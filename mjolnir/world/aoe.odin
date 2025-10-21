@@ -11,13 +11,15 @@ NodeEntry :: struct {
   tags:     NodeTagSet,
 }
 
-// Equality check for NodeEntry - matches by handle only since handles are unique
-node_entry_equal :: proc(a: NodeEntry, b: NodeEntry) -> bool {
-  return a.handle == b.handle
+// Tracked position for incremental updates
+NodeCacheEntry :: struct {
+  position: [3]f32,
+  tags:     NodeTagSet,
 }
 
 AOEOctree :: struct {
   tree:            geometry.Octree(NodeEntry),
+  node_cache:      map[resources.Handle]NodeCacheEntry,
   rebuild_pending: bool,
 }
 
@@ -25,11 +27,13 @@ aoe_init :: proc(aoe: ^AOEOctree, bounds: geometry.Aabb) {
   geometry.octree_init(&aoe.tree, bounds, max_depth = 6, max_items = 16)
   aoe.tree.bounds_func = aoe_node_entry_to_aabb
   aoe.tree.point_func = aoe_node_entry_to_point
+  aoe.node_cache = make(map[resources.Handle]NodeCacheEntry)
   aoe.rebuild_pending = false
 }
 
 aoe_destroy :: proc(aoe: ^AOEOctree) {
   geometry.octree_destroy(&aoe.tree)
+  delete(aoe.node_cache)
 }
 
 @(private)
@@ -52,7 +56,11 @@ aoe_insert :: proc(
   position: [3]f32,
   tags: NodeTagSet = {},
 ) -> bool {
-  entry := NodeEntry{handle = handle, position = position, tags = tags}
+  entry := NodeEntry {
+    handle   = handle,
+    position = position,
+    tags     = tags,
+  }
   return geometry.octree_insert(&aoe.tree, entry)
 }
 
@@ -62,7 +70,11 @@ aoe_remove :: proc(
   position: [3]f32,
   tags: NodeTagSet = {},
 ) -> bool {
-  entry := NodeEntry{handle = handle, position = position, tags = tags}
+  entry := NodeEntry {
+    handle   = handle,
+    position = position,
+    tags     = tags,
+  }
   return geometry.octree_remove(&aoe.tree, entry)
 }
 
@@ -73,7 +85,10 @@ aoe_update :: proc(
   new_position: [3]f32,
   tags: NodeTagSet = {},
 ) -> bool {
-  old_entry := NodeEntry{handle = handle, position = old_position}
+  old_entry := NodeEntry {
+    handle   = handle,
+    position = old_position,
+  }
   new_entry := NodeEntry {
     handle   = handle,
     position = new_position,
@@ -257,24 +272,111 @@ aoe_mark_for_rebuild :: proc(aoe: ^AOEOctree) {
   aoe.rebuild_pending = true
 }
 
+// Incrementally update the octree based on node movements
+aoe_update_from_world :: proc(aoe: ^AOEOctree, world: ^World) {
+  // First frame: do full rebuild
+  if len(aoe.node_cache) == 0 {
+    aoe_rebuild_from_world(aoe, world)
+    return
+  }
+
+  // Incremental updates for subsequent frames
+  for i in 0 ..< len(world.nodes.entries) {
+    entry := &world.nodes.entries[i]
+    if !entry.active do continue
+
+    node := &entry.item
+    handle := resources.Handle {
+      index      = u32(i),
+      generation = entry.generation,
+    }
+    new_position := node.transform.world_matrix[3].xyz
+    new_tags := node.tags
+
+    // Check if node is in cache
+    cached, in_cache := aoe.node_cache[handle]
+
+    if node.pending_deletion {
+      // Remove deleted nodes
+      if in_cache {
+        old_entry := NodeEntry {
+          handle   = handle,
+          position = cached.position,
+          tags     = cached.tags,
+        }
+        geometry.octree_remove(&aoe.tree, old_entry)
+        delete_key(&aoe.node_cache, handle)
+      }
+      continue
+    }
+
+    if in_cache {
+      // Update existing node if position or tags changed
+      position_changed := cached.position != new_position
+      tags_changed := cached.tags != new_tags
+
+      if position_changed || tags_changed {
+        // Remove from old position
+        old_entry := NodeEntry {
+          handle   = handle,
+          position = cached.position,
+          tags     = cached.tags,
+        }
+        geometry.octree_remove(&aoe.tree, old_entry)
+
+        // Insert at new position
+        new_entry := NodeEntry {
+          handle   = handle,
+          position = new_position,
+          tags     = new_tags,
+        }
+        geometry.octree_insert(&aoe.tree, new_entry)
+
+        // Update cache
+        aoe.node_cache[handle] = NodeCacheEntry {
+          position = new_position,
+          tags     = new_tags,
+        }
+      }
+    } else {
+      // New node: insert and cache
+      new_entry := NodeEntry {
+        handle   = handle,
+        position = new_position,
+        tags     = new_tags,
+      }
+      geometry.octree_insert(&aoe.tree, new_entry)
+      aoe.node_cache[handle] = NodeCacheEntry {
+        position = new_position,
+        tags     = new_tags,
+      }
+    }
+  }
+}
+
+// Full rebuild - only used on first frame or when explicitly requested
 aoe_rebuild_from_world :: proc(aoe: ^AOEOctree, world: ^World) {
   // Clear existing octree
-  bounds := aoe.tree.root.bounds if aoe.tree.root != nil else geometry.Aabb {
-    min = {-1000, -1000, -1000},
-    max = {1000, 1000, 1000},
-  }
+  bounds :=
+    aoe.tree.root.bounds if aoe.tree.root != nil else geometry.Aabb{min = {-1000, -1000, -1000}, max = {1000, 1000, 1000}}
   geometry.octree_destroy(&aoe.tree)
   geometry.octree_init(&aoe.tree, bounds, max_depth = 6, max_items = 16)
   aoe.tree.bounds_func = aoe_node_entry_to_aabb
   aoe.tree.point_func = aoe_node_entry_to_point
 
-  // Reinsert all nodes
+  // Clear and rebuild cache
+  clear(&aoe.node_cache)
+
+  // Insert all active nodes
   for i in 0 ..< len(world.nodes.entries) {
     entry := &world.nodes.entries[i]
     if !entry.active || entry.item.pending_deletion do continue
 
     node := &entry.item
-    handle := resources.Handle{index = u32(i), generation = entry.generation}
+    handle := resources.Handle {
+      index      = u32(i),
+      generation = entry.generation,
+    }
     position := node.transform.world_matrix[3].xyz
 
     node_entry := NodeEntry {
@@ -283,6 +385,12 @@ aoe_rebuild_from_world :: proc(aoe: ^AOEOctree, world: ^World) {
       tags     = node.tags,
     }
     geometry.octree_insert(&aoe.tree, node_entry)
+
+    // Cache position
+    aoe.node_cache[handle] = NodeCacheEntry {
+      position = position,
+      tags     = node.tags,
+    }
   }
 
   aoe.rebuild_pending = false
