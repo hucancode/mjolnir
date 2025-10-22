@@ -1297,16 +1297,18 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
 
     if hovered && self.mouse_clicked {
       data.pressed = true
+      mark_dirty(self, handle)
     }
 
     if data.pressed && self.mouse_released {
       data.pressed = false
+      mark_dirty(self, handle)
       if hovered && data.callback != nil {
         data.callback(data.user_data)
       }
     }
 
-    if old_hovered != data.hovered || data.pressed {
+    if old_hovered != data.hovered {
       mark_dirty(self, handle)
     }
 
