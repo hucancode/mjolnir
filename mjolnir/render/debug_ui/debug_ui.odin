@@ -22,7 +22,7 @@ Renderer :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  atlas:                     ^gpu.Image,
+  atlas_handle:              resources.Handle,  // For bindless access
   proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
   vertex_buffer:             gpu.MutableBuffer(Vertex2D),
   index_buffer:              gpu.MutableBuffer(u32),
@@ -37,9 +37,10 @@ Renderer :: struct {
 }
 
 Vertex2D :: struct {
-  pos:   [2]f32,
-  uv:    [2]f32,
-  color: [4]u8,
+  pos:        [2]f32,
+  uv:         [2]f32,
+  color:      [4]u8,
+  texture_id: u32,
 }
 
 init :: proc(
@@ -114,6 +115,12 @@ init :: proc(
       format   = .R8G8B8A8_UNORM,
       offset   = u32(offset_of(Vertex2D, color)),
     },
+    {   // texture_id
+      binding  = 0,
+      location = 3,
+      format   = .R32_UINT,
+      offset   = u32(offset_of(Vertex2D, texture_id)),
+    },
   }
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -181,34 +188,14 @@ init :: proc(
     },
     &self.projection_descriptor_set,
   ) or_return
-  vk.CreateDescriptorSetLayout(
-    gctx.device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = 1,
-      pBindings = &vk.DescriptorSetLayoutBinding {
-        binding = 0,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT},
-      },
-    },
-    nil,
-    &self.texture_layout,
-  ) or_return
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &self.texture_layout,
-    },
-    &self.texture_descriptor_set,
-  ) or_return
+
+  // Use the bindless texture descriptor set from resources manager
+  self.texture_layout = rm.textures_set_layout
+  self.texture_descriptor_set = rm.textures_descriptor_set
+
   set_layouts := [?]vk.DescriptorSetLayout {
     self.projection_layout,
-    self.texture_layout,
+    rm.textures_set_layout,
   }
   vk.CreatePipelineLayout(
     gctx.device,
@@ -253,7 +240,7 @@ init :: proc(
     &self.pipeline,
   ) or_return
   log.infof("init UI texture...")
-  _, self.atlas = resources.create_texture_from_pixels(
+  self.atlas_handle, _ = resources.create_texture_from_pixels(
     gctx,
     rm,
     mu.default_atlas_alpha[:],
@@ -261,6 +248,7 @@ init :: proc(
     mu.DEFAULT_ATLAS_HEIGHT,
     .R8_UNORM,
   ) or_return
+  log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
   log.infof("init UI vertex buffer...")
   self.vertex_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -290,35 +278,19 @@ init :: proc(
     buffer = self.proj_buffer.buffer,
     range  = size_of(matrix[4, 4]f32),
   }
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.projection_descriptor_set,
-      dstBinding = 0,
-      descriptorCount = 1,
-      descriptorType = .UNIFORM_BUFFER,
-      pBufferInfo = &buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.texture_descriptor_set,
-      dstBinding = 0,
-      descriptorCount = 1,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo = &{
-        sampler = rm.nearest_clamp_sampler,
-        imageView = self.atlas.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    },
+
+  // Only need to update the projection buffer descriptor
+  // Texture descriptor set is already set up by resources manager
+  write := vk.WriteDescriptorSet {
+    sType = .WRITE_DESCRIPTOR_SET,
+    dstSet = self.projection_descriptor_set,
+    dstBinding = 0,
+    descriptorCount = 1,
+    descriptorType = .UNIFORM_BUFFER,
+    pBufferInfo = &buffer_info,
   }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    len(writes),
-    raw_data(writes[:]),
-    0,
-    nil,
-  )
+
+  vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
   log.infof("done init UI")
   return .SUCCESS
 }
@@ -376,6 +348,7 @@ ui_push_quad :: proc(
   cmd_buf: vk.CommandBuffer,
   dst, src: mu.Rect,
   color: mu.Color,
+  texture_id: u32,
 ) {
   if (self.vertex_count + 4 > UI_MAX_VERTICES ||
        self.index_count + 6 > UI_MAX_INDICES) {
@@ -392,24 +365,28 @@ ui_push_quad :: proc(
     mu.DEFAULT_ATLAS_HEIGHT
   dx, dy, dw, dh := f32(dst.x), f32(dst.y), f32(dst.w), f32(dst.h)
   self.vertices[self.vertex_count + 0] = {
-    pos   = [2]f32{dx, dy},
-    uv    = [2]f32{x, y},
-    color = [4]u8{color.r, color.g, color.b, color.a},
+    pos        = [2]f32{dx, dy},
+    uv         = [2]f32{x, y},
+    color      = [4]u8{color.r, color.g, color.b, color.a},
+    texture_id = texture_id,
   }
   self.vertices[self.vertex_count + 1] = {
-    pos   = [2]f32{dx + dw, dy},
-    uv    = [2]f32{x + w, y},
-    color = [4]u8{color.r, color.g, color.b, color.a},
+    pos        = [2]f32{dx + dw, dy},
+    uv         = [2]f32{x + w, y},
+    color      = [4]u8{color.r, color.g, color.b, color.a},
+    texture_id = texture_id,
   }
   self.vertices[self.vertex_count + 2] = {
-    pos   = [2]f32{dx + dw, dy + dh},
-    uv    = [2]f32{x + w, y + h},
-    color = [4]u8{color.r, color.g, color.b, color.a},
+    pos        = [2]f32{dx + dw, dy + dh},
+    uv         = [2]f32{x + w, y + h},
+    color      = [4]u8{color.r, color.g, color.b, color.a},
+    texture_id = texture_id,
   }
   self.vertices[self.vertex_count + 3] = {
-    pos   = [2]f32{dx, dy + dh},
-    uv    = [2]f32{x, y + h},
-    color = [4]u8{color.r, color.g, color.b, color.a},
+    pos        = [2]f32{dx, dy + dh},
+    uv         = [2]f32{x, y + h},
+    color      = [4]u8{color.r, color.g, color.b, color.a},
+    texture_id = texture_id,
   }
   vertex_base := u32(self.vertex_count)
   self.indices[self.index_count + 0] = vertex_base + 0
@@ -434,6 +411,7 @@ ui_draw_rect :: proc(
     rect,
     mu.default_atlas[mu.DEFAULT_ATLAS_WHITE],
     color,
+    self.atlas_handle.index,
   )
 }
 
@@ -451,7 +429,7 @@ ui_draw_text :: proc(
       src := mu.default_atlas[mu.DEFAULT_ATLAS_FONT + r]
       dst.w = src.w
       dst.h = src.h
-      ui_push_quad(self, cmd_buf, dst, src, color)
+      ui_push_quad(self, cmd_buf, dst, src, color, self.atlas_handle.index)
       dst.x += dst.w
     }
   }
@@ -467,7 +445,7 @@ ui_draw_icon :: proc(
   src := mu.default_atlas[id]
   x := rect.x + (rect.w - src.w) / 2
   y := rect.y + (rect.h - src.h) / 2
-  ui_push_quad(self, cmd_buf, {x, y, src.w, src.h}, src, color)
+  ui_push_quad(self, cmd_buf, {x, y, src.w, src.h}, src, color, self.atlas_handle.index)
 }
 
 ui_set_clip_rect :: proc(
@@ -496,8 +474,6 @@ shutdown :: proc(self: ^Renderer, device: vk.Device) {
   self.pipeline_layout = 0
   vk.DestroyDescriptorSetLayout(device, self.projection_layout, nil)
   self.projection_layout = 0
-  vk.DestroyDescriptorSetLayout(device, self.texture_layout, nil)
-  self.texture_layout = 0
 }
 
 recreate_images :: proc(

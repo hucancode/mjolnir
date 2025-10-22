@@ -9,6 +9,6 @@ layout(location = 2) flat in uint textureId;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    float texAlpha = texture(textures[textureId], uv).r;
-    outColor = vec4(color.rgb, color.a * texAlpha);
+    vec4 texColor = texture(textures[textureId], uv);
+    outColor = color * texColor;
 }

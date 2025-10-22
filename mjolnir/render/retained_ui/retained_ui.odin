@@ -9,8 +9,8 @@ import fs "vendor:fontstash"
 import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: resources.MAX_FRAMES_IN_FLIGHT
-SHADER_UI_VERT :: #load("../../shader/microui/vert.spv")
-SHADER_UI_FRAG :: #load("../../shader/microui/frag.spv")
+SHADER_UI_VERT :: #load("../../shader/retained_ui/vert.spv")
+SHADER_UI_FRAG :: #load("../../shader/retained_ui/frag.spv")
 SHADER_TEXT_VERT :: #load("../../shader/text/vert.spv")
 SHADER_TEXT_FRAG :: #load("../../shader/text/frag.spv")
 
@@ -59,7 +59,6 @@ LabelData :: struct {
 
 ImageData :: struct {
   texture_handle: resources.Handle,
-  texture_id:     u32,
   uv:             [4]f32, // u0, v0, u1, v1 for sprite animation
   sprite_index:   u32,
   sprite_count:   u32,
@@ -167,9 +166,10 @@ DrawCommand :: struct {
 }
 
 Vertex2D :: struct {
-  pos:   [2]f32,
-  uv:    [2]f32,
-  color: [4]u8,
+  pos:        [2]f32,
+  uv:         [2]f32,
+  color:      [4]u8,
+  texture_id: u32,
 }
 
 TextVertex :: struct {
@@ -179,11 +179,13 @@ TextVertex :: struct {
 }
 
 DrawList :: struct {
-  commands:     [dynamic]DrawCommand,
-  vertices:     [UI_MAX_VERTICES]Vertex2D,
-  indices:      [UI_MAX_INDICES]u32,
-  vertex_count: u32,
-  index_count:  u32,
+  commands:            [dynamic]DrawCommand,
+  vertices:            [UI_MAX_VERTICES]Vertex2D,
+  indices:             [UI_MAX_INDICES]u32,
+  vertex_count:        u32,
+  index_count:         u32,
+  cumulative_vertices: u32,
+  cumulative_indices:  u32,
 }
 
 // ============================================================================
@@ -216,6 +218,7 @@ Manager :: struct {
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
   atlas:                     ^gpu.Image,
+  atlas_handle:              resources.Handle,  // For bindless access
   proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
   vertex_buffers:            [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
   index_buffers:             [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
@@ -335,6 +338,12 @@ init :: proc(
       format   = .R8G8B8A8_UNORM,
       offset   = u32(offset_of(Vertex2D, color)),
     },
+    {
+      binding  = 0,
+      location = 3,
+      format   = .R32_UINT,
+      offset   = u32(offset_of(Vertex2D, texture_id)),
+    },
   }
 
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
@@ -414,36 +423,13 @@ init :: proc(
     &self.projection_descriptor_set,
   ) or_return
 
-  vk.CreateDescriptorSetLayout(
-    gctx.device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = 1,
-      pBindings = &vk.DescriptorSetLayoutBinding {
-        binding = 0,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT},
-      },
-    },
-    nil,
-    &self.texture_layout,
-  ) or_return
-
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &self.texture_layout,
-    },
-    &self.texture_descriptor_set,
-  ) or_return
+  // Use the bindless texture descriptor set from resources manager
+  self.texture_layout = rm.textures_set_layout
+  self.texture_descriptor_set = rm.textures_descriptor_set
 
   set_layouts := [?]vk.DescriptorSetLayout {
     self.projection_layout,
-    self.texture_layout,
+    rm.textures_set_layout,
   }
 
   vk.CreatePipelineLayout(
@@ -496,7 +482,7 @@ init :: proc(
   // Create white 1x1 texture as default
   log.infof("init UI default texture...")
   white_pixel := [4]u8{255, 255, 255, 255}
-  _, self.atlas = resources.create_texture_from_pixels(
+  self.atlas_handle, self.atlas = resources.create_texture_from_pixels(
     gctx,
     rm,
     white_pixel[:],
@@ -504,6 +490,7 @@ init :: proc(
     1,
     .R8G8B8A8_UNORM,
   ) or_return
+  log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
 
   // Create buffers for each frame in flight
   log.infof("init UI buffers...")
@@ -542,36 +529,18 @@ init :: proc(
     range  = size_of(matrix[4, 4]f32),
   }
 
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.projection_descriptor_set,
-      dstBinding = 0,
-      descriptorCount = 1,
-      descriptorType = .UNIFORM_BUFFER,
-      pBufferInfo = &buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.texture_descriptor_set,
-      dstBinding = 0,
-      descriptorCount = 1,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo = &{
-        sampler = rm.nearest_clamp_sampler,
-        imageView = self.atlas.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    },
+  // Only need to update the projection buffer descriptor
+  // Texture descriptor set is already set up by resources manager
+  write := vk.WriteDescriptorSet {
+    sType = .WRITE_DESCRIPTOR_SET,
+    dstSet = self.projection_descriptor_set,
+    dstBinding = 0,
+    descriptorCount = 1,
+    descriptorType = .UNIFORM_BUFFER,
+    pBufferInfo = &buffer_info,
   }
 
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    len(writes),
-    raw_data(writes[:]),
-    0,
-    nil,
-  )
+  vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
 
   // ============================================================================
   // Initialize text rendering system
@@ -865,7 +834,7 @@ shutdown :: proc(self: ^Manager, device: vk.Device) {
   vk.DestroyPipeline(device, self.pipeline, nil)
   vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(device, self.projection_layout, nil)
-  vk.DestroyDescriptorSetLayout(device, self.texture_layout, nil)
+  // Don't destroy texture_layout - it's borrowed from resources manager
 
   // Cleanup text rendering resources
   fs.Destroy(&self.font_ctx)
@@ -1058,7 +1027,11 @@ build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
     child = child_widget.next_sibling
   }
 
-  widget.dirty = false
+  // Re-fetch widget pointer in case pool was modified during recursion
+  widget, found = resources.get(self.widgets, handle)
+  if found {
+    widget.dirty = false
+  }
 }
 
 build_button_commands :: proc(
@@ -1073,7 +1046,8 @@ build_button_commands :: proc(
   if data.pressed {
     bg_color = {u8(widget.bg_color.r / 2), u8(widget.bg_color.g / 2), u8(widget.bg_color.b / 2), widget.bg_color.a}
   } else if data.hovered {
-    bg_color = {min(widget.bg_color.r + 30, 255), min(widget.bg_color.g + 30, 255), min(widget.bg_color.b + 30, 255), widget.bg_color.a}
+    // Darken on hover for better contrast against light backgrounds
+    bg_color = {max(widget.bg_color.r - 40, 0), max(widget.bg_color.g - 40, 0), max(widget.bg_color.b - 40, 0), widget.bg_color.a}
   }
 
   append(
@@ -1134,7 +1108,7 @@ build_image_commands :: proc(
       widget = handle,
       rect = {widget.position.x, widget.position.y, widget.size.x, widget.size.y},
       color = {255, 255, 255, 255},
-      texture_id = data.texture_id,
+      texture_id = data.texture_handle.index,
       uv = data.uv,
     },
   )
@@ -1410,114 +1384,21 @@ flush_text :: proc(self: ^Manager, cmd_buf: vk.CommandBuffer) -> vk.Result {
   return .SUCCESS
 }
 
-render :: proc(
+flush_ui_batch :: proc(
   self: ^Manager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
+  draw_list: ^DrawList,
 ) -> vk.Result {
-  draw_list := &self.draw_lists[frame_index]
+  // Calculate how many NEW vertices/indices to flush since last flush
+  new_vertex_count := draw_list.vertex_count - draw_list.cumulative_vertices
+  new_index_count := draw_list.index_count - draw_list.cumulative_indices
 
-  if len(draw_list.commands) == 0 do return .SUCCESS
-
-  draw_list.vertex_count = 0
-  draw_list.index_count = 0
-
-  for cmd in draw_list.commands {
-    switch cmd.type {
-    case .RECT:
-      push_quad(
-        draw_list,
-        {cmd.rect.x, cmd.rect.y, cmd.rect.z, cmd.rect.w},
-        cmd.uv,
-        cmd.color,
-      )
-    case .TEXT:
-      // Flush current batch before drawing text
-      if draw_list.vertex_count > 0 {
-        gpu.write(&self.vertex_buffers[frame_index], draw_list.vertices[:draw_list.vertex_count]) or_return
-        gpu.write(&self.index_buffers[frame_index], draw_list.indices[:draw_list.index_count]) or_return
-
-        vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
-
-        descriptor_sets := [?]vk.DescriptorSet {
-          self.projection_descriptor_set,
-          self.texture_descriptor_set,
-        }
-
-        vk.CmdBindDescriptorSets(
-          command_buffer,
-          .GRAPHICS,
-          self.pipeline_layout,
-          0,
-          2,
-          raw_data(descriptor_sets[:]),
-          0,
-          nil,
-        )
-
-        viewport := vk.Viewport {
-          x        = 0,
-          y        = f32(self.frame_height),
-          width    = f32(self.frame_width),
-          height   = -f32(self.frame_height),
-          minDepth = 0,
-          maxDepth = 1,
-        }
-        vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-
-        scissor := vk.Rect2D {
-          extent = {self.frame_width, self.frame_height},
-        }
-        vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-
-        offsets := [?]vk.DeviceSize{0}
-        vk.CmdBindVertexBuffers(
-          command_buffer,
-          0,
-          1,
-          &self.vertex_buffers[frame_index].buffer,
-          raw_data(offsets[:]),
-        )
-
-        vk.CmdBindIndexBuffer(
-          command_buffer,
-          self.index_buffers[frame_index].buffer,
-          0,
-          .UINT32,
-        )
-
-        vk.CmdDrawIndexed(command_buffer, draw_list.index_count, 1, 0, 0, 0)
-
-        draw_list.vertex_count = 0
-        draw_list.index_count = 0
-      }
-
-      // Draw text using internal text renderer
-      draw_text_internal(
-        self,
-        cmd.text,
-        cmd.rect.x,
-        cmd.rect.y + 16,  // Baseline offset
-        16,  // Font size
-        cmd.color,
-      )
-    case .IMAGE:
-      push_quad(
-        draw_list,
-        {cmd.rect.x, cmd.rect.y, cmd.rect.z, cmd.rect.w},
-        cmd.uv,
-        cmd.color,
-      )
-    case .CLIP:
-      // Clip handling
-    }
+  if new_vertex_count == 0 {
+    return .SUCCESS
   }
 
-  // Flush text renderer
-  flush_text(self, command_buffer) or_return
-
-  if draw_list.vertex_count == 0 do return .SUCCESS
-
+  // Write ALL accumulated vertices/indices to GPU buffer (including previous batches)
   gpu.write(&self.vertex_buffers[frame_index], draw_list.vertices[:draw_list.vertex_count]) or_return
   gpu.write(&self.index_buffers[frame_index], draw_list.indices[:draw_list.index_count]) or_return
 
@@ -1537,7 +1418,7 @@ render :: proc(
     raw_data(descriptor_sets[:]),
     0,
     nil,
-  )
+    )
 
   viewport := vk.Viewport {
     x        = 0,
@@ -1570,7 +1451,78 @@ render :: proc(
     .UINT32,
   )
 
-  vk.CmdDrawIndexed(command_buffer, draw_list.index_count, 1, 0, 0, 0)
+  // Draw only the NEW vertices from this batch
+  // Note: vertexOffset is added to each index, but our indices are already absolute,
+  // so we use vertexOffset=0 and rely on the absolute indices
+  first_index := draw_list.cumulative_indices
+  vk.CmdDrawIndexed(command_buffer, new_index_count, 1, first_index, 0, 0)
+
+  // Update cumulative to mark what we've drawn
+  draw_list.cumulative_vertices = draw_list.vertex_count
+  draw_list.cumulative_indices = draw_list.index_count
+
+  return .SUCCESS
+}
+
+render :: proc(
+  self: ^Manager,
+  command_buffer: vk.CommandBuffer,
+  frame_index: u32,
+  rm: ^resources.Manager,
+  gctx: ^gpu.GPUContext,
+) -> vk.Result {
+  draw_list := &self.draw_lists[frame_index]
+
+  if len(draw_list.commands) == 0 do return .SUCCESS
+
+  // Reset for this frame's accumulation
+  draw_list.vertex_count = 0
+  draw_list.index_count = 0
+  draw_list.cumulative_vertices = 0
+  draw_list.cumulative_indices = 0
+
+  for cmd in draw_list.commands {
+    switch cmd.type {
+    case .RECT:
+      push_quad(
+        draw_list,
+        {cmd.rect.x, cmd.rect.y, cmd.rect.z, cmd.rect.w},
+        cmd.uv,
+        cmd.color,
+        self.atlas_handle.index,  // Use white texture for solid colors
+      )
+    case .TEXT:
+      // Flush current batch before drawing text
+      flush_ui_batch(self, command_buffer, frame_index, draw_list) or_return
+
+      // Draw text using internal text renderer
+      draw_text_internal(
+        self,
+        cmd.text,
+        cmd.rect.x,
+        cmd.rect.y + 16,  // Baseline offset
+        16,  // Font size
+        cmd.color,
+      )
+    case .IMAGE:
+      // Just push the image quad with its texture ID - bindless system handles the rest
+      push_quad(
+        draw_list,
+        {cmd.rect.x, cmd.rect.y, cmd.rect.z, cmd.rect.w},
+        cmd.uv,
+        cmd.color,
+        cmd.texture_id,
+      )
+    case .CLIP:
+      // Clip handling
+    }
+  }
+
+  // Flush any remaining UI quads (images)
+  flush_ui_batch(self, command_buffer, frame_index, draw_list) or_return
+
+  // Then flush text renderer on top
+  flush_text(self, command_buffer) or_return
 
   return .SUCCESS
 }
@@ -1580,9 +1532,12 @@ push_quad :: proc(
   rect: [4]f32,
   uv: [4]f32,
   color: [4]u8,
+  texture_id: u32 = 0,
 ) {
   if draw_list.vertex_count + 4 > UI_MAX_VERTICES ||
      draw_list.index_count + 6 > UI_MAX_INDICES {
+    log.warnf("push_quad: buffer full! vertex_count=%d, index_count=%d",
+      draw_list.vertex_count, draw_list.index_count)
     return
   }
 
@@ -1590,24 +1545,28 @@ push_quad :: proc(
   u0, v0, u1, v1 := uv.x, uv.y, uv.z, uv.w
 
   draw_list.vertices[draw_list.vertex_count + 0] = {
-    pos   = {x, y},
-    uv    = {u0, v0},
-    color = color,
+    pos        = {x, y},
+    uv         = {u0, v0},
+    color      = color,
+    texture_id = texture_id,
   }
   draw_list.vertices[draw_list.vertex_count + 1] = {
-    pos   = {x + w, y},
-    uv    = {u1, v0},
-    color = color,
+    pos        = {x + w, y},
+    uv         = {u1, v0},
+    color      = color,
+    texture_id = texture_id,
   }
   draw_list.vertices[draw_list.vertex_count + 2] = {
-    pos   = {x + w, y + h},
-    uv    = {u1, v1},
-    color = color,
+    pos        = {x + w, y + h},
+    uv         = {u1, v1},
+    color      = color,
+    texture_id = texture_id,
   }
   draw_list.vertices[draw_list.vertex_count + 3] = {
-    pos   = {x, y + h},
-    uv    = {u0, v1},
-    color = color,
+    pos        = {x, y + h},
+    uv         = {u0, v1},
+    color      = color,
+    texture_id = texture_id,
   }
 
   vertex_base := u32(draw_list.vertex_count)
@@ -1667,7 +1626,7 @@ create_label :: proc(
 
   widget.position = {x, y}
   widget.size = {100, 20}
-  widget.fg_color = {255, 255, 255, 255}
+  widget.fg_color = {0, 0, 0, 255}  // Black text for labels (readable on light backgrounds)
   widget.data = LabelData {
     text = text,
   }
@@ -1678,10 +1637,9 @@ create_label :: proc(
 create_image :: proc(
   self: ^Manager,
   texture_handle: resources.Handle,
-  texture_id: u32,
   x, y, w, h: f32,
-  uv: [4]f32 = {0, 0, 1, 1},
   parent: WidgetHandle = {},
+  uv: [4]f32 = {0, 0, 1, 1},
 ) -> (
   handle: WidgetHandle,
   ok: bool,
@@ -1694,7 +1652,6 @@ create_image :: proc(
   widget.size = {w, h}
   widget.data = ImageData {
     texture_handle = texture_handle,
-    texture_id     = texture_id,
     uv             = uv,
     sprite_index   = 0,
     sprite_count   = 1,
@@ -1789,5 +1746,21 @@ set_image_sprite :: proc(
     }
   }
 
+  mark_dirty(self, handle)
+}
+
+set_widget_colors :: proc(
+  self: ^Manager,
+  handle: WidgetHandle,
+  bg_color: [4]u8,
+  fg_color: [4]u8,
+  border_color: [4]u8,
+) {
+  widget, found := resources.get(self.widgets, handle)
+  if !found do return
+
+  widget.bg_color = bg_color
+  widget.fg_color = fg_color
+  widget.border_color = border_color
   mark_dirty(self, handle)
 }
