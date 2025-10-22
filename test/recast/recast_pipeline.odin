@@ -14,7 +14,6 @@ import "core:log"
 test_nav_test_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     fmt.println("Testing with nav_test.obj (multi-level navigation)...")
-
     mesh_path := "assets/nav_test.obj"
     vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(mesh_path, 1.0, 45.0)
     if !ok {
@@ -26,21 +25,16 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
         delete(indices)
         delete(areas)
     }
-
     fmt.printf("  Loaded %d vertices and %d triangles\n",
                len(vertices), len(indices)/3)
-
     // Setup configuration
     cfg: recast.Config
-
     // Get mesh bounds
     bmin, bmax := recast.calc_bounds(vertices)
     cfg.bmin = bmin
     cfg.bmax = bmax
-
     fmt.printf("  Mesh bounds: (%.4f, %.4f, %.4f) to (%.4f, %.4f, %.4f)\n",
                bmin.x, bmin.y, bmin.z, bmax.x, bmax.y, bmax.z)
-
     // Standard test parameters (matching C++)
     cfg.cs = 0.3
     cfg.ch = 0.2
@@ -55,30 +49,24 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     cfg.max_verts_per_poly = 6
     cfg.detail_sample_dist = 6.0
     cfg.detail_sample_max_error = 1.0
-
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
     fmt.printf("  Grid size: %d x %d\n", cfg.width, cfg.height)
-
     // Build heightfield
     hf := recast.create_heightfield(cfg.width, cfg.height,
                                cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     defer recast.free_heightfield(hf)
     testing.expect(t, hf != nil, "Failed to create heightfield")
-
     // Rasterize (areas already marked by load_obj_to_navmesh_input)
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, cfg.walkable_climb)
     testing.expect(t, hf != nil, "Failed to rasterize triangles")
-
     // Filter
     recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
     recast.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
     recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
-
     // Build compact heightfield
     chf := recast.create_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-
     // Check for multiple levels
     max_layers := 0
     total_layers := 0
@@ -87,15 +75,12 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
         max_layers = max(max_layers, layers)
         if layers > 1 do total_layers += 1
     }
-
     fmt.printf("  Maximum layers in single cell: %d\n", max_layers)
     fmt.printf("  Cells with multiple layers: %d\n", total_layers)
-
     // Optionally test layers for multi-level navigation
     // Note: May fail if >255 regions, which is fine for standard navmesh
     lset, layer_ok := recast.build_heightfield_layers(chf, 0, cfg.walkable_height)
     defer recast.free_heightfield_layer_set(lset)
-
     if layer_ok && len(lset) > 0 {
         fmt.printf("  Generated %d navigation layers:\n", len(lset))
         for layer, i in lset {
@@ -105,18 +90,15 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     } else if !layer_ok {
         fmt.println("  Note: Layer building skipped (likely >255 regions) - using standard regions instead")
     }
-
     // Continue with standard navmesh generation
     recast.erode_walkable_area(cfg.walkable_radius, chf)
     recast.build_distance_field(chf)
     recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
-
     // Analyze regions
     max_region := 0
     region_counts := make([]int, 256)
     defer delete(region_counts)
     total_region_spans := 0
-
     for i in 0..<len(chf.spans) {
         reg := int(chf.spans[i].reg)
         if reg > 0 && reg < 256 {
@@ -125,11 +107,9 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
             if reg > max_region do max_region = reg
         }
     }
-
     fmt.println("  Region Analysis:")
     fmt.printf("    Total regions: %d\n", max_region)
     fmt.printf("    Total spans in regions: %d\n", total_region_spans)
-
     // Count regions by size
     small_regions, medium_regions, large_regions := 0, 0, 0
     for i in 1..=max_region {
@@ -146,12 +126,10 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     fmt.printf("    Small regions (<50 spans): %d\n", small_regions)
     fmt.printf("    Medium regions (50-200 spans): %d\n", medium_regions)
     fmt.printf("    Large regions (>200 spans): %d\n", large_regions)
-
     // Build contours
     cset := recast.create_contour_set(chf, cfg.max_simplification_error, cfg.max_edge_len)
     defer recast.free_contour_set(cset)
     testing.expect(t, cset != nil, "Failed to build contours")
-
     // Analyze contours
     min_verts, max_verts := i32(999999), i32(0)
     total_verts := 0
@@ -165,7 +143,6 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     pmesh := recast.create_poly_mesh(cset, cfg.max_verts_per_poly)
     defer recast.free_poly_mesh(pmesh)
     testing.expect(t, pmesh != nil, "Failed to build poly mesh")
-
     // Analyze polygon mesh regions
     poly_regions := make([]int, 256)
     defer delete(poly_regions)
@@ -177,7 +154,6 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
             if reg > max_poly_region do max_poly_region = reg
         }
     }
-
     log.infof("  Polygon Mesh Analysis:")
     log.infof("    Total polygons: %d", pmesh.npolys)
     log.infof("    Total vertices: %d", len(pmesh.verts))
@@ -189,7 +165,6 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
             log.infof("      Region %d: %d polygons\n", i, poly_regions[i])
         }
     }
-
     // Analyze polygon connectivity
     fmt.println("  Polygon Connectivity Analysis:")
     connection_counts := make([]int, 7)  // 0 to 6 connections
@@ -197,11 +172,9 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     total_connections := 0
     isolated_polys := 0
     fully_connected_polys := 0
-
     for i in 0..<pmesh.npolys {
         poly := pmesh.polys[i * pmesh.nvp * 2:]
         connections := 0
-
         // Count connections for this polygon
         for j in 0..<pmesh.nvp {
             if poly[j] == recast.RC_MESH_NULL_IDX do break  // End of vertices
@@ -236,19 +209,15 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
             defer delete(stack)
             append(&stack, int(i))
             island_size := 0
-
             for len(stack) > 0 {
                 curr := pop(&stack)
-
                 if visited[curr] do continue
                 visited[curr] = true
                 island_size += 1
-
                 // Add connected neighbors to stack
                 poly := pmesh.polys[curr * int(pmesh.nvp) * 2:]
                 for j in 0..<pmesh.nvp {
                     if poly[j] == recast.RC_MESH_NULL_IDX do break
-
                     neighbor := int(poly[pmesh.nvp + j])
                     if neighbor != int(recast.RC_MESH_NULL_IDX) && !visited[neighbor] {
                         append(&stack, neighbor)

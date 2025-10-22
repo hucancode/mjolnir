@@ -7,7 +7,6 @@ import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
-// 64 byte push constant budget
 PushConstant :: struct {
   camera_index: u32,
 }
@@ -28,7 +27,6 @@ init :: proc(
     gctx.command_pool,
     self.commands[:],
   ) or_return
-
   depth_format: vk.Format = .D32_SFLOAT
   if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
@@ -36,8 +34,6 @@ init :: proc(
   spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
   spec_info.pData = cast(rawptr)&spec_data
   defer delete(spec_entries)
-
-  // Initialize G-buffer pipeline
   log.info("About to build G-buffer pipelines...")
   vert_shader_code := #load("../../shader/gbuffer/vert.spv")
   vert_module := gpu.create_shader_module(
@@ -218,12 +214,10 @@ begin_pass :: proc(
     {.COLOR_ATTACHMENT_OUTPUT},
     {.COLOR_ATTACHMENT_WRITE},
   )
-
   depth_texture := resources.get(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
-
   position_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = position_texture.view,
@@ -311,10 +305,8 @@ end_pass :: proc(
   frame_index: u32,
 ) {
   vk.CmdEndRendering(command_buffer)
-
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-
   // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
   position_texture := resources.get(
     rm.image_2d_buffers,
@@ -336,7 +328,6 @@ end_pass :: proc(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
   )
-
   // Collect G-buffer images for batch transition (excluding final image which stays as attachment)
   gbuffer_images := [?]vk.Image {
     position_texture.image,
@@ -345,7 +336,6 @@ end_pass :: proc(
     metallic_roughness_texture.image,
     emissive_texture.image,
   }
-
   // Batch transition all G-buffer images to SHADER_READ_ONLY_OPTIMAL
   gpu.transition_images(
     command_buffer,
@@ -453,7 +443,6 @@ begin_record :: proc(
   }
   command_buffer = camera.geometry_commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-
   color_formats := [?]vk.Format {
     .R32G32B32A32_SFLOAT,
     .R8G8B8A8_UNORM,

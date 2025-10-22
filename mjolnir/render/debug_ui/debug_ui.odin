@@ -188,11 +188,9 @@ init :: proc(
     },
     &self.projection_descriptor_set,
   ) or_return
-
   // Use the bindless texture descriptor set from resources manager
   self.texture_layout = rm.textures_set_layout
   self.texture_descriptor_set = rm.textures_descriptor_set
-
   set_layouts := [?]vk.DescriptorSetLayout {
     self.projection_layout,
     rm.textures_set_layout,
@@ -278,7 +276,6 @@ init :: proc(
     buffer = self.proj_buffer.buffer,
     range  = size_of(matrix[4, 4]f32),
   }
-
   // Only need to update the projection buffer descriptor
   // Texture descriptor set is already set up by resources manager
   write := vk.WriteDescriptorSet {
@@ -289,7 +286,6 @@ init :: proc(
     descriptorType = .UNIFORM_BUFFER,
     pBufferInfo = &buffer_info,
   }
-
   vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
   log.infof("done init UI")
   return .SUCCESS
@@ -490,13 +486,11 @@ recreate_images :: proc(
   self.current_scissor = vk.Rect2D {
     extent = {width, height},
   }
-
   // Update the projection matrix with new dimensions and DPI scale
   ortho :=
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
     linalg.matrix4_scale(dpi_scale)
   gpu.write(&self.proj_buffer, &ortho) or_return
-
   return .SUCCESS
 }
 

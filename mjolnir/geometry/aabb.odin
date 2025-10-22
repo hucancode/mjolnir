@@ -88,7 +88,6 @@ distance_point_aabb :: proc(point: [3]f32, aabb: Aabb) -> f32 {
 ray_aabb_intersection :: proc(origin: [3]f32, inv_dir: [3]f32, aabb: Aabb) -> (t_near, t_far: f32) {
   t_min := [3]f32{-F32_MAX, -F32_MAX, -F32_MAX}
   t_max := [3]f32{F32_MAX, F32_MAX, F32_MAX}
-
   for i in 0..<3 {
     if math.abs(inv_dir[i]) < 1e-6 {
       // Ray is parallel to this axis

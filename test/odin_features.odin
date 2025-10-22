@@ -43,7 +43,6 @@ dot_product_benchmark :: proc(t: ^testing.T) {
     for i in 0 ..< len(a) do sum += a[i] * b[i]
     return sum
   }
-
   dot_product_simd :: proc(a, b: []f32) -> f32 {
     a := a
     b := b
@@ -64,7 +63,6 @@ dot_product_benchmark :: proc(t: ^testing.T) {
     for i in 0 ..< len(a) do sum += a[i] * b[i]
     return sum
   }
-
   N :: 10_000_000
   ROUNDS :: 10
   setup :: proc(

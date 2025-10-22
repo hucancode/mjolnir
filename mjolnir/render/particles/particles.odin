@@ -264,7 +264,6 @@ init :: proc(
     gctx.command_pool,
     self.commands[:],
   ) or_return
-
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -902,7 +901,6 @@ begin_pass :: proc(
 ) {
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-
   // Memory barrier to ensure compute results are visible before rendering
   barrier := vk.BufferMemoryBarrier {
     sType               = .BUFFER_MEMORY_BARRIER,

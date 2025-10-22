@@ -15,22 +15,17 @@ test_filter_low_hanging_obstacles_basic :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Add walkable span at ground level
     recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
     // testing.expect(t, ok, "Failed to add walkable span")
-
     // Add non-walkable span just above it (obstacle)
     recast.add_span(hf, 2, 2, 3, 4, recast.RC_NULL_AREA, 1)
     // testing.expect(t, ok, "Failed to add obstacle span")
-
     // Apply filter with walkable_climb = 2
     recast.filter_low_hanging_walkable_obstacles(2, hf)
-
     // The obstacle should now be walkable because it's within climb height
     column_index := 2 + 2 * hf.width
     span := hf.spans[column_index]
-
     // Find the obstacle span (should be second in list)
     obstacle_span := span.next
     testing.expect(t, obstacle_span != nil, "Should have obstacle span")
@@ -46,18 +41,14 @@ test_filter_low_hanging_obstacles_too_high :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Add walkable span at ground level
     recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
     // testing.expect(t, ok, "Failed to add walkable span")
-
     // Add non-walkable span too high above it
     recast.add_span(hf, 2, 2, 5, 7, recast.RC_NULL_AREA, 1)
     // testing.expect(t, ok, "Failed to add high obstacle span")
-
     // Apply filter with walkable_climb = 2 (span difference is 3, too high)
     recast.filter_low_hanging_walkable_obstacles(2, hf)
-
     // The obstacle should remain non-walkable
     column_index := 2 + 2 * hf.width
     span := hf.spans[column_index]
@@ -75,40 +66,30 @@ test_filter_low_hanging_obstacles_multiple_spans :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Create complex span column: walkable, obstacle (low), walkable, obstacle (high)
     ok := recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add ground walkable span")
-
     ok = recast.add_span(hf, 2, 2, 3, 4, recast.RC_NULL_AREA, 1)
     testing.expect(t, ok, "Failed to add low obstacle")
-
     ok = recast.add_span(hf, 2, 2, 5, 7, recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add upper walkable span")
-
     ok = recast.add_span(hf, 2, 2, 10, 12, recast.RC_NULL_AREA, 1)
     testing.expect(t, ok, "Failed to add high obstacle")
-
     // Apply filter with walkable_climb = 2
     recast.filter_low_hanging_walkable_obstacles(2, hf)
-
     // Check results: low obstacle should be walkable, high obstacle should not
     column_index := 2 + 2 * hf.width
     span := hf.spans[column_index]
-
     // Ground span (walkable)
     testing.expect(t, span.area == recast.RC_WALKABLE_AREA, "Ground should be walkable")
-
     // Low obstacle (should be converted to walkable)
     span = span.next
     testing.expect(t, span.area == recast.RC_WALKABLE_AREA,
                   "Low obstacle should be walkable")
-
     // Upper walkable (should remain walkable)
     span = span.next
     testing.expect(t, span.area == recast.RC_WALKABLE_AREA,
                   "Upper walkable should remain walkable")
-
     // High obstacle (should remain non-walkable because gap from upper walkable is too big)
     span = span.next
     testing.expect(t, span.area == recast.RC_NULL_AREA,
@@ -126,28 +107,21 @@ test_filter_ledge_spans_basic :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Create a ledge scenario: walkable area with drop-off
     // Add walkable spans in center and some neighbors, but not all
     ok := recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1) // Center
     testing.expect(t, ok, "Failed to add center span")
-
     ok = recast.add_span(hf, 1, 2, 0, 2, recast.RC_WALKABLE_AREA, 1) // Left neighbor
     testing.expect(t, ok, "Failed to add left neighbor")
-
     ok = recast.add_span(hf, 2, 1, 0, 2, recast.RC_WALKABLE_AREA, 1) // Bottom neighbor
     testing.expect(t, ok, "Failed to add bottom neighbor")
-
     // Missing right (3,2) and top (2,3) neighbors - this creates a ledge
-
     // Build compact heightfield
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-
     // Apply ledge filter with walkable_height = 4 (must be able to stand)
     recast.filter_ledge_spans(4, 2, hf)
-
     // Check if spans near ledges are filtered out
     // Center span should be filtered because it has missing neighbors (ledge)
     center_idx := 2 + 2 * hf.width
@@ -164,7 +138,6 @@ test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Create a safe area with all neighbors present
     for x in 1..=3 {
         for z in 1..=3 {
@@ -172,14 +145,11 @@ test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
             // testing.expect(t, ok, "Failed to add safe area span")
         }
     }
-
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-
     // Apply ledge filter
     recast.filter_ledge_spans(4, 2, hf)
-
     // All spans in the safe area should remain walkable
     center_idx := 2 + 2 * hf.width
     span := hf.spans[center_idx]
@@ -200,18 +170,14 @@ test_filter_walkable_low_height_spans_basic :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Add walkable span with low ceiling (insufficient height clearance)
     recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
     // testing.expect(t, ok, "Failed to add ground span")
-
     // Add ceiling span very close above (height = 2 units)
     recast.add_span(hf, 2, 2, 4, 6, recast.RC_NULL_AREA, 1)
     // testing.expect(t, ok, "Failed to add ceiling span")
-
     // Apply filter with walkable_height = 4 (requires 4 units clearance)
     recast.filter_walkable_low_height_spans(4, hf)
-
     // Ground span should be filtered out due to insufficient clearance
     column_index := 2 + 2 * hf.width
     span := hf.spans[column_index]
@@ -229,18 +195,14 @@ test_filter_walkable_low_height_spans_sufficient_height :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Add walkable span with sufficient ceiling height
     recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
     // testing.expect(t, ok, "Failed to add ground span")
-
     // Add ceiling span with sufficient clearance (6 units above ground span max)
     recast.add_span(hf, 2, 2, 8, 10, recast.RC_NULL_AREA, 1)
     // testing.expect(t, ok, "Failed to add ceiling span")
-
     // Apply filter with walkable_height = 4
     recast.filter_walkable_low_height_spans(4, hf)
-
     // Ground span should remain walkable
     column_index := 2 + 2 * hf.width
     span := hf.spans[column_index]
@@ -257,14 +219,11 @@ test_filter_walkable_low_height_no_ceiling :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Add walkable span with no ceiling (open sky)
     recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
     // testing.expect(t, ok, "Failed to add ground span")
-
     // Apply filter with walkable_height = 4
     recast.filter_walkable_low_height_spans(4, hf)
-
     // Ground span should remain walkable (no ceiling constraint)
     column_index := 2 + 2 * hf.width
     span := hf.spans[column_index]
@@ -286,7 +245,6 @@ test_filter_interactions_combined :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Create complex scenario with multiple filter conditions
     // Ground level walkable area
     for x in 2..=7 {
@@ -340,7 +298,6 @@ test_all_filters :: proc(t: ^testing.T) {
     {
         hf := recast.Heightfield{width = 1, height = 1, spans = make([]^recast.Span, 1)}
         defer delete(hf.spans)
-
         floor := new(recast.Span)
         floor.smax = 10
         floor.area = recast.RC_WALKABLE_AREA
@@ -350,23 +307,18 @@ test_all_filters :: proc(t: ^testing.T) {
         obstacle.area = recast.RC_NULL_AREA
         floor.next = obstacle
         hf.spans[0] = floor
-
         recast.filter_low_hanging_walkable_obstacles(5, &hf)
         testing.expect(t, obstacle.area != recast.RC_NULL_AREA, "climb=5 should be walkable")
-
         obstacle.area = recast.RC_NULL_AREA
         recast.filter_low_hanging_walkable_obstacles(4, &hf)
         testing.expect(t, obstacle.area == recast.RC_NULL_AREA, "climb=5 exceeds limit=4")
-
         free(floor)
         free(obstacle)
     }
-
     // Test 2: Low height clearance
     {
         hf := recast.Heightfield{width = 1, height = 1, spans = make([]^recast.Span, 1)}
         defer delete(hf.spans)
-
         floor := new(recast.Span)
         floor.smax = 10
         floor.area = recast.RC_WALKABLE_AREA
@@ -374,33 +326,26 @@ test_all_filters :: proc(t: ^testing.T) {
         ceiling.smin = 13
         floor.next = ceiling
         hf.spans[0] = floor
-
         recast.filter_walkable_low_height_spans(5, &hf)
         testing.expect(t, floor.area == recast.RC_NULL_AREA, "clearance=3 < required=5")
-
         free(floor)
         free(ceiling)
     }
-
     // Test 3: Ledge detection
     {
         hf := recast.Heightfield{width = 3, height = 1, spans = make([]^recast.Span, 3)}
         defer delete(hf.spans)
-
         for i in 0..<3 {
             span := new(recast.Span)
             span.smax = u32(10 + i * 5)  // Heights: 10, 15, 20
             span.area = recast.RC_WALKABLE_AREA
             hf.spans[i] = span
         }
-
         recast.filter_ledge_spans(10, 3, &hf)
         testing.expect(t, hf.spans[0].area == recast.RC_NULL_AREA, "edge is ledge")
         testing.expect(t, hf.spans[2].area == recast.RC_NULL_AREA, "edge is ledge")
-
         for i in 0..<3 do free(hf.spans[i])
     }
-
     // Test 4: Median filter with compact heightfield
     {
         chf := recast.Compact_Heightfield{
@@ -411,15 +356,12 @@ test_all_filters :: proc(t: ^testing.T) {
             delete(chf.spans)
             delete(chf.areas)
         }
-
         chf.cells = make([]recast.Compact_Cell, 9)
         chf.spans = make([]recast.Compact_Span, 9)
         chf.areas = make([]u8, 9)
-
         for i in 0..<9 {
             chf.cells[i] = {index = u32(i), count = 1}
             chf.areas[i] = recast.RC_WALKABLE_AREA
-
             // Setup 4-connected grid
             span := &chf.spans[i]
             x, z := i % 3, i / 3
@@ -435,7 +377,6 @@ test_all_filters :: proc(t: ^testing.T) {
                 }
             }
         }
-
         chf.areas[4] = recast.RC_NULL_AREA
         recast.median_filter_walkable_area(&chf)
         testing.expect(t, chf.areas[4] == recast.RC_NULL_AREA, "median preserves null")
@@ -457,42 +398,33 @@ test_low_hanging_obstacle_filter_edge_cases :: proc(t: ^testing.T) {
             ch = 1.0,
         }
         hf.spans = make([]^recast.Span, 1)
-
         // Create walkable floor span [0, 10] - agent stands at height 10
         span1 := new(recast.Span)
         span1.smin = 0
         span1.smax = 10
         span1.area = recast.RC_WALKABLE_AREA
-
         // Create non-walkable obstacle [12, 15] - agent needs to reach height 15
         span2 := new(recast.Span)
         span2.smin = 12
         span2.smax = 15
         span2.area = recast.RC_NULL_AREA
         span1.next = span2
-
         hf.spans[0] = span1
-
         // Apply filter with walkableClimb = 5
         recast.filter_low_hanging_walkable_obstacles(5, &hf)
-
         // Climb height is 5 (15-10), should be walkable since 5 <= 5
         testing.expect(t, span2.area != recast.RC_NULL_AREA,
                       "Span with climb height=5 should be walkable with walkableClimb=5")
-
         // Reset and test with walkableClimb = 4
         span2.area = recast.RC_NULL_AREA
         recast.filter_low_hanging_walkable_obstacles(4, &hf)
-
         // Climb height is 5, should NOT be walkable since 5 > 4
         testing.expect(t, span2.area == recast.RC_NULL_AREA,
                       "Span with climb height=5 should NOT be walkable with walkableClimb=4")
-
         free(span1)
         free(span2)
         delete(hf.spans)
     }
-
     // Test 2: Thick platform test
     {
         hf := recast.Heightfield{
@@ -504,34 +436,27 @@ test_low_hanging_obstacle_filter_edge_cases :: proc(t: ^testing.T) {
             ch = 1.0,
         }
         hf.spans = make([]^recast.Span, 1)
-
         // Create walkable span [0, 10] - agent at height 10
         span1 := new(recast.Span)
         span1.smin = 0
         span1.smax = 10
         span1.area = recast.RC_WALKABLE_AREA
-
         // Create thick non-walkable platform [11, 20] - agent needs to reach height 20
         span2 := new(recast.Span)
         span2.smin = 11
         span2.smax = 20
         span2.area = recast.RC_NULL_AREA
         span1.next = span2
-
         hf.spans[0] = span1
-
         // Apply filter with walkableClimb = 5
         recast.filter_low_hanging_walkable_obstacles(5, &hf)
-
         // Climb height is 10 (20-10), should NOT be walkable since 10 > 5
         testing.expect(t, span2.area == recast.RC_NULL_AREA,
                       "Thick platform requiring 10 unit climb should not be walkable with walkableClimb=5")
-
         free(span1)
         free(span2)
         delete(hf.spans)
     }
-
     // Test 3: Adjacent spans test
     {
         hf := recast.Heightfield{
@@ -543,42 +468,33 @@ test_low_hanging_obstacle_filter_edge_cases :: proc(t: ^testing.T) {
             ch = 1.0,
         }
         hf.spans = make([]^recast.Span, 1)
-
         // Create walkable span [0, 10]
         span1 := new(recast.Span)
         span1.smin = 0
         span1.smax = 10
         span1.area = recast.RC_WALKABLE_AREA
-
         // Create adjacent non-walkable span [10, 15]
         span2 := new(recast.Span)
         span2.smin = 10
         span2.smax = 15
         span2.area = recast.RC_NULL_AREA
         span1.next = span2
-
         hf.spans[0] = span1
-
         // Apply filter with walkableClimb = 5
         recast.filter_low_hanging_walkable_obstacles(5, &hf)
-
         // Climb height is 5 (15-10), should be walkable since 5 <= 5
         testing.expect(t, span2.area != recast.RC_NULL_AREA,
                       "Adjacent span with climb=5 should be walkable with walkableClimb=5")
-
         // Reset and test with smaller walkableClimb
         span2.area = recast.RC_NULL_AREA
         recast.filter_low_hanging_walkable_obstacles(4, &hf)
-
         // Climb height is 5, should NOT be walkable since 5 > 4
         testing.expect(t, span2.area == recast.RC_NULL_AREA,
                       "Adjacent span with climb=5 should NOT be walkable with walkableClimb=4")
-
         free(span1)
         free(span2)
         delete(hf.spans)
     }
-
     // Test 4: Multiple consecutive non-walkable spans
     {
         hf := recast.Heightfield{
@@ -590,45 +506,37 @@ test_low_hanging_obstacle_filter_edge_cases :: proc(t: ^testing.T) {
             ch = 1.0,
         }
         hf.spans = make([]^recast.Span, 1)
-
         // Create walkable span
         span1 := new(recast.Span)
         span1.smin = 0
         span1.smax = 10
         span1.area = recast.RC_WALKABLE_AREA
-
         // Create first non-walkable span with small gap
         span2 := new(recast.Span)
         span2.smin = 12
         span2.smax = 15
         span2.area = recast.RC_NULL_AREA
         span1.next = span2
-
         // Create second non-walkable span with small gap from span2
         span3 := new(recast.Span)
         span3.smin = 17
         span3.smax = 20
         span3.area = recast.RC_NULL_AREA
         span2.next = span3
-
         hf.spans[0] = span1
-
         // Apply filter with walkableClimb = 5
         recast.filter_low_hanging_walkable_obstacles(5, &hf)
-
         // Only span2 should become walkable (gap=2 from span1)
         // span3 should remain non-walkable (it's not directly above a walkable span)
         testing.expect(t, span2.area != recast.RC_NULL_AREA,
                       "First non-walkable span should become walkable")
         testing.expect(t, span3.area == recast.RC_NULL_AREA,
                       "Second non-walkable span should remain non-walkable")
-
         free(span1)
         free(span2)
         free(span3)
         delete(hf.spans)
     }
-
     log.info("Low hanging obstacle filter edge cases passed")
 }
 
@@ -646,7 +554,6 @@ test_ledge_filter_steep_slope :: proc(t: ^testing.T) {
             ch = 1.0,
         }
         hf.spans = make([]^recast.Span, 9)
-
         // Create a steep slope scenario
         // Center span at height 10
         center_span := new(recast.Span)
@@ -654,7 +561,6 @@ test_ledge_filter_steep_slope :: proc(t: ^testing.T) {
         center_span.smax = 10
         center_span.area = recast.RC_WALKABLE_AREA
         hf.spans[4] = center_span // Center of 3x3 grid
-
         // Create neighbors at varying heights
         // Low neighbor at height 7 (traversable)
         low_span := new(recast.Span)
@@ -662,31 +568,25 @@ test_ledge_filter_steep_slope :: proc(t: ^testing.T) {
         low_span.smax = 7
         low_span.area = recast.RC_WALKABLE_AREA
         hf.spans[3] = low_span // Left neighbor
-
         // High neighbor at height 11 (traversable)
         high_span := new(recast.Span)
         high_span.smin = 0
         high_span.smax = 11
         high_span.area = recast.RC_WALKABLE_AREA
         hf.spans[5] = high_span // Right neighbor
-
         walkable_height := 10
         walkable_climb := 3
-
         // Apply ledge filter
         recast.filter_ledge_spans(walkable_height, walkable_climb, &hf)
-
         // The center span should be marked as unwalkable because
         // the difference between highest and lowest traversable neighbors (11-7=4) > walkableClimb (3)
         testing.expect(t, center_span.area == recast.RC_NULL_AREA,
                       "Center span should be marked as ledge due to steep slope")
-
         free(center_span)
         free(low_span)
         free(high_span)
         delete(hf.spans)
     }
-
     log.info("Ledge filter steep slope test passed")
 }
 
@@ -704,44 +604,34 @@ test_walkable_low_height_filter :: proc(t: ^testing.T) {
             ch = 1.0,
         }
         hf.spans = make([]^recast.Span, 1)
-
         // Create walkable span with limited clearance
         span1 := new(recast.Span)
         span1.smin = 0
         span1.smax = 10
         span1.area = recast.RC_WALKABLE_AREA
-
         // Create ceiling span
         span2 := new(recast.Span)
         span2.smin = 13  // Only 3 units of clearance
         span2.smax = 20
         span2.area = recast.RC_NULL_AREA
         span1.next = span2
-
         hf.spans[0] = span1
-
         // Apply filter with walkableHeight = 5
         recast.filter_walkable_low_height_spans(5, &hf)
-
         // span1 should be marked unwalkable (clearance=3 < walkableHeight=5)
         testing.expect(t, span1.area == recast.RC_NULL_AREA,
                       "Span with insufficient clearance should be unwalkable")
-
         // Reset and test with adequate clearance
         span1.area = recast.RC_WALKABLE_AREA
         span2.smin = 16  // 6 units of clearance
-
         recast.filter_walkable_low_height_spans(5, &hf)
-
         // span1 should remain walkable (clearance=6 >= walkableHeight=5)
         testing.expect(t, span1.area != recast.RC_NULL_AREA,
                       "Span with sufficient clearance should remain walkable")
-
         free(span1)
         free(span2)
         delete(hf.spans)
     }
-
     log.info("Walkable low height filter test passed")
 }
 

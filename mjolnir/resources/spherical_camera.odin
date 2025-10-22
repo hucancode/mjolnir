@@ -77,7 +77,6 @@ spherical_camera_init :: proc(
     camera,
     &manager.visibility_sphere_descriptor_layout,
   ) or_return
-
   return .SUCCESS
 }
 
@@ -114,7 +113,6 @@ spherical_camera_upload_data :: proc(
   // Spherical camera uses identity view (transformations happen in geometry shader)
   // Geometry shader will apply per-face view matrices
   dst.view = linalg.MATRIX4F32_IDENTITY
-
   // Perspective projection with 90degree FOV for cube map faces
   fov := f32(math.PI * 0.5) // 90 degrees
   aspect := f32(1.0) // Square faces
@@ -197,7 +195,6 @@ spherical_camera_update_descriptor_set :: proc(
     buffer = camera.draw_commands.buffer,
     range  = vk.DeviceSize(camera.draw_commands.bytes_count),
   }
-
   // NOTE: Bindings must match sphere_cull.comp shader!
   // Binding 4 is skipped (no depth pyramid in sphere culling)
   // Bindings 5,6 are for draw count/commands to match the shader layout
@@ -251,7 +248,6 @@ spherical_camera_update_descriptor_set :: proc(
       pBufferInfo = &command_info,
     },
   }
-
   vk.UpdateDescriptorSets(
     gctx.device,
     len(writes),

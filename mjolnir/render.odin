@@ -116,7 +116,6 @@ renderer_init :: proc(
     rm,
   ) or_return
   navigation_renderer.init(&self.navigation, gctx, rm) or_return
-
   return .SUCCESS
 }
 
@@ -175,12 +174,9 @@ record_camera_visibility :: proc(
   for &entry, cam_index in rm.cameras.entries {
     if !entry.active do continue
     if resources.PassType.SHADOW not_in entry.item.enabled_passes do continue
-
     cam := &entry.item
-
     // Upload camera data to GPU buffer
     resources.camera_upload_data(rm, cam, u32(cam_index))
-
     // Dispatch visibility - records compute culling + depth rendering
     world.visibility_system_dispatch(
       &world_state.visibility,
@@ -194,16 +190,12 @@ record_camera_visibility :: proc(
       rm,
     )
   }
-
   // Iterate through all spherical cameras (all have shadow pass by design)
   for &entry, cam_index in rm.spherical_cameras.entries {
     if !entry.active do continue
-
     spherical_cam := &entry.item
-
     // Upload camera data to GPU buffer
     resources.spherical_camera_upload_data(rm, spherical_cam, u32(cam_index))
-
     // Dispatch visibility - records compute culling + depth rendering
     world.visibility_system_dispatch_spherical(
       &world_state.visibility,
@@ -216,7 +208,6 @@ record_camera_visibility :: proc(
       rm,
     )
   }
-
   return .SUCCESS
 }
 
@@ -234,13 +225,11 @@ record_geometry_pass :: proc(
     camera_handle,
     rm,
   ) or_return
-
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil {
     log.error("Failed to get camera for geometry pass")
     return .ERROR_UNKNOWN
   }
-
   // STEP 1: Execute culling pass (late pass) - writes draw list
   world.visibility_system_dispatch_culling(
     &world_state.visibility,
@@ -253,7 +242,6 @@ record_geometry_pass :: proc(
     {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
     rm,
   )
-
   // STEP 2: Render depth - reads draw list, writes depth[N]
   world.visibility_system_dispatch_depth(
     &world_state.visibility,
@@ -266,7 +254,6 @@ record_geometry_pass :: proc(
     {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
     rm,
   )
-
   // STEP 3: Build pyramid - reads depth[N], builds pyramid[N]
   world.visibility_system_dispatch_pyramid(
     &world_state.visibility,
@@ -277,7 +264,6 @@ record_geometry_pass :: proc(
     frame_index,
     rm,
   )
-
   // STEP 4: Render geometry color - reads draw list, reads depth[N] for depth testing
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
   geometry_pass.begin_pass(camera_handle, command_buffer, rm, frame_index)
@@ -292,7 +278,6 @@ record_geometry_pass :: proc(
     command_stride,
   )
   geometry_pass.end_pass(camera_handle, command_buffer, rm, frame_index)
-
   geometry_pass.end_record(
     command_buffer,
     camera_handle,
@@ -406,13 +391,11 @@ record_transparency_pass :: proc(
     camera_handle.index,
     rm,
   )
-
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil {
     log.error("Failed to get camera for transparency pass")
     return .ERROR_UNKNOWN
   }
-
   // Cull transparent objects (depth already rendered in geometry pass)
   // Disable occlusion culling for transparent objects to avoid rejecting sprites
   world.visibility_system_dispatch_culling(
@@ -428,7 +411,6 @@ record_transparency_pass :: proc(
     occlusion_enabled = false,
   )
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
-
   // Render sprites with sprite pipeline
   transparency.render(
     &self.transparency,
@@ -441,7 +423,6 @@ record_transparency_pass :: proc(
     camera.late_draw_count[frame_index].buffer,
     command_stride,
   )
-
   // Cull wireframe objects
   // world.visibility_system_dispatch_culling(
   //   &world_state.visibility,

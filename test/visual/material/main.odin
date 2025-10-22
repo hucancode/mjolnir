@@ -28,15 +28,12 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if camera != nil {
     mjolnir.camera_look_at(camera, {2.4, 1.8, 2.4}, {0.0, 0.0, 0.0})
   }
-
   cube_geom := geometry.make_cube()
-
   cube_mesh, mesh_ok := mjolnir.create_mesh(engine, cube_geom)
   if !mesh_ok {
     log.error("material textured cube: mesh creation failed")
     return
   }
-
   albedo_texture, texture_ok := mjolnir.create_texture(
     engine,
     #load("statue-1275469_1280.jpg"),
@@ -46,7 +43,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     log.error("material textured cube: texture load failed")
     return
   }
-
   material_handle, material_ok := mjolnir.create_material(
     engine,
     {.ALBEDO_TEXTURE},
@@ -59,7 +55,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     log.error("material textured cube: material creation failed")
     return
   }
-
   cube_handle, cube_node, spawned := mjolnir.spawn(
     engine,
     world.MeshAttachment {
@@ -72,7 +67,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     mjolnir.scale(cube_node, 0.75)
     state.cube_handle = cube_handle
   }
-
   _, light_node, light_ok := mjolnir.spawn_directional_light(
     engine,
     {1.0, 1.0, 1.0, 1.0},

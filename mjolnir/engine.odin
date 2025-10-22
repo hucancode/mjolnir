@@ -32,7 +32,7 @@ MOUSE_SENSITIVITY_X :: 0.005
 MOUSE_SENSITIVITY_Y :: 0.005
 SCROLL_SENSITIVITY :: 0.5
 MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
-USE_PARALLEL_UPDATE :: true // Set to false to disable threading for debugging
+USE_PARALLEL_UPDATE :: true
 
 g_context: runtime.Context
 
@@ -84,9 +84,7 @@ Engine :: struct {
   command_buffers:        [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:             [2]i32,
   debug_ui_enabled:       bool,
-  // Deferred cleanup for thread safety
   pending_node_deletions: [dynamic]resources.Handle,
-  // Frame synchronization for parallel update/render
   frame_fence:            vk.Fence,
   update_thread:          Maybe(^thread.Thread),
   update_active:          bool,
@@ -95,7 +93,6 @@ Engine :: struct {
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
   sw, sh := glfw.GetWindowContentScale(window)
-  // Use X scale, warn if not equal
   if sw != sh {
     log.warnf("DPI scale x (%v) and y (%v) not the same, using x", sw, sh)
   }
@@ -143,18 +140,13 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
-
-  // Initialize deferred cleanup
   self.pending_node_deletions = make([dynamic]resources.Handle, 0)
-
-  // Create fence for frame synchronization
   vk.CreateFence(
     self.gctx.device,
     &vk.FenceCreateInfo{sType = .FENCE_CREATE_INFO},
     nil,
     &self.frame_fence,
   ) or_return
-
   vk.AllocateCommandBuffers(
     self.gctx.device,
     &{
@@ -178,10 +170,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-
-      // Pass key events to retained UI first
       retained_ui.input_key(&engine.render.retained_ui, int(key), int(action))
-
       if engine.key_press_proc != nil {
         engine.key_press_proc(engine, int(key), int(action), int(mods))
       }
@@ -231,7 +220,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
       }
     },
   )
-
   glfw.SetMouseButtonCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, button, action, mods: c.int) {
@@ -275,7 +263,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
       }
     },
   )
-
   glfw.SetScrollCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
@@ -286,18 +273,15 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
         -i32(math.round(xoffset)),
         -i32(math.round(yoffset)),
       )
-      // Forward scroll events to camera controller
       if world.g_scroll_deltas == nil {
         world.g_scroll_deltas = make(map[glfw.WindowHandle]f32)
       }
       world.g_scroll_deltas[window] = f32(yoffset)
-
       if engine.mouse_scroll_proc != nil {
         engine.mouse_scroll_proc(engine, {xoffset, yoffset})
       }
     },
   )
-
   glfw.SetCharCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, ch: rune) {
@@ -309,7 +293,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
       retained_ui.input_text(&engine.render.retained_ui, text_str)
     },
   )
-
   if self.setup_proc != nil {
     self.setup_proc(self)
   }
@@ -341,35 +324,26 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
   if bone_buffer.mapped == nil {
     return
   }
-
   for &entry in self.world.nodes.entries do if entry.active {
     node := &entry.item
     mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment)
     if !has_mesh do continue
-
     skinning, has_skin := mesh_attachment.skinning.?
     if !has_skin do continue
-
     anim_instance, has_anim := skinning.animation.?
     if !has_anim do continue
-
     animation.instance_update(&anim_instance, delta_time)
     clip := anim_instance.clip
     if clip == nil do continue
-
     mesh := resources.get(self.rm.meshes, mesh_attachment.handle) or_continue
     mesh_skinning, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
-
     bone_count := len(mesh_skinning.bones)
     if bone_count == 0 do continue
-
     if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do continue
-
     matrices_ptr := gpu.mutable_buffer_get(bone_buffer, skinning.bone_matrix_buffer_offset)
     matrices := slice.from_ptr(matrices_ptr, bone_count)
     resources.sample_clip(mesh, clip, anim_instance.time, matrices)
-
     skinning.animation = anim_instance
     mesh_attachment.skinning = skinning
     node.attachment = mesh_attachment
@@ -378,26 +352,23 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
 
 update_sprite_animations :: proc(self: ^Engine, delta_time: f32) {
   if delta_time <= 0 do return
-
-  // Early exit if no sprites exist
-  active_count := len(self.rm.sprites.entries) - len(self.rm.sprites.free_indices)
+  active_count :=
+    len(self.rm.sprites.entries) - len(self.rm.sprites.free_indices)
   if active_count == 0 do return
-
   for &entry, i in self.rm.sprites.entries {
     if !entry.active do continue
-
     sprite := &entry.item
     anim, has_anim := &sprite.animation.?
     if !has_anim do continue
-
     resources.sprite_animation_update(anim, delta_time)
-
-    handle := resources.Handle{index = u32(i), generation = entry.generation}
+    handle := resources.Handle {
+      index      = u32(i),
+      generation = entry.generation,
+    }
     resources.sprite_write_to_gpu(&self.rm, handle, sprite)
   }
 }
 
-// Main thread input handling - only GLFW and input operations
 update_input :: proc(self: ^Engine) -> bool {
   glfw.PollEvents()
   last_mouse_pos := self.input.mouse_pos
@@ -426,8 +397,6 @@ update :: proc(self: ^Engine) -> bool {
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
-  // Animation updates are now handled in render thread for smooth animation at render FPS
-  // Update particle system params
   params := gpu.mutable_buffer_get(&self.render.particles.params_buffer, 0)
   params.delta_time = delta_time
   params.emitter_count = u32(
@@ -436,7 +405,6 @@ update :: proc(self: ^Engine) -> bool {
   params.forcefield_count = u32(
     min(len(self.rm.forcefields.entries), resources.MAX_FORCE_FIELDS),
   )
-  // Update retained UI input
   retained_ui.update_input(
     &self.render.retained_ui,
     f32(self.input.mouse_pos.x),
@@ -458,7 +426,6 @@ shutdown :: proc(self: ^Engine) {
     self.gctx.command_pool,
     self.command_buffers[:],
   )
-  // Main render target is cleaned up in renderer_shutdown
   delete(self.pending_node_deletions)
   vk.DestroyFence(self.gctx.device, self.frame_fence, nil)
   renderer_shutdown(
@@ -591,12 +558,9 @@ render :: proc(self: ^Engine) -> vk.Result {
     resources.camera_upload_data(&self.rm, &entry.item, u32(cam_index))
   }
   resources.update_light_shadow_camera_transforms(&self.rm, self.frame_index)
-  // Call pre-render hook before any rendering
   if self.pre_render_proc != nil {
     self.pre_render_proc(self)
   }
-
-  // Render visibility/shadows for ALL cameras
   record_camera_visibility(
     &self.render,
     self.frame_index,
@@ -605,19 +569,14 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.world,
     command_buffer,
   ) or_return
-
-  // Render non-main cameras first (e.g., portal cameras) so their outputs can be used as textures
   for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue
-    if u32(cam_index) == main_camera_handle.index do continue // Skip main camera, render it last
-
+    if u32(cam_index) == main_camera_handle.index do continue
     cam_handle := resources.Handle {
       index      = u32(cam_index),
       generation = entry.generation,
     }
     cam := &entry.item
-
-    // Record all passes for this portal camera (writes to shared renderer buffers)
     if resources.PassType.GEOMETRY in cam.enabled_passes {
       record_geometry_pass(
         &self.render,
@@ -657,8 +616,6 @@ render :: proc(self: ^Engine) -> vk.Result {
         self.swapchain.format.format,
       )
     }
-
-    // Execute all recorded commands for this portal camera at once
     portal_buffers := [dynamic]vk.CommandBuffer{}
     defer delete(portal_buffers)
     if resources.PassType.GEOMETRY in cam.enabled_passes {
@@ -681,14 +638,9 @@ render :: proc(self: ^Engine) -> vk.Result {
       )
     }
   }
-
-  // Call post-render hook after portal cameras but before main camera
-  // This allows materials to bind portal camera outputs as textures
   if self.post_render_proc != nil {
     self.post_render_proc(self)
   }
-
-  // Now render the main camera
   record_geometry_pass(
     &self.render,
     self.frame_index,
@@ -756,14 +708,19 @@ render :: proc(self: ^Engine) -> vk.Result {
     debug_ui.render(&self.render.ui, command_buffer)
     debug_ui.end_pass(&self.render.ui, command_buffer)
   }
-  // Retained mode UI rendering
   retained_ui.begin_pass(
     &self.render.retained_ui,
     command_buffer,
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
   )
-  retained_ui.render(&self.render.retained_ui, command_buffer, self.frame_index, &self.rm, &self.gctx)
+  retained_ui.render(
+    &self.render.retained_ui,
+    command_buffer,
+    self.frame_index,
+    &self.rm,
+    &self.gctx,
+  )
   retained_ui.end_pass(command_buffer)
   gpu.transition_image_to_present(
     command_buffer,
@@ -805,10 +762,8 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
   }
   frame := 0
   for !glfw.WindowShouldClose(self.window) {
-    // resources.Handle input and GLFW events on main thread, GLFW cannot run on subthreads
     update_input(self)
     when !USE_PARALLEL_UPDATE {
-      // Single threaded mode - run update directly
       update(self)
     }
     if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
@@ -839,18 +794,14 @@ update_thread_proc :: proc(thread: ^thread.Thread) {
   data := cast(^UpdateThreadData)thread.data
   engine := data.engine
   for engine.update_active {
-    // Run update at consistent rate
     should_update := update(engine)
     if !should_update {
-      // Sleep briefly to avoid busy waiting
-      // MAXIMUM 500 FPS
       time.sleep(time.Millisecond * 2)
     }
   }
   log.info("Update thread terminating")
 }
 
-// Deferred cleanup functions for thread safety
 queue_node_deletion :: proc(engine: ^Engine, handle: resources.Handle) {
   append(&engine.pending_node_deletions, handle)
 }
@@ -860,6 +811,5 @@ process_pending_deletions :: proc(engine: ^Engine) {
     world.despawn(&engine.world, handle)
   }
   clear(&engine.pending_node_deletions)
-  // Actually cleanup the nodes that were marked for deletion
   world.cleanup_pending_deletions(&engine.world, &engine.rm, &engine.gctx)
 }

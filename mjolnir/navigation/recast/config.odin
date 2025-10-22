@@ -38,7 +38,6 @@ validate_config :: proc(cfg: ^Config) -> bool {
     if cfg.cs <= 0 || cfg.ch <= 0 {
         return false
     }
-
     // Check bounds (allow zero bounds which indicates they haven't been set yet)
     if cfg.bmin == cfg.bmax && cfg.bmin != {0, 0, 0} {
         return false  // Same bounds but not zero (invalid)
@@ -46,34 +45,27 @@ validate_config :: proc(cfg: ^Config) -> bool {
     if cfg.bmin.x > cfg.bmax.x || cfg.bmin.y > cfg.bmax.y || cfg.bmin.z > cfg.bmax.z {
         return false  // Inverted bounds (invalid)
     }
-
     // Check agent parameters
     if cfg.walkable_height < 3 {
         return false
     }
-
     if cfg.walkable_climb < 0 {
         return false
     }
-
     if cfg.walkable_slope_angle < 0 || cfg.walkable_slope_angle > 90 {
         return false
     }
-
     // Check region parameters
     if cfg.min_region_area < 0 || cfg.merge_region_area < 0 {
         return false
     }
-
     // Check polygon parameters
     if cfg.max_verts_per_poly < 3 {
         return false
     }
-
     if cfg.max_verts_per_poly > DT_VERTS_PER_POLYGON {
         return false
     }
-
     return true
 }
 
@@ -102,7 +94,6 @@ config_create :: proc() -> Config {
 calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
     bmin = cfg.bmin
     bmax = cfg.bmax
-
     if cfg.tile_size > 0 {
         ts := f32(cfg.tile_size) * cfg.cs
         bmin.x = cfg.bmin.x + f32(tx) * ts
@@ -110,7 +101,6 @@ calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
         bmax.x = cfg.bmin.x + f32(tx + 1) * ts
         bmax.z = cfg.bmin.z + f32(ty + 1) * ts
     }
-
     return
 }
 
@@ -119,7 +109,6 @@ get_tile_count :: proc(cfg: ^Config) -> (tw, th: i32) {
     if cfg.tile_size <= 0 {
         return 1, 1
     }
-
     gw, gh := calc_grid_size_from_config(cfg)
     tw = (gw + cfg.tile_size - 1) / cfg.tile_size
     th = (gh + cfg.tile_size - 1) / cfg.tile_size

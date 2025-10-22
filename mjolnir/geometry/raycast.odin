@@ -142,19 +142,15 @@ raycast_bvh_limited :: proc(
 	for len(stack) > 0 && tests < config.max_tests {
 		node_idx := pop(&stack)
 		node := &bvh.nodes[node_idx]
-
-		t_near, t_far := ray_aabb_intersection_safe(ray.origin, ray.direction, node.bounds)
+  t_near, t_far := ray_aabb_intersection_safe(ray.origin, ray.direction, node.bounds)
 		if t_near > best_hit.t || t_far < 0 do continue
-
-		if node.primitive_count > 0 {
+  if node.primitive_count > 0 {
 			for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
 				if tests >= config.max_tests do break
-
-				prim := bvh.primitives[i]
+  		prim := bvh.primitives[i]
 				hit, t := intersection_func(ray, prim, best_hit.t)
 				tests += 1
-
-				if hit && t < best_hit.t {
+  		if hit && t < best_hit.t {
 					best_hit.primitive = prim
 					best_hit.t = t
 					best_hit.hit = true
@@ -163,8 +159,7 @@ raycast_bvh_limited :: proc(
 		} else {
 			left_node := &bvh.nodes[node.left_child]
 			right_node := &bvh.nodes[node.right_child]
-
-			left_t_near, _ := ray_aabb_intersection_safe(
+  	left_t_near, _ := ray_aabb_intersection_safe(
 				ray.origin,
 				ray.direction,
 				left_node.bounds,
@@ -174,8 +169,7 @@ raycast_bvh_limited :: proc(
 				ray.direction,
 				right_node.bounds,
 			)
-
-			if left_t_near < right_t_near {
+  	if left_t_near < right_t_near {
 				append(&stack, node.right_child, node.left_child)
 			} else {
 				append(&stack, node.left_child, node.right_child)
@@ -226,19 +220,15 @@ raycast_single_bvh_limited :: proc(
 	for len(stack) > 0 && tests < config.max_tests {
 		node_idx := pop(&stack)
 		node := &bvh.nodes[node_idx]
-
-		t_near, t_far := ray_aabb_intersection_safe(ray.origin, ray.direction, node.bounds)
+  t_near, t_far := ray_aabb_intersection_safe(ray.origin, ray.direction, node.bounds)
 		if t_near > config.max_dist || t_far < 0 do continue
-
-		if node.primitive_count > 0 {
+  if node.primitive_count > 0 {
 			for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
 				if tests >= config.max_tests do break
-
-				prim := bvh.primitives[i]
+  		prim := bvh.primitives[i]
 				hit, t := intersection_func(ray, prim, config.max_dist)
 				tests += 1
-
-				if hit && t <= config.max_dist {
+  		if hit && t <= config.max_dist {
 					return RayHit(T){primitive = prim, t = t, hit = true}
 				}
 			}
@@ -294,19 +284,15 @@ raycast_multi_bvh_limited :: proc(
 	for len(stack) > 0 && tests < config.max_tests {
 		node_idx := pop(&stack)
 		node := &bvh.nodes[node_idx]
-
-		t_near, t_far := ray_aabb_intersection_safe(ray.origin, ray.direction, node.bounds)
+  t_near, t_far := ray_aabb_intersection_safe(ray.origin, ray.direction, node.bounds)
 		if t_near > config.max_dist || t_far < 0 do continue
-
-		if node.primitive_count > 0 {
+  if node.primitive_count > 0 {
 			for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
 				if tests >= config.max_tests do break
-
-				prim := bvh.primitives[i]
+  		prim := bvh.primitives[i]
 				hit, t := intersection_func(ray, prim, config.max_dist)
 				tests += 1
-
-				if hit && t <= config.max_dist {
+  		if hit && t <= config.max_dist {
 					append(results, RayHit(T){primitive = prim, t = t, hit = true})
 				}
 			}
@@ -406,11 +392,9 @@ octree_node_raycast_limited :: proc(
 
 	for item in node.items {
 		if tests^ >= max_tests do return
-
-		hit, t := intersection_func(ray, item, best_hit.t)
+  hit, t := intersection_func(ray, item, best_hit.t)
 		tests^ += 1
-
-		if hit && t < best_hit.t {
+  if hit && t < best_hit.t {
 			best_hit.primitive = item
 			best_hit.t = t
 			best_hit.hit = true
@@ -446,12 +430,10 @@ octree_node_raycast_limited :: proc(
 
 	for i in 0 ..< valid_count {
 		if tests^ >= max_tests do return
-
-		child_idx := child_intersections[i].idx
+  child_idx := child_intersections[i].idx
 		child_t_min := child_intersections[i].t_min
 		if child_t_min > best_hit.t do break
-
-		child_t_max := min_f32(
+  child_t_max := min_f32(
 			best_hit.t,
 			ray_aabb_intersection_far(ray.origin, inv_dir, node.children[child_idx].bounds),
 		)
@@ -551,11 +533,9 @@ octree_node_raycast_single_limited :: proc(
 
 	for item in node.items {
 		if tests^ >= max_tests do return {}
-
-		hit, t := intersection_func(ray, item, max_dist)
+  hit, t := intersection_func(ray, item, max_dist)
 		tests^ += 1
-
-		if hit && t <= max_dist {
+  if hit && t <= max_dist {
 			return RayHit(T){primitive = item, t = t, hit = true}
 		}
 	}
@@ -589,15 +569,13 @@ octree_node_raycast_single_limited :: proc(
 
 	for i in 0 ..< valid_count {
 		if tests^ >= max_tests do return {}
-
-		child_idx := child_intersections[i].idx
+  child_idx := child_intersections[i].idx
 		child_t_min := child_intersections[i].t_min
 		child_t_max := min_f32(
 			max_dist,
 			ray_aabb_intersection_far(ray.origin, inv_dir, node.children[child_idx].bounds),
 		)
-
-		result := octree_node_raycast_single_limited(
+  result := octree_node_raycast_single_limited(
 			octree,
 			node.children[child_idx],
 			ray,
@@ -609,8 +587,7 @@ octree_node_raycast_single_limited :: proc(
 			tests,
 			max_tests,
 		)
-
-		if result.hit do return result
+  if result.hit do return result
 	}
 
 	return {}
@@ -707,11 +684,9 @@ octree_node_raycast_multi_limited :: proc(
 
 	for item in node.items {
 		if tests^ >= max_tests do return
-
-		hit, t := intersection_func(ray, item, max_dist)
+  hit, t := intersection_func(ray, item, max_dist)
 		tests^ += 1
-
-		if hit && t <= max_dist {
+  if hit && t <= max_dist {
 			append(results, RayHit(T){primitive = item, t = t, hit = true})
 		}
 	}
@@ -720,8 +695,7 @@ octree_node_raycast_multi_limited :: proc(
 
 	for i in 0 ..< 8 {
 		if tests^ >= max_tests do return
-
-		child_t_min, child_t_max := ray_aabb_intersection(
+  child_t_min, child_t_max := ray_aabb_intersection(
 			ray.origin,
 			inv_dir,
 			node.children[i].bounds,
@@ -760,8 +734,7 @@ raycast_brute :: proc(
 
 	for prim, i in primitives {
 		if i >= max_tests do break
-
-		hit, t := intersection_func(ray, prim, best_hit.t)
+  hit, t := intersection_func(ray, prim, best_hit.t)
 		if hit && t < best_hit.t {
 			best_hit.primitive = prim
 			best_hit.t = t
@@ -785,8 +758,7 @@ raycast_single_brute :: proc(
 
 	for prim, i in primitives {
 		if i >= max_tests do break
-
-		hit, t := intersection_func(ray, prim, config.max_dist)
+  hit, t := intersection_func(ray, prim, config.max_dist)
 		if hit && t <= config.max_dist {
 			return RayHit(T){primitive = prim, t = t, hit = true}
 		}
@@ -811,8 +783,7 @@ raycast_multi_brute :: proc(
 
 	for prim, i in primitives {
 		if i >= max_tests do break
-
-		hit, t := intersection_func(ray, prim, config.max_dist)
+  hit, t := intersection_func(ray, prim, config.max_dist)
 		if hit && t <= config.max_dist {
 			append(results, RayHit(T){primitive = prim, t = t, hit = true})
 		}

@@ -48,7 +48,6 @@ begin_ambient_pass :: proc(
 ) {
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-
   color_texture := resources.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
@@ -107,7 +106,6 @@ render_ambient :: proc(
 ) {
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-
   push := AmbientPushConstant {
     camera_index           = camera_handle.index,
     environment_index      = self.environment_map.index,
@@ -149,9 +147,7 @@ init :: proc(
     gctx.command_pool,
     self.commands[:],
   ) or_return
-
   log.debugf("renderer lighting init %d x %d", width, height)
-
   // Initialize ambient pipeline
   ambient_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
     rm.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
@@ -173,7 +169,6 @@ init :: proc(
     nil,
     &self.ambient_pipeline_layout,
   ) or_return
-
   ambient_vert_shader_code := #load("../../shader/lighting_ambient/vert.spv")
   ambient_vert_module := gpu.create_shader_module(
     gctx.device,
@@ -186,7 +181,6 @@ init :: proc(
     ambient_frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, ambient_frag_module, nil)
-
   ambient_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   ambient_dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -241,7 +235,6 @@ init :: proc(
   spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
   spec_info.pData = cast(rawptr)&spec_data
   defer delete(spec_entries)
-
   ambient_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -281,7 +274,6 @@ init :: proc(
     nil,
     &self.ambient_pipeline,
   ) or_return
-
   // Initialize environment resources
   environment_map: ^gpu.Image
   self.environment_map, environment_map = resources.create_texture_from_path(
@@ -314,9 +306,7 @@ init :: proc(
   }
   self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0 // Default IBL intensity
-
   log.info("Ambient pipeline initialized successfully")
-
   // Initialize lighting pipeline
   lighting_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
     rm.camera_buffer_set_layout, // set = 0 (regular cameras)
@@ -341,7 +331,6 @@ init :: proc(
     nil,
     &self.lighting_pipeline_layout,
   ) or_return
-
   lighting_vert_shader_code := #load("../../shader/lighting/vert.spv")
   lighting_vert_module := gpu.create_shader_module(
     gctx.device,
@@ -354,7 +343,6 @@ init :: proc(
     lighting_frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, lighting_frag_module, nil)
-
   lighting_dynamic_states := [?]vk.DynamicState {
     .VIEWPORT,
     .SCISSOR,
@@ -460,7 +448,6 @@ init :: proc(
     &self.lighting_pipeline,
   ) or_return
   log.info("Lighting pipeline initialized successfully")
-
   // Initialize light volume meshes
   self.sphere_mesh, _ = resources.create_mesh(
     gctx,
@@ -478,7 +465,6 @@ init :: proc(
     geometry.make_fullscreen_triangle(),
   ) or_return
   log.info("Light volume meshes initialized")
-
   return .SUCCESS
 }
 
@@ -589,7 +575,6 @@ begin_pass :: proc(
 ) {
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-
   final_image := resources.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
@@ -666,7 +651,6 @@ render :: proc(
 ) {
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-
   bind_and_draw_mesh :: proc(
     mesh_handle: resources.Handle,
     command_buffer: vk.CommandBuffer,

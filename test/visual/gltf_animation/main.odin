@@ -30,14 +30,12 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if camera != nil {
     mjolnir.camera_look_at(camera, {1.0, 0.5, 1.0}, {0.0, 0.3, 0.0})
   }
-
   nodes, ok := mjolnir.load_gltf(engine, "assets/CesiumMan.glb")
   if !ok {
     log.error("gltf animation: failed to load asset")
     return
   }
   state.root_nodes = nodes
-
   for handle in nodes {
     mjolnir.scale(engine, handle, 0.4)
     node := mjolnir.get_node(engine, handle)
@@ -51,7 +49,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-
   dir_light_handle, dir_light_node, dir_ok := mjolnir.spawn_directional_light(
     engine,
     {1.0, 1.0, 1.0, 1.0},
@@ -61,7 +58,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if dir_ok {
     mjolnir.rotate(dir_light_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
   }
-
   _, _, _ = mjolnir.spawn_point_light(
     engine,
     {0.8, 0.7, 0.6, 0.5},
@@ -72,7 +68,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
 
 update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   state.frame_counter += 1
-
   if state.root_nodes != nil {
     rotation := delta_time * math.PI * 0.05
     for handle in state.root_nodes {

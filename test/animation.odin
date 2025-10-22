@@ -21,13 +21,11 @@ test_sample_valid :: proc(t: ^testing.T) {
 @(test)
 test_sample_step_interpolation :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 30 * time.Second)
-
   frames := []animation.Keyframe(f32) {
     {time = 0.0, value = 0.0},
     {time = 1.0, value = 10.0},
     {time = 2.0, value = 20.0},
   }
-
   testing.expect_value(t, animation.keyframe_sample_step(frames, 0.0), 0.0)
   testing.expect_value(t, animation.keyframe_sample_step(frames, 0.5), 0.0)
   testing.expect_value(t, animation.keyframe_sample_step(frames, 0.99), 0.0)
@@ -41,9 +39,7 @@ test_sample_step_interpolation :: proc(t: ^testing.T) {
 @(test)
 test_sample_step_interpolation_single_frame :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 30 * time.Second)
-
   frames := []animation.Keyframe(f32){{time = 1.0, value = 42.0}}
-
   testing.expect_value(t, animation.keyframe_sample_step(frames, 0.0), 42.0)
   testing.expect_value(t, animation.keyframe_sample_step(frames, 1.0), 42.0)
   testing.expect_value(t, animation.keyframe_sample_step(frames, 2.0), 42.0)
@@ -52,15 +48,12 @@ test_sample_step_interpolation_single_frame :: proc(t: ^testing.T) {
 @(test)
 test_sample_cubic_spline_interpolation :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 30 * time.Second)
-
   frames := []animation.CubicSplineKeyframe(f32) {
     {time = 0.0, in_tangent = 0.0, value = 0.0, out_tangent = 5.0},
     {time = 1.0, in_tangent = 5.0, value = 10.0, out_tangent = 0.0},
   }
-
   testing.expect_value(t, animation.keyframe_sample_cubic(frames, 0.0), 0.0)
   testing.expect_value(t, animation.keyframe_sample_cubic(frames, 1.0), 10.0)
-
   mid := animation.keyframe_sample_cubic(frames, 0.5)
   testing.expect(t, mid > 0.0 && mid < 10.0, "Cubic interpolation should produce smooth curve")
 }
@@ -68,18 +61,14 @@ test_sample_cubic_spline_interpolation :: proc(t: ^testing.T) {
 @(test)
 test_sample_cubic_spline_vector_interpolation :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 30 * time.Second)
-
   frames := []animation.CubicSplineKeyframe([3]f32) {
     {time = 0.0, in_tangent = {0, 0, 0}, value = {0, 0, 0}, out_tangent = {1, 2, 3}},
     {time = 1.0, in_tangent = {1, 2, 3}, value = {10, 20, 30}, out_tangent = {0, 0, 0}},
   }
-
   result_start := animation.keyframe_sample_cubic(frames, 0.0)
   testing.expect_value(t, result_start, [3]f32{0, 0, 0})
-
   result_end := animation.keyframe_sample_cubic(frames, 1.0)
   testing.expect_value(t, result_end, [3]f32{10, 20, 30})
-
   result_mid := animation.keyframe_sample_cubic(frames, 0.5)
   testing.expect(t, result_mid.x > 0 && result_mid.x < 10, "X component should be interpolated")
   testing.expect(t, result_mid.y > 0 && result_mid.y < 20, "Y component should be interpolated")
@@ -89,22 +78,17 @@ test_sample_cubic_spline_vector_interpolation :: proc(t: ^testing.T) {
 @(test)
 test_sample_cubic_spline_quaternion_interpolation :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 30 * time.Second)
-
   q1 := linalg.quaternion_angle_axis_f32(0, {0, 0, 1})
   q2 := linalg.quaternion_angle_axis_f32(math.PI/2, {0, 0, 1})
   tangent: quaternion128 = quaternion(w = 0, x = 0, y = 0, z = 0.5)
-
   frames := []animation.CubicSplineKeyframe(quaternion128) {
     {time = 0.0, in_tangent = tangent, value = q1, out_tangent = tangent},
     {time = 1.0, in_tangent = tangent, value = q2, out_tangent = tangent},
   }
-
   result_start := animation.keyframe_sample_cubic(frames, 0.0)
   testing.expect(t, almost_equal_quaternion(result_start, q1), "Should match first keyframe")
-
   result_end := animation.keyframe_sample_cubic(frames, 1.0)
   testing.expect(t, almost_equal_quaternion(result_end, q2), "Should match second keyframe")
-
   result_mid := animation.keyframe_sample_cubic(frames, 0.5)
   length_sq := result_mid.w*result_mid.w + result_mid.x*result_mid.x + result_mid.y*result_mid.y + result_mid.z*result_mid.z
   testing.expect(t, length_sq > 0.8, "Quaternion should be normalized")
@@ -219,7 +203,6 @@ test_quaternion_sampling :: proc(t: ^testing.T) {
   q2 := linalg.quaternion_angle_axis_f32(math.PI, {0, 0, 1}) // 180 around Z
   q3 := linalg.quaternion_angle_axis_f32(math.PI, {0, 1, 0}) // 180 around Y
   q4 := linalg.quaternion_angle_axis_f32(math.PI, {1, 0, 0}) // 180 around X
-
   frames := []animation.Keyframe(quaternion128) {
     {time = 0.0, value = q1},
     {time = 1.0, value = q2},

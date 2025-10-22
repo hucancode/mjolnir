@@ -13,14 +13,11 @@ import "core:slice"
 test_grid_size_calculation :: proc(t: ^testing.T) {
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{10, 5, 20}
-
     width, height: i32
-
     // Test with cell size 1.0
     width, height = recast.calc_grid_size(bmin, bmax, 1.0)
     testing.expect_value(t, width, 10)
     testing.expect_value(t, height, 20)
-
     // Test with cell size 0.5
     width, height = recast.calc_grid_size(bmin, bmax, 0.5)
     testing.expect_value(t, width, 20)
@@ -30,17 +27,14 @@ test_grid_size_calculation :: proc(t: ^testing.T) {
 @(test)
 test_compact_heightfield_spans :: proc(t: ^testing.T) {
     // Create a simple heightfield with one span
-
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{1, 1, 1}
     hf := recast.create_heightfield(1, 1, bmin, bmax, 1.0, 0.1)
     defer recast.free_heightfield(hf)
     testing.expect(t, hf != nil, "Failed to create heightfield")
-
     // Add a span manually
     ok := recast.add_span(hf, 0, 0, 0, 10, recast.RC_WALKABLE_AREA, 1)
     // testing.expect(t, ok, "Failed to add span")
-
     // Build compact heightfield
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
@@ -96,7 +90,6 @@ test_heightfield_bounds :: proc(t: ^testing.T) {
         // Large area
         {{0, 0, 0}, {100, 10, 100}, 2.0, 50, 50},
     }
-
     for tc in test_cases {
         width := i32((tc.bmax.x - tc.bmin.x) / tc.cs)
         height := i32((tc.bmax.z - tc.bmin.z) / tc.cs)
@@ -138,19 +131,15 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
             testing.expect(t, ok, "Failed to add span")
         }
     }
-
     // Build compact heightfield
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-
     // Build distance field
     ok := recast.build_distance_field(chf)
     testing.expect(t, ok, "Failed to build distance field")
-
     // Validate distance field basic properties
     // Distance field should be built successfully and contain valid values
-
     // Function to get distance at grid position
     get_distance_at :: proc(chf: ^recast.Compact_Heightfield, x, z: i32) -> u16 {
         if x < 0 || x >= chf.width || z < 0 || z >= chf.height {
@@ -159,22 +148,18 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
         cell := &chf.cells[x + z * chf.width]
         span_idx := cell.index
         span_count := cell.count
-
         if span_count > 0 && span_idx < u32(len(chf.spans)) {
             return chf.dist[span_idx]
         }
         return 0
     }
-
     // Check various positions to ensure distance field has reasonable values
     corner_dist := get_distance_at(chf, 0, 0)      // Corner
     edge_dist := get_distance_at(chf, 2, 0)        // North edge
     adjacent_dist := get_distance_at(chf, 1, 2)    // West of center
     center_neighbor := get_distance_at(chf, 1, 1)  // Next to missing center
-
     // Basic validation - distance field should have been computed
     testing.expect(t, chf.max_distance > 0, "Distance field should have max_distance > 0")
-
     // At least some cells should have distance values
     non_zero_distances := 0
     total_spans := 0
@@ -184,7 +169,6 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
         }
         total_spans += 1
     }
-
     testing.expect(t, non_zero_distances > 0, "Some cells should have non-zero distances")
     testing.expect(t, total_spans > 0, "Should have spans to test")
 }
@@ -205,7 +189,6 @@ test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
     ground_level := u16(0)
     ground_height := u16(2) // 1 unit high (2 * cell_height)
     walkable_area := u8(recast.RC_WALKABLE_AREA)
-
     for z in 0..<field_size {
         for x in 0..<field_size {
             ok := recast.add_span(hf, x, z, ground_level, ground_height, walkable_area, 1)
@@ -219,7 +202,6 @@ test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
     obstacle_bottom := u16(4) // Start at 2 units high (gap from ground)
     obstacle_top := u16(20) // 10 units high (20 * cell_height)
     obstacle_area := u8(recast.RC_NULL_AREA) // Non-walkable
-
     for z in obstacle_start..<obstacle_end {
         for x in obstacle_start..<obstacle_end {
             // Add obstacle span with gap from ground
@@ -227,12 +209,10 @@ test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
             testing.expect(t, ok, "Adding obstacle span should succeed")
         }
     }
-
     // Verify the heightfield structure
     span_count := 0
     ground_only_count := 0
     obstacle_count := 0
-
     for z in 0..<field_size {
         for x in 0..<field_size {
             column_index := x + z * field_size
@@ -245,7 +225,6 @@ test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
             // Check if this is an obstacle cell
             is_obstacle := x >= obstacle_start && x < obstacle_end &&
                           z >= obstacle_start && z < obstacle_end
-
             if is_obstacle {
                 // Obstacle cells should have 2 spans: ground + obstacle (with gap)
                 testing.expect(t, span.smin == u32(ground_level),
@@ -254,12 +233,10 @@ test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
                     "First span should end at ground height")
                 testing.expect(t, span.area == u32(walkable_area),
                     "Ground span should be walkable")
-
                 // Check second span (obstacle)
                 obstacle_span := span.next
                 testing.expect(t, obstacle_span != nil,
                     "Obstacle cell should have second span")
-
                 if obstacle_span != nil {
                     testing.expect(t, obstacle_span.smin == u32(obstacle_bottom),
                         "Obstacle span should start at obstacle bottom")
@@ -287,12 +264,10 @@ test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
             }
         }
     }
-
     // Verify counts
     expected_ground_only := int(field_size * field_size - 9) // Total cells minus obstacle cells
     expected_obstacle := 9 // 3x3 obstacle
     expected_total_spans := expected_ground_only + expected_obstacle * 2 // obstacle cells have 2 spans
-
     testing.expect_value(t, ground_only_count, expected_ground_only)
     testing.expect_value(t, obstacle_count, expected_obstacle)
     testing.expect_value(t, span_count, expected_total_spans)
@@ -305,25 +280,21 @@ test_heightfield_elevation_profile :: proc(t: ^testing.T) {
     field_size := i32(10)
     cell_size := f32(1.0)
     cell_height := f32(0.5)
-
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size), 10, f32(field_size)}
     hf := recast.create_heightfield(field_size, field_size, bmin, bmax, cell_size, cell_height)
     defer recast.free_heightfield(hf)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
-
     // Create varying terrain with obstacles
     for z in 0..<field_size {
         for x in 0..<field_size {
             // Base ground level
             ground_min := u16(0)
             ground_max := u16(2) // 1 unit high
-
             // Add ground
             ok := recast.add_span(hf, x, z, ground_min, ground_max,
                 u8(recast.RC_WALKABLE_AREA), 1)
             testing.expect(t, ok, "Adding ground span should succeed")
-
             // Add obstacles at specific locations
             if (x == 2 && z == 2) || (x == 7 && z == 7) {
                 // Tall obstacles
@@ -342,7 +313,6 @@ test_heightfield_elevation_profile :: proc(t: ^testing.T) {
             }
         }
     }
-
     for x in 0..<field_size {
         column_index := x + 5 * field_size
         span := hf.spans[column_index]
@@ -368,18 +338,15 @@ test_heightfield_sharp_elevation_changes :: proc(t: ^testing.T) {
     field_size := i32(20)
     cell_size := f32(0.5)
     cell_height := f32(0.25)
-
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size) * cell_size, 10, f32(field_size) * cell_size}
     hf := recast.create_heightfield(field_size, field_size, bmin, bmax, cell_size, cell_height)
     defer recast.free_heightfield(hf)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
-
     // Create a cliff-like structure
     cliff_x := i32(10)
     low_height := u16(4)  // 1 unit
     high_height := u16(40) // 10 units
-
     for z in 0..<field_size {
         for x in 0..<field_size {
             if x < cliff_x {
@@ -393,7 +360,6 @@ test_heightfield_sharp_elevation_changes :: proc(t: ^testing.T) {
             }
         }
     }
-
     // Verify the sharp transition
     z_test := i32(10)
     for x in cliff_x-2..<cliff_x+2 {

@@ -358,7 +358,6 @@ init :: proc(
     gctx.command_pool,
     self.commands[:],
   ) or_return
-
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
   vert_module := gpu.create_shader_module(
@@ -470,7 +469,6 @@ init :: proc(
     push_constant_ranges := [?]vk.PushConstantRange {
       {stageFlags = {.FRAGMENT}, offset = 0, size = push_constant_size},
     }
-
     layout_sets := [?]vk.DescriptorSetLayout {
       rm.textures_set_layout, // set = 0 (bindless textures)
     }
@@ -608,7 +606,6 @@ begin_pass :: proc(
     // if no postprocess effect, just copy the input to output
     append(&self.effect_stack, nil)
   }
-
   viewport := vk.Viewport {
     width    = f32(extent.width),
     height   = f32(extent.height),
@@ -633,20 +630,16 @@ render :: proc(
 ) {
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-
   for effect, i in self.effect_stack {
     is_first := i == 0
     is_last := i == len(self.effect_stack) - 1
-
     // Simple ping-pong logic:
     // Pass 0: reads from original input (final_image), writes to image[0]
     // Pass 1: reads from image[0], writes to image[1]
     // Pass 2: reads from image[1], writes to image[0]
     // etc.
-
     input_image_index: u32
     dst_image_idx: u32
-
     if is_first {
       input_image_index =
         resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index).index // Use original input
@@ -656,13 +649,11 @@ render :: proc(
       input_image_index = self.images[prev_dst_image_idx].index // Read from previous output
       dst_image_idx = u32(i % 2) // Alternate between image[0] and image[1]
     }
-
     // Ping-pong logic:
     // Pass 0: input -> image[0]     (src: original input, dst: image[0])
     // Pass 1: image[0] -> image[1]  (src: image[0], dst: image[1])
     // Pass 2: image[1] -> image[0]  (src: image[1], dst: image[0])
     // Pass N: image[(N+1)%2] -> swapchain (src: image[(N-1)%2], dst: swapchain)
-
     dst_view := output_view
     if !is_last {
       dst_texture := resources.get(
@@ -724,7 +715,6 @@ render :: proc(
     vk.CmdBeginRendering(command_buffer, &render_info)
     effect_type := get_effect_type(effect)
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[effect_type])
-
     // Bind textures descriptor set
     descriptor_sets := [?]vk.DescriptorSet {
       rm.textures_descriptor_set, // set = 0 (bindless textures)
@@ -928,10 +918,8 @@ begin_record :: proc(
       pInheritanceInfo = &inheritance,
     },
   ) or_return
-
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return command_buffer, .ERROR_UNKNOWN
-
   // Transition final image to shader read optimal
   final_image := resources.get(
     rm.image_2d_buffers,
@@ -940,7 +928,6 @@ begin_record :: proc(
   if final_image != nil {
     gpu.transition_image_to_shader_read(command_buffer, final_image.image)
   }
-
   // Transition swapchain image to color attachment optimal
   gpu.transition_image(
     command_buffer,
@@ -953,7 +940,6 @@ begin_record :: proc(
     {},
     {.COLOR_ATTACHMENT_WRITE},
   )
-
   return command_buffer, .SUCCESS
 }
 

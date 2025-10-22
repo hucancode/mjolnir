@@ -108,21 +108,17 @@ test_region_overflow_handling :: proc(t: ^testing.T) {
 test_navtest_layers :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     fmt.println("\nTesting nav_test.obj layer characteristics...")
-
     // Simulate the nav_test.obj structure with known multi-level areas
     bmin := [3]f32{-30, -5, -50}
     bmax := [3]f32{65, 20, 35}
-
     // Use same grid size as nav_test.obj
     hf := recast.create_heightfield(305, 258, bmin, bmax, 0.3, 0.2)
     defer recast.free_heightfield(hf)
     testing.expect(t, hf != nil, "Failed to create heightfield")
-
     // Create multiple overlapping levels at different heights
     for level in 0..<4 {
         y := f32(level * 4)
         offset := f32(level * 10)
-
         verts := [][3]f32{
             {-20 + offset, y, -40 + offset},
             {50 - offset, y, -40 + offset},
@@ -131,29 +127,23 @@ test_navtest_layers :: proc(t: ^testing.T) {
         }
         tris := []i32{0, 1, 2, 0, 2, 3}
         areas := []u8{recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA}
-
         recast.rasterize_triangles(verts, tris, areas, hf, 4)
     }
-
     chf := recast.create_compact_heightfield(10, 4, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-
     // Count layers per cell
     histogram: [10]int // Count cells with 0-9 layers
     max_layers := 0
-
     for i in 0..<(chf.width * chf.height) {
         layers := int(chf.cells[i].count)
         if layers < 10 do histogram[layers] += 1
         if layers > max_layers do max_layers = layers
     }
-
     // Build regions before layers
     recast.erode_walkable_area(2, chf)
     recast.build_distance_field(chf)
     recast.build_regions(chf, 0, 8, 20)
-
     // Count regions
     max_region := 0
     for i in 0..<len(chf.spans) {

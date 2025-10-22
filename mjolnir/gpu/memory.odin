@@ -43,7 +43,6 @@ malloc_mutable_buffer :: proc(
     buffer.element_size = size_of(T)
   }
   buffer.bytes_count = buffer.element_size * count
-
   create_info := vk.BufferCreateInfo {
     sType       = .BUFFER_CREATE_INFO,
     size        = vk.DeviceSize(buffer.bytes_count),
@@ -51,18 +50,14 @@ malloc_mutable_buffer :: proc(
     sharingMode = .EXCLUSIVE,
   }
   vk.CreateBuffer(gctx.device, &create_info, nil, &buffer.buffer) or_return
-
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
-
   buffer.memory = allocate_vulkan_memory(
     gctx,
     mem_reqs,
     {.HOST_VISIBLE, .HOST_COHERENT},
   ) or_return
-
   vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory, 0) or_return
-
   vk.MapMemory(
     gctx.device,
     buffer.memory,
@@ -71,7 +66,6 @@ malloc_mutable_buffer :: proc(
     {},
     auto_cast &buffer.mapped,
   ) or_return
-
   log.infof("mutable buffer created 0x%x at %v", buffer.buffer, &buffer.mapped)
   return buffer, .SUCCESS
 }
@@ -99,7 +93,6 @@ malloc_immutable_buffer :: proc(
     buffer.element_size = size_of(T)
   }
   buffer.bytes_count = buffer.element_size * count
-
   create_info := vk.BufferCreateInfo {
     sType       = .BUFFER_CREATE_INFO,
     size        = vk.DeviceSize(buffer.bytes_count),
@@ -107,18 +100,14 @@ malloc_immutable_buffer :: proc(
     sharingMode = .EXCLUSIVE,
   }
   vk.CreateBuffer(gctx.device, &create_info, nil, &buffer.buffer) or_return
-
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
-
   buffer.memory = allocate_vulkan_memory(
     gctx,
     mem_reqs,
     {.DEVICE_LOCAL},
   ) or_return
-
   vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory, 0) or_return
-
   log.infof("immutable buffer created 0x%x", buffer.buffer)
   return buffer, .SUCCESS
 }
@@ -198,9 +187,7 @@ immutable_buffer_write_single :: proc(
 ) -> vk.Result {
   staging := malloc_mutable_buffer(gctx, T, 1, {.TRANSFER_SRC}) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-
   mutable_buffer_write_single(&staging, data) or_return
-
   cmd_buffer := begin_single_time_command(gctx) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
@@ -225,9 +212,7 @@ immutable_buffer_write_multi :: proc(
     {.TRANSFER_SRC},
   ) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-
   mutable_buffer_write_multi(&staging, data) or_return
-
   cmd_buffer := begin_single_time_command(gctx) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
@@ -253,7 +238,6 @@ immutable_buffer_read :: proc(
   index: int = 0,
 ) -> vk.Result {
   if len(output) == 0 do return .SUCCESS
-
   staging := malloc_mutable_buffer(
     gctx,
     T,
@@ -261,7 +245,6 @@ immutable_buffer_read :: proc(
     {.TRANSFER_DST},
   ) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-
   cmd_buffer := begin_single_time_command(gctx) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
@@ -271,7 +254,6 @@ immutable_buffer_read :: proc(
   }
   vk.CmdCopyBuffer(cmd_buffer, buffer.buffer, staging.buffer, 1, &region)
   end_single_time_command(gctx, &cmd_buffer) or_return
-
   for i in 0 ..< len(output) {
     output[i] = staging.mapped[i]
   }
@@ -319,12 +301,9 @@ create_immutable_buffer :: proc(
 ) {
   buffer = malloc_immutable_buffer(gctx, T, count, usage) or_return
   if data == nil do return buffer, .SUCCESS
-
   staging := malloc_mutable_buffer(gctx, T, count, {.TRANSFER_SRC}) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-
   mem.copy(staging.mapped, data, staging.bytes_count)
-
   cmd_buffer := begin_single_time_command(gctx) or_return
   region := vk.BufferCopy {
     size = vk.DeviceSize(staging.bytes_count),
@@ -336,7 +315,6 @@ create_immutable_buffer :: proc(
     buffer.buffer,
   )
   end_single_time_command(gctx, &cmd_buffer) or_return
-
   return buffer, .SUCCESS
 }
 malloc_image_buffer :: proc(
@@ -718,7 +696,6 @@ cube_depth_texture_init :: proc(
 ) -> vk.Result {
   spec := image_spec_cube(size, format, usage)
   self.base = image_create(gctx, spec) or_return
-
   // Create 6 face views (one per face for rendering to individual faces)
   for i in 0 ..< 6 {
     view_info := vk.ImageViewCreateInfo {
@@ -747,7 +724,6 @@ cube_depth_texture_init :: proc(
       &self.face_views[i],
     ) or_return
   }
-
   return .SUCCESS
 }
 
@@ -861,7 +837,6 @@ generate_mipmaps :: proc(
   }
   cmd_buffer := begin_single_time_command(gctx) or_return
   defer end_single_time_command(gctx, &cmd_buffer)
-
   // First, transition all mip levels from UNDEFINED to TRANSFER_DST_OPTIMAL
   init_barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -892,7 +867,6 @@ generate_mipmaps :: proc(
     1,
     &init_barrier,
   )
-
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     image = img.image,

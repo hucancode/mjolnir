@@ -37,23 +37,19 @@ VisibilitySystem :: struct {
   late_cull_pipeline:       vk.Pipeline,
   sphere_cull_pipeline:     vk.Pipeline, // For SphericalCamera (radius-based culling)
   depth_reduce_pipeline:    vk.Pipeline,
-
   // Pipeline layouts
   late_cull_layout:         vk.PipelineLayout,
   sphere_cull_layout:       vk.PipelineLayout,
   depth_reduce_layout:      vk.PipelineLayout,
-
   // Depth rendering pipelines
   depth_pipeline:           vk.Pipeline, // Uses geometry_pipeline_layout
   spherical_depth_pipeline: vk.Pipeline, // Uses spherical_camera_pipeline_layout
-
   // System parameters
   max_draws:                u32,
   node_count:               u32,
   depth_width:              u32,
   depth_height:             u32,
   depth_bias:               f32,
-
   // Statistics for debugging
   stats_enabled:            bool,
 }
@@ -121,11 +117,9 @@ visibility_system_get_stats :: proc(
     camera_index = camera_index,
     frame_index  = frame_index,
   }
-
   if camera.late_draw_count[frame_index].mapped != nil {
     stats.late_draw_count = camera.late_draw_count[frame_index].mapped[0]
   }
-
   return stats
 }
 
@@ -153,7 +147,6 @@ visibility_system_dispatch_culling :: proc(
   if system.node_count == 0 {
     return
   }
-
   // === BARRIER: WAIT FOR PREVIOUS FRAME'S PYRAMID ===
   // Late pass N uses pyramid[N-1] for occlusion culling
   prev_frame :=
@@ -163,7 +156,6 @@ visibility_system_dispatch_culling :: proc(
     rm.image_2d_buffers,
     camera.depth_pyramid[prev_frame].texture,
   )
-
   pyramid_barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     srcAccessMask = {.SHADER_WRITE},
@@ -181,7 +173,6 @@ visibility_system_dispatch_culling :: proc(
       layerCount = 1,
     },
   }
-
   vk.CmdPipelineBarrier(
     command_buffer,
     {.COMPUTE_SHADER}, // Previous frame's pyramid build
@@ -194,7 +185,6 @@ visibility_system_dispatch_culling :: proc(
     1,
     &pyramid_barrier,
   )
-
   // === LATE PASS: OCCLUSION CULLING ===
   execute_late_pass(
     system,
@@ -208,7 +198,6 @@ visibility_system_dispatch_culling :: proc(
     rm,
     occlusion_enabled,
   )
-
   // === BARRIER: MAKE DRAW COMMANDS VISIBLE TO DEPTH PASS ===
   late_compute_done := [?]vk.BufferMemoryBarrier {
     {
@@ -255,12 +244,10 @@ visibility_system_dispatch_depth :: proc(
   if system.node_count == 0 {
     return
   }
-
   depth_texture := resources.get(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
-
   // === RENDER DEPTH PASS ===
   render_depth_pass(
     system,
@@ -273,7 +260,6 @@ visibility_system_dispatch_depth :: proc(
     include_flags,
     exclude_flags,
   )
-
   // === BARRIER: TRANSITION DEPTH FOR PYRAMID READ ===
   // Depth write complete, transition to shader read for pyramid building
   depth_to_pyramid := vk.ImageMemoryBarrier {
@@ -320,15 +306,12 @@ visibility_system_dispatch_pyramid :: proc(
   if system.node_count == 0 {
     return
   }
-
   depth_texture := resources.get(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
-
   // === BUILD DEPTH PYRAMID ===
   build_depth_pyramid(system, gctx, command_buffer, camera, frame_index, rm)
-
   // === BARRIER: DEPTH READY FOR GEOMETRY PASS ===
   // Pyramid read complete, depth[N] can now be used by geometry for depth testing
   pyramid_done := vk.ImageMemoryBarrier {
@@ -360,7 +343,6 @@ visibility_system_dispatch_pyramid :: proc(
     1,
     &pyramid_done,
   )
-
   if system.stats_enabled {
     log_culling_stats(system, camera, camera_index, frame_index)
   }
@@ -389,7 +371,6 @@ visibility_system_dispatch :: proc(
     exclude_flags,
     rm,
   )
-
   visibility_system_dispatch_depth(
     system,
     gctx,
@@ -401,7 +382,6 @@ visibility_system_dispatch :: proc(
     exclude_flags,
     rm,
   )
-
   visibility_system_dispatch_pyramid(
     system,
     gctx,
@@ -427,7 +407,6 @@ visibility_system_dispatch_spherical :: proc(
   if system.node_count == 0 {
     return
   }
-
   // STEP 1: Clear draw count and execute sphere culling
   vk.CmdFillBuffer(
     command_buffer,
@@ -436,7 +415,6 @@ visibility_system_dispatch_spherical :: proc(
     vk.DeviceSize(camera.draw_count.bytes_count),
     0,
   )
-
   execute_sphere_pass(
     system,
     gctx,
@@ -447,7 +425,6 @@ visibility_system_dispatch_spherical :: proc(
     exclude_flags,
     rm,
   )
-
   // STEP 2: Barrier - Wait for compute to finish before reading draw commands
   compute_done := [?]vk.BufferMemoryBarrier {
     {
@@ -465,7 +442,6 @@ visibility_system_dispatch_spherical :: proc(
       size = vk.DeviceSize(camera.draw_count.bytes_count),
     },
   }
-
   vk.CmdPipelineBarrier(
     command_buffer,
     {.COMPUTE_SHADER},
@@ -478,7 +454,6 @@ visibility_system_dispatch_spherical :: proc(
     0,
     nil,
   )
-
   // STEP 3: Render depth to cube map
   render_spherical_depth_pass(
     system,
@@ -541,7 +516,6 @@ create_descriptor_layouts :: proc(
       stageFlags = {.COMPUTE},
     }, // Depth pyramid
   }
-
   vk.CreateDescriptorSetLayout(
     gctx.device,
     &vk.DescriptorSetLayoutCreateInfo {
@@ -552,7 +526,6 @@ create_descriptor_layouts :: proc(
     nil,
     &rm.visibility_late_descriptor_layout,
   ) or_return
-
   // Sphere pass descriptor layout (matches sphere_cull.comp shader)
   // NOTE: Binding 4 is intentionally skipped to maintain compatibility
   sphere_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -593,7 +566,6 @@ create_descriptor_layouts :: proc(
       stageFlags = {.COMPUTE},
     }, // Draw commands (binding 6!)
   }
-
   vk.CreateDescriptorSetLayout(
     gctx.device,
     &vk.DescriptorSetLayoutCreateInfo {
@@ -604,7 +576,6 @@ create_descriptor_layouts :: proc(
     nil,
     &rm.visibility_sphere_descriptor_layout,
   ) or_return
-
   // Depth pyramid reduction descriptor layout
   depth_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -620,7 +591,6 @@ create_descriptor_layouts :: proc(
       stageFlags = {.COMPUTE},
     }, // Dest mip
   }
-
   vk.CreateDescriptorSetLayout(
     gctx.device,
     &vk.DescriptorSetLayoutCreateInfo {
@@ -631,7 +601,6 @@ create_descriptor_layouts :: proc(
     nil,
     &rm.visibility_depth_reduce_descriptor_layout,
   ) or_return
-
   return vk.Result.SUCCESS
 }
 
@@ -646,7 +615,6 @@ create_compute_pipelines :: proc(
     stageFlags = {.COMPUTE},
     size       = size_of(VisibilityPushConstants),
   }
-
   vk.CreatePipelineLayout(
     gctx.device,
     &vk.PipelineLayoutCreateInfo {
@@ -659,7 +627,6 @@ create_compute_pipelines :: proc(
     nil,
     &system.late_cull_layout,
   ) or_return
-
   vk.CreatePipelineLayout(
     gctx.device,
     &vk.PipelineLayoutCreateInfo {
@@ -672,12 +639,10 @@ create_compute_pipelines :: proc(
     nil,
     &system.sphere_cull_layout,
   ) or_return
-
   depth_push_range := vk.PushConstantRange {
     stageFlags = {.COMPUTE},
     size       = size_of(DepthReducePushConstants),
   }
-
   vk.CreatePipelineLayout(
     gctx.device,
     &vk.PipelineLayoutCreateInfo {
@@ -690,25 +655,21 @@ create_compute_pipelines :: proc(
     nil,
     &system.depth_reduce_layout,
   ) or_return
-
   late_shader := gpu.create_shader_module(
     gctx.device,
     #load("../shader/occlusion_culling/late_cull.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, late_shader, nil)
-
   sphere_shader := gpu.create_shader_module(
     gctx.device,
     #load("../shader/occlusion_culling/sphere_cull.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, sphere_shader, nil)
-
   depth_shader := gpu.create_shader_module(
     gctx.device,
     #load("../shader/occlusion_culling/depth_reduce.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, depth_shader, nil)
-
   late_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
     stage = {
@@ -719,7 +680,6 @@ create_compute_pipelines :: proc(
     },
     layout = system.late_cull_layout,
   }
-
   vk.CreateComputePipelines(
     gctx.device,
     0,
@@ -728,7 +688,6 @@ create_compute_pipelines :: proc(
     nil,
     &system.late_cull_pipeline,
   ) or_return
-
   sphere_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
     stage = {
@@ -739,7 +698,6 @@ create_compute_pipelines :: proc(
     },
     layout = system.sphere_cull_layout,
   }
-
   vk.CreateComputePipelines(
     gctx.device,
     0,
@@ -748,7 +706,6 @@ create_compute_pipelines :: proc(
     nil,
     &system.sphere_cull_pipeline,
   ) or_return
-
   depth_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
     stage = {
@@ -759,7 +716,6 @@ create_compute_pipelines :: proc(
     },
     layout = system.depth_reduce_layout,
   }
-
   vk.CreateComputePipelines(
     gctx.device,
     0,
@@ -768,7 +724,6 @@ create_compute_pipelines :: proc(
     nil,
     &system.depth_reduce_pipeline,
   ) or_return
-
   return vk.Result.SUCCESS
 }
 
@@ -779,14 +734,12 @@ create_depth_pipeline :: proc(
   rm: ^resources.Manager,
 ) -> vk.Result {
   // Create depth-only rendering pipeline for early/late pass depth rendering
-
   // Load shaders
   vert_shader := gpu.create_shader_module(
     gctx.device,
     #load("../shader/occlusion_culling/vert.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_shader, nil)
-
   // Shader stages
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
@@ -796,12 +749,10 @@ create_depth_pipeline :: proc(
       pName = "main",
     },
   }
-
   // Vertex input: only position from Vertex struct
   vertex_bindings := [?]vk.VertexInputBindingDescription {
     {binding = 0, stride = size_of(geometry.Vertex), inputRate = .VERTEX},
   }
-
   vertex_attributes := [?]vk.VertexInputAttributeDescription {
     {
       location = 0,
@@ -810,7 +761,6 @@ create_depth_pipeline :: proc(
       offset = u32(offset_of(geometry.Vertex, position)),
     },
   }
-
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(vertex_bindings),
@@ -818,21 +768,18 @@ create_depth_pipeline :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-
   // Input assembly
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology               = .TRIANGLE_LIST,
     primitiveRestartEnable = false,
   }
-
   // Viewport and scissor (dynamic state)
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-
   // Rasterization
   // Note: Using CLOCKWISE because viewport Y is flipped (negative height)
   // When Y is flipped, CCW triangles become CW on screen
@@ -846,14 +793,12 @@ create_depth_pipeline :: proc(
     depthBiasEnable         = false,
     lineWidth               = 1.0,
   }
-
   // Multisampling (disabled)
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
     sampleShadingEnable  = false,
   }
-
   // Depth stencil (depth write enabled, test LESS for forward-Z)
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -863,7 +808,6 @@ create_depth_pipeline :: proc(
     depthBoundsTestEnable = false,
     stencilTestEnable     = false,
   }
-
   // No color attachments for depth-only pass
   color_blend := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -871,7 +815,6 @@ create_depth_pipeline :: proc(
     attachmentCount = 0,
     pAttachments    = nil,
   }
-
   // Dynamic states
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
@@ -879,18 +822,15 @@ create_depth_pipeline :: proc(
     dynamicStateCount = len(dynamic_states),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
-
   // Use the shared geometry pipeline layout from resources manager
   if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-
   // Configure dynamic rendering for depth-only pass
   depth_dynamic_rendering := vk.PipelineRenderingCreateInfo {
     sType                 = .PIPELINE_RENDERING_CREATE_INFO,
     depthAttachmentFormat = .D32_SFLOAT,
   }
-
   // Create graphics pipeline using dynamic rendering
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -907,7 +847,6 @@ create_depth_pipeline :: proc(
     pDynamicState       = &dynamic_state,
     layout              = rm.geometry_pipeline_layout,
   }
-
   vk.CreateGraphicsPipelines(
     gctx.device,
     0,
@@ -916,7 +855,6 @@ create_depth_pipeline :: proc(
     nil,
     &system.depth_pipeline,
   ) or_return
-
   return vk.Result.SUCCESS
 }
 
@@ -928,26 +866,22 @@ create_spherical_depth_pipeline :: proc(
 ) -> vk.Result {
   // Create depth rendering pipeline for spherical cameras (point light shadows)
   // Uses geometry shader to render to all 6 cube faces in one pass
-
   // Load shaders
   vert_shader := gpu.create_shader_module(
     gctx.device,
     #load("../shader/shadow_spherical/vert.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_shader, nil)
-
   geom_shader := gpu.create_shader_module(
     gctx.device,
     #load("../shader/shadow_spherical/geom.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, geom_shader, nil)
-
   frag_shader := gpu.create_shader_module(
     gctx.device,
     #load("../shader/shadow_spherical/frag.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_shader, nil)
-
   // Shader stages: vertex + geometry + fragment
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
@@ -969,12 +903,10 @@ create_spherical_depth_pipeline :: proc(
       pName = "main",
     },
   }
-
   // Vertex input: only position from Vertex struct
   vertex_bindings := [?]vk.VertexInputBindingDescription {
     {binding = 0, stride = size_of(geometry.Vertex), inputRate = .VERTEX},
   }
-
   vertex_attributes := [?]vk.VertexInputAttributeDescription {
     {
       location = 0,
@@ -983,7 +915,6 @@ create_spherical_depth_pipeline :: proc(
       offset = u32(offset_of(geometry.Vertex, position)),
     },
   }
-
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(vertex_bindings),
@@ -991,21 +922,18 @@ create_spherical_depth_pipeline :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-
   // Input assembly
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology               = .TRIANGLE_LIST,
     primitiveRestartEnable = false,
   }
-
   // Viewport and scissor (dynamic state)
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-
   // Rasterization
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
@@ -1017,14 +945,12 @@ create_spherical_depth_pipeline :: proc(
     depthBiasEnable         = false,
     lineWidth               = 1.0,
   }
-
   // Multisampling (disabled)
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
     sampleShadingEnable  = false,
   }
-
   // Depth stencil (depth write enabled, test LESS)
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -1034,7 +960,6 @@ create_spherical_depth_pipeline :: proc(
     depthBoundsTestEnable = false,
     stencilTestEnable     = false,
   }
-
   // No color attachments for depth-only pass
   color_blend := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -1042,7 +967,6 @@ create_spherical_depth_pipeline :: proc(
     attachmentCount = 0,
     pAttachments    = nil,
   }
-
   // Dynamic states
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
@@ -1050,19 +974,16 @@ create_spherical_depth_pipeline :: proc(
     dynamicStateCount = len(dynamic_states),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
-
   // Use the shared spherical camera pipeline layout from resources manager
   if rm.spherical_camera_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-
   // Configure dynamic rendering for depth-only cube map rendering
   depth_dynamic_rendering := vk.PipelineRenderingCreateInfo {
     sType                 = .PIPELINE_RENDERING_CREATE_INFO,
     depthAttachmentFormat = .D32_SFLOAT,
     viewMask              = 0, // Not using multiview, geometry shader handles cube faces
   }
-
   // Create graphics pipeline using dynamic rendering
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -1079,7 +1000,6 @@ create_spherical_depth_pipeline :: proc(
     pDynamicState       = &dynamic_state,
     layout              = rm.spherical_camera_pipeline_layout,
   }
-
   vk.CreateGraphicsPipelines(
     gctx.device,
     0,
@@ -1088,7 +1008,6 @@ create_spherical_depth_pipeline :: proc(
     nil,
     &system.spherical_depth_pipeline,
   ) or_return
-
   return vk.Result.SUCCESS
 }
 
@@ -1109,7 +1028,6 @@ render_depth_pass :: proc(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
-
   // === BARRIER: PREPARE DEPTH FOR WRITING ===
   // Transition from READ_ONLY_OPTIMAL (left by previous frame's post-processing)
   // to ATTACHMENT_OPTIMAL (needed for clear and write)
@@ -1142,7 +1060,6 @@ render_depth_pass :: proc(
     1,
     &depth_ready_to_write,
   )
-
   // Begin dynamic rendering for depth rendering
   depth_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -1152,16 +1069,13 @@ render_depth_pass :: proc(
     storeOp = .STORE,
     clearValue = {depthStencil = {depth = 1.0, stencil = 0}},
   }
-
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
     renderArea = {offset = {0, 0}, extent = camera.extent},
     layerCount = 1,
     pDepthAttachment = &depth_attachment,
   }
-
   vk.CmdBeginRendering(command_buffer, &render_info)
-
   // Set viewport and scissor
   // Use negative height to flip Y axis (Vulkan convention: +Y down, we want +Y up)
   viewport := vk.Viewport {
@@ -1172,19 +1086,15 @@ render_depth_pass :: proc(
     minDepth = 0.0,
     maxDepth = 1.0,
   }
-
   scissor := vk.Rect2D {
     offset = {0, 0},
     extent = camera.extent,
   }
-
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-
   // Bind depth pipeline
   if system.depth_pipeline != 0 {
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, system.depth_pipeline)
-
     // Bind all descriptor sets like geometry renderer
     descriptor_sets := [?]vk.DescriptorSet {
       rm.camera_buffer_descriptor_set,
@@ -1206,7 +1116,6 @@ render_depth_pass :: proc(
       0,
       nil,
     )
-
     // Push camera index
     camera_index := camera_index
     vk.CmdPushConstants(
@@ -1217,7 +1126,6 @@ render_depth_pass :: proc(
       size_of(u32),
       &camera_index,
     )
-
     // Bind vertex and index buffers from resources
     vertex_buffers := [?]vk.Buffer{rm.vertex_buffer.buffer}
     offsets := [?]vk.DeviceSize{0}
@@ -1229,7 +1137,6 @@ render_depth_pass :: proc(
       raw_data(offsets[:]),
     )
     vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
-
     vk.CmdDrawIndexedIndirectCount(
       command_buffer,
       camera.late_draw_commands[frame_index].buffer,
@@ -1240,9 +1147,7 @@ render_depth_pass :: proc(
       draw_command_stride(),
     )
   }
-
   vk.CmdEndRendering(command_buffer)
-
   // No barrier here - main dispatch function handles synchronization
 }
 
@@ -1288,9 +1193,7 @@ build_depth_pyramid :: proc(
     mip_height := max(1, camera.depth_pyramid[frame_index].height >> mip)
     dispatch_x := (mip_width + 31) / 32
     dispatch_y := (mip_height + 31) / 32
-
     vk.CmdDispatch(command_buffer, dispatch_x, dispatch_y, 1)
-
     // Only synchronize the dependency chain, don't transition layouts
     if mip < camera.depth_pyramid[frame_index].mip_levels - 1 {
       vk.CmdPipelineBarrier(
@@ -1307,13 +1210,11 @@ build_depth_pyramid :: proc(
       )
     }
   }
-
   // Get pyramid texture from resources system for this frame
   pyramid_texture := resources.get(
     rm.image_2d_buffers,
     camera.depth_pyramid[frame_index].texture,
   )
-
   // Final layout transition for ALL mips at once after generation completes
   final_barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -1332,7 +1233,6 @@ build_depth_pyramid :: proc(
       layerCount = 1,
     },
   }
-
   vk.CmdPipelineBarrier(
     command_buffer,
     {.COMPUTE_SHADER},
@@ -1379,7 +1279,6 @@ execute_late_pass :: proc(
     0,
     nil,
   )
-
   // Push constants with occlusion setting (uses previous frame's pyramid via descriptor set)
   prev_frame :=
     (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) %
@@ -1395,7 +1294,6 @@ execute_late_pass :: proc(
     depth_bias        = system.depth_bias,
     occlusion_enabled = occlusion_enabled ? 1 : 0,
   }
-
   vk.CmdPushConstants(
     command_buffer,
     system.late_cull_layout,
@@ -1404,7 +1302,6 @@ execute_late_pass :: proc(
     size_of(push_constants),
     &push_constants,
   )
-
   // Dispatch compute shader
   dispatch_x := (system.node_count + 63) / 64
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
@@ -1423,7 +1320,6 @@ execute_sphere_pass :: proc(
 ) {
   // Bind sphere culling pipeline and descriptor set
   vk.CmdBindPipeline(command_buffer, .COMPUTE, system.sphere_cull_pipeline)
-
   // Note: SphericalCamera needs a descriptor_set field
   // This will be added in a later step
   vk.CmdBindDescriptorSets(
@@ -1436,7 +1332,6 @@ execute_sphere_pass :: proc(
     0,
     nil,
   )
-
   // Push constants - same structure as late pass
   push_constants := VisibilityPushConstants {
     camera_index      = camera_index,
@@ -1449,7 +1344,6 @@ execute_sphere_pass :: proc(
     depth_bias        = 0, // Unused
     occlusion_enabled = 0, // Disabled for sphere culling
   }
-
   vk.CmdPushConstants(
     command_buffer,
     system.sphere_cull_layout,
@@ -1458,7 +1352,6 @@ execute_sphere_pass :: proc(
     size_of(push_constants),
     &push_constants,
   )
-
   // Dispatch compute shader
   dispatch_x := (system.node_count + 63) / 64
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
@@ -1473,17 +1366,14 @@ log_culling_stats :: proc(
 ) {
   // Read draw counts from mapped memory for this frame
   late_count: u32 = 0
-
   if camera.late_draw_count[frame_index].mapped != nil {
     late_count = camera.late_draw_count[frame_index].mapped[0]
   }
-
   // Calculate culling efficiency
   efficiency: f32 = 0.0
   if system.node_count > 0 {
     efficiency = f32(late_count) / f32(system.node_count) * 100.0
   }
-
   log.infof(
     "[Camera %d Frame %d] Culling Stats: Total Objects=%d | Late Pass=%d | Efficiency=%.1f%%",
     camera_index,
@@ -1509,7 +1399,6 @@ render_spherical_depth_pass :: proc(
     log.error("Failed to get depth cube for spherical camera")
     return
   }
-
   // Transition all cube faces to ATTACHMENT_OPTIMAL for rendering
   cube_ready_to_write := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -1540,7 +1429,6 @@ render_spherical_depth_pass :: proc(
     1,
     &cube_ready_to_write,
   )
-
   // Begin dynamic rendering for all cube faces at once
   // The geometry shader will emit primitives to each face using gl_Layer
   depth_attachment := vk.RenderingAttachmentInfo {
@@ -1551,7 +1439,6 @@ render_spherical_depth_pass :: proc(
     storeOp = .STORE,
     clearValue = {depthStencil = {depth = 1.0, stencil = 0}},
   }
-
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
     renderArea = {
@@ -1561,9 +1448,7 @@ render_spherical_depth_pass :: proc(
     layerCount = 6, // Render to all 6 cube faces
     pDepthAttachment = &depth_attachment,
   }
-
   vk.CmdBeginRendering(command_buffer, &render_info)
-
   // Set viewport and scissor for cube face size
   viewport := vk.Viewport {
     x        = 0,
@@ -1573,15 +1458,12 @@ render_spherical_depth_pass :: proc(
     minDepth = 0.0,
     maxDepth = 1.0,
   }
-
   scissor := vk.Rect2D {
     offset = {0, 0},
     extent = {width = camera.size, height = camera.size},
   }
-
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-
   // Bind spherical depth pipeline
   if system.spherical_depth_pipeline != 0 {
     vk.CmdBindPipeline(
@@ -1589,7 +1471,6 @@ render_spherical_depth_pass :: proc(
       .GRAPHICS,
       system.spherical_depth_pipeline,
     )
-
     // Bind all descriptor sets - NOTE: Using spherical_camera_buffer at set 0
     descriptor_sets := [?]vk.DescriptorSet {
       rm.spherical_camera_buffer_descriptor_set,
@@ -1611,7 +1492,6 @@ render_spherical_depth_pass :: proc(
       0,
       nil,
     )
-
     // Push camera index
     cam_idx := camera_index
     vk.CmdPushConstants(
@@ -1622,7 +1502,6 @@ render_spherical_depth_pass :: proc(
       size_of(u32),
       &cam_idx,
     )
-
     // Bind vertex and index buffers
     vertex_buffers := [?]vk.Buffer{rm.vertex_buffer.buffer}
     offsets := [?]vk.DeviceSize{0}
@@ -1634,7 +1513,6 @@ render_spherical_depth_pass :: proc(
       raw_data(offsets[:]),
     )
     vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
-
     // Draw using indirect commands from culling pass
     vk.CmdDrawIndexedIndirectCount(
       command_buffer,
@@ -1646,9 +1524,7 @@ render_spherical_depth_pass :: proc(
       draw_command_stride(),
     )
   }
-
   vk.CmdEndRendering(command_buffer)
-
   // Transition cube back to SHADER_READ_ONLY for shadow sampling
   cube_ready_to_read := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
