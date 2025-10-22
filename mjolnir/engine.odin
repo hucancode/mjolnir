@@ -757,7 +757,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
   )
-  retained_ui.render(&self.render.retained_ui, command_buffer, self.frame_index)
+  retained_ui.render(&self.render.retained_ui, command_buffer, self.frame_index, &self.rm, &self.gctx)
   retained_ui.end_pass(command_buffer)
   gpu.transition_image_to_present(
     command_buffer,

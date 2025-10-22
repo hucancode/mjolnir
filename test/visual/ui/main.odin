@@ -13,6 +13,8 @@ GameState :: struct {
   button_handle:      retained_ui.WidgetHandle,
   label_handle:       retained_ui.WidgetHandle,
   window_handle:      retained_ui.WidgetHandle,
+  image_handle:       retained_ui.WidgetHandle,
+  texture_handle:     resources.Handle,
   click_count:        int,
   background_visible: bool,
 }
@@ -68,7 +70,7 @@ main :: proc() {
     )
 
     // Create some buttons
-    button1, _ := retained_ui.create_button(
+    state.button_handle, _ = retained_ui.create_button(
       ui,
       "Click Me!",
       100,
@@ -79,7 +81,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    state.button_handle = button1
 
     button2, _ := retained_ui.create_button(
       ui,
@@ -102,21 +103,28 @@ main :: proc() {
       state.window_handle,
     )
 
-    // Create another label with info
-    info_label, _ := retained_ui.create_label(
-      ui,
-      "This is a retained mode UI demo",
-      100,
-      290,
-      state.window_handle,
-    )
-
     // Create an additional label showing the new API
     status_label, _ := retained_ui.create_label(
       ui,
       "Status: Ready",
       100,
       320,
+      state.window_handle,
+    )
+
+    image_data := #load("statue-1275469_1280.jpg")
+    state.texture_handle, _, _ = resources.create_texture_from_data(
+      &engine.gctx,
+      &engine.rm,
+      image_data,
+    )
+    state.image_handle, _ = retained_ui.create_image(
+      ui,
+      state.texture_handle,
+      350,
+      120,
+      300,
+      225,
       state.window_handle,
     )
 
