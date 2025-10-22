@@ -1,14 +1,15 @@
 package main
 
 import "core:log"
+import "core:fmt"
 import "../../../mjolnir"
 import "../../../mjolnir/geometry"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
-import retained_ui "../../../mjolnir/render/retained_ui"
-import mu "vendor:microui"
+import "../../../mjolnir/render/retained_ui"
 
 GameState :: struct {
+  engine:             ^mjolnir.Engine,
   button_handle:      retained_ui.WidgetHandle,
   label_handle:       retained_ui.WidgetHandle,
   window_handle:      retained_ui.WidgetHandle,
@@ -24,28 +25,9 @@ on_button_click :: proc(ctx: rawptr) {
   log.infof("Button clicked! Count: %d", state.click_count)
 
   // Update label text
-  text := "Clicks: "
-  click_str := "0"
-  if state.click_count > 0 {
-    // Simple integer to string (for demonstration)
-    switch state.click_count {
-    case 1:
-      click_str = "1"
-    case 2:
-      click_str = "2"
-    case 3:
-      click_str = "3"
-    case 4:
-      click_str = "4"
-    case 5:
-      click_str = "5"
-    case:
-      click_str = "Many"
-    }
-  }
-
-  // Note: In production, use a proper string builder or format function
-  // retained_ui.set_label_text(&state.ui, state.label_handle, fmt.tprintf("%s%d", text, state.click_count))
+  ui := mjolnir.get_retained_ui(state.engine)
+  label_text := fmt.tprintf("Clicks: %d", state.click_count)
+  retained_ui.set_label_text(ui, state.label_handle, label_text)
 }
 
 on_toggle_click :: proc(ctx: rawptr) {
@@ -68,6 +50,9 @@ main :: proc() {
   // Setup callback - called once after engine initialization
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     log.infof("Setting up retained UI visual test...")
+
+    // Store engine reference for callbacks
+    state.engine = engine
 
     // Get the engine's built-in retained UI manager
     ui := mjolnir.get_retained_ui(engine)
@@ -123,6 +108,15 @@ main :: proc() {
       "This is a retained mode UI demo",
       100,
       290,
+      state.window_handle,
+    )
+
+    // Create an additional label showing the new API
+    status_label, _ := retained_ui.create_label(
+      ui,
+      "Status: Ready",
+      100,
+      320,
       state.window_handle,
     )
 

@@ -2,18 +2,27 @@ package retained_ui
 
 import gpu "../../gpu"
 import resources "../../resources"
-import text "../text"
 import "core:log"
 import "core:math/linalg"
+import "core:os"
+import fs "vendor:fontstash"
 import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: resources.MAX_FRAMES_IN_FLIGHT
 SHADER_UI_VERT :: #load("../../shader/microui/vert.spv")
 SHADER_UI_FRAG :: #load("../../shader/microui/frag.spv")
+SHADER_TEXT_VERT :: #load("../../shader/text/vert.spv")
+SHADER_TEXT_FRAG :: #load("../../shader/text/frag.spv")
 
 UI_MAX_QUAD :: 2000
 UI_MAX_VERTICES :: UI_MAX_QUAD * 4
 UI_MAX_INDICES :: UI_MAX_QUAD * 6
+
+TEXT_MAX_QUADS :: 4096
+TEXT_MAX_VERTICES :: TEXT_MAX_QUADS * 4
+TEXT_MAX_INDICES :: TEXT_MAX_QUADS * 6
+ATLAS_WIDTH :: 1024
+ATLAS_HEIGHT :: 1024
 
 // ============================================================================
 // Core Types
@@ -163,6 +172,12 @@ Vertex2D :: struct {
   color: [4]u8,
 }
 
+TextVertex :: struct {
+  pos:   [2]f32,
+  uv:    [2]f32,
+  color: [4]u8,
+}
+
 DrawList :: struct {
   commands:     [dynamic]DrawCommand,
   vertices:     [UI_MAX_VERTICES]Vertex2D,
@@ -193,10 +208,7 @@ Manager :: struct {
   mouse_clicked:    bool,
   mouse_released:   bool,
 
-  // Text rendering
-  text_renderer:    ^text.Renderer,
-
-  // Rendering resources
+  // UI rectangle rendering resources
   projection_layout:         vk.DescriptorSetLayout,
   projection_descriptor_set: vk.DescriptorSet,
   texture_layout:            vk.DescriptorSetLayout,
@@ -208,6 +220,25 @@ Manager :: struct {
   vertex_buffers:            [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
   index_buffers:             [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
 
+  // Text rendering resources
+  font_ctx:                      fs.FontContext,
+  default_font:                  int,
+  text_projection_layout:        vk.DescriptorSetLayout,
+  text_projection_descriptor:    vk.DescriptorSet,
+  text_texture_layout:           vk.DescriptorSetLayout,
+  text_texture_descriptor:       vk.DescriptorSet,
+  text_pipeline_layout:          vk.PipelineLayout,
+  text_pipeline:                 vk.Pipeline,
+  text_atlas:                    ^gpu.Image,
+  text_proj_buffer:              gpu.MutableBuffer(matrix[4, 4]f32),
+  text_vertex_buffer:            gpu.MutableBuffer(TextVertex),
+  text_index_buffer:             gpu.MutableBuffer(u32),
+  text_vertices:                 [TEXT_MAX_VERTICES]TextVertex,
+  text_indices:                  [TEXT_MAX_INDICES]u32,
+  text_vertex_count:             u32,
+  text_index_count:              u32,
+  atlas_initialized:             bool,
+
   // Screen dimensions
   frame_width:      u32,
   frame_height:     u32,
@@ -218,6 +249,11 @@ Manager :: struct {
 // Initialization
 // ============================================================================
 
+atlas_resize_callback :: proc(data: rawptr, w, h: int) {
+  self := cast(^Manager)data
+  // Mark that atlas needs update (not implemented yet)
+}
+
 init :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
@@ -225,9 +261,7 @@ init :: proc(
   width, height: u32,
   dpi_scale: f32 = 1.0,
   rm: ^resources.Manager,
-  text_renderer: ^text.Renderer,
 ) -> vk.Result {
-  self.text_renderer = text_renderer
   resources.pool_init(&self.widgets, 1000)
   self.root_widgets = make([dynamic]WidgetHandle, 0, 100)
   self.dirty_widgets = make([dynamic]WidgetHandle, 0, 100)
@@ -539,11 +573,282 @@ init :: proc(
     nil,
   )
 
+  // ============================================================================
+  // Initialize text rendering system
+  // ============================================================================
+
+  log.infof("init text rendering system...")
+
+  // Initialize fontstash
+  fs.Init(&self.font_ctx, ATLAS_WIDTH, ATLAS_HEIGHT, .TOPLEFT)
+  self.font_ctx.callbackResize = atlas_resize_callback
+  self.font_ctx.userData = self
+
+  // Load default font
+  font_path := "assets/Excalifont-Regular.ttf"
+  font_data, font_ok := os.read_entire_file(font_path)
+  if !font_ok {
+    log.errorf("Failed to load font: %s", font_path)
+    return .ERROR_INITIALIZATION_FAILED
+  }
+
+  self.default_font = fs.AddFontMem(&self.font_ctx, "default", font_data, true)
+  if self.default_font == fs.INVALID {
+    log.errorf("Failed to add font to fontstash")
+    return .ERROR_INITIALIZATION_FAILED
+  }
+
+  // Pre-rasterize common glyphs
+  log.infof("pre-rasterizing common glyphs...")
+  fs.SetFont(&self.font_ctx, self.default_font)
+  fs.SetColor(&self.font_ctx, {255, 255, 255, 255})
+  test_string := " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+  common_sizes := [?]f32{12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96}
+  for size in common_sizes {
+    fs.SetSize(&self.font_ctx, size)
+    iter := fs.TextIterInit(&self.font_ctx, 0, 0, test_string)
+    quad: fs.Quad
+    for fs.TextIterNext(&self.font_ctx, &iter, &quad) {}
+  }
+  log.infof("pre-rasterization complete")
+
+  // Create text atlas texture
+  log.infof("creating text atlas texture...")
+  _, self.text_atlas = resources.create_texture_from_pixels(
+    gctx,
+    rm,
+    self.font_ctx.textureData,
+    self.font_ctx.width,
+    self.font_ctx.height,
+    .R8_UNORM,
+  ) or_return
+  self.atlas_initialized = true
+
+  // Create text rendering pipeline
+  log.infof("creating text rendering pipeline...")
+  text_vert_shader := gpu.create_shader_module(gctx.device, SHADER_TEXT_VERT) or_return
+  defer vk.DestroyShaderModule(gctx.device, text_vert_shader, nil)
+
+  text_frag_shader := gpu.create_shader_module(gctx.device, SHADER_TEXT_FRAG) or_return
+  defer vk.DestroyShaderModule(gctx.device, text_frag_shader, nil)
+
+  text_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = text_vert_shader,
+      pName = "main",
+    },
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.FRAGMENT},
+      module = text_frag_shader,
+      pName = "main",
+    },
+  }
+
+  text_vertex_binding := vk.VertexInputBindingDescription {
+    binding   = 0,
+    stride    = size_of(TextVertex),
+    inputRate = .VERTEX,
+  }
+
+  text_vertex_attributes := [?]vk.VertexInputAttributeDescription {
+    {binding = 0, location = 0, format = .R32G32_SFLOAT, offset = u32(offset_of(TextVertex, pos))},
+    {binding = 0, location = 1, format = .R32G32_SFLOAT, offset = u32(offset_of(TextVertex, uv))},
+    {binding = 0, location = 2, format = .R8G8B8A8_UNORM, offset = u32(offset_of(TextVertex, color))},
+  }
+
+  text_vertex_input := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = 1,
+    pVertexBindingDescriptions      = &text_vertex_binding,
+    vertexAttributeDescriptionCount = len(text_vertex_attributes),
+    pVertexAttributeDescriptions    = raw_data(text_vertex_attributes[:]),
+  }
+
+  text_color_blend := vk.PipelineColorBlendAttachmentState {
+    blendEnable         = true,
+    srcColorBlendFactor = .SRC_ALPHA,
+    dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
+    colorBlendOp        = .ADD,
+    srcAlphaBlendFactor = .ONE,
+    dstAlphaBlendFactor = .ZERO,
+    alphaBlendOp        = .ADD,
+    colorWriteMask      = {.R, .G, .B, .A},
+  }
+
+  text_color_blending := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    attachmentCount = 1,
+    pAttachments    = &text_color_blend,
+  }
+
+  // Text descriptor sets
+  vk.CreateDescriptorSetLayout(
+    gctx.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = 1,
+      pBindings = &vk.DescriptorSetLayoutBinding {
+        binding = 0,
+        descriptorType = .UNIFORM_BUFFER,
+        descriptorCount = 1,
+        stageFlags = {.VERTEX},
+      },
+    },
+    nil,
+    &self.text_projection_layout,
+  ) or_return
+
+  vk.AllocateDescriptorSets(
+    gctx.device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = gctx.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &self.text_projection_layout,
+    },
+    &self.text_projection_descriptor,
+  ) or_return
+
+  vk.CreateDescriptorSetLayout(
+    gctx.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = 1,
+      pBindings = &vk.DescriptorSetLayoutBinding {
+        binding = 0,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = 1,
+        stageFlags = {.FRAGMENT},
+      },
+    },
+    nil,
+    &self.text_texture_layout,
+  ) or_return
+
+  vk.AllocateDescriptorSets(
+    gctx.device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = gctx.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &self.text_texture_layout,
+    },
+    &self.text_texture_descriptor,
+  ) or_return
+
+  text_set_layouts := [?]vk.DescriptorSetLayout {
+    self.text_projection_layout,
+    self.text_texture_layout,
+  }
+
+  vk.CreatePipelineLayout(
+    gctx.device,
+    &{
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = len(text_set_layouts),
+      pSetLayouts = raw_data(text_set_layouts[:]),
+    },
+    nil,
+    &self.text_pipeline_layout,
+  ) or_return
+
+  text_pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &rendering_info_khr,
+    stageCount          = len(text_shader_stages),
+    pStages             = raw_data(text_shader_stages[:]),
+    pVertexInputState   = &text_vertex_input,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport_state,
+    pRasterizationState = &rasterizer,
+    pMultisampleState   = &multisampling,
+    pColorBlendState    = &text_color_blending,
+    pDynamicState       = &dynamic_state_info,
+    pDepthStencilState  = &depth_stencil_state,
+    layout              = self.text_pipeline_layout,
+  }
+
+  vk.CreateGraphicsPipelines(
+    gctx.device,
+    0,
+    1,
+    &text_pipeline_info,
+    nil,
+    &self.text_pipeline,
+  ) or_return
+
+  // Create text buffers
+  log.infof("creating text buffers...")
+  self.text_vertex_buffer = gpu.create_mutable_buffer(
+    gctx,
+    TextVertex,
+    TEXT_MAX_VERTICES,
+    {.VERTEX_BUFFER},
+  ) or_return
+
+  self.text_index_buffer = gpu.create_mutable_buffer(
+    gctx,
+    u32,
+    TEXT_MAX_INDICES,
+    {.INDEX_BUFFER},
+  ) or_return
+
+  text_ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
+  self.text_proj_buffer = gpu.create_mutable_buffer(
+    gctx,
+    matrix[4, 4]f32,
+    1,
+    {.UNIFORM_BUFFER},
+    raw_data(&text_ortho),
+  ) or_return
+
+  // Update text descriptor sets
+  text_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.text_proj_buffer.buffer,
+    range  = size_of(matrix[4, 4]f32),
+  }
+
+  text_writes := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.text_projection_descriptor,
+      dstBinding = 0,
+      descriptorCount = 1,
+      descriptorType = .UNIFORM_BUFFER,
+      pBufferInfo = &text_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.text_texture_descriptor,
+      dstBinding = 0,
+      descriptorCount = 1,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo = &{
+        sampler = rm.linear_clamp_sampler,
+        imageView = self.text_atlas.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    },
+  }
+
+  vk.UpdateDescriptorSets(
+    gctx.device,
+    len(text_writes),
+    raw_data(text_writes[:]),
+    0,
+    nil,
+  )
+
+  log.infof("text rendering system initialized")
   log.infof("retained UI initialized")
   return .SUCCESS
 }
 
 shutdown :: proc(self: ^Manager, device: vk.Device) {
+  // Cleanup UI resources
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     gpu.mutable_buffer_destroy(device, &self.vertex_buffers[i])
     gpu.mutable_buffer_destroy(device, &self.index_buffers[i])
@@ -561,6 +866,16 @@ shutdown :: proc(self: ^Manager, device: vk.Device) {
   vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(device, self.projection_layout, nil)
   vk.DestroyDescriptorSetLayout(device, self.texture_layout, nil)
+
+  // Cleanup text rendering resources
+  fs.Destroy(&self.font_ctx)
+  gpu.mutable_buffer_destroy(device, &self.text_vertex_buffer)
+  gpu.mutable_buffer_destroy(device, &self.text_index_buffer)
+  gpu.mutable_buffer_destroy(device, &self.text_proj_buffer)
+  vk.DestroyPipeline(device, self.text_pipeline, nil)
+  vk.DestroyPipelineLayout(device, self.text_pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(device, self.text_projection_layout, nil)
+  vk.DestroyDescriptorSetLayout(device, self.text_texture_layout, nil)
 }
 
 widget_deinit :: proc(widget: ^Widget) {
@@ -970,6 +1285,131 @@ end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
 
+// ============================================================================
+// Text Rendering Helper Functions
+// ============================================================================
+
+push_text_quad :: proc(self: ^Manager, quad: fs.Quad, color: [4]u8) {
+  if self.text_vertex_count + 4 > TEXT_MAX_VERTICES ||
+     self.text_index_count + 6 > TEXT_MAX_INDICES {
+    log.warnf("Text vertex buffer full, dropping text")
+    return
+  }
+
+  self.text_vertices[self.text_vertex_count + 0] = {
+    pos   = [2]f32{quad.x0, quad.y0},
+    uv    = [2]f32{quad.s0, quad.t0},
+    color = color,
+  }
+  self.text_vertices[self.text_vertex_count + 1] = {
+    pos   = [2]f32{quad.x1, quad.y0},
+    uv    = [2]f32{quad.s1, quad.t0},
+    color = color,
+  }
+  self.text_vertices[self.text_vertex_count + 2] = {
+    pos   = [2]f32{quad.x1, quad.y1},
+    uv    = [2]f32{quad.s1, quad.t1},
+    color = color,
+  }
+  self.text_vertices[self.text_vertex_count + 3] = {
+    pos   = [2]f32{quad.x0, quad.y1},
+    uv    = [2]f32{quad.s0, quad.t1},
+    color = color,
+  }
+
+  vertex_base := u32(self.text_vertex_count)
+  self.text_indices[self.text_index_count + 0] = vertex_base + 0
+  self.text_indices[self.text_index_count + 1] = vertex_base + 1
+  self.text_indices[self.text_index_count + 2] = vertex_base + 2
+  self.text_indices[self.text_index_count + 3] = vertex_base + 2
+  self.text_indices[self.text_index_count + 4] = vertex_base + 3
+  self.text_indices[self.text_index_count + 5] = vertex_base + 0
+
+  self.text_index_count += 6
+  self.text_vertex_count += 4
+}
+
+draw_text_internal :: proc(
+  self: ^Manager,
+  text: string,
+  x, y: f32,
+  size: f32 = 16,
+  color: [4]u8 = {255, 255, 255, 255},
+) {
+  fs.SetFont(&self.font_ctx, self.default_font)
+  fs.SetSize(&self.font_ctx, size)
+  fs.SetColor(&self.font_ctx, color)
+  fs.SetAH(&self.font_ctx, .LEFT)
+  fs.SetAV(&self.font_ctx, .BASELINE)
+
+  iter := fs.TextIterInit(&self.font_ctx, x, y, text)
+  quad: fs.Quad
+  for fs.TextIterNext(&self.font_ctx, &iter, &quad) {
+    push_text_quad(self, quad, color)
+  }
+}
+
+flush_text :: proc(self: ^Manager, cmd_buf: vk.CommandBuffer) -> vk.Result {
+  if self.text_vertex_count == 0 && self.text_index_count == 0 {
+    return .SUCCESS
+  }
+
+  defer {
+    self.text_vertex_count = 0
+    self.text_index_count = 0
+  }
+
+  gpu.write(&self.text_vertex_buffer, self.text_vertices[:self.text_vertex_count]) or_return
+  gpu.write(&self.text_index_buffer, self.text_indices[:self.text_index_count]) or_return
+
+  vk.CmdBindPipeline(cmd_buf, .GRAPHICS, self.text_pipeline)
+
+  descriptor_sets := [?]vk.DescriptorSet {
+    self.text_projection_descriptor,
+    self.text_texture_descriptor,
+  }
+
+  vk.CmdBindDescriptorSets(
+    cmd_buf,
+    .GRAPHICS,
+    self.text_pipeline_layout,
+    0,
+    2,
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
+  )
+
+  viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(self.frame_height),
+    width    = f32(self.frame_width),
+    height   = -f32(self.frame_height),
+    minDepth = 0,
+    maxDepth = 1,
+  }
+  vk.CmdSetViewport(cmd_buf, 0, 1, &viewport)
+
+  scissor := vk.Rect2D {
+    extent = {self.frame_width, self.frame_height},
+  }
+  vk.CmdSetScissor(cmd_buf, 0, 1, &scissor)
+
+  offsets := [?]vk.DeviceSize{0}
+  vk.CmdBindVertexBuffers(
+    cmd_buf,
+    0,
+    1,
+    &self.text_vertex_buffer.buffer,
+    raw_data(offsets[:]),
+  )
+
+  vk.CmdBindIndexBuffer(cmd_buf, self.text_index_buffer.buffer, 0, .UINT32)
+  vk.CmdDrawIndexed(cmd_buf, self.text_index_count, 1, 0, 0, 0)
+
+  return .SUCCESS
+}
+
 render :: proc(
   self: ^Manager,
   command_buffer: vk.CommandBuffer,
@@ -1052,9 +1492,9 @@ render :: proc(
         draw_list.index_count = 0
       }
 
-      // Draw text using the text renderer
-      text.draw_text(
-        self.text_renderer,
+      // Draw text using internal text renderer
+      draw_text_internal(
+        self,
         cmd.text,
         cmd.rect.x,
         cmd.rect.y + 16,  // Baseline offset
@@ -1074,9 +1514,7 @@ render :: proc(
   }
 
   // Flush text renderer
-  if self.text_renderer != nil {
-    text.flush(self.text_renderer, command_buffer) or_return
-  }
+  flush_text(self, command_buffer) or_return
 
   if draw_list.vertex_count == 0 do return .SUCCESS
 
