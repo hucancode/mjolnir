@@ -138,7 +138,10 @@ should_subdivide :: proc(octree: ^Octree($T), node: ^OctreeNode(T)) -> bool {
     if octant >= 0 do octant_counts[octant] += 1
     else do return true
   }
-  return slice.count_proc(octant_counts[:], proc(x:i32) -> bool { return x > 0 }) > 1
+  return(
+    slice.count_proc(octant_counts[:], proc(x: i32) -> bool {return x > 0}) >
+    1 \
+  )
 }
 
 octree_insert :: proc(octree: ^Octree($T), item: T) -> bool {
@@ -344,14 +347,70 @@ octree_node_query_disc :: proc(
     }
   }
   if node.children[0] != nil {
-    octree_node_query_disc(octree, node.children[0], center, normal, radius, results)
-    octree_node_query_disc(octree, node.children[1], center, normal, radius, results)
-    octree_node_query_disc(octree, node.children[2], center, normal, radius, results)
-    octree_node_query_disc(octree, node.children[3], center, normal, radius, results)
-    octree_node_query_disc(octree, node.children[4], center, normal, radius, results)
-    octree_node_query_disc(octree, node.children[5], center, normal, radius, results)
-    octree_node_query_disc(octree, node.children[6], center, normal, radius, results)
-    octree_node_query_disc(octree, node.children[7], center, normal, radius, results)
+    octree_node_query_disc(
+      octree,
+      node.children[0],
+      center,
+      normal,
+      radius,
+      results,
+    )
+    octree_node_query_disc(
+      octree,
+      node.children[1],
+      center,
+      normal,
+      radius,
+      results,
+    )
+    octree_node_query_disc(
+      octree,
+      node.children[2],
+      center,
+      normal,
+      radius,
+      results,
+    )
+    octree_node_query_disc(
+      octree,
+      node.children[3],
+      center,
+      normal,
+      radius,
+      results,
+    )
+    octree_node_query_disc(
+      octree,
+      node.children[4],
+      center,
+      normal,
+      radius,
+      results,
+    )
+    octree_node_query_disc(
+      octree,
+      node.children[5],
+      center,
+      normal,
+      radius,
+      results,
+    )
+    octree_node_query_disc(
+      octree,
+      node.children[6],
+      center,
+      normal,
+      radius,
+      results,
+    )
+    octree_node_query_disc(
+      octree,
+      node.children[7],
+      center,
+      normal,
+      radius,
+      results,
+    )
   }
 }
 
@@ -463,7 +522,14 @@ octree_raycast :: proc(
   octree: ^Octree($T),
   ray: Ray,
   max_dist: f32 = F32_MAX,
-  intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  intersection_func: proc(
+    ray: Ray,
+    primitive: T,
+    max_t: f32,
+  ) -> (
+    hit: bool,
+    t: f32,
+  ),
 ) -> RayHit(T) {
   if octree.root == nil do return {}
 
@@ -476,10 +542,23 @@ octree_raycast :: proc(
     1.0 / ray.direction.z,
   }
 
-  t_min, t_max := ray_aabb_intersection(ray.origin, inv_dir, octree.root.bounds)
+  t_min, t_max := ray_aabb_intersection(
+    ray.origin,
+    inv_dir,
+    octree.root.bounds,
+  )
   if t_min > max_dist || t_max < 0 do return best_hit
 
-  octree_node_raycast(octree, octree.root, ray, inv_dir, max_f32(t_min, 0), min_f32(t_max, max_dist), &best_hit, intersection_func)
+  octree_node_raycast(
+    octree,
+    octree.root,
+    ray,
+    inv_dir,
+    max_f32(t_min, 0),
+    min_f32(t_max, max_dist),
+    &best_hit,
+    intersection_func,
+  )
 
   return best_hit
 }
@@ -488,7 +567,14 @@ octree_raycast_single :: proc(
   octree: ^Octree($T),
   ray: Ray,
   max_dist: f32 = F32_MAX,
-  intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  intersection_func: proc(
+    ray: Ray,
+    primitive: T,
+    max_t: f32,
+  ) -> (
+    hit: bool,
+    t: f32,
+  ),
 ) -> RayHit(T) {
   if octree.root == nil do return {}
 
@@ -498,17 +584,37 @@ octree_raycast_single :: proc(
     1.0 / ray.direction.z,
   }
 
-  t_min, t_max := ray_aabb_intersection(ray.origin, inv_dir, octree.root.bounds)
+  t_min, t_max := ray_aabb_intersection(
+    ray.origin,
+    inv_dir,
+    octree.root.bounds,
+  )
   if t_min > max_dist || t_max < 0 do return {}
 
-  return octree_node_raycast_single(octree, octree.root, ray, inv_dir, max_f32(t_min, 0), min_f32(t_max, max_dist), max_dist, intersection_func)
+  return octree_node_raycast_single(
+    octree,
+    octree.root,
+    ray,
+    inv_dir,
+    max_f32(t_min, 0),
+    min_f32(t_max, max_dist),
+    max_dist,
+    intersection_func,
+  )
 }
 
 octree_raycast_multi :: proc(
   octree: ^Octree($T),
   ray: Ray,
   max_dist: f32 = F32_MAX,
-  intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  intersection_func: proc(
+    ray: Ray,
+    primitive: T,
+    max_t: f32,
+  ) -> (
+    hit: bool,
+    t: f32,
+  ),
   results: ^[dynamic]RayHit(T),
 ) {
   clear(results)
@@ -520,10 +626,24 @@ octree_raycast_multi :: proc(
     1.0 / ray.direction.z,
   }
 
-  t_min, t_max := ray_aabb_intersection(ray.origin, inv_dir, octree.root.bounds)
+  t_min, t_max := ray_aabb_intersection(
+    ray.origin,
+    inv_dir,
+    octree.root.bounds,
+  )
   if t_min > max_dist || t_max < 0 do return
 
-  octree_node_raycast_multi(octree, octree.root, ray, inv_dir, max_f32(t_min, 0), min_f32(t_max, max_dist), max_dist, intersection_func, results)
+  octree_node_raycast_multi(
+    octree,
+    octree.root,
+    ray,
+    inv_dir,
+    max_f32(t_min, 0),
+    min_f32(t_max, max_dist),
+    max_dist,
+    intersection_func,
+    results,
+  )
 
   // Sort results by distance
   if len(results^) > 1 {
@@ -541,7 +661,14 @@ octree_node_raycast :: proc(
   inv_dir: [3]f32,
   t_min, t_max: f32,
   best_hit: ^RayHit(T),
-  intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  intersection_func: proc(
+    ray: Ray,
+    primitive: T,
+    max_t: f32,
+  ) -> (
+    hit: bool,
+    t: f32,
+  ),
 ) {
   if t_min > best_hit.t do return
 
@@ -618,29 +745,28 @@ octree_node_raycast_single :: proc(
   inv_dir: [3]f32,
   t_min, t_max: f32,
   max_dist: f32,
-  intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  intersection_func: proc(
+    ray: Ray,
+    primitive: T,
+    max_t: f32,
+  ) -> (
+    hit: bool,
+    t: f32,
+  ),
 ) -> RayHit(T) {
   // Check items in current node first
   for item in node.items {
     hit, t := intersection_func(ray, item, max_dist)
     if hit && t <= max_dist {
-      return RayHit(T){
-        primitive = item,
-        t = t,
-        hit = true,
-      }
+      return RayHit(T){primitive = item, t = t, hit = true}
     }
   }
-
   if node.children[0] == nil do return {}
-
-  // Sort children by distance for early termination
   child_intersections: [8]struct {
     idx:   i32,
     t_min: f32,
   }
   valid_count := 0
-
   for i in 0 ..< 8 {
     child_t_min, child_t_max := ray_aabb_intersection(
       ray.origin,
@@ -662,7 +788,6 @@ octree_node_raycast_single :: proc(
     }) -> bool {
     return a.t_min < b.t_min
   })
-
   for i in 0 ..< valid_count {
     child_idx := child_intersections[i].idx
     child_t_min := child_intersections[i].t_min
@@ -674,7 +799,6 @@ octree_node_raycast_single :: proc(
         node.children[child_idx].bounds,
       ),
     )
-
     result := octree_node_raycast_single(
       octree,
       node.children[child_idx],
@@ -702,23 +826,23 @@ octree_node_raycast_multi :: proc(
   inv_dir: [3]f32,
   t_min, t_max: f32,
   max_dist: f32,
-  intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  intersection_func: proc(
+    ray: Ray,
+    primitive: T,
+    max_t: f32,
+  ) -> (
+    hit: bool,
+    t: f32,
+  ),
   results: ^[dynamic]RayHit(T),
 ) {
-  // Check items in current node
   for item in node.items {
     hit, t := intersection_func(ray, item, max_dist)
     if hit && t <= max_dist {
-      append(results, RayHit(T){
-        primitive = item,
-        t = t,
-        hit = true,
-      })
+      append(results, RayHit(T){primitive = item, t = t, hit = true})
     }
   }
-
   if node.children[0] == nil do return
-
   // Check all children
   for i in 0 ..< 8 {
     child_t_min, child_t_max := ray_aabb_intersection(
@@ -750,7 +874,13 @@ octree_query_sphere_primitives :: proc(
 ) {
   clear(results)
   if octree.root == nil do return
-  octree_node_query_sphere_primitives(octree, octree.root, sphere, results, intersection_func)
+  octree_node_query_sphere_primitives(
+    octree,
+    octree.root,
+    sphere,
+    results,
+    intersection_func,
+  )
 }
 
 @(private)
@@ -762,16 +892,20 @@ octree_node_query_sphere_primitives :: proc(
   intersection_func: proc(sphere: Sphere, primitive: T) -> bool,
 ) {
   if !aabb_sphere_intersects(node.bounds, sphere.center, sphere.radius) do return
-
   for item in node.items {
     if intersection_func(sphere, item) {
       append(results, item)
     }
   }
-
   if node.children[0] != nil {
-    for i in 0 ..< 8 {
-      octree_node_query_sphere_primitives(octree, node.children[i], sphere, results, intersection_func)
+    for child in node.children {
+      octree_node_query_sphere_primitives(
+        octree,
+        child,
+        sphere,
+        results,
+        intersection_func,
+      )
     }
   }
 }
@@ -789,33 +923,22 @@ octree_node_remove :: proc(
   bounds: Aabb,
 ) -> bool {
   if !aabb_intersects(node.bounds, bounds) do return false
-  for it, i in node.items {
-    if octree_items_equal(item, it) {
-      unordered_remove(&node.items, i)
-      node.total_items -= 1
-      return true
-    }
+  i, found := slice.linear_search(node.items[:], item)
+  if found {
+    unordered_remove(&node.items, i)
+    node.total_items -= 1
+    return true
   }
-
-  if node.children[0] != nil {
-    for i in 0 ..< 8 {
-      if octree_node_remove(octree, node.children[i], item, bounds) {
-        node.total_items -= 1
-        if should_collapse(node) {
-          octree_collapse(node)
-        }
-        return true
-      }
-    }
+  if node.children[0] == nil do return false
+  for child in node.children {
+    if !octree_node_remove(octree, child, item, bounds) do continue
+    node.total_items -= 1
+    if should_collapse(node) do octree_collapse(node)
+    return true
   }
-
   return false
 }
 
-@(private)
-octree_items_equal :: proc(a: $T, b: T) -> bool {
-  return a == b
-}
 
 @(private)
 should_collapse :: proc(node: ^OctreeNode($T)) -> bool {

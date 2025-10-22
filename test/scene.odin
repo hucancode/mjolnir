@@ -16,7 +16,7 @@ test_node_translate :: proc(t: ^testing.T) {
   using mjolnir
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil)
+  defer world.destroy(&w, nil, nil)
   parent_handle, _, parent_ok := world.spawn_at(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
   _, child, child_ok := world.spawn_child(&w, parent_handle)
@@ -38,7 +38,7 @@ test_node_rotate :: proc(t: ^testing.T) {
   using mjolnir
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil)
+  defer world.destroy(&w, nil, nil)
   _, child, child_ok := world.spawn(&w)
   testing.expectf(t, child_ok, "failed to spawn node")
   world.rotate(child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
@@ -59,7 +59,7 @@ test_node_scale :: proc(t: ^testing.T) {
   using mjolnir
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil)
+  defer world.destroy(&w, nil, nil)
   parent_handle, _, parent_ok := world.spawn_at(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
   _, child, child_ok := world.spawn_child(&w, parent_handle)
@@ -82,7 +82,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   using mjolnir
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil)
+  defer world.destroy(&w, nil, nil)
   _, node, node_ok := world.spawn(&w)
   testing.expectf(t, node_ok, "failed to spawn node")
   world.scale(node, 2)
@@ -106,7 +106,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   using mjolnir
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil)
+  defer world.destroy(&w, nil, nil)
   // Create a 4-node chain
   node1_handle, node1, node1_ok := world.spawn(&w)
   testing.expectf(t, node1_ok, "failed to spawn node1")
@@ -217,7 +217,7 @@ teardown_scene :: proc(
 ) -> time.Benchmark_Error {
   using world
   scene := cast(^World)(raw_data(options.input))
-  destroy(scene, nil)
+  destroy(scene, nil, nil)
   free(scene, allocator)
   return nil
 }
@@ -329,7 +329,7 @@ test_scene_memory_cleanup :: proc(t: ^testing.T) {
   using world
   scene: World
   init(&scene)
-  defer destroy(&scene, nil)
+  defer destroy(&scene, nil, nil)
   for i in 0 ..< 1000 {
     spawn(&scene)
   }
@@ -340,7 +340,7 @@ test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
   using world
   scene: World
   init(&scene)
-  defer destroy(&scene, nil)
+  defer destroy(&scene, nil, nil)
   spawn(
     &scene,
     LightAttachment {

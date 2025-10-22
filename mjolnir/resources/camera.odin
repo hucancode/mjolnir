@@ -597,6 +597,55 @@ camera_viewport_to_world_ray :: proc(
   return ray_origin, ray_dir
 }
 
+// Camera-based raycast - finds closest hit from viewport coordinates
+// mouse_x, mouse_y: Mouse coordinates (origin at top-left, Y increases downward)
+// Returns the closest primitive hit by the ray from the camera through the viewport position
+camera_raycast :: proc(
+  camera: ^Camera,
+  mouse_x, mouse_y: f32,
+  primitives: []$T,
+  intersection_func: proc(ray: geometry.Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  bounds_func: proc(t: T) -> geometry.Aabb,
+  config: geometry.RaycastConfig = geometry.DEFAULT_RAYCAST_CONFIG,
+) -> geometry.RayHit(T) {
+  ray_origin, ray_dir := camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
+  ray := geometry.Ray{origin = ray_origin, direction = ray_dir}
+  return geometry.raycast(primitives, ray, intersection_func, bounds_func, config)
+}
+
+// Camera-based raycast - finds any hit from viewport coordinates (early exit)
+// mouse_x, mouse_y: Mouse coordinates (origin at top-left, Y increases downward)
+// Returns as soon as any hit is found
+camera_raycast_single :: proc(
+  camera: ^Camera,
+  mouse_x, mouse_y: f32,
+  primitives: []$T,
+  intersection_func: proc(ray: geometry.Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  bounds_func: proc(t: T) -> geometry.Aabb,
+  config: geometry.RaycastConfig = geometry.DEFAULT_RAYCAST_CONFIG,
+) -> geometry.RayHit(T) {
+  ray_origin, ray_dir := camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
+  ray := geometry.Ray{origin = ray_origin, direction = ray_dir}
+  return geometry.raycast_single(primitives, ray, intersection_func, bounds_func, config)
+}
+
+// Camera-based raycast - finds all hits from viewport coordinates
+// mouse_x, mouse_y: Mouse coordinates (origin at top-left, Y increases downward)
+// Returns all primitives hit by the ray, sorted by distance
+camera_raycast_multi :: proc(
+  camera: ^Camera,
+  mouse_x, mouse_y: f32,
+  primitives: []$T,
+  intersection_func: proc(ray: geometry.Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  bounds_func: proc(t: T) -> geometry.Aabb,
+  config: geometry.RaycastConfig = geometry.DEFAULT_RAYCAST_CONFIG,
+  results: ^[dynamic]geometry.RayHit(T),
+) {
+  ray_origin, ray_dir := camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
+  ray := geometry.Ray{origin = ray_origin, direction = ray_dir}
+  geometry.raycast_multi(primitives, ray, intersection_func, bounds_func, config, results)
+}
+
 
 // Create depth pyramid for a specific frame
 @(private)

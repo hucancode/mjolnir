@@ -47,7 +47,7 @@ test_world_spawn_and_get_actor :: proc(t: ^testing.T) {
 
 	w: world.World
 	world.init(&w)
-	defer world.destroy(&w, nil)
+	defer world.destroy(&w, nil, nil)
 
 	actor_handle, actor, ok := world.spawn_actor(&w, TestPlayerData2)
 	testing.expect(t, ok)
@@ -73,7 +73,7 @@ test_world_auto_tick_actors :: proc(t: ^testing.T) {
 
 	w: world.World
 	world.init(&w)
-	defer world.destroy(&w, nil)
+	defer world.destroy(&w, nil, nil)
 
 	player_handle, player, _ := world.spawn_actor(&w, TestPlayerData2)
 	player.data = TestPlayerData2{health = 50, speed = 5}
@@ -106,7 +106,7 @@ test_world_lazy_pool_creation :: proc(t: ^testing.T) {
 
 	w: world.World
 	world.init(&w)
-	defer world.destroy(&w, nil)
+	defer world.destroy(&w, nil, nil)
 
 	testing.expect(t, len(w.actor_pools) == 0)
 
@@ -155,7 +155,7 @@ test_custom_game_state :: proc(t: ^testing.T) {
 
 	w: world.World
 	world.init(&w)
-	defer world.destroy(&w, nil)
+	defer world.destroy(&w, nil, nil)
 
 	game := GameState{score = 0, enemies_killed = 0, wave_number = 1}
 

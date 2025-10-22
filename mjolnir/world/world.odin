@@ -133,7 +133,7 @@ update_node_tags :: proc(node: ^Node) {
 destroy_node :: proc(
   self: ^Node,
   rm: ^resources.Manager,
-  gctx: ^gpu.GPUContext = nil,
+  gctx: ^gpu.GPUContext,
 ) {
   delete(self.children)
   if rm == nil {
@@ -267,6 +267,9 @@ _spawn_internal :: proc(
   if rm != nil {
     _upload_node_to_gpu(handle, node, rm)
   }
+
+  // Mark node for octree insertion
+  world.octree_dirty_set[handle] = true
 
   return handle, node, true
 }
@@ -426,12 +429,14 @@ TraverseEntry :: struct {
 }
 
 World :: struct {
-  root:            resources.Handle,
-  nodes:           resources.Pool(Node),
-  traversal_stack: [dynamic]TraverseEntry,
-  visibility:      VisibilitySystem,
-  aoe:             AOEOctree,
-  actor_pools:     map[typeid]ActorPoolEntry,
+  root:                   resources.Handle,
+  nodes:                  resources.Pool(Node),
+  traversal_stack:        [dynamic]TraverseEntry,
+  visibility:             VisibilitySystem,
+  node_octree:            geometry.Octree(NodeEntry),
+  octree_entry_map:       map[resources.Handle]NodeEntry, // Current octree state
+  octree_dirty_set:       map[resources.Handle]bool, // Nodes needing octree update
+  actor_pools:            map[typeid]ActorPoolEntry,
 }
 
 init :: proc(world: ^World) {
@@ -442,16 +447,22 @@ init :: proc(world: ^World) {
   root.parent = world.root
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
   world.actor_pools = make(map[typeid]ActorPoolEntry)
-  aoe_init(
-    &world.aoe,
+  geometry.octree_init(
+    &world.node_octree,
     geometry.Aabb{min = {-1000, -1000, -1000}, max = {1000, 1000, 1000}},
+    max_depth = 6,
+    max_items = 16,
   )
+  world.node_octree.bounds_func = node_entry_to_aabb
+  world.node_octree.point_func = node_entry_to_point
+  world.octree_entry_map = make(map[resources.Handle]NodeEntry)
+  world.octree_dirty_set = make(map[resources.Handle]bool)
 }
 
 destroy :: proc(
   world: ^World,
   rm: ^resources.Manager,
-  gctx: ^gpu.GPUContext = nil,
+  gctx: ^gpu.GPUContext,
 ) {
   for &entry in world.nodes.entries {
     if entry.active {
@@ -464,7 +475,9 @@ destroy :: proc(
     entry.destroy_fn(entry.pool_ptr)
   }
   delete(world.actor_pools)
-  aoe_destroy(&world.aoe)
+  geometry.octree_destroy(&world.node_octree)
+  delete(world.octree_entry_map)
+  delete(world.octree_dirty_set)
 }
 
 init_gpu :: proc(
@@ -493,8 +506,8 @@ begin_frame :: proc(
   game_state: rawptr = nil,
 ) {
   traverse(world, rm)
+  process_octree_updates(world, rm)  // Process only changed nodes - O(k) where k << n
   update_visibility_system(world)
-  aoe_update_from_world(&world.aoe, world)
   world_tick_actors(world, rm, delta_time, game_state)
 }
 
@@ -523,7 +536,7 @@ despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
 cleanup_pending_deletions :: proc(
   world: ^World,
   rm: ^resources.Manager,
-  gctx: ^gpu.GPUContext = nil,
+  gctx: ^gpu.GPUContext,
 ) {
   to_destroy := make([dynamic]resources.Handle, 0)
   defer delete(to_destroy)
@@ -537,6 +550,9 @@ cleanup_pending_deletions :: proc(
     }
   }
   for handle in to_destroy {
+    // Mark for octree removal
+    world.octree_dirty_set[handle] = true
+
     if node, ok := resources.free(&world.nodes, handle); ok {
       destroy_node(node, rm, gctx)
     }
@@ -573,22 +589,12 @@ traverse :: proc(
   )
   for len(world.traversal_stack) > 0 {
     entry := pop(&world.traversal_stack)
-    current_node, found := resources.get(world.nodes, entry.handle)
-    if !found {
-      // log.errorf(
-      //   "traverse_scene: Node with handle %v not found\n",
-      //   entry.handle,
-      // )
-      continue
-    }
+    current_node := resources.get(world.nodes, entry.handle) or_continue
     if current_node.pending_deletion do continue
-    // Update parent_visible from parent chain only
     visibility_changed :=
       current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
     is_dirty := transform_update_local(&current_node.transform)
-
-    // Update tags when visibility changes
     if visibility_changed {
       update_node_tags(current_node)
     }
@@ -598,27 +604,22 @@ traverse :: proc(
     has_bone_socket := false
     apply_bone_socket: {
       if current_node.bone_socket == "" || rm == nil do break apply_bone_socket
-
       parent_node := resources.get(world.nodes, current_node.parent) or_break
       parent_mesh_attachment := parent_node.attachment.(MeshAttachment) or_break
       parent_mesh := resources.get(
         rm.meshes,
         parent_mesh_attachment.handle,
       ) or_break
-
       bone_index := resources.find_bone_by_name(
         parent_mesh,
         current_node.bone_socket,
       ) or_break
       parent_skinning := parent_mesh_attachment.skinning.? or_break
       if parent_skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do break apply_bone_socket
-
       parent_mesh_skinning := parent_mesh.skinning.? or_break
       if bone_index >= u32(len(parent_mesh_skinning.bones)) do break apply_bone_socket
-
       bone_buffer := &rm.bone_buffer
       if bone_buffer.mapped == nil do break apply_bone_socket
-
       bone_matrices_ptr := gpu.mutable_buffer_get(
         bone_buffer,
         parent_skinning.bone_matrix_buffer_offset,
@@ -627,7 +628,6 @@ traverse :: proc(
         bone_matrices_ptr,
         len(parent_mesh_skinning.bones),
       )
-
       // bone_matrices contains skinning matrices (world_transform * inverse_bind)
       // To get the bone's world transform, multiply by the bind matrix
       skinning_matrix := bone_matrices[bone_index]
@@ -638,6 +638,11 @@ traverse :: proc(
     }
 
     if entry.parent_is_dirty || is_dirty || has_bone_socket {
+      // Mark node for octree update if not root
+      if entry.handle != world.root {
+        world.octree_dirty_set[entry.handle] = true
+      }
+
       transform_update_world(
         &current_node.transform,
         entry.parent_transform * bone_socket_transform,
