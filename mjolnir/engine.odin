@@ -14,6 +14,7 @@ import "core:unicode/utf8"
 import "gpu"
 import "render/debug_ui"
 import "render/particles"
+import "render/retained_ui"
 import "render/text"
 import "resources"
 import "vendor:glfw"
@@ -325,6 +326,10 @@ get_main_camera :: proc(self: ^Engine) -> ^resources.Camera {
   return resources.get(self.rm.cameras, self.render.main_camera)
 }
 
+get_retained_ui :: proc(self: ^Engine) -> ^retained_ui.Manager {
+  return &self.render.retained_ui
+}
+
 update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
   if delta_time <= 0 {
     return
@@ -428,6 +433,14 @@ update :: proc(self: ^Engine) -> bool {
   params.forcefield_count = u32(
     min(len(self.rm.forcefields.entries), resources.MAX_FORCE_FIELDS),
   )
+  // Update retained UI input
+  retained_ui.update_input(
+    &self.render.retained_ui,
+    f32(self.input.mouse_pos.x),
+    f32(self.input.mouse_pos.y),
+    self.input.mouse_holding[0],
+  )
+  retained_ui.update(&self.render.retained_ui, self.frame_index)
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
@@ -751,6 +764,15 @@ render :: proc(self: ^Engine) -> vk.Result {
     debug_ui.render(&self.render.ui, command_buffer)
     debug_ui.end_pass(&self.render.ui, command_buffer)
   }
+  // Retained mode UI rendering
+  retained_ui.begin_pass(
+    &self.render.retained_ui,
+    command_buffer,
+    self.swapchain.views[self.swapchain.image_index],
+    self.swapchain.extent,
+  )
+  retained_ui.render(&self.render.retained_ui, command_buffer, self.frame_index)
+  retained_ui.end_pass(command_buffer)
   gpu.transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
