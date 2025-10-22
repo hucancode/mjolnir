@@ -11,6 +11,7 @@ import "render/lighting"
 import navigation_renderer "render/navigation"
 import "render/particles"
 import "render/post_process"
+import "render/retained_ui"
 import "render/text"
 import "render/transparency"
 import "resources"
@@ -26,6 +27,7 @@ Renderer :: struct {
   post_process: post_process.Renderer,
   text:         text.Renderer,
   ui:           debug_ui.Renderer,
+  retained_ui:  retained_ui.Manager,
   main_camera:  resources.Handle, // Main camera for rendering
 }
 
@@ -114,6 +116,16 @@ renderer_init :: proc(
     dpi_scale,
     rm,
   ) or_return
+  retained_ui.init(
+    &self.retained_ui,
+    gctx,
+    swapchain_format,
+    swapchain_extent.width,
+    swapchain_extent.height,
+    dpi_scale,
+    rm,
+    &self.text,
+  ) or_return
   navigation_renderer.init(&self.navigation, gctx, rm) or_return
 
   return .SUCCESS
@@ -125,6 +137,7 @@ renderer_shutdown :: proc(
   command_pool: vk.CommandPool,
   rm: ^resources.Manager,
 ) {
+  retained_ui.shutdown(&self.retained_ui, device)
   debug_ui.shutdown(&self.ui, device)
   text.shutdown(&self.text, device)
   navigation_renderer.shutdown(&self.navigation, device, command_pool)
@@ -166,6 +179,7 @@ resize :: proc(
     extent.height,
     dpi_scale,
   ) or_return
+  // Note: retained_ui doesn't need recreate_images - it just uses projection matrix
   return .SUCCESS
 }
 
