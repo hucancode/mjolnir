@@ -15,7 +15,6 @@ import "gpu"
 import "render/debug_ui"
 import "render/particles"
 import "render/retained_ui"
-import "render/text"
 import "resources"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -39,7 +38,6 @@ g_context: runtime.Context
 
 SetupProc :: #type proc(engine: ^Engine)
 UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
-Render2DProc :: #type proc(engine: ^Engine, ctx: ^mu.Context)
 KeyInputProc :: #type proc(engine: ^Engine, key, action, mods: int)
 MousePressProc :: #type proc(engine: ^Engine, key, action, mods: int)
 MouseDragProc :: #type proc(engine: ^Engine, delta, offset: [2]f64)
@@ -74,7 +72,6 @@ Engine :: struct {
   input:                  InputState,
   setup_proc:             SetupProc,
   update_proc:            UpdateProc,
-  render2d_proc:          Render2DProc,
   key_press_proc:         KeyInputProc,
   mouse_press_proc:       MousePressProc,
   mouse_drag_proc:        MouseDragProc,
@@ -742,18 +739,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   vk.CmdExecuteCommands(command_buffer, len(buffers), raw_data(buffers[:]))
   render_debug_ui(self)
-  if self.render2d_proc != nil {
-    self.render2d_proc(self, &self.render.ui.ctx)
-  }
   mu.end(&self.render.ui.ctx)
-  text.begin_pass(
-    &self.render.text,
-    command_buffer,
-    self.swapchain.views[self.swapchain.image_index],
-    self.swapchain.extent,
-  )
-  text.render(&self.render.text, command_buffer, &self.gctx)
-  text.end_pass(command_buffer)
   if self.debug_ui_enabled {
     debug_ui.begin_pass(
       &self.render.ui,

@@ -12,7 +12,6 @@ import navigation_renderer "render/navigation"
 import "render/particles"
 import "render/post_process"
 import "render/retained_ui"
-import "render/text"
 import "render/transparency"
 import "resources"
 import vk "vendor:vulkan"
@@ -25,7 +24,6 @@ Renderer :: struct {
   particles:    particles.Renderer,
   navigation:   navigation_renderer.Renderer,
   post_process: post_process.Renderer,
-  text:         text.Renderer,
   ui:           debug_ui.Renderer,
   retained_ui:  retained_ui.Manager,
   main_camera:  resources.Handle, // Main camera for rendering
@@ -99,14 +97,6 @@ renderer_init :: proc(
     swapchain_extent.height,
     rm,
   ) or_return
-  text.init(
-    &self.text,
-    gctx,
-    swapchain_format,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    rm,
-  ) or_return
   debug_ui.init(
     &self.ui,
     gctx,
@@ -124,7 +114,6 @@ renderer_init :: proc(
     swapchain_extent.height,
     dpi_scale,
     rm,
-    &self.text,
   ) or_return
   navigation_renderer.init(&self.navigation, gctx, rm) or_return
 
@@ -139,7 +128,6 @@ renderer_shutdown :: proc(
 ) {
   retained_ui.shutdown(&self.retained_ui, device)
   debug_ui.shutdown(&self.ui, device)
-  text.shutdown(&self.text, device)
   navigation_renderer.shutdown(&self.navigation, device, command_pool)
   post_process.shutdown(&self.post_process, device, command_pool, rm)
   particles.shutdown(&self.particles, device, command_pool)
@@ -171,15 +159,6 @@ resize :: proc(
     color_format,
     rm,
   ) or_return
-  text.recreate_images(&self.text, extent.width, extent.height) or_return
-  debug_ui.recreate_images(
-    &self.ui,
-    color_format,
-    extent.width,
-    extent.height,
-    dpi_scale,
-  ) or_return
-  // Note: retained_ui doesn't need recreate_images - it just uses projection matrix
   return .SUCCESS
 }
 

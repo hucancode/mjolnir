@@ -6,7 +6,6 @@ import "core:math/linalg"
 import "core:os"
 import "mjolnir"
 import "mjolnir/geometry"
-import "mjolnir/render/text"
 import "mjolnir/resources"
 import "mjolnir/world"
 import "vendor:glfw"
@@ -41,7 +40,6 @@ main :: proc() {
   engine.setup_proc = setup
   engine.update_proc = update
   engine.key_press_proc = on_key_pressed
-  engine.render2d_proc = render_2d
   engine.post_render_proc = on_post_render
   mjolnir.run(engine, 1280, 720, "Mjolnir")
 }
@@ -702,17 +700,6 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
       world.camera_controller_sync(current_controller, main_camera_for_sync)
     }
   }
-}
-
-render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
-  text.draw_text(
-    &engine.render.text,
-    "Mjolnir",
-    600,
-    60,
-    48,
-    {255, 255, 255, 255},
-  )
 }
 
 on_post_render :: proc(engine: ^mjolnir.Engine) {
