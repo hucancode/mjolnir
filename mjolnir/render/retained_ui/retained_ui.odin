@@ -22,10 +22,6 @@ TEXT_MAX_INDICES :: TEXT_MAX_QUADS * 6
 ATLAS_WIDTH :: 1024
 ATLAS_HEIGHT :: 1024
 
-// ============================================================================
-// Core Types
-// ============================================================================
-
 WidgetType :: enum {
   BUTTON,
   LABEL,
@@ -38,10 +34,6 @@ WidgetType :: enum {
 }
 
 WidgetHandle :: resources.Handle
-
-// ============================================================================
-// Widget Data Structures
-// ============================================================================
 
 ButtonData :: struct {
   text:      string,
@@ -63,16 +55,17 @@ ImageData :: struct {
 }
 
 TextBoxData :: struct {
-  text:          [dynamic]u8,  // mutable text buffer
-  max_length:    u32,
-  placeholder:   string,
-  focused:       bool,
-  hovered:       bool,
-  cursor_pos:    u32,          // cursor position in text
-  selection_start: i32,        // -1 if no selection
+  text:            [dynamic]u8,  // mutable text buffer
+  text_as_string:  string,       // view of text as string for rendering
+  max_length:      u32,
+  placeholder:     string,
+  focused:         bool,
+  hovered:         bool,
+  cursor_pos:      u32,          // cursor position in text
+  selection_start: i32,          // -1 if no selection
   selection_end:   i32,
-  callback:      proc(ctx: rawptr),  // called on text change
-  user_data:     rawptr,
+  callback:        proc(ctx: rawptr),  // called on text change
+  user_data:       rawptr,
 }
 
 ComboBoxData :: struct {
@@ -217,12 +210,11 @@ Manager :: struct {
   mouse_down:       bool,
   mouse_clicked:    bool,
   mouse_released:   bool,
+  focused_widget:   WidgetHandle,  // Currently focused widget for keyboard input
 
   // UI rectangle rendering resources
   projection_layout:         vk.DescriptorSetLayout,
   projection_descriptor_set: vk.DescriptorSet,
-  texture_layout:            vk.DescriptorSetLayout,
-  texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
   atlas:                     ^gpu.Image,
@@ -249,13 +241,9 @@ Manager :: struct {
   dpi_scale:        f32,
 }
 
-// ============================================================================
-// Initialization
-// ============================================================================
-
 atlas_resize_callback :: proc(data: rawptr, w, h: int) {
   self := cast(^Manager)data
-  // Mark that atlas needs update (not implemented yet)
+  // TODO: Mark that atlas needs update (not implemented yet)
 }
 
 init :: proc(
@@ -424,10 +412,6 @@ init :: proc(
     &self.projection_descriptor_set,
   ) or_return
 
-  // Use the bindless texture descriptor set from resources manager
-  self.texture_layout = rm.textures_set_layout
-  self.texture_descriptor_set = rm.textures_descriptor_set
-
   set_layouts := [?]vk.DescriptorSetLayout {
     self.projection_layout,
     rm.textures_set_layout,
@@ -493,7 +477,6 @@ init :: proc(
   ) or_return
   log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
 
-  // Create buffers for each frame in flight
   log.infof("init UI buffers...")
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     self.vertex_buffers[i] = gpu.create_mutable_buffer(
@@ -511,7 +494,6 @@ init :: proc(
     ) or_return
   }
 
-  // Projection matrix
   ortho :=
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
     linalg.matrix4_scale(dpi_scale)
@@ -523,15 +505,11 @@ init :: proc(
     {.UNIFORM_BUFFER},
     raw_data(&ortho),
   ) or_return
-
-  // Update descriptor sets
   buffer_info := vk.DescriptorBufferInfo {
     buffer = self.proj_buffer.buffer,
     range  = size_of(matrix[4, 4]f32),
   }
 
-  // Only need to update the projection buffer descriptor
-  // Texture descriptor set is already set up by resources manager
   write := vk.WriteDescriptorSet {
     sType = .WRITE_DESCRIPTOR_SET,
     dstSet = self.projection_descriptor_set,
@@ -542,13 +520,7 @@ init :: proc(
   }
 
   vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
-
-  // ============================================================================
-  // Initialize text rendering system
-  // ============================================================================
-
   log.infof("init text rendering system...")
-
   // Initialize fontstash
   fs.Init(&self.font_ctx, ATLAS_WIDTH, ATLAS_HEIGHT, .TOPLEFT)
   self.font_ctx.callbackResize = atlas_resize_callback
@@ -647,7 +619,6 @@ shutdown :: proc(self: ^Manager, device: vk.Device) {
   vk.DestroyPipeline(device, self.pipeline, nil)
   vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(device, self.projection_layout, nil)
-  // Don't destroy texture_layout - it's borrowed from resources manager
 
   // Cleanup text rendering resources (text uses same pipeline as UI)
   fs.Destroy(&self.font_ctx)
@@ -965,13 +936,50 @@ build_textbox_commands :: proc(
       )
     }
   } else {
-    // Show actual text - PROBLEM: string(data.text[:]) is temporary!
-    // We cannot store this in draw commands because it references stack memory
-    // For now, skip rendering textbox text content
-    // TODO: Store text as string in TextBoxData instead of [dynamic]u8
+    // Show actual text using stable string view
+    append(
+      &draw_list.commands,
+      DrawCommand {
+        type = .TEXT,
+        widget = handle,
+        rect = {widget.position.x + 8, widget.position.y + 8, widget.size.x - 16, widget.size.y - 16},
+        color = widget.fg_color,
+        text = data.text_as_string,
+      },
+    )
   }
 
-  // TODO: Draw cursor when focused (needs line primitive)
+  // Draw cursor when focused
+  if data.focused {
+    // Calculate cursor position at end of text using fontstash
+    text_width: f32 = 0
+    if len(data.text) > 0 {
+      font_size := widget.size.y - 16
+      fs.SetFont(&self.font_ctx, self.default_font)
+      fs.SetSize(&self.font_ctx, font_size)
+
+      // Measure text width accurately
+      bounds: [4]f32
+      fs.TextBounds(&self.font_ctx, data.text_as_string, 0, 0, &bounds)
+      text_width = bounds[2] - bounds[0]
+    }
+
+    cursor_x := widget.position.x + 8 + text_width
+    cursor_y := widget.position.y + 6
+    cursor_height := widget.size.y - 12
+
+    // Draw vertical line as cursor
+    append(
+      &draw_list.commands,
+      DrawCommand {
+        type = .RECT,
+        widget = handle,
+        rect = {cursor_x, cursor_y, 2, cursor_height},  // 2 pixels wide
+        color = {0, 0, 0, 255},
+        uv = {0, 0, 1, 1},
+      },
+    )
+  }
 }
 
 build_combobox_commands :: proc(
@@ -1195,6 +1203,61 @@ update_input :: proc(self: ^Manager, mouse_x, mouse_y: f32, mouse_down: bool) {
   }
 }
 
+input_text :: proc(self: ^Manager, text: string) {
+  // Only process text input if there's a focused widget
+  if self.focused_widget.index == 0 do return
+
+  widget, found := resources.get(self.widgets, self.focused_widget)
+  if !found || widget.type != .TEXT_BOX do return
+
+  data := &widget.data.(TextBoxData)
+  if !data.focused do return
+
+  // Append text to buffer
+  for ch in text {
+    if len(data.text) >= int(data.max_length) do break
+    append(&data.text, u8(ch))
+  }
+
+  // Update string view
+  data.text_as_string = string(data.text[:])
+
+  // Trigger callback if provided
+  if data.callback != nil {
+    data.callback(data.user_data)
+  }
+
+  mark_dirty(self, self.focused_widget)
+}
+
+input_key :: proc(self: ^Manager, key: int, action: int) {
+  // Only process key input if there's a focused widget
+  if self.focused_widget.index == 0 do return
+
+  widget, found := resources.get(self.widgets, self.focused_widget)
+  if !found || widget.type != .TEXT_BOX do return
+
+  data := &widget.data.(TextBoxData)
+  if !data.focused do return
+
+  // Only handle press and repeat actions
+  if action != 1 && action != 2 do return  // 1 = PRESS, 2 = REPEAT
+
+  // Handle backspace (259 = GLFW_KEY_BACKSPACE)
+  if key == 259 {
+    if len(data.text) > 0 {
+      pop(&data.text)
+      data.text_as_string = string(data.text[:])
+
+      if data.callback != nil {
+        data.callback(data.user_data)
+      }
+
+      mark_dirty(self, self.focused_widget)
+    }
+  }
+}
+
 deselect_radio_group :: proc(self: ^Manager, handle: WidgetHandle, group_id: u32, exclude_handle: WidgetHandle) {
   widget, found := resources.get(self.widgets, handle)
   if !found do return
@@ -1295,7 +1358,22 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
     data.hovered = hovered
 
     if self.mouse_clicked {
+      // Clear previous focus
+      if self.focused_widget.index != 0 && self.focused_widget != handle {
+        if old_focused_widget, ok := resources.get(self.widgets, self.focused_widget); ok {
+          if old_data, is_textbox := &old_focused_widget.data.(TextBoxData); is_textbox {
+            old_data.focused = false
+            mark_dirty(self, self.focused_widget)
+          }
+        }
+      }
+
       data.focused = hovered
+      if hovered {
+        self.focused_widget = handle
+      } else if self.focused_widget == handle {
+        self.focused_widget = {}
+      }
     }
 
     if old_hovered != data.hovered || old_focused != data.focused {
@@ -1489,7 +1567,7 @@ draw_text_internal :: proc(
   }
 }
 
-flush_text :: proc(self: ^Manager, cmd_buf: vk.CommandBuffer) -> vk.Result {
+flush_text :: proc(self: ^Manager, cmd_buf: vk.CommandBuffer, rm: ^resources.Manager) -> vk.Result {
   if self.text_vertex_count == 0 && self.text_index_count == 0 {
     return .SUCCESS
   }
@@ -1507,7 +1585,7 @@ flush_text :: proc(self: ^Manager, cmd_buf: vk.CommandBuffer) -> vk.Result {
 
   descriptor_sets := [?]vk.DescriptorSet {
     self.projection_descriptor_set,
-    self.texture_descriptor_set,
+    rm.textures_descriptor_set,
   }
 
   vk.CmdBindDescriptorSets(
@@ -1556,6 +1634,7 @@ flush_ui_batch :: proc(
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
   draw_list: ^DrawList,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   // Calculate how many NEW vertices/indices to flush since last flush
   new_vertex_count := draw_list.vertex_count - draw_list.cumulative_vertices
@@ -1573,7 +1652,7 @@ flush_ui_batch :: proc(
 
   descriptor_sets := [?]vk.DescriptorSet {
     self.projection_descriptor_set,
-    self.texture_descriptor_set,
+    rm.textures_descriptor_set,
   }
 
   vk.CmdBindDescriptorSets(
@@ -1660,7 +1739,7 @@ render :: proc(
       )
     case .TEXT:
       // Flush current batch before drawing text
-      flush_ui_batch(self, command_buffer, frame_index, draw_list) or_return
+      flush_ui_batch(self, command_buffer, frame_index, draw_list, rm) or_return
 
       // Draw text using internal text renderer
       // Baseline offset: position text relative to top of bounding box
@@ -1689,10 +1768,10 @@ render :: proc(
   }
 
   // Flush any remaining UI quads (images)
-  flush_ui_batch(self, command_buffer, frame_index, draw_list) or_return
+  flush_ui_batch(self, command_buffer, frame_index, draw_list, rm) or_return
 
   // Then flush text renderer on top
-  flush_text(self, command_buffer) or_return
+  flush_text(self, command_buffer, rm) or_return
 
   return .SUCCESS
 }

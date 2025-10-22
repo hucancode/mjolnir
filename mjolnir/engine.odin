@@ -178,6 +178,10 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
+
+      // Pass key events to retained UI first
+      retained_ui.input_key(&engine.render.retained_ui, int(key), int(action))
+
       if engine.key_press_proc != nil {
         engine.key_press_proc(engine, int(key), int(action), int(mods))
       }
@@ -300,7 +304,9 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
       context = g_context
       engine := cast(^Engine)context.user_ptr
       bytes, size := utf8.encode_rune(ch)
-      mu.input_text(&engine.render.ui.ctx, string(bytes[:size]))
+      text_str := string(bytes[:size])
+      mu.input_text(&engine.render.ui.ctx, text_str)
+      retained_ui.input_text(&engine.render.retained_ui, text_str)
     },
   )
 
