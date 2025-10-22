@@ -46,12 +46,10 @@ scene_geometry_collector_init :: proc(collector: ^SceneGeometryCollector) {
   collector.indices = make([dynamic]i32, 0)
   collector.area_types = make([dynamic]u8, 0)
   collector.mesh_count = 0
-
   collector.include_filter = proc(node: ^Node) -> bool {
     _, is_mesh := node.attachment.(MeshAttachment)
     return is_mesh
   }
-
   collector.area_type_mapper = proc(node: ^Node) -> u8 {
     return u8(recast.RC_WALKABLE_AREA) // Default to walkable - to be enhanced later with obstacle detection
   }
@@ -98,7 +96,6 @@ add_mesh_to_collector :: proc(
   area_type: u8,
 ) {
   vertex_offset := i32(len(collector.vertices))
-
   vertex_count := int(mesh.vertex_allocation.count)
   vertices := make([]geometry.Vertex, vertex_count, context.temp_allocator)
   ret := gpu.immutable_buffer_read(
@@ -111,13 +108,11 @@ add_mesh_to_collector :: proc(
     log.error("Failed to read vertex data from StaticBuffer")
     return
   }
-
   for vertex in vertices {
     transformed_pos :=
       (transform * [4]f32{vertex.position.x, vertex.position.y, vertex.position.z, 1.0}).xyz
     append(&collector.vertices, transformed_pos)
   }
-
   index_count := int(mesh.index_allocation.count)
   indices := make([]u32, index_count, context.temp_allocator)
   ret = gpu.immutable_buffer_read(
@@ -130,11 +125,9 @@ add_mesh_to_collector :: proc(
     log.error("Failed to read index data from StaticBuffer")
     return
   }
-
   for index in indices {
     append(&collector.indices, i32(index) + vertex_offset)
   }
-
   triangle_count := index_count / 3
   for i in 0 ..< triangle_count {
     append(&collector.area_types, area_type)
@@ -154,18 +147,15 @@ build_navigation_mesh_from_scene :: proc(
   scene_geometry_collector_init(&collector)
   collector.world, collector.rm, collector.gctx = world, rm, gctx
   defer scene_geometry_collector_destroy(&collector)
-
   traverse(
     collector.world,
     collector.rm,
     &collector,
     scene_geometry_collector_traverse,
   )
-
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     return {}, false
   }
-
   pmesh, dmesh, ok := recast.build_navmesh(
     collector.vertices[:],
     collector.indices[:],
@@ -179,14 +169,12 @@ build_navigation_mesh_from_scene :: proc(
     recast.free_poly_mesh(pmesh)
     recast.free_poly_mesh_detail(dmesh)
   }
-
   nav_mesh_handle: resources.Handle
   nav_mesh: ^resources.NavMesh
   nav_mesh_handle, nav_mesh, ok = resources.alloc(&rm.nav_meshes)
   if !ok {
     return nav_mesh_handle, false
   }
-
   nav_params := detour.Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
     poly_mesh_detail   = dmesh,
@@ -199,12 +187,10 @@ build_navigation_mesh_from_scene :: proc(
     user_id            = 0,
     off_mesh_con_count = 0,
   }
-
   nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
   if recast.status_failed(create_status) {
     return nav_mesh_handle, false
   }
-
   mesh_params := detour.Nav_Mesh_Params {
     orig        = pmesh.bmin,
     tile_width  = pmesh.bmax[0] - pmesh.bmin[0],
@@ -212,12 +198,10 @@ build_navigation_mesh_from_scene :: proc(
     max_tiles   = 1,
     max_polys   = 1024,
   }
-
   init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
   if recast.status_failed(init_status) {
     return nav_mesh_handle, false
   }
-
   _, add_status := detour.nav_mesh_add_tile(
     &nav_mesh.detour_mesh,
     nav_data,
@@ -227,20 +211,16 @@ build_navigation_mesh_from_scene :: proc(
     detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
     return nav_mesh_handle, false
   }
-
   nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
   nav_mesh.cell_size = config.cs
   nav_mesh.tile_size = config.tile_size
   nav_mesh.is_tiled = config.tile_size > 0
-
   for i in 0 ..< 64 {
     nav_mesh.area_costs[i] = 1.0
   }
-
   return nav_mesh_handle, true
 }
 
-// Build navigation mesh with custom geometry filter
 build_navigation_mesh_from_scene_filtered :: proc(
   world: ^World,
   rm: ^resources.Manager,
@@ -252,38 +232,30 @@ build_navigation_mesh_from_scene_filtered :: proc(
   resources.Handle,
   bool,
 ) {
-  // Initialize geometry collector with custom filters
   collector: SceneGeometryCollector
   scene_geometry_collector_init(&collector)
   collector.world, collector.rm, collector.gctx = world, rm, gctx
   defer scene_geometry_collector_destroy(&collector)
-
   collector.include_filter = include_filter
   if area_type_mapper != nil {
     collector.area_type_mapper = area_type_mapper
   }
-
-  // Collect geometry from scene
   traverse(
     collector.world,
     collector.rm,
     &collector,
     scene_geometry_collector_traverse,
   )
-
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     log.error("No geometry found in scene for navigation mesh building")
     return {}, false
   }
-
   log.infof(
     "Collected %d vertices, %d indices from %d meshes for filtered navigation mesh",
     len(collector.vertices),
     len(collector.indices),
     collector.mesh_count,
   )
-
-  // Build navigation mesh using Recast
   pmesh, dmesh, ok := recast.build_navmesh(
     collector.vertices[:],
     collector.indices[:],
@@ -298,8 +270,6 @@ build_navigation_mesh_from_scene_filtered :: proc(
     recast.free_poly_mesh(pmesh)
     recast.free_poly_mesh_detail(dmesh)
   }
-
-  // Create and initialize resources.NavMesh resource (same as basic version)
   nav_mesh_handle: resources.Handle
   nav_mesh: ^resources.NavMesh
   nav_mesh_handle, nav_mesh, ok = resources.alloc(&rm.nav_meshes)
@@ -307,36 +277,24 @@ build_navigation_mesh_from_scene_filtered :: proc(
     log.error("Failed to allocate navigation mesh resource")
     return nav_mesh_handle, false
   }
-
-  // Create navigation mesh data from Recast polygon mesh
   nav_params := detour.Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
     poly_mesh_detail   = dmesh,
-
-    // Agent parameters (convert from cells to world units)
     walkable_height    = f32(config.walkable_height) * config.ch,
     walkable_radius    = f32(config.walkable_radius) * config.cs,
     walkable_climb     = f32(config.walkable_climb) * config.ch,
-
-    // Tile parameters (for single tile mesh)
     tile_x             = 0,
     tile_y             = 0,
     tile_layer         = 0,
     user_id            = 0,
-
-    // Off-mesh connections (none for now)
     off_mesh_con_count = 0,
   }
-
-  // Create navigation mesh data
   nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
   if recast.status_failed(create_status) {
     log.errorf("Failed to create navigation mesh data: %v", create_status)
     return nav_mesh_handle, false
   }
   // Don't delete nav_data - ownership is transferred to nav mesh with DT_TILE_FREE_DATA flag
-
-  // Initialize navigation mesh with parameters
   mesh_params := detour.Nav_Mesh_Params {
     orig        = pmesh.bmin,
     tile_width  = pmesh.bmax[0] - pmesh.bmin[0],
@@ -344,14 +302,11 @@ build_navigation_mesh_from_scene_filtered :: proc(
     max_tiles   = 1,
     max_polys   = 1024,
   }
-
   init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
   if recast.status_failed(init_status) {
     log.errorf("Failed to initialize navigation mesh: %v", init_status)
     return nav_mesh_handle, false
   }
-
-  // Add the tile to the navigation mesh with DT_TILE_FREE_DATA flag
   _, add_status := detour.nav_mesh_add_tile(
     &nav_mesh.detour_mesh,
     nav_data,
@@ -362,16 +317,13 @@ build_navigation_mesh_from_scene_filtered :: proc(
     detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
     return nav_mesh_handle, false
   }
-
   nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
   nav_mesh.cell_size = config.cs
   nav_mesh.tile_size = config.tile_size
   nav_mesh.is_tiled = config.tile_size > 0
-
   for i in 0 ..< 64 {
     nav_mesh.area_costs[i] = 1.0
   }
-
   log.infof(
     "Successfully built filtered navigation mesh with handle %v",
     nav_mesh_handle,
@@ -394,18 +346,15 @@ build_navigation_mesh_from_world :: proc(
   scene_geometry_collector_init(&collector)
   collector.world, collector.rm, collector.gctx = world, rm, gctx
   defer scene_geometry_collector_destroy(&collector)
-
   // Custom filter to include all mesh nodes
   collector.include_filter = proc(node: ^Node) -> bool {
     _, is_mesh := node.attachment.(MeshAttachment)
     return is_mesh
   }
-
   // Area type mapper - mark everything as walkable and let Recast filter obstacles
   collector.area_type_mapper = proc(node: ^Node) -> u8 {
     return u8(recast.RC_WALKABLE_AREA)
   }
-
   // Collect geometry from scene
   traverse(
     collector.world,
@@ -413,19 +362,16 @@ build_navigation_mesh_from_world :: proc(
     &collector,
     scene_geometry_collector_traverse,
   )
-
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     log.error("No geometry found in world for navigation mesh building")
     return {}, false
   }
-
   log.infof(
     "Collected %d vertices, %d indices from %d meshes for world navigation mesh",
     len(collector.vertices),
     len(collector.indices),
     collector.mesh_count,
   )
-
   // Debug: Print first few vertices and bounds
   if len(collector.vertices) > 0 {
     log.infof(
@@ -442,7 +388,6 @@ build_navigation_mesh_from_world :: proc(
         collector.vertices[1].z,
       )
     }
-
     // Calculate bounds
     min_pos := collector.vertices[0]
     max_pos := collector.vertices[0]
@@ -464,7 +409,6 @@ build_navigation_mesh_from_world :: proc(
       max_pos.z,
     )
   }
-
   // Debug: Print area types
   walkable_count := 0
   obstacle_count := 0
@@ -480,7 +424,6 @@ build_navigation_mesh_from_world :: proc(
     walkable_count,
     obstacle_count,
   )
-
   // Debug: Print configuration
   log.infof(
     "Recast Config: cs=%.3f, ch=%.3f, walkable_radius=%d, min_region=%d",
@@ -489,7 +432,6 @@ build_navigation_mesh_from_world :: proc(
     config.walkable_radius,
     config.min_region_area,
   )
-
   // Build navigation mesh using Recast
   pmesh, dmesh, ok := recast.build_navmesh(
     collector.vertices[:],
@@ -505,7 +447,6 @@ build_navigation_mesh_from_world :: proc(
     recast.free_poly_mesh(pmesh)
     recast.free_poly_mesh_detail(dmesh)
   }
-
   // Create and initialize resources.NavMesh resource
   nav_mesh_handle: resources.Handle
   nav_mesh: ^resources.NavMesh
@@ -514,34 +455,28 @@ build_navigation_mesh_from_world :: proc(
     log.error("Failed to allocate navigation mesh resource")
     return nav_mesh_handle, false
   }
-
   // Create navigation mesh data from Recast polygon mesh
   nav_params := detour.Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
     poly_mesh_detail   = dmesh,
-
     // Agent parameters (convert from cells to world units)
     walkable_height    = f32(config.walkable_height) * config.ch,
     walkable_radius    = f32(config.walkable_radius) * config.cs,
     walkable_climb     = f32(config.walkable_climb) * config.ch,
-
     // Tile parameters (for single tile mesh)
     tile_x             = 0,
     tile_y             = 0,
     tile_layer         = 0,
     user_id            = 0,
-
     // Off-mesh connections (none for now)
     off_mesh_con_count = 0,
   }
-
   // Create navigation mesh data
   nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
   if recast.status_failed(create_status) {
     log.errorf("Failed to create navigation mesh data: %v", create_status)
     return nav_mesh_handle, false
   }
-
   // Initialize navigation mesh with parameters
   mesh_params := detour.Nav_Mesh_Params {
     orig        = pmesh.bmin,
@@ -550,13 +485,11 @@ build_navigation_mesh_from_world :: proc(
     max_tiles   = 1,
     max_polys   = 1024,
   }
-
   init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
   if recast.status_failed(init_status) {
     log.errorf("Failed to initialize navigation mesh: %v", init_status)
     return nav_mesh_handle, false
   }
-
   // Add the tile to the navigation mesh
   _, add_status := detour.nav_mesh_add_tile(
     &nav_mesh.detour_mesh,
@@ -568,16 +501,13 @@ build_navigation_mesh_from_world :: proc(
     detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
     return nav_mesh_handle, false
   }
-
   nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
   nav_mesh.cell_size = config.cs
   nav_mesh.tile_size = config.tile_size
   nav_mesh.is_tiled = config.tile_size > 0
-
   for i in 0 ..< 64 {
     nav_mesh.area_costs[i] = 1.0
   }
-
   log.infof(
     "Successfully built world navigation mesh with handle %v",
     nav_mesh_handle,
@@ -663,7 +593,6 @@ nav_find_path :: proc(
     )
     return nil, false
   }
-
   status2: recast.Status
   end_ref: recast.Poly_Ref
   end_pos: [3]f32
@@ -680,8 +609,6 @@ nav_find_path :: proc(
     )
     return nil, false
   }
-
-  // Find path between polygons
   poly_path := make([]recast.Poly_Ref, max_path_length, context.temp_allocator)
   path_status, path_count := detour.find_path(
     &nav_context.nav_mesh_query,
@@ -693,7 +620,6 @@ nav_find_path :: proc(
     poly_path[:],
     max_path_length,
   )
-
   if recast.status_failed(path_status) || path_count == 0 {
     log.errorf(
       "Failed to find path from %v to %v: %v",
@@ -703,8 +629,6 @@ nav_find_path :: proc(
     )
     return nil, false
   }
-
-  // Convert polygon path to straight path (string pulling)
   straight_path := make(
     []detour.Straight_Path_Point,
     max_path_length,
@@ -722,18 +646,14 @@ nav_find_path :: proc(
     max_path_length,
     u32(detour.Straight_Path_Options.All_Crossings),
   )
-
   if recast.status_failed(straight_status) || straight_path_count == 0 {
     log.errorf("Failed to create straight path: %v", straight_status)
     return nil, false
   }
-
-  // Convert straight path points to result
   result_path := make([][3]f32, straight_path_count)
   for i in 0 ..< straight_path_count {
     result_path[i] = straight_path[i].pos
   }
-
   log.infof(
     "Found path with %d waypoints from %v to %v",
     straight_path_count,
@@ -753,9 +673,7 @@ nav_is_position_walkable :: proc(
 ) -> bool {
   nav_context := resources.get(rm.nav_contexts, context_handle)
   if nav_context == nil do return false
-
   half_extents := [3]f32{1.0, 2.0, 1.0}
-
   status, poly_ref, nearest_pos := detour.find_nearest_poly(
     &nav_context.nav_mesh_query,
     position,
@@ -779,18 +697,15 @@ nav_find_nearest_point :: proc(
 ) {
   nav_context := resources.get(rm.nav_contexts, context_handle)
   if nav_context == nil do return {}, false
-
   status, poly_ref, result_pos := detour.find_nearest_poly(
     &nav_context.nav_mesh_query,
     position,
     search_extents,
     &nav_context.query_filter,
   )
-
   if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
     return result_pos, true
   }
-
   return {}, false
 }
 
@@ -836,11 +751,8 @@ nav_agent_set_target :: proc(
   if node == nil {
     return false
   }
-
   agent := &node.attachment.(NavMeshAgentAttachment)
-
   agent.target_position = target
-
   // Find path if pathfinding is enabled
   if agent.pathfinding_enabled {
     // Use provided context or default
@@ -848,7 +760,6 @@ nav_agent_set_target :: proc(
     if nav_context_handle == {} {
       nav_context_handle = rm.navigation_system.default_context_handle
     }
-
     current_pos := node.transform.position
     path, success := nav_find_path(
       world,
@@ -866,7 +777,6 @@ nav_agent_set_target :: proc(
       log.warn("Failed to find path for navigation agent")
     }
   }
-
   return true
 }
 
@@ -881,7 +791,6 @@ build_and_visualize_navigation_mesh :: proc(
   nav_mesh_handle: resources.Handle,
   success: bool,
 ) {
-
   // Build navigation mesh from world geometry
   mesh_handle, build_ok := build_navigation_mesh_from_world(
     world,
@@ -894,17 +803,14 @@ build_and_visualize_navigation_mesh :: proc(
     return {}, false
   }
   nav_mesh_handle = mesh_handle
-
   nav_mesh := resources.get(rm.nav_meshes, nav_mesh_handle)
   if nav_mesh == nil do return nav_mesh_handle, false
-
   // Build visualization from Detour mesh
   tile := detour.get_tile_at(&nav_mesh.detour_mesh, 0, 0, 0)
   if tile == nil || tile.header == nil {
     log.error("Failed to get navigation mesh tile for visualization")
     return nav_mesh_handle, false
   }
-
   // Create visualization vertices and indices
   Vertex :: struct {
     position: [3]f32,
@@ -914,7 +820,6 @@ build_and_visualize_navigation_mesh :: proc(
   indices := make([dynamic]u32, 0, int(tile.header.poly_count) * 3)
   defer delete(navmesh_vertices)
   defer delete(indices)
-
   // Convert Detour vertices to renderer format
   for i in 0 ..< tile.header.vert_count {
     pos := tile.verts[i]
@@ -923,13 +828,11 @@ build_and_visualize_navigation_mesh :: proc(
       Vertex{position = pos, color = {0.0, 0.8, 0.2, 0.6}},
     )
   }
-
   // Convert Detour polygons to triangles
   for i in 0 ..< tile.header.poly_count {
     poly := &tile.polys[i]
     vert_count := int(poly.vert_count)
     if vert_count < 3 do continue
-
     // Generate random color for each polygon
     poly_seed := u32(i * 17 + 23)
     hue := f32((poly_seed * 137) % 360)
@@ -939,14 +842,12 @@ build_and_visualize_navigation_mesh :: proc(
       0.5 + 0.5 * math.sin((hue + 240) * math.PI / 180.0),
       0.6,
     }
-
     // Apply color to vertices
     for j in 0 ..< vert_count {
       if int(poly.verts[j]) < len(navmesh_vertices) {
         navmesh_vertices[poly.verts[j]].color = poly_color
       }
     }
-
     // Create triangles from polygon (fan triangulation)
     for j in 1 ..< vert_count - 1 {
       append(
@@ -957,10 +858,8 @@ build_and_visualize_navigation_mesh :: proc(
       )
     }
   }
-
   // Convert vertices to renderer format using transmute since they have identical layout
   renderer_vertices := transmute([]navmesh_renderer.Vertex)navmesh_vertices[:]
-
   load_ok := navmesh_renderer.load_navmesh_data(
     renderer,
     renderer_vertices,
@@ -970,14 +869,11 @@ build_and_visualize_navigation_mesh :: proc(
     log.error("Failed to load navigation mesh data into renderer")
     return nav_mesh_handle, false
   }
-
   // Configure renderer
   renderer.enabled = true
-
   log.infof(
     "Navigation mesh visualization created with %d triangles",
     renderer.index_count / 3,
   )
-
   return nav_mesh_handle, true
 }

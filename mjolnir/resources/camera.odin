@@ -64,7 +64,6 @@ Camera :: struct {
     PerspectiveProjection,
     OrthographicProjection,
   },
-
   // GPU data for bindless buffer
   data:                         CameraData,
   // Render target data
@@ -129,7 +128,6 @@ camera_init :: proc(
     far          = far_plane,
   }
   camera.position = camera_position
-
   forward := linalg.normalize(camera_target - camera_position)
   safe_up := [3]f32{0, 1, 0}
   if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
@@ -152,17 +150,14 @@ camera_init :: proc(
     -forward.z,
   }
   camera.rotation = linalg.quaternion_from_matrix3(rotation_matrix)
-
   camera.extent = {width, height}
   camera.enabled_passes = enabled_passes
-
   needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
   needs_final :=
     .LIGHTING in enabled_passes ||
     .TRANSPARENCY in enabled_passes ||
     .PARTICLES in enabled_passes ||
     .POST_PROCESS in enabled_passes
-
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     if needs_final {
       camera.attachments[.FINAL_IMAGE][frame], _, _ = create_texture(
@@ -225,7 +220,6 @@ camera_init :: proc(
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
   }
-
   // Allocate per-pass command buffers for this camera
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
@@ -254,8 +248,6 @@ camera_init :: proc(
       raw_data(camera.transparency_commands[:]),
     ) or_return
   }
-
-  // Step 1: Create buffers and pyramids for all frames FIRST
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     camera.late_draw_count[frame] = gpu.create_mutable_buffer(
       gctx,
@@ -263,7 +255,6 @@ camera_init :: proc(
       1,
       {.STORAGE_BUFFER, .TRANSFER_DST},
     ) or_return
-
     camera.late_draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,
       vk.DrawIndexedIndirectCommand,
@@ -271,9 +262,6 @@ camera_init :: proc(
       {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
   }
-
-  // Create ALL depth pyramids before allocating descriptors
-  // (descriptors need to reference pyramids from other frames)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     create_camera_depth_pyramid(
       gctx,
@@ -284,8 +272,6 @@ camera_init :: proc(
       u32(frame),
     ) or_return
   }
-
-  // Step 2: Allocate and update descriptors after ALL pyramids are created
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     camera_allocate_visibility_descriptors(
       gctx,
@@ -296,18 +282,15 @@ camera_init :: proc(
       &manager.visibility_depth_reduce_descriptor_layout,
     ) or_return
   }
-
   return .SUCCESS
 }
 
-// Destroy camera and release all resources including textures
 camera_destroy :: proc(
   camera: ^Camera,
   device: vk.Device,
   command_pool: vk.CommandPool,
   manager: ^Manager,
 ) {
-  // Free all camera-owned textures from manager pools
   for attachment_type in AttachmentType {
     for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
       handle := camera.attachments[attachment_type][frame]
@@ -316,37 +299,27 @@ camera_destroy :: proc(
       }
     }
   }
-
-  // Free per-pass command buffers
-  if camera.geometry_commands[0] != nil {
-    vk.FreeCommandBuffers(
-      device,
-      command_pool,
-      MAX_FRAMES_IN_FLIGHT,
-      raw_data(camera.geometry_commands[:]),
-    )
-    camera.geometry_commands = {}
-  }
-  if camera.lighting_commands[0] != nil {
-    vk.FreeCommandBuffers(
-      device,
-      command_pool,
-      MAX_FRAMES_IN_FLIGHT,
-      raw_data(camera.lighting_commands[:]),
-    )
-    camera.lighting_commands = {}
-  }
-  if camera.transparency_commands[0] != nil {
-    vk.FreeCommandBuffers(
-      device,
-      command_pool,
-      MAX_FRAMES_IN_FLIGHT,
-      raw_data(camera.transparency_commands[:]),
-    )
-    camera.transparency_commands = {}
-  }
-
-  // Clean up per-frame visibility resources
+  vk.FreeCommandBuffers(
+    device,
+    command_pool,
+    MAX_FRAMES_IN_FLIGHT,
+    raw_data(camera.geometry_commands[:]),
+  )
+  camera.geometry_commands = {}
+  vk.FreeCommandBuffers(
+    device,
+    command_pool,
+    MAX_FRAMES_IN_FLIGHT,
+    raw_data(camera.lighting_commands[:]),
+  )
+  camera.lighting_commands = {}
+  vk.FreeCommandBuffers(
+    device,
+    command_pool,
+    MAX_FRAMES_IN_FLIGHT,
+    raw_data(camera.transparency_commands[:]),
+  )
+  camera.transparency_commands = {}
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     // Clean up depth pyramid views and samplers
     for mip in 0 ..< camera.depth_pyramid[frame].mip_levels {
@@ -354,11 +327,9 @@ camera_destroy :: proc(
     }
     vk.DestroyImageView(device, camera.depth_pyramid[frame].full_view, nil)
     vk.DestroySampler(device, camera.depth_pyramid[frame].sampler, nil)
-
     // Clean up draw buffers
     gpu.mutable_buffer_destroy(device, &camera.late_draw_count[frame])
     gpu.mutable_buffer_destroy(device, &camera.late_draw_commands[frame])
-
     // Free depth pyramid texture
     if pyramid_item, freed := free(
       &manager.image_2d_buffers,
@@ -467,7 +438,6 @@ camera_look_at :: proc(
 ) {
   camera.position = from
   forward := linalg.normalize(to - from)
-
   safe_up := world_up
   if math.abs(linalg.dot(forward, world_up)) > 0.999 {
     safe_up = {0, 0, 1}
@@ -475,7 +445,6 @@ camera_look_at :: proc(
       safe_up = {1, 0, 0}
     }
   }
-
   right := linalg.normalize(linalg.cross(forward, safe_up))
   recalc_up := linalg.cross(right, forward)
   rotation_matrix := linalg.Matrix3f32 {
@@ -491,7 +460,6 @@ camera_look_at :: proc(
   }
   camera.rotation = linalg.quaternion_from_matrix3(rotation_matrix)
 }
-
 
 camera_update_aspect_ratio :: proc(camera: ^Camera, new_aspect_ratio: f32) {
   switch &proj in camera.projection {
@@ -549,9 +517,7 @@ camera_resize :: proc(
   depth_format: vk.Format,
 ) -> vk.Result {
   if camera.extent.width == width && camera.extent.height == height do return .SUCCESS
-
   vk.DeviceWaitIdle(gctx.device) or_return
-
   // Clear descriptor set references (will be reallocated after resource recreation)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     camera.late_descriptor_set[frame] = 0
@@ -559,13 +525,20 @@ camera_resize :: proc(
       camera.depth_reduce_descriptor_sets[frame][mip] = 0
     }
   }
-
   // Destroy depth pyramids (views, samplers, textures)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     for mip in 0 ..< camera.depth_pyramid[frame].mip_levels {
-      vk.DestroyImageView(gctx.device, camera.depth_pyramid[frame].views[mip], nil)
+      vk.DestroyImageView(
+        gctx.device,
+        camera.depth_pyramid[frame].views[mip],
+        nil,
+      )
     }
-    vk.DestroyImageView(gctx.device, camera.depth_pyramid[frame].full_view, nil)
+    vk.DestroyImageView(
+      gctx.device,
+      camera.depth_pyramid[frame].full_view,
+      nil,
+    )
     vk.DestroySampler(gctx.device, camera.depth_pyramid[frame].sampler, nil)
 
     if pyramid_item, freed := free(
@@ -576,7 +549,6 @@ camera_resize :: proc(
     }
     camera.depth_pyramid[frame] = {}
   }
-
   // Destroy attachment textures
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     for attachment_type in AttachmentType {
@@ -589,22 +561,18 @@ camera_resize :: proc(
       camera.attachments[attachment_type][frame] = {}
     }
   }
-
   // Update dimensions and aspect ratio
   camera.extent = {width, height}
   if perspective, ok := &camera.projection.(PerspectiveProjection); ok {
     perspective.aspect_ratio = f32(width) / f32(height)
   }
-
-  // Determine which attachments to recreate based on enabled passes
-  needs_gbuffer := .GEOMETRY in camera.enabled_passes || .LIGHTING in camera.enabled_passes
+  needs_gbuffer :=
+    .GEOMETRY in camera.enabled_passes || .LIGHTING in camera.enabled_passes
   needs_final :=
     .LIGHTING in camera.enabled_passes ||
     .TRANSPARENCY in camera.enabled_passes ||
     .PARTICLES in camera.enabled_passes ||
     .POST_PROCESS in camera.enabled_passes
-
-  // Recreate render target attachments at new dimensions
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     if needs_final {
       camera.attachments[.FINAL_IMAGE][frame], _, _ = create_texture(
@@ -667,7 +635,6 @@ camera_resize :: proc(
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
   }
-
   // Recreate depth pyramids for all frames before allocating descriptors
   // (late culling uses prev frame's pyramid, so all must exist first)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -680,8 +647,6 @@ camera_resize :: proc(
       u32(frame),
     ) or_return
   }
-
-  // Allocate fresh descriptor sets for new resources
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     camera_allocate_visibility_descriptors(
       gctx,
@@ -692,7 +657,6 @@ camera_resize :: proc(
       &manager.visibility_depth_reduce_descriptor_layout,
     ) or_return
   }
-
   log.infof("Camera resized to %dx%d", width, height)
   return .SUCCESS
 }
@@ -716,27 +680,22 @@ camera_viewport_to_world_ray :: proc(
   // Convert screen coordinates to normalized device coordinates (NDC)
   ndc_x := (2.0 * mouse_x) / f32(camera.extent.width) - 1.0
   ndc_y := 1.0 - (2.0 * mouse_y) / f32(camera.extent.height)
-
   // Get view and projection matrices
   view_matrix := camera_calculate_view_matrix(camera)
   proj_matrix := camera_calculate_projection_matrix(camera)
   inv_proj := linalg.matrix4_inverse(proj_matrix)
   inv_view := linalg.matrix4_inverse(view_matrix)
-
   // Ray in clip space
   ray_clip := [4]f32{ndc_x, ndc_y, -1.0, 1.0}
-
   // Ray in view space
   ray_eye := inv_proj * ray_clip
   ray_eye = [4]f32{ray_eye.x, ray_eye.y, -1.0, 0.0}
-
   // Ray in world space
   ray_world_4 := inv_view * ray_eye
   ray_dir = linalg.normalize(
     [3]f32{ray_world_4.x, ray_world_4.y, ray_world_4.z},
   )
   ray_origin = camera.position
-
   return ray_origin, ray_dir
 }
 
@@ -747,13 +706,29 @@ camera_raycast :: proc(
   camera: ^Camera,
   mouse_x, mouse_y: f32,
   primitives: []$T,
-  intersection_func: proc(ray: geometry.Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  intersection_func: proc(
+    ray: geometry.Ray,
+    primitive: T,
+    max_t: f32,
+  ) -> (
+    hit: bool,
+    t: f32,
+  ),
   bounds_func: proc(t: T) -> geometry.Aabb,
   config: geometry.RaycastConfig = geometry.DEFAULT_RAYCAST_CONFIG,
 ) -> geometry.RayHit(T) {
   ray_origin, ray_dir := camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
-  ray := geometry.Ray{origin = ray_origin, direction = ray_dir}
-  return geometry.raycast(primitives, ray, intersection_func, bounds_func, config)
+  ray := geometry.Ray {
+    origin    = ray_origin,
+    direction = ray_dir,
+  }
+  return geometry.raycast(
+    primitives,
+    ray,
+    intersection_func,
+    bounds_func,
+    config,
+  )
 }
 
 // Camera-based raycast - finds any hit from viewport coordinates (early exit)
@@ -763,13 +738,29 @@ camera_raycast_single :: proc(
   camera: ^Camera,
   mouse_x, mouse_y: f32,
   primitives: []$T,
-  intersection_func: proc(ray: geometry.Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  intersection_func: proc(
+    ray: geometry.Ray,
+    primitive: T,
+    max_t: f32,
+  ) -> (
+    hit: bool,
+    t: f32,
+  ),
   bounds_func: proc(t: T) -> geometry.Aabb,
   config: geometry.RaycastConfig = geometry.DEFAULT_RAYCAST_CONFIG,
 ) -> geometry.RayHit(T) {
   ray_origin, ray_dir := camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
-  ray := geometry.Ray{origin = ray_origin, direction = ray_dir}
-  return geometry.raycast_single(primitives, ray, intersection_func, bounds_func, config)
+  ray := geometry.Ray {
+    origin    = ray_origin,
+    direction = ray_dir,
+  }
+  return geometry.raycast_single(
+    primitives,
+    ray,
+    intersection_func,
+    bounds_func,
+    config,
+  )
 }
 
 // Camera-based raycast - finds all hits from viewport coordinates
@@ -779,16 +770,32 @@ camera_raycast_multi :: proc(
   camera: ^Camera,
   mouse_x, mouse_y: f32,
   primitives: []$T,
-  intersection_func: proc(ray: geometry.Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  intersection_func: proc(
+    ray: geometry.Ray,
+    primitive: T,
+    max_t: f32,
+  ) -> (
+    hit: bool,
+    t: f32,
+  ),
   bounds_func: proc(t: T) -> geometry.Aabb,
   config: geometry.RaycastConfig = geometry.DEFAULT_RAYCAST_CONFIG,
   results: ^[dynamic]geometry.RayHit(T),
 ) {
   ray_origin, ray_dir := camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
-  ray := geometry.Ray{origin = ray_origin, direction = ray_dir}
-  geometry.raycast_multi(primitives, ray, intersection_func, bounds_func, config, results)
+  ray := geometry.Ray {
+    origin    = ray_origin,
+    direction = ray_dir,
+  }
+  geometry.raycast_multi(
+    primitives,
+    ray,
+    intersection_func,
+    bounds_func,
+    config,
+    results,
+  )
 }
-
 
 // Create depth pyramid for a specific frame
 @(private)
@@ -808,15 +815,12 @@ create_camera_depth_pyramid :: proc(
     depth_handle.index,
     frame_index,
   )
-
   // Depth pyramid dimensions: mip 0 is HALF the resolution of source depth texture
   pyramid_width := max(1, width / 2)
   pyramid_height := max(1, height / 2)
-
   // Calculate mip levels for depth pyramid based on pyramid base size
   mip_levels :=
     u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
-
   // Create depth pyramid texture with mip levels using new Image API
   pyramid_handle, pyramid_texture, pyramid_ok := alloc(
     &manager.image_2d_buffers,
@@ -825,7 +829,6 @@ create_camera_depth_pyramid :: proc(
     log.error("Failed to allocate handle for depth pyramid texture")
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
-
   spec := gpu.image_spec_2d(
     pyramid_width,
     pyramid_height,
@@ -835,7 +838,6 @@ create_camera_depth_pyramid :: proc(
   )
   spec.mip_levels = mip_levels
   pyramid_texture^ = gpu.image_create(gctx, spec) or_return
-
   // Register the auto-created view in bindless texture array
   set_texture_2d_descriptor(
     gctx,
@@ -843,19 +845,16 @@ create_camera_depth_pyramid :: proc(
     pyramid_handle.index,
     pyramid_texture.view,
   )
-
   camera.depth_pyramid[frame_index].texture = pyramid_handle
   camera.depth_pyramid[frame_index].mip_levels = mip_levels
   camera.depth_pyramid[frame_index].width = pyramid_width
   camera.depth_pyramid[frame_index].height = pyramid_height
-
   log.debugf(
     "Created depth pyramid texture at bindless index %d with %d mip levels for frame %d",
     pyramid_handle.index,
     mip_levels,
     frame_index,
   )
-
   // Create per-mip views for depth reduction shader (write to individual mips)
   for mip in 0 ..< mip_levels {
     view_info := vk.ImageViewCreateInfo {
@@ -871,7 +870,6 @@ create_camera_depth_pyramid :: proc(
         layerCount = 1,
       },
     }
-
     vk.CreateImageView(
       gctx.device,
       &view_info,
@@ -879,7 +877,6 @@ create_camera_depth_pyramid :: proc(
       &camera.depth_pyramid[frame_index].views[mip],
     ) or_return
   }
-
   // Create full pyramid view for culling shader (sample from all mips)
   full_view_info := vk.ImageViewCreateInfo {
     sType = .IMAGE_VIEW_CREATE_INFO,
@@ -894,14 +891,12 @@ create_camera_depth_pyramid :: proc(
       layerCount     = 1,
     },
   }
-
   vk.CreateImageView(
     gctx.device,
     &full_view_info,
     nil,
     &camera.depth_pyramid[frame_index].full_view,
   ) or_return
-
   // Create sampler for depth pyramid with MAX reduction for forward-Z
   reduction_mode := vk.SamplerReductionModeCreateInfo {
     sType         = .SAMPLER_REDUCTION_MODE_CREATE_INFO,
@@ -920,14 +915,12 @@ create_camera_depth_pyramid :: proc(
     borderColor  = .FLOAT_OPAQUE_WHITE,
     pNext        = &reduction_mode,
   }
-
   vk.CreateSampler(
     gctx.device,
     &sampler_info,
     nil,
     &camera.depth_pyramid[frame_index].sampler,
   ) or_return
-
   return .SUCCESS
 }
 
@@ -952,7 +945,6 @@ camera_allocate_visibility_descriptors :: proc(
     },
     &camera.late_descriptor_set[frame_index],
   ) or_return
-
   // Allocate descriptor sets for depth pyramid reduction (one per mip level)
   for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
     vk.AllocateDescriptorSets(
@@ -978,7 +970,6 @@ camera_allocate_visibility_descriptors :: proc(
       u32(mip),
     )
   }
-
   return .SUCCESS
 }
 
@@ -993,7 +984,6 @@ camera_update_late_descriptor_set :: proc(
   // For late culling pass, we bind the PREVIOUS frame's pyramid
   // Frame 0 uses frame MAX_FRAMES_IN_FLIGHT-1, frame 1 uses frame 0, etc.
   prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
-
   node_info := vk.DescriptorBufferInfo {
     buffer = manager.node_data_buffer.buffer,
     range  = vk.DeviceSize(manager.node_data_buffer.bytes_count),
@@ -1024,7 +1014,6 @@ camera_update_late_descriptor_set :: proc(
     imageView   = camera.depth_pyramid[prev_frame].full_view,
     imageLayout = .SHADER_READ_ONLY_OPTIMAL,
   }
-
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
@@ -1083,7 +1072,6 @@ camera_update_late_descriptor_set :: proc(
       pImageInfo = &pyramid_info,
     },
   }
-
   vk.UpdateDescriptorSets(
     gctx.device,
     len(writes),
@@ -1109,7 +1097,6 @@ camera_update_depth_reduce_descriptor_set :: proc(
   // Mip 0 reads from depth texture, other mips read from previous mip level
   source_view :=
     mip == 0 ? curr_depth_texture.view : camera.depth_pyramid[frame_index].views[mip - 1]
-
   // Use DEPTH_STENCIL_READ_ONLY_OPTIMAL for depth texture (mip 0), SHADER_READ_ONLY_OPTIMAL for pyramid mips
   source_layout :=
     mip == 0 ? vk.ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL : vk.ImageLayout.SHADER_READ_ONLY_OPTIMAL
@@ -1122,7 +1109,6 @@ camera_update_depth_reduce_descriptor_set :: proc(
     imageView   = camera.depth_pyramid[frame_index].views[mip],
     imageLayout = .GENERAL,
   }
-
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
@@ -1141,7 +1127,6 @@ camera_update_depth_reduce_descriptor_set :: proc(
       pImageInfo = &dest_info,
     },
   }
-
   vk.UpdateDescriptorSets(
     gctx.device,
     len(writes),

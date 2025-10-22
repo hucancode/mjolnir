@@ -47,11 +47,8 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Setup function called!")
-
-  // Enable visibility statistics logging
   set_visibility_stats(engine, false)
   set_debug_ui_enabled(engine, true)
-
   plain_material_handle, plain_material_ok := create_material(engine)
   cube_geom := make_cube()
   cube_mesh_handle, cube_mesh_ok := create_mesh(engine, cube_geom)
@@ -113,7 +110,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   when true {
-    // Create ground plane
     brick_wall_mat_handle = {}
     brick_wall_mat_ok := false
     brick_albedo_handle, brick_albedo_ok := create_texture(
@@ -132,7 +128,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       make_quad(),
     )
     log.info("spawning ground and walls")
-    // Ground node
     size: f32 = 15.0
     if brick_wall_mat_ok && ground_mesh_ok {
       _, ground_node, ground_ok := spawn(
@@ -143,7 +138,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         },
       )
       if ground_ok do scale(ground_node, size)
-      // Left wall
       _, left_wall, left_ok := spawn(
         engine,
         world.MeshAttachment {
@@ -156,7 +150,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         rotate(left_wall, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
         scale(left_wall, size)
       }
-      // Right wall
       _, right_wall, right_ok := spawn(
         engine,
         world.MeshAttachment {
@@ -169,7 +162,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         rotate(right_wall, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
         scale(right_wall, size)
       }
-      // Back wall
       _, back_wall, back_ok := spawn(
         engine,
         world.MeshAttachment {
@@ -182,7 +174,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         rotate(back_wall, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
         scale(back_wall, size)
       }
-      // Ceiling
       _, ceiling, ceiling_ok := spawn(
         engine,
         world.MeshAttachment {
@@ -225,7 +216,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       for child_handle in armature_ptr.children {
         child_node := get_node(engine, child_handle)
         if child_node == nil do continue
-
         if mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment);
            has_mesh {
           if _, has_skin := mesh_attachment.skinning.?; has_skin {
@@ -271,7 +261,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   when true {
     log.infof("creating %d lights", LIGHT_COUNT)
-    // Create lights and light cubes
     for i in 0 ..< LIGHT_COUNT {
       color := [4]f32 {
         math.sin(f32(i)),
@@ -352,7 +341,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         world.MeshAttachment {
           handle      = sphere_mesh_handle,
           material    = emissive_handle,
-          cast_shadow = false, // Emissive objects don't need shadows
+          cast_shadow = false,
         },
       )
       if bright_ok {
@@ -501,7 +490,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   current_controller = &orbit_controller
   when true {
-    // Create portal camera with its own render target
+    // create portal camera with its own render target
     portal_camera_ok: bool
     portal_camera_handle, portal_camera_ok = create_camera(
       engine,
@@ -517,21 +506,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if !portal_camera_ok {
       log.error("Failed to create portal camera")
     }
-
-    // Create material for the portal surface (texture will be set per-frame)
     portal_material_ok: bool
     portal_material_handle, portal_material_ok = create_material(
       engine,
       {.ALBEDO_TEXTURE},
     )
-
-    // Create the portal quad mesh
     portal_mesh_ok: bool
     portal_quad_handle, portal_mesh_ok = create_mesh(
       engine,
       make_quad(),
     )
-
     if portal_material_ok && portal_mesh_ok {
       _, portal_node, portal_spawn_ok := spawn(
         engine,
@@ -548,17 +532,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-
-  // Spawn Warrior effect sprite (6x17 grid, frames 0-98)
   when true {
     log.info("spawning Warrior effect sprite with animation (99 frames @ 24fps)...")
-
-    // Load Warrior effect sprite sheet
     warrior_sprite_texture, warrior_sprite_ok := create_texture(
       engine,
       "assets/Warrior_Sheet-Effect.png",
     )
-
     if warrior_sprite_ok {
       // Use shared sprite quad mesh from transparency renderer
       sprite_quad := engine.render.transparency.sprite_quad_mesh
@@ -569,7 +548,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         fps = 24.0,
         mode = .LOOP,
       )
-
       sprite_handle, sprite_ok := resources.create_sprite(
         &engine.rm,
         warrior_sprite_texture,
@@ -579,42 +557,33 @@ setup :: proc(engine: ^mjolnir.Engine) {
         color = {1.0, 1.0, 1.0, 1.0},
         animation = warrior_animation,
       )
-
       if sprite_ok {
-        // Create sprite material (transparent with albedo texture)
         sprite_material, mat_ok := create_material(
           engine,
           {.ALBEDO_TEXTURE},
           type = .TRANSPARENT,
           albedo_handle = warrior_sprite_texture,
         )
-
         if mat_ok {
-          // Create sprite attachment
           sprite_attachment := world.SpriteAttachment {
             sprite_handle = sprite_handle,
             mesh_handle   = sprite_quad,
             material      = sprite_material,
           }
-
-          // Spawn at (5, 8, 5) - between camera {10,16,10} and origin {0,0,0}
           _, sprite_node, spawn_ok := world.spawn_at(
             &engine.world,
             {4, 1.5, 0},
             sprite_attachment,
             &engine.rm,
           )
-
           if spawn_ok {
             world.scale(sprite_node, 3.0)
-            // Disable culling to ensure it renders
             // sprite_node.culling_enabled = false
           }
         }
       }
     }
   }
-
   log.info("setup complete")
 }
 
@@ -643,12 +612,11 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     2.0,
     math.sin(t) * 2.0,
   )
-  // Animate lights
   for handle, i in light_handles {
     if i == 0 {
-      // Rotate light 0 around Y axis
+      // rotate light 0 around Y axis
       t := time_since_start(engine)
-      // rotate(engine, handle, t, linalg.VECTOR3F32_Y_AXIS)
+      rotate(engine, handle, t, linalg.VECTOR3F32_Y_AXIS)
       // rotate_by(engine, handle, math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
       continue
     }

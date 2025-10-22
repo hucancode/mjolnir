@@ -254,7 +254,6 @@ _spawn_internal :: proc(
 ) {
   handle, node, ok := resources.alloc(&world.nodes)
   if !ok do return {}, nil, false
-
   _init_node_with_attachment(node, attachment, handle, rm)
   geometry.transform_translate(
     &node.transform,
@@ -263,14 +262,11 @@ _spawn_internal :: proc(
     position.z,
   )
   attach(world.nodes, parent, handle)
-
   if rm != nil {
     _upload_node_to_gpu(handle, node, rm)
   }
-
   // Mark node for octree insertion
   world.octree_dirty_set[handle] = true
-
   return handle, node, true
 }
 
@@ -297,7 +293,6 @@ _upload_node_to_gpu :: proc(
 ) {
   world_matrix := node.transform.world_matrix
   gpu.write(&rm.world_matrix_buffer, &world_matrix, int(handle.index))
-
   data := _build_node_data(node, rm)
   gpu.write(&rm.node_data_buffer, &data, int(handle.index))
 }
@@ -312,10 +307,8 @@ _apply_sprite_to_node_data :: proc(
   data.material_id = sprite_attachment.material.index
   data.mesh_id = sprite_attachment.mesh_handle.index
   data.attachment_data_index = sprite_attachment.sprite_handle.index
-
   if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
   if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
-
   if material, has_mat := resources.get(
     rm.materials,
     sprite_attachment.material,
@@ -341,17 +334,14 @@ _build_node_data :: proc(
     attachment_data_index = 0xFFFFFFFF,
     flags                 = {},
   }
-
   if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
     data.material_id = mesh_attachment.material.index
     data.mesh_id = mesh_attachment.handle.index
-
     // FIX: Must check both node.visible AND node.parent_visible (same as traverse logic)
     if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
     if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
     if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
     if mesh_attachment.navigation_obstacle do data.flags |= {.NAVIGATION_OBSTACLE}
-
     if material, has_mat := resources.get(
       rm.materials,
       mesh_attachment.material,
@@ -364,22 +354,18 @@ _build_node_data :: proc(
       case .PBR, .UNLIT: // No flags
       }
     }
-
     if skinning, has_skin := mesh_attachment.skinning.?; has_skin {
       data.attachment_data_index = skinning.bone_matrix_buffer_offset
     }
   }
-
   if sprite_attachment, has_sprite := node.attachment.(SpriteAttachment);
      has_sprite {
     _apply_sprite_to_node_data(&data, sprite_attachment, node, rm)
   }
-
   if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment);
      is_obstacle {
     data.flags |= {.NAVIGATION_OBSTACLE}
   }
-
   return data
 }
 
@@ -495,7 +481,6 @@ init_gpu :: proc(
     depth_width,
     depth_height,
   ) or_return
-
   return .SUCCESS
 }
 
@@ -552,7 +537,6 @@ cleanup_pending_deletions :: proc(
   for handle in to_destroy {
     // Mark for octree removal
     world.octree_dirty_set[handle] = true
-
     if node, ok := resources.free(&world.nodes, handle); ok {
       destroy_node(node, rm, gctx)
     }
@@ -598,7 +582,6 @@ traverse :: proc(
     if visibility_changed {
       update_node_tags(current_node)
     }
-
     // Apply bone socket transform if specified
     bone_socket_transform := linalg.MATRIX4F32_IDENTITY
     has_bone_socket := false
@@ -636,13 +619,11 @@ traverse :: proc(
       bone_socket_transform = skinning_matrix * bind_matrix
       has_bone_socket = true
     }
-
     if entry.parent_is_dirty || is_dirty || has_bone_socket {
       // Mark node for octree update if not root
       if entry.handle != world.root {
         world.octree_dirty_set[entry.handle] = true
       }
-
       transform_update_world(
         &current_node.transform,
         entry.parent_transform * bone_socket_transform,
@@ -1115,7 +1096,6 @@ create_sprite_attachment :: proc(
     animation,
   )
   if !ok do return {}, false
-
   attachment = SpriteAttachment {
     sprite_handle = sprite_handle,
     mesh_handle   = shared_quad_mesh,
@@ -1133,7 +1113,6 @@ _ensure_actor_pool :: proc(world: ^World, $T: typeid) -> ^ActorPool(T) {
   }
   pool := new(ActorPool(T))
   actor_pool_init(pool)
-
   world.actor_pools[tid] = ActorPoolEntry {
     pool_ptr = rawptr(pool),
     tick_fn = proc(pool_ptr: rawptr, ctx: ^ActorContext) {
@@ -1183,7 +1162,6 @@ spawn_actor :: proc(
 ) {
   node_handle, _, node_ok := spawn(world, attachment, rm)
   if !node_ok do return {}, nil, false
-
   pool := _ensure_actor_pool(world, T)
   return actor_alloc(pool, node_handle)
 }
@@ -1201,7 +1179,6 @@ spawn_actor_at :: proc(
 ) {
   node_handle, _, node_ok := spawn_at(world, position, attachment, rm)
   if !node_ok do return {}, nil, false
-
   pool := _ensure_actor_pool(world, T)
   return actor_alloc(pool, node_handle)
 }
@@ -1219,7 +1196,6 @@ spawn_actor_child :: proc(
 ) {
   node_handle, _, node_ok := spawn_child(world, parent, attachment, rm)
   if !node_ok do return {}, nil, false
-
   pool := _ensure_actor_pool(world, T)
   return actor_alloc(pool, node_handle)
 }
@@ -1234,10 +1210,8 @@ get_actor :: proc(
 ) #optional_ok {
   entry, pool_exists := world.actor_pools[typeid_of(T)]
   if !pool_exists do return nil, false
-
   actor_ptr, found := entry.get_fn(entry.pool_ptr, handle)
   if !found do return nil, false
-
   return cast(^Actor(T))actor_ptr, true
 }
 
@@ -1267,7 +1241,6 @@ disable_actor_tick :: proc(
 ) {
   entry, pool_exists := world.actor_pools[typeid_of(T)]
   if !pool_exists do return
-
   pool := cast(^ActorPool(T))entry.pool_ptr
   actor_disable_tick(pool, handle)
 }
@@ -1284,7 +1257,6 @@ world_tick_actors :: proc(
     delta_time = delta_time,
     game_state = game_state,
   }
-
   for t, entry in world.actor_pools {
     entry.tick_fn(entry.pool_ptr, &ctx)
   }

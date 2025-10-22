@@ -235,7 +235,6 @@ make_sphere :: proc(
   idx_count := rings * segments * 6
   ret.vertices = make([]Vertex, vert_count)
   ret.indices = make([]u32, idx_count)
-
   for ring in 0 ..= rings {
     phi := math.PI * f32(ring) / f32(rings)
     y := math.cos(phi)
@@ -279,7 +278,6 @@ make_cone :: proc(
   idx_count := segments * 6
   ret.vertices = make([]Vertex, vert_count)
   ret.indices = make([]u32, idx_count)
-
   // Tip vertex
   ret.vertices[0] = Vertex {
     position = {0, height / 2, 0},
@@ -336,7 +334,6 @@ make_fullscreen_triangle :: proc(
 ) {
   ret.vertices = make([]Vertex, 3)
   ret.indices = make([]u32, 3)
-
   // Full-screen triangle vertices in NDC space (clip coordinates)
   // These coordinates cover the entire screen when used directly
   ret.vertices[0] = Vertex {
@@ -357,12 +354,10 @@ make_fullscreen_triangle :: proc(
     color    = color,
     uv       = {0.0, 2.0},
   }
-
   // Clockwise winding
   ret.indices[0] = 0
   ret.indices[1] = 2
   ret.indices[2] = 1
-
   ret.aabb = aabb_from_vertices(ret.vertices)
   return
 }
@@ -378,27 +373,21 @@ make_capsule :: proc(
 ) {
   // Capsule = cylinder + 2 hemispheres
   // Vertices: top hemisphere, bottom hemisphere, cylinder sides
-
   sphere_rings := rings
   cyl_height := height - 2.0 * radius
-
   // Vertex counts
   top_hemi_verts := (sphere_rings + 1) * (segments + 1)
   bottom_hemi_verts := (sphere_rings + 1) * (segments + 1)
   cylinder_verts := 2 * (segments + 1)
   vert_count := top_hemi_verts + bottom_hemi_verts + cylinder_verts
-
   // Index counts
   top_hemi_quads := sphere_rings * segments
   bottom_hemi_quads := sphere_rings * segments
   cylinder_quads := segments
   idx_count := (top_hemi_quads + bottom_hemi_quads + cylinder_quads) * 6
-
   ret.vertices = make([]Vertex, vert_count)
   ret.indices = make([]u32, idx_count)
-
   v := 0
-
   // --- Top Hemisphere ---
   for ring in 0 ..= sphere_rings {
     phi := (math.PI / 2.0) * f32(ring) / f32(sphere_rings)
@@ -420,7 +409,6 @@ make_capsule :: proc(
       v += 1
     }
   }
-
   // --- Bottom Hemisphere ---
   for ring in 0 ..= sphere_rings {
     phi := (math.PI / 2.0) * f32(ring) / f32(sphere_rings)
@@ -442,7 +430,6 @@ make_capsule :: proc(
       v += 1
     }
   }
-
   // --- Cylinder Sides ---
   for seg in 0 ..= segments {
     theta := 2.0 * math.PI * f32(seg) / f32(segments)
@@ -465,13 +452,11 @@ make_capsule :: proc(
     }
     v += 1
   }
-
   // --- Indices ---
   i := 0
   top_start: u32 = 0
   bottom_start := top_hemi_verts
   cyl_start := top_hemi_verts + bottom_hemi_verts
-
   // Top hemisphere indices
   for ring in 0 ..< sphere_rings {
     for seg in 0 ..< segments {
@@ -484,7 +469,6 @@ make_capsule :: proc(
       i += 6
     }
   }
-
   // Bottom hemisphere indices
   for ring in 0 ..< sphere_rings {
     for seg in 0 ..< segments {
@@ -507,7 +491,6 @@ make_capsule :: proc(
     p[0], p[1], p[2], p[3], p[4], p[5] = a, c, b, b, c, d
     i += 6
   }
-
   ret.aabb = aabb_from_vertices(ret.vertices)
   return
 }
@@ -525,7 +508,6 @@ make_torus :: proc(
   idx_count := segments * sides * 6
   ret.vertices = make([]Vertex, vert_count)
   ret.indices = make([]u32, idx_count)
-
   for seg in 0 ..= segments {
     theta := 2.0 * math.PI * f32(seg) / f32(segments)
     cos_theta := math.cos(theta)
@@ -576,13 +558,10 @@ make_cylinder :: proc(
   cap_verts := (segments + 2) * 2 // +1 for center, +segments+1 for rim (duplicate first for UV seam)
   vert_count := body_verts + cap_verts
   idx_count := segments * 6 + segments * 3 * 2
-
   ret.vertices = make([]Vertex, vert_count)
   ret.indices = make([]u32, idx_count)
-
   half_h := height * 0.5
   v: u32 = 0
-
   // Body vertices (top and bottom rings)
   for i in 0 ..= segments {
     theta := 2.0 * math.PI * f32(i) / f32(segments)
@@ -605,7 +584,6 @@ make_cylinder :: proc(
     }
     v += 1
   }
-
   // Top cap center
   top_center := v
   ret.vertices[v] = Vertex {
@@ -628,7 +606,6 @@ make_cylinder :: proc(
     }
     v += 1
   }
-
   // Bottom cap center
   bottom_center := v
   ret.vertices[v] = Vertex {
@@ -651,7 +628,6 @@ make_cylinder :: proc(
     }
     v += 1
   }
-
   // Indices
   i := 0
   // Body
@@ -676,7 +652,6 @@ make_cylinder :: proc(
     p[0], p[1], p[2] = bottom_center, bottom_rim + seg, bottom_rim + seg + 1
     i += 3
   }
-
   ret.aabb = aabb_from_vertices(ret.vertices)
   return
 }
@@ -777,7 +752,6 @@ barycentric_2d :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
     d11 := linalg.dot(v1, v1)
     d20 := linalg.dot(v2, v0)
     d21 := linalg.dot(v2, v1)
-
     denom := d00 * d11 - d01 * d01
     if math.abs(denom) < math.F32_EPSILON {
         return {1.0/3.0, 1.0/3.0, 1.0/3.0}
@@ -930,35 +904,29 @@ intersect_segment_triangle :: proc "contextless" (sp, sq: [3]f32, a, b, c: [3]f3
     ab := b - a
     ac := c - a
     qp := sp - sq
-
     // Compute triangle normal
     norm := linalg.cross(ab, ac)
-
     // Compute denominator
     d := linalg.dot(qp, norm)
     if math.abs(d) < math.F32_EPSILON {
         return false, 0
     }
-
     // Compute intersection t value
     ap := sp - a
     t = linalg.dot(ap, norm) / d
     if t < 0 || t > 1 {
         return false, 0
     }
-
     // Compute barycentric coordinates
     e := linalg.cross(qp, ap)
     v := linalg.dot(ac, e) / d
     if v < 0 || v > 1 {
         return false, 0
     }
-
     w := -linalg.dot(ab, e) / d
     if w < 0 || v + w > 1 {
         return false, 0
     }
-
     return true, t
 }
 
@@ -973,7 +941,6 @@ closest_point_on_triangle :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
     if d1 <= 0 && d2 <= 0 {
         return a
     }
-
     // Check if P in vertex region outside B
     bp := p - b
     d3 := linalg.dot(ab, bp)
@@ -981,14 +948,12 @@ closest_point_on_triangle :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
     if d3 >= 0 && d4 <= d3 {
         return b
     }
-
     // Check if P in edge region of AB
     vc := d1*d4 - d3*d2
     if vc <= 0 && d1 >= 0 && d3 <= 0 {
         v := d1 / (d1 - d3)
         return a + v * ab
     }
-
     // Check if P in vertex region outside C
     cp := p - c
     d5 := linalg.dot(ab, cp)
@@ -996,21 +961,18 @@ closest_point_on_triangle :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
     if d6 >= 0 && d5 <= d6 {
         return c
     }
-
     // Check if P in edge region of AC
     vb := d5*d2 - d1*d6
     if vb <= 0 && d2 >= 0 && d6 <= 0 {
         w := d2 / (d2 - d6)
         return a + w * ac
     }
-
     // Check if P in edge region of BC
     va := d3*d6 - d5*d4
     if va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0 {
         w := (d4 - d3) / ((d4 - d3) + (d5 - d6))
         return b + w * (c - b)
     }
-
     // P inside face region
     denom := 1 / (va + vb + vc)
     v := vb * denom
@@ -1021,21 +983,17 @@ closest_point_on_triangle :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
 // Calculate polygon normal using Newell's method
 calc_poly_normal :: proc "contextless" (verts: [][3]f32) -> [3]f32 {
     normal := [3]f32{0, 0, 0}
-
     for i in 0..<len(verts) {
         v0 := verts[i]
         v1 := verts[(i + 1) % len(verts)]
-
         normal.x += (v0.y - v1.y) * (v0.z + v1.z)
         normal.y += (v0.z - v1.z) * (v0.x + v1.x)
         normal.z += (v0.x - v1.x) * (v0.y + v1.y)
     }
-
     // Normalize the result
     if linalg.length2(normal) > math.F32_EPSILON * math.F32_EPSILON {
         normal = linalg.normalize(normal)
     }
-
     return normal
 }
 
@@ -1088,23 +1046,18 @@ ilog2 :: proc "contextless" (v: u32) -> u32 {
     val := v
     r: u32 = 0
     shift: u32
-
     shift = u32(val > 0xffff) << 4
     val >>= shift
     r |= shift
-
     shift = u32(val > 0xff) << 3
     val >>= shift
     r |= shift
-
     shift = u32(val > 0xf) << 2
     val >>= shift
     r |= shift
-
     shift = u32(val > 0x3) << 1
     val >>= shift
     r |= shift
-
     r |= val >> 1
     return r
 }
@@ -1135,10 +1088,8 @@ circum_circle :: proc "contextless" (a, b, c: [3]f32) -> (center: [2]f32, r_sq: 
     len_ab_sq := linalg.length2(ab.xz)
     len_ac_sq := linalg.length2(ac.xz)
     inv_cross := 1.0 / (2.0 * cross)
-
     ux := (ac.z * len_ab_sq - ab.z * len_ac_sq) * inv_cross
     uy := (ab.x * len_ac_sq - ac.x * len_ab_sq) * inv_cross
-
     center.x = a.x + ux
     center.y = a.z + uy
     r_sq = ux * ux + uy * uy
@@ -1157,16 +1108,13 @@ in_circumcircle :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
 point_segment_distance_sq :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
     segment := vb - va
     to_pt := pt - va
-
     segment_length_sq := linalg.length2(segment)
     if segment_length_sq < math.F32_EPSILON {
         return linalg.length2(to_pt)
     }
-
     // Project point onto segment
     t := linalg.saturate(linalg.dot(to_pt, segment) / segment_length_sq)
     closest := va + segment * t
-
     return linalg.length2(pt - closest)
 }
 
@@ -1180,26 +1128,21 @@ point_segment_distance :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
 // Based on C++ distToPoly from RecastMeshDetail.cpp
 point_polygon_distance :: proc(pt: [3]f32, vertices: [][3]f32) -> f32 {
     if len(vertices) < 3 do return math.F32_MAX
-
     min_dist_sq := f32(math.F32_MAX)
     inside := false
-
     for i in 0..<len(vertices) {
         j := (i + len(vertices) - 1) % len(vertices)
         vi := vertices[i]
         vj := vertices[j]
-
         // Point-in-polygon test using ray casting (XZ plane)
         if ((vi.z > pt.z) != (vj.z > pt.z)) &&
            (pt.x < (vj.x - vi.x) * (pt.z - vi.z) / (vj.z - vi.z) + vi.x) {
             inside = !inside
         }
-
         // Find minimum distance to edge
         dist_sq, _ := point_segment_distance2_2d(pt, vi, vj)
         min_dist_sq = min(min_dist_sq, dist_sq)
     }
-
     min_dist := math.sqrt(min_dist_sq)
     return inside ? -min_dist : min_dist
 }
@@ -1208,50 +1151,39 @@ point_polygon_distance :: proc(pt: [3]f32, vertices: [][3]f32) -> f32 {
 // Based on C++ distToTriMesh from RecastMeshDetail.cpp
 point_triangle_mesh_distance :: proc(p: [3]f32, verts: [][3]f32, tris: [][3]u8) -> f32 {
     min_dist := f32(math.F32_MAX)
-
     for tri in tris {
         va := verts[tri[0]]
         vb := verts[tri[1]]
         vc := verts[tri[2]]
-
         // Project point onto triangle plane
         n := linalg.cross(vb - va, vc - va)
         if linalg.length2(n) < math.F32_EPSILON do continue
         n = linalg.normalize(n)
-
         plane_dist := linalg.dot(p - va, n)
         projected := p - n * plane_dist
-
         // Check if projected point is inside triangle using barycentric coordinates
         v0 := vc - va
         v1 := vb - va
         v2 := projected - va
-
         dot00 := linalg.dot(v0, v0)
         dot01 := linalg.dot(v0, v1)
         dot02 := linalg.dot(v0, v2)
         dot11 := linalg.dot(v1, v1)
         dot12 := linalg.dot(v1, v2)
-
         denom := dot00 * dot11 - dot01 * dot01
         if abs(denom) < math.F32_EPSILON do continue
-
         inv_denom := 1.0 / denom
         u := (dot11 * dot02 - dot01 * dot12) * inv_denom
         v := (dot00 * dot12 - dot01 * dot02) * inv_denom
-
         if (u >= 0) && (v >= 0) && (u + v <= 1) {
             return abs(plane_dist)
         }
-
         // Point is outside triangle, find distance to edges
         d0 := point_segment_distance(p, va, vb)
         d1 := point_segment_distance(p, vb, vc)
         d2 := point_segment_distance(p, vc, va)
-
         min_dist = min(min_dist, d0, d1, d2)
     }
-
     return min_dist
 }
 
@@ -1270,80 +1202,65 @@ offset_poly_2d :: proc(verts: [][3]f32, offset: f32) -> (out_verts: [dynamic][3]
     // Defines the limit at which a miter becomes a bevel
     // Similar in behavior to https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/stroke-miterlimit
     MITER_LIMIT :: 1.20
-
     num_verts := len(verts)
     if num_verts < 3 do return nil, false
-
     // First pass: calculate how many vertices we'll need
     estimated_verts := num_verts * 2  // Conservative estimate for beveling
     out_verts = make([dynamic][3]f32, 0, estimated_verts)
-
     for vert_index in 0..<num_verts {
         // Grab three vertices of the polygon
         vert_index_a := (vert_index + num_verts - 1) % num_verts
         vert_index_b := vert_index
         vert_index_c := (vert_index + 1) % num_verts
-
         vert_a := verts[vert_index_a]
         vert_b := verts[vert_index_b]
         vert_c := verts[vert_index_c]
-
         // From A to B on the x/z plane
         prev_segment_dir: [3]f32
         prev_segment_dir.x = vert_b.x - vert_a.x
         prev_segment_dir.y = 0 // Squash onto x/z plane
         prev_segment_dir.z = vert_b.z - vert_a.z
         safe_normalize(&prev_segment_dir)
-
         // From B to C on the x/z plane
         curr_segment_dir: [3]f32
         curr_segment_dir.x = vert_c.x - vert_b.x
         curr_segment_dir.y = 0 // Squash onto x/z plane
         curr_segment_dir.z = vert_c.z - vert_b.z
         safe_normalize(&curr_segment_dir)
-
         // The y component of the cross product of the two normalized segment directions
         // The X and Z components of the cross product are both zero because the two
         // segment direction vectors fall within the x/z plane
         cross := linalg.cross(curr_segment_dir.xz, prev_segment_dir.xz)
-
         // CCW perpendicular vector to AB. The segment normal
         prev_segment_norm_x := -prev_segment_dir.z
         prev_segment_norm_z := prev_segment_dir.x
-
         // CCW perpendicular vector to BC. The segment normal
         curr_segment_norm_x := -curr_segment_dir.z
         curr_segment_norm_z := curr_segment_dir.x
-
         // Average the two segment normals to get the proportional miter offset for B
         // This isn't normalized because it's defining the distance and direction the corner will need to be
         // adjusted proportionally to the edge offsets to properly miter the adjoining edges
         corner_miter_x := (prev_segment_norm_x + curr_segment_norm_x) * 0.5
         corner_miter_z := (prev_segment_norm_z + curr_segment_norm_z) * 0.5
         corner_miter_sq_mag := corner_miter_x * corner_miter_x + corner_miter_z * corner_miter_z
-
         // If the magnitude of the segment normal average is less than about .69444,
         // the corner is an acute enough angle that the result should be beveled
         bevel := corner_miter_sq_mag * MITER_LIMIT * MITER_LIMIT < 1.0
-
         // Scale the corner miter so it's proportional to how much the corner should be offset compared to the edges
         if corner_miter_sq_mag > math.F32_EPSILON {
             scale := 1.0 / corner_miter_sq_mag
             corner_miter_x *= scale
             corner_miter_z *= scale
         }
-
         if bevel && cross < 0.0 { // If the corner is convex and an acute enough angle, generate a bevel
             // Generate two bevel vertices at distances from B proportional to the angle between the two segments
             // Move each bevel vertex out proportional to the given offset
             d := (1.0 - (prev_segment_dir.x * curr_segment_dir.x + prev_segment_dir.z * curr_segment_dir.z)) * 0.5
-
             append(&out_verts, [3]f32{
                 vert_b.x + (-prev_segment_norm_x + prev_segment_dir.x * d) * offset,
                 vert_b.y,
                 vert_b.z + (-prev_segment_norm_z + prev_segment_dir.z * d) * offset,
             })
-
             append(&out_verts, [3]f32{
                 vert_b.x + (-curr_segment_norm_x - curr_segment_dir.x * d) * offset,
                 vert_b.y,
@@ -1358,12 +1275,10 @@ offset_poly_2d :: proc(verts: [][3]f32, offset: f32) -> (out_verts: [dynamic][3]
             })
         }
     }
-
     // Allocate final output with the exact size needed
     if len(out_verts) == 0 {
         delete(out_verts)
         return nil, false
     }
-
     return out_verts, true
 }

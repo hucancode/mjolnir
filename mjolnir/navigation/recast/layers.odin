@@ -73,18 +73,14 @@ build_heightfield_layers :: proc(
 ) -> (result: [dynamic]Heightfield_Layer, success: bool) {
     dimensions := [2]i32{chf.width, chf.height}  // Using array for dimensions
     span_count := i32(len(chf.spans))
-
     log.infof("%v cells, %d spans", dimensions, span_count)
-
     // Phase 1: Monotone region partitioning
     src_reg := make([]u8, span_count)
     defer delete(src_reg)
-
     if !partition_monotone_regions(chf, border_size, src_reg) {
         log.warn("Could not partition monotone regions (likely >255 regions)")
         return {}, false
     }
-
     // Count regions
     nregs := 0
     for reg in src_reg {
@@ -92,14 +88,11 @@ build_heightfield_layers :: proc(
             nregs = max(nregs, int(reg) + 1)
         }
     }
-
     if nregs == 0 {
         log.warn("No regions found")
         return {}, true  // Empty result is valid
     }
-
     log.infof("%d regions", nregs)
-
     // Phase 2: Region analysis
     regions := make([]Heightfield_Layer_Region, nregs)
     defer {
@@ -109,33 +102,26 @@ build_heightfield_layers :: proc(
         }
         delete(regions)
     }
-
     if !analyze_regions(chf, src_reg, regions) {
         log.error("Could not analyze regions")
         return {}, false
     }
-
     // Phase 3: Layer assignment
     nlayers := assign_layers_dfs(regions)
     log.infof("%d layers", nlayers)
-
     // Phase 4: Layer merging
     nlayers = merge_layers(regions, walkable_height)
     log.infof("%d layers after merging", nlayers)
-
     // Phase 5: Layer compaction
     nlayers = compact_layer_ids(regions)
     log.infof("%d layers after compaction", nlayers)
-
     // Phase 6: Build layer data
     lset := make([dynamic]Heightfield_Layer, 0, nlayers)
-
     for layer_id in 0 ..< nlayers {
         if !build_single_layer(chf, src_reg, regions, u8(layer_id), border_size, &lset) {
             log.warnf("Failed to build layer %d", layer_id)
         }
     }
-
     log.infof("Built %d layers", len(lset))
     return lset, true
 }
@@ -148,37 +134,30 @@ partition_monotone_regions :: proc(
 ) -> bool {
     w := chf.width
     h := chf.height
-
     // Initialize all regions as unassigned
     slice.fill(src_reg, 0xff)
     sweeps := make([dynamic]Layer_Sweep_Span)
     defer delete(sweeps)
     prev_count: [256]i32
     reg_id: u8 = 0
-
     // Process each row from border to h-border
     for y in border_size ..< (h - border_size) {
         // Reset previous count for this row
         slice.fill(prev_count[:reg_id], 0)
         sweep_id: u8 = 0
         clear(&sweeps)     // Start fresh for each row
-
         // Process each column from border to w-border
         for x in border_size ..< (w - border_size) {
             c := &chf.cells[x + y * w]
-
             // Process each span in this cell
             for i in c.index ..< c.index + u32(c.count) {
                 if i >= u32(len(chf.spans)) || i >= u32(len(chf.areas)) {
                     continue
                 }
-
                 if chf.areas[i] == RC_NULL_AREA {
                     continue
                 }
-
                 sid: u8 = 0xff  // 0xff as invalid marker
-
                 // Check connection in -X direction (direction 0)
                 s := &chf.spans[i]
                 if get_con(s, 0) != RC_NOT_CONNECTED {
@@ -190,12 +169,10 @@ partition_monotone_regions :: proc(
                         sid = src_reg[ai]  // Reuse existing sweep ID
                     }
                 }
-
                 // If no existing sweep found, create new one
                 if sid == 0xff {
                     sid = sweep_id
                     sweep_id += 1
-
                     // Extend sweeps array if needed
                     for len(sweeps) <= int(sid) {
                         append(&sweeps, Layer_Sweep_Span{
@@ -204,27 +181,22 @@ partition_monotone_regions :: proc(
                             neighbor_id = 0xff, // uses 0xff for invalid
                         })
                     }
-
                     sweeps[sid].neighbor_id = 0xff
                     sweeps[sid].sample_count = 0
                 }
-
                 // Check connection in -Y direction (direction 3)
                 if get_con(s, 3) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(3)
                     ay := y + get_dir_offset_y(3)
                     ai := chf.cells[ax + ay * w].index + u32(get_con(s, 3))
-
                     if ai < u32(len(src_reg)) {
                         nr := src_reg[ai]
                         if nr != 0xff {
                             sweep := &sweeps[sid]
-
                             // Set neighbour when first valid neighbour is encountered
                             if sweep.sample_count == 0 {
                                 sweep.neighbor_id = nr
                             }
-
                             if sweep.neighbor_id == nr {
                                 // Update existing neighbour
                                 sweep.sample_count += 1
@@ -236,16 +208,13 @@ partition_monotone_regions :: proc(
                         }
                     }
                 }
-
                 // Store sweep ID in srcReg (first pass)
                 src_reg[i] = sid
             }
         }
-
         // Create unique region IDs
         for i in 0..< int(sweep_id) {
             sweep := &sweeps[i]
-
             // If neighbour is set and there is only one continuous connection,
             // merge with previous region, else create new region
             if sweep.neighbor_id != 0xff &&
@@ -260,7 +229,6 @@ partition_monotone_regions :: proc(
                 reg_id += 1
             }
         }
-
         // Remap local sweep IDs to region IDs (second pass)
         for x in border_size ..< (w - border_size) {
             c := &chf.cells[x + y * w]
@@ -274,7 +242,6 @@ partition_monotone_regions :: proc(
             }
         }
     }
-
     return true
 }
 
@@ -286,7 +253,6 @@ analyze_regions :: proc(
 ) -> bool {
     w := chf.width
     h := chf.height
-
     // Initialize all regions
     for &reg in regions {
         reg.overlapping_layers = make([dynamic]u8)
@@ -295,49 +261,39 @@ analyze_regions :: proc(
         reg.layer_id = RC_NULL_LAYER
         reg.is_base = false
     }
-
     // Find region bounds and build neighbor relationships
     for y in 0 ..< h {
         for x in 0 ..< w {
             c := &chf.cells[x + y * w]
-
             // Collect regions in this cell
             local_regions := make([dynamic]u8)
             defer delete(local_regions)
-
             for i in c.index ..< c.index + u32(c.count) {
                 if i >= u32(len(chf.spans)) ||
                    i >= u32(len(chf.areas)) ||
                    i >= u32(len(src_reg)) {
                     continue
                 }
-
                 if chf.areas[i] == RC_NULL_AREA {
                     continue
                 }
-
                 ri := src_reg[i]
                 if ri == RC_NULL_LAYER || int(ri) >= len(regions) {
                     continue
                 }
-
                 s := &chf.spans[i]
-
                 // Update region bounds using modernized approach
                 reg := &regions[ri]
                 // This tracks where spans START, not their full extent
                 expand_bounds(&reg.height_bounds, s.y)
                 expand_bounds(&reg.height_bounds, s.y)  // Yes, s.y for both!
-
                 // Add to local regions list
                 add_unique(&local_regions, ri)
-
                 // Check 4-directional neighbors
                 for dir in 0 ..< 4 {
                     if get_con(s, dir) != RC_NOT_CONNECTED {
                         ax := x + get_dir_offset_x(dir)
                         ay := y + get_dir_offset_y(dir)
-
                         if ax >= 0 && ax < w && ay >= 0 && ay < h {
                             ai := chf.cells[ax + ay * w].index + u32(get_con(s, dir))
                             if ai < u32(len(src_reg)) {
@@ -353,7 +309,6 @@ analyze_regions :: proc(
                     }
                 }
             }
-
             // Add overlapping layers for all regions in this cell
             for i in 0 ..< len(local_regions) {
                 for j in i + 1 ..< len(local_regions) {
@@ -367,7 +322,6 @@ analyze_regions :: proc(
             }
         }
     }
-
     return true
 }
 
@@ -660,7 +614,6 @@ build_single_layer :: proc(
     for y in 0 ..< h {
         for x in 0 ..< w {
             c := &chf.cells[x + y * w]
-
             for i in c.index ..< c.index + u32(c.count) {
                 if i >= u32(len(src_reg)) {
                     continue
@@ -684,7 +637,6 @@ build_single_layer :: proc(
                     continue
                 }
                 lidx := lx + ly * layer_width
-
                 if lidx < 0 || lidx >= i32(len(layer.heights)) {
                     continue
                 }

@@ -21,7 +21,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if camera != nil {
     mjolnir.camera_look_at(camera, {6.0, 4.5, 6.0}, {0.0, 0.8, 0.0})
   }
-
   plane_geom := geometry.make_quad()
   plane_mesh, plane_mesh_ok := mjolnir.create_mesh(
     engine,
@@ -52,7 +51,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if plane_spawned {
     mjolnir.scale(plane_node, 7.0)
   }
-
   cube_geom := geometry.make_cube()
   cube_mesh, cube_mesh_ok := mjolnir.create_mesh(
     engine,
@@ -85,7 +83,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     mjolnir.translate(cube_node, 0.0, 1.5, 0.0)
     mjolnir.scale(cube_node, 0.8)
   }
-
   _, light_node, light_ok := mjolnir.spawn_spot_light(
     engine,
     {1.0, 0.95, 0.8, 3.5},

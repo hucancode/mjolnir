@@ -49,9 +49,7 @@ node_balance :: proc(node: ^IntervalNode) -> int {
 @(private)
 update_node :: proc(node: ^IntervalNode) {
   if node == nil do return
-
   node.height = max(node_height(node.left), node_height(node.right)) + 1
-
   node.max_end = node.interval.end
   if node.left != nil do node.max_end = max(node.max_end, node.left.max_end)
   if node.right != nil do node.max_end = max(node.max_end, node.right.max_end)
@@ -61,13 +59,10 @@ update_node :: proc(node: ^IntervalNode) {
 rotate_right :: proc(y: ^IntervalNode) -> ^IntervalNode {
   x := y.left
   t2 := x.right
-
   x.right = y
   y.left = t2
-
   update_node(y)
   update_node(x)
-
   return x
 }
 
@@ -75,13 +70,10 @@ rotate_right :: proc(y: ^IntervalNode) -> ^IntervalNode {
 rotate_left :: proc(x: ^IntervalNode) -> ^IntervalNode {
   y := x.right
   t2 := y.left
-
   y.left = x
   x.right = t2
-
   update_node(x)
   update_node(y)
-
   return y
 }
 

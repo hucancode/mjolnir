@@ -33,7 +33,6 @@ on_button_click :: proc(ctx: rawptr) {
   if state == nil do return
   state.click_count += 1
   log.infof("Button clicked! Count: %d", state.click_count)
-
   // Update label text
   ui := mjolnir.get_retained_ui(state.engine)
   label_text := fmt.tprintf("Clicks: %d", state.click_count)
@@ -43,33 +42,27 @@ on_button_click :: proc(ctx: rawptr) {
 on_toggle_click :: proc(ctx: rawptr) {
   if state == nil do return
   state.background_visible = !state.background_visible
-
   // Toggle image visibility
   ui := mjolnir.get_retained_ui(state.engine)
   retained_ui.set_visible(ui, state.image_handle, state.background_visible)
-
   log.infof("Toggle clicked! Image visible: %v", state.background_visible)
 }
 
 on_checkbox_change :: proc(ctx: rawptr, checked: bool) {
   if state == nil do return
   state.music_enabled = checked
-
   ui := mjolnir.get_retained_ui(state.engine)
   status_text := "Status: Music OFF"
   if checked {
     status_text = "Status: Music ON"
   }
   retained_ui.set_label_text(ui, state.status_label, status_text)
-
   log.infof("Checkbox changed! Music enabled: %v", checked)
 }
 
 on_combobox_change :: proc(ctx: rawptr, selected_index: i32) {
   if state == nil do return
-
   ui := mjolnir.get_retained_ui(state.engine)
-
   quality_names := [?]string{"Low", "Medium", "High", "Ultra"}
   if selected_index >= 0 && selected_index < i32(len(quality_names)) {
     status_text := fmt.tprintf("Status: Quality = %s", quality_names[selected_index])
@@ -102,20 +95,15 @@ on_radio_hard :: proc(ctx: rawptr) {
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
-
   // Allocate game state
   state = new(GameState)
-
   // Setup callback - called once after engine initialization
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     log.infof("Setting up retained UI visual test...")
-
     // Store engine reference for callbacks
     state.engine = engine
-
     // Get the engine's built-in retained UI manager
     ui := mjolnir.get_retained_ui(engine)
-
     // Create a window container
     state.window_handle, _ = retained_ui.create_window(
       ui,
@@ -125,7 +113,6 @@ main :: proc() {
       760,
       560,
     )
-
     // === LEFT COLUMN: Buttons and Labels ===
     state.button_handle, _ = retained_ui.create_button(
       ui,
@@ -138,7 +125,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-
     state.label_handle, _ = retained_ui.create_label(
       ui,
       "Clicks: 0",
@@ -146,7 +132,6 @@ main :: proc() {
       130,
       state.window_handle,
     )
-
     button2, _ := retained_ui.create_button(
       ui,
       "Toggle Image",
@@ -158,7 +143,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-
     // === CheckBox ===
     state.checkbox_handle, _ = retained_ui.create_checkbox(
       ui,
@@ -170,7 +154,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-
     // === ComboBox ===
     state.combobox_handle, _ = retained_ui.create_combobox(
       ui,
@@ -183,12 +166,9 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-
     retained_ui.create_label(ui, "Graphics Quality:", 40, 240, state.window_handle)
-
     // === Radio Buttons (Difficulty) ===
     retained_ui.create_label(ui, "Difficulty:", 40, 330, state.window_handle)
-
     retained_ui.create_radiobutton(
       ui,
       1,  // group_id
@@ -200,7 +180,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-
     retained_ui.create_radiobutton(
       ui,
       1,  // same group_id
@@ -212,7 +191,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-
     retained_ui.create_radiobutton(
       ui,
       1,  // same group_id
@@ -224,7 +202,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-
     // === TextBox ===
     retained_ui.create_label(ui, "Player Name:", 40, 460, state.window_handle)
     state.textbox_handle, _ = retained_ui.create_textbox(
@@ -239,7 +216,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-
     // === Status Label ===
     state.status_label, _ = retained_ui.create_label(
       ui,
@@ -248,7 +224,6 @@ main :: proc() {
       530,
       state.window_handle,
     )
-
     // === RIGHT COLUMN: Image ===
     image_data := #load("statue-1275469_1280.jpg")
     state.texture_handle, _, _ = resources.create_texture_from_data(
@@ -265,15 +240,12 @@ main :: proc() {
       240,
       state.window_handle,
     )
-
     // Initialize state
     state.background_visible = true
-
     log.infof("Scene and UI setup complete")
   }
   // Run the engine
   mjolnir.run(engine, 800, 600, "visual-retained-ui")
-
   // Cleanup
   if state != nil do free(state)
 }

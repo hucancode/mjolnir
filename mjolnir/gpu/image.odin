@@ -119,24 +119,20 @@ validate_spec :: proc(spec: ^ImageSpec) {
   if spec.mip_levels == 0 {
     spec.mip_levels = 1
   }
-
   // Infer view type if not specified (0 is the zero value)
   if spec.view_type == {} {
     spec.view_type = infer_view_type(spec.type, spec.array_layers)
   }
-
   // Infer aspect mask if not specified
   if card(spec.aspect_mask) == 0 {
     spec.aspect_mask = infer_aspect_mask(spec.format)
   }
-
   // Set default array layers for cube maps
   if spec.type == .CUBE && spec.array_layers == 0 {
     spec.array_layers = 6
   } else if spec.type == .CUBE_ARRAY && spec.array_layers < 6 {
     spec.array_layers = 6
   }
-
   // Set default depth for 2D images
   if (spec.type == .D2 ||
        spec.type == .D2_ARRAY ||
@@ -145,7 +141,6 @@ validate_spec :: proc(spec: ^ImageSpec) {
      spec.depth == 0 {
     spec.depth = 1
   }
-
   // Set default create_view to true if not explicitly disabled
   if !spec.create_view && spec.view_type != {} {
     spec.create_view = true
@@ -162,13 +157,11 @@ image_create :: proc(
 ) {
   img.spec = spec
   validate_spec(&img.spec)
-
   // Handle CUBE flag for cube maps
   flags: vk.ImageCreateFlags
   if img.spec.type == .CUBE || img.spec.type == .CUBE_ARRAY {
     flags = {.CUBE_COMPATIBLE}
   }
-
   create_info := vk.ImageCreateInfo {
     sType         = .IMAGE_CREATE_INFO,
     flags         = flags,
@@ -183,20 +176,15 @@ image_create :: proc(
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
-
   vk.CreateImage(gctx.device, &create_info, nil, &img.image) or_return
-
   mem_reqs: vk.MemoryRequirements
   vk.GetImageMemoryRequirements(gctx.device, img.image, &mem_reqs)
-
   img.memory = allocate_vulkan_memory(
     gctx,
     mem_reqs,
     img.spec.memory_flags,
   ) or_return
-
   vk.BindImageMemory(gctx.device, img.image, img.memory, 0) or_return
-
   // Create default view if requested
   if img.spec.create_view {
     view_info := vk.ImageViewCreateInfo {
@@ -220,7 +208,6 @@ image_create :: proc(
     }
     vk.CreateImageView(gctx.device, &view_info, nil, &img.view) or_return
   }
-
   log.debugf(
     "Created image %v %dx%d (mips=%d, layers=%d) 0x%x",
     img.spec.format,
@@ -230,7 +217,6 @@ image_create :: proc(
     img.spec.array_layers,
     img.image,
   )
-
   return img, .SUCCESS
 }
 
@@ -248,9 +234,7 @@ image_create_with_data :: proc(
   // Ensure TRANSFER_DST is in usage flags
   modified_spec := spec
   modified_spec.usage |= {.TRANSFER_DST}
-
   img = image_create(gctx, modified_spec) or_return
-
   // Create staging buffer
   staging := create_mutable_buffer(
     gctx,
@@ -260,7 +244,6 @@ image_create_with_data :: proc(
     data,
   ) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-
   // Transition to transfer dst
   transition := ImageTransition {
     old_layout  = .UNDEFINED,
@@ -277,7 +260,6 @@ image_create_with_data :: proc(
   cmd_buffer := begin_single_time_command(gctx) or_return
   image_transition(cmd_buffer, &img, transition)
   end_single_time_command(gctx, &cmd_buffer) or_return
-
   // Copy buffer to image
   cmd_buffer = begin_single_time_command(gctx) or_return
   region := vk.BufferImageCopy {
@@ -302,7 +284,6 @@ image_create_with_data :: proc(
     &region,
   )
   end_single_time_command(gctx, &cmd_buffer) or_return
-
   // Transition to final layout
   transition = ImageTransition {
     old_layout  = .TRANSFER_DST_OPTIMAL,
@@ -319,7 +300,6 @@ image_create_with_data :: proc(
   cmd_buffer = begin_single_time_command(gctx) or_return
   image_transition(cmd_buffer, &img, transition)
   end_single_time_command(gctx, &cmd_buffer) or_return
-
   return img, .SUCCESS
 }
 
@@ -338,10 +318,8 @@ image_create_with_mipmaps :: proc(
   if modified_spec.mip_levels == 0 {
     modified_spec.mip_levels = calculate_mip_levels(spec.width, spec.height)
   }
-
   // Ensure required usage flags for mipmap generation
   modified_spec.usage |= {.TRANSFER_DST, .TRANSFER_SRC}
-
   // Verify format supports linear filtering for blit
   format_props: vk.FormatProperties
   vk.GetPhysicalDeviceFormatProperties(
@@ -356,9 +334,7 @@ image_create_with_mipmaps :: proc(
     )
     return img, .ERROR_FORMAT_NOT_SUPPORTED
   }
-
   img = image_create(gctx, modified_spec) or_return
-
   // Create staging buffer
   staging := create_mutable_buffer(
     gctx,
@@ -368,9 +344,7 @@ image_create_with_mipmaps :: proc(
     data,
   ) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-
   cmd_buffer := begin_single_time_command(gctx) or_return
-
   // Transition all mip levels to TRANSFER_DST_OPTIMAL
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -401,7 +375,6 @@ image_create_with_mipmaps :: proc(
     1,
     &barrier,
   )
-
   // Copy base mip level from staging buffer
   region := vk.BufferImageCopy {
     bufferOffset = 0,
@@ -424,11 +397,9 @@ image_create_with_mipmaps :: proc(
     1,
     &region,
   )
-
   // Generate mipmaps
   mip_width := i32(img.spec.width)
   mip_height := i32(img.spec.height)
-
   for i in 1 ..< img.spec.mip_levels {
     // Transition previous mip to TRANSFER_SRC
     barrier.subresourceRange.baseMipLevel = i - 1
@@ -437,7 +408,6 @@ image_create_with_mipmaps :: proc(
     barrier.newLayout = .TRANSFER_SRC_OPTIMAL
     barrier.srcAccessMask = {.TRANSFER_WRITE}
     barrier.dstAccessMask = {.TRANSFER_READ}
-
     vk.CmdPipelineBarrier(
       cmd_buffer,
       {.TRANSFER},
@@ -450,7 +420,6 @@ image_create_with_mipmaps :: proc(
       1,
       &barrier,
     )
-
     // Blit from previous mip to current mip
     blit := vk.ImageBlit {
       srcOffsets = {{0, 0, 0}, {mip_width, mip_height, 1}},
@@ -481,13 +450,11 @@ image_create_with_mipmaps :: proc(
       &blit,
       .LINEAR,
     )
-
     // Transition previous mip to SHADER_READ_ONLY
     barrier.oldLayout = .TRANSFER_SRC_OPTIMAL
     barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
     barrier.srcAccessMask = {.TRANSFER_READ}
     barrier.dstAccessMask = {.SHADER_READ}
-
     vk.CmdPipelineBarrier(
       cmd_buffer,
       {.TRANSFER},
@@ -500,18 +467,15 @@ image_create_with_mipmaps :: proc(
       1,
       &barrier,
     )
-
     mip_width = max(mip_width / 2, 1)
     mip_height = max(mip_height / 2, 1)
   }
-
   // Transition last mip level to SHADER_READ_ONLY
   barrier.subresourceRange.baseMipLevel = img.spec.mip_levels - 1
   barrier.oldLayout = .TRANSFER_DST_OPTIMAL
   barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
   barrier.srcAccessMask = {.TRANSFER_WRITE}
   barrier.dstAccessMask = {.SHADER_READ}
-
   vk.CmdPipelineBarrier(
     cmd_buffer,
     {.TRANSFER},
@@ -524,15 +488,12 @@ image_create_with_mipmaps :: proc(
     1,
     &barrier,
   )
-
   end_single_time_command(gctx, &cmd_buffer) or_return
-
   log.debugf(
     "Generated %d mip levels for image 0x%x",
     img.spec.mip_levels,
     img.image,
   )
-
   return img, .SUCCESS
 }
 
@@ -546,12 +507,10 @@ image_transition :: proc(
   if mip_count == 0 {
     mip_count = img.spec.mip_levels
   }
-
   layer_count := transition.layer_count
   if layer_count == 0 {
     layer_count = max(img.spec.array_layers, 1)
   }
-
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     oldLayout = transition.old_layout,
@@ -569,7 +528,6 @@ image_transition :: proc(
     srcAccessMask = transition.src_access,
     dstAccessMask = transition.dst_access,
   }
-
   vk.CmdPipelineBarrier(
     cmd,
     transition.src_stage,
@@ -683,7 +641,6 @@ image_update_region :: proc(
 ) -> vk.Result {
   w := width if width > 0 else img.spec.width
   h := height if height > 0 else img.spec.height
-
   // Create staging buffer
   staging := create_mutable_buffer(
     gctx,
@@ -693,9 +650,7 @@ image_update_region :: proc(
     data,
   ) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-
   cmd_buffer := begin_single_time_command(gctx) or_return
-
   // Transition to transfer dst
   transition := ImageTransition {
     old_layout = old_layout,
@@ -706,7 +661,6 @@ image_update_region :: proc(
     dst_access = {.TRANSFER_WRITE},
   }
   image_transition(cmd_buffer, img, transition)
-
   // Copy buffer to image
   region := vk.BufferImageCopy {
     bufferOffset = 0,
@@ -729,7 +683,6 @@ image_update_region :: proc(
     1,
     &region,
   )
-
   // Transition to final layout
   transition = ImageTransition {
     old_layout = .TRANSFER_DST_OPTIMAL,
@@ -740,7 +693,6 @@ image_update_region :: proc(
     dst_access = {.SHADER_READ},
   }
   image_transition(cmd_buffer, img, transition)
-
   return end_single_time_command(gctx, &cmd_buffer)
 }
 
@@ -761,9 +713,7 @@ image_copy_region :: proc(
 ) -> vk.Result {
   w := width if width > 0 else min(src.spec.width, dst.spec.width)
   h := height if height > 0 else min(src.spec.height, dst.spec.height)
-
   cmd_buffer := begin_single_time_command(gctx) or_return
-
   // Transition source to transfer src
   src_transition := ImageTransition {
     old_layout = src_old_layout,
@@ -774,7 +724,6 @@ image_copy_region :: proc(
     dst_access = {.TRANSFER_READ},
   }
   image_transition(cmd_buffer, src, src_transition)
-
   // Transition destination to transfer dst
   dst_transition := ImageTransition {
     old_layout = dst_old_layout,
@@ -785,7 +734,6 @@ image_copy_region :: proc(
     dst_access = {.TRANSFER_WRITE},
   }
   image_transition(cmd_buffer, dst, dst_transition)
-
   // Copy image
   region := vk.ImageCopy {
     srcSubresource = {
@@ -813,7 +761,6 @@ image_copy_region :: proc(
     1,
     &region,
   )
-
   // Transition source to final layout
   src_transition = ImageTransition {
     old_layout = .TRANSFER_SRC_OPTIMAL,
@@ -824,7 +771,6 @@ image_copy_region :: proc(
     dst_access = {.SHADER_READ},
   }
   image_transition(cmd_buffer, src, src_transition)
-
   // Transition destination to final layout
   dst_transition = ImageTransition {
     old_layout = .TRANSFER_DST_OPTIMAL,
@@ -835,7 +781,6 @@ image_copy_region :: proc(
     dst_access = {.SHADER_READ},
   }
   image_transition(cmd_buffer, dst, dst_transition)
-
   return end_single_time_command(gctx, &cmd_buffer)
 }
 
@@ -850,7 +795,6 @@ image_spec_2d :: proc(
   if mipmaps {
     mip_levels = calculate_mip_levels(width, height)
   }
-
   return ImageSpec {
     type = .D2,
     width = width,
@@ -898,7 +842,6 @@ image_spec_cube :: proc(
   if mipmaps {
     mip_levels = calculate_mip_levels(size, size)
   }
-
   return ImageSpec {
     type = .CUBE,
     width = size,

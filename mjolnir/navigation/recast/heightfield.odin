@@ -83,10 +83,8 @@ free_compact_heightfield :: proc(chf: ^Compact_Heightfield) {
 allocate_span :: proc(hf: ^Heightfield) -> ^Span {
   if hf.freelist == nil || hf.freelist.next == nil {
     pool := new(Span_Pool)
-
     pool.next = hf.pools
     hf.pools = pool
-
     freelist := hf.freelist
     for i := RC_SPANS_PER_POOL - 1; i >= 0; i -= 1 {
       pool.items[i].next = freelist
@@ -94,7 +92,6 @@ allocate_span :: proc(hf: ^Heightfield) -> ^Span {
     }
     hf.freelist = freelist
   }
-
   new_span := hf.freelist
   hf.freelist = hf.freelist.next
   new_span.next = nil

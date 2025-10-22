@@ -80,13 +80,11 @@ keyframe_sample_step :: proc(frames: []Keyframe($T), t: f32) -> T {
   if t >= slice.last(frames).time {
     return slice.last(frames).value
   }
-
-  // Use binary search to find the upper bound (first keyframe with time > t)
+  // binary search to find the upper bound (first keyframe with time > t)
   cmp :: proc(item: Keyframe(T), t: f32) -> slice.Ordering {
     return slice.Ordering.Less if item.time <= t else slice.Ordering.Greater
   }
   upper_idx, exact_match := slice.binary_search_by(frames, t, cmp)
-
   if exact_match {
     // t exactly matches a keyframe time
     return frames[upper_idx].value
@@ -112,17 +110,14 @@ keyframe_sample_cubic :: proc(frames: []CubicSplineKeyframe($T), t: f32) -> T {
   i, _ := slice.binary_search_by(frames, t, cmp)
   a := frames[i - 1]
   b := frames[i]
-
   dt := b.time - a.time
   u := (t - a.time) / dt
   u2 := u * u
   u3 := u2 * u
-
   h00 := 2*u3 - 3*u2 + 1
   h10 := u3 - 2*u2 + u
   h01 := -2*u3 + 3*u2
   h11 := u3 - u2
-
   when T == quaternion64 || T == quaternion128 || T == quaternion256 {
     q0 := a.value
     m0_scaled := quaternion(
@@ -138,12 +133,10 @@ keyframe_sample_cubic :: proc(frames: []CubicSplineKeyframe($T), t: f32) -> T {
       z = b.in_tangent.z * dt,
       w = b.in_tangent.w * dt,
     )
-
     result_x := h00 * q0.x + h10 * m0_scaled.x + h01 * q1.x + h11 * m1_scaled.x
     result_y := h00 * q0.y + h10 * m0_scaled.y + h01 * q1.y + h11 * m1_scaled.y
     result_z := h00 * q0.z + h10 * m0_scaled.z + h01 * q1.z + h11 * m1_scaled.z
     result_w := h00 * q0.w + h10 * m0_scaled.w + h01 * q1.w + h11 * m1_scaled.w
-
     result := linalg.quaternion_normalize(quaternion(
       x = result_x,
       y = result_y,
@@ -240,11 +233,9 @@ Channel :: struct {
   position_interpolation: InterpolationMode,
   rotation_interpolation: InterpolationMode,
   scale_interpolation:    InterpolationMode,
-
   positions:         []Keyframe([3]f32),
   rotations:         []Keyframe(quaternion128),
   scales:            []Keyframe([3]f32),
-
   cubic_positions:   []CubicSplineKeyframe([3]f32),
   cubic_rotations:   []CubicSplineKeyframe(quaternion128),
   cubic_scales:      []CubicSplineKeyframe([3]f32),

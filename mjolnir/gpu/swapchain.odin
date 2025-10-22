@@ -66,7 +66,6 @@ swapchain_init :: proc(
       ),
     }
   }
-
   width, height := glfw.GetFramebufferSize(window)
   support := query_swapchain_support(
     gctx.physical_device,

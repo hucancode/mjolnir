@@ -6,7 +6,6 @@ import "../recast"
 
 create_navmesh :: proc(pmesh: ^recast.Poly_Mesh, dmesh: ^recast.Poly_Mesh_Detail,
                       walkable_height: f32, walkable_radius: f32, walkable_climb: f32) -> (nav_mesh: ^Nav_Mesh, ok: bool) {
-
     params := Create_Nav_Mesh_Data_Params{
         poly_mesh = pmesh,
         poly_mesh_detail = dmesh,
@@ -14,10 +13,8 @@ create_navmesh :: proc(pmesh: ^recast.Poly_Mesh, dmesh: ^recast.Poly_Mesh_Detail
         walkable_radius = walkable_radius,
         walkable_climb = walkable_climb,
     }
-
     nav_data, data_status := create_nav_mesh_data(&params)
     if recast.status_failed(data_status) do return nil, false
-
     nav_mesh = new(Nav_Mesh)
     mesh_params := Nav_Mesh_Params{
         orig = pmesh.bmin,
@@ -26,36 +23,28 @@ create_navmesh :: proc(pmesh: ^recast.Poly_Mesh, dmesh: ^recast.Poly_Mesh_Detail
         max_tiles = 1,
         max_polys = 1024,
     }
-
     init_status := nav_mesh_init(nav_mesh, &mesh_params)
     if recast.status_failed(init_status) {
         free(nav_mesh)
         return nil, false
     }
-
     _, add_status := nav_mesh_add_tile(nav_mesh, nav_data, recast.DT_TILE_FREE_DATA)
     if recast.status_failed(add_status) {
         nav_mesh_destroy(nav_mesh)
         free(nav_mesh)
         return nil, false
     }
-
     return nav_mesh, true
 }
 
 find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]f32,
                         filter: ^Query_Filter, path: [][3]f32) -> (path_count: int, status: recast.Status) {
-
     if len(path) == 0 do return 0, {.Buffer_Too_Small}
-
     half_extents := [3]f32{5.0, 5.0, 5.0}
-
     start_status, start_ref, start_nearest := find_nearest_poly(query, start_pos, half_extents, filter)
     if recast.status_failed(start_status) || start_ref == recast.INVALID_POLY_REF do return 0, start_status
-
     end_status, end_ref, end_nearest := find_nearest_poly(query, end_pos, half_extents, filter)
     if recast.status_failed(end_status) || end_ref == recast.INVALID_POLY_REF do return 0, end_status
-
     if start_ref == end_ref {
         path[0] = start_nearest
         if linalg.length2(end_nearest - start_nearest) > 0.0001 {
@@ -64,32 +53,24 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
         }
         return 1, {.Success}
     }
-
     poly_path := make([]recast.Poly_Ref, len(path))
     defer delete(poly_path)
-
     path_status, poly_path_count := find_path(query, start_ref, end_ref, start_nearest, end_nearest,
                                              filter, poly_path, i32(len(path)))
     if recast.status_failed(path_status) || poly_path_count == 0 do return 0, path_status
-
     straight_path := make([]Straight_Path_Point, len(path))
     defer delete(straight_path)
-
     straight_path_flags := make([]u8, len(path))
     defer delete(straight_path_flags)
-
     straight_path_refs := make([]recast.Poly_Ref, len(path))
     defer delete(straight_path_refs)
-
     straight_status, straight_path_count := find_straight_path(query, start_nearest, end_nearest,
                                                               poly_path[:poly_path_count], poly_path_count,
                                                               straight_path, straight_path_flags, straight_path_refs,
                                                               i32(len(path)), 0)
     if recast.status_failed(straight_status) do return 0, straight_status
-
     path_count = 0
     last_pos := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
-
     for i in 0..<int(straight_path_count) {
         pos := straight_path[i].pos
         if linalg.length2(pos - last_pos) > 0.0001 {
@@ -98,7 +79,6 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
             last_pos = pos
         }
     }
-
     return path_count, {.Success}
 }
 
@@ -296,15 +276,12 @@ encode_poly_id :: proc(nav_mesh: ^Nav_Mesh, salt: u32, tile_index: u32, poly_ind
 
 decode_poly_id :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Poly_Ref) -> (salt: u32, tile_index: u32, poly_index: u32) {
     if nav_mesh == nil do return 0, 0, 0
-
     salt_mask := (u32(1) << nav_mesh.salt_bits) - 1
     tile_mask := (u32(1) << nav_mesh.tile_bits) - 1
     poly_mask := (u32(1) << nav_mesh.poly_bits) - 1
-
     salt = (u32(ref) >> (nav_mesh.poly_bits + nav_mesh.tile_bits)) & salt_mask
     tile_index = (u32(ref) >> nav_mesh.poly_bits) & tile_mask
     poly_index = u32(ref) & poly_mask
-
     return
 }
 

@@ -90,7 +90,6 @@ get_child_center :: proc(
 ) -> [3]f32 {
   offset := parent_size * 0.25
   center := parent_center
-
   if octant & 1 != 0 {
     center.x += offset.x
   } else {
@@ -106,14 +105,12 @@ get_child_center :: proc(
   } else {
     center.z -= offset.z
   }
-
   return center
 }
 
 @(private)
 octree_subdivide :: proc(node: ^OctreeNode($T)) {
   parent_size := node.bounds.max - node.bounds.min
-
   for i in 0 ..< 8 {
     child := new(OctreeNode(T))
     child.bounds = get_child_bounds(node, i32(i))
@@ -170,7 +167,6 @@ octree_node_insert :: proc(
     }
     return true
   }
-
   if octree_node_insert_to_children(octree, node, item, bounds) {
     node.total_items += 1
     return true
@@ -186,7 +182,6 @@ octree_node_insert_to_children :: proc(
   bounds: Aabb,
 ) -> bool {
   octant := get_octant_for_aabb(node.center, bounds)
-
   if octant >= 0 {
     return octree_node_insert(octree, node.children[octant], item, bounds)
   } else {
@@ -257,7 +252,6 @@ octree_node_query_aabb_limited :: proc(
 ) {
   if !aabb_intersects(node.bounds, query_bounds) do return
   if len(results) >= max_results do return
-
   for item in node.items {
     if len(results) >= max_results do return
     item_bounds := octree.bounds_func(item)
@@ -265,7 +259,6 @@ octree_node_query_aabb_limited :: proc(
       append(results, item)
     }
   }
-
   if node.children[0] != nil {
     for i in 0 ..< 8 {
       if len(results) >= max_results do return
@@ -424,7 +417,6 @@ octree_query_ray :: proc(
   results: ^[dynamic]T,
 ) {
   clear(results)
-
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
@@ -463,15 +455,12 @@ octree_node_query_ray :: proc(
       append(results, item)
     }
   }
-
   if node.children[0] == nil do return
-
   child_intersections: [8]struct {
     idx:   i32,
     t_min: f32,
   }
   valid_count := 0
-
   for i in 0 ..< 8 {
     child_t_min, child_t_max := ray_aabb_intersection(
       ray.origin,
@@ -486,7 +475,6 @@ octree_node_query_ray :: proc(
       valid_count += 1
     }
   }
-
   slice.sort_by(child_intersections[:valid_count], proc(a, b: struct {
       idx:   i32,
       t_min: f32,
@@ -530,23 +518,19 @@ octree_raycast :: proc(
   ),
 ) -> RayHit(T) {
   if octree.root == nil do return {}
-
   best_hit: RayHit(T)
   best_hit.t = max_dist
-
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
     1.0 / ray.direction.z,
   }
-
   t_min, t_max := ray_aabb_intersection(
     ray.origin,
     inv_dir,
     octree.root.bounds,
   )
   if t_min > max_dist || t_max < 0 do return best_hit
-
   octree_node_raycast(
     octree,
     octree.root,
@@ -557,7 +541,6 @@ octree_raycast :: proc(
     &best_hit,
     intersection_func,
   )
-
   return best_hit
 }
 
@@ -575,20 +558,17 @@ octree_raycast_single :: proc(
   ),
 ) -> RayHit(T) {
   if octree.root == nil do return {}
-
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
     1.0 / ray.direction.z,
   }
-
   t_min, t_max := ray_aabb_intersection(
     ray.origin,
     inv_dir,
     octree.root.bounds,
   )
   if t_min > max_dist || t_max < 0 do return {}
-
   return octree_node_raycast_single(
     octree,
     octree.root,
@@ -617,20 +597,17 @@ octree_raycast_multi :: proc(
 ) {
   clear(results)
   if octree.root == nil do return
-
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
     1.0 / ray.direction.z,
   }
-
   t_min, t_max := ray_aabb_intersection(
     ray.origin,
     inv_dir,
     octree.root.bounds,
   )
   if t_min > max_dist || t_max < 0 do return
-
   octree_node_raycast_multi(
     octree,
     octree.root,
@@ -642,7 +619,6 @@ octree_raycast_multi :: proc(
     intersection_func,
     results,
   )
-
   // Sort results by distance
   if len(results^) > 1 {
     slice.sort_by(results[:], proc(a, b: RayHit(T)) -> bool {
@@ -669,7 +645,6 @@ octree_node_raycast :: proc(
   ),
 ) {
   if t_min > best_hit.t do return
-
   for item in node.items {
     hit, t := intersection_func(ray, item, best_hit.t)
     if hit && t < best_hit.t {
@@ -678,15 +653,12 @@ octree_node_raycast :: proc(
       best_hit.hit = true
     }
   }
-
   if node.children[0] == nil do return
-
   child_intersections: [8]struct {
     idx:   i32,
     t_min: f32,
   }
   valid_count := 0
-
   for i in 0 ..< 8 {
     child_t_min, child_t_max := ray_aabb_intersection(
       ray.origin,
@@ -701,19 +673,16 @@ octree_node_raycast :: proc(
       valid_count += 1
     }
   }
-
   slice.sort_by(child_intersections[:valid_count], proc(a, b: struct {
       idx:   i32,
       t_min: f32,
     }) -> bool {
     return a.t_min < b.t_min
   })
-
   for i in 0 ..< valid_count {
     child_idx := child_intersections[i].idx
     child_t_min := child_intersections[i].t_min
     if child_t_min > best_hit.t do break
-
     child_t_max := min(
       best_hit.t,
       ray_aabb_intersection_far(
@@ -779,7 +748,6 @@ octree_node_raycast_single :: proc(
       valid_count += 1
     }
   }
-
   slice.sort_by(child_intersections[:valid_count], proc(a, b: struct {
       idx:   i32,
       t_min: f32,
@@ -807,12 +775,10 @@ octree_node_raycast_single :: proc(
       max_dist,
       intersection_func,
     )
-
     if result.hit {
       return result
     }
   }
-
   return {}
 }
 
@@ -937,7 +903,6 @@ octree_node_remove :: proc(
   return false
 }
 
-
 @(private)
 should_collapse :: proc(node: ^OctreeNode($T)) -> bool {
   if node.children[0] == nil do return false
@@ -947,35 +912,18 @@ should_collapse :: proc(node: ^OctreeNode($T)) -> bool {
 @(private)
 count_items_recursive :: proc(node: ^OctreeNode($T)) -> int {
   if node == nil do return 0
-
   count := len(node.items)
-  if node.children[0] != nil {
-    count += count_items_recursive(node.children[0])
-    count += count_items_recursive(node.children[1])
-    count += count_items_recursive(node.children[2])
-    count += count_items_recursive(node.children[3])
-    count += count_items_recursive(node.children[4])
-    count += count_items_recursive(node.children[5])
-    count += count_items_recursive(node.children[6])
-    count += count_items_recursive(node.children[7])
-  }
-
+  for child in node.children do count += count_items_recursive(child)
   return count
 }
 
 @(private)
 octree_collapse :: proc(node: ^OctreeNode($T)) {
   if node.children[0] == nil do return
-
-  // Pre-allocate space for all items using cached count
   reserve(&node.items, int(node.total_items))
-
-  // Collect items from children
   for i in 0 ..< 8 {
     collect_items_recursive(node.children[i], &node.items)
   }
-
-  // Clean up children
   for i in 0 ..< 8 {
     octree_node_destroy(node.children[i])
     free(node.children[i])
@@ -986,11 +934,9 @@ octree_collapse :: proc(node: ^OctreeNode($T)) {
 @(private)
 collect_items_recursive :: proc(node: ^OctreeNode($T), results: ^[dynamic]T) {
   if node == nil do return
-
   for item in node.items {
     append(results, item)
   }
-
   if node.children[0] != nil {
     for i in 0 ..< 8 {
       collect_items_recursive(node.children[i], results)
@@ -1001,12 +947,10 @@ collect_items_recursive :: proc(node: ^OctreeNode($T), results: ^[dynamic]T) {
 octree_update :: proc(octree: ^Octree($T), old_item: T, new_item: T) -> bool {
   old_bounds := octree.bounds_func(old_item)
   new_bounds := octree.bounds_func(new_item)
-
   if aabb_contains(old_bounds, new_bounds) &&
      aabb_contains(new_bounds, old_bounds) {
     return true
   }
-
   remove_result := octree_node_remove(
     octree,
     octree.root,
@@ -1017,17 +961,14 @@ octree_update :: proc(octree: ^Octree($T), old_item: T, new_item: T) -> bool {
     insert_result := octree_insert(octree, new_item)
     return insert_result
   }
-
   return false
 }
 
 octree_collect_all :: proc(node: ^OctreeNode($T), results: ^[dynamic]T) {
   if node == nil do return
-
   for item in node.items {
     append(results, item)
   }
-
   if node.children[0] != nil {
     for i in 0 ..< 8 {
       octree_collect_all(node.children[i], results)
@@ -1063,7 +1004,6 @@ calculate_stats_recursive :: proc(
   stats.max_depth = stats.max_depth > depth ? stats.max_depth : depth
   stats.max_items_node =
     stats.max_items_node > i32(len(node.items)) ? stats.max_items_node : i32(len(node.items))
-
   if node.children[0] == nil {
     stats.leaf_nodes += 1
     if len(node.items) == 0 do stats.empty_nodes += 1

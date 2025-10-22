@@ -154,7 +154,6 @@ sample_clip :: proc(
     return
   }
   if clip == nil do return
-
   TraverseEntry :: struct {
     transform: matrix[4, 4]f32,
     bone:      u32,

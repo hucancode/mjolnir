@@ -30,12 +30,10 @@ init :: proc(
     gctx.command_pool,
     self.commands[:],
   ) or_return
-
   log.info("Initializing transparent renderer")
   if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-
   // Create shared sprite quad mesh (1x1 unit quad)
   half_w: f32 = 0.5
   half_h: f32 = 0.5
@@ -64,7 +62,6 @@ init :: proc(
     uv       = {0, 0},
     color    = {1, 1, 1, 1},
   }
-
   indices := make([]u32, 6)
   indices[0] = 0
   indices[1] = 1
@@ -72,13 +69,11 @@ init :: proc(
   indices[3] = 2
   indices[4] = 3
   indices[5] = 0
-
   quad_geom := geometry.Geometry {
     vertices = vertices,
     indices  = indices,
     aabb     = geometry.aabb_from_vertices(vertices),
   }
-
   mesh_handle, mesh_ptr, mesh_result := resources.create_mesh(
     gctx,
     rm,
@@ -100,7 +95,6 @@ init :: proc(
     mesh_ptr.aabb_max.y,
     mesh_ptr.aabb_max.z,
   )
-
   create_transparent_pipelines(
     gctx,
     self,
@@ -136,7 +130,6 @@ create_transparent_pipelines :: proc(
   spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
   spec_info.pData = cast(rawptr)&spec_data
   defer delete(spec_entries)
-
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
@@ -150,18 +143,15 @@ create_transparent_pipelines :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
   }
-
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
@@ -169,12 +159,10 @@ create_transparent_pipelines :: proc(
     frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
-
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-
   // Enable depth testing but disable depth writing for transparent objects
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -182,7 +170,6 @@ create_transparent_pipelines :: proc(
     depthWriteEnable = false, // Don't write to depth buffer for transparent objects
     depthCompareOp   = .LESS_OR_EQUAL,
   }
-
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
     srcColorBlendFactor = .SRC_ALPHA,
@@ -193,27 +180,23 @@ create_transparent_pipelines :: proc(
     alphaBlendOp        = .ADD,
     colorWriteMask      = {.R, .G, .B, .A},
   }
-
   color_blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
-
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = len(dynamic_states),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
-
   rendering_info := vk.PipelineRenderingCreateInfo {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_format,
     depthAttachmentFormat   = depth_format,
   }
-
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -230,7 +213,6 @@ create_transparent_pipelines :: proc(
       pSpecializationInfo = &spec_info,
     },
   }
-
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),
@@ -246,7 +228,6 @@ create_transparent_pipelines :: proc(
     layout              = pipeline_layout,
     pNext               = &rendering_info,
   }
-
   vk.CreateGraphicsPipelines(
     gctx.device,
     0,
@@ -255,7 +236,6 @@ create_transparent_pipelines :: proc(
     nil,
     &self.transparent_pipeline,
   ) or_return
-
   return .SUCCESS
 }
 
@@ -266,7 +246,6 @@ create_wireframe_pipelines :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
-
   // Load shader modules at compile time
   vert_shader_code := #load("../../shader/wireframe/vert.spv")
   vert_module := gpu.create_shader_module(
@@ -274,14 +253,12 @@ create_wireframe_pipelines :: proc(
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-
   frag_shader_code := #load("../../shader/wireframe/frag.spv")
   frag_module := gpu.create_shader_module(
     gctx.device,
     frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
@@ -295,18 +272,15 @@ create_wireframe_pipelines :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
   }
-
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-
   // Set to LINE polygon mode for wireframe rendering
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
@@ -315,12 +289,10 @@ create_wireframe_pipelines :: proc(
     frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
-
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-
   // Enable depth testing but disable depth writing
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -328,7 +300,6 @@ create_wireframe_pipelines :: proc(
     depthWriteEnable = false,
     depthCompareOp   = .LESS_OR_EQUAL,
   }
-
   // Simple alpha blending for wireframe
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask      = {.R, .G, .B, .A},
@@ -340,20 +311,17 @@ create_wireframe_pipelines :: proc(
     dstAlphaBlendFactor = .ZERO,
     alphaBlendOp        = .ADD,
   }
-
   color_blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
-
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = len(dynamic_states),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
-
   rendering_info := vk.PipelineRenderingCreateInfo {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = 1,
@@ -374,7 +342,6 @@ create_wireframe_pipelines :: proc(
       pName = "main",
     },
   }
-
   create_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),
@@ -390,7 +357,6 @@ create_wireframe_pipelines :: proc(
     layout              = pipeline_layout,
     pNext               = &rendering_info,
   }
-
   vk.CreateGraphicsPipelines(
     gctx.device,
     0,
@@ -399,7 +365,6 @@ create_wireframe_pipelines :: proc(
     nil,
     &self.wireframe_pipeline,
   ) or_return
-
   return .SUCCESS
 }
 
@@ -410,7 +375,6 @@ create_sprite_pipeline :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
-
   // Load sprite shader modules
   vert_shader_code := #load("../../shader/sprite/vert.spv")
   vert_module := gpu.create_shader_module(
@@ -418,14 +382,12 @@ create_sprite_pipeline :: proc(
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-
   frag_shader_code := #load("../../shader/sprite/frag.spv")
   frag_module := gpu.create_shader_module(
     gctx.device,
     frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
@@ -439,18 +401,15 @@ create_sprite_pipeline :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
   }
-
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-
   // No face culling for billboards
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
@@ -459,12 +418,10 @@ create_sprite_pipeline :: proc(
     frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
-
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-
   // Enable depth testing but disable depth writing for sprites
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -472,7 +429,6 @@ create_sprite_pipeline :: proc(
     depthWriteEnable = false,
     depthCompareOp   = .LESS_OR_EQUAL,
   }
-
   // Alpha blending for sprites
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
@@ -484,27 +440,23 @@ create_sprite_pipeline :: proc(
     alphaBlendOp        = .ADD,
     colorWriteMask      = {.R, .G, .B, .A},
   }
-
   color_blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
-
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = len(dynamic_states),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
-
   rendering_info := vk.PipelineRenderingCreateInfo {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_format,
     depthAttachmentFormat   = depth_format,
   }
-
   shader_stages := [2]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -519,7 +471,6 @@ create_sprite_pipeline :: proc(
       pName = "main",
     },
   }
-
   create_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),
@@ -535,7 +486,6 @@ create_sprite_pipeline :: proc(
     layout              = pipeline_layout,
     pNext               = &rendering_info,
   }
-
   vk.CreateGraphicsPipelines(
     gctx.device,
     0,
@@ -544,7 +494,6 @@ create_sprite_pipeline :: proc(
     nil,
     &self.sprite_pipeline,
   ) or_return
-
   log.info("Sprite pipeline created successfully")
   return .SUCCESS
 }
@@ -572,7 +521,6 @@ begin_pass :: proc(
 ) {
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-
   // Setup color attachment - load existing content
   color_texture := resources.get(
     rm.image_2d_buffers,
@@ -646,7 +594,6 @@ render :: proc(
     log.warn("Transparency render: draw_buffer or count_buffer is null")
     return
   }
-
   descriptor_sets := [?]vk.DescriptorSet {
     rm.camera_buffer_descriptor_set,
     rm.textures_descriptor_set,
@@ -670,7 +617,6 @@ render :: proc(
     nil,
   )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-
   push_constants := PushConstant {
     camera_index = camera_handle.index,
   }
@@ -692,7 +638,6 @@ render :: proc(
     raw_data(vertex_offsets[:]),
   )
   vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
-
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     draw_buffer,

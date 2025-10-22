@@ -42,11 +42,9 @@ actor_alloc :: proc(
 ) {
   handle, actor, ok = resources.alloc(&pool.actors)
   if !ok do return {}, nil, false
-
   actor.node_handle = node_handle
   actor.tick_enabled = false
   actor.tick_proc = nil
-
   return handle, actor, true
 }
 
@@ -59,7 +57,6 @@ actor_free :: proc(
 ) {
   actor, freed = resources.free(&pool.actors, handle)
   if !freed do return nil, false
-
   if actor.tick_enabled {
     for i := 0; i < len(pool.tick_list); i += 1 {
       if pool.tick_list[i] == handle {
@@ -68,7 +65,6 @@ actor_free :: proc(
       }
     }
   }
-
   return actor, true
 }
 

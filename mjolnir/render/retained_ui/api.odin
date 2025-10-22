@@ -20,7 +20,6 @@ create_button :: proc(
   widget: ^Widget
   handle, widget, ok = create_widget(self, .BUTTON, parent)
   if !ok do return
-
   widget.position = {x, y}
   widget.size = {w, h}
   widget.data = ButtonData {
@@ -28,7 +27,6 @@ create_button :: proc(
     callback  = callback,
     user_data = user_data,
   }
-
   return
 }
 
@@ -44,14 +42,12 @@ create_label :: proc(
   widget: ^Widget
   handle, widget, ok = create_widget(self, .LABEL, parent)
   if !ok do return
-
   widget.position = {x, y}
   widget.size = {100, 20}
   widget.fg_color = {0, 0, 0, 255}  // Black text for labels (readable on light backgrounds)
   widget.data = LabelData {
     text = text,
   }
-
   return
 }
 
@@ -68,7 +64,6 @@ create_image :: proc(
   widget: ^Widget
   handle, widget, ok = create_widget(self, .IMAGE, parent)
   if !ok do return
-
   widget.position = {x, y}
   widget.size = {w, h}
   widget.data = ImageData {
@@ -77,7 +72,6 @@ create_image :: proc(
     sprite_index   = 0,
     sprite_count   = 1,
   }
-
   return
 }
 
@@ -93,7 +87,6 @@ create_window :: proc(
   widget: ^Widget
   handle, widget, ok = create_widget(self, .WINDOW, parent)
   if !ok do return
-
   widget.position = {x, y}
   widget.size = {w, h}
   widget.bg_color = {240, 240, 240, 255}
@@ -104,7 +97,6 @@ create_window :: proc(
     resizeable = true,
     minimized  = false,
   }
-
   return
 }
 
@@ -123,7 +115,6 @@ create_textbox :: proc(
   widget: ^Widget
   handle, widget, ok = create_widget(self, .TEXT_BOX, parent)
   if !ok do return
-
   widget.position = {x, y}
   widget.size = {w, h}
   widget.bg_color = {255, 255, 255, 255}
@@ -137,7 +128,6 @@ create_textbox :: proc(
     callback        = callback,
     user_data       = user_data,
   }
-
   return
 }
 
@@ -155,7 +145,6 @@ create_combobox :: proc(
   widget: ^Widget
   handle, widget, ok = create_widget(self, .COMBO_BOX, parent)
   if !ok do return
-
   widget.position = {x, y}
   widget.size = {w, h}
   widget.data = ComboBoxData {
@@ -165,7 +154,6 @@ create_combobox :: proc(
     callback     = callback,
     user_data    = user_data,
   }
-
   return
 }
 
@@ -184,7 +172,6 @@ create_checkbox :: proc(
   widget: ^Widget
   handle, widget, ok = create_widget(self, .CHECK_BOX, parent)
   if !ok do return
-
   widget.position = {x, y}
   widget.size = {200, 20}  // width for label, height for box
   widget.data = CheckBoxData {
@@ -193,7 +180,6 @@ create_checkbox :: proc(
     callback  = callback,
     user_data = user_data,
   }
-
   return
 }
 
@@ -213,7 +199,6 @@ create_radiobutton :: proc(
   widget: ^Widget
   handle, widget, ok = create_widget(self, .RADIO_BUTTON, parent)
   if !ok do return
-
   widget.position = {x, y}
   widget.size = {200, 20}  // width for label, height for circle
   widget.data = RadioButtonData {
@@ -223,7 +208,6 @@ create_radiobutton :: proc(
     callback  = callback,
     user_data = user_data,
   }
-
   return
 }
 
@@ -239,7 +223,6 @@ set_button_callback :: proc(
 ) {
   widget, found := resources.get(self.widgets, handle)
   if !found || widget.type != .BUTTON do return
-
   data := &widget.data.(ButtonData)
   data.callback = callback
   data.user_data = user_data
@@ -248,7 +231,6 @@ set_button_callback :: proc(
 set_label_text :: proc(self: ^Manager, handle: WidgetHandle, text: string) {
   widget, found := resources.get(self.widgets, handle)
   if !found || widget.type != .LABEL do return
-
   data := &widget.data.(LabelData)
   data.text = text
   mark_dirty(self, handle)
@@ -257,7 +239,6 @@ set_label_text :: proc(self: ^Manager, handle: WidgetHandle, text: string) {
 set_button_text :: proc(self: ^Manager, handle: WidgetHandle, text: string) {
   widget, found := resources.get(self.widgets, handle)
   if !found || widget.type != .BUTTON do return
-
   data := &widget.data.(ButtonData)
   data.text = text
   mark_dirty(self, handle)
@@ -271,11 +252,9 @@ set_image_sprite :: proc(
 ) {
   widget, found := resources.get(self.widgets, handle)
   if !found || widget.type != .IMAGE do return
-
   data := &widget.data.(ImageData)
   data.sprite_index = sprite_index
   data.sprite_count = sprite_count
-
   if sprite_count > 0 {
     sprite_width := 1.0 / f32(sprite_count)
     data.uv = {
@@ -285,7 +264,6 @@ set_image_sprite :: proc(
       1,
     }
   }
-
   mark_dirty(self, handle)
 }
 
@@ -298,7 +276,6 @@ set_widget_colors :: proc(
 ) {
   widget, found := resources.get(self.widgets, handle)
   if !found do return
-
   widget.bg_color = bg_color
   widget.fg_color = fg_color
   widget.border_color = border_color
@@ -312,7 +289,6 @@ set_widget_colors :: proc(
 destroy_widget :: proc(self: ^Manager, handle: WidgetHandle) {
   widget, found := resources.get(self.widgets, handle)
   if !found do return
-
   child := widget.first_child
   for child.index != 0 {
     next_child, _ := resources.get(self.widgets, child)
@@ -320,7 +296,6 @@ destroy_widget :: proc(self: ^Manager, handle: WidgetHandle) {
     destroy_widget(self, child)
     child = next
   }
-
   if parent_widget, found := resources.get(self.widgets, widget.parent); found {
     if parent_widget.first_child == handle {
       parent_widget.first_child = widget.next_sibling
@@ -336,14 +311,12 @@ destroy_widget :: proc(self: ^Manager, handle: WidgetHandle) {
       }
     }
   }
-
   if prev, found := resources.get(self.widgets, widget.prev_sibling); found {
     prev.next_sibling = widget.next_sibling
   }
   if next, found := resources.get(self.widgets, widget.next_sibling); found {
     next.prev_sibling = widget.prev_sibling
   }
-
   resources.free(&self.widgets, handle)
 }
 

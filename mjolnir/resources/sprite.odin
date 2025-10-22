@@ -53,7 +53,6 @@ sprite_animation_init :: proc(
 ) -> SpriteAnimation {
   // Initialize starting frame based on direction
   initial_frame := forward ? 0 : frame_count - 1
-
   return SpriteAnimation {
     frame_count = frame_count,
     current_frame = initial_frame,
@@ -70,20 +69,16 @@ sprite_animation_update :: proc(anim: ^SpriteAnimation, delta_time: f32) {
   if anim.frame_count <= 1 do return
   if anim.fps <= 0 do return
   if delta_time <= 0 || delta_time > 1.0 do return
-
   anim.time += delta_time
   frame_duration := 1.0 / anim.fps
-
   // Limit iterations to prevent infinite loops from large delta_time
   max_iterations := anim.frame_count * 2
   iteration := u32(0)
-
   for anim.time >= frame_duration {
     if iteration >= max_iterations {
       // Skip ahead instead of looping thousands of times
       frames_to_skip := u32(anim.time / frame_duration)
       anim.time = math.mod(anim.time, frame_duration)
-
       switch anim.mode {
       case .ONCE:
         if anim.forward {
@@ -96,14 +91,12 @@ sprite_animation_update :: proc(anim: ^SpriteAnimation, delta_time: f32) {
           }
         }
         anim.state = .STOPPED
-
       case .LOOP:
         if anim.forward {
           anim.current_frame = frames_to_skip % anim.frame_count
         } else {
           anim.current_frame = anim.frame_count - 1 - (frames_to_skip % anim.frame_count)
         }
-
       case .PINGPONG:
         // PINGPONG: cycle length is 2 * (frame_count - 1)
         cycle_length := max(1, (anim.frame_count - 1) * 2)
@@ -118,9 +111,7 @@ sprite_animation_update :: proc(anim: ^SpriteAnimation, delta_time: f32) {
       }
       break
     }
-
     anim.time -= frame_duration
-
     // Advance frame based on direction
     if anim.forward {
       anim.current_frame += 1
@@ -152,7 +143,6 @@ sprite_animation_update :: proc(anim: ^SpriteAnimation, delta_time: f32) {
         anim.current_frame -= 1
       }
     }
-
     iteration += 1
   }
 }
@@ -168,7 +158,6 @@ sprite_animation_pause :: proc(anim: ^SpriteAnimation) {
 sprite_animation_stop :: proc(anim: ^SpriteAnimation) {
   anim.state = .STOPPED
   anim.time = 0.0
-
   // Reset to starting frame based on direction
   anim.current_frame = anim.forward ? 0 : anim.frame_count - 1
 }
@@ -183,7 +172,6 @@ sprite_animation_set_mode :: proc(anim: ^SpriteAnimation, mode: SpriteAnimationM
 
 sprite_animation_set_direction :: proc(anim: ^SpriteAnimation, forward: bool) {
   anim.forward = forward
-
   // Optionally reset to starting frame if stopped
   if anim.state == .STOPPED {
     anim.current_frame = forward ? 0 : anim.frame_count - 1
@@ -249,7 +237,6 @@ create_sprite :: proc(
     log.error("Failed to allocate sprite: pool capacity reached")
     return {}, false
   }
-
   sprite_init(
     sprite,
     texture,
@@ -260,7 +247,6 @@ create_sprite :: proc(
     sampler,
   )
   sprite.animation = animation
-
   res := sprite_write_to_gpu(manager, handle, sprite)
   if res != .SUCCESS {
     free(&manager.sprites, handle)

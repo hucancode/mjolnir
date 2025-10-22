@@ -17,12 +17,10 @@ test_resource_pool_basic_allocation :: proc(t: ^testing.T) {
   pool: resources.Pool(TestData)
   resources.pool_init(&pool)
   defer resources.pool_destroy(pool, proc(data: ^TestData) {})
-
   handle, data, ok := resources.alloc(&pool)
   testing.expect(t, ok)
   testing.expect(t, data != nil)
   testing.expect_value(t, handle.generation, 1)
-
   data.value = 42
   retrieved := resources.get(pool, handle)
   testing.expect_value(t, retrieved.value, 42)
@@ -33,11 +31,9 @@ test_resource_pool_handle_invalidation :: proc(t: ^testing.T) {
   pool: resources.Pool(TestData)
   resources.pool_init(&pool)
   defer resources.pool_destroy(pool, proc(data: ^TestData) {})
-
   handle, _, ok := resources.alloc(&pool)
   testing.expect(t, ok)
   resources.free(&pool, handle)
-
   retrieved, found := resources.get(pool, handle)
   testing.expect(t, !found)
   testing.expect(t, retrieved == nil)

@@ -382,14 +382,12 @@ process_mesh_primitives :: proc(
   if len(primitives) == 0 {
     return {}, .invalid_gltf
   }
-
   material_handle: resources.Handle
   if primitives[0].material != nil {
     if handle, found := material_cache[primitives[0].material]; found {
       material_handle = handle
     }
   }
-
   combined_vertices := make(
     [dynamic]geometry.Vertex,
     0,
@@ -397,7 +395,6 @@ process_mesh_primitives :: proc(
   )
   combined_indices := make([dynamic]u32, 0, context.temp_allocator)
   combined_skinnings: [dynamic]geometry.SkinningData
-
   if include_skinning {
     combined_skinnings = make(
       [dynamic]geometry.SkinningData,
@@ -405,12 +402,10 @@ process_mesh_primitives :: proc(
       context.temp_allocator,
     )
   }
-
   for &prim in primitives {
     vertex_offset := u32(len(combined_vertices))
     vertices_num := prim.attributes[0].data.count
     vertices := make([]geometry.Vertex, vertices_num, context.temp_allocator)
-
     skinnings: []geometry.SkinningData
     if include_skinning {
       skinnings = make(
@@ -419,14 +414,11 @@ process_mesh_primitives :: proc(
         context.temp_allocator,
       )
     }
-
     process_vertex_attributes(&prim, vertices, skinnings)
-
     append(&combined_vertices, ..vertices[:])
     if include_skinning {
       append(&combined_skinnings, ..skinnings[:])
     }
-
     if prim.indices != nil {
       indices := make([]u32, prim.indices.count, context.temp_allocator)
       _ = cgltf.accessor_unpack_indices(
@@ -435,17 +427,14 @@ process_mesh_primitives :: proc(
         size_of(u32),
         prim.indices.count,
       )
-
       for &index in indices {
         index += vertex_offset
       }
       append(&combined_indices, ..indices[:])
     }
   }
-
   final_vertices := slice.clone(combined_vertices[:])
   final_indices := slice.clone(combined_indices[:])
-
   geometry_data: geometry.Geometry
   if include_skinning {
     final_skinnings := slice.clone(combined_skinnings[:])
@@ -457,7 +446,6 @@ process_mesh_primitives :: proc(
   } else {
     geometry_data = geometry.make_geometry(final_vertices, final_indices)
   }
-
   return GeometryData {
       geometry = geometry_data,
       material_handle = material_handle,
@@ -769,7 +757,6 @@ load_animations :: proc(
   mesh := resources.get(rm.meshes, mesh_handle)
   if mesh == nil do return false
   skinning := &mesh.skinning.?
-
   for gltf_anim, i in gltf_data.animations {
     _, clip, clip_ok := resources.alloc(&rm.animation_clips)
     if !clip_ok {
@@ -792,7 +779,6 @@ load_animations :: proc(
         gltf_channel.target_node,
       ) or_continue
       engine_channel := &clip.channels[bone_idx]
-
       interpolation_mode := animation.InterpolationMode.LINEAR
       #partial switch gltf_channel.sampler.interpolation {
       case .step:

@@ -423,7 +423,6 @@ find_navmesh_point_from_mouse :: proc(
     ray_dir.y,
     ray_dir.z,
   )
-
   // Strategy 1: Try intersection with ground plane (y=0) first
   if abs(ray_dir.y) > 0.001 {
     t := -ray_origin.y / ray_dir.y
@@ -453,7 +452,6 @@ find_navmesh_point_from_mouse :: proc(
       }
     }
   }
-
   // Strategy 2: Sample along the ray at various distances (fallback)
   sample_distances := [10]f32{5, 10, 15, 20, 25, 30, 35, 40, 50, 60}
   for dist in sample_distances {

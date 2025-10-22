@@ -14,7 +14,6 @@ test_erode_walkable_area :: proc(t: ^testing.T) {
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     defer recast.free_heightfield(hf)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
-
     // Add a floor
     for x in 0..<10 {
         for z in 0..<10 {
@@ -22,15 +21,12 @@ test_erode_walkable_area :: proc(t: ^testing.T) {
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
-
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Building compact heightfield should succeed")
-
     // Erode with radius 1
     ok := recast.erode_walkable_area(1, chf)
     testing.expect(t, hf != nil, "Eroding walkable area should succeed")
-
     // Check that border areas were eroded
     for y in 0..<10 {
         for x in 0..<10 {
@@ -69,20 +65,16 @@ test_build_distance_field :: proc(t: ^testing.T) {
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
-
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Building compact heightfield should succeed")
-
     // Build distance field
     ok := recast.build_distance_field(chf)
     testing.expect(t, ok, "Building distance field should succeed")
-
     // Check that distance field was created
     testing.expect(t, chf.dist != nil, "Distance field should be allocated")
     testing.expect_value(t, len(chf.dist), int(len(chf.spans)))
     testing.expect(t, chf.max_distance > 0, "Max distance should be greater than 0")
-
     // THOROUGH VALIDATION: Check distance field mathematical correctness
     // In a distance field with a hole in center, distances should increase with distance from hole
     get_distance_at_grid :: proc(chf: ^recast.Compact_Heightfield, x, z: i32) -> u16 {
@@ -97,32 +89,26 @@ test_build_distance_field :: proc(t: ^testing.T) {
         }
         return 0
     }
-
     // Test specific distance relationships for mathematical correctness
     corner_dist := get_distance_at_grid(chf, 0, 0) // Far corner from hole
     edge_border_dist := get_distance_at_grid(chf, 0, 3) // Actual border cell (should be 0)
     hole_adjacent_dist := get_distance_at_grid(chf, 3, 3) // Adjacent to hole
     interior_dist := get_distance_at_grid(chf, 2, 2) // Interior cell
-
     // Validate distance field gradients: distances should increase away from edges/obstacles
     // Border cells should have distance 0 (they're edges themselves)
     testing.expect(t, edge_border_dist == 0,
                   "Border cells should have distance 0")
-
     // Cells adjacent to hole should have small positive distance (1-2 steps from edge)
     testing.expect(t, hole_adjacent_dist > 0 && hole_adjacent_dist <= 4,
                   "Hole-adjacent cells should have small positive distance")
-
     // Interior cells should have higher distances than cells closer to edges
     testing.expect(t, interior_dist >= hole_adjacent_dist,
                   "Interior cells should have distance >= hole-adjacent cells")
-
     // Validate that cells adjacent to hole have reasonable distances
     // Based on the visualization, the hole is at (4,4) and (5,5)
     // Adjacent cells should be at positions around the hole
     hole_adjacent_cells := 0
     total_adjacent_distance := u32(0)
-
     // Check all positions adjacent to the 2x2 hole at (4,4) and (5,5)
     adjacent_positions := [][2]i32{
         {3,3}, {3,4}, {3,5}, {3,6},  // Left side
@@ -130,7 +116,6 @@ test_build_distance_field :: proc(t: ^testing.T) {
         {5,3}, {5,6},                // Top and bottom of hole
         {6,3}, {6,4}, {6,5}, {6,6},  // Right side
     }
-
     for pos in adjacent_positions {
         dist := get_distance_at_grid(chf, pos.x, pos.y)
         if dist >= 0 { // Count all cells that exist (including distance 0)
@@ -140,11 +125,9 @@ test_build_distance_field :: proc(t: ^testing.T) {
             }
         }
     }
-
     // Should find most of the 12 adjacent positions (some might be at grid edges)
     testing.expect(t, hole_adjacent_cells >= 8 && hole_adjacent_cells <= 12,
                   "Should find 8-12 cells adjacent to 2x2 hole")
-
     if hole_adjacent_cells > 0 {
         // Adjacent cells to holes/edges often have distance 0 (they are edges themselves)
         // This is mathematically correct behavior for distance fields
@@ -153,7 +136,6 @@ test_build_distance_field :: proc(t: ^testing.T) {
         testing.expect(t, avg_adjacent_dist <= 3,
                       "Average adjacent distance should be reasonable (<= 3)")
     }
-
     // The test expectation seems wrong - the distance field algorithm uses a scale factor
     // Let me check what the actual edge distances should be
     for y in 0..<10 {
@@ -166,7 +148,6 @@ test_build_distance_field :: proc(t: ^testing.T) {
                         // For a proper distance field, edges should have distance 0
                         // But internal cells will have higher distances
                         is_edge := false
-
                         // Check if this is actually an edge cell (adjacent to empty space)
                         if i < u32(len(chf.spans)) {
                             s := &chf.spans[i]
@@ -176,7 +157,6 @@ test_build_distance_field :: proc(t: ^testing.T) {
                                     break
                                 }
                             }
-
                             if is_edge {
                                 testing.expect(t, chf.dist[i] == 0, "True edge cells should have distance 0")
                             }
@@ -201,7 +181,6 @@ test_build_regions_watershed :: proc(t: ^testing.T) {
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
-
     // Platform 2: x[11-19], z[11-19]
     for x in 11..<20 {
         for z in 11..<20 {
@@ -209,40 +188,32 @@ test_build_regions_watershed :: proc(t: ^testing.T) {
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
-
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Building compact heightfield should succeed")
-
     // Build distance field
     ok := recast.build_distance_field(chf)
     testing.expect(t, ok, "Building distance field should succeed")
-
     // Build regions
     ok = recast.build_regions(chf, 0, 8, 20)
     testing.expect(t, hf != nil, "Building regions should succeed")
-
     // Check that regions were created
     testing.expect(t, chf.max_regions >= 2, "Should have at least 2 regions")
-
     // Verify that the two platforms have different region IDs
     region1 := u16(0)
     region2 := u16(0)
-
     // Get region ID from first platform
     c1 := &chf.cells[5 + 5 * chf.width]
     if c1.count > 0 {
         s1 := &chf.spans[c1.index]
         region1 = s1.reg
     }
-
     // Get region ID from second platform
     c2 := &chf.cells[15 + 15 * chf.width]
     if c2.count > 0 {
         s2 := &chf.spans[c2.index]
         region2 = s2.reg
     }
-
     testing.expect(t, region1 != 0, "First platform should have a region")
     testing.expect(t, region2 != 0, "Second platform should have a region")
     testing.expect(t, region1 != region2, "Platforms should have different regions")
@@ -361,44 +332,35 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-
     ok := recast.build_distance_field(chf)
     testing.expect(t, ok, "Failed to build distance field")
-
     // Build regions with minRegionArea=4 (each platform has 9 cells)
     ok = recast.build_regions(chf, 0, 4, 20)
     testing.expect(t, ok, "Failed to build regions")
-
     // Validate region connectivity correctness
     get_region_at :: proc(chf: ^recast.Compact_Heightfield, x, z: i32) -> u16 {
         if x < 0 || x >= chf.width || z < 0 || z >= chf.height {
             return 0
         }
-
         cell := &chf.cells[x + z * chf.width]
         span_idx := cell.index
         span_count := cell.count
-
         if span_count > 0 && span_idx < u32(len(chf.spans)) {
             return chf.spans[span_idx].reg
         }
         return 0
     }
-
     // Get region IDs for both platforms
     platform1_region := get_region_at(chf, 1, 1)  // Center of platform 1
     platform2_region := get_region_at(chf, 6, 1)  // Center of platform 2
-
     // Validate region separation
     testing.expect(t, platform1_region != 0, "Platform 1 should be assigned to a region")
     testing.expect(t, platform2_region != 0, "Platform 2 should be assigned to a region")
     testing.expect(t, platform1_region != platform2_region,
                   "Disconnected platforms should have different regions")
-
     // Validate internal platform connectivity
     platform1_region_alt := get_region_at(chf, 0, 0)  // Corner of platform 1
     platform2_region_alt := get_region_at(chf, 7, 2)  // Corner of platform 2
-
     testing.expect(t, platform1_region == platform1_region_alt,
                   "All cells in platform 1 should have the same region")
     testing.expect(t, platform2_region == platform2_region_alt,
@@ -419,7 +381,6 @@ test_region_generation :: proc(t: ^testing.T) {
         {8, 0, 8}, {12, 0, 8}, {12, 3, 8}, {8, 3, 8},
         {8, 0, 12}, {12, 0, 12}, {12, 3, 12}, {8, 3, 12},
     }
-
     indices := []i32{
         0, 1, 2,
         0, 2, 3,
@@ -433,7 +394,6 @@ test_region_generation :: proc(t: ^testing.T) {
         8, 4, 7,
         8, 7, 11,
     }
-
     areas := make([]u8, 10)
     defer delete(areas)
     slice.fill(areas, recast.RC_WALKABLE_AREA)
@@ -476,7 +436,6 @@ test_region_generation :: proc(t: ^testing.T) {
     // Count spans in each region
     region_counts := make([]int, chf.max_regions + 1)
     defer delete(region_counts)
-
     for i in 0..<len(chf.spans) {
         reg := chf.spans[i].reg
         if reg > 0 && reg < u16(len(region_counts)) {

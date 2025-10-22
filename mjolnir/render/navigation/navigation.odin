@@ -17,7 +17,6 @@ Renderer :: struct {
   enabled:            bool,
   color_mode:         ColorMode,
   commands:           [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-
   // Path rendering
   path_vertex_buffer: gpu.MutableBuffer(Vertex),
   path_vertex_count:  u32,
@@ -61,13 +60,11 @@ init :: proc(
   renderer.height_offset = 0.05
   renderer.base_color = {0.0, 0.8, 0.2}
   renderer.path_enabled = false
-
   gpu.allocate_secondary_buffers(
     gctx.device,
     gctx.command_pool,
     renderer.commands[:],
   ) or_return
-
   create_pipeline(renderer, gctx, rm) or_return
   renderer.vertex_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -87,7 +84,6 @@ init :: proc(
     1024,
     {.VERTEX_BUFFER},
   ) or_return
-
   return .SUCCESS
 }
 
@@ -137,7 +133,6 @@ begin_pass :: proc(
 ) {
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-
   color_texture := resources.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
@@ -146,7 +141,6 @@ begin_pass :: proc(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
-
   color_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = color_texture.view,
@@ -154,7 +148,6 @@ begin_pass :: proc(
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-
   depth_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = depth_texture.view,
@@ -162,7 +155,6 @@ begin_pass :: proc(
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-
   extent := camera.extent
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
@@ -172,9 +164,7 @@ begin_pass :: proc(
     pColorAttachments = &color_attachment,
     pDepthAttachment = &depth_attachment,
   }
-
   vk.CmdBeginRendering(command_buffer, &render_info)
-
   viewport := vk.Viewport {
     width    = f32(extent.width),
     height   = f32(extent.height),
@@ -200,9 +190,7 @@ render :: proc(
   rm: ^resources.Manager,
 ) {
   if !renderer.enabled do return
-
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.pipeline)
-
   // Bind descriptor sets
   descriptor_sets := [?]vk.DescriptorSet{rm.camera_buffer_descriptor_set}
   vk.CmdBindDescriptorSets(
@@ -215,7 +203,6 @@ render :: proc(
     0,
     nil,
   )
-
   // Render navmesh
   if renderer.vertex_count > 0 && renderer.index_count > 0 {
     // Bind vertex and index buffers
@@ -234,7 +221,6 @@ render :: proc(
       0,
       .UINT32,
     )
-
     // Set push constants
     push_constants := PushConstants {
       world         = world_matrix,
@@ -251,16 +237,13 @@ render :: proc(
       size_of(PushConstants),
       &push_constants,
     )
-
     // Draw navmesh
     vk.CmdDrawIndexed(command_buffer, renderer.index_count, 1, 0, 0, 0)
   }
-
   // Render path
   if renderer.path_enabled && renderer.path_vertex_count > 0 {
     // Switch to line pipeline
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.line_pipeline)
-
     // Bind descriptor sets (same as before)
     vk.CmdBindDescriptorSets(
       command_buffer,
@@ -272,7 +255,6 @@ render :: proc(
       0,
       nil,
     )
-
     // Bind path vertex buffer
     path_buffers := []vk.Buffer{renderer.path_vertex_buffer.buffer}
     offsets := []vk.DeviceSize{0}
@@ -283,7 +265,6 @@ render :: proc(
       raw_data(path_buffers),
       raw_data(offsets),
     )
-
     // Set push constants for path
     path_push_constants := PushConstants {
       world         = world_matrix,
@@ -300,7 +281,6 @@ render :: proc(
       size_of(PushConstants),
       &path_push_constants,
     )
-
     // Draw path as line strip
     vk.CmdDraw(command_buffer, renderer.path_vertex_count, 1, 0, 0)
   }
@@ -313,11 +293,9 @@ load_navmesh_data :: proc(
 ) -> bool {
   renderer.vertex_count = u32(len(vertices))
   renderer.index_count = u32(len(indices))
-
   if renderer.vertex_count == 0 || renderer.index_count == 0 {
     return true
   }
-
   if renderer.vertex_count > 16384 || renderer.index_count > 32768 {
     log.errorf(
       "Navigation mesh too large: %d vertices, %d indices",
@@ -326,28 +304,23 @@ load_navmesh_data :: proc(
     )
     return false
   }
-
   vertex_result := gpu.write(&renderer.vertex_buffer, vertices)
   if vertex_result != .SUCCESS {
     return false
   }
-
   index_result := gpu.write(&renderer.index_buffer, indices)
   if index_result != .SUCCESS {
     return false
   }
-
   return true
 }
 
 regenerate_colors :: proc(renderer: ^Renderer, poly_count: u32) {
   if renderer.vertex_count == 0 do return
-
   // Read current vertex data (note: GPU read is not available, regenerate from stored data)
   vertices := make([]Vertex, renderer.vertex_count, context.temp_allocator)
   // Note: Since GPU read is not available, we'll need to store vertex data or regenerate
   // For now, just regenerate colors based on positions
-
   // Generate colors based on mode
   switch renderer.color_mode {
   case .Area_Colors:
@@ -391,7 +364,6 @@ regenerate_colors :: proc(renderer: ^Renderer, poly_count: u32) {
       }
     }
   }
-
   // Upload updated vertices
   gpu.write(&renderer.vertex_buffer, vertices)
 }
@@ -408,24 +380,20 @@ create_pipeline :: proc(
     navmesh_vert_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, navmesh_vert, nil)
-
   navmesh_frag_code := #load("../../shader/navmesh/frag.spv")
   navmesh_frag := gpu.create_shader_module(
     gctx.device,
     navmesh_frag_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, navmesh_frag, nil)
-
   // Create descriptor set layouts
   set_layouts := []vk.DescriptorSetLayout{rm.camera_buffer_set_layout}
-
   // Create pipeline layout
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
     offset     = 0,
     size       = size_of(PushConstants),
   }
-
   layout_info := vk.PipelineLayoutCreateInfo {
     sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
     setLayoutCount         = u32(len(set_layouts)),
@@ -433,21 +401,18 @@ create_pipeline :: proc(
     pushConstantRangeCount = 1,
     pPushConstantRanges    = &push_constant_range,
   }
-
   vk.CreatePipelineLayout(
     gctx.device,
     &layout_info,
     nil,
     &renderer.pipeline_layout,
   ) or_return
-
   // Vertex input description
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Vertex),
     inputRate = .VERTEX,
   }
-
   vertex_attributes := []vk.VertexInputAttributeDescription {
     {
       location = 0,
@@ -462,7 +427,6 @@ create_pipeline :: proc(
       offset = u32(offset_of(Vertex, color)),
     },
   }
-
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
@@ -470,19 +434,16 @@ create_pipeline :: proc(
     vertexAttributeDescriptionCount = u32(len(vertex_attributes)),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes),
   }
-
   // Common pipeline state
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
   }
-
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
@@ -490,12 +451,10 @@ create_pipeline :: proc(
     frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
-
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-
   // Depth testing enabled, writing disabled for transparency
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -503,7 +462,6 @@ create_pipeline :: proc(
     depthWriteEnable = false,
     depthCompareOp   = .LESS_OR_EQUAL,
   }
-
   // Alpha blending
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
@@ -515,31 +473,26 @@ create_pipeline :: proc(
     alphaBlendOp        = .ADD,
     colorWriteMask      = {.R, .G, .B, .A},
   }
-
   color_blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
-
   dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = u32(len(dynamic_states)),
     pDynamicStates    = raw_data(dynamic_states),
   }
-
   // Render target formats
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
-
   rendering_info := vk.PipelineRenderingCreateInfo {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_format,
     depthAttachmentFormat   = depth_format,
   }
-
   shader_stages := []vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -554,7 +507,6 @@ create_pipeline :: proc(
       pName = "main",
     },
   }
-
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = u32(len(shader_stages)),
@@ -570,7 +522,6 @@ create_pipeline :: proc(
     layout              = renderer.pipeline_layout,
     pNext               = &rendering_info,
   }
-
   vk.CreateGraphicsPipelines(
     gctx.device,
     0,
@@ -579,13 +530,11 @@ create_pipeline :: proc(
     nil,
     &renderer.pipeline,
   ) or_return
-
   // Create line pipeline for path rendering
   input_assembly_lines := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .LINE_STRIP,
   }
-
   rasterizer_lines := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
@@ -593,7 +542,6 @@ create_pipeline :: proc(
     frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 3.0, // Thicker lines for better visibility
   }
-
   pipeline_info_lines := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = u32(len(shader_stages)),
@@ -609,7 +557,6 @@ create_pipeline :: proc(
     layout              = renderer.pipeline_layout,
     pNext               = &rendering_info,
   }
-
   vk.CreateGraphicsPipelines(
     gctx.device,
     0,
@@ -618,7 +565,6 @@ create_pipeline :: proc(
     nil,
     &renderer.line_pipeline,
   ) or_return
-
   log.info("Navigation mesh pipeline created successfully")
   return .SUCCESS
 }
@@ -634,17 +580,14 @@ update_path :: proc(
     renderer.path_vertex_count = 0
     return
   }
-
   // Create vertices for the path line strip
   path_vertices := make([]Vertex, len(path_points), context.temp_allocator)
-
   for point, i in path_points {
     path_vertices[i] = Vertex {
       position = point,
       color    = path_color,
     }
   }
-
   // Upload to path vertex buffer
   if len(path_vertices) <= 1024 {
     vertex_result := gpu.write(&renderer.path_vertex_buffer, path_vertices)

@@ -176,7 +176,6 @@ spawn_child :: proc(
   return world.spawn_child(&engine.world, parent, attachment, &engine.rm)
 }
 
-// World/node manipulation
 load_gltf :: proc(
   engine: ^Engine,
   path: string,
@@ -324,7 +323,6 @@ spawn_spot_light :: proc(
 ) {
   handle, node, ok = spawn(engine, nil)
   if !ok do return
-
   attachment := world.create_spot_light_attachment(
     handle,
     &engine.rm,
@@ -443,7 +441,6 @@ create_camera :: proc(
   if !camera_ok {
     return {}, false
   }
-
   init_result := resources.camera_init(
     camera_ptr,
     &engine.gctx,
@@ -485,7 +482,6 @@ get_camera_attachment :: proc(
   if handle.generation == 0 {
     return {}, false
   }
-
   return handle, true
 }
 
@@ -496,7 +492,6 @@ update_material_texture :: proc(
   texture_handle: resources.Handle,
 ) -> bool {
   material := resources.get(engine.rm.materials, material_handle) or_return
-
   switch texture_type {
   case .ALBEDO_TEXTURE:
     material.albedo = texture_handle
@@ -554,7 +549,6 @@ build_navigation_mesh_from_world :: proc(
   config.max_verts_per_poly = i32(verts_per_poly)
   config.detail_sample_dist = detail_sample_dist
   config.detail_sample_max_error = detail_sample_max_error
-
   return world.build_navigation_mesh_from_world(
     &engine.world,
     &engine.rm,

@@ -25,7 +25,6 @@ Manager :: struct {
   linear_clamp_sampler:                      vk.Sampler,
   nearest_repeat_sampler:                    vk.Sampler,
   nearest_clamp_sampler:                     vk.Sampler,
-
   // Resource pools
   meshes:                                    Pool(Mesh),
   materials:                                 Pool(Material),
@@ -37,12 +36,10 @@ Manager :: struct {
   forcefields:                               Pool(ForceField),
   animation_clips:                           Pool(animation.Clip),
   sprites:                                   Pool(Sprite),
-
   // Navigation system resources
   nav_meshes:                                Pool(NavMesh),
   nav_contexts:                              Pool(NavContext),
   navigation_system:                         NavigationSystem,
-
   // Bone matrix system
   bone_buffer_set_layout:                    vk.DescriptorSetLayout,
   bone_buffer_descriptor_set:                vk.DescriptorSet,
@@ -50,54 +47,44 @@ Manager :: struct {
     matrix[4, 4]f32,
   ),
   bone_matrix_slab:                          SlabAllocator,
-
   // Bindless camera buffer system
   camera_buffer_set_layout:                  vk.DescriptorSetLayout,
   camera_buffer_descriptor_set:              vk.DescriptorSet,
   camera_buffer:                             gpu.MutableBuffer(CameraData),
-
   // Bindless spherical camera buffer system
   spherical_camera_buffer_set_layout:        vk.DescriptorSetLayout,
   spherical_camera_buffer_descriptor_set:    vk.DescriptorSet,
   spherical_camera_buffer:                   gpu.MutableBuffer(CameraData),
-
   // Bindless material buffer system
   material_buffer_set_layout:                vk.DescriptorSetLayout,
   material_buffer_descriptor_set:            vk.DescriptorSet,
   material_buffer:                           gpu.MutableBuffer(MaterialData),
-
   // Bindless world matrix buffer system
   world_matrix_buffer_set_layout:            vk.DescriptorSetLayout,
   world_matrix_descriptor_set:               vk.DescriptorSet,
   world_matrix_buffer:                       gpu.MutableBuffer(
     matrix[4, 4]f32,
   ),
-
   // Bindless node data buffer system
   node_data_buffer_set_layout:               vk.DescriptorSetLayout,
   node_data_descriptor_set:                  vk.DescriptorSet,
   node_data_buffer:                          gpu.MutableBuffer(NodeData),
-
   // Bindless mesh data buffer system
   mesh_data_buffer_set_layout:               vk.DescriptorSetLayout,
   mesh_data_descriptor_set:                  vk.DescriptorSet,
   mesh_data_buffer:                          gpu.MutableBuffer(MeshData),
-
   // Bindless emitter buffer system
   emitter_buffer_set_layout:                 vk.DescriptorSetLayout,
   emitter_buffer_descriptor_set:             vk.DescriptorSet,
   emitter_buffer:                            gpu.MutableBuffer(EmitterData),
-
   // Bindless forcefield buffer system
   forcefield_buffer_set_layout:              vk.DescriptorSetLayout,
   forcefield_buffer_descriptor_set:          vk.DescriptorSet,
   forcefield_buffer:                         gpu.MutableBuffer(ForceFieldData),
-
   // Bindless sprite buffer system
   sprite_buffer_set_layout:                  vk.DescriptorSetLayout,
   sprite_buffer_descriptor_set:              vk.DescriptorSet,
   sprite_buffer:                             gpu.MutableBuffer(SpriteData),
-
   // Bindless vertex skinning buffer system
   vertex_skinning_buffer_set_layout:         vk.DescriptorSetLayout,
   vertex_skinning_descriptor_set:            vk.DescriptorSet,
@@ -105,26 +92,21 @@ Manager :: struct {
     geometry.SkinningData,
   ),
   vertex_skinning_slab:                      SlabAllocator,
-
   // Bindless lights buffer system (staged - infrequent updates)
   lights:                                    Pool(Light),
   lights_buffer_set_layout:                  vk.DescriptorSetLayout,
   lights_buffer_descriptor_set:              vk.DescriptorSet,
   lights_buffer:                             gpu.MutableBuffer(LightData),
-
   // Bindless texture system
   textures_set_layout:                       vk.DescriptorSetLayout,
   textures_descriptor_set:                   vk.DescriptorSet,
-
   // Shared pipeline layouts
   geometry_pipeline_layout:                  vk.PipelineLayout, // Used by geometry, transparency, depth renderers
   spherical_camera_pipeline_layout:          vk.PipelineLayout, // Used by spherical depth rendering (point light shadows)
-
   // Visibility system descriptor layouts (for shadow cameras)
   visibility_late_descriptor_layout:         vk.DescriptorSetLayout,
   visibility_sphere_descriptor_layout:       vk.DescriptorSetLayout,
   visibility_depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
-
   // Bindless vertex/index buffer system
   vertex_buffer:                             gpu.ImmutableBuffer(
     geometry.Vertex,
@@ -132,7 +114,6 @@ Manager :: struct {
   index_buffer:                              gpu.ImmutableBuffer(u32),
   vertex_slab:                               SlabAllocator,
   index_slab:                                SlabAllocator,
-
   // Frame-scoped bookkeeping
   current_frame_index:                       u32,
 }
@@ -326,7 +307,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(manager.lights.entries)
   delete(manager.lights.free_indices)
-
   // Clean up spherical cameras with GPU resources (frees their textures)
   for &entry in manager.spherical_cameras.entries {
     if entry.generation > 0 && entry.active {
@@ -340,7 +320,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(manager.spherical_cameras.entries)
   delete(manager.spherical_cameras.free_indices)
-
   // Clean up regular cameras with GPU resources (frees their textures)
   for &entry in manager.cameras.entries {
     if entry.generation > 0 && entry.active {
@@ -349,7 +328,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(manager.cameras.entries)
   delete(manager.cameras.free_indices)
-
   // Now safe to destroy texture pools - all owned textures have been freed
   for &entry in manager.image_2d_buffers.entries {
     if entry.generation > 0 && entry.active {
@@ -358,7 +336,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(manager.image_2d_buffers.entries)
   delete(manager.image_2d_buffers.free_indices)
-
   for &entry in manager.image_cube_buffers.entries {
     if entry.generation > 0 && entry.active {
       gpu.cube_depth_texture_destroy(gctx.device, &entry.item)
@@ -366,7 +343,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(manager.image_cube_buffers.entries)
   delete(manager.image_cube_buffers.free_indices)
-
   for &entry in manager.meshes.entries {
     if entry.generation > 0 && entry.active {
       mesh_destroy(&entry.item, gctx, manager)
@@ -374,7 +350,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(manager.meshes.entries)
   delete(manager.meshes.free_indices)
-
   // Simple cleanup for pools without GPU resources
   delete(manager.materials.entries)
   delete(manager.materials.free_indices)
@@ -400,7 +375,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(manager.nav_meshes.entries)
   delete(manager.nav_meshes.free_indices)
-
   for &entry in manager.nav_contexts.entries {
     if entry.generation > 0 && entry.active {
       // Clean up navigation contexts
@@ -409,7 +383,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(manager.nav_contexts.entries)
   delete(manager.nav_contexts.free_indices)
-
   // Clean up navigation system
   delete(manager.navigation_system.geometry_cache)
   delete(manager.navigation_system.dirty_tiles)
@@ -432,7 +405,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   vk.DestroyDescriptorSetLayout(gctx.device, manager.textures_set_layout, nil)
   manager.textures_set_layout = 0
   manager.textures_descriptor_set = 0
-
   // Destroy visibility descriptor set layouts
   if manager.visibility_late_descriptor_layout != 0 {
     vk.DestroyDescriptorSetLayout(
@@ -655,7 +627,6 @@ init_bone_matrix_allocator :: proc(
     pBufferInfo     = &buffer_info,
   }
   vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
-
   return .SUCCESS
 }
 
@@ -667,7 +638,6 @@ init_camera_buffer :: proc(
     "Creating camera buffer with capacity %d cameras...",
     MAX_ACTIVE_CAMERAS,
   )
-
   // Create camera buffer
   manager.camera_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -676,7 +646,6 @@ init_camera_buffer :: proc(
     {.STORAGE_BUFFER},
     nil,
   ) or_return
-
   // Create descriptor set layout
   camera_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -686,7 +655,6 @@ init_camera_buffer :: proc(
       stageFlags = {.VERTEX, .FRAGMENT, .COMPUTE},
     },
   }
-
   vk.CreateDescriptorSetLayout(
     gctx.device,
     &vk.DescriptorSetLayoutCreateInfo {
@@ -697,7 +665,6 @@ init_camera_buffer :: proc(
     nil,
     &manager.camera_buffer_set_layout,
   ) or_return
-
   // Allocate descriptor set
   vk.AllocateDescriptorSets(
     gctx.device,
@@ -709,14 +676,12 @@ init_camera_buffer :: proc(
     },
     &manager.camera_buffer_descriptor_set,
   ) or_return
-
   // Update descriptor set
   buffer_info := vk.DescriptorBufferInfo {
     buffer = manager.camera_buffer.buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
-
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
     dstSet          = manager.camera_buffer_descriptor_set,
@@ -725,9 +690,7 @@ init_camera_buffer :: proc(
     descriptorCount = 1,
     pBufferInfo     = &buffer_info,
   }
-
   vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
-
   log.infof("Camera buffer initialized successfully")
   return .SUCCESS
 }
@@ -1397,7 +1360,6 @@ init_spherical_camera_buffer :: proc(
     "Creating spherical camera buffer with capacity %d cameras...",
     MAX_ACTIVE_CAMERAS,
   )
-
   // Create spherical camera buffer
   manager.spherical_camera_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -1406,7 +1368,6 @@ init_spherical_camera_buffer :: proc(
     {.STORAGE_BUFFER},
     nil,
   ) or_return
-
   // Create descriptor set layout
   camera_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -1416,7 +1377,6 @@ init_spherical_camera_buffer :: proc(
       stageFlags = {.VERTEX, .FRAGMENT, .COMPUTE, .GEOMETRY},
     },
   }
-
   vk.CreateDescriptorSetLayout(
     gctx.device,
     &vk.DescriptorSetLayoutCreateInfo {
@@ -1427,7 +1387,6 @@ init_spherical_camera_buffer :: proc(
     nil,
     &manager.spherical_camera_buffer_set_layout,
   ) or_return
-
   // Allocate descriptor set
   vk.AllocateDescriptorSets(
     gctx.device,
@@ -1439,14 +1398,12 @@ init_spherical_camera_buffer :: proc(
     },
     &manager.spherical_camera_buffer_descriptor_set,
   ) or_return
-
   // Update descriptor set
   buffer_info := vk.DescriptorBufferInfo {
     buffer = manager.spherical_camera_buffer.buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
-
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
     dstSet          = manager.spherical_camera_buffer_descriptor_set,
@@ -1455,9 +1412,7 @@ init_spherical_camera_buffer :: proc(
     descriptorCount = 1,
     pBufferInfo     = &buffer_info,
   }
-
   vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
-
   log.infof("Spherical camera buffer initialized successfully")
   return .SUCCESS
 }
@@ -1693,7 +1648,6 @@ manager_free_vertices :: proc(
 manager_free_indices :: proc(manager: ^Manager, allocation: BufferAllocation) {
   slab_free(&manager.index_slab, allocation.offset)
 }
-
 
 create_animation_clip :: proc(
   manager: ^Manager,

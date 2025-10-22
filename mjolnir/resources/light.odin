@@ -50,7 +50,6 @@ create_light :: proc(
     log.error("Failed to allocate light: pool capacity reached")
     return Handle{}, false
   }
-
   light.type = light_type
   light.node_handle = node_handle
   light.cast_shadow = cast_shadow
@@ -62,7 +61,6 @@ create_light :: proc(
   light.camera_handle = {}
   light.camera_index = 0xFFFFFFFF
   light.shadow_map = 0xFFFFFFFF
-
   if cast_shadow {
     #partial switch light_type {
     case .POINT:
@@ -73,7 +71,6 @@ create_light :: proc(
         free(&manager.lights, handle)
         return Handle{}, false
       }
-
       init_result := spherical_camera_init(
         spherical_cam,
         gctx,
@@ -86,18 +83,15 @@ create_light :: proc(
         .D32_SFLOAT,
         MAX_NODES_IN_SCENE,
       )
-
       if init_result != .SUCCESS {
         log.error("Failed to initialize spherical camera for point light")
         free(&manager.spherical_cameras, cam_handle)
         free(&manager.lights, handle)
         return Handle{}, false
       }
-
       light.camera_handle = cam_handle
       light.camera_index = cam_handle.index
       light.shadow_map = spherical_cam.depth_cube.index
-
     case .DIRECTIONAL, .SPOT:
       // Directional and spot lights use regular cameras
       cam_handle, cam, cam_ok := alloc(&manager.cameras)
@@ -106,13 +100,11 @@ create_light :: proc(
         free(&manager.lights, handle)
         return Handle{}, false
       }
-
       // Camera parameters differ by light type
       fov := f32(math.PI * 0.5) // 90 degrees default
       if light_type == .SPOT {
         fov = angle_outer * 2.0 // FOV should cover the spot cone
       }
-
       init_result := camera_init(
         cam,
         gctx,
@@ -128,14 +120,12 @@ create_light :: proc(
         radius * 0.01, // near plane as 1% of radius
         radius, // far
       )
-
       if init_result != .SUCCESS {
         log.error("Failed to initialize camera for directional/spot light")
         free(&manager.cameras, cam_handle)
         free(&manager.lights, handle)
         return Handle{}, false
       }
-
       light.camera_handle = cam_handle
       light.camera_index = cam_handle.index
       // Use camera's shared depth texture for shadow map
@@ -148,7 +138,6 @@ create_light :: proc(
       )
     }
   }
-
   gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   return handle, true
 }
@@ -163,7 +152,6 @@ destroy_light :: proc(
   if !light_ok {
     return false
   }
-
   // Destroy associated camera if it exists (switch on light type to determine pool)
   if light.camera_handle.generation > 0 {
     #partial switch light.type {
@@ -174,7 +162,6 @@ destroy_light :: proc(
         spherical_camera_destroy(cam, gctx.device, gctx.command_pool, manager)
       }
       free(&manager.spherical_cameras, light.camera_handle)
-
     case .DIRECTIONAL, .SPOT:
       // Directional and spot lights use regular cameras
       if cam, cam_ok := get(manager.cameras, light.camera_handle); cam_ok {
@@ -183,7 +170,6 @@ destroy_light :: proc(
       free(&manager.cameras, light.camera_handle)
     }
   }
-
   _, freed := free(&manager.lights, handle)
   return freed
 }
