@@ -407,13 +407,13 @@ ray_aabb_intersection_safe :: proc(
       t1 := (aabb.min[i] - origin[i]) * inv_d
       t2 := (aabb.max[i] - origin[i]) * inv_d
 
-      t_min[i] = min_f32(t1, t2)
-      t_max[i] = max_f32(t1, t2)
+      t_min[i] = min(t1, t2)
+      t_max[i] = max(t1, t2)
     }
   }
 
-  t_near = max_f32(max_f32(t_min.x, t_min.y), t_min.z)
-  t_far = min_f32(min_f32(t_max.x, t_max.y), t_max.z)
+  t_near = max(t_min.x, t_min.y, t_min.z)
+  t_far = min(t_max.x, t_max.y, t_max.z)
 
   // Valid intersection if t_far >= t_near
   if t_far < t_near do return F32_MAX, -F32_MAX

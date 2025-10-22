@@ -100,39 +100,26 @@ ray_aabb_intersection :: proc(origin: [3]f32, inv_dir: [3]f32, aabb: Aabb) -> (t
     } else {
       t1 := (aabb.min[i] - origin[i]) * inv_dir[i]
       t2 := (aabb.max[i] - origin[i]) * inv_dir[i]
-
-      t_min[i] = min_f32(t1, t2)
-      t_max[i] = max_f32(t1, t2)
+      t_min[i] = min(t1, t2)
+      t_max[i] = max(t1, t2)
     }
   }
-
-  t_near = max_f32(max_f32(t_min.x, t_min.y), t_min.z)
-  t_far = min_f32(min_f32(t_max.x, t_max.y), t_max.z)
-
+  t_near = max(t_min.x, t_min.y, t_min.z)
+  t_far = min(t_max.x, t_max.y, t_max.z)
   return
 }
 
 ray_aabb_intersection_far :: proc(origin: [3]f32, inv_dir: [3]f32, aabb: Aabb) -> f32 {
   t1 := (aabb.min - origin) * inv_dir
   t2 := (aabb.max - origin) * inv_dir
-
   t_max := linalg.max(t1, t2)
-
-  return min(min(t_max.x, t_max.y), t_max.z)
-}
-
-min_f32 :: proc(a, b: f32) -> f32 {
-  return a < b ? a : b
-}
-
-max_f32 :: proc(a, b: f32) -> f32 {
-  return a > b ? a : b
+  return min(t_max.x, t_max.y, t_max.z)
 }
 
 min_vec3 :: proc(v: [3]f32) -> f32 {
-  return min_f32(min_f32(v.x, v.y), v.z)
+  return min(v.x, v.y, v.z)
 }
 
 max_vec3 :: proc(v: [3]f32) -> f32 {
-  return max_f32(max_f32(v.x, v.y), v.z)
+  return max(v.x, v.y, v.z)
 }
