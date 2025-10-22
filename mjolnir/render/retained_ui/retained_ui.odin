@@ -63,27 +63,43 @@ ImageData :: struct {
 }
 
 TextBoxData :: struct {
-  text:        string,
-  max_length:  u32,
-  placeholder: string,
-  focused:     bool,
+  text:          [dynamic]u8,  // mutable text buffer
+  max_length:    u32,
+  placeholder:   string,
+  focused:       bool,
+  hovered:       bool,
+  cursor_pos:    u32,          // cursor position in text
+  selection_start: i32,        // -1 if no selection
+  selection_end:   i32,
+  callback:      proc(ctx: rawptr),  // called on text change
+  user_data:     rawptr,
 }
 
 ComboBoxData :: struct {
   items:         []string,
-  selected:      i32,
+  selected:      i32,          // -1 if nothing selected
   expanded:      bool,
+  hovered:       bool,
+  hovered_item:  i32,          // which item in dropdown is hovered (-1 if none)
+  callback:      proc(ctx: rawptr, selected_index: i32),  // called when selection changes
+  user_data:     rawptr,
 }
 
 CheckBoxData :: struct {
-  checked:  bool,
-  label:    string,
+  checked:   bool,
+  label:     string,
+  hovered:   bool,
+  callback:  proc(ctx: rawptr, checked: bool),  // called when state changes
+  user_data: rawptr,
 }
 
 RadioButtonData :: struct {
-  group_id: u32,
-  selected: bool,
-  label:    string,
+  group_id:  u32,
+  selected:  bool,
+  label:     string,
+  hovered:   bool,
+  callback:  proc(ctx: rawptr),  // called when selected
+  user_data: rawptr,
 }
 
 WindowData :: struct {
@@ -649,7 +665,8 @@ widget_deinit :: proc(widget: ^Widget) {
   case ImageData:
     // Image data cleanup if needed
   case TextBoxData:
-    // TextBox data cleanup if needed
+    // Clean up dynamic text buffer
+    delete(data.text)
   case ComboBoxData:
     // ComboBox data cleanup if needed
   case CheckBoxData:
@@ -704,44 +721,6 @@ create_widget :: proc(
   return
 }
 
-destroy_widget :: proc(self: ^Manager, handle: WidgetHandle) {
-  widget, found := resources.get(self.widgets, handle)
-  if !found do return
-
-  child := widget.first_child
-  for child.index != 0 {
-    next_child, _ := resources.get(self.widgets, child)
-    next := next_child.next_sibling
-    destroy_widget(self, child)
-    child = next
-  }
-
-  if parent_widget, found := resources.get(self.widgets, widget.parent); found {
-    if parent_widget.first_child == handle {
-      parent_widget.first_child = widget.next_sibling
-    }
-    if parent_widget.last_child == handle {
-      parent_widget.last_child = widget.prev_sibling
-    }
-  } else {
-    for root_widget, i in self.root_widgets {
-      if root_widget == handle {
-        ordered_remove(&self.root_widgets, i)
-        break
-      }
-    }
-  }
-
-  if prev, found := resources.get(self.widgets, widget.prev_sibling); found {
-    prev.next_sibling = widget.next_sibling
-  }
-  if next, found := resources.get(self.widgets, widget.next_sibling); found {
-    next.prev_sibling = widget.prev_sibling
-  }
-
-  resources.free(&self.widgets, handle)
-}
-
 mark_dirty :: proc(self: ^Manager, handle: WidgetHandle) {
   widget, found := resources.get(self.widgets, handle)
   if !found do return
@@ -750,27 +729,6 @@ mark_dirty :: proc(self: ^Manager, handle: WidgetHandle) {
     widget.dirty = true
     append(&self.dirty_widgets, handle)
   }
-}
-
-set_position :: proc(self: ^Manager, handle: WidgetHandle, x, y: f32) {
-  widget, found := resources.get(self.widgets, handle)
-  if !found do return
-  widget.position = {x, y}
-  mark_dirty(self, handle)
-}
-
-set_size :: proc(self: ^Manager, handle: WidgetHandle, w, h: f32) {
-  widget, found := resources.get(self.widgets, handle)
-  if !found do return
-  widget.size = {w, h}
-  mark_dirty(self, handle)
-}
-
-set_visible :: proc(self: ^Manager, handle: WidgetHandle, visible: bool) {
-  widget, found := resources.get(self.widgets, handle)
-  if !found do return
-  widget.visible = visible
-  mark_dirty(self, handle)
 }
 
 // ============================================================================
@@ -807,8 +765,14 @@ build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
       build_image_commands(self, &self.draw_lists[i], handle, widget)
     case .WINDOW:
       build_window_commands(self, &self.draw_lists[i], handle, widget)
-    case .TEXT_BOX, .COMBO_BOX, .CHECK_BOX, .RADIO_BUTTON:
-      // Not implemented in first version
+    case .TEXT_BOX:
+      build_textbox_commands(self, &self.draw_lists[i], handle, widget)
+    case .COMBO_BOX:
+      build_combobox_commands(self, &self.draw_lists[i], handle, widget)
+    case .CHECK_BOX:
+      build_checkbox_commands(self, &self.draw_lists[i], handle, widget)
+    case .RADIO_BUTTON:
+      build_radiobutton_commands(self, &self.draw_lists[i], handle, widget)
     }
   }
 
@@ -952,6 +916,264 @@ build_window_commands :: proc(
   }
 }
 
+build_textbox_commands :: proc(
+  self: ^Manager,
+  draw_list: ^DrawList,
+  handle: WidgetHandle,
+  widget: ^Widget,
+) {
+  data := widget.data.(TextBoxData)
+
+  // Background
+  bg_color := widget.bg_color
+  if data.focused {
+    bg_color = {255, 255, 255, 255}  // White when focused
+  } else if data.hovered {
+    bg_color = {245, 245, 245, 255}  // Light gray when hovered
+  }
+
+  append(
+    &draw_list.commands,
+    DrawCommand {
+      type = .RECT,
+      widget = handle,
+      rect = {widget.position.x, widget.position.y, widget.size.x, widget.size.y},
+      color = bg_color,
+      uv = {0, 0, 1, 1},
+    },
+  )
+
+  // Border (darker when focused)
+  border_color := data.focused ? [4]u8{60, 120, 200, 255} : widget.border_color
+
+  // Text or placeholder - show placeholder if text is empty
+  if len(data.text) == 0 {
+    // Show placeholder in gray
+    if len(data.placeholder) > 0 {
+      append(
+        &draw_list.commands,
+        DrawCommand {
+          type = .TEXT,
+          widget = handle,
+          rect = {widget.position.x + 8, widget.position.y + 8, widget.size.x - 16, widget.size.y - 16},
+          color = {150, 150, 150, 255},
+          text = data.placeholder,
+        },
+      )
+    }
+  } else {
+    // Show actual text - PROBLEM: string(data.text[:]) is temporary!
+    // We cannot store this in draw commands because it references stack memory
+    // For now, skip rendering textbox text content
+    // TODO: Store text as string in TextBoxData instead of [dynamic]u8
+  }
+
+  // TODO: Draw cursor when focused (needs line primitive)
+}
+
+build_combobox_commands :: proc(
+  self: ^Manager,
+  draw_list: ^DrawList,
+  handle: WidgetHandle,
+  widget: ^Widget,
+) {
+  data := widget.data.(ComboBoxData)
+
+  // Main box
+  bg_color := data.hovered ? [4]u8{230, 230, 230, 255} : widget.bg_color
+
+  append(
+    &draw_list.commands,
+    DrawCommand {
+      type = .RECT,
+      widget = handle,
+      rect = {widget.position.x, widget.position.y, widget.size.x, widget.size.y},
+      color = bg_color,
+      uv = {0, 0, 1, 1},
+    },
+  )
+
+  // Selected item text - must reference stable memory
+  if data.selected >= 0 && data.selected < i32(len(data.items)) {
+    // Reference stable string from items array
+    append(
+      &draw_list.commands,
+      DrawCommand {
+        type = .TEXT,
+        widget = handle,
+        rect = {widget.position.x + 8, widget.position.y + 8, widget.size.x - 32, widget.size.y - 16},
+        color = widget.fg_color,
+        text = data.items[data.selected],
+      },
+    )
+  } else {
+    // Reference string literal (stable)
+    append(
+      &draw_list.commands,
+      DrawCommand {
+        type = .TEXT,
+        widget = handle,
+        rect = {widget.position.x + 8, widget.position.y + 8, widget.size.x - 32, widget.size.y - 16},
+        color = widget.fg_color,
+        text = "Select...",
+      },
+    )
+  }
+
+  // Dropdown arrow (simple text)
+  append(
+    &draw_list.commands,
+    DrawCommand {
+      type = .TEXT,
+      widget = handle,
+      rect = {widget.position.x + widget.size.x - 24, widget.position.y + 8, 16, widget.size.y - 16},
+      color = widget.fg_color,
+      text = data.expanded ? "▲" : "▼",
+    },
+  )
+
+  // Dropdown list
+  if data.expanded {
+    item_height: f32 = 24
+    dropdown_y := widget.position.y + widget.size.y
+
+    for item, i in data.items {
+      item_bg := data.hovered_item == i32(i) ? [4]u8{200, 220, 255, 255} : [4]u8{250, 250, 250, 255}
+
+      append(
+        &draw_list.commands,
+        DrawCommand {
+          type = .RECT,
+          widget = handle,
+          rect = {widget.position.x, dropdown_y + f32(i) * item_height, widget.size.x, item_height},
+          color = item_bg,
+          uv = {0, 0, 1, 1},
+        },
+      )
+
+      // IMPORTANT: Reference data.items[i] directly, not the local 'item' variable
+      append(
+        &draw_list.commands,
+        DrawCommand {
+          type = .TEXT,
+          widget = handle,
+          rect = {widget.position.x + 8, dropdown_y + f32(i) * item_height + 4, widget.size.x - 16, item_height - 8},
+          color = {0, 0, 0, 255},
+          text = data.items[i],  // Reference array element directly
+        },
+      )
+    }
+  }
+}
+
+build_checkbox_commands :: proc(
+  self: ^Manager,
+  draw_list: ^DrawList,
+  handle: WidgetHandle,
+  widget: ^Widget,
+) {
+  data := widget.data.(CheckBoxData)
+
+  box_size: f32 = 20
+  spacing: f32 = 8
+
+  // Checkbox box
+  box_bg := data.hovered ? [4]u8{230, 230, 230, 255} : widget.bg_color
+
+  append(
+    &draw_list.commands,
+    DrawCommand {
+      type = .RECT,
+      widget = handle,
+      rect = {widget.position.x, widget.position.y, box_size, box_size},
+      color = box_bg,
+      uv = {0, 0, 1, 1},
+    },
+  )
+
+  // Check mark
+  if data.checked {
+    append(
+      &draw_list.commands,
+      DrawCommand {
+        type = .TEXT,
+        widget = handle,
+        rect = {widget.position.x + 2, widget.position.y + 2, box_size - 4, box_size - 4},
+        color = {40, 100, 200, 255},
+        text = "✓",
+      },
+    )
+  }
+
+  // Label
+  if len(data.label) > 0 {
+    append(
+      &draw_list.commands,
+      DrawCommand {
+        type = .TEXT,
+        widget = handle,
+        rect = {widget.position.x + box_size + spacing, widget.position.y, widget.size.x - box_size - spacing, box_size},
+        color = widget.fg_color,
+        text = data.label,
+      },
+    )
+  }
+}
+
+build_radiobutton_commands :: proc(
+  self: ^Manager,
+  draw_list: ^DrawList,
+  handle: WidgetHandle,
+  widget: ^Widget,
+) {
+  data := widget.data.(RadioButtonData)
+
+  circle_size: f32 = 20
+  spacing: f32 = 8
+
+  // Radio circle background
+  circle_bg := data.hovered ? [4]u8{230, 230, 230, 255} : widget.bg_color
+
+  append(
+    &draw_list.commands,
+    DrawCommand {
+      type = .RECT,
+      widget = handle,
+      rect = {widget.position.x, widget.position.y, circle_size, circle_size},
+      color = circle_bg,
+      uv = {0, 0, 1, 1},
+    },
+  )
+
+  // Selection dot (using unicode circle)
+  if data.selected {
+    append(
+      &draw_list.commands,
+      DrawCommand {
+        type = .TEXT,
+        widget = handle,
+        rect = {widget.position.x + 4, widget.position.y + 2, circle_size - 8, circle_size - 4},
+        color = {40, 100, 200, 255},
+        text = "●",
+      },
+    )
+  }
+
+  // Label
+  if len(data.label) > 0 {
+    append(
+      &draw_list.commands,
+      DrawCommand {
+        type = .TEXT,
+        widget = handle,
+        rect = {widget.position.x + circle_size + spacing, widget.position.y, widget.size.x - circle_size - spacing, circle_size},
+        color = widget.fg_color,
+        text = data.label,
+      },
+    )
+  }
+}
+
 // ============================================================================
 // Input Handling
 // ============================================================================
@@ -967,6 +1189,27 @@ update_input :: proc(self: ^Manager, mouse_x, mouse_y: f32, mouse_down: bool) {
 
   for root_handle in self.root_widgets {
     update_widget_input(self, root_handle)
+  }
+}
+
+deselect_radio_group :: proc(self: ^Manager, handle: WidgetHandle, group_id: u32, exclude_handle: WidgetHandle) {
+  widget, found := resources.get(self.widgets, handle)
+  if !found do return
+
+  if widget.type == .RADIO_BUTTON && handle != exclude_handle {
+    data := &widget.data.(RadioButtonData)
+    if data.group_id == group_id && data.selected {
+      data.selected = false
+      mark_dirty(self, handle)
+    }
+  }
+
+  // Recursively check children
+  child := widget.first_child
+  for child.index != 0 {
+    deselect_radio_group(self, child, group_id, exclude_handle)
+    child_widget, _ := resources.get(self.widgets, child)
+    child = child_widget.next_sibling
   }
 }
 
@@ -1001,8 +1244,119 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
       mark_dirty(self, handle)
     }
 
-  case .LABEL, .IMAGE, .TEXT_BOX, .COMBO_BOX, .CHECK_BOX, .RADIO_BUTTON, .WINDOW:
-    // Input handling for other widgets
+  case .CHECK_BOX:
+    data := &widget.data.(CheckBoxData)
+    box_size: f32 = 20
+    old_hovered := data.hovered
+    data.hovered = hovered && mx <= wx + box_size && my <= wy + box_size
+
+    if data.hovered && self.mouse_clicked {
+      data.checked = !data.checked
+      if data.callback != nil {
+        data.callback(data.user_data, data.checked)
+      }
+      mark_dirty(self, handle)
+    }
+
+    if old_hovered != data.hovered {
+      mark_dirty(self, handle)
+    }
+
+  case .RADIO_BUTTON:
+    data := &widget.data.(RadioButtonData)
+    circle_size: f32 = 20
+    old_hovered := data.hovered
+    data.hovered = hovered && mx <= wx + circle_size && my <= wy + circle_size
+
+    if data.hovered && self.mouse_clicked && !data.selected {
+      // Deselect all other radio buttons in the same group
+      for other_handle in self.root_widgets {
+        deselect_radio_group(self, other_handle, data.group_id, handle)
+      }
+
+      data.selected = true
+      if data.callback != nil {
+        data.callback(data.user_data)
+      }
+      mark_dirty(self, handle)
+    }
+
+    if old_hovered != data.hovered {
+      mark_dirty(self, handle)
+    }
+
+  case .TEXT_BOX:
+    data := &widget.data.(TextBoxData)
+    old_hovered := data.hovered
+    old_focused := data.focused
+    data.hovered = hovered
+
+    if self.mouse_clicked {
+      data.focused = hovered
+    }
+
+    if old_hovered != data.hovered || old_focused != data.focused {
+      mark_dirty(self, handle)
+    }
+
+  case .COMBO_BOX:
+    data := &widget.data.(ComboBoxData)
+    old_hovered := data.hovered
+    old_expanded := data.expanded
+    data.hovered = hovered && my <= wy + widget.size.y
+
+    if data.hovered && self.mouse_clicked {
+      data.expanded = !data.expanded
+      mark_dirty(self, handle)
+    }
+
+    // Check dropdown items if expanded
+    if data.expanded {
+      item_height: f32 = 24
+      dropdown_y := wy + widget.size.y
+      old_hovered_item := data.hovered_item
+      data.hovered_item = -1
+
+      for item, i in data.items {
+        item_y := dropdown_y + f32(i) * item_height
+        if mx >= wx && mx <= wx + ww && my >= item_y && my <= item_y + item_height {
+          data.hovered_item = i32(i)
+
+          if self.mouse_clicked {
+            selected_index := i32(i)
+            callback := data.callback
+            user_data := data.user_data
+
+            data.selected = selected_index
+            data.expanded = false
+            mark_dirty(self, handle)
+
+            // Call callback AFTER marking dirty and AFTER storing values
+            // Callback might modify widgets, invalidating our data pointer
+            if callback != nil {
+              callback(user_data, selected_index)
+            }
+
+            // Re-fetch widget pointer after callback
+            widget, found = resources.get(self.widgets, handle)
+            if !found do return
+            data = &widget.data.(ComboBoxData)
+            break
+          }
+        }
+      }
+
+      if old_hovered_item != data.hovered_item {
+        mark_dirty(self, handle)
+      }
+    }
+
+    if old_hovered != data.hovered || old_expanded != data.expanded {
+      mark_dirty(self, handle)
+    }
+
+  case .LABEL, .IMAGE, .WINDOW:
+    // No input handling needed
   }
 
   child := widget.first_child
@@ -1108,6 +1462,17 @@ draw_text_internal :: proc(
   size: f32 = 16,
   color: [4]u8 = {255, 255, 255, 255},
 ) {
+  // Skip empty or invalid strings
+  if len(text) == 0 || text == "" {
+    return
+  }
+
+  // Validate text pointer
+  if raw_data(text) == nil {
+    log.warnf("draw_text_internal: nil text pointer")
+    return
+  }
+
   fs.SetFont(&self.font_ctx, self.default_font)
   fs.SetSize(&self.font_ctx, size)
   fs.SetColor(&self.font_ctx, color)
@@ -1378,188 +1743,4 @@ push_quad :: proc(
 
   draw_list.index_count += 6
   draw_list.vertex_count += 4
-}
-
-// ============================================================================
-// Widget Creation Helpers
-// ============================================================================
-
-create_button :: proc(
-  self: ^Manager,
-  text: string,
-  x, y, w, h: f32,
-  callback: proc(ctx: rawptr) = nil,
-  user_data: rawptr = nil,
-  parent: WidgetHandle = {},
-) -> (
-  handle: WidgetHandle,
-  ok: bool,
-) {
-  widget: ^Widget
-  handle, widget, ok = create_widget(self, .BUTTON, parent)
-  if !ok do return
-
-  widget.position = {x, y}
-  widget.size = {w, h}
-  widget.data = ButtonData {
-    text      = text,
-    callback  = callback,
-    user_data = user_data,
-  }
-
-  return
-}
-
-create_label :: proc(
-  self: ^Manager,
-  text: string,
-  x, y: f32,
-  parent: WidgetHandle = {},
-) -> (
-  handle: WidgetHandle,
-  ok: bool,
-) {
-  widget: ^Widget
-  handle, widget, ok = create_widget(self, .LABEL, parent)
-  if !ok do return
-
-  widget.position = {x, y}
-  widget.size = {100, 20}
-  widget.fg_color = {0, 0, 0, 255}  // Black text for labels (readable on light backgrounds)
-  widget.data = LabelData {
-    text = text,
-  }
-
-  return
-}
-
-create_image :: proc(
-  self: ^Manager,
-  texture_handle: resources.Handle,
-  x, y, w, h: f32,
-  parent: WidgetHandle = {},
-  uv: [4]f32 = {0, 0, 1, 1},
-) -> (
-  handle: WidgetHandle,
-  ok: bool,
-) {
-  widget: ^Widget
-  handle, widget, ok = create_widget(self, .IMAGE, parent)
-  if !ok do return
-
-  widget.position = {x, y}
-  widget.size = {w, h}
-  widget.data = ImageData {
-    texture_handle = texture_handle,
-    uv             = uv,
-    sprite_index   = 0,
-    sprite_count   = 1,
-  }
-
-  return
-}
-
-create_window :: proc(
-  self: ^Manager,
-  title: string,
-  x, y, w, h: f32,
-  parent: WidgetHandle = {},
-) -> (
-  handle: WidgetHandle,
-  ok: bool,
-) {
-  widget: ^Widget
-  handle, widget, ok = create_widget(self, .WINDOW, parent)
-  if !ok do return
-
-  widget.position = {x, y}
-  widget.size = {w, h}
-  widget.bg_color = {240, 240, 240, 255}
-  widget.data = WindowData {
-    title      = title,
-    closeable  = true,
-    moveable   = true,
-    resizeable = true,
-    minimized  = false,
-  }
-
-  return
-}
-
-// ============================================================================
-// Widget Data Accessors
-// ============================================================================
-
-set_button_callback :: proc(
-  self: ^Manager,
-  handle: WidgetHandle,
-  callback: proc(ctx: rawptr),
-  user_data: rawptr = nil,
-) {
-  widget, found := resources.get(self.widgets, handle)
-  if !found || widget.type != .BUTTON do return
-
-  data := &widget.data.(ButtonData)
-  data.callback = callback
-  data.user_data = user_data
-}
-
-set_label_text :: proc(self: ^Manager, handle: WidgetHandle, text: string) {
-  widget, found := resources.get(self.widgets, handle)
-  if !found || widget.type != .LABEL do return
-
-  data := &widget.data.(LabelData)
-  data.text = text
-  mark_dirty(self, handle)
-}
-
-set_button_text :: proc(self: ^Manager, handle: WidgetHandle, text: string) {
-  widget, found := resources.get(self.widgets, handle)
-  if !found || widget.type != .BUTTON do return
-
-  data := &widget.data.(ButtonData)
-  data.text = text
-  mark_dirty(self, handle)
-}
-
-set_image_sprite :: proc(
-  self: ^Manager,
-  handle: WidgetHandle,
-  sprite_index: u32,
-  sprite_count: u32,
-) {
-  widget, found := resources.get(self.widgets, handle)
-  if !found || widget.type != .IMAGE do return
-
-  data := &widget.data.(ImageData)
-  data.sprite_index = sprite_index
-  data.sprite_count = sprite_count
-
-  if sprite_count > 0 {
-    sprite_width := 1.0 / f32(sprite_count)
-    data.uv = {
-      f32(sprite_index) * sprite_width,
-      0,
-      f32(sprite_index + 1) * sprite_width,
-      1,
-    }
-  }
-
-  mark_dirty(self, handle)
-}
-
-set_widget_colors :: proc(
-  self: ^Manager,
-  handle: WidgetHandle,
-  bg_color: [4]u8,
-  fg_color: [4]u8,
-  border_color: [4]u8,
-) {
-  widget, found := resources.get(self.widgets, handle)
-  if !found do return
-
-  widget.bg_color = bg_color
-  widget.fg_color = fg_color
-  widget.border_color = border_color
-  mark_dirty(self, handle)
 }
