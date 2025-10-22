@@ -709,17 +709,43 @@ mark_dirty :: proc(self: ^Manager, handle: WidgetHandle) {
 rebuild_draw_lists :: proc(self: ^Manager) {
   if len(self.dirty_widgets) == 0 do return
 
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    clear(&self.draw_lists[i].commands)
-    self.draw_lists[i].vertex_count = 0
-    self.draw_lists[i].index_count = 0
+  when ODIN_DEBUG {
+    log.debugf("Rebuilding draw lists for %d dirty widget(s)", len(self.dirty_widgets))
   }
 
-  for root_handle in self.root_widgets {
-    build_widget_draw_commands(self, root_handle)
+  // Instead of clearing everything, only remove commands for dirty widgets
+  for dirty_handle in self.dirty_widgets {
+    // Remove commands for this widget from all frame draw lists
+    for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+      remove_widget_commands(&self.draw_lists[i], dirty_handle)
+    }
+  }
+
+  // Rebuild only dirty widgets
+  for dirty_handle in self.dirty_widgets {
+    widget, found := resources.get(self.widgets, dirty_handle)
+    if !found do continue
+
+    if widget.visible {
+      build_widget_draw_commands(self, dirty_handle)
+    } else {
+      // Widget is invisible - commands already removed, just clear dirty flag
+      widget.dirty = false
+    }
   }
 
   clear(&self.dirty_widgets)
+}
+
+// Remove all draw commands associated with a specific widget
+remove_widget_commands :: proc(draw_list: ^DrawList, handle: WidgetHandle) {
+  // Remove commands where widget matches
+  // Use reverse iteration to safely remove while iterating
+  for i := len(draw_list.commands) - 1; i >= 0; i -= 1 {
+    if draw_list.commands[i].widget == handle {
+      ordered_remove(&draw_list.commands, i)
+    }
+  }
 }
 
 build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
@@ -747,20 +773,27 @@ build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
     }
   }
 
-  // Store first_child before recursion since widget pointer may become invalid
-  first_child := widget.first_child
-
-  child := first_child
-  for child.index != 0 {
-    build_widget_draw_commands(self, child)
-    child_widget, _ := resources.get(self.widgets, child)
-    child = child_widget.next_sibling
-  }
-
-  // Re-fetch widget pointer in case pool was modified during recursion
+  // Re-fetch widget pointer in case pool was modified
   widget, found = resources.get(self.widgets, handle)
   if found {
     widget.dirty = false
+  }
+}
+
+// Build draw commands for entire widget tree (used on initial creation)
+build_widget_tree_commands :: proc(self: ^Manager, handle: WidgetHandle) {
+  widget, found := resources.get(self.widgets, handle)
+  if !found || !widget.visible do return
+
+  // Build commands for this widget
+  build_widget_draw_commands(self, handle)
+
+  // Recursively build children
+  child := widget.first_child
+  for child.index != 0 {
+    build_widget_tree_commands(self, child)
+    child_widget, _ := resources.get(self.widgets, child)
+    child = child_widget.next_sibling
   }
 }
 
