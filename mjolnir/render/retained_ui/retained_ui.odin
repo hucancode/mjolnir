@@ -776,7 +776,10 @@ build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
     }
   }
 
-  child := widget.first_child
+  // Store first_child before recursion since widget pointer may become invalid
+  first_child := widget.first_child
+
+  child := first_child
   for child.index != 0 {
     build_widget_draw_commands(self, child)
     child_widget, _ := resources.get(self.widgets, child)
@@ -1100,7 +1103,7 @@ build_checkbox_commands :: proc(
         widget = handle,
         rect = {widget.position.x + 2, widget.position.y + 2, box_size - 4, box_size - 4},
         color = {40, 100, 200, 255},
-        text = "✓",
+        text = "O",
       },
     )
   }
@@ -1145,7 +1148,7 @@ build_radiobutton_commands :: proc(
     },
   )
 
-  // Selection dot (using unicode circle)
+  // Selection dot
   if data.selected {
     append(
       &draw_list.commands,
@@ -1154,7 +1157,7 @@ build_radiobutton_commands :: proc(
         widget = handle,
         rect = {widget.position.x + 4, widget.position.y + 2, circle_size - 8, circle_size - 4},
         color = {40, 100, 200, 255},
-        text = "●",
+        text = "O",
       },
     )
   }
@@ -1660,12 +1663,15 @@ render :: proc(
       flush_ui_batch(self, command_buffer, frame_index, draw_list) or_return
 
       // Draw text using internal text renderer
+      // Baseline offset: position text relative to top of bounding box
+      // Font metrics: baseline is roughly 75% down from top for most fonts
+      baseline_offset := cmd.rect.w * 0.75  // Use width as font size hint
       draw_text_internal(
         self,
         cmd.text,
         cmd.rect.x,
-        cmd.rect.y + 16,  // Baseline offset
-        16,  // Font size
+        cmd.rect.y + baseline_offset,
+        cmd.rect.w,  // Use rect width as font size
         cmd.color,
       )
     case .IMAGE:
