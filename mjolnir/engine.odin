@@ -86,7 +86,6 @@ Engine :: struct {
   cursor_pos:             [2]i32,
   debug_ui_enabled:       bool,
   pending_node_deletions: [dynamic]resources.Handle,
-  frame_fence:            vk.Fence,
   update_thread:          Maybe(^thread.Thread),
   update_active:          bool,
   last_render_timestamp:  time.Time,
@@ -142,12 +141,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
   ) or_return
   self.pending_node_deletions = make([dynamic]resources.Handle, 0)
-  vk.CreateFence(
-    self.gctx.device,
-    &vk.FenceCreateInfo{sType = .FENCE_CREATE_INFO},
-    nil,
-    &self.frame_fence,
-  ) or_return
   vk.AllocateCommandBuffers(
     self.gctx.device,
     &{
@@ -494,7 +487,6 @@ shutdown :: proc(self: ^Engine) {
     self.command_buffers[:],
   )
   delete(self.pending_node_deletions)
-  vk.DestroyFence(self.gctx.device, self.frame_fence, nil)
   renderer_shutdown(
     &self.render,
     self.gctx.device,
