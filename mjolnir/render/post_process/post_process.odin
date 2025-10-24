@@ -65,7 +65,7 @@ CrossHatchEffect :: struct {
   lum_threshold_02: f32,
   lum_threshold_03: f32,
   lum_threshold_04: f32,
-  padding:          f32, // For alignment
+  padding:          f32,
 }
 
 DoFEffect :: struct {

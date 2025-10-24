@@ -148,7 +148,6 @@ init :: proc(
     self.commands[:],
   ) or_return
   log.debugf("renderer lighting init %d x %d", width, height)
-  // Initialize ambient pipeline
   ambient_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
     rm.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
     rm.textures_set_layout, // set = 1 (bindless textures)
@@ -274,7 +273,6 @@ init :: proc(
     nil,
     &self.ambient_pipeline,
   ) or_return
-  // Initialize environment resources
   environment_map: ^gpu.Image
   self.environment_map, environment_map = resources.create_texture_from_path(
     gctx,
@@ -305,9 +303,8 @@ init :: proc(
     return brdf_ret
   }
   self.brdf_lut = brdf_handle
-  self.ibl_intensity = 1.0 // Default IBL intensity
+  self.ibl_intensity = 1.0
   log.info("Ambient pipeline initialized successfully")
-  // Initialize lighting pipeline
   lighting_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
     rm.camera_buffer_set_layout, // set = 0 (regular cameras)
     rm.textures_set_layout, // set = 1 (bindless textures/samplers)
@@ -398,7 +395,7 @@ init :: proc(
   lighting_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable = true,
-    // Greater or equal for point light, less or equal for spot light
+    // greater or equal for point light, less or equal for spot light
     depthCompareOp  = .GREATER_OR_EQUAL,
   }
   lighting_color_formats := [?]vk.Format{color_format}
@@ -448,7 +445,6 @@ init :: proc(
     &self.lighting_pipeline,
   ) or_return
   log.info("Lighting pipeline initialized successfully")
-  // Initialize light volume meshes
   self.sphere_mesh, _ = resources.create_mesh(
     gctx,
     rm,
@@ -549,7 +545,6 @@ Renderer :: struct {
   ibl_intensity:            f32,
   lighting_pipeline:        vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
-  // Light volume meshes
   sphere_mesh:              resources.Handle,
   cone_mesh:                resources.Handle,
   triangle_mesh:            resources.Handle,
@@ -587,7 +582,6 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
-  // Use per-frame depth texture from attachments
   depth_texture := resources.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
@@ -595,7 +589,7 @@ begin_pass :: proc(
   depth_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = depth_texture.view,
-    imageLayout = .SHADER_READ_ONLY_OPTIMAL, // From geometry pass end_record
+    imageLayout = .SHADER_READ_ONLY_OPTIMAL, // from geometry pass end_record
     loadOp      = .LOAD,
     storeOp     = .DONT_CARE,
   }
@@ -686,7 +680,6 @@ render :: proc(
       0,
     )
   }
-  // Push constant structure for light index-based rendering
   push_constant := LightPushConstant {
     scene_camera_idx       = camera_handle.index,
     position_texture_index = resources.camera_get_attachment(camera, .POSITION, frame_index).index,

@@ -97,7 +97,6 @@ raycast_multi :: proc(
 	}
 }
 
-// BVH-accelerated raycast - closest hit
 @(private)
 raycast_bvh :: proc(
 	primitives: []$T,

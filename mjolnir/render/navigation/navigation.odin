@@ -9,7 +9,7 @@ import vk "vendor:vulkan"
 Renderer :: struct {
   pipeline_layout:    vk.PipelineLayout,
   pipeline:           vk.Pipeline,
-  line_pipeline:      vk.Pipeline, // Pipeline for path line rendering
+  line_pipeline:      vk.Pipeline,
   vertex_buffer:      gpu.MutableBuffer(Vertex),
   index_buffer:       gpu.MutableBuffer(u32),
   vertex_count:       u32,
@@ -17,7 +17,6 @@ Renderer :: struct {
   enabled:            bool,
   color_mode:         ColorMode,
   commands:           [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  // Path rendering
   path_vertex_buffer: gpu.MutableBuffer(Vertex),
   path_vertex_count:  u32,
   path_enabled:       bool,
@@ -191,7 +190,6 @@ render :: proc(
 ) {
   if !renderer.enabled do return
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.pipeline)
-  // Bind descriptor sets
   descriptor_sets := [?]vk.DescriptorSet{rm.camera_buffer_descriptor_set}
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -203,9 +201,7 @@ render :: proc(
     0,
     nil,
   )
-  // Render navmesh
   if renderer.vertex_count > 0 && renderer.index_count > 0 {
-    // Bind vertex and index buffers
     vertex_buffers := []vk.Buffer{renderer.vertex_buffer.buffer}
     offsets := []vk.DeviceSize{0}
     vk.CmdBindVertexBuffers(
@@ -221,7 +217,6 @@ render :: proc(
       0,
       .UINT32,
     )
-    // Set push constants
     push_constants := PushConstants {
       world         = world_matrix,
       camera_index  = camera_index,
@@ -237,14 +232,10 @@ render :: proc(
       size_of(PushConstants),
       &push_constants,
     )
-    // Draw navmesh
     vk.CmdDrawIndexed(command_buffer, renderer.index_count, 1, 0, 0, 0)
   }
-  // Render path
   if renderer.path_enabled && renderer.path_vertex_count > 0 {
-    // Switch to line pipeline
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.line_pipeline)
-    // Bind descriptor sets (same as before)
     vk.CmdBindDescriptorSets(
       command_buffer,
       .GRAPHICS,
@@ -255,7 +246,6 @@ render :: proc(
       0,
       nil,
     )
-    // Bind path vertex buffer
     path_buffers := []vk.Buffer{renderer.path_vertex_buffer.buffer}
     offsets := []vk.DeviceSize{0}
     vk.CmdBindVertexBuffers(
@@ -265,13 +255,12 @@ render :: proc(
       raw_data(path_buffers),
       raw_data(offsets),
     )
-    // Set push constants for path
     path_push_constants := PushConstants {
       world         = world_matrix,
       camera_index  = camera_index,
-      height_offset = renderer.height_offset + 0.01, // Slightly above navmesh
-      alpha         = 1.0, // Full opacity for path
-      color_mode    = u32(ColorMode.Uniform), // Use uniform color mode
+      height_offset = renderer.height_offset + 0.01,
+      alpha         = 1.0,
+      color_mode    = u32(ColorMode.Uniform),
     }
     vk.CmdPushConstants(
       command_buffer,
@@ -281,7 +270,6 @@ render :: proc(
       size_of(PushConstants),
       &path_push_constants,
     )
-    // Draw path as line strip
     vk.CmdDraw(command_buffer, renderer.path_vertex_count, 1, 0, 0)
   }
 }
@@ -317,7 +305,6 @@ load_navmesh_data :: proc(
 
 regenerate_colors :: proc(renderer: ^Renderer, poly_count: u32) {
   if renderer.vertex_count == 0 do return
-  // Read current vertex data (note: GPU read is not available, regenerate from stored data)
   vertices := make([]Vertex, renderer.vertex_count, context.temp_allocator)
   // Note: Since GPU read is not available, we'll need to store vertex data or regenerate
   // For now, just regenerate colors based on positions
@@ -349,7 +336,7 @@ regenerate_colors :: proc(renderer: ^Renderer, poly_count: u32) {
     // Random colors are generated in shader using gl_PrimitiveID
     // Just set a default color (will be ignored by shader)
     for &vertex in vertices {
-      vertex.color = {1.0, 1.0, 1.0, 0.6} // White default
+      vertex.color = {1.0, 1.0, 1.0, 0.6}
     }
   case .Region_Colors:
     // Similar to random but with different seed
@@ -364,7 +351,6 @@ regenerate_colors :: proc(renderer: ^Renderer, poly_count: u32) {
       }
     }
   }
-  // Upload updated vertices
   gpu.write(&renderer.vertex_buffer, vertices)
 }
 
@@ -373,7 +359,6 @@ create_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) -> vk.Result {
-  // Load shaders
   navmesh_vert_code := #load("../../shader/navmesh/vert.spv")
   navmesh_vert := gpu.create_shader_module(
     gctx.device,
@@ -386,9 +371,7 @@ create_pipeline :: proc(
     navmesh_frag_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, navmesh_frag, nil)
-  // Create descriptor set layouts
   set_layouts := []vk.DescriptorSetLayout{rm.camera_buffer_set_layout}
-  // Create pipeline layout
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
     offset     = 0,
@@ -407,7 +390,6 @@ create_pipeline :: proc(
     nil,
     &renderer.pipeline_layout,
   ) or_return
-  // Vertex input description
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Vertex),
@@ -434,7 +416,6 @@ create_pipeline :: proc(
     vertexAttributeDescriptionCount = u32(len(vertex_attributes)),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes),
   }
-  // Common pipeline state
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
@@ -462,7 +443,6 @@ create_pipeline :: proc(
     depthWriteEnable = false,
     depthCompareOp   = .LESS_OR_EQUAL,
   }
-  // Alpha blending
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
     srcColorBlendFactor = .SRC_ALPHA,
@@ -484,7 +464,6 @@ create_pipeline :: proc(
     dynamicStateCount = u32(len(dynamic_states)),
     pDynamicStates    = raw_data(dynamic_states),
   }
-  // Render target formats
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
   rendering_info := vk.PipelineRenderingCreateInfo {
@@ -530,7 +509,6 @@ create_pipeline :: proc(
     nil,
     &renderer.pipeline,
   ) or_return
-  // Create line pipeline for path rendering
   input_assembly_lines := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .LINE_STRIP,
@@ -540,7 +518,7 @@ create_pipeline :: proc(
     polygonMode = .FILL,
     cullMode    = {},
     frontFace   = .COUNTER_CLOCKWISE,
-    lineWidth   = 3.0, // Thicker lines for better visibility
+    lineWidth   = 3.0,
   }
   pipeline_info_lines := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -569,7 +547,6 @@ create_pipeline :: proc(
   return .SUCCESS
 }
 
-// Update path visualization with a series of path points
 update_path :: proc(
   renderer: ^Renderer,
   path_points: [][3]f32,
@@ -580,7 +557,6 @@ update_path :: proc(
     renderer.path_vertex_count = 0
     return
   }
-  // Create vertices for the path line strip
   path_vertices := make([]Vertex, len(path_points), context.temp_allocator)
   for point, i in path_points {
     path_vertices[i] = Vertex {
@@ -588,7 +564,6 @@ update_path :: proc(
       color    = path_color,
     }
   }
-  // Upload to path vertex buffer
   if len(path_vertices) <= 1024 {
     vertex_result := gpu.write(&renderer.path_vertex_buffer, path_vertices)
     if vertex_result == .SUCCESS {
@@ -607,7 +582,6 @@ update_path :: proc(
   }
 }
 
-// Clear path visualization
 clear_path :: proc(renderer: ^Renderer) {
   renderer.path_enabled = false
   renderer.path_vertex_count = 0

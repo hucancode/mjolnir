@@ -186,7 +186,7 @@ world_raycast_multi :: proc(
   }
 }
 
-// Camera-based world raycast - finds closest mesh node from viewport coordinates
+// camera-based world raycast - finds closest mesh node from viewport coordinates
 // tag_filter: Only test nodes that have ALL specified tags
 camera_world_raycast :: proc(
   world: ^World,
@@ -208,7 +208,7 @@ camera_world_raycast :: proc(
   return world_raycast(world, rm, ray, tag_filter, config)
 }
 
-// Camera-based world raycast - finds any mesh node from viewport coordinates (early exit)
+// camera-based world raycast - finds any mesh node from viewport coordinates (early exit)
 // tag_filter: Only test nodes that have ALL specified tags
 camera_world_raycast_single :: proc(
   world: ^World,
@@ -230,7 +230,7 @@ camera_world_raycast_single :: proc(
   return world_raycast_single(world, rm, ray, tag_filter, config)
 }
 
-// Camera-based world raycast - finds all mesh nodes from viewport coordinates
+// camera-based world raycast - finds all mesh nodes from viewport coordinates
 // tag_filter: Only test nodes that have ALL specified tags
 camera_world_raycast_multi :: proc(
   world: ^World,

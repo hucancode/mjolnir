@@ -161,7 +161,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
     return slice.max(src[0:len(chf.spans)])
 }
 
-// Box blur for distance field smoothing
+// box blur for distance field smoothing
 box_blur :: proc(chf: ^Compact_Heightfield, thr: i32, src, dst: []u16) -> []u16 {
     w := chf.width
     h := chf.height
@@ -204,13 +204,13 @@ box_blur :: proc(chf: ^Compact_Heightfield, thr: i32, src, dst: []u16) -> []u16 
     return dst
 }
 
-// Flood region - level set based region growing
+// flood region - level set based region growing
 flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
                     src_reg, src_dist: []u16, stack: ^[dynamic]Level_Stack_Entry) -> bool {
     w := chf.width
     h := chf.height
     area := chf.areas[i]
-    // Flood fill mark region
+    // flood fill mark region
     clear(stack)
     append(stack, Level_Stack_Entry{x, y, i})
     src_reg[i] = r
@@ -223,7 +223,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
         cy := back.y
         ci := back.index
         cs := &chf.spans[ci]
-        // Check if any of the neighbours already have a valid region set
+        // check if any of the neighbours already have a valid region set
         ar: u16 = 0
         for dir in 0..<4 {
             // 8 connected
@@ -238,7 +238,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
                 continue
             }
             nr := src_reg[ai]
-            if (nr & RC_BORDER_REG) != 0 { // Do not take borders into account
+            if (nr & RC_BORDER_REG) != 0 { // do not take borders into account
                 continue
             }
             if nr != 0 && nr != r {
@@ -273,7 +273,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
             continue
         }
         count += 1
-        // Expand neighbours
+        // expand neighbours
         for dir in 0..<4 {
             if get_con(cs, dir) == RC_NOT_CONNECTED {
                 continue
@@ -295,14 +295,14 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
     return count > 0
 }
 
-// Expand regions to fill gaps
+// expand regions to fill gaps
 expand_regions :: proc(max_iter: i32, level: u16, chf: ^Compact_Heightfield,
                       src_reg, src_dist: []u16, stack: ^[dynamic]Level_Stack_Entry,
                       fill_stack: bool) {
     w := chf.width
     h := chf.height
     if fill_stack {
-        // Find cells revealed by the raised level
+        // find cells revealed by the raised level
         clear(stack)
         for y in 0..<h {
             for x in 0..<w {
@@ -315,7 +315,7 @@ expand_regions :: proc(max_iter: i32, level: u16, chf: ^Compact_Heightfield,
             }
         }
     } else {
-        // Mark all cells which already have a region
+        // mark all cells which already have a region
         for j in 0..<len(stack) {
             i := stack[j].index
             if i >= 0 && src_reg[i] != 0 {
@@ -371,7 +371,7 @@ expand_regions :: proc(max_iter: i32, level: u16, chf: ^Compact_Heightfield,
                 failed += 1
             }
         }
-        // Copy entries that differ between src and dst to keep them in sync
+        // copy entries that differ between src and dst to keep them in sync
         for entry in dirty_entries {
             src_reg[entry.index] = entry.region
             src_dist[entry.index] = entry.distance2
@@ -388,7 +388,7 @@ expand_regions :: proc(max_iter: i32, level: u16, chf: ^Compact_Heightfield,
     }
 }
 
-// Paint rectangular region
+// paint rectangular region
 paint_rect_region :: proc(minx, maxx, miny, maxy: i32, reg_id: u16,
                          chf: ^Compact_Heightfield, src_reg: []u16) {
     w := chf.width
@@ -404,15 +404,13 @@ paint_rect_region :: proc(minx, maxx, miny, maxy: i32, reg_id: u16,
     }
 }
 
-// Remove adjacent duplicate neighbours
+// remove adjacent duplicate neighbours
 remove_adjacent_neighbours :: proc(reg: ^Region) {
-    // Remove adjacent duplicates
     if len(reg.connections) <= 1 {
         return
     }
-    // Use slice.unique to remove consecutive duplicates
     unique_slice := slice.unique(reg.connections[:])
-    // Check wrap-around: if last element equals first element (circular case)
+    // check wrap-around: if last element equals first element (circular case)
     if len(unique_slice) > 1 && slice.last(unique_slice) == slice.first(unique_slice) {
         resize(&reg.connections, len(unique_slice)-1)
     } else {
@@ -420,7 +418,7 @@ remove_adjacent_neighbours :: proc(reg: ^Region) {
     }
 }
 
-// Replace neighbour in region connections
+// replace neighbour in region connections
 replace_neighbour :: proc(reg: ^Region, old_id, new_id: u16) {
     nei_changed := false
     for i in 0..<len(reg.connections) {
@@ -439,7 +437,6 @@ replace_neighbour :: proc(reg: ^Region, old_id, new_id: u16) {
     }
 }
 
-// Check if two regions can merge
 can_merge_with_region :: proc(rega, regb: ^Region) -> bool {
     if rega.area_type != regb.area_type {
         return false
@@ -454,7 +451,6 @@ can_merge_with_region :: proc(rega, regb: ^Region) -> bool {
     return true
 }
 
-// Add unique floor region
 add_unique_floor_region :: proc(reg: ^Region, n: i32) {
     if slice.contains(reg.floors[:], n) {
         return
@@ -462,16 +458,15 @@ add_unique_floor_region :: proc(reg: ^Region, n: i32) {
     append(&reg.floors, n)
 }
 
-// Merge two regions
 merge_regions :: proc(rega, regb: ^Region) -> bool {
     aid := rega.id
     bid := regb.id
-    // Duplicate current neighbourhood
+    // duplicate current neighbourhood
     acon := make([dynamic]i32, len(rega.connections))
     defer delete(acon)
     copy(acon[:], rega.connections[:])
     bcon := &regb.connections
-    // Find insertion point on A
+    // find insertion point on A
     insa := -1
     for val, i in acon {
         if val == i32(bid) {
@@ -482,7 +477,7 @@ merge_regions :: proc(rega, regb: ^Region) -> bool {
     if insa == -1 {
         return false
     }
-    // Find insertion point on B
+    // find insertion point on B
     insb := -1
     for val, i in bcon {
         if val == i32(aid) {
@@ -493,7 +488,7 @@ merge_regions :: proc(rega, regb: ^Region) -> bool {
     if insb == -1 {
         return false
     }
-    // Merge neighbours
+    // merge neighbours
     clear(&rega.connections)
     for i := 0; i < len(acon) - 1; i += 1 {
         append(&rega.connections, acon[(insa + 1 + i) % len(acon)])
@@ -511,9 +506,8 @@ merge_regions :: proc(rega, regb: ^Region) -> bool {
     return true
 }
 
-// Check if region is connected to border
 is_region_connected_to_border :: proc(reg: ^Region) -> bool {
-    // Region is connected to border if one of the neighbours is null id
+    // region is connected to border if one of the neighbours is null id
     for i in 0..<len(reg.connections) {
         if reg.connections[i] == 0 {
             return true
@@ -522,7 +516,6 @@ is_region_connected_to_border :: proc(reg: ^Region) -> bool {
     return false
 }
 
-// Check if edge is solid
 is_solid_edge :: proc(chf: ^Compact_Heightfield, src_reg: []u16,
                      x, y, i: i32, dir: int) -> bool {
     s := &chf.spans[i]
@@ -540,7 +533,6 @@ is_solid_edge :: proc(chf: ^Compact_Heightfield, src_reg: []u16,
     return r != src_reg[i]
 }
 
-// Walk contour to find region connections
 walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compact_Heightfield,
                     src_reg: []u16, cont: ^[dynamic]i32) {
     x, y, i := x_in, y_in, i_in
@@ -566,7 +558,7 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compac
         iter += 1
         s := &chf.spans[i]
         if is_solid_edge(chf, src_reg, x, y, i, dir) {
-            // Choose the edge corner
+            // choose the edge corner
             r: u16 = 0
             if get_con(s, dir) != RC_NOT_CONNECTED {
                 ax := x + get_dir_offset_x(dir)
@@ -582,7 +574,7 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compac
                 cur_reg = r
                 append(cont, i32(cur_reg))
             }
-            dir = (dir + 1) & 0x3  // Rotate CW
+            dir = (dir + 1) & 0x3  // rotate CW
         } else {
             ni: i32 = -1
             nx := x + get_dir_offset_x(dir)
@@ -594,20 +586,19 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compac
                 }
             }
             if ni == -1 {
-                // Should not happen
                 return
             }
             x = nx
             y = ny
             i = ni
-            dir = (dir + 3) & 0x3    // Rotate CCW
+            dir = (dir + 3) & 0x3    // rotate CCW
         }
         if starti == i && start_dir == dir {
             break
         }
     }
     arr := slice.unique(cont[:])
-    // Check wrap-around: if last element equals first element (circular case)
+    // check wrap-around: if last element equals first element (circular case)
     if len(arr) > 1 && slice.last(arr) == slice.first(arr) {
         resize(cont, len(arr)-1)
     } else {
@@ -636,7 +627,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
         }
         delete(regions)
     }
-    // Construct regions
+    // construct regions
     for i in 0..<nreg {
         regions[i] = Region{
             id = u16(i),
@@ -644,7 +635,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
             ymax = 0,
         }
     }
-    // Find edge of a region and find connections around the contour
+    // find edge of a region and find connections around the contour
     for y in 0..<h {
         for x in 0..<w {
             c := &chf.cells[x + y * w]
@@ -655,7 +646,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
                 }
                 reg := &regions[r]
                 reg.span_count += 1
-                // Update floors
+                // update floors
                 for j in u32(c.index)..<u32(c.index) + u32(c.count) {
                     if i == j {
                         continue
@@ -669,12 +660,12 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
                     }
                     add_unique_floor_region(reg, i32(floor_id))
                 }
-                // Have found contour
+                // have found contour
                 if len(reg.connections) > 0 {
                     continue
                 }
                 reg.area_type = chf.areas[i]
-                // Check if this cell is next to a border
+                // check if this cell is next to a border
                 ndir := -1
                 for dir in 0..<4 {
                     if is_solid_edge(chf, src_reg, x, y, i32(i), dir) {
@@ -683,14 +674,14 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
                     }
                 }
                 if ndir != -1 {
-                    // The cell is at border
-                    // Walk around the contour to find all the neighbours
+                    // the cell is at border
+                    // walk around the contour to find all the neighbours
                     walk_contour_for_region(x, y, i32(i), ndir, chf, src_reg, &reg.connections)
                 }
             }
         }
     }
-    // Remove too small regions
+    // remove too small regions
     stack := make([dynamic]i32, 0, 32)
     defer delete(stack)
     trace := make([dynamic]i32, 0, 32)
@@ -705,8 +696,8 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
         if reg.visited {
             continue
         }
-        // Count the total size of all the connected regions
-        // Also keep track of the regions connects to a tile border
+        // count the total size of all the connected regions
+        // also keep track of the regions connects to a tile border
         connects_to_border := false
         span_count := i32(0)
         clear(&stack)
@@ -736,19 +727,19 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
                 neireg.visited = true
             }
         }
-        // If the accumulated regions size is too small, remove it
-        // Do not remove areas which connect to tile borders
+        // if the accumulated regions size is too small, remove it
+        // do not remove areas which connect to tile borders
         // as their size cannot be estimated correctly and removing them
         // can potentially remove necessary areas
         if span_count < min_region_area && !connects_to_border {
-            // Kill all visited regions
+            // kill all visited regions
             for j in trace {
                 regions[j].span_count = 0
                 regions[j].id = 0
             }
         }
     }
-    // Merge too small regions to neighbour regions
+    // merge too small regions to neighbour regions
     merge_count := 0
     for {
         merge_count = 0
@@ -763,13 +754,13 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
             if reg.span_count == 0 {
                 continue
             }
-            // Check to see if the region should be merged
+            // check to see if the region should be merged
             if reg.span_count > merge_region_size && is_region_connected_to_border(reg) {
                 continue
             }
-            // Small region with more than 1 connection
-            // Or region which is not connected to a border at all
-            // Find smallest neighbour region that connects to this one
+            // small region with more than 1 connection
+            // or region which is not connected to a border at all
+            // find smallest neighbour region that connects to this one
             smallest := 0xfffffff
             merge_id := reg.id
             for j in 0..<len(reg.connections) {
@@ -787,23 +778,23 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
                     merge_id = mreg.id
                 }
             }
-            // Found new id
+            // found new id
             if merge_id != reg.id {
                 old_id := reg.id
                 target := &regions[merge_id]
-                // Merge neighbours
+                // merge neighbours
                 if merge_regions(target, reg) {
-                    // Fixup regions pointing to current region
+                    // fixup regions pointing to current region
                     for j in 0..<nreg {
                         if regions[j].id == 0 || (regions[j].id & RC_BORDER_REG) != 0 {
                             continue
                         }
-                        // If another region was already merged into current region
+                        // if another region was already merged into current region
                         // change the nid of the previous region too
                         if regions[j].id == old_id {
                             regions[j].id = merge_id
                         }
-                        // Replace the current region with the new one if the
+                        // replace the current region with the new one if the
                         // current regions is neighbour
                         replace_neighbour(&regions[j], old_id, merge_id)
                     }
@@ -815,7 +806,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
             break
         }
     }
-    // Compress region Ids
+    // compress region Ids
     for &reg in regions {
         reg.remap = reg.id != 0 && (reg.id & RC_BORDER_REG) == 0
     }
@@ -835,7 +826,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
         }
     }
     max_region_id = reg_id_gen
-    // Remap regions
+    // remap regions
     for i in 0..<len(chf.spans) {
         if (src_reg[i] & RC_BORDER_REG) == 0 && src_reg[i] < u16(nreg) {
             src_reg[i] = regions[src_reg[i]].id
@@ -856,7 +847,7 @@ resolve_region_overlaps :: proc(chf: ^Compact_Heightfield, src_reg: []u16, overl
     for overlap in overlaps {
         overlap_id := overlap.id
         log.debugf("Resolving overlap in region %d with %d spans", overlap_id, overlap.span_count)
-        // Find all spans belonging to this overlapping region
+        // find all spans belonging to this overlapping region
         overlap_spans := make([dynamic]i32, 0, overlap.span_count)
         defer delete(overlap_spans)
         for y in 0..<h {
@@ -870,27 +861,27 @@ resolve_region_overlaps :: proc(chf: ^Compact_Heightfield, src_reg: []u16, overl
             }
         }
         if len(overlap_spans) == 0 do continue
-        // Group overlapping spans by connectivity
+        // group overlapping spans by connectivity
         span_groups := group_connected_spans(chf, overlap_spans[:], overlap_id, src_reg)
         defer {
             for group in span_groups do delete(group)
             delete(span_groups)
         }
-        // If we have multiple groups, assign them to separate regions
+        // if we have multiple groups, assign them to separate regions
         if len(span_groups) > 1 {
             log.debugf("Split region %d into %d connected groups", overlap_id, len(span_groups))
-            // Keep the largest group in the original region
+            // keep the largest group in the original region
             largest_group_idx := 0
             for i in 1..<len(span_groups) {
                 if len(span_groups[i]) > len(span_groups[largest_group_idx]) {
                     largest_group_idx = i
                 }
             }
-            // Assign smaller groups to new regions
+            // assign smaller groups to new regions
             new_region_id := u16(chf.max_regions + 1)
             for i in 0..<len(span_groups) {
                 if i == largest_group_idx do continue
-                // Only create new regions for groups large enough
+                // only create new regions for groups large enough
                 if i32(len(span_groups[i])) >= min_region_area {
                     for span_idx in span_groups[i] {
                         src_reg[span_idx] = new_region_id
@@ -901,7 +892,7 @@ resolve_region_overlaps :: proc(chf: ^Compact_Heightfield, src_reg: []u16, overl
                 } else {
                     // Too small, assign to border or null region
                     for span_idx in span_groups[i] {
-                        src_reg[span_idx] = 0  // Mark as unassigned
+                        src_reg[span_idx] = 0  // mark as unassigned
                     }
                 }
             }
@@ -911,7 +902,6 @@ resolve_region_overlaps :: proc(chf: ^Compact_Heightfield, src_reg: []u16, overl
     return resolved_count > 0
 }
 
-// Group connected spans within an overlapping region
 group_connected_spans :: proc(chf: ^Compact_Heightfield, span_indices: []i32, region_id: u16, src_reg: []u16) -> [][dynamic]i32 {
     w := chf.width
     h := chf.height
@@ -920,17 +910,17 @@ group_connected_spans :: proc(chf: ^Compact_Heightfield, span_indices: []i32, re
     groups := make([dynamic][dynamic]i32, 0, 4)
     for span_idx, i in span_indices {
         if visited[i] do continue
-        // Start new group with flood fill
+        // start new group with flood fill
         group := make([dynamic]i32, 0, 16)
         stack := make([dynamic]i32, 0, 16)
         defer delete(stack)
-        append(&stack, i32(i))  // Index in span_indices array, not span index itself
+        append(&stack, i32(i))  // index in span_indices array, not span index itself
         visited[i] = true
         for len(stack) > 0 {
             current_idx := pop(&stack)
             current_span := span_indices[current_idx]
             append(&group, current_span)
-            // Find neighbors of current span
+            // find neighbors of current span
             for j, other_span in span_indices {
                 if visited[j] do continue
                 if are_spans_connected(chf, current_span, i32(other_span), w, h) {
@@ -944,21 +934,19 @@ group_connected_spans :: proc(chf: ^Compact_Heightfield, span_indices: []i32, re
     return groups[:]
 }
 
-// Check if two spans are connected (adjacent in 2D grid)
 are_spans_connected :: proc(chf: ^Compact_Heightfield, span1, span2: i32, w, h: i32) -> bool {
-    // Find cell coordinates for each span
+    // find cell coordinates for each span
     x1, y1 := find_span_coordinates(chf, span1, w, h)
     x2, y2 := find_span_coordinates(chf, span2, w, h)
-    if x1 == -1 || x2 == -1 do return false  // Invalid spans
-    // Check if spans are in adjacent cells (4-connected)
+    if x1 == -1 || x2 == -1 do return false  // invalid spans
+    // check if spans are in adjacent cells (4-connected)
     dx := abs(x1 - x2)
     dy := abs(y1 - y2)
     return (dx == 1 && dy == 0) || (dx == 0 && dy == 1)
 }
 
-// Find the cell coordinates for a given span index
 find_span_coordinates :: proc(chf: ^Compact_Heightfield, span_idx: i32, w, h: i32) -> (x, y: i32) {
-    // Search through all cells to find which one contains this span
+    // search through all cells to find which one contains this span
     for y_search in 0..<h {
         for x_search in 0..<w {
             c := &chf.cells[x_search + y_search * w]
@@ -969,10 +957,10 @@ find_span_coordinates :: proc(chf: ^Compact_Heightfield, span_idx: i32, w, h: i3
             }
         }
     }
-    return -1, -1  // Not found
+    return -1, -1  // not found
 }
 
-// Build regions using watershed partitioning
+// build regions using watershed partitioning
 build_regions :: proc(chf: ^Compact_Heightfield,
                         border_size, min_region_area, merge_region_area: i32) -> bool {
     sort_cells_by_level :: proc(start_level: u16, chf: ^Compact_Heightfield, src_reg: []u16,
@@ -984,7 +972,7 @@ build_regions :: proc(chf: ^Compact_Heightfield,
         for &st in stacks {
             clear(&st)
         }
-        // Put all cells in the level range into the appropriate stacks
+        // put all cells in the level range into the appropriate stacks
         for y in 0..<h {
             for x in 0..<w {
                 c := &chf.cells[x + y * w]
@@ -1010,7 +998,7 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     if len(chf.spans) == 0 {
         return true
     }
-    buf := make([]u16, len(chf.spans) * 2)  // Need 2 buffers: reg and dist
+    buf := make([]u16, len(chf.spans) * 2)  // need 2 buffers: reg and dist
     defer delete(buf)
     LOG_NB_STACKS :: 3
     NB_STACKS :: 1 << LOG_NB_STACKS
@@ -1025,14 +1013,14 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     src_dist := buf[len(chf.spans):len(chf.spans)*2]
     region_id: u16 = 1
     level := (chf.max_distance + 1) & (~u16(1))
-    // Calculate expand iterations based on distance field
-    // More iterations for larger distance fields to ensure proper region expansion
+    // calculate expand iterations based on distance field
+    // more iterations for larger distance fields to ensure proper region expansion
     expand_iters := i32(8)
     if border_size > 0 {
-        // Make sure border will not overflow
+        // make sure border will not overflow
         bw := min(w, border_size)
         bh := min(h, border_size)
-        // Paint regions
+        // paint regions
         paint_rect_region(0, bw, 0, h, region_id | RC_BORDER_REG, chf, src_reg)
         region_id += 1
         paint_rect_region(w - bw, w, 0, h, region_id | RC_BORDER_REG, chf, src_reg)

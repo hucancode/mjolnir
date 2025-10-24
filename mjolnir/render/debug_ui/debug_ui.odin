@@ -22,7 +22,7 @@ Renderer :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  atlas_handle:              resources.Handle,  // For bindless access
+  atlas_handle:              resources.Handle,
   proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
   vertex_buffer:             gpu.MutableBuffer(Vertex2D),
   index_buffer:              gpu.MutableBuffer(u32),
@@ -188,7 +188,6 @@ init :: proc(
     },
     &self.projection_descriptor_set,
   ) or_return
-  // Use the bindless texture descriptor set from resources manager
   self.texture_layout = rm.textures_set_layout
   self.texture_descriptor_set = rm.textures_descriptor_set
   set_layouts := [?]vk.DescriptorSetLayout {
@@ -276,8 +275,6 @@ init :: proc(
     buffer = self.proj_buffer.buffer,
     range  = size_of(matrix[4, 4]f32),
   }
-  // Only need to update the projection buffer descriptor
-  // Texture descriptor set is already set up by resources manager
   write := vk.WriteDescriptorSet {
     sType = .WRITE_DESCRIPTOR_SET,
     dstSet = self.projection_descriptor_set,
@@ -478,15 +475,12 @@ recreate_images :: proc(
   width, height: u32,
   dpi_scale: f32,
 ) -> vk.Result {
-  // Only update frame dimensions and DPI scale
   self.frame_width = width
   self.frame_height = height
   self.dpi_scale = dpi_scale
-  // Reset scissor to full screen on resize
   self.current_scissor = vk.Rect2D {
     extent = {width, height},
   }
-  // Update the projection matrix with new dimensions and DPI scale
   ortho :=
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
     linalg.matrix4_scale(dpi_scale)
@@ -494,7 +488,6 @@ recreate_images :: proc(
   return .SUCCESS
 }
 
-// Modular UI renderer API
 begin_pass :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
