@@ -354,7 +354,7 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
     // Resolve IK configs into runtime IK targets
     if len(mesh_attachment.ik_configs) > 0 {
       ik_targets := make(
-        [dynamic]animation.TwoBoneIKTarget,
+        [dynamic]animation.IKTarget,
         0,
         len(mesh_attachment.ik_configs),
         context.temp_allocator,
@@ -366,12 +366,19 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
       for &config in mesh_attachment.ik_configs {
         if !config.enabled do continue
 
-        // Resolve bone names to indices
-        root_idx, root_ok := resources.find_bone_by_name(mesh, config.root_bone_name)
-        mid_idx, mid_ok := resources.find_bone_by_name(mesh, config.middle_bone_name)
-        end_idx, end_ok := resources.find_bone_by_name(mesh, config.end_bone_name)
+        // Resolve all bone names to indices
+        bone_indices := make([]u32, len(config.bone_names), context.temp_allocator)
+        all_found := true
+        for name, i in config.bone_names {
+          idx, ok := resources.find_bone_by_name(mesh, name)
+          if !ok {
+            all_found = false
+            break
+          }
+          bone_indices[i] = idx
+        }
 
-        if !root_ok || !mid_ok || !end_ok do continue
+        if !all_found do continue
 
         // Transform IK target from world space to skeleton-local space
         target_world_h := linalg.Vector4f32{config.target_position.x, config.target_position.y, config.target_position.z, 1.0}
@@ -384,12 +391,12 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
         pole_local := pole_local_h.xyz
 
         // Build runtime IK target in skeleton-local space
-        ik_target := animation.TwoBoneIKTarget {
-          root_bone_idx   = root_idx,
-          middle_bone_idx = mid_idx,
-          end_bone_idx    = end_idx,
+        ik_target := animation.IKTarget {
+          bone_indices    = bone_indices,
           target_position = target_local,
           pole_vector     = pole_local,
+          max_iterations  = config.max_iterations,
+          tolerance       = config.tolerance,
           weight          = config.weight,
           enabled         = true,
         }

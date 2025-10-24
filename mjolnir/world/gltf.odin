@@ -702,7 +702,7 @@ construct_scene :: proc(
               skinning = NodeSkinning {
                 bone_matrix_buffer_offset = skin_data.matrix_buffer_offset,
               },
-              ik_configs = make([dynamic]TwoBoneIKConfig, 0),
+              ik_configs = make([dynamic]IKConfig, 0),
             }
             if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin];
                !has_first_mesh {
