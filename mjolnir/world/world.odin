@@ -1,6 +1,6 @@
 package world
 
-import "../animation"
+import anim "../animation"
 import "../geometry"
 import "../gpu"
 import "../resources"
@@ -8,6 +8,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
+import "core:strings"
 import vk "vendor:vulkan"
 
 LightAttachment :: struct {
@@ -15,14 +16,27 @@ LightAttachment :: struct {
 }
 
 NodeSkinning :: struct {
-  animation:                 Maybe(animation.Instance),
+  animation:                 Maybe(anim.Instance),
   bone_matrix_buffer_offset: u32, // Offset into bone matrix buffer for skinned mesh
+}
+
+// Configuration for a two-bone IK chain
+// Stores bone names (resolved to indices at runtime) and world-space target positions
+TwoBoneIKConfig :: struct {
+  root_bone_name:   string, // e.g., "UpperArm.L", "Hip.L"
+  middle_bone_name: string, // e.g., "LowerArm.L", "Knee.L"
+  end_bone_name:    string, // e.g., "Hand.L", "Ankle.L"
+  target_position:  [3]f32, // World-space position for end effector
+  pole_position:    [3]f32, // World-space pole hint (knee/elbow direction)
+  weight:           f32,    // Blend weight (0-1), 1 = full IK
+  enabled:          bool,
 }
 
 MeshAttachment :: struct {
   handle:              resources.Handle,
   material:            resources.Handle,
   skinning:            Maybe(NodeSkinning),
+  ik_configs:          [dynamic]TwoBoneIKConfig, // IK constraints for this mesh
   cast_shadow:         bool,
   navigation_obstacle: bool,
 }
@@ -79,7 +93,7 @@ Node :: struct {
   name:             string,
   bone_socket:      string, // If not empty, attach to this bone on parent skinned mesh
   attachment:       NodeAttachment,
-  animation:        Maybe(animation.Instance), // For node transform animation
+  animation:        Maybe(anim.Instance), // For node transform animation
   culling_enabled:  bool,
   visible:          bool, // Node's own visibility state
   parent_visible:   bool, // Visibility inherited from parent chain
@@ -155,14 +169,78 @@ destroy_node :: proc(
   case MeshAttachment:
     // TODO: we need to check if the mesh is still in use before freeing its resources
     skinning, has_skin := &attachment.skinning.?
-    if has_skin && skinning.bone_matrix_buffer_offset != 0xFFFFFFFF {
-      resources.slab_free(
-        &rm.bone_matrix_slab,
-        skinning.bone_matrix_buffer_offset,
-      )
-      skinning.bone_matrix_buffer_offset = 0xFFFFFFFF
+    if has_skin {
+      if skinning.bone_matrix_buffer_offset != 0xFFFFFFFF {
+        resources.slab_free(
+          &rm.bone_matrix_slab,
+          skinning.bone_matrix_buffer_offset,
+        )
+        skinning.bone_matrix_buffer_offset = 0xFFFFFFFF
+      }
     }
+    // Cleanup IK configs
+    for &config in attachment.ik_configs {
+      delete(config.root_bone_name)
+      delete(config.middle_bone_name)
+      delete(config.end_bone_name)
+    }
+    delete(attachment.ik_configs)
   }
+}
+
+// Add a two-bone IK constraint
+// Update target/pole positions every frame using set_ik_target()
+add_ik :: proc(
+  node: ^Node,
+  root_bone_name, middle_bone_name, end_bone_name: string,
+  target_pos: [3]f32,
+  pole_pos: [3]f32,
+  weight: f32 = 1.0,
+) {
+  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return
+
+  config := TwoBoneIKConfig {
+    root_bone_name   = strings.clone(root_bone_name),
+    middle_bone_name = strings.clone(middle_bone_name),
+    end_bone_name    = strings.clone(end_bone_name),
+    target_position  = target_pos,
+    pole_position    = pole_pos,
+    weight           = clamp(weight, 0.0, 1.0),
+    enabled          = true,
+  }
+
+  append(&mesh_attachment.ik_configs, config)
+}
+
+// Enable/disable an IK constraint by index
+set_ik_enabled :: proc(node: ^Node, index: int, enabled: bool) {
+  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return
+  if index < 0 || index >= len(mesh_attachment.ik_configs) do return
+  mesh_attachment.ik_configs[index].enabled = enabled
+}
+
+// Update IK target/pole positions
+set_ik_target :: proc(node: ^Node, index: int, target_pos, pole_pos: [3]f32) {
+  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return
+  if index < 0 || index >= len(mesh_attachment.ik_configs) do return
+  mesh_attachment.ik_configs[index].target_position = target_pos
+  mesh_attachment.ik_configs[index].pole_position = pole_pos
+}
+
+// Clear all IK constraints from a node
+clear_ik :: proc(node: ^Node) {
+  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return
+
+  for &config in mesh_attachment.ik_configs {
+    delete(config.root_bone_name)
+    delete(config.middle_bone_name)
+    delete(config.end_bone_name)
+  }
+  clear(&mesh_attachment.ik_configs)
 }
 
 detach :: proc(nodes: resources.Pool(Node), child_handle: resources.Handle) {
@@ -214,7 +292,7 @@ play_animation :: proc(
   rm: ^resources.Manager,
   node_handle: resources.Handle,
   name: string,
-  mode: animation.PlayMode = .LOOP,
+  mode: anim.PlayMode = .LOOP,
 ) -> bool {
   if rm == nil {
     return false

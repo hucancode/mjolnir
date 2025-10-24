@@ -1,6 +1,6 @@
 package world
 
-import "../animation"
+import anim "../animation"
 import "../geometry"
 import "../gpu"
 import "../resources"
@@ -702,6 +702,7 @@ construct_scene :: proc(
               skinning = NodeSkinning {
                 bone_matrix_buffer_offset = skin_data.matrix_buffer_offset,
               },
+              ik_configs = make([dynamic]TwoBoneIKConfig, 0),
             }
             if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin];
                !has_first_mesh {
@@ -768,7 +769,7 @@ load_animations :: proc(
     } else {
       clip.name = fmt.tprintf("animation_%d", i)
     }
-    clip.channels = make([]animation.Channel, len(skinning.bones))
+    clip.channels = make([]anim.Channel, len(skinning.bones))
     for gltf_channel in gltf_anim.channels {
       if gltf_channel.target_node == nil || gltf_channel.sampler == nil {
         continue
@@ -779,7 +780,7 @@ load_animations :: proc(
         gltf_channel.target_node,
       ) or_continue
       engine_channel := &clip.channels[bone_idx]
-      interpolation_mode := animation.InterpolationMode.LINEAR
+      interpolation_mode := anim.InterpolationMode.LINEAR
       #partial switch gltf_channel.sampler.interpolation {
       case .step:
         interpolation_mode = .STEP

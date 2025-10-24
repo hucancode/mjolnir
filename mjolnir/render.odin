@@ -53,7 +53,7 @@ renderer_init :: proc(
     swapchain_format,
     .D32_SFLOAT,
     {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .POST_PROCESS},
-    {10, 16, 10}, // Camera slightly above and diagonal to origin
+    {3, 4, 3}, // Camera slightly above and diagonal to origin
     {0, 0, 0}, // Looking at origin
     math.PI * 0.5, // FOV
     0.1, // near plane

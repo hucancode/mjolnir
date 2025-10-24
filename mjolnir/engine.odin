@@ -6,6 +6,7 @@ import "core:c"
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:slice"
 import "core:strings"
 import "core:thread"
@@ -324,6 +325,9 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
   if bone_buffer.mapped == nil {
     return
   }
+  @(static) frame_count := 0
+  frame_count += 1
+  skinned_node_count := 0
   for &entry in self.world.nodes.entries do if entry.active {
     node := &entry.item
     mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment)
@@ -341,9 +345,68 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
     bone_count := len(mesh_skinning.bones)
     if bone_count == 0 do continue
     if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do continue
+
+    skinned_node_count += 1
+
     matrices_ptr := gpu.mutable_buffer_get(bone_buffer, skinning.bone_matrix_buffer_offset)
     matrices := slice.from_ptr(matrices_ptr, bone_count)
-    resources.sample_clip(mesh, clip, anim_instance.time, matrices)
+
+    // Resolve IK configs into runtime IK targets
+    if len(mesh_attachment.ik_configs) > 0 {
+      ik_targets := make(
+        [dynamic]animation.TwoBoneIKTarget,
+        0,
+        len(mesh_attachment.ik_configs),
+        context.temp_allocator,
+      )
+
+      // Get node's world transform inverse to convert IK targets to skeleton-local space
+      node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
+
+      for &config in mesh_attachment.ik_configs {
+        if !config.enabled do continue
+
+        // Resolve bone names to indices
+        root_idx, root_ok := resources.find_bone_by_name(mesh, config.root_bone_name)
+        mid_idx, mid_ok := resources.find_bone_by_name(mesh, config.middle_bone_name)
+        end_idx, end_ok := resources.find_bone_by_name(mesh, config.end_bone_name)
+
+        if !root_ok || !mid_ok || !end_ok do continue
+
+        // Transform IK target from world space to skeleton-local space
+        target_world_h := linalg.Vector4f32{config.target_position.x, config.target_position.y, config.target_position.z, 1.0}
+        pole_world_h := linalg.Vector4f32{config.pole_position.x, config.pole_position.y, config.pole_position.z, 1.0}
+
+        target_local_h := node_world_inv * target_world_h
+        pole_local_h := node_world_inv * pole_world_h
+
+        target_local := target_local_h.xyz
+        pole_local := pole_local_h.xyz
+
+        // Build runtime IK target in skeleton-local space
+        ik_target := animation.TwoBoneIKTarget {
+          root_bone_idx   = root_idx,
+          middle_bone_idx = mid_idx,
+          end_bone_idx    = end_idx,
+          target_position = target_local,
+          pole_vector     = pole_local,
+          weight          = config.weight,
+          enabled         = true,
+        }
+
+        append(&ik_targets, ik_target)
+      }
+
+      // Apply IK if we have valid targets
+      if len(ik_targets) > 0 {
+        resources.sample_clip_with_ik(mesh, clip, anim_instance.time, ik_targets[:], matrices)
+      } else {
+        resources.sample_clip(mesh, clip, anim_instance.time, matrices)
+      }
+    } else {
+      resources.sample_clip(mesh, clip, anim_instance.time, matrices)
+    }
+
     skinning.animation = anim_instance
     mesh_attachment.skinning = skinning
     node.attachment = mesh_attachment
@@ -415,6 +478,9 @@ update :: proc(self: ^Engine) -> bool {
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
+  // Update skeletal animations after user update so IK targets are current
+  update_skeletal_animations(self, delta_time)
+  update_sprite_animations(self, delta_time)
   self.last_update_timestamp = time.now()
   return true
 }
@@ -548,8 +614,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     time.duration_seconds(time.since(self.last_render_timestamp)),
   )
   world.begin_frame(&self.world, &self.rm)
-  update_skeletal_animations(self, render_delta_time)
-  update_sprite_animations(self, render_delta_time)
   main_camera_handle := self.render.main_camera
   main_camera := resources.get(self.rm.cameras, main_camera_handle)
   if main_camera == nil do return .ERROR_UNKNOWN

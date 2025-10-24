@@ -187,6 +187,181 @@ sample_clip :: proc(
   }
 }
 
+// Sample animation clip with IK corrections applied
+// This version first computes FK, then applies IK targets, then outputs skinning matrices
+sample_clip_with_ik :: proc(
+  self: ^Mesh,
+  clip: ^animation.Clip,
+  t: f32,
+  ik_targets: []animation.TwoBoneIKTarget,
+  out_bone_matrices: []matrix[4, 4]f32,
+) {
+  skin, has_skin := &self.skinning.?
+  if !has_skin do return
+  if len(out_bone_matrices) < len(skin.bones) {
+    return
+  }
+  if clip == nil do return
+
+  bone_count := len(skin.bones)
+
+  // Allocate temporary storage for world transforms
+  world_transforms := make(
+    []animation.BoneTransform,
+    bone_count,
+    context.temp_allocator,
+  )
+
+  // Phase 1: FK pass - compute world transforms from animation
+  TraverseEntry :: struct {
+    parent_world: matrix[4, 4]f32,
+    bone_index:   u32,
+  }
+  stack := make(
+    [dynamic]TraverseEntry,
+    0,
+    bone_count,
+    context.temp_allocator,
+  )
+  append(
+    &stack,
+    TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
+  )
+
+  for len(stack) > 0 {
+    entry := pop(&stack)
+    bone := &skin.bones[entry.bone_index]
+    bone_idx := entry.bone_index
+
+    // Sample animation for local transform
+    local_transform: geometry.Transform
+    if bone_idx < u32(len(clip.channels)) {
+      local_transform.position, local_transform.rotation, local_transform.scale =
+        animation.channel_sample(clip.channels[bone_idx], t)
+    } else {
+      local_transform.scale = [3]f32{1, 1, 1}
+      local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
+    }
+
+    local_matrix := linalg.matrix4_from_trs(
+      local_transform.position,
+      local_transform.rotation,
+      local_transform.scale,
+    )
+
+    // Compute world transform
+    world_matrix := entry.parent_world * local_matrix
+
+    // Store world transform
+    world_transforms[bone_idx].world_matrix = world_matrix
+    world_transforms[bone_idx].world_position = animation.matrix_get_position(
+      world_matrix,
+    )
+    world_transforms[bone_idx].world_rotation = animation.matrix_get_rotation(
+      world_matrix,
+    )
+
+    // Push children
+    for child_idx in bone.children {
+      append(&stack, TraverseEntry{world_matrix, child_idx})
+    }
+  }
+
+  // Phase 2: Apply IK corrections
+  for target in ik_targets {
+    if !target.enabled do continue
+
+    // Compute bone lengths (could be cached per mesh)
+    root_pos := world_transforms[target.root_bone_idx].world_position
+    mid_pos := world_transforms[target.middle_bone_idx].world_position
+    end_pos := world_transforms[target.end_bone_idx].world_position
+
+    upper_length := linalg.distance(root_pos, mid_pos)
+    lower_length := linalg.distance(mid_pos, end_pos)
+    bone_lengths := [2]f32{upper_length, lower_length}
+
+    // Apply IK
+    animation.two_bone_ik_solve(world_transforms[:], target, bone_lengths)
+  }
+
+  // Phase 2.5: Update child bones after IK modifications
+  // After IK modifies parent bones, we need to recompute world transforms for their children
+  // to maintain hierarchical consistency
+  if len(ik_targets) > 0 {
+    // Collect all bones affected by IK (root, middle, end from all targets)
+    affected_bones := make(map[u32]bool, len(ik_targets) * 3, context.temp_allocator)
+    for target in ik_targets {
+      if !target.enabled do continue
+      affected_bones[target.root_bone_idx] = true
+      affected_bones[target.middle_bone_idx] = true
+      affected_bones[target.end_bone_idx] = true
+    }
+
+    // Recompute world transforms for children of affected bones
+    update_stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
+
+    // Find all children of affected bones and queue them for update
+    for bone_idx in affected_bones {
+      bone := &skin.bones[bone_idx]
+      parent_world := world_transforms[bone_idx].world_matrix
+
+      for child_idx in bone.children {
+        // Skip if this child is also an IK-affected bone (already updated by IK)
+        if child_idx in affected_bones do continue
+
+        append(&update_stack, TraverseEntry{parent_world, child_idx})
+      }
+    }
+
+    // Traverse and update child bones hierarchically
+    for len(update_stack) > 0 {
+      entry := pop(&update_stack)
+      bone := &skin.bones[entry.bone_index]
+      bone_idx := entry.bone_index
+
+      // Get the local transform from the animation (FK)
+      // We keep the animated local transform, only updating world space
+      local_transform: geometry.Transform
+      if bone_idx < u32(len(clip.channels)) {
+        local_transform.position, local_transform.rotation, local_transform.scale =
+          animation.channel_sample(clip.channels[bone_idx], t)
+      } else {
+        local_transform.scale = [3]f32{1, 1, 1}
+        local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
+      }
+
+      local_matrix := linalg.matrix4_from_trs(
+        local_transform.position,
+        local_transform.rotation,
+        local_transform.scale,
+      )
+
+      // Recompute world transform using IK-modified parent
+      world_matrix := entry.parent_world * local_matrix
+
+      // Update world transform
+      world_transforms[bone_idx].world_matrix = world_matrix
+      world_transforms[bone_idx].world_position = animation.matrix_get_position(
+        world_matrix,
+      )
+      world_transforms[bone_idx].world_rotation = animation.matrix_get_rotation(
+        world_matrix,
+      )
+
+      // Queue children for update
+      for child_idx in bone.children {
+        append(&update_stack, TraverseEntry{world_matrix, child_idx})
+      }
+    }
+  }
+
+  // Phase 3: Compute final skinning matrices = world * inverse_bind
+  for i in 0 ..< bone_count {
+    world_matrix := world_transforms[i].world_matrix
+    out_bone_matrices[i] = world_matrix * skin.bones[i].inverse_bind_matrix
+  }
+}
+
 create_mesh :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,

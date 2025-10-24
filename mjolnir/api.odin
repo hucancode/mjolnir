@@ -192,7 +192,7 @@ load_gltf :: proc(
   return handles, result == .success
 }
 
-get_node :: proc(engine: ^Engine, handle: resources.Handle) -> ^world.Node {
+get_node :: proc(engine: ^Engine, handle: resources.Handle) -> (ret: ^world.Node, ok: bool) #optional_ok {
   return resources.get(engine.world.nodes, handle)
 }
 
