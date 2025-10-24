@@ -17,18 +17,18 @@ LightAttachment :: struct {
 
 NodeSkinning :: struct {
   animation:                 Maybe(anim.Instance),
-  bone_matrix_buffer_offset: u32, // Offset into bone matrix buffer for skinned mesh
+  bone_matrix_buffer_offset: u32, // offset into bone matrix buffer for skinned mesh
 }
 
 // Configuration for an N-bone IK chain (minimum 2 bones)
 // Stores bone names (resolved to indices at runtime) and world-space target positions
 IKConfig :: struct {
-  bone_names:       []string, // All bones in chain from root to end (min 2)
-  target_position:  [3]f32,   // World-space position for end effector
-  pole_position:    [3]f32,   // World-space pole hint (bending direction)
+  bone_names:       []string, // all bones in chain from root to end (min 2)
+  target_position:  [3]f32,   // world-space position for end effector
+  pole_position:    [3]f32,   // world-space pole hint (bending direction)
   max_iterations:   int,      // FABRIK iterations (default: 10)
-  tolerance:        f32,      // Convergence threshold (default: 0.001)
-  weight:           f32,      // Blend weight (0-1), 1 = full IK
+  tolerance:        f32,      // convergence threshold (default: 0.001)
+  weight:           f32,      // blend weight (0-1), 1 = full IK
   enabled:          bool,
 }
 
@@ -66,22 +66,22 @@ NodeAttachment :: union {
 }
 
 NodeTag :: enum u32 {
-  PAWN, // Movable game entities (players, AI, etc.)
-  ACTOR, // Generic game actor
-  MESH, // Has mesh attachment
-  SPRITE, // Has sprite attachment
-  LIGHT, // Has light attachment
-  EMITTER, // Has particle emitter
-  FORCEFIELD, // Has force field
-  VISIBLE, // Currently visible (own + parent visibility)
-  NAVMESH_AGENT, // Has navigation agent
-  NAVMESH_OBSTACLE, // Is navigation obstacle
-  INTERACTIVE, // Can be interacted with
-  ENEMY, // Enemy entity
-  FRIENDLY, // Friendly entity
-  PROJECTILE, // Projectile entity
-  STATIC, // Static, non-moving entity
-  DYNAMIC, // Dynamic, moving entity
+  PAWN, // generic game entities (players, AI, etc.)
+  ACTOR, // generic game actor
+  MESH, // has mesh attachment
+  SPRITE, // has sprite attachment
+  LIGHT, // has light attachment
+  EMITTER, // has particle emitter
+  FORCEFIELD, // has force field
+  VISIBLE, // currently visible (own + parent visibility)
+  NAVMESH_AGENT, // has navigation agent
+  NAVMESH_OBSTACLE, // is navigation obstacle
+  INTERACTIVE, // can be interacted with
+  ENEMY, // enemy entity
+  FRIENDLY, // friendly entity
+  PROJECTILE, // projectile entity
+  STATIC, // static, non-moving entity
+  DYNAMIC, // dynamic, moving entity
 }
 
 NodeTagSet :: bit_set[NodeTag;u32]
@@ -91,14 +91,14 @@ Node :: struct {
   children:         [dynamic]resources.Handle,
   transform:        geometry.Transform,
   name:             string,
-  bone_socket:      string, // If not empty, attach to this bone on parent skinned mesh
+  bone_socket:      string, // if not empty, attach to this bone on parent skinned mesh
   attachment:       NodeAttachment,
-  animation:        Maybe(anim.Instance), // For node transform animation
+  animation:        Maybe(anim.Instance),
   culling_enabled:  bool,
-  visible:          bool, // Node's own visibility state
-  parent_visible:   bool, // Visibility inherited from parent chain
-  pending_deletion: bool, // Atomic flag for safe deletion
-  tags:             NodeTagSet, // Tags for AOE queries and filtering
+  visible:          bool, // node's own visibility state
+  parent_visible:   bool, // visibility inherited from parent chain
+  pending_deletion: bool, // atomic flag for safe deletion
+  tags:             NodeTagSet, // tags for queries and filtering
 }
 
 TraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
@@ -178,7 +178,6 @@ destroy_node :: proc(
         skinning.bone_matrix_buffer_offset = 0xFFFFFFFF
       }
     }
-    // Cleanup IK configs
     for &config in attachment.ik_configs {
       for name in config.bone_names {
         delete(name)
@@ -189,8 +188,8 @@ destroy_node :: proc(
   }
 }
 
-// Add an N-bone IK constraint (minimum 2 bones)
-// Update target/pole positions every frame using set_ik_target()
+// add an N-bone IK constraint (minimum 2 bones)
+// update target/pole positions every frame using set_ik_target()
 add_ik :: proc(
   node: ^Node,
   bone_names: []string,
@@ -204,8 +203,6 @@ add_ik :: proc(
   if !is_mesh do return
 
   if len(bone_names) < 2 do return
-
-  // Clone bone names
   cloned_names := make([]string, len(bone_names))
   for name, i in bone_names {
     cloned_names[i] = strings.clone(name)
@@ -224,7 +221,6 @@ add_ik :: proc(
   append(&mesh_attachment.ik_configs, config)
 }
 
-// Enable/disable an IK constraint by index
 set_ik_enabled :: proc(node: ^Node, index: int, enabled: bool) {
   mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
   if !is_mesh do return
@@ -232,7 +228,6 @@ set_ik_enabled :: proc(node: ^Node, index: int, enabled: bool) {
   mesh_attachment.ik_configs[index].enabled = enabled
 }
 
-// Update IK target/pole positions
 set_ik_target :: proc(node: ^Node, index: int, target_pos, pole_pos: [3]f32) {
   mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
   if !is_mesh do return
@@ -241,7 +236,6 @@ set_ik_target :: proc(node: ^Node, index: int, target_pos, pole_pos: [3]f32) {
   mesh_attachment.ik_configs[index].pole_position = pole_pos
 }
 
-// Clear all IK constraints from a node
 clear_ik :: proc(node: ^Node) {
   mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
   if !is_mesh do return
@@ -329,7 +323,6 @@ play_animation :: proc(
   return true
 }
 
-// Private internal spawn implementation - all spawn variants use this
 @(private = "file")
 _spawn_internal :: proc(
   world: ^World,
@@ -355,7 +348,6 @@ _spawn_internal :: proc(
   if rm != nil {
     _upload_node_to_gpu(handle, node, rm)
   }
-  // Mark node for octree insertion
   world.octree_dirty_set[handle] = true
   return handle, node, true
 }
@@ -510,8 +502,8 @@ World :: struct {
   traversal_stack:        [dynamic]TraverseEntry,
   visibility:             VisibilitySystem,
   node_octree:            geometry.Octree(NodeEntry),
-  octree_entry_map:       map[resources.Handle]NodeEntry, // Current octree state
-  octree_dirty_set:       map[resources.Handle]bool, // Nodes needing octree update
+  octree_entry_map:       map[resources.Handle]NodeEntry,
+  octree_dirty_set:       map[resources.Handle]bool, // nodes needing octree update
   actor_pools:            map[typeid]ActorPoolEntry,
 }
 
@@ -563,7 +555,6 @@ init_gpu :: proc(
   depth_width: u32,
   depth_height: u32,
 ) -> vk.Result {
-  // Initialize visibility system (creates and stores descriptor layouts in Manager)
   visibility_system_init(
     &world.visibility,
     gctx,
@@ -581,7 +572,7 @@ begin_frame :: proc(
   game_state: rawptr = nil,
 ) {
   traverse(world, rm)
-  process_octree_updates(world, rm)  // Process only changed nodes - O(k) where k << n
+  process_octree_updates(world, rm)
   update_visibility_system(world)
   world_tick_actors(world, rm, delta_time, game_state)
 }
@@ -607,7 +598,6 @@ despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
   return true
 }
 
-// Actually destroy nodes that are marked for deletion
 cleanup_pending_deletions :: proc(
   world: ^World,
   rm: ^resources.Manager,
@@ -625,7 +615,6 @@ cleanup_pending_deletions :: proc(
     }
   }
   for handle in to_destroy {
-    // Mark for octree removal
     world.octree_dirty_set[handle] = true
     if node, ok := resources.free(&world.nodes, handle); ok {
       destroy_node(node, rm, gctx)
@@ -636,8 +625,6 @@ cleanup_pending_deletions :: proc(
 get_node :: proc(world: ^World, handle: resources.Handle) -> ^Node {
   return resources.get(world.nodes, handle)
 }
-
-// Emitter synchronization for particle system
 
 @(private)
 update_visibility_system :: proc(world: ^World) {
@@ -672,7 +659,6 @@ traverse :: proc(
     if visibility_changed {
       update_node_tags(current_node)
     }
-    // Apply bone socket transform if specified
     bone_socket_transform := linalg.MATRIX4F32_IDENTITY
     has_bone_socket := false
     apply_bone_socket: {
@@ -702,7 +688,7 @@ traverse :: proc(
         len(parent_mesh_skinning.bones),
       )
       // bone_matrices contains skinning matrices (world_transform * inverse_bind)
-      // To get the bone's world transform, multiply by the bind matrix
+      // to get the bone's world transform, multiply by the bind matrix
       skinning_matrix := bone_matrices[bone_index]
       bone := parent_mesh_skinning.bones[bone_index]
       bind_matrix := linalg.matrix4_inverse(bone.inverse_bind_matrix)
@@ -710,7 +696,6 @@ traverse :: proc(
       has_bone_socket = true
     }
     if entry.parent_is_dirty || is_dirty || has_bone_socket {
-      // Mark node for octree update if not root
       if entry.handle != world.root {
         world.octree_dirty_set[entry.handle] = true
       }
@@ -727,7 +712,6 @@ traverse :: proc(
         )
       }
     }
-    // Update node data when visibility changes
     if (visibility_changed || is_dirty || entry.parent_is_dirty) && rm != nil {
       data := resources.NodeData {
         material_id           = 0xFFFFFFFF,
@@ -770,11 +754,9 @@ traverse :: proc(
       }
       gpu.write(&rm.node_data_buffer, &data, int(entry.handle.index))
     }
-    // Only call the callback if the node is effectively visible
     if callback != nil && current_node.parent_visible && current_node.visible {
       if !callback(current_node, cb_context) do continue
     }
-    // Copy children array to avoid race conditions during iteration
     children_copy := make([]resources.Handle, len(current_node.children))
     defer delete(children_copy)
     copy(children_copy, current_node.children[:])
@@ -785,7 +767,7 @@ traverse :: proc(
           child_handle,
           current_node.transform.world_matrix,
           is_dirty || entry.parent_is_dirty,
-          current_node.parent_visible && current_node.visible, // Pass combined visibility to children
+          current_node.parent_visible && current_node.visible,
         },
       )
     }
@@ -1077,7 +1059,6 @@ node_handle_scale :: proc(world: ^World, handle: resources.Handle, s: f32) {
   }
 }
 
-// Create point light attachment and associated Light resource
 create_point_light_attachment :: proc(
   node_handle: resources.Handle,
   rm: ^resources.Manager,
@@ -1103,7 +1084,6 @@ create_point_light_attachment :: proc(
   return
 }
 
-// Create directional light attachment and associated Light resource
 create_directional_light_attachment :: proc(
   node_handle: resources.Handle,
   rm: ^resources.Manager,
@@ -1127,7 +1107,6 @@ create_directional_light_attachment :: proc(
   return
 }
 
-// Create spot light attachment and associated Light resource
 create_spot_light_attachment :: proc(
   node_handle: resources.Handle,
   rm: ^resources.Manager,
@@ -1158,7 +1137,6 @@ create_spot_light_attachment :: proc(
   return
 }
 
-// Create sprite attachment and associated Sprite resource
 create_sprite_attachment :: proc(
   rm: ^resources.Manager,
   shared_quad_mesh: resources.Handle,

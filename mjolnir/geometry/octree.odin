@@ -619,7 +619,6 @@ octree_raycast_multi :: proc(
     intersection_func,
     results,
   )
-  // Sort results by distance
   if len(results^) > 1 {
     slice.sort_by(results[:], proc(a, b: RayHit(T)) -> bool {
       return a.t < b.t
@@ -721,7 +720,6 @@ octree_node_raycast_single :: proc(
     t: f32,
   ),
 ) -> RayHit(T) {
-  // Check items in current node first
   for item in node.items {
     hit, t := intersection_func(ray, item, max_dist)
     if hit && t <= max_dist {
@@ -807,7 +805,6 @@ octree_node_raycast_multi :: proc(
     }
   }
   if node.children[0] == nil do return
-  // Check all children
   for i in 0 ..< 8 {
     child_t_min, child_t_max := ray_aabb_intersection(
       ray.origin,

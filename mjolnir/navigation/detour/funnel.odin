@@ -189,7 +189,6 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query, start_pos, end_pos: [3]f32,
     return stat, straight_path_count
 }
 
-// Get portal points between adjacent polygons
 get_portal_points :: proc(query: ^Nav_Mesh_Query, from: recast.Poly_Ref, to: recast.Poly_Ref) ->
     (left: [3]f32, right: [3]f32, portal_type: u8, status: recast.Status) {
     from_tile, from_poly, from_status := get_tile_and_poly_by_ref(query.nav_mesh, from)
@@ -263,7 +262,6 @@ calc_poly_center :: proc(tile: ^Mesh_Tile, poly: ^Poly) -> [3]f32 {
     return center
 }
 
-// Surface movement constrained by navigation mesh
 move_along_surface :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos: [3]f32,
                           end_pos: [3]f32, filter: ^Query_Filter,
                           visited: []recast.Poly_Ref, max_visited: i32) ->
@@ -315,7 +313,6 @@ move_along_surface :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, s
     return result_pos, visited_count, {.Success}
 }
 
-// Helper functions
 closest_point_on_poly_boundary_nav :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f32) -> ([3]f32, recast.Status) {
     tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
     if recast.status_failed(status) || tile == nil || poly == nil do return pos, status
@@ -340,7 +337,6 @@ closest_point_on_poly_boundary_nav :: proc(query: ^Nav_Mesh_Query, ref: recast.P
     if inside {
         return pos, {.Success}
     } else {
-        // Find closest edge
         min_dist := edge_dist[0]
         min_idx := 0
         for i in 1..<int(poly.vert_count) {
@@ -404,12 +400,10 @@ find_neighbor_across_edge :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref,
                                  filter: ^Query_Filter) -> (recast.Poly_Ref, bool) {
     tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
     if recast.status_failed(status) do return recast.INVALID_POLY_REF, false
-    // Check each edge for intersection
     for i in 0..<int(poly.vert_count) {
         va := tile.verts[poly.verts[i]]
         vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
         if geometry.segment_segment_intersect_2d(start_pos, end_pos, va, vb) {
-            // Find neighbor across this edge
             link := poly.first_link
             for link != recast.DT_NULL_LINK {
                 if get_link_edge(tile, link) == u8(i) {
@@ -424,7 +418,7 @@ find_neighbor_across_edge :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref,
                 }
                 link = get_next_link(tile, link)
             }
-            return recast.INVALID_POLY_REF, true // Hit wall
+            return recast.INVALID_POLY_REF, true // hit wall
         }
     }
     return recast.INVALID_POLY_REF, false

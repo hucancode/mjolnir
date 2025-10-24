@@ -26,7 +26,7 @@ Renderer :: struct {
   post_process: post_process.Renderer,
   ui:           debug_ui.Renderer,
   retained_ui:  retained_ui.Manager,
-  main_camera:  resources.Handle, // Main camera for rendering
+  main_camera:  resources.Handle,
 }
 
 renderer_init :: proc(

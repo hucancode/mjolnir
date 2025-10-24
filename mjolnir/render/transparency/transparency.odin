@@ -34,7 +34,6 @@ init :: proc(
   if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-  // Create shared sprite quad mesh (1x1 unit quad)
   half_w: f32 = 0.5
   half_h: f32 = 0.5
   vertices := make([]geometry.Vertex, 4)
@@ -111,10 +110,8 @@ create_transparent_pipelines :: proc(
   self: ^Renderer,
   pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
-  // Create all shader variants for transparent PBR materials
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
-  // Load shader modules at compile time
   vert_shader_code := #load("../../shader/transparent/vert.spv")
   vert_module := gpu.create_shader_module(
     gctx.device,
@@ -163,7 +160,6 @@ create_transparent_pipelines :: proc(
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-  // Enable depth testing but disable depth writing for transparent objects
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
@@ -246,7 +242,6 @@ create_wireframe_pipelines :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
-  // Load shader modules at compile time
   vert_shader_code := #load("../../shader/wireframe/vert.spv")
   vert_module := gpu.create_shader_module(
     gctx.device,
@@ -281,7 +276,6 @@ create_wireframe_pipelines :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  // Set to LINE polygon mode for wireframe rendering
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .LINE,
@@ -293,14 +287,12 @@ create_wireframe_pipelines :: proc(
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-  // Enable depth testing but disable depth writing
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
     depthWriteEnable = false,
     depthCompareOp   = .LESS_OR_EQUAL,
   }
-  // Simple alpha blending for wireframe
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask      = {.R, .G, .B, .A},
     blendEnable         = true,
@@ -375,7 +367,6 @@ create_sprite_pipeline :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
-  // Load sprite shader modules
   vert_shader_code := #load("../../shader/sprite/vert.spv")
   vert_module := gpu.create_shader_module(
     gctx.device,
@@ -410,11 +401,10 @@ create_sprite_pipeline :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  // No face culling for billboards
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
-    cullMode    = {}, // No culling for sprites
+    cullMode    = {},
     frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
@@ -422,14 +412,12 @@ create_sprite_pipeline :: proc(
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-  // Enable depth testing but disable depth writing for sprites
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
     depthWriteEnable = false,
     depthCompareOp   = .LESS_OR_EQUAL,
   }
-  // Alpha blending for sprites
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
     srcColorBlendFactor = .SRC_ALPHA,
@@ -521,7 +509,6 @@ begin_pass :: proc(
 ) {
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-  // Setup color attachment - load existing content
   color_texture := resources.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
@@ -545,7 +532,6 @@ begin_pass :: proc(
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-  // Setup depth attachment - load existing depth buffer
   depth_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = depth_texture.view,
@@ -553,7 +539,6 @@ begin_pass :: proc(
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-  // Begin dynamic rendering
   extent := camera.extent
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
@@ -603,8 +588,8 @@ render :: proc(
     rm.node_data_descriptor_set,
     rm.mesh_data_descriptor_set,
     rm.vertex_skinning_descriptor_set,
-    rm.lights_buffer_descriptor_set, // Set 8: Lights
-    rm.sprite_buffer_descriptor_set, // Set 9: Sprites
+    rm.lights_buffer_descriptor_set,
+    rm.sprite_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

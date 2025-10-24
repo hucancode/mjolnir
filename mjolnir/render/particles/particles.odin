@@ -300,19 +300,19 @@ create_emitter_pipeline :: proc(
   emitter_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding         = 0,
-      descriptorType  = .STORAGE_BUFFER, // Particle buffer
+      descriptorType  = .STORAGE_BUFFER,
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
     },
     {
       binding         = 1,
-      descriptorType  = .STORAGE_BUFFER, // Particle counter buffer
+      descriptorType  = .STORAGE_BUFFER,
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
     },
     {
       binding         = 2,
-      descriptorType  = .UNIFORM_BUFFER, // Params buffer
+      descriptorType  = .UNIFORM_BUFFER,
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
     },
@@ -1000,7 +1000,6 @@ render :: proc(
     0,
     nil,
   )
-  // Set camera index via push constants
   camera_idx := camera_index
   vk.CmdPushConstants(
     command_buffer,

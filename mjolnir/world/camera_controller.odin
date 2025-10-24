@@ -13,7 +13,6 @@ CameraControllerType :: enum {
   CINEMATIC,
 }
 
-// Orbit camera controller data
 OrbitCameraData :: struct {
   target:       [3]f32,
   distance:     f32,
@@ -27,7 +26,6 @@ OrbitCameraData :: struct {
   rotate_speed: f32,
 }
 
-// Free camera controller data
 FreeCameraData :: struct {
   move_speed:        f32,
   rotation_speed:    f32,
@@ -35,31 +33,27 @@ FreeCameraData :: struct {
   mouse_sensitivity: f32,
 }
 
-// Follow camera controller data (for future use)
 FollowCameraData :: struct {
-  target:         ^[3]f32, // Pointer to target position
+  target:         ^[3]f32,
   offset:         [3]f32,
   follow_speed:   f32,
   look_at_target: bool,
 }
 
-// Base controller structure with self-contained input
 CameraController :: struct {
   type:           CameraControllerType,
-  window:         glfw.WindowHandle, // Controller owns window for input
+  window:         glfw.WindowHandle,
   data:           union {
     OrbitCameraData,
     FreeCameraData,
     FollowCameraData,
   },
-  // Internal input state (private to controller)
   last_mouse_pos: [2]f64,
   mouse_delta:    [2]f64,
   scroll_delta:   f32,
   is_orbiting:    bool,
 }
 
-// Global scroll state for handling GLFW callbacks
 // NOTE: This is accessed by engine.odin to forward scroll events
 g_scroll_deltas: map[glfw.WindowHandle]f32
 
@@ -153,14 +147,12 @@ camera_controller_follow_init :: proc(
   }
 }
 
-// Orbit controller update - self-contained with GLFW input gathering
 camera_controller_orbit_update :: proc(
   self: ^CameraController,
   camera: ^resources.Camera,
   delta_time: f32,
 ) {
   orbit := &self.data.(OrbitCameraData)
-  // Check mouse button state
   left_button_pressed :=
     glfw.GetMouseButton(self.window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
   // Handle orbiting state transitions
@@ -174,7 +166,6 @@ camera_controller_orbit_update :: proc(
     // Mouse up - stop orbiting
     self.is_orbiting = false
   }
-  // Handle zoom with scroll wheel (always responsive)
   scroll := get_scroll_delta_for_window(self.window)
   if scroll != 0 {
     orbit.distance -= scroll * orbit.zoom_speed
@@ -184,14 +175,12 @@ camera_controller_orbit_update :: proc(
       orbit.max_distance,
     )
   }
-  // Only update mouse delta and apply rotation when orbiting
   camera_needs_update := false
   if self.is_orbiting {
     current_mouse_pos: [2]f64
     current_mouse_pos.x, current_mouse_pos.y = glfw.GetCursorPos(self.window)
     self.mouse_delta = current_mouse_pos - self.last_mouse_pos
     self.last_mouse_pos = current_mouse_pos
-    // Apply rotation only if there's actual mouse movement
     if self.mouse_delta.x != 0 || self.mouse_delta.y != 0 {
       orbit.yaw += f32(self.mouse_delta.x) * orbit.rotate_speed * 0.01
       orbit.pitch += f32(self.mouse_delta.y) * orbit.rotate_speed * 0.01
@@ -199,29 +188,25 @@ camera_controller_orbit_update :: proc(
       camera_needs_update = true
     }
   }
-  // Only update camera position/rotation when necessary
   if camera_needs_update || scroll != 0 {
-    // Calculate camera position using spherical coordinates around target
     x := orbit.distance * math.cos(orbit.pitch) * math.cos(orbit.yaw)
     y := orbit.distance * math.sin(orbit.pitch)
     z := orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw)
-    // Position camera at calculated offset from target, looking at target
     camera_position := orbit.target + [3]f32{x, y, z}
     resources.camera_look_at(camera, camera_position, orbit.target)
   }
 }
 
-// Free camera controller update - self-contained with GLFW input gathering
 camera_controller_free_update :: proc(
   self: ^CameraController,
   camera: ^resources.Camera,
   delta_time: f32,
 ) {
   free := &self.data.(FreeCameraData)
-  // Gather keyboard input for movement
+  // gather keyboard input for movement
   move_vector := [3]f32{0, 0, 0}
   speed := free.move_speed
-  // Check for boost with shift key
+  // check for boost with shift key
   if glfw.GetKey(self.window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS {
     speed *= free.boost_multiplier
   }
@@ -232,45 +217,40 @@ camera_controller_free_update :: proc(
   if glfw.GetKey(self.window, glfw.KEY_D) == glfw.PRESS do move_vector += resources.camera_right(camera)
   if glfw.GetKey(self.window, glfw.KEY_Q) == glfw.PRESS do move_vector.y -= 1
   if glfw.GetKey(self.window, glfw.KEY_E) == glfw.PRESS do move_vector.y += 1
-  // Apply movement
   if linalg.length(move_vector) > 0 {
     move_vector = linalg.normalize(move_vector) * speed * delta_time
     camera.position += move_vector
   }
-  // Check mouse button state
   right_button_pressed :=
     glfw.GetMouseButton(self.window, glfw.MOUSE_BUTTON_RIGHT) == glfw.PRESS
-  // Handle mouse look state transitions
   if right_button_pressed && !self.is_orbiting {
-    // Mouse down - start mouse look
+    // mouse down - start mouse look
     self.is_orbiting = true
     current_mouse_pos: [2]f64
     current_mouse_pos.x, current_mouse_pos.y = glfw.GetCursorPos(self.window)
     self.last_mouse_pos = current_mouse_pos
   } else if !right_button_pressed && self.is_orbiting {
-    // Mouse up - stop mouse look
+    // mouse up - stop mouse look
     self.is_orbiting = false
   }
-  // Only update mouse delta and apply rotation when in mouse look mode
   if self.is_orbiting {
     current_mouse_pos: [2]f64
     current_mouse_pos.x, current_mouse_pos.y = glfw.GetCursorPos(self.window)
     self.mouse_delta = current_mouse_pos - self.last_mouse_pos
     self.last_mouse_pos = current_mouse_pos
-    // Apply rotation
+    // apply rotation
     yaw_delta := f32(self.mouse_delta.x) * free.mouse_sensitivity
     pitch_delta := f32(self.mouse_delta.y) * free.mouse_sensitivity
-    // Rotate around world up for yaw
+    // rotate around world up for yaw
     yaw_quat := linalg.quaternion_angle_axis(-yaw_delta, [3]f32{0, 1, 0})
     camera.rotation = yaw_quat * camera.rotation
-    // Rotate around local right for pitch
+    // rotate around local right for pitch
     right := resources.camera_right(camera)
     pitch_quat := linalg.quaternion_angle_axis(-pitch_delta, right)
     camera.rotation = pitch_quat * camera.rotation
   }
 }
 
-// Follow camera controller update - self-contained
 camera_controller_follow_update :: proc(
   self: ^CameraController,
   camera: ^resources.Camera,
@@ -280,7 +260,6 @@ camera_controller_follow_update :: proc(
   if follow.target != nil {
     target_pos := follow.target^
     desired_pos := target_pos + follow.offset
-    // Smooth interpolation
     current_pos := camera.position
     new_pos := linalg.lerp(
       current_pos,
@@ -295,24 +274,22 @@ camera_controller_follow_update :: proc(
   }
 }
 
-// Sync current camera state to orbit controller to prevent jumps
 camera_controller_orbit_sync :: proc(
   controller: ^CameraController,
   camera: ^resources.Camera,
 ) {
   if orbit, ok := &controller.data.(OrbitCameraData); ok {
-    // Calculate spherical coordinates from current camera position relative to target
     offset := camera.position - orbit.target
     orbit.distance = linalg.length(offset)
     if orbit.distance > 0.001 {
-      // Calculate yaw (rotation around Y axis)
+      // calculate yaw (rotation around Y axis)
       orbit.yaw = math.atan2(offset.z, offset.x)
-      // Calculate pitch (up/down angle)
+      // calculate pitch (up/down angle)
       horizontal_distance := math.sqrt(
         offset.x * offset.x + offset.z * offset.z,
       )
       orbit.pitch = math.atan2(offset.y, horizontal_distance)
-      // Clamp values to valid ranges
+      // clamp values to valid ranges
       orbit.pitch = clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch)
       orbit.distance = clamp(
         orbit.distance,
@@ -329,7 +306,6 @@ camera_controller_orbit_sync :: proc(
   }
 }
 
-// Sync current camera state to free controller (free camera stores position/rotation directly in Camera)
 camera_controller_free_sync :: proc(
   controller: ^CameraController,
   camera: ^resources.Camera,
@@ -339,7 +315,6 @@ camera_controller_free_sync :: proc(
   // This procedure exists for API consistency and potential future use.
 }
 
-// Generic sync procedure that works with any controller type
 camera_controller_sync :: proc(
   controller: ^CameraController,
   camera: ^resources.Camera,
@@ -350,13 +325,12 @@ camera_controller_sync :: proc(
   case .FREE:
     camera_controller_free_sync(controller, camera)
   case .FOLLOW:
-  // Follow camera doesn't need syncing as it automatically follows its target
+  // follow camera doesn't need syncing as it automatically follows its target
   case .CINEMATIC:
-  // Cinematic camera doesn't need syncing as it follows predefined paths
+  // cinematic camera doesn't need syncing as it follows predefined paths
   }
 }
 
-// Configuration functions for orbit controller
 camera_controller_orbit_set_target :: proc(
   controller: ^CameraController,
   target: [3]f32,
@@ -389,7 +363,6 @@ camera_controller_orbit_set_yaw_pitch :: proc(
   }
 }
 
-// Configuration functions for free controller
 camera_controller_free_set_speed :: proc(
   controller: ^CameraController,
   speed: f32,

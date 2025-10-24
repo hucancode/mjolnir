@@ -680,7 +680,6 @@ construct_scene :: proc(
               continue
             }
             skinning, _ := &mesh.skinning.?
-            // Deep clone bones including their children slices
             skinning.bones = make([]resources.Bone, len(skin_data.bones))
             for src_bone, i in skin_data.bones {
               skinning.bones[i] = src_bone

@@ -193,7 +193,6 @@ begin_pass :: proc(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
-  // Collect all G-buffer images for batch transition
   gbuffer_images := [?]vk.Image {
     position_texture.image,
     normal_texture.image,
@@ -202,7 +201,7 @@ begin_pass :: proc(
     emissive_texture.image,
     final_texture.image,
   }
-  // Batch transition all G-buffer images to COLOR_ATTACHMENT_OPTIMAL
+  // batch transition all G-buffer images to COLOR_ATTACHMENT_OPTIMAL
   gpu.transition_images(
     command_buffer,
     gbuffer_images[:],
@@ -307,7 +306,7 @@ end_pass :: proc(
   vk.CmdEndRendering(command_buffer)
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-  // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
+  // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
   position_texture := resources.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .POSITION, frame_index),
@@ -328,7 +327,6 @@ end_pass :: proc(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
   )
-  // Collect G-buffer images for batch transition (excluding final image which stays as attachment)
   gbuffer_images := [?]vk.Image {
     position_texture.image,
     normal_texture.image,
@@ -336,7 +334,7 @@ end_pass :: proc(
     metallic_roughness_texture.image,
     emissive_texture.image,
   }
-  // Batch transition all G-buffer images to SHADER_READ_ONLY_OPTIMAL
+  // batch transition all G-buffer images to SHADER_READ_ONLY_OPTIMAL
   gpu.transition_images(
     command_buffer,
     gbuffer_images[:],
@@ -350,7 +348,6 @@ end_pass :: proc(
   )
 }
 
-// Render using the late culled draw list for this frame
 render :: proc(
   self: ^Renderer,
   camera_handle: resources.Handle,
