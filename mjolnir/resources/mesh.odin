@@ -193,7 +193,7 @@ sample_clip_with_ik :: proc(
   self: ^Mesh,
   clip: ^animation.Clip,
   t: f32,
-  ik_targets: []animation.TwoBoneIKTarget,
+  ik_targets: []animation.IKTarget,
   out_bone_matrices: []matrix[4, 4]f32,
 ) {
   skin, has_skin := &self.skinning.?
@@ -271,30 +271,33 @@ sample_clip_with_ik :: proc(
   for target in ik_targets {
     if !target.enabled do continue
 
-    // Compute bone lengths (could be cached per mesh)
-    root_pos := world_transforms[target.root_bone_idx].world_position
-    mid_pos := world_transforms[target.middle_bone_idx].world_position
-    end_pos := world_transforms[target.end_bone_idx].world_position
+    // Compute bone lengths for the chain
+    chain_length := len(target.bone_indices)
+    bone_lengths := make([]f32, chain_length - 1, context.temp_allocator)
 
-    upper_length := linalg.distance(root_pos, mid_pos)
-    lower_length := linalg.distance(mid_pos, end_pos)
-    bone_lengths := [2]f32{upper_length, lower_length}
+    for i in 0 ..< chain_length - 1 {
+      bone_idx := target.bone_indices[i]
+      next_bone_idx := target.bone_indices[i + 1]
+      pos := world_transforms[bone_idx].world_position
+      next_pos := world_transforms[next_bone_idx].world_position
+      bone_lengths[i] = linalg.distance(pos, next_pos)
+    }
 
     // Apply IK
-    animation.two_bone_ik_solve(world_transforms[:], target, bone_lengths)
+    animation.fabrik_solve(world_transforms[:], target, bone_lengths[:])
   }
 
   // Phase 2.5: Update child bones after IK modifications
   // After IK modifies parent bones, we need to recompute world transforms for their children
   // to maintain hierarchical consistency
   if len(ik_targets) > 0 {
-    // Collect all bones affected by IK (root, middle, end from all targets)
-    affected_bones := make(map[u32]bool, len(ik_targets) * 3, context.temp_allocator)
+    // Collect all bones affected by IK
+    affected_bones := make(map[u32]bool, bone_count, context.temp_allocator)
     for target in ik_targets {
       if !target.enabled do continue
-      affected_bones[target.root_bone_idx] = true
-      affected_bones[target.middle_bone_idx] = true
-      affected_bones[target.end_bone_idx] = true
+      for bone_idx in target.bone_indices {
+        affected_bones[bone_idx] = true
+      }
     }
 
     // Recompute world transforms for children of affected bones

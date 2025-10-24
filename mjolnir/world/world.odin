@@ -20,15 +20,15 @@ NodeSkinning :: struct {
   bone_matrix_buffer_offset: u32, // Offset into bone matrix buffer for skinned mesh
 }
 
-// Configuration for a two-bone IK chain
+// Configuration for an N-bone IK chain (minimum 2 bones)
 // Stores bone names (resolved to indices at runtime) and world-space target positions
-TwoBoneIKConfig :: struct {
-  root_bone_name:   string, // e.g., "UpperArm.L", "Hip.L"
-  middle_bone_name: string, // e.g., "LowerArm.L", "Knee.L"
-  end_bone_name:    string, // e.g., "Hand.L", "Ankle.L"
-  target_position:  [3]f32, // World-space position for end effector
-  pole_position:    [3]f32, // World-space pole hint (knee/elbow direction)
-  weight:           f32,    // Blend weight (0-1), 1 = full IK
+IKConfig :: struct {
+  bone_names:       []string, // All bones in chain from root to end (min 2)
+  target_position:  [3]f32,   // World-space position for end effector
+  pole_position:    [3]f32,   // World-space pole hint (bending direction)
+  max_iterations:   int,      // FABRIK iterations (default: 10)
+  tolerance:        f32,      // Convergence threshold (default: 0.001)
+  weight:           f32,      // Blend weight (0-1), 1 = full IK
   enabled:          bool,
 }
 
@@ -36,7 +36,7 @@ MeshAttachment :: struct {
   handle:              resources.Handle,
   material:            resources.Handle,
   skinning:            Maybe(NodeSkinning),
-  ik_configs:          [dynamic]TwoBoneIKConfig, // IK constraints for this mesh
+  ik_configs:          [dynamic]IKConfig, // IK constraints for this mesh
   cast_shadow:         bool,
   navigation_obstacle: bool,
 }
@@ -180,34 +180,45 @@ destroy_node :: proc(
     }
     // Cleanup IK configs
     for &config in attachment.ik_configs {
-      delete(config.root_bone_name)
-      delete(config.middle_bone_name)
-      delete(config.end_bone_name)
+      for name in config.bone_names {
+        delete(name)
+      }
+      delete(config.bone_names)
     }
     delete(attachment.ik_configs)
   }
 }
 
-// Add a two-bone IK constraint
+// Add an N-bone IK constraint (minimum 2 bones)
 // Update target/pole positions every frame using set_ik_target()
 add_ik :: proc(
   node: ^Node,
-  root_bone_name, middle_bone_name, end_bone_name: string,
+  bone_names: []string,
   target_pos: [3]f32,
   pole_pos: [3]f32,
   weight: f32 = 1.0,
+  max_iterations: int = 10,
+  tolerance: f32 = 0.001,
 ) {
   mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
   if !is_mesh do return
 
-  config := TwoBoneIKConfig {
-    root_bone_name   = strings.clone(root_bone_name),
-    middle_bone_name = strings.clone(middle_bone_name),
-    end_bone_name    = strings.clone(end_bone_name),
-    target_position  = target_pos,
-    pole_position    = pole_pos,
-    weight           = clamp(weight, 0.0, 1.0),
-    enabled          = true,
+  if len(bone_names) < 2 do return
+
+  // Clone bone names
+  cloned_names := make([]string, len(bone_names))
+  for name, i in bone_names {
+    cloned_names[i] = strings.clone(name)
+  }
+
+  config := IKConfig {
+    bone_names      = cloned_names,
+    target_position = target_pos,
+    pole_position   = pole_pos,
+    max_iterations  = max_iterations,
+    tolerance       = tolerance,
+    weight          = clamp(weight, 0.0, 1.0),
+    enabled         = true,
   }
 
   append(&mesh_attachment.ik_configs, config)
@@ -236,9 +247,10 @@ clear_ik :: proc(node: ^Node) {
   if !is_mesh do return
 
   for &config in mesh_attachment.ik_configs {
-    delete(config.root_bone_name)
-    delete(config.middle_bone_name)
-    delete(config.end_bone_name)
+    for name in config.bone_names {
+      delete(name)
+    }
+    delete(config.bone_names)
   }
   clear(&mesh_attachment.ik_configs)
 }

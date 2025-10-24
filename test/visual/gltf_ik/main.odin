@@ -49,7 +49,7 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
          has_mesh {
         mjolnir.play_animation(engine, child, "Anim_0")
 
-        // Setup IK for right arm
+        // Setup IK for right arm using FABRIK solver
         // Based on logs: shoulder is at [-0.106, 1.036, 0.043]
         // Arm length is ~0.43m, so target must be within that reach
         target := [3]f32{0.0, 0.0, 0.9} // Closer to shoulder, reachable
@@ -57,85 +57,19 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
 
         world.add_ik(
           child_node,
-          "Skeleton_arm_joint_R",      // Root: shoulder
-          "Skeleton_arm_joint_R__2_",  // Middle: elbow
-          "Skeleton_arm_joint_R__3_",  // End: hand
-          target,
-          pole,
-          1.0,
+          bone_names = []string{
+            "Skeleton_arm_joint_R",      // Root: shoulder
+            "Skeleton_arm_joint_R__2_",  // Middle: elbow
+            "Skeleton_arm_joint_R__3_",  // End: hand
+          },
+          target_pos = target,
+          pole_pos = pole,
+          weight = 1.0,
         )
 
         // Enable IK immediately
         world.set_ik_enabled(child_node, 0, true)
         state.character_handle = child
-
-        // Create visualization spheres for the arm bones
-        sphere_geom := geometry.make_sphere()
-        sphere_mesh, sphere_ok := mjolnir.create_mesh(engine, sphere_geom)
-        if sphere_ok {
-          // Shoulder sphere (blue)
-          shoulder_material, _ := mjolnir.create_material(
-            engine,
-            base_color_factor = [4]f32{0.2, 0.4, 1.0, 1.0}, // Blue
-            metallic_value = 0.0,
-            roughness_value = 0.8,
-          )
-          _, shoulder_sphere, shoulder_ok := mjolnir.spawn_child(
-            engine,
-            child,
-            world.MeshAttachment {
-              handle = sphere_mesh,
-              material = shoulder_material,
-              cast_shadow = false,
-            },
-          )
-          if shoulder_ok {
-            shoulder_sphere.bone_socket = "Skeleton_arm_joint_R"
-            mjolnir.scale(shoulder_sphere, 0.05)
-          }
-
-          // Elbow sphere (green)
-          elbow_material, _ := mjolnir.create_material(
-            engine,
-            base_color_factor = [4]f32{0.2, 1.0, 0.4, 1.0}, // Green
-            metallic_value = 0.0,
-            roughness_value = 0.8,
-          )
-          _, elbow_sphere, elbow_ok := mjolnir.spawn_child(
-            engine,
-            child,
-            world.MeshAttachment {
-              handle = sphere_mesh,
-              material = elbow_material,
-              cast_shadow = false,
-            },
-          )
-          if elbow_ok {
-            elbow_sphere.bone_socket = "Skeleton_arm_joint_R__2_"
-            mjolnir.scale(elbow_sphere, 0.05)
-          }
-
-          // Hand sphere (yellow)
-          hand_material, _ := mjolnir.create_material(
-            engine,
-            base_color_factor = [4]f32{1.0, 1.0, 0.2, 1.0}, // Yellow
-            metallic_value = 0.0,
-            roughness_value = 0.8,
-          )
-          _, hand_sphere, hand_ok := mjolnir.spawn_child(
-            engine,
-            child,
-            world.MeshAttachment {
-              handle = sphere_mesh,
-              material = hand_material,
-              cast_shadow = false,
-            },
-          )
-          if hand_ok {
-            hand_sphere.bone_socket = "Skeleton_arm_joint_R__3_"
-            mjolnir.scale(hand_sphere, 0.05)
-          }
-        }
       }
     }
   }
@@ -148,6 +82,7 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if dir_ok {
     mjolnir.rotate(dir_light_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
   }
+
   // Visualize IK target with a small red cube
   target_pos := [3]f32{0.0, 0.0, 0.9}
   cube_geom := geometry.make_cube({1.0, 0.2, 0.2, 1.0})
