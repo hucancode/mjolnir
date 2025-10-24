@@ -48,7 +48,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Setup function called!")
   set_visibility_stats(engine, false)
-  set_debug_ui_enabled(engine, true)
+  // set_debug_ui_enabled(engine, true)
   plain_material_handle, plain_material_ok := create_material(engine)
   cube_geom := make_cube()
   cube_mesh_handle, cube_mesh_ok := create_mesh(engine, cube_geom)
@@ -212,31 +212,27 @@ setup :: proc(engine: ^mjolnir.Engine) {
         play_animation(engine, armature_ptr.children[i], "idle")
       }
       translate_node(armature_ptr, 0, 0, 1)
-      // Attach a cube to the hand.L bone
       for child_handle in armature_ptr.children {
-        child_node := get_node(engine, child_handle)
-        if child_node == nil do continue
-        if mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment);
-           has_mesh {
-          if _, has_skin := mesh_attachment.skinning.?; has_skin {
-            if plain_material_ok && cube_mesh_ok {
-              _, cube_node, cube_ok := spawn_child(
-                engine,
-                child_handle,
-                world.MeshAttachment {
-                  handle = cube_mesh_handle,
-                  material = plain_material_handle,
-                  cast_shadow = true,
-                },
-              )
-              if cube_ok {
-                cube_node.bone_socket = "hand.L"
-                scale(cube_node, 0.1)
-              }
-            }
-            break
-          }
+        child_node := get_node(engine, child_handle) or_continue
+        mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment)
+        if !has_mesh do continue
+        _, has_skin := mesh_attachment.skinning.?
+        if !has_skin do continue
+        if plain_material_ok && cube_mesh_ok {
+          _, hand_cube_node := spawn_child(
+            engine,
+            child_handle,
+            world.MeshAttachment {
+              handle = cube_mesh_handle,
+              material = plain_material_handle,
+              cast_shadow = true,
+            },
+          ) or_continue
+          // Attach a cube to the hand.L bone
+          hand_cube_node.bone_socket = "hand.L"
+          scale(hand_cube_node, 0.1)
         }
+        break
       }
     }
   }
