@@ -325,9 +325,6 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
   if bone_buffer.mapped == nil {
     return
   }
-  @(static) frame_count := 0
-  frame_count += 1
-  skinned_node_count := 0
   for &entry in self.world.nodes.entries do if entry.active {
     node := &entry.item
     mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment)
@@ -345,9 +342,6 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
     bone_count := len(mesh_skinning.bones)
     if bone_count == 0 do continue
     if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do continue
-
-    skinned_node_count += 1
-
     matrices_ptr := gpu.mutable_buffer_get(bone_buffer, skinning.bone_matrix_buffer_offset)
     matrices := slice.from_ptr(matrices_ptr, bone_count)
 
