@@ -688,6 +688,7 @@ construct_scene :: proc(
               skinning.bones[i].name = strings.clone(src_bone.name)
             }
             skinning.root_bone_index = skin_data.root_bone_idx
+            resources.compute_bone_lengths(skinning)
             gpu_result := resources.mesh_write_to_gpu(rm, mesh_handle, mesh)
             if gpu_result != vk.Result.SUCCESS {
               log.error("Failed to write skinned mesh data to GPU")

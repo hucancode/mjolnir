@@ -41,6 +41,7 @@ Skinning :: struct {
   root_bone_index:            u32,
   bones:                      []Bone,
   vertex_skinning_allocation: BufferAllocation,
+  bone_lengths:               []f32, // Length from parent to this bone
 }
 
 Mesh :: struct {
@@ -58,6 +59,7 @@ mesh_destroy :: proc(self: ^Mesh, gctx: ^gpu.GPUContext, manager: ^Manager) {
   manager_free_vertex_skinning(manager, skin.vertex_skinning_allocation)
   for &bone in skin.bones do bone_destroy(&bone)
   delete(skin.bones)
+  delete(skin.bone_lengths)
 }
 
 find_bone_by_name :: proc(
@@ -187,6 +189,55 @@ sample_clip :: proc(
   }
 }
 
+// Compute all bone lengths from bind pose
+// Traverses skeleton hierarchy and stores distance from parent to each bone
+compute_bone_lengths :: proc(skin: ^Skinning) {
+  bone_count := len(skin.bones)
+  if bone_count == 0 do return
+
+  // Allocate bone lengths array
+  skin.bone_lengths = make([]f32, bone_count)
+
+  // Get bind pose positions (inverse of inverse_bind_matrix)
+  bind_positions := make([][ 3]f32, bone_count, context.temp_allocator)
+  for bone, i in skin.bones {
+    bind_matrix := linalg.matrix4_inverse(bone.inverse_bind_matrix)
+    bind_positions[i] = bind_matrix[3].xyz
+  }
+
+  // Traverse hierarchy and compute distances
+  TraverseEntry :: struct {
+    bone_idx: u32,
+    parent_pos: [3]f32,
+  }
+  stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
+
+  // Root has no parent, length = 0
+  root_pos := bind_positions[skin.root_bone_index]
+  skin.bone_lengths[skin.root_bone_index] = 0
+
+  // Queue root's children
+  root_bone := &skin.bones[skin.root_bone_index]
+  for child_idx in root_bone.children {
+    append(&stack, TraverseEntry{child_idx, root_pos})
+  }
+
+  // Process all bones
+  for len(stack) > 0 {
+    entry := pop(&stack)
+    bone := &skin.bones[entry.bone_idx]
+    bone_pos := bind_positions[entry.bone_idx]
+
+    // Compute and store length from parent
+    skin.bone_lengths[entry.bone_idx] = linalg.distance(entry.parent_pos, bone_pos)
+
+    // Queue children with this bone's position
+    for child_idx in bone.children {
+      append(&stack, TraverseEntry{child_idx, bone_pos})
+    }
+  }
+}
+
 // Sample animation clip with IK corrections applied
 // This version first computes FK, then applies IK targets, then outputs skinning matrices
 sample_clip_with_ik :: proc(
@@ -254,12 +305,8 @@ sample_clip_with_ik :: proc(
 
     // Store world transform
     world_transforms[bone_idx].world_matrix = world_matrix
-    world_transforms[bone_idx].world_position = animation.matrix_get_position(
-      world_matrix,
-    )
-    world_transforms[bone_idx].world_rotation = animation.matrix_get_rotation(
-      world_matrix,
-    )
+    world_transforms[bone_idx].world_position = world_matrix[3].xyz
+    world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
 
     // Push children
     for child_idx in bone.children {
@@ -271,16 +318,15 @@ sample_clip_with_ik :: proc(
   for target in ik_targets {
     if !target.enabled do continue
 
-    // Compute bone lengths for the chain
     chain_length := len(target.bone_indices)
     bone_lengths := make([]f32, chain_length - 1, context.temp_allocator)
 
+    // bone_lengths[child] = distance from parent to child
+    // For chain [A, B, C], we need: [length(A->B), length(B->C)]
+    // Which is: [bone_lengths[B], bone_lengths[C]]
     for i in 0 ..< chain_length - 1 {
-      bone_idx := target.bone_indices[i]
-      next_bone_idx := target.bone_indices[i + 1]
-      pos := world_transforms[bone_idx].world_position
-      next_pos := world_transforms[next_bone_idx].world_position
-      bone_lengths[i] = linalg.distance(pos, next_pos)
+      child_bone_idx := target.bone_indices[i + 1]
+      bone_lengths[i] = skin.bone_lengths[child_bone_idx]
     }
 
     // Apply IK
@@ -344,12 +390,8 @@ sample_clip_with_ik :: proc(
 
       // Update world transform
       world_transforms[bone_idx].world_matrix = world_matrix
-      world_transforms[bone_idx].world_position = animation.matrix_get_position(
-        world_matrix,
-      )
-      world_transforms[bone_idx].world_rotation = animation.matrix_get_rotation(
-        world_matrix,
-      )
+      world_transforms[bone_idx].world_position = world_matrix[3].xyz
+      world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
 
       // Queue children for update
       for child_idx in bone.children {

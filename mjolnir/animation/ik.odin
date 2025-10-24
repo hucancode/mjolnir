@@ -23,16 +23,6 @@ BoneTransform :: struct {
 	world_matrix:   matrix[4, 4]f32,
 }
 
-// Extract position from a 4x4 transform matrix
-matrix_get_position :: proc(m: matrix[4, 4]f32) -> [3]f32 {
-	return m[3].xyz
-}
-
-// Extract rotation (as quaternion) from a 4x4 transform matrix
-matrix_get_rotation :: proc(m: matrix[4, 4]f32) -> quaternion128 {
-	return linalg.quaternion_from_matrix4(m)
-}
-
 // Compute a quaternion that rotates 'from' vector to 'to' vector
 quaternion_from_to :: proc(from, to: [3]f32) -> quaternion128 {
 	dot := linalg.dot(from, to)
