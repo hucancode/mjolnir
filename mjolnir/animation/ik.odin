@@ -143,7 +143,12 @@ fabrik_solve :: proc(
 	}
 
 	// Update world transforms from solved positions
-	update_transforms_from_positions(world_transforms, target.bone_indices, positions[:])
+	update_transforms_from_positions(
+		world_transforms,
+		target.bone_indices,
+		positions[:],
+		target.target_position,
+	)
 }
 
 // Apply pole vector constraint to bend the chain toward the pole
@@ -214,8 +219,16 @@ update_transforms_from_positions :: proc(
 	world_transforms: []BoneTransform,
 	bone_indices: []u32,
 	positions: [][3]f32,
+	target_position: [3]f32,
 ) {
 	chain_length := len(bone_indices)
+
+	// Save original FK positions before we start modifying them
+	fk_positions := make([][3]f32, chain_length, context.temp_allocator)
+	for i in 0 ..< chain_length {
+		bone_idx := bone_indices[i]
+		fk_positions[i] = world_transforms[bone_idx].world_position
+	}
 
 	for i in 0 ..< chain_length {
 		bone_idx := bone_indices[i]
@@ -226,14 +239,26 @@ update_transforms_from_positions :: proc(
 		// Update rotation to point toward next bone
 		if i < chain_length - 1 {
 			// Get original FK direction
-			next_bone_idx := bone_indices[i + 1]
-			fk_to_next := world_transforms[next_bone_idx].world_position -
-			             world_transforms[bone_idx].world_position
-			fk_dir := linalg.normalize(fk_to_next)
+			fk_dir := linalg.normalize(fk_positions[i + 1] - fk_positions[i])
 
 			// Get IK direction
-			ik_to_next := positions[i + 1] - positions[i]
-			ik_dir := linalg.normalize(ik_to_next)
+			ik_dir := linalg.normalize(positions[i + 1] - positions[i])
+
+			// Compute rotation delta
+			delta_rotation := quaternion_from_to(fk_dir, ik_dir)
+
+			// Apply to current rotation
+			world_transforms[bone_idx].world_rotation =
+				delta_rotation * world_transforms[bone_idx].world_rotation
+		} else if chain_length >= 2 {
+			// Last bone: orient in same direction as incoming bone segment
+			// This makes the bone "point toward" the direction it reached
+
+			// Original direction from previous to current (in FK)
+			fk_dir := linalg.normalize(fk_positions[i] - fk_positions[i - 1])
+
+			// IK direction from previous to current
+			ik_dir := linalg.normalize(positions[i] - positions[i - 1])
 
 			// Compute rotation delta
 			delta_rotation := quaternion_from_to(fk_dir, ik_dir)
