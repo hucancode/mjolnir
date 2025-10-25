@@ -20,7 +20,7 @@ main :: proc() {
 		for z in 0 ..< 300 {
 			for x in 0 ..< 300 {
 				_, node := mjolnir.spawn(engine, world.MeshAttachment{handle = mesh, material = mat}) or_continue
-				mjolnir.translate(node, f32(x - 128) * 4, 0, f32(z - 128) * 4)
+				mjolnir.translate(node, f32(x - 150) * 4, 0, f32(z - 150) * 4)
 			}
 		}
 		camera := mjolnir.get_main_camera(engine)
