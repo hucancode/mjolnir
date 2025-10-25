@@ -310,121 +310,6 @@ get_retained_ui :: proc(self: ^Engine) -> ^retained_ui.Manager {
   return &self.render.retained_ui
 }
 
-update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
-  if delta_time <= 0 {
-    return
-  }
-  bone_buffer := &self.rm.bone_buffer
-  if bone_buffer.mapped == nil {
-    return
-  }
-  for &entry in self.world.nodes.entries do if entry.active {
-    node := &entry.item
-    mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment)
-    if !has_mesh do continue
-    skinning, has_skin := mesh_attachment.skinning.?
-    if !has_skin do continue
-    anim_instance, has_anim := skinning.animation.?
-    if !has_anim do continue
-    animation.instance_update(&anim_instance, delta_time)
-    clip := anim_instance.clip
-    if clip == nil do continue
-    mesh := resources.get(self.rm.meshes, mesh_attachment.handle) or_continue
-    mesh_skinning, mesh_has_skin := mesh.skinning.?
-    if !mesh_has_skin do continue
-    bone_count := len(mesh_skinning.bones)
-    if bone_count == 0 do continue
-    if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do continue
-    matrices_ptr := gpu.mutable_buffer_get(bone_buffer, skinning.bone_matrix_buffer_offset)
-    matrices := slice.from_ptr(matrices_ptr, bone_count)
-
-    // Resolve IK configs into runtime IK targets
-    if len(mesh_attachment.ik_configs) > 0 {
-      ik_targets := make(
-        [dynamic]animation.IKTarget,
-        0,
-        len(mesh_attachment.ik_configs),
-        context.temp_allocator,
-      )
-
-      // Get node's world transform inverse to convert IK targets to skeleton-local space
-      node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
-
-      for &config in mesh_attachment.ik_configs {
-        if !config.enabled do continue
-
-        // Resolve all bone names to indices
-        bone_indices := make([]u32, len(config.bone_names), context.temp_allocator)
-        all_found := true
-        for name, i in config.bone_names {
-          idx, ok := resources.find_bone_by_name(mesh, name)
-          if !ok {
-            all_found = false
-            break
-          }
-          bone_indices[i] = idx
-        }
-
-        if !all_found do continue
-
-        // Transform IK target from world space to skeleton-local space
-        target_world_h := linalg.Vector4f32{config.target_position.x, config.target_position.y, config.target_position.z, 1.0}
-        pole_world_h := linalg.Vector4f32{config.pole_position.x, config.pole_position.y, config.pole_position.z, 1.0}
-
-        target_local_h := node_world_inv * target_world_h
-        pole_local_h := node_world_inv * pole_world_h
-
-        target_local := target_local_h.xyz
-        pole_local := pole_local_h.xyz
-
-        // Build runtime IK target in skeleton-local space
-        ik_target := animation.IKTarget {
-          bone_indices    = bone_indices,
-          target_position = target_local,
-          pole_vector     = pole_local,
-          max_iterations  = config.max_iterations,
-          tolerance       = config.tolerance,
-          weight          = config.weight,
-          enabled         = true,
-        }
-
-        append(&ik_targets, ik_target)
-      }
-
-      // Apply IK if we have valid targets
-      if len(ik_targets) > 0 {
-        resources.sample_clip_with_ik(mesh, clip, anim_instance.time, ik_targets[:], matrices)
-      } else {
-        resources.sample_clip(mesh, clip, anim_instance.time, matrices)
-      }
-    } else {
-      resources.sample_clip(mesh, clip, anim_instance.time, matrices)
-    }
-
-    skinning.animation = anim_instance
-    mesh_attachment.skinning = skinning
-    node.attachment = mesh_attachment
-  }
-}
-
-update_sprite_animations :: proc(self: ^Engine, delta_time: f32) {
-  if delta_time <= 0 do return
-  active_count :=
-    len(self.rm.sprites.entries) - len(self.rm.sprites.free_indices)
-  if active_count == 0 do return
-  for &entry, i in self.rm.sprites.entries {
-    if !entry.active do continue
-    sprite := &entry.item
-    anim, has_anim := &sprite.animation.?
-    if !has_anim do continue
-    resources.sprite_animation_update(anim, delta_time)
-    handle := resources.Handle {
-      index      = u32(i),
-      generation = entry.generation,
-    }
-    resources.sprite_write_to_gpu(&self.rm, handle, sprite)
-  }
-}
 
 update_input :: proc(self: ^Engine) -> bool {
   glfw.PollEvents()
@@ -473,8 +358,8 @@ update :: proc(self: ^Engine) -> bool {
     self.update_proc(self, delta_time)
   }
   // Update skeletal animations after user update so IK targets are current
-  update_skeletal_animations(self, delta_time)
-  update_sprite_animations(self, delta_time)
+  world.update_skeletal_animations(&self.world, &self.rm, delta_time)
+  world.update_sprite_animations(&self.rm, delta_time)
   self.last_update_timestamp = time.now()
   return true
 }

@@ -373,10 +373,9 @@ _upload_node_to_gpu :: proc(
   node: ^Node,
   rm: ^resources.Manager,
 ) {
-  world_matrix := node.transform.world_matrix
-  gpu.write(&rm.world_matrix_buffer, &world_matrix, int(handle.index))
+  resources.node_upload_transform(rm, handle, &node.transform.world_matrix)
   data := _build_node_data(node, rm)
-  gpu.write(&rm.node_data_buffer, &data, int(handle.index))
+  resources.node_upload_data(rm, handle, &data)
 }
 
 @(private = "file")
@@ -704,11 +703,10 @@ traverse :: proc(
         entry.parent_transform * bone_socket_transform,
       )
       if rm != nil {
-        world_matrix := current_node.transform.world_matrix
-        gpu.write(
-          &rm.world_matrix_buffer,
-          &world_matrix,
-          int(entry.handle.index),
+        resources.node_upload_transform(
+          rm,
+          entry.handle,
+          &current_node.transform.world_matrix,
         )
       }
     }
@@ -752,7 +750,7 @@ traverse :: proc(
          has_sprite {
         _apply_sprite_to_node_data(&data, sprite_attachment, current_node, rm)
       }
-      gpu.write(&rm.node_data_buffer, &data, int(entry.handle.index))
+      resources.node_upload_data(rm, entry.handle, &data)
     }
     if callback != nil && current_node.parent_visible && current_node.visible {
       if !callback(current_node, cb_context) do continue
