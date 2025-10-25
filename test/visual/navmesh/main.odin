@@ -59,7 +59,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = demo_setup
   engine.update_proc = demo_update
-  engine.render2d_proc = demo_render2d
+  engine.post_render_proc = demo_render2d
   engine.mouse_press_proc = demo_mouse_pressed
   engine.mouse_move_proc = demo_mouse_moved
   mjolnir.run(engine, 800, 600, "Navigation Mesh Visual Test")
@@ -95,6 +95,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
     {1, 0, 0, 1},
   )
   find_path(engine)
+  // set_debug_ui_enabled(engine, true)
   log.info("Navigation mesh demo setup complete")
 }
 
@@ -596,8 +597,9 @@ demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   }
 }
 
-demo_render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
+demo_render2d :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
+  ctx := &engine.render.ui.ctx
   if mu.window(ctx, "Navigation Mesh Demo", {40, 40, 380, 500}, {.NO_CLOSE}) {
     mu.label(ctx, "World-Integrated Navigation System")
     if demo_state.nav_mesh_handle.generation != 0 {
