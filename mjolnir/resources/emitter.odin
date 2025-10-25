@@ -26,7 +26,7 @@ EmitterData :: struct {
 }
 
 Emitter :: struct {
-  using data:        EmitterData,
+  using data:        ^EmitterData,
   enabled:           b32,
   texture_handle:    Handle,
   node_handle:       Handle,
@@ -39,7 +39,12 @@ create_emitter_handle :: proc(
 ) -> (Handle, bool) {
   handle, emitter, ok := alloc(&manager.emitters)
   if !ok do return Handle{}, false
+  // Point data to GPU-mapped memory
+  emitter.data = &manager.emitter_buffer.mapped[handle.index]
+  // Copy config data (but preserve the data pointer)
+  data_ptr := emitter.data
   emitter^ = config
+  emitter.data = data_ptr
   emitter.node_handle = node_handle
   emitter_write_to_gpu(manager, handle, emitter, false)
   return handle, true
@@ -71,14 +76,9 @@ emitter_write_to_gpu :: proc(
   }
   time_acc: f32 = 0.0
   if preserve_time_accumulator {
-    existing := gpu.mutable_buffer_get(&manager.emitter_buffer, handle.index)
-    time_acc = existing.time_accumulator
+    time_acc = emitter.data.time_accumulator
   }
   emitter_update_gpu_data(emitter, time_acc)
-  gpu.write(
-    &manager.emitter_buffer,
-    &emitter.data,
-    int(handle.index),
-  ) or_return
+  // Data is already in GPU memory via pointer, no write needed
   return .SUCCESS
 }

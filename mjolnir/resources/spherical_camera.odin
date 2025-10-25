@@ -12,7 +12,7 @@ SphericalCamera :: struct {
   radius:         f32, // Capture radius
   near:           f32, // Near plane
   far:            f32, // Far plane
-  data:           CameraData, // GPU data for bindless buffer
+  data:           ^CameraData, // GPU data for bindless buffer (pointer to GPU-mapped memory)
   size:           u32, // Resolution of cube map faces (size x size)
   depth_cube:     Handle, // Cube depth texture
   command_buffer: vk.CommandBuffer, // Secondary command buffer
@@ -105,36 +105,31 @@ spherical_camera_upload_data :: proc(
   camera: ^SphericalCamera,
   camera_index: u32,
 ) {
-  dst := gpu.mutable_buffer_get(&manager.spherical_camera_buffer, camera_index)
-  if dst == nil {
-    log.errorf("Spherical camera index %d out of bounds", camera_index)
-    return
-  }
   // Spherical camera uses identity view (transformations happen in geometry shader)
   // Geometry shader will apply per-face view matrices
-  dst.view = linalg.MATRIX4F32_IDENTITY
+  camera.data.view = linalg.MATRIX4F32_IDENTITY
   // Perspective projection with 90degree FOV for cube map faces
   fov := f32(math.PI * 0.5) // 90 degrees
   aspect := f32(1.0) // Square faces
-  dst.projection = linalg.matrix4_perspective(
+  camera.data.projection = linalg.matrix4_perspective(
     fov,
     aspect,
     camera.near,
     camera.far,
   )
-  dst.viewport_params = [4]f32 {
+  camera.data.viewport_params = [4]f32 {
     f32(camera.size),
     f32(camera.size),
     camera.near,
     camera.far,
   }
-  dst.position = [4]f32 {
+  camera.data.position = [4]f32 {
     camera.center[0],
     camera.center[1],
     camera.center[2],
     camera.radius, // Store radius in w component
   }
-  camera.data = dst^
+  // Data is already in GPU memory via pointer, no write needed
 }
 
 spherical_camera_get_visible_count :: proc(camera: ^SphericalCamera) -> u32 {

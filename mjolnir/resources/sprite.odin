@@ -41,7 +41,7 @@ SpriteData :: struct {
 }
 
 Sprite :: struct {
-  using data: SpriteData,
+  using data: ^SpriteData,
   animation:  Maybe(SpriteAnimation),
 }
 
@@ -215,7 +215,8 @@ sprite_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   sprite_update_gpu_data(sprite)
-  return gpu.write(&manager.sprite_buffer, &sprite.data, int(handle.index))
+  // Data is already in GPU memory via pointer, no write needed
+  return .SUCCESS
 }
 
 create_sprite :: proc(
@@ -237,6 +238,8 @@ create_sprite :: proc(
     log.error("Failed to allocate sprite: pool capacity reached")
     return {}, false
   }
+  // Point data to GPU-mapped memory
+  sprite.data = &manager.sprite_buffer.mapped[handle.index]
   sprite_init(
     sprite,
     texture,

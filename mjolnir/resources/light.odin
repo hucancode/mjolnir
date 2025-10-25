@@ -26,7 +26,7 @@ LightData :: struct {
 }
 
 Light :: struct {
-  using data:    LightData,
+  using data:    ^LightData,
   node_handle:   Handle, // Associated scene node for transform updates
   camera_handle: Handle, // Camera (regular or spherical based on light type)
 }
@@ -50,6 +50,8 @@ create_light :: proc(
     log.error("Failed to allocate light: pool capacity reached")
     return Handle{}, false
   }
+  // Point data to GPU-mapped memory
+  light.data = &manager.lights_buffer.mapped[handle.index]
   light.type = light_type
   light.node_handle = node_handle
   light.cast_shadow = cast_shadow
@@ -71,6 +73,8 @@ create_light :: proc(
         free(&manager.lights, handle)
         return Handle{}, false
       }
+      // Point data to GPU-mapped memory
+      spherical_cam.data = &manager.spherical_camera_buffer.mapped[cam_handle.index]
       init_result := spherical_camera_init(
         spherical_cam,
         gctx,
@@ -100,6 +104,8 @@ create_light :: proc(
         free(&manager.lights, handle)
         return Handle{}, false
       }
+      // Point data to GPU-mapped memory
+      cam.data = &manager.camera_buffer.mapped[cam_handle.index]
       // Camera parameters differ by light type
       fov := f32(math.PI * 0.5) // 90 degrees default
       if light_type == .SPOT {
@@ -138,7 +144,7 @@ create_light :: proc(
       )
     }
   }
-  gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
+  // Data is already in GPU memory via pointer, no write needed
   return handle, true
 }
 
@@ -175,9 +181,7 @@ destroy_light :: proc(
 }
 
 update_light_gpu_data :: proc(manager: ^Manager, handle: Handle) {
-  if light, ok := get(manager.lights, handle); ok {
-    gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
-  }
+  // Data is already in GPU memory via pointer, no write needed
 }
 update_light_shadow_camera_transforms :: proc(
   manager: ^Manager,
@@ -220,6 +224,6 @@ update_light_shadow_camera_transforms :: proc(
         light.shadow_map = camera_get_attachment(cam, .DEPTH, frame_index).index
       }
     }
-    gpu.write(&manager.lights_buffer, &light.data, light_index)
+    // Data is already in GPU memory via pointer, no write needed
   }
 }

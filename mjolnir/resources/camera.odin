@@ -64,8 +64,8 @@ Camera :: struct {
     PerspectiveProjection,
     OrthographicProjection,
   },
-  // GPU data for bindless buffer
-  data:                         CameraData,
+  // GPU data for bindless buffer (pointer to GPU-mapped memory)
+  data:                         ^CameraData,
   // Render target data
   extent:                       vk.Extent2D,
   attachments:                  [AttachmentType][MAX_FRAMES_IN_FLIGHT]Handle,
@@ -363,7 +363,7 @@ camera_upload_data :: proc(
   }
   frustum := make_frustum(camera.data.projection * camera.data.view)
   camera.data.frustum_planes = frustum.planes
-  gpu.write(&manager.camera_buffer, &camera.data, int(camera_index))
+  // Data is already in GPU memory via pointer, no write needed
 }
 
 // Helper functions that work directly with Camera

@@ -44,7 +44,7 @@ Skinning :: struct {
 }
 
 Mesh :: struct {
-  using data:        MeshData,
+  using data:        ^MeshData,
   vertex_allocation: BufferAllocation,
   index_allocation:  BufferAllocation,
   skinning:          Maybe(Skinning),
@@ -202,6 +202,8 @@ create_mesh :: proc(
     log.error("Failed to allocate mesh: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
   }
+  // Point data to GPU-mapped memory
+  mesh.data = &manager.mesh_data_buffer.mapped[handle.index]
   ret = mesh_init(mesh, gctx, manager, data)
   if ret != .SUCCESS {
     return
@@ -244,5 +246,6 @@ mesh_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   mesh_update_gpu_data(mesh)
-  return gpu.write(&manager.mesh_data_buffer, &mesh.data, int(handle.index))
+  // Data is already in GPU memory via pointer, no write needed
+  return .SUCCESS
 }

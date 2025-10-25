@@ -44,6 +44,8 @@ renderer_init :: proc(
     log.error("Failed to allocate main camera")
     return .ERROR_INITIALIZATION_FAILED
   }
+  // Point data to GPU-mapped memory
+  main_camera_ptr.data = &rm.camera_buffer.mapped[main_camera_handle.index]
   init_result := resources.camera_init(
     main_camera_ptr,
     gctx,

@@ -36,7 +36,7 @@ MaterialData :: struct {
 }
 
 Material :: struct {
-  using data:         MaterialData,
+  using data:         ^MaterialData,
   type:               MaterialType,
   albedo:             Handle,
   metallic_roughness: Handle,
@@ -61,11 +61,7 @@ material_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   material_update_gpu_data(mat)
-  gpu.write(
-    &manager.material_buffer,
-    &mat.data,
-    int(handle.index),
-  ) or_return
+  // Data is already in GPU memory via pointer, no copy needed
   return .SUCCESS
 }
 
@@ -93,6 +89,8 @@ create_material :: proc(
     log.error("Failed to allocate material: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
   }
+  // Point data to GPU-mapped memory
+  mat.data = &manager.material_buffer.mapped[ret.index]
   mat.type = type
   mat.features = features
   mat.albedo = albedo_handle

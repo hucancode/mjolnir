@@ -441,6 +441,8 @@ create_camera :: proc(
   if !camera_ok {
     return {}, false
   }
+  // Point data to GPU-mapped memory
+  camera_ptr.data = &engine.rm.camera_buffer.mapped[camera_handle.index]
   init_result := resources.camera_init(
     camera_ptr,
     &engine.gctx,

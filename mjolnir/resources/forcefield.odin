@@ -14,7 +14,7 @@ ForceFieldData :: struct {
 }
 
 ForceField :: struct {
-  using data:  ForceFieldData,
+  using data:  ^ForceFieldData,
   node_handle: Handle,
 }
 
@@ -25,7 +25,12 @@ create_forcefield_handle :: proc(
 ) -> (Handle, bool) {
   handle, forcefield, ok := alloc(&manager.forcefields)
   if !ok do return Handle{}, false
+  // Point data to GPU-mapped memory
+  forcefield.data = &manager.forcefield_buffer.mapped[handle.index]
+  // Copy config data (but preserve the data pointer)
+  data_ptr := forcefield.data
   forcefield^ = config
+  forcefield.data = data_ptr
   forcefield.node_handle = node_handle
   forcefield_write_to_gpu(manager, handle, forcefield)
   return handle, true
@@ -53,10 +58,6 @@ forcefield_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   forcefield_update_gpu_data(ff)
-  gpu.write(
-    &manager.forcefield_buffer,
-    &ff.data,
-    int(handle.index),
-  ) or_return
+  // Data is already in GPU memory via pointer, no write needed
   return .SUCCESS
 }
