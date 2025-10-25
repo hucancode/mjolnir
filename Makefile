@@ -41,6 +41,7 @@ vtest:
 	@failed=0; \
 	for test_name in $(VISUAL_TESTS); do \
 		echo "Testing $$test_name..."; \
+		date; \
 		./test/visual/run.py "$$test_name" artifacts || failed=$$((failed + 1)); \
 	done; \
 	if [ $$failed -ne 0 ]; then \

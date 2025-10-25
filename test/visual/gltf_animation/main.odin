@@ -19,6 +19,7 @@ AnimationSceneState :: struct {
 state := AnimationSceneState{}
 
 main :: proc() {
+  context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup_scene
   engine.update_proc = update_scene

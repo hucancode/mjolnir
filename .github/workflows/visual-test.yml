@@ -54,6 +54,23 @@ jobs:
     - name: Build shader
       run: make shader
 
+    - name: Query Vulkan device capabilities
+      env:
+        VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+      run: |
+        export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
+        echo "=== Vulkan Instance Info ==="
+        vulkaninfo --summary || true
+        echo ""
+        echo "=== Available Devices ==="
+        vulkaninfo | grep -A 20 "^GPU" || true
+        echo ""
+        echo "=== Device Features ==="
+        vulkaninfo | grep -A 50 "VkPhysicalDeviceFeatures" || true
+        echo ""
+        echo "=== Device Limits ==="
+        vulkaninfo | grep -A 30 "VkPhysicalDeviceLimits" || true
+
     - name: Run visual tests
       env:
         VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d
@@ -71,9 +88,13 @@ jobs:
       run: |
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
         mkdir -p "$VK_SCREENSHOT_DIR"
-        make build
-        timeout 15s xvfb-run -a -s "-screen 0 1920x1080x24" ./bin/main || true
+        odin build . -out:bin/main -define:USE_PARALLEL_UPDATE=false -define:FRAME_LIMIT=10
+        xvfb-run -a -s "-screen 0 1920x1080x24" ./bin/main
         ppm=$(find "$VK_SCREENSHOT_DIR" -name '*.ppm' | head -1)
+        if [ -z "$ppm" ]; then
+          echo "ERROR: No screenshot generated"
+          exit 1
+        fi
         python3 -c "
         from skimage import io; import numpy as np
         img = io.imread('$ppm')
@@ -82,6 +103,7 @@ jobs:
         print(f'Colors: {colors}, Pixels: {pixels}')
         assert 1000 < colors < pixels // 2, f'Invalid color count: {colors}'
         "
+        echo "Smoke test passed!"
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       if: always()
