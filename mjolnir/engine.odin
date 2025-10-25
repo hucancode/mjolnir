@@ -33,7 +33,8 @@ MOUSE_SENSITIVITY_X :: 0.005
 MOUSE_SENSITIVITY_Y :: 0.005
 SCROLL_SENSITIVITY :: 0.5
 MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
-USE_PARALLEL_UPDATE :: true
+USE_PARALLEL_UPDATE :: #config(USE_PARALLEL_UPDATE, true)
+FRAME_LIMIT :: #config(FRAME_LIMIT, 0)
 
 g_context: runtime.Context
 
@@ -289,6 +290,9 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   )
   if self.setup_proc != nil {
     self.setup_proc(self)
+  }
+  when FRAME_LIMIT > 0 {
+    log.infof("Frame limit set to %d", FRAME_LIMIT)
   }
   log.infof("Engine initialized")
   return .SUCCESS
@@ -729,6 +733,12 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     }
     self.last_frame_timestamp = time.now()
     frame += 1
+    when FRAME_LIMIT > 0 {
+      if frame >= FRAME_LIMIT {
+        log.infof("Reached frame limit %d, exiting gracefully", FRAME_LIMIT)
+        break
+      }
+    }
   }
 }
 

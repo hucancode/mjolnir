@@ -26,15 +26,17 @@ def find_test_dir(repo_root: Path, test_id: str) -> Path:
     return candidate if candidate.is_dir() else (repo_root / test_id)
 
 
-def build_test(repo_root: Path, test_dir: Path):
+def build_test(repo_root: Path, test_dir: Path, frame_limit: int = 0):
     test_dir_rel = os.path.relpath(test_dir, repo_root)
     binary_name = f"visual_{test_dir.name}"
-    print(f"Building {test_dir_rel}")
-    subprocess.run(
-        ["odin", "build", test_dir_rel, f"-out:bin/{binary_name}"],
-        cwd=repo_root,
-        check=True,
-    )
+    print(f"Building {test_dir_rel} with FRAME_LIMIT={frame_limit}")
+    build_args = [
+        "odin", "build", test_dir_rel,
+        f"-out:bin/{binary_name}",
+        "-define:USE_PARALLEL_UPDATE=false",
+        f"-define:FRAME_LIMIT={frame_limit}"
+    ]
+    subprocess.run(build_args, cwd=repo_root, check=True)
     return binary_name
 
 
@@ -48,20 +50,9 @@ def run_test(repo_root: Path, binary_name: str, timeout: int, env: dict, log_pat
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            start_new_session=True,
         )
-        try:
-            stdout, _ = proc.communicate(timeout=timeout)
-            code = proc.returncode or 0
-        except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGTERM)
-            try:
-                stdout, _ = proc.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(proc.pid, signal.SIGKILL)
-                stdout, _ = proc.communicate()
-            code = 0
-            print("Timed out (allowed)")
+        stdout, _ = proc.communicate()
+        code = proc.returncode or 0
 
         log_file.write(stdout)
         print(stdout, end="")
@@ -129,10 +120,11 @@ def main():
     )
     direction = config.get("direction", os.environ.get("COMPARISON_DIRECTION", "lower"))
     frames = int(config.get("frames", os.environ.get("COMPARISON_FRAMES", "3")))
+    frame_limit = int(config.get("frame_limit", os.environ.get("FRAME_LIMIT", "0")))
     update_golden = os.environ.get("UPDATE_GOLDEN") == "1"
 
     # Build and run
-    binary_name = build_test(repo_root, test_dir)
+    binary_name = build_test(repo_root, test_dir, frame_limit)
 
     out_dir = artifact_root / test_dir.name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -148,7 +140,16 @@ def main():
     code = run_test(repo_root, binary_name, timeout, env, artifact_root / "logs" / f"{test_dir.name}.log")
 
     # Compare
-    latest = sorted(out_dir.glob("*.ppm"))[0]
+    screenshots = sorted(out_dir.glob("*.ppm"))
+    if not screenshots:
+        print(f"ERROR: No screenshots generated in {out_dir}")
+        print(f"Expected VK_LAYER_LUNARG_screenshot to create .ppm files")
+        print(f"Environment: VK_SCREENSHOT_FRAMES={env.get('VK_SCREENSHOT_FRAMES')}")
+        print(f"             VK_SCREENSHOT_DIR={env.get('VK_SCREENSHOT_DIR')}")
+        print(f"Build config: FRAME_LIMIT={frame_limit}")
+        print(f"Check the log file at: {artifact_root / 'logs' / f'{test_dir.name}.log'}")
+        sys.exit(1)
+    latest = screenshots[0]
     golden = test_dir / "golden.ppm"
 
     if update_golden:
