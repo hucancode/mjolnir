@@ -80,14 +80,20 @@ test_box_box :: proc(
 	overlap_z := math.min(max_a.z, max_b.z) - math.max(min_a.z, min_b.z)
 	min_overlap := min(overlap_x, overlap_y, overlap_z)
 	normal: [3]f32
+	point: [3]f32
 	if min_overlap == overlap_x {
 		normal = pos_b.x > pos_a.x ? [3]f32{1, 0, 0} : [3]f32{-1, 0, 0}
+		contact_x := pos_b.x > pos_a.x ? max_a.x : min_a.x
+		point = [3]f32{contact_x, (max(min_a.y, min_b.y) + min(max_a.y, max_b.y)) * 0.5, (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5}
 	} else if min_overlap == overlap_y {
 		normal = pos_b.y > pos_a.y ? [3]f32{0, 1, 0} : [3]f32{0, -1, 0}
+		contact_y := pos_b.y > pos_a.y ? max_a.y : min_a.y
+		point = [3]f32{(max(min_a.x, min_b.x) + min(max_a.x, max_b.x)) * 0.5, contact_y, (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5}
 	} else {
 		normal = pos_b.z > pos_a.z ? [3]f32{0, 0, 1} : [3]f32{0, 0, -1}
+		contact_z := pos_b.z > pos_a.z ? max_a.z : min_a.z
+		point = [3]f32{(max(min_a.x, min_b.x) + min(max_a.x, max_b.x)) * 0.5, (max(min_a.y, min_b.y) + min(max_a.y, max_b.y)) * 0.5, contact_z}
 	}
-	point := (pos_a + pos_b) * 0.5
 	return true, point, normal, min_overlap
 }
 
@@ -352,4 +358,29 @@ test_collision :: proc(
 		return hit, point, -normal, penetration
 	}
 	return false, {}, {}, 0
+}
+
+test_collision_gjk :: proc(
+	collider_a: ^Collider,
+	pos_a: [3]f32,
+	collider_b: ^Collider,
+	pos_b: [3]f32,
+) -> (
+	bool,
+	[3]f32,
+	[3]f32,
+	f32,
+) {
+	simplex := Simplex{}
+	if !gjk(collider_a, pos_a, collider_b, pos_b, &simplex) {
+		return false, {}, {}, 0
+	}
+	normal, depth, ok := epa(simplex, collider_a, pos_a, collider_b, pos_b)
+	if !ok {
+		return false, {}, {}, 0
+	}
+	center_a := pos_a + collider_a.offset
+	center_b := pos_b + collider_b.offset
+	contact_point := center_a + normal * depth * 0.5
+	return true, contact_point, normal, depth
 }

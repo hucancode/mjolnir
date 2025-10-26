@@ -1,6 +1,8 @@
 package physics
 
 import "core:log"
+import "core:math"
+import "core:math/linalg"
 import "core:slice"
 import "../geometry"
 import "../resources"
@@ -111,6 +113,104 @@ physics_world_step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
 		body := &entry.item
 		rigid_body_integrate(body, dt)
 	}
+	// Track which bodies were handled by CCD
+	ccd_handled := make([dynamic]bool, len(physics.bodies.entries), context.temp_allocator)
+
+	// Perform CCD for fast-moving objects
+	ccd_threshold :: 2.0 // Objects moving faster than this use CCD
+	for &entry_a, idx_a in physics.bodies.entries {
+		if !entry_a.active {
+			continue
+		}
+		body_a := &entry_a.item
+		if body_a.is_static || body_a.collider_handle.generation == 0 {
+			continue
+		}
+
+		// Check if moving fast enough for CCD
+		velocity_mag := linalg.vector_length(body_a.velocity)
+		if velocity_mag < ccd_threshold {
+			continue
+		}
+
+		node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
+		if !node_a_ok {
+			continue
+		}
+		collider_a, col_a_ok := resources.get(physics.colliders, body_a.collider_handle)
+		if !col_a_ok {
+			continue
+		}
+
+		pos_a := node_a.transform.position
+		motion := body_a.velocity * dt
+		earliest_toi := f32(1.0)
+		earliest_normal := [3]f32{0, 1, 0}
+		earliest_body_b: ^RigidBody = nil
+		has_ccd_hit := false
+
+		// Check against all other colliders
+		for &entry_b, idx_b in physics.bodies.entries {
+			if !entry_b.active || idx_a == idx_b {
+				continue
+			}
+			body_b := &entry_b.item
+			if body_b.collider_handle.generation == 0 {
+				continue
+			}
+
+			node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
+			if !node_b_ok {
+				continue
+			}
+			collider_b, col_b_ok := resources.get(physics.colliders, body_b.collider_handle)
+			if !col_b_ok {
+				continue
+			}
+
+			pos_b := node_b.transform.position
+			toi := swept_test(collider_a, pos_a, motion, collider_b, pos_b)
+
+			if toi.has_impact && toi.time < earliest_toi {
+				earliest_toi = toi.time
+				earliest_normal = toi.normal
+				earliest_body_b = body_b
+				has_ccd_hit = true
+			}
+		}
+
+		// If we found a TOI, move to impact and reflect velocity
+		if has_ccd_hit && earliest_toi < 0.99 {
+			// Move to just before impact position
+			safe_time := earliest_toi * 0.98
+			node_a.transform.position += body_a.velocity * dt * safe_time
+
+			// Reflect velocity along collision normal
+			vel_along_normal := linalg.vector_dot(body_a.velocity, earliest_normal)
+			if vel_along_normal < 0 {
+				// Calculate restitution
+				restitution := body_a.restitution
+				if earliest_body_b != nil {
+					restitution = (body_a.restitution + earliest_body_b.restitution) * 0.5
+				}
+
+				// Reflect normal component with restitution
+				body_a.velocity -= earliest_normal * vel_along_normal * (1.0 + restitution)
+
+				// Apply friction to tangent velocity
+				friction := body_a.friction
+				if earliest_body_b != nil {
+					friction = (body_a.friction + earliest_body_b.friction) * 0.5
+				}
+				tangent_vel := body_a.velocity - earliest_normal * linalg.vector_dot(body_a.velocity, earliest_normal)
+				body_a.velocity -= tangent_vel * friction * 0.5
+			}
+
+			// Mark as handled by CCD - skip normal position integration
+			ccd_handled[idx_a] = true
+		}
+	}
+
 	broad_phase_entries := make([dynamic]BroadPhaseEntry, context.temp_allocator)
 	for &entry, idx in physics.bodies.entries {
 		if !entry.active {
@@ -198,9 +298,11 @@ physics_world_step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
 			pos_a := node_a.transform.position
 			pos_b := node_b.transform.position
 			resolve_contact(&contact, body_a, body_b, pos_a, pos_b)
+			// Apply direct position correction
+			resolve_contact_position(&contact, body_a, body_b, &node_a.transform.position, &node_b.transform.position)
 		}
 	}
-	for &entry in physics.bodies.entries {
+	for &entry, idx in physics.bodies.entries {
 		if !entry.active {
 			continue
 		}
@@ -208,12 +310,56 @@ physics_world_step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
 		if body.is_static || body.is_kinematic {
 			continue
 		}
+
+		// Skip if already handled by CCD
+		if idx < len(ccd_handled) && ccd_handled[idx] {
+			continue
+		}
+
 		node, node_ok := resources.get(w.nodes, body.node_handle)
 		if !node_ok {
 			continue
 		}
+		// Update position
 		vel := body.velocity * dt
 		geometry.transform_translate_by(&node.transform, vel.x, vel.y, vel.z)
+
+		// Update rotation from angular velocity
+		// Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
+		// Skip rotation if angular velocity is negligible
+		ang_vel_mag_sq := linalg.vector_dot(body.angular_velocity, body.angular_velocity)
+		if ang_vel_mag_sq > 0.0001 {
+			// Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
+			omega_quat := quaternion(
+				w = 0,
+				x = body.angular_velocity.x,
+				y = body.angular_velocity.y,
+				z = body.angular_velocity.z,
+			)
+			q_old := node.transform.rotation
+			// Calculate derivative: q_dot = 0.5 * omega * q_old
+			q_dot := omega_quat * q_old
+			q_dot.w *= 0.5
+			q_dot.x *= 0.5
+			q_dot.y *= 0.5
+			q_dot.z *= 0.5
+			// Integrate: q_new = q_old + q_dot * dt
+			q_new := quaternion(
+				w = q_old.w + q_dot.w * dt,
+				x = q_old.x + q_dot.x * dt,
+				y = q_old.y + q_dot.y * dt,
+				z = q_old.z + q_dot.z * dt,
+			)
+			// Normalize to prevent drift
+			mag := math.sqrt(q_new.w * q_new.w + q_new.x * q_new.x + q_new.y * q_new.y + q_new.z * q_new.z)
+			if mag > 0.0001 {
+				q_new.w /= mag
+				q_new.x /= mag
+				q_new.y /= mag
+				q_new.z /= mag
+				geometry.transform_rotate(&node.transform, q_new)
+			}
+		}
 	}
 
 	// Kill bodies that fall below kill_y threshold

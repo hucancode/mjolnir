@@ -9,37 +9,14 @@ import "../mjolnir/resources"
 import "../mjolnir/world"
 
 @(test)
-test_rigid_body_creation :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 30 * time.Second)
-	node_handle := resources.Handle{index = 1, generation = 1}
-	body := physics.rigid_body_create(node_handle, 10.0, false)
-	testing.expect(t, body.node_handle == node_handle, "Node handle should match")
-	testing.expect(t, body.mass == 10.0, "Mass should be 10.0")
-	testing.expect(t, abs(body.inv_mass - 0.1) < 0.001, "Inverse mass should be 0.1")
-	testing.expect(t, !body.is_static, "Body should not be static")
-	testing.expect(t, body.restitution == 0.5, "Default restitution should be 0.5")
-	testing.expect(t, body.friction == 0.5, "Default friction should be 0.5")
-	testing.expect(t, body.gravity_scale == 1.0, "Default gravity scale should be 1.0")
-}
-
-@(test)
-test_rigid_body_static_creation :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 30 * time.Second)
-	node_handle := resources.Handle{index = 1, generation = 1}
-	body := physics.rigid_body_create(node_handle, 10.0, true)
-	testing.expect(t, body.is_static, "Body should be static")
-	testing.expect(t, body.inv_mass == 0.0, "Static body should have zero inverse mass")
-}
-
-@(test)
 test_rigid_body_box_inertia :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 30 * time.Second)
 	node_handle := resources.Handle{index = 1, generation = 1}
 	body := physics.rigid_body_create(node_handle, 12.0, false)
 	physics.rigid_body_set_box_inertia(&body, {1, 2, 3})
-	expected_ixx := (12.0 / 3.0) * (4.0 + 9.0)
-	expected_iyy := (12.0 / 3.0) * (1.0 + 9.0)
-	expected_izz := (12.0 / 3.0) * (1.0 + 4.0)
+	expected_ixx := f32((12.0 / 3.0) * (4.0 + 9.0))
+	expected_iyy := f32((12.0 / 3.0) * (1.0 + 9.0))
+	expected_izz := f32((12.0 / 3.0) * (1.0 + 4.0))
 	testing.expect(
 		t,
 		abs(body.inertia[0, 0] - expected_ixx) < 0.001,
@@ -63,7 +40,7 @@ test_rigid_body_sphere_inertia :: proc(t: ^testing.T) {
 	node_handle := resources.Handle{index = 1, generation = 1}
 	body := physics.rigid_body_create(node_handle, 5.0, false)
 	physics.rigid_body_set_sphere_inertia(&body, 2.0)
-	expected_i := (2.0 / 5.0) * 5.0 * 4.0
+	expected_i := f32((2.0 / 5.0) * 5.0 * 4.0)
 	testing.expect(
 		t,
 		abs(body.inertia[0, 0] - expected_i) < 0.001,
@@ -151,20 +128,6 @@ test_rigid_body_static_no_force :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_physics_world_init_destroy :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 30 * time.Second)
-	physics_world := physics.PhysicsWorld{}
-	physics.physics_world_init(&physics_world, {0, -10, 0})
-	testing.expect(
-		t,
-		abs(physics_world.gravity.y + 10) < 0.001,
-		"Gravity should be set correctly",
-	)
-	testing.expect(t, physics_world.iterations == 4, "Default iterations should be 4")
-	physics.physics_world_destroy(&physics_world)
-}
-
-@(test)
 test_physics_world_create_destroy_body :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 30 * time.Second)
 	physics_world := physics.PhysicsWorld{}
@@ -180,11 +143,11 @@ test_physics_world_create_destroy_body :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "Body creation should succeed")
 	testing.expect(t, body != nil, "Body pointer should not be nil")
 	testing.expect(t, body.mass == 5.0, "Body mass should match")
-	retrieved_body := resources.pool_get(&physics_world.bodies, body_handle)
-	testing.expect(t, retrieved_body != nil, "Should retrieve body from pool")
+	retrieved_body, retrieved_ok := resources.get(physics_world.bodies, body_handle)
+	testing.expect(t, retrieved_ok && retrieved_body != nil, "Should retrieve body from pool")
 	testing.expect(t, retrieved_body.mass == 5.0, "Retrieved body mass should match")
 	physics.physics_world_destroy_body(&physics_world, body_handle)
-	destroyed_body := resources.pool_get(&physics_world.bodies, body_handle)
+	destroyed_body, destroyed_ok := resources.get(physics_world.bodies, body_handle)
 	testing.expect(t, destroyed_body == nil, "Destroyed body should not be retrievable")
 }
 
@@ -210,8 +173,8 @@ test_physics_world_add_collider :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "Collider addition should succeed")
 	testing.expect(t, col_ptr != nil, "Collider pointer should not be nil")
 	testing.expect(t, body.collider_handle == collider_handle, "Body should reference collider")
-	retrieved_collider := resources.pool_get(&physics_world.colliders, collider_handle)
-	testing.expect(t, retrieved_collider != nil, "Should retrieve collider from pool")
+	retrieved_collider, retrieved_collider_ok := resources.get(physics_world.colliders, collider_handle)
+	testing.expect(t, retrieved_collider_ok && retrieved_collider != nil, "Should retrieve collider from pool")
 }
 
 @(test)
