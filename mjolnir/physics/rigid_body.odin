@@ -16,6 +16,8 @@ RigidBody :: struct {
 	torque:           [3]f32,
 	restitution:      f32,
 	friction:         f32,
+	linear_damping:   f32,
+	angular_damping:  f32,
 	is_static:        bool,
 	is_kinematic:     bool,
 	gravity_scale:    f32,
@@ -27,13 +29,15 @@ rigid_body_create :: proc(
 	is_static := false,
 ) -> RigidBody {
 	body := RigidBody {
-		node_handle   = node_handle,
-		mass          = mass,
-		inv_mass      = is_static ? 0.0 : 1.0 / mass,
-		restitution   = 0.5,
-		friction      = 0.5,
-		is_static     = is_static,
-		gravity_scale = 1.0,
+		node_handle      = node_handle,
+		mass             = mass,
+		inv_mass         = is_static ? 0.0 : 1.0 / mass,
+		restitution      = 0.2,   // Low bounce - objects stay in contact
+		friction         = 0.8,   // High friction - sliding slows down quickly
+		linear_damping   = 0.01,  // 1% velocity loss per second
+		angular_damping  = 0.05,  // 5% angular velocity loss per second
+		is_static        = is_static,
+		gravity_scale    = 1.0,
 	}
 	if is_static {
 		body.inertia = matrix[3, 3]f32{}
@@ -132,8 +136,17 @@ rigid_body_integrate :: proc(body: ^RigidBody, dt: f32) {
 	if body.is_static || body.is_kinematic {
 		return
 	}
+	// Apply forces
 	body.velocity += body.force * body.inv_mass * dt
 	body.angular_velocity += linalg.matrix_mul_vector(body.inv_inertia, body.torque) * dt
+
+	// Apply damping (exponential decay)
+	damping_factor := 1.0 - body.linear_damping
+	angular_damping_factor := 1.0 - body.angular_damping
+	body.velocity *= damping_factor
+	body.angular_velocity *= angular_damping_factor
+
+	// Clear forces
 	body.force = {}
 	body.torque = {}
 }
