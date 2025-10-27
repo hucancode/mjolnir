@@ -34,7 +34,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 	log.info("Setting up physics demo")
 
 	// Initialize physics world
-	physics.physics_world_init(&demo_state.physics_world)
+	physics.init(&demo_state.physics_world)
 
 	// Create ground plane (large thin box)
 	ground_geom := make_cube([4]f32{0.3, 0.4, 0.3, 1.0})
@@ -58,7 +58,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 	// Create static rigid body for ground
 	ground_node, ground_node_ok := resources.get(engine.world.nodes, demo_state.ground_handle)
 	if ground_node_ok {
-		body_handle, body, ok := physics.physics_world_create_body(
+		body_handle, body, ok := physics.create_body(
 			&demo_state.physics_world,
 			demo_state.ground_handle,
 			0.0,
@@ -67,7 +67,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 		if ok {
 			demo_state.ground_body = body_handle
 			collider := physics.collider_create_box([3]f32{15.0, 0.5, 15.0})
-			physics.physics_world_add_collider(&demo_state.physics_world, body_handle, collider)
+			physics.add_collider(&demo_state.physics_world, body_handle, collider)
 			log.info("Ground body created")
 		}
 	}
@@ -90,7 +90,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 	// Create static rigid body for sphere
 	sphere_node, sphere_node_ok := resources.get(engine.world.nodes, demo_state.sphere_handle)
 	if sphere_node_ok {
-		body_handle, body, ok := physics.physics_world_create_body(
+		body_handle, body, ok := physics.create_body(
 			&demo_state.physics_world,
 			demo_state.sphere_handle,
 			0.0,
@@ -99,7 +99,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 		if ok {
 			demo_state.sphere_body = body_handle
 			collider := physics.collider_create_sphere(1.5)
-			physics.physics_world_add_collider(&demo_state.physics_world, body_handle, collider)
+			physics.add_collider(&demo_state.physics_world, body_handle, collider)
 			physics.rigid_body_set_sphere_inertia(body, 1.5)
 			log.info("Sphere body created")
 		}
@@ -149,7 +149,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 		// Create dynamic rigid body for each cube
 		cube_node, cube_node_ok := resources.get(engine.world.nodes, cube_handle)
 		if cube_node_ok {
-			body_handle, body, ok := physics.physics_world_create_body(
+			body_handle, body, ok := physics.create_body(
 				&demo_state.physics_world,
 				cube_handle,
 				1.0,  // mass
@@ -158,7 +158,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 			if ok {
 				demo_state.cube_bodies[i] = body_handle
 				collider := physics.collider_create_box([3]f32{0.5, 0.5, 0.5})
-				physics.physics_world_add_collider(&demo_state.physics_world, body_handle, collider)
+				physics.add_collider(&demo_state.physics_world, body_handle, collider)
 				physics.rigid_body_set_box_inertia(body, [3]f32{0.5, 0.5, 0.5})
 				log.infof("Cube %d body created at position (%.2f, %.2f, %.2f)", i, pos.x, pos.y, pos.z)
 			}
@@ -176,5 +176,5 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 
 demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 	// Step physics simulation
-	physics.physics_world_step(&demo_state.physics_world, &engine.world, delta_time)
+	physics.step(&demo_state.physics_world, &engine.world, delta_time)
 }

@@ -24,7 +24,7 @@ BroadPhaseEntry :: struct {
   bounds: geometry.Aabb,
 }
 
-physics_world_init :: proc(
+init :: proc(
   world: ^PhysicsWorld,
   gravity := [3]f32{0, -9.81, 0},
 ) {
@@ -42,14 +42,14 @@ physics_world_init :: proc(
   }
 }
 
-physics_world_destroy :: proc(world: ^PhysicsWorld) {
+destroy :: proc(world: ^PhysicsWorld) {
   resources.pool_destroy(world.bodies, proc(body: ^RigidBody) {})
   resources.pool_destroy(world.colliders, proc(col: ^Collider) {})
   delete(world.contacts)
   geometry.bvh_destroy(&world.spatial_index)
 }
 
-physics_world_create_body :: proc(
+create_body :: proc(
   world: ^PhysicsWorld,
   node_handle: resources.Handle,
   mass: f32,
@@ -67,7 +67,7 @@ physics_world_create_body :: proc(
   return handle, body, true
 }
 
-physics_world_destroy_body :: proc(
+destroy_body :: proc(
   world: ^PhysicsWorld,
   handle: resources.Handle,
 ) {
@@ -78,7 +78,7 @@ physics_world_destroy_body :: proc(
   resources.free(&world.bodies, handle)
 }
 
-physics_world_add_collider :: proc(
+add_collider :: proc(
   world: ^PhysicsWorld,
   body_handle: resources.Handle,
   collider: Collider,
@@ -100,7 +100,7 @@ physics_world_add_collider :: proc(
   return handle, col_ptr, true
 }
 
-physics_world_step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
+step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   clear(&physics.contacts)
   for &entry in physics.bodies.entries {
     if !entry.active {
@@ -424,6 +424,6 @@ physics_world_step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         KILL_Y,
       )
     }
-    physics_world_destroy_body(physics, handle)
+    destroy_body(physics, handle)
   }
 }

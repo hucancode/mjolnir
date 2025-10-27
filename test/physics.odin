@@ -142,10 +142,10 @@ test_rigid_body_static_no_force :: proc(t: ^testing.T) {
 test_physics_world_create_destroy_body :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 30 * time.Second)
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world)
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world)
+	defer physics.destroy(&physics_world)
 	node_handle := resources.Handle{index = 1, generation = 1}
-	body_handle, body, ok := physics.physics_world_create_body(
+	body_handle, body, ok := physics.create_body(
 		&physics_world,
 		node_handle,
 		5.0,
@@ -157,26 +157,26 @@ test_physics_world_create_destroy_body :: proc(t: ^testing.T) {
 	retrieved_body, retrieved_ok := resources.get(physics_world.bodies, body_handle)
 	testing.expect(t, retrieved_ok && retrieved_body != nil, "Should retrieve body from pool")
 	testing.expect(t, retrieved_body.mass == 5.0, "Retrieved body mass should match")
-	physics.physics_world_destroy_body(&physics_world, body_handle)
+	physics.destroy_body(&physics_world, body_handle)
 	destroyed_body, destroyed_ok := resources.get(physics_world.bodies, body_handle)
 	testing.expect(t, destroyed_body == nil, "Destroyed body should not be retrievable")
 }
 
 @(test)
-test_physics_world_add_collider :: proc(t: ^testing.T) {
+test_add_collider :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 30 * time.Second)
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world)
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world)
+	defer physics.destroy(&physics_world)
 	node_handle := resources.Handle{index = 1, generation = 1}
-	body_handle, body, _ := physics.physics_world_create_body(
+	body_handle, body, _ := physics.create_body(
 		&physics_world,
 		node_handle,
 		5.0,
 		false,
 	)
 	collider := physics.collider_create_sphere(2.0)
-	collider_handle, col_ptr, ok := physics.physics_world_add_collider(
+	collider_handle, col_ptr, ok := physics.add_collider(
 		&physics_world,
 		body_handle,
 		collider,
@@ -195,10 +195,10 @@ test_physics_world_gravity_application :: proc(t: ^testing.T) {
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world, {0, -10, 0})
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world, {0, -10, 0})
+	defer physics.destroy(&physics_world)
 	node_handle, _, _ := world.spawn(&w)
-	body_handle, body, _ := physics.physics_world_create_body(
+	body_handle, body, _ := physics.create_body(
 		&physics_world,
 		node_handle,
 		2.0,
@@ -206,7 +206,7 @@ test_physics_world_gravity_application :: proc(t: ^testing.T) {
 	)
 	initial_velocity := body.velocity.y
 	dt := f32(0.016)
-	physics.physics_world_step(&physics_world, &w, dt)
+	physics.step(&physics_world, &w, dt)
 	expected_velocity_change := physics_world.gravity.y * dt
 	testing.expect(
 		t,
@@ -222,20 +222,20 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world, {0, 0, 0})
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world, {0, 0, 0})
+	defer physics.destroy(&physics_world)
 	node_a, node_a_ptr, _ := world.spawn_at(&w, {0, 0, 0})
 	node_b, node_b_ptr, _ := world.spawn_at(&w, {1.5, 0, 0})
-	body_a_handle, body_a, _ := physics.physics_world_create_body(&physics_world, node_a, 1.0)
-	body_b_handle, body_b, _ := physics.physics_world_create_body(&physics_world, node_b, 1.0)
+	body_a_handle, body_a, _ := physics.create_body(&physics_world, node_a, 1.0)
+	body_b_handle, body_b, _ := physics.create_body(&physics_world, node_b, 1.0)
 	collider_a := physics.collider_create_sphere(1.0)
 	collider_b := physics.collider_create_sphere(1.0)
-	physics.physics_world_add_collider(&physics_world, body_a_handle, collider_a)
-	physics.physics_world_add_collider(&physics_world, body_b_handle, collider_b)
+	physics.add_collider(&physics_world, body_a_handle, collider_a)
+	physics.add_collider(&physics_world, body_b_handle, collider_b)
 	body_a.velocity = {10, 0, 0}
 	body_b.velocity = {-10, 0, 0}
 	dt := f32(0.016)
-	physics.physics_world_step(&physics_world, &w, dt)
+	physics.step(&physics_world, &w, dt)
 	testing.expect(t, len(physics_world.contacts) > 0, "Collision should be detected")
 	testing.expect(
 		t,
@@ -256,29 +256,29 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world, {0, 0, 0})
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world, {0, 0, 0})
+	defer physics.destroy(&physics_world)
 	node_static, _, _ := world.spawn_at(&w, {0, 0, 0})
 	node_dynamic, _, _ := world.spawn_at(&w, {1.5, 0, 0})
-	body_static_handle, body_static, _ := physics.physics_world_create_body(
+	body_static_handle, body_static, _ := physics.create_body(
 		&physics_world,
 		node_static,
 		1.0,
 		true,
 	)
-	body_dynamic_handle, body_dynamic, _ := physics.physics_world_create_body(
+	body_dynamic_handle, body_dynamic, _ := physics.create_body(
 		&physics_world,
 		node_dynamic,
 		1.0,
 		false,
 	)
 	collider := physics.collider_create_sphere(1.0)
-	physics.physics_world_add_collider(&physics_world, body_static_handle, collider)
-	physics.physics_world_add_collider(&physics_world, body_dynamic_handle, collider)
+	physics.add_collider(&physics_world, body_static_handle, collider)
+	physics.add_collider(&physics_world, body_dynamic_handle, collider)
 	body_dynamic.velocity = {-10, 0, 0}
 	initial_static_velocity := body_static.velocity
 	dt := f32(0.016)
-	physics.physics_world_step(&physics_world, &w, dt)
+	physics.step(&physics_world, &w, dt)
 	testing.expect(t, len(physics_world.contacts) > 0, "Collision should be detected")
 	testing.expect(
 		t,
@@ -382,19 +382,19 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
 	defer world.destroy(&w, nil, nil)
 
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world, {0, 0, 0})
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world, {0, 0, 0})
+	defer physics.destroy(&physics_world)
 
 	node_bullet, _, _ := world.spawn_at(&w, {-5, 0, 0})
 	node_wall, _, _ := world.spawn_at(&w, {0, 0, 0})
 
-	body_bullet_handle, body_bullet, _ := physics.physics_world_create_body(
+	body_bullet_handle, body_bullet, _ := physics.create_body(
 		&physics_world,
 		node_bullet,
 		0.1,
 		false,
 	)
-	body_wall_handle, body_wall, _ := physics.physics_world_create_body(
+	body_wall_handle, body_wall, _ := physics.create_body(
 		&physics_world,
 		node_wall,
 		100.0,
@@ -404,13 +404,13 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
 	collider_bullet := physics.collider_create_sphere(0.1)
 	collider_wall := physics.collider_create_box({0.5, 5, 5})
 
-	physics.physics_world_add_collider(&physics_world, body_bullet_handle, collider_bullet)
-	physics.physics_world_add_collider(&physics_world, body_wall_handle, collider_wall)
+	physics.add_collider(&physics_world, body_bullet_handle, collider_bullet)
+	physics.add_collider(&physics_world, body_wall_handle, collider_wall)
 
 	body_bullet.velocity = {100, 0, 0}
 
 	dt := f32(0.016)
-	physics.physics_world_step(&physics_world, &w, dt)
+	physics.step(&physics_world, &w, dt)
 
 	node_bullet_after, _ := resources.get(w.nodes, body_bullet.node_handle)
 	testing.expect(
@@ -434,11 +434,11 @@ test_physics_world_angular_integration :: proc(t: ^testing.T) {
 	defer world.destroy(&w, nil, nil)
 
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world, {0, 0, 0})
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world, {0, 0, 0})
+	defer physics.destroy(&physics_world)
 
 	node_handle, node, _ := world.spawn(&w)
-	body_handle, body, _ := physics.physics_world_create_body(
+	body_handle, body, _ := physics.create_body(
 		&physics_world,
 		node_handle,
 		1.0,
@@ -452,7 +452,7 @@ test_physics_world_angular_integration :: proc(t: ^testing.T) {
 	initial_rotation := node.transform.rotation
 
 	dt := f32(1.0)
-	physics.physics_world_step(&physics_world, &w, dt)
+	physics.step(&physics_world, &w, dt)
 
 	node_after, _ := resources.get(w.nodes, body.node_handle)
 	rotation_changed :=
@@ -473,11 +473,11 @@ test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
 	defer world.destroy(&w, nil, nil)
 
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world)
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world)
+	defer physics.destroy(&physics_world)
 
 	node_handle, _, _ := world.spawn_at(&w, {0, physics.KILL_Y - 1, 0})
-	body_handle, body, _ := physics.physics_world_create_body(
+	body_handle, body, _ := physics.create_body(
 		&physics_world,
 		node_handle,
 		1.0,
@@ -485,7 +485,7 @@ test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
 	)
 
 	dt := f32(0.016)
-	physics.physics_world_step(&physics_world, &w, dt)
+	physics.step(&physics_world, &w, dt)
 
 	destroyed_body, ok := resources.get(physics_world.bodies, body_handle)
 	testing.expect(t, destroyed_body == nil, "Body below KILL_Y should be destroyed")
@@ -1133,15 +1133,15 @@ test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world, {0, 0, 0})
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world, {0, 0, 0})
+	defer physics.destroy(&physics_world)
 	node_handle, node, _ := world.spawn(&w)
-	body_handle, body, _ := physics.physics_world_create_body(&physics_world, node_handle, 1.0)
+	body_handle, body, _ := physics.create_body(&physics_world, node_handle, 1.0)
 	physics.rigid_body_set_box_inertia(body, {1, 1, 1})
 	body.angular_velocity = {0, 1, 0}
 	initial_quat := node.transform.rotation
 	dt := f32(0.1)
-	physics.physics_world_step(&physics_world, &w, dt)
+	physics.step(&physics_world, &w, dt)
 	updated_quat := node.transform.rotation
 	quat_changed :=
 		abs(updated_quat.w - initial_quat.w) > 0.001 ||
@@ -1158,12 +1158,12 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world, {0, 0, 0})
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world, {0, 0, 0})
+	defer physics.destroy(&physics_world)
 	node_a, _, _ := world.spawn_at(&w, {0, 0, 0})
 	node_b, _, _ := world.spawn_at(&w, {0.5, 0.5, 0})
-	body_a_handle, body_a, _ := physics.physics_world_create_body(&physics_world, node_a, 1.0)
-	body_b_handle, body_b, _ := physics.physics_world_create_body(
+	body_a_handle, body_a, _ := physics.create_body(&physics_world, node_a, 1.0)
+	body_b_handle, body_b, _ := physics.create_body(
 		&physics_world,
 		node_b,
 		1.0,
@@ -1171,11 +1171,11 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
 	)
 	physics.rigid_body_set_box_inertia(body_a, {1, 1, 1})
 	collider := physics.collider_create_sphere(1.0)
-	physics.physics_world_add_collider(&physics_world, body_a_handle, collider)
-	physics.physics_world_add_collider(&physics_world, body_b_handle, collider)
+	physics.add_collider(&physics_world, body_a_handle, collider)
+	physics.add_collider(&physics_world, body_b_handle, collider)
 	body_a.velocity = {10, 0, 0}
 	dt := f32(0.016)
-	physics.physics_world_step(&physics_world, &w, dt)
+	physics.step(&physics_world, &w, dt)
 	if len(physics_world.contacts) > 0 {
 		testing.expect(
 			t,
@@ -1256,35 +1256,35 @@ test_integration_box_stack_stability :: proc(t: ^testing.T) {
 	defer world.destroy(&w, nil, nil)
 
 	physics_world : physics.PhysicsWorld
-	physics.physics_world_init(&physics_world, {0, -9.81, 0})
-	defer physics.physics_world_destroy(&physics_world)
+	physics.init(&physics_world, {0, -9.81, 0})
+	defer physics.destroy(&physics_world)
 
 	node_ground, _, _ := world.spawn_at(&w, {0, -0.5, 0})
-	body_ground_h, _, _ := physics.physics_world_create_body(
+	body_ground_h, _, _ := physics.create_body(
 		&physics_world,
 		node_ground,
 		1.0,
 		true,
 	)
 	collider_ground := physics.collider_create_box({5, 0.5, 5})
-	physics.physics_world_add_collider(&physics_world, body_ground_h, collider_ground)
+	physics.add_collider(&physics_world, body_ground_h, collider_ground)
 
 	node_1, _, _ := world.spawn_at(&w, {0, 0.5, 0})
-	body_1_h, body_1, _ := physics.physics_world_create_body(&physics_world, node_1, 1.0)
+	body_1_h, body_1, _ := physics.create_body(&physics_world, node_1, 1.0)
 	collider_box := physics.collider_create_box({0.5, 0.5, 0.5})
-	physics.physics_world_add_collider(&physics_world, body_1_h, collider_box)
+	physics.add_collider(&physics_world, body_1_h, collider_box)
 
 	node_2, _, _ := world.spawn_at(&w, {0, 1.5, 0})
-	body_2_h, body_2, _ := physics.physics_world_create_body(&physics_world, node_2, 1.0)
-	physics.physics_world_add_collider(&physics_world, body_2_h, collider_box)
+	body_2_h, body_2, _ := physics.create_body(&physics_world, node_2, 1.0)
+	physics.add_collider(&physics_world, body_2_h, collider_box)
 
 	node_3, _, _ := world.spawn_at(&w, {0, 2.5, 0})
-	body_3_h, body_3, _ := physics.physics_world_create_body(&physics_world, node_3, 1.0)
-	physics.physics_world_add_collider(&physics_world, body_3_h, collider_box)
+	body_3_h, body_3, _ := physics.create_body(&physics_world, node_3, 1.0)
+	physics.add_collider(&physics_world, body_3_h, collider_box)
 
 	dt := f32(0.016)
 	for i in 0 ..< 120 {
-		physics.physics_world_step(&physics_world, &w, dt)
+		physics.step(&physics_world, &w, dt)
 	}
 
 	testing.expect(

@@ -149,8 +149,7 @@ rigid_body_integrate :: proc(body: ^RigidBody, dt: f32) {
   body.velocity *= damping_factor
   body.angular_velocity *= angular_damping_factor
   // Clear forces
-  body.force = {}
-  body.torque = {}
+  rigid_body_clear_forces(body)
 }
 
 rigid_body_clear_forces :: proc(body: ^RigidBody) {
