@@ -141,7 +141,7 @@ test_rigid_body_static_no_force :: proc(t: ^testing.T) {
 @(test)
 test_physics_world_create_destroy_body :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 30 * time.Second)
-	physics_world := physics.PhysicsWorld{}
+	physics_world : physics.PhysicsWorld
 	physics.physics_world_init(&physics_world)
 	defer physics.physics_world_destroy(&physics_world)
 	node_handle := resources.Handle{index = 1, generation = 1}
@@ -165,7 +165,7 @@ test_physics_world_create_destroy_body :: proc(t: ^testing.T) {
 @(test)
 test_physics_world_add_collider :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 30 * time.Second)
-	physics_world := physics.PhysicsWorld{}
+	physics_world : physics.PhysicsWorld
 	physics.physics_world_init(&physics_world)
 	defer physics.physics_world_destroy(&physics_world)
 	node_handle := resources.Handle{index = 1, generation = 1}
@@ -194,7 +194,7 @@ test_physics_world_gravity_application :: proc(t: ^testing.T) {
 	w := world.World{}
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
-	physics_world := physics.PhysicsWorld{}
+	physics_world : physics.PhysicsWorld
 	physics.physics_world_init(&physics_world, {0, -10, 0})
 	defer physics.physics_world_destroy(&physics_world)
 	node_handle, _, _ := world.spawn(&w)
@@ -221,7 +221,7 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
 	w := world.World{}
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
-	physics_world := physics.PhysicsWorld{}
+	physics_world : physics.PhysicsWorld
 	physics.physics_world_init(&physics_world, {0, 0, 0})
 	defer physics.physics_world_destroy(&physics_world)
 	node_a, node_a_ptr, _ := world.spawn_at(&w, {0, 0, 0})
@@ -255,7 +255,7 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
 	w := world.World{}
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
-	physics_world := physics.PhysicsWorld{}
+	physics_world : physics.PhysicsWorld
 	physics.physics_world_init(&physics_world, {0, 0, 0})
 	defer physics.physics_world_destroy(&physics_world)
 	node_static, _, _ := world.spawn_at(&w, {0, 0, 0})
@@ -293,6 +293,205 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
 }
 
 // ============================================================================
+// Contact Resolution & Solver Tests
+// ============================================================================
+
+@(test)
+test_resolve_contact_momentum_conservation :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	node_handle_a := resources.Handle{index = 1, generation = 1}
+	node_handle_b := resources.Handle{index = 2, generation = 1}
+	body_a := physics.rigid_body_create(node_handle_a, 2.0, false)
+	body_b := physics.rigid_body_create(node_handle_b, 3.0, false)
+	body_a.velocity = {5, 0, 0}
+	body_b.velocity = {-3, 0, 0}
+
+	initial_momentum := body_a.velocity * body_a.mass + body_b.velocity * body_b.mass
+
+	contact := physics.Contact {
+		point        = {0, 0, 0},
+		normal       = {1, 0, 0},
+		penetration  = 0.1,
+		restitution  = 0.0,
+		friction     = 0.0,
+	}
+
+	pos_a := [3]f32{0, 0, 0}
+	pos_b := [3]f32{0, 0, 0}
+
+	physics.resolve_contact(&contact, &body_a, &body_b, pos_a, pos_b)
+
+	final_momentum := body_a.velocity * body_a.mass + body_b.velocity * body_b.mass
+
+	testing.expect(
+		t,
+		abs(final_momentum.x - initial_momentum.x) < 0.001,
+		"Momentum X should be conserved",
+	)
+	testing.expect(
+		t,
+		abs(final_momentum.y) < 0.001 && abs(final_momentum.z) < 0.001,
+		"No momentum should be created in Y/Z",
+	)
+}
+
+// ============================================================================
+// Angular Dynamics Tests
+// ============================================================================
+
+@(test)
+test_rigid_body_apply_force_at_point_generates_torque :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	node_handle := resources.Handle{index = 1, generation = 1}
+	body := physics.rigid_body_create(node_handle, 1.0, false)
+	physics.rigid_body_set_sphere_inertia(&body, 1.0)
+
+	center := [3]f32{0, 0, 0}
+	point := [3]f32{1, 0, 0}
+	force := [3]f32{0, 1, 0}
+
+	physics.rigid_body_apply_force_at_point(&body, force, point, center)
+
+	testing.expect(
+		t,
+		abs(body.force.y - 1.0) < 0.001,
+		"Force should be accumulated",
+	)
+	testing.expect(
+		t,
+		abs(body.torque.z - 1.0) < 0.001,
+		"Torque should be r × F in Z direction",
+	)
+	testing.expect(
+		t,
+		abs(body.torque.x) < 0.001 && abs(body.torque.y) < 0.001,
+		"No torque in X or Y",
+	)
+}
+
+// ============================================================================
+// Physics World Integration Tests
+// ============================================================================
+
+@(test)
+test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+
+	physics_world : physics.PhysicsWorld
+	physics.physics_world_init(&physics_world, {0, 0, 0})
+	defer physics.physics_world_destroy(&physics_world)
+
+	node_bullet, _, _ := world.spawn_at(&w, {-5, 0, 0})
+	node_wall, _, _ := world.spawn_at(&w, {0, 0, 0})
+
+	body_bullet_handle, body_bullet, _ := physics.physics_world_create_body(
+		&physics_world,
+		node_bullet,
+		0.1,
+		false,
+	)
+	body_wall_handle, body_wall, _ := physics.physics_world_create_body(
+		&physics_world,
+		node_wall,
+		100.0,
+		true,
+	)
+
+	collider_bullet := physics.collider_create_sphere(0.1)
+	collider_wall := physics.collider_create_box({0.5, 5, 5})
+
+	physics.physics_world_add_collider(&physics_world, body_bullet_handle, collider_bullet)
+	physics.physics_world_add_collider(&physics_world, body_wall_handle, collider_wall)
+
+	body_bullet.velocity = {100, 0, 0}
+
+	dt := f32(0.016)
+	physics.physics_world_step(&physics_world, &w, dt)
+
+	node_bullet_after, _ := resources.get(w.nodes, body_bullet.node_handle)
+	testing.expect(
+		t,
+		node_bullet_after.transform.position.x < 0.5,
+		"CCD should prevent tunneling through wall",
+	)
+	testing.expect(
+		t,
+		body_bullet.velocity.x < 100,
+		"CCD should reflect/reduce velocity",
+	)
+}
+
+@(test)
+test_physics_world_angular_integration :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+
+	physics_world : physics.PhysicsWorld
+	physics.physics_world_init(&physics_world, {0, 0, 0})
+	defer physics.physics_world_destroy(&physics_world)
+
+	node_handle, node, _ := world.spawn(&w)
+	body_handle, body, _ := physics.physics_world_create_body(
+		&physics_world,
+		node_handle,
+		1.0,
+		false,
+	)
+
+	physics.rigid_body_set_sphere_inertia(body, 1.0)
+
+	body.angular_velocity = {0, math.PI, 0}
+
+	initial_rotation := node.transform.rotation
+
+	dt := f32(1.0)
+	physics.physics_world_step(&physics_world, &w, dt)
+
+	node_after, _ := resources.get(w.nodes, body.node_handle)
+	rotation_changed :=
+		abs(node_after.transform.rotation.w - initial_rotation.w) > 0.1 ||
+		abs(node_after.transform.rotation.x - initial_rotation.x) > 0.1 ||
+		abs(node_after.transform.rotation.y - initial_rotation.y) > 0.1 ||
+		abs(node_after.transform.rotation.z - initial_rotation.z) > 0.1
+
+	testing.expect(t, rotation_changed, "Angular velocity should update rotation quaternion")
+}
+
+@(test)
+test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+
+	physics_world : physics.PhysicsWorld
+	physics.physics_world_init(&physics_world)
+	defer physics.physics_world_destroy(&physics_world)
+
+	node_handle, _, _ := world.spawn_at(&w, {0, physics.KILL_Y - 1, 0})
+	body_handle, body, _ := physics.physics_world_create_body(
+		&physics_world,
+		node_handle,
+		1.0,
+		false,
+	)
+
+	dt := f32(0.016)
+	physics.physics_world_step(&physics_world, &w, dt)
+
+	destroyed_body, ok := resources.get(physics_world.bodies, body_handle)
+	testing.expect(t, destroyed_body == nil, "Body below KILL_Y should be destroyed")
+}
+
+// ============================================================================
 // GJK/EPA Algorithm Tests
 // ============================================================================
 
@@ -303,7 +502,7 @@ test_gjk_sphere_sphere_intersecting :: proc(t: ^testing.T) {
 	collider_b := physics.collider_create_sphere(1.0)
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{1.5, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
 	testing.expect(t, result, "GJK should detect collision between intersecting spheres")
 }
@@ -315,7 +514,7 @@ test_gjk_sphere_sphere_separated :: proc(t: ^testing.T) {
 	collider_b := physics.collider_create_sphere(1.0)
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{3, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
 	testing.expect(t, !result, "GJK should not detect collision between separated spheres")
 }
@@ -327,7 +526,7 @@ test_gjk_box_box_intersecting :: proc(t: ^testing.T) {
 	collider_b := physics.collider_create_box({1, 1, 1})
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{1.5, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
 	testing.expect(t, result, "GJK should detect collision between intersecting boxes")
 }
@@ -339,7 +538,7 @@ test_gjk_box_box_separated :: proc(t: ^testing.T) {
 	collider_b := physics.collider_create_box({1, 1, 1})
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{5, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
 	testing.expect(t, !result, "GJK should not detect collision between separated boxes")
 }
@@ -351,7 +550,7 @@ test_gjk_capsule_capsule_intersecting :: proc(t: ^testing.T) {
 	collider_b := physics.collider_create_capsule(0.5, 2.0)
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{0.8, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
 	testing.expect(t, result, "GJK should detect collision between intersecting capsules")
 }
@@ -363,7 +562,7 @@ test_gjk_capsule_capsule_separated :: proc(t: ^testing.T) {
 	collider_b := physics.collider_create_capsule(0.5, 2.0)
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{5, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
 	testing.expect(t, !result, "GJK should not detect collision between separated capsules")
 }
@@ -378,7 +577,7 @@ test_gjk_sphere_box_intersecting :: proc(t: ^testing.T) {
 	// They overlap from 0.5 to 1.0
 	pos_sphere := [3]f32{1.5, 0, 0}
 	pos_box := [3]f32{0, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	result := physics.gjk(&collider_sphere, pos_sphere, &collider_box, pos_box, &simplex)
 	testing.expect(t, result, "GJK should detect collision between sphere and box")
 }
@@ -390,7 +589,7 @@ test_gjk_sphere_box_separated :: proc(t: ^testing.T) {
 	collider_box := physics.collider_create_box({1, 1, 1})
 	pos_sphere := [3]f32{5, 0, 0}
 	pos_box := [3]f32{0, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	result := physics.gjk(&collider_sphere, pos_sphere, &collider_box, pos_box, &simplex)
 	testing.expect(t, !result, "GJK should not detect collision when sphere and box are separated")
 }
@@ -402,7 +601,7 @@ test_epa_sphere_sphere_penetration :: proc(t: ^testing.T) {
 	collider_b := physics.collider_create_sphere(1.0)
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{1.5, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	if !physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex) {
 		testing.fail_now(t, "GJK should detect collision")
 	}
@@ -419,7 +618,7 @@ test_epa_box_box_penetration :: proc(t: ^testing.T) {
 	collider_b := physics.collider_create_box({1, 1, 1})
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{1.5, 0, 0}
-	simplex := physics.Simplex{}
+	simplex : physics.Simplex
 	if !physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex) {
 		testing.fail_now(t, "GJK should detect collision")
 	}
@@ -933,7 +1132,7 @@ test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
 	w := world.World{}
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
-	physics_world := physics.PhysicsWorld{}
+	physics_world : physics.PhysicsWorld
 	physics.physics_world_init(&physics_world, {0, 0, 0})
 	defer physics.physics_world_destroy(&physics_world)
 	node_handle, node, _ := world.spawn(&w)
@@ -958,7 +1157,7 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
 	w := world.World{}
 	world.init(&w)
 	defer world.destroy(&w, nil, nil)
-	physics_world := physics.PhysicsWorld{}
+	physics_world : physics.PhysicsWorld
 	physics.physics_world_init(&physics_world, {0, 0, 0})
 	defer physics.physics_world_destroy(&physics_world)
 	node_a, _, _ := world.spawn_at(&w, {0, 0, 0})
@@ -984,4 +1183,168 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
 			"Off-center collision should induce angular velocity",
 		)
 	}
+}
+
+// ============================================================================
+// Priority 2: Restitution, Friction, and Multi-Body Tests
+// ============================================================================
+
+@(test)
+test_resolve_contact_restitution_coefficient :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	node_handle_dynamic := resources.Handle{index = 1, generation = 1}
+	node_handle_static := resources.Handle{index = 2, generation = 1}
+	body_dynamic := physics.rigid_body_create(node_handle_dynamic, 1.0, false)
+	body_static := physics.rigid_body_create(node_handle_static, 1.0, true)
+	body_dynamic.velocity = {0, -10, 0}
+
+	contact := physics.Contact {
+		point       = {0, 0, 0},
+		normal      = -linalg.VECTOR3F32_Y_AXIS, // Points from dynamic (above) to static (below)
+		penetration = 0.01,
+		restitution = 0.8,
+		friction    = 0.0,
+	}
+
+	physics.resolve_contact(&contact, &body_dynamic, &body_static, {0, 0, 0}, {0, 0, 0})
+
+	expected_velocity := f32(10.0 * 0.8)
+	testing.expect(
+		t,
+		abs(body_dynamic.velocity.y - expected_velocity) < 0.1,
+		"Velocity should reverse and reduce by restitution coefficient",
+	)
+}
+
+@(test)
+test_resolve_contact_friction_reduces_tangent_velocity :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	node_handle_dynamic := resources.Handle{index = 1, generation = 1}
+	node_handle_static := resources.Handle{index = 2, generation = 1}
+	body_dynamic := physics.rigid_body_create(node_handle_dynamic, 1.0, false)
+	body_static := physics.rigid_body_create(node_handle_static, 1.0, true)
+	body_dynamic.velocity = {5, -1, 0}
+
+	contact := physics.Contact {
+		point       = {0, 0, 0},
+		normal      = -linalg.VECTOR3F32_Y_AXIS, // Points from dynamic (above) to static (below)
+		penetration = 0.01,
+		restitution = 0.0,
+		friction    = 0.5,
+	}
+
+	initial_tangent_speed := abs(body_dynamic.velocity.x)
+
+	physics.resolve_contact(&contact, &body_dynamic, &body_static, {0, 0, 0}, {0, 0, 0})
+
+	final_tangent_speed := abs(body_dynamic.velocity.x)
+
+	testing.expect(
+		t,
+		final_tangent_speed < initial_tangent_speed,
+		"Friction should reduce tangent velocity",
+	)
+	testing.expect(t, final_tangent_speed > 0, "Friction should not completely stop object")
+}
+
+@(test)
+test_integration_box_stack_stability :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+
+	physics_world : physics.PhysicsWorld
+	physics.physics_world_init(&physics_world, {0, -9.81, 0})
+	defer physics.physics_world_destroy(&physics_world)
+
+	node_ground, _, _ := world.spawn_at(&w, {0, -0.5, 0})
+	body_ground_h, _, _ := physics.physics_world_create_body(
+		&physics_world,
+		node_ground,
+		1.0,
+		true,
+	)
+	collider_ground := physics.collider_create_box({5, 0.5, 5})
+	physics.physics_world_add_collider(&physics_world, body_ground_h, collider_ground)
+
+	node_1, _, _ := world.spawn_at(&w, {0, 0.5, 0})
+	body_1_h, body_1, _ := physics.physics_world_create_body(&physics_world, node_1, 1.0)
+	collider_box := physics.collider_create_box({0.5, 0.5, 0.5})
+	physics.physics_world_add_collider(&physics_world, body_1_h, collider_box)
+
+	node_2, _, _ := world.spawn_at(&w, {0, 1.5, 0})
+	body_2_h, body_2, _ := physics.physics_world_create_body(&physics_world, node_2, 1.0)
+	physics.physics_world_add_collider(&physics_world, body_2_h, collider_box)
+
+	node_3, _, _ := world.spawn_at(&w, {0, 2.5, 0})
+	body_3_h, body_3, _ := physics.physics_world_create_body(&physics_world, node_3, 1.0)
+	physics.physics_world_add_collider(&physics_world, body_3_h, collider_box)
+
+	dt := f32(0.016)
+	for i in 0 ..< 120 {
+		physics.physics_world_step(&physics_world, &w, dt)
+	}
+
+	testing.expect(
+		t,
+		linalg.vector_length(body_1.velocity) < 0.1,
+		"Bottom box should settle",
+	)
+	testing.expect(
+		t,
+		linalg.vector_length(body_2.velocity) < 0.1,
+		"Middle box should settle",
+	)
+	testing.expect(
+		t,
+		linalg.vector_length(body_3.velocity) < 0.1,
+		"Top box should settle",
+	)
+
+	node_1_final, _ := resources.get(w.nodes, body_1.node_handle)
+	node_2_final, _ := resources.get(w.nodes, body_2.node_handle)
+	node_3_final, _ := resources.get(w.nodes, body_3.node_handle)
+
+	testing.expect(
+		t,
+		node_2_final.transform.position.y > node_1_final.transform.position.y,
+		"Box 2 should be above box 1",
+	)
+	testing.expect(
+		t,
+		node_3_final.transform.position.y > node_2_final.transform.position.y,
+		"Box 3 should be above box 2",
+	)
+}
+
+@(test)
+test_resolve_contact_position_correction :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	node_handle_a := resources.Handle{index = 1, generation = 1}
+	node_handle_b := resources.Handle{index = 2, generation = 1}
+	body_a := physics.rigid_body_create(node_handle_a, 1.0, false)
+	body_b := physics.rigid_body_create(node_handle_b, 1.0, false)
+
+	pos_a := [3]f32{0, 0, 0}
+	pos_b := [3]f32{0, 0, 0}
+
+	contact := physics.Contact {
+		point       = {0, 0, 0},
+		normal      = {1, 0, 0},
+		penetration = 0.5,
+		restitution = 0.0,
+		friction    = 0.0,
+	}
+
+	physics.resolve_contact_position(&contact, &body_a, &body_b, &pos_a, &pos_b)
+
+	separation := abs(pos_b.x - pos_a.x)
+	testing.expect(t, separation > 0.0, "Position correction should separate bodies")
+	testing.expect(
+		t,
+		separation < 0.5,
+		"Correction should be partial (Baumgarte stabilization)",
+	)
 }

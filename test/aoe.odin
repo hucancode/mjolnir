@@ -131,7 +131,7 @@ test_aoe_query_fan :: proc(t: ^testing.T) {
 	defer delete(results)
 
 	// Query 90-degree fan pointing in positive X direction
-	world.query_fan(&w, {0, 0, 0}, {1, 0, 0}, 8.0, math.PI / 2, &results)
+	world.query_fan(&w, {0, 0, 0}, linalg.VECTOR3F32_X_AXIS, 8.0, math.PI / 2, &results)
 	testing.expect(t, len(results) >= 1, "Should find at least node in positive X direction")
 
 	// Verify it doesn't include node in negative X

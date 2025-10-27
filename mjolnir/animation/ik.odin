@@ -30,9 +30,9 @@ quaternion_from_to :: proc(from, to: [3]f32) -> quaternion128 {
 		return linalg.QUATERNIONF32_IDENTITY
 	}
 	if dot < -0.9999 {
-		axis := linalg.cross(from, [3]f32{1, 0, 0})
+		axis := linalg.cross(from, linalg.VECTOR3F32_X_AXIS)
 		if linalg.length(axis) < 0.0001 {
-			axis = linalg.cross(from, [3]f32{0, 1, 0})
+			axis = linalg.cross(from, linalg.VECTOR3F32_Y_AXIS)
 		}
 		axis = linalg.normalize(axis)
 		return linalg.quaternion_angle_axis(math.PI, axis)

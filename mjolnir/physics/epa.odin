@@ -77,9 +77,9 @@ epa :: proc(
 			line_dir := linalg.normalize(ab)
 			// Find a non-parallel axis
 			if abs(line_dir.x) < 0.9 {
-				normal_dir = linalg.vector_cross3(line_dir, [3]f32{1, 0, 0})
+				normal_dir = linalg.vector_cross3(line_dir, linalg.VECTOR3F32_X_AXIS)
 			} else {
-				normal_dir = linalg.vector_cross3(line_dir, [3]f32{0, 1, 0})
+				normal_dir = linalg.vector_cross3(line_dir, linalg.VECTOR3F32_Y_AXIS)
 			}
 			normal_dir = linalg.normalize(normal_dir)
 		} else {

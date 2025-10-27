@@ -36,9 +36,9 @@ sphere_bounds :: proc(sphere: Sphere) -> Aabb {
 disc_bounds :: proc(disc: Disc) -> Aabb {
   tan1, tan2 := [3]f32{}, [3]f32{}
   if math.abs(disc.normal.y) > 0.9 {
-    tan1 = linalg.normalize(linalg.cross(disc.normal, [3]f32{1, 0, 0}))
+    tan1 = linalg.normalize(linalg.cross(disc.normal, linalg.VECTOR3F32_X_AXIS))
   } else {
-    tan1 = linalg.normalize(linalg.cross(disc.normal, [3]f32{0, 1, 0}))
+    tan1 = linalg.normalize(linalg.cross(disc.normal, linalg.VECTOR3F32_Y_AXIS))
   }
   tan2 = linalg.cross(disc.normal, tan1)
   ext1 := tan1 * disc.radius

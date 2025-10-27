@@ -82,7 +82,7 @@ test_box_box :: proc(
 	normal: [3]f32
 	point: [3]f32
 	if min_overlap == overlap_x {
-		normal = pos_b.x > pos_a.x ? [3]f32{1, 0, 0} : [3]f32{-1, 0, 0}
+		normal = pos_b.x > pos_a.x ? linalg.VECTOR3F32_X_AXIS : -linalg.VECTOR3F32_X_AXIS
 		contact_x := pos_b.x > pos_a.x ? max_a.x : min_a.x
 		point = [3]f32{contact_x, (max(min_a.y, min_b.y) + min(max_a.y, max_b.y)) * 0.5, (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5}
 	} else if min_overlap == overlap_y {
@@ -371,7 +371,7 @@ test_collision_gjk :: proc(
 	[3]f32,
 	f32,
 ) {
-	simplex := Simplex{}
+	simplex : Simplex
 	if !gjk(collider_a, pos_a, collider_b, pos_b, &simplex) {
 		return false, {}, {}, 0
 	}

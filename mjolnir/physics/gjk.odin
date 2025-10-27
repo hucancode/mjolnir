@@ -88,13 +88,11 @@ gjk :: proc(
 	// Initial direction (from B to A)
 	direction := pos_a - pos_b
 	if linalg.vector_dot(direction, direction) < 0.0001 {
-		direction = {1, 0, 0}
+		direction = linalg.VECTOR3F32_X_AXIS
 	}
-
 	// Get first point
-	simplex := Simplex{}
+	simplex : Simplex
 	simplex_push_front(&simplex, support(collider_a, pos_a, collider_b, pos_b, direction))
-
 	// Reverse direction
 	direction = -simplex.points[0]
 

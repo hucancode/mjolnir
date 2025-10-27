@@ -200,9 +200,9 @@ almost_equal_quaternion :: proc(a, b: quaternion128) -> bool {
 @(test)
 test_quaternion_sampling :: proc(t: ^testing.T) {
   q1 := linalg.quaternion_angle_axis_f32(0, {0, 0, 1}) // Identity
-  q2 := linalg.quaternion_angle_axis_f32(math.PI, {0, 0, 1}) // 180 around Z
-  q3 := linalg.quaternion_angle_axis_f32(math.PI, {0, 1, 0}) // 180 around Y
-  q4 := linalg.quaternion_angle_axis_f32(math.PI, {1, 0, 0}) // 180 around X
+  q2 := linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Z_AXIS)
+  q3 := linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Y_AXIS)
+  q4 := linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_X_AXIS)
   frames := []animation.Keyframe(quaternion128) {
     {time = 0.0, value = q1},
     {time = 1.0, value = q2},
