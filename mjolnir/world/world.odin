@@ -201,13 +201,11 @@ add_ik :: proc(
 ) {
   mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
   if !is_mesh do return
-
   if len(bone_names) < 2 do return
   cloned_names := make([]string, len(bone_names))
   for name, i in bone_names {
     cloned_names[i] = strings.clone(name)
   }
-
   config := IKConfig {
     bone_names      = cloned_names,
     target_position = target_pos,
@@ -217,7 +215,6 @@ add_ik :: proc(
     weight          = clamp(weight, 0.0, 1.0),
     enabled         = true,
   }
-
   append(&mesh_attachment.ik_configs, config)
 }
 
@@ -239,7 +236,6 @@ set_ik_target :: proc(node: ^Node, index: int, target_pos, pole_pos: [3]f32) {
 clear_ik :: proc(node: ^Node) {
   mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
   if !is_mesh do return
-
   for &config in mesh_attachment.ik_configs {
     for name in config.bone_names {
       delete(name)

@@ -194,43 +194,35 @@ sample_clip :: proc(
 compute_bone_lengths :: proc(skin: ^Skinning) {
   bone_count := len(skin.bones)
   if bone_count == 0 do return
-
   // Allocate bone lengths array
   skin.bone_lengths = make([]f32, bone_count)
-
   // Get bind pose positions (inverse of inverse_bind_matrix)
   bind_positions := make([][ 3]f32, bone_count, context.temp_allocator)
   for bone, i in skin.bones {
     bind_matrix := linalg.matrix4_inverse(bone.inverse_bind_matrix)
     bind_positions[i] = bind_matrix[3].xyz
   }
-
   // Traverse hierarchy and compute distances
   TraverseEntry :: struct {
     bone_idx: u32,
     parent_pos: [3]f32,
   }
   stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
-
   // Root has no parent, length = 0
   root_pos := bind_positions[skin.root_bone_index]
   skin.bone_lengths[skin.root_bone_index] = 0
-
   // Queue root's children
   root_bone := &skin.bones[skin.root_bone_index]
   for child_idx in root_bone.children {
     append(&stack, TraverseEntry{child_idx, root_pos})
   }
-
   // Process all bones
   for len(stack) > 0 {
     entry := pop(&stack)
     bone := &skin.bones[entry.bone_idx]
     bone_pos := bind_positions[entry.bone_idx]
-
     // Compute and store length from parent
     skin.bone_lengths[entry.bone_idx] = linalg.distance(entry.parent_pos, bone_pos)
-
     // Queue children with this bone's position
     for child_idx in bone.children {
       append(&stack, TraverseEntry{child_idx, bone_pos})
@@ -253,16 +245,13 @@ sample_clip_with_ik :: proc(
     return
   }
   if clip == nil do return
-
   bone_count := len(skin.bones)
-
   // Allocate temporary storage for world transforms
   world_transforms := make(
     []animation.BoneTransform,
     bone_count,
     context.temp_allocator,
   )
-
   // Phase 1: FK pass - compute world transforms from animation
   TraverseEntry :: struct {
     parent_world: matrix[4, 4]f32,
@@ -278,12 +267,10 @@ sample_clip_with_ik :: proc(
     &stack,
     TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
   )
-
   for len(stack) > 0 {
     entry := pop(&stack)
     bone := &skin.bones[entry.bone_index]
     bone_idx := entry.bone_index
-
     // Sample animation for local transform
     local_transform: geometry.Transform
     if bone_idx < u32(len(clip.channels)) {
@@ -293,34 +280,27 @@ sample_clip_with_ik :: proc(
       local_transform.scale = [3]f32{1, 1, 1}
       local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
     }
-
     local_matrix := linalg.matrix4_from_trs(
       local_transform.position,
       local_transform.rotation,
       local_transform.scale,
     )
-
     // Compute world transform
     world_matrix := entry.parent_world * local_matrix
-
     // Store world transform
     world_transforms[bone_idx].world_matrix = world_matrix
     world_transforms[bone_idx].world_position = world_matrix[3].xyz
     world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
-
     // Push children
     for child_idx in bone.children {
       append(&stack, TraverseEntry{world_matrix, child_idx})
     }
   }
-
   // Phase 2: Apply IK corrections
   for target in ik_targets {
     if !target.enabled do continue
-
     chain_length := len(target.bone_indices)
     bone_lengths := make([]f32, chain_length - 1, context.temp_allocator)
-
     // bone_lengths[child] = distance from parent to child
     // For chain [A, B, C], we need: [length(A->B), length(B->C)]
     // Which is: [bone_lengths[B], bone_lengths[C]]
@@ -328,11 +308,9 @@ sample_clip_with_ik :: proc(
       child_bone_idx := target.bone_indices[i + 1]
       bone_lengths[i] = skin.bone_lengths[child_bone_idx]
     }
-
     // Apply IK
     animation.fabrik_solve(world_transforms[:], target, bone_lengths[:])
   }
-
   // Phase 2.5: Update child bones after IK modifications
   // After IK modifies parent bones, we need to recompute world transforms for their children
   // to maintain hierarchical consistency
@@ -345,29 +323,23 @@ sample_clip_with_ik :: proc(
         affected_bones[bone_idx] = true
       }
     }
-
     // Recompute world transforms for children of affected bones
     update_stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
-
     // Find all children of affected bones and queue them for update
     for bone_idx in affected_bones {
       bone := &skin.bones[bone_idx]
       parent_world := world_transforms[bone_idx].world_matrix
-
       for child_idx in bone.children {
         // Skip if this child is also an IK-affected bone (already updated by IK)
         if child_idx in affected_bones do continue
-
         append(&update_stack, TraverseEntry{parent_world, child_idx})
       }
     }
-
     // Traverse and update child bones hierarchically
     for len(update_stack) > 0 {
       entry := pop(&update_stack)
       bone := &skin.bones[entry.bone_index]
       bone_idx := entry.bone_index
-
       // Get the local transform from the animation (FK)
       // We keep the animated local transform, only updating world space
       local_transform: geometry.Transform
@@ -378,28 +350,23 @@ sample_clip_with_ik :: proc(
         local_transform.scale = [3]f32{1, 1, 1}
         local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
       }
-
       local_matrix := linalg.matrix4_from_trs(
         local_transform.position,
         local_transform.rotation,
         local_transform.scale,
       )
-
       // Recompute world transform using IK-modified parent
       world_matrix := entry.parent_world * local_matrix
-
       // Update world transform
       world_transforms[bone_idx].world_matrix = world_matrix
       world_transforms[bone_idx].world_position = world_matrix[3].xyz
       world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
-
       // Queue children for update
       for child_idx in bone.children {
         append(&update_stack, TraverseEntry{world_matrix, child_idx})
       }
     }
   }
-
   // Phase 3: Compute final skinning matrices = world * inverse_bind
   for i in 0 ..< bone_count {
     world_matrix := world_transforms[i].world_matrix

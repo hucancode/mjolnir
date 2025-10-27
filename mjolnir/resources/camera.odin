@@ -540,7 +540,6 @@ camera_resize :: proc(
       nil,
     )
     vk.DestroySampler(gctx.device, camera.depth_pyramid[frame].sampler, nil)
-
     if pyramid_item, freed := free(
       &manager.image_2d_buffers,
       camera.depth_pyramid[frame].texture,
@@ -554,7 +553,6 @@ camera_resize :: proc(
     for attachment_type in AttachmentType {
       handle := camera.attachments[attachment_type][frame]
       if handle.index == 0 && handle.generation == 0 do continue
-
       if item, freed := free(&manager.image_2d_buffers, handle); freed {
         gpu.image_destroy(gctx.device, item)
       }

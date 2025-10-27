@@ -48,13 +48,11 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
       if _, has_mesh := child_node.attachment.(world.MeshAttachment);
          has_mesh {
         mjolnir.play_animation(engine, child, "Anim_0")
-
         // Setup IK for right arm using FABRIK solver
         // Based on logs: shoulder is at [-0.106, 1.036, 0.043]
         // Arm length is ~0.43m, so target must be within that reach
         target := [3]f32{0.0, 0.0, 0.9} // Closer to shoulder, reachable
         pole := [3]f32{0.3, 0.4, 0.0}   // Elbow points right and slightly down
-
         world.add_ik(
           child_node,
           bone_names = []string{
@@ -66,7 +64,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
           pole_pos = pole,
           weight = 1.0,
         )
-
         // Enable IK immediately
         world.set_ik_enabled(child_node, 0, true)
         state.character_handle = child
@@ -82,7 +79,6 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if dir_ok {
     mjolnir.rotate(dir_light_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
   }
-
   // Visualize IK target with a small red cube
   target_pos := [3]f32{0.0, 0.0, 0.9}
   cube_geom := geometry.make_cube({1.0, 0.2, 0.2, 1.0})
@@ -112,25 +108,20 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
 
 update_scene :: proc(engine: ^mjolnir.Engine, dt: f32) {
   if state.character_handle.index == 0 do return
-
   character_node := mjolnir.get_node(engine, state.character_handle)
   if character_node == nil do return
-
   // Animate target Y position from 0 to 1 using a smooth sine wave
   t := mjolnir.time_since_start(engine) * 0.5 // Slow down the animation (2 second period)
   y := 0.5 + 0.5 * math.sin(t) // Oscillate between 0 and 1
-
   // Update IK target position
   new_target := [3]f32{0.0, y, 0.6}
   pole := [3]f32{0.3, 0.4, 0.0}
-
   world.set_ik_target(
     character_node,
     0, // IK config index
     new_target,
     pole,
   )
-
   // Update target cube visualization position
   if state.target_cube.index != 0 {
     cube_node := mjolnir.get_node(engine, state.target_cube)
