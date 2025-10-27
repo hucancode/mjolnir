@@ -29,6 +29,107 @@ Renderer :: struct {
   main_camera:  resources.Handle,
 }
 
+// Bootstrap: populate both draw buffers on first frame (unified for async/non-async)
+record_compute_bootstrap :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  rm: ^resources.Manager,
+  world_state: ^world.World,
+  compute_buffer: vk.CommandBuffer,
+) -> vk.Result {
+  vk.ResetCommandBuffer(compute_buffer, {}) or_return
+  vk.BeginCommandBuffer(
+    compute_buffer,
+    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+  ) or_return
+  // Generate culling for BOTH frames on bootstrap
+  for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
+    for &entry, cam_index in rm.cameras.entries {
+      if !entry.active do continue
+      if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
+      cam := &entry.item
+      world.visibility_system_dispatch_culling(
+        &world_state.visibility,
+        gctx,
+        compute_buffer,
+        cam,
+        u32(cam_index),
+        u32(frame_idx),
+        {.VISIBLE},
+        {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+        rm,
+      )
+    }
+  }
+  vk.EndCommandBuffer(compute_buffer) or_return
+  // Submit and wait for completion before first frame starts
+  if queue, ok := gctx.compute_queue.?; ok {
+    // Async compute: use compute queue
+    cmd_buf := compute_buffer
+    submit_info := vk.SubmitInfo {
+      sType              = .SUBMIT_INFO,
+      commandBufferCount = 1,
+      pCommandBuffers    = &cmd_buf,
+    }
+    vk.QueueSubmit(queue, 1, &submit_info, 0) or_return
+    vk.QueueWaitIdle(queue) or_return
+  } else {
+    // Non-async: use graphics queue
+    cmd_buf := compute_buffer
+    submit_info := vk.SubmitInfo {
+      sType              = .SUBMIT_INFO,
+      commandBufferCount = 1,
+      pCommandBuffers    = &cmd_buf,
+    }
+    vk.QueueSubmit(gctx.graphics_queue, 1, &submit_info, 0) or_return
+    vk.QueueWaitIdle(gctx.graphics_queue) or_return
+  }
+  return .SUCCESS
+}
+
+// Unified algorithm for async compute recording
+// Same logic used inline on graphics queue when async is disabled
+record_compute_commands :: proc(
+  self: ^Renderer,
+  frame_index: u32,
+  gctx: ^gpu.GPUContext,
+  rm: ^resources.Manager,
+  world_state: ^world.World,
+  compute_buffer: vk.CommandBuffer,
+) -> vk.Result {
+  vk.ResetCommandBuffer(compute_buffer, {}) or_return
+  vk.BeginCommandBuffer(
+    compute_buffer,
+    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+  ) or_return
+  // Compute for NEXT frame
+  next_frame_index := (frame_index + 1) % resources.MAX_FRAMES_IN_FLIGHT
+  for &entry, cam_index in rm.cameras.entries {
+    if !entry.active do continue
+    if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
+    cam := &entry.item
+    world.visibility_system_dispatch_culling(
+      &world_state.visibility,
+      gctx,
+      compute_buffer,
+      cam,
+      u32(cam_index),
+      next_frame_index,
+      {.VISIBLE},
+      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+      rm,
+    )
+  }
+  particles.simulate(
+    &self.particles,
+    compute_buffer,
+    rm.world_matrix_descriptor_set,
+    rm,
+  )
+  vk.EndCommandBuffer(compute_buffer) or_return
+  return .SUCCESS
+}
+
 renderer_init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
@@ -171,14 +272,15 @@ record_camera_visibility :: proc(
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   // Iterate through all regular cameras with shadow pass enabled
+  // Shadow cameras use the same unified double-buffering algorithm
   for &entry, cam_index in rm.cameras.entries {
     if !entry.active do continue
     if resources.PassType.SHADOW not_in entry.item.enabled_passes do continue
     cam := &entry.item
     // Upload camera data to GPU buffer
     resources.camera_upload_data(rm, cam, u32(cam_index))
-    // Dispatch visibility - records compute culling + depth rendering
-    world.visibility_system_dispatch(
+    // Unified algorithm: culling + depth + pyramid (no barriers needed!)
+    world.visibility_system_dispatch_culling(
       &world_state.visibility,
       gctx,
       command_buffer,
@@ -187,6 +289,26 @@ record_camera_visibility :: proc(
       frame_index,
       {.VISIBLE},
       {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+      rm,
+    )
+    world.visibility_system_dispatch_depth(
+      &world_state.visibility,
+      gctx,
+      command_buffer,
+      cam,
+      u32(cam_index),
+      frame_index,
+      {.VISIBLE},
+      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+      rm,
+    )
+    world.visibility_system_dispatch_pyramid(
+      &world_state.visibility,
+      gctx,
+      command_buffer,
+      cam,
+      u32(cam_index),
+      frame_index,
       rm,
     )
   }
@@ -230,18 +352,11 @@ record_geometry_pass :: proc(
     log.error("Failed to get camera for geometry pass")
     return .ERROR_UNKNOWN
   }
-  // STEP 1: Execute culling pass (late pass) - writes draw list
-  world.visibility_system_dispatch_culling(
-    &world_state.visibility,
-    gctx,
-    command_buffer,
-    camera,
-    camera_handle.index,
-    frame_index,
-    {.VISIBLE},
-    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-    rm,
-  )
+  // STEP 1: Use pre-computed draw list
+  // Double-buffering works on same queue too:
+  //   - Frame N-1 computed for buffer[N]
+  //   - Frame N graphics reads buffer[N]
+  // No barriers needed - natural ordering ensures correctness
   // STEP 2: Render depth - reads draw list, writes depth[N]
   world.visibility_system_dispatch_depth(
     &world_state.visibility,
@@ -396,8 +511,8 @@ record_transparency_pass :: proc(
     log.error("Failed to get camera for transparency pass")
     return .ERROR_UNKNOWN
   }
-  // Cull transparent objects (depth already rendered in geometry pass)
-  // Disable occlusion culling for transparent objects to avoid rejecting sprites
+  // Cull transparent objects (no occlusion test, just frustum culling)
+  // Uses unified double-buffering algorithm (reads pre-computed buffer)
   world.visibility_system_dispatch_culling(
     &world_state.visibility,
     gctx,
@@ -408,7 +523,6 @@ record_transparency_pass :: proc(
     {.VISIBLE, .MATERIAL_TRANSPARENT},
     {},
     rm,
-    occlusion_enabled = false,
   )
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
   // Render sprites with sprite pipeline

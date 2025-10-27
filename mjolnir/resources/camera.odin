@@ -74,8 +74,10 @@ Camera :: struct {
   geometry_commands:            [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   lighting_commands:            [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   transparency_commands:        [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  // Visibility task data (for occlusion culling)
-  // Per-frame resources for pipelined multi-frame occlusion culling
+  // Double-buffered draw lists for lock-free async compute:
+  //   - Frame N graphics reads from late_draw_commands[N]
+  //   - Frame N compute writes to late_draw_commands[(N+1)%2]
+  // This ensures graphics and compute never access the same buffer
   late_draw_count:              [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   late_draw_commands:           [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
