@@ -29,7 +29,6 @@ Renderer :: struct {
   main_camera:  resources.Handle,
 }
 
-// Bootstrap: populate both draw buffers on first frame (unified for async/non-async)
 record_compute_bootstrap :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
@@ -87,8 +86,6 @@ record_compute_bootstrap :: proc(
   return .SUCCESS
 }
 
-// Unified algorithm for async compute recording
-// Same logic used inline on graphics queue when async is disabled
 record_compute_commands :: proc(
   self: ^Renderer,
   frame_index: u32,
@@ -272,14 +269,12 @@ record_camera_visibility :: proc(
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   // Iterate through all regular cameras with shadow pass enabled
-  // Shadow cameras use the same unified double-buffering algorithm
   for &entry, cam_index in rm.cameras.entries {
     if !entry.active do continue
     if resources.PassType.SHADOW not_in entry.item.enabled_passes do continue
     cam := &entry.item
     // Upload camera data to GPU buffer
     resources.camera_upload_data(rm, cam, u32(cam_index))
-    // Unified algorithm: culling + depth + pyramid (no barriers needed!)
     world.visibility_system_dispatch_culling(
       &world_state.visibility,
       gctx,
@@ -512,7 +507,6 @@ record_transparency_pass :: proc(
     return .ERROR_UNKNOWN
   }
   // Cull transparent objects (no occlusion test, just frustum culling)
-  // Uses unified double-buffering algorithm (reads pre-computed buffer)
   world.visibility_system_dispatch_culling(
     &world_state.visibility,
     gctx,

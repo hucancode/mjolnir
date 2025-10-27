@@ -173,7 +173,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.format.format,
     get_window_dpi(self.window),
   ) or_return
-  // Bootstrap: populate both draw buffers before first frame (unified algorithm)
+  // Bootstrap: populate both draw buffers before first frame
   record_compute_bootstrap(
     &self.render,
     &self.gctx,
