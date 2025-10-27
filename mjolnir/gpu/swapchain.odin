@@ -9,15 +9,16 @@ import vk "vendor:vulkan"
 MAX_FRAMES_IN_FLIGHT :: 2
 
 Swapchain :: struct {
-  handle:                     vk.SwapchainKHR,
-  format:                     vk.SurfaceFormatKHR,
-  extent:                     vk.Extent2D,
-  images:                     []vk.Image,
-  views:                      []vk.ImageView,
-  image_index:                u32,
-  in_flight_fences:           [MAX_FRAMES_IN_FLIGHT]vk.Fence,
-  image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-  render_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+  handle:                      vk.SwapchainKHR,
+  format:                      vk.SurfaceFormatKHR,
+  extent:                      vk.Extent2D,
+  images:                      []vk.Image,
+  views:                       []vk.ImageView,
+  image_index:                 u32,
+  in_flight_fences:            [MAX_FRAMES_IN_FLIGHT]vk.Fence,
+  image_available_semaphores:  [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+  render_finished_semaphores:  [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+  compute_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 }
 
 swapchain_init :: proc(
@@ -146,6 +147,12 @@ swapchain_init :: proc(
       nil,
       &self.render_finished_semaphores[i],
     ) or_return
+    vk.CreateSemaphore(
+      gctx.device,
+      &semaphore_info,
+      nil,
+      &self.compute_finished_semaphores[i],
+    ) or_return
     fence_info := vk.FenceCreateInfo {
       sType = .FENCE_CREATE_INFO,
       flags = {.SIGNALED},
@@ -171,6 +178,7 @@ swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     vk.DestroySemaphore(device, self.image_available_semaphores[i], nil)
     vk.DestroySemaphore(device, self.render_finished_semaphores[i], nil)
+    vk.DestroySemaphore(device, self.compute_finished_semaphores[i], nil)
     vk.DestroyFence(device, self.in_flight_fences[i], nil)
   }
   vk.DestroySwapchainKHR(device, self.handle, nil)
@@ -221,13 +229,35 @@ submit_queue_and_present :: proc(
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
   frame_index: u32,
+  compute_command_buffer: Maybe(vk.CommandBuffer) = nil,
 ) -> vk.Result {
-  wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
-  submit_info := vk.SubmitInfo {
+  if compute_cmd, has_compute := compute_command_buffer.?; has_compute && gctx.has_async_compute {
+    if compute_queue, ok := gctx.compute_queue.?; ok {
+      compute_submit := vk.SubmitInfo {
+        sType                = .SUBMIT_INFO,
+        commandBufferCount   = 1,
+        pCommandBuffers      = &compute_cmd,
+        signalSemaphoreCount = 1,
+        pSignalSemaphores    = &self.compute_finished_semaphores[frame_index],
+      }
+      vk.QueueSubmit(compute_queue, 1, &compute_submit, 0) or_return
+    }
+  }
+  wait_semaphores: [dynamic]vk.Semaphore
+  wait_stages: [dynamic]vk.PipelineStageFlags
+  defer delete(wait_semaphores)
+  defer delete(wait_stages)
+  append(&wait_semaphores, self.image_available_semaphores[frame_index])
+  append(&wait_stages, vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT})
+  if compute_command_buffer != nil && gctx.has_async_compute {
+    append(&wait_semaphores, self.compute_finished_semaphores[frame_index])
+    append(&wait_stages, vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER})
+  }
+  graphics_submit := vk.SubmitInfo {
     sType                = .SUBMIT_INFO,
-    waitSemaphoreCount   = 1,
-    pWaitSemaphores      = &self.image_available_semaphores[frame_index],
-    pWaitDstStageMask    = &wait_stage_mask,
+    waitSemaphoreCount   = u32(len(wait_semaphores)),
+    pWaitSemaphores      = raw_data(wait_semaphores),
+    pWaitDstStageMask    = raw_data(wait_stages),
     commandBufferCount   = 1,
     pCommandBuffers      = command_buffer,
     signalSemaphoreCount = 1,
@@ -236,7 +266,7 @@ submit_queue_and_present :: proc(
   vk.QueueSubmit(
     gctx.graphics_queue,
     1,
-    &submit_info,
+    &graphics_submit,
     self.in_flight_fences[frame_index],
   ) or_return
   image_indices := [?]u32{self.image_index}

@@ -82,9 +82,10 @@ Engine :: struct {
   pre_render_proc:        PreRenderProc,
   post_render_proc:       PostRenderProc,
   render_error_count:     u32,
-  render:                 Renderer,
-  command_buffers:        [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  cursor_pos:             [2]i32,
+  render:                  Renderer,
+  command_buffers:         [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  compute_command_buffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  cursor_pos:              [2]i32,
   debug_ui_enabled:       bool,
   pending_node_deletions: [dynamic]resources.Handle,
   update_thread:          Maybe(^thread.Thread),
@@ -152,6 +153,18 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     },
     raw_data(self.command_buffers[:]),
   ) or_return
+  if pool, ok := self.gctx.compute_command_pool.?; ok {
+    vk.AllocateCommandBuffers(
+      self.gctx.device,
+      &{
+        sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+        commandPool = pool,
+        level = .PRIMARY,
+        commandBufferCount = MAX_FRAMES_IN_FLIGHT,
+      },
+      raw_data(self.compute_command_buffers[:]),
+    ) or_return
+  }
   renderer_init(
     &self.render,
     &self.gctx,
@@ -160,6 +173,19 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.format.format,
     get_window_dpi(self.window),
   ) or_return
+  // Bootstrap: populate both draw buffers before first frame (unified algorithm)
+  record_compute_bootstrap(
+    &self.render,
+    &self.gctx,
+    &self.rm,
+    &self.world,
+    self.compute_command_buffers[0],
+  ) or_return
+  if self.gctx.has_async_compute {
+    log.infof("Async compute bootstrap: both draw buffers initialized on compute queue")
+  } else {
+    log.infof("Sequential compute bootstrap: both draw buffers initialized on graphics queue")
+  }
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
@@ -375,6 +401,13 @@ shutdown :: proc(self: ^Engine) {
     self.gctx.command_pool,
     self.command_buffers[:],
   )
+  if pool, ok := self.gctx.compute_command_pool.?; ok {
+    gpu.free_command_buffers(
+      self.gctx.device,
+      pool,
+      self.compute_command_buffers[:],
+    )
+  }
   delete(self.pending_node_deletions)
   renderer_shutdown(
     &self.render,
@@ -628,12 +661,46 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
   )
-  particles.simulate(
-    &self.render.particles,
-    command_buffer,
-    self.rm.world_matrix_descriptor_set,
-    &self.rm,
-  )
+  compute_cmd_buffer: Maybe(vk.CommandBuffer) = nil
+  if self.gctx.has_async_compute {
+    // Async path: separate compute queue
+    compute_buffer := self.compute_command_buffers[self.frame_index]
+    record_compute_commands(
+      &self.render,
+      self.frame_index,
+      &self.gctx,
+      &self.rm,
+      &self.world,
+      compute_buffer,
+    ) or_return
+    compute_cmd_buffer = compute_buffer
+  } else {
+    // Non-async path: same algorithm, just inline on graphics queue
+    // Compute for NEXT frame before rendering CURRENT frame
+    next_frame_index := (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
+    for &entry, cam_index in self.rm.cameras.entries {
+      if !entry.active do continue
+      if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
+      cam := &entry.item
+      world.visibility_system_dispatch_culling(
+        &self.world.visibility,
+        &self.gctx,
+        command_buffer,
+        cam,
+        u32(cam_index),
+        next_frame_index,
+        {.VISIBLE},
+        {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+        &self.rm,
+      )
+    }
+    particles.simulate(
+      &self.render.particles,
+      command_buffer,
+      self.rm.world_matrix_descriptor_set,
+      &self.rm,
+    )
+  }
   buffers := [?]vk.CommandBuffer {
     main_camera.geometry_commands[self.frame_index],
     main_camera.lighting_commands[self.frame_index],
@@ -678,6 +745,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.swapchain,
     &command_buffer,
     self.frame_index,
+    compute_cmd_buffer,
   ) or_return
   self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   process_pending_deletions(self)

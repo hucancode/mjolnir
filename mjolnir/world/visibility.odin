@@ -115,102 +115,6 @@ visibility_system_set_stats_enabled :: proc(
   system.stats_enabled = enabled
 }
 
-// STEP 1: Execute late pass culling - writes draw list
-visibility_system_dispatch_culling :: proc(
-  system: ^VisibilitySystem,
-  gctx: ^gpu.GPUContext,
-  command_buffer: vk.CommandBuffer,
-  camera: ^resources.Camera,
-  camera_index: u32,
-  frame_index: u32,
-  include_flags: resources.NodeFlagSet,
-  exclude_flags: resources.NodeFlagSet,
-  rm: ^resources.Manager,
-  occlusion_enabled: bool = true,
-) {
-  if system.node_count == 0 {
-    return
-  }
-  // Late pass N uses pyramid[N-1] for occlusion culling
-  prev_frame :=
-    (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) %
-    resources.MAX_FRAMES_IN_FLIGHT
-  prev_pyramid_texture := resources.get(
-    rm.image_2d_buffers,
-    camera.depth_pyramid[prev_frame].texture,
-  )
-  pyramid_barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_WRITE},
-    dstAccessMask = {.SHADER_READ},
-    oldLayout = .SHADER_READ_ONLY_OPTIMAL,
-    newLayout = .SHADER_READ_ONLY_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = prev_pyramid_texture.image,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = camera.depth_pyramid[prev_frame].mip_levels,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER}, // Previous frame's pyramid build
-    {.COMPUTE_SHADER}, // This frame's late culling
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &pyramid_barrier,
-  )
-  // === LATE PASS: OCCLUSION CULLING ===
-  execute_late_pass(
-    system,
-    gctx,
-    command_buffer,
-    camera,
-    camera_index,
-    frame_index,
-    include_flags,
-    exclude_flags,
-    rm,
-    occlusion_enabled,
-  )
-  // === BARRIER: MAKE DRAW COMMANDS VISIBLE TO DEPTH PASS ===
-  late_compute_done := [?]vk.BufferMemoryBarrier {
-    {
-      sType = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer = camera.late_draw_commands[frame_index].buffer,
-      size = vk.DeviceSize(camera.late_draw_commands[frame_index].bytes_count),
-    },
-    {
-      sType = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer = camera.late_draw_count[frame_index].buffer,
-      size = vk.DeviceSize(camera.late_draw_count[frame_index].bytes_count),
-    },
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER}, // Late pass compute
-    {.DRAW_INDIRECT}, // Depth pass indirect draw
-    {},
-    0,
-    nil,
-    len(late_compute_done),
-    raw_data(late_compute_done[:]),
-    0,
-    nil,
-  )
-}
 // STEP 2: Render depth - reads draw list, writes depth[N]
 visibility_system_dispatch_depth :: proc(
   system: ^VisibilitySystem,
@@ -230,7 +134,6 @@ visibility_system_dispatch_depth :: proc(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
-  // === RENDER DEPTH PASS ===
   render_depth_pass(
     system,
     gctx,
@@ -290,7 +193,6 @@ visibility_system_dispatch_pyramid :: proc(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
-  // === BUILD DEPTH PYRAMID ===
   build_depth_pyramid(system, gctx, command_buffer, camera, frame_index, rm)
   // Pyramid read complete, depth[N] can now be used by geometry for depth testing
   pyramid_done := vk.ImageMemoryBarrier {
@@ -327,48 +229,38 @@ visibility_system_dispatch_pyramid :: proc(
   }
 }
 
-// dispatches full visibility pipeline (culling + depth + pyramid)
-visibility_system_dispatch :: proc(
+// Frame N compute writes to buffer[(N+1)%2], while frame N graphics reads buffer[N]
+visibility_system_dispatch_culling :: proc(
   system: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera: ^resources.Camera,
   camera_index: u32,
-  frame_index: u32,
+  target_frame_index: u32,
   include_flags: resources.NodeFlagSet,
   exclude_flags: resources.NodeFlagSet,
   rm: ^resources.Manager,
 ) {
-  visibility_system_dispatch_culling(
+  if system.node_count == 0 {
+    return
+  }
+  // Compute for target_frame uses pyramid from (target_frame-1)
+  prev_frame :=
+    (target_frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) %
+    resources.MAX_FRAMES_IN_FLIGHT
+  // Pyramid is read-only and shared between queues - no ownership transfer needed
+  // The fence ensures previous frame completed before we read its pyramid
+  execute_late_pass(
     system,
     gctx,
     command_buffer,
     camera,
     camera_index,
-    frame_index,
+    target_frame_index,
     include_flags,
     exclude_flags,
     rm,
-  )
-  visibility_system_dispatch_depth(
-    system,
-    gctx,
-    command_buffer,
-    camera,
-    camera_index,
-    frame_index,
-    include_flags,
-    exclude_flags,
-    rm,
-  )
-  visibility_system_dispatch_pyramid(
-    system,
-    gctx,
-    command_buffer,
-    camera,
-    camera_index,
-    frame_index,
-    rm,
+    true,
   )
 }
 

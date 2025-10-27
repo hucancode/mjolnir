@@ -57,6 +57,7 @@ swapchain_support_destroy :: proc(support: ^SwapchainSupport) {
 FoundQueueFamilyIndices :: struct {
   graphics_family: u32,
   present_family:  u32,
+  compute_family:  Maybe(u32),
 }
 
 GPUContext :: struct {
@@ -73,9 +74,13 @@ GPUContext :: struct {
   graphics_queue:       vk.Queue,
   present_family:       u32,
   present_queue:        vk.Queue,
+  compute_family:       Maybe(u32),
+  compute_queue:        Maybe(vk.Queue),
   descriptor_pool:      vk.DescriptorPool,
   command_pool:         vk.CommandPool,
+  compute_command_pool: Maybe(vk.CommandPool),
   device_properties:    vk.PhysicalDeviceProperties,
+  has_async_compute:    bool,
 }
 
 // Global context for debug callback
@@ -100,6 +105,9 @@ shutdown :: proc(self: ^GPUContext) {
   vk.DeviceWaitIdle(self.device)
   vk.DestroyDescriptorPool(self.device, self.descriptor_pool, nil)
   vk.DestroyCommandPool(self.device, self.command_pool, nil)
+  if pool, ok := self.compute_command_pool.?; ok {
+    vk.DestroyCommandPool(self.device, pool, nil)
+  }
   vk.DestroyDevice(self.device, nil)
   vk.DestroySurfaceKHR(self.instance, self.surface, nil)
   when ENABLE_VALIDATION_LAYERS {
@@ -387,6 +395,7 @@ find_queue_families :: proc(
   )
   maybe_graphics_family: Maybe(u32)
   maybe_present_family: Maybe(u32)
+  maybe_compute_family: Maybe(u32)
   for family, i in queue_families_slice {
     idx := u32(i)
     if .GRAPHICS in family.queueFlags {
@@ -402,13 +411,21 @@ find_queue_families :: proc(
     if present_support {
       maybe_present_family = idx
     }
-    if maybe_graphics_family != nil && maybe_present_family != nil {
+    // Prefer dedicated compute queue (COMPUTE but not GRAPHICS)
+    if .COMPUTE in family.queueFlags && .GRAPHICS not_in family.queueFlags {
+      maybe_compute_family = idx
+    }
+    if maybe_graphics_family != nil && maybe_present_family != nil && maybe_compute_family != nil {
       break
     }
   }
+  // Fallback: use graphics queue for compute if no dedicated queue exists
+  if maybe_compute_family == nil && maybe_graphics_family != nil {
+    maybe_compute_family = maybe_graphics_family
+  }
   if g_fam, ok_g := maybe_graphics_family.?; ok_g {
     if p_fam, ok_p := maybe_present_family.?; ok_p {
-      return FoundQueueFamilyIndices{g_fam, p_fam}, .SUCCESS
+      return FoundQueueFamilyIndices{g_fam, p_fam, maybe_compute_family}, .SUCCESS
     }
   }
   res = .ERROR_FEATURE_NOT_PRESENT
@@ -420,6 +437,7 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   indices := find_queue_families(self.physical_device, self.surface) or_return
   self.graphics_family = indices.graphics_family
   self.present_family = indices.present_family
+  self.compute_family = indices.compute_family
   support_details := query_swapchain_support(
     self.physical_device,
     self.surface,
@@ -430,13 +448,16 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   queue_create_infos_list := make(
     [dynamic]vk.DeviceQueueCreateInfo,
     0,
-    2,
+    3,
     context.temp_allocator,
   )
   unique_queue_families := make(map[u32]struct {
-    }, 2, context.temp_allocator)
+    }, 3, context.temp_allocator)
   unique_queue_families[self.graphics_family] = {}
   unique_queue_families[self.present_family] = {}
+  if compute_fam, ok := self.compute_family.?; ok {
+    unique_queue_families[compute_fam] = {}
+  }
   queue_priority: f32 = 1.0
   for family_index in unique_queue_families {
     append(
@@ -492,6 +513,17 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   ) or_return
   vk.GetDeviceQueue(self.device, self.graphics_family, 0, &self.graphics_queue)
   vk.GetDeviceQueue(self.device, self.present_family, 0, &self.present_queue)
+  if compute_fam, ok := self.compute_family.?; ok {
+    queue: vk.Queue
+    vk.GetDeviceQueue(self.device, compute_fam, 0, &queue)
+    self.compute_queue = queue
+    self.has_async_compute = compute_fam != self.graphics_family
+    if self.has_async_compute {
+      log.infof("Async compute enabled: dedicated compute queue family %d", compute_fam)
+    } else {
+      log.infof("Async compute disabled: using graphics queue for compute")
+    }
+  }
   return .SUCCESS
 }
 
@@ -549,7 +581,23 @@ command_pool_init :: proc(self: ^GPUContext) -> vk.Result {
     nil,
     &self.command_pool,
   ) or_return
-  log.infof("Vulkan command pool created")
+  log.infof("Vulkan graphics command pool created")
+  if compute_fam, ok := self.compute_family.?; ok {
+    compute_pool_info := vk.CommandPoolCreateInfo {
+      sType            = .COMMAND_POOL_CREATE_INFO,
+      flags            = {.RESET_COMMAND_BUFFER},
+      queueFamilyIndex = compute_fam,
+    }
+    pool: vk.CommandPool
+    vk.CreateCommandPool(
+      self.device,
+      &compute_pool_info,
+      nil,
+      &pool,
+    ) or_return
+    self.compute_command_pool = pool
+    log.infof("Vulkan compute command pool created")
+  }
   return .SUCCESS
 }
 
