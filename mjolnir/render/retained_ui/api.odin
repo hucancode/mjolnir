@@ -2,10 +2,6 @@ package retained_ui
 
 import resources "../../resources"
 
-// ============================================================================
-// Widget Creation API
-// ============================================================================
-
 create_button :: proc(
   self: ^Manager,
   text: string,
@@ -210,10 +206,6 @@ create_radiobutton :: proc(
   }
   return
 }
-
-// ============================================================================
-// Widget Data Accessors
-// ============================================================================
 
 set_button_callback :: proc(
   self: ^Manager,

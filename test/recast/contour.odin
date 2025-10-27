@@ -10,10 +10,6 @@ import "core:fmt"
 import "core:strings"
 import "core:slice"
 
-// ================================
-// SECTION 1: BASIC CONTOUR BUILDING
-// ================================
-
 @(test)
 test_build_contours_with_holes :: proc(t: ^testing.T) {
         hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
@@ -147,10 +143,6 @@ test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
     defer recast.free_contour_set(contour_set_area)
     testing.expect(t, ok, "Failed to build contours with area edge tessellation")
 }
-
-// ================================
-// SECTION 4: BOUNDARY VERTEX HANDLING
-// ================================
 
 @(test)
 test_contour_boundary_vertices :: proc(t: ^testing.T) {

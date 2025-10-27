@@ -5,10 +5,6 @@ import "core:testing"
 import "core:log"
 import "core:time"
 
-// ================================
-// SECTION 1: FILTER LOW HANGING WALKABLE OBSTACLES
-// ================================
-
 @(test)
 test_filter_low_hanging_obstacles_basic :: proc(t: ^testing.T) {
         hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
@@ -93,10 +89,6 @@ test_filter_low_hanging_obstacles_multiple_spans :: proc(t: ^testing.T) {
                   "High obstacle should remain non-walkable")
 }
 
-// ================================
-// SECTION 2: FILTER LEDGE SPANS
-// ================================
-
 @(test)
 test_filter_ledge_spans_basic :: proc(t: ^testing.T) {
         // Create heightfield and compact heightfield for ledge filtering
@@ -154,10 +146,6 @@ test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
                       "Safe area should remain walkable")
     }
 }
-
-// ================================
-// SECTION 3: FILTER WALKABLE LOW HEIGHT SPANS
-// ================================
 
 @(test)
 test_filter_walkable_low_height_spans_basic :: proc(t: ^testing.T) {
@@ -225,10 +213,6 @@ test_filter_walkable_low_height_no_ceiling :: proc(t: ^testing.T) {
                       "Span with no ceiling should remain walkable")
     }
 }
-
-// ================================
-// SECTION 4: FILTER INTERACTIONS
-// ================================
 
 @(test)
 test_filter_interactions_combined :: proc(t: ^testing.T) {

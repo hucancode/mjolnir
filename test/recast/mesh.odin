@@ -375,10 +375,6 @@ test_mark_walkable_triangles_mixed_slopes :: proc(t: ^testing.T) {
     testing.expect_value(t, areas[2], recast.RC_NULL_AREA)     // 60°
 }
 
-// ================================
-// SECTION 2: CLEAR UNWALKABLE TRIANGLES
-// ================================
-
 @(test)
 test_clear_unwalkable_triangles_basic :: proc(t: ^testing.T) {
         // Create mix of walkable and non-walkable triangles
@@ -419,10 +415,6 @@ test_clear_unwalkable_triangles_preserve_non_walkable :: proc(t: ^testing.T) {
     testing.expect_value(t, areas[1], recast.RC_NULL_AREA)
 }
 
-// ================================
-// SECTION 3: TRIANGLE NORMAL CALCULATION
-// ================================
-
 @(test)
 test_triangle_normal_calculation_accuracy :: proc(t: ^testing.T) {
         // Test that slope calculation is based on accurate normal computation
@@ -451,10 +443,6 @@ test_triangle_normal_calculation_accuracy :: proc(t: ^testing.T) {
     recast.mark_walkable_triangles(80.0, vertices_vertical, indices_vertical, areas_vertical)
     testing.expect_value(t, areas_vertical[0], recast.RC_NULL_AREA)
 }
-
-// ================================
-// SECTION 4: EDGE CASES
-// ================================
 
 @(test)
 test_triangle_operations_zero_area :: proc(t: ^testing.T) {
@@ -514,10 +502,6 @@ test_triangle_operations_empty_input :: proc(t: ^testing.T) {
     recast.mark_walkable_triangles(45.0, vertices, indices, areas)
     recast.clear_unwalkable_triangles(45.0, vertices, indices, areas)
 }
-
-// ================================
-// SECTION 5: INTEGRATION WITH AREA MARKING
-// ================================
 
 @(test)
 test_triangle_operations_preserve_area_types :: proc(t: ^testing.T) {
