@@ -64,7 +64,7 @@ resolve_contact :: proc(contact: ^Contact, body_a: ^RigidBody, body_b: ^RigidBod
 	tangent_length_sq := linalg.vector_dot(tangent, tangent)
 
 	if tangent_length_sq > 0.0001 {
-		tangent = linalg.vector_normalize(tangent)
+		tangent = linalg.normalize(tangent)
 
 		// Calculate friction impulse denominator
 		r_a_cross_t := linalg.vector_cross3(r_a, tangent)

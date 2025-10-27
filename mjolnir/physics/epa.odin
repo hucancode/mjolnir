@@ -32,37 +32,81 @@ epa :: proc(
 	depth: f32,
 	ok: bool,
 ) {
-	// Initialize polytope with simplex vertices
+	// Initialize polytope with simplex vertices, removing duplicates
 	vertices := make([dynamic][3]f32, context.temp_allocator)
+	dedup_epsilon :: 0.0001
 	for i in 0 ..< simplex.count {
-		append(&vertices, simplex.points[i])
+		point := simplex.points[i]
+		// Check if this point is already in vertices (avoid duplicates)
+		is_duplicate := false
+		for existing in vertices {
+			diff := point - existing
+			if linalg.length(diff) < dedup_epsilon {
+				is_duplicate = true
+				break
+			}
+		}
+		if !is_duplicate {
+			append(&vertices, point)
+		}
 	}
 
-	// Initialize faces based on simplex size
+	// Initialize faces based on vertex count (after deduplication)
 	faces := make([dynamic]EPAFace, context.temp_allocator)
+	vertex_count := len(vertices)
 
 	// Create initial tetrahedron faces
-	if simplex.count == 4 {
+	if vertex_count == 4 {
 		add_face(&faces, &vertices, 0, 1, 2)
 		add_face(&faces, &vertices, 0, 3, 1)
 		add_face(&faces, &vertices, 0, 2, 3)
 		add_face(&faces, &vertices, 1, 3, 2)
-	} else if simplex.count == 3 {
+	} else if vertex_count == 3 {
 		// If we only have a triangle, we need to create a thin tetrahedron
 		// Add a point slightly offset from the triangle
-		abc := linalg.vector_cross3(
-			vertices[1] - vertices[0],
-			vertices[2] - vertices[0],
-		)
-		normal_dir := linalg.vector_normalize(abc)
-		if linalg.vector_length(normal_dir) < 0.0001 {
-			normal_dir = {0, 1, 0}
+		ab := vertices[1] - vertices[0]
+		ac := vertices[2] - vertices[0]
+		abc := linalg.vector_cross3(ab, ac)
+
+		// Check if triangle is degenerate (collinear points)
+		abc_length := linalg.length(abc)
+		normal_dir: [3]f32
+		if abc_length < 0.0001 {
+			// Points are collinear - find perpendicular direction
+			// Use the line direction and create a perpendicular
+			line_dir := linalg.normalize(ab)
+			// Find a non-parallel axis
+			if abs(line_dir.x) < 0.9 {
+				normal_dir = linalg.vector_cross3(line_dir, [3]f32{1, 0, 0})
+			} else {
+				normal_dir = linalg.vector_cross3(line_dir, [3]f32{0, 1, 0})
+			}
+			normal_dir = linalg.normalize(normal_dir)
+		} else {
+			normal_dir = abc / abc_length
 		}
+
 		append(&vertices, vertices[0] + normal_dir * 0.001)
 		add_face(&faces, &vertices, 0, 1, 2)
 		add_face(&faces, &vertices, 0, 3, 1)
 		add_face(&faces, &vertices, 0, 2, 3)
 		add_face(&faces, &vertices, 1, 3, 2)
+	} else if vertex_count == 2 {
+		// Only have a line segment - can't do EPA, use distance as approximation
+		ab := vertices[1] - vertices[0]
+		line_length := linalg.length(ab)
+		if line_length < 0.0001 {
+			return {}, 0, false
+		}
+		// The penetration is approximately the distance from origin to the line
+		t := -linalg.vector_dot(vertices[0], ab) / linalg.vector_dot(ab, ab)
+		t = clamp(t, 0, 1)
+		closest_point := vertices[0] + ab * t
+		dist := linalg.length(closest_point)
+		if dist < 0.0001 {
+			return linalg.normalize(ab), 0.001, true
+		}
+		return linalg.normalize(closest_point), dist, true
 	} else {
 		// Invalid simplex
 		return {}, 0, false
@@ -77,6 +121,11 @@ epa :: proc(
 	epsilon :: 0.0001
 
 	for iteration in 0 ..< max_iterations {
+		// Check if we still have faces after potential removals
+		if len(faces) == 0 {
+			return {}, 0, false
+		}
+
 		// Find closest face to origin
 		closest_face_idx := 0
 		min_distance := faces[0].distance
@@ -174,7 +223,7 @@ add_face :: proc(
 	ac := vc - va
 	normal := linalg.vector_cross3(ab, ac)
 
-	length := linalg.vector_length(normal)
+	length := linalg.length(normal)
 	if length > 0.0001 {
 		normal = normal / length
 	} else {

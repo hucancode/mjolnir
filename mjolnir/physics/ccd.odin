@@ -75,7 +75,7 @@ swept_sphere_sphere :: proc(
 		result.time = t
 		impact_center_a := center_a + motion * t
 		delta := center_b - impact_center_a
-		distance := linalg.vector_length(delta)
+		distance := linalg.length(delta)
 		result.normal = distance > 0.0001 ? delta / distance : [3]f32{0, 1, 0}
 		result.point = impact_center_a + result.normal * radius_a
 	}

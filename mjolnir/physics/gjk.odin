@@ -27,7 +27,7 @@ find_furthest_point :: proc(
 	switch collider.type {
 	case .Sphere:
 		sphere := collider.shape.(SphereCollider)
-		dir_normalized := linalg.vector_normalize(direction)
+		dir_normalized := linalg.normalize0(direction)
 		return center + dir_normalized * sphere.radius
 	case .Box:
 		box := collider.shape.(BoxCollider)
@@ -49,7 +49,7 @@ find_furthest_point :: proc(
 		dot := linalg.vector_dot(direction, line_dir)
 		line_point := center + line_dir * (dot >= 0 ? h : -h)
 		// Then add the sphere radius in the direction
-		dir_normalized := linalg.vector_normalize(direction)
+		dir_normalized := linalg.normalize0(direction)
 		return line_point + dir_normalized * capsule.radius
 	}
 	return center
@@ -144,7 +144,14 @@ line_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
 
 	// If origin is in the direction of AB
 	if same_direction(ab, ao) {
-		direction^ = linalg.vector_cross3(linalg.vector_cross3(ab, ao), ab)
+		ab_ao := linalg.vector_cross3(ab, ao)
+		new_dir := linalg.vector_cross3(ab_ao, ab)
+		// Safety check for zero-length direction
+		if linalg.length(new_dir) < 0.0001 {
+			direction^ = ao
+		} else {
+			direction^ = new_dir
+		}
 	} else {
 		// Origin is closer to A
 		simplex_set(simplex, a)
@@ -170,7 +177,14 @@ triangle_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
 	if same_direction(linalg.vector_cross3(abc, ac), ao) {
 		if same_direction(ac, ao) {
 			simplex_set(simplex, a, c)
-			direction^ = linalg.vector_cross3(linalg.vector_cross3(ac, ao), ac)
+			ac_ao := linalg.vector_cross3(ac, ao)
+			new_dir := linalg.vector_cross3(ac_ao, ac)
+			// Safety check for zero-length direction
+			if linalg.length(new_dir) < 0.0001 {
+				direction^ = ao
+			} else {
+				direction^ = new_dir
+			}
 		} else {
 			return line_case(simplex, direction)
 		}

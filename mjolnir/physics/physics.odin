@@ -128,7 +128,7 @@ physics_world_step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
 		}
 
 		// Check if moving fast enough for CCD
-		velocity_mag := linalg.vector_length(body_a.velocity)
+		velocity_mag := linalg.length(body_a.velocity)
 		if velocity_mag < ccd_threshold {
 			continue
 		}
