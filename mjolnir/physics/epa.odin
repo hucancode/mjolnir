@@ -41,7 +41,7 @@ epa :: proc(
     is_duplicate := false
     for existing in vertices {
       diff := point - existing
-      if linalg.length(diff) < dedup_epsilon {
+      if linalg.length2(diff) < dedup_epsilon * dedup_epsilon {
         is_duplicate = true
         break
       }
@@ -66,21 +66,14 @@ epa :: proc(
     ac := vertices[2] - vertices[0]
     abc := linalg.vector_cross3(ab, ac)
     // Check if triangle is degenerate (collinear points)
-    abc_length := linalg.length(abc)
     normal_dir: [3]f32
-    if abc_length < 0.0001 {
+    if linalg.length2(abc) < 0.0001 * 0.0001 {
       // Points are collinear - find perpendicular direction
-      // Use the line direction and create a perpendicular
       line_dir := linalg.normalize(ab)
-      // Find a non-parallel axis
-      if abs(line_dir.x) < 0.9 {
-        normal_dir = linalg.vector_cross3(line_dir, linalg.VECTOR3F32_X_AXIS)
-      } else {
-        normal_dir = linalg.vector_cross3(line_dir, linalg.VECTOR3F32_Y_AXIS)
-      }
-      normal_dir = linalg.normalize(normal_dir)
+      perp := abs(line_dir.x) < 0.9 ? linalg.VECTOR3F32_X_AXIS : linalg.VECTOR3F32_Y_AXIS
+      normal_dir = linalg.normalize(linalg.vector_cross3(line_dir, perp))
     } else {
-      normal_dir = abc / abc_length
+      normal_dir = linalg.normalize(abc)
     }
     append(&vertices, vertices[0] + normal_dir * 0.001)
     add_face(&faces, &vertices, 0, 1, 2)
@@ -202,12 +195,7 @@ add_face :: proc(
   ab := vb - va
   ac := vc - va
   normal := linalg.vector_cross3(ab, ac)
-  length := linalg.length(normal)
-  if length > 0.0001 {
-    normal = normal / length
-  } else {
-    normal = {0, 1, 0}
-  }
+  normal = linalg.length2(normal) > 0.0001 * 0.0001 ? linalg.normalize(normal) : linalg.VECTOR3F32_Y_AXIS
   // Calculate distance from origin to face
   distance := linalg.vector_dot(normal, va)
   // Ensure normal points toward origin

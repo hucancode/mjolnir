@@ -143,12 +143,7 @@ line_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
   if same_direction(ab, ao) {
     ab_ao := linalg.vector_cross3(ab, ao)
     new_dir := linalg.vector_cross3(ab_ao, ab)
-    // Safety check for zero-length direction
-    if linalg.length(new_dir) < 0.0001 {
-      direction^ = ao
-    } else {
-      direction^ = new_dir
-    }
+    direction^ = linalg.length2(new_dir) < 0.0001 * 0.0001 ? ao : new_dir
   } else {
     // Origin is closer to A
     simplex_set(simplex, a)
@@ -172,12 +167,7 @@ triangle_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
       simplex_set(simplex, a, c)
       ac_ao := linalg.vector_cross3(ac, ao)
       new_dir := linalg.vector_cross3(ac_ao, ac)
-      // Safety check for zero-length direction
-      if linalg.length(new_dir) < 0.0001 {
-        direction^ = ao
-      } else {
-        direction^ = new_dir
-      }
+      direction^ = linalg.length2(new_dir) < 0.0001 * 0.0001 ? ao : new_dir
     } else {
       return line_case(simplex, direction)
     }

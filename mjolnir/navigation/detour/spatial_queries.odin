@@ -381,7 +381,7 @@ find_distance_to_wall :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref
             }
         }
         center := calc_poly_center(tile, poly)
-        if linalg.length(center - center_pos) > max_radius do break
+        if linalg.length2(center - center_pos) > max_radius * max_radius do break
     }
     return hit_dist, hit_pos, hit_normal, {.Success}
 }
@@ -412,7 +412,7 @@ find_local_neighbourhood :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_
         }
         // Check if polygon center is within radius
         center := calc_poly_center(tile, poly)
-        if linalg.length(center - center_pos) > radius {
+        if linalg.length2(center - center_pos) > radius * radius {
             continue
         }
         // Add to results

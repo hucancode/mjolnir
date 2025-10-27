@@ -79,8 +79,8 @@ fabrik_solve :: proc(
     }
   } else {
     // Target reachable, iterate FABRIK
-    iterations := target.max_iterations if target.max_iterations > 0 else 10
-    tolerance := target.tolerance if target.tolerance > 0 else 0.001
+    iterations := target.max_iterations > 0 ? target.max_iterations : 10
+    tolerance := target.tolerance > 0 ? target.tolerance : 0.001
     for iter in 0 ..< iterations {
       // Forward pass: drag from end to root
       positions[chain_length - 1] = target_pos
@@ -102,7 +102,7 @@ fabrik_solve :: proc(
     }
   }
   // Apply pole vector constraint
-  if linalg.length(target.pole_vector) > 0.0001 {
+  if linalg.length2(target.pole_vector) > 0.0001 * 0.0001 {
     apply_pole_constraint(positions[:], target.pole_vector, bone_lengths)
   }
   // Update world transforms from solved positions
@@ -128,37 +128,31 @@ apply_pole_constraint :: proc(
   for i in 1 ..< chain_length - 1 {
     root := positions[0]
     end := positions[chain_length - 1]
-    // Project current joint onto line from root to end
     to_end := end - root
-    line_length := linalg.length(to_end)
-    if line_length < 0.0001 {
+    if linalg.length2(to_end) < 0.0001 * 0.0001 {
       continue
     }
-    line_dir := to_end / line_length
+    line_dir := linalg.normalize(to_end)
     to_joint := positions[i] - root
     projection_dist := linalg.dot(to_joint, line_dir)
     projection_point := root + line_dir * projection_dist
     // Current perpendicular offset
     offset := positions[i] - projection_point
-    offset_length := linalg.length(offset)
-    if offset_length < 0.0001 {
+    offset_length_sq := linalg.length2(offset)
+    if offset_length_sq < 0.0001 * 0.0001 {
       // Joint on the line, use pole to create offset
-      offset = linalg.normalize(pole_vector - root)
-      offset = offset - line_dir * linalg.dot(offset, line_dir)
-      offset = linalg.normalize(offset)
-      offset_length = 0.1
+      pole_dir := linalg.normalize(pole_vector - root)
+      offset = linalg.normalize(pole_dir - line_dir * linalg.dot(pole_dir, line_dir))
+      offset_length_sq = 0.01
     }
     // Desired offset direction toward pole
     to_pole := pole_vector - projection_point
     pole_offset := to_pole - line_dir * linalg.dot(to_pole, line_dir)
-    pole_offset_length := linalg.length(pole_offset)
-    if pole_offset_length > 0.0001 {
-      pole_dir := pole_offset / pole_offset_length
-      // Blend current offset toward pole direction
-      new_offset := linalg.normalize(
-        linalg.lerp(offset / offset_length, pole_dir, 0.5),
-      )
-      positions[i] = projection_point + new_offset * offset_length
+    if linalg.length2(pole_offset) > 0.0001 * 0.0001 {
+      pole_dir := linalg.normalize(pole_offset)
+      current_dir := linalg.normalize(offset)
+      new_offset := linalg.normalize(linalg.lerp(current_dir, pole_dir, 0.5))
+      positions[i] = projection_point + new_offset * math.sqrt(offset_length_sq)
     }
   }
   // Re-enforce bone lengths after pole constraint

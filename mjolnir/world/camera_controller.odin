@@ -217,7 +217,7 @@ camera_controller_free_update :: proc(
   if glfw.GetKey(self.window, glfw.KEY_D) == glfw.PRESS do move_vector += resources.camera_right(camera)
   if glfw.GetKey(self.window, glfw.KEY_Q) == glfw.PRESS do move_vector.y -= 1
   if glfw.GetKey(self.window, glfw.KEY_E) == glfw.PRESS do move_vector.y += 1
-  if linalg.length(move_vector) > 0 {
+  if linalg.length2(move_vector) > 0 {
     move_vector = linalg.normalize(move_vector) * speed * delta_time
     camera.position += move_vector
   }

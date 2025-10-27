@@ -150,7 +150,7 @@ query_disc :: proc(
     dist_along_normal := linalg.dot(to_point, norm_normal)
     if math.abs(dist_along_normal) > 0.1 do continue
     projection := to_point - norm_normal * dist_along_normal
-    if linalg.length(projection) <= radius {
+    if linalg.length2(projection) <= radius * radius {
       append(results, entry.handle)
     }
   }

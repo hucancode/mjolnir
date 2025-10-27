@@ -276,7 +276,7 @@ move_along_surface :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, s
         visited_count = 1
     }
     dir := end_pos - start_pos
-    if linalg.length(dir) < 1e-6 do return result_pos, visited_count, {.Success}
+    if linalg.length2(dir) < 1e-6 * 1e-6 do return result_pos, visited_count, {.Success}
     cur_pos := start_pos
     cur_ref := start_ref
     // Walk along surface using adaptive steps

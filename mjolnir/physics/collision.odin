@@ -202,7 +202,7 @@ test_capsule_capsule :: proc(
     return false, {}, {}, 0
   }
   distance := math.sqrt(distance_sq)
-  normal := distance > 0.0001 ? delta / distance : [3]f32{0, 1, 0}
+  normal := distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration := radius_sum - distance
   point := point_a + normal * (capsule_a.radius - penetration * 0.5)
   return true, point, normal, penetration
@@ -237,7 +237,7 @@ test_sphere_capsule :: proc(
     return false, {}, {}, 0
   }
   distance := math.sqrt(distance_sq)
-  normal := distance > 0.0001 ? delta / distance : [3]f32{0, 1, 0}
+  normal := distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration := radius_sum - distance
   point := closest + normal * (capsule.radius - penetration * 0.5)
   return true, point, normal, penetration
@@ -271,7 +271,7 @@ test_box_capsule :: proc(
     return false, {}, {}, 0
   }
   distance := math.sqrt(distance_sq)
-  normal := distance > 0.0001 ? delta / distance : [3]f32{0, 1, 0}
+  normal := distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration := capsule.radius - distance
   return true, closest, normal, penetration
 }
