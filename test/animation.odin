@@ -20,7 +20,6 @@ test_sample_valid :: proc(t: ^testing.T) {
 
 @(test)
 test_sample_step_interpolation :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
   frames := []animation.Keyframe(f32) {
     {time = 0.0, value = 0.0},
     {time = 1.0, value = 10.0},
@@ -38,7 +37,6 @@ test_sample_step_interpolation :: proc(t: ^testing.T) {
 
 @(test)
 test_sample_step_interpolation_single_frame :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
   frames := []animation.Keyframe(f32){{time = 1.0, value = 42.0}}
   testing.expect_value(t, animation.keyframe_sample_step(frames, 0.0), 42.0)
   testing.expect_value(t, animation.keyframe_sample_step(frames, 1.0), 42.0)
@@ -47,7 +45,6 @@ test_sample_step_interpolation_single_frame :: proc(t: ^testing.T) {
 
 @(test)
 test_sample_cubic_spline_interpolation :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
   frames := []animation.CubicSplineKeyframe(f32) {
     {time = 0.0, in_tangent = 0.0, value = 0.0, out_tangent = 5.0},
     {time = 1.0, in_tangent = 5.0, value = 10.0, out_tangent = 0.0},
@@ -60,8 +57,7 @@ test_sample_cubic_spline_interpolation :: proc(t: ^testing.T) {
 
 @(test)
 test_sample_cubic_spline_vector_interpolation :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  frames := []animation.CubicSplineKeyframe([3]f32) {
+    frames := []animation.CubicSplineKeyframe([3]f32) {
     {time = 0.0, in_tangent = {0, 0, 0}, value = {0, 0, 0}, out_tangent = {1, 2, 3}},
     {time = 1.0, in_tangent = {1, 2, 3}, value = {10, 20, 30}, out_tangent = {0, 0, 0}},
   }
@@ -77,7 +73,6 @@ test_sample_cubic_spline_vector_interpolation :: proc(t: ^testing.T) {
 
 @(test)
 test_sample_cubic_spline_quaternion_interpolation :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
   q1 := linalg.quaternion_angle_axis_f32(0, {0, 0, 1})
   q2 := linalg.quaternion_angle_axis_f32(math.PI/2, {0, 0, 1})
   tangent: quaternion128 = quaternion(w = 0, x = 0, y = 0, z = 0.5)

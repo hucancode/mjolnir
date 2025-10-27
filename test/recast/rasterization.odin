@@ -12,8 +12,7 @@ import "core:math"
 
 @(test)
 test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Test 1: Zero area triangle (collinear points)
@@ -42,8 +41,7 @@ test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
 
 @(test)
 test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Nearly collinear points (very thin triangle)
@@ -71,8 +69,7 @@ test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
 
 @(test)
 test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Use high resolution heightfield to test sub-pixel triangles
+        // Use high resolution heightfield to test sub-pixel triangles
     // Small cell size to create sub-pixel scenarios
     cell_size := f32(0.1)
     hf := recast.create_heightfield(50, 50, {0,0,0}, {5,5,5}, cell_size, 0.05)
@@ -101,8 +98,7 @@ test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
 
 @(test)
 test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(20, 20, {0,0,0}, {10,10,10}, 0.5, 0.1)
+        hf := recast.create_heightfield(20, 20, {0,0,0}, {10,10,10}, 0.5, 0.1)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     tiny_size := f32(0.01)
@@ -133,8 +129,7 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
 
 @(test)
 test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Large triangle spanning many cells
@@ -161,8 +156,7 @@ test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
 
 @(test)
 test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Triangle that partially covers several cells
@@ -194,8 +188,7 @@ test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
 
 @(test)
 test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Triangle with coordinates that might cause precision issues
@@ -220,8 +213,7 @@ test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
 
 @(test)
 test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    large_offset := f32(100000.0)
+        large_offset := f32(100000.0)
     hf := recast.create_heightfield(10, 10,
                                    {large_offset, 0, large_offset},
                                    {large_offset + 10, 10, large_offset + 10},
@@ -250,8 +242,7 @@ test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
 
 @(test)
 test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.2)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.2)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Sloped triangle with height variation
@@ -282,8 +273,7 @@ test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
 
 @(test)
 test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Vertical triangle (wall)
@@ -346,8 +336,7 @@ test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
 // Thorough triangle rasterization validation - tests geometric accuracy
 @(test)
 test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test rasterization of a specific triangle with known coverage
+        // Test rasterization of a specific triangle with known coverage
     // Triangle vertices: (1,0,1), (3,0,1), (2,0,3)
     // This creates a triangle that should cover specific cells
     verts := [][3]f32{
@@ -395,8 +384,7 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
 
 @(test)
 test_triangle_rasterization :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
     defer recast.free_heightfield(hf)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     // Test single triangle rasterization

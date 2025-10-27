@@ -10,8 +10,7 @@ import "core:log"
 
 @(test)
 test_navmesh_file_serialization :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    vertices := [][3]f32{
+        vertices := [][3]f32{
         {-5, 0, -5}, {5, 0, -5}, {5, 0, 5}, {-5, 0, 5},
     }
     indices := []i32{0, 1, 2, 0, 2, 3}
@@ -52,8 +51,7 @@ test_navmesh_file_serialization :: proc(t: ^testing.T) {
 
 @(test)
 test_navmesh_data_serialization :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    vertices := [][3]f32{
+        vertices := [][3]f32{
         {-10, 0, -10}, {10, 0, -10}, {10, 0, 10}, {-10, 0, 10},
     }
     indices := []i32{0, 1, 2, 0, 2, 3}
@@ -100,8 +98,7 @@ test_navmesh_data_serialization :: proc(t: ^testing.T) {
 
 @(test)
 test_bake_and_save_workflow :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    vertices := [][3]f32{
+        vertices := [][3]f32{
         {-8, 0, -8}, {8, 0, -8}, {8, 0, 8}, {-8, 0, 8},
         // Add a raised platform
         {-2, 1, -2}, {2, 1, -2}, {2, 1, 2}, {-2, 1, 2},

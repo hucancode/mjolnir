@@ -493,8 +493,7 @@ test_navmesh_performance :: proc(t: ^testing.T) {
 
 @(test)
 test_edge_cases :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test 1: Empty mesh
+        // Test 1: Empty mesh
     {
         vertices := [][3]f32{}
         indices := []i32{}

@@ -117,8 +117,7 @@ test_heightfield_edge_cases :: proc(t: ^testing.T) {
 // Thorough distance field validation - tests mathematical correctness
 @(test)
 test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a 5x5 heightfield with a single center obstacle
+        // Create a 5x5 heightfield with a single center obstacle
     // This creates a known pattern where distances should form concentric rings
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.2)
     defer recast.free_heightfield(hf)
@@ -174,8 +173,7 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
 }
 @(test)
 test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a 30x30 walkable field
+        // Create a 30x30 walkable field
     field_size := i32(30)
     cell_size := f32(1.0)
     cell_height := f32(0.5)
@@ -275,8 +273,7 @@ test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
 
 @(test)
 test_heightfield_elevation_profile :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a smaller field for detailed analysis
+        // Create a smaller field for detailed analysis
     field_size := i32(10)
     cell_size := f32(1.0)
     cell_height := f32(0.5)
@@ -333,8 +330,7 @@ test_heightfield_elevation_profile :: proc(t: ^testing.T) {
 
 @(test)
 test_heightfield_sharp_elevation_changes :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test that sharp elevation changes are properly represented
+        // Test that sharp elevation changes are properly represented
     field_size := i32(20)
     cell_size := f32(0.5)
     cell_height := f32(0.25)

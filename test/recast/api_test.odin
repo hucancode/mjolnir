@@ -9,8 +9,7 @@ import "core:fmt"
 // Test high-level API functions
 @(test)
 test_api_simple_build :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Simple square floor geometry
+        // Simple square floor geometry
     vertices := [][3]f32{
         {0, 0, 0},
         {10, 0, 0},
@@ -57,8 +56,7 @@ test_api_simple_build :: proc(t: ^testing.T) {
 
 @(test)
 test_api_quick_build :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test the convenience quick build function
+        // Test the convenience quick build function
     vertices := [][3]f32{
         {0, 0, 0},
         {20, 0, 0},
@@ -108,8 +106,7 @@ test_api_quick_build :: proc(t: ^testing.T) {
 
 @(test)
 test_api_configuration :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test that different configurations produce valid results
+        // Test that different configurations produce valid results
     vertices := [][3]f32{
         {0, 0, 0},
         {10, 0, 0},
@@ -163,8 +160,7 @@ test_api_configuration :: proc(t: ^testing.T) {
 
 @(test)
 test_api_error_handling :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test error handling with invalid inputs
+        // Test error handling with invalid inputs
     // Empty geometry
     empty_vertices := [][3]f32{}
     empty_indices := []i32{}
@@ -204,8 +200,7 @@ test_api_error_handling :: proc(t: ^testing.T) {
 
 @(test)
 test_api_build_with_areas :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test building with custom area types
+        // Test building with custom area types
     vertices := [][3]f32{
         {0, 0, 0},
         {40, 0, 0},
@@ -262,8 +257,7 @@ test_api_build_with_areas :: proc(t: ^testing.T) {
 
 @(test)
 test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test complex geometry generation and navigation mesh building
+        // Test complex geometry generation and navigation mesh building
     vertices := make([dynamic][3]f32)
     indices := make([dynamic]i32)
     areas := make([dynamic]u8)

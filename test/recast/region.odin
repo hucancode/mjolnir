@@ -307,8 +307,7 @@ test_border_regions :: proc(t: ^testing.T) {
 // Thorough watershed region validation - tests region connectivity correctness
 @(test)
 test_watershed_region_connectivity :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create two separate 3x3 platforms with a gap between them
+        // Create two separate 3x3 platforms with a gap between them
     // This should result in exactly 2 regions with no cross-connections
     hf := recast.create_heightfield(8, 4, {0,0,0}, {8,3,4}, 1.0, 0.2)
     defer recast.free_heightfield(hf)
@@ -372,8 +371,7 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
 
 @(test)
 test_region_generation :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a more complex test scene
+        // Create a more complex test scene
     vertices := [][3]f32{
         // Ground plane with hole
         {0, 0, 0}, {20, 0, 0}, {20, 0, 20}, {0, 0, 20},

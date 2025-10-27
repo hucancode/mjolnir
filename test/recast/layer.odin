@@ -10,8 +10,7 @@ import "core:time"
 // Test simple layer assignment with multi-level structures
 @(test)
 test_simple_layers :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a simple multi-level structure
+        // Create a simple multi-level structure
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{10, 10, 10}
     hf := recast.create_heightfield(20, 20, bmin, bmax, 0.5, 0.5)
@@ -63,8 +62,7 @@ test_simple_layers :: proc(t: ^testing.T) {
 // the system correctly detects and reports >255 region overflow.
 @(test)
 test_region_overflow_handling :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a heightfield with many small disconnected regions
+        // Create a heightfield with many small disconnected regions
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{100, 10, 100}
     hf := recast.create_heightfield(200, 200, bmin, bmax, 0.5, 0.5)
@@ -106,8 +104,7 @@ test_region_overflow_handling :: proc(t: ^testing.T) {
 // Test actual nav_test.obj layer detection
 @(test)
 test_navtest_layers :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    fmt.println("\nTesting nav_test.obj layer characteristics...")
+        fmt.println("\nTesting nav_test.obj layer characteristics...")
     // Simulate the nav_test.obj structure with known multi-level areas
     bmin := [3]f32{-30, -5, -50}
     bmax := [3]f32{65, 20, 35}

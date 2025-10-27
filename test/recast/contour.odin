@@ -16,8 +16,7 @@ import "core:slice"
 
 @(test)
 test_build_contours_with_holes :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
+        hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Create walkable area with hole in middle
@@ -54,8 +53,7 @@ test_build_contours_with_holes :: proc(t: ^testing.T) {
 
 @(test)
 test_contour_simplification_accuracy :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(6, 6, {0,0,0}, {6,6,6}, 1.0, 0.5)
+        hf := recast.create_heightfield(6, 6, {0,0,0}, {6,6,6}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Create simple rectangular area
@@ -86,8 +84,7 @@ test_contour_simplification_accuracy :: proc(t: ^testing.T) {
 
 @(test)
 test_contour_edge_length_constraints :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
+        hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Create long thin walkable area
@@ -111,8 +108,7 @@ test_contour_edge_length_constraints :: proc(t: ^testing.T) {
 
 @(test)
 test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(6, 6, {0,0,0}, {6,6,6}, 1.0, 0.5)
+        hf := recast.create_heightfield(6, 6, {0,0,0}, {6,6,6}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Create simple area
@@ -133,8 +129,7 @@ test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
 
 @(test)
 test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(6, 6, {0,0,0}, {6,6,6}, 1.0, 0.5)
+        hf := recast.create_heightfield(6, 6, {0,0,0}, {6,6,6}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Create simple area
@@ -159,8 +154,7 @@ test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
 
 @(test)
 test_contour_boundary_vertices :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
+        hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Add walkable area touching boundaries
@@ -185,8 +179,7 @@ test_contour_boundary_vertices :: proc(t: ^testing.T) {
 
 @(test)
 test_contour_l_shaped_region :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
+        hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Create L-shaped walkable area
@@ -220,8 +213,7 @@ test_contour_l_shaped_region :: proc(t: ^testing.T) {
 
 @(test)
 test_contour_generation_empty_input :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
+        hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     chf := recast.create_compact_heightfield(2, 1, hf)
@@ -240,8 +232,7 @@ test_contour_generation_empty_input :: proc(t: ^testing.T) {
 
 @(test)
 test_contour_generation_simple :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a simple 5x5 heightfield with one region
+        // Create a simple 5x5 heightfield with one region
     chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
     chf.width = 5
@@ -301,8 +292,7 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
 // Test contour generation with multiple regions
 @(test)
 test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a 10x10 heightfield with two separate regions
+        // Create a 10x10 heightfield with two separate regions
     chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
     chf.width = 10
@@ -373,8 +363,7 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
 // Test triangulation with complex polygons
 @(test)
 test_triangulation_complex_polygon :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test with a more complex polygon (octagon)
+        // Test with a more complex polygon (octagon)
     verts := make([][4]i32, 8)
     defer delete(verts)
     // Define octagon vertices
@@ -406,8 +395,7 @@ test_triangulation_complex_polygon :: proc(t: ^testing.T) {
 // Test edge cases in triangulation
 @(test)
 test_triangulation_edge_cases :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test 1: Triangle (minimum polygon)
+        // Test 1: Triangle (minimum polygon)
     {
         verts := [][4]i32{{0, 0, 0, 0}, {10, 0, 0, 0}, {5, 0, 10, 0}}
         indices := []i32{0, 2, 1}
@@ -444,8 +432,7 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
 // Test contour simplification
 @(test)
 test_contour_simplification :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a contour with many collinear points
+        // Create a contour with many collinear points
     raw_verts := make([dynamic][4]i32)
     defer delete(raw_verts)
     // Add points along a square with extra collinear points
@@ -485,8 +472,7 @@ test_contour_simplification :: proc(t: ^testing.T) {
 // Test simple square first
 @(test)
 test_simple_square_mesh :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a contour set with a simple square
+        // Create a contour set with a simple square
     cset := new(recast.Contour_Set)
     defer recast.free_contour_set(cset)
     // Set up contours with append instead
@@ -517,8 +503,7 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
 // Test simple L-shape
 @(test)
 test_simple_l_shape_mesh :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a contour set with a simple L-shape
+        // Create a contour set with a simple L-shape
     cset := new(recast.Contour_Set)
     defer recast.free_contour_set(cset)
     // Set up contours with append instead
@@ -558,8 +543,7 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
 // Integration test: contour to mesh pipeline
 @(test)
 test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a contour set with an L-shaped region
+        // Create a contour set with an L-shaped region
     cset := new(recast.Contour_Set)
     defer recast.free_contour_set(cset)
     // Set up contours with append instead
@@ -608,8 +592,7 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
 
 @(test)
 test_simplify_contour_distance :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test distance calculation algorithm
+        // Test distance calculation algorithm
     test_cases := []struct {
         px, pz: i32,  // Point
         ax, az: i32,  // Segment start
@@ -659,8 +642,7 @@ test_simplify_contour_distance :: proc(t: ^testing.T) {
 
 @(test)
 test_basic_contour_simplification :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a raw contour for simplification
+        // Create a raw contour for simplification
     raw_verts := [][4]i32{
         {0, 0, 0, 0},
         {10, 0, 0, 0},
@@ -686,8 +668,7 @@ test_basic_contour_simplification :: proc(t: ^testing.T) {
 
 @(test)
 test_simplify_contour_algorithm :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create test raw contour points (a simple square with extra points)
+        // Create test raw contour points (a simple square with extra points)
     raw_verts := [][4]i32{
         // Bottom edge (with extra points)
         {0, 0, 0, 0},

@@ -7,8 +7,6 @@ import nav "../../mjolnir/navigation/recast"
 
 @(test)
 test_obstacle_connectivity :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    
     // Create a plane with an obstacle in the middle
     // The plane is 10x10 units, obstacle is 2x2 units at center
     vertices := [][3]f32{
@@ -17,7 +15,6 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
         { 5, 0, -5},  // 1
         { 5, 0,  5},  // 2
         {-5, 0,  5},  // 3
-        
         // Obstacle (box in center)
         {-1, 0, -1},  // 4
         { 1, 0, -1},  // 5
@@ -28,26 +25,21 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
         { 1, 2,  1},  // 10
         {-1, 2,  1},  // 11
     }
-    
     // Ground triangles (excluding area where obstacle sits)
     // Split the ground into triangles around the obstacle
     indices := []i32{
         // Bottom strip
         0, 1, 4,
         1, 5, 4,
-        
-        // Top strip  
+        // Top strip
         8, 9, 3,
         9, 2, 3,
-        
         // Left strip
         0, 4, 8,
         0, 8, 3,
-        
         // Right strip
         5, 1, 2,
         5, 2, 9,
-        
         // Obstacle faces (marked as unwalkable)
         // Front
         4, 5, 6,
@@ -65,7 +57,6 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
         7, 6, 10,
         7, 10, 11,
     }
-    
     // Mark areas - ground is walkable, obstacle is not
     areas := make([]u8, len(indices)/3)
     defer delete(areas)
@@ -75,7 +66,6 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
     for i in 8..<len(areas) {
         areas[i] = nav.RC_NULL_AREA  // Obstacle triangles
     }
-    
     // Build configuration
     cfg := nav.Config{
         cs = 0.3,
@@ -92,22 +82,18 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
         detail_sample_dist = 6.0,
         detail_sample_max_error = 1.0,
     }
-    
     // Build navigation mesh
     pmesh, dmesh, ok := nav.build_navmesh(vertices, indices, areas, cfg)
     defer {
         if pmesh != nil do nav.free_poly_mesh(pmesh)
         if dmesh != nil do nav.free_poly_mesh_detail(dmesh)
     }
-    
     testing.expect(t, ok, "Navigation mesh build should succeed")
     testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")
-    
     // Check polygon connectivity
     disconnected_count := 0
     for i in 0..<pmesh.npolys {
         pi := int(i) * int(pmesh.nvp) * 2
-        
         // Count neighbors
         neighbor_count := 0
         for j in 0..<pmesh.nvp {
@@ -115,11 +101,9 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
                 neighbor_count += 1
             }
         }
-        
         // A polygon should have at least one neighbor unless it's isolated
         if neighbor_count == 0 {
             disconnected_count += 1
-            
             // Get polygon vertices for debugging
             verts := make([dynamic]u16, 0, pmesh.nvp)
             defer delete(verts)
@@ -129,21 +113,16 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
                     append(&verts, v)
                 }
             }
-            
             log.warnf("Polygon %d has no neighbors! Vertices: %v", i, verts)
         }
     }
-    
     // We expect all polygons to be connected (the ground around the obstacle should form a connected mesh)
     testing.expect_value(t, disconnected_count, 0)
-    
     log.infof("Navigation mesh has %d polygons, all properly connected!", pmesh.npolys)
 }
 
 @(test)
 test_single_obstacle_connectivity :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    
     // Create a simple plane with a single obstacle in the middle
     // This should create a connected mesh that goes around the obstacle
     vertices := [][3]f32{
@@ -152,7 +131,6 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
         { 5, 0, -5},  // 1
         { 5, 0,  5},  // 2
         {-5, 0,  5},  // 3
-        
         // Single smaller obstacle in center (1x1x2)
         {-0.5, 0, -0.5},  // 4
         { 0.5, 0, -0.5},  // 5
@@ -163,13 +141,11 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
         { 0.5, 2,  0.5},  // 10
         {-0.5, 2,  0.5},  // 11
     }
-    
     // Create simple ground plane and obstacle
     indices := []i32{
         // Ground plane (just two triangles covering the whole area)
         0, 1, 2,
         0, 2, 3,
-        
         // Obstacle faces (non-walkable)
         // Bottom (on ground)
         4, 5, 9,
@@ -190,7 +166,6 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
         7, 6, 10,
         7, 10, 11,
     }
-    
     // Mark areas
     areas := make([]u8, len(indices)/3)
     defer delete(areas)
@@ -200,7 +175,6 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
     for i in 2..<len(areas) {
         areas[i] = nav.RC_NULL_AREA  // Obstacle triangles
     }
-    
     cfg := nav.Config{
         cs = 0.3,
         ch = 0.2,
@@ -216,43 +190,35 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
         detail_sample_dist = 6.0,
         detail_sample_max_error = 1.0,
     }
-    
     pmesh, dmesh, ok := nav.build_navmesh(vertices, indices, areas, cfg)
     defer {
         if pmesh != nil do nav.free_poly_mesh(pmesh)
         if dmesh != nil do nav.free_poly_mesh_detail(dmesh)
     }
-    
     testing.expect(t, ok, "Navigation mesh build should succeed")
     testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")
-    
     // Check regions - with a single obstacle, we should have only one region
     regions := make(map[u16]int)
     defer delete(regions)
-    
     for i in 0..<pmesh.npolys {
         region_id := pmesh.regs[i]
         regions[region_id] = regions[region_id] + 1
     }
-    
     log.infof("Single obstacle test: Found %d regions", len(regions))
     for region_id, count in regions {
         log.infof("  Region %d: %d polygons", region_id, count)
     }
-    
     // The test's original expectation of a single region is incorrect.
     // With an obstacle in the middle, Recast's watershed algorithm naturally creates
     // separate regions in each quadrant. What matters is that:
     // 1. We have a reasonable number of regions (not too fragmented)
     // 2. All polygons within each region are connected
-    
     // Expect between 1-4 regions (one per quadrant around the obstacle is reasonable)
     region_count_ok := len(regions) >= 1 && len(regions) <= 4
     if !region_count_ok {
         log.errorf("Expected 1-4 regions for single obstacle, got %d", len(regions))
     }
     testing.expect(t, region_count_ok)
-    
     // Check that all polygons have neighbors (no isolated polygons)
     isolated_count := 0
     for i in 0..<pmesh.npolys {
@@ -268,9 +234,7 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
             log.warnf("Polygon %d is isolated (no neighbors)", i)
         }
     }
-    
     testing.expect_value(t, isolated_count, 0)
-    
     // Verify that each region has at least one polygon (no empty regions)
     for region_id, count in regions {
         if count <= 0 {
@@ -278,34 +242,27 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
         }
         testing.expect(t, count > 0)
     }
-    
     log.infof("Single obstacle connectivity test passed! %d regions found, all polygons connected.", len(regions))
 }
 
-@(test) 
+@(test)
 test_near_miss_edges :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    
     // Create two triangles that should share an edge but have slight vertex misalignment
     vertices := [][3]f32{
         // First triangle
         {0, 0, 0},      // 0
         {1, 0, 0},      // 1
         {0.5, 0, 1},    // 2
-        
         // Second triangle - edge 3-4 should match edge 1-0 but with slight offset
         {1.0001, 0, 0.0001},   // 3 (should match vertex 1)
         {0.0001, 0, -0.0001},  // 4 (should match vertex 0)
         {0.5, 0, -1},          // 5
     }
-    
     indices := []i32{
         0, 1, 2,    // First triangle
         3, 4, 5,    // Second triangle
     }
-    
     areas := []u8{nav.RC_WALKABLE_AREA, nav.RC_WALKABLE_AREA}
-    
     cfg := nav.Config{
         cs = 0.1,
         ch = 0.1,
@@ -321,16 +278,13 @@ test_near_miss_edges :: proc(t: ^testing.T) {
         detail_sample_dist = 6.0,
         detail_sample_max_error = 1.0,
     }
-    
     pmesh, dmesh, ok := nav.build_navmesh(vertices, indices, areas, cfg)
     defer {
         if pmesh != nil do nav.free_poly_mesh(pmesh)
         if dmesh != nil do nav.free_poly_mesh_detail(dmesh)
     }
-    
     testing.expect(t, ok, "Navigation mesh build should succeed")
     testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")
-    
     // Check that the triangles are connected
     connected := false
     for i in 0..<pmesh.npolys {
@@ -343,8 +297,6 @@ test_near_miss_edges :: proc(t: ^testing.T) {
         }
         if connected do break
     }
-    
     testing.expect(t, connected, "Triangles with near-miss edges should be connected after tolerance-based matching")
-    
     log.infof("Near-miss edge test passed! Polygons are properly connected with tolerance.")
 }

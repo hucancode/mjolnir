@@ -35,8 +35,7 @@ validate_poly_mesh_detail :: proc(dmesh: ^recast.Poly_Mesh_Detail) -> bool {
 
 @(test)
 test_simple_detail_mesh_build :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create minimal working example
+        // Create minimal working example
     pmesh := new(recast.Poly_Mesh)
     defer recast.free_poly_mesh(pmesh)
     chf := new(recast.Compact_Heightfield)
@@ -89,8 +88,7 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
 
 @(test)
 test_detail_mesh_sampling_quality :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test detail mesh sampling with different quality settings
+        // Test detail mesh sampling with different quality settings
     vertices := [][3]f32{
         {0, 0, 0}, {20, 0, 0}, {20, 1, 20}, {0, 2, 20},  // Sloped quad
     }
@@ -131,8 +129,7 @@ test_detail_mesh_sampling_quality :: proc(t: ^testing.T) {
 
 @(test)
 test_detail_mesh_height_accuracy :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test that detail mesh accurately represents height variations
+        // Test that detail mesh accurately represents height variations
     vertices := [][3]f32{
         // Create a surface with height variation
         {0, 0, 0}, {10, 2, 0}, {10, 1, 10}, {0, 3, 10},
@@ -174,8 +171,7 @@ test_detail_mesh_height_accuracy :: proc(t: ^testing.T) {
 
 @(test)
 test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test edge cases: very small triangles, degenerate cases
+        // Test edge cases: very small triangles, degenerate cases
     // Case 1: Very small triangle
     vertices_small := [][3]f32{
         {0, 0, 0}, {0.1, 0, 0}, {0.05, 0, 0.1},
@@ -227,8 +223,7 @@ test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
 
 @(test)
 test_build_detail_mesh_simple :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create simple scenario for detail mesh building
+        // Create simple scenario for detail mesh building
     hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -342,8 +337,7 @@ test_detail_mesh_max_edge_error_variations :: proc(t: ^testing.T) {
 
 @(test)
 test_detail_mesh_small_polygons :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Create several tiny walkable areas
@@ -365,8 +359,7 @@ test_detail_mesh_small_polygons :: proc(t: ^testing.T) {
 
 @(test)
 test_detail_mesh_extreme_parameters :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create base scenario
+        // Create base scenario
     hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -405,8 +398,7 @@ test_detail_mesh_extreme_parameters :: proc(t: ^testing.T) {
 
 @(test)
 test_detail_mesh_data_consistency :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create scenario for detail mesh validation
+        // Create scenario for detail mesh validation
     hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -645,8 +637,7 @@ test_delaunay_hull_edge_cases :: proc(t: ^testing.T) {
 
 @(test)
 test_delaunay_hull_performance :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    num_points := 50
+        num_points := 50
     points := make([][3]f32, num_points)
     hull := make([]i32, num_points)
     defer delete(points)

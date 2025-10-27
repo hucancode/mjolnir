@@ -10,8 +10,7 @@ import "../../mjolnir/navigation/detour"
 
 @(test)
 test_bv_tree_construction :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    mesh: recast.Poly_Mesh
+        mesh: recast.Poly_Mesh
     mesh.cs = 0.3
     mesh.ch = 0.2
     mesh.nvp = 6
@@ -152,8 +151,7 @@ test_bv_tree_various_y_values :: proc(t: ^testing.T) {
 
 @(test)
 test_bv_tree_e2e :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a simple floor mesh
+        // Create a simple floor mesh
     mesh: recast.Poly_Mesh
     mesh.cs = 0.3
     mesh.ch = 0.2

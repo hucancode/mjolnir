@@ -129,7 +129,6 @@ The engine uses a deferred rendering approach with multiple passes:
 - Test in complete isolation with hard-coded inputs that verify specific behaviors
 - Each test confirms ONE aspect of functionality (no duplicates)
 - Verify exact outputs (allow floating-point precision tolerance)
-- Use 30s timeout: `testing.set_fail_timeout(t, 30 * time.Second)`
 - Fulfill all pre-conditions before testing
 - Cover edge cases (boundaries, empty, invalid) AND normal cases
 

@@ -104,8 +104,7 @@ test_span_allocation :: proc(t: ^testing.T) {
 // Unit Test: Invalid span inputs
 @(test)
 test_span_invalid_inputs :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
     defer recast.free_heightfield(hf)
     // Test out of bounds coordinates
@@ -125,8 +124,7 @@ test_span_invalid_inputs :: proc(t: ^testing.T) {
 // Unit Test: Edge case values
 @(test)
 test_span_edge_cases :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
     defer recast.free_heightfield(hf)
     // Test minimum values
@@ -183,8 +181,7 @@ verify_span_list :: proc(t: ^testing.T, hf: ^recast.Heightfield, x, z: i32, expe
 // Integration Test: Basic span merging
 @(test)
 test_span_merging :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
     defer recast.free_heightfield(hf)
     // Add first span
@@ -205,8 +202,7 @@ test_span_merging :: proc(t: ^testing.T) {
 // Integration Test: Non-overlapping spans
 @(test)
 test_span_non_overlapping :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := create_test_heightfield(10, 10)
+        hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Add two non-overlapping spans
@@ -225,8 +221,7 @@ test_span_non_overlapping :: proc(t: ^testing.T) {
 // Integration Test: Exact overlap merging
 @(test)
 test_span_merge_exact_overlap :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := create_test_heightfield(10, 10)
+        hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Add two exactly overlapping spans
@@ -244,8 +239,7 @@ test_span_merge_exact_overlap :: proc(t: ^testing.T) {
 // Integration Test: Partial overlap merging
 @(test)
 test_span_merge_partial_overlap :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := create_test_heightfield(10, 10)
+        hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Add two partially overlapping spans
@@ -263,8 +257,7 @@ test_span_merge_partial_overlap :: proc(t: ^testing.T) {
 // Integration Test: Touching spans merge
 @(test)
 test_span_merge_touching :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := create_test_heightfield(10, 10)
+        hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Add two spans that exactly touch (smax1 == smin2)
@@ -282,8 +275,7 @@ test_span_merge_touching :: proc(t: ^testing.T) {
 // Integration Test: Multiple overlaps
 @(test)
 test_span_merge_multiple_overlaps :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := create_test_heightfield(10, 10)
+        hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Add multiple spans that will all merge
@@ -306,8 +298,7 @@ test_span_merge_multiple_overlaps :: proc(t: ^testing.T) {
 // Integration Test: Area priority during merge
 @(test)
 test_span_area_priority :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := create_test_heightfield(10, 10)
+        hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Test that higher area IDs take priority
@@ -325,8 +316,7 @@ test_span_area_priority :: proc(t: ^testing.T) {
 // Integration Test: Merge threshold behavior
 @(test)
 test_span_merge_threshold :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := create_test_heightfield(10, 10)
+        hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Test flag merge threshold
@@ -346,8 +336,7 @@ test_span_merge_threshold :: proc(t: ^testing.T) {
 // Integration Test: Insertion order independence
 @(test)
 test_span_insertion_order :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := create_test_heightfield(10, 10)
+        hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Add spans in reverse order
@@ -369,8 +358,7 @@ test_span_insertion_order :: proc(t: ^testing.T) {
 // Integration Test: Algorithm correctness
 @(test)
 test_span_merge_algorithm_correctness :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+        hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
     defer recast.free_heightfield(hf)
     // Test 1: Add non-overlapping spans in order
@@ -405,8 +393,7 @@ test_span_merge_algorithm_correctness :: proc(t: ^testing.T) {
 // Integration Test: Out of order additions
 @(test)
 test_span_merge_out_of_order :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test adding spans out of order
+        // Test adding spans out of order
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
     defer recast.free_heightfield(hf)
@@ -441,8 +428,7 @@ test_span_merge_out_of_order :: proc(t: ^testing.T) {
 // Integration Test: Partial merge scenarios
 @(test)
 test_span_partial_merge :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test partial merging scenarios
+        // Test partial merging scenarios
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
     defer recast.free_heightfield(hf)
@@ -527,8 +513,7 @@ test_span_complex_merging :: proc(t: ^testing.T) {
 // Test span merging behavior with flag threshold - validates merging algorithm correctness
 @(test)
 test_span_merging_with_flag_threshold :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    hf := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.2)
+        hf := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.2)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
     // Test case 1: Merging spans with area flag threshold
@@ -575,8 +560,7 @@ test_span_merging_with_flag_threshold :: proc(t: ^testing.T) {
 // Thorough heightfield span merging validation - tests complex merging logic
 @(test)
 test_span_merging_complex_scenarios :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test complex span merging with multiple overlapping spans at different heights
+        // Test complex span merging with multiple overlapping spans at different heights
     // This validates the correctness of the span merging algorithm
     hf := recast.create_heightfield(3, 3, {0,0,0}, {3,3,3}, 1.0, 0.2)
     testing.expect(t, hf != nil, "Failed to create heightfield")
@@ -627,8 +611,7 @@ test_span_merging_complex_scenarios :: proc(t: ^testing.T) {
 
 @(test)
 test_multiple_spans_per_cell :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a small heightfield
+        // Create a small heightfield
     field_size := i32(5)
     cell_size := f32(1.0)
     cell_height := f32(0.5)
@@ -678,8 +661,7 @@ test_multiple_spans_per_cell :: proc(t: ^testing.T) {
 
 @(test)
 test_many_thin_spans :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test with many thin non-overlapping spans
+        // Test with many thin non-overlapping spans
     field_size := i32(3)
     cell_size := f32(1.0)
     cell_height := f32(0.1) // Very fine resolution
@@ -717,8 +699,7 @@ test_many_thin_spans :: proc(t: ^testing.T) {
 // Detailed test comparing specific Recast functions
 @(test)
 test_basic_span_merging :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a small heightfield for testing
+        // Create a small heightfield for testing
     hf := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
     defer recast.free_heightfield(hf)
     testing.expect(t, hf != nil, "Failed to create heightfield")

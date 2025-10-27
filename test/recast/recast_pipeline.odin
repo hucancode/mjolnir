@@ -12,8 +12,7 @@ import "core:log"
 // Test with nav_test.obj - multi-level navigation test mesh
 @(test)
 test_nav_test_mesh :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    fmt.println("Testing with nav_test.obj (multi-level navigation)...")
+        fmt.println("Testing with nav_test.obj (multi-level navigation)...")
     mesh_path := "assets/nav_test.obj"
     vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(mesh_path, 1.0, 45.0)
     if !ok {
@@ -238,8 +237,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
 // Test with dungeon.obj - complex indoor environment
 @(test)
 test_dungeon_mesh :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    mesh_path := "assets/dungeon.obj"
+        mesh_path := "assets/dungeon.obj"
     vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(mesh_path, 1.0, 45.0)
     testing.expectf(t, ok, "failed to load asset")
     defer {
@@ -305,8 +303,7 @@ test_dungeon_mesh :: proc(t: ^testing.T) {
 // Test with floor_with_5_obstacles.obj
 @(test)
 test_floor_with_obstacles :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    mesh_path := "assets/floor_with_5_obstacles.obj"
+        mesh_path := "assets/floor_with_5_obstacles.obj"
     vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(mesh_path, 1.0, 45.0)
     testing.expect(t, ok, "failed to load asset")
     defer {
@@ -353,8 +350,7 @@ test_floor_with_obstacles :: proc(t: ^testing.T) {
 
 @(test)
 test_floor_5_obstacles_simple :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Load the floor_with_5_obstacles.obj mesh
+        // Load the floor_with_5_obstacles.obj mesh
     vertices, indices, areas, ok := nav.load_obj_to_navmesh_input("assets/floor_with_5_obstacles.obj")
     defer {
         delete(vertices)

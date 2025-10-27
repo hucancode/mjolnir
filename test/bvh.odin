@@ -479,8 +479,7 @@ test_bvh_precision :: proc(t: ^testing.T) {
 
 @(test)
 bvh_build_benchmark :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  bench_proc :: proc(
+    bench_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {

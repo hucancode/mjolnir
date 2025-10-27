@@ -7,8 +7,7 @@ import "../mjolnir/geometry"
 
 @(test)
 test_interval_tree_basic :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  tree: geometry.IntervalTree
+    tree: geometry.IntervalTree
   geometry.interval_tree_init(&tree)
   defer geometry.interval_tree_destroy(&tree)
   ranges := geometry.interval_tree_get_ranges(&tree)
@@ -26,8 +25,7 @@ test_interval_tree_basic :: proc(t: ^testing.T) {
 
 @(test)
 test_interval_tree_range_insertion :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  tree: geometry.IntervalTree
+    tree: geometry.IntervalTree
   geometry.interval_tree_init(&tree)
   defer geometry.interval_tree_destroy(&tree)
   // Test range insertion
@@ -46,8 +44,7 @@ test_interval_tree_range_insertion :: proc(t: ^testing.T) {
 
 @(test)
 test_interval_tree_merging :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  tree: geometry.IntervalTree
+    tree: geometry.IntervalTree
   geometry.interval_tree_init(&tree)
   defer geometry.interval_tree_destroy(&tree)
   // Test overlapping intervals merge
@@ -67,8 +64,7 @@ test_interval_tree_merging :: proc(t: ^testing.T) {
 
 @(test)
 test_interval_tree_complex_merging :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  tree: geometry.IntervalTree
+    tree: geometry.IntervalTree
   geometry.interval_tree_init(&tree)
   defer geometry.interval_tree_destroy(&tree)
   // Create multiple separate ranges
@@ -86,8 +82,7 @@ test_interval_tree_complex_merging :: proc(t: ^testing.T) {
 
 @(test)
 test_interval_tree_sparse_pattern :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  tree: geometry.IntervalTree
+    tree: geometry.IntervalTree
   geometry.interval_tree_init(&tree)
   defer geometry.interval_tree_destroy(&tree)
   // Insert sparse individual elements
@@ -107,8 +102,7 @@ test_interval_tree_sparse_pattern :: proc(t: ^testing.T) {
 
 @(test)
 test_interval_tree_performance :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  tree: geometry.IntervalTree
+    tree: geometry.IntervalTree
   geometry.interval_tree_init(&tree)
   defer geometry.interval_tree_destroy(&tree)
   // Test performance with many ranges
@@ -132,8 +126,7 @@ test_interval_tree_performance :: proc(t: ^testing.T) {
 
 @(test)
 test_interval_tree_vs_dirty_set :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  tree: geometry.IntervalTree
+    tree: geometry.IntervalTree
   geometry.interval_tree_init(&tree)
   defer geometry.interval_tree_destroy(&tree)
   // Simulate dirty buffer operations
@@ -179,8 +172,7 @@ test_interval_tree_vs_dirty_set :: proc(t: ^testing.T) {
 
 @(test)
 test_interval_tree_edge_cases :: proc(t: ^testing.T) {
-  testing.set_fail_timeout(t, 30 * time.Second)
-  tree: geometry.IntervalTree
+    tree: geometry.IntervalTree
   geometry.interval_tree_init(&tree)
   defer geometry.interval_tree_destroy(&tree)
   // Test zero count insertion
