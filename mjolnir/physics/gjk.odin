@@ -48,7 +48,7 @@ find_furthest_point :: proc(
     h := capsule.height * 0.5
     // Capsule is two hemispheres connected by a cylinder
     // First find the furthest point on the central line segment
-    line_dir := [3]f32{0, 1, 0}
+    line_dir := linalg.VECTOR3F32_Y_AXIS
     dot := linalg.vector_dot(direction, line_dir)
     line_point := center + line_dir * (dot >= 0 ? h : -h)
     // Then add the sphere radius in the direction

@@ -11,12 +11,13 @@ import "core:slice"
 KILL_Y :: -50.0
 
 PhysicsWorld :: struct {
-  bodies:        resources.Pool(RigidBody),
-  colliders:     resources.Pool(Collider),
-  contacts:      [dynamic]Contact,
-  gravity:       [3]f32,
-  iterations:    i32,
-  spatial_index: geometry.BVH(resources.Handle),
+  bodies:         resources.Pool(RigidBody),
+  colliders:      resources.Pool(Collider),
+  contacts:       [dynamic]Contact,
+  prev_contacts:  map[u64]Contact, // Contact cache for warmstarting
+  gravity:        [3]f32,
+  iterations:     i32,
+  spatial_index:  geometry.BVH(resources.Handle),
 }
 
 BroadPhaseEntry :: struct {
@@ -31,8 +32,9 @@ init :: proc(
   resources.pool_init(&world.bodies)
   resources.pool_init(&world.colliders)
   world.contacts = make([dynamic]Contact)
+  world.prev_contacts = make(map[u64]Contact)
   world.gravity = gravity
-  world.iterations = 8
+  world.iterations = 6 // Per-substep iterations (3 substeps × 6 = 18 total)
   world.spatial_index = geometry.BVH(resources.Handle) {
     nodes = make([dynamic]geometry.BVHNode),
     primitives = make([dynamic]resources.Handle),
@@ -46,6 +48,7 @@ destroy :: proc(world: ^PhysicsWorld) {
   resources.pool_destroy(world.bodies, proc(body: ^RigidBody) {})
   resources.pool_destroy(world.colliders, proc(col: ^Collider) {})
   delete(world.contacts)
+  delete(world.prev_contacts)
   geometry.bvh_destroy(&world.spatial_index)
 }
 
@@ -101,7 +104,15 @@ add_collider :: proc(
 }
 
 step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
-  clear(&physics.contacts)
+  // Save previous contacts for warmstarting
+  clear(&physics.prev_contacts)
+  for contact in physics.contacts {
+    pair := CollisionPair{body_a = contact.body_a, body_b = contact.body_b}
+    hash := collision_pair_hash(pair)
+    physics.prev_contacts[hash] = contact
+  }
+
+  // Apply forces to all bodies (gravity, etc.)
   for &entry in physics.bodies.entries {
     if !entry.active {
       continue
@@ -112,6 +123,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       rigid_body_apply_force(body, gravity_force)
     }
   }
+
+  // Integrate velocities from forces ONCE for the entire frame
   for &entry in physics.bodies.entries {
     if !entry.active {
       continue
@@ -119,14 +132,15 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     body := &entry.item
     rigid_body_integrate(body, dt)
   }
-  // Track which bodies were handled by CCD
+
+  // Track which bodies were handled by CCD (outside substep loop)
   ccd_handled := make(
     [dynamic]bool,
     len(physics.bodies.entries),
     context.temp_allocator,
   )
-  // Perform CCD for fast-moving objects
-  ccd_threshold :: 2.0 // Objects moving faster than this use CCD
+  // Perform CCD for fast-moving objects ONCE before substeps
+  ccd_threshold :: 5.0 // Objects moving faster than this use CCD (m/s)
   for &entry_a, idx_a in physics.bodies.entries {
     if !entry_a.active {
       continue
@@ -154,7 +168,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     pos_a := node_a.transform.position
     motion := body_a.velocity * dt
     earliest_toi := f32(1.0)
-    earliest_normal := [3]f32{0, 1, 0}
+    earliest_normal := linalg.VECTOR3F32_Y_AXIS
     earliest_body_b: ^RigidBody = nil
     has_ccd_hit := false
     // Check against all other colliders
@@ -217,6 +231,16 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       ccd_handled[idx_a] = true
     }
   }
+
+  // Use substeps like Rapier - integrate position multiple times per frame
+  // More substeps = smaller steps = less tunneling through thin objects
+  num_substeps :: 5
+  substep_dt := dt / f32(num_substeps)
+
+  for substep in 0 ..< num_substeps {
+    // Clear and redetect contacts at current positions
+    clear(&physics.contacts)
+
   broad_phase_entries := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   for &entry, idx in physics.bodies.entries {
     if !entry.active {
@@ -282,12 +306,22 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       }
       pos_a := node_a.transform.position
       pos_b := node_b.transform.position
+      // Try fast primitive collision first, fall back to GJK if unavailable
       hit, point, normal, penetration := test_collision(
         collider_a,
         pos_a,
         collider_b,
         pos_b,
       )
+      // If primitive test returns no collision but shapes support GJK, try GJK as fallback
+      if !hit {
+        hit, point, normal, penetration = test_collision_gjk(
+          collider_a,
+          pos_a,
+          collider_b,
+          pos_b,
+        )
+      }
       if hit {
         contact := Contact {
           body_a      = entry_a.handle,
@@ -298,10 +332,56 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
           restitution = (body_a.restitution + body_b.restitution) * 0.5,
           friction    = (body_a.friction + body_b.friction) * 0.5,
         }
+        // Check if we have a cached contact from previous frame for warmstarting
+        pair := CollisionPair{body_a = entry_a.handle, body_b = entry_b.handle}
+        hash := collision_pair_hash(pair)
+        if prev_contact, found := physics.prev_contacts[hash]; found {
+          // Copy accumulated impulses for warmstart with heavy damping
+          // Heavy damping prevents bad impulses from causing instability
+          warmstart_coef :: 0.8 // Reduced to prevent carrying forward problematic impulses
+          contact.normal_impulse = prev_contact.normal_impulse * warmstart_coef
+          contact.tangent_impulse[0] = prev_contact.tangent_impulse[0] * warmstart_coef
+          contact.tangent_impulse[1] = prev_contact.tangent_impulse[1] * warmstart_coef
+        }
         append(&physics.contacts, contact)
       }
     }
   }
+  // Prepare all contacts (compute mass matrices and bias terms)
+  for &contact in physics.contacts {
+    body_a, body_a_ok := resources.get(physics.bodies, contact.body_a)
+    body_b, body_b_ok := resources.get(physics.bodies, contact.body_b)
+    if !body_a_ok || !body_b_ok {
+      continue
+    }
+    node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
+    node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
+    if !node_a_ok || !node_b_ok {
+      continue
+    }
+    pos_a := node_a.transform.position
+    pos_b := node_b.transform.position
+    prepare_contact(&contact, body_a, body_b, pos_a, pos_b, substep_dt)
+  }
+  // Warmstart with cached impulses (only on first substep)
+  if substep == 0 {
+    for &contact in physics.contacts {
+    body_a, body_a_ok := resources.get(physics.bodies, contact.body_a)
+    body_b, body_b_ok := resources.get(physics.bodies, contact.body_b)
+    if !body_a_ok || !body_b_ok {
+      continue
+    }
+    node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
+    node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
+    if !node_a_ok || !node_b_ok {
+      continue
+    }
+      pos_a := node_a.transform.position
+      pos_b := node_b.transform.position
+      warmstart_contact(&contact, body_a, body_b, pos_a, pos_b)
+    }
+  }
+  // Solve constraints with bias (includes position correction + restitution)
   for _ in 0 ..< physics.iterations {
     for &contact in physics.contacts {
       body_a, body_a_ok := resources.get(physics.bodies, contact.body_a)
@@ -317,14 +397,27 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       pos_a := node_a.transform.position
       pos_b := node_b.transform.position
       resolve_contact(&contact, body_a, body_b, pos_a, pos_b)
-      // Apply direct position correction
-      resolve_contact_position(
-        &contact,
-        body_a,
-        body_b,
-        &node_a.transform.position,
-        &node_b.transform.position,
-      )
+    }
+  }
+  // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
+  // This prevents jitter without adding artificial velocity
+  stabilization_iters :: 2
+  for _ in 0 ..< stabilization_iters {
+    for &contact in physics.contacts {
+      body_a, body_a_ok := resources.get(physics.bodies, contact.body_a)
+      body_b, body_b_ok := resources.get(physics.bodies, contact.body_b)
+      if !body_a_ok || !body_b_ok {
+        continue
+      }
+      node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
+      node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
+      if !node_a_ok || !node_b_ok {
+        continue
+      }
+      pos_a := node_a.transform.position
+      pos_b := node_b.transform.position
+      // Solve without bias - only enforce zero relative velocity at contact
+      resolve_contact_no_bias(&contact, body_a, body_b, pos_a, pos_b)
     }
   }
   for &entry, idx in physics.bodies.entries {
@@ -343,8 +436,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     if !node_ok {
       continue
     }
-    // Update position
-    vel := body.velocity * dt
+    // Update position using substep timestep
+    vel := body.velocity * substep_dt
     geometry.transform_translate_by(&node.transform, vel.x, vel.y, vel.z)
     // Update rotation from angular velocity
     // Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
@@ -368,12 +461,12 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       q_dot.x *= 0.5
       q_dot.y *= 0.5
       q_dot.z *= 0.5
-      // Integrate: q_new = q_old + q_dot * dt
+      // Integrate: q_new = q_old + q_dot * substep_dt
       q_new := quaternion(
-        w = q_old.w + q_dot.w * dt,
-        x = q_old.x + q_dot.x * dt,
-        y = q_old.y + q_dot.y * dt,
-        z = q_old.z + q_dot.z * dt,
+        w = q_old.w + q_dot.w * substep_dt,
+        x = q_old.x + q_dot.x * substep_dt,
+        y = q_old.y + q_dot.y * substep_dt,
+        z = q_old.z + q_dot.z * substep_dt,
       )
       // Normalize to prevent drift
       mag := math.sqrt(
@@ -391,6 +484,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       }
     }
   }
+  } // End substep loop
+
   // Kill bodies that fall below kill_y threshold
   bodies_to_kill := make([dynamic]resources.Handle, context.temp_allocator)
   for &entry, idx in physics.bodies.entries {

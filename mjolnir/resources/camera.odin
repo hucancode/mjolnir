@@ -129,7 +129,7 @@ camera_init :: proc(
   }
   camera.position = camera_position
   forward := linalg.normalize(camera_target - camera_position)
-  safe_up := [3]f32{0, 1, 0}
+  safe_up := linalg.VECTOR3F32_Y_AXIS
   if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
     safe_up = linalg.VECTOR3F32_Z_AXIS
     if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
@@ -434,7 +434,7 @@ camera_get_near_far :: proc(camera: ^Camera) -> (near: f32, far: f32) {
 camera_look_at :: proc(
   camera: ^Camera,
   from, to: [3]f32,
-  world_up := [3]f32{0, 1, 0},
+  world_up := linalg.VECTOR3F32_Y_AXIS,
 ) {
   camera.position = from
   forward := linalg.normalize(to - from)

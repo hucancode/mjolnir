@@ -115,10 +115,10 @@ load_obj :: proc(filename: string, scale: f32 = 1.0) -> (geom: Geometry, ok: boo
             if len > 0 {
                 vertices[i].normal = n / len
             } else {
-                vertices[i].normal = [3]f32{0, 1, 0}
+                vertices[i].normal = linalg.VECTOR3F32_Y_AXIS
             }
         } else {
-            vertices[i].normal = [3]f32{0, 1, 0}
+            vertices[i].normal = linalg.VECTOR3F32_Y_AXIS
         }
         // Default color (white)
         vertices[i].color = [4]f32{1, 1, 1, 1}

@@ -242,7 +242,7 @@ camera_controller_free_update :: proc(
     yaw_delta := f32(self.mouse_delta.x) * free.mouse_sensitivity
     pitch_delta := f32(self.mouse_delta.y) * free.mouse_sensitivity
     // rotate around world up for yaw
-    yaw_quat := linalg.quaternion_angle_axis(-yaw_delta, [3]f32{0, 1, 0})
+    yaw_quat := linalg.quaternion_angle_axis(-yaw_delta, linalg.VECTOR3F32_Y_AXIS)
     camera.rotation = yaw_quat * camera.rotation
     // rotate around local right for pitch
     right := resources.camera_right(camera)

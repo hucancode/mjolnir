@@ -32,7 +32,7 @@ swept_sphere_sphere :: proc(
       result.has_impact = true
       result.time = 0.0
       distance := math.sqrt(distance_sq)
-      result.normal = distance > 0.0001 ? delta / distance : [3]f32{0, 1, 0}
+      result.normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
       result.point = center_a + result.normal * radius_a
     }
     return result
@@ -66,7 +66,7 @@ swept_sphere_sphere :: proc(
     impact_center_a := center_a + motion * t
     delta := center_b - impact_center_a
     distance := linalg.length(delta)
-    result.normal = distance > 0.0001 ? delta / distance : [3]f32{0, 1, 0}
+    result.normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
     result.point = impact_center_a + result.normal * radius_a
   }
   return result
@@ -87,7 +87,7 @@ swept_sphere_box :: proc(
   // Ray-AABB intersection (Slab method)
   t_min := f32(-1e6)
   t_max := f32(1e6)
-  hit_normal := [3]f32{0, 1, 0}
+  hit_normal := linalg.VECTOR3F32_Y_AXIS
   for i in 0 ..< 3 {
     if abs(velocity[i]) < 0.0001 {
       // Ray parallel to slab

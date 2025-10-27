@@ -100,8 +100,8 @@ test_frustum_aabb_perspective_projection :: proc(t: ^testing.T) {
 test_frustum_camera_perspective :: proc(t: ^testing.T) {
   // Create a realistic camera setup
   camera_pos := [3]f32{0, 0, 0}
-  camera_target := [3]f32{0, 0, -1}  // Looking down -Z
-  camera_up := [3]f32{0, 1, 0}       // Y is up
+  camera_target := -linalg.VECTOR3F32_Z_AXIS  // Looking down -Z
+  camera_up := linalg.VECTOR3F32_Y_AXIS       // Y is up
   // Create view matrix (camera looking down -Z axis)
   view := linalg.matrix4_look_at(camera_pos, camera_target, camera_up)
   // Create perspective projection (90 degree FOV, aspect 1:1, near=0.1, far=100)
@@ -196,8 +196,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 test_frustum_camera_orthographic :: proc(t: ^testing.T) {
   // Test with orthographic projection
   camera_pos := [3]f32{0, 0, 0}
-  camera_target := [3]f32{0, 0, -1}
-  camera_up := [3]f32{0, 1, 0}
+  camera_target := -linalg.VECTOR3F32_Z_AXIS
+  camera_up := linalg.VECTOR3F32_Y_AXIS
   view := linalg.matrix4_look_at(camera_pos, camera_target, camera_up)
   // Orthographic projection: left, right, bottom, top, near, far
   proj := linalg.matrix_ortho3d_f32(-5, 5, -5, 5, 0.1, 100)
@@ -227,7 +227,7 @@ test_frustum_camera_moved :: proc(t: ^testing.T) {
   // Test camera moved to a different position
   camera_pos := [3]f32{10, 5, 10}
   camera_target := [3]f32{0, 0, 0}    // Looking at origin
-  camera_up := [3]f32{0, 1, 0}
+  camera_up := linalg.VECTOR3F32_Y_AXIS
   view := linalg.matrix4_look_at(camera_pos, camera_target, camera_up)
   fov: f32 = math.PI / 3.0  // 60 degrees
   aspect: f32 = 16.0 / 9.0  // Widescreen aspect ratio
@@ -259,8 +259,8 @@ test_frustum_camera_moved :: proc(t: ^testing.T) {
 test_frustum_sphere_camera :: proc(t: ^testing.T) {
   // Test sphere frustum culling with camera
   camera_pos := [3]f32{0, 0, 0}
-  camera_target := [3]f32{0, 0, -1}
-  camera_up := [3]f32{0, 1, 0}
+  camera_target := -linalg.VECTOR3F32_Z_AXIS
+  camera_up := linalg.VECTOR3F32_Y_AXIS
   view := linalg.matrix4_look_at(camera_pos, camera_target, camera_up)
   proj := linalg.matrix4_perspective_f32(math.PI / 2.0, 1.0, 0.1, 50.0)
   view_proj := proj * view

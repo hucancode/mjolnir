@@ -530,7 +530,7 @@ test_calc_tri_normal :: proc(t: ^testing.T) {
     testing.expect(t, vec3_approx_equal(normal3, expected3), "YZ triangle normal should point +X")
     // Test winding order (reversed triangle should have opposite normal)
     normal4 := geometry.calc_tri_normal(v0, v2, v1)  // Reversed v1 and v2
-    expected4 := [3]f32{0, 0, -1}
+    expected4 := -linalg.VECTOR3F32_Z_AXIS
     testing.expect(t, vec3_approx_equal(normal4, expected4), "Reversed triangle normal should point -Z")
     // Test arbitrary non-degenerate triangle
     v9 := [3]f32{0, 0, 0}

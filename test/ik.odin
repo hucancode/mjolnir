@@ -39,7 +39,7 @@ test_fabrik_two_bone_straight_reach :: proc(t: ^testing.T) {
 	target := animation.IKTarget {
 		bone_indices    = bone_indices,
 		target_position = [3]f32{1, -1.5, 0},
-		pole_vector     = [3]f32{0, 0, 1}, // Bend toward +Z
+		pole_vector     = linalg.VECTOR3F32_Z_AXIS, // Bend toward +Z
 		max_iterations  = 20,
 		tolerance       = 0.001,
 		weight          = 1.0,
@@ -115,7 +115,7 @@ test_fabrik_unreachable_target :: proc(t: ^testing.T) {
 	target := animation.IKTarget {
 		bone_indices    = bone_indices,
 		target_position = [3]f32{3, 0, 0},
-		pole_vector     = [3]f32{0, 0, 1},
+		pole_vector     = linalg.VECTOR3F32_Z_AXIS,
 		max_iterations  = 20,
 		tolerance       = 0.001,
 		weight          = 1.0,
@@ -293,7 +293,7 @@ test_fabrik_convergence :: proc(t: ^testing.T) {
 	target := animation.IKTarget {
 		bone_indices    = bone_indices,
 		target_position = [3]f32{1, -2, 0},
-		pole_vector     = [3]f32{0, 0, 1},
+		pole_vector     = linalg.VECTOR3F32_Z_AXIS,
 		max_iterations  = 30,
 		tolerance       = 0.0001,
 		weight          = 1.0,
