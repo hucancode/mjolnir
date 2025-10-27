@@ -556,7 +556,7 @@ test_detour_raycast_wall_hit :: proc(t: ^testing.T) {
     // testing.expect(t, hit.t < 1.0, "Should hit wall before reaching end")
     // testing.expect(t, hit.hit_edge_index >= 0, "Should have hit edge index")
     // Hit normal may be zero if no wall was detected in simple test mesh
-    normal_len := linalg.vector_length(hit.hit_normal)
+    normal_len := linalg.length(hit.hit_normal)
     testing.expect(t, normal_len >= 0.0, "Hit normal should be valid")
 }
 

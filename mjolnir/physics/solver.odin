@@ -30,11 +30,11 @@ resolve_contact :: proc(contact: ^Contact, body_a: ^RigidBody, body_b: ^RigidBod
 
 	inv_mass_sum := body_a.inv_mass + body_b.inv_mass
 	angular_factor_a := linalg.vector_dot(
-		linalg.matrix_mul_vector(body_a.inv_inertia, r_a_cross_n),
+		body_a.inv_inertia * r_a_cross_n,
 		r_a_cross_n,
 	)
 	angular_factor_b := linalg.vector_dot(
-		linalg.matrix_mul_vector(body_b.inv_inertia, r_b_cross_n),
+		body_b.inv_inertia * r_b_cross_n,
 		r_b_cross_n,
 	)
 
@@ -71,11 +71,11 @@ resolve_contact :: proc(contact: ^Contact, body_a: ^RigidBody, body_b: ^RigidBod
 		r_b_cross_t := linalg.vector_cross3(r_b, tangent)
 
 		angular_factor_a_friction := linalg.vector_dot(
-			linalg.matrix_mul_vector(body_a.inv_inertia, r_a_cross_t),
+			body_a.inv_inertia * r_a_cross_t,
 			r_a_cross_t,
 		)
 		angular_factor_b_friction := linalg.vector_dot(
-			linalg.matrix_mul_vector(body_b.inv_inertia, r_b_cross_t),
+			body_b.inv_inertia * r_b_cross_t,
 			r_b_cross_t,
 		)
 

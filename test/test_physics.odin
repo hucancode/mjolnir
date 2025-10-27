@@ -878,3 +878,110 @@ test_swept_collider_sphere_sphere :: proc(t: ^testing.T) {
 	testing.expect(t, result.has_impact, "Swept test should detect collision")
 	testing.expect(t, result.time > 0 && result.time < 1.0, "TOI should be in valid range")
 }
+
+// ============================================================================
+// Rotational Physics Tests
+// ============================================================================
+
+@(test)
+test_torque_induces_angular_velocity :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	node_handle := resources.Handle{index = 1, generation = 1}
+	body := physics.rigid_body_create(node_handle, 1.0, false)
+	physics.rigid_body_set_box_inertia(&body, {1, 1, 1})
+	torque := [3]f32{0, 10, 0}
+	body.torque = torque
+	dt := f32(0.016)
+	physics.rigid_body_integrate(&body, dt)
+	testing.expect(
+		t,
+		abs(body.angular_velocity.y) > 0.01,
+		"Torque should induce angular velocity",
+	)
+	testing.expect(
+		t,
+		abs(body.torque.y) < 0.001,
+		"Torque should be cleared after integration",
+	)
+}
+
+@(test)
+test_off_center_impulse_creates_rotation :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	node_handle := resources.Handle{index = 1, generation = 1}
+	body := physics.rigid_body_create(node_handle, 1.0, false)
+	physics.rigid_body_set_box_inertia(&body, {1, 1, 1})
+	center := [3]f32{0, 0, 0}
+	impulse := [3]f32{0, 0, 10}
+	point := [3]f32{1, 0, 0}
+	physics.rigid_body_apply_impulse_at_point(&body, impulse, point, center)
+	testing.expect(
+		t,
+		abs(body.velocity.z - 10.0) < 0.001,
+		"Should have linear velocity from impulse",
+	)
+	testing.expect(
+		t,
+		abs(body.angular_velocity.y) > 0.01,
+		"Off-center impulse should create angular velocity around Y axis",
+	)
+}
+
+@(test)
+test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+	physics_world := physics.PhysicsWorld{}
+	physics.physics_world_init(&physics_world, {0, 0, 0})
+	defer physics.physics_world_destroy(&physics_world)
+	node_handle, node, _ := world.spawn(&w)
+	body_handle, body, _ := physics.physics_world_create_body(&physics_world, node_handle, 1.0)
+	physics.rigid_body_set_box_inertia(body, {1, 1, 1})
+	body.angular_velocity = {0, 1, 0}
+	initial_quat := node.transform.rotation
+	dt := f32(0.1)
+	physics.physics_world_step(&physics_world, &w, dt)
+	updated_quat := node.transform.rotation
+	quat_changed :=
+		abs(updated_quat.w - initial_quat.w) > 0.001 ||
+		abs(updated_quat.x - initial_quat.x) > 0.001 ||
+		abs(updated_quat.y - initial_quat.y) > 0.001 ||
+		abs(updated_quat.z - initial_quat.z) > 0.001
+	testing.expect(t, quat_changed, "Rotation quaternion should update from angular velocity")
+}
+
+@(test)
+test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+	physics_world := physics.PhysicsWorld{}
+	physics.physics_world_init(&physics_world, {0, 0, 0})
+	defer physics.physics_world_destroy(&physics_world)
+	node_a, _, _ := world.spawn_at(&w, {0, 0, 0})
+	node_b, _, _ := world.spawn_at(&w, {0.5, 0.5, 0})
+	body_a_handle, body_a, _ := physics.physics_world_create_body(&physics_world, node_a, 1.0)
+	body_b_handle, body_b, _ := physics.physics_world_create_body(
+		&physics_world,
+		node_b,
+		1.0,
+		true,
+	)
+	physics.rigid_body_set_box_inertia(body_a, {1, 1, 1})
+	collider := physics.collider_create_sphere(1.0)
+	physics.physics_world_add_collider(&physics_world, body_a_handle, collider)
+	physics.physics_world_add_collider(&physics_world, body_b_handle, collider)
+	body_a.velocity = {10, 0, 0}
+	dt := f32(0.016)
+	physics.physics_world_step(&physics_world, &w, dt)
+	if len(physics_world.contacts) > 0 {
+		testing.expect(
+			t,
+			abs(body_a.angular_velocity.z) > 0.01,
+			"Off-center collision should induce angular velocity",
+		)
+	}
+}

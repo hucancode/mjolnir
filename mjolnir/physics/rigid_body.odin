@@ -129,7 +129,7 @@ rigid_body_apply_impulse_at_point :: proc(
 	body.velocity += impulse * body.inv_mass
 	r := point - center
 	angular_impulse := linalg.vector_cross3(r, impulse)
-	body.angular_velocity += linalg.matrix_mul_vector(body.inv_inertia, angular_impulse)
+	body.angular_velocity += body.inv_inertia * angular_impulse
 }
 
 rigid_body_integrate :: proc(body: ^RigidBody, dt: f32) {
@@ -138,7 +138,7 @@ rigid_body_integrate :: proc(body: ^RigidBody, dt: f32) {
 	}
 	// Apply forces
 	body.velocity += body.force * body.inv_mass * dt
-	body.angular_velocity += linalg.matrix_mul_vector(body.inv_inertia, body.torque) * dt
+	body.angular_velocity += (body.inv_inertia * body.torque) * dt
 
 	// Apply damping (exponential decay)
 	damping_factor := 1.0 - body.linear_damping
