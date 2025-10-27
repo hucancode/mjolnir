@@ -77,10 +77,6 @@ test_compact_span_bit_operations :: proc(t: ^testing.T) {
     testing.expect_value(t, span.h, max_h)
 }
 
-// ================================
-// SECTION 2: UNIT TESTS - BASIC OPERATIONS
-// ================================
-
 // Unit Test: Basic span allocation
 @(test)
 test_span_allocation :: proc(t: ^testing.T) {
@@ -145,11 +141,6 @@ test_span_edge_cases :: proc(t: ^testing.T) {
     testing.expect_value(t, span.smax, u32(max_height))
 }
 
-// ================================
-// SECTION 3: INTEGRATION TESTS - SPAN MERGING
-// ================================
-
-// Helper to create a heightfield for testing
 create_test_heightfield :: proc(width, height: i32) -> ^recast.Heightfield {
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(width), 10, f32(height)}

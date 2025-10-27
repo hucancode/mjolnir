@@ -113,7 +113,6 @@ main :: proc() {
       760,
       560,
     )
-    // === LEFT COLUMN: Buttons and Labels ===
     state.button_handle, _ = retained_ui.create_button(
       ui,
       "Click Me!",
@@ -143,7 +142,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    // === CheckBox ===
     state.checkbox_handle, _ = retained_ui.create_checkbox(
       ui,
       "Enable Music",
@@ -154,7 +152,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    // === ComboBox ===
     state.combobox_handle, _ = retained_ui.create_combobox(
       ui,
       quality_items[:],
@@ -167,7 +164,6 @@ main :: proc() {
       state.window_handle,
     )
     retained_ui.create_label(ui, "Graphics Quality:", 40, 240, state.window_handle)
-    // === Radio Buttons (Difficulty) ===
     retained_ui.create_label(ui, "Difficulty:", 40, 330, state.window_handle)
     retained_ui.create_radiobutton(
       ui,
@@ -202,7 +198,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    // === TextBox ===
     retained_ui.create_label(ui, "Player Name:", 40, 460, state.window_handle)
     state.textbox_handle, _ = retained_ui.create_textbox(
       ui,
@@ -216,7 +211,6 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    // === Status Label ===
     state.status_label, _ = retained_ui.create_label(
       ui,
       "Status: Ready",
@@ -224,7 +218,6 @@ main :: proc() {
       530,
       state.window_handle,
     )
-    // === RIGHT COLUMN: Image ===
     image_data := #load("statue-1275469_1280.jpg")
     state.texture_handle, _, _ = resources.create_texture_from_data(
       &engine.gctx,

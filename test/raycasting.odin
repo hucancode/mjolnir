@@ -10,10 +10,6 @@ import "core:time"
 import "core:slice"
 import "../mjolnir/geometry"
 
-// ============================================================================
-// PRIMITIVE INTERSECTION TESTS
-// ============================================================================
-
 @(test)
 test_ray_triangle_intersection :: proc(t: ^testing.T) {
   tri := geometry.Triangle{
@@ -166,10 +162,6 @@ test_sphere_triangle_intersection :: proc(t: ^testing.T) {
   s6 := geometry.Sphere{center = {3, 3, 0}, radius = 0.5}
   testing.expect(t, !geometry.sphere_triangle_intersection(s6, tri), "Sphere should not touch triangle")
 }
-
-// ============================================================================
-// BVH TESTS
-// ============================================================================
 
 @(test)
 test_bvh_basic_raycasting :: proc(t: ^testing.T) {
@@ -425,10 +417,6 @@ test_bvh_empty :: proc(t: ^testing.T) {
   delete(multi_hits)
 }
 
-// ============================================================================
-// OCTREE TESTS
-// ============================================================================
-
 @(test)
 test_octree_basic_raycasting :: proc(t: ^testing.T) {
   primitives := [dynamic]geometry.Primitive{}
@@ -682,10 +670,6 @@ test_octree_empty :: proc(t: ^testing.T) {
   geometry.octree_destroy(&empty_octree)
 }
 
-// ============================================================================
-// PERFORMANCE TESTS
-// ============================================================================
-
 @(test)
 test_large_scene_raycasting :: proc(t: ^testing.T) {
   primitives := [dynamic]geometry.Primitive{}
@@ -737,10 +721,6 @@ test_large_scene_raycasting :: proc(t: ^testing.T) {
   geometry.bvh_destroy(&bvh)
   delete(primitives)
 }
-
-// ============================================================================
-// BENCHMARK 1: BVH Ray Query (Single Hit)
-// ============================================================================
 
 @(test)
 benchmark_bvh_ray_single :: proc(t: ^testing.T) {
@@ -821,10 +801,6 @@ BVH_Ray_Single_State :: struct {
   current_ray: int,
   hit_count: int,
 }
-
-// ============================================================================
-// BENCHMARK 2: BVH Ray Query (Multi Hit)
-// ============================================================================
 
 @(test)
 benchmark_bvh_ray_multi :: proc(t: ^testing.T) {
@@ -908,10 +884,6 @@ BVH_Ray_Multi_State :: struct {
   max_hits: int,
 }
 
-// ============================================================================
-// BENCHMARK 3: BVH Sphere Query
-// ============================================================================
-
 @(test)
 benchmark_bvh_sphere :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
@@ -993,10 +965,6 @@ BVH_Sphere_State :: struct {
   total_hits: int,
   max_hits: int,
 }
-
-// ============================================================================
-// BENCHMARK 4: BVH AABB Query
-// ============================================================================
 
 @(test)
 benchmark_bvh_aabb :: proc(t: ^testing.T) {
@@ -1098,10 +1066,6 @@ BVH_AABB_State :: struct {
   max_hits: int,
 }
 
-// ============================================================================
-// BENCHMARK 5: Octree Ray Query (Single Hit)
-// ============================================================================
-
 @(test)
 benchmark_octree_ray_single :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
@@ -1189,10 +1153,6 @@ Octree_Ray_Single_State :: struct {
   current_ray: int,
   hit_count: int,
 }
-
-// ============================================================================
-// BENCHMARK 6: Octree Ray Query (Multi Hit)
-// ============================================================================
 
 @(test)
 benchmark_octree_ray_multi :: proc(t: ^testing.T) {
@@ -1288,10 +1248,6 @@ Octree_Ray_Multi_State :: struct {
   max_hits: int,
 }
 
-// ============================================================================
-// BENCHMARK 7: Octree Sphere Query
-// ============================================================================
-
 @(test)
 benchmark_octree_sphere :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
@@ -1386,10 +1342,6 @@ Octree_Sphere_State :: struct {
   max_hits: int,
 }
 
-// ============================================================================
-// BENCHMARK 8: BVH Build Performance
-// ============================================================================
-
 @(test)
 benchmark_bvh_build :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
@@ -1451,10 +1403,6 @@ BVH_Build_State :: struct {
   bvh: geometry.BVH(geometry.Primitive),
   primitives: []geometry.Primitive,
 }
-
-// ============================================================================
-// BENCHMARK 9: Octree Build Performance
-// ============================================================================
 
 @(test)
 benchmark_octree_build :: proc(t: ^testing.T) {
@@ -1530,10 +1478,6 @@ Octree_Build_State :: struct {
   primitives: []geometry.Primitive,
   bounds: geometry.Aabb,
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
 generate_random_primitives :: proc(count: int, bounds: geometry.Aabb) -> []geometry.Primitive {
   primitives := make([]geometry.Primitive, count)

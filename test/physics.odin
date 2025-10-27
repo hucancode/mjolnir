@@ -9,10 +9,6 @@ import "../mjolnir/physics"
 import "../mjolnir/resources"
 import "../mjolnir/world"
 
-// ============================================================================
-// Rigid Body Tests
-// ============================================================================
-
 @(test)
 test_rigid_body_box_inertia :: proc(t: ^testing.T) {
 	node_handle := resources.Handle{index = 1, generation = 1}
@@ -127,10 +123,6 @@ test_rigid_body_static_no_force :: proc(t: ^testing.T) {
 		"Static body should ignore forces",
 	)
 }
-
-// ============================================================================
-// Physics World Tests
-// ============================================================================
 
 @(test)
 test_physics_world_create_destroy_body :: proc(t: ^testing.T) {
@@ -281,10 +273,6 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
 	)
 }
 
-// ============================================================================
-// Contact Resolution & Solver Tests
-// ============================================================================
-
 @(test)
 test_resolve_contact_momentum_conservation :: proc(t: ^testing.T) {
 	node_handle_a := resources.Handle{index = 1, generation = 1}
@@ -317,10 +305,6 @@ test_resolve_contact_momentum_conservation :: proc(t: ^testing.T) {
 	)
 }
 
-// ============================================================================
-// Angular Dynamics Tests
-// ============================================================================
-
 @(test)
 test_rigid_body_apply_force_at_point_generates_torque :: proc(t: ^testing.T) {
 	node_handle := resources.Handle{index = 1, generation = 1}
@@ -346,10 +330,6 @@ test_rigid_body_apply_force_at_point_generates_torque :: proc(t: ^testing.T) {
 		"No torque in X or Y",
 	)
 }
-
-// ============================================================================
-// Physics World Integration Tests
-// ============================================================================
 
 @(test)
 test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
@@ -442,10 +422,6 @@ test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
 	destroyed_body, ok := resources.get(physics_world.bodies, body_handle)
 	testing.expect(t, destroyed_body == nil, "Body below KILL_Y should be destroyed")
 }
-
-// ============================================================================
-// GJK/EPA Algorithm Tests
-// ============================================================================
 
 @(test)
 test_gjk_sphere_sphere_intersecting :: proc(t: ^testing.T) {
@@ -647,10 +623,6 @@ test_support_function_capsule :: proc(t: ^testing.T) {
 		"Support function for capsule should return top hemisphere point",
 	)
 }
-
-// ============================================================================
-// Primitive Collision Tests
-// ============================================================================
 
 @(test)
 test_sphere_sphere_collision_intersecting :: proc(t: ^testing.T) {
@@ -906,10 +878,6 @@ test_collider_get_aabb_capsule :: proc(t: ^testing.T) {
 	)
 }
 
-// ============================================================================
-// Continuous Collision Detection Tests
-// ============================================================================
-
 @(test)
 test_swept_sphere_sphere_hit :: proc(t: ^testing.T) {
 	center_a := [3]f32{0, 0, 0}
@@ -980,10 +948,6 @@ test_swept_collider_sphere_sphere :: proc(t: ^testing.T) {
 	testing.expect(t, result.has_impact, "Swept test should detect collision")
 	testing.expect(t, result.time > 0 && result.time < 1.0, "TOI should be in valid range")
 }
-
-// ============================================================================
-// Rotational Physics Tests
-// ============================================================================
 
 @(test)
 test_torque_induces_angular_velocity :: proc(t: ^testing.T) {
@@ -1083,10 +1047,6 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
 		)
 	}
 }
-
-// ============================================================================
-// Priority 2: Restitution, Friction, and Multi-Body Tests
-// ============================================================================
 
 @(test)
 test_resolve_contact_restitution_coefficient :: proc(t: ^testing.T) {

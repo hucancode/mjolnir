@@ -6,10 +6,6 @@ import "core:log"
 import "core:time"
 import "core:math"
 
-// ================================
-// SECTION 1: DEGENERATE TRIANGLE RASTERIZATION
-// ================================
-
 @(test)
 test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
         hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
@@ -62,10 +58,6 @@ test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
     span := hf.spans[column_index]
     // Span might be nil due to very small triangle, but shouldn't crash
 }
-
-// ================================
-// SECTION 2: SUB-PIXEL AND TINY TRIANGLES
-// ================================
 
 @(test)
 test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
@@ -123,10 +115,6 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
     }
 }
 
-// ================================
-// SECTION 3: TRIANGLES SPANNING MULTIPLE CELLS
-// ================================
-
 @(test)
 test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
         hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
@@ -182,10 +170,6 @@ test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
     testing.expect(t, affected_cells > 0, "Partial coverage should affect some cells")
 }
 
-// ================================
-// SECTION 4: PRECISION AND FLOATING-POINT EDGE CASES
-// ================================
-
 @(test)
 test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
         hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
@@ -236,10 +220,6 @@ test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
     testing.expect(t, span != nil, "Extreme coordinates triangle should create spans")
 }
 
-// ================================
-// SECTION 5: HEIGHT VARIATION AND SLOPED TRIANGLES
-// ================================
-
 @(test)
 test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
         hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.2)
@@ -289,10 +269,6 @@ test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
     // Vertical triangles might not create spans in XZ plane
     // but should not crash the system
 }
-
-// ================================
-// SECTION 6: PERFORMANCE AND STRESS
-// ================================
 
 @(test)
 test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
