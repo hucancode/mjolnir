@@ -55,7 +55,6 @@ PassType :: enum {
 
 PassTypeSet :: bit_set[PassType;u32]
 
-// Unified Camera struct combining geometry camera, render target, and visibility task
 Camera :: struct {
   // Geometry camera data (embedded directly from geometry.Camera)
   position:                     [3]f32,

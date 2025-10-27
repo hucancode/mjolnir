@@ -244,24 +244,49 @@ visibility_system_dispatch_culling :: proc(
   if system.node_count == 0 {
     return
   }
-  // Compute for target_frame uses pyramid from (target_frame-1)
+  // write to target_frame buffer, read from (target_frame-1) pyramid
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.late_draw_count[target_frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.late_draw_count[target_frame_index].bytes_count),
+    0,
+  )
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.late_cull_pipeline)
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .COMPUTE,
+    system.late_cull_layout,
+    0,
+    1,
+    &camera.late_descriptor_set[target_frame_index],
+    0,
+    nil,
+  )
   prev_frame :=
     (target_frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) %
     resources.MAX_FRAMES_IN_FLIGHT
-  // Pyramid is read-only and shared between queues - no ownership transfer needed
-  // The fence ensures previous frame completed before we read its pyramid
-  execute_late_pass(
-    system,
-    gctx,
+  push_constants := VisibilityPushConstants {
+    camera_index      = camera_index,
+    node_count        = system.node_count,
+    max_draws         = system.max_draws,
+    include_flags     = include_flags,
+    exclude_flags     = exclude_flags,
+    pyramid_width     = f32(camera.depth_pyramid[prev_frame].width),
+    pyramid_height    = f32(camera.depth_pyramid[prev_frame].height),
+    depth_bias        = system.depth_bias,
+    occlusion_enabled = 1,
+  }
+  vk.CmdPushConstants(
     command_buffer,
-    camera,
-    camera_index,
-    target_frame_index,
-    include_flags,
-    exclude_flags,
-    rm,
-    true,
+    system.late_cull_layout,
+    {.COMPUTE},
+    0,
+    size_of(push_constants),
+    &push_constants,
   )
+  dispatch_x := (system.node_count + 63) / 64
+  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
 }
 
 // SphericalCamera visibility dispatch - culling + depth cube rendering
@@ -286,16 +311,38 @@ visibility_system_dispatch_spherical :: proc(
     vk.DeviceSize(camera.draw_count.bytes_count),
     0,
   )
-  execute_sphere_pass(
-    system,
-    gctx,
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.sphere_cull_pipeline)
+  vk.CmdBindDescriptorSets(
     command_buffer,
-    camera,
-    camera_index,
-    include_flags,
-    exclude_flags,
-    rm,
+    .COMPUTE,
+    system.sphere_cull_layout,
+    0,
+    1,
+    &camera.descriptor_set,
+    0,
+    nil,
   )
+  push_constants := VisibilityPushConstants {
+    camera_index      = camera_index,
+    node_count        = system.node_count,
+    max_draws         = system.max_draws,
+    include_flags     = include_flags,
+    exclude_flags     = exclude_flags,
+    pyramid_width     = 0,
+    pyramid_height    = 0,
+    depth_bias        = 0,
+    occlusion_enabled = 0,
+  }
+  vk.CmdPushConstants(
+    command_buffer,
+    system.sphere_cull_layout,
+    {.COMPUTE},
+    0,
+    size_of(push_constants),
+    &push_constants,
+  )
+  dispatch_x := (system.node_count + 63) / 64
+  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
   // STEP 2: Barrier - Wait for compute to finish before reading draw commands
   compute_done := [?]vk.BufferMemoryBarrier {
     {
@@ -1075,109 +1122,7 @@ build_depth_pyramid :: proc(
   )
 }
 
-@(private)
-execute_late_pass :: proc(
-  system: ^VisibilitySystem,
-  gctx: ^gpu.GPUContext,
-  command_buffer: vk.CommandBuffer,
-  camera: ^resources.Camera,
-  camera_index: u32,
-  frame_index: u32,
-  include_flags: resources.NodeFlagSet,
-  exclude_flags: resources.NodeFlagSet,
-  rm: ^resources.Manager,
-  occlusion_enabled: bool,
-) {
-  vk.CmdFillBuffer(
-    command_buffer,
-    camera.late_draw_count[frame_index].buffer,
-    0,
-    vk.DeviceSize(camera.late_draw_count[frame_index].bytes_count),
-    0,
-  )
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.late_cull_pipeline)
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .COMPUTE,
-    system.late_cull_layout,
-    0,
-    1,
-    &camera.late_descriptor_set[frame_index],
-    0,
-    nil,
-  )
-  prev_frame :=
-    (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) %
-    resources.MAX_FRAMES_IN_FLIGHT
-  push_constants := VisibilityPushConstants {
-    camera_index      = camera_index,
-    node_count        = system.node_count,
-    max_draws         = system.max_draws,
-    include_flags     = include_flags,
-    exclude_flags     = exclude_flags,
-    pyramid_width     = f32(camera.depth_pyramid[prev_frame].width),
-    pyramid_height    = f32(camera.depth_pyramid[prev_frame].height),
-    depth_bias        = system.depth_bias,
-    occlusion_enabled = occlusion_enabled ? 1 : 0,
-  }
-  vk.CmdPushConstants(
-    command_buffer,
-    system.late_cull_layout,
-    {.COMPUTE},
-    0,
-    size_of(push_constants),
-    &push_constants,
-  )
-  dispatch_x := (system.node_count + 63) / 64
-  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
-}
-
-@(private)
-execute_sphere_pass :: proc(
-  system: ^VisibilitySystem,
-  gctx: ^gpu.GPUContext,
-  command_buffer: vk.CommandBuffer,
-  camera: ^resources.SphericalCamera,
-  camera_index: u32,
-  include_flags: resources.NodeFlagSet,
-  exclude_flags: resources.NodeFlagSet,
-  rm: ^resources.Manager,
-) {
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.sphere_cull_pipeline)
-  // Note: SphericalCamera needs a descriptor_set field
-  // this will be added in a later step
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .COMPUTE,
-    system.sphere_cull_layout,
-    0,
-    1,
-    &camera.descriptor_set,
-    0,
-    nil,
-  )
-  push_constants := VisibilityPushConstants {
-    camera_index      = camera_index,
-    node_count        = system.node_count,
-    max_draws         = system.max_draws,
-    include_flags     = include_flags,
-    exclude_flags     = exclude_flags,
-    pyramid_width     = 0, // Unused
-    pyramid_height    = 0, // Unused
-    depth_bias        = 0, // Unused
-    occlusion_enabled = 0, // Disabled for sphere culling
-  }
-  vk.CmdPushConstants(
-    command_buffer,
-    system.sphere_cull_layout,
-    {.COMPUTE},
-    0,
-    size_of(push_constants),
-    &push_constants,
-  )
-  dispatch_x := (system.node_count + 63) / 64
-  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
-}
+// REMOVED: execute_late_pass and execute_sphere_pass - inlined into their calling sites
 
 @(private)
 log_culling_stats :: proc(

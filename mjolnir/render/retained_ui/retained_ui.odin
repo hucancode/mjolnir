@@ -153,7 +153,6 @@ DrawCommandType :: enum {
 DrawCommand :: struct {
   type:       DrawCommandType,
   widget:     WidgetHandle,
-  // Unified data for all command types
   rect:       [4]f32,  // x, y, w, h
   color:      [4]u8,
   texture_id: u32,

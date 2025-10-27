@@ -13,7 +13,6 @@ ImageType :: enum {
   CUBE_ARRAY,
 }
 
-// Unified image specification
 ImageSpec :: struct {
   // Core properties
   type:         ImageType,
@@ -34,7 +33,6 @@ ImageSpec :: struct {
   aspect_mask:  vk.ImageAspectFlags, // Auto-inferred from format if empty
 }
 
-// Unified image resource
 Image :: struct {
   // Core Vulkan resources
   image:  vk.Image,
