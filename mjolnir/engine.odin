@@ -173,14 +173,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.format.format,
     get_window_dpi(self.window),
   ) or_return
-  // Bootstrap: populate both draw buffers before first frame
-  record_compute_bootstrap(
-    &self.render,
-    &self.gctx,
-    &self.rm,
-    &self.world,
-    self.compute_command_buffers[0],
-  ) or_return
   if self.gctx.has_async_compute {
     log.infof("Async compute bootstrap: both draw buffers initialized on compute queue")
   } else {
@@ -425,7 +417,7 @@ shutdown :: proc(self: ^Engine) {
 }
 
 @(private = "file")
-render_debug_ui :: proc(self: ^Engine) {
+populate_debug_ui :: proc(self: ^Engine) {
   if mu.window(
     &self.render.ui.ctx,
     "Engine",
@@ -706,7 +698,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.render.post_process.commands[self.frame_index],
   }
   vk.CmdExecuteCommands(command_buffer, len(buffers), raw_data(buffers[:]))
-  render_debug_ui(self)
+  populate_debug_ui(self)
   mu.end(&self.render.ui.ctx)
   if self.debug_ui_enabled {
     debug_ui.begin_pass(
@@ -732,9 +724,35 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.gctx,
   )
   retained_ui.end_pass(command_buffer)
-  gpu.transition_image_to_present(
+  // Transition swapchain image to present layout
+  present_barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    dstAccessMask = {},
+    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    newLayout = .PRESENT_SRC_KHR,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = self.swapchain.images[self.swapchain.image_index],
+    subresourceRange = {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+  }
+  vk.CmdPipelineBarrier(
     command_buffer,
-    self.swapchain.images[self.swapchain.image_index],
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.BOTTOM_OF_PIPE},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &present_barrier,
   )
   vk.EndCommandBuffer(command_buffer) or_return
   gpu.submit_queue_and_present(

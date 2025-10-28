@@ -29,63 +29,6 @@ Renderer :: struct {
   main_camera:  resources.Handle,
 }
 
-record_compute_bootstrap :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
-  world_state: ^world.World,
-  compute_buffer: vk.CommandBuffer,
-) -> vk.Result {
-  vk.ResetCommandBuffer(compute_buffer, {}) or_return
-  vk.BeginCommandBuffer(
-    compute_buffer,
-    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-  ) or_return
-  // Generate culling for BOTH frames on bootstrap
-  for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
-    for &entry, cam_index in rm.cameras.entries {
-      if !entry.active do continue
-      if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
-      cam := &entry.item
-      world.visibility_system_dispatch_culling(
-        &world_state.visibility,
-        gctx,
-        compute_buffer,
-        cam,
-        u32(cam_index),
-        u32(frame_idx),
-        {.VISIBLE},
-        {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-        rm,
-      )
-    }
-  }
-  vk.EndCommandBuffer(compute_buffer) or_return
-  // Submit and wait for completion before first frame starts
-  if queue, ok := gctx.compute_queue.?; ok {
-    // Async compute: use compute queue
-    cmd_buf := compute_buffer
-    submit_info := vk.SubmitInfo {
-      sType              = .SUBMIT_INFO,
-      commandBufferCount = 1,
-      pCommandBuffers    = &cmd_buf,
-    }
-    vk.QueueSubmit(queue, 1, &submit_info, 0) or_return
-    vk.QueueWaitIdle(queue) or_return
-  } else {
-    // Non-async: use graphics queue
-    cmd_buf := compute_buffer
-    submit_info := vk.SubmitInfo {
-      sType              = .SUBMIT_INFO,
-      commandBufferCount = 1,
-      pCommandBuffers    = &cmd_buf,
-    }
-    vk.QueueSubmit(gctx.graphics_queue, 1, &submit_info, 0) or_return
-    vk.QueueWaitIdle(gctx.graphics_queue) or_return
-  }
-  return .SUCCESS
-}
-
 record_compute_commands :: proc(
   self: ^Renderer,
   frame_index: u32,

@@ -4,7 +4,6 @@ import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
 
-// Image type enumeration
 ImageType :: enum {
   D2,
   D2_ARRAY,
@@ -14,36 +13,28 @@ ImageType :: enum {
 }
 
 ImageSpec :: struct {
-  // Core properties
   type:         ImageType,
   width:        u32,
   height:       u32,
   depth:        u32, // For 3D images
   array_layers: u32, // For array/cube images (cube = 6 layers)
   format:       vk.Format,
-  // Mipmap configuration
   mip_levels:   u32, // 0 = auto-calculate from dimensions
-  // Vulkan configuration
   tiling:       vk.ImageTiling,
   usage:        vk.ImageUsageFlags,
   memory_flags: vk.MemoryPropertyFlags,
-  // View configuration (optional, created by default)
   create_view:  bool,
   view_type:    vk.ImageViewType, // Auto-inferred if .UNDEFINED
   aspect_mask:  vk.ImageAspectFlags, // Auto-inferred from format if empty
 }
 
 Image :: struct {
-  // Core Vulkan resources
   image:  vk.Image,
   memory: vk.DeviceMemory,
-  // Image properties
   spec:   ImageSpec,
-  // Default view (most common use case)
   view:   vk.ImageView,
 }
 
-// Image transition specification
 ImageTransition :: struct {
   old_layout:  vk.ImageLayout,
   new_layout:  vk.ImageLayout,
@@ -57,7 +48,6 @@ ImageTransition :: struct {
   layer_count: u32,
 }
 
-// Auto-infer view type from image type
 infer_view_type :: proc(
   img_type: ImageType,
   array_layers: u32,
@@ -77,7 +67,6 @@ infer_view_type :: proc(
   return .D2
 }
 
-// Auto-infer image type from view type
 infer_image_type :: proc(view_type: vk.ImageViewType) -> vk.ImageType {
   switch view_type {
   case .D1, .D1_ARRAY:
@@ -92,7 +81,6 @@ infer_image_type :: proc(view_type: vk.ImageViewType) -> vk.ImageType {
   return .D2
 }
 
-// Auto-infer aspect mask from format
 infer_aspect_mask :: proc(format: vk.Format) -> vk.ImageAspectFlags {
   #partial switch format {
   case .D16_UNORM, .D32_SFLOAT, .X8_D24_UNORM_PACK32:
@@ -111,7 +99,6 @@ calculate_mip_levels :: proc(width, height: u32) -> u32 {
   return u32(math.floor(math.log2(f32(max(width, height))))) + 1
 }
 
-// Validate and complete image spec
 validate_spec :: proc(spec: ^ImageSpec) {
   // Auto-calculate mip levels if not specified
   if spec.mip_levels == 0 {
@@ -145,7 +132,6 @@ validate_spec :: proc(spec: ^ImageSpec) {
   }
 }
 
-// Create empty image
 image_create :: proc(
   gctx: ^GPUContext,
   spec: ImageSpec,
@@ -218,7 +204,6 @@ image_create :: proc(
   return img, .SUCCESS
 }
 
-// Create image with data upload
 image_create_with_data :: proc(
   gctx: ^GPUContext,
   spec: ImageSpec,
@@ -242,24 +227,39 @@ image_create_with_data :: proc(
     data,
   ) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-  // Transition to transfer dst
-  transition := ImageTransition {
-    old_layout  = .UNDEFINED,
-    new_layout  = .TRANSFER_DST_OPTIMAL,
-    src_stage   = {.TOP_OF_PIPE},
-    dst_stage   = {.TRANSFER},
-    src_access  = {},
-    dst_access  = {.TRANSFER_WRITE},
-    base_mip    = 0,
-    mip_count   = 1,
-    base_layer  = 0,
-    layer_count = max(img.spec.array_layers, 1),
-  }
+  defer mutable_buffer_destroy(gctx.device, &staging)
   cmd_buffer := begin_single_time_command(gctx) or_return
-  image_transition(cmd_buffer, &img, transition)
-  end_single_time_command(gctx, &cmd_buffer) or_return
+  // Transition to transfer dst
+  barrier_to_dst := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = .UNDEFINED,
+    newLayout = .TRANSFER_DST_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = img.image,
+    subresourceRange = {
+      aspectMask = img.spec.aspect_mask,
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = max(img.spec.array_layers, 1),
+    },
+    srcAccessMask = {},
+    dstAccessMask = {.TRANSFER_WRITE},
+  }
+  vk.CmdPipelineBarrier(
+    cmd_buffer,
+    {.TOP_OF_PIPE},
+    {.TRANSFER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier_to_dst,
+  )
   // Copy buffer to image
-  cmd_buffer = begin_single_time_command(gctx) or_return
   region := vk.BufferImageCopy {
     bufferOffset = 0,
     bufferRowLength = 0,
@@ -281,27 +281,40 @@ image_create_with_data :: proc(
     1,
     &region,
   )
-  end_single_time_command(gctx, &cmd_buffer) or_return
   // Transition to final layout
-  transition = ImageTransition {
-    old_layout  = .TRANSFER_DST_OPTIMAL,
-    new_layout  = initial_layout,
-    src_stage   = {.TRANSFER},
-    dst_stage   = {.FRAGMENT_SHADER},
-    src_access  = {.TRANSFER_WRITE},
-    dst_access  = {.SHADER_READ},
-    base_mip    = 0,
-    mip_count   = 1,
-    base_layer  = 0,
-    layer_count = max(img.spec.array_layers, 1),
+  barrier_to_final := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = .TRANSFER_DST_OPTIMAL,
+    newLayout = initial_layout,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = img.image,
+    subresourceRange = {
+      aspectMask = img.spec.aspect_mask,
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = max(img.spec.array_layers, 1),
+    },
+    srcAccessMask = {.TRANSFER_WRITE},
+    dstAccessMask = {.SHADER_READ},
   }
-  cmd_buffer = begin_single_time_command(gctx) or_return
-  image_transition(cmd_buffer, &img, transition)
+  vk.CmdPipelineBarrier(
+    cmd_buffer,
+    {.TRANSFER},
+    {.FRAGMENT_SHADER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier_to_final,
+  )
   end_single_time_command(gctx, &cmd_buffer) or_return
   return img, .SUCCESS
 }
 
-// Create image with automatic mipmap generation
 image_create_with_mipmaps :: proc(
   gctx: ^GPUContext,
   spec: ImageSpec,
@@ -495,52 +508,6 @@ image_create_with_mipmaps :: proc(
   return img, .SUCCESS
 }
 
-// Single image transition
-image_transition :: proc(
-  cmd: vk.CommandBuffer,
-  img: ^Image,
-  transition: ImageTransition,
-) {
-  mip_count := transition.mip_count
-  if mip_count == 0 {
-    mip_count = img.spec.mip_levels
-  }
-  layer_count := transition.layer_count
-  if layer_count == 0 {
-    layer_count = max(img.spec.array_layers, 1)
-  }
-  barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = transition.old_layout,
-    newLayout = transition.new_layout,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = img.image,
-    subresourceRange = {
-      aspectMask = img.spec.aspect_mask,
-      baseMipLevel = transition.base_mip,
-      levelCount = mip_count,
-      baseArrayLayer = transition.base_layer,
-      layerCount = layer_count,
-    },
-    srcAccessMask = transition.src_access,
-    dstAccessMask = transition.dst_access,
-  }
-  vk.CmdPipelineBarrier(
-    cmd,
-    transition.src_stage,
-    transition.dst_stage,
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &barrier,
-  )
-}
-
-// Create additional view for specific mip/layer range
 image_create_view :: proc(
   device: vk.Device,
   img: ^Image,
@@ -571,23 +538,15 @@ image_create_view :: proc(
   return
 }
 
-// Destroy image and all associated resources
 image_destroy :: proc(device: vk.Device, img: ^Image) {
-  if img.view != 0 {
-    vk.DestroyImageView(device, img.view, nil)
-    img.view = 0
-  }
-  if img.image != 0 {
-    vk.DestroyImage(device, img.image, nil)
-    img.image = 0
-  }
-  if img.memory != 0 {
-    vk.FreeMemory(device, img.memory, nil)
-    img.memory = 0
-  }
+  vk.DestroyImageView(device, img.view, nil)
+  img.view = 0
+  vk.DestroyImage(device, img.image, nil)
+  img.image = 0
+  vk.FreeMemory(device, img.memory, nil)
+  img.memory = 0
 }
 
-// Spec builder for 2D images
 image_spec_2d :: proc(
   width, height: u32,
   format: vk.Format,
@@ -613,7 +572,6 @@ image_spec_2d :: proc(
   }
 }
 
-// Spec builder for depth images
 image_spec_depth :: proc(
   width, height: u32,
   format: vk.Format = .D32_SFLOAT,
@@ -634,7 +592,6 @@ image_spec_depth :: proc(
   }
 }
 
-// Spec builder for cube maps
 image_spec_cube :: proc(
   size: u32,
   format: vk.Format,
