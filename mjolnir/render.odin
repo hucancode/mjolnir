@@ -100,14 +100,13 @@ record_compute_commands :: proc(
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
   // Compute for frame N prepares data for frame N+1
-  // Buffer indices with MAX_FRAMES_IN_FLIGHT=2: frame N uses buffer [N%2], produces data for buffer [(N+1)%2]
+  // Buffer indices with MAX_FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
   next_frame_index := (frame_index + 1) % resources.MAX_FRAMES_IN_FLIGHT
   for &entry, cam_index in rm.cameras.entries {
     if !entry.active do continue
     if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
     cam := &entry.item
     // STEP 1: Build pyramid[N] from depth[N-1]
-    // pyramid[frame_index] reads from depth[(frame_index-1)%2] via descriptors
     // This allows Compute N to build pyramid[N] from Render N-1's depth
     world.visibility_system_dispatch_pyramid(
       &world_state.visibility,
@@ -336,6 +335,7 @@ record_camera_visibility :: proc(
       command_buffer,
       spherical_cam,
       u32(cam_index),
+      frame_index,
       {.VISIBLE},
       {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
       rm,

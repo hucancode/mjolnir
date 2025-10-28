@@ -75,8 +75,8 @@ Camera :: struct {
   lighting_commands:            [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   transparency_commands:        [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Double-buffered draw lists for lock-free async compute:
-  //   - Frame N graphics reads from late_draw_commands[(N-1)%2]
-  //   - Frame N compute writes to late_draw_commands[N%2]
+  //   - Frame N graphics reads from late_draw_commands[N-1]
+  //   - Frame N compute writes to late_draw_commands[N]
   // Graphics reads from previous frame's draw list while compute prepares current frame's list
   late_draw_count:              [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   late_draw_commands:           [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
