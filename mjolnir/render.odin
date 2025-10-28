@@ -422,7 +422,6 @@ record_particles_pass :: proc(
   return .SUCCESS
 }
 
-// TODO: we need a better design for transparency pass, skip for now
 record_transparency_pass :: proc(
   self: ^Renderer,
   frame_index: u32,
@@ -458,7 +457,8 @@ record_transparency_pass :: proc(
     log.error("Failed to get camera for transparency pass")
     return .ERROR_UNKNOWN
   }
-  // Cull transparent objects (no occlusion test, just frustum culling)
+  command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
+  // Single dispatch to generate all 3 draw lists (late, transparent, sprite)
   world.visibility_system_dispatch_culling(
     &world_state.visibility,
     gctx,
@@ -466,13 +466,65 @@ record_transparency_pass :: proc(
     camera,
     camera_handle.index,
     frame_index,
-    {.VISIBLE, .MATERIAL_TRANSPARENT},
+    {.VISIBLE},
     {},
     rm,
   )
-  // Use current frame's draw list for transparency rendering
-  // draw_list[frame_index] was written by Compute N-1, safe to read during Render N
-  command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
+  // Barrier: Wait for compute to finish before reading draw commands
+  compute_done := [?]vk.BufferMemoryBarrier {
+    {
+      sType = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer = camera.transparent_draw_commands[frame_index].buffer,
+      size = vk.DeviceSize(camera.transparent_draw_commands[frame_index].bytes_count),
+    },
+    {
+      sType = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer = camera.transparent_draw_count[frame_index].buffer,
+      size = vk.DeviceSize(camera.transparent_draw_count[frame_index].bytes_count),
+    },
+    {
+      sType = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer = camera.sprite_draw_commands[frame_index].buffer,
+      size = vk.DeviceSize(camera.sprite_draw_commands[frame_index].bytes_count),
+    },
+    {
+      sType = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer = camera.sprite_draw_count[frame_index].buffer,
+      size = vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
+    },
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+    {},
+    0,
+    nil,
+    len(compute_done),
+    raw_data(compute_done[:]),
+    0,
+    nil,
+  )
+  // Render transparent meshes with transparent pipeline
+  transparency.render(
+    &self.transparency,
+    self.transparency.transparent_pipeline,
+    camera_handle,
+    command_buffer,
+    rm,
+    frame_index,
+    camera.transparent_draw_commands[frame_index].buffer,
+    camera.transparent_draw_count[frame_index].buffer,
+    command_stride,
+  )
   // Render sprites with sprite pipeline
   transparency.render(
     &self.transparency,
@@ -481,33 +533,10 @@ record_transparency_pass :: proc(
     command_buffer,
     rm,
     frame_index,
-    camera.late_draw_commands[frame_index].buffer,
-    camera.late_draw_count[frame_index].buffer,
+    camera.sprite_draw_commands[frame_index].buffer,
+    camera.sprite_draw_count[frame_index].buffer,
     command_stride,
   )
-  // Cull wireframe objects
-  // world.visibility_system_dispatch_culling(
-  //   &world_state.visibility,
-  //   gctx,
-  //   command_buffer,
-  //   camera,
-  //   camera_handle.index,
-  //   frame_index,
-  //   {.VISIBLE, .MATERIAL_WIREFRAME},
-  //   {},
-  //   rm,
-  // )
-  // transparency.render(
-  //   &self.transparency,
-  //   self.transparency.wireframe_pipeline,
-  //   camera_handle,
-  //   command_buffer,
-  //   rm,
-  //   frame_index,
-  //   camera.late_draw_commands[frame_index].buffer,
-  //   camera.late_draw_count[frame_index].buffer,
-  //   command_stride,
-  // )
   transparency.end_pass(&self.transparency, command_buffer)
   transparency.end_record(command_buffer) or_return
   return .SUCCESS

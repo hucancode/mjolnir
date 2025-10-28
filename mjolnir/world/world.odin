@@ -386,6 +386,8 @@ _apply_sprite_to_node_data :: proc(
   data.attachment_data_index = sprite_attachment.sprite_handle.index
   if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
   if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
+  // Mark as sprite
+  data.flags |= {.MATERIAL_SPRITE}
   if material, has_mat := resources.get(
     rm.materials,
     sprite_attachment.material,

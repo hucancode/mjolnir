@@ -75,16 +75,24 @@ Camera :: struct {
   lighting_commands:            [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   transparency_commands:        [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Double-buffered draw lists for lock-free async compute:
-  //   - Frame N graphics reads from late_draw_commands[N-1]
-  //   - Frame N compute writes to late_draw_commands[N]
+  //   - Frame N graphics reads from draw_commands[N-1]
+  //   - Frame N compute writes to draw_commands[N]
   // Graphics reads from previous frame's draw list while compute prepares current frame's list
-  late_draw_count:              [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  late_draw_commands:           [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  late_draw_count:               [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  late_draw_commands:            [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  depth_pyramid:                [MAX_FRAMES_IN_FLIGHT]DepthPyramid,
-  late_descriptor_set:          [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  depth_reduce_descriptor_sets: [MAX_FRAMES_IN_FLIGHT][16]vk.DescriptorSet,
+  transparent_draw_count:        [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  transparent_draw_commands:     [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  sprite_draw_count:             [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  sprite_draw_commands:          [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  depth_pyramid:                  [MAX_FRAMES_IN_FLIGHT]DepthPyramid,
+  multi_pass_descriptor_set:      [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  depth_reduce_descriptor_sets:   [MAX_FRAMES_IN_FLIGHT][16]vk.DescriptorSet,
 }
 
 // Depth pyramid for hierarchical Z-buffer occlusion culling
@@ -263,6 +271,30 @@ camera_init :: proc(
       int(max_draws),
       {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
+    camera.transparent_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.transparent_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.sprite_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.sprite_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
   }
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     create_camera_depth_pyramid(
@@ -280,7 +312,6 @@ camera_init :: proc(
       manager,
       camera,
       u32(frame),
-      &manager.visibility_late_descriptor_layout,
       &manager.visibility_depth_reduce_descriptor_layout,
     ) or_return
   }
@@ -332,6 +363,10 @@ camera_destroy :: proc(
     // Clean up draw buffers
     gpu.mutable_buffer_destroy(device, &camera.late_draw_count[frame])
     gpu.mutable_buffer_destroy(device, &camera.late_draw_commands[frame])
+    gpu.mutable_buffer_destroy(device, &camera.transparent_draw_count[frame])
+    gpu.mutable_buffer_destroy(device, &camera.transparent_draw_commands[frame])
+    gpu.mutable_buffer_destroy(device, &camera.sprite_draw_count[frame])
+    gpu.mutable_buffer_destroy(device, &camera.sprite_draw_commands[frame])
     // Free depth pyramid texture
     if pyramid_item, freed := free(
       &manager.image_2d_buffers,
@@ -524,7 +559,7 @@ camera_resize :: proc(
   vk.DeviceWaitIdle(gctx.device) or_return
   // Clear descriptor set references (will be reallocated after resource recreation)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    camera.late_descriptor_set[frame] = 0
+    camera.multi_pass_descriptor_set[frame] = 0
     for mip in 0 ..< camera.depth_pyramid[frame].mip_levels {
       camera.depth_reduce_descriptor_sets[frame][mip] = 0
     }
@@ -653,7 +688,6 @@ camera_resize :: proc(
       manager,
       camera,
       u32(frame),
-      &manager.visibility_late_descriptor_layout,
       &manager.visibility_depth_reduce_descriptor_layout,
     ) or_return
   }
@@ -931,19 +965,18 @@ camera_allocate_visibility_descriptors :: proc(
   manager: ^Manager,
   camera: ^Camera,
   frame_index: u32,
-  late_descriptor_layout: ^vk.DescriptorSetLayout,
   depth_reduce_descriptor_layout: ^vk.DescriptorSetLayout,
 ) -> vk.Result {
-  // Allocate late pass descriptor set for this frame
+  // Allocate multi-pass descriptor set for this frame (always, for unified pipeline)
   vk.AllocateDescriptorSets(
     gctx.device,
     &vk.DescriptorSetAllocateInfo {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = gctx.descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = late_descriptor_layout,
+      pSetLayouts = &manager.visibility_multi_pass_descriptor_layout,
     },
-    &camera.late_descriptor_set[frame_index],
+    &camera.multi_pass_descriptor_set[frame_index],
   ) or_return
   // Allocate descriptor sets for depth pyramid reduction (one per mip level)
   for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
@@ -958,8 +991,8 @@ camera_allocate_visibility_descriptors :: proc(
       &camera.depth_reduce_descriptor_sets[frame_index][mip],
     ) or_return
   }
-  // Update late pass descriptor set for this frame
-  camera_update_late_descriptor_set(gctx, manager, camera, frame_index)
+  // Update multi-pass descriptor set for this frame
+  camera_update_multi_pass_descriptor_set(gctx, manager, camera, frame_index)
   // Update depth reduction descriptor sets for this frame
   for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
     camera_update_depth_reduce_descriptor_set(
@@ -971,114 +1004,6 @@ camera_allocate_visibility_descriptors :: proc(
     )
   }
   return .SUCCESS
-}
-
-// Update late pass descriptor set for a specific frame
-@(private)
-camera_update_late_descriptor_set :: proc(
-  gctx: ^gpu.GPUContext,
-  manager: ^Manager,
-  camera: ^Camera,
-  frame_index: u32,
-) {
-  // For late culling pass, we bind the PREVIOUS frame's pyramid
-  // Frame 0 uses frame MAX_FRAMES_IN_FLIGHT-1, frame 1 uses frame 0, etc.
-  prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
-  node_info := vk.DescriptorBufferInfo {
-    buffer = manager.node_data_buffer.buffer,
-    range  = vk.DeviceSize(manager.node_data_buffer.bytes_count),
-  }
-  mesh_info := vk.DescriptorBufferInfo {
-    buffer = manager.mesh_data_buffer.buffer,
-    range  = vk.DeviceSize(manager.mesh_data_buffer.bytes_count),
-  }
-  world_info := vk.DescriptorBufferInfo {
-    buffer = manager.world_matrix_buffer.buffer,
-    range  = vk.DeviceSize(manager.world_matrix_buffer.bytes_count),
-  }
-  camera_info := vk.DescriptorBufferInfo {
-    buffer = manager.camera_buffer.buffer,
-    range  = vk.DeviceSize(manager.camera_buffer.bytes_count),
-  }
-  count_info := vk.DescriptorBufferInfo {
-    buffer = camera.late_draw_count[frame_index].buffer,
-    range  = vk.DeviceSize(camera.late_draw_count[frame_index].bytes_count),
-  }
-  command_info := vk.DescriptorBufferInfo {
-    buffer = camera.late_draw_commands[frame_index].buffer,
-    range  = vk.DeviceSize(camera.late_draw_commands[frame_index].bytes_count),
-  }
-  // Bind previous frame's depth pyramid for occlusion culling
-  pyramid_info := vk.DescriptorImageInfo {
-    sampler     = camera.depth_pyramid[prev_frame].sampler,
-    imageView   = camera.depth_pyramid[prev_frame].full_view,
-    imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-  }
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.late_descriptor_set[frame_index],
-      dstBinding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &node_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.late_descriptor_set[frame_index],
-      dstBinding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &mesh_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.late_descriptor_set[frame_index],
-      dstBinding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &world_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.late_descriptor_set[frame_index],
-      dstBinding = 3,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &camera_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.late_descriptor_set[frame_index],
-      dstBinding = 4,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &count_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.late_descriptor_set[frame_index],
-      dstBinding = 5,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &command_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.late_descriptor_set[frame_index],
-      dstBinding = 6,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &pyramid_info,
-    },
-  }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    len(writes),
-    raw_data(writes[:]),
-    0,
-    nil,
-  )
 }
 
 // Update depth reduction descriptor set for a specific frame and mip level
@@ -1129,6 +1054,159 @@ camera_update_depth_reduce_descriptor_set :: proc(
       descriptorType = .STORAGE_IMAGE,
       descriptorCount = 1,
       pImageInfo = &dest_info,
+    },
+  }
+  vk.UpdateDescriptorSets(
+    gctx.device,
+    len(writes),
+    raw_data(writes[:]),
+    0,
+    nil,
+  )
+}
+
+// Update multi-pass descriptor set for a specific frame (all 3 draw lists)
+@(private)
+camera_update_multi_pass_descriptor_set :: proc(
+  gctx: ^gpu.GPUContext,
+  manager: ^Manager,
+  camera: ^Camera,
+  frame_index: u32,
+) {
+  prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
+  node_info := vk.DescriptorBufferInfo {
+    buffer = manager.node_data_buffer.buffer,
+    range  = vk.DeviceSize(manager.node_data_buffer.bytes_count),
+  }
+  mesh_info := vk.DescriptorBufferInfo {
+    buffer = manager.mesh_data_buffer.buffer,
+    range  = vk.DeviceSize(manager.mesh_data_buffer.bytes_count),
+  }
+  world_info := vk.DescriptorBufferInfo {
+    buffer = manager.world_matrix_buffer.buffer,
+    range  = vk.DeviceSize(manager.world_matrix_buffer.bytes_count),
+  }
+  camera_info := vk.DescriptorBufferInfo {
+    buffer = manager.camera_buffer.buffer,
+    range  = vk.DeviceSize(manager.camera_buffer.bytes_count),
+  }
+  late_count_info := vk.DescriptorBufferInfo {
+    buffer = camera.late_draw_count[frame_index].buffer,
+    range  = vk.DeviceSize(camera.late_draw_count[frame_index].bytes_count),
+  }
+  late_command_info := vk.DescriptorBufferInfo {
+    buffer = camera.late_draw_commands[frame_index].buffer,
+    range  = vk.DeviceSize(camera.late_draw_commands[frame_index].bytes_count),
+  }
+  transparent_count_info := vk.DescriptorBufferInfo {
+    buffer = camera.transparent_draw_count[frame_index].buffer,
+    range  = vk.DeviceSize(camera.transparent_draw_count[frame_index].bytes_count),
+  }
+  transparent_command_info := vk.DescriptorBufferInfo {
+    buffer = camera.transparent_draw_commands[frame_index].buffer,
+    range  = vk.DeviceSize(camera.transparent_draw_commands[frame_index].bytes_count),
+  }
+  sprite_count_info := vk.DescriptorBufferInfo {
+    buffer = camera.sprite_draw_count[frame_index].buffer,
+    range  = vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
+  }
+  sprite_command_info := vk.DescriptorBufferInfo {
+    buffer = camera.sprite_draw_commands[frame_index].buffer,
+    range  = vk.DeviceSize(camera.sprite_draw_commands[frame_index].bytes_count),
+  }
+  pyramid_info := vk.DescriptorImageInfo {
+    sampler     = camera.depth_pyramid[prev_frame].sampler,
+    imageView   = camera.depth_pyramid[prev_frame].full_view,
+    imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+  }
+  writes := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &node_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 1,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &mesh_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 2,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &world_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &camera_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 4,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &late_count_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 5,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &late_command_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 6,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &transparent_count_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 7,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &transparent_command_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 8,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &sprite_count_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 9,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &sprite_command_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstBinding = 10,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &pyramid_info,
     },
   }
   vk.UpdateDescriptorSets(

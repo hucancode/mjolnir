@@ -108,8 +108,8 @@ Manager :: struct {
   geometry_pipeline_layout:                  vk.PipelineLayout, // Used by geometry, transparency, depth renderers
   spherical_camera_pipeline_layout:          vk.PipelineLayout, // Used by spherical depth rendering (point light shadows)
   // Visibility system descriptor layouts (for shadow cameras)
-  visibility_late_descriptor_layout:         vk.DescriptorSetLayout,
   visibility_sphere_descriptor_layout:       vk.DescriptorSetLayout,
+  visibility_multi_pass_descriptor_layout:   vk.DescriptorSetLayout,
   visibility_depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
   // Bindless vertex/index buffer system
   vertex_buffer:                             gpu.ImmutableBuffer(
@@ -403,12 +403,6 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   manager.textures_set_layout = 0
   manager.textures_descriptor_set = 0
   // Destroy visibility descriptor set layouts
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    manager.visibility_late_descriptor_layout,
-    nil,
-  )
-  manager.visibility_late_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
     manager.visibility_sphere_descriptor_layout,

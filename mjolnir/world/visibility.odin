@@ -47,11 +47,11 @@ CullingStats :: struct {
 }
 
 VisibilitySystem :: struct {
-  late_cull_pipeline:       vk.Pipeline,
   sphere_cull_pipeline:     vk.Pipeline, // For SphericalCamera (radius-based culling)
+  multi_pass_cull_pipeline: vk.Pipeline, // Generates 3 draw lists in one dispatch
   depth_reduce_pipeline:    vk.Pipeline,
-  late_cull_layout:         vk.PipelineLayout,
   sphere_cull_layout:       vk.PipelineLayout,
+  multi_pass_cull_layout:   vk.PipelineLayout,
   depth_reduce_layout:      vk.PipelineLayout,
   depth_pipeline:           vk.Pipeline, // uses geometry_pipeline_layout
   spherical_depth_pipeline: vk.Pipeline, // uses spherical_camera_pipeline_layout
@@ -90,13 +90,13 @@ visibility_system_shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  vk.DestroyPipeline(gctx.device, system.late_cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, system.sphere_cull_pipeline, nil)
+  vk.DestroyPipeline(gctx.device, system.multi_pass_cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, system.depth_reduce_pipeline, nil)
   vk.DestroyPipeline(gctx.device, system.depth_pipeline, nil)
   vk.DestroyPipeline(gctx.device, system.spherical_depth_pipeline, nil)
-  vk.DestroyPipelineLayout(gctx.device, system.late_cull_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, system.sphere_cull_layout, nil)
+  vk.DestroyPipelineLayout(gctx.device, system.multi_pass_cull_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, system.depth_reduce_layout, nil)
 }
 
@@ -184,6 +184,7 @@ visibility_system_dispatch_pyramid :: proc(
 }
 
 // Frame N compute writes to buffer[N], while frame N graphics reads buffer[N-1]
+// Uses multi_pass pipeline but only late_draw_count/commands are used
 visibility_system_dispatch_culling :: proc(
   system: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
@@ -198,7 +199,7 @@ visibility_system_dispatch_culling :: proc(
   if system.node_count == 0 {
     return
   }
-  // write to target_frame buffer, read from (target_frame-1) pyramid
+  // Clear all draw count buffers (multi_pass writes to all 3)
   vk.CmdFillBuffer(
     command_buffer,
     camera.late_draw_count[target_frame_index].buffer,
@@ -206,14 +207,28 @@ visibility_system_dispatch_culling :: proc(
     vk.DeviceSize(camera.late_draw_count[target_frame_index].bytes_count),
     0,
   )
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.late_cull_pipeline)
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.transparent_draw_count[target_frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.transparent_draw_count[target_frame_index].bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.sprite_draw_count[target_frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.sprite_draw_count[target_frame_index].bytes_count),
+    0,
+  )
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.multi_pass_cull_pipeline)
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
-    system.late_cull_layout,
+    system.multi_pass_cull_layout,
     0,
     1,
-    &camera.late_descriptor_set[target_frame_index],
+    &camera.multi_pass_descriptor_set[target_frame_index],
     0,
     nil,
   )
@@ -233,7 +248,7 @@ visibility_system_dispatch_culling :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    system.late_cull_layout,
+    system.multi_pass_cull_layout,
     {.COMPUTE},
     0,
     size_of(push_constants),
@@ -345,60 +360,6 @@ create_descriptor_layouts :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) -> vk.Result {
-  late_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    }, // node data
-    {
-      binding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    }, // mesh data
-    {
-      binding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    }, // world matrices
-    {
-      binding = 3,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    }, // camera data
-    {
-      binding = 4,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    }, // draw count
-    {
-      binding = 5,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    }, // draw commands
-    {
-      binding = 6,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    }, // depth pyramid
-  }
-  vk.CreateDescriptorSetLayout(
-    gctx.device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(late_bindings),
-      pBindings = raw_data(late_bindings[:]),
-    },
-    nil,
-    &rm.visibility_late_descriptor_layout,
-  ) or_return
   // Sphere pass descriptor layout (matches sphere_cull.comp shader)
   // NOTE: Binding 4 is intentionally skipped to maintain compatibility
   sphere_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -449,6 +410,85 @@ create_descriptor_layouts :: proc(
     nil,
     &rm.visibility_sphere_descriptor_layout,
   ) or_return
+  // Multi-pass descriptor layout (generates 3 draw lists in one dispatch)
+  multi_pass_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // node data
+    {
+      binding = 1,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // mesh data
+    {
+      binding = 2,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // world matrices
+    {
+      binding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // camera data
+    {
+      binding = 4,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // late draw count
+    {
+      binding = 5,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // late draw commands
+    {
+      binding = 6,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // transparent draw count
+    {
+      binding = 7,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // transparent draw commands
+    {
+      binding = 8,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // sprite draw count
+    {
+      binding = 9,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // sprite draw commands
+    {
+      binding = 10,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    }, // depth pyramid
+  }
+  vk.CreateDescriptorSetLayout(
+    gctx.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(multi_pass_bindings),
+      pBindings = raw_data(multi_pass_bindings[:]),
+    },
+    nil,
+    &rm.visibility_multi_pass_descriptor_layout,
+  ) or_return
   depth_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -491,24 +531,24 @@ create_compute_pipelines :: proc(
     &vk.PipelineLayoutCreateInfo {
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = 1,
-      pSetLayouts = &rm.visibility_late_descriptor_layout,
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &push_constant_range,
-    },
-    nil,
-    &system.late_cull_layout,
-  ) or_return
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &vk.PipelineLayoutCreateInfo {
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = 1,
       pSetLayouts = &rm.visibility_sphere_descriptor_layout,
       pushConstantRangeCount = 1,
       pPushConstantRanges = &push_constant_range,
     },
     nil,
     &system.sphere_cull_layout,
+  ) or_return
+  vk.CreatePipelineLayout(
+    gctx.device,
+    &vk.PipelineLayoutCreateInfo {
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &rm.visibility_multi_pass_descriptor_layout,
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
+    },
+    nil,
+    &system.multi_pass_cull_layout,
   ) or_return
   depth_push_range := vk.PushConstantRange {
     stageFlags = {.COMPUTE},
@@ -526,39 +566,21 @@ create_compute_pipelines :: proc(
     nil,
     &system.depth_reduce_layout,
   ) or_return
-  late_shader := gpu.create_shader_module(
-    gctx.device,
-    #load("../shader/occlusion_culling/late_cull.spv"),
-  ) or_return
-  defer vk.DestroyShaderModule(gctx.device, late_shader, nil)
   sphere_shader := gpu.create_shader_module(
     gctx.device,
     #load("../shader/occlusion_culling/sphere_cull.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, sphere_shader, nil)
+  multi_pass_shader := gpu.create_shader_module(
+    gctx.device,
+    #load("../shader/occlusion_culling/multi_pass_cull.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gctx.device, multi_pass_shader, nil)
   depth_shader := gpu.create_shader_module(
     gctx.device,
     #load("../shader/occlusion_culling/depth_reduce.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, depth_shader, nil)
-  late_info := vk.ComputePipelineCreateInfo {
-    sType = .COMPUTE_PIPELINE_CREATE_INFO,
-    stage = {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.COMPUTE},
-      module = late_shader,
-      pName = "main",
-    },
-    layout = system.late_cull_layout,
-  }
-  vk.CreateComputePipelines(
-    gctx.device,
-    0,
-    1,
-    &late_info,
-    nil,
-    &system.late_cull_pipeline,
-  ) or_return
   sphere_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
     stage = {
@@ -576,6 +598,24 @@ create_compute_pipelines :: proc(
     &sphere_info,
     nil,
     &system.sphere_cull_pipeline,
+  ) or_return
+  multi_pass_info := vk.ComputePipelineCreateInfo {
+    sType = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage = {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.COMPUTE},
+      module = multi_pass_shader,
+      pName = "main",
+    },
+    layout = system.multi_pass_cull_layout,
+  }
+  vk.CreateComputePipelines(
+    gctx.device,
+    0,
+    1,
+    &multi_pass_info,
+    nil,
+    &system.multi_pass_cull_pipeline,
   ) or_return
   depth_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
