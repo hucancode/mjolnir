@@ -526,24 +526,6 @@ end_pass :: proc(
         layerCount = 1,
       },
     },
-    // Depth
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-      oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = depth_texture.image,
-      subresourceRange = {
-        aspectMask = {.DEPTH},
-        baseMipLevel = 0,
-        levelCount = 1,
-        baseArrayLayer = 0,
-        layerCount = 1,
-      },
-    },
   }
   vk.CmdPipelineBarrier(
     command_buffer,

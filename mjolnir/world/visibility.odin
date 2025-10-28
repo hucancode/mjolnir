@@ -987,6 +987,37 @@ render_depth_pass :: proc(
     )
   }
   vk.CmdEndRendering(command_buffer)
+  // Barrier: depth writes complete, transition for compute + fragment shader reads
+  // Pyramid generation (compute) and lighting (fragment) both sample this depth
+  depth_ready_to_read := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    dstAccessMask = {.SHADER_READ},
+    oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = depth_texture.image,
+    subresourceRange = {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.LATE_FRAGMENT_TESTS}, // Wait for depth writes to complete
+    {.COMPUTE_SHADER, .FRAGMENT_SHADER}, // Before compute pyramid gen AND fragment lighting
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &depth_ready_to_read,
+  )
 }
 
 @(private)
@@ -1088,6 +1119,37 @@ render_spherical_depth_pass :: proc(
     log.error("Failed to get depth cube for spherical camera")
     return
   }
+  // Transition from DEPTH_STENCIL_READ_ONLY_OPTIMAL (left by previous frame's lighting pass)
+  // to ATTACHMENT_OPTIMAL (needed for clear and write)
+  depth_ready_to_write := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_READ},
+    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    oldLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = depth_cube.image,
+    subresourceRange = {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 6, // All cube faces
+    },
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.FRAGMENT_SHADER}, // previous frame's lighting pass reads done
+    {.EARLY_FRAGMENT_TESTS}, // this frame's depth writes start
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &depth_ready_to_write,
+  )
   // the geometry shader will emit primitives to each face using gl_Layer
   depth_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -1178,4 +1240,35 @@ render_spherical_depth_pass :: proc(
     )
   }
   vk.CmdEndRendering(command_buffer)
+  // Barrier: depth cube writes complete, transition for fragment shader reads
+  // Lighting samples this cube map for point light shadows
+  depth_ready_to_read := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    dstAccessMask = {.SHADER_READ},
+    oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = depth_cube.image,
+    subresourceRange = {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 6, // All cube faces
+    },
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.LATE_FRAGMENT_TESTS}, // Wait for depth writes to complete
+    {.FRAGMENT_SHADER}, // Before fragment shader samples shadow cube
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &depth_ready_to_read,
+  )
 }
