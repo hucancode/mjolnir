@@ -183,7 +183,7 @@ visibility_system_dispatch_pyramid :: proc(
   }
 }
 
-// Frame N compute writes to buffer[N%2], while frame N graphics reads buffer[(N-1)%2]
+// Frame N compute writes to buffer[N], while frame N graphics reads buffer[N-1]
 visibility_system_dispatch_culling :: proc(
   system: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
@@ -250,6 +250,7 @@ visibility_system_dispatch_spherical :: proc(
   command_buffer: vk.CommandBuffer,
   camera: ^resources.SphericalCamera,
   camera_index: u32,
+  frame_index: u32,
   include_flags: resources.NodeFlagSet,
   exclude_flags: resources.NodeFlagSet,
   rm: ^resources.Manager,
@@ -333,6 +334,7 @@ visibility_system_dispatch_spherical :: proc(
     command_buffer,
     camera,
     camera_index,
+    frame_index,
     rm,
   )
 }
@@ -1077,43 +1079,15 @@ render_spherical_depth_pass :: proc(
   command_buffer: vk.CommandBuffer,
   camera: ^resources.SphericalCamera,
   camera_index: u32,
+  frame_index: u32,
   rm: ^resources.Manager,
 ) {
-  depth_cube := resources.get(rm.image_cube_buffers, camera.depth_cube)
+  // Frame N writes to depth_cube[N]
+  depth_cube := resources.get(rm.image_cube_buffers, camera.depth_cube[frame_index])
   if depth_cube == nil {
     log.error("Failed to get depth cube for spherical camera")
     return
   }
-  // transition all cube faces to ATTACHMENT_OPTIMAL for rendering
-  cube_ready_to_write := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_READ},
-    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    oldLayout = .SHADER_READ_ONLY_OPTIMAL,
-    newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = depth_cube.image,
-    subresourceRange = {
-      aspectMask     = {.DEPTH},
-      baseMipLevel   = 0,
-      levelCount     = 1,
-      baseArrayLayer = 0,
-      layerCount     = 6,
-    },
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.FRAGMENT_SHADER},
-    {.EARLY_FRAGMENT_TESTS},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &cube_ready_to_write,
-  )
   // the geometry shader will emit primitives to each face using gl_Layer
   depth_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -1193,7 +1167,6 @@ render_spherical_depth_pass :: proc(
       raw_data(offsets[:]),
     )
     vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
-    // Draw using indirect commands from culling pass
     vk.CmdDrawIndexedIndirectCount(
       command_buffer,
       camera.draw_commands.buffer,
@@ -1205,34 +1178,4 @@ render_spherical_depth_pass :: proc(
     )
   }
   vk.CmdEndRendering(command_buffer)
-  // Transition cube back to SHADER_READ_ONLY for shadow sampling
-  cube_ready_to_read := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    dstAccessMask = {.SHADER_READ},
-    oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    newLayout = .SHADER_READ_ONLY_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = depth_cube.image,
-    subresourceRange = {
-      aspectMask     = {.DEPTH},
-      baseMipLevel   = 0,
-      levelCount     = 1,
-      baseArrayLayer = 0,
-      layerCount     = 6, // all 6 cube faces
-    },
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.LATE_FRAGMENT_TESTS},
-    {.FRAGMENT_SHADER},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &cube_ready_to_read,
-  )
 }

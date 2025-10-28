@@ -14,7 +14,7 @@ SphericalCamera :: struct {
   far:            f32, // Far plane
   data:           CameraData, // GPU data for bindless buffer
   size:           u32, // Resolution of cube map faces (size x size)
-  depth_cube:     Handle, // Cube depth texture
+  depth_cube:     [MAX_FRAMES_IN_FLIGHT]Handle, // Cube depth textures
   command_buffer: vk.CommandBuffer, // Secondary command buffer
   draw_commands:  gpu.MutableBuffer(vk.DrawIndexedIndirectCommand), // Draw commands for visible objects
   draw_count:     gpu.MutableBuffer(u32), // Number of visible objects
@@ -41,13 +41,15 @@ spherical_camera_init :: proc(
   camera.far = far
   camera.size = size
   camera.max_draws = max_draws
-  camera.depth_cube, _, _ = create_empty_texture_cube(
-    gctx,
-    manager,
-    size,
-    depth_format,
-    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-  )
+  for &v in camera.depth_cube {
+    v, _, _ = create_empty_texture_cube(
+      gctx,
+      manager,
+      size,
+      depth_format,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    )
+  }
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
     commandPool        = gctx.command_pool,
@@ -86,9 +88,8 @@ spherical_camera_destroy :: proc(
   command_pool: vk.CommandPool,
   manager: ^Manager,
 ) {
-  if camera.depth_cube.generation > 0 {
-    if item, freed := free(&manager.image_cube_buffers, camera.depth_cube);
-       freed {
+  for v in camera.depth_cube {
+    if item, freed := free(&manager.image_cube_buffers, v); freed {
       gpu.cube_depth_texture_destroy(device, item)
     }
   }

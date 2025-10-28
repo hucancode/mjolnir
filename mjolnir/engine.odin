@@ -548,6 +548,8 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.world,
     command_buffer,
   ) or_return
+  camera_command_buffers := make([dynamic]vk.CommandBuffer)
+  defer delete(camera_command_buffers)
   for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue
     if u32(cam_index) == main_camera_handle.index do continue
@@ -595,28 +597,24 @@ render :: proc(self: ^Engine) -> vk.Result {
         self.swapchain.format.format,
       )
     }
-    portal_buffers := [dynamic]vk.CommandBuffer{}
-    defer delete(portal_buffers)
     if resources.PassType.GEOMETRY in cam.enabled_passes {
-      append(&portal_buffers, cam.geometry_commands[self.frame_index])
+      append(&camera_command_buffers, cam.geometry_commands[self.frame_index])
     }
     if resources.PassType.LIGHTING in cam.enabled_passes {
-      append(&portal_buffers, cam.lighting_commands[self.frame_index])
+      append(&camera_command_buffers, cam.lighting_commands[self.frame_index])
     }
     if resources.PassType.PARTICLES in cam.enabled_passes {
-      append(&portal_buffers, self.render.particles.commands[self.frame_index])
+      append(&camera_command_buffers, self.render.particles.commands[self.frame_index])
     }
     if resources.PassType.TRANSPARENCY in cam.enabled_passes {
-      append(&portal_buffers, cam.transparency_commands[self.frame_index])
-    }
-    if len(portal_buffers) > 0 {
-      vk.CmdExecuteCommands(
-        command_buffer,
-        u32(len(portal_buffers)),
-        raw_data(portal_buffers[:]),
-      )
+      append(&camera_command_buffers, cam.transparency_commands[self.frame_index])
     }
   }
+  vk.CmdExecuteCommands(
+    command_buffer,
+    u32(len(camera_command_buffers)),
+    raw_data(camera_command_buffers[:]),
+  )
   if self.post_render_proc != nil {
     self.post_render_proc(self)
   }

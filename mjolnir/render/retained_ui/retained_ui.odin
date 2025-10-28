@@ -240,8 +240,8 @@ init :: proc(
   resources.pool_init(&self.widgets, 1000)
   self.root_widgets = make([dynamic]WidgetHandle, 0, 100)
   self.dirty_widgets = make([dynamic]WidgetHandle, 0, 100)
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    self.draw_lists[i].commands = make([dynamic]DrawCommand, 0, 1000)
+  for &v in self.draw_lists {
+    v.commands = make([dynamic]DrawCommand, 0, 1000)
   }
   self.frame_width = width
   self.frame_height = height
@@ -647,8 +647,8 @@ rebuild_draw_lists :: proc(self: ^Manager) {
   // Instead of clearing everything, only remove commands for dirty widgets
   for dirty_handle in self.dirty_widgets {
     // Remove commands for this widget from all frame draw lists
-    for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-      remove_widget_commands(&self.draw_lists[i], dirty_handle)
+    for &v in self.draw_lists {
+      remove_widget_commands(&v, dirty_handle)
     }
   }
   // Rebuild only dirty widgets
@@ -679,24 +679,24 @@ remove_widget_commands :: proc(draw_list: ^DrawList, handle: WidgetHandle) {
 build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
   widget, found := resources.get(self.widgets, handle)
   if !found || !widget.visible do return
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for &v in self.draw_lists {
     switch widget.type {
     case .BUTTON:
-      build_button_commands(self, &self.draw_lists[i], handle, widget)
+      build_button_commands(self, &v, handle, widget)
     case .LABEL:
-      build_label_commands(self, &self.draw_lists[i], handle, widget)
+      build_label_commands(self, &v, handle, widget)
     case .IMAGE:
-      build_image_commands(self, &self.draw_lists[i], handle, widget)
+      build_image_commands(self, &v, handle, widget)
     case .WINDOW:
-      build_window_commands(self, &self.draw_lists[i], handle, widget)
+      build_window_commands(self, &v, handle, widget)
     case .TEXT_BOX:
-      build_textbox_commands(self, &self.draw_lists[i], handle, widget)
+      build_textbox_commands(self, &v, handle, widget)
     case .COMBO_BOX:
-      build_combobox_commands(self, &self.draw_lists[i], handle, widget)
+      build_combobox_commands(self, &v, handle, widget)
     case .CHECK_BOX:
-      build_checkbox_commands(self, &self.draw_lists[i], handle, widget)
+      build_checkbox_commands(self, &v, handle, widget)
     case .RADIO_BUTTON:
-      build_radiobutton_commands(self, &self.draw_lists[i], handle, widget)
+      build_radiobutton_commands(self, &v, handle, widget)
     }
   }
   // Re-fetch widget pointer in case pool was modified

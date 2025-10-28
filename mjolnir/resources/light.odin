@@ -91,7 +91,6 @@ create_light :: proc(
       }
       light.camera_handle = cam_handle
       light.camera_index = cam_handle.index
-      light.shadow_map = spherical_cam.depth_cube.index
     case .DIRECTIONAL, .SPOT:
       // Directional and spot lights use regular cameras
       cam_handle, cam, cam_ok := alloc(&manager.cameras)
@@ -179,6 +178,7 @@ update_light_gpu_data :: proc(manager: ^Manager, handle: Handle) {
     gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
+
 update_light_shadow_camera_transforms :: proc(
   manager: ^Manager,
   frame_index: u32 = 0,
@@ -201,7 +201,7 @@ update_light_shadow_camera_transforms :: proc(
       spherical_cam := get(manager.spherical_cameras, light.camera_handle)
       if spherical_cam != nil {
         spherical_cam.center = light_position
-        light.shadow_map = spherical_cam.depth_cube.index
+        light.shadow_map = spherical_cam.depth_cube[frame_index].index
       }
     case .DIRECTIONAL:
       // TODO: Implement directional light later
