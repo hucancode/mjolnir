@@ -99,31 +99,35 @@ record_compute_commands :: proc(
     compute_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
-  // Compute for NEXT frame
+  // Compute for frame N prepares data for frame N+1
+  // Buffer indices with MAX_FRAMES_IN_FLIGHT=2: frame N uses buffer [N%2], produces data for buffer [(N+1)%2]
   next_frame_index := (frame_index + 1) % resources.MAX_FRAMES_IN_FLIGHT
   for &entry, cam_index in rm.cameras.entries {
     if !entry.active do continue
     if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
     cam := &entry.item
-    // STEP 1: Build pyramid[next_frame] from depth[frame_index]
-    // This uses the depth buffer that was just written by the previous frame's graphics pass
+    // STEP 1: Build pyramid[N] from depth[N-1]
+    // pyramid[frame_index] reads from depth[(frame_index-1)%2] via descriptors
+    // This allows Compute N to build pyramid[N] from Render N-1's depth
     world.visibility_system_dispatch_pyramid(
       &world_state.visibility,
       gctx,
       compute_buffer,
       cam,
       u32(cam_index),
-      next_frame_index,
+      frame_index,  // Build pyramid[N]
       rm,
     )
-    // STEP 2: Cull using camera[next_frame] + pyramid[next_frame] → draw_list[next_frame]
+    // STEP 2: Cull using camera[N] + pyramid[N] → draw_list[N+1]
+    // Reads pyramid[frame_index], writes draw_list[next_frame_index]
+    // This produces draw_list[N+1] for use by Render N+1
     world.visibility_system_dispatch_culling(
       &world_state.visibility,
       gctx,
       compute_buffer,
       cam,
       u32(cam_index),
-      next_frame_index,
+      next_frame_index,  // Write draw_list[N+1]
       {.VISIBLE},
       {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
       rm,
@@ -362,10 +366,11 @@ record_geometry_pass :: proc(
   // ═══════════════════════════════════════════════════════════════════════════
   // GRAPHICS QUEUE: Frame N rendering
   // ═══════════════════════════════════════════════════════════════════════════
-  // Uses draw_list[N-1] and camera[N-1] (prepared by frame N-1 compute)
-  // This enables parallel execution with frame N compute (which prepares data for frame N+1)
+  // Uses draw_list[N] (prepared by frame N-1 compute) and camera[N] (current frame)
+  // Runs in parallel with frame N compute (which prepares draw_list[N+1] for frame N+1)
   //
-  // STEP 1: Render depth[N] using draw_list[N-1] and camera[N-1]
+  // STEP 1: Render depth[N] using draw_list[N], camera[N]
+  // This depth will be read by frame N+1 compute for pyramid building
   world.visibility_system_dispatch_depth(
     &world_state.visibility,
     gctx,
@@ -377,8 +382,8 @@ record_geometry_pass :: proc(
     {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
     rm,
   )
-  // STEP 2: Render geometry pass using draw_list[N-1] and camera[N-1]
-  prev_frame := (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
+  // STEP 2: Render geometry pass using draw_list[N], camera[N]
+  // draw_list[frame_index] was written by Compute N-1, safe to read during Render N
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
   geometry_pass.begin_pass(camera_handle, command_buffer, rm, frame_index)
   geometry_pass.render(
@@ -387,8 +392,8 @@ record_geometry_pass :: proc(
     command_buffer,
     rm,
     frame_index,
-    camera.late_draw_commands[prev_frame].buffer,
-    camera.late_draw_count[prev_frame].buffer,
+    camera.late_draw_commands[frame_index].buffer,
+    camera.late_draw_count[frame_index].buffer,
     command_stride,
   )
   geometry_pass.end_pass(camera_handle, command_buffer, rm, frame_index)
@@ -522,8 +527,8 @@ record_transparency_pass :: proc(
     {},
     rm,
   )
-  // Use previous frame's draw list for transparency rendering
-  prev_frame := (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
+  // Use current frame's draw list for transparency rendering
+  // draw_list[frame_index] was written by Compute N-1, safe to read during Render N
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
   // Render sprites with sprite pipeline
   transparency.render(
@@ -533,8 +538,8 @@ record_transparency_pass :: proc(
     command_buffer,
     rm,
     frame_index,
-    camera.late_draw_commands[prev_frame].buffer,
-    camera.late_draw_count[prev_frame].buffer,
+    camera.late_draw_commands[frame_index].buffer,
+    camera.late_draw_count[frame_index].buffer,
     command_stride,
   )
   // Cull wireframe objects

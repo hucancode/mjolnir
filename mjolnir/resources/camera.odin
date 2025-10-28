@@ -64,7 +64,7 @@ Camera :: struct {
     OrthographicProjection,
   },
   // Per-frame GPU data
-  // Frame N compute uses data[N], Frame N render uses data[N-1]
+  // Frame N compute uses data[N] for culling, Frame N render uses data[N-1] for drawing
   data:                         [MAX_FRAMES_IN_FLIGHT]CameraData,
   // Render target data
   extent:                       vk.Extent2D,
@@ -75,9 +75,9 @@ Camera :: struct {
   lighting_commands:            [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   transparency_commands:        [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Double-buffered draw lists for lock-free async compute:
-  //   - Frame N graphics reads from late_draw_commands[N]
-  //   - Frame N compute writes to late_draw_commands[(N+1)%2]
-  // This ensures graphics and compute never access the same buffer
+  //   - Frame N graphics reads from late_draw_commands[(N-1)%2]
+  //   - Frame N compute writes to late_draw_commands[N%2]
+  // Graphics reads from previous frame's draw list while compute prepares current frame's list
   late_draw_count:              [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   late_draw_commands:           [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,

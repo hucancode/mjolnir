@@ -8,6 +8,21 @@ import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
 
+/*
+Current Visibility Synchronization
+
+Compute:
+1. Build pyramid[N-1] from depth[N-1]
+2. Cull using camera[N] + pyramid[N-1] → draw_list[N+1]
+Meanwhile, render:
+a. Render depth[N] using draw_list[N], camera[N]
+b. Render geometry pass N using draw_list[N], camera[N]
+c. Render shadow_depth[N] using shadow_draw_list[N], shadow_camera[N]
+d. Render lighting pass with geometry pass N, shadow depth N
+_________ end frame, sync _________
+1,2 and a,b,c,d run in parallel
+*/
+
 VisibilityPushConstants :: struct {
   camera_index:      u32,
   node_count:        u32,
@@ -147,7 +162,7 @@ visibility_system_dispatch_depth :: proc(
   )
 }
 
-// STEP 3: Build pyramid - reads depth[N], builds pyramid[N]
+// STEP 3: Build pyramid - reads depth[N-1], builds pyramid[N]
 visibility_system_dispatch_pyramid :: proc(
   system: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
@@ -168,7 +183,7 @@ visibility_system_dispatch_pyramid :: proc(
   }
 }
 
-// Frame N compute writes to buffer[(N+1)%2], while frame N graphics reads buffer[N]
+// Frame N compute writes to buffer[N%2], while frame N graphics reads buffer[(N-1)%2]
 visibility_system_dispatch_culling :: proc(
   system: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
@@ -957,13 +972,13 @@ render_depth_pass :: proc(
       raw_data(offsets[:]),
     )
     vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
-    // Use previous frame's draw list (prepared by frame N-1 compute)
-    prev_frame := (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
+    // Use current frame's draw list (prepared by frame N-1 compute)
+    // draw_list[frame_index] was written by Compute N-1, safe to read during Render N
     vk.CmdDrawIndexedIndirectCount(
       command_buffer,
-      camera.late_draw_commands[prev_frame].buffer,
+      camera.late_draw_commands[frame_index].buffer,
       0, // offset
-      camera.late_draw_count[prev_frame].buffer,
+      camera.late_draw_count[frame_index].buffer,
       0, // count offset
       system.max_draws,
       draw_command_stride(),
@@ -978,13 +993,13 @@ build_depth_pyramid :: proc(
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera: ^resources.Camera,
-  target_frame_index: u32, // Which pyramid to build (reads from depth[target-1] via descriptors)
+  target_frame_index: u32, // Frame N builds pyramid[N] from depth[N-1] (via descriptors)
   rm: ^resources.Manager,
 ) {
   vk.CmdBindPipeline(command_buffer, .COMPUTE, system.depth_reduce_pipeline)
   // Generate ALL mip levels using the same shader
-  // Mip 0: reads from depth[target-1] (configured in descriptor sets)
-  // Other mips: read from pyramid[target] mip-1
+  // Mip 0: reads from depth[N-1] (configured in descriptor sets)
+  // Other mips: read from pyramid[N] mip-1
   for mip in 0 ..< camera.depth_pyramid[target_frame_index].mip_levels {
     vk.CmdBindDescriptorSets(
       command_buffer,
