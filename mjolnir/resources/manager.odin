@@ -279,15 +279,6 @@ init :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
-commit :: proc(
-  manager: ^Manager,
-  command_buffer: vk.CommandBuffer,
-) -> vk.Result {
-  // MutableBuffer doesn't need flush - data is already in host-visible GPU memory
-  // Memory barriers in the rendering pipeline ensure visibility
-  return .SUCCESS
-}
-
 shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   destroy_material_buffer(gctx, manager)
   destroy_world_matrix_buffers(gctx, manager)
