@@ -9,9 +9,8 @@ import "mjolnir/geometry"
 import "mjolnir/resources"
 import "mjolnir/world"
 import "vendor:glfw"
-import mu "vendor:microui"
 
-LIGHT_COUNT :: 10
+LIGHT_COUNT :: 20
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle

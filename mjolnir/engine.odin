@@ -33,7 +33,7 @@ MOUSE_SENSITIVITY_X :: 0.005
 MOUSE_SENSITIVITY_Y :: 0.005
 SCROLL_SENSITIVITY :: 0.5
 MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
-USE_PARALLEL_UPDATE :: #config(USE_PARALLEL_UPDATE, true)
+USE_PARALLEL_UPDATE :: #config(USE_PARALLEL_UPDATE, false)
 FRAME_LIMIT :: #config(FRAME_LIMIT, 0)
 
 g_context: runtime.Context
@@ -675,8 +675,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     ) or_return
     compute_cmd_buffer = compute_buffer
   } else {
-    // Non-async path: same algorithm, just inline on graphics queue
-    // Compute for NEXT frame before rendering CURRENT frame
     next_frame_index := (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
     for &entry, cam_index in self.rm.cameras.entries {
       if !entry.active do continue
@@ -688,7 +686,8 @@ render :: proc(self: ^Engine) -> vk.Result {
         command_buffer,
         cam,
         u32(cam_index),
-        next_frame_index,
+        // next_frame_index,
+        self.frame_index,
         {.VISIBLE},
         {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
         &self.rm,
