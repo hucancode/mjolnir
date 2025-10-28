@@ -20,9 +20,15 @@ LightData :: struct {
   angle_outer:  f32, // outer cone angle for spot lights
   type:         LightType, // LightType
   node_index:   u32, // index into world matrices buffer
-  shadow_map:   u32, // texture index in bindless array
   camera_index: u32, // index into camera matrices buffer
   cast_shadow:  b32, // 0 = no shadow, 1 = cast shadow
+  _padding:     u32, // Maintain 16-byte alignment
+}
+
+DynamicLightData :: struct {
+  position:   [4]f32, // xyz = position, w = unused
+  shadow_map: u32, // texture index in bindless array (per-frame)
+  _padding:   [3]u32, // Maintain 16-byte alignment
 }
 
 Light :: struct {
@@ -60,7 +66,6 @@ create_light :: proc(
   light.node_index = node_handle.index
   light.camera_handle = {}
   light.camera_index = 0xFFFFFFFF
-  light.shadow_map = 0xFFFFFFFF
   if cast_shadow {
     #partial switch light_type {
     case .POINT:
@@ -127,12 +132,9 @@ create_light :: proc(
       }
       light.camera_handle = cam_handle
       light.camera_index = cam_handle.index
-      // Use camera's shared depth texture for shadow map
-      light.shadow_map = camera_get_attachment(cam, .DEPTH, 0).index
       log.infof(
-        "Created %v light - shadow_map texture index=%d, camera_index=%d",
+        "Created %v light - camera_index=%d",
         light_type,
-        light.shadow_map,
         light.camera_index,
       )
     }
@@ -195,13 +197,14 @@ update_light_shadow_camera_transforms :: proc(
     // Extract position and direction from world matrix
     light_position := world_matrix[3].xyz
     light_direction := world_matrix[2].xyz
+    shadow_map_id: u32 = 0xFFFFFFFF
     #partial switch light.type {
     case .POINT:
       // Point lights use spherical cameras
       spherical_cam := get(manager.spherical_cameras, light.camera_handle)
       if spherical_cam != nil {
         spherical_cam.center = light_position
-        light.shadow_map = spherical_cam.depth_cube[frame_index].index
+        shadow_map_id = spherical_cam.depth_cube[frame_index].index
       }
     case .DIRECTIONAL:
       // TODO: Implement directional light later
@@ -210,16 +213,21 @@ update_light_shadow_camera_transforms :: proc(
         camera_position := light_position - light_direction * 50.0 // Far back
         target_position := light_position
         camera_look_at(cam, camera_position, target_position)
-        light.shadow_map = camera_get_attachment(cam, .DEPTH, frame_index).index
+        shadow_map_id = camera_get_attachment(cam, .DEPTH, frame_index).index
       }
     case .SPOT:
       cam := get(manager.cameras, light.camera_handle)
       if cam != nil {
         target_position := light_position + light_direction
         camera_look_at(cam, light_position, target_position)
-        light.shadow_map = camera_get_attachment(cam, .DEPTH, frame_index).index
+        shadow_map_id = camera_get_attachment(cam, .DEPTH, frame_index).index
       }
     }
-    gpu.write(&manager.lights_buffer, &light.data, light_index)
+    // Write to per-frame dynamic light data buffer (position + shadow_map synchronized)
+    dynamic_data := DynamicLightData {
+      position   = {light_position.x, light_position.y, light_position.z, 1.0},
+      shadow_map = shadow_map_id,
+    }
+    gpu.write(&manager.dynamic_light_data_buffers[frame_index], &dynamic_data, light_index)
   }
 }

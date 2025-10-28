@@ -311,6 +311,7 @@ init :: proc(
     rm.lights_buffer_set_layout, // set = 2 (light data)
     rm.world_matrix_buffer_set_layout, // set = 3 (world matrices)
     rm.spherical_camera_buffer_set_layout, // set = 4 (spherical cameras for point light shadows)
+    rm.dynamic_light_data_set_layout, // set = 5 (per-frame position + shadow map)
   }
   lighting_push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -622,6 +623,7 @@ begin_pass :: proc(
     rm.lights_buffer_descriptor_set, // set = 2 (lights)
     rm.world_matrix_descriptor_set, // set = 3 (world matrices)
     rm.spherical_camera_buffer_descriptor_set, // set = 4 (spherical cameras)
+    rm.dynamic_light_data_descriptor_sets[frame_index], // set = 5 (per-frame position + shadow map)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

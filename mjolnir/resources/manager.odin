@@ -97,6 +97,10 @@ Manager :: struct {
   lights_buffer_set_layout:                  vk.DescriptorSetLayout,
   lights_buffer_descriptor_set:              vk.DescriptorSet,
   lights_buffer:                             gpu.MutableBuffer(LightData),
+  // Per-frame dynamic light data (position + shadow_map, synchronized per frame)
+  dynamic_light_data_buffers:                [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(DynamicLightData),
+  dynamic_light_data_set_layout:             vk.DescriptorSetLayout,
+  dynamic_light_data_descriptor_sets:        [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   // Bindless texture system
   textures_set_layout:                       vk.DescriptorSetLayout,
   textures_descriptor_set:                   vk.DescriptorSet,
@@ -159,6 +163,7 @@ init :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
   init_emitter_buffer(gctx, manager) or_return
   init_forcefield_buffer(gctx, manager) or_return
   init_lights_buffer(gctx, manager) or_return
+  init_dynamic_light_data_buffers(gctx, manager) or_return
   init_sprite_buffer(gctx, manager) or_return
   init_vertex_index_buffers(gctx, manager) or_return
   // Texture + samplers descriptor set
@@ -285,6 +290,7 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   destroy_emitter_buffer(gctx, manager)
   destroy_forcefield_buffer(gctx, manager)
   destroy_lights_buffer(gctx, manager)
+  destroy_dynamic_light_data_buffers(gctx, manager)
   destroy_sprite_buffer(gctx, manager)
   // Clean up lights (which may own shadow cameras with textures)
   for &entry, i in manager.lights.entries {
@@ -397,30 +403,24 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   manager.textures_set_layout = 0
   manager.textures_descriptor_set = 0
   // Destroy visibility descriptor set layouts
-  if manager.visibility_late_descriptor_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      manager.visibility_late_descriptor_layout,
-      nil,
-    )
-    manager.visibility_late_descriptor_layout = 0
-  }
-  if manager.visibility_sphere_descriptor_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      manager.visibility_sphere_descriptor_layout,
-      nil,
-    )
-    manager.visibility_sphere_descriptor_layout = 0
-  }
-  if manager.visibility_depth_reduce_descriptor_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      manager.visibility_depth_reduce_descriptor_layout,
-      nil,
-    )
-    manager.visibility_depth_reduce_descriptor_layout = 0
-  }
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    manager.visibility_late_descriptor_layout,
+    nil,
+  )
+  manager.visibility_late_descriptor_layout = 0
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    manager.visibility_sphere_descriptor_layout,
+    nil,
+  )
+  manager.visibility_sphere_descriptor_layout = 0
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    manager.visibility_depth_reduce_descriptor_layout,
+    nil,
+  )
+  manager.visibility_depth_reduce_descriptor_layout = 0
 }
 
 create_geometry_pipeline_layout :: proc(
@@ -1079,26 +1079,99 @@ init_lights_buffer :: proc(
 
 destroy_lights_buffer :: proc(gctx: ^gpu.GPUContext, manager: ^Manager) {
   gpu.mutable_buffer_destroy(gctx.device, &manager.lights_buffer)
-  if manager.lights_buffer_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      manager.lights_buffer_set_layout,
-      nil,
-    )
-  }
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    manager.lights_buffer_set_layout,
+    nil,
+  )
   manager.lights_buffer_set_layout = 0
   manager.lights_buffer_descriptor_set = 0
 }
 
+init_dynamic_light_data_buffers :: proc(
+  gctx: ^gpu.GPUContext,
+  manager: ^Manager,
+) -> vk.Result {
+  log.info("Creating per-frame dynamic light data buffers")
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    manager.dynamic_light_data_buffers[frame_idx] = gpu.malloc_mutable_buffer(
+      gctx,
+      DynamicLightData,
+      MAX_LIGHTS,
+      {.STORAGE_BUFFER},
+    ) or_return
+    dynamic_data := gpu.mutable_buffer_get_all(&manager.dynamic_light_data_buffers[frame_idx])
+    for &data in dynamic_data {
+      data.position = {0, 0, 0, 0}
+      data.shadow_map = 0xFFFFFFFF
+    }
+  }
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    gctx.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
+    nil,
+    &manager.dynamic_light_data_set_layout,
+  ) or_return
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    vk.AllocateDescriptorSets(
+      gctx.device,
+      &vk.DescriptorSetAllocateInfo {
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = gctx.descriptor_pool,
+        descriptorSetCount = 1,
+        pSetLayouts = &manager.dynamic_light_data_set_layout,
+      },
+      &manager.dynamic_light_data_descriptor_sets[frame_idx],
+    ) or_return
+    buffer_info := vk.DescriptorBufferInfo {
+      buffer = manager.dynamic_light_data_buffers[frame_idx].buffer,
+      offset = 0,
+      range  = vk.DeviceSize(vk.WHOLE_SIZE),
+    }
+    write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = manager.dynamic_light_data_descriptor_sets[frame_idx],
+      dstBinding      = 0,
+      descriptorType  = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo     = &buffer_info,
+    }
+    vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
+  }
+  return .SUCCESS
+}
+
+destroy_dynamic_light_data_buffers :: proc(gctx: ^gpu.GPUContext, manager: ^Manager) {
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    gpu.mutable_buffer_destroy(gctx.device, &manager.dynamic_light_data_buffers[frame_idx])
+  }
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    manager.dynamic_light_data_set_layout,
+    nil,
+  )
+  manager.dynamic_light_data_set_layout = 0
+}
+
 destroy_emitter_buffer :: proc(gctx: ^gpu.GPUContext, manager: ^Manager) {
   gpu.mutable_buffer_destroy(gctx.device, &manager.emitter_buffer)
-  if manager.emitter_buffer_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      manager.emitter_buffer_set_layout,
-      nil,
-    )
-  }
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    manager.emitter_buffer_set_layout,
+    nil,
+  )
   manager.emitter_buffer_set_layout = 0
   manager.emitter_buffer_descriptor_set = 0
 }
@@ -1163,13 +1236,11 @@ init_forcefield_buffer :: proc(
 
 destroy_forcefield_buffer :: proc(gctx: ^gpu.GPUContext, manager: ^Manager) {
   gpu.mutable_buffer_destroy(gctx.device, &manager.forcefield_buffer)
-  if manager.forcefield_buffer_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      manager.forcefield_buffer_set_layout,
-      nil,
-    )
-  }
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    manager.forcefield_buffer_set_layout,
+    nil,
+  )
   manager.forcefield_buffer_set_layout = 0
   manager.forcefield_buffer_descriptor_set = 0
 }
@@ -1234,13 +1305,11 @@ init_sprite_buffer :: proc(
 
 destroy_sprite_buffer :: proc(gctx: ^gpu.GPUContext, manager: ^Manager) {
   gpu.mutable_buffer_destroy(gctx.device, &manager.sprite_buffer)
-  if manager.sprite_buffer_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      manager.sprite_buffer_set_layout,
-      nil,
-    )
-  }
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    manager.sprite_buffer_set_layout,
+    nil,
+  )
   manager.sprite_buffer_set_layout = 0
   manager.sprite_buffer_descriptor_set = 0
 }
