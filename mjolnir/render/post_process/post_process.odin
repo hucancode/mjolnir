@@ -667,16 +667,35 @@ render :: proc(
         )
         continue
       }
-      gpu.transition_image(
+      // Transition dst texture from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
+      dst_barrier := vk.ImageMemoryBarrier {
+        sType = .IMAGE_MEMORY_BARRIER,
+        srcAccessMask = {},
+        dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+        oldLayout = .UNDEFINED,
+        newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = dst_texture.image,
+        subresourceRange = {
+          aspectMask = {.COLOR},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 1,
+        },
+      }
+      vk.CmdPipelineBarrier(
         command_buffer,
-        dst_texture.image,
-        .UNDEFINED,
-        .COLOR_ATTACHMENT_OPTIMAL,
-        {.COLOR},
         {.TOP_OF_PIPE},
         {.COLOR_ATTACHMENT_OUTPUT},
         {},
-        {.COLOR_ATTACHMENT_WRITE},
+        0,
+        nil,
+        0,
+        nil,
+        1,
+        &dst_barrier,
       )
       dst_view = dst_texture.view
     } else {
@@ -695,7 +714,36 @@ render :: proc(
         )
         continue
       }
-      gpu.transition_image_to_shader_read(command_buffer, src_texture.image)
+      // Transition src texture from COLOR_ATTACHMENT to SHADER_READ_ONLY
+      src_barrier := vk.ImageMemoryBarrier {
+        sType = .IMAGE_MEMORY_BARRIER,
+        srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+        dstAccessMask = {.SHADER_READ},
+        oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+        newLayout = .SHADER_READ_ONLY_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = src_texture.image,
+        subresourceRange = {
+          aspectMask = {.COLOR},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 1,
+        },
+      }
+      vk.CmdPipelineBarrier(
+        command_buffer,
+        {.COLOR_ATTACHMENT_OUTPUT},
+        {.FRAGMENT_SHADER},
+        {},
+        0,
+        nil,
+        0,
+        nil,
+        1,
+        &src_barrier,
+      )
     }
     color_attachment := vk.RenderingAttachmentInfo {
       sType = .RENDERING_ATTACHMENT_INFO,
@@ -921,24 +969,69 @@ begin_record :: proc(
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return command_buffer, .ERROR_UNKNOWN
   // Transition final image to shader read optimal
-  final_image := resources.get(
+  if final_image, ok := resources.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
-  )
-  if final_image != nil {
-    gpu.transition_image_to_shader_read(command_buffer, final_image.image)
+  ); ok {
+    final_barrier := vk.ImageMemoryBarrier {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = final_image.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    }
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.COLOR_ATTACHMENT_OUTPUT},
+      {.FRAGMENT_SHADER},
+      {},
+      0,
+      nil,
+      0,
+      nil,
+      1,
+      &final_barrier,
+    )
   }
-  // Transition swapchain image to color attachment optimal
-  gpu.transition_image(
+  // Transition swapchain image from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
+  swapchain_barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {},
+    dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    oldLayout = .UNDEFINED,
+    newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = swapchain_image,
+    subresourceRange = {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+  }
+  vk.CmdPipelineBarrier(
     command_buffer,
-    swapchain_image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {.COLOR},
     {.TOP_OF_PIPE},
     {.COLOR_ATTACHMENT_OUTPUT},
     {},
-    {.COLOR_ATTACHMENT_WRITE},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &swapchain_barrier,
   )
   return command_buffer, .SUCCESS
 }

@@ -193,25 +193,128 @@ begin_pass :: proc(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
-  gbuffer_images := [?]vk.Image {
-    position_texture.image,
-    normal_texture.image,
-    albedo_texture.image,
-    metallic_roughness_texture.image,
-    emissive_texture.image,
-    final_texture.image,
+  // Transition all G-buffer images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
+  image_barriers := [?]vk.ImageMemoryBarrier {
+    // Position
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {},
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = position_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Normal
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {},
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = normal_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Albedo
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {},
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = albedo_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Metallic/Roughness
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {},
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = metallic_roughness_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Emissive
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {},
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = emissive_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Final image
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {},
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = final_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
   }
-  // batch transition all G-buffer images to COLOR_ATTACHMENT_OPTIMAL
-  gpu.transition_images(
+  vk.CmdPipelineBarrier(
     command_buffer,
-    gbuffer_images[:],
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {.COLOR},
-    1,
     {.TOP_OF_PIPE},
     {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR_ATTACHMENT_WRITE},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    len(image_barriers),
+    raw_data(image_barriers[:]),
   )
   depth_texture := resources.get(
     rm.image_2d_buffers,
@@ -306,7 +409,7 @@ end_pass :: proc(
   vk.CmdEndRendering(command_buffer)
   camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
-  // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
+  // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting and post-processing
   position_texture := resources.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .POSITION, frame_index),
@@ -327,24 +430,132 @@ end_pass :: proc(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
   )
-  gbuffer_images := [?]vk.Image {
-    position_texture.image,
-    normal_texture.image,
-    albedo_texture.image,
-    metallic_roughness_texture.image,
-    emissive_texture.image,
+  depth_texture := resources.get(
+    rm.image_2d_buffers,
+    resources.camera_get_attachment(camera, .DEPTH, frame_index),
+  )
+  // transition all G-buffer attachments + depth to SHADER_READ_ONLY_OPTIMAL
+  image_barriers := [?]vk.ImageMemoryBarrier {
+    // Position
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = position_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Normal
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = normal_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Albedo
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = albedo_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Metallic/Roughness
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = metallic_roughness_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Emissive
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = emissive_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    // Depth
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+      oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = depth_texture.image,
+      subresourceRange = {
+        aspectMask = {.DEPTH},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
   }
-  // batch transition all G-buffer images to SHADER_READ_ONLY_OPTIMAL
-  gpu.transition_images(
+  vk.CmdPipelineBarrier(
     command_buffer,
-    gbuffer_images[:],
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR},
-    1,
-    {.COLOR_ATTACHMENT_OUTPUT},
+    {.COLOR_ATTACHMENT_OUTPUT, .LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER},
-    {.SHADER_READ},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    len(image_barriers),
+    raw_data(image_barriers[:]),
   )
 }
 

@@ -231,8 +231,16 @@ submit_queue_and_present :: proc(
   frame_index: u32,
   compute_command_buffer: Maybe(vk.CommandBuffer) = nil,
 ) -> vk.Result {
-  if compute_cmd, has_compute := compute_command_buffer.?; has_compute && gctx.has_async_compute {
+  wait_semaphores: [dynamic]vk.Semaphore
+  wait_stages: [dynamic]vk.PipelineStageFlags
+  defer delete(wait_semaphores)
+  defer delete(wait_stages)
+  append(&wait_semaphores, self.image_available_semaphores[frame_index])
+  append(&wait_stages, vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT})
+  if compute_cmd, has_compute := compute_command_buffer.?; has_compute {
     if compute_queue, ok := gctx.compute_queue.?; ok {
+      append(&wait_semaphores, self.compute_finished_semaphores[frame_index])
+      append(&wait_stages, vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER})
       compute_submit := vk.SubmitInfo {
         sType                = .SUBMIT_INFO,
         commandBufferCount   = 1,
@@ -242,16 +250,6 @@ submit_queue_and_present :: proc(
       }
       vk.QueueSubmit(compute_queue, 1, &compute_submit, 0) or_return
     }
-  }
-  wait_semaphores: [dynamic]vk.Semaphore
-  wait_stages: [dynamic]vk.PipelineStageFlags
-  defer delete(wait_semaphores)
-  defer delete(wait_stages)
-  append(&wait_semaphores, self.image_available_semaphores[frame_index])
-  append(&wait_stages, vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT})
-  if compute_command_buffer != nil && gctx.has_async_compute {
-    append(&wait_semaphores, self.compute_finished_semaphores[frame_index])
-    append(&wait_stages, vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER})
   }
   graphics_submit := vk.SubmitInfo {
     sType                = .SUBMIT_INFO,
