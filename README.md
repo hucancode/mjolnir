@@ -5,7 +5,7 @@ Mjolnir is a minimalistic rendering engine. The goal is to create a simple set o
 [![Logic Tests](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml)
 [![Graphics Tests](https://github.com/hucancode/mjolnir/actions/workflows/visual-test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/visual-test.yml)
 
-![](./readme/render-target.png)
+![](./readme/transparent.png)
 
 # Build scripts
 ```sh
