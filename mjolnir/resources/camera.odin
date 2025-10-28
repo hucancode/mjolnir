@@ -530,37 +530,35 @@ camera_resize :: proc(
     }
   }
   // Destroy depth pyramids (views, samplers, textures)
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    for mip in 0 ..< camera.depth_pyramid[frame].mip_levels {
+  for &p in camera.depth_pyramid {
+    for mip in 0 ..< p.mip_levels {
       vk.DestroyImageView(
         gctx.device,
-        camera.depth_pyramid[frame].views[mip],
+        p.views[mip],
         nil,
       )
     }
     vk.DestroyImageView(
       gctx.device,
-      camera.depth_pyramid[frame].full_view,
+      p.full_view,
       nil,
     )
-    vk.DestroySampler(gctx.device, camera.depth_pyramid[frame].sampler, nil)
+    vk.DestroySampler(gctx.device, p.sampler, nil)
     if pyramid_item, freed := free(
       &manager.image_2d_buffers,
-      camera.depth_pyramid[frame].texture,
+      p.texture,
     ); freed {
       gpu.image_destroy(gctx.device, pyramid_item)
     }
-    camera.depth_pyramid[frame] = {}
+    p = {}
   }
   // Destroy attachment textures
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    for attachment_type in AttachmentType {
-      handle := camera.attachments[attachment_type][frame]
-      if handle.index == 0 && handle.generation == 0 do continue
+  for attachment_type in AttachmentType {
+    for &handle in camera.attachments[attachment_type] {
       if item, freed := free(&manager.image_2d_buffers, handle); freed {
         gpu.image_destroy(gctx.device, item)
       }
-      camera.attachments[attachment_type][frame] = {}
+      handle = {}
     }
   }
   // Update dimensions and aspect ratio
