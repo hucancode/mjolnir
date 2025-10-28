@@ -184,9 +184,7 @@ image_create :: proc(
       },
       subresourceRange = {
         aspectMask = img.spec.aspect_mask,
-        baseMipLevel = 0,
         levelCount = img.spec.mip_levels,
-        baseArrayLayer = 0,
         layerCount = max(img.spec.array_layers, 1),
       },
     }
@@ -239,9 +237,7 @@ image_create_with_data :: proc(
     image = img.image,
     subresourceRange = {
       aspectMask = img.spec.aspect_mask,
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = max(img.spec.array_layers, 1),
     },
     srcAccessMask = {},
@@ -261,16 +257,11 @@ image_create_with_data :: proc(
   )
   // Copy buffer to image
   region := vk.BufferImageCopy {
-    bufferOffset = 0,
-    bufferRowLength = 0,
-    bufferImageHeight = 0,
     imageSubresource = {
       aspectMask = img.spec.aspect_mask,
       mipLevel = 0,
-      baseArrayLayer = 0,
       layerCount = max(img.spec.array_layers, 1),
     },
-    imageOffset = {0, 0, 0},
     imageExtent = {img.spec.width, img.spec.height, img.spec.depth},
   }
   vk.CmdCopyBufferToImage(
@@ -291,9 +282,7 @@ image_create_with_data :: proc(
     image = img.image,
     subresourceRange = {
       aspectMask = img.spec.aspect_mask,
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = max(img.spec.array_layers, 1),
     },
     srcAccessMask = {.TRANSFER_WRITE},
@@ -368,9 +357,7 @@ image_create_with_mipmaps :: proc(
     dstAccessMask = {.TRANSFER_WRITE},
     subresourceRange = {
       aspectMask = img.spec.aspect_mask,
-      baseArrayLayer = 0,
       layerCount = max(img.spec.array_layers, 1),
-      baseMipLevel = 0,
       levelCount = img.spec.mip_levels,
     },
   }
@@ -388,16 +375,10 @@ image_create_with_mipmaps :: proc(
   )
   // Copy base mip level from staging buffer
   region := vk.BufferImageCopy {
-    bufferOffset = 0,
-    bufferRowLength = 0,
-    bufferImageHeight = 0,
     imageSubresource = {
       aspectMask = img.spec.aspect_mask,
-      mipLevel = 0,
-      baseArrayLayer = 0,
       layerCount = max(img.spec.array_layers, 1),
     },
-    imageOffset = {0, 0, 0},
     imageExtent = {img.spec.width, img.spec.height, img.spec.depth},
   }
   vk.CmdCopyBufferToImage(
@@ -437,7 +418,6 @@ image_create_with_mipmaps :: proc(
       srcSubresource = {
         aspectMask = img.spec.aspect_mask,
         mipLevel = i - 1,
-        baseArrayLayer = 0,
         layerCount = max(img.spec.array_layers, 1),
       },
       dstOffsets = {
@@ -447,7 +427,6 @@ image_create_with_mipmaps :: proc(
       dstSubresource = {
         aspectMask = img.spec.aspect_mask,
         mipLevel = i,
-        baseArrayLayer = 0,
         layerCount = max(img.spec.array_layers, 1),
       },
     }
