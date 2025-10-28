@@ -534,7 +534,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   if main_camera == nil do return .ERROR_UNKNOWN
   for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue
-    resources.camera_upload_data(&self.rm, &entry.item, u32(cam_index))
+    resources.camera_upload_data(&self.rm, &entry.item, u32(cam_index), self.frame_index)
   }
   resources.update_light_shadow_camera_transforms(&self.rm, self.frame_index)
   if self.pre_render_proc != nil {

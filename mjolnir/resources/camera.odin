@@ -63,8 +63,9 @@ Camera :: struct {
     PerspectiveProjection,
     OrthographicProjection,
   },
-  // GPU data for bindless buffer
-  data:                         CameraData,
+  // Per-frame GPU data
+  // Frame N compute uses data[N], Frame N render uses data[N-1]
+  data:                         [MAX_FRAMES_IN_FLIGHT]CameraData,
   // Render target data
   extent:                       vk.Extent2D,
   attachments:                  [AttachmentType][MAX_FRAMES_IN_FLIGHT]Handle,
@@ -341,30 +342,32 @@ camera_destroy :: proc(
   }
 }
 
-// Update camera data in the bindless buffer
+// Update camera data in the bindless buffer for a specific frame
+// frame_index: which frame's data to update (for double-buffering)
 camera_upload_data :: proc(
   manager: ^Manager,
   camera: ^Camera,
   camera_index: u32,
+  frame_index: u32,
 ) {
-  camera.data.view = camera_calculate_view_matrix(camera)
-  camera.data.projection = camera_calculate_projection_matrix(camera)
+  camera.data[frame_index].view = camera_calculate_view_matrix(camera)
+  camera.data[frame_index].projection = camera_calculate_projection_matrix(camera)
   near, far := camera_get_near_far(camera)
-  camera.data.viewport_params = [4]f32 {
+  camera.data[frame_index].viewport_params = [4]f32 {
     f32(camera.extent.width),
     f32(camera.extent.height),
     near,
     far,
   }
-  camera.data.position = [4]f32 {
+  camera.data[frame_index].position = [4]f32 {
     camera.position[0],
     camera.position[1],
     camera.position[2],
     1.0,
   }
-  frustum := make_frustum(camera.data.projection * camera.data.view)
-  camera.data.frustum_planes = frustum.planes
-  gpu.write(&manager.camera_buffer, &camera.data, int(camera_index))
+  frustum := make_frustum(camera.data[frame_index].projection * camera.data[frame_index].view)
+  camera.data[frame_index].frustum_planes = frustum.planes
+  gpu.write(&manager.camera_buffer, &camera.data[frame_index], int(camera_index))
 }
 
 // Helper functions that work directly with Camera
@@ -1089,13 +1092,17 @@ camera_update_depth_reduce_descriptor_set :: proc(
   frame_index: u32,
   mip: u32,
 ) {
-  curr_depth_texture := get(
+  // For mip 0: read from PREVIOUS frame's depth texture to support async compute
+  // pyramid[N] mip 0 reads from depth[N-1]
+  // This allows compute to build pyramid[N] while graphics renders depth[N]
+  prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
+  prev_depth_texture := get(
     manager.image_2d_buffers,
-    camera.attachments[.DEPTH][frame_index],
+    camera.attachments[.DEPTH][prev_frame],
   )
-  // Mip 0 reads from depth texture, other mips read from previous mip level
+  // Mip 0 reads from previous frame's depth texture, other mips read from current pyramid's previous mip level
   source_view :=
-    mip == 0 ? curr_depth_texture.view : camera.depth_pyramid[frame_index].views[mip - 1]
+    mip == 0 ? prev_depth_texture.view : camera.depth_pyramid[frame_index].views[mip - 1]
   // Use DEPTH_STENCIL_READ_ONLY_OPTIMAL for depth texture (mip 0), SHADER_READ_ONLY_OPTIMAL for pyramid mips
   source_layout :=
     mip == 0 ? vk.ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL : vk.ImageLayout.SHADER_READ_ONLY_OPTIMAL

@@ -105,6 +105,18 @@ record_compute_commands :: proc(
     if !entry.active do continue
     if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
     cam := &entry.item
+    // STEP 1: Build pyramid[next_frame] from depth[frame_index]
+    // This uses the depth buffer that was just written by the previous frame's graphics pass
+    world.visibility_system_dispatch_pyramid(
+      &world_state.visibility,
+      gctx,
+      compute_buffer,
+      cam,
+      u32(cam_index),
+      next_frame_index,
+      rm,
+    )
+    // STEP 2: Cull using camera[next_frame] + pyramid[next_frame] → draw_list[next_frame]
     world.visibility_system_dispatch_culling(
       &world_state.visibility,
       gctx,
@@ -274,7 +286,7 @@ record_camera_visibility :: proc(
     if resources.PassType.SHADOW not_in entry.item.enabled_passes do continue
     cam := &entry.item
     // Upload camera data to GPU buffer
-    resources.camera_upload_data(rm, cam, u32(cam_index))
+    resources.camera_upload_data(rm, cam, u32(cam_index), frame_index)
     world.visibility_system_dispatch_culling(
       &world_state.visibility,
       gctx,
@@ -347,12 +359,13 @@ record_geometry_pass :: proc(
     log.error("Failed to get camera for geometry pass")
     return .ERROR_UNKNOWN
   }
-  // STEP 1: Use pre-computed draw list
-  // Double-buffering works on same queue too:
-  //   - Frame N-1 computed for buffer[N]
-  //   - Frame N graphics reads buffer[N]
-  // No barriers needed - natural ordering ensures correctness
-  // STEP 2: Render depth - reads draw list, writes depth[N]
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GRAPHICS QUEUE: Frame N rendering
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Uses draw_list[N-1] and camera[N-1] (prepared by frame N-1 compute)
+  // This enables parallel execution with frame N compute (which prepares data for frame N+1)
+  //
+  // STEP 1: Render depth[N] using draw_list[N-1] and camera[N-1]
   world.visibility_system_dispatch_depth(
     &world_state.visibility,
     gctx,
@@ -364,17 +377,8 @@ record_geometry_pass :: proc(
     {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
     rm,
   )
-  // STEP 3: Build pyramid - reads depth[N], builds pyramid[N]
-  world.visibility_system_dispatch_pyramid(
-    &world_state.visibility,
-    gctx,
-    command_buffer,
-    camera,
-    camera_handle.index,
-    frame_index,
-    rm,
-  )
-  // STEP 4: Render geometry color - reads draw list, reads depth[N] for depth testing
+  // STEP 2: Render geometry pass using draw_list[N-1] and camera[N-1]
+  prev_frame := (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
   geometry_pass.begin_pass(camera_handle, command_buffer, rm, frame_index)
   geometry_pass.render(
@@ -383,8 +387,8 @@ record_geometry_pass :: proc(
     command_buffer,
     rm,
     frame_index,
-    camera.late_draw_commands[frame_index].buffer,
-    camera.late_draw_count[frame_index].buffer,
+    camera.late_draw_commands[prev_frame].buffer,
+    camera.late_draw_count[prev_frame].buffer,
     command_stride,
   )
   geometry_pass.end_pass(camera_handle, command_buffer, rm, frame_index)
@@ -518,6 +522,8 @@ record_transparency_pass :: proc(
     {},
     rm,
   )
+  // Use previous frame's draw list for transparency rendering
+  prev_frame := (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
   // Render sprites with sprite pipeline
   transparency.render(
@@ -527,8 +533,8 @@ record_transparency_pass :: proc(
     command_buffer,
     rm,
     frame_index,
-    camera.late_draw_commands[frame_index].buffer,
-    camera.late_draw_count[frame_index].buffer,
+    camera.late_draw_commands[prev_frame].buffer,
+    camera.late_draw_count[prev_frame].buffer,
     command_stride,
   )
   // Cull wireframe objects

@@ -145,37 +145,8 @@ visibility_system_dispatch_depth :: proc(
     include_flags,
     exclude_flags,
   )
-  // Depth write complete, transition to shader read for pyramid building
-  depth_to_pyramid := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    dstAccessMask = {.SHADER_READ},
-    oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = depth_texture.image,
-    subresourceRange = {
-      aspectMask = {.DEPTH},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.LATE_FRAGMENT_TESTS}, // Depth pass complete
-    {.COMPUTE_SHADER}, // Pyramid pass starts
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &depth_to_pyramid,
-  )
 }
+
 // STEP 3: Build pyramid - reads depth[N], builds pyramid[N]
 visibility_system_dispatch_pyramid :: proc(
   system: ^VisibilitySystem,
@@ -183,49 +154,17 @@ visibility_system_dispatch_pyramid :: proc(
   command_buffer: vk.CommandBuffer,
   camera: ^resources.Camera,
   camera_index: u32,
-  frame_index: u32,
+  target_frame_index: u32, // Which pyramid to write to
   rm: ^resources.Manager,
 ) {
   if system.node_count == 0 {
     return
   }
-  depth_texture := resources.get(
-    rm.image_2d_buffers,
-    camera.attachments[.DEPTH][frame_index],
-  )
-  build_depth_pyramid(system, gctx, command_buffer, camera, frame_index, rm)
-  // Pyramid read complete, depth[N] can now be used by geometry for depth testing
-  pyramid_done := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_READ},
-    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
-    oldLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = depth_texture.image,
-    subresourceRange = {
-      aspectMask = {.DEPTH},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER}, // Pyramid compute complete
-    {.EARLY_FRAGMENT_TESTS}, // Geometry depth testing can start
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &pyramid_done,
-  )
+  // Build pyramid[target] from depth[target-1]
+  // This allows async compute to build pyramid[N] from depth[N-1] while graphics renders depth[N]
+  build_depth_pyramid(system, gctx, command_buffer, camera, target_frame_index, rm)
   if system.stats_enabled {
-    log_culling_stats(system, camera, camera_index, frame_index)
+    log_culling_stats(system, camera, camera_index, target_frame_index)
   }
 }
 
@@ -1018,11 +957,13 @@ render_depth_pass :: proc(
       raw_data(offsets[:]),
     )
     vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
+    // Use previous frame's draw list (prepared by frame N-1 compute)
+    prev_frame := (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
     vk.CmdDrawIndexedIndirectCount(
       command_buffer,
-      camera.late_draw_commands[frame_index].buffer,
+      camera.late_draw_commands[prev_frame].buffer,
       0, // offset
-      camera.late_draw_count[frame_index].buffer,
+      camera.late_draw_count[prev_frame].buffer,
       0, // count offset
       system.max_draws,
       draw_command_stride(),
@@ -1037,20 +978,21 @@ build_depth_pyramid :: proc(
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera: ^resources.Camera,
-  frame_index: u32,
+  target_frame_index: u32, // Which pyramid to build (reads from depth[target-1] via descriptors)
   rm: ^resources.Manager,
 ) {
   vk.CmdBindPipeline(command_buffer, .COMPUTE, system.depth_reduce_pipeline)
-  // generate ALL mip levels using the same shader
-  // for mip 0, reads from previous frame's depth texture; for others, reads from current frame's previous mip
-  for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
+  // Generate ALL mip levels using the same shader
+  // Mip 0: reads from depth[target-1] (configured in descriptor sets)
+  // Other mips: read from pyramid[target] mip-1
+  for mip in 0 ..< camera.depth_pyramid[target_frame_index].mip_levels {
     vk.CmdBindDescriptorSets(
       command_buffer,
       .COMPUTE,
       system.depth_reduce_layout,
       0,
       1,
-      &camera.depth_reduce_descriptor_sets[frame_index][mip],
+      &camera.depth_reduce_descriptor_sets[target_frame_index][mip],
       0,
       nil,
     )
@@ -1065,13 +1007,13 @@ build_depth_pyramid :: proc(
       size_of(push_constants),
       &push_constants,
     )
-    mip_width := max(1, camera.depth_pyramid[frame_index].width >> mip)
-    mip_height := max(1, camera.depth_pyramid[frame_index].height >> mip)
+    mip_width := max(1, camera.depth_pyramid[target_frame_index].width >> mip)
+    mip_height := max(1, camera.depth_pyramid[target_frame_index].height >> mip)
     dispatch_x := (mip_width + 31) / 32
     dispatch_y := (mip_height + 31) / 32
     vk.CmdDispatch(command_buffer, dispatch_x, dispatch_y, 1)
     // only synchronize the dependency chain, don't transition layouts
-    if mip < camera.depth_pyramid[frame_index].mip_levels - 1 {
+    if mip < camera.depth_pyramid[target_frame_index].mip_levels - 1 {
       vk.CmdPipelineBarrier(
         command_buffer,
         {.COMPUTE_SHADER},
@@ -1086,43 +1028,7 @@ build_depth_pyramid :: proc(
       )
     }
   }
-  pyramid_texture := resources.get(
-    rm.image_2d_buffers,
-    camera.depth_pyramid[frame_index].texture,
-  )
-  // final layout transition for ALL mips at once after generation completes
-  final_barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_WRITE},
-    dstAccessMask = {.SHADER_READ},
-    oldLayout = .GENERAL,
-    newLayout = .SHADER_READ_ONLY_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = pyramid_texture.image,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = camera.depth_pyramid[frame_index].mip_levels,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER},
-    {.COMPUTE_SHADER},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &final_barrier,
-  )
 }
-
-// REMOVED: execute_late_pass and execute_sphere_pass - inlined into their calling sites
 
 @(private)
 log_culling_stats :: proc(
