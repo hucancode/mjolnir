@@ -524,7 +524,7 @@ init :: proc(
     TEXT_MAX_INDICES,
     {.INDEX_BUFFER},
   ) or_return
-  log.infof("retained UI initialized (text uses same pipeline)")
+  log.infof("retained UI initialized")
   return .SUCCESS
 }
 

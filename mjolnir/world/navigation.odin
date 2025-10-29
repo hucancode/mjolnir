@@ -693,8 +693,9 @@ spawn_nav_agent_at :: proc(
   radius: f32 = 0.5,
   height: f32 = 2.0,
 ) -> (
-  resources.Handle,
-  ^Node,
+  handle: resources.Handle,
+  node: ^Node,
+  ok: bool,
 ) {
   attachment := NavMeshAgentAttachment {
     target_position     = position,
@@ -706,11 +707,7 @@ spawn_nav_agent_at :: proc(
     auto_update_path    = true,
     pathfinding_enabled = true,
   }
-  handle, node, ok := spawn_at(world, position, attachment)
-  if !ok {
-    return {}, nil
-  }
-  return handle, node
+  return spawn_at(world, position, attachment)
 }
 
 nav_agent_set_target :: proc(

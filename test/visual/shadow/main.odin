@@ -10,9 +10,13 @@ import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
 
+
+orbit_controller: world.CameraController
+light_handle: resources.Handle
 main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup_scene
+  engine.update_proc = update
   mjolnir.run(engine, 800, 600, "visual-shadow-casting")
 }
 
@@ -21,6 +25,9 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if camera != nil {
     mjolnir.camera_look_at(camera, {6.0, 4.5, 6.0}, {0.0, 0.8, 0.0})
   }
+  world.setup_camera_controller_callbacks(engine.window)
+  orbit_controller = world.camera_controller_orbit_init(engine.window)
+  world.camera_controller_sync(&orbit_controller, camera)
   plane_geom := geometry.make_quad()
   plane_mesh, plane_mesh_ok := mjolnir.create_mesh(
     engine,
@@ -83,14 +90,29 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     mjolnir.translate(cube_node, 0.0, 1.5, 0.0)
     mjolnir.scale(cube_node, 0.8)
   }
-  _, light_node, light_ok := mjolnir.spawn_spot_light(
+  handle, node, ok := mjolnir.spawn_spot_light(
     engine,
     {1.0, 0.95, 0.8, 3.5},
     radius = 18.0,
     angle = math.PI * 0.3,
     position = {0.0, 5.0, 0.0},
   )
-  if light_ok {
-    mjolnir.rotate(light_node, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  if ok {
+    light_handle = handle
+    mjolnir.rotate(node, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   }
+}
+
+
+update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+  using mjolnir, geometry
+  if main_camera := get_main_camera(engine); main_camera != nil {
+      world.camera_controller_orbit_update(
+        &orbit_controller,
+        main_camera,
+        delta_time,
+      )
+  }
+  t := time_since_start(engine)
+  mjolnir.translate(engine, light_handle, 0, math.sin(t)*0.5+4.5, 0)
 }

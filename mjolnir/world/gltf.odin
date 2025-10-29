@@ -632,8 +632,7 @@ construct_scene :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
-    node_handle, node, ok := resources.alloc(&world.nodes)
-    if !ok do continue
+    node_handle, node := resources.alloc(&world.nodes) or_continue
     init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {

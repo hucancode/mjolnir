@@ -321,8 +321,7 @@ spawn_spot_light :: proc(
   node: ^world.Node,
   ok: bool,
 ) {
-  handle, node, ok = spawn(engine, nil)
-  if !ok do return
+  handle, node = spawn(engine) or_return
   attachment := world.create_spot_light_attachment(
     handle,
     &engine.rm,
@@ -334,6 +333,7 @@ spawn_spot_light :: proc(
   ) or_return
   node.attachment = attachment
   translate(node, position.x, position.y, position.z)
+  ok = true
   return
 }
 
@@ -348,8 +348,7 @@ spawn_point_light :: proc(
   node: ^world.Node,
   ok: bool,
 ) {
-  handle, node, ok = spawn(engine, nil)
-  if !ok do return
+  handle, node = spawn(engine) or_return
   attachment := world.create_point_light_attachment(
     handle,
     &engine.rm,
@@ -360,6 +359,7 @@ spawn_point_light :: proc(
   ) or_return
   node.attachment = attachment
   translate(node, position.x, position.y, position.z)
+  ok = true
   return
 }
 
@@ -373,8 +373,7 @@ spawn_directional_light :: proc(
   node: ^world.Node,
   ok: bool,
 ) {
-  handle, node, ok = spawn(engine, nil)
-  if !ok do return
+  handle, node = spawn(engine) or_return
   attachment := world.create_directional_light_attachment(
     handle,
     &engine.rm,
@@ -384,6 +383,7 @@ spawn_directional_light :: proc(
   )
   node.attachment = attachment
   translate(node, position.x, position.y, position.z)
+  ok = true
   return
 }
 
@@ -434,13 +434,10 @@ create_camera :: proc(
   near_plane: f32 = 0.1,
   far_plane: f32 = 100.0,
 ) -> (
-  resources.Handle,
-  bool,
+  handle: resources.Handle,
+  ok: bool,
 ) #optional_ok {
-  camera_handle, camera_ptr, camera_ok := resources.alloc(&engine.rm.cameras)
-  if !camera_ok {
-    return {}, false
-  }
+  camera_handle, camera_ptr := resources.alloc(&engine.rm.cameras) or_return
   init_result := resources.camera_init(
     camera_ptr,
     &engine.gctx,
@@ -469,19 +466,15 @@ get_camera_attachment :: proc(
   attachment_type: resources.AttachmentType,
   frame_index: u32 = 0,
 ) -> (
-  resources.Handle,
-  bool,
+  handle: resources.Handle,
+  ok: bool,
 ) #optional_ok {
-  camera := resources.get(engine.rm.cameras, camera_handle)
-  if camera == nil do return {}, false
-  handle := resources.camera_get_attachment(
+  camera := resources.get(engine.rm.cameras, camera_handle) or_return
+  handle = resources.camera_get_attachment(
     camera,
     attachment_type,
     frame_index,
   )
-  if handle.generation == 0 {
-    return {}, false
-  }
   return handle, true
 }
 
@@ -649,18 +642,18 @@ spawn_nav_agent_at :: proc(
   radius: f32 = 0.6,
   height: f32 = 2.0,
 ) -> (
-  resources.Handle,
-  bool,
+  handle: resources.Handle,
+  ok: bool,
 ) #optional_ok {
-  handle, _ := world.spawn_nav_agent_at(
+  handle, _ = world.spawn_nav_agent_at(
     &engine.world,
     &engine.rm,
     &engine.gctx,
     position,
     radius,
     height,
-  )
-  return handle, handle.index != 0xFFFFFFFF
+  ) or_return
+  return
 }
 
 nav_agent_set_target :: proc(

@@ -327,12 +327,11 @@ _spawn_internal :: proc(
   attachment: NodeAttachment,
   rm: ^resources.Manager,
 ) -> (
-  resources.Handle,
-  ^Node,
-  bool,
+  handle: resources.Handle,
+  node: ^Node,
+  ok: bool,
 ) {
-  handle, node, ok := resources.alloc(&world.nodes)
-  if !ok do return {}, nil, false
+  handle, node = resources.alloc(&world.nodes) or_return
   _init_node_with_attachment(node, attachment, handle, rm)
   geometry.transform_translate(
     &node.transform,

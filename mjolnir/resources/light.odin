@@ -187,8 +187,6 @@ update_light_shadow_camera_transforms :: proc(
 ) {
   for &entry, light_index in manager.lights.entries do if entry.active {
     light := &entry.item
-    if !light.cast_shadow do continue
-    if light.camera_handle.generation == 0 do continue
     // Get light's world transform from node
     node_data := gpu.mutable_buffer_get(&manager.node_data_buffer, light.node_index)
     if node_data == nil do continue
@@ -198,32 +196,35 @@ update_light_shadow_camera_transforms :: proc(
     light_position := world_matrix[3].xyz
     light_direction := world_matrix[2].xyz
     shadow_map_id: u32 = 0xFFFFFFFF
-    #partial switch light.type {
-    case .POINT:
-      // Point lights use spherical cameras
-      spherical_cam := get(manager.spherical_cameras, light.camera_handle)
-      if spherical_cam != nil {
-        spherical_cam.center = light_position
-        shadow_map_id = spherical_cam.depth_cube[frame_index].index
-      }
-    case .DIRECTIONAL:
-      // TODO: Implement directional light later
-      cam := get(manager.cameras, light.camera_handle)
-      if cam != nil {
-        camera_position := light_position - light_direction * 50.0 // Far back
-        target_position := light_position
-        camera_look_at(cam, camera_position, target_position)
-        shadow_map_id = camera_get_attachment(cam, .DEPTH, frame_index).index
-      }
-    case .SPOT:
-      cam := get(manager.cameras, light.camera_handle)
-      if cam != nil {
-        target_position := light_position + light_direction
-        camera_look_at(cam, light_position, target_position)
-        shadow_map_id = camera_get_attachment(cam, .DEPTH, frame_index).index
+    // Update shadow camera transforms only for shadow-casting lights
+    if light.cast_shadow && light.camera_handle.generation != 0 {
+      #partial switch light.type {
+      case .POINT:
+        // Point lights use spherical cameras
+        spherical_cam := get(manager.spherical_cameras, light.camera_handle)
+        if spherical_cam != nil {
+          spherical_cam.center = light_position
+          shadow_map_id = spherical_cam.depth_cube[frame_index].index
+        }
+      case .DIRECTIONAL:
+        // TODO: Implement directional light later
+        cam := get(manager.cameras, light.camera_handle)
+        if cam != nil {
+          camera_position := light_position - light_direction * 50.0 // Far back
+          target_position := light_position
+          camera_look_at(cam, camera_position, target_position)
+          shadow_map_id = camera_get_attachment(cam, .DEPTH, frame_index).index
+        }
+      case .SPOT:
+        cam := get(manager.cameras, light.camera_handle)
+        if cam != nil {
+          target_position := light_position + light_direction
+          camera_look_at(cam, light_position, target_position)
+          shadow_map_id = camera_get_attachment(cam, .DEPTH, frame_index).index
+        }
       }
     }
-    // Write to per-frame dynamic light data buffer (position + shadow_map synchronized)
+    // Always write dynamic light data (position + shadow_map) for all lights
     dynamic_data := DynamicLightData {
       position   = {light_position.x, light_position.y, light_position.z, 1.0},
       shadow_map = shadow_map_id,

@@ -10,10 +10,14 @@ import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
 
+orbit_controller: world.CameraController
+light_handle: resources.Handle
+
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup_scene
+  engine.update_proc = update
   mjolnir.run(engine, 800, 600, "visual-lights-no-shadows")
 }
 
@@ -22,6 +26,9 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if camera != nil {
     mjolnir.camera_look_at(camera, {6.0, 4.0, 6.0}, {0.0, 0.0, 0.0})
   }
+  world.setup_camera_controller_callbacks(engine.window)
+  orbit_controller = world.camera_controller_orbit_init(engine.window)
+  world.camera_controller_sync(&orbit_controller, camera)
   plane_geom := geometry.make_quad()
   plane_mesh, plane_mesh_ok := mjolnir.create_mesh(
     engine,
@@ -91,18 +98,32 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     {1.0, 0.85, 0.6, 1.0},
     radius = 5.0,
     cast_shadow = false,
-    position = {1.5, 3.0, -1.0},
+    position = {0.0, 3.0, 0.0},
   )
-  _, spot_node, spot_ok := mjolnir.spawn_spot_light(
+  spot_handle, spot_node, spot_ok := mjolnir.spawn_spot_light(
     engine,
     {0.6, 0.8, 1.0, 1.0},
     radius = 18.0,
-    angle = math.PI * 0.25,
+    angle = math.PI * 0.15,
     cast_shadow = false,
-    position = {-3.0, 5.0, 3.0},
   )
   if spot_ok {
-    mjolnir.rotate(spot_node, -math.PI * 0.7, linalg.VECTOR3F32_X_AXIS)
-    mjolnir.rotate(spot_node, math.PI * -0.25)
+    light_handle = spot_handle
+  } else {
+    log.errorf("something went wrong, could not create spot light")
   }
+}
+
+update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+  using mjolnir, geometry
+  if main_camera := get_main_camera(engine); main_camera != nil {
+      world.camera_controller_orbit_update(
+        &orbit_controller,
+        main_camera,
+        delta_time,
+      )
+  }
+  t := time_since_start(engine)
+  mjolnir.translate(engine, light_handle, 0, 2, 0)
+  mjolnir.rotate(engine, light_handle, math.PI*(math.sin(t)*0.5+0.5), linalg.VECTOR3F32_X_AXIS)
 }
