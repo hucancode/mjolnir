@@ -669,9 +669,7 @@ render :: proc(
         image = dst_texture.image,
         subresourceRange = {
           aspectMask = {.COLOR},
-          baseMipLevel = 0,
           levelCount = 1,
-          baseArrayLayer = 0,
           layerCount = 1,
         },
       }
@@ -716,9 +714,7 @@ render :: proc(
         image = src_texture.image,
         subresourceRange = {
           aspectMask = {.COLOR},
-          baseMipLevel = 0,
           levelCount = 1,
-          baseArrayLayer = 0,
           layerCount = 1,
         },
       }
@@ -974,9 +970,7 @@ begin_record :: proc(
       image = final_image.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     }
@@ -1005,9 +999,7 @@ begin_record :: proc(
     image = swapchain_image,
     subresourceRange = {
       aspectMask = {.COLOR},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 1,
     },
   }

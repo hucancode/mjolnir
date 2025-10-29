@@ -924,9 +924,7 @@ render_depth_pass :: proc(
     image = depth_texture.image,
     subresourceRange = {
       aspectMask = {.DEPTH},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 1,
     },
   }
@@ -1040,9 +1038,7 @@ render_depth_pass :: proc(
     image = depth_texture.image,
     subresourceRange = {
       aspectMask = {.DEPTH},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 1,
     },
   }
@@ -1172,9 +1168,7 @@ render_spherical_depth_pass :: proc(
     image = depth_cube.image,
     subresourceRange = {
       aspectMask = {.DEPTH},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 6, // All cube faces
     },
   }
@@ -1293,9 +1287,7 @@ render_spherical_depth_pass :: proc(
     image = depth_cube.image,
     subresourceRange = {
       aspectMask = {.DEPTH},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 6, // All cube faces
     },
   }

@@ -400,9 +400,7 @@ copy_image :: proc(
     image = dst.image,
     subresourceRange = {
       aspectMask = {.COLOR},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 1,
     },
   }
@@ -452,9 +450,7 @@ copy_image :: proc(
     image = dst.image,
     subresourceRange = {
       aspectMask = {.COLOR},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 1,
     },
   }
@@ -492,9 +488,7 @@ copy_image_for_mips :: proc(
     image = dst.image,
     subresourceRange = {
       aspectMask = {.COLOR},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 1,
     },
   }
@@ -575,9 +569,7 @@ create_image_buffer :: proc(
       components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
       subresourceRange = {
         aspectMask = aspect_mask,
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -648,9 +640,7 @@ depth_image_init :: proc(
     image = img_buffer.image,
     subresourceRange = {
       aspectMask = {.DEPTH},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 1,
     },
     srcAccessMask = {}, // No source access needed for UNDEFINED -> WRITE
@@ -682,9 +672,7 @@ depth_image_init :: proc(
       components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
       subresourceRange = {
         aspectMask = {.DEPTH},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -723,7 +711,6 @@ cube_depth_texture_init :: proc(
       },
       subresourceRange = {
         aspectMask = self.spec.aspect_mask,
-        baseMipLevel = 0,
         levelCount = 1,
         baseArrayLayer = u32(i),
         layerCount = 1,
@@ -815,9 +802,7 @@ create_image_view_with_mips :: proc(
     format = format,
     subresourceRange = {
       aspectMask = aspect,
-      baseMipLevel = 0,
       levelCount = mip_levels,
-      baseArrayLayer = 0,
       layerCount = 1,
     },
   }
@@ -861,9 +846,7 @@ generate_mipmaps :: proc(
     dstAccessMask = {.TRANSFER_WRITE},
     subresourceRange = {
       aspectMask = {.COLOR},
-      baseArrayLayer = 0,
       layerCount = 1,
-      baseMipLevel = 0,
       levelCount = mip_levels,
     },
   }

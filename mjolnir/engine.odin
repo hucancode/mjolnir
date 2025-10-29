@@ -734,9 +734,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     image = self.swapchain.images[self.swapchain.image_index],
     subresourceRange = {
       aspectMask = {.COLOR},
-      baseMipLevel = 0,
       levelCount = 1,
-      baseArrayLayer = 0,
       layerCount = 1,
     },
   }

@@ -134,9 +134,7 @@ swapchain_init :: proc(
         components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
         subresourceRange = {
           aspectMask = {.COLOR},
-          baseMipLevel = 0,
           levelCount = 1,
-          baseArrayLayer = 0,
           layerCount = 1,
         },
       },

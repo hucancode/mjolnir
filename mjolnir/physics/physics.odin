@@ -58,16 +58,13 @@ create_body :: proc(
   mass: f32,
   is_static := false,
 ) -> (
-  resources.Handle,
-  ^RigidBody,
-  bool,
+  handle: resources.Handle,
+  body: ^RigidBody,
+  ok: bool,
 ) {
-  handle, body, ok := resources.alloc(&world.bodies)
-  if !ok {
-    return {}, nil, false
-  }
+  handle, body = resources.alloc(&world.bodies) or_return
   body^ = rigid_body_create(node_handle, mass, is_static)
-  return handle, body, true
+  return
 }
 
 destroy_body :: proc(

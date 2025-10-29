@@ -195,9 +195,7 @@ begin_pass :: proc(
       image = position_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -213,9 +211,7 @@ begin_pass :: proc(
       image = normal_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -231,9 +227,7 @@ begin_pass :: proc(
       image = albedo_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -249,9 +243,7 @@ begin_pass :: proc(
       image = metallic_roughness_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -267,9 +259,7 @@ begin_pass :: proc(
       image = emissive_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -285,9 +275,7 @@ begin_pass :: proc(
       image = final_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -436,9 +424,7 @@ end_pass :: proc(
       image = position_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -454,9 +440,7 @@ end_pass :: proc(
       image = normal_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -472,9 +456,7 @@ end_pass :: proc(
       image = albedo_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -490,9 +472,7 @@ end_pass :: proc(
       image = metallic_roughness_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
@@ -508,9 +488,7 @@ end_pass :: proc(
       image = emissive_texture.image,
       subresourceRange = {
         aspectMask = {.COLOR},
-        baseMipLevel = 0,
         levelCount = 1,
-        baseArrayLayer = 0,
         layerCount = 1,
       },
     },
