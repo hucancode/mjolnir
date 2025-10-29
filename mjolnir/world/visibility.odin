@@ -288,7 +288,7 @@ visibility_system_dispatch_spherical :: proc(
     system.sphere_cull_layout,
     0,
     1,
-    &camera.descriptor_set,
+    &camera.descriptor_sets[frame_index], // Use per-frame descriptor to match spherical camera data
     0,
     nil,
   )
@@ -911,13 +911,11 @@ render_depth_pass :: proc(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
-  // Transition from READ_ONLY_OPTIMAL (left by previous frame's post-processing)
-  // to ATTACHMENT_OPTIMAL (needed for clear and write)
   depth_ready_to_write := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_READ},
+    srcAccessMask = {},
     dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    oldLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    oldLayout = .UNDEFINED,
     newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
@@ -930,7 +928,7 @@ render_depth_pass :: proc(
   }
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.FRAGMENT_SHADER}, // previous frame's post-processing reads done
+    {.TOP_OF_PIPE}, // previous frame's post-processing reads done
     {.EARLY_FRAGMENT_TESTS}, // this frame's depth writes start
     {},
     0,
@@ -974,7 +972,7 @@ render_depth_pass :: proc(
   if system.depth_pipeline != 0 {
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, system.depth_pipeline)
     descriptor_sets := [?]vk.DescriptorSet {
-      rm.camera_buffer_descriptor_set,
+      rm.camera_buffer_descriptor_sets[frame_index], // Per-frame to avoid overlap
       rm.textures_descriptor_set,
       rm.bone_buffer_descriptor_set,
       rm.material_buffer_descriptor_set,
@@ -1155,13 +1153,12 @@ render_spherical_depth_pass :: proc(
     log.error("Failed to get depth cube for spherical camera")
     return
   }
-  // Transition from DEPTH_STENCIL_READ_ONLY_OPTIMAL (left by previous frame's lighting pass)
-  // to ATTACHMENT_OPTIMAL (needed for clear and write)
+  // Layout transition before rendering shadow depth
   depth_ready_to_write := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_READ},
+    srcAccessMask = {}, // No memory dependency - fence ensures visibility
     dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    oldLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    oldLayout = .UNDEFINED, // Discard previous contents
     newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
@@ -1174,8 +1171,8 @@ render_spherical_depth_pass :: proc(
   }
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.FRAGMENT_SHADER}, // previous frame's lighting pass reads done
-    {.EARLY_FRAGMENT_TESTS}, // this frame's depth writes start
+    {.TOP_OF_PIPE}, // No wait
+    {.EARLY_FRAGMENT_TESTS}, // Before depth writes
     {},
     0,
     nil,
@@ -1225,7 +1222,7 @@ render_spherical_depth_pass :: proc(
       system.spherical_depth_pipeline,
     )
     descriptor_sets := [?]vk.DescriptorSet {
-      rm.spherical_camera_buffer_descriptor_set,
+      rm.spherical_camera_buffer_descriptor_sets[frame_index], // Per-frame to avoid overlap
       rm.textures_descriptor_set,
       rm.bone_buffer_descriptor_set,
       rm.material_buffer_descriptor_set,
@@ -1248,7 +1245,7 @@ render_spherical_depth_pass :: proc(
     vk.CmdPushConstants(
       command_buffer,
       rm.spherical_camera_pipeline_layout,
-      {.VERTEX, .GEOMETRY},
+      {.VERTEX, .GEOMETRY, .FRAGMENT},
       0,
       size_of(u32),
       &cam_idx,

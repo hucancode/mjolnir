@@ -47,14 +47,14 @@ Manager :: struct {
     matrix[4, 4]f32,
   ),
   bone_matrix_slab:                          SlabAllocator,
-  // Bindless camera buffer system
+  // Bindless camera buffer system (per-frame to avoid frame overlap)
   camera_buffer_set_layout:                  vk.DescriptorSetLayout,
-  camera_buffer_descriptor_set:              vk.DescriptorSet,
-  camera_buffer:                             gpu.MutableBuffer(CameraData),
+  camera_buffer_descriptor_sets:             [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  camera_buffers:                            [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(CameraData),
   // Bindless spherical camera buffer system
   spherical_camera_buffer_set_layout:        vk.DescriptorSetLayout,
-  spherical_camera_buffer_descriptor_set:    vk.DescriptorSet,
-  spherical_camera_buffer:                   gpu.MutableBuffer(CameraData),
+  spherical_camera_buffer_descriptor_sets:   [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  spherical_camera_buffers:                  [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(SphericalCameraData),
   // Bindless material buffer system
   material_buffer_set_layout:                vk.DescriptorSetLayout,
   material_buffer_descriptor_set:            vk.DescriptorSet,
@@ -620,17 +620,9 @@ init_camera_buffer :: proc(
   manager: ^Manager,
 ) -> vk.Result {
   log.infof(
-    "Creating camera buffer with capacity %d cameras...",
+    "Creating per-frame camera buffers with capacity %d cameras...",
     MAX_ACTIVE_CAMERAS,
   )
-  // Create camera buffer
-  manager.camera_buffer = gpu.create_mutable_buffer(
-    gctx,
-    CameraData,
-    MAX_ACTIVE_CAMERAS,
-    {.STORAGE_BUFFER},
-    nil,
-  ) or_return
   // Create descriptor set layout
   camera_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -650,33 +642,43 @@ init_camera_buffer :: proc(
     nil,
     &manager.camera_buffer_set_layout,
   ) or_return
-  // Allocate descriptor set
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &manager.camera_buffer_set_layout,
-    },
-    &manager.camera_buffer_descriptor_set,
-  ) or_return
-  // Update descriptor set
-  buffer_info := vk.DescriptorBufferInfo {
-    buffer = manager.camera_buffer.buffer,
-    offset = 0,
-    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  // Create per-frame buffers and descriptor sets
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    manager.camera_buffers[frame_idx] = gpu.create_mutable_buffer(
+      gctx,
+      CameraData,
+      MAX_ACTIVE_CAMERAS,
+      {.STORAGE_BUFFER},
+      nil,
+    ) or_return
+    // Allocate descriptor set
+    vk.AllocateDescriptorSets(
+      gctx.device,
+      &{
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = gctx.descriptor_pool,
+        descriptorSetCount = 1,
+        pSetLayouts = &manager.camera_buffer_set_layout,
+      },
+      &manager.camera_buffer_descriptor_sets[frame_idx],
+    ) or_return
+    // Update descriptor set
+    buffer_info := vk.DescriptorBufferInfo {
+      buffer = manager.camera_buffers[frame_idx].buffer,
+      offset = 0,
+      range  = vk.DeviceSize(vk.WHOLE_SIZE),
+    }
+    write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = manager.camera_buffer_descriptor_sets[frame_idx],
+      dstBinding      = 0,
+      descriptorType  = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo     = &buffer_info,
+    }
+    vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
   }
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = manager.camera_buffer_descriptor_set,
-    dstBinding      = 0,
-    descriptorType  = .STORAGE_BUFFER,
-    descriptorCount = 1,
-    pBufferInfo     = &buffer_info,
-  }
-  vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
-  log.infof("Camera buffer initialized successfully")
+  log.infof("Camera buffers initialized successfully")
   return .SUCCESS
 }
 
@@ -1397,7 +1399,9 @@ destroy_vertex_skinning_buffer :: proc(
 }
 
 destroy_camera_buffer :: proc(gctx: ^gpu.GPUContext, manager: ^Manager) {
-  gpu.mutable_buffer_destroy(gctx.device, &manager.camera_buffer)
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    gpu.mutable_buffer_destroy(gctx.device, &manager.camera_buffers[frame_idx])
+  }
   vk.DestroyDescriptorSetLayout(
     gctx.device,
     manager.camera_buffer_set_layout,
@@ -1411,17 +1415,9 @@ init_spherical_camera_buffer :: proc(
   manager: ^Manager,
 ) -> vk.Result {
   log.infof(
-    "Creating spherical camera buffer with capacity %d cameras...",
+    "Creating per-frame spherical camera buffers with capacity %d cameras...",
     MAX_ACTIVE_CAMERAS,
   )
-  // Create spherical camera buffer
-  manager.spherical_camera_buffer = gpu.create_mutable_buffer(
-    gctx,
-    CameraData,
-    MAX_ACTIVE_CAMERAS,
-    {.STORAGE_BUFFER},
-    nil,
-  ) or_return
   // Create descriptor set layout
   camera_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -1441,33 +1437,43 @@ init_spherical_camera_buffer :: proc(
     nil,
     &manager.spherical_camera_buffer_set_layout,
   ) or_return
-  // Allocate descriptor set
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &manager.spherical_camera_buffer_set_layout,
-    },
-    &manager.spherical_camera_buffer_descriptor_set,
-  ) or_return
-  // Update descriptor set
-  buffer_info := vk.DescriptorBufferInfo {
-    buffer = manager.spherical_camera_buffer.buffer,
-    offset = 0,
-    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  // Create per-frame buffers and descriptor sets
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    manager.spherical_camera_buffers[frame_idx] = gpu.create_mutable_buffer(
+      gctx,
+      SphericalCameraData,
+      MAX_ACTIVE_CAMERAS,
+      {.STORAGE_BUFFER},
+      nil,
+    ) or_return
+    // Allocate descriptor set
+    vk.AllocateDescriptorSets(
+      gctx.device,
+      &{
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = gctx.descriptor_pool,
+        descriptorSetCount = 1,
+        pSetLayouts = &manager.spherical_camera_buffer_set_layout,
+      },
+      &manager.spherical_camera_buffer_descriptor_sets[frame_idx],
+    ) or_return
+    // Update descriptor set
+    buffer_info := vk.DescriptorBufferInfo {
+      buffer = manager.spherical_camera_buffers[frame_idx].buffer,
+      offset = 0,
+      range  = vk.DeviceSize(vk.WHOLE_SIZE),
+    }
+    write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = manager.spherical_camera_buffer_descriptor_sets[frame_idx],
+      dstBinding      = 0,
+      descriptorType  = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo     = &buffer_info,
+    }
+    vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
   }
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = manager.spherical_camera_buffer_descriptor_set,
-    dstBinding      = 0,
-    descriptorType  = .STORAGE_BUFFER,
-    descriptorCount = 1,
-    pBufferInfo     = &buffer_info,
-  }
-  vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
-  log.infof("Spherical camera buffer initialized successfully")
+  log.infof("Spherical camera buffers initialized successfully")
   return .SUCCESS
 }
 
@@ -1475,7 +1481,9 @@ destroy_spherical_camera_buffer :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.mutable_buffer_destroy(gctx.device, &manager.spherical_camera_buffer)
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    gpu.mutable_buffer_destroy(gctx.device, &manager.spherical_camera_buffers[frame_idx])
+  }
   vk.DestroyDescriptorSetLayout(
     gctx.device,
     manager.spherical_camera_buffer_set_layout,

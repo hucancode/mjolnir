@@ -2,16 +2,15 @@
 
 layout(location = 0) in vec3 fragWorldPos;
 
-struct Camera {
-    mat4 view;
+struct SphericalCamera {
     mat4 projection;
-    vec4 viewport_params;
-    vec4 position;
-    vec4 frustum_planes[6];
+    vec4 position; // center.xyz, radius in w
+    vec2 near_far;
+    vec2 _padding;
 };
 
-layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    Camera cameras[];
+layout(set = 0, binding = 0) readonly buffer SphericalCameraBuffer {
+    SphericalCamera cameras[];
 };
 
 layout(push_constant) uniform PushConstants {
@@ -19,11 +18,11 @@ layout(push_constant) uniform PushConstants {
 };
 
 void main() {
-    Camera camera = cameras[camera_index];
+    SphericalCamera camera = cameras[camera_index];
     vec3 lightPos = camera.position.xyz;
     float linearDepth = length(fragWorldPos - lightPos);
-    float near = camera.viewport_params.z;
-    float far = camera.viewport_params.w;
+    float near = camera.near_far.x;
+    float far = camera.near_far.y;
     // Linear depth mapping: [near, far] -> [0, 1]
     // Provides uniform precision across entire light radius
     gl_FragDepth = (linearDepth - near) / (far - near);

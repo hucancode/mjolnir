@@ -31,6 +31,15 @@ CameraData :: struct {
   frustum_planes:  [6][4]f32,
 }
 
+// GPU-side spherical camera data (optimized for point light shadows)
+// Only contains what's actually used by shadow rendering and lighting passes
+SphericalCameraData :: struct {
+  projection: matrix[4, 4]f32, // 90-degree FOV for cube faces
+  position:   [4]f32, // center.xyz, radius in w
+  near_far:   [2]f32, // near, far planes
+  _padding:   [2]f32, // Align to 16 bytes
+}
+
 // Attachment types for camera render targets
 AttachmentType :: enum {
   FINAL_IMAGE        = 0,
@@ -402,7 +411,7 @@ camera_upload_data :: proc(
   }
   frustum := make_frustum(camera.data[frame_index].projection * camera.data[frame_index].view)
   camera.data[frame_index].frustum_planes = frustum.planes
-  gpu.write(&manager.camera_buffer, &camera.data[frame_index], int(camera_index))
+  gpu.write(&manager.camera_buffers[frame_index], &camera.data[frame_index], int(camera_index))
 }
 
 // Helper functions that work directly with Camera
@@ -1087,8 +1096,8 @@ camera_update_multi_pass_descriptor_set :: proc(
     range  = vk.DeviceSize(manager.world_matrix_buffer.bytes_count),
   }
   camera_info := vk.DescriptorBufferInfo {
-    buffer = manager.camera_buffer.buffer,
-    range  = vk.DeviceSize(manager.camera_buffer.bytes_count),
+    buffer = manager.camera_buffers[frame_index].buffer,
+    range  = vk.DeviceSize(manager.camera_buffers[frame_index].bytes_count),
   }
   late_count_info := vk.DescriptorBufferInfo {
     buffer = camera.late_draw_count[frame_index].buffer,

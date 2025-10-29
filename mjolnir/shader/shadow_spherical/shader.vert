@@ -5,16 +5,15 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 0) out vec3 worldPos;
 layout(location = 1) out uint instanceIndex;
 
-struct Camera {
-    mat4 view;
+struct SphericalCamera {
     mat4 projection;
-    vec4 viewport_params;
-    vec4 position;
-    vec4 frustum_planes[6];
+    vec4 position; // center.xyz, radius in w
+    vec2 near_far;
+    vec2 _padding;
 };
 
-layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    Camera cameras[];
+layout(set = 0, binding = 0) readonly buffer SphericalCameraBuffer {
+    SphericalCamera cameras[];
 };
 
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {

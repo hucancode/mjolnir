@@ -521,7 +521,7 @@ render :: proc(
     return
   }
   descriptor_sets := [?]vk.DescriptorSet {
-    rm.camera_buffer_descriptor_set,
+    rm.camera_buffer_descriptor_sets[frame_index], // Per-frame to avoid overlap
     rm.textures_descriptor_set,
     rm.bone_buffer_descriptor_set,
     rm.material_buffer_descriptor_set,

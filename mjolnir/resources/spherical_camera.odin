@@ -12,14 +12,13 @@ SphericalCamera :: struct {
   radius:         f32, // Capture radius
   near:           f32, // Near plane
   far:            f32, // Far plane
-  data:           CameraData, // GPU data for bindless buffer
   size:           u32, // Resolution of cube map faces (size x size)
-  depth_cube:     [MAX_FRAMES_IN_FLIGHT]Handle, // Cube depth textures
+  depth_cube:     [MAX_FRAMES_IN_FLIGHT]Handle, // Cube depth textures (per-frame)
   command_buffer: vk.CommandBuffer, // Secondary command buffer
-  draw_commands:  gpu.MutableBuffer(vk.DrawIndexedIndirectCommand), // Draw commands for visible objects
-  draw_count:     gpu.MutableBuffer(u32), // Number of visible objects
-  max_draws:      u32, // Maximum number of draw calls
-  descriptor_set: vk.DescriptorSet, // Descriptor set for sphere culling compute shader
+  draw_commands:   gpu.MutableBuffer(vk.DrawIndexedIndirectCommand), // Draw commands for visible objects
+  draw_count:      gpu.MutableBuffer(u32), // Number of visible objects
+  max_draws:       u32, // Maximum number of draw calls
+  descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet, // Per-frame descriptor sets for sphere culling
 }
 
 // Initialize a new spherical camera
@@ -105,16 +104,14 @@ spherical_camera_upload_data :: proc(
   manager: ^Manager,
   camera: ^SphericalCamera,
   camera_index: u32,
+  frame_index: u32 = 0,
 ) {
-  dst := gpu.mutable_buffer_get(&manager.spherical_camera_buffer, camera_index)
+  dst := gpu.mutable_buffer_get(&manager.spherical_camera_buffers[frame_index], camera_index)
   if dst == nil {
     log.errorf("Spherical camera index %d out of bounds", camera_index)
     return
   }
-  // Spherical camera uses identity view (transformations happen in geometry shader)
-  // Geometry shader will apply per-face view matrices
-  dst.view = linalg.MATRIX4F32_IDENTITY
-  // Perspective projection with 90degree FOV for cube map faces
+  // Perspective projection with 90-degree FOV for cube map faces
   fov := f32(math.PI * 0.5) // 90 degrees
   aspect := f32(1.0) // Square faces
   dst.projection = linalg.matrix4_perspective(
@@ -123,19 +120,16 @@ spherical_camera_upload_data :: proc(
     camera.near,
     camera.far,
   )
-  dst.viewport_params = [4]f32 {
-    f32(camera.size),
-    f32(camera.size),
-    camera.near,
-    camera.far,
-  }
   dst.position = [4]f32 {
     camera.center[0],
     camera.center[1],
     camera.center[2],
     camera.radius, // Store radius in w component
   }
-  camera.data = dst^
+  dst.near_far = [2]f32 {
+    camera.near,
+    camera.far,
+  }
 }
 
 spherical_camera_get_visible_count :: proc(camera: ^SphericalCamera) -> u32 {
@@ -143,7 +137,7 @@ spherical_camera_get_visible_count :: proc(camera: ^SphericalCamera) -> u32 {
   return camera.draw_count.mapped[0]
 }
 
-// Allocate and update descriptor set for sphere culling compute shader
+// Allocate and update descriptor sets for sphere culling compute shader (per-frame)
 // This should be called AFTER spherical_camera_init and requires the visibility system's sphere descriptor layout
 spherical_camera_allocate_visibility_descriptors :: proc(
   gctx: ^gpu.GPUContext,
@@ -151,26 +145,35 @@ spherical_camera_allocate_visibility_descriptors :: proc(
   camera: ^SphericalCamera,
   sphere_descriptor_layout: ^vk.DescriptorSetLayout,
 ) -> vk.Result {
+  // Allocate per-frame descriptor sets
+  set_layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout {
+    sphere_descriptor_layout^,
+    sphere_descriptor_layout^,
+  }
   vk.AllocateDescriptorSets(
     gctx.device,
     &vk.DescriptorSetAllocateInfo {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = sphere_descriptor_layout,
+      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+      pSetLayouts = raw_data(set_layouts[:]),
     },
-    &camera.descriptor_set,
+    raw_data(camera.descriptor_sets[:]),
   ) or_return
-  spherical_camera_update_descriptor_set(gctx, manager, camera)
+  // Update all per-frame descriptor sets
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    spherical_camera_update_descriptor_set(gctx, manager, camera, u32(frame_idx))
+  }
   return .SUCCESS
 }
 
-// Update sphere culling descriptor set with current buffer bindings
+// Update sphere culling descriptor set with current buffer bindings (per-frame)
 @(private)
 spherical_camera_update_descriptor_set :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
   camera: ^SphericalCamera,
+  frame_index: u32,
 ) {
   node_info := vk.DescriptorBufferInfo {
     buffer = manager.node_data_buffer.buffer,
@@ -184,9 +187,10 @@ spherical_camera_update_descriptor_set :: proc(
     buffer = manager.world_matrix_buffer.buffer,
     range  = vk.DeviceSize(manager.world_matrix_buffer.bytes_count),
   }
+  // Use per-frame spherical camera buffer to match rendering
   camera_info := vk.DescriptorBufferInfo {
-    buffer = manager.spherical_camera_buffer.buffer,
-    range  = vk.DeviceSize(manager.spherical_camera_buffer.bytes_count),
+    buffer = manager.spherical_camera_buffers[frame_index].buffer,
+    range  = vk.DeviceSize(manager.spherical_camera_buffers[frame_index].bytes_count),
   }
   count_info := vk.DescriptorBufferInfo {
     buffer = camera.draw_count.buffer,
@@ -202,7 +206,7 @@ spherical_camera_update_descriptor_set :: proc(
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set,
+      dstSet = camera.descriptor_sets[frame_index],
       dstBinding = 0,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -210,7 +214,7 @@ spherical_camera_update_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set,
+      dstSet = camera.descriptor_sets[frame_index],
       dstBinding = 1,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -218,7 +222,7 @@ spherical_camera_update_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set,
+      dstSet = camera.descriptor_sets[frame_index],
       dstBinding = 2,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -226,7 +230,7 @@ spherical_camera_update_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set,
+      dstSet = camera.descriptor_sets[frame_index],
       dstBinding = 3,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -234,7 +238,7 @@ spherical_camera_update_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set,
+      dstSet = camera.descriptor_sets[frame_index],
       dstBinding = 5,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -242,7 +246,7 @@ spherical_camera_update_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set,
+      dstSet = camera.descriptor_sets[frame_index],
       dstBinding = 6,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,

@@ -24,6 +24,13 @@ struct Camera {
     vec4 frustum_planes[6];
 };
 
+struct SphericalCamera {
+    mat4 projection;
+    vec4 position; // center.xyz, radius in w
+    vec2 near_far;
+    vec2 _padding;
+};
+
 struct LightData {
     vec4 color;
     float radius;
@@ -59,7 +66,7 @@ layout(set = 3, binding = 0) readonly buffer WorldMatricesBuffer {
 } world_matrices_buffer;
 // Spherical camera buffer (set 4, binding 0) - For point light shadows
 layout(set = 4, binding = 0) readonly buffer SphericalCameraBuffer {
-    Camera spherical_cameras[];
+    SphericalCamera spherical_cameras[];
 } spherical_camera_buffer;
 // Per-frame dynamic light data buffer (set 5, binding 0) - Position + shadow map synchronized
 layout(set = 5, binding = 0) readonly buffer DynamicLightDataBuffer {
@@ -100,12 +107,19 @@ bool has_shadow_resource(uint light_idx) {
     return shadow_map < MAX_TEXTURES;
 }
 
-float calculateShadow(vec3 fragPos, vec3 n, Camera lightCamera, LightData light, uint light_idx, vec3 light_position, vec3 light_direction) {
-    uint shadow_map = dynamic_light_data_buffer.dynamic_light_data[light_idx].shadow_map;
-    if (!has_shadow_resource(light_idx)) {
+float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint light_idx, vec3 light_position, vec3 light_direction) {
+    if (light.cast_shadow == 0u) {
         return 1.0;
     }
+    uint shadow_map = dynamic_light_data_buffer.dynamic_light_data[light_idx].shadow_map;
+    if (shadow_map >= MAX_CUBE_TEXTURES && light.type == POINT_LIGHT) {
+        return 1.0; // No valid shadow map for point light
+    }
+    if (shadow_map >= MAX_TEXTURES && (light.type == DIRECTIONAL_LIGHT || light.type == SPOT_LIGHT)) {
+        return 1.0; // No valid shadow map for directional/spot light
+    }
     if (light.type == DIRECTIONAL_LIGHT) {
+        Camera lightCamera = camera_buffer.cameras[light.camera_index];
         vec4 lightSpacePos = lightCamera.projection * lightCamera.view * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         // Transform XY from [-1,1] to [0,1], but Z is already [0,1] in Vulkan!
@@ -129,9 +143,9 @@ float calculateShadow(vec3 fragPos, vec3 n, Camera lightCamera, LightData light,
         vec3 coord = normalize(-lightToFrag);
         float linearDepth = length(lightToFrag);
         float shadowDepth = texture(samplerCube(cube_textures[shadow_map], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
-        Camera spherical_cam = spherical_camera_buffer.spherical_cameras[light.camera_index];
-        float near = spherical_cam.viewport_params.z;
-        float far = spherical_cam.viewport_params.w;
+        SphericalCamera spherical_cam = spherical_camera_buffer.spherical_cameras[light.camera_index];
+        float near = spherical_cam.near_far.x;
+        float far = spherical_cam.near_far.y;
         // Linear depth mapping: [near, far] -> [0, 1]
         float currentDepth = (linearDepth - near) / (far - near);
         currentDepth = clamp(currentDepth, 0.0, 1.0);
@@ -141,6 +155,7 @@ float calculateShadow(vec3 fragPos, vec3 n, Camera lightCamera, LightData light,
         float brightness = (currentDepth > shadowDepth + bias) ? 0.1 : 1.0;
         return brightness;
     } else if (light.type == SPOT_LIGHT) {
+        Camera lightCamera = camera_buffer.cameras[light.camera_index];
         vec4 lightSpacePos = lightCamera.projection * lightCamera.view * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         // Transform XY from [-1,1] to [0,1], Z is already [0,1]
@@ -230,8 +245,6 @@ void main() {
         outColor = vec4(1.0, 0.0, 1.0, 1.0); // Magenta for invalid light camera index
         return;
     }
-
-    // Get cameras from bindless buffer
     Camera camera = camera_buffer.cameras[scene_camera_idx];
     vec2 uv = (gl_FragCoord.xy / camera.viewport_params.xy);
     vec3 position = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz;
@@ -243,17 +256,10 @@ void main() {
     float roughness = clamp(mr.g, 0.0, 1.0);
     roughness = max(roughness, 0.05);
     vec3 V = normalize(camera.position.xyz - position);
-    // Get light position from per-frame dynamic data buffer (synchronized with shadow maps)
     vec3 light_position = dynamic_light_data_buffer.dynamic_light_data[light_index].position.xyz;
-    // Get light direction from world matrix
     mat4 lightWorldMatrix = world_matrices_buffer.world_matrices[light.node_index];
     vec3 light_direction = lightWorldMatrix[2].xyz;
-    bool use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light_index);
-    float shadowFactor = 1.0;
-    if (use_shadow) {
-        Camera lightCamera = camera_buffer.cameras[light.camera_index];
-        shadowFactor = calculateShadow(position, normal, lightCamera, light, light_index, light_position, light_direction);
-    }
+    float shadowFactor = calculateShadow(position, normal, light, light_index, light_position, light_direction);
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_position, light_direction);
     direct = min(vec3(1.0), direct);
     outColor = vec4(direct * shadowFactor, 1.0);

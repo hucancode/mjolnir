@@ -9,16 +9,15 @@ layout(location = 1) in uint instanceIndex[];
 
 layout(location = 0) out vec3 fragWorldPos;
 
-struct Camera {
-    mat4 view;
+struct SphericalCamera {
     mat4 projection;
-    vec4 viewport_params;
-    vec4 position;
-    vec4 frustum_planes[6];
+    vec4 position; // center.xyz, radius in w
+    vec2 near_far;
+    vec2 _padding;
 };
 
-layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    Camera cameras[];
+layout(set = 0, binding = 0) readonly buffer SphericalCameraBuffer {
+    SphericalCamera cameras[];
 };
 
 layout(push_constant) uniform PushConstants {
@@ -44,7 +43,7 @@ mat4 makeView(vec3 pos, vec3 forward, vec3 up)
 }
 
 void main() {
-    Camera camera = cameras[camera_index];
+    SphericalCamera camera = cameras[camera_index];
     vec3 center = camera.position.xyz;
 
     mat4 views[6];

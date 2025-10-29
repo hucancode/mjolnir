@@ -269,8 +269,8 @@ record_camera_visibility :: proc(
   for &entry, cam_index in rm.spherical_cameras.entries {
     if !entry.active do continue
     spherical_cam := &entry.item
-    // Upload camera data to GPU buffer
-    resources.spherical_camera_upload_data(rm, spherical_cam, u32(cam_index))
+    // Upload camera data to GPU buffer (per-frame to avoid frame overlap)
+    resources.spherical_camera_upload_data(rm, spherical_cam, u32(cam_index), frame_index)
     // Dispatch visibility - records compute culling + depth rendering
     world.visibility_system_dispatch_spherical(
       &world_state.visibility,

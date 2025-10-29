@@ -192,10 +192,11 @@ render :: proc(
   world_matrix: matrix[4, 4]f32,
   camera_index: u32,
   rm: ^resources.Manager,
+  frame_index: u32 = 0,
 ) {
   if !renderer.enabled do return
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.pipeline)
-  descriptor_sets := [?]vk.DescriptorSet{rm.camera_buffer_descriptor_set}
+  descriptor_sets := [?]vk.DescriptorSet{rm.camera_buffer_descriptor_sets[frame_index]}
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,

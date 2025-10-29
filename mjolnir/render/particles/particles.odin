@@ -971,11 +971,12 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
   rm: ^resources.Manager,
+  frame_index: u32 = 0,
 ) {
   // Use indirect draw - GPU handles the count
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
-    rm.camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
+    rm.camera_buffer_descriptor_sets[frame_index], // set 0 (per-frame camera buffer)
     rm.textures_descriptor_set, // set 1 (textures)
   }
   vk.CmdBindDescriptorSets(

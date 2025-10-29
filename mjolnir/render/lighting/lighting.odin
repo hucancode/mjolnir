@@ -81,7 +81,7 @@ begin_ambient_pass :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    rm.camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
+    rm.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
     rm.textures_descriptor_set, // set = 1 (bindless textures)
   }
   vk.CmdBindDescriptorSets(
@@ -588,11 +588,11 @@ begin_pass :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    rm.camera_buffer_descriptor_set, // set = 0 (regular cameras)
+    rm.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame cameras)
     rm.textures_descriptor_set, // set = 1 (textures/samplers)
     rm.lights_buffer_descriptor_set, // set = 2 (lights)
     rm.world_matrix_descriptor_set, // set = 3 (world matrices)
-    rm.spherical_camera_buffer_descriptor_set, // set = 4 (spherical cameras)
+    rm.spherical_camera_buffer_descriptor_sets[frame_index], // set = 4 (per-frame spherical cameras)
     rm.dynamic_light_data_descriptor_sets[frame_index], // set = 5 (per-frame position + shadow map)
   }
   vk.CmdBindDescriptorSets(
