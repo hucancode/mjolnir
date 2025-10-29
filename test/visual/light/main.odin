@@ -16,12 +16,12 @@ light_handle: resources.Handle
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
-  engine.setup_proc = setup_scene
+  engine.setup_proc = setup
   engine.update_proc = update
   mjolnir.run(engine, 800, 600, "visual-lights-no-shadows")
 }
 
-setup_scene :: proc(engine: ^mjolnir.Engine) {
+setup :: proc(engine: ^mjolnir.Engine) {
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
     mjolnir.camera_look_at(camera, {6.0, 4.0, 6.0}, {0.0, 0.0, 0.0})

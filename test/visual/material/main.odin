@@ -10,24 +10,24 @@ import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
 
-MaterialSceneState :: struct {
-  cube_handle: resources.Handle,
-}
-
-state := MaterialSceneState{}
+orbit_controller: world.CameraController
+cube_handle: resources.Handle
 
 main :: proc() {
   engine := new(mjolnir.Engine)
-  engine.setup_proc = setup_scene
-  engine.update_proc = update_scene
+  engine.setup_proc = setup
+  engine.update_proc = update
   mjolnir.run(engine, 800, 600, "visual-material-textured-cube")
 }
 
-setup_scene :: proc(engine: ^mjolnir.Engine) {
+setup :: proc(engine: ^mjolnir.Engine) {
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    mjolnir.camera_look_at(camera, {2.4, 1.8, 2.4}, {0.0, 0.0, 0.0})
+    mjolnir.camera_look_at(camera, {2, 2, 2}, {0.0, 0.0, 0.0})
   }
+  world.setup_camera_controller_callbacks(engine.window)
+  orbit_controller = world.camera_controller_orbit_init(engine.window)
+  world.camera_controller_sync(&orbit_controller, camera)
   cube_geom := geometry.make_cube()
   cube_mesh, mesh_ok := mjolnir.create_mesh(engine, cube_geom)
   if !mesh_ok {
@@ -55,7 +55,7 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     log.error("material textured cube: material creation failed")
     return
   }
-  cube_handle, cube_node, spawned := mjolnir.spawn(
+  handle, node, ok := mjolnir.spawn(
     engine,
     world.MeshAttachment {
       handle = cube_mesh,
@@ -63,9 +63,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  if spawned {
-    mjolnir.scale(cube_node, 0.75)
-    state.cube_handle = cube_handle
+  if ok {
+    cube_handle = handle
   }
   _, light_node, light_ok := mjolnir.spawn_directional_light(
     engine,
@@ -78,9 +77,13 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   }
 }
 
-update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  if state.cube_handle.generation != 0 {
-    rotation := delta_time * math.PI * 0.25
-    mjolnir.rotate_by(engine, state.cube_handle, rotation, linalg.VECTOR3F32_Y_AXIS)
+update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+  if main_camera := mjolnir.get_main_camera(engine); main_camera != nil {
+      world.camera_controller_orbit_update(
+        &orbit_controller,
+        main_camera,
+        delta_time,
+      )
   }
+  mjolnir.rotate(engine, cube_handle, mjolnir.time_since_start(engine), linalg.VECTOR3F32_Y_AXIS)
 }
