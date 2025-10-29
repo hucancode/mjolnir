@@ -64,6 +64,7 @@ create_body :: proc(
 ) {
   handle, body = resources.alloc(&world.bodies) or_return
   body^ = rigid_body_create(node_handle, mass, is_static)
+  ok = true
   return
 }
 

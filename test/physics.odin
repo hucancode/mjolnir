@@ -1057,7 +1057,7 @@ test_resolve_contact_restitution_coefficient :: proc(t: ^testing.T) {
 	body_dynamic.velocity = {0, -10, 0}
 	contact := physics.Contact {
 		point       = {0, 0, 0},
-		normal      = -linalg.VECTOR3F32_Y_AXIS, // Points from dynamic (above) to static (below)
+		normal      = {0, -1, 0}, // Points from dynamic (above) to static (below)
 		penetration = 0.01,
 		restitution = 0.8,
 		friction    = 0.0,
@@ -1090,7 +1090,7 @@ test_resolve_contact_friction_reduces_tangent_velocity :: proc(t: ^testing.T) {
 	body_dynamic.velocity = {5, -1, 0}
 	contact := physics.Contact {
 		point       = {0, 0, 0},
-		normal      = -linalg.VECTOR3F32_Y_AXIS, // Points from dynamic (above) to static (below)
+		normal      = {0, -1, 0}, // Points from dynamic (above) to static (below)
 		penetration = 0.01,
 		restitution = 0.0,
 		friction    = 0.5,
