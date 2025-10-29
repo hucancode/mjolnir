@@ -185,14 +185,29 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     vec3 H = normalize(V + L);
     float distance = light.type == DIRECTIONAL_LIGHT ? 1.0 : length(light_position - fragPos);
     float attenuation = light.radius;
-    if (light.type != DIRECTIONAL_LIGHT) {
+    if (light.type == POINT_LIGHT) {
         float norm_dist = distance / max(0.01, light.radius);
         attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
     }
     if (light.type == SPOT_LIGHT) {
-        vec3 lightToFrag = normalize(fragPos - light_position);
-        float cosTheta = dot(lightToFrag, normalize(light_direction));
-        float spotEffect = smoothstep(cos(light.angle_outer), cos(light.angle_inner), cosTheta);
+        // Vector from cone tip to fragment
+        vec3 tipToFrag = fragPos - light_position;
+        vec3 cone_axis = normalize(light_direction);
+        // Project onto cone axis to get distance along the axis
+        float distance_along_axis = dot(tipToFrag, cone_axis);
+        // Calculate perpendicular component (rejection from axis)
+        vec3 projection_on_axis = distance_along_axis * cone_axis;
+        vec3 perpendicular_component = tipToFrag - projection_on_axis;
+        float radial_distance = length(perpendicular_component);
+        // Cone radius at this distance: r = d * tan(angle)
+        float cone_radius_at_height = distance_along_axis * tan(light.angle_outer);
+        // Normalized radial distance: 0 = on centerline, 1 = at edge
+        float normalized_radial = radial_distance / max(cone_radius_at_height, 0.001);
+        // Smooth falloff from inner to outer angle
+        float inner_outer_ratio = tan(light.angle_inner) / tan(light.angle_outer);
+        float spotEffect = smoothstep(1.0, inner_outer_ratio, normalized_radial);
+        float norm_dist = distance_along_axis / max(0.01, light.radius);
+        spotEffect *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
         attenuation *= spotEffect;
     }
     float NdotL = max(dot(N, L), 0.0);
@@ -263,4 +278,5 @@ void main() {
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_position, light_direction);
     direct = min(vec3(1.0), direct);
     outColor = vec4(direct * shadowFactor, 1.0);
+    // outColor.b = clamp(outColor.b, 0.1, 1.0);
 }

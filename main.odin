@@ -275,8 +275,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         light_handles[i], light, light_spawn_ok = spawn_spot_light(
           engine,
           color,
-          10,
-          math.PI * 0.25,
+          14,
+          math.PI * 0.15,
           true,
           {0, 6, -1},
         )
@@ -467,9 +467,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  // add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  // add_crosshatch(engine, [2]f32{1280, 720})
+  add_crosshatch(engine, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)
@@ -612,7 +612,8 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       // rotate light 0 around Y axis
       t := time_since_start(engine)
       rotate(engine, handle, t, linalg.VECTOR3F32_Y_AXIS)
-      // rotate_by(engine, handle, math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
+      spread := (math.sin(t*0.2) + 1.0)
+      rotate_by(engine, handle, math.PI * 0.4 * spread, linalg.VECTOR3F32_X_AXIS)
       continue
     }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0

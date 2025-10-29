@@ -30,9 +30,15 @@ struct LightData {
     float angle_outer;
     uint type;
     uint node_index;
-    uint shadow_map;
     uint camera_index;
     uint cast_shadow;
+    uint _padding;
+};
+
+struct DynamicLightData {
+    vec4 position;
+    uint shadow_map;
+    uint _padding[3];
 };
 
 // Bindless camera buffer (set 0, binding 0)
@@ -47,6 +53,10 @@ layout(set = 2, binding = 0) readonly buffer LightsBuffer {
 layout(set = 3, binding = 0) readonly buffer WorldMatricesBuffer {
     mat4 world_matrices[];
 } world_matrices_buffer;
+// Per-frame dynamic light data buffer (set 5, binding 0) - Position + shadow map synchronized
+layout(set = 5, binding = 0) readonly buffer DynamicLightDataBuffer {
+    DynamicLightData dynamic_light_data[];
+} dynamic_light_data_buffer;
 
 layout(push_constant) uniform PushConstant {
     uint light_index;
@@ -80,9 +90,10 @@ void main() {
         return;
     }
 
-    // Get light world matrix to calculate position and direction
+    // Get light position from dynamic data buffer (synchronized with fragment shader)
+    vec3 light_position = dynamic_light_data_buffer.dynamic_light_data[light_index].position.xyz;
+    // Get light direction from world matrix
     mat4 lightWorldMatrix = world_matrices_buffer.world_matrices[light.node_index];
-    vec3 light_position = lightWorldMatrix[3].xyz;
     vec3 light_direction = lightWorldMatrix[2].xyz; // Light forward is -Z direction
 
     if (light.type == DIRECTIONAL_LIGHT) {
