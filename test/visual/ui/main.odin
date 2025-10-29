@@ -34,7 +34,7 @@ on_button_click :: proc(ctx: rawptr) {
   state.click_count += 1
   log.infof("Button clicked! Count: %d", state.click_count)
   // Update label text
-  ui := mjolnir.get_retained_ui(state.engine)
+  ui := &state.engine.render.retained_ui
   label_text := fmt.tprintf("Clicks: %d", state.click_count)
   retained_ui.set_label_text(ui, state.label_handle, label_text)
 }
@@ -43,7 +43,7 @@ on_toggle_click :: proc(ctx: rawptr) {
   if state == nil do return
   state.background_visible = !state.background_visible
   // Toggle image visibility
-  ui := mjolnir.get_retained_ui(state.engine)
+  ui := &state.engine.render.retained_ui
   retained_ui.set_visible(ui, state.image_handle, state.background_visible)
   log.infof("Toggle clicked! Image visible: %v", state.background_visible)
 }
@@ -51,7 +51,7 @@ on_toggle_click :: proc(ctx: rawptr) {
 on_checkbox_change :: proc(ctx: rawptr, checked: bool) {
   if state == nil do return
   state.music_enabled = checked
-  ui := mjolnir.get_retained_ui(state.engine)
+  ui := &state.engine.render.retained_ui
   status_text := "Status: Music OFF"
   if checked {
     status_text = "Status: Music ON"
@@ -62,7 +62,7 @@ on_checkbox_change :: proc(ctx: rawptr, checked: bool) {
 
 on_combobox_change :: proc(ctx: rawptr, selected_index: i32) {
   if state == nil do return
-  ui := mjolnir.get_retained_ui(state.engine)
+  ui := &state.engine.render.retained_ui
   quality_names := [?]string{"Low", "Medium", "High", "Ultra"}
   if selected_index >= 0 && selected_index < i32(len(quality_names)) {
     status_text := fmt.tprintf("Status: Quality = %s", quality_names[selected_index])
@@ -73,21 +73,21 @@ on_combobox_change :: proc(ctx: rawptr, selected_index: i32) {
 
 on_radio_easy :: proc(ctx: rawptr) {
   if state == nil do return
-  ui := mjolnir.get_retained_ui(state.engine)
+  ui := &state.engine.render.retained_ui
   retained_ui.set_label_text(ui, state.status_label, "Status: Difficulty = Easy")
   log.infof("Difficulty set to Easy")
 }
 
 on_radio_normal :: proc(ctx: rawptr) {
   if state == nil do return
-  ui := mjolnir.get_retained_ui(state.engine)
+  ui := &state.engine.render.retained_ui
   retained_ui.set_label_text(ui, state.status_label, "Status: Difficulty = Normal")
   log.infof("Difficulty set to Normal")
 }
 
 on_radio_hard :: proc(ctx: rawptr) {
   if state == nil do return
-  ui := mjolnir.get_retained_ui(state.engine)
+  ui := &state.engine.render.retained_ui
   retained_ui.set_label_text(ui, state.status_label, "Status: Difficulty = Hard")
   log.infof("Difficulty set to Hard")
 }
@@ -103,7 +103,7 @@ main :: proc() {
     // Store engine reference for callbacks
     state.engine = engine
     // Get the engine's built-in retained UI manager
-    ui := mjolnir.get_retained_ui(engine)
+    ui := &engine.render.retained_ui
     // Create a window container
     state.window_handle, _ = retained_ui.create_window(
       ui,

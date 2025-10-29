@@ -807,14 +807,6 @@ get_texture_count :: proc(engine: ^Engine) -> u32 {
   )
 }
 
-set_debug_ui_enabled :: proc(engine: ^Engine, enabled: bool) {
-  engine.debug_ui_enabled = enabled
-}
-
-get_debug_ui_enabled :: proc(engine: ^Engine) -> bool {
-  return engine.debug_ui_enabled
-}
-
 set_visibility_stats :: proc(engine: ^Engine, enabled: bool) {
   world.visibility_system_set_stats_enabled(&engine.world.visibility, enabled)
 }

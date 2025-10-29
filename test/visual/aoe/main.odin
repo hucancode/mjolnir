@@ -33,7 +33,7 @@ setup_aoe_test :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("AOE Test: Setup")
   set_visibility_stats(engine, false)
-  set_debug_ui_enabled(engine, false)
+  engine.debug_ui_enabled = false
   // Create meshes
   cube_mesh, cube_ok := create_mesh(engine, make_cube())
   sphere_mesh, sphere_ok := create_mesh(engine, make_sphere())

@@ -328,10 +328,6 @@ get_main_camera :: proc(self: ^Engine) -> ^resources.Camera {
   return resources.get(self.rm.cameras, self.render.main_camera)
 }
 
-get_retained_ui :: proc(self: ^Engine) -> ^retained_ui.Manager {
-  return &self.render.retained_ui
-}
-
 
 update_input :: proc(self: ^Engine) -> bool {
   glfw.PollEvents()

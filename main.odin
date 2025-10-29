@@ -47,7 +47,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Setup function called!")
   set_visibility_stats(engine, false)
-  // set_debug_ui_enabled(engine, true)
+  // engine.debug_ui_enabled = true
   plain_material_handle, plain_material_ok := create_material(engine)
   cube_geom := make_cube()
   cube_mesh_handle, cube_mesh_ok := create_mesh(engine, cube_geom)

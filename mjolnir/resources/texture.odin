@@ -429,11 +429,3 @@ create_checkerboard_texture :: proc(
   )
 }
 
-// Texture metadata queries
-get_texture_size :: proc(texture: ^gpu.Image) -> (width: u32, height: u32) {
-  return texture.spec.width, texture.spec.height
-}
-
-get_texture_format :: proc(texture: ^gpu.Image) -> vk.Format {
-  return texture.spec.format
-}

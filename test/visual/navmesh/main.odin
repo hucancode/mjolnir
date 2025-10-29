@@ -71,7 +71,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
   demo_state.obstacle_handles = make([dynamic]resources.Handle, 0)
   demo_state.path_waypoint_handles = make([dynamic]resources.Handle, 0)
   demo_state.camera_auto_rotate = false
-  // set_debug_ui_enabled(engine, true)
+  // engine.debug_ui_enabled = true
   main_camera := get_main_camera(engine)
   if main_camera != nil {
     camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0}, {0, 1, 0})
@@ -95,7 +95,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
     {1, 0, 0, 1},
   )
   find_path(engine)
-  // set_debug_ui_enabled(engine, true)
+  // engine.debug_ui_enabled = true
   log.info("Navigation mesh demo setup complete")
 }
 
