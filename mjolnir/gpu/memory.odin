@@ -408,64 +408,6 @@ create_image_view :: proc(
   return
 }
 
-transition_image_layout :: proc(
-  gctx: ^GPUContext,
-  image: vk.Image,
-  format: vk.Format,
-  old_layout, new_layout: vk.ImageLayout,
-) -> vk.Result {
-  cmd_buffer := begin_single_time_command(gctx) or_return
-  src_access_mask: vk.AccessFlags
-  dst_access_mask: vk.AccessFlags
-  src_stage: vk.PipelineStageFlags
-  dst_stage: vk.PipelineStageFlags
-  if old_layout == .UNDEFINED && new_layout == .TRANSFER_DST_OPTIMAL {
-    dst_access_mask = {.TRANSFER_WRITE}
-    src_stage = {.TOP_OF_PIPE}
-    dst_stage = {.TRANSFER}
-  } else if old_layout == .TRANSFER_DST_OPTIMAL &&
-     new_layout == .SHADER_READ_ONLY_OPTIMAL {
-    src_access_mask = {.TRANSFER_WRITE}
-    dst_access_mask = {.SHADER_READ}
-    src_stage = {.TRANSFER}
-    dst_stage = {.FRAGMENT_SHADER}
-  } else {
-    // Fallback: generic, but not optimal
-    src_stage = {.TOP_OF_PIPE}
-    dst_stage = {.TOP_OF_PIPE}
-  }
-  barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = old_layout,
-    newLayout = new_layout,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = image,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-    srcAccessMask = src_access_mask,
-    dstAccessMask = dst_access_mask,
-  }
-  vk.CmdPipelineBarrier(
-    cmd_buffer,
-    src_stage,
-    dst_stage,
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &barrier,
-  )
-  return end_single_time_command(gctx, &cmd_buffer)
-}
-
 copy_image :: proc(
   gctx: ^GPUContext,
   dst: ImageBuffer,
