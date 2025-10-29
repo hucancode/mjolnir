@@ -10,7 +10,6 @@ import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
 
-orbit_controller: world.CameraController
 cube_handle: resources.Handle
 
 main :: proc() {
@@ -24,10 +23,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
     mjolnir.camera_look_at(camera, {2, 2, 2}, {0.0, 0.0, 0.0})
+    mjolnir.sync_active_camera_controller(engine)
   }
-  world.setup_camera_controller_callbacks(engine.window)
-  orbit_controller = world.camera_controller_orbit_init(engine.window)
-  world.camera_controller_sync(&orbit_controller, camera)
+  // Camera controller is automatically set up by engine
   cube_geom := geometry.make_cube()
   cube_mesh, mesh_ok := mjolnir.create_mesh(engine, cube_geom)
   if !mesh_ok {
@@ -78,12 +76,5 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  if main_camera := mjolnir.get_main_camera(engine); main_camera != nil {
-      world.camera_controller_orbit_update(
-        &orbit_controller,
-        main_camera,
-        delta_time,
-      )
-  }
   mjolnir.rotate(engine, cube_handle, mjolnir.time_since_start(engine), linalg.VECTOR3F32_Y_AXIS)
 }

@@ -10,7 +10,6 @@ import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
 
-orbit_controller: world.CameraController
 light_handle: resources.Handle
 
 main :: proc() {
@@ -25,10 +24,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
     mjolnir.camera_look_at(camera, {6.0, 4.0, 6.0}, {0.0, 0.0, 0.0})
+    mjolnir.sync_active_camera_controller(engine)
   }
-  world.setup_camera_controller_callbacks(engine.window)
-  orbit_controller = world.camera_controller_orbit_init(engine.window)
-  world.camera_controller_sync(&orbit_controller, camera)
+  // Camera controller is automatically set up by engine
   plane_geom := geometry.make_quad()
   plane_mesh, plane_mesh_ok := mjolnir.create_mesh(
     engine,
@@ -106,6 +104,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     radius = 18.0,
     angle = math.PI * 0.15,
     cast_shadow = false,
+    position = {0, 2, 0},
   )
   if spot_ok {
     light_handle = spot_handle
@@ -116,14 +115,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
-  if main_camera := get_main_camera(engine); main_camera != nil {
-      world.camera_controller_orbit_update(
-        &orbit_controller,
-        main_camera,
-        delta_time,
-      )
-  }
   t := time_since_start(engine)
-  mjolnir.translate(engine, light_handle, 0, 2, 0)
   mjolnir.rotate(engine, light_handle, math.PI*(math.sin(t)*0.5+0.5), linalg.VECTOR3F32_X_AXIS)
 }

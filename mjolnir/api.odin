@@ -805,3 +805,168 @@ set_visibility_stats :: proc(engine: ^Engine, enabled: bool) {
 }
 
 camera_look_at :: resources.camera_look_at
+
+CameraControllerType :: world.CameraControllerType
+
+setup_orbit_camera :: proc(
+  engine: ^Engine,
+  target: [3]f32 = {0, 0, 0},
+  distance: f32 = 5.0,
+  yaw: f32 = 0,
+  pitch: f32 = 0,
+) {
+  world.setup_camera_controller_callbacks(engine.window)
+  engine.orbit_controller = world.camera_controller_orbit_init(
+    engine.window,
+    target,
+    distance,
+    yaw,
+    pitch,
+  )
+  if main_camera := get_main_camera(engine); main_camera != nil {
+    world.camera_controller_sync(&engine.orbit_controller, main_camera)
+  }
+  engine.active_controller = &engine.orbit_controller
+}
+
+setup_free_camera :: proc(
+  engine: ^Engine,
+  move_speed := f32(5.0),
+  rotation_speed := f32(2.0),
+) {
+  world.setup_camera_controller_callbacks(engine.window)
+  engine.free_controller = world.camera_controller_free_init(
+    engine.window,
+    move_speed,
+    rotation_speed,
+  )
+  if main_camera := get_main_camera(engine); main_camera != nil {
+    world.camera_controller_sync(&engine.free_controller, main_camera)
+  }
+  engine.active_controller = &engine.free_controller
+}
+
+setup_both_camera_controllers :: proc(
+  engine: ^Engine,
+  start_with: CameraControllerType = .ORBIT,
+  orbit_target: [3]f32 = {0, 0, 0},
+  orbit_distance: f32 = 5.0,
+  orbit_yaw: f32 = 0,
+  orbit_pitch: f32 = 0,
+  free_move_speed := f32(5.0),
+  free_rotation_speed := f32(2.0),
+) {
+  world.setup_camera_controller_callbacks(engine.window)
+  engine.orbit_controller = world.camera_controller_orbit_init(
+    engine.window,
+    orbit_target,
+    orbit_distance,
+    orbit_yaw,
+    orbit_pitch,
+  )
+  engine.free_controller = world.camera_controller_free_init(
+    engine.window,
+    free_move_speed,
+    free_rotation_speed,
+  )
+  if main_camera := get_main_camera(engine); main_camera != nil {
+    world.camera_controller_sync(&engine.orbit_controller, main_camera)
+    world.camera_controller_sync(&engine.free_controller, main_camera)
+  }
+  switch start_with {
+  case .ORBIT:
+    engine.active_controller = &engine.orbit_controller
+  case .FREE:
+    engine.active_controller = &engine.free_controller
+  case .FOLLOW, .CINEMATIC:
+  }
+}
+
+switch_camera_controller :: proc(engine: ^Engine, type: CameraControllerType) {
+  main_camera := get_main_camera(engine)
+  if main_camera == nil do return
+  switch type {
+  case .ORBIT:
+    world.camera_controller_sync(&engine.orbit_controller, main_camera)
+    engine.active_controller = &engine.orbit_controller
+  case .FREE:
+    world.camera_controller_sync(&engine.free_controller, main_camera)
+    engine.active_controller = &engine.free_controller
+  case .FOLLOW, .CINEMATIC:
+  }
+}
+
+update_camera_controller :: proc(engine: ^Engine, delta_time: f32) {
+  if engine.active_controller == nil do return
+  main_camera := get_main_camera(engine)
+  if main_camera == nil do return
+  switch engine.active_controller.type {
+  case .ORBIT:
+    world.camera_controller_orbit_update(
+      engine.active_controller,
+      main_camera,
+      delta_time,
+    )
+  case .FREE:
+    world.camera_controller_free_update(
+      engine.active_controller,
+      main_camera,
+      delta_time,
+    )
+  case .FOLLOW:
+    world.camera_controller_follow_update(
+      engine.active_controller,
+      main_camera,
+      delta_time,
+    )
+  case .CINEMATIC:
+  }
+}
+
+get_active_camera_controller_type :: proc(engine: ^Engine) -> CameraControllerType {
+  if engine.active_controller == nil do return .ORBIT
+  return engine.active_controller.type
+}
+
+set_orbit_camera_target :: proc(engine: ^Engine, target: [3]f32) {
+  world.camera_controller_orbit_set_target(&engine.orbit_controller, target)
+}
+
+set_orbit_camera_distance :: proc(engine: ^Engine, distance: f32) {
+  world.camera_controller_orbit_set_distance(&engine.orbit_controller, distance)
+}
+
+set_orbit_camera_angles :: proc(engine: ^Engine, yaw, pitch: f32) {
+  world.camera_controller_orbit_set_yaw_pitch(&engine.orbit_controller, yaw, pitch)
+}
+
+set_free_camera_speed :: proc(engine: ^Engine, speed: f32) {
+  world.camera_controller_free_set_speed(&engine.free_controller, speed)
+}
+
+set_free_camera_sensitivity :: proc(engine: ^Engine, sensitivity: f32) {
+  world.camera_controller_free_set_sensitivity(&engine.free_controller, sensitivity)
+}
+
+get_main_camera :: proc(engine: ^Engine) -> ^resources.Camera {
+  return resources.get(engine.rm.cameras, engine.render.main_camera)
+}
+
+sync_camera_controller :: proc(engine: ^Engine, type: CameraControllerType) {
+  main_camera := get_main_camera(engine)
+  if main_camera == nil do return
+  switch type {
+  case .ORBIT:
+    world.camera_controller_sync(&engine.orbit_controller, main_camera)
+  case .FREE:
+    world.camera_controller_sync(&engine.free_controller, main_camera)
+  case .FOLLOW, .CINEMATIC:
+  }
+}
+
+sync_active_camera_controller :: proc(engine: ^Engine) {
+  if engine.active_controller == nil do return
+  main_camera := get_main_camera(engine)
+  if main_camera == nil do return
+  world.camera_controller_sync(engine.active_controller, main_camera)
+}

@@ -23,10 +23,6 @@ portal_camera_handle: resources.Handle
 portal_material_handle: resources.Handle
 portal_quad_handle: resources.Handle
 
-orbit_controller: world.CameraController
-free_controller: world.CameraController
-current_controller: ^world.CameraController
-tab_was_pressed: bool
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -475,15 +471,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // add_dof(engine)
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
-  world.setup_camera_controller_callbacks(engine.window)
-  main_camera := get_main_camera(engine)
-  orbit_controller = world.camera_controller_orbit_init(engine.window)
-  free_controller = world.camera_controller_free_init(engine.window)
-  if main_camera != nil {
-    world.camera_controller_sync(&orbit_controller, main_camera)
-    world.camera_controller_sync(&free_controller, main_camera)
-  }
-  current_controller = &orbit_controller
+  // Camera controller is automatically set up by engine
   when true {
     // create portal camera with its own render target
     portal_camera_ok: bool
@@ -584,21 +572,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
-  if main_camera := get_main_camera(engine); main_camera != nil {
-    if current_controller == &orbit_controller {
-      world.camera_controller_orbit_update(
-        current_controller,
-        main_camera,
-        delta_time,
-      )
-    } else {
-      world.camera_controller_free_update(
-        current_controller,
-        main_camera,
-        delta_time,
-      )
-    }
-  }
+  // Camera controller is automatically updated by engine
   t := time_since_start(engine) * 0.5
   translate(
     engine,
@@ -652,16 +626,13 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   } else if key == glfw.KEY_X {
     translate_by(engine, light_handles[0], 0.0, 0.0, -0.1)
   } else if key == glfw.KEY_TAB {
-    main_camera_for_sync := get_main_camera(engine)
-    if current_controller == &orbit_controller {
-      current_controller = &free_controller
+    current_type := get_active_camera_controller_type(engine)
+    if current_type == .ORBIT {
+      switch_camera_controller(engine, .FREE)
       log.info("Switched to free camera")
     } else {
-      current_controller = &orbit_controller
+      switch_camera_controller(engine, .ORBIT)
       log.info("Switched to orbit camera")
-    }
-    if main_camera_for_sync != nil {
-      world.camera_controller_sync(current_controller, main_camera_for_sync)
     }
   }
 }

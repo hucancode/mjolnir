@@ -47,6 +47,7 @@ MouseScrollProc :: #type proc(engine: ^Engine, offset: [2]f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: [2]f64)
 PreRenderProc :: #type proc(engine: ^Engine)
 PostRenderProc :: #type proc(engine: ^Engine)
+CameraController :: world.CameraController
 
 UpdateThreadData :: struct {
   engine: ^Engine,
@@ -91,6 +92,10 @@ Engine :: struct {
   update_thread:          Maybe(^thread.Thread),
   update_active:          bool,
   last_render_timestamp:  time.Time,
+  orbit_controller:       CameraController,
+  free_controller:        CameraController,
+  active_controller:      ^CameraController,
+  camera_controller_enabled: bool,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -130,6 +135,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   log.infof("Window created %v\n", self.window)
   gpu.gpu_context_init(&self.gctx, self.window) or_return
   resources.init(&self.rm, &self.gctx) or_return
+  self.camera_controller_enabled = true
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
@@ -306,6 +312,16 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
       retained_ui.input_text(&engine.render.retained_ui, text_str)
     },
   )
+  if self.camera_controller_enabled {
+    world.setup_camera_controller_callbacks(self.window)
+    self.orbit_controller = world.camera_controller_orbit_init(self.window)
+    self.free_controller = world.camera_controller_free_init(self.window)
+    if main_camera := get_main_camera(self); main_camera != nil {
+      world.camera_controller_sync(&self.orbit_controller, main_camera)
+      world.camera_controller_sync(&self.free_controller, main_camera)
+    }
+    self.active_controller = &self.orbit_controller
+  }
   if self.setup_proc != nil {
     self.setup_proc(self)
   }
@@ -324,10 +340,10 @@ time_since_start :: proc(self: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(self.start_timestamp)))
 }
 
+@(private = "file")
 get_main_camera :: proc(self: ^Engine) -> ^resources.Camera {
   return resources.get(self.rm.cameras, self.render.main_camera)
 }
-
 
 update_input :: proc(self: ^Engine) -> bool {
   glfw.PollEvents()
@@ -372,6 +388,33 @@ update :: proc(self: ^Engine) -> bool {
     self.input.mouse_holding[0],
   )
   retained_ui.update(&self.render.retained_ui, self.frame_index)
+  // Update camera controller
+  if self.camera_controller_enabled && self.active_controller != nil {
+    main_camera := get_main_camera(self)
+    if main_camera != nil {
+      switch self.active_controller.type {
+      case .ORBIT:
+        world.camera_controller_orbit_update(
+          self.active_controller,
+          main_camera,
+          delta_time,
+        )
+      case .FREE:
+        world.camera_controller_free_update(
+          self.active_controller,
+          main_camera,
+          delta_time,
+        )
+      case .FOLLOW:
+        world.camera_controller_follow_update(
+          self.active_controller,
+          main_camera,
+          delta_time,
+        )
+      case .CINEMATIC:
+      }
+    }
+  }
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
