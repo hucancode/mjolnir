@@ -41,7 +41,8 @@ jobs:
           mesa-vulkan-drivers \
           vulkan-tools \
           x11-utils \
-          python3-pip
+          python3-pip \
+          gdb
         sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
         pip install scikit-image numpy
 

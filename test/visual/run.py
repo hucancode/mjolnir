@@ -60,6 +60,46 @@ def run_test(repo_root: Path, binary_name: str, timeout: int, env: dict, log_pat
     return code
 
 
+def run_test_with_gdb(repo_root: Path, binary_name: str, env: dict, log_path: Path) -> str:
+    """
+    Re-run the crashed test under gdb to capture a backtrace.
+    Returns the gdb output as a string.
+    """
+    print(f"Re-running {binary_name.removeprefix('visual_')} with gdb to capture crash log...")
+
+    gdb_commands = """
+run
+thread apply all bt
+quit
+"""
+
+    crash_log_path = log_path.with_suffix('.crash.log')
+
+    with crash_log_path.open("w") as crash_file:
+        proc = subprocess.Popen(
+            [
+                "xvfb-run", "-a", "-s", "-screen 0 1920x1080x24",
+                "gdb", "-batch",
+                "-ex", "run",
+                "-ex", "thread apply all bt",
+                "-ex", "quit",
+                f"./bin/{binary_name}"
+            ],
+            cwd=repo_root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        stdout, _ = proc.communicate()
+
+        crash_file.write(stdout)
+        print(stdout, end="")
+
+    print(f"Crash log saved to: {crash_log_path}")
+    return stdout
+
+
 def to_grayscale(img: np.ndarray) -> np.ndarray:
     if len(img.shape) == 3 and img.shape[2] >= 3:
         return np.dot(img[..., :3], [0.299, 0.587, 0.114])
@@ -137,7 +177,13 @@ def main():
     env["VK_SCREENSHOT_FRAMES"] = str(frames)
     env["VK_SCREENSHOT_DIR"] = str(out_dir.resolve())
 
-    code = run_test(repo_root, binary_name, timeout, env, artifact_root / "logs" / f"{test_dir.name}.log")
+    log_path = artifact_root / "logs" / f"{test_dir.name}.log"
+    code = run_test(repo_root, binary_name, timeout, env, log_path)
+
+    # If test crashed, re-run with gdb to get backtrace
+    if code != 0:
+        print(f"\nTest crashed with exit code {code}")
+        run_test_with_gdb(repo_root, binary_name, env, log_path)
 
     # Compare
     screenshots = sorted(out_dir.glob("*.ppm"))
