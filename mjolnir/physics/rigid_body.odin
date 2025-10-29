@@ -53,6 +53,24 @@ rigid_body_create :: proc(
   return body
 }
 
+rigid_body_set_mass :: proc(body: ^RigidBody, mass: f32) {
+  if body.is_static {
+    return
+  }
+  if mass <= 0.0 {
+    return
+  }
+  old_mass := body.mass
+  body.mass = mass
+  body.inv_mass = 1.0 / mass
+  // Scale inertia tensor proportionally if it was set
+  if old_mass > 0.0 {
+    mass_ratio := mass / old_mass
+    body.inertia = mass_ratio * body.inertia
+    body.inv_inertia = linalg.matrix3_inverse_f32(body.inertia)
+  }
+}
+
 rigid_body_set_box_inertia :: proc(body: ^RigidBody, half_extents: [3]f32) {
   if body.is_static {
     return
