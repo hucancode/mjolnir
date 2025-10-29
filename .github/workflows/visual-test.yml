@@ -45,6 +45,7 @@ jobs:
           gdb
         sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
         pip install scikit-image numpy
+        echo "LAVAPIPE_ICD=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json" >> $GITHUB_ENV
 
     - name: Inspect Vulkan SDK assets
       run: |
@@ -57,7 +58,7 @@ jobs:
 
     - name: Query Vulkan device capabilities
       env:
-        VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
       run: |
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
         echo "=== Vulkan Instance Info ==="
@@ -75,15 +76,15 @@ jobs:
     - name: Run visual tests
       env:
         VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d
-        VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
       run: |
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
         make vtest
     - name: Smoke test
       env:
         VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d
-        VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-        VK_INSTANCE_LAYERS: VK_LAYER_LUNARG_screenshot
+        VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
+        VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation:VK_LAYER_LUNARG_screenshot
         VK_SCREENSHOT_FRAMES: 3
         VK_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/main
       run: |
