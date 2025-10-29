@@ -786,17 +786,8 @@ create_render_pipeline :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology = .POINT_LIST,
-  }
-  rasterization := vk.PipelineRasterizationStateCreateInfo {
-    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    depthClampEnable        = false,
-    rasterizerDiscardEnable = false,
-    polygonMode             = .FILL,
-    lineWidth               = 1.0,
-  }
+  input_assembly := gpu.create_standard_input_assembly(topology = .POINT_LIST)
+  rasterization := gpu.create_standard_rasterizer(cull_mode = {})
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
     srcColorBlendFactor = .SRC_ALPHA,
@@ -817,16 +808,8 @@ create_render_pipeline :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
-  dynamic_state := vk.PipelineDynamicStateCreateInfo {
-    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = len(dynamic_states),
-    pDynamicStates    = raw_data(dynamic_states[:]),
-  }
-  multisample := vk.PipelineMultisampleStateCreateInfo {
-    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    rasterizationSamples = {._1},
-  }
+  dynamic_state := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
+  multisample := gpu.create_standard_multisampling()
   vert_shader_code := #load("../../shader/particle/vert.spv")
   frag_shader_code := #load("../../shader/particle/frag.spv")
   vert_module := gpu.create_shader_module(

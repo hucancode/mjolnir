@@ -185,16 +185,8 @@ init :: proc(
     ambient_frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, ambient_frag_module, nil)
-  ambient_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
-  ambient_dynamic_state := vk.PipelineDynamicStateCreateInfo {
-    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = len(ambient_dynamic_states),
-    pDynamicStates    = raw_data(ambient_dynamic_states[:]),
-  }
-  ambient_input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology = .TRIANGLE_LIST,
-  }
+  ambient_dynamic_state := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
+  ambient_input_assembly := gpu.create_standard_input_assembly()
   ambient_vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
   }
@@ -203,15 +195,8 @@ init :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  ambient_rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    lineWidth   = 1.0,
-  }
-  ambient_multisampling := vk.PipelineMultisampleStateCreateInfo {
-    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    rasterizationSamples = {._1},
-  }
+  ambient_rasterizer := gpu.create_standard_rasterizer(cull_mode = {})
+  ambient_multisampling := gpu.create_standard_multisampling()
   ambient_color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask      = {.R, .G, .B, .A},
     blendEnable         = false,
@@ -346,20 +331,9 @@ init :: proc(
     lighting_frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, lighting_frag_module, nil)
-  lighting_dynamic_states := [?]vk.DynamicState {
-    .VIEWPORT,
-    .SCISSOR,
-    .DEPTH_COMPARE_OP,
-  }
-  lighting_dynamic_state := vk.PipelineDynamicStateCreateInfo {
-    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = len(lighting_dynamic_states),
-    pDynamicStates    = raw_data(lighting_dynamic_states[:]),
-  }
-  lighting_input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology = .TRIANGLE_LIST,
-  }
+  lighting_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_COMPARE_OP}
+  lighting_dynamic_state := gpu.create_dynamic_state(lighting_dynamic_states[:])
+  lighting_input_assembly := gpu.create_standard_input_assembly()
   lighting_vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
@@ -372,17 +346,8 @@ init :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  lighting_rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    cullMode    = {.FRONT},
-    frontFace   = .COUNTER_CLOCKWISE,
-    lineWidth   = 1.0,
-  }
-  lighting_multisampling := vk.PipelineMultisampleStateCreateInfo {
-    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    rasterizationSamples = {._1},
-  }
+  lighting_rasterizer := gpu.create_standard_rasterizer(cull_mode = {.FRONT})
+  lighting_multisampling := gpu.create_standard_multisampling()
   lighting_color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask      = {.R, .G, .B, .A},
     blendEnable         = true,

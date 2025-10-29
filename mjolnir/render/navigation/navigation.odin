@@ -421,26 +421,14 @@ create_pipeline :: proc(
     vertexAttributeDescriptionCount = u32(len(vertex_attributes)),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes),
   }
-  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology = .TRIANGLE_LIST,
-  }
+  input_assembly := gpu.create_standard_input_assembly()
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-  rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    cullMode    = {},
-    frontFace   = .COUNTER_CLOCKWISE,
-    lineWidth   = 1.0,
-  }
-  multisampling := vk.PipelineMultisampleStateCreateInfo {
-    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    rasterizationSamples = {._1},
-  }
+  rasterizer := gpu.create_standard_rasterizer(cull_mode = {})
+  multisampling := gpu.create_standard_multisampling()
   // Depth testing enabled, writing disabled for transparency
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -463,12 +451,7 @@ create_pipeline :: proc(
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
-  dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
-  dynamic_state := vk.PipelineDynamicStateCreateInfo {
-    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = u32(len(dynamic_states)),
-    pDynamicStates    = raw_data(dynamic_states),
-  }
+  dynamic_state := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
   rendering_info := vk.PipelineRenderingCreateInfo {
@@ -514,17 +497,8 @@ create_pipeline :: proc(
     nil,
     &renderer.pipeline,
   ) or_return
-  input_assembly_lines := vk.PipelineInputAssemblyStateCreateInfo {
-    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology = .LINE_STRIP,
-  }
-  rasterizer_lines := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    cullMode    = {},
-    frontFace   = .COUNTER_CLOCKWISE,
-    lineWidth   = 3.0,
-  }
+  input_assembly_lines := gpu.create_standard_input_assembly(topology = .LINE_STRIP)
+  rasterizer_lines := gpu.create_standard_rasterizer(cull_mode = {}, line_width = 3.0)
   pipeline_info_lines := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = u32(len(shader_stages)),
