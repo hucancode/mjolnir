@@ -72,8 +72,8 @@ destroy_body :: proc(
   world: ^PhysicsWorld,
   handle: resources.Handle,
 ) {
-  body, _ := resources.get(world.bodies, handle)
-  if body != nil && body.collider_handle.generation != 0 {
+  body, ok := resources.get(world.bodies, handle)
+  if ok && body.collider_handle.generation != 0 {
     resources.free(&world.colliders, body.collider_handle)
   }
   resources.free(&world.bodies, handle)
@@ -84,18 +84,12 @@ add_collider :: proc(
   body_handle: resources.Handle,
   collider: Collider,
 ) -> (
-  resources.Handle,
-  ^Collider,
-  bool,
+  handle: resources.Handle,
+  col_ptr: ^Collider,
+  ok: bool,
 ) {
-  body, body_ok := resources.get(world.bodies, body_handle)
-  if !body_ok {
-    return {}, nil, false
-  }
-  handle, col_ptr, ok := resources.alloc(&world.colliders)
-  if !ok {
-    return {}, nil, false
-  }
+  body := resources.get(world.bodies, body_handle) or_return
+  handle, col_ptr = resources.alloc(&world.colliders) or_return
   col_ptr^ = collider
   body.collider_handle = handle
   return handle, col_ptr, true
@@ -116,7 +110,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       continue
     }
     body := &entry.item
-    if !body.is_static && !body.is_kinematic {
+    if !body.is_static && !body.is_kinematic && !body.trigger_only {
       gravity_force := physics.gravity * body.mass * body.gravity_scale
       rigid_body_apply_force(body, gravity_force)
     }
@@ -144,7 +138,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       continue
     }
     body_a := &entry_a.item
-    if body_a.is_static || body_a.collider_handle.generation == 0 {
+    if body_a.is_static || body_a.collider_handle.generation == 0 || body_a.trigger_only {
       continue
     }
     // Check if moving fast enough for CCD
@@ -152,17 +146,11 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     if velocity_mag < ccd_threshold {
       continue
     }
-    node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
-    if !node_a_ok {
-      continue
-    }
-    collider_a, col_a_ok := resources.get(
+    node_a := resources.get(w.nodes, body_a.node_handle) or_continue
+    collider_a := resources.get(
       physics.colliders,
       body_a.collider_handle,
-    )
-    if !col_a_ok {
-      continue
-    }
+    ) or_continue
     pos_a := node_a.transform.position
     motion := body_a.velocity * dt
     earliest_toi := f32(1.0)
@@ -178,17 +166,11 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       if body_b.collider_handle.generation == 0 {
         continue
       }
-      node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
-      if !node_b_ok {
-        continue
-      }
-      collider_b, col_b_ok := resources.get(
+      node_b := resources.get(w.nodes, body_b.node_handle) or_continue
+      collider_b := resources.get(
         physics.colliders,
         body_b.collider_handle,
-      )
-      if !col_b_ok {
-        continue
-      }
+      ) or_continue
       pos_b := node_b.transform.position
       toi := swept_test(collider_a, pos_a, motion, collider_b, pos_b)
       if toi.has_impact && toi.time < earliest_toi {
@@ -230,260 +212,223 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     }
   }
 
-  // Use substeps like Rapier - integrate position multiple times per frame
-  // More substeps = smaller steps = less tunneling through thin objects
+  // integrate position multiple times per frame
+  // more substeps = smaller steps = less tunneling through thin objects
   num_substeps :: 5
   substep_dt := dt / f32(num_substeps)
 
   for substep in 0 ..< num_substeps {
-    // Clear and redetect contacts at current positions
+    // clear and redetect contacts at current positions
     clear(&physics.contacts)
-
-  broad_phase_entries := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  for &entry, idx in physics.bodies.entries {
-    if !entry.active {
-      continue
-    }
-    body := &entry.item
-    if body.collider_handle.generation == 0 {
-      continue
-    }
-    node, node_ok := resources.get(w.nodes, body.node_handle)
-    if !node_ok {
-      continue
-    }
-    collider, col_ok := resources.get(physics.colliders, body.collider_handle)
-    if !col_ok {
-      continue
-    }
-    pos := node.transform.position
-    bounds := collider_get_aabb(collider, pos)
-    handle := resources.Handle {
-      index      = u32(idx),
-      generation = entry.generation,
-    }
-    append(
-      &broad_phase_entries,
-      BroadPhaseEntry{handle = handle, bounds = bounds},
-    )
-  }
-  for i in 0 ..< len(broad_phase_entries) {
-    for j in i + 1 ..< len(broad_phase_entries) {
-      entry_a := broad_phase_entries[i]
-      entry_b := broad_phase_entries[j]
-      if !geometry.aabb_intersects(entry_a.bounds, entry_b.bounds) {
+    broad_phase_entries := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+    for &entry, idx in physics.bodies.entries {
+      if !entry.active {
         continue
       }
-      body_a, body_a_ok := resources.get(physics.bodies, entry_a.handle)
-      body_b, body_b_ok := resources.get(physics.bodies, entry_b.handle)
-      if !body_a_ok || !body_b_ok {
+      body := &entry.item
+      if body.collider_handle.generation == 0 {
         continue
       }
-      if body_a.is_static && body_b.is_static {
-        continue
+      node := resources.get(w.nodes, body.node_handle) or_continue
+      collider := resources.get(physics.colliders, body.collider_handle) or_continue
+      pos := node.transform.position
+      bounds := collider_get_aabb(collider, pos)
+      handle := resources.Handle {
+        index      = u32(idx),
+        generation = entry.generation,
       }
-      if body_a.collider_handle.generation == 0 ||
-         body_b.collider_handle.generation == 0 {
-        continue
-      }
-      node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
-      node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
-      if !node_a_ok || !node_b_ok {
-        continue
-      }
-      collider_a, col_a_ok := resources.get(
-        physics.colliders,
-        body_a.collider_handle,
+      append(
+        &broad_phase_entries,
+        BroadPhaseEntry{handle = handle, bounds = bounds},
       )
-      collider_b, col_b_ok := resources.get(
-        physics.colliders,
-        body_b.collider_handle,
-      )
-      if !col_a_ok || !col_b_ok {
-        continue
-      }
-      pos_a := node_a.transform.position
-      pos_b := node_b.transform.position
-      // Try fast primitive collision first, fall back to GJK if unavailable
-      hit, point, normal, penetration := test_collision(
-        collider_a,
-        pos_a,
-        collider_b,
-        pos_b,
-      )
-      // If primitive test returns no collision but shapes support GJK, try GJK as fallback
-      if !hit {
-        hit, point, normal, penetration = test_collision_gjk(
+    }
+    for i in 0 ..< len(broad_phase_entries) {
+      for j in i + 1 ..< len(broad_phase_entries) {
+        entry_a := broad_phase_entries[i]
+        entry_b := broad_phase_entries[j]
+        if !geometry.aabb_intersects(entry_a.bounds, entry_b.bounds) {
+          continue
+        }
+        body_a := resources.get(physics.bodies, entry_a.handle) or_continue
+        body_b := resources.get(physics.bodies, entry_b.handle) or_continue
+        if body_a.is_static && body_b.is_static {
+          continue
+        }
+        // Skip collision resolution if either body is trigger_only
+        // But still detect collision for trigger events
+        if body_a.trigger_only || body_b.trigger_only {
+          continue
+        }
+        if body_a.collider_handle.generation == 0 ||
+           body_b.collider_handle.generation == 0 {
+          continue
+        }
+        node_a := resources.get(w.nodes, body_a.node_handle) or_continue
+        node_b := resources.get(w.nodes, body_b.node_handle) or_continue
+        collider_a := resources.get(
+          physics.colliders,
+          body_a.collider_handle,
+        ) or_continue
+        collider_b := resources.get(
+          physics.colliders,
+          body_b.collider_handle,
+        ) or_continue
+        pos_a := node_a.transform.position
+        pos_b := node_b.transform.position
+        // Try fast primitive collision first, fall back to GJK if unavailable
+        hit, point, normal, penetration := test_collision(
           collider_a,
           pos_a,
           collider_b,
           pos_b,
         )
-      }
-      if hit {
-        contact := Contact {
-          body_a      = entry_a.handle,
-          body_b      = entry_b.handle,
-          point       = point,
-          normal      = normal,
-          penetration = penetration,
-          restitution = (body_a.restitution + body_b.restitution) * 0.5,
-          friction    = (body_a.friction + body_b.friction) * 0.5,
+        // If primitive test returns no collision but shapes support GJK, try GJK as fallback
+        if !hit {
+          hit, point, normal, penetration = test_collision_gjk(
+            collider_a,
+            pos_a,
+            collider_b,
+            pos_b,
+          )
         }
-        // Check if we have a cached contact from previous frame for warmstarting
-        pair := CollisionPair{body_a = entry_a.handle, body_b = entry_b.handle}
-        hash := collision_pair_hash(pair)
-        if prev_contact, found := physics.prev_contacts[hash]; found {
-          // Copy accumulated impulses for warmstart with heavy damping
-          // Heavy damping prevents bad impulses from causing instability
-          warmstart_coef :: 0.8 // Reduced to prevent carrying forward problematic impulses
-          contact.normal_impulse = prev_contact.normal_impulse * warmstart_coef
-          contact.tangent_impulse[0] = prev_contact.tangent_impulse[0] * warmstart_coef
-          contact.tangent_impulse[1] = prev_contact.tangent_impulse[1] * warmstart_coef
+        if hit {
+          contact := Contact {
+            body_a      = entry_a.handle,
+            body_b      = entry_b.handle,
+            point       = point,
+            normal      = normal,
+            penetration = penetration,
+            restitution = (body_a.restitution + body_b.restitution) * 0.5,
+            friction    = (body_a.friction + body_b.friction) * 0.5,
+          }
+          // Check if we have a cached contact from previous frame for warmstarting
+          pair := CollisionPair{body_a = entry_a.handle, body_b = entry_b.handle}
+          hash := collision_pair_hash(pair)
+          if prev_contact, found := physics.prev_contacts[hash]; found {
+            // Copy accumulated impulses for warmstart with heavy damping
+            // Heavy damping prevents bad impulses from causing instability
+            warmstart_coef :: 0.8 // Reduced to prevent carrying forward problematic impulses
+            contact.normal_impulse = prev_contact.normal_impulse * warmstart_coef
+            contact.tangent_impulse[0] = prev_contact.tangent_impulse[0] * warmstart_coef
+            contact.tangent_impulse[1] = prev_contact.tangent_impulse[1] * warmstart_coef
+          }
+          append(&physics.contacts, contact)
         }
-        append(&physics.contacts, contact)
       }
     }
-  }
-  // Prepare all contacts (compute mass matrices and bias terms)
-  for &contact in physics.contacts {
-    body_a, body_a_ok := resources.get(physics.bodies, contact.body_a)
-    body_b, body_b_ok := resources.get(physics.bodies, contact.body_b)
-    if !body_a_ok || !body_b_ok {
-      continue
-    }
-    node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
-    node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
-    if !node_a_ok || !node_b_ok {
-      continue
-    }
-    pos_a := node_a.transform.position
-    pos_b := node_b.transform.position
-    prepare_contact(&contact, body_a, body_b, pos_a, pos_b, substep_dt)
-  }
-  // Warmstart with cached impulses (only on first substep)
-  if substep == 0 {
+    // Prepare all contacts (compute mass matrices and bias terms)
     for &contact in physics.contacts {
-    body_a, body_a_ok := resources.get(physics.bodies, contact.body_a)
-    body_b, body_b_ok := resources.get(physics.bodies, contact.body_b)
-    if !body_a_ok || !body_b_ok {
-      continue
-    }
-    node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
-    node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
-    if !node_a_ok || !node_b_ok {
-      continue
-    }
+      body_a := resources.get(physics.bodies, contact.body_a) or_continue
+      body_b := resources.get(physics.bodies, contact.body_b) or_continue
+      node_a := resources.get(w.nodes, body_a.node_handle) or_continue
+      node_b := resources.get(w.nodes, body_b.node_handle) or_continue
       pos_a := node_a.transform.position
       pos_b := node_b.transform.position
-      warmstart_contact(&contact, body_a, body_b, pos_a, pos_b)
+      prepare_contact(&contact, body_a, body_b, pos_a, pos_b, substep_dt)
     }
-  }
-  // Solve constraints with bias (includes position correction + restitution)
-  for _ in 0 ..< physics.iterations {
-    for &contact in physics.contacts {
-      body_a, body_a_ok := resources.get(physics.bodies, contact.body_a)
-      body_b, body_b_ok := resources.get(physics.bodies, contact.body_b)
-      if !body_a_ok || !body_b_ok {
+    // Warmstart with cached impulses (only on first substep)
+    if substep == 0 {
+      for &contact in physics.contacts {
+        body_a := resources.get(physics.bodies, contact.body_a) or_continue
+        body_b := resources.get(physics.bodies, contact.body_b) or_continue
+        node_a := resources.get(w.nodes, body_a.node_handle) or_continue
+        node_b := resources.get(w.nodes, body_b.node_handle) or_continue
+        pos_a := node_a.transform.position
+        pos_b := node_b.transform.position
+        warmstart_contact(&contact, body_a, body_b, pos_a, pos_b)
+      }
+    }
+    // Solve constraints with bias (includes position correction + restitution)
+    for _ in 0 ..< physics.iterations {
+      for &contact in physics.contacts {
+        body_a := resources.get(physics.bodies, contact.body_a) or_continue
+        body_b := resources.get(physics.bodies, contact.body_b) or_continue
+        node_a := resources.get(w.nodes, body_a.node_handle) or_continue
+        node_b := resources.get(w.nodes, body_b.node_handle) or_continue
+        pos_a := node_a.transform.position
+        pos_b := node_b.transform.position
+        resolve_contact(&contact, body_a, body_b, pos_a, pos_b)
+      }
+    }
+    // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
+    // This prevents jitter without adding artificial velocity
+    stabilization_iters :: 2
+    for _ in 0 ..< stabilization_iters {
+      for &contact in physics.contacts {
+        body_a := resources.get(physics.bodies, contact.body_a) or_continue
+        body_b := resources.get(physics.bodies, contact.body_b) or_continue
+        node_a := resources.get(w.nodes, body_a.node_handle) or_continue
+        node_b := resources.get(w.nodes, body_b.node_handle) or_continue
+        pos_a := node_a.transform.position
+        pos_b := node_b.transform.position
+        // Solve without bias - only enforce zero relative velocity at contact
+        resolve_contact_no_bias(&contact, body_a, body_b, pos_a, pos_b)
+      }
+    }
+    for &entry, idx in physics.bodies.entries {
+      if !entry.active {
         continue
       }
-      node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
-      node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
-      if !node_a_ok || !node_b_ok {
+      body := &entry.item
+      if body.is_static || body.is_kinematic || body.trigger_only {
         continue
       }
-      pos_a := node_a.transform.position
-      pos_b := node_b.transform.position
-      resolve_contact(&contact, body_a, body_b, pos_a, pos_b)
-    }
-  }
-  // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
-  // This prevents jitter without adding artificial velocity
-  stabilization_iters :: 2
-  for _ in 0 ..< stabilization_iters {
-    for &contact in physics.contacts {
-      body_a, body_a_ok := resources.get(physics.bodies, contact.body_a)
-      body_b, body_b_ok := resources.get(physics.bodies, contact.body_b)
-      if !body_a_ok || !body_b_ok {
+      // Skip if already handled by CCD
+      if idx < len(ccd_handled) && ccd_handled[idx] {
         continue
       }
-      node_a, node_a_ok := resources.get(w.nodes, body_a.node_handle)
-      node_b, node_b_ok := resources.get(w.nodes, body_b.node_handle)
-      if !node_a_ok || !node_b_ok {
-        continue
-      }
-      pos_a := node_a.transform.position
-      pos_b := node_b.transform.position
-      // Solve without bias - only enforce zero relative velocity at contact
-      resolve_contact_no_bias(&contact, body_a, body_b, pos_a, pos_b)
-    }
-  }
-  for &entry, idx in physics.bodies.entries {
-    if !entry.active {
-      continue
-    }
-    body := &entry.item
-    if body.is_static || body.is_kinematic {
-      continue
-    }
-    // Skip if already handled by CCD
-    if idx < len(ccd_handled) && ccd_handled[idx] {
-      continue
-    }
-    node, node_ok := resources.get(w.nodes, body.node_handle)
-    if !node_ok {
-      continue
-    }
-    // Update position using substep timestep
-    vel := body.velocity * substep_dt
-    geometry.transform_translate_by(&node.transform, vel.x, vel.y, vel.z)
-    // Update rotation from angular velocity
-    // Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
-    // Skip rotation if angular velocity is negligible
-    ang_vel_mag_sq := linalg.vector_dot(
-      body.angular_velocity,
-      body.angular_velocity,
-    )
-    if ang_vel_mag_sq > 0.0001 {
-      // Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
-      omega_quat := quaternion(
-        w = 0,
-        x = body.angular_velocity.x,
-        y = body.angular_velocity.y,
-        z = body.angular_velocity.z,
-      )
-      q_old := node.transform.rotation
-      // Calculate derivative: q_dot = 0.5 * omega * q_old
-      q_dot := omega_quat * q_old
-      q_dot.w *= 0.5
-      q_dot.x *= 0.5
-      q_dot.y *= 0.5
-      q_dot.z *= 0.5
-      // Integrate: q_new = q_old + q_dot * substep_dt
-      q_new := quaternion(
-        w = q_old.w + q_dot.w * substep_dt,
-        x = q_old.x + q_dot.x * substep_dt,
-        y = q_old.y + q_dot.y * substep_dt,
-        z = q_old.z + q_dot.z * substep_dt,
-      )
-      // Normalize to prevent drift
-      mag := math.sqrt(
-        q_new.w * q_new.w +
-        q_new.x * q_new.x +
-        q_new.y * q_new.y +
-        q_new.z * q_new.z,
-      )
-      if mag > 0.0001 {
-        q_new.w /= mag
-        q_new.x /= mag
-        q_new.y /= mag
-        q_new.z /= mag
-        geometry.transform_rotate(&node.transform, q_new)
+      node := resources.get(w.nodes, body.node_handle) or_continue
+      // Update position using substep timestep
+      vel := body.velocity * substep_dt
+      geometry.transform_translate_by(&node.transform, vel.x, vel.y, vel.z)
+      // Update rotation from angular velocity (if enabled)
+      // Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
+      // Skip rotation if angular velocity is negligible or rotation is disabled
+      if body.enable_rotation {
+        ang_vel_mag_sq := linalg.vector_dot(
+          body.angular_velocity,
+          body.angular_velocity,
+        )
+        if ang_vel_mag_sq > 0.0001 {
+          // Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
+          omega_quat := quaternion(
+            w = 0,
+            x = body.angular_velocity.x,
+            y = body.angular_velocity.y,
+            z = body.angular_velocity.z,
+          )
+          q_old := node.transform.rotation
+          // Calculate derivative: q_dot = 0.5 * omega * q_old
+          q_dot := omega_quat * q_old
+          q_dot.w *= 0.5
+          q_dot.x *= 0.5
+          q_dot.y *= 0.5
+          q_dot.z *= 0.5
+          // Integrate: q_new = q_old + q_dot * substep_dt
+          q_new := quaternion(
+            w = q_old.w + q_dot.w * substep_dt,
+            x = q_old.x + q_dot.x * substep_dt,
+            y = q_old.y + q_dot.y * substep_dt,
+            z = q_old.z + q_dot.z * substep_dt,
+          )
+          // Normalize to prevent drift
+          mag := math.sqrt(
+            q_new.w * q_new.w +
+            q_new.x * q_new.x +
+            q_new.y * q_new.y +
+            q_new.z * q_new.z,
+          )
+          if mag > 0.0001 {
+            q_new.w /= mag
+            q_new.x /= mag
+            q_new.y /= mag
+            q_new.z /= mag
+            geometry.transform_rotate(&node.transform, q_new)
+          }
+        }
       }
     }
-  }
   } // End substep loop
-
   // Kill bodies that fall below kill_y threshold
   bodies_to_kill := make([dynamic]resources.Handle, context.temp_allocator)
   for &entry, idx in physics.bodies.entries {
@@ -494,10 +439,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     if body.is_static || body.is_kinematic {
       continue
     }
-    node, node_ok := resources.get(w.nodes, body.node_handle)
-    if !node_ok {
-      continue
-    }
+    node := resources.get(w.nodes, body.node_handle) or_continue
     if node.transform.position.y < KILL_Y {
       handle := resources.Handle {
         index      = u32(idx),
@@ -508,15 +450,13 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   }
   // Remove killed bodies
   for handle in bodies_to_kill {
-    body, body_ok := resources.get(physics.bodies, handle)
-    if body_ok {
-      node, _ := resources.get(w.nodes, body.node_handle)
-      log.infof(
-        "Removing body at y=%.2f (below KILL_Y=%.2f)",
-        node.transform.position.y,
-        KILL_Y,
-      )
-    }
-    destroy_body(physics, handle)
+    defer destroy_body(physics, handle)
+    body := resources.get(physics.bodies, handle) or_continue
+    node, _ := resources.get(w.nodes, body.node_handle)
+    log.infof(
+      "Removing body at y=%.2f (below KILL_Y=%.2f)",
+      node.transform.position.y,
+      KILL_Y,
+    )
   }
 }

@@ -20,6 +20,8 @@ RigidBody :: struct {
   angular_damping:  f32,
   is_static:        bool,
   is_kinematic:     bool,
+  enable_rotation:  bool,
+  trigger_only:     bool,
   gravity_scale:    f32,
 }
 
@@ -37,6 +39,8 @@ rigid_body_create :: proc(
     linear_damping  = 0.01, // 1% velocity loss per second
     angular_damping = 0.05, // 5% angular velocity loss per second
     is_static       = is_static,
+    enable_rotation = true,  // turn this to false to stop rotating body (for character simulation)
+    trigger_only    = false, // turn this to true to stop response to collision resolution
     gravity_scale   = 1.0,
   }
   if is_static {
@@ -110,8 +114,10 @@ rigid_body_apply_force_at_point :: proc(
     return
   }
   body.force += force
-  r := point - center
-  body.torque += linalg.vector_cross3(r, force)
+  if body.enable_rotation {
+    r := point - center
+    body.torque += linalg.vector_cross3(r, force)
+  }
 }
 
 rigid_body_apply_impulse :: proc(body: ^RigidBody, impulse: [3]f32) {
@@ -131,23 +137,31 @@ rigid_body_apply_impulse_at_point :: proc(
     return
   }
   body.velocity += impulse * body.inv_mass
-  r := point - center
-  angular_impulse := linalg.vector_cross3(r, impulse)
-  body.angular_velocity += body.inv_inertia * angular_impulse
+  if body.enable_rotation {
+    r := point - center
+    angular_impulse := linalg.vector_cross3(r, impulse)
+    body.angular_velocity += body.inv_inertia * angular_impulse
+  }
 }
 
 rigid_body_integrate :: proc(body: ^RigidBody, dt: f32) {
-  if body.is_static || body.is_kinematic {
+  if body.is_static || body.is_kinematic || body.trigger_only {
     return
   }
   // Apply forces
   body.velocity += body.force * body.inv_mass * dt
-  body.angular_velocity += (body.inv_inertia * body.torque) * dt
+  if body.enable_rotation {
+    body.angular_velocity += (body.inv_inertia * body.torque) * dt
+  }
   // Apply damping (exponential decay)
   damping_factor := 1.0 - body.linear_damping
   angular_damping_factor := 1.0 - body.angular_damping
   body.velocity *= damping_factor
-  body.angular_velocity *= angular_damping_factor
+  if body.enable_rotation {
+    body.angular_velocity *= angular_damping_factor
+  } else {
+    body.angular_velocity = {}
+  }
   // Clear forces
   rigid_body_clear_forces(body)
 }

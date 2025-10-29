@@ -53,7 +53,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         for y in 0 ..< ny {
           for z in 0 ..< nz {
             world_x := (f32(x) - f32(nx) * 0.5) * space
-            world_y := (f32(y) - f32(ny) * 0.5) * space + 1.5
+            world_y := (f32(y) - f32(ny) * 0.5) * space + 2.25
             world_z := (f32(z) - f32(nz) * 0.5) * space
             node_handle: resources.Handle
             node_ok := false
@@ -459,7 +459,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // add_dof(engine)
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
-  when false {
+  when true {
     // create portal camera with its own render target
     portal_camera_ok: bool
     portal_camera_handle, portal_camera_ok = create_camera(

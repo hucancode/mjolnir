@@ -1191,3 +1191,239 @@ test_resolve_contact_bias_correction :: proc(t: ^testing.T) {
 	testing.expect(t, contact.bias > 0.0, "Bias should be positive for position correction")
 	testing.expect(t, contact.normal_mass > 0.0, "Normal mass should be computed")
 }
+
+@(test)
+test_disable_rotation_prevents_angular_velocity :: proc(t: ^testing.T) {
+	node_handle := resources.Handle{index = 1, generation = 1}
+	body := physics.rigid_body_create(node_handle, 1.0, false)
+	physics.rigid_body_set_box_inertia(&body, {1, 1, 1})
+	body.enable_rotation = false
+	torque := [3]f32{0, 10, 0}
+	body.torque = torque
+	dt := f32(0.016)
+	physics.rigid_body_integrate(&body, dt)
+	testing.expect(
+		t,
+		abs(body.angular_velocity.x) < 0.001 &&
+		abs(body.angular_velocity.y) < 0.001 &&
+		abs(body.angular_velocity.z) < 0.001,
+		"Angular velocity should remain zero when rotation is disabled",
+	)
+}
+
+@(test)
+test_disable_rotation_prevents_torque_application :: proc(t: ^testing.T) {
+	node_handle := resources.Handle{index = 1, generation = 1}
+	body := physics.rigid_body_create(node_handle, 1.0, false)
+	physics.rigid_body_set_box_inertia(&body, {1, 1, 1})
+	body.enable_rotation = false
+	center := [3]f32{0, 0, 0}
+	point := [3]f32{1, 0, 0}
+	force := [3]f32{0, 1, 0}
+	physics.rigid_body_apply_force_at_point(&body, force, point, center)
+	testing.expect(
+		t,
+		abs(body.torque.x) < 0.001 &&
+		abs(body.torque.y) < 0.001 &&
+		abs(body.torque.z) < 0.001,
+		"Torque should not be applied when rotation is disabled",
+	)
+}
+
+@(test)
+test_disable_rotation_prevents_quaternion_update :: proc(t: ^testing.T) {
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+	physics_world : physics.PhysicsWorld
+	physics.init(&physics_world, {0, 0, 0})
+	defer physics.destroy(&physics_world)
+	node_handle, node, _ := world.spawn(&w)
+	body_handle, body, _ := physics.create_body(&physics_world, node_handle, 1.0)
+	physics.rigid_body_set_box_inertia(body, {1, 1, 1})
+	body.enable_rotation = false
+	body.angular_velocity = {0, 5, 0}
+	initial_quat := node.transform.rotation
+	dt := f32(0.1)
+	physics.step(&physics_world, &w, dt)
+	updated_quat := node.transform.rotation
+	quat_unchanged :=
+		abs(updated_quat.w - initial_quat.w) < 0.001 &&
+		abs(updated_quat.x - initial_quat.x) < 0.001 &&
+		abs(updated_quat.y - initial_quat.y) < 0.001 &&
+		abs(updated_quat.z - initial_quat.z) < 0.001
+	testing.expect(t, quat_unchanged, "Quaternion should not update when rotation is disabled")
+}
+
+@(test)
+test_disable_rotation_off_center_impulse_no_spin :: proc(t: ^testing.T) {
+	node_handle := resources.Handle{index = 1, generation = 1}
+	body := physics.rigid_body_create(node_handle, 1.0, false)
+	physics.rigid_body_set_box_inertia(&body, {1, 1, 1})
+	body.enable_rotation = false
+	center := [3]f32{0, 0, 0}
+	impulse := [3]f32{0, 0, 10}
+	point := [3]f32{1, 0, 0}
+	physics.rigid_body_apply_impulse_at_point(&body, impulse, point, center)
+	testing.expect(
+		t,
+		abs(body.velocity.z - 10.0) < 0.001,
+		"Linear velocity should be applied",
+	)
+	testing.expect(
+		t,
+		abs(body.angular_velocity.x) < 0.001 &&
+		abs(body.angular_velocity.y) < 0.001 &&
+		abs(body.angular_velocity.z) < 0.001,
+		"Angular velocity should remain zero when rotation is disabled",
+	)
+}
+
+@(test)
+test_enable_rotation_default_true :: proc(t: ^testing.T) {
+	node_handle := resources.Handle{index = 1, generation = 1}
+	body := physics.rigid_body_create(node_handle, 1.0, false)
+	testing.expect(t, body.enable_rotation, "Rotation should be enabled by default")
+}
+
+@(test)
+test_trigger_only_prevents_gravity :: proc(t: ^testing.T) {
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+	physics_world : physics.PhysicsWorld
+	physics.init(&physics_world, {0, -10, 0})
+	defer physics.destroy(&physics_world)
+	node_handle, _, _ := world.spawn(&w)
+	body_handle, body, _ := physics.create_body(
+		&physics_world,
+		node_handle,
+		2.0,
+		false,
+	)
+	body.trigger_only = true
+	initial_velocity := body.velocity.y
+	dt := f32(0.016)
+	physics.step(&physics_world, &w, dt)
+	testing.expect(
+		t,
+		abs(body.velocity.y - initial_velocity) < 0.001,
+		"Velocity should not change when body is trigger_only",
+	)
+}
+
+@(test)
+test_trigger_only_prevents_position_update :: proc(t: ^testing.T) {
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+	physics_world : physics.PhysicsWorld
+	physics.init(&physics_world, {0, 0, 0})
+	defer physics.destroy(&physics_world)
+	node_handle, node, _ := world.spawn_at(&w, {5, 10, 15})
+	body_handle, body, _ := physics.create_body(&physics_world, node_handle, 1.0)
+	body.trigger_only = true
+	body.velocity = {10, 5, 3}
+	initial_position := node.transform.position
+	dt := f32(0.016)
+	physics.step(&physics_world, &w, dt)
+	node_after, _ := resources.get(w.nodes, body.node_handle)
+	testing.expect(
+		t,
+		abs(node_after.transform.position.x - initial_position.x) < 0.001 &&
+		abs(node_after.transform.position.y - initial_position.y) < 0.001 &&
+		abs(node_after.transform.position.z - initial_position.z) < 0.001,
+		"Position should not change when body is trigger_only",
+	)
+}
+
+@(test)
+test_trigger_only_no_collision_response :: proc(t: ^testing.T) {
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+	physics_world : physics.PhysicsWorld
+	physics.init(&physics_world, {0, 0, 0})
+	defer physics.destroy(&physics_world)
+	node_a, _, _ := world.spawn_at(&w, {0, 0, 0})
+	node_b, _, _ := world.spawn_at(&w, {1.5, 0, 0})
+	body_a_handle, body_a, _ := physics.create_body(&physics_world, node_a, 1.0)
+	body_b_handle, body_b, _ := physics.create_body(&physics_world, node_b, 1.0)
+	collider := physics.collider_create_sphere(1.0)
+	physics.add_collider(&physics_world, body_a_handle, collider)
+	physics.add_collider(&physics_world, body_b_handle, collider)
+	body_a.trigger_only = true
+	body_b.velocity = {-10, 0, 0}
+	initial_velocity := body_b.velocity.x
+	dt := f32(0.016)
+	physics.step(&physics_world, &w, dt)
+	// Velocity should remain negative (not bounce back) and mostly unchanged
+	// Allow for damping effects but ensure no bounce
+	testing.expect(
+		t,
+		body_b.velocity.x < -9.0 && body_b.velocity.x > -10.2,
+		"Body should pass through trigger without bouncing (velocity should remain ~-10)",
+	)
+}
+
+@(test)
+test_trigger_only_runtime_toggle :: proc(t: ^testing.T) {
+	w := world.World{}
+	world.init(&w)
+	defer world.destroy(&w, nil, nil)
+	physics_world : physics.PhysicsWorld
+	physics.init(&physics_world, {0, -10, 0})
+	defer physics.destroy(&physics_world)
+	node_handle, node, _ := world.spawn_at(&w, {0, 10, 0})
+	body_handle, body, _ := physics.create_body(&physics_world, node_handle, 1.0)
+	dt := f32(0.016)
+	physics.step(&physics_world, &w, dt)
+	pos_after_first := node.transform.position.y
+	testing.expect(
+		t,
+		pos_after_first < 10.0,
+		"Body should fall with physics enabled",
+	)
+	body.trigger_only = true
+	physics.step(&physics_world, &w, dt)
+	node_after, _ := resources.get(w.nodes, body.node_handle)
+	pos_after_trigger := node_after.transform.position.y
+	testing.expect(
+		t,
+		abs(pos_after_trigger - pos_after_first) < 0.001,
+		"Body should stop moving when trigger_only is enabled",
+	)
+	body.trigger_only = false
+	physics.step(&physics_world, &w, dt)
+	node_final, _ := resources.get(w.nodes, body.node_handle)
+	testing.expect(
+		t,
+		node_final.transform.position.y < pos_after_trigger,
+		"Body should resume falling when trigger_only is disabled",
+	)
+}
+
+@(test)
+test_force_application :: proc(t: ^testing.T) {
+	node_handle := resources.Handle{index = 1, generation = 1}
+	body := physics.rigid_body_create(node_handle, 10.0, false)
+	force := [3]f32{100, 50, 0}
+	physics.rigid_body_apply_force(&body, force)
+	testing.expect(
+		t,
+		abs(body.force.x - 100) < 0.001 &&
+		abs(body.force.y - 50) < 0.001 &&
+		abs(body.force.z) < 0.001,
+		"Force should be applied correctly",
+	)
+	dt := f32(0.016)
+	physics.rigid_body_integrate(&body, dt)
+	expected_vx := force.x / body.mass * dt * (1.0 - body.linear_damping)
+	expected_vy := force.y / body.mass * dt * (1.0 - body.linear_damping)
+	testing.expect(
+		t,
+		abs(body.velocity.x - expected_vx) < 0.01 &&
+		abs(body.velocity.y - expected_vy) < 0.01,
+		"Force should accelerate the body correctly",
+	)
+}
