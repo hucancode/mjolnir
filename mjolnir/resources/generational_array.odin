@@ -37,25 +37,31 @@ pool_destroy :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
 }
 
 alloc :: proc(pool: ^Pool($T)) -> (handle: Handle, item: ^T, ok: bool) {
+  MAX_CONSECUTIVE_ERROR :: 20
+  @(static) error_count := 0
   index, has_free_index := pop_safe(&pool.free_indices)
   if has_free_index {
     entry := &pool.entries[index]
     entry.active = true
+    error_count = 0
     return Handle{index, entry.generation}, &entry.item, true
-  } else {
-    index := u32(len(pool.entries))
-    if pool.capacity > 0 && index >= pool.capacity {
-      log.errorf("Pool allocation failed: index=%d >= capacity=%d, entries length=%d", index, pool.capacity, len(pool.entries))
-      return
-    }
-    new_item_generation: u32 = 1
-    entry_to_add := Entry(T) {
-      generation = new_item_generation,
-      active     = true,
-    }
-    append(&pool.entries, entry_to_add)
-    return Handle{index, new_item_generation}, &pool.entries[index].item, true
   }
+  index = u32(len(pool.entries))
+  if pool.capacity > 0 && index >= pool.capacity {
+    if error_count < MAX_CONSECUTIVE_ERROR {
+        log.errorf("Pool allocation failed: index=%d >= capacity=%d, entries length=%d", index, pool.capacity, len(pool.entries))
+        error_count += 1
+    }
+    return
+  }
+  new_item_generation: u32 = 1
+  entry_to_add := Entry(T) {
+    generation = new_item_generation,
+    active     = true,
+  }
+  append(&pool.entries, entry_to_add)
+  error_count = 0
+  return Handle{index, new_item_generation}, &pool.entries[index].item, true
 }
 
 // New free function that returns (item, freed) for caller-managed deinitialization
