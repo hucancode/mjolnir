@@ -3,7 +3,6 @@ package main
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:os"
 import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/resources"
@@ -15,22 +14,12 @@ ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
 light_cube_handles: [LIGHT_COUNT]resources.Handle
-brick_wall_mat_handle: resources.Handle
-hammer_handle: resources.Handle
 forcefield_handle: resources.Handle
-
 portal_camera_handle: resources.Handle
 portal_material_handle: resources.Handle
-portal_quad_handle: resources.Handle
-
 
 main :: proc() {
   context.logger = log.create_console_logger()
-  args := os.args
-  log.infof("Starting with %d arguments", len(args))
-  if len(args) > 1 {
-    log.infof("Running mode: %s", args[1])
-  }
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
@@ -105,7 +94,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   when true {
-    brick_wall_mat_handle = {}
+    brick_wall_mat_handle: resources.Handle
     brick_wall_mat_ok := false
     brick_albedo_handle, brick_albedo_ok := create_texture(
       engine,
@@ -189,7 +178,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if gltf_ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for handle in gltf_nodes {
-        hammer_handle = handle
         translate(engine, handle, 3, 1, -2)
         scale(engine, handle, 0.2)
       }
@@ -471,8 +459,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // add_dof(engine)
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
-  // Camera controller is automatically set up by engine
-  when true {
+  when false {
     // create portal camera with its own render target
     portal_camera_ok: bool
     portal_camera_handle, portal_camera_ok = create_camera(
@@ -494,8 +481,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       engine,
       {.ALBEDO_TEXTURE},
     )
-    portal_mesh_ok: bool
-    portal_quad_handle, portal_mesh_ok = create_mesh(
+    portal_quad_handle, portal_mesh_ok := create_mesh(
       engine,
       make_quad(),
     )
@@ -522,7 +508,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       "assets/Warrior_Sheet-Effect.png",
     )
     if warrior_sprite_ok {
-      // Use shared sprite quad mesh from transparency renderer
       sprite_quad := engine.render.transparency.sprite_quad_mesh
       // 6x17 sprite sheet: 6 columns, 17 rows, using frames 0-98 (99 total)
       // Create animation: 99 frames at 24fps, looping
@@ -629,17 +614,14 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
     current_type := get_active_camera_controller_type(engine)
     if current_type == .ORBIT {
       switch_camera_controller(engine, .FREE)
-      log.info("Switched to free camera")
     } else {
       switch_camera_controller(engine, .ORBIT)
-      log.info("Switched to orbit camera")
     }
   }
 }
 
 on_post_render :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
-  if portal_camera_handle.generation == 0 || portal_material_handle.generation == 0 do return
   portal_texture_handle := get_camera_attachment(
     engine,
     portal_camera_handle,
