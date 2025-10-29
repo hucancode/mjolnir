@@ -22,10 +22,15 @@ init :: proc(
   width, height: u32,
   rm: ^resources.Manager,
 ) -> vk.Result {
-  gpu.allocate_secondary_buffers(
+  vk.AllocateCommandBuffers(
     gctx.device,
-    gctx.command_pool,
-    self.commands[:],
+    &vk.CommandBufferAllocateInfo {
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = gctx.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = u32(len(self.commands)),
+    },
+    raw_data(self.commands[:]),
   ) or_return
   depth_format: vk.Format = .D32_SFLOAT
   if rm.geometry_pipeline_layout == 0 {
@@ -612,7 +617,7 @@ shutdown :: proc(
   device: vk.Device,
   command_pool: vk.CommandPool,
 ) {
-  gpu.free_command_buffers(device, command_pool, self.commands[:])
+  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
   vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
 }

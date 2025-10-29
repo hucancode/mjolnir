@@ -59,10 +59,15 @@ init :: proc(
   renderer.height_offset = 0.05
   renderer.base_color = {0.0, 0.8, 0.2}
   renderer.path_enabled = false
-  gpu.allocate_secondary_buffers(
+  vk.AllocateCommandBuffers(
     gctx.device,
-    gctx.command_pool,
-    renderer.commands[:],
+    &vk.CommandBufferAllocateInfo {
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = gctx.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = u32(len(renderer.commands)),
+    },
+    raw_data(renderer.commands[:]),
   ) or_return
   create_pipeline(renderer, gctx, rm) or_return
   renderer.vertex_buffer = gpu.create_mutable_buffer(
@@ -97,7 +102,7 @@ shutdown :: proc(
   gpu.mutable_buffer_destroy(device, &self.vertex_buffer)
   gpu.mutable_buffer_destroy(device, &self.index_buffer)
   gpu.mutable_buffer_destroy(device, &self.path_vertex_buffer)
-  gpu.free_command_buffers(device, command_pool, self.commands[:])
+  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
 }
 
 begin_record :: proc(

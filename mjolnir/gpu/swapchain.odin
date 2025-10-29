@@ -124,11 +124,24 @@ swapchain_init :: proc(
   )
   self.views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
-    self.views[i] = create_image_view(
+    vk.CreateImageView(
       gctx.device,
-      self.images[i],
-      self.format.format,
-      {.COLOR},
+      &vk.ImageViewCreateInfo {
+        sType = .IMAGE_VIEW_CREATE_INFO,
+        image = self.images[i],
+        viewType = .D2,
+        format = self.format.format,
+        components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+        subresourceRange = {
+          aspectMask = {.COLOR},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 1,
+        },
+      },
+      nil,
+      &self.views[i],
     ) or_return
   }
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {

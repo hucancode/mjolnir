@@ -223,7 +223,7 @@ shutdown :: proc(
   device: vk.Device,
   command_pool: vk.CommandPool,
 ) {
-  gpu.free_command_buffers(device, command_pool, self.commands[:])
+  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
   vk.DestroyPipeline(device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
@@ -259,10 +259,15 @@ init :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) -> vk.Result {
-  gpu.allocate_secondary_buffers(
+  vk.AllocateCommandBuffers(
     gctx.device,
-    gctx.command_pool,
-    self.commands[:],
+    &vk.CommandBufferAllocateInfo {
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = gctx.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = u32(len(self.commands)),
+    },
+    raw_data(self.commands[:]),
   ) or_return
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_mutable_buffer(

@@ -142,10 +142,15 @@ init :: proc(
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
-  gpu.allocate_secondary_buffers(
+  vk.AllocateCommandBuffers(
     gctx.device,
-    gctx.command_pool,
-    self.commands[:],
+    &vk.CommandBufferAllocateInfo {
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = gctx.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = u32(len(self.commands)),
+    },
+    raw_data(self.commands[:]),
   ) or_return
   log.debugf("renderer lighting init %d x %d", width, height)
   ambient_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
@@ -471,7 +476,7 @@ shutdown :: proc(
   command_pool: vk.CommandPool,
   rm: ^resources.Manager,
 ) {
-  gpu.free_command_buffers(device, command_pool, self.commands[:])
+  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
   vk.DestroyPipeline(device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(device, self.ambient_pipeline_layout, nil)

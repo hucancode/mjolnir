@@ -353,10 +353,15 @@ init :: proc(
   width, height: u32,
   rm: ^resources.Manager,
 ) -> vk.Result {
-  gpu.allocate_secondary_buffers(
+  vk.AllocateCommandBuffers(
     gctx.device,
-    gctx.command_pool,
-    self.commands[:],
+    &vk.CommandBufferAllocateInfo {
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = gctx.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = u32(len(self.commands)),
+    },
+    raw_data(self.commands[:]),
   ) or_return
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
@@ -583,7 +588,7 @@ shutdown :: proc(
   command_pool: vk.CommandPool,
   rm: ^resources.Manager,
 ) {
-  gpu.free_command_buffers(device, command_pool, self.commands[:])
+  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
   for &p in self.pipelines {
     vk.DestroyPipeline(device, p, nil)
     p = 0

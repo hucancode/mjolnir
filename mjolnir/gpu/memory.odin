@@ -381,32 +381,6 @@ image_buffer_destroy :: proc(device: vk.Device, self: ^ImageBuffer) {
   self.format = .UNDEFINED
 }
 
-create_image_view :: proc(
-  device: vk.Device,
-  image: vk.Image,
-  format: vk.Format,
-  aspect_mask: vk.ImageAspectFlags,
-) -> (
-  view: vk.ImageView,
-  res: vk.Result,
-) {
-  create_info := vk.ImageViewCreateInfo {
-    sType = .IMAGE_VIEW_CREATE_INFO,
-    image = image,
-    viewType = .D2,
-    format = format,
-    components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
-    subresourceRange = {
-      aspectMask = aspect_mask,
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-  }
-  res = vk.CreateImageView(device, &create_info, nil, &view)
-  return
-}
 
 copy_image :: proc(
   gctx: ^GPUContext,
@@ -591,11 +565,24 @@ create_image_buffer :: proc(
   ) or_return
   copy_image(gctx, img, staging) or_return
   aspect_mask := vk.ImageAspectFlags{.COLOR}
-  img.view = create_image_view(
+  vk.CreateImageView(
     gctx.device,
-    img.image,
-    format,
-    aspect_mask,
+    &vk.ImageViewCreateInfo {
+      sType = .IMAGE_VIEW_CREATE_INFO,
+      image = img.image,
+      viewType = .D2,
+      format = format,
+      components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+      subresourceRange = {
+        aspectMask = aspect_mask,
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    nil,
+    &img.view,
   ) or_return
   ret = .SUCCESS
   return
@@ -685,11 +672,24 @@ depth_image_init :: proc(
     &barrier,
   )
   end_single_time_command(gctx, &cmd_buffer) or_return
-  img_buffer.view = create_image_view(
+  vk.CreateImageView(
     gctx.device,
-    img_buffer.image,
-    img_buffer.format,
-    {.DEPTH},
+    &vk.ImageViewCreateInfo {
+      sType = .IMAGE_VIEW_CREATE_INFO,
+      image = img_buffer.image,
+      viewType = .D2,
+      format = img_buffer.format,
+      components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+      subresourceRange = {
+        aspectMask = {.DEPTH},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    },
+    nil,
+    &img_buffer.view,
   ) or_return
   return .SUCCESS
 }

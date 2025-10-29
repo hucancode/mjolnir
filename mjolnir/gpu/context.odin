@@ -704,28 +704,3 @@ allocate_vulkan_memory :: proc(
   return
 }
 
-allocate_secondary_buffers :: proc(
-  device: vk.Device,
-  pool: vk.CommandPool,
-  buffers: []vk.CommandBuffer,
-) -> vk.Result {
-  vk.AllocateCommandBuffers(
-    device,
-    &vk.CommandBufferAllocateInfo {
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = pool,
-      level = .SECONDARY,
-      commandBufferCount = u32(len(buffers)),
-    },
-    raw_data(buffers),
-  ) or_return
-  return .SUCCESS
-}
-
-free_command_buffers :: proc(
-  device: vk.Device,
-  pool: vk.CommandPool,
-  buffers: []vk.CommandBuffer,
-) {
-  vk.FreeCommandBuffers(device, pool, u32(len(buffers)), raw_data(buffers))
-}

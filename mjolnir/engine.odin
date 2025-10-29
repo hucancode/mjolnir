@@ -388,16 +388,18 @@ update :: proc(self: ^Engine) -> bool {
 
 shutdown :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(self.gctx.device)
-  gpu.free_command_buffers(
+  vk.FreeCommandBuffers(
     self.gctx.device,
     self.gctx.command_pool,
-    self.command_buffers[:],
+    u32(len(self.command_buffers)),
+    raw_data(self.command_buffers[:]),
   )
   if pool, ok := self.gctx.compute_command_pool.?; ok {
-    gpu.free_command_buffers(
+    vk.FreeCommandBuffers(
       self.gctx.device,
       pool,
-      self.compute_command_buffers[:],
+      u32(len(self.compute_command_buffers)),
+      raw_data(self.compute_command_buffers[:]),
     )
   }
   delete(self.pending_node_deletions)
