@@ -34,6 +34,8 @@ def build_test(repo_root: Path, test_dir: Path, frame_limit: int = 0):
         "odin", "build", test_dir_rel,
         f"-out:bin/{binary_name}",
         "-define:USE_PARALLEL_UPDATE=false",
+        "-define:ENABLE_VALIDATION_LAYERS=true",
+        "-define:REQUIRE_GEOMETRY_SHADER=false",
         f"-define:FRAME_LIMIT={frame_limit}"
     ]
     subprocess.run(build_args, cwd=repo_root, check=True)
@@ -172,8 +174,16 @@ def main():
 
     env = os.environ.copy()
     layers = env.get("VK_INSTANCE_LAYERS", "")
-    if "VK_LAYER_LUNARG_screenshot" not in layers:
-        env["VK_INSTANCE_LAYERS"] = f"{layers}:VK_LAYER_LUNARG_screenshot" if layers else "VK_LAYER_LUNARG_screenshot"
+
+    # Add validation layer first for better error detection, then screenshot layer
+    required_layers = ["VK_LAYER_KHRONOS_validation", "VK_LAYER_LUNARG_screenshot"]
+    existing_layers = [l.strip() for l in layers.split(":") if l.strip()]
+
+    for layer in required_layers:
+        if layer not in existing_layers:
+            existing_layers.append(layer)
+
+    env["VK_INSTANCE_LAYERS"] = ":".join(existing_layers)
     env["VK_SCREENSHOT_FRAMES"] = str(frames)
     env["VK_SCREENSHOT_DIR"] = str(out_dir.resolve())
 

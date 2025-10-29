@@ -48,9 +48,9 @@ alloc :: proc(pool: ^Pool($T)) -> (handle: Handle, item: ^T, ok: bool) {
   }
   index = u32(len(pool.entries))
   if pool.capacity > 0 && index >= pool.capacity {
+    error_count += 1
     if error_count < MAX_CONSECUTIVE_ERROR {
         log.errorf("Pool allocation failed: index=%d >= capacity=%d, entries length=%d", index, pool.capacity, len(pool.entries))
-        error_count += 1
     }
     return
   }

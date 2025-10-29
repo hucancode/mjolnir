@@ -14,7 +14,7 @@ run: shader
 	odin run . -out:bin/main
 
 debug: shader
-	odin run . -out:bin/main-debug -debug
+	VK_LOADER_DEBUG=all VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation odin run . -out:bin/main-debug -debug
 
 build: shader
 	odin build . -out:bin/main

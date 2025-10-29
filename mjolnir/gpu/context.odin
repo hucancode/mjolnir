@@ -178,7 +178,7 @@ vulkan_instance_init :: proc(self: ^GPUContext) -> vk.Result {
     dbg_create_info = {
       sType           = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
       messageSeverity = {
-        // .WARNING,
+        .WARNING,
         .ERROR,
       },
       messageType     = {.VALIDATION, .PERFORMANCE},
@@ -274,7 +274,8 @@ score_physical_device :: proc(
   vk.GetPhysicalDeviceFeatures(device, &features)
   device_name_cstring := cstring(&props.deviceName[0])
   log.infof("Scoring device %s", device_name_cstring)
-  when ODIN_OS != .Darwin {
+  REQUIRE_GEOMETRY_SHADER :: #config(REQUIRE_GEOMETRY_SHADER, ODIN_OS != .Darwin)
+  when REQUIRE_GEOMETRY_SHADER {
     if !features.geometryShader {
       log.infof("Device %s: no geometry shader.", device_name_cstring)
       return 0, .SUCCESS
@@ -703,4 +704,3 @@ allocate_vulkan_memory :: proc(
   ret = .SUCCESS
   return
 }
-
