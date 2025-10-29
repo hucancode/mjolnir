@@ -42,19 +42,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 4.1
     size: f32 = 0.3
-    nx, ny, nz := 240, 2, 240
+    nx, ny, nz := 240, 1, 240
     mat_handle, mat_ok := create_material(
       engine,
       metallic_value = 0.5,
       roughness_value = 0.8,
     )
     if cube_mesh_ok && sphere_mesh_ok && cone_mesh_ok && mat_ok {
-      spawn_loop: for x in 1 ..< nx {
-        for y in 1 ..< ny {
-          for z in 1 ..< nz {
+      spawn_loop: for x in 0 ..< nx {
+        for y in 0 ..< ny {
+          for z in 0 ..< nz {
             world_x := (f32(x) - f32(nx) * 0.5) * space
-            world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
-            world_z := (f32(z) - f32(nz)) * space
+            world_y := (f32(y) - f32(ny) * 0.5) * space + 1.5
+            world_z := (f32(z) - f32(nz) * 0.5) * space
             node_handle: resources.Handle
             node_ok := false
             if x % 3 == 0 {

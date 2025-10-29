@@ -500,6 +500,7 @@ World :: struct {
   node_octree:            geometry.Octree(NodeEntry),
   octree_entry_map:       map[resources.Handle]NodeEntry,
   octree_dirty_set:       map[resources.Handle]bool, // nodes needing octree update
+  octree_updates_enabled: bool,
   actor_pools:            map[typeid]ActorPoolEntry,
 }
 
@@ -511,16 +512,69 @@ init :: proc(world: ^World) {
   root.parent = world.root
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
   world.actor_pools = make(map[typeid]ActorPoolEntry)
+  max_depth, max_items := compute_octree_params(resources.MAX_NODES_IN_SCENE)
   geometry.octree_init(
     &world.node_octree,
     geometry.Aabb{min = {-1000, -1000, -1000}, max = {1000, 1000, 1000}},
-    max_depth = 6,
-    max_items = 16,
+    max_depth = max_depth,
+    max_items = max_items,
   )
   world.node_octree.bounds_func = node_entry_to_aabb
   world.node_octree.point_func = node_entry_to_point
   world.octree_entry_map = make(map[resources.Handle]NodeEntry)
   world.octree_dirty_set = make(map[resources.Handle]bool)
+  world.octree_updates_enabled = true
+}
+
+compute_octree_params :: proc(expected_object_count: int) -> (max_depth: i32, max_items: i32) {
+  max_depth = 8
+  max_items = 32
+  if expected_object_count > 100000 {
+    max_depth = 10
+    max_items = 128
+  } else if expected_object_count > 10000 {
+    max_depth = 9
+    max_items = 64
+  } else if expected_object_count > 1000 {
+    max_depth = 8
+    max_items = 32
+  }
+  return max_depth, max_items
+}
+
+set_octree_bounds :: proc(world: ^World, bounds: geometry.Aabb) {
+  if world.node_octree.root != nil {
+    geometry.octree_destroy(&world.node_octree)
+  }
+  max_depth, max_items := compute_octree_params(resources.MAX_NODES_IN_SCENE)
+  geometry.octree_init(&world.node_octree, bounds, max_depth, max_items)
+  world.node_octree.bounds_func = node_entry_to_aabb
+  world.node_octree.point_func = node_entry_to_point
+  clear(&world.octree_entry_map)
+  clear(&world.octree_dirty_set)
+}
+
+set_octree_updates_enabled :: proc(world: ^World, enabled: bool) {
+  world.octree_updates_enabled = enabled
+}
+
+force_octree_rebuild :: proc(world: ^World, rm: ^resources.Manager) {
+  clear(&world.octree_entry_map)
+  geometry.octree_destroy(&world.node_octree)
+  max_depth, max_items := compute_octree_params(resources.MAX_NODES_IN_SCENE)
+  geometry.octree_init(
+    &world.node_octree,
+    geometry.Aabb{min = {-1000, -1000, -1000}, max = {1000, 1000, 1000}},
+    max_depth,
+    max_items,
+  )
+  world.node_octree.bounds_func = node_entry_to_aabb
+  world.node_octree.point_func = node_entry_to_point
+  for &entry, i in world.nodes.entries {
+    if !entry.active || entry.item.pending_deletion do continue
+    handle := resources.Handle{index = u32(i), generation = entry.generation}
+    world.octree_dirty_set[handle] = true
+  }
 }
 
 destroy :: proc(

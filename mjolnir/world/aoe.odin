@@ -190,6 +190,7 @@ query_fan :: proc(
 
 // Process pending octree updates - O(k) where k is number of changed nodes
 process_octree_updates :: proc(world: ^World, rm: ^resources.Manager) {
+  if !world.octree_updates_enabled do return
   if len(world.octree_dirty_set) == 0 do return
   for handle, _ in world.octree_dirty_set {
     node := resources.get(world.nodes, handle)

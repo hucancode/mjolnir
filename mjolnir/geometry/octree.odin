@@ -128,15 +128,7 @@ should_subdivide :: proc(octree: ^Octree($T), node: ^OctreeNode(T)) -> bool {
   size := min_vec3(node.bounds.max - node.bounds.min)
   if size <= octree.min_size do return false
   if i32(len(node.items)) <= octree.max_items do return false
-  octant_counts: [8]i32
-  for item in node.items {
-    bounds := octree.bounds_func(item)
-    octant := get_octant_for_aabb(node.center, bounds)
-    if octant >= 0 do octant_counts[octant] += 1
-    else do return true
-  }
-  valid_octant_count := len(octant_counts) - slice.count(octant_counts[:], 0)
-  return valid_octant_count > 1
+  return true
 }
 
 octree_insert :: proc(octree: ^Octree($T), item: T) -> bool {
@@ -152,6 +144,11 @@ octree_node_insert :: proc(
   item: T,
   bounds: Aabb,
 ) -> bool {
+  if node.depth >= octree.max_depth {
+    append(&node.items, item)
+    node.total_items += 1
+    return true
+  }
   if node.children[0] == nil {
     append(&node.items, item)
     node.total_items += 1
@@ -159,10 +156,12 @@ octree_node_insert :: proc(
       octree_subdivide(node)
       old_items := node.items[:]
       clear(&node.items)
-      node.total_items = i32(len(node.items))
+      node.total_items = 0
       for old_item in old_items {
         old_bounds := octree.bounds_func(old_item)
-        octree_node_insert_to_children(octree, node, old_item, old_bounds)
+        if octree_node_insert_to_children_internal(octree, node, old_item, old_bounds) {
+          node.total_items += 1
+        }
       }
     }
     return true
@@ -187,6 +186,22 @@ octree_node_insert_to_children :: proc(
   } else {
     append(&node.items, item)
     node.total_items += 1
+    return true
+  }
+}
+
+@(private)
+octree_node_insert_to_children_internal :: proc(
+  octree: ^Octree($T),
+  node: ^OctreeNode(T),
+  item: T,
+  bounds: Aabb,
+) -> bool {
+  octant := get_octant_for_aabb(node.center, bounds)
+  if octant >= 0 {
+    return octree_node_insert(octree, node.children[octant], item, bounds)
+  } else {
+    append(&node.items, item)
     return true
   }
 }
