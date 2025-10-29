@@ -16,6 +16,30 @@ import "base:runtime"
 // It does not test any functionality
 
 // @(test)
+test_zero_vs_minus_zero :: proc(t: ^testing.T) {
+    a := 0.0
+    b := -0.0
+    c := -a
+    testing.expect_value(t, a, b)
+    testing.expect_value(t, a, c)
+    testing.expect_value(t, a, c)
+    ax := transmute(u64)a
+    bx := transmute(u64)b
+    testing.expect(t, ax != bx)
+    testing.expect_value(t, -linalg.VECTOR3F32_Y_AXIS, [3]f32{0,-1,0})
+    T :: struct {
+        v: [3]f32,
+    }
+    actual : T = {
+        v = -linalg.VECTOR3F32_Y_AXIS,
+    }
+    expected : T = {
+        v = {0, -1, 0},
+    }
+    testing.expect_value(t, actual, expected)
+}
+
+// @(test)
 test_bitset_int_conversion :: proc(t: ^testing.T) {
   Features :: enum {
     SKINNING,
