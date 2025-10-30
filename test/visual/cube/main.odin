@@ -1,11 +1,9 @@
 package main
 
 import "../../../mjolnir"
-import "../../../mjolnir/geometry"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 import "core:log"
-import "core:math"
 
 main :: proc() {
   context.logger = log.create_console_logger()
