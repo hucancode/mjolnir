@@ -1,7 +1,6 @@
 package main
 
 import "../../../mjolnir"
-import "../../../mjolnir/geometry"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 import "core:log"
@@ -36,9 +35,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       mjolnir.scale(engine, handle, 0.45)
     }
   }
-
   if camera := mjolnir.get_main_camera(engine); camera != nil {
-    mjolnir.camera_look_at(camera, {7.5, 6.0, 7.5}, {0, 0, 0})
+    mjolnir.camera_look_at(camera, {5, 4, 5}, {0, 0, 0})
   }
   mjolnir.add_crosshatch(
     engine,
