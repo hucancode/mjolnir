@@ -1,12 +1,12 @@
 package main
 
-import "core:log"
-import "core:fmt"
 import "../../../mjolnir"
 import "../../../mjolnir/geometry"
+import "../../../mjolnir/render/retained_ui"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
-import "../../../mjolnir/render/retained_ui"
+import "core:fmt"
+import "core:log"
 
 GameState :: struct {
   engine:             ^mjolnir.Engine,
@@ -65,30 +65,49 @@ on_combobox_change :: proc(ctx: rawptr, selected_index: i32) {
   ui := &state.engine.render.retained_ui
   quality_names := [?]string{"Low", "Medium", "High", "Ultra"}
   if selected_index >= 0 && selected_index < i32(len(quality_names)) {
-    status_text := fmt.tprintf("Status: Quality = %s", quality_names[selected_index])
+    status_text := fmt.tprintf(
+      "Status: Quality = %s",
+      quality_names[selected_index],
+    )
     retained_ui.set_label_text(ui, state.status_label, status_text)
-    log.infof("ComboBox changed! Selected index: %d (%s)", selected_index, quality_names[selected_index])
+    log.infof(
+      "ComboBox changed! Selected index: %d (%s)",
+      selected_index,
+      quality_names[selected_index],
+    )
   }
 }
 
 on_radio_easy :: proc(ctx: rawptr) {
   if state == nil do return
   ui := &state.engine.render.retained_ui
-  retained_ui.set_label_text(ui, state.status_label, "Status: Difficulty = Easy")
+  retained_ui.set_label_text(
+    ui,
+    state.status_label,
+    "Status: Difficulty = Easy",
+  )
   log.infof("Difficulty set to Easy")
 }
 
 on_radio_normal :: proc(ctx: rawptr) {
   if state == nil do return
   ui := &state.engine.render.retained_ui
-  retained_ui.set_label_text(ui, state.status_label, "Status: Difficulty = Normal")
+  retained_ui.set_label_text(
+    ui,
+    state.status_label,
+    "Status: Difficulty = Normal",
+  )
   log.infof("Difficulty set to Normal")
 }
 
 on_radio_hard :: proc(ctx: rawptr) {
   if state == nil do return
   ui := &state.engine.render.retained_ui
-  retained_ui.set_label_text(ui, state.status_label, "Status: Difficulty = Hard")
+  retained_ui.set_label_text(
+    ui,
+    state.status_label,
+    "Status: Difficulty = Hard",
+  )
   log.infof("Difficulty set to Hard")
 }
 
@@ -163,22 +182,28 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    retained_ui.create_label(ui, "Graphics Quality:", 40, 240, state.window_handle)
+    retained_ui.create_label(
+      ui,
+      "Graphics Quality:",
+      40,
+      240,
+      state.window_handle,
+    )
     retained_ui.create_label(ui, "Difficulty:", 40, 330, state.window_handle)
     retained_ui.create_radiobutton(
       ui,
-      1,  // group_id
+      1, // group_id
       "Easy",
       40,
       355,
-      true,  // selected by default
+      true, // selected by default
       on_radio_easy,
       nil,
       state.window_handle,
     )
     retained_ui.create_radiobutton(
       ui,
-      1,  // same group_id
+      1, // same group_id
       "Normal",
       40,
       385,
@@ -189,7 +214,7 @@ main :: proc() {
     )
     retained_ui.create_radiobutton(
       ui,
-      1,  // same group_id
+      1, // same group_id
       "Hard",
       40,
       415,

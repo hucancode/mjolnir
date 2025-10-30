@@ -1,7 +1,6 @@
 package main
 
 import "../../../mjolnir"
-import "../../../mjolnir/geometry"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 import "core:log"
@@ -43,67 +42,55 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     node := mjolnir.get_node(engine, handle)
     if node == nil do continue
     for child in node.children {
-      child_node := mjolnir.get_node(engine, child)
-      if child_node == nil do continue
-      if _, has_mesh := child_node.attachment.(world.MeshAttachment);
-         has_mesh {
-        mjolnir.play_animation(engine, child, "Anim_0")
+      if mjolnir.play_animation(engine, child, "Anim_0") {
+        child_node := mjolnir.get_node(engine, child)
         // Setup IK for right arm using FABRIK solver
         // Based on logs: shoulder is at [-0.106, 1.036, 0.043]
         // Arm length is ~0.43m, so target must be within that reach
         target := [3]f32{0.0, 0.0, 0.9} // Closer to shoulder, reachable
-        pole := [3]f32{0.3, 0.4, 0.0}   // Elbow points right and slightly down
+        pole := [3]f32{0.3, 0.4, 0.0} // Elbow points right and slightly down
         world.add_ik(
           child_node,
-          bone_names = []string{
-            "Skeleton_arm_joint_R",      // Root: shoulder
-            "Skeleton_arm_joint_R__2_",  // Middle: elbow
-            "Skeleton_arm_joint_R__3_",  // End: hand
+          bone_names = []string {
+            "Skeleton_arm_joint_R", // Root: shoulder
+            "Skeleton_arm_joint_R__2_", // Middle: elbow
+            "Skeleton_arm_joint_R__3_", // End: hand
           },
           target_pos = target,
           pole_pos = pole,
           weight = 1.0,
         )
-        // Enable IK immediately
         world.set_ik_enabled(child_node, 0, true)
         state.character_handle = child
       }
     }
   }
-  dir_light_handle, dir_light_node, dir_ok := mjolnir.spawn_directional_light(
+  dir_light_handle := mjolnir.spawn_directional_light(
     engine,
     {1.0, 1.0, 1.0, 1.0},
     cast_shadow = true,
     position = {0.0, 5.0, 0.0},
   )
-  if dir_ok {
-    mjolnir.rotate(dir_light_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
-  }
-  // Visualize IK target with a small red cube
+  mjolnir.rotate(
+    engine,
+    dir_light_handle,
+    math.PI * 0.25,
+    linalg.VECTOR3F32_X_AXIS,
+  )
+  // Visualize IK target with a small red cube using builtin resources
   target_pos := [3]f32{0.0, 0.0, 0.9}
-  cube_geom := geometry.make_cube({1.0, 0.2, 0.2, 1.0})
-  cube_mesh, mesh_ok := mjolnir.create_mesh(engine, cube_geom)
-  if mesh_ok {
-    cube_material := mjolnir.create_material(
-      engine,
-      base_color_factor = [4]f32{1.0, 0.2, 0.2, 1.0},
-      metallic_value = 0.0,
-      roughness_value = 0.8,
-    )
-    cube_handle, _, ok := mjolnir.spawn_at(
-      engine,
-      target_pos,
-      world.MeshAttachment {
-        handle = cube_mesh,
-        material = cube_material,
-        cast_shadow = false,
-      },
-    )
-    if ok {
-      mjolnir.scale(engine, cube_handle, 0.025)
-      state.target_cube = cube_handle
-    }
-  }
+  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  cube_material := mjolnir.get_builtin_material(engine, .RED)
+  state.target_cube = mjolnir.spawn_at(
+    engine,
+    target_pos,
+    world.MeshAttachment {
+      handle = cube_mesh,
+      material = cube_material,
+      cast_shadow = false,
+    },
+  )
+  mjolnir.scale(engine, state.target_cube, 0.025)
 }
 
 update_scene :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -122,11 +109,11 @@ update_scene :: proc(engine: ^mjolnir.Engine, dt: f32) {
     new_target,
     pole,
   )
-  // Update target cube visualization position
-  if state.target_cube.index != 0 {
-    cube_node := mjolnir.get_node(engine, state.target_cube)
-    if cube_node != nil {
-      mjolnir.translate(cube_node, new_target.x, new_target.y, new_target.z)
-    }
-  }
+  mjolnir.translate(
+    engine,
+    state.target_cube,
+    new_target.x,
+    new_target.y,
+    new_target.z,
+  )
 }

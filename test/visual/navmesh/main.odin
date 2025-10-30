@@ -1,8 +1,4 @@
 package main
-import "core:fmt"
-import "core:log"
-import "core:math"
-import "core:math/rand"
 import "../../../mjolnir"
 import "../../../mjolnir/geometry"
 import "../../../mjolnir/navigation/detour"
@@ -10,6 +6,10 @@ import "../../../mjolnir/navigation/recast"
 import navigation_renderer "../../../mjolnir/render/navigation"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
+import "core:fmt"
+import "core:log"
+import "core:math"
+import "core:math/rand"
 import "vendor:glfw"
 import mu "vendor:microui"
 
@@ -115,34 +115,30 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
     emissive_value = 0.02,
   )
   if ground_mesh_ok && ground_material_ok {
-    ground_handle, ground_node, ground_ok := spawn(
-        engine,
-        world.MeshAttachment {
-          handle              = ground_mesh_handle,
-          material            = ground_material_handle,
-          cast_shadow         = false,
-          navigation_obstacle = false, // Ground should be walkable
-        },
-      )
-    if ground_ok {
-      demo_state.ground_handle = ground_handle
-      ground_node.name = "ground"
-    }
+    demo_state.ground_handle = spawn(
+      engine,
+      world.MeshAttachment {
+        handle              = ground_mesh_handle,
+        material            = ground_material_handle,
+        cast_shadow         = false,
+        navigation_obstacle = false, // Ground should be walkable
+      },
+    )
   }
   obstacle_positions := [][3]f32 {
-      {-10, 1.5, -10}, // Obstacle 1
-      {10, 1.5, -10}, // Obstacle 2
-      {-10, 1.5, 10}, // Obstacle 3
-      {10, 1.5, 10}, // Obstacle 4
-      {0, 2, 0}, // Central obstacle (taller)
-    }
+    {-10, 1.5, -10}, // Obstacle 1
+    {10, 1.5, -10}, // Obstacle 2
+    {-10, 1.5, 10}, // Obstacle 3
+    {10, 1.5, 10}, // Obstacle 4
+    {0, 2, 0}, // Central obstacle (taller)
+  }
   obstacle_sizes := [][3]f32 {
-      {2, 3, 2}, // Small obstacles
-      {2, 3, 2},
-      {2, 3, 2},
-      {2, 3, 2},
-      {4, 4, 4}, // Larger central obstacle
-    }
+    {2, 3, 2}, // Small obstacles
+    {2, 3, 2},
+    {2, 3, 2},
+    {2, 3, 2},
+    {4, 4, 4}, // Larger central obstacle
+  }
   for position, i in obstacle_positions {
     size := obstacle_sizes[i]
     obstacle_geom := geometry.make_cube([4]f32{0.8, 0.2, 0.2, 1.0})
@@ -162,20 +158,17 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
       emissive_value = 0.1,
     )
     if obstacle_mesh_ok && obstacle_material_ok {
-      obstacle_handle, obstacle_node, obstacle_ok := spawn_at(
-          engine,
-          position,
-          world.MeshAttachment {
-            handle              = obstacle_mesh_handle,
-            material            = obstacle_material_handle,
-            cast_shadow         = true,
-            navigation_obstacle = true, // Mark as navigation obstacle
-          },
-        )
-      if obstacle_ok {
-        obstacle_node.name = fmt.tprintf("obstacle_%d", i + 1)
-        append(&demo_state.obstacle_handles, obstacle_handle)
-      }
+      obstacle_handle := spawn_at(
+        engine,
+        position,
+        world.MeshAttachment {
+          handle              = obstacle_mesh_handle,
+          material            = obstacle_material_handle,
+          cast_shadow         = true,
+          navigation_obstacle = true, // Mark as navigation obstacle
+        },
+      )
+      append(&demo_state.obstacle_handles, obstacle_handle)
     }
   }
   log.infof(
@@ -209,7 +202,7 @@ create_obj_visualization_mesh :: proc(
   )
   obj_spawn_ok: bool
   if obj_mesh_ok && obj_material_ok {
-    demo_state.obj_node_handle, demo_state.obj_mesh_node, obj_spawn_ok =
+    demo_state.obj_node_handle, obj_spawn_ok =
       spawn_at(
         engine,
         [3]f32{0, 0, 0},
@@ -220,6 +213,7 @@ create_obj_visualization_mesh :: proc(
           navigation_obstacle = false, // OBJ mesh should be walkable
         },
       )
+    demo_state.obj_mesh_node = get_node(engine, demo_state.obj_mesh_handle)
   }
   if obj_spawn_ok {
     demo_state.obj_mesh_node.name = "obj_mesh"
@@ -331,10 +325,7 @@ update_position_marker :: proc(
     despawn(engine, handle^)
   }
   marker_geom := geometry.make_sphere(12, 6, 0.3, color)
-  marker_mesh_handle, marker_mesh_ok := create_mesh(
-    engine,
-    marker_geom,
-  )
+  marker_mesh_handle, marker_mesh_ok := create_mesh(engine, marker_geom)
   marker_material_handle, marker_material_ok := create_material(
     engine,
     metallic_value = 0.2,
@@ -344,18 +335,18 @@ update_position_marker :: proc(
   node: ^world.Node
   spawn_ok: bool
   if marker_mesh_ok && marker_material_ok {
-    handle^, node, spawn_ok = spawn_at(
-        engine,
-        pos + [3]f32{0, 0.2, 0}, // Slightly above ground
-        world.MeshAttachment {
-          handle              = marker_mesh_handle,
-          material            = marker_material_handle,
-          cast_shadow         = false,
-          navigation_obstacle = false, // Markers should not be obstacles
-        },
-      )
+    handle^, spawn_ok = spawn_at(
+      engine,
+      pos + [3]f32{0, 0.2, 0}, // Slightly above ground
+      world.MeshAttachment {
+        handle              = marker_mesh_handle,
+        material            = marker_material_handle,
+        cast_shadow         = false,
+        navigation_obstacle = false, // Markers should not be obstacles
+      },
+    )
   }
-  if !spawn_ok do handle^ = resources.Handle{}
+  if !spawn_ok do handle^ = {}
 }
 
 visualize_path :: proc(engine: ^mjolnir.Engine) {
@@ -414,7 +405,11 @@ find_navmesh_point_from_mouse :: proc(
   )
   // GLFW returns coordinates with origin at top-left, Y increases downward
   camera := mjolnir.get_main_camera(engine)
-  ray_origin, ray_dir := resources.camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
+  ray_origin, ray_dir := resources.camera_viewport_to_world_ray(
+    camera,
+    mouse_x,
+    mouse_y,
+  )
   log.debugf(
     "Ray: origin=(%.2f, %.2f, %.2f), dir=(%.2f, %.2f, %.2f)",
     ray_origin.x,

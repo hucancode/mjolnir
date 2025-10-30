@@ -1,13 +1,11 @@
 package main
 
 import "../../../mjolnir"
-import "../../../mjolnir/geometry"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:time"
 import "vendor:glfw"
 
 cube_handle: resources.Handle
@@ -20,23 +18,17 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  camera := mjolnir.get_main_camera(engine)
-  if camera != nil {
+  if camera := mjolnir.get_main_camera(engine); camera != nil {
     mjolnir.camera_look_at(camera, {2, 2, 2}, {0.0, 0.0, 0.0})
     mjolnir.sync_active_camera_controller(engine)
   }
-  // Camera controller is automatically set up by engine
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-  albedo_texture, texture_ok := mjolnir.create_texture(
+  albedo_texture := mjolnir.create_texture(
     engine,
     #load("statue-1275469_1280.jpg"),
     generate_mips = true,
   )
-  if !texture_ok {
-    log.error("material textured cube: texture load failed")
-    return
-  }
-  material_handle, material_ok := mjolnir.create_material(
+  material_handle := mjolnir.create_material(
     engine,
     {.ALBEDO_TEXTURE},
     type = resources.MaterialType.PBR,
@@ -44,11 +36,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     roughness_value = 0.35,
     metallic_value = 0.1,
   )
-  if !material_ok {
-    log.error("material textured cube: material creation failed")
-    return
-  }
-  handle, node, ok := mjolnir.spawn(
+  cube_handle = mjolnir.spawn(
     engine,
     world.MeshAttachment {
       handle = cube_mesh,
@@ -56,20 +44,25 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  if ok {
-    cube_handle = handle
-  }
-  _, light_node, light_ok := mjolnir.spawn_directional_light(
+  light_handle := mjolnir.spawn_directional_light(
     engine,
     {1.0, 1.0, 1.0, 1.0},
     cast_shadow = false,
     position = {3.0, 5.0, 2.0},
   )
-  if light_ok {
-    mjolnir.rotate(light_node, -math.PI * 0.35, linalg.VECTOR3F32_X_AXIS)
-  }
+  mjolnir.rotate(
+    engine,
+    light_handle,
+    -math.PI * 0.35,
+    linalg.VECTOR3F32_X_AXIS,
+  )
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  mjolnir.rotate(engine, cube_handle, mjolnir.time_since_start(engine), linalg.VECTOR3F32_Y_AXIS)
+  mjolnir.rotate(
+    engine,
+    cube_handle,
+    mjolnir.time_since_start(engine),
+    linalg.VECTOR3F32_Y_AXIS,
+  )
 }

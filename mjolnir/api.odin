@@ -5,13 +5,13 @@ import "core:math"
 import "core:strings"
 import "core:sync"
 import "geometry"
+import "level_manager"
 import "navigation/recast"
 import "render/post_process"
 import "resources"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 import "world"
-import "level_manager"
 
 // Backward compatibility: Re-export types from level_manager
 Level_Descriptor :: level_manager.Level_Descriptor
@@ -161,15 +161,29 @@ create_mesh :: proc(
   return resources.create_mesh_handle(&engine.gctx, &engine.rm, geom)
 }
 
+get_builtin_mesh :: proc(
+  engine: ^Engine,
+  primitive: resources.Primitive,
+) -> resources.Handle {
+  return engine.rm.builtin_meshes[primitive]
+}
+
+get_builtin_material :: proc(
+  engine: ^Engine,
+  color: resources.Color,
+) -> resources.Handle {
+  return engine.rm.builtin_materials[color]
+}
+
 spawn :: proc(
   engine: ^Engine,
   attachment: world.NodeAttachment = nil,
 ) -> (
   resources.Handle,
-  ^world.Node,
   bool,
-) {
-  return world.spawn(&engine.world, attachment, &engine.rm)
+) #optional_ok {
+  handle, _, ok := world.spawn(&engine.world, attachment, &engine.rm)
+  return handle, ok
 }
 
 spawn_at :: proc(
@@ -178,10 +192,15 @@ spawn_at :: proc(
   attachment: world.NodeAttachment = nil,
 ) -> (
   resources.Handle,
-  ^world.Node,
   bool,
-) {
-  return world.spawn_at(&engine.world, position, attachment, &engine.rm)
+) #optional_ok {
+  handle, _, ok := world.spawn_at(
+    &engine.world,
+    position,
+    attachment,
+    &engine.rm,
+  )
+  return handle, ok
 }
 
 spawn_child :: proc(
@@ -190,10 +209,15 @@ spawn_child :: proc(
   attachment: world.NodeAttachment = nil,
 ) -> (
   resources.Handle,
-  ^world.Node,
   bool,
-) {
-  return world.spawn_child(&engine.world, parent, attachment, &engine.rm)
+) #optional_ok {
+  handle, _, ok := world.spawn_child(
+    &engine.world,
+    parent,
+    attachment,
+    &engine.rm,
+  )
+  return handle, ok
 }
 
 load_gltf :: proc(
@@ -202,7 +226,7 @@ load_gltf :: proc(
 ) -> (
   nodes: [dynamic]resources.Handle,
   ok: bool,
-) {
+) #optional_ok {
   handles, result := world.load_gltf(
     &engine.world,
     &engine.rm,
@@ -212,7 +236,13 @@ load_gltf :: proc(
   return handles, result == .success
 }
 
-get_node :: proc(engine: ^Engine, handle: resources.Handle) -> (ret: ^world.Node, ok: bool) #optional_ok {
+get_node :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+) -> (
+  ret: ^world.Node,
+  ok: bool,
+) #optional_ok {
   return cont.get(engine.world.nodes, handle)
 }
 
@@ -346,10 +376,10 @@ spawn_spot_light :: proc(
   position: [3]f32 = {0, 0, 0},
 ) -> (
   handle: resources.Handle,
-  node: ^world.Node,
   ok: bool,
-) {
-  handle, node = spawn(engine) or_return
+) #optional_ok {
+  handle = spawn(engine) or_return
+  node := get_node(engine, handle) or_return
   attachment := world.create_spot_light_attachment(
     handle,
     &engine.rm,
@@ -373,10 +403,10 @@ spawn_point_light :: proc(
   position: [3]f32 = {0, 0, 0},
 ) -> (
   handle: resources.Handle,
-  node: ^world.Node,
   ok: bool,
-) {
-  handle, node = spawn(engine) or_return
+) #optional_ok {
+  handle = spawn(engine) or_return
+  node := get_node(engine, handle) or_return
   attachment := world.create_point_light_attachment(
     handle,
     &engine.rm,
@@ -398,10 +428,10 @@ spawn_directional_light :: proc(
   position: [3]f32 = {0, 0, 0},
 ) -> (
   handle: resources.Handle,
-  node: ^world.Node,
   ok: bool,
-) {
-  handle, node = spawn(engine) or_return
+) #optional_ok {
+  handle = spawn(engine) or_return
+  node := get_node(engine, handle) or_return
   attachment := world.create_directional_light_attachment(
     handle,
     &engine.rm,
@@ -441,8 +471,8 @@ play_animation :: proc(
   engine: ^Engine,
   handle: resources.Handle,
   name: string,
-) {
-  world.play_animation(&engine.world, &engine.rm, handle, name)
+) -> bool {
+  return world.play_animation(&engine.world, &engine.rm, handle, name)
 }
 
 create_camera :: proc(
@@ -951,7 +981,9 @@ update_camera_controller :: proc(engine: ^Engine, delta_time: f32) {
   }
 }
 
-get_active_camera_controller_type :: proc(engine: ^Engine) -> CameraControllerType {
+get_active_camera_controller_type :: proc(
+  engine: ^Engine,
+) -> CameraControllerType {
   if engine.active_controller == nil do return .ORBIT
   return engine.active_controller.type
 }
@@ -961,11 +993,18 @@ set_orbit_camera_target :: proc(engine: ^Engine, target: [3]f32) {
 }
 
 set_orbit_camera_distance :: proc(engine: ^Engine, distance: f32) {
-  world.camera_controller_orbit_set_distance(&engine.orbit_controller, distance)
+  world.camera_controller_orbit_set_distance(
+    &engine.orbit_controller,
+    distance,
+  )
 }
 
 set_orbit_camera_angles :: proc(engine: ^Engine, yaw, pitch: f32) {
-  world.camera_controller_orbit_set_yaw_pitch(&engine.orbit_controller, yaw, pitch)
+  world.camera_controller_orbit_set_yaw_pitch(
+    &engine.orbit_controller,
+    yaw,
+    pitch,
+  )
 }
 
 set_free_camera_speed :: proc(engine: ^Engine, speed: f32) {
@@ -973,7 +1012,10 @@ set_free_camera_speed :: proc(engine: ^Engine, speed: f32) {
 }
 
 set_free_camera_sensitivity :: proc(engine: ^Engine, sensitivity: f32) {
-  world.camera_controller_free_set_sensitivity(&engine.free_controller, sensitivity)
+  world.camera_controller_free_set_sensitivity(
+    &engine.free_controller,
+    sensitivity,
+  )
 }
 
 get_main_camera :: proc(engine: ^Engine) -> ^resources.Camera {

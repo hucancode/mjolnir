@@ -1,13 +1,13 @@
 package main
 
-import "core:log"
-import "core:os"
-import "core:math"
-import "core:math/linalg"
 import "../../../mjolnir"
 import "../../../mjolnir/geometry"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import "core:os"
 import "vendor:glfw"
 
 cube_handles: [dynamic]resources.Handle
@@ -57,24 +57,22 @@ setup_aoe_test :: proc(engine: ^mjolnir.Engine) {
     for z in 0 ..< grid_size {
       world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
       world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
-      handle, node, ok := spawn(
+      handle := spawn(
         engine,
         world.MeshAttachment {
           handle = cube_mesh,
           material = cube_mat,
           cast_shadow = false,
         },
-      )
-      if ok {
-        translate(node, world_x, 0.5, world_z)
-        scale(node, cube_scale)
-        append(&cube_handles, handle)
-      }
+      ) or_continue
+      translate(engine, handle, world_x, 0.5, world_z)
+      scale(engine, handle, cube_scale)
+      append(&cube_handles, handle)
     }
   }
   // Spawn effector sphere
   effector_position = {0, 1, 0}
-  handle, node, ok := spawn(
+  effector_sphere = spawn(
     engine,
     world.MeshAttachment {
       handle = sphere_mesh,
@@ -82,12 +80,14 @@ setup_aoe_test :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = false,
     },
   )
-  if ok {
-    effector_sphere = handle
-    translate(node, effector_position.x, effector_position.y, effector_position.z)
-    scale(node, 0.5)
-  }
-  // Position camera
+  translate(
+    engine,
+    effector_sphere,
+    effector_position.x,
+    effector_position.y,
+    effector_position.z,
+  )
+  scale(engine, effector_sphere, 0.5)
   if main_camera := get_main_camera(engine); main_camera != nil {
     main_camera.position = {10, 30, 10}
     resources.camera_look_at(main_camera, main_camera.position, {0, 0, 0})
@@ -112,17 +112,33 @@ update_aoe_test :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       mouse_x := mouse_x_window * dpi_scale
       mouse_y := mouse_y_window * dpi_scale
       log.infof("=== Mouse Click Debug ===")
-      log.infof("Mouse window coords: (%.1f, %.1f)", mouse_x_window, mouse_y_window)
+      log.infof(
+        "Mouse window coords: (%.1f, %.1f)",
+        mouse_x_window,
+        mouse_y_window,
+      )
       log.infof("DPI scale: %.2f", dpi_scale)
       log.infof("Mouse framebuffer coords: (%.1f, %.1f)", mouse_x, mouse_y)
-      log.infof("Swapchain extent: %v x %v", engine.swapchain.extent.width, engine.swapchain.extent.height)
-      log.infof("Camera viewport: %v x %v", camera.extent.width, camera.extent.height)
+      log.infof(
+        "Swapchain extent: %v x %v",
+        engine.swapchain.extent.width,
+        engine.swapchain.extent.height,
+      )
+      log.infof(
+        "Camera viewport: %v x %v",
+        camera.extent.width,
+        camera.extent.height,
+      )
       // Calculate normalized device coordinates to verify
       ndc_x := (2.0 * mouse_x) / f32(camera.extent.width) - 1.0
       ndc_y := 1.0 - (2.0 * mouse_y) / f32(camera.extent.height)
       log.infof("Calculated NDC: (%.3f, %.3f)", ndc_x, ndc_y)
       // Show what world point the ray is aiming at
-      ray_origin, ray_dir := resources.camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
+      ray_origin, ray_dir := resources.camera_viewport_to_world_ray(
+        camera,
+        mouse_x,
+        mouse_y,
+      )
       target_point := ray_origin + ray_dir * 25.0
       log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
       log.infof("Ray target at distance 25: %v", target_point)
@@ -130,7 +146,7 @@ update_aoe_test :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       ray_config := geometry.RaycastConfig {
         max_dist  = 1000.0,
         max_tests = 0,
-        accel     = .OCTREE,  // Fixed: was .BVH but we only use OCTREE now
+        accel     = .OCTREE, // Fixed: was .BVH but we only use OCTREE now
       }
       hit := world.camera_world_raycast(
         &engine.world,
@@ -138,22 +154,33 @@ update_aoe_test :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
         camera,
         mouse_x,
         mouse_y,
-        {},  // No tag filter - test all nodes
+        {}, // No tag filter - test all nodes
         ray_config,
       )
       if hit.hit {
         clicked_cube = hit.node_handle
-        if node := world.get_node(&engine.world, hit.node_handle); node != nil {
+        if node := world.get_node(&engine.world, hit.node_handle);
+           node != nil {
           world_pos := node.transform.world_matrix[3].xyz
-          log.infof("Hit cube at position %v, distance: %.2f", world_pos, hit.t)
+          log.infof(
+            "Hit cube at position %v, distance: %.2f",
+            world_pos,
+            hit.t,
+          )
           // Debug: show what the ray calculation says we should hit
           expected_x := ray_origin.x + ray_dir.x * hit.t
           expected_y := ray_origin.y + ray_dir.y * hit.t
           expected_z := ray_origin.z + ray_dir.z * hit.t
-          log.infof("Ray at t=%.2f should be at: [%.2f, %.2f, %.2f]", hit.t, expected_x, expected_y, expected_z)
+          log.infof(
+            "Ray at t=%.2f should be at: [%.2f, %.2f, %.2f]",
+            hit.t,
+            expected_x,
+            expected_y,
+            expected_z,
+          )
         }
       } else {
-        clicked_cube = {}  // Clear previous selection
+        clicked_cube = {} // Clear previous selection
       }
     }
   }
@@ -162,8 +189,13 @@ update_aoe_test :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   effector_position.x = math.cos(orbit_angle) * orbit_radius
   effector_position.y = 1.0
   effector_position.z = math.sin(orbit_angle) * orbit_radius
-  translate(engine, effector_sphere,
-    effector_position.x, effector_position.y, effector_position.z)
+  translate(
+    engine,
+    effector_sphere,
+    effector_position.x,
+    effector_position.y,
+    effector_position.z,
+  )
   // Reset all cubes to normal scale
   for handle in cube_handles {
     scale(engine, handle, 0.3)
@@ -171,7 +203,12 @@ update_aoe_test :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Query for cubes within effect radius
   affected := make([dynamic]resources.Handle, 0)
   defer delete(affected)
-  world.query_sphere(&engine.world, effector_position, effect_radius, &affected)
+  world.query_sphere(
+    &engine.world,
+    effector_position,
+    effect_radius,
+    &affected,
+  )
   // Shrink affected cubes
   for handle in affected {
     scale(engine, handle, 0.1)
