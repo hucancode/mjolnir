@@ -1,5 +1,7 @@
 package resources
 
+import cont "../containers"
+
 MAX_TEXTURES :: 1000
 MAX_CUBE_TEXTURES :: 200
 MAX_FRAMES_IN_FLIGHT :: 2
@@ -15,7 +17,7 @@ BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024 // 64MB
 BINDLESS_SKINNING_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
 // Configuration for different allocation sizes
 // Total capacity: 256*512 + 1024*256 + 4096*128 + 16384*64 + 65536*16 + 262144*4 + 1048576*1 + 0*0 = 2,097,152 vertices
-VERTEX_SLAB_CONFIG :: [MAX_SLAB_CLASSES]struct {
+VERTEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   block_size, block_count: u32,
 } {
   {block_size = 256, block_count = 512}, // Small meshes: 131,072 vertices
@@ -29,7 +31,7 @@ VERTEX_SLAB_CONFIG :: [MAX_SLAB_CLASSES]struct {
 }
 
 // Total capacity: 128*2048 + 512*1024 + 2048*512 + 8192*256 + 32768*128 + 131072*32 + 524288*8 + 2097152*4 = 16,777,216 indices
-INDEX_SLAB_CONFIG :: [MAX_SLAB_CLASSES]struct {
+INDEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   block_size, block_count: u32,
 } {
   {block_size = 128, block_count = 2048}, // Small index counts: 262,144 indices

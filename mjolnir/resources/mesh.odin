@@ -1,5 +1,6 @@
 package resources
 
+import cont "../containers"
 import "../animation"
 import "../geometry"
 import "../gpu"
@@ -384,7 +385,7 @@ create_mesh :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, mesh, ok = alloc(&manager.meshes)
+  handle, mesh, ok = cont.alloc(&manager.meshes)
   if !ok {
     log.error("Failed to allocate mesh: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY

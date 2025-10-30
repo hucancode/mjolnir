@@ -1,5 +1,6 @@
 package world
 
+import cont "../containers"
 import anim "../animation"
 import "../geometry"
 import "../gpu"
@@ -172,7 +173,7 @@ destroy_node :: proc(
     skinning, has_skin := &attachment.skinning.?
     if has_skin {
       if skinning.bone_matrix_buffer_offset != 0xFFFFFFFF {
-        resources.slab_free(
+        cont.slab_free(
           &rm.bone_matrix_slab,
           skinning.bone_matrix_buffer_offset,
         )
@@ -247,7 +248,7 @@ clear_ik :: proc(node: ^Node) {
 }
 
 detach :: proc(nodes: resources.Pool(Node), child_handle: resources.Handle) {
-  child_node := resources.get(nodes, child_handle)
+  child_node := cont.get(nodes, child_handle)
   if child_node == nil {
     return
   }
@@ -255,7 +256,7 @@ detach :: proc(nodes: resources.Pool(Node), child_handle: resources.Handle) {
   if parent_handle == child_handle {
     return
   }
-  parent_node := resources.get(nodes, parent_handle)
+  parent_node := cont.get(nodes, parent_handle)
   if parent_node == nil {
     return
   }
@@ -270,12 +271,12 @@ attach :: proc(
   nodes: resources.Pool(Node),
   parent_handle, child_handle: resources.Handle,
 ) {
-  child_node := resources.get(nodes, child_handle)
-  parent_node := resources.get(nodes, parent_handle)
+  child_node := cont.get(nodes, child_handle)
+  parent_node := cont.get(nodes, parent_handle)
   if child_node == nil || parent_node == nil {
     return
   }
-  if old_parent_node, ok := resources.get(nodes, child_node.parent); ok {
+  if old_parent_node, ok := cont.get(nodes, child_node.parent); ok {
     idx, found := slice.linear_search(
       old_parent_node.children[:],
       child_handle,
@@ -300,7 +301,7 @@ play_animation :: proc(
   if rm == nil {
     return false
   }
-  node := resources.get(world.nodes, node_handle)
+  node := cont.get(world.nodes, node_handle)
   if node == nil {
     return false
   }
@@ -308,7 +309,7 @@ play_animation :: proc(
   if !ok {
     return false
   }
-  mesh := resources.get(rm.meshes, data.handle)
+  mesh := cont.get(rm.meshes, data.handle)
   if mesh == nil do return false
   skinning, has_skin := &data.skinning.?
   if !has_skin do return false
@@ -332,7 +333,7 @@ _spawn_internal :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  handle, node = resources.alloc(&world.nodes) or_return
+  handle, node = cont.alloc(&world.nodes) or_return
   _init_node_with_attachment(node, attachment, handle, rm)
   geometry.transform_translate(
     &node.transform,
@@ -388,7 +389,7 @@ _apply_sprite_to_node_data :: proc(
   if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
   // Mark as sprite
   data.flags |= {.MATERIAL_SPRITE}
-  if material, has_mat := resources.get(
+  if material, has_mat := cont.get(
     rm.materials,
     sprite_attachment.material,
   ); has_mat {
@@ -421,7 +422,7 @@ _build_node_data :: proc(
     if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
     if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
     if mesh_attachment.navigation_obstacle do data.flags |= {.NAVIGATION_OBSTACLE}
-    if material, has_mat := resources.get(
+    if material, has_mat := cont.get(
       rm.materials,
       mesh_attachment.material,
     ); has_mat {
@@ -506,9 +507,9 @@ World :: struct {
 }
 
 init :: proc(world: ^World) {
-  resources.pool_init(&world.nodes, resources.MAX_NODES_IN_SCENE)
+  cont.init(&world.nodes, resources.MAX_NODES_IN_SCENE)
   root: ^Node
-  world.root, root, _ = resources.alloc(&world.nodes)
+  world.root, root, _ = cont.alloc(&world.nodes)
   init_node(root, "root")
   root.parent = world.root
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
@@ -588,7 +589,7 @@ destroy :: proc(
       destroy_node(&entry.item, rm, gctx)
     }
   }
-  resources.pool_destroy(world.nodes, proc(node: ^Node) {})
+  cont.destroy(world.nodes, proc(node: ^Node) {})
   delete(world.traversal_stack)
   for _, entry in world.actor_pools {
     entry.destroy_fn(entry.pool_ptr)
@@ -638,7 +639,7 @@ shutdown :: proc(
 }
 
 despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
-  node := resources.get(world.nodes, handle)
+  node := cont.get(world.nodes, handle)
   if node == nil {
     log.warnf("despawn: node %v not found (already freed or invalid)", handle)
     return false
@@ -683,7 +684,7 @@ cleanup_pending_deletions :: proc(
   }
 
   for handle in to_destroy {
-    node := resources.get(world.nodes, handle)
+    node := cont.get(world.nodes, handle)
     if node != nil {
       log.infof("  Destroying node handle: %v name='%s'", handle, node.name)
     } else {
@@ -700,14 +701,14 @@ cleanup_pending_deletions :: proc(
     }
 
     world.octree_dirty_set[handle] = true
-    if node, ok := resources.free(&world.nodes, handle); ok {
+    if node, ok := cont.free(&world.nodes, handle); ok {
       destroy_node(node, rm, gctx)
     }
   }
 }
 
 get_node :: proc(world: ^World, handle: resources.Handle) -> ^Node {
-  return resources.get(world.nodes, handle)
+  return cont.get(world.nodes, handle)
 }
 
 @(private)
@@ -737,7 +738,7 @@ traverse :: proc(
   )
   for len(world.traversal_stack) > 0 {
     entry := pop(&world.traversal_stack)
-    current_node := resources.get(world.nodes, entry.handle) or_continue
+    current_node := cont.get(world.nodes, entry.handle) or_continue
     if current_node.pending_deletion do continue
     visibility_changed :=
       current_node.parent_visible != entry.parent_is_visible
@@ -750,9 +751,9 @@ traverse :: proc(
     has_bone_socket := false
     apply_bone_socket: {
       if current_node.bone_socket == "" || rm == nil do break apply_bone_socket
-      parent_node := resources.get(world.nodes, current_node.parent) or_break
+      parent_node := cont.get(world.nodes, current_node.parent) or_break
       parent_mesh_attachment := parent_node.attachment.(MeshAttachment) or_break
-      parent_mesh := resources.get(
+      parent_mesh := cont.get(
         rm.meshes,
         parent_mesh_attachment.handle,
       ) or_break
@@ -817,7 +818,7 @@ traverse :: proc(
         if mesh_attachment.cast_shadow {
           data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
         }
-        if material_entry, has_material := resources.get(
+        if material_entry, has_material := cont.get(
           rm.materials,
           mesh_attachment.material,
         ); has_material {
@@ -874,7 +875,7 @@ assign_emitter_to_node :: proc(
   if !is_emitter {
     return
   }
-  emitter, ok := resources.get(rm.emitters, attachment.handle)
+  emitter, ok := cont.get(rm.emitters, attachment.handle)
   if ok {
     emitter.node_handle = node_handle
     resources.emitter_write_to_gpu(rm, attachment.handle, emitter)
@@ -894,7 +895,7 @@ assign_forcefield_to_node :: proc(
   if !is_forcefield {
     return
   }
-  forcefield, ok := resources.get(rm.forcefields, attachment.handle)
+  forcefield, ok := cont.get(rm.forcefields, attachment.handle)
   if ok {
     forcefield.node_handle = node_handle
     resources.forcefield_write_to_gpu(rm, attachment.handle, forcefield)
@@ -914,7 +915,7 @@ assign_light_to_node :: proc(
   if !is_light {
     return
   }
-  if light, ok := resources.get(rm.lights, attachment.handle); ok {
+  if light, ok := cont.get(rm.lights, attachment.handle); ok {
     light.node_handle = node_handle
     light.node_index = node_handle.index
     gpu.write(&rm.lights_buffer, &light.data, int(attachment.handle.index))
@@ -1040,7 +1041,7 @@ node_handle_translate_by :: proc(
   y: f32 = 0,
   z: f32 = 0,
 ) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_translate_by(&node.transform, x, y, z)
   }
 }
@@ -1052,7 +1053,7 @@ node_handle_translate :: proc(
   y: f32 = 0,
   z: f32 = 0,
 ) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_translate(&node.transform, x, y, z)
   }
 }
@@ -1067,7 +1068,7 @@ node_handle_rotate_by_quaternion :: proc(
   handle: resources.Handle,
   q: quaternion128,
 ) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_rotate_by_quaternion(&node.transform, q)
   }
 }
@@ -1078,7 +1079,7 @@ node_handle_rotate_by_angle :: proc(
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_rotate_by_angle(&node.transform, angle, axis)
   }
 }
@@ -1093,7 +1094,7 @@ node_handle_rotate_quaternion :: proc(
   handle: resources.Handle,
   q: quaternion128,
 ) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_rotate_quaternion(&node.transform, q)
   }
 }
@@ -1104,7 +1105,7 @@ node_handle_rotate_angle :: proc(
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_rotate_angle(&node.transform, angle, axis)
   }
 }
@@ -1116,13 +1117,13 @@ node_handle_scale_xyz_by :: proc(
   y: f32 = 1,
   z: f32 = 1,
 ) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_scale_xyz_by(&node.transform, x, y, z)
   }
 }
 
 node_handle_scale_by :: proc(world: ^World, handle: resources.Handle, s: f32) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_scale_by(&node.transform, s)
   }
 }
@@ -1134,13 +1135,13 @@ node_handle_scale_xyz :: proc(
   y: f32 = 1,
   z: f32 = 1,
 ) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_scale_xyz(&node.transform, x, y, z)
   }
 }
 
 node_handle_scale :: proc(world: ^World, handle: resources.Handle, s: f32) {
-  if node, ok := resources.get(world.nodes, handle); ok {
+  if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_scale(&node.transform, s)
   }
 }

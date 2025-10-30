@@ -1,5 +1,6 @@
 package retained_ui
 
+import cont "../../containers"
 import resources "../../resources"
 
 create_button :: proc(
@@ -213,7 +214,7 @@ set_button_callback :: proc(
   callback: proc(ctx: rawptr),
   user_data: rawptr = nil,
 ) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found || widget.type != .BUTTON do return
   data := &widget.data.(ButtonData)
   data.callback = callback
@@ -221,7 +222,7 @@ set_button_callback :: proc(
 }
 
 set_label_text :: proc(self: ^Manager, handle: WidgetHandle, text: string) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found || widget.type != .LABEL do return
   data := &widget.data.(LabelData)
   data.text = text
@@ -229,7 +230,7 @@ set_label_text :: proc(self: ^Manager, handle: WidgetHandle, text: string) {
 }
 
 set_button_text :: proc(self: ^Manager, handle: WidgetHandle, text: string) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found || widget.type != .BUTTON do return
   data := &widget.data.(ButtonData)
   data.text = text
@@ -242,7 +243,7 @@ set_image_sprite :: proc(
   sprite_index: u32,
   sprite_count: u32,
 ) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found || widget.type != .IMAGE do return
   data := &widget.data.(ImageData)
   data.sprite_index = sprite_index
@@ -266,7 +267,7 @@ set_widget_colors :: proc(
   fg_color: [4]u8,
   border_color: [4]u8,
 ) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found do return
   widget.bg_color = bg_color
   widget.fg_color = fg_color
@@ -279,16 +280,16 @@ set_widget_colors :: proc(
 // ============================================================================
 
 destroy_widget :: proc(self: ^Manager, handle: WidgetHandle) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found do return
   child := widget.first_child
   for child.index != 0 {
-    next_child, _ := resources.get(self.widgets, child)
+    next_child, _ := cont.get(self.widgets, child)
     next := next_child.next_sibling
     destroy_widget(self, child)
     child = next
   }
-  if parent_widget, found := resources.get(self.widgets, widget.parent); found {
+  if parent_widget, found := cont.get(self.widgets, widget.parent); found {
     if parent_widget.first_child == handle {
       parent_widget.first_child = widget.next_sibling
     }
@@ -303,31 +304,31 @@ destroy_widget :: proc(self: ^Manager, handle: WidgetHandle) {
       }
     }
   }
-  if prev, found := resources.get(self.widgets, widget.prev_sibling); found {
+  if prev, found := cont.get(self.widgets, widget.prev_sibling); found {
     prev.next_sibling = widget.next_sibling
   }
-  if next, found := resources.get(self.widgets, widget.next_sibling); found {
+  if next, found := cont.get(self.widgets, widget.next_sibling); found {
     next.prev_sibling = widget.prev_sibling
   }
-  resources.free(&self.widgets, handle)
+  cont.free(&self.widgets, handle)
 }
 
 set_position :: proc(self: ^Manager, handle: WidgetHandle, x, y: f32) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found do return
   widget.position = {x, y}
   mark_dirty(self, handle)
 }
 
 set_size :: proc(self: ^Manager, handle: WidgetHandle, w, h: f32) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found do return
   widget.size = {w, h}
   mark_dirty(self, handle)
 }
 
 set_visible :: proc(self: ^Manager, handle: WidgetHandle, visible: bool) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found do return
   widget.visible = visible
   mark_dirty(self, handle)

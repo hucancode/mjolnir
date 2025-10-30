@@ -1,5 +1,6 @@
 package world
 
+import cont "../containers"
 import geometry "../geometry"
 import gpu "../gpu"
 import resources "../resources"
@@ -145,7 +146,7 @@ visibility_system_dispatch_depth :: proc(
   if system.node_count == 0 {
     return
   }
-  depth_texture := resources.get(
+  depth_texture := cont.get(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
@@ -907,7 +908,7 @@ render_depth_pass :: proc(
   include_flags: resources.NodeFlagSet,
   exclude_flags: resources.NodeFlagSet,
 ) {
-  depth_texture := resources.get(
+  depth_texture := cont.get(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
@@ -1148,7 +1149,7 @@ render_spherical_depth_pass :: proc(
   rm: ^resources.Manager,
 ) {
   // Frame N writes to depth_cube[N]
-  depth_cube := resources.get(rm.image_cube_buffers, camera.depth_cube[frame_index])
+  depth_cube := cont.get(rm.image_cube_buffers, camera.depth_cube[frame_index])
   if depth_cube == nil {
     log.error("Failed to get depth cube for spherical camera")
     return

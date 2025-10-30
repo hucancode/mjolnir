@@ -1,5 +1,6 @@
 package mjolnir
 
+import cont "containers"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -93,7 +94,7 @@ renderer_init :: proc(
   swapchain_format: vk.Format,
   dpi_scale: f32,
 ) -> vk.Result {
-  main_camera_handle, main_camera_ptr, main_camera_ok := resources.alloc(
+  main_camera_handle, main_camera_ptr, main_camera_ok := cont.alloc(
     &rm.cameras,
   )
   if !main_camera_ok {
@@ -117,7 +118,7 @@ renderer_init :: proc(
   )
   if init_result != .SUCCESS {
     log.error("Failed to initialize main camera")
-    resources.free(&rm.cameras, main_camera_handle)
+    cont.free(&rm.cameras, main_camera_handle)
     return .ERROR_INITIALIZATION_FAILED
   }
   self.main_camera = main_camera_handle
@@ -301,7 +302,7 @@ record_geometry_pass :: proc(
     camera_handle,
     rm,
   ) or_return
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil {
     log.error("Failed to get camera for geometry pass")
     return .ERROR_UNKNOWN
@@ -452,7 +453,7 @@ record_transparency_pass :: proc(
     camera_handle.index,
     rm,
   )
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil {
     log.error("Failed to get camera for transparency pass")
     return .ERROR_UNKNOWN

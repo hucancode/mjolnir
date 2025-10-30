@@ -1,5 +1,6 @@
 package mjolnir
 
+import cont "containers"
 import "core:math"
 import "core:strings"
 import "core:sync"
@@ -212,7 +213,7 @@ load_gltf :: proc(
 }
 
 get_node :: proc(engine: ^Engine, handle: resources.Handle) -> (ret: ^world.Node, ok: bool) #optional_ok {
-  return resources.get(engine.world.nodes, handle)
+  return cont.get(engine.world.nodes, handle)
 }
 
 despawn :: proc(engine: ^Engine, handle: resources.Handle) {
@@ -464,7 +465,7 @@ create_camera :: proc(
   handle: resources.Handle,
   ok: bool,
 ) #optional_ok {
-  camera_handle, camera_ptr := resources.alloc(&engine.rm.cameras) or_return
+  camera_handle, camera_ptr := cont.alloc(&engine.rm.cameras) or_return
   init_result := resources.camera_init(
     camera_ptr,
     &engine.gctx,
@@ -481,7 +482,7 @@ create_camera :: proc(
     far_plane,
   )
   if init_result != .SUCCESS {
-    resources.free(&engine.rm.cameras, camera_handle)
+    cont.free(&engine.rm.cameras, camera_handle)
     return {}, false
   }
   return camera_handle, true
@@ -496,7 +497,7 @@ get_camera_attachment :: proc(
   handle: resources.Handle,
   ok: bool,
 ) #optional_ok {
-  camera := resources.get(engine.rm.cameras, camera_handle) or_return
+  camera := cont.get(engine.rm.cameras, camera_handle) or_return
   handle = resources.camera_get_attachment(
     camera,
     attachment_type,
@@ -511,7 +512,7 @@ update_material_texture :: proc(
   texture_type: resources.ShaderFeature,
   texture_handle: resources.Handle,
 ) -> bool {
-  material := resources.get(engine.rm.materials, material_handle) or_return
+  material := cont.get(engine.rm.materials, material_handle) or_return
   switch texture_type {
   case .ALBEDO_TEXTURE:
     material.albedo = texture_handle
@@ -976,7 +977,7 @@ set_free_camera_sensitivity :: proc(engine: ^Engine, sensitivity: f32) {
 }
 
 get_main_camera :: proc(engine: ^Engine) -> ^resources.Camera {
-  return resources.get(engine.rm.cameras, engine.render.main_camera)
+  return cont.get(engine.rm.cameras, engine.render.main_camera)
 }
 
 sync_camera_controller :: proc(engine: ^Engine, type: CameraControllerType) {

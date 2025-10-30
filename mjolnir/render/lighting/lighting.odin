@@ -1,5 +1,6 @@
 package lighting
 
+import cont "../../containers"
 import "../../geometry"
 import "../../gpu"
 import "../../resources"
@@ -46,9 +47,9 @@ begin_ambient_pass :: proc(
   rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
-  color_texture := resources.get(
+  color_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
@@ -104,7 +105,7 @@ render_ambient :: proc(
   rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   push := AmbientPushConstant {
     camera_index           = camera_handle.index,
@@ -446,11 +447,11 @@ shutdown :: proc(
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(device, self.ambient_pipeline_layout, nil)
   self.ambient_pipeline_layout = 0
-  if item, freed := resources.free(&rm.image_2d_buffers, self.environment_map);
+  if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
      freed {
     gpu.image_destroy(device, item)
   }
-  if item, freed := resources.free(&rm.image_2d_buffers, self.brdf_lut);
+  if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut);
      freed {
     gpu.image_destroy(device, item)
   }
@@ -468,7 +469,7 @@ begin_record :: proc(
   command_buffer: vk.CommandBuffer,
   ret: vk.Result,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil {
     ret = .ERROR_UNKNOWN
     return
@@ -539,9 +540,9 @@ begin_pass :: proc(
   rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
-  final_image := resources.get(
+  final_image := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
@@ -553,7 +554,7 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
-  depth_texture := resources.get(
+  depth_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
@@ -615,14 +616,14 @@ render :: proc(
   rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   bind_and_draw_mesh :: proc(
     mesh_handle: resources.Handle,
     command_buffer: vk.CommandBuffer,
     rm: ^resources.Manager,
   ) {
-    mesh_ptr := resources.get(rm.meshes, mesh_handle)
+    mesh_ptr := cont.get(rm.meshes, mesh_handle)
     if mesh_ptr == nil {
       log.errorf("Failed to get mesh for handle %v", mesh_handle)
       return

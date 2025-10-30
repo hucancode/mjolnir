@@ -1,5 +1,6 @@
 package world
 
+import cont "../containers"
 import "../resources"
 import "core:log"
 
@@ -23,12 +24,12 @@ ActorContext :: struct {
 }
 
 actor_pool_init :: proc(pool: ^ActorPool($T), capacity: u32 = 0) {
-  resources.pool_init(&pool.actors, capacity)
+  cont.init(&pool.actors, capacity)
   pool.tick_list = make([dynamic]resources.Handle, 0)
 }
 
 actor_pool_destroy :: proc(pool: ^ActorPool($T)) {
-  resources.pool_destroy(pool.actors, proc(actor: ^Actor(T)) {})
+  cont.destroy(pool.actors, proc(actor: ^Actor(T)) {})
   delete(pool.tick_list)
 }
 
@@ -40,7 +41,7 @@ actor_alloc :: proc(
   actor: ^Actor(T),
   ok: bool,
 ) {
-  handle, actor, ok = resources.alloc(&pool.actors)
+  handle, actor, ok = cont.alloc(&pool.actors)
   if !ok do return {}, nil, false
   actor.node_handle = node_handle
   actor.tick_enabled = false
@@ -55,7 +56,7 @@ actor_free :: proc(
   actor: ^Actor(T),
   freed: bool,
 ) {
-  actor, freed = resources.free(&pool.actors, handle)
+  actor, freed = cont.free(&pool.actors, handle)
   if !freed do return nil, false
   if actor.tick_enabled {
     for i := 0; i < len(pool.tick_list); i += 1 {
@@ -75,11 +76,11 @@ actor_get :: proc(
   actor: ^Actor(T),
   ok: bool,
 ) #optional_ok {
-  return resources.get(pool.actors, handle)
+  return cont.get(pool.actors, handle)
 }
 
 actor_enable_tick :: proc(pool: ^ActorPool($T), handle: resources.Handle) {
-  actor, ok := resources.get(pool.actors, handle)
+  actor, ok := cont.get(pool.actors, handle)
   if !ok do return
   if !actor.tick_enabled {
     actor.tick_enabled = true
@@ -88,7 +89,7 @@ actor_enable_tick :: proc(pool: ^ActorPool($T), handle: resources.Handle) {
 }
 
 actor_disable_tick :: proc(pool: ^ActorPool($T), handle: resources.Handle) {
-  actor, ok := resources.get(pool.actors, handle)
+  actor, ok := cont.get(pool.actors, handle)
   if !ok do return
   if actor.tick_enabled {
     actor.tick_enabled = false
@@ -104,7 +105,7 @@ actor_disable_tick :: proc(pool: ^ActorPool($T), handle: resources.Handle) {
 actor_pool_tick :: proc(pool: ^ActorPool($T), ctx: ^ActorContext) {
   for i := 0; i < len(pool.tick_list); i += 1 {
     handle := pool.tick_list[i]
-    actor, ok := resources.get(pool.actors, handle)
+    actor, ok := cont.get(pool.actors, handle)
     if !ok {
       unordered_remove(&pool.tick_list, i)
       i -= 1

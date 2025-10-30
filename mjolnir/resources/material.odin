@@ -1,8 +1,9 @@
 package resources
 
+import cont "../containers"
+import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
-import "../gpu"
 
 ShaderFeature :: enum {
   ALBEDO_TEXTURE             = 0,
@@ -88,7 +89,7 @@ create_material :: proc(
   res: vk.Result,
 ) {
   ok: bool
-  ret, mat, ok = alloc(&manager.materials)
+  ret, mat, ok = cont.alloc(&manager.materials)
   if !ok {
     log.error("Failed to allocate material: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY

@@ -1,11 +1,16 @@
 package resources
 
 import "../animation"
+import cont "../containers"
 import "../geometry"
 import "../gpu"
 import "core:log"
 import "core:slice"
 import vk "vendor:vulkan"
+
+Handle :: cont.Handle
+Pool :: cont.Pool
+SlabAllocator :: cont.SlabAllocator
 
 SamplerType :: enum u32 {
   NEAREST_CLAMP  = 0,
@@ -124,29 +129,29 @@ Manager :: struct {
 
 init :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
   log.infof("Initializing mesh pool... ")
-  pool_init(&manager.meshes, MAX_MESHES)
+  cont.init(&manager.meshes, MAX_MESHES)
   log.infof("Initializing materials pool... ")
-  pool_init(&manager.materials, MAX_MATERIALS)
+  cont.init(&manager.materials, MAX_MATERIALS)
   log.infof("Initializing image 2d buffer pool... ")
-  pool_init(&manager.image_2d_buffers, MAX_TEXTURES)
+  cont.init(&manager.image_2d_buffers, MAX_TEXTURES)
   log.infof("Initializing image cube buffer pool... ")
-  pool_init(&manager.image_cube_buffers, MAX_CUBE_TEXTURES)
+  cont.init(&manager.image_cube_buffers, MAX_CUBE_TEXTURES)
   log.infof("Initializing cameras pool... ")
-  pool_init(&manager.cameras, MAX_ACTIVE_CAMERAS)
+  cont.init(&manager.cameras, MAX_ACTIVE_CAMERAS)
   log.infof("Initializing spherical cameras pool... ")
-  pool_init(&manager.spherical_cameras, MAX_ACTIVE_CAMERAS)
+  cont.init(&manager.spherical_cameras, MAX_ACTIVE_CAMERAS)
   log.infof("Initializing forcefield pool... ")
-  pool_init(&manager.forcefields, MAX_FORCE_FIELDS)
+  cont.init(&manager.forcefields, MAX_FORCE_FIELDS)
   log.infof("Initializing animation clips pool... ")
-  pool_init(&manager.animation_clips, 0)
+  cont.init(&manager.animation_clips, 0)
   log.infof("Initializing sprites pool... ")
-  pool_init(&manager.sprites, MAX_SPRITES)
+  cont.init(&manager.sprites, MAX_SPRITES)
   log.infof("Initializing lights pool... ")
-  pool_init(&manager.lights, MAX_LIGHTS)
+  cont.init(&manager.lights, MAX_LIGHTS)
   log.infof("Initializing navigation mesh pool... ")
-  pool_init(&manager.nav_meshes, 0)
+  cont.init(&manager.nav_meshes, 0)
   log.infof("Initializing navigation context pool... ")
-  pool_init(&manager.nav_contexts, 0)
+  cont.init(&manager.nav_contexts, 0)
   log.infof("Initializing navigation system... ")
   manager.navigation_system = {}
   manager.current_frame_index = 0
@@ -545,7 +550,7 @@ init_bone_matrix_allocator :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
 ) -> vk.Result {
-  slab_allocator_init(
+  cont.slab_init(
     &manager.bone_matrix_slab,
     {
       {32, 64}, // 64 bytes * 32   bones * 64   blocks = 128K bytes
@@ -1337,7 +1342,7 @@ init_vertex_skinning_buffer :: proc(
     skinning_count,
     {.STORAGE_BUFFER},
   ) or_return
-  slab_allocator_init(&manager.vertex_skinning_slab, VERTEX_SLAB_CONFIG)
+  cont.slab_init(&manager.vertex_skinning_slab, VERTEX_SLAB_CONFIG)
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -1387,7 +1392,7 @@ destroy_vertex_skinning_buffer :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  slab_allocator_destroy(&manager.vertex_skinning_slab)
+  cont.slab_destroy(&manager.vertex_skinning_slab)
   gpu.immutable_buffer_destroy(gctx.device, &manager.vertex_skinning_buffer)
   vk.DestroyDescriptorSetLayout(
     gctx.device,
@@ -1577,7 +1582,7 @@ destroy_bone_matrix_allocator :: proc(
   )
   manager.bone_buffer_set_layout = 0
   manager.bone_buffer_descriptor_set = 0
-  slab_allocator_destroy(&manager.bone_matrix_slab)
+  cont.slab_destroy(&manager.bone_matrix_slab)
 }
 
 init_vertex_index_buffers :: proc(
@@ -1598,8 +1603,8 @@ init_vertex_index_buffers :: proc(
     index_count,
     {.INDEX_BUFFER},
   ) or_return
-  slab_allocator_init(&manager.vertex_slab, VERTEX_SLAB_CONFIG)
-  slab_allocator_init(&manager.index_slab, INDEX_SLAB_CONFIG)
+  cont.slab_init(&manager.vertex_slab, VERTEX_SLAB_CONFIG)
+  cont.slab_init(&manager.index_slab, INDEX_SLAB_CONFIG)
   log.info("Bindless buffer system initialized")
   log.info("Vertex buffer capacity:", vertex_count, "vertices")
   log.info("Index buffer capacity:", index_count, "indices")
@@ -1612,8 +1617,8 @@ destroy_vertex_index_buffers :: proc(
 ) {
   gpu.immutable_buffer_destroy(gctx.device, &manager.vertex_buffer)
   gpu.immutable_buffer_destroy(gctx.device, &manager.index_buffer)
-  slab_allocator_destroy(&manager.vertex_slab)
-  slab_allocator_destroy(&manager.index_slab)
+  cont.slab_destroy(&manager.vertex_slab)
+  cont.slab_destroy(&manager.index_slab)
 }
 
 manager_allocate_vertices :: proc(
@@ -1625,7 +1630,7 @@ manager_allocate_vertices :: proc(
   ret: vk.Result,
 ) {
   vertex_count := u32(len(vertices))
-  offset, ok := slab_alloc(&manager.vertex_slab, vertex_count)
+  offset, ok := cont.slab_alloc(&manager.vertex_slab, vertex_count)
   if !ok {
     log.error("Failed to allocate vertices from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -1647,7 +1652,7 @@ manager_allocate_indices :: proc(
   ret: vk.Result,
 ) {
   index_count := u32(len(indices))
-  offset, ok := slab_alloc(&manager.index_slab, index_count)
+  offset, ok := cont.slab_alloc(&manager.index_slab, index_count)
   if !ok {
     log.error("Failed to allocate indices from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -1672,7 +1677,7 @@ manager_allocate_vertex_skinning :: proc(
     return {}, .SUCCESS
   }
   skinning_count := u32(len(skinnings))
-  offset, ok := slab_alloc(&manager.vertex_skinning_slab, skinning_count)
+  offset, ok := cont.slab_alloc(&manager.vertex_skinning_slab, skinning_count)
   if !ok {
     log.error("Failed to allocate vertex skinning data from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -1697,18 +1702,18 @@ manager_free_vertex_skinning :: proc(
   if allocation.count == 0 {
     return
   }
-  slab_free(&manager.vertex_skinning_slab, allocation.offset)
+  cont.slab_free(&manager.vertex_skinning_slab, allocation.offset)
 }
 
 manager_free_vertices :: proc(
   manager: ^Manager,
   allocation: BufferAllocation,
 ) {
-  slab_free(&manager.vertex_slab, allocation.offset)
+  cont.slab_free(&manager.vertex_slab, allocation.offset)
 }
 
 manager_free_indices :: proc(manager: ^Manager, allocation: BufferAllocation) {
-  slab_free(&manager.index_slab, allocation.offset)
+  cont.slab_free(&manager.index_slab, allocation.offset)
 }
 
 create_animation_clip :: proc(
@@ -1722,7 +1727,7 @@ create_animation_clip :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, clip, ok = alloc(&manager.animation_clips)
+  handle, clip, ok = cont.alloc(&manager.animation_clips)
   if !ok {
     log.error("Failed to allocate animation clip")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY

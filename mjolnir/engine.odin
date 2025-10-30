@@ -1,5 +1,6 @@
 package mjolnir
 
+import cont "containers"
 import "animation"
 import "base:runtime"
 import "core:c"
@@ -347,7 +348,7 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 
 @(private = "file")
 get_main_camera :: proc(self: ^Engine) -> ^resources.Camera {
-  return resources.get(self.rm.cameras, self.render.main_camera)
+  return cont.get(self.rm.cameras, self.render.main_camera)
 }
 
 update_input :: proc(self: ^Engine) -> bool {
@@ -577,7 +578,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   world.begin_frame(&self.world, &self.rm)
   main_camera_handle := self.render.main_camera
-  main_camera := resources.get(self.rm.cameras, main_camera_handle)
+  main_camera := cont.get(self.rm.cameras, main_camera_handle)
   if main_camera == nil do return .ERROR_UNKNOWN
   for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue

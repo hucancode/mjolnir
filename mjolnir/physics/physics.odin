@@ -1,5 +1,6 @@
 package physics
 
+import cont "../containers"
 import "../geometry"
 import "../resources"
 import "../world"
@@ -29,8 +30,8 @@ init :: proc(
   world: ^PhysicsWorld,
   gravity := [3]f32{0, -9.81, 0},
 ) {
-  resources.pool_init(&world.bodies)
-  resources.pool_init(&world.colliders)
+  cont.init(&world.bodies)
+  cont.init(&world.colliders)
   world.contacts = make([dynamic]Contact)
   world.prev_contacts = make(map[u64]Contact)
   world.gravity = gravity
@@ -45,8 +46,8 @@ init :: proc(
 }
 
 destroy :: proc(world: ^PhysicsWorld) {
-  resources.pool_destroy(world.bodies, proc(body: ^RigidBody) {})
-  resources.pool_destroy(world.colliders, proc(col: ^Collider) {})
+  cont.destroy(world.bodies, proc(body: ^RigidBody) {})
+  cont.destroy(world.colliders, proc(col: ^Collider) {})
   delete(world.contacts)
   delete(world.prev_contacts)
   geometry.bvh_destroy(&world.spatial_index)
@@ -62,7 +63,7 @@ create_body :: proc(
   body: ^RigidBody,
   ok: bool,
 ) {
-  handle, body = resources.alloc(&world.bodies) or_return
+  handle, body = cont.alloc(&world.bodies) or_return
   body^ = rigid_body_create(node_handle, mass, is_static)
   ok = true
   return
@@ -72,11 +73,11 @@ destroy_body :: proc(
   world: ^PhysicsWorld,
   handle: resources.Handle,
 ) {
-  body, ok := resources.get(world.bodies, handle)
+  body, ok := cont.get(world.bodies, handle)
   if ok && body.collider_handle.generation != 0 {
-    resources.free(&world.colliders, body.collider_handle)
+    cont.free(&world.colliders, body.collider_handle)
   }
-  resources.free(&world.bodies, handle)
+  cont.free(&world.bodies, handle)
 }
 
 add_collider :: proc(
@@ -88,8 +89,8 @@ add_collider :: proc(
   col_ptr: ^Collider,
   ok: bool,
 ) {
-  body := resources.get(world.bodies, body_handle) or_return
-  handle, col_ptr = resources.alloc(&world.colliders) or_return
+  body := cont.get(world.bodies, body_handle) or_return
+  handle, col_ptr = cont.alloc(&world.colliders) or_return
   col_ptr^ = collider
   body.collider_handle = handle
   return handle, col_ptr, true
@@ -146,8 +147,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     if velocity_mag < ccd_threshold {
       continue
     }
-    node_a := resources.get(w.nodes, body_a.node_handle) or_continue
-    collider_a := resources.get(
+    node_a := cont.get(w.nodes, body_a.node_handle) or_continue
+    collider_a := cont.get(
       physics.colliders,
       body_a.collider_handle,
     ) or_continue
@@ -166,8 +167,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       if body_b.collider_handle.generation == 0 {
         continue
       }
-      node_b := resources.get(w.nodes, body_b.node_handle) or_continue
-      collider_b := resources.get(
+      node_b := cont.get(w.nodes, body_b.node_handle) or_continue
+      collider_b := cont.get(
         physics.colliders,
         body_b.collider_handle,
       ) or_continue
@@ -229,8 +230,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       if body.collider_handle.generation == 0 {
         continue
       }
-      node := resources.get(w.nodes, body.node_handle) or_continue
-      collider := resources.get(physics.colliders, body.collider_handle) or_continue
+      node := cont.get(w.nodes, body.node_handle) or_continue
+      collider := cont.get(physics.colliders, body.collider_handle) or_continue
       pos := node.transform.position
       bounds := collider_get_aabb(collider, pos)
       handle := resources.Handle {
@@ -249,8 +250,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         if !geometry.aabb_intersects(entry_a.bounds, entry_b.bounds) {
           continue
         }
-        body_a := resources.get(physics.bodies, entry_a.handle) or_continue
-        body_b := resources.get(physics.bodies, entry_b.handle) or_continue
+        body_a := cont.get(physics.bodies, entry_a.handle) or_continue
+        body_b := cont.get(physics.bodies, entry_b.handle) or_continue
         if body_a.is_static && body_b.is_static {
           continue
         }
@@ -263,13 +264,13 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
            body_b.collider_handle.generation == 0 {
           continue
         }
-        node_a := resources.get(w.nodes, body_a.node_handle) or_continue
-        node_b := resources.get(w.nodes, body_b.node_handle) or_continue
-        collider_a := resources.get(
+        node_a := cont.get(w.nodes, body_a.node_handle) or_continue
+        node_b := cont.get(w.nodes, body_b.node_handle) or_continue
+        collider_a := cont.get(
           physics.colliders,
           body_a.collider_handle,
         ) or_continue
-        collider_b := resources.get(
+        collider_b := cont.get(
           physics.colliders,
           body_b.collider_handle,
         ) or_continue
@@ -318,10 +319,10 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     }
     // Prepare all contacts (compute mass matrices and bias terms)
     for &contact in physics.contacts {
-      body_a := resources.get(physics.bodies, contact.body_a) or_continue
-      body_b := resources.get(physics.bodies, contact.body_b) or_continue
-      node_a := resources.get(w.nodes, body_a.node_handle) or_continue
-      node_b := resources.get(w.nodes, body_b.node_handle) or_continue
+      body_a := cont.get(physics.bodies, contact.body_a) or_continue
+      body_b := cont.get(physics.bodies, contact.body_b) or_continue
+      node_a := cont.get(w.nodes, body_a.node_handle) or_continue
+      node_b := cont.get(w.nodes, body_b.node_handle) or_continue
       pos_a := node_a.transform.position
       pos_b := node_b.transform.position
       prepare_contact(&contact, body_a, body_b, pos_a, pos_b, substep_dt)
@@ -329,10 +330,10 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     // Warmstart with cached impulses (only on first substep)
     if substep == 0 {
       for &contact in physics.contacts {
-        body_a := resources.get(physics.bodies, contact.body_a) or_continue
-        body_b := resources.get(physics.bodies, contact.body_b) or_continue
-        node_a := resources.get(w.nodes, body_a.node_handle) or_continue
-        node_b := resources.get(w.nodes, body_b.node_handle) or_continue
+        body_a := cont.get(physics.bodies, contact.body_a) or_continue
+        body_b := cont.get(physics.bodies, contact.body_b) or_continue
+        node_a := cont.get(w.nodes, body_a.node_handle) or_continue
+        node_b := cont.get(w.nodes, body_b.node_handle) or_continue
         pos_a := node_a.transform.position
         pos_b := node_b.transform.position
         warmstart_contact(&contact, body_a, body_b, pos_a, pos_b)
@@ -341,10 +342,10 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     // Solve constraints with bias (includes position correction + restitution)
     for _ in 0 ..< physics.iterations {
       for &contact in physics.contacts {
-        body_a := resources.get(physics.bodies, contact.body_a) or_continue
-        body_b := resources.get(physics.bodies, contact.body_b) or_continue
-        node_a := resources.get(w.nodes, body_a.node_handle) or_continue
-        node_b := resources.get(w.nodes, body_b.node_handle) or_continue
+        body_a := cont.get(physics.bodies, contact.body_a) or_continue
+        body_b := cont.get(physics.bodies, contact.body_b) or_continue
+        node_a := cont.get(w.nodes, body_a.node_handle) or_continue
+        node_b := cont.get(w.nodes, body_b.node_handle) or_continue
         pos_a := node_a.transform.position
         pos_b := node_b.transform.position
         resolve_contact(&contact, body_a, body_b, pos_a, pos_b)
@@ -355,10 +356,10 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     stabilization_iters :: 2
     for _ in 0 ..< stabilization_iters {
       for &contact in physics.contacts {
-        body_a := resources.get(physics.bodies, contact.body_a) or_continue
-        body_b := resources.get(physics.bodies, contact.body_b) or_continue
-        node_a := resources.get(w.nodes, body_a.node_handle) or_continue
-        node_b := resources.get(w.nodes, body_b.node_handle) or_continue
+        body_a := cont.get(physics.bodies, contact.body_a) or_continue
+        body_b := cont.get(physics.bodies, contact.body_b) or_continue
+        node_a := cont.get(w.nodes, body_a.node_handle) or_continue
+        node_b := cont.get(w.nodes, body_b.node_handle) or_continue
         pos_a := node_a.transform.position
         pos_b := node_b.transform.position
         // Solve without bias - only enforce zero relative velocity at contact
@@ -377,7 +378,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       if idx < len(ccd_handled) && ccd_handled[idx] {
         continue
       }
-      node := resources.get(w.nodes, body.node_handle) or_continue
+      node := cont.get(w.nodes, body.node_handle) or_continue
       // Update position using substep timestep
       vel := body.velocity * substep_dt
       geometry.transform_translate_by(&node.transform, vel.x, vel.y, vel.z)
@@ -439,7 +440,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     if body.is_static || body.is_kinematic {
       continue
     }
-    node := resources.get(w.nodes, body.node_handle) or_continue
+    node := cont.get(w.nodes, body.node_handle) or_continue
     if node.transform.position.y < KILL_Y {
       handle := resources.Handle {
         index      = u32(idx),
@@ -451,8 +452,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   // Remove killed bodies
   for handle in bodies_to_kill {
     defer destroy_body(physics, handle)
-    body := resources.get(physics.bodies, handle) or_continue
-    node, _ := resources.get(w.nodes, body.node_handle)
+    body := cont.get(physics.bodies, handle) or_continue
+    node, _ := cont.get(w.nodes, body.node_handle)
     log.infof(
       "Removing body at y=%.2f (below KILL_Y=%.2f)",
       node.transform.position.y,

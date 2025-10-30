@@ -1,5 +1,6 @@
 package resources
 
+import cont "../containers"
 import "../geometry"
 import "../gpu"
 import "core:log"
@@ -51,7 +52,7 @@ create_light :: proc(
   Handle,
   bool,
 ) {
-  handle, light, ok := alloc(&manager.lights)
+  handle, light, ok := cont.alloc(&manager.lights)
   if !ok {
     log.error("Failed to allocate light: pool capacity reached")
     return Handle{}, false
@@ -70,10 +71,10 @@ create_light :: proc(
     #partial switch light_type {
     case .POINT:
       // Point lights use spherical cameras for omnidirectional shadows
-      cam_handle, spherical_cam, cam_ok := alloc(&manager.spherical_cameras)
+      cam_handle, spherical_cam, cam_ok := cont.alloc(&manager.spherical_cameras)
       if !cam_ok {
         log.error("Failed to allocate spherical camera for point light")
-        free(&manager.lights, handle)
+        cont.free(&manager.lights, handle)
         return Handle{}, false
       }
       init_result := spherical_camera_init(
@@ -90,18 +91,18 @@ create_light :: proc(
       )
       if init_result != .SUCCESS {
         log.error("Failed to initialize spherical camera for point light")
-        free(&manager.spherical_cameras, cam_handle)
-        free(&manager.lights, handle)
+        cont.free(&manager.spherical_cameras, cam_handle)
+        cont.free(&manager.lights, handle)
         return Handle{}, false
       }
       light.camera_handle = cam_handle
       light.camera_index = cam_handle.index
     case .DIRECTIONAL, .SPOT:
       // Directional and spot lights use regular cameras
-      cam_handle, cam, cam_ok := alloc(&manager.cameras)
+      cam_handle, cam, cam_ok := cont.alloc(&manager.cameras)
       if !cam_ok {
         log.error("Failed to allocate camera for directional/spot light")
-        free(&manager.lights, handle)
+        cont.free(&manager.lights, handle)
         return Handle{}, false
       }
       // Camera parameters differ by light type
@@ -126,8 +127,8 @@ create_light :: proc(
       )
       if init_result != .SUCCESS {
         log.error("Failed to initialize camera for directional/spot light")
-        free(&manager.cameras, cam_handle)
-        free(&manager.lights, handle)
+        cont.free(&manager.cameras, cam_handle)
+        cont.free(&manager.lights, handle)
         return Handle{}, false
       }
       light.camera_handle = cam_handle
@@ -149,7 +150,7 @@ destroy_light :: proc(
   gctx: ^gpu.GPUContext,
   handle: Handle,
 ) -> bool {
-  light, light_ok := get(manager.lights, handle)
+  light, light_ok := cont.get(manager.lights, handle)
   if !light_ok {
     return false
   }
@@ -158,25 +159,25 @@ destroy_light :: proc(
     #partial switch light.type {
     case .POINT:
       // Point lights use spherical cameras
-      if cam, cam_ok := get(manager.spherical_cameras, light.camera_handle);
+      if cam, cam_ok := cont.get(manager.spherical_cameras, light.camera_handle);
          cam_ok {
         spherical_camera_destroy(cam, gctx.device, gctx.command_pool, manager)
       }
-      free(&manager.spherical_cameras, light.camera_handle)
+      cont.free(&manager.spherical_cameras, light.camera_handle)
     case .DIRECTIONAL, .SPOT:
       // Directional and spot lights use regular cameras
-      if cam, cam_ok := get(manager.cameras, light.camera_handle); cam_ok {
+      if cam, cam_ok := cont.get(manager.cameras, light.camera_handle); cam_ok {
         camera_destroy(cam, gctx.device, gctx.command_pool, manager)
       }
-      free(&manager.cameras, light.camera_handle)
+      cont.free(&manager.cameras, light.camera_handle)
     }
   }
-  _, freed := free(&manager.lights, handle)
+  _, freed := cont.free(&manager.lights, handle)
   return freed
 }
 
 update_light_gpu_data :: proc(manager: ^Manager, handle: Handle) {
-  if light, ok := get(manager.lights, handle); ok {
+  if light, ok := cont.get(manager.lights, handle); ok {
     gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
@@ -201,14 +202,14 @@ update_light_shadow_camera_transforms :: proc(
       #partial switch light.type {
       case .POINT:
         // Point lights use spherical cameras
-        spherical_cam := get(manager.spherical_cameras, light.camera_handle)
+        spherical_cam := cont.get(manager.spherical_cameras, light.camera_handle)
         if spherical_cam != nil {
           spherical_cam.center = light_position
           shadow_map_id = spherical_cam.depth_cube[frame_index].index
         }
       case .DIRECTIONAL:
         // TODO: Implement directional light later
-        cam := get(manager.cameras, light.camera_handle)
+        cam := cont.get(manager.cameras, light.camera_handle)
         if cam != nil {
           camera_position := light_position - light_direction * 50.0 // Far back
           target_position := light_position
@@ -216,7 +217,7 @@ update_light_shadow_camera_transforms :: proc(
           shadow_map_id = camera_get_attachment(cam, .DEPTH, frame_index).index
         }
       case .SPOT:
-        cam := get(manager.cameras, light.camera_handle)
+        cam := cont.get(manager.cameras, light.camera_handle)
         if cam != nil {
           target_position := light_position + light_direction
           camera_look_at(cam, light_position, target_position)

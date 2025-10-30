@@ -1,5 +1,6 @@
 package resources
 
+import cont "../containers"
 import "../gpu"
 import "core:log"
 import "core:math"
@@ -232,7 +233,7 @@ create_sprite :: proc(
   ok: bool,
 ) #optional_ok {
   sprite: ^Sprite
-  handle, sprite, ok = alloc(&manager.sprites)
+  handle, sprite, ok = cont.alloc(&manager.sprites)
   if !ok {
     log.error("Failed to allocate sprite: pool capacity reached")
     return {}, false
@@ -249,12 +250,12 @@ create_sprite :: proc(
   sprite.animation = animation
   res := sprite_write_to_gpu(manager, handle, sprite)
   if res != .SUCCESS {
-    free(&manager.sprites, handle)
+    cont.free(&manager.sprites, handle)
     return {}, false
   }
   return handle, true
 }
 
 destroy_sprite_handle :: proc(manager: ^Manager, handle: Handle) {
-  free(&manager.sprites, handle)
+  cont.free(&manager.sprites, handle)
 }

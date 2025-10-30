@@ -1,5 +1,6 @@
 package navigation_renderer
 
+import cont "../../containers"
 import "../../gpu"
 import "../../resources"
 import "core:log"
@@ -135,13 +136,13 @@ begin_pass :: proc(
   rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
-  color_texture := resources.get(
+  color_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
-  depth_texture := resources.get(
+  depth_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )

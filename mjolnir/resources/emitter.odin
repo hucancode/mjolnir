@@ -1,7 +1,8 @@
 package resources
 
-import vk "vendor:vulkan"
+import cont "../containers"
 import "../gpu"
+import vk "vendor:vulkan"
 
 EmitterData :: struct {
   initial_velocity:  [4]f32,
@@ -37,7 +38,7 @@ create_emitter_handle :: proc(
   node_handle: Handle,
   config: Emitter,
 ) -> (Handle, bool) {
-  handle, emitter, ok := alloc(&manager.emitters)
+  handle, emitter, ok := cont.alloc(&manager.emitters)
   if !ok do return Handle{}, false
   emitter^ = config
   emitter.node_handle = node_handle
@@ -49,7 +50,7 @@ destroy_emitter_handle :: proc(
   manager: ^Manager,
   handle: Handle,
 ) -> bool {
-  _, freed := free(&manager.emitters, handle)
+  _, freed := cont.free(&manager.emitters, handle)
   return freed
 }
 

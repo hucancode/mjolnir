@@ -1,5 +1,6 @@
 package transparency
 
+import cont "../../containers"
 import "../../geometry"
 import "../../gpu"
 import "../../resources"
@@ -461,9 +462,9 @@ begin_pass :: proc(
   rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
-  color_texture := resources.get(
+  color_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
@@ -471,7 +472,7 @@ begin_pass :: proc(
     log.error("Transparent lighting missing color attachment")
     return
   }
-  depth_texture := resources.get(
+  depth_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
@@ -598,7 +599,7 @@ begin_record :: proc(
   command_buffer: vk.CommandBuffer,
   ret: vk.Result,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil {
     ret = .ERROR_UNKNOWN
     return

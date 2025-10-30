@@ -1,7 +1,8 @@
 package resources
 
-import vk "vendor:vulkan"
+import cont "../containers"
 import "../gpu"
+import vk "vendor:vulkan"
 
 ForceFieldData :: struct {
   tangent_strength: f32,
@@ -23,7 +24,7 @@ create_forcefield_handle :: proc(
   node_handle: Handle,
   config: ForceField,
 ) -> (Handle, bool) {
-  handle, forcefield, ok := alloc(&manager.forcefields)
+  handle, forcefield, ok := cont.alloc(&manager.forcefields)
   if !ok do return Handle{}, false
   forcefield^ = config
   forcefield.node_handle = node_handle
@@ -35,7 +36,7 @@ destroy_forcefield_handle :: proc(
   manager: ^Manager,
   handle: Handle,
 ) -> bool {
-  _, freed := free(&manager.forcefields, handle)
+  _, freed := cont.free(&manager.forcefields, handle)
   return freed
 }
 

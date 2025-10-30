@@ -1,5 +1,6 @@
 package world
 
+import cont "../containers"
 import anim "../animation"
 import "../geometry"
 import "../gpu"
@@ -573,7 +574,7 @@ process_skins :: proc(
         break
       }
     }
-    matrix_buffer_offset := resources.slab_alloc(
+    matrix_buffer_offset := cont.slab_alloc(
       &rm.bone_matrix_slab,
       u32(len(bones)),
     )
@@ -632,7 +633,7 @@ construct_scene :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := resources.alloc(&world.nodes) or_continue
+    node_handle, node := cont.alloc(&world.nodes) or_continue
     init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
@@ -661,7 +662,7 @@ construct_scene :: proc(
       if geometry_data, found := geometry_cache[gltf_node.mesh]; found {
         if gltf_node.skin != nil {
           if skin_data, skin_found := skin_cache[gltf_node.skin]; skin_found {
-            mesh_handle, mesh, mesh_ok := resources.alloc(&rm.meshes)
+            mesh_handle, mesh, mesh_ok := cont.alloc(&rm.meshes)
             if !mesh_ok {
               log.error("Failed to allocate mesh for skinned mesh")
               continue
@@ -675,7 +676,7 @@ construct_scene :: proc(
             if init_result != vk.Result.SUCCESS {
               log.error("Failed to initialize skinned mesh")
               resources.mesh_destroy(mesh, gctx, rm)
-              resources.free(&rm.meshes, mesh_handle)
+              cont.free(&rm.meshes, mesh_handle)
               continue
             }
             skinning, _ := &mesh.skinning.?
@@ -691,7 +692,7 @@ construct_scene :: proc(
             if gpu_result != vk.Result.SUCCESS {
               log.error("Failed to write skinned mesh data to GPU")
               resources.mesh_destroy(mesh, gctx, rm)
-              resources.free(&rm.meshes, mesh_handle)
+              cont.free(&rm.meshes, mesh_handle)
               continue
             }
             node.attachment = MeshAttachment {
@@ -754,11 +755,11 @@ load_animations :: proc(
   gltf_skin: ^cgltf.skin,
   mesh_handle: resources.Handle,
 ) -> bool {
-  mesh := resources.get(rm.meshes, mesh_handle)
+  mesh := cont.get(rm.meshes, mesh_handle)
   if mesh == nil do return false
   skinning := &mesh.skinning.?
   for gltf_anim, i in gltf_data.animations {
-    _, clip, clip_ok := resources.alloc(&rm.animation_clips)
+    _, clip, clip_ok := cont.alloc(&rm.animation_clips)
     if !clip_ok {
       log.error("Failed to allocate animation clip")
       continue

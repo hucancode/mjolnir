@@ -1,5 +1,6 @@
 package resources
 
+import cont "../containers"
 import "../gpu"
 import "core:c"
 import "core:log"
@@ -20,7 +21,7 @@ create_empty_texture_2d :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = alloc(&manager.image_2d_buffers)
+  handle, texture, ok = cont.alloc(&manager.image_2d_buffers)
   if !ok {
     log.error("Failed to allocate 2D texture: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -45,7 +46,7 @@ create_empty_texture_cube :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = alloc(&manager.image_cube_buffers)
+  handle, texture, ok = cont.alloc(&manager.image_cube_buffers)
   if !ok {
     log.error("Failed to allocate cube texture: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -84,7 +85,7 @@ create_texture_from_path :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = alloc(&manager.image_2d_buffers)
+  handle, texture, ok = cont.alloc(&manager.image_2d_buffers)
   if !ok {
     log.error("Failed to allocate texture from path: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -161,7 +162,7 @@ create_texture_from_pixels :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = alloc(&manager.image_2d_buffers)
+  handle, texture, ok = cont.alloc(&manager.image_2d_buffers)
   if !ok {
     log.error("Failed to allocate texture from pixels: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -206,7 +207,7 @@ create_texture_from_data :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = alloc(&manager.image_2d_buffers)
+  handle, texture, ok = cont.alloc(&manager.image_2d_buffers)
   if !ok {
     log.error("Failed to allocate texture from data: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY

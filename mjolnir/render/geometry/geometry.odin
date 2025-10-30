@@ -1,5 +1,6 @@
 package geometry_pass
 
+import cont "../../containers"
 import "../../geometry"
 import "../../gpu"
 import "../../resources"
@@ -154,30 +155,30 @@ begin_pass :: proc(
   rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
-  position_texture := resources.get(
+  position_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .POSITION, frame_index),
   )
-  normal_texture := resources.get(
+  normal_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .NORMAL, frame_index),
   )
-  albedo_texture := resources.get(
+  albedo_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .ALBEDO, frame_index),
   )
-  metallic_roughness_texture := resources.get(
+  metallic_roughness_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index),
   )
-  emissive_texture := resources.get(
+  emissive_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
   )
-  final_texture := resources.get(
+  final_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
@@ -292,7 +293,7 @@ begin_pass :: proc(
     len(image_barriers),
     raw_data(image_barriers[:]),
   )
-  depth_texture := resources.get(
+  depth_texture := cont.get(
     rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
@@ -383,30 +384,30 @@ end_pass :: proc(
   frame_index: u32,
 ) {
   vk.CmdEndRendering(command_buffer)
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting and post-processing
-  position_texture := resources.get(
+  position_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .POSITION, frame_index),
   )
-  normal_texture := resources.get(
+  normal_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .NORMAL, frame_index),
   )
-  albedo_texture := resources.get(
+  albedo_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .ALBEDO, frame_index),
   )
-  metallic_roughness_texture := resources.get(
+  metallic_roughness_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index),
   )
-  emissive_texture := resources.get(
+  emissive_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
   )
-  depth_texture := resources.get(
+  depth_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
@@ -592,7 +593,7 @@ begin_record :: proc(
   command_buffer: vk.CommandBuffer,
   ret: vk.Result,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil {
     ret = .ERROR_UNKNOWN
     return

@@ -1,5 +1,6 @@
 package resources
 
+import cont "../containers"
 import "../geometry"
 import "../gpu"
 import "core:log"
@@ -336,7 +337,7 @@ camera_destroy :: proc(
   for attachment_type in AttachmentType {
     for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
       handle := camera.attachments[attachment_type][frame]
-      if item, freed := free(&manager.image_2d_buffers, handle); freed {
+      if item, freed := cont.free(&manager.image_2d_buffers, handle); freed {
         gpu.image_destroy(device, item)
       }
     }
@@ -377,7 +378,7 @@ camera_destroy :: proc(
     gpu.mutable_buffer_destroy(device, &camera.sprite_draw_count[frame])
     gpu.mutable_buffer_destroy(device, &camera.sprite_draw_commands[frame])
     // Free depth pyramid texture
-    if pyramid_item, freed := free(
+    if pyramid_item, freed := cont.free(
       &manager.image_2d_buffers,
       camera.depth_pyramid[frame].texture,
     ); freed {
@@ -588,7 +589,7 @@ camera_resize :: proc(
       nil,
     )
     vk.DestroySampler(gctx.device, p.sampler, nil)
-    if pyramid_item, freed := free(
+    if pyramid_item, freed := cont.free(
       &manager.image_2d_buffers,
       p.texture,
     ); freed {
@@ -599,7 +600,7 @@ camera_resize :: proc(
   // Destroy attachment textures
   for attachment_type in AttachmentType {
     for &handle in camera.attachments[attachment_type] {
-      if item, freed := free(&manager.image_2d_buffers, handle); freed {
+      if item, freed := cont.free(&manager.image_2d_buffers, handle); freed {
         gpu.image_destroy(gctx.device, item)
       }
       handle = {}
@@ -852,7 +853,7 @@ create_camera_depth_pyramid :: proc(
 ) -> vk.Result {
   // Get depth texture from attachments (already created in camera_init)
   depth_handle := camera.attachments[.DEPTH][frame_index]
-  depth_texture := get(manager.image_2d_buffers, depth_handle)
+  depth_texture := cont.get(manager.image_2d_buffers, depth_handle)
   log.debugf(
     "Using depth texture at bindless index %d for frame %d",
     depth_handle.index,
@@ -865,7 +866,7 @@ create_camera_depth_pyramid :: proc(
   mip_levels :=
     u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
   // Create depth pyramid texture with mip levels using new Image API
-  pyramid_handle, pyramid_texture, pyramid_ok := alloc(
+  pyramid_handle, pyramid_texture, pyramid_ok := cont.alloc(
     &manager.image_2d_buffers,
   )
   if !pyramid_ok {
@@ -1028,7 +1029,7 @@ camera_update_depth_reduce_descriptor_set :: proc(
   // pyramid[N] mip 0 reads from depth[N-1]
   // This allows compute to build pyramid[N] while graphics renders depth[N]
   prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
-  prev_depth_texture := get(
+  prev_depth_texture := cont.get(
     manager.image_2d_buffers,
     camera.attachments[.DEPTH][prev_frame],
   )

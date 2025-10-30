@@ -1,5 +1,6 @@
 package resources
 
+import cont "../containers"
 import "../gpu"
 import "core:log"
 import "core:math"
@@ -88,7 +89,7 @@ spherical_camera_destroy :: proc(
   manager: ^Manager,
 ) {
   for v in camera.depth_cube {
-    if item, freed := free(&manager.image_cube_buffers, v); freed {
+    if item, freed := cont.free(&manager.image_cube_buffers, v); freed {
       gpu.cube_depth_texture_destroy(device, item)
     }
   }

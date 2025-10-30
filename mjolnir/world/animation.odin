@@ -1,5 +1,6 @@
 package world
 
+import cont "../containers"
 import anim "../animation"
 import "../geometry"
 import "../gpu"
@@ -34,7 +35,7 @@ update_skeletal_animations :: proc(
 		clip := anim_instance.clip
 		if clip == nil do continue
 
-		mesh := resources.get(rm.meshes, mesh_attachment.handle) or_continue
+		mesh := cont.get(rm.meshes, mesh_attachment.handle) or_continue
 		mesh_skinning, mesh_has_skin := mesh.skinning.?
 		if !mesh_has_skin do continue
 

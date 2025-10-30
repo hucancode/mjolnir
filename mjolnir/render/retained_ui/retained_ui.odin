@@ -1,5 +1,6 @@
 package retained_ui
 
+import cont "../../containers"
 import gpu "../../gpu"
 import resources "../../resources"
 import "core:log"
@@ -237,7 +238,7 @@ init :: proc(
   dpi_scale: f32 = 1.0,
   rm: ^resources.Manager,
 ) -> vk.Result {
-  resources.pool_init(&self.widgets, 1000)
+  cont.init(&self.widgets, 1000)
   self.root_widgets = make([dynamic]WidgetHandle, 0, 100)
   self.dirty_widgets = make([dynamic]WidgetHandle, 0, 100)
   for &v in self.draw_lists {
@@ -538,7 +539,7 @@ shutdown :: proc(self: ^Manager, device: vk.Device) {
   gpu.mutable_buffer_destroy(device, &self.proj_buffer)
   delete(self.root_widgets)
   delete(self.dirty_widgets)
-  resources.pool_destroy(self.widgets, widget_deinit)
+  cont.destroy(self.widgets, widget_deinit)
   vk.DestroyPipeline(device, self.pipeline, nil)
   vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(device, self.projection_layout, nil)
@@ -584,7 +585,7 @@ create_widget :: proc(
   widget: ^Widget,
   ok: bool,
 ) {
-  handle, widget, ok = resources.alloc(&self.widgets)
+  handle, widget, ok = cont.alloc(&self.widgets)
   if !ok do return
   widget.type = type
   widget.parent = parent
@@ -595,9 +596,9 @@ create_widget :: proc(
   widget.fg_color = {0, 0, 0, 255}
   widget.border_color = {100, 100, 100, 255}
   widget.border_width = 1.0
-  if parent_widget, found := resources.get(self.widgets, parent); found {
+  if parent_widget, found := cont.get(self.widgets, parent); found {
     if parent_widget.last_child.index != 0 {
-      last_child, _ := resources.get(self.widgets, parent_widget.last_child)
+      last_child, _ := cont.get(self.widgets, parent_widget.last_child)
       last_child.next_sibling = handle
       widget.prev_sibling = parent_widget.last_child
     } else {
@@ -612,7 +613,7 @@ create_widget :: proc(
 }
 
 mark_dirty :: proc(self: ^Manager, handle: WidgetHandle) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found do return
   if !widget.dirty {
     widget.dirty = true
@@ -638,7 +639,7 @@ rebuild_draw_lists :: proc(self: ^Manager) {
   }
   // Rebuild only dirty widgets
   for dirty_handle in self.dirty_widgets {
-    widget, found := resources.get(self.widgets, dirty_handle)
+    widget, found := cont.get(self.widgets, dirty_handle)
     if !found do continue
     if widget.visible {
       build_widget_draw_commands(self, dirty_handle)
@@ -662,7 +663,7 @@ remove_widget_commands :: proc(draw_list: ^DrawList, handle: WidgetHandle) {
 }
 
 build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found || !widget.visible do return
   for &v in self.draw_lists {
     switch widget.type {
@@ -685,7 +686,7 @@ build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
     }
   }
   // Re-fetch widget pointer in case pool was modified
-  widget, found = resources.get(self.widgets, handle)
+  widget, found = cont.get(self.widgets, handle)
   if found {
     widget.dirty = false
   }
@@ -693,7 +694,7 @@ build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
 
 // Build draw commands for entire widget tree (used on initial creation)
 build_widget_tree_commands :: proc(self: ^Manager, handle: WidgetHandle) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found || !widget.visible do return
   // Build commands for this widget
   build_widget_draw_commands(self, handle)
@@ -701,7 +702,7 @@ build_widget_tree_commands :: proc(self: ^Manager, handle: WidgetHandle) {
   child := widget.first_child
   for child.index != 0 {
     build_widget_tree_commands(self, child)
-    child_widget, _ := resources.get(self.widgets, child)
+    child_widget, _ := cont.get(self.widgets, child)
     child = child_widget.next_sibling
   }
 }
@@ -1111,7 +1112,7 @@ update_input :: proc(self: ^Manager, mouse_x, mouse_y: f32, mouse_down: bool) {
 input_text :: proc(self: ^Manager, text: string) {
   // Only process text input if there's a focused widget
   if self.focused_widget.index == 0 do return
-  widget, found := resources.get(self.widgets, self.focused_widget)
+  widget, found := cont.get(self.widgets, self.focused_widget)
   if !found || widget.type != .TEXT_BOX do return
   data := &widget.data.(TextBoxData)
   if !data.focused do return
@@ -1132,7 +1133,7 @@ input_text :: proc(self: ^Manager, text: string) {
 input_key :: proc(self: ^Manager, key: int, action: int) {
   // Only process key input if there's a focused widget
   if self.focused_widget.index == 0 do return
-  widget, found := resources.get(self.widgets, self.focused_widget)
+  widget, found := cont.get(self.widgets, self.focused_widget)
   if !found || widget.type != .TEXT_BOX do return
   data := &widget.data.(TextBoxData)
   if !data.focused do return
@@ -1152,7 +1153,7 @@ input_key :: proc(self: ^Manager, key: int, action: int) {
 }
 
 deselect_radio_group :: proc(self: ^Manager, handle: WidgetHandle, group_id: u32, exclude_handle: WidgetHandle) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found do return
   if widget.type == .RADIO_BUTTON && handle != exclude_handle {
     data := &widget.data.(RadioButtonData)
@@ -1165,13 +1166,13 @@ deselect_radio_group :: proc(self: ^Manager, handle: WidgetHandle, group_id: u32
   child := widget.first_child
   for child.index != 0 {
     deselect_radio_group(self, child, group_id, exclude_handle)
-    child_widget, _ := resources.get(self.widgets, child)
+    child_widget, _ := cont.get(self.widgets, child)
     child = child_widget.next_sibling
   }
 }
 
 update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
-  widget, found := resources.get(self.widgets, handle)
+  widget, found := cont.get(self.widgets, handle)
   if !found || !widget.visible || !widget.enabled do return
   mx, my := self.mouse_pos.x, self.mouse_pos.y
   wx, wy := widget.position.x, widget.position.y
@@ -1238,7 +1239,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
     if self.mouse_clicked {
       // Clear previous focus
       if self.focused_widget.index != 0 && self.focused_widget != handle {
-        if old_focused_widget, ok := resources.get(self.widgets, self.focused_widget); ok {
+        if old_focused_widget, ok := cont.get(self.widgets, self.focused_widget); ok {
           if old_data, is_textbox := &old_focused_widget.data.(TextBoxData); is_textbox {
             old_data.focused = false
             mark_dirty(self, self.focused_widget)
@@ -1287,7 +1288,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
               callback(user_data, selected_index)
             }
             // Re-fetch widget pointer after callback
-            widget, found = resources.get(self.widgets, handle)
+            widget, found = cont.get(self.widgets, handle)
             if !found do return
             data = &widget.data.(ComboBoxData)
             break
@@ -1307,7 +1308,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
   child := widget.first_child
   for child.index != 0 {
     update_widget_input(self, child)
-    child_widget, _ := resources.get(self.widgets, child)
+    child_widget, _ := cont.get(self.widgets, child)
     child = child_widget.next_sibling
   }
 }

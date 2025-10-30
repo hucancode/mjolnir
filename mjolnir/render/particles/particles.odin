@@ -1,5 +1,6 @@
 package particles
 
+import cont "../../containers"
 import "../../gpu"
 import "../../resources"
 import "../shared"
@@ -887,7 +888,7 @@ begin_pass :: proc(
   rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   // Memory barrier to ensure compute results are visible before rendering
   barrier := vk.BufferMemoryBarrier {
@@ -911,7 +912,7 @@ begin_pass :: proc(
     0,
     nil, // imageMemoryBarrierCount, pImageMemoryBarriers
   )
-  color_texture := resources.get(
+  color_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
@@ -919,7 +920,7 @@ begin_pass :: proc(
     log.error("Particle renderer missing color attachment")
     return
   }
-  depth_texture := resources.get(
+  depth_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )

@@ -1,5 +1,6 @@
 package post_process
 
+import cont "../../containers"
 import "../../gpu"
 import "../../resources"
 import "../shared"
@@ -550,7 +551,7 @@ destroy_images :: proc(
   rm: ^resources.Manager,
 ) {
   for handle in self.images {
-    if item, freed := resources.free(&rm.image_2d_buffers, handle); freed {
+    if item, freed := cont.free(&rm.image_2d_buffers, handle); freed {
       gpu.image_destroy(device, item)
     }
   }
@@ -618,7 +619,7 @@ render :: proc(
   rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   for effect, i in self.effect_stack {
     is_first := i == 0
@@ -646,7 +647,7 @@ render :: proc(
     // Pass N: image[(N+1)%2] -> swapchain (src: image[(N-1)%2], dst: swapchain)
     dst_view := output_view
     if !is_last {
-      dst_texture := resources.get(
+      dst_texture := cont.get(
         rm.image_2d_buffers,
         self.images[dst_image_idx],
       )
@@ -691,7 +692,7 @@ render :: proc(
     }
     if !is_first {
       src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
-      src_texture := resources.get(
+      src_texture := cont.get(
         rm.image_2d_buffers,
         self.images[src_texture_idx],
       )
@@ -952,10 +953,10 @@ begin_record :: proc(
       pInheritanceInfo = &inheritance,
     },
   ) or_return
-  camera := resources.get(rm.cameras, camera_handle)
+  camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return command_buffer, .ERROR_UNKNOWN
   // Transition final image to shader read optimal
-  if final_image, ok := resources.get(
+  if final_image, ok := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   ); ok {

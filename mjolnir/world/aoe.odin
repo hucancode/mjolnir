@@ -1,5 +1,6 @@
 package world
 
+import cont "../containers"
 import "../geometry"
 import "../resources"
 import "core:math"
@@ -193,7 +194,7 @@ process_octree_updates :: proc(world: ^World, rm: ^resources.Manager) {
   if !world.octree_updates_enabled do return
   if len(world.octree_dirty_set) == 0 do return
   for handle, _ in world.octree_dirty_set {
-    node := resources.get(world.nodes, handle)
+    node := cont.get(world.nodes, handle)
     // Case 1: Node was deleted - remove from octree and entry map
     if node == nil || node.pending_deletion {
       if old_entry, exists := world.octree_entry_map[handle]; exists {
@@ -208,7 +209,7 @@ process_octree_updates :: proc(world: ^World, rm: ^resources.Manager) {
     new_bounds := geometry.Aabb{}
     if .MESH in new_tags && rm != nil {
       if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-        if mesh := resources.get(rm.meshes, mesh_attachment.handle); mesh != nil {
+        if mesh := cont.get(rm.meshes, mesh_attachment.handle); mesh != nil {
           local_bounds := geometry.Aabb{min = mesh.aabb_min, max = mesh.aabb_max}
           new_bounds = geometry.aabb_transform(local_bounds, node.transform.world_matrix)
         }
