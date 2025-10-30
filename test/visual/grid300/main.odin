@@ -10,13 +10,8 @@ main :: proc() {
 	context.logger = log.create_console_logger()
 	engine := new(mjolnir.Engine)
 	engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-		mat, _ := mjolnir.create_material(
-			engine,
-			type = resources.MaterialType.UNLIT,
-			base_color_factor = {0.18, 0.82, 0.36, 1.0},
-		)
-		cube := geometry.make_cube()
-		mesh, _ := mjolnir.create_mesh(engine, cube)
+		mat := engine.rm.builtin_materials[resources.Color.GREEN]
+		mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
 		for z in 0 ..< 300 {
 			for x in 0 ..< 300 {
 				_, node := mjolnir.spawn(engine, world.MeshAttachment{handle = mesh, material = mat}) or_continue

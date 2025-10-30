@@ -11,14 +11,8 @@ main :: proc() {
 	context.logger = log.create_console_logger()
 	engine := new(mjolnir.Engine)
 	engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-		mat, _ := mjolnir.create_material(
-			engine,
-			type = resources.MaterialType.UNLIT,
-			base_color_factor = {1.0, 0.45, 0.15, 1.0},
-		)
-		cube := geometry.make_cube()
-		for &v in cube.vertices do v.position *= 0.5
-		mesh, _ := mjolnir.create_mesh(engine, cube)
+		mat := engine.rm.builtin_materials[resources.Color.RED]
+		mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
 		_, node, _ := mjolnir.spawn(engine, world.MeshAttachment{handle = mesh, material = mat})
 		mjolnir.translate(node, 0, 0, 0)
 		camera := mjolnir.get_main_camera(engine)

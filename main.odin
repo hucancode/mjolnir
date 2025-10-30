@@ -33,62 +33,58 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Setup function called!")
   set_visibility_stats(engine, false)
   // engine.debug_ui_enabled = true
-  plain_material_handle, plain_material_ok := create_material(engine)
-  cube_geom := make_cube()
-  cube_mesh_handle, cube_mesh_ok := create_mesh(engine, cube_geom)
-  sphere_mesh_handle, sphere_mesh_ok := create_mesh(engine, make_sphere())
-  cone_mesh_handle, cone_mesh_ok := create_mesh(engine, make_cone())
+  plain_material_handle :=
+    engine.rm.builtin_materials[resources.Color.WHITE]
+  cube_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.CUBE]
+  sphere_mesh_handle :=
+    engine.rm.builtin_meshes[resources.Primitive.SPHERE]
+  cone_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.CONE]
   if true {
     log.info("spawning cubes in a grid")
     space: f32 = 4.1
     size: f32 = 0.3
     nx, ny, nz := 240, 1, 240
-    mat_handle, mat_ok := create_material(
-      engine,
-      metallic_value = 0.5,
-      roughness_value = 0.8,
-    )
-    if cube_mesh_ok && sphere_mesh_ok && cone_mesh_ok && mat_ok {
-      spawn_loop: for x in 0 ..< nx {
-        for y in 0 ..< ny {
-          for z in 0 ..< nz {
-            world_x := (f32(x) - f32(nx) * 0.5) * space
-            world_y := (f32(y) - f32(ny) * 0.5) * space + 2.25
-            world_z := (f32(z) - f32(nz) * 0.5) * space
-            node_handle: resources.Handle
-            node_ok := false
-            if x % 3 == 0 {
-              node_handle, _, node_ok = spawn(
-                engine,
-                world.MeshAttachment {
-                  handle = cube_mesh_handle,
-                  material = mat_handle,
-                  cast_shadow = true,
-                },
-              )
-            } else if x % 3 == 1 {
-              node_handle, _, node_ok = spawn(
-                engine,
-                world.MeshAttachment {
-                  handle = cone_mesh_handle,
-                  material = mat_handle,
-                  cast_shadow = true,
-                },
-              )
-            } else {
-              node_handle, _, node_ok = spawn(
-                engine,
-                world.MeshAttachment {
-                  handle = sphere_mesh_handle,
-                  material = mat_handle,
-                  cast_shadow = true,
-                },
-              )
-            }
-            if !node_ok do break spawn_loop
-            translate(engine, node_handle, world_x, world_y, world_z)
-            scale(engine, node_handle, size)
+    mat_handle :=
+      engine.rm.builtin_materials[resources.Color.CYAN]
+    spawn_loop: for x in 0 ..< nx {
+      for y in 0 ..< ny {
+        for z in 0 ..< nz {
+          world_x := (f32(x) - f32(nx) * 0.5) * space
+          world_y := (f32(y) - f32(ny) * 0.5) * space + 2.25
+          world_z := (f32(z) - f32(nz) * 0.5) * space
+          node_handle: resources.Handle
+          node_ok := false
+          if x % 3 == 0 {
+            node_handle, _, node_ok = spawn(
+              engine,
+              world.MeshAttachment {
+                handle = cube_mesh_handle,
+                material = mat_handle,
+                cast_shadow = true,
+              },
+            )
+          } else if x % 3 == 1 {
+            node_handle, _, node_ok = spawn(
+              engine,
+              world.MeshAttachment {
+                handle = cone_mesh_handle,
+                material = mat_handle,
+                cast_shadow = true,
+              },
+            )
+          } else {
+            node_handle, _, node_ok = spawn(
+              engine,
+              world.MeshAttachment {
+                handle = sphere_mesh_handle,
+                material = mat_handle,
+                cast_shadow = true,
+              },
+            )
           }
+          if !node_ok do break spawn_loop
+          translate(engine, node_handle, world_x, world_y, world_z)
+          scale(engine, node_handle, size)
         }
       }
     }
@@ -107,10 +103,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
         albedo_handle = brick_albedo_handle,
       )
     }
-    ground_mesh_handle, ground_mesh_ok := create_mesh(
-      engine,
-      make_quad(),
-    )
+    ground_mesh_handle :=
+      engine.rm.builtin_meshes[resources.Primitive.QUAD]
+    ground_mesh_ok := true
     log.info("spawning ground and walls")
     size: f32 = 15.0
     if brick_wall_mat_ok && ground_mesh_ok {
@@ -201,7 +196,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         if !has_mesh do continue
         _, has_skin := mesh_attachment.skinning.?
         if !has_skin do continue
-        if plain_material_ok && cube_mesh_ok {
           _, hand_cube_node := spawn_child(
             engine,
             child_handle,
@@ -214,7 +208,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
           // Attach a cube to the hand.L bone
           hand_cube_node.bone_socket = "hand.L"
           scale(hand_cube_node, 0.1)
-        }
         break
       }
     }
@@ -276,22 +269,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
         )
         if !light_spawn_ok do continue
       }
-      if plain_material_ok && cube_mesh_ok {
-        cube_node: ^world.Node
-        cube_ok: bool
-        light_cube_handles[i], cube_node, cube_ok = spawn_child(
-          engine,
-          light_handles[i],
-          world.MeshAttachment {
-            handle = cube_mesh_handle,
-            material = plain_material_handle,
-            cast_shadow = false,
-          },
-        )
-        if cube_ok {
-          scale(cube_node, 0.05)
-          translate(cube_node, y=0.5)
-        }
+      cube_node: ^world.Node
+      cube_ok: bool
+      light_cube_handles[i], cube_node, cube_ok = spawn_child(
+        engine,
+        light_handles[i],
+        world.MeshAttachment {
+          handle = cube_mesh_handle,
+          material = plain_material_handle,
+          cast_shadow = false,
+        },
+      )
+      if cube_ok {
+        scale(cube_node, 0.05)
+        translate(cube_node, y = 0.5)
       }
     }
     if false {
@@ -314,12 +305,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
       engine,
       emissive_value = 30.0,
     )
-    if emissive_ok && sphere_mesh_ok {
+    if emissive_ok {
       _, bright_ball_node, bright_ok := spawn(
         engine,
         world.MeshAttachment {
-          handle      = sphere_mesh_handle,
-          material    = emissive_handle,
+          handle = sphere_mesh_handle,
+          material = emissive_handle,
           cast_shadow = false,
         },
       )
@@ -436,7 +427,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             ff_attachment.handle = forcefield_resource
           }
         }
-        if goldstar_material_ok && sphere_mesh_ok {
+        if goldstar_material_ok {
           _, forcefield_visual, visual_ok := spawn_child(
             engine,
             forcefield_handle,
@@ -464,14 +455,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     portal_camera_ok: bool
     portal_camera_handle, portal_camera_ok = create_camera(
       engine,
-      512,  // width
-      512,  // height
-      {.GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES},  // enabled passes (no post-process for performance)
-      {5, 15, 7},  // camera position
-      {0, 0, 0},   // looking at origin
-      math.PI * 0.5,  // FOV
-      0.1,  // near plane
-      100.0,  // far plane
+      512, // width
+      512, // height
+      {.GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES}, // enabled passes (no post-process for performance)
+      {5, 15, 7}, // camera position
+      {0, 0, 0}, // looking at origin
+      math.PI * 0.5, // FOV
+      0.1, // near plane
+      100.0, // far plane
     )
     if !portal_camera_ok {
       log.error("Failed to create portal camera")
@@ -481,10 +472,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       engine,
       {.ALBEDO_TEXTURE},
     )
-    portal_quad_handle, portal_mesh_ok := create_mesh(
-      engine,
-      make_quad(),
-    )
+    portal_quad_handle :=
+      engine.rm.builtin_meshes[resources.Primitive.QUAD]
+    portal_mesh_ok := true
     if portal_material_ok && portal_mesh_ok {
       _, portal_node, portal_spawn_ok := spawn(
         engine,
@@ -502,7 +492,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   when true {
-    log.info("spawning Warrior effect sprite with animation (99 frames @ 24fps)...")
+    log.info(
+      "spawning Warrior effect sprite with animation (99 frames @ 24fps)...",
+    )
     warrior_sprite_texture, warrior_sprite_ok := create_texture(
       engine,
       "assets/Warrior_Sheet-Effect.png",
@@ -519,9 +511,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       sprite_handle, sprite_ok := resources.create_sprite(
         &engine.rm,
         warrior_sprite_texture,
-        frame_columns = 6,   // 6 columns in sprite sheet
-        frame_rows = 17,     // 17 rows in sprite sheet
-        frame_index = 0,     // Starting frame (animation will override this)
+        frame_columns = 6, // 6 columns in sprite sheet
+        frame_rows = 17, // 17 rows in sprite sheet
+        frame_index = 0, // Starting frame (animation will override this)
         color = {1.0, 1.0, 1.0, 1.0},
         animation = warrior_animation,
       )
@@ -571,8 +563,13 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       // rotate light 0 around Y axis
       t := time_since_start(engine)
       rotate(engine, handle, t, linalg.VECTOR3F32_Y_AXIS)
-      spread := (math.sin(t*0.2) + 1.0)
-      rotate_by(engine, handle, math.PI * 0.4 * spread, linalg.VECTOR3F32_X_AXIS)
+      spread := (math.sin(t * 0.2) + 1.0)
+      rotate_by(
+        engine,
+        handle,
+        math.PI * 0.4 * spread,
+        linalg.VECTOR3F32_X_AXIS,
+      )
       continue
     }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
@@ -628,5 +625,10 @@ on_post_render :: proc(engine: ^mjolnir.Engine) {
     resources.AttachmentType.FINAL_IMAGE,
     engine.frame_index,
   )
-  update_material_texture(engine, portal_material_handle, .ALBEDO_TEXTURE, portal_texture_handle)
+  update_material_texture(
+    engine,
+    portal_material_handle,
+    .ALBEDO_TEXTURE,
+    portal_texture_handle,
+  )
 }

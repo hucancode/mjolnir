@@ -24,12 +24,38 @@ BufferAllocation :: struct {
   count:  u32,
 }
 
+Color :: enum {
+  WHITE,
+  BLACK,
+  GRAY,
+  RED,
+  GREEN,
+  BLUE,
+  YELLOW,
+  CYAN,
+  MAGENTA,
+}
+
+Primitive :: enum {
+  CUBE,
+  SPHERE,
+  QUAD,
+  CONE,
+  CAPSULE,
+  CYLINDER,
+  TORUS,
+}
+
 Manager :: struct {
   // Global samplers
   linear_repeat_sampler:                     vk.Sampler,
   linear_clamp_sampler:                      vk.Sampler,
   nearest_repeat_sampler:                    vk.Sampler,
   nearest_clamp_sampler:                     vk.Sampler,
+  // Builtin materials
+  builtin_materials:                         [len(Color)]Handle,
+  // Builtin meshes
+  builtin_meshes:                            [len(Primitive)]Handle,
   // Resource pools
   meshes:                                    Pool(Mesh),
   materials:                                 Pool(Material),
@@ -286,6 +312,8 @@ init :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
     0,
     nil,
   )
+  init_builtin_materials(manager) or_return
+  init_builtin_meshes(manager, gctx) or_return
   return .SUCCESS
 }
 
@@ -1750,4 +1778,78 @@ create_animation_clip_handle :: proc(
 ) #optional_ok {
   h, _, ret := create_animation_clip(manager, name, duration, channels)
   return h, ret == .SUCCESS
+}
+
+init_builtin_materials :: proc(manager: ^Manager) -> vk.Result {
+  log.info("Creating builtin materials...")
+  colors := [len(Color)][4]f32 {
+    {1.0, 1.0, 1.0, 1.0}, // WHITE
+    {0.0, 0.0, 0.0, 1.0}, // BLACK
+    {0.3, 0.3, 0.3, 1.0}, // GRAY
+    {1.0, 0.0, 0.0, 1.0}, // RED
+    {0.0, 1.0, 0.0, 1.0}, // GREEN
+    {0.0, 0.0, 1.0, 1.0}, // BLUE
+    {1.0, 1.0, 0.0, 1.0}, // YELLOW
+    {0.0, 1.0, 1.0, 1.0}, // CYAN
+    {1.0, 0.0, 1.0, 1.0}, // MAGENTA
+  }
+  for color, i in colors {
+    manager.builtin_materials[i], _, _ = create_material(
+      manager,
+      {},
+      .PBR,
+      {},
+      {},
+      {},
+      {},
+      {},
+      0.0,
+      1.0,
+      0.0,
+      color,
+    )
+  }
+  log.info("Builtin materials created successfully")
+  return .SUCCESS
+}
+
+init_builtin_meshes :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
+  log.info("Creating builtin meshes...")
+  manager.builtin_meshes[Primitive.CUBE], _ = create_mesh_handle(
+    gctx,
+    manager,
+    geometry.make_cube(),
+  )
+  manager.builtin_meshes[Primitive.SPHERE], _ = create_mesh_handle(
+    gctx,
+    manager,
+    geometry.make_sphere(),
+  )
+  manager.builtin_meshes[Primitive.QUAD], _ = create_mesh_handle(
+    gctx,
+    manager,
+    geometry.make_quad(),
+  )
+  manager.builtin_meshes[Primitive.CONE], _ = create_mesh_handle(
+    gctx,
+    manager,
+    geometry.make_cone(),
+  )
+  manager.builtin_meshes[Primitive.CAPSULE], _ = create_mesh_handle(
+    gctx,
+    manager,
+    geometry.make_capsule(),
+  )
+  manager.builtin_meshes[Primitive.CYLINDER], _ = create_mesh_handle(
+    gctx,
+    manager,
+    geometry.make_cylinder(),
+  )
+  manager.builtin_meshes[Primitive.TORUS], _ = create_mesh_handle(
+    gctx,
+    manager,
+    geometry.make_torus(),
+  )
+  log.info("Builtin meshes created successfully")
+  return .SUCCESS
 }

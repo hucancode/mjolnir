@@ -3,6 +3,7 @@ package main
 import "core:log"
 import "../../../mjolnir"
 import "../../../mjolnir/geometry"
+import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 
 main :: proc() {
@@ -13,10 +14,10 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mat1, _ := mjolnir.create_material(engine, type = .UNLIT, base_color_factor = {0.93, 0.75, 0.2, 1.0})
-  mat2, _ := mjolnir.create_material(engine, type = .UNLIT, base_color_factor = {0.1, 0.55, 0.95, 1.0})
-  cube := geometry.make_cube()
-  mesh, _ := mjolnir.create_mesh(engine, cube)
+  using mjolnir
+  mat1 := engine.rm.builtin_materials[resources.Color.YELLOW]
+  mat2 := engine.rm.builtin_materials[resources.Color.BLUE]
+  mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   half := f32(2.0)
   for z in 0 ..< 5 {
     for x in 0 ..< 5 {

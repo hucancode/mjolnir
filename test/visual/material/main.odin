@@ -26,12 +26,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     mjolnir.sync_active_camera_controller(engine)
   }
   // Camera controller is automatically set up by engine
-  cube_geom := geometry.make_cube()
-  cube_mesh, mesh_ok := mjolnir.create_mesh(engine, cube_geom)
-  if !mesh_ok {
-    log.error("material textured cube: mesh creation failed")
-    return
-  }
+  cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   albedo_texture, texture_ok := mjolnir.create_texture(
     engine,
     #load("statue-1275469_1280.jpg"),

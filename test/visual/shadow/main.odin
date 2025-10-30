@@ -25,25 +25,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     mjolnir.sync_active_camera_controller(engine)
   }
   // Camera controller is automatically set up by engine
-  plane_geom := geometry.make_quad()
-  plane_mesh, plane_mesh_ok := mjolnir.create_mesh(
-    engine,
-    plane_geom,
-  )
-  if !plane_mesh_ok {
-    log.error("shadow casting: plane mesh creation failed")
-    return
-  }
-  plane_material, plane_mat_ok := mjolnir.create_material(
-    engine,
-    type = resources.MaterialType.PBR,
-    base_color_factor = {0.35, 0.35, 0.35, 1.0},
-    roughness_value = 0.7,
-  )
-  if !plane_mat_ok {
-    log.error("shadow casting: plane material creation failed")
-    return
-  }
+  plane_mesh := engine.rm.builtin_meshes[resources.Primitive.QUAD]
+  plane_material := engine.rm.builtin_materials[resources.Color.GRAY]
   _, plane_node, plane_spawned := mjolnir.spawn(
     engine,
     world.MeshAttachment {
@@ -55,26 +38,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   if plane_spawned {
     mjolnir.scale(plane_node, 7.0)
   }
-  cube_geom := geometry.make_cube()
-  cube_mesh, cube_mesh_ok := mjolnir.create_mesh(
-    engine,
-    cube_geom,
-  )
-  if !cube_mesh_ok {
-    log.error("shadow casting: cube mesh creation failed")
-    return
-  }
-  cube_material, cube_mat_ok := mjolnir.create_material(
-    engine,
-    type = resources.MaterialType.PBR,
-    base_color_factor = {0.9, 0.9, 0.95, 1.0},
-    roughness_value = 0.25,
-    metallic_value = 0.05,
-  )
-  if !cube_mat_ok {
-    log.error("shadow casting: cube material creation failed")
-    return
-  }
+  cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
+  cube_material := engine.rm.builtin_materials[resources.Color.WHITE]
   _, cube_node, cube_spawned := mjolnir.spawn(
     engine,
     world.MeshAttachment {

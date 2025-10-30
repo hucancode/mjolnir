@@ -4,6 +4,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "../../../mjolnir"
+import cont "../../../mjolnir/containers"
 import "../../../mjolnir/geometry"
 import "../../../mjolnir/physics"
 import "../../../mjolnir/resources"
@@ -37,26 +38,20 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 	physics.init(&demo_state.physics_world)
 
 	// Create ground plane (large thin box)
-	ground_geom := make_cube([4]f32{0.3, 0.4, 0.3, 1.0})
-	for &v in ground_geom.vertices {
-		v.position.x *= 15.0 // Wide
-		v.position.y *= 0.5  // Thin
-		v.position.z *= 15.0 // Deep
-	}
-	ground_mesh, _ := create_mesh(engine, ground_geom)
-	ground_mat, _ := create_material(
-		engine,
-		metallic_value = 0.1,
-		roughness_value = 0.9,
-	)
-	demo_state.ground_handle, _, _ = spawn_at(
+	ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
+	ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
+	h, ground_node_ptr, _ := spawn_at(
 		engine,
 		[3]f32{0, -0.5, 0},
 		world.MeshAttachment{handle = ground_mesh, material = ground_mat},
 	)
+	demo_state.ground_handle = h
+	if ground_node_ptr != nil {
+		world.scale_xyz(ground_node_ptr, 15.0, 0.5, 15.0)
+	}
 
 	// Create static rigid body for ground
-	ground_node, ground_node_ok := resources.get(engine.world.nodes, demo_state.ground_handle)
+	ground_node, ground_node_ok := cont.get(engine.world.nodes, demo_state.ground_handle)
 	if ground_node_ok {
 		body_handle, body, ok := physics.create_body(
 			&demo_state.physics_world,
@@ -73,22 +68,20 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 	}
 
 	// Create static sphere in the center
-	sphere_geom := make_sphere(16, 16, 1.5, [4]f32{0.8, 0.2, 0.8, 1.0})
-	sphere_mesh, _ := create_mesh(engine, sphere_geom)
-	sphere_mat, _ := create_material(
-		engine,
-		metallic_value = 0.7,
-		roughness_value = 0.3,
-		emissive_value = 0.1,
-	)
-	demo_state.sphere_handle, _, _ = spawn_at(
+	sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
+	sphere_mat := engine.rm.builtin_materials[resources.Color.MAGENTA]
+	h2, sphere_node_ptr, _ := spawn_at(
 		engine,
 		[3]f32{0, 1.5, 0},
 		world.MeshAttachment{handle = sphere_mesh, material = sphere_mat, cast_shadow = true},
 	)
+	demo_state.sphere_handle = h2
+	if sphere_node_ptr != nil {
+		world.scale(sphere_node_ptr, 1.5)
+	}
 
 	// Create static rigid body for sphere
-	sphere_node, sphere_node_ok := resources.get(engine.world.nodes, demo_state.sphere_handle)
+	sphere_node, sphere_node_ok := cont.get(engine.world.nodes, demo_state.sphere_handle)
 	if sphere_node_ok {
 		body_handle, body, ok := physics.create_body(
 			&demo_state.physics_world,
@@ -106,16 +99,8 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 	}
 
 	// Create cubes from above
-	cube_geom := make_cube([4]f32{0.9, 0.5, 0.2, 1.0})
-	for &v in cube_geom.vertices {
-		v.position *= 0.5
-	}
-	cube_mesh, _ := create_mesh(engine, cube_geom)
-	cube_mat, _ := create_material(
-		engine,
-		metallic_value = 0.3,
-		roughness_value = 0.7,
-	)
+	cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
+	cube_mat := engine.rm.builtin_materials[resources.Color.RED]
 
 	cube_positions := [CUBE_COUNT][3]f32{
 		// First ring around sphere
@@ -147,7 +132,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 		demo_state.cube_handles[i] = cube_handle
 
 		// Create dynamic rigid body for each cube
-		cube_node, cube_node_ok := resources.get(engine.world.nodes, cube_handle)
+		cube_node, cube_node_ok := cont.get(engine.world.nodes, cube_handle)
 		if cube_node_ok {
 			body_handle, body, ok := physics.create_body(
 				&demo_state.physics_world,

@@ -98,7 +98,7 @@ void main() {
             uv
         );
     } else {
-        albedo = color;
+        albedo = color * material.base_color_factor;
     }
     outAlbedo = albedo;
 

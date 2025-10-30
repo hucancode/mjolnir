@@ -34,22 +34,17 @@ setup_aoe_test :: proc(engine: ^mjolnir.Engine) {
   log.info("AOE Test: Setup")
   set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
-  // Create meshes
-  cube_mesh, cube_ok := create_mesh(engine, make_cube())
-  sphere_mesh, sphere_ok := create_mesh(engine, make_sphere())
-  // Material for cubes
-  cube_mat, cube_mat_ok := create_material(
-    engine,
-    metallic_value = 0.5,
-    roughness_value = 0.8,
-  )
+  // Use builtin meshes and materials
+  cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
+  sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
+  cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
   // Emissive material for effector sphere
   effector_mat, effector_mat_ok := create_material(
     engine,
     emissive_value = 5.0,
   )
-  if !cube_ok || !sphere_ok || !cube_mat_ok || !effector_mat_ok {
-    log.error("Failed to create test resources")
+  if !effector_mat_ok {
+    log.error("Failed to create effector material")
     return
   }
   // Spawn 50x50 grid of cubes

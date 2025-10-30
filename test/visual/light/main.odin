@@ -27,26 +27,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     mjolnir.sync_active_camera_controller(engine)
   }
   // Camera controller is automatically set up by engine
-  plane_geom := geometry.make_quad()
-  plane_mesh, plane_mesh_ok := mjolnir.create_mesh(
-    engine,
-    plane_geom,
-  )
-  if !plane_mesh_ok {
-    log.error("lights no shadows: plane mesh creation failed")
-    return
-  }
-  plane_material, plane_mat_ok := mjolnir.create_material(
-    engine,
-    type = resources.MaterialType.PBR,
-    base_color_factor = {0.2, 0.22, 0.25, 1.0},
-    roughness_value = 0.8,
-    metallic_value = 0.0,
-  )
-  if !plane_mat_ok {
-    log.error("lights no shadows: plane material creation failed")
-    return
-  }
+  plane_mesh := engine.rm.builtin_meshes[resources.Primitive.QUAD]
+  plane_material := engine.rm.builtin_materials[resources.Color.GRAY]
   plane_handle, plane_node, plane_spawned := mjolnir.spawn(
     engine,
     world.MeshAttachment {
@@ -59,26 +41,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     mjolnir.scale(plane_node, 6.5)
     mjolnir.translate(plane_node, 0.0, -0.05, 0.0)
   }
-  sphere_geom := geometry.make_sphere(32, 16, 1.0)
-  sphere_mesh, sphere_mesh_ok := mjolnir.create_mesh(
-    engine,
-    sphere_geom,
-  )
-  if !sphere_mesh_ok {
-    log.error("lights no shadows: sphere mesh creation failed")
-    return
-  }
-  sphere_material, sphere_mat_ok := mjolnir.create_material(
-    engine,
-    type = resources.MaterialType.PBR,
-    base_color_factor = {0.85, 0.3, 0.3, 1.0},
-    roughness_value = 0.35,
-    metallic_value = 0.2,
-  )
-  if !sphere_mat_ok {
-    log.error("lights no shadows: sphere material creation failed")
-    return
-  }
+  sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
+  sphere_material := engine.rm.builtin_materials[resources.Color.RED]
   _, sphere_node, sphere_spawned := mjolnir.spawn(
     engine,
     world.MeshAttachment {
