@@ -2,6 +2,7 @@ package mjolnir
 
 import "core:math"
 import "core:strings"
+import "core:sync"
 import "geometry"
 import "navigation/recast"
 import "render/post_process"
@@ -9,7 +10,25 @@ import "resources"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 import "world"
+import "level_manager"
 
+// Backward compatibility: Re-export types from level_manager
+Level_Descriptor :: level_manager.Level_Descriptor
+Level_Setup_Proc :: level_manager.Level_Setup_Proc
+Level_Teardown_Proc :: level_manager.Level_Teardown_Proc
+Level_Finished_Proc :: level_manager.Level_Finished_Proc
+Setup_Mode :: level_manager.Setup_Mode
+Teardown_Mode :: level_manager.Teardown_Mode
+Transition_Pattern :: level_manager.Transition_Pattern
+Level_State :: level_manager.Level_State
+Level_Manager :: level_manager.Level_Manager
+
+// Backward compatibility: Convenience wrappers
+init_level_manager :: level_manager.init
+is_level_transitioning :: level_manager.is_transitioning
+should_show_loading_screen :: level_manager.should_show_loading
+get_current_level_name :: level_manager.get_current_level_name
+load_level :: level_manager.load_level
 create_texture :: proc {
   create_texture_from_path,
   create_texture_from_data,
@@ -198,6 +217,14 @@ get_node :: proc(engine: ^Engine, handle: resources.Handle) -> (ret: ^world.Node
 
 despawn :: proc(engine: ^Engine, handle: resources.Handle) {
   world.despawn(&engine.world, handle)
+}
+
+// Thread-safe: Queue a node for deletion from background threads
+// The actual despawn will happen on the main thread during process_pending_deletions
+queue_node_deletion :: proc(engine: ^Engine, handle: resources.Handle) {
+  sync.mutex_lock(&engine.pending_deletions_mutex)
+  defer sync.mutex_unlock(&engine.pending_deletions_mutex)
+  append(&engine.pending_node_deletions, handle)
 }
 
 translate_handle :: proc(

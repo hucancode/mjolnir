@@ -6,9 +6,9 @@ import "core:math/linalg"
 import "core:slice"
 import "gpu"
 import "render/debug_ui"
-import geometry_pass "render/geometry"
+import "render/geometry"
 import "render/lighting"
-import navigation_renderer "render/navigation"
+import "render/navigation"
 import "render/particles"
 import "render/post_process"
 import "render/retained_ui"
@@ -18,11 +18,11 @@ import vk "vendor:vulkan"
 import "world"
 
 Renderer :: struct {
-  geometry:     geometry_pass.Renderer,
+  geometry:     geometry.Renderer,
   lighting:     lighting.Renderer,
   transparency: transparency.Renderer,
   particles:    particles.Renderer,
-  navigation:   navigation_renderer.Renderer,
+  navigation:   navigation.Renderer,
   post_process: post_process.Renderer,
   ui:           debug_ui.Renderer,
   retained_ui:  retained_ui.Manager,
@@ -130,7 +130,7 @@ renderer_init :: proc(
     swapchain_format,
     vk.Format.D32_SFLOAT,
   ) or_return
-  geometry_pass.init(
+  geometry.init(
     &self.geometry,
     gctx,
     swapchain_extent.width,
@@ -171,7 +171,7 @@ renderer_init :: proc(
     dpi_scale,
     rm,
   ) or_return
-  navigation_renderer.init(&self.navigation, gctx, rm) or_return
+  navigation.init(&self.navigation, gctx, rm) or_return
   return .SUCCESS
 }
 
@@ -183,12 +183,12 @@ renderer_shutdown :: proc(
 ) {
   retained_ui.shutdown(&self.retained_ui, device)
   debug_ui.shutdown(&self.ui, device)
-  navigation_renderer.shutdown(&self.navigation, device, command_pool)
+  navigation.shutdown(&self.navigation, device, command_pool)
   post_process.shutdown(&self.post_process, device, command_pool, rm)
   particles.shutdown(&self.particles, device, command_pool)
   transparency.shutdown(&self.transparency, device, command_pool)
   lighting.shutdown(&self.lighting, device, command_pool, rm)
-  geometry_pass.shutdown(&self.geometry, device, command_pool)
+  geometry.shutdown(&self.geometry, device, command_pool)
 }
 
 resize :: proc(
@@ -295,7 +295,7 @@ record_geometry_pass :: proc(
   world_state: ^world.World,
   camera_handle: resources.Handle,
 ) -> vk.Result {
-  command_buffer := geometry_pass.begin_record(
+  command_buffer := geometry.begin_record(
     &self.geometry,
     frame_index,
     camera_handle,
@@ -328,8 +328,8 @@ record_geometry_pass :: proc(
   // STEP 2: Render geometry pass using draw_list[N], camera[N]
   // draw_list[frame_index] was written by Compute N-1, safe to read during Render N
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
-  geometry_pass.begin_pass(camera_handle, command_buffer, rm, frame_index)
-  geometry_pass.render(
+  geometry.begin_pass(camera_handle, command_buffer, rm, frame_index)
+  geometry.render(
     &self.geometry,
     camera_handle,
     command_buffer,
@@ -339,8 +339,8 @@ record_geometry_pass :: proc(
     camera.late_draw_count[frame_index].buffer,
     command_stride,
   )
-  geometry_pass.end_pass(camera_handle, command_buffer, rm, frame_index)
-  geometry_pass.end_record(
+  geometry.end_pass(camera_handle, command_buffer, rm, frame_index)
+  geometry.end_record(
     command_buffer,
     camera_handle,
     rm,
@@ -445,7 +445,7 @@ record_transparency_pass :: proc(
     rm,
     frame_index,
   )
-  navigation_renderer.render(
+  navigation.render(
     &self.navigation,
     command_buffer,
     linalg.MATRIX4F32_IDENTITY,
