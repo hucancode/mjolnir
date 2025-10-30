@@ -9,10 +9,12 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:strings"
+import "core:sync"
 import "core:thread"
 import "core:time"
 import "core:unicode/utf8"
 import "gpu"
+import "level_manager"
 import "render/debug_ui"
 import "render/particles"
 import "render/retained_ui"
@@ -89,6 +91,7 @@ Engine :: struct {
   cursor_pos:              [2]i32,
   debug_ui_enabled:       bool,
   pending_node_deletions: [dynamic]resources.Handle,
+  pending_deletions_mutex: sync.Mutex,
   update_thread:          Maybe(^thread.Thread),
   update_active:          bool,
   last_render_timestamp:  time.Time,
@@ -96,6 +99,7 @@ Engine :: struct {
   free_controller:        CameraController,
   active_controller:      ^CameraController,
   camera_controller_enabled: bool,
+  level_manager:          level_manager.Level_Manager,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -140,6 +144,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
   world.init(&self.world)
+  level_manager.init(&self.level_manager)
   gpu.swapchain_init(&self.swapchain, &self.gctx, self.window) or_return
   world.init_gpu(
     &self.world,
@@ -346,6 +351,9 @@ get_main_camera :: proc(self: ^Engine) -> ^resources.Camera {
 }
 
 update_input :: proc(self: ^Engine) -> bool {
+  if level_manager.is_transitioning(&self.level_manager) {
+    return true
+  }
   glfw.PollEvents()
   last_mouse_pos := self.input.mouse_pos
   self.input.mouse_pos.x, self.input.mouse_pos.y = glfw.GetCursorPos(
@@ -369,9 +377,15 @@ update_input :: proc(self: ^Engine) -> bool {
 }
 
 update :: proc(self: ^Engine) -> bool {
+  context.user_ptr = self
   delta_time := get_delta_time(self)
   if delta_time < UPDATE_FRAME_TIME {
     return false
+  }
+  level_manager.update(&self.level_manager)
+  if level_manager.is_transitioning(&self.level_manager) {
+    self.last_update_timestamp = time.now()
+    return true
   }
   params := gpu.mutable_buffer_get(&self.render.particles.params_buffer, 0)
   params.delta_time = delta_time
@@ -388,7 +402,6 @@ update :: proc(self: ^Engine) -> bool {
     self.input.mouse_holding[0],
   )
   retained_ui.update(&self.render.retained_ui, self.frame_index)
-  // Update camera controller
   if self.camera_controller_enabled && self.active_controller != nil {
     main_camera := get_main_camera(self)
     if main_camera != nil {
@@ -418,7 +431,6 @@ update :: proc(self: ^Engine) -> bool {
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
-  // Update skeletal animations after user update so IK targets are current
   world.update_skeletal_animations(&self.world, &self.rm, delta_time)
   world.update_sprite_animations(&self.rm, delta_time)
   self.last_update_timestamp = time.now()
@@ -427,6 +439,7 @@ update :: proc(self: ^Engine) -> bool {
 
 shutdown :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(self.gctx.device)
+  level_manager.shutdown(&self.level_manager)
   vk.FreeCommandBuffers(
     self.gctx.device,
     self.gctx.command_pool,
@@ -462,7 +475,7 @@ populate_debug_ui :: proc(self: ^Engine) {
   if mu.window(
     &self.render.ui.ctx,
     "Engine",
-    {40, 40, 350, 280},
+    {40, 40, 200, 200},
     {.NO_CLOSE},
   ) {
     mu.label(
@@ -546,6 +559,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 render :: proc(self: ^Engine) -> vk.Result {
+  context.user_ptr = self
   gpu.acquire_next_image(
     self.gctx.device,
     &self.swapchain,
@@ -648,9 +662,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     u32(len(camera_command_buffers)),
     raw_data(camera_command_buffers[:]),
   )
-  if self.post_render_proc != nil {
-    self.post_render_proc(self)
-  }
   record_geometry_pass(
     &self.render,
     self.frame_index,
@@ -740,6 +751,25 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   vk.CmdExecuteCommands(command_buffer, len(buffers), raw_data(buffers[:]))
   populate_debug_ui(self)
+  if self.post_render_proc != nil {
+    self.post_render_proc(self)
+  }
+  if level_manager.should_show_loading(&self.level_manager) {
+      TEXT :: "Loading..."
+	ctx := &self.render.ui.ctx
+	w := i32(self.swapchain.extent.width)
+	h := i32(self.swapchain.extent.height)
+	container_w: i32 = 400
+	container_h: i32 = 200
+	x := (w - container_w) / 2
+	y := (h - container_h) / 2
+	if mu.begin_window(ctx, "##loading", {x, y, container_w, container_h}, {.NO_TITLE, .NO_RESIZE, .NO_CLOSE, .NO_SCROLL}) {
+		mu.layout_row(ctx, {-1}, 0)
+		mu.layout_row(ctx, {-1}, 80)
+		mu.label(ctx, TEXT)
+		mu.end_window(ctx)
+	}
+  }
   mu.end(&self.render.ui.ctx)
   if self.debug_ui_enabled {
     debug_ui.begin_pass(
@@ -876,14 +906,16 @@ update_thread_proc :: proc(thread: ^thread.Thread) {
   log.info("Update thread terminating")
 }
 
-queue_node_deletion :: proc(engine: ^Engine, handle: resources.Handle) {
-  append(&engine.pending_node_deletions, handle)
-}
-
 process_pending_deletions :: proc(engine: ^Engine) {
+  sync.mutex_lock(&engine.pending_deletions_mutex)
+  defer sync.mutex_unlock(&engine.pending_deletions_mutex)
+
   for handle in engine.pending_node_deletions {
     world.despawn(&engine.world, handle)
   }
   clear(&engine.pending_node_deletions)
+
+  sync.mutex_unlock(&engine.pending_deletions_mutex)
   world.cleanup_pending_deletions(&engine.world, &engine.rm, &engine.gctx)
+  sync.mutex_lock(&engine.pending_deletions_mutex)
 }

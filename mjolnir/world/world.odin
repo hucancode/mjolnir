@@ -117,6 +117,7 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.culling_enabled = true
   self.visible = true
   self.parent_visible = true
+  self.pending_deletion = false
   self.tags = {}
 }
 
@@ -639,11 +640,15 @@ shutdown :: proc(
 despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
   node := resources.get(world.nodes, handle)
   if node == nil {
+    log.warnf("despawn: node %v not found (already freed or invalid)", handle)
     return false
   }
   if !node.pending_deletion {
+    log.infof("despawn: marking node %v '%s' for deletion", handle, node.name)
     node.pending_deletion = true
     detach(world.nodes, handle)
+  } else {
+    log.warnf("despawn: node %v '%s' already marked for deletion", handle, node.name)
   }
   return true
 }
@@ -655,16 +660,45 @@ cleanup_pending_deletions :: proc(
 ) {
   to_destroy := make([dynamic]resources.Handle, 0)
   defer delete(to_destroy)
+
+  // Count pending deletions for debugging
+  pending_count := 0
   for i in 0 ..< len(world.nodes.entries) {
     entry := &world.nodes.entries[i]
     if entry.active && entry.item.pending_deletion {
+      pending_count += 1
       append(
         &to_destroy,
         resources.Handle{index = u32(i), generation = entry.generation},
       )
     }
   }
+
+  if pending_count > 0 {
+    log.infof("Cleanup: found %d nodes marked for deletion", pending_count)
+  }
+
+  if len(to_destroy) > 0 {
+    log.infof("Cleanup: destroying %d nodes", len(to_destroy))
+  }
+
   for handle in to_destroy {
+    node := resources.get(world.nodes, handle)
+    if node != nil {
+      log.infof("  Destroying node handle: %v name='%s'", handle, node.name)
+    } else {
+      log.warnf("  Node handle %v already gone!", handle)
+    }
+
+    // Clear GPU buffers BEFORE freeing the node
+    if rm != nil {
+      zero_matrix: matrix[4, 4]f32
+      resources.node_upload_transform(rm, handle, &zero_matrix)
+      zero_data: resources.NodeData
+      zero_data.flags = {}  // Empty flags means not renderable
+      resources.node_upload_data(rm, handle, &zero_data)
+    }
+
     world.octree_dirty_set[handle] = true
     if node, ok := resources.free(&world.nodes, handle); ok {
       destroy_node(node, rm, gctx)
@@ -678,13 +712,16 @@ get_node :: proc(world: ^World, handle: resources.Handle) -> ^Node {
 
 @(private)
 update_visibility_system :: proc(world: ^World) {
-  count := slice.count_proc(
-    world.nodes.entries[:],
-    proc(entry: resources.Entry(Node)) -> bool {
-      return entry.active
-    },
-  )
-  visibility_system_set_node_count(&world.visibility, u32(count))
+  // Find the highest active node index
+  max_index: int = 0
+  for i in 0..<len(world.nodes.entries) {
+    if world.nodes.entries[i].active {
+      max_index = i
+    }
+  }
+  // node_count must be max_index + 1 so GPU processes all indices up to max
+  node_count := u32(max_index + 1)
+  visibility_system_set_node_count(&world.visibility, node_count)
 }
 
 traverse :: proc(
