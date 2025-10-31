@@ -50,6 +50,7 @@ Mesh :: struct {
   vertex_allocation: BufferAllocation,
   index_allocation:  BufferAllocation,
   skinning:          Maybe(Skinning),
+  using meta:        ResourceMetadata,
 }
 
 mesh_destroy :: proc(self: ^Mesh, gctx: ^gpu.GPUContext, manager: ^Manager) {

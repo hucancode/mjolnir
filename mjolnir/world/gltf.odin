@@ -239,7 +239,7 @@ load_textures_batch :: proc(
     } else {
       continue
     }
-    tex_handle, _, texture_result := resources.create_texture(
+    tex_handle, tex, texture_result := resources.create_texture(
       gctx,
       rm,
       pixel_data,
@@ -247,6 +247,7 @@ load_textures_batch :: proc(
     if texture_result != .SUCCESS {
       return .io_error
     }
+    tex.auto_purge = true // Enable auto-purge for GLTF-loaded textures
     delete(pixel_data)
     texture_cache[gltf_texture] = tex_handle
     log.infof("Created texture %v", tex_handle)
@@ -269,7 +270,7 @@ load_materials_batch :: proc(
     if gltf_material == nil do continue
     albedo, metallic_roughness, normal, emissive, occlusion, features :=
       load_material_textures(gltf_material, texture_cache)
-    material_handle, _, material_result := resources.create_material(
+    material_handle, mat, material_result := resources.create_material(
       rm,
       features,
       .PBR,
@@ -280,6 +281,12 @@ load_materials_batch :: proc(
       occlusion,
     )
     if material_result != .SUCCESS do return .invalid_gltf
+    mat.auto_purge = true
+    resources.texture_2d_ref(rm, albedo)
+    resources.texture_2d_ref(rm, metallic_roughness)
+    resources.texture_2d_ref(rm, normal)
+    resources.texture_2d_ref(rm, emissive)
+    resources.texture_2d_ref(rm, occlusion)
     material_cache[gltf_material] = material_handle
     log.infof("Created material %v", material_handle)
   }
@@ -667,6 +674,7 @@ construct_scene :: proc(
               log.error("Failed to allocate mesh for skinned mesh")
               continue
             }
+            mesh.auto_purge = true
             init_result := resources.mesh_init(
               mesh,
               gctx,
@@ -695,6 +703,8 @@ construct_scene :: proc(
               cont.free(&rm.meshes, mesh_handle)
               continue
             }
+            resources.mesh_ref(rm, mesh_handle)
+            resources.material_ref(rm, geometry_data.material_handle)
             node.attachment = MeshAttachment {
               handle = mesh_handle,
               material = geometry_data.material_handle,
@@ -718,12 +728,15 @@ construct_scene :: proc(
             }
           }
         } else {
-          mesh_handle, _, ret := resources.create_mesh(
+          mesh_handle, mesh, ret := resources.create_mesh(
             gctx,
             rm,
             geometry_data.geometry,
           )
           if ret == .SUCCESS {
+            mesh.auto_purge = true
+            resources.mesh_ref(rm, mesh_handle)
+            resources.material_ref(rm, geometry_data.material_handle)
             node.attachment = MeshAttachment {
               handle      = mesh_handle,
               material    = geometry_data.material_handle,

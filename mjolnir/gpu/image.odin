@@ -29,10 +29,12 @@ ImageSpec :: struct {
 }
 
 Image :: struct {
-  image:  vk.Image,
-  memory: vk.DeviceMemory,
-  spec:   ImageSpec,
-  view:   vk.ImageView,
+  image:      vk.Image,
+  memory:     vk.DeviceMemory,
+  spec:       ImageSpec,
+  view:       vk.ImageView,
+  ref_count:  u32,
+  auto_purge: bool,
 }
 
 ImageTransition :: struct {

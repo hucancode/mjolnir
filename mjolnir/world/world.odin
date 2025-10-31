@@ -169,7 +169,8 @@ destroy_node :: proc(
     resources.destroy_sprite_handle(rm, attachment.sprite_handle)
     attachment.sprite_handle = {}
   case MeshAttachment:
-    // TODO: we need to check if the mesh is still in use before freeing its resources
+    resources.mesh_unref(rm, attachment.handle)
+    resources.material_unref(rm, attachment.material)
     skinning, has_skin := &attachment.skinning.?
     if has_skin {
       if skinning.bone_matrix_buffer_offset != 0xFFFFFFFF {

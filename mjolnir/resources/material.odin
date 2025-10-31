@@ -44,6 +44,7 @@ Material :: struct {
   normal:             Handle,
   emissive:           Handle,
   occlusion:          Handle,
+  using meta:         ResourceMetadata,
 }
 
 material_update_gpu_data :: proc(mat: ^Material) {

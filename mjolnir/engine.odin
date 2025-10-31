@@ -910,13 +910,19 @@ update_thread_proc :: proc(thread: ^thread.Thread) {
 process_pending_deletions :: proc(engine: ^Engine) {
   sync.mutex_lock(&engine.pending_deletions_mutex)
   defer sync.mutex_unlock(&engine.pending_deletions_mutex)
-
   for handle in engine.pending_node_deletions {
     world.despawn(&engine.world, handle)
   }
+  had_deletions := len(engine.pending_node_deletions) > 0
   clear(&engine.pending_node_deletions)
-
   sync.mutex_unlock(&engine.pending_deletions_mutex)
   world.cleanup_pending_deletions(&engine.world, &engine.rm, &engine.gctx)
+  // Purge unused resources after nodes are fully removed
+  // Only resources with auto_purge=true are purged
+  // System-managed resources (builtin meshes/materials, render targets, etc.) have auto_purge=false
+  if had_deletions {
+    resources.purge_unused_resources(&engine.rm, &engine.gctx)
+  }
+
   sync.mutex_lock(&engine.pending_deletions_mutex)
 }
