@@ -464,7 +464,7 @@ init :: proc(
   self.font_ctx.callbackResize = atlas_resize_callback
   self.font_ctx.userData = self
   // Load default font
-  font_path := "assets/Excalifont-Regular.ttf"
+  font_path := "assets/Outfit-Regular.ttf"
   font_data, font_ok := os.read_entire_file(font_path)
   if !font_ok {
     log.errorf("Failed to load font: %s", font_path)
