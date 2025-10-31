@@ -149,6 +149,7 @@ main :: proc() {
       40,
       130,
       state.window_handle,
+      true, // autosize - test dynamic resizing
     )
     button2, _ := retained_ui.create_button(
       ui,
@@ -188,8 +189,9 @@ main :: proc() {
       40,
       240,
       state.window_handle,
+      true, // autosize
     )
-    retained_ui.create_label(ui, "Difficulty:", 40, 330, state.window_handle)
+    retained_ui.create_label(ui, "Difficulty:", 40, 330, state.window_handle, true)
     retained_ui.create_radiobutton(
       ui,
       1, // group_id
@@ -223,7 +225,7 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    retained_ui.create_label(ui, "Player Name:", 40, 460, state.window_handle)
+    retained_ui.create_label(ui, "Player Name:", 40, 460, state.window_handle, true)
     state.textbox_handle, _ = retained_ui.create_textbox(
       ui,
       "Enter your name...",
@@ -242,6 +244,7 @@ main :: proc() {
       220,
       530,
       state.window_handle,
+      true, // autosize
     )
     image_data := #load("statue-1275469_1280.jpg")
     state.texture_handle, _, _ = resources.create_texture_from_data(

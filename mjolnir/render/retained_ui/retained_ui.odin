@@ -70,7 +70,8 @@ ButtonData :: struct {
 }
 
 LabelData :: struct {
-  text: string,
+  text:     string,
+  autosize: bool,
 }
 
 ImageData :: struct {
@@ -808,6 +809,19 @@ build_label_commands :: proc(
   widget: ^Widget,
 ) {
   data := widget.data.(LabelData)
+
+  // Auto-size label to fit text if enabled
+  if data.autosize && len(data.text) > 0 {
+    font_size := widget.size.y
+    fs.SetFont(&self.font_ctx, self.default_font)
+    fs.SetSize(&self.font_ctx, font_size)
+    bounds: [4]f32
+    fs.TextBounds(&self.font_ctx, data.text, 0, 0, &bounds)
+    text_width := bounds[2] - bounds[0]
+    // Update widget size to match text
+    widget.size.x = text_width + 4 // Add small padding
+  }
+
   append(
     &draw_list.commands,
     DrawCommand {

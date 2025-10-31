@@ -32,6 +32,7 @@ create_label :: proc(
   text: string,
   x, y: f32,
   parent: WidgetHandle = {},
+  autosize: bool = false,
 ) -> (
   handle: WidgetHandle,
   ok: bool,
@@ -43,8 +44,10 @@ create_label :: proc(
   widget.size = {100, 20}
   widget.fg_color = {0, 0, 0, 255}  // Black text for labels (readable on light backgrounds)
   widget.data = LabelData {
-    text = text,
+    text     = text,
+    autosize = autosize,
   }
+  mark_dirty(self, handle)
   return
 }
 
