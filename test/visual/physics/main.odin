@@ -12,55 +12,53 @@ import "core:math/linalg"
 
 CUBE_COUNT :: 15
 
-demo_state: struct {
-  physics_world: physics.PhysicsWorld,
-  cube_handles:  [CUBE_COUNT]resources.Handle,
-  sphere_handle: resources.Handle,
-  ground_handle: resources.Handle,
-  cube_bodies:   [CUBE_COUNT]resources.Handle,
-  sphere_body:   resources.Handle,
-  ground_body:   resources.Handle,
-}
+physics_world: physics.PhysicsWorld
+cube_handles:  [CUBE_COUNT]resources.Handle
+sphere_handle: resources.Handle
+ground_handle: resources.Handle
+cube_bodies:   [CUBE_COUNT]resources.Handle
+sphere_body:   resources.Handle
+ground_body:   resources.Handle
 
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
-  engine.setup_proc = demo_setup
-  engine.update_proc = demo_update
+  engine.setup_proc = setup
+  engine.update_proc = update
   mjolnir.run(engine, 800, 600, "Physics Visual Test - Falling Cubes")
 }
 
-demo_setup :: proc(engine: ^mjolnir.Engine) {
+setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Setting up physics demo")
 
   // Initialize physics world
-  physics.init(&demo_state.physics_world)
+  physics.init(&physics_world)
   // Create ground plane (large thin box)
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  demo_state.ground_handle = spawn_at(
+  ground_handle = spawn_at(
     engine,
     [3]f32{0, -0.5, 0},
     world.MeshAttachment{handle = ground_mesh, material = ground_mat},
   )
-  world.scale_xyz(&engine.world, demo_state.ground_handle, 15.0, 0.5, 15.0)
+  world.scale_xyz(&engine.world, ground_handle, 15.0, 0.5, 15.0)
   // Create static rigid body for ground
   ground_node, ground_node_ok := cont.get(
     engine.world.nodes,
-    demo_state.ground_handle,
+    ground_handle,
   )
   if ground_node_ok {
     body_handle, body, ok := physics.create_body(
-      &demo_state.physics_world,
-      demo_state.ground_handle,
+      &physics_world,
+      ground_handle,
       0.0,
       true, // static
     )
     if ok {
-      demo_state.ground_body = body_handle
+      ground_body = body_handle
       collider := physics.collider_create_box([3]f32{15.0, 0.5, 15.0})
-      physics.add_collider(&demo_state.physics_world, body_handle, collider)
+      physics.add_collider(&physics_world, body_handle, collider)
       log.info("Ground body created")
     }
   }
@@ -68,7 +66,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
   // Create static sphere in the center
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
   sphere_mat := engine.rm.builtin_materials[resources.Color.MAGENTA]
-  demo_state.sphere_handle = spawn_at(
+  sphere_handle = spawn_at(
     engine,
     [3]f32{0, 1.5, 0},
     world.MeshAttachment {
@@ -77,23 +75,23 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  mjolnir.scale(engine, demo_state.sphere_handle, 1.5)
+  mjolnir.scale(engine, sphere_handle, 1.5)
   // Create static rigid body for sphere
   sphere_node, sphere_node_ok := cont.get(
     engine.world.nodes,
-    demo_state.sphere_handle,
+    sphere_handle,
   )
   if sphere_node_ok {
     body_handle, body, ok := physics.create_body(
-      &demo_state.physics_world,
-      demo_state.sphere_handle,
+      &physics_world,
+      sphere_handle,
       0.0,
       true, // static
     )
     if ok {
-      demo_state.sphere_body = body_handle
+      sphere_body = body_handle
       collider := physics.collider_create_sphere(1.5)
-      physics.add_collider(&demo_state.physics_world, body_handle, collider)
+      physics.add_collider(&physics_world, body_handle, collider)
       physics.rigid_body_set_sphere_inertia(body, 1.5)
       log.info("Sphere body created")
     }
@@ -125,7 +123,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   for pos, i in cube_positions {
-    demo_state.cube_handles[i] = spawn_at(
+    cube_handles[i] = spawn_at(
       engine,
       pos,
       world.MeshAttachment {
@@ -137,19 +135,19 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
     // Create dynamic rigid body for each cube
     cube_node, cube_node_ok := cont.get(
       engine.world.nodes,
-      demo_state.cube_handles[i],
+      cube_handles[i],
     )
     if cube_node_ok {
       body_handle, body, ok := physics.create_body(
-        &demo_state.physics_world,
-        demo_state.cube_handles[i],
+        &physics_world,
+        cube_handles[i],
         1.0, // mass
         false, // not static (dynamic)
       )
       if ok {
-        demo_state.cube_bodies[i] = body_handle
+        cube_bodies[i] = body_handle
         collider := physics.collider_create_box([3]f32{0.5, 0.5, 0.5})
-        physics.add_collider(&demo_state.physics_world, body_handle, collider)
+        physics.add_collider(&physics_world, body_handle, collider)
         physics.rigid_body_set_box_inertia(body, [3]f32{0.5, 0.5, 0.5})
         log.infof(
           "Cube %d body created at position (%.2f, %.2f, %.2f)",
@@ -171,6 +169,6 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Physics demo setup complete")
 }
 
-demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  physics.step(&demo_state.physics_world, &engine.world, delta_time)
+update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+  physics.step(&physics_world, &engine.world, delta_time)
 }

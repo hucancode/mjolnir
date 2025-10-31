@@ -7,43 +7,30 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:time"
-import cgltf "vendor:cgltf"
-import "vendor:glfw"
 
-AnimationSceneState :: struct {
-  root_nodes:       [dynamic]resources.Handle,
-  character_handle: resources.Handle,
-  target_cube:      resources.Handle,
-}
-
-state := AnimationSceneState{}
+root_nodes: [dynamic]resources.Handle
+character_handle: resources.Handle
+target_cube: resources.Handle
 
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
-  engine.setup_proc = setup_scene
-  engine.update_proc = update_scene
+  engine.setup_proc = setup
+  engine.update_proc = update
   mjolnir.run(engine, 800, 600, "visual-gltf-ik")
 }
 
-setup_scene :: proc(engine: ^mjolnir.Engine) {
-  camera := mjolnir.get_main_camera(engine)
-  if camera != nil {
-    mjolnir.camera_look_at(camera, {1.0, 0.5, 1.0}, {0.0, 0.3, 0.0})
+setup :: proc(engine: ^mjolnir.Engine) {
+  using mjolnir
+  if camera := get_main_camera(engine); camera != nil {
+    camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
   }
-  nodes, ok := mjolnir.load_gltf(engine, "assets/CesiumMan.glb")
-  if !ok {
-    log.error("gltf animation: failed to load asset")
-    return
-  }
-  state.root_nodes = nodes
-  for handle in nodes {
-    mjolnir.scale(engine, handle, 0.4)
-    node := mjolnir.get_node(engine, handle)
-    if node == nil do continue
+  root_nodes := load_gltf(engine, "assets/CesiumMan.glb")
+  for handle in root_nodes {
+    node := get_node(engine, handle) or_continue
     for child in node.children {
-      if mjolnir.play_animation(engine, child, "Anim_0") {
-        child_node := mjolnir.get_node(engine, child)
+      if play_animation(engine, child, "Anim_0") {
+        child_node := get_node(engine, child) or_continue
         // Setup IK for right arm using FABRIK solver
         // Based on logs: shoulder is at [-0.106, 1.036, 0.043]
         // Arm length is ~0.43m, so target must be within that reach
@@ -61,27 +48,21 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
           weight = 1.0,
         )
         world.set_ik_enabled(child_node, 0, true)
-        state.character_handle = child
+        character_handle = child
       }
     }
   }
-  dir_light_handle := mjolnir.spawn_directional_light(
+  spawn_directional_light(
     engine,
     {1.0, 1.0, 1.0, 1.0},
     cast_shadow = true,
     position = {0.0, 5.0, 0.0},
   )
-  mjolnir.rotate(
-    engine,
-    dir_light_handle,
-    math.PI * 0.25,
-    linalg.VECTOR3F32_X_AXIS,
-  )
-  // Visualize IK target with a small red cube using builtin resources
+  // Visualize IK target with a small red cube
   target_pos := [3]f32{0.0, 0.0, 0.9}
-  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-  cube_material := mjolnir.get_builtin_material(engine, .RED)
-  state.target_cube = mjolnir.spawn_at(
+  cube_mesh := get_builtin_mesh(engine, .CUBE)
+  cube_material := get_builtin_material(engine, .RED)
+  target_cube = spawn_at(
     engine,
     target_pos,
     world.MeshAttachment {
@@ -90,18 +71,14 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = false,
     },
   )
-  mjolnir.scale(engine, state.target_cube, 0.025)
+  mjolnir.scale(engine, target_cube, 0.1)
 }
 
-update_scene :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  if state.character_handle.index == 0 do return
-  character_node := mjolnir.get_node(engine, state.character_handle)
-  if character_node == nil do return
-  // Animate target Y position from 0 to 1 using a smooth sine wave
-  t := mjolnir.time_since_start(engine) * 0.5 // Slow down the animation (2 second period)
-  y := 0.5 + 0.5 * math.sin(t) // Oscillate between 0 and 1
-  // Update IK target position
-  new_target := [3]f32{0.0, y, 0.6}
+update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  character_node := mjolnir.get_node(engine, character_handle)
+  t := mjolnir.time_since_start(engine) * 0.5
+  y := 0.5 + 0.5 * math.sin(t)
+  new_target := [3]f32{0.0, y * 2, 0.9}
   pole := [3]f32{0.3, 0.4, 0.0}
   world.set_ik_target(
     character_node,
@@ -111,7 +88,7 @@ update_scene :: proc(engine: ^mjolnir.Engine, dt: f32) {
   )
   mjolnir.translate(
     engine,
-    state.target_cube,
+    target_cube,
     new_target.x,
     new_target.y,
     new_target.z,

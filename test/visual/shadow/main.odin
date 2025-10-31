@@ -14,12 +14,12 @@ light_handle: resources.Handle
 
 main :: proc() {
   engine := new(mjolnir.Engine)
-  engine.setup_proc = setup_scene
+  engine.setup_proc = setup
   engine.update_proc = update
   mjolnir.run(engine, 800, 600, "visual-shadow-casting")
 }
 
-setup_scene :: proc(engine: ^mjolnir.Engine) {
+setup :: proc(engine: ^mjolnir.Engine) {
   if camera := mjolnir.get_main_camera(engine); camera != nil {
     mjolnir.camera_look_at(camera, {6.0, 4.5, 6.0}, {0.0, 0.8, 0.0})
     mjolnir.sync_active_camera_controller(engine)

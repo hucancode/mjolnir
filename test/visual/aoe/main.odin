@@ -24,14 +24,13 @@ main :: proc() {
   args := os.args
   log.infof("Starting AOE Visual Test with %d arguments", len(args))
   engine := new(mjolnir.Engine)
-  engine.setup_proc = setup_aoe_test
-  engine.update_proc = update_aoe_test
+  engine.setup_proc = setup
+  engine.update_proc = update
   mjolnir.run(engine, 1280, 720, "Mjolnir - AOE Test")
 }
 
-setup_aoe_test :: proc(engine: ^mjolnir.Engine) {
+setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
-  log.info("AOE Test: Setup")
   set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
   // Use builtin meshes and materials
@@ -39,14 +38,10 @@ setup_aoe_test :: proc(engine: ^mjolnir.Engine) {
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
   // Emissive material for effector sphere
-  effector_mat, effector_mat_ok := create_material(
+  effector_mat := create_material(
     engine,
     emissive_value = 5.0,
   )
-  if !effector_mat_ok {
-    log.error("Failed to create effector material")
-    return
-  }
   // Spawn 50x50 grid of cubes
   cube_handles = make([dynamic]resources.Handle, 0)
   grid_size := 50
@@ -95,7 +90,7 @@ setup_aoe_test :: proc(engine: ^mjolnir.Engine) {
   log.infof("AOE test setup complete: %d cubes", len(cube_handles))
 }
 
-update_aoe_test :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir
   // Handle mouse click for raycasting
   mouse_button_pressed := engine.input.mouse_buttons[glfw.MOUSE_BUTTON_LEFT]
