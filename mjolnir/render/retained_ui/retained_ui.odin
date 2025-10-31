@@ -6,6 +6,7 @@ import resources "../../resources"
 import "core:log"
 import "core:math/linalg"
 import "core:os"
+import "core:slice"
 import fs "vendor:fontstash"
 import vk "vendor:vulkan"
 
@@ -22,6 +23,30 @@ TEXT_MAX_VERTICES :: TEXT_MAX_QUADS * 4
 TEXT_MAX_INDICES :: TEXT_MAX_QUADS * 6
 ATLAS_WIDTH :: 1024
 ATLAS_HEIGHT :: 1024
+
+DROPDOWN_HOVER_BG :: [4]u8{230, 230, 230, 255}
+DROPDOWN_LIST_BG :: [4]u8{240, 245, 250, 255}
+DROPDOWN_LIST_HOVER_BG :: [4]u8{100, 180, 255, 255}
+DROPDOWN_OPEN_HINT_BG :: [4]u8{50, 150, 255, 255}
+DROPDOWN_CLOSE_HINT_BG :: [4]u8{100, 100, 100, 255}
+
+CHECKBOX_HOVER_BG :: [4]u8{230, 230, 230, 255}
+
+RADIO_BUTTON_HOVER_BG :: [4]u8{230, 230, 230, 255}
+
+WHITE :: [4]u8{255, 255, 255, 255}
+BLACK :: [4]u8{0, 0, 0, 255}
+
+WIDGET_DEFAULT_BG :: [4]u8{200, 200, 200, 255}
+WIDGET_DEFAULT_FG :: [4]u8{0, 0, 0, 255}
+WIDGET_DEFAULT_BORDER :: [4]u8{100, 100, 100, 255}
+
+TEXTBOX_BG_FOCUSED :: [4]u8{255, 255, 255, 255}
+TEXTBOX_BG_HOVERED :: [4]u8{245, 245, 245, 255}
+TEXTBOX_BORDER_FOCUSED :: [4]u8{60, 120, 200, 255}
+TEXTBOX_PLACEHOLDER_COLOR :: [4]u8{150, 150, 150, 255}
+
+BUTTON_SHADOW_COLOR :: [4]u8{80, 80, 120, 255}
 
 WidgetType :: enum {
   BUTTON,
@@ -56,34 +81,34 @@ ImageData :: struct {
 }
 
 TextBoxData :: struct {
-  text:            [dynamic]u8,  // mutable text buffer
-  text_as_string:  string,       // view of text as string for rendering
+  text:            [dynamic]u8, // mutable text buffer
+  text_as_string:  string, // view of text as string for rendering
   max_length:      u32,
   placeholder:     string,
   focused:         bool,
   hovered:         bool,
-  cursor_pos:      u32,          // cursor position in text
-  selection_start: i32,          // -1 if no selection
+  cursor_pos:      u32, // cursor position in text
+  selection_start: i32, // -1 if no selection
   selection_end:   i32,
-  callback:        proc(ctx: rawptr),  // called on text change
+  callback:        proc(ctx: rawptr), // called on text change
   user_data:       rawptr,
 }
 
 ComboBoxData :: struct {
-  items:         []string,
-  selected:      i32,          // -1 if nothing selected
-  expanded:      bool,
-  hovered:       bool,
-  hovered_item:  i32,          // which item in dropdown is hovered (-1 if none)
-  callback:      proc(ctx: rawptr, selected_index: i32),  // called when selection changes
-  user_data:     rawptr,
+  items:        []string,
+  selected:     i32, // -1 if nothing selected
+  expanded:     bool,
+  hovered:      bool,
+  hovered_item: i32, // which item in dropdown is hovered (-1 if none)
+  callback:     proc(ctx: rawptr, selected_index: i32), // called when selection changes
+  user_data:    rawptr,
 }
 
 CheckBoxData :: struct {
   checked:   bool,
   label:     string,
   hovered:   bool,
-  callback:  proc(ctx: rawptr, checked: bool),  // called when state changes
+  callback:  proc(ctx: rawptr, checked: bool), // called when state changes
   user_data: rawptr,
 }
 
@@ -92,16 +117,16 @@ RadioButtonData :: struct {
   selected:  bool,
   label:     string,
   hovered:   bool,
-  callback:  proc(ctx: rawptr),  // called when selected
+  callback:  proc(ctx: rawptr), // called when selected
   user_data: rawptr,
 }
 
 WindowData :: struct {
-  title:       string,
-  closeable:   bool,
-  moveable:    bool,
-  resizeable:  bool,
-  minimized:   bool,
+  title:      string,
+  closeable:  bool,
+  moveable:   bool,
+  resizeable: bool,
+  minimized:  bool,
 }
 
 WidgetData :: union {
@@ -124,13 +149,13 @@ Widget :: struct {
   next_sibling: WidgetHandle,
   prev_sibling: WidgetHandle,
   // Layout
-  position:     [2]f32,  // absolute screen position
+  position:     [2]f32, // absolute screen position
   size:         [2]f32,
-  anchor:       [2]f32,  // 0-1 for alignment within parent
+  anchor:       [2]f32, // 0-1 for alignment within parent
   // Visual state
   visible:      bool,
   enabled:      bool,
-  dirty:        bool,    // needs draw list rebuild
+  dirty:        bool, // needs draw list rebuild
   // Styling
   bg_color:     [4]u8,
   fg_color:     [4]u8,
@@ -139,10 +164,6 @@ Widget :: struct {
   // Widget-specific data
   data:         WidgetData,
 }
-
-// ============================================================================
-// Draw Command System
-// ============================================================================
 
 DrawCommandType :: enum {
   RECT,
@@ -154,12 +175,13 @@ DrawCommandType :: enum {
 DrawCommand :: struct {
   type:       DrawCommandType,
   widget:     WidgetHandle,
-  rect:       [4]f32,  // x, y, w, h
+  rect:       [4]f32, // x, y, w, h
   color:      [4]u8,
   texture_id: u32,
-  uv:         [4]f32,  // texture coordinates
+  uv:         [4]f32, // texture coordinates
   text:       string,
-  clip_rect:  [4]i32,  // scissor rectangle
+  clip_rect:  [4]i32, // scissor rectangle
+  z:          f32,
 }
 
 Vertex2D :: struct {
@@ -167,6 +189,7 @@ Vertex2D :: struct {
   uv:         [2]f32,
   color:      [4]u8,
   texture_id: u32,
+  z:          f32,
 }
 
 DrawList :: struct {
@@ -179,50 +202,50 @@ DrawList :: struct {
   cumulative_indices:  u32,
 }
 
-// ============================================================================
-// UI Manager
-// ============================================================================
-
 Manager :: struct {
   // Widget storage
-  widgets:          resources.Pool(Widget),
-  root_widgets:     [dynamic]WidgetHandle,
+  widgets:                      resources.Pool(Widget),
+  root_widgets:                 [dynamic]WidgetHandle,
   // Draw lists (one per frame in flight)
-  draw_lists:       [MAX_FRAMES_IN_FLIGHT]DrawList,
-  current_frame:    u32,
+  draw_lists:                   [MAX_FRAMES_IN_FLIGHT]DrawList,
+  current_frame:                u32,
   // Dirty tracking for incremental updates
-  dirty_widgets:    [dynamic]WidgetHandle,
+  dirty_widgets:                [dynamic]WidgetHandle,
   // Input state
-  mouse_pos:        [2]f32,
-  mouse_down:       bool,
-  mouse_clicked:    bool,
-  mouse_released:   bool,
-  focused_widget:   WidgetHandle,  // Currently focused widget for keyboard input
+  mouse_pos:                    [2]f32,
+  mouse_down:                   bool,
+  mouse_clicked:                bool,
+  mouse_released:               bool,
+  focused_widget:               WidgetHandle, // Currently focused widget for keyboard input
   // UI rectangle rendering resources
-  projection_layout:         vk.DescriptorSetLayout,
-  projection_descriptor_set: vk.DescriptorSet,
-  pipeline_layout:           vk.PipelineLayout,
-  pipeline:                  vk.Pipeline,
-  atlas:                     ^gpu.Image,
-  atlas_handle:              resources.Handle,  // For bindless access
-  proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
-  vertex_buffers:            [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
-  index_buffers:             [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  projection_layout:            vk.DescriptorSetLayout,
+  projection_descriptor_set:    vk.DescriptorSet,
+  pipeline_layout:              vk.PipelineLayout,
+  pipeline:                     vk.Pipeline,
+  atlas:                        ^gpu.Image,
+  atlas_handle:                 resources.Handle, // For bindless access
+  proj_buffer:                  gpu.MutableBuffer(matrix[4, 4]f32),
+  vertex_buffers:               [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    Vertex2D,
+  ),
+  index_buffers:                [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   // Text rendering resources
-  font_ctx:                      fs.FontContext,
-  default_font:                  int,
-  text_atlas_handle:             resources.Handle,  // For bindless access
-  text_vertices:                 [TEXT_MAX_VERTICES]Vertex2D,
-  text_indices:                  [TEXT_MAX_INDICES]u32,
-  text_vertex_count:             u32,
-  text_index_count:              u32,
-  text_vertex_buffer:            gpu.MutableBuffer(Vertex2D),
-  text_index_buffer:             gpu.MutableBuffer(u32),
-  atlas_initialized:             bool,
+  font_ctx:                     fs.FontContext,
+  default_font:                 int,
+  text_atlas_handle:            resources.Handle, // For bindless access
+  text_vertices:                [TEXT_MAX_VERTICES]Vertex2D,
+  text_indices:                 [TEXT_MAX_INDICES]u32,
+  text_vertex_count:            u32,
+  text_index_count:             u32,
+  text_cumulative_vertex_count: u32, // Track what's been flushed
+  text_cumulative_index_count:  u32, // Track what's been flushed
+  text_vertex_buffer:           gpu.MutableBuffer(Vertex2D),
+  text_index_buffer:            gpu.MutableBuffer(u32),
+  atlas_initialized:            bool,
   // Screen dimensions
-  frame_width:      u32,
-  frame_height:     u32,
-  dpi_scale:        f32,
+  frame_width:                  u32,
+  frame_height:                 u32,
+  dpi_scale:                    f32,
 }
 
 atlas_resize_callback :: proc(data: rawptr, w, h: int) {
@@ -273,7 +296,9 @@ init :: proc(
       pName = "main",
     },
   }
-  dynamic_state_info := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
+  dynamic_state_info := gpu.create_dynamic_state(
+    gpu.STANDARD_DYNAMIC_STATES[:],
+  )
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Vertex2D),
@@ -281,28 +306,34 @@ init :: proc(
   }
   vertex_attributes := [?]vk.VertexInputAttributeDescription {
     {
-      binding  = 0,
+      binding = 0,
       location = 0,
-      format   = .R32G32_SFLOAT,
-      offset   = u32(offset_of(Vertex2D, pos)),
+      format = .R32G32_SFLOAT,
+      offset = u32(offset_of(Vertex2D, pos)),
     },
     {
-      binding  = 0,
+      binding = 0,
       location = 1,
-      format   = .R32G32_SFLOAT,
-      offset   = u32(offset_of(Vertex2D, uv)),
+      format = .R32G32_SFLOAT,
+      offset = u32(offset_of(Vertex2D, uv)),
     },
     {
-      binding  = 0,
+      binding = 0,
       location = 2,
-      format   = .R8G8B8A8_UNORM,
-      offset   = u32(offset_of(Vertex2D, color)),
+      format = .R8G8B8A8_UNORM,
+      offset = u32(offset_of(Vertex2D, color)),
     },
     {
-      binding  = 0,
+      binding = 0,
       location = 3,
-      format   = .R32_UINT,
-      offset   = u32(offset_of(Vertex2D, texture_id)),
+      format = .R32_UINT,
+      offset = u32(offset_of(Vertex2D, texture_id)),
+    },
+    {
+      binding = 0,
+      location = 4,
+      format = .R32_SFLOAT,
+      offset = u32(offset_of(Vertex2D, z)),
     },
   }
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
@@ -410,7 +441,7 @@ init :: proc(
   ) or_return
   // Create white 1x1 texture as default
   log.infof("init UI default texture...")
-  white_pixel := [4]u8{255, 255, 255, 255}
+  white_pixel := WHITE
   self.atlas_handle, self.atlas = resources.create_texture_from_pixels(
     gctx,
     rm,
@@ -450,12 +481,12 @@ init :: proc(
     range  = size_of(matrix[4, 4]f32),
   }
   write := vk.WriteDescriptorSet {
-    sType = .WRITE_DESCRIPTOR_SET,
-    dstSet = self.projection_descriptor_set,
-    dstBinding = 0,
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = self.projection_descriptor_set,
+    dstBinding      = 0,
     descriptorCount = 1,
-    descriptorType = .UNIFORM_BUFFER,
-    pBufferInfo = &buffer_info,
+    descriptorType  = .UNIFORM_BUFFER,
+    pBufferInfo     = &buffer_info,
   }
   vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
   log.infof("init text rendering system...")
@@ -494,12 +525,12 @@ init :: proc(
   atlas_size := self.font_ctx.width * self.font_ctx.height
   rgba_data := make([]u8, atlas_size * 4)
   defer delete(rgba_data)
-  for i in 0..<atlas_size {
+  for i in 0 ..< atlas_size {
     alpha := self.font_ctx.textureData[i]
-    rgba_data[i*4 + 0] = 255  // R = white
-    rgba_data[i*4 + 1] = 255  // G = white
-    rgba_data[i*4 + 2] = 255  // B = white
-    rgba_data[i*4 + 3] = alpha  // A = alpha mask
+    rgba_data[i * 4 + 0] = 255 // R = white
+    rgba_data[i * 4 + 1] = 255 // G = white
+    rgba_data[i * 4 + 2] = 255 // B = white
+    rgba_data[i * 4 + 3] = alpha // A = alpha mask
   }
   self.text_atlas_handle, _ = resources.create_texture_from_pixels(
     gctx,
@@ -510,7 +541,10 @@ init :: proc(
     .R8G8B8A8_UNORM,
   ) or_return
   self.atlas_initialized = true
-  log.infof("Text atlas created at bindless index %d", self.text_atlas_handle.index)
+  log.infof(
+    "Text atlas created at bindless index %d",
+    self.text_atlas_handle.index,
+  )
   // Create text GPU buffers (text uses same pipeline but separate buffers for staging)
   log.infof("creating text GPU buffers...")
   self.text_vertex_buffer = gpu.create_mutable_buffer(
@@ -553,28 +587,24 @@ widget_deinit :: proc(widget: ^Widget) {
   // Cleanup widget-specific data
   switch &data in widget.data {
   case ButtonData:
-    // Button data cleanup if needed
+  // Button data cleanup if needed
   case LabelData:
-    // Label data cleanup if needed
+  // Label data cleanup if needed
   case ImageData:
-    // Image data cleanup if needed
+  // Image data cleanup if needed
   case TextBoxData:
     // Clean up dynamic text buffer
     delete(data.text)
   case ComboBoxData:
-    // ComboBox data cleanup if needed
+  // ComboBox data cleanup if needed
   case CheckBoxData:
-    // CheckBox data cleanup if needed
+  // CheckBox data cleanup if needed
   case RadioButtonData:
-    // RadioButton data cleanup if needed
+  // RadioButton data cleanup if needed
   case WindowData:
-    // Window data cleanup if needed
+  // Window data cleanup if needed
   }
 }
-
-// ============================================================================
-// Widget Management
-// ============================================================================
 
 create_widget :: proc(
   self: ^Manager,
@@ -591,10 +621,10 @@ create_widget :: proc(
   widget.parent = parent
   widget.visible = true
   widget.enabled = true
-  widget.dirty = false  // Start as clean, mark_dirty will set to true
-  widget.bg_color = {200, 200, 200, 255}
-  widget.fg_color = {0, 0, 0, 255}
-  widget.border_color = {100, 100, 100, 255}
+  widget.dirty = false
+  widget.bg_color = WIDGET_DEFAULT_BG
+  widget.fg_color = WIDGET_DEFAULT_FG
+  widget.border_color = WIDGET_DEFAULT_BORDER
   widget.border_width = 1.0
   if parent_widget, found := cont.get(self.widgets, parent); found {
     if parent_widget.last_child.index != 0 {
@@ -621,14 +651,13 @@ mark_dirty :: proc(self: ^Manager, handle: WidgetHandle) {
   }
 }
 
-// ============================================================================
-// Draw List Management
-// ============================================================================
-
 rebuild_draw_lists :: proc(self: ^Manager) {
   if len(self.dirty_widgets) == 0 do return
   when ODIN_DEBUG {
-    log.debugf("Rebuilding draw lists for %d dirty widget(s)", len(self.dirty_widgets))
+    log.debugf(
+      "Rebuilding draw lists for %d dirty widget(s)",
+      len(self.dirty_widgets),
+    )
   }
   // Instead of clearing everything, only remove commands for dirty widgets
   for dirty_handle in self.dirty_widgets {
@@ -716,17 +745,32 @@ build_button_commands :: proc(
   data := widget.data.(ButtonData)
   bg_color := widget.bg_color
   if data.pressed {
-    bg_color = {u8(widget.bg_color.r / 2), u8(widget.bg_color.g / 2), u8(widget.bg_color.b / 2), widget.bg_color.a}
+    bg_color = {
+      u8(widget.bg_color.r / 2),
+      u8(widget.bg_color.g / 2),
+      u8(widget.bg_color.b / 2),
+      widget.bg_color.a,
+    }
   } else if data.hovered {
     // Darken on hover for better contrast against light backgrounds
-    bg_color = {max(widget.bg_color.r - 40, 0), max(widget.bg_color.g - 40, 0), max(widget.bg_color.b - 40, 0), widget.bg_color.a}
+    bg_color = {
+      max(widget.bg_color.r - 40, 0),
+      max(widget.bg_color.g - 40, 0),
+      max(widget.bg_color.b - 40, 0),
+      widget.bg_color.a,
+    }
   }
   append(
     &draw_list.commands,
     DrawCommand {
       type = .RECT,
       widget = handle,
-      rect = {widget.position.x, widget.position.y, widget.size.x, widget.size.y},
+      rect = {
+        widget.position.x,
+        widget.position.y,
+        widget.size.x,
+        widget.size.y,
+      },
       color = bg_color,
       uv = {0, 0, 1, 1},
     },
@@ -736,7 +780,12 @@ build_button_commands :: proc(
     DrawCommand {
       type = .TEXT,
       widget = handle,
-      rect = {widget.position.x + 10, widget.position.y + 10, widget.size.x - 20, widget.size.y - 20},
+      rect = {
+        widget.position.x + 10,
+        widget.position.y + 10,
+        widget.size.x - 20,
+        widget.size.y - 20,
+      },
       color = widget.fg_color,
       text = data.text,
     },
@@ -755,7 +804,12 @@ build_label_commands :: proc(
     DrawCommand {
       type = .TEXT,
       widget = handle,
-      rect = {widget.position.x, widget.position.y, widget.size.x, widget.size.y},
+      rect = {
+        widget.position.x,
+        widget.position.y,
+        widget.size.x,
+        widget.size.y,
+      },
       color = widget.fg_color,
       text = data.text,
     },
@@ -774,10 +828,16 @@ build_image_commands :: proc(
     DrawCommand {
       type = .IMAGE,
       widget = handle,
-      rect = {widget.position.x, widget.position.y, widget.size.x, widget.size.y},
-      color = {255, 255, 255, 255},
+      rect = {
+        widget.position.x,
+        widget.position.y,
+        widget.size.x,
+        widget.size.y,
+      },
+      color = WHITE,
       texture_id = data.texture_handle.index,
       uv = data.uv,
+      z = 0.0,
     },
   )
 }
@@ -795,8 +855,13 @@ build_window_commands :: proc(
     DrawCommand {
       type = .RECT,
       widget = handle,
-      rect = {widget.position.x, widget.position.y, widget.size.x, title_bar_height},
-      color = {80, 80, 120, 255},
+      rect = {
+        widget.position.x,
+        widget.position.y,
+        widget.size.x,
+        title_bar_height,
+      },
+      color = BUTTON_SHADOW_COLOR,
       uv = {0, 0, 1, 1},
     },
   )
@@ -805,8 +870,13 @@ build_window_commands :: proc(
     DrawCommand {
       type = .TEXT,
       widget = handle,
-      rect = {widget.position.x + 10, widget.position.y + 5, widget.size.x - 20, title_bar_height - 10},
-      color = {255, 255, 255, 255},
+      rect = {
+        widget.position.x + 10,
+        widget.position.y + 5,
+        widget.size.x - 20,
+        title_bar_height - 10,
+      },
+      color = WHITE,
       text = data.title,
     },
   )
@@ -816,7 +886,12 @@ build_window_commands :: proc(
       DrawCommand {
         type = .RECT,
         widget = handle,
-        rect = {widget.position.x, widget.position.y + title_bar_height, widget.size.x, widget.size.y - title_bar_height},
+        rect = {
+          widget.position.x,
+          widget.position.y + title_bar_height,
+          widget.size.x,
+          widget.size.y - title_bar_height,
+        },
         color = widget.bg_color,
         uv = {0, 0, 1, 1},
       },
@@ -834,22 +909,27 @@ build_textbox_commands :: proc(
   // Background
   bg_color := widget.bg_color
   if data.focused {
-    bg_color = {255, 255, 255, 255}  // White when focused
+    bg_color = WHITE // White when focused
   } else if data.hovered {
-    bg_color = {245, 245, 245, 255}  // Light gray when hovered
+    bg_color = TEXTBOX_BG_HOVERED // Light gray when hovered
   }
   append(
     &draw_list.commands,
     DrawCommand {
       type = .RECT,
       widget = handle,
-      rect = {widget.position.x, widget.position.y, widget.size.x, widget.size.y},
+      rect = {
+        widget.position.x,
+        widget.position.y,
+        widget.size.x,
+        widget.size.y,
+      },
       color = bg_color,
       uv = {0, 0, 1, 1},
     },
   )
   // Border (darker when focused)
-  border_color := data.focused ? [4]u8{60, 120, 200, 255} : widget.border_color
+  border_color := data.focused ? TEXTBOX_BORDER_FOCUSED : widget.border_color
   // Text or placeholder - show placeholder if text is empty
   if len(data.text) == 0 {
     // Show placeholder in gray
@@ -859,8 +939,13 @@ build_textbox_commands :: proc(
         DrawCommand {
           type = .TEXT,
           widget = handle,
-          rect = {widget.position.x + 8, widget.position.y + 8, widget.size.x - 16, widget.size.y - 16},
-          color = {150, 150, 150, 255},
+          rect = {
+            widget.position.x + 8,
+            widget.position.y + 8,
+            widget.size.x - 16,
+            widget.size.y - 16,
+          },
+          color = TEXTBOX_PLACEHOLDER_COLOR,
           text = data.placeholder,
         },
       )
@@ -872,7 +957,12 @@ build_textbox_commands :: proc(
       DrawCommand {
         type = .TEXT,
         widget = handle,
-        rect = {widget.position.x + 8, widget.position.y + 8, widget.size.x - 16, widget.size.y - 16},
+        rect = {
+          widget.position.x + 8,
+          widget.position.y + 8,
+          widget.size.x - 16,
+          widget.size.y - 16,
+        },
         color = widget.fg_color,
         text = data.text_as_string,
       },
@@ -898,11 +988,11 @@ build_textbox_commands :: proc(
     append(
       &draw_list.commands,
       DrawCommand {
-        type = .RECT,
+        type   = .RECT,
         widget = handle,
-        rect = {cursor_x, cursor_y, 2, cursor_height},  // 2 pixels wide
-        color = {0, 0, 0, 255},
-        uv = {0, 0, 1, 1},
+        rect   = {cursor_x, cursor_y, 2, cursor_height}, // 2 pixels wide
+        color  = {0, 0, 0, 255},
+        uv     = {0, 0, 1, 1},
       },
     )
   }
@@ -916,79 +1006,108 @@ build_combobox_commands :: proc(
 ) {
   data := widget.data.(ComboBoxData)
   // Main box
-  bg_color := data.hovered ? [4]u8{230, 230, 230, 255} : widget.bg_color
+  bg_color := data.hovered ? DROPDOWN_HOVER_BG : widget.bg_color
   append(
     &draw_list.commands,
     DrawCommand {
       type = .RECT,
       widget = handle,
-      rect = {widget.position.x, widget.position.y, widget.size.x, widget.size.y},
+      rect = {
+        widget.position.x,
+        widget.position.y,
+        widget.size.x,
+        widget.size.y,
+      },
       color = bg_color,
       uv = {0, 0, 1, 1},
     },
   )
-  // Selected item text - must reference stable memory
   if data.selected >= 0 && data.selected < i32(len(data.items)) {
-    // Reference stable string from items array
     append(
       &draw_list.commands,
       DrawCommand {
         type = .TEXT,
         widget = handle,
-        rect = {widget.position.x + 8, widget.position.y + 8, widget.size.x - 32, widget.size.y - 16},
+        rect = {
+          widget.position.x + 8,
+          widget.position.y + 8,
+          widget.size.x - 32,
+          widget.size.y - 16,
+        },
         color = widget.fg_color,
         text = data.items[data.selected],
       },
     )
   } else {
-    // Reference string literal (stable)
     append(
       &draw_list.commands,
       DrawCommand {
         type = .TEXT,
         widget = handle,
-        rect = {widget.position.x + 8, widget.position.y + 8, widget.size.x - 32, widget.size.y - 16},
+        rect = {
+          widget.position.x + 8,
+          widget.position.y + 8,
+          widget.size.x - 32,
+          widget.size.y - 16,
+        },
         color = widget.fg_color,
         text = "Select...",
       },
     )
   }
-  // Dropdown arrow (simple text)
+  cue_width: f32 = 8
+  cue_color := data.expanded ? DROPDOWN_OPEN_HINT_BG : DROPDOWN_CLOSE_HINT_BG
   append(
     &draw_list.commands,
     DrawCommand {
-      type = .TEXT,
+      type = .RECT,
       widget = handle,
-      rect = {widget.position.x + widget.size.x - 24, widget.position.y + 8, 16, widget.size.y - 16},
-      color = widget.fg_color,
-      text = data.expanded ? "▲" : "▼",
+      rect = {
+        widget.position.x + widget.size.x - cue_width,
+        widget.position.y,
+        cue_width,
+        widget.size.y,
+      },
+      color = cue_color,
+      uv = {0, 0, 1, 1},
     },
   )
-  // Dropdown list
   if data.expanded {
     item_height: f32 = 24
     dropdown_y := widget.position.y + widget.size.y
     for item, i in data.items {
-      item_bg := data.hovered_item == i32(i) ? [4]u8{200, 220, 255, 255} : [4]u8{250, 250, 250, 255}
+      item_bg :=
+        data.hovered_item == i32(i) ? DROPDOWN_LIST_HOVER_BG : DROPDOWN_LIST_BG
       append(
         &draw_list.commands,
         DrawCommand {
           type = .RECT,
           widget = handle,
-          rect = {widget.position.x, dropdown_y + f32(i) * item_height, widget.size.x, item_height},
+          rect = {
+            widget.position.x,
+            dropdown_y + f32(i) * item_height,
+            widget.size.x,
+            item_height,
+          },
           color = item_bg,
           uv = {0, 0, 1, 1},
+          z = -0.01,
         },
       )
-      // IMPORTANT: Reference data.items[i] directly, not the local 'item' variable
       append(
         &draw_list.commands,
         DrawCommand {
           type = .TEXT,
           widget = handle,
-          rect = {widget.position.x + 8, dropdown_y + f32(i) * item_height + 4, widget.size.x - 16, item_height - 8},
-          color = {0, 0, 0, 255},
-          text = data.items[i],  // Reference array element directly
+          rect = {
+            widget.position.x + 8,
+            dropdown_y + f32(i) * item_height + 4,
+            widget.size.x - 16,
+            item_height - 8,
+          },
+          color = BLACK,
+          text = item,
+          z = -0.01,
         },
       )
     }
@@ -1005,7 +1124,7 @@ build_checkbox_commands :: proc(
   box_size: f32 = 20
   spacing: f32 = 8
   // Checkbox box
-  box_bg := data.hovered ? [4]u8{230, 230, 230, 255} : widget.bg_color
+  box_bg := data.hovered ? CHECKBOX_HOVER_BG : widget.bg_color
   append(
     &draw_list.commands,
     DrawCommand {
@@ -1021,11 +1140,16 @@ build_checkbox_commands :: proc(
     append(
       &draw_list.commands,
       DrawCommand {
-        type = .TEXT,
+        type = .RECT,
         widget = handle,
-        rect = {widget.position.x + 2, widget.position.y + 2, box_size - 4, box_size - 4},
-        color = {40, 100, 200, 255},
-        text = "O",
+        rect = {
+          widget.position.x + 2,
+          widget.position.y + 2,
+          box_size - 4,
+          box_size - 4,
+        },
+        color = BLACK,
+        uv = {0, 0, 1, 1},
       },
     )
   }
@@ -1036,7 +1160,12 @@ build_checkbox_commands :: proc(
       DrawCommand {
         type = .TEXT,
         widget = handle,
-        rect = {widget.position.x + box_size + spacing, widget.position.y, widget.size.x - box_size - spacing, box_size},
+        rect = {
+          widget.position.x + box_size + spacing,
+          widget.position.y,
+          widget.size.x - box_size - spacing,
+          box_size,
+        },
         color = widget.fg_color,
         text = data.label,
       },
@@ -1054,7 +1183,7 @@ build_radiobutton_commands :: proc(
   circle_size: f32 = 20
   spacing: f32 = 8
   // Radio circle background
-  circle_bg := data.hovered ? [4]u8{230, 230, 230, 255} : widget.bg_color
+  circle_bg := data.hovered ? RADIO_BUTTON_HOVER_BG : widget.bg_color
   append(
     &draw_list.commands,
     DrawCommand {
@@ -1070,11 +1199,16 @@ build_radiobutton_commands :: proc(
     append(
       &draw_list.commands,
       DrawCommand {
-        type = .TEXT,
+        type = .RECT,
         widget = handle,
-        rect = {widget.position.x + 4, widget.position.y + 2, circle_size - 8, circle_size - 4},
-        color = {40, 100, 200, 255},
-        text = "O",
+        rect = {
+          widget.position.x + 4,
+          widget.position.y + 4,
+          circle_size - 8,
+          circle_size - 8,
+        },
+        color = BLACK,
+        uv = {0, 0, 1, 1},
       },
     )
   }
@@ -1085,17 +1219,18 @@ build_radiobutton_commands :: proc(
       DrawCommand {
         type = .TEXT,
         widget = handle,
-        rect = {widget.position.x + circle_size + spacing, widget.position.y, widget.size.x - circle_size - spacing, circle_size},
+        rect = {
+          widget.position.x + circle_size + spacing,
+          widget.position.y,
+          widget.size.x - circle_size - spacing,
+          circle_size,
+        },
         color = widget.fg_color,
         text = data.label,
       },
     )
   }
 }
-
-// ============================================================================
-// Input Handling
-// ============================================================================
 
 update_input :: proc(self: ^Manager, mouse_x, mouse_y: f32, mouse_down: bool) {
   self.mouse_pos = {mouse_x, mouse_y}
@@ -1138,7 +1273,7 @@ input_key :: proc(self: ^Manager, key: int, action: int) {
   data := &widget.data.(TextBoxData)
   if !data.focused do return
   // Only handle press and repeat actions
-  if action != 1 && action != 2 do return  // 1 = PRESS, 2 = REPEAT
+  if action != 1 && action != 2 do return // 1 = PRESS, 2 = REPEAT
   // Handle backspace (259 = GLFW_KEY_BACKSPACE)
   if key == 259 {
     if len(data.text) > 0 {
@@ -1152,7 +1287,12 @@ input_key :: proc(self: ^Manager, key: int, action: int) {
   }
 }
 
-deselect_radio_group :: proc(self: ^Manager, handle: WidgetHandle, group_id: u32, exclude_handle: WidgetHandle) {
+deselect_radio_group :: proc(
+  self: ^Manager,
+  handle: WidgetHandle,
+  group_id: u32,
+  exclude_handle: WidgetHandle,
+) {
   widget, found := cont.get(self.widgets, handle)
   if !found do return
   if widget.type == .RADIO_BUTTON && handle != exclude_handle {
@@ -1239,8 +1379,12 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
     if self.mouse_clicked {
       // Clear previous focus
       if self.focused_widget.index != 0 && self.focused_widget != handle {
-        if old_focused_widget, ok := cont.get(self.widgets, self.focused_widget); ok {
-          if old_data, is_textbox := &old_focused_widget.data.(TextBoxData); is_textbox {
+        if old_focused_widget, ok := cont.get(
+          self.widgets,
+          self.focused_widget,
+        ); ok {
+          if old_data, is_textbox := &old_focused_widget.data.(TextBoxData);
+             is_textbox {
             old_data.focused = false
             mark_dirty(self, self.focused_widget)
           }
@@ -1273,7 +1417,10 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
       data.hovered_item = -1
       for item, i in data.items {
         item_y := dropdown_y + f32(i) * item_height
-        if mx >= wx && mx <= wx + ww && my >= item_y && my <= item_y + item_height {
+        if mx >= wx &&
+           mx <= wx + ww &&
+           my >= item_y &&
+           my <= item_y + item_height {
           data.hovered_item = i32(i)
           if self.mouse_clicked {
             selected_index := i32(i)
@@ -1303,7 +1450,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
       mark_dirty(self, handle)
     }
   case .LABEL, .IMAGE, .WINDOW:
-    // No input handling needed
+  // No input handling needed
   }
   child := widget.first_child
   for child.index != 0 {
@@ -1312,10 +1459,6 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
     child = child_widget.next_sibling
   }
 }
-
-// ============================================================================
-// Rendering
-// ============================================================================
 
 update :: proc(self: ^Manager, frame_index: u32) {
   self.current_frame = frame_index
@@ -1336,11 +1479,11 @@ begin_pass :: proc(
     storeOp     = .STORE,
   }
   render_info := vk.RenderingInfo {
-    sType                = .RENDERING_INFO,
-    renderArea           = {extent = extent},
-    layerCount           = 1,
+    sType = .RENDERING_INFO,
+    renderArea = {extent = extent},
+    layerCount = 1,
     colorAttachmentCount = 1,
-    pColorAttachments    = &color_attachment,
+    pColorAttachments = &color_attachment,
   }
   vk.CmdBeginRendering(command_buffer, &render_info)
 }
@@ -1349,11 +1492,12 @@ end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
 
-// ============================================================================
-// Text Rendering Helper Functions
-// ============================================================================
-
-push_text_quad :: proc(self: ^Manager, quad: fs.Quad, color: [4]u8) {
+push_text_quad :: proc(
+  self: ^Manager,
+  quad: fs.Quad,
+  color: [4]u8,
+  z: f32 = 0.0,
+) {
   if self.text_vertex_count + 4 > TEXT_MAX_VERTICES ||
      self.text_index_count + 6 > TEXT_MAX_INDICES {
     log.warnf("Text vertex buffer full, dropping text")
@@ -1365,24 +1509,28 @@ push_text_quad :: proc(self: ^Manager, quad: fs.Quad, color: [4]u8) {
     uv         = [2]f32{quad.s0, quad.t0},
     color      = color,
     texture_id = texture_id,
+    z          = z,
   }
   self.text_vertices[self.text_vertex_count + 1] = {
     pos        = [2]f32{quad.x1, quad.y0},
     uv         = [2]f32{quad.s1, quad.t0},
     color      = color,
     texture_id = texture_id,
+    z          = z,
   }
   self.text_vertices[self.text_vertex_count + 2] = {
     pos        = [2]f32{quad.x1, quad.y1},
     uv         = [2]f32{quad.s1, quad.t1},
     color      = color,
     texture_id = texture_id,
+    z          = z,
   }
   self.text_vertices[self.text_vertex_count + 3] = {
     pos        = [2]f32{quad.x0, quad.y1},
     uv         = [2]f32{quad.s0, quad.t1},
     color      = color,
     texture_id = texture_id,
+    z          = z,
   }
   vertex_base := u32(self.text_vertex_count)
   self.text_indices[self.text_index_count + 0] = vertex_base + 0
@@ -1401,6 +1549,7 @@ draw_text_internal :: proc(
   x, y: f32,
   size: f32 = 16,
   color: [4]u8 = {255, 255, 255, 255},
+  z: f32 = 0.0,
 ) {
   if len(text) == 0 {
     return
@@ -1417,21 +1566,29 @@ draw_text_internal :: proc(
   iter := fs.TextIterInit(&self.font_ctx, x, y, text)
   quad: fs.Quad
   for fs.TextIterNext(&self.font_ctx, &iter, &quad) {
-    push_text_quad(self, quad, color)
+    push_text_quad(self, quad, color, z)
   }
 }
 
-flush_text :: proc(self: ^Manager, cmd_buf: vk.CommandBuffer, rm: ^resources.Manager) -> vk.Result {
-  if self.text_vertex_count == 0 && self.text_index_count == 0 {
+flush_text :: proc(
+  self: ^Manager,
+  cmd_buf: vk.CommandBuffer,
+  rm: ^resources.Manager,
+) -> vk.Result {
+  new_vertex_count :=
+    self.text_vertex_count - self.text_cumulative_vertex_count
+  new_index_count := self.text_index_count - self.text_cumulative_index_count
+  if new_vertex_count == 0 && new_index_count == 0 {
     return .SUCCESS
   }
-  defer {
-    self.text_vertex_count = 0
-    self.text_index_count = 0
-  }
-  gpu.write(&self.text_vertex_buffer, self.text_vertices[:self.text_vertex_count]) or_return
-  gpu.write(&self.text_index_buffer, self.text_indices[:self.text_index_count]) or_return
-  // Use main UI pipeline (same as rectangles and images)
+  gpu.write(
+    &self.text_vertex_buffer,
+    self.text_vertices[:self.text_vertex_count],
+  ) or_return
+  gpu.write(
+    &self.text_index_buffer,
+    self.text_indices[:self.text_index_count],
+  ) or_return
   vk.CmdBindPipeline(cmd_buf, .GRAPHICS, self.pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
     self.projection_descriptor_set,
@@ -1469,7 +1626,11 @@ flush_text :: proc(self: ^Manager, cmd_buf: vk.CommandBuffer, rm: ^resources.Man
     raw_data(offsets[:]),
   )
   vk.CmdBindIndexBuffer(cmd_buf, self.text_index_buffer.buffer, 0, .UINT32)
-  vk.CmdDrawIndexed(cmd_buf, self.text_index_count, 1, 0, 0, 0)
+  first_index := self.text_cumulative_index_count
+  vk.CmdDrawIndexed(cmd_buf, new_index_count, 1, first_index, 0, 0)
+  self.text_cumulative_vertex_count = self.text_vertex_count
+  self.text_cumulative_index_count = self.text_index_count
+
   return .SUCCESS
 }
 
@@ -1480,15 +1641,19 @@ flush_ui_batch :: proc(
   draw_list: ^DrawList,
   rm: ^resources.Manager,
 ) -> vk.Result {
-  // Calculate how many NEW vertices/indices to flush since last flush
   new_vertex_count := draw_list.vertex_count - draw_list.cumulative_vertices
   new_index_count := draw_list.index_count - draw_list.cumulative_indices
   if new_vertex_count == 0 {
     return .SUCCESS
   }
-  // Write ALL accumulated vertices/indices to GPU buffer (including previous batches)
-  gpu.write(&self.vertex_buffers[frame_index], draw_list.vertices[:draw_list.vertex_count]) or_return
-  gpu.write(&self.index_buffers[frame_index], draw_list.indices[:draw_list.index_count]) or_return
+  gpu.write(
+    &self.vertex_buffers[frame_index],
+    draw_list.vertices[:draw_list.vertex_count],
+  ) or_return
+  gpu.write(
+    &self.index_buffers[frame_index],
+    draw_list.indices[:draw_list.index_count],
+  ) or_return
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
     self.projection_descriptor_set,
@@ -1503,7 +1668,7 @@ flush_ui_batch :: proc(
     raw_data(descriptor_sets[:]),
     0,
     nil,
-    )
+  )
   viewport := vk.Viewport {
     x        = 0,
     y        = f32(self.frame_height),
@@ -1531,12 +1696,8 @@ flush_ui_batch :: proc(
     0,
     .UINT32,
   )
-  // Draw only the NEW vertices from this batch
-  // Note: vertexOffset is added to each index, but our indices are already absolute,
-  // so we use vertexOffset=0 and rely on the absolute indices
   first_index := draw_list.cumulative_indices
   vk.CmdDrawIndexed(command_buffer, new_index_count, 1, first_index, 0, 0)
-  // Update cumulative to mark what we've drawn
   draw_list.cumulative_vertices = draw_list.vertex_count
   draw_list.cumulative_indices = draw_list.index_count
   return .SUCCESS
@@ -1551,12 +1712,30 @@ render :: proc(
 ) -> vk.Result {
   draw_list := &self.draw_lists[frame_index]
   if len(draw_list.commands) == 0 do return .SUCCESS
-  // Reset for this frame's accumulation
   draw_list.vertex_count = 0
   draw_list.index_count = 0
   draw_list.cumulative_vertices = 0
   draw_list.cumulative_indices = 0
+  self.text_vertex_count = 0
+  self.text_index_count = 0
+  self.text_cumulative_vertex_count = 0
+  self.text_cumulative_index_count = 0
+  slice.stable_sort_by(draw_list.commands[:], proc(a, b: DrawCommand) -> bool {
+    return a.z > b.z
+  })
+  current_z: f32 = 999.0
   for cmd in draw_list.commands {
+    if cmd.z < current_z {
+      flush_ui_batch(
+        self,
+        command_buffer,
+        frame_index,
+        draw_list,
+        rm,
+      ) or_return
+      flush_text(self, command_buffer, rm) or_return
+      current_z = cmd.z
+    }
     switch cmd.type {
     case .RECT:
       push_quad(
@@ -1564,39 +1743,33 @@ render :: proc(
         {cmd.rect.x, cmd.rect.y, cmd.rect.z, cmd.rect.w},
         cmd.uv,
         cmd.color,
-        self.atlas_handle.index,  // Use white texture for solid colors
-      )
-    case .TEXT:
-      // Flush current batch before drawing text
-      flush_ui_batch(self, command_buffer, frame_index, draw_list, rm) or_return
-      // Draw text using internal text renderer
-      // Baseline offset: position text relative to top of bounding box
-      // Font metrics: baseline is roughly 75% down from top for most fonts
-      baseline_offset := cmd.rect.w * 0.75  // Use width as font size hint
-      draw_text_internal(
-        self,
-        cmd.text,
-        cmd.rect.x,
-        cmd.rect.y + baseline_offset,
-        cmd.rect.w,  // Use rect width as font size
-        cmd.color,
+        self.atlas_handle.index,
+        cmd.z,
       )
     case .IMAGE:
-      // Just push the image quad with its texture ID - bindless system handles the rest
       push_quad(
         draw_list,
         {cmd.rect.x, cmd.rect.y, cmd.rect.z, cmd.rect.w},
         cmd.uv,
         cmd.color,
         cmd.texture_id,
+        cmd.z,
+      )
+    case .TEXT:
+      baseline_offset := cmd.rect.w * 0.75
+      draw_text_internal(
+        self,
+        cmd.text,
+        cmd.rect.x,
+        cmd.rect.y + baseline_offset,
+        cmd.rect.w,
+        cmd.color,
+        cmd.z,
       )
     case .CLIP:
-      // Clip handling
     }
   }
-  // Flush any remaining UI quads (images)
   flush_ui_batch(self, command_buffer, frame_index, draw_list, rm) or_return
-  // Then flush text renderer on top
   flush_text(self, command_buffer, rm) or_return
   return .SUCCESS
 }
@@ -1607,11 +1780,15 @@ push_quad :: proc(
   uv: [4]f32,
   color: [4]u8,
   texture_id: u32 = 0,
+  z: f32 = 0.0,
 ) {
   if draw_list.vertex_count + 4 > UI_MAX_VERTICES ||
      draw_list.index_count + 6 > UI_MAX_INDICES {
-    log.warnf("push_quad: buffer full! vertex_count=%d, index_count=%d",
-      draw_list.vertex_count, draw_list.index_count)
+    log.warnf(
+      "push_quad: buffer full! vertex_count=%d, index_count=%d",
+      draw_list.vertex_count,
+      draw_list.index_count,
+    )
     return
   }
   x, y, w, h := rect.x, rect.y, rect.z, rect.w
@@ -1621,24 +1798,28 @@ push_quad :: proc(
     uv         = {u0, v0},
     color      = color,
     texture_id = texture_id,
+    z          = z,
   }
   draw_list.vertices[draw_list.vertex_count + 1] = {
     pos        = {x + w, y},
     uv         = {u1, v0},
     color      = color,
     texture_id = texture_id,
+    z          = z,
   }
   draw_list.vertices[draw_list.vertex_count + 2] = {
     pos        = {x + w, y + h},
     uv         = {u1, v1},
     color      = color,
     texture_id = texture_id,
+    z          = z,
   }
   draw_list.vertices[draw_list.vertex_count + 3] = {
     pos        = {x, y + h},
     uv         = {u0, v1},
     color      = color,
     texture_id = texture_id,
+    z          = z,
   }
   vertex_base := u32(draw_list.vertex_count)
   draw_list.indices[draw_list.index_count + 0] = vertex_base + 0
