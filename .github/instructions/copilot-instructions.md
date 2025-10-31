@@ -24,10 +24,8 @@ make test
 odin test test -out:bin/test -define:ODIN_TEST_NAMES=tests.name
 # Check for compiler errors without building
 make check
-# Build all shaders (required before first build)
+# Build all shaders
 make shader
-# Build single shader
-make mjolnir/shader/{shader_name}/vert.spv # build a specific vertex shader, use frag.spv for fragment shader
 ```
 
 ## Architecture Overview
@@ -36,16 +34,20 @@ make mjolnir/shader/{shader_name}/vert.spv # build a specific vertex shader, use
 The engine is organized into sub-systems with clear responsibility boundaries:
 
 **Lower Level Systems (highly independent):**
-- **GPU**: `mjolnir/gpu/` - Vulkan context, memory management, swapchain
+- **GPU**: `mjolnir/gpu/` - Vulkan context, memory management, swapchain, pipeline helpers
+- **Containers**: `mjolnir/containers/` - Generic data structures (handle pools, slab allocators)
 - **Geometry**: `mjolnir/geometry/` - Camera, transforms, primitives, BVH, octree, AABB, frustum
 - **Animation**: `mjolnir/animation/` - Skeletal animation support
 - **Navigation**: `mjolnir/navigation/` - Recast + Detour integration
+- **Physics**: `mjolnir/physics/` - Rigid body dynamics, collision detection, character controllers
+- **Level Manager**: `mjolnir/level_manager/` - Async/blocking level transitions with loading screen support
 
 **Higher Level Systems:**
 - **Resources**: `mjolnir/resources/` - Data management (Mesh, Material, Node, Skin, Light, Camera, etc.)
-  + Handle-based system with generational arrays and slab allocators
+  + Handle-based system with generational handle pools
+  + Reference counting for shared resources (meshes, materials, textures)
+  + Builtin materials and primitive meshes for quick prototyping
 - **Render**: Rendering sub-systems that depend on Resources
-  + Shadow Renderer
   + Geometry Renderer
   + Lighting Renderer
   + Transparency Renderer
@@ -57,27 +59,11 @@ The engine is organized into sub-systems with clear responsibility boundaries:
 ### Rendering Pipeline
 The engine uses a deferred rendering approach with multiple passes:
 
-1. **Depth Pre-pass** - Early depth testing for performance
-2. **Shadow Pass** - Shadow map generation for point, directional, and spot lights
-3. **G-Buffer Pass** - Geometry data (position, normal, albedo, metallic/roughness, emissive)
-4. **Lighting Pass** - Ambient + per-light additive rendering
-5. **Particle Rendering** - GPU-based particle systems
-6. **Post-Processing** - Effects like bloom, fog, cross-hatching, tone mapping
-
-### Key Systems
-- **World Management**: `mjolnir/world/` - Scene graph, visibility culling, GLTF integration
-- **Resource Management**: `mjolnir/resources/` - Handle-based system with generational arrays
-  + Materials, Meshes, Nodes, Lights, Cameras, Emitters
-  + Slab allocators for efficient memory management
-- **Particle System**: Emitter system, physics simulation, visibility culling
-- **Navigation**: Recast + Detour integration for pathfinding and navmesh
-- **Geometry Systems**: BVH, octree, interval tree, frustum culling, AABB calculations
-
-### Performance Features
-- **GPU Culling**: GPU-based visibility culling
-- **Parallel Scene Updates**: Dedicated update thread (compile flag: `USE_PARALLEL_UPDATE`)
-- **Particle Compaction**: GPU compute reduces draw calls from MAX_PARTICLES (65K) to actual alive count
-- **Indirect Rendering**: Uses `vk.CmdDrawIndirect` for efficient GPU-driven rendering
+1. **Visibility Pass** - Calculate visibility with frustum culling and occlusion culling, produce optimized draw lists and depth maps
+2. **G-Buffer Pass** - Geometry data (position, normal, albedo, metallic/roughness, emissive)
+3. **Lighting Pass** - Ambient + per-light additive rendering
+4. **Particle Rendering** - GPU-based particle systems
+5. **Post-Processing** - Effects like bloom, fog, cross-hatching, tone mapping
 
 ### Asset Support
 - **GLTF Loading**: Full support for loading 3D models via `mjolnir/world/gltf.odin`
@@ -87,16 +73,12 @@ The engine uses a deferred rendering approach with multiple passes:
   + vertex shader must be `shader.vert` and compiled to `vert.spv`
   + fragment shader must be `shader.frag` and compiled to `frag.spv`
   + compute shaders must be `*.comp` and compiled to `*.spv`
-  + Available shader passes: gbuffer, shadow, lighting, lighting_ambient, transparent, particle, postprocess, wireframe, navmesh, navmesh_debug, microui
-  + Post-processing effects: bloom, blur, crosshatch, dof, fog, grayscale, outline, tonemap
-  + Compute shaders: particle physics, compaction, visibility culling, scene culling
 
 ### GPU Resource Management
-- Uses custom slab allocators and generational arrays for efficient resource management
-- Handle-based system for referencing resources safely
+- Uses custom slab allocators and generational handle pools for efficient resource management
+- Handle-based system for referencing resources safely with generation counters
 - Resource warehouse pattern for centralized management
-- **Bindless Approach**: All GPU resources managed in array-based system. Draw commands send resource IDs to index into GPU arrays instead of raw data
-- **Staging Buffers**: Accumulate changes during update phase, flush to GPU buffers at frame start. Batch resource modifications through staging system to minimize GPU transfers
+- **Bindless**: All GPU resources managed in array-based system. Draw commands send resource IDs to index into GPU arrays instead of raw data
 
 ## Development Notes
 
@@ -145,17 +127,21 @@ The engine uses a deferred rendering approach with multiple passes:
 
 ### Common File Locations
 
-- **Engine core**: `mjolnir/engine.odin`
-- **GPU abstractions**: `mjolnir/gpu/` (context, memory, swapchain)
+- **Engine core**: `mjolnir/engine.odin` - Main engine loop with built-in camera controller
+- **API**: `mjolnir/api.odin` - Public API for engine users (camera controls, level transitions)
+- **GPU abstractions**: `mjolnir/gpu/` (context, memory, swapchain, pipeline helpers)
+- **Containers**: `mjolnir/containers/` (handle pools, slab allocators)
 - **Geometry systems**: `mjolnir/geometry/` (camera, transforms, BVH, octree, primitives)
 - **Animation**: `mjolnir/animation/` (skeletal animation)
 - **Navigation**: `mjolnir/navigation/` (Recast + Detour integration)
-- **Resources**: `mjolnir/resources/` (handles, materials, meshes, nodes, lights, cameras)
+- **Physics**: `mjolnir/physics/` (rigid body, collision, character controllers)
+- **Resources**: `mjolnir/resources/` (handles, materials, meshes, nodes, lights, cameras, tracking)
+- **Level Manager**: `mjolnir/level_manager/` (level transitions, loading screens)
 - **World**: `mjolnir/world/` (scene graph, visibility, GLTF loading)
 - **Rendering**: Various renderer implementations
 - **Shaders**: `mjolnir/shader/{pass_name}/`
 - **Assets**: `assets/` (models, textures, etc.)
-- **Tests**: `test/`
+- **Tests**: `test/` - Unit tests and `test/visual/` for end-to-end visual tests
 
 ### Debugging Tips
 
@@ -163,6 +149,12 @@ The engine uses a deferred rendering approach with multiple passes:
 - To debug visual issues, hardcode frame count limit in `engine.odin` `run` procedure to stop after few frames and examine logs
 - To slow down the engine to avoid excessive logs. Set FPS in `engine.odin` to low value like 4 or 2.
 - To capture visual result, run `make capture`, then analyze the newly created `screenshot.png`
+- Visual test runner: `test/visual/run.py` - Runs all visual tests and compares against golden images
+
+### Build Flags
+
+- **REQUIRE_GEOMETRY_SHADER**: Compile with geometry shader support (required for spherical shadow mapping)
+- **USE_PARALLEL_UPDATE**: Enable dedicated update thread for parallel scene updates
 
 # Odin Language Quick Reference
 
