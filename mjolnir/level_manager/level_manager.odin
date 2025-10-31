@@ -134,10 +134,16 @@ load_level :: proc(
     log.warn("Cannot load level while seamless teardown is still running")
     return
   }
-  if current, ok := lm.current.?; ok {
-    if current.id == descriptor.id {
-      log.warn("Requested level is already loaded:", descriptor.id)
-      return
+  // Prevent async/seamless loading when user_data pointer matches current level
+  // async loading must operate on 2 different levels (we can't transition to level 1 from level 1 itself, because setup are run before teardown)
+  // block loading can operate on the same level (we can transition to level 1 from level 1 since teardown are run before setup)
+  if pattern == .Seamless {
+    if current, ok := lm.current.?; ok {
+      if current.user_data == descriptor.user_data {
+        log.warn("Cannot use seamless transition with same user_data pointer:", descriptor.id)
+        log.warn("Use .Traditional pattern instead, or provide different user_data")
+        return
+      }
     }
   }
   lm.pending = Pending_Transition {

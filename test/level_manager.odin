@@ -433,7 +433,7 @@ test_is_transitioning :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_reject_loading_same_level :: proc(t: ^testing.T) {
+test_reject_seamless_with_same_user_data :: proc(t: ^testing.T) {
 	manager: lm.Level_Manager
 	ctx: Test_Context
 	ctx.setup_result = true
@@ -441,9 +441,9 @@ test_reject_loading_same_level :: proc(t: ^testing.T) {
 
 	lm.init(&manager)
 
-	// Load Level 2
+	// Load Level 1
 	descriptor := lm.Level_Descriptor {
-		id        = "Level 2",
+		id        = "Level 1",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx,
@@ -459,23 +459,23 @@ test_reject_loading_same_level :: proc(t: ^testing.T) {
 	testing.expect(t, id_ok, "Should have current level")
 	testing.expect(
 		t,
-		current_id == "Level 2",
-		"Should be in Level 2",
+		current_id == "Level 1",
+		"Should be in Level 1",
 	)
 
 	// Reset context flags
 	ctx.setup_called = false
 	ctx.teardown_called = false
 
-	// Try to load Level 2 again
-	lm.load_level(&manager, descriptor, .Traditional, false)
+	// Try to load with seamless transition using SAME user_data pointer
+	lm.load_level(&manager, descriptor, .Seamless, false)
 
-	// Should reject the request
+	// Should reject the request due to same user_data
 	_, ok := manager.pending.?
 	testing.expect(
 		t,
 		!ok,
-		"Should not create pending transition for same level",
+		"Should reject seamless transition with same user_data pointer",
 	)
 
 	// Update should not trigger any transitions
@@ -490,12 +490,5 @@ test_reject_loading_same_level :: proc(t: ^testing.T) {
 		t,
 		!ctx.teardown_called,
 		"Teardown should not be called",
-	)
-	current_id2, ok2 := lm.get_current_level_id(&manager)
-	testing.expect(t, ok2, "Should still have current level")
-	testing.expect(
-		t,
-		current_id2 == "Level 2",
-		"Should still be in Level 2",
 	)
 }
