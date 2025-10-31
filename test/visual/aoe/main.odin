@@ -26,7 +26,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
-  mjolnir.run(engine, 1280, 720, "Mjolnir - AOE Test")
+  mjolnir.run(engine, 800, 600, "Mjolnir - AOE Test")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {

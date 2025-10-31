@@ -97,9 +97,11 @@ jobs:
           echo "ERROR: No screenshot generated"
           exit 1
         fi
+        png="${ppm%.ppm}.png"
         python3 -c "
         from skimage import io; import numpy as np
         img = io.imread('$ppm')
+        io.imsave('$png', img)
         colors = len(np.unique(img.reshape(-1, img.shape[2]), axis=0))
         pixels = img.shape[0] * img.shape[1]
         print(f'Colors: {colors}, Pixels: {pixels}')

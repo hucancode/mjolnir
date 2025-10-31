@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -195,9 +194,9 @@ def main():
         print(f"\nTest crashed with exit code {code}")
         run_test_with_gdb(repo_root, binary_name, env, log_path)
 
-    # Compare
-    screenshots = sorted(out_dir.glob("*.ppm"))
-    if not screenshots:
+    # Convert PPM to PNG
+    ppm_files = sorted(out_dir.glob("*.ppm"))
+    if not ppm_files:
         print(f"ERROR: No screenshots generated in {out_dir}")
         print(f"Expected VK_LAYER_LUNARG_screenshot to create .ppm files")
         print(f"Environment: VK_SCREENSHOT_FRAMES={env.get('VK_SCREENSHOT_FRAMES')}")
@@ -205,8 +204,16 @@ def main():
         print(f"Build config: FRAME_LIMIT={frame_limit}")
         print(f"Check the log file at: {artifact_root / 'logs' / f'{test_dir.name}.log'}")
         sys.exit(1)
+
+    for ppm_file in ppm_files:
+        png_file = ppm_file.with_suffix('.png')
+        img = io.imread(str(ppm_file))
+        io.imsave(str(png_file), img)
+
+    # Compare
+    screenshots = sorted(out_dir.glob("*.png"))
     latest = screenshots[0]
-    golden = test_dir / "golden.ppm"
+    golden = test_dir / "golden.png"
 
     if update_golden:
         shutil.copy2(latest, golden)

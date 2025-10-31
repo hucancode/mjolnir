@@ -64,12 +64,10 @@ capture: build
 	@APP_PATH="./bin/main"; \
 	FRAME_N="5,6"; \
 	OUT_DIR="screenshots"; \
-	PPM_FILE="$$OUT_DIR/$$FRAME_N.ppm"; \
-	PNG_FILE="$$OUT_DIR/screenshot.png"; \
 	TIMEOUT_SEC="10"; \
 	\
-	command -v convert >/dev/null || { echo "Error: ImageMagick 'convert' not found" >&2; exit 1; }; \
 	command -v xvfb-run >/dev/null || { echo "Error: 'xvfb-run' not found" >&2; exit 1; }; \
+	command -v python3 >/dev/null || { echo "Error: 'python3' not found" >&2; exit 1; }; \
 	\
 	echo "Running $$APP_PATH for $$TIMEOUT_SEC seconds to capture frame $$FRAME_N..."; \
 	VK_INSTANCE_LAYERS="VK_LAYER_LUNARG_screenshot" \
@@ -78,11 +76,10 @@ capture: build
 	xvfb-run -a -s "-screen 0 1920x1080x24" \
 	timeout "$${TIMEOUT_SEC}s" "$$APP_PATH" || true; \
 	\
-	for f in "$$OUT_DIR/"*.ppm; do \
-		out="$${f%.ppm}.png"; \
-		echo "Converting $$f -> $$out"; \
-		convert "$$f" "$$out"; \
-	done
+	echo "Converting PPM to PNG..."; \
+	python3 -c "from pathlib import Path; from skimage import io; \
+	[io.imsave(str(f.with_suffix('.png')), io.imread(str(f))) for f in Path('$$OUT_DIR').glob('*.ppm')]"; \
+	echo "Screenshots saved to $$OUT_DIR/"
 clean:
 	rm -rf bin/*
 
