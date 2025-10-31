@@ -8,6 +8,13 @@ import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
+SHADER_TRANSPARENT_VERT :: #load("../../shader/transparent/vert.spv")
+SHADER_TRANSPARENT_FRAG :: #load("../../shader/transparent/frag.spv")
+SHADER_SPRITE_VERT := #load("../../shader/sprite/vert.spv")
+SHADER_SPRITE_FRAG := #load("../../shader/sprite/frag.spv")
+SHADER_WIREFRAME_VERT := #load("../../shader/wireframe/vert.spv")
+SHADER_WIREFRAME_FRAG := #load("../../shader/wireframe/frag.spv")
+
 Renderer :: struct {
   transparent_pipeline: vk.Pipeline,
   wireframe_pipeline:   vk.Pipeline,
@@ -118,16 +125,14 @@ create_transparent_pipelines :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
-  vert_shader_code := #load("../../shader/transparent/vert.spv")
   vert_module := gpu.create_shader_module(
     gctx.device,
-    vert_shader_code,
+    SHADER_TRANSPARENT_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_shader_code := #load("../../shader/transparent/frag.spv")
   frag_module := gpu.create_shader_module(
     gctx.device,
-    frag_shader_code,
+    SHADER_TRANSPARENT_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
@@ -231,16 +236,14 @@ create_wireframe_pipelines :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
-  vert_shader_code := #load("../../shader/wireframe/vert.spv")
   vert_module := gpu.create_shader_module(
     gctx.device,
-    vert_shader_code,
+    SHADER_WIREFRAME_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_shader_code := #load("../../shader/wireframe/frag.spv")
   frag_module := gpu.create_shader_module(
     gctx.device,
-    frag_shader_code,
+    SHADER_WIREFRAME_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
@@ -339,16 +342,14 @@ create_sprite_pipeline :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
-  vert_shader_code := #load("../../shader/sprite/vert.spv")
   vert_module := gpu.create_shader_module(
     gctx.device,
-    vert_shader_code,
+    SHADER_SPRITE_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_shader_code := #load("../../shader/sprite/frag.spv")
   frag_module := gpu.create_shader_module(
     gctx.device,
-    frag_shader_code,
+    SHADER_SPRITE_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {

@@ -8,6 +8,12 @@ import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
+SHADER_AMBIENT_VERT :: #load("../../shader/lighting_ambient/vert.spv")
+SHADER_AMBIENT_FRAG :: #load("../../shader/lighting_ambient/frag.spv")
+SHADER_LIGHTING_VERT := #load("../../shader/lighting/vert.spv")
+SHADER_LIGHTING_FRAG := #load("../../shader/lighting/frag.spv")
+TEXTURE_LUT_GGX :: #load("../../assets/lut_ggx.png")
+
 LightKind :: enum u32 {
   POINT       = 0,
   DIRECTIONAL = 1,
@@ -174,16 +180,14 @@ init :: proc(
     nil,
     &self.ambient_pipeline_layout,
   ) or_return
-  ambient_vert_shader_code := #load("../../shader/lighting_ambient/vert.spv")
   ambient_vert_module := gpu.create_shader_module(
     gctx.device,
-    ambient_vert_shader_code,
+    SHADER_AMBIENT_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, ambient_vert_module, nil)
-  ambient_frag_shader_code := #load("../../shader/lighting_ambient/frag.spv")
   ambient_frag_module := gpu.create_shader_module(
     gctx.device,
-    ambient_frag_shader_code,
+    SHADER_AMBIENT_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, ambient_frag_module, nil)
   ambient_dynamic_state := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
@@ -288,7 +292,7 @@ init :: proc(
   brdf_handle, _, brdf_ret := resources.create_texture_from_data(
     gctx,
     rm,
-    #load("../../assets/lut_ggx.png"),
+    TEXTURE_LUT_GGX,
   )
   if brdf_ret != .SUCCESS {
     return brdf_ret
@@ -320,16 +324,14 @@ init :: proc(
     nil,
     &self.lighting_pipeline_layout,
   ) or_return
-  lighting_vert_shader_code := #load("../../shader/lighting/vert.spv")
   lighting_vert_module := gpu.create_shader_module(
     gctx.device,
-    lighting_vert_shader_code,
+    SHADER_LIGHTING_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, lighting_vert_module, nil)
-  lighting_frag_shader_code := #load("../../shader/lighting/frag.spv")
   lighting_frag_module := gpu.create_shader_module(
     gctx.device,
-    lighting_frag_shader_code,
+    SHADER_LIGHTING_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, lighting_frag_module, nil)
   lighting_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_COMPARE_OP}

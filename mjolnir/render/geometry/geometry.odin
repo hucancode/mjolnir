@@ -8,6 +8,9 @@ import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
+SHADER_G_BUFFER_VERT :: #load("../../shader/gbuffer/vert.spv")
+SHADER_G_BUFFER_FRAG :: #load("../../shader/gbuffer/frag.spv")
+
 PushConstant :: struct {
   camera_index: u32,
 }
@@ -41,16 +44,14 @@ init :: proc(
   spec_info.pData = cast(rawptr)&spec_data
   defer delete(spec_entries)
   log.info("About to build G-buffer pipelines...")
-  vert_shader_code := #load("../../shader/gbuffer/vert.spv")
   vert_module := gpu.create_shader_module(
     gctx.device,
-    vert_shader_code,
+    SHADER_G_BUFFER_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_shader_code := #load("../../shader/gbuffer/frag.spv")
   frag_module := gpu.create_shader_module(
     gctx.device,
-    frag_shader_code,
+    SHADER_G_BUFFER_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {

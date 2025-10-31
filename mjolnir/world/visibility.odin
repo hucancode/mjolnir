@@ -24,6 +24,14 @@ _________ end frame, sync _________
 1,2 and a,b,c,d run in parallel
 */
 
+SHADER_SPHERECAM_CULLING :: #load("../shader/occlusion_culling/sphere_cull.spv")
+SHADER_CULLING :: #load("../shader/occlusion_culling/multi_pass_cull.spv")
+SHADER_DEPTH_REDUCE :: #load("../shader/occlusion_culling/depth_reduce.spv")
+SHADER_DEPTH_VERT ::#load("../shader/occlusion_culling/vert.spv")
+SHADER_SPHERECAM_DEPTH_VERT :: #load("../shader/shadow_spherical/vert.spv")
+SHADER_SPHERECAM_DEPTH_GEOM :: #load("../shader/shadow_spherical/geom.spv")
+SHADER_SPHERECAM_DEPTH_FRAG :: #load("../shader/shadow_spherical/frag.spv")
+
 VisibilityPushConstants :: struct {
   camera_index:      u32,
   node_count:        u32,
@@ -569,17 +577,17 @@ create_compute_pipelines :: proc(
   ) or_return
   sphere_shader := gpu.create_shader_module(
     gctx.device,
-    #load("../shader/occlusion_culling/sphere_cull.spv"),
+    SHADER_SPHERECAM_CULLING,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, sphere_shader, nil)
   multi_pass_shader := gpu.create_shader_module(
     gctx.device,
-    #load("../shader/occlusion_culling/multi_pass_cull.spv"),
+    SHADER_CULLING,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, multi_pass_shader, nil)
   depth_shader := gpu.create_shader_module(
     gctx.device,
-    #load("../shader/occlusion_culling/depth_reduce.spv"),
+    SHADER_DEPTH_REDUCE,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, depth_shader, nil)
   sphere_info := vk.ComputePipelineCreateInfo {
@@ -647,7 +655,7 @@ create_depth_pipeline :: proc(
 ) -> vk.Result {
   vert_shader := gpu.create_shader_module(
     gctx.device,
-    #load("../shader/occlusion_culling/vert.spv"),
+    SHADER_DEPTH_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_shader, nil)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
@@ -766,17 +774,17 @@ create_spherical_depth_pipeline :: proc(
   // uses geometry shader to render to all 6 cube faces in one pass
   vert_shader := gpu.create_shader_module(
     gctx.device,
-    #load("../shader/shadow_spherical/vert.spv"),
+    SHADER_SPHERECAM_DEPTH_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_shader, nil)
   geom_shader := gpu.create_shader_module(
     gctx.device,
-    #load("../shader/shadow_spherical/geom.spv"),
+    SHADER_SPHERECAM_DEPTH_GEOM,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, geom_shader, nil)
   frag_shader := gpu.create_shader_module(
     gctx.device,
-    #load("../shader/shadow_spherical/frag.spv"),
+    SHADER_SPHERECAM_DEPTH_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_shader, nil)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {

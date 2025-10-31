@@ -9,6 +9,12 @@ import vk "vendor:vulkan"
 
 MAX_PARTICLES :: 65536
 COMPUTE_PARTICLE_BATCH :: 256
+SHADER_EMITTER_COMP :: #load("../../shader/particle/emitter.spv")
+SHADER_PARTICLE_COMP :: #load("../../shader/particle/compute.spv")
+SHADER_PARTICLE_COMPACT_COMP :: #load("../../shader/particle/compact.spv")
+SHADER_PARTICLE_VERT := #load("../../shader/particle/vert.spv")
+SHADER_PARTICLE_FRAG := #load("../../shader/particle/frag.spv")
+TEXTURE_BLACK_CIRCLE :: #load("../../assets/black-circle.png")
 
 Particle :: struct {
   position:      [4]f32,
@@ -405,7 +411,7 @@ create_emitter_pipeline :: proc(
   )
   emitter_shader_module := gpu.create_shader_module(
     gctx.device,
-    #load("../../shader/particle/emitter.spv"),
+    SHADER_EMITTER_COMP,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, emitter_shader_module, nil)
   emitter_pipeline_info := vk.ComputePipelineCreateInfo {
@@ -536,7 +542,7 @@ create_compute_pipeline :: proc(
   )
   compute_shader_module := gpu.create_shader_module(
     gctx.device,
-    #load("../../shader/particle/compute.spv"),
+    SHADER_PARTICLE_COMP,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, compute_shader_module, nil)
   compute_pipeline_info := vk.ComputePipelineCreateInfo {
@@ -691,7 +697,7 @@ create_compact_pipeline :: proc(
   )
   compact_shader_module := gpu.create_shader_module(
     gctx.device,
-    #load("../../shader/particle/compact.spv"),
+    SHADER_PARTICLE_COMPACT_COMP,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, compact_shader_module, nil)
   compact_pipeline_info := vk.ComputePipelineCreateInfo {
@@ -743,7 +749,7 @@ create_render_pipeline :: proc(
   default_texture_handle, _, ret := resources.create_texture_from_data(
     gctx,
     rm,
-    #load("../../assets/black-circle.png"),
+    TEXTURE_BLACK_CIRCLE,
   )
   if ret != .SUCCESS {
     return ret
@@ -811,15 +817,13 @@ create_render_pipeline :: proc(
   }
   dynamic_state := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
   multisample := gpu.create_standard_multisampling()
-  vert_shader_code := #load("../../shader/particle/vert.spv")
-  frag_shader_code := #load("../../shader/particle/frag.spv")
   vert_module := gpu.create_shader_module(
     gctx.device,
-    vert_shader_code,
+    SHADER_PARTICLE_VERT,
   ) or_return
   frag_module := gpu.create_shader_module(
     gctx.device,
-    frag_shader_code,
+    SHADER_PARTICLE_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)

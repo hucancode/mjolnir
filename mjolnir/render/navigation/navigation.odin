@@ -7,6 +7,9 @@ import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
 
+SHADER_NAVMESH_VERT :: #load("../../shader/navmesh/vert.spv")
+SHADER_NAVMESH_FRAG :: #load("../../shader/navmesh/frag.spv")
+
 Renderer :: struct {
   pipeline_layout:    vk.PipelineLayout,
   pipeline:           vk.Pipeline,
@@ -366,16 +369,14 @@ create_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) -> vk.Result {
-  navmesh_vert_code := #load("../../shader/navmesh/vert.spv")
   navmesh_vert := gpu.create_shader_module(
     gctx.device,
-    navmesh_vert_code,
+    SHADER_NAVMESH_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, navmesh_vert, nil)
-  navmesh_frag_code := #load("../../shader/navmesh/frag.spv")
   navmesh_frag := gpu.create_shader_module(
     gctx.device,
-    navmesh_frag_code,
+    SHADER_NAVMESH_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, navmesh_frag, nil)
   set_layouts := []vk.DescriptorSetLayout{rm.camera_buffer_set_layout}
