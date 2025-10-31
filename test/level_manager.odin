@@ -38,9 +38,10 @@ test_init :: proc(t: ^testing.T) {
 		manager.state == .Idle,
 		"Initial state should be Idle",
 	)
+	_, ok := lm.get_current_level_id(&manager)
 	testing.expect(
 		t,
-		lm.get_current_level_name(&manager) == nil,
+		!ok,
 		"No current level initially",
 	)
 }
@@ -55,7 +56,7 @@ test_load_level_creates_pending :: proc(t: ^testing.T) {
 	lm.init(&manager)
 
 	descriptor := lm.Level_Descriptor {
-		name      = "Test Level",
+		id        = "Test Level",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx,
@@ -67,8 +68,8 @@ test_load_level_creates_pending :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "Pending transition should be set")
 	testing.expect(
 		t,
-		pending.descriptor.name == "Test Level",
-		"Pending descriptor name should match",
+		pending.descriptor.id == "Test Level",
+		"Pending descriptor id should match",
 	)
 	testing.expect(
 		t,
@@ -89,7 +90,7 @@ test_blocking_traditional_transition_no_previous_level :: proc(
 	lm.init(&manager)
 
 	descriptor := lm.Level_Descriptor {
-		name      = "Level 1",
+		id        = "Level 1",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx,
@@ -126,10 +127,11 @@ test_blocking_traditional_transition_no_previous_level :: proc(
 	// Third update: activate level
 	lm.update(&manager)
 	testing.expect(t, manager.state == .Idle, "Should return to Idle state")
-	current_name := lm.get_current_level_name(&manager)
+	current_id, ok := lm.get_current_level_id(&manager)
+	testing.expect(t, ok, "Should have current level")
 	testing.expect(
 		t,
-		current_name.? == "Level 1",
+		current_id == "Level 1",
 		"Current level should be Level 1",
 	)
 }
@@ -149,7 +151,7 @@ test_blocking_traditional_transition_with_previous_level :: proc(
 
 	// Load first level
 	desc1 := lm.Level_Descriptor {
-		name      = "Level 1",
+		id        = "Level 1",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx1,
@@ -164,7 +166,7 @@ test_blocking_traditional_transition_with_previous_level :: proc(
 
 	// Load second level
 	desc2 := lm.Level_Descriptor {
-		name      = "Level 2",
+		id        = "Level 2",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx2,
@@ -208,10 +210,11 @@ test_blocking_traditional_transition_with_previous_level :: proc(
 	// Fifth update: activate level 2
 	lm.update(&manager)
 	testing.expect(t, manager.state == .Idle, "Should return to Idle state")
-	current_name := lm.get_current_level_name(&manager)
+	current_id, ok := lm.get_current_level_id(&manager)
+	testing.expect(t, ok, "Should have current level")
 	testing.expect(
 		t,
-		current_name.? == "Level 2",
+		current_id == "Level 2",
 		"Current level should be Level 2",
 	)
 }
@@ -228,7 +231,7 @@ test_reject_load_while_transitioning :: proc(t: ^testing.T) {
 	lm.init(&manager)
 
 	desc1 := lm.Level_Descriptor {
-		name      = "Level 1",
+		id        = "Level 1",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx1,
@@ -244,7 +247,7 @@ test_reject_load_while_transitioning :: proc(t: ^testing.T) {
 
 	// Try to load another level while transitioning
 	desc2 := lm.Level_Descriptor {
-		name      = "Level 2",
+		id        = "Level 2",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx2,
@@ -267,7 +270,7 @@ test_on_finished_callback :: proc(t: ^testing.T) {
 	lm.init(&manager)
 
 	descriptor := lm.Level_Descriptor {
-		name      = "Level 1",
+		id        = "Level 1",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx,
@@ -303,7 +306,7 @@ test_setup_failure_returns_to_idle :: proc(t: ^testing.T) {
 	lm.init(&manager)
 
 	descriptor := lm.Level_Descriptor {
-		name      = "Level 1",
+		id        = "Level 1",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx,
@@ -322,9 +325,10 @@ test_setup_failure_returns_to_idle :: proc(t: ^testing.T) {
 		manager.state == .Idle,
 		"Should return to Idle on setup failure",
 	)
+	_, ok := lm.get_current_level_id(&manager)
 	testing.expect(
 		t,
-		lm.get_current_level_name(&manager) == nil,
+		!ok,
 		"No level should be active",
 	)
 }
@@ -339,7 +343,7 @@ test_show_loading_screen :: proc(t: ^testing.T) {
 	lm.init(&manager)
 
 	descriptor := lm.Level_Descriptor {
-		name      = "Level 1",
+		id        = "Level 1",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx,
@@ -392,7 +396,7 @@ test_is_transitioning :: proc(t: ^testing.T) {
 	)
 
 	descriptor := lm.Level_Descriptor {
-		name      = "Level 1",
+		id        = "Level 1",
 		setup     = test_setup,
 		teardown  = test_teardown,
 		user_data = &ctx,
@@ -425,5 +429,73 @@ test_is_transitioning :: proc(t: ^testing.T) {
 		t,
 		!lm.is_transitioning(&manager),
 		"Should not be transitioning after activation",
+	)
+}
+
+@(test)
+test_reject_loading_same_level :: proc(t: ^testing.T) {
+	manager: lm.Level_Manager
+	ctx: Test_Context
+	ctx.setup_result = true
+	ctx.teardown_result = true
+
+	lm.init(&manager)
+
+	// Load Level 2
+	descriptor := lm.Level_Descriptor {
+		id        = "Level 2",
+		setup     = test_setup,
+		teardown  = test_teardown,
+		user_data = &ctx,
+	}
+
+	lm.load_level(&manager, descriptor, .Traditional, false)
+	lm.update(&manager) // start setup
+	lm.update(&manager) // finish setup
+	lm.update(&manager) // activate
+
+	testing.expect(t, manager.state == .Idle, "Should be Idle after loading")
+	current_id, id_ok := lm.get_current_level_id(&manager)
+	testing.expect(t, id_ok, "Should have current level")
+	testing.expect(
+		t,
+		current_id == "Level 2",
+		"Should be in Level 2",
+	)
+
+	// Reset context flags
+	ctx.setup_called = false
+	ctx.teardown_called = false
+
+	// Try to load Level 2 again
+	lm.load_level(&manager, descriptor, .Traditional, false)
+
+	// Should reject the request
+	_, ok := manager.pending.?
+	testing.expect(
+		t,
+		!ok,
+		"Should not create pending transition for same level",
+	)
+
+	// Update should not trigger any transitions
+	lm.update(&manager)
+	testing.expect(t, manager.state == .Idle, "Should remain Idle")
+	testing.expect(
+		t,
+		!ctx.setup_called,
+		"Setup should not be called again",
+	)
+	testing.expect(
+		t,
+		!ctx.teardown_called,
+		"Teardown should not be called",
+	)
+	current_id2, ok2 := lm.get_current_level_id(&manager)
+	testing.expect(t, ok2, "Should still have current level")
+	testing.expect(
+		t,
+		current_id2 == "Level 2",
+		"Should still be in Level 2",
 	)
 }

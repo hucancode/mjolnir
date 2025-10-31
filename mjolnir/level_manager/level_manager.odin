@@ -35,7 +35,7 @@ Level_State :: enum {
 }
 
 Level_Descriptor :: struct {
-  name:      string,
+  id:        string,
   setup:     Level_Setup_Proc,
   teardown:  Level_Teardown_Proc,
   user_data: rawptr,
@@ -89,7 +89,7 @@ shutdown :: proc(lm: ^Level_Manager) {
   }
   if current, ok := lm.current.?; ok {
     if lm.state == .Idle {
-      log.info("Tearing down active level on shutdown:", current.name)
+      log.info("Tearing down active level on shutdown:", current.id)
       current.teardown(current.user_data)
     }
   }
@@ -111,11 +111,11 @@ should_show_loading :: proc(lm: ^Level_Manager) -> bool {
   return lm.show_loading && is_transitioning(lm)
 }
 
-get_current_level_name :: proc(lm: ^Level_Manager) -> Maybe(string) {
+get_current_level_id :: proc(lm: ^Level_Manager) -> (ret: string, ok: bool) {
   if current, ok := lm.current.?; ok {
-    return current.name
+    return current.id, true
   }
-  return nil
+  return "", false
 }
 
 load_level :: proc(
@@ -134,6 +134,12 @@ load_level :: proc(
     log.warn("Cannot load level while seamless teardown is still running")
     return
   }
+  if current, ok := lm.current.?; ok {
+    if current.id == descriptor.id {
+      log.warn("Requested level is already loaded:", descriptor.id)
+      return
+    }
+  }
   lm.pending = Pending_Transition {
     descriptor    = descriptor,
     pattern       = pattern,
@@ -141,7 +147,7 @@ load_level :: proc(
     on_finished   = on_finished,
     callback_data = callback_data,
   }
-  log.info("Level transition requested:", descriptor.name)
+  log.info("Level transition requested:", descriptor.id)
 }
 
 update :: proc(lm: ^Level_Manager) {
@@ -200,7 +206,7 @@ update :: proc(lm: ^Level_Manager) {
 @(private)
 _start_seamless_transition :: proc(lm: ^Level_Manager) {
   next := lm.next.? or_else panic("Next level not set")
-  log.info("Starting seamless transition to:", next.name)
+  log.info("Starting seamless transition to:", next.id)
   lm.state = .Setting_Up
   lm.setup_complete = false
   lm.setup_success = false
@@ -217,12 +223,12 @@ _start_seamless_transition :: proc(lm: ^Level_Manager) {
 @(private)
 _start_traditional_transition :: proc(lm: ^Level_Manager) {
   if current, ok := lm.current.?; ok {
-    log.info("Starting traditional transition: tearing down", current.name)
+    log.info("Starting traditional transition: tearing down", current.id)
     lm.state = .Tearing_Down
     if lm.teardown_mode == .Blocking {
       lm.teardown_success = current.teardown(current.user_data)
       if !lm.teardown_success {
-        log.warn("Level teardown failed:", current.name)
+        log.warn("Level teardown failed:", current.id)
       }
       lm.teardown_complete = true
     } else {
@@ -249,7 +255,7 @@ _start_next_setup :: proc(lm: ^Level_Manager) {
   if lm.setup_mode == .Blocking {
     lm.setup_success = next.setup(next.user_data)
     if !lm.setup_success {
-      log.warn("Level setup failed:", next.name)
+      log.warn("Level setup failed:", next.id)
     }
     lm.setup_complete = true
   } else {
@@ -276,9 +282,9 @@ _finish_teardown :: proc(lm: ^Level_Manager) {
   }
   current := lm.current.? or_else panic("Current level not set")
   if !lm.teardown_success {
-    log.warn("Level teardown completed with errors:", current.name)
+    log.warn("Level teardown completed with errors:", current.id)
   } else {
-    log.info("Level teardown complete:", current.name)
+    log.info("Level teardown complete:", current.id)
   }
   lm.current = nil
   if lm.pattern == .Traditional {
@@ -296,18 +302,18 @@ _finish_setup :: proc(lm: ^Level_Manager) {
   }
   next := lm.next.? or_else panic("Next level not set")
   if !lm.setup_success {
-    log.warn("Level setup completed with errors:", next.name)
+    log.warn("Level setup completed with errors:", next.id)
     lm.state = .Idle
     return
   }
-  log.info("Level setup complete:", next.name)
+  log.info("Level setup complete:", next.id)
   lm.state = .Setup_Complete
 }
 
 @(private)
 _activate_level :: proc(lm: ^Level_Manager) {
   next := lm.next.? or_else panic("Next level not set")
-  log.info("Activating level:", next.name)
+  log.info("Activating level:", next.id)
   // Save old level descriptor BEFORE changing lm.current
   old_level: Maybe(Level_Descriptor)
   if lm.pattern == .Seamless {
@@ -319,10 +325,10 @@ _activate_level :: proc(lm: ^Level_Manager) {
   if lm.on_loading_finished != nil {
     lm.on_loading_finished(lm.callback_user_data)
   }
-  log.info("Level active:", next.name)
+  log.info("Level active:", next.id)
   // NOW start async teardown of old level (after activation)
   if old, ok := old_level.?; ok {
-    log.info("Seamless transition: tearing down previous level:", old.name)
+    log.info("Seamless transition: tearing down previous level:", old.id)
     lm.teardown_complete = false
     lm.teardown_success = false
     thread_data := new(Thread_Data)
@@ -341,13 +347,13 @@ _async_setup_thread_proc :: proc(t: ^thread.Thread) {
   thread_data := cast(^Thread_Data)t.data
   descriptor := &thread_data.descriptor
   lm := thread_data.manager
-  log.info("Async setup thread started:", descriptor.name)
+  log.info("Async setup thread started:", descriptor.id)
   success := descriptor.setup(descriptor.user_data)
   lm.setup_success = success
   lm.setup_complete = true
   log.info(
     "Async setup thread finished:",
-    descriptor.name,
+    descriptor.id,
     "success:",
     success,
   )
@@ -358,13 +364,13 @@ _async_teardown_thread_proc :: proc(t: ^thread.Thread) {
   thread_data := cast(^Thread_Data)t.data
   descriptor := &thread_data.descriptor
   lm := thread_data.manager
-  log.info("Async teardown thread started:", descriptor.name)
+  log.info("Async teardown thread started:", descriptor.id)
   success := descriptor.teardown(descriptor.user_data)
   lm.teardown_success = success
   lm.teardown_complete = true
   log.info(
     "Async teardown thread finished:",
-    descriptor.name,
+    descriptor.id,
     "success:",
     success,
   )

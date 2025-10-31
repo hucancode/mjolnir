@@ -106,8 +106,7 @@ on_level_loaded :: proc(user_data: rawptr) {
 populate_level_test_ui :: proc(engine: ^mjolnir.Engine) {
   ctx := &engine.render.ui.ctx
   if mu.window(ctx, "Level Test", {40, 250, 280, 250}, {.NO_CLOSE}) {
-    current_level := mjolnir.get_current_level_name(&engine.level_manager)
-    if name, ok := current_level.?; ok {
+    if name, ok := mjolnir.get_current_level_id(&engine.level_manager); ok {
       mu.label(ctx, fmt.tprintf("Current Level: %s", name))
     } else {
       mu.label(ctx, "Current Level: None")
@@ -131,8 +130,7 @@ populate_level_test_ui :: proc(engine: ^mjolnir.Engine) {
     is_transitioning := mjolnir.is_level_transitioning(&engine.level_manager)
     if !is_transitioning {
       current_name := "None"
-      if name, ok := mjolnir.get_current_level_name(&engine.level_manager).?;
-         ok {
+      if name, ok := mjolnir.get_current_level_id(&engine.level_manager); ok {
         current_name = name
       }
       if .SUBMIT in mu.button(ctx, "Load LV1 (Blocking)") {
@@ -141,7 +139,7 @@ populate_level_test_ui :: proc(engine: ^mjolnir.Engine) {
           current_name,
         )
         level_1_desc := mjolnir.Level_Descriptor {
-          name      = "Level 1 - Suzanne",
+          id        = "Level 1 - Suzanne",
           setup     = level_1_setup,
           teardown  = level_1_teardown,
           user_data = &g_level_1_data,
@@ -160,7 +158,7 @@ populate_level_test_ui :: proc(engine: ^mjolnir.Engine) {
           current_name,
         )
         level_2_desc := mjolnir.Level_Descriptor {
-          name      = "Level 2 - Mjolnir",
+          id        = "Level 2 - Mjolnir",
           setup     = level_2_setup,
           teardown  = level_2_teardown,
           user_data = &g_level_2_data,
@@ -180,7 +178,7 @@ populate_level_test_ui :: proc(engine: ^mjolnir.Engine) {
           current_name,
         )
         level_1_desc := mjolnir.Level_Descriptor {
-          name      = "Level 1 - Suzanne",
+          id        = "Level 1 - Suzanne",
           setup     = level_1_setup,
           teardown  = level_1_teardown,
           user_data = &g_level_1_data,
@@ -199,7 +197,7 @@ populate_level_test_ui :: proc(engine: ^mjolnir.Engine) {
           current_name,
         )
         level_2_desc := mjolnir.Level_Descriptor {
-          name      = "Level 2 - Mjolnir",
+          id        = "Level 2 - Mjolnir",
           setup     = level_2_setup,
           teardown  = level_2_teardown,
           user_data = &g_level_2_data,
@@ -231,7 +229,7 @@ main :: proc() {
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     log.info("Loading initial level")
     level_1_desc := mjolnir.Level_Descriptor {
-      name      = "Level 1 - Suzanne",
+      id        = "Level 1 - Suzanne",
       setup     = level_1_setup,
       teardown  = level_1_teardown,
       user_data = &g_level_1_data,

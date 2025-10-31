@@ -28,7 +28,7 @@ Level_Manager :: level_manager.Level_Manager
 init_level_manager :: level_manager.init
 is_level_transitioning :: level_manager.is_transitioning
 should_show_loading_screen :: level_manager.should_show_loading
-get_current_level_name :: level_manager.get_current_level_name
+get_current_level_id :: level_manager.get_current_level_id
 load_level :: level_manager.load_level
 create_texture :: proc {
   create_texture_from_path,
