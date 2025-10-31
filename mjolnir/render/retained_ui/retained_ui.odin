@@ -172,16 +172,24 @@ DrawCommandType :: enum {
   CLIP,
 }
 
+TextAlign :: enum {
+  LEFT,
+  CENTER,
+  RIGHT,
+}
+
 DrawCommand :: struct {
-  type:       DrawCommandType,
-  widget:     WidgetHandle,
-  rect:       [4]f32, // x, y, w, h
-  color:      [4]u8,
-  texture_id: u32,
-  uv:         [4]f32, // texture coordinates
-  text:       string,
-  clip_rect:  [4]i32, // scissor rectangle
-  z:          f32,
+  type:        DrawCommandType,
+  widget:      WidgetHandle,
+  rect:        [4]f32, // x, y, w, h
+  color:       [4]u8,
+  texture_id:  u32,
+  uv:          [4]f32, // texture coordinates
+  text:        string,
+  text_align:  TextAlign,
+  text_suffix: bool, // Show suffix instead of prefix when text overflows
+  clip_rect:   [4]i32, // scissor rectangle
+  z:           f32,
 }
 
 Vertex2D :: struct {
@@ -788,6 +796,7 @@ build_button_commands :: proc(
       },
       color = widget.fg_color,
       text = data.text,
+      text_align = .CENTER,
     },
   )
 }
@@ -812,6 +821,7 @@ build_label_commands :: proc(
       },
       color = widget.fg_color,
       text = data.text,
+      text_align = .LEFT,
     },
   )
 }
@@ -878,6 +888,7 @@ build_window_commands :: proc(
       },
       color = WHITE,
       text = data.title,
+      text_align = .LEFT,
     },
   )
   if !data.minimized {
@@ -947,6 +958,7 @@ build_textbox_commands :: proc(
           },
           color = TEXTBOX_PLACEHOLDER_COLOR,
           text = data.placeholder,
+          text_align = .LEFT,
         },
       )
     }
@@ -965,6 +977,8 @@ build_textbox_commands :: proc(
         },
         color = widget.fg_color,
         text = data.text_as_string,
+        text_align = .LEFT,
+        text_suffix = true, // Show suffix when text overflows
       },
     )
   }
@@ -972,6 +986,8 @@ build_textbox_commands :: proc(
   if data.focused {
     // Calculate cursor position at end of text using fontstash
     text_width: f32 = 0
+    available_width := widget.size.x - 16
+    text_offset: f32 = 0
     if len(data.text) > 0 {
       font_size := widget.size.y - 16
       fs.SetFont(&self.font_ctx, self.default_font)
@@ -980,8 +996,17 @@ build_textbox_commands :: proc(
       bounds: [4]f32
       fs.TextBounds(&self.font_ctx, data.text_as_string, 0, 0, &bounds)
       text_width = bounds[2] - bounds[0]
+      // If text overflows, calculate offset to show suffix (same logic as draw_text_internal)
+      if text_width > available_width {
+        text_offset = available_width - text_width
+      }
     }
-    cursor_x := widget.position.x + 8 + text_width
+    // Cursor should be at the right edge of the visible area when text overflows
+    cursor_x := widget.position.x + 8 + text_offset + text_width
+    // Clamp cursor to visible area
+    if cursor_x > widget.position.x + 8 + available_width {
+      cursor_x = widget.position.x + 8 + available_width
+    }
     cursor_y := widget.position.y + 6
     cursor_height := widget.size.y - 12
     // Draw vertical line as cursor
@@ -1036,6 +1061,7 @@ build_combobox_commands :: proc(
         },
         color = widget.fg_color,
         text = data.items[data.selected],
+        text_align = .LEFT,
       },
     )
   } else {
@@ -1052,6 +1078,7 @@ build_combobox_commands :: proc(
         },
         color = widget.fg_color,
         text = "Select...",
+        text_align = .LEFT,
       },
     )
   }
@@ -1107,6 +1134,7 @@ build_combobox_commands :: proc(
           },
           color = BLACK,
           text = item,
+          text_align = .LEFT,
           z = -0.01,
         },
       )
@@ -1168,6 +1196,7 @@ build_checkbox_commands :: proc(
         },
         color = widget.fg_color,
         text = data.label,
+        text_align = .LEFT,
       },
     )
   }
@@ -1227,6 +1256,7 @@ build_radiobutton_commands :: proc(
         },
         color = widget.fg_color,
         text = data.label,
+        text_align = .LEFT,
       },
     )
   }
@@ -1550,6 +1580,9 @@ draw_text_internal :: proc(
   size: f32 = 16,
   color: [4]u8 = {255, 255, 255, 255},
   z: f32 = 0.0,
+  align: TextAlign = .LEFT,
+  clip_rect: [4]f32 = {0, 0, 0, 0}, // x, y, width, height (0 width means no clipping)
+  show_suffix: bool = false, // Show suffix instead of prefix when text overflows
 ) {
   if len(text) == 0 {
     return
@@ -1563,10 +1596,91 @@ draw_text_internal :: proc(
   fs.SetColor(&self.font_ctx, color)
   fs.SetAH(&self.font_ctx, .LEFT)
   fs.SetAV(&self.font_ctx, .BASELINE)
-  iter := fs.TextIterInit(&self.font_ctx, x, y, text)
+
+  // Measure text for alignment and clipping
+  bounds: [4]f32
+  fs.TextBounds(&self.font_ctx, text, 0, 0, &bounds)
+  text_width := bounds[2] - bounds[0]
+
+  // Calculate x offset based on alignment (only if text fits)
+  x_offset: f32 = 0
+  if clip_rect.z > 0 {
+    if text_width <= clip_rect.z {
+      // Text fits - apply alignment
+      switch align {
+      case .LEFT:
+        x_offset = 0
+      case .CENTER:
+        x_offset = (clip_rect.z - text_width) * 0.5
+      case .RIGHT:
+        x_offset = clip_rect.z - text_width
+      }
+    } else {
+      // Text overflows
+      if show_suffix {
+        // Show suffix (end of text) - shift left so end is visible
+        x_offset = clip_rect.z - text_width
+      } else {
+        // Show prefix (beginning of text) - keep left-aligned
+        x_offset = 0
+      }
+    }
+  } else {
+    // No clipping - apply alignment normally
+    switch align {
+    case .LEFT:
+      x_offset = 0
+    case .CENTER:
+      x_offset = -text_width * 0.5
+    case .RIGHT:
+      x_offset = -text_width
+    }
+  }
+
+  text_x := x + x_offset
+  clip_enabled := clip_rect.z > 0
+  clip_left := clip_rect.x
+  clip_right := clip_rect.x + clip_rect.z
+  clip_top := clip_rect.y
+  clip_bottom := clip_rect.y + clip_rect.w
+
+  iter := fs.TextIterInit(&self.font_ctx, text_x, y, text)
   quad: fs.Quad
   for fs.TextIterNext(&self.font_ctx, &iter, &quad) {
-    push_text_quad(self, quad, color, z)
+    // Apply clipping if enabled
+    if clip_enabled {
+      // Check if quad is completely outside clip rect
+      if quad.x1 < clip_left || quad.x0 > clip_right ||
+         quad.y1 < clip_top || quad.y0 > clip_bottom {
+        continue
+      }
+      // Clip the quad to the clip rect
+      clipped_quad := quad
+      if clipped_quad.x0 < clip_left {
+        // Adjust UV coordinates proportionally
+        uv_adjust := (clip_left - clipped_quad.x0) / (clipped_quad.x1 - clipped_quad.x0)
+        clipped_quad.s0 = clipped_quad.s0 + (clipped_quad.s1 - clipped_quad.s0) * uv_adjust
+        clipped_quad.x0 = clip_left
+      }
+      if clipped_quad.x1 > clip_right {
+        uv_adjust := (clipped_quad.x1 - clip_right) / (clipped_quad.x1 - clipped_quad.x0)
+        clipped_quad.s1 = clipped_quad.s1 - (clipped_quad.s1 - clipped_quad.s0) * uv_adjust
+        clipped_quad.x1 = clip_right
+      }
+      if clipped_quad.y0 < clip_top {
+        uv_adjust := (clip_top - clipped_quad.y0) / (clipped_quad.y1 - clipped_quad.y0)
+        clipped_quad.t0 = clipped_quad.t0 + (clipped_quad.t1 - clipped_quad.t0) * uv_adjust
+        clipped_quad.y0 = clip_top
+      }
+      if clipped_quad.y1 > clip_bottom {
+        uv_adjust := (clipped_quad.y1 - clip_bottom) / (clipped_quad.y1 - clipped_quad.y0)
+        clipped_quad.t1 = clipped_quad.t1 - (clipped_quad.t1 - clipped_quad.t0) * uv_adjust
+        clipped_quad.y1 = clip_bottom
+      }
+      push_text_quad(self, clipped_quad, color, z)
+    } else {
+      push_text_quad(self, quad, color, z)
+    }
   }
 }
 
@@ -1765,6 +1879,9 @@ render :: proc(
         cmd.rect.w,
         cmd.color,
         cmd.z,
+        cmd.text_align,
+        cmd.rect, // Use rect as clip bounds
+        cmd.text_suffix,
       )
     case .CLIP:
     }
