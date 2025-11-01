@@ -191,6 +191,244 @@ sample_clip :: proc(
   }
 }
 
+AnimationSample :: struct {
+  clip:   ^animation.Clip,
+  time:   f32,
+  weight: f32,
+}
+
+sample_clips_blended :: proc(
+  self: ^Mesh,
+  samples: []AnimationSample,
+  out_bone_matrices: []matrix[4, 4]f32,
+) {
+  skin, has_skin := &self.skinning.?
+  if !has_skin do return
+  if len(out_bone_matrices) < len(skin.bones) do return
+  if len(samples) == 0 do return
+  if len(samples) == 1 {
+    sample_clip(self, samples[0].clip, samples[0].time, out_bone_matrices)
+    return
+  }
+  bone_count := len(skin.bones)
+  blended_transforms := make(
+    []geometry.Transform,
+    bone_count,
+    context.temp_allocator,
+  )
+  for i in 0 ..< bone_count {
+    blended_transforms[i].scale = {1, 1, 1}
+    blended_transforms[i].rotation = linalg.QUATERNIONF32_IDENTITY
+  }
+  total_weight: f32 = 0
+  for sample in samples {
+    total_weight += sample.weight
+  }
+  if total_weight <= 0 do return
+  inv_total_weight := 1.0 / total_weight
+  for sample in samples {
+    if sample.clip == nil do continue
+    if sample.weight <= 0 do continue
+    normalized_weight := sample.weight * inv_total_weight
+    for bone_idx in 0 ..< bone_count {
+      local_pos: [3]f32
+      local_rot: quaternion128
+      local_scale: [3]f32 = {1, 1, 1}
+      if bone_idx < len(sample.clip.channels) {
+        local_pos, local_rot, local_scale = animation.channel_sample(
+          sample.clip.channels[bone_idx],
+          sample.time,
+        )
+      } else {
+        local_rot = linalg.QUATERNIONF32_IDENTITY
+      }
+      blended_transforms[bone_idx].position += local_pos * normalized_weight
+      blended_transforms[bone_idx].scale += (local_scale - [3]f32{1, 1, 1}) * normalized_weight
+      if normalized_weight > 0.0001 {
+        if linalg.dot(blended_transforms[bone_idx].rotation, local_rot) < 0 {
+          local_rot = -local_rot
+        }
+        blended_transforms[bone_idx].rotation = linalg.quaternion_normalize(
+          blended_transforms[bone_idx].rotation + local_rot * normalized_weight,
+        )
+      }
+    }
+  }
+  TraverseEntry :: struct {
+    transform: matrix[4, 4]f32,
+    bone:      u32,
+  }
+  stack := make(
+    [dynamic]TraverseEntry,
+    0,
+    bone_count,
+    context.temp_allocator,
+  )
+  append(
+    &stack,
+    TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
+  )
+  for len(stack) > 0 {
+    entry := pop(&stack)
+    bone := &skin.bones[entry.bone]
+    bone_idx := entry.bone
+    blended := blended_transforms[bone_idx]
+    local_matrix := linalg.matrix4_from_trs(
+      blended.position,
+      blended.rotation,
+      blended.scale,
+    )
+    world_transform := entry.transform * local_matrix
+    out_bone_matrices[bone_idx] = world_transform * bone.inverse_bind_matrix
+    for child_index in bone.children {
+      append(&stack, TraverseEntry{world_transform, child_index})
+    }
+  }
+}
+
+sample_clips_blended_with_ik :: proc(
+  self: ^Mesh,
+  samples: []AnimationSample,
+  ik_targets: []animation.IKTarget,
+  out_bone_matrices: []matrix[4, 4]f32,
+) {
+  skin, has_skin := &self.skinning.?
+  if !has_skin do return
+  if len(out_bone_matrices) < len(skin.bones) do return
+  if len(samples) == 0 do return
+  bone_count := len(skin.bones)
+  blended_transforms := make(
+    []geometry.Transform,
+    bone_count,
+    context.temp_allocator,
+  )
+  for i in 0 ..< bone_count {
+    blended_transforms[i].scale = {1, 1, 1}
+    blended_transforms[i].rotation = linalg.QUATERNIONF32_IDENTITY
+  }
+  total_weight: f32 = 0
+  for sample in samples {
+    total_weight += sample.weight
+  }
+  if total_weight <= 0 do return
+  inv_total_weight := 1.0 / total_weight
+  for sample in samples {
+    if sample.clip == nil do continue
+    if sample.weight <= 0 do continue
+    normalized_weight := sample.weight * inv_total_weight
+    for bone_idx in 0 ..< bone_count {
+      local_pos: [3]f32
+      local_rot: quaternion128
+      local_scale: [3]f32 = {1, 1, 1}
+      if bone_idx < len(sample.clip.channels) {
+        local_pos, local_rot, local_scale = animation.channel_sample(
+          sample.clip.channels[bone_idx],
+          sample.time,
+        )
+      } else {
+        local_rot = linalg.QUATERNIONF32_IDENTITY
+      }
+      blended_transforms[bone_idx].position += local_pos * normalized_weight
+      blended_transforms[bone_idx].scale += (local_scale - [3]f32{1, 1, 1}) * normalized_weight
+      if normalized_weight > 0.0001 {
+        if linalg.dot(blended_transforms[bone_idx].rotation, local_rot) < 0 {
+          local_rot = -local_rot
+        }
+        blended_transforms[bone_idx].rotation = linalg.quaternion_normalize(
+          blended_transforms[bone_idx].rotation + local_rot * normalized_weight,
+        )
+      }
+    }
+  }
+  world_transforms := make(
+    []animation.BoneTransform,
+    bone_count,
+    context.temp_allocator,
+  )
+  TraverseEntry :: struct {
+    parent_world: matrix[4, 4]f32,
+    bone_index:   u32,
+  }
+  stack := make(
+    [dynamic]TraverseEntry,
+    0,
+    bone_count,
+    context.temp_allocator,
+  )
+  append(
+    &stack,
+    TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
+  )
+  for len(stack) > 0 {
+    entry := pop(&stack)
+    bone := &skin.bones[entry.bone_index]
+    bone_idx := entry.bone_index
+    blended := blended_transforms[bone_idx]
+    local_matrix := linalg.matrix4_from_trs(
+      blended.position,
+      blended.rotation,
+      blended.scale,
+    )
+    world_matrix := entry.parent_world * local_matrix
+    world_transforms[bone_idx].world_matrix = world_matrix
+    world_transforms[bone_idx].world_position = world_matrix[3].xyz
+    world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
+    for child_idx in bone.children {
+      append(&stack, TraverseEntry{world_matrix, child_idx})
+    }
+  }
+  for target in ik_targets {
+    if !target.enabled do continue
+    chain_length := len(target.bone_indices)
+    bone_lengths := make([]f32, chain_length - 1, context.temp_allocator)
+    for i in 0 ..< chain_length - 1 {
+      child_bone_idx := target.bone_indices[i + 1]
+      bone_lengths[i] = skin.bone_lengths[child_bone_idx]
+    }
+    animation.fabrik_solve(world_transforms[:], target, bone_lengths[:])
+  }
+  if len(ik_targets) > 0 {
+    affected_bones := make(map[u32]bool, bone_count, context.temp_allocator)
+    for target in ik_targets {
+      if !target.enabled do continue
+      for bone_idx in target.bone_indices {
+        affected_bones[bone_idx] = true
+      }
+    }
+    update_stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
+    for bone_idx in affected_bones {
+      bone := &skin.bones[bone_idx]
+      parent_world := world_transforms[bone_idx].world_matrix
+      for child_idx in bone.children {
+        if child_idx in affected_bones do continue
+        append(&update_stack, TraverseEntry{parent_world, child_idx})
+      }
+    }
+    for len(update_stack) > 0 {
+      entry := pop(&update_stack)
+      bone := &skin.bones[entry.bone_index]
+      bone_idx := entry.bone_index
+      blended := blended_transforms[bone_idx]
+      local_matrix := linalg.matrix4_from_trs(
+        blended.position,
+        blended.rotation,
+        blended.scale,
+      )
+      world_matrix := entry.parent_world * local_matrix
+      world_transforms[bone_idx].world_matrix = world_matrix
+      world_transforms[bone_idx].world_position = world_matrix[3].xyz
+      world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
+      for child_idx in bone.children {
+        append(&update_stack, TraverseEntry{world_matrix, child_idx})
+      }
+    }
+  }
+  for i in 0 ..< bone_count {
+    world_matrix := world_transforms[i].world_matrix
+    out_bone_matrices[i] = world_matrix * skin.bones[i].inverse_bind_matrix
+  }
+}
+
 // Compute all bone lengths from bind pose
 // Traverses skeleton hierarchy and stores distance from parent to each bone
 compute_bone_lengths :: proc(skin: ^Skinning) {

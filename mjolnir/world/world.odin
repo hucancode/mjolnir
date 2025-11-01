@@ -16,8 +16,13 @@ LightAttachment :: struct {
   handle: resources.Handle,
 }
 
+AnimationLayer :: struct {
+  instance: anim.Instance,
+  weight:   f32, // 0.0 to 1.0, blending weight for this animation
+}
+
 NodeSkinning :: struct {
-  animation:                 Maybe(anim.Instance),
+  animation_layers:          [dynamic]AnimationLayer,
   bone_matrix_buffer_offset: u32, // offset into bone matrix buffer for skinned mesh
 }
 
@@ -180,6 +185,7 @@ destroy_node :: proc(
         )
         skinning.bone_matrix_buffer_offset = 0xFFFFFFFF
       }
+      delete(skinning.animation_layers)
     }
     for &config in attachment.ik_configs {
       for name in config.bone_names {
@@ -318,7 +324,92 @@ play_animation :: proc(
   if !found {
     return false
   }
-  skinning.animation = anim_inst
+  clear(&skinning.animation_layers)
+  append(&skinning.animation_layers, AnimationLayer{instance = anim_inst, weight = 1.0})
+  return true
+}
+
+add_animation_layer :: proc(
+  world: ^World,
+  rm: ^resources.Manager,
+  node_handle: resources.Handle,
+  name: string,
+  weight: f32 = 1.0,
+  mode: anim.PlayMode = .LOOP,
+) -> (
+  layer_index: int,
+  ok: bool,
+) #optional_ok {
+  if rm == nil do return -1, false
+  node := cont.get(world.nodes, node_handle)
+  if node == nil do return -1, false
+  data, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return -1, false
+  mesh := cont.get(rm.meshes, data.handle)
+  if mesh == nil do return -1, false
+  skinning, has_skin := &data.skinning.?
+  if !has_skin do return -1, false
+  anim_inst, found := resources.make_animation_instance(rm, name, mode)
+  if !found do return -1, false
+  layer := AnimationLayer {
+    instance = anim_inst,
+    weight   = clamp(weight, 0.0, 1.0),
+  }
+  append(&skinning.animation_layers, layer)
+  return len(skinning.animation_layers) - 1, true
+}
+
+remove_animation_layer :: proc(
+  world: ^World,
+  node_handle: resources.Handle,
+  layer_index: int,
+) -> bool {
+  node := cont.get(world.nodes, node_handle)
+  if node == nil do return false
+  data, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return false
+  skinning, has_skin := &data.skinning.?
+  if !has_skin do return false
+  if layer_index < 0 || layer_index >= len(skinning.animation_layers) do return false
+  unordered_remove(&skinning.animation_layers, layer_index)
+  return true
+}
+
+set_animation_layer_weight :: proc(
+  world: ^World,
+  node_handle: resources.Handle,
+  layer_index: int,
+  weight: f32,
+) -> bool {
+  node := cont.get(world.nodes, node_handle)
+  if node == nil do return false
+  data, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return false
+  skinning, has_skin := &data.skinning.?
+  if !has_skin do return false
+  if layer_index < 0 || layer_index >= len(skinning.animation_layers) do return false
+  skinning.animation_layers[layer_index].weight = clamp(weight, 0.0, 1.0)
+  return true
+}
+
+get_animation_layer_count :: proc(world: ^World, node_handle: resources.Handle) -> int {
+  node := cont.get(world.nodes, node_handle)
+  if node == nil do return 0
+  data, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return 0
+  skinning, has_skin := &data.skinning.?
+  if !has_skin do return 0
+  return len(skinning.animation_layers)
+}
+
+clear_animation_layers :: proc(world: ^World, node_handle: resources.Handle) -> bool {
+  node := cont.get(world.nodes, node_handle)
+  if node == nil do return false
+  data, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return false
+  skinning, has_skin := &data.skinning.?
+  if !has_skin do return false
+  clear(&skinning.animation_layers)
   return true
 }
 

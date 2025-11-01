@@ -475,6 +475,43 @@ play_animation :: proc(
   return world.play_animation(&engine.world, &engine.rm, handle, name)
 }
 
+add_animation_layer :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+  name: string,
+  weight: f32 = 1.0,
+) -> (
+  layer_index: int,
+  ok: bool,
+) #optional_ok {
+  return world.add_animation_layer(&engine.world, &engine.rm, handle, name, weight)
+}
+
+remove_animation_layer :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+  layer_index: int,
+) -> bool {
+  return world.remove_animation_layer(&engine.world, handle, layer_index)
+}
+
+set_animation_layer_weight :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+  layer_index: int,
+  weight: f32,
+) -> bool {
+  return world.set_animation_layer_weight(&engine.world, handle, layer_index, weight)
+}
+
+get_animation_layer_count :: proc(engine: ^Engine, handle: resources.Handle) -> int {
+  return world.get_animation_layer_count(&engine.world, handle)
+}
+
+clear_animation_layers :: proc(engine: ^Engine, handle: resources.Handle) -> bool {
+  return world.clear_animation_layers(&engine.world, handle)
+}
+
 create_camera :: proc(
   engine: ^Engine,
   width, height: u32,

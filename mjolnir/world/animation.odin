@@ -24,16 +24,11 @@ update_skeletal_animations :: proc(
 
 	for &entry in world.nodes.entries do if entry.active {
 		node := &entry.item
-		mesh_attachment, has_mesh := node.attachment.(MeshAttachment)
+		mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
 		if !has_mesh do continue
-		skinning, has_skin := mesh_attachment.skinning.?
+		skinning, has_skin := &mesh_attachment.skinning.?
 		if !has_skin do continue
-		anim_instance, has_anim := skinning.animation.?
-		if !has_anim do continue
-
-		anim.instance_update(&anim_instance, delta_time)
-		clip := anim_instance.clip
-		if clip == nil do continue
+		if len(skinning.animation_layers) == 0 do continue
 
 		mesh := cont.get(rm.meshes, mesh_attachment.handle) or_continue
 		mesh_skinning, mesh_has_skin := mesh.skinning.?
@@ -46,27 +41,33 @@ update_skeletal_animations :: proc(
 		matrices_ptr := gpu.mutable_buffer_get(bone_buffer, skinning.bone_matrix_buffer_offset)
 		matrices := slice.from_ptr(matrices_ptr, bone_count)
 
-		// Resolve IK configs into runtime IK targets
+		for &layer in skinning.animation_layers {
+			anim.instance_update(&layer.instance, delta_time)
+		}
+
+		samples := make([]resources.AnimationSample, len(skinning.animation_layers), context.temp_allocator)
+		for layer, i in skinning.animation_layers {
+			samples[i] = resources.AnimationSample {
+				clip   = layer.instance.clip,
+				time   = layer.instance.time,
+				weight = layer.weight,
+			}
+		}
+
 		if len(mesh_attachment.ik_configs) > 0 {
 			ik_targets := _resolve_ik_targets(
 				&mesh_attachment.ik_configs,
 				mesh,
 				&node.transform,
 			)
-
 			if len(ik_targets) > 0 {
-				resources.sample_clip_with_ik(mesh, clip, anim_instance.time, ik_targets[:], matrices)
+				resources.sample_clips_blended_with_ik(mesh, samples, ik_targets[:], matrices)
 			} else {
-				resources.sample_clip(mesh, clip, anim_instance.time, matrices)
+				resources.sample_clips_blended(mesh, samples, matrices)
 			}
 		} else {
-			resources.sample_clip(mesh, clip, anim_instance.time, matrices)
+			resources.sample_clips_blended(mesh, samples, matrices)
 		}
-
-		// Write back updated animation state
-		skinning.animation = anim_instance
-		mesh_attachment.skinning = skinning
-		node.attachment = mesh_attachment
 	}
 }
 
