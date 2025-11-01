@@ -15,6 +15,7 @@ SphericalCamera :: struct {
   far:            f32, // Far plane
   size:           u32, // Resolution of cube map faces (size x size)
   depth_cube:     [MAX_FRAMES_IN_FLIGHT]Handle, // Cube depth textures (per-frame)
+  color_cube:     [MAX_FRAMES_IN_FLIGHT]Handle, // Cube color textures for transparent shadows (per-frame)
   command_buffer: vk.CommandBuffer, // Secondary command buffer
   draw_commands:   gpu.MutableBuffer(vk.DrawIndexedIndirectCommand), // Draw commands for visible objects
   draw_count:      gpu.MutableBuffer(u32), // Number of visible objects
@@ -48,6 +49,15 @@ spherical_camera_init :: proc(
       size,
       depth_format,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    )
+  }
+  for &v in camera.color_cube {
+    v, _, _ = create_empty_texture_cube(
+      gctx,
+      manager,
+      size,
+      .R16G16B16A16_SFLOAT,
+      {.COLOR_ATTACHMENT, .SAMPLED},
     )
   }
   alloc_info := vk.CommandBufferAllocateInfo {
@@ -89,6 +99,11 @@ spherical_camera_destroy :: proc(
   manager: ^Manager,
 ) {
   for v in camera.depth_cube {
+    if item, freed := cont.free(&manager.image_cube_buffers, v); freed {
+      gpu.cube_depth_texture_destroy(device, item)
+    }
+  }
+  for v in camera.color_cube {
     if item, freed := cont.free(&manager.image_cube_buffers, v); freed {
       gpu.cube_depth_texture_destroy(device, item)
     }

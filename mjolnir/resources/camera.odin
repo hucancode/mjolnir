@@ -50,6 +50,7 @@ AttachmentType :: enum {
   METALLIC_ROUGHNESS = 4,
   EMISSIVE           = 5,
   DEPTH              = 6,
+  SHADOW_COLOR       = 7, // Color accumulation for transparent shadows
 }
 
 // Pass types for enabled rendering passes
@@ -239,6 +240,16 @@ camera_init :: proc(
       depth_format,
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
+    if .SHADOW in enabled_passes {
+      camera.attachments[.SHADOW_COLOR][frame], _, _ = create_texture(
+        gctx,
+        manager,
+        width,
+        height,
+        .R16G16B16A16_SFLOAT,
+        vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
+      )
+    }
   }
   // Allocate per-pass command buffers for this camera
   alloc_info := vk.CommandBufferAllocateInfo {
@@ -679,6 +690,16 @@ camera_resize :: proc(
       depth_format,
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
+    if .SHADOW in camera.enabled_passes {
+      camera.attachments[.SHADOW_COLOR][frame], _, _ = create_texture(
+        gctx,
+        manager,
+        width,
+        height,
+        .R16G16B16A16_SFLOAT,
+        vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
+      )
+    }
   }
   // Recreate depth pyramids for all frames before allocating descriptors
   // (late culling uses prev frame's pyramid, so all must exist first)
