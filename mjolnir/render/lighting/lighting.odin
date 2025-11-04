@@ -665,9 +665,9 @@ render :: proc(
     depth_texture_index    = resources.camera_get_attachment(camera, .DEPTH, frame_index).index,
     input_image_index      = resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index).index,
   }
-  for entry, idx in rm.lights.entries do if entry.active {
-    light := entry.item
-    push_constant.light_index = u32(idx)
+  for handle in rm.active_lights {
+    light := cont.get(rm.lights, handle) or_continue
+    push_constant.light_index = handle.index
     vk.CmdPushConstants(command_buffer, self.lighting_pipeline_layout, {.VERTEX, .FRAGMENT}, 0, size_of(push_constant), &push_constant)
     switch light.type {
     case .POINT:

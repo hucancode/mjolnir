@@ -321,6 +321,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           duration = rotation_duration,
           speed = 1.0,
         }
+        world.register_animatable_node(&engine.world, lights_root_handle)
         log.infof("created light rotating animation with %d keyframes", len(rotation_clip.channels[0].rotations))
       }
     }
@@ -552,6 +553,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             duration = rotation_duration,
             speed = 1.0,
           }
+          world.register_animatable_node(&engine.world, forcefield_root_handle)
         }
       }
       forcefield_ok: bool
