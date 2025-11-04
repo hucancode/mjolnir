@@ -432,6 +432,7 @@ update :: proc(self: ^Engine) -> bool {
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
+  world.update_node_animations(&self.world, &self.rm, delta_time)
   world.update_skeletal_animations(&self.world, &self.rm, delta_time)
   world.update_sprite_animations(&self.rm, delta_time)
   self.last_update_timestamp = time.now()
