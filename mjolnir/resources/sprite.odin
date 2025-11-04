@@ -16,8 +16,8 @@ SpriteAnimationState :: enum {
 }
 
 SpriteAnimationMode :: enum {
-  ONCE,     // Play through once, then stop
-  LOOP,     // Play through, repeat
+  ONCE, // Play through once, then stop
+  LOOP, // Play through, repeat
   PINGPONG, // Play forward, then reverse, repeat
 }
 
@@ -97,7 +97,8 @@ sprite_animation_update :: proc(anim: ^SpriteAnimation, delta_time: f32) {
         if anim.forward {
           anim.current_frame = frames_to_skip % anim.frame_count
         } else {
-          anim.current_frame = anim.frame_count - 1 - (frames_to_skip % anim.frame_count)
+          anim.current_frame =
+            anim.frame_count - 1 - (frames_to_skip % anim.frame_count)
         }
       case .PINGPONG:
         // PINGPONG: cycle length is 2 * (frame_count - 1)
@@ -168,7 +169,10 @@ sprite_animation_set_frame :: proc(anim: ^SpriteAnimation, frame: u32) {
   anim.current_frame = min(frame, anim.frame_count - 1)
 }
 
-sprite_animation_set_mode :: proc(anim: ^SpriteAnimation, mode: SpriteAnimationMode) {
+sprite_animation_set_mode :: proc(
+  anim: ^SpriteAnimation,
+  mode: SpriteAnimationMode,
+) {
   anim.mode = mode
 }
 
@@ -272,7 +276,8 @@ register_animatable_sprite :: proc(manager: ^Manager, handle: Handle) {
 }
 
 unregister_animatable_sprite :: proc(manager: ^Manager, handle: Handle) {
-  if i, found := slice.linear_search(manager.animatable_sprites[:], handle); found {
-      unordered_remove(&manager.animatable_sprites, i)
+  if i, found := slice.linear_search(manager.animatable_sprites[:], handle);
+     found {
+    unordered_remove(&manager.animatable_sprites, i)
   }
 }
