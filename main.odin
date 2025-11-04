@@ -525,7 +525,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
-  // Camera controller is automatically updated by engine
   t := time_since_start(engine) * 0.5
   translate(
     engine,
