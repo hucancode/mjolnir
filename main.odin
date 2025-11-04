@@ -14,14 +14,8 @@ import "vendor:glfw"
 LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
-light_handles: [LIGHT_COUNT]resources.Handle
-light_cube_handles: [LIGHT_COUNT]resources.Handle
-lights_root_handle: resources.Handle
-forcefield_root_handle: resources.Handle
-forcefield_handle: resources.Handle
 portal_camera_handle: resources.Handle
 portal_material_handle: resources.Handle
-hand_cube_handle: resources.Handle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -190,7 +184,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           if !has_mesh do continue
           _, has_skin := mesh_attachment.skinning.?
           if !has_skin do continue
-          hand_cube_handle = spawn_child(
+          hand_cube_handle := spawn_child(
             engine,
             child_handle,
             world.MeshAttachment {
@@ -288,7 +282,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   when true {
     log.infof("creating %d lights with animated root", LIGHT_COUNT)
     // Create root node for all lights with rotation animation
-    lights_root_handle = spawn_at(engine, {0, 2, 0})
+    lights_root_handle := spawn_at(engine, {0, 2, 0})
     // Create rotation animation for lights root (60 second full rotation)
     rotation_duration: f32 = 10.0
     rotation_clip_handle, rotation_clip, clip_alloc_ok := cont.alloc(&engine.rm.animation_clips)
@@ -330,7 +324,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         log.infof("created light rotating animation with %d keyframes", len(rotation_clip.channels[0].rotations))
       }
     }
-
     // Create lights as children of the root, arranged in a circle
     radius: f32 = 15.0
     for i in 0 ..< LIGHT_COUNT {
@@ -340,25 +333,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
         math.sin(f32(i)),
         1.0,
       }
-
       // Calculate fixed local position in a circle
       angle := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
       local_x := math.cos(angle) * radius
       local_z := math.sin(angle) * radius
       local_y: f32 = 4.0
-
       should_make_spot_light := i % 2 != 1
       if ALL_SPOT_LIGHT {
         should_make_spot_light = true
       } else if ALL_POINT_LIGHT {
         should_make_spot_light = false
       }
-
+      light_handle : resources.Handle
       if should_make_spot_light {
-        light_handles[i] = spawn_child(engine, lights_root_handle) or_continue
-        node := get_node(engine, light_handles[i]) or_continue
+        light_handle = spawn_child(engine, lights_root_handle) or_continue
+        node := get_node(engine, light_handle) or_continue
         attachment := world.create_spot_light_attachment(
-          light_handles[i],
+          light_handle,
           &engine.rm,
           &engine.gctx,
           color,
@@ -367,18 +358,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
           true,
         ) or_continue
         node.attachment = attachment
-        translate(engine, light_handles[i], local_x, local_y, local_z)
+        translate(engine, light_handle, local_x, local_y, local_z)
         rotate(
           engine,
-          light_handles[i],
+          light_handle,
           math.PI * 0.5,
           linalg.VECTOR3F32_X_AXIS,
         )
       } else {
-        light_handles[i] = spawn_child(engine, lights_root_handle) or_continue
-        node := get_node(engine, light_handles[i]) or_continue
+        light_handle = spawn_child(engine, lights_root_handle) or_continue
+        node := get_node(engine, light_handle) or_continue
         attachment := world.create_point_light_attachment(
-          light_handles[i],
+          light_handle,
           &engine.rm,
           &engine.gctx,
           color,
@@ -386,20 +377,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
           true,
         ) or_continue
         node.attachment = attachment
-        translate(engine, light_handles[i], local_x, local_y, local_z)
+        translate(engine, light_handle, local_x, local_y, local_z)
       }
-
-      light_cube_handles[i] = spawn_child(
+      cube_handle := spawn_child(
         engine,
-        light_handles[i],
+        light_handle,
         world.MeshAttachment {
           handle = cube_mesh_handle,
           material = plain_material_handle,
           cast_shadow = false,
         },
       )
-      scale(engine, light_cube_handles[i], 0.05)
-      translate(engine, light_cube_handles[i], y = 0.5)
+      scale(engine, cube_handle, 0.05)
+      translate(engine, cube_handle, y = 0.5)
     }
     when false {
       dir_light_handle := spawn_directional_light(
@@ -522,7 +512,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
     if psys1_ok {
-      forcefield_root_handle = spawn_at(engine, {0, 2, 0})
+      forcefield_root_handle := spawn_at(engine, {0, 2, 0})
       rotation_duration: f32 = math.TAU / 0.5  // matches the original speed
       // Allocate clip directly using the pool
       forcefield_clip_handle, rotation_clip, clip_alloc_ok := cont.alloc(&engine.rm.animation_clips)
@@ -565,7 +555,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
       }
       forcefield_ok: bool
-      forcefield_handle = spawn_child(
+      forcefield_handle := spawn_child(
         engine,
         forcefield_root_handle,
         world.ForceFieldAttachment{},
@@ -699,19 +689,7 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   using mjolnir, geometry
   log.infof("key pressed key %d action %d mods %x", key, action, mods)
   if action == glfw.RELEASE do return
-  if key == glfw.KEY_LEFT {
-    translate_by(engine, light_handles[0], 0.1, 0.0, 0.0)
-  } else if key == glfw.KEY_RIGHT {
-    translate_by(engine, light_handles[0], -0.1, 0.0, 0.0)
-  } else if key == glfw.KEY_UP {
-    translate_by(engine, light_handles[0], 0.0, 0.1, 0.0)
-  } else if key == glfw.KEY_DOWN {
-    translate_by(engine, light_handles[0], 0.0, -0.1, 0.0)
-  } else if key == glfw.KEY_Z {
-    translate_by(engine, light_handles[0], 0.0, 0.0, 0.1)
-  } else if key == glfw.KEY_X {
-    translate_by(engine, light_handles[0], 0.0, 0.0, -0.1)
-  } else if key == glfw.KEY_TAB {
+  if key == glfw.KEY_TAB {
     current_type := get_active_camera_controller_type(engine)
     if current_type == .ORBIT {
       switch_camera_controller(engine, .FREE)
