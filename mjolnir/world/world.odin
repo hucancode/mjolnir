@@ -350,6 +350,8 @@ add_animation_layer :: proc(
   clip_handle: resources.Handle
   clip_duration: f32
   found := false
+  // TODO: use linear search as a first working implementation
+  // later we need to do better than this linear search
   for &entry, idx in rm.animation_clips.entries do if entry.active {
     if entry.item.name == animation_name {
       clip_handle = resources.Handle{index = u32(idx), generation = entry.generation}
@@ -371,7 +373,7 @@ add_animation_layer :: proc(
   } else {
     append(&skinning.layers, layer)
   }
-
+  register_animatable_node(world, node_handle)
   return true
 }
 
@@ -422,6 +424,9 @@ clear_animation_layers :: proc(
   if !has_skin do return false
 
   clear(&skinning.layers)
+  if _, has_node_anim := node.animation.?; !has_node_anim {
+    unregister_animatable_node(world, node_handle)
+  }
   return true
 }
 
@@ -500,6 +505,7 @@ add_ik_layer :: proc(
     append(&skinning.layers, layer)
   }
 
+  register_animatable_node(world, node_handle)
   return true
 }
 
@@ -750,6 +756,7 @@ World :: struct {
   octree_dirty_set:       map[resources.Handle]bool, // nodes needing octree update
   octree_updates_enabled: bool,
   actor_pools:            map[typeid]ActorPoolEntry,
+  animatable_nodes:       [dynamic]resources.Handle,
 }
 
 init :: proc(world: ^World) {
@@ -760,6 +767,7 @@ init :: proc(world: ^World) {
   root.parent = world.root
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
   world.actor_pools = make(map[typeid]ActorPoolEntry)
+  world.animatable_nodes = make([dynamic]resources.Handle, 0)
   max_depth, max_items := compute_octree_params(resources.MAX_NODES_IN_SCENE)
   geometry.octree_init(
     &world.node_octree,
@@ -841,9 +849,22 @@ destroy :: proc(
     entry.destroy_fn(entry.pool_ptr)
   }
   delete(world.actor_pools)
+  delete(world.animatable_nodes)
   geometry.octree_destroy(&world.node_octree)
   delete(world.octree_entry_map)
   delete(world.octree_dirty_set)
+}
+
+register_animatable_node :: proc(world: ^World, handle: resources.Handle) {
+  // TODO: if this list get more than 10000 items, we need to use a map
+  if slice.contains(world.animatable_nodes[:], handle) do return
+  append(&world.animatable_nodes, handle)
+}
+
+unregister_animatable_node :: proc(world: ^World, handle: resources.Handle) {
+  if i, found := slice.linear_search(world.animatable_nodes[:], handle); found {
+    unordered_remove(&world.animatable_nodes, i)
+  }
 }
 
 init_gpu :: proc(
@@ -945,8 +966,8 @@ cleanup_pending_deletions :: proc(
       zero_data.flags = {}  // Empty flags means not renderable
       resources.node_upload_data(rm, handle, &zero_data)
     }
-
     world.octree_dirty_set[handle] = true
+    unregister_animatable_node(world, handle)
     if node, ok := cont.free(&world.nodes, handle); ok {
       destroy_node(node, rm, gctx)
     }

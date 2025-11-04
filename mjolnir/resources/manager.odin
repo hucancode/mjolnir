@@ -156,6 +156,10 @@ Manager :: struct {
   index_slab:                                SlabAllocator,
   // Frame-scoped bookkeeping
   current_frame_index:                       u32,
+  // Animation tracking
+  animatable_sprites:                        [dynamic]Handle,
+  // Rendering tracking
+  active_lights:                             [dynamic]Handle,
 }
 
 init :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
@@ -177,8 +181,10 @@ init :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
   cont.init(&manager.animation_clips, 0)
   log.infof("Initializing sprites pool... ")
   cont.init(&manager.sprites, MAX_SPRITES)
+  manager.animatable_sprites = make([dynamic]Handle, 0)
   log.infof("Initializing lights pool... ")
   cont.init(&manager.lights, MAX_LIGHTS)
+  manager.active_lights = make([dynamic]Handle, 0)
   log.infof("Initializing navigation mesh pool... ")
   cont.init(&manager.nav_meshes, 0)
   log.infof("Initializing navigation context pool... ")
@@ -394,6 +400,8 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   delete(manager.forcefields.free_indices)
   delete(manager.sprites.entries)
   delete(manager.sprites.free_indices)
+  delete(manager.animatable_sprites)
+  delete(manager.active_lights)
   for &entry in manager.animation_clips.entries {
     if entry.generation > 0 && entry.active {
       animation.clip_destroy(&entry.item)

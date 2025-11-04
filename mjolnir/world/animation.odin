@@ -49,8 +49,8 @@ update_skeletal_animations :: proc(
 		return
 	}
 
-	for &entry in world.nodes.entries do if entry.active {
-		node := &entry.item
+	for handle in world.animatable_nodes {
+		node := cont.get(world.nodes, handle) or_continue
 		mesh_attachment, has_mesh := node.attachment.(MeshAttachment)
 		if !has_mesh do continue
 		skinning, has_skin := mesh_attachment.skinning.?
@@ -101,8 +101,8 @@ update_node_animations :: proc(
 	delta_time: f32,
 ) {
 	if delta_time <= 0 do return
-	for &entry in world.nodes.entries do if entry.active {
-		node := &entry.item
+	for handle in world.animatable_nodes {
+		node := cont.get(world.nodes, handle) or_continue
 		anim_inst, has_anim := &node.animation.?
 		if !has_anim do continue
 
@@ -163,21 +163,11 @@ update_sprite_animations :: proc(
 ) {
 	if delta_time <= 0 do return
 
-	active_count := len(rm.sprites.entries) - len(rm.sprites.free_indices)
-	if active_count == 0 do return
-
-	for &entry, i in rm.sprites.entries {
-		if !entry.active do continue
-		sprite := &entry.item
+	for handle in rm.animatable_sprites {
+		sprite := cont.get(rm.sprites, handle) or_continue
 		anim_inst, has_anim := &sprite.animation.?
 		if !has_anim do continue
-
 		resources.sprite_animation_update(anim_inst, delta_time)
-
-		handle := resources.Handle {
-			index      = u32(i),
-			generation = entry.generation,
-		}
 		resources.sprite_write_to_gpu(rm, handle, sprite)
 	}
 }

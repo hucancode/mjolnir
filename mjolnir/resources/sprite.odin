@@ -4,6 +4,7 @@ import cont "../containers"
 import "../gpu"
 import "core:log"
 import "core:math"
+import "core:slice"
 import vk "vendor:vulkan"
 
 MAX_SPRITES :: 4096
@@ -253,9 +254,25 @@ create_sprite :: proc(
     cont.free(&manager.sprites, handle)
     return {}, false
   }
+  if _, has_anim := animation.?; has_anim {
+    register_animatable_sprite(manager, handle)
+  }
   return handle, true
 }
 
 destroy_sprite_handle :: proc(manager: ^Manager, handle: Handle) {
+  unregister_animatable_sprite(manager, handle)
   cont.free(&manager.sprites, handle)
+}
+
+register_animatable_sprite :: proc(manager: ^Manager, handle: Handle) {
+  // TODO: if this list get more than 10000 items, we need to use a map
+  if slice.contains(manager.animatable_sprites[:], handle) do return
+  append(&manager.animatable_sprites, handle)
+}
+
+unregister_animatable_sprite :: proc(manager: ^Manager, handle: Handle) {
+  if i, found := slice.linear_search(manager.animatable_sprites[:], handle); found {
+      unordered_remove(&manager.animatable_sprites, i)
+  }
 }

@@ -6,6 +6,7 @@ import "../gpu"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 import vk "vendor:vulkan"
 
 LightType :: enum u32 {
@@ -141,6 +142,7 @@ create_light :: proc(
     }
   }
   gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
+  register_active_light(manager, handle)
   return handle, true
 }
 
@@ -172,6 +174,7 @@ destroy_light :: proc(
       cont.free(&manager.cameras, light.camera_handle)
     }
   }
+  unregister_active_light(manager, handle)
   _, freed := cont.free(&manager.lights, handle)
   return freed
 }
@@ -186,8 +189,8 @@ update_light_shadow_camera_transforms :: proc(
   manager: ^Manager,
   frame_index: u32 = 0,
 ) {
-  for &entry, light_index in manager.lights.entries do if entry.active {
-    light := &entry.item
+  for handle, light_index in manager.active_lights {
+    light := cont.get(manager.lights, handle) or_continue
     // Get light's world transform from node
     node_data := gpu.mutable_buffer_get(&manager.node_data_buffer, light.node_index)
     if node_data == nil do continue
@@ -231,5 +234,17 @@ update_light_shadow_camera_transforms :: proc(
       shadow_map = shadow_map_id,
     }
     gpu.write(&manager.dynamic_light_data_buffers[frame_index], &dynamic_data, light_index)
+  }
+}
+
+register_active_light :: proc(manager: ^Manager, handle: Handle) {
+  // TODO: if this list get more than 10000 items, we need to use a map
+  if slice.contains(manager.active_lights[:], handle) do return
+  append(&manager.active_lights, handle)
+}
+
+unregister_active_light :: proc(manager: ^Manager, handle: Handle) {
+  if i, found := slice.linear_search(manager.active_lights[:], handle); found {
+    unordered_remove(&manager.active_lights, i)
   }
 }
