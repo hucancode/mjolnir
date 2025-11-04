@@ -87,6 +87,17 @@ NodeTag :: enum u32 {
 
 NodeTagSet :: bit_set[NodeTag;u32]
 
+// AnimationInstance represents a playing animation clip on a node
+// Uses handle-based lookup to avoid pointer invalidation when pools resize
+AnimationInstance :: struct {
+  clip_handle: resources.Handle, // handle to animation clip (resolved at runtime)
+  mode:        anim.PlayMode,
+  status:      anim.Status,
+  time:        f32,
+  duration:    f32,
+  speed:       f32,
+}
+
 Node :: struct {
   parent:           resources.Handle,
   children:         [dynamic]resources.Handle,
@@ -94,7 +105,7 @@ Node :: struct {
   name:             string,
   bone_socket:      string, // if not empty, attach to this bone on parent skinned mesh
   attachment:       NodeAttachment,
-  animation:        Maybe(anim.Instance),
+  animation:        Maybe(AnimationInstance),
   culling_enabled:  bool,
   visible:          bool, // node's own visibility state
   parent_visible:   bool, // visibility inherited from parent chain
@@ -335,19 +346,24 @@ add_animation_layer :: proc(
 
   skinning := &mesh_attachment.skinning.?
 
-  // Find animation clip
-  clip: ^anim.Clip
-  for &entry in rm.animation_clips.entries do if entry.active {
+  // Find animation clip handle and duration
+  clip_handle: resources.Handle
+  clip_duration: f32
+  found := false
+  for &entry, idx in rm.animation_clips.entries do if entry.active {
     if entry.item.name == animation_name {
-      clip = &entry.item
+      clip_handle = resources.Handle{index = u32(idx), generation = entry.generation}
+      clip_duration = entry.item.duration
+      found = true
       break
     }
   }
-  if clip == nil do return false
+  if !found do return false
 
-  // Create new layer
+  // Create new layer with handle
   layer := anim.Layer{}
-  anim.layer_init_fk(&layer, clip, weight, mode, speed)
+  clip_handle_u64 := transmute(u64)clip_handle
+  anim.layer_init_fk(&layer, clip_handle_u64, clip_duration, weight, mode, speed)
 
   // Add or replace layer
   if layer_index >= 0 && layer_index < len(skinning.layers) {
@@ -1017,6 +1033,8 @@ traverse :: proc(
       if entry.handle != world.root {
         world.octree_dirty_set[entry.handle] = true
       }
+      // Bone socket provides an additional transform layer between parent and local
+      // transform_update_world will multiply: (parent * bone_socket) * local_matrix
       transform_update_world(
         &current_node.transform,
         entry.parent_transform * bone_socket_transform,

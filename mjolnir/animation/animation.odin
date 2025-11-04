@@ -256,7 +256,74 @@ channel_destroy :: proc(channel: ^Channel) {
   channel.cubic_scales = nil
 }
 
-channel_sample :: proc(
+// Sample channel, returning Maybe for each component (nil if no keyframe data)
+// Use this for node animations where you want to preserve non-animated components
+channel_sample_some :: proc(
+  channel: Channel,
+  t: f32,
+) -> (
+  position: Maybe([3]f32),
+  rotation: Maybe(quaternion128),
+  scale: Maybe([3]f32),
+) {
+  // Only return a value if the channel has keyframe data
+  if len(channel.positions) > 0 || len(channel.cubic_positions) > 0 {
+    pos_value: [3]f32
+    switch channel.position_interpolation {
+    case .LINEAR:
+      pos_value = keyframe_sample_linear(channel.positions, t)
+    case .STEP:
+      pos_value = keyframe_sample_step(channel.positions, t)
+    case .CUBICSPLINE:
+      pos_value = keyframe_sample_cubic(channel.cubic_positions, t)
+    }
+    position = pos_value
+  }
+
+  if len(channel.rotations) > 0 || len(channel.cubic_rotations) > 0 {
+    rot_value: quaternion128
+    switch channel.rotation_interpolation {
+    case .LINEAR:
+      rot_value = keyframe_sample_or_linear(
+        channel.rotations,
+        t,
+        linalg.QUATERNIONF32_IDENTITY,
+      )
+    case .STEP:
+      rot_value = keyframe_sample_or_step(
+        channel.rotations,
+        t,
+        linalg.QUATERNIONF32_IDENTITY,
+      )
+    case .CUBICSPLINE:
+      rot_value = keyframe_sample_or_cubic(
+        channel.cubic_rotations,
+        t,
+        linalg.QUATERNIONF32_IDENTITY,
+      )
+    }
+    rotation = rot_value
+  }
+
+  if len(channel.scales) > 0 || len(channel.cubic_scales) > 0 {
+    scale_value: [3]f32
+    switch channel.scale_interpolation {
+    case .LINEAR:
+      scale_value = keyframe_sample_or_linear(channel.scales, t, [3]f32{1, 1, 1})
+    case .STEP:
+      scale_value = keyframe_sample_or_step(channel.scales, t, [3]f32{1, 1, 1})
+    case .CUBICSPLINE:
+      scale_value = keyframe_sample_or_cubic(channel.cubic_scales, t, [3]f32{1, 1, 1})
+    }
+    scale = scale_value
+  }
+
+  return
+}
+
+// Sample channel, always returning all components with defaults if no keyframe data
+// Use this for skeletal animations where every bone needs a complete transform
+channel_sample_all :: proc(
   channel: Channel,
   t: f32,
 ) -> (
@@ -264,42 +331,10 @@ channel_sample :: proc(
   rotation: quaternion128,
   scale: [3]f32,
 ) {
-  switch channel.position_interpolation {
-  case .LINEAR:
-    position = keyframe_sample_linear(channel.positions, t)
-  case .STEP:
-    position = keyframe_sample_step(channel.positions, t)
-  case .CUBICSPLINE:
-    position = keyframe_sample_cubic(channel.cubic_positions, t)
-  }
-  switch channel.rotation_interpolation {
-  case .LINEAR:
-    rotation = keyframe_sample_or_linear(
-      channel.rotations,
-      t,
-      linalg.QUATERNIONF32_IDENTITY,
-    )
-  case .STEP:
-    rotation = keyframe_sample_or_step(
-      channel.rotations,
-      t,
-      linalg.QUATERNIONF32_IDENTITY,
-    )
-  case .CUBICSPLINE:
-    rotation = keyframe_sample_or_cubic(
-      channel.cubic_rotations,
-      t,
-      linalg.QUATERNIONF32_IDENTITY,
-    )
-  }
-  switch channel.scale_interpolation {
-  case .LINEAR:
-    scale = keyframe_sample_or_linear(channel.scales, t, [3]f32{1, 1, 1})
-  case .STEP:
-    scale = keyframe_sample_or_step(channel.scales, t, [3]f32{1, 1, 1})
-  case .CUBICSPLINE:
-    scale = keyframe_sample_or_cubic(channel.cubic_scales, t, [3]f32{1, 1, 1})
-  }
+  maybe_pos, maybe_rot, maybe_scl := channel_sample_some(channel, t)
+  position = maybe_pos.? or_else [3]f32{0, 0, 0}
+  rotation = maybe_rot.? or_else linalg.QUATERNIONF32_IDENTITY
+  scale = maybe_scl.? or_else [3]f32{1, 1, 1}
   return
 }
 
@@ -316,7 +351,12 @@ clip_destroy :: proc(clip: ^Clip) {
 }
 
 FKLayer :: struct {
-  instance: Instance, // Animation instance with independent time/playback
+  clip_handle: u64,      // Handle to animation clip (stores resources.Handle as u64)
+  mode:        PlayMode,
+  status:      Status,
+  time:        f32,
+  duration:    f32,
+  speed:       f32,
 }
 
 IKLayer :: struct {
@@ -333,17 +373,16 @@ Layer :: struct {
   data:   LayerData, // FK or IK layer data
 }
 
-layer_init_fk :: proc(self: ^Layer, clip: ^Clip, weight: f32 = 1.0, mode: PlayMode = .LOOP, speed: f32 = 1.0) {
+layer_init_fk :: proc(self: ^Layer, clip_handle: u64, duration: f32, weight: f32 = 1.0, mode: PlayMode = .LOOP, speed: f32 = 1.0) {
   self.weight = weight
-  instance := Instance {
-    clip     = clip,
-    mode     = mode,
-    status   = .PLAYING,
-    time     = 0.0,
-    duration = clip.duration if clip != nil else 0.0,
-    speed    = speed,
+  self.data = FKLayer {
+    clip_handle = clip_handle,
+    mode        = mode,
+    status      = .PLAYING,
+    time        = 0.0,
+    duration    = duration,
+    speed       = speed,
   }
-  self.data = FKLayer{instance = instance}
 }
 
 layer_init_ik :: proc(self: ^Layer, target: IKTarget, weight: f32 = 1.0) {
@@ -354,7 +393,28 @@ layer_init_ik :: proc(self: ^Layer, target: IKTarget, weight: f32 = 1.0) {
 layer_update :: proc(self: ^Layer, delta_time: f32) {
   switch &layer_data in self.data {
   case FKLayer:
-    instance_update(&layer_data.instance, delta_time)
+    // Update FK layer time
+    if layer_data.status != .PLAYING || layer_data.duration <= 0 {
+      return
+    }
+    effective_delta_time := delta_time * layer_data.speed
+    switch layer_data.mode {
+    case .LOOP:
+      layer_data.time += effective_delta_time
+      layer_data.time = math.mod_f32(layer_data.time + layer_data.duration, layer_data.duration)
+    case .ONCE:
+      layer_data.time += effective_delta_time
+      layer_data.time = math.mod_f32(layer_data.time + layer_data.duration, layer_data.duration)
+      if layer_data.time >= layer_data.duration {
+        layer_data.time = layer_data.duration
+        layer_data.status = .STOPPED
+      }
+    case .PING_PONG:
+      layer_data.time += effective_delta_time
+      if layer_data.time >= layer_data.duration || layer_data.time < 0 {
+        layer_data.speed *= -1
+      }
+    }
   case IKLayer:
     // IK doesn't have time-based updates
   }

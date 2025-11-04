@@ -321,3 +321,143 @@ animation_sample_benchmark :: proc(t: ^testing.T) {
     options.megabytes_per_second,
   )
 }
+
+@(test)
+test_node_animation_channel_sampling :: proc(t: ^testing.T) {
+  // Create a simple animation channel with position, rotation, and scale
+  channel := animation.Channel {
+    position_interpolation = .LINEAR,
+    rotation_interpolation = .LINEAR,
+    scale_interpolation = .LINEAR,
+    positions = []animation.Keyframe([3]f32) {
+      {time = 0.0, value = {0, 0, 0}},
+      {time = 1.0, value = {10, 0, 0}},
+    },
+    rotations = []animation.Keyframe(quaternion128) {
+      {time = 0.0, value = linalg.QUATERNIONF32_IDENTITY},
+      {time = 1.0, value = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 1, 0})},
+    },
+    scales = []animation.Keyframe([3]f32) {
+      {time = 0.0, value = {1, 1, 1}},
+      {time = 1.0, value = {2, 2, 2}},
+    },
+  }
+
+  // Test at t=0
+  pos, rot, scale := animation.channel_sample_all(channel, 0.0)
+  testing.expect_value(t, pos, [3]f32{0, 0, 0})
+  testing.expect_value(t, scale, [3]f32{1, 1, 1})
+
+  // Test at t=0.5 (midpoint)
+  pos, rot, scale = animation.channel_sample_all(channel, 0.5)
+  testing.expect_value(t, pos, [3]f32{5, 0, 0})
+  testing.expect_value(t, scale, [3]f32{1.5, 1.5, 1.5})
+
+  // Test at t=1.0
+  pos, rot, scale = animation.channel_sample_all(channel, 1.0)
+  testing.expect_value(t, pos, [3]f32{10, 0, 0})
+  testing.expect_value(t, scale, [3]f32{2, 2, 2})
+}
+
+@(test)
+test_node_animation_instance_update :: proc(t: ^testing.T) {
+  // Create a clip with 2 second duration
+  clip := animation.Clip {
+    name = "test_clip",
+    duration = 2.0,
+    channels = make([]animation.Channel, 1),
+  }
+  clip.channels[0] = animation.Channel {
+    position_interpolation = .LINEAR,
+    positions = []animation.Keyframe([3]f32) {
+      {time = 0.0, value = {0, 0, 0}},
+      {time = 2.0, value = {20, 0, 0}},
+    },
+  }
+
+  // Create instance
+  instance := animation.Instance {
+    clip = &clip,
+    mode = .LOOP,
+    status = .PLAYING,
+    time = 0.0,
+    duration = clip.duration,
+    speed = 1.0,
+  }
+
+  // Update by 0.5 seconds
+  animation.instance_update(&instance, 0.5)
+  testing.expect_value(t, instance.time, 0.5)
+
+  // Update by 1.0 second (total 1.5)
+  animation.instance_update(&instance, 1.0)
+  testing.expect_value(t, instance.time, 1.5)
+
+  // Update by 1.0 second (should wrap to 0.5 in loop mode)
+  animation.instance_update(&instance, 1.0)
+  testing.expect(t, instance.time > 0.4 && instance.time < 0.6, "Time should wrap in loop mode")
+
+  delete(clip.channels)
+}
+
+@(test)
+test_node_animation_playback_modes :: proc(t: ^testing.T) {
+  clip := animation.Clip {
+    name = "test_clip",
+    duration = 1.0,
+    channels = nil,
+  }
+
+  // Test LOOP mode
+  instance_loop := animation.Instance {
+    clip = &clip,
+    mode = .LOOP,
+    status = .PLAYING,
+    time = 0.0,
+    duration = 1.0,
+    speed = 1.0,
+  }
+  animation.instance_update(&instance_loop, 1.5)
+  testing.expect(t, instance_loop.time < 1.0, "Loop mode should wrap")
+  testing.expect_value(t, instance_loop.status, animation.Status.PLAYING)
+
+  // Test PING_PONG mode
+  instance_ping_pong := animation.Instance {
+    clip = &clip,
+    mode = .PING_PONG,
+    status = .PLAYING,
+    time = 0.0,
+    duration = 1.0,
+    speed = 1.0,
+  }
+  // Update past duration, should reverse direction
+  animation.instance_update(&instance_ping_pong, 1.5)
+  testing.expect(t, instance_ping_pong.time > 0.0, "Ping pong should go forward then reverse")
+  testing.expect(t, instance_ping_pong.speed < 0, "Ping pong should reverse speed")
+}
+
+@(test)
+test_node_animation_step_interpolation :: proc(t: ^testing.T) {
+  // Create channel with STEP interpolation (useful for sprite animations or discrete values)
+  channel := animation.Channel {
+    position_interpolation = .STEP,
+    positions = []animation.Keyframe([3]f32) {
+      {time = 0.0, value = {0, 0, 0}},
+      {time = 1.0, value = {10, 0, 0}},
+      {time = 2.0, value = {20, 0, 0}},
+    },
+  }
+
+  // With STEP, values should not interpolate
+  pos, _, _ := animation.channel_sample_all(channel, 0.0)
+  testing.expect_value(t, pos, [3]f32{0, 0, 0})
+
+  pos, _, _ = animation.channel_sample_all(channel, 0.99)
+  testing.expect_value(t, pos, [3]f32{0, 0, 0}) // Still first keyframe
+
+  pos, _, _ = animation.channel_sample_all(channel, 1.0)
+  testing.expect_value(t, pos, [3]f32{10, 0, 0}) // Jump to second keyframe
+
+  pos, _, _ = animation.channel_sample_all(channel, 1.5)
+  testing.expect_value(t, pos, [3]f32{10, 0, 0}) // Hold second value
+}

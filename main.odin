@@ -4,6 +4,8 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "mjolnir"
+import "mjolnir/animation"
+import cont "mjolnir/containers"
 import "mjolnir/geometry"
 import "mjolnir/resources"
 import "mjolnir/world"
@@ -14,15 +16,17 @@ ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
 light_cube_handles: [LIGHT_COUNT]resources.Handle
+lights_root_handle: resources.Handle
+forcefield_root_handle: resources.Handle
 forcefield_handle: resources.Handle
 portal_camera_handle: resources.Handle
 portal_material_handle: resources.Handle
+hand_cube_handle: resources.Handle
 
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
-  engine.update_proc = update
   engine.key_press_proc = on_key_pressed
   engine.post_render_proc = on_post_render
   mjolnir.run(engine, 1280, 720, "Mjolnir")
@@ -186,7 +190,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           if !has_mesh do continue
           _, has_skin := mesh_attachment.skinning.?
           if !has_skin do continue
-          handle := spawn_child(
+          hand_cube_handle = spawn_child(
             engine,
             child_handle,
             world.MeshAttachment {
@@ -195,10 +199,55 @@ setup :: proc(engine: ^mjolnir.Engine) {
               cast_shadow = true,
             },
           ) or_continue
-          hand_cube_node := get_node(engine, handle)
+          hand_cube_node := get_node(engine, hand_cube_handle)
           // Attach a cube to the hand.L bone
           hand_cube_node.bone_socket = "hand.L"
-          scale(engine, handle, 0.1)
+          scale(engine, hand_cube_handle, 0.1)
+
+          // Create a spinning animation with cubic spline interpolation
+          spin_duration: f32 = 2.0
+
+          // Allocate clip directly using the pool
+          spin_clip_handle, spin_clip, clip_alloc_ok := cont.alloc(&engine.rm.animation_clips)
+          if clip_alloc_ok {
+            spin_clip.name = "cube_spin"
+            spin_clip.duration = spin_duration
+            spin_clip.channels = make([]animation.Channel, 1)
+            spin_clip.channels[0].rotation_interpolation = .CUBICSPLINE
+            spin_clip.channels[0].cubic_rotations = make([]animation.CubicSplineKeyframe(quaternion128), 3)
+            spin_clip.channels[0].cubic_rotations[0] = {
+              time = 0.0,
+              in_tangent = linalg.QUATERNIONF32_IDENTITY,
+              value = linalg.QUATERNIONF32_IDENTITY,
+              out_tangent = linalg.QUATERNIONF32_IDENTITY,
+            }
+            spin_clip.channels[0].cubic_rotations[1] = {
+              time = spin_duration * 0.5,
+              in_tangent = linalg.QUATERNIONF32_IDENTITY,
+              value = linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Y_AXIS),
+              out_tangent = linalg.QUATERNIONF32_IDENTITY,
+            }
+            spin_clip.channels[0].cubic_rotations[2] = {
+              time = spin_duration,
+              in_tangent = linalg.QUATERNIONF32_IDENTITY,
+              value = linalg.QUATERNIONF32_IDENTITY,
+              out_tangent = linalg.QUATERNIONF32_IDENTITY,
+            }
+
+            // Get fresh node pointer (previous one may be stale after allocations)
+            if hand_cube_node_fresh, ok := get_node(engine, hand_cube_handle); ok {
+              // Create animation instance with handle
+              hand_cube_node_fresh.animation = world.AnimationInstance {
+                clip_handle = spin_clip_handle,
+                mode = .LOOP,
+                status = .PLAYING,
+                time = 0.0,
+                duration = spin_duration,
+                speed = 1.0,
+              }
+            }
+          }
+
           break
         }
       }
@@ -237,7 +286,53 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   when true {
-    log.infof("creating %d lights", LIGHT_COUNT)
+    log.infof("creating %d lights with animated root", LIGHT_COUNT)
+    // Create root node for all lights with rotation animation
+    lights_root_handle = spawn_at(engine, {0, 2, 0})
+    // Create rotation animation for lights root (60 second full rotation)
+    rotation_duration: f32 = 10.0
+    rotation_clip_handle, rotation_clip, clip_alloc_ok := cont.alloc(&engine.rm.animation_clips)
+    if clip_alloc_ok {
+      rotation_clip.name = "lights_rotation"
+      rotation_clip.duration = rotation_duration
+      rotation_clip.channels = make([]animation.Channel, 1)
+      rotation_clip.channels[0].rotation_interpolation = .LINEAR
+      rotation_clip.channels[0].rotations = make([]animation.Keyframe(quaternion128), 5)
+      rotation_clip.channels[0].rotations[0] = {
+        time = 0.0,
+        value = linalg.QUATERNIONF32_IDENTITY,
+      }
+      rotation_clip.channels[0].rotations[1] = {
+        time = rotation_duration*0.25,
+        value = linalg.quaternion_angle_axis_f32(math.PI*0.5, linalg.VECTOR3F32_Y_AXIS),
+      }
+      rotation_clip.channels[0].rotations[2] = {
+        time = rotation_duration*0.5,
+        value = linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Y_AXIS),
+      }
+      rotation_clip.channels[0].rotations[3] = {
+        time = rotation_duration*0.75,
+        value = linalg.quaternion_angle_axis_f32(math.PI * 1.5, linalg.VECTOR3F32_Y_AXIS),
+      }
+      rotation_clip.channels[0].rotations[4] = {
+        time = rotation_duration,
+        value = linalg.quaternion_angle_axis_f32(math.PI*2, linalg.VECTOR3F32_Y_AXIS),
+      }
+      if lights_root_node, ok := get_node(engine, lights_root_handle); ok {
+        lights_root_node.animation = world.AnimationInstance {
+          clip_handle = rotation_clip_handle,
+          mode = .LOOP,
+          status = .PLAYING,
+          time = 0.0,
+          duration = rotation_duration,
+          speed = 1.0,
+        }
+        log.infof("created light rotating animation with %d keyframes", len(rotation_clip.channels[0].rotations))
+      }
+    }
+
+    // Create lights as children of the root, arranged in a circle
+    radius: f32 = 15.0
     for i in 0 ..< LIGHT_COUNT {
       color := [4]f32 {
         math.sin(f32(i)),
@@ -245,22 +340,34 @@ setup :: proc(engine: ^mjolnir.Engine) {
         math.sin(f32(i)),
         1.0,
       }
+
+      // Calculate fixed local position in a circle
+      angle := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
+      local_x := math.cos(angle) * radius
+      local_z := math.sin(angle) * radius
+      local_y: f32 = 4.0
+
       should_make_spot_light := i % 2 != 1
       if ALL_SPOT_LIGHT {
         should_make_spot_light = true
       } else if ALL_POINT_LIGHT {
         should_make_spot_light = false
       }
+
       if should_make_spot_light {
-        light_handles[i] =
-        spawn_spot_light(
-          engine,
+        light_handles[i] = spawn_child(engine, lights_root_handle) or_continue
+        node := get_node(engine, light_handles[i]) or_continue
+        attachment := world.create_spot_light_attachment(
+          light_handles[i],
+          &engine.rm,
+          &engine.gctx,
           color,
-          14,
+          14.0,
           math.PI * 0.15,
           true,
-          {0, 6, -1},
         ) or_continue
+        node.attachment = attachment
+        translate(engine, light_handles[i], local_x, local_y, local_z)
         rotate(
           engine,
           light_handles[i],
@@ -268,9 +375,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
           linalg.VECTOR3F32_X_AXIS,
         )
       } else {
-        light_handles[i] =
-        spawn_point_light(engine, color, 14, true, {0, 2, -1}) or_continue
+        light_handles[i] = spawn_child(engine, lights_root_handle) or_continue
+        node := get_node(engine, light_handles[i]) or_continue
+        attachment := world.create_point_light_attachment(
+          light_handles[i],
+          &engine.rm,
+          &engine.gctx,
+          color,
+          14.0,
+          true,
+        ) or_continue
+        node.attachment = attachment
+        translate(engine, light_handles[i], local_x, local_y, local_z)
       }
+
       light_cube_handles[i] = spawn_child(
         engine,
         light_handles[i],
@@ -404,13 +522,55 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
     if psys1_ok {
+      forcefield_root_handle = spawn_at(engine, {0, 2, 0})
+      rotation_duration: f32 = math.TAU / 0.5  // matches the original speed
+      // Allocate clip directly using the pool
+      forcefield_clip_handle, rotation_clip, clip_alloc_ok := cont.alloc(&engine.rm.animation_clips)
+      if clip_alloc_ok {
+        rotation_clip.name = "forcefield_rotation"
+        rotation_clip.duration = rotation_duration
+        rotation_clip.channels = make([]animation.Channel, 1)
+        rotation_clip.channels[0].rotation_interpolation = .LINEAR
+        rotation_clip.channels[0].rotations = make([]animation.Keyframe(quaternion128), 5)
+        rotation_clip.channels[0].rotations[0] = {
+          time = 0.0,
+          value = linalg.QUATERNIONF32_IDENTITY,
+        }
+        rotation_clip.channels[0].rotations[1] = {
+          time = rotation_duration*0.25,
+          value = linalg.quaternion_angle_axis_f32(math.PI*0.5, linalg.VECTOR3F32_Y_AXIS),
+        }
+        rotation_clip.channels[0].rotations[2] = {
+          time = rotation_duration*0.5,
+          value = linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Y_AXIS),
+        }
+        rotation_clip.channels[0].rotations[3] = {
+          time = rotation_duration*0.75,
+          value = linalg.quaternion_angle_axis_f32(math.PI * 1.5, linalg.VECTOR3F32_Y_AXIS),
+        }
+        rotation_clip.channels[0].rotations[4] = {
+          time = rotation_duration,
+          value = linalg.quaternion_angle_axis_f32(math.PI * 2, linalg.VECTOR3F32_Y_AXIS),
+        }
+
+        if forcefield_root_node, ok := get_node(engine, forcefield_root_handle); ok {
+          forcefield_root_node.animation = world.AnimationInstance {
+            clip_handle = forcefield_clip_handle,
+            mode = .LOOP,
+            status = .PLAYING,
+            time = 0.0,
+            duration = rotation_duration,
+            speed = 1.0,
+          }
+        }
+      }
       forcefield_ok: bool
       forcefield_handle = spawn_child(
         engine,
-        psys_handle1,
+        forcefield_root_handle,
         world.ForceFieldAttachment{},
       )
-      translate(engine, forcefield_handle, 5.0, 0.0, 0.0)
+      translate(engine, forcefield_handle, 2.0, 0.0, 0.0)
       forcefield_resource, ff_ok := create_forcefield(
         engine,
         forcefield_handle,
@@ -533,49 +693,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   log.info("setup complete")
-}
-
-update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  using mjolnir, geometry
-  t := time_since_start(engine) * 0.5
-  translate(
-    engine,
-    forcefield_handle,
-    math.cos(t) * 2.0,
-    2.0,
-    math.sin(t) * 2.0,
-  )
-  for handle, i in light_handles {
-    if i == 0 {
-      // rotate light 0 around Y axis
-      t := time_since_start(engine)
-      rotate(engine, handle, t, linalg.VECTOR3F32_Y_AXIS)
-      spread := (math.sin(t * 0.2) + 1.0)
-      rotate_by(
-        engine,
-        handle,
-        math.PI * 0.4 * spread,
-        linalg.VECTOR3F32_X_AXIS,
-      )
-      continue
-    }
-    offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
-    t := time_since_start(engine) + offset
-    // log.infof("getting light %d %v", i, handle)
-    rx := math.sin(t)
-    ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 0.5
-    rz := math.cos(t)
-    v := linalg.normalize([3]f32{rx, ry, rz})
-    radius: f32 = 15.0
-    v = v * radius - linalg.VECTOR3F32_Y_AXIS * 4.0
-    translate(engine, handle, v.x, v.y, v.z)
-    rotate_by(
-      engine,
-      light_cube_handles[i],
-      math.PI * time_since_start(engine) * 0.5,
-      linalg.VECTOR3F32_Y_AXIS,
-    )
-  }
 }
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {

@@ -178,7 +178,10 @@ sample_clip :: proc(
     local_transform: geometry.Transform
     if entry.bone < u32(len(clip.channels)) {
       local_transform.position, local_transform.rotation, local_transform.scale =
-        animation.channel_sample(clip.channels[entry.bone], t)
+        animation.channel_sample_all(clip.channels[entry.bone], t)
+    } else {
+      local_transform.scale = [3]f32{1, 1, 1}
+      local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
     }
     local_matrix := linalg.matrix4_from_trs(
       local_transform.position,
@@ -236,6 +239,7 @@ compute_bone_lengths :: proc(skin: ^Skinning) {
 // Layers are evaluated in order, with their weights controlling blending
 sample_layers :: proc(
   self: ^Mesh,
+  rm: ^Manager,
   layers: []animation.Layer,
   ik_targets: []animation.IKTarget,
   out_bone_matrices: []matrix[4, 4]f32,
@@ -266,8 +270,9 @@ sample_layers :: proc(
 
     switch &layer_data in layer.data {
     case animation.FKLayer:
-      clip := layer_data.instance.clip
-      if clip == nil do continue
+      // Resolve clip handle at runtime
+      clip_handle := transmute(Handle)layer_data.clip_handle
+      clip := cont.get(rm.animation_clips, clip_handle) or_continue
 
       // Sample this layer's animation
       TraverseEntry :: struct {
@@ -288,7 +293,7 @@ sample_layers :: proc(
         local_transform: geometry.Transform
         if entry.bone < u32(len(clip.channels)) {
           local_transform.position, local_transform.rotation, local_transform.scale =
-            animation.channel_sample(clip.channels[entry.bone], layer_data.instance.time)
+            animation.channel_sample_all(clip.channels[entry.bone], layer_data.time)
         } else {
           local_transform.scale = [3]f32{1, 1, 1}
           local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
@@ -508,7 +513,7 @@ sample_clip_with_ik :: proc(
     local_transform: geometry.Transform
     if bone_idx < u32(len(clip.channels)) {
       local_transform.position, local_transform.rotation, local_transform.scale =
-        animation.channel_sample(clip.channels[bone_idx], t)
+        animation.channel_sample_all(clip.channels[bone_idx], t)
     } else {
       local_transform.scale = [3]f32{1, 1, 1}
       local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
@@ -578,7 +583,7 @@ sample_clip_with_ik :: proc(
       local_transform: geometry.Transform
       if bone_idx < u32(len(clip.channels)) {
         local_transform.position, local_transform.rotation, local_transform.scale =
-          animation.channel_sample(clip.channels[bone_idx], t)
+          animation.channel_sample_all(clip.channels[bone_idx], t)
       } else {
         local_transform.scale = [3]f32{1, 1, 1}
         local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
