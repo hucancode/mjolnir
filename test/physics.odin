@@ -673,8 +673,8 @@ test_sphere_sphere_collision_overlapping :: proc(t: ^testing.T) {
 
 @(test)
 test_box_box_collision_intersecting :: proc(t: ^testing.T) {
-	box_a := physics.BoxCollider{half_extents = {1, 1, 1}}
-	box_b := physics.BoxCollider{half_extents = {1, 1, 1}}
+	box_a := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
+	box_b := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{1.5, 0, 0}
 	hit, point, normal, penetration := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
@@ -689,8 +689,8 @@ test_box_box_collision_intersecting :: proc(t: ^testing.T) {
 
 @(test)
 test_box_box_collision_separated :: proc(t: ^testing.T) {
-	box_a := physics.BoxCollider{half_extents = {1, 1, 1}}
-	box_b := physics.BoxCollider{half_extents = {1, 1, 1}}
+	box_a := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
+	box_b := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{5, 0, 0}
 	hit, _, _, _ := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
@@ -699,8 +699,8 @@ test_box_box_collision_separated :: proc(t: ^testing.T) {
 
 @(test)
 test_box_box_collision_y_axis :: proc(t: ^testing.T) {
-	box_a := physics.BoxCollider{half_extents = {1, 1, 1}}
-	box_b := physics.BoxCollider{half_extents = {1, 1, 1}}
+	box_a := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
+	box_b := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
 	pos_a := [3]f32{0, 0, 0}
 	pos_b := [3]f32{0, 1.5, 0}
 	hit, _, normal, penetration := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
@@ -716,7 +716,7 @@ test_box_box_collision_y_axis :: proc(t: ^testing.T) {
 @(test)
 test_sphere_box_collision_intersecting :: proc(t: ^testing.T) {
 	sphere := physics.SphereCollider{radius = 1.0}
-	box := physics.BoxCollider{half_extents = {1, 1, 1}}
+	box := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
 	// Sphere at (1.5, 0, 0) with radius 1.0 reaches from 0.5 to 2.5
 	// Box at (0, 0, 0) with extents 1 reaches from -1 to 1
 	// Penetration: 1.0 - 0.5 = 0.5
@@ -741,7 +741,7 @@ test_sphere_box_collision_intersecting :: proc(t: ^testing.T) {
 @(test)
 test_sphere_box_collision_separated :: proc(t: ^testing.T) {
 	sphere := physics.SphereCollider{radius = 1.0}
-	box := physics.BoxCollider{half_extents = {1, 1, 1}}
+	box := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
 	pos_sphere := [3]f32{5, 0, 0}
 	pos_box := [3]f32{0, 0, 0}
 	hit, _, _, _ := physics.test_sphere_box(pos_sphere, &sphere, pos_box, &box)
@@ -751,7 +751,7 @@ test_sphere_box_collision_separated :: proc(t: ^testing.T) {
 @(test)
 test_sphere_box_collision_corner :: proc(t: ^testing.T) {
 	sphere := physics.SphereCollider{radius = 1.0}
-	box := physics.BoxCollider{half_extents = {1, 1, 1}}
+	box := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
 	pos_sphere := [3]f32{1.5, 1.5, 1.5}
 	pos_box := [3]f32{0, 0, 0}
 	hit, _, _, _ := physics.test_sphere_box(pos_sphere, &sphere, pos_box, &box)
@@ -802,7 +802,7 @@ test_sphere_capsule_collision :: proc(t: ^testing.T) {
 
 @(test)
 test_box_capsule_collision :: proc(t: ^testing.T) {
-	box := physics.BoxCollider{half_extents = {1, 1, 1}}
+	box := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
 	capsule := physics.CapsuleCollider{radius = 0.5, height = 2.0}
 	pos_box := [3]f32{0, 0, 0}
 	pos_capsule := [3]f32{1.3, 0, 0}
