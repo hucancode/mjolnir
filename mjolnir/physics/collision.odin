@@ -6,6 +6,16 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
+// Check if quaternion is identity (axis-aligned)
+is_identity_quaternion :: proc(q: quaternion128) -> bool {
+  // Identity quaternion is (0, 0, 0, 1) or very close to it
+  epsilon :: 1e-6
+  return math.abs(q.x) < epsilon &&
+         math.abs(q.y) < epsilon &&
+         math.abs(q.z) < epsilon &&
+         math.abs(q.w - 1.0) < epsilon
+}
+
 Contact :: struct {
   body_a:              resources.Handle,
   body_b:              resources.Handle,
@@ -76,52 +86,72 @@ test_box_box :: proc(
   [3]f32,
   f32,
 ) {
-  min_a := pos_a - box_a.half_extents
-  max_a := pos_a + box_a.half_extents
-  min_b := pos_b - box_b.half_extents
-  max_b := pos_b + box_b.half_extents
-  if max_a.x < min_b.x || min_a.x > max_b.x {
-    return false, {}, {}, 0
-  }
-  if max_a.y < min_b.y || min_a.y > max_b.y {
-    return false, {}, {}, 0
-  }
-  if max_a.z < min_b.z || min_a.z > max_b.z {
-    return false, {}, {}, 0
-  }
-  overlap_x := math.min(max_a.x, max_b.x) - math.max(min_a.x, min_b.x)
-  overlap_y := math.min(max_a.y, max_b.y) - math.max(min_a.y, min_b.y)
-  overlap_z := math.min(max_a.z, max_b.z) - math.max(min_a.z, min_b.z)
-  min_overlap := min(overlap_x, overlap_y, overlap_z)
-  normal: [3]f32
-  point: [3]f32
-  if min_overlap == overlap_x {
-    normal =
-      pos_b.x > pos_a.x ? linalg.VECTOR3F32_X_AXIS : -linalg.VECTOR3F32_X_AXIS
-    contact_x := pos_b.x > pos_a.x ? max_a.x : min_a.x
-    point = [3]f32 {
-      contact_x,
-      (max(min_a.y, min_b.y) + min(max_a.y, max_b.y)) * 0.5,
-      (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5,
+  // Check if both boxes are axis-aligned (identity rotation)
+  is_a_aligned := is_identity_quaternion(box_a.rotation)
+  is_b_aligned := is_identity_quaternion(box_b.rotation)
+
+  // Fast path for axis-aligned boxes
+  if is_a_aligned && is_b_aligned {
+    min_a := pos_a - box_a.half_extents
+    max_a := pos_a + box_a.half_extents
+    min_b := pos_b - box_b.half_extents
+    max_b := pos_b + box_b.half_extents
+    if max_a.x < min_b.x || min_a.x > max_b.x {
+      return false, {}, {}, 0
     }
-  } else if min_overlap == overlap_y {
-    normal = pos_b.y > pos_a.y ? {0, 1, 0} : {0, -1, 0}
-    contact_y := pos_b.y > pos_a.y ? max_a.y : min_a.y
-    point = [3]f32 {
-      (max(min_a.x, min_b.x) + min(max_a.x, max_b.x)) * 0.5,
-      contact_y,
-      (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5,
+    if max_a.y < min_b.y || min_a.y > max_b.y {
+      return false, {}, {}, 0
     }
-  } else {
-    normal = pos_b.z > pos_a.z ? linalg.VECTOR3F32_Z_AXIS : -linalg.VECTOR3F32_Z_AXIS
-    contact_z := pos_b.z > pos_a.z ? max_a.z : min_a.z
-    point = [3]f32 {
-      (max(min_a.x, min_b.x) + min(max_a.x, max_b.x)) * 0.5,
-      (max(min_a.y, min_b.y) + min(max_a.y, max_b.y)) * 0.5,
-      contact_z,
+    if max_a.z < min_b.z || min_a.z > max_b.z {
+      return false, {}, {}, 0
     }
+    overlap_x := math.min(max_a.x, max_b.x) - math.max(min_a.x, min_b.x)
+    overlap_y := math.min(max_a.y, max_b.y) - math.max(min_a.y, min_b.y)
+    overlap_z := math.min(max_a.z, max_b.z) - math.max(min_a.z, min_b.z)
+    min_overlap := min(overlap_x, overlap_y, overlap_z)
+    normal: [3]f32
+    point: [3]f32
+    if min_overlap == overlap_x {
+      normal =
+        pos_b.x > pos_a.x ? linalg.VECTOR3F32_X_AXIS : -linalg.VECTOR3F32_X_AXIS
+      contact_x := pos_b.x > pos_a.x ? max_a.x : min_a.x
+      point = [3]f32 {
+        contact_x,
+        (max(min_a.y, min_b.y) + min(max_a.y, max_b.y)) * 0.5,
+        (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5,
+      }
+    } else if min_overlap == overlap_y {
+      normal = pos_b.y > pos_a.y ? {0, 1, 0} : {0, -1, 0}
+      contact_y := pos_b.y > pos_a.y ? max_a.y : min_a.y
+      point = [3]f32 {
+        (max(min_a.x, min_b.x) + min(max_a.x, max_b.x)) * 0.5,
+        contact_y,
+        (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5,
+      }
+    } else {
+      normal = pos_b.z > pos_a.z ? linalg.VECTOR3F32_Z_AXIS : -linalg.VECTOR3F32_Z_AXIS
+      contact_z := pos_b.z > pos_a.z ? max_a.z : min_a.z
+      point = [3]f32 {
+        (max(min_a.x, min_b.x) + min(max_a.x, max_b.x)) * 0.5,
+        (max(min_a.y, min_b.y) + min(max_a.y, max_b.y)) * 0.5,
+        contact_z,
+      }
+    }
+    return true, point, normal, min_overlap
   }
-  return true, point, normal, min_overlap
+
+  // General case: OBB-OBB collision using SAT
+  obb_a := geometry.Obb {
+    center       = pos_a,
+    half_extents = box_a.half_extents,
+    rotation     = box_a.rotation,
+  }
+  obb_b := geometry.Obb {
+    center       = pos_b,
+    half_extents = box_b.half_extents,
+    rotation     = box_b.rotation,
+  }
+  return geometry.obb_obb_intersect(obb_a, obb_b)
 }
 
 test_sphere_box :: proc(
@@ -135,18 +165,31 @@ test_sphere_box :: proc(
   [3]f32,
   f32,
 ) {
-  min_box := pos_box - box.half_extents
-  max_box := pos_box + box.half_extents
-  closest := linalg.clamp(pos_sphere, min_box, max_box)
-  delta := pos_sphere - closest
-  distance_sq := linalg.vector_length2(delta)
-  if distance_sq >= sphere.radius * sphere.radius {
-    return false, {}, {}, 0
+  // Check if box is axis-aligned for fast path
+  is_aligned := is_identity_quaternion(box.rotation)
+
+  if is_aligned {
+    min_box := pos_box - box.half_extents
+    max_box := pos_box + box.half_extents
+    closest := linalg.clamp(pos_sphere, min_box, max_box)
+    delta := pos_sphere - closest
+    distance_sq := linalg.vector_length2(delta)
+    if distance_sq >= sphere.radius * sphere.radius {
+      return false, {}, {}, 0
+    }
+    distance := math.sqrt(distance_sq)
+    normal := distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+    penetration := sphere.radius - distance
+    return true, closest, normal, penetration
   }
-  distance := math.sqrt(distance_sq)
-  normal := distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
-  penetration := sphere.radius - distance
-  return true, closest, normal, penetration
+
+  // OBB case
+  obb := geometry.Obb {
+    center       = pos_box,
+    half_extents = box.half_extents,
+    rotation     = box.rotation,
+  }
+  return geometry.obb_sphere_intersect(obb, pos_sphere, sphere.radius)
 }
 
 test_capsule_capsule :: proc(
@@ -254,26 +297,39 @@ test_box_capsule :: proc(
   [3]f32,
   f32,
 ) {
-  h := capsule.height * 0.5
-  line_start := pos_capsule + [3]f32{0, -h, 0}
-  line_end := pos_capsule + [3]f32{0, h, 0}
-  min_box := pos_box - box.half_extents
-  max_box := pos_box + box.half_extents
-  closest_start := linalg.clamp(line_start, min_box, max_box)
-  closest_end := linalg.clamp(line_end, min_box, max_box)
-  dist_start_sq := linalg.vector_length2(line_start - closest_start)
-  dist_end_sq := linalg.vector_length2(line_end - closest_end)
-  closest := dist_start_sq < dist_end_sq ? closest_start : closest_end
-  point_on_line := dist_start_sq < dist_end_sq ? line_start : line_end
-  delta := point_on_line - closest
-  distance_sq := linalg.vector_length2(delta)
-  if distance_sq >= capsule.radius * capsule.radius {
-    return false, {}, {}, 0
+  // Check if box is axis-aligned for fast path
+  is_aligned := is_identity_quaternion(box.rotation)
+
+  if is_aligned {
+    h := capsule.height * 0.5
+    line_start := pos_capsule + [3]f32{0, -h, 0}
+    line_end := pos_capsule + [3]f32{0, h, 0}
+    min_box := pos_box - box.half_extents
+    max_box := pos_box + box.half_extents
+    closest_start := linalg.clamp(line_start, min_box, max_box)
+    closest_end := linalg.clamp(line_end, min_box, max_box)
+    dist_start_sq := linalg.vector_length2(line_start - closest_start)
+    dist_end_sq := linalg.vector_length2(line_end - closest_end)
+    closest := dist_start_sq < dist_end_sq ? closest_start : closest_end
+    point_on_line := dist_start_sq < dist_end_sq ? line_start : line_end
+    delta := point_on_line - closest
+    distance_sq := linalg.vector_length2(delta)
+    if distance_sq >= capsule.radius * capsule.radius {
+      return false, {}, {}, 0
+    }
+    distance := math.sqrt(distance_sq)
+    normal := distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+    penetration := capsule.radius - distance
+    return true, closest, normal, penetration
   }
-  distance := math.sqrt(distance_sq)
-  normal := distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
-  penetration := capsule.radius - distance
-  return true, closest, normal, penetration
+
+  // OBB case
+  obb := geometry.Obb {
+    center       = pos_box,
+    half_extents = box.half_extents,
+    rotation     = box.rotation,
+  }
+  return geometry.obb_capsule_intersect(obb, pos_capsule, capsule.radius, capsule.height)
 }
 
 test_collision :: proc(

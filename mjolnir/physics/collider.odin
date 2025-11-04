@@ -87,25 +87,12 @@ collider_get_aabb :: proc(
     return geometry.Aabb{min = center - r, max = center + r}
   case .Box:
     box := collider.shape.(BoxCollider)
-    // For oriented boxes, compute AABB that contains all 8 corners
-    corners := [8][3]f32 {
-      {-box.half_extents.x, -box.half_extents.y, -box.half_extents.z},
-      {box.half_extents.x, -box.half_extents.y, -box.half_extents.z},
-      {-box.half_extents.x, box.half_extents.y, -box.half_extents.z},
-      {box.half_extents.x, box.half_extents.y, -box.half_extents.z},
-      {-box.half_extents.x, -box.half_extents.y, box.half_extents.z},
-      {box.half_extents.x, -box.half_extents.y, box.half_extents.z},
-      {-box.half_extents.x, box.half_extents.y, box.half_extents.z},
-      {box.half_extents.x, box.half_extents.y, box.half_extents.z},
+    obb := geometry.Obb {
+      center       = center,
+      half_extents = box.half_extents,
+      rotation     = box.rotation,
     }
-    aabb := geometry.AABB_UNDEFINED
-    for corner in corners {
-      rotated := linalg.quaternion128_mul_vector3(box.rotation, corner)
-      world_corner := center + rotated
-      aabb.min = linalg.min(aabb.min, world_corner)
-      aabb.max = linalg.max(aabb.max, world_corner)
-    }
-    return aabb
+    return geometry.obb_to_aabb(obb)
   case .Capsule:
     capsule := collider.shape.(CapsuleCollider)
     r := capsule.radius
@@ -114,4 +101,15 @@ collider_get_aabb :: proc(
     return geometry.Aabb{min = center - extents, max = center + extents}
   }
   return {}
+}
+
+// Get OBB for a box collider
+collider_get_obb :: proc(collider: ^Collider, position: [3]f32) -> geometry.Obb {
+  center := position + collider.offset
+  box := collider.shape.(BoxCollider)
+  return geometry.Obb {
+    center       = center,
+    half_extents = box.half_extents,
+    rotation     = box.rotation,
+  }
 }
