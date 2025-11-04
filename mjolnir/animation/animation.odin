@@ -204,7 +204,6 @@ sample_cubic_cubic :: proc(a: CubicSplineKeyframe($T), b: CubicSplineKeyframe(T)
   }
 }
 
-// Unified keyframe sampling that dispatches to the appropriate helper
 keyframe_sample :: proc(frames: []Keyframe($T), t: f32, fallback: T) -> T {
   if len(frames) == 0 {
     return fallback
@@ -229,8 +228,6 @@ keyframe_sample :: proc(frames: []Keyframe($T), t: f32, fallback: T) -> T {
 
   a := frames[i - 1]
   b := frames[i]
-
-  // Dispatch to the appropriate helper based on keyframe types
   switch a_variant in a {
   case LinearKeyframe(T):
     switch b_variant in b {
@@ -328,10 +325,8 @@ instance_update :: proc(self: ^Instance, delta_time: f32) {
   case .LOOP:
     self.time += effective_delta_time
     self.time = math.mod_f32(self.time + self.duration, self.duration)
-  // log.infof("animation_instance_update: time +%f = %f", effective_delta_time, self.time)
   case .ONCE:
     self.time += effective_delta_time
-    self.time = math.mod_f32(self.time + self.duration, self.duration)
     if self.time >= self.duration {
       self.time = self.duration
       self.status = .STOPPED
