@@ -205,8 +205,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
             name = "cube_spin",
           ); spin_ok {
             rotation_fn :: proc(i: int) -> quaternion128 {
-              angles := [3]f32{0, math.PI, 0}  // identity, 180deg, identity
-              return linalg.quaternion_angle_axis_f32(angles[i], linalg.VECTOR3F32_Y_AXIS)
+              angles := [3]f32{0, math.PI, 0} // identity, 180deg, identity
+              return linalg.quaternion_angle_axis_f32(
+                angles[i],
+                linalg.VECTOR3F32_Y_AXIS,
+              )
             }
             init_animation_channel(
               engine,
@@ -219,11 +222,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
             if node, ok := get_node(engine, hand_cube_handle); ok {
               node.animation = world.AnimationInstance {
                 clip_handle = spin_clip_handle,
-                mode = .LOOP,
-                status = .PLAYING,
-                time = 0.0,
-                duration = spin_duration,
-                speed = 1.0,
+                mode        = .LOOP,
+                status      = .PLAYING,
+                time        = 0.0,
+                duration    = spin_duration,
+                speed       = 1.0,
               }
               world.register_animatable_node(&engine.world, hand_cube_handle)
             }
@@ -278,8 +281,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
       name = "lights_rotation",
     ); rotation_ok {
       rotation_fn :: proc(i: int) -> quaternion128 {
-        angle := f32(i) * math.PI * 0.5  // 0, 90, 180, 270, 360 degrees
-        return linalg.quaternion_angle_axis_f32(angle, linalg.VECTOR3F32_Y_AXIS)
+        angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
+        return linalg.quaternion_angle_axis_f32(
+          angle,
+          linalg.VECTOR3F32_Y_AXIS,
+        )
       }
 
       init_animation_channel(
@@ -294,11 +300,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
       if lights_root_node, ok := get_node(engine, lights_root_handle); ok {
         lights_root_node.animation = world.AnimationInstance {
           clip_handle = rotation_clip_handle,
-          mode = .LOOP,
-          status = .PLAYING,
-          time = 0.0,
-          duration = rotation_duration,
-          speed = 1.0,
+          mode        = .LOOP,
+          status      = .PLAYING,
+          time        = 0.0,
+          duration    = rotation_duration,
+          speed       = 1.0,
         }
         world.register_animatable_node(&engine.world, lights_root_handle)
         log.info("created light rotating animation with 5 keyframes")
@@ -324,7 +330,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       } else if ALL_POINT_LIGHT {
         should_make_spot_light = false
       }
-      light_handle : resources.Handle
+      light_handle: resources.Handle
       if should_make_spot_light {
         light_handle = spawn_child(engine, lights_root_handle) or_continue
         node := get_node(engine, light_handle) or_continue
@@ -339,12 +345,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         ) or_continue
         node.attachment = attachment
         translate(engine, light_handle, local_x, local_y, local_z)
-        rotate(
-          engine,
-          light_handle,
-          math.PI * 0.5,
-          linalg.VECTOR3F32_X_AXIS,
-        )
+        rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
       } else {
         light_handle = spawn_child(engine, lights_root_handle) or_continue
         node := get_node(engine, light_handle) or_continue
@@ -429,8 +430,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         albedo_handle = goldstar_texture_handle,
       )
     }
-    psys_handle1, psys1_ok := spawn_at(engine, {-2.0, 1.9, 0.3})
-    if psys1_ok && goldstar_texture_ok {
+    psys_handle1 := spawn_at(engine, {-2.0, 1.9, 0.3})
+    if goldstar_texture_ok {
       emitter_handle1, emitter1_ok := create_emitter(
         engine,
         psys_handle1,
@@ -460,8 +461,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         )
       }
     }
-    psys_handle2, psys2_ok := spawn_at(engine, {2.0, 1.9, 0.3})
-    if psys2_ok && black_circle_ok {
+    psys_handle2 := spawn_at(engine, {2.0, 1.9, 0.3})
+    if black_circle_ok {
       emitter_handle2, emitter2_ok := create_emitter(
         engine,
         psys_handle2,
@@ -491,74 +492,65 @@ setup :: proc(engine: ^mjolnir.Engine) {
         )
       }
     }
-    if psys1_ok {
-      forcefield_root_handle := spawn_at(engine, {0, 4, 0})
-      rotation_duration: f32 = 8.0
-      if forcefield_clip_handle, forcefield_ok := create_animation_clip(
-        engine,
-        channel_count = 1,
-        duration = rotation_duration,
-        name = "forcefield_rotation",
-      ); forcefield_ok {
-        rotation_fn :: proc(i: int) -> quaternion128 {
-          angle := f32(i) * math.PI * 0.5  // 0, 90, 180, 270, 360 degrees
-          return linalg.quaternion_angle_axis_f32(angle, linalg.VECTOR3F32_Y_AXIS)
-        }
-
-        init_animation_channel(
-          engine,
-          forcefield_clip_handle,
-          channel_idx = 0,
-          rotation_count = 5,
-          rotation_fn = rotation_fn,
-          rotation_interpolation = .LINEAR,
+    forcefield_root_handle := spawn_at(engine, {0, 4, 0})
+    if forcefield_clip_handle, ok := create_animation_clip(
+      engine,
+      channel_count = 1,
+      duration = 8,
+      name = "forcefield_rotation",
+    ); ok {
+      rotation_fn :: proc(i: int) -> quaternion128 {
+        angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
+        return linalg.quaternion_angle_axis_f32(
+          angle,
+          linalg.VECTOR3F32_Y_AXIS,
         )
-
-        if forcefield_root_node, ok := get_node(engine, forcefield_root_handle); ok {
-          forcefield_root_node.animation = world.AnimationInstance {
-            clip_handle = forcefield_clip_handle,
-            mode = .LOOP,
-            status = .PLAYING,
-            time = 0.0,
-            duration = rotation_duration,
-            speed = 1.0,
-          }
-          world.register_animatable_node(&engine.world, forcefield_root_handle)
+      }
+      init_animation_channel(
+        engine,
+        forcefield_clip_handle,
+        channel_idx = 0,
+        rotation_count = 5,
+        rotation_fn = rotation_fn,
+        rotation_interpolation = .LINEAR,
+      )
+      if node, ok := get_node(engine, forcefield_root_handle); ok {
+        node.animation = world.AnimationInstance {
+          clip_handle = forcefield_clip_handle,
+          mode        = .LOOP,
+          status      = .PLAYING,
+          time        = 0.0,
+          duration    = rotation_duration,
+          speed       = 1.0,
         }
-      }
-      forcefield_ok: bool
-      forcefield_handle := spawn_child(
-        engine,
-        forcefield_root_handle,
-        world.ForceFieldAttachment{},
-      )
-      translate(engine, forcefield_handle, 3.0, 0.0, 0.0)
-      forcefield_resource, ff_ok := create_forcefield(
-        engine,
-        forcefield_handle,
-        resources.ForceField {
-          tangent_strength = 2.0,
-          strength = 20.0,
-          area_of_effect = 5.0,
-        },
-      )
-      if ff_node, ok := get_node(engine, forcefield_handle); ok {
-        ff_attachment := &ff_node.attachment.(world.ForceFieldAttachment)
-        ff_attachment.handle = forcefield_resource
-      }
-      if goldstar_material_ok {
-        handle := spawn_child(
-          engine,
-          forcefield_handle,
-          world.MeshAttachment {
-            handle = sphere_mesh_handle,
-            material = goldstar_material_handle,
-            cast_shadow = false,
-          },
-        )
-        scale(engine, handle, 0.2)
+        world.register_animatable_node(&engine.world, forcefield_root_handle)
       }
     }
+    forcefield_handle := spawn_child(engine, forcefield_root_handle)
+    translate(engine, forcefield_handle, 3.0, 0.0, 0.0)
+    if node, ok := get_node(engine, forcefield_handle); ok {
+      node.attachment = world.ForceFieldAttachment {
+        handle = create_forcefield(
+          engine,
+          forcefield_handle,
+          resources.ForceField {
+            tangent_strength = 2.0,
+            strength = 20.0,
+            area_of_effect = 5.0,
+          },
+        ),
+      }
+    }
+    handle := spawn_child(
+      engine,
+      forcefield_handle,
+      world.MeshAttachment {
+        handle = sphere_mesh_handle,
+        material = goldstar_material_handle,
+        cast_shadow = false,
+      },
+    )
+    scale(engine, handle, 0.2)
   }
   add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)

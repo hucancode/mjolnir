@@ -21,23 +21,10 @@ NodeSkinning :: struct {
   bone_matrix_buffer_offset: u32,                 // offset into bone matrix buffer for skinned mesh
 }
 
-// Configuration for an N-bone IK chain (minimum 2 bones)
-// Stores bone names (resolved to indices at runtime) and world-space target positions
-IKConfig :: struct {
-  bone_names:       []string, // all bones in chain from root to end (min 2)
-  target_position:  [3]f32,   // world-space position for end effector
-  pole_position:    [3]f32,   // world-space pole hint (bending direction)
-  max_iterations:   int,      // FABRIK iterations (default: 10)
-  tolerance:        f32,      // convergence threshold (default: 0.001)
-  weight:           f32,      // blend weight (0-1), 1 = full IK
-  enabled:          bool,
-}
-
 MeshAttachment :: struct {
   handle:              resources.Handle,
   material:            resources.Handle,
   skinning:            Maybe(NodeSkinning),
-  ik_configs:          [dynamic]IKConfig, // IK constraints for this mesh
   cast_shadow:         bool,
   navigation_obstacle: bool,
 }
@@ -193,71 +180,7 @@ destroy_node :: proc(
       }
       delete(skinning.layers)
     }
-    for &config in attachment.ik_configs {
-      for name in config.bone_names {
-        delete(name)
-      }
-      delete(config.bone_names)
-    }
-    delete(attachment.ik_configs)
   }
-}
-
-// add an N-bone IK constraint (minimum 2 bones)
-// update target/pole positions every frame using set_ik_target()
-add_ik :: proc(
-  node: ^Node,
-  bone_names: []string,
-  target_pos: [3]f32,
-  pole_pos: [3]f32,
-  weight: f32 = 1.0,
-  max_iterations: int = 10,
-  tolerance: f32 = 0.001,
-) {
-  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
-  if !is_mesh do return
-  if len(bone_names) < 2 do return
-  cloned_names := make([]string, len(bone_names))
-  for name, i in bone_names {
-    cloned_names[i] = strings.clone(name)
-  }
-  config := IKConfig {
-    bone_names      = cloned_names,
-    target_position = target_pos,
-    pole_position   = pole_pos,
-    max_iterations  = max_iterations,
-    tolerance       = tolerance,
-    weight          = clamp(weight, 0.0, 1.0),
-    enabled         = true,
-  }
-  append(&mesh_attachment.ik_configs, config)
-}
-
-set_ik_enabled :: proc(node: ^Node, index: int, enabled: bool) {
-  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
-  if !is_mesh do return
-  if index < 0 || index >= len(mesh_attachment.ik_configs) do return
-  mesh_attachment.ik_configs[index].enabled = enabled
-}
-
-set_ik_target :: proc(node: ^Node, index: int, target_pos, pole_pos: [3]f32) {
-  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
-  if !is_mesh do return
-  if index < 0 || index >= len(mesh_attachment.ik_configs) do return
-  mesh_attachment.ik_configs[index].target_position = target_pos
-  mesh_attachment.ik_configs[index].pole_position = pole_pos
-}
-
-clear_ik :: proc(node: ^Node) {
-  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
-  if !is_mesh do return
-  for &config in mesh_attachment.ik_configs {
-    for name in config.bone_names {
-      delete(name)
-    }
-    delete(config.bone_names)
-  }
-  clear(&mesh_attachment.ik_configs)
 }
 
 detach :: proc(nodes: resources.Pool(Node), child_handle: resources.Handle) {
