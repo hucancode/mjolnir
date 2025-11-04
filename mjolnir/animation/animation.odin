@@ -241,6 +241,72 @@ Channel :: struct {
   cubic_scales:      []CubicSplineKeyframe([3]f32),
 }
 
+channel_init :: proc(
+  channel: ^Channel,
+  position_count: int = 0,
+  rotation_count: int = 0,
+  scale_count: int = 0,
+  position_interpolation: InterpolationMode = .LINEAR,
+  rotation_interpolation: InterpolationMode = .LINEAR,
+  scale_interpolation: InterpolationMode = .LINEAR,
+  duration: f32 = 1.0,
+) {
+  channel.position_interpolation = position_interpolation
+  channel.rotation_interpolation = rotation_interpolation
+  channel.scale_interpolation = scale_interpolation
+  if position_count > 0 {
+    if position_interpolation == .CUBICSPLINE {
+      channel.cubic_positions = make([]CubicSplineKeyframe([3]f32), position_count)
+      for &kf, i in channel.cubic_positions {
+        kf.time = f32(i) * duration / f32(position_count - 1) if position_count > 1 else 0
+        kf.value = [3]f32{0, 0, 0}
+        kf.in_tangent = [3]f32{0, 0, 0}
+        kf.out_tangent = [3]f32{0, 0, 0}
+      }
+    } else {
+      channel.positions = make([]Keyframe([3]f32), position_count)
+      for &kf, i in channel.positions {
+        kf.time = f32(i) * duration / f32(position_count - 1) if position_count > 1 else 0
+        kf.value = [3]f32{0, 0, 0}
+      }
+    }
+  }
+  if rotation_count > 0 {
+    if rotation_interpolation == .CUBICSPLINE {
+      channel.cubic_rotations = make([]CubicSplineKeyframe(quaternion128), rotation_count)
+      for &kf, i in channel.cubic_rotations {
+        kf.time = f32(i) * duration / f32(rotation_count - 1) if rotation_count > 1 else 0
+        kf.value = linalg.QUATERNIONF32_IDENTITY
+        kf.in_tangent = linalg.QUATERNIONF32_IDENTITY
+        kf.out_tangent = linalg.QUATERNIONF32_IDENTITY
+      }
+    } else {
+      channel.rotations = make([]Keyframe(quaternion128), rotation_count)
+      for &kf, i in channel.rotations {
+        kf.time = f32(i) * duration / f32(rotation_count - 1) if rotation_count > 1 else 0
+        kf.value = linalg.QUATERNIONF32_IDENTITY
+      }
+    }
+  }
+  if scale_count > 0 {
+    if scale_interpolation == .CUBICSPLINE {
+      channel.cubic_scales = make([]CubicSplineKeyframe([3]f32), scale_count)
+      for &kf, i in channel.cubic_scales {
+        kf.time = f32(i) * duration / f32(scale_count - 1) if scale_count > 1 else 0
+        kf.value = [3]f32{1, 1, 1}
+        kf.in_tangent = [3]f32{0, 0, 0}
+        kf.out_tangent = [3]f32{0, 0, 0}
+      }
+    } else {
+      channel.scales = make([]Keyframe([3]f32), scale_count)
+      for &kf, i in channel.scales {
+        kf.time = f32(i) * duration / f32(scale_count - 1) if scale_count > 1 else 0
+        kf.value = [3]f32{1, 1, 1}
+      }
+    }
+  }
+}
+
 channel_destroy :: proc(channel: ^Channel) {
   delete(channel.positions)
   channel.positions = nil
@@ -342,6 +408,15 @@ Clip :: struct {
   name:     string,
   duration: f32,
   channels: []Channel,
+}
+
+clip_create :: proc(channel_count: int, duration: f32 = 1.0, name: string = "") -> Clip {
+  clip := Clip {
+    name     = name,
+    duration = duration,
+    channels = make([]Channel, channel_count),
+  }
+  return clip
 }
 
 clip_destroy :: proc(clip: ^Clip) {

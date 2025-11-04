@@ -1,5 +1,6 @@
 package mjolnir
 
+import "animation"
 import cont "containers"
 import "core:math"
 import "core:strings"
@@ -465,6 +466,108 @@ create_forcefield :: proc(
   bool,
 ) #optional_ok {
   return resources.create_forcefield_handle(&engine.rm, owner, forcefield)
+}
+
+// Create an animation clip with automatic allocation and initialization
+// Use init_animation_channel to populate the channels after creation
+create_animation_clip :: proc(
+  engine: ^Engine,
+  channel_count: int,
+  duration: f32 = 1.0,
+  name: string = "",
+) -> (
+  handle: resources.Handle,
+  ok: bool,
+) #optional_ok {
+  // Allocate clip from resource manager
+  h, clip, alloc_ok := cont.alloc(&engine.rm.animation_clips)
+  if !alloc_ok {
+    return {}, false
+  }
+
+  // Initialize clip using new API
+  clip^ = animation.clip_create(
+    channel_count = channel_count,
+    duration = duration,
+    name = name,
+  )
+
+  return h, true
+}
+
+// Initialize an animation channel with callback functions for generating keyframe values
+// Callbacks take index and return the value for that keyframe
+// This allows procedural generation of keyframe values without manual loops
+init_animation_channel :: proc(
+  engine: ^Engine,
+  clip_handle: resources.Handle,
+  channel_idx: int,
+  position_count: int = 0,
+  rotation_count: int = 0,
+  scale_count: int = 0,
+  position_fn: proc(i: int) -> [3]f32 = nil,
+  rotation_fn: proc(i: int) -> quaternion128 = nil,
+  scale_fn: proc(i: int) -> [3]f32 = nil,
+  position_interpolation: animation.InterpolationMode = .LINEAR,
+  rotation_interpolation: animation.InterpolationMode = .LINEAR,
+  scale_interpolation: animation.InterpolationMode = .LINEAR,
+) {
+  // Get clip from handle
+  clip, clip_ok := cont.get(engine.rm.animation_clips, clip_handle)
+  if !clip_ok do return
+
+  // Initialize channel structure with defaults
+  animation.channel_init(
+    &clip.channels[channel_idx],
+    position_count = position_count,
+    rotation_count = rotation_count,
+    scale_count = scale_count,
+    position_interpolation = position_interpolation,
+    rotation_interpolation = rotation_interpolation,
+    scale_interpolation = scale_interpolation,
+    duration = clip.duration,
+  )
+
+  channel := &clip.channels[channel_idx]
+
+  // Apply position callback if provided
+  if position_fn != nil {
+    if position_interpolation == .CUBICSPLINE {
+      for &kf, i in channel.cubic_positions {
+        kf.value = position_fn(i)
+      }
+    } else {
+      for &kf, i in channel.positions {
+        kf.value = position_fn(i)
+      }
+    }
+  }
+
+  // Apply rotation callback if provided
+  if rotation_fn != nil {
+    if rotation_interpolation == .CUBICSPLINE {
+      for &kf, i in channel.cubic_rotations {
+        kf.value = rotation_fn(i)
+      }
+    } else {
+      for &kf, i in channel.rotations {
+        kf.value = rotation_fn(i)
+      }
+    }
+  }
+
+  // Apply scale callback if provided
+  if scale_fn != nil {
+    if scale_interpolation == .CUBICSPLINE {
+      for &kf, i in channel.cubic_scales {
+        kf.value = scale_fn(i)
+      }
+    } else {
+      for &kf, i in channel.scales {
+        kf.value = scale_fn(i)
+      }
+    }
+  }
 }
 
 play_animation :: proc(

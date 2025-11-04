@@ -5,7 +5,6 @@ import "core:math"
 import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/animation"
-import cont "mjolnir/containers"
 import "mjolnir/geometry"
 import "mjolnir/resources"
 import "mjolnir/world"
@@ -198,39 +197,29 @@ setup :: proc(engine: ^mjolnir.Engine) {
           hand_cube_node.bone_socket = "hand.L"
           scale(engine, hand_cube_handle, 0.1)
 
-          // Create a spinning animation with cubic spline interpolation
+          // Create a spinning animation
           spin_duration: f32 = 2.0
-
-          // Allocate clip directly using the pool
-          spin_clip_handle, spin_clip, clip_alloc_ok := cont.alloc(&engine.rm.animation_clips)
-          if clip_alloc_ok {
-            spin_clip.name = "cube_spin"
-            spin_clip.duration = spin_duration
-            spin_clip.channels = make([]animation.Channel, 1)
-            spin_clip.channels[0].rotation_interpolation = .CUBICSPLINE
-            spin_clip.channels[0].cubic_rotations = make([]animation.CubicSplineKeyframe(quaternion128), 3)
-            spin_clip.channels[0].cubic_rotations[0] = {
-              time = 0.0,
-              in_tangent = linalg.QUATERNIONF32_IDENTITY,
-              value = linalg.QUATERNIONF32_IDENTITY,
-              out_tangent = linalg.QUATERNIONF32_IDENTITY,
-            }
-            spin_clip.channels[0].cubic_rotations[1] = {
-              time = spin_duration * 0.5,
-              in_tangent = linalg.QUATERNIONF32_IDENTITY,
-              value = linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Y_AXIS),
-              out_tangent = linalg.QUATERNIONF32_IDENTITY,
-            }
-            spin_clip.channels[0].cubic_rotations[2] = {
-              time = spin_duration,
-              in_tangent = linalg.QUATERNIONF32_IDENTITY,
-              value = linalg.QUATERNIONF32_IDENTITY,
-              out_tangent = linalg.QUATERNIONF32_IDENTITY,
+          if spin_clip_handle, spin_ok := create_animation_clip(
+            engine,
+            channel_count = 1,
+            duration = spin_duration,
+            name = "cube_spin",
+          ); spin_ok {
+            rotation_fn :: proc(i: int) -> quaternion128 {
+              angles := [3]f32{0, math.PI, 0}  // identity, 180deg, identity
+              return linalg.quaternion_angle_axis_f32(angles[i], linalg.VECTOR3F32_Y_AXIS)
             }
 
-            // Get fresh node pointer (previous one may be stale after allocations)
+            init_animation_channel(
+              engine,
+              spin_clip_handle,
+              channel_idx = 0,
+              rotation_count = 3,
+              rotation_fn = rotation_fn,
+              rotation_interpolation = .CUBICSPLINE,
+            )
+
             if hand_cube_node_fresh, ok := get_node(engine, hand_cube_handle); ok {
-              // Create animation instance with handle
               hand_cube_node_fresh.animation = world.AnimationInstance {
                 clip_handle = spin_clip_handle,
                 mode = .LOOP,
@@ -283,35 +272,28 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.infof("creating %d lights with animated root", LIGHT_COUNT)
     // Create root node for all lights with rotation animation
     lights_root_handle := spawn_at(engine, {0, 2, 0})
-    // Create rotation animation for lights root (60 second full rotation)
+    // Create rotation animation
     rotation_duration: f32 = 10.0
-    rotation_clip_handle, rotation_clip, clip_alloc_ok := cont.alloc(&engine.rm.animation_clips)
-    if clip_alloc_ok {
-      rotation_clip.name = "lights_rotation"
-      rotation_clip.duration = rotation_duration
-      rotation_clip.channels = make([]animation.Channel, 1)
-      rotation_clip.channels[0].rotation_interpolation = .LINEAR
-      rotation_clip.channels[0].rotations = make([]animation.Keyframe(quaternion128), 5)
-      rotation_clip.channels[0].rotations[0] = {
-        time = 0.0,
-        value = linalg.QUATERNIONF32_IDENTITY,
+    if rotation_clip_handle, rotation_ok := create_animation_clip(
+      engine,
+      channel_count = 1,
+      duration = rotation_duration,
+      name = "lights_rotation",
+    ); rotation_ok {
+      rotation_fn :: proc(i: int) -> quaternion128 {
+        angle := f32(i) * math.PI * 0.5  // 0, 90, 180, 270, 360 degrees
+        return linalg.quaternion_angle_axis_f32(angle, linalg.VECTOR3F32_Y_AXIS)
       }
-      rotation_clip.channels[0].rotations[1] = {
-        time = rotation_duration*0.25,
-        value = linalg.quaternion_angle_axis_f32(math.PI*0.5, linalg.VECTOR3F32_Y_AXIS),
-      }
-      rotation_clip.channels[0].rotations[2] = {
-        time = rotation_duration*0.5,
-        value = linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Y_AXIS),
-      }
-      rotation_clip.channels[0].rotations[3] = {
-        time = rotation_duration*0.75,
-        value = linalg.quaternion_angle_axis_f32(math.PI * 1.5, linalg.VECTOR3F32_Y_AXIS),
-      }
-      rotation_clip.channels[0].rotations[4] = {
-        time = rotation_duration,
-        value = linalg.quaternion_angle_axis_f32(math.PI*2, linalg.VECTOR3F32_Y_AXIS),
-      }
+
+      init_animation_channel(
+        engine,
+        rotation_clip_handle,
+        channel_idx = 0,
+        rotation_count = 5,
+        rotation_fn = rotation_fn,
+        rotation_interpolation = .LINEAR,
+      )
+
       if lights_root_node, ok := get_node(engine, lights_root_handle); ok {
         lights_root_node.animation = world.AnimationInstance {
           clip_handle = rotation_clip_handle,
@@ -322,7 +304,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           speed = 1.0,
         }
         world.register_animatable_node(&engine.world, lights_root_handle)
-        log.infof("created light rotating animation with %d keyframes", len(rotation_clip.channels[0].rotations))
+        log.info("created light rotating animation with 5 keyframes")
       }
     }
     // Create lights as children of the root, arranged in a circle
@@ -513,36 +495,27 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
     if psys1_ok {
-      forcefield_root_handle := spawn_at(engine, {0, 2, 0})
-      rotation_duration: f32 = math.TAU / 0.5  // matches the original speed
-      // Allocate clip directly using the pool
-      forcefield_clip_handle, rotation_clip, clip_alloc_ok := cont.alloc(&engine.rm.animation_clips)
-      if clip_alloc_ok {
-        rotation_clip.name = "forcefield_rotation"
-        rotation_clip.duration = rotation_duration
-        rotation_clip.channels = make([]animation.Channel, 1)
-        rotation_clip.channels[0].rotation_interpolation = .LINEAR
-        rotation_clip.channels[0].rotations = make([]animation.Keyframe(quaternion128), 5)
-        rotation_clip.channels[0].rotations[0] = {
-          time = 0.0,
-          value = linalg.QUATERNIONF32_IDENTITY,
+      forcefield_root_handle := spawn_at(engine, {0, 4, 0})
+      rotation_duration: f32 = 8.0
+      if forcefield_clip_handle, forcefield_ok := create_animation_clip(
+        engine,
+        channel_count = 1,
+        duration = rotation_duration,
+        name = "forcefield_rotation",
+      ); forcefield_ok {
+        rotation_fn :: proc(i: int) -> quaternion128 {
+          angle := f32(i) * math.PI * 0.5  // 0, 90, 180, 270, 360 degrees
+          return linalg.quaternion_angle_axis_f32(angle, linalg.VECTOR3F32_Y_AXIS)
         }
-        rotation_clip.channels[0].rotations[1] = {
-          time = rotation_duration*0.25,
-          value = linalg.quaternion_angle_axis_f32(math.PI*0.5, linalg.VECTOR3F32_Y_AXIS),
-        }
-        rotation_clip.channels[0].rotations[2] = {
-          time = rotation_duration*0.5,
-          value = linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Y_AXIS),
-        }
-        rotation_clip.channels[0].rotations[3] = {
-          time = rotation_duration*0.75,
-          value = linalg.quaternion_angle_axis_f32(math.PI * 1.5, linalg.VECTOR3F32_Y_AXIS),
-        }
-        rotation_clip.channels[0].rotations[4] = {
-          time = rotation_duration,
-          value = linalg.quaternion_angle_axis_f32(math.PI * 2, linalg.VECTOR3F32_Y_AXIS),
-        }
+
+        init_animation_channel(
+          engine,
+          forcefield_clip_handle,
+          channel_idx = 0,
+          rotation_count = 5,
+          rotation_fn = rotation_fn,
+          rotation_interpolation = .LINEAR,
+        )
 
         if forcefield_root_node, ok := get_node(engine, forcefield_root_handle); ok {
           forcefield_root_node.animation = world.AnimationInstance {
@@ -562,7 +535,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         forcefield_root_handle,
         world.ForceFieldAttachment{},
       )
-      translate(engine, forcefield_handle, 2.0, 0.0, 0.0)
+      translate(engine, forcefield_handle, 3.0, 0.0, 0.0)
       forcefield_resource, ff_ok := create_forcefield(
         engine,
         forcefield_handle,

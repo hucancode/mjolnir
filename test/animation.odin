@@ -228,6 +228,105 @@ test_quaternion_sampling :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_channel_init_linear :: proc(t: ^testing.T) {
+  clip := animation.clip_create(channel_count = 1, duration = 3.0)
+  defer animation.clip_destroy(&clip)
+  animation.channel_init(
+    &clip.channels[0],
+    position_count = 4,
+    rotation_count = 3,
+    scale_count = 2,
+    duration = clip.duration,
+  )
+  testing.expect_value(t, len(clip.channels[0].positions), 4)
+  testing.expect_value(t, len(clip.channels[0].rotations), 3)
+  testing.expect_value(t, len(clip.channels[0].scales), 2)
+  testing.expect_value(t, clip.channels[0].positions[0].time, 0.0)
+  testing.expect_value(t, clip.channels[0].positions[1].time, 1.0)
+  testing.expect_value(t, clip.channels[0].positions[2].time, 2.0)
+  testing.expect_value(t, clip.channels[0].positions[3].time, 3.0)
+  testing.expect_value(t, clip.channels[0].rotations[0].time, 0.0)
+  testing.expect_value(t, clip.channels[0].rotations[1].time, 1.5)
+  testing.expect_value(t, clip.channels[0].rotations[2].time, 3.0)
+  testing.expect_value(t, clip.channels[0].scales[0].time, 0.0)
+  testing.expect_value(t, clip.channels[0].scales[1].time, 3.0)
+  testing.expect_value(t, clip.channels[0].positions[0].value, [3]f32{0, 0, 0})
+  testing.expect(
+    t,
+    almost_equal_quaternion(
+      clip.channels[0].rotations[0].value,
+      linalg.QUATERNIONF32_IDENTITY,
+    ),
+  )
+  testing.expect_value(t, clip.channels[0].scales[0].value, [3]f32{1, 1, 1})
+}
+
+@(test)
+test_channel_init_cubic :: proc(t: ^testing.T) {
+  clip := animation.clip_create(channel_count = 1, duration = 2.0)
+  defer animation.clip_destroy(&clip)
+  animation.channel_init(
+    &clip.channels[0],
+    position_count = 3,
+    position_interpolation = .CUBICSPLINE,
+    duration = clip.duration,
+  )
+  testing.expect_value(t, len(clip.channels[0].cubic_positions), 3)
+  testing.expect_value(t, len(clip.channels[0].positions), 0)
+  testing.expect_value(t, clip.channels[0].cubic_positions[0].time, 0.0)
+  testing.expect_value(t, clip.channels[0].cubic_positions[1].time, 1.0)
+  testing.expect_value(t, clip.channels[0].cubic_positions[2].time, 2.0)
+  testing.expect_value(
+    t,
+    clip.channels[0].cubic_positions[0].value,
+    [3]f32{0, 0, 0},
+  )
+  testing.expect_value(
+    t,
+    clip.channels[0].cubic_positions[0].in_tangent,
+    [3]f32{0, 0, 0},
+  )
+  testing.expect_value(
+    t,
+    clip.channels[0].cubic_positions[0].out_tangent,
+    [3]f32{0, 0, 0},
+  )
+}
+
+@(test)
+test_channel_init_modify_and_sample :: proc(t: ^testing.T) {
+  clip := animation.clip_create(channel_count = 1, duration = 2.0)
+  defer animation.clip_destroy(&clip)
+  animation.channel_init(
+    &clip.channels[0],
+    position_count = 3,
+    rotation_count = 2,
+    duration = clip.duration,
+  )
+  clip.channels[0].positions[0].value = [3]f32{0, 0, 0}
+  clip.channels[0].positions[1].value = [3]f32{1, 2, 3}
+  clip.channels[0].positions[2].value = [3]f32{2, 4, 6}
+  clip.channels[0].rotations[0].value = linalg.quaternion_angle_axis_f32(
+    0,
+    {0, 0, 1},
+  )
+  clip.channels[0].rotations[1].value = linalg.quaternion_angle_axis_f32(
+    math.PI / 2,
+    {0, 0, 1},
+  )
+  p, r, s := animation.channel_sample_all(clip.channels[0], 1.0)
+  testing.expect_value(t, p, [3]f32{1, 2, 3})
+  testing.expect(
+    t,
+    almost_equal_quaternion(
+      r,
+      linalg.quaternion_angle_axis_f32(math.PI / 4, {0, 0, 1}),
+    ),
+  )
+  testing.expect_value(t, s, [3]f32{1, 1, 1})
+}
+
+@(test)
 animation_sample_benchmark :: proc(t: ^testing.T) {
   n := 1e6
   FRAME_COUNT :: 1e6
