@@ -196,7 +196,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
           // Attach a cube to the hand.L bone
           hand_cube_node.bone_socket = "hand.L"
           scale(engine, hand_cube_handle, 0.1)
-
           // Create a spinning animation
           spin_duration: f32 = 2.0
           if spin_clip_handle, spin_ok := create_animation_clip(
@@ -209,7 +208,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
               angles := [3]f32{0, math.PI, 0}  // identity, 180deg, identity
               return linalg.quaternion_angle_axis_f32(angles[i], linalg.VECTOR3F32_Y_AXIS)
             }
-
             init_animation_channel(
               engine,
               spin_clip_handle,
@@ -218,9 +216,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
               rotation_fn = rotation_fn,
               rotation_interpolation = .CUBICSPLINE,
             )
-
-            if hand_cube_node_fresh, ok := get_node(engine, hand_cube_handle); ok {
-              hand_cube_node_fresh.animation = world.AnimationInstance {
+            if node, ok := get_node(engine, hand_cube_handle); ok {
+              node.animation = world.AnimationInstance {
                 clip_handle = spin_clip_handle,
                 mode = .LOOP,
                 status = .PLAYING,
@@ -228,9 +225,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 duration = spin_duration,
                 speed = 1.0,
               }
+              world.register_animatable_node(&engine.world, hand_cube_handle)
             }
           }
-
           break
         }
       }

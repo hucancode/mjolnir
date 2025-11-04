@@ -10,7 +10,12 @@ InterpolationMode :: enum {
   CUBICSPLINE,
 }
 
-Keyframe :: struct($T: typeid) {
+LinearKeyframe :: struct($T: typeid) {
+  time:  f32,
+  value: T,
+}
+
+StepKeyframe :: struct($T: typeid) {
   time:  f32,
   value: T,
 }
@@ -22,46 +27,40 @@ CubicSplineKeyframe :: struct($T: typeid) {
   out_tangent: T,
 }
 
-keyframe_sample_or :: proc {
-  keyframe_sample_or_linear,
-  keyframe_sample_or_step,
-  keyframe_sample_or_cubic,
+Keyframe :: union($T: typeid) {
+  LinearKeyframe(T),
+  StepKeyframe(T),
+  CubicSplineKeyframe(T),
 }
 
-keyframe_sample_or_linear :: proc(frames: []Keyframe($T), t: f32, fallback: T) -> T {
-  return keyframe_sample_linear(frames, t) if len(frames) > 0 else fallback
-}
-
-keyframe_sample_or_step :: proc(frames: []Keyframe($T), t: f32, fallback: T) -> T {
-  return keyframe_sample_step(frames, t) if len(frames) > 0 else fallback
-}
-
-keyframe_sample_or_cubic :: proc(frames: []CubicSplineKeyframe($T), t: f32, fallback: T) -> T {
-  return keyframe_sample_cubic(frames, t) if len(frames) > 0 else fallback
-}
-
-keyframe_sample :: proc {
-  keyframe_sample_linear,
-  keyframe_sample_step,
-  keyframe_sample_cubic,
-}
-
-keyframe_sample_linear :: proc(frames: []Keyframe($T), t: f32) -> T {
-  if len(frames) == 0 {
-    return T{}
+// Helper to get time from any keyframe variant
+keyframe_time :: proc(kf: Keyframe($T)) -> f32 {
+  switch v in kf {
+  case LinearKeyframe(T):
+    return v.time
+  case StepKeyframe(T):
+    return v.time
+  case CubicSplineKeyframe(T):
+    return v.time
   }
-  if t <= slice.first(frames).time {
-    return slice.first(frames).value
+  return 0
+}
+
+// Helper to get value from any keyframe variant
+keyframe_value :: proc(kf: Keyframe($T)) -> T {
+  switch v in kf {
+  case LinearKeyframe(T):
+    return v.value
+  case StepKeyframe(T):
+    return v.value
+  case CubicSplineKeyframe(T):
+    return v.value
   }
-  if t >= slice.last(frames).time {
-    return slice.last(frames).value
-  }
-  cmp :: proc(item: Keyframe(T), t: f32) -> slice.Ordering {
-    return slice.Ordering.Less if item.time < t else slice.Ordering.Greater
-  }
-  i, _ := slice.binary_search_by(frames, t, cmp)
-  a := frames[i - 1]
-  b := frames[i]
+  return T{}
+}
+
+// 9 interpolation helpers for all combinations
+sample_linear_linear :: proc(a: LinearKeyframe($T), b: LinearKeyframe(T), t: f32) -> T {
   alpha := (t - a.time) / (b.time - a.time)
   when T == quaternion64 || T == quaternion128 || T == quaternion256 {
     return linalg.quaternion_slerp(a.value, b.value, alpha)
@@ -70,46 +69,103 @@ keyframe_sample_linear :: proc(frames: []Keyframe($T), t: f32) -> T {
   }
 }
 
-keyframe_sample_step :: proc(frames: []Keyframe($T), t: f32) -> T {
-  if len(frames) == 0 {
-    return T{}
-  }
-  if t <= slice.first(frames).time {
-    return slice.first(frames).value
-  }
-  if t >= slice.last(frames).time {
-    return slice.last(frames).value
-  }
-  // binary search to find the upper bound (first keyframe with time > t)
-  cmp :: proc(item: Keyframe(T), t: f32) -> slice.Ordering {
-    return slice.Ordering.Less if item.time <= t else slice.Ordering.Greater
-  }
-  upper_idx, exact_match := slice.binary_search_by(frames, t, cmp)
-  if exact_match {
-    // t exactly matches a keyframe time
-    return frames[upper_idx].value
+sample_linear_step :: proc(a: LinearKeyframe($T), b: StepKeyframe(T), t: f32) -> T {
+  return a.value
+}
+
+sample_linear_cubic :: proc(a: LinearKeyframe($T), b: CubicSplineKeyframe(T), t: f32) -> T {
+  dt := b.time - a.time
+  u := (t - a.time) / dt
+  u2 := u * u
+  u3 := u2 * u
+  h00 := 2*u3 - 3*u2 + 1
+  h01 := -2*u3 + 3*u2
+  h11 := u3 - u2
+  when T == quaternion64 || T == quaternion128 || T == quaternion256 {
+    q0 := a.value
+    q1 := b.value
+    m1_scaled := quaternion(
+      x = b.in_tangent.x * dt,
+      y = b.in_tangent.y * dt,
+      z = b.in_tangent.z * dt,
+      w = b.in_tangent.w * dt,
+    )
+    result_x := h00 * q0.x + h01 * q1.x + h11 * m1_scaled.x
+    result_y := h00 * q0.y + h01 * q1.y + h11 * m1_scaled.y
+    result_z := h00 * q0.z + h01 * q1.z + h11 * m1_scaled.z
+    result_w := h00 * q0.w + h01 * q1.w + h11 * m1_scaled.w
+    return linalg.quaternion_normalize(quaternion(
+      x = result_x,
+      y = result_y,
+      z = result_z,
+      w = result_w,
+    ))
   } else {
-    // t is between keyframes, return the previous keyframe's value
-    return frames[upper_idx - 1].value
+    return h00 * a.value + h01 * b.value + h11 * (b.in_tangent * dt)
   }
 }
 
-keyframe_sample_cubic :: proc(frames: []CubicSplineKeyframe($T), t: f32) -> T {
-  if len(frames) == 0 {
-    return T{}
+sample_step_linear :: proc(a: StepKeyframe($T), b: LinearKeyframe(T), t: f32) -> T {
+  // Step holds value until we reach the next keyframe's exact time
+  if t >= b.time {
+    return b.value
   }
-  if t <= slice.first(frames).time {
-    return slice.first(frames).value
+  return a.value
+}
+
+sample_step_step :: proc(a: StepKeyframe($T), b: StepKeyframe(T), t: f32) -> T {
+  // Step holds value until we reach the next keyframe's exact time
+  if t >= b.time {
+    return b.value
   }
-  if t >= slice.last(frames).time {
-    return slice.last(frames).value
+  return a.value
+}
+
+sample_step_cubic :: proc(a: StepKeyframe($T), b: CubicSplineKeyframe(T), t: f32) -> T {
+  // Step holds value until we reach the next keyframe's exact time
+  if t >= b.time {
+    return b.value
   }
-  cmp :: proc(item: CubicSplineKeyframe(T), t: f32) -> slice.Ordering {
-    return slice.Ordering.Less if item.time < t else slice.Ordering.Greater
+  return a.value
+}
+
+sample_cubic_linear :: proc(a: CubicSplineKeyframe($T), b: LinearKeyframe(T), t: f32) -> T {
+  dt := b.time - a.time
+  u := (t - a.time) / dt
+  u2 := u * u
+  u3 := u2 * u
+  h00 := 2*u3 - 3*u2 + 1
+  h10 := u3 - 2*u2 + u
+  h01 := -2*u3 + 3*u2
+  when T == quaternion64 || T == quaternion128 || T == quaternion256 {
+    q0 := a.value
+    m0_scaled := quaternion(
+      x = a.out_tangent.x * dt,
+      y = a.out_tangent.y * dt,
+      z = a.out_tangent.z * dt,
+      w = a.out_tangent.w * dt,
+    )
+    q1 := b.value
+    result_x := h00 * q0.x + h10 * m0_scaled.x + h01 * q1.x
+    result_y := h00 * q0.y + h10 * m0_scaled.y + h01 * q1.y
+    result_z := h00 * q0.z + h10 * m0_scaled.z + h01 * q1.z
+    result_w := h00 * q0.w + h10 * m0_scaled.w + h01 * q1.w
+    return linalg.quaternion_normalize(quaternion(
+      x = result_x,
+      y = result_y,
+      z = result_z,
+      w = result_w,
+    ))
+  } else {
+    return h00 * a.value + h10 * (a.out_tangent * dt) + h01 * b.value
   }
-  i, _ := slice.binary_search_by(frames, t, cmp)
-  a := frames[i - 1]
-  b := frames[i]
+}
+
+sample_cubic_step :: proc(a: CubicSplineKeyframe($T), b: StepKeyframe(T), t: f32) -> T {
+  return a.value
+}
+
+sample_cubic_cubic :: proc(a: CubicSplineKeyframe($T), b: CubicSplineKeyframe(T), t: f32) -> T {
   dt := b.time - a.time
   u := (t - a.time) / dt
   u2 := u * u
@@ -137,16 +193,75 @@ keyframe_sample_cubic :: proc(frames: []CubicSplineKeyframe($T), t: f32) -> T {
     result_y := h00 * q0.y + h10 * m0_scaled.y + h01 * q1.y + h11 * m1_scaled.y
     result_z := h00 * q0.z + h10 * m0_scaled.z + h01 * q1.z + h11 * m1_scaled.z
     result_w := h00 * q0.w + h10 * m0_scaled.w + h01 * q1.w + h11 * m1_scaled.w
-    result := linalg.quaternion_normalize(quaternion(
+    return linalg.quaternion_normalize(quaternion(
       x = result_x,
       y = result_y,
       z = result_z,
       w = result_w,
     ))
-    return result
   } else {
     return h00 * a.value + h10 * (a.out_tangent * dt) + h01 * b.value + h11 * (b.in_tangent * dt)
   }
+}
+
+// Unified keyframe sampling that dispatches to the appropriate helper
+keyframe_sample :: proc(frames: []Keyframe($T), t: f32, fallback: T) -> T {
+  if len(frames) == 0 {
+    return fallback
+  }
+
+  first_time := keyframe_time(slice.first(frames))
+  last_time := keyframe_time(slice.last(frames))
+
+  if t <= first_time {
+    return keyframe_value(slice.first(frames))
+  }
+
+  if t >= last_time {
+    return keyframe_value(slice.last(frames))
+  }
+
+  cmp :: proc(item: Keyframe(T), t: f32) -> slice.Ordering {
+    item_time := keyframe_time(item)
+    return slice.Ordering.Less if item_time < t else slice.Ordering.Greater
+  }
+  i, _ := slice.binary_search_by(frames, t, cmp)
+
+  a := frames[i - 1]
+  b := frames[i]
+
+  // Dispatch to the appropriate helper based on keyframe types
+  switch a_variant in a {
+  case LinearKeyframe(T):
+    switch b_variant in b {
+    case LinearKeyframe(T):
+      return sample_linear_linear(a_variant, b_variant, t)
+    case StepKeyframe(T):
+      return sample_linear_step(a_variant, b_variant, t)
+    case CubicSplineKeyframe(T):
+      return sample_linear_cubic(a_variant, b_variant, t)
+    }
+  case StepKeyframe(T):
+    switch b_variant in b {
+    case LinearKeyframe(T):
+      return sample_step_linear(a_variant, b_variant, t)
+    case StepKeyframe(T):
+      return sample_step_step(a_variant, b_variant, t)
+    case CubicSplineKeyframe(T):
+      return sample_step_cubic(a_variant, b_variant, t)
+    }
+  case CubicSplineKeyframe(T):
+    switch b_variant in b {
+    case LinearKeyframe(T):
+      return sample_cubic_linear(a_variant, b_variant, t)
+    case StepKeyframe(T):
+      return sample_cubic_step(a_variant, b_variant, t)
+    case CubicSplineKeyframe(T):
+      return sample_cubic_cubic(a_variant, b_variant, t)
+    }
+  }
+
+  return fallback
 }
 
 Status :: enum {
@@ -230,15 +345,9 @@ instance_update :: proc(self: ^Instance, delta_time: f32) {
 }
 
 Channel :: struct {
-  position_interpolation: InterpolationMode,
-  rotation_interpolation: InterpolationMode,
-  scale_interpolation:    InterpolationMode,
-  positions:         []Keyframe([3]f32),
-  rotations:         []Keyframe(quaternion128),
-  scales:            []Keyframe([3]f32),
-  cubic_positions:   []CubicSplineKeyframe([3]f32),
-  cubic_rotations:   []CubicSplineKeyframe(quaternion128),
-  cubic_scales:      []CubicSplineKeyframe([3]f32),
+  positions: []Keyframe([3]f32),
+  rotations: []Keyframe(quaternion128),
+  scales:    []Keyframe([3]f32),
 }
 
 channel_init :: proc(
@@ -251,57 +360,60 @@ channel_init :: proc(
   scale_interpolation: InterpolationMode = .LINEAR,
   duration: f32 = 1.0,
 ) {
-  channel.position_interpolation = position_interpolation
-  channel.rotation_interpolation = rotation_interpolation
-  channel.scale_interpolation = scale_interpolation
   if position_count > 0 {
-    if position_interpolation == .CUBICSPLINE {
-      channel.cubic_positions = make([]CubicSplineKeyframe([3]f32), position_count)
-      for &kf, i in channel.cubic_positions {
-        kf.time = f32(i) * duration / f32(position_count - 1) if position_count > 1 else 0
-        kf.value = [3]f32{0, 0, 0}
-        kf.in_tangent = [3]f32{0, 0, 0}
-        kf.out_tangent = [3]f32{0, 0, 0}
-      }
-    } else {
-      channel.positions = make([]Keyframe([3]f32), position_count)
-      for &kf, i in channel.positions {
-        kf.time = f32(i) * duration / f32(position_count - 1) if position_count > 1 else 0
-        kf.value = [3]f32{0, 0, 0}
+    channel.positions = make([]Keyframe([3]f32), position_count)
+    for &kf, i in channel.positions {
+      time := f32(i) * duration / f32(position_count - 1) if position_count > 1 else 0
+      switch position_interpolation {
+      case .LINEAR:
+        kf = LinearKeyframe([3]f32){time = time, value = [3]f32{0, 0, 0}}
+      case .STEP:
+        kf = StepKeyframe([3]f32){time = time, value = [3]f32{0, 0, 0}}
+      case .CUBICSPLINE:
+        kf = CubicSplineKeyframe([3]f32){
+          time = time,
+          value = [3]f32{0, 0, 0},
+          in_tangent = [3]f32{0, 0, 0},
+          out_tangent = [3]f32{0, 0, 0},
+        }
       }
     }
   }
   if rotation_count > 0 {
-    if rotation_interpolation == .CUBICSPLINE {
-      channel.cubic_rotations = make([]CubicSplineKeyframe(quaternion128), rotation_count)
-      for &kf, i in channel.cubic_rotations {
-        kf.time = f32(i) * duration / f32(rotation_count - 1) if rotation_count > 1 else 0
-        kf.value = linalg.QUATERNIONF32_IDENTITY
-        kf.in_tangent = linalg.QUATERNIONF32_IDENTITY
-        kf.out_tangent = linalg.QUATERNIONF32_IDENTITY
-      }
-    } else {
-      channel.rotations = make([]Keyframe(quaternion128), rotation_count)
-      for &kf, i in channel.rotations {
-        kf.time = f32(i) * duration / f32(rotation_count - 1) if rotation_count > 1 else 0
-        kf.value = linalg.QUATERNIONF32_IDENTITY
+    channel.rotations = make([]Keyframe(quaternion128), rotation_count)
+    for &kf, i in channel.rotations {
+      time := f32(i) * duration / f32(rotation_count - 1) if rotation_count > 1 else 0
+      switch rotation_interpolation {
+      case .LINEAR:
+        kf = LinearKeyframe(quaternion128){time = time, value = linalg.QUATERNIONF32_IDENTITY}
+      case .STEP:
+        kf = StepKeyframe(quaternion128){time = time, value = linalg.QUATERNIONF32_IDENTITY}
+      case .CUBICSPLINE:
+        kf = CubicSplineKeyframe(quaternion128){
+          time = time,
+          value = linalg.QUATERNIONF32_IDENTITY,
+          in_tangent = linalg.QUATERNIONF32_IDENTITY,
+          out_tangent = linalg.QUATERNIONF32_IDENTITY,
+        }
       }
     }
   }
   if scale_count > 0 {
-    if scale_interpolation == .CUBICSPLINE {
-      channel.cubic_scales = make([]CubicSplineKeyframe([3]f32), scale_count)
-      for &kf, i in channel.cubic_scales {
-        kf.time = f32(i) * duration / f32(scale_count - 1) if scale_count > 1 else 0
-        kf.value = [3]f32{1, 1, 1}
-        kf.in_tangent = [3]f32{0, 0, 0}
-        kf.out_tangent = [3]f32{0, 0, 0}
-      }
-    } else {
-      channel.scales = make([]Keyframe([3]f32), scale_count)
-      for &kf, i in channel.scales {
-        kf.time = f32(i) * duration / f32(scale_count - 1) if scale_count > 1 else 0
-        kf.value = [3]f32{1, 1, 1}
+    channel.scales = make([]Keyframe([3]f32), scale_count)
+    for &kf, i in channel.scales {
+      time := f32(i) * duration / f32(scale_count - 1) if scale_count > 1 else 0
+      switch scale_interpolation {
+      case .LINEAR:
+        kf = LinearKeyframe([3]f32){time = time, value = [3]f32{1, 1, 1}}
+      case .STEP:
+        kf = StepKeyframe([3]f32){time = time, value = [3]f32{1, 1, 1}}
+      case .CUBICSPLINE:
+        kf = CubicSplineKeyframe([3]f32){
+          time = time,
+          value = [3]f32{1, 1, 1},
+          in_tangent = [3]f32{0, 0, 0},
+          out_tangent = [3]f32{0, 0, 0},
+        }
       }
     }
   }
@@ -314,12 +426,6 @@ channel_destroy :: proc(channel: ^Channel) {
   channel.rotations = nil
   delete(channel.scales)
   channel.scales = nil
-  delete(channel.cubic_positions)
-  channel.cubic_positions = nil
-  delete(channel.cubic_rotations)
-  channel.cubic_rotations = nil
-  delete(channel.cubic_scales)
-  channel.cubic_scales = nil
 }
 
 // Sample channel, returning Maybe for each component (nil if no keyframe data)
@@ -332,56 +438,16 @@ channel_sample_some :: proc(
   rotation: Maybe(quaternion128),
   scale: Maybe([3]f32),
 ) {
-  // Only return a value if the channel has keyframe data
-  if len(channel.positions) > 0 || len(channel.cubic_positions) > 0 {
-    pos_value: [3]f32
-    switch channel.position_interpolation {
-    case .LINEAR:
-      pos_value = keyframe_sample_linear(channel.positions, t)
-    case .STEP:
-      pos_value = keyframe_sample_step(channel.positions, t)
-    case .CUBICSPLINE:
-      pos_value = keyframe_sample_cubic(channel.cubic_positions, t)
-    }
-    position = pos_value
+  if len(channel.positions) > 0 {
+    position = keyframe_sample(channel.positions, t, [3]f32{0, 0, 0})
   }
 
-  if len(channel.rotations) > 0 || len(channel.cubic_rotations) > 0 {
-    rot_value: quaternion128
-    switch channel.rotation_interpolation {
-    case .LINEAR:
-      rot_value = keyframe_sample_or_linear(
-        channel.rotations,
-        t,
-        linalg.QUATERNIONF32_IDENTITY,
-      )
-    case .STEP:
-      rot_value = keyframe_sample_or_step(
-        channel.rotations,
-        t,
-        linalg.QUATERNIONF32_IDENTITY,
-      )
-    case .CUBICSPLINE:
-      rot_value = keyframe_sample_or_cubic(
-        channel.cubic_rotations,
-        t,
-        linalg.QUATERNIONF32_IDENTITY,
-      )
-    }
-    rotation = rot_value
+  if len(channel.rotations) > 0 {
+    rotation = keyframe_sample(channel.rotations, t, linalg.QUATERNIONF32_IDENTITY)
   }
 
-  if len(channel.scales) > 0 || len(channel.cubic_scales) > 0 {
-    scale_value: [3]f32
-    switch channel.scale_interpolation {
-    case .LINEAR:
-      scale_value = keyframe_sample_or_linear(channel.scales, t, [3]f32{1, 1, 1})
-    case .STEP:
-      scale_value = keyframe_sample_or_step(channel.scales, t, [3]f32{1, 1, 1})
-    case .CUBICSPLINE:
-      scale_value = keyframe_sample_or_cubic(channel.cubic_scales, t, [3]f32{1, 1, 1})
-    }
-    scale = scale_value
+  if len(channel.scales) > 0 {
+    scale = keyframe_sample(channel.scales, t, [3]f32{1, 1, 1})
   }
 
   return

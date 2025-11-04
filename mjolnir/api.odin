@@ -532,39 +532,42 @@ init_animation_channel :: proc(
 
   // Apply position callback if provided
   if position_fn != nil {
-    if position_interpolation == .CUBICSPLINE {
-      for &kf, i in channel.cubic_positions {
-        kf.value = position_fn(i)
-      }
-    } else {
-      for &kf, i in channel.positions {
-        kf.value = position_fn(i)
+    for &kf, i in channel.positions {
+      switch &variant in kf {
+      case animation.LinearKeyframe([3]f32):
+        variant.value = position_fn(i)
+      case animation.StepKeyframe([3]f32):
+        variant.value = position_fn(i)
+      case animation.CubicSplineKeyframe([3]f32):
+        variant.value = position_fn(i)
       }
     }
   }
 
   // Apply rotation callback if provided
   if rotation_fn != nil {
-    if rotation_interpolation == .CUBICSPLINE {
-      for &kf, i in channel.cubic_rotations {
-        kf.value = rotation_fn(i)
-      }
-    } else {
-      for &kf, i in channel.rotations {
-        kf.value = rotation_fn(i)
+    for &kf, i in channel.rotations {
+      switch &variant in kf {
+      case animation.LinearKeyframe(quaternion128):
+        variant.value = rotation_fn(i)
+      case animation.StepKeyframe(quaternion128):
+        variant.value = rotation_fn(i)
+      case animation.CubicSplineKeyframe(quaternion128):
+        variant.value = rotation_fn(i)
       }
     }
   }
 
   // Apply scale callback if provided
   if scale_fn != nil {
-    if scale_interpolation == .CUBICSPLINE {
-      for &kf, i in channel.cubic_scales {
-        kf.value = scale_fn(i)
-      }
-    } else {
-      for &kf, i in channel.scales {
-        kf.value = scale_fn(i)
+    for &kf, i in channel.scales {
+      switch &variant in kf {
+      case animation.LinearKeyframe([3]f32):
+        variant.value = scale_fn(i)
+      case animation.StepKeyframe([3]f32):
+        variant.value = scale_fn(i)
+      case animation.CubicSplineKeyframe([3]f32):
+        variant.value = scale_fn(i)
       }
     }
   }
