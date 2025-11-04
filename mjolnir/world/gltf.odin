@@ -785,12 +785,13 @@ load_animations :: proc(
       log.error("Failed to allocate animation clip")
       continue
     }
+    name := ""
     if gltf_anim.name != nil {
-      clip.name = strings.clone_from_cstring(gltf_anim.name)
+      name = strings.clone_from_cstring(gltf_anim.name)
     } else {
-      clip.name = fmt.tprintf("animation_%d", i)
+      name = fmt.tprintf("animation_%d", i)
     }
-    clip.channels = make([]anim.Channel, len(skinning.bones))
+    clip^ = anim.clip_create(channel_count = len(skinning.bones), name = name)
     for gltf_channel in gltf_anim.channels {
       if gltf_channel.target_node == nil || gltf_channel.sampler == nil {
         continue
