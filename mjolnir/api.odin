@@ -475,6 +475,99 @@ play_animation :: proc(
   return world.play_animation(&engine.world, &engine.rm, handle, name)
 }
 
+// Add an animation layer to a skinned mesh node
+add_animation_layer :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+  animation_name: string,
+  weight: f32 = 1.0,
+  layer_index: int = -1, // -1 to append, >= 0 to replace existing layer
+) -> bool {
+  return world.add_animation_layer(
+    &engine.world,
+    &engine.rm,
+    handle,
+    animation_name,
+    weight,
+    layer_index = layer_index,
+  )
+}
+
+// Remove an animation layer from a skinned mesh node
+remove_animation_layer :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+  layer_index: int,
+) -> bool {
+  return world.remove_animation_layer(&engine.world, handle, layer_index)
+}
+
+// Set the blend weight for an animation layer
+set_animation_layer_weight :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+  layer_index: int,
+  weight: f32,
+) -> bool {
+  return world.set_animation_layer_weight(&engine.world, handle, layer_index, weight)
+}
+
+// Clear all animation layers from a skinned mesh node
+clear_animation_layers :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+) -> bool {
+  return world.clear_animation_layers(&engine.world, handle)
+}
+
+// Add an IK layer to control specific bones
+// IK targets are in world space and will be converted internally
+add_ik_layer :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+  bone_names: []string,
+  target_pos: [3]f32,
+  pole_pos: [3]f32,
+  weight: f32 = 1.0,
+  max_iterations: int = 10,
+  tolerance: f32 = 0.001,
+  layer_index: int = -1, // -1 to append, >= 0 to replace existing layer
+) -> bool {
+  return world.add_ik_layer(
+    &engine.world,
+    &engine.rm,
+    handle,
+    bone_names,
+    target_pos,
+    pole_pos,
+    weight,
+    max_iterations,
+    tolerance,
+    layer_index,
+  )
+}
+
+// Update IK target position and pole vector for an existing IK layer
+set_ik_layer_target :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+  layer_index: int,
+  target_pos: [3]f32,
+  pole_pos: [3]f32,
+) -> bool {
+  return world.set_ik_layer_target(&engine.world, handle, layer_index, target_pos, pole_pos)
+}
+
+// Enable or disable an IK layer
+set_ik_layer_enabled :: proc(
+  engine: ^Engine,
+  handle: resources.Handle,
+  layer_index: int,
+  enabled: bool,
+) -> bool {
+  return world.set_ik_layer_enabled(&engine.world, handle, layer_index, enabled)
+}
+
 create_camera :: proc(
   engine: ^Engine,
   width, height: u32,

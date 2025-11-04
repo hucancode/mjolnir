@@ -232,6 +232,237 @@ compute_bone_lengths :: proc(skin: ^Skinning) {
   }
 }
 
+// Sample and blend multiple animation layers (FK + IK)
+// Layers are evaluated in order, with their weights controlling blending
+sample_layers :: proc(
+  self: ^Mesh,
+  layers: []animation.Layer,
+  ik_targets: []animation.IKTarget,
+  out_bone_matrices: []matrix[4, 4]f32,
+) {
+  skin, has_skin := &self.skinning.?
+  if !has_skin do return
+  bone_count := len(skin.bones)
+  if len(out_bone_matrices) < bone_count do return
+  if len(layers) == 0 do return
+
+  // Temporary storage for accumulating transforms
+  accumulated_positions := make([][3]f32, bone_count, context.temp_allocator)
+  accumulated_rotations := make([]quaternion128, bone_count, context.temp_allocator)
+  accumulated_scales := make([][3]f32, bone_count, context.temp_allocator)
+  accumulated_weights := make([]f32, bone_count, context.temp_allocator)
+
+  // Initialize accumulators
+  for i in 0..<bone_count {
+    accumulated_positions[i] = {0, 0, 0}
+    accumulated_rotations[i] = linalg.QUATERNIONF32_IDENTITY
+    accumulated_scales[i] = {0, 0, 0}
+    accumulated_weights[i] = 0
+  }
+
+  // Sample and accumulate FK layers
+  for &layer in layers {
+    if layer.weight <= 0 do continue
+
+    switch &layer_data in layer.data {
+    case animation.FKLayer:
+      clip := layer_data.instance.clip
+      if clip == nil do continue
+
+      // Sample this layer's animation
+      TraverseEntry :: struct {
+        transform: matrix[4, 4]f32,
+        bone:      u32,
+      }
+      stack := make(
+        [dynamic]TraverseEntry,
+        0,
+        bone_count,
+        context.temp_allocator,
+      )
+      append(&stack, TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index})
+
+      for len(stack) > 0 {
+        entry := pop(&stack)
+        bone := &skin.bones[entry.bone]
+        local_transform: geometry.Transform
+        if entry.bone < u32(len(clip.channels)) {
+          local_transform.position, local_transform.rotation, local_transform.scale =
+            animation.channel_sample(clip.channels[entry.bone], layer_data.instance.time)
+        } else {
+          local_transform.scale = [3]f32{1, 1, 1}
+          local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
+        }
+
+        // Accumulate weighted transform
+        w := layer.weight
+        accumulated_positions[entry.bone] += local_transform.position * w
+        accumulated_rotations[entry.bone] = linalg.quaternion_slerp(
+          accumulated_rotations[entry.bone],
+          local_transform.rotation,
+          w / (accumulated_weights[entry.bone] + w),
+        ) if accumulated_weights[entry.bone] > 0 else local_transform.rotation
+        accumulated_scales[entry.bone] += local_transform.scale * w
+        accumulated_weights[entry.bone] += w
+
+        for child_index in bone.children {
+          append(&stack, TraverseEntry{entry.transform, child_index})
+        }
+      }
+
+    case animation.IKLayer:
+      // IK layers are applied after FK as post-process (handled below)
+      continue
+    }
+  }
+
+  // Normalize accumulated transforms and compute world transforms
+  world_transforms := make(
+    []animation.BoneTransform,
+    bone_count,
+    context.temp_allocator,
+  )
+
+  TraverseEntry :: struct {
+    parent_world: matrix[4, 4]f32,
+    bone_index:   u32,
+  }
+  stack := make(
+    [dynamic]TraverseEntry,
+    0,
+    bone_count,
+    context.temp_allocator,
+  )
+  append(&stack, TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index})
+
+  for len(stack) > 0 {
+    entry := pop(&stack)
+    bone := &skin.bones[entry.bone_index]
+    bone_idx := entry.bone_index
+
+    // Normalize accumulated transforms
+    local_transform: geometry.Transform
+    if accumulated_weights[bone_idx] > 0 {
+      weight := accumulated_weights[bone_idx]
+      local_transform.position = accumulated_positions[bone_idx] / weight
+      local_transform.rotation = linalg.quaternion_normalize(accumulated_rotations[bone_idx])
+      local_transform.scale = accumulated_scales[bone_idx] / weight
+    } else {
+      local_transform.scale = [3]f32{1, 1, 1}
+      local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
+    }
+
+    local_matrix := linalg.matrix4_from_trs(
+      local_transform.position,
+      local_transform.rotation,
+      local_transform.scale,
+    )
+
+    // Compute world transform
+    world_matrix := entry.parent_world * local_matrix
+    world_transforms[bone_idx].world_matrix = world_matrix
+    world_transforms[bone_idx].world_position = world_matrix[3].xyz
+    world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
+
+    for child_idx in bone.children {
+      append(&stack, TraverseEntry{world_matrix, child_idx})
+    }
+  }
+
+  // Apply IK targets (from both layer-embedded IK and external IK targets)
+  all_ik_targets := make([dynamic]animation.IKTarget, 0, context.temp_allocator)
+
+  // Collect IK from layers
+  for &layer in layers {
+    if layer.weight <= 0 do continue
+    switch &layer_data in layer.data {
+    case animation.IKLayer:
+      target := layer_data.target
+      target.weight = layer.weight
+      append(&all_ik_targets, target)
+    case animation.FKLayer:
+      continue
+    }
+  }
+
+  // Add external IK targets
+  for target in ik_targets {
+    append(&all_ik_targets, target)
+  }
+
+  // Apply all IK
+  for target in all_ik_targets {
+    if !target.enabled do continue
+    chain_length := len(target.bone_indices)
+    bone_lengths := make([]f32, chain_length - 1, context.temp_allocator)
+    for i in 0 ..< chain_length - 1 {
+      child_bone_idx := target.bone_indices[i + 1]
+      bone_lengths[i] = skin.bone_lengths[child_bone_idx]
+    }
+    animation.fabrik_solve(world_transforms[:], target, bone_lengths[:])
+  }
+
+  // Update child bones after IK (same as sample_clip_with_ik)
+  if len(all_ik_targets) > 0 {
+    affected_bones := make(map[u32]bool, bone_count, context.temp_allocator)
+    for target in all_ik_targets {
+      if !target.enabled do continue
+      for bone_idx in target.bone_indices {
+        affected_bones[bone_idx] = true
+      }
+    }
+
+    update_stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
+    for bone_idx in affected_bones {
+      bone := &skin.bones[bone_idx]
+      parent_world := world_transforms[bone_idx].world_matrix
+      for child_idx in bone.children {
+        if child_idx in affected_bones do continue
+        append(&update_stack, TraverseEntry{parent_world, child_idx})
+      }
+    }
+
+    for len(update_stack) > 0 {
+      entry := pop(&update_stack)
+      bone := &skin.bones[entry.bone_index]
+      bone_idx := entry.bone_index
+
+      // Get normalized local transform
+      local_transform: geometry.Transform
+      if accumulated_weights[bone_idx] > 0 {
+        weight := accumulated_weights[bone_idx]
+        local_transform.position = accumulated_positions[bone_idx] / weight
+        local_transform.rotation = linalg.quaternion_normalize(accumulated_rotations[bone_idx])
+        local_transform.scale = accumulated_scales[bone_idx] / weight
+      } else {
+        local_transform.scale = [3]f32{1, 1, 1}
+        local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
+      }
+
+      local_matrix := linalg.matrix4_from_trs(
+        local_transform.position,
+        local_transform.rotation,
+        local_transform.scale,
+      )
+
+      world_matrix := entry.parent_world * local_matrix
+      world_transforms[bone_idx].world_matrix = world_matrix
+      world_transforms[bone_idx].world_position = world_matrix[3].xyz
+      world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
+
+      for child_idx in bone.children {
+        append(&update_stack, TraverseEntry{world_matrix, child_idx})
+      }
+    }
+  }
+
+  // Compute final skinning matrices
+  for i in 0 ..< bone_count {
+    world_matrix := world_transforms[i].world_matrix
+    out_bone_matrices[i] = world_matrix * skin.bones[i].inverse_bind_matrix
+  }
+}
+
 // Sample animation clip with IK corrections applied
 // This version first computes FK, then applies IK targets, then outputs skinning matrices
 sample_clip_with_ik :: proc(

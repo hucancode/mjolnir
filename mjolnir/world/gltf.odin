@@ -427,6 +427,7 @@ process_mesh_primitives :: proc(
     if include_skinning {
       append(&combined_skinnings, ..skinnings[:])
     }
+    // TODO: optimize this, resize combined_indices and directly mutate the element, no more copy
     if prim.indices != nil {
       indices := make([]u32, prim.indices.count, context.temp_allocator)
       _ = cgltf.accessor_unpack_indices(
@@ -439,8 +440,15 @@ process_mesh_primitives :: proc(
         index += vertex_offset
       }
       append(&combined_indices, ..indices[:])
+    } else {
+      indices := make([]u32, vertices_num, context.temp_allocator)
+      for i in 0 ..< vertices_num {
+        indices[i] = vertex_offset + u32(i)
+      }
+      append(&combined_indices, ..indices[:])
     }
   }
+  // TODO: optimize this, find a way to avoid cloning
   final_vertices := slice.clone(combined_vertices[:])
   final_indices := slice.clone(combined_indices[:])
   geometry_data: geometry.Geometry

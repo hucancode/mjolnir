@@ -314,3 +314,48 @@ clip_destroy :: proc(clip: ^Clip) {
   delete(clip.channels)
   clip.channels = nil
 }
+
+FKLayer :: struct {
+  instance: Instance, // Animation instance with independent time/playback
+}
+
+IKLayer :: struct {
+  target: IKTarget, // IK constraint
+}
+
+LayerData :: union {
+  FKLayer,
+  IKLayer,
+}
+
+Layer :: struct {
+  weight: f32,       // Blend weight (0.0 to 1.0)
+  data:   LayerData, // FK or IK layer data
+}
+
+layer_init_fk :: proc(self: ^Layer, clip: ^Clip, weight: f32 = 1.0, mode: PlayMode = .LOOP, speed: f32 = 1.0) {
+  self.weight = weight
+  instance := Instance {
+    clip     = clip,
+    mode     = mode,
+    status   = .PLAYING,
+    time     = 0.0,
+    duration = clip.duration if clip != nil else 0.0,
+    speed    = speed,
+  }
+  self.data = FKLayer{instance = instance}
+}
+
+layer_init_ik :: proc(self: ^Layer, target: IKTarget, weight: f32 = 1.0) {
+  self.weight = weight
+  self.data = IKLayer{target = target}
+}
+
+layer_update :: proc(self: ^Layer, delta_time: f32) {
+  switch &layer_data in self.data {
+  case FKLayer:
+    instance_update(&layer_data.instance, delta_time)
+  case IKLayer:
+    // IK doesn't have time-based updates
+  }
+}
