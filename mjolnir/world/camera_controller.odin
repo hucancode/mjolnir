@@ -24,6 +24,7 @@ OrbitCameraData :: struct {
   max_pitch:    f32,
   zoom_speed:   f32,
   rotate_speed: f32,
+  pan_speed:    f32,
 }
 
 FreeCameraData :: struct {
@@ -94,6 +95,7 @@ camera_controller_orbit_init :: proc(
       max_pitch = math.PI * 0.4,
       zoom_speed = 2.0,
       rotate_speed = 2.0,
+      pan_speed = 0.01,
     },
     last_mouse_pos = {current_mouse_x, current_mouse_y},
     mouse_delta = {0, 0},
@@ -182,9 +184,31 @@ camera_controller_orbit_update :: proc(
     self.mouse_delta = current_mouse_pos - self.last_mouse_pos
     self.last_mouse_pos = current_mouse_pos
     if self.mouse_delta.x != 0 || self.mouse_delta.y != 0 {
-      orbit.yaw += f32(self.mouse_delta.x) * orbit.rotate_speed * 0.01
-      orbit.pitch += f32(self.mouse_delta.y) * orbit.rotate_speed * 0.01
-      orbit.pitch = linalg.clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch)
+      shift_pressed := glfw.GetKey(self.window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS ||
+                       glfw.GetKey(self.window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS
+      if shift_pressed {
+        // Pan mode - move the target point
+        camera := resources.Camera{
+          position = orbit.target + [3]f32{
+            orbit.distance * math.cos(orbit.pitch) * math.cos(orbit.yaw),
+            orbit.distance * math.sin(orbit.pitch),
+            orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw),
+          },
+        }
+        // Calculate camera right and up vectors for panning
+        forward := linalg.normalize(orbit.target - camera.position)
+        right := linalg.normalize(linalg.cross(forward, linalg.VECTOR3F32_Y_AXIS))
+        up := linalg.cross(right, forward)
+        // Pan the target based on mouse movement
+        pan_x := -f32(self.mouse_delta.x) * orbit.pan_speed * orbit.distance
+        pan_y := f32(self.mouse_delta.y) * orbit.pan_speed * orbit.distance
+        orbit.target += right * pan_x + up * pan_y
+      } else {
+        // Rotate mode - orbit around target
+        orbit.yaw += f32(self.mouse_delta.x) * orbit.rotate_speed * 0.01
+        orbit.pitch += f32(self.mouse_delta.y) * orbit.rotate_speed * 0.01
+        orbit.pitch = linalg.clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch)
+      }
       camera_needs_update = true
     }
   }
@@ -221,24 +245,13 @@ camera_controller_free_update :: proc(
     move_vector = linalg.normalize(move_vector) * speed * delta_time
     camera.position += move_vector
   }
-  right_button_pressed :=
-    glfw.GetMouseButton(self.window, glfw.MOUSE_BUTTON_RIGHT) == glfw.PRESS
-  if right_button_pressed && !self.is_orbiting {
-    // mouse down - start mouse look
-    self.is_orbiting = true
-    current_mouse_pos: [2]f64
-    current_mouse_pos.x, current_mouse_pos.y = glfw.GetCursorPos(self.window)
-    self.last_mouse_pos = current_mouse_pos
-  } else if !right_button_pressed && self.is_orbiting {
-    // mouse up - stop mouse look
-    self.is_orbiting = false
-  }
-  if self.is_orbiting {
-    current_mouse_pos: [2]f64
-    current_mouse_pos.x, current_mouse_pos.y = glfw.GetCursorPos(self.window)
-    self.mouse_delta = current_mouse_pos - self.last_mouse_pos
-    self.last_mouse_pos = current_mouse_pos
-    // apply rotation
+  // Always track mouse movement for free camera
+  current_mouse_pos: [2]f64
+  current_mouse_pos.x, current_mouse_pos.y = glfw.GetCursorPos(self.window)
+  self.mouse_delta = current_mouse_pos - self.last_mouse_pos
+  self.last_mouse_pos = current_mouse_pos
+  // apply rotation based on mouse movement
+  if self.mouse_delta.x != 0 || self.mouse_delta.y != 0 {
     yaw_delta := f32(self.mouse_delta.x) * free.mouse_sensitivity
     pitch_delta := f32(self.mouse_delta.y) * free.mouse_sensitivity
     // rotate around world up for yaw
