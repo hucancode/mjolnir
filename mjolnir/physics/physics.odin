@@ -8,6 +8,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
+import "core:time"
 
 KILL_Y :: -50.0
 
@@ -17,8 +18,9 @@ PhysicsWorld :: struct {
   contacts:       [dynamic]Contact,
   prev_contacts:  map[u64]Contact, // Contact cache for warmstarting
   gravity:        [3]f32,
-  iterations:     i32,
-  spatial_index:  geometry.BVH(resources.Handle),
+  iterations:     i32, // Per-substep iterations
+  spatial_index:  geometry.BVH(BroadPhaseEntry),
+  body_bounds:    [dynamic]geometry.Aabb,
 }
 
 BroadPhaseEntry :: struct {
@@ -35,19 +37,21 @@ init :: proc(
   world.contacts = make([dynamic]Contact)
   world.prev_contacts = make(map[u64]Contact)
   world.gravity = gravity
-  world.iterations = 6 // Per-substep iterations (3 substeps × 6 = 18 total)
-  world.spatial_index = geometry.BVH(resources.Handle) {
+  world.iterations = 6
+  world.spatial_index = geometry.BVH(BroadPhaseEntry) {
     nodes = make([dynamic]geometry.BVHNode),
-    primitives = make([dynamic]resources.Handle),
-    bounds_func = proc(h: resources.Handle) -> geometry.Aabb {
-      return {}
+    primitives = make([dynamic]BroadPhaseEntry),
+    bounds_func = proc(entry: BroadPhaseEntry) -> geometry.Aabb {
+      return entry.bounds
     },
   }
+  world.body_bounds = make([dynamic]geometry.Aabb)
 }
 
 destroy :: proc(world: ^PhysicsWorld) {
   cont.destroy(world.bodies, proc(body: ^RigidBody) {})
   cont.destroy(world.colliders, proc(col: ^Collider) {})
+  delete(world.body_bounds)
   delete(world.contacts)
   delete(world.prev_contacts)
   geometry.bvh_destroy(&world.spatial_index)
@@ -97,6 +101,8 @@ add_collider :: proc(
 }
 
 step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
+  step_start := time.now()
+
   // Save previous contacts for warmstarting
   clear(&physics.prev_contacts)
   for contact in physics.contacts {
@@ -215,48 +221,77 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
 
   // integrate position multiple times per frame
   // more substeps = smaller steps = less tunneling through thin objects
-  num_substeps :: 5
-  substep_dt := dt / f32(num_substeps)
+  NUM_SUBSTEPS :: 5
+  substep_dt := dt / f32(NUM_SUBSTEPS)
 
-  for substep in 0 ..< num_substeps {
-    // clear and redetect contacts at current positions
-    clear(&physics.contacts)
-    broad_phase_entries := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  // Count active bodies with colliders
+  active_body_count := 0
+  for &entry in physics.bodies.entries {
+    if entry.active && entry.item.collider_handle.generation != 0 {
+      active_body_count += 1
+    }
+  }
+
+  // Rebuild BVH only when body count changes (bodies added/removed)
+  rebuild_bvh := len(physics.spatial_index.primitives) != active_body_count
+  bvh_build_time: time.Duration
+  if rebuild_bvh {
+    bvh_build_start := time.now()
+    clear(&physics.spatial_index.nodes)
+    clear(&physics.spatial_index.primitives)
+    entries := make([dynamic]BroadPhaseEntry, 0, active_body_count, context.temp_allocator)
     for &entry, idx in physics.bodies.entries {
-      if !entry.active {
-        continue
-      }
+      if !entry.active do continue
       body := &entry.item
-      if body.collider_handle.generation == 0 {
-        continue
-      }
+      if body.collider_handle.generation == 0 do continue
+
       node := cont.get(w.nodes, body.node_handle) or_continue
       collider := cont.get(physics.colliders, body.collider_handle) or_continue
       pos := node.transform.position
       bounds := collider_get_aabb(collider, pos)
+
       handle := resources.Handle {
         index      = u32(idx),
         generation = entry.generation,
       }
-      append(
-        &broad_phase_entries,
-        BroadPhaseEntry{handle = handle, bounds = bounds},
-      )
+      append(&entries, BroadPhaseEntry{handle = handle, bounds = bounds})
     }
-    for i in 0 ..< len(broad_phase_entries) {
-      for j in i + 1 ..< len(broad_phase_entries) {
-        entry_a := broad_phase_entries[i]
-        entry_b := broad_phase_entries[j]
-        if !geometry.aabb_intersects(entry_a.bounds, entry_b.bounds) {
-          continue
-        }
-        body_a := cont.get(physics.bodies, entry_a.handle) or_continue
-        body_b := cont.get(physics.bodies, entry_b.handle) or_continue
+
+    geometry.bvh_build(&physics.spatial_index, entries[:], 4)
+    bvh_build_time = time.since(bvh_build_start)
+  }
+
+  substep_start := time.now()
+
+  for substep in 0 ..< NUM_SUBSTEPS {
+    // clear and redetect contacts at current positions
+    clear(&physics.contacts)
+
+    for &bvh_entry, i in physics.spatial_index.primitives {
+      body := cont.get(physics.bodies, bvh_entry.handle) or_continue
+      node := cont.get(w.nodes, body.node_handle) or_continue
+      collider := cont.get(physics.colliders, body.collider_handle) or_continue
+      pos := node.transform.position
+      bvh_entry.bounds = collider_get_aabb(collider, pos)
+    }
+    geometry.bvh_refit(&physics.spatial_index)
+    candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+    for &bvh_entry in physics.spatial_index.primitives {
+      handle_a := bvh_entry.handle
+      body_a := cont.get(physics.bodies, handle_a) or_continue
+      clear(&candidates)
+      geometry.bvh_query_aabb(&physics.spatial_index, bvh_entry.bounds, &candidates)
+      for entry_b in candidates {
+        handle_b := entry_b.handle
+        // Skip self-collision
+        if handle_a == handle_b do continue
+        // Skip duplicate pairs (only test A-B, not B-A)
+        if handle_a.index > handle_b.index do continue
+        body_b := cont.get(physics.bodies, handle_b) or_continue
         if body_a.is_static && body_b.is_static {
           continue
         }
         // Skip collision resolution if either body is trigger_only
-        // But still detect collision for trigger events
         if body_a.trigger_only || body_b.trigger_only {
           continue
         }
@@ -294,8 +329,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         }
         if hit {
           contact := Contact {
-            body_a      = entry_a.handle,
-            body_b      = entry_b.handle,
+            body_a      = handle_a,
+            body_b      = handle_b,
             point       = point,
             normal      = normal,
             penetration = penetration,
@@ -303,7 +338,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
             friction    = (body_a.friction + body_b.friction) * 0.5,
           }
           // Check if we have a cached contact from previous frame for warmstarting
-          pair := CollisionPair{body_a = entry_a.handle, body_b = entry_b.handle}
+          pair := CollisionPair{body_a = handle_a, body_b = handle_b}
           hash := collision_pair_hash(pair)
           if prev_contact, found := physics.prev_contacts[hash]; found {
             // Copy accumulated impulses for warmstart with heavy damping
@@ -317,6 +352,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         }
       }
     }
+
     // Prepare all contacts (compute mass matrices and bias terms)
     for &contact in physics.contacts {
       body_a := cont.get(physics.bodies, contact.body_a) or_continue
@@ -429,8 +465,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         }
       }
     }
-  } // End substep loop
-  // Kill bodies that fall below kill_y threshold
+  }
+  substep_time := time.since(substep_start)
   bodies_to_kill := make([dynamic]resources.Handle, context.temp_allocator)
   for &entry, idx in physics.bodies.entries {
     if !entry.active {
@@ -460,4 +496,13 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       KILL_Y,
     )
   }
+  total_time := time.since(step_start)
+  log.infof(
+    "Physics: %.2fms total | BVH build=%.2fms | substeps=%.2fms | bodies=%d contacts=%d",
+    time.duration_milliseconds(total_time),
+    time.duration_milliseconds(bvh_build_time),
+    time.duration_milliseconds(substep_time),
+    active_body_count,
+    len(physics.contacts),
+  )
 }

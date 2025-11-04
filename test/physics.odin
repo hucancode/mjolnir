@@ -1428,3 +1428,82 @@ test_force_application :: proc(t: ^testing.T) {
 		"Force should accelerate the body correctly",
 	)
 }
+
+@(test)
+test_obb_obb_collision_aligned :: proc(t: ^testing.T) {
+	box_a := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
+	box_b := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
+	pos_a := [3]f32{0, 0, 0}
+	pos_b := [3]f32{1.5, 0, 0}
+	hit, _, normal, penetration := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
+	testing.expect(t, hit, "Aligned OBBs should intersect")
+	testing.expect(t, abs(penetration - 0.5) < 0.001, "Penetration should be 0.5")
+}
+
+@(test)
+test_obb_obb_collision_rotated_45 :: proc(t: ^testing.T) {
+	// Rotate box A by 45 degrees around Z axis
+	angle := f32(math.PI / 4.0)
+	axis := linalg.VECTOR3F32_Z_AXIS
+	rotation_a := linalg.quaternion_angle_axis_f32(angle, axis)
+	box_a := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = rotation_a}
+	box_b := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
+	pos_a := [3]f32{0, 0, 0}
+	pos_b := [3]f32{1.2, 0, 0}
+	hit, _, _, _ := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
+	testing.expect(t, hit, "Rotated OBB should still intersect with aligned box")
+}
+
+@(test)
+test_obb_obb_collision_both_rotated :: proc(t: ^testing.T) {
+	angle_a := f32(math.PI / 4.0)
+	angle_b := f32(math.PI / 6.0)
+	rotation_a := linalg.quaternion_angle_axis_f32(angle_a, linalg.VECTOR3F32_Z_AXIS)
+	rotation_b := linalg.quaternion_angle_axis_f32(angle_b, linalg.VECTOR3F32_Y_AXIS)
+	box_a := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = rotation_a}
+	box_b := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = rotation_b}
+	pos_a := [3]f32{0, 0, 0}
+	pos_b := [3]f32{1.5, 0, 0}
+	hit, _, _, _ := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
+	testing.expect(t, hit, "Both rotated OBBs should intersect")
+}
+
+@(test)
+test_obb_obb_collision_separated :: proc(t: ^testing.T) {
+	rotation := linalg.quaternion_angle_axis_f32(f32(math.PI / 4.0), linalg.VECTOR3F32_Z_AXIS)
+	box_a := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = rotation}
+	box_b := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = linalg.QUATERNIONF32_IDENTITY}
+	pos_a := [3]f32{0, 0, 0}
+	pos_b := [3]f32{5, 0, 0}
+	hit, _, _, _ := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
+	testing.expect(t, !hit, "Separated OBBs should not intersect")
+}
+
+@(test)
+test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
+	sphere := physics.SphereCollider{radius = 1.0}
+	rotation := linalg.quaternion_angle_axis_f32(f32(math.PI / 4.0), linalg.VECTOR3F32_Z_AXIS)
+	box := physics.BoxCollider{half_extents = {1, 1, 1}, rotation = rotation}
+	pos_sphere := [3]f32{1.5, 0, 0}
+	pos_box := [3]f32{0, 0, 0}
+	hit, _, _, _ := physics.test_sphere_box(pos_sphere, &sphere, pos_box, &box)
+	testing.expect(t, hit, "Sphere should collide with rotated OBB")
+}
+
+@(test)
+test_collider_get_aabb_obb :: proc(t: ^testing.T) {
+	// Create box rotated 45 degrees around Z
+	angle := f32(math.PI / 4.0)
+	rotation := linalg.quaternion_angle_axis_f32(angle, linalg.VECTOR3F32_Z_AXIS)
+	collider := physics.collider_create_box({1, 1, 1}, {0, 0, 0}, rotation)
+	position := [3]f32{0, 0, 0}
+	aabb := physics.collider_get_aabb(&collider, position)
+	// Rotated box diagonal should be sqrt(2) ≈ 1.414
+	expected_extent := f32(math.sqrt(f64(2.0)))
+	testing.expect(
+		t,
+		abs(aabb.max.x - expected_extent) < 0.1 &&
+		abs(aabb.max.y - expected_extent) < 0.1,
+		"AABB of rotated box should expand to fit rotated corners",
+	)
+}

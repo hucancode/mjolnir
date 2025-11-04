@@ -1,6 +1,7 @@
 package physics
 
 import "../geometry"
+import "core:math/linalg"
 
 ColliderType :: enum {
   Sphere,
@@ -14,6 +15,15 @@ SphereCollider :: struct {
 
 BoxCollider :: struct {
   half_extents: [3]f32,
+  rotation:     quaternion128, // Orientation of the box
+}
+
+// Initialize a box collider with given half-extents and rotation
+box_collider_init :: proc(half_extents: [3]f32, rotation := linalg.QUATERNIONF32_IDENTITY) -> BoxCollider {
+  return BoxCollider {
+    half_extents = half_extents,
+    rotation = rotation,
+  }
 }
 
 CapsuleCollider :: struct {
@@ -44,11 +54,12 @@ collider_create_sphere :: proc(radius: f32, offset := [3]f32{}) -> Collider {
 collider_create_box :: proc(
   half_extents: [3]f32,
   offset := [3]f32{},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> Collider {
   return Collider {
     type = .Box,
     offset = offset,
-    shape = BoxCollider{half_extents = half_extents},
+    shape = box_collider_init(half_extents, rotation),
   }
 }
 
@@ -76,10 +87,25 @@ collider_get_aabb :: proc(
     return geometry.Aabb{min = center - r, max = center + r}
   case .Box:
     box := collider.shape.(BoxCollider)
-    return geometry.Aabb {
-      min = center - box.half_extents,
-      max = center + box.half_extents,
+    // For oriented boxes, compute AABB that contains all 8 corners
+    corners := [8][3]f32 {
+      {-box.half_extents.x, -box.half_extents.y, -box.half_extents.z},
+      {box.half_extents.x, -box.half_extents.y, -box.half_extents.z},
+      {-box.half_extents.x, box.half_extents.y, -box.half_extents.z},
+      {box.half_extents.x, box.half_extents.y, -box.half_extents.z},
+      {-box.half_extents.x, -box.half_extents.y, box.half_extents.z},
+      {box.half_extents.x, -box.half_extents.y, box.half_extents.z},
+      {-box.half_extents.x, box.half_extents.y, box.half_extents.z},
+      {box.half_extents.x, box.half_extents.y, box.half_extents.z},
     }
+    aabb := geometry.AABB_UNDEFINED
+    for corner in corners {
+      rotated := linalg.quaternion128_mul_vector3(box.rotation, corner)
+      world_corner := center + rotated
+      aabb.min = linalg.min(aabb.min, world_corner)
+      aabb.max = linalg.max(aabb.max, world_corner)
+    }
+    return aabb
   case .Capsule:
     capsule := collider.shape.(CapsuleCollider)
     r := capsule.radius
