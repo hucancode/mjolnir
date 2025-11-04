@@ -813,12 +813,8 @@ load_animations :: proc(
       }
       #partial switch gltf_channel.target_path {
       case .translation:
-        engine_channel.position_interpolation = interpolation_mode
+        engine_channel.positions = make(type_of(engine_channel.positions), n)
         if interpolation_mode == .CUBICSPLINE {
-          engine_channel.cubic_positions = make(
-            type_of(engine_channel.cubic_positions),
-            n,
-          )
           for i in 0 ..< int(n) {
             time_val: [1]f32
             cgltf.accessor_read_float(
@@ -849,15 +845,14 @@ load_animations :: proc(
               raw_data(out_tangent[:]),
               3,
             ) or_continue
-            engine_channel.cubic_positions[i] = {
+            engine_channel.positions[i] = anim.CubicSplineKeyframe([3]f32) {
               time        = time_val[0],
               in_tangent  = in_tangent,
               value       = value,
               out_tangent = out_tangent,
             }
           }
-        } else {
-          engine_channel.positions = make(type_of(engine_channel.positions), n)
+        } else if interpolation_mode == .STEP {
           for i in 0 ..< int(n) {
             time_val: [1]f32
             cgltf.accessor_read_float(
@@ -874,19 +869,37 @@ load_animations :: proc(
               raw_data(position[:]),
               3,
             ) or_continue
-            engine_channel.positions[i] = {
+            engine_channel.positions[i] = anim.StepKeyframe([3]f32) {
+              time  = time_val[0],
+              value = position,
+            }
+          }
+        } else {
+          for i in 0 ..< int(n) {
+            time_val: [1]f32
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.input,
+              uint(i),
+              raw_data(time_val[:]),
+              1,
+            ) or_continue
+            clip.duration = max(clip.duration, time_val[0])
+            position: [3]f32
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i),
+              raw_data(position[:]),
+              3,
+            ) or_continue
+            engine_channel.positions[i] = anim.LinearKeyframe([3]f32) {
               time  = time_val[0],
               value = position,
             }
           }
         }
       case .rotation:
-        engine_channel.rotation_interpolation = interpolation_mode
+        engine_channel.rotations = make(type_of(engine_channel.rotations), n)
         if interpolation_mode == .CUBICSPLINE {
-          engine_channel.cubic_rotations = make(
-            type_of(engine_channel.cubic_rotations),
-            n,
-          )
           for i in 0 ..< int(n) {
             time_val: [1]f32
             cgltf.accessor_read_float(
@@ -917,7 +930,7 @@ load_animations :: proc(
               raw_data(out_tangent[:]),
               4,
             ) or_continue
-            engine_channel.cubic_rotations[i] = {
+            engine_channel.rotations[i] = anim.CubicSplineKeyframe(quaternion128) {
               time        = time_val[0],
               in_tangent  = quaternion(
                 x = in_tangent[0],
@@ -939,8 +952,7 @@ load_animations :: proc(
               ),
             }
           }
-        } else {
-          engine_channel.rotations = make(type_of(engine_channel.rotations), n)
+        } else if interpolation_mode == .STEP {
           for i in 0 ..< int(n) {
             time_val: [1]f32
             cgltf.accessor_read_float(
@@ -957,7 +969,34 @@ load_animations :: proc(
               raw_data(rotation[:]),
               4,
             ) or_continue
-            engine_channel.rotations[i] = {
+            engine_channel.rotations[i] = anim.StepKeyframe(quaternion128) {
+              time  = time_val[0],
+              value = quaternion(
+                x = rotation[0],
+                y = rotation[1],
+                z = rotation[2],
+                w = rotation[3],
+              ),
+            }
+          }
+        } else {
+          for i in 0 ..< int(n) {
+            time_val: [1]f32
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.input,
+              uint(i),
+              raw_data(time_val[:]),
+              1,
+            ) or_continue
+            clip.duration = max(clip.duration, time_val[0])
+            rotation: [4]f32
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i),
+              raw_data(rotation[:]),
+              4,
+            ) or_continue
+            engine_channel.rotations[i] = anim.LinearKeyframe(quaternion128) {
               time  = time_val[0],
               value = quaternion(
                 x = rotation[0],
@@ -969,12 +1008,8 @@ load_animations :: proc(
           }
         }
       case .scale:
-        engine_channel.scale_interpolation = interpolation_mode
+        engine_channel.scales = make(type_of(engine_channel.scales), n)
         if interpolation_mode == .CUBICSPLINE {
-          engine_channel.cubic_scales = make(
-            type_of(engine_channel.cubic_scales),
-            n,
-          )
           for i in 0 ..< int(n) {
             time_val: [1]f32
             cgltf.accessor_read_float(
@@ -1005,15 +1040,14 @@ load_animations :: proc(
               raw_data(out_tangent[:]),
               3,
             ) or_continue
-            engine_channel.cubic_scales[i] = {
+            engine_channel.scales[i] = anim.CubicSplineKeyframe([3]f32) {
               time        = time_val[0],
               in_tangent  = in_tangent,
               value       = value,
               out_tangent = out_tangent,
             }
           }
-        } else {
-          engine_channel.scales = make(type_of(engine_channel.scales), n)
+        } else if interpolation_mode == .STEP {
           for i in 0 ..< int(n) {
             time_val: [1]f32
             cgltf.accessor_read_float(
@@ -1030,7 +1064,29 @@ load_animations :: proc(
               raw_data(scale[:]),
               3,
             ) or_continue
-            engine_channel.scales[i] = {
+            engine_channel.scales[i] = anim.StepKeyframe([3]f32) {
+              time  = time_val[0],
+              value = scale,
+            }
+          }
+        } else {
+          for i in 0 ..< int(n) {
+            time_val: [1]f32
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.input,
+              uint(i),
+              raw_data(time_val[:]),
+              1,
+            ) or_continue
+            clip.duration = max(clip.duration, time_val[0])
+            scale: [3]f32
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i),
+              raw_data(scale[:]),
+              3,
+            ) or_continue
+            engine_channel.scales[i] = anim.LinearKeyframe([3]f32) {
               time  = time_val[0],
               value = scale,
             }
