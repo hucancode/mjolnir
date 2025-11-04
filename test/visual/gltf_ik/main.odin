@@ -30,14 +30,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
     node := get_node(engine, handle) or_continue
     for child in node.children {
       if play_animation(engine, child, "Anim_0") {
-        child_node := get_node(engine, child) or_continue
         // Setup IK for right arm using FABRIK solver
         // Based on logs: shoulder is at [-0.106, 1.036, 0.043]
         // Arm length is ~0.43m, so target must be within that reach
         target := [3]f32{0.0, 0.0, 0.9} // Closer to shoulder, reachable
         pole := [3]f32{0.3, 0.4, 0.0} // Elbow points right and slightly down
-        world.add_ik(
-          child_node,
+
+        // Add IK as a layer (layer 1, since animation is on layer 0)
+        add_ik_layer(
+          engine,
+          child,
           bone_names = []string {
             "Skeleton_arm_joint_R", // Root: shoulder
             "Skeleton_arm_joint_R__2_", // Middle: elbow
@@ -47,7 +49,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
           pole_pos = pole,
           weight = 1.0,
         )
-        world.set_ik_enabled(child_node, 0, true)
         character_handle = child
       }
     }
@@ -75,18 +76,22 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  character_node := mjolnir.get_node(engine, character_handle)
-  t := mjolnir.time_since_start(engine) * 0.5
+  using mjolnir
+  t := time_since_start(engine) * 0.5
   y := 0.5 + 0.5 * math.sin(t)
   new_target := [3]f32{0.0, y * 2, 0.9}
   pole := [3]f32{0.3, 0.4, 0.0}
-  world.set_ik_target(
-    character_node,
-    0, // IK config index
+
+  // Update IK layer 1 (animation is on layer 0)
+  set_ik_layer_target(
+    engine,
+    character_handle,
+    1, // IK layer index
     new_target,
     pole,
   )
-  mjolnir.translate(
+
+  translate(
     engine,
     target_cube,
     new_target.x,

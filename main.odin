@@ -176,7 +176,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for armature in gltf_nodes {
         armature_ptr := get_node(engine, armature)
-        if armature_ptr == nil do continue
         for i in 1 ..< len(armature_ptr.children) {
           play_animation(engine, armature_ptr.children[i], "idle")
         }
@@ -221,6 +220,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for handle in gltf_nodes {
         translate(engine, handle, -3, 1, 0)
+      }
+    }
+  }
+  when true {
+    log.info("loading Fox GLTF...")
+    if gltf_nodes, ok := load_gltf(engine, "assets/Fox2.glb"); ok {
+      log.infof("Loaded GLTF nodes: %v", gltf_nodes)
+      for handle in gltf_nodes {
+        translate(engine, handle, 6, 0, 0)
+        armature_ptr := get_node(engine, handle)
+        for i in 1 ..< len(armature_ptr.children) {
+          play_animation(engine, armature_ptr.children[i], "Run")
+        }
       }
     }
   }
