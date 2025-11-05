@@ -27,11 +27,10 @@ main :: proc() {
     // Create figure-8/infinity symbol spline path
     // Parametric equations for figure-8: x = sin(t), y = 0, z = sin(2t)/2
     // Include duplicate first point at end for seamless looping
-    CONTROL_POINTS :: 33
+    CONTROL_POINTS :: 10
     spline = animation.spline_create([3]f32, CONTROL_POINTS)
     for i in 0 ..< CONTROL_POINTS {
       t := f32(i) * 2.0 * math.PI / f32(CONTROL_POINTS - 1)
-      // Figure-8 pattern (lemniscate)
       scale :: 5.0
       x := scale * math.sin(t)
       y := f32(0.0)
@@ -39,11 +38,11 @@ main :: proc() {
       spline.points[i] = [3]f32{x, y, z}
       spline.times[i] = f32(i) * ANIMATION_DURATION / f32(CONTROL_POINTS - 1)
     }
-    // Verify spline is valid
     if !animation.spline_validate(spline) {
       log.error("Spline validation failed!")
     }
-    // Create cubes with different colors
+    // Build arc-length table for uniform spatial sampling
+    animation.spline_build_arc_table(&spline, 200)
     mat_handles := [?]resources.Handle {
       engine.rm.builtin_materials[resources.Color.RED],
       engine.rm.builtin_materials[resources.Color.GREEN],
@@ -73,13 +72,14 @@ main :: proc() {
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     using mjolnir
+    total_length := animation.spline_arc_length(spline)
     for i in 0 ..< CUBE_COUNT {
-      offset := f32(i) / f32(CUBE_COUNT) * ANIMATION_DURATION
-      offset_time := math.mod_f32(time_since_start(engine) + offset, ANIMATION_DURATION)
-      normalized := offset_time / ANIMATION_DURATION
-      tweened := animation.ease(normalized, .QuadInOut)
-      sample_time := tweened * ANIMATION_DURATION
-      pos := animation.spline_sample(spline, sample_time)
+      offset := f32(i) / f32(CUBE_COUNT) * total_length
+      elapsed := time_since_start(engine)
+      current_s := math.mod_f32(elapsed * (total_length / ANIMATION_DURATION) + offset, total_length)
+      normalized := current_s / total_length
+      tweened := animation.sample(normalized, 0, total_length, .QuadInOut)
+      pos := animation.spline_sample_uniform(spline, tweened)
       translate(engine, cubes[i], pos.x, pos.y, pos.z)
     }
   }
