@@ -55,9 +55,8 @@ actor_free :: proc(
 ) -> (
   actor: ^Actor(T),
   freed: bool,
-) {
-  actor, freed = cont.free(&pool.actors, handle)
-  if !freed do return nil, false
+) #optional_ok {
+  actor = cont.free(&pool.actors, handle) or_return
   if actor.tick_enabled {
     for i := 0; i < len(pool.tick_list); i += 1 {
       if pool.tick_list[i] == handle {

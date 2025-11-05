@@ -1432,7 +1432,7 @@ create_sprite_attachment :: proc(
   ok: bool,
 ) #optional_ok {
   sprite_handle: resources.Handle
-  sprite_handle, ok = resources.create_sprite(
+  sprite_handle = resources.create_sprite(
     rm,
     texture,
     frame_columns,
@@ -1441,8 +1441,7 @@ create_sprite_attachment :: proc(
     color,
     sampler,
     animation,
-  )
-  if !ok do return {}, false
+  ) or_return
   attachment = SpriteAttachment {
     sprite_handle = sprite_handle,
     mesh_handle   = shared_quad_mesh,

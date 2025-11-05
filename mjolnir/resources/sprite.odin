@@ -238,11 +238,7 @@ create_sprite :: proc(
   ok: bool,
 ) #optional_ok {
   sprite: ^Sprite
-  handle, sprite, ok = cont.alloc(&manager.sprites)
-  if !ok {
-    log.error("Failed to allocate sprite: pool capacity reached")
-    return {}, false
-  }
+  handle, sprite = cont.alloc(&manager.sprites) or_return
   sprite_init(
     sprite,
     texture,

@@ -23,9 +23,8 @@ create_forcefield_handle :: proc(
   manager: ^Manager,
   node_handle: Handle,
   config: ForceField,
-) -> (Handle, bool) {
-  handle, forcefield, ok := cont.alloc(&manager.forcefields)
-  if !ok do return Handle{}, false
+) -> (ret: Handle, ok: bool) #optional_ok {
+  handle, forcefield := cont.alloc(&manager.forcefields) or_return
   forcefield^ = config
   forcefield.node_handle = node_handle
   forcefield_write_to_gpu(manager, handle, forcefield)

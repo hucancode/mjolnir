@@ -37,9 +37,8 @@ create_emitter_handle :: proc(
   manager: ^Manager,
   node_handle: Handle,
   config: Emitter,
-) -> (Handle, bool) {
-  handle, emitter, ok := cont.alloc(&manager.emitters)
-  if !ok do return Handle{}, false
+) -> (ret: Handle, ok: bool) {
+  handle, emitter := cont.alloc(&manager.emitters) or_return
   emitter^ = config
   emitter.node_handle = node_handle
   emitter_write_to_gpu(manager, handle, emitter, false)

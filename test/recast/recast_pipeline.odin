@@ -15,10 +15,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
         fmt.println("Testing with nav_test.obj (multi-level navigation)...")
     mesh_path := "assets/nav_test.obj"
     vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(mesh_path, 1.0, 45.0)
-    if !ok {
-        fmt.println("  Skipping nav_test.obj test - file not found")
-        return
-    }
+    testing.expect(t, ok, "Failed to load navmesh")
     defer {
         delete(vertices)
         delete(indices)

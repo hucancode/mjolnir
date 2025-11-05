@@ -50,14 +50,10 @@ create_light :: proc(
   angle_outer: f32 = math.PI * 0.2,
   cast_shadow: b32 = true,
 ) -> (
-  Handle,
-  bool,
+  ret: Handle,
+  ok: bool,
 ) {
-  handle, light, ok := cont.alloc(&manager.lights)
-  if !ok {
-    log.error("Failed to allocate light: pool capacity reached")
-    return Handle{}, false
-  }
+  handle, light := cont.alloc(&manager.lights) or_return
   light.type = light_type
   light.node_handle = node_handle
   light.cast_shadow = cast_shadow

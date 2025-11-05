@@ -141,9 +141,9 @@ build_navigation_mesh_from_scene :: proc(
   gctx: ^gpu.GPUContext,
   config: recast.Config = {},
 ) -> (
-  resources.Handle,
-  bool,
-) {
+  ret: resources.Handle,
+  ok: bool,
+) #optional_ok {
   collector: SceneGeometryCollector
   scene_geometry_collector_init(&collector)
   collector.world, collector.rm, collector.gctx = world, rm, gctx
@@ -157,25 +157,18 @@ build_navigation_mesh_from_scene :: proc(
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     return {}, false
   }
-  pmesh, dmesh, ok := recast.build_navmesh(
+  pmesh, dmesh := recast.build_navmesh(
     collector.vertices[:],
     collector.indices[:],
     collector.area_types[:],
     config,
-  )
-  if !ok {
-    return {}, false
-  }
+  ) or_return
   defer {
     recast.free_poly_mesh(pmesh)
     recast.free_poly_mesh_detail(dmesh)
   }
-  nav_mesh_handle: resources.Handle
   nav_mesh: ^resources.NavMesh
-  nav_mesh_handle, nav_mesh, ok = cont.alloc(&rm.nav_meshes)
-  if !ok {
-    return nav_mesh_handle, false
-  }
+  ret, nav_mesh = cont.alloc(&rm.nav_meshes) or_return
   nav_params := detour.Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
     poly_mesh_detail   = dmesh,
@@ -190,7 +183,7 @@ build_navigation_mesh_from_scene :: proc(
   }
   nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
   if recast.status_failed(create_status) {
-    return nav_mesh_handle, false
+    return ret, false
   }
   mesh_params := detour.Nav_Mesh_Params {
     orig        = pmesh.bmin,
@@ -201,7 +194,7 @@ build_navigation_mesh_from_scene :: proc(
   }
   init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
   if recast.status_failed(init_status) {
-    return nav_mesh_handle, false
+    return ret, false
   }
   _, add_status := detour.nav_mesh_add_tile(
     &nav_mesh.detour_mesh,
@@ -210,7 +203,7 @@ build_navigation_mesh_from_scene :: proc(
   )
   if recast.status_failed(add_status) {
     detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
-    return nav_mesh_handle, false
+    return ret, false
   }
   nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
   nav_mesh.cell_size = config.cs
@@ -219,7 +212,7 @@ build_navigation_mesh_from_scene :: proc(
   for i in 0 ..< 64 {
     nav_mesh.area_costs[i] = 1.0
   }
-  return nav_mesh_handle, true
+  return ret, true
 }
 
 build_navigation_mesh_from_scene_filtered :: proc(
@@ -230,9 +223,9 @@ build_navigation_mesh_from_scene_filtered :: proc(
   area_type_mapper: proc(node: ^Node) -> u8 = nil,
   config: recast.Config = {},
 ) -> (
-  resources.Handle,
-  bool,
-) {
+  ret: resources.Handle,
+  ok: bool,
+) #optional_ok {
   collector: SceneGeometryCollector
   scene_geometry_collector_init(&collector)
   collector.world, collector.rm, collector.gctx = world, rm, gctx
@@ -257,27 +250,18 @@ build_navigation_mesh_from_scene_filtered :: proc(
     len(collector.indices),
     collector.mesh_count,
   )
-  pmesh, dmesh, ok := recast.build_navmesh(
+  pmesh, dmesh := recast.build_navmesh(
     collector.vertices[:],
     collector.indices[:],
     collector.area_types[:],
     config,
-  )
-  if !ok {
-    log.error("Failed to build navigation mesh")
-    return {}, false
-  }
+  ) or_return
   defer {
     recast.free_poly_mesh(pmesh)
     recast.free_poly_mesh_detail(dmesh)
   }
-  nav_mesh_handle: resources.Handle
   nav_mesh: ^resources.NavMesh
-  nav_mesh_handle, nav_mesh, ok = cont.alloc(&rm.nav_meshes)
-  if !ok {
-    log.error("Failed to allocate navigation mesh resource")
-    return nav_mesh_handle, false
-  }
+  ret, nav_mesh = cont.alloc(&rm.nav_meshes) or_return
   nav_params := detour.Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
     poly_mesh_detail   = dmesh,
@@ -293,7 +277,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
   if recast.status_failed(create_status) {
     log.errorf("Failed to create navigation mesh data: %v", create_status)
-    return nav_mesh_handle, false
+    return ret, false
   }
   mesh_params := detour.Nav_Mesh_Params {
     orig        = pmesh.bmin,
@@ -305,7 +289,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
   if recast.status_failed(init_status) {
     log.errorf("Failed to initialize navigation mesh: %v", init_status)
-    return nav_mesh_handle, false
+    return ret, false
   }
   _, add_status := detour.nav_mesh_add_tile(
     &nav_mesh.detour_mesh,
@@ -315,7 +299,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   if recast.status_failed(add_status) {
     log.errorf("Failed to add tile to navigation mesh: %v", add_status)
     detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
-    return nav_mesh_handle, false
+    return ret, false
   }
   nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
   nav_mesh.cell_size = config.cs
@@ -326,9 +310,9 @@ build_navigation_mesh_from_scene_filtered :: proc(
   }
   log.infof(
     "Successfully built filtered navigation mesh with handle %v",
-    nav_mesh_handle,
+    ret,
   )
-  return nav_mesh_handle, true
+  return ret, true
 }
 
 build_navigation_mesh_from_world :: proc(
@@ -337,9 +321,9 @@ build_navigation_mesh_from_world :: proc(
   gctx: ^gpu.GPUContext,
   config: recast.Config = {},
 ) -> (
-  resources.Handle,
-  bool,
-) {
+  ret: resources.Handle,
+  ok: bool,
+) #optional_ok {
   collector: SceneGeometryCollector
   scene_geometry_collector_init(&collector)
   collector.world, collector.rm, collector.gctx = world, rm, gctx
@@ -423,27 +407,18 @@ build_navigation_mesh_from_world :: proc(
     config.walkable_radius,
     config.min_region_area,
   )
-  pmesh, dmesh, ok := recast.build_navmesh(
+  pmesh, dmesh := recast.build_navmesh(
     collector.vertices[:],
     collector.indices[:],
     collector.area_types[:],
     config,
-  )
-  if !ok {
-    log.error("Failed to build navigation mesh from world")
-    return {}, false
-  }
+  ) or_return
   defer {
     recast.free_poly_mesh(pmesh)
     recast.free_poly_mesh_detail(dmesh)
   }
-  nav_mesh_handle: resources.Handle
   nav_mesh: ^resources.NavMesh
-  nav_mesh_handle, nav_mesh, ok = cont.alloc(&rm.nav_meshes)
-  if !ok {
-    log.error("Failed to allocate navigation mesh resource")
-    return nav_mesh_handle, false
-  }
+  ret, nav_mesh = cont.alloc(&rm.nav_meshes) or_return
   nav_params := detour.Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
     poly_mesh_detail   = dmesh,
@@ -459,7 +434,7 @@ build_navigation_mesh_from_world :: proc(
   nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
   if recast.status_failed(create_status) {
     log.errorf("Failed to create navigation mesh data: %v", create_status)
-    return nav_mesh_handle, false
+    return ret, false
   }
   mesh_params := detour.Nav_Mesh_Params {
     orig        = pmesh.bmin,
@@ -471,7 +446,7 @@ build_navigation_mesh_from_world :: proc(
   init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
   if recast.status_failed(init_status) {
     log.errorf("Failed to initialize navigation mesh: %v", init_status)
-    return nav_mesh_handle, false
+    return ret, false
   }
   _, add_status := detour.nav_mesh_add_tile(
     &nav_mesh.detour_mesh,
@@ -481,7 +456,7 @@ build_navigation_mesh_from_world :: proc(
   if recast.status_failed(add_status) {
     log.errorf("Failed to add tile to navigation mesh: %v", add_status)
     detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
-    return nav_mesh_handle, false
+    return ret, false
   }
   nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
   nav_mesh.cell_size = config.cs
@@ -492,9 +467,9 @@ build_navigation_mesh_from_world :: proc(
   }
   log.infof(
     "Successfully built world navigation mesh with handle %v",
-    nav_mesh_handle,
+    ret,
   )
-  return nav_mesh_handle, true
+  return ret, true
 }
 
 calculate_bounds_from_vertices :: proc(vertices: [][3]f32) -> geometry.Aabb {
@@ -516,16 +491,13 @@ create_navigation_context :: proc(
   gctx: ^gpu.GPUContext,
   nav_mesh_handle: resources.Handle,
 ) -> (
-  resources.Handle,
-  bool,
-) {
+  ret: resources.Handle,
+  ok: bool,
+) #optional_ok {
   nav_mesh := cont.get(rm.nav_meshes, nav_mesh_handle)
   if nav_mesh == nil do return {}, false
-  context_handle, nav_context, ok := cont.alloc(&rm.nav_contexts)
-  if !ok {
-    log.error("Failed to allocate navigation context")
-    return context_handle, false
-  }
+  nav_context : ^resources.NavContext
+  ret, nav_context = cont.alloc(&rm.nav_contexts) or_return
   init_status := detour.nav_mesh_query_init(
     &nav_context.nav_mesh_query,
     &nav_mesh.detour_mesh,
@@ -533,13 +505,13 @@ create_navigation_context :: proc(
   )
   if recast.status_failed(init_status) {
     log.errorf("Failed to initialize navigation mesh query: %v", init_status)
-    cont.free(&rm.nav_contexts, context_handle)
-    return context_handle, false
+    cont.free(&rm.nav_contexts, ret)
+    return ret, false
   }
   detour.query_filter_init(&nav_context.query_filter)
   nav_context.associated_mesh = nav_mesh_handle
-  log.infof("Created navigation context with handle %v", context_handle)
-  return context_handle, true
+  log.infof("Created navigation context with handle %v", ret)
+  return ret, true
 }
 
 nav_find_path :: proc(
@@ -552,7 +524,7 @@ nav_find_path :: proc(
   max_path_length: i32 = 256,
 ) -> (
   path: [][3]f32,
-  success: bool,
+  ok: bool,
 ) {
   nav_context := cont.get(rm.nav_contexts, context_handle)
   if nav_context == nil do return nil, false
