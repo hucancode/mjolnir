@@ -8,12 +8,11 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-CUBE_COUNT :: 10
+CUBE_COUNT :: 50
 ANIMATION_DURATION :: 8.0
 
 cubes: [CUBE_COUNT]resources.Handle
 spline: animation.Spline([3]f32)
-time_elapsed: f32
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -45,7 +44,7 @@ main :: proc() {
       log.error("Spline validation failed!")
     }
     // Create cubes with different colors
-    mat_handles := [CUBE_COUNT]resources.Handle {
+    mat_handles := [?]resources.Handle {
       engine.rm.builtin_materials[resources.Color.RED],
       engine.rm.builtin_materials[resources.Color.GREEN],
       engine.rm.builtin_materials[resources.Color.BLUE],
@@ -55,13 +54,12 @@ main :: proc() {
       engine.rm.builtin_materials[resources.Color.WHITE],
       engine.rm.builtin_materials[resources.Color.GRAY],
       engine.rm.builtin_materials[resources.Color.BLACK],
-      engine.rm.builtin_materials[resources.Color.RED],
     }
     cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
     for i in 0 ..< CUBE_COUNT {
       cubes[i] = spawn(
         engine,
-        world.MeshAttachment{handle = cube_mesh, material = mat_handles[i]},
+        world.MeshAttachment{handle = cube_mesh, material = mat_handles[i%len(mat_handles)]},
       )
       scale_handle(engine, cubes[i], 0.3)
     }
@@ -70,28 +68,17 @@ main :: proc() {
     quad_mesh := engine.rm.builtin_meshes[resources.Primitive.QUAD]
     ground := spawn(engine, world.MeshAttachment{handle = quad_mesh, material = ground_mat})
     scale_handle(engine, ground, 20.0)
-    rotate(engine, ground, -math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
     translate(engine, ground, 0, -2, 0)
-    // Add lighting - point light above the scene
     spawn_point_light(engine, {1.0, 1.0, 1.0, 1.0}, 20.0, position = {0, 10, 0})
-    time_elapsed = 0
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     using mjolnir
-    time_elapsed += delta_time
-    // Wrap time to animation duration
-    wrapped_time := math.mod_f32(time_elapsed, ANIMATION_DURATION)
-    // Update each cube position with time offset
     for i in 0 ..< CUBE_COUNT {
-      // Offset each cube's time based on its index
       offset := f32(i) / f32(CUBE_COUNT) * ANIMATION_DURATION
-      offset_time := math.mod_f32(wrapped_time + offset, ANIMATION_DURATION)
-      // Normalize time [0, 1] and apply SineInOut tween
+      offset_time := math.mod_f32(time_since_start(engine) + offset, ANIMATION_DURATION)
       normalized := offset_time / ANIMATION_DURATION
-      tweened := animation.ease(normalized, .SineInOut)
-      // Map tweened value to spline time
+      tweened := animation.ease(normalized, .QuadInOut)
       sample_time := tweened * ANIMATION_DURATION
-      // Sample position from spline
       pos := animation.spline_sample(spline, sample_time)
       translate(engine, cubes[i], pos.x, pos.y, pos.z)
     }
