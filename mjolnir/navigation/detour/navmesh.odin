@@ -292,8 +292,8 @@ setup_tile_data :: proc(tile: ^Mesh_Tile, data: []u8, header: ^Mesh_Header, flag
             tile.links[i].next = u32(i + 1)
             tile.links[i].ref = recast.INVALID_POLY_REF
         }
-        tile.links[len(tile.links) - 1].next = recast.DT_NULL_LINK
-        tile.links[len(tile.links) - 1].ref = recast.INVALID_POLY_REF
+        slice.last_ptr(tile.links).next = recast.DT_NULL_LINK
+        slice.last_ptr(tile.links).ref = recast.INVALID_POLY_REF
         tile.links_free_list = 0
     }
     return {.Success}
