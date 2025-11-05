@@ -311,7 +311,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
     // Create lights as children of the root, arranged in a circle
-    radius: f32 = 15.0
+    radius: f32 = 10.0
     for i in 0 ..< LIGHT_COUNT {
       color := [4]f32 {
         math.sin(f32(i)),
