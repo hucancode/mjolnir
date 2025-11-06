@@ -63,7 +63,7 @@ test_sphere_sphere :: proc(
   f32,
 ) {
   delta := pos_b - pos_a
-  distance_sq := linalg.vector_length2(delta)
+  distance_sq := linalg.length2(delta)
   radius_sum := sphere_a.radius + sphere_b.radius
   if distance_sq >= radius_sum * radius_sum {
     return false, {}, {}, 0
@@ -173,7 +173,7 @@ test_sphere_box :: proc(
     max_box := pos_box + box.half_extents
     closest := linalg.clamp(pos_sphere, min_box, max_box)
     delta := pos_sphere - closest
-    distance_sq := linalg.vector_length2(delta)
+    distance_sq := linalg.length2(delta)
     if distance_sq >= sphere.radius * sphere.radius {
       return false, {}, {}, 0
     }
@@ -209,37 +209,13 @@ test_capsule_capsule :: proc(
   line_a_end := pos_a + [3]f32{0, h_a, 0}
   line_b_start := pos_b + [3]f32{0, -h_b, 0}
   line_b_end := pos_b + [3]f32{0, h_b, 0}
-  d1 := line_a_end - line_a_start
-  d2 := line_b_end - line_b_start
-  r := line_a_start - line_b_start
-  a := linalg.vector_length2(d1)
-  e := linalg.vector_length2(d2)
-  f := linalg.vector_dot(d2, r)
-  s, t: f32
-  if a <= 0.0001 && e <= 0.0001 {
-    s, t = 0, 0
-  } else if a <= 0.0001 {
-    s, t = 0, clamp(f / e, 0, 1)
-  } else {
-    c := linalg.vector_dot(d1, r)
-    if e <= 0.0001 {
-      s, t = clamp(-c / a, 0, 1), 0
-    } else {
-      b := linalg.vector_dot(d1, d2)
-      denom := a * e - b * b
-      s = denom != 0 ? clamp((b * f - c * e) / denom, 0, 1) : 0
-      t = (b * s + f) / e
-      if t < 0 {
-        s, t = clamp(-c / a, 0, 1), 0
-      } else if t > 1 {
-        s, t = clamp((b - c) / a, 0, 1), 1
-      }
-    }
-  }
-  point_a := line_a_start + d1 * s
-  point_b := line_b_start + d2 * t
+
+  point_a, point_b, _, _ := geometry.segment_segment_closest_points(
+    line_a_start, line_a_end,
+    line_b_start, line_b_end,
+  )
   delta := point_b - point_a
-  distance_sq := linalg.vector_length2(delta)
+  distance_sq := linalg.length2(delta)
   radius_sum := capsule_a.radius + capsule_b.radius
   if distance_sq >= radius_sum * radius_sum {
     return false, {}, {}, 0
@@ -266,15 +242,11 @@ test_sphere_capsule :: proc(
   line_start := pos_capsule + [3]f32{0, -h, 0}
   line_end := pos_capsule + [3]f32{0, h, 0}
   line_dir := line_end - line_start
-  line_length_sq := linalg.vector_length2(line_dir)
-  t := line_length_sq < 0.0001 ? 0 : clamp(
-    linalg.vector_dot(pos_sphere - line_start, line_dir) / line_length_sq,
-    0,
-    1,
-  )
+  line_length_sq := linalg.length2(line_dir)
+  t := line_length_sq < 0.0001 ? 0 : linalg.saturate(linalg.dot(pos_sphere - line_start, line_dir) / line_length_sq)
   closest := line_start + line_dir * t
   delta := pos_sphere - closest
-  distance_sq := linalg.vector_length2(delta)
+  distance_sq := linalg.length2(delta)
   radius_sum := sphere.radius + capsule.radius
   if distance_sq >= radius_sum * radius_sum {
     return false, {}, {}, 0
@@ -292,10 +264,10 @@ test_box_capsule :: proc(
   pos_capsule: [3]f32,
   capsule: ^CapsuleCollider,
 ) -> (
-  bool,
-  [3]f32,
-  [3]f32,
-  f32,
+  hit: bool,
+  closest: [3]f32,
+  normal: [3]f32,
+  penetration: f32,
 ) {
   // Check if box is axis-aligned for fast path
   is_aligned := is_identity_quaternion(box.rotation)
@@ -308,21 +280,20 @@ test_box_capsule :: proc(
     max_box := pos_box + box.half_extents
     closest_start := linalg.clamp(line_start, min_box, max_box)
     closest_end := linalg.clamp(line_end, min_box, max_box)
-    dist_start_sq := linalg.vector_length2(line_start - closest_start)
-    dist_end_sq := linalg.vector_length2(line_end - closest_end)
-    closest := dist_start_sq < dist_end_sq ? closest_start : closest_end
+    dist_start_sq := linalg.length2(line_start - closest_start)
+    dist_end_sq := linalg.length2(line_end - closest_end)
+    closest = dist_start_sq < dist_end_sq ? closest_start : closest_end
     point_on_line := dist_start_sq < dist_end_sq ? line_start : line_end
     delta := point_on_line - closest
-    distance_sq := linalg.vector_length2(delta)
+    distance_sq := linalg.length2(delta)
     if distance_sq >= capsule.radius * capsule.radius {
       return false, {}, {}, 0
     }
     distance := math.sqrt(distance_sq)
-    normal := distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
-    penetration := capsule.radius - distance
+    normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+    penetration = capsule.radius - distance
     return true, closest, normal, penetration
   }
-
   // OBB case
   obb := geometry.Obb {
     center       = pos_box,

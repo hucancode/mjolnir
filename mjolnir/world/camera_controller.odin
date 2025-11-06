@@ -358,7 +358,7 @@ camera_controller_orbit_set_distance :: proc(
   distance: f32,
 ) {
   if orbit, ok := &controller.data.(OrbitCameraData); ok {
-    orbit.distance = linalg.clamp(
+    orbit.distance = clamp(
       distance,
       orbit.min_distance,
       orbit.max_distance,
@@ -372,7 +372,7 @@ camera_controller_orbit_set_yaw_pitch :: proc(
 ) {
   if orbit, ok := &controller.data.(OrbitCameraData); ok {
     orbit.yaw = yaw
-    orbit.pitch = linalg.clamp(pitch, orbit.min_pitch, orbit.max_pitch)
+    orbit.pitch = clamp(pitch, orbit.min_pitch, orbit.max_pitch)
   }
 }
 

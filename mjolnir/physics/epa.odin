@@ -89,7 +89,7 @@ epa :: proc(
     }
     // The penetration is approximately the distance from origin to the line
     t := -linalg.vector_dot(vertices[0], ab) / linalg.vector_dot(ab, ab)
-    t = clamp(t, 0, 1)
+    t = linalg.saturate(t)
     closest_point := vertices[0] + ab * t
     dist := linalg.length(closest_point)
     if dist < 0.0001 {

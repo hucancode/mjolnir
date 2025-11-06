@@ -449,19 +449,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
             z = q_old.z + q_dot.z * substep_dt,
           )
           // Normalize to prevent drift
-          mag := math.sqrt(
-            q_new.w * q_new.w +
-            q_new.x * q_new.x +
-            q_new.y * q_new.y +
-            q_new.z * q_new.z,
-          )
-          if mag > 0.0001 {
-            q_new.w /= mag
-            q_new.x /= mag
-            q_new.y /= mag
-            q_new.z /= mag
-            geometry.transform_rotate(&node.transform, q_new)
-          }
+          q_new = linalg.quaternion_normalize(q_new)
+          geometry.transform_rotate(&node.transform, q_new)
         }
       }
     }

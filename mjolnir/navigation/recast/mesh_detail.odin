@@ -870,17 +870,17 @@ point_to_triangle_distance_sq :: proc(p: [3]f32, a: [3]f32, b: [3]f32, c: [3]f32
     // Point projects outside triangle, find closest point on edges
     min_dist_sq := f32(math.F32_MAX)
     // Edge AB
-    t := clamp(linalg.dot(ap, ab) / d00, 0, 1)
+    t := linalg.saturate(linalg.dot(ap, ab) / d00)
     closest := a + t * ab
     min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
     // Edge AC
-    t = clamp(linalg.dot(ap, ac) / d11, 0, 1)
+    t = linalg.saturate(linalg.dot(ap, ac) / d11)
     closest = a + t * ac
     min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
     // Edge BC
     bc := c - b
     bp := p - b
-    t = clamp(linalg.dot(bp, bc) / linalg.dot(bc, bc), 0, 1)
+    t = linalg.saturate(linalg.dot(bp, bc) / linalg.dot(bc, bc))
     closest = b + t * bc
     min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
     return min_dist_sq

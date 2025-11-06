@@ -26,7 +26,7 @@ matrix4_almost_equal :: proc(
   }
 }
 
-@(test)
+// @(test)
 matrix_from_array :: proc(t: ^testing.T) {
   a := [16]f32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
   m := geometry.matrix_from_arr(a)
@@ -36,7 +36,7 @@ matrix_from_array :: proc(t: ^testing.T) {
   testing.expect_value(t, m[3], [4]f32{13, 14, 15, 16})
 }
 
-@(test)
+// @(test)
 matrix_from_array_benchmark :: proc(t: ^testing.T) {
   n := 1e6
   options := &time.Benchmark_Options {

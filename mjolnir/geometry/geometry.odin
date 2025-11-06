@@ -1123,6 +1123,71 @@ point_segment_distance :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
     return math.sqrt(point_segment_distance_sq(pt, va, vb))
 }
 
+// returns closest point on segment A, closest point on segment B, and parametric values s and t
+segment_segment_closest_points :: proc "contextless" (
+    a_start, a_end: [3]f32,
+    b_start, b_end: [3]f32,
+) -> (
+    point_on_a: [3]f32,
+    point_on_b: [3]f32,
+    s: f32,
+    t: f32,
+) {
+    d1 := a_end - a_start
+    d2 := b_end - b_start
+    r := a_start - b_start
+    a := linalg.length2(d1)
+    e := linalg.length2(d2)
+    f := linalg.dot(d2, r)
+    if a <= 0.0001 && e <= 0.0001 {
+        // Both segments are points
+        s, t = 0, 0
+        point_on_a = a_start
+        point_on_b = b_start
+        return
+    }
+    if a <= 0.0001 {
+        // First segment is a point
+        s = 0
+        t = linalg.saturate(f / e)
+        point_on_a = a_start
+        point_on_b = b_start + d2 * t
+        return
+    }
+
+    c := linalg.dot(d1, r)
+    if e <= 0.0001 {
+        // Second segment is a point
+        s = linalg.saturate(-c / a)
+        t = 0
+        point_on_a = a_start + d1 * s
+        point_on_b = b_start
+        return
+    }
+    // general case: both segments are non-degenerate
+    b := linalg.dot(d1, d2)
+    denom := a * e - b * b
+    // compute s for the closest point on segment A
+    if denom != 0 {
+        s = linalg.saturate((b * f - c * e) / denom)
+    } else {
+        s = 0
+    }
+    // compute t for the closest point on segment B
+    t = (b * s + f) / e
+    // clamp t to [0,1] and recompute s if necessary
+    if t < 0 {
+        s = linalg.saturate(-c / a)
+        t = 0
+    } else if t > 1 {
+        s = linalg.saturate((b - c) / a)
+        t = 1
+    }
+    point_on_a = a_start + d1 * s
+    point_on_b = b_start + d2 * t
+    return
+}
+
 // Distance from point to polygon boundary with inside/outside test
 // Returns negative distance if point is inside, positive if outside
 // Based on C++ distToPoly from RecastMeshDetail.cpp
