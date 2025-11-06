@@ -651,7 +651,7 @@ test_collision_gjk_sphere_sphere :: proc(t: ^testing.T) {
   collider_b := physics.collider_create_sphere(1.0)
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
-  hit, point, normal, penetration := physics.test_collision_gjk(
+  point, normal, penetration, hit := physics.test_collision_gjk(
     &collider_a,
     pos_a,
     &collider_b,
@@ -671,7 +671,7 @@ test_collision_gjk_box_box :: proc(t: ^testing.T) {
   collider_b := physics.collider_create_box({1, 1, 1})
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
-  hit, point, normal, penetration := physics.test_collision_gjk(
+  point, normal, penetration, hit := physics.test_collision_gjk(
     &collider_a,
     pos_a,
     &collider_b,
@@ -741,7 +741,7 @@ test_sphere_sphere_collision_intersecting :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
-  hit, point, normal, penetration := physics.test_sphere_sphere(
+  point, normal, penetration, hit := physics.test_sphere_sphere(
     pos_a,
     &sphere_a,
     pos_b,
@@ -772,7 +772,7 @@ test_sphere_sphere_collision_separated :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{3, 0, 0}
-  hit, _, _, _ := physics.test_sphere_sphere(
+  _, _, _, hit := physics.test_sphere_sphere(
     pos_a,
     &sphere_a,
     pos_b,
@@ -791,7 +791,7 @@ test_sphere_sphere_collision_overlapping :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{0, 0, 0}
-  hit, _, _, penetration := physics.test_sphere_sphere(
+  _, _, penetration, hit := physics.test_sphere_sphere(
     pos_a,
     &sphere_a,
     pos_b,
@@ -817,7 +817,7 @@ test_box_box_collision_intersecting :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
-  hit, point, normal, penetration := physics.test_box_box(
+  point, normal, penetration, hit := physics.test_box_box(
     pos_a,
     &box_a,
     pos_b,
@@ -850,7 +850,7 @@ test_box_box_collision_separated :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{5, 0, 0}
-  hit, _, _, _ := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
+  _, _, _, hit := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
   testing.expect(t, !hit, "Separated boxes should not intersect")
 }
 
@@ -866,7 +866,7 @@ test_box_box_collision_y_axis :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{0, 1.5, 0}
-  hit, _, normal, penetration := physics.test_box_box(
+  _, normal, penetration, hit := physics.test_box_box(
     pos_a,
     &box_a,
     pos_b,
@@ -901,7 +901,7 @@ test_sphere_box_collision_intersecting :: proc(t: ^testing.T) {
   // Penetration: 1.0 - 0.5 = 0.5
   pos_sphere := [3]f32{1.5, 0, 0}
   pos_box := [3]f32{0, 0, 0}
-  hit, point, normal, penetration := physics.test_sphere_box(
+  point, normal, penetration, hit := physics.test_sphere_box(
     pos_sphere,
     &sphere,
     pos_box,
@@ -932,7 +932,7 @@ test_sphere_box_collision_separated :: proc(t: ^testing.T) {
   }
   pos_sphere := [3]f32{5, 0, 0}
   pos_box := [3]f32{0, 0, 0}
-  hit, _, _, _ := physics.test_sphere_box(pos_sphere, &sphere, pos_box, &box)
+  _, _, _, hit := physics.test_sphere_box(pos_sphere, &sphere, pos_box, &box)
   testing.expect(t, !hit, "Separated sphere and box should not intersect")
 }
 
@@ -947,7 +947,7 @@ test_sphere_box_collision_corner :: proc(t: ^testing.T) {
   }
   pos_sphere := [3]f32{1.5, 1.5, 1.5}
   pos_box := [3]f32{0, 0, 0}
-  hit, _, _, _ := physics.test_sphere_box(pos_sphere, &sphere, pos_box, &box)
+  _, _, _, hit := physics.test_sphere_box(pos_sphere, &sphere, pos_box, &box)
   testing.expect(t, hit, "Sphere should collide with box corner")
 }
 
@@ -963,7 +963,7 @@ test_capsule_capsule_collision_parallel :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{0.8, 0, 0}
-  hit, _, _, penetration := physics.test_capsule_capsule(
+  _, _, penetration, hit := physics.test_capsule_capsule(
     pos_a,
     &capsule_a,
     pos_b,
@@ -989,7 +989,7 @@ test_capsule_capsule_collision_separated :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{5, 0, 0}
-  hit, _, _, _ := physics.test_capsule_capsule(
+  _, _, _, hit := physics.test_capsule_capsule(
     pos_a,
     &capsule_a,
     pos_b,
@@ -1009,7 +1009,7 @@ test_sphere_capsule_collision :: proc(t: ^testing.T) {
   }
   pos_sphere := [3]f32{1.2, 0, 0}
   pos_capsule := [3]f32{0, 0, 0}
-  hit, _, _, penetration := physics.test_sphere_capsule(
+  _, _, penetration, hit := physics.test_sphere_capsule(
     pos_sphere,
     &sphere,
     pos_capsule,
@@ -1035,7 +1035,7 @@ test_box_capsule_collision :: proc(t: ^testing.T) {
   }
   pos_box := [3]f32{0, 0, 0}
   pos_capsule := [3]f32{1.3, 0, 0}
-  hit, _, _, _ := physics.test_box_capsule(
+  _, _, _, hit := physics.test_box_capsule(
     pos_box,
     &box,
     pos_capsule,
@@ -1752,7 +1752,7 @@ test_obb_obb_collision_aligned :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
-  hit, _, normal, penetration := physics.test_box_box(
+  _, normal, penetration, hit := physics.test_box_box(
     pos_a,
     &box_a,
     pos_b,
@@ -1782,7 +1782,7 @@ test_obb_obb_collision_rotated_45 :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.2, 0, 0}
-  hit, _, _, _ := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
+  _, _, _, hit := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
   testing.expect(t, hit, "Rotated OBB should still intersect with aligned box")
 }
 
@@ -1808,7 +1808,7 @@ test_obb_obb_collision_both_rotated :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
-  hit, _, _, _ := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
+  _, _, _, hit := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
   testing.expect(t, hit, "Both rotated OBBs should intersect")
 }
 
@@ -1828,7 +1828,7 @@ test_obb_obb_collision_separated :: proc(t: ^testing.T) {
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{5, 0, 0}
-  hit, _, _, _ := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
+  _, _, _, hit := physics.test_box_box(pos_a, &box_a, pos_b, &box_b)
   testing.expect(t, !hit, "Separated OBBs should not intersect")
 }
 
@@ -1847,7 +1847,7 @@ test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
   }
   pos_sphere := [3]f32{1.5, 0, 0}
   pos_box := [3]f32{0, 0, 0}
-  hit, _, _, _ := physics.test_sphere_box(pos_sphere, &sphere, pos_box, &box)
+  _, _, _, hit := physics.test_sphere_box(pos_sphere, &sphere, pos_box, &box)
   testing.expect(t, hit, "Sphere should collide with rotated OBB")
 }
 

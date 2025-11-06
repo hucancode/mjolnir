@@ -78,7 +78,7 @@ destroy_body :: proc(
   handle: resources.Handle,
 ) {
   body, ok := cont.get(world.bodies, handle)
-  if ok && body.collider_handle.generation != 0 {
+  if ok {
     cont.free(&world.colliders, body.collider_handle)
   }
   cont.free(&world.bodies, handle)
@@ -244,29 +244,25 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       if !entry.active do continue
       body := &entry.item
       if body.collider_handle.generation == 0 do continue
-
       node := cont.get(w.nodes, body.node_handle) or_continue
       collider := cont.get(physics.colliders, body.collider_handle) or_continue
       pos := node.transform.position
       bounds := collider_get_aabb(collider, pos)
-
       handle := resources.Handle {
         index      = u32(idx),
         generation = entry.generation,
       }
       append(&entries, BroadPhaseEntry{handle = handle, bounds = bounds})
     }
-
     geometry.bvh_build(&physics.spatial_index, entries[:], 4)
     bvh_build_time = time.since(bvh_build_start)
   }
-
   substep_start := time.now()
-
+  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  defer delete(candidates)
   for substep in 0 ..< NUM_SUBSTEPS {
     // clear and redetect contacts at current positions
     clear(&physics.contacts)
-
     for &bvh_entry, i in physics.spatial_index.primitives {
       body := cont.get(physics.bodies, bvh_entry.handle) or_continue
       node := cont.get(w.nodes, body.node_handle) or_continue
@@ -275,7 +271,6 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       bvh_entry.bounds = collider_get_aabb(collider, pos)
     }
     geometry.bvh_refit(&physics.spatial_index)
-    candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
     for &bvh_entry in physics.spatial_index.primitives {
       handle_a := bvh_entry.handle
       body_a := cont.get(physics.bodies, handle_a) or_continue
@@ -288,13 +283,9 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         // Skip duplicate pairs (only test A-B, not B-A)
         if handle_a.index > handle_b.index do continue
         body_b := cont.get(physics.bodies, handle_b) or_continue
-        if body_a.is_static && body_b.is_static {
-          continue
-        }
+        if body_a.is_static && body_b.is_static do continue
         // Skip collision resolution if either body is trigger_only
-        if body_a.trigger_only || body_b.trigger_only {
-          continue
-        }
+        if body_a.trigger_only || body_b.trigger_only do continue
         if body_a.collider_handle.generation == 0 ||
            body_b.collider_handle.generation == 0 {
           continue
@@ -312,7 +303,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         pos_a := node_a.transform.position
         pos_b := node_b.transform.position
         // Try fast primitive collision first, fall back to GJK if unavailable
-        hit, point, normal, penetration := test_collision(
+        point, normal, penetration, hit := test_collision(
           collider_a,
           pos_a,
           collider_b,
@@ -320,39 +311,37 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         )
         // If primitive test returns no collision but shapes support GJK, try GJK as fallback
         if !hit {
-          hit, point, normal, penetration = test_collision_gjk(
+          point, normal, penetration, hit = test_collision_gjk(
             collider_a,
             pos_a,
             collider_b,
             pos_b,
           )
         }
-        if hit {
-          contact := Contact {
-            body_a      = handle_a,
-            body_b      = handle_b,
-            point       = point,
-            normal      = normal,
-            penetration = penetration,
-            restitution = (body_a.restitution + body_b.restitution) * 0.5,
-            friction    = (body_a.friction + body_b.friction) * 0.5,
-          }
-          // Check if we have a cached contact from previous frame for warmstarting
-          pair := CollisionPair{body_a = handle_a, body_b = handle_b}
-          hash := collision_pair_hash(pair)
-          if prev_contact, found := physics.prev_contacts[hash]; found {
-            // Copy accumulated impulses for warmstart with heavy damping
-            // Heavy damping prevents bad impulses from causing instability
-            warmstart_coef :: 0.8 // Reduced to prevent carrying forward problematic impulses
-            contact.normal_impulse = prev_contact.normal_impulse * warmstart_coef
-            contact.tangent_impulse[0] = prev_contact.tangent_impulse[0] * warmstart_coef
-            contact.tangent_impulse[1] = prev_contact.tangent_impulse[1] * warmstart_coef
-          }
-          append(&physics.contacts, contact)
+        if !hit do continue
+        contact := Contact {
+          body_a      = handle_a,
+          body_b      = handle_b,
+          point       = point,
+          normal      = normal,
+          penetration = penetration,
+          restitution = (body_a.restitution + body_b.restitution) * 0.5,
+          friction    = (body_a.friction + body_b.friction) * 0.5,
         }
+        // Check if we have a cached contact from previous frame for warmstarting
+        pair := CollisionPair{body_a = handle_a, body_b = handle_b}
+        hash := collision_pair_hash(pair)
+        if prev_contact, found := physics.prev_contacts[hash]; found {
+          // Copy accumulated impulses for warmstart with heavy damping
+          // Heavy damping prevents bad impulses from causing instability
+          warmstart_coef :: 0.8 // Reduced to prevent carrying forward problematic impulses
+          contact.normal_impulse = prev_contact.normal_impulse * warmstart_coef
+          contact.tangent_impulse[0] = prev_contact.tangent_impulse[0] * warmstart_coef
+          contact.tangent_impulse[1] = prev_contact.tangent_impulse[1] * warmstart_coef
+        }
+        append(&physics.contacts, contact)
       }
     }
-
     // Prepare all contacts (compute mass matrices and bias terms)
     for &contact in physics.contacts {
       body_a := cont.get(physics.bodies, contact.body_a) or_continue
@@ -402,10 +391,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         resolve_contact_no_bias(&contact, body_a, body_b, pos_a, pos_b)
       }
     }
-    for &entry, idx in physics.bodies.entries {
-      if !entry.active {
-        continue
-      }
+    for &entry, idx in physics.bodies.entries do if entry.active {
       body := &entry.item
       if body.is_static || body.is_kinematic || body.trigger_only {
         continue
@@ -421,46 +407,40 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       // Update rotation from angular velocity (if enabled)
       // Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
       // Skip rotation if angular velocity is negligible or rotation is disabled
-      if body.enable_rotation {
-        ang_vel_mag_sq := linalg.vector_dot(
-          body.angular_velocity,
-          body.angular_velocity,
-        )
-        if ang_vel_mag_sq > 0.0001 {
-          // Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
-          omega_quat := quaternion(
-            w = 0,
-            x = body.angular_velocity.x,
-            y = body.angular_velocity.y,
-            z = body.angular_velocity.z,
-          )
-          q_old := node.transform.rotation
-          // Calculate derivative: q_dot = 0.5 * omega * q_old
-          q_dot := omega_quat * q_old
-          q_dot.w *= 0.5
-          q_dot.x *= 0.5
-          q_dot.y *= 0.5
-          q_dot.z *= 0.5
-          // Integrate: q_new = q_old + q_dot * substep_dt
-          q_new := quaternion(
-            w = q_old.w + q_dot.w * substep_dt,
-            x = q_old.x + q_dot.x * substep_dt,
-            y = q_old.y + q_dot.y * substep_dt,
-            z = q_old.z + q_dot.z * substep_dt,
-          )
-          // Normalize to prevent drift
-          q_new = linalg.quaternion_normalize(q_new)
-          geometry.transform_rotate(&node.transform, q_new)
-        }
-      }
+      if !body.enable_rotation do continue
+      ang_vel_mag_sq := linalg.vector_dot(
+        body.angular_velocity,
+        body.angular_velocity,
+      )
+      if ang_vel_mag_sq < 0.0001 do continue
+      // Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
+      omega_quat := quaternion(
+        w = 0,
+        x = body.angular_velocity.x,
+        y = body.angular_velocity.y,
+        z = body.angular_velocity.z,
+      )
+      q_old := node.transform.rotation
+      // Calculate derivative: q_dot = 0.5 * omega * q_old
+      q_dot := omega_quat * q_old
+      q_dot.w *= 0.5
+      q_dot.x *= 0.5
+      q_dot.y *= 0.5
+      q_dot.z *= 0.5
+      // Integrate: q_new = q_old + q_dot * substep_dt
+      q_new := quaternion(
+        w = q_old.w + q_dot.w * substep_dt,
+        x = q_old.x + q_dot.x * substep_dt,
+        y = q_old.y + q_dot.y * substep_dt,
+        z = q_old.z + q_dot.z * substep_dt,
+      )
+      // Normalize to prevent drift
+      q_new = linalg.quaternion_normalize(q_new)
+      geometry.transform_rotate(&node.transform, q_new)
     }
   }
   substep_time := time.since(substep_start)
-  bodies_to_kill := make([dynamic]resources.Handle, context.temp_allocator)
-  for &entry, idx in physics.bodies.entries {
-    if !entry.active {
-      continue
-    }
+  for &entry, idx in physics.bodies.entries do if entry.active {
     body := &entry.item
     if body.is_static || body.is_kinematic {
       continue
@@ -471,19 +451,15 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         index      = u32(idx),
         generation = entry.generation,
       }
-      append(&bodies_to_kill, handle)
+      defer destroy_body(physics, handle)
+      body := cont.get(physics.bodies, handle) or_continue
+      node, _ := cont.get(w.nodes, body.node_handle)
+      log.infof(
+        "Removing body at y=%.2f (below KILL_Y=%.2f)",
+        node.transform.position.y,
+        KILL_Y,
+      )
     }
-  }
-  // Remove killed bodies
-  for handle in bodies_to_kill {
-    defer destroy_body(physics, handle)
-    body := cont.get(physics.bodies, handle) or_continue
-    node, _ := cont.get(w.nodes, body.node_handle)
-    log.infof(
-      "Removing body at y=%.2f (below KILL_Y=%.2f)",
-      node.transform.position.y,
-      KILL_Y,
-    )
   }
   total_time := time.since(step_start)
   log.infof(
