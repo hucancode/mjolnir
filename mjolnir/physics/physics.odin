@@ -13,14 +13,16 @@ import "core:time"
 KILL_Y :: -50.0
 
 PhysicsWorld :: struct {
-  bodies:         resources.Pool(RigidBody),
-  colliders:      resources.Pool(Collider),
-  contacts:       [dynamic]Contact,
-  prev_contacts:  map[u64]Contact, // Contact cache for warmstarting
-  gravity:        [3]f32,
-  iterations:     i32, // Per-substep iterations
-  spatial_index:  geometry.BVH(BroadPhaseEntry),
-  body_bounds:    [dynamic]geometry.Aabb,
+  bodies:                resources.Pool(RigidBody),
+  colliders:             resources.Pool(Collider),
+  contacts:              [dynamic]Contact,
+  prev_contacts:         map[u64]Contact, // Contact cache for warmstarting
+  gravity:               [3]f32,
+  iterations:            i32, // Per-substep iterations
+  spatial_index:         geometry.BVH(BroadPhaseEntry),
+  body_bounds:           [dynamic]geometry.Aabb,
+  enable_air_resistance: bool,
+  air_density:           f32, // kg/m3
 }
 
 BroadPhaseEntry :: struct {
@@ -28,10 +30,7 @@ BroadPhaseEntry :: struct {
   bounds: geometry.Aabb,
 }
 
-init :: proc(
-  world: ^PhysicsWorld,
-  gravity := [3]f32{0, -9.81, 0},
-) {
+init :: proc(world: ^PhysicsWorld, gravity := [3]f32{0, -9.81, 0}) {
   cont.init(&world.bodies)
   cont.init(&world.colliders)
   world.contacts = make([dynamic]Contact)
@@ -46,6 +45,8 @@ init :: proc(
     },
   }
   world.body_bounds = make([dynamic]geometry.Aabb)
+  world.enable_air_resistance = false
+  world.air_density = 1.225 // Earth sea level air density
 }
 
 destroy :: proc(world: ^PhysicsWorld) {
@@ -60,7 +61,7 @@ destroy :: proc(world: ^PhysicsWorld) {
 create_body :: proc(
   world: ^PhysicsWorld,
   node_handle: resources.Handle,
-  mass: f32,
+  mass: f32 = 1.0,
   is_static := false,
 ) -> (
   handle: resources.Handle,
@@ -73,10 +74,7 @@ create_body :: proc(
   return
 }
 
-destroy_body :: proc(
-  world: ^PhysicsWorld,
-  handle: resources.Handle,
-) {
+destroy_body :: proc(world: ^PhysicsWorld, handle: resources.Handle) {
   body, ok := cont.get(world.bodies, handle)
   if ok {
     cont.free(&world.colliders, body.collider_handle)
@@ -102,25 +100,66 @@ add_collider :: proc(
 
 step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   step_start := time.now()
-
   // Save previous contacts for warmstarting
   clear(&physics.prev_contacts)
   for contact in physics.contacts {
-    pair := CollisionPair{body_a = contact.body_a, body_b = contact.body_b}
-    hash := collision_pair_hash(pair)
+    hash := collision_pair_hash({contact.body_a, contact.body_b})
     physics.prev_contacts[hash] = contact
   }
 
-  // Apply forces to all bodies (gravity, etc.)
-  for &entry in physics.bodies.entries {
-    if !entry.active {
+  // Apply forces to all bodies (gravity, air resistance, etc.)
+  for &entry in physics.bodies.entries do if entry.active {
+    body := &entry.item
+    if body.is_static || body.is_kinematic || body.trigger_only {
       continue
     }
-    body := &entry.item
-    if !body.is_static && !body.is_kinematic && !body.trigger_only {
-      gravity_force := physics.gravity * body.mass * body.gravity_scale
-      rigid_body_apply_force(body, gravity_force)
+    // Apply gravity
+    gravity_force := physics.gravity * body.mass * body.gravity_scale
+    rigid_body_apply_force(body, gravity_force)
+    if !physics.enable_air_resistance do continue
+    // Apply air resistance (drag)
+    // Drag force: F_d = -0.5 * p * v * v * C_d * A
+    // Where: p=air density, v=velocity, C_d=drag coefficient, A=cross-sectional area
+    vel_mag := linalg.length(body.velocity)
+    if vel_mag < 0.001 do continue
+    // Calculate cross-sectional area
+    cross_section := body.cross_sectional_area
+    calculate_cross_section: if cross_section <= 0.0 {
+      // Auto-calculate from collider if available
+      if body.collider_handle.generation == 0 {
+        // No collider: fallback to mass-based estimate
+        cross_section = math.pow(body.mass, 2.0 / 3.0) * 0.1
+        break calculate_cross_section
+      }
+      collider := cont.get(physics.colliders, body.collider_handle) or_break calculate_cross_section
+      // Estimate frontal area based on collider type
+      switch c in collider.shape {
+      case SphereCollider:
+        // Frontal area of sphere = pi * r * r
+        cross_section = math.PI * c.radius * c.radius
+      case BoxCollider:
+        // Frontal area of box (average of three face areas)
+        // Each face area = 2*half_extent_1 × 2*half_extent_2 = 4*half_extent_1*half_extent_2
+        cross_section = (c.half_extents.x * c.half_extents.y * 4.0 + c.half_extents.y * c.half_extents.z * 4.0 + c.half_extents.x * c.half_extents.z * 4.0) / 3.0
+      case CapsuleCollider:
+        // Frontal area of capsule = pi * r * r (circle)
+        cross_section = math.PI * c.radius * c.radius
+      case:
+        // Fallback: estimate from mass (objects with same mass are assumed same size)
+        cross_section = math.pow(body.mass, 2.0 / 3.0) * 0.1
+      }
     }
+    drag_magnitude := 0.5 * physics.air_density * vel_mag * vel_mag * body.drag_coefficient * cross_section
+    drag_direction := -linalg.normalize(body.velocity)
+    drag_force := drag_direction * drag_magnitude
+    // Clamp drag acceleration to prevent numerical instability
+    // Limit to 30x gravity to keep simulation stable
+    drag_accel := drag_magnitude * body.inv_mass
+    max_accel := linalg.length(physics.gravity) * 30.0
+    if drag_accel > max_accel {
+      drag_force *= max_accel / drag_accel
+    }
+    rigid_body_apply_force(body, drag_force)
   }
 
   // Integrate velocities from forces ONCE for the entire frame
@@ -145,7 +184,9 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       continue
     }
     body_a := &entry_a.item
-    if body_a.is_static || body_a.collider_handle.generation == 0 || body_a.trigger_only {
+    if body_a.is_static ||
+       body_a.collider_handle.generation == 0 ||
+       body_a.trigger_only {
       continue
     }
     // Check if moving fast enough for CCD
@@ -239,7 +280,12 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     bvh_build_start := time.now()
     clear(&physics.spatial_index.nodes)
     clear(&physics.spatial_index.primitives)
-    entries := make([dynamic]BroadPhaseEntry, 0, active_body_count, context.temp_allocator)
+    entries := make(
+      [dynamic]BroadPhaseEntry,
+      0,
+      active_body_count,
+      context.temp_allocator,
+    )
     for &entry, idx in physics.bodies.entries {
       if !entry.active do continue
       body := &entry.item
@@ -275,7 +321,11 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       handle_a := bvh_entry.handle
       body_a := cont.get(physics.bodies, handle_a) or_continue
       clear(&candidates)
-      geometry.bvh_query_aabb(&physics.spatial_index, bvh_entry.bounds, &candidates)
+      geometry.bvh_query_aabb(
+        &physics.spatial_index,
+        bvh_entry.bounds,
+        &candidates,
+      )
       for entry_b in candidates {
         handle_b := entry_b.handle
         // Skip self-collision
@@ -329,15 +379,20 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
           friction    = (body_a.friction + body_b.friction) * 0.5,
         }
         // Check if we have a cached contact from previous frame for warmstarting
-        pair := CollisionPair{body_a = handle_a, body_b = handle_b}
+        pair := CollisionPair {
+          body_a = handle_a,
+          body_b = handle_b,
+        }
         hash := collision_pair_hash(pair)
         if prev_contact, found := physics.prev_contacts[hash]; found {
           // Copy accumulated impulses for warmstart with heavy damping
           // Heavy damping prevents bad impulses from causing instability
           warmstart_coef :: 0.8 // Reduced to prevent carrying forward problematic impulses
           contact.normal_impulse = prev_contact.normal_impulse * warmstart_coef
-          contact.tangent_impulse[0] = prev_contact.tangent_impulse[0] * warmstart_coef
-          contact.tangent_impulse[1] = prev_contact.tangent_impulse[1] * warmstart_coef
+          contact.tangent_impulse[0] =
+            prev_contact.tangent_impulse[0] * warmstart_coef
+          contact.tangent_impulse[1] =
+            prev_contact.tangent_impulse[1] * warmstart_coef
         }
         append(&physics.contacts, contact)
       }
@@ -408,18 +463,10 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       // Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
       // Skip rotation if angular velocity is negligible or rotation is disabled
       if !body.enable_rotation do continue
-      ang_vel_mag_sq := linalg.vector_dot(
-        body.angular_velocity,
-        body.angular_velocity,
-      )
+      ang_vel_mag_sq := linalg.vector_dot(body.angular_velocity, body.angular_velocity)
       if ang_vel_mag_sq < 0.0001 do continue
       // Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
-      omega_quat := quaternion(
-        w = 0,
-        x = body.angular_velocity.x,
-        y = body.angular_velocity.y,
-        z = body.angular_velocity.z,
-      )
+      omega_quat := quaternion(w = 0, x = body.angular_velocity.x, y = body.angular_velocity.y, z = body.angular_velocity.z)
       q_old := node.transform.rotation
       // Calculate derivative: q_dot = 0.5 * omega * q_old
       q_dot := omega_quat * q_old
@@ -428,12 +475,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       q_dot.y *= 0.5
       q_dot.z *= 0.5
       // Integrate: q_new = q_old + q_dot * substep_dt
-      q_new := quaternion(
-        w = q_old.w + q_dot.w * substep_dt,
-        x = q_old.x + q_dot.x * substep_dt,
-        y = q_old.y + q_dot.y * substep_dt,
-        z = q_old.z + q_dot.z * substep_dt,
-      )
+      q_new := quaternion(w = q_old.w + q_dot.w * substep_dt, x = q_old.x + q_dot.x * substep_dt, y = q_old.y + q_dot.y * substep_dt, z = q_old.z + q_dot.z * substep_dt)
       // Normalize to prevent drift
       q_new = linalg.quaternion_normalize(q_new)
       geometry.transform_rotate(&node.transform, q_new)
@@ -454,11 +496,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       defer destroy_body(physics, handle)
       body := cont.get(physics.bodies, handle) or_continue
       node, _ := cont.get(w.nodes, body.node_handle)
-      log.infof(
-        "Removing body at y=%.2f (below KILL_Y=%.2f)",
-        node.transform.position.y,
-        KILL_Y,
-      )
+      log.infof("Removing body at y=%.2f (below KILL_Y=%.2f)", node.transform.position.y, KILL_Y)
     }
   }
   total_time := time.since(step_start)

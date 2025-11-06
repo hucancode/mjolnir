@@ -4,25 +4,27 @@ import "../resources"
 import "core:math/linalg"
 
 RigidBody :: struct {
-  node_handle:      resources.Handle,
-  collider_handle:  resources.Handle,
-  mass:             f32,
-  inv_mass:         f32,
-  inertia:          matrix[3, 3]f32,
-  inv_inertia:      matrix[3, 3]f32,
-  velocity:         [3]f32,
-  angular_velocity: [3]f32,
-  force:            [3]f32,
-  torque:           [3]f32,
-  restitution:      f32,
-  friction:         f32,
-  linear_damping:   f32,
-  angular_damping:  f32,
-  is_static:        bool,
-  is_kinematic:     bool,
-  enable_rotation:  bool,
-  trigger_only:     bool,
-  gravity_scale:    f32,
+  node_handle:          resources.Handle,
+  collider_handle:      resources.Handle,
+  mass:                 f32,
+  inv_mass:             f32,
+  inertia:              matrix[3, 3]f32,
+  inv_inertia:          matrix[3, 3]f32,
+  velocity:             [3]f32,
+  angular_velocity:     [3]f32,
+  force:                [3]f32,
+  torque:               [3]f32,
+  restitution:          f32,
+  friction:             f32,
+  linear_damping:       f32,
+  angular_damping:      f32,
+  is_static:            bool,
+  is_kinematic:         bool,
+  enable_rotation:      bool,
+  trigger_only:         bool,
+  gravity_scale:        f32,
+  drag_coefficient:     f32,
+  cross_sectional_area: f32, // m2 - set to 0 for automatic calculation
 }
 
 rigid_body_create :: proc(
@@ -31,17 +33,19 @@ rigid_body_create :: proc(
   is_static := false,
 ) -> RigidBody {
   body := RigidBody {
-    node_handle     = node_handle,
-    mass            = mass,
-    inv_mass        = is_static ? 0.0 : 1.0 / mass,
-    restitution     = 0.2, // Low bounce - objects stay in contact
-    friction        = 0.8, // High friction - sliding slows down quickly
-    linear_damping  = 0.01, // 1% velocity loss per second
-    angular_damping = 0.05, // 5% angular velocity loss per second
-    is_static       = is_static,
-    enable_rotation = true,  // turn this to false to stop rotating body (for character simulation)
-    trigger_only    = false, // turn this to true to stop response to collision resolution
-    gravity_scale   = 1.0,
+    node_handle          = node_handle,
+    mass                 = mass,
+    inv_mass             = is_static ? 0.0 : 1.0 / mass,
+    restitution          = 0.2, // Low bounce - objects stay in contact
+    friction             = 0.8, // High friction - sliding slows down quickly
+    linear_damping       = 0.01, // 1% velocity loss per second
+    angular_damping      = 0.05, // 5% angular velocity loss per second
+    is_static            = is_static,
+    enable_rotation      = true,  // turn this to false to stop rotating body (for character simulation)
+    trigger_only         = false, // turn this to true to stop response to collision resolution
+    gravity_scale        = 1.0,
+    drag_coefficient     = 0.47,  // sphere drag coefficient (0.47), cube ~1.05, use 0.1-2.0 range
+    cross_sectional_area = 0.0,   // 0 = auto-calculate from mass
   }
   if is_static {
     body.inertia = matrix[3, 3]f32{}

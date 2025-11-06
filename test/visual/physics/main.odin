@@ -34,9 +34,8 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
-  log.info("Setting up physics demo")
-  physics.init(&physics_world)
-  // Create ground plane (large thin box)
+  physics.init(&physics_world, {0, -20, 0}) // 2x earth gravity
+  physics_world.enable_air_resistance = true
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
   ground_handle = spawn_at(
@@ -44,18 +43,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
     [3]f32{0, -0.5, 0},
     world.MeshAttachment{handle = ground_mesh, material = ground_mat},
   )
-  world.scale_xyz(&engine.world, ground_handle, 40.0, 0.5, 40.0)
+  world.scale_xyz(&engine.world, ground_handle, 10.0, 0.5, 10.0)
   ground_node, ground_node_ok := cont.get(engine.world.nodes, ground_handle)
   if ground_node_ok {
     body_handle, body, ok := physics.create_body(
       &physics_world,
       ground_handle,
-      0.0,
-      true, // static
+      is_static = true,
     )
     if ok {
       ground_body = body_handle
-      collider := physics.collider_create_box([3]f32{40.0, 0.5, 40.0})
+      collider := physics.collider_create_box([3]f32{10.0, 0.5, 10.0})
       physics.add_collider(&physics_world, body_handle, collider)
       log.info("Ground body created")
     }
@@ -77,8 +75,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     body_handle, body, ok := physics.create_body(
       &physics_world,
       sphere_handle,
-      0.0,
-      true, // static
+      is_static = true,
     )
     if ok {
       sphere_body = body_handle
@@ -105,7 +102,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-
   for pos, i in cube_positions {
     cube_handles[i] = spawn_at(
       engine,
@@ -121,8 +117,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       body_handle, body, ok := physics.create_body(
         &physics_world,
         cube_handles[i],
-        1.0, // mass
-        false, // dynamic
+        50, // mass
       )
       if ok {
         cube_bodies[i] = body_handle
@@ -143,35 +138,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     resources.camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
     world.camera_controller_sync(&engine.orbit_controller, camera)
   }
-  spot_light_handle := spawn_spot_light(engine, {0.8, 0.9, 1, 1}, 50.0, math.PI * 0.3, position = {0, 20, 0})
-  rotate(engine, spot_light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  spawn_point_light(engine, {0.8, 0.9, 1, 1}, 50.0, position = {0, 20, 0})
   log.info("Physics demo setup complete")
 }
 
-frame_count: int = 0
-
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   physics.step(&physics_world, &engine.world, delta_time)
-  // Debug: Check cube positions every 60 frames (once per second)
-  frame_count += 1
-  if frame_count % 60 == 0 {
-    for i in 0 ..< CUBE_COUNT {
-      if cube_node, ok := cont.get(engine.world.nodes, cube_handles[i]); ok {
-        if cube_body, ok2 := cont.get(physics_world.bodies, cube_bodies[i]);
-           ok2 {
-          y_pos := cube_node.transform.position.y
-          vel_y := cube_body.velocity.y
-          // Warn if cube is below ground level (should be at y >= 0.5 for center)
-          if y_pos < 0.0 {
-            log.warnf("Cube %d SUNK: y=%.3f, vy=%.3f", i, y_pos, vel_y)
-          }
-        }
-      }
-    }
-    log.infof(
-      "Frame %d: %d contacts",
-      frame_count,
-      len(physics_world.contacts),
-    )
-  }
 }
