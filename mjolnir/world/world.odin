@@ -109,7 +109,6 @@ FrameContext :: struct {
 }
 
 init_node :: proc(self: ^Node, name: string = "") {
-  self.children = make([dynamic]resources.Handle, 0)
   self.transform = geometry.TRANSFORM_IDENTITY
   self.name = name
   self.bone_socket = ""
@@ -262,7 +261,6 @@ add_animation_layer :: proc(
   } else {
     // Initialize skinning with empty layers
     mesh_attachment.skinning = NodeSkinning {
-      layers                    = make([dynamic]anim.Layer, 0),
       bone_matrix_buffer_offset = 0xFFFFFFFF,
     }
   }
@@ -388,7 +386,6 @@ add_ik_layer :: proc(
   } else {
     // Initialize skinning with empty layers
     mesh_attachment.skinning = NodeSkinning {
-      layers                    = make([dynamic]anim.Layer, 0),
       bone_matrix_buffer_offset = 0xFFFFFFFF,
     }
   }
@@ -714,9 +711,6 @@ init :: proc(world: ^World) {
   world.root, root, _ = cont.alloc(&world.nodes)
   init_node(root, "root")
   root.parent = world.root
-  world.traversal_stack = make([dynamic]TraverseEntry, 0)
-  world.actor_pools = make(map[typeid]ActorPoolEntry)
-  world.animatable_nodes = make([dynamic]resources.Handle, 0)
   max_depth, max_items := compute_octree_params(resources.MAX_NODES_IN_SCENE)
   geometry.octree_init(
     &world.node_octree,
@@ -884,46 +878,17 @@ cleanup_pending_deletions :: proc(
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
 ) {
-  to_destroy := make([dynamic]resources.Handle, 0)
-  defer delete(to_destroy)
-
-  // Count pending deletions for debugging
-  pending_count := 0
-  for i in 0 ..< len(world.nodes.entries) {
-    entry := &world.nodes.entries[i]
-    if entry.active && entry.item.pending_deletion {
-      pending_count += 1
-      append(
-        &to_destroy,
-        resources.Handle{index = u32(i), generation = entry.generation},
-      )
+  zero_matrix: matrix[4, 4]f32
+  zero_data: resources.NodeData
+  for entry, i in world.nodes.entries do if entry.active {
+    if !entry.item.pending_deletion do continue
+    handle := resources.Handle {
+      index      = u32(i),
+      generation = entry.generation,
     }
-  }
-
-  if pending_count > 0 {
-    log.infof("Cleanup: found %d nodes marked for deletion", pending_count)
-  }
-
-  if len(to_destroy) > 0 {
-    log.infof("Cleanup: destroying %d nodes", len(to_destroy))
-  }
-
-  for handle in to_destroy {
-    node := cont.get(world.nodes, handle)
-    if node != nil {
-      log.infof("  Destroying node handle: %v name='%s'", handle, node.name)
-    } else {
-      log.warnf("  Node handle %v already gone!", handle)
-    }
-
     // Clear GPU buffers BEFORE freeing the node
-    if rm != nil {
-      zero_matrix: matrix[4, 4]f32
-      resources.node_upload_transform(rm, handle, &zero_matrix)
-      zero_data: resources.NodeData
-      zero_data.flags = {} // Empty flags means not renderable
-      resources.node_upload_data(rm, handle, &zero_data)
-    }
+    resources.node_upload_transform(rm, handle, &zero_matrix)
+    resources.node_upload_data(rm, handle, &zero_data)
     world.octree_dirty_set[handle] = true
     unregister_animatable_node(world, handle)
     if node, ok := cont.free(&world.nodes, handle); ok {
@@ -938,16 +903,14 @@ get_node :: proc(world: ^World, handle: resources.Handle) -> ^Node {
 
 @(private)
 update_visibility_system :: proc(world: ^World) {
-  // Find the highest active node index
-  max_index: int = 0
-  for i in 0 ..< len(world.nodes.entries) {
-    if world.nodes.entries[i].active {
-      max_index = i
-    }
-  }
-  // node_count must be max_index + 1 so GPU processes all indices up to max
-  node_count := u32(max_index + 1)
-  visibility_system_set_node_count(&world.visibility, node_count)
+  i, found := slice.linear_search_reverse_proc(
+    world.nodes.entries[:],
+    proc(entry: cont.Entry(Node)) -> bool {
+      return entry.active
+    },
+  )
+  node_count := i + 1 if found else len(world.nodes.entries)
+  visibility_system_set_node_count(&world.visibility, u32(node_count))
 }
 
 traverse :: proc(
@@ -1071,10 +1034,7 @@ traverse :: proc(
     if callback != nil && current_node.parent_visible && current_node.visible {
       if !callback(current_node, cb_context) do continue
     }
-    children_copy := make([]resources.Handle, len(current_node.children))
-    defer delete(children_copy)
-    copy(children_copy, current_node.children[:])
-    for child_handle in children_copy {
+    for child_handle in current_node.children {
       append(
         &world.traversal_stack,
         TraverseEntry {

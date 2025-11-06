@@ -29,9 +29,6 @@ octree_init :: proc(
   octree.root = new(OctreeNode(T))
   octree.root.bounds = bounds
   octree.root.center = aabb_center(bounds)
-  octree.root.depth = 0
-  octree.root.items = make([dynamic]T)
-  octree.root.total_items = 0
   octree.max_depth = max_depth
   octree.max_items = max_items
   shift_val := u32(1) << u32(max_depth)
@@ -116,8 +113,6 @@ octree_subdivide :: proc(node: ^OctreeNode($T)) {
     child.bounds = get_child_bounds(node, i32(i))
     child.center = get_child_center(node.center, parent_size, i32(i))
     child.depth = node.depth + 1
-    child.items = make([dynamic]T)
-    child.total_items = 0
     node.children[i] = child
   }
 }

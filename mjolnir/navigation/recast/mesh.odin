@@ -921,7 +921,7 @@ build_poly_mesh :: proc(
     verts_after := len(verts)
     new_verts := verts_after - verts_before
     // Start with triangles as initial polygons
-    region_polys := make([dynamic]Poly_Build)
+    region_polys: [dynamic]Poly_Build
     defer {
       for &poly in region_polys {
         delete(poly.verts)

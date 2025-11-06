@@ -311,7 +311,6 @@ build_contours :: proc(
   cset.height = chf.height - border_size * 2
   cset.border_size = border_size
   cset.max_error = max_error
-  cset.conts = make([dynamic]Contour, 0)
   // defer delete(cset.conts) // Will be freed by free_contour_set
   // Create flags array to mark region boundaries
   flags := make([]u8, len(chf.spans))
@@ -354,9 +353,9 @@ build_contours :: proc(
     }
   }
   // Create temporary arrays for contour vertices
-  verts := make([dynamic][4]i32, 0)
+  verts: [dynamic][4]i32
   defer delete(verts)
-  simplified := make([dynamic][4]i32, 0)
+  simplified: [dynamic][4]i32
   defer delete(simplified)
   // Extract contours for each boundary span
   contours_created := 0
@@ -815,7 +814,6 @@ create_contour_set :: proc(
   build_flags: Contour_Tess_Flags = {.WALL_EDGES},
 ) -> ^Contour_Set {
   cset := new(Contour_Set)
-  cset.conts = make([dynamic]Contour, 0)
   if !build_contours(chf, max_error, max_edge_len, cset, build_flags) {
     free_contour_set(cset)
     return nil

@@ -146,7 +146,7 @@ partition_monotone_regions :: proc(
   h := chf.height
   // Initialize all regions as unassigned
   slice.fill(src_reg, 0xff)
-  sweeps := make([dynamic]Layer_Sweep_Span)
+  sweeps: [dynamic]Layer_Sweep_Span
   defer delete(sweeps)
   prev_count: [256]i32
   reg_id: u8 = 0
@@ -272,8 +272,6 @@ analyze_regions :: proc(
   h := chf.height
   // Initialize all regions
   for &reg in regions {
-    reg.overlapping_layers = make([dynamic]u8)
-    reg.neighbors = make([dynamic]u8)
     reg.height_bounds = {0xffff, 0} // [ymin=max_value, ymax=0] for proper min/max tracking
     reg.layer_id = RC_NULL_LAYER
     reg.is_base = false
@@ -283,7 +281,7 @@ analyze_regions :: proc(
     for x in 0 ..< w {
       c := &chf.cells[x + y * w]
       // Collect regions in this cell
-      local_regions := make([dynamic]u8)
+      local_regions: [dynamic]u8
       defer delete(local_regions)
       for i in c.index ..< c.index + u32(c.count) {
         if i >= u32(len(chf.spans)) ||
@@ -344,7 +342,7 @@ analyze_regions :: proc(
 
 // Phase 3: Layer assignment via DFS
 assign_layers_dfs :: proc(regions: []Heightfield_Layer_Region) -> int {
-  stack := make([dynamic]int)
+  stack: [dynamic]int
   defer delete(stack)
   layer_id: u8 = 0
   for i in 0 ..< len(regions) {

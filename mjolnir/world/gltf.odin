@@ -54,7 +54,6 @@ load_gltf :: proc(
   if len(gltf_data.buffers) > 0 {
     cgltf.load_buffers(options, gltf_data, gltf_path_cstr) or_return
   }
-  nodes = make([dynamic]resources.Handle, 0)
   if len(gltf_data.nodes) == 0 {
     return nodes, .success
   }
@@ -138,10 +137,6 @@ load_gltf :: proc(
 @(private = "file")
 discover_assets :: proc(gltf_data: ^cgltf.data) -> AssetManifest {
   manifest: AssetManifest
-  manifest.unique_textures = make([dynamic]^cgltf.texture, 0)
-  manifest.unique_materials = make([dynamic]^cgltf.material, 0)
-  manifest.meshes = make([dynamic]^cgltf.mesh, 0)
-  manifest.skins = make([dynamic]^cgltf.skin, 0)
   texture_set := make(map[^cgltf.texture]bool, context.temp_allocator)
   material_set := make(map[^cgltf.material]bool, context.temp_allocator)
   mesh_set := make(map[^cgltf.mesh]bool, context.temp_allocator)

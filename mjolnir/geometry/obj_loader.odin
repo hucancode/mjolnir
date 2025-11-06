@@ -22,9 +22,9 @@ load_obj :: proc(
   content := string(data)
   lines := strings.split_lines(content)
   defer delete(lines)
-  temp_positions := make([dynamic][3]f32)
+  temp_positions: [dynamic][3]f32
   defer delete(temp_positions)
-  temp_indices := make([dynamic]u32)
+  temp_indices: [dynamic]u32
   defer delete(temp_indices)
   for line in lines {
     trimmed := strings.trim_space(line)
@@ -43,7 +43,7 @@ load_obj :: proc(
         }
       }
     case "f":
-      face_indices := make([dynamic]i32)
+      face_indices: [dynamic]i32
       defer delete(face_indices)
       for i in 1 ..< len(parts) {
         face_part := parts[i]

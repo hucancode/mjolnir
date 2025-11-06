@@ -40,7 +40,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Emissive material for effector sphere
   effector_mat := create_material(engine, emissive_value = 5.0)
   // Spawn 50x50 grid of cubes
-  cube_handles = make([dynamic]resources.Handle, 0)
   grid_size := 50
   spacing: f32 = 1.0
   cube_scale: f32 = 0.3
@@ -193,7 +192,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     scale(engine, handle, 0.3)
   }
   // Query for cubes within effect radius
-  affected := make([dynamic]resources.Handle, 0)
+  affected: [dynamic]resources.Handle
   defer delete(affected)
   world.query_sphere(
     &engine.world,

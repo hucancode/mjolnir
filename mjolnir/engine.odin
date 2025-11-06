@@ -154,7 +154,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
-  self.pending_node_deletions = make([dynamic]resources.Handle, 0)
   vk.AllocateCommandBuffers(
     self.gctx.device,
     &{
@@ -606,7 +605,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.world,
     command_buffer,
   ) or_return
-  camera_command_buffers := make([dynamic]vk.CommandBuffer)
+  camera_command_buffers: [dynamic]vk.CommandBuffer
   defer delete(camera_command_buffers)
   for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue

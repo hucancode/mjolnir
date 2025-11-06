@@ -43,10 +43,6 @@ SceneGeometryCollector :: struct {
 }
 
 scene_geometry_collector_init :: proc(collector: ^SceneGeometryCollector) {
-  collector.vertices = make([dynamic][3]f32, 0)
-  collector.indices = make([dynamic]i32, 0)
-  collector.area_types = make([dynamic]u8, 0)
-  collector.mesh_count = 0
   collector.include_filter = proc(node: ^Node) -> bool {
     _, is_mesh := node.attachment.(MeshAttachment)
     return is_mesh

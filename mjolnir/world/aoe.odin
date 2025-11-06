@@ -75,7 +75,7 @@ query_sphere :: proc(
 ) {
   clear(results)
   if world.node_octree.root == nil do return
-  entries := make([dynamic]NodeEntry, 0)
+  entries: [dynamic]NodeEntry
   defer delete(entries)
   geometry.octree_query_sphere(&world.node_octree, center, radius, &entries)
   filter_by_tags(&entries, tags_any, tags_all, tags_none)
@@ -112,7 +112,7 @@ query_box :: proc(
 ) {
   clear(results)
   if world.node_octree.root == nil do return
-  entries := make([dynamic]NodeEntry, 0)
+  entries: [dynamic]NodeEntry
   defer delete(entries)
   geometry.octree_query_aabb(&world.node_octree, bounds, &entries)
   filter_by_tags(&entries, tags_any, tags_all, tags_none)
@@ -135,7 +135,7 @@ query_disc :: proc(
 ) {
   clear(results)
   if world.node_octree.root == nil do return
-  entries := make([dynamic]NodeEntry, 0)
+  entries: [dynamic]NodeEntry
   defer delete(entries)
   geometry.octree_query_disc(
     &world.node_octree,
@@ -170,7 +170,7 @@ query_fan :: proc(
 ) {
   clear(results)
   if world.node_octree.root == nil do return
-  entries := make([dynamic]NodeEntry, 0)
+  entries: [dynamic]NodeEntry
   defer delete(entries)
   // Query sphere first to get candidates
   geometry.octree_query_sphere(&world.node_octree, origin, radius, &entries)

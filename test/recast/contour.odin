@@ -569,7 +569,6 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
   cset := new(recast.Contour_Set)
   defer recast.free_contour_set(cset)
   // Set up contours with append instead
-  cset.conts = make([dynamic]recast.Contour, 0)
   append(&cset.conts, recast.Contour{})
   cset.bmin = {0, 0, 0}
   cset.bmax = {30, 10, 30}
@@ -608,7 +607,6 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
   cset := new(recast.Contour_Set)
   defer recast.free_contour_set(cset)
   // Set up contours with append instead
-  cset.conts = make([dynamic]recast.Contour, 0)
   append(&cset.conts, recast.Contour{})
   cset.bmin = {0, 0, 0}
   cset.bmax = {30, 10, 30}
@@ -660,7 +658,6 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
   cset := new(recast.Contour_Set)
   defer recast.free_contour_set(cset)
   // Set up contours with append instead
-  cset.conts = make([dynamic]recast.Contour, 0)
   append(&cset.conts, recast.Contour{})
   cset.bmin = {0, 0, 0}
   cset.bmax = {30, 10, 30}
@@ -833,7 +830,7 @@ test_simplify_contour_algorithm :: proc(t: ^testing.T) {
   max_edge_len: i32 = 12
   prev_length := len(raw_verts) + 1 // Initialize to larger than original
   for max_error in max_errors {
-    simplified := make([dynamic][4]i32, 0)
+    simplified: [dynamic][4]i32
     defer delete(simplified)
     recast.simplify_contour(
       raw_verts,
@@ -878,7 +875,7 @@ test_simplify_contour_algorithm :: proc(t: ^testing.T) {
       {10, 0, 10, 0x2000},
       {0, 0, 10, 0},
     }
-    simplified := make([dynamic][4]i32, 0)
+    simplified: [dynamic][4]i32
     defer delete(simplified)
     recast.simplify_contour(raw_verts_with_regions, &simplified, 1.0, 1.0, 12)
     // Should preserve region boundary vertices

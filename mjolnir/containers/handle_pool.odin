@@ -26,8 +26,6 @@ Pool :: struct($T: typeid) {
 
 // init initializes a pool with optional capacity limit.
 init :: proc(pool: ^Pool($T), capacity: u32 = 0) {
-  pool.entries = make([dynamic]Entry(T), 0, 0)
-  pool.free_indices = make([dynamic]u32, 0, 0)
   pool.capacity = capacity
 }
 

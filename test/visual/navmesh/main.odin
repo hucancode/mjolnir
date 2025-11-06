@@ -68,9 +68,6 @@ main :: proc() {
 demo_setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Navigation mesh demo setup with world integration")
-  demo_state.obstacle_handles = make([dynamic]resources.Handle, 0)
-  demo_state.path_waypoint_handles = make([dynamic]resources.Handle, 0)
-  demo_state.camera_auto_rotate = false
   // engine.debug_ui_enabled = true
   main_camera := get_main_camera(engine)
   if main_camera != nil {

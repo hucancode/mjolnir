@@ -306,7 +306,6 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
   // Create a simple contour set with one square contour
   cset := new(recast.Contour_Set)
   defer recast.free_contour_set(cset)
-  cset.conts = make([dynamic]recast.Contour, 0)
   append(&cset.conts, recast.Contour{})
   cset.bmin = {0, 0, 0}
   cset.bmax = {10, 2, 10}

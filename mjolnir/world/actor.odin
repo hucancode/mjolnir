@@ -25,7 +25,6 @@ ActorContext :: struct {
 
 actor_pool_init :: proc(pool: ^ActorPool($T), capacity: u32 = 0) {
   cont.init(&pool.actors, capacity)
-  pool.tick_list = make([dynamic]resources.Handle, 0)
 }
 
 actor_pool_destroy :: proc(pool: ^ActorPool($T)) {
