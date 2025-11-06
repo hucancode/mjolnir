@@ -7,7 +7,7 @@ import "core:time"
 
 // Helper to create test configuration
 create_test_config :: proc(cs, ch: f32) -> recast.Config {
-  cfg := recast.Config{}
+  cfg: recast.Config
   cfg.cs = cs
   cfg.ch = ch
   cfg.walkable_slope_angle = 45.0
@@ -116,7 +116,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
   )
   // 3. Validate region building created proper connectivity
   // Each region should have reasonable size for the input geometry
-  region_sizes := map[u16]int{}
+  region_sizes: map[u16]int
   defer delete(region_sizes)
   for i in 0 ..< len(chf.spans) {
     if chf.areas[i] != recast.RC_NULL_AREA {
@@ -308,7 +308,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     "Should have elevated walkable areas on obstacle",
   )
   // 2. Validate region separation - floor and obstacle should be different regions
-  region_heights := map[u16][dynamic]int{}
+  region_heights: map[u16][dynamic]int
   defer {
     for reg, heights in region_heights {
       delete(heights)
@@ -494,7 +494,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
   poly_verts := [][3]f32{{20, -1, 5}, {25, -1, 5}, {25, -1, 10}, {20, -1, 10}}
   recast.mark_convex_poly_area(poly_verts, -1, 10, 30, chf)
   // Verify areas were marked
-  marked_areas := map[u8]int{}
+  marked_areas: map[u8]int
   defer delete(marked_areas)
   for i in 0 ..< len(chf.spans) {
     area := chf.areas[i]
@@ -613,9 +613,9 @@ test_navmesh_performance :: proc(t: ^testing.T) {
 test_edge_cases :: proc(t: ^testing.T) {
   // Test 1: Empty mesh
   {
-    vertices := [][3]f32{}
-    indices := []i32{}
-    areas := []u8{}
+    vertices: [][3]f32
+    indices: []i32
+    areas: []u8
     cfg := recast.Config {
       cs                   = 0.3,
       ch                   = 0.2,

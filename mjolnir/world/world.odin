@@ -289,7 +289,7 @@ add_animation_layer :: proc(
   if !found do return false
 
   // Create new layer with handle
-  layer := anim.Layer{}
+  layer: anim.Layer
   clip_handle_u64 := transmute(u64)clip_handle
   anim.layer_init_fk(
     &layer,
@@ -438,7 +438,7 @@ add_ik_layer :: proc(
   }
 
   // Create IK layer
-  layer := anim.Layer{}
+  layer: anim.Layer
   anim.layer_init_ik(&layer, ik_target, weight)
 
   // Add or replace layer

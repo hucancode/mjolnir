@@ -616,9 +616,9 @@ test_triangle_operations_large_coordinates :: proc(t: ^testing.T) {
 @(test)
 test_triangle_operations_empty_input :: proc(t: ^testing.T) {
   // Test with empty arrays - should not crash
-  vertices := [][3]f32{}
-  indices := []i32{}
-  areas := []u8{}
+  vertices: [][3]f32
+  indices: []i32
+  areas: []u8
   // Should handle empty input gracefully
   recast.mark_walkable_triangles(45.0, vertices, indices, areas)
   recast.clear_unwalkable_triangles(45.0, vertices, indices, areas)

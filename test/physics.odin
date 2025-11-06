@@ -186,7 +186,7 @@ test_add_collider :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_gravity_application :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -212,7 +212,7 @@ test_physics_world_gravity_application :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_two_body_collision :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -249,7 +249,7 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_static_body_collision :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -352,7 +352,7 @@ test_rigid_body_apply_force_at_point_generates_torque :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -394,7 +394,7 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_angular_integration :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -427,7 +427,7 @@ test_physics_world_angular_integration :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -1278,7 +1278,7 @@ test_off_center_impulse_creates_rotation :: proc(t: ^testing.T) {
 
 @(test)
 test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -1306,7 +1306,7 @@ test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
 
 @(test)
 test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -1415,7 +1415,7 @@ test_resolve_contact_friction_reduces_tangent_velocity :: proc(t: ^testing.T) {
 
 @(test)
 test_integration_box_stack_stability :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -1539,7 +1539,7 @@ test_disable_rotation_prevents_torque_application :: proc(t: ^testing.T) {
 
 @(test)
 test_disable_rotation_prevents_quaternion_update :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -1601,7 +1601,7 @@ test_enable_rotation_default_true :: proc(t: ^testing.T) {
 
 @(test)
 test_trigger_only_prevents_gravity :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -1627,7 +1627,7 @@ test_trigger_only_prevents_gravity :: proc(t: ^testing.T) {
 
 @(test)
 test_trigger_only_prevents_position_update :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -1652,7 +1652,7 @@ test_trigger_only_prevents_position_update :: proc(t: ^testing.T) {
 
 @(test)
 test_trigger_only_no_collision_response :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld
@@ -1681,7 +1681,7 @@ test_trigger_only_no_collision_response :: proc(t: ^testing.T) {
 
 @(test)
 test_trigger_only_runtime_toggle :: proc(t: ^testing.T) {
-  w := world.World{}
+  w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   physics_world: physics.PhysicsWorld

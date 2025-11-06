@@ -36,7 +36,7 @@ find_straight_path :: proc(
   )
   if recast.status_failed(end_status) do return {.Invalid_Param}, 0
   // Add start point
-  stat := recast.Status{}
+  stat: recast.Status
   n_straight_path := i32(0)
   if n_straight_path < max_straight_path {
     straight_path[n_straight_path] = {

@@ -8,7 +8,7 @@ import "core:time"
 // Unit Test: Verify span bit packing/unpacking with hard-coded inputs
 @(test)
 test_span_bit_operations :: proc(t: ^testing.T) {
-  span := recast.Span{}
+  span: recast.Span
   // Test setting and getting smin
   span.smin = 100
   testing.expect_value(t, span.smin, u32(100))
@@ -35,7 +35,7 @@ test_span_bit_operations :: proc(t: ^testing.T) {
 // Unit Test: Verify compact cell bit operations
 @(test)
 test_compact_cell_bit_operations :: proc(t: ^testing.T) {
-  cell := recast.Compact_Cell{}
+  cell: recast.Compact_Cell
   // Test setting and getting index
   cell.index = 12345
   testing.expect_value(t, cell.index, u32(12345))
@@ -55,7 +55,7 @@ test_compact_cell_bit_operations :: proc(t: ^testing.T) {
 // Unit Test: Verify compact span bit operations
 @(test)
 test_compact_span_bit_operations :: proc(t: ^testing.T) {
-  span := recast.Compact_Span{}
+  span: recast.Compact_Span
   // Test y and reg (direct fields)
   span.y = 1000
   span.reg = 500

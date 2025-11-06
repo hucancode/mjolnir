@@ -163,7 +163,7 @@ test_sample_cubic_spline_quaternion_interpolation :: proc(t: ^testing.T) {
 
 @(test)
 test_sample_no_data :: proc(t: ^testing.T) {
-  frames := []animation.Keyframe(f32){}
+  frames: []animation.Keyframe(f32)
   result := animation.keyframe_sample(frames, 0.5, 0.0)
   testing.expect_value(t, result, 0.0)
   result = animation.keyframe_sample(frames, 0.5, 999.0)

@@ -640,7 +640,7 @@ test_delaunay_hull_simple_triangle :: proc(t: ^testing.T) {
   if len(triangles) > 0 {
     tri := triangles[0]
     // Verify triangle contains all 3 vertices
-    vertices_in_triangle := [3]bool{}
+    vertices_in_triangle: [3]bool
     for i in 0 ..< 3 {
       idx := tri[i]
       testing.expect(

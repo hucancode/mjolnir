@@ -146,9 +146,9 @@ test_api_configuration :: proc(t: ^testing.T) {
 test_api_error_handling :: proc(t: ^testing.T) {
   // Test error handling with invalid inputs
   // Empty geometry
-  empty_vertices := [][3]f32{}
-  empty_indices := []i32{}
-  empty_areas := []u8{}
+  empty_vertices: [][3]f32
+  empty_indices: []i32
+  empty_areas: []u8
   config := recast.Config {
     cs                       = 0.3,
     ch                       = 0.2,
@@ -247,7 +247,7 @@ test_api_build_with_areas :: proc(t: ^testing.T) {
   defer recast.free_poly_mesh(pmesh)
   defer recast.free_poly_mesh_detail(dmesh)
   // Check that different areas were preserved
-  area_counts := map[u8]int{}
+  area_counts: map[u8]int
   defer delete(area_counts)
   for i in 0 ..< pmesh.npolys {
     area := pmesh.areas[i]

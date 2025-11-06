@@ -35,7 +35,7 @@ ColliderShape :: union {
   CapsuleCollider,
 }
 
-collider_create_sphere :: proc(radius: f32, offset := [3]f32{}) -> Collider {
+collider_create_sphere :: proc(radius: f32, offset: [3]f32 = {}) -> Collider {
   return Collider {
     type = .Sphere,
     offset = offset,
@@ -45,7 +45,7 @@ collider_create_sphere :: proc(radius: f32, offset := [3]f32{}) -> Collider {
 
 collider_create_box :: proc(
   half_extents: [3]f32,
-  offset := [3]f32{},
+  offset: [3]f32 = {},
   rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> Collider {
   return Collider {
@@ -58,7 +58,7 @@ collider_create_box :: proc(
 collider_create_capsule :: proc(
   radius: f32,
   height: f32,
-  offset := [3]f32{},
+  offset: [3]f32 = {},
 ) -> Collider {
   return Collider {
     type = .Capsule,

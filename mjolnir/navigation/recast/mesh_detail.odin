@@ -1102,7 +1102,7 @@ seed_array_with_poly_center :: proc(
   hp: ^Height_Patch,
 ) -> bool {
   // Calculate polygon center
-  center := [3]f32{}
+  center: [3]f32
   for i in 0 ..< len(poly) {
     v := verts[poly[i]]
     center.x += f32(v.x)

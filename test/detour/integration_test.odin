@@ -14,7 +14,7 @@ test_integration_pathfinding_priority_queue :: proc(t: ^testing.T) {
   nav_mesh := create_test_nav_mesh(t)
   defer destroy_test_nav_mesh(nav_mesh)
   // Create query object
-  query := detour.Nav_Mesh_Query{}
+  query: detour.Nav_Mesh_Query
   defer detour.nav_mesh_query_destroy(&query)
   status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
   testing.expect(
@@ -24,14 +24,14 @@ test_integration_pathfinding_priority_queue :: proc(t: ^testing.T) {
   )
   // Test that nodes are processed in correct order during pathfinding
   // We'll track the order in which nodes are processed by the priority queue
-  filter := detour.Query_Filter{}
+  filter: detour.Query_Filter
   detour.query_filter_init(&filter)
   // Find start and end polygons
   start_pos := [3]f32{1.0, 0.0, 1.0}
   end_pos := [3]f32{9.0, 0.0, 9.0}
   half_extents := [3]f32{1.0, 1.0, 1.0}
-  start_ref := recast.Poly_Ref(0)
-  start_nearest := [3]f32{}
+  start_ref: recast.Poly_Ref
+  start_nearest: [3]f32
   status, start_ref, start_nearest = detour.find_nearest_poly(
     &query,
     start_pos,
@@ -48,8 +48,8 @@ test_integration_pathfinding_priority_queue :: proc(t: ^testing.T) {
     start_ref != recast.INVALID_POLY_REF,
     "Start reference should be valid",
   )
-  end_ref := recast.Poly_Ref(0)
-  end_nearest := [3]f32{}
+  end_ref: recast.Poly_Ref
+  end_nearest: [3]f32
   status, end_ref, end_nearest = detour.find_nearest_poly(
     &query,
     end_pos,
@@ -93,9 +93,9 @@ test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
   nav_mesh2 := create_test_nav_mesh(t)
   defer destroy_test_nav_mesh(nav_mesh2)
   // Create multiple query objects
-  query1 := detour.Nav_Mesh_Query{}
+  query1: detour.Nav_Mesh_Query
   defer detour.nav_mesh_query_destroy(&query1)
-  query2 := detour.Nav_Mesh_Query{}
+  query2: detour.Nav_Mesh_Query
   defer detour.nav_mesh_query_destroy(&query2)
   status1 := detour.nav_mesh_query_init(&query1, nav_mesh1, 128)
   testing.expect(
@@ -109,7 +109,7 @@ test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
     recast.status_succeeded(status2),
     "Query2 initialization should succeed",
   )
-  filter := detour.Query_Filter{}
+  filter: detour.Query_Filter
   detour.query_filter_init(&filter)
   // Perform pathfinding with different parameters on both queries
   // This tests that the thread-local context switching works correctly
@@ -128,8 +128,8 @@ test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
     recast.status_succeeded(status),
     "Should find start polygon for query1",
   )
-  end_ref1 := recast.Poly_Ref(0)
-  end_nearest1 := [3]f32{}
+  end_ref1: recast.Poly_Ref
+  end_nearest1: [3]f32
   status, end_ref1, end_nearest1 = detour.find_nearest_poly(
     &query1,
     end_pos1,
@@ -144,8 +144,8 @@ test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
   // Query 2 - longer path
   start_pos2 := [3]f32{2.0, 0.0, 2.0}
   end_pos2 := [3]f32{8.0, 0.0, 8.0}
-  start_ref2 := recast.Poly_Ref(0)
-  start_nearest2 := [3]f32{}
+  start_ref2: recast.Poly_Ref
+  start_nearest2: [3]f32
   status, start_ref2, start_nearest2 = detour.find_nearest_poly(
     &query2,
     start_pos2,
@@ -157,8 +157,8 @@ test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
     recast.status_succeeded(status),
     "Should find start polygon for query2",
   )
-  end_ref2 := recast.Poly_Ref(0)
-  end_nearest2 := [3]f32{}
+  end_ref2: recast.Poly_Ref
+  end_nearest2: [3]f32
   status, end_ref2, end_nearest2 = detour.find_nearest_poly(
     &query2,
     end_pos2,
@@ -526,9 +526,9 @@ test_navigation_edge_cases :: proc(t: ^testing.T) {
   // End-to-end test: Handle edge cases
   // Test 1: Empty geometry
   {
-    vertices := [][3]f32{}
-    indices := []i32{}
-    area_types := []u8{}
+    vertices: [][3]f32
+    indices: []i32
+    area_types: []u8
     config := recast.Config {
       cs              = 0.3,
       ch              = 0.2,

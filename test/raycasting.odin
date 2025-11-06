@@ -245,7 +245,7 @@ test_sphere_triangle_intersection :: proc(t: ^testing.T) {
 
 @(test)
 test_bvh_basic_raycasting :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   append(
     &primitives,
     geometry.Primitive {
@@ -300,7 +300,7 @@ test_bvh_basic_raycasting :: proc(t: ^testing.T) {
 
 @(test)
 test_bvh_single_vs_multi_raycast :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   // Create overlapping shapes along a ray path
   append(
     &primitives,
@@ -340,7 +340,7 @@ test_bvh_single_vs_multi_raycast :: proc(t: ^testing.T) {
   testing.expect(t, single_hit.hit, "Single raycast should hit")
   testing.expect_value(t, single_hit.t, 1.0) // First triangle at z=1
   // Test multi raycast - should return all hits
-  multi_hits := [dynamic]geometry.RayHit(geometry.Primitive){}
+  multi_hits: [dynamic]geometry.RayHit(geometry.Primitive)
   geometry.bvh_raycast_multi(
     &bvh,
     ray,
@@ -365,7 +365,7 @@ test_bvh_single_vs_multi_raycast :: proc(t: ^testing.T) {
 
 @(test)
 test_bvh_max_distance :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   // Triangle at distance 5
   append(
     &primitives,
@@ -399,7 +399,7 @@ test_bvh_max_distance :: proc(t: ^testing.T) {
   testing.expect(t, hit_limited.hit, "Should hit triangle within range")
   testing.expect_value(t, hit_limited.t, 5.0)
   // Test multi raycast with limited distance
-  multi_hits := [dynamic]geometry.RayHit(geometry.Primitive){}
+  multi_hits: [dynamic]geometry.RayHit(geometry.Primitive)
   geometry.bvh_raycast_multi(
     &bvh,
     ray,
@@ -425,7 +425,7 @@ test_bvh_max_distance :: proc(t: ^testing.T) {
 
 @(test)
 test_bvh_sphere_query :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   append(
     &primitives,
     geometry.Primitive {
@@ -447,7 +447,7 @@ test_bvh_sphere_query :: proc(t: ^testing.T) {
     center = {0.5, 0.5, 0},
     radius = 0.6,
   }
-  results := [dynamic]geometry.Primitive{}
+  results: [dynamic]geometry.Primitive
   geometry.bvh_query_sphere_primitives(
     &bvh,
     query_sphere,
@@ -474,7 +474,7 @@ test_bvh_sphere_query :: proc(t: ^testing.T) {
 
 @(test)
 test_bvh_aabb_query :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   // Triangle fully inside query AABB
   append(
     &primitives,
@@ -511,7 +511,7 @@ test_bvh_aabb_query :: proc(t: ^testing.T) {
     min = {0, 0, 0},
     max = {3, 3, 3},
   }
-  results := [dynamic]geometry.Primitive{}
+  results: [dynamic]geometry.Primitive
   geometry.bvh_query_aabb(&bvh, query_aabb, &results)
   testing.expect_value(t, len(results), 2)
   // Small query that finds nothing
@@ -543,7 +543,7 @@ test_bvh_empty :: proc(t: ^testing.T) {
     geometry.ray_primitive_intersection,
   )
   testing.expect(t, !hit.hit, "Empty BVH should return no hit")
-  multi_hits := [dynamic]geometry.RayHit(geometry.Primitive){}
+  multi_hits: [dynamic]geometry.RayHit(geometry.Primitive)
   geometry.bvh_raycast_multi(
     &empty_bvh,
     ray,
@@ -558,7 +558,7 @@ test_bvh_empty :: proc(t: ^testing.T) {
 
 @(test)
 test_octree_basic_raycasting :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   append(
     &primitives,
     geometry.Primitive {
@@ -622,7 +622,7 @@ test_octree_basic_raycasting :: proc(t: ^testing.T) {
 
 @(test)
 test_octree_single_vs_multi_raycast :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   // Create overlapping shapes along a ray path
   append(
     &primitives,
@@ -678,7 +678,7 @@ test_octree_single_vs_multi_raycast :: proc(t: ^testing.T) {
   testing.expect(t, single_hit.hit, "Single raycast should hit")
   testing.expect_value(t, single_hit.t, 1.0) // First triangle at z=1
   // Test multi raycast - should return all hits
-  multi_hits := [dynamic]geometry.RayHit(geometry.Primitive){}
+  multi_hits: [dynamic]geometry.RayHit(geometry.Primitive)
   geometry.octree_raycast_multi(
     &octree,
     ray,
@@ -701,7 +701,7 @@ test_octree_single_vs_multi_raycast :: proc(t: ^testing.T) {
 
 @(test)
 test_octree_sphere_query :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   append(
     &primitives,
     geometry.Primitive {
@@ -739,7 +739,7 @@ test_octree_sphere_query :: proc(t: ^testing.T) {
     center = {0.5, 0.5, 0},
     radius = 0.6,
   }
-  results := [dynamic]geometry.Primitive{}
+  results: [dynamic]geometry.Primitive
   geometry.octree_query_sphere_primitives(
     &octree,
     query_sphere,
@@ -766,7 +766,7 @@ test_octree_sphere_query :: proc(t: ^testing.T) {
 
 @(test)
 test_octree_subdivision_with_raycast :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   // Create clustered primitives to force subdivision
   for i in 0 ..< 10 {
     fi := f32(i) * 0.1
@@ -809,7 +809,7 @@ test_octree_subdivision_with_raycast :: proc(t: ^testing.T) {
     origin    = {-1, -1, -1},
     direction = linalg.normalize([3]f32{1, 1, 1}),
   }
-  multi_hits := [dynamic]geometry.RayHit(geometry.Primitive){}
+  multi_hits: [dynamic]geometry.RayHit(geometry.Primitive)
   geometry.octree_raycast_multi(
     &octree,
     ray,
@@ -857,7 +857,7 @@ test_octree_empty :: proc(t: ^testing.T) {
 
 @(test)
 test_large_scene_raycasting :: proc(t: ^testing.T) {
-  primitives := [dynamic]geometry.Primitive{}
+  primitives: [dynamic]geometry.Primitive
   // Create a grid of triangles
   grid_size := 10
   for x in 0 ..< grid_size {

@@ -797,7 +797,7 @@ build_navigation_mesh_from_world :: proc(
   resources.Handle,
   bool,
 ) #optional_ok {
-  config := recast.Config{}
+  config: recast.Config
   config.cs = cell_size
   config.ch = cell_height
   config.walkable_height = i32(math.ceil(f64(agent_height / config.ch)))

@@ -761,7 +761,7 @@ find_polys_around_shape :: proc(
   }
   result_count = 0
   // Calculate shape center
-  center := [3]f32{}
+  center: [3]f32
   for vert in verts {
     center += vert
   }

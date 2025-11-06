@@ -206,7 +206,7 @@ process_octree_updates :: proc(world: ^World, rm: ^resources.Manager) {
     // Case 2: Compute new entry from current node state
     new_position := node.transform.world_matrix[3].xyz
     new_tags := node.tags
-    new_bounds := geometry.Aabb{}
+    new_bounds: geometry.Aabb
     if .MESH in new_tags && rm != nil {
       if mesh_attachment, has_mesh := node.attachment.(MeshAttachment);
          has_mesh {

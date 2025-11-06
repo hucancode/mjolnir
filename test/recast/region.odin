@@ -326,7 +326,7 @@ test_region_merging :: proc(t: ^testing.T) {
   ok = recast.build_regions(chf, 0, 2, 50)
   testing.expect(t, hf != nil, "Building regions should succeed")
   // Count unique regions
-  unique_regions := map[u16]bool{}
+  unique_regions: map[u16]bool
   defer delete(unique_regions)
   for i in 0 ..< len(chf.spans) {
     if chf.areas[i] != recast.RC_NULL_AREA {
