@@ -1,8 +1,8 @@
 package mjolnir
 
-import cont "containers"
 import "animation"
 import "base:runtime"
+import cont "containers"
 import "core:c"
 import "core:fmt"
 import "core:log"
@@ -66,41 +66,41 @@ InputState :: struct {
 }
 
 Engine :: struct {
-  window:                 glfw.WindowHandle,
-  gctx:                   gpu.GPUContext,
-  rm:                     resources.Manager,
-  frame_index:            u32,
-  swapchain:              gpu.Swapchain,
-  world:                  world.World,
-  last_frame_timestamp:   time.Time,
-  last_update_timestamp:  time.Time,
-  start_timestamp:        time.Time,
-  input:                  InputState,
-  setup_proc:             SetupProc,
-  update_proc:            UpdateProc,
-  key_press_proc:         KeyInputProc,
-  mouse_press_proc:       MousePressProc,
-  mouse_drag_proc:        MouseDragProc,
-  mouse_move_proc:        MouseMoveProc,
-  mouse_scroll_proc:      MouseScrollProc,
-  pre_render_proc:        PreRenderProc,
-  post_render_proc:       PostRenderProc,
-  render_error_count:     u32,
-  render:                  Renderer,
-  command_buffers:         [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  compute_command_buffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  cursor_pos:              [2]i32,
-  debug_ui_enabled:       bool,
-  pending_node_deletions: [dynamic]resources.Handle,
-  pending_deletions_mutex: sync.Mutex,
-  update_thread:          Maybe(^thread.Thread),
-  update_active:          bool,
-  last_render_timestamp:  time.Time,
-  orbit_controller:       CameraController,
-  free_controller:        CameraController,
-  active_controller:      ^CameraController,
+  window:                    glfw.WindowHandle,
+  gctx:                      gpu.GPUContext,
+  rm:                        resources.Manager,
+  frame_index:               u32,
+  swapchain:                 gpu.Swapchain,
+  world:                     world.World,
+  last_frame_timestamp:      time.Time,
+  last_update_timestamp:     time.Time,
+  start_timestamp:           time.Time,
+  input:                     InputState,
+  setup_proc:                SetupProc,
+  update_proc:               UpdateProc,
+  key_press_proc:            KeyInputProc,
+  mouse_press_proc:          MousePressProc,
+  mouse_drag_proc:           MouseDragProc,
+  mouse_move_proc:           MouseMoveProc,
+  mouse_scroll_proc:         MouseScrollProc,
+  pre_render_proc:           PreRenderProc,
+  post_render_proc:          PostRenderProc,
+  render_error_count:        u32,
+  render:                    Renderer,
+  command_buffers:           [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  compute_command_buffers:   [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  cursor_pos:                [2]i32,
+  debug_ui_enabled:          bool,
+  pending_node_deletions:    [dynamic]resources.Handle,
+  pending_deletions_mutex:   sync.Mutex,
+  update_thread:             Maybe(^thread.Thread),
+  update_active:             bool,
+  last_render_timestamp:     time.Time,
+  orbit_controller:          CameraController,
+  free_controller:           CameraController,
+  active_controller:         ^CameraController,
   camera_controller_enabled: bool,
-  level_manager:          level_manager.Level_Manager,
+  level_manager:             level_manager.Level_Manager,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -186,9 +186,13 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     get_window_dpi(self.window),
   ) or_return
   if self.gctx.has_async_compute {
-    log.infof("Async compute bootstrap: both draw buffers initialized on compute queue")
+    log.infof(
+      "Async compute bootstrap: both draw buffers initialized on compute queue",
+    )
   } else {
-    log.infof("Sequential compute bootstrap: both draw buffers initialized on graphics queue")
+    log.infof(
+      "Sequential compute bootstrap: both draw buffers initialized on graphics queue",
+    )
   }
   glfw.SetKeyCallback(
     self.window,
@@ -583,7 +587,12 @@ render :: proc(self: ^Engine) -> vk.Result {
   if main_camera == nil do return .ERROR_UNKNOWN
   for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue
-    resources.camera_upload_data(&self.rm, &entry.item, u32(cam_index), self.frame_index)
+    resources.camera_upload_data(
+      &self.rm,
+      &entry.item,
+      u32(cam_index),
+      self.frame_index,
+    )
   }
   resources.update_light_shadow_camera_transforms(&self.rm, self.frame_index)
   if self.pre_render_proc != nil {
@@ -653,10 +662,16 @@ render :: proc(self: ^Engine) -> vk.Result {
       append(&camera_command_buffers, cam.lighting_commands[self.frame_index])
     }
     if resources.PassType.PARTICLES in cam.enabled_passes {
-      append(&camera_command_buffers, self.render.particles.commands[self.frame_index])
+      append(
+        &camera_command_buffers,
+        self.render.particles.commands[self.frame_index],
+      )
     }
     if resources.PassType.TRANSPARENCY in cam.enabled_passes {
-      append(&camera_command_buffers, cam.transparency_commands[self.frame_index])
+      append(
+        &camera_command_buffers,
+        cam.transparency_commands[self.frame_index],
+      )
     }
   }
   vk.CmdExecuteCommands(
@@ -757,20 +772,25 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.post_render_proc(self)
   }
   if level_manager.should_show_loading(&self.level_manager) {
-      TEXT :: "Loading..."
-	ctx := &self.render.ui.ctx
-	w := i32(self.swapchain.extent.width)
-	h := i32(self.swapchain.extent.height)
-	container_w: i32 = 400
-	container_h: i32 = 200
-	x := (w - container_w) / 2
-	y := (h - container_h) / 2
-	if mu.begin_window(ctx, "##loading", {x, y, container_w, container_h}, {.NO_TITLE, .NO_RESIZE, .NO_CLOSE, .NO_SCROLL}) {
-		mu.layout_row(ctx, {-1}, 0)
-		mu.layout_row(ctx, {-1}, 80)
-		mu.label(ctx, TEXT)
-		mu.end_window(ctx)
-	}
+    TEXT :: "Loading..."
+    ctx := &self.render.ui.ctx
+    w := i32(self.swapchain.extent.width)
+    h := i32(self.swapchain.extent.height)
+    container_w: i32 = 400
+    container_h: i32 = 200
+    x := (w - container_w) / 2
+    y := (h - container_h) / 2
+    if mu.begin_window(
+      ctx,
+      "##loading",
+      {x, y, container_w, container_h},
+      {.NO_TITLE, .NO_RESIZE, .NO_CLOSE, .NO_SCROLL},
+    ) {
+      mu.layout_row(ctx, {-1}, 0)
+      mu.layout_row(ctx, {-1}, 80)
+      mu.label(ctx, TEXT)
+      mu.end_window(ctx)
+    }
   }
   mu.end(&self.render.ui.ctx)
   if self.debug_ui_enabled {
@@ -807,11 +827,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = self.swapchain.images[self.swapchain.image_index],
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      levelCount = 1,
-      layerCount = 1,
-    },
+    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
   }
   vk.CmdPipelineBarrier(
     command_buffer,

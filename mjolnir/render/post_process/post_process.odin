@@ -574,7 +574,12 @@ shutdown :: proc(
   command_pool: vk.CommandPool,
   rm: ^resources.Manager,
 ) {
-  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
+  vk.FreeCommandBuffers(
+    device,
+    command_pool,
+    u32(len(self.commands)),
+    raw_data(self.commands[:]),
+  )
   for &p in self.pipelines {
     vk.DestroyPipeline(device, p, nil)
     p = 0
@@ -647,10 +652,7 @@ render :: proc(
     // Pass N: image[(N+1)%2] -> swapchain (src: image[(N-1)%2], dst: swapchain)
     dst_view := output_view
     if !is_last {
-      dst_texture := cont.get(
-        rm.image_2d_buffers,
-        self.images[dst_image_idx],
-      )
+      dst_texture := cont.get(rm.image_2d_buffers, self.images[dst_image_idx])
       if dst_texture == nil {
         log.errorf(
           "Post-process image handle %v not found",
@@ -998,11 +1000,7 @@ begin_record :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = swapchain_image,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      levelCount = 1,
-      layerCount = 1,
-    },
+    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
   }
   vk.CmdPipelineBarrier(
     command_buffer,

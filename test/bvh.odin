@@ -1,12 +1,12 @@
 package tests
 
-import "core:testing"
+import "../mjolnir/geometry"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:log"
-import "core:time"
 import "core:slice"
-import "../mjolnir/geometry"
+import "core:testing"
+import "core:time"
 
 BVHTestItem :: struct {
   id:     i32,
@@ -19,12 +19,9 @@ test_bvh_item_bounds :: proc(item: BVHTestItem) -> geometry.Aabb {
 
 make_test_item :: proc(id: i32, center: [3]f32, size: f32) -> BVHTestItem {
   half_size := [3]f32{size, size, size} * 0.5
-  return BVHTestItem{
+  return BVHTestItem {
     id = id,
-    bounds = geometry.Aabb{
-      min = center - half_size,
-      max = center + half_size,
-    },
+    bounds = geometry.Aabb{min = center - half_size, max = center + half_size},
   }
 }
 
@@ -36,7 +33,11 @@ test_bvh_build_empty :: proc(t: ^testing.T) {
   empty_items: []BVHTestItem
   geometry.bvh_build(&bvh, empty_items)
   testing.expect(t, len(bvh.nodes) == 0, "Empty BVH should have no nodes")
-  testing.expect(t, len(bvh.primitives) == 0, "Empty BVH should have no primitives")
+  testing.expect(
+    t,
+    len(bvh.primitives) == 0,
+    "Empty BVH should have no primitives",
+  )
 }
 
 @(test)
@@ -44,14 +45,24 @@ test_bvh_build_single_item :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
-  items := []BVHTestItem{
-    make_test_item(1, {0, 0, 0}, 2),
-  }
+  items := []BVHTestItem{make_test_item(1, {0, 0, 0}, 2)}
   geometry.bvh_build(&bvh, items)
   testing.expect(t, len(bvh.nodes) == 1, "Single item BVH should have 1 node")
-  testing.expect(t, len(bvh.primitives) == 1, "Single item BVH should have 1 primitive")
-  testing.expect(t, bvh.nodes[0].left_child == -1, "Single item node should be a leaf")
-  testing.expect(t, bvh.nodes[0].primitive_count == 1, "Single item node should have 1 primitive")
+  testing.expect(
+    t,
+    len(bvh.primitives) == 1,
+    "Single item BVH should have 1 primitive",
+  )
+  testing.expect(
+    t,
+    bvh.nodes[0].left_child == -1,
+    "Single item node should be a leaf",
+  )
+  testing.expect(
+    t,
+    bvh.nodes[0].primitive_count == 1,
+    "Single item node should have 1 primitive",
+  )
 }
 
 @(test)
@@ -59,7 +70,7 @@ test_bvh_build_multiple_items :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {-5, 0, 0}, 2),
     make_test_item(2, {5, 0, 0}, 2),
     make_test_item(3, {0, -5, 0}, 2),
@@ -68,7 +79,11 @@ test_bvh_build_multiple_items :: proc(t: ^testing.T) {
     make_test_item(6, {0, 0, 5}, 2),
   }
   geometry.bvh_build(&bvh, items, 2)
-  testing.expect(t, len(bvh.nodes) > 1, "Multiple items should create multiple nodes")
+  testing.expect(
+    t,
+    len(bvh.nodes) > 1,
+    "Multiple items should create multiple nodes",
+  )
   testing.expect(t, len(bvh.primitives) == 6, "Should have all 6 primitives")
   // Validate tree structure
   testing.expect(t, geometry.bvh_validate(&bvh), "BVH should be valid")
@@ -84,7 +99,7 @@ test_bvh_query_aabb :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
     make_test_item(2, {10, 0, 0}, 2),
     make_test_item(3, {0, 10, 0}, 2),
@@ -93,7 +108,7 @@ test_bvh_query_aabb :: proc(t: ^testing.T) {
   }
   geometry.bvh_build(&bvh, items)
   // Query near origin
-  query_bounds := geometry.Aabb{
+  query_bounds := geometry.Aabb {
     min = {-5, -5, -5},
     max = {5, 5, 5},
   }
@@ -103,7 +118,7 @@ test_bvh_query_aabb :: proc(t: ^testing.T) {
   testing.expect(t, len(results) == 1, "Should find 1 item near origin")
   testing.expect(t, results[0].id == 1, "Should find the item at origin")
   // Query larger area
-  query_bounds = geometry.Aabb{
+  query_bounds = geometry.Aabb {
     min = {-5, -5, -5},
     max = {15, 15, 15},
   }
@@ -111,7 +126,7 @@ test_bvh_query_aabb :: proc(t: ^testing.T) {
   geometry.bvh_query_aabb(&bvh, query_bounds, &results)
   testing.expect(t, len(results) == 4, "Should find 4 items in larger area")
   // Query empty area
-  query_bounds = geometry.Aabb{
+  query_bounds = geometry.Aabb {
     min = {100, 100, 100},
     max = {200, 200, 200},
   }
@@ -126,7 +141,7 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
     make_test_item(2, {5, 0, 0}, 2),
     make_test_item(3, {10, 0, 0}, 2),
@@ -135,8 +150,8 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
   }
   geometry.bvh_build(&bvh, items)
   // Ray along X axis
-  ray := geometry.Ray{
-    origin = {-10, 0, 0},
+  ray := geometry.Ray {
+    origin    = {-10, 0, 0},
     direction = {1, 0, 0},
   }
   results := make([dynamic]BVHTestItem)
@@ -144,21 +159,25 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
   geometry.bvh_query_ray(&bvh, ray, 20, &results)
   testing.expect(t, len(results) == 3, "Should find 3 items along X axis")
   // Ray along Y axis
-  ray = geometry.Ray{
-    origin = {0, -10, 0},
+  ray = geometry.Ray {
+    origin    = {0, -10, 0},
     direction = {0, 1, 0},
   }
   clear(&results)
   geometry.bvh_query_ray(&bvh, ray, 20, &results)
   testing.expect(t, len(results) == 2, "Should find 2 items along Y axis")
   // Ray that misses everything
-  ray = geometry.Ray{
-    origin = {100, 100, 100},
+  ray = geometry.Ray {
+    origin    = {100, 100, 100},
     direction = {1, 0, 0},
   }
   clear(&results)
   geometry.bvh_query_ray(&bvh, ray, 20, &results)
-  testing.expect(t, len(results) == 0, "Should find no items for ray that misses")
+  testing.expect(
+    t,
+    len(results) == 0,
+    "Should find no items for ray that misses",
+  )
 }
 
 @(test)
@@ -166,7 +185,7 @@ test_bvh_query_sphere :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
     make_test_item(2, {3, 0, 0}, 2),
     make_test_item(3, {0, 3, 0}, 2),
@@ -185,7 +204,11 @@ test_bvh_query_sphere :: proc(t: ^testing.T) {
   radius = 1.5
   clear(&results)
   geometry.bvh_query_sphere(&bvh, center, radius, &results)
-  testing.expect(t, len(results) == 1, "Should find 1 item within smaller sphere")
+  testing.expect(
+    t,
+    len(results) == 1,
+    "Should find 1 item within smaller sphere",
+  )
   testing.expect(t, results[0].id == 1, "Should find the item at origin")
   // Query sphere in empty area
   center = [3]f32{100, 100, 100}
@@ -200,7 +223,7 @@ test_bvh_query_nearest :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
     make_test_item(2, {5, 0, 0}, 2),
     make_test_item(3, {0, 5, 0}, 2),
@@ -228,7 +251,11 @@ test_bvh_query_nearest :: proc(t: ^testing.T) {
   // Query with very small max distance
   point = [3]f32{20, 20, 20}
   result, dist, found = geometry.bvh_query_nearest(&bvh, point, 1)
-  testing.expect(t, !found, "Should not find any item within small max distance")
+  testing.expect(
+    t,
+    !found,
+    "Should not find any item within small max distance",
+  )
 }
 
 @(test)
@@ -236,7 +263,7 @@ test_bvh_refit :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
     make_test_item(2, {5, 0, 0}, 2),
     make_test_item(3, {0, 5, 0}, 2),
@@ -251,10 +278,18 @@ test_bvh_refit :: proc(t: ^testing.T) {
   geometry.bvh_refit(&bvh)
   // Check that bounds have been updated
   new_bounds := bvh.nodes[0].bounds
-  testing.expect(t, new_bounds.min != original_bounds.min || new_bounds.max != original_bounds.max,
-                 "Root bounds should have changed after refit")
+  testing.expect(
+    t,
+    new_bounds.min != original_bounds.min ||
+    new_bounds.max != original_bounds.max,
+    "Root bounds should have changed after refit",
+  )
   // Tree should still be valid
-  testing.expect(t, geometry.bvh_validate(&bvh), "BVH should still be valid after refit")
+  testing.expect(
+    t,
+    geometry.bvh_validate(&bvh),
+    "BVH should still be valid after refit",
+  )
 }
 
 @(test)
@@ -262,7 +297,7 @@ test_bvh_validate :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
     make_test_item(2, {5, 0, 0}, 2),
     make_test_item(3, {0, 5, 0}, 2),
@@ -287,7 +322,7 @@ test_bvh_stats :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 2),
     make_test_item(2, {5, 0, 0}, 2),
     make_test_item(3, {0, 5, 0}, 2),
@@ -299,9 +334,16 @@ test_bvh_stats :: proc(t: ^testing.T) {
   testing.expect(t, stats.total_nodes > 0, "Should have nodes")
   testing.expect(t, stats.leaf_nodes > 0, "Should have leaf nodes")
   testing.expect(t, stats.total_primitives == 5, "Should have all primitives")
-  testing.expect(t, stats.max_leaf_size <= 2, "Max leaf size should respect limit")
-  testing.expect(t, stats.total_nodes == stats.leaf_nodes + stats.internal_nodes,
-                 "Total nodes should equal leaf + internal nodes")
+  testing.expect(
+    t,
+    stats.max_leaf_size <= 2,
+    "Max leaf size should respect limit",
+  )
+  testing.expect(
+    t,
+    stats.total_nodes == stats.leaf_nodes + stats.internal_nodes,
+    "Total nodes should equal leaf + internal nodes",
+  )
 }
 
 @(test)
@@ -313,7 +355,7 @@ test_bvh_large_dataset :: proc(t: ^testing.T) {
   item_count := 1000
   items := make([]BVHTestItem, item_count)
   defer delete(items)
-  for i in 0..<item_count {
+  for i in 0 ..< item_count {
     x := f32(i % 10) * 2 - 10
     y := f32((i / 10) % 10) * 2 - 10
     z := f32((i / 100) % 10) * 2 - 10
@@ -324,7 +366,7 @@ test_bvh_large_dataset :: proc(t: ^testing.T) {
   testing.expect(t, len(bvh.primitives) == item_count, "Should have all items")
   testing.expect(t, geometry.bvh_validate(&bvh), "Large BVH should be valid")
   // Query a small region and verify performance
-  query_bounds := geometry.Aabb{
+  query_bounds := geometry.Aabb {
     min = {-2, -2, -2},
     max = {2, 2, 2},
   }
@@ -335,11 +377,18 @@ test_bvh_large_dataset :: proc(t: ^testing.T) {
   testing.expect(t, len(results) < item_count, "Should not find all items")
   // Verify found items are actually in the query region
   for item in results {
-    testing.expect(t, geometry.aabb_intersects(item.bounds, query_bounds),
-                   "All found items should intersect query bounds")
+    testing.expect(
+      t,
+      geometry.aabb_intersects(item.bounds, query_bounds),
+      "All found items should intersect query bounds",
+    )
   }
   stats := geometry.bvh_get_stats(&bvh)
-  testing.expect(t, stats.total_nodes > 1, "Large dataset should create multiple nodes")
+  testing.expect(
+    t,
+    stats.total_nodes > 1,
+    "Large dataset should create multiple nodes",
+  )
   testing.expect(t, stats.leaf_nodes > 0, "Should have leaf nodes")
   testing.expect(t, stats.internal_nodes > 0, "Should have internal nodes")
 }
@@ -350,7 +399,7 @@ test_bvh_sah_splitting :: proc(t: ^testing.T) {
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
   // Create items that should benefit from SAH splitting
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 1),
     make_test_item(2, {1, 0, 0}, 1),
     make_test_item(3, {2, 0, 0}, 1),
@@ -359,9 +408,13 @@ test_bvh_sah_splitting :: proc(t: ^testing.T) {
     make_test_item(6, {100, 100, 100}, 1),
   }
   geometry.bvh_build(&bvh, items, 2)
-  testing.expect(t, geometry.bvh_validate(&bvh), "SAH-built BVH should be valid")
+  testing.expect(
+    t,
+    geometry.bvh_validate(&bvh),
+    "SAH-built BVH should be valid",
+  )
   // Query for tightly packed items
-  query_bounds := geometry.Aabb{
+  query_bounds := geometry.Aabb {
     min = {-1, -1, -1},
     max = {5, 1, 1},
   }
@@ -370,7 +423,7 @@ test_bvh_sah_splitting :: proc(t: ^testing.T) {
   geometry.bvh_query_aabb(&bvh, query_bounds, &results)
   testing.expect(t, len(results) == 5, "Should find 5 tightly packed items")
   // Query for isolated item
-  query_bounds = geometry.Aabb{
+  query_bounds = geometry.Aabb {
     min = {99, 99, 99},
     max = {101, 101, 101},
   }
@@ -388,23 +441,31 @@ test_bvh_edge_cases :: proc(t: ^testing.T) {
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
   // Test with identical positions
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 1),
     make_test_item(2, {0, 0, 0}, 1),
     make_test_item(3, {0, 0, 0}, 1),
   }
   geometry.bvh_build(&bvh, items)
-  testing.expect(t, geometry.bvh_validate(&bvh), "BVH with identical positions should be valid")
+  testing.expect(
+    t,
+    geometry.bvh_validate(&bvh),
+    "BVH with identical positions should be valid",
+  )
   testing.expect(t, len(bvh.primitives) == 3, "Should have all 3 primitives")
   // Query should find all items
-  query_bounds := geometry.Aabb{
+  query_bounds := geometry.Aabb {
     min = {-1, -1, -1},
     max = {1, 1, 1},
   }
   results := make([dynamic]BVHTestItem)
   defer delete(results)
   geometry.bvh_query_aabb(&bvh, query_bounds, &results)
-  testing.expect(t, len(results) == 3, "Should find all 3 items at same position")
+  testing.expect(
+    t,
+    len(results) == 3,
+    "Should find all 3 items at same position",
+  )
 }
 
 @(test)
@@ -413,16 +474,20 @@ test_bvh_degenerate_cases :: proc(t: ^testing.T) {
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
   // Test with zero-volume items
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0, 0, 0}, 0),
     make_test_item(2, {1, 0, 0}, 0),
     make_test_item(3, {0, 1, 0}, 0),
   }
   geometry.bvh_build(&bvh, items)
-  testing.expect(t, geometry.bvh_validate(&bvh), "BVH with zero-volume items should be valid")
+  testing.expect(
+    t,
+    geometry.bvh_validate(&bvh),
+    "BVH with zero-volume items should be valid",
+  )
   testing.expect(t, len(bvh.primitives) == 3, "Should have all 3 primitives")
   // Query should still work
-  query_bounds := geometry.Aabb{
+  query_bounds := geometry.Aabb {
     min = {-0.5, -0.5, -0.5},
     max = {0.5, 0.5, 0.5},
   }
@@ -439,15 +504,23 @@ test_bvh_memory_management :: proc(t: ^testing.T) {
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
   // Test multiple builds don't leak memory
-  for iteration in 0..<3 {
-    items := []BVHTestItem{
+  for iteration in 0 ..< 3 {
+    items := []BVHTestItem {
       make_test_item(1, {0, 0, 0}, 1),
       make_test_item(2, {1, 0, 0}, 1),
       make_test_item(3, {0, 1, 0}, 1),
     }
     geometry.bvh_build(&bvh, items)
-    testing.expect(t, len(bvh.primitives) == 3, "Should have 3 primitives after rebuild")
-    testing.expect(t, geometry.bvh_validate(&bvh), "BVH should be valid after rebuild")
+    testing.expect(
+      t,
+      len(bvh.primitives) == 3,
+      "Should have 3 primitives after rebuild",
+    )
+    testing.expect(
+      t,
+      geometry.bvh_validate(&bvh),
+      "BVH should be valid after rebuild",
+    )
   }
 }
 
@@ -457,16 +530,20 @@ test_bvh_precision :: proc(t: ^testing.T) {
   bvh.bounds_func = test_bvh_item_bounds
   defer geometry.bvh_destroy(&bvh)
   // Test with very small and very large coordinates
-  items := []BVHTestItem{
+  items := []BVHTestItem {
     make_test_item(1, {0.0001, 0.0001, 0.0001}, 0.0001),
     make_test_item(2, {1000000, 1000000, 1000000}, 1000),
     make_test_item(3, {-1000000, -1000000, -1000000}, 1000),
   }
   geometry.bvh_build(&bvh, items)
-  testing.expect(t, geometry.bvh_validate(&bvh), "BVH with extreme coordinates should be valid")
+  testing.expect(
+    t,
+    geometry.bvh_validate(&bvh),
+    "BVH with extreme coordinates should be valid",
+  )
   testing.expect(t, len(bvh.primitives) == 3, "Should have all 3 primitives")
   // Query for small item
-  query_bounds := geometry.Aabb{
+  query_bounds := geometry.Aabb {
     min = {0, 0, 0},
     max = {0.001, 0.001, 0.001},
   }
@@ -479,7 +556,7 @@ test_bvh_precision :: proc(t: ^testing.T) {
 
 @(test)
 bvh_build_benchmark :: proc(t: ^testing.T) {
-    bench_proc :: proc(
+  bench_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
@@ -500,9 +577,9 @@ bvh_build_benchmark :: proc(t: ^testing.T) {
   // Generate items in a large cube for realistic distribution
   cube_size := 200
   for i in 0 ..< item_count {
-    x := f32(i % cube_size - cube_size/2) * 2
-    y := f32((i / cube_size) % cube_size - cube_size/2) * 2
-    z := f32((i / (cube_size * cube_size)) % cube_size - cube_size/2) * 2
+    x := f32(i % cube_size - cube_size / 2) * 2
+    y := f32((i / cube_size) % cube_size - cube_size / 2) * 2
+    z := f32((i / (cube_size * cube_size)) % cube_size - cube_size / 2) * 2
     items[i] = make_test_item(i32(i), {x, y, z}, 1.5)
   }
   options := &time.Benchmark_Options {
@@ -537,12 +614,14 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
       x := f32(i % 200 - 100) * 1.8
       y := f32((i / 200) % 200 - 100) * 1.8
       z := f32((i / 40000) % 200 - 100) * 1.8
-      items[i] = make_test_item(i32(i), {x, y, z}, 1.2,
-)
+      items[i] = make_test_item(i32(i), {x, y, z}, 1.2)
     }
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
+    options.input = slice.bytes_from_ptr(
+      bvh_ptr,
+      size_of(^geometry.BVH(BVHTestItem)),
+    )
     return nil
   }
   bench_proc :: proc(
@@ -604,12 +683,14 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
       x := f32(i % 60 - 30) * 2.5
       y := f32((i / 60) % 60 - 30) * 2.5
       z := f32((i / 3600) % 60 - 30) * 2.5
-      items[i] = make_test_item(i32(i), {x, y, z}, 1.8,
-)
+      items[i] = make_test_item(i32(i), {x, y, z}, 1.8)
     }
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
+    options.input = slice.bytes_from_ptr(
+      bvh_ptr,
+      size_of(^geometry.BVH(BVHTestItem)),
+    )
     return nil
   }
   bench_proc :: proc(
@@ -622,7 +703,7 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
     for i in 0 ..< options.rounds {
       angle := f32(i) * 0.001
       ray := geometry.Ray {
-        origin = {-50 + f32(i % 100) * 0.1, -50 + f32(i % 100) * 0.1, -50},
+        origin    = {-50 + f32(i % 100) * 0.1, -50 + f32(i % 100) * 0.1, -50},
         direction = {math.cos(angle), math.sin(angle), 0.8},
       }
       geometry.bvh_query_ray(bvh_ptr, ray, 200, &results)
@@ -670,12 +751,14 @@ bvh_nearest_benchmark :: proc(t: ^testing.T) {
       x := f32(i % 40 - 20) * 3
       y := f32((i / 40) % 40 - 20) * 3
       z := f32((i / 1600) % 40 - 20) * 3
-      items[i] = make_test_item(i32(i), {x, y, z}, 2,
-)
+      items[i] = make_test_item(i32(i), {x, y, z}, 2)
     }
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
+    options.input = slice.bytes_from_ptr(
+      bvh_ptr,
+      size_of(^geometry.BVH(BVHTestItem)),
+    )
     return nil
   }
   bench_proc :: proc(
@@ -684,7 +767,7 @@ bvh_nearest_benchmark :: proc(t: ^testing.T) {
   ) -> time.Benchmark_Error {
     bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
     for i in 0 ..< options.rounds {
-      query_point := [3]f32{
+      query_point := [3]f32 {
         f32(i % 80 - 40) * 0.8,
         f32((i / 80) % 80 - 40) * 0.8,
         f32((i / 6400) % 80 - 40) * 0.8,
@@ -736,12 +819,14 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
       x := f32(i % 50 - 75) * 1.5
       y := f32((i / 50) % 50 - 75) * 1.5
       z := f32((i / 2500) % 50 - 75) * 1.5
-      items[i] = make_test_item(i32(i), {x, y, z}, 1,
-)
+      items[i] = make_test_item(i32(i), {x, y, z}, 1)
     }
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
+    options.input = slice.bytes_from_ptr(
+      bvh_ptr,
+      size_of(^geometry.BVH(BVHTestItem)),
+    )
     return nil
   }
   bench_proc :: proc(
@@ -802,12 +887,14 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
       x := f32(i % 30 - 15) * 4
       y := f32((i / 30) % 30 - 15) * 4
       z := f32((i / 900) % 30 - 15) * 4
-      items[i] = make_test_item(i32(i), {x, y, z}, 2.5,
-)
+      items[i] = make_test_item(i32(i), {x, y, z}, 2.5)
     }
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
+    options.input = slice.bytes_from_ptr(
+      bvh_ptr,
+      size_of(^geometry.BVH(BVHTestItem)),
+    )
     return nil
   }
   bench_proc :: proc(

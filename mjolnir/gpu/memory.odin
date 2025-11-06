@@ -398,11 +398,7 @@ copy_image :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = dst.image,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      levelCount = 1,
-      layerCount = 1,
-    },
+    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
   }
   vk.CmdPipelineBarrier(
     cmd_buffer,
@@ -448,11 +444,7 @@ copy_image :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = dst.image,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      levelCount = 1,
-      layerCount = 1,
-    },
+    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
   }
   vk.CmdPipelineBarrier(
     cmd_buffer,
@@ -486,11 +478,7 @@ copy_image_for_mips :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = dst.image,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      levelCount = 1,
-      layerCount = 1,
-    },
+    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
   }
   vk.CmdPipelineBarrier(
     cmd_buffer,
@@ -566,7 +554,12 @@ create_image_buffer :: proc(
       image = img.image,
       viewType = .D2,
       format = format,
-      components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+      components = {
+        r = .IDENTITY,
+        g = .IDENTITY,
+        b = .IDENTITY,
+        a = .IDENTITY,
+      },
       subresourceRange = {
         aspectMask = aspect_mask,
         levelCount = 1,
@@ -638,11 +631,7 @@ depth_image_init :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = img_buffer.image,
-    subresourceRange = {
-      aspectMask = {.DEPTH},
-      levelCount = 1,
-      layerCount = 1,
-    },
+    subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 1},
     srcAccessMask = {}, // No source access needed for UNDEFINED -> WRITE
     dstAccessMask = {
       .DEPTH_STENCIL_ATTACHMENT_READ,
@@ -669,7 +658,12 @@ depth_image_init :: proc(
       image = img_buffer.image,
       viewType = .D2,
       format = img_buffer.format,
-      components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+      components = {
+        r = .IDENTITY,
+        g = .IDENTITY,
+        b = .IDENTITY,
+        a = .IDENTITY,
+      },
       subresourceRange = {
         aspectMask = {.DEPTH},
         levelCount = 1,

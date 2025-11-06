@@ -37,7 +37,9 @@ test_sample_step_interpolation :: proc(t: ^testing.T) {
 
 @(test)
 test_sample_step_interpolation_single_frame :: proc(t: ^testing.T) {
-  frames := []animation.Keyframe(f32){animation.StepKeyframe(f32){time = 1.0, value = 42.0}}
+  frames := []animation.Keyframe(f32) {
+    animation.StepKeyframe(f32){time = 1.0, value = 42.0},
+  }
   testing.expect_value(t, animation.keyframe_sample(frames, 0.0, 0.0), 42.0)
   testing.expect_value(t, animation.keyframe_sample(frames, 1.0, 0.0), 42.0)
   testing.expect_value(t, animation.keyframe_sample(frames, 2.0, 0.0), 42.0)
@@ -46,46 +48,116 @@ test_sample_step_interpolation_single_frame :: proc(t: ^testing.T) {
 @(test)
 test_sample_cubic_spline_interpolation :: proc(t: ^testing.T) {
   frames := []animation.Keyframe(f32) {
-    animation.CubicSplineKeyframe(f32){time = 0.0, in_tangent = 0.0, value = 0.0, out_tangent = 5.0},
-    animation.CubicSplineKeyframe(f32){time = 1.0, in_tangent = 5.0, value = 10.0, out_tangent = 0.0},
+    animation.CubicSplineKeyframe(f32) {
+      time = 0.0,
+      in_tangent = 0.0,
+      value = 0.0,
+      out_tangent = 5.0,
+    },
+    animation.CubicSplineKeyframe(f32) {
+      time = 1.0,
+      in_tangent = 5.0,
+      value = 10.0,
+      out_tangent = 0.0,
+    },
   }
   testing.expect_value(t, animation.keyframe_sample(frames, 0.0, 0.0), 0.0)
   testing.expect_value(t, animation.keyframe_sample(frames, 1.0, 0.0), 10.0)
   mid := animation.keyframe_sample(frames, 0.5, 0.0)
-  testing.expect(t, mid > 0.0 && mid < 10.0, "Cubic interpolation should produce smooth curve")
+  testing.expect(
+    t,
+    mid > 0.0 && mid < 10.0,
+    "Cubic interpolation should produce smooth curve",
+  )
 }
 
 @(test)
 test_sample_cubic_spline_vector_interpolation :: proc(t: ^testing.T) {
   frames := []animation.Keyframe([3]f32) {
-    animation.CubicSplineKeyframe([3]f32){time = 0.0, in_tangent = {0, 0, 0}, value = {0, 0, 0}, out_tangent = {1, 2, 3}},
-    animation.CubicSplineKeyframe([3]f32){time = 1.0, in_tangent = {1, 2, 3}, value = {10, 20, 30}, out_tangent = {0, 0, 0}},
+    animation.CubicSplineKeyframe([3]f32) {
+      time = 0.0,
+      in_tangent = {0, 0, 0},
+      value = {0, 0, 0},
+      out_tangent = {1, 2, 3},
+    },
+    animation.CubicSplineKeyframe([3]f32) {
+      time = 1.0,
+      in_tangent = {1, 2, 3},
+      value = {10, 20, 30},
+      out_tangent = {0, 0, 0},
+    },
   }
   result_start := animation.keyframe_sample(frames, 0.0, [3]f32{0, 0, 0})
   testing.expect_value(t, result_start, [3]f32{0, 0, 0})
   result_end := animation.keyframe_sample(frames, 1.0, [3]f32{0, 0, 0})
   testing.expect_value(t, result_end, [3]f32{10, 20, 30})
   result_mid := animation.keyframe_sample(frames, 0.5, [3]f32{0, 0, 0})
-  testing.expect(t, result_mid.x > 0 && result_mid.x < 10, "X component should be interpolated")
-  testing.expect(t, result_mid.y > 0 && result_mid.y < 20, "Y component should be interpolated")
-  testing.expect(t, result_mid.z > 0 && result_mid.z < 30, "Z component should be interpolated")
+  testing.expect(
+    t,
+    result_mid.x > 0 && result_mid.x < 10,
+    "X component should be interpolated",
+  )
+  testing.expect(
+    t,
+    result_mid.y > 0 && result_mid.y < 20,
+    "Y component should be interpolated",
+  )
+  testing.expect(
+    t,
+    result_mid.z > 0 && result_mid.z < 30,
+    "Z component should be interpolated",
+  )
 }
 
 @(test)
 test_sample_cubic_spline_quaternion_interpolation :: proc(t: ^testing.T) {
   q1 := linalg.quaternion_angle_axis_f32(0, {0, 0, 1})
-  q2 := linalg.quaternion_angle_axis_f32(math.PI/2, {0, 0, 1})
+  q2 := linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
   tangent: quaternion128 = quaternion(w = 0, x = 0, y = 0, z = 0.5)
   frames := []animation.Keyframe(quaternion128) {
-    animation.CubicSplineKeyframe(quaternion128){time = 0.0, in_tangent = tangent, value = q1, out_tangent = tangent},
-    animation.CubicSplineKeyframe(quaternion128){time = 1.0, in_tangent = tangent, value = q2, out_tangent = tangent},
+    animation.CubicSplineKeyframe(quaternion128) {
+      time = 0.0,
+      in_tangent = tangent,
+      value = q1,
+      out_tangent = tangent,
+    },
+    animation.CubicSplineKeyframe(quaternion128) {
+      time = 1.0,
+      in_tangent = tangent,
+      value = q2,
+      out_tangent = tangent,
+    },
   }
-  result_start := animation.keyframe_sample(frames, 0.0, linalg.QUATERNIONF32_IDENTITY)
-  testing.expect(t, almost_equal_quaternion(result_start, q1), "Should match first keyframe")
-  result_end := animation.keyframe_sample(frames, 1.0, linalg.QUATERNIONF32_IDENTITY)
-  testing.expect(t, almost_equal_quaternion(result_end, q2), "Should match second keyframe")
-  result_mid := animation.keyframe_sample(frames, 0.5, linalg.QUATERNIONF32_IDENTITY)
-  length_sq := result_mid.w*result_mid.w + result_mid.x*result_mid.x + result_mid.y*result_mid.y + result_mid.z*result_mid.z
+  result_start := animation.keyframe_sample(
+    frames,
+    0.0,
+    linalg.QUATERNIONF32_IDENTITY,
+  )
+  testing.expect(
+    t,
+    almost_equal_quaternion(result_start, q1),
+    "Should match first keyframe",
+  )
+  result_end := animation.keyframe_sample(
+    frames,
+    1.0,
+    linalg.QUATERNIONF32_IDENTITY,
+  )
+  testing.expect(
+    t,
+    almost_equal_quaternion(result_end, q2),
+    "Should match second keyframe",
+  )
+  result_mid := animation.keyframe_sample(
+    frames,
+    0.5,
+    linalg.QUATERNIONF32_IDENTITY,
+  )
+  length_sq :=
+    result_mid.w * result_mid.w +
+    result_mid.x * result_mid.x +
+    result_mid.y * result_mid.y +
+    result_mid.z * result_mid.z
   testing.expect(t, length_sq > 0.8, "Quaternion should be normalized")
 }
 
@@ -100,7 +172,9 @@ test_sample_no_data :: proc(t: ^testing.T) {
 
 @(test)
 test_sample_one_data_point :: proc(t: ^testing.T) {
-  frames := []animation.Keyframe(f32){animation.LinearKeyframe(f32){time = 0.0, value = 42.0}}
+  frames := []animation.Keyframe(f32) {
+    animation.LinearKeyframe(f32){time = 0.0, value = 42.0},
+  }
   result := animation.keyframe_sample(frames, 0.0, 0.0)
   testing.expect_value(t, result, 42.0)
   result = animation.keyframe_sample(frames, 1.0, 0.0)
@@ -207,22 +281,38 @@ test_quaternion_sampling :: proc(t: ^testing.T) {
   // exact matches
   testing.expect(
     t,
-    almost_equal_quaternion(animation.keyframe_sample(frames, 0.0, linalg.QUATERNIONF32_IDENTITY), q1),
+    almost_equal_quaternion(
+      animation.keyframe_sample(frames, 0.0, linalg.QUATERNIONF32_IDENTITY),
+      q1,
+    ),
   )
   testing.expect(
     t,
-    almost_equal_quaternion(animation.keyframe_sample(frames, 1.0, linalg.QUATERNIONF32_IDENTITY), q2),
+    almost_equal_quaternion(
+      animation.keyframe_sample(frames, 1.0, linalg.QUATERNIONF32_IDENTITY),
+      q2,
+    ),
   )
   testing.expect(
     t,
-    almost_equal_quaternion(animation.keyframe_sample(frames, 2.0, linalg.QUATERNIONF32_IDENTITY), q3),
+    almost_equal_quaternion(
+      animation.keyframe_sample(frames, 2.0, linalg.QUATERNIONF32_IDENTITY),
+      q3,
+    ),
   )
   testing.expect(
     t,
-    almost_equal_quaternion(animation.keyframe_sample(frames, 3.0, linalg.QUATERNIONF32_IDENTITY), q4),
+    almost_equal_quaternion(
+      animation.keyframe_sample(frames, 3.0, linalg.QUATERNIONF32_IDENTITY),
+      q4,
+    ),
   )
   // interpolation
-  half_rot := animation.keyframe_sample(frames, 0.5, linalg.QUATERNIONF32_IDENTITY)
+  half_rot := animation.keyframe_sample(
+    frames,
+    0.5,
+    linalg.QUATERNIONF32_IDENTITY,
+  )
   expected_half := linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
   testing.expect(t, almost_equal_quaternion(half_rot, expected_half))
 }
@@ -241,16 +331,56 @@ test_channel_init_linear :: proc(t: ^testing.T) {
   testing.expect_value(t, len(clip.channels[0].positions), 4)
   testing.expect_value(t, len(clip.channels[0].rotations), 3)
   testing.expect_value(t, len(clip.channels[0].scales), 2)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].positions[0]), 0.0)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].positions[1]), 1.0)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].positions[2]), 2.0)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].positions[3]), 3.0)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].rotations[0]), 0.0)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].rotations[1]), 1.5)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].rotations[2]), 3.0)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].scales[0]), 0.0)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].scales[1]), 3.0)
-  testing.expect_value(t, animation.keyframe_value(clip.channels[0].positions[0]), [3]f32{0, 0, 0})
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].positions[0]),
+    0.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].positions[1]),
+    1.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].positions[2]),
+    2.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].positions[3]),
+    3.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].rotations[0]),
+    0.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].rotations[1]),
+    1.5,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].rotations[2]),
+    3.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].scales[0]),
+    0.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].scales[1]),
+    3.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_value(clip.channels[0].positions[0]),
+    [3]f32{0, 0, 0},
+  )
   testing.expect(
     t,
     almost_equal_quaternion(
@@ -258,7 +388,11 @@ test_channel_init_linear :: proc(t: ^testing.T) {
       linalg.QUATERNIONF32_IDENTITY,
     ),
   )
-  testing.expect_value(t, animation.keyframe_value(clip.channels[0].scales[0]), [3]f32{1, 1, 1})
+  testing.expect_value(
+    t,
+    animation.keyframe_value(clip.channels[0].scales[0]),
+    [3]f32{1, 1, 1},
+  )
 }
 
 @(test)
@@ -272,9 +406,21 @@ test_channel_init_cubic :: proc(t: ^testing.T) {
     duration = clip.duration,
   )
   testing.expect_value(t, len(clip.channels[0].positions), 3)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].positions[0]), 0.0)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].positions[1]), 1.0)
-  testing.expect_value(t, animation.keyframe_time(clip.channels[0].positions[2]), 2.0)
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].positions[0]),
+    0.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].positions[1]),
+    1.0,
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_time(clip.channels[0].positions[2]),
+    2.0,
+  )
   // Check that the keyframes are CubicSplineKeyframe type
   switch kf in clip.channels[0].positions[0] {
   case animation.CubicSplineKeyframe([3]f32):
@@ -301,31 +447,33 @@ test_channel_init_modify_and_sample :: proc(t: ^testing.T) {
   case animation.LinearKeyframe([3]f32):
     kf.value = [3]f32{0, 0, 0}
   case animation.StepKeyframe([3]f32), animation.CubicSplineKeyframe([3]f32):
-    // Not expected for this test
+  // Not expected for this test
   }
   switch &kf in clip.channels[0].positions[1] {
   case animation.LinearKeyframe([3]f32):
     kf.value = [3]f32{1, 2, 3}
   case animation.StepKeyframe([3]f32), animation.CubicSplineKeyframe([3]f32):
-    // Not expected for this test
+  // Not expected for this test
   }
   switch &kf in clip.channels[0].positions[2] {
   case animation.LinearKeyframe([3]f32):
     kf.value = [3]f32{2, 4, 6}
   case animation.StepKeyframe([3]f32), animation.CubicSplineKeyframe([3]f32):
-    // Not expected for this test
+  // Not expected for this test
   }
   switch &kf in clip.channels[0].rotations[0] {
   case animation.LinearKeyframe(quaternion128):
     kf.value = linalg.quaternion_angle_axis_f32(0, {0, 0, 1})
-  case animation.StepKeyframe(quaternion128), animation.CubicSplineKeyframe(quaternion128):
-    // Not expected for this test
+  case animation.StepKeyframe(quaternion128),
+       animation.CubicSplineKeyframe(quaternion128):
+  // Not expected for this test
   }
   switch &kf in clip.channels[0].rotations[1] {
   case animation.LinearKeyframe(quaternion128):
     kf.value = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
-  case animation.StepKeyframe(quaternion128), animation.CubicSplineKeyframe(quaternion128):
-    // Not expected for this test
+  case animation.StepKeyframe(quaternion128),
+       animation.CubicSplineKeyframe(quaternion128):
+  // Not expected for this test
   }
   p, r, s := animation.channel_sample_all(clip.channels[0], 1.0)
   testing.expect_value(t, p, [3]f32{1, 2, 3})
@@ -374,18 +522,14 @@ animation_sample_benchmark :: proc(t: ^testing.T) {
         FRAME_COUNT,
         allocator,
       )
-      anim.scale = make(
-        []animation.Keyframe([4]f32),
-        FRAME_COUNT,
-        allocator,
-      )
+      anim.scale = make([]animation.Keyframe([4]f32), FRAME_COUNT, allocator)
       for i in 0 ..< FRAME_COUNT {
         anim.position[i] = animation.LinearKeyframe([4]f32) {
-          time = f32(i) * time_step,
+          time  = f32(i) * time_step,
           value = [4]f32{f32(i), f32(i), f32(i), f32(i)} * value_step,
         }
         anim.rotation[i] = animation.LinearKeyframe(quaternion128) {
-          time = f32(i) * time_step,
+          time  = f32(i) * time_step,
           value = quaternion(
             x = f32(i) * value_step,
             y = f32(i) * value_step,
@@ -394,7 +538,7 @@ animation_sample_benchmark :: proc(t: ^testing.T) {
           ),
         }
         anim.scale[i] = animation.LinearKeyframe([4]f32) {
-          time = f32(i) * time_step,
+          time  = f32(i) * time_step,
           value = [4]f32{f32(i), f32(i), f32(i), f32(i)} * value_step,
         }
       }
@@ -408,8 +552,16 @@ animation_sample_benchmark :: proc(t: ^testing.T) {
       anim := cast(^Animation)(raw_data(options.input))
       for i in 0 ..< options.rounds {
         sample_time := DURATION * f32(i % 100) / 100.0
-        animation.keyframe_sample(anim.position, sample_time, [4]f32{0, 0, 0, 0})
-        animation.keyframe_sample(anim.rotation, sample_time, linalg.QUATERNIONF32_IDENTITY)
+        animation.keyframe_sample(
+          anim.position,
+          sample_time,
+          [4]f32{0, 0, 0, 0},
+        )
+        animation.keyframe_sample(
+          anim.rotation,
+          sample_time,
+          linalg.QUATERNIONF32_IDENTITY,
+        )
         animation.keyframe_sample(anim.scale, sample_time, [4]f32{1, 1, 1, 1})
         options.processed += size_of(Transform)
         options.count += 1
@@ -447,10 +599,16 @@ test_node_animation_channel_sampling :: proc(t: ^testing.T) {
       animation.LinearKeyframe([3]f32){time = 1.0, value = {10, 0, 0}},
     },
     rotations = []animation.Keyframe(quaternion128) {
-      animation.LinearKeyframe(quaternion128){time = 0.0, value = linalg.QUATERNIONF32_IDENTITY},
-      animation.LinearKeyframe(quaternion128){time = 1.0, value = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 1, 0})},
+      animation.LinearKeyframe(quaternion128) {
+        time = 0.0,
+        value = linalg.QUATERNIONF32_IDENTITY,
+      },
+      animation.LinearKeyframe(quaternion128) {
+        time = 1.0,
+        value = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 1, 0}),
+      },
     },
-    scales = []animation.Keyframe([3]f32) {
+    scales    = []animation.Keyframe([3]f32) {
       animation.LinearKeyframe([3]f32){time = 0.0, value = {1, 1, 1}},
       animation.LinearKeyframe([3]f32){time = 1.0, value = {2, 2, 2}},
     },
@@ -476,7 +634,7 @@ test_node_animation_channel_sampling :: proc(t: ^testing.T) {
 test_node_animation_instance_update :: proc(t: ^testing.T) {
   // Create a clip with 2 second duration
   clip := animation.Clip {
-    name = "test_clip",
+    name     = "test_clip",
     duration = 2.0,
     channels = make([]animation.Channel, 1),
   }
@@ -489,12 +647,12 @@ test_node_animation_instance_update :: proc(t: ^testing.T) {
 
   // Create instance
   instance := animation.Instance {
-    clip = &clip,
-    mode = .LOOP,
-    status = .PLAYING,
-    time = 0.0,
+    clip     = &clip,
+    mode     = .LOOP,
+    status   = .PLAYING,
+    time     = 0.0,
     duration = clip.duration,
-    speed = 1.0,
+    speed    = 1.0,
   }
 
   // Update by 0.5 seconds
@@ -507,7 +665,11 @@ test_node_animation_instance_update :: proc(t: ^testing.T) {
 
   // Update by 1.0 second (should wrap to 0.5 in loop mode)
   animation.instance_update(&instance, 1.0)
-  testing.expect(t, instance.time > 0.4 && instance.time < 0.6, "Time should wrap in loop mode")
+  testing.expect(
+    t,
+    instance.time > 0.4 && instance.time < 0.6,
+    "Time should wrap in loop mode",
+  )
 
   delete(clip.channels)
 }
@@ -515,19 +677,19 @@ test_node_animation_instance_update :: proc(t: ^testing.T) {
 @(test)
 test_node_animation_playback_modes :: proc(t: ^testing.T) {
   clip := animation.Clip {
-    name = "test_clip",
+    name     = "test_clip",
     duration = 1.0,
     channels = nil,
   }
 
   // Test LOOP mode
   instance_loop := animation.Instance {
-    clip = &clip,
-    mode = .LOOP,
-    status = .PLAYING,
-    time = 0.0,
+    clip     = &clip,
+    mode     = .LOOP,
+    status   = .PLAYING,
+    time     = 0.0,
     duration = 1.0,
-    speed = 1.0,
+    speed    = 1.0,
   }
   animation.instance_update(&instance_loop, 1.5)
   testing.expect(t, instance_loop.time < 1.0, "Loop mode should wrap")
@@ -535,17 +697,25 @@ test_node_animation_playback_modes :: proc(t: ^testing.T) {
 
   // Test PING_PONG mode
   instance_ping_pong := animation.Instance {
-    clip = &clip,
-    mode = .PING_PONG,
-    status = .PLAYING,
-    time = 0.0,
+    clip     = &clip,
+    mode     = .PING_PONG,
+    status   = .PLAYING,
+    time     = 0.0,
     duration = 1.0,
-    speed = 1.0,
+    speed    = 1.0,
   }
   // Update past duration, should reverse direction
   animation.instance_update(&instance_ping_pong, 1.5)
-  testing.expect(t, instance_ping_pong.time > 0.0, "Ping pong should go forward then reverse")
-  testing.expect(t, instance_ping_pong.speed < 0, "Ping pong should reverse speed")
+  testing.expect(
+    t,
+    instance_ping_pong.time > 0.0,
+    "Ping pong should go forward then reverse",
+  )
+  testing.expect(
+    t,
+    instance_ping_pong.speed < 0,
+    "Ping pong should reverse speed",
+  )
 }
 
 @(test)
@@ -605,8 +775,16 @@ test_tween_quad_in_out :: proc(t: ^testing.T) {
   testing.expect_value(t, result, 0.5)
   testing.expect_value(t, animation.sample(0.0, 0, 1, .QuadInOut), 0.0)
   testing.expect_value(t, animation.sample(1.0, 0, 1, .QuadInOut), 1.0)
-  testing.expect(t, animation.sample(0.25, 0, 1, .QuadInOut) < 0.25, "Should accelerate in first half")
-  testing.expect(t, animation.sample(0.75, 0, 1, .QuadInOut) > 0.75, "Should decelerate in second half")
+  testing.expect(
+    t,
+    animation.sample(0.25, 0, 1, .QuadInOut) < 0.25,
+    "Should accelerate in first half",
+  )
+  testing.expect(
+    t,
+    animation.sample(0.75, 0, 1, .QuadInOut) > 0.75,
+    "Should decelerate in second half",
+  )
 }
 
 @(test)
@@ -646,7 +824,11 @@ test_tween_quint_in :: proc(t: ^testing.T) {
 test_tween_quint_out :: proc(t: ^testing.T) {
   testing.expect_value(t, animation.sample(0.0, 0, 1, .QuintOut), 0.0)
   testing.expect_value(t, animation.sample(1.0, 0, 1, .QuintOut), 1.0)
-  testing.expect(t, animation.sample(0.5, 0, 1, .QuintOut) > 0.9, "QuintOut should reach near end quickly")
+  testing.expect(
+    t,
+    animation.sample(0.5, 0, 1, .QuintOut) > 0.9,
+    "QuintOut should reach near end quickly",
+  )
 }
 
 @(test)
@@ -662,7 +844,11 @@ test_tween_sine_in :: proc(t: ^testing.T) {
   testing.expect_value(t, animation.sample(0.0, 0, 1, .SineIn), 0.0)
   testing.expect_value(t, animation.sample(1.0, 0, 1, .SineIn), 1.0)
   result := animation.sample(0.5, 0, 1, .SineIn)
-  testing.expect(t, result > 0.25 && result < 0.35, "SineIn midpoint should be around 0.29")
+  testing.expect(
+    t,
+    result > 0.25 && result < 0.35,
+    "SineIn midpoint should be around 0.29",
+  )
 }
 
 @(test)
@@ -670,7 +856,11 @@ test_tween_sine_out :: proc(t: ^testing.T) {
   testing.expect_value(t, animation.sample(0.0, 0, 1, .SineOut), 0.0)
   testing.expect_value(t, animation.sample(1.0, 0, 1, .SineOut), 1.0)
   result := animation.sample(0.5, 0, 1, .SineOut)
-  testing.expect(t, result > 0.65 && result < 0.75, "SineOut midpoint should be around 0.71")
+  testing.expect(
+    t,
+    result > 0.65 && result < 0.75,
+    "SineOut midpoint should be around 0.71",
+  )
 }
 
 @(test)
@@ -685,7 +875,11 @@ test_tween_circ_in :: proc(t: ^testing.T) {
   testing.expect_value(t, animation.sample(0.0, 0, 1, .CircIn), 0.0)
   testing.expect_value(t, animation.sample(1.0, 0, 1, .CircIn), 1.0)
   result := animation.sample(0.5, 0, 1, .CircIn)
-  testing.expect(t, result > 0.1 && result < 0.15, "CircIn at 0.5 should be around 0.13")
+  testing.expect(
+    t,
+    result > 0.1 && result < 0.15,
+    "CircIn at 0.5 should be around 0.13",
+  )
 }
 
 @(test)
@@ -693,7 +887,11 @@ test_tween_circ_out :: proc(t: ^testing.T) {
   testing.expect_value(t, animation.sample(0.0, 0, 1, .CircOut), 0.0)
   testing.expect_value(t, animation.sample(1.0, 0, 1, .CircOut), 1.0)
   result := animation.sample(0.5, 0, 1, .CircOut)
-  testing.expect(t, result > 0.85 && result < 0.9, "CircOut at 0.5 should be around 0.87")
+  testing.expect(
+    t,
+    result > 0.85 && result < 0.9,
+    "CircOut at 0.5 should be around 0.87",
+  )
 }
 
 @(test)
@@ -733,7 +931,11 @@ test_tween_elastic_in :: proc(t: ^testing.T) {
   testing.expect_value(t, animation.sample(0.0, 0, 1, .ElasticIn), 0.0)
   testing.expect_value(t, animation.sample(1.0, 0, 1, .ElasticIn), 1.0)
   result := animation.sample(0.5, 0, 1, .ElasticIn)
-  testing.expect(t, result < 0.1, "ElasticIn should undershoot before reaching end")
+  testing.expect(
+    t,
+    result < 0.1,
+    "ElasticIn should undershoot before reaching end",
+  )
 }
 
 @(test)
@@ -779,7 +981,11 @@ test_tween_bounce_in :: proc(t: ^testing.T) {
   testing.expect_value(t, animation.sample(0.0, 0, 1, .BounceIn), 0.0)
   testing.expect_value(t, animation.sample(1.0, 0, 1, .BounceIn), 1.0)
   result := animation.sample(0.5, 0, 1, .BounceIn)
-  testing.expect(t, result >= 0 && result <= 1, "BounceIn should stay in range")
+  testing.expect(
+    t,
+    result >= 0 && result <= 1,
+    "BounceIn should stay in range",
+  )
 }
 
 @(test)
@@ -787,7 +993,11 @@ test_tween_bounce_out :: proc(t: ^testing.T) {
   testing.expect_value(t, animation.sample(0.0, 0, 1, .BounceOut), 0.0)
   testing.expect_value(t, animation.sample(1.0, 0, 1, .BounceOut), 1.0)
   result := animation.sample(0.5, 0, 1, .BounceOut)
-  testing.expect(t, result >= 0 && result <= 1, "BounceOut should stay in range")
+  testing.expect(
+    t,
+    result >= 0 && result <= 1,
+    "BounceOut should stay in range",
+  )
 }
 
 @(test)
@@ -811,22 +1021,59 @@ test_tween_custom_range :: proc(t: ^testing.T) {
 
 @(test)
 test_tween_symmetry :: proc(t: ^testing.T) {
-  modes := []animation.Mode{.QuadInOut, .CubicInOut, .QuintInOut, .SineInOut, .CircInOut, .ExpoInOut, .ElasticInOut, .BackInOut, .BounceInOut}
+  modes := []animation.Mode {
+    .QuadInOut,
+    .CubicInOut,
+    .QuintInOut,
+    .SineInOut,
+    .CircInOut,
+    .ExpoInOut,
+    .ElasticInOut,
+    .BackInOut,
+    .BounceInOut,
+  }
   for mode in modes {
     result_low := animation.sample(0.25, 0, 1, mode)
     result_high := animation.sample(0.75, 0, 1, mode)
-    testing.expect(t, abs(result_low + result_high - 1.0) < 0.1, "InOut modes should be symmetric around midpoint")
+    testing.expect(
+      t,
+      abs(result_low + result_high - 1.0) < 0.1,
+      "InOut modes should be symmetric around midpoint",
+    )
   }
 }
 
 @(test)
 test_tween_endpoint_consistency :: proc(t: ^testing.T) {
-  modes := []animation.Mode{
-    .Linear, .QuadIn, .QuadOut, .QuadInOut, .CubicIn, .CubicOut, .CubicInOut,
-    .QuintIn, .QuintOut, .QuintInOut, .SineIn, .SineOut, .SineInOut,
-    .CircIn, .CircOut, .CircInOut, .ExpoIn, .ExpoOut, .ExpoInOut,
-    .ElasticIn, .ElasticOut, .ElasticInOut, .BackIn, .BackOut, .BackInOut,
-    .BounceIn, .BounceOut, .BounceInOut,
+  modes := []animation.Mode {
+    .Linear,
+    .QuadIn,
+    .QuadOut,
+    .QuadInOut,
+    .CubicIn,
+    .CubicOut,
+    .CubicInOut,
+    .QuintIn,
+    .QuintOut,
+    .QuintInOut,
+    .SineIn,
+    .SineOut,
+    .SineInOut,
+    .CircIn,
+    .CircOut,
+    .CircInOut,
+    .ExpoIn,
+    .ExpoOut,
+    .ExpoInOut,
+    .ElasticIn,
+    .ElasticOut,
+    .ElasticInOut,
+    .BackIn,
+    .BackOut,
+    .BackInOut,
+    .BounceIn,
+    .BounceOut,
+    .BounceInOut,
   }
   for mode in modes {
     start := animation.sample(0.0, 0, 1, mode)
@@ -855,7 +1102,11 @@ test_spline_scalar_interpolation :: proc(t: ^testing.T) {
   testing.expect_value(t, animation.spline_sample(spline, 2.0), 5.0)
   testing.expect_value(t, animation.spline_sample(spline, 3.0), 15.0)
   mid := animation.spline_sample(spline, 0.5)
-  testing.expect(t, mid > 0.0 && mid < 10.0, "Interpolated value should be between control points")
+  testing.expect(
+    t,
+    mid > 0.0 && mid < 10.0,
+    "Interpolated value should be between control points",
+  )
 }
 
 @(test)
@@ -868,9 +1119,21 @@ test_spline_vector_interpolation :: proc(t: ^testing.T) {
   spline.times[0] = 0.0
   spline.times[1] = 1.0
   spline.times[2] = 2.0
-  testing.expect_value(t, animation.spline_sample(spline, 0.0), [3]f32{0, 0, 0})
-  testing.expect_value(t, animation.spline_sample(spline, 1.0), [3]f32{10, 20, 30})
-  testing.expect_value(t, animation.spline_sample(spline, 2.0), [3]f32{20, 10, 40})
+  testing.expect_value(
+    t,
+    animation.spline_sample(spline, 0.0),
+    [3]f32{0, 0, 0},
+  )
+  testing.expect_value(
+    t,
+    animation.spline_sample(spline, 1.0),
+    [3]f32{10, 20, 30},
+  )
+  testing.expect_value(
+    t,
+    animation.spline_sample(spline, 2.0),
+    [3]f32{20, 10, 40},
+  )
   mid := animation.spline_sample(spline, 0.5)
   testing.expect(t, mid.x > 0 && mid.x < 10, "X should interpolate smoothly")
   testing.expect(t, mid.y > 0 && mid.y < 20, "Y should interpolate smoothly")
@@ -888,14 +1151,34 @@ test_spline_quaternion_interpolation :: proc(t: ^testing.T) {
   spline.times[1] = 1.0
   spline.times[2] = 2.0
   result_start := animation.spline_sample(spline, 0.0)
-  testing.expect(t, almost_equal_quaternion(result_start, spline.points[0]), "Should match first point")
+  testing.expect(
+    t,
+    almost_equal_quaternion(result_start, spline.points[0]),
+    "Should match first point",
+  )
   result_mid := animation.spline_sample(spline, 1.0)
-  testing.expect(t, almost_equal_quaternion(result_mid, spline.points[1]), "Should match middle point")
+  testing.expect(
+    t,
+    almost_equal_quaternion(result_mid, spline.points[1]),
+    "Should match middle point",
+  )
   result_end := animation.spline_sample(spline, 2.0)
-  testing.expect(t, almost_equal_quaternion(result_end, spline.points[2]), "Should match last point")
+  testing.expect(
+    t,
+    almost_equal_quaternion(result_end, spline.points[2]),
+    "Should match last point",
+  )
   result_interp := animation.spline_sample(spline, 0.5)
-  length_sq := result_interp.w*result_interp.w + result_interp.x*result_interp.x + result_interp.y*result_interp.y + result_interp.z*result_interp.z
-  testing.expect(t, abs(length_sq - 1.0) < 0.01, "Quaternion should remain normalized")
+  length_sq :=
+    result_interp.w * result_interp.w +
+    result_interp.x * result_interp.x +
+    result_interp.y * result_interp.y +
+    result_interp.z * result_interp.z
+  testing.expect(
+    t,
+    abs(length_sq - 1.0) < 0.01,
+    "Quaternion should remain normalized",
+  )
 }
 
 @(test)
@@ -951,7 +1234,11 @@ test_spline_smooth_curve :: proc(t: ^testing.T) {
     t_val := f32(i) * 4.0 / f32(step_count)
     curr := animation.spline_sample(spline, t_val)
     delta := abs(curr - prev)
-    testing.expect(t, delta < 5.0, "Spline should produce smooth transitions without large jumps")
+    testing.expect(
+      t,
+      delta < 5.0,
+      "Spline should produce smooth transitions without large jumps",
+    )
     prev = curr
   }
 }
@@ -980,15 +1267,27 @@ test_spline_nonuniform_times :: proc(t: ^testing.T) {
   spline.times[1] = 0.5
   spline.times[2] = 3.0
   spline.times[3] = 4.0
-  testing.expect(t, animation.spline_validate(spline), "Spline should be valid with monotonic times")
+  testing.expect(
+    t,
+    animation.spline_validate(spline),
+    "Spline should be valid with monotonic times",
+  )
   testing.expect_value(t, animation.spline_sample(spline, 0.0), 0.0)
   testing.expect_value(t, animation.spline_sample(spline, 0.5), 10.0)
   testing.expect_value(t, animation.spline_sample(spline, 3.0), 20.0)
   testing.expect_value(t, animation.spline_sample(spline, 4.0), 30.0)
   mid1 := animation.spline_sample(spline, 0.25)
-  testing.expect(t, mid1 > 0.0 && mid1 < 10.0, "Should interpolate in first segment")
+  testing.expect(
+    t,
+    mid1 > 0.0 && mid1 < 10.0,
+    "Should interpolate in first segment",
+  )
   mid2 := animation.spline_sample(spline, 1.75)
-  testing.expect(t, mid2 > 10.0 && mid2 < 20.0, "Should interpolate in second segment")
+  testing.expect(
+    t,
+    mid2 > 10.0 && mid2 < 20.0,
+    "Should interpolate in second segment",
+  )
 }
 
 @(test)
@@ -998,12 +1297,24 @@ test_spline_validation :: proc(t: ^testing.T) {
   spline.times[0] = 0.0
   spline.times[1] = 1.0
   spline.times[2] = 2.0
-  testing.expect(t, animation.spline_validate(spline), "Valid monotonic times should pass")
+  testing.expect(
+    t,
+    animation.spline_validate(spline),
+    "Valid monotonic times should pass",
+  )
   spline.times[1] = 2.0
   spline.times[2] = 1.0
-  testing.expect(t, !animation.spline_validate(spline), "Non-monotonic times should fail")
+  testing.expect(
+    t,
+    !animation.spline_validate(spline),
+    "Non-monotonic times should fail",
+  )
   spline.times[0] = 1.0
   spline.times[1] = 1.0
   spline.times[2] = 2.0
-  testing.expect(t, animation.spline_validate(spline), "Equal adjacent times are allowed for simplicity")
+  testing.expect(
+    t,
+    animation.spline_validate(spline),
+    "Equal adjacent times are allowed for simplicity",
+  )
 }

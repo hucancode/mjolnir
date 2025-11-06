@@ -11,7 +11,7 @@ Frustum :: struct {
   planes: [6]Plane,
 }
 
-make_frustum :: proc(view_projection_matrix: matrix[4,4]f32) -> Frustum {
+make_frustum :: proc(view_projection_matrix: matrix[4, 4]f32) -> Frustum {
   m := linalg.transpose(view_projection_matrix)
   // Each plane is a Vec4: a*x + b*y + c*z + d = 0
   planes := [6]Plane {
@@ -37,19 +37,13 @@ make_frustum :: proc(view_projection_matrix: matrix[4,4]f32) -> Frustum {
   return Frustum{planes}
 }
 
-signed_distance_to_plane :: proc(
-  plane: Plane,
-  point: [3]f32,
-) -> f32 {
+signed_distance_to_plane :: proc(plane: Plane, point: [3]f32) -> f32 {
   return linalg.dot(plane.xyz, point) + plane.w
 }
 
 frustum_test_point :: proc(frustum: Frustum, p: [3]f32) -> bool {
   for plane in frustum.planes {
-    distance := linalg.dot(plane.xyz, p) + plane.w
-    if distance < 0.0 {
-      return false
-    }
+    if signed_distance_to_plane(plane, p) < 0 do return false
   }
   return true
 }
@@ -85,35 +79,24 @@ frustum_test_aabb :: proc(frustum: Frustum, aabb: Aabb) -> bool {
       negative_vertex.z = aabb.max.z
     }
     // If the positive vertex is on the negative side of the plane, the entire AABB is outside
-    if signed_distance_to_plane(plane, positive_vertex) < 0 {
-      return false
-    }
+    if signed_distance_to_plane(plane, positive_vertex) < 0 do return false
   }
-  // If we get here, the AABB is not completely outside any plane, so it intersects the frustum
   return true
 }
 
 frustum_test_sphere :: proc(
-  sphere_center: [3]f32,
-  sphere_radius: f32,
-  frustum: ^Frustum,
+  frustum: Frustum,
+  center: [3]f32,
+  radius: f32,
 ) -> bool {
   for plane_vec in frustum.planes {
-    dist := signed_distance_to_plane(plane_vec, sphere_center)
-    if dist < -sphere_radius {
-      return false
-    }
+    dist := signed_distance_to_plane(plane_vec, center)
+    if dist < -radius do return false
   }
-  return true // Sphere intersects or is inside all planes
+  return true
 }
 
-// transform_aabb transforms an AABB by a given matrix.
-aabb_transform :: proc(
-  aabb: Aabb,
-  transform_matrix: matrix[4,4]f32,
-) -> (
-  ret: Aabb,
-) {
+aabb_transform :: proc(aabb: Aabb, transform: matrix[4, 4]f32) -> (ret: Aabb) {
   min_p := aabb.min
   max_p := aabb.max
   corners: [8][4]f32
@@ -127,7 +110,7 @@ aabb_transform :: proc(
   corners[7] = {max_p.x, max_p.y, max_p.z, 1.0}
   ret = AABB_UNDEFINED
   for corner in corners {
-    transformed_corner := transform_matrix * corner
+    transformed_corner := transform * corner
     ret.min = linalg.min(ret.min, transformed_corner.xyz)
     ret.max = linalg.max(ret.max, transformed_corner.xyz)
   }

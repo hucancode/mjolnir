@@ -131,7 +131,12 @@ swapchain_init :: proc(
         image = self.images[i],
         viewType = .D2,
         format = self.format.format,
-        components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+        components = {
+          r = .IDENTITY,
+          g = .IDENTITY,
+          b = .IDENTITY,
+          a = .IDENTITY,
+        },
         subresourceRange = {
           aspectMask = {.COLOR},
           levelCount = 1,
@@ -251,7 +256,10 @@ submit_queue_and_present :: proc(
   if compute_cmd, has_compute := compute_command_buffer.?; has_compute {
     if compute_queue, ok := gctx.compute_queue.?; ok {
       append(&wait_semaphores, self.compute_finished_semaphores[frame_index])
-      append(&wait_stages, vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER})
+      append(
+        &wait_stages,
+        vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER},
+      )
       compute_submit := vk.SubmitInfo {
         sType                = .SUBMIT_INFO,
         commandBufferCount   = 1,

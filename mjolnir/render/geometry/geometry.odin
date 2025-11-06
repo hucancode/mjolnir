@@ -580,7 +580,12 @@ shutdown :: proc(
   device: vk.Device,
   command_pool: vk.CommandPool,
 ) {
-  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
+  vk.FreeCommandBuffers(
+    device,
+    command_pool,
+    u32(len(self.commands)),
+    raw_data(self.commands[:]),
+  )
   vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
 }

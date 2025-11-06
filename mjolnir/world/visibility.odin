@@ -24,10 +24,12 @@ _________ end frame, sync _________
 1,2 and a,b,c,d run in parallel
 */
 
-SHADER_SPHERECAM_CULLING :: #load("../shader/occlusion_culling/sphere_cull.spv")
+SHADER_SPHERECAM_CULLING :: #load(
+  "../shader/occlusion_culling/sphere_cull.spv",
+)
 SHADER_CULLING :: #load("../shader/occlusion_culling/multi_pass_cull.spv")
 SHADER_DEPTH_REDUCE :: #load("../shader/occlusion_culling/depth_reduce.spv")
-SHADER_DEPTH_VERT ::#load("../shader/occlusion_culling/vert.spv")
+SHADER_DEPTH_VERT :: #load("../shader/occlusion_culling/vert.spv")
 SHADER_SPHERECAM_DEPTH_VERT :: #load("../shader/shadow_spherical/vert.spv")
 SHADER_SPHERECAM_DEPTH_GEOM :: #load("../shader/shadow_spherical/geom.spv")
 SHADER_SPHERECAM_DEPTH_FRAG :: #load("../shader/shadow_spherical/frag.spv")
@@ -186,7 +188,14 @@ visibility_system_dispatch_pyramid :: proc(
   }
   // Build pyramid[target] from depth[target-1]
   // This allows async compute to build pyramid[N] from depth[N-1] while graphics renders depth[N]
-  build_depth_pyramid(system, gctx, command_buffer, camera, target_frame_index, rm)
+  build_depth_pyramid(
+    system,
+    gctx,
+    command_buffer,
+    camera,
+    target_frame_index,
+    rm,
+  )
   if system.stats_enabled {
     log_culling_stats(system, camera, camera_index, target_frame_index)
   }
@@ -220,7 +229,9 @@ visibility_system_dispatch_culling :: proc(
     command_buffer,
     camera.transparent_draw_count[target_frame_index].buffer,
     0,
-    vk.DeviceSize(camera.transparent_draw_count[target_frame_index].bytes_count),
+    vk.DeviceSize(
+      camera.transparent_draw_count[target_frame_index].bytes_count,
+    ),
     0,
   )
   vk.CmdFillBuffer(
@@ -929,11 +940,7 @@ render_depth_pass :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = depth_texture.image,
-    subresourceRange = {
-      aspectMask = {.DEPTH},
-      levelCount = 1,
-      layerCount = 1,
-    },
+    subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 1},
   }
   vk.CmdPipelineBarrier(
     command_buffer,
@@ -1043,11 +1050,7 @@ render_depth_pass :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = depth_texture.image,
-    subresourceRange = {
-      aspectMask = {.DEPTH},
-      levelCount = 1,
-      layerCount = 1,
-    },
+    subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 1},
   }
   vk.CmdPipelineBarrier(
     command_buffer,
@@ -1099,7 +1102,10 @@ build_depth_pyramid :: proc(
       &push_constants,
     )
     mip_width := max(1, camera.depth_pyramid[target_frame_index].width >> mip)
-    mip_height := max(1, camera.depth_pyramid[target_frame_index].height >> mip)
+    mip_height := max(
+      1,
+      camera.depth_pyramid[target_frame_index].height >> mip,
+    )
     dispatch_x := (mip_width + 31) / 32
     dispatch_y := (mip_height + 31) / 32
     vk.CmdDispatch(command_buffer, dispatch_x, dispatch_y, 1)
