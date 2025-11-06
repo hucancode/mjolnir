@@ -159,7 +159,12 @@ octree_node_insert :: proc(
       node.total_items = 0
       for old_item in old_items {
         old_bounds := octree.bounds_func(old_item)
-        if octree_node_insert_to_children_internal(octree, node, old_item, old_bounds) {
+        if octree_node_insert_to_children_internal(
+          octree,
+          node,
+          old_item,
+          old_bounds,
+        ) {
           node.total_items += 1
         }
       }

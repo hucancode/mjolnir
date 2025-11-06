@@ -981,17 +981,17 @@ build_textbox_commands :: proc(
     append(
       &draw_list.commands,
       DrawCommand {
-        type = .TEXT,
-        widget = handle,
-        rect = {
+        type        = .TEXT,
+        widget      = handle,
+        rect        = {
           widget.position.x + 8,
           widget.position.y + 8,
           widget.size.x - 16,
           widget.size.y - 16,
         },
-        color = widget.fg_color,
-        text = data.text_as_string,
-        text_align = .LEFT,
+        color       = widget.fg_color,
+        text        = data.text_as_string,
+        text_align  = .LEFT,
         text_suffix = true, // Show suffix when text overflows
       },
     )
@@ -1664,31 +1664,41 @@ draw_text_internal :: proc(
     // Apply clipping if enabled
     if clip_enabled {
       // Check if quad is completely outside clip rect
-      if quad.x1 < clip_left || quad.x0 > clip_right ||
-         quad.y1 < clip_top || quad.y0 > clip_bottom {
+      if quad.x1 < clip_left ||
+         quad.x0 > clip_right ||
+         quad.y1 < clip_top ||
+         quad.y0 > clip_bottom {
         continue
       }
       // Clip the quad to the clip rect
       clipped_quad := quad
       if clipped_quad.x0 < clip_left {
         // Adjust UV coordinates proportionally
-        uv_adjust := (clip_left - clipped_quad.x0) / (clipped_quad.x1 - clipped_quad.x0)
-        clipped_quad.s0 = clipped_quad.s0 + (clipped_quad.s1 - clipped_quad.s0) * uv_adjust
+        uv_adjust :=
+          (clip_left - clipped_quad.x0) / (clipped_quad.x1 - clipped_quad.x0)
+        clipped_quad.s0 =
+          clipped_quad.s0 + (clipped_quad.s1 - clipped_quad.s0) * uv_adjust
         clipped_quad.x0 = clip_left
       }
       if clipped_quad.x1 > clip_right {
-        uv_adjust := (clipped_quad.x1 - clip_right) / (clipped_quad.x1 - clipped_quad.x0)
-        clipped_quad.s1 = clipped_quad.s1 - (clipped_quad.s1 - clipped_quad.s0) * uv_adjust
+        uv_adjust :=
+          (clipped_quad.x1 - clip_right) / (clipped_quad.x1 - clipped_quad.x0)
+        clipped_quad.s1 =
+          clipped_quad.s1 - (clipped_quad.s1 - clipped_quad.s0) * uv_adjust
         clipped_quad.x1 = clip_right
       }
       if clipped_quad.y0 < clip_top {
-        uv_adjust := (clip_top - clipped_quad.y0) / (clipped_quad.y1 - clipped_quad.y0)
-        clipped_quad.t0 = clipped_quad.t0 + (clipped_quad.t1 - clipped_quad.t0) * uv_adjust
+        uv_adjust :=
+          (clip_top - clipped_quad.y0) / (clipped_quad.y1 - clipped_quad.y0)
+        clipped_quad.t0 =
+          clipped_quad.t0 + (clipped_quad.t1 - clipped_quad.t0) * uv_adjust
         clipped_quad.y0 = clip_top
       }
       if clipped_quad.y1 > clip_bottom {
-        uv_adjust := (clipped_quad.y1 - clip_bottom) / (clipped_quad.y1 - clipped_quad.y0)
-        clipped_quad.t1 = clipped_quad.t1 - (clipped_quad.t1 - clipped_quad.t0) * uv_adjust
+        uv_adjust :=
+          (clipped_quad.y1 - clip_bottom) / (clipped_quad.y1 - clipped_quad.y0)
+        clipped_quad.t1 =
+          clipped_quad.t1 - (clipped_quad.t1 - clipped_quad.t0) * uv_adjust
         clipped_quad.y1 = clip_bottom
       }
       push_text_quad(self, clipped_quad, color, z)

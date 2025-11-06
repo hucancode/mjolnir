@@ -49,7 +49,10 @@ Material :: struct {
 
 material_update_gpu_data :: proc(mat: ^Material) {
   mat.albedo_index = min(MAX_TEXTURES - 1, mat.albedo.index)
-  mat.metallic_roughness_index = min(MAX_TEXTURES - 1, mat.metallic_roughness.index)
+  mat.metallic_roughness_index = min(
+    MAX_TEXTURES - 1,
+    mat.metallic_roughness.index,
+  )
   mat.normal_index = min(MAX_TEXTURES - 1, mat.normal.index)
   mat.emissive_index = min(MAX_TEXTURES - 1, mat.emissive.index)
 }
@@ -63,11 +66,7 @@ material_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   material_update_gpu_data(mat)
-  gpu.write(
-    &manager.material_buffer,
-    &mat.data,
-    int(handle.index),
-  ) or_return
+  gpu.write(&manager.material_buffer, &mat.data, int(handle.index)) or_return
   return .SUCCESS
 }
 

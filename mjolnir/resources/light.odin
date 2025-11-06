@@ -68,7 +68,9 @@ create_light :: proc(
     #partial switch light_type {
     case .POINT:
       // Point lights use spherical cameras for omnidirectional shadows
-      cam_handle, spherical_cam, cam_ok := cont.alloc(&manager.spherical_cameras)
+      cam_handle, spherical_cam, cam_ok := cont.alloc(
+        &manager.spherical_cameras,
+      )
       if !cam_ok {
         log.error("Failed to allocate spherical camera for point light")
         cont.free(&manager.lights, handle)
@@ -157,14 +159,17 @@ destroy_light :: proc(
     #partial switch light.type {
     case .POINT:
       // Point lights use spherical cameras
-      if cam, cam_ok := cont.get(manager.spherical_cameras, light.camera_handle);
-         cam_ok {
+      if cam, cam_ok := cont.get(
+        manager.spherical_cameras,
+        light.camera_handle,
+      ); cam_ok {
         spherical_camera_destroy(cam, gctx.device, gctx.command_pool, manager)
       }
       cont.free(&manager.spherical_cameras, light.camera_handle)
     case .DIRECTIONAL, .SPOT:
       // Directional and spot lights use regular cameras
-      if cam, cam_ok := cont.get(manager.cameras, light.camera_handle); cam_ok {
+      if cam, cam_ok := cont.get(manager.cameras, light.camera_handle);
+         cam_ok {
         camera_destroy(cam, gctx.device, gctx.command_pool, manager)
       }
       cont.free(&manager.cameras, light.camera_handle)
@@ -188,9 +193,15 @@ update_light_shadow_camera_transforms :: proc(
   for handle, light_index in manager.active_lights {
     light := cont.get(manager.lights, handle) or_continue
     // Get light's world transform from node
-    node_data := gpu.mutable_buffer_get(&manager.node_data_buffer, light.node_index)
+    node_data := gpu.mutable_buffer_get(
+      &manager.node_data_buffer,
+      light.node_index,
+    )
     if node_data == nil do continue
-    world_matrix := gpu.mutable_buffer_get(&manager.world_matrix_buffer, light.node_index)
+    world_matrix := gpu.mutable_buffer_get(
+      &manager.world_matrix_buffer,
+      light.node_index,
+    )
     if world_matrix == nil do continue
     // Extract position and direction from world matrix
     light_position := world_matrix[3].xyz
@@ -201,7 +212,10 @@ update_light_shadow_camera_transforms :: proc(
       #partial switch light.type {
       case .POINT:
         // Point lights use spherical cameras
-        spherical_cam := cont.get(manager.spherical_cameras, light.camera_handle)
+        spherical_cam := cont.get(
+          manager.spherical_cameras,
+          light.camera_handle,
+        )
         if spherical_cam != nil {
           spherical_cam.center = light_position
           shadow_map_id = spherical_cam.depth_cube[frame_index].index
@@ -229,7 +243,11 @@ update_light_shadow_camera_transforms :: proc(
       position   = {light_position.x, light_position.y, light_position.z, 1.0},
       shadow_map = shadow_map_id,
     }
-    gpu.write(&manager.dynamic_light_data_buffers[frame_index], &dynamic_data, light_index)
+    gpu.write(
+      &manager.dynamic_light_data_buffers[frame_index],
+      &dynamic_data,
+      light_index,
+    )
   }
 }
 

@@ -1,7 +1,7 @@
 package world
 
-import cont "../containers"
 import anim "../animation"
+import cont "../containers"
 import "../geometry"
 import "../gpu"
 import "../resources"
@@ -929,7 +929,9 @@ load_animations :: proc(
               raw_data(out_tangent[:]),
               4,
             ) or_continue
-            engine_channel.rotations[i] = anim.CubicSplineKeyframe(quaternion128) {
+            engine_channel.rotations[i] = anim.CubicSplineKeyframe(
+              quaternion128,
+            ) {
               time        = time_val[0],
               in_tangent  = quaternion(
                 x = in_tangent[0],

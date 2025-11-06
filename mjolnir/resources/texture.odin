@@ -8,7 +8,6 @@ import "core:strings"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
-// Create empty 2D texture
 create_empty_texture_2d :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
@@ -33,7 +32,6 @@ create_empty_texture_2d :: proc(
   return handle, texture, .SUCCESS
 }
 
-// Create empty cube texture
 create_empty_texture_cube :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
@@ -70,7 +68,6 @@ create_empty_texture_cube :: proc(
   return handle, texture, .SUCCESS
 }
 
-// Create texture from file path
 create_texture_from_path :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
@@ -148,7 +145,6 @@ create_texture_from_path :: proc(
   return handle, texture, .SUCCESS
 }
 
-// Create texture from pixel data
 create_texture_from_pixels :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
@@ -254,7 +250,6 @@ create_texture_from_data :: proc(
   return handle, texture, .SUCCESS
 }
 
-// Overloaded create_texture proc
 create_texture :: proc {
   create_empty_texture_2d,
   create_texture_from_path,
@@ -262,12 +257,10 @@ create_texture :: proc {
   create_texture_from_pixels,
 }
 
-// Overloaded create_cube_texture proc
 create_cube_texture :: proc {
   create_empty_texture_cube,
 }
 
-// Handle-only variants
 create_texture_handle :: proc {
   create_empty_texture_2d_handle,
   create_texture_from_path_handle,
@@ -363,7 +356,6 @@ create_texture_from_pixels_handle :: proc(
   return h, ret == .SUCCESS
 }
 
-// Convenience texture generators
 create_solid_color_texture :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
@@ -429,4 +421,3 @@ create_checkerboard_texture :: proc(
     int(size),
   )
 }
-

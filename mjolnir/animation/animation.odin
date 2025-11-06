@@ -60,7 +60,11 @@ keyframe_value :: proc(kf: Keyframe($T)) -> T {
 }
 
 // 9 interpolation helpers for all combinations
-sample_linear_linear :: proc(a: LinearKeyframe($T), b: LinearKeyframe(T), t: f32) -> T {
+sample_linear_linear :: proc(
+  a: LinearKeyframe($T),
+  b: LinearKeyframe(T),
+  t: f32,
+) -> T {
   alpha := (t - a.time) / (b.time - a.time)
   when T == quaternion64 || T == quaternion128 || T == quaternion256 {
     return linalg.quaternion_slerp(a.value, b.value, alpha)
@@ -69,17 +73,25 @@ sample_linear_linear :: proc(a: LinearKeyframe($T), b: LinearKeyframe(T), t: f32
   }
 }
 
-sample_linear_step :: proc(a: LinearKeyframe($T), b: StepKeyframe(T), t: f32) -> T {
+sample_linear_step :: proc(
+  a: LinearKeyframe($T),
+  b: StepKeyframe(T),
+  t: f32,
+) -> T {
   return a.value
 }
 
-sample_linear_cubic :: proc(a: LinearKeyframe($T), b: CubicSplineKeyframe(T), t: f32) -> T {
+sample_linear_cubic :: proc(
+  a: LinearKeyframe($T),
+  b: CubicSplineKeyframe(T),
+  t: f32,
+) -> T {
   dt := b.time - a.time
   u := (t - a.time) / dt
   u2 := u * u
   u3 := u2 * u
-  h00 := 2*u3 - 3*u2 + 1
-  h01 := -2*u3 + 3*u2
+  h00 := 2 * u3 - 3 * u2 + 1
+  h01 := -2 * u3 + 3 * u2
   h11 := u3 - u2
   when T == quaternion64 || T == quaternion128 || T == quaternion256 {
     q0 := a.value
@@ -94,18 +106,19 @@ sample_linear_cubic :: proc(a: LinearKeyframe($T), b: CubicSplineKeyframe(T), t:
     result_y := h00 * q0.y + h01 * q1.y + h11 * m1_scaled.y
     result_z := h00 * q0.z + h01 * q1.z + h11 * m1_scaled.z
     result_w := h00 * q0.w + h01 * q1.w + h11 * m1_scaled.w
-    return linalg.normalize(quaternion(
-      x = result_x,
-      y = result_y,
-      z = result_z,
-      w = result_w,
-    ))
+    return linalg.normalize(
+      quaternion(x = result_x, y = result_y, z = result_z, w = result_w),
+    )
   } else {
     return h00 * a.value + h01 * b.value + h11 * (b.in_tangent * dt)
   }
 }
 
-sample_step_linear :: proc(a: StepKeyframe($T), b: LinearKeyframe(T), t: f32) -> T {
+sample_step_linear :: proc(
+  a: StepKeyframe($T),
+  b: LinearKeyframe(T),
+  t: f32,
+) -> T {
   // Step holds value until we reach the next keyframe's exact time
   if t >= b.time {
     return b.value
@@ -113,7 +126,11 @@ sample_step_linear :: proc(a: StepKeyframe($T), b: LinearKeyframe(T), t: f32) ->
   return a.value
 }
 
-sample_step_step :: proc(a: StepKeyframe($T), b: StepKeyframe(T), t: f32) -> T {
+sample_step_step :: proc(
+  a: StepKeyframe($T),
+  b: StepKeyframe(T),
+  t: f32,
+) -> T {
   // Step holds value until we reach the next keyframe's exact time
   if t >= b.time {
     return b.value
@@ -121,7 +138,11 @@ sample_step_step :: proc(a: StepKeyframe($T), b: StepKeyframe(T), t: f32) -> T {
   return a.value
 }
 
-sample_step_cubic :: proc(a: StepKeyframe($T), b: CubicSplineKeyframe(T), t: f32) -> T {
+sample_step_cubic :: proc(
+  a: StepKeyframe($T),
+  b: CubicSplineKeyframe(T),
+  t: f32,
+) -> T {
   // Step holds value until we reach the next keyframe's exact time
   if t >= b.time {
     return b.value
@@ -129,14 +150,18 @@ sample_step_cubic :: proc(a: StepKeyframe($T), b: CubicSplineKeyframe(T), t: f32
   return a.value
 }
 
-sample_cubic_linear :: proc(a: CubicSplineKeyframe($T), b: LinearKeyframe(T), t: f32) -> T {
+sample_cubic_linear :: proc(
+  a: CubicSplineKeyframe($T),
+  b: LinearKeyframe(T),
+  t: f32,
+) -> T {
   dt := b.time - a.time
   u := (t - a.time) / dt
   u2 := u * u
   u3 := u2 * u
-  h00 := 2*u3 - 3*u2 + 1
-  h10 := u3 - 2*u2 + u
-  h01 := -2*u3 + 3*u2
+  h00 := 2 * u3 - 3 * u2 + 1
+  h10 := u3 - 2 * u2 + u
+  h01 := -2 * u3 + 3 * u2
   when T == quaternion64 || T == quaternion128 || T == quaternion256 {
     q0 := a.value
     m0_scaled := quaternion(
@@ -150,29 +175,34 @@ sample_cubic_linear :: proc(a: CubicSplineKeyframe($T), b: LinearKeyframe(T), t:
     result_y := h00 * q0.y + h10 * m0_scaled.y + h01 * q1.y
     result_z := h00 * q0.z + h10 * m0_scaled.z + h01 * q1.z
     result_w := h00 * q0.w + h10 * m0_scaled.w + h01 * q1.w
-    return linalg.normalize(quaternion(
-      x = result_x,
-      y = result_y,
-      z = result_z,
-      w = result_w,
-    ))
+    return linalg.normalize(
+      quaternion(x = result_x, y = result_y, z = result_z, w = result_w),
+    )
   } else {
     return h00 * a.value + h10 * (a.out_tangent * dt) + h01 * b.value
   }
 }
 
-sample_cubic_step :: proc(a: CubicSplineKeyframe($T), b: StepKeyframe(T), t: f32) -> T {
+sample_cubic_step :: proc(
+  a: CubicSplineKeyframe($T),
+  b: StepKeyframe(T),
+  t: f32,
+) -> T {
   return a.value
 }
 
-sample_cubic_cubic :: proc(a: CubicSplineKeyframe($T), b: CubicSplineKeyframe(T), t: f32) -> T {
+sample_cubic_cubic :: proc(
+  a: CubicSplineKeyframe($T),
+  b: CubicSplineKeyframe(T),
+  t: f32,
+) -> T {
   dt := b.time - a.time
   u := (t - a.time) / dt
   u2 := u * u
   u3 := u2 * u
-  h00 := 2*u3 - 3*u2 + 1
-  h10 := u3 - 2*u2 + u
-  h01 := -2*u3 + 3*u2
+  h00 := 2 * u3 - 3 * u2 + 1
+  h10 := u3 - 2 * u2 + u
+  h01 := -2 * u3 + 3 * u2
   h11 := u3 - u2
   when T == quaternion64 || T == quaternion128 || T == quaternion256 {
     q0 := a.value
@@ -193,14 +223,16 @@ sample_cubic_cubic :: proc(a: CubicSplineKeyframe($T), b: CubicSplineKeyframe(T)
     result_y := h00 * q0.y + h10 * m0_scaled.y + h01 * q1.y + h11 * m1_scaled.y
     result_z := h00 * q0.z + h10 * m0_scaled.z + h01 * q1.z + h11 * m1_scaled.z
     result_w := h00 * q0.w + h10 * m0_scaled.w + h01 * q1.w + h11 * m1_scaled.w
-    return linalg.normalize(quaternion(
-      x = result_x,
-      y = result_y,
-      z = result_z,
-      w = result_w,
-    ))
+    return linalg.normalize(
+      quaternion(x = result_x, y = result_y, z = result_z, w = result_w),
+    )
   } else {
-    return h00 * a.value + h10 * (a.out_tangent * dt) + h01 * b.value + h11 * (b.in_tangent * dt)
+    return(
+      h00 * a.value +
+      h10 * (a.out_tangent * dt) +
+      h01 * b.value +
+      h11 * (b.in_tangent * dt) \
+    )
   }
 }
 
@@ -358,17 +390,24 @@ channel_init :: proc(
   if position_count > 0 {
     channel.positions = make([]Keyframe([3]f32), position_count)
     for &kf, i in channel.positions {
-      time := f32(i) * duration / f32(position_count - 1) if position_count > 1 else 0
+      time :=
+        f32(i) * duration / f32(position_count - 1) if position_count > 1 else 0
       switch position_interpolation {
       case .LINEAR:
-        kf = LinearKeyframe([3]f32){time = time, value = [3]f32{0, 0, 0}}
-      case .STEP:
-        kf = StepKeyframe([3]f32){time = time, value = [3]f32{0, 0, 0}}
-      case .CUBICSPLINE:
-        kf = CubicSplineKeyframe([3]f32){
-          time = time,
+        kf = LinearKeyframe([3]f32) {
+          time  = time,
           value = [3]f32{0, 0, 0},
-          in_tangent = [3]f32{0, 0, 0},
+        }
+      case .STEP:
+        kf = StepKeyframe([3]f32) {
+          time  = time,
+          value = [3]f32{0, 0, 0},
+        }
+      case .CUBICSPLINE:
+        kf = CubicSplineKeyframe([3]f32) {
+          time        = time,
+          value       = [3]f32{0, 0, 0},
+          in_tangent  = [3]f32{0, 0, 0},
           out_tangent = [3]f32{0, 0, 0},
         }
       }
@@ -377,17 +416,24 @@ channel_init :: proc(
   if rotation_count > 0 {
     channel.rotations = make([]Keyframe(quaternion128), rotation_count)
     for &kf, i in channel.rotations {
-      time := f32(i) * duration / f32(rotation_count - 1) if rotation_count > 1 else 0
+      time :=
+        f32(i) * duration / f32(rotation_count - 1) if rotation_count > 1 else 0
       switch rotation_interpolation {
       case .LINEAR:
-        kf = LinearKeyframe(quaternion128){time = time, value = linalg.QUATERNIONF32_IDENTITY}
-      case .STEP:
-        kf = StepKeyframe(quaternion128){time = time, value = linalg.QUATERNIONF32_IDENTITY}
-      case .CUBICSPLINE:
-        kf = CubicSplineKeyframe(quaternion128){
-          time = time,
+        kf = LinearKeyframe(quaternion128) {
+          time  = time,
           value = linalg.QUATERNIONF32_IDENTITY,
-          in_tangent = linalg.QUATERNIONF32_IDENTITY,
+        }
+      case .STEP:
+        kf = StepKeyframe(quaternion128) {
+          time  = time,
+          value = linalg.QUATERNIONF32_IDENTITY,
+        }
+      case .CUBICSPLINE:
+        kf = CubicSplineKeyframe(quaternion128) {
+          time        = time,
+          value       = linalg.QUATERNIONF32_IDENTITY,
+          in_tangent  = linalg.QUATERNIONF32_IDENTITY,
           out_tangent = linalg.QUATERNIONF32_IDENTITY,
         }
       }
@@ -396,17 +442,24 @@ channel_init :: proc(
   if scale_count > 0 {
     channel.scales = make([]Keyframe([3]f32), scale_count)
     for &kf, i in channel.scales {
-      time := f32(i) * duration / f32(scale_count - 1) if scale_count > 1 else 0
+      time :=
+        f32(i) * duration / f32(scale_count - 1) if scale_count > 1 else 0
       switch scale_interpolation {
       case .LINEAR:
-        kf = LinearKeyframe([3]f32){time = time, value = [3]f32{1, 1, 1}}
-      case .STEP:
-        kf = StepKeyframe([3]f32){time = time, value = [3]f32{1, 1, 1}}
-      case .CUBICSPLINE:
-        kf = CubicSplineKeyframe([3]f32){
-          time = time,
+        kf = LinearKeyframe([3]f32) {
+          time  = time,
           value = [3]f32{1, 1, 1},
-          in_tangent = [3]f32{0, 0, 0},
+        }
+      case .STEP:
+        kf = StepKeyframe([3]f32) {
+          time  = time,
+          value = [3]f32{1, 1, 1},
+        }
+      case .CUBICSPLINE:
+        kf = CubicSplineKeyframe([3]f32) {
+          time        = time,
+          value       = [3]f32{1, 1, 1},
+          in_tangent  = [3]f32{0, 0, 0},
           out_tangent = [3]f32{0, 0, 0},
         }
       }
@@ -438,7 +491,11 @@ channel_sample_some :: proc(
   }
 
   if len(channel.rotations) > 0 {
-    rotation = keyframe_sample(channel.rotations, t, linalg.QUATERNIONF32_IDENTITY)
+    rotation = keyframe_sample(
+      channel.rotations,
+      t,
+      linalg.QUATERNIONF32_IDENTITY,
+    )
   }
 
   if len(channel.scales) > 0 {
@@ -471,7 +528,11 @@ Clip :: struct {
   channels: []Channel,
 }
 
-clip_create :: proc(channel_count: int, duration: f32 = 1.0, name: string = "") -> Clip {
+clip_create :: proc(
+  channel_count: int,
+  duration: f32 = 1.0,
+  name: string = "",
+) -> Clip {
   clip := Clip {
     name     = name,
     duration = duration,
@@ -487,7 +548,7 @@ clip_destroy :: proc(clip: ^Clip) {
 }
 
 FKLayer :: struct {
-  clip_handle: u64,      // Handle to animation clip (stores resources.Handle as u64)
+  clip_handle: u64, // Handle to animation clip (stores resources.Handle as u64)
   mode:        PlayMode,
   status:      Status,
   time:        f32,
@@ -505,11 +566,18 @@ LayerData :: union {
 }
 
 Layer :: struct {
-  weight: f32,       // Blend weight (0.0 to 1.0)
+  weight: f32, // Blend weight (0.0 to 1.0)
   data:   LayerData, // FK or IK layer data
 }
 
-layer_init_fk :: proc(self: ^Layer, clip_handle: u64, duration: f32, weight: f32 = 1.0, mode: PlayMode = .LOOP, speed: f32 = 1.0) {
+layer_init_fk :: proc(
+  self: ^Layer,
+  clip_handle: u64,
+  duration: f32,
+  weight: f32 = 1.0,
+  mode: PlayMode = .LOOP,
+  speed: f32 = 1.0,
+) {
   self.weight = weight
   self.data = FKLayer {
     clip_handle = clip_handle,
@@ -523,7 +591,9 @@ layer_init_fk :: proc(self: ^Layer, clip_handle: u64, duration: f32, weight: f32
 
 layer_init_ik :: proc(self: ^Layer, target: IKTarget, weight: f32 = 1.0) {
   self.weight = weight
-  self.data = IKLayer{target = target}
+  self.data = IKLayer {
+    target = target,
+  }
 }
 
 layer_update :: proc(self: ^Layer, delta_time: f32) {
@@ -537,10 +607,16 @@ layer_update :: proc(self: ^Layer, delta_time: f32) {
     switch layer_data.mode {
     case .LOOP:
       layer_data.time += effective_delta_time
-      layer_data.time = math.mod_f32(layer_data.time + layer_data.duration, layer_data.duration)
+      layer_data.time = math.mod_f32(
+        layer_data.time + layer_data.duration,
+        layer_data.duration,
+      )
     case .ONCE:
       layer_data.time += effective_delta_time
-      layer_data.time = math.mod_f32(layer_data.time + layer_data.duration, layer_data.duration)
+      layer_data.time = math.mod_f32(
+        layer_data.time + layer_data.duration,
+        layer_data.duration,
+      )
       if layer_data.time >= layer_data.duration {
         layer_data.time = layer_data.duration
         layer_data.status = .STOPPED
@@ -552,6 +628,6 @@ layer_update :: proc(self: ^Layer, delta_time: f32) {
       }
     }
   case IKLayer:
-    // IK doesn't have time-based updates
+  // IK doesn't have time-based updates
   }
 }

@@ -42,7 +42,7 @@ create_label :: proc(
   if !ok do return
   widget.position = {x, y}
   widget.size = {100, 20}
-  widget.fg_color = {0, 0, 0, 255}  // Black text for labels (readable on light backgrounds)
+  widget.fg_color = {0, 0, 0, 255} // Black text for labels (readable on light backgrounds)
   widget.data = LabelData {
     text     = text,
     autosize = autosize,
@@ -173,7 +173,7 @@ create_checkbox :: proc(
   handle, widget, ok = create_widget(self, .CHECK_BOX, parent)
   if !ok do return
   widget.position = {x, y}
-  widget.size = {200, 20}  // width for label, height for box
+  widget.size = {200, 20} // width for label, height for box
   widget.data = CheckBoxData {
     checked   = checked,
     label     = label,
@@ -200,7 +200,7 @@ create_radiobutton :: proc(
   handle, widget, ok = create_widget(self, .RADIO_BUTTON, parent)
   if !ok do return
   widget.position = {x, y}
-  widget.size = {200, 20}  // width for label, height for circle
+  widget.size = {200, 20} // width for label, height for circle
   widget.data = RadioButtonData {
     group_id  = group_id,
     selected  = selected,

@@ -38,10 +38,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
   // Emissive material for effector sphere
-  effector_mat := create_material(
-    engine,
-    emissive_value = 5.0,
-  )
+  effector_mat := create_material(engine, emissive_value = 5.0)
   // Spawn 50x50 grid of cubes
   cube_handles = make([dynamic]resources.Handle, 0)
   grid_size := 50

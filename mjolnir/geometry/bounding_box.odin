@@ -26,34 +26,51 @@ aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
 }
 
 aabb_union :: proc(a, b: Aabb) -> Aabb {
-  return Aabb{
-    min = linalg.min(a.min, b.min),
-    max = linalg.max(a.max, b.max),
-  }
+  return Aabb{min = linalg.min(a.min, b.min), max = linalg.max(a.max, b.max)}
 }
 
 aabb_intersects :: proc(a, b: Aabb) -> bool {
-  return a.min.x <= b.max.x && a.max.x >= b.min.x &&
-         a.min.y <= b.max.y && a.max.y >= b.min.y &&
-         a.min.z <= b.max.z && a.max.z >= b.min.z
+  return(
+    a.min.x <= b.max.x &&
+    a.max.x >= b.min.x &&
+    a.min.y <= b.max.y &&
+    a.max.y >= b.min.y &&
+    a.min.z <= b.max.z &&
+    a.max.z >= b.min.z \
+  )
 }
 
 aabb_contains :: proc(outer, inner: Aabb) -> bool {
-  return inner.min.x >= outer.min.x && inner.max.x <= outer.max.x &&
-         inner.min.y >= outer.min.y && inner.max.y <= outer.max.y &&
-         inner.min.z >= outer.min.z && inner.max.z <= outer.max.z
+  return(
+    inner.min.x >= outer.min.x &&
+    inner.max.x <= outer.max.x &&
+    inner.min.y >= outer.min.y &&
+    inner.max.y <= outer.max.y &&
+    inner.min.z >= outer.min.z &&
+    inner.max.z <= outer.max.z \
+  )
 }
 
 aabb_contains_approx :: proc(outer, inner: Aabb, epsilon: f32 = 1e-6) -> bool {
-  return inner.min.x >= outer.min.x - epsilon && inner.max.x <= outer.max.x + epsilon &&
-         inner.min.y >= outer.min.y - epsilon && inner.max.y <= outer.max.y + epsilon &&
-         inner.min.z >= outer.min.z - epsilon && inner.max.z <= outer.max.z + epsilon
+  return(
+    inner.min.x >= outer.min.x - epsilon &&
+    inner.max.x <= outer.max.x + epsilon &&
+    inner.min.y >= outer.min.y - epsilon &&
+    inner.max.y <= outer.max.y + epsilon &&
+    inner.min.z >= outer.min.z - epsilon &&
+    inner.max.z <= outer.max.z + epsilon \
+  )
 }
 
 aabb_contains_point :: proc(aabb: Aabb, point: [3]f32) -> bool {
-  return point.x >= aabb.min.x && point.x <= aabb.max.x &&
-         point.y >= aabb.min.y && point.y <= aabb.max.y &&
-         point.z >= aabb.min.z && point.z <= aabb.max.z
+  return(
+    point.x >= aabb.min.x &&
+    point.x <= aabb.max.x &&
+    point.y >= aabb.min.y &&
+    point.y <= aabb.max.y &&
+    point.z >= aabb.min.z &&
+    point.z <= aabb.max.z \
+  )
 }
 
 aabb_center :: proc(aabb: Aabb) -> [3]f32 {
@@ -74,7 +91,11 @@ aabb_volume :: proc(aabb: Aabb) -> f32 {
   return d.x * d.y * d.z
 }
 
-aabb_sphere_intersects :: proc(aabb: Aabb, center: [3]f32, radius: f32) -> bool {
+aabb_sphere_intersects :: proc(
+  aabb: Aabb,
+  center: [3]f32,
+  radius: f32,
+) -> bool {
   closest := linalg.clamp(center, aabb.min, aabb.max)
   diff := center - closest
   return linalg.dot(diff, diff) <= radius * radius
@@ -85,10 +106,16 @@ distance_point_aabb :: proc(point: [3]f32, aabb: Aabb) -> f32 {
   return linalg.length(point - closest)
 }
 
-ray_aabb_intersection :: proc(origin: [3]f32, inv_dir: [3]f32, aabb: Aabb) -> (t_near, t_far: f32) {
+ray_aabb_intersection :: proc(
+  origin: [3]f32,
+  inv_dir: [3]f32,
+  aabb: Aabb,
+) -> (
+  t_near, t_far: f32,
+) {
   t_min := [3]f32{-F32_MAX, -F32_MAX, -F32_MAX}
   t_max := [3]f32{F32_MAX, F32_MAX, F32_MAX}
-  for i in 0..<3 {
+  for i in 0 ..< 3 {
     if math.abs(inv_dir[i]) < 1e-6 {
       // Ray is parallel to this axis
       if origin[i] < aabb.min[i] || origin[i] > aabb.max[i] {
@@ -108,7 +135,11 @@ ray_aabb_intersection :: proc(origin: [3]f32, inv_dir: [3]f32, aabb: Aabb) -> (t
   return
 }
 
-ray_aabb_intersection_far :: proc(origin: [3]f32, inv_dir: [3]f32, aabb: Aabb) -> f32 {
+ray_aabb_intersection_far :: proc(
+  origin: [3]f32,
+  inv_dir: [3]f32,
+  aabb: Aabb,
+) -> f32 {
   t1 := (aabb.min - origin) * inv_dir
   t2 := (aabb.max - origin) * inv_dir
   t_max := linalg.max(t1, t2)
@@ -177,13 +208,23 @@ obb_contains_point :: proc(obb: Obb, point: [3]f32) -> bool {
   d := point - obb.center
   inv_rot := linalg.quaternion_inverse(obb.rotation)
   local := linalg.quaternion128_mul_vector3(inv_rot, d)
-  return math.abs(local.x) <= obb.half_extents.x &&
-         math.abs(local.y) <= obb.half_extents.y &&
-         math.abs(local.z) <= obb.half_extents.z
+  return(
+    math.abs(local.x) <= obb.half_extents.x &&
+    math.abs(local.y) <= obb.half_extents.y &&
+    math.abs(local.z) <= obb.half_extents.z \
+  )
 }
 
 // OBB-OBB intersection test using Separating Axis Theorem
-obb_obb_intersect :: proc(a: Obb, b: Obb) -> (contact: [3]f32, normal: [3]f32, penetration_depth: f32, hit: bool) {
+obb_obb_intersect :: proc(
+  a: Obb,
+  b: Obb,
+) -> (
+  contact: [3]f32,
+  normal: [3]f32,
+  penetration_depth: f32,
+  hit: bool,
+) {
   // Get rotation matrices for both OBBs
   ax, ay, az := obb_axes(a)
   bx, by, bz := obb_axes(b)
@@ -196,20 +237,30 @@ obb_obb_intersect :: proc(a: Obb, b: Obb) -> (contact: [3]f32, normal: [3]f32, p
   min_overlap := f32(math.F32_MAX)
   best_axis: [3]f32
   // Helper to test a single axis
-  test_axis :: proc(axis: [3]f32, t: [3]f32, a: Obb, b: Obb, ax, ay, az, bx, by, bz: [3]f32, min_overlap: ^f32, best_axis: ^[3]f32) -> bool {
+  test_axis :: proc(
+    axis: [3]f32,
+    t: [3]f32,
+    a: Obb,
+    b: Obb,
+    ax, ay, az, bx, by, bz: [3]f32,
+    min_overlap: ^f32,
+    best_axis: ^[3]f32,
+  ) -> bool {
     length_sq := linalg.length2(axis)
     if length_sq < 1e-6 do return true // Degenerate axis, skip
     normalized_axis := axis / math.sqrt(length_sq)
     // Project centers onto axis
     dist := linalg.dot(t, normalized_axis)
     // Project extents of A onto axis
-    ra := a.half_extents.x * math.abs(linalg.dot(ax, normalized_axis)) +
-          a.half_extents.y * math.abs(linalg.dot(ay, normalized_axis)) +
-          a.half_extents.z * math.abs(linalg.dot(az, normalized_axis))
+    ra :=
+      a.half_extents.x * math.abs(linalg.dot(ax, normalized_axis)) +
+      a.half_extents.y * math.abs(linalg.dot(ay, normalized_axis)) +
+      a.half_extents.z * math.abs(linalg.dot(az, normalized_axis))
     // Project extents of B onto axis
-    rb := b.half_extents.x * math.abs(linalg.dot(bx, normalized_axis)) +
-          b.half_extents.y * math.abs(linalg.dot(by, normalized_axis)) +
-          b.half_extents.z * math.abs(linalg.dot(bz, normalized_axis))
+    rb :=
+      b.half_extents.x * math.abs(linalg.dot(bx, normalized_axis)) +
+      b.half_extents.y * math.abs(linalg.dot(by, normalized_axis)) +
+      b.half_extents.z * math.abs(linalg.dot(bz, normalized_axis))
     // Check for separation
     abs_dist := math.abs(dist)
     overlap := ra + rb - abs_dist
@@ -250,7 +301,16 @@ obb_obb_intersect :: proc(a: Obb, b: Obb) -> (contact: [3]f32, normal: [3]f32, p
 }
 
 // Sphere-OBB intersection test
-obb_sphere_intersect :: proc(obb: Obb, sphere_center: [3]f32, sphere_radius: f32) -> (closest: [3]f32, normal: [3]f32, penetration: f32, hit: bool) {
+obb_sphere_intersect :: proc(
+  obb: Obb,
+  sphere_center: [3]f32,
+  sphere_radius: f32,
+) -> (
+  closest: [3]f32,
+  normal: [3]f32,
+  penetration: f32,
+  hit: bool,
+) {
   // Find closest point on OBB to sphere center
   closest = obb_closest_point(obb, sphere_center)
   // Vector from closest point to sphere center
@@ -273,7 +333,12 @@ obb_capsule_intersect :: proc(
   capsule_center: [3]f32,
   capsule_radius: f32,
   capsule_height: f32,
-) -> (closest_on_obb: [3]f32, normal: [3]f32, penetration: f32, hit: bool) {
+) -> (
+  closest_on_obb: [3]f32,
+  normal: [3]f32,
+  penetration: f32,
+  hit: bool,
+) {
   // Capsule is aligned along Y-axis
   h := capsule_height * 0.5
   line_start := capsule_center + [3]f32{0, -h, 0}
@@ -284,7 +349,7 @@ obb_capsule_intersect :: proc(
   min_dist_sq := f32(math.F32_MAX)
   closest_on_line: [3]f32
   // Sample 5 points along the line segment
-  for i in 0..=4 {
+  for i in 0 ..= 4 {
     t := f32(i) / 4.0
     sample := linalg.mix(line_start, line_end, t)
     point_on_obb := obb_closest_point(obb, sample)
@@ -300,7 +365,9 @@ obb_capsule_intersect :: proc(
   line_dir := line_end - line_start
   line_length_sq := linalg.length2(line_dir)
   if line_length_sq > 1e-6 {
-    t := linalg.saturate(linalg.dot(closest_on_obb - line_start, line_dir) / line_length_sq)
+    t := linalg.saturate(
+      linalg.dot(closest_on_obb - line_start, line_dir) / line_length_sq,
+    )
     closest_on_line = linalg.mix(line_start, line_end, t)
     closest_on_obb = obb_closest_point(obb, closest_on_line)
   }

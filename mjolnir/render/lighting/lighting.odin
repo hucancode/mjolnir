@@ -190,7 +190,9 @@ init :: proc(
     SHADER_AMBIENT_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, ambient_frag_module, nil)
-  ambient_dynamic_state := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
+  ambient_dynamic_state := gpu.create_dynamic_state(
+    gpu.STANDARD_DYNAMIC_STATES[:],
+  )
   ambient_input_assembly := gpu.create_standard_input_assembly()
   ambient_vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -334,8 +336,14 @@ init :: proc(
     SHADER_LIGHTING_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, lighting_frag_module, nil)
-  lighting_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_COMPARE_OP}
-  lighting_dynamic_state := gpu.create_dynamic_state(lighting_dynamic_states[:])
+  lighting_dynamic_states := [?]vk.DynamicState {
+    .VIEWPORT,
+    .SCISSOR,
+    .DEPTH_COMPARE_OP,
+  }
+  lighting_dynamic_state := gpu.create_dynamic_state(
+    lighting_dynamic_states[:],
+  )
   lighting_input_assembly := gpu.create_standard_input_assembly()
   lighting_vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -444,7 +452,12 @@ shutdown :: proc(
   command_pool: vk.CommandPool,
   rm: ^resources.Manager,
 ) {
-  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
+  vk.FreeCommandBuffers(
+    device,
+    command_pool,
+    u32(len(self.commands)),
+    raw_data(self.commands[:]),
+  )
   vk.DestroyPipeline(device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(device, self.ambient_pipeline_layout, nil)
@@ -453,8 +466,7 @@ shutdown :: proc(
      freed {
     gpu.image_destroy(device, item)
   }
-  if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut);
-     freed {
+  if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
     gpu.image_destroy(device, item)
   }
   vk.DestroyPipelineLayout(device, self.lighting_pipeline_layout, nil)
@@ -668,7 +680,14 @@ render :: proc(
   for handle in rm.active_lights {
     light := cont.get(rm.lights, handle) or_continue
     push_constant.light_index = handle.index
-    vk.CmdPushConstants(command_buffer, self.lighting_pipeline_layout, {.VERTEX, .FRAGMENT}, 0, size_of(push_constant), &push_constant)
+    vk.CmdPushConstants(
+      command_buffer,
+      self.lighting_pipeline_layout,
+      {.VERTEX, .FRAGMENT},
+      0,
+      size_of(push_constant),
+      &push_constant,
+    )
     switch light.type {
     case .POINT:
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)

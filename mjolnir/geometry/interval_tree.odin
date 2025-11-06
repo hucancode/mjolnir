@@ -7,10 +7,10 @@ Interval :: struct {
 }
 
 IntervalNode :: struct {
-  interval:      Interval,
-  max_end:       int,
-  left, right:   ^IntervalNode,
-  height:        int,
+  interval:    Interval,
+  max_end:     int,
+  left, right: ^IntervalNode,
+  height:      int,
 }
 
 IntervalTree :: struct {
@@ -18,7 +18,10 @@ IntervalTree :: struct {
   allocator: mem.Allocator,
 }
 
-interval_tree_init :: proc(tree: ^IntervalTree, allocator := context.allocator) {
+interval_tree_init :: proc(
+  tree: ^IntervalTree,
+  allocator := context.allocator,
+) {
   tree.root = nil
   tree.allocator = allocator
 }
@@ -91,8 +94,8 @@ interval_tree_insert :: proc(tree: ^IntervalTree, start: int, count: int = 1) {
   append(&intervals, new_interval)
   // Sort intervals by start position
   // TODO: use slice.sort_proc
-  for i in 0..<len(intervals) {
-    for j in i+1..<len(intervals) {
+  for i in 0 ..< len(intervals) {
+    for j in i + 1 ..< len(intervals) {
       if intervals[i].start > intervals[j].start {
         intervals[i], intervals[j] = intervals[j], intervals[i]
       }
@@ -103,7 +106,7 @@ interval_tree_insert :: proc(tree: ^IntervalTree, start: int, count: int = 1) {
   defer delete(merged)
   if len(intervals) > 0 {
     current := intervals[0]
-    for i in 1..<len(intervals) {
+    for i in 1 ..< len(intervals) {
       if intervals[i].start <= current.end + 1 {
         // Merge intervals
         current.end = max(current.end, intervals[i].end)
@@ -122,7 +125,11 @@ interval_tree_insert :: proc(tree: ^IntervalTree, start: int, count: int = 1) {
 }
 
 @(private)
-insert_simple :: proc(node: ^IntervalNode, interval: Interval, allocator: mem.Allocator) -> ^IntervalNode {
+insert_simple :: proc(
+  node: ^IntervalNode,
+  interval: Interval,
+  allocator: mem.Allocator,
+) -> ^IntervalNode {
   if node == nil {
     new_node := new(IntervalNode, allocator)
     new_node.interval = interval
@@ -162,7 +169,10 @@ collect_intervals :: proc(node: ^IntervalNode, intervals: ^[dynamic]Interval) {
   collect_intervals(node.right, intervals)
 }
 
-interval_tree_get_ranges :: proc(tree: ^IntervalTree, allocator := context.temp_allocator) -> []Interval {
+interval_tree_get_ranges :: proc(
+  tree: ^IntervalTree,
+  allocator := context.temp_allocator,
+) -> []Interval {
   intervals := make([dynamic]Interval, 0, allocator)
   collect_intervals(tree.root, &intervals)
   return intervals[:]

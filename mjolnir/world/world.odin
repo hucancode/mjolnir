@@ -1,7 +1,7 @@
 package world
 
-import cont "../containers"
 import anim "../animation"
+import cont "../containers"
 import "../geometry"
 import "../gpu"
 import "../resources"
@@ -18,7 +18,7 @@ LightAttachment :: struct {
 
 NodeSkinning :: struct {
   layers:                    [dynamic]anim.Layer, // Animation layers (FK + IK)
-  bone_matrix_buffer_offset: u32,                 // offset into bone matrix buffer for skinned mesh
+  bone_matrix_buffer_offset: u32, // offset into bone matrix buffer for skinned mesh
 }
 
 MeshAttachment :: struct {
@@ -262,7 +262,7 @@ add_animation_layer :: proc(
   } else {
     // Initialize skinning with empty layers
     mesh_attachment.skinning = NodeSkinning {
-      layers = make([dynamic]anim.Layer, 0),
+      layers                    = make([dynamic]anim.Layer, 0),
       bone_matrix_buffer_offset = 0xFFFFFFFF,
     }
   }
@@ -277,7 +277,10 @@ add_animation_layer :: proc(
   // later we need to do better than this linear search
   for &entry, idx in rm.animation_clips.entries do if entry.active {
     if entry.item.name == animation_name {
-      clip_handle = resources.Handle{index = u32(idx), generation = entry.generation}
+      clip_handle = resources.Handle {
+        index      = u32(idx),
+        generation = entry.generation,
+      }
       clip_duration = entry.item.duration
       found = true
       break
@@ -288,7 +291,14 @@ add_animation_layer :: proc(
   // Create new layer with handle
   layer := anim.Layer{}
   clip_handle_u64 := transmute(u64)clip_handle
-  anim.layer_init_fk(&layer, clip_handle_u64, clip_duration, weight, mode, speed)
+  anim.layer_init_fk(
+    &layer,
+    clip_handle_u64,
+    clip_duration,
+    weight,
+    mode,
+    speed,
+  )
 
   // Add or replace layer
   if layer_index >= 0 && layer_index < len(skinning.layers) {
@@ -378,7 +388,7 @@ add_ik_layer :: proc(
   } else {
     // Initialize skinning with empty layers
     mesh_attachment.skinning = NodeSkinning {
-      layers = make([dynamic]anim.Layer, 0),
+      layers                    = make([dynamic]anim.Layer, 0),
       bone_matrix_buffer_offset = 0xFFFFFFFF,
     }
   }
@@ -399,8 +409,18 @@ add_ik_layer :: proc(
 
   // Transform IK target from world space to skeleton-local space
   node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
-  target_world_h := linalg.Vector4f32{target_world_pos.x, target_world_pos.y, target_world_pos.z, 1.0}
-  pole_world_h := linalg.Vector4f32{pole_world_pos.x, pole_world_pos.y, pole_world_pos.z, 1.0}
+  target_world_h := linalg.Vector4f32 {
+    target_world_pos.x,
+    target_world_pos.y,
+    target_world_pos.z,
+    1.0,
+  }
+  pole_world_h := linalg.Vector4f32 {
+    pole_world_pos.x,
+    pole_world_pos.y,
+    pole_world_pos.z,
+    1.0,
+  }
   target_local_h := node_world_inv * target_world_h
   pole_local_h := node_world_inv * pole_world_h
   target_local := target_local_h.xyz
@@ -450,8 +470,18 @@ set_ik_layer_target :: proc(
 
   // Transform from world space to skeleton-local space
   node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
-  target_world_h := linalg.Vector4f32{target_world_pos.x, target_world_pos.y, target_world_pos.z, 1.0}
-  pole_world_h := linalg.Vector4f32{pole_world_pos.x, pole_world_pos.y, pole_world_pos.z, 1.0}
+  target_world_h := linalg.Vector4f32 {
+    target_world_pos.x,
+    target_world_pos.y,
+    target_world_pos.z,
+    1.0,
+  }
+  pole_world_h := linalg.Vector4f32 {
+    pole_world_pos.x,
+    pole_world_pos.y,
+    pole_world_pos.z,
+    1.0,
+  }
   target_local_h := node_world_inv * target_world_h
   pole_local_h := node_world_inv * pole_world_h
   target_local := target_local_h.xyz
@@ -564,10 +594,8 @@ _apply_sprite_to_node_data :: proc(
   if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
   // Mark as sprite
   data.flags |= {.MATERIAL_SPRITE}
-  if material, has_mat := cont.get(
-    rm.materials,
-    sprite_attachment.material,
-  ); has_mat {
+  if material, has_mat := cont.get(rm.materials, sprite_attachment.material);
+     has_mat {
     switch material.type {
     case .TRANSPARENT:
       data.flags |= {.MATERIAL_TRANSPARENT}
@@ -597,10 +625,8 @@ _build_node_data :: proc(
     if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
     if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
     if mesh_attachment.navigation_obstacle do data.flags |= {.NAVIGATION_OBSTACLE}
-    if material, has_mat := cont.get(
-      rm.materials,
-      mesh_attachment.material,
-    ); has_mat {
+    if material, has_mat := cont.get(rm.materials, mesh_attachment.material);
+       has_mat {
       switch material.type {
       case .TRANSPARENT:
         data.flags |= {.MATERIAL_TRANSPARENT}
@@ -705,7 +731,12 @@ init :: proc(world: ^World) {
   world.octree_updates_enabled = true
 }
 
-compute_octree_params :: proc(expected_object_count: int) -> (max_depth: i32, max_items: i32) {
+compute_octree_params :: proc(
+  expected_object_count: int,
+) -> (
+  max_depth: i32,
+  max_items: i32,
+) {
   max_depth = 8
   max_items = 32
   if expected_object_count > 100000 {
@@ -751,16 +782,15 @@ force_octree_rebuild :: proc(world: ^World, rm: ^resources.Manager) {
   world.node_octree.point_func = node_entry_to_point
   for &entry, i in world.nodes.entries {
     if !entry.active || entry.item.pending_deletion do continue
-    handle := resources.Handle{index = u32(i), generation = entry.generation}
+    handle := resources.Handle {
+      index      = u32(i),
+      generation = entry.generation,
+    }
     world.octree_dirty_set[handle] = true
   }
 }
 
-destroy :: proc(
-  world: ^World,
-  rm: ^resources.Manager,
-  gctx: ^gpu.GPUContext,
-) {
+destroy :: proc(world: ^World, rm: ^resources.Manager, gctx: ^gpu.GPUContext) {
   for &entry in world.nodes.entries {
     if entry.active {
       destroy_node(&entry.item, rm, gctx)
@@ -785,7 +815,8 @@ register_animatable_node :: proc(world: ^World, handle: resources.Handle) {
 }
 
 unregister_animatable_node :: proc(world: ^World, handle: resources.Handle) {
-  if i, found := slice.linear_search(world.animatable_nodes[:], handle); found {
+  if i, found := slice.linear_search(world.animatable_nodes[:], handle);
+     found {
     unordered_remove(&world.animatable_nodes, i)
   }
 }
@@ -839,7 +870,11 @@ despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
     node.pending_deletion = true
     detach(world.nodes, handle)
   } else {
-    log.warnf("despawn: node %v '%s' already marked for deletion", handle, node.name)
+    log.warnf(
+      "despawn: node %v '%s' already marked for deletion",
+      handle,
+      node.name,
+    )
   }
   return true
 }
@@ -886,7 +921,7 @@ cleanup_pending_deletions :: proc(
       zero_matrix: matrix[4, 4]f32
       resources.node_upload_transform(rm, handle, &zero_matrix)
       zero_data: resources.NodeData
-      zero_data.flags = {}  // Empty flags means not renderable
+      zero_data.flags = {} // Empty flags means not renderable
       resources.node_upload_data(rm, handle, &zero_data)
     }
     world.octree_dirty_set[handle] = true
@@ -905,7 +940,7 @@ get_node :: proc(world: ^World, handle: resources.Handle) -> ^Node {
 update_visibility_system :: proc(world: ^World) {
   // Find the highest active node index
   max_index: int = 0
-  for i in 0..<len(world.nodes.entries) {
+  for i in 0 ..< len(world.nodes.entries) {
     if world.nodes.entries[i].active {
       max_index = i
     }

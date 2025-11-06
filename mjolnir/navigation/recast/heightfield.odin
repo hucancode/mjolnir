@@ -6,7 +6,7 @@ Span :: struct {
     smax: u32 | 13,
     area: u32 | 6,
   },
-  next: ^Span,
+  next:       ^Span,
 }
 
 Span_Pool :: struct {
@@ -33,8 +33,8 @@ Compact_Cell :: bit_field u32 {
 }
 
 Compact_Span :: struct {
-  y:   u16,
-  reg: u16,
+  y:          u16,
+  reg:        u16,
   using data: bit_field u32 {
     con: u32 | 24,
     h:   u8  | 8,
@@ -99,15 +99,19 @@ allocate_span :: proc(hf: ^Heightfield) -> ^Span {
 }
 
 free_span :: proc(hf: ^Heightfield, span: ^Span) {
-    if span == nil do return
-    span.smin = 0
-    span.smax = 0
-    span.area = 0
-    span.next = hf.freelist
-    hf.freelist = span
+  if span == nil do return
+  span.smin = 0
+  span.smax = 0
+  span.area = 0
+  span.next = hf.freelist
+  hf.freelist = span
 }
 
-create_heightfield :: proc(width, height: i32, bmin, bmax: [3]f32, cs, ch: f32) -> ^Heightfield {
+create_heightfield :: proc(
+  width, height: i32,
+  bmin, bmax: [3]f32,
+  cs, ch: f32,
+) -> ^Heightfield {
   hf := new(Heightfield)
   hf.width = width
   hf.height = height
@@ -121,10 +125,20 @@ create_heightfield :: proc(width, height: i32, bmin, bmax: [3]f32, cs, ch: f32) 
 }
 
 create_heightfield_from_config :: proc(cfg: ^Config) -> ^Heightfield {
-  return create_heightfield(cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
+  return create_heightfield(
+    cfg.width,
+    cfg.height,
+    cfg.bmin,
+    cfg.bmax,
+    cfg.cs,
+    cfg.ch,
+  )
 }
 
-create_compact_heightfield :: proc(walkable_height, walkable_climb: i32, hf: ^Heightfield) -> ^Compact_Heightfield {
+create_compact_heightfield :: proc(
+  walkable_height, walkable_climb: i32,
+  hf: ^Heightfield,
+) -> ^Compact_Heightfield {
   chf := new(Compact_Heightfield)
   if !build_compact_heightfield(walkable_height, walkable_climb, hf, chf) {
     free_compact_heightfield(chf)

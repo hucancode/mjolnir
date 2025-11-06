@@ -11,7 +11,13 @@ mesh_ref :: proc(manager: ^Manager, handle: Handle) -> bool {
   return true
 }
 
-mesh_unref :: proc(manager: ^Manager, handle: Handle) -> (ref_count: u32, ok: bool) {
+mesh_unref :: proc(
+  manager: ^Manager,
+  handle: Handle,
+) -> (
+  ref_count: u32,
+  ok: bool,
+) {
   mesh := cont.get(manager.meshes, handle) or_return
   if mesh.ref_count == 0 {
     // log.warnf("mesh_unref: ref_count already 0 for handle %v", handle)
@@ -27,7 +33,13 @@ material_ref :: proc(manager: ^Manager, handle: Handle) -> bool {
   return true
 }
 
-material_unref :: proc(manager: ^Manager, handle: Handle) -> (ref_count: u32, ok: bool) {
+material_unref :: proc(
+  manager: ^Manager,
+  handle: Handle,
+) -> (
+  ref_count: u32,
+  ok: bool,
+) {
   mat := cont.get(manager.materials, handle) or_return
   if mat.ref_count == 0 {
     // log.warnf("material_unref: ref_count already 0 for handle %v", handle)
@@ -43,7 +55,13 @@ texture_2d_ref :: proc(manager: ^Manager, handle: Handle) -> bool {
   return true
 }
 
-texture_2d_unref :: proc(manager: ^Manager, handle: Handle) -> (ref_count: u32, ok: bool) {
+texture_2d_unref :: proc(
+  manager: ^Manager,
+  handle: Handle,
+) -> (
+  ref_count: u32,
+  ok: bool,
+) {
   img := cont.get(manager.image_2d_buffers, handle) or_return
   if img.ref_count == 0 {
     // log.warnf("texture_2d_unref: ref_count already 0 for handle %v", handle)
@@ -59,7 +77,13 @@ texture_cube_ref :: proc(manager: ^Manager, handle: Handle) -> bool {
   return true
 }
 
-texture_cube_unref :: proc(manager: ^Manager, handle: Handle) -> (ref_count: u32, ok: bool) {
+texture_cube_unref :: proc(
+  manager: ^Manager,
+  handle: Handle,
+) -> (
+  ref_count: u32,
+  ok: bool,
+) {
   img := cont.get(manager.image_cube_buffers, handle) or_return
   if img.ref_count == 0 {
     // log.warnf("texture_cube_unref: ref_count already 0 for handle %v", handle)
@@ -69,10 +93,18 @@ texture_cube_unref :: proc(manager: ^Manager, handle: Handle) -> (ref_count: u32
   return img.ref_count, true
 }
 
-purge_unused_meshes :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> (purged_count: int) {
+purge_unused_meshes :: proc(
+  manager: ^Manager,
+  gctx: ^gpu.GPUContext,
+) -> (
+  purged_count: int,
+) {
   for &entry, i in manager.meshes.entries do if entry.active {
     if entry.item.auto_purge && entry.item.ref_count == 0 {
-      handle := Handle{index = u32(i), generation = entry.generation}
+      handle := Handle {
+        index      = u32(i),
+        generation = entry.generation,
+      }
       mesh, freed := cont.free(&manager.meshes, handle)
       if freed {
         mesh_destroy(mesh, gctx, manager)
@@ -89,7 +121,10 @@ purge_unused_meshes :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> (purged
 purge_unused_materials :: proc(manager: ^Manager) -> (purged_count: int) {
   for &entry, i in manager.materials.entries do if entry.active {
     if entry.item.auto_purge && entry.item.ref_count == 0 {
-      handle := Handle{index = u32(i), generation = entry.generation}
+      handle := Handle {
+        index      = u32(i),
+        generation = entry.generation,
+      }
       mat, freed := cont.free(&manager.materials, handle)
       if freed {
         // Unref all textures referenced by this material
@@ -108,10 +143,18 @@ purge_unused_materials :: proc(manager: ^Manager) -> (purged_count: int) {
   return
 }
 
-purge_unused_textures_2d :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> (purged_count: int) {
+purge_unused_textures_2d :: proc(
+  manager: ^Manager,
+  gctx: ^gpu.GPUContext,
+) -> (
+  purged_count: int,
+) {
   for &entry, i in manager.image_2d_buffers.entries do if entry.active {
     if entry.item.auto_purge && entry.item.ref_count == 0 {
-      handle := Handle{index = u32(i), generation = entry.generation}
+      handle := Handle {
+        index      = u32(i),
+        generation = entry.generation,
+      }
       img, freed := cont.free(&manager.image_2d_buffers, handle)
       if freed {
         gpu.image_destroy(gctx.device, img)
@@ -125,10 +168,18 @@ purge_unused_textures_2d :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> (p
   return
 }
 
-purge_unused_textures_cube :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> (purged_count: int) {
+purge_unused_textures_cube :: proc(
+  manager: ^Manager,
+  gctx: ^gpu.GPUContext,
+) -> (
+  purged_count: int,
+) {
   for &entry, i in manager.image_cube_buffers.entries do if entry.active {
     if entry.item.auto_purge && entry.item.ref_count == 0 {
-      handle := Handle{index = u32(i), generation = entry.generation}
+      handle := Handle {
+        index      = u32(i),
+        generation = entry.generation,
+      }
       img, freed := cont.free(&manager.image_cube_buffers, handle)
       if freed {
         gpu.cube_depth_texture_destroy(gctx.device, img)
@@ -142,7 +193,12 @@ purge_unused_textures_cube :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> 
   return
 }
 
-purge_unused_resources :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> (total_purged: int) {
+purge_unused_resources :: proc(
+  manager: ^Manager,
+  gctx: ^gpu.GPUContext,
+) -> (
+  total_purged: int,
+) {
   // TODO: purging procedure is now running a full scan O(n) over all resources, which is expensive. we need to optimize this
   total_purged += purge_unused_meshes(manager, gctx)
   total_purged += purge_unused_materials(manager)

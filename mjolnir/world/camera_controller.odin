@@ -77,8 +77,8 @@ camera_controller_orbit_init :: proc(
   window: glfw.WindowHandle,
   target: [3]f32 = {0, 0, 0},
   distance: f32 = 5.0,
-  yaw :f32 = 0,
-  pitch :f32 = 0,
+  yaw: f32 = 0,
+  pitch: f32 = 0,
 ) -> CameraController {
   current_mouse_x, current_mouse_y := glfw.GetCursorPos(window)
   return {
@@ -184,20 +184,19 @@ camera_controller_orbit_update :: proc(
     self.mouse_delta = current_mouse_pos - self.last_mouse_pos
     self.last_mouse_pos = current_mouse_pos
     if self.mouse_delta.x != 0 || self.mouse_delta.y != 0 {
-      shift_pressed := glfw.GetKey(self.window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS ||
-                       glfw.GetKey(self.window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS
+      shift_pressed :=
+        glfw.GetKey(self.window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS ||
+        glfw.GetKey(self.window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS
       if shift_pressed {
         // Pan mode - move the target point
-        camera := resources.Camera{
-          position = orbit.target + [3]f32{
-            orbit.distance * math.cos(orbit.pitch) * math.cos(orbit.yaw),
-            orbit.distance * math.sin(orbit.pitch),
-            orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw),
-          },
+        camera := resources.Camera {
+          position = orbit.target + [3]f32{orbit.distance * math.cos(orbit.pitch) * math.cos(orbit.yaw), orbit.distance * math.sin(orbit.pitch), orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw)},
         }
         // Calculate camera right and up vectors for panning
         forward := linalg.normalize(orbit.target - camera.position)
-        right := linalg.normalize(linalg.cross(forward, linalg.VECTOR3F32_Y_AXIS))
+        right := linalg.normalize(
+          linalg.cross(forward, linalg.VECTOR3F32_Y_AXIS),
+        )
         up := linalg.cross(right, forward)
         // Pan the target based on mouse movement
         pan_x := -f32(self.mouse_delta.x) * orbit.pan_speed * orbit.distance
@@ -207,7 +206,11 @@ camera_controller_orbit_update :: proc(
         // Rotate mode - orbit around target
         orbit.yaw += f32(self.mouse_delta.x) * orbit.rotate_speed * 0.01
         orbit.pitch += f32(self.mouse_delta.y) * orbit.rotate_speed * 0.01
-        orbit.pitch = linalg.clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch)
+        orbit.pitch = linalg.clamp(
+          orbit.pitch,
+          orbit.min_pitch,
+          orbit.max_pitch,
+        )
       }
       camera_needs_update = true
     }
@@ -255,7 +258,10 @@ camera_controller_free_update :: proc(
     yaw_delta := f32(self.mouse_delta.x) * free.mouse_sensitivity
     pitch_delta := f32(self.mouse_delta.y) * free.mouse_sensitivity
     // rotate around world up for yaw
-    yaw_quat := linalg.quaternion_angle_axis(-yaw_delta, linalg.VECTOR3F32_Y_AXIS)
+    yaw_quat := linalg.quaternion_angle_axis(
+      -yaw_delta,
+      linalg.VECTOR3F32_Y_AXIS,
+    )
     camera.rotation = yaw_quat * camera.rotation
     // rotate around local right for pitch
     right := resources.camera_right(camera)
@@ -358,11 +364,7 @@ camera_controller_orbit_set_distance :: proc(
   distance: f32,
 ) {
   if orbit, ok := &controller.data.(OrbitCameraData); ok {
-    orbit.distance = clamp(
-      distance,
-      orbit.min_distance,
-      orbit.max_distance,
-    )
+    orbit.distance = clamp(distance, orbit.min_distance, orbit.max_distance)
   }
 }
 

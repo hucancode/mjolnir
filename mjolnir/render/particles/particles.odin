@@ -230,7 +230,12 @@ shutdown :: proc(
   device: vk.Device,
   command_pool: vk.CommandPool,
 ) {
-  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
+  vk.FreeCommandBuffers(
+    device,
+    command_pool,
+    u32(len(self.commands)),
+    raw_data(self.commands[:]),
+  )
   vk.DestroyPipeline(device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
@@ -311,22 +316,22 @@ create_emitter_pipeline :: proc(
 ) -> vk.Result {
   emitter_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
-      binding         = 0,
-      descriptorType  = .STORAGE_BUFFER,
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
+      stageFlags = {.COMPUTE},
     },
     {
-      binding         = 1,
-      descriptorType  = .STORAGE_BUFFER,
+      binding = 1,
+      descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
+      stageFlags = {.COMPUTE},
     },
     {
-      binding         = 2,
-      descriptorType  = .UNIFORM_BUFFER,
+      binding = 2,
+      descriptorType = .UNIFORM_BUFFER,
       descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
+      stageFlags = {.COMPUTE},
     },
   }
   vk.CreateDescriptorSetLayout(

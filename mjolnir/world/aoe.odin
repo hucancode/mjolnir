@@ -3,8 +3,8 @@ package world
 import cont "../containers"
 import "../geometry"
 import "../resources"
-import "core:math"
 import "core:log"
+import "core:math"
 import "core:math/linalg"
 
 NodeEntry :: struct {
@@ -208,18 +208,25 @@ process_octree_updates :: proc(world: ^World, rm: ^resources.Manager) {
     new_tags := node.tags
     new_bounds := geometry.Aabb{}
     if .MESH in new_tags && rm != nil {
-      if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
+      if mesh_attachment, has_mesh := node.attachment.(MeshAttachment);
+         has_mesh {
         if mesh := cont.get(rm.meshes, mesh_attachment.handle); mesh != nil {
-          local_bounds := geometry.Aabb{min = mesh.aabb_min, max = mesh.aabb_max}
-          new_bounds = geometry.aabb_transform(local_bounds, node.transform.world_matrix)
+          local_bounds := geometry.Aabb {
+            min = mesh.aabb_min,
+            max = mesh.aabb_max,
+          }
+          new_bounds = geometry.aabb_transform(
+            local_bounds,
+            node.transform.world_matrix,
+          )
         }
       }
     }
-    new_entry := NodeEntry{
-      handle = handle,
+    new_entry := NodeEntry {
+      handle   = handle,
       position = new_position,
-      tags = new_tags,
-      bounds = new_bounds,
+      tags     = new_tags,
+      bounds   = new_bounds,
     }
     // Case 3: Check if node already exists in octree
     old_entry, exists := world.octree_entry_map[handle]

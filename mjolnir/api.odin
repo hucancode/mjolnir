@@ -615,7 +615,12 @@ set_animation_layer_weight :: proc(
   layer_index: int,
   weight: f32,
 ) -> bool {
-  return world.set_animation_layer_weight(&engine.world, handle, layer_index, weight)
+  return world.set_animation_layer_weight(
+    &engine.world,
+    handle,
+    layer_index,
+    weight,
+  )
 }
 
 // Clear all animation layers from a skinned mesh node
@@ -661,7 +666,13 @@ set_ik_layer_target :: proc(
   target_pos: [3]f32,
   pole_pos: [3]f32,
 ) -> bool {
-  return world.set_ik_layer_target(&engine.world, handle, layer_index, target_pos, pole_pos)
+  return world.set_ik_layer_target(
+    &engine.world,
+    handle,
+    layer_index,
+    target_pos,
+    pole_pos,
+  )
 }
 
 // Enable or disable an IK layer
@@ -671,7 +682,12 @@ set_ik_layer_enabled :: proc(
   layer_index: int,
   enabled: bool,
 ) -> bool {
-  return world.set_ik_layer_enabled(&engine.world, handle, layer_index, enabled)
+  return world.set_ik_layer_enabled(
+    &engine.world,
+    handle,
+    layer_index,
+    enabled,
+  )
 }
 
 create_camera :: proc(

@@ -140,8 +140,13 @@ load_level :: proc(
   if pattern == .Seamless {
     if current, ok := lm.current.?; ok {
       if current.user_data == descriptor.user_data {
-        log.warn("Cannot use seamless transition with same user_data pointer:", descriptor.id)
-        log.warn("Use .Traditional pattern instead, or provide different user_data")
+        log.warn(
+          "Cannot use seamless transition with same user_data pointer:",
+          descriptor.id,
+        )
+        log.warn(
+          "Use .Traditional pattern instead, or provide different user_data",
+        )
         return
       }
     }
@@ -357,12 +362,7 @@ _async_setup_thread_proc :: proc(t: ^thread.Thread) {
   success := descriptor.setup(descriptor.user_data)
   lm.setup_success = success
   lm.setup_complete = true
-  log.info(
-    "Async setup thread finished:",
-    descriptor.id,
-    "success:",
-    success,
-  )
+  log.info("Async setup thread finished:", descriptor.id, "success:", success)
 }
 
 @(private)

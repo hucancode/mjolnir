@@ -173,9 +173,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   ccd_threshold :: 5.0 // Objects moving faster than this use CCD (m/s)
   for &entry_a, idx_a in physics.bodies.entries do if entry_a.active {
     body_a := &entry_a.item
-    if body_a.is_static ||
-       body_a.collider_handle.generation == 0 ||
-       body_a.trigger_only {
+    if body_a.is_static || body_a.collider_handle.generation == 0 || body_a.trigger_only {
       continue
     }
     // Check if moving fast enough for CCD
@@ -184,10 +182,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       continue
     }
     node_a := cont.get(w.nodes, body_a.node_handle) or_continue
-    collider_a := cont.get(
-      physics.colliders,
-      body_a.collider_handle,
-    ) or_continue
+    collider_a := cont.get(physics.colliders, body_a.collider_handle) or_continue
     pos_a := node_a.transform.position
     motion := body_a.velocity * dt
     earliest_toi := f32(1.0)
@@ -200,10 +195,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       body_b := &entry_b.item
       if body_b.collider_handle.generation == 0 do continue
       node_b := cont.get(w.nodes, body_b.node_handle) or_continue
-      collider_b := cont.get(
-        physics.colliders,
-        body_b.collider_handle,
-      ) or_continue
+      collider_b := cont.get(physics.colliders, body_b.collider_handle) or_continue
       pos_b := node_b.transform.position
       toi := swept_test(collider_a, pos_a, motion, collider_b, pos_b)
       if toi.has_impact && toi.time < earliest_toi {
@@ -224,20 +216,16 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         // Calculate restitution
         restitution := body_a.restitution
         if earliest_body_b != nil {
-          restitution =
-            (body_a.restitution + earliest_body_b.restitution) * 0.5
+          restitution = (body_a.restitution + earliest_body_b.restitution) * 0.5
         }
         // Reflect normal component with restitution
-        body_a.velocity -=
-          earliest_normal * vel_along_normal * (1.0 + restitution)
+        body_a.velocity -= earliest_normal * vel_along_normal * (1.0 + restitution)
         // Apply friction to tangent velocity
         friction := body_a.friction
         if earliest_body_b != nil {
           friction = (body_a.friction + earliest_body_b.friction) * 0.5
         }
-        tangent_vel :=
-          body_a.velocity -
-          earliest_normal * linalg.dot(body_a.velocity, earliest_normal)
+        tangent_vel := body_a.velocity - earliest_normal * linalg.dot(body_a.velocity, earliest_normal)
         body_a.velocity -= tangent_vel * friction * 0.5
       }
       // Mark as handled by CCD - skip normal position integration

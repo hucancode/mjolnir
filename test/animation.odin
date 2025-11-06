@@ -313,7 +313,10 @@ test_quaternion_sampling :: proc(t: ^testing.T) {
     0.5,
     linalg.QUATERNIONF32_IDENTITY,
   )
-  expected_half := linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Z_AXIS)
+  expected_half := linalg.quaternion_angle_axis(
+    math.PI / 2,
+    linalg.VECTOR3F32_Z_AXIS,
+  )
   testing.expect(t, almost_equal_quaternion(half_rot, expected_half))
 }
 
@@ -470,7 +473,10 @@ test_channel_init_modify_and_sample :: proc(t: ^testing.T) {
   }
   switch &kf in clip.channels[0].rotations[1] {
   case animation.LinearKeyframe(quaternion128):
-    kf.value = linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Z_AXIS)
+    kf.value = linalg.quaternion_angle_axis(
+      math.PI / 2,
+      linalg.VECTOR3F32_Z_AXIS,
+    )
   case animation.StepKeyframe(quaternion128),
        animation.CubicSplineKeyframe(quaternion128):
   // Not expected for this test
@@ -605,7 +611,10 @@ test_node_animation_channel_sampling :: proc(t: ^testing.T) {
       },
       animation.LinearKeyframe(quaternion128) {
         time = 1.0,
-        value = linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Z_AXIS),
+        value = linalg.quaternion_angle_axis(
+          math.PI / 2,
+          linalg.VECTOR3F32_Z_AXIS,
+        ),
       },
     },
     scales    = []animation.Keyframe([3]f32) {
@@ -1145,8 +1154,14 @@ test_spline_quaternion_interpolation :: proc(t: ^testing.T) {
   spline := animation.spline_create(quaternion128, 3)
   defer animation.spline_destroy(&spline)
   spline.points[0] = linalg.quaternion_angle_axis(0, linalg.VECTOR3F32_Z_AXIS)
-  spline.points[1] = linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Z_AXIS)
-  spline.points[2] = linalg.quaternion_angle_axis(math.PI, linalg.VECTOR3F32_Z_AXIS)
+  spline.points[1] = linalg.quaternion_angle_axis(
+    math.PI / 2,
+    linalg.VECTOR3F32_Z_AXIS,
+  )
+  spline.points[2] = linalg.quaternion_angle_axis(
+    math.PI,
+    linalg.VECTOR3F32_Z_AXIS,
+  )
   spline.times[0] = 0.0
   spline.times[1] = 1.0
   spline.times[2] = 2.0

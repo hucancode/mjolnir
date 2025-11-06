@@ -85,7 +85,9 @@ init :: proc(
       pName = "main",
     },
   }
-  dynamic_state_info := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
+  dynamic_state_info := gpu.create_dynamic_state(
+    gpu.STANDARD_DYNAMIC_STATES[:],
+  )
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Vertex2D),
@@ -261,12 +263,12 @@ init :: proc(
     range  = size_of(matrix[4, 4]f32),
   }
   write := vk.WriteDescriptorSet {
-    sType = .WRITE_DESCRIPTOR_SET,
-    dstSet = self.projection_descriptor_set,
-    dstBinding = 0,
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = self.projection_descriptor_set,
+    dstBinding      = 0,
     descriptorCount = 1,
-    descriptorType = .UNIFORM_BUFFER,
-    pBufferInfo = &buffer_info,
+    descriptorType  = .UNIFORM_BUFFER,
+    pBufferInfo     = &buffer_info,
   }
   vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
   log.infof("done init UI")
@@ -423,7 +425,14 @@ ui_draw_icon :: proc(
   src := mu.default_atlas[id]
   x := rect.x + (rect.w - src.w) / 2
   y := rect.y + (rect.h - src.h) / 2
-  ui_push_quad(self, cmd_buf, {x, y, src.w, src.h}, src, color, self.atlas_handle.index)
+  ui_push_quad(
+    self,
+    cmd_buf,
+    {x, y, src.w, src.h},
+    src,
+    color,
+    self.atlas_handle.index,
+  )
 }
 
 ui_set_clip_rect :: proc(

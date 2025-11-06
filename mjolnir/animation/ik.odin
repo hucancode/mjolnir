@@ -142,7 +142,9 @@ apply_pole_constraint :: proc(
     if offset_length_sq < math.F32_EPSILON {
       // Joint on the line, use pole to create offset
       pole_dir := linalg.normalize(pole_vector - root)
-      offset = linalg.normalize(pole_dir - line_dir * linalg.dot(pole_dir, line_dir))
+      offset = linalg.normalize(
+        pole_dir - line_dir * linalg.dot(pole_dir, line_dir),
+      )
       offset_length_sq = 0.01
     }
     // Desired offset direction toward pole
@@ -152,7 +154,8 @@ apply_pole_constraint :: proc(
       pole_dir := linalg.normalize(pole_offset)
       current_dir := linalg.normalize(offset)
       new_offset := linalg.normalize(linalg.lerp(current_dir, pole_dir, 0.5))
-      positions[i] = projection_point + new_offset * math.sqrt(offset_length_sq)
+      positions[i] =
+        projection_point + new_offset * math.sqrt(offset_length_sq)
     }
   }
   // Re-enforce bone lengths after pole constraint

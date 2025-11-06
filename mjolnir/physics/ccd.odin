@@ -11,7 +11,6 @@ TOIResult :: struct {
   point:      [3]f32,
 }
 
-// Swept sphere vs static sphere
 swept_sphere_sphere :: proc(
   center_a: [3]f32,
   radius_a: f32,
@@ -19,7 +18,7 @@ swept_sphere_sphere :: proc(
   center_b: [3]f32,
   radius_b: f32,
 ) -> TOIResult {
-  result : TOIResult
+  result: TOIResult
   // Relative motion
   motion := velocity_a
   motion_length_sq := linalg.length2(motion)
@@ -32,7 +31,8 @@ swept_sphere_sphere :: proc(
       result.has_impact = true
       result.time = 0.0
       distance := math.sqrt(distance_sq)
-      result.normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+      result.normal =
+        distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
       result.point = center_a + result.normal * radius_a
     }
     return result
@@ -66,13 +66,13 @@ swept_sphere_sphere :: proc(
     impact_center_a := center_a + motion * t
     delta := center_b - impact_center_a
     distance := linalg.length(delta)
-    result.normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+    result.normal =
+      distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
     result.point = impact_center_a + result.normal * radius_a
   }
   return result
 }
 
-// Swept sphere vs static box (AABB)
 swept_sphere_box :: proc(
   center: [3]f32,
   radius: f32,
@@ -80,7 +80,7 @@ swept_sphere_box :: proc(
   box_min: [3]f32,
   box_max: [3]f32,
 ) -> TOIResult {
-  result : TOIResult
+  result: TOIResult
   // Expand the box by sphere radius - now ray vs expanded box
   expanded_min := box_min - [3]f32{radius, radius, radius}
   expanded_max := box_max + [3]f32{radius, radius, radius}
@@ -129,7 +129,6 @@ swept_sphere_box :: proc(
   return result
 }
 
-// Swept test dispatcher
 swept_test :: proc(
   collider_a: ^Collider,
   pos_a: [3]f32,

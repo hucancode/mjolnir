@@ -35,7 +35,7 @@ find_furthest_point :: proc(
     sign_x := direction.x >= 0 ? f32(1.0) : f32(-1.0)
     sign_y := direction.y >= 0 ? f32(1.0) : f32(-1.0)
     sign_z := direction.z >= 0 ? f32(1.0) : f32(-1.0)
-    offset := box.half_extents * [3]f32 { sign_x, sign_y, sign_z }
+    offset := box.half_extents * [3]f32{sign_x, sign_y, sign_z}
     return center + offset
   case .Capsule:
     capsule := collider.shape.(CapsuleCollider)

@@ -177,10 +177,7 @@ vulkan_instance_init :: proc(self: ^GPUContext) -> vk.Result {
     append(&extensions, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
     dbg_create_info = {
       sType           = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-      messageSeverity = {
-        .WARNING,
-        .ERROR,
-      },
+      messageSeverity = {.WARNING, .ERROR},
       messageType     = {.VALIDATION, .PERFORMANCE},
       pfnUserCallback = debug_callback,
     }
@@ -274,7 +271,10 @@ score_physical_device :: proc(
   vk.GetPhysicalDeviceFeatures(device, &features)
   device_name_cstring := cstring(&props.deviceName[0])
   log.infof("Scoring device %s", device_name_cstring)
-  REQUIRE_GEOMETRY_SHADER :: #config(REQUIRE_GEOMETRY_SHADER, ODIN_OS != .Darwin)
+  REQUIRE_GEOMETRY_SHADER :: #config(
+    REQUIRE_GEOMETRY_SHADER,
+    ODIN_OS != .Darwin,
+  )
   when REQUIRE_GEOMETRY_SHADER {
     if !features.geometryShader {
       log.infof("Device %s: no geometry shader.", device_name_cstring)
@@ -416,7 +416,9 @@ find_queue_families :: proc(
     if .COMPUTE in family.queueFlags && .GRAPHICS not_in family.queueFlags {
       maybe_compute_family = idx
     }
-    if maybe_graphics_family != nil && maybe_present_family != nil && maybe_compute_family != nil {
+    if maybe_graphics_family != nil &&
+       maybe_present_family != nil &&
+       maybe_compute_family != nil {
       break
     }
   }
@@ -426,7 +428,8 @@ find_queue_families :: proc(
   }
   if g_fam, ok_g := maybe_graphics_family.?; ok_g {
     if p_fam, ok_p := maybe_present_family.?; ok_p {
-      return FoundQueueFamilyIndices{g_fam, p_fam, maybe_compute_family}, .SUCCESS
+      return FoundQueueFamilyIndices{g_fam, p_fam, maybe_compute_family},
+        .SUCCESS
     }
   }
   res = .ERROR_FEATURE_NOT_PRESENT
@@ -489,9 +492,9 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
   }
   vulkan_12_features := vk.PhysicalDeviceVulkan12Features {
-    sType              = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-    drawIndirectCount  = true, // Required for vk.CmdDrawIndexedIndirectCount
-    pNext              = &dynamic_rendering_feature,
+    sType             = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+    drawIndirectCount = true, // Required for vk.CmdDrawIndexedIndirectCount
+    pNext             = &dynamic_rendering_feature,
   }
   device_create_info := vk.DeviceCreateInfo {
     sType                   = .DEVICE_CREATE_INFO,
@@ -520,7 +523,10 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     self.compute_queue = queue
     self.has_async_compute = compute_fam != self.graphics_family
     if self.has_async_compute {
-      log.infof("Async compute enabled: dedicated compute queue family %d", compute_fam)
+      log.infof(
+        "Async compute enabled: dedicated compute queue family %d",
+        compute_fam,
+      )
     } else {
       log.infof("Async compute disabled: using graphics queue for compute")
     }
@@ -590,12 +596,7 @@ command_pool_init :: proc(self: ^GPUContext) -> vk.Result {
       queueFamilyIndex = compute_fam,
     }
     pool: vk.CommandPool
-    vk.CreateCommandPool(
-      self.device,
-      &compute_pool_info,
-      nil,
-      &pool,
-    ) or_return
+    vk.CreateCommandPool(self.device, &compute_pool_info, nil, &pool) or_return
     self.compute_command_pool = pool
     log.infof("Vulkan compute command pool created")
   }

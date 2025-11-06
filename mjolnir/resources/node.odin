@@ -14,7 +14,7 @@ NodeFlag :: enum u32 {
   NAVIGATION_OBSTACLE,
 }
 
-NodeFlagSet :: bit_set[NodeFlag; u32]
+NodeFlagSet :: bit_set[NodeFlag;u32]
 
 NodeData :: struct {
   material_id:           u32,
@@ -33,10 +33,6 @@ node_upload_transform :: proc(
 }
 
 // Upload node data to GPU
-node_upload_data :: proc(
-  rm: ^Manager,
-  node_handle: Handle,
-  data: ^NodeData,
-) {
+node_upload_data :: proc(rm: ^Manager, node_handle: Handle, data: ^NodeData) {
   gpu.write(&rm.node_data_buffer, data, int(node_handle.index))
 }

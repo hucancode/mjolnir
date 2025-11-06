@@ -65,7 +65,8 @@ epa :: proc(
     if linalg.length2(abc) < math.F32_EPSILON {
       // Points are collinear - find perpendicular direction
       line_dir := linalg.normalize(ab)
-      perp := abs(line_dir.x) < 0.9 ? linalg.VECTOR3F32_X_AXIS : linalg.VECTOR3F32_Y_AXIS
+      perp :=
+        abs(line_dir.x) < 0.9 ? linalg.VECTOR3F32_X_AXIS : linalg.VECTOR3F32_Y_AXIS
       normal_dir = linalg.normalize(linalg.cross(line_dir, perp))
     } else {
       normal_dir = linalg.normalize(abc)
@@ -194,7 +195,8 @@ add_face :: proc(
   ab := vb - va
   ac := vc - va
   normal := linalg.cross(ab, ac)
-  normal = linalg.length2(normal) > math.F32_EPSILON ? linalg.normalize(normal) : linalg.VECTOR3F32_Y_AXIS
+  normal =
+    linalg.length2(normal) > math.F32_EPSILON ? linalg.normalize(normal) : linalg.VECTOR3F32_Y_AXIS
   // Calculate distance from origin to face
   distance := linalg.dot(normal, va)
   // Ensure normal points toward origin

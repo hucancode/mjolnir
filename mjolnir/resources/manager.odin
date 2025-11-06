@@ -13,7 +13,7 @@ Pool :: cont.Pool
 SlabAllocator :: cont.SlabAllocator
 
 ResourceMetadata :: struct {
-  ref_count:  u32,  // Reference count for resource lifetime tracking
+  ref_count:  u32, // Reference count for resource lifetime tracking
   auto_purge: bool, // true = purge when ref_count==0, false = self managed lifecycle, never purged automatically
 }
 
@@ -86,11 +86,15 @@ Manager :: struct {
   // Bindless camera buffer system (per-frame to avoid frame overlap)
   camera_buffer_set_layout:                  vk.DescriptorSetLayout,
   camera_buffer_descriptor_sets:             [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  camera_buffers:                            [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(CameraData),
+  camera_buffers:                            [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    CameraData,
+  ),
   // Bindless spherical camera buffer system
   spherical_camera_buffer_set_layout:        vk.DescriptorSetLayout,
   spherical_camera_buffer_descriptor_sets:   [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  spherical_camera_buffers:                  [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(SphericalCameraData),
+  spherical_camera_buffers:                  [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    SphericalCameraData,
+  ),
   // Bindless material buffer system
   material_buffer_set_layout:                vk.DescriptorSetLayout,
   material_buffer_descriptor_set:            vk.DescriptorSet,
@@ -134,7 +138,9 @@ Manager :: struct {
   lights_buffer_descriptor_set:              vk.DescriptorSet,
   lights_buffer:                             gpu.MutableBuffer(LightData),
   // Per-frame dynamic light data (position + shadow_map, synchronized per frame)
-  dynamic_light_data_buffers:                [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(DynamicLightData),
+  dynamic_light_data_buffers:                [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    DynamicLightData,
+  ),
   dynamic_light_data_set_layout:             vk.DescriptorSetLayout,
   dynamic_light_data_descriptor_sets:        [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   // Bindless texture system
@@ -1142,7 +1148,9 @@ init_dynamic_light_data_buffers :: proc(
       MAX_LIGHTS,
       {.STORAGE_BUFFER},
     ) or_return
-    dynamic_data := gpu.mutable_buffer_get_all(&manager.dynamic_light_data_buffers[frame_idx])
+    dynamic_data := gpu.mutable_buffer_get_all(
+      &manager.dynamic_light_data_buffers[frame_idx],
+    )
     for &data in dynamic_data {
       data.position = {0, 0, 0, 0}
       data.shadow_map = 0xFFFFFFFF
@@ -1195,9 +1203,15 @@ init_dynamic_light_data_buffers :: proc(
   return .SUCCESS
 }
 
-destroy_dynamic_light_data_buffers :: proc(gctx: ^gpu.GPUContext, manager: ^Manager) {
+destroy_dynamic_light_data_buffers :: proc(
+  gctx: ^gpu.GPUContext,
+  manager: ^Manager,
+) {
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    gpu.mutable_buffer_destroy(gctx.device, &manager.dynamic_light_data_buffers[frame_idx])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &manager.dynamic_light_data_buffers[frame_idx],
+    )
   }
   vk.DestroyDescriptorSetLayout(
     gctx.device,
@@ -1528,7 +1542,10 @@ destroy_spherical_camera_buffer :: proc(
   manager: ^Manager,
 ) {
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    gpu.mutable_buffer_destroy(gctx.device, &manager.spherical_camera_buffers[frame_idx])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &manager.spherical_camera_buffers[frame_idx],
+    )
   }
   vk.DestroyDescriptorSetLayout(
     gctx.device,
@@ -1826,7 +1843,10 @@ init_builtin_materials :: proc(manager: ^Manager) -> vk.Result {
   return .SUCCESS
 }
 
-init_builtin_meshes :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
+init_builtin_meshes :: proc(
+  manager: ^Manager,
+  gctx: ^gpu.GPUContext,
+) -> vk.Result {
   log.info("Creating builtin meshes...")
   manager.builtin_meshes[Primitive.CUBE], _ = create_mesh_handle(
     gctx,

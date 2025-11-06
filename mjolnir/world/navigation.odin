@@ -308,10 +308,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   for i in 0 ..< 64 {
     nav_mesh.area_costs[i] = 1.0
   }
-  log.infof(
-    "Successfully built filtered navigation mesh with handle %v",
-    ret,
-  )
+  log.infof("Successfully built filtered navigation mesh with handle %v", ret)
   return ret, true
 }
 
@@ -465,10 +462,7 @@ build_navigation_mesh_from_world :: proc(
   for i in 0 ..< 64 {
     nav_mesh.area_costs[i] = 1.0
   }
-  log.infof(
-    "Successfully built world navigation mesh with handle %v",
-    ret,
-  )
+  log.infof("Successfully built world navigation mesh with handle %v", ret)
   return ret, true
 }
 
@@ -496,7 +490,7 @@ create_navigation_context :: proc(
 ) #optional_ok {
   nav_mesh := cont.get(rm.nav_meshes, nav_mesh_handle)
   if nav_mesh == nil do return {}, false
-  nav_context : ^resources.NavContext
+  nav_context: ^resources.NavContext
   ret, nav_context = cont.alloc(&rm.nav_contexts) or_return
   init_status := detour.nav_mesh_query_init(
     &nav_context.nav_mesh_query,

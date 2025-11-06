@@ -1,899 +1,1014 @@
 package navigation_recast
 
-import "core:slice"
-import "core:log"
 import "../../geometry"
+import "core:log"
 import "core:math/linalg"
+import "core:slice"
 
 // Data structures for hole merging
 Contour_Hole :: struct {
-    contour: ^Contour,
-    minx, minz: i32,
-    leftmost: i32,
+  contour:    ^Contour,
+  minx, minz: i32,
+  leftmost:   i32,
 }
 
 Contour_Region :: struct {
-    outline: ^Contour,
-    holes: []Contour_Hole,
-    nholes: i32,
+  outline: ^Contour,
+  holes:   []Contour_Hole,
+  nholes:  i32,
 }
 
 // Build compact heightfield from regular heightfield
-build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
-                                    hf: ^Heightfield, chf: ^Compact_Heightfield) -> bool {
-    w := hf.width
-    h := hf.height
-    span_count := 0
-    // Fill in header
-    chf.width = w
-    chf.height = h
-    chf.walkable_height = walkable_height
-    chf.walkable_climb = walkable_climb
-    chf.max_distance = 0
-    chf.max_regions = 0
-    chf.bmin = hf.bmin
-    chf.bmax = hf.bmax
-    chf.bmax.y += f32(walkable_height) * hf.ch  // Adjust max height
-    chf.cs = hf.cs
-    chf.ch = hf.ch
-    // Note: C++ doesn't set border_size in rcBuildCompactHeightfield
-    // It's set later during contour building or other operations
-    chf.border_size = 0
-    chf.cells = make([]Compact_Cell, w * h)
-    // Count spans and find max bottom
-    max_spans := 0
-    for y in 0..<h {
-        for x in 0..<w {
-            s := hf.spans[x + y * w]
-            if s == nil do continue
-            span_num := 0
-            for s != nil {
-                if s.area != RC_NULL_AREA {
-                    span_count += 1
-                    span_num += 1
-                }
-                s = s.next
-            }
-            max_spans = max(max_spans, span_num)
+build_compact_heightfield :: proc(
+  walkable_height, walkable_climb: i32,
+  hf: ^Heightfield,
+  chf: ^Compact_Heightfield,
+) -> bool {
+  w := hf.width
+  h := hf.height
+  span_count := 0
+  // Fill in header
+  chf.width = w
+  chf.height = h
+  chf.walkable_height = walkable_height
+  chf.walkable_climb = walkable_climb
+  chf.max_distance = 0
+  chf.max_regions = 0
+  chf.bmin = hf.bmin
+  chf.bmax = hf.bmax
+  chf.bmax.y += f32(walkable_height) * hf.ch // Adjust max height
+  chf.cs = hf.cs
+  chf.ch = hf.ch
+  // Note: C++ doesn't set border_size in rcBuildCompactHeightfield
+  // It's set later during contour building or other operations
+  chf.border_size = 0
+  chf.cells = make([]Compact_Cell, w * h)
+  // Count spans and find max bottom
+  max_spans := 0
+  for y in 0 ..< h {
+    for x in 0 ..< w {
+      s := hf.spans[x + y * w]
+      if s == nil do continue
+      span_num := 0
+      for s != nil {
+        if s.area != RC_NULL_AREA {
+          span_count += 1
+          span_num += 1
         }
+        s = s.next
+      }
+      max_spans = max(max_spans, span_num)
     }
-    if span_count == 0 do return true
-    // Allocate spans
-    chf.spans = make([]Compact_Span, span_count)
-    chf.areas = make([]u8, span_count)
-    slice.fill(chf.areas, RC_NULL_AREA)
-    // Fill in cells and spans
-    idx := 0
-    for y in 0..<h {
-        for x in 0..<w {
-            c := &chf.cells[x + y * w]
-            c.index = u32(idx)
-            c.count = 0
-            for s := hf.spans[x + y * w]; s != nil; s = s.next {
-                if s.area != RC_NULL_AREA {
-                    bottom := i32(s.smax)
-                    next := s.next
-                    top := next != nil ? i32(next.smin) : RC_SPAN_MAX_HEIGHT
-                    cs := &chf.spans[idx]
-                    cs.y = u16(clamp(bottom, 0, 0xffff))
-                    cs.h = u8(clamp(top - bottom, 0, 0xff))
-                    chf.areas[idx] = u8(s.area)
-                    idx += 1
-                    c.count = c.count + 1
-                }
-            }
+  }
+  if span_count == 0 do return true
+  // Allocate spans
+  chf.spans = make([]Compact_Span, span_count)
+  chf.areas = make([]u8, span_count)
+  slice.fill(chf.areas, RC_NULL_AREA)
+  // Fill in cells and spans
+  idx := 0
+  for y in 0 ..< h {
+    for x in 0 ..< w {
+      c := &chf.cells[x + y * w]
+      c.index = u32(idx)
+      c.count = 0
+      for s := hf.spans[x + y * w]; s != nil; s = s.next {
+        if s.area != RC_NULL_AREA {
+          bottom := i32(s.smax)
+          next := s.next
+          top := next != nil ? i32(next.smin) : RC_SPAN_MAX_HEIGHT
+          cs := &chf.spans[idx]
+          cs.y = u16(clamp(bottom, 0, 0xffff))
+          cs.h = u8(clamp(top - bottom, 0, 0xff))
+          chf.areas[idx] = u8(s.area)
+          idx += 1
+          c.count = c.count + 1
         }
+      }
     }
-    // Find neighbor connections
-    max_layers := max_spans
-    too_high_neighbor := 0
-    for y in 0..<h {
-        for x in 0..<w {
-            c := &chf.cells[x + y * w]
-            for i in c.index..<c.index + u32(c.count) {
-                s := &chf.spans[i]
-                for dir in 0..<4 {
-                    set_con(s, dir, RC_NOT_CONNECTED)
-                    nx := int(x) + int(get_dir_offset_x(dir))
-                    ny := int(y) + int(get_dir_offset_y(dir))
-                    if nx < 0 || ny < 0 || nx >= int(w) || ny >= int(h) do continue
-                    nc := &chf.cells[nx + ny * int(w)]
-                    // Find connection
-                    for k in nc.index..<nc.index + u32(nc.count) {
-                        ns := &chf.spans[k]
-                        bot := max(int(s.y), int(ns.y))
-                        top := min(int(s.y) + int(s.h), int(ns.y) + int(ns.h))
-                        if (top - bot) >= int(walkable_height) && abs(int(ns.y) - int(s.y)) <= int(walkable_climb) {
-                            lidx := int(k - nc.index)
-                            if lidx < 0 || lidx > max_layers {
-                                too_high_neighbor = max(too_high_neighbor, lidx)
-                                continue
-                            }
-                            set_con(s, dir, lidx)
-                            break
-                        }
-                    }
-                }
+  }
+  // Find neighbor connections
+  max_layers := max_spans
+  too_high_neighbor := 0
+  for y in 0 ..< h {
+    for x in 0 ..< w {
+      c := &chf.cells[x + y * w]
+      for i in c.index ..< c.index + u32(c.count) {
+        s := &chf.spans[i]
+        for dir in 0 ..< 4 {
+          set_con(s, dir, RC_NOT_CONNECTED)
+          nx := int(x) + int(get_dir_offset_x(dir))
+          ny := int(y) + int(get_dir_offset_y(dir))
+          if nx < 0 || ny < 0 || nx >= int(w) || ny >= int(h) do continue
+          nc := &chf.cells[nx + ny * int(w)]
+          // Find connection
+          for k in nc.index ..< nc.index + u32(nc.count) {
+            ns := &chf.spans[k]
+            bot := max(int(s.y), int(ns.y))
+            top := min(int(s.y) + int(s.h), int(ns.y) + int(ns.h))
+            if (top - bot) >= int(walkable_height) &&
+               abs(int(ns.y) - int(s.y)) <= int(walkable_climb) {
+              lidx := int(k - nc.index)
+              if lidx < 0 || lidx > max_layers {
+                too_high_neighbor = max(too_high_neighbor, lidx)
+                continue
+              }
+              set_con(s, dir, lidx)
+              break
             }
+          }
         }
+      }
     }
-    if too_high_neighbor > max_layers {
-        return false
-    }
-    return true
+  }
+  if too_high_neighbor > max_layers {
+    return false
+  }
+  return true
 }
 
 // Find the leftmost vertex of a contour
-find_leftmost_vertex :: proc(contour: ^Contour) -> (minx, minz, leftmost: i32) {
-    minx = contour.verts[0].x
-    minz = contour.verts[0].z
-    leftmost = 0
-    for i in 1..<len(contour.verts) {
-        x := contour.verts[i].x
-        z := contour.verts[i].z
-        if x < minx || (x == minx && z < minz) {
-            minx = x
-            minz = z
-            leftmost = i32(i)
-        }
+find_leftmost_vertex :: proc(
+  contour: ^Contour,
+) -> (
+  minx, minz, leftmost: i32,
+) {
+  minx = contour.verts[0].x
+  minz = contour.verts[0].z
+  leftmost = 0
+  for i in 1 ..< len(contour.verts) {
+    x := contour.verts[i].x
+    z := contour.verts[i].z
+    if x < minx || (x == minx && z < minz) {
+      minx = x
+      minz = z
+      leftmost = i32(i)
     }
-    return minx, minz, leftmost
+  }
+  return minx, minz, leftmost
 }
 
 // Check if vertex pj is inside cone at vertex i
 in_cone_hole :: proc(i: i32, verts: [][4]i32, pj: [4]i32) -> bool {
-    n := i32(len(verts))
-    pi := verts[i]
-    pi1 := verts[(i + 1) % n]
-    pin1 := verts[(i + n - 1) % n]
-    return geometry.in_cone(pin1.xz, pi.xz, pi1.xz, pj.xz)
+  n := i32(len(verts))
+  pi := verts[i]
+  pi1 := verts[(i + 1) % n]
+  pin1 := verts[(i + n - 1) % n]
+  return geometry.in_cone(pin1.xz, pi.xz, pi1.xz, pj.xz)
 }
 
 // Check if segment d0-d1 intersects with contour
-intersect_segment_contour :: proc(d0, d1: [4]i32, i: i32, verts: [][4]i32) -> bool {
-    n := len(verts)
-    // For each edge (k,k+1) of P
-    for k in 0..<n {
-        k1 := (k + 1) % n
-        // Skip edges incident to i
-        if i32(k) == i || i32(k1) == i {
-            continue
-        }
-        p0 := verts[k]
-        p1 := verts[k1]
-        if d0.xz == p0.xz || d1.xz == p0.xz || d0.xz == p1.xz || d1.xz == p1.xz {
-            continue
-        }
-        if geometry.intersect(d0.xz, d1.xz, p0.xz, p1.xz) {
-            return true
-        }
+intersect_segment_contour :: proc(
+  d0, d1: [4]i32,
+  i: i32,
+  verts: [][4]i32,
+) -> bool {
+  n := len(verts)
+  // For each edge (k,k+1) of P
+  for k in 0 ..< n {
+    k1 := (k + 1) % n
+    // Skip edges incident to i
+    if i32(k) == i || i32(k1) == i {
+      continue
     }
-    return false
+    p0 := verts[k]
+    p1 := verts[k1]
+    if d0.xz == p0.xz || d1.xz == p0.xz || d0.xz == p1.xz || d1.xz == p1.xz {
+      continue
+    }
+    if geometry.intersect(d0.xz, d1.xz, p0.xz, p1.xz) {
+      return true
+    }
+  }
+  return false
 }
 
 // Merge two contours
 merge_contours :: proc(ca, cb: ^Contour, ia, ib: int) -> bool {
-    na := len(ca.verts)
-    nb := len(cb.verts)
-    verts := make([][4]i32, na + nb + 2)
-    defer delete(verts)
-    // Copy vertices from contour A starting at ia
-    n := 0
-    // First part: from ia to end
-    copy(verts[n:], ca.verts[ia:])
-    n += na - ia
-    // Second part: from start to ia (wrapping around)
-    copy(verts[n:], ca.verts[:ia+1])
-    n += ia + 1
-    // Copy vertices from contour B starting at ib
-    // First part: from ib to end
-    copy(verts[n:], cb.verts[ib:])
-    n += nb - ib
-    // Second part: from start to ib (wrapping around)
-    copy(verts[n:], cb.verts[:ib+1])
-    n += ib + 1
-    delete(ca.verts)
-    ca.verts = slice.clone(verts[:n])
-    delete(cb.verts)
-    cb.verts = nil
-    return true
+  na := len(ca.verts)
+  nb := len(cb.verts)
+  verts := make([][4]i32, na + nb + 2)
+  defer delete(verts)
+  // Copy vertices from contour A starting at ia
+  n := 0
+  // First part: from ia to end
+  copy(verts[n:], ca.verts[ia:])
+  n += na - ia
+  // Second part: from start to ia (wrapping around)
+  copy(verts[n:], ca.verts[:ia + 1])
+  n += ia + 1
+  // Copy vertices from contour B starting at ib
+  // First part: from ib to end
+  copy(verts[n:], cb.verts[ib:])
+  n += nb - ib
+  // Second part: from start to ib (wrapping around)
+  copy(verts[n:], cb.verts[:ib + 1])
+  n += ib + 1
+  delete(ca.verts)
+  ca.verts = slice.clone(verts[:n])
+  delete(cb.verts)
+  cb.verts = nil
+  return true
 }
 
 // Merge region holes into outline
 merge_region_holes :: proc(reg: ^Contour_Region) {
-    // Sort holes from left to right
-    slice.sort_by(reg.holes[:reg.nholes], proc(a, b: Contour_Hole) -> bool {
-        if a.minx == b.minx {
-            return a.minz < b.minz
-        }
-        return a.minx < b.minx
-    })
-    for i in 0..<reg.nholes {
-        hole := &reg.holes[i]
-        index := -1
-        best_vertex := int(hole.leftmost)
-        for iter in 0..<len(hole.contour.verts) {
-            // Find potential diagonals from current hole vertex
-            diags := make([dynamic]Potential_Diagonal, 0, len(reg.outline.verts))
-            defer delete(diags)
-            corner := hole.contour.verts[best_vertex]
-            for j in 0..<len(reg.outline.verts) {
-                if in_cone_hole(i32(j), reg.outline.verts, corner) {
-                    diff_xz := reg.outline.verts[j].xz - corner.xz
-                    append(&diags, Potential_Diagonal{vert = i32(j), dist = linalg.length2(diff_xz)})
-                }
-            }
-            // Sort by distance
-            slice.sort_by(diags[:], proc(a, b: Potential_Diagonal) -> bool {
-                return a.dist < b.dist
-            })
-            // Find a diagonal that doesn't intersect the outline or other holes
-            for j in 0..<len(diags) {
-                pt := reg.outline.verts[diags[j].vert]
-                intersects := intersect_segment_contour(pt, corner, diags[j].vert, reg.outline.verts)
-                // Check remaining holes
-                for k := i; k < reg.nholes && !intersects; k += 1 {
-                    intersects = intersects || intersect_segment_contour(pt, corner, -1, reg.holes[k].contour.verts)
-                }
-                if !intersects {
-                    index = int(diags[j].vert)
-                    break
-                }
-            }
-            // If found valid diagonal, stop
-            if index != -1 {
-                break
-            }
-            // Try next vertex
-            best_vertex = (best_vertex + 1) % len(hole.contour.verts)
-        }
-        if index == -1 {
-            log.warnf("Failed to find merge point for hole %d", i)
-            continue
-        }
-        if !merge_contours(reg.outline, hole.contour, index, best_vertex) {
-            log.warnf("Failed to merge hole %d", i)
-            continue
-        }
+  // Sort holes from left to right
+  slice.sort_by(reg.holes[:reg.nholes], proc(a, b: Contour_Hole) -> bool {
+    if a.minx == b.minx {
+      return a.minz < b.minz
     }
+    return a.minx < b.minx
+  })
+  for i in 0 ..< reg.nholes {
+    hole := &reg.holes[i]
+    index := -1
+    best_vertex := int(hole.leftmost)
+    for iter in 0 ..< len(hole.contour.verts) {
+      // Find potential diagonals from current hole vertex
+      diags := make([dynamic]Potential_Diagonal, 0, len(reg.outline.verts))
+      defer delete(diags)
+      corner := hole.contour.verts[best_vertex]
+      for j in 0 ..< len(reg.outline.verts) {
+        if in_cone_hole(i32(j), reg.outline.verts, corner) {
+          diff_xz := reg.outline.verts[j].xz - corner.xz
+          append(
+            &diags,
+            Potential_Diagonal{vert = i32(j), dist = linalg.length2(diff_xz)},
+          )
+        }
+      }
+      // Sort by distance
+      slice.sort_by(diags[:], proc(a, b: Potential_Diagonal) -> bool {
+        return a.dist < b.dist
+      })
+      // Find a diagonal that doesn't intersect the outline or other holes
+      for j in 0 ..< len(diags) {
+        pt := reg.outline.verts[diags[j].vert]
+        intersects := intersect_segment_contour(
+          pt,
+          corner,
+          diags[j].vert,
+          reg.outline.verts,
+        )
+        // Check remaining holes
+        for k := i; k < reg.nholes && !intersects; k += 1 {
+          intersects =
+            intersects ||
+            intersect_segment_contour(
+              pt,
+              corner,
+              -1,
+              reg.holes[k].contour.verts,
+            )
+        }
+        if !intersects {
+          index = int(diags[j].vert)
+          break
+        }
+      }
+      // If found valid diagonal, stop
+      if index != -1 {
+        break
+      }
+      // Try next vertex
+      best_vertex = (best_vertex + 1) % len(hole.contour.verts)
+    }
+    if index == -1 {
+      log.warnf("Failed to find merge point for hole %d", i)
+      continue
+    }
+    if !merge_contours(reg.outline, hole.contour, index, best_vertex) {
+      log.warnf("Failed to merge hole %d", i)
+      continue
+    }
+  }
 }
 
 // Build contours from compact heightfield
-build_contours :: proc(chf: ^Compact_Heightfield,
-                      max_error: f32, max_edge_len: i32, cset: ^Contour_Set,
-                      build_flags: Contour_Tess_Flags = {.WALL_EDGES}) -> bool {
-    w := chf.width
-    h := chf.height
-    border_size := chf.border_size
-    // Initialize contour set
-    cset.bmin = chf.bmin
-    cset.bmax = chf.bmax
-    if border_size > 0 {
-        // If the heightfield was built with bordersize, remove the offset.
-        pad := f32(border_size) * chf.cs
-        cset.bmin += [3]f32{pad, 0, pad}
-        cset.bmax -= [3]f32{pad, 0, pad}
-    }
-    cset.cs = chf.cs
-    cset.ch = chf.ch
-    cset.width = chf.width - border_size * 2
-    cset.height = chf.height - border_size * 2
-    cset.border_size = border_size
-    cset.max_error = max_error
-    cset.conts = make([dynamic]Contour, 0)
-    // defer delete(cset.conts) // Will be freed by free_contour_set
-    // Create flags array to mark region boundaries
-    flags := make([]u8, len(chf.spans))
-    defer delete(flags)
-    // Mark region boundaries - spans that have different region neighbors
-    boundary_spans := 0
-    for y in 0..<h {
-        for x in 0..<w {
-            c := &chf.cells[x + y * w]
-            span_idx := c.index
-            span_count := c.count
-            for i in span_idx..<span_idx + u32(span_count) {
-                s := &chf.spans[i]
-                res: u8 = 0
-                // Skip spans with no region or border regions
-                if s.reg == 0 || (s.reg & RC_BORDER_REG) != 0 {
-                    flags[i] = 0
-                    continue
-                }
-                // Check all 4 directions for region boundaries
-                for dir in 0..<4 {
-                    r: u16 = 0
-                    if get_con(s, dir) != RC_NOT_CONNECTED {
-                        ax := x + get_dir_offset_x(dir)
-                        ay := y + get_dir_offset_y(dir)
-                        if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                            ai := chf.cells[ax + ay * w].index + u32(get_con(s, dir))
-                            if ai < u32(len(chf.spans)) {
-                                r = chf.spans[ai].reg
-                            }
-                        }
-                    }
-                    if r == s.reg {
-                        res |= (1 << u8(dir))
-                    }
-                }
-                // Invert flags - we want boundaries where regions differ
-                flags[i] = res ~ 0xf  // Inverse, mark non-connected edges
-            }
+build_contours :: proc(
+  chf: ^Compact_Heightfield,
+  max_error: f32,
+  max_edge_len: i32,
+  cset: ^Contour_Set,
+  build_flags: Contour_Tess_Flags = {.WALL_EDGES},
+) -> bool {
+  w := chf.width
+  h := chf.height
+  border_size := chf.border_size
+  // Initialize contour set
+  cset.bmin = chf.bmin
+  cset.bmax = chf.bmax
+  if border_size > 0 {
+    // If the heightfield was built with bordersize, remove the offset.
+    pad := f32(border_size) * chf.cs
+    cset.bmin += [3]f32{pad, 0, pad}
+    cset.bmax -= [3]f32{pad, 0, pad}
+  }
+  cset.cs = chf.cs
+  cset.ch = chf.ch
+  cset.width = chf.width - border_size * 2
+  cset.height = chf.height - border_size * 2
+  cset.border_size = border_size
+  cset.max_error = max_error
+  cset.conts = make([dynamic]Contour, 0)
+  // defer delete(cset.conts) // Will be freed by free_contour_set
+  // Create flags array to mark region boundaries
+  flags := make([]u8, len(chf.spans))
+  defer delete(flags)
+  // Mark region boundaries - spans that have different region neighbors
+  boundary_spans := 0
+  for y in 0 ..< h {
+    for x in 0 ..< w {
+      c := &chf.cells[x + y * w]
+      span_idx := c.index
+      span_count := c.count
+      for i in span_idx ..< span_idx + u32(span_count) {
+        s := &chf.spans[i]
+        res: u8 = 0
+        // Skip spans with no region or border regions
+        if s.reg == 0 || (s.reg & RC_BORDER_REG) != 0 {
+          flags[i] = 0
+          continue
         }
-    }
-    // Create temporary arrays for contour vertices
-    verts := make([dynamic][4]i32, 0)
-    defer delete(verts)
-    simplified := make([dynamic][4]i32, 0)
-    defer delete(simplified)
-    // Extract contours for each boundary span
-    contours_created := 0
-    total_verts_processed := 0
-    boundary_spans_found := 0
-    for y in 0..<h {
-        for x in 0..<w {
-            c := &chf.cells[x + y * w]
-            span_idx := c.index
-            span_count := c.count
-            spans_in_cell := 0
-            for i in span_idx..<span_idx + u32(span_count) {
-                spans_in_cell += 1
-                // Safety check for excessive spans per cell
-                if spans_in_cell > 100 {
-                    log.warnf("Cell at (%d, %d) has excessive spans (%d), stopping processing", x, y, spans_in_cell)
-                    break
-                }
-                // Skip if no boundary edges or no region
-                if flags[i] == 0 || flags[i] == 0xf {
-                    flags[i] = 0
-                    continue
-                }
-                region_id := chf.spans[i].reg
-                if region_id == 0 || (region_id & RC_BORDER_REG) != 0 {
-                    continue
-                }
-                area_id := chf.areas[i]
-                // Extract contour for this region
-                boundary_spans_found += 1
-                // Clear arrays for this contour
-                clear(&verts)
-                clear(&simplified)
-                // Walk the boundary to extract contour vertices
-                walk_contour_boundary(i32(x), i32(y), i32(i), chf, flags[:], &verts)
-                raw_vert_count := len(verts)
-                if len(verts) >= 3 { // Need at least 3 vertices for a valid contour
-                    // Simplify the contour if requested
-                    if max_error > 0.01 {
-                        simplify_contour(verts[:], &simplified, max_error, chf.cs, max_edge_len, build_flags)
-                        remove_degenerate_contour_segments(&simplified)
-                    } else {
-                        // Use raw vertices if no simplification
-                        for v in verts {
-                            append(&simplified, v)
-                        }
-                        remove_degenerate_contour_segments(&simplified)
-                    }
-                    // Only create contour if we have meaningful vertices after simplification
-                    if len(simplified) >= 3 { // Need at least 3 vertices for a valid contour
-                        // Allocate new contour
-                        append(&cset.conts, Contour{})
-                        cont := slice.last_ptr(cset.conts[:])
-                        cont.area = area_id
-                        cont.reg = region_id
-                        // Allocate and copy vertex data
-                        cont.verts = make([][4]i32, len(simplified))
-                        copy(cont.verts, simplified[:])
-                        // Adjust vertices for border size
-                        if border_size > 0 {
-                            for &v in cont.verts {
-                                v.x -= border_size
-                                v.z -= border_size
-                            }
-                        }
-                        cont.rverts = make([][4]i32, len(verts))
-                        copy(cont.rverts, verts[:])
-                        // Adjust raw vertices for border size
-                        if border_size > 0 {
-                            for &v in cont.rverts {
-                                v.x -= border_size
-                                v.z -= border_size
-                            }
-                        }
-                        contours_created += 1
-                        total_verts_processed += len(verts)
-                        }                }
+        // Check all 4 directions for region boundaries
+        for dir in 0 ..< 4 {
+          r: u16 = 0
+          if get_con(s, dir) != RC_NOT_CONNECTED {
+            ax := x + get_dir_offset_x(dir)
+            ay := y + get_dir_offset_y(dir)
+            if ax >= 0 && ay >= 0 && ax < w && ay < h {
+              ai := chf.cells[ax + ay * w].index + u32(get_con(s, dir))
+              if ai < u32(len(chf.spans)) {
+                r = chf.spans[ai].reg
+              }
             }
+          }
+          if r == s.reg {
+            res |= (1 << u8(dir))
+          }
         }
+        // Invert flags - we want boundaries where regions differ
+        flags[i] = res ~ 0xf // Inverse, mark non-connected edges
+      }
     }
-    // Merge holes if needed
-    if len(cset.conts) > 0 {
-        // Calculate winding of all polygons
-        winding := make([]i8, len(cset.conts))
-        defer delete(winding)
-        for i in 0..<len(cset.conts) {
-            cont := &cset.conts[i]
-            // If the contour is wound backwards, it is a hole
-            area := calculate_contour_area(cont.verts)
-            winding[i] = area < 0 ? -1 : 1
+  }
+  // Create temporary arrays for contour vertices
+  verts := make([dynamic][4]i32, 0)
+  defer delete(verts)
+  simplified := make([dynamic][4]i32, 0)
+  defer delete(simplified)
+  // Extract contours for each boundary span
+  contours_created := 0
+  total_verts_processed := 0
+  boundary_spans_found := 0
+  for y in 0 ..< h {
+    for x in 0 ..< w {
+      c := &chf.cells[x + y * w]
+      span_idx := c.index
+      span_count := c.count
+      spans_in_cell := 0
+      for i in span_idx ..< span_idx + u32(span_count) {
+        spans_in_cell += 1
+        // Safety check for excessive spans per cell
+        if spans_in_cell > 100 {
+          log.warnf(
+            "Cell at (%d, %d) has excessive spans (%d), stopping processing",
+            x,
+            y,
+            spans_in_cell,
+          )
+          break
         }
-        // Count holes using slice.count_proc
-        nholes := slice.count_proc(winding, proc(w: i8) -> bool { return w < 0 })
-        if nholes > 0 {
-            // Collect outline and hole contours per region
-            nregions := chf.max_regions + 1
-            regions := make([]Contour_Region, nregions)
-            defer delete(regions)
-            holes := make([]Contour_Hole, len(cset.conts))
-            defer delete(holes)
-            // Assign contours to regions
-            for i in 0..<len(cset.conts) {
-                cont := &cset.conts[i]
-                // Positively wound contours are outlines, negative holes
-                if winding[i] > 0 {
-                    if regions[cont.reg].outline != nil {
-                        log.errorf("Multiple outlines for region %d", cont.reg)
-                    }
-                    regions[cont.reg].outline = cont
-                } else {
-                    regions[cont.reg].nholes += 1
-                }
-            }
-            // Allocate hole arrays for each region
-            hole_index := 0
-            for i in 0..<nregions {
-                if regions[i].nholes > 0 {
-                    regions[i].holes = holes[hole_index:hole_index + int(regions[i].nholes)]
-                    hole_index += int(regions[i].nholes)
-                    regions[i].nholes = 0 // Reset to use as index
-                }
-            }
-            // Fill hole data
-            for i in 0..<len(cset.conts) {
-                cont := &cset.conts[i]
-                reg := &regions[cont.reg]
-                if winding[i] < 0 {
-                    // Find leftmost vertex
-                    minx, minz, leftmost := find_leftmost_vertex(cont)
-                    hole := &reg.holes[reg.nholes]
-                    hole.contour = cont
-                    hole.minx = minx
-                    hole.minz = minz
-                    hole.leftmost = leftmost
-                    reg.nholes += 1
-                }
-            }
-            // Merge holes into outlines
-            for i in 0..<nregions {
-                reg := &regions[i]
-                if reg.nholes == 0 do continue
-                if reg.outline != nil {
-                    merge_region_holes(reg)
-                } else {
-                    // The region does not have an outline.
-                    // This can happen if the contour becomes self-overlapping because of
-                    // too aggressive simplification settings.
-                    log.errorf("Bad outline for region %d, contour simplification is likely too aggressive.", i)
-                }
-            }
+        // Skip if no boundary edges or no region
+        if flags[i] == 0 || flags[i] == 0xf {
+          flags[i] = 0
+          continue
         }
+        region_id := chf.spans[i].reg
+        if region_id == 0 || (region_id & RC_BORDER_REG) != 0 {
+          continue
+        }
+        area_id := chf.areas[i]
+        // Extract contour for this region
+        boundary_spans_found += 1
+        // Clear arrays for this contour
+        clear(&verts)
+        clear(&simplified)
+        // Walk the boundary to extract contour vertices
+        walk_contour_boundary(i32(x), i32(y), i32(i), chf, flags[:], &verts)
+        raw_vert_count := len(verts)
+        if len(verts) >= 3 {   // Need at least 3 vertices for a valid contour
+          // Simplify the contour if requested
+          if max_error > 0.01 {
+            simplify_contour(
+              verts[:],
+              &simplified,
+              max_error,
+              chf.cs,
+              max_edge_len,
+              build_flags,
+            )
+            remove_degenerate_contour_segments(&simplified)
+          } else {
+            // Use raw vertices if no simplification
+            for v in verts {
+              append(&simplified, v)
+            }
+            remove_degenerate_contour_segments(&simplified)
+          }
+          // Only create contour if we have meaningful vertices after simplification
+          if len(simplified) >= 3 {   // Need at least 3 vertices for a valid contour
+            // Allocate new contour
+            append(&cset.conts, Contour{})
+            cont := slice.last_ptr(cset.conts[:])
+            cont.area = area_id
+            cont.reg = region_id
+            // Allocate and copy vertex data
+            cont.verts = make([][4]i32, len(simplified))
+            copy(cont.verts, simplified[:])
+            // Adjust vertices for border size
+            if border_size > 0 {
+              for &v in cont.verts {
+                v.x -= border_size
+                v.z -= border_size
+              }
+            }
+            cont.rverts = make([][4]i32, len(verts))
+            copy(cont.rverts, verts[:])
+            // Adjust raw vertices for border size
+            if border_size > 0 {
+              for &v in cont.rverts {
+                v.x -= border_size
+                v.z -= border_size
+              }
+            }
+            contours_created += 1
+            total_verts_processed += len(verts)
+          }}
+      }
     }
-    return true
+  }
+  // Merge holes if needed
+  if len(cset.conts) > 0 {
+    // Calculate winding of all polygons
+    winding := make([]i8, len(cset.conts))
+    defer delete(winding)
+    for i in 0 ..< len(cset.conts) {
+      cont := &cset.conts[i]
+      // If the contour is wound backwards, it is a hole
+      area := calculate_contour_area(cont.verts)
+      winding[i] = area < 0 ? -1 : 1
+    }
+    // Count holes using slice.count_proc
+    nholes := slice.count_proc(winding, proc(w: i8) -> bool {return w < 0})
+    if nholes > 0 {
+      // Collect outline and hole contours per region
+      nregions := chf.max_regions + 1
+      regions := make([]Contour_Region, nregions)
+      defer delete(regions)
+      holes := make([]Contour_Hole, len(cset.conts))
+      defer delete(holes)
+      // Assign contours to regions
+      for i in 0 ..< len(cset.conts) {
+        cont := &cset.conts[i]
+        // Positively wound contours are outlines, negative holes
+        if winding[i] > 0 {
+          if regions[cont.reg].outline != nil {
+            log.errorf("Multiple outlines for region %d", cont.reg)
+          }
+          regions[cont.reg].outline = cont
+        } else {
+          regions[cont.reg].nholes += 1
+        }
+      }
+      // Allocate hole arrays for each region
+      hole_index := 0
+      for i in 0 ..< nregions {
+        if regions[i].nholes > 0 {
+          regions[i].holes =
+          holes[hole_index:hole_index + int(regions[i].nholes)]
+          hole_index += int(regions[i].nholes)
+          regions[i].nholes = 0 // Reset to use as index
+        }
+      }
+      // Fill hole data
+      for i in 0 ..< len(cset.conts) {
+        cont := &cset.conts[i]
+        reg := &regions[cont.reg]
+        if winding[i] < 0 {
+          // Find leftmost vertex
+          minx, minz, leftmost := find_leftmost_vertex(cont)
+          hole := &reg.holes[reg.nholes]
+          hole.contour = cont
+          hole.minx = minx
+          hole.minz = minz
+          hole.leftmost = leftmost
+          reg.nholes += 1
+        }
+      }
+      // Merge holes into outlines
+      for i in 0 ..< nregions {
+        reg := &regions[i]
+        if reg.nholes == 0 do continue
+        if reg.outline != nil {
+          merge_region_holes(reg)
+        } else {
+          // The region does not have an outline.
+          // This can happen if the contour becomes self-overlapping because of
+          // too aggressive simplification settings.
+          log.errorf(
+            "Bad outline for region %d, contour simplification is likely too aggressive.",
+            i,
+          )
+        }
+      }
+    }
+  }
+  return true
 }
 
 // Walk along the boundary of a region to extract contour vertices
 // Returns true if boundary walk completed successfully, false if algorithm cannot proceed
-walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
-                             flags: []u8, points: ^[dynamic][4]i32) -> bool {
-    // Input bounds validation
-    if i < 0 || i >= i32(len(flags)) {
-        log.errorf("Invalid span index %d for boundary walk (flags array length: %d)", i, len(flags))
-        return false
-    }
-    if x < 0 || x >= chf.width || y < 0 || y >= chf.height {
-        log.errorf("Invalid coordinates (%d, %d) for boundary walk (heightfield size: %dx%d)", x, y, chf.width, chf.height)
-        return false
-    }
-    // Find first boundary edge - choose the first non-connected edge
-    dir: u8 = 0
-    for (flags[i] & (1 << dir)) == 0 {
-        dir += 1
-        if dir >= 4 {
-            return false // No boundary found
-        }
-    }
-    start_dir := dir
-    start_i := i
-    area := chf.areas[i]
-    curr_x, curr_y, curr_i := x, y, i
-    iter: i32 = 0
-    for iter < 40000 {
-        iter += 1
-        // Bounds check for current index
-        if curr_i < 0 || curr_i >= i32(len(chf.spans)) {
-            log.errorf("walk_contour_boundary: curr_i %d out of bounds [0, %d)", curr_i, len(chf.spans))
-            return false
-        }
-        if (flags[curr_i] & (1 << dir)) != 0 {
-            // We can step in this direction - create vertex at edge corner
-            is_area_border := false
-            px := curr_x
-            py, is_border_vertex := get_corner_height_for_contour(curr_x, curr_y, curr_i, i32(dir), chf)
-            pz := curr_y
-            switch dir {
-            case 0: pz += 1      // North: increment Z
-            case 1: px += 1; pz += 1  // Northeast: increment both X and Z
-            case 2: px += 1      // East: increment X
-            case 3:              // South: no change (base position)
-            }
-            // Get region info for the edge
-            r: i32 = 0
-            s := &chf.spans[curr_i]
-            if get_con(s, int(dir)) != RC_NOT_CONNECTED {
-                ax := curr_x + i32(get_dir_offset_x(int(dir)))
-                ay := curr_y + i32(get_dir_offset_y(int(dir)))
-                // Bounds check for neighbor coordinates
-                if ax >= 0 && ax < chf.width && ay >= 0 && ay < chf.height {
-                    ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, int(dir)))
-                    if ai >= 0 && ai < i32(len(chf.spans)) {
-                        r = i32(chf.spans[ai].reg)
-                        // Check if this is an area border
-                        if ai < i32(len(chf.areas)) && area != chf.areas[ai] {
-                            is_area_border = true
-                        }
-                    }
-                }
-            }
-            if is_border_vertex {
-                r |= RC_BORDER_VERTEX
-            }
-            if is_area_border {
-                r |= RC_AREA_BORDER
-            }
-            append(points, [4]i32{px, py, pz, r})
-            flags[curr_i] &= ~(1 << dir) // Remove visited edges
-            dir = (dir + 1) & 0x3       // Rotate CW
-        } else {
-            // Cannot step in this direction - move to neighbor span
-            ni := i32(-1)
-            nx := curr_x + i32(get_dir_offset_x(int(dir)))
-            ny := curr_y + i32(get_dir_offset_y(int(dir)))
-            s := &chf.spans[curr_i]
-            if get_con(s, int(dir)) != RC_NOT_CONNECTED {
-                // Bounds check for neighbor coordinates
-                if nx >= 0 && nx < chf.width && ny >= 0 && ny < chf.height {
-                    nc := &chf.cells[nx + ny * chf.width]
-                    ni = i32(nc.index) + i32(get_con(s, int(dir)))
-                }
-            }
-            if ni == -1 {
-                // Should not happen in valid heightfield
-                return false
-            }
-            // Bounds check the new index
-            if ni < 0 || ni >= i32(len(chf.spans)) {
-                log.errorf("walk_contour_boundary: ni %d out of bounds [0, %d)", ni, len(chf.spans))
-                return false
-            }
-            // Update position to neighbor
-            curr_x = nx
-            curr_y = ny
-            curr_i = ni
-            dir = (dir + 3) & 0x3  // Rotate CCW
-        }
-        // Check termination condition
-        if start_i == curr_i && start_dir == dir {
-            return true
-        }
-    }
-    // Should not happen with valid heightfield
-    log.errorf("Boundary walk exceeded maximum iterations, may indicate corrupted heightfield")
+walk_contour_boundary :: proc(
+  x, y, i: i32,
+  chf: ^Compact_Heightfield,
+  flags: []u8,
+  points: ^[dynamic][4]i32,
+) -> bool {
+  // Input bounds validation
+  if i < 0 || i >= i32(len(flags)) {
+    log.errorf(
+      "Invalid span index %d for boundary walk (flags array length: %d)",
+      i,
+      len(flags),
+    )
     return false
+  }
+  if x < 0 || x >= chf.width || y < 0 || y >= chf.height {
+    log.errorf(
+      "Invalid coordinates (%d, %d) for boundary walk (heightfield size: %dx%d)",
+      x,
+      y,
+      chf.width,
+      chf.height,
+    )
+    return false
+  }
+  // Find first boundary edge - choose the first non-connected edge
+  dir: u8 = 0
+  for (flags[i] & (1 << dir)) == 0 {
+    dir += 1
+    if dir >= 4 {
+      return false // No boundary found
+    }
+  }
+  start_dir := dir
+  start_i := i
+  area := chf.areas[i]
+  curr_x, curr_y, curr_i := x, y, i
+  iter: i32 = 0
+  for iter < 40000 {
+    iter += 1
+    // Bounds check for current index
+    if curr_i < 0 || curr_i >= i32(len(chf.spans)) {
+      log.errorf(
+        "walk_contour_boundary: curr_i %d out of bounds [0, %d)",
+        curr_i,
+        len(chf.spans),
+      )
+      return false
+    }
+    if (flags[curr_i] & (1 << dir)) != 0 {
+      // We can step in this direction - create vertex at edge corner
+      is_area_border := false
+      px := curr_x
+      py, is_border_vertex := get_corner_height_for_contour(
+        curr_x,
+        curr_y,
+        curr_i,
+        i32(dir),
+        chf,
+      )
+      pz := curr_y
+      switch dir {
+      case 0:
+        pz += 1 // North: increment Z
+      case 1:
+        px += 1;pz += 1 // Northeast: increment both X and Z
+      case 2:
+        px += 1 // East: increment X
+      case 3: // South: no change (base position)
+      }
+      // Get region info for the edge
+      r: i32 = 0
+      s := &chf.spans[curr_i]
+      if get_con(s, int(dir)) != RC_NOT_CONNECTED {
+        ax := curr_x + i32(get_dir_offset_x(int(dir)))
+        ay := curr_y + i32(get_dir_offset_y(int(dir)))
+        // Bounds check for neighbor coordinates
+        if ax >= 0 && ax < chf.width && ay >= 0 && ay < chf.height {
+          ai :=
+            i32(chf.cells[ax + ay * chf.width].index) +
+            i32(get_con(s, int(dir)))
+          if ai >= 0 && ai < i32(len(chf.spans)) {
+            r = i32(chf.spans[ai].reg)
+            // Check if this is an area border
+            if ai < i32(len(chf.areas)) && area != chf.areas[ai] {
+              is_area_border = true
+            }
+          }
+        }
+      }
+      if is_border_vertex {
+        r |= RC_BORDER_VERTEX
+      }
+      if is_area_border {
+        r |= RC_AREA_BORDER
+      }
+      append(points, [4]i32{px, py, pz, r})
+      flags[curr_i] &= ~(1 << dir) // Remove visited edges
+      dir = (dir + 1) & 0x3 // Rotate CW
+    } else {
+      // Cannot step in this direction - move to neighbor span
+      ni := i32(-1)
+      nx := curr_x + i32(get_dir_offset_x(int(dir)))
+      ny := curr_y + i32(get_dir_offset_y(int(dir)))
+      s := &chf.spans[curr_i]
+      if get_con(s, int(dir)) != RC_NOT_CONNECTED {
+        // Bounds check for neighbor coordinates
+        if nx >= 0 && nx < chf.width && ny >= 0 && ny < chf.height {
+          nc := &chf.cells[nx + ny * chf.width]
+          ni = i32(nc.index) + i32(get_con(s, int(dir)))
+        }
+      }
+      if ni == -1 {
+        // Should not happen in valid heightfield
+        return false
+      }
+      // Bounds check the new index
+      if ni < 0 || ni >= i32(len(chf.spans)) {
+        log.errorf(
+          "walk_contour_boundary: ni %d out of bounds [0, %d)",
+          ni,
+          len(chf.spans),
+        )
+        return false
+      }
+      // Update position to neighbor
+      curr_x = nx
+      curr_y = ny
+      curr_i = ni
+      dir = (dir + 3) & 0x3 // Rotate CCW
+    }
+    // Check termination condition
+    if start_i == curr_i && start_dir == dir {
+      return true
+    }
+  }
+  // Should not happen with valid heightfield
+  log.errorf(
+    "Boundary walk exceeded maximum iterations, may indicate corrupted heightfield",
+  )
+  return false
 }
 
 // Get height at corner, considering neighboring spans
-get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfield) -> (ret: i32, is_border_vertex: bool) {
-    // Input validation
-    if i < 0 || i >= i32(len(chf.spans)) {
-        log.errorf("Invalid span index %d in get_corner_height_for_contour", i)
-        return 0, false
-    }
-    s := &chf.spans[i]
-    ch := i32(s.y)
-    dirp := (dir + 1) & 0x3
-    regs: [4]u32
-    // Combine region and area codes in order to prevent
-    // border vertices which are in between two areas to be removed.
-    regs[0] = u32(s.reg) | (u32(chf.areas[i]) << 16)
-    // Check primary direction
-    if get_con(s, int(dir)) != RC_NOT_CONNECTED {
-        ax := x + i32(get_dir_offset_x(int(dir)))
-        ay := y + i32(get_dir_offset_y(int(dir)))
-        // Bounds check for neighbor coordinates
-        if ax >= 0 && ax < chf.width && ay >= 0 && ay < chf.height {
-            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, int(dir)))
-            if ai >= 0 && ai < i32(len(chf.spans)) {
-                as := &chf.spans[ai]
-                ch = max(ch, i32(as.y))
-                regs[1] = u32(as.reg) | (u32(chf.areas[ai]) << 16)
-                // Check diagonal
-                if get_con(as, int(dirp)) != RC_NOT_CONNECTED {
-                    ax2 := ax + i32(get_dir_offset_x(int(dirp)))
-                    ay2 := ay + i32(get_dir_offset_y(int(dirp)))
-                    if ax2 >= 0 && ax2 < chf.width && ay2 >= 0 && ay2 < chf.height {
-                        ai2 := i32(chf.cells[ax2 + ay2 * chf.width].index) + i32(get_con(as, int(dirp)))
-                        if ai2 >= 0 && ai2 < i32(len(chf.spans)) {
-                            as2 := &chf.spans[ai2]
-                            ch = max(ch, i32(as2.y))
-                            regs[2] = u32(as2.reg) | (u32(chf.areas[ai2]) << 16)
-                        }
-                    }
-                }
+get_corner_height_for_contour :: proc(
+  x, y, i, dir: i32,
+  chf: ^Compact_Heightfield,
+) -> (
+  ret: i32,
+  is_border_vertex: bool,
+) {
+  // Input validation
+  if i < 0 || i >= i32(len(chf.spans)) {
+    log.errorf("Invalid span index %d in get_corner_height_for_contour", i)
+    return 0, false
+  }
+  s := &chf.spans[i]
+  ch := i32(s.y)
+  dirp := (dir + 1) & 0x3
+  regs: [4]u32
+  // Combine region and area codes in order to prevent
+  // border vertices which are in between two areas to be removed.
+  regs[0] = u32(s.reg) | (u32(chf.areas[i]) << 16)
+  // Check primary direction
+  if get_con(s, int(dir)) != RC_NOT_CONNECTED {
+    ax := x + i32(get_dir_offset_x(int(dir)))
+    ay := y + i32(get_dir_offset_y(int(dir)))
+    // Bounds check for neighbor coordinates
+    if ax >= 0 && ax < chf.width && ay >= 0 && ay < chf.height {
+      ai :=
+        i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, int(dir)))
+      if ai >= 0 && ai < i32(len(chf.spans)) {
+        as := &chf.spans[ai]
+        ch = max(ch, i32(as.y))
+        regs[1] = u32(as.reg) | (u32(chf.areas[ai]) << 16)
+        // Check diagonal
+        if get_con(as, int(dirp)) != RC_NOT_CONNECTED {
+          ax2 := ax + i32(get_dir_offset_x(int(dirp)))
+          ay2 := ay + i32(get_dir_offset_y(int(dirp)))
+          if ax2 >= 0 && ax2 < chf.width && ay2 >= 0 && ay2 < chf.height {
+            ai2 :=
+              i32(chf.cells[ax2 + ay2 * chf.width].index) +
+              i32(get_con(as, int(dirp)))
+            if ai2 >= 0 && ai2 < i32(len(chf.spans)) {
+              as2 := &chf.spans[ai2]
+              ch = max(ch, i32(as2.y))
+              regs[2] = u32(as2.reg) | (u32(chf.areas[ai2]) << 16)
             }
+          }
         }
+      }
     }
-    // Check perpendicular direction
-    if get_con(s, int(dirp)) != RC_NOT_CONNECTED {
-        ax := x + i32(get_dir_offset_x(int(dirp)))
-        ay := y + i32(get_dir_offset_y(int(dirp)))
-        // Bounds check for neighbor coordinates
-        if ax >= 0 && ax < chf.width && ay >= 0 && ay < chf.height {
-            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, int(dirp)))
-            if ai >= 0 && ai < i32(len(chf.spans)) {
-                as := &chf.spans[ai]
-                ch = max(ch, i32(as.y))
-                regs[3] = u32(as.reg) | (u32(chf.areas[ai]) << 16)
-                // Check diagonal
-                if get_con(as, int(dir)) != RC_NOT_CONNECTED {
-                    ax2 := ax + i32(get_dir_offset_x(int(dir)))
-                    ay2 := ay + i32(get_dir_offset_y(int(dir)))
-                    if ax2 >= 0 && ax2 < chf.width && ay2 >= 0 && ay2 < chf.height {
-                        ai2 := i32(chf.cells[ax2 + ay2 * chf.width].index) + i32(get_con(as, int(dir)))
-                        if ai2 >= 0 && ai2 < i32(len(chf.spans)) {
-                            as2 := &chf.spans[ai2]
-                            ch = max(ch, i32(as2.y))
-                            regs[2] = u32(as2.reg) | (u32(chf.areas[ai2]) << 16)
-                        }
-                    }
-                }
+  }
+  // Check perpendicular direction
+  if get_con(s, int(dirp)) != RC_NOT_CONNECTED {
+    ax := x + i32(get_dir_offset_x(int(dirp)))
+    ay := y + i32(get_dir_offset_y(int(dirp)))
+    // Bounds check for neighbor coordinates
+    if ax >= 0 && ax < chf.width && ay >= 0 && ay < chf.height {
+      ai :=
+        i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, int(dirp)))
+      if ai >= 0 && ai < i32(len(chf.spans)) {
+        as := &chf.spans[ai]
+        ch = max(ch, i32(as.y))
+        regs[3] = u32(as.reg) | (u32(chf.areas[ai]) << 16)
+        // Check diagonal
+        if get_con(as, int(dir)) != RC_NOT_CONNECTED {
+          ax2 := ax + i32(get_dir_offset_x(int(dir)))
+          ay2 := ay + i32(get_dir_offset_y(int(dir)))
+          if ax2 >= 0 && ax2 < chf.width && ay2 >= 0 && ay2 < chf.height {
+            ai2 :=
+              i32(chf.cells[ax2 + ay2 * chf.width].index) +
+              i32(get_con(as, int(dir)))
+            if ai2 >= 0 && ai2 < i32(len(chf.spans)) {
+              as2 := &chf.spans[ai2]
+              ch = max(ch, i32(as2.y))
+              regs[2] = u32(as2.reg) | (u32(chf.areas[ai2]) << 16)
             }
+          }
         }
+      }
     }
-    // Check if vertex is on border between regions
-    for j in 0..<4 {
-        a := j
-        b := (j + 1) & 0x3
-        c := (j + 2) & 0x3
-        d := (j + 3) & 0x3
-        // Check for specific border patterns
-        two_same_exts := (regs[a] & regs[b] & RC_BORDER_REG) != 0 && regs[a] == regs[b]
-        two_ints := ((regs[c] | regs[d]) & RC_BORDER_REG) == 0
-        ints_same_area := (regs[c] >> 16) == (regs[d] >> 16)
-        no_zeros := regs[a] != 0 && regs[b] != 0 && regs[c] != 0 && regs[d] != 0
-        if two_same_exts && two_ints && ints_same_area && no_zeros {
-            return ch, true
-        }
+  }
+  // Check if vertex is on border between regions
+  for j in 0 ..< 4 {
+    a := j
+    b := (j + 1) & 0x3
+    c := (j + 2) & 0x3
+    d := (j + 3) & 0x3
+    // Check for specific border patterns
+    two_same_exts :=
+      (regs[a] & regs[b] & RC_BORDER_REG) != 0 && regs[a] == regs[b]
+    two_ints := ((regs[c] | regs[d]) & RC_BORDER_REG) == 0
+    ints_same_area := (regs[c] >> 16) == (regs[d] >> 16)
+    no_zeros := regs[a] != 0 && regs[b] != 0 && regs[c] != 0 && regs[d] != 0
+    if two_same_exts && two_ints && ints_same_area && no_zeros {
+      return ch, true
     }
-    return ch, false
+  }
+  return ch, false
 }
 
 // Remove degenerate segments from contour
 remove_degenerate_contour_segments :: proc(simplified: ^[dynamic][4]i32) {
-    // Remove adjacent vertices which are equal on xz-plane,
-    // or else the triangulator will get confused.
-    if len(simplified) <= 1 {
-        return
+  // Remove adjacent vertices which are equal on xz-plane,
+  // or else the triangulator will get confused.
+  if len(simplified) <= 1 {
+    return
+  }
+  // Use two-pointer technique to remove vertices with same xz coordinates
+  write_idx := 0
+  for read_idx in 0 ..< len(simplified) {
+    next_idx := (read_idx + 1) % len(simplified)
+    // Keep vertex if it differs from next in xz-plane
+    if simplified[read_idx][0] != simplified[next_idx][0] ||
+       simplified[read_idx][2] != simplified[next_idx][2] {
+      simplified[write_idx] = simplified[read_idx]
+      write_idx += 1
     }
-    // Use two-pointer technique to remove vertices with same xz coordinates
-    write_idx := 0
-    for read_idx in 0..<len(simplified) {
-        next_idx := (read_idx + 1) % len(simplified)
-        // Keep vertex if it differs from next in xz-plane
-        if simplified[read_idx][0] != simplified[next_idx][0] ||
-           simplified[read_idx][2] != simplified[next_idx][2] {
-            simplified[write_idx] = simplified[read_idx]
-            write_idx += 1
-        }
-    }
-    resize(simplified, write_idx)
+  }
+  resize(simplified, write_idx)
 }
 
 // Calculate signed area of 2D contour (positive = counter-clockwise, negative = clockwise)
 calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
-    if len(verts) < 3 do return 0 // Need at least 3 vertices
-    nverts := len(verts)
-    area: i32 = 0
-    j := nverts - 1
-    for i in 0..<nverts {
-        vi := verts[i]
-        vj := verts[j]
-        area += vi.x * vj.z - vj.x * vi.z
-        j = i
-    }
-    return (area + 1) / 2  // Round and return signed area
+  if len(verts) < 3 do return 0 // Need at least 3 vertices
+  nverts := len(verts)
+  area: i32 = 0
+  j := nverts - 1
+  for i in 0 ..< nverts {
+    vi := verts[i]
+    vj := verts[j]
+    area += vi.x * vj.z - vj.x * vi.z
+    j = i
+  }
+  return (area + 1) / 2 // Round and return signed area
 }
 
-create_contour_set :: proc(chf: ^Compact_Heightfield, max_error: f32, max_edge_len: i32,
-                          build_flags: Contour_Tess_Flags = {.WALL_EDGES}) -> ^Contour_Set {
-    cset := new(Contour_Set)
-    cset.conts = make([dynamic]Contour, 0)
-    if !build_contours(chf, max_error, max_edge_len, cset, build_flags) {
-        free_contour_set(cset)
-        return nil
-    }
-    return cset
+create_contour_set :: proc(
+  chf: ^Compact_Heightfield,
+  max_error: f32,
+  max_edge_len: i32,
+  build_flags: Contour_Tess_Flags = {.WALL_EDGES},
+) -> ^Contour_Set {
+  cset := new(Contour_Set)
+  cset.conts = make([dynamic]Contour, 0)
+  if !build_contours(chf, max_error, max_edge_len, cset, build_flags) {
+    free_contour_set(cset)
+    return nil
+  }
+  return cset
 }
 
 // Free contour set
 free_contour_set :: proc(cset: ^Contour_Set) {
-    if cset == nil do return
-    for cont in cset.conts {
-        delete(cont.verts)
-        delete(cont.rverts)
-    }
-    delete(cset.conts)
-    free(cset)
+  if cset == nil do return
+  for cont in cset.conts {
+    delete(cont.verts)
+    delete(cont.rverts)
+  }
+  delete(cset.conts)
+  free(cset)
 }
 
-simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_error: f32, cell_size: f32, max_edge_len: i32 = 12, build_flags: Contour_Tess_Flags = {.WALL_EDGES}) {
-    clear(simplified)
-    if len(raw_verts) < 3 { // Need at least 3 vertices
-        // Too few vertices to simplify
-        for v in raw_verts {
-            append(simplified, v)
-        }
-        return
+simplify_contour :: proc(
+  raw_verts: [][4]i32,
+  simplified: ^[dynamic][4]i32,
+  max_error: f32,
+  cell_size: f32,
+  max_edge_len: i32 = 12,
+  build_flags: Contour_Tess_Flags = {.WALL_EDGES},
+) {
+  clear(simplified)
+  if len(raw_verts) < 3 {   // Need at least 3 vertices
+    // Too few vertices to simplify
+    for v in raw_verts {
+      append(simplified, v)
     }
-    // If no simplification requested, copy all vertices
-    if max_error <= 0.0 {
-        for v in raw_verts {
-            append(simplified, v)
-        }
-        return
+    return
+  }
+  // If no simplification requested, copy all vertices
+  if max_error <= 0.0 {
+    for v in raw_verts {
+      append(simplified, v)
     }
-    n_verts := len(raw_verts)
-    // Check if contour has connections (region changes)
-    has_connections := false
+    return
+  }
+  n_verts := len(raw_verts)
+  // Check if contour has connections (region changes)
+  has_connections := false
+  for i := 0; i < n_verts; i += 1 {
+    if (raw_verts[i].w & RC_CONTOUR_REG_MASK) != 0 {
+      has_connections = true
+      break
+    }
+  }
+  if has_connections {
+    // Add a new point to every location where the region changes
+    seed_count := 0
     for i := 0; i < n_verts; i += 1 {
-        if (raw_verts[i].w & RC_CONTOUR_REG_MASK) != 0 {
-            has_connections = true
-            break
-        }
+      ii := (i + 1) % n_verts
+      different_regs :=
+        (raw_verts[i].w & RC_CONTOUR_REG_MASK) !=
+        (raw_verts[ii].w & RC_CONTOUR_REG_MASK)
+      area_borders :=
+        (raw_verts[i].w & RC_AREA_BORDER) != (raw_verts[ii].w & RC_AREA_BORDER)
+      if different_regs || area_borders {
+        v := raw_verts[i]
+        append(simplified, [4]i32{v[0], v[1], v[2], i32(i)})
+        seed_count += 1
+      }
     }
-    if has_connections {
-        // Add a new point to every location where the region changes
-        seed_count := 0
-        for i := 0; i < n_verts; i += 1 {
-            ii := (i + 1) % n_verts
-            different_regs := (raw_verts[i].w & RC_CONTOUR_REG_MASK) != (raw_verts[ii].w & RC_CONTOUR_REG_MASK)
-            area_borders := (raw_verts[i].w & RC_AREA_BORDER) != (raw_verts[ii].w & RC_AREA_BORDER)
-            if different_regs || area_borders {
-                v := raw_verts[i]
-                append(simplified, [4]i32{v[0], v[1], v[2], i32(i)})
-                seed_count += 1
-            }
-        }
+  }
+  // If no connections were found, use lower-left and upper-right as seed points
+  if len(simplified) == 0 {
+    // Find lower-left and upper-right vertices as initial seed points
+    llx, llz := raw_verts[0][0], raw_verts[0][2]
+    urx, urz := raw_verts[0][0], raw_verts[0][2]
+    lli, uri := 0, 0
+    for i := 0; i < n_verts; i += 1 {
+      x := raw_verts[i].x
+      z := raw_verts[i].z
+      if x < llx || (x == llx && z < llz) {
+        llx = x
+        llz = z
+        lli = i
+      }
+      if x > urx || (x == urx && z > urz) {
+        urx = x
+        urz = z
+        uri = i
+      }
     }
-    // If no connections were found, use lower-left and upper-right as seed points
-    if len(simplified) == 0 {
-        // Find lower-left and upper-right vertices as initial seed points
-        llx, llz := raw_verts[0][0], raw_verts[0][2]
-        urx, urz := raw_verts[0][0], raw_verts[0][2]
-        lli, uri := 0, 0
-        for i := 0; i < n_verts; i += 1 {
-            x := raw_verts[i].x
-            z := raw_verts[i].z
-            if x < llx || (x == llx && z < llz) {
-                llx = x
-                llz = z
-                lli = i
-            }
-            if x > urx || (x == urx && z > urz) {
-                urx = x
-                urz = z
-                uri = i
-            }
-        }
-        // Add initial seed points
-        v := raw_verts[lli]
-        append(simplified, [4]i32{v[0], v[1], v[2], i32(lli)})
-        if uri != lli {
-            v = raw_verts[uri]
-            append(simplified, [4]i32{v[0], v[1], v[2], i32(uri)})
-        }
+    // Add initial seed points
+    v := raw_verts[lli]
+    append(simplified, [4]i32{v[0], v[1], v[2], i32(lli)})
+    if uri != lli {
+      v = raw_verts[uri]
+      append(simplified, [4]i32{v[0], v[1], v[2], i32(uri)})
     }
-    // Add points until all raw points are within error tolerance to the simplified shape
-    error_sq := max_error * max_error
-    for i := 0; i < len(simplified); {
-        ii := (i + 1) % len(simplified)
-        a := simplified[i]
-        ax := a[0]
-        az := a[2]
-        ai := a[3]
-        b := simplified[ii]
-        bx := b[0]
-        bz := b[2]
-        bi := b[3]
-        // Find maximum deviation from the segment
-        max_d := f32(0)
-        max_i := -1
-        // Traverse vertices between a and b
-        ci := (ai + 1) % i32(n_verts)
-        // Tessellate only outer edges or edges between areas
-        if (raw_verts[ci].w & RC_CONTOUR_REG_MASK) == 0 || (raw_verts[ci].w & RC_AREA_BORDER) != 0 {
-            for ci != bi {
-                v := raw_verts[ci]
-                pt := [3]f32{f32(v[0]), 0, f32(v[2])}
-                seg_start := [3]f32{f32(ax), 0, f32(az)}
-                seg_end := [3]f32{f32(bx), 0, f32(bz)}
-                d, _ := geometry.point_segment_distance2_2d(pt, seg_start, seg_end)
-                if d > max_d {
-                    max_d = d
-                    max_i = int(ci)
-                }
-                ci = (ci + 1) % i32(n_verts)
-            }
+  }
+  // Add points until all raw points are within error tolerance to the simplified shape
+  error_sq := max_error * max_error
+  for i := 0; i < len(simplified); {
+    ii := (i + 1) % len(simplified)
+    a := simplified[i]
+    ax := a[0]
+    az := a[2]
+    ai := a[3]
+    b := simplified[ii]
+    bx := b[0]
+    bz := b[2]
+    bi := b[3]
+    // Find maximum deviation from the segment
+    max_d := f32(0)
+    max_i := -1
+    // Traverse vertices between a and b
+    ci := (ai + 1) % i32(n_verts)
+    // Tessellate only outer edges or edges between areas
+    if (raw_verts[ci].w & RC_CONTOUR_REG_MASK) == 0 ||
+       (raw_verts[ci].w & RC_AREA_BORDER) != 0 {
+      for ci != bi {
+        v := raw_verts[ci]
+        pt := [3]f32{f32(v[0]), 0, f32(v[2])}
+        seg_start := [3]f32{f32(ax), 0, f32(az)}
+        seg_end := [3]f32{f32(bx), 0, f32(bz)}
+        d, _ := geometry.point_segment_distance2_2d(pt, seg_start, seg_end)
+        if d > max_d {
+          max_d = d
+          max_i = int(ci)
         }
-        // If the max deviation is larger than accepted error, add new point
-        if max_i != -1 && max_d > error_sq {
-            // Insert the new point after current point
-            v := raw_verts[max_i]
-            inject_at(simplified, i+1, [4]i32{v[0], v[1], v[2], i32(max_i)})
-        } else {
-            i += 1
-        }
+        ci = (ci + 1) % i32(n_verts)
+      }
     }
-    // Split too long edges
-    if max_edge_len > 0 && (Contour_Tess_Flag.WALL_EDGES in build_flags || Contour_Tess_Flag.AREA_EDGES in build_flags) {
-        i := 0
-        for i < len(simplified) {
-            ii := (i + 1) % len(simplified)
-            a := simplified[i]
-            b := simplified[ii]
-            ab := b - a
-            // Check if we should tessellate this edge
-            ci := (a.w + 1) % i32(n_verts)
-            tess := false
-            // Wall edges (region == 0)
-            vertex_flags := transmute(Vertex_Flags)raw_verts[ci].w
-            if Contour_Tess_Flag.WALL_EDGES in build_flags && (raw_verts[ci].w & RC_CONTOUR_REG_MASK) == 0 {
-                tess = true
-            }
-            // Edges between areas
-            if .AREA_EDGES in build_flags && .AREA_BORDER in vertex_flags {
-                tess = true
-            }
-            max_i := -1
-            if tess {
-                edge_len_sq := linalg.length2([2]f32{f32(ab.x), f32(ab.z)})
-                if edge_len_sq > f32(max_edge_len*max_edge_len) {
-                    // Edge is too long, split it
-                    // Round based on lexicographical order for consistency
-                    n := ab.w if ab.w > 0 else ab.w + i32(n_verts)
-                    if n > 1 {
-                        if b.x > a.x || (b.x == a.x && b.z > a.z) {
-                            max_i = int((a.w + n/2) % i32(n_verts))
-                        } else {
-                            max_i = int((a.w + (n+1)/2) % i32(n_verts))
-                        }
-                    }
-                }
-            }
-            // If we found a point to add, insert it
-            if max_i != -1 {
-                v := raw_verts[max_i]
-                inject_at(simplified, i+1, [4]i32{v.x, v.y, v.z, i32(max_i)})
+    // If the max deviation is larger than accepted error, add new point
+    if max_i != -1 && max_d > error_sq {
+      // Insert the new point after current point
+      v := raw_verts[max_i]
+      inject_at(simplified, i + 1, [4]i32{v[0], v[1], v[2], i32(max_i)})
+    } else {
+      i += 1
+    }
+  }
+  // Split too long edges
+  if max_edge_len > 0 &&
+     (Contour_Tess_Flag.WALL_EDGES in build_flags ||
+         Contour_Tess_Flag.AREA_EDGES in build_flags) {
+    i := 0
+    for i < len(simplified) {
+      ii := (i + 1) % len(simplified)
+      a := simplified[i]
+      b := simplified[ii]
+      ab := b - a
+      // Check if we should tessellate this edge
+      ci := (a.w + 1) % i32(n_verts)
+      tess := false
+      // Wall edges (region == 0)
+      vertex_flags := transmute(Vertex_Flags)raw_verts[ci].w
+      if Contour_Tess_Flag.WALL_EDGES in build_flags &&
+         (raw_verts[ci].w & RC_CONTOUR_REG_MASK) == 0 {
+        tess = true
+      }
+      // Edges between areas
+      if .AREA_EDGES in build_flags && .AREA_BORDER in vertex_flags {
+        tess = true
+      }
+      max_i := -1
+      if tess {
+        edge_len_sq := linalg.length2([2]f32{f32(ab.x), f32(ab.z)})
+        if edge_len_sq > f32(max_edge_len * max_edge_len) {
+          // Edge is too long, split it
+          // Round based on lexicographical order for consistency
+          n := ab.w if ab.w > 0 else ab.w + i32(n_verts)
+          if n > 1 {
+            if b.x > a.x || (b.x == a.x && b.z > a.z) {
+              max_i = int((a.w + n / 2) % i32(n_verts))
             } else {
-                i += 1
+              max_i = int((a.w + (n + 1) / 2) % i32(n_verts))
             }
+          }
         }
+      }
+      // If we found a point to add, insert it
+      if max_i != -1 {
+        v := raw_verts[max_i]
+        inject_at(simplified, i + 1, [4]i32{v.x, v.y, v.z, i32(max_i)})
+      } else {
+        i += 1
+      }
     }
-    // Update the vertex flags after simplification
-    // The edge vertex flag is taken from the current raw point,
-    // and the neighbour region is taken from the next raw point.
-    for i in 0..<len(simplified) {
-        ai := (simplified[i].w + 1) % i32(n_verts)
-        bi := simplified[i].w
-        simplified[i].w = (raw_verts[ai].w & (RC_CONTOUR_REG_MASK | RC_AREA_BORDER)) | (raw_verts[bi].w & RC_BORDER_VERTEX)
-    }
+  }
+  // Update the vertex flags after simplification
+  // The edge vertex flag is taken from the current raw point,
+  // and the neighbour region is taken from the next raw point.
+  for i in 0 ..< len(simplified) {
+    ai := (simplified[i].w + 1) % i32(n_verts)
+    bi := simplified[i].w
+    simplified[i].w =
+      (raw_verts[ai].w & (RC_CONTOUR_REG_MASK | RC_AREA_BORDER)) |
+      (raw_verts[bi].w & RC_BORDER_VERTEX)
+  }
 }

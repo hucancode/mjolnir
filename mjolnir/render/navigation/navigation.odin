@@ -106,7 +106,12 @@ shutdown :: proc(
   gpu.mutable_buffer_destroy(device, &self.vertex_buffer)
   gpu.mutable_buffer_destroy(device, &self.index_buffer)
   gpu.mutable_buffer_destroy(device, &self.path_vertex_buffer)
-  vk.FreeCommandBuffers(device, command_pool, u32(len(self.commands)), raw_data(self.commands[:]))
+  vk.FreeCommandBuffers(
+    device,
+    command_pool,
+    u32(len(self.commands)),
+    raw_data(self.commands[:]),
+  )
 }
 
 begin_record :: proc(
@@ -200,7 +205,9 @@ render :: proc(
 ) {
   if !renderer.enabled do return
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.pipeline)
-  descriptor_sets := [?]vk.DescriptorSet{rm.camera_buffer_descriptor_sets[frame_index]}
+  descriptor_sets := [?]vk.DescriptorSet {
+    rm.camera_buffer_descriptor_sets[frame_index],
+  }
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
@@ -500,8 +507,13 @@ create_pipeline :: proc(
     nil,
     &renderer.pipeline,
   ) or_return
-  input_assembly_lines := gpu.create_standard_input_assembly(topology = .LINE_STRIP)
-  rasterizer_lines := gpu.create_standard_rasterizer(cull_mode = {}, line_width = 3.0)
+  input_assembly_lines := gpu.create_standard_input_assembly(
+    topology = .LINE_STRIP,
+  )
+  rasterizer_lines := gpu.create_standard_rasterizer(
+    cull_mode = {},
+    line_width = 3.0,
+  )
   pipeline_info_lines := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = u32(len(shader_stages)),

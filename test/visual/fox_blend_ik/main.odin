@@ -8,7 +8,7 @@ import "core:math"
 
 fox_handle: resources.Handle
 target_cube: resources.Handle
-blend_factor: f32 = 0.0  // 0.0 = Walk, 1.0 = Run
+blend_factor: f32 = 0.0 // 0.0 = Walk, 1.0 = Run
 blend_direction: f32 = 1.0
 
 main :: proc() {
@@ -65,8 +65,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
         // Layer 2: IK for spine/neck/head to track target
         // Target position in world space (scaled coordinates)
-        target_pos := [3]f32{0.0, 4.0, 5.0}  // scaled from {0, 80, 100}
-        pole_pos := [3]f32{0.0, 5.0, 2.5}    // scaled from {0, 100, 50}
+        target_pos := [3]f32{0.0, 4.0, 5.0} // scaled from {0, 80, 100}
+        pole_pos := [3]f32{0.0, 5.0, 2.5} // scaled from {0, 100, 50}
 
         if !add_ik_layer(
           engine,
@@ -95,15 +95,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cube_mesh := get_builtin_mesh(engine, .CUBE)
   cube_material := get_builtin_material(engine, .RED)
   target_cube = spawn_at(
-    engine,
-    {0.0, 4.0, 5.0},  // Initial IK target position
-    world.MeshAttachment {
-      handle = cube_mesh,
-      material = cube_material,
-      cast_shadow = false,
-    },
+  engine,
+  {0.0, 4.0, 5.0}, // Initial IK target position
+  world.MeshAttachment {
+    handle = cube_mesh,
+    material = cube_material,
+    cast_shadow = false,
+  },
   )
-  scale(engine, target_cube, 0.25)  // Make it smaller for the scaled scene
+  scale(engine, target_cube, 0.25) // Make it smaller for the scaled scene
 
   // Add lighting
   spawn_directional_light(
@@ -139,12 +139,12 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
   // Move target cube in a circle (scaled coordinates: 80->4, 100->5)
   t := time_since_start(engine)
-  radius: f32 = 4.0  // scaled from 80
+  radius: f32 = 4.0 // scaled from 80
   target_x := math.cos(t) * radius
   target_z := math.sin(t) * radius
-  target_y := 4.0 + math.sin(t * 2.0) * 1.0  // scaled from 80 + 20
+  target_y := 4.0 + math.sin(t * 2.0) * 1.0 // scaled from 80 + 20
   new_target := [3]f32{target_x, target_y, target_z}
-  pole := [3]f32{0.0, 5.0, 0.0}  // scaled from {0, 100, 0}
+  pole := [3]f32{0.0, 5.0, 0.0} // scaled from {0, 100, 0}
 
   // Update IK target (layer 2)
   if fox_handle.index != 0 {
@@ -159,9 +159,10 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
 on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   using mjolnir
-  if action == 1 { // Key press
+  if action == 1 {   // Key press
     switch key {
-    case 32: // Space - toggle IK
+    case 32:
+      // Space - toggle IK
       // Toggle IK layer enabled state (not implemented in API yet, so this is placeholder)
       log.info("Space pressed - IK toggle (not yet implemented)")
     }

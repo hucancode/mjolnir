@@ -1,7 +1,7 @@
 package resources
 
-import cont "../containers"
 import "../animation"
+import cont "../containers"
 import "../geometry"
 import "../gpu"
 import "core:log"
@@ -202,14 +202,14 @@ compute_bone_lengths :: proc(skin: ^Skinning) {
   // Allocate bone lengths array
   skin.bone_lengths = make([]f32, bone_count)
   // Get bind pose positions (inverse of inverse_bind_matrix)
-  bind_positions := make([][ 3]f32, bone_count, context.temp_allocator)
+  bind_positions := make([][3]f32, bone_count, context.temp_allocator)
   for bone, i in skin.bones {
     bind_matrix := linalg.matrix4_inverse(bone.inverse_bind_matrix)
     bind_positions[i] = bind_matrix[3].xyz
   }
   // Traverse hierarchy and compute distances
   TraverseEntry :: struct {
-    bone_idx: u32,
+    bone_idx:   u32,
     parent_pos: [3]f32,
   }
   stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
@@ -227,7 +227,10 @@ compute_bone_lengths :: proc(skin: ^Skinning) {
     bone := &skin.bones[entry.bone_idx]
     bone_pos := bind_positions[entry.bone_idx]
     // Compute and store length from parent
-    skin.bone_lengths[entry.bone_idx] = linalg.distance(entry.parent_pos, bone_pos)
+    skin.bone_lengths[entry.bone_idx] = linalg.distance(
+      entry.parent_pos,
+      bone_pos,
+    )
     // Queue children with this bone's position
     for child_idx in bone.children {
       append(&stack, TraverseEntry{child_idx, bone_pos})
@@ -252,12 +255,16 @@ sample_layers :: proc(
 
   // Temporary storage for accumulating transforms
   accumulated_positions := make([][3]f32, bone_count, context.temp_allocator)
-  accumulated_rotations := make([]quaternion128, bone_count, context.temp_allocator)
+  accumulated_rotations := make(
+    []quaternion128,
+    bone_count,
+    context.temp_allocator,
+  )
   accumulated_scales := make([][3]f32, bone_count, context.temp_allocator)
   accumulated_weights := make([]f32, bone_count, context.temp_allocator)
 
   // Initialize accumulators
-  for i in 0..<bone_count {
+  for i in 0 ..< bone_count {
     accumulated_positions[i] = {0, 0, 0}
     accumulated_rotations[i] = linalg.QUATERNIONF32_IDENTITY
     accumulated_scales[i] = {0, 0, 0}
@@ -285,7 +292,10 @@ sample_layers :: proc(
         bone_count,
         context.temp_allocator,
       )
-      append(&stack, TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index})
+      append(
+        &stack,
+        TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
+      )
 
       for len(stack) > 0 {
         entry := pop(&stack)
@@ -293,7 +303,10 @@ sample_layers :: proc(
         local_transform: geometry.Transform
         if entry.bone < u32(len(clip.channels)) {
           local_transform.position, local_transform.rotation, local_transform.scale =
-            animation.channel_sample_all(clip.channels[entry.bone], layer_data.time)
+            animation.channel_sample_all(
+              clip.channels[entry.bone],
+              layer_data.time,
+            )
         } else {
           local_transform.scale = [3]f32{1, 1, 1}
           local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
@@ -302,11 +315,8 @@ sample_layers :: proc(
         // Accumulate weighted transform
         w := layer.weight
         accumulated_positions[entry.bone] += local_transform.position * w
-        accumulated_rotations[entry.bone] = linalg.quaternion_slerp(
-          accumulated_rotations[entry.bone],
-          local_transform.rotation,
-          w / (accumulated_weights[entry.bone] + w),
-        ) if accumulated_weights[entry.bone] > 0 else local_transform.rotation
+        accumulated_rotations[entry.bone] =
+          linalg.quaternion_slerp(accumulated_rotations[entry.bone], local_transform.rotation, w / (accumulated_weights[entry.bone] + w)) if accumulated_weights[entry.bone] > 0 else local_transform.rotation
         accumulated_scales[entry.bone] += local_transform.scale * w
         accumulated_weights[entry.bone] += w
 
@@ -332,13 +342,11 @@ sample_layers :: proc(
     parent_world: matrix[4, 4]f32,
     bone_index:   u32,
   }
-  stack := make(
-    [dynamic]TraverseEntry,
-    0,
-    bone_count,
-    context.temp_allocator,
+  stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
+  append(
+    &stack,
+    TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
   )
-  append(&stack, TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index})
 
   for len(stack) > 0 {
     entry := pop(&stack)
@@ -350,7 +358,9 @@ sample_layers :: proc(
     if accumulated_weights[bone_idx] > 0 {
       weight := accumulated_weights[bone_idx]
       local_transform.position = accumulated_positions[bone_idx] / weight
-      local_transform.rotation = linalg.normalize(accumulated_rotations[bone_idx])
+      local_transform.rotation = linalg.normalize(
+        accumulated_rotations[bone_idx],
+      )
       local_transform.scale = accumulated_scales[bone_idx] / weight
     } else {
       local_transform.scale = [3]f32{1, 1, 1}
@@ -367,7 +377,9 @@ sample_layers :: proc(
     world_matrix := entry.parent_world * local_matrix
     world_transforms[bone_idx].world_matrix = world_matrix
     world_transforms[bone_idx].world_position = world_matrix[3].xyz
-    world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
+    world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(
+      world_matrix,
+    )
 
     for child_idx in bone.children {
       append(&stack, TraverseEntry{world_matrix, child_idx})
@@ -375,7 +387,11 @@ sample_layers :: proc(
   }
 
   // Apply IK targets (from both layer-embedded IK and external IK targets)
-  all_ik_targets := make([dynamic]animation.IKTarget, 0, context.temp_allocator)
+  all_ik_targets := make(
+    [dynamic]animation.IKTarget,
+    0,
+    context.temp_allocator,
+  )
 
   // Collect IK from layers
   for &layer in layers {
@@ -417,7 +433,12 @@ sample_layers :: proc(
       }
     }
 
-    update_stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
+    update_stack := make(
+      [dynamic]TraverseEntry,
+      0,
+      bone_count,
+      context.temp_allocator,
+    )
     for bone_idx in affected_bones {
       bone := &skin.bones[bone_idx]
       parent_world := world_transforms[bone_idx].world_matrix
@@ -437,7 +458,9 @@ sample_layers :: proc(
       if accumulated_weights[bone_idx] > 0 {
         weight := accumulated_weights[bone_idx]
         local_transform.position = accumulated_positions[bone_idx] / weight
-        local_transform.rotation = linalg.normalize(accumulated_rotations[bone_idx])
+        local_transform.rotation = linalg.normalize(
+          accumulated_rotations[bone_idx],
+        )
         local_transform.scale = accumulated_scales[bone_idx] / weight
       } else {
         local_transform.scale = [3]f32{1, 1, 1}
@@ -453,7 +476,8 @@ sample_layers :: proc(
       world_matrix := entry.parent_world * local_matrix
       world_transforms[bone_idx].world_matrix = world_matrix
       world_transforms[bone_idx].world_position = world_matrix[3].xyz
-      world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
+      world_transforms[bone_idx].world_rotation =
+        linalg.quaternion_from_matrix4(world_matrix)
 
       for child_idx in bone.children {
         append(&update_stack, TraverseEntry{world_matrix, child_idx})
@@ -495,12 +519,7 @@ sample_clip_with_ik :: proc(
     parent_world: matrix[4, 4]f32,
     bone_index:   u32,
   }
-  stack := make(
-    [dynamic]TraverseEntry,
-    0,
-    bone_count,
-    context.temp_allocator,
-  )
+  stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
   append(
     &stack,
     TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
@@ -528,7 +547,9 @@ sample_clip_with_ik :: proc(
     // Store world transform
     world_transforms[bone_idx].world_matrix = world_matrix
     world_transforms[bone_idx].world_position = world_matrix[3].xyz
-    world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
+    world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(
+      world_matrix,
+    )
     // Push children
     for child_idx in bone.children {
       append(&stack, TraverseEntry{world_matrix, child_idx})
@@ -562,7 +583,12 @@ sample_clip_with_ik :: proc(
       }
     }
     // Recompute world transforms for children of affected bones
-    update_stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
+    update_stack := make(
+      [dynamic]TraverseEntry,
+      0,
+      bone_count,
+      context.temp_allocator,
+    )
     // Find all children of affected bones and queue them for update
     for bone_idx in affected_bones {
       bone := &skin.bones[bone_idx]
@@ -598,7 +624,8 @@ sample_clip_with_ik :: proc(
       // Update world transform
       world_transforms[bone_idx].world_matrix = world_matrix
       world_transforms[bone_idx].world_position = world_matrix[3].xyz
-      world_transforms[bone_idx].world_rotation = linalg.quaternion_from_matrix4(world_matrix)
+      world_transforms[bone_idx].world_rotation =
+        linalg.quaternion_from_matrix4(world_matrix)
       // Queue children for update
       for child_idx in bone.children {
         append(&update_stack, TraverseEntry{world_matrix, child_idx})

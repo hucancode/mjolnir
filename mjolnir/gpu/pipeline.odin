@@ -14,11 +14,11 @@ create_standard_rasterizer :: proc(
   line_width: f32 = 1.0,
 ) -> vk.PipelineRasterizationStateCreateInfo {
   return {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = polygon_mode,
-    cullMode    = cull_mode,
-    frontFace   = front_face,
-    lineWidth   = line_width,
+    cullMode = cull_mode,
+    frontFace = front_face,
+    lineWidth = line_width,
   }
 }
 
@@ -28,16 +28,17 @@ create_standard_input_assembly :: proc(
   topology: vk.PrimitiveTopology = .TRIANGLE_LIST,
 ) -> vk.PipelineInputAssemblyStateCreateInfo {
   return {
-    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = topology,
   }
 }
 
 // Creates standard multisampling state with 1x MSAA (no multisampling).
 // 1x MSAA is the most common configuration for deferred rendering.
-create_standard_multisampling :: proc() -> vk.PipelineMultisampleStateCreateInfo {
+create_standard_multisampling :: proc(
+) -> vk.PipelineMultisampleStateCreateInfo {
   return {
-    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
 }
@@ -53,8 +54,8 @@ create_dynamic_state :: proc(
   states: []vk.DynamicState,
 ) -> vk.PipelineDynamicStateCreateInfo {
   return {
-    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = u32(len(states)),
-    pDynamicStates    = raw_data(states),
+    pDynamicStates = raw_data(states),
   }
 }

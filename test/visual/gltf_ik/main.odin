@@ -91,11 +91,5 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     pole,
   )
 
-  translate(
-    engine,
-    target_cube,
-    new_target.x,
-    new_target.y,
-    new_target.z,
-  )
+  translate(engine, target_cube, new_target.x, new_target.y, new_target.z)
 }

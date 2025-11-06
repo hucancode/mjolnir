@@ -58,7 +58,7 @@ record_compute_commands :: proc(
       compute_buffer,
       cam,
       u32(cam_index),
-      frame_index,  // Build pyramid[N]
+      frame_index, // Build pyramid[N]
       rm,
     )
     // STEP 2: Cull using camera[N] + pyramid[N] → draw_list[N+1]
@@ -70,7 +70,7 @@ record_compute_commands :: proc(
       compute_buffer,
       cam,
       u32(cam_index),
-      next_frame_index,  // Write draw_list[N+1]
+      next_frame_index, // Write draw_list[N+1]
       {.VISIBLE},
       {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
       rm,
@@ -271,7 +271,12 @@ record_camera_visibility :: proc(
     if !entry.active do continue
     spherical_cam := &entry.item
     // Upload camera data to GPU buffer (per-frame to avoid frame overlap)
-    resources.spherical_camera_upload_data(rm, spherical_cam, u32(cam_index), frame_index)
+    resources.spherical_camera_upload_data(
+      rm,
+      spherical_cam,
+      u32(cam_index),
+      frame_index,
+    )
     // Dispatch visibility - records compute culling + depth rendering
     world.visibility_system_dispatch_spherical(
       &world_state.visibility,
@@ -341,12 +346,7 @@ record_geometry_pass :: proc(
     command_stride,
   )
   geometry.end_pass(camera_handle, command_buffer, rm, frame_index)
-  geometry.end_record(
-    command_buffer,
-    camera_handle,
-    rm,
-    frame_index,
-  ) or_return
+  geometry.end_record(command_buffer, camera_handle, rm, frame_index) or_return
   return .SUCCESS
 }
 
@@ -478,21 +478,27 @@ record_transparency_pass :: proc(
       srcAccessMask = {.SHADER_WRITE},
       dstAccessMask = {.INDIRECT_COMMAND_READ},
       buffer = camera.transparent_draw_commands[frame_index].buffer,
-      size = vk.DeviceSize(camera.transparent_draw_commands[frame_index].bytes_count),
+      size = vk.DeviceSize(
+        camera.transparent_draw_commands[frame_index].bytes_count,
+      ),
     },
     {
       sType = .BUFFER_MEMORY_BARRIER,
       srcAccessMask = {.SHADER_WRITE},
       dstAccessMask = {.INDIRECT_COMMAND_READ},
       buffer = camera.transparent_draw_count[frame_index].buffer,
-      size = vk.DeviceSize(camera.transparent_draw_count[frame_index].bytes_count),
+      size = vk.DeviceSize(
+        camera.transparent_draw_count[frame_index].bytes_count,
+      ),
     },
     {
       sType = .BUFFER_MEMORY_BARRIER,
       srcAccessMask = {.SHADER_WRITE},
       dstAccessMask = {.INDIRECT_COMMAND_READ},
       buffer = camera.sprite_draw_commands[frame_index].buffer,
-      size = vk.DeviceSize(camera.sprite_draw_commands[frame_index].bytes_count),
+      size = vk.DeviceSize(
+        camera.sprite_draw_commands[frame_index].bytes_count,
+      ),
     },
     {
       sType = .BUFFER_MEMORY_BARRIER,

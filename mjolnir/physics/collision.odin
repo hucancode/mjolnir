@@ -8,27 +8,29 @@ import "core:math/linalg"
 
 is_identity_quaternion :: proc(q: quaternion128) -> bool {
   epsilon :: 1e-6
-  return math.abs(q.x) < epsilon &&
-         math.abs(q.y) < epsilon &&
-         math.abs(q.z) < epsilon &&
-         math.abs(q.w - 1.0) < epsilon
+  return(
+    math.abs(q.x) < epsilon &&
+    math.abs(q.y) < epsilon &&
+    math.abs(q.z) < epsilon &&
+    math.abs(q.w - 1.0) < epsilon \
+  )
 }
 
 Contact :: struct {
-  body_a:              resources.Handle,
-  body_b:              resources.Handle,
-  point:               [3]f32,
-  normal:              [3]f32,
-  penetration:         f32,
-  restitution:         f32,
-  friction:            f32,
+  body_a:          resources.Handle,
+  body_b:          resources.Handle,
+  point:           [3]f32,
+  normal:          [3]f32,
+  penetration:     f32,
+  restitution:     f32,
+  friction:        f32,
   // Warmstarting: accumulated impulses from this contact
-  normal_impulse:      f32,
-  tangent_impulse:     [2]f32,
+  normal_impulse:  f32,
+  tangent_impulse: [2]f32,
   // Cached data for constraint solving
-  normal_mass:         f32,
-  tangent_mass:        [2]f32,
-  bias:                f32, // Position correction bias term
+  normal_mass:     f32,
+  tangent_mass:    [2]f32,
+  bias:            f32, // Position correction bias term
 }
 
 CollisionPair :: struct {
@@ -45,8 +47,10 @@ collision_pair_hash :: proc(pair: CollisionPair) -> u64 {
 }
 
 collision_pair_eq :: proc(a: CollisionPair, b: CollisionPair) -> bool {
-  return (a.body_a == b.body_a && a.body_b == b.body_b) ||
-         (a.body_a == b.body_b && a.body_b == b.body_a)
+  return(
+    (a.body_a == b.body_a && a.body_b == b.body_b) ||
+    (a.body_a == b.body_b && a.body_b == b.body_a) \
+  )
 }
 
 test_sphere_sphere :: proc(
@@ -67,7 +71,8 @@ test_sphere_sphere :: proc(
     return
   }
   distance := math.sqrt(distance_sq)
-  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  normal =
+    distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration = radius_sum - distance
   point = pos_a + normal * (sphere_a.radius - penetration * 0.5)
   hit = true
@@ -118,7 +123,8 @@ test_box_box :: proc(
         (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5,
       }
     } else {
-      normal = pos_b.z > pos_a.z ? linalg.VECTOR3F32_Z_AXIS : -linalg.VECTOR3F32_Z_AXIS
+      normal =
+        pos_b.z > pos_a.z ? linalg.VECTOR3F32_Z_AXIS : -linalg.VECTOR3F32_Z_AXIS
       contact_z := pos_b.z > pos_a.z ? max_a.z : min_a.z
       point = [3]f32 {
         (max(min_a.x, min_b.x) + min(max_a.x, max_b.x)) * 0.5,
@@ -166,7 +172,8 @@ test_sphere_box :: proc(
       return
     }
     distance := math.sqrt(distance_sq)
-    normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+    normal =
+      distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
     penetration = sphere.radius - distance
     hit = true
     return
@@ -197,8 +204,10 @@ test_capsule_capsule :: proc(
   line_b_start := pos_b + [3]f32{0, -h_b, 0}
   line_b_end := pos_b + [3]f32{0, h_b, 0}
   point_a, point_b, _, _ := geometry.segment_segment_closest_points(
-    line_a_start, line_a_end,
-    line_b_start, line_b_end,
+    line_a_start,
+    line_a_end,
+    line_b_start,
+    line_b_end,
   )
   delta := point_b - point_a
   distance_sq := linalg.length2(delta)
@@ -207,7 +216,8 @@ test_capsule_capsule :: proc(
     return
   }
   distance := math.sqrt(distance_sq)
-  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  normal =
+    distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration = radius_sum - distance
   point = point_a + normal * (capsule_a.radius - penetration * 0.5)
   hit = true
@@ -230,7 +240,8 @@ test_sphere_capsule :: proc(
   line_end := pos_capsule + [3]f32{0, h, 0}
   line_dir := line_end - line_start
   line_length_sq := linalg.length2(line_dir)
-  t := line_length_sq < math.F32_EPSILON ? 0 : linalg.saturate(linalg.dot(pos_sphere - line_start, line_dir) / line_length_sq)
+  t :=
+    line_length_sq < math.F32_EPSILON ? 0 : linalg.saturate(linalg.dot(pos_sphere - line_start, line_dir) / line_length_sq)
   closest := line_start + line_dir * t
   delta := pos_sphere - closest
   distance_sq := linalg.length2(delta)
@@ -239,7 +250,8 @@ test_sphere_capsule :: proc(
     return
   }
   distance := math.sqrt(distance_sq)
-  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  normal =
+    distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration = radius_sum - distance
   point = closest + normal * (capsule.radius - penetration * 0.5)
   hit = true
@@ -276,7 +288,8 @@ test_box_capsule :: proc(
       return
     }
     distance := math.sqrt(distance_sq)
-    normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+    normal =
+      distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
     penetration = capsule.radius - distance
     hit = true
     return
@@ -287,7 +300,12 @@ test_box_capsule :: proc(
     half_extents = box.half_extents,
     rotation     = box.rotation,
   }
-  closest, normal, penetration, hit = geometry.obb_capsule_intersect(obb, pos_capsule, capsule.radius, capsule.height)
+  closest, normal, penetration, hit = geometry.obb_capsule_intersect(
+    obb,
+    pos_capsule,
+    capsule.radius,
+    capsule.height,
+  )
   return
 }
 
@@ -315,7 +333,12 @@ test_collision :: proc(
   } else if collider_a.type == .Sphere && collider_b.type == .Box {
     sphere := &collider_a.shape.(SphereCollider)
     box := &collider_b.shape.(BoxCollider)
-    point, normal, penetration, hit = test_sphere_box(center_a, sphere, center_b, box)
+    point, normal, penetration, hit = test_sphere_box(
+      center_a,
+      sphere,
+      center_b,
+      box,
+    )
     // invert normal because test_sphere_box return normal pointing box -> sphere
     normal = -normal
     return
@@ -330,7 +353,12 @@ test_collision :: proc(
   } else if collider_a.type == .Sphere && collider_b.type == .Capsule {
     sphere := &collider_a.shape.(SphereCollider)
     capsule := &collider_b.shape.(CapsuleCollider)
-    point, normal, penetration, hit = test_sphere_capsule(center_a, sphere, center_b, capsule)
+    point, normal, penetration, hit = test_sphere_capsule(
+      center_a,
+      sphere,
+      center_b,
+      capsule,
+    )
     // invert normal because test_sphere_capsule return normal pointing capsule -> sphere
     normal = -normal
     return
@@ -345,7 +373,12 @@ test_collision :: proc(
   } else if collider_a.type == .Capsule && collider_b.type == .Box {
     capsule := &collider_a.shape.(CapsuleCollider)
     box := &collider_b.shape.(BoxCollider)
-    point, normal, penetration, hit = test_box_capsule(center_b, box, center_a, capsule)
+    point, normal, penetration, hit = test_box_capsule(
+      center_b,
+      box,
+      center_a,
+      capsule,
+    )
     // invert normal because test_box_capsule return normal pointing box -> capsule
     normal = -normal
     return

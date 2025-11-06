@@ -19,7 +19,7 @@ Disc :: struct {
 }
 
 triangle_bounds :: proc(tri: Triangle) -> Aabb {
-  return Aabb{
+  return Aabb {
     min = linalg.min(tri.v0, tri.v1, tri.v2),
     max = linalg.max(tri.v0, tri.v1, tri.v2),
   }
@@ -27,18 +27,19 @@ triangle_bounds :: proc(tri: Triangle) -> Aabb {
 
 sphere_bounds :: proc(sphere: Sphere) -> Aabb {
   r := [3]f32{sphere.radius, sphere.radius, sphere.radius}
-  return Aabb{
-    min = sphere.center - r,
-    max = sphere.center + r,
-  }
+  return Aabb{min = sphere.center - r, max = sphere.center + r}
 }
 
 disc_bounds :: proc(disc: Disc) -> Aabb {
   tan1, tan2 := [3]f32{}, [3]f32{}
   if math.abs(disc.normal.y) > 0.9 {
-    tan1 = linalg.normalize(linalg.cross(disc.normal, linalg.VECTOR3F32_X_AXIS))
+    tan1 = linalg.normalize(
+      linalg.cross(disc.normal, linalg.VECTOR3F32_X_AXIS),
+    )
   } else {
-    tan1 = linalg.normalize(linalg.cross(disc.normal, linalg.VECTOR3F32_Y_AXIS))
+    tan1 = linalg.normalize(
+      linalg.cross(disc.normal, linalg.VECTOR3F32_Y_AXIS),
+    )
   }
   tan2 = linalg.cross(disc.normal, tan1)
   ext1 := tan1 * disc.radius
@@ -56,7 +57,10 @@ ray_triangle_intersection :: proc(
   ray: Ray,
   tri: Triangle,
   max_t: f32 = F32_MAX,
-) -> (hit: bool, t: f32) {
+) -> (
+  hit: bool,
+  t: f32,
+) {
   epsilon :: 1e-6
   edge1 := tri.v1 - tri.v0
   edge2 := tri.v2 - tri.v0
@@ -87,7 +91,10 @@ ray_sphere_intersection :: proc(
   ray: Ray,
   sphere: Sphere,
   max_t: f32 = F32_MAX,
-) -> (hit: bool, t: f32) {
+) -> (
+  hit: bool,
+  t: f32,
+) {
   oc := ray.origin - sphere.center
   a := linalg.dot(ray.direction, ray.direction)
   half_b := linalg.dot(oc, ray.direction)
@@ -134,7 +141,10 @@ ray_primitive_intersection :: proc(
   ray: Ray,
   prim: Primitive,
   max_t: f32 = F32_MAX,
-) -> (hit: bool, t: f32) {
+) -> (
+  hit: bool,
+  t: f32,
+) {
   switch p in prim.data {
   case Triangle:
     return ray_triangle_intersection(ray, p, max_t)
@@ -167,7 +177,7 @@ closest_point_on_triangle_struct :: proc(p: [3]f32, tri: Triangle) -> [3]f32 {
   d3 := linalg.dot(ab, bp)
   d4 := linalg.dot(ac, bp)
   if d3 >= 0.0 && d4 <= d3 do return tri.v1
-  vc := d1*d4 - d3*d2
+  vc := d1 * d4 - d3 * d2
   if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
     v := d1 / (d1 - d3)
     return tri.v0 + v * ab
@@ -176,12 +186,12 @@ closest_point_on_triangle_struct :: proc(p: [3]f32, tri: Triangle) -> [3]f32 {
   d5 := linalg.dot(ab, cp)
   d6 := linalg.dot(ac, cp)
   if d6 >= 0.0 && d5 <= d6 do return tri.v2
-  vb := d5*d2 - d1*d6
+  vb := d5 * d2 - d1 * d6
   if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
     w := d2 / (d2 - d6)
     return tri.v0 + w * ac
   }
-  va := d3*d6 - d5*d4
+  va := d3 * d6 - d5 * d4
   if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
     w := (d4 - d3) / ((d4 - d3) + (d5 - d6))
     return tri.v1 + w * (tri.v2 - tri.v1)
@@ -192,7 +202,10 @@ closest_point_on_triangle_struct :: proc(p: [3]f32, tri: Triangle) -> [3]f32 {
   return tri.v0 + ab * v + ac * w
 }
 
-sphere_primitive_intersection :: proc(sphere: Sphere, prim: Primitive) -> bool {
+sphere_primitive_intersection :: proc(
+  sphere: Sphere,
+  prim: Primitive,
+) -> bool {
   switch p in prim.data {
   case Triangle:
     return sphere_triangle_intersection(sphere, p)
@@ -202,7 +215,12 @@ sphere_primitive_intersection :: proc(sphere: Sphere, prim: Primitive) -> bool {
   return false
 }
 
-aabb_disc_intersects :: proc(aabb: Aabb, center: [3]f32, normal: [3]f32, radius: f32) -> bool {
+aabb_disc_intersects :: proc(
+  aabb: Aabb,
+  center: [3]f32,
+  normal: [3]f32,
+  radius: f32,
+) -> bool {
   closest := linalg.clamp(center, aabb.min, aabb.max)
   to_closest := closest - center
   dist_sq := linalg.dot(to_closest, to_closest)

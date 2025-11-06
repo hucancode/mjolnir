@@ -46,8 +46,8 @@ rigid_body_create :: proc(
     enable_rotation      = enable_rotation, // turn this to false to stop rotating body (for character simulation)
     trigger_only         = trigger_only, // turn this to true to stop response to collision resolution
     gravity_scale        = 1.0,
-    drag_coefficient     = 0.47,  // sphere drag coefficient (0.47), cube ~1.05, use 0.1-2.0 range
-    cross_sectional_area = 0.0,   // 0 = auto-calculate from mass
+    drag_coefficient     = 0.47, // sphere drag coefficient (0.47), cube ~1.05, use 0.1-2.0 range
+    cross_sectional_area = 0.0, // 0 = auto-calculate from mass
     inertia              = is_static ? {} : linalg.MATRIX3F32_IDENTITY,
     inv_inertia          = is_static ? {} : linalg.MATRIX3F32_IDENTITY,
   }
@@ -73,7 +73,9 @@ rigid_body_set_box_inertia :: proc(body: ^RigidBody, half_extents: [3]f32) {
   x2 := half_extents.x * half_extents.x
   y2 := half_extents.y * half_extents.y
   z2 := half_extents.z * half_extents.z
-  body.inertia = linalg.matrix3_scale_f32({y2 + z2, x2 + z2, x2 + y2} * m / 3.0)
+  body.inertia = linalg.matrix3_scale_f32(
+    {y2 + z2, x2 + z2, x2 + y2} * m / 3.0,
+  )
   body.inv_inertia = linalg.matrix3_inverse_f32(body.inertia)
 }
 

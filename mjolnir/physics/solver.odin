@@ -17,14 +17,8 @@ prepare_contact :: proc(
   r_a_cross_n := linalg.cross(r_a, contact.normal)
   r_b_cross_n := linalg.cross(r_b, contact.normal)
   inv_mass_sum := body_a.inv_mass + body_b.inv_mass
-  angular_factor_a := linalg.dot(
-    body_a.inv_inertia * r_a_cross_n,
-    r_a_cross_n,
-  )
-  angular_factor_b := linalg.dot(
-    body_b.inv_inertia * r_b_cross_n,
-    r_b_cross_n,
-  )
+  angular_factor_a := linalg.dot(body_a.inv_inertia * r_a_cross_n, r_a_cross_n)
+  angular_factor_b := linalg.dot(body_b.inv_inertia * r_b_cross_n, r_b_cross_n)
   normal_mass := inv_mass_sum + angular_factor_a + angular_factor_b
   if normal_mass > math.F32_EPSILON {
     contact.normal_mass = 1.0 / normal_mass
@@ -107,7 +101,8 @@ resolve_contact :: proc(
   vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, r_b)
   relative_velocity := vel_b - vel_a
   velocity_along_normal := linalg.dot(relative_velocity, contact.normal)
-  delta_impulse := contact.normal_mass * (-velocity_along_normal + contact.bias)
+  delta_impulse :=
+    contact.normal_mass * (-velocity_along_normal + contact.bias)
   old_impulse := contact.normal_impulse
   contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
   delta_impulse = contact.normal_impulse - old_impulse
@@ -123,7 +118,11 @@ resolve_contact :: proc(
     velocity_along_tangent := linalg.dot(vel_b - vel_a, tangents[i])
     delta_impulse_t := contact.tangent_mass[i] * (-velocity_along_tangent)
     old_impulse_t := contact.tangent_impulse[i]
-    contact.tangent_impulse[i] = clamp(old_impulse_t + delta_impulse_t, -max_friction, max_friction)
+    contact.tangent_impulse[i] = clamp(
+      old_impulse_t + delta_impulse_t,
+      -max_friction,
+      max_friction,
+    )
     impulse_t := tangents[i] * (contact.tangent_impulse[i] - old_impulse_t)
     rigid_body_apply_impulse_at_point(body_a, -impulse_t, contact.point, pos_a)
     rigid_body_apply_impulse_at_point(body_b, impulse_t, contact.point, pos_b)
@@ -160,7 +159,11 @@ resolve_contact_no_bias :: proc(
     velocity_along_tangent := linalg.dot(vel_b - vel_a, tangents[i])
     delta_impulse_t := contact.tangent_mass[i] * (-velocity_along_tangent)
     old_impulse_t := contact.tangent_impulse[i]
-    contact.tangent_impulse[i] = clamp(old_impulse_t + delta_impulse_t, -max_friction, max_friction)
+    contact.tangent_impulse[i] = clamp(
+      old_impulse_t + delta_impulse_t,
+      -max_friction,
+      max_friction,
+    )
     impulse_t := tangents[i] * (contact.tangent_impulse[i] - old_impulse_t)
     rigid_body_apply_impulse_at_point(body_a, -impulse_t, contact.point, pos_a)
     rigid_body_apply_impulse_at_point(body_b, impulse_t, contact.point, pos_b)

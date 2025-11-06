@@ -23,7 +23,10 @@ create_forcefield_handle :: proc(
   manager: ^Manager,
   node_handle: Handle,
   config: ForceField,
-) -> (ret: Handle, ok: bool) #optional_ok {
+) -> (
+  ret: Handle,
+  ok: bool,
+) #optional_ok {
   handle, forcefield := cont.alloc(&manager.forcefields) or_return
   forcefield^ = config
   forcefield.node_handle = node_handle
@@ -31,10 +34,7 @@ create_forcefield_handle :: proc(
   return handle, true
 }
 
-destroy_forcefield_handle :: proc(
-  manager: ^Manager,
-  handle: Handle,
-) -> bool {
+destroy_forcefield_handle :: proc(manager: ^Manager, handle: Handle) -> bool {
   _, freed := cont.free(&manager.forcefields, handle)
   return freed
 }
@@ -53,10 +53,6 @@ forcefield_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   forcefield_update_gpu_data(ff)
-  gpu.write(
-    &manager.forcefield_buffer,
-    &ff.data,
-    int(handle.index),
-  ) or_return
+  gpu.write(&manager.forcefield_buffer, &ff.data, int(handle.index)) or_return
   return .SUCCESS
 }

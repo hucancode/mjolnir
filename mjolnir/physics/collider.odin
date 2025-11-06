@@ -15,15 +15,7 @@ SphereCollider :: struct {
 
 BoxCollider :: struct {
   half_extents: [3]f32,
-  rotation:     quaternion128, // Orientation of the box
-}
-
-// Initialize a box collider with given half-extents and rotation
-box_collider_init :: proc(half_extents: [3]f32, rotation := linalg.QUATERNIONF32_IDENTITY) -> BoxCollider {
-  return BoxCollider {
-    half_extents = half_extents,
-    rotation = rotation,
-  }
+  rotation:     quaternion128,
 }
 
 CapsuleCollider :: struct {
@@ -59,7 +51,7 @@ collider_create_box :: proc(
   return Collider {
     type = .Box,
     offset = offset,
-    shape = box_collider_init(half_extents, rotation),
+    shape = BoxCollider{half_extents = half_extents, rotation = rotation},
   }
 }
 
@@ -104,12 +96,15 @@ collider_get_aabb :: proc(
 }
 
 // Get OBB for a box collider
-collider_get_obb :: proc(collider: ^Collider, position: [3]f32) -> geometry.Obb {
+collider_get_obb :: proc(
+  collider: ^Collider,
+  position: [3]f32,
+) -> geometry.Obb {
   center := position + collider.offset
   box := collider.shape.(BoxCollider)
   return geometry.Obb {
-    center       = center,
+    center = center,
     half_extents = box.half_extents,
-    rotation     = box.rotation,
+    rotation = box.rotation,
   }
 }

@@ -9,13 +9,13 @@ import vk "vendor:vulkan"
 
 // SphericalCamera captures a full sphere (omnidirectional view) into a cube map
 SphericalCamera :: struct {
-  center:         [3]f32, // Center position of the sphere
-  radius:         f32, // Capture radius
-  near:           f32, // Near plane
-  far:            f32, // Far plane
-  size:           u32, // Resolution of cube map faces (size x size)
-  depth_cube:     [MAX_FRAMES_IN_FLIGHT]Handle, // Cube depth textures (per-frame)
-  command_buffer: vk.CommandBuffer, // Secondary command buffer
+  center:          [3]f32, // Center position of the sphere
+  radius:          f32, // Capture radius
+  near:            f32, // Near plane
+  far:             f32, // Far plane
+  size:            u32, // Resolution of cube map faces (size x size)
+  depth_cube:      [MAX_FRAMES_IN_FLIGHT]Handle, // Cube depth textures (per-frame)
+  command_buffer:  vk.CommandBuffer, // Secondary command buffer
   draw_commands:   gpu.MutableBuffer(vk.DrawIndexedIndirectCommand), // Draw commands for visible objects
   draw_count:      gpu.MutableBuffer(u32), // Number of visible objects
   max_draws:       u32, // Maximum number of draw calls
@@ -107,7 +107,10 @@ spherical_camera_upload_data :: proc(
   camera_index: u32,
   frame_index: u32 = 0,
 ) {
-  dst := gpu.mutable_buffer_get(&manager.spherical_camera_buffers[frame_index], camera_index)
+  dst := gpu.mutable_buffer_get(
+    &manager.spherical_camera_buffers[frame_index],
+    camera_index,
+  )
   if dst == nil {
     log.errorf("Spherical camera index %d out of bounds", camera_index)
     return
@@ -127,10 +130,7 @@ spherical_camera_upload_data :: proc(
     camera.center[2],
     camera.radius, // Store radius in w component
   }
-  dst.near_far = [2]f32 {
-    camera.near,
-    camera.far,
-  }
+  dst.near_far = [2]f32{camera.near, camera.far}
 }
 
 spherical_camera_get_visible_count :: proc(camera: ^SphericalCamera) -> u32 {
@@ -163,7 +163,12 @@ spherical_camera_allocate_visibility_descriptors :: proc(
   ) or_return
   // Update all per-frame descriptor sets
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    spherical_camera_update_descriptor_set(gctx, manager, camera, u32(frame_idx))
+    spherical_camera_update_descriptor_set(
+      gctx,
+      manager,
+      camera,
+      u32(frame_idx),
+    )
   }
   return .SUCCESS
 }
@@ -191,7 +196,9 @@ spherical_camera_update_descriptor_set :: proc(
   // Use per-frame spherical camera buffer to match rendering
   camera_info := vk.DescriptorBufferInfo {
     buffer = manager.spherical_camera_buffers[frame_index].buffer,
-    range  = vk.DeviceSize(manager.spherical_camera_buffers[frame_index].bytes_count),
+    range  = vk.DeviceSize(
+      manager.spherical_camera_buffers[frame_index].bytes_count,
+    ),
   }
   count_info := vk.DescriptorBufferInfo {
     buffer = camera.draw_count.buffer,

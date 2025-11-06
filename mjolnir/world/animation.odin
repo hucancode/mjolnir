@@ -63,13 +63,7 @@ update_skeletal_animations :: proc(
       skinning.bone_matrix_buffer_offset,
     )
     matrices := slice.from_ptr(matrices_ptr, bone_count)
-    resources.sample_layers(
-      mesh,
-      rm,
-      skinning.layers[:],
-      nil,
-      matrices,
-    )
+    resources.sample_layers(mesh, rm, skinning.layers[:], nil, matrices)
   }
 }
 
@@ -122,4 +116,3 @@ update_sprite_animations :: proc(rm: ^resources.Manager, delta_time: f32) {
     resources.sprite_write_to_gpu(rm, handle, sprite)
   }
 }
-
