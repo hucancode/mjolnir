@@ -102,7 +102,7 @@ fabrik_solve :: proc(
     }
   }
   // Apply pole vector constraint
-  if linalg.length2(target.pole_vector) > 0.0001 * 0.0001 {
+  if linalg.length2(target.pole_vector) > math.F32_EPSILON {
     apply_pole_constraint(positions[:], target.pole_vector, bone_lengths)
   }
   // Update world transforms from solved positions
@@ -129,7 +129,7 @@ apply_pole_constraint :: proc(
     root := positions[0]
     end := positions[chain_length - 1]
     to_end := end - root
-    if linalg.length2(to_end) < 0.0001 * 0.0001 {
+    if linalg.length2(to_end) < math.F32_EPSILON {
       continue
     }
     line_dir := linalg.normalize(to_end)
@@ -139,7 +139,7 @@ apply_pole_constraint :: proc(
     // Current perpendicular offset
     offset := positions[i] - projection_point
     offset_length_sq := linalg.length2(offset)
-    if offset_length_sq < 0.0001 * 0.0001 {
+    if offset_length_sq < math.F32_EPSILON {
       // Joint on the line, use pole to create offset
       pole_dir := linalg.normalize(pole_vector - root)
       offset = linalg.normalize(pole_dir - line_dir * linalg.dot(pole_dir, line_dir))
@@ -148,7 +148,7 @@ apply_pole_constraint :: proc(
     // Desired offset direction toward pole
     to_pole := pole_vector - projection_point
     pole_offset := to_pole - line_dir * linalg.dot(to_pole, line_dir)
-    if linalg.length2(pole_offset) > 0.0001 * 0.0001 {
+    if linalg.length2(pole_offset) > math.F32_EPSILON {
       pole_dir := linalg.normalize(pole_offset)
       current_dir := linalg.normalize(offset)
       new_offset := linalg.normalize(linalg.lerp(current_dir, pole_dir, 0.5))

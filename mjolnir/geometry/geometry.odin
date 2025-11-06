@@ -1139,14 +1139,14 @@ segment_segment_closest_points :: proc "contextless" (
     a := linalg.length2(d1)
     e := linalg.length2(d2)
     f := linalg.dot(d2, r)
-    if a <= 0.0001 && e <= 0.0001 {
+    if a <= math.F32_EPSILON && e <= math.F32_EPSILON {
         // Both segments are points
         s, t = 0, 0
         point_on_a = a_start
         point_on_b = b_start
         return
     }
-    if a <= 0.0001 {
+    if a <= math.F32_EPSILON {
         // First segment is a point
         s = 0
         t = linalg.saturate(f / e)
@@ -1156,7 +1156,7 @@ segment_segment_closest_points :: proc "contextless" (
     }
 
     c := linalg.dot(d1, r)
-    if e <= 0.0001 {
+    if e <= math.F32_EPSILON {
         // Second segment is a point
         s = linalg.saturate(-c / a)
         t = 0

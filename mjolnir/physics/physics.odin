@@ -444,7 +444,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       // Skip rotation if angular velocity is negligible or rotation is disabled
       if !body.enable_rotation do continue
       ang_vel_mag_sq := linalg.length2(body.angular_velocity)
-      if ang_vel_mag_sq < 0.0001 do continue
+      if ang_vel_mag_sq < math.F32_EPSILON do continue
       // Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
       omega_quat := quaternion(w = 0, x = body.angular_velocity.x, y = body.angular_velocity.y, z = body.angular_velocity.z)
       q_old := node.transform.rotation

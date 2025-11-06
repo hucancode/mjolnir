@@ -180,7 +180,7 @@ query_fan :: proc(
   for entry in entries {
     to_point := entry.position - origin
     dist := linalg.length(to_point)
-    if dist > radius || dist < 0.0001 do continue
+    if dist > radius || dist < math.F32_EPSILON do continue
     dir_to_point := to_point / dist
     dot_product := linalg.dot(dir_to_point, norm_direction)
     if dot_product >= cos_half_angle {

@@ -34,21 +34,16 @@ epa :: proc(
 ) {
   // Initialize polytope with simplex vertices, removing duplicates
   vertices := make([dynamic][3]f32, context.temp_allocator)
-  dedup_epsilon :: 0.0001
-  for i in 0 ..< simplex.count {
+  simplex_point: for i in 0 ..< simplex.count {
     point := simplex.points[i]
     // Check if this point is already in vertices (avoid duplicates)
-    is_duplicate := false
     for existing in vertices {
       diff := point - existing
-      if linalg.length2(diff) < dedup_epsilon * dedup_epsilon {
-        is_duplicate = true
-        break
+      if linalg.length2(diff) < math.F32_EPSILON * math.F32_EPSILON {
+        continue simplex_point
       }
     }
-    if !is_duplicate {
-      append(&vertices, point)
-    }
+    append(&vertices, point)
   }
   // Initialize faces based on vertex count (after deduplication)
   faces := make([dynamic]EPAFace, context.temp_allocator)
@@ -67,7 +62,7 @@ epa :: proc(
     abc := linalg.cross(ab, ac)
     // Check if triangle is degenerate (collinear points)
     normal_dir: [3]f32
-    if linalg.length2(abc) < 0.0001 * 0.0001 {
+    if linalg.length2(abc) < math.F32_EPSILON {
       // Points are collinear - find perpendicular direction
       line_dir := linalg.normalize(ab)
       perp := abs(line_dir.x) < 0.9 ? linalg.VECTOR3F32_X_AXIS : linalg.VECTOR3F32_Y_AXIS
@@ -84,32 +79,35 @@ epa :: proc(
     // Only have a line segment - can't do EPA, use distance as approximation
     ab := vertices[1] - vertices[0]
     line_length := linalg.length(ab)
-    if line_length < 0.0001 {
-      return {}, 0, false
+    if line_length < math.F32_EPSILON {
+      ok = false
+      return
     }
     // The penetration is approximately the distance from origin to the line
     t := -linalg.dot(vertices[0], ab) / linalg.length2(ab)
     t = linalg.saturate(t)
     closest_point := vertices[0] + ab * t
     dist := linalg.length(closest_point)
-    if dist < 0.0001 {
+    if dist < math.F32_EPSILON {
       return linalg.normalize(ab), 0.001, true
     }
     return linalg.normalize(closest_point), dist, true
   } else {
     // Invalid simplex
-    return {}, 0, false
+    ok = false
+    return
   }
   // Safety check - ensure we have faces
   if len(faces) == 0 {
-    return {}, 0, false
+    ok = false
+    return
   }
-  max_iterations := 32
-  epsilon :: 0.0001
-  for iteration in 0 ..< max_iterations {
+  MAX_ITERATIONS :: 32
+  for iteration in 0 ..< MAX_ITERATIONS {
     // Check if we still have faces after potential removals
     if len(faces) == 0 {
-      return {}, 0, false
+      ok = false
+      return
     }
     // Find closest face to origin
     closest_face_idx := 0
@@ -133,12 +131,12 @@ epa :: proc(
     support_distance := linalg.dot(support_point, closest_face.normal)
     // If support point is not significantly further than closest face,
     // we've found the closest face on the original shapes
-    if support_distance - min_distance < epsilon {
-      return closest_face.normal, min_distance + epsilon, true
+    if support_distance - min_distance < math.F32_EPSILON {
+      return closest_face.normal, min_distance + math.F32_EPSILON, true
     }
     // Add support point to vertices
     if len(vertices) >= EPA_MAX_VERTICES {
-      return closest_face.normal, min_distance + epsilon, true
+      return closest_face.normal, min_distance + math.F32_EPSILON, true
     }
     append(&vertices, support_point)
     support_idx := len(vertices) - 1
@@ -177,9 +175,10 @@ epa :: proc(
         closest_face = face
       }
     }
-    return closest_face.normal, closest_face.distance + epsilon, true
+    return closest_face.normal, closest_face.distance + math.F32_EPSILON, true
   }
-  return {}, 0, false
+  ok = false
+  return
 }
 
 // Add a face to the polytope with proper normal calculation
@@ -195,7 +194,7 @@ add_face :: proc(
   ab := vb - va
   ac := vc - va
   normal := linalg.cross(ab, ac)
-  normal = linalg.length2(normal) > 0.0001 * 0.0001 ? linalg.normalize(normal) : linalg.VECTOR3F32_Y_AXIS
+  normal = linalg.length2(normal) > math.F32_EPSILON ? linalg.normalize(normal) : linalg.VECTOR3F32_Y_AXIS
   // Calculate distance from origin to face
   distance := linalg.dot(normal, va)
   // Ensure normal points toward origin

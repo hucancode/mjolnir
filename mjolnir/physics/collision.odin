@@ -67,7 +67,7 @@ test_sphere_sphere :: proc(
     return
   }
   distance := math.sqrt(distance_sq)
-  normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration = radius_sum - distance
   point = pos_a + normal * (sphere_a.radius - penetration * 0.5)
   hit = true
@@ -166,7 +166,7 @@ test_sphere_box :: proc(
       return
     }
     distance := math.sqrt(distance_sq)
-    normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+    normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
     penetration = sphere.radius - distance
     hit = true
     return
@@ -207,7 +207,7 @@ test_capsule_capsule :: proc(
     return
   }
   distance := math.sqrt(distance_sq)
-  normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration = radius_sum - distance
   point = point_a + normal * (capsule_a.radius - penetration * 0.5)
   hit = true
@@ -230,7 +230,7 @@ test_sphere_capsule :: proc(
   line_end := pos_capsule + [3]f32{0, h, 0}
   line_dir := line_end - line_start
   line_length_sq := linalg.length2(line_dir)
-  t := line_length_sq < 0.0001 ? 0 : linalg.saturate(linalg.dot(pos_sphere - line_start, line_dir) / line_length_sq)
+  t := line_length_sq < math.F32_EPSILON ? 0 : linalg.saturate(linalg.dot(pos_sphere - line_start, line_dir) / line_length_sq)
   closest := line_start + line_dir * t
   delta := pos_sphere - closest
   distance_sq := linalg.length2(delta)
@@ -239,7 +239,7 @@ test_sphere_capsule :: proc(
     return
   }
   distance := math.sqrt(distance_sq)
-  normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration = radius_sum - distance
   point = closest + normal * (capsule.radius - penetration * 0.5)
   hit = true
@@ -276,7 +276,7 @@ test_box_capsule :: proc(
       return
     }
     distance := math.sqrt(distance_sq)
-    normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+    normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
     penetration = capsule.radius - distance
     hit = true
     return

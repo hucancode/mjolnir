@@ -23,7 +23,7 @@ swept_sphere_sphere :: proc(
   // Relative motion
   motion := velocity_a
   motion_length_sq := linalg.length2(motion)
-  if motion_length_sq < 0.0001 {
+  if motion_length_sq < math.F32_EPSILON {
     // Not moving - use discrete test
     delta := center_b - center_a
     distance_sq := linalg.length2(delta)
@@ -32,7 +32,7 @@ swept_sphere_sphere :: proc(
       result.has_impact = true
       result.time = 0.0
       distance := math.sqrt(distance_sq)
-      result.normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+      result.normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
       result.point = center_a + result.normal * radius_a
     }
     return result
@@ -66,7 +66,7 @@ swept_sphere_sphere :: proc(
     impact_center_a := center_a + motion * t
     delta := center_b - impact_center_a
     distance := linalg.length(delta)
-    result.normal = distance > 0.0001 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+    result.normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
     result.point = impact_center_a + result.normal * radius_a
   }
   return result
@@ -89,7 +89,7 @@ swept_sphere_box :: proc(
   t_max := f32(1e6)
   hit_normal := linalg.VECTOR3F32_Y_AXIS
   for i in 0 ..< 3 {
-    if abs(velocity[i]) < 0.0001 {
+    if abs(velocity[i]) < math.F32_EPSILON {
       // Ray parallel to slab
       if center[i] < expanded_min[i] || center[i] > expanded_max[i] {
         return result // No hit

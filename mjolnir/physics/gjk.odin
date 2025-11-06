@@ -84,7 +84,7 @@ gjk :: proc(
 ) -> bool {
   // Initial direction (from B to A)
   direction := pos_a - pos_b
-  if linalg.length2(direction) < 0.0001 {
+  if linalg.length2(direction) < math.F32_EPSILON {
     direction = linalg.VECTOR3F32_X_AXIS
   }
   // Get first point
@@ -137,7 +137,7 @@ line_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
   if same_direction(ab, ao) {
     ab_ao := linalg.cross(ab, ao)
     new_dir := linalg.cross(ab_ao, ab)
-    direction^ = linalg.length2(new_dir) < 0.0001 * 0.0001 ? ao : new_dir
+    direction^ = linalg.length2(new_dir) < math.F32_EPSILON ? ao : new_dir
   } else {
     // Origin is closer to A
     simplex_set(simplex, a)
@@ -161,7 +161,7 @@ triangle_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
       simplex_set(simplex, a, c)
       ac_ao := linalg.cross(ac, ao)
       new_dir := linalg.cross(ac_ao, ac)
-      direction^ = linalg.length2(new_dir) < 0.0001 * 0.0001 ? ao : new_dir
+      direction^ = linalg.length2(new_dir) < math.F32_EPSILON ? ao : new_dir
     } else {
       return line_case(simplex, direction)
     }

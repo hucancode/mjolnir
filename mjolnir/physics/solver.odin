@@ -1,5 +1,6 @@
 package physics
 
+import "core:math"
 import "core:math/linalg"
 
 // Prepare contact constraint for solving (called once before iterations)
@@ -25,7 +26,7 @@ prepare_contact :: proc(
     r_b_cross_n,
   )
   normal_mass := inv_mass_sum + angular_factor_a + angular_factor_b
-  if normal_mass > 0.0001 {
+  if normal_mass > math.F32_EPSILON {
     contact.normal_mass = 1.0 / normal_mass
   } else {
     contact.normal_mass = 0
@@ -44,7 +45,7 @@ prepare_contact :: proc(
       r_b_cross_t,
     )
     tangent_mass := inv_mass_sum + angular_factor_a_t + angular_factor_b_t
-    if tangent_mass > 0.0001 {
+    if tangent_mass > math.F32_EPSILON {
       contact.tangent_mass[i] = 1.0 / tangent_mass
     } else {
       contact.tangent_mass[i] = 0

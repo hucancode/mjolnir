@@ -47,7 +47,7 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
     if recast.status_failed(end_status) || end_ref == recast.INVALID_POLY_REF do return 0, end_status
     if start_ref == end_ref {
         path[0] = start_nearest
-        if linalg.length2(end_nearest - start_nearest) > 0.0001 {
+        if linalg.length2(end_nearest - start_nearest) > math.F32_EPSILON {
             path[1] = end_nearest
             return 2, {.Success}
         }
@@ -73,7 +73,7 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
     last_pos := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
     for i in 0..<int(straight_path_count) {
         pos := straight_path[i].pos
-        if linalg.length2(pos - last_pos) > 0.0001 {
+        if linalg.length2(pos - last_pos) > math.F32_EPSILON {
             path[path_count] = pos
             path_count += 1
             last_pos = pos
