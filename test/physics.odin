@@ -1446,17 +1446,17 @@ test_integration_box_stack_stability :: proc(t: ^testing.T) {
   }
   testing.expect(
     t,
-    linalg.vector_length(body_1.velocity) < 0.1,
+    linalg.length(body_1.velocity) < 0.1,
     "Bottom box should settle",
   )
   testing.expect(
     t,
-    linalg.vector_length(body_2.velocity) < 0.1,
+    linalg.length(body_2.velocity) < 0.1,
     "Middle box should settle",
   )
   testing.expect(
     t,
-    linalg.vector_length(body_3.velocity) < 0.1,
+    linalg.length(body_3.velocity) < 0.1,
     "Top box should settle",
   )
   node_1_final, _ := cont.get(w.nodes, body_1.node_handle)
@@ -1769,9 +1769,10 @@ test_obb_obb_collision_aligned :: proc(t: ^testing.T) {
 @(test)
 test_obb_obb_collision_rotated_45 :: proc(t: ^testing.T) {
   // Rotate box A by 45 degrees around Z axis
-  angle := f32(math.PI / 4.0)
-  axis := linalg.VECTOR3F32_Z_AXIS
-  rotation_a := linalg.quaternion_angle_axis_f32(angle, axis)
+  rotation_a := linalg.quaternion_angle_axis(
+    math.PI / 4.0,
+    linalg.VECTOR3F32_Z_AXIS,
+  )
   box_a := physics.BoxCollider {
     half_extents = {1, 1, 1},
     rotation     = rotation_a,
@@ -1788,14 +1789,12 @@ test_obb_obb_collision_rotated_45 :: proc(t: ^testing.T) {
 
 @(test)
 test_obb_obb_collision_both_rotated :: proc(t: ^testing.T) {
-  angle_a := f32(math.PI / 4.0)
-  angle_b := f32(math.PI / 6.0)
-  rotation_a := linalg.quaternion_angle_axis_f32(
-    angle_a,
+  rotation_a := linalg.quaternion_angle_axis(
+    math.PI / 4.0,
     linalg.VECTOR3F32_Z_AXIS,
   )
-  rotation_b := linalg.quaternion_angle_axis_f32(
-    angle_b,
+  rotation_b := linalg.quaternion_angle_axis(
+    math.PI / 6.0,
     linalg.VECTOR3F32_Y_AXIS,
   )
   box_a := physics.BoxCollider {
@@ -1814,8 +1813,8 @@ test_obb_obb_collision_both_rotated :: proc(t: ^testing.T) {
 
 @(test)
 test_obb_obb_collision_separated :: proc(t: ^testing.T) {
-  rotation := linalg.quaternion_angle_axis_f32(
-    f32(math.PI / 4.0),
+  rotation := linalg.quaternion_angle_axis(
+    math.PI / 4.0,
     linalg.VECTOR3F32_Z_AXIS,
   )
   box_a := physics.BoxCollider {
@@ -1837,7 +1836,7 @@ test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
   sphere := physics.SphereCollider {
     radius = 1.0,
   }
-  rotation := linalg.quaternion_angle_axis_f32(
+  rotation := linalg.quaternion_angle_axis(
     f32(math.PI / 4.0),
     linalg.VECTOR3F32_Z_AXIS,
   )
@@ -1853,9 +1852,10 @@ test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
 
 @(test)
 test_collider_get_aabb_obb :: proc(t: ^testing.T) {
-  // Create box rotated 45 degrees around Z
-  angle := f32(math.PI / 4.0)
-  rotation := linalg.quaternion_angle_axis_f32(angle, linalg.VECTOR3F32_Z_AXIS)
+  rotation := linalg.quaternion_angle_axis(
+    math.PI / 4.0,
+    linalg.VECTOR3F32_Z_AXIS,
+  )
   collider := physics.collider_create_box({1, 1, 1}, {0, 0, 0}, rotation)
   position := [3]f32{0, 0, 0}
   aabb := physics.collider_get_aabb(&collider, position)

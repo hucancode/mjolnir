@@ -350,7 +350,7 @@ sample_layers :: proc(
     if accumulated_weights[bone_idx] > 0 {
       weight := accumulated_weights[bone_idx]
       local_transform.position = accumulated_positions[bone_idx] / weight
-      local_transform.rotation = linalg.quaternion_normalize(accumulated_rotations[bone_idx])
+      local_transform.rotation = linalg.normalize(accumulated_rotations[bone_idx])
       local_transform.scale = accumulated_scales[bone_idx] / weight
     } else {
       local_transform.scale = [3]f32{1, 1, 1}
@@ -437,7 +437,7 @@ sample_layers :: proc(
       if accumulated_weights[bone_idx] > 0 {
         weight := accumulated_weights[bone_idx]
         local_transform.position = accumulated_positions[bone_idx] / weight
-        local_transform.rotation = linalg.quaternion_normalize(accumulated_rotations[bone_idx])
+        local_transform.rotation = linalg.normalize(accumulated_rotations[bone_idx])
         local_transform.scale = accumulated_scales[bone_idx] / weight
       } else {
         local_transform.scale = [3]f32{1, 1, 1}

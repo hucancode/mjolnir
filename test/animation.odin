@@ -111,8 +111,8 @@ test_sample_cubic_spline_vector_interpolation :: proc(t: ^testing.T) {
 
 @(test)
 test_sample_cubic_spline_quaternion_interpolation :: proc(t: ^testing.T) {
-  q1 := linalg.quaternion_angle_axis_f32(0, {0, 0, 1})
-  q2 := linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
+  q1 := linalg.quaternion_angle_axis(0, linalg.VECTOR3F32_Z_AXIS)
+  q2 := linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Z_AXIS)
   tangent: quaternion128 = quaternion(w = 0, x = 0, y = 0, z = 0.5)
   frames := []animation.Keyframe(quaternion128) {
     animation.CubicSplineKeyframe(quaternion128) {
@@ -268,10 +268,10 @@ almost_equal_quaternion :: proc(a, b: quaternion128) -> bool {
 
 @(test)
 test_quaternion_sampling :: proc(t: ^testing.T) {
-  q1 := linalg.quaternion_angle_axis_f32(0, {0, 0, 1}) // Identity
-  q2 := linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Z_AXIS)
-  q3 := linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_Y_AXIS)
-  q4 := linalg.quaternion_angle_axis_f32(math.PI, linalg.VECTOR3F32_X_AXIS)
+  q1 := linalg.quaternion_angle_axis(0, linalg.VECTOR3F32_Z_AXIS) // Identity
+  q2 := linalg.quaternion_angle_axis(math.PI, linalg.VECTOR3F32_Z_AXIS)
+  q3 := linalg.quaternion_angle_axis(math.PI, linalg.VECTOR3F32_Y_AXIS)
+  q4 := linalg.quaternion_angle_axis(math.PI, linalg.VECTOR3F32_X_AXIS)
   frames := []animation.Keyframe(quaternion128) {
     animation.LinearKeyframe(quaternion128){time = 0.0, value = q1},
     animation.LinearKeyframe(quaternion128){time = 1.0, value = q2},
@@ -313,7 +313,7 @@ test_quaternion_sampling :: proc(t: ^testing.T) {
     0.5,
     linalg.QUATERNIONF32_IDENTITY,
   )
-  expected_half := linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
+  expected_half := linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Z_AXIS)
   testing.expect(t, almost_equal_quaternion(half_rot, expected_half))
 }
 
@@ -463,14 +463,14 @@ test_channel_init_modify_and_sample :: proc(t: ^testing.T) {
   }
   switch &kf in clip.channels[0].rotations[0] {
   case animation.LinearKeyframe(quaternion128):
-    kf.value = linalg.quaternion_angle_axis_f32(0, {0, 0, 1})
+    kf.value = linalg.quaternion_angle_axis(0, linalg.VECTOR3F32_Z_AXIS)
   case animation.StepKeyframe(quaternion128),
        animation.CubicSplineKeyframe(quaternion128):
   // Not expected for this test
   }
   switch &kf in clip.channels[0].rotations[1] {
   case animation.LinearKeyframe(quaternion128):
-    kf.value = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
+    kf.value = linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Z_AXIS)
   case animation.StepKeyframe(quaternion128),
        animation.CubicSplineKeyframe(quaternion128):
   // Not expected for this test
@@ -481,7 +481,7 @@ test_channel_init_modify_and_sample :: proc(t: ^testing.T) {
     t,
     almost_equal_quaternion(
       r,
-      linalg.quaternion_angle_axis_f32(math.PI / 4, {0, 0, 1}),
+      linalg.quaternion_angle_axis(math.PI / 4, linalg.VECTOR3F32_Z_AXIS),
     ),
   )
   testing.expect_value(t, s, [3]f32{1, 1, 1})
@@ -605,7 +605,7 @@ test_node_animation_channel_sampling :: proc(t: ^testing.T) {
       },
       animation.LinearKeyframe(quaternion128) {
         time = 1.0,
-        value = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 1, 0}),
+        value = linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Z_AXIS),
       },
     },
     scales    = []animation.Keyframe([3]f32) {
@@ -1144,9 +1144,9 @@ test_spline_vector_interpolation :: proc(t: ^testing.T) {
 test_spline_quaternion_interpolation :: proc(t: ^testing.T) {
   spline := animation.spline_create(quaternion128, 3)
   defer animation.spline_destroy(&spline)
-  spline.points[0] = linalg.quaternion_angle_axis_f32(0, {0, 0, 1})
-  spline.points[1] = linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
-  spline.points[2] = linalg.quaternion_angle_axis_f32(math.PI, {0, 0, 1})
+  spline.points[0] = linalg.quaternion_angle_axis(0, linalg.VECTOR3F32_Z_AXIS)
+  spline.points[1] = linalg.quaternion_angle_axis(math.PI / 2, linalg.VECTOR3F32_Z_AXIS)
+  spline.points[2] = linalg.quaternion_angle_axis(math.PI, linalg.VECTOR3F32_Z_AXIS)
   spline.times[0] = 0.0
   spline.times[1] = 1.0
   spline.times[2] = 2.0

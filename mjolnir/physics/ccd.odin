@@ -22,11 +22,11 @@ swept_sphere_sphere :: proc(
   result : TOIResult
   // Relative motion
   motion := velocity_a
-  motion_length_sq := linalg.vector_dot(motion, motion)
+  motion_length_sq := linalg.length2(motion)
   if motion_length_sq < 0.0001 {
     // Not moving - use discrete test
     delta := center_b - center_a
-    distance_sq := linalg.vector_dot(delta, delta)
+    distance_sq := linalg.length2(delta)
     radius_sum := radius_a + radius_b
     if distance_sq < radius_sum * radius_sum {
       result.has_impact = true
@@ -44,8 +44,8 @@ swept_sphere_sphere :: proc(
   d := center_a - center_b
   radius_sum := radius_a + radius_b
   a := motion_length_sq
-  b := 2.0 * linalg.vector_dot(d, motion)
-  c := linalg.vector_dot(d, d) - radius_sum * radius_sum
+  b := 2.0 * linalg.dot(d, motion)
+  c := linalg.length2(d) - radius_sum * radius_sum
   discriminant := b * b - 4.0 * a * c
   if discriminant < 0 {
     // No intersection

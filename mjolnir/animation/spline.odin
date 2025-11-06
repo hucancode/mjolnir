@@ -140,7 +140,7 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
     result_z := h00 * p0.z + h10 * m0_scaled.z + h01 * p1.z + h11 * m1_scaled.z
     result_w := h00 * p0.w + h10 * m0_scaled.w + h01 * p1.w + h11 * m1_scaled.w
 
-    return linalg.quaternion_normalize(
+    return linalg.normalize(
       quaternion(x = result_x, y = result_y, z = result_z, w = result_w),
     )
   } else {

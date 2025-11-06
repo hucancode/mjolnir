@@ -64,14 +64,14 @@ epa :: proc(
     // Add a point slightly offset from the triangle
     ab := vertices[1] - vertices[0]
     ac := vertices[2] - vertices[0]
-    abc := linalg.vector_cross3(ab, ac)
+    abc := linalg.cross(ab, ac)
     // Check if triangle is degenerate (collinear points)
     normal_dir: [3]f32
     if linalg.length2(abc) < 0.0001 * 0.0001 {
       // Points are collinear - find perpendicular direction
       line_dir := linalg.normalize(ab)
       perp := abs(line_dir.x) < 0.9 ? linalg.VECTOR3F32_X_AXIS : linalg.VECTOR3F32_Y_AXIS
-      normal_dir = linalg.normalize(linalg.vector_cross3(line_dir, perp))
+      normal_dir = linalg.normalize(linalg.cross(line_dir, perp))
     } else {
       normal_dir = linalg.normalize(abc)
     }
@@ -88,7 +88,7 @@ epa :: proc(
       return {}, 0, false
     }
     // The penetration is approximately the distance from origin to the line
-    t := -linalg.vector_dot(vertices[0], ab) / linalg.vector_dot(ab, ab)
+    t := -linalg.dot(vertices[0], ab) / linalg.length2(ab)
     t = linalg.saturate(t)
     closest_point := vertices[0] + ab * t
     dist := linalg.length(closest_point)
@@ -130,7 +130,7 @@ epa :: proc(
       closest_face.normal,
     )
     // Calculate distance from origin to support point along normal
-    support_distance := linalg.vector_dot(support_point, closest_face.normal)
+    support_distance := linalg.dot(support_point, closest_face.normal)
     // If support point is not significantly further than closest face,
     // we've found the closest face on the original shapes
     if support_distance - min_distance < epsilon {
@@ -149,7 +149,7 @@ epa :: proc(
       face := faces[i]
       // Check if face is visible from support point
       to_support := support_point - vertices[face.a]
-      if linalg.vector_dot(face.normal, to_support) > 0 {
+      if linalg.dot(face.normal, to_support) > 0 {
         // Face is visible, add its edges to the list
         add_if_unique_edge(&edges, face.a, face.b)
         add_if_unique_edge(&edges, face.b, face.c)
@@ -194,10 +194,10 @@ add_face :: proc(
   // Calculate face normal
   ab := vb - va
   ac := vc - va
-  normal := linalg.vector_cross3(ab, ac)
+  normal := linalg.cross(ab, ac)
   normal = linalg.length2(normal) > 0.0001 * 0.0001 ? linalg.normalize(normal) : linalg.VECTOR3F32_Y_AXIS
   // Calculate distance from origin to face
-  distance := linalg.vector_dot(normal, va)
+  distance := linalg.dot(normal, va)
   // Ensure normal points toward origin
   face_a, face_b, face_c := a, b, c
   if distance < 0 {

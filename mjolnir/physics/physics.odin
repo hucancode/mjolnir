@@ -106,7 +106,6 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     hash := collision_pair_hash({contact.body_a, contact.body_b})
     physics.prev_contacts[hash] = contact
   }
-
   // Apply forces to all bodies (gravity, air resistance, etc.)
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
@@ -135,15 +134,12 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       // Estimate frontal area based on collider type
       switch c in collider.shape {
       case SphereCollider:
-        // Frontal area of sphere = pi * r * r
+        cross_section = math.PI * c.radius * c.radius
+      case CapsuleCollider:
         cross_section = math.PI * c.radius * c.radius
       case BoxCollider:
         // Frontal area of box (average of three face areas)
-        // Each face area = 2*half_extent_1 × 2*half_extent_2 = 4*half_extent_1*half_extent_2
         cross_section = (c.half_extents.x * c.half_extents.y * 4.0 + c.half_extents.y * c.half_extents.z * 4.0 + c.half_extents.x * c.half_extents.z * 4.0) / 3.0
-      case CapsuleCollider:
-        // Frontal area of capsule = pi * r * r (circle)
-        cross_section = math.PI * c.radius * c.radius
       case:
         // Fallback: estimate from mass (objects with same mass are assumed same size)
         cross_section = math.pow(body.mass, 2.0 / 3.0) * 0.1
@@ -152,8 +148,9 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     drag_magnitude := 0.5 * physics.air_density * vel_mag * vel_mag * body.drag_coefficient * cross_section
     drag_direction := -linalg.normalize(body.velocity)
     drag_force := drag_direction * drag_magnitude
-    // Clamp drag acceleration to prevent numerical instability
-    // Limit to 30x gravity to keep simulation stable
+    // clamp drag acceleration to prevent numerical instability
+    // without this, ultra-light objects with large colliders experience extreme deceleration
+    // that can cause velocity to explode or reverse in a single timestep
     drag_accel := drag_magnitude * body.inv_mass
     max_accel := linalg.length(physics.gravity) * 30.0
     if drag_accel > max_accel {
@@ -161,16 +158,11 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     }
     rigid_body_apply_force(body, drag_force)
   }
-
   // Integrate velocities from forces ONCE for the entire frame
-  for &entry in physics.bodies.entries {
-    if !entry.active {
-      continue
-    }
+  for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
     rigid_body_integrate(body, dt)
   }
-
   // Track which bodies were handled by CCD (outside substep loop)
   ccd_handled := make(
     [dynamic]bool,
@@ -179,10 +171,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   )
   // Perform CCD for fast-moving objects ONCE before substeps
   ccd_threshold :: 5.0 // Objects moving faster than this use CCD (m/s)
-  for &entry_a, idx_a in physics.bodies.entries {
-    if !entry_a.active {
-      continue
-    }
+  for &entry_a, idx_a in physics.bodies.entries do if entry_a.active {
     body_a := &entry_a.item
     if body_a.is_static ||
        body_a.collider_handle.generation == 0 ||
@@ -206,14 +195,10 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     earliest_body_b: ^RigidBody = nil
     has_ccd_hit := false
     // Check against all other colliders
-    for &entry_b, idx_b in physics.bodies.entries {
-      if !entry_b.active || idx_a == idx_b {
-        continue
-      }
+    for &entry_b, idx_b in physics.bodies.entries do if entry_b.active {
+      if idx_a == idx_b do continue
       body_b := &entry_b.item
-      if body_b.collider_handle.generation == 0 {
-        continue
-      }
+      if body_b.collider_handle.generation == 0 do continue
       node_b := cont.get(w.nodes, body_b.node_handle) or_continue
       collider_b := cont.get(
         physics.colliders,
@@ -234,7 +219,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       safe_time := earliest_toi * 0.98
       node_a.transform.position += body_a.velocity * dt * safe_time
       // Reflect velocity along collision normal
-      vel_along_normal := linalg.vector_dot(body_a.velocity, earliest_normal)
+      vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
       if vel_along_normal < 0 {
         // Calculate restitution
         restitution := body_a.restitution
@@ -252,27 +237,23 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         }
         tangent_vel :=
           body_a.velocity -
-          earliest_normal * linalg.vector_dot(body_a.velocity, earliest_normal)
+          earliest_normal * linalg.dot(body_a.velocity, earliest_normal)
         body_a.velocity -= tangent_vel * friction * 0.5
       }
       // Mark as handled by CCD - skip normal position integration
       ccd_handled[idx_a] = true
     }
   }
-
   // integrate position multiple times per frame
   // more substeps = smaller steps = less tunneling through thin objects
   NUM_SUBSTEPS :: 5
   substep_dt := dt / f32(NUM_SUBSTEPS)
-
-  // Count active bodies with colliders
   active_body_count := 0
-  for &entry in physics.bodies.entries {
-    if entry.active && entry.item.collider_handle.generation != 0 {
+  for &entry in physics.bodies.entries do if entry.active {
+    if entry.item.collider_handle.generation != 0 {
       active_body_count += 1
     }
   }
-
   // Rebuild BVH only when body count changes (bodies added/removed)
   rebuild_bvh := len(physics.spatial_index.primitives) != active_body_count
   bvh_build_time: time.Duration
@@ -286,8 +267,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       active_body_count,
       context.temp_allocator,
     )
-    for &entry, idx in physics.bodies.entries {
-      if !entry.active do continue
+    for &entry, idx in physics.bodies.entries do if entry.active {
       body := &entry.item
       if body.collider_handle.generation == 0 do continue
       node := cont.get(w.nodes, body.node_handle) or_continue
@@ -463,7 +443,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       // Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
       // Skip rotation if angular velocity is negligible or rotation is disabled
       if !body.enable_rotation do continue
-      ang_vel_mag_sq := linalg.vector_dot(body.angular_velocity, body.angular_velocity)
+      ang_vel_mag_sq := linalg.length2(body.angular_velocity)
       if ang_vel_mag_sq < 0.0001 do continue
       // Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
       omega_quat := quaternion(w = 0, x = body.angular_velocity.x, y = body.angular_velocity.y, z = body.angular_velocity.z)
@@ -477,7 +457,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       // Integrate: q_new = q_old + q_dot * substep_dt
       q_new := quaternion(w = q_old.w + q_dot.w * substep_dt, x = q_old.x + q_dot.x * substep_dt, y = q_old.y + q_dot.y * substep_dt, z = q_old.z + q_dot.z * substep_dt)
       // Normalize to prevent drift
-      q_new = linalg.quaternion_normalize(q_new)
+      q_new = linalg.normalize(q_new)
       geometry.transform_rotate(&node.transform, q_new)
     }
   }

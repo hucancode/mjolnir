@@ -206,7 +206,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           ); spin_ok {
             rotation_fn :: proc(i: int) -> quaternion128 {
               angles := [3]f32{0, math.PI, 0} // identity, 180deg, identity
-              return linalg.quaternion_angle_axis_f32(
+              return linalg.quaternion_angle_axis(
                 angles[i],
                 linalg.VECTOR3F32_Y_AXIS,
               )
@@ -282,7 +282,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ); rotation_ok {
       rotation_fn :: proc(i: int) -> quaternion128 {
         angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
-        return linalg.quaternion_angle_axis_f32(
+        return linalg.quaternion_angle_axis(
           angle,
           linalg.VECTOR3F32_Y_AXIS,
         )
@@ -501,7 +501,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ); ok {
       rotation_fn :: proc(i: int) -> quaternion128 {
         angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
-        return linalg.quaternion_angle_axis_f32(
+        return linalg.quaternion_angle_axis(
           angle,
           linalg.VECTOR3F32_Y_AXIS,
         )

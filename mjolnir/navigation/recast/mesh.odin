@@ -8,7 +8,7 @@ import "../../geometry"
 // Check if three vertices form a left turn (counter-clockwise)
 uleft :: proc(a, b, c: [3]i16) -> bool {
     // 2D cross product in XZ plane: (b-a) × (c-a)
-    // return linalg.vector_cross2(b.xz - a.xz, c.xz - a.xz) < 0
+    // return linalg.cross(b.xz - a.xz, c.xz - a.xz) < 0
     // the code above will cause integer overflow, we must use i32 to avoid it
     return (i32(b.x) - i32(a.x)) * (i32(c.z) - i32(a.z)) -
            (i32(c.x) - i32(a.x)) * (i32(b.z) - i32(a.z)) < 0

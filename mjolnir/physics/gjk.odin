@@ -35,21 +35,15 @@ find_furthest_point :: proc(
     sign_x := direction.x >= 0 ? f32(1.0) : f32(-1.0)
     sign_y := direction.y >= 0 ? f32(1.0) : f32(-1.0)
     sign_z := direction.z >= 0 ? f32(1.0) : f32(-1.0)
-    return(
-      center +
-      [3]f32 {
-          box.half_extents.x * sign_x,
-          box.half_extents.y * sign_y,
-          box.half_extents.z * sign_z,
-        } \
-    )
+    offset := box.half_extents * [3]f32 { sign_x, sign_y, sign_z }
+    return center + offset
   case .Capsule:
     capsule := collider.shape.(CapsuleCollider)
     h := capsule.height * 0.5
     // Capsule is two hemispheres connected by a cylinder
     // First find the furthest point on the central line segment
     line_dir := linalg.VECTOR3F32_Y_AXIS
-    dot := linalg.vector_dot(direction, line_dir)
+    dot := linalg.dot(direction, line_dir)
     line_point := center + line_dir * (dot >= 0 ? h : -h)
     // Then add the sphere radius in the direction
     dir_normalized := linalg.normalize0(direction)
@@ -90,7 +84,7 @@ gjk :: proc(
 ) -> bool {
   // Initial direction (from B to A)
   direction := pos_a - pos_b
-  if linalg.vector_dot(direction, direction) < 0.0001 {
+  if linalg.length2(direction) < 0.0001 {
     direction = linalg.VECTOR3F32_X_AXIS
   }
   // Get first point
@@ -105,7 +99,7 @@ gjk :: proc(
   for iteration in 0 ..< max_iterations {
     a := support(collider_a, pos_a, collider_b, pos_b, direction)
     // If we didn't pass the origin, there's no collision
-    if linalg.vector_dot(a, direction) < 0 {
+    if linalg.dot(a, direction) < 0 {
       return false
     }
     simplex_push_front(&simplex, a)
@@ -141,8 +135,8 @@ line_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
   ao := -a
   // If origin is in the direction of AB
   if same_direction(ab, ao) {
-    ab_ao := linalg.vector_cross3(ab, ao)
-    new_dir := linalg.vector_cross3(ab_ao, ab)
+    ab_ao := linalg.cross(ab, ao)
+    new_dir := linalg.cross(ab_ao, ab)
     direction^ = linalg.length2(new_dir) < 0.0001 * 0.0001 ? ao : new_dir
   } else {
     // Origin is closer to A
@@ -160,20 +154,20 @@ triangle_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
   ab := b - a
   ac := c - a
   ao := -a
-  abc := linalg.vector_cross3(ab, ac)
+  abc := linalg.cross(ab, ac)
   // Check if origin is outside edge AC
-  if same_direction(linalg.vector_cross3(abc, ac), ao) {
+  if same_direction(linalg.cross(abc, ac), ao) {
     if same_direction(ac, ao) {
       simplex_set(simplex, a, c)
-      ac_ao := linalg.vector_cross3(ac, ao)
-      new_dir := linalg.vector_cross3(ac_ao, ac)
+      ac_ao := linalg.cross(ac, ao)
+      new_dir := linalg.cross(ac_ao, ac)
       direction^ = linalg.length2(new_dir) < 0.0001 * 0.0001 ? ao : new_dir
     } else {
       return line_case(simplex, direction)
     }
   } else {
     // Check if origin is outside edge AB
-    if same_direction(linalg.vector_cross3(ab, abc), ao) {
+    if same_direction(linalg.cross(ab, abc), ao) {
       return line_case(simplex, direction)
     } else {
       // Origin is either above or below the triangle
@@ -198,9 +192,9 @@ tetrahedron_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
   ac := c - a
   ad := d - a
   ao := -a
-  abc := linalg.vector_cross3(ab, ac)
-  acd := linalg.vector_cross3(ac, ad)
-  adb := linalg.vector_cross3(ad, ab)
+  abc := linalg.cross(ab, ac)
+  acd := linalg.cross(ac, ad)
+  adb := linalg.cross(ad, ab)
   // Check each face
   if same_direction(abc, ao) {
     simplex_set(simplex, a, b, c)
@@ -220,5 +214,5 @@ tetrahedron_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
 
 // Check if two vectors point in the same direction
 same_direction :: proc(a, b: [3]f32) -> bool {
-  return linalg.vector_dot(a, b) > 0
+  return linalg.dot(a, b) > 0
 }

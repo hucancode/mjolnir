@@ -94,7 +94,7 @@ sample_linear_cubic :: proc(a: LinearKeyframe($T), b: CubicSplineKeyframe(T), t:
     result_y := h00 * q0.y + h01 * q1.y + h11 * m1_scaled.y
     result_z := h00 * q0.z + h01 * q1.z + h11 * m1_scaled.z
     result_w := h00 * q0.w + h01 * q1.w + h11 * m1_scaled.w
-    return linalg.quaternion_normalize(quaternion(
+    return linalg.normalize(quaternion(
       x = result_x,
       y = result_y,
       z = result_z,
@@ -150,7 +150,7 @@ sample_cubic_linear :: proc(a: CubicSplineKeyframe($T), b: LinearKeyframe(T), t:
     result_y := h00 * q0.y + h10 * m0_scaled.y + h01 * q1.y
     result_z := h00 * q0.z + h10 * m0_scaled.z + h01 * q1.z
     result_w := h00 * q0.w + h10 * m0_scaled.w + h01 * q1.w
-    return linalg.quaternion_normalize(quaternion(
+    return linalg.normalize(quaternion(
       x = result_x,
       y = result_y,
       z = result_z,
@@ -193,7 +193,7 @@ sample_cubic_cubic :: proc(a: CubicSplineKeyframe($T), b: CubicSplineKeyframe(T)
     result_y := h00 * q0.y + h10 * m0_scaled.y + h01 * q1.y + h11 * m1_scaled.y
     result_z := h00 * q0.z + h10 * m0_scaled.z + h01 * q1.z + h11 * m1_scaled.z
     result_w := h00 * q0.w + h10 * m0_scaled.w + h01 * q1.w + h11 * m1_scaled.w
-    return linalg.quaternion_normalize(quaternion(
+    return linalg.normalize(quaternion(
       x = result_x,
       y = result_y,
       z = result_z,

@@ -325,7 +325,7 @@ get_poly_height :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f3
         }
         if geometry.point_in_triangle_2d(pos, verts[0], verts[1], verts[2]) {
             bary := geometry.barycentric_2d(pos, verts[0], verts[1], verts[2])
-            height = linalg.vector_dot(bary, [3]f32{verts[0].y, verts[1].y, verts[2].y})
+            height = linalg.dot(bary, [3]f32{verts[0].y, verts[1].y, verts[2].y})
             return height, {.Success}
         }
     }
