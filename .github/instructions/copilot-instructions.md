@@ -91,6 +91,7 @@ The engine uses a deferred rendering approach with multiple passes:
 - We use right handed Y up coordinate system
 - Avoid thin wrapper functions, especially getters and setters that does nothing but get/set the variable
 - Don't introduce unnecessary indirections, extra structs
+- Don't store pointer on struct, struct should own all of its members
 
 ### Shader Development
 - Shaders are in `mjolnir/shader/` organized by render pass
