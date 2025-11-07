@@ -354,8 +354,8 @@ begin_pass :: proc(
     emissive_attachment,
   }
   extent := camera.extent
-  render_info := vk.RenderingInfoKHR {
-    sType = .RENDERING_INFO_KHR,
+  render_info := vk.RenderingInfo {
+    sType = .RENDERING_INFO,
     renderArea = {extent = extent},
     layerCount = 1,
     colorAttachmentCount = len(color_attachments),
