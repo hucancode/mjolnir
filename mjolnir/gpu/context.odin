@@ -490,6 +490,7 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   basic_features := vk.PhysicalDeviceFeatures {
     multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
+    geometryShader            = true,
   }
   vulkan_12_features := vk.PhysicalDeviceVulkan12Features {
     sType             = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
