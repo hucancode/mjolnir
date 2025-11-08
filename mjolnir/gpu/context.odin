@@ -493,9 +493,10 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     geometryShader            = true,
   }
   vulkan_12_features := vk.PhysicalDeviceVulkan12Features {
-    sType             = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-    drawIndirectCount = true, // Required for vk.CmdDrawIndexedIndirectCount
-    pNext             = &dynamic_rendering_feature,
+    sType               = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+    drawIndirectCount   = true, // Required for vk.CmdDrawIndexedIndirectCount
+    samplerFilterMinmax = true,
+    pNext               = &dynamic_rendering_feature,
   }
   device_create_info := vk.DeviceCreateInfo {
     sType                   = .DEVICE_CREATE_INFO,
