@@ -475,17 +475,10 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     )
   }
   // Enable descriptor indexing features
-  descriptor_indexing_features := vk.PhysicalDeviceDescriptorIndexingFeatures {
-    sType                                     = .PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
-    shaderSampledImageArrayNonUniformIndexing = true,
-    runtimeDescriptorArray                    = true,
-    descriptorBindingPartiallyBound           = true,
-    descriptorBindingVariableDescriptorCount  = true,
-  }
-  dynamic_rendering_feature := vk.PhysicalDeviceDynamicRenderingFeatures {
-    sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
-    dynamicRendering = true,
-    pNext            = &descriptor_indexing_features,
+  vulkan_13_features := vk.PhysicalDeviceVulkan13Features {
+    sType                          = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+    dynamicRendering               = true,
+    shaderDemoteToHelperInvocation = true,
   }
   basic_features := vk.PhysicalDeviceFeatures {
     multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
@@ -493,10 +486,14 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     geometryShader            = true,
   }
   vulkan_12_features := vk.PhysicalDeviceVulkan12Features {
-    sType               = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-    drawIndirectCount   = true, // Required for vk.CmdDrawIndexedIndirectCount
-    samplerFilterMinmax = true,
-    pNext               = &dynamic_rendering_feature,
+    sType                                     = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+    drawIndirectCount                         = true, // Required for vk.CmdDrawIndexedIndirectCount
+    samplerFilterMinmax                       = true,
+    shaderSampledImageArrayNonUniformIndexing = true,
+    runtimeDescriptorArray                    = true,
+    descriptorBindingPartiallyBound           = true,
+    descriptorBindingVariableDescriptorCount  = true,
+    pNext                                     = &vulkan_13_features,
   }
   device_create_info := vk.DeviceCreateInfo {
     sType                   = .DEVICE_CREATE_INFO,
