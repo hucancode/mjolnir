@@ -227,7 +227,6 @@ image_create_with_data :: proc(
     data,
   ) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-  defer mutable_buffer_destroy(gctx.device, &staging)
   cmd_buffer := begin_single_time_command(gctx) or_return
   // Transition to transfer dst
   barrier_to_dst := vk.ImageMemoryBarrier {
