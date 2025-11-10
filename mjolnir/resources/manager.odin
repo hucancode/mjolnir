@@ -1165,7 +1165,7 @@ init_dynamic_light_data_buffers :: proc(
       binding = 0,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
+      stageFlags = {.VERTEX, .FRAGMENT},
     },
   }
   vk.CreateDescriptorSetLayout(

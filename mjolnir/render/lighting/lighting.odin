@@ -44,6 +44,7 @@ LightPushConstant :: struct {
   emissive_texture_index: u32,
   depth_texture_index:    u32,
   input_image_index:      u32,
+  padding:                [3]u32,
 }
 
 begin_ambient_pass :: proc(
