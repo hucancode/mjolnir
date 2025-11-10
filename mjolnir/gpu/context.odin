@@ -91,6 +91,9 @@ gpu_context_init :: proc(
   window: glfw.WindowHandle,
 ) -> vk.Result {
   self.window = window
+  when ENABLE_VALIDATION_LAYERS {
+    g_context = context
+  }
   vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
   vulkan_instance_init(self) or_return
   surface_init(self) or_return
@@ -178,7 +181,7 @@ vulkan_instance_init :: proc(self: ^GPUContext) -> vk.Result {
     dbg_create_info = {
       sType           = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
       messageSeverity = {.WARNING, .ERROR},
-      messageType     = {.VALIDATION, .PERFORMANCE},
+      messageType     = {.GENERAL, .VALIDATION, .PERFORMANCE},
       pfnUserCallback = debug_callback,
     }
     create_info.pNext = &dbg_create_info
