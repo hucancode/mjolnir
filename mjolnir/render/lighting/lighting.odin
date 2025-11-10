@@ -496,6 +496,7 @@ begin_record :: proc(
     colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_formats[0],
     depthAttachmentFormat   = .D32_SFLOAT,
+    rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -575,7 +576,7 @@ begin_pass :: proc(
   depth_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = depth_texture.view,
-    imageLayout = .SHADER_READ_ONLY_OPTIMAL, // from geometry pass end_record
+    imageLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL, // Depth attachments must use depth-specific layout
     loadOp      = .LOAD,
     storeOp     = .DONT_CARE,
   }

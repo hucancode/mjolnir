@@ -156,6 +156,7 @@ The engine uses a deferred rendering approach with multiple passes:
 
 - **REQUIRE_GEOMETRY_SHADER**: Compile with geometry shader support (required for spherical shadow mapping)
 - **USE_PARALLEL_UPDATE**: Enable dedicated update thread for parallel scene updates
+- **FRAME_LIMIT**: limit renderer to only render a few frames, useful for collecting logs from render procedure. without this logs would be super noisy
 
 # Odin Language Quick Reference
 

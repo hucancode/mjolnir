@@ -389,7 +389,6 @@ create_pipeline :: proc(
   set_layouts := []vk.DescriptorSetLayout{rm.camera_buffer_set_layout}
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
-    offset     = 0,
     size       = size_of(PushConstants),
   }
   layout_info := vk.PipelineLayoutCreateInfo {

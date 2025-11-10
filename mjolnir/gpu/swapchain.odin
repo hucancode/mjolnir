@@ -16,9 +16,9 @@ Swapchain :: struct {
   views:                       []vk.ImageView,
   image_index:                 u32,
   in_flight_fences:            [MAX_FRAMES_IN_FLIGHT]vk.Fence,
-  image_available_semaphores:  [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-  render_finished_semaphores:  [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
-  compute_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+  image_available_semaphores:  [MAX_FRAMES_IN_FLIGHT]vk.Semaphore, // Per frame-in-flight
+  render_finished_semaphores:  []vk.Semaphore, // Per swapchain image
+  compute_finished_semaphores: []vk.Semaphore, // Per swapchain image
 }
 
 swapchain_init :: proc(
@@ -147,16 +147,14 @@ swapchain_init :: proc(
       &self.views[i],
     ) or_return
   }
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    semaphore_info := vk.SemaphoreCreateInfo {
-      sType = .SEMAPHORE_CREATE_INFO,
-    }
-    vk.CreateSemaphore(
-      gctx.device,
-      &semaphore_info,
-      nil,
-      &self.image_available_semaphores[i],
-    ) or_return
+  // Allocate per-swapchain-image semaphores
+  self.render_finished_semaphores = make([]vk.Semaphore, swapchain_image_count)
+  self.compute_finished_semaphores = make([]vk.Semaphore, swapchain_image_count)
+  semaphore_info := vk.SemaphoreCreateInfo {
+    sType = .SEMAPHORE_CREATE_INFO,
+  }
+  // Create per-swapchain-image semaphores
+  for i in 0 ..< swapchain_image_count {
     vk.CreateSemaphore(
       gctx.device,
       &semaphore_info,
@@ -168,6 +166,15 @@ swapchain_init :: proc(
       &semaphore_info,
       nil,
       &self.compute_finished_semaphores[i],
+    ) or_return
+  }
+  // Create per-frame-in-flight resources
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    vk.CreateSemaphore(
+      gctx.device,
+      &semaphore_info,
+      nil,
+      &self.image_available_semaphores[i],
     ) or_return
     fence_info := vk.FenceCreateInfo {
       sType = .FENCE_CREATE_INFO,
@@ -188,14 +195,26 @@ swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {
   delete(self.views)
   self.views = nil
   // TODO: destroying image will make app crash
-  // for image in self.images do vk.DestroyImage(gctx.device, image, nil)
+  // for image in self.images do vk.DestroyImage(device, image, nil)
   delete(self.images)
   self.images = nil
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    vk.DestroySemaphore(device, self.image_available_semaphores[i], nil)
-    vk.DestroySemaphore(device, self.render_finished_semaphores[i], nil)
-    vk.DestroySemaphore(device, self.compute_finished_semaphores[i], nil)
-    vk.DestroyFence(device, self.in_flight_fences[i], nil)
+  // Destroy per-swapchain-image semaphores
+  for semaphore in self.render_finished_semaphores {
+    vk.DestroySemaphore(device, semaphore, nil)
+  }
+  delete(self.render_finished_semaphores)
+  self.render_finished_semaphores = nil
+  for semaphore in self.compute_finished_semaphores {
+    vk.DestroySemaphore(device, semaphore, nil)
+  }
+  delete(self.compute_finished_semaphores)
+  self.compute_finished_semaphores = nil
+  // Destroy per-frame-in-flight resources
+  for semaphore in self.image_available_semaphores {
+    vk.DestroySemaphore(device, semaphore, nil)
+  }
+  for fence in self.in_flight_fences {
+      vk.DestroyFence(device, fence, nil)
   }
   vk.DestroySwapchainKHR(device, self.handle, nil)
   self.handle = 0
@@ -219,7 +238,7 @@ acquire_next_image :: proc(
 ) -> (
   result: vk.Result,
 ) {
-  // log.debug("waiting for fence...")
+  // Wait for this frame's work to complete
   vk.WaitForFences(
     device,
     1,
@@ -227,6 +246,7 @@ acquire_next_image :: proc(
     true,
     math.max(u64),
   ) or_return
+  // Acquire next swapchain image
   vk.AcquireNextImageKHR(
     device,
     self.handle,
@@ -235,6 +255,7 @@ acquire_next_image :: proc(
     0,
     &self.image_index,
   ) or_return
+  // Reset fence for this frame
   vk.ResetFences(device, 1, &self.in_flight_fences[frame_index]) or_return
   result = .SUCCESS
   return
@@ -255,7 +276,7 @@ submit_queue_and_present :: proc(
   append(&wait_stages, vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT})
   if compute_cmd, has_compute := compute_command_buffer.?; has_compute {
     if compute_queue, ok := gctx.compute_queue.?; ok {
-      append(&wait_semaphores, self.compute_finished_semaphores[frame_index])
+      append(&wait_semaphores, self.compute_finished_semaphores[self.image_index])
       append(
         &wait_stages,
         vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER},
@@ -265,7 +286,7 @@ submit_queue_and_present :: proc(
         commandBufferCount   = 1,
         pCommandBuffers      = &compute_cmd,
         signalSemaphoreCount = 1,
-        pSignalSemaphores    = &self.compute_finished_semaphores[frame_index],
+        pSignalSemaphores    = &self.compute_finished_semaphores[self.image_index],
       }
       vk.QueueSubmit(compute_queue, 1, &compute_submit, 0) or_return
     }
@@ -278,7 +299,7 @@ submit_queue_and_present :: proc(
     commandBufferCount   = 1,
     pCommandBuffers      = command_buffer,
     signalSemaphoreCount = 1,
-    pSignalSemaphores    = &self.render_finished_semaphores[frame_index],
+    pSignalSemaphores    = &self.render_finished_semaphores[self.image_index],
   }
   vk.QueueSubmit(
     gctx.graphics_queue,
@@ -290,7 +311,7 @@ submit_queue_and_present :: proc(
   present_info := vk.PresentInfoKHR {
     sType              = .PRESENT_INFO_KHR,
     waitSemaphoreCount = 1,
-    pWaitSemaphores    = &self.render_finished_semaphores[frame_index],
+    pWaitSemaphores    = &self.render_finished_semaphores[self.image_index],
     swapchainCount     = 1,
     pSwapchains        = &self.handle,
     pImageIndices      = raw_data(image_indices[:]),

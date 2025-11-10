@@ -188,12 +188,12 @@ simulate :: proc(
   barrier3 := vk.MemoryBarrier {
     sType         = .MEMORY_BARRIER,
     srcAccessMask = {.TRANSFER_WRITE},
-    dstAccessMask = {.VERTEX_ATTRIBUTE_READ, .INDIRECT_COMMAND_READ},
+    dstAccessMask = {.INDIRECT_COMMAND_READ},
   }
   vk.CmdPipelineBarrier(
     command_buffer,
     {.TRANSFER},
-    {.VERTEX_INPUT, .DRAW_INDIRECT},
+    {.DRAW_INDIRECT},
     {},
     1,
     &barrier3,
@@ -899,28 +899,6 @@ begin_pass :: proc(
 ) {
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
-  // Memory barrier to ensure compute results are visible before rendering
-  barrier := vk.BufferMemoryBarrier {
-    sType               = .BUFFER_MEMORY_BARRIER,
-    srcAccessMask       = {.SHADER_WRITE},
-    dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = self.particle_buffer.buffer,
-    size                = vk.DeviceSize(vk.WHOLE_SIZE),
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER},
-    {.VERTEX_INPUT},
-    {},
-    0,
-    nil, // memoryBarrierCount, pMemoryBarriers
-    1,
-    &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
-    0,
-    nil, // imageMemoryBarrierCount, pImageMemoryBarriers
-  )
   color_texture := cont.get(
     rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
@@ -1045,6 +1023,7 @@ begin_record :: proc(
     colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_formats[0],
     depthAttachmentFormat   = .D32_SFLOAT,
+    rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -1054,7 +1033,7 @@ begin_record :: proc(
     command_buffer,
     &vk.CommandBufferBeginInfo {
       sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
+      flags = {.ONE_TIME_SUBMIT, .SIMULTANEOUS_USE},
       pInheritanceInfo = &inheritance,
     },
   ) or_return

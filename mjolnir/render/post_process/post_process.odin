@@ -458,7 +458,7 @@ init :: proc(
       push_constant_size = size_of(BasePushConstant)
     }
     push_constant_ranges := [?]vk.PushConstantRange {
-      {stageFlags = {.FRAGMENT}, offset = 0, size = push_constant_size},
+      {stageFlags = {.FRAGMENT}, size = push_constant_size},
     }
     layout_sets := [?]vk.DescriptorSetLayout {
       rm.textures_set_layout, // set = 0 (bindless textures)
@@ -942,6 +942,7 @@ begin_record :: proc(
     sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
     colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_formats[0],
+    rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,

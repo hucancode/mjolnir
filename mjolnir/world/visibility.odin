@@ -1011,7 +1011,7 @@ render_depth_pass :: proc(
     vk.CmdPushConstants(
       command_buffer,
       rm.geometry_pipeline_layout,
-      {.VERTEX},
+      {.VERTEX, .FRAGMENT},
       0,
       size_of(u32),
       &camera_index,

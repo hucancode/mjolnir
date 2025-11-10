@@ -461,6 +461,12 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   manager.visibility_sphere_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
+    manager.visibility_multi_pass_descriptor_layout,
+    nil,
+  )
+  manager.visibility_multi_pass_descriptor_layout = 0
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
     manager.visibility_depth_reduce_descriptor_layout,
     nil,
   )

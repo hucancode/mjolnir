@@ -65,7 +65,7 @@ spherical_camera_init :: proc(
     gctx,
     u32,
     1,
-    {.STORAGE_BUFFER, .TRANSFER_DST},
+    {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
   ) or_return
   camera.draw_commands = gpu.create_mutable_buffer(
     gctx,

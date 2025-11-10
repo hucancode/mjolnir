@@ -618,6 +618,7 @@ begin_record :: proc(
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = .D32_SFLOAT,
+    rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,

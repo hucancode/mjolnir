@@ -232,6 +232,41 @@ camera_init :: proc(
       depth_format,
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
+    // Transition depth image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL
+    depth_tex := cont.get(manager.image_2d_buffers, camera.attachments[.DEPTH][frame])
+    if depth_tex != nil {
+      cmd_buf := gpu.begin_single_time_command(gctx) or_return
+      barrier := vk.ImageMemoryBarrier {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = depth_tex.image,
+        subresourceRange = {
+          aspectMask = {.DEPTH},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 1,
+        },
+        srcAccessMask = {},
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
+      }
+      vk.CmdPipelineBarrier(
+        cmd_buf,
+        {.TOP_OF_PIPE},
+        {.EARLY_FRAGMENT_TESTS},
+        {},
+        0,
+        nil,
+        0,
+        nil,
+        1,
+        &barrier,
+      )
+      gpu.end_single_time_command(gctx, &cmd_buf) or_return
+    }
   }
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
@@ -265,7 +300,7 @@ camera_init :: proc(
       gctx,
       u32,
       1,
-      {.STORAGE_BUFFER, .TRANSFER_DST},
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
     camera.late_draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,
@@ -277,7 +312,7 @@ camera_init :: proc(
       gctx,
       u32,
       1,
-      {.STORAGE_BUFFER, .TRANSFER_DST},
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
     camera.transparent_draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,
@@ -289,7 +324,7 @@ camera_init :: proc(
       gctx,
       u32,
       1,
-      {.STORAGE_BUFFER, .TRANSFER_DST},
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
     camera.sprite_draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,
@@ -637,6 +672,41 @@ camera_resize :: proc(
       depth_format,
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
+    // Transition depth image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL
+    depth_tex := cont.get(manager.image_2d_buffers, camera.attachments[.DEPTH][frame])
+    if depth_tex != nil {
+      cmd_buf := gpu.begin_single_time_command(gctx) or_return
+      barrier := vk.ImageMemoryBarrier {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = depth_tex.image,
+        subresourceRange = {
+          aspectMask = {.DEPTH},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 1,
+        },
+        srcAccessMask = {},
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
+      }
+      vk.CmdPipelineBarrier(
+        cmd_buf,
+        {.TOP_OF_PIPE},
+        {.EARLY_FRAGMENT_TESTS},
+        {},
+        0,
+        nil,
+        0,
+        nil,
+        1,
+        &barrier,
+      )
+      gpu.end_single_time_command(gctx, &cmd_buf) or_return
+    }
   }
   // Recreate depth pyramids for all frames before allocating descriptors
   // (late culling uses prev frame's pyramid, so all must exist first)
@@ -825,6 +895,41 @@ create_camera_depth_pyramid :: proc(
   )
   spec.mip_levels = mip_levels
   pyramid_texture^ = gpu.image_create(gctx, spec) or_return
+  // Transition all mip levels from UNDEFINED to GENERAL layout for compute shader read/write
+  // Use immediate command buffer for initialization
+  {
+    cmd_buf := gpu.begin_single_time_command(gctx) or_return
+    barrier := vk.ImageMemoryBarrier {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .UNDEFINED,
+      newLayout = .GENERAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = pyramid_texture.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = 0,
+        levelCount = mip_levels,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+      srcAccessMask = {},
+      dstAccessMask = {.SHADER_READ, .SHADER_WRITE},
+    }
+    vk.CmdPipelineBarrier(
+      cmd_buf,
+      {.TOP_OF_PIPE},
+      {.COMPUTE_SHADER},
+      {},
+      0,
+      nil,
+      0,
+      nil,
+      1,
+      &barrier,
+    )
+    gpu.end_single_time_command(gctx, &cmd_buf) or_return
+  }
   // Register the auto-created view in bindless texture array
   set_texture_2d_descriptor(
     gctx,
@@ -969,9 +1074,10 @@ camera_update_depth_reduce_descriptor_set :: proc(
   // Mip 0 reads from previous frame's depth texture, other mips read from current pyramid's previous mip level
   source_view :=
     mip == 0 ? prev_depth_texture.view : camera.depth_pyramid[frame_index].views[mip - 1]
-  // Use DEPTH_STENCIL_READ_ONLY_OPTIMAL for depth texture (mip 0), SHADER_READ_ONLY_OPTIMAL for pyramid mips
+  // Use DEPTH_STENCIL_READ_ONLY_OPTIMAL for depth texture (mip 0), GENERAL for pyramid mips
+  // GENERAL layout is used because the pyramid image is used for both read (sample) and write (storage)
   source_layout :=
-    mip == 0 ? vk.ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL : vk.ImageLayout.SHADER_READ_ONLY_OPTIMAL
+    mip == 0 ? vk.ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL : vk.ImageLayout.GENERAL
   source_info := vk.DescriptorImageInfo {
     sampler     = camera.depth_pyramid[frame_index].sampler,
     imageView   = source_view,
@@ -1065,7 +1171,7 @@ camera_update_multi_pass_descriptor_set :: proc(
   pyramid_info := vk.DescriptorImageInfo {
     sampler     = camera.depth_pyramid[prev_frame].sampler,
     imageView   = camera.depth_pyramid[prev_frame].full_view,
-    imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    imageLayout = .GENERAL, // Depth pyramid uses GENERAL layout for both read/write
   }
   writes := [?]vk.WriteDescriptorSet {
     {

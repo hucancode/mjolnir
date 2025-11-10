@@ -673,11 +673,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       )
     }
   }
-  vk.CmdExecuteCommands(
-    command_buffer,
-    u32(len(camera_command_buffers)),
-    raw_data(camera_command_buffers[:]),
-  )
   record_geometry_pass(
     &self.render,
     self.frame_index,
@@ -718,6 +713,11 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.extent,
     self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
+  )
+  vk.CmdExecuteCommands(
+    command_buffer,
+    u32(len(camera_command_buffers)),
+    raw_data(camera_command_buffers[:]),
   )
   compute_cmd_buffer: Maybe(vk.CommandBuffer) = nil
   if self.gctx.has_async_compute {

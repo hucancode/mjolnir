@@ -439,20 +439,6 @@ record_transparency_pass :: proc(
     rm,
     color_format,
   ) or_return
-  transparency.begin_pass(
-    &self.transparency,
-    camera_handle,
-    command_buffer,
-    rm,
-    frame_index,
-  )
-  navigation.render(
-    &self.navigation,
-    command_buffer,
-    linalg.MATRIX4F32_IDENTITY,
-    camera_handle.index,
-    rm,
-  )
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil {
     log.error("Failed to get camera for transparency pass")
@@ -519,6 +505,20 @@ record_transparency_pass :: proc(
     raw_data(compute_done[:]),
     0,
     nil,
+  )
+  transparency.begin_pass(
+    &self.transparency,
+    camera_handle,
+    command_buffer,
+    rm,
+    frame_index,
+  )
+  navigation.render(
+    &self.navigation,
+    command_buffer,
+    linalg.MATRIX4F32_IDENTITY,
+    camera_handle.index,
+    rm,
   )
   // Render transparent meshes with transparent pipeline
   transparency.render(
