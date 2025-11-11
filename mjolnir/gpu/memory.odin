@@ -34,11 +34,6 @@ malloc_mutable_buffer :: proc(
       size_of(T),
       int(gctx.device_properties.limits.minUniformBufferOffsetAlignment),
     )
-  } else if .STORAGE_BUFFER in usage && count > 1 {
-    buffer.element_size = align_up(
-      size_of(T),
-      int(gctx.device_properties.limits.minStorageBufferOffsetAlignment),
-    )
   } else {
     buffer.element_size = size_of(T)
   }
@@ -83,11 +78,6 @@ malloc_immutable_buffer :: proc(
     buffer.element_size = align_up(
       size_of(T),
       int(gctx.device_properties.limits.minUniformBufferOffsetAlignment),
-    )
-  } else if .STORAGE_BUFFER in usage && count > 1 {
-    buffer.element_size = align_up(
-      size_of(T),
-      int(gctx.device_properties.limits.minStorageBufferOffsetAlignment),
     )
   } else {
     buffer.element_size = size_of(T)
