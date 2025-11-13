@@ -114,7 +114,7 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
   if ground_mesh_ok && ground_material_ok {
     demo_state.ground_handle = spawn(
       engine,
-      world.MeshAttachment {
+      attachment = world.MeshAttachment {
         handle              = ground_mesh_handle,
         material            = ground_material_handle,
         cast_shadow         = false,
@@ -155,7 +155,7 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
       emissive_value = 0.1,
     )
     if obstacle_mesh_ok && obstacle_material_ok {
-      obstacle_handle := spawn_at(
+      obstacle_handle := spawn(
         engine,
         position,
         world.MeshAttachment {
@@ -200,7 +200,7 @@ create_obj_visualization_mesh :: proc(
   obj_spawn_ok: bool
   if obj_mesh_ok && obj_material_ok {
     demo_state.obj_node_handle, obj_spawn_ok =
-      spawn_at(
+      spawn(
         engine,
         [3]f32{0, 0, 0},
         world.MeshAttachment {
@@ -332,7 +332,7 @@ update_position_marker :: proc(
   node: ^world.Node
   spawn_ok: bool
   if marker_mesh_ok && marker_material_ok {
-    handle^, spawn_ok = spawn_at(
+    handle^, spawn_ok = spawn(
       engine,
       pos + [3]f32{0, 0.2, 0}, // Slightly above ground
       world.MeshAttachment {

@@ -582,7 +582,7 @@ shutdown :: proc(self: ^Manager, device: vk.Device) {
   gpu.mutable_buffer_destroy(device, &self.proj_buffer)
   delete(self.root_widgets)
   delete(self.dirty_widgets)
-  cont.destroy(self.widgets, widget_deinit)
+  cont.destroy(self.widgets, widget_destroy)
   vk.DestroyPipeline(device, self.pipeline, nil)
   vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(device, self.projection_layout, nil)
@@ -592,7 +592,7 @@ shutdown :: proc(self: ^Manager, device: vk.Device) {
   gpu.mutable_buffer_destroy(device, &self.text_index_buffer)
 }
 
-widget_deinit :: proc(widget: ^Widget) {
+widget_destroy:: proc(widget: ^Widget) {
   // Cleanup widget-specific data
   switch &data in widget.data {
   case ButtonData:

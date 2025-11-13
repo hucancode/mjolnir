@@ -524,34 +524,6 @@ set_ik_layer_enabled :: proc(
 }
 
 @(private = "file")
-_spawn_internal :: proc(
-  world: ^World,
-  parent: resources.Handle,
-  position: [3]f32,
-  attachment: NodeAttachment,
-  rm: ^resources.Manager,
-) -> (
-  handle: resources.Handle,
-  node: ^Node,
-  ok: bool,
-) {
-  handle, node = cont.alloc(&world.nodes) or_return
-  _init_node_with_attachment(node, attachment, handle, rm)
-  geometry.transform_translate(
-    &node.transform,
-    position.x,
-    position.y,
-    position.z,
-  )
-  attach(world.nodes, parent, handle)
-  if rm != nil {
-    _upload_node_to_gpu(handle, node, rm)
-  }
-  world.octree_dirty_set[handle] = true
-  return handle, node, true
-}
-
-@(private = "file")
 _init_node_with_attachment :: proc(
   node: ^Node,
   attachment: NodeAttachment,
@@ -647,21 +619,9 @@ _build_node_data :: proc(
   return data
 }
 
-spawn_at :: proc(
-  self: ^World,
-  position: [3]f32,
-  attachment: NodeAttachment = nil,
-  rm: ^resources.Manager = nil,
-) -> (
-  handle: resources.Handle,
-  node: ^Node,
-  ok: bool,
-) {
-  return _spawn_internal(self, self.root, position, attachment, rm)
-}
-
 spawn :: proc(
   self: ^World,
+  position: [3]f32 = {0, 0, 0},
   attachment: NodeAttachment = nil,
   rm: ^resources.Manager = nil,
 ) -> (
@@ -669,12 +629,13 @@ spawn :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  return _spawn_internal(self, self.root, {0, 0, 0}, attachment, rm)
+  return spawn_child(self, self.root, position, attachment, rm)
 }
 
 spawn_child :: proc(
   self: ^World,
   parent: resources.Handle,
+  position: [3]f32 = {0, 0, 0},
   attachment: NodeAttachment = nil,
   rm: ^resources.Manager = nil,
 ) -> (
@@ -682,7 +643,20 @@ spawn_child :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  return _spawn_internal(self, parent, {0, 0, 0}, attachment, rm)
+    handle, node = cont.alloc(&self.nodes) or_return
+    _init_node_with_attachment(node, attachment, handle, rm)
+    geometry.transform_translate(
+      &node.transform,
+      position.x,
+      position.y,
+      position.z,
+    )
+    attach(self.nodes, parent, handle)
+    if rm != nil {
+      _upload_node_to_gpu(handle, node, rm)
+    }
+    self.octree_dirty_set[handle] = true
+    return handle, node, true
 }
 
 TraverseEntry :: struct {
@@ -1501,7 +1475,7 @@ spawn_actor :: proc(
   actor: ^Actor(T),
   ok: bool,
 ) {
-  node_handle, _, node_ok := spawn(world, attachment, rm)
+  node_handle, _, node_ok := spawn(world, {}, attachment, rm)
   if !node_ok do return {}, nil, false
   pool := _ensure_actor_pool(world, T)
   return actor_alloc(pool, node_handle)
@@ -1518,7 +1492,7 @@ spawn_actor_at :: proc(
   actor: ^Actor(T),
   ok: bool,
 ) {
-  node_handle, _, node_ok := spawn_at(world, position, attachment, rm)
+  node_handle, _, node_ok := spawn(world, position, attachment, rm)
   if !node_ok do return {}, nil, false
   pool := _ensure_actor_pool(world, T)
   return actor_alloc(pool, node_handle)

@@ -15,7 +15,7 @@ main :: proc() {
       for x in 0 ..< 5 {
         handle := mjolnir.spawn(
           engine,
-          world.MeshAttachment{handle = mesh, material = mat},
+          attachment = world.MeshAttachment{handle = mesh, material = mat},
         ) or_continue
         mjolnir.translate(engine, handle, f32(x - 2) * 4, 0, f32(z - 2) * 4)
       }

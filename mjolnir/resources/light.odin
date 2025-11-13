@@ -186,7 +186,7 @@ update_light_gpu_data :: proc(manager: ^Manager, handle: Handle) {
   }
 }
 
-update_light_shadow_camera_transforms :: proc(
+update_light_camera :: proc(
   manager: ^Manager,
   frame_index: u32 = 0,
 ) {

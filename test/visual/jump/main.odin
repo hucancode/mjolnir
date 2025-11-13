@@ -38,7 +38,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&demo_state.physics_world, {0, -10, 0})
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  demo_state.ground_handle = spawn_at(
+  demo_state.ground_handle = spawn(
     engine,
     [3]f32{0, -0.5, 0},
     world.MeshAttachment{handle = ground_mesh, material = ground_mat},
@@ -64,7 +64,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
-  demo_state.cube_handle = spawn_at(
+  demo_state.cube_handle = spawn(
     engine,
     [3]f32{0, 3, 0},
     world.MeshAttachment {

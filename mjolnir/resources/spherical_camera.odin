@@ -73,12 +73,29 @@ spherical_camera_init :: proc(
     int(max_draws),
     {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
   ) or_return
-  spherical_camera_allocate_visibility_descriptors(
-    gctx,
-    manager,
-    camera,
-    &manager.visibility_sphere_descriptor_layout,
+  set_layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout {
+    manager.visibility_sphere_descriptor_layout,
+    manager.visibility_sphere_descriptor_layout,
+  }
+  vk.AllocateDescriptorSets(
+    gctx.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = gctx.descriptor_pool,
+      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+      pSetLayouts = raw_data(set_layouts[:]),
+    },
+    raw_data(camera.descriptor_sets[:]),
   ) or_return
+  // Update all per-frame descriptor sets
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    spherical_camera_update_descriptor_set(
+      gctx,
+      manager,
+      camera,
+      u32(frame_idx),
+    )
+  }
   return .SUCCESS
 }
 
@@ -136,41 +153,6 @@ spherical_camera_upload_data :: proc(
 spherical_camera_get_visible_count :: proc(camera: ^SphericalCamera) -> u32 {
   if camera.draw_count.mapped == nil do return 0
   return camera.draw_count.mapped[0]
-}
-
-// Allocate and update descriptor sets for sphere culling compute shader (per-frame)
-// This should be called AFTER spherical_camera_init and requires the visibility system's sphere descriptor layout
-spherical_camera_allocate_visibility_descriptors :: proc(
-  gctx: ^gpu.GPUContext,
-  manager: ^Manager,
-  camera: ^SphericalCamera,
-  sphere_descriptor_layout: ^vk.DescriptorSetLayout,
-) -> vk.Result {
-  // Allocate per-frame descriptor sets
-  set_layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout {
-    sphere_descriptor_layout^,
-    sphere_descriptor_layout^,
-  }
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &vk.DescriptorSetAllocateInfo {
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-      pSetLayouts = raw_data(set_layouts[:]),
-    },
-    raw_data(camera.descriptor_sets[:]),
-  ) or_return
-  // Update all per-frame descriptor sets
-  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    spherical_camera_update_descriptor_set(
-      gctx,
-      manager,
-      camera,
-      u32(frame_idx),
-    )
-  }
-  return .SUCCESS
 }
 
 // Update sphere culling descriptor set with current buffer bindings (per-frame)

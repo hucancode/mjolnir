@@ -118,34 +118,6 @@ mesh_init :: proc(
   return .SUCCESS
 }
 
-make_animation_instance :: proc(
-  manager: ^Manager,
-  animation_name: string,
-  mode: animation.PlayMode,
-  speed: f32 = 1.0,
-) -> (
-  instance: animation.Instance,
-  ok: bool,
-) #optional_ok {
-  // TODO: use linear search as a first working implementation
-  // later we need to do better than this linear search
-  for &entry in manager.animation_clips.entries do if entry.active {
-    clip := &entry.item
-    if clip.name != animation_name do continue
-    instance = {
-      clip     = clip,
-      mode     = mode,
-      status   = .PLAYING,
-      time     = 0.0,
-      duration = clip.duration,
-      speed    = speed,
-    }
-    ok = true
-    break
-  }
-  return
-}
-
 sample_clip :: proc(
   self: ^Mesh,
   clip: ^animation.Clip,

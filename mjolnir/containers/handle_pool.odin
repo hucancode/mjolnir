@@ -30,11 +30,11 @@ init :: proc(pool: ^Pool($T), capacity: u32 = 0) {
 }
 
 // destroy frees the pool's memory, calling deinit_proc on all active items.
-destroy :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
+destroy :: proc(pool: Pool($T), destroy_proc: proc(_: ^T)) {
   for &entry in pool.entries {
     // Only deinit entries that are still active
     if entry.generation > 0 && entry.active {
-      deinit_proc(&entry.item)
+      destroy_proc(&entry.item)
     }
   }
   delete(pool.entries)

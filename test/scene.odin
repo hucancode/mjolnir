@@ -17,7 +17,7 @@ test_node_translate :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
-  parent_handle, _, parent_ok := world.spawn_at(&w, {1, 2, 3})
+  parent_handle, _, parent_ok := world.spawn(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
   _, child, child_ok := world.spawn_child(&w, parent_handle)
   testing.expectf(t, child_ok, "failed to spawn child node")
@@ -60,7 +60,7 @@ test_node_scale :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
   defer world.destroy(&w, nil, nil)
-  parent_handle, _, parent_ok := world.spawn_at(&w, {1, 2, 3})
+  parent_handle, _, parent_ok := world.spawn(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
   _, child, child_ok := world.spawn_child(&w, parent_handle)
   testing.expectf(t, child_ok, "failed to spawn child node")
@@ -343,13 +343,13 @@ test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
   defer destroy(&scene, nil, nil)
   spawn(
     &scene,
-    LightAttachment {
+    attachment = LightAttachment {
       // In reality we would need valid light
     },
   )
   spawn(
     &scene,
-    MeshAttachment {
+    attachment = MeshAttachment {
       // In reality we would need valid mesh handle
     },
   )

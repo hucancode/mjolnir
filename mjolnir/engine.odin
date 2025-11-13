@@ -593,7 +593,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       self.frame_index,
     )
   }
-  resources.update_light_shadow_camera_transforms(&self.rm, self.frame_index)
+  resources.update_light_camera(&self.rm, self.frame_index)
   if self.pre_render_proc != nil {
     self.pre_render_proc(self)
   }

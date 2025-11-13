@@ -343,9 +343,9 @@ test_aoe_world_integration :: proc(t: ^testing.T) {
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   // Spawn some nodes
-  h1, n1, ok1 := world.spawn_at(&w, {0, 0, 0}, world.MeshAttachment{})
-  h2, n2, ok2 := world.spawn_at(&w, {5, 0, 0}, world.SpriteAttachment{})
-  h3, n3, ok3 := world.spawn_at(&w, {10, 0, 0}, world.LightAttachment{})
+  h1, n1, ok1 := world.spawn(&w, {0, 0, 0}, world.MeshAttachment{})
+  h2, n2, ok2 := world.spawn(&w, {5, 0, 0}, world.SpriteAttachment{})
+  h3, n3, ok3 := world.spawn(&w, {10, 0, 0}, world.LightAttachment{})
   testing.expect(t, ok1 && ok2 && ok3, "All spawns should succeed")
   // Tag nodes manually for test
   n1.tags = {.MESH, .PAWN, .FRIENDLY}
@@ -409,7 +409,7 @@ test_aoe_incremental_updates :: proc(t: ^testing.T) {
   world.init(&w)
   defer world.destroy(&w, nil, nil)
   // Spawn a node
-  h1, n1, ok := world.spawn_at(&w, {0, 0, 0})
+  h1, n1, ok := world.spawn(&w, {0, 0, 0})
   testing.expect(t, ok, "Spawn should succeed")
   n1.tags = {.MESH, .PAWN}
   // Traverse to initialize world matrices and mark pending updates

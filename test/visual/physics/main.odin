@@ -38,7 +38,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   physics_world.enable_air_resistance = true
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  ground_handle = spawn_at(
+  ground_handle = spawn(
     engine,
     [3]f32{0, -0.5, 0},
     world.MeshAttachment{handle = ground_mesh, material = ground_mat},
@@ -60,7 +60,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
   sphere_mat := engine.rm.builtin_materials[resources.Color.MAGENTA]
-  sphere_handle = spawn_at(
+  sphere_handle = spawn(
     engine,
     [3]f32{0, SPHERE_RADIUS, 0},
     world.MeshAttachment {
@@ -103,7 +103,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   for pos, i in cube_positions {
-    cube_handles[i] = spawn_at(
+    cube_handles[i] = spawn(
       engine,
       pos,
       world.MeshAttachment {

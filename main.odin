@@ -51,7 +51,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           if x % 3 == 0 {
             node_handle, node_ok = spawn(
               engine,
-              world.MeshAttachment {
+              attachment = world.MeshAttachment {
                 handle = cube_mesh_handle,
                 material = mat_handle,
                 cast_shadow = true,
@@ -60,7 +60,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           } else if x % 3 == 1 {
             node_handle, node_ok = spawn(
               engine,
-              world.MeshAttachment {
+              attachment = world.MeshAttachment {
                 handle = cone_mesh_handle,
                 material = mat_handle,
                 cast_shadow = true,
@@ -69,7 +69,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           } else {
             node_handle, node_ok = spawn(
               engine,
-              world.MeshAttachment {
+              attachment = world.MeshAttachment {
                 handle = sphere_mesh_handle,
                 material = mat_handle,
                 cast_shadow = true,
@@ -104,7 +104,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if brick_wall_mat_ok && ground_mesh_ok {
       ground_handle := spawn(
         engine,
-        world.MeshAttachment {
+        attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
@@ -112,7 +112,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       scale(engine, ground_handle, size)
       left_wall_handle := spawn(
         engine,
-        world.MeshAttachment {
+        attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
@@ -122,7 +122,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       scale(engine, left_wall_handle, size)
       right_wall_handle := spawn(
         engine,
-        world.MeshAttachment {
+        attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
@@ -137,7 +137,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       scale(engine, right_wall_handle, size)
       back_wall_handle := spawn(
         engine,
-        world.MeshAttachment {
+        attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
@@ -147,7 +147,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       scale(engine, back_wall_handle, size)
       ceiling_handle := spawn(
         engine,
-        world.MeshAttachment {
+        attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
@@ -186,7 +186,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           hand_cube_handle := spawn_child(
             engine,
             child_handle,
-            world.MeshAttachment {
+            attachment = world.MeshAttachment {
               handle = cube_mesh_handle,
               material = plain_material_handle,
               cast_shadow = true,
@@ -271,7 +271,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   when true {
     log.infof("creating %d lights with animated root", LIGHT_COUNT)
     // Create root node for all lights with rotation animation
-    lights_root_handle := spawn_at(engine, {0, 2, 0})
+    lights_root_handle := spawn(engine, {0, 2, 0})
     // Create rotation animation
     rotation_duration: f32 = 10.0
     if rotation_clip_handle, rotation_ok := create_animation_clip(
@@ -332,38 +332,28 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
       light_handle: resources.Handle
       if should_make_spot_light {
-        light_handle = spawn_child(engine, lights_root_handle) or_continue
-        node := get_node(engine, light_handle) or_continue
-        attachment := world.create_spot_light_attachment(
-          light_handle,
-          &engine.rm,
-          &engine.gctx,
-          color,
-          14.0,
-          math.PI * 0.15,
-          true,
+        light_handle = spawn_child_spot_light(
+            engine,
+            color,
+            14.0,
+            math.PI * 0.15,
+            lights_root_handle,
         ) or_continue
-        node.attachment = attachment
         translate(engine, light_handle, local_x, local_y, local_z)
         rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
       } else {
-        light_handle = spawn_child(engine, lights_root_handle) or_continue
-        node := get_node(engine, light_handle) or_continue
-        attachment := world.create_point_light_attachment(
-          light_handle,
-          &engine.rm,
-          &engine.gctx,
-          color,
-          14.0,
-          true,
+        light_handle = spawn_child_point_light(
+            engine,
+            color,
+            14.0,
+            lights_root_handle,
         ) or_continue
-        node.attachment = attachment
         translate(engine, light_handle, local_x, local_y, local_z)
       }
       cube_handle := spawn_child(
         engine,
         light_handle,
-        world.MeshAttachment {
+        attachment = world.MeshAttachment {
           handle = cube_mesh_handle,
           material = plain_material_handle,
           cast_shadow = false,
@@ -430,7 +420,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         albedo_handle = goldstar_texture_handle,
       )
     }
-    psys_handle1 := spawn_at(engine, {-2.0, 1.9, 0.3})
+    psys_handle1 := spawn(engine, {-2.0, 1.9, 0.3})
     if goldstar_texture_ok {
       emitter_handle1, emitter1_ok := create_emitter(
         engine,
@@ -457,11 +447,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
         spawn_child(
           engine,
           psys_handle1,
-          world.EmitterAttachment{emitter_handle1},
+          attachment = world.EmitterAttachment{emitter_handle1},
         )
       }
     }
-    psys_handle2 := spawn_at(engine, {2.0, 1.9, 0.3})
+    psys_handle2 := spawn(engine, {2.0, 1.9, 0.3})
     if black_circle_ok {
       emitter_handle2, emitter2_ok := create_emitter(
         engine,
@@ -488,11 +478,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
         spawn_child(
           engine,
           psys_handle2,
-          world.EmitterAttachment{emitter_handle2},
+          attachment = world.EmitterAttachment{emitter_handle2},
         )
       }
     }
-    forcefield_root_handle := spawn_at(engine, {0, 4, 0})
+    forcefield_root_handle := spawn(engine, {0, 4, 0})
     if forcefield_clip_handle, ok := create_animation_clip(
       engine,
       channel_count = 1,
@@ -544,7 +534,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     handle := spawn_child(
       engine,
       forcefield_handle,
-      world.MeshAttachment {
+      attachment = world.MeshAttachment {
         handle = sphere_mesh_handle,
         material = goldstar_material_handle,
         cast_shadow = false,
@@ -582,7 +572,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if portal_material_ok && portal_mesh_ok {
       handle := spawn(
         engine,
-        world.MeshAttachment {
+        attachment = world.MeshAttachment {
           handle = portal_quad_handle,
           material = portal_material_handle,
           cast_shadow = false,
@@ -632,7 +622,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             mesh_handle   = sprite_quad,
             material      = sprite_material,
           }
-          _, sprite_node, spawn_ok := world.spawn_at(
+          _, sprite_node, spawn_ok := world.spawn(
             &engine.world,
             {4, 1.5, 0},
             sprite_attachment,

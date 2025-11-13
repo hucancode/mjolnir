@@ -30,7 +30,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   plane_material := engine.rm.builtin_materials[resources.Color.GRAY]
   plane_handle := mjolnir.spawn(
     engine,
-    world.MeshAttachment {
+    attachment = world.MeshAttachment {
       handle = plane_mesh,
       material = plane_material,
       cast_shadow = false,
@@ -42,7 +42,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   sphere_material := engine.rm.builtin_materials[resources.Color.RED]
   sphere_handle := mjolnir.spawn(
     engine,
-    world.MeshAttachment {
+    attachment = world.MeshAttachment {
       handle = sphere_mesh,
       material = sphere_material,
       cast_shadow = false,

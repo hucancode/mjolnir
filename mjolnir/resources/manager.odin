@@ -151,7 +151,7 @@ Manager :: struct {
   spherical_camera_pipeline_layout:          vk.PipelineLayout, // Used by spherical depth rendering (point light shadows)
   // Visibility system descriptor layouts (for shadow cameras)
   visibility_sphere_descriptor_layout:       vk.DescriptorSetLayout,
-  visibility_multi_pass_descriptor_layout:   vk.DescriptorSetLayout,
+  visibility_descriptor_layout:   vk.DescriptorSetLayout,
   visibility_depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
   // Bindless vertex/index buffer system
   vertex_buffer:                             gpu.ImmutableBuffer(
@@ -461,10 +461,10 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   manager.visibility_sphere_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
-    manager.visibility_multi_pass_descriptor_layout,
+    manager.visibility_descriptor_layout,
     nil,
   )
-  manager.visibility_multi_pass_descriptor_layout = 0
+  manager.visibility_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
     manager.visibility_depth_reduce_descriptor_layout,
@@ -508,6 +508,7 @@ create_geometry_pipeline_layout :: proc(
   return .SUCCESS
 }
 
+@(private)
 create_spherical_camera_pipeline_layout :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
@@ -1830,17 +1831,8 @@ init_builtin_materials :: proc(manager: ^Manager) -> vk.Result {
   for color, i in colors {
     manager.builtin_materials[i], _, _ = create_material(
       manager,
-      {},
-      .PBR,
-      {},
-      {},
-      {},
-      {},
-      {},
-      0.0,
-      1.0,
-      0.0,
-      color,
+      type = .PBR,
+      base_color_factor = color,
     )
   }
   log.info("Builtin materials created successfully")

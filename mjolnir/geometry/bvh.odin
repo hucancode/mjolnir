@@ -81,7 +81,7 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
   for prim, i in build_prims {
     bvh.primitives[i] = items[prim.index]
   }
-  flatten_bvh_tree(bvh, root)
+  flatten_bvh(bvh, root)
   // No need to free build nodes - arena will clean up
 }
 
@@ -272,7 +272,7 @@ count_build_nodes :: proc(node: ^BVHBuildNode) -> i32 {
 }
 
 @(private)
-flatten_bvh_tree :: proc(bvh: ^BVH($T), root: ^BVHBuildNode) {
+flatten_bvh :: proc(bvh: ^BVH($T), root: ^BVHBuildNode) {
   node_count := count_build_nodes(root)
   resize(&bvh.nodes, int(node_count))
   next_node_idx: i32 = 0
@@ -304,16 +304,6 @@ flatten_node :: proc(
   bvh.nodes[node_idx] = node
   return node_idx
 }
-
-// No longer needed - arena allocator handles cleanup
-// @(private)
-// free_build_nodes :: proc(node: ^BVHBuildNode) {
-//   if node == nil do return
-//
-//   free_build_nodes(node.left)
-//   free_build_nodes(node.right)
-//   free(node)
-// }
 
 bvh_query_aabb :: proc(
   bvh: ^BVH($T),
@@ -782,7 +772,7 @@ bvh_insert_incremental :: proc(bvh: ^BVH($T), item: T) {
   leaf_node.primitive_count += 1
   leaf_node.bounds = aabb_union(leaf_node.bounds, item_bounds)
   // Refit bounds up the tree
-  bvh_refit_from_node(bvh, best_node_idx)
+  refit_from_node(bvh, best_node_idx)
 }
 
 @(private)
@@ -814,8 +804,8 @@ find_best_insert_node :: proc(bvh: ^BVH($T), item_bounds: Aabb) -> int {
 }
 
 @(private)
-bvh_refit_from_node :: proc(bvh: ^BVH($T), start_node_idx: int) {
-  // This would require parent pointers for efficient implementation
+refit_from_node :: proc(bvh: ^BVH($T), start_node_idx: int) {
+  // TODO: This would require parent pointers for efficient implementation
   // For now, just refit the entire tree
   bvh_refit(bvh)
 }

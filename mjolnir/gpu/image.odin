@@ -37,19 +37,6 @@ Image :: struct {
   auto_purge: bool,
 }
 
-ImageTransition :: struct {
-  old_layout:  vk.ImageLayout,
-  new_layout:  vk.ImageLayout,
-  src_stage:   vk.PipelineStageFlags,
-  dst_stage:   vk.PipelineStageFlags,
-  src_access:  vk.AccessFlags,
-  dst_access:  vk.AccessFlags,
-  base_mip:    u32,
-  mip_count:   u32,
-  base_layer:  u32,
-  layer_count: u32,
-}
-
 infer_view_type :: proc(
   img_type: ImageType,
   array_layers: u32,

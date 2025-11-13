@@ -700,71 +700,6 @@ test_octree_single_vs_multi_raycast :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_octree_sphere_query :: proc(t: ^testing.T) {
-  primitives: [dynamic]geometry.Primitive
-  append(
-    &primitives,
-    geometry.Primitive {
-      type = .Triangle,
-      data = geometry.Triangle{v0 = {0, 0, 0}, v1 = {1, 0, 0}, v2 = {0, 1, 0}},
-    },
-  )
-  append(
-    &primitives,
-    geometry.Primitive {
-      type = .Sphere,
-      data = geometry.Sphere{center = {3, 0, 0}, radius = 0.5},
-    },
-  )
-  octree: geometry.Octree(geometry.Primitive)
-  octree.bounds_func = geometry.primitive_bounds
-  octree.point_func = proc(p: geometry.Primitive) -> [3]f32 {
-    switch prim in p.data {
-    case geometry.Triangle:
-      return (prim.v0 + prim.v1 + prim.v2) / 3.0
-    case geometry.Sphere:
-      return prim.center
-    }
-    return {}
-  }
-  bounds := geometry.Aabb {
-    min = {-10, -10, -10},
-    max = {10, 10, 10},
-  }
-  geometry.octree_init(&octree, bounds, 6, 4)
-  for prim in primitives {
-    geometry.octree_insert(&octree, prim)
-  }
-  query_sphere := geometry.Sphere {
-    center = {0.5, 0.5, 0},
-    radius = 0.6,
-  }
-  results: [dynamic]geometry.Primitive
-  geometry.octree_query_sphere_primitives(
-    &octree,
-    query_sphere,
-    &results,
-    geometry.sphere_primitive_intersection,
-  )
-  testing.expect_value(t, len(results), 1)
-  query_sphere2 := geometry.Sphere {
-    center = {3, 0, 0},
-    radius = 0.6,
-  }
-  clear(&results)
-  geometry.octree_query_sphere_primitives(
-    &octree,
-    query_sphere2,
-    &results,
-    geometry.sphere_primitive_intersection,
-  )
-  testing.expect_value(t, len(results), 1)
-  geometry.octree_destroy(&octree)
-  delete(primitives)
-  delete(results)
-}
-
-@(test)
 test_octree_subdivision_with_raycast :: proc(t: ^testing.T) {
   primitives: [dynamic]geometry.Primitive
   // Create clustered primitives to force subdivision
@@ -1543,11 +1478,11 @@ benchmark_octree_sphere :: proc(t: ^testing.T) {
     for _ in 0 ..< options.rounds {
       sphere := state.spheres[state.current_sphere]
       state.current_sphere = (state.current_sphere + 1) % len(state.spheres)
-      geometry.octree_query_sphere_primitives(
+      geometry.octree_query_sphere(
         &state.octree,
-        sphere,
+        sphere.center,
+        sphere.radius,
         &state.results,
-        geometry.sphere_primitive_intersection,
       )
       state.total_hits += len(state.results)
       if len(state.results) > state.max_hits {

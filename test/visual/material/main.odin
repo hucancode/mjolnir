@@ -38,7 +38,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   cube_handle = mjolnir.spawn(
     engine,
-    world.MeshAttachment {
+    attachment = world.MeshAttachment {
       handle = cube_mesh,
       material = material_handle,
       cast_shadow = true,

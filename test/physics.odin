@@ -218,8 +218,8 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
   physics_world: physics.PhysicsWorld
   physics.init(&physics_world, {0, 0, 0})
   defer physics.destroy(&physics_world)
-  node_a, node_a_ptr, _ := world.spawn_at(&w, {0, 0, 0})
-  node_b, node_b_ptr, _ := world.spawn_at(&w, {1.5, 0, 0})
+  node_a, node_a_ptr, _ := world.spawn(&w, {0, 0, 0})
+  node_b, node_b_ptr, _ := world.spawn(&w, {1.5, 0, 0})
   body_a_handle, body_a, _ := physics.create_body(&physics_world, node_a, 1.0)
   body_b_handle, body_b, _ := physics.create_body(&physics_world, node_b, 1.0)
   collider_a := physics.collider_create_sphere(1.0)
@@ -255,8 +255,8 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
   physics_world: physics.PhysicsWorld
   physics.init(&physics_world, {0, 0, 0})
   defer physics.destroy(&physics_world)
-  node_static, _, _ := world.spawn_at(&w, {0, 0, 0})
-  node_dynamic, _, _ := world.spawn_at(&w, {1.5, 0, 0})
+  node_static, _, _ := world.spawn(&w, {0, 0, 0})
+  node_dynamic, _, _ := world.spawn(&w, {1.5, 0, 0})
   body_static_handle, body_static, _ := physics.create_body(
     &physics_world,
     node_static,
@@ -358,8 +358,8 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
   physics_world: physics.PhysicsWorld
   physics.init(&physics_world, {0, 0, 0})
   defer physics.destroy(&physics_world)
-  node_bullet, _, _ := world.spawn_at(&w, {-5, 0, 0})
-  node_wall, _, _ := world.spawn_at(&w, {0, 0, 0})
+  node_bullet, _, _ := world.spawn(&w, {-5, 0, 0})
+  node_wall, _, _ := world.spawn(&w, {0, 0, 0})
   body_bullet_handle, body_bullet, _ := physics.create_body(
     &physics_world,
     node_bullet,
@@ -433,7 +433,7 @@ test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
   physics_world: physics.PhysicsWorld
   physics.init(&physics_world)
   defer physics.destroy(&physics_world)
-  node_handle, _, _ := world.spawn_at(&w, {0, physics.KILL_Y - 1, 0})
+  node_handle, _, _ := world.spawn(&w, {0, physics.KILL_Y - 1, 0})
   body_handle, body, _ := physics.create_body(
     &physics_world,
     node_handle,
@@ -1312,8 +1312,8 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
   physics_world: physics.PhysicsWorld
   physics.init(&physics_world, {0, 0, 0})
   defer physics.destroy(&physics_world)
-  node_a, _, _ := world.spawn_at(&w, {0, 0, 0})
-  node_b, _, _ := world.spawn_at(&w, {0.5, 0.5, 0})
+  node_a, _, _ := world.spawn(&w, {0, 0, 0})
+  node_b, _, _ := world.spawn(&w, {0.5, 0.5, 0})
   body_a_handle, body_a, _ := physics.create_body(&physics_world, node_a, 1.0)
   body_b_handle, body_b, _ := physics.create_body(
     &physics_world,
@@ -1421,7 +1421,7 @@ test_integration_box_stack_stability :: proc(t: ^testing.T) {
   physics_world: physics.PhysicsWorld
   physics.init(&physics_world, {0, -9.81, 0})
   defer physics.destroy(&physics_world)
-  node_ground, _, _ := world.spawn_at(&w, {0, -0.5, 0})
+  node_ground, _, _ := world.spawn(&w, {0, -0.5, 0})
   body_ground_h, _, _ := physics.create_body(
     &physics_world,
     node_ground,
@@ -1430,14 +1430,14 @@ test_integration_box_stack_stability :: proc(t: ^testing.T) {
   )
   collider_ground := physics.collider_create_box({5, 0.5, 5})
   physics.add_collider(&physics_world, body_ground_h, collider_ground)
-  node_1, _, _ := world.spawn_at(&w, {0, 0.5, 0})
+  node_1, _, _ := world.spawn(&w, {0, 0.5, 0})
   body_1_h, body_1, _ := physics.create_body(&physics_world, node_1, 10.0)
   collider_box := physics.collider_create_box({0.5, 0.5, 0.5})
   physics.add_collider(&physics_world, body_1_h, collider_box)
-  node_2, _, _ := world.spawn_at(&w, {0, 1.5, 0})
+  node_2, _, _ := world.spawn(&w, {0, 1.5, 0})
   body_2_h, body_2, _ := physics.create_body(&physics_world, node_2, 10.0)
   physics.add_collider(&physics_world, body_2_h, collider_box)
-  node_3, _, _ := world.spawn_at(&w, {0, 2.5, 0})
+  node_3, _, _ := world.spawn(&w, {0, 2.5, 0})
   body_3_h, body_3, _ := physics.create_body(&physics_world, node_3, 10.0)
   physics.add_collider(&physics_world, body_3_h, collider_box)
   dt := f32(0.016)
@@ -1633,7 +1633,7 @@ test_trigger_only_prevents_position_update :: proc(t: ^testing.T) {
   physics_world: physics.PhysicsWorld
   physics.init(&physics_world, {0, 0, 0})
   defer physics.destroy(&physics_world)
-  node_handle, node, _ := world.spawn_at(&w, {5, 10, 15})
+  node_handle, node, _ := world.spawn(&w, {5, 10, 15})
   body_handle, body, _ := physics.create_body(&physics_world, node_handle, 1.0)
   body.trigger_only = true
   body.velocity = {10, 5, 3}
@@ -1658,8 +1658,8 @@ test_trigger_only_no_collision_response :: proc(t: ^testing.T) {
   physics_world: physics.PhysicsWorld
   physics.init(&physics_world, {0, 0, 0})
   defer physics.destroy(&physics_world)
-  node_a, _, _ := world.spawn_at(&w, {0, 0, 0})
-  node_b, _, _ := world.spawn_at(&w, {1.5, 0, 0})
+  node_a, _, _ := world.spawn(&w, {0, 0, 0})
+  node_b, _, _ := world.spawn(&w, {1.5, 0, 0})
   body_a_handle, body_a, _ := physics.create_body(&physics_world, node_a, 1.0)
   body_b_handle, body_b, _ := physics.create_body(&physics_world, node_b, 1.0)
   collider := physics.collider_create_sphere(1.0)
@@ -1687,7 +1687,7 @@ test_trigger_only_runtime_toggle :: proc(t: ^testing.T) {
   physics_world: physics.PhysicsWorld
   physics.init(&physics_world, {0, -10, 0})
   defer physics.destroy(&physics_world)
-  node_handle, node, _ := world.spawn_at(&w, {0, 10, 0})
+  node_handle, node, _ := world.spawn(&w, {0, 10, 0})
   body_handle, body, _ := physics.create_body(&physics_world, node_handle, 1.0)
   dt := f32(0.016)
   physics.step(&physics_world, &w, dt)

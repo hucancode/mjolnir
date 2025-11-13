@@ -96,7 +96,7 @@ Camera :: struct {
     vk.DrawIndexedIndirectCommand,
   ),
   depth_pyramid:                [MAX_FRAMES_IN_FLIGHT]DepthPyramid,
-  multi_pass_descriptor_set:    [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  descriptor_set:    [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   depth_reduce_descriptor_sets: [MAX_FRAMES_IN_FLIGHT][16]vk.DescriptorSet,
 }
 
@@ -344,7 +344,7 @@ camera_init :: proc(
     ) or_return
   }
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    camera_allocate_visibility_descriptors(
+    camera_allocate_descriptors(
       gctx,
       manager,
       camera,
@@ -572,7 +572,7 @@ camera_resize :: proc(
   vk.DeviceWaitIdle(gctx.device) or_return
   // Clear descriptor set references (will be reallocated after resource recreation)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    camera.multi_pass_descriptor_set[frame] = 0
+    camera.descriptor_set[frame] = 0
     for mip in 0 ..< camera.depth_pyramid[frame].mip_levels {
       camera.depth_reduce_descriptor_sets[frame][mip] = 0
     }
@@ -721,7 +721,7 @@ camera_resize :: proc(
     ) or_return
   }
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    camera_allocate_visibility_descriptors(
+    camera_allocate_descriptors(
       gctx,
       manager,
       camera,
@@ -1013,7 +1013,7 @@ create_camera_depth_pyramid :: proc(
   return .SUCCESS
 }
 
-camera_allocate_visibility_descriptors :: proc(
+camera_allocate_descriptors :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
   camera: ^Camera,
@@ -1026,9 +1026,9 @@ camera_allocate_visibility_descriptors :: proc(
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = gctx.descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = &manager.visibility_multi_pass_descriptor_layout,
+      pSetLayouts = &manager.visibility_descriptor_layout,
     },
-    &camera.multi_pass_descriptor_set[frame_index],
+    &camera.descriptor_set[frame_index],
   ) or_return
   for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
     vk.AllocateDescriptorSets(
@@ -1042,9 +1042,9 @@ camera_allocate_visibility_descriptors :: proc(
       &camera.depth_reduce_descriptor_sets[frame_index][mip],
     ) or_return
   }
-  camera_update_multi_pass_descriptor_set(gctx, manager, camera, frame_index)
+  update_descriptor_set(gctx, manager, camera, frame_index)
   for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
-    camera_update_depth_reduce_descriptor_set(
+    update_depth_reduce_descriptor_set(
       gctx,
       manager,
       camera,
@@ -1056,7 +1056,7 @@ camera_allocate_visibility_descriptors :: proc(
 }
 
 @(private)
-camera_update_depth_reduce_descriptor_set :: proc(
+update_depth_reduce_descriptor_set :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
   camera: ^Camera,
@@ -1115,7 +1115,7 @@ camera_update_depth_reduce_descriptor_set :: proc(
 }
 
 @(private)
-camera_update_multi_pass_descriptor_set :: proc(
+update_descriptor_set :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
   camera: ^Camera,
@@ -1176,7 +1176,7 @@ camera_update_multi_pass_descriptor_set :: proc(
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 0,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1184,7 +1184,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 1,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1192,7 +1192,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 2,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1200,7 +1200,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 3,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1208,7 +1208,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 4,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1216,7 +1216,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 5,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1224,7 +1224,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 6,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1232,7 +1232,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 7,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1240,7 +1240,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 8,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1248,7 +1248,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 9,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -1256,7 +1256,7 @@ camera_update_multi_pass_descriptor_set :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.multi_pass_descriptor_set[frame_index],
+      dstSet = camera.descriptor_set[frame_index],
       dstBinding = 10,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,

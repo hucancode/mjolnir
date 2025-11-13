@@ -94,7 +94,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Create target cube for IK visualization
   cube_mesh := get_builtin_mesh(engine, .CUBE)
   cube_material := get_builtin_material(engine, .RED)
-  target_cube = spawn_at(
+  target_cube = spawn(
   engine,
   {0.0, 4.0, 5.0}, // Initial IK target position
   world.MeshAttachment {

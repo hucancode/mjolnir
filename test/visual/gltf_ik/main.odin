@@ -63,7 +63,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   target_pos := [3]f32{0.0, 0.0, 0.9}
   cube_mesh := get_builtin_mesh(engine, .CUBE)
   cube_material := get_builtin_material(engine, .RED)
-  target_cube = spawn_at(
+  target_cube = spawn(
     engine,
     target_pos,
     world.MeshAttachment {

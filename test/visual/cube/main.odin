@@ -13,7 +13,7 @@ main :: proc() {
     mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
     handle := mjolnir.spawn(
       engine,
-      world.MeshAttachment{handle = mesh, material = mat},
+      attachment = world.MeshAttachment{handle = mesh, material = mat},
     )
     mjolnir.translate(engine, handle, 0, 0, 0)
     camera := mjolnir.get_main_camera(engine)

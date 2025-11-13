@@ -99,4 +99,14 @@ $(SHADER_DIR)/%/geom.spv: $(SHADER_DIR)/%/shader.geom
 	@echo "Compiling geometry shader $<..."
 	@glslc "$<" -o "$@"
 
-.PHONY: build run debug shader test check clean vtest golden
+long-proc:
+	grep -rhE "^\s*[a-zA-Z0-9_]+\s*::\s*proc" mjolnir --include \*.odin | \
+      awk '{for(i=1; i<=NF; i++) {if($$i == "::") {print $$(i-1); break}}}' | \
+      awk '{print length, $$0}' | \
+      sort -rn | \
+      head -n20
+
+long-file:
+	find mjolnir -type f -name "*.odin" -exec wc -l {} + | sort -rn | head -n20
+
+.PHONY: build run debug shader test check clean vtest golden long-proc long-file

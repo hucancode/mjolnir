@@ -178,35 +178,20 @@ get_builtin_material :: proc(
 
 spawn :: proc(
   engine: ^Engine,
+  position: [3]f32 = {0, 0, 0},
   attachment: world.NodeAttachment = nil,
 ) -> (
   resources.Handle,
   bool,
 ) #optional_ok {
-  handle, _, ok := world.spawn(&engine.world, attachment, &engine.rm)
-  return handle, ok
-}
-
-spawn_at :: proc(
-  engine: ^Engine,
-  position: [3]f32,
-  attachment: world.NodeAttachment = nil,
-) -> (
-  resources.Handle,
-  bool,
-) #optional_ok {
-  handle, _, ok := world.spawn_at(
-    &engine.world,
-    position,
-    attachment,
-    &engine.rm,
-  )
+  handle, _, ok := world.spawn(&engine.world, position, attachment, &engine.rm)
   return handle, ok
 }
 
 spawn_child :: proc(
   engine: ^Engine,
   parent: resources.Handle,
+  position: [3]f32 = {0, 0, 0},
   attachment: world.NodeAttachment = nil,
 ) -> (
   resources.Handle,
@@ -215,6 +200,7 @@ spawn_child :: proc(
   handle, _, ok := world.spawn_child(
     &engine.world,
     parent,
+    position,
     attachment,
     &engine.rm,
   )
@@ -373,8 +359,8 @@ spawn_spot_light :: proc(
   color: [4]f32,
   radius: f32,
   angle: f32,
-  cast_shadow := true,
   position: [3]f32 = {0, 0, 0},
+  cast_shadow := true,
 ) -> (
   handle: resources.Handle,
   ok: bool,
@@ -396,12 +382,41 @@ spawn_spot_light :: proc(
   return
 }
 
+spawn_child_spot_light :: proc(
+  engine: ^Engine,
+  color: [4]f32,
+  radius: f32,
+  angle: f32,
+  parent: resources.Handle,
+  position: [3]f32 = {0, 0, 0},
+  cast_shadow := true,
+) -> (
+  handle: resources.Handle,
+  ok: bool,
+) #optional_ok {
+  handle = spawn_child(engine, parent) or_return
+  node := get_node(engine, handle) or_return
+  attachment := world.create_spot_light_attachment(
+    handle,
+    &engine.rm,
+    &engine.gctx,
+    color,
+    radius,
+    angle,
+    b32(cast_shadow),
+  ) or_return
+  node.attachment = attachment
+  translate(node, position.x, position.y, position.z)
+  ok = true
+  return
+}
+
 spawn_point_light :: proc(
   engine: ^Engine,
   color: [4]f32,
   radius: f32,
-  cast_shadow := true,
   position: [3]f32 = {0, 0, 0},
+  cast_shadow := true,
 ) -> (
   handle: resources.Handle,
   ok: bool,
@@ -422,11 +437,38 @@ spawn_point_light :: proc(
   return
 }
 
+spawn_child_point_light :: proc(
+  engine: ^Engine,
+  color: [4]f32,
+  radius: f32,
+  parent: resources.Handle,
+  position: [3]f32 = {0, 0, 0},
+  cast_shadow := true,
+) -> (
+  handle: resources.Handle,
+  ok: bool,
+) #optional_ok {
+  handle = spawn_child(engine, parent) or_return
+  node := get_node(engine, handle) or_return
+  attachment := world.create_point_light_attachment(
+    handle,
+    &engine.rm,
+    &engine.gctx,
+    color,
+    radius,
+    b32(cast_shadow),
+  ) or_return
+  node.attachment = attachment
+  translate(node, position.x, position.y, position.z)
+  ok = true
+  return
+}
+
 spawn_directional_light :: proc(
   engine: ^Engine,
   color: [4]f32,
-  cast_shadow := true,
   position: [3]f32 = {0, 0, 0},
+  cast_shadow := true,
 ) -> (
   handle: resources.Handle,
   ok: bool,
@@ -439,7 +481,7 @@ spawn_directional_light :: proc(
     &engine.gctx,
     color,
     b32(cast_shadow),
-  )
+  ) or_return
   node.attachment = attachment
   translate(node, position.x, position.y, position.z)
   ok = true
@@ -1074,7 +1116,7 @@ get_texture_count :: proc(engine: ^Engine) -> u32 {
 }
 
 set_visibility_stats :: proc(engine: ^Engine, enabled: bool) {
-  world.visibility_system_set_stats_enabled(&engine.world.visibility, enabled)
+  engine.world.visibility.stats_enabled = enabled
 }
 
 camera_look_at :: resources.camera_look_at

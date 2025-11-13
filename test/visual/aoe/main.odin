@@ -50,7 +50,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
       handle := spawn(
         engine,
-        world.MeshAttachment {
+        attachment = world.MeshAttachment {
           handle = cube_mesh,
           material = cube_mat,
           cast_shadow = false,
@@ -65,7 +65,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   effector_position = {0, 1, 0}
   effector_sphere = spawn(
     engine,
-    world.MeshAttachment {
+    attachment = world.MeshAttachment {
       handle = sphere_mesh,
       material = effector_mat,
       cast_shadow = false,

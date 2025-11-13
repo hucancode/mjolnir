@@ -19,7 +19,7 @@ main :: proc() {
         mat := mat1 if (x + z) % 2 == 0 else mat2
         handle := spawn(
           engine,
-          world.MeshAttachment{handle = mesh, material = mat},
+          attachment = world.MeshAttachment{handle = mesh, material = mat},
         )
         translate(
           engine,
