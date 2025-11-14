@@ -28,7 +28,6 @@ layout(push_constant) uniform PushConstants {
     float height_offset;   // 4 - Raise navmesh slightly above ground
     float alpha;           // 4 - Transparency control
     uint color_mode;       // 4 - 0=area_colors, 1=uniform, 2=height_based
-    float padding[11];     // 44 (pad to 128)
 };
 
 void main() {

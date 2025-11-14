@@ -47,10 +47,8 @@ PushConstants :: struct {
   world:         matrix[4, 4]f32,
   camera_index:  u32,
   height_offset: f32,
-  line_width:    f32,
-  debug_mode:    u32,
-  debug_color:   [3]f32,
-  padding:       [8]f32,
+  alpha:         f32,
+  color_mode:    ColorMode,
 }
 
 init :: proc(
@@ -284,10 +282,8 @@ render :: proc(
       world         = world_matrix,
       camera_index  = camera_index,
       height_offset = renderer.height_offset,
-      line_width    = 3.0,
-      debug_mode    = 0,
-      debug_color   = {1.0, 1.0, 1.0},
-      padding       = {},
+      alpha         = renderer.alpha,
+      color_mode    = renderer.color_mode,
     }
     vk.CmdPushConstants(
       command_buffer,
@@ -324,10 +320,8 @@ render :: proc(
       world         = world_matrix,
       camera_index  = camera_index,
       height_offset = renderer.height_offset + 0.01,
-      line_width    = 3.0,
-      debug_mode    = 0,
-      debug_color   = {0.0, 1.0, 0.0},
-      padding       = {},
+      alpha         = 1.0,
+      color_mode    = ColorMode.Uniform,
     }
     vk.CmdPushConstants(
       command_buffer,
