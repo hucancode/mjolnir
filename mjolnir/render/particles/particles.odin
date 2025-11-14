@@ -76,8 +76,8 @@ simulate :: proc(
   world_matrix_set: vk.DescriptorSet,
   rm: ^resources.Manager,
 ) {
-  params_ptr := gpu.mutable_buffer_get(&self.params_buffer)
-  counter_ptr := gpu.mutable_buffer_get(&self.particle_counter_buffer)
+  params_ptr := gpu.get(&self.params_buffer)
+  counter_ptr := gpu.get(&self.particle_counter_buffer)
   params_ptr.particle_count = counter_ptr^
   counter_ptr^ = 0
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.emitter_pipeline)

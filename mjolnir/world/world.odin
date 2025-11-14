@@ -929,7 +929,7 @@ traverse :: proc(
       if bone_index >= u32(len(parent_mesh_skinning.bones)) do break apply_bone_socket
       bone_buffer := &rm.bone_buffer
       if bone_buffer.mapped == nil do break apply_bone_socket
-      bone_matrices_ptr := gpu.mutable_buffer_get(
+      bone_matrices_ptr := gpu.get(
         bone_buffer,
         parent_skinning.bone_matrix_buffer_offset,
       )

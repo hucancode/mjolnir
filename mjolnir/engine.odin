@@ -409,7 +409,7 @@ update :: proc(self: ^Engine) -> bool {
     self.last_update_timestamp = time.now()
     return true
   }
-  params := gpu.mutable_buffer_get(&self.render.particles.params_buffer, 0)
+  params := gpu.get(&self.render.particles.params_buffer, 0)
   params.delta_time = delta_time
   params.emitter_count = u32(
     min(len(self.rm.emitters.entries), resources.MAX_EMITTERS),

@@ -891,7 +891,7 @@ init_node_data_buffer :: proc(
     MAX_NODES_IN_SCENE,
     {.STORAGE_BUFFER},
   ) or_return
-  node_slice := gpu.mutable_buffer_get_all(&manager.node_data_buffer)
+  node_slice := gpu.get_all(&manager.node_data_buffer)
   slice.fill(
     node_slice,
     NodeData {
@@ -1023,7 +1023,7 @@ init_emitter_buffer :: proc(
     MAX_EMITTERS,
     {.STORAGE_BUFFER},
   ) or_return
-  emitters := gpu.mutable_buffer_get_all(&manager.emitter_buffer)
+  emitters := gpu.get_all(&manager.emitter_buffer)
   for &emitter in emitters do emitter = {}
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -1149,7 +1149,7 @@ init_dynamic_light_data_buffers :: proc(
       MAX_LIGHTS,
       {.STORAGE_BUFFER},
     ) or_return
-    dynamic_data := gpu.mutable_buffer_get_all(
+    dynamic_data := gpu.get_all(
       &manager.dynamic_light_data_buffers[frame_idx],
     )
     for &data in dynamic_data {
@@ -1244,7 +1244,7 @@ init_forcefield_buffer :: proc(
     MAX_FORCE_FIELDS,
     {.STORAGE_BUFFER},
   ) or_return
-  forcefields := gpu.mutable_buffer_get_all(&manager.forcefield_buffer)
+  forcefields := gpu.get_all(&manager.forcefield_buffer)
   for &forcefield in forcefields do forcefield = {}
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -1313,7 +1313,7 @@ init_sprite_buffer :: proc(
     MAX_SPRITES,
     {.STORAGE_BUFFER},
   ) or_return
-  sprites := gpu.mutable_buffer_get_all(&manager.sprite_buffer)
+  sprites := gpu.get_all(&manager.sprite_buffer)
   for &sprite in sprites do sprite = {}
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {

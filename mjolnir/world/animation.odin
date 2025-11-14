@@ -58,7 +58,7 @@ update_skeletal_animations :: proc(
     for &layer in skinning.layers {
       anim.layer_update(&layer, delta_time)
     }
-    matrices_ptr := gpu.mutable_buffer_get(
+    matrices_ptr := gpu.get(
       bone_buffer,
       skinning.bone_matrix_buffer_offset,
     )

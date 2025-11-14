@@ -122,7 +122,7 @@ spherical_camera_upload_data :: proc(
   camera_index: u32,
   frame_index: u32 = 0,
 ) {
-  dst := gpu.mutable_buffer_get(
+  dst := gpu.get(
     &manager.spherical_camera_buffers[frame_index],
     camera_index,
   )

@@ -107,6 +107,15 @@ align_up :: proc(value: int, alignment: int) -> int {
   return (value + alignment - 1) & ~(alignment - 1)
 }
 
+get :: proc {
+  mutable_buffer_get,
+}
+
+get_all :: proc {
+  mutable_buffer_get_all,
+  immutable_buffer_get_all,
+}
+
 write :: proc {
   mutable_buffer_write_single,
   mutable_buffer_write_multi,
@@ -147,13 +156,6 @@ mutable_buffer_get :: proc(buffer: ^MutableBuffer($T), index: u32 = 0) -> ^T {
 mutable_buffer_get_all :: proc(buffer: ^MutableBuffer($T)) -> []T {
   element_count := buffer.bytes_count / buffer.element_size
   return slice.from_ptr(buffer.mapped, element_count)
-}
-
-mutable_buffer_offset_of :: proc(
-  buffer: ^MutableBuffer($T),
-  index: u32,
-) -> u32 {
-  return index * u32(buffer.element_size)
 }
 
 mutable_buffer_destroy :: proc(device: vk.Device, buffer: ^MutableBuffer($T)) {
@@ -214,14 +216,7 @@ immutable_buffer_write_multi :: proc(
   return end_single_time_command(gctx, &cmd_buffer)
 }
 
-immutable_buffer_offset_of :: proc(
-  buffer: ^ImmutableBuffer($T),
-  index: u32,
-) -> u32 {
-  return index * u32(buffer.element_size)
-}
-
-readback :: proc(
+immutable_buffer_get_all :: proc(
   gctx: ^GPUContext,
   buffer: ^ImmutableBuffer($T),
   output: []T,
@@ -274,35 +269,6 @@ create_mutable_buffer :: proc(
 ) {
   buffer = malloc_mutable_buffer(gctx, T, count, usage) or_return
   if data != nil do mem.copy(buffer.mapped, data, buffer.bytes_count)
-  return buffer, .SUCCESS
-}
-
-create_immutable_buffer :: proc(
-  gctx: ^GPUContext,
-  $T: typeid,
-  count: int,
-  usage: vk.BufferUsageFlags,
-  data: rawptr = nil,
-) -> (
-  buffer: ImmutableBuffer(T),
-  ret: vk.Result,
-) {
-  buffer = malloc_immutable_buffer(gctx, T, count, usage) or_return
-  if data == nil do return buffer, .SUCCESS
-  staging := malloc_mutable_buffer(gctx, T, count, {.TRANSFER_SRC}) or_return
-  defer mutable_buffer_destroy(gctx.device, &staging)
-  mem.copy(staging.mapped, data, staging.bytes_count)
-  cmd_buffer := begin_single_time_command(gctx) or_return
-  region := vk.BufferCopy {
-    size = vk.DeviceSize(staging.bytes_count),
-  }
-  vk.CmdCopyBuffer(cmd_buffer, staging.buffer, buffer.buffer, 1, &region)
-  log.infof(
-    "Copying staging 0x%x to immutable 0x%x",
-    staging.buffer,
-    buffer.buffer,
-  )
-  end_single_time_command(gctx, &cmd_buffer) or_return
   return buffer, .SUCCESS
 }
 

@@ -193,12 +193,12 @@ update_light_camera :: proc(
   for handle, light_index in manager.active_lights {
     light := cont.get(manager.lights, handle) or_continue
     // Get light's world transform from node
-    node_data := gpu.mutable_buffer_get(
+    node_data := gpu.get(
       &manager.node_data_buffer,
       light.node_index,
     )
     if node_data == nil do continue
-    world_matrix := gpu.mutable_buffer_get(
+    world_matrix := gpu.get(
       &manager.world_matrix_buffer,
       light.node_index,
     )
