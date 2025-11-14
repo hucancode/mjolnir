@@ -686,7 +686,7 @@ construct_scene :: proc(
             )
             if init_result != .SUCCESS {
               log.error("Failed to initialize skinned mesh")
-              resources.mesh_destroy(mesh, gctx, rm)
+              resources.mesh_destroy(mesh, rm)
               cont.free(&rm.meshes, mesh_handle)
               continue
             }
@@ -702,7 +702,7 @@ construct_scene :: proc(
             gpu_result := resources.mesh_write_to_gpu(rm, mesh_handle, mesh)
             if gpu_result != .SUCCESS {
               log.error("Failed to write skinned mesh data to GPU")
-              resources.mesh_destroy(mesh, gctx, rm)
+              resources.mesh_destroy(mesh, rm)
               cont.free(&rm.meshes, mesh_handle)
               continue
             }

@@ -180,7 +180,9 @@ init :: proc(
     &self.projection_descriptor_set,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup
+    // descriptor sets are auto-freed when pool is destroyed
+    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
+    self.projection_layout = 0
   }
   self.texture_layout = rm.textures_set_layout
   self.texture_descriptor_set = rm.textures_descriptor_set
@@ -199,7 +201,10 @@ init :: proc(
     &self.pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+    self.pipeline_layout = 0
+    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
+    self.projection_layout = 0
   }
   color_formats := [?]vk.Format{color_format}
   rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
@@ -234,7 +239,12 @@ init :: proc(
     &self.pipeline,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+    self.pipeline = 0
+    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+    self.pipeline_layout = 0
+    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
+    self.projection_layout = 0
   }
   log.infof("init UI texture...")
   self.atlas_handle, _ = resources.create_texture_from_pixels(
@@ -246,7 +256,13 @@ init :: proc(
     .R8_UNORM,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    // texture is managed by resource manager, no manual cleanup needed
+    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+    self.pipeline = 0
+    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+    self.pipeline_layout = 0
+    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
+    self.projection_layout = 0
   }
   log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
   log.infof("init UI vertex buffer...")
@@ -257,7 +273,14 @@ init :: proc(
     {.VERTEX_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
+    // texture is managed by resource manager, no manual cleanup needed
+    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+    self.pipeline = 0
+    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+    self.pipeline_layout = 0
+    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
+    self.projection_layout = 0
   }
   log.infof("init UI indices buffer...")
   self.index_buffer = gpu.create_mutable_buffer(
@@ -267,7 +290,15 @@ init :: proc(
     {.INDEX_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
+    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
+    // texture is managed by resource manager, no manual cleanup needed
+    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+    self.pipeline = 0
+    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+    self.pipeline_layout = 0
+    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
+    self.projection_layout = 0
   }
   ortho :=
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
@@ -281,7 +312,16 @@ init :: proc(
     raw_data(&ortho),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.proj_buffer)
+    gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
+    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
+    // texture is managed by resource manager, no manual cleanup needed
+    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+    self.pipeline = 0
+    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+    self.pipeline_layout = 0
+    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
+    self.projection_layout = 0
   }
   buffer_info := vk.DescriptorBufferInfo {
     buffer = self.proj_buffer.buffer,

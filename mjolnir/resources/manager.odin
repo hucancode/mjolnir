@@ -408,7 +408,7 @@ shutdown :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
   delete(manager.image_cube_buffers.free_indices)
   for &entry in manager.meshes.entries {
     if entry.generation > 0 && entry.active {
-      mesh_destroy(&entry.item, gctx, manager)
+      mesh_destroy(&entry.item, manager)
     }
   }
   delete(manager.meshes.entries)

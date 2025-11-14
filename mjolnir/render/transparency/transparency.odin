@@ -44,7 +44,12 @@ init :: proc(
     raw_data(self.commands[:]),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   log.info("Initializing transparent renderer")
   if rm.geometry_pipeline_layout == 0 {
@@ -95,7 +100,7 @@ init :: proc(
     quad_geom,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    resources.mesh_destroy_handle(gctx.device, rm, mesh_handle)
   }
   self.sprite_quad_mesh = mesh_handle
   log.infof(
@@ -115,15 +120,15 @@ init :: proc(
     rm.geometry_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, self.transparent_pipeline, nil)
   }
   create_wireframe_pipelines(gctx, self, rm.geometry_pipeline_layout) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
   }
   create_sprite_pipeline(gctx, self, rm.geometry_pipeline_layout) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, self.sprite_pipeline, nil)
   }
   log.info("Transparent renderer initialized successfully")
   return .SUCCESS

@@ -365,7 +365,12 @@ init :: proc(
     raw_data(self.commands[:]),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)

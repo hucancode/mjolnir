@@ -393,7 +393,7 @@ init :: proc(
     &self.projection_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
   }
   vk.AllocateDescriptorSets(
     gctx.device,
@@ -406,7 +406,7 @@ init :: proc(
     &self.projection_descriptor_set,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    // Descriptor sets are auto-freed when descriptor pool is destroyed
   }
   set_layouts := [?]vk.DescriptorSetLayout {
     self.projection_layout,
@@ -423,7 +423,7 @@ init :: proc(
     &self.pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   }
   color_formats := [?]vk.Format{color_format}
   rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
@@ -458,7 +458,7 @@ init :: proc(
     &self.pipeline,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   }
   // Create white 1x1 texture as default
   log.infof("init UI default texture...")
@@ -472,7 +472,7 @@ init :: proc(
     .R8G8B8A8_UNORM,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    resources.destroy_texture(gctx.device, rm, self.atlas_handle)
   }
   log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
   log.infof("init UI buffers...")
@@ -491,7 +491,10 @@ init :: proc(
     ) or_return
   }
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    for j in 0 ..< MAX_FRAMES_IN_FLIGHT {
+      gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[j])
+      gpu.mutable_buffer_destroy(gctx.device, &self.index_buffers[j])
+    }
   }
   ortho :=
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
@@ -504,7 +507,7 @@ init :: proc(
     raw_data(&ortho),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.proj_buffer)
   }
   buffer_info := vk.DescriptorBufferInfo {
     buffer = self.proj_buffer.buffer,
@@ -571,7 +574,7 @@ init :: proc(
     .R8G8B8A8_UNORM,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    resources.destroy_texture(gctx.device, rm, self.text_atlas_handle)
   }
   self.atlas_initialized = true
   log.infof(
@@ -587,7 +590,7 @@ init :: proc(
     {.VERTEX_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.text_vertex_buffer)
   }
   self.text_index_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -596,7 +599,7 @@ init :: proc(
     {.INDEX_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.text_index_buffer)
   }
   log.infof("retained UI initialized")
   return .SUCCESS

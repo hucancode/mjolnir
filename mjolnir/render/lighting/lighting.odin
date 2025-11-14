@@ -161,7 +161,12 @@ init :: proc(
     raw_data(self.commands[:]),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   log.debugf("renderer lighting init %d x %d", width, height)
   ambient_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
@@ -185,7 +190,13 @@ init :: proc(
     &self.ambient_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   ambient_vert_module := gpu.create_shader_module(
     gctx.device,
@@ -278,7 +289,14 @@ init :: proc(
     &self.ambient_pipeline,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   environment_map: ^gpu.Image
   self.environment_map, environment_map = resources.create_texture_from_path(
@@ -291,7 +309,18 @@ init :: proc(
     true,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
+       freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   self.environment_max_lod = 8.0 // default fallback
   if environment_map != nil {
@@ -310,7 +339,21 @@ init :: proc(
     TEXTURE_LUT_GGX,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    if item, freed := cont.free(&rm.image_2d_buffers, brdf_handle); freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
+       freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0
@@ -340,7 +383,22 @@ init :: proc(
     &self.lighting_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
+    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
+       freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   lighting_vert_module := gpu.create_shader_module(
     gctx.device,
@@ -443,7 +501,23 @@ init :: proc(
     &self.lighting_pipeline,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
+    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
+       freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   log.info("Lighting pipeline initialized successfully")
   self.sphere_mesh, _ = resources.create_mesh(
@@ -452,7 +526,26 @@ init :: proc(
     geometry.make_sphere(segments = 64, rings = 64),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    if mesh, freed := cont.free(&rm.meshes, self.sphere_mesh); freed {
+      resources.mesh_destroy(mesh, rm)
+    }
+    vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
+    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
+       freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   self.cone_mesh, _ = resources.create_mesh(
     gctx,
@@ -460,7 +553,29 @@ init :: proc(
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    if mesh, freed := cont.free(&rm.meshes, self.cone_mesh); freed {
+      resources.mesh_destroy(mesh, rm)
+    }
+    if mesh, freed := cont.free(&rm.meshes, self.sphere_mesh); freed {
+      resources.mesh_destroy(mesh, rm)
+    }
+    vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
+    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
+       freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   self.triangle_mesh, _ = resources.create_mesh(
     gctx,
@@ -468,7 +583,32 @@ init :: proc(
     geometry.make_fullscreen_triangle(),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    if mesh, freed := cont.free(&rm.meshes, self.triangle_mesh); freed {
+      resources.mesh_destroy(mesh, rm)
+    }
+    if mesh, freed := cont.free(&rm.meshes, self.cone_mesh); freed {
+      resources.mesh_destroy(mesh, rm)
+    }
+    if mesh, freed := cont.free(&rm.meshes, self.sphere_mesh); freed {
+      resources.mesh_destroy(mesh, rm)
+    }
+    vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
+    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
+       freed {
+      gpu.image_destroy(gctx.device, item)
+    }
+    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   log.info("Light volume meshes initialized")
   return .SUCCESS

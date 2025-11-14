@@ -87,19 +87,26 @@ visibility_system_init :: proc(
   system.depth_bias = 0.0001
   create_descriptor_layouts(system, gctx, rm) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyDescriptorSetLayout(gctx.device, rm.visibility_depth_reduce_descriptor_layout, nil)
+    vk.DestroyDescriptorSetLayout(gctx.device, rm.visibility_descriptor_layout, nil)
+    vk.DestroyDescriptorSetLayout(gctx.device, rm.visibility_sphere_descriptor_layout, nil)
   }
   create_compute_pipelines(system, gctx, rm) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, system.depth_reduce_layout, nil)
+    vk.DestroyPipeline(gctx.device, system.depth_reduce_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, system.cull_layout, nil)
+    vk.DestroyPipeline(gctx.device, system.cull_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, system.sphere_cull_layout, nil)
+    vk.DestroyPipeline(gctx.device, system.sphere_cull_pipeline, nil)
   }
   create_depth_pipeline(system, gctx, rm) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, system.depth_pipeline, nil)
   }
   create_spherical_depth_pipeline(system, gctx, rm) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, system.spherical_depth_pipeline, nil)
   }
   return .SUCCESS
 }

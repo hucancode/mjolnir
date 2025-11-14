@@ -421,3 +421,13 @@ create_checkerboard_texture :: proc(
     int(size),
   )
 }
+
+destroy_texture :: proc(device: vk.Device, manager: ^Manager, handle: Handle) {
+  if texture := cont.get(manager.image_2d_buffers, handle); texture != nil {
+    gpu.image_destroy(device, texture)
+    cont.free(&manager.image_2d_buffers, handle)
+  } else if cube_texture := cont.get(manager.image_cube_buffers, handle); cube_texture != nil {
+    gpu.cube_depth_texture_destroy(device, cube_texture)
+    cont.free(&manager.image_cube_buffers, handle)
+  }
+}

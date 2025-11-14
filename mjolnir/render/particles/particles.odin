@@ -282,7 +282,12 @@ init :: proc(
     raw_data(self.commands[:]),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_mutable_buffer(
@@ -292,7 +297,7 @@ init :: proc(
     {.UNIFORM_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.params_buffer)
   }
   self.particle_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -301,7 +306,7 @@ init :: proc(
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
   }
   self.particle_counter_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -310,25 +315,32 @@ init :: proc(
     {.STORAGE_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_counter_buffer)
   }
   self.emitter_bindless_descriptor_set = rm.emitter_buffer_descriptor_set
   self.forcefield_bindless_descriptor_set = rm.forcefield_buffer_descriptor_set
   create_emitter_pipeline(gctx, self, rm) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyDescriptorSetLayout(gctx.device, self.emitter_descriptor_set_layout, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
+    vk.DestroyPipeline(gctx.device, self.emitter_pipeline, nil)
   }
   create_compact_pipeline(gctx, self) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyDescriptorSetLayout(gctx.device, self.compact_descriptor_set_layout, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
+    vk.DestroyPipeline(gctx.device, self.compact_pipeline, nil)
   }
   create_compute_pipeline(gctx, self, rm) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyDescriptorSetLayout(gctx.device, self.compute_descriptor_set_layout, nil)
+    vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
+    vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
   }
   create_render_pipeline(gctx, self, rm) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
+    vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
   }
   return .SUCCESS
 }
@@ -394,7 +406,7 @@ create_emitter_pipeline :: proc(
     &self.emitter_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
   }
   emitter_particle_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.particle_buffer.buffer,
@@ -503,7 +515,7 @@ create_compute_pipeline :: proc(
     &self.compute_descriptor_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyDescriptorSetLayout(gctx.device, self.compute_descriptor_set_layout, nil)
   }
   vk.AllocateDescriptorSets(
     gctx.device,
@@ -516,7 +528,7 @@ create_compute_pipeline :: proc(
     &self.compute_descriptor_set,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    // Descriptor sets are auto-freed when descriptor pool is destroyed
   }
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
     self.compute_descriptor_set_layout,
@@ -534,7 +546,7 @@ create_compute_pipeline :: proc(
     &self.compute_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
   }
   params_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.params_buffer.buffer,
@@ -648,7 +660,7 @@ create_compact_pipeline :: proc(
     &self.compact_descriptor_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyDescriptorSetLayout(gctx.device, self.compact_descriptor_set_layout, nil)
   }
   vk.AllocateDescriptorSets(
     gctx.device,
@@ -661,7 +673,7 @@ create_compact_pipeline :: proc(
     &self.compact_descriptor_set,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    // Descriptor sets are auto-freed when descriptor pool is destroyed
   }
   vk.CreatePipelineLayout(
     gctx.device,
@@ -674,7 +686,7 @@ create_compact_pipeline :: proc(
     &self.compact_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
   }
   self.compact_particle_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -683,7 +695,7 @@ create_compact_pipeline :: proc(
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
   }
   self.draw_command_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -692,7 +704,7 @@ create_compact_pipeline :: proc(
     {.STORAGE_BUFFER, .INDIRECT_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
   }
   compact_source_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.particle_buffer.buffer,
@@ -803,7 +815,7 @@ create_render_pipeline :: proc(
     &self.render_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
   }
   default_texture_handle, _ := resources.create_texture_from_data(
     gctx,
@@ -811,7 +823,7 @@ create_render_pipeline :: proc(
     TEXTURE_BLACK_CIRCLE,
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    resources.destroy_texture(gctx.device, rm, default_texture_handle)
   }
   self.default_texture_index = default_texture_handle.index
   vertex_binding := vk.VertexInputBindingDescription {

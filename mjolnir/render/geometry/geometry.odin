@@ -37,7 +37,12 @@ init :: proc(
     raw_data(self.commands[:]),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(self.commands)),
+      raw_data(self.commands[:]),
+    )
   }
   depth_format: vk.Format = .D32_SFLOAT
   if rm.geometry_pipeline_layout == 0 {

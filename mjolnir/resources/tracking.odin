@@ -107,7 +107,7 @@ purge_unused_meshes :: proc(
       }
       mesh, freed := cont.free(&manager.meshes, handle)
       if freed {
-        mesh_destroy(mesh, gctx, manager)
+        mesh_destroy(mesh, manager)
         purged_count += 1
       }
     }

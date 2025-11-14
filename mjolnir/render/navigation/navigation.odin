@@ -76,11 +76,24 @@ init :: proc(
     raw_data(renderer.commands[:]),
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(renderer.commands)),
+      raw_data(renderer.commands[:]),
+    )
   }
   create_pipeline(renderer, gctx, rm) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    vk.DestroyPipeline(gctx.device, renderer.pipeline, nil)
+    vk.DestroyPipeline(gctx.device, renderer.line_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, renderer.pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(renderer.commands)),
+      raw_data(renderer.commands[:]),
+    )
   }
   renderer.vertex_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -89,7 +102,16 @@ init :: proc(
     {.VERTEX_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &renderer.vertex_buffer)
+    vk.DestroyPipeline(gctx.device, renderer.pipeline, nil)
+    vk.DestroyPipeline(gctx.device, renderer.line_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, renderer.pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(renderer.commands)),
+      raw_data(renderer.commands[:]),
+    )
   }
   renderer.index_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -98,7 +120,17 @@ init :: proc(
     {.INDEX_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+    gpu.mutable_buffer_destroy(gctx.device, &renderer.index_buffer)
+    gpu.mutable_buffer_destroy(gctx.device, &renderer.vertex_buffer)
+    vk.DestroyPipeline(gctx.device, renderer.pipeline, nil)
+    vk.DestroyPipeline(gctx.device, renderer.line_pipeline, nil)
+    vk.DestroyPipelineLayout(gctx.device, renderer.pipeline_layout, nil)
+    vk.FreeCommandBuffers(
+      gctx.device,
+      gctx.command_pool,
+      u32(len(renderer.commands)),
+      raw_data(renderer.commands[:]),
+    )
   }
   renderer.path_vertex_buffer = gpu.create_mutable_buffer(
     gctx,

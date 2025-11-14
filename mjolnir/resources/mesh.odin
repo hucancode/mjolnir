@@ -53,7 +53,7 @@ Mesh :: struct {
   using meta:        ResourceMetadata,
 }
 
-mesh_destroy :: proc(self: ^Mesh, gctx: ^gpu.GPUContext, manager: ^Manager) {
+mesh_destroy :: proc(self: ^Mesh, manager: ^Manager) {
   manager_free_vertices(manager, self.vertex_allocation)
   manager_free_indices(manager, self.index_allocation)
   skin, has_skin := &self.skinning.?
@@ -669,4 +669,11 @@ mesh_write_to_gpu :: proc(
   }
   mesh_update_gpu_data(mesh)
   return gpu.write(&manager.mesh_data_buffer, &mesh.data, int(handle.index))
+}
+
+mesh_destroy_handle :: proc(device: vk.Device, manager: ^Manager, handle: Handle) {
+  if mesh, ok := cont.get(manager.meshes, handle); ok {
+    mesh_destroy(mesh, manager)
+    cont.free(&manager.meshes, handle)
+  }
 }
