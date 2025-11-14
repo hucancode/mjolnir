@@ -149,7 +149,7 @@ init :: proc(
   width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   vk.AllocateCommandBuffers(
     gctx.device,
     &vk.CommandBufferAllocateInfo {
@@ -160,6 +160,9 @@ init :: proc(
     },
     raw_data(self.commands[:]),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.debugf("renderer lighting init %d x %d", width, height)
   ambient_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
     rm.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
@@ -181,6 +184,9 @@ init :: proc(
     nil,
     &self.ambient_pipeline_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   ambient_vert_module := gpu.create_shader_module(
     gctx.device,
     SHADER_AMBIENT_VERT,
@@ -271,6 +277,9 @@ init :: proc(
     nil,
     &self.ambient_pipeline,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   environment_map: ^gpu.Image
   self.environment_map, environment_map = resources.create_texture_from_path(
     gctx,
@@ -281,6 +290,9 @@ init :: proc(
     {.SAMPLED},
     true,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.environment_max_lod = 8.0 // default fallback
   if environment_map != nil {
     self.environment_max_lod =
@@ -292,13 +304,13 @@ init :: proc(
       ) -
       1.0
   }
-  brdf_handle, _, brdf_ret := resources.create_texture_from_data(
+  brdf_handle, _ := resources.create_texture_from_data(
     gctx,
     rm,
     TEXTURE_LUT_GGX,
-  )
-  if brdf_ret != .SUCCESS {
-    return brdf_ret
+  ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
   }
   self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0
@@ -327,6 +339,9 @@ init :: proc(
     nil,
     &self.lighting_pipeline_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   lighting_vert_module := gpu.create_shader_module(
     gctx.device,
     SHADER_LIGHTING_VERT,
@@ -427,22 +442,34 @@ init :: proc(
     nil,
     &self.lighting_pipeline,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.info("Lighting pipeline initialized successfully")
   self.sphere_mesh, _ = resources.create_mesh(
     gctx,
     rm,
     geometry.make_sphere(segments = 64, rings = 64),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.cone_mesh, _ = resources.create_mesh(
     gctx,
     rm,
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.triangle_mesh, _ = resources.create_mesh(
     gctx,
     rm,
     geometry.make_fullscreen_triangle(),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.info("Light volume meshes initialized")
   return .SUCCESS
 }

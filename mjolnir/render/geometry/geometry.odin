@@ -25,7 +25,7 @@ init :: proc(
   gctx: ^gpu.GPUContext,
   width, height: u32,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   vk.AllocateCommandBuffers(
     gctx.device,
     &vk.CommandBufferAllocateInfo {
@@ -36,6 +36,9 @@ init :: proc(
     },
     raw_data(self.commands[:]),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   depth_format: vk.Format = .D32_SFLOAT
   if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED

@@ -93,7 +93,7 @@ renderer_init :: proc(
   swapchain_extent: vk.Extent2D,
   swapchain_format: vk.Format,
   dpi_scale: f32,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   main_camera_handle, main_camera_ptr, main_camera_ok := cont.alloc(
     &rm.cameras,
   )
@@ -101,7 +101,10 @@ renderer_init :: proc(
     log.error("Failed to allocate main camera")
     return .ERROR_INITIALIZATION_FAILED
   }
-  init_result := resources.camera_init(
+  defer if ret != .SUCCESS {
+    cont.free(&rm.cameras, main_camera_handle)
+  }
+  resources.camera_init(
     main_camera_ptr,
     gctx,
     rm,
@@ -115,12 +118,7 @@ renderer_init :: proc(
     math.PI * 0.5, // FOV
     0.1, // near plane
     100.0, // far plane
-  )
-  if init_result != .SUCCESS {
-    log.error("Failed to initialize main camera")
-    cont.free(&rm.cameras, main_camera_handle)
-    return .ERROR_INITIALIZATION_FAILED
-  }
+  ) or_return
   self.main_camera = main_camera_handle
   lighting.init(
     &self.lighting,

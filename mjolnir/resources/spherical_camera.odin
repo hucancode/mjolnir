@@ -116,8 +116,6 @@ spherical_camera_destroy :: proc(
 }
 
 // Upload camera data to GPU buffer
-// For spherical camera, we store 6 projection matrices (one for each cube face)
-// TODO: fix this, rework spherical camera data
 spherical_camera_upload_data :: proc(
   manager: ^Manager,
   camera: ^SphericalCamera,

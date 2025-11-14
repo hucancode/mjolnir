@@ -32,7 +32,7 @@ init :: proc(
   gctx: ^gpu.GPUContext,
   width, height: u32,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   vk.AllocateCommandBuffers(
     gctx.device,
     &vk.CommandBufferAllocateInfo {
@@ -43,6 +43,9 @@ init :: proc(
     },
     raw_data(self.commands[:]),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.info("Initializing transparent renderer")
   if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
@@ -86,14 +89,13 @@ init :: proc(
     indices  = indices,
     aabb     = geometry.aabb_from_vertices(vertices),
   }
-  mesh_handle, mesh_ptr, mesh_result := resources.create_mesh(
+  mesh_handle, mesh_ptr := resources.create_mesh(
     gctx,
     rm,
     quad_geom,
-  )
-  if mesh_result != .SUCCESS {
-    log.errorf("Failed to create sprite quad mesh: %v", mesh_result)
-    return .ERROR_INITIALIZATION_FAILED
+  ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
   }
   self.sprite_quad_mesh = mesh_handle
   log.infof(
@@ -112,8 +114,17 @@ init :: proc(
     self,
     rm.geometry_pipeline_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   create_wireframe_pipelines(gctx, self, rm.geometry_pipeline_layout) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   create_sprite_pipeline(gctx, self, rm.geometry_pipeline_layout) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.info("Transparent renderer initialized successfully")
   return .SUCCESS
 }

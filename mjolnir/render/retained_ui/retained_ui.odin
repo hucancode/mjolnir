@@ -269,7 +269,7 @@ init :: proc(
   width, height: u32,
   dpi_scale: f32 = 1.0,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   cont.init(&self.widgets, 1000)
   self.root_widgets = make([dynamic]WidgetHandle, 0, 100)
   self.dirty_widgets = make([dynamic]WidgetHandle, 0, 100)
@@ -392,6 +392,9 @@ init :: proc(
     nil,
     &self.projection_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   vk.AllocateDescriptorSets(
     gctx.device,
     &{
@@ -402,6 +405,9 @@ init :: proc(
     },
     &self.projection_descriptor_set,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   set_layouts := [?]vk.DescriptorSetLayout {
     self.projection_layout,
     rm.textures_set_layout,
@@ -416,6 +422,9 @@ init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   color_formats := [?]vk.Format{color_format}
   rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
@@ -448,6 +457,9 @@ init :: proc(
     nil,
     &self.pipeline,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   // Create white 1x1 texture as default
   log.infof("init UI default texture...")
   white_pixel := WHITE
@@ -459,6 +471,9 @@ init :: proc(
     1,
     .R8G8B8A8_UNORM,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
   log.infof("init UI buffers...")
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -475,6 +490,9 @@ init :: proc(
       {.INDEX_BUFFER},
     ) or_return
   }
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   ortho :=
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
     linalg.matrix4_scale(dpi_scale)
@@ -485,6 +503,9 @@ init :: proc(
     {.UNIFORM_BUFFER},
     raw_data(&ortho),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   buffer_info := vk.DescriptorBufferInfo {
     buffer = self.proj_buffer.buffer,
     range  = size_of(matrix[4, 4]f32),
@@ -549,6 +570,9 @@ init :: proc(
     self.font_ctx.height,
     .R8G8B8A8_UNORM,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.atlas_initialized = true
   log.infof(
     "Text atlas created at bindless index %d",
@@ -562,12 +586,18 @@ init :: proc(
     TEXT_MAX_VERTICES,
     {.VERTEX_BUFFER},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.text_index_buffer = gpu.create_mutable_buffer(
     gctx,
     u32,
     TEXT_MAX_INDICES,
     {.INDEX_BUFFER},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.infof("retained UI initialized")
   return .SUCCESS
 }

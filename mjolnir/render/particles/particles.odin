@@ -270,7 +270,7 @@ init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   vk.AllocateCommandBuffers(
     gctx.device,
     &vk.CommandBufferAllocateInfo {
@@ -281,6 +281,9 @@ init :: proc(
     },
     raw_data(self.commands[:]),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -288,24 +291,45 @@ init :: proc(
     1,
     {.UNIFORM_BUFFER},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.particle_buffer = gpu.create_mutable_buffer(
     gctx,
     Particle,
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.particle_counter_buffer = gpu.create_mutable_buffer(
     gctx,
     u32,
     1,
     {.STORAGE_BUFFER},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.emitter_bindless_descriptor_set = rm.emitter_buffer_descriptor_set
   self.forcefield_bindless_descriptor_set = rm.forcefield_buffer_descriptor_set
   create_emitter_pipeline(gctx, self, rm) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   create_compact_pipeline(gctx, self) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   create_compute_pipeline(gctx, self, rm) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   create_render_pipeline(gctx, self, rm) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   return .SUCCESS
 }
 
@@ -313,7 +337,7 @@ create_emitter_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   emitter_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -369,6 +393,9 @@ create_emitter_pipeline :: proc(
     nil,
     &self.emitter_pipeline_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   emitter_particle_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.particle_buffer.buffer,
     range  = vk.DeviceSize(self.particle_buffer.bytes_count),
@@ -444,7 +471,7 @@ create_compute_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   compute_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -475,6 +502,9 @@ create_compute_pipeline :: proc(
     nil,
     &self.compute_descriptor_set_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   vk.AllocateDescriptorSets(
     gctx.device,
     &{
@@ -485,6 +515,9 @@ create_compute_pipeline :: proc(
     },
     &self.compute_descriptor_set,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
     self.compute_descriptor_set_layout,
     rm.forcefield_buffer_set_layout,
@@ -500,6 +533,9 @@ create_compute_pipeline :: proc(
     nil,
     &self.compute_pipeline_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   params_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.params_buffer.buffer,
     range  = vk.DeviceSize(self.params_buffer.bytes_count),
@@ -574,7 +610,7 @@ create_compute_pipeline :: proc(
 create_compact_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   compact_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -611,6 +647,9 @@ create_compact_pipeline :: proc(
     nil,
     &self.compact_descriptor_set_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   vk.AllocateDescriptorSets(
     gctx.device,
     &{
@@ -621,6 +660,9 @@ create_compact_pipeline :: proc(
     },
     &self.compact_descriptor_set,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   vk.CreatePipelineLayout(
     gctx.device,
     &{
@@ -631,18 +673,27 @@ create_compact_pipeline :: proc(
     nil,
     &self.compact_pipeline_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.compact_particle_buffer = gpu.create_mutable_buffer(
     gctx,
     Particle,
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.draw_command_buffer = gpu.create_mutable_buffer(
     gctx,
     vk.DrawIndirectCommand,
     1,
     {.STORAGE_BUFFER, .INDIRECT_BUFFER},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   compact_source_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.particle_buffer.buffer,
     range  = vk.DeviceSize(self.particle_buffer.bytes_count),
@@ -730,7 +781,7 @@ create_render_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
     rm.camera_buffer_set_layout, // set = 0 for bindless camera buffer
     rm.textures_set_layout, // set = 1 for textures
@@ -751,13 +802,16 @@ create_render_pipeline :: proc(
     nil,
     &self.render_pipeline_layout,
   ) or_return
-  default_texture_handle, _, ret := resources.create_texture_from_data(
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
+  default_texture_handle, _ := resources.create_texture_from_data(
     gctx,
     rm,
     TEXTURE_BLACK_CIRCLE,
-  )
-  if ret != .SUCCESS {
-    return ret
+  ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
   }
   self.default_texture_index = default_texture_handle.index
   vertex_binding := vk.VertexInputBindingDescription {

@@ -74,26 +74,34 @@ VisibilitySystem :: struct {
   stats_enabled:            bool,
 }
 
-draw_command_stride :: proc() -> u32 {
-  return u32(size_of(vk.DrawIndexedIndirectCommand))
-}
-
 visibility_system_init :: proc(
   system: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
   depth_width: u32,
   depth_height: u32,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   system.max_draws = resources.MAX_NODES_IN_SCENE
   system.depth_width = depth_width
   system.depth_height = depth_height
   system.depth_bias = 0.0001
   create_descriptor_layouts(system, gctx, rm) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   create_compute_pipelines(system, gctx, rm) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   create_depth_pipeline(system, gctx, rm) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   create_spherical_depth_pipeline(system, gctx, rm) or_return
-  return vk.Result.SUCCESS
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
+  return .SUCCESS
 }
 
 visibility_system_shutdown :: proc(
@@ -187,7 +195,6 @@ visibility_system_dispatch_pyramid :: proc(
     command_buffer,
     camera,
     target_frame_index,
-    rm,
   )
   if system.stats_enabled {
     log_culling_stats(system, camera, camera_index, target_frame_index)
@@ -526,7 +533,7 @@ create_descriptor_layouts :: proc(
     nil,
     &rm.visibility_depth_reduce_descriptor_layout,
   ) or_return
-  return vk.Result.SUCCESS
+  return .SUCCESS
 }
 
 @(private)
@@ -648,7 +655,7 @@ create_compute_pipelines :: proc(
     nil,
     &system.depth_reduce_pipeline,
   ) or_return
-  return vk.Result.SUCCESS
+  return .SUCCESS
 }
 
 @(private)
@@ -765,7 +772,7 @@ create_depth_pipeline :: proc(
     nil,
     &system.depth_pipeline,
   ) or_return
-  return vk.Result.SUCCESS
+  return .SUCCESS
 }
 
 @(private)
@@ -905,7 +912,7 @@ create_spherical_depth_pipeline :: proc(
     nil,
     &system.spherical_depth_pipeline,
   ) or_return
-  return vk.Result.SUCCESS
+  return .SUCCESS
 }
 
 @(private)
@@ -1028,7 +1035,7 @@ render_depth_pass :: proc(
       camera.late_draw_count[frame_index].buffer,
       0, // count offset
       system.max_draws,
-      draw_command_stride(),
+      u32(size_of(vk.DrawIndexedIndirectCommand)),
     )
   }
   vk.CmdEndRendering(command_buffer)
@@ -1066,7 +1073,6 @@ build_depth_pyramid :: proc(
   command_buffer: vk.CommandBuffer,
   camera: ^resources.Camera,
   target_frame_index: u32, // Frame N builds pyramid[N] from depth[N-1] (via descriptors)
-  rm: ^resources.Manager,
 ) {
   vk.CmdBindPipeline(command_buffer, .COMPUTE, system.depth_reduce_pipeline)
   // Generate ALL mip levels using the same shader
@@ -1275,7 +1281,7 @@ render_spherical_depth_pass :: proc(
       camera.draw_count.buffer,
       0, // count offset
       system.max_draws,
-      draw_command_stride(),
+      u32(size_of(vk.DrawIndexedIndirectCommand)),
     )
   }
   vk.CmdEndRendering(command_buffer)

@@ -353,7 +353,7 @@ init :: proc(
   color_format: vk.Format,
   width, height: u32,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   vk.AllocateCommandBuffers(
     gctx.device,
     &vk.CommandBufferAllocateInfo {
@@ -364,6 +364,9 @@ init :: proc(
     },
     raw_data(self.commands[:]),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
   vert_module := gpu.create_shader_module(

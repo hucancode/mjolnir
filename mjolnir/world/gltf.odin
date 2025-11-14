@@ -684,7 +684,7 @@ construct_scene :: proc(
               rm,
               geometry_data.geometry,
             )
-            if init_result != vk.Result.SUCCESS {
+            if init_result != .SUCCESS {
               log.error("Failed to initialize skinned mesh")
               resources.mesh_destroy(mesh, gctx, rm)
               cont.free(&rm.meshes, mesh_handle)
@@ -700,7 +700,7 @@ construct_scene :: proc(
             skinning.root_bone_index = skin_data.root_bone_idx
             resources.compute_bone_lengths(skinning)
             gpu_result := resources.mesh_write_to_gpu(rm, mesh_handle, mesh)
-            if gpu_result != vk.Result.SUCCESS {
+            if gpu_result != .SUCCESS {
               log.error("Failed to write skinned mesh data to GPU")
               resources.mesh_destroy(mesh, gctx, rm)
               cont.free(&rm.meshes, mesh_handle)

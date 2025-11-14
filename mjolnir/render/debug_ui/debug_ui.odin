@@ -50,7 +50,7 @@ init :: proc(
   width, height: u32,
   dpi_scale: f32 = 1.0,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   mu.init(&self.ctx)
   self.ctx.text_width = mu.default_atlas_text_width
   self.ctx.text_height = mu.default_atlas_text_height
@@ -165,6 +165,10 @@ init :: proc(
     nil,
     &self.projection_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
+    self.projection_layout = 0
+  }
   vk.AllocateDescriptorSets(
     gctx.device,
     &{
@@ -175,6 +179,9 @@ init :: proc(
     },
     &self.projection_descriptor_set,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup
+  }
   self.texture_layout = rm.textures_set_layout
   self.texture_descriptor_set = rm.textures_descriptor_set
   set_layouts := [?]vk.DescriptorSetLayout {
@@ -191,6 +198,9 @@ init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   color_formats := [?]vk.Format{color_format}
   rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
@@ -223,6 +233,9 @@ init :: proc(
     nil,
     &self.pipeline,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.infof("init UI texture...")
   self.atlas_handle, _ = resources.create_texture_from_pixels(
     gctx,
@@ -232,6 +245,9 @@ init :: proc(
     mu.DEFAULT_ATLAS_HEIGHT,
     .R8_UNORM,
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
   log.infof("init UI vertex buffer...")
   self.vertex_buffer = gpu.create_mutable_buffer(
@@ -240,6 +256,9 @@ init :: proc(
     UI_MAX_VERTICES,
     {.VERTEX_BUFFER},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   log.infof("init UI indices buffer...")
   self.index_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -247,6 +266,9 @@ init :: proc(
     UI_MAX_INDICES,
     {.INDEX_BUFFER},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   ortho :=
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
     linalg.matrix4_scale(dpi_scale)
@@ -258,6 +280,9 @@ init :: proc(
     {.UNIFORM_BUFFER},
     raw_data(&ortho),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   buffer_info := vk.DescriptorBufferInfo {
     buffer = self.proj_buffer.buffer,
     range  = size_of(matrix[4, 4]f32),

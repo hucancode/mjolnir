@@ -111,7 +111,7 @@ get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
   return sw
 }
 
-init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
+init :: proc(self: ^Engine, width, height: u32, title: string) -> (ret: vk.Result) {
   context.user_ptr = self
   g_context = context
   // glfw.SetErrorCallback(glfw_error_callback)
@@ -164,6 +164,14 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     },
     raw_data(self.command_buffers[:]),
   ) or_return
+  defer if ret != .SUCCESS {
+    vk.FreeCommandBuffers(
+      self.gctx.device,
+      self.gctx.command_pool,
+      u32(len(self.command_buffers)),
+      raw_data(self.command_buffers[:]),
+    )
+  }
   if pool, ok := self.gctx.compute_command_pool.?; ok {
     vk.AllocateCommandBuffers(
       self.gctx.device,
@@ -175,6 +183,16 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
       },
       raw_data(self.compute_command_buffers[:]),
     ) or_return
+  }
+  defer if ret != .SUCCESS {
+    if pool, ok := self.gctx.compute_command_pool.?; ok {
+      vk.FreeCommandBuffers(
+        self.gctx.device,
+        pool,
+        u32(len(self.compute_command_buffers)),
+        raw_data(self.compute_command_buffers[:]),
+      )
+    }
   }
   renderer_init(
     &self.render,

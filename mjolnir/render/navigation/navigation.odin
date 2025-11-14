@@ -57,7 +57,7 @@ init :: proc(
   renderer: ^Renderer,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
-) -> vk.Result {
+) -> (ret: vk.Result) {
   renderer.enabled = true
   renderer.color_mode = .Random_Colors
   renderer.debug_mode = false
@@ -75,19 +75,31 @@ init :: proc(
     },
     raw_data(renderer.commands[:]),
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   create_pipeline(renderer, gctx, rm) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   renderer.vertex_buffer = gpu.create_mutable_buffer(
     gctx,
     Vertex,
     16384,
     {.VERTEX_BUFFER},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   renderer.index_buffer = gpu.create_mutable_buffer(
     gctx,
     u32,
     32768,
     {.INDEX_BUFFER},
   ) or_return
+  defer if ret != .SUCCESS {
+    // TODO: cleanup on error
+  }
   renderer.path_vertex_buffer = gpu.create_mutable_buffer(
     gctx,
     Vertex,
