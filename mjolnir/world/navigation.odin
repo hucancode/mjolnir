@@ -95,7 +95,7 @@ add_mesh_to_collector :: proc(
   vertex_offset := i32(len(collector.vertices))
   vertex_count := int(mesh.vertex_allocation.count)
   vertices := make([]geometry.Vertex, vertex_count, context.temp_allocator)
-  ret := gpu.immutable_buffer_read(
+  ret := gpu.readback(
     gctx,
     &rm.vertex_buffer,
     vertices,
@@ -112,7 +112,7 @@ add_mesh_to_collector :: proc(
   }
   index_count := int(mesh.index_allocation.count)
   indices := make([]u32, index_count, context.temp_allocator)
-  ret = gpu.immutable_buffer_read(
+  ret = gpu.readback(
     gctx,
     &rm.index_buffer,
     indices,

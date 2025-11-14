@@ -221,7 +221,7 @@ immutable_buffer_offset_of :: proc(
   return index * u32(buffer.element_size)
 }
 
-immutable_buffer_read :: proc(
+readback :: proc(
   gctx: ^GPUContext,
   buffer: ^ImmutableBuffer($T),
   output: []T,
@@ -273,9 +273,7 @@ create_mutable_buffer :: proc(
   ret: vk.Result,
 ) {
   buffer = malloc_mutable_buffer(gctx, T, count, usage) or_return
-  if data != nil {
-    mem.copy(buffer.mapped, data, buffer.bytes_count)
-  }
+  if data != nil do mem.copy(buffer.mapped, data, buffer.bytes_count)
   return buffer, .SUCCESS
 }
 

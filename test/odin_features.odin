@@ -172,6 +172,25 @@ delete_unallocated_slice :: proc(t: ^testing.T) {
   delete(arr)
 }
 
+@(test)
+err_defer :: proc(t: ^testing.T) {
+    job1 :: proc() -> bool {
+        return true
+    }
+    job2 :: proc() -> bool {
+        return false
+    }
+    do_all :: proc() -> (ok: bool) {
+        ok = true
+        log.info("expecting job 1 clean up to appear!")
+        job1() or_return
+        defer if !ok do log.info("job 1 clean up")
+        job2() or_return
+        return
+    }
+    do_all()
+}
+
 // @(test)
 loop_through_unallocated_slice :: proc(t: ^testing.T) {
   arr: []u32
@@ -185,7 +204,7 @@ loop_through_unallocated_slice :: proc(t: ^testing.T) {
 copy_to_unallocated_slice :: proc(t: ^testing.T) {
   src: []u32 = {1, 2, 3}
   dst: []u32
-  mem.copy(raw_data(dst), raw_data(src), min(len(src), len(dst)))
+  mem.copy(raw_data(dst), raw_data(src), min(slice.size(src), slice.size(dst)))
   testing.expect_value(t, len(dst), 0)
 }
 
@@ -193,7 +212,7 @@ copy_to_unallocated_slice :: proc(t: ^testing.T) {
 copy_from_unallocated_slice :: proc(t: ^testing.T) {
   src: []u32
   dst: []u32 = {1, 2, 3}
-  mem.copy(raw_data(dst), raw_data(src), min(len(src), len(dst)))
+  mem.copy(raw_data(dst), raw_data(src), min(slice.size(src), slice.size(dst)))
   testing.expect_value(t, dst[0], 1)
   testing.expect_value(t, dst[1], 2)
   testing.expect_value(t, dst[2], 3)
@@ -206,9 +225,9 @@ get_pixel_data :: proc(t: ^testing.T) {
   defer delete(float_pixels)
   ptr := cast([^]u8)raw_data(float_pixels)
   data := ptr[:n * size_of(f32)]
-  testing.expect_value(t, len(data), len(float_pixels) * size_of(f32))
+  testing.expect_value(t, len(data), slice.size(float_pixels))
   data = slice.to_bytes(float_pixels)
-  testing.expect_value(t, len(data), len(float_pixels) * size_of(f32))
+  testing.expect_value(t, len(data), slice.size(float_pixels))
 }
 
 // @(test)

@@ -38,8 +38,8 @@ matrix_from_arr :: proc(a: [16]f32) -> (m: matrix[4, 4]f32) {
   m[0, 3], m[1, 3], m[2, 3], m[3, 3] = a[12], a[13], a[14], a[15]
   /*
   // this code is about 10 times slower than the above
-  for i in 0..<4 {
-      for j in 0..<4 {
+  #unroll for i in 0..<4 {
+      #unroll for j in 0..<4 {
           m[i, j] = a[j * 4 + i]
       }
   }
