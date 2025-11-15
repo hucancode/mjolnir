@@ -75,6 +75,8 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
   }
   if demo_state.use_procedural {
     create_demo_scene(engine)
+  } else {
+    create_obj_visualization_mesh(engine, "assets/nav_test.obj")
   }
   setup_navigation_mesh(engine)
   demo_state.start_pos = {-20, 0, -20}
@@ -210,7 +212,7 @@ create_obj_visualization_mesh :: proc(
           navigation_obstacle = false, // OBJ mesh should be walkable
         },
       )
-    demo_state.obj_mesh_node = get_node(engine, demo_state.obj_mesh_handle)
+    demo_state.obj_mesh_node = get_node(engine, demo_state.obj_node_handle)
   }
   if obj_spawn_ok {
     demo_state.obj_mesh_node.name = "obj_mesh"
