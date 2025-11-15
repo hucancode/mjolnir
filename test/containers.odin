@@ -295,6 +295,7 @@ test_slab_alloc_and_free :: proc(t: ^testing.T) {
   c.slab_init(&allocator, config)
   defer c.slab_destroy(&allocator)
 
+  idx0, _ := c.slab_alloc(&allocator, 0)
   idx1, _ := c.slab_alloc(&allocator, 4)
   idx2, _ := c.slab_alloc(&allocator, 4)
 
@@ -303,6 +304,8 @@ test_slab_alloc_and_free :: proc(t: ^testing.T) {
 
   // Free first allocation
   c.slab_free(&allocator, idx1)
+  // Free 0-sized allocation should be a no-op
+  c.slab_free(&allocator, idx0)
 
   // Allocate again - should reuse idx1
   idx3, ok := c.slab_alloc(&allocator, 4)

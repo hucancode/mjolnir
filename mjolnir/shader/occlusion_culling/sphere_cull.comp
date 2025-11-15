@@ -70,11 +70,11 @@ layout(set = 0, binding = 3) readonly buffer SphericalCameraBuffer {
     SphericalCamera cameras[];
 };
 
-layout(set = 0, binding = 5) buffer DrawCountBuffer {
+layout(set = 0, binding = 4) buffer DrawCountBuffer {
     uint draw_count;
 };
 
-layout(set = 0, binding = 6) buffer DrawCommandBuffer {
+layout(set = 0, binding = 5) buffer DrawCommandBuffer {
     DrawCommand commands[];
 };
 

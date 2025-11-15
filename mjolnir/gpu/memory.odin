@@ -47,7 +47,7 @@ malloc_mutable_buffer :: proc(
   vk.CreateBuffer(gctx.device, &create_info, nil, &buffer.buffer) or_return
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
-  buffer.memory = allocate_vulkan_memory(
+  buffer.memory = allocate_memory(
     gctx,
     mem_reqs,
     {.HOST_VISIBLE, .HOST_COHERENT},
@@ -65,7 +65,7 @@ malloc_mutable_buffer :: proc(
   return buffer, .SUCCESS
 }
 
-malloc_immutable_buffer :: proc(
+malloc_buffer :: proc(
   gctx: ^GPUContext,
   $T: typeid,
   count: int,
@@ -92,11 +92,7 @@ malloc_immutable_buffer :: proc(
   vk.CreateBuffer(gctx.device, &create_info, nil, &buffer.buffer) or_return
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
-  buffer.memory = allocate_vulkan_memory(
-    gctx,
-    mem_reqs,
-    {.DEVICE_LOCAL},
-  ) or_return
+  buffer.memory = allocate_memory(gctx, mem_reqs, {.DEVICE_LOCAL}) or_return
   vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory, 0) or_return
   log.infof("immutable buffer created 0x%x", buffer.buffer)
   return buffer, .SUCCESS
@@ -113,17 +109,17 @@ get :: proc {
 
 get_all :: proc {
   mutable_buffer_get_all,
-  immutable_buffer_get_all,
+  buffer_get_all,
 }
 
 write :: proc {
-  mutable_buffer_write_single,
+  mutable_buffer_write,
   mutable_buffer_write_multi,
-  immutable_buffer_write_single,
-  immutable_buffer_write_multi,
+  buffer_write,
+  buffer_write_multi,
 }
 
-mutable_buffer_write_single :: proc(
+mutable_buffer_write :: proc(
   buffer: ^MutableBuffer($T),
   data: ^T,
   index: int = 0,
@@ -171,7 +167,7 @@ mutable_buffer_destroy :: proc(device: vk.Device, buffer: ^MutableBuffer($T)) {
   buffer.element_size = 0
 }
 
-immutable_buffer_write_single :: proc(
+buffer_write :: proc(
   gctx: ^GPUContext,
   buffer: ^ImmutableBuffer($T),
   data: ^T,
@@ -179,7 +175,7 @@ immutable_buffer_write_single :: proc(
 ) -> vk.Result {
   staging := malloc_mutable_buffer(gctx, T, 1, {.TRANSFER_SRC}) or_return
   defer mutable_buffer_destroy(gctx.device, &staging)
-  mutable_buffer_write_single(&staging, data) or_return
+  mutable_buffer_write(&staging, data) or_return
   cmd_buffer := begin_single_time_command(gctx) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
@@ -191,7 +187,7 @@ immutable_buffer_write_single :: proc(
   return end_single_time_command(gctx, &cmd_buffer)
 }
 
-immutable_buffer_write_multi :: proc(
+buffer_write_multi :: proc(
   gctx: ^GPUContext,
   buffer: ^ImmutableBuffer($T),
   data: []T,
@@ -216,7 +212,7 @@ immutable_buffer_write_multi :: proc(
   return end_single_time_command(gctx, &cmd_buffer)
 }
 
-immutable_buffer_get_all :: proc(
+buffer_get_all :: proc(
   gctx: ^GPUContext,
   buffer: ^ImmutableBuffer($T),
   output: []T,
@@ -245,10 +241,7 @@ immutable_buffer_get_all :: proc(
   return .SUCCESS
 }
 
-immutable_buffer_destroy :: proc(
-  device: vk.Device,
-  buffer: ^ImmutableBuffer($T),
-) {
+buffer_destroy :: proc(device: vk.Device, buffer: ^ImmutableBuffer($T)) {
   vk.DestroyBuffer(device, buffer.buffer, nil)
   buffer.buffer = 0
   vk.FreeMemory(device, buffer.memory, nil)
@@ -272,14 +265,14 @@ create_mutable_buffer :: proc(
   return buffer, .SUCCESS
 }
 
-CubeImageBuffer :: struct {
+CubeImage:: struct {
   using base: Image,
   face_views: [6]vk.ImageView, // One view per face for rendering
 }
 
 cube_depth_texture_init :: proc(
   gctx: ^GPUContext,
-  self: ^CubeImageBuffer,
+  self: ^CubeImage,
   size: u32,
   format: vk.Format = .D32_SFLOAT,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
@@ -316,7 +309,7 @@ cube_depth_texture_init :: proc(
   return .SUCCESS
 }
 
-cube_depth_texture_destroy :: proc(device: vk.Device, self: ^CubeImageBuffer) {
+cube_depth_texture_destroy :: proc(device: vk.Device, self: ^CubeImage) {
   if self == nil {
     return
   }
@@ -325,4 +318,20 @@ cube_depth_texture_destroy :: proc(device: vk.Device, self: ^CubeImageBuffer) {
     v = 0
   }
   image_destroy(device, &self.base)
+}
+
+buffer_info :: proc(self: ^ImmutableBuffer($T)) -> vk.DescriptorBufferInfo {
+  return vk.DescriptorBufferInfo {
+    buffer = self.buffer,
+    range = vk.DeviceSize(self.bytes_count),
+  }
+}
+
+mutable_buffer_info :: proc(
+  self: ^MutableBuffer($T),
+) -> vk.DescriptorBufferInfo {
+  return vk.DescriptorBufferInfo {
+    buffer = self.buffer,
+    range = vk.DeviceSize(self.bytes_count),
+  }
 }

@@ -47,6 +47,18 @@ Material :: struct {
   using meta:         ResourceMetadata,
 }
 
+Color :: enum {
+  WHITE,
+  BLACK,
+  GRAY,
+  RED,
+  GREEN,
+  BLUE,
+  YELLOW,
+  CYAN,
+  MAGENTA,
+}
+
 material_update_gpu_data :: proc(mat: ^Material) {
   mat.albedo_index = min(MAX_TEXTURES - 1, mat.albedo.index)
   mat.metallic_roughness_index = min(
@@ -148,4 +160,28 @@ create_material_handle :: proc(
     base_color_factor,
   )
   return h, ret == .SUCCESS
+}
+
+init_builtin_materials :: proc(manager: ^Manager) -> vk.Result {
+  log.info("Creating builtin materials...")
+  colors := [len(Color)][4]f32 {
+    {1.0, 1.0, 1.0, 1.0}, // WHITE
+    {0.0, 0.0, 0.0, 1.0}, // BLACK
+    {0.3, 0.3, 0.3, 1.0}, // GRAY
+    {1.0, 0.0, 0.0, 1.0}, // RED
+    {0.0, 1.0, 0.0, 1.0}, // GREEN
+    {0.0, 0.0, 1.0, 1.0}, // BLUE
+    {1.0, 1.0, 0.0, 1.0}, // YELLOW
+    {0.0, 1.0, 1.0, 1.0}, // CYAN
+    {1.0, 0.0, 1.0, 1.0}, // MAGENTA
+  }
+  for color, i in colors {
+    manager.builtin_materials[i], _, _ = create_material(
+      manager,
+      type = .PBR,
+      base_color_factor = color,
+    )
+  }
+  log.info("Builtin materials created successfully")
+  return .SUCCESS
 }

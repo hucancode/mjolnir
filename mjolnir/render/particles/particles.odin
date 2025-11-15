@@ -80,77 +80,41 @@ simulate :: proc(
   counter_ptr := gpu.get(&self.particle_counter_buffer)
   params_ptr.particle_count = counter_ptr^
   counter_ptr^ = 0
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, self.emitter_pipeline)
-  emitter_descriptor_sets := [?]vk.DescriptorSet {
+  gpu.bind_compute_pipeline(
+    command_buffer,
+    self.emitter_pipeline,
+    self.emitter_pipeline_layout,
     self.emitter_bindless_descriptor_set,
     self.emitter_descriptor_set,
     world_matrix_set,
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .COMPUTE,
-    self.emitter_pipeline_layout,
-    0,
-    len(emitter_descriptor_sets),
-    raw_data(emitter_descriptor_sets[:]),
-    0,
-    nil,
   )
   // One thread per emitter (local_size_x = 64)
   vk.CmdDispatch(command_buffer, u32(resources.MAX_EMITTERS + 63) / 64, 1, 1)
   // Barrier to ensure emission is complete before compaction
-  barrier_emit := vk.MemoryBarrier {
-    sType         = .MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_WRITE},
-    dstAccessMask = {.SHADER_READ},
-  }
-  vk.CmdPipelineBarrier(
+  gpu.memory_barrier(
     command_buffer,
+    {.SHADER_WRITE},
+    {.SHADER_READ},
     {.COMPUTE_SHADER},
     {.COMPUTE_SHADER},
-    {},
-    1,
-    &barrier_emit,
-    0,
-    nil,
-    0,
-    nil,
   )
   compact(self, command_buffer)
   // Memory barrier before simulation
-  barrier1 := vk.MemoryBarrier {
-    sType         = .MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_WRITE},
-    dstAccessMask = {.SHADER_READ},
-  }
-  vk.CmdPipelineBarrier(
+  gpu.memory_barrier(
     command_buffer,
+    {.SHADER_WRITE},
+    {.SHADER_READ},
     {.COMPUTE_SHADER},
     {.COMPUTE_SHADER},
-    {},
-    1,
-    &barrier1,
-    0,
-    nil,
-    0,
-    nil,
   )
   // GPU handles the count internally
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compute_pipeline)
-  compute_descriptor_sets := [?]vk.DescriptorSet {
+  gpu.bind_compute_pipeline(
+    command_buffer,
+    self.compute_pipeline,
+    self.compute_pipeline_layout,
     self.compute_descriptor_set,
     self.forcefield_bindless_descriptor_set,
     rm.world_matrix_descriptor_set,
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .COMPUTE,
-    self.compute_pipeline_layout,
-    0,
-    len(compute_descriptor_sets),
-    raw_data(compute_descriptor_sets[:]),
-    0,
-    nil,
   )
   vk.CmdDispatch(
     command_buffer,
@@ -159,22 +123,12 @@ simulate :: proc(
     1,
   )
   // Memory barrier before copying back
-  barrier2 := vk.MemoryBarrier {
-    sType         = .MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_WRITE},
-    dstAccessMask = {.TRANSFER_READ},
-  }
-  vk.CmdPipelineBarrier(
+  gpu.memory_barrier(
     command_buffer,
+    {.SHADER_WRITE},
+    {.TRANSFER_READ},
     {.COMPUTE_SHADER},
     {.TRANSFER},
-    {},
-    1,
-    &barrier2,
-    0,
-    nil,
-    0,
-    nil,
   )
   // Copy simulated particles back to main buffer
   vk.CmdCopyBuffer(
@@ -185,37 +139,21 @@ simulate :: proc(
     &vk.BufferCopy{size = vk.DeviceSize(self.particle_buffer.bytes_count)},
   )
   // Final barrier for rendering
-  barrier3 := vk.MemoryBarrier {
-    sType         = .MEMORY_BARRIER,
-    srcAccessMask = {.TRANSFER_WRITE},
-    dstAccessMask = {.INDIRECT_COMMAND_READ},
-  }
-  vk.CmdPipelineBarrier(
+  gpu.memory_barrier(
     command_buffer,
+    {.TRANSFER_WRITE},
+    {.INDIRECT_COMMAND_READ},
     {.TRANSFER},
     {.DRAW_INDIRECT},
-    {},
-    1,
-    &barrier3,
-    0,
-    nil,
-    0,
-    nil,
   )
 }
 
 compact :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
-  // Run compaction
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compact_pipeline)
-  vk.CmdBindDescriptorSets(
+  gpu.bind_compute_pipeline(
     command_buffer,
-    .COMPUTE,
+    self.compact_pipeline,
     self.compact_pipeline_layout,
-    0,
-    1,
-    &self.compact_descriptor_set,
-    0,
-    nil,
+    self.compact_descriptor_set,
   )
   vk.CmdDispatch(
     command_buffer,
@@ -225,69 +163,48 @@ compact :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   )
 }
 
-shutdown :: proc(
-  self: ^Renderer,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
-) {
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    u32(len(self.commands)),
-    raw_data(self.commands[:]),
-  )
-  vk.DestroyPipeline(device, self.compute_pipeline, nil)
-  vk.DestroyPipelineLayout(device, self.compute_pipeline_layout, nil)
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+  gpu.free_command_buffer(gctx, self.commands[:])
+  vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
-    device,
+    gctx.device,
     self.compute_descriptor_set_layout,
     nil,
   )
-  vk.DestroyPipeline(device, self.emitter_pipeline, nil)
-  vk.DestroyPipelineLayout(device, self.emitter_pipeline_layout, nil)
+  vk.DestroyPipeline(gctx.device, self.emitter_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
-    device,
+    gctx.device,
     self.emitter_descriptor_set_layout,
     nil,
   )
-  vk.DestroyPipeline(device, self.compact_pipeline, nil)
-  vk.DestroyPipelineLayout(device, self.compact_pipeline_layout, nil)
+  vk.DestroyPipeline(gctx.device, self.compact_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
-    device,
+    gctx.device,
     self.compact_descriptor_set_layout,
     nil,
   )
-  vk.DestroyPipeline(device, self.render_pipeline, nil)
-  vk.DestroyPipelineLayout(device, self.render_pipeline_layout, nil)
-  gpu.mutable_buffer_destroy(device, &self.params_buffer)
-  gpu.mutable_buffer_destroy(device, &self.particle_buffer)
-  gpu.mutable_buffer_destroy(device, &self.compact_particle_buffer)
-  gpu.mutable_buffer_destroy(device, &self.draw_command_buffer)
-  gpu.mutable_buffer_destroy(device, &self.particle_counter_buffer)
+  vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
+  gpu.mutable_buffer_destroy(gctx.device, &self.params_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_counter_buffer)
 }
 
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &vk.CommandBufferAllocateInfo {
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = gctx.command_pool,
-      level = .SECONDARY,
-      commandBufferCount = u32(len(self.commands)),
-    },
-    raw_data(self.commands[:]),
-  ) or_return
+) -> (
+  ret: vk.Result,
+) {
+  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
   defer if ret != .SUCCESS {
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
+    gpu.free_command_buffer(gctx, self.commands[:])
   }
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_mutable_buffer(
@@ -321,19 +238,31 @@ init :: proc(
   self.forcefield_bindless_descriptor_set = rm.forcefield_buffer_descriptor_set
   create_emitter_pipeline(gctx, self, rm) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.emitter_descriptor_set_layout, nil)
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.emitter_descriptor_set_layout,
+      nil,
+    )
     vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
     vk.DestroyPipeline(gctx.device, self.emitter_pipeline, nil)
   }
   create_compact_pipeline(gctx, self) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.compact_descriptor_set_layout, nil)
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.compact_descriptor_set_layout,
+      nil,
+    )
     vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
     vk.DestroyPipeline(gctx.device, self.compact_pipeline, nil)
   }
   create_compute_pipeline(gctx, self, rm) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.compute_descriptor_set_layout, nil)
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.compute_descriptor_set_layout,
+      nil,
+    )
     vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
     vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
   }
@@ -349,110 +278,32 @@ create_emitter_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
-  emitter_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 2,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(emitter_bindings),
-      pBindings = raw_data(emitter_bindings[:]),
-    },
+) -> (
+  ret: vk.Result,
+) {
+  self.emitter_descriptor_set_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.UNIFORM_BUFFER, {.COMPUTE}},
+  ) or_return
+  self.emitter_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
     nil,
-    &self.emitter_descriptor_set_layout,
-  ) or_return
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &self.emitter_descriptor_set_layout,
-    },
-    &self.emitter_descriptor_set,
-  ) or_return
-  descriptor_set_layouts := [?]vk.DescriptorSetLayout {
     rm.emitter_buffer_set_layout,
     self.emitter_descriptor_set_layout,
     rm.world_matrix_buffer_set_layout,
-  }
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(descriptor_set_layouts),
-      pSetLayouts = raw_data(descriptor_set_layouts[:]),
-    },
-    nil,
-    &self.emitter_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
   }
-  emitter_particle_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.particle_buffer.buffer,
-    range  = vk.DeviceSize(self.particle_buffer.bytes_count),
-  }
-  emitter_counter_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.particle_counter_buffer.buffer,
-    range  = vk.DeviceSize(self.particle_counter_buffer.bytes_count),
-  }
-  emitter_params_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.params_buffer.buffer,
-    range  = vk.DeviceSize(self.params_buffer.bytes_count),
-  }
-  emitter_writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.emitter_descriptor_set,
-      dstBinding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &emitter_particle_buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.emitter_descriptor_set,
-      dstBinding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &emitter_counter_buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.emitter_descriptor_set,
-      dstBinding = 2,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &emitter_params_buffer_info,
-    },
-  }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    len(emitter_writes),
-    raw_data(emitter_writes[:]),
-    0,
-    nil,
-  )
+  self.emitter_descriptor_set = gpu.create_descriptor_set(
+    gctx,
+    &self.emitter_descriptor_set_layout,
+    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.particle_buffer)},
+    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.particle_counter_buffer)},
+    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.params_buffer)},
+  ) or_return
   emitter_shader_module := gpu.create_shader_module(
     gctx.device,
     SHADER_EMITTER_COMP,
@@ -483,116 +334,48 @@ create_compute_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
-  compute_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
+) -> (
+  ret: vk.Result,
+) {
+  self.compute_descriptor_set_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.UNIFORM_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.compute_descriptor_set_layout,
+      nil,
+    )
   }
-  vk.CreateDescriptorSetLayout(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(compute_bindings),
-      pBindings = raw_data(compute_bindings[:]),
-    },
+  self.compute_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
     nil,
-    &self.compute_descriptor_set_layout,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.compute_descriptor_set_layout, nil)
-  }
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &self.compute_descriptor_set_layout,
-    },
-    &self.compute_descriptor_set,
-  ) or_return
-  defer if ret != .SUCCESS {
-    // Descriptor sets are auto-freed when descriptor pool is destroyed
-  }
-  descriptor_set_layouts := [?]vk.DescriptorSetLayout {
     self.compute_descriptor_set_layout,
     rm.forcefield_buffer_set_layout,
     rm.world_matrix_buffer_set_layout,
-  }
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(descriptor_set_layouts),
-      pSetLayouts = raw_data(descriptor_set_layouts[:]),
-    },
-    nil,
-    &self.compute_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
   }
-  params_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.params_buffer.buffer,
-    range  = vk.DeviceSize(self.params_buffer.bytes_count),
-  }
-  particle_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.compact_particle_buffer.buffer,
-    range  = vk.DeviceSize(self.compact_particle_buffer.bytes_count),
-  }
-  count_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.particle_counter_buffer.buffer,
-    range  = vk.DeviceSize(self.particle_counter_buffer.bytes_count),
-  }
-  compute_writes := [?]vk.WriteDescriptorSet {
+  self.compute_descriptor_set = gpu.create_descriptor_set(
+    gctx,
+    &self.compute_descriptor_set_layout,
     {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.compute_descriptor_set,
-      dstBinding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &params_buffer_info,
+      type = .UNIFORM_BUFFER,
+      info = gpu.mutable_buffer_info(&self.params_buffer),
     },
     {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.compute_descriptor_set,
-      dstBinding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &particle_buffer_info,
+      type = .STORAGE_BUFFER,
+      info = gpu.mutable_buffer_info(&self.compact_particle_buffer),
     },
     {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.compute_descriptor_set,
-      dstBinding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &count_buffer_info,
+      type = .STORAGE_BUFFER,
+      info = gpu.mutable_buffer_info(&self.particle_counter_buffer),
     },
-  }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    len(compute_writes),
-    raw_data(compute_writes[:]),
-    0,
-    nil,
-  )
+  ) or_return
   compute_shader_module := gpu.create_shader_module(
     gctx.device,
     SHADER_PARTICLE_COMP,
@@ -622,68 +405,27 @@ create_compute_pipeline :: proc(
 create_compact_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
-) -> (ret: vk.Result) {
-  compact_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 3,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(compact_bindings),
-      pBindings = raw_data(compact_bindings[:]),
-    },
-    nil,
-    &self.compact_descriptor_set_layout,
+) -> (
+  ret: vk.Result,
+) {
+  self.compact_descriptor_set_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
   ) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.compact_descriptor_set_layout, nil)
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.compact_descriptor_set_layout,
+      nil,
+    )
   }
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &self.compact_descriptor_set_layout,
-    },
-    &self.compact_descriptor_set,
-  ) or_return
-  defer if ret != .SUCCESS {
-    // Descriptor sets are auto-freed when descriptor pool is destroyed
-  }
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = 1,
-      pSetLayouts = &self.compact_descriptor_set_layout,
-    },
+  self.compact_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
     nil,
-    &self.compact_pipeline_layout,
+    self.compact_descriptor_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
@@ -706,63 +448,26 @@ create_compact_pipeline :: proc(
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
   }
-  compact_source_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.particle_buffer.buffer,
-    range  = vk.DeviceSize(self.particle_buffer.bytes_count),
-  }
-  compact_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.compact_particle_buffer.buffer,
-    range  = vk.DeviceSize(self.compact_particle_buffer.bytes_count),
-  }
-  draw_cmd_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.draw_command_buffer.buffer,
-    range  = vk.DeviceSize(self.draw_command_buffer.bytes_count),
-  }
-  count_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.particle_counter_buffer.buffer,
-    range  = vk.DeviceSize(self.particle_counter_buffer.bytes_count),
-  }
-  compact_writes := [?]vk.WriteDescriptorSet {
+  self.compact_descriptor_set = gpu.create_descriptor_set(
+    gctx,
+    &self.compact_descriptor_set_layout,
     {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.compact_descriptor_set,
-      dstBinding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &compact_source_buffer_info,
+      type = .STORAGE_BUFFER,
+      info = gpu.mutable_buffer_info(&self.particle_buffer),
     },
     {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.compact_descriptor_set,
-      dstBinding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &compact_buffer_info,
+      type = .STORAGE_BUFFER,
+      info = gpu.mutable_buffer_info(&self.compact_particle_buffer),
     },
     {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.compact_descriptor_set,
-      dstBinding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &draw_cmd_buffer_info,
+      type = .STORAGE_BUFFER,
+      info = gpu.mutable_buffer_info(&self.draw_command_buffer),
     },
     {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.compact_descriptor_set,
-      dstBinding = 3,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &count_buffer_info,
+      type = .STORAGE_BUFFER,
+      info = gpu.mutable_buffer_info(&self.particle_counter_buffer),
     },
-  }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    len(compact_writes),
-    raw_data(compact_writes[:]),
-    0,
-    nil,
-  )
+  ) or_return
   compact_shader_module := gpu.create_shader_module(
     gctx.device,
     SHADER_PARTICLE_COMPACT_COMP,
@@ -793,26 +498,14 @@ create_render_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
-  descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    rm.camera_buffer_set_layout, // set = 0 for bindless camera buffer
-    rm.textures_set_layout, // set = 1 for textures
-  }
-  push_constant_range := vk.PushConstantRange {
-    stageFlags = {.VERTEX},
-    size       = size_of(u32), // camera_index
-  }
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(descriptor_set_layouts),
-      pSetLayouts = raw_data(descriptor_set_layouts[:]),
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &push_constant_range,
-    },
-    nil,
-    &self.render_pipeline_layout,
+) -> (
+  ret: vk.Result,
+) {
+  self.render_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange{stageFlags = {.VERTEX}, size = size_of(u32)},
+    rm.camera_buffer_set_layout,
+    rm.textures_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
@@ -865,7 +558,7 @@ create_render_pipeline :: proc(
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
   input_assembly := gpu.create_standard_input_assembly(topology = .POINT_LIST)
-  rasterization := gpu.create_standard_rasterizer(cull_mode = {})
+  rasterization := gpu.create_double_sided_rasterizer()
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
     srcColorBlendFactor = .SRC_ALPHA,
@@ -966,58 +659,30 @@ begin_pass :: proc(
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   color_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
+    rm.images_2d,
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Particle renderer missing color attachment")
     return
   }
   depth_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .DEPTH, frame_index),
+    rm.images_2d,
+    camera.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
     log.error("Particle renderer missing depth attachment")
     return
   }
-  color_attachment := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = color_texture.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD, // preserve previous contents
-    storeOp     = .STORE,
-  }
-  depth_attachment := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = depth_texture.view,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .STORE,
-  }
   extent := camera.extent
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-    pDepthAttachment = &depth_attachment,
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
-  viewport := vk.Viewport {
-    x        = 0.0,
-    y        = f32(extent.height),
-    width    = f32(extent.width),
-    height   = -f32(extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  gpu.begin_rendering(
+    command_buffer,
+    extent.width,
+    extent.height,
+    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
+  )
+  gpu.set_viewport_scissor(command_buffer, extent.width, extent.height)
 }
 
 render :: proc(
@@ -1028,20 +693,12 @@ render :: proc(
   frame_index: u32 = 0,
 ) {
   // Use indirect draw - GPU handles the count
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
-  descriptor_sets := [?]vk.DescriptorSet {
-    rm.camera_buffer_descriptor_sets[frame_index], // set 0 (per-frame camera buffer)
-    rm.textures_descriptor_set, // set 1 (textures)
-  }
-  vk.CmdBindDescriptorSets(
+  gpu.bind_graphics_pipeline(
     command_buffer,
-    .GRAPHICS,
+    self.render_pipeline,
     self.render_pipeline_layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
+    rm.camera_buffer_descriptor_sets[frame_index],
+    rm.textures_descriptor_set,
   )
   camera_idx := camera_index
   vk.CmdPushConstants(
@@ -1083,11 +740,11 @@ begin_record :: proc(
 ) {
   command_buffer = self.commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [1]vk.Format{color_format}
+  color_formats := [?]vk.Format{color_format}
   rendering_info := vk.CommandBufferInheritanceRenderingInfo {
     sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount    = 1,
-    pColorAttachmentFormats = &color_formats[0],
+    colorAttachmentCount    = len(color_formats),
+    pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = .D32_SFLOAT,
     rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
   }

@@ -32,24 +32,12 @@ init :: proc(
   gctx: ^gpu.GPUContext,
   width, height: u32,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &vk.CommandBufferAllocateInfo {
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = gctx.command_pool,
-      level = .SECONDARY,
-      commandBufferCount = u32(len(self.commands)),
-    },
-    raw_data(self.commands[:]),
-  ) or_return
+) -> (
+  ret: vk.Result,
+) {
+  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
   defer if ret != .SUCCESS {
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
+    gpu.free_command_buffer(gctx, self.commands[:])
   }
   log.info("Initializing transparent renderer")
   if rm.geometry_pipeline_layout == 0 {
@@ -94,11 +82,7 @@ init :: proc(
     indices  = indices,
     aabb     = geometry.aabb_from_vertices(vertices),
   }
-  mesh_handle, mesh_ptr := resources.create_mesh(
-    gctx,
-    rm,
-    quad_geom,
-  ) or_return
+  mesh_handle, mesh_ptr := resources.create_mesh(gctx, rm, quad_geom) or_return
   defer if ret != .SUCCESS {
     resources.mesh_destroy_handle(gctx.device, rm, mesh_handle)
   }
@@ -387,7 +371,7 @@ create_sprite_pipeline :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  rasterizer := gpu.create_standard_rasterizer(cull_mode = {})
+  rasterizer := gpu.create_double_sided_rasterizer()
   multisampling := gpu.create_standard_multisampling()
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -458,22 +442,13 @@ create_sprite_pipeline :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(
-  self: ^Renderer,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
-) {
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    u32(len(self.commands)),
-    raw_data(self.commands[:]),
-  )
-  vk.DestroyPipeline(device, self.transparent_pipeline, nil)
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+  gpu.free_command_buffer(gctx, self.commands[:])
+  vk.DestroyPipeline(gctx.device, self.transparent_pipeline, nil)
   self.transparent_pipeline = 0
-  vk.DestroyPipeline(device, self.wireframe_pipeline, nil)
+  vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
   self.wireframe_pipeline = 0
-  vk.DestroyPipeline(device, self.sprite_pipeline, nil)
+  vk.DestroyPipeline(gctx.device, self.sprite_pipeline, nil)
   self.sprite_pipeline = 0
 }
 
@@ -487,58 +462,30 @@ begin_pass :: proc(
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   color_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
+    rm.images_2d,
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Transparent lighting missing color attachment")
     return
   }
   depth_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .DEPTH, frame_index),
+    rm.images_2d,
+    camera.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
     log.error("Transparent lighting missing depth attachment")
     return
   }
-  color_attachment := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = color_texture.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .STORE,
-  }
-  depth_attachment := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = depth_texture.view,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .STORE,
-  }
   extent := camera.extent
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-    pDepthAttachment = &depth_attachment,
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(extent.height),
-    width    = f32(extent.width),
-    height   = -f32(extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  gpu.begin_rendering(
+    command_buffer,
+    extent.width,
+    extent.height,
+    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
+  )
+  gpu.set_viewport_scissor(command_buffer, extent.width, extent.height)
 }
 
 render :: proc(
@@ -556,7 +503,10 @@ render :: proc(
     log.warn("Transparency render: draw_buffer or count_buffer is null")
     return
   }
-  descriptor_sets := [?]vk.DescriptorSet {
+  gpu.bind_graphics_pipeline(
+    command_buffer,
+    pipeline,
+    rm.geometry_pipeline_layout,
     rm.camera_buffer_descriptor_sets[frame_index], // Per-frame to avoid overlap
     rm.textures_descriptor_set,
     rm.bone_buffer_descriptor_set,
@@ -567,18 +517,7 @@ render :: proc(
     rm.vertex_skinning_descriptor_set,
     rm.lights_buffer_descriptor_set,
     rm.sprite_buffer_descriptor_set,
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    rm.geometry_pipeline_layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
   )
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
   push_constants := PushConstant {
     camera_index = camera_handle.index,
   }

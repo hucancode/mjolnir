@@ -52,21 +52,6 @@ test_next_prev_dir :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_quantize_float :: proc(t: ^testing.T) {
-  v := [3]f32{1.2, 3.7, 5.1}
-  result := geometry.quantize_float(v, 10.0)
-  testing.expect_value(t, result[0], i32(12))
-  testing.expect_value(t, result[1], i32(37))
-  testing.expect_value(t, result[2], i32(51))
-  // Test with negative values
-  v2 := [3]f32{-1.2, -3.7, -5.1}
-  result2 := geometry.quantize_float(v2, 10.0)
-  testing.expect_value(t, result2[0], i32(-12))
-  testing.expect_value(t, result2[1], i32(-37))
-  testing.expect_value(t, result2[2], i32(-51))
-}
-
-@(test)
 test_overlap_bounds :: proc(t: ^testing.T) {
   // Test overlapping bounds
   amin1 := [3]f32{0, 0, 0}

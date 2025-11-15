@@ -50,7 +50,7 @@ material_unref :: proc(
 }
 
 texture_2d_ref :: proc(manager: ^Manager, handle: Handle) -> bool {
-  img := cont.get(manager.image_2d_buffers, handle) or_return
+  img := cont.get(manager.images_2d, handle) or_return
   img.ref_count += 1
   return true
 }
@@ -62,7 +62,7 @@ texture_2d_unref :: proc(
   ref_count: u32,
   ok: bool,
 ) {
-  img := cont.get(manager.image_2d_buffers, handle) or_return
+  img := cont.get(manager.images_2d, handle) or_return
   if img.ref_count == 0 {
     // log.warnf("texture_2d_unref: ref_count already 0 for handle %v", handle)
     return 0, true
@@ -72,7 +72,7 @@ texture_2d_unref :: proc(
 }
 
 texture_cube_ref :: proc(manager: ^Manager, handle: Handle) -> bool {
-  img := cont.get(manager.image_cube_buffers, handle) or_return
+  img := cont.get(manager.images_cube, handle) or_return
   img.ref_count += 1
   return true
 }
@@ -84,7 +84,7 @@ texture_cube_unref :: proc(
   ref_count: u32,
   ok: bool,
 ) {
-  img := cont.get(manager.image_cube_buffers, handle) or_return
+  img := cont.get(manager.images_cube, handle) or_return
   if img.ref_count == 0 {
     // log.warnf("texture_cube_unref: ref_count already 0 for handle %v", handle)
     return 0, true
@@ -149,13 +149,13 @@ purge_unused_textures_2d :: proc(
 ) -> (
   purged_count: int,
 ) {
-  for &entry, i in manager.image_2d_buffers.entries do if entry.active {
+  for &entry, i in manager.images_2d.entries do if entry.active {
     if entry.item.auto_purge && entry.item.ref_count == 0 {
       handle := Handle {
         index      = u32(i),
         generation = entry.generation,
       }
-      img, freed := cont.free(&manager.image_2d_buffers, handle)
+      img, freed := cont.free(&manager.images_2d, handle)
       if freed {
         gpu.image_destroy(gctx.device, img)
         purged_count += 1
@@ -174,13 +174,13 @@ purge_unused_textures_cube :: proc(
 ) -> (
   purged_count: int,
 ) {
-  for &entry, i in manager.image_cube_buffers.entries do if entry.active {
+  for &entry, i in manager.images_cube.entries do if entry.active {
     if entry.item.auto_purge && entry.item.ref_count == 0 {
       handle := Handle {
         index      = u32(i),
         generation = entry.generation,
       }
-      img, freed := cont.free(&manager.image_cube_buffers, handle)
+      img, freed := cont.free(&manager.images_cube, handle)
       if freed {
         gpu.cube_depth_texture_destroy(gctx.device, img)
         purged_count += 1

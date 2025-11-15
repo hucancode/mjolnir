@@ -3,6 +3,8 @@ package geometry
 import "core:math"
 import "core:slice"
 
+// TODO: most ray casting operation here build a new acceleration structure from scratch, which is inefficient. we must redesign API interface supporting existing BVH/Octree/etc
+
 // Acceleration structure type for raycasting
 AccelType :: enum {
   BVH,
@@ -153,19 +155,13 @@ raycast_bvh :: proc(
   config: RaycastConfig,
 ) -> RayHit(T) {
   if len(primitives) == 0 do return {}
-
   bvh: BVH(T)
   bvh.bounds_func = bounds_func
   defer bvh_destroy(&bvh)
-
   bvh_build(&bvh, primitives)
-
-  // If no max_tests limit, use standard BVH raycast
   if config.max_tests <= 0 {
     return bvh_raycast(&bvh, ray, config.max_dist, intersection_func)
   }
-
-  // Limited version
   return raycast_bvh_limited(&bvh, ray, intersection_func, config)
 }
 
@@ -184,14 +180,11 @@ raycast_bvh_limited :: proc(
   config: RaycastConfig,
 ) -> RayHit(T) {
   if len(bvh.nodes) == 0 do return {}
-
   best_hit: RayHit(T)
   best_hit.t = config.max_dist
   tests := 0
-
   stack := make([dynamic]i32, 0, 64, context.temp_allocator)
   append(&stack, 0)
-
   for len(stack) > 0 && tests < config.max_tests {
     node_idx := pop(&stack)
     node := &bvh.nodes[node_idx]
@@ -233,7 +226,6 @@ raycast_bvh_limited :: proc(
       }
     }
   }
-
   return best_hit
 }
 
@@ -254,17 +246,13 @@ raycast_single_bvh :: proc(
   config: RaycastConfig,
 ) -> RayHit(T) {
   if len(primitives) == 0 do return {}
-
   bvh: BVH(T)
   bvh.bounds_func = bounds_func
   defer bvh_destroy(&bvh)
-
   bvh_build(&bvh, primitives)
-
   if config.max_tests <= 0 {
     return bvh_raycast_single(&bvh, ray, config.max_dist, intersection_func)
   }
-
   return raycast_single_bvh_limited(&bvh, ray, intersection_func, config)
 }
 
@@ -283,11 +271,9 @@ raycast_single_bvh_limited :: proc(
   config: RaycastConfig,
 ) -> RayHit(T) {
   if len(bvh.nodes) == 0 do return {}
-
   tests := 0
   stack := make([dynamic]i32, 0, 64, context.temp_allocator)
   append(&stack, 0)
-
   for len(stack) > 0 && tests < config.max_tests {
     node_idx := pop(&stack)
     node := &bvh.nodes[node_idx]
@@ -297,21 +283,20 @@ raycast_single_bvh_limited :: proc(
       node.bounds,
     )
     if t_near > config.max_dist || t_far < 0 do continue
-    if node.primitive_count > 0 {
-      for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
-        if tests >= config.max_tests do break
-        prim := bvh.primitives[i]
-        hit, t := intersection_func(ray, prim, config.max_dist)
-        tests += 1
-        if hit && t <= config.max_dist {
-          return RayHit(T){primitive = prim, t = t, hit = true}
-        }
-      }
-    } else {
+    if node.primitive_count <= 0 {
       append(&stack, node.left_child, node.right_child)
+      continue
+    }
+    for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
+      if tests >= config.max_tests do break
+      prim := bvh.primitives[i]
+      hit, t := intersection_func(ray, prim, config.max_dist)
+      tests += 1
+      if hit && t <= config.max_dist {
+        return RayHit(T){primitive = prim, t = t, hit = true}
+      }
     }
   }
-
   return {}
 }
 
@@ -334,18 +319,14 @@ raycast_multi_bvh :: proc(
 ) {
   clear(results)
   if len(primitives) == 0 do return
-
   bvh: BVH(T)
   bvh.bounds_func = bounds_func
   defer bvh_destroy(&bvh)
-
   bvh_build(&bvh, primitives)
-
   if config.max_tests <= 0 {
     bvh_raycast_multi(&bvh, ray, config.max_dist, intersection_func, results)
     return
   }
-
   raycast_multi_bvh_limited(&bvh, ray, intersection_func, config, results)
 }
 
@@ -365,11 +346,9 @@ raycast_multi_bvh_limited :: proc(
   results: ^[dynamic]RayHit(T),
 ) {
   if len(bvh.nodes) == 0 do return
-
   tests := 0
   stack := make([dynamic]i32, 0, 64, context.temp_allocator)
   append(&stack, 0)
-
   for len(stack) > 0 && tests < config.max_tests {
     node_idx := pop(&stack)
     node := &bvh.nodes[node_idx]
@@ -393,7 +372,6 @@ raycast_multi_bvh_limited :: proc(
       append(&stack, node.left_child, node.right_child)
     }
   }
-
   if len(results^) > 1 {
     slice.sort_by(results[:], proc(a, b: RayHit(T)) -> bool {return a.t < b.t})
   }
@@ -416,21 +394,15 @@ raycast_octree :: proc(
   config: RaycastConfig,
 ) -> RayHit(T) {
   if len(primitives) == 0 do return {}
-
   overall_bounds := AABB_UNDEFINED
   for prim in primitives {
     overall_bounds = aabb_union(overall_bounds, bounds_func(prim))
   }
-
   octree: Octree(T)
   octree.bounds_func = bounds_func
   octree_init(&octree, overall_bounds)
   defer octree_destroy(&octree)
-
-  for prim in primitives {
-    octree_insert(&octree, prim)
-  }
-
+  for prim in primitives do octree_insert(&octree, prim)
   if config.max_tests <= 0 {
     return octree_raycast(&octree, ray, config.max_dist, intersection_func)
   }
@@ -453,11 +425,9 @@ raycast_octree_limited :: proc(
   config: RaycastConfig,
 ) -> RayHit(T) {
   if octree.root == nil do return {}
-
   best_hit: RayHit(T)
   best_hit.t = config.max_dist
   tests := 0
-
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
@@ -594,21 +564,15 @@ raycast_single_octree :: proc(
   config: RaycastConfig,
 ) -> RayHit(T) {
   if len(primitives) == 0 do return {}
-
   overall_bounds := AABB_UNDEFINED
   for prim in primitives {
     overall_bounds = aabb_union(overall_bounds, bounds_func(prim))
   }
-
   octree: Octree(T)
   octree.bounds_func = bounds_func
   octree_init(&octree, overall_bounds)
   defer octree_destroy(&octree)
-
-  for prim in primitives {
-    octree_insert(&octree, prim)
-  }
-
+  for prim in primitives do octree_insert(&octree, prim)
   if config.max_tests <= 0 {
     return octree_raycast_single(
       &octree,
@@ -617,7 +581,6 @@ raycast_single_octree :: proc(
       intersection_func,
     )
   }
-
   return raycast_single_octree_limited(&octree, ray, intersection_func, config)
 }
 
@@ -636,21 +599,18 @@ raycast_single_octree_limited :: proc(
   config: RaycastConfig,
 ) -> RayHit(T) {
   if octree.root == nil do return {}
-
   tests := 0
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
     1.0 / ray.direction.z,
   }
-
   t_min, t_max := ray_aabb_intersection(
     ray.origin,
     inv_dir,
     octree.root.bounds,
   )
   if t_min > config.max_dist || t_max < 0 do return {}
-
   return octree_node_raycast_single_limited(
     octree,
     octree.root,
@@ -685,7 +645,6 @@ octree_node_raycast_single_limited :: proc(
   max_tests: int,
 ) -> RayHit(T) {
   if tests^ >= max_tests do return {}
-
   for item in node.items {
     if tests^ >= max_tests do return {}
     hit, t := intersection_func(ray, item, max_dist)
@@ -694,15 +653,12 @@ octree_node_raycast_single_limited :: proc(
       return RayHit(T){primitive = item, t = t, hit = true}
     }
   }
-
   if node.children[0] == nil do return {}
-
   child_intersections: [8]struct {
     idx:   i32,
     t_min: f32,
   }
   valid_count := 0
-
   for i in 0 ..< 8 {
     child_t_min, child_t_max := ray_aabb_intersection(
       ray.origin,
@@ -717,14 +673,12 @@ octree_node_raycast_single_limited :: proc(
       valid_count += 1
     }
   }
-
   slice.sort_by(child_intersections[:valid_count], proc(a, b: struct {
       idx:   i32,
       t_min: f32,
     }) -> bool {
     return a.t_min < b.t_min
   })
-
   for i in 0 ..< valid_count {
     if tests^ >= max_tests do return {}
     child_idx := child_intersections[i].idx
@@ -751,7 +705,6 @@ octree_node_raycast_single_limited :: proc(
     )
     if result.hit do return result
   }
-
   return {}
 }
 
@@ -774,21 +727,17 @@ raycast_multi_octree :: proc(
 ) {
   clear(results)
   if len(primitives) == 0 do return
-
   overall_bounds := AABB_UNDEFINED
   for prim in primitives {
     overall_bounds = aabb_union(overall_bounds, bounds_func(prim))
   }
-
   octree: Octree(T)
   octree.bounds_func = bounds_func
   octree_init(&octree, overall_bounds)
   defer octree_destroy(&octree)
-
   for prim in primitives {
     octree_insert(&octree, prim)
   }
-
   if config.max_tests <= 0 {
     octree_raycast_multi(
       &octree,
@@ -799,7 +748,6 @@ raycast_multi_octree :: proc(
     )
     return
   }
-
   raycast_multi_octree_limited(
     &octree,
     ray,
@@ -825,21 +773,18 @@ raycast_multi_octree_limited :: proc(
   results: ^[dynamic]RayHit(T),
 ) {
   if octree.root == nil do return
-
   tests := 0
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
     1.0 / ray.direction.z,
   }
-
   t_min, t_max := ray_aabb_intersection(
     ray.origin,
     inv_dir,
     octree.root.bounds,
   )
   if t_min > config.max_dist || t_max < 0 do return
-
   octree_node_raycast_multi_limited(
     octree,
     octree.root,
@@ -853,7 +798,6 @@ raycast_multi_octree_limited :: proc(
     &tests,
     config.max_tests,
   )
-
   if len(results^) > 1 {
     slice.sort_by(results[:], proc(a, b: RayHit(T)) -> bool {return a.t < b.t})
   }
@@ -880,7 +824,6 @@ octree_node_raycast_multi_limited :: proc(
   max_tests: int,
 ) {
   if tests^ >= max_tests do return
-
   for item in node.items {
     if tests^ >= max_tests do return
     hit, t := intersection_func(ray, item, max_dist)
@@ -889,9 +832,7 @@ octree_node_raycast_multi_limited :: proc(
       append(results, RayHit(T){primitive = item, t = t, hit = true})
     }
   }
-
   if node.children[0] == nil do return
-
   for i in 0 ..< 8 {
     if tests^ >= max_tests do return
     child_t_min, child_t_max := ray_aabb_intersection(
@@ -934,10 +875,8 @@ raycast_brute :: proc(
 ) -> RayHit(T) {
   best_hit: RayHit(T)
   best_hit.t = config.max_dist
-
   max_tests := config.max_tests
   if max_tests <= 0 do max_tests = len(primitives)
-
   for prim, i in primitives {
     if i >= max_tests do break
     hit, t := intersection_func(ray, prim, best_hit.t)
@@ -947,7 +886,6 @@ raycast_brute :: proc(
       best_hit.hit = true
     }
   }
-
   return best_hit
 }
 
@@ -968,7 +906,6 @@ raycast_single_brute :: proc(
 ) -> RayHit(T) {
   max_tests := config.max_tests
   if max_tests <= 0 do max_tests = len(primitives)
-
   for prim, i in primitives {
     if i >= max_tests do break
     hit, t := intersection_func(ray, prim, config.max_dist)
@@ -976,7 +913,6 @@ raycast_single_brute :: proc(
       return RayHit(T){primitive = prim, t = t, hit = true}
     }
   }
-
   return {}
 }
 
@@ -997,10 +933,8 @@ raycast_multi_brute :: proc(
   results: ^[dynamic]RayHit(T),
 ) {
   clear(results)
-
   max_tests := config.max_tests
   if max_tests <= 0 do max_tests = len(primitives)
-
   for prim, i in primitives {
     if i >= max_tests do break
     hit, t := intersection_func(ray, prim, config.max_dist)
@@ -1008,8 +942,7 @@ raycast_multi_brute :: proc(
       append(results, RayHit(T){primitive = prim, t = t, hit = true})
     }
   }
-
-  if len(results^) > 1 {
+  if len(results) > 1 {
     slice.sort_by(results[:], proc(a, b: RayHit(T)) -> bool {return a.t < b.t})
   }
 }

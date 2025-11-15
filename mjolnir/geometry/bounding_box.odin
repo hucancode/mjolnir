@@ -383,3 +383,39 @@ obb_capsule_intersect :: proc(
   hit = true
   return
 }
+
+// Check if two bounding boxes overlap in 3D
+overlap_bounds :: proc "contextless" (amin, amax, bmin, bmax: [3]f32) -> bool {
+  return(
+    amin.x <= bmax.x &&
+    amax.x >= bmin.x &&
+    amin.y <= bmax.y &&
+    amax.y >= bmin.y &&
+    amin.z <= bmax.z &&
+    amax.z >= bmin.z \
+  )
+}
+
+// Check if quantized bounds overlap
+overlap_quantized_bounds :: proc "contextless" (
+  amin, amax, bmin, bmax: [3]i32,
+) -> bool {
+  return(
+    amin.x <= bmax.x &&
+    amax.x >= bmin.x &&
+    amin.y <= bmax.y &&
+    amax.y >= bmin.y &&
+    amin.z <= bmax.z &&
+    amax.z >= bmin.z \
+  )
+}
+
+// Quantize floating point vector to integer coordinates
+quantize_float :: proc "contextless" (v: [3]f32, factor: f32) -> [3]i32 {
+  scaled := v * factor + 0.5
+  return {
+    i32(math.floor(scaled.x)),
+    i32(math.floor(scaled.y)),
+    i32(math.floor(scaled.z)),
+  }
+}

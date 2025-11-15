@@ -52,85 +52,47 @@ PushConstants :: struct {
 }
 
 init :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
-  renderer.enabled = true
-  renderer.color_mode = .Random_Colors
-  renderer.debug_mode = false
-  renderer.alpha = 0.6
-  renderer.height_offset = 0.05
-  renderer.base_color = {0.0, 0.8, 0.2}
-  renderer.path_enabled = false
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &vk.CommandBufferAllocateInfo {
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = gctx.command_pool,
-      level = .SECONDARY,
-      commandBufferCount = u32(len(renderer.commands)),
-    },
-    raw_data(renderer.commands[:]),
-  ) or_return
+) -> (
+  ret: vk.Result,
+) {
+  self.enabled = true
+  self.color_mode = .Random_Colors
+  self.debug_mode = false
+  self.alpha = 0.6
+  self.height_offset = 0.05
+  self.base_color = {0.0, 0.8, 0.2}
+  self.path_enabled = false
+  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
   defer if ret != .SUCCESS {
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(renderer.commands)),
-      raw_data(renderer.commands[:]),
-    )
+    gpu.free_command_buffer(gctx, self.commands[:])
   }
-  create_pipeline(renderer, gctx, rm) or_return
+  create_pipeline(self, gctx, rm) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyPipeline(gctx.device, renderer.pipeline, nil)
-    vk.DestroyPipeline(gctx.device, renderer.line_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, renderer.pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(renderer.commands)),
-      raw_data(renderer.commands[:]),
-    )
+    vk.DestroyPipeline(gctx.device, self.line_pipeline, nil)
+    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   }
-  renderer.vertex_buffer = gpu.create_mutable_buffer(
+  self.vertex_buffer = gpu.create_mutable_buffer(
     gctx,
     Vertex,
     16384,
     {.VERTEX_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &renderer.vertex_buffer)
-    vk.DestroyPipeline(gctx.device, renderer.pipeline, nil)
-    vk.DestroyPipeline(gctx.device, renderer.line_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, renderer.pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(renderer.commands)),
-      raw_data(renderer.commands[:]),
-    )
+    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
   }
-  renderer.index_buffer = gpu.create_mutable_buffer(
+  self.index_buffer = gpu.create_mutable_buffer(
     gctx,
     u32,
     32768,
     {.INDEX_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &renderer.index_buffer)
-    gpu.mutable_buffer_destroy(gctx.device, &renderer.vertex_buffer)
-    vk.DestroyPipeline(gctx.device, renderer.pipeline, nil)
-    vk.DestroyPipeline(gctx.device, renderer.line_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, renderer.pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(renderer.commands)),
-      raw_data(renderer.commands[:]),
-    )
+    gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
   }
-  renderer.path_vertex_buffer = gpu.create_mutable_buffer(
+  self.path_vertex_buffer = gpu.create_mutable_buffer(
     gctx,
     Vertex,
     1024,
@@ -139,23 +101,14 @@ init :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(
-  self: ^Renderer,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
-) {
-  vk.DestroyPipeline(device, self.pipeline, nil)
-  vk.DestroyPipeline(device, self.line_pipeline, nil)
-  vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
-  gpu.mutable_buffer_destroy(device, &self.vertex_buffer)
-  gpu.mutable_buffer_destroy(device, &self.index_buffer)
-  gpu.mutable_buffer_destroy(device, &self.path_vertex_buffer)
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    u32(len(self.commands)),
-    raw_data(self.commands[:]),
-  )
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+  vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+  vk.DestroyPipeline(gctx.device, self.line_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+  gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.path_vertex_buffer)
+  gpu.free_command_buffer(gctx, self.commands[:])
 }
 
 begin_record :: proc(
@@ -191,48 +144,27 @@ begin_pass :: proc(
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   color_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
+    rm.images_2d,
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
   depth_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .DEPTH, frame_index),
+    rm.images_2d,
+    camera.attachments[.DEPTH][frame_index],
   )
-  color_attachment := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = color_texture.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .STORE,
-  }
-  depth_attachment := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = depth_texture.view,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .STORE,
-  }
   extent := camera.extent
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-    pDepthAttachment = &depth_attachment,
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
-  viewport := vk.Viewport {
-    width    = f32(extent.width),
-    height   = f32(extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  gpu.begin_rendering(
+    command_buffer,
+    extent.width,
+    extent.height,
+    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
+  )
+  gpu.set_viewport_scissor(
+    command_buffer,
+    extent.width,
+    extent.height,
+    flip_y = false,
+  )
 }
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {
@@ -248,35 +180,17 @@ render :: proc(
   frame_index: u32 = 0,
 ) {
   if !renderer.enabled do return
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.pipeline)
-  descriptor_sets := [?]vk.DescriptorSet {
-    rm.camera_buffer_descriptor_sets[frame_index],
-  }
-  vk.CmdBindDescriptorSets(
+  gpu.bind_graphics_pipeline(
     command_buffer,
-    .GRAPHICS,
+    renderer.pipeline,
     renderer.pipeline_layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
+    rm.camera_buffer_descriptor_sets[frame_index],
   )
   if renderer.vertex_count > 0 && renderer.index_count > 0 {
-    vertex_buffers := []vk.Buffer{renderer.vertex_buffer.buffer}
-    offsets := []vk.DeviceSize{0}
-    vk.CmdBindVertexBuffers(
+    gpu.bind_vertex_index_buffers(
       command_buffer,
-      0,
-      1,
-      raw_data(vertex_buffers),
-      raw_data(offsets),
-    )
-    vk.CmdBindIndexBuffer(
-      command_buffer,
+      renderer.vertex_buffer.buffer,
       renderer.index_buffer.buffer,
-      0,
-      .UINT32,
     )
     push_constants := PushConstants {
       world         = world_matrix,
@@ -296,16 +210,11 @@ render :: proc(
     vk.CmdDrawIndexed(command_buffer, renderer.index_count, 1, 0, 0, 0)
   }
   if renderer.path_enabled && renderer.path_vertex_count > 0 {
-    vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.line_pipeline)
-    vk.CmdBindDescriptorSets(
+    gpu.bind_graphics_pipeline(
       command_buffer,
-      .GRAPHICS,
+      renderer.line_pipeline,
       renderer.pipeline_layout,
-      0,
-      len(descriptor_sets),
-      raw_data(descriptor_sets[:]),
-      0,
-      nil,
+      rm.camera_buffer_descriptor_sets[frame_index],
     )
     path_buffers := []vk.Buffer{renderer.path_vertex_buffer.buffer}
     offsets := []vk.DeviceSize{0}
@@ -430,23 +339,13 @@ create_pipeline :: proc(
     SHADER_NAVMESH_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, navmesh_frag, nil)
-  set_layouts := []vk.DescriptorSetLayout{rm.camera_buffer_set_layout}
-  push_constant_range := vk.PushConstantRange {
-    stageFlags = {.VERTEX, .FRAGMENT},
-    size       = size_of(PushConstants),
-  }
-  layout_info := vk.PipelineLayoutCreateInfo {
-    sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-    setLayoutCount         = u32(len(set_layouts)),
-    pSetLayouts            = raw_data(set_layouts),
-    pushConstantRangeCount = 1,
-    pPushConstantRanges    = &push_constant_range,
-  }
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &layout_info,
-    nil,
-    &renderer.pipeline_layout,
+  renderer.pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange {
+      stageFlags = {.VERTEX, .FRAGMENT},
+      size = size_of(PushConstants),
+    },
+    rm.camera_buffer_set_layout,
   ) or_return
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
@@ -480,7 +379,7 @@ create_pipeline :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  rasterizer := gpu.create_standard_rasterizer(cull_mode = {})
+  rasterizer := gpu.create_double_sided_rasterizer()
   multisampling := gpu.create_standard_multisampling()
   // Depth testing enabled, writing disabled for transparency
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
@@ -553,10 +452,7 @@ create_pipeline :: proc(
   input_assembly_lines := gpu.create_standard_input_assembly(
     topology = .LINE_STRIP,
   )
-  rasterizer_lines := gpu.create_standard_rasterizer(
-    cull_mode = {},
-    line_width = 3.0,
-  )
+  rasterizer_lines := gpu.create_double_sided_rasterizer(line_width = 3.0)
   pipeline_info_lines := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = u32(len(shader_stages)),

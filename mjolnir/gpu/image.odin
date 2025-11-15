@@ -85,6 +85,7 @@ infer_aspect_mask :: proc(format: vk.Format) -> vk.ImageAspectFlags {
 
 // Calculate optimal mip levels for given dimensions
 calculate_mip_levels :: proc(width, height: u32) -> u32 {
+  // floor(log2(max(width, height))) + 1
   return u32(math.floor(math.log2(f32(max(width, height))))) + 1
 }
 
@@ -152,11 +153,7 @@ image_create :: proc(
   vk.CreateImage(gctx.device, &create_info, nil, &img.image) or_return
   mem_reqs: vk.MemoryRequirements
   vk.GetImageMemoryRequirements(gctx.device, img.image, &mem_reqs)
-  img.memory = allocate_vulkan_memory(
-    gctx,
-    mem_reqs,
-    img.spec.memory_flags,
-  ) or_return
+  img.memory = allocate_memory(gctx, mem_reqs, img.spec.memory_flags) or_return
   vk.BindImageMemory(gctx.device, img.image, img.memory, 0) or_return
   // Create default view if requested
   if img.spec.create_view {
@@ -216,32 +213,17 @@ image_create_with_data :: proc(
   defer mutable_buffer_destroy(gctx.device, &staging)
   cmd_buffer := begin_single_time_command(gctx) or_return
   // Transition to transfer dst
-  barrier_to_dst := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = .UNDEFINED,
-    newLayout = .TRANSFER_DST_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = img.image,
-    subresourceRange = {
-      aspectMask = img.spec.aspect_mask,
-      levelCount = 1,
-      layerCount = max(img.spec.array_layers, 1),
-    },
-    srcAccessMask = {},
-    dstAccessMask = {.TRANSFER_WRITE},
-  }
-  vk.CmdPipelineBarrier(
+  image_barrier(
     cmd_buffer,
+    img.image,
+    .UNDEFINED,
+    .TRANSFER_DST_OPTIMAL,
+    {},
+    {.TRANSFER_WRITE},
     {.TOP_OF_PIPE},
     {.TRANSFER},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &barrier_to_dst,
+    img.spec.aspect_mask,
+    layer_count = max(img.spec.array_layers, 1),
   )
   // Copy buffer to image
   region := vk.BufferImageCopy {
@@ -261,32 +243,17 @@ image_create_with_data :: proc(
     &region,
   )
   // Transition to final layout
-  barrier_to_final := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = .TRANSFER_DST_OPTIMAL,
-    newLayout = initial_layout,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = img.image,
-    subresourceRange = {
-      aspectMask = img.spec.aspect_mask,
-      levelCount = 1,
-      layerCount = max(img.spec.array_layers, 1),
-    },
-    srcAccessMask = {.TRANSFER_WRITE},
-    dstAccessMask = {.SHADER_READ},
-  }
-  vk.CmdPipelineBarrier(
+  image_barrier(
     cmd_buffer,
+    img.image,
+    .TRANSFER_DST_OPTIMAL,
+    initial_layout,
+    {.TRANSFER_WRITE},
+    {.SHADER_READ},
     {.TRANSFER},
     {.FRAGMENT_SHADER},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &barrier_to_final,
+    img.spec.aspect_mask,
+    layer_count = max(img.spec.array_layers, 1),
   )
   end_single_time_command(gctx, &cmd_buffer) or_return
   return img, .SUCCESS

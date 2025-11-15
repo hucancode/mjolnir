@@ -57,52 +57,29 @@ begin_ambient_pass :: proc(
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   color_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
+    rm.images_2d,
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
-  color_attachment := vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = color_texture.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = {color = {float32 = {0, 0, 0, 1}}},
-  }
-  extent := camera.extent
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
-  viewport := vk.Viewport {
-    width    = f32(extent.width),
-    height   = f32(extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  descriptor_sets := [?]vk.DescriptorSet {
+  gpu.begin_rendering(
+    command_buffer,
+    camera.extent.width,
+    camera.extent.height,
+    nil,
+    gpu.create_color_attachment(color_texture),
+  )
+  gpu.set_viewport_scissor(
+    command_buffer,
+    camera.extent.width,
+    camera.extent.height,
+    flip_y = false,
+  )
+  gpu.bind_graphics_pipeline(
+    command_buffer,
+    self.ambient_pipeline,
+    self.ambient_pipeline_layout,
     rm.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
     rm.textures_descriptor_set, // set = 1 (bindless textures)
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    self.ambient_pipeline_layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
   )
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.ambient_pipeline)
 }
 
 render_ambient :: proc(
@@ -118,12 +95,12 @@ render_ambient :: proc(
     camera_index           = camera_handle.index,
     environment_index      = self.environment_map.index,
     brdf_lut_index         = self.brdf_lut.index,
-    position_texture_index = resources.camera_get_attachment(camera, .POSITION, frame_index).index,
-    normal_texture_index   = resources.camera_get_attachment(camera, .NORMAL, frame_index).index,
-    albedo_texture_index   = resources.camera_get_attachment(camera, .ALBEDO, frame_index).index,
-    metallic_texture_index = resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index).index,
-    emissive_texture_index = resources.camera_get_attachment(camera, .EMISSIVE, frame_index).index,
-    depth_texture_index    = resources.camera_get_attachment(camera, .DEPTH, frame_index).index,
+    position_texture_index = camera.attachments[.POSITION][frame_index].index,
+    normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
+    albedo_texture_index   = camera.attachments[.ALBEDO][frame_index].index,
+    metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
+    depth_texture_index    = camera.attachments[.DEPTH][frame_index].index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }
@@ -149,54 +126,25 @@ init :: proc(
   width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
-) -> (ret: vk.Result) {
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &vk.CommandBufferAllocateInfo {
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = gctx.command_pool,
-      level = .SECONDARY,
-      commandBufferCount = u32(len(self.commands)),
-    },
-    raw_data(self.commands[:]),
-  ) or_return
+) -> (
+  ret: vk.Result,
+) {
+  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
   defer if ret != .SUCCESS {
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
+    gpu.free_command_buffer(gctx, self.commands[:])
   }
   log.debugf("renderer lighting init %d x %d", width, height)
-  ambient_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    rm.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    rm.textures_set_layout, // set = 1 (bindless textures)
-  }
-  ambient_push_constant_range := vk.PushConstantRange {
-    stageFlags = {.FRAGMENT},
-    size       = size_of(AmbientPushConstant),
-  }
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(ambient_pipeline_set_layouts),
-      pSetLayouts = raw_data(ambient_pipeline_set_layouts[:]),
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &ambient_push_constant_range,
+  self.ambient_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange {
+      stageFlags = {.FRAGMENT},
+      size = size_of(AmbientPushConstant),
     },
-    nil,
-    &self.ambient_pipeline_layout,
+    rm.camera_buffer_set_layout,
+    rm.textures_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
   }
   ambient_vert_module := gpu.create_shader_module(
     gctx.device,
@@ -220,7 +168,7 @@ init :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  ambient_rasterizer := gpu.create_standard_rasterizer(cull_mode = {})
+  ambient_rasterizer := gpu.create_double_sided_rasterizer()
   ambient_multisampling := gpu.create_standard_multisampling()
   ambient_color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask      = {.R, .G, .B, .A},
@@ -290,13 +238,6 @@ init :: proc(
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
   }
   environment_map: ^gpu.Image
   self.environment_map, environment_map = resources.create_texture_from_path(
@@ -309,18 +250,9 @@ init :: proc(
     true,
   ) or_return
   defer if ret != .SUCCESS {
-    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
-       freed {
+    if item, freed := cont.free(&rm.images_2d, self.environment_map); freed {
       gpu.image_destroy(gctx.device, item)
     }
-    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
   }
   self.environment_max_lod = 8.0 // default fallback
   if environment_map != nil {
@@ -339,66 +271,28 @@ init :: proc(
     TEXTURE_LUT_GGX,
   ) or_return
   defer if ret != .SUCCESS {
-    if item, freed := cont.free(&rm.image_2d_buffers, brdf_handle); freed {
+    if item, freed := cont.free(&rm.images_2d, brdf_handle); freed {
       gpu.image_destroy(gctx.device, item)
     }
-    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
-       freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
   }
   self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0
   log.info("Ambient pipeline initialized successfully")
-  lighting_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    rm.camera_buffer_set_layout, // set = 0 (regular cameras)
-    rm.textures_set_layout, // set = 1 (bindless textures/samplers)
-    rm.lights_buffer_set_layout, // set = 2 (light data)
-    rm.world_matrix_buffer_set_layout, // set = 3 (world matrices)
-    rm.spherical_camera_buffer_set_layout, // set = 4 (spherical cameras for point light shadows)
-    rm.dynamic_light_data_set_layout, // set = 5 (per-frame position + shadow map)
-  }
-  lighting_push_constant_range := vk.PushConstantRange {
-    stageFlags = {.VERTEX, .FRAGMENT},
-    size       = size_of(LightPushConstant),
-  }
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &vk.PipelineLayoutCreateInfo {
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(lighting_pipeline_set_layouts),
-      pSetLayouts = raw_data(lighting_pipeline_set_layouts[:]),
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &lighting_push_constant_range,
+  self.lighting_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange {
+      stageFlags = {.VERTEX, .FRAGMENT},
+      size = size_of(LightPushConstant),
     },
-    nil,
-    &self.lighting_pipeline_layout,
+    rm.camera_buffer_set_layout,
+    rm.textures_set_layout,
+    rm.lights_buffer_set_layout,
+    rm.world_matrix_buffer_set_layout,
+    rm.spherical_camera_buffer_set_layout,
+    rm.dynamic_light_data_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
-    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
-       freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
   }
   lighting_vert_module := gpu.create_shader_module(
     gctx.device,
@@ -502,22 +396,6 @@ init :: proc(
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
-    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
-       freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
   }
   log.info("Lighting pipeline initialized successfully")
   self.sphere_mesh, _ = resources.create_mesh(
@@ -529,23 +407,6 @@ init :: proc(
     if mesh, freed := cont.free(&rm.meshes, self.sphere_mesh); freed {
       resources.mesh_destroy(mesh, rm)
     }
-    vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
-    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
-       freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
   }
   self.cone_mesh, _ = resources.create_mesh(
     gctx,
@@ -556,26 +417,6 @@ init :: proc(
     if mesh, freed := cont.free(&rm.meshes, self.cone_mesh); freed {
       resources.mesh_destroy(mesh, rm)
     }
-    if mesh, freed := cont.free(&rm.meshes, self.sphere_mesh); freed {
-      resources.mesh_destroy(mesh, rm)
-    }
-    vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
-    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
-       freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
   }
   self.triangle_mesh, _ = resources.create_mesh(
     gctx,
@@ -586,29 +427,6 @@ init :: proc(
     if mesh, freed := cont.free(&rm.meshes, self.triangle_mesh); freed {
       resources.mesh_destroy(mesh, rm)
     }
-    if mesh, freed := cont.free(&rm.meshes, self.cone_mesh); freed {
-      resources.mesh_destroy(mesh, rm)
-    }
-    if mesh, freed := cont.free(&rm.meshes, self.sphere_mesh); freed {
-      resources.mesh_destroy(mesh, rm)
-    }
-    vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
-    if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
-       freed {
-      gpu.image_destroy(gctx.device, item)
-    }
-    vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
   }
   log.info("Light volume meshes initialized")
   return .SUCCESS
@@ -616,29 +434,22 @@ init :: proc(
 
 shutdown :: proc(
   self: ^Renderer,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
+  gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    u32(len(self.commands)),
-    raw_data(self.commands[:]),
-  )
-  vk.DestroyPipeline(device, self.ambient_pipeline, nil)
+  gpu.free_command_buffer(gctx, self.commands[:])
+  vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
-  vk.DestroyPipelineLayout(device, self.ambient_pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
   self.ambient_pipeline_layout = 0
-  if item, freed := cont.free(&rm.image_2d_buffers, self.environment_map);
-     freed {
-    gpu.image_destroy(device, item)
+  if item, freed := cont.free(&rm.images_2d, self.environment_map); freed {
+    gpu.image_destroy(gctx.device, item)
   }
-  if item, freed := cont.free(&rm.image_2d_buffers, self.brdf_lut); freed {
-    gpu.image_destroy(device, item)
+  if item, freed := cont.free(&rm.images_2d, self.brdf_lut); freed {
+    gpu.image_destroy(gctx.device, item)
   }
-  vk.DestroyPipelineLayout(device, self.lighting_pipeline_layout, nil)
-  vk.DestroyPipeline(device, self.lighting_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
+  vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
 }
 
 begin_record :: proc(
@@ -726,70 +537,36 @@ begin_pass :: proc(
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   final_image := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
+    rm.images_2d,
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
-  color_attachment := vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = final_image.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .LOAD,
-    storeOp = .STORE,
-    clearValue = {color = {float32 = BG_BLUE_GRAY}},
-  }
   depth_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .DEPTH, frame_index),
+    rm.images_2d,
+    camera.attachments[.DEPTH][frame_index],
   )
-  depth_attachment := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = depth_texture.view,
-    imageLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL, // Depth attachments must use depth-specific layout
-    loadOp      = .LOAD,
-    storeOp     = .DONT_CARE,
-  }
-  extent := camera.extent
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-    pDepthAttachment = &depth_attachment,
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(extent.height),
-    width    = f32(extent.width),
-    height   = -f32(extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  descriptor_sets := [?]vk.DescriptorSet {
+  gpu.begin_rendering(
+    command_buffer,
+    camera.extent.width,
+    camera.extent.height,
+    gpu.create_depth_attachment(depth_texture, .LOAD, .DONT_CARE),
+    gpu.create_color_attachment(final_image, .LOAD, .STORE, BG_BLUE_GRAY),
+  )
+  gpu.set_viewport_scissor(
+    command_buffer,
+    camera.extent.width,
+    camera.extent.height,
+  )
+  gpu.bind_graphics_pipeline(
+    command_buffer,
+    self.lighting_pipeline,
+    self.lighting_pipeline_layout,
     rm.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame cameras)
     rm.textures_descriptor_set, // set = 1 (textures/samplers)
     rm.lights_buffer_descriptor_set, // set = 2 (lights)
     rm.world_matrix_descriptor_set, // set = 3 (world matrices)
     rm.spherical_camera_buffer_descriptor_sets[frame_index], // set = 4 (per-frame spherical cameras)
     rm.dynamic_light_data_descriptor_sets[frame_index], // set = 5 (per-frame position + shadow map)
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    self.lighting_pipeline_layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
   )
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
 }
 
 render :: proc(
@@ -838,13 +615,13 @@ render :: proc(
   }
   push_constant := LightPushConstant {
     scene_camera_idx       = camera_handle.index,
-    position_texture_index = resources.camera_get_attachment(camera, .POSITION, frame_index).index,
-    normal_texture_index   = resources.camera_get_attachment(camera, .NORMAL, frame_index).index,
-    albedo_texture_index   = resources.camera_get_attachment(camera, .ALBEDO, frame_index).index,
-    metallic_texture_index = resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index).index,
-    emissive_texture_index = resources.camera_get_attachment(camera, .EMISSIVE, frame_index).index,
-    depth_texture_index    = resources.camera_get_attachment(camera, .DEPTH, frame_index).index,
-    input_image_index      = resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index).index,
+    position_texture_index = camera.attachments[.POSITION][frame_index].index,
+    normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
+    albedo_texture_index   = camera.attachments[.ALBEDO][frame_index].index,
+    metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
+    depth_texture_index    = camera.attachments[.DEPTH][frame_index].index,
+    input_image_index      = camera.attachments[.FINAL_IMAGE][frame_index].index,
   }
   for handle in rm.active_lights {
     light := cont.get(rm.lights, handle) or_continue

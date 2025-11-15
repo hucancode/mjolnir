@@ -20,7 +20,7 @@ create_empty_texture_2d :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = cont.alloc(&manager.image_2d_buffers)
+  handle, texture, ok = cont.alloc(&manager.images_2d)
   if !ok {
     log.error("Failed to allocate 2D texture: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -40,11 +40,11 @@ create_empty_texture_cube :: proc(
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
 ) -> (
   handle: Handle,
-  texture: ^gpu.CubeImageBuffer,
+  texture: ^gpu.CubeImage,
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = cont.alloc(&manager.image_cube_buffers)
+  handle, texture, ok = cont.alloc(&manager.images_cube)
   if !ok {
     log.error("Failed to allocate cube texture: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -82,7 +82,7 @@ create_texture_from_path :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = cont.alloc(&manager.image_2d_buffers)
+  handle, texture, ok = cont.alloc(&manager.images_2d)
   if !ok {
     log.error("Failed to allocate texture from path: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -158,7 +158,7 @@ create_texture_from_pixels :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = cont.alloc(&manager.image_2d_buffers)
+  handle, texture, ok = cont.alloc(&manager.images_2d)
   if !ok {
     log.error("Failed to allocate texture from pixels: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -203,7 +203,7 @@ create_texture_from_data :: proc(
   ret: vk.Result,
 ) {
   ok: bool
-  handle, texture, ok = cont.alloc(&manager.image_2d_buffers)
+  handle, texture, ok = cont.alloc(&manager.images_2d)
   if !ok {
     log.error("Failed to allocate texture from data: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -423,11 +423,62 @@ create_checkerboard_texture :: proc(
 }
 
 destroy_texture :: proc(device: vk.Device, manager: ^Manager, handle: Handle) {
-  if texture := cont.get(manager.image_2d_buffers, handle); texture != nil {
+  if texture := cont.get(manager.images_2d, handle); texture != nil {
     gpu.image_destroy(device, texture)
-    cont.free(&manager.image_2d_buffers, handle)
-  } else if cube_texture := cont.get(manager.image_cube_buffers, handle); cube_texture != nil {
+    cont.free(&manager.images_2d, handle)
+  } else if cube_texture := cont.get(manager.images_cube, handle);
+     cube_texture != nil {
     gpu.cube_depth_texture_destroy(device, cube_texture)
-    cont.free(&manager.image_cube_buffers, handle)
+    cont.free(&manager.images_cube, handle)
   }
+}
+
+set_texture_2d_descriptor :: proc(
+  gctx: ^gpu.GPUContext,
+  manager: ^Manager,
+  index: u32,
+  image_view: vk.ImageView,
+) {
+  if index >= MAX_TEXTURES {
+    log.warnf("Index %d out of bounds for bindless textures", index)
+    return
+  }
+  gpu.update_descriptor_set_array_offset(
+    gctx,
+    manager.textures_descriptor_set,
+    0,
+    index,
+    {
+      .SAMPLED_IMAGE,
+      vk.DescriptorImageInfo {
+        imageView = image_view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    },
+  )
+}
+
+set_texture_cube_descriptor :: proc(
+  gctx: ^gpu.GPUContext,
+  manager: ^Manager,
+  index: u32,
+  image_view: vk.ImageView,
+) {
+  if index >= MAX_CUBE_TEXTURES {
+    log.warnf("Index %d out of bounds for bindless cube textures", index)
+    return
+  }
+  gpu.update_descriptor_set_array_offset(
+    gctx,
+    manager.textures_descriptor_set,
+    2,
+    index,
+    {
+      .SAMPLED_IMAGE,
+      vk.DescriptorImageInfo {
+        imageView = image_view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    },
+  )
 }

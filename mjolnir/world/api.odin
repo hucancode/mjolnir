@@ -1,0 +1,255 @@
+package world
+
+import cont "../containers"
+import "../geometry"
+import "../resources"
+import "core:math"
+import "core:math/linalg"
+
+translate_by :: proc {
+  geometry.transform_translate_by,
+  node_translate_by,
+  node_handle_translate_by,
+}
+
+translate :: proc {
+  geometry.transform_translate,
+  node_translate,
+  node_handle_translate,
+}
+
+rotate_by :: proc {
+  geometry.transform_rotate_by_quaternion,
+  geometry.transform_rotate_by_angle,
+  node_rotate_by_quaternion,
+  node_rotate_by_angle,
+  node_handle_rotate_by_quaternion,
+  node_handle_rotate_by_angle,
+}
+
+rotate :: proc {
+  geometry.transform_rotate_quaternion,
+  geometry.transform_rotate_angle,
+  node_rotate_quaternion,
+  node_rotate_angle,
+  node_handle_rotate_quaternion,
+  node_handle_rotate_angle,
+}
+
+scale_xyz_by :: proc {
+  geometry.transform_scale_xyz_by,
+  node_scale_xyz_by,
+  node_handle_scale_xyz_by,
+}
+
+scale_by :: proc {
+  geometry.transform_scale_by,
+  node_scale_by,
+  node_handle_scale_by,
+}
+
+scale_xyz :: proc {
+  geometry.transform_scale_xyz,
+  node_scale_xyz,
+  node_handle_scale_xyz,
+}
+
+scale :: proc {
+  geometry.transform_scale,
+  node_scale,
+  node_handle_scale,
+}
+
+node_translate_by :: proc(node: ^Node, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+  geometry.transform_translate_by(&node.transform, x, y, z)
+}
+
+node_translate :: proc(node: ^Node, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+  geometry.transform_translate(&node.transform, x, y, z)
+}
+
+node_rotate_by :: proc {
+  node_rotate_by_quaternion,
+  node_rotate_by_angle,
+}
+
+node_rotate_by_quaternion :: proc(node: ^Node, q: quaternion128) {
+  geometry.transform_rotate_by_quaternion(&node.transform, q)
+}
+
+node_rotate_by_angle :: proc(
+  node: ^Node,
+  angle: f32,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
+) {
+  geometry.transform_rotate_by_angle(&node.transform, angle, axis)
+}
+
+node_rotate :: proc {
+  node_rotate_quaternion,
+  node_rotate_angle,
+}
+
+node_rotate_quaternion :: proc(node: ^Node, q: quaternion128) {
+  geometry.transform_rotate_quaternion(&node.transform, q)
+}
+
+node_rotate_angle :: proc(
+  node: ^Node,
+  angle: f32,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
+) {
+  geometry.transform_rotate_angle(&node.transform, angle, axis)
+}
+
+node_scale_xyz_by :: proc(node: ^Node, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+  geometry.transform_scale_xyz_by(&node.transform, x, y, z)
+}
+
+node_scale_by :: proc(node: ^Node, s: f32) {
+  geometry.transform_scale_by(&node.transform, s)
+}
+
+node_scale_xyz :: proc(node: ^Node, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+  geometry.transform_scale_xyz(&node.transform, x, y, z)
+}
+
+node_scale :: proc(node: ^Node, s: f32) {
+  geometry.transform_scale(&node.transform, s)
+}
+
+node_handle_translate_by :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  x: f32 = 0,
+  y: f32 = 0,
+  z: f32 = 0,
+) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_translate_by(&node.transform, x, y, z)
+  }
+}
+
+node_handle_translate :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  x: f32 = 0,
+  y: f32 = 0,
+  z: f32 = 0,
+) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_translate(&node.transform, x, y, z)
+  }
+}
+
+node_handle_rotate_by :: proc {
+  node_handle_rotate_by_quaternion,
+  node_handle_rotate_by_angle,
+}
+
+node_handle_rotate_by_quaternion :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  q: quaternion128,
+) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_rotate_by_quaternion(&node.transform, q)
+  }
+}
+
+node_handle_rotate_by_angle :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  angle: f32,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
+) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_rotate_by_angle(&node.transform, angle, axis)
+  }
+}
+
+node_handle_rotate :: proc {
+  node_handle_rotate_quaternion,
+  node_handle_rotate_angle,
+}
+
+node_handle_rotate_quaternion :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  q: quaternion128,
+) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_rotate_quaternion(&node.transform, q)
+  }
+}
+
+node_handle_rotate_angle :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  angle: f32,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
+) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_rotate_angle(&node.transform, angle, axis)
+  }
+}
+
+node_handle_scale_xyz_by :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  x: f32 = 1,
+  y: f32 = 1,
+  z: f32 = 1,
+) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_scale_xyz_by(&node.transform, x, y, z)
+  }
+}
+
+node_handle_scale_by :: proc(world: ^World, handle: resources.Handle, s: f32) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_scale_by(&node.transform, s)
+  }
+}
+
+node_handle_scale_xyz :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  x: f32 = 1,
+  y: f32 = 1,
+  z: f32 = 1,
+) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_scale_xyz(&node.transform, x, y, z)
+  }
+}
+
+node_handle_scale :: proc(world: ^World, handle: resources.Handle, s: f32) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.transform_scale(&node.transform, s)
+  }
+}
+
+get_node :: proc(world: ^World, handle: resources.Handle) -> ^Node {
+  return cont.get(world.nodes, handle)
+}
+
+enable_actor_tick :: proc(
+  world: ^World,
+  $T: typeid,
+  handle: resources.Handle,
+) {
+  pool := _ensure_actor_pool(world, T)
+  actor_enable_tick(pool, handle)
+}
+
+disable_actor_tick :: proc(
+  world: ^World,
+  $T: typeid,
+  handle: resources.Handle,
+) {
+  entry, pool_exists := world.actor_pools[typeid_of(T)]
+  if !pool_exists do return
+  pool := cast(^ActorPool(T))entry.pool_ptr
+  actor_disable_tick(pool, handle)
+}

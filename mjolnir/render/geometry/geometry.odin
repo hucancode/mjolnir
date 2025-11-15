@@ -25,24 +25,12 @@ init :: proc(
   gctx: ^gpu.GPUContext,
   width, height: u32,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &vk.CommandBufferAllocateInfo {
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = gctx.command_pool,
-      level = .SECONDARY,
-      commandBufferCount = u32(len(self.commands)),
-    },
-    raw_data(self.commands[:]),
-  ) or_return
+) -> (
+  ret: vk.Result,
+) {
+  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
   defer if ret != .SUCCESS {
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
+    gpu.free_command_buffer(gctx, self.commands[:])
   }
   depth_format: vk.Format = .D32_SFLOAT
   if rm.geometry_pipeline_layout == 0 {
@@ -168,222 +156,116 @@ begin_pass :: proc(
   if camera == nil do return
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
   position_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .POSITION, frame_index),
+    rm.images_2d,
+    camera.attachments[.POSITION][frame_index],
   )
   normal_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .NORMAL, frame_index),
+    rm.images_2d,
+    camera.attachments[.NORMAL][frame_index],
   )
   albedo_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .ALBEDO, frame_index),
+    rm.images_2d,
+    camera.attachments[.ALBEDO][frame_index],
   )
   metallic_roughness_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index),
+    rm.images_2d,
+    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
   )
   emissive_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
+    rm.images_2d,
+    camera.attachments[.EMISSIVE][frame_index],
   )
   final_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
+    rm.images_2d,
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
   // Transition all G-buffer images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
-  image_barriers := [?]vk.ImageMemoryBarrier {
-    // Position
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {},
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = position_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-    // Normal
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {},
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = normal_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-    // Albedo
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {},
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = albedo_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-    // Metallic/Roughness
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {},
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = metallic_roughness_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-    // Emissive
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {},
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = emissive_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-    // Final image
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {},
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = final_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-  }
-  vk.CmdPipelineBarrier(
+  gpu.image_barrier(
     command_buffer,
+    position_texture.image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
     {.TOP_OF_PIPE},
     {.COLOR_ATTACHMENT_OUTPUT},
+    {.COLOR},
+  )
+  gpu.image_barrier(
+    command_buffer,
+    normal_texture.image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
     {},
-    0,
-    nil,
-    0,
-    nil,
-    len(image_barriers),
-    raw_data(image_barriers[:]),
+    {.COLOR_ATTACHMENT_WRITE},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.COLOR},
+  )
+  gpu.image_barrier(
+    command_buffer,
+    albedo_texture.image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.COLOR},
+  )
+  gpu.image_barrier(
+    command_buffer,
+    metallic_roughness_texture.image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.COLOR},
+  )
+  gpu.image_barrier(
+    command_buffer,
+    emissive_texture.image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.COLOR},
+  )
+  gpu.image_barrier(
+    command_buffer,
+    final_texture.image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.COLOR},
   )
   depth_texture := cont.get(
-    rm.image_2d_buffers,
+    rm.images_2d,
     camera.attachments[.DEPTH][frame_index],
   )
-  position_attachment := vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = position_texture.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 0.0}}},
-  }
-  normal_attachment := vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = normal_texture.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
-  }
-  albedo_attachment := vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = albedo_texture.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
-  }
-  metallic_roughness_attachment := vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = metallic_roughness_texture.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
-  }
-  emissive_attachment := vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = emissive_texture.view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
-  }
-  depth_attachment := vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = depth_texture.view,
-    imageLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    loadOp = .LOAD,
-    storeOp = .STORE,
-    clearValue = {depthStencil = {depth = 1.0, stencil = 0}},
-  }
-  color_attachments := [?]vk.RenderingAttachmentInfoKHR {
-    position_attachment,
-    normal_attachment,
-    albedo_attachment,
-    metallic_roughness_attachment,
-    emissive_attachment,
-  }
-  extent := camera.extent
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = 1,
-    colorAttachmentCount = len(color_attachments),
-    pColorAttachments = raw_data(color_attachments[:]),
-    pDepthAttachment = &depth_attachment,
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(extent.height),
-    width    = f32(extent.width),
-    height   = -f32(extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  gpu.begin_rendering(
+    command_buffer,
+    camera.extent.width,
+    camera.extent.height,
+    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+    gpu.create_color_attachment(position_texture),
+    gpu.create_color_attachment(normal_texture),
+    gpu.create_color_attachment(albedo_texture),
+    gpu.create_color_attachment(metallic_roughness_texture),
+    gpu.create_color_attachment(emissive_texture),
+  )
+  gpu.set_viewport_scissor(
+    command_buffer,
+    camera.extent.width,
+    camera.extent.height,
+  )
 }
 
 end_pass :: proc(
@@ -397,123 +279,84 @@ end_pass :: proc(
   if camera == nil do return
   // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting and post-processing
   position_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .POSITION, frame_index),
+    rm.images_2d,
+    camera.attachments[.POSITION][frame_index],
   )
   normal_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .NORMAL, frame_index),
+    rm.images_2d,
+    camera.attachments[.NORMAL][frame_index],
   )
   albedo_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .ALBEDO, frame_index),
+    rm.images_2d,
+    camera.attachments[.ALBEDO][frame_index],
   )
   metallic_roughness_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index),
+    rm.images_2d,
+    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
   )
   emissive_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
+    rm.images_2d,
+    camera.attachments[.EMISSIVE][frame_index],
   )
   depth_texture := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .DEPTH, frame_index),
+    rm.images_2d,
+    camera.attachments[.DEPTH][frame_index],
   )
   // transition all G-buffer attachments + depth to SHADER_READ_ONLY_OPTIMAL
-  image_barriers := [?]vk.ImageMemoryBarrier {
-    // Position
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = position_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-    // Normal
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = normal_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-    // Albedo
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = albedo_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-    // Metallic/Roughness
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = metallic_roughness_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-    // Emissive
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = emissive_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    },
-  }
-  vk.CmdPipelineBarrier(
+  gpu.image_barrier(
     command_buffer,
-    {.COLOR_ATTACHMENT_OUTPUT, .LATE_FRAGMENT_TESTS},
+    position_texture.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.COLOR_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+    {.COLOR_ATTACHMENT_OUTPUT},
     {.FRAGMENT_SHADER},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    len(image_barriers),
-    raw_data(image_barriers[:]),
+    {.COLOR},
+  )
+  gpu.image_barrier(
+    command_buffer,
+    normal_texture.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.COLOR_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {.COLOR},
+  )
+  gpu.image_barrier(
+    command_buffer,
+    albedo_texture.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.COLOR_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {.COLOR},
+  )
+  gpu.image_barrier(
+    command_buffer,
+    metallic_roughness_texture.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.COLOR_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {.COLOR},
+  )
+  gpu.image_barrier(
+    command_buffer,
+    emissive_texture.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.COLOR_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {.COLOR},
   )
 }
 
@@ -530,7 +373,10 @@ render :: proc(
   if draw_buffer == 0 || count_buffer == 0 {
     return
   }
-  descriptor_sets := [?]vk.DescriptorSet {
+  gpu.bind_graphics_pipeline(
+    command_buffer,
+    self.pipeline,
+    rm.geometry_pipeline_layout,
     rm.camera_buffer_descriptor_sets[frame_index], // Per-frame to avoid overlap
     rm.textures_descriptor_set,
     rm.bone_buffer_descriptor_set,
@@ -539,18 +385,7 @@ render :: proc(
     rm.node_data_descriptor_set,
     rm.mesh_data_descriptor_set,
     rm.vertex_skinning_descriptor_set,
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    rm.geometry_pipeline_layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
   )
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
   push_constants := PushConstant {
     camera_index = camera_handle.index,
   }
@@ -562,16 +397,11 @@ render :: proc(
     size_of(PushConstant),
     &push_constants,
   )
-  vertex_buffers := [1]vk.Buffer{rm.vertex_buffer.buffer}
-  vertex_offsets := [1]vk.DeviceSize{0}
-  vk.CmdBindVertexBuffers(
+  gpu.bind_vertex_index_buffers(
     command_buffer,
-    0,
-    1,
-    raw_data(vertex_buffers[:]),
-    raw_data(vertex_offsets[:]),
+    rm.vertex_buffer.buffer,
+    rm.index_buffer.buffer,
   )
-  vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     draw_buffer,
@@ -583,18 +413,9 @@ render :: proc(
   )
 }
 
-shutdown :: proc(
-  self: ^Renderer,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
-) {
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    u32(len(self.commands)),
-    raw_data(self.commands[:]),
-  )
-  vk.DestroyPipeline(device, self.pipeline, nil)
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+  gpu.free_command_buffer(gctx, self.commands[:])
+  vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   self.pipeline = 0
 }
 

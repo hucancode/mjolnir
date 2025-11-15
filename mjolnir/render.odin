@@ -93,7 +93,9 @@ renderer_init :: proc(
   swapchain_extent: vk.Extent2D,
   swapchain_format: vk.Format,
   dpi_scale: f32,
-) -> (ret: vk.Result) {
+) -> (
+  ret: vk.Result,
+) {
   main_camera_handle, main_camera_ptr, main_camera_ok := cont.alloc(
     &rm.cameras,
   )
@@ -176,18 +178,17 @@ renderer_init :: proc(
 
 renderer_shutdown :: proc(
   self: ^Renderer,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
+  gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  retained_ui.shutdown(&self.retained_ui, device)
-  debug_ui.shutdown(&self.ui, device)
-  navigation.shutdown(&self.navigation, device, command_pool)
-  post_process.shutdown(&self.post_process, device, command_pool, rm)
-  particles.shutdown(&self.particles, device, command_pool)
-  transparency.shutdown(&self.transparency, device, command_pool)
-  lighting.shutdown(&self.lighting, device, command_pool, rm)
-  geometry.shutdown(&self.geometry, device, command_pool)
+  retained_ui.shutdown(&self.retained_ui, gctx)
+  debug_ui.shutdown(&self.ui, gctx)
+  navigation.shutdown(&self.navigation, gctx)
+  post_process.shutdown(&self.post_process, gctx, rm)
+  particles.shutdown(&self.particles, gctx)
+  transparency.shutdown(&self.transparency, gctx)
+  lighting.shutdown(&self.lighting, gctx, rm)
+  geometry.shutdown(&self.geometry, gctx)
 }
 
 resize :: proc(
@@ -226,12 +227,11 @@ record_camera_visibility :: proc(
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   // Iterate through all regular cameras with shadow pass enabled
-  for &entry, cam_index in rm.cameras.entries {
-    if !entry.active do continue
+  for &entry, cam_index in rm.cameras.entries do if entry.active {
     if resources.PassType.SHADOW not_in entry.item.enabled_passes do continue
     cam := &entry.item
     // Upload camera data to GPU buffer
-    resources.camera_upload_data(rm, cam, u32(cam_index), frame_index)
+    resources.camera_upload_data(rm, u32(cam_index), frame_index)
     world.visibility_system_dispatch_culling(
       &world_state.visibility,
       gctx,
@@ -456,53 +456,41 @@ record_transparency_pass :: proc(
     rm,
   )
   // Barrier: Wait for compute to finish before reading draw commands
-  compute_done := [?]vk.BufferMemoryBarrier {
-    {
-      sType = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer = camera.transparent_draw_commands[frame_index].buffer,
-      size = vk.DeviceSize(
-        camera.transparent_draw_commands[frame_index].bytes_count,
-      ),
-    },
-    {
-      sType = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer = camera.transparent_draw_count[frame_index].buffer,
-      size = vk.DeviceSize(
-        camera.transparent_draw_count[frame_index].bytes_count,
-      ),
-    },
-    {
-      sType = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer = camera.sprite_draw_commands[frame_index].buffer,
-      size = vk.DeviceSize(
-        camera.sprite_draw_commands[frame_index].bytes_count,
-      ),
-    },
-    {
-      sType = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer = camera.sprite_draw_count[frame_index].buffer,
-      size = vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
-    },
-  }
-  vk.CmdPipelineBarrier(
+  gpu.buffer_barrier(
     command_buffer,
+    camera.transparent_draw_commands[frame_index].buffer,
+    vk.DeviceSize(camera.transparent_draw_commands[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
     {.DRAW_INDIRECT},
-    {},
-    0,
-    nil,
-    len(compute_done),
-    raw_data(compute_done[:]),
-    0,
-    nil,
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    camera.transparent_draw_count[frame_index].buffer,
+    vk.DeviceSize(camera.transparent_draw_count[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    camera.sprite_draw_commands[frame_index].buffer,
+    vk.DeviceSize(camera.sprite_draw_commands[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    camera.sprite_draw_count[frame_index].buffer,
+    vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
   )
   transparency.begin_pass(
     &self.transparency,

@@ -456,7 +456,7 @@ build_contours :: proc(
     for i in 0 ..< len(cset.conts) {
       cont := &cset.conts[i]
       // If the contour is wound backwards, it is a hole
-      area := calculate_contour_area(cont.verts)
+      area := geometry.calculate_contour_area(cont.verts)
       winding[i] = area < 0 ? -1 : 1
     }
     // Count holes using slice.count_proc
@@ -790,21 +790,6 @@ remove_degenerate_contour_segments :: proc(simplified: ^[dynamic][4]i32) {
     }
   }
   resize(simplified, write_idx)
-}
-
-// Calculate signed area of 2D contour (positive = counter-clockwise, negative = clockwise)
-calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
-  if len(verts) < 3 do return 0 // Need at least 3 vertices
-  nverts := len(verts)
-  area: i32 = 0
-  j := nverts - 1
-  for i in 0 ..< nverts {
-    vi := verts[i]
-    vj := verts[j]
-    area += vi.x * vj.z - vj.x * vi.z
-    j = i
-  }
-  return (area + 1) / 2 // Round and return signed area
 }
 
 create_contour_set :: proc(

@@ -25,6 +25,7 @@ OrthographicProjection :: struct {
 CameraData :: struct {
   view:            matrix[4, 4]f32,
   projection:      matrix[4, 4]f32,
+  // TODO: consider store inverse view, inverse projection
   viewport_params: [4]f32,
   position:        [4]f32,
   frustum_planes:  [6][4]f32,
@@ -96,7 +97,7 @@ Camera :: struct {
     vk.DrawIndexedIndirectCommand,
   ),
   depth_pyramid:                [MAX_FRAMES_IN_FLIGHT]DepthPyramid,
-  descriptor_set:    [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  descriptor_set:               [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   depth_reduce_descriptor_sets: [MAX_FRAMES_IN_FLIGHT][16]vk.DescriptorSet,
 }
 
@@ -115,8 +116,7 @@ camera_init :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
   width, height: u32,
-  color_format: vk.Format,
-  depth_format: vk.Format,
+  color_format, depth_format: vk.Format,
   enabled_passes: PassTypeSet = {
     .SHADOW,
     .GEOMETRY,
@@ -151,16 +151,10 @@ camera_init :: proc(
   }
   right := linalg.normalize(linalg.cross(forward, safe_up))
   recalc_up := linalg.cross(right, forward)
-  rotation_matrix := linalg.Matrix3f32 {
-    right.x,
-    recalc_up.x,
-    -forward.x,
-    right.y,
-    recalc_up.y,
-    -forward.y,
-    right.z,
-    recalc_up.z,
-    -forward.z,
+  rotation_matrix := matrix[3,3]f32 {
+    right.x, recalc_up.x, -forward.x,
+    right.y, recalc_up.y, -forward.y,
+    right.z, recalc_up.z, -forward.z,
   }
   camera.rotation = linalg.quaternion_from_matrix3(rotation_matrix)
   camera.extent = {width, height}
@@ -233,66 +227,41 @@ camera_init :: proc(
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
     // Transition depth image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL
-    depth_tex := cont.get(manager.image_2d_buffers, camera.attachments[.DEPTH][frame])
-    if depth_tex != nil {
+    if depth, ok := cont.get(manager.images_2d, camera.attachments[.DEPTH][frame]); ok {
       cmd_buf := gpu.begin_single_time_command(gctx) or_return
-      barrier := vk.ImageMemoryBarrier {
-        sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .UNDEFINED,
-        newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = depth_tex.image,
-        subresourceRange = {
-          aspectMask = {.DEPTH},
-          baseMipLevel = 0,
-          levelCount = 1,
-          baseArrayLayer = 0,
-          layerCount = 1,
-        },
-        srcAccessMask = {},
-        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
-      }
-      vk.CmdPipelineBarrier(
+      gpu.image_barrier(
         cmd_buf,
+        depth.image,
+        .UNDEFINED,
+        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        {},
+        {.DEPTH_STENCIL_ATTACHMENT_READ},
         {.TOP_OF_PIPE},
         {.EARLY_FRAGMENT_TESTS},
-        {},
-        0,
-        nil,
-        0,
-        nil,
-        1,
-        &barrier,
+        {.DEPTH},
       )
       gpu.end_single_time_command(gctx, &cmd_buf) or_return
     }
   }
-  alloc_info := vk.CommandBufferAllocateInfo {
-    sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-    commandPool        = gctx.command_pool,
-    level              = .SECONDARY,
-    commandBufferCount = MAX_FRAMES_IN_FLIGHT,
-  }
   if .GEOMETRY in enabled_passes {
-    vk.AllocateCommandBuffers(
-      gctx.device,
-      &alloc_info,
-      raw_data(camera.geometry_commands[:]),
+    gpu.allocate_command_buffer(
+      gctx,
+      camera.geometry_commands[:],
+      .SECONDARY,
     ) or_return
   }
   if .LIGHTING in enabled_passes {
-    vk.AllocateCommandBuffers(
-      gctx.device,
-      &alloc_info,
-      raw_data(camera.lighting_commands[:]),
+    gpu.allocate_command_buffer(
+      gctx,
+      camera.lighting_commands[:],
+      .SECONDARY,
     ) or_return
   }
   if .TRANSPARENCY in enabled_passes {
-    vk.AllocateCommandBuffers(
-      gctx.device,
-      &alloc_info,
-      raw_data(camera.transparency_commands[:]),
+    gpu.allocate_command_buffer(
+      gctx,
+      camera.transparency_commands[:],
+      .SECONDARY,
     ) or_return
   }
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -344,121 +313,66 @@ camera_init :: proc(
     ) or_return
   }
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    camera_allocate_descriptors(
-      gctx,
-      manager,
-      camera,
-      u32(frame),
-      &manager.visibility_depth_reduce_descriptor_layout,
-    ) or_return
+    camera_allocate_descriptors(gctx, manager, camera, u32(frame)) or_return
   }
   return .SUCCESS
 }
 
 camera_destroy :: proc(
-  camera: ^Camera,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
+  self: ^Camera,
+  gctx: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  for attachment_type in AttachmentType {
-    for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-      handle := camera.attachments[attachment_type][frame]
-      if item, freed := cont.free(&manager.image_2d_buffers, handle); freed {
-        gpu.image_destroy(device, item)
+  for handles in self.attachments {
+    for handle in handles {
+      if item, freed := cont.free(&manager.images_2d, handle); freed {
+        gpu.image_destroy(gctx.device, item)
       }
     }
   }
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    MAX_FRAMES_IN_FLIGHT,
-    raw_data(camera.geometry_commands[:]),
-  )
-  camera.geometry_commands = {}
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    MAX_FRAMES_IN_FLIGHT,
-    raw_data(camera.lighting_commands[:]),
-  )
-  camera.lighting_commands = {}
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    MAX_FRAMES_IN_FLIGHT,
-    raw_data(camera.transparency_commands[:]),
-  )
-  camera.transparency_commands = {}
+  gpu.free_command_buffer(gctx, self.geometry_commands[:])
+  gpu.free_command_buffer(gctx, self.lighting_commands[:])
+  gpu.free_command_buffer(gctx, self.transparency_commands[:])
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    for mip in 0 ..< camera.depth_pyramid[frame].mip_levels {
-      vk.DestroyImageView(device, camera.depth_pyramid[frame].views[mip], nil)
+    for mip in 0 ..< self.depth_pyramid[frame].mip_levels {
+      vk.DestroyImageView(
+        gctx.device,
+        self.depth_pyramid[frame].views[mip],
+        nil,
+      )
     }
-    vk.DestroyImageView(device, camera.depth_pyramid[frame].full_view, nil)
-    vk.DestroySampler(device, camera.depth_pyramid[frame].sampler, nil)
-    gpu.mutable_buffer_destroy(device, &camera.late_draw_count[frame])
-    gpu.mutable_buffer_destroy(device, &camera.late_draw_commands[frame])
-    gpu.mutable_buffer_destroy(device, &camera.transparent_draw_count[frame])
+    vk.DestroyImageView(gctx.device, self.depth_pyramid[frame].full_view, nil)
+    vk.DestroySampler(gctx.device, self.depth_pyramid[frame].sampler, nil)
+    gpu.mutable_buffer_destroy(gctx.device, &self.late_draw_count[frame])
+    gpu.mutable_buffer_destroy(gctx.device, &self.late_draw_commands[frame])
     gpu.mutable_buffer_destroy(
-      device,
-      &camera.transparent_draw_commands[frame],
+      gctx.device,
+      &self.transparent_draw_count[frame],
     )
-    gpu.mutable_buffer_destroy(device, &camera.sprite_draw_count[frame])
-    gpu.mutable_buffer_destroy(device, &camera.sprite_draw_commands[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &self.transparent_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(gctx.device, &self.sprite_draw_count[frame])
+    gpu.mutable_buffer_destroy(gctx.device, &self.sprite_draw_commands[frame])
     // Free depth pyramid texture
     if pyramid_item, freed := cont.free(
-      &manager.image_2d_buffers,
-      camera.depth_pyramid[frame].texture,
+      &manager.images_2d,
+      self.depth_pyramid[frame].texture,
     ); freed {
-      gpu.image_destroy(device, pyramid_item)
+      gpu.image_destroy(gctx.device, pyramid_item)
     }
   }
 }
 
-camera_upload_data :: proc(
-  manager: ^Manager,
-  camera: ^Camera,
-  camera_index: u32,
-  frame_index: u32,
-) {
-  camera.data[frame_index].view = camera_calculate_view_matrix(camera)
-  camera.data[frame_index].projection = camera_calculate_projection_matrix(
-    camera,
-  )
-  near, far := camera_get_near_far(camera)
-  camera.data[frame_index].viewport_params = [4]f32 {
-    f32(camera.extent.width),
-    f32(camera.extent.height),
-    near,
-    far,
-  }
-  camera.data[frame_index].position = [4]f32 {
-    camera.position[0],
-    camera.position[1],
-    camera.position[2],
-    1.0,
-  }
-  frustum := geometry.make_frustum(
-    camera.data[frame_index].projection * camera.data[frame_index].view,
-  )
-  camera.data[frame_index].frustum_planes = frustum.planes
-  gpu.write(
-    &manager.camera_buffers[frame_index],
-    &camera.data[frame_index],
-    int(camera_index),
-  )
-}
-
-camera_calculate_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
+camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   forward_vec := camera_forward(camera)
   up_vec := camera_up(camera)
   target_point := camera.position + forward_vec
   return linalg.matrix4_look_at(camera.position, target_point, up_vec)
 }
 
-camera_calculate_projection_matrix :: proc(
-  camera: ^Camera,
-) -> matrix[4, 4]f32 {
+camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
     return linalg.matrix4_perspective(
@@ -481,29 +395,29 @@ camera_calculate_projection_matrix :: proc(
   }
 }
 
-camera_forward :: proc(camera: ^Camera) -> [3]f32 {
+camera_forward :: proc(self: ^Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(
-    camera.rotation,
+    self.rotation,
     -linalg.VECTOR3F32_Z_AXIS,
   )
 }
 
-camera_right :: proc(camera: ^Camera) -> [3]f32 {
+camera_right :: proc(self: ^Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(
-    camera.rotation,
+    self.rotation,
     linalg.VECTOR3F32_X_AXIS,
   )
 }
 
-camera_up :: proc(camera: ^Camera) -> [3]f32 {
+camera_up :: proc(self: ^Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(
-    camera.rotation,
+    self.rotation,
     linalg.VECTOR3F32_Y_AXIS,
   )
 }
 
-camera_get_near_far :: proc(camera: ^Camera) -> (near: f32, far: f32) {
-  switch proj in camera.projection {
+camera_get_near_far :: proc(self: ^Camera) -> (near: f32, far: f32) {
+  switch proj in self.projection {
   case PerspectiveProjection:
     return proj.near, proj.far
   case OrthographicProjection:
@@ -514,11 +428,11 @@ camera_get_near_far :: proc(camera: ^Camera) -> (near: f32, far: f32) {
 }
 
 camera_look_at :: proc(
-  camera: ^Camera,
+  self: ^Camera,
   from, to: [3]f32,
   world_up := linalg.VECTOR3F32_Y_AXIS,
 ) {
-  camera.position = from
+  self.position = from
   forward := linalg.normalize(to - from)
   safe_up := world_up
   if math.abs(linalg.dot(forward, world_up)) > 0.999 {
@@ -529,35 +443,21 @@ camera_look_at :: proc(
   }
   right := linalg.normalize(linalg.cross(forward, safe_up))
   recalc_up := linalg.cross(right, forward)
-  rotation_matrix := linalg.Matrix3f32 {
-    right.x,
-    recalc_up.x,
-    -forward.x,
-    right.y,
-    recalc_up.y,
-    -forward.y,
-    right.z,
-    recalc_up.z,
-    -forward.z,
+  rotation_matrix := matrix[3,3]f32 {
+    right.x, recalc_up.x, -forward.x,
+    right.y, recalc_up.y, -forward.y,
+    right.z, recalc_up.z, -forward.z,
   }
-  camera.rotation = linalg.quaternion_from_matrix3(rotation_matrix)
+  self.rotation = linalg.quaternion_from_matrix3(rotation_matrix)
 }
 
-camera_update_aspect_ratio :: proc(camera: ^Camera, new_aspect_ratio: f32) {
-  switch &proj in camera.projection {
+camera_update_aspect_ratio :: proc(self: ^Camera, new_aspect_ratio: f32) {
+  switch &proj in self.projection {
   case PerspectiveProjection:
     proj.aspect_ratio = new_aspect_ratio
   case OrthographicProjection:
   // For orthographic projection, might want to adjust width/height
   }
-}
-
-camera_get_attachment :: proc(
-  camera: ^Camera,
-  attachment_type: AttachmentType,
-  frame_index: u32,
-) -> Handle {
-  return camera.attachments[attachment_type][frame_index]
 }
 
 camera_resize :: proc(
@@ -584,22 +484,17 @@ camera_resize :: proc(
     }
     vk.DestroyImageView(gctx.device, p.full_view, nil)
     vk.DestroySampler(gctx.device, p.sampler, nil)
-    if pyramid_item, freed := cont.free(&manager.image_2d_buffers, p.texture);
-       freed {
+    if pyramid_item, freed := cont.free(&manager.images_2d, p.texture); freed {
       gpu.image_destroy(gctx.device, pyramid_item)
     }
-    p = {}
   }
-  // Destroy attachment textures
-  for attachment_type in AttachmentType {
-    for &handle in camera.attachments[attachment_type] {
-      if item, freed := cont.free(&manager.image_2d_buffers, handle); freed {
+  for handles in camera.attachments {
+    for handle in handles {
+      if item, freed := cont.free(&manager.images_2d, handle); freed {
         gpu.image_destroy(gctx.device, item)
       }
-      handle = {}
     }
   }
-  // Update dimensions and aspect ratio
   camera.extent = {width, height}
   if perspective, ok := &camera.projection.(PerspectiveProjection); ok {
     perspective.aspect_ratio = f32(width) / f32(height)
@@ -672,44 +567,23 @@ camera_resize :: proc(
       depth_format,
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
-    // Transition depth image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL
-    depth_tex := cont.get(manager.image_2d_buffers, camera.attachments[.DEPTH][frame])
+    depth_tex := cont.get(manager.images_2d, camera.attachments[.DEPTH][frame])
     if depth_tex != nil {
       cmd_buf := gpu.begin_single_time_command(gctx) or_return
-      barrier := vk.ImageMemoryBarrier {
-        sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .UNDEFINED,
-        newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = depth_tex.image,
-        subresourceRange = {
-          aspectMask = {.DEPTH},
-          baseMipLevel = 0,
-          levelCount = 1,
-          baseArrayLayer = 0,
-          layerCount = 1,
-        },
-        srcAccessMask = {},
-        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
-      }
-      vk.CmdPipelineBarrier(
+      gpu.image_barrier(
         cmd_buf,
+        depth_tex.image,
+        .UNDEFINED,
+        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        {},
+        {.DEPTH_STENCIL_ATTACHMENT_READ},
         {.TOP_OF_PIPE},
         {.EARLY_FRAGMENT_TESTS},
-        {},
-        0,
-        nil,
-        0,
-        nil,
-        1,
-        &barrier,
+        {.DEPTH},
       )
       gpu.end_single_time_command(gctx, &cmd_buf) or_return
     }
   }
-  // Recreate depth pyramids for all frames before allocating descriptors
-  // (late culling uses prev frame's pyramid, so all must exist first)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     create_camera_depth_pyramid(
       gctx,
@@ -721,13 +595,7 @@ camera_resize :: proc(
     ) or_return
   }
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    camera_allocate_descriptors(
-      gctx,
-      manager,
-      camera,
-      u32(frame),
-      &manager.visibility_depth_reduce_descriptor_layout,
-    ) or_return
+    camera_allocate_descriptors(gctx, manager, camera, u32(frame)) or_return
   }
   log.infof("Camera resized to %dx%d", width, height)
   return .SUCCESS
@@ -738,6 +606,7 @@ camera_get_visible_count :: proc(camera: ^Camera, frame_index: u32) -> u32 {
   return camera.late_draw_count[frame_index].mapped[0]
 }
 
+// TODO: this procedure has around 8 matrices operations, if you run this thousands times per frame you should optimize it first
 camera_viewport_to_world_ray :: proc(
   camera: ^Camera,
   mouse_x, mouse_y: f32,
@@ -749,8 +618,8 @@ camera_viewport_to_world_ray :: proc(
   ndc_x := (2.0 * mouse_x) / f32(camera.extent.width) - 1.0
   ndc_y := 1.0 - (2.0 * mouse_y) / f32(camera.extent.height)
   // Get view and projection matrices
-  view_matrix := camera_calculate_view_matrix(camera)
-  proj_matrix := camera_calculate_projection_matrix(camera)
+  view_matrix := camera_view_matrix(camera)
+  proj_matrix := camera_projection_matrix(camera)
   inv_proj := linalg.matrix4_inverse(proj_matrix)
   inv_view := linalg.matrix4_inverse(view_matrix)
   // Ray in clip space
@@ -866,7 +735,7 @@ create_camera_depth_pyramid :: proc(
   frame_index: u32,
 ) -> vk.Result {
   depth_handle := camera.attachments[.DEPTH][frame_index]
-  depth_texture := cont.get(manager.image_2d_buffers, depth_handle)
+  depth_texture := cont.get(manager.images_2d, depth_handle)
   log.debugf(
     "Using depth texture at bindless index %d for frame %d",
     depth_handle.index,
@@ -879,9 +748,7 @@ create_camera_depth_pyramid :: proc(
   mip_levels :=
     u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
   // Create depth pyramid texture with mip levels using new Image API
-  pyramid_handle, pyramid_texture, pyramid_ok := cont.alloc(
-    &manager.image_2d_buffers,
-  )
+  pyramid_handle, pyramid_texture, pyramid_ok := cont.alloc(&manager.images_2d)
   if !pyramid_ok {
     log.error("Failed to allocate handle for depth pyramid texture")
     return .ERROR_OUT_OF_DEVICE_MEMORY
@@ -899,34 +766,17 @@ create_camera_depth_pyramid :: proc(
   // Use immediate command buffer for initialization
   {
     cmd_buf := gpu.begin_single_time_command(gctx) or_return
-    barrier := vk.ImageMemoryBarrier {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .UNDEFINED,
-      newLayout = .GENERAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = pyramid_texture.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        baseMipLevel = 0,
-        levelCount = mip_levels,
-        baseArrayLayer = 0,
-        layerCount = 1,
-      },
-      srcAccessMask = {},
-      dstAccessMask = {.SHADER_READ, .SHADER_WRITE},
-    }
-    vk.CmdPipelineBarrier(
+    gpu.image_barrier(
       cmd_buf,
+      pyramid_texture.image,
+      .UNDEFINED,
+      .GENERAL,
+      {},
+      {.SHADER_READ, .SHADER_WRITE},
       {.TOP_OF_PIPE},
       {.COMPUTE_SHADER},
-      {},
-      0,
-      nil,
-      0,
-      nil,
-      1,
-      &barrier,
+      {.COLOR},
+      level_count = mip_levels,
     )
     gpu.end_single_time_command(gctx, &cmd_buf) or_return
   }
@@ -1018,256 +868,129 @@ camera_allocate_descriptors :: proc(
   manager: ^Manager,
   camera: ^Camera,
   frame_index: u32,
-  depth_reduce_descriptor_layout: ^vk.DescriptorSetLayout,
 ) -> vk.Result {
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &vk.DescriptorSetAllocateInfo {
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &manager.visibility_descriptor_layout,
-    },
+  gpu.allocate_descriptor_set(
+    gctx,
     &camera.descriptor_set[frame_index],
+    &manager.visibility_descriptor_layout,
   ) or_return
   for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
-    vk.AllocateDescriptorSets(
-      gctx.device,
-      &vk.DescriptorSetAllocateInfo {
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = gctx.descriptor_pool,
-        descriptorSetCount = 1,
-        pSetLayouts = depth_reduce_descriptor_layout,
-      },
+    gpu.allocate_descriptor_set(
+      gctx,
       &camera.depth_reduce_descriptor_sets[frame_index][mip],
+      &manager.visibility_depth_reduce_descriptor_layout,
     ) or_return
   }
-  update_descriptor_set(gctx, manager, camera, frame_index)
+  prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
+  gpu.update_descriptor_set(
+    gctx,
+    camera.descriptor_set[frame_index],
+    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.node_data_buffer)},
+    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.mesh_data_buffer)},
+    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.world_matrix_buffer)},
+    {
+      .STORAGE_BUFFER,
+      gpu.mutable_buffer_info(&manager.camera_buffers[frame_index]),
+    },
+    {
+      .STORAGE_BUFFER,
+      gpu.mutable_buffer_info(&camera.late_draw_count[frame_index]),
+    },
+    {
+      .STORAGE_BUFFER,
+      gpu.mutable_buffer_info(&camera.late_draw_commands[frame_index]),
+    },
+    {
+      .STORAGE_BUFFER,
+      gpu.mutable_buffer_info(&camera.transparent_draw_count[frame_index]),
+    },
+    {
+      .STORAGE_BUFFER,
+      gpu.mutable_buffer_info(&camera.transparent_draw_commands[frame_index]),
+    },
+    {
+      .STORAGE_BUFFER,
+      gpu.mutable_buffer_info(&camera.sprite_draw_count[frame_index]),
+    },
+    {
+      .STORAGE_BUFFER,
+      gpu.mutable_buffer_info(&camera.sprite_draw_commands[frame_index]),
+    },
+    {
+      .COMBINED_IMAGE_SAMPLER,
+      vk.DescriptorImageInfo {
+        sampler     = camera.depth_pyramid[prev_frame].sampler,
+        imageView   = camera.depth_pyramid[prev_frame].full_view,
+        imageLayout = .GENERAL, // Depth pyramid uses GENERAL layout for both read/write
+      },
+    },
+  )
   for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
-    update_depth_reduce_descriptor_set(
+    // For mip 0: read from PREVIOUS frame's depth texture to support async compute
+    // pyramid[N] mip 0 reads from depth[N-1]
+    // This allows compute to build pyramid[N] while graphics renders depth[N]
+    prev_depth_texture := cont.get(
+      manager.images_2d,
+      camera.attachments[.DEPTH][prev_frame],
+    )
+    // Mip 0 reads from previous frame's depth texture, other mips read from current pyramid's previous mip level
+    source_view :=
+      mip == 0 ? prev_depth_texture.view : camera.depth_pyramid[frame_index].views[mip - 1]
+    // Use DEPTH_STENCIL_READ_ONLY_OPTIMAL for depth texture (mip 0), GENERAL for pyramid mips
+    // GENERAL layout is used because the pyramid image is used for both read (sample) and write (storage)
+    source_layout :=
+      mip == 0 ? vk.ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL : vk.ImageLayout.GENERAL
+    gpu.update_descriptor_set(
       gctx,
-      manager,
-      camera,
-      frame_index,
-      u32(mip),
+      camera.depth_reduce_descriptor_sets[frame_index][mip],
+      {
+        type = .COMBINED_IMAGE_SAMPLER,
+        info = vk.DescriptorImageInfo {
+          sampler = camera.depth_pyramid[frame_index].sampler,
+          imageView = source_view,
+          imageLayout = source_layout,
+        },
+      },
+      {
+        type = .STORAGE_IMAGE,
+        info = vk.DescriptorImageInfo {
+          imageView = camera.depth_pyramid[frame_index].views[mip],
+          imageLayout = .GENERAL,
+        },
+      },
     )
   }
   return .SUCCESS
 }
 
-@(private)
-update_depth_reduce_descriptor_set :: proc(
-  gctx: ^gpu.GPUContext,
-  manager: ^Manager,
-  camera: ^Camera,
-  frame_index: u32,
-  mip: u32,
-) {
-  // For mip 0: read from PREVIOUS frame's depth texture to support async compute
-  // pyramid[N] mip 0 reads from depth[N-1]
-  // This allows compute to build pyramid[N] while graphics renders depth[N]
-  prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
-  prev_depth_texture := cont.get(
-    manager.image_2d_buffers,
-    camera.attachments[.DEPTH][prev_frame],
-  )
-  // Mip 0 reads from previous frame's depth texture, other mips read from current pyramid's previous mip level
-  source_view :=
-    mip == 0 ? prev_depth_texture.view : camera.depth_pyramid[frame_index].views[mip - 1]
-  // Use DEPTH_STENCIL_READ_ONLY_OPTIMAL for depth texture (mip 0), GENERAL for pyramid mips
-  // GENERAL layout is used because the pyramid image is used for both read (sample) and write (storage)
-  source_layout :=
-    mip == 0 ? vk.ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL : vk.ImageLayout.GENERAL
-  source_info := vk.DescriptorImageInfo {
-    sampler     = camera.depth_pyramid[frame_index].sampler,
-    imageView   = source_view,
-    imageLayout = source_layout,
-  }
-  dest_info := vk.DescriptorImageInfo {
-    imageView   = camera.depth_pyramid[frame_index].views[mip],
-    imageLayout = .GENERAL,
-  }
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.depth_reduce_descriptor_sets[frame_index][mip],
-      dstBinding = 0,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &source_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.depth_reduce_descriptor_sets[frame_index][mip],
-      dstBinding = 1,
-      descriptorType = .STORAGE_IMAGE,
-      descriptorCount = 1,
-      pImageInfo = &dest_info,
-    },
-  }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    len(writes),
-    raw_data(writes[:]),
-    0,
-    nil,
-  )
-}
-
-@(private)
-update_descriptor_set :: proc(
-  gctx: ^gpu.GPUContext,
-  manager: ^Manager,
-  camera: ^Camera,
+camera_upload_data :: proc(
+  self: ^Manager,
+  camera_index: u32,
   frame_index: u32,
 ) {
-  prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
-  node_info := vk.DescriptorBufferInfo {
-    buffer = manager.node_data_buffer.buffer,
-    range  = vk.DeviceSize(manager.node_data_buffer.bytes_count),
+  camera := &self.cameras.entries[camera_index].item
+  camera.data[frame_index].view = camera_view_matrix(camera)
+  camera.data[frame_index].projection = camera_projection_matrix(camera)
+  near, far := camera_get_near_far(camera)
+  camera.data[frame_index].viewport_params = [4]f32 {
+    f32(camera.extent.width),
+    f32(camera.extent.height),
+    near,
+    far,
   }
-  mesh_info := vk.DescriptorBufferInfo {
-    buffer = manager.mesh_data_buffer.buffer,
-    range  = vk.DeviceSize(manager.mesh_data_buffer.bytes_count),
+  camera.data[frame_index].position = [4]f32 {
+    camera.position[0],
+    camera.position[1],
+    camera.position[2],
+    1.0,
   }
-  world_info := vk.DescriptorBufferInfo {
-    buffer = manager.world_matrix_buffer.buffer,
-    range  = vk.DeviceSize(manager.world_matrix_buffer.bytes_count),
-  }
-  camera_info := vk.DescriptorBufferInfo {
-    buffer = manager.camera_buffers[frame_index].buffer,
-    range  = vk.DeviceSize(manager.camera_buffers[frame_index].bytes_count),
-  }
-  late_count_info := vk.DescriptorBufferInfo {
-    buffer = camera.late_draw_count[frame_index].buffer,
-    range  = vk.DeviceSize(camera.late_draw_count[frame_index].bytes_count),
-  }
-  late_command_info := vk.DescriptorBufferInfo {
-    buffer = camera.late_draw_commands[frame_index].buffer,
-    range  = vk.DeviceSize(camera.late_draw_commands[frame_index].bytes_count),
-  }
-  transparent_count_info := vk.DescriptorBufferInfo {
-    buffer = camera.transparent_draw_count[frame_index].buffer,
-    range  = vk.DeviceSize(
-      camera.transparent_draw_count[frame_index].bytes_count,
-    ),
-  }
-  transparent_command_info := vk.DescriptorBufferInfo {
-    buffer = camera.transparent_draw_commands[frame_index].buffer,
-    range  = vk.DeviceSize(
-      camera.transparent_draw_commands[frame_index].bytes_count,
-    ),
-  }
-  sprite_count_info := vk.DescriptorBufferInfo {
-    buffer = camera.sprite_draw_count[frame_index].buffer,
-    range  = vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
-  }
-  sprite_command_info := vk.DescriptorBufferInfo {
-    buffer = camera.sprite_draw_commands[frame_index].buffer,
-    range  = vk.DeviceSize(
-      camera.sprite_draw_commands[frame_index].bytes_count,
-    ),
-  }
-  pyramid_info := vk.DescriptorImageInfo {
-    sampler     = camera.depth_pyramid[prev_frame].sampler,
-    imageView   = camera.depth_pyramid[prev_frame].full_view,
-    imageLayout = .GENERAL, // Depth pyramid uses GENERAL layout for both read/write
-  }
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &node_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &mesh_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &world_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 3,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &camera_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 4,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &late_count_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 5,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &late_command_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 6,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &transparent_count_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 7,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &transparent_command_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 8,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &sprite_count_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 9,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &sprite_command_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_set[frame_index],
-      dstBinding = 10,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &pyramid_info,
-    },
-  }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    len(writes),
-    raw_data(writes[:]),
-    0,
-    nil,
+  frustum := geometry.make_frustum(
+    camera.data[frame_index].projection * camera.data[frame_index].view,
+  )
+  camera.data[frame_index].frustum_planes = frustum.planes
+  gpu.write(
+    &self.camera_buffers[frame_index],
+    &camera.data[frame_index],
+    int(camera_index),
   )
 }

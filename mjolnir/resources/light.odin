@@ -163,14 +163,14 @@ destroy_light :: proc(
         manager.spherical_cameras,
         light.camera_handle,
       ); cam_ok {
-        spherical_camera_destroy(cam, gctx.device, gctx.command_pool, manager)
+        spherical_camera_destroy(cam, gctx, manager)
       }
       cont.free(&manager.spherical_cameras, light.camera_handle)
     case .DIRECTIONAL, .SPOT:
       // Directional and spot lights use regular cameras
       if cam, cam_ok := cont.get(manager.cameras, light.camera_handle);
          cam_ok {
-        camera_destroy(cam, gctx.device, gctx.command_pool, manager)
+        camera_destroy(cam, gctx, manager)
       }
       cont.free(&manager.cameras, light.camera_handle)
     }
@@ -186,22 +186,13 @@ update_light_gpu_data :: proc(manager: ^Manager, handle: Handle) {
   }
 }
 
-update_light_camera :: proc(
-  manager: ^Manager,
-  frame_index: u32 = 0,
-) {
+update_light_camera :: proc(manager: ^Manager, frame_index: u32 = 0) {
   for handle, light_index in manager.active_lights {
     light := cont.get(manager.lights, handle) or_continue
     // Get light's world transform from node
-    node_data := gpu.get(
-      &manager.node_data_buffer,
-      light.node_index,
-    )
+    node_data := gpu.get(&manager.node_data_buffer, light.node_index)
     if node_data == nil do continue
-    world_matrix := gpu.get(
-      &manager.world_matrix_buffer,
-      light.node_index,
-    )
+    world_matrix := gpu.get(&manager.world_matrix_buffer, light.node_index)
     if world_matrix == nil do continue
     // Extract position and direction from world matrix
     light_position := world_matrix[3].xyz
@@ -227,14 +218,14 @@ update_light_camera :: proc(
           camera_position := light_position - light_direction * 50.0 // Far back
           target_position := light_position
           camera_look_at(cam, camera_position, target_position)
-          shadow_map_id = camera_get_attachment(cam, .DEPTH, frame_index).index
+          shadow_map_id = cam.attachments[.DEPTH][frame_index].index
         }
       case .SPOT:
         cam := cont.get(manager.cameras, light.camera_handle)
         if cam != nil {
           target_position := light_position + light_direction
           camera_look_at(cam, light_position, target_position)
-          shadow_map_id = camera_get_attachment(cam, .DEPTH, frame_index).index
+          shadow_map_id = cam.attachments[.DEPTH][frame_index].index
         }
       }
     }

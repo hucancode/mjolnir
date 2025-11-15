@@ -53,12 +53,27 @@ Mesh :: struct {
   using meta:        ResourceMetadata,
 }
 
+BufferAllocation :: struct {
+  offset: u32,
+  count:  u32,
+}
+
+Primitive :: enum {
+  CUBE,
+  SPHERE,
+  QUAD,
+  CONE,
+  CAPSULE,
+  CYLINDER,
+  TORUS,
+}
+
 mesh_destroy :: proc(self: ^Mesh, manager: ^Manager) {
-  manager_free_vertices(manager, self.vertex_allocation)
-  manager_free_indices(manager, self.index_allocation)
+  free_vertices(manager, self.vertex_allocation)
+  free_indices(manager, self.index_allocation)
   skin, has_skin := &self.skinning.?
   if !has_skin do return
-  manager_free_vertex_skinning(manager, skin.vertex_skinning_allocation)
+  free_vertex_skinning(manager, skin.vertex_skinning_allocation)
   for &bone in skin.bones do bone_destroy(&bone)
   delete(skin.bones)
   delete(skin.bone_lengths)
@@ -90,12 +105,12 @@ mesh_init :: proc(
   defer geometry.delete_geometry(data)
   self.aabb_min = data.aabb.min
   self.aabb_max = data.aabb.max
-  self.vertex_allocation = manager_allocate_vertices(
+  self.vertex_allocation = allocate_vertices(
     manager,
     gctx,
     data.vertices,
   ) or_return
-  self.index_allocation = manager_allocate_indices(
+  self.index_allocation = allocate_indices(
     manager,
     gctx,
     data.indices,
@@ -103,7 +118,7 @@ mesh_init :: proc(
   if len(data.skinnings) <= 0 {
     return .SUCCESS
   }
-  allocation, ret := manager_allocate_vertex_skinning(
+  allocation, ret := allocate_vertex_skinning(
     manager,
     gctx,
     data.skinnings,
@@ -676,4 +691,127 @@ mesh_destroy_handle :: proc(device: vk.Device, manager: ^Manager, handle: Handle
     mesh_destroy(mesh, manager)
     cont.free(&manager.meshes, handle)
   }
+}
+
+allocate_vertices :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  vertices: []geometry.Vertex,
+) -> (
+  allocation: BufferAllocation,
+  ret: vk.Result,
+) {
+  vertex_count := u32(len(vertices))
+  offset, ok := cont.slab_alloc(&self.vertex_slab, vertex_count)
+  if !ok {
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  gpu.write(gctx, &self.vertex_buffer, vertices, int(offset)) or_return
+  return BufferAllocation{offset = offset, count = vertex_count}, .SUCCESS
+}
+
+allocate_indices :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  indices: []u32,
+) -> (
+  allocation: BufferAllocation,
+  ret: vk.Result,
+) {
+  index_count := u32(len(indices))
+  offset, ok := cont.slab_alloc(&self.index_slab, index_count)
+  if !ok {
+    log.error("Failed to allocate indices from slab allocator")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  gpu.write(gctx, &self.index_buffer, indices, int(offset)) or_return
+  return BufferAllocation{offset = offset, count = index_count}, .SUCCESS
+}
+
+allocate_vertex_skinning :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  skinnings: []geometry.SkinningData,
+) -> (
+  allocation: BufferAllocation,
+  ret: vk.Result,
+) {
+  if len(skinnings) == 0 {
+    return {}, .SUCCESS
+  }
+  skinning_count := u32(len(skinnings))
+  offset, ok := cont.slab_alloc(&self.vertex_skinning_slab, skinning_count)
+  if !ok {
+    log.error("Failed to allocate vertex skinning data from slab allocator")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  gpu.write(
+    gctx,
+    &self.vertex_skinning_buffer,
+    skinnings,
+    int(offset),
+  ) or_return
+  return BufferAllocation{offset = offset, count = skinning_count}, .SUCCESS
+}
+
+free_vertex_skinning :: proc(
+  self: ^Manager,
+  allocation: BufferAllocation,
+) {
+  cont.slab_free(&self.vertex_skinning_slab, allocation.offset)
+}
+
+free_vertices :: proc(
+  manager: ^Manager,
+  allocation: BufferAllocation,
+) {
+  cont.slab_free(&manager.vertex_slab, allocation.offset)
+}
+
+free_indices :: proc(manager: ^Manager, allocation: BufferAllocation) {
+  cont.slab_free(&manager.index_slab, allocation.offset)
+}
+
+init_builtin_meshes :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+) -> vk.Result {
+  log.info("Creating builtin meshes...")
+  self.builtin_meshes[Primitive.CUBE], _ = create_mesh_handle(
+    gctx,
+    self,
+    geometry.make_cube(),
+  )
+  self.builtin_meshes[Primitive.SPHERE], _ = create_mesh_handle(
+    gctx,
+    self,
+    geometry.make_sphere(),
+  )
+  self.builtin_meshes[Primitive.QUAD], _ = create_mesh_handle(
+    gctx,
+    self,
+    geometry.make_quad(),
+  )
+  self.builtin_meshes[Primitive.CONE], _ = create_mesh_handle(
+    gctx,
+    self,
+    geometry.make_cone(),
+  )
+  self.builtin_meshes[Primitive.CAPSULE], _ = create_mesh_handle(
+    gctx,
+    self,
+    geometry.make_capsule(),
+  )
+  self.builtin_meshes[Primitive.CYLINDER], _ = create_mesh_handle(
+    gctx,
+    self,
+    geometry.make_cylinder(),
+  )
+  self.builtin_meshes[Primitive.TORUS], _ = create_mesh_handle(
+    gctx,
+    self,
+    geometry.make_torus(),
+  )
+  log.info("Builtin meshes created successfully")
+  return .SUCCESS
 }

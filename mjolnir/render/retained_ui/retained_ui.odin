@@ -269,7 +269,9 @@ init :: proc(
   width, height: u32,
   dpi_scale: f32 = 1.0,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
+) -> (
+  ret: vk.Result,
+) {
   cont.init(&self.widgets, 1000)
   self.root_widgets = make([dynamic]WidgetHandle, 0, 100)
   self.dirty_widgets = make([dynamic]WidgetHandle, 0, 100)
@@ -358,7 +360,7 @@ init :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  rasterizer := gpu.create_standard_rasterizer(cull_mode = {})
+  rasterizer := gpu.create_double_sided_rasterizer()
   multisampling := gpu.create_standard_multisampling()
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
@@ -375,52 +377,18 @@ init :: proc(
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
-  // Descriptor sets for projection and texture
-  projection_layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = 1,
-    pBindings    = &vk.DescriptorSetLayoutBinding {
-      binding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    gctx.device,
-    &projection_layout_info,
-    nil,
-    &self.projection_layout,
+  self.projection_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.UNIFORM_BUFFER, {.VERTEX}},
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
   }
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &self.projection_layout,
-    },
-    &self.projection_descriptor_set,
-  ) or_return
-  defer if ret != .SUCCESS {
-    // Descriptor sets are auto-freed when descriptor pool is destroyed
-  }
-  set_layouts := [?]vk.DescriptorSetLayout {
+  self.pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    nil,
     self.projection_layout,
     rm.textures_set_layout,
-  }
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(set_layouts),
-      pSetLayouts = raw_data(set_layouts[:]),
-    },
-    nil,
-    &self.pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
@@ -509,19 +477,14 @@ init :: proc(
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.proj_buffer)
   }
-  buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.proj_buffer.buffer,
-    range  = size_of(matrix[4, 4]f32),
-  }
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.projection_descriptor_set,
-    dstBinding      = 0,
-    descriptorCount = 1,
-    descriptorType  = .UNIFORM_BUFFER,
-    pBufferInfo     = &buffer_info,
-  }
-  vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
+  self.projection_descriptor_set = gpu.create_descriptor_set(
+    gctx,
+    &self.projection_layout,
+    {
+      type = .UNIFORM_BUFFER,
+      info = gpu.mutable_buffer_info(&self.proj_buffer),
+    },
+  ) or_return
   log.infof("init text rendering system...")
   // Initialize fontstash
   fs.Init(&self.font_ctx, ATLAS_WIDTH, ATLAS_HEIGHT, .TOPLEFT)
@@ -605,27 +568,27 @@ init :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(self: ^Manager, device: vk.Device) {
+shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   // Cleanup UI resources
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    gpu.mutable_buffer_destroy(device, &self.vertex_buffers[i])
-    gpu.mutable_buffer_destroy(device, &self.index_buffers[i])
+    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
+    gpu.mutable_buffer_destroy(gctx.device, &self.index_buffers[i])
     delete(self.draw_lists[i].commands)
   }
-  gpu.mutable_buffer_destroy(device, &self.proj_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.proj_buffer)
   delete(self.root_widgets)
   delete(self.dirty_widgets)
   cont.destroy(self.widgets, widget_destroy)
-  vk.DestroyPipeline(device, self.pipeline, nil)
-  vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(device, self.projection_layout, nil)
+  vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
   // Cleanup text rendering resources (text uses same pipeline as UI)
   fs.Destroy(&self.font_ctx)
-  gpu.mutable_buffer_destroy(device, &self.text_vertex_buffer)
-  gpu.mutable_buffer_destroy(device, &self.text_index_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.text_vertex_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.text_index_buffer)
 }
 
-widget_destroy:: proc(widget: ^Widget) {
+widget_destroy :: proc(widget: ^Widget) {
   // Cleanup widget-specific data
   switch &data in widget.data {
   case ButtonData:
@@ -1548,21 +1511,13 @@ begin_pass :: proc(
   color_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
-  color_attachment := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = color_view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .STORE,
-  }
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
+  gpu.begin_rendering(
+    command_buffer,
+    extent.width,
+    extent.height,
+    nil,
+    gpu.create_color_attachment_view(color_view, .LOAD, .STORE),
+  )
 }
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {
@@ -1760,34 +1715,14 @@ flush_text :: proc(
     &self.text_index_buffer,
     self.text_indices[:self.text_index_count],
   ) or_return
-  vk.CmdBindPipeline(cmd_buf, .GRAPHICS, self.pipeline)
-  descriptor_sets := [?]vk.DescriptorSet {
+  gpu.bind_graphics_pipeline(
+    cmd_buf,
+    self.pipeline,
+    self.pipeline_layout,
     self.projection_descriptor_set,
     rm.textures_descriptor_set,
-  }
-  vk.CmdBindDescriptorSets(
-    cmd_buf,
-    .GRAPHICS,
-    self.pipeline_layout,
-    0,
-    2,
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
   )
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(self.frame_height),
-    width    = f32(self.frame_width),
-    height   = -f32(self.frame_height),
-    minDepth = 0,
-    maxDepth = 1,
-  }
-  vk.CmdSetViewport(cmd_buf, 0, 1, &viewport)
-  scissor := vk.Rect2D {
-    extent = {self.frame_width, self.frame_height},
-  }
-  vk.CmdSetScissor(cmd_buf, 0, 1, &scissor)
+  gpu.set_viewport_scissor(cmd_buf, self.frame_width, self.frame_height)
   offsets := [?]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     cmd_buf,
@@ -1825,34 +1760,14 @@ flush_ui_batch :: proc(
     &self.index_buffers[frame_index],
     draw_list.indices[:draw_list.index_count],
   ) or_return
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
-  descriptor_sets := [?]vk.DescriptorSet {
+  gpu.bind_graphics_pipeline(
+    command_buffer,
+    self.pipeline,
+    self.pipeline_layout,
     self.projection_descriptor_set,
     rm.textures_descriptor_set,
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    self.pipeline_layout,
-    0,
-    2,
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
   )
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(self.frame_height),
-    width    = f32(self.frame_width),
-    height   = -f32(self.frame_height),
-    minDepth = 0,
-    maxDepth = 1,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  scissor := vk.Rect2D {
-    extent = {self.frame_width, self.frame_height},
-  }
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  gpu.set_viewport_scissor(command_buffer, self.frame_width, self.frame_height)
   offsets := [?]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     command_buffer,

@@ -554,9 +554,7 @@ find_local_neighbourhood :: proc(
       query.nav_mesh,
       cur.ref,
     )
-    if recast.status_failed(poly_status) {
-      continue
-    }
+    if recast.status_failed(poly_status) do continue
     // Check if polygon center is within radius
     center := calc_poly_center(tile, poly)
     if linalg.length2(center - center_pos) > radius * radius {
@@ -637,9 +635,7 @@ find_polys_around_circle :: proc(
     query.nav_mesh,
     start_ref,
   )
-  if recast.status_failed(poly_status) {
-    return 0, poly_status
-  }
+  if recast.status_failed(poly_status) do return 0, poly_status
   start_node.pos, _ = closest_point_on_polygon(
     start_tile,
     start_poly,
@@ -654,22 +650,15 @@ find_polys_around_circle :: proc(
     {start_ref, start_node.cost, start_node.total},
   )
   // Dijkstra search with iteration limit to prevent hanging
-  max_dijkstra_iterations := 100 // Much smaller limit for circle search
-  dijkstra_iterations := 0
-  for !node_queue_empty(&query.open_list) &&
-      dijkstra_iterations < max_dijkstra_iterations {
-    dijkstra_iterations += 1
-    if result_count >= max_result {
-      break // Found enough results
-    }
+  MAX_ITERATIONS :: 100 // Much smaller limit for circle search
+  it := 0
+  for !node_queue_empty(&query.open_list) && it < MAX_ITERATIONS {
+    it += 1
+    if result_count >= max_result do break // Found enough results
     best := node_queue_pop(&query.open_list)
-    if best.ref == recast.INVALID_POLY_REF {
-      break
-    }
+    if best.ref == recast.INVALID_POLY_REF do break
     current := get_node(&query.pf_context, best.ref)
-    if current == nil || .Closed in current.flags {
-      continue
-    }
+    if current == nil || .Closed in current.flags do continue
     current.flags |= {.Closed}
     current.flags &= ~{.Open}
     // Check if within radius
@@ -687,9 +676,7 @@ find_polys_around_circle :: proc(
       query.nav_mesh,
       current.id,
     )
-    if recast.status_failed(cur_status) {
-      continue
-    }
+    if recast.status_failed(cur_status) do continue
     poly_idx := get_poly_index(query.nav_mesh, current.id)
     link := get_first_link(cur_tile, i32(poly_idx))
     for link != recast.DT_NULL_LINK {
@@ -707,9 +694,7 @@ find_polys_around_circle :: proc(
           neighbor_node := get_node(&query.pf_context, neighbor_ref)
           if neighbor_node == nil {
             neighbor_node = create_node(&query.pf_context, neighbor_ref)
-            if neighbor_node == nil {
-              break
-            }
+            if neighbor_node == nil do break
             neighbor_node.pos = calc_poly_center(neighbor_tile, neighbor_poly)
           }
           if .Closed in neighbor_node.flags {
@@ -762,25 +747,19 @@ find_polys_around_shape :: proc(
   result_count = 0
   // Calculate shape center
   center: [3]f32
-  for vert in verts {
-    center += vert
-  }
+  for vert in verts do center += vert
   center /= f32(len(verts))
   // Clear node pool for search
   pathfinding_context_clear(&query.pf_context)
   node_queue_clear(&query.open_list)
   // Initialize start node
   start_node := create_node(&query.pf_context, start_ref)
-  if start_node == nil {
-    return 0, {.Out_Of_Nodes}
-  }
+  if start_node == nil do return 0, {.Out_Of_Nodes}
   start_tile, start_poly, poly_status := get_tile_and_poly_by_ref(
     query.nav_mesh,
     start_ref,
   )
-  if recast.status_failed(poly_status) {
-    return 0, poly_status
-  }
+  if recast.status_failed(poly_status) do return 0, poly_status
   start_node.pos, _ = closest_point_on_polygon(start_tile, start_poly, center)
   start_node.cost = 0
   start_node.total = linalg.length(start_node.pos - center)
@@ -793,9 +772,7 @@ find_polys_around_shape :: proc(
   // Dijkstra search
   for !node_queue_empty(&query.open_list) {
     best := node_queue_pop(&query.open_list)
-    if best.ref == recast.INVALID_POLY_REF {
-      break
-    }
+    if best.ref == recast.INVALID_POLY_REF do break
     current := get_node(&query.pf_context, best.ref)
     if current == nil || .Closed in current.flags {
       continue
@@ -816,9 +793,7 @@ find_polys_around_shape :: proc(
       query.nav_mesh,
       current.id,
     )
-    if recast.status_failed(cur_status) {
-      continue
-    }
+    if recast.status_failed(cur_status) do continue
     poly_idx := get_poly_index(query.nav_mesh, current.id)
     link := get_first_link(cur_tile, i32(poly_idx))
     for link != recast.DT_NULL_LINK {
@@ -911,14 +886,9 @@ get_poly_wall_segments :: proc(
   }
   segment_count = 0
   tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-  if recast.status_failed(poly_status) {
-    return 0, poly_status
-  }
+  if recast.status_failed(poly_status) do return 0, poly_status
   poly_idx := get_poly_index(query.nav_mesh, ref)
-  for i in 0 ..< int(poly.vert_count) {
-    if segment_count >= max_segments {
-      break
-    }
+  for i in 0 ..< min(int(max_segments), int(poly.vert_count)) {
     va := tile.verts[poly.verts[i]]
     vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
     // Find neighbor across this edge
@@ -960,14 +930,9 @@ is_in_closed_list :: proc(
   query: ^Nav_Mesh_Query,
   ref: recast.Poly_Ref,
 ) -> bool {
-  if query == nil {
-    return false
-  }
+  if query == nil do return false
   node := get_node(&query.pf_context, ref)
-  if node == nil {
-    return false
-  }
-  return .Closed in node.flags
+  return node != nil && .Closed in node.flags
 }
 
 // Find closest point on polygon boundary

@@ -521,20 +521,7 @@ create_animation_clip :: proc(
   handle: resources.Handle,
   ok: bool,
 ) #optional_ok {
-  // Allocate clip from resource manager
-  h, clip, alloc_ok := cont.alloc(&engine.rm.animation_clips)
-  if !alloc_ok {
-    return {}, false
-  }
-
-  // Initialize clip using new API
-  clip^ = animation.clip_create(
-    channel_count = channel_count,
-    duration = duration,
-    name = name,
-  )
-
-  return h, true
+  return resources.create_animation_clip(&engine.rm, channel_count, duration, name)
 }
 
 // Initialize an animation channel with callback functions for generating keyframe values
@@ -785,12 +772,7 @@ get_camera_attachment :: proc(
   ok: bool,
 ) #optional_ok {
   camera := cont.get(engine.rm.cameras, camera_handle) or_return
-  handle = resources.camera_get_attachment(
-    camera,
-    attachment_type,
-    frame_index,
-  )
-  return handle, true
+  return camera.attachments[attachment_type][frame_index], true
 }
 
 update_material_texture :: proc(
@@ -1110,8 +1092,7 @@ get_mesh_count :: proc(engine: ^Engine) -> u32 {
 
 get_texture_count :: proc(engine: ^Engine) -> u32 {
   return u32(
-    len(engine.rm.image_2d_buffers.entries) -
-    len(engine.rm.image_2d_buffers.free_indices),
+    len(engine.rm.images_2d.entries) - len(engine.rm.images_2d.free_indices),
   )
 }
 

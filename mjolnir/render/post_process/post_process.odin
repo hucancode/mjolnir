@@ -353,24 +353,12 @@ init :: proc(
   color_format: vk.Format,
   width, height: u32,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &vk.CommandBufferAllocateInfo {
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = gctx.command_pool,
-      level = .SECONDARY,
-      commandBufferCount = u32(len(self.commands)),
-    },
-    raw_data(self.commands[:]),
-  ) or_return
+) -> (
+  ret: vk.Result,
+) {
+  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
   defer if ret != .SUCCESS {
-    vk.FreeCommandBuffers(
-      gctx.device,
-      gctx.command_pool,
-      u32(len(self.commands)),
-      raw_data(self.commands[:]),
-    )
+    gpu.free_command_buffer(gctx, self.commands[:])
   }
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
@@ -432,7 +420,7 @@ init :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  rasterizer := gpu.create_standard_rasterizer(cull_mode = {})
+  rasterizer := gpu.create_double_sided_rasterizer()
   multisampling := gpu.create_standard_multisampling()
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
     sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -465,23 +453,10 @@ init :: proc(
     case .NONE:
       push_constant_size = size_of(BasePushConstant)
     }
-    push_constant_ranges := [?]vk.PushConstantRange {
-      {stageFlags = {.FRAGMENT}, size = push_constant_size},
-    }
-    layout_sets := [?]vk.DescriptorSetLayout {
-      rm.textures_set_layout, // set = 0 (bindless textures)
-    }
-    vk.CreatePipelineLayout(
-      gctx.device,
-      &{
-        sType = .PIPELINE_LAYOUT_CREATE_INFO,
-        setLayoutCount = len(layout_sets),
-        pSetLayouts = raw_data(layout_sets[:]),
-        pushConstantRangeCount = 1 if push_constant_size > 0 else 0,
-        pPushConstantRanges = raw_data(push_constant_ranges[:]),
-      },
-      nil,
-      &self.pipeline_layouts[i],
+    self.pipeline_layouts[i] = gpu.create_pipeline_layout(
+      gctx,
+      vk.PushConstantRange{stageFlags = {.FRAGMENT}, size = push_constant_size} if push_constant_size > 0 else nil,
+      rm.textures_set_layout,
     ) or_return
     shader_stages[i] = [2]vk.PipelineShaderStageCreateInfo {
       {
@@ -559,7 +534,7 @@ destroy_images :: proc(
   rm: ^resources.Manager,
 ) {
   for handle in self.images {
-    if item, freed := cont.free(&rm.image_2d_buffers, handle); freed {
+    if item, freed := cont.free(&rm.images_2d, handle); freed {
       gpu.image_destroy(device, item)
     }
   }
@@ -578,26 +553,20 @@ recreate_images :: proc(
 
 shutdown :: proc(
   self: ^Renderer,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
+  gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    u32(len(self.commands)),
-    raw_data(self.commands[:]),
-  )
+  gpu.free_command_buffer(gctx, self.commands[:])
   for &p in self.pipelines {
-    vk.DestroyPipeline(device, p, nil)
+    vk.DestroyPipeline(gctx.device, p, nil)
     p = 0
   }
   for &layout in self.pipeline_layouts {
-    vk.DestroyPipelineLayout(device, layout, nil)
+    vk.DestroyPipelineLayout(gctx.device, layout, nil)
     layout = 0
   }
   delete(self.effect_stack)
-  destroy_images(self, device, rm)
+  destroy_images(self, gctx.device, rm)
 }
 
 // Modular postprocess API
@@ -610,17 +579,12 @@ begin_pass :: proc(
     // if no postprocess effect, just copy the input to output
     append(&self.effect_stack, nil)
   }
-  viewport := vk.Viewport {
-    width    = f32(extent.width),
-    height   = f32(extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  gpu.set_viewport_scissor(
+    command_buffer,
+    extent.width,
+    extent.height,
+    flip_y = false,
+  )
 }
 
 render :: proc(
@@ -646,7 +610,7 @@ render :: proc(
     dst_image_idx: u32
     if is_first {
       input_image_index =
-        resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index).index // Use original input
+        camera.attachments[.FINAL_IMAGE][frame_index].index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -660,7 +624,7 @@ render :: proc(
     // Pass N: image[(N+1)%2] -> swapchain (src: image[(N-1)%2], dst: swapchain)
     dst_view := output_view
     if !is_last {
-      dst_texture := cont.get(rm.image_2d_buffers, self.images[dst_image_idx])
+      dst_texture := cont.get(rm.images_2d, self.images[dst_image_idx])
       if dst_texture == nil {
         log.errorf(
           "Post-process image handle %v not found",
@@ -669,32 +633,16 @@ render :: proc(
         continue
       }
       // Transition dst texture from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
-      dst_barrier := vk.ImageMemoryBarrier {
-        sType = .IMAGE_MEMORY_BARRIER,
-        srcAccessMask = {},
-        dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-        oldLayout = .UNDEFINED,
-        newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = dst_texture.image,
-        subresourceRange = {
-          aspectMask = {.COLOR},
-          levelCount = 1,
-          layerCount = 1,
-        },
-      }
-      vk.CmdPipelineBarrier(
+      gpu.image_barrier(
         command_buffer,
+        dst_texture.image,
+        .UNDEFINED,
+        .COLOR_ATTACHMENT_OPTIMAL,
+        {},
+        {.COLOR_ATTACHMENT_WRITE},
         {.TOP_OF_PIPE},
         {.COLOR_ATTACHMENT_OUTPUT},
-        {},
-        0,
-        nil,
-        0,
-        nil,
-        1,
-        &dst_barrier,
+        {.COLOR},
       )
       dst_view = dst_texture.view
     } else {
@@ -702,10 +650,7 @@ render :: proc(
     }
     if !is_first {
       src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
-      src_texture := cont.get(
-        rm.image_2d_buffers,
-        self.images[src_texture_idx],
-      )
+      src_texture := cont.get(rm.images_2d, self.images[src_texture_idx])
       if src_texture == nil {
         log.errorf(
           "Post-process source image handle %v not found",
@@ -714,79 +659,45 @@ render :: proc(
         continue
       }
       // Transition src texture from COLOR_ATTACHMENT to SHADER_READ_ONLY
-      src_barrier := vk.ImageMemoryBarrier {
-        sType = .IMAGE_MEMORY_BARRIER,
-        srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-        dstAccessMask = {.SHADER_READ},
-        oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-        newLayout = .SHADER_READ_ONLY_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = src_texture.image,
-        subresourceRange = {
-          aspectMask = {.COLOR},
-          levelCount = 1,
-          layerCount = 1,
-        },
-      }
-      vk.CmdPipelineBarrier(
+      gpu.image_barrier(
         command_buffer,
+        src_texture.image,
+        .COLOR_ATTACHMENT_OPTIMAL,
+        .SHADER_READ_ONLY_OPTIMAL,
+        {.COLOR_ATTACHMENT_WRITE},
+        {.SHADER_READ},
         {.COLOR_ATTACHMENT_OUTPUT},
         {.FRAGMENT_SHADER},
-        {},
-        0,
-        nil,
-        0,
-        nil,
-        1,
-        &src_barrier,
+        {.COLOR},
       )
     }
-    color_attachment := vk.RenderingAttachmentInfo {
-      sType = .RENDERING_ATTACHMENT_INFO,
-      imageView = dst_view,
-      imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      loadOp = .CLEAR,
-      storeOp = .STORE,
-      clearValue = {color = {float32 = BG_BLUE_GRAY}},
-    }
-    render_info := vk.RenderingInfo {
-      sType = .RENDERING_INFO,
-      renderArea = {extent = extent},
-      layerCount = 1,
-      colorAttachmentCount = 1,
-      pColorAttachments = &color_attachment,
-    }
-    vk.CmdBeginRendering(command_buffer, &render_info)
-    effect_type := get_effect_type(effect)
-    vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[effect_type])
-    // Bind textures descriptor set
-    descriptor_sets := [?]vk.DescriptorSet {
-      rm.textures_descriptor_set, // set = 0 (bindless textures)
-    }
-    vk.CmdBindDescriptorSets(
+    gpu.begin_rendering(
       command_buffer,
-      .GRAPHICS,
-      self.pipeline_layouts[effect_type],
-      0,
-      len(descriptor_sets),
-      raw_data(descriptor_sets[:]),
-      0,
+      extent.width,
+      extent.height,
       nil,
+      gpu.create_color_attachment_view(dst_view, .CLEAR, .STORE, BG_BLUE_GRAY),
+    )
+    effect_type := get_effect_type(effect)
+    gpu.bind_graphics_pipeline(
+      command_buffer,
+      self.pipelines[effect_type],
+      self.pipeline_layouts[effect_type],
+      rm.textures_descriptor_set,
     )
     base: BasePushConstant
     base.position_texture_index =
-      resources.camera_get_attachment(camera, .POSITION, frame_index).index
+      camera.attachments[.POSITION][frame_index].index
     base.normal_texture_index =
-      resources.camera_get_attachment(camera, .NORMAL, frame_index).index
+      camera.attachments[.NORMAL][frame_index].index
     base.albedo_texture_index =
-      resources.camera_get_attachment(camera, .ALBEDO, frame_index).index
+      camera.attachments[.ALBEDO][frame_index].index
     base.metallic_texture_index =
-      resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index).index
+      camera.attachments[.METALLIC_ROUGHNESS][frame_index].index
     base.emissive_texture_index =
-      resources.camera_get_attachment(camera, .EMISSIVE, frame_index).index
+      camera.attachments[.EMISSIVE][frame_index].index
     base.depth_texture_index =
-      resources.camera_get_attachment(camera, .DEPTH, frame_index).index
+      camera.attachments[.DEPTH][frame_index].index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {
@@ -968,60 +879,32 @@ begin_record :: proc(
   if camera == nil do return command_buffer, .ERROR_UNKNOWN
   // Transition final image to shader read optimal
   if final_image, ok := cont.get(
-    rm.image_2d_buffers,
-    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
+    rm.images_2d,
+    camera.attachments[.FINAL_IMAGE][frame_index],
   ); ok {
-    final_barrier := vk.ImageMemoryBarrier {
-      sType = .IMAGE_MEMORY_BARRIER,
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = final_image.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-    }
-    vk.CmdPipelineBarrier(
+    gpu.image_barrier(
       command_buffer,
+      final_image.image,
+      .COLOR_ATTACHMENT_OPTIMAL,
+      .SHADER_READ_ONLY_OPTIMAL,
+      {.COLOR_ATTACHMENT_WRITE},
+      {.SHADER_READ},
       {.COLOR_ATTACHMENT_OUTPUT},
       {.FRAGMENT_SHADER},
-      {},
-      0,
-      nil,
-      0,
-      nil,
-      1,
-      &final_barrier,
+      {.COLOR},
     )
   }
   // Transition swapchain image from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
-  swapchain_barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {},
-    dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-    oldLayout = .UNDEFINED,
-    newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = swapchain_image,
-    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
-  }
-  vk.CmdPipelineBarrier(
+  gpu.image_barrier(
     command_buffer,
+    swapchain_image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
     {.TOP_OF_PIPE},
     {.COLOR_ATTACHMENT_OUTPUT},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &swapchain_barrier,
+    {.COLOR},
   )
   return command_buffer, .SUCCESS
 }

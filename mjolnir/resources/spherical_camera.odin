@@ -50,16 +50,9 @@ spherical_camera_init :: proc(
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
   }
-  alloc_info := vk.CommandBufferAllocateInfo {
-    sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-    commandPool        = gctx.command_pool,
-    level              = .SECONDARY,
-    commandBufferCount = 1,
-  }
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &alloc_info,
-    &camera.command_buffer,
+  camera.command_buffer = gpu.allocate_command_buffer(
+    gctx,
+    vk.CommandBufferLevel.SECONDARY,
   ) or_return
   camera.draw_count = gpu.create_mutable_buffer(
     gctx,
@@ -73,46 +66,40 @@ spherical_camera_init :: proc(
     int(max_draws),
     {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
   ) or_return
-  set_layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout {
-    manager.visibility_sphere_descriptor_layout,
-    manager.visibility_sphere_descriptor_layout,
-  }
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &vk.DescriptorSetAllocateInfo {
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-      pSetLayouts = raw_data(set_layouts[:]),
-    },
-    raw_data(camera.descriptor_sets[:]),
-  ) or_return
-  // Update all per-frame descriptor sets
-  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    spherical_camera_update_descriptor_set(
+  // Create and update all per-frame descriptor sets
+  for frame_index in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    camera.descriptor_sets[frame_index] = gpu.create_descriptor_set(
       gctx,
-      manager,
-      camera,
-      u32(frame_idx),
-    )
+      &manager.visibility_sphere_descriptor_layout,
+      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.node_data_buffer)},
+      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.mesh_data_buffer)},
+      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.world_matrix_buffer)},
+      {
+        .STORAGE_BUFFER,
+        gpu.mutable_buffer_info(
+          &manager.spherical_camera_buffers[frame_index],
+        ),
+      },
+      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&camera.draw_count)},
+      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&camera.draw_commands)},
+    ) or_return
   }
   return .SUCCESS
 }
 
 spherical_camera_destroy :: proc(
-  camera: ^SphericalCamera,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
+  self: ^SphericalCamera,
+  gctx: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  for v in camera.depth_cube {
-    if item, freed := cont.free(&manager.image_cube_buffers, v); freed {
-      gpu.cube_depth_texture_destroy(device, item)
+  for v in self.depth_cube {
+    if item, freed := cont.free(&manager.images_cube, v); freed {
+      gpu.cube_depth_texture_destroy(gctx.device, item)
     }
   }
-  vk.FreeCommandBuffers(device, command_pool, 1, &camera.command_buffer)
-  gpu.mutable_buffer_destroy(device, &camera.draw_count)
-  gpu.mutable_buffer_destroy(device, &camera.draw_commands)
+  gpu.free_command_buffer(gctx, &self.command_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.draw_count)
+  gpu.mutable_buffer_destroy(gctx.device, &self.draw_commands)
 }
 
 // Upload camera data to GPU buffer
@@ -122,10 +109,7 @@ spherical_camera_upload_data :: proc(
   camera_index: u32,
   frame_index: u32 = 0,
 ) {
-  dst := gpu.get(
-    &manager.spherical_camera_buffers[frame_index],
-    camera_index,
-  )
+  dst := gpu.get(&manager.spherical_camera_buffers[frame_index], camera_index)
   if dst == nil {
     log.errorf("Spherical camera index %d out of bounds", camera_index)
     return
@@ -148,104 +132,7 @@ spherical_camera_upload_data :: proc(
   dst.near_far = [2]f32{camera.near, camera.far}
 }
 
-spherical_camera_get_visible_count :: proc(camera: ^SphericalCamera) -> u32 {
+spherical_camera_visible_count :: proc(camera: ^SphericalCamera) -> u32 {
   if camera.draw_count.mapped == nil do return 0
   return camera.draw_count.mapped[0]
-}
-
-// Update sphere culling descriptor set with current buffer bindings (per-frame)
-@(private)
-spherical_camera_update_descriptor_set :: proc(
-  gctx: ^gpu.GPUContext,
-  manager: ^Manager,
-  camera: ^SphericalCamera,
-  frame_index: u32,
-) {
-  node_info := vk.DescriptorBufferInfo {
-    buffer = manager.node_data_buffer.buffer,
-    range  = vk.DeviceSize(manager.node_data_buffer.bytes_count),
-  }
-  mesh_info := vk.DescriptorBufferInfo {
-    buffer = manager.mesh_data_buffer.buffer,
-    range  = vk.DeviceSize(manager.mesh_data_buffer.bytes_count),
-  }
-  world_info := vk.DescriptorBufferInfo {
-    buffer = manager.world_matrix_buffer.buffer,
-    range  = vk.DeviceSize(manager.world_matrix_buffer.bytes_count),
-  }
-  // Use per-frame spherical camera buffer to match rendering
-  camera_info := vk.DescriptorBufferInfo {
-    buffer = manager.spherical_camera_buffers[frame_index].buffer,
-    range  = vk.DeviceSize(
-      manager.spherical_camera_buffers[frame_index].bytes_count,
-    ),
-  }
-  count_info := vk.DescriptorBufferInfo {
-    buffer = camera.draw_count.buffer,
-    range  = vk.DeviceSize(camera.draw_count.bytes_count),
-  }
-  command_info := vk.DescriptorBufferInfo {
-    buffer = camera.draw_commands.buffer,
-    range  = vk.DeviceSize(camera.draw_commands.bytes_count),
-  }
-  // NOTE: Bindings must match sphere_cull.comp shader!
-  // Binding 4 is skipped (no depth pyramid in sphere culling)
-  // Bindings 5,6 are for draw count/commands to match the shader layout
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_sets[frame_index],
-      dstBinding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &node_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_sets[frame_index],
-      dstBinding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &mesh_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_sets[frame_index],
-      dstBinding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &world_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_sets[frame_index],
-      dstBinding = 3,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &camera_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_sets[frame_index],
-      dstBinding = 5,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &count_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = camera.descriptor_sets[frame_index],
-      dstBinding = 6,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &command_info,
-    },
-  }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    len(writes),
-    raw_data(writes[:]),
-    0,
-    nil,
-  )
 }

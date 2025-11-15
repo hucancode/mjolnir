@@ -544,7 +544,8 @@ descriptor_pool_init :: proc(self: ^GPUContext) -> vk.Result {
   MAX_DEPTH_PYRAMID_MIPS :: 16
   MAX_ACTIVE_CAMERAS :: 128
   // Storage images needed for depth pyramid mip reduction (one per mip per frame per camera)
-  STORAGE_IMAGE_COUNT :: MAX_ACTIVE_CAMERAS * MAX_FRAMES_IN_FLIGHT * MAX_DEPTH_PYRAMID_MIPS
+  STORAGE_IMAGE_COUNT ::
+    MAX_ACTIVE_CAMERAS * MAX_FRAMES_IN_FLIGHT * MAX_DEPTH_PYRAMID_MIPS
   // expand those limits as needed
   pool_sizes := [?]vk.DescriptorPoolSize {
     {.COMBINED_IMAGE_SAMPLER, MAX_SAMPLER_COUNT},
@@ -689,7 +690,7 @@ find_memory_type_index :: proc(
   return 0, false
 }
 
-allocate_vulkan_memory :: proc(
+allocate_memory :: proc(
   self: ^GPUContext,
   mem_requirements: vk.MemoryRequirements,
   properties: vk.MemoryPropertyFlags,

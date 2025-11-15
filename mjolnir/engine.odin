@@ -111,7 +111,13 @@ get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
   return sw
 }
 
-init :: proc(self: ^Engine, width, height: u32, title: string) -> (ret: vk.Result) {
+init :: proc(
+  self: ^Engine,
+  width, height: u32,
+  title: string,
+) -> (
+  ret: vk.Result,
+) {
   context.user_ptr = self
   g_context = context
   // glfw.SetErrorCallback(glfw_error_callback)
@@ -154,45 +160,19 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> (ret: vk.Resul
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
-  vk.AllocateCommandBuffers(
-    self.gctx.device,
-    &{
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = self.gctx.command_pool,
-      level = .PRIMARY,
-      commandBufferCount = MAX_FRAMES_IN_FLIGHT,
-    },
-    raw_data(self.command_buffers[:]),
+  gpu.allocate_command_buffer(&self.gctx, self.command_buffers[:]) or_return
+  defer if ret != .SUCCESS {
+    gpu.free_command_buffer(&self.gctx, self.command_buffers[:])
+  }
+  gpu.allocate_compute_command_buffer(
+    &self.gctx,
+    self.compute_command_buffers[:],
   ) or_return
   defer if ret != .SUCCESS {
-    vk.FreeCommandBuffers(
-      self.gctx.device,
-      self.gctx.command_pool,
-      u32(len(self.command_buffers)),
-      raw_data(self.command_buffers[:]),
+    gpu.free_compute_command_buffer(
+      &self.gctx,
+      self.compute_command_buffers[:],
     )
-  }
-  if pool, ok := self.gctx.compute_command_pool.?; ok {
-    vk.AllocateCommandBuffers(
-      self.gctx.device,
-      &{
-        sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-        commandPool = pool,
-        level = .PRIMARY,
-        commandBufferCount = MAX_FRAMES_IN_FLIGHT,
-      },
-      raw_data(self.compute_command_buffers[:]),
-    ) or_return
-  }
-  defer if ret != .SUCCESS {
-    if pool, ok := self.gctx.compute_command_pool.?; ok {
-      vk.FreeCommandBuffers(
-        self.gctx.device,
-        pool,
-        u32(len(self.compute_command_buffers)),
-        raw_data(self.compute_command_buffers[:]),
-      )
-    }
   }
   renderer_init(
     &self.render,
@@ -463,27 +443,10 @@ update :: proc(self: ^Engine) -> bool {
 shutdown :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(self.gctx.device)
   level_manager.shutdown(&self.level_manager)
-  vk.FreeCommandBuffers(
-    self.gctx.device,
-    self.gctx.command_pool,
-    u32(len(self.command_buffers)),
-    raw_data(self.command_buffers[:]),
-  )
-  if pool, ok := self.gctx.compute_command_pool.?; ok {
-    vk.FreeCommandBuffers(
-      self.gctx.device,
-      pool,
-      u32(len(self.compute_command_buffers)),
-      raw_data(self.compute_command_buffers[:]),
-    )
-  }
+  gpu.free_command_buffer(&self.gctx, self.command_buffers[:])
+  gpu.free_compute_command_buffer(&self.gctx, self.compute_command_buffers[:])
   delete(self.pending_node_deletions)
-  renderer_shutdown(
-    &self.render,
-    self.gctx.device,
-    self.gctx.command_pool,
-    &self.rm,
-  )
+  renderer_shutdown(&self.render, &self.gctx, &self.rm)
   world.shutdown(&self.world, &self.gctx, &self.rm)
   resources.shutdown(&self.rm, &self.gctx)
   gpu.swapchain_destroy(&self.swapchain, self.gctx.device)
@@ -512,8 +475,7 @@ populate_debug_ui :: proc(self: ^Engine) {
       &self.render.ui.ctx,
       fmt.tprintf(
         "Textures %d",
-        len(self.rm.image_2d_buffers.entries) -
-        len(self.rm.image_2d_buffers.free_indices),
+        len(self.rm.images_2d.entries) - len(self.rm.images_2d.free_indices),
       ),
     )
     mu.label(
@@ -602,11 +564,9 @@ render :: proc(self: ^Engine) -> vk.Result {
   main_camera_handle := self.render.main_camera
   main_camera := cont.get(self.rm.cameras, main_camera_handle)
   if main_camera == nil do return .ERROR_UNKNOWN
-  for &entry, cam_index in self.rm.cameras.entries {
-    if !entry.active do continue
+  for &entry, cam_index in self.rm.cameras.entries do if entry.active {
     resources.camera_upload_data(
       &self.rm,
-      &entry.item,
       u32(cam_index),
       self.frame_index,
     )

@@ -34,10 +34,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cube_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   sphere_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
   cone_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.CONE]
-  if true {
+  when true {
     log.info("spawning cubes in a grid")
     space: f32 = 4.1
-    size: f32 = 0.3
+    cube_size: f32 = 0.3
     nx, ny, nz := 240, 1, 240
     mat_handle := engine.rm.builtin_materials[resources.Color.CYAN]
     spawn_loop: for x in 0 ..< nx {
@@ -78,7 +78,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           }
           if !node_ok do break spawn_loop
           translate(engine, node_handle, world_x, world_y, world_z)
-          scale(engine, node_handle, size)
+          scale(engine, node_handle, cube_size)
         }
       }
     }
@@ -98,10 +98,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       )
     }
     ground_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.QUAD]
-    ground_mesh_ok := true
     log.info("spawning ground and walls")
     size: f32 = 15.0
-    if brick_wall_mat_ok && ground_mesh_ok {
+    if brick_wall_mat_ok {
       ground_handle := spawn(
         engine,
         attachment = world.MeshAttachment {
@@ -658,7 +657,7 @@ on_post_render :: proc(engine: ^mjolnir.Engine) {
   portal_texture_handle := get_camera_attachment(
     engine,
     portal_camera_handle,
-    resources.AttachmentType.FINAL_IMAGE,
+    .FINAL_IMAGE,
     engine.frame_index,
   )
   update_material_texture(

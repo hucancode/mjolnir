@@ -50,7 +50,9 @@ init :: proc(
   width, height: u32,
   dpi_scale: f32 = 1.0,
   rm: ^resources.Manager,
-) -> (ret: vk.Result) {
+) -> (
+  ret: vk.Result,
+) {
   mu.init(&self.ctx)
   self.ctx.text_width = mu.default_atlas_text_width
   self.ctx.text_height = mu.default_atlas_text_height
@@ -132,7 +134,7 @@ init :: proc(
     viewportCount = 1,
     scissorCount  = 1,
   }
-  rasterizer := gpu.create_standard_rasterizer(cull_mode = {})
+  rasterizer := gpu.create_double_sided_rasterizer()
   multisampling := gpu.create_standard_multisampling()
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
@@ -149,56 +151,21 @@ init :: proc(
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
-  projection_layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = 1,
-    pBindings    = &vk.DescriptorSetLayoutBinding {
-      binding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    gctx.device,
-    &projection_layout_info,
-    nil,
-    &self.projection_layout,
+  self.projection_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.UNIFORM_BUFFER, {.VERTEX}},
   ) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
-    self.projection_layout = 0
-  }
-  vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &self.projection_layout,
-    },
-    &self.projection_descriptor_set,
-  ) or_return
-  defer if ret != .SUCCESS {
-    // descriptor sets are auto-freed when pool is destroyed
     vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
     self.projection_layout = 0
   }
   self.texture_layout = rm.textures_set_layout
   self.texture_descriptor_set = rm.textures_descriptor_set
-  set_layouts := [?]vk.DescriptorSetLayout {
+  self.pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    nil,
     self.projection_layout,
     rm.textures_set_layout,
-  }
-  vk.CreatePipelineLayout(
-    gctx.device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(set_layouts),
-      pSetLayouts = raw_data(set_layouts[:]),
-    },
-    nil,
-    &self.pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
@@ -323,19 +290,14 @@ init :: proc(
     vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
     self.projection_layout = 0
   }
-  buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.proj_buffer.buffer,
-    range  = size_of(matrix[4, 4]f32),
-  }
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.projection_descriptor_set,
-    dstBinding      = 0,
-    descriptorCount = 1,
-    descriptorType  = .UNIFORM_BUFFER,
-    pBufferInfo     = &buffer_info,
-  }
-  vk.UpdateDescriptorSets(gctx.device, 1, &write, 0, nil)
+  self.projection_descriptor_set = gpu.create_descriptor_set(
+    gctx,
+    &self.projection_layout,
+    {
+      type = .UNIFORM_BUFFER,
+      info = gpu.mutable_buffer_info(&self.proj_buffer),
+    },
+  ) or_return
   log.infof("done init UI")
   return .SUCCESS
 }
@@ -350,20 +312,12 @@ ui_flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
   }
   gpu.write(&self.vertex_buffer, self.vertices[:self.vertex_count]) or_return
   gpu.write(&self.index_buffer, self.indices[:self.index_count]) or_return
-  vk.CmdBindPipeline(cmd_buf, .GRAPHICS, self.pipeline)
-  descriptor_sets := [?]vk.DescriptorSet {
+  gpu.bind_graphics_pipeline(
+    cmd_buf,
+    self.pipeline,
+    self.pipeline_layout,
     self.projection_descriptor_set,
     self.texture_descriptor_set,
-  }
-  vk.CmdBindDescriptorSets(
-    cmd_buf,
-    .GRAPHICS,
-    self.pipeline_layout,
-    0,
-    2,
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
   )
   viewport := vk.Viewport {
     x        = 0,
@@ -516,15 +470,15 @@ ui_set_clip_rect :: proc(
   vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
 }
 
-shutdown :: proc(self: ^Renderer, device: vk.Device) {
-  gpu.mutable_buffer_destroy(device, &self.vertex_buffer)
-  gpu.mutable_buffer_destroy(device, &self.index_buffer)
-  gpu.mutable_buffer_destroy(device, &self.proj_buffer)
-  vk.DestroyPipeline(device, self.pipeline, nil)
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+  gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.proj_buffer)
+  vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   self.pipeline = 0
-  vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
-  vk.DestroyDescriptorSetLayout(device, self.projection_layout, nil)
+  vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
   self.projection_layout = 0
 }
 
@@ -553,34 +507,13 @@ begin_pass :: proc(
   color_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
-  color_attachment := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = color_view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD, // preserve previous contents
-    storeOp     = .STORE,
-  }
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
-  viewport := vk.Viewport {
-    x        = 0.0,
-    y        = f32(extent.height),
-    width    = f32(extent.width),
-    height   = -f32(extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  gpu.begin_rendering(
+    command_buffer,
+    extent.width, extent.height,
+    nil,
+    gpu.create_color_attachment_view(color_view, .LOAD, .STORE),
+  )
+  gpu.set_viewport_scissor(command_buffer, extent.width, extent.height)
 }
 
 render :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
