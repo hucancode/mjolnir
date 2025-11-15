@@ -3,18 +3,17 @@
 const int MAX_PARTICLES = 65536;
 
 struct Particle {
-    vec4 position;
-    vec4 velocity;
+    vec3 position;
+    float size;
+    vec3 velocity;
+    float size_end;
     vec4 color_start;
     vec4 color_end;
     vec4 color;
-    float size;
-    float size_end;
     float life;
     float max_life;
     float weight;
     uint texture_index;
-    uint padding[6];
 };
 
 struct DrawCommand {

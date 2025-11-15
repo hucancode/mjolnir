@@ -17,18 +17,17 @@ SHADER_PARTICLE_FRAG := #load("../../shader/particle/frag.spv")
 TEXTURE_BLACK_CIRCLE :: #load("../../assets/black-circle.png")
 
 Particle :: struct {
-  position:      [4]f32,
-  velocity:      [4]f32,
+  position:      [3]f32,
+  size:          f32,
+  velocity:      [3]f32,
+  size_end:      f32,
   color_start:   [4]f32,
   color_end:     [4]f32,
   color:         [4]f32,
-  size:          f32,
-  size_end:      f32,
   life:          f32,
   max_life:      f32,
   weight:        f32,
   texture_index: u32,
-  padding:       [6]u32,
 }
 
 ParticleSystemParams :: struct {

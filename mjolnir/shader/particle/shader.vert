@@ -1,6 +1,6 @@
 #version 450
 
-layout (location = 0) in vec4 inPosition;
+layout (location = 0) in vec3 inPosition;
 layout (location = 1) in vec4 inColor;
 layout (location = 2) in float inSize;
 layout (location = 3) in uint inTextureIndex;
@@ -33,10 +33,9 @@ layout(push_constant) uniform ParticlePushConstants {
 
 void main() {
     Camera camera = camera_buffer.cameras[push.camera_index];
-    vec4 cameraPosition = -inverse(camera.view)[3];
     outColor = inColor;
     outTextureIndex = inTextureIndex;
-    gl_Position = camera.projection * camera.view * inPosition;
-    float dist = clamp(length((cameraPosition - inPosition).xyz), 1.0, 20.0);
+    gl_Position = camera.projection * camera.view * vec4(inPosition, 1.0);
+    float dist = clamp(length(camera.position.xyz - inPosition), 1.0, 20.0);
     gl_PointSize = clamp(inSize / dist, 10.0, 100.0);
 }

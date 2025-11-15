@@ -4,40 +4,36 @@ const int MAX_PARTICLES = 65536;
 const int MAX_EMITTERS = 64;
 
 struct Particle {
-    vec4 position;
-    vec4 velocity;
+    vec3 position;
+    float size;
+    vec3 velocity;
+    float size_end;
     vec4 color_start;
     vec4 color_end;
     vec4 color;
-    float size;
-    float size_end;
     float life;
     float max_life;
     float weight;
     uint texture_index;
-    uint padding[6];
 };
 
 struct Emitter {
-  vec4 initial_velocity;
+  vec3 initial_velocity;
+  float size_start;
   vec4 color_start;
   vec4 color_end;
+  vec3 aabb_min;
   float emission_rate;
+  vec3 aabb_max;
   float particle_lifetime;
   float position_spread;
   float velocity_spread;
   float time_accumulator;
-  float size_start;
   float size_end;
   float weight;
   float weight_spread;
   uint texture_index;
   uint node_index;
-  uint visible;
-  vec3 aabb_min;
-  float padding1;
-  vec3 aabb_max;
-  float padding2;
 };
 
 layout(set = 0, binding = 0) buffer EmitterBuffer {
@@ -90,9 +86,14 @@ vec3 random_in_sphere(float radius, vec2 seed) {
 void main() {
     uint emitter_idx = gl_GlobalInvocationID.x;
     if (emitter_idx >= emitter_count) return;
-
+    uint node_index = emitters[emitter_idx].node_index;
+    if (node_index >= world_matrices.length()) {
+        return;
+    }
+    // TODO: query node array to find visibility
+    uint visible = 1;
     // Check if this emitter is visible
-    if (emitters[emitter_idx].visible == 0) {
+    if (visible == 0) {
         // Emitter is invisible, don't emit particles but still update time accumulator
         emitters[emitter_idx].time_accumulator += emitters[emitter_idx].emission_rate * delta_time;
         // Reset accumulator to prevent burst when becoming visible again
@@ -111,10 +112,6 @@ void main() {
         if (idx >= MAX_PARTICLES) break;
         // Random seed per particle
         vec2 seed = vec2(float(idx), float(emitter_idx) + float(i) * 0.123);
-        uint node_index = emitters[emitter_idx].node_index;
-        if (node_index >= world_matrices.length()) {
-            break;
-        }
         mat4 world = world_matrices[node_index];
         mat3 world_rotation = mat3(world);
         // Position: emitter position + random spread (local spread rotated into world space)
@@ -139,8 +136,8 @@ void main() {
         // Texture index
         uint texture_index = emitters[emitter_idx].texture_index;
         // Write particle
-        particles[idx].position = position;
-        particles[idx].velocity = velocity;
+        particles[idx].position = position.xyz;
+        particles[idx].velocity = velocity.xyz;
         particles[idx].color_start = color_start;
         particles[idx].color_end = color_end;
         particles[idx].color = color_start;

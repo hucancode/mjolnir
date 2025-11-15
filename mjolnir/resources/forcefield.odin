@@ -10,8 +10,7 @@ ForceFieldData :: struct {
   area_of_effect:   f32,
   fade:             f32,
   node_index:       u32,
-  visible:          b32,
-  _padding:         [2]u32,
+  padding:          [3]u32,
 }
 
 ForceField :: struct {
@@ -41,7 +40,6 @@ destroy_forcefield_handle :: proc(manager: ^Manager, handle: Handle) -> bool {
 
 forcefield_update_gpu_data :: proc(ff: ^ForceField) {
   ff.node_index = ff.node_handle.index
-  ff.visible = b32(true)
 }
 
 forcefield_write_to_gpu :: proc(
@@ -53,6 +51,10 @@ forcefield_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   forcefield_update_gpu_data(ff)
-  gpu.write(&manager.forcefield_buffer.buffer, &ff.data, int(handle.index)) or_return
+  gpu.write(
+    &manager.forcefield_buffer.buffer,
+    &ff.data,
+    int(handle.index),
+  ) or_return
   return .SUCCESS
 }

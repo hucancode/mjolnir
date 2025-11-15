@@ -4,18 +4,17 @@ const int MAX_PARTICLES = 65536;
 const int MAX_FORCE_FIELDS = 32;
 
 struct Particle {
-    vec4 position;
-    vec4 velocity;
+    vec3 position;
+    float size;
+    vec3 velocity;
+    float size_end;
     vec4 color_start;
     vec4 color_end;
     vec4 color;
-    float size;
-    float size_end;
     float life;
     float max_life;
     float weight;
     uint texture_index;
-    uint padding[6];
 };
 
 struct ForceField {
@@ -24,8 +23,7 @@ struct ForceField {
     float area_of_effect;
     float fade;
     uint node_index;
-    uint visible;
-    uint padding[2];
+    uint padding[3];
 };
 
 layout(set = 0, binding = 0) uniform ParamsBuffer {
@@ -84,9 +82,11 @@ void main() {
     uint n = min(forcefield_count, MAX_FORCE_FIELDS);
     for (int f = 0; f < n; ++f) {
         ForceField ff = forcefields[f];
+        // TODO: query node array to find visibility
+        uint visible = 1;
         // Ignore unused or invisible forcefields
-        if (ff.visible == 0 || ff.area_of_effect <= 0.0) continue;
-        vec3 ff_pos = (world_matrices[ff.node_index] * vec4(0, 0, 0, 1)).xyz;
+        if (visible == 0 || ff.area_of_effect <= 0.0) continue;
+        vec3 ff_pos = world_matrices[ff.node_index][3].xyz;
         vec3 to_particle = p - ff_pos;
         float dist = length(to_particle);
         if (dist > ff.area_of_effect) continue;
