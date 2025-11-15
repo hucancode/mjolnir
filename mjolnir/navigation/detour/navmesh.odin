@@ -1,6 +1,7 @@
 package navigation_detour
 
 import "../../geometry"
+import alg "../../algebra"
 import "../recast"
 import "core:math"
 import "core:slice"
@@ -146,8 +147,8 @@ nav_mesh_init :: proc(
     nav_mesh.tiles[i].next = nav_mesh.next_free
     nav_mesh.next_free = &nav_mesh.tiles[i]
   }
-  tile_bits_needed := geometry.ilog2(geometry.next_pow2(u32(params.max_tiles)))
-  poly_bits_needed := geometry.ilog2(geometry.next_pow2(u32(params.max_polys)))
+  tile_bits_needed := alg.ilog2(alg.next_pow2(u32(params.max_tiles)))
+  poly_bits_needed := alg.ilog2(alg.next_pow2(u32(params.max_polys)))
   nav_mesh.tile_bits = tile_bits_needed
   nav_mesh.poly_bits = poly_bits_needed
   nav_mesh.salt_bits = min(31, 32 - nav_mesh.tile_bits - nav_mesh.poly_bits)

@@ -58,14 +58,14 @@ Manager :: struct {
   bone_matrix_slab:                          SlabAllocator,
   // Bindless camera buffer system (per-frame to avoid frame overlap)
   camera_buffer_set_layout:                  vk.DescriptorSetLayout,
-  camera_buffer_descriptor_sets:             [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  camera_buffers:                            [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  camera_buffer_descriptor_sets:             [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  camera_buffers:                            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     CameraData,
   ),
   // Bindless spherical camera buffer system
   spherical_camera_buffer_set_layout:        vk.DescriptorSetLayout,
-  spherical_camera_buffer_descriptor_sets:   [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  spherical_camera_buffers:                  [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  spherical_camera_buffer_descriptor_sets:   [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  spherical_camera_buffers:                  [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     SphericalCameraData,
   ),
   // Bindless material buffer system
@@ -111,11 +111,11 @@ Manager :: struct {
   lights_buffer_descriptor_set:              vk.DescriptorSet,
   lights_buffer:                             gpu.MutableBuffer(LightData),
   // Per-frame dynamic light data (position + shadow_map, synchronized per frame)
-  dynamic_light_data_buffers:                [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  dynamic_light_data_buffers:                [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     DynamicLightData,
   ),
   dynamic_light_data_set_layout:             vk.DescriptorSetLayout,
-  dynamic_light_data_descriptor_sets:        [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  dynamic_light_data_descriptor_sets:        [FRAMES_IN_FLIGHT]vk.DescriptorSet,
   // Bindless texture system
   textures_set_layout:                       vk.DescriptorSetLayout,
   textures_descriptor_set:                   vk.DescriptorSet,
@@ -511,7 +511,7 @@ init_bone_matrix_allocator :: proc(
   self.bone_buffer_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.bone_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.bone_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.bone_buffer)},
   ) or_return
   return .SUCCESS
 }
@@ -531,7 +531,7 @@ init_camera_buffer :: proc(
     {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT, .COMPUTE}},
   ) or_return
   // Create per-frame buffers and descriptor sets
-  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
     self.camera_buffers[frame_idx] = gpu.create_mutable_buffer(
       gctx,
       CameraData,
@@ -543,7 +543,7 @@ init_camera_buffer :: proc(
       &self.camera_buffer_set_layout,
       {
         .STORAGE_BUFFER,
-        gpu.mutable_buffer_info(&self.camera_buffers[frame_idx]),
+        gpu.buffer_info(&self.camera_buffers[frame_idx]),
       },
     ) or_return
 
@@ -574,7 +574,7 @@ init_material_buffer :: proc(
   self.material_buffer_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.material_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.material_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.material_buffer)},
   ) or_return
   return .SUCCESS
 }
@@ -612,7 +612,7 @@ init_world_matrix_buffers :: proc(
   self.world_matrix_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.world_matrix_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.world_matrix_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.world_matrix_buffer)},
   ) or_return
   return .SUCCESS
 }
@@ -660,7 +660,7 @@ init_node_data_buffer :: proc(
   self.node_data_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.node_data_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.node_data_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.node_data_buffer)},
   ) or_return
   return .SUCCESS
 }
@@ -696,7 +696,7 @@ init_mesh_data_buffer :: proc(
   self.mesh_data_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.mesh_data_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.mesh_data_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.mesh_data_buffer)},
   ) or_return
   return .SUCCESS
 }
@@ -722,7 +722,7 @@ init_emitter_buffer :: proc(
   self.emitter_buffer_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.emitter_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.emitter_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.emitter_buffer)},
   ) or_return
   return .SUCCESS
 }
@@ -746,7 +746,7 @@ init_lights_buffer :: proc(
   self.lights_buffer_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.lights_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.lights_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.lights_buffer)},
   ) or_return
   return .SUCCESS
 }
@@ -769,7 +769,7 @@ init_dynamic_light_data_buffers :: proc(
   gctx: ^gpu.GPUContext,
 ) -> vk.Result {
   log.info("Creating per-frame dynamic light data buffers")
-  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
     self.dynamic_light_data_buffers[frame_idx] = gpu.malloc_mutable_buffer(
       gctx,
       DynamicLightData,
@@ -786,14 +786,14 @@ init_dynamic_light_data_buffers :: proc(
     gctx,
     {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT}},
   ) or_return
-  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
     self.dynamic_light_data_descriptor_sets[frame_idx] =
       gpu.create_descriptor_set(
         gctx,
         &self.dynamic_light_data_set_layout,
         {
           .STORAGE_BUFFER,
-          gpu.mutable_buffer_info(&self.dynamic_light_data_buffers[frame_idx]),
+          gpu.buffer_info(&self.dynamic_light_data_buffers[frame_idx]),
         },
       ) or_return
   }
@@ -805,7 +805,7 @@ destroy_dynamic_light_data_buffers :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
 ) {
-  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
     gpu.mutable_buffer_destroy(
       gctx.device,
       &self.dynamic_light_data_buffers[frame_idx],
@@ -852,7 +852,7 @@ init_forcefield_buffer :: proc(
   self.forcefield_buffer_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.forcefield_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.forcefield_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.forcefield_buffer)},
   ) or_return
   return .SUCCESS
 }
@@ -890,7 +890,7 @@ init_sprite_buffer :: proc(
   self.sprite_buffer_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.sprite_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.sprite_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.sprite_buffer)},
   ) or_return
   return .SUCCESS
 }
@@ -990,7 +990,7 @@ init_spherical_camera_buffer :: proc(
     {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT, .COMPUTE, .GEOMETRY}},
   ) or_return
   // Create per-frame buffers and descriptor sets
-  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
     self.spherical_camera_buffers[frame_idx] = gpu.create_mutable_buffer(
       gctx,
       SphericalCameraData,
@@ -1005,7 +1005,7 @@ init_spherical_camera_buffer :: proc(
         &self.spherical_camera_buffer_set_layout,
         {
           .STORAGE_BUFFER,
-          gpu.mutable_buffer_info(&self.spherical_camera_buffers[frame_idx]),
+          gpu.buffer_info(&self.spherical_camera_buffers[frame_idx]),
         },
       ) or_return
   }

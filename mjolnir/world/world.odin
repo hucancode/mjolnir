@@ -499,7 +499,7 @@ init_gpu :: proc(
   depth_width: u32,
   depth_height: u32,
 ) -> vk.Result {
-  visibility_system_init(
+  visibility_init(
     &world.visibility,
     gctx,
     rm,
@@ -526,7 +526,7 @@ shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  visibility_system_shutdown(&world.visibility, gctx, rm)
+  visibility_shutdown(&world.visibility, gctx, rm)
   destroy(world, rm, gctx)
 }
 
@@ -583,7 +583,7 @@ update_visibility_system :: proc(world: ^World) {
     },
   )
   node_count := i + 1 if found else len(world.nodes.entries)
-  visibility_system_set_node_count(&world.visibility, u32(node_count))
+  world.visibility.node_count = min(u32(node_count), world.visibility.max_draws)
 }
 
 traverse :: proc(

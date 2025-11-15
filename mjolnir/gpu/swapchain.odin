@@ -6,7 +6,7 @@ import "core:slice"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
-MAX_FRAMES_IN_FLIGHT :: 2
+FRAMES_IN_FLIGHT :: 2
 
 Swapchain :: struct {
   handle:                      vk.SwapchainKHR,
@@ -15,8 +15,8 @@ Swapchain :: struct {
   images:                      []vk.Image,
   views:                       []vk.ImageView,
   image_index:                 u32,
-  in_flight_fences:            [MAX_FRAMES_IN_FLIGHT]vk.Fence,
-  image_available_semaphores:  [MAX_FRAMES_IN_FLIGHT]vk.Semaphore, // Per frame-in-flight
+  in_flight_fences:            [FRAMES_IN_FLIGHT]vk.Fence,
+  image_available_semaphores:  [FRAMES_IN_FLIGHT]vk.Semaphore, // Per frame-in-flight
   render_finished_semaphores:  []vk.Semaphore, // Per swapchain image
   compute_finished_semaphores: []vk.Semaphore, // Per swapchain image
 }
@@ -169,7 +169,7 @@ swapchain_init :: proc(
     ) or_return
   }
   // Create per-frame-in-flight resources
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for i in 0 ..< FRAMES_IN_FLIGHT {
     vk.CreateSemaphore(
       gctx.device,
       &semaphore_info,

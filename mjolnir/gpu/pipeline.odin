@@ -27,27 +27,151 @@ create_double_sided_rasterizer :: proc(
   }
 }
 
-create_standard_input_assembly :: proc(
-  topology: vk.PrimitiveTopology = .TRIANGLE_LIST,
-) -> vk.PipelineInputAssemblyStateCreateInfo {
-  return {
-    sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology = topology,
-  }
+VERTEX_INPUT_NONE := vk.PipelineVertexInputStateCreateInfo {
+  sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 }
 
-// 1x MSAA (no multisampling) is the most common configuration for deferred rendering.
-create_standard_multisampling :: proc(
-) -> vk.PipelineMultisampleStateCreateInfo {
-  return {
-    sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    rasterizationSamples = {._1},
-  }
+READ_WRITE_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
+  sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+  depthTestEnable  = true,
+  depthWriteEnable = true,
+  depthCompareOp   = .LESS_OR_EQUAL,
 }
 
-// Standard dynamic states used by most pipelines.
-// Viewport and scissor are dynamic to support window resizing.
-STANDARD_DYNAMIC_STATES := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+READ_ONLY_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
+  sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+  depthTestEnable = true,
+  depthCompareOp  = .LESS_OR_EQUAL,
+}
+
+READ_ONLY_INVERSE_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
+  sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+  depthTestEnable = true,
+  depthCompareOp  = .GREATER_OR_EQUAL,
+}
+
+DYNAMIC_STATES := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+
+STANDARD_DYNAMIC_STATES := vk.PipelineDynamicStateCreateInfo {
+  sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+  dynamicStateCount = len(DYNAMIC_STATES),
+  pDynamicStates    = raw_data(DYNAMIC_STATES[:]),
+}
+
+STANDARD_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
+  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+  polygonMode = .FILL,
+  cullMode    = {.BACK},
+  frontFace   = .COUNTER_CLOCKWISE,
+}
+
+INVERSE_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
+  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+  polygonMode = .FILL,
+  cullMode    = {.BACK},
+  frontFace   = .CLOCKWISE,
+}
+
+DOUBLE_SIDED_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
+  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+  polygonMode = .FILL,
+  lineWidth   = 1.0,
+}
+
+LINE_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
+  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+  polygonMode = .LINE,
+  lineWidth   = 1.0,
+}
+
+BOLD_DOUBLE_SIDED_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
+  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+  polygonMode = .FILL,
+  lineWidth   = 3.0,
+}
+
+STANDARD_INPUT_ASSEMBLY := vk.PipelineInputAssemblyStateCreateInfo {
+  sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+  topology = .TRIANGLE_LIST,
+}
+
+POINT_INPUT_ASSEMBLY := vk.PipelineInputAssemblyStateCreateInfo {
+  sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+  topology = .POINT_LIST,
+}
+
+LINE_INPUT_ASSEMBLY := vk.PipelineInputAssemblyStateCreateInfo {
+  sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+  topology = .LINE_STRIP,
+}
+
+STANDARD_VIEWPORT_STATE := vk.PipelineViewportStateCreateInfo {
+  sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+  viewportCount = 1,
+  scissorCount  = 1,
+}
+
+STANDARD_MULTISAMPLING := vk.PipelineMultisampleStateCreateInfo {
+  sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+  rasterizationSamples = {._1},
+}
+
+BLEND_OVERRIDE := vk.PipelineColorBlendAttachmentState {
+  colorWriteMask = {.R, .G, .B, .A},
+}
+
+COLOR_BLENDING_OVERRIDE := vk.PipelineColorBlendStateCreateInfo {
+  sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+  attachmentCount = 1,
+  pAttachments    = &BLEND_OVERRIDE,
+}
+
+BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
+  blendEnable         = true,
+  srcColorBlendFactor = .SRC_ALPHA,
+  dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
+  colorBlendOp        = .ADD,
+  srcAlphaBlendFactor = .SRC_ALPHA,
+  dstAlphaBlendFactor = .ONE_MINUS_SRC_ALPHA,
+  alphaBlendOp        = .ADD,
+  colorWriteMask      = {.R, .G, .B, .A},
+}
+
+COLOR_BLENDING_ADDITIVE := vk.PipelineColorBlendStateCreateInfo {
+  sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+  attachmentCount = 1,
+  pAttachments    = &BLEND_ADDITIVE,
+}
+
+BLEND_OVERFLOW := vk.PipelineColorBlendAttachmentState {
+  blendEnable         = true,
+  srcColorBlendFactor = .ONE,
+  dstColorBlendFactor = .ONE,
+  colorBlendOp        = .ADD,
+  srcAlphaBlendFactor = .ONE,
+  dstAlphaBlendFactor = .ONE,
+  alphaBlendOp        = .ADD,
+  colorWriteMask      = {.R, .G, .B, .A},
+}
+
+COLOR_BLENDING_OVERFLOW := vk.PipelineColorBlendStateCreateInfo {
+  sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+  attachmentCount = 1,
+  pAttachments    = &BLEND_OVERFLOW,
+}
+
+STANDARD_COLOR_FORMAT := vk.Format.B8G8R8A8_SRGB
+STANDARD_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
+  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+  colorAttachmentCount    = 1,
+  pColorAttachmentFormats = &STANDARD_COLOR_FORMAT,
+  depthAttachmentFormat   = .D32_SFLOAT,
+}
+
+DEPTH_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
+  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+  depthAttachmentFormat   = .D32_SFLOAT,
+}
 
 create_dynamic_state :: proc(
   states: []vk.DynamicState,
@@ -190,17 +314,7 @@ allocate_compute_command_buffer :: proc {
   allocate_compute_command_buffer_multi,
 }
 
-free_command_buffer_single :: proc(
-  gctx: ^GPUContext,
-  command: ^vk.CommandBuffer,
-) {
-  vk.FreeCommandBuffers(gctx.device, gctx.command_pool, 1, command)
-}
-
-free_command_buffer_multi :: proc(
-  gctx: ^GPUContext,
-  commands: []vk.CommandBuffer,
-) {
+free_command_buffer :: proc(gctx: ^GPUContext, commands: ..vk.CommandBuffer) {
   vk.FreeCommandBuffers(
     gctx.device,
     gctx.command_pool,
@@ -208,12 +322,6 @@ free_command_buffer_multi :: proc(
     raw_data(commands),
   )
 }
-
-free_command_buffer :: proc {
-  free_command_buffer_single,
-  free_command_buffer_multi,
-}
-
 
 free_compute_command_buffer_single :: proc(
   gctx: ^GPUContext,
@@ -345,7 +453,10 @@ create_descriptor_set :: proc(
       vk.DescriptorImageInfo,
     },
   },
-) -> (dst: vk.DescriptorSet, ret: vk.Result) {
+) -> (
+  dst: vk.DescriptorSet,
+  ret: vk.Result,
+) {
   allocate_descriptor_set_single(gctx, &dst, layout) or_return
   update_descriptor_set(gctx, dst, ..buffers)
   return dst, .SUCCESS
@@ -642,7 +753,6 @@ set_viewport_scissor :: proc(
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    offset = {0, 0},
     extent = {width = width, height = height},
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)

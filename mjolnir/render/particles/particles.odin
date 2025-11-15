@@ -53,7 +53,7 @@ Renderer :: struct {
   emitter_descriptor_set_layout:      vk.DescriptorSetLayout,
   emitter_descriptor_set:             vk.DescriptorSet,
   emitter_bindless_descriptor_set:    vk.DescriptorSet,
-  particle_counter_buffer:            gpu.MutableBuffer(u32),
+  particle_count_buffer:              gpu.MutableBuffer(u32),
   // Compaction pipeline
   compact_particle_buffer:            gpu.MutableBuffer(Particle),
   draw_command_buffer:                gpu.MutableBuffer(
@@ -67,7 +67,7 @@ Renderer :: struct {
   render_pipeline_layout:             vk.PipelineLayout,
   render_pipeline:                    vk.Pipeline,
   default_texture_index:              u32,
-  commands:                           [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  commands:                           [resources.FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 simulate :: proc(
@@ -77,7 +77,7 @@ simulate :: proc(
   rm: ^resources.Manager,
 ) {
   params_ptr := gpu.get(&self.params_buffer)
-  counter_ptr := gpu.get(&self.particle_counter_buffer)
+  counter_ptr := gpu.get(&self.particle_count_buffer)
   params_ptr.particle_count = counter_ptr^
   counter_ptr^ = 0
   gpu.bind_compute_pipeline(
@@ -164,7 +164,7 @@ compact :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  gpu.free_command_buffer(gctx, self.commands[:])
+  gpu.free_command_buffer(gctx, ..self.commands[:])
   vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
@@ -192,7 +192,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.particle_counter_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
 }
 
 init :: proc(
@@ -204,7 +204,7 @@ init :: proc(
 ) {
   gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
   defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, self.commands[:])
+    gpu.free_command_buffer(gctx, ..self.commands[:])
   }
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_mutable_buffer(
@@ -225,14 +225,14 @@ init :: proc(
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
   }
-  self.particle_counter_buffer = gpu.create_mutable_buffer(
+  self.particle_count_buffer = gpu.create_mutable_buffer(
     gctx,
     u32,
     1,
     {.STORAGE_BUFFER},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.particle_counter_buffer)
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
   }
   self.emitter_bindless_descriptor_set = rm.emitter_buffer_descriptor_set
   self.forcefield_bindless_descriptor_set = rm.forcefield_buffer_descriptor_set
@@ -300,9 +300,9 @@ create_emitter_pipeline :: proc(
   self.emitter_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.emitter_descriptor_set_layout,
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.particle_buffer)},
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.particle_counter_buffer)},
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&self.params_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_count_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.params_buffer)},
   ) or_return
   emitter_shader_module := gpu.create_shader_module(
     gctx.device,
@@ -363,17 +363,14 @@ create_compute_pipeline :: proc(
   self.compute_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.compute_descriptor_set_layout,
+    {type = .UNIFORM_BUFFER, info = gpu.buffer_info(&self.params_buffer)},
     {
-      type = .UNIFORM_BUFFER,
-      info = gpu.mutable_buffer_info(&self.params_buffer),
+      type = .STORAGE_BUFFER,
+      info = gpu.buffer_info(&self.compact_particle_buffer),
     },
     {
       type = .STORAGE_BUFFER,
-      info = gpu.mutable_buffer_info(&self.compact_particle_buffer),
-    },
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.mutable_buffer_info(&self.particle_counter_buffer),
+      info = gpu.buffer_info(&self.particle_count_buffer),
     },
   ) or_return
   compute_shader_module := gpu.create_shader_module(
@@ -451,21 +448,18 @@ create_compact_pipeline :: proc(
   self.compact_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.compact_descriptor_set_layout,
+    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.particle_buffer)},
     {
       type = .STORAGE_BUFFER,
-      info = gpu.mutable_buffer_info(&self.particle_buffer),
+      info = gpu.buffer_info(&self.compact_particle_buffer),
     },
     {
       type = .STORAGE_BUFFER,
-      info = gpu.mutable_buffer_info(&self.compact_particle_buffer),
+      info = gpu.buffer_info(&self.draw_command_buffer),
     },
     {
       type = .STORAGE_BUFFER,
-      info = gpu.mutable_buffer_info(&self.draw_command_buffer),
-    },
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.mutable_buffer_info(&self.particle_counter_buffer),
+      info = gpu.buffer_info(&self.particle_count_buffer),
     },
   ) or_return
   compact_shader_module := gpu.create_shader_module(
@@ -557,30 +551,6 @@ create_render_pipeline :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-  input_assembly := gpu.create_standard_input_assembly(topology = .POINT_LIST)
-  rasterization := gpu.create_double_sided_rasterizer()
-  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
-    blendEnable         = true,
-    srcColorBlendFactor = .SRC_ALPHA,
-    dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
-    colorBlendOp        = .ADD,
-    srcAlphaBlendFactor = .ONE,
-    dstAlphaBlendFactor = .ONE_MINUS_SRC_ALPHA,
-    alphaBlendOp        = .ADD,
-    colorWriteMask      = {.R, .G, .B, .A},
-  }
-  blend_state := vk.PipelineColorBlendStateCreateInfo {
-    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    attachmentCount = 1,
-    pAttachments    = &color_blend_attachment,
-  }
-  viewport_state := vk.PipelineViewportStateCreateInfo {
-    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    viewportCount = 1,
-    scissorCount  = 1,
-  }
-  dynamic_state := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
-  multisample := gpu.create_standard_multisampling()
   vert_module := gpu.create_shader_module(
     gctx.device,
     SHADER_PARTICLE_VERT,
@@ -591,52 +561,36 @@ create_render_pipeline :: proc(
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-  spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
-  spec_info.pData = cast(rawptr)&spec_data
-  defer delete(spec_entries)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.VERTEX},
       module = vert_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
+      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.FRAGMENT},
       module = frag_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
+      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
     },
-  }
-  color_formats := [?]vk.Format{.B8G8R8A8_SRGB}
-  rendering_info := vk.PipelineRenderingCreateInfo {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat   = .D32_SFLOAT,
-  }
-  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-    depthTestEnable  = true,
-    depthWriteEnable = false,
-    depthCompareOp   = .LESS_OR_EQUAL,
   }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),
     pStages             = raw_data(shader_stages[:]),
     pVertexInputState   = &vertex_input_info,
-    pInputAssemblyState = &input_assembly,
-    pViewportState      = &viewport_state,
-    pRasterizationState = &rasterization,
-    pMultisampleState   = &multisample,
-    pColorBlendState    = &blend_state,
-    pDynamicState       = &dynamic_state,
+    pInputAssemblyState = &gpu.POINT_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.DOUBLE_SIDED_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
+    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
+    pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
     layout              = self.render_pipeline_layout,
-    pNext               = &rendering_info,
-    pDepthStencilState  = &depth_stencil,
+    pNext               = &gpu.STANDARD_RENDERING_INFO,
   }
   vk.CreateGraphicsPipelines(
     gctx.device,

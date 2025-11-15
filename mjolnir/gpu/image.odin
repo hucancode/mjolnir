@@ -2,6 +2,7 @@ package gpu
 
 import "core:log"
 import "core:math"
+import alg "../algebra"
 import vk "vendor:vulkan"
 
 ImageType :: enum {
@@ -85,8 +86,7 @@ infer_aspect_mask :: proc(format: vk.Format) -> vk.ImageAspectFlags {
 
 // Calculate optimal mip levels for given dimensions
 calculate_mip_levels :: proc(width, height: u32) -> u32 {
-  // floor(log2(max(width, height))) + 1
-  return u32(math.floor(math.log2(f32(max(width, height))))) + 1
+  return alg.log2_greater_than(max(width, height))
 }
 
 validate_spec :: proc(spec: ^ImageSpec) {

@@ -540,12 +540,12 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
 
 @(private = "file")
 descriptor_pool_init :: proc(self: ^GPUContext) -> vk.Result {
-  MAX_FRAMES_IN_FLIGHT :: 2 // TODO: get this from a common place
+  FRAMES_IN_FLIGHT :: 2 // TODO: get this from a common place
   MAX_DEPTH_PYRAMID_MIPS :: 16
   MAX_ACTIVE_CAMERAS :: 128
   // Storage images needed for depth pyramid mip reduction (one per mip per frame per camera)
   STORAGE_IMAGE_COUNT ::
-    MAX_ACTIVE_CAMERAS * MAX_FRAMES_IN_FLIGHT * MAX_DEPTH_PYRAMID_MIPS
+    MAX_ACTIVE_CAMERAS * FRAMES_IN_FLIGHT * MAX_DEPTH_PYRAMID_MIPS
   // expand those limits as needed
   pool_sizes := [?]vk.DescriptorPoolSize {
     {.COMBINED_IMAGE_SAMPLER, MAX_SAMPLER_COUNT},
@@ -560,7 +560,7 @@ descriptor_pool_init :: proc(self: ^GPUContext) -> vk.Result {
   log.infof(" - Combined Image Samplers: %d", MAX_SAMPLER_COUNT)
   log.infof(
     " - Uniform Buffers: %d",
-    MAX_FRAMES_IN_FLIGHT * SCENE_CAMERA_COUNT,
+    FRAMES_IN_FLIGHT * SCENE_CAMERA_COUNT,
   )
   log.infof(" - Storage Buffers: %d", ACTIVE_MATERIAL_COUNT)
   log.infof(" - Storage Images: %d", STORAGE_IMAGE_COUNT)
@@ -568,7 +568,7 @@ descriptor_pool_init :: proc(self: ^GPUContext) -> vk.Result {
     sType         = .DESCRIPTOR_POOL_CREATE_INFO,
     poolSizeCount = len(pool_sizes),
     pPoolSizes    = raw_data(pool_sizes[:]),
-    maxSets       = MAX_FRAMES_IN_FLIGHT + ACTIVE_MATERIAL_COUNT + STORAGE_IMAGE_COUNT,
+    maxSets       = FRAMES_IN_FLIGHT + ACTIVE_MATERIAL_COUNT + STORAGE_IMAGE_COUNT,
     // flags = {.FREE_DESCRIPTOR_SET} // If needed
   }
   log.infof("Creating descriptor pool with maxSets: %d", pool_info.maxSets)

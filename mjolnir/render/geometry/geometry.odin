@@ -17,7 +17,7 @@ PushConstant :: struct {
 
 Renderer :: struct {
   pipeline: vk.Pipeline,
-  commands: [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  commands: [resources.FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 init :: proc(
@@ -30,15 +30,12 @@ init :: proc(
 ) {
   gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
   defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, self.commands[:])
+    gpu.free_command_buffer(gctx, ..self.commands[:])
   }
   depth_format: vk.Format = .D32_SFLOAT
   if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-  spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
-  spec_info.pData = cast(rawptr)&spec_data
-  defer delete(spec_entries)
   log.info("About to build G-buffer pipelines...")
   vert_module := gpu.create_shader_module(
     gctx.device,
@@ -63,33 +60,18 @@ init :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-  input_assembly := gpu.create_standard_input_assembly()
-  viewport_state := vk.PipelineViewportStateCreateInfo {
-    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    viewportCount = 1,
-    scissorCount  = 1,
-  }
-  rasterizer := gpu.create_standard_rasterizer()
-  multisampling := gpu.create_standard_multisampling()
-  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-    depthTestEnable  = true,
-    depthWriteEnable = false,
-    depthCompareOp   = .LESS_OR_EQUAL,
-  }
   color_blend_attachments := [?]vk.PipelineColorBlendAttachmentState {
-    {colorWriteMask = {.R, .G, .B, .A}}, // position
-    {colorWriteMask = {.R, .G, .B, .A}}, // normal
-    {colorWriteMask = {.R, .G, .B, .A}}, // albedo
-    {colorWriteMask = {.R, .G, .B, .A}}, // metallic/roughness
-    {colorWriteMask = {.R, .G, .B, .A}}, // emissive
+    gpu.BLEND_OVERRIDE, // position
+    gpu.BLEND_OVERRIDE, // normal
+    gpu.BLEND_OVERRIDE, // albedo
+    gpu.BLEND_OVERRIDE, // metallic/roughness
+    gpu.BLEND_OVERRIDE, // emissive
   }
   color_blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     attachmentCount = len(color_blend_attachments),
     pAttachments    = raw_data(color_blend_attachments[:]),
   }
-  dynamic_state := gpu.create_dynamic_state(gpu.STANDARD_DYNAMIC_STATES[:])
   color_formats := [?]vk.Format {
     .R32G32B32A32_SFLOAT, // position
     .R8G8B8A8_UNORM, // normal
@@ -109,14 +91,14 @@ init :: proc(
       stage = {.VERTEX},
       module = vert_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
+      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.FRAGMENT},
       module = frag_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
+      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
     },
   }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
@@ -124,13 +106,13 @@ init :: proc(
     stageCount          = len(shader_stages),
     pStages             = raw_data(shader_stages[:]),
     pVertexInputState   = &vertex_input_info,
-    pInputAssemblyState = &input_assembly,
-    pViewportState      = &viewport_state,
-    pRasterizationState = &rasterizer,
-    pMultisampleState   = &multisampling,
-    pDepthStencilState  = &depth_stencil,
+    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.STANDARD_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
     pColorBlendState    = &color_blending,
-    pDynamicState       = &dynamic_state,
+    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
     layout              = rm.geometry_pipeline_layout,
     pNext               = &rendering_info,
   }
@@ -414,7 +396,7 @@ render :: proc(
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  gpu.free_command_buffer(gctx, self.commands[:])
+  gpu.free_command_buffer(gctx, ..self.commands[:])
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   self.pipeline = 0
 }

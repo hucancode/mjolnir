@@ -320,7 +320,7 @@ cube_depth_texture_destroy :: proc(device: vk.Device, self: ^CubeImage) {
   image_destroy(device, &self.base)
 }
 
-buffer_info :: proc(self: ^ImmutableBuffer($T)) -> vk.DescriptorBufferInfo {
+immutable_buffer_info :: proc(self: ^ImmutableBuffer($T)) -> vk.DescriptorBufferInfo {
   return vk.DescriptorBufferInfo {
     buffer = self.buffer,
     range = vk.DeviceSize(self.bytes_count),
@@ -334,4 +334,9 @@ mutable_buffer_info :: proc(
     buffer = self.buffer,
     range = vk.DeviceSize(self.bytes_count),
   }
+}
+
+buffer_info :: proc {
+  immutable_buffer_info,
+  mutable_buffer_info,
 }

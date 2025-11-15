@@ -163,9 +163,9 @@ Obb :: struct {
 
 // Get the 3 local axes of the OBB (columns of rotation matrix)
 obb_axes :: proc(obb: Obb) -> (x, y, z: [3]f32) {
-  x = linalg.quaternion128_mul_vector3(obb.rotation, linalg.VECTOR3F32_X_AXIS)
-  y = linalg.quaternion128_mul_vector3(obb.rotation, linalg.VECTOR3F32_Y_AXIS)
-  z = linalg.quaternion128_mul_vector3(obb.rotation, linalg.VECTOR3F32_Z_AXIS)
+  x = linalg.mul(obb.rotation, linalg.VECTOR3F32_X_AXIS)
+  y = linalg.mul(obb.rotation, linalg.VECTOR3F32_Y_AXIS)
+  z = linalg.mul(obb.rotation, linalg.VECTOR3F32_Z_AXIS)
   return
 }
 
@@ -183,7 +183,7 @@ obb_to_aabb :: proc(obb: Obb) -> Aabb {
   }
   aabb := AABB_UNDEFINED
   for corner in corners {
-    rotated := linalg.quaternion128_mul_vector3(obb.rotation, corner)
+    rotated := linalg.mul(obb.rotation, corner)
     world_corner := obb.center + rotated
     aabb.min = linalg.min(aabb.min, world_corner)
     aabb.max = linalg.max(aabb.max, world_corner)
@@ -196,18 +196,18 @@ obb_closest_point :: proc(obb: Obb, point: [3]f32) -> [3]f32 {
   d := point - obb.center
   // Transform point to OBB local space
   inv_rot := linalg.quaternion_inverse(obb.rotation)
-  local := linalg.quaternion128_mul_vector3(inv_rot, d)
+  local := linalg.mul(inv_rot, d)
   // Clamp to box extents
   clamped := linalg.clamp(local, -obb.half_extents, obb.half_extents)
   // Transform back to world space
-  return obb.center + linalg.quaternion128_mul_vector3(obb.rotation, clamped)
+  return obb.center + linalg.mul(obb.rotation, clamped)
 }
 
 // Check if point is inside OBB
 obb_contains_point :: proc(obb: Obb, point: [3]f32) -> bool {
   d := point - obb.center
   inv_rot := linalg.quaternion_inverse(obb.rotation)
-  local := linalg.quaternion128_mul_vector3(inv_rot, d)
+  local := linalg.mul(inv_rot, d)
   return(
     math.abs(local.x) <= obb.half_extents.x &&
     math.abs(local.y) <= obb.half_extents.y &&

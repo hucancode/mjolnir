@@ -25,7 +25,7 @@ import mu "vendor:microui"
 import vk "vendor:vulkan"
 import "world"
 
-MAX_FRAMES_IN_FLIGHT :: 2
+FRAMES_IN_FLIGHT :: 2
 RENDER_FPS :: 60.0
 FRAME_TIME :: 1.0 / RENDER_FPS
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
@@ -87,8 +87,8 @@ Engine :: struct {
   post_render_proc:          PostRenderProc,
   render_error_count:        u32,
   render:                    Renderer,
-  command_buffers:           [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  compute_command_buffers:   [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  command_buffers:           [FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  compute_command_buffers:   [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                [2]i32,
   debug_ui_enabled:          bool,
   pending_node_deletions:    [dynamic]resources.Handle,
@@ -162,7 +162,7 @@ init :: proc(
   ) or_return
   gpu.allocate_command_buffer(&self.gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
-    gpu.free_command_buffer(&self.gctx, self.command_buffers[:])
+    gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
   }
   gpu.allocate_compute_command_buffer(
     &self.gctx,
@@ -443,7 +443,7 @@ update :: proc(self: ^Engine) -> bool {
 shutdown :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(self.gctx.device)
   level_manager.shutdown(&self.level_manager)
-  gpu.free_command_buffer(&self.gctx, self.command_buffers[:])
+  gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
   gpu.free_compute_command_buffer(&self.gctx, self.compute_command_buffers[:])
   delete(self.pending_node_deletions)
   renderer_shutdown(&self.render, &self.gctx, &self.rm)
@@ -493,7 +493,7 @@ populate_debug_ui :: proc(self: ^Engine) {
       ),
     )
     if main_camera := get_main_camera(self); main_camera != nil {
-      main_stats := world.visibility_system_get_stats(
+      main_stats := world.visibility_stats(
         &self.world.visibility,
         main_camera,
         self.render.main_camera.index,
@@ -505,7 +505,7 @@ populate_debug_ui :: proc(self: ^Engine) {
       )
       mu.label(
         &self.render.ui.ctx,
-        fmt.tprintf("Draw count: %d draws", main_stats.late_draw_count),
+        fmt.tprintf("Draw count: %d draws", main_stats.opaque_draw_count),
       )
     }
   }
@@ -711,12 +711,12 @@ render :: proc(self: ^Engine) -> vk.Result {
     ) or_return
     compute_cmd_buffer = compute_buffer
   } else {
-    next_frame_index := (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
+    next_frame_index := (self.frame_index + 1) % FRAMES_IN_FLIGHT
     for &entry, cam_index in self.rm.cameras.entries {
       if !entry.active do continue
       if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
       cam := &entry.item
-      world.visibility_system_dispatch_culling(
+      world.visibility_perform_culling(
         &self.world.visibility,
         &self.gctx,
         command_buffer,
@@ -826,7 +826,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
     compute_cmd_buffer,
   ) or_return
-  self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
+  self.frame_index = (self.frame_index + 1) % FRAMES_IN_FLIGHT
   process_pending_deletions(self)
   self.last_render_timestamp = time.now()
   return .SUCCESS

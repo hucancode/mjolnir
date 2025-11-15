@@ -71,34 +71,34 @@ Camera :: struct {
   },
   // Per-frame GPU data
   // Frame N compute uses data[N] for culling, Frame N render uses data[N-1] for drawing
-  data:                         [MAX_FRAMES_IN_FLIGHT]CameraData,
+  data:                         [FRAMES_IN_FLIGHT]CameraData,
   // Render target data
   extent:                       vk.Extent2D,
-  attachments:                  [AttachmentType][MAX_FRAMES_IN_FLIGHT]Handle,
+  attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]Handle,
   enabled_passes:               PassTypeSet,
   // Per-pass secondary command buffers for this camera
-  geometry_commands:            [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  lighting_commands:            [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  transparency_commands:        [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  geometry_commands:            [FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  lighting_commands:            [FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  transparency_commands:        [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Double-buffered draw lists for lock-free async compute:
   //   - Frame N graphics reads from draw_commands[N-1]
   //   - Frame N compute writes to draw_commands[N]
   // Graphics reads from previous frame's draw list while compute prepares current frame's list
-  late_draw_count:              [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  late_draw_commands:           [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  opaque_draw_count:            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  opaque_draw_commands:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  transparent_draw_count:       [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  transparent_draw_commands:    [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  transparent_draw_count:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  transparent_draw_commands:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  sprite_draw_count:            [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  sprite_draw_commands:         [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  sprite_draw_count:            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  sprite_draw_commands:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  depth_pyramid:                [MAX_FRAMES_IN_FLIGHT]DepthPyramid,
-  descriptor_set:               [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  depth_reduce_descriptor_sets: [MAX_FRAMES_IN_FLIGHT][16]vk.DescriptorSet,
+  depth_pyramid:                [FRAMES_IN_FLIGHT]DepthPyramid,
+  descriptor_set:               [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  depth_reduce_descriptor_sets: [FRAMES_IN_FLIGHT][16]vk.DescriptorSet,
 }
 
 DepthPyramid :: struct {
@@ -151,7 +151,7 @@ camera_init :: proc(
   }
   right := linalg.normalize(linalg.cross(forward, safe_up))
   recalc_up := linalg.cross(right, forward)
-  rotation_matrix := matrix[3,3]f32 {
+  rotation_matrix := matrix[3, 3]f32{
     right.x, recalc_up.x, -forward.x,
     right.y, recalc_up.y, -forward.y,
     right.z, recalc_up.z, -forward.z,
@@ -165,7 +165,7 @@ camera_init :: proc(
     .TRANSPARENCY in enabled_passes ||
     .PARTICLES in enabled_passes ||
     .POST_PROCESS in enabled_passes
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     if needs_final {
       camera.attachments[.FINAL_IMAGE][frame], _, _ = create_texture(
         gctx,
@@ -227,7 +227,10 @@ camera_init :: proc(
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
     // Transition depth image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL
-    if depth, ok := cont.get(manager.images_2d, camera.attachments[.DEPTH][frame]); ok {
+    if depth, ok := cont.get(
+      manager.images_2d,
+      camera.attachments[.DEPTH][frame],
+    ); ok {
       cmd_buf := gpu.begin_single_time_command(gctx) or_return
       gpu.image_barrier(
         cmd_buf,
@@ -264,14 +267,14 @@ camera_init :: proc(
       .SECONDARY,
     ) or_return
   }
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    camera.late_draw_count[frame] = gpu.create_mutable_buffer(
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    camera.opaque_draw_count[frame] = gpu.create_mutable_buffer(
       gctx,
       u32,
       1,
       {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
-    camera.late_draw_commands[frame] = gpu.create_mutable_buffer(
+    camera.opaque_draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,
       vk.DrawIndexedIndirectCommand,
       int(max_draws),
@@ -302,7 +305,7 @@ camera_init :: proc(
       {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
   }
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     create_camera_depth_pyramid(
       gctx,
       manager,
@@ -312,7 +315,7 @@ camera_init :: proc(
       u32(frame),
     ) or_return
   }
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     camera_allocate_descriptors(gctx, manager, camera, u32(frame)) or_return
   }
   return .SUCCESS
@@ -330,10 +333,10 @@ camera_destroy :: proc(
       }
     }
   }
-  gpu.free_command_buffer(gctx, self.geometry_commands[:])
-  gpu.free_command_buffer(gctx, self.lighting_commands[:])
-  gpu.free_command_buffer(gctx, self.transparency_commands[:])
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  gpu.free_command_buffer(gctx, ..self.geometry_commands[:])
+  gpu.free_command_buffer(gctx, ..self.lighting_commands[:])
+  gpu.free_command_buffer(gctx, ..self.transparency_commands[:])
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     for mip in 0 ..< self.depth_pyramid[frame].mip_levels {
       vk.DestroyImageView(
         gctx.device,
@@ -343,8 +346,8 @@ camera_destroy :: proc(
     }
     vk.DestroyImageView(gctx.device, self.depth_pyramid[frame].full_view, nil)
     vk.DestroySampler(gctx.device, self.depth_pyramid[frame].sampler, nil)
-    gpu.mutable_buffer_destroy(gctx.device, &self.late_draw_count[frame])
-    gpu.mutable_buffer_destroy(gctx.device, &self.late_draw_commands[frame])
+    gpu.mutable_buffer_destroy(gctx.device, &self.opaque_draw_count[frame])
+    gpu.mutable_buffer_destroy(gctx.device, &self.opaque_draw_commands[frame])
     gpu.mutable_buffer_destroy(
       gctx.device,
       &self.transparent_draw_count[frame],
@@ -396,24 +399,15 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
 }
 
 camera_forward :: proc(self: ^Camera) -> [3]f32 {
-  return linalg.quaternion_mul_vector3(
-    self.rotation,
-    -linalg.VECTOR3F32_Z_AXIS,
-  )
+  return linalg.mul(self.rotation, -linalg.VECTOR3F32_Z_AXIS)
 }
 
 camera_right :: proc(self: ^Camera) -> [3]f32 {
-  return linalg.quaternion_mul_vector3(
-    self.rotation,
-    linalg.VECTOR3F32_X_AXIS,
-  )
+  return linalg.mul(self.rotation, linalg.VECTOR3F32_X_AXIS)
 }
 
 camera_up :: proc(self: ^Camera) -> [3]f32 {
-  return linalg.quaternion_mul_vector3(
-    self.rotation,
-    linalg.VECTOR3F32_Y_AXIS,
-  )
+  return linalg.mul(self.rotation, linalg.VECTOR3F32_Y_AXIS)
 }
 
 camera_get_near_far :: proc(self: ^Camera) -> (near: f32, far: f32) {
@@ -443,7 +437,7 @@ camera_look_at :: proc(
   }
   right := linalg.normalize(linalg.cross(forward, safe_up))
   recalc_up := linalg.cross(right, forward)
-  rotation_matrix := matrix[3,3]f32 {
+  rotation_matrix := matrix[3, 3]f32{
     right.x, recalc_up.x, -forward.x,
     right.y, recalc_up.y, -forward.y,
     right.z, recalc_up.z, -forward.z,
@@ -471,7 +465,7 @@ camera_resize :: proc(
   if camera.extent.width == width && camera.extent.height == height do return .SUCCESS
   vk.DeviceWaitIdle(gctx.device) or_return
   // Clear descriptor set references (will be reallocated after resource recreation)
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     camera.descriptor_set[frame] = 0
     for mip in 0 ..< camera.depth_pyramid[frame].mip_levels {
       camera.depth_reduce_descriptor_sets[frame][mip] = 0
@@ -506,7 +500,7 @@ camera_resize :: proc(
     .TRANSPARENCY in camera.enabled_passes ||
     .PARTICLES in camera.enabled_passes ||
     .POST_PROCESS in camera.enabled_passes
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     if needs_final {
       camera.attachments[.FINAL_IMAGE][frame], _, _ = create_texture(
         gctx,
@@ -584,7 +578,7 @@ camera_resize :: proc(
       gpu.end_single_time_command(gctx, &cmd_buf) or_return
     }
   }
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     create_camera_depth_pyramid(
       gctx,
       manager,
@@ -594,7 +588,7 @@ camera_resize :: proc(
       u32(frame),
     ) or_return
   }
-  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     camera_allocate_descriptors(gctx, manager, camera, u32(frame)) or_return
   }
   log.infof("Camera resized to %dx%d", width, height)
@@ -602,8 +596,8 @@ camera_resize :: proc(
 }
 
 camera_get_visible_count :: proc(camera: ^Camera, frame_index: u32) -> u32 {
-  if camera.late_draw_count[frame_index].mapped == nil do return 0
-  return camera.late_draw_count[frame_index].mapped[0]
+  if camera.opaque_draw_count[frame_index].mapped == nil do return 0
+  return camera.opaque_draw_count[frame_index].mapped[0]
 }
 
 // TODO: this procedure has around 8 matrices operations, if you run this thousands times per frame you should optimize it first
@@ -881,40 +875,31 @@ camera_allocate_descriptors :: proc(
       &manager.visibility_depth_reduce_descriptor_layout,
     ) or_return
   }
-  prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
+  prev_frame := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
   gpu.update_descriptor_set(
     gctx,
     camera.descriptor_set[frame_index],
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.node_data_buffer)},
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.mesh_data_buffer)},
-    {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.world_matrix_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&manager.camera_buffers[frame_index])},
+    {.STORAGE_BUFFER, gpu.buffer_info(&camera.opaque_draw_count[frame_index])},
     {
       .STORAGE_BUFFER,
-      gpu.mutable_buffer_info(&manager.camera_buffers[frame_index]),
+      gpu.buffer_info(&camera.opaque_draw_commands[frame_index]),
     },
     {
       .STORAGE_BUFFER,
-      gpu.mutable_buffer_info(&camera.late_draw_count[frame_index]),
+      gpu.buffer_info(&camera.transparent_draw_count[frame_index]),
     },
     {
       .STORAGE_BUFFER,
-      gpu.mutable_buffer_info(&camera.late_draw_commands[frame_index]),
+      gpu.buffer_info(&camera.transparent_draw_commands[frame_index]),
     },
+    {.STORAGE_BUFFER, gpu.buffer_info(&camera.sprite_draw_count[frame_index])},
     {
       .STORAGE_BUFFER,
-      gpu.mutable_buffer_info(&camera.transparent_draw_count[frame_index]),
-    },
-    {
-      .STORAGE_BUFFER,
-      gpu.mutable_buffer_info(&camera.transparent_draw_commands[frame_index]),
-    },
-    {
-      .STORAGE_BUFFER,
-      gpu.mutable_buffer_info(&camera.sprite_draw_count[frame_index]),
-    },
-    {
-      .STORAGE_BUFFER,
-      gpu.mutable_buffer_info(&camera.sprite_draw_commands[frame_index]),
+      gpu.buffer_info(&camera.sprite_draw_commands[frame_index]),
     },
     {
       .COMBINED_IMAGE_SAMPLER,

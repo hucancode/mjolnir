@@ -1,4 +1,6 @@
-package geometry
+package algebra
+
+import "core:math"
 
 // Next power of two
 next_pow2 :: proc "contextless" (v: u32) -> u32 {
@@ -32,6 +34,10 @@ ilog2 :: proc "contextless" (v: u32) -> u32 {
   r |= shift
   r |= val >> 1
   return r
+}
+
+log2_greater_than :: proc (x: u32) -> u32 {
+  return u32(math.floor(math.log2(f32(x)))) + 1
 }
 
 // Align value to given alignment

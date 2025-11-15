@@ -87,9 +87,6 @@ init :: proc(
       pName = "main",
     },
   }
-  dynamic_state_info := gpu.create_dynamic_state(
-    gpu.STANDARD_DYNAMIC_STATES[:],
-  )
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Vertex2D),
@@ -128,29 +125,6 @@ init :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-  input_assembly := gpu.create_standard_input_assembly()
-  viewport_state := vk.PipelineViewportStateCreateInfo {
-    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    viewportCount = 1,
-    scissorCount  = 1,
-  }
-  rasterizer := gpu.create_double_sided_rasterizer()
-  multisampling := gpu.create_standard_multisampling()
-  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
-    blendEnable         = true,
-    srcColorBlendFactor = .SRC_ALPHA,
-    dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
-    colorBlendOp        = .ADD,
-    srcAlphaBlendFactor = .SRC_ALPHA,
-    dstAlphaBlendFactor = .ONE_MINUS_SRC_ALPHA,
-    alphaBlendOp        = .ADD,
-    colorWriteMask      = {.R, .G, .B, .A},
-  }
-  color_blending := vk.PipelineColorBlendStateCreateInfo {
-    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    attachmentCount = 1,
-    pAttachments    = &color_blend_attachment,
-  }
   self.projection_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.UNIFORM_BUFFER, {.VERTEX}},
@@ -173,28 +147,18 @@ init :: proc(
     vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
     self.projection_layout = 0
   }
-  color_formats := [?]vk.Format{color_format}
-  rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-  }
-  depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
-    sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-  }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &rendering_info_khr,
+    pNext               = &gpu.STANDARD_RENDERING_INFO,
     stageCount          = len(shader_stages),
     pStages             = raw_data(shader_stages[:]),
     pVertexInputState   = &vertex_input,
-    pInputAssemblyState = &input_assembly,
-    pViewportState      = &viewport_state,
-    pRasterizationState = &rasterizer,
-    pMultisampleState   = &multisampling,
-    pColorBlendState    = &color_blending,
-    pDynamicState       = &dynamic_state_info,
-    pDepthStencilState  = &depth_stencil_state,
+    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.DOUBLE_SIDED_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
+    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
     layout              = self.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
@@ -295,7 +259,7 @@ init :: proc(
     &self.projection_layout,
     {
       type = .UNIFORM_BUFFER,
-      info = gpu.mutable_buffer_info(&self.proj_buffer),
+      info = gpu.buffer_info(&self.proj_buffer),
     },
   ) or_return
   log.infof("done init UI")

@@ -10,7 +10,7 @@ import "core:slice"
 import fs "vendor:fontstash"
 import vk "vendor:vulkan"
 
-MAX_FRAMES_IN_FLIGHT :: resources.MAX_FRAMES_IN_FLIGHT
+FRAMES_IN_FLIGHT :: resources.FRAMES_IN_FLIGHT
 SHADER_UI_VERT :: #load("../../shader/retained_ui/vert.spv")
 SHADER_UI_FRAG :: #load("../../shader/retained_ui/frag.spv")
 
@@ -216,7 +216,7 @@ Manager :: struct {
   widgets:                      resources.Pool(Widget),
   root_widgets:                 [dynamic]WidgetHandle,
   // Draw lists (one per frame in flight)
-  draw_lists:                   [MAX_FRAMES_IN_FLIGHT]DrawList,
+  draw_lists:                   [FRAMES_IN_FLIGHT]DrawList,
   current_frame:                u32,
   // Dirty tracking for incremental updates
   dirty_widgets:                [dynamic]WidgetHandle,
@@ -234,10 +234,10 @@ Manager :: struct {
   atlas:                        ^gpu.Image,
   atlas_handle:                 resources.Handle, // For bindless access
   proj_buffer:                  gpu.MutableBuffer(matrix[4, 4]f32),
-  vertex_buffers:               [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  vertex_buffers:               [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     Vertex2D,
   ),
-  index_buffers:                [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  index_buffers:                [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   // Text rendering resources
   font_ctx:                     fs.FontContext,
   default_font:                 int,
@@ -307,9 +307,6 @@ init :: proc(
       pName = "main",
     },
   }
-  dynamic_state_info := gpu.create_dynamic_state(
-    gpu.STANDARD_DYNAMIC_STATES[:],
-  )
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Vertex2D),
@@ -354,29 +351,6 @@ init :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-  input_assembly := gpu.create_standard_input_assembly()
-  viewport_state := vk.PipelineViewportStateCreateInfo {
-    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    viewportCount = 1,
-    scissorCount  = 1,
-  }
-  rasterizer := gpu.create_double_sided_rasterizer()
-  multisampling := gpu.create_standard_multisampling()
-  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
-    blendEnable         = true,
-    srcColorBlendFactor = .SRC_ALPHA,
-    dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
-    colorBlendOp        = .ADD,
-    srcAlphaBlendFactor = .SRC_ALPHA,
-    dstAlphaBlendFactor = .ONE_MINUS_SRC_ALPHA,
-    alphaBlendOp        = .ADD,
-    colorWriteMask      = {.R, .G, .B, .A},
-  }
-  color_blending := vk.PipelineColorBlendStateCreateInfo {
-    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    attachmentCount = 1,
-    pAttachments    = &color_blend_attachment,
-  }
   self.projection_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.UNIFORM_BUFFER, {.VERTEX}},
@@ -393,28 +367,18 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   }
-  color_formats := [?]vk.Format{color_format}
-  rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-  }
-  depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
-    sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-  }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &rendering_info_khr,
+    pNext               = &gpu.STANDARD_RENDERING_INFO,
     stageCount          = len(shader_stages),
     pStages             = raw_data(shader_stages[:]),
     pVertexInputState   = &vertex_input,
-    pInputAssemblyState = &input_assembly,
-    pViewportState      = &viewport_state,
-    pRasterizationState = &rasterizer,
-    pMultisampleState   = &multisampling,
-    pColorBlendState    = &color_blending,
-    pDynamicState       = &dynamic_state_info,
-    pDepthStencilState  = &depth_stencil_state,
+    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.DOUBLE_SIDED_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
+    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
     layout              = self.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
@@ -444,7 +408,7 @@ init :: proc(
   }
   log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
   log.infof("init UI buffers...")
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for i in 0 ..< FRAMES_IN_FLIGHT {
     self.vertex_buffers[i] = gpu.create_mutable_buffer(
       gctx,
       Vertex2D,
@@ -459,7 +423,7 @@ init :: proc(
     ) or_return
   }
   defer if ret != .SUCCESS {
-    for j in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    for j in 0 ..< FRAMES_IN_FLIGHT {
       gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[j])
       gpu.mutable_buffer_destroy(gctx.device, &self.index_buffers[j])
     }
@@ -482,7 +446,7 @@ init :: proc(
     &self.projection_layout,
     {
       type = .UNIFORM_BUFFER,
-      info = gpu.mutable_buffer_info(&self.proj_buffer),
+      info = gpu.buffer_info(&self.proj_buffer),
     },
   ) or_return
   log.infof("init text rendering system...")
@@ -570,7 +534,7 @@ init :: proc(
 
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   // Cleanup UI resources
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for i in 0 ..< FRAMES_IN_FLIGHT {
     gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
     gpu.mutable_buffer_destroy(gctx.device, &self.index_buffers[i])
     delete(self.draw_lists[i].commands)

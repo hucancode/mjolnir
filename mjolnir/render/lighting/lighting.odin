@@ -131,7 +131,7 @@ init :: proc(
 ) {
   gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
   defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, self.commands[:])
+    gpu.free_command_buffer(gctx, ..self.commands[:])
   }
   log.debugf("renderer lighting init %d x %d", width, height)
   self.ambient_pipeline_layout = gpu.create_pipeline_layout(
@@ -156,76 +156,34 @@ init :: proc(
     SHADER_AMBIENT_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, ambient_frag_module, nil)
-  ambient_dynamic_state := gpu.create_dynamic_state(
-    gpu.STANDARD_DYNAMIC_STATES[:],
-  )
-  ambient_input_assembly := gpu.create_standard_input_assembly()
-  ambient_vertex_input := vk.PipelineVertexInputStateCreateInfo {
-    sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-  }
-  ambient_viewport_state := vk.PipelineViewportStateCreateInfo {
-    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    viewportCount = 1,
-    scissorCount  = 1,
-  }
-  ambient_rasterizer := gpu.create_double_sided_rasterizer()
-  ambient_multisampling := gpu.create_standard_multisampling()
-  ambient_color_blend_attachment := vk.PipelineColorBlendAttachmentState {
-    colorWriteMask      = {.R, .G, .B, .A},
-    blendEnable         = false,
-    srcColorBlendFactor = .ONE,
-    dstColorBlendFactor = .ZERO,
-    colorBlendOp        = .ADD,
-    srcAlphaBlendFactor = .ONE,
-    dstAlphaBlendFactor = .ZERO,
-    alphaBlendOp        = .ADD,
-  }
-  ambient_color_blending := vk.PipelineColorBlendStateCreateInfo {
-    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    attachmentCount = 1,
-    pAttachments    = &ambient_color_blend_attachment,
-  }
-  ambient_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-  }
-  ambient_color_formats := [?]vk.Format{color_format}
-  ambient_rendering_info := vk.PipelineRenderingCreateInfo {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = len(ambient_color_formats),
-    pColorAttachmentFormats = raw_data(ambient_color_formats[:]),
-  }
-  spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
-  spec_info.pData = cast(rawptr)&spec_data
-  defer delete(spec_entries)
   ambient_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.VERTEX},
       module = ambient_vert_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
+      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.FRAGMENT},
       module = ambient_frag_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
+      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
     },
   }
   ambient_pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &ambient_rendering_info,
+    pNext               = &gpu.STANDARD_RENDERING_INFO,
     stageCount          = len(ambient_shader_stages),
     pStages             = raw_data(ambient_shader_stages[:]),
-    pVertexInputState   = &ambient_vertex_input,
-    pInputAssemblyState = &ambient_input_assembly,
-    pViewportState      = &ambient_viewport_state,
-    pRasterizationState = &ambient_rasterizer,
-    pMultisampleState   = &ambient_multisampling,
-    pColorBlendState    = &ambient_color_blending,
-    pDynamicState       = &ambient_dynamic_state,
-    pDepthStencilState  = &ambient_depth_stencil,
+    pVertexInputState   = &gpu.VERTEX_INPUT_NONE,
+    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.DOUBLE_SIDED_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pColorBlendState    = &gpu.COLOR_BLENDING_OVERRIDE,
+    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
     layout              = self.ambient_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
@@ -254,17 +212,7 @@ init :: proc(
       gpu.image_destroy(gctx.device, item)
     }
   }
-  self.environment_max_lod = 8.0 // default fallback
-  if environment_map != nil {
-    self.environment_max_lod =
-      f32(
-        gpu.calculate_mip_levels(
-          environment_map.spec.width,
-          environment_map.spec.height,
-        ),
-      ) -
-      1.0
-  }
+  self.environment_max_lod = f32(gpu.calculate_mip_levels( environment_map.spec.width, environment_map.spec.height)) - 1.0
   brdf_handle, _ := resources.create_texture_from_data(
     gctx,
     rm,
@@ -312,48 +260,12 @@ init :: proc(
   lighting_dynamic_state := gpu.create_dynamic_state(
     lighting_dynamic_states[:],
   )
-  lighting_input_assembly := gpu.create_standard_input_assembly()
   lighting_vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
     pVertexBindingDescriptions      = &geometry.VERTEX_BINDING_DESCRIPTION[0],
     vertexAttributeDescriptionCount = 1, // Only position needed for lighting
-    pVertexAttributeDescriptions    = &geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[0], // Position at location 0
-  }
-  lighting_viewport_state := vk.PipelineViewportStateCreateInfo {
-    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    viewportCount = 1,
-    scissorCount  = 1,
-  }
-  lighting_rasterizer := gpu.create_standard_rasterizer(cull_mode = {.FRONT})
-  lighting_multisampling := gpu.create_standard_multisampling()
-  lighting_color_blend_attachment := vk.PipelineColorBlendAttachmentState {
-    colorWriteMask      = {.R, .G, .B, .A},
-    blendEnable         = true,
-    srcColorBlendFactor = .ONE,
-    dstColorBlendFactor = .ONE,
-    colorBlendOp        = .ADD,
-    srcAlphaBlendFactor = .ONE,
-    dstAlphaBlendFactor = .ONE,
-    alphaBlendOp        = .ADD,
-  }
-  lighting_color_blending := vk.PipelineColorBlendStateCreateInfo {
-    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    attachmentCount = 1,
-    pAttachments    = &lighting_color_blend_attachment,
-  }
-  lighting_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-    depthTestEnable = true,
-    // greater or equal for point light, less or equal for spot light
-    depthCompareOp  = .GREATER_OR_EQUAL,
-  }
-  lighting_color_formats := [?]vk.Format{color_format}
-  lighting_rendering_info := vk.PipelineRenderingCreateInfo {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = len(lighting_color_formats),
-    pColorAttachmentFormats = raw_data(lighting_color_formats[:]),
-    depthAttachmentFormat   = depth_format,
+    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]), // Position at location 0
   }
   lighting_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
@@ -361,29 +273,29 @@ init :: proc(
       stage = {.VERTEX},
       module = lighting_vert_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
+      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.FRAGMENT},
       module = lighting_frag_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
+      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
     },
   }
   lighting_pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &lighting_rendering_info,
+    pNext               = &gpu.STANDARD_RENDERING_INFO,
     stageCount          = len(lighting_shader_stages),
     pStages             = raw_data(lighting_shader_stages[:]),
     pVertexInputState   = &lighting_vertex_input,
-    pInputAssemblyState = &lighting_input_assembly,
-    pViewportState      = &lighting_viewport_state,
-    pRasterizationState = &lighting_rasterizer,
-    pMultisampleState   = &lighting_multisampling,
-    pColorBlendState    = &lighting_color_blending,
+    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.INVERSE_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pColorBlendState    = &gpu.COLOR_BLENDING_OVERFLOW,
     pDynamicState       = &lighting_dynamic_state,
-    pDepthStencilState  = &lighting_depth_stencil,
+    pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
     layout              = self.lighting_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
@@ -437,7 +349,7 @@ shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  gpu.free_command_buffer(gctx, self.commands[:])
+  gpu.free_command_buffer(gctx, ..self.commands[:])
   vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
@@ -469,11 +381,11 @@ begin_record :: proc(
   }
   command_buffer = camera.lighting_commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [1]vk.Format{color_format}
+  color_formats := [?]vk.Format{color_format}
   rendering_info := vk.CommandBufferInheritanceRenderingInfo {
     sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount    = 1,
-    pColorAttachmentFormats = &color_formats[0],
+    colorAttachmentCount    = len(color_formats),
+    pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = .D32_SFLOAT,
     rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
   }
@@ -514,10 +426,10 @@ Renderer :: struct {
   sphere_mesh:              resources.Handle,
   cone_mesh:                resources.Handle,
   triangle_mesh:            resources.Handle,
-  commands:                 [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  commands:                 [resources.FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
-lighting_recreate_images :: proc(
+recreate_images :: proc(
   self: ^Renderer,
   width, height: u32,
   color_format: vk.Format,

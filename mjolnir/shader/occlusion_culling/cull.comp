@@ -80,11 +80,11 @@ layout(set = 0, binding = 3) readonly buffer CameraBuffer {
 
 // Late pass (opaque) outputs
 layout(set = 0, binding = 4) buffer LateDrawCountBuffer {
-    uint late_draw_count;
+    uint opaque_draw_count;
 };
 
-layout(set = 0, binding = 5) buffer LateDrawCommandBuffer {
-    DrawCommand late_commands[];
+layout(set = 0, binding = 5) buffer OpaqueDrawCommandBuffer {
+    DrawCommand opaque_commands[];
 };
 
 // Transparent pass outputs
@@ -263,9 +263,9 @@ void main() {
         }
     } else {
         // Late pass (opaque objects)
-        uint draw_index = atomicAdd(late_draw_count, 1);
+        uint draw_index = atomicAdd(opaque_draw_count, 1);
         if (draw_index < params.max_draws) {
-            late_commands[draw_index] = cmd;
+            opaque_commands[draw_index] = cmd;
         }
     }
 }

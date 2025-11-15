@@ -44,15 +44,15 @@ record_compute_commands :: proc(
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
   // Compute for frame N prepares data for frame N+1
-  // Buffer indices with MAX_FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
-  next_frame_index := (frame_index + 1) % resources.MAX_FRAMES_IN_FLIGHT
+  // Buffer indices with FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
+  next_frame_index := (frame_index + 1) % resources.FRAMES_IN_FLIGHT
   for &entry, cam_index in rm.cameras.entries {
     if !entry.active do continue
     if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
     cam := &entry.item
     // STEP 1: Build pyramid[N] from depth[N-1]
     // This allows Compute N to build pyramid[N] from Render N-1's depth
-    world.visibility_system_dispatch_pyramid(
+    world.visibility_build_pyramid(
       &world_state.visibility,
       gctx,
       compute_buffer,
@@ -64,7 +64,7 @@ record_compute_commands :: proc(
     // STEP 2: Cull using camera[N] + pyramid[N] → draw_list[N+1]
     // Reads pyramid[frame_index], writes draw_list[next_frame_index]
     // This produces draw_list[N+1] for use by Render N+1
-    world.visibility_system_dispatch_culling(
+    world.visibility_perform_culling(
       &world_state.visibility,
       gctx,
       compute_buffer,
@@ -199,7 +199,7 @@ resize :: proc(
   color_format: vk.Format,
   dpi_scale: f32,
 ) -> vk.Result {
-  lighting.lighting_recreate_images(
+  lighting.recreate_images(
     &self.lighting,
     extent.width,
     extent.height,
@@ -232,7 +232,7 @@ record_camera_visibility :: proc(
     cam := &entry.item
     // Upload camera data to GPU buffer
     resources.camera_upload_data(rm, u32(cam_index), frame_index)
-    world.visibility_system_dispatch_culling(
+    world.visibility_perform_culling(
       &world_state.visibility,
       gctx,
       command_buffer,
@@ -243,7 +243,7 @@ record_camera_visibility :: proc(
       {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
       rm,
     )
-    world.visibility_system_dispatch_depth(
+    world.visibility_render_depth(
       &world_state.visibility,
       gctx,
       command_buffer,
@@ -254,7 +254,7 @@ record_camera_visibility :: proc(
       {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
       rm,
     )
-    world.visibility_system_dispatch_pyramid(
+    world.visibility_build_pyramid(
       &world_state.visibility,
       gctx,
       command_buffer,
@@ -276,7 +276,7 @@ record_camera_visibility :: proc(
       frame_index,
     )
     // Dispatch visibility - records compute culling + depth rendering
-    world.visibility_system_dispatch_spherical(
+    world.visibility_render_sphere_depth(
       &world_state.visibility,
       gctx,
       command_buffer,
@@ -318,7 +318,7 @@ record_geometry_pass :: proc(
   //
   // STEP 1: Render depth[N] using draw_list[N], camera[N]
   // This depth will be read by frame N+1 compute for pyramid building
-  world.visibility_system_dispatch_depth(
+  world.visibility_render_depth(
     &world_state.visibility,
     gctx,
     command_buffer,
@@ -339,8 +339,8 @@ record_geometry_pass :: proc(
     command_buffer,
     rm,
     frame_index,
-    camera.late_draw_commands[frame_index].buffer,
-    camera.late_draw_count[frame_index].buffer,
+    camera.opaque_draw_commands[frame_index].buffer,
+    camera.opaque_draw_count[frame_index].buffer,
     command_stride,
   )
   geometry.end_pass(camera_handle, command_buffer, rm, frame_index)
@@ -444,7 +444,7 @@ record_transparency_pass :: proc(
   }
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
   // Single dispatch to generate all 3 draw lists (late, transparent, sprite)
-  world.visibility_system_dispatch_culling(
+  world.visibility_perform_culling(
     &world_state.visibility,
     gctx,
     command_buffer,

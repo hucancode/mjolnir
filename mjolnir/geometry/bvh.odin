@@ -644,7 +644,7 @@ bvh_query_nearest :: proc(
       right_bounds := bvh.nodes[node.right_child].bounds
       left_dist := distance_point_aabb(point, left_bounds)
       right_dist := distance_point_aabb(point, right_bounds)
-      traversals := [2]BVHTraversal {
+      traversals := [?]BVHTraversal {
         {node_idx = node.left_child, t_min = left_dist},
         {node_idx = node.right_child, t_min = right_dist},
       }

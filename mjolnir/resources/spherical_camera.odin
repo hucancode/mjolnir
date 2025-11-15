@@ -14,12 +14,12 @@ SphericalCamera :: struct {
   near:            f32, // Near plane
   far:             f32, // Far plane
   size:            u32, // Resolution of cube map faces (size x size)
-  depth_cube:      [MAX_FRAMES_IN_FLIGHT]Handle, // Cube depth textures (per-frame)
+  depth_cube:      [FRAMES_IN_FLIGHT]Handle, // Cube depth textures (per-frame)
   command_buffer:  vk.CommandBuffer, // Secondary command buffer
   draw_commands:   gpu.MutableBuffer(vk.DrawIndexedIndirectCommand), // Draw commands for visible objects
   draw_count:      gpu.MutableBuffer(u32), // Number of visible objects
   max_draws:       u32, // Maximum number of draw calls
-  descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet, // Per-frame descriptor sets for sphere culling
+  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet, // Per-frame descriptor sets for sphere culling
 }
 
 // Initialize a new spherical camera
@@ -67,21 +67,21 @@ spherical_camera_init :: proc(
     {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
   ) or_return
   // Create and update all per-frame descriptor sets
-  for frame_index in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for frame_index in 0 ..< FRAMES_IN_FLIGHT {
     camera.descriptor_sets[frame_index] = gpu.create_descriptor_set(
       gctx,
       &manager.visibility_sphere_descriptor_layout,
-      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.node_data_buffer)},
-      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.mesh_data_buffer)},
-      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&manager.world_matrix_buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer)},
       {
         .STORAGE_BUFFER,
-        gpu.mutable_buffer_info(
+        gpu.buffer_info(
           &manager.spherical_camera_buffers[frame_index],
         ),
       },
-      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&camera.draw_count)},
-      {.STORAGE_BUFFER, gpu.mutable_buffer_info(&camera.draw_commands)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.draw_count)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.draw_commands)},
     ) or_return
   }
   return .SUCCESS
@@ -97,7 +97,7 @@ spherical_camera_destroy :: proc(
       gpu.cube_depth_texture_destroy(gctx.device, item)
     }
   }
-  gpu.free_command_buffer(gctx, &self.command_buffer)
+  gpu.free_command_buffer(gctx, self.command_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.draw_count)
   gpu.mutable_buffer_destroy(gctx.device, &self.draw_commands)
 }
