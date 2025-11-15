@@ -30,11 +30,8 @@ Manager :: struct {
   linear_clamp_sampler:                      vk.Sampler,
   nearest_repeat_sampler:                    vk.Sampler,
   nearest_clamp_sampler:                     vk.Sampler,
-  // Builtin materials
   builtin_materials:                         [len(Color)]Handle,
-  // Builtin meshes
   builtin_meshes:                            [len(Primitive)]Handle,
-  // Resource pools
   meshes:                                    Pool(Mesh),
   materials:                                 Pool(Material),
   images_2d:                                 Pool(gpu.Image),
@@ -45,80 +42,60 @@ Manager :: struct {
   forcefields:                               Pool(ForceField),
   animation_clips:                           Pool(animation.Clip),
   sprites:                                   Pool(Sprite),
-  // Navigation system resources
   nav_meshes:                                Pool(NavMesh),
   nav_contexts:                              Pool(NavContext),
   navigation_system:                         NavigationSystem,
-  // Bone matrix system
   bone_buffer:                               gpu.BindlessBuffer(
     matrix[4, 4]f32,
   ),
   bone_matrix_slab:                          SlabAllocator,
-  // Bindless camera buffer system (per-frame to avoid frame overlap)
   camera_buffer:                             gpu.PerFrameBindlessBuffer(
     CameraData,
     FRAMES_IN_FLIGHT,
   ),
-  // Bindless spherical camera buffer system
   spherical_camera_buffer:                   gpu.PerFrameBindlessBuffer(
     SphericalCameraData,
     FRAMES_IN_FLIGHT,
   ),
-  // Bindless material buffer system
   material_buffer:                           gpu.BindlessBuffer(MaterialData),
-  // Bindless world matrix buffer system
   world_matrix_buffer:                       gpu.BindlessBuffer(
     matrix[4, 4]f32,
   ),
-  // Bindless node data buffer system
   node_data_buffer:                          gpu.BindlessBuffer(NodeData),
-  // Bindless mesh data buffer system
   mesh_data_buffer:                          gpu.BindlessBuffer(MeshData),
-  // Bindless emitter buffer system
   emitter_buffer:                            gpu.BindlessBuffer(EmitterData),
-  // Bindless forcefield buffer system
   forcefield_buffer:                         gpu.BindlessBuffer(
     ForceFieldData,
   ),
-  // Bindless sprite buffer system
   sprite_buffer:                             gpu.BindlessBuffer(SpriteData),
-  // Bindless vertex skinning buffer system
   vertex_skinning_buffer:                    gpu.ImmutableBuffer(
     geometry.SkinningData,
   ),
   vertex_skinning_buffer_set_layout:         vk.DescriptorSetLayout,
   vertex_skinning_descriptor_set:            vk.DescriptorSet,
   vertex_skinning_slab:                      SlabAllocator,
-  // Bindless lights buffer system (staged - infrequent updates)
   lights:                                    Pool(Light),
   lights_buffer:                             gpu.BindlessBuffer(LightData),
-  // Per-frame dynamic light data (position + shadow_map, synchronized per frame)
   dynamic_light_data_buffer:                 gpu.PerFrameBindlessBuffer(
     DynamicLightData,
     FRAMES_IN_FLIGHT,
   ),
-  // Bindless texture system
   textures_set_layout:                       vk.DescriptorSetLayout,
   textures_descriptor_set:                   vk.DescriptorSet,
-  // Shared pipeline layouts
+  // TODO: audit all vk.PipelineLayout and vk.DescriptorSetLayout, design a strict ownership on them
   geometry_pipeline_layout:                  vk.PipelineLayout, // Used by geometry, transparency, depth renderers
   spherical_camera_pipeline_layout:          vk.PipelineLayout, // Used by spherical depth rendering (point light shadows)
-  // Visibility system descriptor layouts (for shadow cameras)
   visibility_sphere_descriptor_layout:       vk.DescriptorSetLayout,
   visibility_descriptor_layout:              vk.DescriptorSetLayout,
   visibility_depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
-  // Bindless vertex/index buffer system
   vertex_buffer:                             gpu.ImmutableBuffer(
     geometry.Vertex,
   ),
   index_buffer:                              gpu.ImmutableBuffer(u32),
   vertex_slab:                               SlabAllocator,
   index_slab:                                SlabAllocator,
-  // Frame-scoped bookkeeping
   current_frame_index:                       u32,
-  // Animation tracking
   animatable_sprites:                        [dynamic]Handle,
-  // Rendering tracking
   active_lights:                             [dynamic]Handle,
 }
 
@@ -183,8 +160,22 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.world_matrix_buffer, gctx.device)
-  init_node_data_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS do destroy_node_data_buffer(self, gctx)
+  gpu.bindless_buffer_init(
+    &self.node_data_buffer,
+    gctx,
+    MAX_NODES_IN_SCENE,
+    {.VERTEX, .FRAGMENT},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.node_data_buffer, gctx.device)
+  node_slice := gpu.get_all(&self.node_data_buffer.buffer)
+  slice.fill(
+    node_slice,
+    NodeData {
+      material_id = 0xFFFFFFFF,
+      mesh_id = 0xFFFFFFFF,
+      attachment_data_index = 0xFFFFFFFF,
+    },
+  )
   gpu.bindless_buffer_init(
     &self.mesh_data_buffer,
     gctx,
@@ -253,6 +244,10 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     {.SAMPLER, gpu.MAX_SAMPLERS, {.FRAGMENT}},
     {.SAMPLED_IMAGE, MAX_CUBE_TEXTURES, {.FRAGMENT}},
   ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)
+    self.textures_set_layout = 0
+  }
   self.geometry_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
@@ -273,10 +268,6 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.geometry_pipeline_layout, nil)
     self.geometry_pipeline_layout = 0
-  }
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)
-    self.textures_set_layout = 0
   }
   // Pipeline layout for spherical depth rendering (point light shadows)
   self.spherical_camera_pipeline_layout = gpu.create_pipeline_layout(
@@ -404,7 +395,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
     &self.spherical_camera_buffer,
     gctx.device,
   )
-  destroy_node_data_buffer(self, gctx)
+  gpu.bindless_buffer_destroy(&self.node_data_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.mesh_data_buffer, gctx.device)
   destroy_vertex_skinning_buffer(self, gctx)
   destroy_vertex_index_buffers(self, gctx)
@@ -517,73 +508,14 @@ init_bone_matrix_allocator :: proc(
     "Creating bone matrix buffer with capacity %d matrices...",
     self.bone_matrix_slab.capacity,
   )
-  self.bone_buffer.buffer = gpu.malloc_mutable_buffer(
+  gpu.bindless_buffer_init(
+    &self.bone_buffer,
     gctx,
-    matrix[4, 4]f32,
     int(self.bone_matrix_slab.capacity),
-    {.STORAGE_BUFFER},
-  ) or_return
-  self.bone_buffer.set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX}},
-  ) or_return
-  self.bone_buffer.descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.bone_buffer.set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.bone_buffer.buffer)},
+    {.VERTEX},
   ) or_return
   return .SUCCESS
 }
-
-
-@(private)
-init_node_data_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.infof(
-    "Creating node data buffer with capacity %d nodes...",
-    MAX_NODES_IN_SCENE,
-  )
-  self.node_data_buffer.buffer = gpu.malloc_mutable_buffer(
-    gctx,
-    NodeData,
-    MAX_NODES_IN_SCENE,
-    {.STORAGE_BUFFER},
-  ) or_return
-  node_slice := gpu.get_all(&self.node_data_buffer.buffer)
-  slice.fill(
-    node_slice,
-    NodeData {
-      material_id = 0xFFFFFFFF,
-      mesh_id = 0xFFFFFFFF,
-      attachment_data_index = 0xFFFFFFFF,
-    },
-  )
-  self.node_data_buffer.set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT}},
-  ) or_return
-  self.node_data_buffer.descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.node_data_buffer.set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.node_data_buffer.buffer)},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
-destroy_node_data_buffer :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &manager.node_data_buffer.buffer)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    manager.node_data_buffer.set_layout,
-    nil,
-  )
-  manager.node_data_buffer.set_layout = 0
-  manager.node_data_buffer.descriptor_set = 0
-}
-
 
 @(private)
 init_vertex_skinning_buffer :: proc(
