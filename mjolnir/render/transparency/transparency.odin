@@ -35,7 +35,7 @@ init :: proc(
   ret: vk.Result,
 ) {
   log.info("Initializing transparent renderer")
-  if rm.geometry_pipeline_layout == 0 {
+  if rm.general_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
   half_w: f32 = 0.5
@@ -96,16 +96,16 @@ init :: proc(
   create_transparent_pipelines(
     gctx,
     self,
-    rm.geometry_pipeline_layout,
+    rm.general_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.transparent_pipeline, nil)
   }
-  create_wireframe_pipelines(gctx, self, rm.geometry_pipeline_layout) or_return
+  create_wireframe_pipelines(gctx, self, rm.general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
   }
-  create_sprite_pipeline(gctx, self, rm.geometry_pipeline_layout) or_return
+  create_sprite_pipeline(gctx, self, rm.general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.sprite_pipeline, nil)
   }
@@ -389,7 +389,7 @@ render :: proc(
   gpu.bind_graphics_pipeline(
     command_buffer,
     pipeline,
-    rm.geometry_pipeline_layout,
+    rm.general_pipeline_layout,
     rm.camera_buffer.descriptor_sets[frame_index], // Per-frame to avoid overlap
     rm.textures_descriptor_set,
     rm.bone_buffer.descriptor_set,
@@ -406,7 +406,7 @@ render :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    rm.geometry_pipeline_layout,
+    rm.general_pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),

@@ -65,7 +65,7 @@ spherical_camera_init :: proc(
   for frame_index in 0 ..< FRAMES_IN_FLIGHT {
     camera.descriptor_sets[frame_index] = gpu.create_descriptor_set(
       gctx,
-      &manager.visibility_sphere_descriptor_layout,
+      &manager.sphere_cam_descriptor_layout,
       {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer.buffer)},
       {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer.buffer)},
       {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer.buffer)},

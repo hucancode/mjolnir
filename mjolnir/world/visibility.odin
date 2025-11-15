@@ -60,12 +60,12 @@ CullingStats :: struct {
 VisibilitySystem :: struct {
   cull_layout:           vk.PipelineLayout,
   cull_pipeline:         vk.Pipeline, // Generates 3 draw lists in one dispatch
-  depth_pipeline:        vk.Pipeline, // uses geometry_pipeline_layout
+  depth_pipeline:        vk.Pipeline, // uses general_pipeline_layout
   depth_reduce_layout:   vk.PipelineLayout,
   depth_reduce_pipeline: vk.Pipeline,
   sphere_cull_layout:    vk.PipelineLayout,
   sphere_cull_pipeline:  vk.Pipeline, // For SphericalCamera (radius-based culling)
-  sphere_depth_pipeline: vk.Pipeline, // uses spherical_camera_pipeline_layout
+  sphere_depth_pipeline: vk.Pipeline, // uses sphere_pipeline_layout
   max_draws:             u32,
   node_count:            u32,
   depth_width:           u32,
@@ -91,17 +91,17 @@ visibility_init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
       gctx.device,
-      rm.visibility_depth_reduce_descriptor_layout,
+      rm.depth_reduce_descriptor_layout,
       nil,
     )
     vk.DestroyDescriptorSetLayout(
       gctx.device,
-      rm.visibility_descriptor_layout,
+      rm.normal_cam_descriptor_layout,
       nil,
     )
     vk.DestroyDescriptorSetLayout(
       gctx.device,
-      rm.visibility_sphere_descriptor_layout,
+      rm.sphere_cam_descriptor_layout,
       nil,
     )
   }
@@ -253,7 +253,7 @@ visibility_render_depth :: proc(
     gpu.bind_graphics_pipeline(
       command_buffer,
       self.depth_pipeline,
-      rm.geometry_pipeline_layout,
+      rm.general_pipeline_layout,
       rm.camera_buffer.descriptor_sets[frame_index], // Per-frame to avoid overlap
       rm.textures_descriptor_set,
       rm.bone_buffer.descriptor_set,
@@ -266,7 +266,7 @@ visibility_render_depth :: proc(
     camera_index := camera_index
     vk.CmdPushConstants(
       command_buffer,
-      rm.geometry_pipeline_layout,
+      rm.general_pipeline_layout,
       {.VERTEX, .FRAGMENT},
       0,
       size_of(u32),
@@ -554,7 +554,7 @@ visibility_render_sphere_depth :: proc(
     gpu.bind_graphics_pipeline(
       command_buffer,
       self.sphere_depth_pipeline,
-      rm.spherical_camera_pipeline_layout,
+      rm.sphere_pipeline_layout,
       rm.spherical_camera_buffer.descriptor_sets[frame_index], // Per-frame to avoid overlap
       rm.textures_descriptor_set,
       rm.bone_buffer.descriptor_set,
@@ -567,7 +567,7 @@ visibility_render_sphere_depth :: proc(
     cam_idx := camera_index
     vk.CmdPushConstants(
       command_buffer,
-      rm.spherical_camera_pipeline_layout,
+      rm.sphere_pipeline_layout,
       {.VERTEX, .GEOMETRY, .FRAGMENT},
       0,
       size_of(u32),
@@ -611,7 +611,7 @@ create_descriptor_layouts :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) -> vk.Result {
-  rm.visibility_sphere_descriptor_layout = gpu.create_descriptor_set_layout(
+  rm.sphere_cam_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.STORAGE_BUFFER, {.COMPUTE}},
     {.STORAGE_BUFFER, {.COMPUTE}},
@@ -620,7 +620,7 @@ create_descriptor_layouts :: proc(
     {.STORAGE_BUFFER, {.COMPUTE}},
     {.STORAGE_BUFFER, {.COMPUTE}},
   ) or_return
-  rm.visibility_descriptor_layout = gpu.create_descriptor_set_layout(
+  rm.normal_cam_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.STORAGE_BUFFER, {.COMPUTE}}, // node data
     {.STORAGE_BUFFER, {.COMPUTE}}, // mesh data
@@ -634,7 +634,7 @@ create_descriptor_layouts :: proc(
     {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw commands
     {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // depth pyramid
   ) or_return
-  rm.visibility_depth_reduce_descriptor_layout =
+  rm.depth_reduce_descriptor_layout =
     gpu.create_descriptor_set_layout(
       gctx,
       {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // source mip
@@ -655,7 +655,7 @@ create_compute_pipelines :: proc(
       stageFlags = {.COMPUTE},
       size = size_of(VisibilityPushConstants),
     },
-    rm.visibility_sphere_descriptor_layout,
+    rm.sphere_cam_descriptor_layout,
   ) or_return
   self.cull_layout = gpu.create_pipeline_layout(
     gctx,
@@ -663,7 +663,7 @@ create_compute_pipelines :: proc(
       stageFlags = {.COMPUTE},
       size = size_of(VisibilityPushConstants),
     },
-    rm.visibility_descriptor_layout,
+    rm.normal_cam_descriptor_layout,
   ) or_return
   self.depth_reduce_layout = gpu.create_pipeline_layout(
     gctx,
@@ -671,7 +671,7 @@ create_compute_pipelines :: proc(
       stageFlags = {.COMPUTE},
       size = size_of(DepthReducePushConstants),
     },
-    rm.visibility_depth_reduce_descriptor_layout,
+    rm.depth_reduce_descriptor_layout,
   ) or_return
   sphere_shader := gpu.create_shader_module(
     gctx.device,
@@ -740,7 +740,7 @@ create_depth_pipeline :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-  if rm.geometry_pipeline_layout == 0 {
+  if rm.general_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
@@ -755,7 +755,7 @@ create_depth_pipeline :: proc(
     pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
     pDepthStencilState  = &gpu.READ_WRITE_DEPTH_STATE,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = rm.geometry_pipeline_layout,
+    layout              = rm.general_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
     gctx.device,
@@ -802,7 +802,7 @@ create_depth_pipeline :: proc(
       pName = "main",
     },
   }
-  if rm.spherical_camera_pipeline_layout == 0 {
+  if rm.sphere_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
   sphere_pipeline_info := vk.GraphicsPipelineCreateInfo {
@@ -817,7 +817,7 @@ create_depth_pipeline :: proc(
     pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
     pDepthStencilState  = &gpu.READ_WRITE_DEPTH_STATE,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = rm.spherical_camera_pipeline_layout,
+    layout              = rm.sphere_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
     gctx.device,

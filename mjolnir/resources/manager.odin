@@ -26,77 +26,67 @@ SamplerType :: enum u32 {
 
 Manager :: struct {
   // Global samplers
-  linear_repeat_sampler:                     vk.Sampler,
-  linear_clamp_sampler:                      vk.Sampler,
-  nearest_repeat_sampler:                    vk.Sampler,
-  nearest_clamp_sampler:                     vk.Sampler,
-  builtin_materials:                         [len(Color)]Handle,
-  builtin_meshes:                            [len(Primitive)]Handle,
-  meshes:                                    Pool(Mesh),
-  materials:                                 Pool(Material),
-  images_2d:                                 Pool(gpu.Image),
-  images_cube:                               Pool(gpu.CubeImage),
-  cameras:                                   Pool(Camera),
-  spherical_cameras:                         Pool(SphericalCamera),
-  emitters:                                  Pool(Emitter),
-  forcefields:                               Pool(ForceField),
-  animation_clips:                           Pool(animation.Clip),
-  sprites:                                   Pool(Sprite),
-  nav_meshes:                                Pool(NavMesh),
-  nav_contexts:                              Pool(NavContext),
-  navigation_system:                         NavigationSystem,
-  bone_buffer:                               gpu.BindlessBuffer(
-    matrix[4, 4]f32,
-  ),
-  bone_matrix_slab:                          SlabAllocator,
-  camera_buffer:                             gpu.PerFrameBindlessBuffer(
+  linear_repeat_sampler:          vk.Sampler,
+  linear_clamp_sampler:           vk.Sampler,
+  nearest_repeat_sampler:         vk.Sampler,
+  nearest_clamp_sampler:          vk.Sampler,
+  builtin_materials:              [len(Color)]Handle,
+  builtin_meshes:                 [len(Primitive)]Handle,
+  meshes:                         Pool(Mesh),
+  materials:                      Pool(Material),
+  images_2d:                      Pool(gpu.Image),
+  images_cube:                    Pool(gpu.CubeImage),
+  cameras:                        Pool(Camera),
+  spherical_cameras:              Pool(SphericalCamera),
+  emitters:                       Pool(Emitter),
+  forcefields:                    Pool(ForceField),
+  animation_clips:                Pool(animation.Clip),
+  sprites:                        Pool(Sprite),
+  nav_meshes:                     Pool(NavMesh),
+  nav_contexts:                   Pool(NavContext),
+  navigation_system:              NavigationSystem,
+  bone_buffer:                    gpu.BindlessBuffer(matrix[4, 4]f32),
+  bone_matrix_slab:               SlabAllocator,
+  camera_buffer:                  gpu.PerFrameBindlessBuffer(
     CameraData,
     FRAMES_IN_FLIGHT,
   ),
-  spherical_camera_buffer:                   gpu.PerFrameBindlessBuffer(
+  spherical_camera_buffer:        gpu.PerFrameBindlessBuffer(
     SphericalCameraData,
     FRAMES_IN_FLIGHT,
   ),
-  material_buffer:                           gpu.BindlessBuffer(MaterialData),
-  world_matrix_buffer:                       gpu.BindlessBuffer(
-    matrix[4, 4]f32,
-  ),
-  node_data_buffer:                          gpu.BindlessBuffer(NodeData),
-  mesh_data_buffer:                          gpu.BindlessBuffer(MeshData),
-  emitter_buffer:                            gpu.BindlessBuffer(EmitterData),
-  forcefield_buffer:                         gpu.BindlessBuffer(
-    ForceFieldData,
-  ),
-  sprite_buffer:                             gpu.BindlessBuffer(SpriteData),
-  vertex_skinning_buffer:                    gpu.ImmutableBuffer(
-    geometry.SkinningData,
-  ),
-  vertex_skinning_buffer_set_layout:         vk.DescriptorSetLayout,
-  vertex_skinning_descriptor_set:            vk.DescriptorSet,
-  vertex_skinning_slab:                      SlabAllocator,
-  lights:                                    Pool(Light),
-  lights_buffer:                             gpu.BindlessBuffer(LightData),
-  dynamic_light_data_buffer:                 gpu.PerFrameBindlessBuffer(
+  material_buffer:                gpu.BindlessBuffer(MaterialData),
+  world_matrix_buffer:            gpu.BindlessBuffer(matrix[4, 4]f32),
+  node_data_buffer:               gpu.BindlessBuffer(NodeData),
+  mesh_data_buffer:               gpu.BindlessBuffer(MeshData),
+  emitter_buffer:                 gpu.BindlessBuffer(EmitterData),
+  forcefield_buffer:              gpu.BindlessBuffer(ForceFieldData),
+  sprite_buffer:                  gpu.BindlessBuffer(SpriteData),
+  vertex_skinning_buffer:         gpu.ImmutableBuffer(geometry.SkinningData),
+  vertex_skinning_set_layout:     vk.DescriptorSetLayout,
+  vertex_skinning_descriptor_set: vk.DescriptorSet,
+  vertex_skinning_slab:           SlabAllocator,
+  lights:                         Pool(Light),
+  lights_buffer:                  gpu.BindlessBuffer(LightData),
+  dynamic_light_data_buffer:      gpu.PerFrameBindlessBuffer(
     DynamicLightData,
     FRAMES_IN_FLIGHT,
   ),
-  textures_set_layout:                       vk.DescriptorSetLayout,
-  textures_descriptor_set:                   vk.DescriptorSet,
+  textures_set_layout:            vk.DescriptorSetLayout,
+  textures_descriptor_set:        vk.DescriptorSet,
   // TODO: audit all vk.PipelineLayout and vk.DescriptorSetLayout, design a strict ownership on them
-  geometry_pipeline_layout:                  vk.PipelineLayout, // Used by geometry, transparency, depth renderers
-  spherical_camera_pipeline_layout:          vk.PipelineLayout, // Used by spherical depth rendering (point light shadows)
-  visibility_sphere_descriptor_layout:       vk.DescriptorSetLayout,
-  visibility_descriptor_layout:              vk.DescriptorSetLayout,
-  visibility_depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
-  vertex_buffer:                             gpu.ImmutableBuffer(
-    geometry.Vertex,
-  ),
-  index_buffer:                              gpu.ImmutableBuffer(u32),
-  vertex_slab:                               SlabAllocator,
-  index_slab:                                SlabAllocator,
-  current_frame_index:                       u32,
-  animatable_sprites:                        [dynamic]Handle,
-  active_lights:                             [dynamic]Handle,
+  general_pipeline_layout:        vk.PipelineLayout, // Used by geometry, transparency, depth renderers
+  sphere_pipeline_layout:         vk.PipelineLayout, // Used by spherical depth rendering (point light shadows)
+  sphere_cam_descriptor_layout:   vk.DescriptorSetLayout,
+  normal_cam_descriptor_layout:   vk.DescriptorSetLayout,
+  depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
+  vertex_buffer:                  gpu.ImmutableBuffer(geometry.Vertex),
+  index_buffer:                   gpu.ImmutableBuffer(u32),
+  vertex_slab:                    SlabAllocator,
+  index_slab:                     SlabAllocator,
+  current_frame_index:            u32,
+  animatable_sprites:             [dynamic]Handle,
+  active_lights:                  [dynamic]Handle,
 }
 
 init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
@@ -258,7 +248,7 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)
     self.textures_set_layout = 0
   }
-  self.geometry_pipeline_layout = gpu.create_pipeline_layout(
+  self.general_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
       stageFlags = {.VERTEX, .FRAGMENT},
@@ -271,16 +261,16 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
-    self.vertex_skinning_buffer_set_layout,
+    self.vertex_skinning_set_layout,
     self.lights_buffer.set_layout,
     self.sprite_buffer.set_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(gctx.device, self.geometry_pipeline_layout, nil)
-    self.geometry_pipeline_layout = 0
+    vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
+    self.general_pipeline_layout = 0
   }
   // Pipeline layout for spherical depth rendering (point light shadows)
-  self.spherical_camera_pipeline_layout = gpu.create_pipeline_layout(
+  self.sphere_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
       stageFlags = {.VERTEX, .GEOMETRY, .FRAGMENT},
@@ -293,17 +283,13 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
-    self.vertex_skinning_buffer_set_layout,
+    self.vertex_skinning_set_layout,
     self.lights_buffer.set_layout,
     self.sprite_buffer.set_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(
-      gctx.device,
-      self.spherical_camera_pipeline_layout,
-      nil,
-    )
-    self.spherical_camera_pipeline_layout = 0
+    vk.DestroyPipelineLayout(gctx.device, self.sphere_pipeline_layout, nil)
+    self.sphere_pipeline_layout = 0
   }
   gpu.allocate_descriptor_set(
     gctx,
@@ -409,36 +395,32 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.bindless_buffer_destroy(&self.mesh_data_buffer, gctx.device)
   destroy_vertex_skinning_buffer(self, gctx)
   destroy_vertex_index_buffers(self, gctx)
-  vk.DestroyPipelineLayout(gctx.device, self.geometry_pipeline_layout, nil)
-  self.geometry_pipeline_layout = 0
-  vk.DestroyPipelineLayout(
-    gctx.device,
-    self.spherical_camera_pipeline_layout,
-    nil,
-  )
-  self.spherical_camera_pipeline_layout = 0
+  vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
+  self.general_pipeline_layout = 0
+  vk.DestroyPipelineLayout(gctx.device, self.sphere_pipeline_layout, nil)
+  self.sphere_pipeline_layout = 0
   vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)
   self.textures_set_layout = 0
   self.textures_descriptor_set = 0
   // Destroy visibility descriptor set layouts
   vk.DestroyDescriptorSetLayout(
     gctx.device,
-    self.visibility_sphere_descriptor_layout,
+    self.sphere_cam_descriptor_layout,
     nil,
   )
-  self.visibility_sphere_descriptor_layout = 0
+  self.sphere_cam_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
-    self.visibility_descriptor_layout,
+    self.normal_cam_descriptor_layout,
     nil,
   )
-  self.visibility_descriptor_layout = 0
+  self.normal_cam_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
-    self.visibility_depth_reduce_descriptor_layout,
+    self.depth_reduce_descriptor_layout,
     nil,
   )
-  self.visibility_depth_reduce_descriptor_layout = 0
+  self.depth_reduce_descriptor_layout = 0
 }
 
 @(private)
@@ -512,13 +494,13 @@ init_vertex_skinning_buffer :: proc(
     {.STORAGE_BUFFER},
   ) or_return
   cont.slab_init(&self.vertex_skinning_slab, VERTEX_SLAB_CONFIG)
-  self.vertex_skinning_buffer_set_layout = gpu.create_descriptor_set_layout(
+  self.vertex_skinning_set_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.STORAGE_BUFFER, {.VERTEX}},
   ) or_return
   self.vertex_skinning_descriptor_set = gpu.create_descriptor_set(
     gctx,
-    &self.vertex_skinning_buffer_set_layout,
+    &self.vertex_skinning_set_layout,
     {.STORAGE_BUFFER, gpu.buffer_info(&self.vertex_skinning_buffer)},
   ) or_return
   return .SUCCESS
@@ -530,10 +512,10 @@ destroy_vertex_skinning_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.buffer_destroy(gctx.device, &self.vertex_skinning_buffer)
   vk.DestroyDescriptorSetLayout(
     gctx.device,
-    self.vertex_skinning_buffer_set_layout,
+    self.vertex_skinning_set_layout,
     nil,
   )
-  self.vertex_skinning_buffer_set_layout = 0
+  self.vertex_skinning_set_layout = 0
   self.vertex_skinning_descriptor_set = 0
 }
 

@@ -838,13 +838,13 @@ camera_allocate_descriptors :: proc(
   gpu.allocate_descriptor_set(
     gctx,
     &camera.descriptor_set[frame_index],
-    &manager.visibility_descriptor_layout,
+    &manager.normal_cam_descriptor_layout,
   ) or_return
   for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
     gpu.allocate_descriptor_set(
       gctx,
       &camera.depth_reduce_descriptor_sets[frame_index][mip],
-      &manager.visibility_depth_reduce_descriptor_layout,
+      &manager.depth_reduce_descriptor_layout,
     ) or_return
   }
   prev_frame := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT

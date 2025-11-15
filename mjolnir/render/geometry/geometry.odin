@@ -28,7 +28,7 @@ init :: proc(
   ret: vk.Result,
 ) {
   depth_format: vk.Format = .D32_SFLOAT
-  if rm.geometry_pipeline_layout == 0 {
+  if rm.general_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
   log.info("About to build G-buffer pipelines...")
@@ -108,7 +108,7 @@ init :: proc(
     pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
     pColorBlendState    = &color_blending,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = rm.geometry_pipeline_layout,
+    layout              = rm.general_pipeline_layout,
     pNext               = &rendering_info,
   }
   vk.CreateGraphicsPipelines(
@@ -353,7 +353,7 @@ render :: proc(
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.pipeline,
-    rm.geometry_pipeline_layout,
+    rm.general_pipeline_layout,
     rm.camera_buffer.descriptor_sets[frame_index], // Per-frame to avoid overlap
     rm.textures_descriptor_set,
     rm.bone_buffer.descriptor_set,
@@ -368,7 +368,7 @@ render :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    rm.geometry_pipeline_layout,
+    rm.general_pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
