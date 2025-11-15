@@ -168,6 +168,12 @@ STANDARD_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
   depthAttachmentFormat   = .D32_SFLOAT,
 }
 
+COLOR_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
+  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+  colorAttachmentCount    = 1,
+  pColorAttachmentFormats = &STANDARD_COLOR_FORMAT,
+}
+
 DEPTH_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
   sType                   = .PIPELINE_RENDERING_CREATE_INFO,
   depthAttachmentFormat   = .D32_SFLOAT,

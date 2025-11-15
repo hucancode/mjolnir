@@ -296,7 +296,7 @@ create_emitter_pipeline :: proc(
     &self.emitter_descriptor_set_layout,
     {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_buffer)},
     {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_count_buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.params_buffer)},
+    {.UNIFORM_BUFFER, gpu.buffer_info(&self.params_buffer)},
   ) or_return
   emitter_shader_module := gpu.create_shader_module(
     gctx.device,

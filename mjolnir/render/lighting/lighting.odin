@@ -170,7 +170,7 @@ init :: proc(
   }
   ambient_pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &gpu.STANDARD_RENDERING_INFO,
+    pNext               = &gpu.COLOR_ONLY_RENDERING_INFO,
     stageCount          = len(ambient_shader_stages),
     pStages             = raw_data(ambient_shader_stages[:]),
     pVertexInputState   = &gpu.VERTEX_INPUT_NONE,
