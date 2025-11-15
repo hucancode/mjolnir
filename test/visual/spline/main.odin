@@ -58,17 +58,31 @@ main :: proc() {
     for i in 0 ..< CUBE_COUNT {
       cubes[i] = spawn(
         engine,
-        world.MeshAttachment{handle = cube_mesh, material = mat_handles[i%len(mat_handles)]},
+        attachment = world.MeshAttachment {
+          handle = cube_mesh,
+          material = mat_handles[i % len(mat_handles)],
+        },
       )
       scale_handle(engine, cubes[i], 0.3)
     }
     // Add ground plane
     ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
     quad_mesh := engine.rm.builtin_meshes[resources.Primitive.QUAD]
-    ground := spawn(engine, world.MeshAttachment{handle = quad_mesh, material = ground_mat})
+    ground := spawn(
+      engine,
+      attachment = world.MeshAttachment {
+        handle = quad_mesh,
+        material = ground_mat,
+      },
+    )
     scale_handle(engine, ground, 20.0)
     translate(engine, ground, 0, -2, 0)
-    spawn_point_light(engine, {1.0, 1.0, 1.0, 1.0}, 20.0, position = {0, 10, 0})
+    spawn_point_light(
+      engine,
+      {1.0, 1.0, 1.0, 1.0},
+      20.0,
+      position = {0, 10, 0},
+    )
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     using mjolnir
@@ -76,7 +90,10 @@ main :: proc() {
     for i in 0 ..< CUBE_COUNT {
       offset := f32(i) / f32(CUBE_COUNT) * total_length
       elapsed := time_since_start(engine)
-      current_s := math.mod_f32(elapsed * (total_length / ANIMATION_DURATION) + offset, total_length)
+      current_s := math.mod_f32(
+        elapsed * (total_length / ANIMATION_DURATION) + offset,
+        total_length,
+      )
       normalized := current_s / total_length
       tweened := animation.sample(normalized, 0, total_length, .QuadInOut)
       pos := animation.spline_sample_uniform(spline, tweened)
