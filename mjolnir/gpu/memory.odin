@@ -265,7 +265,7 @@ create_mutable_buffer :: proc(
   return buffer, .SUCCESS
 }
 
-CubeImage:: struct {
+CubeImage :: struct {
   using base: Image,
   face_views: [6]vk.ImageView, // One view per face for rendering
 }
@@ -320,7 +320,9 @@ cube_depth_texture_destroy :: proc(device: vk.Device, self: ^CubeImage) {
   image_destroy(device, &self.base)
 }
 
-immutable_buffer_info :: proc(self: ^ImmutableBuffer($T)) -> vk.DescriptorBufferInfo {
+immutable_buffer_info :: proc(
+  self: ^ImmutableBuffer($T),
+) -> vk.DescriptorBufferInfo {
   return vk.DescriptorBufferInfo {
     buffer = self.buffer,
     range = vk.DeviceSize(self.bytes_count),
@@ -339,4 +341,82 @@ mutable_buffer_info :: proc(
 buffer_info :: proc {
   immutable_buffer_info,
   mutable_buffer_info,
+}
+
+BindlessBuffer :: struct($T: typeid) {
+  buffer:         MutableBuffer(T),
+  set_layout:     vk.DescriptorSetLayout,
+  descriptor_set: vk.DescriptorSet,
+}
+
+PerFrameBindlessBuffer :: struct($T: typeid, $N: int) {
+  buffers:         [N]MutableBuffer(T),
+  set_layout:      vk.DescriptorSetLayout,
+  descriptor_sets: [N]vk.DescriptorSet,
+}
+
+bindless_buffer_init :: proc(
+  self: ^BindlessBuffer($T),
+  gctx: ^GPUContext,
+  capacity: int,
+  stages: vk.ShaderStageFlags,
+) -> vk.Result {
+  self.buffer = malloc_mutable_buffer(
+    gctx,
+    T,
+    capacity,
+    {.STORAGE_BUFFER},
+  ) or_return
+  self.set_layout = create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, stages},
+  ) or_return
+  self.descriptor_set = create_descriptor_set(
+    gctx,
+    &self.set_layout,
+    {.STORAGE_BUFFER, buffer_info(&self.buffer)},
+  ) or_return
+  return .SUCCESS
+}
+
+bindless_buffer_destroy :: proc(self: ^BindlessBuffer($T), device: vk.Device) {
+  mutable_buffer_destroy(device, &self.buffer)
+  vk.DestroyDescriptorSetLayout(device, self.set_layout, nil)
+  self.set_layout = 0
+  self.descriptor_set = 0
+}
+
+per_frame_bindless_buffer_init :: proc(
+  self: ^PerFrameBindlessBuffer($T, $N),
+  gctx: ^GPUContext,
+  capacity: int,
+  stages: vk.ShaderStageFlags,
+) -> vk.Result {
+  self.set_layout = create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, stages},
+  ) or_return
+  for frame_idx in 0 ..< N {
+    self.buffers[frame_idx] = create_mutable_buffer(
+      gctx,
+      T,
+      capacity,
+      {.STORAGE_BUFFER},
+    ) or_return
+    self.descriptor_sets[frame_idx] = create_descriptor_set(
+      gctx,
+      &self.set_layout,
+      {.STORAGE_BUFFER, buffer_info(&self.buffers[frame_idx])},
+    ) or_return
+  }
+  return .SUCCESS
+}
+
+per_frame_bindless_buffer_destroy :: proc(
+  self: ^PerFrameBindlessBuffer($T, $N),
+  device: vk.Device,
+) {
+  for &b in self.buffers do mutable_buffer_destroy(device, &b)
+  vk.DestroyDescriptorSetLayout(device, self.set_layout, nil)
+  self.set_layout = 0
 }

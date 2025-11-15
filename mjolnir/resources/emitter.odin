@@ -74,12 +74,12 @@ emitter_write_to_gpu :: proc(
   }
   time_acc: f32 = 0.0
   if preserve_time_accumulator {
-    existing := gpu.get(&manager.emitter_buffer, handle.index)
+    existing := gpu.get(&manager.emitter_buffer.buffer, handle.index)
     time_acc = existing.time_accumulator
   }
   emitter_update_gpu_data(emitter, time_acc)
   gpu.write(
-    &manager.emitter_buffer,
+    &manager.emitter_buffer.buffer,
     &emitter.data,
     int(handle.index),
   ) or_return

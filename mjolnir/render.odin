@@ -79,7 +79,7 @@ record_compute_commands :: proc(
   particles.simulate(
     &self.particles,
     compute_buffer,
-    rm.world_matrix_descriptor_set,
+    rm.world_matrix_buffer.descriptor_set,
     rm,
   )
   vk.EndCommandBuffer(compute_buffer) or_return

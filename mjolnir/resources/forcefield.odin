@@ -53,6 +53,6 @@ forcefield_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   forcefield_update_gpu_data(ff)
-  gpu.write(&manager.forcefield_buffer, &ff.data, int(handle.index)) or_return
+  gpu.write(&manager.forcefield_buffer.buffer, &ff.data, int(handle.index)) or_return
   return .SUCCESS
 }

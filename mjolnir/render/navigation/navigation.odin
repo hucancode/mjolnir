@@ -183,7 +183,7 @@ render :: proc(
     command_buffer,
     renderer.pipeline,
     renderer.pipeline_layout,
-    rm.camera_buffer_descriptor_sets[frame_index],
+    rm.camera_buffer.descriptor_sets[frame_index],
   )
   if renderer.vertex_count > 0 && renderer.index_count > 0 {
     gpu.bind_vertex_index_buffers(
@@ -213,7 +213,7 @@ render :: proc(
       command_buffer,
       renderer.line_pipeline,
       renderer.pipeline_layout,
-      rm.camera_buffer_descriptor_sets[frame_index],
+      rm.camera_buffer.descriptor_sets[frame_index],
     )
     path_buffers := []vk.Buffer{renderer.path_vertex_buffer.buffer}
     offsets := []vk.DeviceSize{0}
@@ -344,7 +344,7 @@ create_pipeline :: proc(
       stageFlags = {.VERTEX, .FRAGMENT},
       size = size_of(PushConstants),
     },
-    rm.camera_buffer_set_layout,
+    rm.camera_buffer.set_layout,
   ) or_return
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,

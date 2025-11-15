@@ -627,9 +627,9 @@ traverse :: proc(
       parent_mesh_skinning := parent_mesh.skinning.? or_break
       if bone_index >= u32(len(parent_mesh_skinning.bones)) do break apply_bone_socket
       bone_buffer := &rm.bone_buffer
-      if bone_buffer.mapped == nil do break apply_bone_socket
+      if bone_buffer.buffer.mapped == nil do break apply_bone_socket
       bone_matrices_ptr := gpu.get(
-        bone_buffer,
+        &bone_buffer.buffer,
         parent_skinning.bone_matrix_buffer_offset,
       )
       bone_matrices := slice.from_ptr(
@@ -778,7 +778,7 @@ assign_light_to_node :: proc(
   if light, ok := cont.get(rm.lights, attachment.handle); ok {
     light.node_handle = node_handle
     light.node_index = node_handle.index
-    gpu.write(&rm.lights_buffer, &light.data, int(attachment.handle.index))
+    gpu.write(&rm.lights_buffer.buffer, &light.data, int(attachment.handle.index))
   }
 }
 

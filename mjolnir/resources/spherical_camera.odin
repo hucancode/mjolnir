@@ -66,13 +66,13 @@ spherical_camera_init :: proc(
     camera.descriptor_sets[frame_index] = gpu.create_descriptor_set(
       gctx,
       &manager.visibility_sphere_descriptor_layout,
-      {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer)},
-      {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer)},
-      {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer.buffer)},
       {
         .STORAGE_BUFFER,
         gpu.buffer_info(
-          &manager.spherical_camera_buffers[frame_index],
+          &manager.spherical_camera_buffer.buffers[frame_index],
         ),
       },
       {.STORAGE_BUFFER, gpu.buffer_info(&camera.draw_count)},
@@ -103,7 +103,7 @@ spherical_camera_upload_data :: proc(
   camera_index: u32,
   frame_index: u32 = 0,
 ) {
-  dst := gpu.get(&manager.spherical_camera_buffers[frame_index], camera_index)
+  dst := gpu.get(&manager.spherical_camera_buffer.buffers[frame_index], camera_index)
   if dst == nil {
     log.errorf("Spherical camera index %d out of bounds", camera_index)
     return

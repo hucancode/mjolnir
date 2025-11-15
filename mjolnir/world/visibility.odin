@@ -254,13 +254,13 @@ visibility_render_depth :: proc(
       command_buffer,
       self.depth_pipeline,
       rm.geometry_pipeline_layout,
-      rm.camera_buffer_descriptor_sets[frame_index], // Per-frame to avoid overlap
+      rm.camera_buffer.descriptor_sets[frame_index], // Per-frame to avoid overlap
       rm.textures_descriptor_set,
-      rm.bone_buffer_descriptor_set,
-      rm.material_buffer_descriptor_set,
-      rm.world_matrix_descriptor_set,
-      rm.node_data_descriptor_set,
-      rm.mesh_data_descriptor_set,
+      rm.bone_buffer.descriptor_set,
+      rm.material_buffer.descriptor_set,
+      rm.world_matrix_buffer.descriptor_set,
+      rm.node_data_buffer.descriptor_set,
+      rm.mesh_data_buffer.descriptor_set,
       rm.vertex_skinning_descriptor_set,
     )
     camera_index := camera_index
@@ -555,13 +555,13 @@ visibility_render_sphere_depth :: proc(
       command_buffer,
       self.sphere_depth_pipeline,
       rm.spherical_camera_pipeline_layout,
-      rm.spherical_camera_buffer_descriptor_sets[frame_index], // Per-frame to avoid overlap
+      rm.spherical_camera_buffer.descriptor_sets[frame_index], // Per-frame to avoid overlap
       rm.textures_descriptor_set,
-      rm.bone_buffer_descriptor_set,
-      rm.material_buffer_descriptor_set,
-      rm.world_matrix_descriptor_set,
-      rm.node_data_descriptor_set,
-      rm.mesh_data_descriptor_set,
+      rm.bone_buffer.descriptor_set,
+      rm.material_buffer.descriptor_set,
+      rm.world_matrix_buffer.descriptor_set,
+      rm.node_data_buffer.descriptor_set,
+      rm.mesh_data_buffer.descriptor_set,
       rm.vertex_skinning_descriptor_set,
     )
     cam_idx := camera_index

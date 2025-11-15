@@ -221,7 +221,7 @@ sprite_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   sprite_update_gpu_data(sprite)
-  return gpu.write(&manager.sprite_buffer, &sprite.data, int(handle.index))
+  return gpu.write(&manager.sprite_buffer.buffer, &sprite.data, int(handle.index))
 }
 
 create_sprite :: proc(

@@ -29,10 +29,10 @@ node_upload_transform :: proc(
   node_handle: Handle,
   world_matrix: ^matrix[4, 4]f32,
 ) {
-  gpu.write(&rm.world_matrix_buffer, world_matrix, int(node_handle.index))
+  gpu.write(&rm.world_matrix_buffer.buffer, world_matrix, int(node_handle.index))
 }
 
 // Upload node data to GPU
 node_upload_data :: proc(rm: ^Manager, node_handle: Handle, data: ^NodeData) {
-  gpu.write(&rm.node_data_buffer, data, int(node_handle.index))
+  gpu.write(&rm.node_data_buffer.buffer, data, int(node_handle.index))
 }

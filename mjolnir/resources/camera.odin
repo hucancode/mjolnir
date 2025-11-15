@@ -851,10 +851,10 @@ camera_allocate_descriptors :: proc(
   gpu.update_descriptor_set(
     gctx,
     camera.descriptor_set[frame_index],
-    {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&manager.camera_buffers[frame_index])},
+    {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer.buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer.buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer.buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&manager.camera_buffer.buffers[frame_index])},
     {.STORAGE_BUFFER, gpu.buffer_info(&camera.opaque_draw_count[frame_index])},
     {
       .STORAGE_BUFFER,
@@ -946,7 +946,7 @@ camera_upload_data :: proc(
   )
   camera.data[frame_index].frustum_planes = frustum.planes
   gpu.write(
-    &self.camera_buffers[frame_index],
+    &self.camera_buffer.buffers[frame_index],
     &camera.data[frame_index],
     int(camera_index),
   )

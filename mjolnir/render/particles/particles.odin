@@ -113,7 +113,7 @@ simulate :: proc(
     self.compute_pipeline_layout,
     self.compute_descriptor_set,
     self.forcefield_bindless_descriptor_set,
-    rm.world_matrix_descriptor_set,
+    rm.world_matrix_buffer.descriptor_set,
   )
   vk.CmdDispatch(
     command_buffer,
@@ -228,8 +228,8 @@ init :: proc(
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
   }
-  self.emitter_bindless_descriptor_set = rm.emitter_buffer_descriptor_set
-  self.forcefield_bindless_descriptor_set = rm.forcefield_buffer_descriptor_set
+  self.emitter_bindless_descriptor_set = rm.emitter_buffer.descriptor_set
+  self.forcefield_bindless_descriptor_set = rm.forcefield_buffer.descriptor_set
   create_emitter_pipeline(gctx, self, rm) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
@@ -284,9 +284,9 @@ create_emitter_pipeline :: proc(
   self.emitter_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     nil,
-    rm.emitter_buffer_set_layout,
+    rm.emitter_buffer.set_layout,
     self.emitter_descriptor_set_layout,
-    rm.world_matrix_buffer_set_layout,
+    rm.world_matrix_buffer.set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
@@ -348,8 +348,8 @@ create_compute_pipeline :: proc(
     gctx,
     nil,
     self.compute_descriptor_set_layout,
-    rm.forcefield_buffer_set_layout,
-    rm.world_matrix_buffer_set_layout,
+    rm.forcefield_buffer.set_layout,
+    rm.world_matrix_buffer.set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
@@ -492,7 +492,7 @@ create_render_pipeline :: proc(
   self.render_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange{stageFlags = {.VERTEX}, size = size_of(u32)},
-    rm.camera_buffer_set_layout,
+    rm.camera_buffer.set_layout,
     rm.textures_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
@@ -645,7 +645,7 @@ render :: proc(
     command_buffer,
     self.render_pipeline,
     self.render_pipeline_layout,
-    rm.camera_buffer_descriptor_sets[frame_index],
+    rm.camera_buffer.descriptor_sets[frame_index],
     rm.textures_descriptor_set,
   )
   camera_idx := camera_index

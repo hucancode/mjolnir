@@ -77,7 +77,7 @@ begin_ambient_pass :: proc(
     command_buffer,
     self.ambient_pipeline,
     self.ambient_pipeline_layout,
-    rm.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
+    rm.camera_buffer.descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
     rm.textures_descriptor_set, // set = 1 (bindless textures)
   )
 }
@@ -136,7 +136,7 @@ init :: proc(
       stageFlags = {.FRAGMENT},
       size = size_of(AmbientPushConstant),
     },
-    rm.camera_buffer_set_layout,
+    rm.camera_buffer.set_layout,
     rm.textures_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
@@ -228,12 +228,12 @@ init :: proc(
       stageFlags = {.VERTEX, .FRAGMENT},
       size = size_of(LightPushConstant),
     },
-    rm.camera_buffer_set_layout,
+    rm.camera_buffer.set_layout,
     rm.textures_set_layout,
-    rm.lights_buffer_set_layout,
-    rm.world_matrix_buffer_set_layout,
-    rm.spherical_camera_buffer_set_layout,
-    rm.dynamic_light_data_set_layout,
+    rm.lights_buffer.set_layout,
+    rm.world_matrix_buffer.set_layout,
+    rm.spherical_camera_buffer.set_layout,
+    rm.dynamic_light_data_buffer.set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
@@ -420,12 +420,12 @@ begin_pass :: proc(
     command_buffer,
     self.lighting_pipeline,
     self.lighting_pipeline_layout,
-    rm.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame cameras)
+    rm.camera_buffer.descriptor_sets[frame_index], // set = 0 (per-frame cameras)
     rm.textures_descriptor_set, // set = 1 (textures/samplers)
-    rm.lights_buffer_descriptor_set, // set = 2 (lights)
-    rm.world_matrix_descriptor_set, // set = 3 (world matrices)
-    rm.spherical_camera_buffer_descriptor_sets[frame_index], // set = 4 (per-frame spherical cameras)
-    rm.dynamic_light_data_descriptor_sets[frame_index], // set = 5 (per-frame position + shadow map)
+    rm.lights_buffer.descriptor_set, // set = 2 (lights)
+    rm.world_matrix_buffer.descriptor_set, // set = 3 (world matrices)
+    rm.spherical_camera_buffer.descriptor_sets[frame_index], // set = 4 (per-frame spherical cameras)
+    rm.dynamic_light_data_buffer.descriptor_sets[frame_index], // set = 5 (per-frame position + shadow map)
   )
 }
 

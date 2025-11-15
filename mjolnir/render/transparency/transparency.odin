@@ -390,16 +390,16 @@ render :: proc(
     command_buffer,
     pipeline,
     rm.geometry_pipeline_layout,
-    rm.camera_buffer_descriptor_sets[frame_index], // Per-frame to avoid overlap
+    rm.camera_buffer.descriptor_sets[frame_index], // Per-frame to avoid overlap
     rm.textures_descriptor_set,
-    rm.bone_buffer_descriptor_set,
-    rm.material_buffer_descriptor_set,
-    rm.world_matrix_descriptor_set,
-    rm.node_data_descriptor_set,
-    rm.mesh_data_descriptor_set,
+    rm.bone_buffer.descriptor_set,
+    rm.material_buffer.descriptor_set,
+    rm.world_matrix_buffer.descriptor_set,
+    rm.node_data_buffer.descriptor_set,
+    rm.mesh_data_buffer.descriptor_set,
     rm.vertex_skinning_descriptor_set,
-    rm.lights_buffer_descriptor_set,
-    rm.sprite_buffer_descriptor_set,
+    rm.lights_buffer.descriptor_set,
+    rm.sprite_buffer.descriptor_set,
   )
   push_constants := PushConstant {
     camera_index = camera_handle.index,

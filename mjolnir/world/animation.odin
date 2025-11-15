@@ -41,7 +41,7 @@ update_skeletal_animations :: proc(
 ) {
   if delta_time <= 0 do return
   bone_buffer := &rm.bone_buffer
-  if bone_buffer.mapped == nil do return
+  if bone_buffer.buffer.mapped == nil do return
   for handle in world.animatable_nodes {
     node := cont.get(world.nodes, handle) or_continue
     mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
@@ -59,7 +59,7 @@ update_skeletal_animations :: proc(
       anim.layer_update(&layer, delta_time)
     }
     matrices_ptr := gpu.get(
-      bone_buffer,
+      &bone_buffer.buffer,
       skinning.bone_matrix_buffer_offset,
     )
     matrices := slice.from_ptr(matrices_ptr, bone_count)

@@ -716,7 +716,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     particles.simulate(
       &self.render.particles,
       command_buffer,
-      self.rm.world_matrix_descriptor_set,
+      self.rm.world_matrix_buffer.descriptor_set,
       &self.rm,
     )
   }

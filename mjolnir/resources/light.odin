@@ -139,7 +139,7 @@ create_light :: proc(
       )
     }
   }
-  gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
+  gpu.write(&manager.lights_buffer.buffer, &light.data, int(handle.index))
   register_active_light(manager, handle)
   return handle, true
 }
@@ -182,7 +182,7 @@ destroy_light :: proc(
 
 update_light_gpu_data :: proc(manager: ^Manager, handle: Handle) {
   if light, ok := cont.get(manager.lights, handle); ok {
-    gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
+    gpu.write(&manager.lights_buffer.buffer, &light.data, int(handle.index))
   }
 }
 
@@ -190,9 +190,9 @@ update_light_camera :: proc(manager: ^Manager, frame_index: u32 = 0) {
   for handle, light_index in manager.active_lights {
     light := cont.get(manager.lights, handle) or_continue
     // Get light's world transform from node
-    node_data := gpu.get(&manager.node_data_buffer, light.node_index)
+    node_data := gpu.get(&manager.node_data_buffer.buffer, light.node_index)
     if node_data == nil do continue
-    world_matrix := gpu.get(&manager.world_matrix_buffer, light.node_index)
+    world_matrix := gpu.get(&manager.world_matrix_buffer.buffer, light.node_index)
     if world_matrix == nil do continue
     // Extract position and direction from world matrix
     light_position := world_matrix[3].xyz
@@ -235,7 +235,7 @@ update_light_camera :: proc(manager: ^Manager, frame_index: u32 = 0) {
       shadow_map = shadow_map_id,
     }
     gpu.write(
-      &manager.dynamic_light_data_buffers[frame_index],
+      &manager.dynamic_light_data_buffer.buffers[frame_index],
       &dynamic_data,
       light_index,
     )

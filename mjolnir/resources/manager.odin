@@ -50,72 +50,53 @@ Manager :: struct {
   nav_contexts:                              Pool(NavContext),
   navigation_system:                         NavigationSystem,
   // Bone matrix system
-  bone_buffer_set_layout:                    vk.DescriptorSetLayout,
-  bone_buffer_descriptor_set:                vk.DescriptorSet,
-  bone_buffer:                               gpu.MutableBuffer(
+  bone_buffer:                               gpu.BindlessBuffer(
     matrix[4, 4]f32,
   ),
   bone_matrix_slab:                          SlabAllocator,
   // Bindless camera buffer system (per-frame to avoid frame overlap)
-  camera_buffer_set_layout:                  vk.DescriptorSetLayout,
-  camera_buffer_descriptor_sets:             [FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  camera_buffers:                            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  camera_buffer:                             gpu.PerFrameBindlessBuffer(
     CameraData,
+    FRAMES_IN_FLIGHT,
   ),
   // Bindless spherical camera buffer system
-  spherical_camera_buffer_set_layout:        vk.DescriptorSetLayout,
-  spherical_camera_buffer_descriptor_sets:   [FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  spherical_camera_buffers:                  [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  spherical_camera_buffer:                   gpu.PerFrameBindlessBuffer(
     SphericalCameraData,
+    FRAMES_IN_FLIGHT,
   ),
   // Bindless material buffer system
-  material_buffer_set_layout:                vk.DescriptorSetLayout,
-  material_buffer_descriptor_set:            vk.DescriptorSet,
-  material_buffer:                           gpu.MutableBuffer(MaterialData),
+  material_buffer:                           gpu.BindlessBuffer(MaterialData),
   // Bindless world matrix buffer system
-  world_matrix_buffer_set_layout:            vk.DescriptorSetLayout,
-  world_matrix_descriptor_set:               vk.DescriptorSet,
-  world_matrix_buffer:                       gpu.MutableBuffer(
+  world_matrix_buffer:                       gpu.BindlessBuffer(
     matrix[4, 4]f32,
   ),
   // Bindless node data buffer system
-  node_data_buffer_set_layout:               vk.DescriptorSetLayout,
-  node_data_descriptor_set:                  vk.DescriptorSet,
-  node_data_buffer:                          gpu.MutableBuffer(NodeData),
+  node_data_buffer:                          gpu.BindlessBuffer(NodeData),
   // Bindless mesh data buffer system
-  mesh_data_buffer_set_layout:               vk.DescriptorSetLayout,
-  mesh_data_descriptor_set:                  vk.DescriptorSet,
-  mesh_data_buffer:                          gpu.MutableBuffer(MeshData),
+  mesh_data_buffer:                          gpu.BindlessBuffer(MeshData),
   // Bindless emitter buffer system
-  emitter_buffer_set_layout:                 vk.DescriptorSetLayout,
-  emitter_buffer_descriptor_set:             vk.DescriptorSet,
-  emitter_buffer:                            gpu.MutableBuffer(EmitterData),
+  emitter_buffer:                            gpu.BindlessBuffer(EmitterData),
   // Bindless forcefield buffer system
-  forcefield_buffer_set_layout:              vk.DescriptorSetLayout,
-  forcefield_buffer_descriptor_set:          vk.DescriptorSet,
-  forcefield_buffer:                         gpu.MutableBuffer(ForceFieldData),
+  forcefield_buffer:                         gpu.BindlessBuffer(
+    ForceFieldData,
+  ),
   // Bindless sprite buffer system
-  sprite_buffer_set_layout:                  vk.DescriptorSetLayout,
-  sprite_buffer_descriptor_set:              vk.DescriptorSet,
-  sprite_buffer:                             gpu.MutableBuffer(SpriteData),
+  sprite_buffer:                             gpu.BindlessBuffer(SpriteData),
   // Bindless vertex skinning buffer system
-  vertex_skinning_buffer_set_layout:         vk.DescriptorSetLayout,
-  vertex_skinning_descriptor_set:            vk.DescriptorSet,
   vertex_skinning_buffer:                    gpu.ImmutableBuffer(
     geometry.SkinningData,
   ),
+  vertex_skinning_buffer_set_layout:         vk.DescriptorSetLayout,
+  vertex_skinning_descriptor_set:            vk.DescriptorSet,
   vertex_skinning_slab:                      SlabAllocator,
   // Bindless lights buffer system (staged - infrequent updates)
   lights:                                    Pool(Light),
-  lights_buffer_set_layout:                  vk.DescriptorSetLayout,
-  lights_buffer_descriptor_set:              vk.DescriptorSet,
-  lights_buffer:                             gpu.MutableBuffer(LightData),
+  lights_buffer:                             gpu.BindlessBuffer(LightData),
   // Per-frame dynamic light data (position + shadow_map, synchronized per frame)
-  dynamic_light_data_buffers:                [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  dynamic_light_data_buffer:                 gpu.PerFrameBindlessBuffer(
     DynamicLightData,
+    FRAMES_IN_FLIGHT,
   ),
-  dynamic_light_data_set_layout:             vk.DescriptorSetLayout,
-  dynamic_light_data_descriptor_sets:        [FRAMES_IN_FLIGHT]vk.DescriptorSet,
   // Bindless texture system
   textures_set_layout:                       vk.DescriptorSetLayout,
   textures_descriptor_set:                   vk.DescriptorSet,
@@ -171,62 +152,101 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   self.current_frame_index = 0
   log.infof("All resource pools initialized successfully")
   init_global_samplers(self, gctx)
+  log.info("Initializing bindless buffer systems...")
   init_bone_matrix_allocator(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
-  init_camera_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
-  init_spherical_camera_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
-  init_material_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
-  init_world_matrix_buffers(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
+  defer if ret != .SUCCESS do destroy_bone_matrix_allocator(self, gctx)
+  gpu.per_frame_bindless_buffer_init(
+    &self.camera_buffer,
+    gctx,
+    MAX_ACTIVE_CAMERAS,
+    {.VERTEX, .FRAGMENT, .COMPUTE},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
+  gpu.per_frame_bindless_buffer_init(
+    &self.spherical_camera_buffer,
+    gctx,
+    MAX_ACTIVE_CAMERAS,
+    {.VERTEX, .FRAGMENT, .COMPUTE, .GEOMETRY},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.per_frame_bindless_buffer_destroy(&self.spherical_camera_buffer, gctx.device)
+  gpu.bindless_buffer_init(
+    &self.material_buffer,
+    gctx,
+    MAX_MATERIALS,
+    {.VERTEX, .FRAGMENT},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.material_buffer, gctx.device)
+  gpu.bindless_buffer_init(
+    &self.world_matrix_buffer,
+    gctx,
+    MAX_NODES_IN_SCENE,
+    {.VERTEX, .FRAGMENT, .COMPUTE},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.world_matrix_buffer, gctx.device)
   init_node_data_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
-  init_mesh_data_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
+  defer if ret != .SUCCESS do destroy_node_data_buffer(self, gctx)
+  gpu.bindless_buffer_init(
+    &self.mesh_data_buffer,
+    gctx,
+    MAX_MESHES,
+    {.VERTEX},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.mesh_data_buffer, gctx.device)
   init_vertex_skinning_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
+  defer if ret != .SUCCESS do destroy_vertex_skinning_buffer(self, gctx)
+  gpu.bindless_buffer_init(
+    &self.emitter_buffer,
+    gctx,
+    MAX_EMITTERS,
+    {.COMPUTE},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
+  emitters := gpu.get_all(&self.emitter_buffer.buffer)
+  for &emitter in emitters do emitter = {}
+  gpu.bindless_buffer_init(
+    &self.forcefield_buffer,
+    gctx,
+    MAX_FORCE_FIELDS,
+    {.COMPUTE},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
+  forcefields := gpu.get_all(&self.forcefield_buffer.buffer)
+  for &forcefield in forcefields do forcefield = {}
+  gpu.bindless_buffer_init(
+    &self.lights_buffer,
+    gctx,
+    MAX_LIGHTS,
+    {.VERTEX, .FRAGMENT},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
+  gpu.per_frame_bindless_buffer_init(
+    &self.dynamic_light_data_buffer,
+    gctx,
+    MAX_LIGHTS,
+    {.VERTEX, .FRAGMENT},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.per_frame_bindless_buffer_destroy(&self.dynamic_light_data_buffer, gctx.device)
+  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
+    dynamic_data := gpu.get_all(
+      &self.dynamic_light_data_buffer.buffers[frame_idx],
+    )
+    for &data in dynamic_data {
+      data.position = {0, 0, 0, 0}
+      data.shadow_map = 0xFFFFFFFF
+    }
   }
-  init_emitter_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
-  init_forcefield_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
-  init_lights_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
-  init_dynamic_light_data_buffers(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
-  init_sprite_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
+  gpu.bindless_buffer_init(
+    &self.sprite_buffer,
+    gctx,
+    MAX_SPRITES,
+    {.VERTEX, .FRAGMENT},
+  ) or_return
+  defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
+  sprites := gpu.get_all(&self.sprite_buffer.buffer)
+  for &sprite in sprites do sprite = {}
   init_vertex_index_buffers(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    // TODO: cleanup on error
-  }
+  defer if ret != .SUCCESS do destroy_vertex_index_buffers(self, gctx)
+  log.info("Bindless buffer systems initialized successfully")
   self.textures_set_layout = gpu.create_descriptor_set_layout_array(
     gctx,
     {.SAMPLED_IMAGE, MAX_TEXTURES, {.FRAGMENT}},
@@ -239,16 +259,16 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
       stageFlags = {.VERTEX, .FRAGMENT},
       size = size_of(u32),
     },
-    self.camera_buffer_set_layout,
+    self.camera_buffer.set_layout,
     self.textures_set_layout,
-    self.bone_buffer_set_layout,
-    self.material_buffer_set_layout,
-    self.world_matrix_buffer_set_layout,
-    self.node_data_buffer_set_layout,
-    self.mesh_data_buffer_set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.world_matrix_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
     self.vertex_skinning_buffer_set_layout,
-    self.lights_buffer_set_layout,
-    self.sprite_buffer_set_layout,
+    self.lights_buffer.set_layout,
+    self.sprite_buffer.set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.geometry_pipeline_layout, nil)
@@ -265,16 +285,16 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
       stageFlags = {.VERTEX, .GEOMETRY, .FRAGMENT},
       size = size_of(u32),
     },
-    self.spherical_camera_buffer_set_layout,
+    self.spherical_camera_buffer.set_layout,
     self.textures_set_layout,
-    self.bone_buffer_set_layout,
-    self.material_buffer_set_layout,
-    self.world_matrix_buffer_set_layout,
-    self.node_data_buffer_set_layout,
-    self.mesh_data_buffer_set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.world_matrix_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
     self.vertex_skinning_buffer_set_layout,
-    self.lights_buffer_set_layout,
-    self.sprite_buffer_set_layout,
+    self.lights_buffer.set_layout,
+    self.sprite_buffer.set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(
@@ -304,48 +324,44 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
 }
 
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  destroy_material_buffer(self, gctx)
-  destroy_world_matrix_buffers(self, gctx)
-  destroy_emitter_buffer(self, gctx)
-  destroy_forcefield_buffer(self, gctx)
-  destroy_lights_buffer(self, gctx)
-  destroy_dynamic_light_data_buffers(self, gctx)
-  destroy_sprite_buffer(self, gctx)
+  gpu.bindless_buffer_destroy(&self.material_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.world_matrix_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
+  gpu.per_frame_bindless_buffer_destroy(
+    &self.dynamic_light_data_buffer,
+    gctx.device,
+  )
+  gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
   // Clean up lights (which may own shadow cameras with textures)
   for &entry, i in self.lights.entries do if entry.generation > 0 && entry.active {
     destroy_light(self, gctx, Handle{index = u32(i), generation = entry.generation})
   }
   delete(self.lights.entries)
   delete(self.lights.free_indices)
-  // Clean up spherical cameras with GPU resources (frees their textures)
   for &entry in self.spherical_cameras.entries do if entry.generation > 0 && entry.active {
     spherical_camera_destroy(&entry.item, gctx, self)
   }
   delete(self.spherical_cameras.entries)
   delete(self.spherical_cameras.free_indices)
-  // Clean up regular cameras with GPU resources (frees their textures)
   for &entry in self.cameras.entries do if entry.generation > 0 && entry.active {
     camera_destroy(&entry.item, gctx, self)
   }
   delete(self.cameras.entries)
   delete(self.cameras.free_indices)
-  // Now safe to destroy texture pools - all owned textures have been freed
   for &entry in self.images_2d.entries do if entry.generation > 0 && entry.active {
     gpu.image_destroy(gctx.device, &entry.item)
   }
   delete(self.images_2d.entries)
   delete(self.images_2d.free_indices)
-  for &entry in self.images_cube.entries {
-    if entry.generation > 0 && entry.active {
-      gpu.cube_depth_texture_destroy(gctx.device, &entry.item)
-    }
+  for &entry in self.images_cube.entries do if entry.generation > 0 && entry.active {
+    gpu.cube_depth_texture_destroy(gctx.device, &entry.item)
   }
   delete(self.images_cube.entries)
   delete(self.images_cube.free_indices)
-  for &entry in self.meshes.entries {
-    if entry.generation > 0 && entry.active {
-      mesh_destroy(&entry.item, self)
-    }
+  for &entry in self.meshes.entries do if entry.generation > 0 && entry.active {
+    mesh_destroy(&entry.item, self)
   }
   delete(self.meshes.entries)
   delete(self.meshes.free_indices)
@@ -383,10 +399,13 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   delete(self.navigation_system.dirty_tiles)
   destroy_global_samplers(self, gctx)
   destroy_bone_matrix_allocator(self, gctx)
-  destroy_camera_buffer(self, gctx)
-  destroy_spherical_camera_buffer(self, gctx)
+  gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
+  gpu.per_frame_bindless_buffer_destroy(
+    &self.spherical_camera_buffer,
+    gctx.device,
+  )
   destroy_node_data_buffer(self, gctx)
-  destroy_mesh_data_buffer(self, gctx)
+  gpu.bindless_buffer_destroy(&self.mesh_data_buffer, gctx.device)
   destroy_vertex_skinning_buffer(self, gctx)
   destroy_vertex_index_buffers(self, gctx)
   vk.DestroyPipelineLayout(gctx.device, self.geometry_pipeline_layout, nil)
@@ -498,136 +517,24 @@ init_bone_matrix_allocator :: proc(
     "Creating bone matrix buffer with capacity %d matrices...",
     self.bone_matrix_slab.capacity,
   )
-  self.bone_buffer = gpu.malloc_mutable_buffer(
+  self.bone_buffer.buffer = gpu.malloc_mutable_buffer(
     gctx,
     matrix[4, 4]f32,
     int(self.bone_matrix_slab.capacity),
     {.STORAGE_BUFFER},
   ) or_return
-  self.bone_buffer_set_layout = gpu.create_descriptor_set_layout(
+  self.bone_buffer.set_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.STORAGE_BUFFER, {.VERTEX}},
   ) or_return
-  self.bone_buffer_descriptor_set = gpu.create_descriptor_set(
+  self.bone_buffer.descriptor_set = gpu.create_descriptor_set(
     gctx,
-    &self.bone_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.bone_buffer)},
+    &self.bone_buffer.set_layout,
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.bone_buffer.buffer)},
   ) or_return
   return .SUCCESS
 }
 
-@(private)
-init_camera_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.infof(
-    "Creating per-frame camera buffers with capacity %d cameras...",
-    MAX_ACTIVE_CAMERAS,
-  )
-  // Create descriptor set layout
-  self.camera_buffer_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT, .COMPUTE}},
-  ) or_return
-  // Create per-frame buffers and descriptor sets
-  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
-    self.camera_buffers[frame_idx] = gpu.create_mutable_buffer(
-      gctx,
-      CameraData,
-      MAX_ACTIVE_CAMERAS,
-      {.STORAGE_BUFFER},
-    ) or_return
-    self.camera_buffer_descriptor_sets[frame_idx] = gpu.create_descriptor_set(
-      gctx,
-      &self.camera_buffer_set_layout,
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&self.camera_buffers[frame_idx]),
-      },
-    ) or_return
-
-  }
-  log.infof("Camera buffers initialized successfully")
-  return .SUCCESS
-}
-
-@(private)
-init_material_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.infof(
-    "Creating material buffer with capacity %d materials...",
-    MAX_MATERIALS,
-  )
-  self.material_buffer = gpu.malloc_mutable_buffer(
-    gctx,
-    MaterialData,
-    MAX_MATERIALS,
-    {.STORAGE_BUFFER},
-  ) or_return
-  self.material_buffer_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT}},
-  ) or_return
-  self.material_buffer_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.material_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.material_buffer)},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
-destroy_material_buffer :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &manager.material_buffer)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    manager.material_buffer_set_layout,
-    nil,
-  )
-  manager.material_buffer_set_layout = 0
-}
-
-@(private)
-init_world_matrix_buffers :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.infof(
-    "Creating world matrix buffer with capacity %d nodes...",
-    MAX_NODES_IN_SCENE,
-  )
-  self.world_matrix_buffer = gpu.malloc_mutable_buffer(
-    gctx,
-    matrix[4, 4]f32,
-    MAX_NODES_IN_SCENE,
-    {.STORAGE_BUFFER},
-  ) or_return
-  self.world_matrix_buffer_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT, .COMPUTE}},
-  ) or_return
-  self.world_matrix_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.world_matrix_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.world_matrix_buffer)},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
-destroy_world_matrix_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &self.world_matrix_buffer)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.world_matrix_buffer_set_layout,
-    nil,
-  )
-  self.world_matrix_buffer_set_layout = 0
-  self.world_matrix_descriptor_set = 0
-}
 
 @(private)
 init_node_data_buffer :: proc(
@@ -638,13 +545,13 @@ init_node_data_buffer :: proc(
     "Creating node data buffer with capacity %d nodes...",
     MAX_NODES_IN_SCENE,
   )
-  self.node_data_buffer = gpu.malloc_mutable_buffer(
+  self.node_data_buffer.buffer = gpu.malloc_mutable_buffer(
     gctx,
     NodeData,
     MAX_NODES_IN_SCENE,
     {.STORAGE_BUFFER},
   ) or_return
-  node_slice := gpu.get_all(&self.node_data_buffer)
+  node_slice := gpu.get_all(&self.node_data_buffer.buffer)
   slice.fill(
     node_slice,
     NodeData {
@@ -653,271 +560,30 @@ init_node_data_buffer :: proc(
       attachment_data_index = 0xFFFFFFFF,
     },
   )
-  self.node_data_buffer_set_layout = gpu.create_descriptor_set_layout(
+  self.node_data_buffer.set_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT}},
   ) or_return
-  self.node_data_descriptor_set = gpu.create_descriptor_set(
+  self.node_data_buffer.descriptor_set = gpu.create_descriptor_set(
     gctx,
-    &self.node_data_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.node_data_buffer)},
+    &self.node_data_buffer.set_layout,
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.node_data_buffer.buffer)},
   ) or_return
   return .SUCCESS
 }
 
 @(private)
 destroy_node_data_buffer :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &manager.node_data_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &manager.node_data_buffer.buffer)
   vk.DestroyDescriptorSetLayout(
     gctx.device,
-    manager.node_data_buffer_set_layout,
+    manager.node_data_buffer.set_layout,
     nil,
   )
-  manager.node_data_buffer_set_layout = 0
-  manager.node_data_descriptor_set = 0
+  manager.node_data_buffer.set_layout = 0
+  manager.node_data_buffer.descriptor_set = 0
 }
 
-@(private)
-init_mesh_data_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.infof("Creating mesh data buffer with capacity %d meshes...", MAX_MESHES)
-  self.mesh_data_buffer = gpu.malloc_mutable_buffer(
-    gctx,
-    MeshData,
-    MAX_MESHES,
-    {.STORAGE_BUFFER},
-  ) or_return
-  self.mesh_data_buffer_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX}},
-  ) or_return
-  self.mesh_data_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.mesh_data_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.mesh_data_buffer)},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
-init_emitter_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.info("Creating emitter buffer for bindless access")
-  self.emitter_buffer = gpu.malloc_mutable_buffer(
-    gctx,
-    EmitterData,
-    MAX_EMITTERS,
-    {.STORAGE_BUFFER},
-  ) or_return
-  emitters := gpu.get_all(&self.emitter_buffer)
-  for &emitter in emitters do emitter = {}
-  self.emitter_buffer_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}},
-  ) or_return
-  self.emitter_buffer_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.emitter_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.emitter_buffer)},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
-init_lights_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.info("Creating lights buffer for bindless access")
-  self.lights_buffer = gpu.malloc_mutable_buffer(
-    gctx,
-    LightData,
-    MAX_LIGHTS,
-    {.STORAGE_BUFFER},
-  ) or_return
-  self.lights_buffer_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT}},
-  ) or_return
-  self.lights_buffer_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.lights_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.lights_buffer)},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
-destroy_lights_buffer :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &manager.lights_buffer)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    manager.lights_buffer_set_layout,
-    nil,
-  )
-  manager.lights_buffer_set_layout = 0
-  manager.lights_buffer_descriptor_set = 0
-}
-
-@(private)
-init_dynamic_light_data_buffers :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.info("Creating per-frame dynamic light data buffers")
-  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
-    self.dynamic_light_data_buffers[frame_idx] = gpu.malloc_mutable_buffer(
-      gctx,
-      DynamicLightData,
-      MAX_LIGHTS,
-      {.STORAGE_BUFFER},
-    ) or_return
-    dynamic_data := gpu.get_all(&self.dynamic_light_data_buffers[frame_idx])
-    for &data in dynamic_data {
-      data.position = {0, 0, 0, 0}
-      data.shadow_map = 0xFFFFFFFF
-    }
-  }
-  self.dynamic_light_data_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT}},
-  ) or_return
-  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
-    self.dynamic_light_data_descriptor_sets[frame_idx] =
-      gpu.create_descriptor_set(
-        gctx,
-        &self.dynamic_light_data_set_layout,
-        {
-          .STORAGE_BUFFER,
-          gpu.buffer_info(&self.dynamic_light_data_buffers[frame_idx]),
-        },
-      ) or_return
-  }
-  return .SUCCESS
-}
-
-@(private)
-destroy_dynamic_light_data_buffers :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) {
-  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
-    gpu.mutable_buffer_destroy(
-      gctx.device,
-      &self.dynamic_light_data_buffers[frame_idx],
-    )
-  }
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.dynamic_light_data_set_layout,
-    nil,
-  )
-  self.dynamic_light_data_set_layout = 0
-}
-
-@(private)
-destroy_emitter_buffer :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &manager.emitter_buffer)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    manager.emitter_buffer_set_layout,
-    nil,
-  )
-  manager.emitter_buffer_set_layout = 0
-  manager.emitter_buffer_descriptor_set = 0
-}
-
-@(private)
-init_forcefield_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.info("Creating forcefield buffer for bindless access")
-  self.forcefield_buffer = gpu.malloc_mutable_buffer(
-    gctx,
-    ForceFieldData,
-    MAX_FORCE_FIELDS,
-    {.STORAGE_BUFFER},
-  ) or_return
-  forcefields := gpu.get_all(&self.forcefield_buffer)
-  for &forcefield in forcefields do forcefield = {}
-  self.forcefield_buffer_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}},
-  ) or_return
-  self.forcefield_buffer_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.forcefield_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.forcefield_buffer)},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
-destroy_forcefield_buffer :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &manager.forcefield_buffer)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    manager.forcefield_buffer_set_layout,
-    nil,
-  )
-  manager.forcefield_buffer_set_layout = 0
-  manager.forcefield_buffer_descriptor_set = 0
-}
-
-@(private)
-init_sprite_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.info("Creating sprite buffer for bindless access")
-  self.sprite_buffer = gpu.malloc_mutable_buffer(
-    gctx,
-    SpriteData,
-    MAX_SPRITES,
-    {.STORAGE_BUFFER},
-  ) or_return
-  sprites := gpu.get_all(&self.sprite_buffer)
-  for &sprite in sprites do sprite = {}
-  self.sprite_buffer_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT}},
-  ) or_return
-  self.sprite_buffer_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.sprite_buffer_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.sprite_buffer)},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
-destroy_sprite_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &self.sprite_buffer)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.sprite_buffer_set_layout,
-    nil,
-  )
-  self.sprite_buffer_set_layout = 0
-  self.sprite_buffer_descriptor_set = 0
-}
-
-@(private)
-destroy_mesh_data_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &self.mesh_data_buffer)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.mesh_data_buffer_set_layout,
-    nil,
-  )
-  self.mesh_data_buffer_set_layout = 0
-  self.mesh_data_descriptor_set = 0
-}
 
 @(private)
 init_vertex_skinning_buffer :: proc(
@@ -962,72 +628,6 @@ destroy_vertex_skinning_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   self.vertex_skinning_descriptor_set = 0
 }
 
-@(private)
-destroy_camera_buffer :: proc(manager: ^Manager, gctx: ^gpu.GPUContext) {
-  for &b in manager.camera_buffers {
-    gpu.mutable_buffer_destroy(gctx.device, &b)
-  }
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    manager.camera_buffer_set_layout,
-    nil,
-  )
-  manager.camera_buffer_set_layout = 0
-}
-
-@(private)
-init_spherical_camera_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  log.infof(
-    "Creating per-frame spherical camera buffers with capacity %d cameras...",
-    MAX_ACTIVE_CAMERAS,
-  )
-  // Create descriptor set layout
-  self.spherical_camera_buffer_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX, .FRAGMENT, .COMPUTE, .GEOMETRY}},
-  ) or_return
-  // Create per-frame buffers and descriptor sets
-  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
-    self.spherical_camera_buffers[frame_idx] = gpu.create_mutable_buffer(
-      gctx,
-      SphericalCameraData,
-      MAX_ACTIVE_CAMERAS,
-      {.STORAGE_BUFFER},
-      nil,
-    ) or_return
-    // Allocate and update descriptor set
-    self.spherical_camera_buffer_descriptor_sets[frame_idx] =
-      gpu.create_descriptor_set(
-        gctx,
-        &self.spherical_camera_buffer_set_layout,
-        {
-          .STORAGE_BUFFER,
-          gpu.buffer_info(&self.spherical_camera_buffers[frame_idx]),
-        },
-      ) or_return
-  }
-  log.infof("Spherical camera buffers initialized successfully")
-  return .SUCCESS
-}
-
-@(private)
-destroy_spherical_camera_buffer :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) {
-  for &b in self.spherical_camera_buffers {
-    gpu.mutable_buffer_destroy(gctx.device, &b)
-  }
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.spherical_camera_buffer_set_layout,
-    nil,
-  )
-  self.spherical_camera_buffer_set_layout = 0
-}
 
 @(private)
 destroy_global_samplers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
@@ -1055,10 +655,7 @@ destroy_global_samplers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
 
 @(private)
 destroy_bone_matrix_allocator :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &self.bone_buffer)
-  vk.DestroyDescriptorSetLayout(gctx.device, self.bone_buffer_set_layout, nil)
-  self.bone_buffer_set_layout = 0
-  self.bone_buffer_descriptor_set = 0
+  gpu.bindless_buffer_destroy(&self.bone_buffer, gctx.device)
   cont.slab_destroy(&self.bone_matrix_slab)
 }
 

@@ -481,7 +481,7 @@ process_skins :: proc(
     matrix_buffer_offset := cont.slab_alloc(&rm.bone_matrix_slab, u32(len(bones)))
     l := matrix_buffer_offset
     r := l + u32(len(bones))
-    bone_matrices := gpu.get_all(&rm.bone_buffer)[l:r]
+    bone_matrices := gpu.get_all(&rm.bone_buffer.buffer)[l:r]
     slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
     skin_cache[gltf_skin] = SkinData {
       bones                = bones,

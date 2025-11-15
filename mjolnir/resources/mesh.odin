@@ -683,7 +683,7 @@ mesh_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   mesh_update_gpu_data(mesh)
-  return gpu.write(&manager.mesh_data_buffer, &mesh.data, int(handle.index))
+  return gpu.write(&manager.mesh_data_buffer.buffer, &mesh.data, int(handle.index))
 }
 
 mesh_destroy_handle :: proc(device: vk.Device, manager: ^Manager, handle: Handle) {

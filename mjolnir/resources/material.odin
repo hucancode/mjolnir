@@ -78,7 +78,7 @@ material_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   material_update_gpu_data(mat)
-  gpu.write(&manager.material_buffer, &mat.data, int(handle.index)) or_return
+  gpu.write(&manager.material_buffer.buffer, &mat.data, int(handle.index)) or_return
   return .SUCCESS
 }
 
