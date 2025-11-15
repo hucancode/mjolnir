@@ -129,10 +129,6 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, ..self.commands[:])
-  }
   log.debugf("renderer lighting init %d x %d", width, height)
   self.ambient_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
@@ -349,7 +345,6 @@ shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  gpu.free_command_buffer(gctx, ..self.commands[:])
   vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
@@ -362,52 +357,6 @@ shutdown :: proc(
   }
   vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
-}
-
-begin_record :: proc(
-  self: ^Renderer,
-  frame_index: u32,
-  camera_handle: resources.Handle,
-  rm: ^resources.Manager,
-  color_format: vk.Format,
-) -> (
-  command_buffer: vk.CommandBuffer,
-  ret: vk.Result,
-) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-  command_buffer = camera.lighting_commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [?]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
-    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat   = .D32_SFLOAT,
-    rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo {
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
-      pInheritanceInfo = &inheritance,
-    },
-  ) or_return
-  ret = .SUCCESS
-  return
-}
-
-end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
-  vk.EndCommandBuffer(command_buffer) or_return
-  return .SUCCESS
 }
 
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
@@ -426,7 +375,6 @@ Renderer :: struct {
   sphere_mesh:              resources.Handle,
   cone_mesh:                resources.Handle,
   triangle_mesh:            resources.Handle,
-  commands:                 [resources.FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 recreate_images :: proc(

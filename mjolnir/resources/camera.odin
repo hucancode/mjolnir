@@ -76,10 +76,6 @@ Camera :: struct {
   extent:                       vk.Extent2D,
   attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]Handle,
   enabled_passes:               PassTypeSet,
-  // Per-pass secondary command buffers for this camera
-  geometry_commands:            [FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  lighting_commands:            [FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  transparency_commands:        [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Double-buffered draw lists for lock-free async compute:
   //   - Frame N graphics reads from draw_commands[N-1]
   //   - Frame N compute writes to draw_commands[N]
@@ -246,27 +242,6 @@ camera_init :: proc(
       gpu.end_single_time_command(gctx, &cmd_buf) or_return
     }
   }
-  if .GEOMETRY in enabled_passes {
-    gpu.allocate_command_buffer(
-      gctx,
-      camera.geometry_commands[:],
-      .SECONDARY,
-    ) or_return
-  }
-  if .LIGHTING in enabled_passes {
-    gpu.allocate_command_buffer(
-      gctx,
-      camera.lighting_commands[:],
-      .SECONDARY,
-    ) or_return
-  }
-  if .TRANSPARENCY in enabled_passes {
-    gpu.allocate_command_buffer(
-      gctx,
-      camera.transparency_commands[:],
-      .SECONDARY,
-    ) or_return
-  }
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     camera.opaque_draw_count[frame] = gpu.create_mutable_buffer(
       gctx,
@@ -333,9 +308,6 @@ camera_destroy :: proc(
       }
     }
   }
-  gpu.free_command_buffer(gctx, ..self.geometry_commands[:])
-  gpu.free_command_buffer(gctx, ..self.lighting_commands[:])
-  gpu.free_command_buffer(gctx, ..self.transparency_commands[:])
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     for mip in 0 ..< self.depth_pyramid[frame].mip_levels {
       vk.DestroyImageView(

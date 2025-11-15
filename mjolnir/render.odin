@@ -298,13 +298,8 @@ record_geometry_pass :: proc(
   rm: ^resources.Manager,
   world_state: ^world.World,
   camera_handle: resources.Handle,
+  command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  command_buffer := geometry.begin_record(
-    &self.geometry,
-    frame_index,
-    camera_handle,
-    rm,
-  ) or_return
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil {
     log.error("Failed to get camera for geometry pass")
@@ -344,7 +339,6 @@ record_geometry_pass :: proc(
     command_stride,
   )
   geometry.end_pass(camera_handle, command_buffer, rm, frame_index)
-  geometry.end_record(command_buffer, camera_handle, rm, frame_index) or_return
   return .SUCCESS
 }
 
@@ -354,14 +348,8 @@ record_lighting_pass :: proc(
   rm: ^resources.Manager,
   camera_handle: resources.Handle,
   color_format: vk.Format,
+  command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  command_buffer := lighting.begin_record(
-    &self.lighting,
-    frame_index,
-    camera_handle,
-    rm,
-    color_format,
-  ) or_return
   lighting.begin_ambient_pass(
     &self.lighting,
     camera_handle,
@@ -392,7 +380,6 @@ record_lighting_pass :: proc(
     frame_index,
   )
   lighting.end_pass(command_buffer)
-  lighting.end_record(command_buffer) or_return
   return .SUCCESS
 }
 
@@ -402,12 +389,8 @@ record_particles_pass :: proc(
   rm: ^resources.Manager,
   camera_handle: resources.Handle,
   color_format: vk.Format,
+  command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  command_buffer := particles.begin_record(
-    &self.particles,
-    frame_index,
-    color_format,
-  ) or_return
   particles.begin_pass(
     &self.particles,
     command_buffer,
@@ -417,7 +400,6 @@ record_particles_pass :: proc(
   )
   particles.render(&self.particles, command_buffer, camera_handle.index, rm)
   particles.end_pass(command_buffer)
-  particles.end_record(command_buffer) or_return
   return .SUCCESS
 }
 
@@ -429,14 +411,8 @@ record_transparency_pass :: proc(
   world_state: ^world.World,
   camera_handle: resources.Handle,
   color_format: vk.Format,
+  command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  command_buffer := transparency.begin_record(
-    &self.transparency,
-    frame_index,
-    camera_handle,
-    rm,
-    color_format,
-  ) or_return
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil {
     log.error("Failed to get camera for transparency pass")
@@ -531,7 +507,6 @@ record_transparency_pass :: proc(
     command_stride,
   )
   transparency.end_pass(&self.transparency, command_buffer)
-  transparency.end_record(command_buffer) or_return
   return .SUCCESS
 }
 
@@ -544,15 +519,39 @@ record_post_process_pass :: proc(
   swapchain_extent: vk.Extent2D,
   swapchain_image: vk.Image,
   swapchain_view: vk.ImageView,
+  command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  command_buffer := post_process.begin_record(
-    &self.post_process,
-    frame_index,
-    color_format,
-    camera_handle,
-    rm,
+  // Transition final image and swapchain image (moved from begin_record)
+  camera := cont.get(rm.cameras, camera_handle)
+  if camera != nil {
+    if final_image, ok := cont.get(
+      rm.images_2d,
+      camera.attachments[.FINAL_IMAGE][frame_index],
+    ); ok {
+      gpu.image_barrier(
+        command_buffer,
+        final_image.image,
+        .COLOR_ATTACHMENT_OPTIMAL,
+        .SHADER_READ_ONLY_OPTIMAL,
+        {.COLOR_ATTACHMENT_WRITE},
+        {.SHADER_READ},
+        {.COLOR_ATTACHMENT_OUTPUT},
+        {.FRAGMENT_SHADER},
+        {.COLOR},
+      )
+    }
+  }
+  gpu.image_barrier(
+    command_buffer,
     swapchain_image,
-  ) or_return
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.COLOR},
+  )
   post_process.begin_pass(&self.post_process, command_buffer, swapchain_extent)
   post_process.render(
     &self.post_process,
@@ -564,6 +563,5 @@ record_post_process_pass :: proc(
     frame_index,
   )
   post_process.end_pass(&self.post_process, command_buffer)
-  post_process.end_record(command_buffer) or_return
   return .SUCCESS
 }

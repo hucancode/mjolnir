@@ -583,8 +583,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.world,
     command_buffer,
   ) or_return
-  camera_command_buffers: [dynamic]vk.CommandBuffer
-  defer delete(camera_command_buffers)
   for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue
     if u32(cam_index) == main_camera_handle.index do continue
@@ -601,6 +599,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         &self.rm,
         &self.world,
         cam_handle,
+        command_buffer,
       )
     }
     if resources.PassType.LIGHTING in cam.enabled_passes {
@@ -610,6 +609,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         &self.rm,
         cam_handle,
         self.swapchain.format.format,
+        command_buffer,
       )
     }
     if resources.PassType.PARTICLES in cam.enabled_passes {
@@ -619,6 +619,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         &self.rm,
         cam_handle,
         self.swapchain.format.format,
+        command_buffer,
       )
     }
     if resources.PassType.TRANSPARENCY in cam.enabled_passes {
@@ -630,24 +631,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         &self.world,
         cam_handle,
         self.swapchain.format.format,
-      )
-    }
-    if resources.PassType.GEOMETRY in cam.enabled_passes {
-      append(&camera_command_buffers, cam.geometry_commands[self.frame_index])
-    }
-    if resources.PassType.LIGHTING in cam.enabled_passes {
-      append(&camera_command_buffers, cam.lighting_commands[self.frame_index])
-    }
-    if resources.PassType.PARTICLES in cam.enabled_passes {
-      append(
-        &camera_command_buffers,
-        self.render.particles.commands[self.frame_index],
-      )
-    }
-    if resources.PassType.TRANSPARENCY in cam.enabled_passes {
-      append(
-        &camera_command_buffers,
-        cam.transparency_commands[self.frame_index],
+        command_buffer,
       )
     }
   }
@@ -658,6 +642,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.rm,
     &self.world,
     main_camera_handle,
+    command_buffer,
   )
   record_lighting_pass(
     &self.render,
@@ -665,6 +650,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.rm,
     main_camera_handle,
     self.swapchain.format.format,
+    command_buffer,
   )
   record_particles_pass(
     &self.render,
@@ -672,6 +658,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.rm,
     main_camera_handle,
     self.swapchain.format.format,
+    command_buffer,
   )
   record_transparency_pass(
     &self.render,
@@ -681,6 +668,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.world,
     main_camera_handle,
     self.swapchain.format.format,
+    command_buffer,
   )
   record_post_process_pass(
     &self.render,
@@ -691,11 +679,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.extent,
     self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
-  )
-  vk.CmdExecuteCommands(
     command_buffer,
-    u32(len(camera_command_buffers)),
-    raw_data(camera_command_buffers[:]),
   )
   compute_cmd_buffer: Maybe(vk.CommandBuffer) = nil
   if self.gctx.has_async_compute {
@@ -736,14 +720,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       &self.rm,
     )
   }
-  buffers := [?]vk.CommandBuffer {
-    main_camera.geometry_commands[self.frame_index],
-    main_camera.lighting_commands[self.frame_index],
-    self.render.particles.commands[self.frame_index],
-    main_camera.transparency_commands[self.frame_index],
-    self.render.post_process.commands[self.frame_index],
-  }
-  vk.CmdExecuteCommands(command_buffer, len(buffers), raw_data(buffers[:]))
   populate_debug_ui(self)
   if self.post_render_proc != nil {
     self.post_render_proc(self)

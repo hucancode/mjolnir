@@ -17,7 +17,6 @@ PushConstant :: struct {
 
 Renderer :: struct {
   pipeline: vk.Pipeline,
-  commands: [resources.FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 init :: proc(
@@ -28,10 +27,6 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, ..self.commands[:])
-  }
   depth_format: vk.Format = .D32_SFLOAT
   if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
@@ -396,62 +391,6 @@ render :: proc(
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  gpu.free_command_buffer(gctx, ..self.commands[:])
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   self.pipeline = 0
-}
-
-begin_record :: proc(
-  self: ^Renderer,
-  frame_index: u32,
-  camera_handle: resources.Handle,
-  rm: ^resources.Manager,
-) -> (
-  command_buffer: vk.CommandBuffer,
-  ret: vk.Result,
-) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-  command_buffer = camera.geometry_commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [?]vk.Format {
-    .R32G32B32A32_SFLOAT,
-    .R8G8B8A8_UNORM,
-    .R8G8B8A8_UNORM,
-    .R8G8B8A8_UNORM,
-    .R8G8B8A8_UNORM,
-  }
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
-    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat   = .D32_SFLOAT,
-    rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo {
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
-      pInheritanceInfo = &inheritance,
-    },
-  ) or_return
-  return command_buffer, .SUCCESS
-}
-
-end_record :: proc(
-  command_buffer: vk.CommandBuffer,
-  camera_handle: resources.Handle,
-  rm: ^resources.Manager,
-  frame_index: u32,
-) -> vk.Result {
-  vk.EndCommandBuffer(command_buffer) or_return
-  return .SUCCESS
 }

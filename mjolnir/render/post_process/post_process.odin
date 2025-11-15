@@ -183,7 +183,6 @@ Renderer :: struct {
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
   images:           [2]resources.Handle,
-  commands:         [resources.FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -356,10 +355,6 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, ..self.commands[:])
-  }
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
   vert_module := gpu.create_shader_module(
@@ -523,7 +518,6 @@ shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  gpu.free_command_buffer(gctx, ..self.commands[:])
   for &p in self.pipelines {
     vk.DestroyPipeline(gctx.device, p, nil)
     p = 0
@@ -807,76 +801,4 @@ render :: proc(
 }
 
 end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
-
-}
-
-begin_record :: proc(
-  self: ^Renderer,
-  frame_index: u32,
-  color_format: vk.Format,
-  camera_handle: resources.Handle,
-  rm: ^resources.Manager,
-  swapchain_image: vk.Image,
-) -> (
-  command_buffer: vk.CommandBuffer,
-  ret: vk.Result,
-) {
-  command_buffer = self.commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [?]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
-    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-    rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo {
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
-      pInheritanceInfo = &inheritance,
-    },
-  ) or_return
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return command_buffer, .ERROR_UNKNOWN
-  // Transition final image to shader read optimal
-  if final_image, ok := cont.get(
-    rm.images_2d,
-    camera.attachments[.FINAL_IMAGE][frame_index],
-  ); ok {
-    gpu.image_barrier(
-      command_buffer,
-      final_image.image,
-      .COLOR_ATTACHMENT_OPTIMAL,
-      .SHADER_READ_ONLY_OPTIMAL,
-      {.COLOR_ATTACHMENT_WRITE},
-      {.SHADER_READ},
-      {.COLOR_ATTACHMENT_OUTPUT},
-      {.FRAGMENT_SHADER},
-      {.COLOR},
-    )
-  }
-  // Transition swapchain image from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
-  gpu.image_barrier(
-    command_buffer,
-    swapchain_image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  return command_buffer, .SUCCESS
-}
-
-end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
-  vk.EndCommandBuffer(command_buffer) or_return
-  return .SUCCESS
 }

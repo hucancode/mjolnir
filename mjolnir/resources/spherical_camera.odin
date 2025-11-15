@@ -15,7 +15,6 @@ SphericalCamera :: struct {
   far:             f32, // Far plane
   size:            u32, // Resolution of cube map faces (size x size)
   depth_cube:      [FRAMES_IN_FLIGHT]Handle, // Cube depth textures (per-frame)
-  command_buffer:  vk.CommandBuffer, // Secondary command buffer
   draw_commands:   gpu.MutableBuffer(vk.DrawIndexedIndirectCommand), // Draw commands for visible objects
   draw_count:      gpu.MutableBuffer(u32), // Number of visible objects
   max_draws:       u32, // Maximum number of draw calls
@@ -50,10 +49,6 @@ spherical_camera_init :: proc(
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
   }
-  camera.command_buffer = gpu.allocate_command_buffer(
-    gctx,
-    vk.CommandBufferLevel.SECONDARY,
-  ) or_return
   camera.draw_count = gpu.create_mutable_buffer(
     gctx,
     u32,
@@ -97,7 +92,6 @@ spherical_camera_destroy :: proc(
       gpu.cube_depth_texture_destroy(gctx.device, item)
     }
   }
-  gpu.free_command_buffer(gctx, self.command_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.draw_count)
   gpu.mutable_buffer_destroy(gctx.device, &self.draw_commands)
 }

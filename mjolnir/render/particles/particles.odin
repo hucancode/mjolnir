@@ -67,7 +67,6 @@ Renderer :: struct {
   render_pipeline_layout:             vk.PipelineLayout,
   render_pipeline:                    vk.Pipeline,
   default_texture_index:              u32,
-  commands:                           [resources.FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 simulate :: proc(
@@ -164,7 +163,6 @@ compact :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  gpu.free_command_buffer(gctx, ..self.commands[:])
   vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
@@ -202,10 +200,6 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, ..self.commands[:])
-  }
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -682,42 +676,4 @@ render :: proc(
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
-}
-
-begin_record :: proc(
-  self: ^Renderer,
-  frame_index: u32,
-  color_format: vk.Format,
-) -> (
-  command_buffer: vk.CommandBuffer,
-  ret: vk.Result,
-) {
-  command_buffer = self.commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [?]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
-    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat   = .D32_SFLOAT,
-    rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo {
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT, .SIMULTANEOUS_USE},
-      pInheritanceInfo = &inheritance,
-    },
-  ) or_return
-  return command_buffer, .SUCCESS
-}
-
-end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
-  vk.EndCommandBuffer(command_buffer) or_return
-  return .SUCCESS
 }

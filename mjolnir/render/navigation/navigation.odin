@@ -108,7 +108,6 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.path_vertex_buffer)
-  gpu.free_command_buffer(gctx, ..self.commands[:])
 }
 
 begin_record :: proc(

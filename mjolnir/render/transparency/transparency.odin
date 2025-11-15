@@ -20,7 +20,6 @@ Renderer :: struct {
   wireframe_pipeline:   vk.Pipeline,
   sprite_pipeline:      vk.Pipeline,
   sprite_quad_mesh:     resources.Handle,
-  commands:             [resources.FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 PushConstant :: struct {
@@ -35,10 +34,6 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, ..self.commands[:])
-  }
   log.info("Initializing transparent renderer")
   if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
@@ -332,7 +327,6 @@ create_sprite_pipeline :: proc(
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  gpu.free_command_buffer(gctx, ..self.commands[:])
   vk.DestroyPipeline(gctx.device, self.transparent_pipeline, nil)
   self.transparent_pipeline = 0
   vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
@@ -439,50 +433,7 @@ render :: proc(
   )
 }
 
-begin_record :: proc(
-  self: ^Renderer,
-  frame_index: u32,
-  camera_handle: resources.Handle,
-  rm: ^resources.Manager,
-  color_format: vk.Format,
-) -> (
-  command_buffer: vk.CommandBuffer,
-  ret: vk.Result,
-) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-  command_buffer = camera.transparency_commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [?]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
-    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat   = .D32_SFLOAT,
-    rasterizationSamples    = {._1}, // No MSAA, single sample per pixel
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo {
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
-      pInheritanceInfo = &inheritance,
-    },
-  ) or_return
-  return command_buffer, .SUCCESS
-}
-
-end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
-  vk.EndCommandBuffer(command_buffer) or_return
-  return .SUCCESS
-}
+// No longer needed - recording directly to primary command buffer
 
 end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
