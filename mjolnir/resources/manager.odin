@@ -100,38 +100,48 @@ Manager :: struct {
 }
 
 init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
-  log.infof("Initializing mesh pool... ")
   cont.init(&self.meshes, MAX_MESHES)
-  log.infof("Initializing materials pool... ")
   cont.init(&self.materials, MAX_MATERIALS)
-  log.infof("Initializing image 2d buffer pool... ")
   cont.init(&self.images_2d, MAX_TEXTURES)
-  log.infof("Initializing image cube buffer pool... ")
   cont.init(&self.images_cube, MAX_CUBE_TEXTURES)
-  log.infof("Initializing cameras pool... ")
   cont.init(&self.cameras, MAX_ACTIVE_CAMERAS)
-  log.infof("Initializing spherical cameras pool... ")
   cont.init(&self.spherical_cameras, MAX_ACTIVE_CAMERAS)
-  log.infof("Initializing forcefield pool... ")
   cont.init(&self.forcefields, MAX_FORCE_FIELDS)
-  log.infof("Initializing animation clips pool... ")
   cont.init(&self.animation_clips, 0)
-  log.infof("Initializing sprites pool... ")
   cont.init(&self.sprites, MAX_SPRITES)
-  log.infof("Initializing lights pool... ")
   cont.init(&self.lights, MAX_LIGHTS)
-  log.infof("Initializing navigation mesh pool... ")
   cont.init(&self.nav_meshes, 0)
-  log.infof("Initializing navigation context pool... ")
   cont.init(&self.nav_contexts, 0)
-  log.infof("Initializing navigation system... ")
   self.navigation_system = {}
   self.current_frame_index = 0
   log.infof("All resource pools initialized successfully")
   init_global_samplers(self, gctx)
   log.info("Initializing bindless buffer systems...")
-  init_bone_matrix_allocator(self, gctx) or_return
-  defer if ret != .SUCCESS do destroy_bone_matrix_allocator(self, gctx)
+  cont.slab_init(
+    &self.bone_matrix_slab,
+    {
+      {32, 64}, // 64 bytes * 32   bones * 64   blocks = 128K bytes
+      {64, 128}, // 64 bytes * 64   bones * 128  blocks = 512K bytes
+      {128, 8192}, // 64 bytes * 128  bones * 8192 blocks = 64M bytes
+      {256, 4096}, // 64 bytes * 256  bones * 4096 blocks = 64M bytes
+      {512, 256}, // 64 bytes * 512  bones * 256  blocks = 8M bytes
+      {1024, 128}, // 64 bytes * 1024 bones * 256  blocks = 8M bytes
+      {2048, 32}, // 64 bytes * 2048 bones * 32   blocks = 4M bytes
+      {4096, 16}, // 64 bytes * 4096 bones * 16   blocks = 4M bytes
+      // Total size: ~153M bytes for bone matrices
+      // This could roughly fit 12000 animated characters with 128 bones each
+    },
+  )
+  gpu.bindless_buffer_init(
+    &self.bone_buffer,
+    gctx,
+    int(self.bone_matrix_slab.capacity),
+    {.VERTEX},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.bindless_buffer_destroy(&self.bone_buffer, gctx.device)
+    cont.slab_destroy(&self.bone_matrix_slab)
+  }
   gpu.per_frame_bindless_buffer_init(
     &self.camera_buffer,
     gctx,
@@ -311,6 +321,7 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   )
   init_builtin_materials(self) or_return
   init_builtin_meshes(self, gctx) or_return
+  log.info("Resource systems initialized successfully")
   return .SUCCESS
 }
 
@@ -372,7 +383,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(self.animation_clips.entries)
   delete(self.animation_clips.free_indices)
-  // Navigation system cleanup
   for &entry in self.nav_meshes.entries do if entry.generation > 0 && entry.active {
     // Clean up navigation mesh
     // TODO: detour mesh cleanup would be added here if needed
@@ -385,11 +395,11 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(self.nav_contexts.entries)
   delete(self.nav_contexts.free_indices)
-  // Clean up navigation system
   delete(self.navigation_system.geometry_cache)
   delete(self.navigation_system.dirty_tiles)
   destroy_global_samplers(self, gctx)
-  destroy_bone_matrix_allocator(self, gctx)
+  gpu.bindless_buffer_destroy(&self.bone_buffer, gctx.device)
+  cont.slab_destroy(&self.bone_matrix_slab)
   gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
   gpu.per_frame_bindless_buffer_destroy(
     &self.spherical_camera_buffer,
@@ -485,39 +495,6 @@ init_global_samplers :: proc(
 }
 
 @(private)
-init_bone_matrix_allocator :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  cont.slab_init(
-    &self.bone_matrix_slab,
-    {
-      {32, 64}, // 64 bytes * 32   bones * 64   blocks = 128K bytes
-      {64, 128}, // 64 bytes * 64   bones * 128  blocks = 512K bytes
-      {128, 8192}, // 64 bytes * 128  bones * 8192 blocks = 64M bytes
-      {256, 4096}, // 64 bytes * 256  bones * 4096 blocks = 64M bytes
-      {512, 256}, // 64 bytes * 512  bones * 256  blocks = 8M bytes
-      {1024, 128}, // 64 bytes * 1024 bones * 256  blocks = 8M bytes
-      {2048, 32}, // 64 bytes * 2048 bones * 32   blocks = 4M bytes
-      {4096, 16}, // 64 bytes * 4096 bones * 16   blocks = 4M bytes
-      // Total size: ~153M bytes for bone matrices
-      // This could roughly fit 12000 animated characters with 128 bones each
-    },
-  )
-  log.infof(
-    "Creating bone matrix buffer with capacity %d matrices...",
-    self.bone_matrix_slab.capacity,
-  )
-  gpu.bindless_buffer_init(
-    &self.bone_buffer,
-    gctx,
-    int(self.bone_matrix_slab.capacity),
-    {.VERTEX},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
 init_vertex_skinning_buffer :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
@@ -586,12 +563,6 @@ destroy_global_samplers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
 }
 
 @(private)
-destroy_bone_matrix_allocator :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.bindless_buffer_destroy(&self.bone_buffer, gctx.device)
-  cont.slab_destroy(&self.bone_matrix_slab)
-}
-
-@(private)
 init_vertex_index_buffers :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
@@ -612,7 +583,6 @@ init_vertex_index_buffers :: proc(
   ) or_return
   cont.slab_init(&self.vertex_slab, VERTEX_SLAB_CONFIG)
   cont.slab_init(&self.index_slab, INDEX_SLAB_CONFIG)
-  log.info("Bindless buffer system initialized")
   log.info("Vertex buffer capacity:", vertex_count, "vertices")
   log.info("Index buffer capacity:", index_count, "indices")
   return .SUCCESS
