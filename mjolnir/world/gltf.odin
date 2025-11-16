@@ -14,7 +14,6 @@ import path "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "vendor:cgltf"
-import vk "vendor:vulkan"
 
 @(private = "file")
 AssetManifest :: struct {

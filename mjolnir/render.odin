@@ -14,6 +14,7 @@ import "render/particles"
 import "render/post_process"
 import "render/retained_ui"
 import "render/transparency"
+import "render/visibility"
 import "resources"
 import vk "vendor:vulkan"
 import "world"
@@ -28,6 +29,18 @@ Renderer :: struct {
   ui:           debug_ui.Renderer,
   retained_ui:  retained_ui.Manager,
   main_camera:  resources.Handle,
+  visibility:   visibility.VisibilitySystem,
+}
+
+update_visibility_node_count :: proc(self: ^Renderer, world_state: ^world.World) {
+  i, found := slice.linear_search_reverse_proc(
+    world_state.nodes.entries[:],
+    proc(entry: cont.Entry(world.Node)) -> bool {
+      return entry.active
+    },
+  )
+  node_count := i + 1 if found else len(world_state.nodes.entries)
+  self.visibility.node_count = min(u32(node_count), self.visibility.max_draws)
 }
 
 record_compute_commands :: proc(
@@ -52,8 +65,8 @@ record_compute_commands :: proc(
     cam := &entry.item
     // STEP 1: Build pyramid[N] from depth[N-1]
     // This allows Compute N to build pyramid[N] from Render N-1's depth
-    world.visibility_build_pyramid(
-      &world_state.visibility,
+    visibility.build_pyramid(
+      &self.visibility,
       gctx,
       compute_buffer,
       cam,
@@ -64,8 +77,8 @@ record_compute_commands :: proc(
     // STEP 2: Cull using camera[N] + pyramid[N] → draw_list[N+1]
     // Reads pyramid[frame_index], writes draw_list[next_frame_index]
     // This produces draw_list[N+1] for use by Render N+1
-    world.visibility_perform_culling(
-      &world_state.visibility,
+    visibility.perform_culling(
+      &self.visibility,
       gctx,
       compute_buffer,
       cam,
@@ -122,6 +135,13 @@ renderer_init :: proc(
     100.0, // far plane
   ) or_return
   self.main_camera = main_camera_handle
+  visibility.init(
+    &self.visibility,
+    gctx,
+    rm,
+    swapchain_extent.width,
+    swapchain_extent.height,
+  ) or_return
   lighting.init(
     &self.lighting,
     gctx,
@@ -189,6 +209,7 @@ renderer_shutdown :: proc(
   transparency.shutdown(&self.transparency, gctx)
   lighting.shutdown(&self.lighting, gctx, rm)
   geometry.shutdown(&self.geometry, gctx)
+  visibility.shutdown(&self.visibility, gctx)
 }
 
 resize :: proc(
@@ -232,8 +253,8 @@ record_camera_visibility :: proc(
     cam := &entry.item
     // Upload camera data to GPU buffer
     resources.camera_upload_data(rm, u32(cam_index), frame_index)
-    world.visibility_perform_culling(
-      &world_state.visibility,
+    visibility.perform_culling(
+      &self.visibility,
       gctx,
       command_buffer,
       cam,
@@ -243,8 +264,8 @@ record_camera_visibility :: proc(
       {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
       rm,
     )
-    world.visibility_render_depth(
-      &world_state.visibility,
+    visibility.render_depth(
+      &self.visibility,
       gctx,
       command_buffer,
       cam,
@@ -254,8 +275,8 @@ record_camera_visibility :: proc(
       {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
       rm,
     )
-    world.visibility_build_pyramid(
-      &world_state.visibility,
+    visibility.build_pyramid(
+      &self.visibility,
       gctx,
       command_buffer,
       cam,
@@ -276,8 +297,8 @@ record_camera_visibility :: proc(
       frame_index,
     )
     // Dispatch visibility - records compute culling + depth rendering
-    world.visibility_render_sphere_depth(
-      &world_state.visibility,
+    visibility.render_sphere_depth(
+      &self.visibility,
       gctx,
       command_buffer,
       spherical_cam,
@@ -313,8 +334,8 @@ record_geometry_pass :: proc(
   //
   // STEP 1: Render depth[N] using draw_list[N], camera[N]
   // This depth will be read by frame N+1 compute for pyramid building
-  world.visibility_render_depth(
-    &world_state.visibility,
+  visibility.render_depth(
+    &self.visibility,
     gctx,
     command_buffer,
     camera,
@@ -420,8 +441,8 @@ record_transparency_pass :: proc(
   }
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
   // Single dispatch to generate all 3 draw lists (late, transparent, sprite)
-  world.visibility_perform_culling(
-    &world_state.visibility,
+  visibility.perform_culling(
+    &self.visibility,
     gctx,
     command_buffer,
     camera,

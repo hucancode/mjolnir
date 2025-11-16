@@ -1097,7 +1097,7 @@ get_texture_count :: proc(engine: ^Engine) -> u32 {
 }
 
 set_visibility_stats :: proc(engine: ^Engine, enabled: bool) {
-  engine.world.visibility.stats_enabled = enabled
+  engine.render.visibility.stats_enabled = enabled
 }
 
 camera_look_at :: resources.camera_look_at

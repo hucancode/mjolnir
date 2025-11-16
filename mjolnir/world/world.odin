@@ -10,7 +10,6 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:strings"
-import vk "vendor:vulkan"
 
 LightAttachment :: struct {
   handle: resources.Handle,
@@ -373,7 +372,6 @@ World :: struct {
   root:                   resources.Handle,
   nodes:                  resources.Pool(Node),
   traversal_stack:        [dynamic]TraverseEntry,
-  visibility:             VisibilitySystem,
   node_octree:            geometry.Octree(NodeEntry),
   octree_entry_map:       map[resources.Handle]NodeEntry,
   octree_dirty_set:       map[resources.Handle]bool, // nodes needing octree update
@@ -474,23 +472,6 @@ unregister_animatable_node :: proc(world: ^World, handle: resources.Handle) {
   }
 }
 
-init_gpu :: proc(
-  world: ^World,
-  gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
-  depth_width: u32,
-  depth_height: u32,
-) -> vk.Result {
-  visibility_init(
-    &world.visibility,
-    gctx,
-    rm,
-    depth_width,
-    depth_height,
-  ) or_return
-  return .SUCCESS
-}
-
 begin_frame :: proc(
   world: ^World,
   rm: ^resources.Manager,
@@ -499,7 +480,6 @@ begin_frame :: proc(
 ) {
   traverse(world, rm)
   process_octree_updates(world, rm)
-  update_visibility_system(world)
   world_tick_actors(world, rm, delta_time, game_state)
 }
 
@@ -508,7 +488,7 @@ shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  visibility_shutdown(&world.visibility, gctx)
+  // Visibility system moved to Renderer
   for &entry in world.nodes.entries {
     if entry.active {
       destroy_node(&entry.item, rm, gctx)
@@ -568,18 +548,6 @@ cleanup_pending_deletions :: proc(
       destroy_node(node, rm, gctx)
     }
   }
-}
-
-@(private)
-update_visibility_system :: proc(world: ^World) {
-  i, found := slice.linear_search_reverse_proc(
-    world.nodes.entries[:],
-    proc(entry: cont.Entry(Node)) -> bool {
-      return entry.active
-    },
-  )
-  node_count := i + 1 if found else len(world.nodes.entries)
-  world.visibility.node_count = min(u32(node_count), world.visibility.max_draws)
 }
 
 traverse :: proc(

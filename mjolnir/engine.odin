@@ -19,6 +19,7 @@ import "level_manager"
 import "render/debug_ui"
 import "render/particles"
 import "render/retained_ui"
+import "render/visibility"
 import "resources"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -153,13 +154,6 @@ init :: proc(
   world.init(&self.world)
   level_manager.init(&self.level_manager)
   gpu.swapchain_init(&self.swapchain, &self.gctx, self.window) or_return
-  world.init_gpu(
-    &self.world,
-    &self.gctx,
-    &self.rm,
-    self.swapchain.extent.width,
-    self.swapchain.extent.height,
-  ) or_return
   gpu.allocate_command_buffer(&self.gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
     gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
@@ -493,15 +487,15 @@ populate_debug_ui :: proc(self: ^Engine) {
       ),
     )
     if main_camera := get_main_camera(self); main_camera != nil {
-      main_stats := world.visibility_stats(
-        &self.world.visibility,
+      main_stats := visibility.stats(
+        &self.render.visibility,
         main_camera,
         self.render.main_camera.index,
         self.frame_index,
       )
       mu.label(
         &self.render.ui.ctx,
-        fmt.tprintf("Total Objects: %d", self.world.visibility.node_count),
+        fmt.tprintf("Total Objects: %d", self.render.visibility.node_count),
       )
       mu.label(
         &self.render.ui.ctx,
@@ -561,6 +555,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     time.duration_seconds(time.since(self.last_render_timestamp)),
   )
   world.begin_frame(&self.world, &self.rm)
+  update_visibility_node_count(&self.render, &self.world)
   main_camera_handle := self.render.main_camera
   main_camera := cont.get(self.rm.cameras, main_camera_handle)
   if main_camera == nil do return .ERROR_UNKNOWN
@@ -700,8 +695,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       if !entry.active do continue
       if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
       cam := &entry.item
-      world.visibility_perform_culling(
-        &self.world.visibility,
+      visibility.perform_culling(
+        &self.render.visibility,
         &self.gctx,
         command_buffer,
         cam,

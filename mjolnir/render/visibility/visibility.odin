@@ -1,9 +1,9 @@
-package world
+package visibility
 
-import cont "../containers"
-import geometry "../geometry"
-import gpu "../gpu"
-import resources "../resources"
+import cont "../../containers"
+import geometry "../../geometry"
+import gpu "../../gpu"
+import resources "../../resources"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -25,14 +25,14 @@ _________ end frame, sync _________
 */
 
 SHADER_SPHERECAM_CULLING :: #load(
-  "../shader/occlusion_culling/sphere_cull.spv",
+  "../../shader/occlusion_culling/sphere_cull.spv",
 )
-SHADER_CULLING :: #load("../shader/occlusion_culling/cull.spv")
-SHADER_DEPTH_REDUCE :: #load("../shader/occlusion_culling/depth_reduce.spv")
-SHADER_DEPTH_VERT :: #load("../shader/occlusion_culling/vert.spv")
-SHADER_SPHERECAM_DEPTH_VERT :: #load("../shader/shadow_spherical/vert.spv")
-SHADER_SPHERECAM_DEPTH_GEOM :: #load("../shader/shadow_spherical/geom.spv")
-SHADER_SPHERECAM_DEPTH_FRAG :: #load("../shader/shadow_spherical/frag.spv")
+SHADER_CULLING :: #load("../../shader/occlusion_culling/cull.spv")
+SHADER_DEPTH_REDUCE :: #load("../../shader/occlusion_culling/depth_reduce.spv")
+SHADER_DEPTH_VERT :: #load("../../shader/occlusion_culling/vert.spv")
+SHADER_SPHERECAM_DEPTH_VERT :: #load("../../shader/shadow_spherical/vert.spv")
+SHADER_SPHERECAM_DEPTH_GEOM :: #load("../../shader/shadow_spherical/geom.spv")
+SHADER_SPHERECAM_DEPTH_FRAG :: #load("../../shader/shadow_spherical/frag.spv")
 
 VisibilityPushConstants :: struct {
   camera_index:      u32,
@@ -74,12 +74,11 @@ VisibilitySystem :: struct {
   stats_enabled:         bool,
 }
 
-visibility_init :: proc(
+init :: proc(
   self: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
-  depth_width: u32,
-  depth_height: u32,
+  depth_width, depth_height: u32,
 ) -> (
   ret: vk.Result,
 ) {
@@ -104,7 +103,7 @@ visibility_init :: proc(
   return .SUCCESS
 }
 
-visibility_shutdown :: proc(
+shutdown :: proc(
   self: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
 ) {
@@ -118,7 +117,7 @@ visibility_shutdown :: proc(
   vk.DestroyPipelineLayout(gctx.device, self.depth_reduce_layout, nil)
 }
 
-visibility_stats :: proc(
+stats :: proc(
   self: ^VisibilitySystem,
   camera: ^resources.Camera,
   camera_index: u32,
@@ -135,7 +134,7 @@ visibility_stats :: proc(
 }
 
 // STEP 2: Render depth - reads draw list, writes depth[N]
-visibility_render_depth :: proc(
+render_depth :: proc(
   self: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
@@ -287,7 +286,7 @@ visibility_render_depth :: proc(
 }
 
 // STEP 3: Build pyramid - reads depth[N-1], builds pyramid[N]
-visibility_build_pyramid :: proc(
+build_pyramid :: proc(
   self: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
@@ -363,7 +362,7 @@ visibility_build_pyramid :: proc(
 
 // Frame N compute writes to buffer[N], while frame N graphics reads buffer[N-1]
 // Uses multi_pass pipeline but only opaque_draw_count/commands are used
-visibility_perform_culling :: proc(
+perform_culling :: proc(
   self: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
@@ -431,7 +430,7 @@ visibility_perform_culling :: proc(
 }
 
 // SphericalCamera visibility dispatch - culling + depth cube rendering
-visibility_render_sphere_depth :: proc(
+render_sphere_depth :: proc(
   self: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
