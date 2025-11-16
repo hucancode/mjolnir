@@ -548,6 +548,38 @@ create_forcefield :: proc(
   )
 }
 
+create_light :: proc(
+  engine: ^Engine,
+  light_type: resources.LightType,
+  node_handle: resources.Handle,
+  color: [4]f32 = {1, 1, 1, 1},
+  radius: f32 = 10.0,
+  angle_inner: f32 = 0.0,
+  angle_outer: f32 = 0.0,
+  cast_shadow: b32 = true,
+) -> (
+  light_handle: resources.Handle,
+  ok: bool,
+) #optional_ok {
+  // Create the light resource
+  light_handle = resources.create_light(
+    &engine.rm,
+    &engine.gctx,
+    light_type,
+    node_handle,
+    color,
+    radius,
+    angle_inner,
+    angle_outer,
+    cast_shadow,
+  ) or_return
+  // If the light casts shadows, create a camera for it
+  if cast_shadow {
+    create_light_camera(engine, light_handle) or_return
+  }
+  return light_handle, true
+}
+
 // Create an animation clip with automatic allocation and initialization
 // Use init_animation_channel to populate the channels after creation
 create_animation_clip :: proc(
@@ -801,6 +833,21 @@ create_camera :: proc(
   if init_result != .SUCCESS {
     cont.free(&engine.rm.cameras, camera_handle)
     return {}, false
+  }
+  // Allocate camera descriptors after camera is initialized
+  for frame in 0 ..< resources.FRAMES_IN_FLIGHT {
+    alloc_result := resources.camera_allocate_descriptors(
+      &engine.gctx,
+      &engine.rm,
+      camera_ptr,
+      u32(frame),
+      &engine.render.visibility.normal_cam_descriptor_layout,
+      &engine.render.visibility.depth_reduce_descriptor_layout,
+    )
+    if alloc_result != .SUCCESS {
+      cont.free(&engine.rm.cameras, camera_handle)
+      return {}, false
+    }
   }
   return camera_handle, true
 }

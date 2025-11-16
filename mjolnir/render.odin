@@ -142,6 +142,17 @@ renderer_init :: proc(
     swapchain_extent.width,
     swapchain_extent.height,
   ) or_return
+  // Allocate camera descriptors after visibility system is initialized
+  for frame in 0 ..< resources.FRAMES_IN_FLIGHT {
+    resources.camera_allocate_descriptors(
+      gctx,
+      rm,
+      main_camera_ptr,
+      u32(frame),
+      &self.visibility.normal_cam_descriptor_layout,
+      &self.visibility.depth_reduce_descriptor_layout,
+    ) or_return
+  }
   lighting.init(
     &self.lighting,
     gctx,

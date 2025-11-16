@@ -58,20 +58,23 @@ CullingStats :: struct {
 }
 
 VisibilitySystem :: struct {
-  cull_layout:           vk.PipelineLayout,
-  cull_pipeline:         vk.Pipeline, // Generates 3 draw lists in one dispatch
-  depth_pipeline:        vk.Pipeline, // uses general_pipeline_layout
-  depth_reduce_layout:   vk.PipelineLayout,
-  depth_reduce_pipeline: vk.Pipeline,
-  sphere_cull_layout:    vk.PipelineLayout,
-  sphere_cull_pipeline:  vk.Pipeline, // For SphericalCamera (radius-based culling)
-  sphere_depth_pipeline: vk.Pipeline, // uses sphere_pipeline_layout
-  max_draws:             u32,
-  node_count:            u32,
-  depth_width:           u32,
-  depth_height:          u32,
-  depth_bias:            f32,
-  stats_enabled:         bool,
+  cull_layout:                    vk.PipelineLayout,
+  cull_pipeline:                  vk.Pipeline, // Generates 3 draw lists in one dispatch
+  depth_pipeline:                 vk.Pipeline, // uses general_pipeline_layout
+  depth_reduce_layout:            vk.PipelineLayout,
+  depth_reduce_pipeline:          vk.Pipeline,
+  sphere_cull_layout:             vk.PipelineLayout,
+  sphere_cull_pipeline:           vk.Pipeline, // For SphericalCamera (radius-based culling)
+  sphere_depth_pipeline:          vk.Pipeline, // uses sphere_pipeline_layout
+  sphere_cam_descriptor_layout:   vk.DescriptorSetLayout,
+  normal_cam_descriptor_layout:   vk.DescriptorSetLayout,
+  depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
+  max_draws:                      u32,
+  node_count:                     u32,
+  depth_width:                    u32,
+  depth_height:                   u32,
+  depth_bias:                     f32,
+  stats_enabled:                  bool,
 }
 
 init :: proc(
@@ -86,6 +89,59 @@ init :: proc(
   self.depth_width = depth_width
   self.depth_height = depth_height
   self.depth_bias = 0.0001
+  // Create descriptor set layouts
+  self.sphere_cam_descriptor_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.sphere_cam_descriptor_layout,
+      nil,
+    )
+    self.sphere_cam_descriptor_layout = 0
+  }
+  self.normal_cam_descriptor_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, {.COMPUTE}}, // node data
+    {.STORAGE_BUFFER, {.COMPUTE}}, // mesh data
+    {.STORAGE_BUFFER, {.COMPUTE}}, // world matrices
+    {.STORAGE_BUFFER, {.COMPUTE}}, // camera data
+    {.STORAGE_BUFFER, {.COMPUTE}}, // late draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // late draw commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw commands
+    {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // depth pyramid
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.normal_cam_descriptor_layout,
+      nil,
+    )
+    self.normal_cam_descriptor_layout = 0
+  }
+  self.depth_reduce_descriptor_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // source mip
+    {.STORAGE_IMAGE, {.COMPUTE}}, // dest mip
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.depth_reduce_descriptor_layout,
+      nil,
+    )
+    self.depth_reduce_descriptor_layout = 0
+  }
   create_compute_pipelines(self, gctx, rm) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.depth_reduce_layout, nil)
@@ -103,10 +159,7 @@ init :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(
-  self: ^VisibilitySystem,
-  gctx: ^gpu.GPUContext,
-) {
+shutdown :: proc(self: ^VisibilitySystem, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.sphere_cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_reduce_pipeline, nil)
@@ -115,6 +168,24 @@ shutdown :: proc(
   vk.DestroyPipelineLayout(gctx.device, self.sphere_cull_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.cull_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.depth_reduce_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.sphere_cam_descriptor_layout,
+    nil,
+  )
+  self.sphere_cam_descriptor_layout = 0
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.normal_cam_descriptor_layout,
+    nil,
+  )
+  self.normal_cam_descriptor_layout = 0
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.depth_reduce_descriptor_layout,
+    nil,
+  )
+  self.depth_reduce_descriptor_layout = 0
 }
 
 stats :: proc(
@@ -597,7 +668,7 @@ create_compute_pipelines :: proc(
       stageFlags = {.COMPUTE},
       size = size_of(VisibilityPushConstants),
     },
-    rm.sphere_cam_descriptor_layout,
+    self.sphere_cam_descriptor_layout,
   ) or_return
   self.cull_layout = gpu.create_pipeline_layout(
     gctx,
@@ -605,7 +676,7 @@ create_compute_pipelines :: proc(
       stageFlags = {.COMPUTE},
       size = size_of(VisibilityPushConstants),
     },
-    rm.normal_cam_descriptor_layout,
+    self.normal_cam_descriptor_layout,
   ) or_return
   self.depth_reduce_layout = gpu.create_pipeline_layout(
     gctx,
@@ -613,7 +684,7 @@ create_compute_pipelines :: proc(
       stageFlags = {.COMPUTE},
       size = size_of(DepthReducePushConstants),
     },
-    rm.depth_reduce_descriptor_layout,
+    self.depth_reduce_descriptor_layout,
   ) or_return
   sphere_shader := gpu.create_shader_module(
     gctx.device,

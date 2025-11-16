@@ -50,7 +50,7 @@ create_emitter :: proc(
 ) -> (
   ret: Handle,
   ok: bool,
-) {
+) #optional_ok {
   handle, emitter := cont.alloc(&manager.emitters) or_return
   emitter.emission_rate = emission_rate
   emitter.initial_velocity = initial_velocity

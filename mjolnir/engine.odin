@@ -833,6 +833,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
        FRAME_TIME_MILIS {
       continue
     }
+    ensure_light_cameras(self)
     res := render(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       recreate_swapchain(self) or_continue
@@ -885,4 +886,117 @@ process_pending_deletions :: proc(engine: ^Engine) {
     resources.purge_unused_resources(&engine.rm, &engine.gctx)
   }
   sync.mutex_lock(&engine.pending_deletions_mutex)
+}
+
+@(private)
+create_light_camera :: proc(
+  engine: ^Engine,
+  light_handle: resources.Handle,
+) -> (
+  camera_handle: resources.Handle,
+  ok: bool,
+) #optional_ok {
+  light := cont.get(engine.rm.lights, light_handle) or_return
+  // Only create cameras for lights that cast shadows
+  if !light.cast_shadow {
+    return {}, false
+  }
+  #partial switch light.type {
+  case .POINT:
+    // Point lights use spherical cameras for omnidirectional shadows
+    cam_handle, spherical_cam := cont.alloc(&engine.rm.spherical_cameras) or_return
+    init_result := resources.spherical_camera_init(
+      spherical_cam,
+      &engine.gctx,
+      &engine.rm,
+      resources.SHADOW_MAP_SIZE,
+      {0, 0, 0}, // center will be updated from light node
+      light.radius,
+      0.1, // near
+      light.radius, // far
+      .D32_SFLOAT,
+      resources.MAX_NODES_IN_SCENE,
+    )
+    if init_result != .SUCCESS {
+      cont.free(&engine.rm.spherical_cameras, cam_handle)
+      return {}, false
+    }
+    // Allocate descriptors for the spherical camera
+    alloc_result := resources.spherical_camera_allocate_descriptors(
+      spherical_cam,
+      &engine.gctx,
+      &engine.rm,
+      &engine.render.visibility.sphere_cam_descriptor_layout,
+    )
+    if alloc_result != .SUCCESS {
+      cont.free(&engine.rm.spherical_cameras, cam_handle)
+      return {}, false
+    }
+    // Update the light to reference this camera
+    light.camera_handle = cam_handle
+    light.camera_index = cam_handle.index
+    resources.update_light_gpu_data(&engine.rm, light_handle)
+    return cam_handle, true
+  case .DIRECTIONAL, .SPOT:
+    // Directional and spot lights use regular cameras
+    cam_handle, cam := cont.alloc(&engine.rm.cameras) or_return
+    // Camera parameters differ by light type
+    fov := f32(math.PI * 0.5) // 90 degrees default
+    if light.type == .SPOT {
+      fov = light.angle_outer * 2.0 // FOV should cover the spot cone
+    }
+    init_result := resources.camera_init(
+      cam,
+      &engine.gctx,
+      &engine.rm,
+      resources.SHADOW_MAP_SIZE,
+      resources.SHADOW_MAP_SIZE,
+      engine.swapchain.format.format,
+      .D32_SFLOAT,
+      {.SHADOW}, // only shadow pass enabled
+      {0, 0, 0}, // position will be updated from light node
+      {0, -1, 0}, // looking down by default
+      fov,
+      light.radius * 0.01, // near plane as 1% of radius
+      light.radius, // far
+    )
+    if init_result != .SUCCESS {
+      cont.free(&engine.rm.cameras, cam_handle)
+      return {}, false
+    }
+    // Allocate camera descriptors
+    for frame in 0 ..< resources.FRAMES_IN_FLIGHT {
+      alloc_result := resources.camera_allocate_descriptors(
+        &engine.gctx,
+        &engine.rm,
+        cam,
+        u32(frame),
+        &engine.render.visibility.normal_cam_descriptor_layout,
+        &engine.render.visibility.depth_reduce_descriptor_layout,
+      )
+      if alloc_result != .SUCCESS {
+        cont.free(&engine.rm.cameras, cam_handle)
+        return {}, false
+      }
+    }
+    // Update the light to reference this camera
+    light.camera_handle = cam_handle
+    light.camera_index = cam_handle.index
+    resources.update_light_gpu_data(&engine.rm, light_handle)
+    return cam_handle, true
+  }
+  return {}, false
+}
+
+@(private)
+ensure_light_cameras :: proc(engine: ^Engine) {
+  for light_handle in engine.rm.active_lights {
+    light := cont.get(engine.rm.lights, light_handle) or_continue
+    // Skip if light doesn't cast shadow or already has a camera
+    if !light.cast_shadow || light.camera_handle.generation > 0 {
+      continue
+    }
+    // Create camera for this light
+    create_light_camera(engine, light_handle) or_continue
+  }
 }

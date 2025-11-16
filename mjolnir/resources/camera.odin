@@ -290,9 +290,6 @@ camera_init :: proc(
       u32(frame),
     ) or_return
   }
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
-    camera_allocate_descriptors(gctx, manager, camera, u32(frame)) or_return
-  }
   return .SUCCESS
 }
 
@@ -559,9 +556,6 @@ camera_resize :: proc(
       height,
       u32(frame),
     ) or_return
-  }
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
-    camera_allocate_descriptors(gctx, manager, camera, u32(frame)) or_return
   }
   log.infof("Camera resized to %dx%d", width, height)
   return .SUCCESS
@@ -834,17 +828,19 @@ camera_allocate_descriptors :: proc(
   manager: ^Manager,
   camera: ^Camera,
   frame_index: u32,
+  normal_cam_descriptor_layout: ^vk.DescriptorSetLayout,
+  depth_reduce_descriptor_layout: ^vk.DescriptorSetLayout,
 ) -> vk.Result {
   gpu.allocate_descriptor_set(
     gctx,
     &camera.descriptor_set[frame_index],
-    &manager.normal_cam_descriptor_layout,
+    normal_cam_descriptor_layout,
   ) or_return
   for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
     gpu.allocate_descriptor_set(
       gctx,
       &camera.depth_reduce_descriptor_sets[frame_index][mip],
-      &manager.depth_reduce_descriptor_layout,
+      depth_reduce_descriptor_layout,
     ) or_return
   }
   prev_frame := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
@@ -854,7 +850,10 @@ camera_allocate_descriptors :: proc(
     {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer.buffer)},
     {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer.buffer)},
     {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer.buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&manager.camera_buffer.buffers[frame_index])},
+    {
+      .STORAGE_BUFFER,
+      gpu.buffer_info(&manager.camera_buffer.buffers[frame_index]),
+    },
     {.STORAGE_BUFFER, gpu.buffer_info(&camera.opaque_draw_count[frame_index])},
     {
       .STORAGE_BUFFER,

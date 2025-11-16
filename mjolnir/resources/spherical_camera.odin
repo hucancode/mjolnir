@@ -61,11 +61,20 @@ spherical_camera_init :: proc(
     int(max_draws),
     {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
   ) or_return
+  return .SUCCESS
+}
+
+spherical_camera_allocate_descriptors :: proc(
+  camera: ^SphericalCamera,
+  gctx: ^gpu.GPUContext,
+  manager: ^Manager,
+  sphere_cam_descriptor_layout: ^vk.DescriptorSetLayout,
+) -> vk.Result {
   // Create and update all per-frame descriptor sets
   for frame_index in 0 ..< FRAMES_IN_FLIGHT {
     camera.descriptor_sets[frame_index] = gpu.create_descriptor_set(
       gctx,
-      &manager.sphere_cam_descriptor_layout,
+      sphere_cam_descriptor_layout,
       {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer.buffer)},
       {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer.buffer)},
       {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer.buffer)},
