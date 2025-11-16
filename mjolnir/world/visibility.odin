@@ -87,24 +87,6 @@ visibility_init :: proc(
   self.depth_width = depth_width
   self.depth_height = depth_height
   self.depth_bias = 0.0001
-  create_descriptor_layouts(self, gctx, rm) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      rm.depth_reduce_descriptor_layout,
-      nil,
-    )
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      rm.normal_cam_descriptor_layout,
-      nil,
-    )
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      rm.sphere_cam_descriptor_layout,
-      nil,
-    )
-  }
   create_compute_pipelines(self, gctx, rm) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.depth_reduce_layout, nil)
@@ -125,7 +107,6 @@ visibility_init :: proc(
 visibility_shutdown :: proc(
   self: ^VisibilitySystem,
   gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
 ) {
   vk.DestroyPipeline(gctx.device, self.sphere_cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
@@ -603,44 +584,6 @@ visibility_render_sphere_depth :: proc(
     {.DEPTH},
     layer_count = 6,
   )
-}
-
-@(private)
-create_descriptor_layouts :: proc(
-  self: ^VisibilitySystem,
-  gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
-) -> vk.Result {
-  rm.sphere_cam_descriptor_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-  ) or_return
-  rm.normal_cam_descriptor_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}}, // node data
-    {.STORAGE_BUFFER, {.COMPUTE}}, // mesh data
-    {.STORAGE_BUFFER, {.COMPUTE}}, // world matrices
-    {.STORAGE_BUFFER, {.COMPUTE}}, // camera data
-    {.STORAGE_BUFFER, {.COMPUTE}}, // late draw count
-    {.STORAGE_BUFFER, {.COMPUTE}}, // late draw commands
-    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw count
-    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw commands
-    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw count
-    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw commands
-    {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // depth pyramid
-  ) or_return
-  rm.depth_reduce_descriptor_layout =
-    gpu.create_descriptor_set_layout(
-      gctx,
-      {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // source mip
-      {.STORAGE_IMAGE, {.COMPUTE}}, // dest mip
-    ) or_return
-  return .SUCCESS
 }
 
 @(private)

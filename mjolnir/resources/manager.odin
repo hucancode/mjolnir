@@ -291,6 +291,59 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     vk.DestroyPipelineLayout(gctx.device, self.sphere_pipeline_layout, nil)
     self.sphere_pipeline_layout = 0
   }
+  // Create descriptor set layouts for visibility system
+  self.sphere_cam_descriptor_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.sphere_cam_descriptor_layout,
+      nil,
+    )
+    self.sphere_cam_descriptor_layout = 0
+  }
+  self.normal_cam_descriptor_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, {.COMPUTE}}, // node data
+    {.STORAGE_BUFFER, {.COMPUTE}}, // mesh data
+    {.STORAGE_BUFFER, {.COMPUTE}}, // world matrices
+    {.STORAGE_BUFFER, {.COMPUTE}}, // camera data
+    {.STORAGE_BUFFER, {.COMPUTE}}, // late draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // late draw commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw commands
+    {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // depth pyramid
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.normal_cam_descriptor_layout,
+      nil,
+    )
+    self.normal_cam_descriptor_layout = 0
+  }
+  self.depth_reduce_descriptor_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // source mip
+    {.STORAGE_IMAGE, {.COMPUTE}}, // dest mip
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.depth_reduce_descriptor_layout,
+      nil,
+    )
+    self.depth_reduce_descriptor_layout = 0
+  }
   gpu.allocate_descriptor_set(
     gctx,
     &self.textures_descriptor_set,

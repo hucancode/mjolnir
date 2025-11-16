@@ -461,24 +461,6 @@ force_octree_rebuild :: proc(world: ^World, rm: ^resources.Manager) {
   }
 }
 
-destroy :: proc(world: ^World, rm: ^resources.Manager, gctx: ^gpu.GPUContext) {
-  for &entry in world.nodes.entries {
-    if entry.active {
-      destroy_node(&entry.item, rm, gctx)
-    }
-  }
-  cont.destroy(world.nodes, proc(node: ^Node) {})
-  delete(world.traversal_stack)
-  for _, entry in world.actor_pools {
-    entry.destroy_fn(entry.pool_ptr)
-  }
-  delete(world.actor_pools)
-  delete(world.animatable_nodes)
-  geometry.octree_destroy(&world.node_octree)
-  delete(world.octree_entry_map)
-  delete(world.octree_dirty_set)
-}
-
 register_animatable_node :: proc(world: ^World, handle: resources.Handle) {
   // TODO: if this list get more than 10000 items, we need to use a map
   if slice.contains(world.animatable_nodes[:], handle) do return
@@ -526,8 +508,22 @@ shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  visibility_shutdown(&world.visibility, gctx, rm)
-  destroy(world, rm, gctx)
+  visibility_shutdown(&world.visibility, gctx)
+  for &entry in world.nodes.entries {
+    if entry.active {
+      destroy_node(&entry.item, rm, gctx)
+    }
+  }
+  cont.destroy(world.nodes, proc(node: ^Node) {})
+  delete(world.traversal_stack)
+  for _, entry in world.actor_pools {
+    entry.destroy_fn(entry.pool_ptr)
+  }
+  delete(world.actor_pools)
+  delete(world.animatable_nodes)
+  geometry.octree_destroy(&world.node_octree)
+  delete(world.octree_entry_map)
+  delete(world.octree_dirty_set)
 }
 
 despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
