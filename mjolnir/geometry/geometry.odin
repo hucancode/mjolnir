@@ -646,6 +646,60 @@ point_segment_distance :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
   return math.sqrt(point_segment_distance_sq(pt, va, vb))
 }
 
+// Distance squared from point to triangle in 3D
+point_to_triangle_distance_sq :: proc "contextless" (
+  p: [3]f32,
+  a: [3]f32,
+  b: [3]f32,
+  c: [3]f32,
+) -> f32 {
+  ab := b - a
+  ac := c - a
+  ap := p - a
+  d00 := linalg.dot(ab, ab)
+  d01 := linalg.dot(ab, ac)
+  d11 := linalg.dot(ac, ac)
+  d20 := linalg.dot(ap, ab)
+  d21 := linalg.dot(ap, ac)
+  denom := d00 * d11 - d01 * d01
+  if abs(denom) < 1e-10 {
+    dist_a := linalg.length2(p - a)
+    dist_b := linalg.length2(p - b)
+    dist_c := linalg.length2(p - c)
+    return min(dist_a, min(dist_b, dist_c))
+  }
+  inv_denom := 1.0 / denom
+  u := (d11 * d20 - d01 * d21) * inv_denom
+  v := (d00 * d21 - d01 * d20) * inv_denom
+  if u >= 0 && v >= 0 && (u + v) <= 1 {
+    closest := a + u * ab + v * ac
+    return linalg.length2(p - closest)
+  }
+  min_dist_sq := f32(math.F32_MAX)
+  t := linalg.saturate(linalg.dot(ap, ab) / d00)
+  closest := a + t * ab
+  min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
+  t = linalg.saturate(linalg.dot(ap, ac) / d11)
+  closest = a + t * ac
+  min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
+  bc := c - b
+  bp := p - b
+  t = linalg.saturate(linalg.dot(bp, bc) / linalg.dot(bc, bc))
+  closest = b + t * bc
+  min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
+  return min_dist_sq
+}
+
+// Distance from point to triangle in 3D
+point_to_triangle_distance :: proc "contextless" (
+  p: [3]f32,
+  a: [3]f32,
+  b: [3]f32,
+  c: [3]f32,
+) -> f32 {
+  return math.sqrt(point_to_triangle_distance_sq(p, a, b, c))
+}
+
 // returns closest point on segment A, closest point on segment B, and parametric values s and t
 segment_segment_closest_points :: proc "contextless" (
   a_start, a_end: [3]f32,

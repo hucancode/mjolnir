@@ -64,21 +64,6 @@ Height_Sample :: struct {
   weight: f32, // Interpolation weight
 }
 
-// Barycentric coordinates for triangle interpolation
-Barycentric :: struct {
-  u, v, w: f32, // Barycentric coordinates (u + v + w = 1)
-}
-
-// Timeout context for detail mesh building
-Timeout_Context :: struct {
-  start_time:         time.Time, // When processing started
-  global_timeout:     time.Duration, // Global timeout limit
-  polygon_timeout:    time.Duration, // Per-polygon timeout limit
-  last_progress:      time.Time, // Last progress update
-  polygons_processed: i32, // Number of polygons completed
-  current_polygon:    i32, // Currently processing polygon
-}
-
 // Sample height from heightfield at given world position
 sample_heightfield_height :: proc(
   chf: ^Compact_Heightfield,
@@ -910,7 +895,7 @@ add_samples_by_error :: proc(
       v1 := verts[tri[1]]
       v2 := verts[tri[2]]
       // Calculate point-to-triangle distance
-      dist_sq := point_to_triangle_distance_sq(pt, v0, v1, v2)
+      dist_sq := geometry.point_to_triangle_distance_sq(pt, v0, v1, v2)
       min_dist_sq = min(min_dist_sq, dist_sq)
     }
     error := math.sqrt(min_dist_sq)
@@ -933,59 +918,6 @@ add_samples_by_error :: proc(
     // Stop after adding reasonable number of samples
     if samples_added >= len(samples) / 3 do break
   }
-}
-
-// Calculate squared distance from point to triangle
-point_to_triangle_distance_sq :: proc(
-  p: [3]f32,
-  a: [3]f32,
-  b: [3]f32,
-  c: [3]f32,
-) -> f32 {
-  // Project point onto triangle plane
-  ab := b - a
-  ac := c - a
-  ap := p - a
-  // Calculate barycentric coordinates
-  d00 := linalg.dot(ab, ab)
-  d01 := linalg.dot(ab, ac)
-  d11 := linalg.dot(ac, ac)
-  d20 := linalg.dot(ap, ab)
-  d21 := linalg.dot(ap, ac)
-  denom := d00 * d11 - d01 * d01
-  if abs(denom) < 1e-10 {
-    // Degenerate triangle, return distance to closest vertex
-    dist_a := linalg.length2(p - a)
-    dist_b := linalg.length2(p - b)
-    dist_c := linalg.length2(p - c)
-    return min(dist_a, min(dist_b, dist_c))
-  }
-  inv_denom := 1.0 / denom
-  u := (d11 * d20 - d01 * d21) * inv_denom
-  v := (d00 * d21 - d01 * d20) * inv_denom
-  // Check if point is inside triangle
-  if u >= 0 && v >= 0 && (u + v) <= 1 {
-    // Point projects inside triangle
-    closest := a + u * ab + v * ac
-    return linalg.length2(p - closest)
-  }
-  // Point projects outside triangle, find closest point on edges
-  min_dist_sq := f32(math.F32_MAX)
-  // Edge AB
-  t := linalg.saturate(linalg.dot(ap, ab) / d00)
-  closest := a + t * ab
-  min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
-  // Edge AC
-  t = linalg.saturate(linalg.dot(ap, ac) / d11)
-  closest = a + t * ac
-  min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
-  // Edge BC
-  bc := c - b
-  bp := p - b
-  t = linalg.saturate(linalg.dot(bp, bc) / linalg.dot(bc, bc))
-  closest = b + t * bc
-  min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
-  return min_dist_sq
 }
 
 // Flood fill algorithm for height data collection
