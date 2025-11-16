@@ -74,9 +74,8 @@ Manager :: struct {
   ),
   textures_set_layout:       vk.DescriptorSetLayout,
   textures_descriptor_set:   vk.DescriptorSet,
-  // TODO: audit all vk.PipelineLayout and vk.DescriptorSetLayout, design a strict ownership on them
-  general_pipeline_layout:   vk.PipelineLayout, // Used by geometry, transparency, depth renderers
-  sphere_pipeline_layout:    vk.PipelineLayout, // Used by spherical depth rendering (point light shadows)
+  general_pipeline_layout:   vk.PipelineLayout, // general purpose layout, used by geometry, transparency, depth renderers
+  sphere_pipeline_layout:    vk.PipelineLayout, // general purpose layout, used by spherical depth rendering, same as general_pipeline_layout but use spherical camera instead
   vertex_buffer:             gpu.ImmutableBuffer(geometry.Vertex),
   index_buffer:              gpu.ImmutableBuffer(u32),
   vertex_slab:               SlabAllocator,
