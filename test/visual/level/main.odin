@@ -104,7 +104,7 @@ on_level_loaded :: proc(user_data: rawptr) {
 }
 
 populate_level_test_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.ui.ctx
+  ctx := &engine.render.debug_ui.ctx
   if mu.window(ctx, "Level Test", {40, 250, 280, 250}, {.NO_CLOSE}) {
     if name, ok := mjolnir.get_current_level_id(&engine.level_manager); ok {
       mu.label(ctx, fmt.tprintf("Current Level: %s", name))

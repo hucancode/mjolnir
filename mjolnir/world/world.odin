@@ -10,6 +10,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:strings"
+import "core:sync"
 
 LightAttachment :: struct {
   handle: resources.Handle,
@@ -378,6 +379,8 @@ World :: struct {
   octree_updates_enabled: bool,
   actor_pools:            map[typeid]ActorPoolEntry,
   animatable_nodes:       [dynamic]resources.Handle,
+  pending_node_deletions: [dynamic]resources.Handle,
+  pending_deletions_mutex: sync.Mutex,
 }
 
 init :: proc(world: ^World) {
@@ -501,6 +504,7 @@ shutdown :: proc(
   }
   delete(world.actor_pools)
   delete(world.animatable_nodes)
+  delete(world.pending_node_deletions)
   geometry.octree_destroy(&world.node_octree)
   delete(world.octree_entry_map)
   delete(world.octree_dirty_set)
@@ -548,6 +552,26 @@ cleanup_pending_deletions :: proc(
       destroy_node(node, rm, gctx)
     }
   }
+}
+
+process_pending_deletions :: proc(
+  world: ^World,
+  rm: ^resources.Manager,
+  gctx: ^gpu.GPUContext,
+) {
+  sync.mutex_lock(&world.pending_deletions_mutex)
+  defer sync.mutex_unlock(&world.pending_deletions_mutex)
+  for handle in world.pending_node_deletions {
+    despawn(world, handle)
+  }
+  had_deletions := len(world.pending_node_deletions) > 0
+  clear(&world.pending_node_deletions)
+  sync.mutex_unlock(&world.pending_deletions_mutex)
+  cleanup_pending_deletions(world, rm, gctx)
+  if had_deletions {
+    resources.purge_unused_resources(rm, gctx)
+  }
+  sync.mutex_lock(&world.pending_deletions_mutex)
 }
 
 traverse :: proc(

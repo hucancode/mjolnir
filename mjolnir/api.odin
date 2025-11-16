@@ -8,6 +8,7 @@ import "core:sync"
 import "geometry"
 import "level_manager"
 import "navigation/recast"
+import "render"
 import "render/post_process"
 import "resources"
 import "vendor:glfw"
@@ -240,9 +241,9 @@ despawn :: proc(engine: ^Engine, handle: resources.Handle) {
 // Thread-safe: Queue a node for deletion from background threads
 // The actual despawn will happen on the main thread during process_pending_deletions
 queue_node_deletion :: proc(engine: ^Engine, handle: resources.Handle) {
-  sync.mutex_lock(&engine.pending_deletions_mutex)
-  defer sync.mutex_unlock(&engine.pending_deletions_mutex)
-  append(&engine.pending_node_deletions, handle)
+  sync.mutex_lock(&engine.world.pending_deletions_mutex)
+  defer sync.mutex_unlock(&engine.world.pending_deletions_mutex)
+  append(&engine.world.pending_node_deletions, handle)
 }
 
 translate_handle :: proc(

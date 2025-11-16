@@ -16,6 +16,7 @@ import "core:time"
 import "core:unicode/utf8"
 import "gpu"
 import "level_manager"
+import "render"
 import "render/debug_ui"
 import "render/particles"
 import "render/retained_ui"
@@ -87,13 +88,11 @@ Engine :: struct {
   pre_render_proc:           PreRenderProc,
   post_render_proc:          PostRenderProc,
   render_error_count:        u32,
-  render:                    Renderer,
+  render:                    render.Manager,
   command_buffers:           [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers:   [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                [2]i32,
   debug_ui_enabled:          bool,
-  pending_node_deletions:    [dynamic]resources.Handle,
-  pending_deletions_mutex:   sync.Mutex,
   update_thread:             Maybe(^thread.Thread),
   update_active:             bool,
   last_render_timestamp:     time.Time,
@@ -168,7 +167,7 @@ init :: proc(
       self.compute_command_buffers[:],
     )
   }
-  renderer_init(
+  render.init(
     &self.render,
     &self.gctx,
     &self.rm,
@@ -229,9 +228,9 @@ init :: proc(
       }
       switch action {
       case glfw.PRESS, glfw.REPEAT:
-        mu.input_key_down(&engine.render.ui.ctx, mu_key)
+        mu.input_key_down(&engine.render.debug_ui.ctx, mu_key)
       case glfw.RELEASE:
-        mu.input_key_up(&engine.render.ui.ctx, mu_key)
+        mu.input_key_up(&engine.render.debug_ui.ctx, mu_key)
       case:
         return
       }
@@ -258,9 +257,9 @@ init :: proc(
       y := engine.cursor_pos.y
       switch action {
       case glfw.PRESS, glfw.REPEAT:
-        mu.input_mouse_down(&engine.render.ui.ctx, x, y, mu_btn)
+        mu.input_mouse_down(&engine.render.debug_ui.ctx, x, y, mu_btn)
       case glfw.RELEASE:
-        mu.input_mouse_up(&engine.render.ui.ctx, x, y, mu_btn)
+        mu.input_mouse_up(&engine.render.debug_ui.ctx, x, y, mu_btn)
       }
       if engine.mouse_press_proc != nil {
         engine.mouse_press_proc(engine, int(button), int(action), int(mods))
@@ -274,7 +273,7 @@ init :: proc(
       engine := cast(^Engine)context.user_ptr
       engine.cursor_pos = {i32(math.round(xpos)), i32(math.round(ypos))}
       mu.input_mouse_move(
-        &engine.render.ui.ctx,
+        &engine.render.debug_ui.ctx,
         engine.cursor_pos.x,
         engine.cursor_pos.y,
       )
@@ -289,7 +288,7 @@ init :: proc(
       context = g_context
       engine := cast(^Engine)context.user_ptr
       mu.input_scroll(
-        &engine.render.ui.ctx,
+        &engine.render.debug_ui.ctx,
         -i32(math.round(xoffset)),
         -i32(math.round(yoffset)),
       )
@@ -309,7 +308,7 @@ init :: proc(
       engine := cast(^Engine)context.user_ptr
       bytes, size := utf8.encode_rune(ch)
       text_str := string(bytes[:size])
-      mu.input_text(&engine.render.ui.ctx, text_str)
+      mu.input_text(&engine.render.debug_ui.ctx, text_str)
       retained_ui.input_text(&engine.render.retained_ui, text_str)
     },
   )
@@ -439,8 +438,7 @@ shutdown :: proc(self: ^Engine) {
   level_manager.shutdown(&self.level_manager)
   gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
   gpu.free_compute_command_buffer(&self.gctx, self.compute_command_buffers[:])
-  delete(self.pending_node_deletions)
-  renderer_shutdown(&self.render, &self.gctx, &self.rm)
+  render.shutdown(&self.render, &self.gctx, &self.rm)
   world.shutdown(&self.world, &self.gctx, &self.rm)
   resources.shutdown(&self.rm, &self.gctx)
   gpu.swapchain_destroy(&self.swapchain, self.gctx.device)
@@ -453,34 +451,34 @@ shutdown :: proc(self: ^Engine) {
 @(private = "file")
 populate_debug_ui :: proc(self: ^Engine) {
   if mu.window(
-    &self.render.ui.ctx,
+    &self.render.debug_ui.ctx,
     "Engine",
     {40, 40, 200, 200},
     {.NO_CLOSE},
   ) {
     mu.label(
-      &self.render.ui.ctx,
+      &self.render.debug_ui.ctx,
       fmt.tprintf(
         "Objects %d",
         len(self.world.nodes.entries) - len(self.world.nodes.free_indices),
       ),
     )
     mu.label(
-      &self.render.ui.ctx,
+      &self.render.debug_ui.ctx,
       fmt.tprintf(
         "Textures %d",
         len(self.rm.images_2d.entries) - len(self.rm.images_2d.free_indices),
       ),
     )
     mu.label(
-      &self.render.ui.ctx,
+      &self.render.debug_ui.ctx,
       fmt.tprintf(
         "Materials %d",
         len(self.rm.materials.entries) - len(self.rm.materials.free_indices),
       ),
     )
     mu.label(
-      &self.render.ui.ctx,
+      &self.render.debug_ui.ctx,
       fmt.tprintf(
         "Meshes %d",
         len(self.rm.meshes.entries) - len(self.rm.meshes.free_indices),
@@ -494,398 +492,15 @@ populate_debug_ui :: proc(self: ^Engine) {
         self.frame_index,
       )
       mu.label(
-        &self.render.ui.ctx,
+        &self.render.debug_ui.ctx,
         fmt.tprintf("Total Objects: %d", self.render.visibility.node_count),
       )
       mu.label(
-        &self.render.ui.ctx,
+        &self.render.debug_ui.ctx,
         fmt.tprintf("Draw count: %d draws", main_stats.opaque_draw_count),
       )
     }
   }
-}
-
-@(private = "file")
-recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  gpu.swapchain_recreate(
-    &engine.gctx,
-    &engine.swapchain,
-    engine.window,
-  ) or_return
-  new_aspect_ratio :=
-    f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
-  if main_camera := get_main_camera(engine); main_camera != nil {
-    resources.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
-    resources.camera_resize(
-      main_camera,
-      &engine.gctx,
-      &engine.rm,
-      engine.swapchain.extent.width,
-      engine.swapchain.extent.height,
-      engine.swapchain.format.format,
-      vk.Format.D32_SFLOAT,
-    ) or_return
-  }
-  resize(
-    &engine.render,
-    &engine.gctx,
-    &engine.rm,
-    engine.swapchain.extent,
-    engine.swapchain.format.format,
-    get_window_dpi(engine.window),
-  ) or_return
-  return .SUCCESS
-}
-
-render :: proc(self: ^Engine) -> vk.Result {
-  context.user_ptr = self
-  gpu.acquire_next_image(
-    self.gctx.device,
-    &self.swapchain,
-    self.frame_index,
-  ) or_return
-  mu.begin(&self.render.ui.ctx)
-  command_buffer := self.command_buffers[self.frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-  ) or_return
-  render_delta_time := f32(
-    time.duration_seconds(time.since(self.last_render_timestamp)),
-  )
-  world.begin_frame(&self.world, &self.rm)
-  update_visibility_node_count(&self.render, &self.world)
-  main_camera_handle := self.render.main_camera
-  main_camera := cont.get(self.rm.cameras, main_camera_handle)
-  if main_camera == nil do return .ERROR_UNKNOWN
-  for &entry, cam_index in self.rm.cameras.entries do if entry.active {
-    resources.camera_upload_data(
-      &self.rm,
-      u32(cam_index),
-      self.frame_index,
-    )
-  }
-  resources.update_light_camera(&self.rm, self.frame_index)
-  if self.pre_render_proc != nil {
-    self.pre_render_proc(self)
-  }
-  record_camera_visibility(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
-    &self.rm,
-    &self.world,
-    command_buffer,
-  ) or_return
-  for &entry, cam_index in self.rm.cameras.entries {
-    if !entry.active do continue
-    if u32(cam_index) == main_camera_handle.index do continue
-    cam_handle := resources.Handle {
-      index      = u32(cam_index),
-      generation = entry.generation,
-    }
-    cam := &entry.item
-    if resources.PassType.GEOMETRY in cam.enabled_passes {
-      record_geometry_pass(
-        &self.render,
-        self.frame_index,
-        &self.gctx,
-        &self.rm,
-        &self.world,
-        cam_handle,
-        command_buffer,
-      )
-    }
-    if resources.PassType.LIGHTING in cam.enabled_passes {
-      record_lighting_pass(
-        &self.render,
-        self.frame_index,
-        &self.rm,
-        cam_handle,
-        self.swapchain.format.format,
-        command_buffer,
-      )
-    }
-    if resources.PassType.PARTICLES in cam.enabled_passes {
-      record_particles_pass(
-        &self.render,
-        self.frame_index,
-        &self.rm,
-        cam_handle,
-        self.swapchain.format.format,
-        command_buffer,
-      )
-    }
-    if resources.PassType.TRANSPARENCY in cam.enabled_passes {
-      record_transparency_pass(
-        &self.render,
-        self.frame_index,
-        &self.gctx,
-        &self.rm,
-        &self.world,
-        cam_handle,
-        self.swapchain.format.format,
-        command_buffer,
-      )
-    }
-  }
-  record_geometry_pass(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
-    &self.rm,
-    &self.world,
-    main_camera_handle,
-    command_buffer,
-  )
-  record_lighting_pass(
-    &self.render,
-    self.frame_index,
-    &self.rm,
-    main_camera_handle,
-    self.swapchain.format.format,
-    command_buffer,
-  )
-  record_particles_pass(
-    &self.render,
-    self.frame_index,
-    &self.rm,
-    main_camera_handle,
-    self.swapchain.format.format,
-    command_buffer,
-  )
-  record_transparency_pass(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
-    &self.rm,
-    &self.world,
-    main_camera_handle,
-    self.swapchain.format.format,
-    command_buffer,
-  )
-  record_post_process_pass(
-    &self.render,
-    self.frame_index,
-    &self.rm,
-    main_camera_handle,
-    self.swapchain.format.format,
-    self.swapchain.extent,
-    self.swapchain.images[self.swapchain.image_index],
-    self.swapchain.views[self.swapchain.image_index],
-    command_buffer,
-  )
-  compute_cmd_buffer: Maybe(vk.CommandBuffer) = nil
-  if self.gctx.has_async_compute {
-    // Async path: separate compute queue
-    compute_buffer := self.compute_command_buffers[self.frame_index]
-    record_compute_commands(
-      &self.render,
-      self.frame_index,
-      &self.gctx,
-      &self.rm,
-      &self.world,
-      compute_buffer,
-    ) or_return
-    compute_cmd_buffer = compute_buffer
-  } else {
-    next_frame_index := (self.frame_index + 1) % FRAMES_IN_FLIGHT
-    for &entry, cam_index in self.rm.cameras.entries do if entry.active {
-      cam := &entry.item
-      if resources.PassType.GEOMETRY not_in cam.enabled_passes do continue
-      visibility.perform_culling(
-        &self.render.visibility,
-        &self.gctx,
-        command_buffer,
-        cam,
-        u32(cam_index),
-        // next_frame_index,
-        self.frame_index,
-        {.VISIBLE},
-        {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-        &self.rm,
-      )
-    }
-    particles.simulate(
-      &self.render.particles,
-      command_buffer,
-      self.rm.world_matrix_buffer.descriptor_set,
-      &self.rm,
-    )
-  }
-  populate_debug_ui(self)
-  if self.post_render_proc != nil {
-    self.post_render_proc(self)
-  }
-  if level_manager.should_show_loading(&self.level_manager) {
-    TEXT :: "Loading..."
-    ctx := &self.render.ui.ctx
-    w := i32(self.swapchain.extent.width)
-    h := i32(self.swapchain.extent.height)
-    container_w: i32 = 400
-    container_h: i32 = 200
-    x := (w - container_w) / 2
-    y := (h - container_h) / 2
-    if mu.begin_window(
-      ctx,
-      "##loading",
-      {x, y, container_w, container_h},
-      {.NO_TITLE, .NO_RESIZE, .NO_CLOSE, .NO_SCROLL},
-    ) {
-      mu.layout_row(ctx, {-1}, 0)
-      mu.layout_row(ctx, {-1}, 80)
-      mu.label(ctx, TEXT)
-      mu.end_window(ctx)
-    }
-  }
-  mu.end(&self.render.ui.ctx)
-  if self.debug_ui_enabled {
-    debug_ui.begin_pass(
-      &self.render.ui,
-      command_buffer,
-      self.swapchain.views[self.swapchain.image_index],
-      self.swapchain.extent,
-    )
-    debug_ui.render(&self.render.ui, command_buffer)
-    debug_ui.end_pass(&self.render.ui, command_buffer)
-  }
-  retained_ui.begin_pass(
-    &self.render.retained_ui,
-    command_buffer,
-    self.swapchain.views[self.swapchain.image_index],
-    self.swapchain.extent,
-  )
-  retained_ui.render(
-    &self.render.retained_ui,
-    command_buffer,
-    self.frame_index,
-    &self.rm,
-    &self.gctx,
-  )
-  retained_ui.end_pass(command_buffer)
-  // Transition swapchain image to present layout
-  present_barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-    dstAccessMask = {},
-    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    newLayout = .PRESENT_SRC_KHR,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = self.swapchain.images[self.swapchain.image_index],
-    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.BOTTOM_OF_PIPE},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &present_barrier,
-  )
-  vk.EndCommandBuffer(command_buffer) or_return
-  gpu.submit_queue_and_present(
-    &self.gctx,
-    &self.swapchain,
-    &command_buffer,
-    self.frame_index,
-    compute_cmd_buffer,
-  ) or_return
-  self.frame_index = (self.frame_index + 1) % FRAMES_IN_FLIGHT
-  process_pending_deletions(self)
-  self.last_render_timestamp = time.now()
-  return .SUCCESS
-}
-
-run :: proc(self: ^Engine, width, height: u32, title: string) {
-  if init(self, width, height, title) != .SUCCESS {
-    return
-  }
-  defer shutdown(self)
-  when USE_PARALLEL_UPDATE {
-    self.update_active = true
-    update_data := UpdateThreadData {
-      engine = self,
-    }
-    update_thread := thread.create(update_thread_proc)
-    update_thread.data = &update_data
-    update_thread.init_context = context
-    thread.start(update_thread)
-    self.update_thread = update_thread
-    defer {
-      self.update_active = false
-      thread.join(update_thread)
-      thread.destroy(update_thread)
-    }
-  }
-  frame := 0
-  for !glfw.WindowShouldClose(self.window) {
-    update_input(self)
-    when !USE_PARALLEL_UPDATE {
-      update(self)
-    }
-    if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
-       FRAME_TIME_MILIS {
-      continue
-    }
-    ensure_light_cameras(self)
-    res := render(self)
-    if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-      recreate_swapchain(self) or_continue
-    }
-    if res != .SUCCESS {
-      log.errorf("Error during rendering %v", res)
-      self.render_error_count += 1
-      if self.render_error_count >=
-         MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
-        log.errorf("Too many render errors, exiting...")
-        break
-      }
-    } else {
-      self.render_error_count = 0
-    }
-    self.last_frame_timestamp = time.now()
-    frame += 1
-    when FRAME_LIMIT > 0 {
-      if frame >= FRAME_LIMIT {
-        log.infof("Reached frame limit %d, exiting gracefully", FRAME_LIMIT)
-        break
-      }
-    }
-  }
-}
-
-update_thread_proc :: proc(thread: ^thread.Thread) {
-  data := cast(^UpdateThreadData)thread.data
-  engine := data.engine
-  for engine.update_active {
-    should_update := update(engine)
-    if !should_update {
-      time.sleep(time.Millisecond * 2)
-    }
-  }
-  log.info("Update thread terminating")
-}
-
-process_pending_deletions :: proc(engine: ^Engine) {
-  sync.mutex_lock(&engine.pending_deletions_mutex)
-  defer sync.mutex_unlock(&engine.pending_deletions_mutex)
-  for handle in engine.pending_node_deletions {
-    world.despawn(&engine.world, handle)
-  }
-  had_deletions := len(engine.pending_node_deletions) > 0
-  clear(&engine.pending_node_deletions)
-  sync.mutex_unlock(&engine.pending_deletions_mutex)
-  world.cleanup_pending_deletions(&engine.world, &engine.rm, &engine.gctx)
-  if had_deletions {
-    resources.purge_unused_resources(&engine.rm, &engine.gctx)
-  }
-  sync.mutex_lock(&engine.pending_deletions_mutex)
 }
 
 @(private)
@@ -999,4 +614,371 @@ ensure_light_cameras :: proc(engine: ^Engine) {
     // Create camera for this light
     create_light_camera(engine, light_handle) or_continue
   }
+}
+
+@(private = "file")
+recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
+  gpu.swapchain_recreate(
+    &engine.gctx,
+    &engine.swapchain,
+    engine.window,
+  ) or_return
+  new_aspect_ratio :=
+    f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
+  if main_camera := get_main_camera(engine); main_camera != nil {
+    resources.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
+    resources.camera_resize(
+      main_camera,
+      &engine.gctx,
+      &engine.rm,
+      engine.swapchain.extent.width,
+      engine.swapchain.extent.height,
+      engine.swapchain.format.format,
+      vk.Format.D32_SFLOAT,
+    ) or_return
+  }
+  render.resize(
+    &engine.render,
+    &engine.gctx,
+    &engine.rm,
+    engine.swapchain.extent,
+    engine.swapchain.format.format,
+    get_window_dpi(engine.window),
+  ) or_return
+  return .SUCCESS
+}
+
+render_and_present :: proc(self: ^Engine) -> vk.Result {
+  context.user_ptr = self
+  gpu.acquire_next_image(
+    self.gctx.device,
+    &self.swapchain,
+    self.frame_index,
+  ) or_return
+  mu.begin(&self.render.debug_ui.ctx)
+  command_buffer := self.command_buffers[self.frame_index]
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+  ) or_return
+  render_delta_time := f32(
+    time.duration_seconds(time.since(self.last_render_timestamp)),
+  )
+  world.begin_frame(&self.world, &self.rm)
+  render.update_visibility_node_count(&self.render, &self.world)
+  main_camera_handle := self.render.main_camera
+  main_camera := cont.get(self.rm.cameras, main_camera_handle)
+  if main_camera == nil do return .ERROR_UNKNOWN
+  for &entry, cam_index in self.rm.cameras.entries do if entry.active {
+    resources.camera_upload_data(
+      &self.rm,
+      u32(cam_index),
+      self.frame_index,
+    )
+  }
+  resources.update_light_camera(&self.rm, self.frame_index)
+  if self.pre_render_proc != nil {
+    self.pre_render_proc(self)
+  }
+  render.record_camera_visibility(
+    &self.render,
+    self.frame_index,
+    &self.gctx,
+    &self.rm,
+    &self.world,
+    command_buffer,
+  ) or_return
+  for &entry, cam_index in self.rm.cameras.entries {
+    if !entry.active do continue
+    if u32(cam_index) == main_camera_handle.index do continue
+    cam_handle := resources.Handle {
+      index      = u32(cam_index),
+      generation = entry.generation,
+    }
+    cam := &entry.item
+    if resources.PassType.GEOMETRY in cam.enabled_passes {
+      render.record_geometry_pass(
+        &self.render,
+        self.frame_index,
+        &self.gctx,
+        &self.rm,
+        &self.world,
+        cam_handle,
+        command_buffer,
+      )
+    }
+    if resources.PassType.LIGHTING in cam.enabled_passes {
+      render.record_lighting_pass(
+        &self.render,
+        self.frame_index,
+        &self.rm,
+        cam_handle,
+        self.swapchain.format.format,
+        command_buffer,
+      )
+    }
+    if resources.PassType.PARTICLES in cam.enabled_passes {
+      render.record_particles_pass(
+        &self.render,
+        self.frame_index,
+        &self.rm,
+        cam_handle,
+        self.swapchain.format.format,
+        command_buffer,
+      )
+    }
+    if resources.PassType.TRANSPARENCY in cam.enabled_passes {
+      render.record_transparency_pass(
+        &self.render,
+        self.frame_index,
+        &self.gctx,
+        &self.rm,
+        &self.world,
+        cam_handle,
+        self.swapchain.format.format,
+        command_buffer,
+      )
+    }
+  }
+  render.record_geometry_pass(
+    &self.render,
+    self.frame_index,
+    &self.gctx,
+    &self.rm,
+    &self.world,
+    main_camera_handle,
+    command_buffer,
+  )
+  render.record_lighting_pass(
+    &self.render,
+    self.frame_index,
+    &self.rm,
+    main_camera_handle,
+    self.swapchain.format.format,
+    command_buffer,
+  )
+  render.record_particles_pass(
+    &self.render,
+    self.frame_index,
+    &self.rm,
+    main_camera_handle,
+    self.swapchain.format.format,
+    command_buffer,
+  )
+  render.record_transparency_pass(
+    &self.render,
+    self.frame_index,
+    &self.gctx,
+    &self.rm,
+    &self.world,
+    main_camera_handle,
+    self.swapchain.format.format,
+    command_buffer,
+  )
+  render.record_post_process_pass(
+    &self.render,
+    self.frame_index,
+    &self.rm,
+    main_camera_handle,
+    self.swapchain.format.format,
+    self.swapchain.extent,
+    self.swapchain.images[self.swapchain.image_index],
+    self.swapchain.views[self.swapchain.image_index],
+    command_buffer,
+  )
+  compute_cmd_buffer: Maybe(vk.CommandBuffer) = nil
+  if self.gctx.has_async_compute {
+    // Async path: separate compute queue
+    compute_buffer := self.compute_command_buffers[self.frame_index]
+    render.record_compute_commands(
+      &self.render,
+      self.frame_index,
+      &self.gctx,
+      &self.rm,
+      &self.world,
+      compute_buffer,
+    ) or_return
+    compute_cmd_buffer = compute_buffer
+  } else {
+    next_frame_index := (self.frame_index + 1) % FRAMES_IN_FLIGHT
+    for &entry, cam_index in self.rm.cameras.entries do if entry.active {
+      cam := &entry.item
+      if resources.PassType.GEOMETRY not_in cam.enabled_passes do continue
+      visibility.perform_culling(
+        &self.render.visibility,
+        &self.gctx,
+        command_buffer,
+        cam,
+        u32(cam_index),
+        // next_frame_index,
+        self.frame_index,
+        {.VISIBLE},
+        {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+        &self.rm,
+      )
+    }
+    particles.simulate(
+      &self.render.particles,
+      command_buffer,
+      self.rm.world_matrix_buffer.descriptor_set,
+      &self.rm,
+    )
+  }
+  populate_debug_ui(self)
+  if self.post_render_proc != nil {
+    self.post_render_proc(self)
+  }
+  if level_manager.should_show_loading(&self.level_manager) {
+    TEXT :: "Loading..."
+    ctx := &self.render.debug_ui.ctx
+    w := i32(self.swapchain.extent.width)
+    h := i32(self.swapchain.extent.height)
+    container_w: i32 = 400
+    container_h: i32 = 200
+    x := (w - container_w) / 2
+    y := (h - container_h) / 2
+    if mu.begin_window(
+      ctx,
+      "##loading",
+      {x, y, container_w, container_h},
+      {.NO_TITLE, .NO_RESIZE, .NO_CLOSE, .NO_SCROLL},
+    ) {
+      mu.layout_row(ctx, {-1}, 0)
+      mu.layout_row(ctx, {-1}, 80)
+      mu.label(ctx, TEXT)
+      mu.end_window(ctx)
+    }
+  }
+  mu.end(&self.render.debug_ui.ctx)
+  if self.debug_ui_enabled {
+    debug_ui.begin_pass(
+      &self.render.debug_ui,
+      command_buffer,
+      self.swapchain.views[self.swapchain.image_index],
+      self.swapchain.extent,
+    )
+    debug_ui.render(&self.render.debug_ui, command_buffer)
+    debug_ui.end_pass(&self.render.debug_ui, command_buffer)
+  }
+  retained_ui.begin_pass(
+    &self.render.retained_ui,
+    command_buffer,
+    self.swapchain.views[self.swapchain.image_index],
+    self.swapchain.extent,
+  )
+  retained_ui.render(
+    &self.render.retained_ui,
+    command_buffer,
+    self.frame_index,
+    &self.rm,
+    &self.gctx,
+  )
+  retained_ui.end_pass(command_buffer)
+  // Transition swapchain image to present layout
+  present_barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    dstAccessMask = {},
+    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    newLayout = .PRESENT_SRC_KHR,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = self.swapchain.images[self.swapchain.image_index],
+    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.BOTTOM_OF_PIPE},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &present_barrier,
+  )
+  vk.EndCommandBuffer(command_buffer) or_return
+  gpu.submit_queue_and_present(
+    &self.gctx,
+    &self.swapchain,
+    &command_buffer,
+    self.frame_index,
+    compute_cmd_buffer,
+  ) or_return
+  self.frame_index = (self.frame_index + 1) % FRAMES_IN_FLIGHT
+  world.process_pending_deletions(&self.world, &self.rm, &self.gctx)
+  self.last_render_timestamp = time.now()
+  return .SUCCESS
+}
+
+run :: proc(self: ^Engine, width, height: u32, title: string) {
+  if init(self, width, height, title) != .SUCCESS {
+    return
+  }
+  defer shutdown(self)
+  when USE_PARALLEL_UPDATE {
+    self.update_active = true
+    update_data := UpdateThreadData {
+      engine = self,
+    }
+    update_thread := thread.create(update_thread_proc)
+    update_thread.data = &update_data
+    update_thread.init_context = context
+    thread.start(update_thread)
+    self.update_thread = update_thread
+    defer {
+      self.update_active = false
+      thread.join(update_thread)
+      thread.destroy(update_thread)
+    }
+  }
+  frame := 0
+  for !glfw.WindowShouldClose(self.window) {
+    update_input(self)
+    when !USE_PARALLEL_UPDATE {
+      update(self)
+    }
+    if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
+       FRAME_TIME_MILIS {
+      continue
+    }
+    ensure_light_cameras(self)
+    res := render_and_present(self)
+    if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
+      recreate_swapchain(self) or_continue
+    }
+    if res != .SUCCESS {
+      log.errorf("Error during rendering %v", res)
+      self.render_error_count += 1
+      if self.render_error_count >=
+         MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
+        log.errorf("Too many render errors, exiting...")
+        break
+      }
+    } else {
+      self.render_error_count = 0
+    }
+    self.last_frame_timestamp = time.now()
+    frame += 1
+    when FRAME_LIMIT > 0 {
+      if frame >= FRAME_LIMIT {
+        log.infof("Reached frame limit %d, exiting gracefully", FRAME_LIMIT)
+        break
+      }
+    }
+  }
+}
+
+update_thread_proc :: proc(thread: ^thread.Thread) {
+  data := cast(^UpdateThreadData)thread.data
+  engine := data.engine
+  for engine.update_active {
+    should_update := update(engine)
+    if !should_update {
+      time.sleep(time.Millisecond * 2)
+    }
+  }
+  log.info("Update thread terminating")
 }

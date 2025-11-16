@@ -1,38 +1,41 @@
-package mjolnir
+package render
 
-import cont "containers"
+import cont "../containers"
+import "../gpu"
+import "../resources"
+import "../world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import "gpu"
-import "render/debug_ui"
-import "render/geometry"
-import "render/lighting"
-import "render/navigation"
-import "render/particles"
-import "render/post_process"
-import "render/retained_ui"
-import "render/transparency"
-import "render/visibility"
-import "resources"
+import "debug_ui"
+import "geometry"
+import "lighting"
+import "navigation"
+import "particles"
+import "post_process"
+import "retained_ui"
+import "transparency"
+import "visibility"
 import vk "vendor:vulkan"
-import "world"
 
-Renderer :: struct {
+Manager :: struct {
   geometry:     geometry.Renderer,
   lighting:     lighting.Renderer,
   transparency: transparency.Renderer,
   particles:    particles.Renderer,
   navigation:   navigation.Renderer,
   post_process: post_process.Renderer,
-  ui:           debug_ui.Renderer,
+  debug_ui:     debug_ui.Renderer,
   retained_ui:  retained_ui.Manager,
   main_camera:  resources.Handle,
   visibility:   visibility.VisibilitySystem,
 }
 
-update_visibility_node_count :: proc(self: ^Renderer, world_state: ^world.World) {
+update_visibility_node_count :: proc(
+  self: ^Manager,
+  world_state: ^world.World,
+) {
   i, found := slice.linear_search_reverse_proc(
     world_state.nodes.entries[:],
     proc(entry: cont.Entry(world.Node)) -> bool {
@@ -44,7 +47,7 @@ update_visibility_node_count :: proc(self: ^Renderer, world_state: ^world.World)
 }
 
 record_compute_commands :: proc(
-  self: ^Renderer,
+  self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
@@ -99,8 +102,8 @@ record_compute_commands :: proc(
   return .SUCCESS
 }
 
-renderer_init :: proc(
-  self: ^Renderer,
+init :: proc(
+  self: ^Manager,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
   swapchain_extent: vk.Extent2D,
@@ -186,7 +189,7 @@ renderer_init :: proc(
     rm,
   ) or_return
   debug_ui.init(
-    &self.ui,
+    &self.debug_ui,
     gctx,
     swapchain_format,
     swapchain_extent.width,
@@ -207,13 +210,13 @@ renderer_init :: proc(
   return .SUCCESS
 }
 
-renderer_shutdown :: proc(
-  self: ^Renderer,
+shutdown :: proc(
+  self: ^Manager,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
   retained_ui.shutdown(&self.retained_ui, gctx)
-  debug_ui.shutdown(&self.ui, gctx)
+  debug_ui.shutdown(&self.debug_ui, gctx)
   navigation.shutdown(&self.navigation, gctx)
   post_process.shutdown(&self.post_process, gctx, rm)
   particles.shutdown(&self.particles, gctx)
@@ -224,7 +227,7 @@ renderer_shutdown :: proc(
 }
 
 resize :: proc(
-  self: ^Renderer,
+  self: ^Manager,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
   extent: vk.Extent2D,
@@ -251,7 +254,7 @@ resize :: proc(
 
 // Records shadow pass commands directly into the provided command buffer
 record_camera_visibility :: proc(
-  self: ^Renderer,
+  self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
@@ -262,39 +265,9 @@ record_camera_visibility :: proc(
   for &entry, cam_index in rm.cameras.entries do if entry.active {
     if resources.PassType.SHADOW not_in entry.item.enabled_passes do continue
     cam := &entry.item
-    // Upload camera data to GPU buffer
-    resources.camera_upload_data(rm, u32(cam_index), frame_index)
-    visibility.perform_culling(
-      &self.visibility,
-      gctx,
-      command_buffer,
-      cam,
-      u32(cam_index),
-      frame_index,
-      {.VISIBLE},
-      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-      rm,
-    )
-    visibility.render_depth(
-      &self.visibility,
-      gctx,
-      command_buffer,
-      cam,
-      u32(cam_index),
-      frame_index,
-      {.VISIBLE},
-      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-      rm,
-    )
-    visibility.build_pyramid(
-      &self.visibility,
-      gctx,
-      command_buffer,
-      cam,
-      u32(cam_index),
-      frame_index,
-      rm,
-    )
+    visibility.perform_culling(&self.visibility, gctx, command_buffer, cam, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, rm)
+    visibility.render_depth(&self.visibility, gctx, command_buffer, cam, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, rm)
+    visibility.build_pyramid(&self.visibility, gctx, command_buffer, cam, u32(cam_index), frame_index, rm)
   }
   // Iterate through all spherical cameras (all have shadow pass by design)
   for &entry, cam_index in rm.spherical_cameras.entries {
@@ -324,7 +297,7 @@ record_camera_visibility :: proc(
 }
 
 record_geometry_pass :: proc(
-  self: ^Renderer,
+  self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
@@ -375,7 +348,7 @@ record_geometry_pass :: proc(
 }
 
 record_lighting_pass :: proc(
-  self: ^Renderer,
+  self: ^Manager,
   frame_index: u32,
   rm: ^resources.Manager,
   camera_handle: resources.Handle,
@@ -416,7 +389,7 @@ record_lighting_pass :: proc(
 }
 
 record_particles_pass :: proc(
-  self: ^Renderer,
+  self: ^Manager,
   frame_index: u32,
   rm: ^resources.Manager,
   camera_handle: resources.Handle,
@@ -436,7 +409,7 @@ record_particles_pass :: proc(
 }
 
 record_transparency_pass :: proc(
-  self: ^Renderer,
+  self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
@@ -543,7 +516,7 @@ record_transparency_pass :: proc(
 }
 
 record_post_process_pass :: proc(
-  self: ^Renderer,
+  self: ^Manager,
   frame_index: u32,
   rm: ^resources.Manager,
   camera_handle: resources.Handle,
@@ -554,8 +527,7 @@ record_post_process_pass :: proc(
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   // Transition final image and swapchain image (moved from begin_record)
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera != nil {
+  if camera, ok := cont.get(rm.cameras, camera_handle); ok {
     if final_image, ok := cont.get(
       rm.images_2d,
       camera.attachments[.FINAL_IMAGE][frame_index],

@@ -593,7 +593,7 @@ demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
 demo_render2d :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
-  ctx := &engine.render.ui.ctx
+  ctx := &engine.render.debug_ui.ctx
   if mu.window(ctx, "Navigation Mesh Demo", {40, 40, 380, 500}, {.NO_CLOSE}) {
     mu.label(ctx, "World-Integrated Navigation System")
     if demo_state.nav_mesh_handle.generation != 0 {
