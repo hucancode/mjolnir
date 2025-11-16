@@ -691,10 +691,9 @@ render :: proc(self: ^Engine) -> vk.Result {
     compute_cmd_buffer = compute_buffer
   } else {
     next_frame_index := (self.frame_index + 1) % FRAMES_IN_FLIGHT
-    for &entry, cam_index in self.rm.cameras.entries {
-      if !entry.active do continue
-      if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
+    for &entry, cam_index in self.rm.cameras.entries do if entry.active {
       cam := &entry.item
+      if resources.PassType.GEOMETRY not_in cam.enabled_passes do continue
       visibility.perform_culling(
         &self.render.visibility,
         &self.gctx,
@@ -882,12 +881,8 @@ process_pending_deletions :: proc(engine: ^Engine) {
   clear(&engine.pending_node_deletions)
   sync.mutex_unlock(&engine.pending_deletions_mutex)
   world.cleanup_pending_deletions(&engine.world, &engine.rm, &engine.gctx)
-  // Purge unused resources after nodes are fully removed
-  // Only resources with auto_purge=true are purged
-  // System-managed resources (builtin meshes/materials, render targets, etc.) have auto_purge=false
   if had_deletions {
     resources.purge_unused_resources(&engine.rm, &engine.gctx)
   }
-
   sync.mutex_lock(&engine.pending_deletions_mutex)
 }

@@ -21,9 +21,7 @@ struct ForceField {
     float tangent_strength;
     float strength;
     float area_of_effect;
-    float fade;
     uint node_index;
-    uint padding[3];
 };
 
 layout(set = 0, binding = 0) uniform ParamsBuffer {

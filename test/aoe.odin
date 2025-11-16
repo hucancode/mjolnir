@@ -36,7 +36,7 @@ test_insert_node :: proc(
 @(test)
 test_aoe_insert_and_query_sphere :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   // Insert nodes at specific positions
   h1 := resources.Handle {
     index      = 1,
@@ -76,7 +76,7 @@ test_aoe_insert_and_query_sphere :: proc(t: ^testing.T) {
 @(test)
 test_aoe_query_cube :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   h1 := resources.Handle {
     index      = 1,
     generation = 0,
@@ -107,7 +107,7 @@ test_aoe_query_cube :: proc(t: ^testing.T) {
 @(test)
 test_aoe_query_disc :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   h1 := resources.Handle {
     index      = 1,
     generation = 0,
@@ -143,7 +143,7 @@ test_aoe_query_disc :: proc(t: ^testing.T) {
 @(test)
 test_aoe_query_fan :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   h1 := resources.Handle {
     index      = 1,
     generation = 0,
@@ -198,7 +198,7 @@ test_aoe_query_fan :: proc(t: ^testing.T) {
 @(test)
 test_aoe_tag_filtering_any :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   h1 := resources.Handle {
     index      = 1,
     generation = 0,
@@ -228,7 +228,7 @@ test_aoe_tag_filtering_any :: proc(t: ^testing.T) {
 @(test)
 test_aoe_tag_filtering_all :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   h1 := resources.Handle {
     index      = 1,
     generation = 0,
@@ -265,7 +265,7 @@ test_aoe_tag_filtering_all :: proc(t: ^testing.T) {
 @(test)
 test_aoe_tag_filtering_none :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   h1 := resources.Handle {
     index      = 1,
     generation = 0,
@@ -291,7 +291,7 @@ test_aoe_tag_filtering_none :: proc(t: ^testing.T) {
 @(test)
 test_aoe_tag_filtering_combined :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   h1 := resources.Handle {
     index      = 1,
     generation = 0,
@@ -341,7 +341,7 @@ test_aoe_tag_filtering_combined :: proc(t: ^testing.T) {
 test_aoe_world_integration :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   // Spawn some nodes
   h1, n1, ok1 := world.spawn(&w, {0, 0, 0}, world.MeshAttachment{})
   h2, n2, ok2 := world.spawn(&w, {5, 0, 0}, world.SpriteAttachment{})
@@ -365,7 +365,7 @@ test_aoe_world_integration :: proc(t: ^testing.T) {
 @(test)
 test_aoe_edge_cases :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   results := make([dynamic]resources.Handle)
   defer delete(results)
   // Query empty octree
@@ -407,7 +407,7 @@ test_aoe_edge_cases :: proc(t: ^testing.T) {
 test_aoe_incremental_updates :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   // Spawn a node
   h1, n1, ok := world.spawn(&w, {0, 0, 0})
   testing.expect(t, ok, "Spawn should succeed")
@@ -444,7 +444,7 @@ test_aoe_incremental_updates :: proc(t: ^testing.T) {
 @(test)
 test_aoe_multiple_query_shapes :: proc(t: ^testing.T) {
   w := make_test_world()
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   // Create a grid of nodes
   for x in -2 ..= 2 {
     for z in -2 ..= 2 {

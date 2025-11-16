@@ -281,10 +281,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ); rotation_ok {
       rotation_fn :: proc(i: int) -> quaternion128 {
         angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
-        return linalg.quaternion_angle_axis(
-          angle,
-          linalg.VECTOR3F32_Y_AXIS,
-        )
+        return linalg.quaternion_angle_axis(angle, linalg.VECTOR3F32_Y_AXIS)
       }
 
       init_animation_channel(
@@ -331,21 +328,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
       light_handle: resources.Handle
       if should_make_spot_light {
-        light_handle = spawn_child_spot_light(
-            engine,
-            color,
-            14.0,
-            math.PI * 0.15,
-            lights_root_handle,
+        light_handle =
+        spawn_child_spot_light(
+          engine,
+          color,
+          14.0,
+          math.PI * 0.15,
+          lights_root_handle,
         ) or_continue
         translate(engine, light_handle, local_x, local_y, local_z)
         rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
       } else {
-        light_handle = spawn_child_point_light(
-            engine,
-            color,
-            14.0,
-            lights_root_handle,
+        light_handle =
+        spawn_child_point_light(
+          engine,
+          color,
+          14.0,
+          lights_root_handle,
         ) or_continue
         translate(engine, light_handle, local_x, local_y, local_z)
       }
@@ -424,23 +423,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
       emitter_handle1, emitter1_ok := create_emitter(
         engine,
         psys_handle1,
-        resources.Emitter {
-          emission_rate = 7,
-          particle_lifetime = 5.0,
-          position_spread = 1.5,
-          initial_velocity = {0, -0.1, 0},
-          velocity_spread = 0.1,
-          color_start = {1, 1, 0, 1},
-          color_end = {1, 0.5, 0, 0},
-          size_start = 200.0,
-          size_end = 100.0,
-          weight = 0.1,
-          weight_spread = 0.05,
-          texture_handle = goldstar_texture_handle,
-          enabled = true,
-          aabb_min = {-2, -2, -2},
-          aabb_max = {2, 2, 2},
-        },
+        texture_handle = goldstar_texture_handle,
+        emission_rate = 7,
+        particle_lifetime = 5.0,
+        position_spread = 1.5,
+        initial_velocity = {0, -0.1, 0},
+        velocity_spread = 0.1,
+        color_start = {1, 1, 0, 1},
+        color_end = {1, 0.5, 0, 0},
+        size_start = 200.0,
+        size_end = 100.0,
+        weight = 0.1,
+        weight_spread = 0.05,
+        aabb_min = {-2, -2, -2},
+        aabb_max = {2, 2, 2},
       )
       if emitter1_ok {
         spawn_child(
@@ -455,23 +451,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
       emitter_handle2, emitter2_ok := create_emitter(
         engine,
         psys_handle2,
-        resources.Emitter {
-          emission_rate = 7,
-          particle_lifetime = 3.0,
-          position_spread = 0.3,
-          initial_velocity = {0, 0.2, 0},
-          velocity_spread = 0.15,
-          color_start = {0, 0, 1, 1},
-          color_end = {0, 1, 1, 0},
-          size_start = 350.0,
-          size_end = 175.0,
-          weight = 0.1,
-          weight_spread = 0.3,
-          texture_handle = black_circle_texture_handle,
-          enabled = true,
-          aabb_min = {-1, -1, -1},
-          aabb_max = {1, 1, 1},
-        },
+        texture_handle = black_circle_texture_handle,
+        emission_rate = 7,
+        particle_lifetime = 3.0,
+        position_spread = 0.3,
+        initial_velocity = {0, 0.2, 0},
+        velocity_spread = 0.15,
+        color_start = {0, 0, 1, 1},
+        color_end = {0, 1, 1, 0},
+        size_start = 350.0,
+        size_end = 175.0,
+        weight = 0.1,
+        weight_spread = 0.3,
+        aabb_min = {-1, -1, -1},
+        aabb_max = {1, 1, 1},
       )
       if emitter2_ok {
         spawn_child(
@@ -490,10 +483,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ); ok {
       rotation_fn :: proc(i: int) -> quaternion128 {
         angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
-        return linalg.quaternion_angle_axis(
-          angle,
-          linalg.VECTOR3F32_Y_AXIS,
-        )
+        return linalg.quaternion_angle_axis(angle, linalg.VECTOR3F32_Y_AXIS)
       }
       init_animation_channel(
         engine,
@@ -522,11 +512,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
         handle = create_forcefield(
           engine,
           forcefield_handle,
-          resources.ForceField {
-            tangent_strength = 2.0,
-            strength = 20.0,
-            area_of_effect = 5.0,
-          },
+          tangent_strength = 2.0,
+          strength = 20.0,
+          area_of_effect = 5.0,
         ),
       }
     }

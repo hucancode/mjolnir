@@ -8,9 +8,7 @@ ForceFieldData :: struct {
   tangent_strength: f32,
   strength:         f32,
   area_of_effect:   f32,
-  fade:             f32,
   node_index:       u32,
-  padding:          [3]u32,
 }
 
 ForceField :: struct {
@@ -18,16 +16,20 @@ ForceField :: struct {
   node_handle: Handle,
 }
 
-create_forcefield_handle :: proc(
+create_forcefield :: proc(
   manager: ^Manager,
   node_handle: Handle,
-  config: ForceField,
+  area_of_effect: f32,
+  strength: f32,
+  tangent_strength: f32,
 ) -> (
   ret: Handle,
   ok: bool,
 ) #optional_ok {
   handle, forcefield := cont.alloc(&manager.forcefields) or_return
-  forcefield^ = config
+  forcefield.tangent_strength = tangent_strength
+  forcefield.strength = strength
+  forcefield.area_of_effect = area_of_effect
   forcefield.node_handle = node_handle
   forcefield_write_to_gpu(manager, handle, forcefield)
   return handle, true
@@ -47,9 +49,6 @@ forcefield_write_to_gpu :: proc(
   handle: Handle,
   ff: ^ForceField,
 ) -> vk.Result {
-  if handle.index >= MAX_FORCE_FIELDS {
-    return .ERROR_OUT_OF_DEVICE_MEMORY
-  }
   forcefield_update_gpu_data(ff)
   gpu.write(
     &manager.forcefield_buffer.buffer,

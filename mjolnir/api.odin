@@ -491,23 +491,61 @@ spawn_directional_light :: proc(
 create_emitter :: proc(
   engine: ^Engine,
   owner: resources.Handle,
-  emitter: resources.Emitter,
+  texture_handle: resources.Handle,
+  emission_rate: f32,
+  initial_velocity: [3]f32,
+  velocity_spread: f32,
+  color_start: [4]f32,
+  color_end: [4]f32,
+  aabb_min: [3]f32,
+  aabb_max: [3]f32,
+  particle_lifetime: f32,
+  position_spread: f32,
+  size_start: f32,
+  size_end: f32,
+  weight: f32,
+  weight_spread: f32,
 ) -> (
   resources.Handle,
   bool,
 ) #optional_ok {
-  return resources.create_emitter_handle(&engine.rm, owner, emitter)
+  return resources.create_emitter(
+    &engine.rm,
+    owner,
+    texture_handle,
+    emission_rate,
+    initial_velocity,
+    velocity_spread,
+    color_start,
+    color_end,
+    aabb_min,
+    aabb_max,
+    particle_lifetime,
+    position_spread,
+    size_start,
+    size_end,
+    weight,
+    weight_spread,
+  )
 }
 
 create_forcefield :: proc(
   engine: ^Engine,
   owner: resources.Handle,
-  forcefield: resources.ForceField,
+  area_of_effect: f32 = 1.0,
+  strength: f32 = 1.0,
+  tangent_strength: f32 = 0.0,
 ) -> (
   resources.Handle,
   bool,
 ) #optional_ok {
-  return resources.create_forcefield_handle(&engine.rm, owner, forcefield)
+  return resources.create_forcefield(
+    &engine.rm,
+    owner,
+    area_of_effect,
+    strength,
+    tangent_strength,
+  )
 }
 
 // Create an animation clip with automatic allocation and initialization
@@ -521,7 +559,12 @@ create_animation_clip :: proc(
   handle: resources.Handle,
   ok: bool,
 ) #optional_ok {
-  return resources.create_animation_clip(&engine.rm, channel_count, duration, name)
+  return resources.create_animation_clip(
+    &engine.rm,
+    channel_count,
+    duration,
+    name,
+  )
 }
 
 // Initialize an animation channel with callback functions for generating keyframe values

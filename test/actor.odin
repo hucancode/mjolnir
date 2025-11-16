@@ -45,7 +45,7 @@ mob_tick2 :: proc(
 test_world_spawn_and_get_actor :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   actor_handle, actor, ok := world.spawn_actor(&w, TestPlayerData2)
   testing.expect(t, ok)
   testing.expect(t, actor != nil)
@@ -67,7 +67,7 @@ test_world_spawn_and_get_actor :: proc(t: ^testing.T) {
 test_world_auto_tick_actors :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   player_handle, player, _ := world.spawn_actor(&w, TestPlayerData2)
   player.data = TestPlayerData2 {
     health = 50,
@@ -96,7 +96,7 @@ test_world_auto_tick_actors :: proc(t: ^testing.T) {
 test_world_lazy_pool_creation :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   testing.expect(t, len(w.actor_pools) == 0)
   _, _, ok1 := world.spawn_actor(&w, TestPlayerData2)
   testing.expect(t, ok1)
@@ -138,7 +138,7 @@ enemy_tick :: proc(
 test_custom_game_state :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.destroy(&w, nil, nil)
+  defer world.shutdown(&w, nil, nil)
   game := GameState {
     score          = 0,
     enemies_killed = 0,
