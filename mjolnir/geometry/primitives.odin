@@ -24,19 +24,19 @@ Disc :: struct {
   radius: f32,
 }
 
-triangle_bounds :: proc(tri: Triangle) -> Aabb {
+triangle_bounds :: proc "contextless" (tri: Triangle) -> Aabb {
   return Aabb {
     min = linalg.min(tri.v0, tri.v1, tri.v2),
     max = linalg.max(tri.v0, tri.v1, tri.v2),
   }
 }
 
-sphere_bounds :: proc(sphere: Sphere) -> Aabb {
+sphere_bounds :: proc "contextless" (sphere: Sphere) -> Aabb {
   r := [3]f32{sphere.radius, sphere.radius, sphere.radius}
   return Aabb{min = sphere.center - r, max = sphere.center + r}
 }
 
-disc_bounds :: proc(disc: Disc) -> Aabb {
+disc_bounds :: proc "contextless" (disc: Disc) -> Aabb {
   tan1, tan2 := [3]f32{}, [3]f32{}
   if math.abs(disc.normal.y) > 0.9 {
     tan1 = linalg.normalize(
@@ -59,7 +59,7 @@ disc_bounds :: proc(disc: Disc) -> Aabb {
   return Aabb{min = min, max = max}
 }
 
-ray_triangle_intersection :: proc(
+ray_triangle_intersection :: proc "contextless" (
   ray: Ray,
   tri: Triangle,
   max_t: f32 = F32_MAX,
@@ -93,7 +93,7 @@ ray_triangle_intersection :: proc(
   return false, 0
 }
 
-ray_sphere_intersection :: proc(
+ray_sphere_intersection :: proc "contextless" (
   ray: Ray,
   sphere: Sphere,
   max_t: f32 = F32_MAX,
@@ -133,7 +133,7 @@ Primitive :: struct {
   },
 }
 
-primitive_bounds :: proc(prim: Primitive) -> Aabb {
+primitive_bounds :: proc (prim: Primitive) -> Aabb {
   switch p in prim.data {
   case Triangle:
     return triangle_bounds(p)

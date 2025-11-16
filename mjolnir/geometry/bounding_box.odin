@@ -25,11 +25,11 @@ aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
   return ret
 }
 
-aabb_union :: proc(a, b: Aabb) -> Aabb {
+aabb_union :: proc "contextless" (a, b: Aabb) -> Aabb {
   return Aabb{min = linalg.min(a.min, b.min), max = linalg.max(a.max, b.max)}
 }
 
-aabb_intersects :: proc(a, b: Aabb) -> bool {
+aabb_intersects :: proc "contextless" (a, b: Aabb) -> bool {
   return(
     a.min.x <= b.max.x &&
     a.max.x >= b.min.x &&
@@ -40,7 +40,7 @@ aabb_intersects :: proc(a, b: Aabb) -> bool {
   )
 }
 
-aabb_contains :: proc(outer, inner: Aabb) -> bool {
+aabb_contains :: proc "contextless" (outer, inner: Aabb) -> bool {
   return(
     inner.min.x >= outer.min.x &&
     inner.max.x <= outer.max.x &&
@@ -51,7 +51,10 @@ aabb_contains :: proc(outer, inner: Aabb) -> bool {
   )
 }
 
-aabb_contains_approx :: proc(outer, inner: Aabb, epsilon: f32 = 1e-6) -> bool {
+aabb_contains_approx :: proc "contextless" (
+  outer, inner: Aabb,
+  epsilon: f32 = 1e-6,
+) -> bool {
   return(
     inner.min.x >= outer.min.x - epsilon &&
     inner.max.x <= outer.max.x + epsilon &&
@@ -62,7 +65,7 @@ aabb_contains_approx :: proc(outer, inner: Aabb, epsilon: f32 = 1e-6) -> bool {
   )
 }
 
-aabb_contains_point :: proc(aabb: Aabb, point: [3]f32) -> bool {
+aabb_contains_point :: proc "contextless" (aabb: Aabb, point: [3]f32) -> bool {
   return(
     point.x >= aabb.min.x &&
     point.x <= aabb.max.x &&
@@ -73,25 +76,25 @@ aabb_contains_point :: proc(aabb: Aabb, point: [3]f32) -> bool {
   )
 }
 
-aabb_center :: proc(aabb: Aabb) -> [3]f32 {
+aabb_center :: proc "contextless" (aabb: Aabb) -> [3]f32 {
   return (aabb.min + aabb.max) * 0.5
 }
 
-aabb_size :: proc(aabb: Aabb) -> [3]f32 {
+aabb_size :: proc "contextless" (aabb: Aabb) -> [3]f32 {
   return aabb.max - aabb.min
 }
 
-aabb_surface_area :: proc(aabb: Aabb) -> f32 {
+aabb_surface_area :: proc "contextless" (aabb: Aabb) -> f32 {
   d := aabb.max - aabb.min
   return 2.0 * (d.x * d.y + d.y * d.z + d.z * d.x)
 }
 
-aabb_volume :: proc(aabb: Aabb) -> f32 {
+aabb_volume :: proc "contextless" (aabb: Aabb) -> f32 {
   d := aabb.max - aabb.min
   return d.x * d.y * d.z
 }
 
-aabb_sphere_intersects :: proc(
+aabb_sphere_intersects :: proc "contextless" (
   aabb: Aabb,
   center: [3]f32,
   radius: f32,
@@ -101,12 +104,12 @@ aabb_sphere_intersects :: proc(
   return linalg.dot(diff, diff) <= radius * radius
 }
 
-distance_point_aabb :: proc(point: [3]f32, aabb: Aabb) -> f32 {
+distance_point_aabb :: proc "contextless" (point: [3]f32, aabb: Aabb) -> f32 {
   closest := linalg.clamp(point, aabb.min, aabb.max)
   return linalg.length(point - closest)
 }
 
-ray_aabb_intersection :: proc(
+ray_aabb_intersection :: proc "contextless" (
   origin: [3]f32,
   inv_dir: [3]f32,
   aabb: Aabb,
@@ -135,7 +138,7 @@ ray_aabb_intersection :: proc(
   return
 }
 
-ray_aabb_intersection_far :: proc(
+ray_aabb_intersection_far :: proc "contextless" (
   origin: [3]f32,
   inv_dir: [3]f32,
   aabb: Aabb,
@@ -146,11 +149,11 @@ ray_aabb_intersection_far :: proc(
   return min(t_max.x, t_max.y, t_max.z)
 }
 
-min_vec3 :: proc(v: [3]f32) -> f32 {
+min_vec3 :: proc "contextless" (v: [3]f32) -> f32 {
   return min(v.x, v.y, v.z)
 }
 
-max_vec3 :: proc(v: [3]f32) -> f32 {
+max_vec3 :: proc "contextless" (v: [3]f32) -> f32 {
   return max(v.x, v.y, v.z)
 }
 
@@ -162,7 +165,7 @@ Obb :: struct {
 }
 
 // Get the 3 local axes of the OBB (columns of rotation matrix)
-obb_axes :: proc(obb: Obb) -> (x, y, z: [3]f32) {
+obb_axes :: proc "contextless" (obb: Obb) -> (x, y, z: [3]f32) {
   x = linalg.mul(obb.rotation, linalg.VECTOR3F32_X_AXIS)
   y = linalg.mul(obb.rotation, linalg.VECTOR3F32_Y_AXIS)
   z = linalg.mul(obb.rotation, linalg.VECTOR3F32_Z_AXIS)
@@ -170,7 +173,7 @@ obb_axes :: proc(obb: Obb) -> (x, y, z: [3]f32) {
 }
 
 // Convert OBB to AABB by computing bounds of all 8 corners
-obb_to_aabb :: proc(obb: Obb) -> Aabb {
+obb_to_aabb :: proc "contextless" (obb: Obb) -> Aabb {
   corners := [8][3]f32 {
     {-obb.half_extents.x, -obb.half_extents.y, -obb.half_extents.z},
     {obb.half_extents.x, -obb.half_extents.y, -obb.half_extents.z},
@@ -192,7 +195,7 @@ obb_to_aabb :: proc(obb: Obb) -> Aabb {
 }
 
 // Find closest point on OBB to a given point
-obb_closest_point :: proc(obb: Obb, point: [3]f32) -> [3]f32 {
+obb_closest_point :: proc "contextless" (obb: Obb, point: [3]f32) -> [3]f32 {
   d := point - obb.center
   // Transform point to OBB local space
   inv_rot := linalg.quaternion_inverse(obb.rotation)
@@ -204,7 +207,7 @@ obb_closest_point :: proc(obb: Obb, point: [3]f32) -> [3]f32 {
 }
 
 // Check if point is inside OBB
-obb_contains_point :: proc(obb: Obb, point: [3]f32) -> bool {
+obb_contains_point :: proc "contextless" (obb: Obb, point: [3]f32) -> bool {
   d := point - obb.center
   inv_rot := linalg.quaternion_inverse(obb.rotation)
   local := linalg.mul(inv_rot, d)

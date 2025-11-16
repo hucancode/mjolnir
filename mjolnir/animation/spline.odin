@@ -35,28 +35,28 @@ spline_validate :: proc(spline: Spline($T)) -> bool {
 // h01(t) = -2t^3 + 3t^2
 // h11(t) = t^3 - t^2
 @(private)
-hermite_h00 :: proc(t: f32) -> f32 {
+hermite_h00 :: proc "contextless" (t: f32) -> f32 {
   return 2 * t * t * t - 3 * t * t + 1
 }
 
 @(private)
-hermite_h10 :: proc(t: f32) -> f32 {
+hermite_h10 :: proc "contextless" (t: f32) -> f32 {
   return t * t * t - 2 * t * t + t
 }
 
 @(private)
-hermite_h01 :: proc(t: f32) -> f32 {
+hermite_h01 :: proc "contextless" (t: f32) -> f32 {
   return -2 * t * t * t + 3 * t * t
 }
 
 @(private)
-hermite_h11 :: proc(t: f32) -> f32 {
+hermite_h11 :: proc "contextless" (t: f32) -> f32 {
   return t * t * t - t * t
 }
 
 // Catmull-Rom tangent calculation: m_i = (p_{i+1} - p_{i-1}) / 2
 @(private)
-catmull_rom_tangent :: proc(p_prev: $T, p_next: T) -> T {
+catmull_rom_tangent :: proc "contextless" (p_prev: $T, p_next: T) -> T {
   return (p_next - p_prev) * 0.5
 }
 

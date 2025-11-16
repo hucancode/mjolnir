@@ -74,7 +74,8 @@ slab_free :: proc(allocator: ^SlabAllocator, index: u32) {
   found := false
   for &class in allocator.classes {
     if class.block_size == 0 do continue // Skip empty classes
-    if index >= class.base && index < class.base + class.block_size * class.block_count {
+    if index >= class.base &&
+       index < class.base + class.block_size * class.block_count {
       append(&class.free_list, index)
       found = true
       break

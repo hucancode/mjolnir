@@ -36,7 +36,7 @@ ilog2 :: proc "contextless" (v: u32) -> u32 {
   return r
 }
 
-log2_greater_than :: proc (x: u32) -> u32 {
+log2_greater_than :: proc "contextless" (x: u32) -> u32 {
   return u32(math.floor(math.log2(f32(x)))) + 1
 }
 

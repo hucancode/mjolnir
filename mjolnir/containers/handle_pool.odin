@@ -104,7 +104,7 @@ free :: proc(pool: ^Pool($T), handle: Handle) -> (item: ^T, freed: bool) {
 }
 
 // get retrieves an item by handle. Returns (item_ptr, found).
-get :: proc(
+get :: proc "contextless" (
   pool: Pool($T),
   handle: Handle,
 ) -> (
@@ -122,7 +122,7 @@ get :: proc(
 }
 
 // is_valid checks if a handle is currently valid without accessing the item.
-is_valid :: proc(pool: Pool($T), handle: Handle) -> bool {
+is_valid :: proc "contextless" (pool: Pool($T), handle: Handle) -> bool {
   if handle.index >= u32(len(pool.entries)) {
     return false
   }
@@ -131,7 +131,7 @@ is_valid :: proc(pool: Pool($T), handle: Handle) -> bool {
 }
 
 // count returns the number of active items in the pool.
-count :: proc(pool: Pool($T)) -> int {
+count :: proc "contextless" (pool: Pool($T)) -> int {
   active := 0
   for entry in pool.entries {
     if entry.active do active += 1
@@ -140,6 +140,6 @@ count :: proc(pool: Pool($T)) -> int {
 }
 
 // pool_len returns the total capacity (active + freed slots).
-pool_len :: proc(pool: Pool($T)) -> int {
+pool_len :: proc "contextless" (pool: Pool($T)) -> int {
   return len(pool.entries)
 }

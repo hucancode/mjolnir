@@ -34,81 +34,81 @@ Mode :: enum {
 }
 
 // Core easing functions operating on normalized [0,1] input
-ease_linear :: proc(x: f32) -> f32 {
+ease_linear :: proc "contextless" (x: f32) -> f32 {
   return x
 }
 
-ease_quad_in :: proc(x: f32) -> f32 {
+ease_quad_in :: proc "contextless" (x: f32) -> f32 {
   return x * x
 }
 
-ease_quad_out :: proc(x: f32) -> f32 {
+ease_quad_out :: proc "contextless" (x: f32) -> f32 {
   return 1 - (1 - x) * (1 - x)
 }
 
-ease_quad_in_out :: proc(x: f32) -> f32 {
+ease_quad_in_out :: proc "contextless" (x: f32) -> f32 {
   return 2 * x * x if x < 0.5 else 1 - math.pow(-2 * x + 2, 2) / 2
 }
 
-ease_cubic_in :: proc(x: f32) -> f32 {
+ease_cubic_in :: proc "contextless" (x: f32) -> f32 {
   return x * x * x
 }
 
-ease_cubic_out :: proc(x: f32) -> f32 {
+ease_cubic_out :: proc "contextless" (x: f32) -> f32 {
   return 1 - math.pow(1 - x, 3)
 }
 
-ease_cubic_in_out :: proc(x: f32) -> f32 {
+ease_cubic_in_out :: proc "contextless" (x: f32) -> f32 {
   return 4 * x * x * x if x < 0.5 else 1 - math.pow(-2 * x + 2, 3) / 2
 }
 
-ease_quint_in :: proc(x: f32) -> f32 {
+ease_quint_in :: proc "contextless" (x: f32) -> f32 {
   return x * x * x * x * x
 }
 
-ease_quint_out :: proc(x: f32) -> f32 {
+ease_quint_out :: proc "contextless" (x: f32) -> f32 {
   return 1 - math.pow(1 - x, 5)
 }
 
-ease_quint_in_out :: proc(x: f32) -> f32 {
+ease_quint_in_out :: proc "contextless" (x: f32) -> f32 {
   return 16 * x * x * x * x * x if x < 0.5 else 1 - math.pow(-2 * x + 2, 5) / 2
 }
 
-ease_sine_in :: proc(x: f32) -> f32 {
+ease_sine_in :: proc "contextless" (x: f32) -> f32 {
   return 1 - math.cos(x * math.PI / 2)
 }
 
-ease_sine_out :: proc(x: f32) -> f32 {
+ease_sine_out :: proc "contextless" (x: f32) -> f32 {
   return math.sin(x * math.PI / 2)
 }
 
-ease_sine_in_out :: proc(x: f32) -> f32 {
+ease_sine_in_out :: proc "contextless" (x: f32) -> f32 {
   return -(math.cos(math.PI * x) - 1) / 2
 }
 
-ease_circ_in :: proc(x: f32) -> f32 {
+ease_circ_in :: proc "contextless" (x: f32) -> f32 {
   return 1 - math.sqrt(1 - x * x)
 }
 
-ease_circ_out :: proc(x: f32) -> f32 {
+ease_circ_out :: proc "contextless" (x: f32) -> f32 {
   return math.sqrt(1 - math.pow(x - 1, 2))
 }
 
-ease_circ_in_out :: proc(x: f32) -> f32 {
+ease_circ_in_out :: proc "contextless" (x: f32) -> f32 {
   return(
     (1 - math.sqrt(1 - math.pow(2 * x, 2))) / 2 if x < 0.5 else (math.sqrt(1 - math.pow(-2 * x + 2, 2)) + 1) / 2 \
   )
 }
 
-ease_expo_in :: proc(x: f32) -> f32 {
+ease_expo_in :: proc "contextless" (x: f32) -> f32 {
   return 0 if x == 0 else math.pow(2, 10 * x - 10)
 }
 
-ease_expo_out :: proc(x: f32) -> f32 {
+ease_expo_out :: proc "contextless" (x: f32) -> f32 {
   return 1 if x == 1 else 1 - math.pow(2, -10 * x)
 }
 
-ease_expo_in_out :: proc(x: f32) -> f32 {
+ease_expo_in_out :: proc "contextless" (x: f32) -> f32 {
   if x == 0 do return 0
   if x == 1 do return 1
   return(
@@ -116,21 +116,21 @@ ease_expo_in_out :: proc(x: f32) -> f32 {
   )
 }
 
-ease_elastic_in :: proc(x: f32) -> f32 {
+ease_elastic_in :: proc "contextless" (x: f32) -> f32 {
   c4 := f32((2 * math.PI) / 3)
   if x == 0 do return 0
   if x == 1 do return 1
   return -math.pow(2, 10 * x - 10) * math.sin_f32((x * 10 - 10.75) * c4)
 }
 
-ease_elastic_out :: proc(x: f32) -> f32 {
+ease_elastic_out :: proc "contextless" (x: f32) -> f32 {
   c4 := f32((2 * math.PI) / 3)
   if x == 0 do return 0
   if x == 1 do return 1
   return math.pow(2, -10 * x) * math.sin_f32((x * 10 - 0.75) * c4) + 1
 }
 
-ease_elastic_in_out :: proc(x: f32) -> f32 {
+ease_elastic_in_out :: proc "contextless" (x: f32) -> f32 {
   c5 := f32((2 * math.PI) / 4.5)
   if x == 0 do return 0
   if x == 1 do return 1
@@ -139,19 +139,19 @@ ease_elastic_in_out :: proc(x: f32) -> f32 {
   )
 }
 
-ease_back_in :: proc(x: f32) -> f32 {
+ease_back_in :: proc "contextless" (x: f32) -> f32 {
   c1 := f32(1.70158)
   c3 := c1 + 1
   return c3 * x * x * x - c1 * x * x
 }
 
-ease_back_out :: proc(x: f32) -> f32 {
+ease_back_out :: proc "contextless" (x: f32) -> f32 {
   c1 := f32(1.70158)
   c3 := c1 + 1
   return 1 + c3 * math.pow(x - 1, 3) + c1 * math.pow(x - 1, 2)
 }
 
-ease_back_in_out :: proc(x: f32) -> f32 {
+ease_back_in_out :: proc "contextless" (x: f32) -> f32 {
   c1 := f32(1.70158)
   c2 := c1 * 1.525
   return(
@@ -159,7 +159,7 @@ ease_back_in_out :: proc(x: f32) -> f32 {
   )
 }
 
-ease_bounce_out :: proc(x: f32) -> f32 {
+ease_bounce_out :: proc "contextless" (x: f32) -> f32 {
   n1 := f32(7.5625)
   d1 := f32(2.75)
   if x < 1 / d1 {
@@ -176,18 +176,18 @@ ease_bounce_out :: proc(x: f32) -> f32 {
   }
 }
 
-ease_bounce_in :: proc(x: f32) -> f32 {
+ease_bounce_in :: proc "contextless" (x: f32) -> f32 {
   return 1 - ease_bounce_out(1 - x)
 }
 
-ease_bounce_in_out :: proc(x: f32) -> f32 {
+ease_bounce_in_out :: proc "contextless" (x: f32) -> f32 {
   return(
     (1 - ease_bounce_out(1 - 2 * x)) / 2 if x < 0.5 else (1 + ease_bounce_out(2 * x - 1)) / 2 \
   )
 }
 
 // Dispatch function for all easing modes
-ease :: proc(x: f32, mode: Mode) -> f32 {
+ease :: proc "contextless" (x: f32, mode: Mode) -> f32 {
   switch mode {
   case .Linear:
     return ease_linear(x)
@@ -249,7 +249,12 @@ ease :: proc(x: f32, mode: Mode) -> f32 {
   return x
 }
 
-sample :: proc(x: f32, a: f32 = 0, b: f32 = 1, mode: Mode = .Linear) -> f32 {
+sample :: proc "contextless" (
+  x: f32,
+  a: f32 = 0,
+  b: f32 = 1,
+  mode: Mode = .Linear,
+) -> f32 {
   t := ease(x, mode)
   return a + (b - a) * t
 }

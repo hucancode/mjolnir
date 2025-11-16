@@ -6,7 +6,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-is_identity_quaternion :: proc(q: quaternion128) -> bool {
+is_identity_quaternion :: proc "contextless" (q: quaternion128) -> bool {
   epsilon :: 1e-6
   return(
     math.abs(q.x) < epsilon &&
@@ -39,14 +39,17 @@ CollisionPair :: struct {
 }
 
 // Hash function for collision pairs (for contact caching)
-collision_pair_hash :: proc(pair: CollisionPair) -> u64 {
+collision_pair_hash :: proc "contextless" (pair: CollisionPair) -> u64 {
   // Ensure consistent ordering: smaller index first
   a := min(pair.body_a.index, pair.body_b.index)
   b := max(pair.body_a.index, pair.body_b.index)
   return (u64(a) << 32) | u64(b)
 }
 
-collision_pair_eq :: proc(a: CollisionPair, b: CollisionPair) -> bool {
+collision_pair_eq :: proc "contextless" (
+  a: CollisionPair,
+  b: CollisionPair,
+) -> bool {
   return(
     (a.body_a == b.body_a && a.body_b == b.body_b) ||
     (a.body_a == b.body_b && a.body_b == b.body_a) \

@@ -20,7 +20,11 @@ TRANSFORM_IDENTITY :: Transform {
   is_dirty     = false,
 }
 
-decompose_matrix :: proc(m: matrix[4, 4]f32) -> (ret: Transform) {
+decompose_matrix :: proc "contextless" (
+  m: matrix[4, 4]f32,
+) -> (
+  ret: Transform,
+) {
   // Extract translation (last column of the matrix)
   ret.position = m[3].xyz
   // Extract scale (length of each basis vector)
@@ -31,7 +35,7 @@ decompose_matrix :: proc(m: matrix[4, 4]f32) -> (ret: Transform) {
   return
 }
 
-matrix_from_arr :: proc(a: [16]f32) -> (m: matrix[4, 4]f32) {
+matrix_from_arr :: proc "contextless" (a: [16]f32) -> (m: matrix[4, 4]f32) {
   m[0, 0], m[1, 0], m[2, 0], m[3, 0] = a[0], a[1], a[2], a[3]
   m[0, 1], m[1, 1], m[2, 1], m[3, 1] = a[4], a[5], a[6], a[7]
   m[0, 2], m[1, 2], m[2, 2], m[3, 2] = a[8], a[9], a[10], a[11]
@@ -47,7 +51,7 @@ matrix_from_arr :: proc(a: [16]f32) -> (m: matrix[4, 4]f32) {
   return
 }
 
-transform_translate_by :: proc(
+transform_translate_by :: proc "contextless" (
   t: ^Transform,
   x: f32 = 0,
   y: f32 = 0,
@@ -57,7 +61,7 @@ transform_translate_by :: proc(
   t.is_dirty = true
 }
 
-transform_translate :: proc(
+transform_translate :: proc "contextless" (
   t: ^Transform,
   x: f32 = 0,
   y: f32 = 0,
@@ -72,12 +76,15 @@ transform_rotate_by :: proc {
   transform_rotate_by_angle,
 }
 
-transform_rotate_by_quaternion :: proc(t: ^Transform, q: quaternion128) {
+transform_rotate_by_quaternion :: proc "contextless" (
+  t: ^Transform,
+  q: quaternion128,
+) {
   t.rotation *= q
   t.is_dirty = true
 }
 
-transform_rotate_by_angle :: proc(
+transform_rotate_by_angle :: proc "contextless" (
   t: ^Transform,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
@@ -91,12 +98,15 @@ transform_rotate :: proc {
   transform_rotate_angle,
 }
 
-transform_rotate_quaternion :: proc(t: ^Transform, q: quaternion128) {
+transform_rotate_quaternion :: proc "contextless" (
+  t: ^Transform,
+  q: quaternion128,
+) {
   t.rotation = q
   t.is_dirty = true
 }
 
-transform_rotate_angle :: proc(
+transform_rotate_angle :: proc "contextless" (
   t: ^Transform,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
@@ -105,7 +115,7 @@ transform_rotate_angle :: proc(
   t.is_dirty = true
 }
 
-transform_scale_xyz_by :: proc(
+transform_scale_xyz_by :: proc "contextless" (
   t: ^Transform,
   x: f32 = 1,
   y: f32 = 1,
@@ -115,12 +125,12 @@ transform_scale_xyz_by :: proc(
   t.is_dirty = true
 }
 
-transform_scale_by :: proc(t: ^Transform, s: f32) {
+transform_scale_by :: proc "contextless" (t: ^Transform, s: f32) {
   t.scale *= {s, s, s}
   t.is_dirty = true
 }
 
-transform_scale_xyz :: proc(
+transform_scale_xyz :: proc "contextless" (
   t: ^Transform,
   x: f32 = 1,
   y: f32 = 1,
@@ -130,12 +140,12 @@ transform_scale_xyz :: proc(
   t.is_dirty = true
 }
 
-transform_scale :: proc(t: ^Transform, s: f32) {
+transform_scale :: proc "contextless" (t: ^Transform, s: f32) {
   t.scale = {s, s, s}
   t.is_dirty = true
 }
 
-transform_update_local :: proc(t: ^Transform) -> bool {
+transform_update_local :: proc "contextless" (t: ^Transform) -> bool {
   if !t.is_dirty {
     return false
   }
@@ -144,7 +154,7 @@ transform_update_local :: proc(t: ^Transform) -> bool {
   return true
 }
 
-transform_update_world :: proc(
+transform_update_world :: proc "contextless" (
   t: ^Transform,
   parent: matrix[4, 4]f32,
 ) -> bool {

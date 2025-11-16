@@ -213,6 +213,6 @@ tetrahedron_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
 }
 
 // Check if two vectors point in the same direction
-same_direction :: proc(a, b: [3]f32) -> bool {
+same_direction :: proc "contextless" (a, b: [3]f32) -> bool {
   return linalg.dot(a, b) > 0
 }

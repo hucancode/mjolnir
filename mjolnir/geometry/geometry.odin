@@ -63,13 +63,16 @@ VEC_RIGHT :: [3]f32{1.0, 0.0, 0.0}
 F32_MIN :: -3.40282347E+38
 F32_MAX :: 3.40282347E+38
 
-vector_equal :: proc(a, b: [3]f32, epsilon: f32 = 0.0001) -> bool {
+vector_equal :: proc "contextless" (
+  a, b: [3]f32,
+  epsilon: f32 = 0.0001,
+) -> bool {
   diff := linalg.abs(a - b)
   return diff.x < epsilon && diff.y < epsilon && diff.z < epsilon
 }
 
 // Calculate squared distance from point to line segment in 2D (XZ plane)
-point_segment_distance2_2d :: proc(
+point_segment_distance2_2d :: proc "contextless" (
   p, a, b: [3]f32,
 ) -> (
   dist_sqr: f32,
@@ -138,7 +141,9 @@ ray_segment_intersect_2d :: proc "contextless" (
   return
 }
 
-segment_segment_intersect_2d :: proc(p0, p1, a, b: [3]f32) -> bool {
+segment_segment_intersect_2d :: proc "contextless" (
+  p0, p1, a, b: [3]f32,
+) -> bool {
   segment := p1 - p0
   edge := b - a
   denominator := linalg.cross(segment.xz, edge.xz)
@@ -211,7 +216,7 @@ point_in_polygon_2d :: proc "contextless" (
 }
 
 // Calculate triangle normal
-calc_tri_normal :: proc(v0, v1, v2: [3]f32) -> (norm: [3]f32) {
+calc_tri_normal :: proc "contextless" (v0, v1, v2: [3]f32) -> (norm: [3]f32) {
   e0 := v1 - v0
   e1 := v2 - v0
   norm = linalg.cross(e0, e1)
@@ -449,7 +454,7 @@ intersect_segments_2d :: proc "contextless" (
 }
 
 // Check if circle overlaps with line segment (2D XZ plane)
-overlap_circle_segment :: proc(
+overlap_circle_segment :: proc "contextless" (
   center: [3]f32,
   radius: f32,
   p, q: [3]f32,
@@ -458,7 +463,7 @@ overlap_circle_segment :: proc(
   return dist_sqr <= radius * radius
 }
 
-ray_primitive_intersection :: proc(
+ray_primitive_intersection :: proc (
   ray: Ray,
   prim: Primitive,
   max_t: f32 = F32_MAX,
@@ -475,19 +480,28 @@ ray_primitive_intersection :: proc(
   return false, 0
 }
 
-sphere_sphere_intersection :: proc(s1: Sphere, s2: Sphere) -> bool {
+sphere_sphere_intersection :: proc "contextless" (
+  s1: Sphere,
+  s2: Sphere,
+) -> bool {
   d := linalg.length(s1.center - s2.center)
   return d <= (s1.radius + s2.radius)
 }
 
-sphere_triangle_intersection :: proc(sphere: Sphere, tri: Triangle) -> bool {
+sphere_triangle_intersection :: proc "contextless" (
+  sphere: Sphere,
+  tri: Triangle,
+) -> bool {
   closest := closest_point_on_triangle_struct(sphere.center, tri)
   d := linalg.length(sphere.center - closest)
   return d <= sphere.radius
 }
 
 @(private)
-closest_point_on_triangle_struct :: proc(p: [3]f32, tri: Triangle) -> [3]f32 {
+closest_point_on_triangle_struct :: proc "contextless" (
+  p: [3]f32,
+  tri: Triangle,
+) -> [3]f32 {
   ab := tri.v1 - tri.v0
   ac := tri.v2 - tri.v0
   ap := p - tri.v0
@@ -523,7 +537,7 @@ closest_point_on_triangle_struct :: proc(p: [3]f32, tri: Triangle) -> [3]f32 {
   return tri.v0 + ab * v + ac * w
 }
 
-sphere_primitive_intersection :: proc(
+sphere_primitive_intersection :: proc (
   sphere: Sphere,
   prim: Primitive,
 ) -> bool {
@@ -536,7 +550,7 @@ sphere_primitive_intersection :: proc(
   return false
 }
 
-aabb_disc_intersects :: proc(
+aabb_disc_intersects :: proc "contextless" (
   aabb: Aabb,
   center: [3]f32,
   normal: [3]f32,

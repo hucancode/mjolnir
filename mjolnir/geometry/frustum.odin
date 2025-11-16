@@ -37,11 +37,17 @@ make_frustum :: proc(view_projection_matrix: matrix[4, 4]f32) -> Frustum {
   return Frustum{planes}
 }
 
-signed_distance_to_plane :: proc(plane: Plane, point: [3]f32) -> f32 {
+signed_distance_to_plane :: proc "contextless" (
+  plane: Plane,
+  point: [3]f32,
+) -> f32 {
   return linalg.dot(plane.xyz, point) + plane.w
 }
 
-frustum_test_point :: proc(frustum: Frustum, p: [3]f32) -> bool {
+frustum_test_point :: proc "contextless" (
+  frustum: Frustum,
+  p: [3]f32,
+) -> bool {
   for plane in frustum.planes {
     if signed_distance_to_plane(plane, p) < 0 do return false
   }
@@ -49,7 +55,10 @@ frustum_test_point :: proc(frustum: Frustum, p: [3]f32) -> bool {
 }
 // test_aabb_frustum tests if an Axis-Aligned Bounding Box (AABB) intersects or is contained within a Frustum.
 // Assumes Frustum planes have normals pointing inwards.
-frustum_test_aabb :: proc(frustum: Frustum, aabb: Aabb) -> bool {
+frustum_test_aabb :: proc "contextless" (
+  frustum: Frustum,
+  aabb: Aabb,
+) -> bool {
   // For each frustum plane, test if the AABB is completely on the negative side
   for plane in frustum.planes {
     // Find the "positive" and "negative" vertices of the AABB relative to the plane normal
@@ -84,7 +93,7 @@ frustum_test_aabb :: proc(frustum: Frustum, aabb: Aabb) -> bool {
   return true
 }
 
-frustum_test_sphere :: proc(
+frustum_test_sphere :: proc "contextless" (
   frustum: Frustum,
   center: [3]f32,
   radius: f32,
@@ -96,7 +105,12 @@ frustum_test_sphere :: proc(
   return true
 }
 
-aabb_transform :: proc(aabb: Aabb, transform: matrix[4, 4]f32) -> (ret: Aabb) {
+aabb_transform :: proc "contextless" (
+  aabb: Aabb,
+  transform: matrix[4, 4]f32,
+) -> (
+  ret: Aabb,
+) {
   min_p := aabb.min
   max_p := aabb.max
   corners: [8][4]f32
