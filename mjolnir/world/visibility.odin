@@ -242,7 +242,7 @@ visibility_render_depth :: proc(
       rm.world_matrix_buffer.descriptor_set,
       rm.node_data_buffer.descriptor_set,
       rm.mesh_data_buffer.descriptor_set,
-      rm.vertex_skinning_descriptor_set,
+      rm.vertex_skinning_buffer.descriptor_set,
     )
     camera_index := camera_index
     vk.CmdPushConstants(
@@ -543,7 +543,7 @@ visibility_render_sphere_depth :: proc(
       rm.world_matrix_buffer.descriptor_set,
       rm.node_data_buffer.descriptor_set,
       rm.mesh_data_buffer.descriptor_set,
-      rm.vertex_skinning_descriptor_set,
+      rm.vertex_skinning_buffer.descriptor_set,
     )
     cam_idx := camera_index
     vk.CmdPushConstants(

@@ -117,6 +117,8 @@ write :: proc {
   mutable_buffer_write_multi,
   buffer_write,
   buffer_write_multi,
+  immutable_bindless_buffer_write,
+  immutable_bindless_buffer_write_multi,
 }
 
 mutable_buffer_write :: proc(
@@ -349,6 +351,12 @@ BindlessBuffer :: struct($T: typeid) {
   descriptor_set: vk.DescriptorSet,
 }
 
+ImmutableBindlessBuffer :: struct($T: typeid) {
+  buffer:         ImmutableBuffer(T),
+  set_layout:     vk.DescriptorSetLayout,
+  descriptor_set: vk.DescriptorSet,
+}
+
 PerFrameBindlessBuffer :: struct($T: typeid, $N: int) {
   buffers:         [N]MutableBuffer(T),
   set_layout:      vk.DescriptorSetLayout,
@@ -384,6 +392,58 @@ bindless_buffer_destroy :: proc(self: ^BindlessBuffer($T), device: vk.Device) {
   vk.DestroyDescriptorSetLayout(device, self.set_layout, nil)
   self.set_layout = 0
   self.descriptor_set = 0
+}
+
+immutable_bindless_buffer_init :: proc(
+  self: ^ImmutableBindlessBuffer($T),
+  gctx: ^GPUContext,
+  capacity: int,
+  stages: vk.ShaderStageFlags,
+) -> vk.Result {
+  self.buffer = malloc_buffer(
+    gctx,
+    T,
+    capacity,
+    {.STORAGE_BUFFER},
+  ) or_return
+  self.set_layout = create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, stages},
+  ) or_return
+  self.descriptor_set = create_descriptor_set(
+    gctx,
+    &self.set_layout,
+    {.STORAGE_BUFFER, buffer_info(&self.buffer)},
+  ) or_return
+  return .SUCCESS
+}
+
+immutable_bindless_buffer_destroy :: proc(
+  self: ^ImmutableBindlessBuffer($T),
+  device: vk.Device,
+) {
+  buffer_destroy(device, &self.buffer)
+  vk.DestroyDescriptorSetLayout(device, self.set_layout, nil)
+  self.set_layout = 0
+  self.descriptor_set = 0
+}
+
+immutable_bindless_buffer_write :: proc(
+  gctx: ^GPUContext,
+  self: ^ImmutableBindlessBuffer($T),
+  data: ^T,
+  index: int = 0,
+) -> vk.Result {
+  return buffer_write(gctx, &self.buffer, data, index)
+}
+
+immutable_bindless_buffer_write_multi :: proc(
+  gctx: ^GPUContext,
+  self: ^ImmutableBindlessBuffer($T),
+  data: []T,
+  index: int = 0,
+) -> vk.Result {
+  return buffer_write_multi(gctx, &self.buffer, data, index)
 }
 
 per_frame_bindless_buffer_init :: proc(

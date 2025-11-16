@@ -397,7 +397,7 @@ render :: proc(
     rm.world_matrix_buffer.descriptor_set,
     rm.node_data_buffer.descriptor_set,
     rm.mesh_data_buffer.descriptor_set,
-    rm.vertex_skinning_descriptor_set,
+    rm.vertex_skinning_buffer.descriptor_set,
     rm.lights_buffer.descriptor_set,
     rm.sprite_buffer.descriptor_set,
   )

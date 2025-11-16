@@ -361,7 +361,7 @@ render :: proc(
     rm.world_matrix_buffer.descriptor_set,
     rm.node_data_buffer.descriptor_set,
     rm.mesh_data_buffer.descriptor_set,
-    rm.vertex_skinning_descriptor_set,
+    rm.vertex_skinning_buffer.descriptor_set,
   )
   push_constants := PushConstant {
     camera_index = camera_handle.index,

@@ -62,9 +62,9 @@ Manager :: struct {
   emitter_buffer:                 gpu.BindlessBuffer(EmitterData),
   forcefield_buffer:              gpu.BindlessBuffer(ForceFieldData),
   sprite_buffer:                  gpu.BindlessBuffer(SpriteData),
-  vertex_skinning_buffer:         gpu.ImmutableBuffer(geometry.SkinningData),
-  vertex_skinning_set_layout:     vk.DescriptorSetLayout,
-  vertex_skinning_descriptor_set: vk.DescriptorSet,
+  vertex_skinning_buffer:         gpu.ImmutableBindlessBuffer(
+    geometry.SkinningData,
+  ),
   vertex_skinning_slab:           SlabAllocator,
   lights:                         Pool(Light),
   lights_buffer:                  gpu.BindlessBuffer(LightData),
@@ -261,7 +261,7 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
-    self.vertex_skinning_set_layout,
+    self.vertex_skinning_buffer.set_layout,
     self.lights_buffer.set_layout,
     self.sprite_buffer.set_layout,
   ) or_return
@@ -283,7 +283,7 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
-    self.vertex_skinning_set_layout,
+    self.vertex_skinning_buffer.set_layout,
     self.lights_buffer.set_layout,
     self.sprite_buffer.set_layout,
   ) or_return
@@ -540,36 +540,23 @@ init_vertex_skinning_buffer :: proc(
     "Creating vertex skinning buffer with capacity %d entries...",
     skinning_count,
   )
-  self.vertex_skinning_buffer = gpu.malloc_buffer(
+  gpu.immutable_bindless_buffer_init(
+    &self.vertex_skinning_buffer,
     gctx,
-    geometry.SkinningData,
     skinning_count,
-    {.STORAGE_BUFFER},
+    {.VERTEX},
   ) or_return
   cont.slab_init(&self.vertex_skinning_slab, VERTEX_SLAB_CONFIG)
-  self.vertex_skinning_set_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.VERTEX}},
-  ) or_return
-  self.vertex_skinning_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.vertex_skinning_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.vertex_skinning_buffer)},
-  ) or_return
   return .SUCCESS
 }
 
 @(private)
 destroy_vertex_skinning_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   cont.slab_destroy(&self.vertex_skinning_slab)
-  gpu.buffer_destroy(gctx.device, &self.vertex_skinning_buffer)
-  vk.DestroyDescriptorSetLayout(
+  gpu.immutable_bindless_buffer_destroy(
+    &self.vertex_skinning_buffer,
     gctx.device,
-    self.vertex_skinning_set_layout,
-    nil,
   )
-  self.vertex_skinning_set_layout = 0
-  self.vertex_skinning_descriptor_set = 0
 }
 
 
