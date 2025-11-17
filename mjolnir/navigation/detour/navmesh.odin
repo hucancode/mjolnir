@@ -615,7 +615,7 @@ get_poly_ref_base :: proc(
 compute_tile_hash :: proc(x: i32, y: i32, mask: i32) -> i32 {
   h1: u32 = 0x8da6b343
   h2: u32 = 0xd8163841
-  h := transmute(i32)h1 * x + transmute(i32)h2 * y
+  h := i32(h1) * x + i32(h2) * y
   return h & mask
 }
 

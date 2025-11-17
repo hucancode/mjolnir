@@ -662,9 +662,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
-  render_delta_time := f32(
-    time.duration_seconds(time.since(self.last_render_timestamp)),
-  )
   world.begin_frame(&self.world, &self.rm)
   render.update_visibility_node_count(&self.render, &self.world)
   main_camera_handle := self.render.main_camera
@@ -801,7 +798,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     ) or_return
     compute_cmd_buffer = compute_buffer
   } else {
-    next_frame_index := (self.frame_index + 1) % FRAMES_IN_FLIGHT
     for &entry, cam_index in self.rm.cameras.entries do if entry.active {
       cam := &entry.item
       if resources.PassType.GEOMETRY not_in cam.enabled_passes do continue

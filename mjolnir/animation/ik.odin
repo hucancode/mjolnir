@@ -81,7 +81,7 @@ fabrik_solve :: proc(
     // Target reachable, iterate FABRIK
     iterations := target.max_iterations > 0 ? target.max_iterations : 10
     tolerance := target.tolerance > 0 ? target.tolerance : 0.001
-    for iter in 0 ..< iterations {
+    for _ in 0 ..< iterations {
       // Forward pass: drag from end to root
       positions[chain_length - 1] = target_pos
       for i := chain_length - 2; i >= 0; i -= 1 {

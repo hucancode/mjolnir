@@ -16,8 +16,8 @@ import "particles"
 import "post_process"
 import "retained_ui"
 import "transparency"
-import "visibility"
 import vk "vendor:vulkan"
+import "visibility"
 
 Manager :: struct {
   geometry:     geometry.Renderer,
@@ -32,18 +32,10 @@ Manager :: struct {
   visibility:   visibility.VisibilitySystem,
 }
 
-update_visibility_node_count :: proc(
-  self: ^Manager,
-  world_state: ^world.World,
-) {
-  i, found := slice.linear_search_reverse_proc(
-    world_state.nodes.entries[:],
-    proc(entry: cont.Entry(world.Node)) -> bool {
-      return entry.active
-    },
-  )
-  node_count := i + 1 if found else len(world_state.nodes.entries)
-  self.visibility.node_count = min(u32(node_count), self.visibility.max_draws)
+update_visibility_node_count :: proc(self: ^Manager, world: ^world.World) {
+  n := min(u32(len(world.nodes.entries)), self.visibility.max_draws)
+  for ; n > 0; n -= 1 do if world.nodes.entries[n - 1].active do break
+  self.visibility.node_count = n
 }
 
 record_compute_commands :: proc(

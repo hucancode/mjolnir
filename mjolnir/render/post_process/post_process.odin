@@ -343,7 +343,7 @@ clear_effects :: proc(self: ^Renderer) {
 }
 
 effect_clear :: proc(self: ^Renderer) {
-  resize(&self.effect_stack, 0)
+  clear(&self.effect_stack)
 }
 
 init :: proc(

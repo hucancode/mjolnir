@@ -791,8 +791,7 @@ node_remove :: proc(
   bounds: Aabb,
 ) -> bool {
   if !aabb_intersects(node.bounds, bounds) do return false
-  i, found := slice.linear_search(node.items[:], item)
-  if found {
+  if i, ok := slice.linear_search(node.items[:], item); ok {
     unordered_remove(&node.items, i)
     node.total_items -= 1
     return true

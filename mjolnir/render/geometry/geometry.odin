@@ -275,10 +275,6 @@ end_pass :: proc(
     rm.images_2d,
     camera.attachments[.EMISSIVE][frame_index],
   )
-  depth_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.DEPTH][frame_index],
-  )
   // transition all G-buffer attachments + depth to SHADER_READ_ONLY_OPTIMAL
   gpu.image_barrier(
     command_buffer,

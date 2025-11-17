@@ -144,20 +144,15 @@ add_animation_layer :: proc(
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, ok := &node.attachment.(MeshAttachment)
   if !ok do return false
-  mesh := cont.get(rm.meshes, mesh_attachment.handle) or_return
-
+  cont.is_valid(rm.meshes, mesh_attachment.handle) or_return
   // Get or initialize skinning
-  if skinning_ptr, has_skin := &mesh_attachment.skinning.?; has_skin {
-    // Skinning already exists, use it
-  } else {
+  if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
     // Initialize skinning with empty layers
     mesh_attachment.skinning = NodeSkinning {
       bone_matrix_buffer_offset = 0xFFFFFFFF,
     }
   }
-
   skinning := &mesh_attachment.skinning.?
-
   // Find animation clip handle and duration
   clip_handle: resources.Handle
   clip_duration: f32
@@ -176,7 +171,6 @@ add_animation_layer :: proc(
     }
   }
   if !found do return false
-
   // Create new layer with handle
   layer: anim.Layer
   clip_handle_u64 := transmute(u64)clip_handle
@@ -188,7 +182,6 @@ add_animation_layer :: proc(
     mode,
     speed,
   )
-
   // Add or replace layer
   if layer_index >= 0 && layer_index < len(skinning.layers) {
     skinning.layers[layer_index] = layer
@@ -270,19 +263,13 @@ add_ik_layer :: proc(
   mesh_attachment, ok := &node.attachment.(MeshAttachment)
   if !ok do return false
   mesh := cont.get(rm.meshes, mesh_attachment.handle) or_return
-
   // Get or initialize skinning
-  if skinning_ptr, has_skin := &mesh_attachment.skinning.?; has_skin {
-    // Skinning already exists
-  } else {
-    // Initialize skinning with empty layers
+  if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
     mesh_attachment.skinning = NodeSkinning {
       bone_matrix_buffer_offset = 0xFFFFFFFF,
     }
   }
-
   skinning := &mesh_attachment.skinning.?
-
   // Resolve bone names to indices
   if len(bone_names) < 2 do return false
   bone_indices := make([]u32, len(bone_names))
@@ -294,7 +281,6 @@ add_ik_layer :: proc(
     }
     bone_indices[i] = idx
   }
-
   // Transform IK target from world space to skeleton-local space
   node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
   target_world_h := linalg.Vector4f32 {

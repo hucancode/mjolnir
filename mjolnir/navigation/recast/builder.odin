@@ -316,7 +316,6 @@ build_contours :: proc(
   flags := make([]u8, len(chf.spans))
   defer delete(flags)
   // Mark region boundaries - spans that have different region neighbors
-  boundary_spans := 0
   for y in 0 ..< h {
     for x in 0 ..< w {
       c := &chf.cells[x + y * w]

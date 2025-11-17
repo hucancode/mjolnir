@@ -502,8 +502,6 @@ build_bv_tree :: proc(
     return
   }
   cs := pmesh.cs
-  ch := pmesh.ch
-  nvp := pmesh.nvp
   quant_factor := 1.0 / cs
   // Use hierarchical structure for larger meshes, flat for smaller ones
   if pmesh.npolys <= 32 {

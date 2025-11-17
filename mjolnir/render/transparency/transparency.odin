@@ -118,8 +118,6 @@ create_transparent_pipelines :: proc(
   self: ^Renderer,
   pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
-  depth_format: vk.Format = .D32_SFLOAT
-  color_format: vk.Format = .B8G8R8A8_SRGB
   vert_module := gpu.create_shader_module(
     gctx.device,
     SHADER_TRANSPARENT_VERT,
@@ -190,8 +188,6 @@ create_wireframe_pipelines :: proc(
   self: ^Renderer,
   pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
-  depth_format: vk.Format = .D32_SFLOAT
-  color_format: vk.Format = .B8G8R8A8_SRGB
   vert_module := gpu.create_shader_module(
     gctx.device,
     SHADER_WIREFRAME_VERT,
@@ -260,8 +256,6 @@ create_sprite_pipeline :: proc(
   self: ^Renderer,
   pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
-  depth_format: vk.Format = .D32_SFLOAT
-  color_format: vk.Format = .B8G8R8A8_SRGB
   vert_module := gpu.create_shader_module(
     gctx.device,
     SHADER_SPRITE_VERT,

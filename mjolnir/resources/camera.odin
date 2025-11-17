@@ -695,7 +695,6 @@ create_camera_depth_pyramid :: proc(
   frame_index: u32,
 ) -> vk.Result {
   depth_handle := camera.attachments[.DEPTH][frame_index]
-  depth_texture := cont.get(manager.images_2d, depth_handle)
   log.debugf(
     "Using depth texture at bindless index %d for frame %d",
     depth_handle.index,

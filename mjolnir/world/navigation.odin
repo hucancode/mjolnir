@@ -126,7 +126,7 @@ add_mesh_to_collector :: proc(
     append(&collector.indices, i32(index) + vertex_offset)
   }
   triangle_count := index_count / 3
-  for i in 0 ..< triangle_count {
+  for _ in 0 ..< triangle_count {
     append(&collector.area_types, area_type)
   }
 }
