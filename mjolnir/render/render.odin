@@ -46,20 +46,13 @@ record_compute_commands :: proc(
   world_state: ^world.World,
   compute_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  vk.ResetCommandBuffer(compute_buffer, {}) or_return
-  vk.BeginCommandBuffer(
-    compute_buffer,
-    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-  ) or_return
+  gpu.begin_record(compute_buffer) or_return
   // Compute for frame N prepares data for frame N+1
   // Buffer indices with FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
   next_frame_index := (frame_index + 1) % resources.FRAMES_IN_FLIGHT
-  for &entry, cam_index in rm.cameras.entries {
-    if !entry.active do continue
-    if resources.PassType.GEOMETRY not_in entry.item.enabled_passes do continue
+  for &entry, cam_index in rm.cameras.entries do if entry.active {
     cam := &entry.item
-    // STEP 1: Build pyramid[N] from depth[N-1]
-    // This allows Compute N to build pyramid[N] from Render N-1's depth
+    resources.camera_upload_data(rm, u32(cam_index), frame_index)
     visibility.build_pyramid(
       &self.visibility,
       gctx,
@@ -69,10 +62,22 @@ record_compute_commands :: proc(
       frame_index, // Build pyramid[N]
       rm,
     )
-    // STEP 2: Cull using camera[N] + pyramid[N] → draw_list[N+1]
-    // Reads pyramid[frame_index], writes draw_list[next_frame_index]
-    // This produces draw_list[N+1] for use by Render N+1
     visibility.perform_culling(
+      &self.visibility,
+      gctx,
+      compute_buffer,
+      cam,
+      u32(cam_index),
+      next_frame_index, // Write draw_list[N+1]
+      {.VISIBLE},
+      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+      rm,
+    )
+  }
+  for &entry, cam_index in rm.spherical_cameras.entries do if entry.active {
+    cam := &entry.item
+    resources.spherical_camera_upload_data(rm, cam, u32(cam_index), frame_index)
+    visibility.perform_sphere_culling(
       &self.visibility,
       gctx,
       compute_buffer,
@@ -90,7 +95,7 @@ record_compute_commands :: proc(
     rm.world_matrix_buffer.descriptor_set,
     rm,
   )
-  vk.EndCommandBuffer(compute_buffer) or_return
+  gpu.end_record(compute_buffer) or_return
   return .SUCCESS
 }
 
@@ -104,18 +109,17 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  main_camera_handle, main_camera_ptr, main_camera_ok := cont.alloc(
+  camera_handle, camera, ok := cont.alloc(
     &rm.cameras,
   )
-  if !main_camera_ok {
-    log.error("Failed to allocate main camera")
+  if !ok {
     return .ERROR_INITIALIZATION_FAILED
   }
   defer if ret != .SUCCESS {
-    cont.free(&rm.cameras, main_camera_handle)
+    cont.free(&rm.cameras, camera_handle)
   }
   resources.camera_init(
-    main_camera_ptr,
+    camera,
     gctx,
     rm,
     swapchain_extent.width,
@@ -129,7 +133,7 @@ init :: proc(
     0.1, // near plane
     100.0, // far plane
   ) or_return
-  self.main_camera = main_camera_handle
+  self.main_camera = camera_handle
   visibility.init(
     &self.visibility,
     gctx,
@@ -137,12 +141,11 @@ init :: proc(
     swapchain_extent.width,
     swapchain_extent.height,
   ) or_return
-  // Allocate camera descriptors after visibility system is initialized
   for frame in 0 ..< resources.FRAMES_IN_FLIGHT {
     resources.camera_allocate_descriptors(
       gctx,
       rm,
-      main_camera_ptr,
+      camera,
       u32(frame),
       &self.visibility.normal_cam_descriptor_layout,
       &self.visibility.depth_reduce_descriptor_layout,
@@ -244,8 +247,7 @@ resize :: proc(
   return .SUCCESS
 }
 
-// Records shadow pass commands directly into the provided command buffer
-record_camera_visibility :: proc(
+render_camera_depth :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
@@ -253,31 +255,27 @@ record_camera_visibility :: proc(
   world_state: ^world.World,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  // Iterate through all regular cameras with shadow pass enabled
   for &entry, cam_index in rm.cameras.entries do if entry.active {
-    if resources.PassType.SHADOW not_in entry.item.enabled_passes do continue
     cam := &entry.item
-    visibility.perform_culling(&self.visibility, gctx, command_buffer, cam, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, rm)
-    visibility.render_depth(&self.visibility, gctx, command_buffer, cam, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, rm)
-    visibility.build_pyramid(&self.visibility, gctx, command_buffer, cam, u32(cam_index), frame_index, rm)
-  }
-  // Iterate through all spherical cameras (all have shadow pass by design)
-  for &entry, cam_index in rm.spherical_cameras.entries {
-    if !entry.active do continue
-    spherical_cam := &entry.item
-    // Upload camera data to GPU buffer (per-frame to avoid frame overlap)
-    resources.spherical_camera_upload_data(
-      rm,
-      spherical_cam,
+    visibility.render_depth(
+      &self.visibility,
+      gctx,
+      command_buffer,
+      cam,
       u32(cam_index),
       frame_index,
+      {.VISIBLE},
+      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+      rm,
     )
-    // Dispatch visibility - records compute culling + depth rendering
+  }
+  for &entry, cam_index in rm.spherical_cameras.entries do if entry.active {
+    cam := &entry.item
     visibility.render_sphere_depth(
       &self.visibility,
       gctx,
       command_buffer,
-      spherical_cam,
+      cam,
       u32(cam_index),
       frame_index,
       {.VISIBLE},
@@ -298,32 +296,7 @@ record_geometry_pass :: proc(
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil {
-    log.error("Failed to get camera for geometry pass")
-    return .ERROR_UNKNOWN
-  }
-  // ═══════════════════════════════════════════════════════════════════════════
-  // GRAPHICS QUEUE: Frame N rendering
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Uses draw_list[N] (prepared by frame N-1 compute) and camera[N] (current frame)
-  // Runs in parallel with frame N compute (which prepares draw_list[N+1] for frame N+1)
-  //
-  // STEP 1: Render depth[N] using draw_list[N], camera[N]
-  // This depth will be read by frame N+1 compute for pyramid building
-  visibility.render_depth(
-    &self.visibility,
-    gctx,
-    command_buffer,
-    camera,
-    camera_handle.index,
-    frame_index,
-    {.VISIBLE},
-    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-    rm,
-  )
-  // STEP 2: Render geometry pass using draw_list[N], camera[N]
-  // draw_list[frame_index] was written by Compute N-1, safe to read during Render N
-  command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
+  if camera == nil do return .ERROR_UNKNOWN
   geometry.begin_pass(camera_handle, command_buffer, rm, frame_index)
   geometry.render(
     &self.geometry,
@@ -333,7 +306,7 @@ record_geometry_pass :: proc(
     frame_index,
     camera.opaque_draw_commands[frame_index].buffer,
     camera.opaque_draw_count[frame_index].buffer,
-    command_stride,
+    u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
   geometry.end_pass(camera_handle, command_buffer, rm, frame_index)
   return .SUCCESS
@@ -411,12 +384,7 @@ record_transparency_pass :: proc(
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil {
-    log.error("Failed to get camera for transparency pass")
-    return .ERROR_UNKNOWN
-  }
-  command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
-  // Single dispatch to generate all 3 draw lists (late, transparent, sprite)
+  if camera == nil do return .ERROR_UNKNOWN
   visibility.perform_culling(
     &self.visibility,
     gctx,
@@ -479,7 +447,6 @@ record_transparency_pass :: proc(
     camera_handle.index,
     rm,
   )
-  // Render transparent meshes with transparent pipeline
   transparency.render(
     &self.transparency,
     self.transparency.transparent_pipeline,
@@ -489,9 +456,8 @@ record_transparency_pass :: proc(
     frame_index,
     camera.transparent_draw_commands[frame_index].buffer,
     camera.transparent_draw_count[frame_index].buffer,
-    command_stride,
+    u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
-  // Render sprites with sprite pipeline
   transparency.render(
     &self.transparency,
     self.transparency.sprite_pipeline,
@@ -501,7 +467,7 @@ record_transparency_pass :: proc(
     frame_index,
     camera.sprite_draw_commands[frame_index].buffer,
     camera.sprite_draw_count[frame_index].buffer,
-    command_stride,
+    u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
   transparency.end_pass(&self.transparency, command_buffer)
   return .SUCCESS
@@ -518,7 +484,6 @@ record_post_process_pass :: proc(
   swapchain_view: vk.ImageView,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  // Transition final image and swapchain image (moved from begin_record)
   if camera, ok := cont.get(rm.cameras, camera_handle); ok {
     if final_image, ok := cont.get(
       rm.images_2d,

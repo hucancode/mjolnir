@@ -657,28 +657,14 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   mu.begin(&self.render.debug_ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-  ) or_return
+  gpu.begin_record(command_buffer) or_return
   world.begin_frame(&self.world, &self.rm)
   render.update_visibility_node_count(&self.render, &self.world)
-  main_camera_handle := self.render.main_camera
-  main_camera := cont.get(self.rm.cameras, main_camera_handle)
-  if main_camera == nil do return .ERROR_UNKNOWN
-  for &entry, cam_index in self.rm.cameras.entries do if entry.active {
-    resources.camera_upload_data(
-      &self.rm,
-      u32(cam_index),
-      self.frame_index,
-    )
-  }
   resources.update_light_camera(&self.rm, self.frame_index)
   if self.pre_render_proc != nil {
     self.pre_render_proc(self)
   }
-  render.record_camera_visibility(
+  render.render_camera_depth(
     &self.render,
     self.frame_index,
     &self.gctx,
@@ -688,7 +674,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue
-    if u32(cam_index) == main_camera_handle.index do continue
     cam_handle := resources.Handle {
       index      = u32(cam_index),
       generation = entry.generation,
@@ -738,46 +723,11 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
       )
     }
   }
-  render.record_geometry_pass(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
-    &self.rm,
-    &self.world,
-    main_camera_handle,
-    command_buffer,
-  )
-  render.record_lighting_pass(
-    &self.render,
-    self.frame_index,
-    &self.rm,
-    main_camera_handle,
-    self.swapchain.format.format,
-    command_buffer,
-  )
-  render.record_particles_pass(
-    &self.render,
-    self.frame_index,
-    &self.rm,
-    main_camera_handle,
-    self.swapchain.format.format,
-    command_buffer,
-  )
-  render.record_transparency_pass(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
-    &self.rm,
-    &self.world,
-    main_camera_handle,
-    self.swapchain.format.format,
-    command_buffer,
-  )
   render.record_post_process_pass(
     &self.render,
     self.frame_index,
     &self.rm,
-    main_camera_handle,
+    self.render.main_camera,
     self.swapchain.format.format,
     self.swapchain.extent,
     self.swapchain.images[self.swapchain.image_index],
@@ -798,28 +748,16 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     ) or_return
     compute_cmd_buffer = compute_buffer
   } else {
-    for &entry, cam_index in self.rm.cameras.entries do if entry.active {
-      cam := &entry.item
-      if resources.PassType.GEOMETRY not_in cam.enabled_passes do continue
-      visibility.perform_culling(
-        &self.render.visibility,
-        &self.gctx,
-        command_buffer,
-        cam,
-        u32(cam_index),
-        // next_frame_index,
-        self.frame_index,
-        {.VISIBLE},
-        {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-        &self.rm,
-      )
-    }
-    particles.simulate(
-      &self.render.particles,
-      command_buffer,
-      self.rm.world_matrix_buffer.descriptor_set,
+    compute_buffer := self.command_buffers[self.frame_index]
+    render.record_compute_commands(
+      &self.render,
+      self.frame_index,
+      &self.gctx,
       &self.rm,
-    )
+      &self.world,
+      compute_buffer,
+    ) or_return
+    compute_cmd_buffer = compute_buffer
   }
   populate_debug_ui(self)
   if self.post_render_proc != nil {
@@ -895,7 +833,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     1,
     &present_barrier,
   )
-  vk.EndCommandBuffer(command_buffer) or_return
+  gpu.end_record(command_buffer) or_return
   gpu.submit_queue_and_present(
     &self.gctx,
     &self.swapchain,

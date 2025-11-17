@@ -3,30 +3,6 @@ package gpu
 import "core:slice"
 import vk "vendor:vulkan"
 
-create_standard_rasterizer :: proc(
-  cull_mode: vk.CullModeFlags = {.BACK},
-  polygon_mode: vk.PolygonMode = .FILL,
-  line_width: f32 = 1.0,
-) -> vk.PipelineRasterizationStateCreateInfo {
-  return {
-    sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = polygon_mode,
-    cullMode = cull_mode,
-    frontFace = .COUNTER_CLOCKWISE,
-    lineWidth = line_width,
-  }
-}
-
-create_double_sided_rasterizer :: proc(
-  line_width: f32 = 1.0,
-) -> vk.PipelineRasterizationStateCreateInfo {
-  return {
-    sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    lineWidth = line_width,
-  }
-}
-
 VERTEX_INPUT_NONE := vk.PipelineVertexInputStateCreateInfo {
   sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 }
@@ -177,6 +153,21 @@ COLOR_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
 DEPTH_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
   sType                   = .PIPELINE_RENDERING_CREATE_INFO,
   depthAttachmentFormat   = .D32_SFLOAT,
+}
+
+begin_record :: proc(
+  command_buffer: vk.CommandBuffer,
+  flags: vk.CommandBufferUsageFlags = {.ONE_TIME_SUBMIT},
+) -> vk.Result {
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  return vk.BeginCommandBuffer(command_buffer, &{
+    sType = .COMMAND_BUFFER_BEGIN_INFO,
+    flags = flags,
+  })
+}
+
+end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
+  return vk.EndCommandBuffer(command_buffer)
 }
 
 create_dynamic_state :: proc(

@@ -110,29 +110,6 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   gpu.mutable_buffer_destroy(gctx.device, &self.path_vertex_buffer)
 }
 
-begin_record :: proc(
-  self: ^Renderer,
-  frame_index: u32,
-  color_format: vk.Format,
-) -> (
-  command_buffer: vk.CommandBuffer,
-  result: vk.Result,
-) {
-  command_buffer = self.commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-  ) or_return
-  result = .SUCCESS
-  return
-}
-
-end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
-  vk.EndCommandBuffer(command_buffer) or_return
-  return .SUCCESS
-}
-
 begin_pass :: proc(
   self: ^Renderer,
   camera_handle: resources.Handle,

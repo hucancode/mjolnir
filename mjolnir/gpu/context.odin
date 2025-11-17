@@ -648,11 +648,7 @@ begin_single_time_command :: proc(
     commandBufferCount = 1,
   }
   vk.AllocateCommandBuffers(self.device, &alloc_info, &cmd_buffer) or_return
-  begin_info := vk.CommandBufferBeginInfo {
-    sType = .COMMAND_BUFFER_BEGIN_INFO,
-    flags = {.ONE_TIME_SUBMIT},
-  }
-  vk.BeginCommandBuffer(cmd_buffer, &begin_info) or_return
+  begin_record(cmd_buffer) or_return
   return cmd_buffer, .SUCCESS
 }
 
@@ -660,7 +656,7 @@ end_single_time_command :: proc(
   self: ^GPUContext,
   cmd_buffer: ^vk.CommandBuffer,
 ) -> vk.Result {
-  vk.EndCommandBuffer(cmd_buffer^) or_return
+  end_record(cmd_buffer^) or_return
   submit_info := vk.SubmitInfo {
     sType              = .SUBMIT_INFO,
     commandBufferCount = 1,
