@@ -31,7 +31,7 @@ Emitter :: struct {
 }
 
 create_emitter :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   node_handle: Handle,
   texture_handle: Handle,
   emission_rate: f32,
@@ -51,7 +51,7 @@ create_emitter :: proc(
   ret: Handle,
   ok: bool,
 ) #optional_ok {
-  handle, emitter := cont.alloc(&manager.emitters) or_return
+  handle, emitter := cont.alloc(&rm.emitters) or_return
   emitter.emission_rate = emission_rate
   emitter.initial_velocity = initial_velocity
   emitter.velocity_spread = velocity_spread
@@ -68,7 +68,7 @@ create_emitter :: proc(
   emitter.node_handle = node_handle
   emitter.texture_handle = texture_handle
   emitter.enabled = true
-  emitter_write_to_gpu(manager, handle, emitter, false)
+  emitter_write_to_gpu(rm, handle, emitter, false)
   return handle, true
 }
 
@@ -87,7 +87,7 @@ emitter_update_gpu_data :: proc(
 }
 
 emitter_write_to_gpu :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   handle: Handle,
   emitter: ^Emitter,
   preserve_time_accumulator: bool = true,
@@ -97,12 +97,12 @@ emitter_write_to_gpu :: proc(
   }
   time_acc: f32 = 0.0
   if preserve_time_accumulator {
-    existing := gpu.get(&manager.emitter_buffer.buffer, handle.index)
+    existing := gpu.get(&rm.emitter_buffer.buffer, handle.index)
     time_acc = existing.time_accumulator
   }
   emitter_update_gpu_data(emitter, time_acc)
   gpu.write(
-    &manager.emitter_buffer.buffer,
+    &rm.emitter_buffer.buffer,
     &emitter.data,
     int(handle.index),
   ) or_return

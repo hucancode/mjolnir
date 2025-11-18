@@ -25,7 +25,7 @@ SphericalCamera :: struct {
 spherical_camera_init :: proc(
   self: ^SphericalCamera,
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   size: u32 = SHADOW_MAP_SIZE,
   center: [3]f32 = {0, 0, 0},
   radius: f32 = 10.0,
@@ -43,7 +43,7 @@ spherical_camera_init :: proc(
   for &v in self.depth_cube {
     v, _ = create_empty_texture_cube(
       gctx,
-      manager,
+      rm,
       size,
       depth_format,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
@@ -67,7 +67,7 @@ spherical_camera_init :: proc(
 spherical_camera_allocate_descriptors :: proc(
   self: ^SphericalCamera,
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   sphere_cam_descriptor_layout: ^vk.DescriptorSetLayout,
 ) -> vk.Result {
   // Create and update all per-frame descriptor sets
@@ -75,13 +75,13 @@ spherical_camera_allocate_descriptors :: proc(
     self.descriptor_sets[frame_index] = gpu.create_descriptor_set(
       gctx,
       sphere_cam_descriptor_layout,
-      {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer.buffer)},
-      {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer.buffer)},
-      {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&rm.node_data_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&rm.mesh_data_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&rm.world_matrix_buffer.buffer)},
       {
         .STORAGE_BUFFER,
         gpu.buffer_info(
-          &manager.spherical_camera_buffer.buffers[frame_index],
+          &rm.spherical_camera_buffer.buffers[frame_index],
         ),
       },
       {.STORAGE_BUFFER, gpu.buffer_info(&self.draw_count)},
@@ -94,10 +94,10 @@ spherical_camera_allocate_descriptors :: proc(
 spherical_camera_destroy :: proc(
   self: ^SphericalCamera,
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
 ) {
   for v in self.depth_cube {
-    if item, freed := cont.free(&manager.images_cube, v); freed {
+    if item, freed := cont.free(&rm.images_cube, v); freed {
       gpu.cube_depth_texture_destroy(gctx.device, item)
     }
   }
@@ -107,12 +107,12 @@ spherical_camera_destroy :: proc(
 
 // Upload camera data to GPU buffer
 spherical_camera_upload_data :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   camera: ^SphericalCamera,
   camera_index: u32,
   frame_index: u32 = 0,
 ) {
-  dst := gpu.get(&manager.spherical_camera_buffer.buffers[frame_index], camera_index)
+  dst := gpu.get(&rm.spherical_camera_buffer.buffers[frame_index], camera_index)
   if dst == nil {
     log.errorf("Spherical camera index %d out of bounds", camera_index)
     return

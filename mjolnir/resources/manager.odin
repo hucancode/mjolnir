@@ -518,11 +518,11 @@ init_vertex_index_buffers :: proc(
 
 @(private)
 destroy_vertex_index_buffers :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   gctx: ^gpu.GPUContext,
 ) {
-  gpu.buffer_destroy(gctx.device, &manager.vertex_buffer)
-  gpu.buffer_destroy(gctx.device, &manager.index_buffer)
-  cont.slab_destroy(&manager.vertex_slab)
-  cont.slab_destroy(&manager.index_slab)
+  gpu.buffer_destroy(gctx.device, &rm.vertex_buffer)
+  gpu.buffer_destroy(gctx.device, &rm.index_buffer)
+  cont.slab_destroy(&rm.vertex_slab)
+  cont.slab_destroy(&rm.index_slab)
 }

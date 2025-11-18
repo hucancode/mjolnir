@@ -10,7 +10,7 @@ import vk "vendor:vulkan"
 
 create_empty_texture_2d :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   width, height: u32,
   format: vk.Format,
   usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
@@ -20,21 +20,21 @@ create_empty_texture_2d :: proc(
 ) {
   ok: bool
   texture: ^gpu.Image
-  handle, texture, ok = cont.alloc(&manager.images_2d)
+  handle, texture, ok = cont.alloc(&rm.images_2d)
   if !ok {
     log.error("Failed to allocate 2D texture: pool capacity reached")
     return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
   spec := gpu.image_spec_2d(width, height, format, usage)
   texture^ = gpu.image_create(gctx, spec) or_return
-  set_texture_2d_descriptor(gctx, manager, handle.index, texture.view)
+  set_texture_2d_descriptor(gctx, rm, handle.index, texture.view)
   log.debugf("Created empty texture %dx%d %v", width, height, format)
   return handle, .SUCCESS
 }
 
 create_empty_texture_cube :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   size: u32,
   format: vk.Format = .D32_SFLOAT,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
@@ -44,7 +44,7 @@ create_empty_texture_cube :: proc(
 ) {
   ok: bool
   texture: ^gpu.CubeImage
-  handle, texture, ok = cont.alloc(&manager.images_cube)
+  handle, texture, ok = cont.alloc(&rm.images_cube)
   if !ok {
     log.error("Failed to allocate cube texture: pool capacity reached")
     return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -63,14 +63,14 @@ create_empty_texture_cube :: proc(
       1, // layer_count
     ) or_return
   }
-  set_texture_cube_descriptor(gctx, manager, handle.index, texture.view)
+  set_texture_cube_descriptor(gctx, rm, handle.index, texture.view)
   log.debugf("Created cube texture %dx%d", size, size)
   return handle, .SUCCESS
 }
 
 create_texture_from_path :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   path: string,
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips := false,
@@ -82,7 +82,7 @@ create_texture_from_path :: proc(
 ) {
   ok: bool
   texture: ^gpu.Image
-  handle, texture, ok = cont.alloc(&manager.images_2d)
+  handle, texture, ok = cont.alloc(&rm.images_2d)
   if !ok {
     log.error("Failed to allocate texture from path: pool capacity reached")
     return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -140,14 +140,14 @@ create_texture_from_path :: proc(
       data_size,
     ) or_return
   }
-  set_texture_2d_descriptor(gctx, manager, handle.index, texture.view)
+  set_texture_2d_descriptor(gctx, rm, handle.index, texture.view)
   log.debugf("Created texture from path: %s (%dx%d)", path, width, height)
   return handle, .SUCCESS
 }
 
 create_texture_from_pixels :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   pixels: []u8,
   width, height: int,
   format: vk.Format = .R8G8B8A8_SRGB,
@@ -158,7 +158,7 @@ create_texture_from_pixels :: proc(
 ) {
   ok: bool
   texture: ^gpu.Image
-  handle, texture, ok = cont.alloc(&manager.images_2d)
+  handle, texture, ok = cont.alloc(&rm.images_2d)
   if !ok {
     log.error("Failed to allocate texture from pixels: pool capacity reached")
     return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -185,7 +185,7 @@ create_texture_from_pixels :: proc(
       vk.DeviceSize(len(pixels)),
     ) or_return
   }
-  set_texture_2d_descriptor(gctx, manager, handle.index, texture.view)
+  set_texture_2d_descriptor(gctx, rm, handle.index, texture.view)
   log.debugf("Created texture from pixels (%dx%d)", width, height)
   return handle, .SUCCESS
 }
@@ -193,7 +193,7 @@ create_texture_from_pixels :: proc(
 // Create texture from compressed data (PNG, JPG, etc.)
 create_texture_from_data :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   data: []u8,
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips := false,
@@ -203,7 +203,7 @@ create_texture_from_data :: proc(
 ) {
   ok: bool
   texture: ^gpu.Image
-  handle, texture, ok = cont.alloc(&manager.images_2d)
+  handle, texture, ok = cont.alloc(&rm.images_2d)
   if !ok {
     log.error("Failed to allocate texture from data: pool capacity reached")
     return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -245,7 +245,7 @@ create_texture_from_data :: proc(
     ) or_return
   }
   stbi.image_free(pixels)
-  set_texture_2d_descriptor(gctx, manager, handle.index, texture.view)
+  set_texture_2d_descriptor(gctx, rm, handle.index, texture.view)
   log.debugf("Created texture from data (%dx%d)", width, height)
   return handle, .SUCCESS
 }
@@ -270,7 +270,7 @@ create_texture_handle :: proc {
 
 create_empty_texture_2d_handle :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   width, height: u32,
   format: vk.Format,
   usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
@@ -280,7 +280,7 @@ create_empty_texture_2d_handle :: proc(
 ) #optional_ok {
   h, ret := create_empty_texture_2d(
     gctx,
-    manager,
+    rm,
     width,
     height,
     format,
@@ -291,7 +291,7 @@ create_empty_texture_2d_handle :: proc(
 
 create_texture_from_path_handle :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   path: string,
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips := false,
@@ -303,7 +303,7 @@ create_texture_from_path_handle :: proc(
 ) #optional_ok {
   h, ret := create_texture_from_path(
     gctx,
-    manager,
+    rm,
     path,
     format,
     generate_mips,
@@ -315,7 +315,7 @@ create_texture_from_path_handle :: proc(
 
 create_texture_from_data_handle :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   data: []u8,
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips := false,
@@ -325,7 +325,7 @@ create_texture_from_data_handle :: proc(
 ) #optional_ok {
   h, ret := create_texture_from_data(
     gctx,
-    manager,
+    rm,
     data,
     format,
     generate_mips,
@@ -335,7 +335,7 @@ create_texture_from_data_handle :: proc(
 
 create_texture_from_pixels_handle :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   pixels: []u8,
   width, height: int,
   format: vk.Format = .R8G8B8A8_SRGB,
@@ -346,7 +346,7 @@ create_texture_from_pixels_handle :: proc(
 ) #optional_ok {
   h, ret := create_texture_from_pixels(
     gctx,
-    manager,
+    rm,
     pixels,
     width,
     height,
@@ -358,7 +358,7 @@ create_texture_from_pixels_handle :: proc(
 
 create_solid_color_texture :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   color: [4]u8,
   width: u32 = 1,
   height: u32 = 1,
@@ -377,7 +377,7 @@ create_solid_color_texture :: proc(
   }
   return create_texture_from_pixels(
     gctx,
-    manager,
+    rm,
     pixels,
     int(width),
     int(height),
@@ -386,7 +386,7 @@ create_solid_color_texture :: proc(
 
 create_checkerboard_texture :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   color_a: [4]u8 = {255, 255, 255, 255},
   color_b: [4]u8 = {0, 0, 0, 255},
   size: u32 = 64,
@@ -413,27 +413,27 @@ create_checkerboard_texture :: proc(
   }
   return create_texture_from_pixels(
     gctx,
-    manager,
+    rm,
     pixels,
     int(size),
     int(size),
   )
 }
 
-destroy_texture :: proc(device: vk.Device, manager: ^Manager, handle: Handle) {
-  if texture := cont.get(manager.images_2d, handle); texture != nil {
+destroy_texture :: proc(device: vk.Device, rm: ^Manager, handle: Handle) {
+  if texture := cont.get(rm.images_2d, handle); texture != nil {
     gpu.image_destroy(device, texture)
-    cont.free(&manager.images_2d, handle)
-  } else if cube_texture := cont.get(manager.images_cube, handle);
+    cont.free(&rm.images_2d, handle)
+  } else if cube_texture := cont.get(rm.images_cube, handle);
      cube_texture != nil {
     gpu.cube_depth_texture_destroy(device, cube_texture)
-    cont.free(&manager.images_cube, handle)
+    cont.free(&rm.images_cube, handle)
   }
 }
 
 set_texture_2d_descriptor :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   index: u32,
   image_view: vk.ImageView,
 ) {
@@ -443,7 +443,7 @@ set_texture_2d_descriptor :: proc(
   }
   gpu.update_descriptor_set_array_offset(
     gctx,
-    manager.textures_descriptor_set,
+    rm.textures_descriptor_set,
     0,
     index,
     {
@@ -458,7 +458,7 @@ set_texture_2d_descriptor :: proc(
 
 set_texture_cube_descriptor :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   index: u32,
   image_view: vk.ImageView,
 ) {
@@ -468,7 +468,7 @@ set_texture_cube_descriptor :: proc(
   }
   gpu.update_descriptor_set_array_offset(
     gctx,
-    manager.textures_descriptor_set,
+    rm.textures_descriptor_set,
     2,
     index,
     {

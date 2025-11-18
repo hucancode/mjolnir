@@ -208,7 +208,7 @@ sprite_update_gpu_data :: proc(sprite: ^Sprite) {
 }
 
 sprite_write_to_gpu :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   handle: Handle,
   sprite: ^Sprite,
 ) -> vk.Result {
@@ -221,11 +221,11 @@ sprite_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   sprite_update_gpu_data(sprite)
-  return gpu.write(&manager.sprite_buffer.buffer, &sprite.data, int(handle.index))
+  return gpu.write(&rm.sprite_buffer.buffer, &sprite.data, int(handle.index))
 }
 
 create_sprite :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   texture: Handle,
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
@@ -238,7 +238,7 @@ create_sprite :: proc(
   ok: bool,
 ) #optional_ok {
   sprite: ^Sprite
-  handle, sprite = cont.alloc(&manager.sprites) or_return
+  handle, sprite = cont.alloc(&rm.sprites) or_return
   sprite_init(
     sprite,
     texture,
@@ -249,31 +249,31 @@ create_sprite :: proc(
     sampler,
   )
   sprite.animation = animation
-  res := sprite_write_to_gpu(manager, handle, sprite)
+  res := sprite_write_to_gpu(rm, handle, sprite)
   if res != .SUCCESS {
-    cont.free(&manager.sprites, handle)
+    cont.free(&rm.sprites, handle)
     return {}, false
   }
   if _, has_anim := animation.?; has_anim {
-    register_animatable_sprite(manager, handle)
+    register_animatable_sprite(rm, handle)
   }
   return handle, true
 }
 
-destroy_sprite_handle :: proc(manager: ^Manager, handle: Handle) {
-  unregister_animatable_sprite(manager, handle)
-  cont.free(&manager.sprites, handle)
+destroy_sprite_handle :: proc(rm: ^Manager, handle: Handle) {
+  unregister_animatable_sprite(rm, handle)
+  cont.free(&rm.sprites, handle)
 }
 
-register_animatable_sprite :: proc(manager: ^Manager, handle: Handle) {
+register_animatable_sprite :: proc(rm: ^Manager, handle: Handle) {
   // TODO: if this list get more than 10000 items, we need to use a map
-  if slice.contains(manager.animatable_sprites[:], handle) do return
-  append(&manager.animatable_sprites, handle)
+  if slice.contains(rm.animatable_sprites[:], handle) do return
+  append(&rm.animatable_sprites, handle)
 }
 
-unregister_animatable_sprite :: proc(manager: ^Manager, handle: Handle) {
-  if i, found := slice.linear_search(manager.animatable_sprites[:], handle);
+unregister_animatable_sprite :: proc(rm: ^Manager, handle: Handle) {
+  if i, found := slice.linear_search(rm.animatable_sprites[:], handle);
      found {
-    unordered_remove(&manager.animatable_sprites, i)
+    unordered_remove(&rm.animatable_sprites, i)
   }
 }

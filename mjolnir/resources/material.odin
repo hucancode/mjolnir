@@ -70,7 +70,7 @@ material_update_gpu_data :: proc(mat: ^Material) {
 }
 
 material_write_to_gpu :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   handle: Handle,
   mat: ^Material,
 ) -> vk.Result {
@@ -78,12 +78,12 @@ material_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   material_update_gpu_data(mat)
-  gpu.write(&manager.material_buffer.buffer, &mat.data, int(handle.index)) or_return
+  gpu.write(&rm.material_buffer.buffer, &mat.data, int(handle.index)) or_return
   return .SUCCESS
 }
 
 create_material :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   features: ShaderFeatureSet = {},
   type: MaterialType = .PBR,
   albedo_handle: Handle = {},
@@ -101,7 +101,7 @@ create_material :: proc(
 ) {
   ok: bool
   mat: ^Material
-  ret, mat, ok = cont.alloc(&manager.materials)
+  ret, mat, ok = cont.alloc(&rm.materials)
   if !ok {
     log.error("Failed to allocate material: pool capacity reached")
     return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -124,12 +124,12 @@ create_material :: proc(
     mat.normal.index,
     mat.emissive.index,
   )
-  res = material_write_to_gpu(manager, ret, mat)
+  res = material_write_to_gpu(rm, ret, mat)
   return
 }
 
 create_material_handle :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   features: ShaderFeatureSet = {},
   type: MaterialType = .PBR,
   albedo_handle: Handle = {},
@@ -146,7 +146,7 @@ create_material_handle :: proc(
   ok: bool,
 ) #optional_ok {
   h, ret := create_material(
-    manager,
+    rm,
     features,
     type,
     albedo_handle,

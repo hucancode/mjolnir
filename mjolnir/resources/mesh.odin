@@ -68,12 +68,12 @@ Primitive :: enum {
   TORUS,
 }
 
-mesh_destroy :: proc(self: ^Mesh, manager: ^Manager) {
-  free_vertices(manager, self.vertex_allocation)
-  free_indices(manager, self.index_allocation)
+mesh_destroy :: proc(self: ^Mesh, rm: ^Manager) {
+  free_vertices(rm, self.vertex_allocation)
+  free_indices(rm, self.index_allocation)
   skin, has_skin := &self.skinning.?
   if !has_skin do return
-  free_vertex_skinning(manager, skin.vertex_skinning_allocation)
+  free_vertex_skinning(rm, skin.vertex_skinning_allocation)
   for &bone in skin.bones do bone_destroy(&bone)
   delete(skin.bones)
   delete(skin.bone_lengths)
@@ -99,26 +99,26 @@ find_bone_by_name :: proc(
 mesh_init :: proc(
   self: ^Mesh,
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   data: geometry.Geometry,
 ) -> vk.Result {
   defer geometry.delete_geometry(data)
   self.aabb_min = data.aabb.min
   self.aabb_max = data.aabb.max
   self.vertex_allocation = allocate_vertices(
-    manager,
+    rm,
     gctx,
     data.vertices,
   ) or_return
   self.index_allocation = allocate_indices(
-    manager,
+    rm,
     gctx,
     data.indices,
   ) or_return
   if len(data.skinnings) <= 0 {
     return .SUCCESS
   }
-  allocation, ret := allocate_vertex_skinning(manager, gctx, data.skinnings)
+  allocation, ret := allocate_vertex_skinning(rm, gctx, data.skinnings)
   if ret != .SUCCESS {
     return ret
   }
@@ -624,7 +624,7 @@ sample_clip_with_ik :: proc(
 
 create_mesh :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   data: geometry.Geometry,
   auto_purge: bool = false,
 ) -> (
@@ -633,16 +633,16 @@ create_mesh :: proc(
 ) {
   ok: bool
   mesh: ^Mesh
-  handle, mesh, ok = cont.alloc(&manager.meshes)
+  handle, mesh, ok = cont.alloc(&rm.meshes)
   if !ok {
     ret = .ERROR_OUT_OF_DEVICE_MEMORY
     return
   }
-  defer if !ok do cont.free(&manager.meshes, handle)
-  mesh_init(mesh, gctx, manager, data) or_return
-  defer if !ok do mesh_destroy(mesh, manager)
+  defer if !ok do cont.free(&rm.meshes, handle)
+  mesh_init(mesh, gctx, rm, data) or_return
+  defer if !ok do mesh_destroy(mesh, rm)
   mesh.auto_purge = auto_purge
-  mesh_upload_gpu_data(manager, handle, mesh) or_return
+  mesh_upload_gpu_data(rm, handle, mesh) or_return
   ret = .SUCCESS
   return
 }
@@ -744,8 +744,8 @@ free_vertices :: proc(self: ^Manager, allocation: BufferAllocation) {
   cont.slab_free(&self.vertex_slab, allocation.offset)
 }
 
-free_indices :: proc(manager: ^Manager, allocation: BufferAllocation) {
-  cont.slab_free(&manager.index_slab, allocation.offset)
+free_indices :: proc(rm: ^Manager, allocation: BufferAllocation) {
+  cont.slab_free(&rm.index_slab, allocation.offset)
 }
 
 init_builtin_meshes :: proc(

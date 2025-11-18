@@ -40,7 +40,7 @@ Light :: struct {
 }
 
 create_light :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   gctx: ^gpu.GPUContext,
   light_type: LightType,
   node_handle: Handle,
@@ -53,7 +53,7 @@ create_light :: proc(
   ret: Handle,
   ok: bool,
 ) {
-  handle, light := cont.alloc(&manager.lights) or_return
+  handle, light := cont.alloc(&rm.lights) or_return
   light.type = light_type
   light.node_handle = node_handle
   light.cast_shadow = cast_shadow
@@ -64,34 +64,34 @@ create_light :: proc(
   light.node_index = node_handle.index
   light.camera_handle = {}
   light.camera_index = 0xFFFFFFFF
-  gpu.write(&manager.lights_buffer.buffer, &light.data, int(handle.index))
-  register_active_light(manager, handle)
+  gpu.write(&rm.lights_buffer.buffer, &light.data, int(handle.index))
+  register_active_light(rm, handle)
   return handle, true
 }
 
 destroy_light :: proc(
-  manager: ^Manager,
+  rm: ^Manager,
   gctx: ^gpu.GPUContext,
   handle: Handle,
 ) -> bool {
-  unregister_active_light(manager, handle)
-  _, freed := cont.free(&manager.lights, handle)
+  unregister_active_light(rm, handle)
+  _, freed := cont.free(&rm.lights, handle)
   return freed
 }
 
-update_light_gpu_data :: proc(manager: ^Manager, handle: Handle) {
-  if light, ok := cont.get(manager.lights, handle); ok {
-    gpu.write(&manager.lights_buffer.buffer, &light.data, int(handle.index))
+update_light_gpu_data :: proc(rm: ^Manager, handle: Handle) {
+  if light, ok := cont.get(rm.lights, handle); ok {
+    gpu.write(&rm.lights_buffer.buffer, &light.data, int(handle.index))
   }
 }
 
-update_light_camera :: proc(manager: ^Manager, frame_index: u32 = 0) {
-  for handle, light_index in manager.active_lights {
-    light := cont.get(manager.lights, handle) or_continue
+update_light_camera :: proc(rm: ^Manager, frame_index: u32 = 0) {
+  for handle, light_index in rm.active_lights {
+    light := cont.get(rm.lights, handle) or_continue
     // Get light's world transform from node
-    node_data := gpu.get(&manager.node_data_buffer.buffer, light.node_index)
+    node_data := gpu.get(&rm.node_data_buffer.buffer, light.node_index)
     if node_data == nil do continue
-    world_matrix := gpu.get(&manager.world_matrix_buffer.buffer, light.node_index)
+    world_matrix := gpu.get(&rm.world_matrix_buffer.buffer, light.node_index)
     if world_matrix == nil do continue
     // Extract position and direction from world matrix
     light_position := world_matrix[3].xyz
@@ -103,7 +103,7 @@ update_light_camera :: proc(manager: ^Manager, frame_index: u32 = 0) {
       case .POINT:
         // Point lights use spherical cameras
         spherical_cam := cont.get(
-          manager.spherical_cameras,
+          rm.spherical_cameras,
           light.camera_handle,
         )
         if spherical_cam != nil {
@@ -112,7 +112,7 @@ update_light_camera :: proc(manager: ^Manager, frame_index: u32 = 0) {
         }
       case .DIRECTIONAL:
         // TODO: Implement directional light later
-        cam := cont.get(manager.cameras, light.camera_handle)
+        cam := cont.get(rm.cameras, light.camera_handle)
         if cam != nil {
           camera_position := light_position - light_direction * 50.0 // Far back
           target_position := light_position
@@ -120,7 +120,7 @@ update_light_camera :: proc(manager: ^Manager, frame_index: u32 = 0) {
           shadow_map_id = cam.attachments[.DEPTH][frame_index].index
         }
       case .SPOT:
-        cam := cont.get(manager.cameras, light.camera_handle)
+        cam := cont.get(rm.cameras, light.camera_handle)
         if cam != nil {
           target_position := light_position + light_direction
           camera_look_at(cam, light_position, target_position)
@@ -134,21 +134,21 @@ update_light_camera :: proc(manager: ^Manager, frame_index: u32 = 0) {
       shadow_map = shadow_map_id,
     }
     gpu.write(
-      &manager.dynamic_light_data_buffer.buffers[frame_index],
+      &rm.dynamic_light_data_buffer.buffers[frame_index],
       &dynamic_data,
       light_index,
     )
   }
 }
 
-register_active_light :: proc(manager: ^Manager, handle: Handle) {
+register_active_light :: proc(rm: ^Manager, handle: Handle) {
   // TODO: if this list get more than 10000 items, we need to use a map
-  if slice.contains(manager.active_lights[:], handle) do return
-  append(&manager.active_lights, handle)
+  if slice.contains(rm.active_lights[:], handle) do return
+  append(&rm.active_lights, handle)
 }
 
-unregister_active_light :: proc(manager: ^Manager, handle: Handle) {
-  if i, found := slice.linear_search(manager.active_lights[:], handle); found {
-    unordered_remove(&manager.active_lights, i)
+unregister_active_light :: proc(rm: ^Manager, handle: Handle) {
+  if i, found := slice.linear_search(rm.active_lights[:], handle); found {
+    unordered_remove(&rm.active_lights, i)
   }
 }

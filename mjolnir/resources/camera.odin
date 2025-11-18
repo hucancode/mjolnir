@@ -110,7 +110,7 @@ DepthPyramid :: struct {
 camera_init :: proc(
   camera: ^Camera,
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   width, height: u32,
   color_format, depth_format: vk.Format,
   enabled_passes: PassTypeSet = {
@@ -163,9 +163,10 @@ camera_init :: proc(
     .POST_PROCESS in enabled_passes
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     if needs_final {
-      camera.attachments[.FINAL_IMAGE][frame] = create_texture(
+      camera.attachments[.FINAL_IMAGE][frame] =
+      create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         color_format,
@@ -173,50 +174,56 @@ camera_init :: proc(
       ) or_continue
     }
     if needs_gbuffer {
-      camera.attachments[.POSITION][frame] = create_texture(
+      camera.attachments[.POSITION][frame] =
+      create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R32G32B32A32_SFLOAT,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
-      camera.attachments[.NORMAL][frame] = create_texture(
+      camera.attachments[.NORMAL][frame] =
+      create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
-      camera.attachments[.ALBEDO][frame] = create_texture(
+      camera.attachments[.ALBEDO][frame] =
+      create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
-      camera.attachments[.METALLIC_ROUGHNESS][frame] = create_texture(
+      camera.attachments[.METALLIC_ROUGHNESS][frame] =
+      create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
-      camera.attachments[.EMISSIVE][frame] = create_texture(
+      camera.attachments[.EMISSIVE][frame] =
+      create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
     }
-    camera.attachments[.DEPTH][frame] = create_texture(
+    camera.attachments[.DEPTH][frame] =
+    create_texture(
       gctx,
-      manager,
+      rm,
       width,
       height,
       depth_format,
@@ -224,7 +231,7 @@ camera_init :: proc(
     ) or_continue
     // Transition depth image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL
     if depth, ok := cont.get(
-      manager.images_2d,
+      rm.images_2d,
       camera.attachments[.DEPTH][frame],
     ); ok {
       cmd_buf := gpu.begin_single_time_command(gctx) or_return
@@ -283,7 +290,7 @@ camera_init :: proc(
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     create_camera_depth_pyramid(
       gctx,
-      manager,
+      rm,
       camera,
       width,
       height,
@@ -296,11 +303,11 @@ camera_init :: proc(
 camera_destroy :: proc(
   self: ^Camera,
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
 ) {
   for handles in self.attachments {
     for handle in handles {
-      if item, freed := cont.free(&manager.images_2d, handle); freed {
+      if item, freed := cont.free(&rm.images_2d, handle); freed {
         gpu.image_destroy(gctx.device, item)
       }
     }
@@ -329,7 +336,7 @@ camera_destroy :: proc(
     gpu.mutable_buffer_destroy(gctx.device, &self.sprite_draw_commands[frame])
     // Free depth pyramid texture
     if pyramid_item, freed := cont.free(
-      &manager.images_2d,
+      &rm.images_2d,
       self.depth_pyramid[frame].texture,
     ); freed {
       gpu.image_destroy(gctx.device, pyramid_item)
@@ -426,7 +433,7 @@ camera_update_aspect_ratio :: proc(self: ^Camera, new_aspect_ratio: f32) {
 camera_resize :: proc(
   camera: ^Camera,
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   width, height: u32,
   color_format: vk.Format,
   depth_format: vk.Format,
@@ -447,13 +454,13 @@ camera_resize :: proc(
     }
     vk.DestroyImageView(gctx.device, p.full_view, nil)
     vk.DestroySampler(gctx.device, p.sampler, nil)
-    if pyramid_item, freed := cont.free(&manager.images_2d, p.texture); freed {
+    if pyramid_item, freed := cont.free(&rm.images_2d, p.texture); freed {
       gpu.image_destroy(gctx.device, pyramid_item)
     }
   }
   for handles in camera.attachments {
     for handle in handles {
-      if item, freed := cont.free(&manager.images_2d, handle); freed {
+      if item, freed := cont.free(&rm.images_2d, handle); freed {
         gpu.image_destroy(gctx.device, item)
       }
     }
@@ -473,7 +480,7 @@ camera_resize :: proc(
     if needs_final {
       camera.attachments[.FINAL_IMAGE][frame], _ = create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         color_format,
@@ -483,7 +490,7 @@ camera_resize :: proc(
     if needs_gbuffer {
       camera.attachments[.POSITION][frame], _ = create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R32G32B32A32_SFLOAT,
@@ -491,7 +498,7 @@ camera_resize :: proc(
       )
       camera.attachments[.NORMAL][frame], _ = create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
@@ -499,7 +506,7 @@ camera_resize :: proc(
       )
       camera.attachments[.ALBEDO][frame], _ = create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
@@ -507,7 +514,7 @@ camera_resize :: proc(
       )
       camera.attachments[.METALLIC_ROUGHNESS][frame], _ = create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
@@ -515,7 +522,7 @@ camera_resize :: proc(
       )
       camera.attachments[.EMISSIVE][frame], _ = create_texture(
         gctx,
-        manager,
+        rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
@@ -524,13 +531,13 @@ camera_resize :: proc(
     }
     camera.attachments[.DEPTH][frame], _ = create_texture(
       gctx,
-      manager,
+      rm,
       width,
       height,
       depth_format,
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
-    depth_tex := cont.get(manager.images_2d, camera.attachments[.DEPTH][frame])
+    depth_tex := cont.get(rm.images_2d, camera.attachments[.DEPTH][frame])
     if depth_tex != nil {
       cmd_buf := gpu.begin_single_time_command(gctx) or_return
       gpu.image_barrier(
@@ -550,12 +557,14 @@ camera_resize :: proc(
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     create_camera_depth_pyramid(
       gctx,
-      manager,
+      rm,
       camera,
       width,
       height,
       u32(frame),
     ) or_return
+    // TODO: reallocate camera descriptors
+    // camera_allocate_descriptors
   }
   log.infof("Camera resized to %dx%d", width, height)
   return .SUCCESS
@@ -688,7 +697,7 @@ camera_raycast_multi :: proc(
 @(private)
 create_camera_depth_pyramid :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   camera: ^Camera,
   width: u32,
   height: u32,
@@ -707,7 +716,7 @@ create_camera_depth_pyramid :: proc(
   mip_levels :=
     u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
   // Create depth pyramid texture with mip levels using new Image API
-  pyramid_handle, pyramid_texture, pyramid_ok := cont.alloc(&manager.images_2d)
+  pyramid_handle, pyramid_texture, pyramid_ok := cont.alloc(&rm.images_2d)
   if !pyramid_ok {
     log.error("Failed to allocate handle for depth pyramid texture")
     return .ERROR_OUT_OF_DEVICE_MEMORY
@@ -742,7 +751,7 @@ create_camera_depth_pyramid :: proc(
   // Register the auto-created view in bindless texture array
   set_texture_2d_descriptor(
     gctx,
-    manager,
+    rm,
     pyramid_handle.index,
     pyramid_texture.view,
   )
@@ -824,7 +833,7 @@ create_camera_depth_pyramid :: proc(
 
 camera_allocate_descriptors :: proc(
   gctx: ^gpu.GPUContext,
-  manager: ^Manager,
+  rm: ^Manager,
   camera: ^Camera,
   frame_index: u32,
   normal_cam_descriptor_layout: ^vk.DescriptorSetLayout,
@@ -846,12 +855,12 @@ camera_allocate_descriptors :: proc(
   gpu.update_descriptor_set(
     gctx,
     camera.descriptor_set[frame_index],
-    {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer.buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&manager.mesh_data_buffer.buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&manager.world_matrix_buffer.buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&rm.node_data_buffer.buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&rm.mesh_data_buffer.buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&rm.world_matrix_buffer.buffer)},
     {
       .STORAGE_BUFFER,
-      gpu.buffer_info(&manager.camera_buffer.buffers[frame_index]),
+      gpu.buffer_info(&rm.camera_buffer.buffers[frame_index]),
     },
     {.STORAGE_BUFFER, gpu.buffer_info(&camera.opaque_draw_count[frame_index])},
     {
@@ -885,7 +894,7 @@ camera_allocate_descriptors :: proc(
     // pyramid[N] mip 0 reads from depth[N-1]
     // This allows compute to build pyramid[N] while graphics renders depth[N]
     prev_depth_texture := cont.get(
-      manager.images_2d,
+      rm.images_2d,
       camera.attachments[.DEPTH][prev_frame],
     )
     // Mip 0 reads from previous frame's depth texture, other mips read from current pyramid's previous mip level
