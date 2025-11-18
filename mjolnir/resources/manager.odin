@@ -163,15 +163,6 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     {.VERTEX, .FRAGMENT},
   ) or_return
   defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.node_data_buffer, gctx.device)
-  node_slice := gpu.get_all(&self.node_data_buffer.buffer)
-  slice.fill(
-    node_slice,
-    NodeData {
-      material_id = 0xFFFFFFFF,
-      mesh_id = 0xFFFFFFFF,
-      attachment_data_index = 0xFFFFFFFF,
-    },
-  )
   gpu.bindless_buffer_init(
     &self.mesh_data_buffer,
     gctx,
@@ -213,15 +204,6 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     {.VERTEX, .FRAGMENT},
   ) or_return
   defer if ret != .SUCCESS do gpu.per_frame_bindless_buffer_destroy(&self.dynamic_light_data_buffer, gctx.device)
-  for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
-    dynamic_data := gpu.get_all(
-      &self.dynamic_light_data_buffer.buffers[frame_idx],
-    )
-    for &data in dynamic_data {
-      data.position = {0, 0, 0, 0}
-      data.shadow_map = 0xFFFFFFFF
-    }
-  }
   gpu.bindless_buffer_init(
     &self.sprite_buffer,
     gctx,

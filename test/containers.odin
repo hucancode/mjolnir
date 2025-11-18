@@ -193,13 +193,10 @@ test_pool_generation_wraparound :: proc(t: ^testing.T) {
   pool: c.Pool(Test_Item)
   c.init(&pool)
   defer c.destroy(pool, proc(item: ^Test_Item) {})
-
   h, _, _ := c.alloc(&pool)
   // Manually set generation to max - 1 to test wraparound
   pool.entries[h.index].generation = 0xFFFFFFFF
-
   c.free(&pool, c.Handle{h.index, 0xFFFFFFFF})
-
   // Next allocation should wrap generation to 1 (skip 0)
   h2, _, _ := c.alloc(&pool)
   testing.expect(t, h2.generation == 1, "Generation should wrap to 1 (skip 0)")

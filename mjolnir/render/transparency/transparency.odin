@@ -77,22 +77,10 @@ init :: proc(
     indices  = indices,
     aabb     = geometry.aabb_from_vertices(vertices),
   }
-  mesh_handle, mesh_ptr := resources.create_mesh(gctx, rm, quad_geom) or_return
+  self.sprite_quad_mesh = resources.create_mesh(gctx, rm, quad_geom) or_return
   defer if ret != .SUCCESS {
-    resources.mesh_destroy_handle(gctx.device, rm, mesh_handle)
+    resources.mesh_destroy_handle(rm, self.sprite_quad_mesh)
   }
-  self.sprite_quad_mesh = mesh_handle
-  log.infof(
-    "Created sprite quad mesh with handle index=%d, index_count=%d, AABB=[%.2f,%.2f,%.2f]-[%.2f,%.2f,%.2f]",
-    mesh_handle.index,
-    mesh_ptr.index_count,
-    mesh_ptr.aabb_min.x,
-    mesh_ptr.aabb_min.y,
-    mesh_ptr.aabb_min.z,
-    mesh_ptr.aabb_max.x,
-    mesh_ptr.aabb_max.y,
-    mesh_ptr.aabb_max.z,
-  )
   create_transparent_pipelines(
     gctx,
     self,
@@ -374,7 +362,6 @@ render :: proc(
   frame_index: u32,
   draw_buffer: vk.Buffer,
   count_buffer: vk.Buffer,
-  command_stride: u32,
 ) {
   if draw_buffer == 0 || count_buffer == 0 {
     log.warn("Transparency render: draw_buffer or count_buffer is null")
@@ -423,7 +410,7 @@ render :: proc(
     count_buffer,
     0,
     resources.MAX_NODES_IN_SCENE,
-    command_stride,
+    u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
 }
 

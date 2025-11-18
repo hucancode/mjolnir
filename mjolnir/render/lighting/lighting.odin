@@ -208,7 +208,14 @@ init :: proc(
       gpu.image_destroy(gctx.device, item)
     }
   }
-  self.environment_max_lod = f32(gpu.calculate_mip_levels( environment_map.spec.width, environment_map.spec.height)) - 1.0
+  self.environment_max_lod =
+    f32(
+      gpu.calculate_mip_levels(
+        environment_map.spec.width,
+        environment_map.spec.height,
+      ),
+    ) -
+    1.0
   brdf_handle, _ := resources.create_texture_from_data(
     gctx,
     rm,
@@ -261,7 +268,9 @@ init :: proc(
     vertexBindingDescriptionCount   = 1,
     pVertexBindingDescriptions      = &geometry.VERTEX_BINDING_DESCRIPTION[0],
     vertexAttributeDescriptionCount = 1, // Only position needed for lighting
-    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]), // Position at location 0
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ), // Position at location 0
   }
   lighting_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
@@ -306,7 +315,7 @@ init :: proc(
     vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
   }
   log.info("Lighting pipeline initialized successfully")
-  self.sphere_mesh, _ = resources.create_mesh(
+  self.sphere_mesh = resources.create_mesh(
     gctx,
     rm,
     geometry.make_sphere(segments = 64, rings = 64),
@@ -316,7 +325,7 @@ init :: proc(
       resources.mesh_destroy(mesh, rm)
     }
   }
-  self.cone_mesh, _ = resources.create_mesh(
+  self.cone_mesh = resources.create_mesh(
     gctx,
     rm,
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
@@ -326,7 +335,7 @@ init :: proc(
       resources.mesh_destroy(mesh, rm)
     }
   }
-  self.triangle_mesh, _ = resources.create_mesh(
+  self.triangle_mesh = resources.create_mesh(
     gctx,
     rm,
     geometry.make_fullscreen_triangle(),
@@ -448,21 +457,14 @@ render :: proc(
       log.errorf("Failed to get mesh for handle %v", mesh_handle)
       return
     }
-    vertex_offset := vk.DeviceSize(
-      mesh_ptr.vertex_allocation.offset * size_of(geometry.Vertex),
-    )
-    vk.CmdBindVertexBuffers(
+    gpu.bind_vertex_index_buffers(
       command_buffer,
-      0,
-      1,
-      &rm.vertex_buffer.buffer,
-      &vertex_offset,
-    )
-    vk.CmdBindIndexBuffer(
-      command_buffer,
+      rm.vertex_buffer.buffer,
       rm.index_buffer.buffer,
+      vk.DeviceSize(
+        mesh_ptr.vertex_allocation.offset * size_of(geometry.Vertex),
+      ),
       vk.DeviceSize(mesh_ptr.index_allocation.offset * size_of(u32)),
-      .UINT32,
     )
     vk.CmdDrawIndexed(
       command_buffer,

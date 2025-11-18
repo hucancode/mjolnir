@@ -23,7 +23,7 @@ SphericalCamera :: struct {
 
 // Initialize a new spherical camera
 spherical_camera_init :: proc(
-  camera: ^SphericalCamera,
+  self: ^SphericalCamera,
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
   size: u32 = SHADOW_MAP_SIZE,
@@ -34,13 +34,13 @@ spherical_camera_init :: proc(
   depth_format: vk.Format = .D32_SFLOAT,
   max_draws: u32 = MAX_NODES_IN_SCENE,
 ) -> vk.Result {
-  camera.center = center
-  camera.radius = radius
-  camera.near = near
-  camera.far = far
-  camera.size = size
-  camera.max_draws = max_draws
-  for &v in camera.depth_cube {
+  self.center = center
+  self.radius = radius
+  self.near = near
+  self.far = far
+  self.size = size
+  self.max_draws = max_draws
+  for &v in self.depth_cube {
     v, _, _ = create_empty_texture_cube(
       gctx,
       manager,
@@ -49,13 +49,13 @@ spherical_camera_init :: proc(
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     )
   }
-  camera.draw_count = gpu.create_mutable_buffer(
+  self.draw_count = gpu.create_mutable_buffer(
     gctx,
     u32,
     1,
     {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
   ) or_return
-  camera.draw_commands = gpu.create_mutable_buffer(
+  self.draw_commands = gpu.create_mutable_buffer(
     gctx,
     vk.DrawIndexedIndirectCommand,
     int(max_draws),
@@ -65,14 +65,14 @@ spherical_camera_init :: proc(
 }
 
 spherical_camera_allocate_descriptors :: proc(
-  camera: ^SphericalCamera,
+  self: ^SphericalCamera,
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
   sphere_cam_descriptor_layout: ^vk.DescriptorSetLayout,
 ) -> vk.Result {
   // Create and update all per-frame descriptor sets
   for frame_index in 0 ..< FRAMES_IN_FLIGHT {
-    camera.descriptor_sets[frame_index] = gpu.create_descriptor_set(
+    self.descriptor_sets[frame_index] = gpu.create_descriptor_set(
       gctx,
       sphere_cam_descriptor_layout,
       {.STORAGE_BUFFER, gpu.buffer_info(&manager.node_data_buffer.buffer)},
@@ -84,8 +84,8 @@ spherical_camera_allocate_descriptors :: proc(
           &manager.spherical_camera_buffer.buffers[frame_index],
         ),
       },
-      {.STORAGE_BUFFER, gpu.buffer_info(&camera.draw_count)},
-      {.STORAGE_BUFFER, gpu.buffer_info(&camera.draw_commands)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&self.draw_count)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&self.draw_commands)},
     ) or_return
   }
   return .SUCCESS

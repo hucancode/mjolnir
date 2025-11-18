@@ -162,7 +162,7 @@ create_material_handle :: proc(
   return h, ret == .SUCCESS
 }
 
-init_builtin_materials :: proc(manager: ^Manager) -> vk.Result {
+init_builtin_materials :: proc(self: ^Manager) -> vk.Result {
   log.info("Creating builtin materials...")
   colors := [len(Color)][4]f32 {
     {1.0, 1.0, 1.0, 1.0}, // WHITE
@@ -176,8 +176,8 @@ init_builtin_materials :: proc(manager: ^Manager) -> vk.Result {
     {1.0, 0.0, 1.0, 1.0}, // MAGENTA
   }
   for color, i in colors {
-    manager.builtin_materials[i], _, _ = create_material(
-      manager,
+    self.builtin_materials[i], _, _ = create_material(
+      self,
       type = .PBR,
       base_color_factor = color,
     )

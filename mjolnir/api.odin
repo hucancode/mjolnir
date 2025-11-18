@@ -156,11 +156,15 @@ create_material :: proc(
 create_mesh :: proc(
   engine: ^Engine,
   geom: geometry.Geometry,
+  auto_purge: bool = true,
 ) -> (
-  resources.Handle,
-  bool,
+  handle: resources.Handle,
+  ok: bool,
 ) #optional_ok {
-  return resources.create_mesh_handle(&engine.gctx, &engine.rm, geom)
+  ret : vk.Result
+  handle, ret = resources.create_mesh(&engine.gctx, &engine.rm, geom, auto_purge)
+  ok = ret == .SUCCESS
+  return
 }
 
 get_builtin_mesh :: proc(

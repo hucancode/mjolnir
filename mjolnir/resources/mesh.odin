@@ -35,7 +35,7 @@ MeshData :: struct {
   vertex_offset:          i32,
   vertex_skinning_offset: u32,
   flags:                  MeshFlagSet,
-  _padding:               u32,
+  padding:                u32,
 }
 
 Skinning :: struct {
@@ -80,13 +80,13 @@ mesh_destroy :: proc(self: ^Mesh, manager: ^Manager) {
 }
 
 find_bone_by_name :: proc(
-  mesh: ^Mesh,
+  self: ^Mesh,
   name: string,
 ) -> (
   index: u32,
   ok: bool,
 ) #optional_ok {
-  skin, has_skin := &mesh.skinning.?
+  skin, has_skin := &self.skinning.?
   if !has_skin do return
   for bone, i in skin.bones {
     if bone.name == name {
@@ -118,11 +118,7 @@ mesh_init :: proc(
   if len(data.skinnings) <= 0 {
     return .SUCCESS
   }
-  allocation, ret := allocate_vertex_skinning(
-    manager,
-    gctx,
-    data.skinnings,
-  )
+  allocation, ret := allocate_vertex_skinning(manager, gctx, data.skinnings)
   if ret != .SUCCESS {
     return ret
   }
@@ -630,38 +626,32 @@ create_mesh :: proc(
   gctx: ^gpu.GPUContext,
   manager: ^Manager,
   data: geometry.Geometry,
+  auto_purge: bool = false,
 ) -> (
   handle: Handle,
-  mesh: ^Mesh,
   ret: vk.Result,
 ) {
   ok: bool
+  mesh: ^Mesh
   handle, mesh, ok = cont.alloc(&manager.meshes)
   if !ok {
-    log.error("Failed to allocate mesh: pool capacity reached")
-    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  ret = mesh_init(mesh, gctx, manager, data)
-  if ret != .SUCCESS {
+    ret = .ERROR_OUT_OF_DEVICE_MEMORY
     return
   }
-  ret = mesh_write_to_gpu(manager, handle, mesh)
+  defer if !ok do cont.free(&manager.meshes, handle)
+  mesh_init(mesh, gctx, manager, data) or_return
+  defer if !ok do mesh_destroy(mesh, manager)
+  mesh.auto_purge = auto_purge
+  mesh_upload_gpu_data(manager, handle, mesh) or_return
+  ret = .SUCCESS
   return
 }
 
-create_mesh_handle :: proc(
-  gctx: ^gpu.GPUContext,
-  manager: ^Manager,
-  data: geometry.Geometry,
-) -> (
+mesh_upload_gpu_data :: proc(
+  self: ^Manager,
   handle: Handle,
-  ok: bool,
-) #optional_ok {
-  h, _, ret := create_mesh(gctx, manager, data)
-  return h, ret == .SUCCESS
-}
-
-mesh_update_gpu_data :: proc(mesh: ^Mesh) {
+  mesh: ^Mesh,
+) -> vk.Result {
   mesh.index_count = mesh.index_allocation.count
   mesh.first_index = mesh.index_allocation.offset
   mesh.vertex_offset = cast(i32)mesh.vertex_allocation.offset
@@ -671,25 +661,17 @@ mesh_update_gpu_data :: proc(mesh: ^Mesh) {
     mesh.flags |= {.SKINNED}
     mesh.vertex_skinning_offset = skin.vertex_skinning_allocation.offset
   }
+  return gpu.write(
+    &self.mesh_data_buffer.buffer,
+    &mesh.data,
+    int(handle.index),
+  )
 }
 
-mesh_write_to_gpu :: proc(
-  manager: ^Manager,
-  handle: Handle,
-  mesh: ^Mesh,
-) -> vk.Result {
-  if handle.index >= MAX_MESHES {
-    log.errorf("Mesh index %d exceeds capacity %d", handle.index, MAX_MESHES)
-    return .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  mesh_update_gpu_data(mesh)
-  return gpu.write(&manager.mesh_data_buffer.buffer, &mesh.data, int(handle.index))
-}
-
-mesh_destroy_handle :: proc(device: vk.Device, manager: ^Manager, handle: Handle) {
-  if mesh, ok := cont.get(manager.meshes, handle); ok {
-    mesh_destroy(mesh, manager)
-    cont.free(&manager.meshes, handle)
+mesh_destroy_handle :: proc(self: ^Manager, handle: Handle) {
+  if mesh, ok := cont.get(self.meshes, handle); ok {
+    mesh_destroy(mesh, self)
+    cont.free(&self.meshes, handle)
   }
 }
 
@@ -754,18 +736,12 @@ allocate_vertex_skinning :: proc(
   return BufferAllocation{offset = offset, count = skinning_count}, .SUCCESS
 }
 
-free_vertex_skinning :: proc(
-  self: ^Manager,
-  allocation: BufferAllocation,
-) {
+free_vertex_skinning :: proc(self: ^Manager, allocation: BufferAllocation) {
   cont.slab_free(&self.vertex_skinning_slab, allocation.offset)
 }
 
-free_vertices :: proc(
-  manager: ^Manager,
-  allocation: BufferAllocation,
-) {
-  cont.slab_free(&manager.vertex_slab, allocation.offset)
+free_vertices :: proc(self: ^Manager, allocation: BufferAllocation) {
+  cont.slab_free(&self.vertex_slab, allocation.offset)
 }
 
 free_indices :: proc(manager: ^Manager, allocation: BufferAllocation) {
@@ -777,41 +753,41 @@ init_builtin_meshes :: proc(
   gctx: ^gpu.GPUContext,
 ) -> vk.Result {
   log.info("Creating builtin meshes...")
-  self.builtin_meshes[Primitive.CUBE], _ = create_mesh_handle(
+  self.builtin_meshes[Primitive.CUBE] = create_mesh(
     gctx,
     self,
     geometry.make_cube(),
-  )
-  self.builtin_meshes[Primitive.SPHERE], _ = create_mesh_handle(
+  ) or_return
+  self.builtin_meshes[Primitive.SPHERE] = create_mesh(
     gctx,
     self,
     geometry.make_sphere(),
-  )
-  self.builtin_meshes[Primitive.QUAD], _ = create_mesh_handle(
+  ) or_return
+  self.builtin_meshes[Primitive.QUAD] = create_mesh(
     gctx,
     self,
     geometry.make_quad(),
-  )
-  self.builtin_meshes[Primitive.CONE], _ = create_mesh_handle(
+  ) or_return
+  self.builtin_meshes[Primitive.CONE] = create_mesh(
     gctx,
     self,
     geometry.make_cone(),
-  )
-  self.builtin_meshes[Primitive.CAPSULE], _ = create_mesh_handle(
+  ) or_return
+  self.builtin_meshes[Primitive.CAPSULE] = create_mesh(
     gctx,
     self,
     geometry.make_capsule(),
-  )
-  self.builtin_meshes[Primitive.CYLINDER], _ = create_mesh_handle(
+  ) or_return
+  self.builtin_meshes[Primitive.CYLINDER] = create_mesh(
     gctx,
     self,
     geometry.make_cylinder(),
-  )
-  self.builtin_meshes[Primitive.TORUS], _ = create_mesh_handle(
+  ) or_return
+  self.builtin_meshes[Primitive.TORUS] = create_mesh(
     gctx,
     self,
     geometry.make_torus(),
-  )
+  ) or_return
   log.info("Builtin meshes created successfully")
   return .SUCCESS
 }

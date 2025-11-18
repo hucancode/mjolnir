@@ -341,7 +341,6 @@ render :: proc(
   frame_index: u32,
   draw_buffer: vk.Buffer,
   count_buffer: vk.Buffer,
-  command_stride: u32,
 ) {
   if draw_buffer == 0 || count_buffer == 0 {
     return
@@ -382,7 +381,7 @@ render :: proc(
     count_buffer,
     0,
     resources.MAX_NODES_IN_SCENE,
-    command_stride,
+    u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
 }
 

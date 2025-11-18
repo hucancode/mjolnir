@@ -265,8 +265,8 @@ submit_queue_and_present :: proc(
   gctx: ^GPUContext,
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
+  compute_command_buffer: ^vk.CommandBuffer,
   frame_index: u32,
-  compute_command_buffer: Maybe(vk.CommandBuffer) = nil,
 ) -> vk.Result {
   wait_semaphores: [dynamic]vk.Semaphore
   wait_stages: [dynamic]vk.PipelineStageFlags
@@ -274,7 +274,7 @@ submit_queue_and_present :: proc(
   defer delete(wait_stages)
   append(&wait_semaphores, self.image_available_semaphores[frame_index])
   append(&wait_stages, vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT})
-  if compute_cmd, has_compute := compute_command_buffer.?; has_compute {
+  if gctx.has_async_compute {
     if compute_queue, ok := gctx.compute_queue.?; ok {
       append(&wait_semaphores, self.compute_finished_semaphores[self.image_index])
       append(
@@ -284,7 +284,7 @@ submit_queue_and_present :: proc(
       compute_submit := vk.SubmitInfo {
         sType                = .SUBMIT_INFO,
         commandBufferCount   = 1,
-        pCommandBuffers      = &compute_cmd,
+        pCommandBuffers      = compute_command_buffer,
         signalSemaphoreCount = 1,
         pSignalSemaphores    = &self.compute_finished_semaphores[self.image_index],
       }

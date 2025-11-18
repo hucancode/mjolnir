@@ -513,13 +513,13 @@ create_light_camera :: proc(
 ) #optional_ok {
   light := cont.get(engine.rm.lights, light_handle) or_return
   // Only create cameras for lights that cast shadows
-  if !light.cast_shadow {
-    return {}, false
-  }
+  if !light.cast_shadow do return {}, false
   #partial switch light.type {
   case .POINT:
     // Point lights use spherical cameras for omnidirectional shadows
-    cam_handle, spherical_cam := cont.alloc(&engine.rm.spherical_cameras) or_return
+    cam_handle, spherical_cam := cont.alloc(
+      &engine.rm.spherical_cameras,
+    ) or_return
     init_result := resources.spherical_camera_init(
       spherical_cam,
       &engine.gctx,
@@ -734,31 +734,16 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.views[self.swapchain.image_index],
     command_buffer,
   )
-  compute_cmd_buffer: Maybe(vk.CommandBuffer) = nil
-  if self.gctx.has_async_compute {
-    // Async path: separate compute queue
-    compute_buffer := self.compute_command_buffers[self.frame_index]
-    render.record_compute_commands(
-      &self.render,
-      self.frame_index,
-      &self.gctx,
-      &self.rm,
-      &self.world,
-      compute_buffer,
-    ) or_return
-    compute_cmd_buffer = compute_buffer
-  } else {
-    compute_buffer := self.command_buffers[self.frame_index]
-    render.record_compute_commands(
-      &self.render,
-      self.frame_index,
-      &self.gctx,
-      &self.rm,
-      &self.world,
-      compute_buffer,
-    ) or_return
-    compute_cmd_buffer = compute_buffer
-  }
+  compute_cmd_buffer :=
+    self.compute_command_buffers[self.frame_index] if self.gctx.has_async_compute else command_buffer
+  render.record_compute_commands(
+    &self.render,
+    self.frame_index,
+    &self.gctx,
+    &self.rm,
+    &self.world,
+    compute_cmd_buffer,
+  ) or_return
   populate_debug_ui(self)
   if self.post_render_proc != nil {
     self.post_render_proc(self)
@@ -838,8 +823,8 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.gctx,
     &self.swapchain,
     &command_buffer,
+    &compute_cmd_buffer,
     self.frame_index,
-    compute_cmd_buffer,
   ) or_return
   self.frame_index = (self.frame_index + 1) % FRAMES_IN_FLIGHT
   world.process_pending_deletions(&self.world, &self.rm, &self.gctx)

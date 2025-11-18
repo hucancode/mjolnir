@@ -306,7 +306,6 @@ record_geometry_pass :: proc(
     frame_index,
     camera.opaque_draw_commands[frame_index].buffer,
     camera.opaque_draw_count[frame_index].buffer,
-    u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
   geometry.end_pass(camera_handle, command_buffer, rm, frame_index)
   return .SUCCESS
@@ -456,7 +455,6 @@ record_transparency_pass :: proc(
     frame_index,
     camera.transparent_draw_commands[frame_index].buffer,
     camera.transparent_draw_count[frame_index].buffer,
-    u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
   transparency.render(
     &self.transparency,
@@ -467,7 +465,6 @@ record_transparency_pass :: proc(
     frame_index,
     camera.sprite_draw_commands[frame_index].buffer,
     camera.sprite_draw_count[frame_index].buffer,
-    u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
   transparency.end_pass(&self.transparency, command_buffer)
   return .SUCCESS

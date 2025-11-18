@@ -287,7 +287,6 @@ _build_node_data :: proc(
     material_id           = 0xFFFFFFFF,
     mesh_id               = 0xFFFFFFFF,
     attachment_data_index = 0xFFFFFFFF,
-    flags                 = {},
   }
   if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
     data.material_id = mesh_attachment.material.index

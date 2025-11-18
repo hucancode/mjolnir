@@ -99,13 +99,13 @@ load_gltf :: proc(
   }
   for mesh in manifest.meshes do if mesh != nil {
     is_skinned := mesh in mesh_skinning_map
-    geometry_data := process_mesh_primitives(mesh, &material_cache, is_skinned) or_return
+    geometry_data := load_mesh_primitives(mesh, &material_cache, is_skinned) or_return
     geometry_cache[mesh] = geometry_data
     log.infof("Processed mesh with %d vertices, %d indices", len(geometry_data.geometry.vertices), len(geometry_data.geometry.indices))
   }
   // step 4: Skinning Processing
   skin_cache := make(map[^cgltf.skin]SkinData, context.temp_allocator)
-  process_skins(world, rm, gltf_data, manifest.skins[:], &skin_cache)
+  load_skins(world, rm, gltf_data, manifest.skins[:], &skin_cache)
   // step 5: Scene Construction
   construct_scene(
     world,
@@ -276,7 +276,7 @@ load_material_textures :: proc(
 }
 
 @(private = "file")
-process_mesh_primitives :: proc(
+load_mesh_primitives :: proc(
   mesh: ^cgltf.mesh,
   cache: ^map[^cgltf.material]resources.Handle,
   include_skinning: bool,
@@ -316,7 +316,7 @@ process_mesh_primitives :: proc(
         context.temp_allocator,
       )
     }
-    process_vertex_attributes(&prim, vertices, skinnings)
+    load_vertex_attributes(&prim, vertices, skinnings)
     append(&combined_vertices, ..vertices[:])
     if include_skinning {
       append(&combined_skinnings, ..skinnings[:])
@@ -364,7 +364,7 @@ process_mesh_primitives :: proc(
 }
 
 @(private = "file")
-process_vertex_attributes :: proc(
+load_vertex_attributes :: proc(
   primitive: ^cgltf.primitive,
   vertices: []geometry.Vertex,
   skinnings: []geometry.SkinningData = nil,
@@ -437,7 +437,7 @@ process_vertex_attributes :: proc(
 }
 
 @(private = "file")
-process_skins :: proc(
+load_skins :: proc(
   world: ^World,
   rm: ^resources.Manager,
   gltf_data: ^cgltf.data,
@@ -556,26 +556,17 @@ construct_scene :: proc(
     node.parent = entry.parent
     if gltf_node.mesh in geometry_cache {
       geometry_data := geometry_cache[gltf_node.mesh]
+      mesh_handle: cont.Handle
       if gltf_node.skin in skin_cache {
         skin_data := skin_cache[gltf_node.skin]
-        mesh_handle, mesh, mesh_ok := cont.alloc(&rm.meshes)
-        if !mesh_ok {
-          log.error("Failed to allocate mesh for skinned mesh")
-          continue
-        }
-        mesh.auto_purge = true
-        init_result := resources.mesh_init(
-          mesh,
+        mesh_handle =
+        resources.create_mesh(
           gctx,
           rm,
           geometry_data.geometry,
-        )
-        if init_result != .SUCCESS {
-          log.error("Failed to initialize skinned mesh")
-          resources.mesh_destroy(mesh, rm)
-          cont.free(&rm.meshes, mesh_handle)
-          continue
-        }
+          true,
+        ) or_continue
+        mesh := cont.get(rm.meshes, mesh_handle) or_continue
         skinning, _ := &mesh.skinning.?
         skinning.bones = make([]resources.Bone, len(skin_data.bones))
         for src_bone, i in skin_data.bones {
@@ -585,15 +576,12 @@ construct_scene :: proc(
         }
         skinning.root_bone_index = skin_data.root_bone_idx
         resources.compute_bone_lengths(skinning)
-        gpu_result := resources.mesh_write_to_gpu(rm, mesh_handle, mesh)
-        if gpu_result != .SUCCESS {
+        if resources.mesh_upload_gpu_data(rm, mesh_handle, mesh) != .SUCCESS {
           log.error("Failed to write skinned mesh data to GPU")
           resources.mesh_destroy(mesh, rm)
           cont.free(&rm.meshes, mesh_handle)
           continue
         }
-        resources.mesh_ref(rm, mesh_handle)
-        resources.material_ref(rm, geometry_data.material_handle)
         node.attachment = MeshAttachment {
           handle = mesh_handle,
           material = geometry_data.material_handle,
@@ -615,22 +603,21 @@ construct_scene :: proc(
           )
         }
       } else {
-        mesh_handle, mesh, ret := resources.create_mesh(
+        mesh_handle =
+        resources.create_mesh(
           gctx,
           rm,
           geometry_data.geometry,
-        )
-        if ret == .SUCCESS {
-          mesh.auto_purge = true
-          resources.mesh_ref(rm, mesh_handle)
-          resources.material_ref(rm, geometry_data.material_handle)
-          node.attachment = MeshAttachment {
-            handle      = mesh_handle,
-            material    = geometry_data.material_handle,
-            cast_shadow = true,
-          }
+          true,
+        ) or_continue
+        node.attachment = MeshAttachment {
+          handle      = mesh_handle,
+          material    = geometry_data.material_handle,
+          cast_shadow = true,
         }
       }
+      resources.mesh_ref(rm, mesh_handle)
+      resources.material_ref(rm, geometry_data.material_handle)
     }
     attach(world.nodes, entry.parent, node_handle)
     if entry.parent == world.root do append(nodes, node_handle)
