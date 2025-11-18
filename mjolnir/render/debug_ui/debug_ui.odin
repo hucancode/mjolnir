@@ -73,20 +73,10 @@ init :: proc(
     SHADER_MICROUI_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_shader_module, nil)
-  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_shader_module,
-      pName = "main",
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = frag_shader_module,
-      pName = "main",
-    },
-  }
+  shader_stages := gpu.create_vert_frag_stages(
+    vert_shader_module,
+    frag_shader_module,
+  )
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Vertex2D),
@@ -257,10 +247,7 @@ init :: proc(
   self.projection_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.projection_layout,
-    {
-      type = .UNIFORM_BUFFER,
-      info = gpu.buffer_info(&self.proj_buffer),
-    },
+    {type = .UNIFORM_BUFFER, info = gpu.buffer_info(&self.proj_buffer)},
   ) or_return
   log.infof("done init UI")
   return .SUCCESS
@@ -473,7 +460,8 @@ begin_pass :: proc(
 ) {
   gpu.begin_rendering(
     command_buffer,
-    extent.width, extent.height,
+    extent.width,
+    extent.height,
     nil,
     gpu.create_color_attachment_view(color_view, .LOAD, .STORE),
   )

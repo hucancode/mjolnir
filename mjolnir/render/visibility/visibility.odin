@@ -680,14 +680,7 @@ create_depth_pipeline :: proc(
     SHADER_DEPTH_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_shader, nil)
-  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_shader,
-      pName = "main",
-    },
-  }
+  shader_stages := gpu.create_vert_stage(vert_shader)
   vertex_bindings := [?]vk.VertexInputBindingDescription {
     {binding = 0, stride = size_of(geometry.Vertex), inputRate = .VERTEX},
   }
@@ -748,26 +741,11 @@ create_depth_pipeline :: proc(
     SHADER_SPHERECAM_DEPTH_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, sphere_frag_shader, nil)
-  sphere_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = sphere_vert_shader,
-      pName = "main",
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.GEOMETRY},
-      module = sphere_geom_shader,
-      pName = "main",
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = sphere_frag_shader,
-      pName = "main",
-    },
-  }
+  sphere_shader_stages := gpu.create_vert_geo_frag_stages(
+    sphere_vert_shader,
+    sphere_geom_shader,
+    sphere_frag_shader,
+  )
   if rm.sphere_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }

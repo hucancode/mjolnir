@@ -151,8 +151,92 @@ COLOR_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
 }
 
 DEPTH_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
-  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-  depthAttachmentFormat   = .D32_SFLOAT,
+  sType                 = .PIPELINE_RENDERING_CREATE_INFO,
+  depthAttachmentFormat = .D32_SFLOAT,
+}
+
+create_vert_frag_stages :: proc(
+  vert_module: vk.ShaderModule,
+  frag_module: vk.ShaderModule,
+  specialization: ^vk.SpecializationInfo = nil,
+) -> [2]vk.PipelineShaderStageCreateInfo {
+  return [2]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = vert_module,
+      pName = "main",
+      pSpecializationInfo = specialization,
+    },
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.FRAGMENT},
+      module = frag_module,
+      pName = "main",
+      pSpecializationInfo = specialization,
+    },
+  }
+}
+
+create_vert_stage :: proc(
+  vert_module: vk.ShaderModule,
+  specialization: ^vk.SpecializationInfo = nil,
+) -> [1]vk.PipelineShaderStageCreateInfo {
+  return [1]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = vert_module,
+      pName = "main",
+      pSpecializationInfo = specialization,
+    },
+  }
+}
+
+create_frag_stage :: proc(
+  frag_module: vk.ShaderModule,
+  specialization: ^vk.SpecializationInfo = nil,
+) -> [1]vk.PipelineShaderStageCreateInfo {
+  return [1]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.FRAGMENT},
+      module = frag_module,
+      pName = "main",
+      pSpecializationInfo = specialization,
+    },
+  }
+}
+
+create_vert_geo_frag_stages :: proc(
+  vert_module: vk.ShaderModule,
+  geo_module: vk.ShaderModule,
+  frag_module: vk.ShaderModule,
+  specialization: ^vk.SpecializationInfo = nil,
+) -> [3]vk.PipelineShaderStageCreateInfo {
+  return [3]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = vert_module,
+      pName = "main",
+      pSpecializationInfo = specialization,
+    },
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.GEOMETRY},
+      module = geo_module,
+      pName = "main",
+      pSpecializationInfo = specialization,
+    },
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.FRAGMENT},
+      module = frag_module,
+      pName = "main",
+      pSpecializationInfo = specialization,
+    },
+  }
 }
 
 begin_record :: proc(
@@ -160,10 +244,10 @@ begin_record :: proc(
   flags: vk.CommandBufferUsageFlags = {.ONE_TIME_SUBMIT},
 ) -> vk.Result {
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  return vk.BeginCommandBuffer(command_buffer, &{
-    sType = .COMMAND_BUFFER_BEGIN_INFO,
-    flags = flags,
-  })
+  return vk.BeginCommandBuffer(
+    command_buffer,
+    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = flags},
+  )
 }
 
 end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {

@@ -152,22 +152,11 @@ init :: proc(
     SHADER_AMBIENT_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, ambient_frag_module, nil)
-  ambient_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = ambient_vert_module,
-      pName = "main",
-      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = ambient_frag_module,
-      pName = "main",
-      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
-    },
-  }
+  ambient_shader_stages := gpu.create_vert_frag_stages(
+    ambient_vert_module,
+    ambient_frag_module,
+    &shared.SHADER_SPEC_CONSTANTS,
+  )
   ambient_pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     pNext               = &gpu.COLOR_ONLY_RENDERING_INFO,
@@ -272,22 +261,11 @@ init :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ), // Position at location 0
   }
-  lighting_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = lighting_vert_module,
-      pName = "main",
-      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = lighting_frag_module,
-      pName = "main",
-      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
-    },
-  }
+  lighting_shader_stages := gpu.create_vert_frag_stages(
+    lighting_vert_module,
+    lighting_frag_module,
+    &shared.SHADER_SPEC_CONSTANTS,
+  )
   lighting_pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     pNext               = &gpu.STANDARD_RENDERING_INFO,

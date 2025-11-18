@@ -421,22 +421,11 @@ init :: proc(
       vk.PushConstantRange{stageFlags = {.FRAGMENT}, size = push_constant_size} if push_constant_size > 0 else nil,
       rm.textures_set_layout,
     ) or_return
-    shader_stages[i] = [?]vk.PipelineShaderStageCreateInfo {
-      {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.VERTEX},
-        module = vert_module,
-        pName = "main",
-        pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
-      },
-      {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.FRAGMENT},
-        module = frag_modules[i],
-        pName = "main",
-        pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
-      },
-    }
+    shader_stages[i] = gpu.create_vert_frag_stages(
+      vert_module,
+      frag_modules[i],
+      &shared.SHADER_SPEC_CONSTANTS,
+    )
     pipeline_infos[i] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &gpu.COLOR_ONLY_RENDERING_INFO,
@@ -570,8 +559,7 @@ render :: proc(
     input_image_index: u32
     dst_image_idx: u32
     if is_first {
-      input_image_index =
-        camera.attachments[.FINAL_IMAGE][frame_index].index // Use original input
+      input_image_index = camera.attachments[.FINAL_IMAGE][frame_index].index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -649,16 +637,13 @@ render :: proc(
     base: BasePushConstant
     base.position_texture_index =
       camera.attachments[.POSITION][frame_index].index
-    base.normal_texture_index =
-      camera.attachments[.NORMAL][frame_index].index
-    base.albedo_texture_index =
-      camera.attachments[.ALBEDO][frame_index].index
+    base.normal_texture_index = camera.attachments[.NORMAL][frame_index].index
+    base.albedo_texture_index = camera.attachments[.ALBEDO][frame_index].index
     base.metallic_texture_index =
       camera.attachments[.METALLIC_ROUGHNESS][frame_index].index
     base.emissive_texture_index =
       camera.attachments[.EMISSIVE][frame_index].index
-    base.depth_texture_index =
-      camera.attachments[.DEPTH][frame_index].index
+    base.depth_texture_index = camera.attachments[.DEPTH][frame_index].index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

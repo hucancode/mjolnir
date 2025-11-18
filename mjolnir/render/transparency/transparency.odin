@@ -129,22 +129,11 @@ create_transparent_pipelines :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_module,
-      pName = "main",
-      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = frag_module,
-      pName = "main",
-      pSpecializationInfo = &shared.SHADER_SPEC_CONSTANTS,
-    },
-  }
+  shader_stages := gpu.create_vert_frag_stages(
+    vert_module,
+    frag_module,
+    &shared.SHADER_SPEC_CONSTANTS,
+  )
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),
@@ -199,20 +188,7 @@ create_wireframe_pipelines :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_module,
-      pName = "main",
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = frag_module,
-      pName = "main",
-    },
-  }
+  shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module)
   create_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),
@@ -267,20 +243,7 @@ create_sprite_pipeline :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_module,
-      pName = "main",
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = frag_module,
-      pName = "main",
-    },
-  }
+  shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module)
   create_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),

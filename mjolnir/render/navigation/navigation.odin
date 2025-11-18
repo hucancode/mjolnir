@@ -349,24 +349,11 @@ create_pipeline :: proc(
     vertexAttributeDescriptionCount = u32(len(vertex_attributes)),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes),
   }
-  shader_stages := []vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = navmesh_vert,
-      pName = "main",
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = navmesh_frag,
-      pName = "main",
-    },
-  }
+  shader_stages := gpu.create_vert_frag_stages(navmesh_vert, navmesh_frag)
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    stageCount          = u32(len(shader_stages)),
-    pStages             = raw_data(shader_stages),
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
     pVertexInputState   = &vertex_input,
     pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
     pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
@@ -388,8 +375,8 @@ create_pipeline :: proc(
   ) or_return
   pipeline_info_lines := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    stageCount          = u32(len(shader_stages)),
-    pStages             = raw_data(shader_stages),
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
     pVertexInputState   = &vertex_input,
     pInputAssemblyState = &gpu.LINE_INPUT_ASSEMBLY,
     pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,

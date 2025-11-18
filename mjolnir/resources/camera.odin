@@ -232,10 +232,8 @@ camera_init :: proc(
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_continue
     // Transition depth image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL
-    if depth, ok := cont.get(
-      rm.images_2d,
-      camera.attachments[.DEPTH][frame],
-    ); ok {
+    if depth, ok := cont.get(rm.images_2d, camera.attachments[.DEPTH][frame]);
+       ok {
       cmd_buf := gpu.begin_single_time_command(gctx) or_return
       gpu.image_barrier(
         cmd_buf,
@@ -302,11 +300,7 @@ camera_init :: proc(
   return .SUCCESS
 }
 
-camera_destroy :: proc(
-  self: ^Camera,
-  gctx: ^gpu.GPUContext,
-  rm: ^Manager,
-) {
+camera_destroy :: proc(self: ^Camera, gctx: ^gpu.GPUContext, rm: ^Manager) {
   for handles in self.attachments {
     for handle in handles {
       if item, freed := cont.free(&rm.images_2d, handle); freed {
@@ -473,7 +467,8 @@ camera_resize :: proc(
     .POST_PROCESS in camera.enabled_passes
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     if needs_final {
-      camera.attachments[.FINAL_IMAGE][frame] = create_texture(
+      camera.attachments[.FINAL_IMAGE][frame] =
+      create_texture(
         gctx,
         rm,
         width,
@@ -483,7 +478,8 @@ camera_resize :: proc(
       ) or_continue
     }
     if needs_gbuffer {
-      camera.attachments[.POSITION][frame] = create_texture(
+      camera.attachments[.POSITION][frame] =
+      create_texture(
         gctx,
         rm,
         width,
@@ -491,7 +487,8 @@ camera_resize :: proc(
         vk.Format.R32G32B32A32_SFLOAT,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
-      camera.attachments[.NORMAL][frame] = create_texture(
+      camera.attachments[.NORMAL][frame] =
+      create_texture(
         gctx,
         rm,
         width,
@@ -499,7 +496,8 @@ camera_resize :: proc(
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
-      camera.attachments[.ALBEDO][frame] = create_texture(
+      camera.attachments[.ALBEDO][frame] =
+      create_texture(
         gctx,
         rm,
         width,
@@ -507,7 +505,8 @@ camera_resize :: proc(
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
-      camera.attachments[.METALLIC_ROUGHNESS][frame] = create_texture(
+      camera.attachments[.METALLIC_ROUGHNESS][frame] =
+      create_texture(
         gctx,
         rm,
         width,
@@ -515,7 +514,8 @@ camera_resize :: proc(
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
-      camera.attachments[.EMISSIVE][frame] = create_texture(
+      camera.attachments[.EMISSIVE][frame] =
+      create_texture(
         gctx,
         rm,
         width,
@@ -524,7 +524,8 @@ camera_resize :: proc(
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       ) or_continue
     }
-    camera.attachments[.DEPTH][frame] = create_texture(
+    camera.attachments[.DEPTH][frame] =
+    create_texture(
       gctx,
       rm,
       width,
@@ -658,37 +659,6 @@ camera_raycast_single :: proc(
     intersection_func,
     bounds_func,
     config,
-  )
-}
-
-camera_raycast_multi :: proc(
-  camera: ^Camera,
-  mouse_x, mouse_y: f32,
-  primitives: []$T,
-  intersection_func: proc(
-    ray: geometry.Ray,
-    primitive: T,
-    max_t: f32,
-  ) -> (
-    hit: bool,
-    t: f32,
-  ),
-  bounds_func: proc(t: T) -> geometry.Aabb,
-  config: geometry.RaycastConfig = geometry.DEFAULT_RAYCAST_CONFIG,
-  results: ^[dynamic]geometry.RayHit(T),
-) {
-  ray_origin, ray_dir := camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
-  ray := geometry.Ray {
-    origin    = ray_origin,
-    direction = ray_dir,
-  }
-  geometry.raycast_multi(
-    primitives,
-    ray,
-    intersection_func,
-    bounds_func,
-    config,
-    results,
   )
 }
 
@@ -850,79 +820,7 @@ camera_allocate_descriptors :: proc(
       depth_reduce_descriptor_layout,
     ) or_return
   }
-  prev_frame := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
-  gpu.update_descriptor_set(
-    gctx,
-    camera.descriptor_set[frame_index],
-    {.STORAGE_BUFFER, gpu.buffer_info(&rm.node_data_buffer.buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&rm.mesh_data_buffer.buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&rm.world_matrix_buffer.buffer)},
-    {
-      .STORAGE_BUFFER,
-      gpu.buffer_info(&rm.camera_buffer.buffers[frame_index]),
-    },
-    {.STORAGE_BUFFER, gpu.buffer_info(&camera.opaque_draw_count[frame_index])},
-    {
-      .STORAGE_BUFFER,
-      gpu.buffer_info(&camera.opaque_draw_commands[frame_index]),
-    },
-    {
-      .STORAGE_BUFFER,
-      gpu.buffer_info(&camera.transparent_draw_count[frame_index]),
-    },
-    {
-      .STORAGE_BUFFER,
-      gpu.buffer_info(&camera.transparent_draw_commands[frame_index]),
-    },
-    {.STORAGE_BUFFER, gpu.buffer_info(&camera.sprite_draw_count[frame_index])},
-    {
-      .STORAGE_BUFFER,
-      gpu.buffer_info(&camera.sprite_draw_commands[frame_index]),
-    },
-    {
-      .COMBINED_IMAGE_SAMPLER,
-      vk.DescriptorImageInfo {
-        sampler     = camera.depth_pyramid[prev_frame].sampler,
-        imageView   = camera.depth_pyramid[prev_frame].full_view,
-        imageLayout = .GENERAL, // Depth pyramid uses GENERAL layout for both read/write
-      },
-    },
-  )
-  for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
-    // For mip 0: read from PREVIOUS frame's depth texture to support async compute
-    // pyramid[N] mip 0 reads from depth[N-1]
-    // This allows compute to build pyramid[N] while graphics renders depth[N]
-    prev_depth_texture := cont.get(
-      rm.images_2d,
-      camera.attachments[.DEPTH][prev_frame],
-    )
-    // Mip 0 reads from previous frame's depth texture, other mips read from current pyramid's previous mip level
-    source_view :=
-      mip == 0 ? prev_depth_texture.view : camera.depth_pyramid[frame_index].views[mip - 1]
-    // Use DEPTH_STENCIL_READ_ONLY_OPTIMAL for depth texture (mip 0), GENERAL for pyramid mips
-    // GENERAL layout is used because the pyramid image is used for both read (sample) and write (storage)
-    source_layout :=
-      mip == 0 ? vk.ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL : vk.ImageLayout.GENERAL
-    gpu.update_descriptor_set(
-      gctx,
-      camera.depth_reduce_descriptor_sets[frame_index][mip],
-      {
-        type = .COMBINED_IMAGE_SAMPLER,
-        info = vk.DescriptorImageInfo {
-          sampler = camera.depth_pyramid[frame_index].sampler,
-          imageView = source_view,
-          imageLayout = source_layout,
-        },
-      },
-      {
-        type = .STORAGE_IMAGE,
-        info = vk.DescriptorImageInfo {
-          imageView = camera.depth_pyramid[frame_index].views[mip],
-          imageLayout = .GENERAL,
-        },
-      },
-    )
-  }
+  camera_update_descriptors(gctx, rm, camera, frame_index)
   return .SUCCESS
 }
 
@@ -940,10 +838,7 @@ camera_update_descriptors :: proc(
     {.STORAGE_BUFFER, gpu.buffer_info(&rm.node_data_buffer.buffer)},
     {.STORAGE_BUFFER, gpu.buffer_info(&rm.mesh_data_buffer.buffer)},
     {.STORAGE_BUFFER, gpu.buffer_info(&rm.world_matrix_buffer.buffer)},
-    {
-      .STORAGE_BUFFER,
-      gpu.buffer_info(&rm.camera_buffer.buffers[frame_index]),
-    },
+    {.STORAGE_BUFFER, gpu.buffer_info(&rm.camera_buffer.buffers[frame_index])},
     {.STORAGE_BUFFER, gpu.buffer_info(&camera.opaque_draw_count[frame_index])},
     {
       .STORAGE_BUFFER,
@@ -965,8 +860,8 @@ camera_update_descriptors :: proc(
     {
       .COMBINED_IMAGE_SAMPLER,
       vk.DescriptorImageInfo {
-        sampler     = camera.depth_pyramid[prev_frame].sampler,
-        imageView   = camera.depth_pyramid[prev_frame].full_view,
+        sampler = camera.depth_pyramid[prev_frame].sampler,
+        imageView = camera.depth_pyramid[prev_frame].full_view,
         imageLayout = .GENERAL,
       },
     },
