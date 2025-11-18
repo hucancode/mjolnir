@@ -8,6 +8,8 @@ import "core:math"
 import "core:math/linalg"
 import vk "vendor:vulkan"
 
+MAX_DEPTH_MIPS_LEVEL :: 16
+
 PerspectiveProjection :: struct {
   fov:          f32,
   aspect_ratio: f32,
@@ -94,12 +96,12 @@ Camera :: struct {
   ),
   depth_pyramid:                [FRAMES_IN_FLIGHT]DepthPyramid,
   descriptor_set:               [FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  depth_reduce_descriptor_sets: [FRAMES_IN_FLIGHT][16]vk.DescriptorSet,
+  depth_reduce_descriptor_sets: [FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
 }
 
 DepthPyramid :: struct {
   texture:    Handle,
-  views:      [16]vk.ImageView,
+  views:      [MAX_DEPTH_MIPS_LEVEL]vk.ImageView,
   full_view:  vk.ImageView,
   sampler:    vk.Sampler,
   mip_levels: u32,
@@ -440,13 +442,6 @@ camera_resize :: proc(
 ) -> vk.Result {
   if camera.extent.width == width && camera.extent.height == height do return .SUCCESS
   vk.DeviceWaitIdle(gctx.device) or_return
-  // Clear descriptor set references (will be reallocated after resource recreation)
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
-    camera.descriptor_set[frame] = 0
-    for mip in 0 ..< camera.depth_pyramid[frame].mip_levels {
-      camera.depth_reduce_descriptor_sets[frame][mip] = 0
-    }
-  }
   // Destroy depth pyramids (views, samplers, textures)
   for &p in camera.depth_pyramid {
     for mip in 0 ..< p.mip_levels {
@@ -478,65 +473,65 @@ camera_resize :: proc(
     .POST_PROCESS in camera.enabled_passes
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     if needs_final {
-      camera.attachments[.FINAL_IMAGE][frame], _ = create_texture(
+      camera.attachments[.FINAL_IMAGE][frame] = create_texture(
         gctx,
         rm,
         width,
         height,
         color_format,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
+      ) or_continue
     }
     if needs_gbuffer {
-      camera.attachments[.POSITION][frame], _ = create_texture(
+      camera.attachments[.POSITION][frame] = create_texture(
         gctx,
         rm,
         width,
         height,
         vk.Format.R32G32B32A32_SFLOAT,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
-      camera.attachments[.NORMAL][frame], _ = create_texture(
+      ) or_continue
+      camera.attachments[.NORMAL][frame] = create_texture(
         gctx,
         rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
-      camera.attachments[.ALBEDO][frame], _ = create_texture(
+      ) or_continue
+      camera.attachments[.ALBEDO][frame] = create_texture(
         gctx,
         rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
-      camera.attachments[.METALLIC_ROUGHNESS][frame], _ = create_texture(
+      ) or_continue
+      camera.attachments[.METALLIC_ROUGHNESS][frame] = create_texture(
         gctx,
         rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
-      camera.attachments[.EMISSIVE][frame], _ = create_texture(
+      ) or_continue
+      camera.attachments[.EMISSIVE][frame] = create_texture(
         gctx,
         rm,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
+      ) or_continue
     }
-    camera.attachments[.DEPTH][frame], _ = create_texture(
+    camera.attachments[.DEPTH][frame] = create_texture(
       gctx,
       rm,
       width,
       height,
       depth_format,
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    )
+    ) or_continue
     depth_tex := cont.get(rm.images_2d, camera.attachments[.DEPTH][frame])
     if depth_tex != nil {
       cmd_buf := gpu.begin_single_time_command(gctx) or_return
@@ -554,6 +549,7 @@ camera_resize :: proc(
       gpu.end_single_time_command(gctx, &cmd_buf) or_return
     }
   }
+  // Create all depth pyramids first
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     create_camera_depth_pyramid(
       gctx,
@@ -563,8 +559,10 @@ camera_resize :: proc(
       height,
       u32(frame),
     ) or_return
-    // TODO: reallocate camera descriptors
-    // camera_allocate_descriptors
+  }
+  // Then update all descriptors (references prev_frame pyramids, so all must exist first)
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    camera_update_descriptors(gctx, rm, camera, u32(frame))
   }
   log.infof("Camera resized to %dx%d", width, height)
   return .SUCCESS
@@ -844,7 +842,8 @@ camera_allocate_descriptors :: proc(
     &camera.descriptor_set[frame_index],
     normal_cam_descriptor_layout,
   ) or_return
-  for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
+  // Allocate all 16 possible descriptor sets upfront to handle any mip count on resize
+  for mip in 0 ..< MAX_DEPTH_MIPS_LEVEL {
     gpu.allocate_descriptor_set(
       gctx,
       &camera.depth_reduce_descriptor_sets[frame_index][mip],
@@ -925,6 +924,83 @@ camera_allocate_descriptors :: proc(
     )
   }
   return .SUCCESS
+}
+
+camera_update_descriptors :: proc(
+  gctx: ^gpu.GPUContext,
+  rm: ^Manager,
+  camera: ^Camera,
+  frame_index: u32,
+) {
+  prev_frame := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
+  // Update all descriptor bindings (buffers don't change, only image views/samplers)
+  gpu.update_descriptor_set(
+    gctx,
+    camera.descriptor_set[frame_index],
+    {.STORAGE_BUFFER, gpu.buffer_info(&rm.node_data_buffer.buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&rm.mesh_data_buffer.buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&rm.world_matrix_buffer.buffer)},
+    {
+      .STORAGE_BUFFER,
+      gpu.buffer_info(&rm.camera_buffer.buffers[frame_index]),
+    },
+    {.STORAGE_BUFFER, gpu.buffer_info(&camera.opaque_draw_count[frame_index])},
+    {
+      .STORAGE_BUFFER,
+      gpu.buffer_info(&camera.opaque_draw_commands[frame_index]),
+    },
+    {
+      .STORAGE_BUFFER,
+      gpu.buffer_info(&camera.transparent_draw_count[frame_index]),
+    },
+    {
+      .STORAGE_BUFFER,
+      gpu.buffer_info(&camera.transparent_draw_commands[frame_index]),
+    },
+    {.STORAGE_BUFFER, gpu.buffer_info(&camera.sprite_draw_count[frame_index])},
+    {
+      .STORAGE_BUFFER,
+      gpu.buffer_info(&camera.sprite_draw_commands[frame_index]),
+    },
+    {
+      .COMBINED_IMAGE_SAMPLER,
+      vk.DescriptorImageInfo {
+        sampler     = camera.depth_pyramid[prev_frame].sampler,
+        imageView   = camera.depth_pyramid[prev_frame].full_view,
+        imageLayout = .GENERAL,
+      },
+    },
+  )
+  // Update depth reduce descriptor sets with new views/samplers
+  for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
+    prev_depth_texture := cont.get(
+      rm.images_2d,
+      camera.attachments[.DEPTH][prev_frame],
+    )
+    source_view :=
+      mip == 0 ? prev_depth_texture.view : camera.depth_pyramid[frame_index].views[mip - 1]
+    source_layout :=
+      mip == 0 ? vk.ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL : vk.ImageLayout.GENERAL
+    gpu.update_descriptor_set(
+      gctx,
+      camera.depth_reduce_descriptor_sets[frame_index][mip],
+      {
+        type = .COMBINED_IMAGE_SAMPLER,
+        info = vk.DescriptorImageInfo {
+          sampler = camera.depth_pyramid[frame_index].sampler,
+          imageView = source_view,
+          imageLayout = source_layout,
+        },
+      },
+      {
+        type = .STORAGE_IMAGE,
+        info = vk.DescriptorImageInfo {
+          imageView = camera.depth_pyramid[frame_index].views[mip],
+          imageLayout = .GENERAL,
+        },
+      },
+    )
+  }
 }
 
 camera_upload_data :: proc(
