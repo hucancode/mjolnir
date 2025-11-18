@@ -193,8 +193,7 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   }
-  environment_map: ^gpu.Image
-  self.environment_map, environment_map = resources.create_texture_from_path(
+  self.environment_map = resources.create_texture_from_path(
     gctx,
     rm,
     "assets/Cannon_Exterior.hdr",
@@ -208,6 +207,7 @@ init :: proc(
       gpu.image_destroy(gctx.device, item)
     }
   }
+  environment_map := cont.get(rm.images_2d, self.environment_map)
   self.environment_max_lod =
     f32(
       gpu.calculate_mip_levels(
@@ -216,7 +216,7 @@ init :: proc(
       ),
     ) -
     1.0
-  brdf_handle, _ := resources.create_texture_from_data(
+  brdf_handle := resources.create_texture_from_data(
     gctx,
     rm,
     TEXTURE_LUT_GGX,

@@ -227,7 +227,6 @@ Manager :: struct {
   projection_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:              vk.PipelineLayout,
   pipeline:                     vk.Pipeline,
-  atlas:                        ^gpu.Image,
   atlas_handle:                 resources.Handle, // For bindless access
   proj_buffer:                  gpu.MutableBuffer(matrix[4, 4]f32),
   vertex_buffers:               [FRAMES_IN_FLIGHT]gpu.MutableBuffer(

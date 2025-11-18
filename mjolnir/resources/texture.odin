@@ -16,20 +16,20 @@ create_empty_texture_2d :: proc(
   usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
 ) -> (
   handle: Handle,
-  texture: ^gpu.Image,
   ret: vk.Result,
 ) {
   ok: bool
+  texture: ^gpu.Image
   handle, texture, ok = cont.alloc(&manager.images_2d)
   if !ok {
     log.error("Failed to allocate 2D texture: pool capacity reached")
-    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+    return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
   spec := gpu.image_spec_2d(width, height, format, usage)
   texture^ = gpu.image_create(gctx, spec) or_return
   set_texture_2d_descriptor(gctx, manager, handle.index, texture.view)
   log.debugf("Created empty texture %dx%d %v", width, height, format)
-  return handle, texture, .SUCCESS
+  return handle, .SUCCESS
 }
 
 create_empty_texture_cube :: proc(
@@ -40,14 +40,14 @@ create_empty_texture_cube :: proc(
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
 ) -> (
   handle: Handle,
-  texture: ^gpu.CubeImage,
   ret: vk.Result,
 ) {
   ok: bool
+  texture: ^gpu.CubeImage
   handle, texture, ok = cont.alloc(&manager.images_cube)
   if !ok {
     log.error("Failed to allocate cube texture: pool capacity reached")
-    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+    return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
   spec := gpu.image_spec_cube(size, format, usage)
   texture.base = gpu.image_create(gctx, spec) or_return
@@ -65,7 +65,7 @@ create_empty_texture_cube :: proc(
   }
   set_texture_cube_descriptor(gctx, manager, handle.index, texture.view)
   log.debugf("Created cube texture %dx%d", size, size)
-  return handle, texture, .SUCCESS
+  return handle, .SUCCESS
 }
 
 create_texture_from_path :: proc(
@@ -78,14 +78,14 @@ create_texture_from_path :: proc(
   is_hdr := false,
 ) -> (
   handle: Handle,
-  texture: ^gpu.Image,
   ret: vk.Result,
 ) {
   ok: bool
+  texture: ^gpu.Image
   handle, texture, ok = cont.alloc(&manager.images_2d)
   if !ok {
     log.error("Failed to allocate texture from path: pool capacity reached")
-    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+    return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
   path_cstr := strings.clone_to_cstring(path)
   defer delete(path_cstr)
@@ -100,7 +100,7 @@ create_texture_from_path :: proc(
         path,
         stbi.failure_reason(),
       )
-      return handle, texture, .ERROR_UNKNOWN
+      return handle, .ERROR_UNKNOWN
     }
     pixel_data = pixels
     data_size = vk.DeviceSize(width * height * 4 * size_of(f32))
@@ -112,7 +112,7 @@ create_texture_from_path :: proc(
         path,
         stbi.failure_reason(),
       )
-      return handle, texture, .ERROR_UNKNOWN
+      return handle, .ERROR_UNKNOWN
     }
     pixel_data = pixels
     data_size = vk.DeviceSize(width * height * 4)
@@ -142,7 +142,7 @@ create_texture_from_path :: proc(
   }
   set_texture_2d_descriptor(gctx, manager, handle.index, texture.view)
   log.debugf("Created texture from path: %s (%dx%d)", path, width, height)
-  return handle, texture, .SUCCESS
+  return handle, .SUCCESS
 }
 
 create_texture_from_pixels :: proc(
@@ -154,14 +154,14 @@ create_texture_from_pixels :: proc(
   generate_mips := false,
 ) -> (
   handle: Handle,
-  texture: ^gpu.Image,
   ret: vk.Result,
 ) {
   ok: bool
+  texture: ^gpu.Image
   handle, texture, ok = cont.alloc(&manager.images_2d)
   if !ok {
     log.error("Failed to allocate texture from pixels: pool capacity reached")
-    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+    return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
   spec := gpu.image_spec_2d(
     u32(width),
@@ -187,7 +187,7 @@ create_texture_from_pixels :: proc(
   }
   set_texture_2d_descriptor(gctx, manager, handle.index, texture.view)
   log.debugf("Created texture from pixels (%dx%d)", width, height)
-  return handle, texture, .SUCCESS
+  return handle, .SUCCESS
 }
 
 // Create texture from compressed data (PNG, JPG, etc.)
@@ -199,14 +199,14 @@ create_texture_from_data :: proc(
   generate_mips := false,
 ) -> (
   handle: Handle,
-  texture: ^gpu.Image,
   ret: vk.Result,
 ) {
   ok: bool
+  texture: ^gpu.Image
   handle, texture, ok = cont.alloc(&manager.images_2d)
   if !ok {
     log.error("Failed to allocate texture from data: pool capacity reached")
-    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+    return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
   width, height, channels: c.int
   pixels := stbi.load_from_memory(
@@ -219,7 +219,7 @@ create_texture_from_data :: proc(
   )
   if pixels == nil {
     log.errorf("Failed to decode texture data: %s", stbi.failure_reason())
-    return handle, texture, .ERROR_UNKNOWN
+    return handle, .ERROR_UNKNOWN
   }
   pixel_size := vk.DeviceSize(width * height * 4)
   spec := gpu.image_spec_2d(
@@ -247,7 +247,7 @@ create_texture_from_data :: proc(
   stbi.image_free(pixels)
   set_texture_2d_descriptor(gctx, manager, handle.index, texture.view)
   log.debugf("Created texture from data (%dx%d)", width, height)
-  return handle, texture, .SUCCESS
+  return handle, .SUCCESS
 }
 
 create_texture :: proc {
@@ -278,7 +278,7 @@ create_empty_texture_2d_handle :: proc(
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, _, ret := create_empty_texture_2d(
+  h, ret := create_empty_texture_2d(
     gctx,
     manager,
     width,
@@ -301,7 +301,7 @@ create_texture_from_path_handle :: proc(
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, _, ret := create_texture_from_path(
+  h, ret := create_texture_from_path(
     gctx,
     manager,
     path,
@@ -323,7 +323,7 @@ create_texture_from_data_handle :: proc(
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, _, ret := create_texture_from_data(
+  h, ret := create_texture_from_data(
     gctx,
     manager,
     data,
@@ -344,7 +344,7 @@ create_texture_from_pixels_handle :: proc(
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, _, ret := create_texture_from_pixels(
+  h, ret := create_texture_from_pixels(
     gctx,
     manager,
     pixels,
@@ -364,7 +364,6 @@ create_solid_color_texture :: proc(
   height: u32 = 1,
 ) -> (
   handle: Handle,
-  texture: ^gpu.Image,
   ret: vk.Result,
 ) {
   pixel_count := int(width * height)
@@ -394,7 +393,6 @@ create_checkerboard_texture :: proc(
   checker_size: u32 = 8,
 ) -> (
   handle: Handle,
-  texture: ^gpu.Image,
   ret: vk.Result,
 ) {
   pixel_count := int(size * size)

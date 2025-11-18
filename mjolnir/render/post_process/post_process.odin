@@ -472,7 +472,7 @@ create_images :: proc(
   format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
-    handle, _ = resources.create_texture(
+    handle = resources.create_texture(
       gctx,
       rm,
       width,

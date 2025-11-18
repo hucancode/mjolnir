@@ -198,9 +198,11 @@ load_textures_batch :: proc(
     } else {
       continue
     }
-    handle, tex, result := resources.create_texture(gctx, rm, pixel_data)
+    handle, result := resources.create_texture(gctx, rm, pixel_data)
     if result != .SUCCESS do return .io_error
-    tex.auto_purge = true // Enable auto-purge for GLTF-loaded textures
+    if tex := cont.get(rm.images_2d, handle); tex != nil {
+      tex.auto_purge = true // Enable auto-purge for GLTF-loaded textures
+    }
     cache[texture] = handle
     log.infof("Created texture %v", handle)
   }
@@ -219,12 +221,14 @@ load_materials_batch :: proc(
 ) -> cgltf.result {
   for gltf_mat in materials do if gltf_mat != nil {
     albedo, metallic_roughness, normal, emissive, occlusion, features := load_material_textures(gltf_mat, texture_cache)
-    material_handle, mat, ret := resources.create_material(rm, features, .PBR, albedo, metallic_roughness, normal, emissive, occlusion)
+    material_handle, ret := resources.create_material(rm, features, .PBR, albedo, metallic_roughness, normal, emissive, occlusion)
     if ret != .SUCCESS {
       // TOOD: clean up textures
       return .invalid_gltf
     }
-    mat.auto_purge = true
+    if mat := cont.get(rm.materials, material_handle); mat != nil {
+      mat.auto_purge = true
+    }
     resources.texture_2d_ref(rm, albedo)
     resources.texture_2d_ref(rm, metallic_roughness)
     resources.texture_2d_ref(rm, normal)

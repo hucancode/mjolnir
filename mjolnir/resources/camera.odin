@@ -163,65 +163,65 @@ camera_init :: proc(
     .POST_PROCESS in enabled_passes
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     if needs_final {
-      camera.attachments[.FINAL_IMAGE][frame], _, _ = create_texture(
+      camera.attachments[.FINAL_IMAGE][frame] = create_texture(
         gctx,
         manager,
         width,
         height,
         color_format,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
+      ) or_continue
     }
     if needs_gbuffer {
-      camera.attachments[.POSITION][frame], _, _ = create_texture(
+      camera.attachments[.POSITION][frame] = create_texture(
         gctx,
         manager,
         width,
         height,
         vk.Format.R32G32B32A32_SFLOAT,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
-      camera.attachments[.NORMAL][frame], _, _ = create_texture(
+      ) or_continue
+      camera.attachments[.NORMAL][frame] = create_texture(
         gctx,
         manager,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
-      camera.attachments[.ALBEDO][frame], _, _ = create_texture(
+      ) or_continue
+      camera.attachments[.ALBEDO][frame] = create_texture(
         gctx,
         manager,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
-      camera.attachments[.METALLIC_ROUGHNESS][frame], _, _ = create_texture(
+      ) or_continue
+      camera.attachments[.METALLIC_ROUGHNESS][frame] = create_texture(
         gctx,
         manager,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
-      camera.attachments[.EMISSIVE][frame], _, _ = create_texture(
+      ) or_continue
+      camera.attachments[.EMISSIVE][frame] = create_texture(
         gctx,
         manager,
         width,
         height,
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
-      )
+      ) or_continue
     }
-    camera.attachments[.DEPTH][frame], _, _ = create_texture(
+    camera.attachments[.DEPTH][frame] = create_texture(
       gctx,
       manager,
       width,
       height,
       depth_format,
       vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    )
+    ) or_continue
     // Transition depth image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL
     if depth, ok := cont.get(
       manager.images_2d,
@@ -471,7 +471,7 @@ camera_resize :: proc(
     .POST_PROCESS in camera.enabled_passes
   for frame in 0 ..< FRAMES_IN_FLIGHT {
     if needs_final {
-      camera.attachments[.FINAL_IMAGE][frame], _, _ = create_texture(
+      camera.attachments[.FINAL_IMAGE][frame], _ = create_texture(
         gctx,
         manager,
         width,
@@ -481,7 +481,7 @@ camera_resize :: proc(
       )
     }
     if needs_gbuffer {
-      camera.attachments[.POSITION][frame], _, _ = create_texture(
+      camera.attachments[.POSITION][frame], _ = create_texture(
         gctx,
         manager,
         width,
@@ -489,7 +489,7 @@ camera_resize :: proc(
         vk.Format.R32G32B32A32_SFLOAT,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       )
-      camera.attachments[.NORMAL][frame], _, _ = create_texture(
+      camera.attachments[.NORMAL][frame], _ = create_texture(
         gctx,
         manager,
         width,
@@ -497,7 +497,7 @@ camera_resize :: proc(
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       )
-      camera.attachments[.ALBEDO][frame], _, _ = create_texture(
+      camera.attachments[.ALBEDO][frame], _ = create_texture(
         gctx,
         manager,
         width,
@@ -505,7 +505,7 @@ camera_resize :: proc(
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       )
-      camera.attachments[.METALLIC_ROUGHNESS][frame], _, _ = create_texture(
+      camera.attachments[.METALLIC_ROUGHNESS][frame], _ = create_texture(
         gctx,
         manager,
         width,
@@ -513,7 +513,7 @@ camera_resize :: proc(
         vk.Format.R8G8B8A8_UNORM,
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       )
-      camera.attachments[.EMISSIVE][frame], _, _ = create_texture(
+      camera.attachments[.EMISSIVE][frame], _ = create_texture(
         gctx,
         manager,
         width,
@@ -522,7 +522,7 @@ camera_resize :: proc(
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       )
     }
-    camera.attachments[.DEPTH][frame], _, _ = create_texture(
+    camera.attachments[.DEPTH][frame], _ = create_texture(
       gctx,
       manager,
       width,

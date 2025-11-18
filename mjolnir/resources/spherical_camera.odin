@@ -41,7 +41,7 @@ spherical_camera_init :: proc(
   self.size = size
   self.max_draws = max_draws
   for &v in self.depth_cube {
-    v, _, _ = create_empty_texture_cube(
+    v, _ = create_empty_texture_cube(
       gctx,
       manager,
       size,

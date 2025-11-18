@@ -178,7 +178,7 @@ init :: proc(
     self.projection_layout = 0
   }
   log.infof("init UI texture...")
-  self.atlas_handle, _ = resources.create_texture_from_pixels(
+  self.atlas_handle = resources.create_texture_from_pixels(
     gctx,
     rm,
     mu.default_atlas_alpha[:],

@@ -145,7 +145,7 @@ init :: proc(
   }
   log.infof("init UI default texture...")
   white_pixel := WHITE
-  self.atlas_handle, self.atlas = resources.create_texture_from_pixels(
+  self.atlas_handle = resources.create_texture_from_pixels(
     gctx,
     rm,
     white_pixel[:],
@@ -237,7 +237,7 @@ init :: proc(
     rgba_data[i * 4 + 2] = 255
     rgba_data[i * 4 + 3] = alpha
   }
-  self.text_atlas_handle, _ = resources.create_texture_from_pixels(
+  self.text_atlas_handle = resources.create_texture_from_pixels(
     gctx,
     rm,
     rgba_data[:],

@@ -97,14 +97,14 @@ create_material :: proc(
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> (
   ret: Handle,
-  mat: ^Material,
   res: vk.Result,
 ) {
   ok: bool
+  mat: ^Material
   ret, mat, ok = cont.alloc(&manager.materials)
   if !ok {
     log.error("Failed to allocate material: pool capacity reached")
-    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+    return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
   mat.type = type
   mat.features = features
@@ -145,7 +145,7 @@ create_material_handle :: proc(
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, _, ret := create_material(
+  h, ret := create_material(
     manager,
     features,
     type,
@@ -176,11 +176,11 @@ init_builtin_materials :: proc(self: ^Manager) -> vk.Result {
     {1.0, 0.0, 1.0, 1.0}, // MAGENTA
   }
   for color, i in colors {
-    self.builtin_materials[i], _, _ = create_material(
+    self.builtin_materials[i] = create_material(
       self,
       type = .PBR,
       base_color_factor = color,
-    )
+    ) or_continue
   }
   log.info("Builtin materials created successfully")
   return .SUCCESS

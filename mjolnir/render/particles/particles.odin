@@ -497,7 +497,7 @@ create_render_pipeline :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
   }
-  default_texture_handle, _ := resources.create_texture_from_data(
+  default_texture_handle := resources.create_texture_from_data(
     gctx,
     rm,
     TEXTURE_BLACK_CIRCLE,
