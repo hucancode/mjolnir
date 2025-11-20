@@ -457,9 +457,9 @@ perform_sphere_culling :: proc(
   // STEP 1: Clear draw count and execute sphere culling
   vk.CmdFillBuffer(
     command_buffer,
-    camera.draw_count.buffer,
+    camera.draw_count[frame_index].buffer,
     0,
-    vk.DeviceSize(camera.draw_count.bytes_count),
+    vk.DeviceSize(camera.draw_count[frame_index].bytes_count),
     0,
   )
   gpu.bind_compute_pipeline(
@@ -506,8 +506,8 @@ render_sphere_depth :: proc(
   // STEP 2: Barrier - Wait for compute to finish before reading draw commands
   gpu.buffer_barrier(
     command_buffer,
-    camera.draw_commands.buffer,
-    vk.DeviceSize(camera.draw_commands.bytes_count),
+    camera.draw_commands[frame_index].buffer,
+    vk.DeviceSize(camera.draw_commands[frame_index].bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -515,8 +515,8 @@ render_sphere_depth :: proc(
   )
   gpu.buffer_barrier(
     command_buffer,
-    camera.draw_count.buffer,
-    vk.DeviceSize(camera.draw_count.bytes_count),
+    camera.draw_count[frame_index].buffer,
+    vk.DeviceSize(camera.draw_count[frame_index].bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -585,9 +585,9 @@ render_sphere_depth :: proc(
   )
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
-    camera.draw_commands.buffer,
+    camera.draw_commands[frame_index].buffer,
     0, // offset
-    camera.draw_count.buffer,
+    camera.draw_count[frame_index].buffer,
     0, // count offset
     self.max_draws,
     u32(size_of(vk.DrawIndexedIndirectCommand)),
