@@ -59,27 +59,62 @@ Color :: enum {
   MAGENTA,
 }
 
-material_update_gpu_data :: proc(mat: ^Material) {
-  mat.albedo_index = min(MAX_TEXTURES - 1, mat.albedo.index)
-  mat.metallic_roughness_index = min(
-    MAX_TEXTURES - 1,
-    mat.metallic_roughness.index,
-  )
-  mat.normal_index = min(MAX_TEXTURES - 1, mat.normal.index)
-  mat.emissive_index = min(MAX_TEXTURES - 1, mat.emissive.index)
+material_init :: proc(
+  self: ^Material,
+  features: ShaderFeatureSet,
+  type: MaterialType,
+  albedo_handle: Handle,
+  metallic_roughness_handle: Handle,
+  normal_handle: Handle,
+  emissive_handle: Handle,
+  occlusion_handle: Handle,
+  metallic_value: f32,
+  roughness_value: f32,
+  emissive_value: f32,
+  base_color_factor: [4]f32,
+) {
+  self.type = type
+  self.features = features
+  self.albedo = albedo_handle
+  self.metallic_roughness = metallic_roughness_handle
+  self.normal = normal_handle
+  self.emissive = emissive_handle
+  self.occlusion = occlusion_handle
+  self.metallic_value = metallic_value
+  self.roughness_value = roughness_value
+  self.emissive_value = emissive_value
+  self.base_color_factor = base_color_factor
 }
 
-material_write_to_gpu :: proc(
+material_upload_gpu_data :: proc(
   rm: ^Manager,
   handle: Handle,
-  mat: ^Material,
+  self: ^Material,
 ) -> vk.Result {
   if handle.index >= MAX_MATERIALS {
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  material_update_gpu_data(mat)
-  gpu.write(&rm.material_buffer.buffer, &mat.data, int(handle.index)) or_return
+  self.albedo_index = min(MAX_TEXTURES - 1, self.albedo.index)
+  self.metallic_roughness_index = min(
+    MAX_TEXTURES - 1,
+    self.metallic_roughness.index,
+  )
+  self.normal_index = min(MAX_TEXTURES - 1, self.normal.index)
+  self.emissive_index = min(MAX_TEXTURES - 1, self.emissive.index)
+  gpu.write(
+    &rm.material_buffer.buffer,
+    &self.data,
+    int(handle.index),
+  ) or_return
   return .SUCCESS
+}
+
+material_destroy :: proc(self: ^Material, rm: ^Manager) {
+  texture_2d_unref(rm, self.albedo)
+  texture_2d_unref(rm, self.metallic_roughness)
+  texture_2d_unref(rm, self.normal)
+  texture_2d_unref(rm, self.emissive)
+  texture_2d_unref(rm, self.occlusion)
 }
 
 create_material :: proc(
@@ -95,28 +130,34 @@ create_material :: proc(
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  auto_purge := false,
 ) -> (
-  ret: Handle,
-  res: vk.Result,
+  handle: Handle,
+  ret: vk.Result,
 ) {
-  ok: bool
   mat: ^Material
-  ret, mat, ok = cont.alloc(&rm.materials)
+  ok: bool
+  handle, mat, ok = cont.alloc(&rm.materials)
   if !ok {
     log.error("Failed to allocate material: pool capacity reached")
-    return Handle{}, .ERROR_OUT_OF_DEVICE_MEMORY
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  mat.type = type
-  mat.features = features
-  mat.albedo = albedo_handle
-  mat.metallic_roughness = metallic_roughness_handle
-  mat.normal = normal_handle
-  mat.emissive = emissive_handle
-  mat.occlusion = occlusion_handle
-  mat.metallic_value = metallic_value
-  mat.roughness_value = roughness_value
-  mat.emissive_value = emissive_value
-  mat.base_color_factor = base_color_factor
+  material_init(
+    mat,
+    features,
+    type,
+    albedo_handle,
+    metallic_roughness_handle,
+    normal_handle,
+    emissive_handle,
+    occlusion_handle,
+    metallic_value,
+    roughness_value,
+    emissive_value,
+    base_color_factor,
+  )
+  mat.auto_purge = auto_purge
+  material_upload_gpu_data(rm, handle, mat) or_return
   log.infof(
     "Material created: albedo=%d metallic_roughness=%d normal=%d emissive=%d",
     mat.albedo.index,
@@ -124,8 +165,7 @@ create_material :: proc(
     mat.normal.index,
     mat.emissive.index,
   )
-  res = material_write_to_gpu(rm, ret, mat)
-  return
+  return handle, .SUCCESS
 }
 
 create_material_handle :: proc(
@@ -176,11 +216,8 @@ init_builtin_materials :: proc(self: ^Manager) -> vk.Result {
     {1.0, 0.0, 1.0, 1.0}, // MAGENTA
   }
   for color, i in colors {
-    self.builtin_materials[i] = create_material(
-      self,
-      type = .PBR,
-      base_color_factor = color,
-    ) or_continue
+    self.builtin_materials[i] =
+    create_material(self, type = .PBR, base_color_factor = color) or_continue
   }
   log.info("Builtin materials created successfully")
   return .SUCCESS

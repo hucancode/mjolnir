@@ -161,8 +161,13 @@ create_mesh :: proc(
   handle: resources.Handle,
   ok: bool,
 ) #optional_ok {
-  ret : vk.Result
-  handle, ret = resources.create_mesh(&engine.gctx, &engine.rm, geom, auto_purge)
+  ret: vk.Result
+  handle, ret = resources.create_mesh(
+    &engine.gctx,
+    &engine.rm,
+    geom,
+    auto_purge,
+  )
   ok = ret == .SUCCESS
   return
 }
@@ -889,7 +894,7 @@ update_material_texture :: proc(
   case .OCCLUSION_TEXTURE:
     material.occlusion = texture_handle
   }
-  result := resources.material_write_to_gpu(
+  result := resources.material_upload_gpu_data(
     &engine.rm,
     material_handle,
     material,

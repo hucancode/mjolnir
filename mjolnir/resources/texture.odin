@@ -14,6 +14,7 @@ create_empty_texture_2d :: proc(
   width, height: u32,
   format: vk.Format,
   usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
+  auto_purge := false,
 ) -> (
   handle: Handle,
   ret: vk.Result,
@@ -27,6 +28,7 @@ create_empty_texture_2d :: proc(
   }
   spec := gpu.image_spec_2d(width, height, format, usage)
   texture^ = gpu.image_create(gctx, spec) or_return
+  texture.auto_purge = auto_purge
   set_texture_2d_descriptor(gctx, rm, handle.index, texture.view)
   log.debugf("Created empty texture %dx%d %v", width, height, format)
   return handle, .SUCCESS
@@ -38,6 +40,7 @@ create_empty_texture_cube :: proc(
   size: u32,
   format: vk.Format = .D32_SFLOAT,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+  auto_purge := false,
 ) -> (
   handle: Handle,
   ret: vk.Result,
@@ -51,6 +54,7 @@ create_empty_texture_cube :: proc(
   }
   spec := gpu.image_spec_cube(size, format, usage)
   texture.base = gpu.image_create(gctx, spec) or_return
+  texture.base.auto_purge = auto_purge
   // Create 6 face views for rendering
   for i in 0 ..< 6 {
     texture.face_views[i] = gpu.image_create_view(
@@ -278,14 +282,7 @@ create_empty_texture_2d_handle :: proc(
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, ret := create_empty_texture_2d(
-    gctx,
-    rm,
-    width,
-    height,
-    format,
-    usage,
-  )
+  h, ret := create_empty_texture_2d(gctx, rm, width, height, format, usage)
   return h, ret == .SUCCESS
 }
 
@@ -323,13 +320,7 @@ create_texture_from_data_handle :: proc(
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, ret := create_texture_from_data(
-    gctx,
-    rm,
-    data,
-    format,
-    generate_mips,
-  )
+  h, ret := create_texture_from_data(gctx, rm, data, format, generate_mips)
   return h, ret == .SUCCESS
 }
 
@@ -375,13 +366,7 @@ create_solid_color_texture :: proc(
     pixels[i * 4 + 2] = color[2]
     pixels[i * 4 + 3] = color[3]
   }
-  return create_texture_from_pixels(
-    gctx,
-    rm,
-    pixels,
-    int(width),
-    int(height),
-  )
+  return create_texture_from_pixels(gctx, rm, pixels, int(width), int(height))
 }
 
 create_checkerboard_texture :: proc(
@@ -411,22 +396,24 @@ create_checkerboard_texture :: proc(
       pixels[idx + 3] = color[3]
     }
   }
-  return create_texture_from_pixels(
-    gctx,
-    rm,
-    pixels,
-    int(size),
-    int(size),
-  )
+  return create_texture_from_pixels(gctx, rm, pixels, int(size), int(size))
+}
+
+texture_2d_destroy :: proc(self: ^gpu.Image, device: vk.Device) {
+  gpu.image_destroy(device, self)
+}
+
+texture_cube_destroy :: proc(self: ^gpu.CubeImage, device: vk.Device) {
+  gpu.cube_depth_texture_destroy(device, self)
 }
 
 destroy_texture :: proc(device: vk.Device, rm: ^Manager, handle: Handle) {
   if texture := cont.get(rm.images_2d, handle); texture != nil {
-    gpu.image_destroy(device, texture)
+    texture_2d_destroy(texture, device)
     cont.free(&rm.images_2d, handle)
   } else if cube_texture := cont.get(rm.images_cube, handle);
      cube_texture != nil {
-    gpu.cube_depth_texture_destroy(device, cube_texture)
+    texture_cube_destroy(cube_texture, device)
     cont.free(&rm.images_cube, handle)
   }
 }

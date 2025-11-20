@@ -127,12 +127,7 @@ purge_unused_materials :: proc(self: ^Manager) -> (purged_count: int) {
       }
       mat, freed := cont.free(&self.materials, handle)
       if freed {
-        // Unref all textures referenced by this material
-        texture_2d_unref(self, mat.albedo)
-        texture_2d_unref(self, mat.metallic_roughness)
-        texture_2d_unref(self, mat.normal)
-        texture_2d_unref(self, mat.emissive)
-        texture_2d_unref(self, mat.occlusion)
+        material_destroy(mat, self)
         purged_count += 1
       }
     }
@@ -157,7 +152,7 @@ purge_unused_textures_2d :: proc(
       }
       img, freed := cont.free(&rm.images_2d, handle)
       if freed {
-        gpu.image_destroy(gctx.device, img)
+        texture_2d_destroy(img, gctx.device)
         purged_count += 1
       }
     }
@@ -182,7 +177,7 @@ purge_unused_textures_cube :: proc(
       }
       img, freed := cont.free(&rm.images_cube, handle)
       if freed {
-        gpu.cube_depth_texture_destroy(gctx.device, img)
+        texture_cube_destroy(img, gctx.device)
         purged_count += 1
       }
     }
