@@ -426,7 +426,7 @@ update :: proc(self: ^Engine) -> bool {
     self.update_proc(self, delta_time)
   }
   world.update_node_animations(&self.world, &self.rm, delta_time)
-  world.update_skeletal_animations(&self.world, &self.rm, delta_time)
+  world.update_skeletal_animations(&self.world, &self.rm, delta_time, self.frame_index)
   world.update_sprite_animations(&self.rm, delta_time)
   self.last_update_timestamp = time.now()
   return true
@@ -657,7 +657,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   mu.begin(&self.render.debug_ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
-  world.begin_frame(&self.world, &self.rm)
+  world.begin_frame(&self.world, &self.rm, 0.016, nil, self.frame_index)
   render.update_visibility_node_count(&self.render, &self.world)
   resources.update_light_camera(&self.rm, self.frame_index)
   if self.pre_render_proc != nil {

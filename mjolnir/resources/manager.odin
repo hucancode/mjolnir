@@ -45,7 +45,10 @@ Manager :: struct {
   nav_meshes:                Pool(NavMesh),
   nav_contexts:              Pool(NavContext),
   navigation_system:         NavigationSystem,
-  bone_buffer:               gpu.BindlessBuffer(matrix[4, 4]f32),
+  bone_buffer:               gpu.PerFrameBindlessBuffer(
+    matrix[4, 4]f32,
+    FRAMES_IN_FLIGHT,
+  ),
   bone_matrix_slab:          SlabAllocator,
   camera_buffer:             gpu.PerFrameBindlessBuffer(
     CameraData,
@@ -118,14 +121,14 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
       // This could roughly fit 12000 animated characters with 128 bones each
     },
   )
-  gpu.bindless_buffer_init(
+  gpu.per_frame_bindless_buffer_init(
     &self.bone_buffer,
     gctx,
     int(self.bone_matrix_slab.capacity),
     {.VERTEX},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.bone_buffer, gctx.device)
+    gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
     cont.slab_destroy(&self.bone_matrix_slab)
   }
   gpu.per_frame_bindless_buffer_init(
@@ -362,7 +365,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   delete(self.navigation_system.geometry_cache)
   delete(self.navigation_system.dirty_tiles)
   destroy_global_samplers(self, gctx)
-  gpu.bindless_buffer_destroy(&self.bone_buffer, gctx.device)
+  gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
   cont.slab_destroy(&self.bone_matrix_slab)
   gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
   gpu.per_frame_bindless_buffer_destroy(
