@@ -39,6 +39,36 @@ Light :: struct {
   camera_handle: Handle, // Camera (regular or spherical based on light type)
 }
 
+light_init :: proc(
+  self: ^Light,
+  light_type: LightType,
+  node_handle: Handle,
+  color: [4]f32,
+  radius: f32,
+  angle_inner: f32,
+  angle_outer: f32,
+  cast_shadow: b32,
+) {
+  self.type = light_type
+  self.node_handle = node_handle
+  self.cast_shadow = cast_shadow
+  self.color = color
+  self.radius = radius
+  self.angle_inner = angle_inner
+  self.angle_outer = angle_outer
+  self.node_index = node_handle.index
+  self.camera_handle = {}
+  self.camera_index = 0xFFFFFFFF
+}
+
+light_upload_gpu_data :: proc(rm: ^Manager, handle: Handle, self: ^Light) -> vk.Result {
+  return gpu.write(&rm.lights_buffer.buffer, &self.data, int(handle.index))
+}
+
+light_destroy :: proc(self: ^Light, rm: ^Manager, handle: Handle) {
+  unregister_active_light(rm, handle)
+}
+
 create_light :: proc(
   rm: ^Manager,
   gctx: ^gpu.GPUContext,
@@ -50,21 +80,14 @@ create_light :: proc(
   angle_outer: f32 = math.PI * 0.2,
   cast_shadow: b32 = true,
 ) -> (
-  ret: Handle,
+  handle: Handle,
   ok: bool,
 ) {
-  handle, light := cont.alloc(&rm.lights) or_return
-  light.type = light_type
-  light.node_handle = node_handle
-  light.cast_shadow = cast_shadow
-  light.color = color
-  light.radius = radius
-  light.angle_inner = angle_inner
-  light.angle_outer = angle_outer
-  light.node_index = node_handle.index
-  light.camera_handle = {}
-  light.camera_index = 0xFFFFFFFF
-  gpu.write(&rm.lights_buffer.buffer, &light.data, int(handle.index))
+  light: ^Light
+  handle, light, ok = cont.alloc(&rm.lights)
+  if !ok do return {}, false
+  light_init(light, light_type, node_handle, color, radius, angle_inner, angle_outer, cast_shadow)
+  light_upload_gpu_data(rm, handle, light) or_return
   register_active_light(rm, handle)
   return handle, true
 }
@@ -74,14 +97,15 @@ destroy_light :: proc(
   gctx: ^gpu.GPUContext,
   handle: Handle,
 ) -> bool {
-  unregister_active_light(rm, handle)
-  _, freed := cont.free(&rm.lights, handle)
-  return freed
+  light, freed := cont.free(&rm.lights, handle)
+  if !freed do return false
+  light_destroy(light, rm, handle)
+  return true
 }
 
 update_light_gpu_data :: proc(rm: ^Manager, handle: Handle) {
   if light, ok := cont.get(rm.lights, handle); ok {
-    gpu.write(&rm.lights_buffer.buffer, &light.data, int(handle.index))
+    light_upload_gpu_data(rm, handle, light)
   }
 }
 
