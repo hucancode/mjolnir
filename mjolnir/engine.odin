@@ -87,7 +87,6 @@ Engine :: struct {
   mouse_scroll_proc:         MouseScrollProc,
   pre_render_proc:           PreRenderProc,
   post_render_proc:          PostRenderProc,
-  render_error_count:        u32,
   render:                    render.Manager,
   command_buffers:           [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers:   [FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -854,6 +853,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     }
   }
   frame := 0
+  render_error_count := 0
   for !glfw.WindowShouldClose(self.window) {
     update_input(self)
     when !USE_PARALLEL_UPDATE {
@@ -863,6 +863,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
        FRAME_TIME_MILIS {
       continue
     }
+    self.last_frame_timestamp = time.now()
     ensure_light_cameras(self)
     res := render_and_present(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
@@ -870,16 +871,15 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     }
     if res != .SUCCESS {
       log.errorf("Error during rendering %v", res)
-      self.render_error_count += 1
-      if self.render_error_count >=
+      render_error_count += 1
+      if render_error_count >=
          MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
         log.errorf("Too many render errors, exiting...")
         break
       }
     } else {
-      self.render_error_count = 0
+      render_error_count = 0
     }
-    self.last_frame_timestamp = time.now()
     frame += 1
     when FRAME_LIMIT > 0 {
       if frame >= FRAME_LIMIT {
