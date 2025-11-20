@@ -17,8 +17,8 @@ Swapchain :: struct {
   image_index:                 u32,
   in_flight_fences:            [FRAMES_IN_FLIGHT]vk.Fence,
   image_available_semaphores:  [FRAMES_IN_FLIGHT]vk.Semaphore, // Per frame-in-flight
-  render_finished_semaphores:  []vk.Semaphore, // Per swapchain image
-  compute_finished_semaphores: []vk.Semaphore, // Per swapchain image
+  render_finished_semaphores:  []vk.Semaphore, // Per swapchain image (for presentation sync)
+  compute_finished_semaphores: [FRAMES_IN_FLIGHT]vk.Semaphore, // Per frame-in-flight (for compute->graphics sync)
 }
 
 swapchain_init :: proc(
@@ -147,13 +147,11 @@ swapchain_init :: proc(
       &self.views[i],
     ) or_return
   }
-  // Allocate per-swapchain-image semaphores
+  // Allocate per-swapchain-image semaphores for presentation
   self.render_finished_semaphores = make([]vk.Semaphore, swapchain_image_count)
-  self.compute_finished_semaphores = make([]vk.Semaphore, swapchain_image_count)
   semaphore_info := vk.SemaphoreCreateInfo {
     sType = .SEMAPHORE_CREATE_INFO,
   }
-  // Create per-swapchain-image semaphores
   for i in 0 ..< swapchain_image_count {
     vk.CreateSemaphore(
       gctx.device,
@@ -161,15 +159,14 @@ swapchain_init :: proc(
       nil,
       &self.render_finished_semaphores[i],
     ) or_return
+  }
+  for i in 0 ..< FRAMES_IN_FLIGHT {
     vk.CreateSemaphore(
       gctx.device,
       &semaphore_info,
       nil,
       &self.compute_finished_semaphores[i],
     ) or_return
-  }
-  // Create per-frame-in-flight resources
-  for i in 0 ..< FRAMES_IN_FLIGHT {
     vk.CreateSemaphore(
       gctx.device,
       &semaphore_info,
@@ -204,17 +201,15 @@ swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {
   }
   delete(self.render_finished_semaphores)
   self.render_finished_semaphores = nil
-  for semaphore in self.compute_finished_semaphores {
-    vk.DestroySemaphore(device, semaphore, nil)
-  }
-  delete(self.compute_finished_semaphores)
-  self.compute_finished_semaphores = nil
   // Destroy per-frame-in-flight resources
   for semaphore in self.image_available_semaphores {
     vk.DestroySemaphore(device, semaphore, nil)
   }
+  for semaphore in self.compute_finished_semaphores {
+    vk.DestroySemaphore(device, semaphore, nil)
+  }
   for fence in self.in_flight_fences {
-      vk.DestroyFence(device, fence, nil)
+    vk.DestroyFence(device, fence, nil)
   }
   vk.DestroySwapchainKHR(device, self.handle, nil)
   self.handle = 0
@@ -276,7 +271,7 @@ submit_queue_and_present :: proc(
   append(&wait_stages, vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT})
   if gctx.has_async_compute {
     if compute_queue, ok := gctx.compute_queue.?; ok {
-      append(&wait_semaphores, self.compute_finished_semaphores[self.image_index])
+      append(&wait_semaphores, self.compute_finished_semaphores[frame_index])
       append(
         &wait_stages,
         vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER},
@@ -286,7 +281,7 @@ submit_queue_and_present :: proc(
         commandBufferCount   = 1,
         pCommandBuffers      = compute_command_buffer,
         signalSemaphoreCount = 1,
-        pSignalSemaphores    = &self.compute_finished_semaphores[self.image_index],
+        pSignalSemaphores    = &self.compute_finished_semaphores[frame_index],
       }
       vk.QueueSubmit(compute_queue, 1, &compute_submit, 0) or_return
     }
@@ -299,6 +294,7 @@ submit_queue_and_present :: proc(
     commandBufferCount   = 1,
     pCommandBuffers      = command_buffer,
     signalSemaphoreCount = 1,
+    // Use image_index for presentation sync (graphics->present)
     pSignalSemaphores    = &self.render_finished_semaphores[self.image_index],
   }
   vk.QueueSubmit(
@@ -311,6 +307,7 @@ submit_queue_and_present :: proc(
   present_info := vk.PresentInfoKHR {
     sType              = .PRESENT_INFO_KHR,
     waitSemaphoreCount = 1,
+    // Use image_index for presentation sync (tied to swapchain image)
     pWaitSemaphores    = &self.render_finished_semaphores[self.image_index],
     swapchainCount     = 1,
     pSwapchains        = &self.handle,
