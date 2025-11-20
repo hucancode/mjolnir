@@ -479,8 +479,9 @@ begin_frame :: proc(
   rm: ^resources.Manager,
   delta_time: f32 = 0.016,
   game_state: rawptr = nil,
+  frame_index: u32 = 0,
 ) {
-  traverse(world, rm)
+  traverse(world, rm, nil, nil, frame_index)
   process_octree_updates(world, rm)
   world_tick_actors(world, rm, delta_time, game_state)
 }
@@ -578,6 +579,7 @@ traverse :: proc(
   rm: ^resources.Manager = nil,
   cb_context: rawptr = nil,
   callback: TraversalCallback = nil,
+  frame_index: u32 = 0,
 ) -> bool {
   using geometry
   append(
@@ -613,10 +615,10 @@ traverse :: proc(
       if parent_skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do break apply_bone_socket
       parent_mesh_skinning := parent_mesh.skinning.? or_break
       if bone_index >= u32(len(parent_mesh_skinning.bones)) do break apply_bone_socket
-      bone_buffer := &rm.bone_buffer
-      if bone_buffer.buffer.mapped == nil do break apply_bone_socket
+      bone_buffer := &rm.bone_buffer.buffers[frame_index]
+      if bone_buffer.mapped == nil do break apply_bone_socket
       bone_matrices_ptr := gpu.get(
-        &bone_buffer.buffer,
+        bone_buffer,
         parent_skinning.bone_matrix_buffer_offset,
       )
       bone_matrices := slice.from_ptr(
