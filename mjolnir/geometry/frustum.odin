@@ -11,22 +11,25 @@ Frustum :: struct {
   planes: [6]Plane,
 }
 
-make_frustum :: proc(view_projection_matrix: matrix[4, 4]f32) -> Frustum {
-  m := linalg.transpose(view_projection_matrix)
+make_frustum :: proc(m: matrix[4, 4]f32) -> Frustum {
   // Each plane is a Vec4: a*x + b*y + c*z + d = 0
+  x_axis := [4]f32{m[0, 0], m[0, 1], m[0, 2], m[0, 3]}
+  y_axis := [4]f32{m[1, 0], m[1, 1], m[1, 2], m[1, 3]}
+  z_axis := [4]f32{m[2, 0], m[2, 1], m[2, 2], m[2, 3]}
+  origin := [4]f32{m[3, 0], m[3, 1], m[3, 2], m[3, 3]}
   planes := [6]Plane {
     // Left
-    m[3] + m[0],
+    origin + x_axis,
     // Right
-    m[3] - m[0],
+    origin - x_axis,
     // Bottom
-    m[3] + m[1],
+    origin + y_axis,
     // Top
-    m[3] - m[1],
+    origin - y_axis,
     // Near
-    m[3] + m[2],
+    origin + z_axis,
     // Far
-    m[3] - m[2],
+    origin - z_axis,
   }
   for &plane in planes {
     mag := linalg.length(plane.xyz)
