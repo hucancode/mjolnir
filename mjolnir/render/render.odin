@@ -70,7 +70,7 @@ record_compute_commands :: proc(
       u32(cam_index),
       next_frame_index, // Write draw_list[N+1]
       {.VISIBLE},
-      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+      {},
       rm,
     )
   }
@@ -382,19 +382,8 @@ record_transparency_pass :: proc(
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return .ERROR_UNKNOWN
-  visibility.perform_culling(
-    &self.visibility,
-    gctx,
-    command_buffer,
-    camera,
-    camera_handle.index,
-    frame_index,
-    {.VISIBLE},
-    {},
-    rm,
-  )
+  camera, ok := cont.get(rm.cameras, camera_handle)
+  if !ok do return .ERROR_UNKNOWN
   // Barrier: Wait for compute to finish before reading draw commands
   gpu.buffer_barrier(
     command_buffer,
