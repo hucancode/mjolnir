@@ -21,8 +21,6 @@ ForceFieldHandle :: Handle
 ClipHandle :: Handle
 SpriteHandle :: Handle
 LightHandle :: Handle
-NavContextHandle :: Handle
-NavMeshHandle :: Handle
 
 Pool :: cont.Pool
 SlabAllocator :: cont.SlabAllocator
@@ -58,9 +56,6 @@ Manager :: struct {
   animation_clips:           Pool(animation.Clip),
   sprites:                   Pool(Sprite),
   lights:                    Pool(Light),
-  nav_meshes:                Pool(NavMesh),
-  nav_contexts:              Pool(NavContext),
-  navigation_system:         NavigationSystem,
   bone_buffer:               gpu.PerFrameBindlessBuffer(
     matrix[4, 4]f32,
     FRAMES_IN_FLIGHT,
@@ -114,9 +109,6 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   cont.init(&self.animation_clips, 0)
   cont.init(&self.sprites, MAX_SPRITES)
   cont.init(&self.lights, MAX_LIGHTS)
-  cont.init(&self.nav_meshes, 0)
-  cont.init(&self.nav_contexts, 0)
-  self.navigation_system = {}
   self.current_frame_index = 0
   log.infof("All resource pools initialized successfully")
   init_global_samplers(self, gctx)
@@ -365,20 +357,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   }
   delete(self.animation_clips.entries)
   delete(self.animation_clips.free_indices)
-  for &entry in self.nav_meshes.entries do if entry.generation > 0 && entry.active {
-    // Clean up navigation mesh
-    // TODO: detour mesh cleanup would be added here if needed
-  }
-  delete(self.nav_meshes.entries)
-  delete(self.nav_meshes.free_indices)
-  for &entry in self.nav_contexts.entries do if entry.generation > 0 && entry.active {
-    // Clean up navigation contexts
-    // TODO: context cleanup would be added here if needed
-  }
-  delete(self.nav_contexts.entries)
-  delete(self.nav_contexts.free_indices)
-  delete(self.navigation_system.geometry_cache)
-  delete(self.navigation_system.dirty_tiles)
   destroy_global_samplers(self, gctx)
   gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
   cont.slab_destroy(&self.bone_matrix_slab)

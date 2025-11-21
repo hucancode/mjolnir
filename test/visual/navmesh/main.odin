@@ -3,6 +3,7 @@ import "../../../mjolnir"
 import "../../../mjolnir/geometry"
 import "../../../mjolnir/navigation/detour"
 import "../../../mjolnir/navigation/recast"
+import nav "../../../mjolnir/navigation"
 import navigation_renderer "../../../mjolnir/render/navigation"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
@@ -14,8 +15,8 @@ import "vendor:glfw"
 import mu "vendor:microui"
 
 demo_state: struct {
-  nav_mesh_handle:       resources.NavMeshHandle,
-  nav_context_handle:    resources.NavContextHandle,
+  nav_mesh_ready:        bool,
+  nav_context_ready:     bool,
   // Pathfinding state
   start_pos:             [3]f32,
   end_pos:               [3]f32,
@@ -242,7 +243,7 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
     detail_sample_max_error  = 1.0 * 0.2,
     border_size              = 0,
   }
-  nav_mesh_handle, success := build_and_visualize_navigation_mesh(
+  success := build_and_visualize_navigation_mesh(
     engine,
     config,
   )
@@ -250,18 +251,15 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
     log.error("Failed to build navigation mesh from world")
     return
   }
-  demo_state.nav_mesh_handle = nav_mesh_handle
-  log.infof("Navigation mesh built with handle %v", nav_mesh_handle)
-  context_handle, context_ok := create_navigation_context(
-    engine,
-    nav_mesh_handle,
-  )
+  demo_state.nav_mesh_ready = true
+  log.info("Navigation mesh built successfully")
+  context_ok := nav.create_context(&engine.nav_sys)
   if !context_ok {
     log.error("Failed to create navigation context")
     return
   }
-  demo_state.nav_context_handle = context_handle
-  log.infof("Navigation context created with handle %v", context_handle)
+  demo_state.nav_context_ready = true
+  log.info("Navigation context created successfully")
   renderer := &engine.render.navigation
   renderer.enabled = true
   renderer.color_mode = .Random_Colors
@@ -270,7 +268,7 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
 
 find_path :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
-  if demo_state.nav_context_handle.generation == 0 {
+  if !demo_state.nav_context_ready {
     log.error("No navigation context available for pathfinding")
     return
   }
@@ -285,7 +283,6 @@ find_path :: proc(engine: ^mjolnir.Engine) {
   )
   path := nav_find_path(
     engine,
-    demo_state.nav_context_handle,
     demo_state.start_pos,
     demo_state.end_pos,
     256,
@@ -390,7 +387,7 @@ find_navmesh_point_from_mouse :: proc(
   pos: [3]f32,
   found: bool,
 ) {
-  if demo_state.nav_context_handle.generation == 0 {
+  if !demo_state.nav_context_ready {
     return {}, false
   }
   width, height := glfw.GetWindowSize(engine.window)
@@ -431,7 +428,6 @@ find_navmesh_point_from_mouse :: proc(
       search_extents := [3]f32{2.0, 5.0, 2.0}
       nearest_pos, found := mjolnir.nav_find_nearest_point(
         engine,
-        demo_state.nav_context_handle,
         ground_intersection,
         search_extents,
       )
@@ -460,7 +456,6 @@ find_navmesh_point_from_mouse :: proc(
     search_extents := [3]f32{5.0, 10.0, 5.0}
     nearest_pos, found := mjolnir.nav_find_nearest_point(
       engine,
-      demo_state.nav_context_handle,
       sample_pos,
       search_extents,
     )
@@ -595,7 +590,7 @@ demo_render2d :: proc(engine: ^mjolnir.Engine) {
   ctx := &engine.render.debug_ui.ctx
   if mu.window(ctx, "Navigation Mesh Demo", {40, 40, 380, 500}, {.NO_CLOSE}) {
     mu.label(ctx, "World-Integrated Navigation System")
-    if demo_state.nav_mesh_handle.generation != 0 {
+    if demo_state.nav_mesh_ready {
       mu.label(ctx, "Status: Navigation mesh ready")
       mu.label(ctx, "")
       mu.label(ctx, "NavMesh Settings:")

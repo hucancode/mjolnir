@@ -8,6 +8,7 @@ import "core:sync"
 import "geometry"
 import "level_manager"
 import "navigation/recast"
+import nav "navigation"
 import "render"
 import "render/post_process"
 import "resources"
@@ -924,10 +925,7 @@ build_navigation_mesh_from_world :: proc(
   verts_per_poly: f32 = 6.0,
   detail_sample_dist: f32 = 6.0,
   detail_sample_max_error: f32 = 1.0,
-) -> (
-  resources.NavMeshHandle,
-  bool,
-) #optional_ok {
+) -> bool {
   config: recast.Config
   config.cs = cell_size
   config.ch = cell_height
@@ -950,6 +948,7 @@ build_navigation_mesh_from_world :: proc(
     &engine.world,
     &engine.rm,
     &engine.gctx,
+    &engine.nav_sys,
     config,
   )
 }
@@ -957,46 +956,29 @@ build_navigation_mesh_from_world :: proc(
 build_and_visualize_navigation_mesh :: proc(
   engine: ^Engine,
   config: recast.Config = {},
-) -> (
-  resources.NavMeshHandle,
-  bool,
-) #optional_ok {
+) -> bool {
   return world.build_and_visualize_navigation_mesh(
     &engine.world,
     &engine.rm,
     &engine.gctx,
+    &engine.nav_sys,
     &engine.render.navigation,
     config,
   )
 }
 
-create_navigation_context :: proc(
-  engine: ^Engine,
-  nav_mesh_handle: resources.NavMeshHandle,
-) -> (
-  resources.NavContextHandle,
-  bool,
-) #optional_ok {
-  return world.create_navigation_context(
-    &engine.world,
-    &engine.rm,
-    &engine.gctx,
-    nav_mesh_handle,
-  )
+create_navigation_context :: proc(engine: ^Engine) -> bool {
+  return nav.create_context(&engine.nav_sys)
 }
 
 nav_find_path :: proc(
   engine: ^Engine,
-  nav_context_handle: resources.NavContextHandle,
   start_pos: [3]f32,
   end_pos: [3]f32,
   max_path_length: i32 = 256,
 ) -> [][3]f32 {
-  path, success := world.nav_find_path(
-    &engine.world,
-    &engine.rm,
-    &engine.gctx,
-    nav_context_handle,
+  path, success := nav.find_path(
+    &engine.nav_sys,
     start_pos,
     end_pos,
     max_path_length,
@@ -1009,35 +991,20 @@ nav_find_path :: proc(
 
 nav_is_position_walkable :: proc(
   engine: ^Engine,
-  nav_context_handle: resources.NavContextHandle,
   position: [3]f32,
 ) -> bool {
-  return world.nav_is_position_walkable(
-    &engine.world,
-    &engine.rm,
-    &engine.gctx,
-    nav_context_handle,
-    position,
-  )
+  return nav.is_position_walkable(&engine.nav_sys, position)
 }
 
 nav_find_nearest_point :: proc(
   engine: ^Engine,
-  nav_context_handle: resources.NavContextHandle,
   position: [3]f32,
   search_extents: [3]f32 = {2.0, 4.0, 2.0},
 ) -> (
   nearest_pos: [3]f32,
   found: bool,
 ) {
-  return world.nav_find_nearest_point(
-    &engine.world,
-    &engine.rm,
-    &engine.gctx,
-    nav_context_handle,
-    position,
-    search_extents,
-  )
+  return nav.find_nearest_point(&engine.nav_sys, position, search_extents)
 }
 
 spawn_nav_agent_at :: proc(
@@ -1051,8 +1018,6 @@ spawn_nav_agent_at :: proc(
 ) #optional_ok {
   handle, _ = world.spawn_nav_agent_at(
     &engine.world,
-    &engine.rm,
-    &engine.gctx,
     position,
     radius,
     height,
@@ -1064,15 +1029,12 @@ nav_agent_set_target :: proc(
   engine: ^Engine,
   agent_handle: resources.NodeHandle,
   target_pos: [3]f32,
-  nav_context_handle: resources.NavContextHandle = {},
 ) -> bool {
   return world.nav_agent_set_target(
     &engine.world,
-    &engine.rm,
-    &engine.gctx,
+    &engine.nav_sys,
     agent_handle,
     target_pos,
-    nav_context_handle,
   )
 }
 

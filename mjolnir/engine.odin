@@ -17,6 +17,7 @@ import "core:unicode/utf8"
 import "gpu"
 import alg "algebra"
 import "level_manager"
+import nav "navigation"
 import "render"
 import "render/debug_ui"
 import "render/particles"
@@ -75,6 +76,7 @@ Engine :: struct {
   frame_index:               u32,
   swapchain:                 gpu.Swapchain,
   world:                     world.World,
+  nav_sys:                   nav.NavigationSystem,
   last_frame_timestamp:      time.Time,
   last_update_timestamp:     time.Time,
   start_timestamp:           time.Time,
@@ -146,6 +148,7 @@ init :: proc(
   log.infof("Window created %v\n", self.window)
   gpu.gpu_context_init(&self.gctx, self.window) or_return
   resources.init(&self.rm, &self.gctx) or_return
+  nav.init(&self.nav_sys)
   self.camera_controller_enabled = true
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
@@ -440,6 +443,7 @@ shutdown :: proc(self: ^Engine) {
   gpu.free_compute_command_buffer(&self.gctx, self.compute_command_buffers[:])
   render.shutdown(&self.render, &self.gctx, &self.rm)
   world.shutdown(&self.world, &self.gctx, &self.rm)
+  nav.shutdown(&self.nav_sys)
   resources.shutdown(&self.rm, &self.gctx)
   gpu.swapchain_destroy(&self.swapchain, self.gctx.device)
   gpu.shutdown(&self.gctx)
@@ -518,7 +522,8 @@ create_light_camera :: proc(
   case .POINT:
     // Point lights use spherical cameras for omnidirectional shadows
     cam_handle, spherical_cam := cont.alloc(
-      &engine.rm.spherical_cameras, resources.SphereCameraHandle
+      &engine.rm.spherical_cameras,
+      resources.SphereCameraHandle,
     ) or_return
     init_result := resources.spherical_camera_init(
       spherical_cam,

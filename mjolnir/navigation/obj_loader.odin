@@ -1,7 +1,7 @@
 package navigation
 
 import "../geometry"
-import "./recast"
+import "recast"
 import "core:log"
 import "core:math"
 import "core:math/linalg"

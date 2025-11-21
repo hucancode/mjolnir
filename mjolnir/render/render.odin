@@ -111,7 +111,8 @@ init :: proc(
   ret: vk.Result,
 ) {
   camera_handle, camera, ok := cont.alloc(
-    &rm.cameras, resources.CameraHandle
+    &rm.cameras,
+    resources.CameraHandle,
   )
   if !ok {
     return .ERROR_INITIALIZATION_FAILED
