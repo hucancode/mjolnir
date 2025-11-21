@@ -312,12 +312,12 @@ rasterize_triangles :: proc(
 
 // Clear unwalkable triangles (mark steep slopes as non-walkable)
 clear_unwalkable_triangles :: proc(
-  walkable_slope_angle: f32,
+  walkable_slope: f32,
   verts: [][3]f32,
   tris: []i32,
   areas: []u8,
 ) {
-  walkable_thr := math.cos(math.to_radians(walkable_slope_angle))
+  walkable_thr := math.cos(walkable_slope)
   norm: [3]f32
   num_tris := len(tris) / 3
   for i in 0 ..< num_tris {
@@ -335,12 +335,12 @@ clear_unwalkable_triangles :: proc(
 
 // Mark triangles by their walkable slope
 mark_walkable_triangles :: proc(
-  walkable_slope_angle: f32,
+  walkable_slope: f32,
   verts: [][3]f32,
   tris: []i32,
   areas: []u8,
 ) {
-  walkable_thr := math.cos(math.to_radians(walkable_slope_angle))
+  walkable_thr := math.cos(walkable_slope)
   norm: [3]f32
   num_tris := len(tris) / 3
   for i in 0 ..< num_tris {

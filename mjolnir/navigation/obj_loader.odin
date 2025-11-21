@@ -12,7 +12,7 @@ import "core:slice"
 load_obj_to_navmesh_input :: proc(
   filename: string,
   scale: f32 = 1.0,
-  walkable_slope_angle: f32 = 45.0,
+  walkable_slope: f32 = math.PI * 0.25,
 ) -> (
   vertices: [][3]f32,
   indices: []i32,
@@ -38,7 +38,7 @@ load_obj_to_navmesh_input :: proc(
   areas = make([]u8, triangle_count)
   // Areas start at 0 (RC_NULL_AREA)
   // Mark walkable triangles based on slope
-  walkable_thr := math.cos(walkable_slope_angle * math.PI / 180.0)
+  walkable_thr := math.cos(walkable_slope)
   for i in 0 ..< triangle_count {
     idx := i * 3
     v0 := vertices[indices[idx + 0]]

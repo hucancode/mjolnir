@@ -4,6 +4,7 @@ import nav "../../mjolnir/navigation/recast"
 import "core:log"
 import "core:testing"
 import "core:time"
+import "core:math"
 
 @(test)
 test_obstacle_connectivity :: proc(t: ^testing.T) {
@@ -106,7 +107,7 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
   cfg := nav.Config {
     cs                       = 0.3,
     ch                       = 0.2,
-    walkable_slope_angle     = 45.0,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 10,
     walkable_climb           = 1,
     walkable_radius          = 1,
@@ -245,7 +246,7 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
   cfg := nav.Config {
     cs                       = 0.3,
     ch                       = 0.2,
-    walkable_slope_angle     = 45.0,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 10,
     walkable_climb           = 1,
     walkable_radius          = 1, // Small agent radius (0.3 units)
@@ -343,7 +344,7 @@ test_near_miss_edges :: proc(t: ^testing.T) {
   cfg := nav.Config {
     cs                       = 0.1,
     ch                       = 0.1,
-    walkable_slope_angle     = 45.0,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 10,
     walkable_climb           = 1,
     walkable_radius          = 0,

@@ -14,11 +14,7 @@ import "core:time"
 test_nav_test_mesh :: proc(t: ^testing.T) {
   fmt.println("Testing with nav_test.obj (multi-level navigation)...")
   mesh_path := "assets/nav_test.obj"
-  vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(
-    mesh_path,
-    1.0,
-    45.0,
-  )
+  vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(mesh_path, 1.0)
   testing.expect(t, ok, "Failed to load navmesh")
   defer {
     delete(vertices)
@@ -48,7 +44,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
   // Standard test parameters (matching C++)
   cfg.cs = 0.3
   cfg.ch = 0.2
-  cfg.walkable_slope_angle = 45.0
+  cfg.walkable_slope = math.PI * 0.25
   cfg.walkable_height = 10
   cfg.walkable_climb = 4
   cfg.walkable_radius = 2
@@ -295,11 +291,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
 @(test)
 test_dungeon_mesh :: proc(t: ^testing.T) {
   mesh_path := "assets/dungeon.obj"
-  vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(
-    mesh_path,
-    1.0,
-    45.0,
-  )
+  vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(mesh_path, 1.0)
   testing.expectf(t, ok, "failed to load asset")
   defer {
     delete(vertices)
@@ -311,7 +303,7 @@ test_dungeon_mesh :: proc(t: ^testing.T) {
   // Dungeon-appropriate parameters
   cfg.cs = 0.3
   cfg.ch = 0.2
-  cfg.walkable_slope_angle = 45.0
+  cfg.walkable_slope = math.PI * 0.25
   cfg.walkable_height = 10
   cfg.walkable_climb = 4
   cfg.walkable_radius = 2
@@ -396,11 +388,7 @@ test_dungeon_mesh :: proc(t: ^testing.T) {
 @(test)
 test_floor_with_obstacles :: proc(t: ^testing.T) {
   mesh_path := "assets/floor_with_5_obstacles.obj"
-  vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(
-    mesh_path,
-    1.0,
-    45.0,
-  )
+  vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(mesh_path, 1.0)
   testing.expect(t, ok, "failed to load asset")
   defer {
     delete(vertices)
@@ -411,7 +399,7 @@ test_floor_with_obstacles :: proc(t: ^testing.T) {
   cfg.bmin, cfg.bmax = recast.calc_bounds(vertices)
   cfg.cs = 0.3
   cfg.ch = 0.2
-  cfg.walkable_slope_angle = 45.0
+  cfg.walkable_slope = math.PI * 0.25
   cfg.walkable_height = 10
   cfg.walkable_climb = 4
   cfg.walkable_radius = 2
@@ -481,7 +469,7 @@ test_floor_5_obstacles_simple :: proc(t: ^testing.T) {
   cfg: recast.Config
   cfg.cs = 0.3
   cfg.ch = 0.2
-  cfg.walkable_slope_angle = 45.0
+  cfg.walkable_slope = math.PI * 0.25
   cfg.walkable_height = 10
   cfg.walkable_climb = 4
   cfg.walkable_radius = 2

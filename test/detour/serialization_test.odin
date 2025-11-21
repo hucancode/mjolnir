@@ -4,6 +4,7 @@ import "../../mjolnir/navigation/detour"
 import "../../mjolnir/navigation/recast"
 import "core:fmt"
 import "core:log"
+import "core:math"
 import "core:os"
 import "core:testing"
 import "core:time"
@@ -212,7 +213,7 @@ build_test_mesh :: proc(
   cfg.bmin, cfg.bmax = recast.calc_bounds(vertices)
   cfg.cs = 0.3
   cfg.ch = 0.2
-  cfg.walkable_slope_angle = 45.0
+  cfg.walkable_slope = math.PI * 0.25
   cfg.walkable_height = 10
   cfg.walkable_climb = 4
   cfg.walkable_radius = 2

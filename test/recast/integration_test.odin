@@ -4,13 +4,14 @@ import "../../mjolnir/navigation/recast"
 import "core:log"
 import "core:testing"
 import "core:time"
+import "core:math"
 
 // Helper to create test configuration
 create_test_config :: proc(cs, ch: f32) -> recast.Config {
   cfg: recast.Config
   cfg.cs = cs
   cfg.ch = ch
-  cfg.walkable_slope_angle = 45.0
+  cfg.walkable_slope = math.PI * 0.25
   cfg.walkable_height = 2
   cfg.walkable_climb = 1
   cfg.walkable_radius = 1
@@ -406,7 +407,7 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
   areas := []u8{recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA}
   // Create config with specific slope angle
   cfg := create_test_config(0.3, 0.2)
-  cfg.walkable_slope_angle = 30.0 // Allow 30 degree slopes
+  cfg.walkable_slope = math.PI / 6 // Allow 30 degree slopes
   // Calculate bounds
   cfg.bmin, cfg.bmax = recast.calc_bounds(verts)
   // Calculate grid size
@@ -617,9 +618,9 @@ test_edge_cases :: proc(t: ^testing.T) {
     indices: []i32
     areas: []u8
     cfg := recast.Config {
-      cs                   = 0.3,
-      ch                   = 0.2,
-      walkable_slope_angle = 45.0,
+      cs             = 0.3,
+      ch             = 0.2,
+      walkable_slope = math.PI * 0.25,
     }
     pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, cfg)
     testing.expect(t, !ok, "Empty mesh should fail gracefully")
@@ -634,7 +635,7 @@ test_edge_cases :: proc(t: ^testing.T) {
     cfg := recast.Config {
       cs                      = 0.1,
       ch                      = 0.1,
-      walkable_slope_angle    = 45.0,
+      walkable_slope          = math.PI * 0.25,
       walkable_height         = 10,
       walkable_climb          = 4,
       walkable_radius         = 0,
@@ -668,7 +669,7 @@ test_edge_cases :: proc(t: ^testing.T) {
     cfg := recast.Config {
       cs                      = 10.0, // Large cell size for huge mesh
       ch                      = 1.0,
-      walkable_slope_angle    = 45.0,
+      walkable_slope          = math.PI * 0.25,
       walkable_height         = 10,
       walkable_climb          = 4,
       walkable_radius         = 2,

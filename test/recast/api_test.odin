@@ -17,7 +17,7 @@ test_api_simple_build :: proc(t: ^testing.T) {
   config := recast.Config {
     cs                       = 0.3,
     ch                       = 0.2,
-    walkable_slope_angle     = 45,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 2,
     walkable_climb           = 1,
     walkable_radius          = 1,
@@ -61,7 +61,7 @@ test_api_quick_build :: proc(t: ^testing.T) {
   cfg := recast.Config {
     cs                       = 0.5,
     ch                       = 0.5,
-    walkable_slope_angle     = 45,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 2,
     walkable_climb           = 1,
     walkable_radius          = 1,
@@ -105,7 +105,7 @@ test_api_configuration :: proc(t: ^testing.T) {
     config := recast.Config {
       cs                       = cfg.cs,
       ch                       = cfg.ch,
-      walkable_slope_angle     = 45,
+      walkable_slope           = math.PI * 0.25,
       walkable_height          = 2,
       walkable_climb           = 1,
       walkable_radius          = 1,
@@ -152,7 +152,7 @@ test_api_error_handling :: proc(t: ^testing.T) {
   config := recast.Config {
     cs                       = 0.3,
     ch                       = 0.2,
-    walkable_slope_angle     = 45,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 2,
     walkable_climb           = 1,
     walkable_radius          = 1,
@@ -229,7 +229,7 @@ test_api_build_with_areas :: proc(t: ^testing.T) {
   config := recast.Config {
     cs                       = 0.3,
     ch                       = 0.2,
-    walkable_slope_angle     = 45,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 2,
     walkable_climb           = 1,
     walkable_radius          = 1,
@@ -298,7 +298,7 @@ test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
   config := recast.Config {
     cs                       = 0.5,
     ch                       = 0.5,
-    walkable_slope_angle     = 45,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 2,
     walkable_climb           = 1,
     walkable_radius          = 1,

@@ -280,13 +280,15 @@ Status_Flag :: enum u32 {
 Status :: bit_set[Status_Flag;u32]
 
 status_succeeded :: proc "contextless" (status: Status) -> bool {
-  return .Success in status &&
+  return(
+    .Success in status &&
     .Wrong_Magic not_in status &&
     .Wrong_Version not_in status &&
     .Out_Of_Memory not_in status &&
     .Invalid_Param not_in status &&
     .Buffer_Too_Small not_in status &&
-    .Out_Of_Nodes not_in status
+    .Out_Of_Nodes not_in status \
+  )
 }
 
 Config :: struct {
@@ -298,7 +300,7 @@ Config :: struct {
   ch:                       f32,
   bmin:                     [3]f32,
   bmax:                     [3]f32,
-  walkable_slope_angle:     f32,
+  walkable_slope:           f32,
   walkable_height:          i32,
   walkable_climb:           i32,
   walkable_radius:          i32,

@@ -201,17 +201,16 @@ create_obj_visualization_mesh :: proc(
   )
   obj_spawn_ok: bool
   if obj_mesh_ok && obj_material_ok {
-    demo_state.obj_node_handle, obj_spawn_ok =
-      spawn(
-        engine,
-        [3]f32{0, 0, 0},
-        world.MeshAttachment {
-          handle              = demo_state.obj_mesh_handle,
-          material            = obj_material_handle,
-          cast_shadow         = false,
-          navigation_obstacle = false, // OBJ mesh should be walkable
-        },
-      )
+    demo_state.obj_node_handle, obj_spawn_ok = spawn(
+      engine,
+      [3]f32{0, 0, 0},
+      world.MeshAttachment {
+        handle              = demo_state.obj_mesh_handle,
+        material            = obj_material_handle,
+        cast_shadow         = false,
+        navigation_obstacle = false, // OBJ mesh should be walkable
+      },
+    )
     demo_state.obj_mesh_node = get_node(engine, demo_state.obj_node_handle)
   }
   if obj_spawn_ok {
@@ -228,21 +227,21 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   log.info("Setting up navigation mesh with visualization")
   config := recast.Config {
-      cs                       = 0.3, // Cell size
-      ch                       = 0.2, // Cell height
-      walkable_slope_angle     = 45, // Max slope
-      walkable_height          = i32(math.ceil_f32(2.0 / 0.2)), // Agent height
-      walkable_climb           = i32(math.floor_f32(0.9 / 0.2)), // Agent max climb
-      walkable_radius          = i32(math.ceil_f32(0.6 / 0.3)), // Agent radius
-      max_edge_len             = i32(12.0 / 0.3), // Max edge length
-      max_simplification_error = 1.3,
-      min_region_area          = 8 * 8,
-      merge_region_area        = 20 * 20,
-      max_verts_per_poly       = 6,
-      detail_sample_dist       = 6.0 * 0.3,
-      detail_sample_max_error  = 1.0 * 0.2,
-      border_size              = 0,
-    }
+    cs                       = 0.3, // Cell size
+    ch                       = 0.2, // Cell height
+    walkable_slope           = math.PI * 0.25, // Max slope
+    walkable_height          = i32(math.ceil_f32(2.0 / 0.2)), // Agent height
+    walkable_climb           = i32(math.floor_f32(0.9 / 0.2)), // Agent max climb
+    walkable_radius          = i32(math.ceil_f32(0.6 / 0.3)), // Agent radius
+    max_edge_len             = i32(12.0 / 0.3), // Max edge length
+    max_simplification_error = 1.3,
+    min_region_area          = 8 * 8,
+    merge_region_area        = 20 * 20,
+    max_verts_per_poly       = 6,
+    detail_sample_dist       = 6.0 * 0.3,
+    detail_sample_max_error  = 1.0 * 0.2,
+    border_size              = 0,
+  }
   nav_mesh_handle, success := build_and_visualize_navigation_mesh(
     engine,
     config,

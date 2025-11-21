@@ -100,7 +100,7 @@ test_detail_mesh_sampling_quality :: proc(t: ^testing.T) {
   cfg := recast.Config {
     cs                       = 0.5,
     ch                       = 0.2,
-    walkable_slope_angle     = 45,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 10,
     walkable_climb           = 4,
     walkable_radius          = 2,
@@ -156,7 +156,7 @@ test_detail_mesh_height_accuracy :: proc(t: ^testing.T) {
   cfg := recast.Config {
     cs                       = 0.5,
     ch                       = 0.1, // Small height resolution for accuracy
-    walkable_slope_angle     = 60, // Allow steep slopes
+    walkable_slope           = math.PI * 0.33,
     walkable_height          = 20,
     walkable_climb           = 10,
     walkable_radius          = 1,
@@ -204,7 +204,7 @@ test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
   cfg := recast.Config {
     cs                       = 0.01, // Very small cell size
     ch                       = 0.01,
-    walkable_slope_angle     = 45,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 10,
     walkable_climb           = 4,
     walkable_radius          = 1,

@@ -7,6 +7,7 @@ import "core:slice"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core:math"
 
 @(test)
 test_erode_walkable_area :: proc(t: ^testing.T) {
@@ -556,14 +557,14 @@ test_region_generation :: proc(t: ^testing.T) {
   defer delete(areas)
   slice.fill(areas, recast.RC_WALKABLE_AREA)
   cfg := recast.Config {
-    cs                   = 0.5,
-    ch                   = 0.2,
-    walkable_slope_angle = 45.0,
-    walkable_height      = 10,
-    walkable_climb       = 4,
-    walkable_radius      = 2,
-    min_region_area      = 16,
-    merge_region_area    = 40,
+    cs                = 0.5,
+    ch                = 0.2,
+    walkable_slope    = math.PI * 0.25,
+    walkable_height   = 10,
+    walkable_climb    = 4,
+    walkable_radius   = 2,
+    min_region_area   = 16,
+    merge_region_area = 40,
   }
   cfg.bmin, cfg.bmax = recast.calc_bounds(vertices)
   cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
@@ -579,12 +580,7 @@ test_region_generation :: proc(t: ^testing.T) {
   defer recast.free_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Mark and rasterize
-  recast.mark_walkable_triangles(
-    cfg.walkable_slope_angle,
-    vertices,
-    indices,
-    areas,
-  )
+  recast.mark_walkable_triangles(cfg.walkable_slope, vertices, indices, areas)
   ok := recast.rasterize_triangles(
     vertices,
     indices,

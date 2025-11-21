@@ -248,7 +248,7 @@ test_navigation_mesh_creation :: proc(t: ^testing.T) {
   config := recast.Config {
     cs                       = 0.3, // Cell size
     ch                       = 0.2, // Cell height
-    walkable_slope_angle     = 45.0,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 10, // In cells (2.0m / 0.2 cell height = 10 cells)
     walkable_climb           = 4, // In cells (0.9m / 0.2 cell height ≈ 4 cells)
     walkable_radius          = 2, // In cells (0.6m / 0.3 cell size = 2 cells)
@@ -360,7 +360,7 @@ test_pathfinding :: proc(t: ^testing.T) {
   config := recast.Config {
     cs                       = 0.3,
     ch                       = 0.2,
-    walkable_slope_angle     = 45.0,
+    walkable_slope           = math.PI * 0.25,
     walkable_height          = 10, // In cells (2.0m / 0.2 cell height = 10 cells)
     walkable_climb           = 4, // In cells (0.9m / 0.2 cell height ≈ 4 cells)
     walkable_radius          = 2, // In cells (0.6m / 0.3 cell size = 2 cells)
@@ -565,7 +565,7 @@ test_navigation_edge_cases :: proc(t: ^testing.T) {
       walkable_height          = 10,
       walkable_radius          = 2,
       walkable_climb           = 4,
-      walkable_slope_angle     = 45.0,
+      walkable_slope           = math.PI * 0.25,
       max_edge_len             = 12.0,
       max_simplification_error = 1.3,
       min_region_area          = 8.0,

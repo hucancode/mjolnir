@@ -351,7 +351,11 @@ scale :: proc {
   scale_handle,
 }
 
-scale_by_handle :: proc(engine: ^Engine, handle: resources.NodeHandle, s: f32) {
+scale_by_handle :: proc(
+  engine: ^Engine,
+  handle: resources.NodeHandle,
+  s: f32,
+) {
   world.scale_by(&engine.world, handle, s)
 }
 
@@ -824,7 +828,10 @@ create_camera :: proc(
   handle: resources.CameraHandle,
   ok: bool,
 ) #optional_ok {
-  camera_handle, camera_ptr := cont.alloc(&engine.rm.cameras, resources.CameraHandle) or_return
+  camera_handle, camera_ptr := cont.alloc(
+    &engine.rm.cameras,
+    resources.CameraHandle,
+  ) or_return
   init_result := resources.camera_init(
     camera_ptr,
     &engine.gctx,
@@ -909,7 +916,7 @@ build_navigation_mesh_from_world :: proc(
   agent_height: f32 = 2.0,
   agent_radius: f32 = 0.6,
   agent_max_climb: f32 = 0.9,
-  agent_max_slope: f32 = 45.0,
+  agent_max_slope: f32 = math.PI * 0.25,
   region_min_size: f32 = 8.0,
   region_merge_size: f32 = 20.0,
   edge_max_len: f32 = 12.0,
@@ -927,7 +934,7 @@ build_navigation_mesh_from_world :: proc(
   config.walkable_height = i32(math.ceil(f64(agent_height / config.ch)))
   config.walkable_radius = i32(math.ceil(f64(agent_radius / config.cs)))
   config.walkable_climb = i32(math.floor(f64(agent_max_climb / config.ch)))
-  config.walkable_slope_angle = agent_max_slope
+  config.walkable_slope = agent_max_slope
   config.min_region_area = i32(
     math.floor(f64(region_min_size * region_min_size)),
   )

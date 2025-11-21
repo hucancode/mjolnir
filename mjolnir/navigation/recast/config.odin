@@ -54,7 +54,7 @@ validate_config :: proc(cfg: ^Config) -> bool {
   if cfg.walkable_climb < 0 {
     return false
   }
-  if cfg.walkable_slope_angle < 0 || cfg.walkable_slope_angle > 90 {
+  if cfg.walkable_slope < 0 || cfg.walkable_slope > math.PI * 0.5 {
     return false
   }
   // Check region parameters
@@ -76,7 +76,7 @@ config_create :: proc() -> Config {
   return Config {
     cs = 0.3,
     ch = 0.2,
-    walkable_slope_angle = 45,
+    walkable_slope = math.PI * 0.25,
     walkable_height = 10,
     walkable_climb = 4,
     walkable_radius = 2,
@@ -118,8 +118,8 @@ get_tile_count :: proc(cfg: ^Config) -> (tw, th: i32) {
 }
 
 // Calculate walkable threshold from angle
-calc_walkable_threshold :: proc(walkable_slope_angle: f32) -> f32 {
-  return math.cos(math.to_radians(walkable_slope_angle))
+calc_walkable_threshold :: proc(walkable_slope: f32) -> f32 {
+  return math.cos(walkable_slope)
 }
 
 // Area modification for marking areas
