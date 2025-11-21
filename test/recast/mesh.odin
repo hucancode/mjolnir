@@ -376,11 +376,11 @@ test_mark_walkable_triangles_steep_slope :: proc(t: ^testing.T) {
   indices := []i32{0, 2, 1} // Counter-clockwise winding
   areas := []u8{recast.RC_NULL_AREA}
   // Mark with 45-degree threshold - should remain non-walkable
-  recast.mark_walkable_triangles(45.0, vertices, indices, areas)
+  recast.mark_walkable_triangles(math.PI * 0.25, vertices, indices, areas)
   testing.expect_value(t, areas[0], recast.RC_NULL_AREA)
   // Mark with 70-degree threshold - should become walkable
   areas[0] = recast.RC_NULL_AREA // Reset
-  recast.mark_walkable_triangles(70.0, vertices, indices, areas)
+  recast.mark_walkable_triangles(math.PI * 0.4, vertices, indices, areas)
   testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA)
 }
 
@@ -544,7 +544,7 @@ test_triangle_normal_calculation_accuracy :: proc(t: ^testing.T) {
   indices := []i32{0, 2, 1} // Counter-clockwise winding
   areas := []u8{recast.RC_NULL_AREA}
   // Should be walkable with any reasonable threshold
-  recast.mark_walkable_triangles(1.0, vertices, indices, areas)
+  recast.mark_walkable_triangles(0.01, vertices, indices, areas)
   testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA)
   // Test triangle in YZ plane (vertical wall)
   vertices_vertical := [][3]f32 {
@@ -556,7 +556,7 @@ test_triangle_normal_calculation_accuracy :: proc(t: ^testing.T) {
   areas_vertical := []u8{recast.RC_NULL_AREA}
   // Should not be walkable even with high threshold
   recast.mark_walkable_triangles(
-    80.0,
+    math.PI * 0.45,
     vertices_vertical,
     indices_vertical,
     areas_vertical,

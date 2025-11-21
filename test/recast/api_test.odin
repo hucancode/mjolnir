@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:log"
 import "core:testing"
 import "core:time"
+import "core:math"
 
 // Test high-level API functions
 @(test)
