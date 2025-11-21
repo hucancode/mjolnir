@@ -49,7 +49,7 @@ LightPushConstant :: struct {
 
 begin_ambient_pass :: proc(
   self: ^Renderer,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,
@@ -84,7 +84,7 @@ begin_ambient_pass :: proc(
 
 render_ambient :: proc(
   self: ^Renderer,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,
@@ -353,15 +353,15 @@ BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 Renderer :: struct {
   ambient_pipeline:         vk.Pipeline,
   ambient_pipeline_layout:  vk.PipelineLayout,
-  environment_map:          resources.Handle,
-  brdf_lut:                 resources.Handle,
+  environment_map:          resources.Image2DHandle,
+  brdf_lut:                 resources.Image2DHandle,
   environment_max_lod:      f32,
   ibl_intensity:            f32,
   lighting_pipeline:        vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
-  sphere_mesh:              resources.Handle,
-  cone_mesh:                resources.Handle,
-  triangle_mesh:            resources.Handle,
+  sphere_mesh:              resources.MeshHandle,
+  cone_mesh:                resources.MeshHandle,
+  triangle_mesh:            resources.MeshHandle,
 }
 
 recreate_images :: proc(
@@ -376,7 +376,7 @@ recreate_images :: proc(
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,
@@ -418,7 +418,7 @@ begin_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,
@@ -426,7 +426,7 @@ render :: proc(
   camera := cont.get(rm.cameras, camera_handle)
   if camera == nil do return
   bind_and_draw_mesh :: proc(
-    mesh_handle: resources.Handle,
+    mesh_handle: resources.MeshHandle,
     command_buffer: vk.CommandBuffer,
     rm: ^resources.Manager,
   ) {

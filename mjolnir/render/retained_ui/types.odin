@@ -209,7 +209,7 @@ DrawList :: struct {
 
 Manager :: struct {
   // Widget storage
-  widgets:                      resources.Pool(Widget),
+  widgets:                      cont.Pool(Widget),
   root_widgets:                 [dynamic]WidgetHandle,
   // Draw lists (one per frame in flight)
   draw_lists:                   [FRAMES_IN_FLIGHT]DrawList,

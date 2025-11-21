@@ -22,7 +22,7 @@ Renderer :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  atlas_handle:              resources.Handle,
+  atlas_handle:              resources.Image2DHandle,
   proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
   vertex_buffer:             gpu.MutableBuffer(Vertex2D),
   index_buffer:              gpu.MutableBuffer(u32),

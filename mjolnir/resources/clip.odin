@@ -9,10 +9,10 @@ create_animation_clip :: proc(
   duration: f32 = 1.0,
   name: string = "",
 ) -> (
-  handle: Handle,
+  handle: ClipHandle,
   ok: bool,
 ) #optional_ok {
-  h, clip := cont.alloc(&self.animation_clips) or_return
+  h, clip := cont.alloc(&self.animation_clips, ClipHandle) or_return
   clip^ = animation.clip_create(
     channel_count = channel_count,
     duration = duration,

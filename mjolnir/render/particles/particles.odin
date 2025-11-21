@@ -588,7 +588,7 @@ create_render_pipeline :: proc(
 begin_pass :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   rm: ^resources.Manager,
   frame_index: u32,
 ) {

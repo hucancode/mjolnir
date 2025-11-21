@@ -14,7 +14,7 @@ SphericalCamera :: struct {
   near:            f32, // Near plane
   far:             f32, // Far plane
   size:            u32, // Resolution of cube map faces (size x size)
-  depth_cube:      [FRAMES_IN_FLIGHT]Handle, // Cube depth textures (per-frame)
+  depth_cube:      [FRAMES_IN_FLIGHT]ImageCubeHandle, // Cube depth textures (per-frame)
   // Per-frame GPU data (double-buffered for async compute)
   draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),

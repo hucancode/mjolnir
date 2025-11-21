@@ -7,7 +7,7 @@ import "core:log"
 import "core:math"
 import "core:time"
 
-nodes: [dynamic]resources.Handle
+nodes: [dynamic]resources.NodeHandle
 
 main :: proc() {
   engine := new(mjolnir.Engine)

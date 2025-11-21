@@ -113,7 +113,7 @@ init :: proc(
 }
 
 begin_pass :: proc(
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,
@@ -235,7 +235,7 @@ begin_pass :: proc(
 }
 
 end_pass :: proc(
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,
@@ -324,7 +324,7 @@ end_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,

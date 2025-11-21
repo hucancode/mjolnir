@@ -26,7 +26,7 @@ test_pool_alloc_and_get :: proc(t: ^testing.T) {
   defer c.destroy(pool, proc(item: ^Test_Item) {})
 
   // Allocate first item
-  h1, item1, ok1 := c.alloc(&pool)
+  h1, item1, ok1 := c.alloc(&pool, c.Handle)
   testing.expect(t, ok1, "First allocation should succeed")
   testing.expect(t, h1.index == 0, "First handle index should be 0")
   testing.expect(t, h1.generation == 1, "First handle generation should be 1")
@@ -49,7 +49,7 @@ test_pool_free_and_reuse :: proc(t: ^testing.T) {
   defer c.destroy(pool, proc(item: ^Test_Item) {})
 
   // Allocate and free
-  h1, item1, _ := c.alloc(&pool)
+  h1, item1, _ := c.alloc(&pool, c.Handle)
   item1.value = 100
   freed_item, freed := c.free(&pool, h1)
   testing.expect(t, freed, "Should successfully free item")
@@ -64,7 +64,7 @@ test_pool_free_and_reuse :: proc(t: ^testing.T) {
   testing.expect(t, !found, "Old handle should be invalid after free")
 
   // Allocate again - should reuse slot 0
-  h2, item2, ok := c.alloc(&pool)
+  h2, item2, ok := c.alloc(&pool, c.Handle)
   testing.expect(t, ok, "Second allocation should succeed")
   testing.expect(t, h2.index == 0, "Should reuse index 0")
   testing.expect(t, h2.generation == 2, "Generation should increment to 2")
@@ -88,7 +88,7 @@ test_pool_multiple_allocs :: proc(t: ^testing.T) {
 
   handles: [10]c.Handle
   for i in 0 ..< 10 {
-    h, item, ok := c.alloc(&pool)
+    h, item, ok := c.alloc(&pool, c.Handle)
     testing.expect(t, ok, "Allocation should succeed")
     item.value = i * 10
     handles[i] = h
@@ -110,16 +110,16 @@ test_pool_capacity_limit :: proc(t: ^testing.T) {
 
   // Allocate up to capacity
   for i in 0 ..< 5 {
-    _, _, ok := c.alloc(&pool)
+    _, _, ok := c.alloc(&pool, c.Handle)
     testing.expect(t, ok, "Allocation within capacity should succeed")
   }
 
   // Exceed capacity
-  _, _, ok := c.alloc(&pool)
+  _, _, ok := c.alloc(&pool, c.Handle)
   testing.expect(t, !ok, "Allocation exceeding capacity should fail")
 
   // Free one and allocate again
-  h, _, _ := c.alloc(&pool) // This should fail, but we get h from earlier
+  h, _, _ := c.alloc(&pool, c.Handle) // This should fail, but we get h from earlier
   // Actually we need to save a handle from the loop
 }
 
@@ -129,23 +129,23 @@ test_pool_capacity_limit_with_reuse :: proc(t: ^testing.T) {
   c.init(&pool, capacity = 3)
   defer c.destroy(pool, proc(item: ^Test_Item) {})
 
-  h1, _, ok1 := c.alloc(&pool)
+  h1, _, ok1 := c.alloc(&pool, c.Handle)
   testing.expect(t, ok1, "First alloc should succeed")
 
-  h2, _, ok2 := c.alloc(&pool)
+  h2, _, ok2 := c.alloc(&pool, c.Handle)
   testing.expect(t, ok2, "Second alloc should succeed")
 
-  h3, _, ok3 := c.alloc(&pool)
+  h3, _, ok3 := c.alloc(&pool, c.Handle)
   testing.expect(t, ok3, "Third alloc should succeed")
 
-  _, _, ok4 := c.alloc(&pool)
+  _, _, ok4 := c.alloc(&pool, c.Handle)
   testing.expect(t, !ok4, "Fourth alloc should fail (at capacity)")
 
   // Free one slot
   c.free(&pool, h2)
 
   // Should now be able to allocate again
-  h5, _, ok5 := c.alloc(&pool)
+  h5, _, ok5 := c.alloc(&pool, c.Handle)
   testing.expect(t, ok5, "Allocation after free should succeed")
   testing.expect(t, h5.index == h2.index, "Should reuse freed slot")
 }
@@ -156,13 +156,13 @@ test_pool_is_valid :: proc(t: ^testing.T) {
   c.init(&pool)
   defer c.destroy(pool, proc(item: ^Test_Item) {})
 
-  h1, _, _ := c.alloc(&pool)
+  h1, _, _ := c.alloc(&pool, c.Handle)
   testing.expect(t, c.is_valid(pool, h1), "New handle should be valid")
 
   c.free(&pool, h1)
   testing.expect(t, !c.is_valid(pool, h1), "Freed handle should be invalid")
 
-  h2, _, _ := c.alloc(&pool)
+  h2, _, _ := c.alloc(&pool, c.Handle)
   testing.expect(t, c.is_valid(pool, h2), "Reused slot handle should be valid")
   testing.expect(t, !c.is_valid(pool, h1), "Old handle still invalid")
 }
@@ -175,10 +175,10 @@ test_pool_count :: proc(t: ^testing.T) {
 
   testing.expect(t, c.count(pool) == 0, "Count should be 0 initially")
 
-  h1, _, _ := c.alloc(&pool)
+  h1, _, _ := c.alloc(&pool, c.Handle)
   testing.expect(t, c.count(pool) == 1, "Count should be 1 after alloc")
 
-  h2, _, _ := c.alloc(&pool)
+  h2, _, _ := c.alloc(&pool, c.Handle)
   testing.expect(t, c.count(pool) == 2, "Count should be 2")
 
   c.free(&pool, h1)
@@ -193,12 +193,12 @@ test_pool_generation_wraparound :: proc(t: ^testing.T) {
   pool: c.Pool(Test_Item)
   c.init(&pool)
   defer c.destroy(pool, proc(item: ^Test_Item) {})
-  h, _, _ := c.alloc(&pool)
+  h, _, _ := c.alloc(&pool, c.Handle)
   // Manually set generation to max - 1 to test wraparound
   pool.entries[h.index].generation = 0xFFFFFFFF
   c.free(&pool, c.Handle{h.index, 0xFFFFFFFF})
   // Next allocation should wrap generation to 1 (skip 0)
-  h2, _, _ := c.alloc(&pool)
+  h2, _, _ := c.alloc(&pool, c.Handle)
   testing.expect(t, h2.generation == 1, "Generation should wrap to 1 (skip 0)")
 }
 

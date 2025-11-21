@@ -261,7 +261,7 @@ sample_layers :: proc(
     switch &layer_data in layer.data {
     case animation.FKLayer:
       // Resolve clip handle at runtime
-      clip_handle := transmute(Handle)layer_data.clip_handle
+      clip_handle := transmute(ClipHandle)layer_data.clip_handle
       clip := cont.get(rm.animation_clips, clip_handle) or_continue
 
       // Sample this layer's animation
@@ -628,12 +628,12 @@ create_mesh :: proc(
   data: geometry.Geometry,
   auto_purge: bool = false,
 ) -> (
-  handle: Handle,
+  handle: MeshHandle,
   ret: vk.Result,
 ) {
   ok: bool
   mesh: ^Mesh
-  handle, mesh, ok = cont.alloc(&rm.meshes)
+  handle, mesh, ok = cont.alloc(&rm.meshes, MeshHandle)
   if !ok {
     ret = .ERROR_OUT_OF_DEVICE_MEMORY
     return
@@ -649,7 +649,7 @@ create_mesh :: proc(
 
 mesh_upload_gpu_data :: proc(
   self: ^Manager,
-  handle: Handle,
+  handle: MeshHandle,
   mesh: ^Mesh,
 ) -> vk.Result {
   mesh.index_count = mesh.index_allocation.count
@@ -668,7 +668,7 @@ mesh_upload_gpu_data :: proc(
   )
 }
 
-mesh_destroy_handle :: proc(self: ^Manager, handle: Handle) {
+mesh_destroy_handle :: proc(self: ^Manager, handle: MeshHandle) {
   if mesh, ok := cont.get(self.meshes, handle); ok {
     mesh_destroy(mesh, self)
     cont.free(&self.meshes, handle)

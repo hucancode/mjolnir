@@ -26,7 +26,7 @@ AssetManifest :: struct {
 @(private = "file")
 GeometryData :: struct {
   geometry:        geometry.Geometry,
-  material_handle: resources.Handle,
+  material_handle: resources.MaterialHandle,
 }
 
 @(private = "file")
@@ -42,7 +42,7 @@ load_gltf :: proc(
   gctx: ^gpu.GPUContext,
   path: string,
 ) -> (
-  nodes: [dynamic]resources.Handle,
+  nodes: [dynamic]resources.NodeHandle,
   ret: cgltf.result,
 ) {
   // step 0: cgltf
@@ -66,11 +66,11 @@ load_gltf :: proc(
   }
   // step 2: Resource Loading
   texture_cache := make(
-    map[^cgltf.texture]resources.Handle,
+    map[^cgltf.texture]resources.Image2DHandle,
     context.temp_allocator,
   )
   material_cache := make(
-    map[^cgltf.material]resources.Handle,
+    map[^cgltf.material]resources.MaterialHandle,
     context.temp_allocator,
   )
   load_textures_batch(
@@ -178,7 +178,7 @@ load_textures_batch :: proc(
   gltf_path: string,
   gltf_data: ^cgltf.data,
   textures: []^cgltf.texture,
-  cache: ^map[^cgltf.texture]resources.Handle,
+  cache: ^map[^cgltf.texture]resources.Image2DHandle,
 ) -> cgltf.result {
   for texture in textures do if texture != nil && texture.image_ != nil {
     pixel_data: []u8
@@ -216,8 +216,8 @@ load_materials_batch :: proc(
   gltf_path: string,
   gltf_data: ^cgltf.data,
   materials: []^cgltf.material,
-  texture_cache: ^map[^cgltf.texture]resources.Handle,
-  material_cache: ^map[^cgltf.material]resources.Handle,
+  texture_cache: ^map[^cgltf.texture]resources.Image2DHandle,
+  material_cache: ^map[^cgltf.material]resources.MaterialHandle,
 ) -> cgltf.result {
   for gltf_mat in materials do if gltf_mat != nil {
     albedo, metallic_roughness, normal, emissive, occlusion, features := load_material_textures(gltf_mat, texture_cache)
@@ -243,13 +243,13 @@ load_materials_batch :: proc(
 @(private = "file")
 load_material_textures :: proc(
   mat: ^cgltf.material,
-  cache: ^map[^cgltf.texture]resources.Handle,
+  cache: ^map[^cgltf.texture]resources.Image2DHandle,
 ) -> (
-  albedo: resources.Handle,
-  metallic_roughness: resources.Handle,
-  normal: resources.Handle,
-  emissive: resources.Handle,
-  occlusion: resources.Handle,
+  albedo: resources.Image2DHandle,
+  metallic_roughness: resources.Image2DHandle,
+  normal: resources.Image2DHandle,
+  emissive: resources.Image2DHandle,
+  occlusion: resources.Image2DHandle,
   features: resources.ShaderFeatureSet,
 ) {
   if mat.has_pbr_metallic_roughness {
@@ -282,7 +282,7 @@ load_material_textures :: proc(
 @(private = "file")
 load_mesh_primitives :: proc(
   mesh: ^cgltf.mesh,
-  cache: ^map[^cgltf.material]resources.Handle,
+  cache: ^map[^cgltf.material]resources.MaterialHandle,
   include_skinning: bool,
 ) -> (
   GeometryData,
@@ -290,7 +290,7 @@ load_mesh_primitives :: proc(
 ) {
   primitives := mesh.primitives
   if len(primitives) == 0 do return {}, .invalid_gltf
-  material_handle: resources.Handle
+  material_handle: resources.MaterialHandle
   if mat := primitives[0].material; mat != nil && mat in cache {
     material_handle = cache[mat]
   }
@@ -505,17 +505,17 @@ construct_scene :: proc(
   gltf_data: ^cgltf.data,
   geometry_cache: ^map[^cgltf.mesh]GeometryData,
   skin_cache: ^map[^cgltf.skin]SkinData,
-  nodes: ^[dynamic]resources.Handle,
+  nodes: ^[dynamic]resources.NodeHandle,
 ) -> cgltf.result {
   TraverseEntry :: struct {
     idx:    u32,
-    parent: resources.Handle,
+    parent: resources.NodeHandle,
   }
   stack := make([dynamic]TraverseEntry, 0, context.temp_allocator)
   bones_with_parent := make([dynamic]u32, 0, context.temp_allocator)
   node_ptr_to_idx_map := make(map[^cgltf.node]u32, context.temp_allocator)
   skin_to_first_mesh := make(
-    map[^cgltf.skin]resources.Handle,
+    map[^cgltf.skin]resources.MeshHandle,
     context.temp_allocator,
   )
   for &node, i in gltf_data.nodes {
@@ -535,7 +535,7 @@ construct_scene :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := cont.alloc(&world.nodes) or_continue
+    node_handle, node := cont.alloc(&world.nodes, resources.NodeHandle) or_continue
     init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
@@ -562,7 +562,7 @@ construct_scene :: proc(
     node.parent = entry.parent
     if gltf_node.mesh in geometry_cache {
       geometry_data := geometry_cache[gltf_node.mesh]
-      mesh_handle: cont.Handle
+      mesh_handle: resources.MeshHandle
       if gltf_node.skin in skin_cache {
         skin_data := skin_cache[gltf_node.skin]
         mesh_handle =
@@ -643,7 +643,7 @@ load_animations :: proc(
   gctx: ^gpu.GPUContext,
   gltf_data: ^cgltf.data,
   gltf_skin: ^cgltf.skin,
-  mesh_handle: resources.Handle,
+  mesh_handle: resources.MeshHandle,
 ) -> bool {
   mesh := cont.get(rm.meshes, mesh_handle)
   if mesh == nil do return false

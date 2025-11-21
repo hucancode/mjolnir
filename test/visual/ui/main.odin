@@ -15,7 +15,7 @@ GameState :: struct {
   status_label:       retained_ui.WidgetHandle,
   window_handle:      retained_ui.WidgetHandle,
   image_handle:       retained_ui.WidgetHandle,
-  texture_handle:     resources.Handle,
+  texture_handle:     resources.Image2DHandle,
   checkbox_handle:    retained_ui.WidgetHandle,
   combobox_handle:    retained_ui.WidgetHandle,
   textbox_handle:     retained_ui.WidgetHandle,
@@ -247,7 +247,7 @@ main :: proc() {
       true, // autosize
     )
     image_data := #load("statue-1275469_1280.jpg")
-    state.texture_handle, _, _ = resources.create_texture_from_data(
+    state.texture_handle, _ = resources.create_texture_from_data(
       &engine.gctx,
       &engine.rm,
       image_data,

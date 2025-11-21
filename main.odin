@@ -13,8 +13,8 @@ import "vendor:glfw"
 LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
-portal_camera_handle: resources.Handle
-portal_material_handle: resources.Handle
+portal_camera_handle: resources.CameraHandle
+portal_material_handle: resources.MaterialHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -46,7 +46,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           world_x := (f32(x) - f32(nx) * 0.5) * space
           world_y := (f32(y) - f32(ny) * 0.5) * space + 2.25
           world_z := (f32(z) - f32(nz) * 0.5) * space
-          node_handle: resources.Handle
+          node_handle: resources.NodeHandle
           node_ok := false
           if x % 3 == 0 {
             node_handle, node_ok = spawn(

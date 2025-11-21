@@ -53,7 +53,7 @@ create_label :: proc(
 
 create_image :: proc(
   self: ^Manager,
-  texture_handle: resources.Handle,
+  texture_handle: resources.Image2DHandle,
   x, y, w, h: f32,
   parent: WidgetHandle = {},
   uv: [4]f32 = {0, 0, 1, 1},

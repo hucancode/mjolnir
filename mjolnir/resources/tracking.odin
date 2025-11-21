@@ -5,7 +5,7 @@ import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
-mesh_ref :: proc(rm: ^Manager, handle: Handle) -> bool {
+mesh_ref :: proc(rm: ^Manager, handle: MeshHandle) -> bool {
   mesh := cont.get(rm.meshes, handle) or_return
   mesh.ref_count += 1
   return true
@@ -13,7 +13,7 @@ mesh_ref :: proc(rm: ^Manager, handle: Handle) -> bool {
 
 mesh_unref :: proc(
   rm: ^Manager,
-  handle: Handle,
+  handle: MeshHandle,
 ) -> (
   ref_count: u32,
   ok: bool,
@@ -27,7 +27,7 @@ mesh_unref :: proc(
   return mesh.ref_count, true
 }
 
-material_ref :: proc(rm: ^Manager, handle: Handle) -> bool {
+material_ref :: proc(rm: ^Manager, handle: MaterialHandle) -> bool {
   mat := cont.get(rm.materials, handle) or_return
   mat.ref_count += 1
   return true
@@ -35,7 +35,7 @@ material_ref :: proc(rm: ^Manager, handle: Handle) -> bool {
 
 material_unref :: proc(
   rm: ^Manager,
-  handle: Handle,
+  handle: MaterialHandle,
 ) -> (
   ref_count: u32,
   ok: bool,
@@ -49,7 +49,7 @@ material_unref :: proc(
   return mat.ref_count, true
 }
 
-texture_2d_ref :: proc(rm: ^Manager, handle: Handle) -> bool {
+texture_2d_ref :: proc(rm: ^Manager, handle: Image2DHandle) -> bool {
   img := cont.get(rm.images_2d, handle) or_return
   img.ref_count += 1
   return true
@@ -57,7 +57,7 @@ texture_2d_ref :: proc(rm: ^Manager, handle: Handle) -> bool {
 
 texture_2d_unref :: proc(
   rm: ^Manager,
-  handle: Handle,
+  handle: Image2DHandle,
 ) -> (
   ref_count: u32,
   ok: bool,
@@ -71,7 +71,7 @@ texture_2d_unref :: proc(
   return img.ref_count, true
 }
 
-texture_cube_ref :: proc(rm: ^Manager, handle: Handle) -> bool {
+texture_cube_ref :: proc(rm: ^Manager, handle: ImageCubeHandle) -> bool {
   img := cont.get(rm.images_cube, handle) or_return
   img.ref_count += 1
   return true
@@ -79,7 +79,7 @@ texture_cube_ref :: proc(rm: ^Manager, handle: Handle) -> bool {
 
 texture_cube_unref :: proc(
   rm: ^Manager,
-  handle: Handle,
+  handle: ImageCubeHandle,
 ) -> (
   ref_count: u32,
   ok: bool,

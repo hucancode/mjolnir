@@ -13,20 +13,20 @@ ForceFieldData :: struct {
 
 ForceField :: struct {
   using data:  ForceFieldData,
-  node_handle: Handle,
+  node_handle: NodeHandle,
 }
 
 create_forcefield :: proc(
   rm: ^Manager,
-  node_handle: Handle,
+  node_handle: NodeHandle,
   area_of_effect: f32,
   strength: f32,
   tangent_strength: f32,
 ) -> (
-  ret: Handle,
+  ret: ForceFieldHandle,
   ok: bool,
 ) #optional_ok {
-  handle, forcefield := cont.alloc(&rm.forcefields) or_return
+  handle, forcefield := cont.alloc(&rm.forcefields, ForceFieldHandle) or_return
   forcefield.tangent_strength = tangent_strength
   forcefield.strength = strength
   forcefield.area_of_effect = area_of_effect
@@ -35,7 +35,7 @@ create_forcefield :: proc(
   return handle, true
 }
 
-destroy_forcefield_handle :: proc(rm: ^Manager, handle: Handle) -> bool {
+destroy_forcefield_handle :: proc(rm: ^Manager, handle: ForceFieldHandle) -> bool {
   _, freed := cont.free(&rm.forcefields, handle)
   return freed
 }
@@ -46,7 +46,7 @@ forcefield_update_gpu_data :: proc(ff: ^ForceField) {
 
 forcefield_write_to_gpu :: proc(
   rm: ^Manager,
-  handle: Handle,
+  handle: ForceFieldHandle,
   ff: ^ForceField,
 ) -> vk.Result {
   forcefield_update_gpu_data(ff)

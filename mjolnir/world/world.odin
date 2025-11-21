@@ -13,7 +13,7 @@ import "core:strings"
 import "core:sync"
 
 LightAttachment :: struct {
-  handle: resources.Handle,
+  handle: resources.LightHandle,
 }
 
 NodeSkinning :: struct {
@@ -22,25 +22,25 @@ NodeSkinning :: struct {
 }
 
 MeshAttachment :: struct {
-  handle:              resources.Handle,
-  material:            resources.Handle,
+  handle:              resources.MeshHandle,
+  material:            resources.MaterialHandle,
   skinning:            Maybe(NodeSkinning),
   cast_shadow:         bool,
   navigation_obstacle: bool,
 }
 
 EmitterAttachment :: struct {
-  handle: resources.Handle,
+  handle: resources.EmitterHandle,
 }
 
 ForceFieldAttachment :: struct {
-  handle: resources.Handle,
+  handle: resources.ForceFieldHandle,
 }
 
 SpriteAttachment :: struct {
-  sprite_handle: resources.Handle,
-  mesh_handle:   resources.Handle,
-  material:      resources.Handle,
+  sprite_handle: resources.SpriteHandle,
+  mesh_handle:   resources.MeshHandle,
+  material:      resources.MaterialHandle,
 }
 
 NodeAttachment :: union {
@@ -77,7 +77,7 @@ NodeTagSet :: bit_set[NodeTag;u32]
 // AnimationInstance represents a playing animation clip on a node
 // Uses handle-based lookup to avoid pointer invalidation when pools resize
 AnimationInstance :: struct {
-  clip_handle: resources.Handle, // handle to animation clip (resolved at runtime)
+  clip_handle: resources.ClipHandle, // handle to animation clip (resolved at runtime)
   mode:        anim.PlayMode,
   status:      anim.Status,
   time:        f32,
@@ -86,8 +86,8 @@ AnimationInstance :: struct {
 }
 
 Node :: struct {
-  parent:           resources.Handle,
-  children:         [dynamic]resources.Handle,
+  parent:           resources.NodeHandle,
+  children:         [dynamic]resources.NodeHandle,
   transform:        geometry.Transform,
   name:             string,
   bone_socket:      string, // if not empty, attach to this bone on parent skinned mesh
@@ -103,19 +103,19 @@ Node :: struct {
 TraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 
 TraverseEntry :: struct {
-  handle:            resources.Handle,
+  handle:            resources.NodeHandle,
   parent_transform:  matrix[4, 4]f32,
   parent_is_dirty:   bool,
   parent_is_visible: bool,
 }
 
 World :: struct {
-  root:                   resources.Handle,
+  root:                   resources.NodeHandle,
   nodes:                  resources.Pool(Node),
   traversal_stack:        [dynamic]TraverseEntry,
   actor_pools:            map[typeid]ActorPoolEntry,
-  animatable_nodes:       [dynamic]resources.Handle,
-  pending_node_deletions: [dynamic]resources.Handle,
+  animatable_nodes:       [dynamic]resources.NodeHandle,
+  pending_node_deletions: [dynamic]resources.NodeHandle,
   pending_deletions_mutex: sync.Mutex,
 }
 
@@ -193,7 +193,7 @@ destroy_node :: proc(
   }
 }
 
-detach :: proc(nodes: resources.Pool(Node), child_handle: resources.Handle) {
+detach :: proc(nodes: resources.Pool(Node), child_handle: resources.NodeHandle) {
   child_node := cont.get(nodes, child_handle)
   if child_node == nil {
     return
@@ -215,7 +215,7 @@ detach :: proc(nodes: resources.Pool(Node), child_handle: resources.Handle) {
 
 attach :: proc(
   nodes: resources.Pool(Node),
-  parent_handle, child_handle: resources.Handle,
+  parent_handle, child_handle: resources.NodeHandle,
 ) {
   child_node := cont.get(nodes, child_handle)
   parent_node := cont.get(nodes, parent_handle)
@@ -241,7 +241,7 @@ attach :: proc(
 _init_node_with_attachment :: proc(
   node: ^Node,
   attachment: NodeAttachment,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   rm: ^resources.Manager,
 ) {
   init_node(node)
@@ -254,7 +254,7 @@ _init_node_with_attachment :: proc(
 
 @(private = "file")
 _upload_node_to_gpu :: proc(
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   node: ^Node,
   rm: ^resources.Manager,
 ) {
@@ -338,7 +338,7 @@ spawn :: proc(
   attachment: NodeAttachment = nil,
   rm: ^resources.Manager = nil,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   node: ^Node,
   ok: bool,
 ) {
@@ -347,16 +347,16 @@ spawn :: proc(
 
 spawn_child :: proc(
   self: ^World,
-  parent: resources.Handle,
+  parent: resources.NodeHandle,
   position: [3]f32 = {0, 0, 0},
   attachment: NodeAttachment = nil,
   rm: ^resources.Manager = nil,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   node: ^Node,
   ok: bool,
 ) {
-    handle, node = cont.alloc(&self.nodes) or_return
+    handle, node = cont.alloc(&self.nodes, resources.NodeHandle) or_return
     _init_node_with_attachment(node, attachment, handle, rm)
     geometry.transform_translate(
       &node.transform,
@@ -374,19 +374,19 @@ spawn_child :: proc(
 init :: proc(world: ^World) {
   cont.init(&world.nodes, resources.MAX_NODES_IN_SCENE)
   root: ^Node
-  world.root, root, _ = cont.alloc(&world.nodes)
+  world.root, root, _ = cont.alloc(&world.nodes, resources.NodeHandle)
   init_node(root, "root")
   root.parent = world.root
 }
 
 
-register_animatable_node :: proc(world: ^World, handle: resources.Handle) {
+register_animatable_node :: proc(world: ^World, handle: resources.NodeHandle) {
   // TODO: if this list get more than 10000 items, we need to use a map
   if slice.contains(world.animatable_nodes[:], handle) do return
   append(&world.animatable_nodes, handle)
 }
 
-unregister_animatable_node :: proc(world: ^World, handle: resources.Handle) {
+unregister_animatable_node :: proc(world: ^World, handle: resources.NodeHandle) {
   if i, found := slice.linear_search(world.animatable_nodes[:], handle);
      found {
     unordered_remove(&world.animatable_nodes, i)
@@ -425,7 +425,7 @@ shutdown :: proc(
   delete(world.pending_node_deletions)
 }
 
-despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
+despawn :: proc(world: ^World, handle: resources.NodeHandle) -> bool {
   node := cont.get(world.nodes, handle)
   if node == nil {
     log.warnf("despawn: node %v not found (already freed or invalid)", handle)
@@ -454,7 +454,7 @@ cleanup_pending_deletions :: proc(
   zero_data: resources.NodeData
   for entry, i in world.nodes.entries do if entry.active {
     if !entry.item.pending_deletion do continue
-    handle := resources.Handle {
+    handle := resources.NodeHandle {
       index      = u32(i),
       generation = entry.generation,
     }
@@ -625,7 +625,7 @@ traverse :: proc(
 @(private)
 assign_emitter_to_node :: proc(
   rm: ^resources.Manager,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   node: ^Node,
 ) {
   if rm == nil {
@@ -645,7 +645,7 @@ assign_emitter_to_node :: proc(
 @(private)
 assign_forcefield_to_node :: proc(
   rm: ^resources.Manager,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   node: ^Node,
 ) {
   if rm == nil {
@@ -665,7 +665,7 @@ assign_forcefield_to_node :: proc(
 @(private)
 assign_light_to_node :: proc(
   rm: ^resources.Manager,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   node: ^Node,
 ) {
   if rm == nil {
@@ -683,7 +683,7 @@ assign_light_to_node :: proc(
 }
 
 create_point_light_attachment :: proc(
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
@@ -693,7 +693,7 @@ create_point_light_attachment :: proc(
   attachment: LightAttachment,
   ok: bool,
 ) #optional_ok {
-  handle: resources.Handle
+  handle: resources.LightHandle
   handle, ok = resources.create_light(
     rm,
     gctx,
@@ -708,7 +708,7 @@ create_point_light_attachment :: proc(
 }
 
 create_directional_light_attachment :: proc(
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
@@ -717,7 +717,7 @@ create_directional_light_attachment :: proc(
   attachment: LightAttachment,
   ok: bool,
 ) #optional_ok {
-  handle: resources.Handle
+  handle: resources.LightHandle
   handle, ok = resources.create_light(
     rm,
     gctx,
@@ -731,7 +731,7 @@ create_directional_light_attachment :: proc(
 }
 
 create_spot_light_attachment :: proc(
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
@@ -744,7 +744,7 @@ create_spot_light_attachment :: proc(
 ) #optional_ok {
   angle_inner := angle * 0.8
   angle_outer := angle
-  handle: resources.Handle
+  handle: resources.LightHandle
   handle, ok = resources.create_light(
     rm,
     gctx,
@@ -776,9 +776,9 @@ _ensure_actor_pool :: proc(world: ^World, $T: typeid) -> ^ActorPool(T) {
     },
     alloc_fn = proc(
       pool_ptr: rawptr,
-      node_handle: resources.Handle,
+      node_handle: resources.NodeHandle,
     ) -> (
-      resources.Handle,
+      ActorHandle,
       rawptr,
       bool,
     ) {
@@ -786,14 +786,14 @@ _ensure_actor_pool :: proc(world: ^World, $T: typeid) -> ^ActorPool(T) {
     },
     get_fn = proc(
       pool_ptr: rawptr,
-      handle: resources.Handle,
+      handle: ActorHandle,
     ) -> (
       rawptr,
       bool,
     ) {
       return actor_get(cast(^ActorPool(T))pool_ptr, handle)
     },
-    free_fn = proc(pool_ptr: rawptr, handle: resources.Handle) -> bool {
+    free_fn = proc(pool_ptr: rawptr, handle: ActorHandle) -> bool {
       _, freed := actor_free(cast(^ActorPool(T))pool_ptr, handle)
       return freed
     },
@@ -812,7 +812,7 @@ spawn_actor :: proc(
   attachment: NodeAttachment = nil,
   rm: ^resources.Manager = nil,
 ) -> (
-  actor_handle: resources.Handle,
+  actor_handle: ActorHandle,
   actor: ^Actor(T),
   ok: bool,
 ) {
@@ -829,7 +829,7 @@ spawn_actor_at :: proc(
   attachment: NodeAttachment = nil,
   rm: ^resources.Manager = nil,
 ) -> (
-  actor_handle: resources.Handle,
+  actor_handle: ActorHandle,
   actor: ^Actor(T),
   ok: bool,
 ) {
@@ -842,11 +842,11 @@ spawn_actor_at :: proc(
 spawn_actor_child :: proc(
   world: ^World,
   $T: typeid,
-  parent: resources.Handle,
+  parent: resources.NodeHandle,
   attachment: NodeAttachment = nil,
   rm: ^resources.Manager = nil,
 ) -> (
-  actor_handle: resources.Handle,
+  actor_handle: ActorHandle,
   actor: ^Actor(T),
   ok: bool,
 ) {
@@ -859,7 +859,7 @@ spawn_actor_child :: proc(
 get_actor :: proc(
   world: ^World,
   $T: typeid,
-  handle: resources.Handle,
+  handle: ActorHandle,
 ) -> (
   actor: ^Actor(T),
   ok: bool,
@@ -874,7 +874,7 @@ get_actor :: proc(
 free_actor :: proc(
   world: ^World,
   $T: typeid,
-  handle: resources.Handle,
+  handle: ActorHandle,
 ) -> bool {
   entry, pool_exists := world.actor_pools[typeid_of(T)]
   if !pool_exists do return false

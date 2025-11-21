@@ -9,6 +9,21 @@ import "core:slice"
 import vk "vendor:vulkan"
 
 Handle :: cont.Handle
+NodeHandle :: Handle
+MeshHandle :: distinct Handle
+MaterialHandle :: Handle
+Image2DHandle :: Handle
+ImageCubeHandle :: Handle
+CameraHandle :: Handle
+SphereCameraHandle :: Handle
+EmitterHandle :: Handle
+ForceFieldHandle :: Handle
+ClipHandle :: Handle
+SpriteHandle :: Handle
+LightHandle :: Handle
+NavContextHandle :: Handle
+NavMeshHandle :: Handle
+
 Pool :: cont.Pool
 SlabAllocator :: cont.SlabAllocator
 
@@ -30,8 +45,8 @@ Manager :: struct {
   linear_clamp_sampler:      vk.Sampler,
   nearest_repeat_sampler:    vk.Sampler,
   nearest_clamp_sampler:     vk.Sampler,
-  builtin_materials:         [len(Color)]Handle,
-  builtin_meshes:            [len(Primitive)]Handle,
+  builtin_materials:         [len(Color)]MaterialHandle,
+  builtin_meshes:            [len(Primitive)]MeshHandle,
   meshes:                    Pool(Mesh),
   materials:                 Pool(Material),
   images_2d:                 Pool(gpu.Image),
@@ -42,6 +57,7 @@ Manager :: struct {
   forcefields:               Pool(ForceField),
   animation_clips:           Pool(animation.Clip),
   sprites:                   Pool(Sprite),
+  lights:                    Pool(Light),
   nav_meshes:                Pool(NavMesh),
   nav_contexts:              Pool(NavContext),
   navigation_system:         NavigationSystem,
@@ -69,7 +85,6 @@ Manager :: struct {
     geometry.SkinningData,
   ),
   vertex_skinning_slab:      SlabAllocator,
-  lights:                    Pool(Light),
   lights_buffer:             gpu.BindlessBuffer(LightData),
   dynamic_light_data_buffer: gpu.PerFrameBindlessBuffer(
     DynamicLightData,
@@ -84,8 +99,8 @@ Manager :: struct {
   vertex_slab:               SlabAllocator,
   index_slab:                SlabAllocator,
   current_frame_index:       u32,
-  animatable_sprites:        [dynamic]Handle,
-  active_lights:             [dynamic]Handle,
+  animatable_sprites:        [dynamic]SpriteHandle,
+  active_lights:             [dynamic]LightHandle,
 }
 
 init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
@@ -305,7 +320,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
   // Clean up lights (which may own shadow cameras with textures)
   for &entry, i in self.lights.entries do if entry.generation > 0 && entry.active {
-    destroy_light(self, gctx, Handle{index = u32(i), generation = entry.generation})
+    destroy_light(self, gctx, LightHandle{index = u32(i), generation = entry.generation})
   }
   delete(self.lights.entries)
   delete(self.lights.free_indices)

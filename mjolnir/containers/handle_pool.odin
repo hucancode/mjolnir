@@ -43,7 +43,7 @@ destroy :: proc(pool: Pool($T), destroy_proc: proc(_: ^T)) {
 
 // alloc allocates a new item from the pool, reusing freed slots when possible.
 // Returns (handle, item_ptr, ok). The item is zero-initialized.
-alloc :: proc(pool: ^Pool($T)) -> (handle: Handle, item: ^T, ok: bool) {
+alloc :: proc(pool: ^Pool($T), $HT: typeid) -> (handle: HT, item: ^T, ok: bool) {
   MAX_CONSECUTIVE_ERROR :: 20
   @(static) error_count := 0
 
@@ -53,7 +53,7 @@ alloc :: proc(pool: ^Pool($T)) -> (handle: Handle, item: ^T, ok: bool) {
     entry := &pool.entries[index]
     entry.active = true
     error_count = 0
-    return Handle{index, entry.generation}, &entry.item, true
+    return HT{index, entry.generation}, &entry.item, true
   }
 
   // Allocate a new slot
@@ -78,12 +78,12 @@ alloc :: proc(pool: ^Pool($T)) -> (handle: Handle, item: ^T, ok: bool) {
   }
   append(&pool.entries, entry_to_add)
   error_count = 0
-  return Handle{index, new_item_generation}, &pool.entries[index].item, true
+  return HT{index, new_item_generation}, &pool.entries[index].item, true
 }
 
 // free marks an item as freed and returns a pointer to it for cleanup.
 // The handle becomes invalid immediately. Returns (item_ptr, freed).
-free :: proc(pool: ^Pool($T), handle: Handle) -> (item: ^T, freed: bool) {
+free :: proc(pool: ^Pool($T), handle: $HT) -> (item: ^T, freed: bool) {
   if handle.index >= u32(len(pool.entries)) {
     return nil, false
   }
@@ -106,7 +106,7 @@ free :: proc(pool: ^Pool($T), handle: Handle) -> (item: ^T, freed: bool) {
 // get retrieves an item by handle. Returns (item_ptr, found).
 get :: proc "contextless" (
   pool: Pool($T),
-  handle: Handle,
+  handle: $HT,
 ) -> (
   ret: ^T,
   found: bool,
@@ -122,7 +122,7 @@ get :: proc "contextless" (
 }
 
 // is_valid checks if a handle is currently valid without accessing the item.
-is_valid :: proc "contextless" (pool: Pool($T), handle: Handle) -> bool {
+is_valid :: proc "contextless" (pool: Pool($T), handle: $HT) -> bool {
   if handle.index >= u32(len(pool.entries)) {
     return false
   }

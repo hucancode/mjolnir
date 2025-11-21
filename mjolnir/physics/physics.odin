@@ -11,6 +11,8 @@ import "core:slice"
 import "core:time"
 
 KILL_Y :: -50.0
+RigidBodyHandle :: distinct cont.Handle
+ColliderHandle :: distinct cont.Handle
 
 PhysicsWorld :: struct {
   bodies:                resources.Pool(RigidBody),
@@ -26,7 +28,7 @@ PhysicsWorld :: struct {
 }
 
 BroadPhaseEntry :: struct {
-  handle: resources.Handle,
+  handle: RigidBodyHandle,
   bounds: geometry.Aabb,
 }
 
@@ -60,23 +62,22 @@ destroy :: proc(world: ^PhysicsWorld) {
 
 create_body :: proc(
   world: ^PhysicsWorld,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   mass: f32 = 1.0,
   is_static := false,
 ) -> (
-  handle: resources.Handle,
+  handle: RigidBodyHandle,
   body: ^RigidBody,
   ok: bool,
 ) {
-  handle, body = cont.alloc(&world.bodies) or_return
+  handle, body = cont.alloc(&world.bodies, RigidBodyHandle) or_return
   body^ = rigid_body_create(node_handle, mass, is_static)
   ok = true
   return
 }
 
-destroy_body :: proc(world: ^PhysicsWorld, handle: resources.Handle) {
-  body, ok := cont.get(world.bodies, handle)
-  if ok {
+destroy_body :: proc(world: ^PhysicsWorld, handle: RigidBodyHandle) {
+  if body, ok := cont.get(world.bodies, handle); ok {
     cont.free(&world.colliders, body.collider_handle)
   }
   cont.free(&world.bodies, handle)
@@ -84,15 +85,15 @@ destroy_body :: proc(world: ^PhysicsWorld, handle: resources.Handle) {
 
 add_collider :: proc(
   world: ^PhysicsWorld,
-  body_handle: resources.Handle,
+  body_handle: RigidBodyHandle,
   collider: Collider,
 ) -> (
-  handle: resources.Handle,
+  handle: ColliderHandle,
   col_ptr: ^Collider,
   ok: bool,
 ) {
   body := cont.get(world.bodies, body_handle) or_return
-  handle, col_ptr = cont.alloc(&world.colliders) or_return
+  handle, col_ptr = cont.alloc(&world.colliders, ColliderHandle) or_return
   col_ptr^ = collider
   body.collider_handle = handle
   return handle, col_ptr, true
@@ -268,7 +269,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       collider := cont.get(physics.colliders, body.collider_handle) or_continue
       pos := node.transform.position
       bounds := collider_get_aabb(collider, pos)
-      handle := resources.Handle {
+      handle := RigidBodyHandle {
         index      = u32(idx),
         generation = entry.generation,
       }
@@ -463,7 +464,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     }
     node := cont.get(w.nodes, body.node_handle) or_continue
     if node.transform.position.y < KILL_Y {
-      handle := resources.Handle {
+      handle := RigidBodyHandle {
         index      = u32(idx),
         generation = entry.generation,
       }

@@ -29,7 +29,7 @@ Manager :: struct {
   post_process: post_process.Renderer,
   debug_ui:     debug_ui.Renderer,
   retained_ui:  retained_ui.Manager,
-  main_camera:  resources.Handle,
+  main_camera:  resources.CameraHandle,
   visibility:   visibility.VisibilitySystem,
 }
 
@@ -111,7 +111,7 @@ init :: proc(
   ret: vk.Result,
 ) {
   camera_handle, camera, ok := cont.alloc(
-    &rm.cameras,
+    &rm.cameras, resources.CameraHandle
   )
   if !ok {
     return .ERROR_INITIALIZATION_FAILED
@@ -293,7 +293,7 @@ record_geometry_pass :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
   world_state: ^world.World,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   camera := cont.get(rm.cameras, camera_handle)
@@ -316,7 +316,7 @@ record_lighting_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   rm: ^resources.Manager,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
@@ -357,7 +357,7 @@ record_particles_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   rm: ^resources.Manager,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
@@ -379,7 +379,7 @@ record_transparency_pass :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
   world_state: ^world.World,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
@@ -464,7 +464,7 @@ record_post_process_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   rm: ^resources.Manager,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   color_format: vk.Format,
   swapchain_extent: vk.Extent2D,
   swapchain_image: vk.Image,

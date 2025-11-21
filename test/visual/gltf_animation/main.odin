@@ -11,7 +11,7 @@ import "core:time"
 import cgltf "vendor:cgltf"
 import "vendor:glfw"
 
-root_nodes: [dynamic]resources.Handle
+root_nodes: [dynamic]resources.NodeHandle
 frame_counter: int
 
 main :: proc() {

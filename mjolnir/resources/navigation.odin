@@ -21,7 +21,7 @@ NavMesh :: struct {
 
 NavContext :: struct {
   nav_mesh_query:  detour.Nav_Mesh_Query,
-  associated_mesh: resources.Handle,
+  associated_mesh: resources.NavMeshHandle,
   query_filter:    detour.Query_Filter,
 }
 
@@ -38,7 +38,7 @@ TileCoord :: struct {
 }
 
 NavigationSystem :: struct {
-  default_context_handle: resources.Handle,
+  default_context_handle: resources.NavContextHandle,
   geometry_cache:         [dynamic]NavigationGeometry,
   dirty_tiles:            map[TileCoord]bool,
   rebuild_queued:         bool,

@@ -13,14 +13,14 @@ import "core:os"
 import "vendor:glfw"
 
 physics_world: physics.PhysicsWorld
-cube_handles: [dynamic]resources.Handle
-cube_bodies: [dynamic]resources.Handle
-effector_sphere: resources.Handle
+cube_handles: [dynamic]resources.NodeHandle
+cube_bodies: [dynamic]physics.RigidBodyHandle
+effector_sphere: resources.NodeHandle
 effector_position: [3]f32
 orbit_angle: f32 = 0.0
 orbit_radius: f32 = 15.0
 effect_radius: f32 = 10.0
-clicked_cube: resources.Handle
+clicked_cube: resources.NodeHandle
 last_mouse_button_state: bool = false
 
 main :: proc() {
@@ -188,7 +188,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     scale(engine, handle, 0.3)
   }
   // Query for cubes within effect radius using physics
-  affected: [dynamic]resources.Handle
+  affected: [dynamic]resources.NodeHandle
   defer delete(affected)
   physics.physics_query_sphere(
     &physics_world,

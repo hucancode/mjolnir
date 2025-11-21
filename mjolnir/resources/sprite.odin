@@ -186,7 +186,7 @@ sprite_animation_set_direction :: proc(anim: ^SpriteAnimation, forward: bool) {
 
 sprite_init :: proc(
   self: ^Sprite,
-  texture: Handle,
+  texture: Image2DHandle,
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
   frame_index: u32 = 0,
@@ -209,7 +209,7 @@ sprite_update_gpu_data :: proc(sprite: ^Sprite) {
 
 sprite_write_to_gpu :: proc(
   rm: ^Manager,
-  handle: Handle,
+  handle: SpriteHandle,
   sprite: ^Sprite,
 ) -> vk.Result {
   if handle.index >= MAX_SPRITES {
@@ -226,7 +226,7 @@ sprite_write_to_gpu :: proc(
 
 create_sprite :: proc(
   rm: ^Manager,
-  texture: Handle,
+  texture: Image2DHandle,
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
   frame_index: u32 = 0,
@@ -234,11 +234,11 @@ create_sprite :: proc(
   sampler: SamplerType = .NEAREST_REPEAT,
   animation: Maybe(SpriteAnimation) = nil,
 ) -> (
-  handle: Handle,
+  handle: SpriteHandle,
   ok: bool,
 ) #optional_ok {
   sprite: ^Sprite
-  handle, sprite = cont.alloc(&rm.sprites) or_return
+  handle, sprite = cont.alloc(&rm.sprites, SpriteHandle) or_return
   sprite_init(
     sprite,
     texture,
@@ -260,18 +260,18 @@ create_sprite :: proc(
   return handle, true
 }
 
-destroy_sprite_handle :: proc(rm: ^Manager, handle: Handle) {
+destroy_sprite_handle :: proc(rm: ^Manager, handle: SpriteHandle) {
   unregister_animatable_sprite(rm, handle)
   cont.free(&rm.sprites, handle)
 }
 
-register_animatable_sprite :: proc(rm: ^Manager, handle: Handle) {
+register_animatable_sprite :: proc(rm: ^Manager, handle: SpriteHandle) {
   // TODO: if this list get more than 10000 items, we need to use a map
   if slice.contains(rm.animatable_sprites[:], handle) do return
   append(&rm.animatable_sprites, handle)
 }
 
-unregister_animatable_sprite :: proc(rm: ^Manager, handle: Handle) {
+unregister_animatable_sprite :: proc(rm: ^Manager, handle: SpriteHandle) {
   if i, found := slice.linear_search(rm.animatable_sprites[:], handle);
      found {
     unordered_remove(&rm.animatable_sprites, i)

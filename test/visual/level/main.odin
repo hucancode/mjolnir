@@ -9,7 +9,7 @@ import mu "vendor:microui"
 
 Level_Data :: struct {
   engine: ^mjolnir.Engine,
-  nodes:  [dynamic]resources.Handle,
+  nodes:  [dynamic]resources.NodeHandle,
 }
 
 g_level_1_data: Level_Data

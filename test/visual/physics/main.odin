@@ -17,12 +17,12 @@ CUBE_COUNT :: NX*NY*NZ
 SPHERE_RADIUS :: 3.0
 
 physics_world: physics.PhysicsWorld
-cube_handles: [CUBE_COUNT]resources.Handle
-sphere_handle: resources.Handle
-ground_handle: resources.Handle
-cube_bodies: [CUBE_COUNT]resources.Handle
-sphere_body: resources.Handle
-ground_body: resources.Handle
+cube_handles: [CUBE_COUNT]resources.NodeHandle
+sphere_handle: resources.NodeHandle
+ground_handle: resources.NodeHandle
+cube_bodies: [CUBE_COUNT]physics.RigidBodyHandle
+sphere_body: physics.RigidBodyHandle
+ground_body: physics.RigidBodyHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()

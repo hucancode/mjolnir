@@ -182,7 +182,7 @@ Renderer :: struct {
   pipelines:        [len(PostProcessEffectType)]vk.Pipeline,
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
-  images:           [2]resources.Handle,
+  images:           [2]resources.Image2DHandle,
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -542,7 +542,7 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   rm: ^resources.Manager,
   frame_index: u32,
 ) {

@@ -10,7 +10,7 @@ import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
 
-light_handle: resources.Handle
+light_handle: resources.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()

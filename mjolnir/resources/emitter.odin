@@ -26,14 +26,14 @@ EmitterData :: struct {
 Emitter :: struct {
   using data:     EmitterData,
   enabled:        b32,
-  texture_handle: Handle,
-  node_handle:    Handle,
+  texture_handle: Image2DHandle,
+  node_handle:    NodeHandle,
 }
 
 create_emitter :: proc(
   rm: ^Manager,
-  node_handle: Handle,
-  texture_handle: Handle,
+  node_handle: NodeHandle,
+  texture_handle: Image2DHandle,
   emission_rate: f32,
   initial_velocity: [3]f32,
   velocity_spread: f32,
@@ -48,10 +48,10 @@ create_emitter :: proc(
   weight: f32,
   weight_spread: f32,
 ) -> (
-  ret: Handle,
+  ret: EmitterHandle,
   ok: bool,
 ) #optional_ok {
-  handle, emitter := cont.alloc(&rm.emitters) or_return
+  handle, emitter := cont.alloc(&rm.emitters, EmitterHandle) or_return
   emitter.emission_rate = emission_rate
   emitter.initial_velocity = initial_velocity
   emitter.velocity_spread = velocity_spread
@@ -72,7 +72,7 @@ create_emitter :: proc(
   return handle, true
 }
 
-destroy_emitter_handle :: proc(manager: ^Manager, handle: Handle) -> bool {
+destroy_emitter_handle :: proc(manager: ^Manager, handle: EmitterHandle) -> bool {
   _, freed := cont.free(&manager.emitters, handle)
   return freed
 }
@@ -88,7 +88,7 @@ emitter_update_gpu_data :: proc(
 
 emitter_write_to_gpu :: proc(
   rm: ^Manager,
-  handle: Handle,
+  handle: EmitterHandle,
   emitter: ^Emitter,
   preserve_time_accumulator: bool = true,
 ) -> vk.Result {

@@ -14,23 +14,23 @@ import "vendor:glfw"
 import mu "vendor:microui"
 
 demo_state: struct {
-  nav_mesh_handle:       resources.Handle,
-  nav_context_handle:    resources.Handle,
+  nav_mesh_handle:       resources.NavMeshHandle,
+  nav_context_handle:    resources.NavContextHandle,
   // Pathfinding state
   start_pos:             [3]f32,
   end_pos:               [3]f32,
   current_path:          [][3]f32,
   has_path:              bool,
   // Visual markers
-  start_marker_handle:   resources.Handle,
-  end_marker_handle:     resources.Handle,
-  path_waypoint_handles: [dynamic]resources.Handle,
+  start_marker_handle:   resources.NodeHandle,
+  end_marker_handle:     resources.NodeHandle,
+  path_waypoint_handles: [dynamic]resources.NodeHandle,
   // Demo scene nodes
-  ground_handle:         resources.Handle,
-  obstacle_handles:      [dynamic]resources.Handle,
+  ground_handle:         resources.NodeHandle,
+  obstacle_handles:      [dynamic]resources.NodeHandle,
   // OBJ file support
-  obj_mesh_handle:       resources.Handle,
-  obj_node_handle:       resources.Handle,
+  obj_mesh_handle:       resources.MeshHandle,
+  obj_node_handle:       resources.NodeHandle,
   obj_mesh_node:         ^world.Node,
   show_original_mesh:    bool,
   use_procedural:        bool,
@@ -315,7 +315,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
 
 update_position_marker :: proc(
   engine: ^mjolnir.Engine,
-  handle: ^resources.Handle,
+  handle: ^resources.NodeHandle,
   pos: [3]f32,
   color: [4]f32,
 ) {

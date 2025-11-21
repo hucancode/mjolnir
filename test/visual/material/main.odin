@@ -8,7 +8,7 @@ import "core:math"
 import "core:math/linalg"
 import "vendor:glfw"
 
-cube_handle: resources.Handle
+cube_handle: resources.NodeHandle
 
 main :: proc() {
   engine := new(mjolnir.Engine)

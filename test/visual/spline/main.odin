@@ -11,7 +11,7 @@ import "core:math/linalg"
 CUBE_COUNT :: 50
 ANIMATION_DURATION :: 8.0
 
-cubes: [CUBE_COUNT]resources.Handle
+cubes: [CUBE_COUNT]resources.NodeHandle
 spline: animation.Spline([3]f32)
 
 main :: proc() {
@@ -43,7 +43,7 @@ main :: proc() {
     }
     // Build arc-length table for uniform spatial sampling
     animation.spline_build_arc_table(&spline, 200)
-    mat_handles := [?]resources.Handle {
+    mat_handles := [?]resources.MaterialHandle {
       engine.rm.builtin_materials[resources.Color.RED],
       engine.rm.builtin_materials[resources.Color.GREEN],
       engine.rm.builtin_materials[resources.Color.BLUE],

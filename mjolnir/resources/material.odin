@@ -39,11 +39,11 @@ MaterialData :: struct {
 Material :: struct {
   using data:         MaterialData,
   type:               MaterialType,
-  albedo:             Handle,
-  metallic_roughness: Handle,
-  normal:             Handle,
-  emissive:           Handle,
-  occlusion:          Handle,
+  albedo:             Image2DHandle,
+  metallic_roughness: Image2DHandle,
+  normal:             Image2DHandle,
+  emissive:           Image2DHandle,
+  occlusion:          Image2DHandle,
   using meta:         ResourceMetadata,
 }
 
@@ -63,11 +63,11 @@ material_init :: proc(
   self: ^Material,
   features: ShaderFeatureSet,
   type: MaterialType,
-  albedo_handle: Handle,
-  metallic_roughness_handle: Handle,
-  normal_handle: Handle,
-  emissive_handle: Handle,
-  occlusion_handle: Handle,
+  albedo_handle: Image2DHandle,
+  metallic_roughness_handle: Image2DHandle,
+  normal_handle: Image2DHandle,
+  emissive_handle: Image2DHandle,
+  occlusion_handle: Image2DHandle,
   metallic_value: f32,
   roughness_value: f32,
   emissive_value: f32,
@@ -88,7 +88,7 @@ material_init :: proc(
 
 material_upload_gpu_data :: proc(
   rm: ^Manager,
-  handle: Handle,
+  handle: MaterialHandle,
   self: ^Material,
 ) -> vk.Result {
   if handle.index >= MAX_MATERIALS {
@@ -121,23 +121,23 @@ create_material :: proc(
   rm: ^Manager,
   features: ShaderFeatureSet = {},
   type: MaterialType = .PBR,
-  albedo_handle: Handle = {},
-  metallic_roughness_handle: Handle = {},
-  normal_handle: Handle = {},
-  emissive_handle: Handle = {},
-  occlusion_handle: Handle = {},
+  albedo_handle: Image2DHandle = {},
+  metallic_roughness_handle: Image2DHandle = {},
+  normal_handle: Image2DHandle = {},
+  emissive_handle: Image2DHandle = {},
+  occlusion_handle: Image2DHandle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   auto_purge := false,
 ) -> (
-  handle: Handle,
+  handle: MaterialHandle,
   ret: vk.Result,
 ) {
   mat: ^Material
   ok: bool
-  handle, mat, ok = cont.alloc(&rm.materials)
+  handle, mat, ok = cont.alloc(&rm.materials, MaterialHandle)
   if !ok {
     log.error("Failed to allocate material: pool capacity reached")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
@@ -172,17 +172,17 @@ create_material_handle :: proc(
   rm: ^Manager,
   features: ShaderFeatureSet = {},
   type: MaterialType = .PBR,
-  albedo_handle: Handle = {},
-  metallic_roughness_handle: Handle = {},
-  normal_handle: Handle = {},
-  emissive_handle: Handle = {},
-  occlusion_handle: Handle = {},
+  albedo_handle: Image2DHandle = {},
+  metallic_roughness_handle: Image2DHandle = {},
+  normal_handle: Image2DHandle = {},
+  emissive_handle: Image2DHandle = {},
+  occlusion_handle: Image2DHandle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> (
-  handle: Handle,
+  handle: MaterialHandle,
   ok: bool,
 ) #optional_ok {
   h, ret := create_material(

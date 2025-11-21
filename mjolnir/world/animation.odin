@@ -122,7 +122,7 @@ update_sprite_animations :: proc(rm: ^resources.Manager, delta_time: f32) {
 play_animation :: proc(
   world: ^World,
   rm: ^resources.Manager,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   name: string,
   mode: anim.PlayMode = .LOOP,
   speed: f32 = 1.0,
@@ -134,7 +134,7 @@ play_animation :: proc(
 add_animation_layer :: proc(
   world: ^World,
   rm: ^resources.Manager,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   animation_name: string,
   weight: f32 = 1.0,
   mode: anim.PlayMode = .LOOP,
@@ -155,14 +155,14 @@ add_animation_layer :: proc(
   }
   skinning := &mesh_attachment.skinning.?
   // Find animation clip handle and duration
-  clip_handle: resources.Handle
+  clip_handle: resources.ClipHandle
   clip_duration: f32
   found := false
   // TODO: use linear search as a first working implementation
   // later we need to do better than this linear search
   for &entry, idx in rm.animation_clips.entries do if entry.active {
     if entry.item.name == animation_name {
-      clip_handle = resources.Handle {
+      clip_handle = resources.ClipHandle {
         index      = u32(idx),
         generation = entry.generation,
       }
@@ -196,7 +196,7 @@ add_animation_layer :: proc(
 // Remove animation layer at specified index
 remove_animation_layer :: proc(
   world: ^World,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   layer_index: int,
 ) -> bool {
   node := cont.get(world.nodes, node_handle) or_return
@@ -213,7 +213,7 @@ remove_animation_layer :: proc(
 // Set weight for an animation layer
 set_animation_layer_weight :: proc(
   world: ^World,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   layer_index: int,
   weight: f32,
 ) -> bool {
@@ -231,7 +231,7 @@ set_animation_layer_weight :: proc(
 // Clear all animation layers
 clear_animation_layers :: proc(
   world: ^World,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
 ) -> bool {
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, ok := &node.attachment.(MeshAttachment)
@@ -251,7 +251,7 @@ clear_animation_layers :: proc(
 add_ik_layer :: proc(
   world: ^World,
   rm: ^resources.Manager,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   bone_names: []string,
   target_world_pos: [3]f32,
   pole_world_pos: [3]f32,
@@ -331,7 +331,7 @@ add_ik_layer :: proc(
 // Targets are in world space and will be converted to skeleton-local space internally
 set_ik_layer_target :: proc(
   world: ^World,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   layer_index: int,
   target_world_pos: [3]f32,
   pole_world_pos: [3]f32,
@@ -378,7 +378,7 @@ set_ik_layer_target :: proc(
 // Enable or disable an IK layer
 set_ik_layer_enabled :: proc(
   world: ^World,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   layer_index: int,
   enabled: bool,
 ) -> bool {

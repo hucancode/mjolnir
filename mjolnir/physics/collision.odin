@@ -17,8 +17,8 @@ is_identity_quaternion :: proc "contextless" (q: quaternion128) -> bool {
 }
 
 Contact :: struct {
-  body_a:          resources.Handle,
-  body_b:          resources.Handle,
+  body_a:          RigidBodyHandle,
+  body_b:          RigidBodyHandle,
   point:           [3]f32,
   normal:          [3]f32,
   penetration:     f32,
@@ -34,8 +34,8 @@ Contact :: struct {
 }
 
 CollisionPair :: struct {
-  body_a: resources.Handle,
-  body_b: resources.Handle,
+  body_a: RigidBodyHandle,
+  body_b: RigidBodyHandle,
 }
 
 // Hash function for collision pairs (for contact caching)

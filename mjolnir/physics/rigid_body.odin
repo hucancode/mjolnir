@@ -4,8 +4,8 @@ import "../resources"
 import "core:math/linalg"
 
 RigidBody :: struct {
-  node_handle:          resources.Handle,
-  collider_handle:      resources.Handle,
+  node_handle:          resources.NodeHandle,
+  collider_handle:      ColliderHandle,
   mass:                 f32,
   inv_mass:             f32,
   inertia:              matrix[3, 3]f32,
@@ -28,7 +28,7 @@ RigidBody :: struct {
 }
 
 rigid_body_create :: proc(
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   mass: f32,
   is_static := false,
   enable_rotation := true,

@@ -10,7 +10,7 @@ import "core:math/linalg"
 
 // Physics raycast hit result
 PhysicsRayHit :: struct {
-  body_handle: resources.Handle,
+  body_handle: RigidBodyHandle,
   t:           f32,
   point:       [3]f32,
   normal:      [3]f32,
@@ -194,7 +194,7 @@ physics_query_sphere :: proc(
   w: ^world.World,
   center: [3]f32,
   radius: f32,
-  results: ^[dynamic]resources.Handle,
+  results: ^[dynamic]RigidBodyHandle,
 ) {
   clear(results)
   query_bounds := geometry.Aabb {
@@ -220,7 +220,7 @@ physics_query_box :: proc(
   physics: ^PhysicsWorld,
   w: ^world.World,
   bounds: geometry.Aabb,
-  results: ^[dynamic]resources.Handle,
+  results: ^[dynamic]RigidBodyHandle,
 ) {
   clear(results)
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)

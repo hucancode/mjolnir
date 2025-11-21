@@ -35,14 +35,14 @@ DynamicLightData :: struct {
 
 Light :: struct {
   using data:    LightData,
-  node_handle:   Handle, // Associated scene node for transform updates
-  camera_handle: Handle, // Camera (regular or spherical based on light type)
+  node_handle:   NodeHandle, // Associated scene node for transform updates
+  camera_handle: Handle, // Camera (regular or spherical based on light type) - can be CameraHandle or SphereCameraHandle
 }
 
 light_init :: proc(
   self: ^Light,
   light_type: LightType,
-  node_handle: Handle,
+  node_handle: NodeHandle,
   color: [4]f32,
   radius: f32,
   angle_inner: f32,
@@ -63,13 +63,13 @@ light_init :: proc(
 
 light_upload_gpu_data :: proc(
   rm: ^Manager,
-  handle: Handle,
+  handle: LightHandle,
   self: ^Light,
 ) -> vk.Result {
   return gpu.write(&rm.lights_buffer.buffer, &self.data, int(handle.index))
 }
 
-light_destroy :: proc(self: ^Light, rm: ^Manager, handle: Handle) {
+light_destroy :: proc(self: ^Light, rm: ^Manager, handle: LightHandle) {
   unregister_active_light(rm, handle)
 }
 
@@ -77,18 +77,18 @@ create_light :: proc(
   rm: ^Manager,
   gctx: ^gpu.GPUContext,
   light_type: LightType,
-  node_handle: Handle,
+  node_handle: NodeHandle,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   angle_inner: f32 = math.PI * 0.16,
   angle_outer: f32 = math.PI * 0.2,
   cast_shadow: b32 = true,
 ) -> (
-  handle: Handle,
+  handle: LightHandle,
   ok: bool,
 ) {
   light: ^Light
-  handle, light, ok = cont.alloc(&rm.lights)
+  handle, light, ok = cont.alloc(&rm.lights, LightHandle)
   if !ok do return {}, false
   light_init(
     light,
@@ -109,7 +109,7 @@ create_light :: proc(
 destroy_light :: proc(
   rm: ^Manager,
   gctx: ^gpu.GPUContext,
-  handle: Handle,
+  handle: LightHandle,
 ) -> bool {
   light, freed := cont.free(&rm.lights, handle)
   if !freed do return false
@@ -117,7 +117,7 @@ destroy_light :: proc(
   return true
 }
 
-update_light_gpu_data :: proc(rm: ^Manager, handle: Handle) {
+update_light_gpu_data :: proc(rm: ^Manager, handle: LightHandle) {
   if light, ok := cont.get(rm.lights, handle); ok {
     light_upload_gpu_data(rm, handle, light)
   }
@@ -176,13 +176,13 @@ update_light_camera :: proc(rm: ^Manager, frame_index: u32 = 0) {
   }
 }
 
-register_active_light :: proc(rm: ^Manager, handle: Handle) {
+register_active_light :: proc(rm: ^Manager, handle: LightHandle) {
   // TODO: if this list get more than 10000 items, we need to use a map
   if slice.contains(rm.active_lights[:], handle) do return
   append(&rm.active_lights, handle)
 }
 
-unregister_active_light :: proc(rm: ^Manager, handle: Handle) {
+unregister_active_light :: proc(rm: ^Manager, handle: LightHandle) {
   if i, found := slice.linear_search(rm.active_lights[:], handle); found {
     unordered_remove(&rm.active_lights, i)
   }

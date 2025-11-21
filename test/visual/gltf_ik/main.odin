@@ -8,9 +8,9 @@ import "core:math"
 import "core:math/linalg"
 import "core:time"
 
-root_nodes: [dynamic]resources.Handle
-character_handle: resources.Handle
-target_cube: resources.Handle
+root_nodes: [dynamic]resources.NodeHandle
+character_handle: resources.NodeHandle
+target_cube: resources.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()

@@ -77,7 +77,7 @@ Camera :: struct {
   data:                         [FRAMES_IN_FLIGHT]CameraData,
   // Render target data
   extent:                       vk.Extent2D,
-  attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]Handle,
+  attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]Image2DHandle,
   enabled_passes:               PassTypeSet,
   // Double-buffered draw lists for lock-free async compute:
   //   - Frame N graphics reads from draw_commands[N-1]
@@ -101,7 +101,7 @@ Camera :: struct {
 }
 
 DepthPyramid :: struct {
-  texture:    Handle,
+  texture:    Image2DHandle,
   views:      [MAX_DEPTH_MIPS_LEVEL]vk.ImageView,
   full_view:  vk.ImageView,
   sampler:    vk.Sampler,
@@ -627,7 +627,7 @@ create_camera_depth_pyramid :: proc(
   mip_levels :=
     u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
   // Create depth pyramid texture with mip levels using new Image API
-  pyramid_handle, pyramid_texture, pyramid_ok := cont.alloc(&rm.images_2d)
+  pyramid_handle, pyramid_texture, pyramid_ok := cont.alloc(&rm.images_2d, Image2DHandle)
   if !pyramid_ok {
     log.error("Failed to allocate handle for depth pyramid texture")
     return .ERROR_OUT_OF_DEVICE_MEMORY

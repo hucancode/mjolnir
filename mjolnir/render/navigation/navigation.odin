@@ -112,7 +112,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,

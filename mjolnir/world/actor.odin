@@ -3,17 +3,20 @@ package world
 import cont "../containers"
 import "../resources"
 import "core:log"
+import "core:slice"
 
 Actor :: struct($T: typeid) {
-  node_handle:  resources.Handle,
+  node_handle:  resources.NodeHandle,
   data:         T,
   tick_proc:    proc(actor: ^Actor(T), ctx: ^ActorContext, dt: f32),
   tick_enabled: bool,
 }
 
+ActorHandle :: distinct cont.Handle
+
 ActorPool :: struct($T: typeid) {
   actors:    resources.Pool(Actor(T)),
-  tick_list: [dynamic]resources.Handle,
+  tick_list: [dynamic]ActorHandle,
 }
 
 ActorContext :: struct {
@@ -34,13 +37,13 @@ actor_pool_destroy :: proc(pool: ^ActorPool($T)) {
 
 actor_alloc :: proc(
   pool: ^ActorPool($T),
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
 ) -> (
-  handle: resources.Handle,
+  handle: ActorHandle,
   actor: ^Actor(T),
   ok: bool,
 ) {
-  handle, actor, ok = cont.alloc(&pool.actors)
+  handle, actor, ok = cont.alloc(&pool.actors, ActorHandle)
   if !ok do return {}, nil, false
   actor.node_handle = node_handle
   actor.tick_enabled = false
@@ -50,18 +53,15 @@ actor_alloc :: proc(
 
 actor_free :: proc(
   pool: ^ActorPool($T),
-  handle: resources.Handle,
+  handle: ActorHandle,
 ) -> (
   actor: ^Actor(T),
   freed: bool,
 ) #optional_ok {
   actor = cont.free(&pool.actors, handle) or_return
   if actor.tick_enabled {
-    for i := 0; i < len(pool.tick_list); i += 1 {
-      if pool.tick_list[i] == handle {
+    if i, found := slice.linear_search(pool.tick_list[:], handle); found {
         unordered_remove(&pool.tick_list, i)
-        break
-      }
     }
   }
   return actor, true
@@ -69,7 +69,7 @@ actor_free :: proc(
 
 actor_get :: proc(
   pool: ^ActorPool($T),
-  handle: resources.Handle,
+  handle: ActorHandle,
 ) -> (
   actor: ^Actor(T),
   ok: bool,
@@ -77,7 +77,7 @@ actor_get :: proc(
   return cont.get(pool.actors, handle)
 }
 
-actor_enable_tick :: proc(pool: ^ActorPool($T), handle: resources.Handle) {
+actor_enable_tick :: proc(pool: ^ActorPool($T), handle: ActorHandle) {
   actor, ok := cont.get(pool.actors, handle)
   if !ok do return
   if !actor.tick_enabled {
@@ -86,7 +86,7 @@ actor_enable_tick :: proc(pool: ^ActorPool($T), handle: resources.Handle) {
   }
 }
 
-actor_disable_tick :: proc(pool: ^ActorPool($T), handle: resources.Handle) {
+actor_disable_tick :: proc(pool: ^ActorPool($T), handle: ActorHandle) {
   actor, ok := cont.get(pool.actors, handle)
   if !ok do return
   if actor.tick_enabled {
@@ -120,19 +120,19 @@ ActorPoolEntry :: struct {
   tick_fn:    proc(pool_ptr: rawptr, ctx: ^ActorContext),
   alloc_fn:   proc(
     pool_ptr: rawptr,
-    node_handle: resources.Handle,
+    node_handle: resources.NodeHandle,
   ) -> (
-    resources.Handle,
+    ActorHandle,
     rawptr,
     bool,
   ),
   get_fn:     proc(
     pool_ptr: rawptr,
-    handle: resources.Handle,
+    handle: ActorHandle,
   ) -> (
     rawptr,
     bool,
   ),
-  free_fn:    proc(pool_ptr: rawptr, handle: resources.Handle) -> bool,
+  free_fn:    proc(pool_ptr: rawptr, handle: ActorHandle) -> bool,
   destroy_fn: proc(pool_ptr: rawptr),
 }

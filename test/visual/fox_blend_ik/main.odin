@@ -6,8 +6,8 @@ import "../../../mjolnir/world"
 import "core:log"
 import "core:math"
 
-fox_handle: resources.Handle
-target_cube: resources.Handle
+fox_handle: resources.NodeHandle
+target_cube: resources.NodeHandle
 blend_factor: f32 = 0.0 // 0.0 = Walk, 1.0 = Run
 blend_direction: f32 = 1.0
 

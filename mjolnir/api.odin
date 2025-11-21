@@ -47,7 +47,7 @@ create_texture_from_path :: proc(
   usage: vk.ImageUsageFlags = {.SAMPLED},
   is_hdr := false,
 ) -> (
-  resources.Handle,
+  resources.Image2DHandle,
   bool,
 ) #optional_ok {
   return resources.create_texture_from_path_handle(
@@ -67,7 +67,7 @@ create_texture_from_data :: proc(
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips := false,
 ) -> (
-  resources.Handle,
+  resources.Image2DHandle,
   bool,
 ) #optional_ok {
   return resources.create_texture_from_data_handle(
@@ -87,7 +87,7 @@ create_texture_from_pixels :: proc(
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips := false,
 ) -> (
-  resources.Handle,
+  resources.Image2DHandle,
   bool,
 ) #optional_ok {
   return resources.create_texture_from_pixels_handle(
@@ -107,7 +107,7 @@ create_texture_empty :: proc(
   format: vk.Format,
   usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
 ) -> (
-  resources.Handle,
+  resources.Image2DHandle,
   bool,
 ) #optional_ok {
   return resources.create_empty_texture_2d_handle(
@@ -124,17 +124,17 @@ create_material :: proc(
   engine: ^Engine,
   features: resources.ShaderFeatureSet = {},
   type: resources.MaterialType = .PBR,
-  albedo_handle: resources.Handle = {},
-  metallic_roughness_handle: resources.Handle = {},
-  normal_handle: resources.Handle = {},
-  emissive_handle: resources.Handle = {},
-  occlusion_handle: resources.Handle = {},
+  albedo_handle: resources.Image2DHandle = {},
+  metallic_roughness_handle: resources.Image2DHandle = {},
+  normal_handle: resources.Image2DHandle = {},
+  emissive_handle: resources.Image2DHandle = {},
+  occlusion_handle: resources.Image2DHandle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> (
-  resources.Handle,
+  resources.MaterialHandle,
   bool,
 ) #optional_ok {
   return resources.create_material_handle(
@@ -158,7 +158,7 @@ create_mesh :: proc(
   geom: geometry.Geometry,
   auto_purge: bool = true,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.MeshHandle,
   ok: bool,
 ) #optional_ok {
   ret: vk.Result
@@ -175,14 +175,14 @@ create_mesh :: proc(
 get_builtin_mesh :: proc(
   engine: ^Engine,
   primitive: resources.Primitive,
-) -> resources.Handle {
+) -> resources.MeshHandle {
   return engine.rm.builtin_meshes[primitive]
 }
 
 get_builtin_material :: proc(
   engine: ^Engine,
   color: resources.Color,
-) -> resources.Handle {
+) -> resources.MaterialHandle {
   return engine.rm.builtin_materials[color]
 }
 
@@ -191,7 +191,7 @@ spawn :: proc(
   position: [3]f32 = {0, 0, 0},
   attachment: world.NodeAttachment = nil,
 ) -> (
-  resources.Handle,
+  resources.NodeHandle,
   bool,
 ) #optional_ok {
   handle, _, ok := world.spawn(&engine.world, position, attachment, &engine.rm)
@@ -200,11 +200,11 @@ spawn :: proc(
 
 spawn_child :: proc(
   engine: ^Engine,
-  parent: resources.Handle,
+  parent: resources.NodeHandle,
   position: [3]f32 = {0, 0, 0},
   attachment: world.NodeAttachment = nil,
 ) -> (
-  resources.Handle,
+  resources.NodeHandle,
   bool,
 ) #optional_ok {
   handle, _, ok := world.spawn_child(
@@ -221,7 +221,7 @@ load_gltf :: proc(
   engine: ^Engine,
   path: string,
 ) -> (
-  nodes: [dynamic]resources.Handle,
+  nodes: [dynamic]resources.NodeHandle,
   ok: bool,
 ) #optional_ok {
   handles, result := world.load_gltf(
@@ -235,7 +235,7 @@ load_gltf :: proc(
 
 get_node :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
 ) -> (
   ret: ^world.Node,
   ok: bool,
@@ -243,13 +243,13 @@ get_node :: proc(
   return cont.get(engine.world.nodes, handle)
 }
 
-despawn :: proc(engine: ^Engine, handle: resources.Handle) {
+despawn :: proc(engine: ^Engine, handle: resources.NodeHandle) {
   world.despawn(&engine.world, handle)
 }
 
 // Thread-safe: Queue a node for deletion from background threads
 // The actual despawn will happen on the main thread during process_pending_deletions
-queue_node_deletion :: proc(engine: ^Engine, handle: resources.Handle) {
+queue_node_deletion :: proc(engine: ^Engine, handle: resources.NodeHandle) {
   sync.mutex_lock(&engine.world.pending_deletions_mutex)
   defer sync.mutex_unlock(&engine.world.pending_deletions_mutex)
   append(&engine.world.pending_node_deletions, handle)
@@ -257,7 +257,7 @@ queue_node_deletion :: proc(engine: ^Engine, handle: resources.Handle) {
 
 translate_handle :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   x: f32 = 0,
   y: f32 = 0,
   z: f32 = 0,
@@ -276,7 +276,7 @@ translate :: proc {
 
 translate_by_handle :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   x: f32 = 0,
   y: f32 = 0,
   z: f32 = 0,
@@ -300,7 +300,7 @@ translate_by :: proc {
 
 rotate_handle :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   angle: f32,
   axis: [3]f32 = {0, 1, 0},
 ) {
@@ -318,7 +318,7 @@ rotate :: proc {
 
 rotate_by_handle :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   angle: f32,
   axis: [3]f32 = {0, 1, 0},
 ) {
@@ -342,7 +342,7 @@ scale_node :: proc(node: ^world.Node, s: f32) {
   world.scale(node, s)
 }
 
-scale_handle :: proc(engine: ^Engine, handle: resources.Handle, s: f32) {
+scale_handle :: proc(engine: ^Engine, handle: resources.NodeHandle, s: f32) {
   world.scale(&engine.world, handle, s)
 }
 
@@ -351,7 +351,7 @@ scale :: proc {
   scale_handle,
 }
 
-scale_by_handle :: proc(engine: ^Engine, handle: resources.Handle, s: f32) {
+scale_by_handle :: proc(engine: ^Engine, handle: resources.NodeHandle, s: f32) {
   world.scale_by(&engine.world, handle, s)
 }
 
@@ -372,7 +372,7 @@ spawn_spot_light :: proc(
   position: [3]f32 = {0, 0, 0},
   cast_shadow := true,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   ok: bool,
 ) #optional_ok {
   handle = spawn(engine) or_return
@@ -397,11 +397,11 @@ spawn_child_spot_light :: proc(
   color: [4]f32,
   radius: f32,
   angle: f32,
-  parent: resources.Handle,
+  parent: resources.NodeHandle,
   position: [3]f32 = {0, 0, 0},
   cast_shadow := true,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   ok: bool,
 ) #optional_ok {
   handle = spawn_child(engine, parent) or_return
@@ -428,7 +428,7 @@ spawn_point_light :: proc(
   position: [3]f32 = {0, 0, 0},
   cast_shadow := true,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   ok: bool,
 ) #optional_ok {
   handle = spawn(engine) or_return
@@ -451,11 +451,11 @@ spawn_child_point_light :: proc(
   engine: ^Engine,
   color: [4]f32,
   radius: f32,
-  parent: resources.Handle,
+  parent: resources.NodeHandle,
   position: [3]f32 = {0, 0, 0},
   cast_shadow := true,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   ok: bool,
 ) #optional_ok {
   handle = spawn_child(engine, parent) or_return
@@ -480,7 +480,7 @@ spawn_directional_light :: proc(
   position: [3]f32 = {0, 0, 0},
   cast_shadow := true,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   ok: bool,
 ) #optional_ok {
   handle = spawn(engine) or_return
@@ -500,8 +500,8 @@ spawn_directional_light :: proc(
 
 create_emitter :: proc(
   engine: ^Engine,
-  owner: resources.Handle,
-  texture_handle: resources.Handle,
+  owner: resources.NodeHandle,
+  texture_handle: resources.Image2DHandle,
   emission_rate: f32,
   initial_velocity: [3]f32,
   velocity_spread: f32,
@@ -516,7 +516,7 @@ create_emitter :: proc(
   weight: f32,
   weight_spread: f32,
 ) -> (
-  resources.Handle,
+  resources.EmitterHandle,
   bool,
 ) #optional_ok {
   return resources.create_emitter(
@@ -541,12 +541,12 @@ create_emitter :: proc(
 
 create_forcefield :: proc(
   engine: ^Engine,
-  owner: resources.Handle,
+  owner: resources.NodeHandle,
   area_of_effect: f32 = 1.0,
   strength: f32 = 1.0,
   tangent_strength: f32 = 0.0,
 ) -> (
-  resources.Handle,
+  resources.ForceFieldHandle,
   bool,
 ) #optional_ok {
   return resources.create_forcefield(
@@ -561,14 +561,14 @@ create_forcefield :: proc(
 create_light :: proc(
   engine: ^Engine,
   light_type: resources.LightType,
-  node_handle: resources.Handle,
+  node_handle: resources.NodeHandle,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   angle_inner: f32 = 0.0,
   angle_outer: f32 = 0.0,
   cast_shadow: b32 = true,
 ) -> (
-  light_handle: resources.Handle,
+  light_handle: resources.LightHandle,
   ok: bool,
 ) #optional_ok {
   // Create the light resource
@@ -598,7 +598,7 @@ create_animation_clip :: proc(
   duration: f32 = 1.0,
   name: string = "",
 ) -> (
-  handle: resources.Handle,
+  handle: resources.ClipHandle,
   ok: bool,
 ) #optional_ok {
   return resources.create_animation_clip(
@@ -614,7 +614,7 @@ create_animation_clip :: proc(
 // This allows procedural generation of keyframe values without manual loops
 init_animation_channel :: proc(
   engine: ^Engine,
-  clip_handle: resources.Handle,
+  clip_handle: resources.ClipHandle,
   channel_idx: int,
   position_count: int = 0,
   rotation_count: int = 0,
@@ -689,7 +689,7 @@ init_animation_channel :: proc(
 
 play_animation :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   name: string,
 ) -> bool {
   return world.play_animation(&engine.world, &engine.rm, handle, name)
@@ -698,7 +698,7 @@ play_animation :: proc(
 // Add an animation layer to a skinned mesh node
 add_animation_layer :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   animation_name: string,
   weight: f32 = 1.0,
   layer_index: int = -1, // -1 to append, >= 0 to replace existing layer
@@ -716,7 +716,7 @@ add_animation_layer :: proc(
 // Remove an animation layer from a skinned mesh node
 remove_animation_layer :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   layer_index: int,
 ) -> bool {
   return world.remove_animation_layer(&engine.world, handle, layer_index)
@@ -725,7 +725,7 @@ remove_animation_layer :: proc(
 // Set the blend weight for an animation layer
 set_animation_layer_weight :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   layer_index: int,
   weight: f32,
 ) -> bool {
@@ -740,7 +740,7 @@ set_animation_layer_weight :: proc(
 // Clear all animation layers from a skinned mesh node
 clear_animation_layers :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
 ) -> bool {
   return world.clear_animation_layers(&engine.world, handle)
 }
@@ -749,7 +749,7 @@ clear_animation_layers :: proc(
 // IK targets are in world space and will be converted internally
 add_ik_layer :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   bone_names: []string,
   target_pos: [3]f32,
   pole_pos: [3]f32,
@@ -775,7 +775,7 @@ add_ik_layer :: proc(
 // Update IK target position and pole vector for an existing IK layer
 set_ik_layer_target :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   layer_index: int,
   target_pos: [3]f32,
   pole_pos: [3]f32,
@@ -792,7 +792,7 @@ set_ik_layer_target :: proc(
 // Enable or disable an IK layer
 set_ik_layer_enabled :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   layer_index: int,
   enabled: bool,
 ) -> bool {
@@ -821,10 +821,10 @@ create_camera :: proc(
   near_plane: f32 = 0.1,
   far_plane: f32 = 100.0,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.CameraHandle,
   ok: bool,
 ) #optional_ok {
-  camera_handle, camera_ptr := cont.alloc(&engine.rm.cameras) or_return
+  camera_handle, camera_ptr := cont.alloc(&engine.rm.cameras, resources.CameraHandle) or_return
   init_result := resources.camera_init(
     camera_ptr,
     &engine.gctx,
@@ -864,11 +864,11 @@ create_camera :: proc(
 
 get_camera_attachment :: proc(
   engine: ^Engine,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   attachment_type: resources.AttachmentType,
   frame_index: u32 = 0,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.Image2DHandle,
   ok: bool,
 ) #optional_ok {
   camera := cont.get(engine.rm.cameras, camera_handle) or_return
@@ -877,9 +877,9 @@ get_camera_attachment :: proc(
 
 update_material_texture :: proc(
   engine: ^Engine,
-  material_handle: resources.Handle,
+  material_handle: resources.MaterialHandle,
   texture_type: resources.ShaderFeature,
-  texture_handle: resources.Handle,
+  texture_handle: resources.Image2DHandle,
 ) -> bool {
   material := cont.get(engine.rm.materials, material_handle) or_return
   switch texture_type {
@@ -918,7 +918,7 @@ build_navigation_mesh_from_world :: proc(
   detail_sample_dist: f32 = 6.0,
   detail_sample_max_error: f32 = 1.0,
 ) -> (
-  resources.Handle,
+  resources.NavMeshHandle,
   bool,
 ) #optional_ok {
   config: recast.Config
@@ -951,7 +951,7 @@ build_and_visualize_navigation_mesh :: proc(
   engine: ^Engine,
   config: recast.Config = {},
 ) -> (
-  resources.Handle,
+  resources.NavMeshHandle,
   bool,
 ) #optional_ok {
   return world.build_and_visualize_navigation_mesh(
@@ -965,9 +965,9 @@ build_and_visualize_navigation_mesh :: proc(
 
 create_navigation_context :: proc(
   engine: ^Engine,
-  nav_mesh_handle: resources.Handle,
+  nav_mesh_handle: resources.NavMeshHandle,
 ) -> (
-  resources.Handle,
+  resources.NavContextHandle,
   bool,
 ) #optional_ok {
   return world.create_navigation_context(
@@ -980,7 +980,7 @@ create_navigation_context :: proc(
 
 nav_find_path :: proc(
   engine: ^Engine,
-  nav_context_handle: resources.Handle,
+  nav_context_handle: resources.NavContextHandle,
   start_pos: [3]f32,
   end_pos: [3]f32,
   max_path_length: i32 = 256,
@@ -1002,7 +1002,7 @@ nav_find_path :: proc(
 
 nav_is_position_walkable :: proc(
   engine: ^Engine,
-  nav_context_handle: resources.Handle,
+  nav_context_handle: resources.NavContextHandle,
   position: [3]f32,
 ) -> bool {
   return world.nav_is_position_walkable(
@@ -1016,7 +1016,7 @@ nav_is_position_walkable :: proc(
 
 nav_find_nearest_point :: proc(
   engine: ^Engine,
-  nav_context_handle: resources.Handle,
+  nav_context_handle: resources.NavContextHandle,
   position: [3]f32,
   search_extents: [3]f32 = {2.0, 4.0, 2.0},
 ) -> (
@@ -1039,7 +1039,7 @@ spawn_nav_agent_at :: proc(
   radius: f32 = 0.6,
   height: f32 = 2.0,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   ok: bool,
 ) #optional_ok {
   handle, _ = world.spawn_nav_agent_at(
@@ -1055,9 +1055,9 @@ spawn_nav_agent_at :: proc(
 
 nav_agent_set_target :: proc(
   engine: ^Engine,
-  agent_handle: resources.Handle,
+  agent_handle: resources.NodeHandle,
   target_pos: [3]f32,
-  nav_context_handle: resources.Handle = {},
+  nav_context_handle: resources.NavContextHandle = {},
 ) -> bool {
   return world.nav_agent_set_target(
     &engine.world,

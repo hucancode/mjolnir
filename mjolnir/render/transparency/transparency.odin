@@ -19,7 +19,7 @@ Renderer :: struct {
   transparent_pipeline: vk.Pipeline,
   wireframe_pipeline:   vk.Pipeline,
   sprite_pipeline:      vk.Pipeline,
-  sprite_quad_mesh:     resources.Handle,
+  sprite_quad_mesh:     resources.MeshHandle,
 }
 
 PushConstant :: struct {
@@ -282,7 +282,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,
@@ -319,7 +319,7 @@ begin_pass :: proc(
 render :: proc(
   self: ^Renderer,
   pipeline: vk.Pipeline,
-  camera_handle: resources.Handle,
+  camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
   rm: ^resources.Manager,
   frame_index: u32,
@@ -376,8 +376,6 @@ render :: proc(
     u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
 }
-
-// No longer needed - recording directly to primary command buffer
 
 end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)

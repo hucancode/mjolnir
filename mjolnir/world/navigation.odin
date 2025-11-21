@@ -137,7 +137,7 @@ build_navigation_mesh_from_world :: proc(
   gctx: ^gpu.GPUContext,
   config: recast.Config = {},
 ) -> (
-  ret: resources.Handle,
+  ret: resources.NavMeshHandle,
   ok: bool,
 ) #optional_ok {
   collector: SceneGeometryCollector
@@ -234,7 +234,7 @@ build_navigation_mesh_from_world :: proc(
     recast.free_poly_mesh_detail(dmesh)
   }
   nav_mesh: ^resources.NavMesh
-  ret, nav_mesh = cont.alloc(&rm.nav_meshes) or_return
+  ret, nav_mesh = cont.alloc(&rm.nav_meshes, resources.NavMeshHandle) or_return
   nav_params := detour.Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
     poly_mesh_detail   = dmesh,
@@ -302,15 +302,15 @@ create_navigation_context :: proc(
   world: ^World,
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
-  nav_mesh_handle: resources.Handle,
+  nav_mesh_handle: resources.NavMeshHandle,
 ) -> (
-  ret: resources.Handle,
+  ret: resources.NavContextHandle,
   ok: bool,
 ) #optional_ok {
   nav_mesh := cont.get(rm.nav_meshes, nav_mesh_handle)
   if nav_mesh == nil do return {}, false
   nav_context: ^resources.NavContext
-  ret, nav_context = cont.alloc(&rm.nav_contexts) or_return
+  ret, nav_context = cont.alloc(&rm.nav_contexts, resources.NavContextHandle) or_return
   init_status := detour.nav_mesh_query_init(
     &nav_context.nav_mesh_query,
     &nav_mesh.detour_mesh,
@@ -331,7 +331,7 @@ nav_find_path :: proc(
   world: ^World,
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
-  context_handle: resources.Handle,
+  context_handle: resources.NavContextHandle,
   start: [3]f32,
   end: [3]f32,
   max_path_length: i32 = 256,
@@ -431,7 +431,7 @@ nav_is_position_walkable :: proc(
   world: ^World,
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
-  context_handle: resources.Handle,
+  context_handle: resources.NavContextHandle,
   position: [3]f32,
 ) -> bool {
   nav_context := cont.get(rm.nav_contexts, context_handle)
@@ -450,7 +450,7 @@ nav_find_nearest_point :: proc(
   world: ^World,
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
-  context_handle: resources.Handle,
+  context_handle: resources.NavContextHandle,
   position: [3]f32,
   search_extents: [3]f32 = {2.0, 4.0, 2.0},
 ) -> (
@@ -479,7 +479,7 @@ spawn_nav_agent_at :: proc(
   radius: f32 = 0.5,
   height: f32 = 2.0,
 ) -> (
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   node: ^Node,
   ok: bool,
 ) {
@@ -500,9 +500,9 @@ nav_agent_set_target :: proc(
   world: ^World,
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
-  agent_handle: resources.Handle,
+  agent_handle: resources.NodeHandle,
   target: [3]f32,
-  context_handle: resources.Handle = {},
+  context_handle: resources.NavContextHandle = {},
 ) -> bool {
   node := cont.get(world.nodes, agent_handle)
   if node == nil {
@@ -542,7 +542,7 @@ build_and_visualize_navigation_mesh :: proc(
   renderer: ^navmesh_renderer.Renderer,
   config: recast.Config = {},
 ) -> (
-  nav_mesh_handle: resources.Handle,
+  nav_mesh_handle: resources.NavMeshHandle,
   success: bool,
 ) {
   mesh_handle, build_ok := build_navigation_mesh_from_world(

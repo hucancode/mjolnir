@@ -120,7 +120,7 @@ node_scale :: proc(node: ^Node, s: f32) {
 
 node_handle_translate_by :: proc(
   world: ^World,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   x: f32 = 0,
   y: f32 = 0,
   z: f32 = 0,
@@ -132,7 +132,7 @@ node_handle_translate_by :: proc(
 
 node_handle_translate :: proc(
   world: ^World,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   x: f32 = 0,
   y: f32 = 0,
   z: f32 = 0,
@@ -149,7 +149,7 @@ node_handle_rotate_by :: proc {
 
 node_handle_rotate_by_quaternion :: proc(
   world: ^World,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   q: quaternion128,
 ) {
   if node, ok := cont.get(world.nodes, handle); ok {
@@ -159,7 +159,7 @@ node_handle_rotate_by_quaternion :: proc(
 
 node_handle_rotate_by_angle :: proc(
   world: ^World,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
@@ -175,7 +175,7 @@ node_handle_rotate :: proc {
 
 node_handle_rotate_quaternion :: proc(
   world: ^World,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   q: quaternion128,
 ) {
   if node, ok := cont.get(world.nodes, handle); ok {
@@ -185,7 +185,7 @@ node_handle_rotate_quaternion :: proc(
 
 node_handle_rotate_angle :: proc(
   world: ^World,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
@@ -196,7 +196,7 @@ node_handle_rotate_angle :: proc(
 
 node_handle_scale_xyz_by :: proc(
   world: ^World,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   x: f32 = 1,
   y: f32 = 1,
   z: f32 = 1,
@@ -206,7 +206,7 @@ node_handle_scale_xyz_by :: proc(
   }
 }
 
-node_handle_scale_by :: proc(world: ^World, handle: resources.Handle, s: f32) {
+node_handle_scale_by :: proc(world: ^World, handle: resources.NodeHandle, s: f32) {
   if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_scale_by(&node.transform, s)
   }
@@ -214,7 +214,7 @@ node_handle_scale_by :: proc(world: ^World, handle: resources.Handle, s: f32) {
 
 node_handle_scale_xyz :: proc(
   world: ^World,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
   x: f32 = 1,
   y: f32 = 1,
   z: f32 = 1,
@@ -224,20 +224,20 @@ node_handle_scale_xyz :: proc(
   }
 }
 
-node_handle_scale :: proc(world: ^World, handle: resources.Handle, s: f32) {
+node_handle_scale :: proc(world: ^World, handle: resources.NodeHandle, s: f32) {
   if node, ok := cont.get(world.nodes, handle); ok {
     geometry.transform_scale(&node.transform, s)
   }
 }
 
-get_node :: proc(world: ^World, handle: resources.Handle) -> ^Node {
+get_node :: proc(world: ^World, handle: resources.NodeHandle) -> ^Node {
   return cont.get(world.nodes, handle)
 }
 
 enable_actor_tick :: proc(
   world: ^World,
   $T: typeid,
-  handle: resources.Handle,
+  handle: ActorHandle,
 ) {
   pool := _ensure_actor_pool(world, T)
   actor_enable_tick(pool, handle)
@@ -246,7 +246,7 @@ enable_actor_tick :: proc(
 disable_actor_tick :: proc(
   world: ^World,
   $T: typeid,
-  handle: resources.Handle,
+  handle: resources.NodeHandle,
 ) {
   entry, pool_exists := world.actor_pools[typeid_of(T)]
   if !pool_exists do return

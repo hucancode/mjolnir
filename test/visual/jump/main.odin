@@ -13,10 +13,10 @@ import "vendor:glfw"
 
 demo_state: struct {
   physics_world:   physics.PhysicsWorld,
-  cube_handle:     resources.Handle,
-  ground_handle:   resources.Handle,
-  cube_body:       resources.Handle,
-  ground_body:     resources.Handle,
+  cube_handle:     resources.NodeHandle,
+  ground_handle:   resources.NodeHandle,
+  cube_body:       physics.RigidBodyHandle,
+  ground_body:     physics.RigidBodyHandle,
   time_since_jump: f32,
 }
 

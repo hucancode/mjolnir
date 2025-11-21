@@ -304,7 +304,7 @@ create_widget :: proc(
   widget: ^Widget,
   ok: bool,
 ) {
-  handle, widget, ok = cont.alloc(&self.widgets)
+  handle, widget, ok = cont.alloc(&self.widgets, WidgetHandle)
   if !ok do return
   widget.type = type
   widget.parent = parent

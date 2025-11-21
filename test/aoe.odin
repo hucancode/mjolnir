@@ -26,7 +26,7 @@ spawn_test_body :: proc(
   w: ^world.World,
   position: [3]f32,
   is_static: bool = true,
-) -> resources.Handle {
+) -> physics.RigidBodyHandle {
   node_handle, node, _ := world.spawn(w, position)
   // Update world matrix
   world.traverse(w, nil, nil, nil, 0)
@@ -50,7 +50,7 @@ test_physics_query_sphere :: proc(t: ^testing.T) {
   b2 := spawn_test_body(&phys, &w, {5, 0, 0})
   b3 := spawn_test_body(&phys, &w, {10, 0, 0})
   // Query sphere at origin with radius 3
-  results := make([dynamic]resources.Handle)
+  results := make([dynamic]physics.RigidBodyHandle)
   defer delete(results)
   physics.physics_query_sphere(&phys, &w, {0, 0, 0}, 3.0, &results)
   testing.expect(
@@ -78,7 +78,7 @@ test_physics_query_box :: proc(t: ^testing.T) {
   b2 := spawn_test_body(&phys, &w, {2, 2, 2})
   b3 := spawn_test_body(&phys, &w, {-2, -2, -2})
   b4 := spawn_test_body(&phys, &w, {10, 10, 10})
-  results := make([dynamic]resources.Handle)
+  results := make([dynamic]physics.RigidBodyHandle)
   defer delete(results)
   // Query box centered at origin with half-extent 3
   bounds := geometry.Aabb {
@@ -242,7 +242,7 @@ test_physics_world_integration :: proc(t: ^testing.T) {
   b3 := spawn_test_body(&phys, &w, {10, 0, 0})
   testing.expect(t, b1.generation > 0 && b2.generation > 0 && b3.generation > 0, "All bodies should be created")
   // Query for bodies within range
-  results := make([dynamic]resources.Handle)
+  results := make([dynamic]physics.RigidBodyHandle)
   defer delete(results)
   physics.physics_query_sphere(&phys, &w, {5, 0, 0}, 8.0, &results)
   testing.expect(t, len(results) >= 2, "Should find at least 2 bodies")
@@ -253,7 +253,7 @@ test_physics_edge_cases :: proc(t: ^testing.T) {
   phys, w := make_test_physics()
   defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
-  results := make([dynamic]resources.Handle)
+  results := make([dynamic]physics.RigidBodyHandle)
   defer delete(results)
   // Query empty physics world
   physics.physics_query_sphere(&phys, &w, {0, 0, 0}, 5.0, &results)
@@ -298,7 +298,7 @@ test_physics_cylinder_collision :: proc(t: ^testing.T) {
   // Force BVH rebuild
   physics.step(&phys, &w, 0.0)
   // Query for bodies - should find the cylinder
-  results := make([dynamic]resources.Handle)
+  results := make([dynamic]physics.RigidBodyHandle)
   defer delete(results)
   physics.physics_query_sphere(&phys, &w, {0, 0, 0}, 5.0, &results)
   testing.expect(t, len(results) == 1, "Should find cylinder body")
