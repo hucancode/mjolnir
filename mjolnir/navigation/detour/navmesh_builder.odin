@@ -326,7 +326,7 @@ create_nav_mesh_data :: proc(
   }
   // Additional integrity check - ensure the data layout matches our expectations
   parsed_header, parse_status := parse_mesh_header(data)
-  if recast.status_failed(parse_status) {
+  if !recast.status_succeeded(parse_status) {
     log.errorf("Created tile data failed header parsing: %v", parse_status)
     return nil, {.Invalid_Param}
   }
@@ -464,7 +464,7 @@ create_nav_mesh :: proc(
 ) {
   // Create navigation mesh data
   data, status := create_nav_mesh_data(params)
-  if recast.status_failed(status) {
+  if !recast.status_succeeded(status) {
     return nil, status
   }
   nav_mesh := new(Nav_Mesh)
@@ -476,14 +476,14 @@ create_nav_mesh :: proc(
     max_polys   = 1024,
   }
   status = nav_mesh_init(nav_mesh, &nav_params)
-  if recast.status_failed(status) {
+  if !recast.status_succeeded(status) {
     free(nav_mesh)
     delete(data)
     return nil, status
   }
   // Add the tile
   _, status = nav_mesh_add_tile(nav_mesh, data, recast.DT_TILE_FREE_DATA)
-  if recast.status_failed(status) {
+  if !recast.status_succeeded(status) {
     nav_mesh_destroy(nav_mesh)
     free(nav_mesh)
     return nil, status

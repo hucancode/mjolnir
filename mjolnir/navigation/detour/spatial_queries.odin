@@ -45,7 +45,7 @@ find_nearest_poly :: proc(
           query.nav_mesh,
           ref,
         )
-        if recast.status_failed(poly_status) do continue
+        if !recast.status_succeeded(poly_status) do continue
         closest_pt, _ := closest_point_on_polygon(tile_poly, poly, center)
         dist_sqr := linalg.length2(center - closest_pt)
         if dist_sqr < nearest_dist_sqr {
@@ -132,7 +132,7 @@ raycast :: proc(
       query.nav_mesh,
       cur_ref,
     )
-    if recast.status_failed(poly_status) do break
+    if !recast.status_succeeded(poly_status) do break
     next_ref := recast.INVALID_POLY_REF
     next_t := ray_len
     hit_edge := -1
@@ -414,7 +414,7 @@ get_poly_height :: proc(
 ) {
   if !is_valid_poly_ref(query.nav_mesh, ref) do return 0, {.Invalid_Param}
   tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-  if recast.status_failed(poly_status) do return 0, poly_status
+  if !recast.status_succeeded(poly_status) do return 0, poly_status
   if tile.detail_meshes == nil || len(tile.detail_meshes) == 0 {
     avg_height := f32(0)
     for i in 0 ..< int(poly.vert_count) do avg_height += tile.verts[poly.verts[i]].y
@@ -476,7 +476,7 @@ find_distance_to_wall :: proc(
       query.nav_mesh,
       cur_ref,
     )
-    if recast.status_failed(poly_status) do continue
+    if !recast.status_succeeded(poly_status) do continue
     for i in 0 ..< int(poly.vert_count) {
       va, vb :=
         tile.verts[poly.verts[i]],
@@ -554,7 +554,7 @@ find_local_neighbourhood :: proc(
       query.nav_mesh,
       cur.ref,
     )
-    if recast.status_failed(poly_status) do continue
+    if !recast.status_succeeded(poly_status) do continue
     // Check if polygon center is within radius
     center := calc_poly_center(tile, poly)
     if linalg.length2(center - center_pos) > radius * radius {
@@ -635,7 +635,7 @@ find_polys_around_circle :: proc(
     query.nav_mesh,
     start_ref,
   )
-  if recast.status_failed(poly_status) do return 0, poly_status
+  if !recast.status_succeeded(poly_status) do return 0, poly_status
   start_node.pos, _ = closest_point_on_polygon(
     start_tile,
     start_poly,
@@ -676,7 +676,7 @@ find_polys_around_circle :: proc(
       query.nav_mesh,
       current.id,
     )
-    if recast.status_failed(cur_status) do continue
+    if !recast.status_succeeded(cur_status) do continue
     poly_idx := get_poly_index(query.nav_mesh, current.id)
     link := get_first_link(cur_tile, i32(poly_idx))
     for link != recast.DT_NULL_LINK {
@@ -759,7 +759,7 @@ find_polys_around_shape :: proc(
     query.nav_mesh,
     start_ref,
   )
-  if recast.status_failed(poly_status) do return 0, poly_status
+  if !recast.status_succeeded(poly_status) do return 0, poly_status
   start_node.pos, _ = closest_point_on_polygon(start_tile, start_poly, center)
   start_node.cost = 0
   start_node.total = linalg.length(start_node.pos - center)
@@ -793,7 +793,7 @@ find_polys_around_shape :: proc(
       query.nav_mesh,
       current.id,
     )
-    if recast.status_failed(cur_status) do continue
+    if !recast.status_succeeded(cur_status) do continue
     poly_idx := get_poly_index(query.nav_mesh, current.id)
     link := get_first_link(cur_tile, i32(poly_idx))
     for link != recast.DT_NULL_LINK {
@@ -886,7 +886,7 @@ get_poly_wall_segments :: proc(
   }
   segment_count = 0
   tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-  if recast.status_failed(poly_status) do return 0, poly_status
+  if !recast.status_succeeded(poly_status) do return 0, poly_status
   poly_idx := get_poly_index(query.nav_mesh, ref)
   for i in 0 ..< min(int(max_segments), int(poly.vert_count)) {
     va := tile.verts[poly.verts[i]]

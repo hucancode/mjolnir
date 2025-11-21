@@ -114,7 +114,7 @@ load_navmesh_from_file :: proc(
   // Create and initialize navigation mesh
   nav_mesh := new(Nav_Mesh, allocator)
   init_status := nav_mesh_init(nav_mesh, &file_header.params)
-  if recast.status_failed(init_status) {
+  if !recast.status_succeeded(init_status) {
     log.error("Failed to initialize navigation mesh")
     free(nav_mesh, allocator)
     return nil, false
@@ -151,7 +151,7 @@ load_navmesh_from_file :: proc(
       recast.DT_TILE_FREE_DATA,
       tile_entry.ref,
     )
-    if recast.status_failed(add_status) {
+    if !recast.status_succeeded(add_status) {
       log.errorf("Failed to add tile %d to navigation mesh", i)
       delete(tile_data, allocator)
       nav_mesh_destroy(nav_mesh)
@@ -220,7 +220,7 @@ bake_and_save_navmesh :: proc(
     off_mesh_con_count = 0,
   }
   nav_data, create_status := create_nav_mesh_data(&params)
-  if recast.status_failed(create_status) {
+  if !recast.status_succeeded(create_status) {
     log.error("Failed to create navigation mesh data")
     return false
   }
@@ -239,7 +239,7 @@ bake_and_save_navmesh :: proc(
     max_polys   = 1024,
   }
   init_status := nav_mesh_init(nav_mesh, &mesh_params)
-  if recast.status_failed(init_status) {
+  if !recast.status_succeeded(init_status) {
     log.error("Failed to initialize navigation mesh")
     return false
   }
@@ -251,7 +251,7 @@ bake_and_save_navmesh :: proc(
     nav_data_copy,
     recast.DT_TILE_FREE_DATA,
   )
-  if recast.status_failed(add_status) {
+  if !recast.status_succeeded(add_status) {
     log.error("Failed to add tile to navigation mesh")
     delete(nav_data_copy)
     return false
@@ -279,7 +279,7 @@ load_navmesh_for_runtime :: proc(
   // Use the same initialization method as the fresh navmesh creation
   max_nodes := 2048
   query_status := nav_mesh_query_init(query, nav_mesh, i32(max_nodes))
-  if recast.status_failed(query_status) {
+  if !recast.status_succeeded(query_status) {
     nav_mesh_destroy(nav_mesh)
     free(nav_mesh, allocator)
     free(query, allocator)

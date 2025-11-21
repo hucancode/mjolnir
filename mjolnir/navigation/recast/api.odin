@@ -280,34 +280,13 @@ Status_Flag :: enum u32 {
 Status :: bit_set[Status_Flag;u32]
 
 status_succeeded :: proc "contextless" (status: Status) -> bool {
-  return(
-    Status_Flag.Success in status &&
-    card(
-      status &
-      {
-          .Wrong_Magic,
-          .Wrong_Version,
-          .Out_Of_Memory,
-          .Invalid_Param,
-          .Buffer_Too_Small,
-          .Out_Of_Nodes,
-        },
-    ) ==
-      0 \
-  )
-}
-
-status_failed :: proc "contextless" (status: Status) -> bool {
-  return !status_succeeded(status)
-}
-
-status_in_progress :: proc "contextless" (status: Status) -> bool {
-  return Status_Flag.In_Progress in status
-}
-
-status_detail :: proc "contextless" (status: Status) -> (Status, Status) {
-  success_mask := Status{.Success, .In_Progress, .Partial_Result}
-  return status & success_mask, status & ~success_mask
+  return .Success in status &&
+    .Wrong_Magic not_in status &&
+    .Wrong_Version not_in status &&
+    .Out_Of_Memory not_in status &&
+    .Invalid_Param not_in status &&
+    .Buffer_Too_Small not_in status &&
+    .Out_Of_Nodes not_in status
 }
 
 Config :: struct {
@@ -331,6 +310,7 @@ Config :: struct {
   detail_sample_dist:       f32,
   detail_sample_max_error:  f32,
 }
+
 build_navmesh :: proc(
   vertices: [][3]f32,
   indices: []i32,

@@ -431,9 +431,7 @@ paint_rect_region :: proc(
 
 // remove adjacent duplicate neighbours
 remove_adjacent_neighbours :: proc(reg: ^Region) {
-  if len(reg.connections) <= 1 {
-    return
-  }
+  if len(reg.connections) <= 1 do return
   unique_slice := slice.unique(reg.connections[:])
   // check wrap-around: if last element equals first element (circular case)
   if len(unique_slice) > 1 &&
@@ -458,30 +456,18 @@ replace_neighbour :: proc(reg: ^Region, old_id, new_id: u16) {
       reg.floors[i] = i32(new_id)
     }
   }
-  if nei_changed {
-    remove_adjacent_neighbours(reg)
-  }
+  if nei_changed do remove_adjacent_neighbours(reg)
 }
 
 can_merge_with_region :: proc(rega, regb: ^Region) -> bool {
-  if rega.area_type != regb.area_type {
-    return false
-  }
-  n := slice.count(rega.connections[:], i32(regb.id))
-  if n > 1 {
-    return false
-  }
-  if slice.contains(rega.floors[:], i32(regb.id)) {
-    return false
-  }
+  if rega.area_type != regb.area_type do return false
+  if slice.count(rega.connections[:], i32(regb.id)) > 1 do return false
+  if slice.contains(rega.floors[:], i32(regb.id)) do return false
   return true
 }
 
-add_unique_floor_region :: proc(reg: ^Region, n: i32) {
-  if slice.contains(reg.floors[:], n) {
-    return
-  }
-  append(&reg.floors, n)
+add_unique_floor :: proc(reg: ^Region, n: i32) {
+  if !slice.contains(reg.floors[:], n) do append(&reg.floors, n)
 }
 
 merge_regions :: proc(rega, regb: ^Region) -> bool {
@@ -524,7 +510,7 @@ merge_regions :: proc(rega, regb: ^Region) -> bool {
   }
   remove_adjacent_neighbours(rega)
   for j in 0 ..< len(regb.floors) {
-    add_unique_floor_region(rega, regb.floors[j])
+    add_unique_floor(rega, regb.floors[j])
   }
   rega.span_count += regb.span_count
   regb.span_count = 0
@@ -643,10 +629,7 @@ walk_contour_for_region :: proc(
 }
 
 add_unique_connection :: proc(reg: ^Region, n: i32) {
-  if slice.contains(reg.connections[:], n) {
-    return
-  }
-  append(&reg.connections, n)
+  if !slice.contains(reg.connections[:], n) do append(&reg.connections, n)
 }
 
 merge_and_filter_regions :: proc(
@@ -701,7 +684,7 @@ merge_and_filter_regions :: proc(
           if floor_id == r {
             reg.overlap = true
           }
-          add_unique_floor_region(reg, i32(floor_id))
+          add_unique_floor(reg, i32(floor_id))
         }
         // have found contour
         if len(reg.connections) > 0 {
@@ -1375,7 +1358,7 @@ merge_and_filter_layer_regions :: proc(
   src_reg: []u16,
 ) -> (
   max_region_id: u16,
-  success: bool,
+  ok: bool,
 ) {
   w := chf.width
   h := chf.height
@@ -1439,8 +1422,8 @@ merge_and_filter_layer_regions :: proc(
           if lregs[i] != lregs[j] {
             ri := &regions[lregs[i]]
             rj := &regions[lregs[j]]
-            add_unique_floor_region(ri, lregs[j])
-            add_unique_floor_region(rj, lregs[i])
+            add_unique_floor(ri, lregs[j])
+            add_unique_floor(rj, lregs[i])
           }
         }
       }
@@ -1471,22 +1454,16 @@ merge_and_filter_layer_regions :: proc(
       for j in 0 ..< ncons {
         nei := reg.connections[j]
         regn := &regions[nei]
-        if regn.id != 0 {
-          continue
-        }
+        if regn.id != 0 do continue
         // Skip if different area type, do not connect regions with different area type
-        if reg.area_type != regn.area_type {
-          continue
-        }
+        if reg.area_type != regn.area_type do continue
         // Skip if the neighbour is overlapping root region
-        if slice.contains(root.floors[:], nei) {
-          continue
-        }
+        if slice.contains(root.floors[:], nei) do continue
         append(&q, nei)
         regn.id = layer_id
         // Merge current layers to root
         for k in 0 ..< len(regn.floors) {
-          add_unique_floor_region(root, regn.floors[k])
+          add_unique_floor(root, regn.floors[k])
         }
         root.ymin = min(root.ymin, regn.ymin)
         root.ymax = max(root.ymax, regn.ymax)
@@ -1518,21 +1495,12 @@ merge_and_filter_layer_regions :: proc(
     }
   }
   // Compress region Ids
-  for i in 0 ..< nreg {
-    regions[i].remap = false
-    if regions[i].id == 0 {
-      continue // Skip nil regions
-    }
-    if (regions[i].id & RC_BORDER_REG) != 0 {
-      continue // Skip external regions
-    }
-    regions[i].remap = true
+  for &r in regions[:nreg] {
+    r.remap = r.id != 0 && (r.id & RC_BORDER_REG) == 0
   }
   reg_id_gen: u16 = 0
   for i in 0 ..< nreg {
-    if !regions[i].remap {
-      continue
-    }
+    if !regions[i].remap do continue
     old_id := regions[i].id
     reg_id_gen += 1
     new_id := reg_id_gen
@@ -1593,9 +1561,7 @@ build_layer_regions :: proc(
       c := &chf.cells[x + y * w]
       for i in u32(c.index) ..< u32(c.index) + u32(c.count) {
         s := &chf.spans[i]
-        if chf.areas[i] == RC_NULL_AREA {
-          continue
-        }
+        if chf.areas[i] == RC_NULL_AREA do continue
         // -x
         previd: u16 = 0
         if get_con(s, 0) != RC_NOT_CONNECTED {

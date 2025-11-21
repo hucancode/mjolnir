@@ -154,9 +154,9 @@ nav_mesh_query_init :: proc(
 ) -> recast.Status {
   query.nav_mesh = nav_mesh
   status := pathfinding_context_init(&query.pf_context, max_nodes)
-  if recast.status_failed(status) do return status
+  if !recast.status_succeeded(status) do return status
   status = node_queue_init(&query.open_list, max_nodes)
-  if recast.status_failed(status) {
+  if !recast.status_succeeded(status) {
     pathfinding_context_destroy(&query.pf_context)
     return status
   }
@@ -231,7 +231,7 @@ find_path :: proc(
       query.nav_mesh,
       current.id,
     )
-    if recast.status_failed(tile_status) do continue
+    if !recast.status_succeeded(tile_status) do continue
     // Iterate through polygon links
     link := cur_poly.first_link
     for link != recast.DT_NULL_LINK {
@@ -500,7 +500,7 @@ update_sliced_find_path :: proc(
       query.nav_mesh,
       current.id,
     )
-    if recast.status_failed(tile_status) do continue
+    if !recast.status_succeeded(tile_status) do continue
     link := cur_poly.first_link
     for link != recast.DT_NULL_LINK {
       neighbor_ref := get_link_poly_ref(cur_tile, link)
@@ -631,7 +631,7 @@ find_path_sliced :: proc(
     filter,
     0,
   )
-  if recast.status_failed(init_status) do return init_status, 0
+  if !recast.status_succeeded(init_status) do return init_status, 0
   iter_count := 0
   for iter_count < 10000 {
     done_iters, update_status := update_sliced_find_path(

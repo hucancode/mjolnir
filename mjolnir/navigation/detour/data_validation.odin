@@ -83,5 +83,5 @@ validate_navmesh_header :: proc(header: ^Mesh_Header) -> recast.Status {
 
 verify_data_layout :: proc(data: []u8, header: ^Mesh_Header) -> bool {
   _, map_status := navmesh_create_memory_map(data)
-  return !recast.status_failed(map_status)
+  return !!recast.status_succeeded(map_status)
 }

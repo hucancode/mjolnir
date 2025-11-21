@@ -248,7 +248,7 @@ build_navigation_mesh_from_world :: proc(
     off_mesh_con_count = 0,
   }
   nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
-  if recast.status_failed(create_status) {
+  if !recast.status_succeeded(create_status) {
     log.errorf("Failed to create navigation mesh data: %v", create_status)
     return ret, false
   }
@@ -260,7 +260,7 @@ build_navigation_mesh_from_world :: proc(
     max_polys   = 1024,
   }
   init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
-  if recast.status_failed(init_status) {
+  if !recast.status_succeeded(init_status) {
     log.errorf("Failed to initialize navigation mesh: %v", init_status)
     return ret, false
   }
@@ -269,7 +269,7 @@ build_navigation_mesh_from_world :: proc(
     nav_data,
     recast.DT_TILE_FREE_DATA,
   )
-  if recast.status_failed(add_status) {
+  if !recast.status_succeeded(add_status) {
     log.errorf("Failed to add tile to navigation mesh: %v", add_status)
     detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
     return ret, false
@@ -316,7 +316,7 @@ create_navigation_context :: proc(
     &nav_mesh.detour_mesh,
     2048,
   )
-  if recast.status_failed(init_status) {
+  if !recast.status_succeeded(init_status) {
     log.errorf("Failed to initialize navigation mesh query: %v", init_status)
     cont.free(&rm.nav_contexts, ret)
     return ret, false
@@ -350,7 +350,7 @@ nav_find_path :: proc(
     half_extents,
     &nav_context.query_filter,
   )
-  if recast.status_failed(status) || start_ref == recast.INVALID_POLY_REF {
+  if !recast.status_succeeded(status) || start_ref == recast.INVALID_POLY_REF {
     log.errorf(
       "Failed to find start polygon for pathfinding at position %v",
       start,
@@ -366,7 +366,7 @@ nav_find_path :: proc(
     half_extents,
     &nav_context.query_filter,
   )
-  if recast.status_failed(status2) || end_ref == recast.INVALID_POLY_REF {
+  if !recast.status_succeeded(status2) || end_ref == recast.INVALID_POLY_REF {
     log.errorf(
       "Failed to find end polygon for pathfinding at position %v",
       end,
@@ -384,7 +384,7 @@ nav_find_path :: proc(
     poly_path[:],
     max_path_length,
   )
-  if recast.status_failed(path_status) || path_count == 0 {
+  if !recast.status_succeeded(path_status) || path_count == 0 {
     log.errorf(
       "Failed to find path from %v to %v: %v",
       start,
@@ -410,7 +410,7 @@ nav_find_path :: proc(
     max_path_length,
     u32(detour.Straight_Path_Options.All_Crossings),
   )
-  if recast.status_failed(straight_status) || straight_path_count == 0 {
+  if !recast.status_succeeded(straight_status) || straight_path_count == 0 {
     log.errorf("Failed to create straight path: %v", straight_status)
     return nil, false
   }

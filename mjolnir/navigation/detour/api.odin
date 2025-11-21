@@ -22,7 +22,7 @@ create_navmesh :: proc(
     walkable_climb   = walkable_climb,
   }
   nav_data, data_status := create_nav_mesh_data(&params)
-  if recast.status_failed(data_status) do return nil, false
+  if !recast.status_succeeded(data_status) do return nil, false
   nav_mesh = new(Nav_Mesh)
   mesh_params := Nav_Mesh_Params {
     orig        = pmesh.bmin,
@@ -32,7 +32,7 @@ create_navmesh :: proc(
     max_polys   = 1024,
   }
   init_status := nav_mesh_init(nav_mesh, &mesh_params)
-  if recast.status_failed(init_status) {
+  if !recast.status_succeeded(init_status) {
     free(nav_mesh)
     return nil, false
   }
@@ -41,7 +41,7 @@ create_navmesh :: proc(
     nav_data,
     recast.DT_TILE_FREE_DATA,
   )
-  if recast.status_failed(add_status) {
+  if !recast.status_succeeded(add_status) {
     nav_mesh_destroy(nav_mesh)
     free(nav_mesh)
     return nil, false
@@ -67,14 +67,14 @@ find_path_points :: proc(
     half_extents,
     filter,
   )
-  if recast.status_failed(start_status) || start_ref == recast.INVALID_POLY_REF do return 0, start_status
+  if !recast.status_succeeded(start_status) || start_ref == recast.INVALID_POLY_REF do return 0, start_status
   end_status, end_ref, end_nearest := find_nearest_poly(
     query,
     end_pos,
     half_extents,
     filter,
   )
-  if recast.status_failed(end_status) || end_ref == recast.INVALID_POLY_REF do return 0, end_status
+  if !recast.status_succeeded(end_status) || end_ref == recast.INVALID_POLY_REF do return 0, end_status
   if start_ref == end_ref {
     path[0] = start_nearest
     if linalg.length2(end_nearest - start_nearest) > math.F32_EPSILON {
@@ -95,7 +95,7 @@ find_path_points :: proc(
     poly_path,
     i32(len(path)),
   )
-  if recast.status_failed(path_status) || poly_path_count == 0 do return 0, path_status
+  if !recast.status_succeeded(path_status) || poly_path_count == 0 do return 0, path_status
   straight_path := make([]Straight_Path_Point, len(path))
   defer delete(straight_path)
   straight_path_flags := make([]u8, len(path))
@@ -114,7 +114,7 @@ find_path_points :: proc(
     i32(len(path)),
     0,
   )
-  if recast.status_failed(straight_status) do return 0, straight_status
+  if !recast.status_succeeded(straight_status) do return 0, straight_status
   path_count = 0
   last_pos := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
   for i in 0 ..< int(straight_path_count) {

@@ -180,7 +180,7 @@ nav_mesh_add_tile :: proc(
   status: recast.Status,
 ) {
   header, parse_status := parse_mesh_header(data)
-  if recast.status_failed(parse_status) do return recast.INVALID_TILE_REF, parse_status
+  if !recast.status_succeeded(parse_status) do return recast.INVALID_TILE_REF, parse_status
   tile: ^Mesh_Tile
   if last_ref != recast.INVALID_TILE_REF {
     tile_index := decode_tile_ref(nav_mesh, last_ref)
@@ -200,7 +200,7 @@ nav_mesh_add_tile :: proc(
     tile.next = nil
   }
   result := setup_tile_data(tile, data, header, flags)
-  if recast.status_failed(result) do return recast.INVALID_TILE_REF, result
+  if !recast.status_succeeded(result) do return recast.INVALID_TILE_REF, result
   h := compute_tile_hash(header.x, header.y, nav_mesh.tile_lut_mask)
   tile.next = nav_mesh.pos_lookup[h]
   nav_mesh.pos_lookup[h] = tile
@@ -214,7 +214,7 @@ nav_mesh_remove_tile :: proc(
   ref: recast.Tile_Ref,
 ) -> recast.Status {
   tile, get_status := get_tile_by_ref(nav_mesh, ref)
-  if recast.status_failed(get_status) do return get_status
+  if !recast.status_succeeded(get_status) do return get_status
   disconnect_ext_links(nav_mesh, tile)
   h := compute_tile_hash(tile.header.x, tile.header.y, nav_mesh.tile_lut_mask)
   prev: ^Mesh_Tile = nil
@@ -336,7 +336,7 @@ parse_mesh_header :: proc(data: []u8) -> (^Mesh_Header, recast.Status) {
   if !validation_result.valid do return nil, {.Invalid_Param}
   header := cast(^Mesh_Header)raw_data(data)
   header_status := validate_navmesh_header(header)
-  if recast.status_failed(header_status) do return nil, header_status
+  if !recast.status_succeeded(header_status) do return nil, header_status
   return header, {.Success}
 }
 
@@ -352,7 +352,7 @@ setup_tile_data :: proc(
   tile.flags = flags
   // Use memory map instead of manual pointer arithmetic
   memory_map, map_status := navmesh_create_memory_map(data)
-  if recast.status_failed(map_status) do return map_status
+  if !recast.status_succeeded(map_status) do return map_status
   tile.verts = memory_map.vertices
   tile.polys = memory_map.polygons
   tile.links = memory_map.links

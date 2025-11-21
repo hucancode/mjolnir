@@ -324,7 +324,7 @@ test_detour_sliced_pathfinding_basic :: proc(t: ^testing.T) {
   for total_iterations < max_iterations {
     done_iters, update_status := detour.update_sliced_find_path(&query, 5)
     total_iterations += int(done_iters)
-    if recast.status_in_progress(update_status) {
+    if .In_Progress in update_status {
       continue
     } else if recast.status_succeeded(update_status) {
       break
@@ -462,14 +462,14 @@ test_detour_sliced_pathfinding_errors :: proc(t: ^testing.T) {
   )
   testing.expect(
     t,
-    recast.status_failed(init_status),
+    !recast.status_succeeded(init_status),
     "Init with invalid refs should fail",
   )
   // Test update without init
   done_iters, update_status := detour.update_sliced_find_path(&query, 10)
   testing.expect(
     t,
-    recast.status_failed(update_status),
+    !recast.status_succeeded(update_status),
     "Update without init should fail",
   )
   // Test finalize without proper setup
@@ -478,7 +478,7 @@ test_detour_sliced_pathfinding_errors :: proc(t: ^testing.T) {
   finalize_status, _ := detour.finalize_sliced_find_path(&query, path, 64)
   testing.expect(
     t,
-    recast.status_failed(finalize_status),
+    !recast.status_succeeded(finalize_status),
     "Finalize without setup should fail",
   )
 }
@@ -990,7 +990,7 @@ test_detour_raycast_errors :: proc(t: ^testing.T) {
   )
   testing.expect(
     t,
-    recast.status_failed(invalid_status),
+    !recast.status_succeeded(invalid_status),
     "Raycast with invalid ref should fail",
   )
   // Test zero-length ray
@@ -1214,7 +1214,7 @@ test_detour_move_along_surface_errors :: proc(t: ^testing.T) {
   )
   testing.expect(
     t,
-    recast.status_failed(invalid_status),
+    !recast.status_succeeded(invalid_status),
     "Move with invalid ref should fail",
   )
 }
@@ -1251,7 +1251,7 @@ test_detour_error_handling_pathfinding :: proc(t: ^testing.T) {
   )
   testing.expect(
     t,
-    recast.status_failed(invalid_status),
+    !recast.status_succeeded(invalid_status),
     "Path with invalid refs should fail",
   )
   // Test 2: Zero-size path buffer
@@ -1278,7 +1278,7 @@ test_detour_error_handling_pathfinding :: proc(t: ^testing.T) {
   )
   testing.expect(
     t,
-    recast.status_failed(zero_path_status),
+    !recast.status_succeeded(zero_path_status),
     "Zero-size path buffer should fail",
   )
   // Test 3: Mismatched positions and references (position far from polygon)
@@ -1295,7 +1295,7 @@ test_detour_error_handling_pathfinding :: proc(t: ^testing.T) {
   )
   testing.expect(
     t,
-    recast.status_succeeded(far_status) || recast.status_failed(far_status),
+    recast.status_succeeded(far_status) || !recast.status_succeeded(far_status),
     "Should handle mismatched pos/ref gracefully",
   )
 }
@@ -1776,7 +1776,7 @@ test_detour_performance_pathfinding :: proc(t: ^testing.T) {
       half_extents,
       &filter,
     )
-    if recast.status_failed(start_status) {
+    if !recast.status_succeeded(start_status) {
       continue
     }
     end_status, end_ref, end_nearest := detour.find_nearest_poly(
@@ -1785,7 +1785,7 @@ test_detour_performance_pathfinding :: proc(t: ^testing.T) {
       half_extents,
       &filter,
     )
-    if recast.status_failed(end_status) {
+    if !recast.status_succeeded(end_status) {
       continue
     }
     path_status, path_count := detour.find_path(
@@ -2057,7 +2057,7 @@ create_test_nav_mesh :: proc(t: ^testing.T) -> ^detour.Nav_Mesh {
     max_polys   = 64,
   }
   status := detour.nav_mesh_init(nav_mesh, &params)
-  if recast.status_failed(status) {
+  if !recast.status_succeeded(status) {
     testing.fail_now(t, "Failed to initialize test navigation mesh")
   }
   // Create simple test tile data
@@ -2067,7 +2067,7 @@ create_test_nav_mesh :: proc(t: ^testing.T) -> ^detour.Nav_Mesh {
     data,
     recast.DT_TILE_FREE_DATA,
   )
-  if recast.status_failed(add_status) {
+  if !recast.status_succeeded(add_status) {
     testing.fail_now(t, "Failed to add test tile to navigation mesh")
   }
   return nav_mesh
