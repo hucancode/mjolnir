@@ -102,10 +102,21 @@ Node :: struct {
 
 TraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 
-FrameContext :: struct {
-  frame_index: u32,
-  delta_time:  f32,
-  camera:      ^resources.Camera,
+TraverseEntry :: struct {
+  handle:            resources.Handle,
+  parent_transform:  matrix[4, 4]f32,
+  parent_is_dirty:   bool,
+  parent_is_visible: bool,
+}
+
+World :: struct {
+  root:                   resources.Handle,
+  nodes:                  resources.Pool(Node),
+  traversal_stack:        [dynamic]TraverseEntry,
+  actor_pools:            map[typeid]ActorPoolEntry,
+  animatable_nodes:       [dynamic]resources.Handle,
+  pending_node_deletions: [dynamic]resources.Handle,
+  pending_deletions_mutex: sync.Mutex,
 }
 
 init_node :: proc(self: ^Node, name: string = "") {
@@ -358,23 +369,6 @@ spawn_child :: proc(
       _upload_node_to_gpu(handle, node, rm)
     }
     return handle, node, true
-}
-
-TraverseEntry :: struct {
-  handle:            resources.Handle,
-  parent_transform:  matrix[4, 4]f32,
-  parent_is_dirty:   bool,
-  parent_is_visible: bool,
-}
-
-World :: struct {
-  root:                   resources.Handle,
-  nodes:                  resources.Pool(Node),
-  traversal_stack:        [dynamic]TraverseEntry,
-  actor_pools:            map[typeid]ActorPoolEntry,
-  animatable_nodes:       [dynamic]resources.Handle,
-  pending_node_deletions: [dynamic]resources.Handle,
-  pending_deletions_mutex: sync.Mutex,
 }
 
 init :: proc(world: ^World) {

@@ -25,28 +25,18 @@ physics_raycast :: proc(
   max_dist: f32 = max(f32),
 ) -> PhysicsRayHit {
   closest_hit := PhysicsRayHit{hit = false, t = max_dist}
-  for &entry, idx in physics.bodies.entries do if entry.active {
-    body := &entry.item
+  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  geometry.bvh_query_ray(&physics.spatial_index, ray, max_dist, &candidates)
+  for candidate in candidates {
+    body := cont.get(physics.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
     node := cont.get(w.nodes, body.node_handle) or_continue
     collider := cont.get(physics.colliders, body.collider_handle) or_continue
     pos := node.transform.position
-    // Simple AABB test first for broad phase
-    bounds := collider_get_aabb(collider, pos)
-    inv_dir := [3]f32 {
-      1.0 / ray.direction.x,
-      1.0 / ray.direction.y,
-      1.0 / ray.direction.z,
-    }
-    t_near, t_far := geometry.ray_aabb_intersection(ray.origin, inv_dir, bounds)
-    if t_near > t_far || t_far < 0 || t_near > closest_hit.t do continue
     // Narrow phase - test actual collider shape
     t, normal, hit := raycast_collider(ray, collider, pos, closest_hit.t)
     if hit && t < closest_hit.t {
-      closest_hit.body_handle = resources.Handle {
-        index      = u32(idx),
-        generation = entry.generation,
-      }
+      closest_hit.body_handle = candidate.handle
       closest_hit.t = t
       closest_hit.point = ray.origin + ray.direction * t
       closest_hit.normal = normal
@@ -63,33 +53,23 @@ physics_raycast_single :: proc(
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
 ) -> PhysicsRayHit {
-  for &entry, idx in physics.bodies.entries do if entry.active {
-    body := &entry.item
+  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  geometry.bvh_query_ray(&physics.spatial_index, ray, max_dist, &candidates)
+  for candidate in candidates {
+    body := cont.get(physics.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
     node := cont.get(w.nodes, body.node_handle) or_continue
     collider := cont.get(physics.colliders, body.collider_handle) or_continue
     pos := node.transform.position
-    // Simple AABB test first for broad phase
-    bounds := collider_get_aabb(collider, pos)
-    inv_dir := [3]f32 {
-      1.0 / ray.direction.x,
-      1.0 / ray.direction.y,
-      1.0 / ray.direction.z,
-    }
-    t_near, t_far := geometry.ray_aabb_intersection(ray.origin, inv_dir, bounds)
-    if t_near > t_far || t_far < 0 || t_near > max_dist do continue
     // Narrow phase - test actual collider shape
     t, normal, hit := raycast_collider(ray, collider, pos, max_dist)
     if hit {
       return PhysicsRayHit {
-        body_handle = resources.Handle {
-          index      = u32(idx),
-          generation = entry.generation,
-        },
-        t      = t,
-        point  = ray.origin + ray.direction * t,
-        normal = normal,
-        hit    = true,
+        body_handle = candidate.handle,
+        t           = t,
+        point       = ray.origin + ray.direction * t,
+        normal      = normal,
+        hit         = true,
       }
     }
   }
