@@ -1,6 +1,7 @@
 package navigation_recast
 
 import "../../geometry"
+import alg "../../algebra"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -24,8 +25,6 @@ MIN_POLYGON_AREA :: 1e-6 // Minimum area for valid polygon
 
 // Quality thresholds for triangle optimization
 MIN_TRIANGLE_QUALITY :: 0.5 // Minimum ratio of inscribed to circumscribed circle
-MIN_ANGLE_DEGREES :: 20.0 // Minimum triangle angle in degrees
-MAX_ANGLE_DEGREES :: 160.0 // Maximum triangle angle in degrees
 
 // Vertex structure for detail mesh building
 Detail_Vertex :: struct {
@@ -112,55 +111,6 @@ get_cell_height :: proc(chf: ^Compact_Heightfield, x, z: i32) -> f32 {
   if index + u32(count) > u32(len(chf.spans)) do return 0.0
   top_span := chf.spans[index + u32(count) - 1]
   return f32(top_span.y) + f32(top_span.h)
-}
-
-// Calculate minimum extent of polygon
-calculate_polygon_min_extent :: proc(poly: ^Detail_Polygon) -> f32 {
-  nverts := len(poly.vertices)
-  if nverts < 3 do return 0.0
-  min_dist := f32(1e30)
-  for i in 0 ..< nverts {
-    ni := (i + 1) % nverts
-    p1 := poly.vertices[i].pos
-    p2 := poly.vertices[ni].pos
-    max_edge_dist := f32(0.0)
-    for j in 0 ..< nverts {
-      if j == i || j == ni do continue
-      // Distance from point to line segment (2D)
-      d, _ := geometry.point_segment_distance2_2d(poly.vertices[j].pos, p1, p2)
-      max_edge_dist = max(max_edge_dist, d)
-    }
-    min_dist = min(min_dist, max_edge_dist)
-  }
-  return math.sqrt(min_dist)
-}
-
-// Check if triangle is degenerate
-is_triangle_degenerate :: proc "contextless" (a, b, c: [3]f32) -> bool {
-  return geometry.signed_triangle_area_2d(a, b, c) < math.F32_EPSILON
-}
-
-// Validate a triangle using multiple criteria
-validate_triangle :: proc "contextless" (a, b, c: [3]f32) -> bool {
-  // Check for degenerate area
-  if is_triangle_degenerate(a, b, c) do return false
-  // Check angles (simplified check using dot products)
-  ab := b - a
-  ac := c - a
-  bc := c - b
-  // Normalize vectors
-  ab_len := linalg.length(ab.xz)
-  ac_len := linalg.length(ac.xz)
-  bc_len := linalg.length(bc.xz)
-  if ab_len <= 0 || ac_len <= 0 || bc_len <= 0 do return false
-  ab.xz = linalg.normalize(ab.xz)
-  ac.xz = linalg.normalize(ac.xz)
-  bc.xz = linalg.normalize(bc.xz)
-  // Check angle at vertex A
-  dot_a := linalg.dot(ab.xz, ac.xz)
-  angle_a := math.acos(clamp(dot_a, -1.0, 1.0)) * 180.0 / math.PI
-  if angle_a < MIN_ANGLE_DEGREES || angle_a > MAX_ANGLE_DEGREES do return false
-  return true
 }
 
 // Add a vertex to the detail polygon, ensuring uniqueness
@@ -293,146 +243,6 @@ merge_poly_mesh_details :: proc(
     }
   }
   return true
-}
-
-// Hull-based triangulation
-// This is more robust than ear clipping for simple polygons
-triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
-  nverts := len(poly.vertices)
-  if nverts < 3 {
-    log.warnf("triangulate_hull_based: Too few vertices (%d)", nverts)
-    return false
-  }
-  clear(&poly.triangles)
-  // For triangles, handle directly
-  if nverts == 3 {
-    a := poly.vertices[0].pos
-    b := poly.vertices[1].pos
-    c := poly.vertices[2].pos
-    // Check triangle orientation and area
-    area := geometry.signed_triangle_area_2d(a, b, c)
-    abs_area := abs(area)
-    // For hull triangulation, we accept triangles regardless of winding
-    if abs_area > MIN_POLYGON_AREA {
-      triangle := Detail_Triangle {
-        v    = {0, 1, 2},
-        area = abs_area,
-      }
-      append(&poly.triangles, triangle)
-    }
-    return len(poly.triangles) > 0
-  }
-  // Create hull indices - for detail mesh, vertices are in hull order
-  hull := make([dynamic]i32, nverts)
-  defer delete(hull)
-  for i in 0 ..< nverts {
-    append(&hull, i32(i))
-  }
-  nhull := nverts
-  nin := nverts // All vertices are original polygon vertices for now
-  // Validate polygon vertices are in correct order (counter-clockwise)
-  // Calculate signed area to check winding
-  signed_area := f32(0.0)
-  for i in 0 ..< nverts {
-    j := (i + 1) % nverts
-    signed_area +=
-      (poly.vertices[j].pos.x - poly.vertices[i].pos.x) *
-      (poly.vertices[j].pos.z + poly.vertices[i].pos.z)
-  }
-  // If clockwise, reverse the hull array
-  if signed_area > 0.0 {
-    for i in 0 ..< nverts / 2 {
-      hull[i], hull[nverts - 1 - i] = hull[nverts - 1 - i], hull[i]
-    }
-  }
-  // Find starting ear with shortest perimeter
-  start := 0
-  left := 1
-  right := nhull - 1
-  dmin := f32(1e30)
-  for i in 0 ..< nhull {
-    if hull[i] >= i32(nin) do continue
-    pi := (i + nhull - 1) % nhull
-    ni := (i + 1) % nhull
-    pv := poly.vertices[hull[pi]].pos
-    cv := poly.vertices[hull[i]].pos
-    nv := poly.vertices[hull[ni]].pos
-    d :=
-      linalg.distance(pv.xz, cv.xz) +
-      linalg.distance(cv.xz, nv.xz) +
-      linalg.distance(nv.xz, pv.xz)
-    if d < dmin {
-      start = i
-      left = ni
-      right = pi
-      dmin = d
-    }
-  }
-  // Add first triangle
-  a := poly.vertices[hull[start]].pos
-  b := poly.vertices[hull[left]].pos
-  c := poly.vertices[hull[right]].pos
-  // Ensure triangle has positive area (counter-clockwise)
-  area := geometry.signed_triangle_area_2d(a, b, c)
-  // Always add triangle in hull triangulation, even if degenerate
-  // The area check is less strict for hull triangulation
-  triangle := Detail_Triangle {
-    v    = {hull[start], hull[left], hull[right]},
-    area = abs(area), // Use absolute area
-  }
-  append(&poly.triangles, triangle)
-  // Triangulate remaining polygon by moving left or right
-  for next_index(left, nhull) != right {
-    nleft := next_index(left, nhull)
-    nright := prev_index(right, nhull)
-    cvleft := poly.vertices[hull[left]].pos
-    nvleft := poly.vertices[hull[nleft]].pos
-    cvright := poly.vertices[hull[right]].pos
-    nvright := poly.vertices[hull[nright]].pos
-    dleft :=
-      linalg.distance(cvleft.xz, nvleft.xz) +
-      linalg.distance(nvleft.xz, cvright.xz)
-    dright :=
-      linalg.distance(cvright.xz, nvright.xz) +
-      linalg.distance(cvleft.xz, nvright.xz)
-    if dleft < dright {
-      // Move left
-      a := poly.vertices[hull[left]].pos
-      b := poly.vertices[hull[nleft]].pos
-      c := poly.vertices[hull[right]].pos
-      area := geometry.signed_triangle_area_2d(a, b, c)
-      // Always add triangle in hull triangulation
-      triangle := Detail_Triangle {
-        v    = {hull[left], hull[nleft], hull[right]},
-        area = abs(area),
-      }
-      append(&poly.triangles, triangle)
-      left = nleft
-    } else {
-      // Move right
-      a := poly.vertices[hull[left]].pos
-      b := poly.vertices[hull[nright]].pos
-      c := poly.vertices[hull[right]].pos
-      area := geometry.signed_triangle_area_2d(a, b, c)
-      // Always add triangle in hull triangulation
-      triangle := Detail_Triangle {
-        v    = {hull[left], hull[nright], hull[right]},
-        area = abs(area),
-      }
-      append(&poly.triangles, triangle)
-      right = nright
-    }
-  }
-  return len(poly.triangles) > 0
-}
-
-// Helper functions for hull triangulation
-next_index :: proc "contextless" (i, n: int) -> int {
-  return (i + 1) % n
-}
-
-prev_index :: proc "contextless" (i, n: int) -> int {
-  return (i + n - 1) % n
 }
 
 // Main function to build poly mesh detail
@@ -609,7 +419,7 @@ build_poly_detail :: proc(
   }
   clear(edges)
   clear(tris)
-  min_extent := calculate_polygon_min_extent_from_verts(verts[:])
+  min_extent := geometry.calculate_polygon_min_extent_2d(verts[:])
   // Hull tracking array
   hull := make([dynamic]i32, 0, MAX_VERTS)
   defer delete(hull)
@@ -734,26 +544,6 @@ build_poly_detail :: proc(
     )
   }
   return true
-}
-
-// Calculate minimum extent from vertex array
-calculate_polygon_min_extent_from_verts :: proc(verts: [][3]f32) -> f32 {
-  nverts := len(verts)
-  if nverts < 3 do return 0
-  min_dist := f32(1e30)
-  for i in 0 ..< nverts {
-    ni := (i + 1) % nverts
-    p1 := verts[i]
-    p2 := verts[ni]
-    max_edge_dist := f32(0)
-    for j in 0 ..< nverts {
-      if j == i || j == ni do continue
-      d, _ := geometry.point_segment_distance2_2d(verts[j], p1, p2)
-      max_edge_dist = max(max_edge_dist, d)
-    }
-    min_dist = min(min_dist, max_edge_dist)
-  }
-  return math.sqrt(min_dist)
 }
 
 // Get height from height patch
@@ -1101,117 +891,6 @@ add_edge :: proc(edges: ^[dynamic]i32, s, t, l, r: i32) -> i32 {
   }
 }
 
-// Update left face of edge
-update_left_face :: proc(edges: []i32, edge_idx: i32, s, t, f: i32) {
-  e := edges[edge_idx * 4:]
-  if e[0] == s && e[1] == t && e[2] == EV_UNDEF {
-    e[2] = f
-  } else if e[1] == s && e[0] == t && e[3] == EV_UNDEF {
-    e[3] = f
-  }
-}
-
-// Check if edges overlap
-overlap_edges :: proc(pts: [][3]f32, edges: []i32, s1, t1: i32) -> bool {
-  nedges := len(edges) / 4
-  for i in 0 ..< nedges {
-    e := edges[i * 4:]
-    s0 := e[0]
-    t0 := e[1]
-    // Same endpoints
-    if s0 == s1 || s0 == t1 || t0 == s1 || t0 == t1 {
-      continue
-    }
-    if geometry.segment_segment_intersect_2d(
-      pts[s0],
-      pts[t0],
-      pts[s1],
-      pts[t1],
-    ) {
-      return true
-    }
-  }
-  return false
-}
-
-// Complete a facet in Delaunay triangulation
-complete_facet :: proc(
-  pts: [][3]f32,
-  edges: ^[dynamic]i32,
-  nfaces: i32,
-  e: i32,
-) -> i32 {
-  EPS :: 1e-5
-  edge := edges[e * 4:]
-  // Cache s and t
-  s, t: i32
-  if edge[2] == EV_UNDEF {
-    s = edge[0]
-    t = edge[1]
-  } else if edge[3] == EV_UNDEF {
-    s = edge[1]
-    t = edge[0]
-  } else {
-    // Edge already completed
-    return nfaces
-  }
-  // Find best point on left of edge
-  pt := i32(len(pts))
-  c: [2]f32
-  r := f32(-1)
-  for u in 0 ..< len(pts) {
-    if i32(u) == s || i32(u) == t do continue
-    if linalg.cross((pts[t] - pts[s]).xz, (pts[u] - pts[s]).xz) > EPS {
-      if r < 0 {
-        // The circle is not updated yet, do it now
-        pt = i32(u)
-        c, r, _ = geometry.circum_circle(pts[s], pts[t], pts[u])
-        continue
-      }
-      d := linalg.length2([2]f32{c.x, c.y} - pts[u].xz)
-      tol := f32(0.001)
-      if d > r * (1 + tol) {
-        // Outside current circumcircle, skip
-        continue
-      } else if d < r * (1 - tol) {
-        // Inside safe circumcircle, update circle
-        pt = i32(u)
-        c, r, _ = geometry.circum_circle(pts[s], pts[t], pts[u])
-      } else {
-        // Inside epsilon circumcircle, do extra tests
-        if overlap_edges(pts, edges[:], s, i32(u)) do continue
-        if overlap_edges(pts, edges[:], t, i32(u)) do continue
-        // Edge is valid
-        pt = i32(u)
-        c, r, _ = geometry.circum_circle(pts[s], pts[t], pts[u])
-      }
-    }
-  }
-  // Add new triangle or update edge info if s-t is on hull
-  if pt < i32(len(pts)) {
-    // Update face information of edge being completed
-    update_left_face(edges[:], e, s, t, nfaces)
-    // Add new edge or update face info of old edge
-    edge_idx := find_edge(edges[:], pt, s)
-    if edge_idx == EV_UNDEF {
-      add_edge(edges, pt, s, nfaces, EV_UNDEF)
-    } else {
-      update_left_face(edges[:], edge_idx, pt, s, nfaces)
-    }
-    // Add new edge or update face info of old edge
-    edge_idx = find_edge(edges[:], t, pt)
-    if edge_idx == EV_UNDEF {
-      add_edge(edges, t, pt, nfaces, EV_UNDEF)
-    } else {
-      update_left_face(edges[:], edge_idx, t, pt, nfaces)
-    }
-    return nfaces + 1
-  } else {
-    update_left_face(edges[:], e, s, t, EV_HULL)
-    return nfaces
-  }
-}
-
 // Validate triangles after generation
 validate_triangles :: proc(tris: ^[dynamic][4]i32, nverts: int) -> bool {
   if len(tris) == 0 do return false
@@ -1312,15 +991,4 @@ delaunay_hull :: proc(
     }
   }
   return validate_triangles(tris, len(pts))
-}
-
-// Jittered sampling functions for interior points
-get_jitter_x :: proc(i: i32) -> f32 {
-  h: u32 = 0x8da6b343
-  return (f32((u32(i) * h) & 0xffff) / 65535.0 * 2.0) - 1.0
-}
-
-get_jitter_y :: proc(i: i32) -> f32 {
-  h: u32 = 0xd8163841
-  return (f32((u32(i) * h) & 0xffff) / 65535.0 * 2.0) - 1.0
 }

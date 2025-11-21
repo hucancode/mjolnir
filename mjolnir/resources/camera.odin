@@ -2,6 +2,7 @@ package resources
 
 import cont "../containers"
 import "../geometry"
+import alg "../algebra"
 import "../gpu"
 import "core:log"
 import "core:math"
@@ -830,7 +831,7 @@ camera_update_descriptors :: proc(
   camera: ^Camera,
   frame_index: u32,
 ) {
-  prev_frame := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
+  prev_frame := alg.prev(frame_index, FRAMES_IN_FLIGHT)
   // Update all descriptor bindings (buffers don't change, only image views/samplers)
   gpu.update_descriptor_set(
     gctx,

@@ -71,6 +71,25 @@ vector_equal :: proc "contextless" (
   return diff.x < epsilon && diff.y < epsilon && diff.z < epsilon
 }
 
+calculate_polygon_min_extent_2d :: proc(verts: [][3]f32) -> f32 {
+  nverts := len(verts)
+  if nverts < 3 do return 0
+  min_dist := f32(1e30)
+  for i in 0 ..< nverts {
+    ni := (i + 1) % nverts
+    p1 := verts[i]
+    p2 := verts[ni]
+    max_edge_dist := f32(0)
+    for j in 0 ..< nverts {
+      if j == i || j == ni do continue
+      d, _ := point_segment_distance2_2d(verts[j], p1, p2)
+      max_edge_dist = max(max_edge_dist, d)
+    }
+    min_dist = min(min_dist, max_edge_dist)
+  }
+  return math.sqrt(min_dist)
+}
+
 // Calculate squared distance from point to line segment in 2D (XZ plane)
 point_segment_distance2_2d :: proc "contextless" (
   p, a, b: [3]f32,

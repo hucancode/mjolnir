@@ -3,6 +3,7 @@ package render
 import cont "../containers"
 import "../gpu"
 import "../resources"
+import alg "../algebra"
 import "../world"
 import "core:log"
 import "core:math"
@@ -49,7 +50,7 @@ record_compute_commands :: proc(
   gpu.begin_record(compute_buffer) or_return
   // Compute for frame N prepares data for frame N+1
   // Buffer indices with FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
-  next_frame_index := (frame_index + 1) % resources.FRAMES_IN_FLIGHT
+  next_frame_index := alg.next(frame_index, resources.FRAMES_IN_FLIGHT)
   for &entry, cam_index in rm.cameras.entries do if entry.active {
     cam := &entry.item
     resources.camera_upload_data(rm, u32(cam_index), frame_index)

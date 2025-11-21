@@ -44,3 +44,11 @@ log2_greater_than :: proc "contextless" (x: u32) -> u32 {
 align :: proc "contextless" (value, alignment: int) -> int {
   return (value + alignment - 1) & ~(alignment - 1)
 }
+
+next :: proc "contextless" (i, n: $T) -> T {
+  return (i + 1) % n
+}
+
+prev :: proc "contextless" (i, n: $T) -> T {
+  return (i + n - 1) % n
+}

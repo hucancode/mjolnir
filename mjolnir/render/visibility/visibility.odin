@@ -1,9 +1,10 @@
 package visibility
 
 import cont "../../containers"
-import geometry "../../geometry"
-import gpu "../../gpu"
-import resources "../../resources"
+import "../../geometry"
+import alg "../../algebra"
+import "../../gpu"
+import "../../resources"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -417,8 +418,7 @@ perform_culling :: proc(
     self.cull_layout,
     camera.descriptor_set[frame_index],
   )
-  prev_frame :=
-    (frame_index + resources.FRAMES_IN_FLIGHT - 1) % resources.FRAMES_IN_FLIGHT
+  prev_frame := alg.prev(frame_index, resources.FRAMES_IN_FLIGHT)
   push_constants := VisibilityPushConstants {
     camera_index      = camera_index,
     node_count        = self.node_count,

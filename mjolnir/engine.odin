@@ -15,6 +15,7 @@ import "core:thread"
 import "core:time"
 import "core:unicode/utf8"
 import "gpu"
+import alg "algebra"
 import "level_manager"
 import "render"
 import "render/debug_ui"
@@ -825,7 +826,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &compute_cmd_buffer,
     self.frame_index,
   ) or_return
-  self.frame_index = (self.frame_index + 1) % FRAMES_IN_FLIGHT
+  self.frame_index = alg.next(self.frame_index, FRAMES_IN_FLIGHT)
   world.process_pending_deletions(&self.world, &self.rm, &self.gctx)
   self.last_render_timestamp = time.now()
   return .SUCCESS
