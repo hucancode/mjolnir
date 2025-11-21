@@ -357,7 +357,6 @@ spawn_child :: proc(
     if rm != nil {
       _upload_node_to_gpu(handle, node, rm)
     }
-    self.octree_dirty_set[handle] = true
     return handle, node, true
 }
 
@@ -372,10 +371,6 @@ World :: struct {
   root:                   resources.Handle,
   nodes:                  resources.Pool(Node),
   traversal_stack:        [dynamic]TraverseEntry,
-  node_octree:            geometry.Octree(NodeEntry),
-  octree_entry_map:       map[resources.Handle]NodeEntry,
-  octree_dirty_set:       map[resources.Handle]bool, // nodes needing octree update
-  octree_updates_enabled: bool,
   actor_pools:            map[typeid]ActorPoolEntry,
   animatable_nodes:       [dynamic]resources.Handle,
   pending_node_deletions: [dynamic]resources.Handle,
@@ -388,78 +383,8 @@ init :: proc(world: ^World) {
   world.root, root, _ = cont.alloc(&world.nodes)
   init_node(root, "root")
   root.parent = world.root
-  max_depth, max_items := compute_octree_params(resources.MAX_NODES_IN_SCENE)
-  geometry.octree_init(
-    &world.node_octree,
-    geometry.Aabb{min = {-1000, -1000, -1000}, max = {1000, 1000, 1000}},
-    max_depth = max_depth,
-    max_items = max_items,
-  )
-  world.node_octree.bounds_func = node_entry_to_aabb
-  world.node_octree.point_func = node_entry_to_point
-  world.octree_entry_map = make(map[resources.Handle]NodeEntry)
-  world.octree_dirty_set = make(map[resources.Handle]bool)
-  world.octree_updates_enabled = true
 }
 
-compute_octree_params :: proc(
-  expected_object_count: int,
-) -> (
-  max_depth: i32,
-  max_items: i32,
-) {
-  max_depth = 8
-  max_items = 32
-  if expected_object_count > 100000 {
-    max_depth = 10
-    max_items = 128
-  } else if expected_object_count > 10000 {
-    max_depth = 9
-    max_items = 64
-  } else if expected_object_count > 1000 {
-    max_depth = 8
-    max_items = 32
-  }
-  return max_depth, max_items
-}
-
-set_octree_bounds :: proc(world: ^World, bounds: geometry.Aabb) {
-  if world.node_octree.root != nil {
-    geometry.octree_destroy(&world.node_octree)
-  }
-  max_depth, max_items := compute_octree_params(resources.MAX_NODES_IN_SCENE)
-  geometry.octree_init(&world.node_octree, bounds, max_depth, max_items)
-  world.node_octree.bounds_func = node_entry_to_aabb
-  world.node_octree.point_func = node_entry_to_point
-  clear(&world.octree_entry_map)
-  clear(&world.octree_dirty_set)
-}
-
-set_octree_updates_enabled :: proc(world: ^World, enabled: bool) {
-  world.octree_updates_enabled = enabled
-}
-
-force_octree_rebuild :: proc(world: ^World, rm: ^resources.Manager) {
-  clear(&world.octree_entry_map)
-  geometry.octree_destroy(&world.node_octree)
-  max_depth, max_items := compute_octree_params(resources.MAX_NODES_IN_SCENE)
-  geometry.octree_init(
-    &world.node_octree,
-    geometry.Aabb{min = {-1000, -1000, -1000}, max = {1000, 1000, 1000}},
-    max_depth,
-    max_items,
-  )
-  world.node_octree.bounds_func = node_entry_to_aabb
-  world.node_octree.point_func = node_entry_to_point
-  for &entry, i in world.nodes.entries {
-    if !entry.active || entry.item.pending_deletion do continue
-    handle := resources.Handle {
-      index      = u32(i),
-      generation = entry.generation,
-    }
-    world.octree_dirty_set[handle] = true
-  }
-}
 
 register_animatable_node :: proc(world: ^World, handle: resources.Handle) {
   // TODO: if this list get more than 10000 items, we need to use a map
@@ -482,7 +407,6 @@ begin_frame :: proc(
   frame_index: u32 = 0,
 ) {
   traverse(world, rm, nil, nil, frame_index)
-  process_octree_updates(world, rm)
   world_tick_actors(world, rm, delta_time, game_state)
 }
 
@@ -505,9 +429,6 @@ shutdown :: proc(
   delete(world.actor_pools)
   delete(world.animatable_nodes)
   delete(world.pending_node_deletions)
-  geometry.octree_destroy(&world.node_octree)
-  delete(world.octree_entry_map)
-  delete(world.octree_dirty_set)
 }
 
 despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
@@ -546,7 +467,6 @@ cleanup_pending_deletions :: proc(
     // Clear GPU buffers BEFORE freeing the node
     resources.node_upload_transform(rm, handle, &zero_matrix)
     resources.node_upload_data(rm, handle, &zero_data)
-    world.octree_dirty_set[handle] = true
     unregister_animatable_node(world, handle)
     if node, ok := cont.free(&world.nodes, handle); ok {
       destroy_node(node, rm, gctx)
@@ -634,9 +554,6 @@ traverse :: proc(
       has_bone_socket = true
     }
     if entry.parent_is_dirty || is_dirty || has_bone_socket {
-      if entry.handle != world.root {
-        world.octree_dirty_set[entry.handle] = true
-      }
       // Bone socket provides an additional transform layer between parent and local
       // transform_update_world will multiply: (parent * bone_socket) * local_matrix
       transform_update_world(

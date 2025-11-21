@@ -2,6 +2,8 @@ package main
 
 import "../../../mjolnir"
 import "../../../mjolnir/geometry"
+import cont "../../../mjolnir/containers"
+import "../../../mjolnir/physics"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 import "core:log"
@@ -10,7 +12,9 @@ import "core:math/linalg"
 import "core:os"
 import "vendor:glfw"
 
+physics_world: physics.PhysicsWorld
 cube_handles: [dynamic]resources.Handle
+cube_bodies: [dynamic]resources.Handle
 effector_sphere: resources.Handle
 effector_position: [3]f32
 orbit_angle: f32 = 0.0
@@ -31,6 +35,7 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
+  physics.init(&physics_world)
   set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
   // Use builtin meshes and materials
@@ -48,7 +53,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for z in 0 ..< grid_size {
       world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
       world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
-      handle := spawn(
+      node_handle := spawn(
         engine,
         attachment = world.MeshAttachment {
           handle = cube_mesh,
@@ -56,9 +61,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
           cast_shadow = false,
         },
       ) or_continue
-      translate(engine, handle, world_x, 0.5, world_z)
-      scale(engine, handle, cube_scale)
-      append(&cube_handles, handle)
+      translate(engine, node_handle, world_x, 0.5, world_z)
+      scale(engine, node_handle, cube_scale)
+      append(&cube_handles, node_handle)
+      // Create physics body for cube
+      collider := physics.collider_create_box({0.5, 0.5, 0.5} * cube_scale)
+      body_handle, body, _ := physics.create_body(
+        &physics_world,
+        node_handle,
+        1.0,
+        true, // static
+      )
+      physics.add_collider(&physics_world, body_handle, collider)
+      append(&cube_bodies, body_handle)
     }
   }
   // Spawn effector sphere
@@ -83,11 +98,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
     main_camera.position = {10, 30, 10}
     resources.camera_look_at(main_camera, main_camera.position, {0, 0, 0})
   }
+  // Build initial BVH for all bodies
+  physics.step(&physics_world, &engine.world, 0.0)
   log.infof("AOE test setup complete: %d cubes", len(cube_handles))
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir
+  // Update physics (needed for BVH queries even with static bodies)
+  physics.step(&physics_world, &engine.world, delta_time)
   // Handle mouse click for raycasting
   mouse_button_pressed := engine.input.mouse_buttons[glfw.MOUSE_BUTTON_LEFT]
   mouse_just_clicked := mouse_button_pressed && !last_mouse_button_state
@@ -120,55 +139,32 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
         camera.extent.width,
         camera.extent.height,
       )
-      // Calculate normalized device coordinates to verify
-      ndc_x := (2.0 * mouse_x) / f32(camera.extent.width) - 1.0
-      ndc_y := 1.0 - (2.0 * mouse_y) / f32(camera.extent.height)
-      log.infof("Calculated NDC: (%.3f, %.3f)", ndc_x, ndc_y)
-      // Show what world point the ray is aiming at
+      // Perform raycast from camera through mouse position
       ray_origin, ray_dir := resources.camera_viewport_to_world_ray(
         camera,
         mouse_x,
         mouse_y,
       )
-      target_point := ray_origin + ray_dir * 25.0
-      log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
-      log.infof("Ray target at distance 25: %v", target_point)
-      // Perform raycast from camera through mouse position
-      ray_config := geometry.RaycastConfig {
-        max_dist  = 1000.0,
-        max_tests = 0,
-        accel     = .OCTREE, // Fixed: was .BVH but we only use OCTREE now
+      ray := geometry.Ray {
+        origin    = ray_origin,
+        direction = ray_dir,
       }
-      hit := world.camera_world_raycast(
-        &engine.world,
-        &engine.rm,
-        camera,
-        mouse_x,
-        mouse_y,
-        {}, // No tag filter - test all nodes
-        ray_config,
-      )
+      log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
+      // Use physics raycast
+      hit := physics.physics_raycast(&physics_world, &engine.world, ray, 1000.0)
       if hit.hit {
-        clicked_cube = hit.node_handle
-        if node := world.get_node(&engine.world, hit.node_handle);
-           node != nil {
-          world_pos := node.transform.world_matrix[3].xyz
-          log.infof(
-            "Hit cube at position %v, distance: %.2f",
-            world_pos,
-            hit.t,
-          )
-          // Debug: show what the ray calculation says we should hit
-          expected_x := ray_origin.x + ray_dir.x * hit.t
-          expected_y := ray_origin.y + ray_dir.y * hit.t
-          expected_z := ray_origin.z + ray_dir.z * hit.t
-          log.infof(
-            "Ray at t=%.2f should be at: [%.2f, %.2f, %.2f]",
-            hit.t,
-            expected_x,
-            expected_y,
-            expected_z,
-          )
+        body := cont.get(physics_world.bodies, hit.body_handle)
+        if body != nil {
+          clicked_cube = body.node_handle
+          if node := world.get_node(&engine.world, body.node_handle);
+             node != nil {
+            world_pos := node.transform.world_matrix[3].xyz
+            log.infof(
+              "Hit cube at position %v, distance: %.2f",
+              world_pos,
+              hit.t,
+            )
+          }
         }
       } else {
         clicked_cube = {} // Clear previous selection
@@ -191,18 +187,22 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   for handle in cube_handles {
     scale(engine, handle, 0.3)
   }
-  // Query for cubes within effect radius
+  // Query for cubes within effect radius using physics
   affected: [dynamic]resources.Handle
   defer delete(affected)
-  world.query_sphere(
+  physics.physics_query_sphere(
+    &physics_world,
     &engine.world,
     effector_position,
     effect_radius,
     &affected,
   )
   // Shrink affected cubes
-  for handle in affected {
-    scale(engine, handle, 0.1)
+  for body_handle in affected {
+    body := cont.get(physics_world.bodies, body_handle)
+    if body != nil {
+      scale(engine, body.node_handle, 0.1)
+    }
   }
   // Scale the clicked cube 3x (0.3 * 3 = 0.9)
   if clicked_cube.index != 0 {

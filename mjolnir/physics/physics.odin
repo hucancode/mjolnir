@@ -140,6 +140,12 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       case BoxCollider:
         // Frontal area of box (average of three face areas)
         cross_section = (c.half_extents.x * c.half_extents.y * 4.0 + c.half_extents.y * c.half_extents.z * 4.0 + c.half_extents.x * c.half_extents.z * 4.0) / 3.0
+      case CylinderCollider:
+        // Cross-section of cylinder (average of circular and rectangular face)
+        cross_section = (math.PI * c.radius * c.radius + c.radius * 2.0 * c.height) * 0.5
+      case FanCollider:
+        // Treat as cylinder for air resistance
+        cross_section = (math.PI * c.radius * c.radius + c.radius * 2.0 * c.height) * 0.5
       case:
         // Fallback: estimate from mass (objects with same mass are assumed same size)
         cross_section = math.pow(body.mass, 2.0 / 3.0) * 0.1

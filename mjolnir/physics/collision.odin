@@ -312,6 +312,51 @@ test_box_capsule :: proc(
   return
 }
 
+// Point-in-cylinder test - checks if point is inside a cylinder
+test_point_cylinder :: proc(
+  point: [3]f32,
+  cylinder_center: [3]f32,
+  cylinder: ^CylinderCollider,
+) -> bool {
+  // Transform point to cylinder's local space
+  local_point := point - cylinder_center
+  // Rotate point by inverse of cylinder's rotation
+  inv_rot := linalg.quaternion_inverse(cylinder.rotation)
+  local_point = linalg.mul(inv_rot, local_point)
+  // In local space, cylinder axis is Y, check radial distance and height
+  radial_dist_sq := local_point.x * local_point.x + local_point.z * local_point.z
+  half_height := cylinder.height * 0.5
+  return radial_dist_sq <= cylinder.radius * cylinder.radius && math.abs(local_point.y) <= half_height
+}
+
+// Point-in-fan test - checks if point is inside a fan (partial cylinder)
+test_point_fan :: proc(
+  point: [3]f32,
+  fan_center: [3]f32,
+  fan: ^FanCollider,
+) -> bool {
+  // Transform point to fan's local space
+  local_point := point - fan_center
+  // Rotate point by inverse of fan's rotation
+  inv_rot := linalg.quaternion_inverse(fan.rotation)
+  local_point = linalg.mul(inv_rot, local_point)
+  // In local space, fan forward direction is +Z, axis is Y
+  // Check radial distance and height first (like cylinder)
+  radial_dist_sq := local_point.x * local_point.x + local_point.z * local_point.z
+  half_height := fan.height * 0.5
+  if radial_dist_sq > fan.radius * fan.radius || math.abs(local_point.y) > half_height {
+    return false
+  }
+  // Check if point is within the fan's angular range
+  // Forward is +Z, so we measure angle from +Z axis in XZ plane
+  if radial_dist_sq < math.F32_EPSILON {
+    return true // point is on the axis
+  }
+  angle_from_forward := math.atan2(local_point.x, local_point.z)
+  half_angle := fan.angle * 0.5
+  return math.abs(angle_from_forward) <= half_angle
+}
+
 test_collision :: proc(
   collider_a: ^Collider,
   pos_a: [3]f32,
@@ -325,6 +370,11 @@ test_collision :: proc(
 ) {
   center_a := pos_a + collider_a.offset
   center_b := pos_b + collider_b.offset
+  // Fan is trigger-only, no collision resolution
+  // Cylinder can be solid and uses GJK fallback
+  if collider_a.type == .Fan || collider_b.type == .Fan {
+    return {}, {}, 0, false
+  }
   if collider_a.type == .Sphere && collider_b.type == .Sphere {
     sphere_a := &collider_a.shape.(SphereCollider)
     sphere_b := &collider_b.shape.(SphereCollider)

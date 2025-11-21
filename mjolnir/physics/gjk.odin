@@ -48,6 +48,44 @@ find_furthest_point :: proc(
     // Then add the sphere radius in the direction
     dir_normalized := linalg.normalize0(direction)
     return line_point + dir_normalized * capsule.radius
+  case .Cylinder:
+    cylinder := collider.shape.(CylinderCollider)
+    // Transform direction to cylinder's local space
+    inv_rot := linalg.quaternion_inverse(cylinder.rotation)
+    local_dir := linalg.mul(inv_rot, direction)
+    // In local space, cylinder axis is Y
+    h := cylinder.height * 0.5
+    // Get Y component (along axis)
+    y_component := local_dir.y >= 0 ? h : -h
+    // Get XZ component (radial)
+    radial_dir := [2]f32{local_dir.x, local_dir.z}
+    radial_len := math.sqrt(radial_dir.x * radial_dir.x + radial_dir.y * radial_dir.y)
+    radial_point: [2]f32
+    if radial_len > math.F32_EPSILON {
+      radial_point = (radial_dir / radial_len) * cylinder.radius
+    }
+    // Combine into local point
+    local_point := [3]f32{radial_point.x, y_component, radial_point.y}
+    // Transform back to world space
+    world_point := linalg.mul(cylinder.rotation, local_point)
+    return center + world_point
+  case .Fan:
+    // Fan is trigger-only, but provide support for completeness
+    fan := collider.shape.(FanCollider)
+    // Treat as full cylinder for support function
+    inv_rot := linalg.quaternion_inverse(fan.rotation)
+    local_dir := linalg.mul(inv_rot, direction)
+    h := fan.height * 0.5
+    y_component := local_dir.y >= 0 ? h : -h
+    radial_dir := [2]f32{local_dir.x, local_dir.z}
+    radial_len := math.sqrt(radial_dir.x * radial_dir.x + radial_dir.y * radial_dir.y)
+    radial_point: [2]f32
+    if radial_len > math.F32_EPSILON {
+      radial_point = (radial_dir / radial_len) * fan.radius
+    }
+    local_point := [3]f32{radial_point.x, y_component, radial_point.y}
+    world_point := linalg.mul(fan.rotation, local_point)
+    return center + world_point
   }
   return center
 }

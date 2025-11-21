@@ -9,6 +9,7 @@ Geometry :: struct {
   indices:   []u32,
   aabb:      Aabb,
 }
+
 Triangle :: struct {
   v0, v1, v2: [3]f32,
 }
@@ -32,8 +33,10 @@ triangle_bounds :: proc "contextless" (tri: Triangle) -> Aabb {
 }
 
 sphere_bounds :: proc "contextless" (sphere: Sphere) -> Aabb {
-  r := [3]f32{sphere.radius, sphere.radius, sphere.radius}
-  return Aabb{min = sphere.center - r, max = sphere.center + r}
+  return Aabb {
+    min = sphere.center - sphere.radius,
+    max = sphere.center + sphere.radius,
+  }
 }
 
 disc_bounds :: proc "contextless" (disc: Disc) -> Aabb {
@@ -133,7 +136,7 @@ Primitive :: struct {
   },
 }
 
-primitive_bounds :: proc (prim: Primitive) -> Aabb {
+primitive_bounds :: proc(prim: Primitive) -> Aabb {
   switch p in prim.data {
   case Triangle:
     return triangle_bounds(p)

@@ -63,27 +63,25 @@ rigid_body_set_mass :: proc(body: ^RigidBody, mass: f32) {
   if old_mass > 0.0 {
     mass_ratio := mass / old_mass
     body.inertia = mass_ratio * body.inertia
-    body.inv_inertia = linalg.matrix3_inverse_f32(body.inertia)
+    body.inv_inertia = linalg.matrix3_inverse(body.inertia)
   }
 }
 
 rigid_body_set_box_inertia :: proc(body: ^RigidBody, half_extents: [3]f32) {
   if body.is_static do return
   m := body.mass
-  x2 := half_extents.x * half_extents.x
-  y2 := half_extents.y * half_extents.y
-  z2 := half_extents.z * half_extents.z
-  body.inertia = linalg.matrix3_scale_f32(
-    {y2 + z2, x2 + z2, x2 + y2} * m / 3.0,
+  v := half_extents * half_extents
+  body.inertia = linalg.matrix3_scale(
+    [3]f32{v.y + v.z, v.x + v.z, v.x + v.y} * m / 3.0,
   )
-  body.inv_inertia = linalg.matrix3_inverse_f32(body.inertia)
+  body.inv_inertia = linalg.matrix3_inverse(body.inertia)
 }
 
 rigid_body_set_sphere_inertia :: proc(body: ^RigidBody, radius: f32) {
   if body.is_static do return
   i := (2.0 / 5.0) * body.mass * radius * radius
-  body.inertia = linalg.matrix3_scale_f32({i, i, i})
-  body.inv_inertia = linalg.matrix3_inverse_f32(body.inertia)
+  body.inertia = linalg.matrix3_scale([3]f32{i, i, i})
+  body.inv_inertia = linalg.matrix3_inverse(body.inertia)
 }
 
 rigid_body_set_capsule_inertia :: proc(
@@ -97,8 +95,8 @@ rigid_body_set_capsule_inertia :: proc(
   h2 := height * height
   ix := (m / 12.0) * (3.0 * r2 + h2)
   iy := (m / 2.0) * r2
-  body.inertia = linalg.matrix3_scale_f32({ix, iy, ix})
-  body.inv_inertia = linalg.matrix3_inverse_f32(body.inertia)
+  body.inertia = linalg.matrix3_scale([3]f32{ix, iy, ix})
+  body.inv_inertia = linalg.matrix3_inverse(body.inertia)
 }
 
 rigid_body_apply_force :: proc(body: ^RigidBody, force: [3]f32) {

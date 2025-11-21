@@ -1,6 +1,8 @@
 package tests
 
 import "../mjolnir/geometry"
+import cont "../mjolnir/containers"
+import "../mjolnir/physics"
 import "../mjolnir/resources"
 import "../mjolnir/world"
 import "core:log"
@@ -9,478 +11,321 @@ import "core:math/linalg"
 import "core:testing"
 import "core:time"
 
-// Helper to create minimal world for testing
-make_test_world :: proc() -> world.World {
+// Helper to create minimal physics world for testing
+make_test_physics :: proc() -> (physics.PhysicsWorld, world.World) {
+  phys: physics.PhysicsWorld
+  physics.init(&phys)
   w: world.World
   world.init(&w)
-  return w
+  return phys, w
 }
 
-// Helper to manually insert a node entry into the octree for testing
-test_insert_node :: proc(
+// Helper to spawn a test body at a position
+spawn_test_body :: proc(
+  phys: ^physics.PhysicsWorld,
   w: ^world.World,
-  handle: resources.Handle,
   position: [3]f32,
-  tags: world.NodeTagSet,
-) {
-  entry := world.NodeEntry {
-    handle   = handle,
-    position = position,
-    tags     = tags,
-  }
-  geometry.octree_insert(&w.node_octree, entry)
+  is_static: bool = true,
+) -> resources.Handle {
+  node_handle, node, _ := world.spawn(w, position)
+  // Update world matrix
+  world.traverse(w, nil, nil, nil, 0)
+  collider := physics.collider_create_sphere(0.5)
+  body_handle, _, _ := physics.create_body(phys, node_handle, 1.0, is_static)
+  physics.add_collider(phys, body_handle, collider)
+  // Force BVH rebuild after adding bodies
+  physics.step(phys, w, 0.0)
+  return body_handle
 }
 
 // Unit Tests - Test with hard-coded perfect inputs
 
 @(test)
-test_aoe_insert_and_query_sphere :: proc(t: ^testing.T) {
-  w := make_test_world()
+test_physics_query_sphere :: proc(t: ^testing.T) {
+  phys, w := make_test_physics()
+  defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
-  // Insert nodes at specific positions
-  h1 := resources.Handle {
-    index      = 1,
-    generation = 0,
-  }
-  h2 := resources.Handle {
-    index      = 2,
-    generation = 0,
-  }
-  h3 := resources.Handle {
-    index      = 3,
-    generation = 0,
-  }
-  test_insert_node(&w, h1, {0, 0, 0}, {.MESH})
-  test_insert_node(&w, h2, {5, 0, 0}, {.SPRITE})
-  test_insert_node(&w, h3, {10, 0, 0}, {.LIGHT})
+  // Spawn bodies at specific positions
+  b1 := spawn_test_body(&phys, &w, {0, 0, 0})
+  b2 := spawn_test_body(&phys, &w, {5, 0, 0})
+  b3 := spawn_test_body(&phys, &w, {10, 0, 0})
   // Query sphere at origin with radius 3
   results := make([dynamic]resources.Handle)
   defer delete(results)
-  world.query_sphere(&w, {0, 0, 0}, 3.0, &results)
+  physics.physics_query_sphere(&phys, &w, {0, 0, 0}, 3.0, &results)
   testing.expect(
     t,
     len(results) == 1,
-    "Should find exactly 1 node within radius 3",
+    "Should find exactly 1 body within radius 3",
   )
-  testing.expect(t, results[0].index == 1, "Should find node with index 1")
+  testing.expect(t, results[0] == b1, "Should find body b1")
   // Query larger sphere
   clear(&results)
-  world.query_sphere(&w, {0, 0, 0}, 8.0, &results)
+  physics.physics_query_sphere(&phys, &w, {0, 0, 0}, 8.0, &results)
   testing.expect(
     t,
     len(results) >= 2,
-    "Should find at least 2 nodes within radius 8",
+    "Should find at least 2 bodies within radius 8",
   )
 }
 
 @(test)
-test_aoe_query_cube :: proc(t: ^testing.T) {
-  w := make_test_world()
+test_physics_query_box :: proc(t: ^testing.T) {
+  phys, w := make_test_physics()
+  defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
-  h1 := resources.Handle {
-    index      = 1,
-    generation = 0,
-  }
-  h2 := resources.Handle {
-    index      = 2,
-    generation = 0,
-  }
-  h3 := resources.Handle {
-    index      = 3,
-    generation = 0,
-  }
-  h4 := resources.Handle {
-    index      = 4,
-    generation = 0,
-  }
-  test_insert_node(&w, h1, {0, 0, 0}, {.MESH})
-  test_insert_node(&w, h2, {2, 2, 2}, {.MESH})
-  test_insert_node(&w, h3, {-2, -2, -2}, {.SPRITE})
-  test_insert_node(&w, h4, {10, 10, 10}, {.LIGHT})
+  b1 := spawn_test_body(&phys, &w, {0, 0, 0})
+  b2 := spawn_test_body(&phys, &w, {2, 2, 2})
+  b3 := spawn_test_body(&phys, &w, {-2, -2, -2})
+  b4 := spawn_test_body(&phys, &w, {10, 10, 10})
   results := make([dynamic]resources.Handle)
   defer delete(results)
-  // Query cube centered at origin with half-extent 3
-  world.query_cube(&w, {0, 0, 0}, {3, 3, 3}, &results)
-  testing.expect(t, len(results) == 3, "Should find exactly 3 nodes in cube")
+  // Query box centered at origin with half-extent 3
+  bounds := geometry.Aabb {
+    min = {-3, -3, -3},
+    max = {3, 3, 3},
+  }
+  physics.physics_query_box(&phys, &w, bounds, &results)
+  testing.expect(t, len(results) == 3, "Should find exactly 3 bodies in box")
 }
 
 @(test)
-test_aoe_query_disc :: proc(t: ^testing.T) {
-  w := make_test_world()
+test_physics_raycast_basic :: proc(t: ^testing.T) {
+  phys, w := make_test_physics()
+  defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
-  h1 := resources.Handle {
-    index      = 1,
-    generation = 0,
+  // Spawn a body at (5, 0, 0)
+  b1 := spawn_test_body(&phys, &w, {5, 0, 0})
+  // Raycast along X axis
+  ray := geometry.Ray {
+    origin    = {0, 0, 0},
+    direction = {1, 0, 0},
   }
-  h2 := resources.Handle {
-    index      = 2,
-    generation = 0,
-  }
-  h3 := resources.Handle {
-    index      = 3,
-    generation = 0,
-  }
-  h4 := resources.Handle {
-    index      = 4,
-    generation = 0,
-  }
-  // Insert nodes on XZ plane
-  test_insert_node(&w, h1, {0, 0, 0}, {.MESH})
-  test_insert_node(&w, h2, {2, 0, 0}, {.MESH})
-  test_insert_node(&w, h3, {0, 5, 0}, {.SPRITE}) // Above plane
-  test_insert_node(&w, h4, {0, 0, 2}, {.LIGHT})
-  results := make([dynamic]resources.Handle)
-  defer delete(results)
-  // Query disc on XZ plane (Y-up normal) with radius 3
-  world.query_disc(&w, {0, 0, 0}, {0, 1, 0}, 3.0, &results)
+  hit := physics.physics_raycast(&phys, &w, ray, 100.0)
+  testing.expect(t, hit.hit, "Should hit the body")
+  testing.expect(t, hit.body_handle == b1, "Should hit body b1")
   testing.expect(
     t,
-    len(results) == 3,
-    "Should find 3 nodes on disc (excluding node above plane)",
+    hit.t > 4.0 && hit.t < 6.0,
+    "Hit distance should be around 5",
   )
 }
 
 @(test)
-test_aoe_query_fan :: proc(t: ^testing.T) {
-  w := make_test_world()
+test_physics_raycast_miss :: proc(t: ^testing.T) {
+  phys, w := make_test_physics()
+  defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
-  h1 := resources.Handle {
-    index      = 1,
-    generation = 0,
+  // Spawn a body at (5, 0, 0)
+  spawn_test_body(&phys, &w, {5, 0, 0})
+  // Raycast in opposite direction
+  ray := geometry.Ray {
+    origin    = {0, 0, 0},
+    direction = {-1, 0, 0},
   }
-  h2 := resources.Handle {
-    index      = 2,
-    generation = 0,
+  hit := physics.physics_raycast(&phys, &w, ray, 100.0)
+  testing.expect(t, !hit.hit, "Should not hit anything")
+}
+
+@(test)
+test_physics_raycast_single :: proc(t: ^testing.T) {
+  phys, w := make_test_physics()
+  defer physics.destroy(&phys)
+  defer world.shutdown(&w, nil, nil)
+  // Spawn multiple bodies in a line
+  b1 := spawn_test_body(&phys, &w, {3, 0, 0})
+  b2 := spawn_test_body(&phys, &w, {6, 0, 0})
+  b3 := spawn_test_body(&phys, &w, {9, 0, 0})
+  // Raycast - should hit first body (early exit)
+  ray := geometry.Ray {
+    origin    = {0, 0, 0},
+    direction = {1, 0, 0},
   }
-  h3 := resources.Handle {
-    index      = 3,
-    generation = 0,
+  hit := physics.physics_raycast_single(&phys, &w, ray, 100.0)
+  testing.expect(t, hit.hit, "Should hit a body")
+  // Should hit closest body
+  testing.expect(t, hit.t < 4.0, "Should hit closest body")
+}
+
+// Integration Tests - Test point-in-collider functions
+
+@(test)
+test_point_cylinder :: proc(t: ^testing.T) {
+  cylinder := physics.CylinderCollider {
+    radius   = 2.0,
+    height   = 4.0,
+    rotation = linalg.QUATERNIONF32_IDENTITY,
   }
-  h4 := resources.Handle {
-    index      = 4,
-    generation = 0,
-  }
-  // Insert nodes in different directions from origin
-  test_insert_node(&w, h1, {5, 0, 0}, {.MESH}) // Positive X
-  test_insert_node(&w, h2, {-5, 0, 0}, {.MESH}) // Negative X
-  test_insert_node(&w, h3, {0, 5, 0}, {.SPRITE}) // Positive Y
-  test_insert_node(&w, h4, {3.5, 3.5, 0}, {.LIGHT}) // 45 degrees in XY
-  results := make([dynamic]resources.Handle)
-  defer delete(results)
-  // Query 90-degree fan pointing in positive X direction
-  world.query_fan(
-    &w,
-    {0, 0, 0},
-    linalg.VECTOR3F32_X_AXIS,
-    8.0,
-    math.PI / 2,
-    &results,
+  center := [3]f32{0, 0, 0}
+  // Point inside cylinder
+  testing.expect(
+    t,
+    physics.test_point_cylinder({0, 0, 0}, center, &cylinder),
+    "Point at center should be inside",
   )
   testing.expect(
     t,
-    len(results) >= 1,
-    "Should find at least node in positive X direction",
+    physics.test_point_cylinder({1, 1, 0}, center, &cylinder),
+    "Point within radius and height should be inside",
   )
-  // Verify it doesn't include node in negative X
-  found_negative_x := false
-  for handle in results {
-    if handle.index == 2 do found_negative_x = true
-  }
+  // Point outside cylinder (beyond radius)
   testing.expect(
     t,
-    !found_negative_x,
-    "Should not find node in opposite direction",
+    !physics.test_point_cylinder({3, 0, 0}, center, &cylinder),
+    "Point beyond radius should be outside",
   )
-}
-
-// Integration Tests - Test tag filtering
-
-@(test)
-test_aoe_tag_filtering_any :: proc(t: ^testing.T) {
-  w := make_test_world()
-  defer world.shutdown(&w, nil, nil)
-  h1 := resources.Handle {
-    index      = 1,
-    generation = 0,
-  }
-  h2 := resources.Handle {
-    index      = 2,
-    generation = 0,
-  }
-  h3 := resources.Handle {
-    index      = 3,
-    generation = 0,
-  }
-  test_insert_node(&w, h1, {0, 0, 0}, {.MESH, .PAWN})
-  test_insert_node(&w, h2, {1, 0, 0}, {.SPRITE, .ENEMY})
-  test_insert_node(&w, h3, {2, 0, 0}, {.LIGHT})
-  results := make([dynamic]resources.Handle)
-  defer delete(results)
-  // Query for nodes with PAWN or ENEMY tag
-  world.query_sphere(&w, {1, 0, 0}, 5.0, &results, tags_any = {.PAWN, .ENEMY})
+  // Point outside cylinder (beyond height)
   testing.expect(
     t,
-    len(results) == 2,
-    "Should find 2 nodes with PAWN or ENEMY tag",
+    !physics.test_point_cylinder({0, 3, 0}, center, &cylinder),
+    "Point beyond height should be outside",
   )
 }
 
 @(test)
-test_aoe_tag_filtering_all :: proc(t: ^testing.T) {
-  w := make_test_world()
-  defer world.shutdown(&w, nil, nil)
-  h1 := resources.Handle {
-    index      = 1,
-    generation = 0,
+test_point_fan :: proc(t: ^testing.T) {
+  fan := physics.FanCollider {
+    radius   = 5.0,
+    height   = 2.0,
+    angle    = math.PI / 2, // 90 degrees
+    rotation = linalg.QUATERNIONF32_IDENTITY, // Forward is +Z
   }
-  h2 := resources.Handle {
-    index      = 2,
-    generation = 0,
-  }
-  h3 := resources.Handle {
-    index      = 3,
-    generation = 0,
-  }
-  test_insert_node(&w, h1, {0, 0, 0}, {.MESH, .VISIBLE, .DYNAMIC})
-  test_insert_node(&w, h2, {1, 0, 0}, {.MESH, .DYNAMIC}) // Missing VISIBLE
-  test_insert_node(&w, h3, {2, 0, 0}, {.MESH, .VISIBLE, .STATIC}) // Missing DYNAMIC
-  results := make([dynamic]resources.Handle)
-  defer delete(results)
-  // Query for nodes that have ALL of: MESH, VISIBLE, DYNAMIC
-  world.query_sphere(
-    &w,
-    {1, 0, 0},
-    5.0,
-    &results,
-    tags_all = {.MESH, .VISIBLE, .DYNAMIC},
-  )
+  center := [3]f32{0, 0, 0}
+  // Point inside fan (forward direction +Z)
   testing.expect(
     t,
-    len(results) == 1,
-    "Should find exactly 1 node with all required tags",
+    physics.test_point_fan({0, 0, 3}, center, &fan),
+    "Point in forward direction should be inside",
   )
-  testing.expect(t, results[0].index == 1, "Should find node 1")
-}
-
-@(test)
-test_aoe_tag_filtering_none :: proc(t: ^testing.T) {
-  w := make_test_world()
-  defer world.shutdown(&w, nil, nil)
-  h1 := resources.Handle {
-    index      = 1,
-    generation = 0,
-  }
-  h2 := resources.Handle {
-    index      = 2,
-    generation = 0,
-  }
-  h3 := resources.Handle {
-    index      = 3,
-    generation = 0,
-  }
-  test_insert_node(&w, h1, {0, 0, 0}, {.MESH, .FRIENDLY})
-  test_insert_node(&w, h2, {1, 0, 0}, {.SPRITE, .ENEMY})
-  test_insert_node(&w, h3, {2, 0, 0}, {.LIGHT, .FRIENDLY})
-  results := make([dynamic]resources.Handle)
-  defer delete(results)
-  // Query for nodes that DON'T have ENEMY tag
-  world.query_sphere(&w, {1, 0, 0}, 5.0, &results, tags_none = {.ENEMY})
-  testing.expect(t, len(results) == 2, "Should find 2 nodes without ENEMY tag")
-}
-
-@(test)
-test_aoe_tag_filtering_combined :: proc(t: ^testing.T) {
-  w := make_test_world()
-  defer world.shutdown(&w, nil, nil)
-  h1 := resources.Handle {
-    index      = 1,
-    generation = 0,
-  }
-  h2 := resources.Handle {
-    index      = 2,
-    generation = 0,
-  }
-  h3 := resources.Handle {
-    index      = 3,
-    generation = 0,
-  }
-  h4 := resources.Handle {
-    index      = 4,
-    generation = 0,
-  }
-  test_insert_node(&w, h1, {0, 0, 0}, {.MESH, .PAWN, .FRIENDLY, .VISIBLE})
-  test_insert_node(&w, h2, {1, 0, 0}, {.MESH, .PAWN, .ENEMY, .VISIBLE})
-  test_insert_node(&w, h3, {2, 0, 0}, {.SPRITE, .ACTOR, .FRIENDLY})
-  test_insert_node(&w, h4, {3, 0, 0}, {.MESH, .ACTOR, .ENEMY})
-  results := make([dynamic]resources.Handle)
-  defer delete(results)
-  // Find visible pawns that are NOT enemies
-  world.query_sphere(
-    &w,
-    {1, 0, 0},
-    5.0,
-    &results,
-    tags_all = {.PAWN, .VISIBLE},
-    tags_none = {.ENEMY},
-  )
+  // Point inside fan (45 degrees from forward)
   testing.expect(
     t,
-    len(results) == 1,
-    "Should find exactly 1 node matching all criteria",
+    physics.test_point_fan({2, 0, 2}, center, &fan),
+    "Point at 45 degrees should be inside 90-degree fan",
   )
+  // Point outside fan (beyond angle)
   testing.expect(
     t,
-    results[0].index == 1,
-    "Should find the friendly visible pawn",
+    !physics.test_point_fan({3, 0, 0}, center, &fan),
+    "Point at 90 degrees (perpendicular) should be outside",
+  )
+  // Point outside fan (opposite direction)
+  testing.expect(
+    t,
+    !physics.test_point_fan({0, 0, -3}, center, &fan),
+    "Point in opposite direction should be outside",
+  )
+  // Point outside fan (beyond radius)
+  testing.expect(
+    t,
+    !physics.test_point_fan({0, 0, 6}, center, &fan),
+    "Point beyond radius should be outside",
+  )
+  // Point outside fan (beyond height)
+  testing.expect(
+    t,
+    !physics.test_point_fan({0, 3, 3}, center, &fan),
+    "Point beyond height should be outside",
   )
 }
 
-// End-to-End Tests - Test with realistic World integration
+// End-to-End Tests - Test with realistic integration
 
 @(test)
-test_aoe_world_integration :: proc(t: ^testing.T) {
-  w: world.World
-  world.init(&w)
+test_physics_world_integration :: proc(t: ^testing.T) {
+  phys, w := make_test_physics()
+  defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
-  // Spawn some nodes
-  h1, n1, ok1 := world.spawn(&w, {0, 0, 0}, world.MeshAttachment{})
-  h2, n2, ok2 := world.spawn(&w, {5, 0, 0}, world.SpriteAttachment{})
-  h3, n3, ok3 := world.spawn(&w, {10, 0, 0}, world.LightAttachment{})
-  testing.expect(t, ok1 && ok2 && ok3, "All spawns should succeed")
-  // Tag nodes manually for test
-  n1.tags = {.MESH, .PAWN, .FRIENDLY}
-  n2.tags = {.SPRITE, .ENEMY}
-  n3.tags = {.LIGHT}
-  // Traverse to build world matrices and mark pending updates
-  world.traverse(&w)
-  // Process pending updates to populate octree
-  world.process_octree_updates(&w, nil)
+  // Spawn some bodies
+  b1 := spawn_test_body(&phys, &w, {0, 0, 0})
+  b2 := spawn_test_body(&phys, &w, {5, 0, 0})
+  b3 := spawn_test_body(&phys, &w, {10, 0, 0})
+  testing.expect(t, b1.generation > 0 && b2.generation > 0 && b3.generation > 0, "All bodies should be created")
+  // Query for bodies within range
   results := make([dynamic]resources.Handle)
   defer delete(results)
-  // Query for enemies within range
-  world.query_sphere(&w, {5, 0, 0}, 8.0, &results, tags_any = {.ENEMY})
-  testing.expect(t, len(results) >= 1, "Should find at least 1 enemy")
+  physics.physics_query_sphere(&phys, &w, {5, 0, 0}, 8.0, &results)
+  testing.expect(t, len(results) >= 2, "Should find at least 2 bodies")
 }
 
 @(test)
-test_aoe_edge_cases :: proc(t: ^testing.T) {
-  w := make_test_world()
+test_physics_edge_cases :: proc(t: ^testing.T) {
+  phys, w := make_test_physics()
+  defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
   results := make([dynamic]resources.Handle)
   defer delete(results)
-  // Query empty octree
-  world.query_sphere(&w, {0, 0, 0}, 5.0, &results)
+  // Query empty physics world
+  physics.physics_query_sphere(&phys, &w, {0, 0, 0}, 5.0, &results)
   testing.expect(
     t,
     len(results) == 0,
-    "Should find no results in empty octree",
+    "Should find no results in empty physics world",
   )
-  // Query with empty tag filter (should return all)
-  h1 := resources.Handle {
-    index      = 1,
-    generation = 0,
-  }
-  test_insert_node(&w, h1, {0, 0, 0}, {.MESH})
+  // Spawn one body and query
+  b1 := spawn_test_body(&phys, &w, {0, 0, 0})
   clear(&results)
-  world.query_sphere(&w, {0, 0, 0}, 5.0, &results)
-  testing.expect(t, len(results) == 1, "Should find node with no tag filter")
-  // Query with very small radius (note: items have 0.5 radius AABB, so might still find them)
+  physics.physics_query_sphere(&phys, &w, {0, 0, 0}, 5.0, &results)
+  testing.expect(t, len(results) == 1, "Should find one body")
+  // Query with very small radius
   clear(&results)
-  world.query_sphere(&w, {0, 0, 0}, 0.1, &results)
-  // Due to AABB approximation (0.5 radius), we might still find the node
+  physics.physics_query_sphere(&phys, &w, {0, 0, 0}, 0.1, &results)
   testing.expect(
     t,
     len(results) <= 1,
     "Should find at most 1 result with very small radius",
   )
-  // Query fan with zero angle
-  clear(&results)
-  world.query_fan(&w, {0, 0, 0}, {1, 0, 0}, 5.0, 0.0, &results)
-  testing.expect(
-    t,
-    len(results) == 0,
-    "Should find no results with zero angle",
-  )
+  // Raycast with max_dist = 0
+  ray := geometry.Ray {
+    origin    = {0, 0, 0},
+    direction = {1, 0, 0},
+  }
+  hit := physics.physics_raycast(&phys, &w, ray, 0.0)
+  testing.expect(t, !hit.hit, "Should not hit with zero max distance")
 }
 
 @(test)
-test_aoe_incremental_updates :: proc(t: ^testing.T) {
-  w: world.World
-  world.init(&w)
+test_physics_cylinder_collision :: proc(t: ^testing.T) {
+  phys, w := make_test_physics()
+  defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
-  // Spawn a node
-  h1, n1, ok := world.spawn(&w, {0, 0, 0})
-  testing.expect(t, ok, "Spawn should succeed")
-  n1.tags = {.MESH, .PAWN}
-  // Traverse to initialize world matrices and mark pending updates
-  world.traverse(&w)
-  // Process pending updates to populate octree
-  world.process_octree_updates(&w, nil)
+  // Spawn a cylinder body
+  node_handle, _, _ := world.spawn(&w, {0, 0, 0})
+  world.traverse(&w, nil, nil, nil, 0)
+  collider := physics.collider_create_cylinder(2.0, 4.0)
+  body_handle, _, _ := physics.create_body(&phys, node_handle, 1.0, true)
+  physics.add_collider(&phys, body_handle, collider)
+  // Force BVH rebuild
+  physics.step(&phys, &w, 0.0)
+  // Query for bodies - should find the cylinder
   results := make([dynamic]resources.Handle)
   defer delete(results)
-  // Query at original position
-  world.query_sphere(&w, {0, 0, 0}, 2.0, &results)
-  testing.expect(t, len(results) == 1, "Should find node at original position")
-  // Move the node
-  world.translate(&w, h1, 10, 0, 0)
-  // Traverse to update world matrices and mark for octree update
-  world.traverse(&w)
-  // Process octree updates (remove from old position, insert at new)
-  world.process_octree_updates(&w, nil)
-  // Query old position
-  clear(&results)
-  world.query_sphere(&w, {0, 0, 0}, 2.0, &results)
-  testing.expect(
-    t,
-    len(results) == 0,
-    "Should not find node at old position after move",
-  )
-  // Query new position
-  clear(&results)
-  world.query_sphere(&w, {10, 0, 0}, 2.0, &results)
-  testing.expect(t, len(results) == 1, "Should find node at new position")
+  physics.physics_query_sphere(&phys, &w, {0, 0, 0}, 5.0, &results)
+  testing.expect(t, len(results) == 1, "Should find cylinder body")
+  testing.expect(t, results[0] == body_handle, "Should find the cylinder body")
 }
 
 @(test)
-test_aoe_multiple_query_shapes :: proc(t: ^testing.T) {
-  w := make_test_world()
+test_physics_fan_trigger :: proc(t: ^testing.T) {
+  phys, w := make_test_physics()
+  defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
-  // Create a grid of nodes
-  for x in -2 ..= 2 {
-    for z in -2 ..= 2 {
-      handle := resources.Handle {
-        index      = u32(((x + 2) * 5 + (z + 2))),
-        generation = 0,
-      }
-      pos := [3]f32{f32(x) * 3, 0, f32(z) * 3}
-      test_insert_node(&w, handle, pos, {.MESH, .PAWN})
-    }
-  }
-  results_sphere := make([dynamic]resources.Handle)
-  results_cube := make([dynamic]resources.Handle)
-  results_disc := make([dynamic]resources.Handle)
-  results_fan := make([dynamic]resources.Handle)
-  defer delete(results_sphere)
-  defer delete(results_cube)
-  defer delete(results_disc)
-  defer delete(results_fan)
-  // Test all query shapes at same location
-  center := [3]f32{0, 0, 0}
-  world.query_sphere(&w, center, 5.0, &results_sphere)
-  world.query_cube(&w, center, {5, 5, 5}, &results_cube)
-  world.query_disc(&w, center, {0, 1, 0}, 5.0, &results_disc)
-  world.query_fan(&w, center, {1, 0, 0}, 5.0, math.PI, &results_fan)
-  // All queries should find some nodes
-  testing.expect(t, len(results_sphere) > 0, "Sphere query should find nodes")
-  testing.expect(t, len(results_cube) > 0, "Cube query should find nodes")
-  testing.expect(t, len(results_disc) > 0, "Disc query should find nodes")
-  testing.expect(t, len(results_fan) > 0, "Fan query should find nodes")
-  // Cube should typically find more than sphere (corners extend further)
-  log.infof(
-    "Sphere: %d, Cube: %d, Disc: %d, Fan: %d",
-    len(results_sphere),
-    len(results_cube),
-    len(results_disc),
-    len(results_fan),
+  // Spawn a fan trigger body
+  node_handle, _, _ := world.spawn(&w, {0, 0, 0})
+  collider := physics.collider_create_fan(5.0, 2.0, math.PI / 2)
+  body_handle, body, _ := physics.create_body(&phys, node_handle, 1.0, true)
+  body.trigger_only = true
+  physics.add_collider(&phys, body_handle, collider)
+  // Test point-in-fan directly
+  fan_ptr := &collider.shape.(physics.FanCollider)
+  testing.expect(
+    t,
+    physics.test_point_fan({0, 0, 3}, {0, 0, 0}, fan_ptr),
+    "Point should be inside fan",
+  )
+  testing.expect(
+    t,
+    !physics.test_point_fan({3, 0, 0}, {0, 0, 0}, fan_ptr),
+    "Point should be outside fan",
   )
 }
