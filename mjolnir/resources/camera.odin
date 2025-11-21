@@ -605,64 +605,6 @@ camera_viewport_to_world_ray :: proc(
   return ray_origin, ray_dir
 }
 
-camera_raycast :: proc(
-  camera: ^Camera,
-  mouse_x, mouse_y: f32,
-  primitives: []$T,
-  intersection_func: proc(
-    ray: geometry.Ray,
-    primitive: T,
-    max_t: f32,
-  ) -> (
-    hit: bool,
-    t: f32,
-  ),
-  bounds_func: proc(t: T) -> geometry.Aabb,
-  config: geometry.RaycastConfig = geometry.DEFAULT_RAYCAST_CONFIG,
-) -> geometry.RayHit(T) {
-  ray_origin, ray_dir := camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
-  ray := geometry.Ray {
-    origin    = ray_origin,
-    direction = ray_dir,
-  }
-  return geometry.raycast(
-    primitives,
-    ray,
-    intersection_func,
-    bounds_func,
-    config,
-  )
-}
-
-camera_raycast_single :: proc(
-  camera: ^Camera,
-  mouse_x, mouse_y: f32,
-  primitives: []$T,
-  intersection_func: proc(
-    ray: geometry.Ray,
-    primitive: T,
-    max_t: f32,
-  ) -> (
-    hit: bool,
-    t: f32,
-  ),
-  bounds_func: proc(t: T) -> geometry.Aabb,
-  config: geometry.RaycastConfig = geometry.DEFAULT_RAYCAST_CONFIG,
-) -> geometry.RayHit(T) {
-  ray_origin, ray_dir := camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
-  ray := geometry.Ray {
-    origin    = ray_origin,
-    direction = ray_dir,
-  }
-  return geometry.raycast_single(
-    primitives,
-    ray,
-    intersection_func,
-    bounds_func,
-    config,
-  )
-}
-
 @(private)
 create_camera_depth_pyramid :: proc(
   gctx: ^gpu.GPUContext,
