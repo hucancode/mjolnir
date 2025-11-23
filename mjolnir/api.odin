@@ -5,6 +5,7 @@ import cont "containers"
 import "core:math"
 import "core:strings"
 import "core:sync"
+import "core:time"
 import "geometry"
 import "level_manager"
 import "navigation/recast"
@@ -218,6 +219,39 @@ spawn_child :: proc(
   return handle, ok
 }
 
+spawn_mesh :: proc(
+  engine: ^Engine,
+  primitive: resources.Primitive = .CUBE,
+  color: resources.Color = .WHITE,
+  position: [3]f32 = {0, 0, 0},
+  rotation_angle: f32 = 0,
+  rotation_axis: [3]f32 = {0, 1, 0},
+  scale_factor: f32 = 1.0,
+  cast_shadow := true,
+) -> (
+  resources.NodeHandle,
+  bool,
+) #optional_ok {
+  mesh := get_builtin_mesh(engine, primitive)
+  mat := get_builtin_material(engine, color)
+  handle := spawn(
+    engine,
+    position,
+    world.MeshAttachment {
+      handle = mesh,
+      material = mat,
+      cast_shadow = cast_shadow,
+    },
+  ) or_return
+  if rotation_angle != 0 {
+    rotate(engine, handle, rotation_angle, rotation_axis)
+  }
+  if scale_factor != 1.0 {
+    scale(engine, handle, scale_factor)
+  }
+  return handle, true
+}
+
 load_gltf :: proc(
   engine: ^Engine,
   path: string,
@@ -256,7 +290,7 @@ queue_node_deletion :: proc(engine: ^Engine, handle: resources.NodeHandle) {
   append(&engine.world.pending_node_deletions, handle)
 }
 
-translate_handle :: proc(
+translate :: proc(
   engine: ^Engine,
   handle: resources.NodeHandle,
   x: f32 = 0,
@@ -266,16 +300,7 @@ translate_handle :: proc(
   world.translate(&engine.world, handle, x, y, z)
 }
 
-translate_node :: proc(node: ^world.Node, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
-  world.translate(node, x, y, z)
-}
-
-translate :: proc {
-  translate_node,
-  translate_handle,
-}
-
-translate_by_handle :: proc(
+translate_by :: proc(
   engine: ^Engine,
   handle: resources.NodeHandle,
   x: f32 = 0,
@@ -285,21 +310,7 @@ translate_by_handle :: proc(
   world.translate_by(&engine.world, handle, x, y, z)
 }
 
-translate_by_node :: proc(
-  node: ^world.Node,
-  x: f32 = 0,
-  y: f32 = 0,
-  z: f32 = 0,
-) {
-  world.translate_by(node, x, y, z)
-}
-
-translate_by :: proc {
-  translate_by_node,
-  translate_by_handle,
-}
-
-rotate_handle :: proc(
+rotate :: proc(
   engine: ^Engine,
   handle: resources.NodeHandle,
   angle: f32,
@@ -308,16 +319,7 @@ rotate_handle :: proc(
   world.rotate(&engine.world, handle, angle, axis)
 }
 
-rotate_node :: proc(node: ^world.Node, angle: f32, axis: [3]f32 = {0, 1, 0}) {
-  world.rotate(node, angle, axis)
-}
-
-rotate :: proc {
-  rotate_node,
-  rotate_handle,
-}
-
-rotate_by_handle :: proc(
+rotate_by :: proc(
   engine: ^Engine,
   handle: resources.NodeHandle,
   angle: f32,
@@ -326,33 +328,11 @@ rotate_by_handle :: proc(
   world.rotate_by(&engine.world, handle, angle, axis)
 }
 
-rotate_by_node :: proc(
-  node: ^world.Node,
-  angle: f32,
-  axis: [3]f32 = {0, 1, 0},
-) {
-  world.rotate_by(node, angle, axis)
-}
-
-rotate_by :: proc {
-  rotate_by_node,
-  rotate_by_handle,
-}
-
-scale_node :: proc(node: ^world.Node, s: f32) {
-  world.scale(node, s)
-}
-
-scale_handle :: proc(engine: ^Engine, handle: resources.NodeHandle, s: f32) {
+scale :: proc(engine: ^Engine, handle: resources.NodeHandle, s: f32) {
   world.scale(&engine.world, handle, s)
 }
 
-scale :: proc {
-  scale_node,
-  scale_handle,
-}
-
-scale_by_handle :: proc(
+scale_by :: proc(
   engine: ^Engine,
   handle: resources.NodeHandle,
   s: f32,
@@ -360,13 +340,74 @@ scale_by_handle :: proc(
   world.scale_by(&engine.world, handle, s)
 }
 
-scale_by_node :: proc(node: ^world.Node, s: f32) {
-  world.scale_by(node, s)
+get_position :: proc(
+  engine: ^Engine,
+  handle: resources.NodeHandle,
+) -> (
+  [3]f32,
+  bool,
+) #optional_ok {
+  node := get_node(engine, handle) or_return
+  return node.local_position, true
 }
 
-scale_by :: proc {
-  scale_by_node,
-  scale_by_handle,
+get_world_position :: proc(
+  engine: ^Engine,
+  handle: resources.NodeHandle,
+) -> (
+  [3]f32,
+  bool,
+) #optional_ok {
+  node := get_node(engine, handle) or_return
+  return node.world_matrix[3].xyz, true
+}
+
+get_rotation :: proc(
+  engine: ^Engine,
+  handle: resources.NodeHandle,
+) -> (
+  quaternion128,
+  bool,
+) #optional_ok {
+  node := get_node(engine, handle) or_return
+  return node.local_rotation, true
+}
+
+get_scale :: proc(
+  engine: ^Engine,
+  handle: resources.NodeHandle,
+) -> (
+  f32,
+  bool,
+) #optional_ok {
+  node := get_node(engine, handle) or_return
+  return node.local_scale, true
+}
+
+set_position :: proc(
+  engine: ^Engine,
+  handle: resources.NodeHandle,
+  position: [3]f32,
+) {
+  translate(engine, handle, position.x, position.y, position.z)
+}
+
+set_rotation :: proc(
+  engine: ^Engine,
+  handle: resources.NodeHandle,
+  rotation: quaternion128,
+) {
+  node := get_node(engine, handle) or_return
+  node.local_rotation = rotation
+  node.dirty = true
+}
+
+set_scale :: proc(
+  engine: ^Engine,
+  handle: resources.NodeHandle,
+  scale_value: f32,
+) {
+  scale(engine, handle, scale_value)
 }
 
 spawn_spot_light :: proc(
@@ -1272,4 +1313,102 @@ sync_active_camera_controller :: proc(engine: ^Engine) {
   main_camera := get_main_camera(engine)
   if main_camera == nil do return
   world.camera_controller_sync(engine.active_controller, main_camera)
+}
+
+get_delta_time :: proc(engine: ^Engine) -> f32 {
+  now := time.now()
+  delta := time.duration_seconds(time.diff(engine.last_update_timestamp, now))
+  return f32(delta)
+}
+
+time_since_start :: proc(engine: ^Engine) -> f32 {
+  elapsed := time.duration_seconds(
+    time.diff(engine.start_timestamp, time.now()),
+  )
+  return f32(elapsed)
+}
+
+raycast :: proc(
+  engine: ^Engine,
+  origin: [3]f32,
+  direction: [3]f32,
+  max_distance: f32 = 1000.0,
+) -> (
+  hit: bool,
+  distance: f32,
+  normal: [3]f32,
+  handle: resources.NodeHandle,
+) {
+  // TODO: Implement using world BVH + geometry.ray_primitive_intersection
+  return false, 0, {0, 0, 0}, {}
+}
+
+query_sphere :: proc(
+  engine: ^Engine,
+  center: [3]f32,
+  radius: f32,
+) -> []resources.NodeHandle {
+  // TODO: Implement using physics.physics_query_sphere
+  // Need to convert RigidBodyHandle to NodeHandle
+  return {}
+}
+
+query_box :: proc(
+  engine: ^Engine,
+  min: [3]f32,
+  max: [3]f32,
+) -> []resources.NodeHandle {
+  // TODO: Implement using physics.physics_query_box
+  // Need to convert RigidBodyHandle to NodeHandle
+  return {}
+}
+
+draw_debug_line :: proc(
+  engine: ^Engine,
+  from: [3]f32,
+  to: [3]f32,
+  color: [4]f32 = {1, 1, 1, 1},
+  duration: f32 = 0.0,
+) {
+  // TODO: Spawn a line mesh with wireframe material
+  // Schedule for removal after duration (0 = one frame)
+  // Need to create custom line geometry or use cylinder
+}
+
+draw_debug_box :: proc(
+  engine: ^Engine,
+  center: [3]f32,
+  size: [3]f32,
+  color: [4]f32 = {1, 1, 1, 1},
+  duration: f32 = 0.0,
+) {
+  // TODO: Spawn cube primitive with wireframe material at center
+  // Set scale to size
+  // Schedule for removal after duration (0 = one frame)
+  // Need wireframe material support in ShaderFeatureSet
+}
+
+draw_debug_sphere :: proc(
+  engine: ^Engine,
+  center: [3]f32,
+  radius: f32,
+  color: [4]f32 = {1, 1, 1, 1},
+  duration: f32 = 0.0,
+) {
+  // TODO: Spawn sphere primitive with wireframe material at center
+  // Set scale to radius
+  // Schedule for removal after duration (0 = one frame)
+  // Need wireframe material support in ShaderFeatureSet
+}
+
+draw_debug_aabb :: proc(
+  engine: ^Engine,
+  min: [3]f32,
+  max: [3]f32,
+  color: [4]f32 = {1, 1, 1, 1},
+  duration: f32 = 0.0,
+) {
+  center := (min + max) * 0.5
+  size := max - min
+  draw_debug_box(engine, center, size, color, duration)
 }
