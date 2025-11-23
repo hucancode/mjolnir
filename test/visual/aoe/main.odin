@@ -188,7 +188,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     scale(engine, handle, 0.3)
   }
   // Query for cubes within effect radius using physics
-  affected: [dynamic]resources.NodeHandle
+  affected: [dynamic]physics.RigidBodyHandle
   defer delete(affected)
   physics.physics_query_sphere(
     &physics_world,

@@ -1,8 +1,8 @@
 package resources
 
+import alg "../algebra"
 import cont "../containers"
 import "../geometry"
-import alg "../algebra"
 import "../gpu"
 import "core:log"
 import "core:math"
@@ -155,7 +155,7 @@ camera_init :: proc(
     right.y, recalc_up.y, -forward.y,
     right.z, recalc_up.z, -forward.z,
   }
-  camera.rotation = linalg.quaternion_from_matrix3(rotation_matrix)
+  camera.rotation = linalg.to_quaternion(rotation_matrix)
   camera.extent = {width, height}
   camera.enabled_passes = enabled_passes
   needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
@@ -415,7 +415,7 @@ camera_look_at :: proc(
     right.y, recalc_up.y, -forward.y,
     right.z, recalc_up.z, -forward.z,
   }
-  self.rotation = linalg.quaternion_from_matrix3(rotation_matrix)
+  self.rotation = linalg.to_quaternion(rotation_matrix)
 }
 
 camera_update_aspect_ratio :: proc(self: ^Camera, new_aspect_ratio: f32) {
@@ -627,7 +627,10 @@ create_camera_depth_pyramid :: proc(
   mip_levels :=
     u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
   // Create depth pyramid texture with mip levels using new Image API
-  pyramid_handle, pyramid_texture, pyramid_ok := cont.alloc(&rm.images_2d, Image2DHandle)
+  pyramid_handle, pyramid_texture, pyramid_ok := cont.alloc(
+    &rm.images_2d,
+    Image2DHandle,
+  )
   if !pyramid_ok {
     log.error("Failed to allocate handle for depth pyramid texture")
     return .ERROR_OUT_OF_DEVICE_MEMORY
