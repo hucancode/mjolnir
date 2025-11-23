@@ -30,7 +30,7 @@ decompose_matrix :: proc "contextless" (
   // Extract scale (length of each basis vector)
   ret.scale = {linalg.length(m[0]), linalg.length(m[1]), linalg.length(m[2])}
   // Extract rotation (basis vectors normalized)
-  ret.rotation = linalg.quaternion_from_matrix4(m)
+  ret.rotation = linalg.to_quaternion(m)
   ret.is_dirty = true
   return
 }
