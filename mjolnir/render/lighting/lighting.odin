@@ -299,9 +299,7 @@ init :: proc(
     geometry.make_sphere(segments = 64, rings = 64),
   ) or_return
   defer if ret != .SUCCESS {
-    if mesh, freed := cont.free(&rm.meshes, self.sphere_mesh); freed {
-      resources.mesh_destroy(mesh, rm)
-    }
+    resources.destroy_mesh(rm, self.sphere_mesh)
   }
   self.cone_mesh = resources.create_mesh(
     gctx,
@@ -309,9 +307,7 @@ init :: proc(
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   ) or_return
   defer if ret != .SUCCESS {
-    if mesh, freed := cont.free(&rm.meshes, self.cone_mesh); freed {
-      resources.mesh_destroy(mesh, rm)
-    }
+    resources.destroy_mesh(rm, self.cone_mesh)
   }
   self.triangle_mesh = resources.create_mesh(
     gctx,
@@ -319,9 +315,7 @@ init :: proc(
     geometry.make_fullscreen_triangle(),
   ) or_return
   defer if ret != .SUCCESS {
-    if mesh, freed := cont.free(&rm.meshes, self.triangle_mesh); freed {
-      resources.mesh_destroy(mesh, rm)
-    }
+    resources.destroy_mesh(rm, self.triangle_mesh)
   }
   log.info("Light volume meshes initialized")
   return .SUCCESS

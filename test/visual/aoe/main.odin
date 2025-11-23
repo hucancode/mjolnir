@@ -1,8 +1,8 @@
 package main
 
 import "../../../mjolnir"
-import "../../../mjolnir/geometry"
 import cont "../../../mjolnir/containers"
+import "../../../mjolnir/geometry"
 import "../../../mjolnir/physics"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
@@ -65,7 +65,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       scale(engine, node_handle, cube_scale)
       append(&cube_handles, node_handle)
       // Create physics body for cube
-      collider := physics.collider_create_box({0.5, 0.5, 0.5} * cube_scale)
+      collider := physics.collider_create_box(0.5 * cube_scale)
       body_handle, body, _ := physics.create_body(
         &physics_world,
         node_handle,
@@ -111,7 +111,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   mouse_button_pressed := engine.input.mouse_buttons[glfw.MOUSE_BUTTON_LEFT]
   mouse_just_clicked := mouse_button_pressed && !last_mouse_button_state
   last_mouse_button_state = mouse_button_pressed
-  if mouse_just_clicked {
+  mouse_click: if mouse_just_clicked {
     camera := get_main_camera(engine)
     if camera != nil {
       // Get mouse position in window coordinates
@@ -121,24 +121,6 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       dpi_scale := get_window_dpi(engine.window)
       mouse_x := mouse_x_window * dpi_scale
       mouse_y := mouse_y_window * dpi_scale
-      log.infof("=== Mouse Click Debug ===")
-      log.infof(
-        "Mouse window coords: (%.1f, %.1f)",
-        mouse_x_window,
-        mouse_y_window,
-      )
-      log.infof("DPI scale: %.2f", dpi_scale)
-      log.infof("Mouse framebuffer coords: (%.1f, %.1f)", mouse_x, mouse_y)
-      log.infof(
-        "Swapchain extent: %v x %v",
-        engine.swapchain.extent.width,
-        engine.swapchain.extent.height,
-      )
-      log.infof(
-        "Camera viewport: %v x %v",
-        camera.extent.width,
-        camera.extent.height,
-      )
       // Perform raycast from camera through mouse position
       ray_origin, ray_dir := resources.camera_viewport_to_world_ray(
         camera,
@@ -151,23 +133,17 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       }
       log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
       // Use physics raycast
-      hit := physics.physics_raycast(&physics_world, &engine.world, ray, 1000.0)
-      if hit.hit {
-        body := cont.get(physics_world.bodies, hit.body_handle)
-        if body != nil {
-          clicked_cube = body.node_handle
-          if node := world.get_node(&engine.world, body.node_handle);
-             node != nil {
-            world_pos := node.transform.world_matrix[3].xyz
-            log.infof(
-              "Hit cube at position %v, distance: %.2f",
-              world_pos,
-              hit.t,
-            )
-          }
-        }
-      } else {
-        clicked_cube = {} // Clear previous selection
+      hit := physics.physics_raycast(
+        &physics_world,
+        &engine.world,
+        ray,
+      )
+      if !hit.hit {
+        clicked_cube = {}
+        break mouse_click
+      }
+      if body, ok := cont.get(physics_world.bodies, hit.body_handle); ok {
+        clicked_cube = body.node_handle
       }
     }
   }
@@ -188,7 +164,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     scale(engine, handle, 0.3)
   }
   // Query for cubes within effect radius using physics
-  affected: [dynamic]resources.NodeHandle
+  affected: [dynamic]physics.RigidBodyHandle
   defer delete(affected)
   physics.physics_query_sphere(
     &physics_world,
@@ -205,7 +181,5 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     }
   }
   // Scale the clicked cube 3x (0.3 * 3 = 0.9)
-  if clicked_cube.index != 0 {
-    scale(engine, clicked_cube, 0.9)
-  }
+  scale(engine, clicked_cube, 0.9)
 }

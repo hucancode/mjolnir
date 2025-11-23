@@ -433,7 +433,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       node := cont.get(w.nodes, body.node_handle) or_continue
       // Update position using substep timestep
       vel := body.velocity * substep_dt
-      geometry.transform_translate_by(&node.transform, vel.x, vel.y, vel.z)
+      geometry.translate_by(&node.transform, vel.x, vel.y, vel.z)
       // Update rotation from angular velocity (if enabled)
       // Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
       // Skip rotation if angular velocity is negligible or rotation is disabled
@@ -453,7 +453,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       q_new := quaternion(w = q_old.w + q_dot.w * substep_dt, x = q_old.x + q_dot.x * substep_dt, y = q_old.y + q_dot.y * substep_dt, z = q_old.z + q_dot.z * substep_dt)
       // Normalize to prevent drift
       q_new = linalg.normalize(q_new)
-      geometry.transform_rotate(&node.transform, q_new)
+      geometry.rotate(&node.transform, q_new)
     }
   }
   substep_time := time.since(substep_start)

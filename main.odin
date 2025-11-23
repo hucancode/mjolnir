@@ -26,7 +26,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir, geometry
+  using mjolnir
   log.info("Setup function called!")
   set_visibility_stats(engine, false)
   // engine.debug_ui_enabled = true
@@ -175,7 +175,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         for i in 1 ..< len(armature_ptr.children) {
           play_animation(engine, armature_ptr.children[i], "idle")
         }
-        translate_node(armature_ptr, 0, 0, 1)
+        translate(engine, armature, 0, 0, 1)
         for child_handle in armature_ptr.children {
           child_node := get_node(engine, child_handle) or_continue
           mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment)
@@ -609,14 +609,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
             mesh_handle   = sprite_quad,
             material      = sprite_material,
           }
-          _, sprite_node, spawn_ok := world.spawn(
+          handle, spawn_ok := world.spawn(
             &engine.world,
             {4, 1.5, 0},
             sprite_attachment,
             &engine.rm,
           )
           if spawn_ok {
-            world.scale(sprite_node, 3.0)
+            scale(engine, handle, 3.0)
             // sprite_node.culling_enabled = false
           }
         }
@@ -627,7 +627,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
-  using mjolnir, geometry
+  using mjolnir
   log.infof("key pressed key %d action %d mods %x", key, action, mods)
   if action == glfw.RELEASE do return
   if key == glfw.KEY_TAB {
@@ -642,16 +642,15 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
 
 on_post_render :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
-  portal_texture_handle := get_camera_attachment(
-    engine,
-    portal_camera_handle,
-    .FINAL_IMAGE,
-    engine.frame_index,
-  )
   update_material_texture(
     engine,
     portal_material_handle,
     .ALBEDO_TEXTURE,
-    portal_texture_handle,
+    get_camera_attachment(
+      engine,
+      portal_camera_handle,
+      .FINAL_IMAGE,
+      engine.frame_index,
+    ),
   )
 }

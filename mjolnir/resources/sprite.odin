@@ -260,7 +260,7 @@ create_sprite :: proc(
   return handle, true
 }
 
-destroy_sprite_handle :: proc(rm: ^Manager, handle: SpriteHandle) {
+destroy_sprite :: proc(rm: ^Manager, handle: SpriteHandle) {
   unregister_animatable_sprite(rm, handle)
   cont.free(&rm.sprites, handle)
 }

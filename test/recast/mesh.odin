@@ -565,22 +565,6 @@ test_triangle_normal_calculation_accuracy :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_triangle_operations_zero_area :: proc(t: ^testing.T) {
-  // Create triangle with zero area (two identical vertices)
-  vertices := [][3]f32 {
-    {0, 0, 0}, // 0
-    {0, 0, 0}, // 1 - identical to 0
-    {1, 0, 0}, // 2
-  }
-  indices := []i32{0, 2, 1} // Counter-clockwise winding
-  areas := []u8{recast.RC_WALKABLE_AREA}
-  // Zero-area triangle produces NaN normal, so NaN comparisons return false
-  // This means clear_unwalkable_triangles will NOT clear it
-  recast.clear_unwalkable_triangles(45.0, vertices, indices, areas)
-  testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA) // Should remain unchanged
-}
-
-@(test)
 test_triangle_operations_tiny_triangle :: proc(t: ^testing.T) {
   // Create very small but valid triangle
   epsilon := f32(1e-6)

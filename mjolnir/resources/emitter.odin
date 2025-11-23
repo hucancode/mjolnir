@@ -72,7 +72,7 @@ create_emitter :: proc(
   return handle, true
 }
 
-destroy_emitter_handle :: proc(manager: ^Manager, handle: EmitterHandle) -> bool {
+destroy_emitter :: proc(manager: ^Manager, handle: EmitterHandle) -> bool {
   _, freed := cont.free(&manager.emitters, handle)
   return freed
 }

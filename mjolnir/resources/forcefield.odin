@@ -35,7 +35,7 @@ create_forcefield :: proc(
   return handle, true
 }
 
-destroy_forcefield_handle :: proc(rm: ^Manager, handle: ForceFieldHandle) -> bool {
+destroy_forcefield :: proc(rm: ^Manager, handle: ForceFieldHandle) -> bool {
   _, freed := cont.free(&rm.forcefields, handle)
   return freed
 }

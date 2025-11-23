@@ -241,7 +241,6 @@ spawn_nav_agent_at :: proc(
   height: f32 = 2.0,
 ) -> (
   handle: resources.NodeHandle,
-  node: ^Node,
   ok: bool,
 ) {
   attachment := NavMeshAgentAttachment {

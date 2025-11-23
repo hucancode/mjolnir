@@ -52,8 +52,8 @@ node_destroy :: proc(node: ^OctreeNode($T)) {
 }
 
 @(private)
-get_octant :: proc(center: [3]f32, point: [3]f32) -> i32 {
-  octant: i32 = 0
+get_octant :: proc(center: [3]f32, point: [3]f32) -> u32 {
+  octant: u32 = 0
   if point.x >= center.x do octant |= 0b001
   if point.y >= center.y do octant |= 0b010
   if point.z >= center.z do octant |= 0b100
@@ -61,21 +61,21 @@ get_octant :: proc(center: [3]f32, point: [3]f32) -> i32 {
 }
 
 @(private)
-get_octant_for_aabb :: proc(node_center: [3]f32, aabb: Aabb) -> i32 {
+get_octant_for_aabb :: proc(node_center: [3]f32, aabb: Aabb) -> (idx: u32, ok: bool) {
   aabb_center := aabb_center(aabb)
-  if aabb.min.x < node_center.x && aabb.max.x > node_center.x do return -1
-  if aabb.min.y < node_center.y && aabb.max.y > node_center.y do return -1
-  if aabb.min.z < node_center.z && aabb.max.z > node_center.z do return -1
-  return get_octant(node_center, aabb_center)
+  if aabb.min.x < node_center.x && aabb.max.x > node_center.x do return 0, false
+  if aabb.min.y < node_center.y && aabb.max.y > node_center.y do return 0, false
+  if aabb.min.z < node_center.z && aabb.max.z > node_center.z do return 0, false
+  return get_octant(node_center, aabb_center), true
 }
 
 @(private)
 get_child_bounds :: proc(parent: ^OctreeNode($T), octant: i32) -> Aabb {
   size := (parent.bounds.max - parent.bounds.min) * 0.5
   min := parent.bounds.min
-  if octant & 1 != 0 do min.x += size.x
-  if octant & 2 != 0 do min.y += size.y
-  if octant & 4 != 0 do min.z += size.z
+  if octant & 0b001 != 0 do min.x += size.x
+  if octant & 0b010 != 0 do min.y += size.y
+  if octant & 0b100 != 0 do min.z += size.z
   return Aabb{min = min, max = min + size}
 }
 
@@ -87,17 +87,17 @@ get_child_center :: proc(
 ) -> [3]f32 {
   offset := parent_size * 0.25
   center := parent_center
-  if octant & 1 != 0 {
+  if octant & 0b001 != 0 {
     center.x += offset.x
   } else {
     center.x -= offset.x
   }
-  if octant & 2 != 0 {
+  if octant & 0b010 != 0 {
     center.y += offset.y
   } else {
     center.y -= offset.y
   }
-  if octant & 4 != 0 {
+  if octant & 0b100 != 0 {
     center.z += offset.z
   } else {
     center.z -= offset.z
@@ -180,8 +180,7 @@ node_insert_to_children :: proc(
   item: T,
   bounds: Aabb,
 ) -> bool {
-  octant := get_octant_for_aabb(node.center, bounds)
-  if octant >= 0 {
+  if octant, ok := get_octant_for_aabb(node.center, bounds); ok {
     return node_insert(octree, node.children[octant], item, bounds)
   } else {
     append(&node.items, item)
@@ -197,8 +196,7 @@ node_insert_to_children_internal :: proc(
   item: T,
   bounds: Aabb,
 ) -> bool {
-  octant := get_octant_for_aabb(node.center, bounds)
-  if octant >= 0 {
+  if octant, ok := get_octant_for_aabb(node.center, bounds); ok {
     return node_insert(octree, node.children[octant], item, bounds)
   } else {
     append(&node.items, item)
@@ -368,11 +366,7 @@ octree_query_ray :: proc(
   results: ^[dynamic]T,
 ) {
   clear(results)
-  inv_dir := [3]f32 {
-    1.0 / ray.direction.x,
-    1.0 / ray.direction.y,
-    1.0 / ray.direction.z,
-  }
+  inv_dir := 1.0 / ray.direction
   t_min, t_max := ray_aabb_intersection(
     ray.origin,
     inv_dir,
@@ -471,11 +465,7 @@ octree_raycast :: proc(
   if octree.root == nil do return {}
   best_hit: RayHit(T)
   best_hit.t = max_dist
-  inv_dir := [3]f32 {
-    1.0 / ray.direction.x,
-    1.0 / ray.direction.y,
-    1.0 / ray.direction.z,
-  }
+  inv_dir := 1.0 / ray.direction
   t_min, t_max := ray_aabb_intersection(
     ray.origin,
     inv_dir,
@@ -509,11 +499,7 @@ octree_raycast_single :: proc(
   ),
 ) -> RayHit(T) {
   if octree.root == nil do return {}
-  inv_dir := [3]f32 {
-    1.0 / ray.direction.x,
-    1.0 / ray.direction.y,
-    1.0 / ray.direction.z,
-  }
+  inv_dir := 1.0 / ray.direction
   t_min, t_max := ray_aabb_intersection(
     ray.origin,
     inv_dir,
@@ -548,11 +534,7 @@ octree_raycast_multi :: proc(
 ) {
   clear(results)
   if octree.root == nil do return
-  inv_dir := [3]f32 {
-    1.0 / ray.direction.x,
-    1.0 / ray.direction.y,
-    1.0 / ray.direction.z,
-  }
+  inv_dir := 1.0 / ray.direction
   t_min, t_max := ray_aabb_intersection(
     ray.origin,
     inv_dir,
@@ -814,14 +796,6 @@ should_collapse :: proc(node: ^OctreeNode($T)) -> bool {
 }
 
 @(private)
-count_items_recursive :: proc(node: ^OctreeNode($T)) -> int {
-  if node == nil do return 0
-  count := len(node.items)
-  #unroll for i in 0 ..< 8 do count += count_items_recursive(node.children[i])
-  return count
-}
-
-@(private)
 collapse :: proc(node: ^OctreeNode($T)) {
   if node.children[0] == nil do return
   reserve(&node.items, int(node.total_items))
@@ -854,24 +828,8 @@ octree_update :: proc(octree: ^Octree($T), old_item: T, new_item: T) -> bool {
      aabb_contains(new_bounds, old_bounds) {
     return true
   }
-  remove_result := node_remove(octree, octree.root, old_item, old_bounds)
-  if remove_result {
-    insert_result := octree_insert(octree, new_item)
-    return insert_result
-  }
-  return false
-}
-
-octree_collect_all :: proc(node: ^OctreeNode($T), results: ^[dynamic]T) {
-  if node == nil do return
-  for item in node.items {
-    append(results, item)
-  }
-  if node.children[0] != nil {
-    #unroll for i in 0 ..< 8 {
-      octree_collect_all(node.children[i], results)
-    }
-  }
+  return node_remove(octree, octree.root, old_item, old_bounds) &&
+    octree_insert(octree, new_item)
 }
 
 octree_get_stats :: proc(octree: ^Octree($T)) -> OctreeStats {

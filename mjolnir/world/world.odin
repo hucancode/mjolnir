@@ -110,12 +110,12 @@ TraverseEntry :: struct {
 }
 
 World :: struct {
-  root:                   resources.NodeHandle,
-  nodes:                  resources.Pool(Node),
-  traversal_stack:        [dynamic]TraverseEntry,
-  actor_pools:            map[typeid]ActorPoolEntry,
-  animatable_nodes:       [dynamic]resources.NodeHandle,
-  pending_node_deletions: [dynamic]resources.NodeHandle,
+  root:                    resources.NodeHandle,
+  nodes:                   resources.Pool(Node),
+  traversal_stack:         [dynamic]TraverseEntry,
+  actor_pools:             map[typeid]ActorPoolEntry,
+  animatable_nodes:        [dynamic]resources.NodeHandle,
+  pending_node_deletions:  [dynamic]resources.NodeHandle,
   pending_deletions_mutex: sync.Mutex,
 }
 
@@ -168,13 +168,13 @@ destroy_node :: proc(
     resources.destroy_light(rm, gctx, attachment.handle)
     attachment.handle = {}
   case EmitterAttachment:
-    resources.destroy_emitter_handle(rm, attachment.handle)
+    resources.destroy_emitter(rm, attachment.handle)
     attachment.handle = {}
   case ForceFieldAttachment:
-    resources.destroy_forcefield_handle(rm, attachment.handle)
+    resources.destroy_forcefield(rm, attachment.handle)
     attachment.handle = {}
   case SpriteAttachment:
-    resources.destroy_sprite_handle(rm, attachment.sprite_handle)
+    resources.destroy_sprite(rm, attachment.sprite_handle)
     attachment.sprite_handle = {}
   case MeshAttachment:
     resources.mesh_unref(rm, attachment.handle)
@@ -193,7 +193,10 @@ destroy_node :: proc(
   }
 }
 
-detach :: proc(nodes: resources.Pool(Node), child_handle: resources.NodeHandle) {
+detach :: proc(
+  nodes: resources.Pool(Node),
+  child_handle: resources.NodeHandle,
+) {
   child_node := cont.get(nodes, child_handle)
   if child_node == nil {
     return
@@ -339,7 +342,6 @@ spawn :: proc(
   rm: ^resources.Manager = nil,
 ) -> (
   handle: resources.NodeHandle,
-  node: ^Node,
   ok: bool,
 ) {
   return spawn_child(self, self.root, position, attachment, rm)
@@ -353,22 +355,22 @@ spawn_child :: proc(
   rm: ^resources.Manager = nil,
 ) -> (
   handle: resources.NodeHandle,
-  node: ^Node,
   ok: bool,
 ) {
-    handle, node = cont.alloc(&self.nodes, resources.NodeHandle) or_return
-    _init_node_with_attachment(node, attachment, handle, rm)
-    geometry.transform_translate(
-      &node.transform,
-      position.x,
-      position.y,
-      position.z,
-    )
-    attach(self.nodes, parent, handle)
-    if rm != nil {
-      _upload_node_to_gpu(handle, node, rm)
-    }
-    return handle, node, true
+  node: ^Node
+  handle, node = cont.alloc(&self.nodes, resources.NodeHandle) or_return
+  _init_node_with_attachment(node, attachment, handle, rm)
+  geometry.translate(
+    &node.transform,
+    position.x,
+    position.y,
+    position.z,
+  )
+  attach(self.nodes, parent, handle)
+  if rm != nil {
+    _upload_node_to_gpu(handle, node, rm)
+  }
+  return handle, true
 }
 
 init :: proc(world: ^World) {
@@ -386,7 +388,10 @@ register_animatable_node :: proc(world: ^World, handle: resources.NodeHandle) {
   append(&world.animatable_nodes, handle)
 }
 
-unregister_animatable_node :: proc(world: ^World, handle: resources.NodeHandle) {
+unregister_animatable_node :: proc(
+  world: ^World,
+  handle: resources.NodeHandle,
+) {
   if i, found := slice.linear_search(world.animatable_nodes[:], handle);
      found {
     unordered_remove(&world.animatable_nodes, i)
@@ -507,7 +512,7 @@ traverse :: proc(
     visibility_changed :=
       current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
-    is_dirty := transform_update_local(&current_node.transform)
+    is_dirty := update_local(&current_node.transform)
     if visibility_changed {
       update_node_tags(current_node)
     }
@@ -550,7 +555,7 @@ traverse :: proc(
     if entry.parent_is_dirty || is_dirty || has_bone_socket {
       // Bone socket provides an additional transform layer between parent and local
       // transform_update_world will multiply: (parent * bone_socket) * local_matrix
-      transform_update_world(
+      update_world(
         &current_node.transform,
         entry.parent_transform * bone_socket_transform,
       )
@@ -678,7 +683,11 @@ assign_light_to_node :: proc(
   if light, ok := cont.get(rm.lights, attachment.handle); ok {
     light.node_handle = node_handle
     light.node_index = node_handle.index
-    gpu.write(&rm.lights_buffer.buffer, &light.data, int(attachment.handle.index))
+    gpu.write(
+      &rm.lights_buffer.buffer,
+      &light.data,
+      int(attachment.handle.index),
+    )
   }
 }
 
@@ -784,13 +793,7 @@ _ensure_actor_pool :: proc(world: ^World, $T: typeid) -> ^ActorPool(T) {
     ) {
       return actor_alloc(cast(^ActorPool(T))pool_ptr, node_handle)
     },
-    get_fn = proc(
-      pool_ptr: rawptr,
-      handle: ActorHandle,
-    ) -> (
-      rawptr,
-      bool,
-    ) {
+    get_fn = proc(pool_ptr: rawptr, handle: ActorHandle) -> (rawptr, bool) {
       return actor_get(cast(^ActorPool(T))pool_ptr, handle)
     },
     free_fn = proc(pool_ptr: rawptr, handle: ActorHandle) -> bool {
@@ -871,11 +874,7 @@ get_actor :: proc(
   return cast(^Actor(T))actor_ptr, true
 }
 
-free_actor :: proc(
-  world: ^World,
-  $T: typeid,
-  handle: ActorHandle,
-) -> bool {
+free_actor :: proc(world: ^World, $T: typeid, handle: ActorHandle) -> bool {
   entry, pool_exists := world.actor_pools[typeid_of(T)]
   if !pool_exists do return false
   return entry.free_fn(entry.pool_ptr, handle)

@@ -79,7 +79,7 @@ init :: proc(
   }
   self.sprite_quad_mesh = resources.create_mesh(gctx, rm, quad_geom) or_return
   defer if ret != .SUCCESS {
-    resources.mesh_destroy_handle(rm, self.sprite_quad_mesh)
+    resources.destroy_mesh(rm, self.sprite_quad_mesh)
   }
   create_transparent_pipelines(
     gctx,

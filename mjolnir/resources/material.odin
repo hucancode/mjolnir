@@ -130,17 +130,15 @@ create_material :: proc(
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-  auto_purge := false,
+  auto_purge: bool = false,
 ) -> (
   handle: MaterialHandle,
-  ret: vk.Result,
-) {
+  ok: bool,
+) #optional_ok {
   mat: ^Material
-  ok: bool
-  handle, mat, ok = cont.alloc(&rm.materials, MaterialHandle)
-  if !ok {
-    log.error("Failed to allocate material: pool capacity reached")
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  handle, mat = cont.alloc(&rm.materials, MaterialHandle) or_return
+  defer if !ok {
+    cont.free(&rm.materials, handle)
   }
   material_init(
     mat,
@@ -157,49 +155,10 @@ create_material :: proc(
     base_color_factor,
   )
   mat.auto_purge = auto_purge
-  material_upload_gpu_data(rm, handle, mat) or_return
-  log.infof(
-    "Material created: albedo=%d metallic_roughness=%d normal=%d emissive=%d",
-    mat.albedo.index,
-    mat.metallic_roughness.index,
-    mat.normal.index,
-    mat.emissive.index,
-  )
-  return handle, .SUCCESS
-}
-
-create_material_handle :: proc(
-  rm: ^Manager,
-  features: ShaderFeatureSet = {},
-  type: MaterialType = .PBR,
-  albedo_handle: Image2DHandle = {},
-  metallic_roughness_handle: Image2DHandle = {},
-  normal_handle: Image2DHandle = {},
-  emissive_handle: Image2DHandle = {},
-  occlusion_handle: Image2DHandle = {},
-  metallic_value: f32 = 0.0,
-  roughness_value: f32 = 1.0,
-  emissive_value: f32 = 0.0,
-  base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> (
-  handle: MaterialHandle,
-  ok: bool,
-) #optional_ok {
-  h, ret := create_material(
-    rm,
-    features,
-    type,
-    albedo_handle,
-    metallic_roughness_handle,
-    normal_handle,
-    emissive_handle,
-    occlusion_handle,
-    metallic_value,
-    roughness_value,
-    emissive_value,
-    base_color_factor,
-  )
-  return h, ret == .SUCCESS
+  if material_upload_gpu_data(rm, handle, mat) != .SUCCESS {
+    return {}, false
+  }
+  return handle, true
 }
 
 init_builtin_materials :: proc(self: ^Manager) -> vk.Result {

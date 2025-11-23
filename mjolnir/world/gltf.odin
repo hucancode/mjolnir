@@ -218,17 +218,15 @@ load_materials_batch :: proc(
   materials: []^cgltf.material,
   texture_cache: ^map[^cgltf.texture]resources.Image2DHandle,
   material_cache: ^map[^cgltf.material]resources.MaterialHandle,
-) -> cgltf.result {
+) -> (ret: cgltf.result) {
+  ret = .success
   for gltf_mat in materials do if gltf_mat != nil {
     albedo, metallic_roughness, normal, emissive, occlusion, features := load_material_textures(gltf_mat, texture_cache)
-    material_handle, ret := resources.create_material(rm, features, .PBR, albedo, metallic_roughness, normal, emissive, occlusion)
-    if ret != .SUCCESS {
-      // TOOD: clean up textures
-      return .invalid_gltf
+    defer if ret != .success {
+      // TODO: clean up textures
     }
-    if mat := cont.get(rm.materials, material_handle); mat != nil {
-      mat.auto_purge = true
-    }
+    material_handle, ok := resources.create_material(rm, features, .PBR, albedo, metallic_roughness, normal, emissive, occlusion, auto_purge = true)
+    if !ok do return .invalid_gltf
     resources.texture_2d_ref(rm, albedo)
     resources.texture_2d_ref(rm, metallic_roughness)
     resources.texture_2d_ref(rm, normal)
@@ -535,7 +533,10 @@ construct_scene :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := cont.alloc(&world.nodes, resources.NodeHandle) or_continue
+    node_handle, node := cont.alloc(
+      &world.nodes,
+      resources.NodeHandle,
+    ) or_continue
     init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
@@ -582,12 +583,6 @@ construct_scene :: proc(
         }
         skinning.root_bone_index = skin_data.root_bone_idx
         resources.compute_bone_lengths(skinning)
-        if resources.mesh_upload_gpu_data(rm, mesh_handle, mesh) != .SUCCESS {
-          log.error("Failed to write skinned mesh data to GPU")
-          resources.mesh_destroy(mesh, rm)
-          cont.free(&rm.meshes, mesh_handle)
-          continue
-        }
         node.attachment = MeshAttachment {
           handle = mesh_handle,
           material = geometry_data.material_handle,
