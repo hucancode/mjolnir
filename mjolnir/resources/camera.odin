@@ -598,9 +598,7 @@ camera_viewport_to_world_ray :: proc(
   ray_eye = [4]f32{ray_eye.x, ray_eye.y, -1.0, 0.0}
   // Ray in world space
   ray_world_4 := inv_view * ray_eye
-  ray_dir = linalg.normalize(
-    [3]f32{ray_world_4.x, ray_world_4.y, ray_world_4.z},
-  )
+  ray_dir = linalg.normalize(ray_world_4.xyz)
   ray_origin = camera.position
   return ray_origin, ray_dir
 }

@@ -39,65 +39,59 @@ FanCollider :: struct {
 }
 
 Collider :: struct {
-  type:   ColliderType,
   offset: [3]f32,
-  shape:  ColliderShape,
+  shape:  union {
+    SphereCollider,
+    BoxCollider,
+    CapsuleCollider,
+    CylinderCollider,
+    FanCollider,
+  },
 }
 
-ColliderShape :: union {
-  SphereCollider,
-  BoxCollider,
-  CapsuleCollider,
-  CylinderCollider,
-  FanCollider,
+collider_sphere :: proc(radius: f32 = 1.0, offset: [3]f32 = {}) -> Collider {
+  return Collider{offset = offset, shape = SphereCollider{radius = radius}}
 }
 
-collider_create_sphere :: proc(radius: f32, offset: [3]f32 = {}) -> Collider {
-  return Collider {
-    type = .Sphere,
-    offset = offset,
-    shape = SphereCollider{radius = radius},
-  }
-}
-
-collider_create_box :: proc(
+collider_box :: proc(
   half_extents: [3]f32,
   offset: [3]f32 = {},
   rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> Collider {
   return Collider {
-    type = .Box,
     offset = offset,
     shape = BoxCollider{half_extents = half_extents, rotation = rotation},
   }
 }
 
-collider_create_capsule :: proc(
+collider_capsule :: proc(
   radius: f32,
   height: f32,
   offset: [3]f32 = {},
 ) -> Collider {
   return Collider {
-    type = .Capsule,
     offset = offset,
     shape = CapsuleCollider{radius = radius, height = height},
   }
 }
 
-collider_create_cylinder :: proc(
+collider_cylinder :: proc(
   radius: f32,
   height: f32,
   offset: [3]f32 = {},
   rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> Collider {
   return Collider {
-    type = .Cylinder,
     offset = offset,
-    shape = CylinderCollider{radius = radius, height = height, rotation = rotation},
+    shape = CylinderCollider {
+      radius = radius,
+      height = height,
+      rotation = rotation,
+    },
   }
 }
 
-collider_create_fan :: proc(
+collider_fan :: proc(
   radius: f32,
   height: f32,
   angle: f32,
@@ -105,58 +99,54 @@ collider_create_fan :: proc(
   rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> Collider {
   return Collider {
-    type = .Fan,
     offset = offset,
-    shape = FanCollider{radius = radius, height = height, angle = angle, rotation = rotation},
+    shape = FanCollider {
+      radius = radius,
+      height = height,
+      angle = angle,
+      rotation = rotation,
+    },
   }
 }
 
-collider_get_aabb :: proc(
-  collider: ^Collider,
-  position: [3]f32,
-) -> geometry.Aabb {
-  center := position + collider.offset
-  switch collider.type {
-  case .Sphere:
-    sphere := collider.shape.(SphereCollider)
-    r := [3]f32{sphere.radius, sphere.radius, sphere.radius}
+collider_get_aabb :: proc(self: ^Collider, position: [3]f32) -> geometry.Aabb {
+  center := position + self.offset
+  switch sh in self.shape {
+  case SphereCollider:
+    r := [3]f32{sh.radius, sh.radius, sh.radius}
     return geometry.Aabb{min = center - r, max = center + r}
-  case .Box:
-    box := collider.shape.(BoxCollider)
+  case BoxCollider:
     obb := geometry.Obb {
       center       = center,
-      half_extents = box.half_extents,
-      rotation     = box.rotation,
+      half_extents = sh.half_extents,
+      rotation     = sh.rotation,
     }
     return geometry.obb_to_aabb(obb)
-  case .Capsule:
-    capsule := collider.shape.(CapsuleCollider)
-    r := capsule.radius
-    h := capsule.height * 0.5
+  case CapsuleCollider:
+    r := sh.radius
+    h := sh.height * 0.5
     extents := [3]f32{r, h + r, r}
     return geometry.Aabb{min = center - extents, max = center + extents}
-  case .Cylinder:
-    cylinder := collider.shape.(CylinderCollider)
-    r := cylinder.radius
-    h := cylinder.height * 0.5
+  case CylinderCollider:
+    r := sh.radius
+    h := sh.height * 0.5
     // Conservative AABB for rotated cylinder
     half_extents := [3]f32{r, h, r}
     obb := geometry.Obb {
       center       = center,
       half_extents = half_extents,
-      rotation     = cylinder.rotation,
+      rotation     = sh.rotation,
     }
     return geometry.obb_to_aabb(obb)
-  case .Fan:
-    fan := collider.shape.(FanCollider)
-    r := fan.radius
-    h := fan.height * 0.5
+  case FanCollider:
+    r := sh.radius
+    h := sh.height * 0.5
     // Conservative AABB for fan (treat as full cylinder)
     half_extents := [3]f32{r, h, r}
     obb := geometry.Obb {
       center       = center,
       half_extents = half_extents,
-      rotation     = fan.rotation,
+      rotation     = sh.rotation,
     }
     return geometry.obb_to_aabb(obb)
   }

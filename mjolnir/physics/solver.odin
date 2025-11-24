@@ -26,7 +26,7 @@ prepare_contact :: proc(
     contact.normal_mass = 0
   }
   tangent1, tangent2 := compute_tangent_basis(contact.normal)
-  for i in 0 ..< 2 {
+  #unroll for i in 0 ..< 2 {
     tangent := i == 0 ? tangent1 : tangent2
     r_a_cross_t := linalg.cross(r_a, tangent)
     r_b_cross_t := linalg.cross(r_b, tangent)
@@ -73,14 +73,14 @@ warmstart_contact :: proc(
   r_a := contact.point - pos_a
   r_b := contact.point - pos_b
   impulse_n := contact.normal * contact.normal_impulse
-  rigid_body_apply_impulse_at_point(body_a, -impulse_n, contact.point, pos_a)
-  rigid_body_apply_impulse_at_point(body_b, impulse_n, contact.point, pos_b)
+  apply_impulse_at_point(body_a, -impulse_n, contact.point, pos_a)
+  apply_impulse_at_point(body_b, impulse_n, contact.point, pos_b)
   tangent1, tangent2 := compute_tangent_basis(contact.normal)
   tangents := [2][3]f32{tangent1, tangent2}
-  for i in 0 ..< 2 {
+  #unroll for i in 0 ..< 2 {
     impulse_t := tangents[i] * contact.tangent_impulse[i]
-    rigid_body_apply_impulse_at_point(body_a, -impulse_t, contact.point, pos_a)
-    rigid_body_apply_impulse_at_point(body_b, impulse_t, contact.point, pos_b)
+    apply_impulse_at_point(body_a, -impulse_t, contact.point, pos_a)
+    apply_impulse_at_point(body_b, impulse_t, contact.point, pos_b)
   }
 }
 
@@ -107,12 +107,12 @@ resolve_contact :: proc(
   contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
   delta_impulse = contact.normal_impulse - old_impulse
   impulse := contact.normal * delta_impulse
-  rigid_body_apply_impulse_at_point(body_a, -impulse, contact.point, pos_a)
-  rigid_body_apply_impulse_at_point(body_b, impulse, contact.point, pos_b)
+  apply_impulse_at_point(body_a, -impulse, contact.point, pos_a)
+  apply_impulse_at_point(body_b, impulse, contact.point, pos_b)
   tangent1, tangent2 := compute_tangent_basis(contact.normal)
   tangents := [2][3]f32{tangent1, tangent2}
   max_friction := contact.friction * contact.normal_impulse
-  for i in 0 ..< 2 {
+  #unroll for i in 0 ..< 2 {
     vel_a = body_a.velocity + linalg.cross(body_a.angular_velocity, r_a)
     vel_b = body_b.velocity + linalg.cross(body_b.angular_velocity, r_b)
     velocity_along_tangent := linalg.dot(vel_b - vel_a, tangents[i])
@@ -124,8 +124,8 @@ resolve_contact :: proc(
       max_friction,
     )
     impulse_t := tangents[i] * (contact.tangent_impulse[i] - old_impulse_t)
-    rigid_body_apply_impulse_at_point(body_a, -impulse_t, contact.point, pos_a)
-    rigid_body_apply_impulse_at_point(body_b, impulse_t, contact.point, pos_b)
+    apply_impulse_at_point(body_a, -impulse_t, contact.point, pos_a)
+    apply_impulse_at_point(body_b, impulse_t, contact.point, pos_b)
   }
 }
 
@@ -136,9 +136,7 @@ resolve_contact_no_bias :: proc(
   pos_a: [3]f32,
   pos_b: [3]f32,
 ) {
-  if body_a.is_static && body_b.is_static {
-    return
-  }
+  if body_a.is_static && body_b.is_static do return
   r_a := contact.point - pos_a
   r_b := contact.point - pos_b
   vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, r_a)
@@ -148,8 +146,8 @@ resolve_contact_no_bias :: proc(
   old_impulse := contact.normal_impulse
   contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
   impulse := contact.normal * (contact.normal_impulse - old_impulse)
-  rigid_body_apply_impulse_at_point(body_a, -impulse, contact.point, pos_a)
-  rigid_body_apply_impulse_at_point(body_b, impulse, contact.point, pos_b)
+  apply_impulse_at_point(body_a, -impulse, contact.point, pos_a)
+  apply_impulse_at_point(body_b, impulse, contact.point, pos_b)
   tangent1, tangent2 := compute_tangent_basis(contact.normal)
   tangents := [2][3]f32{tangent1, tangent2}
   max_friction := contact.friction * contact.normal_impulse
@@ -165,8 +163,8 @@ resolve_contact_no_bias :: proc(
       max_friction,
     )
     impulse_t := tangents[i] * (contact.tangent_impulse[i] - old_impulse_t)
-    rigid_body_apply_impulse_at_point(body_a, -impulse_t, contact.point, pos_a)
-    rigid_body_apply_impulse_at_point(body_b, impulse_t, contact.point, pos_b)
+    apply_impulse_at_point(body_a, -impulse_t, contact.point, pos_a)
+    apply_impulse_at_point(body_b, impulse_t, contact.point, pos_b)
   }
 }
 

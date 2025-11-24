@@ -24,7 +24,10 @@ physics_raycast :: proc(
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
 ) -> PhysicsRayHit {
-  closest_hit := PhysicsRayHit{hit = false, t = max_dist}
+  closest_hit := PhysicsRayHit {
+    hit = false,
+    t   = max_dist,
+  }
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   geometry.bvh_query_ray(&physics.spatial_index, ray, max_dist, &candidates)
   for candidate in candidates {
@@ -66,10 +69,10 @@ physics_raycast_single :: proc(
     if hit {
       return PhysicsRayHit {
         body_handle = candidate.handle,
-        t           = t,
-        point       = ray.origin + ray.direction * t,
-        normal      = normal,
-        hit         = true,
+        t = t,
+        point = ray.origin + ray.direction * t,
+        normal = normal,
+        hit = true,
       }
     }
   }
@@ -88,47 +91,47 @@ raycast_collider :: proc(
   hit: bool,
 ) {
   center := position + collider.offset
-  switch collider.type {
-  case .Sphere:
-    sphere := collider.shape.(SphereCollider)
-    sphere_prim := geometry.Sphere{center = center, radius = sphere.radius}
+  switch shape in collider.shape {
+  case SphereCollider:
+    sphere_prim := geometry.Sphere {
+      center = center,
+      radius = shape.radius,
+    }
     hit, t = geometry.ray_sphere_intersection(ray, sphere_prim, max_dist)
     if hit {
       hit_point := ray.origin + ray.direction * t
       normal = linalg.normalize(hit_point - center)
     }
     return t, normal, hit
-  case .Box:
-    box := collider.shape.(BoxCollider)
+  case BoxCollider:
     obb := geometry.Obb {
       center       = center,
-      half_extents = box.half_extents,
-      rotation     = box.rotation,
+      half_extents = shape.half_extents,
+      rotation     = shape.rotation,
     }
     // Use AABB intersection for axis-aligned boxes
-    if is_identity_quaternion(box.rotation) {
+    if is_identity_quaternion(shape.rotation) {
       bounds := geometry.Aabb {
-        min = center - box.half_extents,
-        max = center + box.half_extents,
+        min = center - shape.half_extents,
+        max = center + shape.half_extents,
       }
-      inv_dir := [3]f32 {
-        1.0 / ray.direction.x,
-        1.0 / ray.direction.y,
-        1.0 / ray.direction.z,
-      }
-      t_near, t_far := geometry.ray_aabb_intersection(ray.origin, inv_dir, bounds)
+      inv_dir := 1.0 / ray.direction
+      t_near, t_far := geometry.ray_aabb_intersection(
+        ray.origin,
+        inv_dir,
+        bounds,
+      )
       if t_near <= t_far && t_far >= 0 && t_near <= max_dist {
         t = max(0, t_near)
         hit_point := ray.origin + ray.direction * t
         // Compute normal based on which face was hit
         epsilon :: 0.0001
-        normal = {}
-        if math.abs(hit_point.x - bounds.min.x) < epsilon do normal = {-1, 0, 0}
-        else if math.abs(hit_point.x - bounds.max.x) < epsilon do normal = {1, 0, 0}
-        else if math.abs(hit_point.y - bounds.min.y) < epsilon do normal = {0, -1, 0}
-        else if math.abs(hit_point.y - bounds.max.y) < epsilon do normal = {0, 1, 0}
-        else if math.abs(hit_point.z - bounds.min.z) < epsilon do normal = {-1, 0, 0}
-        else if math.abs(hit_point.z - bounds.max.z) < epsilon do normal = {0, 0, 1}
+        if math.abs(hit_point.x - bounds.min.x) < epsilon do normal = -linalg.VECTOR3F32_X_AXIS
+        else if math.abs(hit_point.x - bounds.max.x) < epsilon do normal = linalg.VECTOR3F32_X_AXIS
+        else if math.abs(hit_point.y - bounds.min.y) < epsilon do normal = -linalg.VECTOR3F32_Y_AXIS
+        else if math.abs(hit_point.y - bounds.max.y) < epsilon do normal = linalg.VECTOR3F32_Y_AXIS
+        else if math.abs(hit_point.z - bounds.min.z) < epsilon do normal = -linalg.VECTOR3F32_Z_AXIS
+        else if math.abs(hit_point.z - bounds.max.z) < epsilon do normal = linalg.VECTOR3F32_Z_AXIS
         return t, normal, true
       }
       return 0, {}, false
@@ -136,23 +139,36 @@ raycast_collider :: proc(
     // For rotated boxes, test via GJK (expensive fallback)
     // For now, just test AABB
     bounds := geometry.obb_to_aabb(obb)
-    inv_dir := [3]f32{1.0 / ray.direction.x, 1.0 / ray.direction.y, 1.0 / ray.direction.z}
-    t_near, t_far := geometry.ray_aabb_intersection(ray.origin, inv_dir, bounds)
+    inv_dir := [3]f32 {
+      1.0 / ray.direction.x,
+      1.0 / ray.direction.y,
+      1.0 / ray.direction.z,
+    }
+    t_near, t_far := geometry.ray_aabb_intersection(
+      ray.origin,
+      inv_dir,
+      bounds,
+    )
     if t_near <= t_far && t_far >= 0 && t_near <= max_dist {
       t = max(0, t_near)
-      return t, {0, 1, 0}, true // approximate normal
+      return t, linalg.VECTOR3F32_Y_AXIS, true // approximate normal
     }
     return 0, {}, false
-  case .Capsule:
-    capsule := collider.shape.(CapsuleCollider)
-    h := capsule.height * 0.5
+  case CapsuleCollider:
+    h := shape.height * 0.5
     line_start := center + [3]f32{0, -h, 0}
     line_end := center + [3]f32{0, h, 0}
     // Raycast as sphere sweep along line segment
     // Find closest point on segment to ray
     // For now, use simplified approach: test sphere at each endpoint
-    s1 := geometry.Sphere{center = line_start, radius = capsule.radius}
-    s2 := geometry.Sphere{center = line_end, radius = capsule.radius}
+    s1 := geometry.Sphere {
+      center = line_start,
+      radius = shape.radius,
+    }
+    s2 := geometry.Sphere {
+      center = line_end,
+      radius = shape.radius,
+    }
     hit1, t1 := geometry.ray_sphere_intersection(ray, s1, max_dist)
     hit2, t2 := geometry.ray_sphere_intersection(ray, s2, max_dist)
     if hit1 && hit2 {
@@ -173,15 +189,19 @@ raycast_collider :: proc(
       return t, normal, true
     }
     return 0, {}, false
-  case .Cylinder, .Fan:
+  case CylinderCollider, FanCollider:
     // Cylinder and Fan use GJK for collision, but for raycasting we'll use a simplified approach
     // Transform to AABB for now
     bounds := collider_get_aabb(collider, position)
-    inv_dir := [3]f32{1.0 / ray.direction.x, 1.0 / ray.direction.y, 1.0 / ray.direction.z}
-    t_near, t_far := geometry.ray_aabb_intersection(ray.origin, inv_dir, bounds)
+    inv_dir := 1.0 / ray.direction
+    t_near, t_far := geometry.ray_aabb_intersection(
+      ray.origin,
+      inv_dir,
+      bounds,
+    )
     if t_near <= t_far && t_far >= 0 && t_near <= max_dist {
       t = max(0, t_near)
-      return t, {0, 1, 0}, true // approximate normal
+      return t, linalg.VECTOR3F32_Y_AXIS, true // approximate normal
     }
     return 0, {}, false
   }
@@ -239,9 +259,7 @@ physics_query_box :: proc(
 
 // Helper: Closest point on 3D line segment
 @(private)
-closest_point_on_segment :: proc "contextless" (
-  p, a, b: [3]f32,
-) -> [3]f32 {
+closest_point_on_segment :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
   ab := b - a
   ap := p - a
   segment_length_sq := linalg.length2(ab)
@@ -260,34 +278,33 @@ test_collider_sphere_overlap :: proc(
   sphere_radius: f32,
 ) -> bool {
   center := collider_pos + collider.offset
-  switch collider.type {
-  case .Sphere:
-    s := collider.shape.(SphereCollider)
-    dist := linalg.distance(center, sphere_center)
-    return dist <= s.radius + sphere_radius
-  case .Box:
-    box := collider.shape.(BoxCollider)
+  switch shape in collider.shape {
+  case SphereCollider:
+    len := shape.radius + sphere_radius
+    return linalg.length2(center - sphere_center) <= len * len
+  case BoxCollider:
     obb := geometry.Obb {
       center       = center,
-      half_extents = box.half_extents,
-      rotation     = box.rotation,
+      half_extents = shape.half_extents,
+      rotation     = shape.rotation,
     }
-    _, _, _, hit := geometry.obb_sphere_intersect(obb, sphere_center, sphere_radius)
+    _, _, _, hit := geometry.obb_sphere_intersect(
+      obb,
+      sphere_center,
+      sphere_radius,
+    )
     return hit
-  case .Capsule:
-    capsule := collider.shape.(CapsuleCollider)
-    h := capsule.height * 0.5
+  case CapsuleCollider:
+    h := shape.height * 0.5
     line_start := center + [3]f32{0, -h, 0}
     line_end := center + [3]f32{0, h, 0}
     closest := closest_point_on_segment(sphere_center, line_start, line_end)
-    dist := linalg.distance(closest, sphere_center)
-    return dist <= capsule.radius + sphere_radius
-  case .Cylinder:
-    cylinder := collider.shape.(CylinderCollider)
-    return test_point_cylinder(sphere_center, center, &cylinder)
-  case .Fan:
-    fan := collider.shape.(FanCollider)
-    return test_point_fan(sphere_center, center, &fan)
+    len := shape.radius + sphere_radius
+    return linalg.length2(closest - sphere_center) <= len * len
+  case CylinderCollider:
+    return test_point_cylinder(sphere_center, center, shape)
+  case FanCollider:
+    return test_point_fan(sphere_center, center, shape)
   }
   return false
 }

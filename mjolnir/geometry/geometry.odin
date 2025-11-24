@@ -238,8 +238,7 @@ point_in_polygon_2d :: proc "contextless" (
 calc_tri_normal :: proc "contextless" (v0, v1, v2: [3]f32) -> (norm: [3]f32) {
   e0 := v1 - v0
   e1 := v2 - v0
-  norm = linalg.cross(e0, e1)
-  norm = linalg.normalize(norm)
+  norm = linalg.normalize(linalg.cross(e0, e1))
   return
 }
 

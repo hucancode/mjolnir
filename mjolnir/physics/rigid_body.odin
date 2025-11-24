@@ -27,136 +27,131 @@ RigidBody :: struct {
   cross_sectional_area: f32, // m2 - set to 0 for automatic calculation
 }
 
-rigid_body_create :: proc(
+rigid_body_init :: proc(
+  self: ^RigidBody,
   node_handle: resources.NodeHandle,
   mass: f32,
   is_static := false,
   enable_rotation := true,
   trigger_only := false,
-) -> RigidBody {
-  return RigidBody {
-    node_handle          = node_handle,
-    mass                 = mass,
-    inv_mass             = is_static ? 0.0 : 1.0 / mass,
-    restitution          = 0.2, // Low bounce - objects stay in contact
-    friction             = 0.8, // High friction - sliding slows down quickly
-    linear_damping       = 0.01, // 1% velocity loss per second
-    angular_damping      = 0.05, // 5% angular velocity loss per second
-    is_static            = is_static,
-    enable_rotation      = enable_rotation, // turn this to false to stop rotating body (for character simulation)
-    trigger_only         = trigger_only, // turn this to true to stop response to collision resolution
-    gravity_scale        = 1.0,
-    drag_coefficient     = 0.47, // sphere drag coefficient (0.47), cube ~1.05, use 0.1-2.0 range
-    cross_sectional_area = 0.0, // 0 = auto-calculate from mass
-    inertia              = is_static ? {} : linalg.MATRIX3F32_IDENTITY,
-    inv_inertia          = is_static ? {} : linalg.MATRIX3F32_IDENTITY,
-  }
+) {
+  self.node_handle = node_handle
+  self.mass = mass
+  self.inv_mass = is_static ? 0.0 : 1.0 / mass
+  self.restitution = 0.2 // Low bounce - objects stay in contact
+  self.friction = 0.8 // High friction - sliding slows down quickly
+  self.linear_damping = 0.01 // 1% velocity loss per second
+  self.angular_damping = 0.05 // 5% angular velocity loss per second
+  self.is_static = is_static
+  self.enable_rotation = enable_rotation // turn this to false to stop rotating body (for character simulation)
+  self.trigger_only = trigger_only // turn this to true to stop response to collision resolution
+  self.gravity_scale = 1.0
+  self.drag_coefficient = 0.47 // sphere drag coefficient (0.47), cube ~1.05, use 0.1-2.0 range
+  self.cross_sectional_area = 0.0 // 0 = auto-calculate from mass
+  self.inertia = is_static ? {} : linalg.MATRIX3F32_IDENTITY
+  self.inv_inertia = is_static ? {} : linalg.MATRIX3F32_IDENTITY
 }
 
-rigid_body_set_mass :: proc(body: ^RigidBody, mass: f32) {
-  if body.is_static do return
+set_mass :: proc(self: ^RigidBody, mass: f32) {
+  if self.is_static do return
   if mass <= 0.0 do return
-  old_mass := body.mass
-  body.mass = mass
-  body.inv_mass = 1.0 / mass
+  old_mass := self.mass
+  self.mass = mass
+  self.inv_mass = 1.0 / mass
   // Scale inertia tensor proportionally if it was set
   if old_mass > 0.0 {
     mass_ratio := mass / old_mass
-    body.inertia = mass_ratio * body.inertia
-    body.inv_inertia = linalg.matrix3_inverse(body.inertia)
+    self.inertia = mass_ratio * self.inertia
+    self.inv_inertia = linalg.matrix3_inverse(self.inertia)
   }
 }
 
-rigid_body_set_box_inertia :: proc(body: ^RigidBody, half_extents: [3]f32) {
-  if body.is_static do return
-  m := body.mass
+set_box_inertia :: proc(self: ^RigidBody, half_extents: [3]f32) {
+  if self.is_static do return
+  m := self.mass
   v := half_extents * half_extents
-  body.inertia = linalg.matrix3_scale(
+  self.inertia = linalg.matrix3_scale(
     [3]f32{v.y + v.z, v.x + v.z, v.x + v.y} * m / 3.0,
   )
-  body.inv_inertia = linalg.matrix3_inverse(body.inertia)
+  self.inv_inertia = linalg.matrix3_inverse(self.inertia)
 }
 
-rigid_body_set_sphere_inertia :: proc(body: ^RigidBody, radius: f32) {
-  if body.is_static do return
-  i := (2.0 / 5.0) * body.mass * radius * radius
-  body.inertia = linalg.matrix3_scale([3]f32{i, i, i})
-  body.inv_inertia = linalg.matrix3_inverse(body.inertia)
+set_sphere_inertia :: proc(self: ^RigidBody, radius: f32) {
+  if self.is_static do return
+  i := (2.0 / 5.0) * self.mass * radius * radius
+  self.inertia = linalg.matrix3_scale([3]f32{i, i, i})
+  self.inv_inertia = linalg.matrix3_inverse(self.inertia)
 }
 
-rigid_body_set_capsule_inertia :: proc(
-  body: ^RigidBody,
-  radius: f32,
-  height: f32,
-) {
-  if body.is_static do return
-  m := body.mass
+set_capsule_inertia :: proc(self: ^RigidBody, radius: f32, height: f32) {
+  if self.is_static do return
+  m := self.mass
   r2 := radius * radius
   h2 := height * height
   ix := (m / 12.0) * (3.0 * r2 + h2)
   iy := (m / 2.0) * r2
-  body.inertia = linalg.matrix3_scale([3]f32{ix, iy, ix})
-  body.inv_inertia = linalg.matrix3_inverse(body.inertia)
+  self.inertia = linalg.matrix3_scale([3]f32{ix, iy, ix})
+  self.inv_inertia = linalg.matrix3_inverse(self.inertia)
 }
 
-rigid_body_apply_force :: proc(body: ^RigidBody, force: [3]f32) {
-  if body.is_static do return
-  body.force += force
+apply_force :: proc(self: ^RigidBody, force: [3]f32) {
+  if self.is_static do return
+  self.force += force
 }
 
-rigid_body_apply_force_at_point :: proc(
-  body: ^RigidBody,
+apply_force_at_point :: proc(
+  self: ^RigidBody,
   force: [3]f32,
   point: [3]f32,
   center: [3]f32,
 ) {
-  if body.is_static do return
-  body.force += force
-  if !body.enable_rotation do return
+  if self.is_static do return
+  self.force += force
+  if !self.enable_rotation do return
   r := point - center
-  body.torque += linalg.cross(r, force)
+  self.torque += linalg.cross(r, force)
 }
 
-rigid_body_apply_impulse :: proc(body: ^RigidBody, impulse: [3]f32) {
-  if body.is_static do return
-  body.velocity += impulse * body.inv_mass
+apply_impulse :: proc(self: ^RigidBody, impulse: [3]f32) {
+  if self.is_static do return
+  self.velocity += impulse * self.inv_mass
 }
 
-rigid_body_apply_impulse_at_point :: proc(
-  body: ^RigidBody,
+apply_impulse_at_point :: proc(
+  self: ^RigidBody,
   impulse: [3]f32,
   point: [3]f32,
   center: [3]f32,
 ) {
-  if body.is_static do return
-  body.velocity += impulse * body.inv_mass
-  if !body.enable_rotation do return
+  if self.is_static do return
+  self.velocity += impulse * self.inv_mass
+  if !self.enable_rotation do return
   r := point - center
   angular_impulse := linalg.cross(r, impulse)
-  body.angular_velocity += body.inv_inertia * angular_impulse
+  self.angular_velocity += self.inv_inertia * angular_impulse
 }
 
-rigid_body_integrate :: proc(body: ^RigidBody, dt: f32) {
-  if body.is_static || body.is_kinematic || body.trigger_only do return
+integrate :: proc(self: ^RigidBody, dt: f32) {
+  if self.is_static || self.is_kinematic || self.trigger_only do return
   // Apply forces
-  body.velocity += body.force * body.inv_mass * dt
-  if body.enable_rotation {
-    body.angular_velocity += (body.inv_inertia * body.torque) * dt
+  self.velocity += self.force * self.inv_mass * dt
+  if self.enable_rotation {
+    self.angular_velocity += (self.inv_inertia * self.torque) * dt
   }
   // Apply damping (exponential decay)
-  damping_factor := 1.0 - body.linear_damping
-  angular_damping_factor := 1.0 - body.angular_damping
-  body.velocity *= damping_factor
-  if body.enable_rotation {
-    body.angular_velocity *= angular_damping_factor
+  damping_factor := 1.0 - self.linear_damping
+  angular_damping_factor := 1.0 - self.angular_damping
+  self.velocity *= damping_factor
+  if self.enable_rotation {
+    self.angular_velocity *= angular_damping_factor
   } else {
-    body.angular_velocity = {}
+    self.angular_velocity = {}
   }
   // Clear forces
-  rigid_body_clear_forces(body)
+  clear_forces(self)
 }
 
-rigid_body_clear_forces :: proc(body: ^RigidBody) {
-  body.force = {}
-  body.torque = {}
+clear_forces :: proc(self: ^RigidBody) {
+  self.force = {}
+  self.torque = {}
 }

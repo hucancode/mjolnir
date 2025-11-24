@@ -11,14 +11,13 @@ import "core:math"
 import "core:math/linalg"
 import "vendor:glfw"
 
-demo_state: struct {
-  physics_world:   physics.PhysicsWorld,
-  cube_handle:     resources.NodeHandle,
-  ground_handle:   resources.NodeHandle,
-  cube_body:       physics.RigidBodyHandle,
-  ground_body:     physics.RigidBodyHandle,
-  time_since_jump: f32,
-}
+physics_world: physics.PhysicsWorld
+cube_handle: resources.NodeHandle
+ground_handle: resources.NodeHandle
+cube_body: physics.RigidBodyHandle
+ground_body: physics.RigidBodyHandle
+time_since_jump: f32
+
 
 JUMP_INTERVAL :: 5.0
 JUMP_FORCE :: 1000.0
@@ -34,37 +33,34 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir, geometry
-  physics.init(&demo_state.physics_world, {0, -10, 0})
+  using mjolnir
+  physics.init(&physics_world, {0, -10, 0})
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  demo_state.ground_handle = spawn(
+  ground_handle = spawn(
     engine,
     [3]f32{0, -0.5, 0},
     world.MeshAttachment{handle = ground_mesh, material = ground_mat},
   )
-  world.scale_xyz(&engine.world, demo_state.ground_handle, 40.0, 0.5, 40.0)
-  ground_node, ground_node_ok := cont.get(
-    engine.world.nodes,
-    demo_state.ground_handle,
-  )
+  world.scale_xyz(&engine.world, ground_handle, 40.0, 0.5, 40.0)
+  ground_node, ground_node_ok := cont.get(engine.world.nodes, ground_handle)
   if ground_node_ok {
-    body_handle, body, ok := physics.create_body(
-      &demo_state.physics_world,
-      demo_state.ground_handle,
+    body_handle, ok := physics.create_body(
+      &physics_world,
+      ground_handle,
       0.0,
       true,
     )
     if ok {
-      demo_state.ground_body = body_handle
-      collider := physics.collider_create_box([3]f32{40.0, 0.5, 40.0})
-      physics.add_collider(&demo_state.physics_world, body_handle, collider)
+      ground_body = body_handle
+      collider := physics.collider_box([3]f32{40.0, 0.5, 40.0})
+      physics.create_collider(&physics_world, body_handle, collider)
       log.info("Ground body created")
     }
   }
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
-  demo_state.cube_handle = spawn(
+  cube_handle = spawn(
     engine,
     [3]f32{0, 3, 0},
     world.MeshAttachment {
@@ -73,29 +69,27 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  cube_node, cube_node_ok := cont.get(
-    engine.world.nodes,
-    demo_state.cube_handle,
-  )
+  cube_node, cube_node_ok := cont.get(engine.world.nodes, cube_handle)
   if cube_node_ok {
-    body_handle, body, ok := physics.create_body(
-      &demo_state.physics_world,
-      demo_state.cube_handle,
+    body_handle, ok := physics.create_body(
+      &physics_world,
+      cube_handle,
       2.0,
       false,
     )
     if ok {
-      demo_state.cube_body = body_handle
-      collider := physics.collider_create_box([3]f32{1.0, 1.0, 1.0})
-      physics.add_collider(&demo_state.physics_world, body_handle, collider)
-      physics.rigid_body_set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
+      body := physics.get(&physics_world, body_handle)
+      cube_body = body_handle
+      collider := physics.collider_box([3]f32{1.0, 1.0, 1.0})
+      physics.create_collider(&physics_world, body_handle, collider)
+      physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
       log.info("Cube body created")
     }
   }
   if camera := get_main_camera(engine); camera != nil {
     resources.camera_look_at(camera, {8, 5, 8}, {0, 2, 0})
   }
-  demo_state.time_since_jump = 0.0
+  time_since_jump = 0.0
   log.info("====================================")
   log.info("CONTROLS:")
   log.info("  SPACE - Jump")
@@ -111,49 +105,40 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   if action != glfw.PRESS {
     return
   }
-  cube_body, body_ok := cont.get(
-    demo_state.physics_world.bodies,
-    demo_state.cube_body,
-  )
+  cube_body, body_ok := cont.get(physics_world.bodies, cube_body)
   if !body_ok {
     return
   }
 
   switch key {
   case glfw.KEY_SPACE:
-    demo_state.time_since_jump = 0.0
+    time_since_jump = 0.0
     apply_jump(engine)
   case glfw.KEY_1:
-    physics.rigid_body_set_mass(cube_body, 5.0)
-    physics.rigid_body_set_box_inertia(cube_body, [3]f32{1.0, 1.0, 1.0})
+    physics.set_mass(cube_body, 5.0)
+    physics.set_box_inertia(cube_body, [3]f32{1.0, 1.0, 1.0})
     log.info("Mass set to 5.0 kg (Light)")
   case glfw.KEY_2:
-    physics.rigid_body_set_mass(cube_body, 20.0)
-    physics.rigid_body_set_box_inertia(cube_body, [3]f32{1.0, 1.0, 1.0})
+    physics.set_mass(cube_body, 20.0)
+    physics.set_box_inertia(cube_body, [3]f32{1.0, 1.0, 1.0})
     log.info("Mass set to 20.0 kg (Medium)")
   case glfw.KEY_3:
-    physics.rigid_body_set_mass(cube_body, 50.0)
-    physics.rigid_body_set_box_inertia(cube_body, [3]f32{1.0, 1.0, 1.0})
+    physics.set_mass(cube_body, 50.0)
+    physics.set_box_inertia(cube_body, [3]f32{1.0, 1.0, 1.0})
     log.info("Mass set to 50.0 kg (Heavy)")
   }
 }
 
 apply_jump :: proc(engine: ^mjolnir.Engine) {
-  cube_body, body_ok := cont.get(
-    demo_state.physics_world.bodies,
-    demo_state.cube_body,
-  )
+  cube_body, body_ok := cont.get(physics_world.bodies, cube_body)
   if !body_ok do return
   jump_force := [3]f32{0, JUMP_FORCE, 0}
-  physics.rigid_body_apply_force(cube_body, jump_force)
+  physics.apply_force(cube_body, jump_force)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  demo_state.time_since_jump += delta_time
-  cube_body, body_ok := cont.get(
-    demo_state.physics_world.bodies,
-    demo_state.cube_body,
-  )
+  time_since_jump += delta_time
+  cube_body, body_ok := cont.get(physics_world.bodies, cube_body)
   if body_ok {
     // Horizontal movement controls (WASD) - continuous polling for smooth movement
     move_force := [3]f32{0, 0, 0}
@@ -170,12 +155,12 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       move_force.x += MOVEMENT_FORCE
     }
     if linalg.length(move_force) > 0.1 {
-      physics.rigid_body_apply_force(cube_body, move_force)
+      physics.apply_force(cube_body, move_force)
     }
   }
-  if demo_state.time_since_jump >= JUMP_INTERVAL {
-    demo_state.time_since_jump = 0.0
+  if time_since_jump >= JUMP_INTERVAL {
+    time_since_jump = 0.0
     apply_jump(engine)
   }
-  physics.step(&demo_state.physics_world, &engine.world, delta_time)
+  physics.step(&physics_world, &engine.world, delta_time)
 }

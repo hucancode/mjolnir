@@ -33,7 +33,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir, geometry
+  using mjolnir
   physics.init(&physics_world, {0, -20, 0}) // 2x earth gravity
   physics_world.enable_air_resistance = true
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
@@ -46,15 +46,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
   world.scale_xyz(&engine.world, ground_handle, 10.0, 0.5, 10.0)
   ground_node, ground_node_ok := cont.get(engine.world.nodes, ground_handle)
   if ground_node_ok {
-    body_handle, body, ok := physics.create_body(
+    body_handle, ok := physics.create_body(
       &physics_world,
       ground_handle,
       is_static = true,
     )
     if ok {
       ground_body = body_handle
-      collider := physics.collider_create_box([3]f32{10.0, 0.5, 10.0})
-      physics.add_collider(&physics_world, body_handle, collider)
+      collider := physics.collider_box([3]f32{10.0, 0.5, 10.0})
+      physics.create_collider(&physics_world, body_handle, collider)
       log.info("Ground body created")
     }
   }
@@ -72,16 +72,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
   mjolnir.scale(engine, sphere_handle, SPHERE_RADIUS)
   sphere_node, sphere_node_ok := cont.get(engine.world.nodes, sphere_handle)
   if sphere_node_ok {
-    body_handle, body, ok := physics.create_body(
+    body_handle, ok := physics.create_body(
       &physics_world,
       sphere_handle,
       is_static = true,
     )
     if ok {
+      body := physics.get(&physics_world, body_handle)
       sphere_body = body_handle
-      collider := physics.collider_create_sphere(SPHERE_RADIUS)
-      physics.add_collider(&physics_world, body_handle, collider)
-      physics.rigid_body_set_sphere_inertia(body, SPHERE_RADIUS)
+      collider := physics.collider_sphere(SPHERE_RADIUS)
+      physics.create_collider(&physics_world, body_handle, collider)
+      physics.set_sphere_inertia(body, SPHERE_RADIUS)
       log.info("Sphere body created with low friction (slippery surface)")
     }
   }
@@ -114,16 +115,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     cube_node, cube_node_ok := cont.get(engine.world.nodes, cube_handles[i])
     if cube_node_ok {
-      body_handle, body, ok := physics.create_body(
+      body_handle, ok := physics.create_body(
         &physics_world,
         cube_handles[i],
         50, // mass
       )
       if ok {
+        body := physics.get(&physics_world, body_handle)
         cube_bodies[i] = body_handle
-        collider := physics.collider_create_box([3]f32{1.0, 1.0, 1.0})
-        physics.add_collider(&physics_world, body_handle, collider)
-        physics.rigid_body_set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
+        collider := physics.collider_box([3]f32{1.0, 1.0, 1.0})
+        physics.create_collider(&physics_world, body_handle, collider)
+        physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
         log.infof(
           "Cube %d body created at position (%.2f, %.2f, %.2f)",
           i,

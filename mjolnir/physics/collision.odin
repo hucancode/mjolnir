@@ -58,9 +58,9 @@ collision_pair_eq :: proc "contextless" (
 
 test_sphere_sphere :: proc(
   pos_a: [3]f32,
-  sphere_a: ^SphereCollider,
+  sphere_a: SphereCollider,
   pos_b: [3]f32,
-  sphere_b: ^SphereCollider,
+  sphere_b: SphereCollider,
 ) -> (
   point: [3]f32,
   normal: [3]f32,
@@ -84,9 +84,9 @@ test_sphere_sphere :: proc(
 
 test_box_box :: proc(
   pos_a: [3]f32,
-  box_a: ^BoxCollider,
+  box_a: BoxCollider,
   pos_b: [3]f32,
-  box_b: ^BoxCollider,
+  box_b: BoxCollider,
 ) -> (
   point: [3]f32,
   normal: [3]f32,
@@ -153,11 +153,11 @@ test_box_box :: proc(
   return geometry.obb_obb_intersect(obb_a, obb_b)
 }
 
-test_sphere_box :: proc(
-  pos_sphere: [3]f32,
-  sphere: ^SphereCollider,
+test_box_sphere :: proc(
   pos_box: [3]f32,
-  box: ^BoxCollider,
+  box: BoxCollider,
+  pos_sphere: [3]f32,
+  sphere: SphereCollider,
 ) -> (
   closest: [3]f32,
   normal: [3]f32,
@@ -191,9 +191,9 @@ test_sphere_box :: proc(
 
 test_capsule_capsule :: proc(
   pos_a: [3]f32,
-  capsule_a: ^CapsuleCollider,
+  capsule_a: CapsuleCollider,
   pos_b: [3]f32,
-  capsule_b: ^CapsuleCollider,
+  capsule_b: CapsuleCollider,
 ) -> (
   point: [3]f32,
   normal: [3]f32,
@@ -227,11 +227,11 @@ test_capsule_capsule :: proc(
   return
 }
 
-test_sphere_capsule :: proc(
-  pos_sphere: [3]f32,
-  sphere: ^SphereCollider,
+test_capsule_sphere :: proc(
   pos_capsule: [3]f32,
-  capsule: ^CapsuleCollider,
+  capsule: CapsuleCollider,
+  pos_sphere: [3]f32,
+  sphere: SphereCollider,
 ) -> (
   point: [3]f32,
   normal: [3]f32,
@@ -263,9 +263,9 @@ test_sphere_capsule :: proc(
 
 test_box_capsule :: proc(
   pos_box: [3]f32,
-  box: ^BoxCollider,
+  box: BoxCollider,
   pos_capsule: [3]f32,
-  capsule: ^CapsuleCollider,
+  capsule: CapsuleCollider,
 ) -> (
   closest: [3]f32,
   normal: [3]f32,
@@ -316,7 +316,7 @@ test_box_capsule :: proc(
 test_point_cylinder :: proc(
   point: [3]f32,
   cylinder_center: [3]f32,
-  cylinder: ^CylinderCollider,
+  cylinder: CylinderCollider,
 ) -> bool {
   // Transform point to cylinder's local space
   local_point := point - cylinder_center
@@ -324,16 +324,18 @@ test_point_cylinder :: proc(
   inv_rot := linalg.quaternion_inverse(cylinder.rotation)
   local_point = linalg.mul(inv_rot, local_point)
   // In local space, cylinder axis is Y, check radial distance and height
-  radial_dist_sq := local_point.x * local_point.x + local_point.z * local_point.z
   half_height := cylinder.height * 0.5
-  return radial_dist_sq <= cylinder.radius * cylinder.radius && math.abs(local_point.y) <= half_height
+  return(
+    linalg.length2(local_point) <= cylinder.radius * cylinder.radius &&
+    math.abs(local_point.y) <= half_height \
+  )
 }
 
 // Point-in-fan test - checks if point is inside a fan (partial cylinder)
 test_point_fan :: proc(
   point: [3]f32,
   fan_center: [3]f32,
-  fan: ^FanCollider,
+  fan: FanCollider,
 ) -> bool {
   // Transform point to fan's local space
   local_point := point - fan_center
@@ -342,9 +344,10 @@ test_point_fan :: proc(
   local_point = linalg.mul(inv_rot, local_point)
   // In local space, fan forward direction is +Z, axis is Y
   // Check radial distance and height first (like cylinder)
-  radial_dist_sq := local_point.x * local_point.x + local_point.z * local_point.z
+  radial_dist_sq := linalg.length2(local_point)
   half_height := fan.height * 0.5
-  if radial_dist_sq > fan.radius * fan.radius || math.abs(local_point.y) > half_height {
+  if radial_dist_sq > fan.radius * fan.radius ||
+     math.abs(local_point.y) > half_height {
     return false
   }
   // Check if point is within the fan's angular range
@@ -370,71 +373,83 @@ test_collision :: proc(
 ) {
   center_a := pos_a + collider_a.offset
   center_b := pos_b + collider_b.offset
-  // Fan is trigger-only, no collision resolution
   // Cylinder can be solid and uses GJK fallback
-  if collider_a.type == .Fan || collider_b.type == .Fan {
-    return {}, {}, 0, false
-  }
-  if collider_a.type == .Sphere && collider_b.type == .Sphere {
-    sphere_a := &collider_a.shape.(SphereCollider)
-    sphere_b := &collider_b.shape.(SphereCollider)
-    return test_sphere_sphere(center_a, sphere_a, center_b, sphere_b)
-  } else if collider_a.type == .Box && collider_b.type == .Box {
-    box_a := &collider_a.shape.(BoxCollider)
-    box_b := &collider_b.shape.(BoxCollider)
-    return test_box_box(center_a, box_a, center_b, box_b)
-  } else if collider_a.type == .Sphere && collider_b.type == .Box {
-    sphere := &collider_a.shape.(SphereCollider)
-    box := &collider_b.shape.(BoxCollider)
-    point, normal, penetration, hit = test_sphere_box(
-      center_a,
-      sphere,
-      center_b,
-      box,
-    )
-    // invert normal because test_sphere_box return normal pointing box -> sphere
-    normal = -normal
+  switch shape_a in collider_a.shape {
+  case FanCollider:
     return
-  } else if collider_a.type == .Box && collider_b.type == .Sphere {
-    box := &collider_a.shape.(BoxCollider)
-    sphere := &collider_b.shape.(SphereCollider)
-    return test_sphere_box(center_b, sphere, center_a, box)
-  } else if collider_a.type == .Capsule && collider_b.type == .Capsule {
-    capsule_a := &collider_a.shape.(CapsuleCollider)
-    capsule_b := &collider_b.shape.(CapsuleCollider)
-    return test_capsule_capsule(center_a, capsule_a, center_b, capsule_b)
-  } else if collider_a.type == .Sphere && collider_b.type == .Capsule {
-    sphere := &collider_a.shape.(SphereCollider)
-    capsule := &collider_b.shape.(CapsuleCollider)
-    point, normal, penetration, hit = test_sphere_capsule(
-      center_a,
-      sphere,
-      center_b,
-      capsule,
-    )
-    // invert normal because test_sphere_capsule return normal pointing capsule -> sphere
-    normal = -normal
-    return
-  } else if collider_a.type == .Capsule && collider_b.type == .Sphere {
-    capsule := &collider_a.shape.(CapsuleCollider)
-    sphere := &collider_b.shape.(SphereCollider)
-    return test_sphere_capsule(center_b, sphere, center_a, capsule)
-  } else if collider_a.type == .Box && collider_b.type == .Capsule {
-    box := &collider_a.shape.(BoxCollider)
-    capsule := &collider_b.shape.(CapsuleCollider)
-    return test_box_capsule(center_a, box, center_b, capsule)
-  } else if collider_a.type == .Capsule && collider_b.type == .Box {
-    capsule := &collider_a.shape.(CapsuleCollider)
-    box := &collider_b.shape.(BoxCollider)
-    point, normal, penetration, hit = test_box_capsule(
-      center_b,
-      box,
-      center_a,
-      capsule,
-    )
-    // invert normal because test_box_capsule return normal pointing box -> capsule
-    normal = -normal
-    return
+  case SphereCollider:
+    switch shape_b in collider_b.shape {
+    case FanCollider:
+      return
+    case SphereCollider:
+      return test_sphere_sphere(center_a, shape_a, center_b, shape_b)
+    case BoxCollider:
+      point, normal, penetration, hit = test_box_sphere(
+        center_b,
+        shape_b,
+        center_a,
+        shape_a,
+      )
+      normal = -normal
+      return
+    case CapsuleCollider:
+      point, normal, penetration, hit = test_capsule_sphere(
+        center_b,
+        shape_b,
+        center_a,
+        shape_a,
+      )
+      normal = -normal
+      return
+    case CylinderCollider:
+    // TODO: implement sphere-cylinder collision
+    }
+  case BoxCollider:
+    switch shape_b in collider_b.shape {
+    case FanCollider:
+      return
+    case SphereCollider:
+      return test_box_sphere(center_a, shape_a, center_b, shape_b)
+    case BoxCollider:
+      return test_box_box(center_a, shape_a, center_b, shape_b)
+    case CapsuleCollider:
+      return test_box_capsule(center_a, shape_a, center_b, shape_b)
+    case CylinderCollider:
+    // TODO: implement box-cylinder collision
+    }
+  case CapsuleCollider:
+    switch shape_b in collider_b.shape {
+    case FanCollider:
+      return
+    case SphereCollider:
+      return test_capsule_sphere(center_a, shape_a, center_b, shape_b)
+    case BoxCollider:
+      point, normal, penetration, hit = test_box_capsule(
+        center_b,
+        shape_b,
+        center_a,
+        shape_a,
+      )
+      normal = -normal
+      return
+    case CapsuleCollider:
+      return test_capsule_capsule(center_a, shape_a, center_b, shape_b)
+    case CylinderCollider:
+    // TODO: implement capsule-cylinder collision
+    }
+  case CylinderCollider:
+    switch shape_b in collider_b.shape {
+    case FanCollider:
+      return
+    case SphereCollider:
+    // TODO: implement cylinder-sphere collision
+    case BoxCollider:
+    // TODO: implement cylinder-box collision
+    case CapsuleCollider:
+    // TODO: implement cylinder-capsule collision
+    case CylinderCollider:
+    // TODO: implement cylinder-cylinder collision
+    }
   }
   return
 }

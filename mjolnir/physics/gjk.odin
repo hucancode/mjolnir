@@ -24,67 +24,47 @@ find_furthest_point :: proc(
   direction: [3]f32,
 ) -> [3]f32 {
   center := position + collider.offset
-  switch collider.type {
-  case .Sphere:
-    sphere := collider.shape.(SphereCollider)
+  switch shape in collider.shape {
+  case SphereCollider:
     dir_normalized := linalg.normalize0(direction)
-    return center + dir_normalized * sphere.radius
-  case .Box:
-    box := collider.shape.(BoxCollider)
+    return center + dir_normalized * shape.radius
+  case BoxCollider:
     // For a box, the furthest point is one of the 8 vertices
-    sign_x := direction.x >= 0 ? f32(1.0) : f32(-1.0)
-    sign_y := direction.y >= 0 ? f32(1.0) : f32(-1.0)
-    sign_z := direction.z >= 0 ? f32(1.0) : f32(-1.0)
-    offset := box.half_extents * [3]f32{sign_x, sign_y, sign_z}
+    offset := shape.half_extents * linalg.sign(direction)
     return center + offset
-  case .Capsule:
-    capsule := collider.shape.(CapsuleCollider)
-    h := capsule.height * 0.5
+  case CapsuleCollider:
+    h := shape.height * 0.5
     // Capsule is two hemispheres connected by a cylinder
     // First find the furthest point on the central line segment
     line_dir := linalg.VECTOR3F32_Y_AXIS
     dot := linalg.dot(direction, line_dir)
     line_point := center + line_dir * (dot >= 0 ? h : -h)
     // Then add the sphere radius in the direction
-    dir_normalized := linalg.normalize0(direction)
-    return line_point + dir_normalized * capsule.radius
-  case .Cylinder:
-    cylinder := collider.shape.(CylinderCollider)
+    return line_point + linalg.normalize0(direction) * shape.radius
+  case CylinderCollider:
     // Transform direction to cylinder's local space
-    inv_rot := linalg.quaternion_inverse(cylinder.rotation)
+    inv_rot := linalg.quaternion_inverse(shape.rotation)
     local_dir := linalg.mul(inv_rot, direction)
     // In local space, cylinder axis is Y
-    h := cylinder.height * 0.5
+    h := shape.height * 0.5
     // Get Y component (along axis)
     y_component := local_dir.y >= 0 ? h : -h
     // Get XZ component (radial)
-    radial_dir := [2]f32{local_dir.x, local_dir.z}
-    radial_len := math.sqrt(radial_dir.x * radial_dir.x + radial_dir.y * radial_dir.y)
-    radial_point: [2]f32
-    if radial_len > math.F32_EPSILON {
-      radial_point = (radial_dir / radial_len) * cylinder.radius
-    }
-    // Combine into local point
+    radial_point := linalg.normalize0(local_dir.xz) * shape.radius
     local_point := [3]f32{radial_point.x, y_component, radial_point.y}
     // Transform back to world space
-    world_point := linalg.mul(cylinder.rotation, local_point)
+    world_point := linalg.mul(shape.rotation, local_point)
     return center + world_point
-  case .Fan:
+  case FanCollider:
     // Fan is trigger-only, but provide support for completeness
-    fan := collider.shape.(FanCollider)
     // Treat as full cylinder for support function
-    inv_rot := linalg.quaternion_inverse(fan.rotation)
+    inv_rot := linalg.quaternion_inverse(shape.rotation)
     local_dir := linalg.mul(inv_rot, direction)
-    h := fan.height * 0.5
+    h := shape.height * 0.5
     y_component := local_dir.y >= 0 ? h : -h
-    radial_dir := [2]f32{local_dir.x, local_dir.z}
-    radial_len := math.sqrt(radial_dir.x * radial_dir.x + radial_dir.y * radial_dir.y)
-    radial_point: [2]f32
-    if radial_len > math.F32_EPSILON {
-      radial_point = (radial_dir / radial_len) * fan.radius
-    }
+    radial_point := linalg.normalize0(local_dir.xz) * shape.radius
     local_point := [3]f32{radial_point.x, y_component, radial_point.y}
-    world_point := linalg.mul(fan.rotation, local_point)
+    world_point := linalg.mul(shape.rotation, local_point)
     return center + world_point
   }
   return center

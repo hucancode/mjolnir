@@ -64,16 +64,17 @@ create_body :: proc(
   world: ^PhysicsWorld,
   node_handle: resources.NodeHandle,
   mass: f32 = 1.0,
-  is_static := false,
+  is_static: bool = false,
+  trigger_only: bool = false,
 ) -> (
   handle: RigidBodyHandle,
-  body: ^RigidBody,
   ok: bool,
 ) {
+  body: ^RigidBody
   handle, body = cont.alloc(&world.bodies, RigidBodyHandle) or_return
-  body^ = rigid_body_create(node_handle, mass, is_static)
-  ok = true
-  return
+  rigid_body_init(body, node_handle, mass, is_static)
+  body.trigger_only = trigger_only
+  return handle, true
 }
 
 destroy_body :: proc(world: ^PhysicsWorld, handle: RigidBodyHandle) {
@@ -83,8 +84,8 @@ destroy_body :: proc(world: ^PhysicsWorld, handle: RigidBodyHandle) {
   cont.free(&world.bodies, handle)
 }
 
-add_collider :: proc(
-  world: ^PhysicsWorld,
+create_collider :: proc(
+  self: ^PhysicsWorld,
   body_handle: RigidBodyHandle,
   collider: Collider,
 ) -> (
@@ -92,8 +93,8 @@ add_collider :: proc(
   col_ptr: ^Collider,
   ok: bool,
 ) {
-  body := cont.get(world.bodies, body_handle) or_return
-  handle, col_ptr = cont.alloc(&world.colliders, ColliderHandle) or_return
+  body := cont.get(self.bodies, body_handle) or_return
+  handle, col_ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
   col_ptr^ = collider
   body.collider_handle = handle
   return handle, col_ptr, true
@@ -115,7 +116,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     }
     // Apply gravity
     gravity_force := physics.gravity * body.mass * body.gravity_scale
-    rigid_body_apply_force(body, gravity_force)
+    apply_force(body, gravity_force)
     if !physics.enable_air_resistance do continue
     // Apply air resistance (drag)
     // Drag force: F_d = -0.5 * p * v * v * C_d * A
@@ -163,12 +164,12 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     if drag_accel > max_accel {
       drag_force *= max_accel / drag_accel
     }
-    rigid_body_apply_force(body, drag_force)
+    apply_force(body, drag_force)
   }
   // Integrate velocities from forces ONCE for the entire frame
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
-    rigid_body_integrate(body, dt)
+    integrate(body, dt)
   }
   // Track which bodies were handled by CCD (outside substep loop)
   ccd_handled := make(
@@ -483,4 +484,29 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     active_body_count,
     len(physics.contacts),
   )
+}
+
+get_body :: proc(
+  self: ^PhysicsWorld,
+  handle: RigidBodyHandle,
+) -> (
+  ret: ^RigidBody,
+  ok: bool,
+) #optional_ok {
+  return cont.get(self.bodies, handle)
+}
+
+get_collider :: proc(
+  self: ^PhysicsWorld,
+  handle: ColliderHandle,
+) -> (
+  ret: ^Collider,
+  ok: bool,
+) #optional_ok {
+  return cont.get(self.colliders, handle)
+}
+
+get :: proc {
+  get_body,
+  get_collider,
 }

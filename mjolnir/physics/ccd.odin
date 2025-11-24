@@ -88,7 +88,7 @@ swept_sphere_box :: proc(
   t_min := f32(-1e6)
   t_max := f32(1e6)
   hit_normal := linalg.VECTOR3F32_Y_AXIS
-  for i in 0 ..< 3 {
+  #unroll for i in 0 ..< 3 {
     if abs(velocity[i]) < math.F32_EPSILON {
       // Ray parallel to slab
       if center[i] < expanded_min[i] || center[i] > expanded_max[i] {
@@ -108,7 +108,7 @@ swept_sphere_box :: proc(
         t_min = t1
         // Normal points from box to sphere
         hit_normal = {}
-        hit_normal[i] = velocity[i] > 0 ? -1.0 : 1.0
+        hit_normal[i] = -linalg.sign(velocity[i])
       }
       if t2 < t_max {
         t_max = t2
@@ -140,48 +140,65 @@ swept_test :: proc(
   center_b := pos_b + collider_b.offset
   // For now, implement sphere-sphere and sphere-box
   // Can extend to other shapes later
-  if collider_a.type == .Sphere && collider_b.type == .Sphere {
-    sphere_a := collider_a.shape.(SphereCollider)
-    sphere_b := collider_b.shape.(SphereCollider)
-    return swept_sphere_sphere(
-      center_a,
-      sphere_a.radius,
-      velocity_a,
-      center_b,
-      sphere_b.radius,
-    )
-  }
-  if collider_a.type == .Sphere && collider_b.type == .Box {
-    sphere := collider_a.shape.(SphereCollider)
-    box := collider_b.shape.(BoxCollider)
-    box_min := center_b - box.half_extents
-    box_max := center_b + box.half_extents
-    return swept_sphere_box(
-      center_a,
-      sphere.radius,
-      velocity_a,
-      box_min,
-      box_max,
-    )
-  }
-  if collider_a.type == .Box && collider_b.type == .Sphere {
-    // Swap and negate velocity
-    sphere := collider_b.shape.(SphereCollider)
-    box := collider_a.shape.(BoxCollider)
-    box_min := center_a - box.half_extents
-    box_max := center_a + box.half_extents
-    result := swept_sphere_box(
-      center_b,
-      sphere.radius,
-      -velocity_a,
-      box_min,
-      box_max,
-    )
-    if result.has_impact {
-      result.normal = -result.normal
+  switch shape_a in collider_a.shape {
+  case FanCollider:
+    return {} // fan collider are trigger-only
+  case SphereCollider:
+    switch shape_b in collider_b.shape {
+    case FanCollider:
+      return {}
+    case SphereCollider:
+      return swept_sphere_sphere(
+        center_a,
+        shape_a.radius,
+        velocity_a,
+        center_b,
+        shape_b.radius,
+      )
+    case BoxCollider:
+      box_min := center_b - shape_b.half_extents
+      box_max := center_b + shape_b.half_extents
+      return swept_sphere_box(
+        center_a,
+        shape_a.radius,
+        velocity_a,
+        box_min,
+        box_max,
+      )
+    case CapsuleCollider:
+    // TODO: implement sphere-capsule swept
+    case CylinderCollider:
+    // TODO: implement sphere-cylinder swept
     }
-    return result
+  case BoxCollider:
+    box_min := center_a - shape_a.half_extents
+    box_max := center_a + shape_a.half_extents
+    switch shape_b in collider_b.shape {
+    case FanCollider:
+      return {}
+    case SphereCollider:
+      result := swept_sphere_box(
+        center_b,
+        shape_b.radius,
+        -velocity_a,
+        box_min,
+        box_max,
+      )
+      if result.has_impact {
+        result.normal = -result.normal
+      }
+      return result
+    case BoxCollider:
+    // TODO: implement box-box swept test
+    case CapsuleCollider:
+    // TODO: implement box-capsule swept
+    case CylinderCollider:
+    // TODO: implement box-cylinder swept
+    }
+  case CapsuleCollider:
+  // TODO: implement capsule-* swept
+  case CylinderCollider:
+  // TODO: implement cylinder-* swept
   }
-  // Fallback: no swept test available
   return {}
 }

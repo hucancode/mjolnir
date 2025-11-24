@@ -360,12 +360,7 @@ spawn_child :: proc(
   node: ^Node
   handle, node = cont.alloc(&self.nodes, resources.NodeHandle) or_return
   _init_node_with_attachment(node, attachment, handle, rm)
-  geometry.translate(
-    &node.transform,
-    position.x,
-    position.y,
-    position.z,
-  )
+  geometry.translate(&node.transform, position.x, position.y, position.z)
   attach(self.nodes, parent, handle)
   if rm != nil {
     _upload_node_to_gpu(handle, node, rm)
@@ -819,7 +814,7 @@ spawn_actor :: proc(
   actor: ^Actor(T),
   ok: bool,
 ) {
-  node_handle, _, node_ok := spawn(world, {}, attachment, rm)
+  node_handle, node_ok := spawn(world, {}, attachment, rm)
   if !node_ok do return {}, nil, false
   pool := _ensure_actor_pool(world, T)
   return actor_alloc(pool, node_handle)
