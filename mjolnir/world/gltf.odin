@@ -218,7 +218,9 @@ load_materials_batch :: proc(
   materials: []^cgltf.material,
   texture_cache: ^map[^cgltf.texture]resources.Image2DHandle,
   material_cache: ^map[^cgltf.material]resources.MaterialHandle,
-) -> (ret: cgltf.result) {
+) -> (
+  ret: cgltf.result,
+) {
   ret = .success
   for gltf_mat in materials do if gltf_mat != nil {
     albedo, metallic_roughness, normal, emissive, occlusion, features := load_material_textures(gltf_mat, texture_cache)
@@ -640,6 +642,63 @@ load_animations :: proc(
   gltf_skin: ^cgltf.skin,
   mesh_handle: resources.MeshHandle,
 ) -> bool {
+  load_keyframe_cubic_spline :: proc "contextless" (
+    $T: typeid,
+    sampler: ^cgltf.animation_sampler,
+    i: uint,
+    k: ^anim.CubicSplineKeyframe(T),
+  ) -> bool {
+    cgltf.accessor_read_float(sampler.input, i, &k.time, 1) or_return
+    cgltf.accessor_read_float(
+      sampler.output,
+      i * 3 + 0,
+      auto_cast &k.in_tangent,
+      size_of(T) / size_of(f32),
+    ) or_return
+    cgltf.accessor_read_float(
+      sampler.output,
+      i * 3 + 1,
+      auto_cast &k.value,
+      size_of(T) / size_of(f32),
+    ) or_return
+    cgltf.accessor_read_float(
+      sampler.output,
+      i * 3 + 2,
+      auto_cast &k.out_tangent,
+      size_of(T) / size_of(f32),
+    ) or_return
+    return true
+  }
+  load_keyframe_step :: proc "contextless" (
+    $T: typeid,
+    sampler: ^cgltf.animation_sampler,
+    i: uint,
+    k: ^anim.StepKeyframe(T),
+  ) -> bool {
+    cgltf.accessor_read_float(sampler.input, i, &k.time, 1) or_return
+    cgltf.accessor_read_float(
+      sampler.output,
+      i,
+      auto_cast &k.value,
+      size_of(T) / size_of(f32),
+    ) or_return
+    return true
+  }
+  load_keyframe_linear :: proc "contextless" (
+    $T: typeid,
+    sampler: ^cgltf.animation_sampler,
+    i: uint,
+    k: ^anim.LinearKeyframe(T),
+  ) -> bool {
+    cgltf.accessor_read_float(sampler.input, i, &k.time, 1) or_return
+    cgltf.accessor_read_float(
+      sampler.output,
+      i,
+      auto_cast &k.value,
+      size_of(T) / size_of(f32),
+    ) or_return
+    return true
+  }
   mesh := cont.get(rm.meshes, mesh_handle)
   if mesh == nil do return false
   skinning := &mesh.skinning.?
@@ -660,150 +719,87 @@ load_animations :: proc(
       n := gltf_channel.sampler.input.count
       bone_idx := slice.linear_search(gltf_skin.joints, gltf_channel.target_node) or_continue
       channel := &clip.channels[bone_idx]
-      interpolation_mode := anim.InterpolationMode.LINEAR
-      #partial switch gltf_channel.sampler.interpolation {
-      case .step:
-        interpolation_mode = .STEP
-      case .linear:
-        interpolation_mode = .LINEAR
-      case .cubic_spline:
-        interpolation_mode = .CUBICSPLINE
-      }
       #partial switch gltf_channel.target_path {
       case .translation:
         channel.positions = make(type_of(channel.positions), n)
-        if interpolation_mode == .CUBICSPLINE {
-          for i in 0 ..< int(n) {
-            time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-            clip.duration = max(clip.duration, time_val[0])
-            in_tangent: [3]f32
-            value: [3]f32
-            out_tangent: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 0), raw_data(in_tangent[:]), 3) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 1), raw_data(value[:]), 3) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 2), raw_data(out_tangent[:]), 3) or_continue
-            channel.positions[i] = anim.CubicSplineKeyframe([3]f32) {
-              time        = time_val[0],
-              in_tangent  = in_tangent,
-              value       = value,
-              out_tangent = out_tangent,
-            }
+        switch gltf_channel.sampler.interpolation {
+        case .cubic_spline:
+          for i in 0 ..< n {
+            channel.positions[i] = anim.CubicSplineKeyframe([3]f32){}
+            load_keyframe_cubic_spline([3]f32, gltf_channel.sampler, i, &channel.positions[i].(anim.CubicSplineKeyframe([3]f32))) or_continue
           }
-        } else if interpolation_mode == .STEP {
-          for i in 0 ..< int(n) {
-            time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-            clip.duration = max(clip.duration, time_val[0])
-            position: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(position[:]), 3) or_continue
-            channel.positions[i] = anim.StepKeyframe([3]f32) {
-              time  = time_val[0],
-              value = position,
-            }
+        case .step:
+          for i in 0 ..< n {
+            channel.positions[i] = anim.StepKeyframe([3]f32){}
+            load_keyframe_step([3]f32, gltf_channel.sampler, i, &channel.positions[i].(anim.StepKeyframe([3]f32))) or_continue
           }
-        } else {
-          for i in 0 ..< int(n) {
-            time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-            clip.duration = max(clip.duration, time_val[0])
-            position: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(position[:]), 3) or_continue
-            channel.positions[i] = anim.LinearKeyframe([3]f32) {
-              time  = time_val[0],
-              value = position,
-            }
+        case .linear:
+          for i in 0 ..< n {
+            channel.positions[i] = anim.LinearKeyframe([3]f32){}
+            load_keyframe_linear([3]f32, gltf_channel.sampler, i, &channel.positions[i].(anim.LinearKeyframe([3]f32))) or_continue
           }
+        }
+        switch k in slice.last(channel.positions) {
+        case anim.CubicSplineKeyframe([3]f32):
+          clip.duration = max(clip.duration, k.time)
+        case anim.StepKeyframe([3]f32):
+          clip.duration = max(clip.duration, k.time)
+        case anim.LinearKeyframe([3]f32):
+          clip.duration = max(clip.duration, k.time)
         }
       case .rotation:
         channel.rotations = make(type_of(channel.rotations), n)
-        if interpolation_mode == .CUBICSPLINE {
-          for i in 0 ..< int(n) {
-            time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-            clip.duration = max(clip.duration, time_val[0])
-            in_tangent: [4]f32
-            value: [4]f32
-            out_tangent: [4]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 0), raw_data(in_tangent[:]), 4) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 1), raw_data(value[:]), 4) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 2), raw_data(out_tangent[:]), 4) or_continue
-            channel.rotations[i] = anim.CubicSplineKeyframe(quaternion128) {
-              time        = time_val[0],
-              in_tangent  = quaternion(x = in_tangent[0], y = in_tangent[1], z = in_tangent[2], w = in_tangent[3]),
-              value       = quaternion(x = value[0], y = value[1], z = value[2], w = value[3]),
-              out_tangent = quaternion(x = out_tangent[0], y = out_tangent[1], z = out_tangent[2], w = out_tangent[3]),
-            }
+        switch gltf_channel.sampler.interpolation {
+        case .cubic_spline:
+          for i in 0 ..< n {
+            channel.rotations[i] = anim.CubicSplineKeyframe(quaternion128){}
+            load_keyframe_cubic_spline(quaternion128, gltf_channel.sampler, i, &channel.rotations[i].(anim.CubicSplineKeyframe(quaternion128))) or_continue
           }
-        } else if interpolation_mode == .STEP {
-          for i in 0 ..< int(n) {
-            time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-            clip.duration = max(clip.duration, time_val[0])
-            rotation: [4]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(rotation[:]), 4) or_continue
-            channel.rotations[i] = anim.StepKeyframe(quaternion128) {
-              time  = time_val[0],
-              value = quaternion(x = rotation[0], y = rotation[1], z = rotation[2], w = rotation[3]),
-            }
+        case .step:
+          for i in 0 ..< n {
+            channel.rotations[i] = anim.StepKeyframe(quaternion128){}
+            load_keyframe_step(quaternion128, gltf_channel.sampler, i, &channel.rotations[i].(anim.StepKeyframe(quaternion128))) or_continue
           }
-        } else {
-          for i in 0 ..< int(n) {
-            time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-            clip.duration = max(clip.duration, time_val[0])
-            rotation: [4]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(rotation[:]), 4) or_continue
-            channel.rotations[i] = anim.LinearKeyframe(quaternion128) {
-              time  = time_val[0],
-              value = quaternion(x = rotation[0], y = rotation[1], z = rotation[2], w = rotation[3]),
-            }
+        case .linear:
+          for i in 0 ..< n {
+            channel.rotations[i] = anim.LinearKeyframe(quaternion128){}
+            load_keyframe_linear(quaternion128, gltf_channel.sampler, i, &channel.rotations[i].(anim.LinearKeyframe(quaternion128))) or_continue
           }
+        }
+        switch k in slice.last(channel.rotations) {
+        case anim.CubicSplineKeyframe(quaternion128):
+          clip.duration = max(clip.duration, k.time)
+        case anim.StepKeyframe(quaternion128):
+          clip.duration = max(clip.duration, k.time)
+        case anim.LinearKeyframe(quaternion128):
+          clip.duration = max(clip.duration, k.time)
         }
       case .scale:
         channel.scales = make(type_of(channel.scales), n)
-        if interpolation_mode == .CUBICSPLINE {
-          for i in 0 ..< int(n) {
-            time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-            clip.duration = max(clip.duration, time_val[0])
-            in_tangent: [3]f32
-            value: [3]f32
-            out_tangent: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 0), raw_data(in_tangent[:]), 3) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 1), raw_data(value[:]), 3) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 2), raw_data(out_tangent[:]), 3) or_continue
-            channel.scales[i] = anim.CubicSplineKeyframe([3]f32) {
-              time        = time_val[0],
-              in_tangent  = in_tangent,
-              value       = value,
-              out_tangent = out_tangent,
-            }
+        switch gltf_channel.sampler.interpolation {
+        case .cubic_spline:
+          for i in 0 ..< n {
+            channel.scales[i] = anim.CubicSplineKeyframe([3]f32){}
+            load_keyframe_cubic_spline([3]f32, gltf_channel.sampler, i, &channel.scales[i].(anim.CubicSplineKeyframe([3]f32))) or_continue
           }
-        } else if interpolation_mode == .STEP {
-          for i in 0 ..< int(n) {
-            time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-            clip.duration = max(clip.duration, time_val[0])
-            scale: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(scale[:]), 3) or_continue
-            channel.scales[i] = anim.StepKeyframe([3]f32) {
-              time  = time_val[0],
-              value = scale,
-            }
+        case .step:
+          for i in 0 ..< n {
+            channel.scales[i] = anim.StepKeyframe([3]f32){}
+            load_keyframe_step([3]f32, gltf_channel.sampler, i, &channel.scales[i].(anim.StepKeyframe([3]f32))) or_continue
           }
-        } else {
-          for i in 0 ..< int(n) {
-            time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-            clip.duration = max(clip.duration, time_val[0])
-            scale: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(scale[:]), 3) or_continue
-            channel.scales[i] = anim.LinearKeyframe([3]f32) {
-              time  = time_val[0],
-              value = scale,
-            }
+        case .linear:
+          for i in 0 ..< n {
+            channel.scales[i] = anim.LinearKeyframe([3]f32){}
+            load_keyframe_linear([3]f32, gltf_channel.sampler, i, &channel.scales[i].(anim.LinearKeyframe([3]f32))) or_continue
           }
+        }
+        switch k in slice.last(channel.scales) {
+        case anim.CubicSplineKeyframe([3]f32):
+          clip.duration = max(clip.duration, k.time)
+        case anim.StepKeyframe([3]f32):
+          clip.duration = max(clip.duration, k.time)
+        case anim.LinearKeyframe([3]f32):
+          clip.duration = max(clip.duration, k.time)
         }
       }
     }
