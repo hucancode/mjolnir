@@ -297,7 +297,7 @@ widget_destroy :: proc(widget: ^Widget) {
 
 create_widget :: proc(
   self: ^Manager,
-  type: WidgetType,
+  $T: typeid,
   parent: WidgetHandle = {},
 ) -> (
   handle: WidgetHandle,
@@ -306,8 +306,8 @@ create_widget :: proc(
 ) {
   handle, widget, ok = cont.alloc(&self.widgets, WidgetHandle)
   if !ok do return
-  widget.type = type
   widget.parent = parent
+  widget.data = T{}
   widget.visible = true
   widget.enabled = true
   widget.dirty = false
@@ -316,8 +316,7 @@ create_widget :: proc(
   widget.border_color = WIDGET_DEFAULT_BORDER
   widget.border_width = 1.0
   if parent_widget, found := cont.get(self.widgets, parent); found {
-    if parent_widget.last_child.index != 0 {
-      last_child, _ := cont.get(self.widgets, parent_widget.last_child)
+    if last_child, ok := cont.get(self.widgets, parent_widget.last_child); ok {
       last_child.next_sibling = handle
       widget.prev_sibling = parent_widget.last_child
     } else {
@@ -354,8 +353,7 @@ rebuild_draw_lists :: proc(self: ^Manager) {
     }
   }
   for dirty_handle in self.dirty_widgets {
-    widget, found := cont.get(self.widgets, dirty_handle)
-    if !found do continue
+    widget := cont.get(self.widgets, dirty_handle) or_continue
     if widget.visible {
       build_widget_draw_commands(self, dirty_handle)
     } else {

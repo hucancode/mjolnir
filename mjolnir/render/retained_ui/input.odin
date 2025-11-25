@@ -17,8 +17,9 @@ update_input :: proc(self: ^Manager, mouse_x, mouse_y: f32, mouse_down: bool) {
 input_text :: proc(self: ^Manager, text: string) {
   if self.focused_widget.index == 0 do return
   widget, found := cont.get(self.widgets, self.focused_widget)
-  if !found || widget.type != .TEXT_BOX do return
-  data := &widget.data.(TextBoxData)
+  if !found do return
+  data, ok := &widget.data.(TextBoxData)
+  if !ok do return
   if !data.focused do return
   for ch in text {
     if len(data.text) >= int(data.max_length) do break
@@ -34,8 +35,9 @@ input_text :: proc(self: ^Manager, text: string) {
 input_key :: proc(self: ^Manager, key: int, action: int) {
   if self.focused_widget.index == 0 do return
   widget, found := cont.get(self.widgets, self.focused_widget)
-  if !found || widget.type != .TEXT_BOX do return
-  data := &widget.data.(TextBoxData)
+  if !found do return
+  data, ok := &widget.data.(TextBoxData)
+  if !ok do return
   if !data.focused do return
   if action != 1 && action != 2 do return
   if key == 259 {
@@ -58,8 +60,9 @@ deselect_radio_group :: proc(
 ) {
   widget, found := cont.get(self.widgets, handle)
   if !found do return
-  if widget.type == .RADIO_BUTTON && handle != exclude_handle {
-    data := &widget.data.(RadioButtonData)
+  if handle != exclude_handle {
+    data, ok := &widget.data.(RadioButtonData)
+    if !ok do return
     if data.group_id == group_id && data.selected {
       data.selected = false
       mark_dirty(self, handle)
@@ -80,9 +83,8 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
   wx, wy := widget.position.x, widget.position.y
   ww, wh := widget.size.x, widget.size.y
   hovered := mx >= wx && mx <= wx + ww && my >= wy && my <= wy + wh
-  switch widget.type {
-  case .BUTTON:
-    data := &widget.data.(ButtonData)
+  switch &data in widget.data {
+  case ButtonData:
     old_hovered := data.hovered
     data.hovered = hovered
     if hovered && self.mouse_clicked {
@@ -99,8 +101,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
     if old_hovered != data.hovered {
       mark_dirty(self, handle)
     }
-  case .CHECK_BOX:
-    data := &widget.data.(CheckBoxData)
+  case CheckBoxData:
     box_size: f32 = 20
     old_hovered := data.hovered
     data.hovered = hovered && mx <= wx + box_size && my <= wy + box_size
@@ -114,8 +115,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
     if old_hovered != data.hovered {
       mark_dirty(self, handle)
     }
-  case .RADIO_BUTTON:
-    data := &widget.data.(RadioButtonData)
+  case RadioButtonData:
     circle_size: f32 = 20
     old_hovered := data.hovered
     data.hovered = hovered && mx <= wx + circle_size && my <= wy + circle_size
@@ -132,8 +132,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
     if old_hovered != data.hovered {
       mark_dirty(self, handle)
     }
-  case .TEXT_BOX:
-    data := &widget.data.(TextBoxData)
+  case TextBoxData:
     old_hovered := data.hovered
     old_focused := data.focused
     data.hovered = hovered
@@ -160,8 +159,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
     if old_hovered != data.hovered || old_focused != data.focused {
       mark_dirty(self, handle)
     }
-  case .COMBO_BOX:
-    data := &widget.data.(ComboBoxData)
+  case ComboBoxData:
     old_hovered := data.hovered
     old_expanded := data.expanded
     data.hovered = hovered && my <= wy + widget.size.y
@@ -191,9 +189,6 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
             if callback != nil {
               callback(user_data, selected_index)
             }
-            widget, found = cont.get(self.widgets, handle)
-            if !found do return
-            data = &widget.data.(ComboBoxData)
             break
           }
         }
@@ -205,7 +200,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
     if old_hovered != data.hovered || old_expanded != data.expanded {
       mark_dirty(self, handle)
     }
-  case .LABEL, .IMAGE, .WINDOW:
+  case LabelData, ImageData, WindowData:
   }
   child := widget.first_child
   for child.index != 0 {

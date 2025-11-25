@@ -44,18 +44,7 @@ TEXTBOX_PLACEHOLDER_COLOR :: [4]u8{150, 150, 150, 255}
 
 BUTTON_SHADOW_COLOR :: [4]u8{80, 80, 120, 255}
 
-WidgetType :: enum {
-  BUTTON,
-  LABEL,
-  IMAGE,
-  TEXT_BOX,
-  COMBO_BOX,
-  CHECK_BOX,
-  RADIO_BUTTON,
-  WINDOW,
-}
-
-WidgetHandle :: resources.Handle
+WidgetHandle :: distinct resources.Handle
 
 ButtonData :: struct {
   text:      string,
@@ -138,7 +127,6 @@ WidgetData :: union {
 }
 
 Widget :: struct {
-  type:         WidgetType,
   // Tree structure
   parent:       WidgetHandle,
   first_child:  WidgetHandle,

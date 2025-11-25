@@ -2,33 +2,33 @@ package retained_ui
 
 import cont "../../containers"
 import fs "vendor:fontstash"
+import "core:log"
 
 build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
   widget, found := cont.get(self.widgets, handle)
   if !found || !widget.visible do return
   for &v in self.draw_lists {
-    switch widget.type {
-    case .BUTTON:
+    switch data in widget.data {
+    case ButtonData:
       build_button_commands(self, &v, handle, widget)
-    case .LABEL:
+    case LabelData:
       build_label_commands(self, &v, handle, widget)
-    case .IMAGE:
+    case ImageData:
       build_image_commands(self, &v, handle, widget)
-    case .WINDOW:
+    case WindowData:
       build_window_commands(self, &v, handle, widget)
-    case .TEXT_BOX:
+    case TextBoxData:
       build_textbox_commands(self, &v, handle, widget)
-    case .COMBO_BOX:
+    case ComboBoxData:
       build_combobox_commands(self, &v, handle, widget)
-    case .CHECK_BOX:
+    case CheckBoxData:
       build_checkbox_commands(self, &v, handle, widget)
-    case .RADIO_BUTTON:
+    case RadioButtonData:
       build_radiobutton_commands(self, &v, handle, widget)
     }
   }
-  // Re-fetch widget pointer in case pool was modified
-  widget, found = cont.get(self.widgets, handle)
-  if found {
+  // re-fetch widget pointer in case pool was modified
+  if widget, found = cont.get(self.widgets, handle); found {
     widget.dirty = false
   }
 }
