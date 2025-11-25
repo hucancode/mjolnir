@@ -32,6 +32,7 @@ main :: proc() {
     }
     if camera := get_main_camera(engine); camera != nil {
       camera_look_at(camera, {8, 6, 8}, {0, 0, 0})
+      sync_active_camera_controller(engine)
     }
     add_crosshatch(engine, resolution = {800, 600})
   }

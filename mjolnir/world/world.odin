@@ -241,32 +241,6 @@ attach :: proc(
 }
 
 @(private = "file")
-_init_node_with_attachment :: proc(
-  node: ^Node,
-  attachment: NodeAttachment,
-  handle: resources.NodeHandle,
-  rm: ^resources.Manager,
-) {
-  init_node(node)
-  node.attachment = attachment
-  assign_emitter_to_node(rm, handle, node)
-  assign_forcefield_to_node(rm, handle, node)
-  assign_light_to_node(rm, handle, node)
-  update_node_tags(node)
-}
-
-@(private = "file")
-_upload_node_to_gpu :: proc(
-  handle: resources.NodeHandle,
-  node: ^Node,
-  rm: ^resources.Manager,
-) {
-  resources.node_upload_transform(rm, handle, &node.transform.world_matrix)
-  data := _build_node_data(node, rm)
-  resources.node_upload_data(rm, handle, &data)
-}
-
-@(private = "file")
 _apply_sprite_to_node_data :: proc(
   data: ^resources.NodeData,
   sprite_attachment: SpriteAttachment,
@@ -292,49 +266,6 @@ _apply_sprite_to_node_data :: proc(
   }
 }
 
-@(private = "file")
-_build_node_data :: proc(
-  node: ^Node,
-  rm: ^resources.Manager,
-) -> resources.NodeData {
-  data := resources.NodeData {
-    material_id           = 0xFFFFFFFF,
-    mesh_id               = 0xFFFFFFFF,
-    attachment_data_index = 0xFFFFFFFF,
-  }
-  if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-    data.material_id = mesh_attachment.material.index
-    data.mesh_id = mesh_attachment.handle.index
-    // FIX: Must check both node.visible AND node.parent_visible (same as traverse logic)
-    if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
-    if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
-    if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
-    if mesh_attachment.navigation_obstacle do data.flags |= {.NAVIGATION_OBSTACLE}
-    if material, has_mat := cont.get(rm.materials, mesh_attachment.material);
-       has_mat {
-      switch material.type {
-      case .TRANSPARENT:
-        data.flags |= {.MATERIAL_TRANSPARENT}
-      case .WIREFRAME:
-        data.flags |= {.MATERIAL_WIREFRAME}
-      case .PBR, .UNLIT: // No flags
-      }
-    }
-    if skinning, has_skin := mesh_attachment.skinning.?; has_skin {
-      data.attachment_data_index = skinning.bone_matrix_buffer_offset
-    }
-  }
-  if sprite_attachment, has_sprite := node.attachment.(SpriteAttachment);
-     has_sprite {
-    _apply_sprite_to_node_data(&data, sprite_attachment, node, rm)
-  }
-  if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment);
-     is_obstacle {
-    data.flags |= {.NAVIGATION_OBSTACLE}
-  }
-  return data
-}
-
 spawn :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
@@ -343,7 +274,7 @@ spawn :: proc(
 ) -> (
   handle: resources.NodeHandle,
   ok: bool,
-) {
+) #optional_ok {
   return spawn_child(self, self.root, position, attachment, rm)
 }
 
@@ -356,14 +287,56 @@ spawn_child :: proc(
 ) -> (
   handle: resources.NodeHandle,
   ok: bool,
-) {
+) #optional_ok {
   node: ^Node
   handle, node = cont.alloc(&self.nodes, resources.NodeHandle) or_return
-  _init_node_with_attachment(node, attachment, handle, rm)
-  geometry.translate(&node.transform, position.x, position.y, position.z)
+  init_node(node)
+  node.attachment = attachment
+  assign_emitter_to_node(rm, handle, node)
+  assign_forcefield_to_node(rm, handle, node)
+  assign_light_to_node(rm, handle, node)
+  update_node_tags(node)
+  node.transform.position = position
+  node.transform.is_dirty = true
   attach(self.nodes, parent, handle)
   if rm != nil {
-    _upload_node_to_gpu(handle, node, rm)
+      resources.node_upload_transform(rm, handle, &node.transform.world_matrix)
+      data := resources.NodeData {
+        material_id           = 0xFFFFFFFF,
+        mesh_id               = 0xFFFFFFFF,
+        attachment_data_index = 0xFFFFFFFF,
+      }
+      if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
+        data.material_id = mesh_attachment.material.index
+        data.mesh_id = mesh_attachment.handle.index
+        // FIX: Must check both node.visible AND node.parent_visible (same as traverse logic)
+        if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
+        if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
+        if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
+        if mesh_attachment.navigation_obstacle do data.flags |= {.NAVIGATION_OBSTACLE}
+        if material, has_mat := cont.get(rm.materials, mesh_attachment.material);
+           has_mat {
+          switch material.type {
+          case .TRANSPARENT:
+            data.flags |= {.MATERIAL_TRANSPARENT}
+          case .WIREFRAME:
+            data.flags |= {.MATERIAL_WIREFRAME}
+          case .PBR, .UNLIT: // No flags
+          }
+        }
+        if skinning, has_skin := mesh_attachment.skinning.?; has_skin {
+          data.attachment_data_index = skinning.bone_matrix_buffer_offset
+        }
+      }
+      if sprite_attachment, has_sprite := node.attachment.(SpriteAttachment);
+         has_sprite {
+        _apply_sprite_to_node_data(&data, sprite_attachment, node, rm)
+      }
+      if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment);
+         is_obstacle {
+        data.flags |= {.NAVIGATION_OBSTACLE}
+      }
+      resources.node_upload_data(rm, handle, &data)
   }
   return handle, true
 }
@@ -783,7 +756,6 @@ _ensure_actor_pool :: proc(world: ^World, $T: typeid) -> ^ActorPool(T) {
       node_handle: resources.NodeHandle,
     ) -> (
       ActorHandle,
-      rawptr,
       bool,
     ) {
       return actor_alloc(cast(^ActorPool(T))pool_ptr, node_handle)
@@ -807,32 +779,14 @@ _ensure_actor_pool :: proc(world: ^World, $T: typeid) -> ^ActorPool(T) {
 spawn_actor :: proc(
   world: ^World,
   $T: typeid,
+  position: [3]f32 = {},
   attachment: NodeAttachment = nil,
   rm: ^resources.Manager = nil,
 ) -> (
   actor_handle: ActorHandle,
-  actor: ^Actor(T),
   ok: bool,
-) {
-  node_handle, node_ok := spawn(world, {}, attachment, rm)
-  if !node_ok do return {}, nil, false
-  pool := _ensure_actor_pool(world, T)
-  return actor_alloc(pool, node_handle)
-}
-
-spawn_actor_at :: proc(
-  world: ^World,
-  $T: typeid,
-  position: [3]f32,
-  attachment: NodeAttachment = nil,
-  rm: ^resources.Manager = nil,
-) -> (
-  actor_handle: ActorHandle,
-  actor: ^Actor(T),
-  ok: bool,
-) {
-  node_handle, _, node_ok := spawn(world, position, attachment, rm)
-  if !node_ok do return {}, nil, false
+) #optional_ok {
+  node_handle := spawn(world, position, attachment, rm) or_return
   pool := _ensure_actor_pool(world, T)
   return actor_alloc(pool, node_handle)
 }
@@ -841,15 +795,14 @@ spawn_actor_child :: proc(
   world: ^World,
   $T: typeid,
   parent: resources.NodeHandle,
+  position: [3]f32 = {},
   attachment: NodeAttachment = nil,
   rm: ^resources.Manager = nil,
 ) -> (
   actor_handle: ActorHandle,
-  actor: ^Actor(T),
   ok: bool,
-) {
-  node_handle, _, node_ok := spawn_child(world, parent, attachment, rm)
-  if !node_ok do return {}, nil, false
+) #optional_ok {
+  node_handle := spawn_child(world, parent, position, attachment, rm) or_return
   pool := _ensure_actor_pool(world, T)
   return actor_alloc(pool, node_handle)
 }

@@ -1,7 +1,7 @@
 package tests
 
-import "../mjolnir/geometry"
 import cont "../mjolnir/containers"
+import "../mjolnir/geometry"
 import "../mjolnir/physics"
 import "../mjolnir/resources"
 import "../mjolnir/world"
@@ -27,12 +27,11 @@ spawn_test_body :: proc(
   position: [3]f32,
   is_static: bool = true,
 ) -> physics.RigidBodyHandle {
-  node_handle, node, _ := world.spawn(w, position)
+  node_handle, _ := world.spawn(w, position)
   // Update world matrix
   world.traverse(w, nil, nil, nil, 0)
-  collider := physics.collider_create_sphere(0.5)
-  body_handle, _, _ := physics.create_body(phys, node_handle, 1.0, is_static)
-  physics.add_collider(phys, body_handle, collider)
+  body_handle := physics.create_body(phys, node_handle, 1.0, is_static)
+  physics.create_collider_sphere(phys, body_handle, 0.5)
   // Force BVH rebuild after adding bodies
   physics.step(phys, w, 0.0)
   return body_handle
@@ -160,24 +159,24 @@ test_point_cylinder :: proc(t: ^testing.T) {
   // Point inside cylinder
   testing.expect(
     t,
-    physics.test_point_cylinder({0, 0, 0}, center, &cylinder),
+    physics.test_point_cylinder({0, 0, 0}, center, cylinder),
     "Point at center should be inside",
   )
   testing.expect(
     t,
-    physics.test_point_cylinder({1, 1, 0}, center, &cylinder),
+    physics.test_point_cylinder({1, 1, 0}, center, cylinder),
     "Point within radius and height should be inside",
   )
   // Point outside cylinder (beyond radius)
   testing.expect(
     t,
-    !physics.test_point_cylinder({3, 0, 0}, center, &cylinder),
+    !physics.test_point_cylinder({3, 0, 0}, center, cylinder),
     "Point beyond radius should be outside",
   )
   // Point outside cylinder (beyond height)
   testing.expect(
     t,
-    !physics.test_point_cylinder({0, 3, 0}, center, &cylinder),
+    !physics.test_point_cylinder({0, 3, 0}, center, cylinder),
     "Point beyond height should be outside",
   )
 }
@@ -194,37 +193,37 @@ test_point_fan :: proc(t: ^testing.T) {
   // Point inside fan (forward direction +Z)
   testing.expect(
     t,
-    physics.test_point_fan({0, 0, 3}, center, &fan),
+    physics.test_point_fan({0, 0, 3}, center, fan),
     "Point in forward direction should be inside",
   )
   // Point inside fan (45 degrees from forward)
   testing.expect(
     t,
-    physics.test_point_fan({2, 0, 2}, center, &fan),
+    physics.test_point_fan({2, 0, 2}, center, fan),
     "Point at 45 degrees should be inside 90-degree fan",
   )
   // Point outside fan (beyond angle)
   testing.expect(
     t,
-    !physics.test_point_fan({3, 0, 0}, center, &fan),
+    !physics.test_point_fan({3, 0, 0}, center, fan),
     "Point at 90 degrees (perpendicular) should be outside",
   )
   // Point outside fan (opposite direction)
   testing.expect(
     t,
-    !physics.test_point_fan({0, 0, -3}, center, &fan),
+    !physics.test_point_fan({0, 0, -3}, center, fan),
     "Point in opposite direction should be outside",
   )
   // Point outside fan (beyond radius)
   testing.expect(
     t,
-    !physics.test_point_fan({0, 0, 6}, center, &fan),
+    !physics.test_point_fan({0, 0, 6}, center, fan),
     "Point beyond radius should be outside",
   )
   // Point outside fan (beyond height)
   testing.expect(
     t,
-    !physics.test_point_fan({0, 3, 3}, center, &fan),
+    !physics.test_point_fan({0, 3, 3}, center, fan),
     "Point beyond height should be outside",
   )
 }
@@ -240,7 +239,11 @@ test_physics_world_integration :: proc(t: ^testing.T) {
   b1 := spawn_test_body(&phys, &w, {0, 0, 0})
   b2 := spawn_test_body(&phys, &w, {5, 0, 0})
   b3 := spawn_test_body(&phys, &w, {10, 0, 0})
-  testing.expect(t, b1.generation > 0 && b2.generation > 0 && b3.generation > 0, "All bodies should be created")
+  testing.expect(
+    t,
+    b1.generation > 0 && b2.generation > 0 && b3.generation > 0,
+    "All bodies should be created",
+  )
   // Query for bodies within range
   results := make([dynamic]physics.RigidBodyHandle)
   defer delete(results)
@@ -290,11 +293,10 @@ test_physics_cylinder_collision :: proc(t: ^testing.T) {
   defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
   // Spawn a cylinder body
-  node_handle, _, _ := world.spawn(&w, {0, 0, 0})
+  node_handle, _ := world.spawn(&w, {0, 0, 0})
   world.traverse(&w, nil, nil, nil, 0)
-  collider := physics.collider_create_cylinder(2.0, 4.0)
-  body_handle, _, _ := physics.create_body(&phys, node_handle, 1.0, true)
-  physics.add_collider(&phys, body_handle, collider)
+  body_handle := physics.create_body(&phys, node_handle, 1.0, true)
+  physics.create_collider_cylinder(&phys, body_handle, 2.0, 4.0)
   // Force BVH rebuild
   physics.step(&phys, &w, 0.0)
   // Query for bodies - should find the cylinder
@@ -310,22 +312,21 @@ test_physics_fan_trigger :: proc(t: ^testing.T) {
   phys, w := make_test_physics()
   defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
-  // Spawn a fan trigger body
-  node_handle, _, _ := world.spawn(&w, {0, 0, 0})
-  collider := physics.collider_create_fan(5.0, 2.0, math.PI / 2)
-  body_handle, body, _ := physics.create_body(&phys, node_handle, 1.0, true)
-  body.trigger_only = true
-  physics.add_collider(&phys, body_handle, collider)
   // Test point-in-fan directly
-  fan_ptr := &collider.shape.(physics.FanCollider)
+  fan := physics.FanCollider {
+    radius   = 5.0,
+    height   = 2.0,
+    angle    = math.PI * 0.5,
+    rotation = linalg.QUATERNIONF32_IDENTITY,
+  }
   testing.expect(
     t,
-    physics.test_point_fan({0, 0, 3}, {0, 0, 0}, fan_ptr),
+    physics.test_point_fan({0, 0, 3}, {0, 0, 0}, fan),
     "Point should be inside fan",
   )
   testing.expect(
     t,
-    !physics.test_point_fan({3, 0, 0}, {0, 0, 0}, fan_ptr),
+    !physics.test_point_fan({3, 0, 0}, {0, 0, 0}, fan),
     "Point should be outside fan",
   )
 }

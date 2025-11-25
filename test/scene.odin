@@ -17,13 +17,14 @@ test_node_translate :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
   defer world.shutdown(&w, nil, nil)
-  parent_handle, _, parent_ok := world.spawn(&w, {1, 2, 3})
+  parent_handle, parent_ok := world.spawn(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
-  _, child, child_ok := world.spawn_child(&w, parent_handle)
-  testing.expectf(t, child_ok, "failed to spawn child node")
-  world.translate(child, 4, 5, 6)
+  child, ok := world.spawn_child(&w, parent_handle)
+  child_ptr := world.get_node(&w, child)
+  testing.expectf(t, ok, "failed to spawn child node")
+  world.translate(&w, child, 4, 5, 6)
   world.begin_frame(&w, nil)
-  actual := child.transform.world_matrix
+  actual := child_ptr.transform.world_matrix
   expected := matrix[4, 4]f32{
     1.0, 0.0, 0.0, 5.0,
     0.0, 1.0, 0.0, 7.0,
@@ -39,12 +40,13 @@ test_node_rotate :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
   defer world.shutdown(&w, nil, nil)
-  _, child, child_ok := world.spawn(&w)
-  testing.expectf(t, child_ok, "failed to spawn node")
-  world.rotate(child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
-  world.translate(child, 1, 0, 0)
+  child, ok := world.spawn(&w)
+  child_ptr := world.get_node(&w, child)
+  testing.expectf(t, ok, "failed to spawn node")
+  world.rotate(&w, child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  world.translate(&w, child, 1, 0, 0)
   world.begin_frame(&w, nil)
-  actual := child.transform.world_matrix
+  actual := child_ptr.transform.world_matrix
   expected := matrix[4, 4]f32{
     0.0, 0.0, 1.0, 1.0,
     0.0, 1.0, 0.0, 0.0,
@@ -60,18 +62,18 @@ test_node_scale :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
   defer world.shutdown(&w, nil, nil)
-  parent_handle, _, parent_ok := world.spawn(&w, {1, 2, 3})
+  parent_handle, parent_ok := world.spawn(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
-  _, child, child_ok := world.spawn_child(&w, parent_handle)
+  child, child_ok := world.spawn_child(&w, parent_handle)
+  child_ptr := world.get_node(&w, child)
   testing.expectf(t, child_ok, "failed to spawn child node")
-  world.translate(child, 1, 1, 1)
-  world.scale_xyz(child, 2, 3, 4)
+  world.scale_xyz(&w, child, 5, 6, 7)
   world.begin_frame(&w, nil)
-  actual := child.transform.world_matrix
+  actual := child_ptr.transform.world_matrix
   expected := matrix[4, 4]f32{
-    2.0, 0.0, 0.0, 2.0,
-    0.0, 3.0, 0.0, 3.0,
-    0.0, 0.0, 4.0, 4.0,
+    5.0, 0.0, 0.0, 1.0,
+    0.0, 6.0, 0.0, 2.0,
+    0.0, 0.0, 7.0, 3.0,
     0.0, 0.0, 0.0, 1.0,
   }
   matrix4_almost_equal(t, actual, expected)
@@ -83,13 +85,14 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
   defer world.shutdown(&w, nil, nil)
-  _, node, node_ok := world.spawn(&w)
+  node, node_ok := world.spawn(&w)
+  node_ptr := world.get_node(&w, node)
   testing.expectf(t, node_ok, "failed to spawn node")
-  world.scale(node, 2)
-  world.rotate(node, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
-  world.translate(node, 3, 4, 5)
+  world.scale(&w, node, 2)
+  world.rotate(&w, node, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  world.translate(&w, node, 3, 4, 5)
   world.begin_frame(&w, nil)
-  actual := node.transform.world_matrix
+  actual := node_ptr.transform.world_matrix
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
   expected := matrix[4, 4]f32{
@@ -108,15 +111,16 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   world.init(&w)
   defer world.shutdown(&w, nil, nil)
   // Create a 4-node chain
-  node1_handle, node1, node1_ok := world.spawn(&w)
+  node1_handle, node1_ok := world.spawn(&w)
   testing.expectf(t, node1_ok, "failed to spawn node1")
-  node2_handle, node2, node2_ok := world.spawn_child(&w, node1_handle)
+  node2_handle, node2_ok := world.spawn_child(&w, node1_handle)
   testing.expectf(t, node2_ok, "failed to spawn node2")
-  node3_handle, node3, node3_ok := world.spawn_child(&w, node2_handle)
+  node3_handle, node3_ok := world.spawn_child(&w, node2_handle)
+  node3 := world.get_node(&w, node3_handle)
   testing.expectf(t, node3_ok, "failed to spawn node3")
-  world.translate(node1, x = 1)
-  world.rotate(node2, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
-  world.scale(node3, 2)
+  world.translate(&w, node1_handle, x = 1)
+  world.rotate(&w, node2_handle, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  world.scale(&w, node3_handle, 2)
   world.begin_frame(&w, nil)
   // The transforms should cascade:
   // node1: translate(1,0,0)
@@ -156,18 +160,12 @@ create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
   for len(queue) > 0 && len(scene.nodes.entries) < target_nodes {
     current := pop_front(&queue)
     if current.depth < max_depth {
-      child_handle, _, child_ok := spawn_child(scene, current.handle)
-      if !child_ok {
-        continue
-      }
+      child_handle := spawn_child(scene, current.handle) or_continue
       translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
       rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, current.depth + 1})
     } else {
-      child_handle, _, child_ok := spawn(scene)
-      if !child_ok {
-        continue
-      }
+      child_handle := spawn(scene) or_continue
       translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
       rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, 1})

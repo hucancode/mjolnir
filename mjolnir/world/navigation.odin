@@ -242,7 +242,7 @@ spawn_nav_agent_at :: proc(
 ) -> (
   handle: resources.NodeHandle,
   ok: bool,
-) {
+) #optional_ok {
   attachment := NavMeshAgentAttachment {
     target_position     = position,
     agent_radius        = radius,

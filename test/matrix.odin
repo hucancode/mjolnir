@@ -20,7 +20,7 @@ matrix4_almost_equal :: proc(
       testing.expect(
         t,
         delta < 0.01,
-        fmt.tprintf("Matrix difference at [%d,%d]: %f", i, j, delta),
+        fmt.tprintf("Matrix difference at [%d,%d], actual: %v . expected: %v", i, j, actual, expected),
       )
     }
   }

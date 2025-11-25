@@ -23,6 +23,7 @@ BoxCollider :: struct {
 CapsuleCollider :: struct {
   radius: f32,
   height: f32,
+  // TODO: implement rotation on capsule
 }
 
 CylinderCollider :: struct {
@@ -47,66 +48,6 @@ Collider :: struct {
     CylinderCollider,
     FanCollider,
   },
-}
-
-collider_sphere :: proc(radius: f32 = 1.0, offset: [3]f32 = {}) -> Collider {
-  return Collider{offset = offset, shape = SphereCollider{radius = radius}}
-}
-
-collider_box :: proc(
-  half_extents: [3]f32,
-  offset: [3]f32 = {},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> Collider {
-  return Collider {
-    offset = offset,
-    shape = BoxCollider{half_extents = half_extents, rotation = rotation},
-  }
-}
-
-collider_capsule :: proc(
-  radius: f32,
-  height: f32,
-  offset: [3]f32 = {},
-) -> Collider {
-  return Collider {
-    offset = offset,
-    shape = CapsuleCollider{radius = radius, height = height},
-  }
-}
-
-collider_cylinder :: proc(
-  radius: f32,
-  height: f32,
-  offset: [3]f32 = {},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> Collider {
-  return Collider {
-    offset = offset,
-    shape = CylinderCollider {
-      radius = radius,
-      height = height,
-      rotation = rotation,
-    },
-  }
-}
-
-collider_fan :: proc(
-  radius: f32,
-  height: f32,
-  angle: f32,
-  offset: [3]f32 = {},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> Collider {
-  return Collider {
-    offset = offset,
-    shape = FanCollider {
-      radius = radius,
-      height = height,
-      angle = angle,
-      rotation = rotation,
-    },
-  }
 }
 
 collider_get_aabb :: proc(self: ^Collider, position: [3]f32) -> geometry.Aabb {

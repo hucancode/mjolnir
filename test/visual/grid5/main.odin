@@ -21,7 +21,8 @@ main :: proc() {
       }
     }
     if camera := mjolnir.get_main_camera(engine); camera != nil {
-      resources.camera_look_at(camera, {10, 15, 10}, {0, 0, 0})
+      mjolnir.camera_look_at(camera, {10, 15, 10}, {0, 0, 0})
+      mjolnir.sync_active_camera_controller(engine)
     }
   }
   mjolnir.run(engine, 800, 600, "visual-grid-5")

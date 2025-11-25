@@ -40,15 +40,12 @@ actor_alloc :: proc(
   node_handle: resources.NodeHandle,
 ) -> (
   handle: ActorHandle,
-  actor: ^Actor(T),
   ok: bool,
 ) {
-  handle, actor, ok = cont.alloc(&pool.actors, ActorHandle)
-  if !ok do return {}, nil, false
+  actor : ^Actor(T)
+  handle, actor = cont.alloc(&pool.actors, ActorHandle) or_return
   actor.node_handle = node_handle
-  actor.tick_enabled = false
-  actor.tick_proc = nil
-  return handle, actor, true
+  return handle, true
 }
 
 actor_free :: proc(
@@ -123,7 +120,6 @@ ActorPoolEntry :: struct {
     node_handle: resources.NodeHandle,
   ) -> (
     ActorHandle,
-    rawptr,
     bool,
   ),
   get_fn:     proc(

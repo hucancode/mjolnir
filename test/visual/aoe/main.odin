@@ -34,7 +34,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir, geometry
+  using mjolnir
   physics.init(&physics_world)
   set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
@@ -65,14 +65,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
       scale(engine, node_handle, cube_scale)
       append(&cube_handles, node_handle)
       // Create physics body for cube
-      collider := physics.collider_box(0.5 * cube_scale)
-      body_handle, body, _ := physics.create_body(
+      body_handle := physics.create_body(
         &physics_world,
         node_handle,
-        1.0,
-        true, // static
+        is_static = true,
       )
-      physics.create_collider(&physics_world, body_handle, collider)
+      physics.create_collider_box(&physics_world, body_handle, 0.5 * cube_scale)
       append(&cube_bodies, body_handle)
     }
   }
@@ -95,8 +93,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   scale(engine, effector_sphere, 0.5)
   if main_camera := get_main_camera(engine); main_camera != nil {
-    main_camera.position = {10, 30, 10}
-    resources.camera_look_at(main_camera, main_camera.position, {0, 0, 0})
+    resources.camera_look_at(main_camera, {10, 30, 10}, {0, 0, 0})
+    sync_active_camera_controller(engine)
   }
   // Build initial BVH for all bodies
   physics.step(&physics_world, &engine.world, 0.0)

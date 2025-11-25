@@ -69,7 +69,7 @@ create_body :: proc(
 ) -> (
   handle: RigidBodyHandle,
   ok: bool,
-) {
+) #optional_ok {
   body: ^RigidBody
   handle, body = cont.alloc(&world.bodies, RigidBodyHandle) or_return
   rigid_body_init(body, node_handle, mass, is_static)
@@ -84,20 +84,124 @@ destroy_body :: proc(world: ^PhysicsWorld, handle: RigidBodyHandle) {
   cont.free(&world.bodies, handle)
 }
 
-create_collider :: proc(
+create_collider_sphere :: proc(
   self: ^PhysicsWorld,
   body_handle: RigidBodyHandle,
-  collider: Collider,
+  radius: f32 = 1.0,
+  offset: [3]f32 = {},
 ) -> (
   handle: ColliderHandle,
-  col_ptr: ^Collider,
   ok: bool,
-) {
-  body := cont.get(self.bodies, body_handle) or_return
-  handle, col_ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
-  col_ptr^ = collider
-  body.collider_handle = handle
-  return handle, col_ptr, true
+) #optional_ok {
+  ptr: ^Collider
+  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
+  ptr.offset = offset
+  ptr.shape = SphereCollider {
+    radius = radius,
+  }
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = handle
+  }
+  return handle, true
+
+}
+
+create_collider_box :: proc(
+  self: ^PhysicsWorld,
+  body_handle: RigidBodyHandle,
+  half_extents: [3]f32,
+  offset: [3]f32 = {},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (
+  handle: ColliderHandle,
+  ok: bool,
+) #optional_ok {
+  ptr: ^Collider
+  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
+  ptr.offset = offset
+  ptr.shape = BoxCollider {
+    half_extents = half_extents,
+    rotation     = rotation,
+  }
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = handle
+  }
+  return handle, true
+}
+
+create_collider_capsule :: proc(
+  self: ^PhysicsWorld,
+  body_handle: RigidBodyHandle,
+  radius: f32,
+  height: f32,
+  offset: [3]f32 = {},
+) -> (
+  handle: ColliderHandle,
+  ok: bool,
+) #optional_ok {
+  ptr: ^Collider
+  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
+  ptr.offset = offset
+  ptr.shape = CapsuleCollider {
+    radius = radius,
+    height = height,
+  }
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = handle
+  }
+  return handle, true
+}
+
+create_collider_cylinder :: proc(
+  self: ^PhysicsWorld,
+  body_handle: RigidBodyHandle,
+  radius: f32,
+  height: f32,
+  offset: [3]f32 = {},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (
+  handle: ColliderHandle,
+  ok: bool,
+) #optional_ok {
+  ptr: ^Collider
+  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
+  ptr.offset = offset
+  ptr.shape = CylinderCollider {
+    radius   = radius,
+    height   = height,
+    rotation = rotation,
+  }
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = handle
+  }
+  return handle, true
+}
+
+create_collider_fan :: proc(
+  self: ^PhysicsWorld,
+  body_handle: RigidBodyHandle,
+  radius: f32,
+  height: f32,
+  angle: f32,
+  offset: [3]f32 = {},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (
+  handle: ColliderHandle,
+  ok: bool,
+) #optional_ok {
+  ptr: ^Collider
+  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
+  ptr.offset = offset
+  ptr.shape = FanCollider {
+    radius   = radius,
+    height   = height,
+    angle    = angle,
+    rotation = rotation,
+  }
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = handle
+  }
+  return handle, true
 }
 
 step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {

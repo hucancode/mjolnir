@@ -21,8 +21,8 @@ main :: proc() {
     using mjolnir
     // Setup camera
     if camera := get_main_camera(engine); camera != nil {
-      resources.camera_look_at(camera, {0, 10, 0}, {0, 0, 0})
-      world.camera_controller_sync(&engine.orbit_controller, camera)
+      camera_look_at(camera, {0, 10, 0}, {0, 0, 0})
+      sync_active_camera_controller(engine)
     }
     // Create figure-8/infinity symbol spline path
     // Parametric equations for figure-8: x = sin(t), y = 0, z = sin(2t)/2
@@ -63,7 +63,7 @@ main :: proc() {
           material = mat_handles[i % len(mat_handles)],
         },
       )
-      scale_handle(engine, cubes[i], 0.3)
+      scale(engine, cubes[i], 0.3)
     }
     // Add ground plane
     ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
@@ -75,7 +75,7 @@ main :: proc() {
         material = ground_mat,
       },
     )
-    scale_handle(engine, ground, 20.0)
+    scale(engine, ground, 20.0)
     translate(engine, ground, 0, -2, 0)
     spawn_point_light(
       engine,

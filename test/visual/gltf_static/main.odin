@@ -15,6 +15,7 @@ main :: proc() {
     using mjolnir
     if camera := get_main_camera(engine); camera != nil {
       camera_look_at(camera, {3, 4, 3}, {0.0, 2.0, 0.0})
+      sync_active_camera_controller(engine)
     }
     nodes = load_gltf(engine, "assets/Duck.glb")
     spawn_directional_light(

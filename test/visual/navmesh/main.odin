@@ -67,12 +67,13 @@ main :: proc() {
 }
 
 demo_setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir, geometry
+  using mjolnir
   log.info("Navigation mesh demo setup with world integration")
   // engine.debug_ui_enabled = true
   main_camera := get_main_camera(engine)
   if main_camera != nil {
-    camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0}, {0, 1, 0})
+    camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0})
+    sync_active_camera_controller(engine)
   }
   if demo_state.use_procedural {
     create_demo_scene(engine)
@@ -100,7 +101,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 create_demo_scene :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir, geometry
+  using mjolnir
   log.info("Creating demo scene with world nodes")
   ground_geom := geometry.make_quad([4]f32{0.2, 0.6, 0.2, 1.0})
   for &vertex in ground_geom.vertices {
@@ -181,7 +182,7 @@ create_obj_visualization_mesh :: proc(
   engine: ^mjolnir.Engine,
   obj_file: string,
 ) {
-  using mjolnir, geometry
+  using mjolnir
   log.infof("Creating OBJ visualization from file: %s", obj_file)
   geom, ok := geometry.load_obj(obj_file, 1.0)
   if !ok {
@@ -315,7 +316,7 @@ update_position_marker :: proc(
   pos: [3]f32,
   color: [4]f32,
 ) {
-  using mjolnir, geometry
+  using mjolnir
   if handle.generation != 0 {
     despawn(engine, handle^)
   }
@@ -345,7 +346,7 @@ update_position_marker :: proc(
 }
 
 visualize_path :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir, geometry
+  using mjolnir
   clear_path_visualization(engine)
   if !demo_state.has_path || len(demo_state.current_path) == 0 {
     return
@@ -572,7 +573,7 @@ demo_mouse_moved :: proc(engine: ^mjolnir.Engine, pos, delta: [2]f64) {
 }
 
 demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  using mjolnir, geometry
+  using mjolnir
   main_camera := get_main_camera(engine)
   if main_camera != nil {
     if demo_state.camera_auto_rotate {
@@ -581,7 +582,8 @@ demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     camera_x := math.cos(demo_state.camera_angle) * demo_state.camera_distance
     camera_z := math.sin(demo_state.camera_angle) * demo_state.camera_distance
     camera_pos := [3]f32{camera_x, demo_state.camera_height, camera_z}
-    camera_look_at(main_camera, camera_pos, {0, 0, 0}, {0, 1, 0})
+    camera_look_at(main_camera, camera_pos, {0, 0, 0})
+    sync_active_camera_controller(engine)
   }
 }
 

@@ -86,7 +86,7 @@ create_light :: proc(
 ) -> (
   handle: LightHandle,
   ok: bool,
-) {
+) #optional_ok {
   light: ^Light
   handle, light, ok = cont.alloc(&rm.lights, LightHandle)
   if !ok do return {}, false

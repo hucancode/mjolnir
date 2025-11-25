@@ -53,8 +53,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     if ok {
       ground_body = body_handle
-      collider := physics.collider_box([3]f32{40.0, 0.5, 40.0})
-      physics.create_collider(&physics_world, body_handle, collider)
+      physics.create_collider_box(&physics_world, body_handle, [3]f32{40.0, 0.5, 40.0})
       log.info("Ground body created")
     }
   }
@@ -80,14 +79,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if ok {
       body := physics.get(&physics_world, body_handle)
       cube_body = body_handle
-      collider := physics.collider_box([3]f32{1.0, 1.0, 1.0})
-      physics.create_collider(&physics_world, body_handle, collider)
+      physics.create_collider_box(&physics_world, body_handle, [3]f32{1.0, 1.0, 1.0})
       physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
       log.info("Cube body created")
     }
   }
   if camera := get_main_camera(engine); camera != nil {
-    resources.camera_look_at(camera, {8, 5, 8}, {0, 2, 0})
+    camera_look_at(camera, {8, 5, 8}, {0, 2, 0})
+    sync_active_camera_controller(engine)
   }
   time_since_jump = 0.0
   log.info("====================================")

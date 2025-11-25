@@ -26,6 +26,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Setup camera - try a closer view first
   if camera := get_main_camera(engine); camera != nil {
     camera_look_at(camera, {3, 2, 3}, {0, 1, 0})
+    sync_active_camera_controller(engine)
   }
 
   // Load Fox model

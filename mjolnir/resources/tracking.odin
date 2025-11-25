@@ -17,7 +17,7 @@ mesh_unref :: proc(
 ) -> (
   ref_count: u32,
   ok: bool,
-) {
+) #optional_ok {
   mesh := cont.get(rm.meshes, handle) or_return
   if mesh.ref_count == 0 {
     // log.warnf("mesh_unref: ref_count already 0 for handle %v", handle)
@@ -39,7 +39,7 @@ material_unref :: proc(
 ) -> (
   ref_count: u32,
   ok: bool,
-) {
+) #optional_ok {
   mat := cont.get(rm.materials, handle) or_return
   if mat.ref_count == 0 {
     // log.warnf("material_unref: ref_count already 0 for handle %v", handle)
@@ -61,7 +61,7 @@ texture_2d_unref :: proc(
 ) -> (
   ref_count: u32,
   ok: bool,
-) {
+) #optional_ok {
   img := cont.get(rm.images_2d, handle) or_return
   if img.ref_count == 0 {
     // log.warnf("texture_2d_unref: ref_count already 0 for handle %v", handle)
@@ -83,7 +83,7 @@ texture_cube_unref :: proc(
 ) -> (
   ref_count: u32,
   ok: bool,
-) {
+) #optional_ok {
   img := cont.get(rm.images_cube, handle) or_return
   if img.ref_count == 0 {
     // log.warnf("texture_cube_unref: ref_count already 0 for handle %v", handle)

@@ -21,6 +21,7 @@ main :: proc() {
     using mjolnir
     if camera := get_main_camera(engine); camera != nil {
       camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
+      sync_active_camera_controller(engine)
     }
     root_nodes = load_gltf(engine, "assets/CesiumMan.glb")
     for handle in root_nodes {

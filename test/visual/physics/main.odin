@@ -53,8 +53,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     if ok {
       ground_body = body_handle
-      collider := physics.collider_box([3]f32{10.0, 0.5, 10.0})
-      physics.create_collider(&physics_world, body_handle, collider)
+      physics.create_collider_box(&physics_world, body_handle, [3]f32{10.0, 0.5, 10.0})
       log.info("Ground body created")
     }
   }
@@ -80,8 +79,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if ok {
       body := physics.get(&physics_world, body_handle)
       sphere_body = body_handle
-      collider := physics.collider_sphere(SPHERE_RADIUS)
-      physics.create_collider(&physics_world, body_handle, collider)
+      physics.create_collider_sphere(&physics_world, body_handle, SPHERE_RADIUS)
       physics.set_sphere_inertia(body, SPHERE_RADIUS)
       log.info("Sphere body created with low friction (slippery surface)")
     }
@@ -123,8 +121,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       if ok {
         body := physics.get(&physics_world, body_handle)
         cube_bodies[i] = body_handle
-        collider := physics.collider_box([3]f32{1.0, 1.0, 1.0})
-        physics.create_collider(&physics_world, body_handle, collider)
+        physics.create_collider_box(&physics_world, body_handle, [3]f32{1.0, 1.0, 1.0})
         physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
         log.infof(
           "Cube %d body created at position (%.2f, %.2f, %.2f)",
@@ -137,8 +134,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if camera := get_main_camera(engine); camera != nil {
-    resources.camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
-    world.camera_controller_sync(&engine.orbit_controller, camera)
+    camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
+    sync_active_camera_controller(engine)
   }
   spawn_point_light(engine, {0.8, 0.9, 1, 1}, 50.0, position = {0, 20, 0})
   log.info("Physics demo setup complete")
