@@ -257,19 +257,6 @@ physics_query_box :: proc(
   }
 }
 
-// Helper: Closest point on 3D line segment
-@(private)
-closest_point_on_segment :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
-  ab := b - a
-  ap := p - a
-  segment_length_sq := linalg.length2(ab)
-  if segment_length_sq < math.F32_EPSILON {
-    return a
-  }
-  t := linalg.saturate(linalg.dot(ap, ab) / segment_length_sq)
-  return a + ab * t
-}
-
 // Test if collider overlaps with sphere
 test_collider_sphere_overlap :: proc(
   collider: ^Collider,
@@ -298,7 +285,7 @@ test_collider_sphere_overlap :: proc(
     h := shape.height * 0.5
     line_start := center + [3]f32{0, -h, 0}
     line_end := center + [3]f32{0, h, 0}
-    closest := closest_point_on_segment(sphere_center, line_start, line_end)
+    closest := geometry.closest_point_on_segment(sphere_center, line_start, line_end)
     len := shape.radius + sphere_radius
     return linalg.length2(closest - sphere_center) <= len * len
   case CylinderCollider:

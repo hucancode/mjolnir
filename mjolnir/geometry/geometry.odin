@@ -107,6 +107,17 @@ point_segment_distance2_2d :: proc "contextless" (
   return linalg.length2((p - pt).xz), t
 }
 
+closest_point_on_segment :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
+  ab := b - a
+  ap := p - a
+  segment_length_sq := linalg.length2(ab)
+  if segment_length_sq < math.F32_EPSILON {
+    return a
+  }
+  t := linalg.saturate(linalg.dot(ap, ab) / segment_length_sq)
+  return linalg.mix(a, b, t)
+}
+
 // Find closest point on line segment in 2D (XZ plane)
 closest_point_on_segment_2d :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
   ab := b - a
