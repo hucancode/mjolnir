@@ -317,9 +317,7 @@ update_position_marker :: proc(
   color: [4]f32,
 ) {
   using mjolnir
-  if handle.generation != 0 {
-    despawn(engine, handle^)
-  }
+  despawn(engine, handle^)
   marker_geom := geometry.make_sphere(12, 6, 0.3, color)
   marker_mesh_handle, marker_mesh_ok := create_mesh(engine, marker_geom)
   marker_material_handle, marker_material_ok := create_material(

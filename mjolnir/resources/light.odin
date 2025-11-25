@@ -136,7 +136,7 @@ update_light_camera :: proc(rm: ^Manager, frame_index: u32 = 0) {
     light_direction := world_matrix[2].xyz
     shadow_map_id: u32 = 0xFFFFFFFF
     // Update shadow camera transforms only for shadow-casting lights
-    if light.cast_shadow && light.camera_handle.generation != 0 {
+    if light.cast_shadow {
       #partial switch light.type {
       case .POINT:
         // Point lights use spherical cameras
