@@ -104,9 +104,9 @@ test_box_box :: proc(
     if max_a.x < min_b.x || min_a.x > max_b.x do return
     if max_a.y < min_b.y || min_a.y > max_b.y do return
     if max_a.z < min_b.z || min_a.z > max_b.z do return
-    overlap_x := math.min(max_a.x, max_b.x) - math.max(min_a.x, min_b.x)
-    overlap_y := math.min(max_a.y, max_b.y) - math.max(min_a.y, min_b.y)
-    overlap_z := math.min(max_a.z, max_b.z) - math.max(min_a.z, min_b.z)
+    overlap_x := min(max_a.x, max_b.x) - max(min_a.x, min_b.x)
+    overlap_y := min(max_a.y, max_b.y) - max(min_a.y, min_b.y)
+    overlap_z := min(max_a.z, max_b.z) - max(min_a.z, min_b.z)
     min_overlap := min(overlap_x, overlap_y, overlap_z)
     if min_overlap == overlap_x {
       normal =
@@ -118,7 +118,7 @@ test_box_box :: proc(
         (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5,
       }
     } else if min_overlap == overlap_y {
-      normal = pos_b.y > pos_a.y ? {0, 1, 0} : {0, -1, 0}
+      normal = pos_b.y > pos_a.y ? linalg.VECTOR3F32_Y_AXIS : -linalg.VECTOR3F32_X_AXIS
       contact_y := pos_b.y > pos_a.y ? max_a.y : min_a.y
       point = [3]f32 {
         (max(min_a.x, min_b.x) + min(max_a.x, max_b.x)) * 0.5,

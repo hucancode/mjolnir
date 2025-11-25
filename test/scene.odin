@@ -145,7 +145,7 @@ create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
   using world
   target_nodes := max_node
   if scene.nodes.capacity > 0 {
-    target_nodes = math.min(target_nodes, int(scene.nodes.capacity))
+    target_nodes = min(target_nodes, int(scene.nodes.capacity))
   }
   if max_depth <= 0 || target_nodes <= 0 do return
   QueueEntry :: struct {
