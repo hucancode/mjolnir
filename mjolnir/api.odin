@@ -29,6 +29,19 @@ Transition_Pattern :: level_manager.Transition_Pattern
 Level_State :: level_manager.Level_State
 Level_Manager :: level_manager.Level_Manager
 
+NodeHandle :: resources.NodeHandle
+MeshHandle :: resources.MeshHandle
+MaterialHandle :: resources.MaterialHandle
+Image2DHandle :: resources.Image2DHandle
+ImageCubeHandle :: resources.ImageCubeHandle
+CameraHandle :: resources.CameraHandle
+SphereCameraHandle :: resources.SphereCameraHandle
+EmitterHandle :: resources.EmitterHandle
+ForceFieldHandle :: resources.ForceFieldHandle
+ClipHandle :: resources.ClipHandle
+SpriteHandle :: resources.SpriteHandle
+LightHandle :: resources.LightHandle
+
 // Backward compatibility: Convenience wrappers
 init_level_manager :: level_manager.init
 is_level_transitioning :: level_manager.is_transitioning
@@ -203,7 +216,7 @@ spawn :: proc(
   position: [3]f32 = {0, 0, 0},
   attachment: world.NodeAttachment = nil,
 ) -> (
-  ret: resources.NodeHandle,
+  ret: NodeHandle,
   ok: bool,
 ) #optional_ok {
   return world.spawn(&engine.world, position, attachment, &engine.rm)

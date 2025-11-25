@@ -510,9 +510,9 @@ populate_debug_ui :: proc(self: ^Engine) {
 @(private)
 create_light_camera :: proc(
   engine: ^Engine,
-  light_handle: resources.LightHandle,
+  light_handle: LightHandle,
 ) -> (
-  camera_handle: resources.CameraHandle,
+  camera_handle: CameraHandle,
   ok: bool,
 ) #optional_ok {
   light := cont.get(engine.rm.lights, light_handle) or_return
@@ -523,7 +523,7 @@ create_light_camera :: proc(
     // Point lights use spherical cameras for omnidirectional shadows
     cam_handle, spherical_cam := cont.alloc(
       &engine.rm.spherical_cameras,
-      resources.SphereCameraHandle,
+      SphereCameraHandle,
     ) or_return
     init_result := resources.spherical_camera_init(
       spherical_cam,
@@ -559,7 +559,7 @@ create_light_camera :: proc(
     return cam_handle, true
   case .DIRECTIONAL, .SPOT:
     // Directional and spot lights use regular cameras
-    cam_handle, cam := cont.alloc(&engine.rm.cameras, resources.CameraHandle) or_return
+    cam_handle, cam := cont.alloc(&engine.rm.cameras, CameraHandle) or_return
     // Camera parameters differ by light type
     fov := f32(math.PI * 0.5) // 90 degrees default
     if light.type == .SPOT {
@@ -679,7 +679,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue
-    cam_handle := resources.CameraHandle {
+    cam_handle := CameraHandle {
       index      = u32(cam_index),
       generation = entry.generation,
     }

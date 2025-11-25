@@ -36,7 +36,7 @@ DynamicLightData :: struct {
 Light :: struct {
   using data:    LightData,
   node_handle:   NodeHandle, // Associated scene node for transform updates
-  camera_handle: Handle, // Camera (regular or spherical based on light type) - can be CameraHandle or SphereCameraHandle
+  camera_handle: CameraHandle, // Camera (regular or spherical based on light type) - can be CameraHandle or SphereCameraHandle
 }
 
 light_init :: proc(

@@ -46,7 +46,6 @@ destroy :: proc(pool: Pool($T), destroy_proc: proc(_: ^T)) {
 alloc :: proc(pool: ^Pool($T), $HT: typeid) -> (handle: HT, item: ^T, ok: bool) {
   MAX_CONSECUTIVE_ERROR :: 20
   @(static) error_count := 0
-
   // Try to reuse a freed slot
   if len(pool.free_indices) > 0 {
     index := pop(&pool.free_indices)
@@ -55,7 +54,6 @@ alloc :: proc(pool: ^Pool($T), $HT: typeid) -> (handle: HT, item: ^T, ok: bool) 
     error_count = 0
     return HT{index, entry.generation}, &entry.item, true
   }
-
   // Allocate a new slot
   index := u32(len(pool.entries))
   if pool.capacity > 0 && index >= pool.capacity {
@@ -70,7 +68,6 @@ alloc :: proc(pool: ^Pool($T), $HT: typeid) -> (handle: HT, item: ^T, ok: bool) 
     }
     return
   }
-
   new_item_generation: u32 = 1
   entry_to_add := Entry(T) {
     generation = new_item_generation,

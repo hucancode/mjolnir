@@ -13,8 +13,8 @@ import "vendor:glfw"
 LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
-portal_camera_handle: resources.CameraHandle
-portal_material_handle: resources.MaterialHandle
+portal_camera_handle: mjolnir.CameraHandle
+portal_material_handle: mjolnir.MaterialHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -46,7 +46,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           world_x := (f32(x) - f32(nx) * 0.5) * space
           world_y := (f32(y) - f32(ny) * 0.5) * space + 2.25
           world_z := (f32(z) - f32(nz) * 0.5) * space
-          node_handle: resources.NodeHandle
+          node_handle: NodeHandle
           node_ok := false
           if x % 3 == 0 {
             node_handle, node_ok = spawn(
@@ -84,7 +84,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   when true {
-    brick_wall_mat_handle: resources.Handle
+    brick_wall_mat_handle: MaterialHandle
     brick_wall_mat_ok := false
     brick_albedo_handle, brick_albedo_ok := create_texture(
       engine,
@@ -326,7 +326,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       } else if ALL_POINT_LIGHT {
         should_make_spot_light = false
       }
-      light_handle: resources.Handle
+      light_handle: NodeHandle
       if should_make_spot_light {
         light_handle =
         spawn_child_spot_light(
@@ -408,7 +408,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       engine,
       "assets/gold-star.png",
     )
-    goldstar_material_handle: resources.Handle
+    goldstar_material_handle: MaterialHandle
     goldstar_material_ok := false
     if goldstar_texture_ok {
       goldstar_material_handle, goldstar_material_ok = create_material(

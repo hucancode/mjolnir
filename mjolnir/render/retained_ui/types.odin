@@ -60,7 +60,7 @@ LabelData :: struct {
 }
 
 ImageData :: struct {
-  texture_handle: resources.Handle,
+  texture_handle: resources.Image2DHandle,
   uv:             [4]f32, // u0, v0, u1, v1 for sprite animation
   sprite_index:   u32,
   sprite_count:   u32,
@@ -215,7 +215,7 @@ Manager :: struct {
   projection_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:              vk.PipelineLayout,
   pipeline:                     vk.Pipeline,
-  atlas_handle:                 resources.Handle, // For bindless access
+  atlas_handle:                 resources.Image2DHandle,
   proj_buffer:                  gpu.MutableBuffer(matrix[4, 4]f32),
   vertex_buffers:               [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     Vertex2D,
@@ -224,7 +224,7 @@ Manager :: struct {
   // Text rendering resources
   font_ctx:                     fs.FontContext,
   default_font:                 int,
-  text_atlas_handle:            resources.Handle, // For bindless access
+  text_atlas_handle:            resources.Image2DHandle,
   text_vertices:                [TEXT_MAX_VERTICES]Vertex2D,
   text_indices:                 [TEXT_MAX_INDICES]u32,
   text_vertex_count:            u32,

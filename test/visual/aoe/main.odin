@@ -93,7 +93,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   scale(engine, effector_sphere, 0.5)
   if main_camera := get_main_camera(engine); main_camera != nil {
-    resources.camera_look_at(main_camera, {10, 30, 10}, {0, 0, 0})
+    camera_look_at(main_camera, {10, 30, 10}, {0, 0, 0})
     sync_active_camera_controller(engine)
   }
   // Build initial BVH for all bodies

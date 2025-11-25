@@ -9,18 +9,18 @@ import "core:slice"
 import vk "vendor:vulkan"
 
 Handle :: cont.Handle
-NodeHandle :: Handle
+NodeHandle :: distinct Handle
 MeshHandle :: distinct Handle
-MaterialHandle :: Handle
-Image2DHandle :: Handle
-ImageCubeHandle :: Handle
-CameraHandle :: Handle
-SphereCameraHandle :: Handle
-EmitterHandle :: Handle
-ForceFieldHandle :: Handle
-ClipHandle :: Handle
-SpriteHandle :: Handle
-LightHandle :: Handle
+MaterialHandle :: distinct Handle
+Image2DHandle :: distinct Handle
+ImageCubeHandle :: distinct Handle
+CameraHandle :: distinct Handle
+SphereCameraHandle :: CameraHandle // TODO: for better type-safety, make this distinct
+EmitterHandle :: distinct Handle
+ForceFieldHandle :: distinct Handle
+ClipHandle :: distinct Handle
+SpriteHandle :: distinct Handle
+LightHandle :: distinct Handle
 
 Pool :: cont.Pool
 SlabAllocator :: cont.SlabAllocator
