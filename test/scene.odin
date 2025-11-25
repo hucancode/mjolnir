@@ -149,7 +149,7 @@ create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
   }
   if max_depth <= 0 || target_nodes <= 0 do return
   QueueEntry :: struct {
-    handle: resources.Handle,
+    handle: resources.NodeHandle,
     depth:  int,
   }
   queue: [dynamic]QueueEntry
