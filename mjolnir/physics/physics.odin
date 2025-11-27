@@ -207,12 +207,15 @@ create_collider_fan :: proc(
 step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   step_start := time.now()
   // Save previous contacts for warmstarting
+  warmstart_prep_start := time.now()
   clear(&physics.prev_contacts)
   for contact in physics.contacts {
     hash := collision_pair_hash({contact.body_a, contact.body_b})
     physics.prev_contacts[hash] = contact
   }
+  warmstart_prep_time := time.since(warmstart_prep_start)
   // Apply forces to all bodies (gravity, air resistance, etc.)
+  force_application_start := time.now()
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
     if body.is_static || body.is_kinematic || body.trigger_only {
@@ -270,12 +273,16 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     }
     apply_force(body, drag_force)
   }
+  force_application_time := time.since(force_application_start)
   // Integrate velocities from forces ONCE for the entire frame
+  integration_start := time.now()
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
     integrate(body, dt)
   }
+  integration_time := time.since(integration_start)
   // Track which bodies were handled by CCD (outside substep loop)
+  ccd_start := time.now()
   ccd_handled := make(
     [dynamic]bool,
     len(physics.bodies.entries),
@@ -283,6 +290,9 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   )
   // Perform CCD for fast-moving objects ONCE before substeps
   ccd_threshold :: 5.0 // Objects moving faster than this use CCD (m/s)
+  ccd_candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  ccd_bodies_tested := 0
+  ccd_total_candidates := 0
   for &entry_a, idx_a in physics.bodies.entries do if entry_a.active {
     body_a := &entry_a.item
     if body_a.is_static || body_a.collider_handle.generation == 0 || body_a.trigger_only {
@@ -293,6 +303,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     if velocity_mag < ccd_threshold {
       continue
     }
+    ccd_bodies_tested += 1
     node_a := cont.get(w.nodes, body_a.node_handle) or_continue
     collider_a := cont.get(physics.colliders, body_a.collider_handle) or_continue
     pos_a := node_a.transform.position
@@ -301,10 +312,26 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     earliest_normal := linalg.VECTOR3F32_Y_AXIS
     earliest_body_b: ^RigidBody = nil
     has_ccd_hit := false
-    // Check against all other colliders
-    for &entry_b, idx_b in physics.bodies.entries do if entry_b.active {
-      if idx_a == idx_b do continue
-      body_b := &entry_b.item
+    // Build swept AABB for broadphase query
+    current_aabb := collider_get_aabb(collider_a, pos_a)
+    swept_aabb := current_aabb
+    // Expand AABB to include motion path
+    for i in 0..<3 {
+      if motion[i] < 0 {
+        swept_aabb.min[i] += motion[i]
+      } else {
+        swept_aabb.max[i] += motion[i]
+      }
+    }
+    // Query BVH for potential collision candidates
+    clear(&ccd_candidates)
+    geometry.bvh_query_aabb(&physics.spatial_index, swept_aabb, &ccd_candidates)
+    ccd_total_candidates += len(ccd_candidates)
+    // Check against nearby colliders only (BVH-accelerated)
+    for candidate in ccd_candidates {
+      handle_b := candidate.handle
+      if u32(idx_a) == handle_b.index do continue
+      body_b := cont.get(physics.bodies, handle_b) or_continue
       if body_b.collider_handle.generation == 0 do continue
       node_b := cont.get(w.nodes, body_b.node_handle) or_continue
       collider_b := cont.get(physics.colliders, body_b.collider_handle) or_continue
@@ -344,6 +371,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       ccd_handled[idx_a] = true
     }
   }
+  ccd_time := time.since(ccd_start)
   // integrate position multiple times per frame
   // more substeps = smaller steps = less tunneling through thin objects
   NUM_SUBSTEPS :: 5
@@ -562,6 +590,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     }
   }
   substep_time := time.since(substep_start)
+  cleanup_start := time.now()
   for &entry, idx in physics.bodies.entries do if entry.active {
     body := &entry.item
     if body.is_static || body.is_kinematic {
@@ -579,12 +608,21 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       log.infof("Removing body at y=%.2f (below KILL_Y=%.2f)", node.transform.position.y, KILL_Y)
     }
   }
+  cleanup_time := time.since(cleanup_start)
   total_time := time.since(step_start)
+  avg_candidates := ccd_bodies_tested > 0 ? f32(ccd_total_candidates) / f32(ccd_bodies_tested) : 0.0
   log.infof(
-    "Physics: %.2fms total | BVH build=%.2fms | substeps=%.2fms | bodies=%d contacts=%d",
+    "Physics: %.2fms total | warmstart=%.2fms force=%.2fms integ=%.2fms ccd=%.2fms (fast=%d avg_cands=%.1f) bvh=%.2fms substeps=%.2fms cleanup=%.2fms | bodies=%d contacts=%d",
     time.duration_milliseconds(total_time),
+    time.duration_milliseconds(warmstart_prep_time),
+    time.duration_milliseconds(force_application_time),
+    time.duration_milliseconds(integration_time),
+    time.duration_milliseconds(ccd_time),
+    ccd_bodies_tested,
+    avg_candidates,
     time.duration_milliseconds(bvh_build_time),
     time.duration_milliseconds(substep_time),
+    time.duration_milliseconds(cleanup_time),
     active_body_count,
     len(physics.contacts),
   )
