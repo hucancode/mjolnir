@@ -1,5 +1,6 @@
 package physics
 
+import "../geometry"
 import "../resources"
 import "core:math/linalg"
 
@@ -25,6 +26,7 @@ RigidBody :: struct {
   gravity_scale:        f32,
   drag_coefficient:     f32,
   cross_sectional_area: f32, // m2 - set to 0 for automatic calculation
+  cached_aabb:          geometry.Aabb,
 }
 
 rigid_body_init :: proc(
@@ -147,11 +149,18 @@ integrate :: proc(self: ^RigidBody, dt: f32) {
   } else {
     self.angular_velocity = {}
   }
-  // Clear forces
   clear_forces(self)
 }
 
 clear_forces :: proc(self: ^RigidBody) {
   self.force = {}
   self.torque = {}
+}
+
+update_cached_aabb :: proc(
+  self: ^RigidBody,
+  collider: ^Collider,
+  position: [3]f32,
+) {
+  self.cached_aabb = collider_calculate_aabb(collider, position)
 }

@@ -29,7 +29,7 @@ physics_raycast :: proc(
     t   = max_dist,
   }
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  geometry.bvh_query_ray(&physics.spatial_index, ray, max_dist, &candidates)
+  bvh_query_ray_fast(&physics.spatial_index, ray, max_dist, &candidates)
   for candidate in candidates {
     body := cont.get(physics.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
@@ -57,7 +57,7 @@ physics_raycast_single :: proc(
   max_dist: f32 = max(f32),
 ) -> PhysicsRayHit {
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  geometry.bvh_query_ray(&physics.spatial_index, ray, max_dist, &candidates)
+  bvh_query_ray_fast(&physics.spatial_index, ray, max_dist, &candidates)
   for candidate in candidates {
     body := cont.get(physics.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
@@ -192,7 +192,7 @@ raycast_collider :: proc(
   case CylinderCollider, FanCollider:
     // Cylinder and Fan use GJK for collision, but for raycasting we'll use a simplified approach
     // Transform to AABB for now
-    bounds := collider_get_aabb(collider, position)
+    bounds := collider_calculate_aabb(collider, position)
     inv_dir := 1.0 / ray.direction
     t_near, t_far := geometry.ray_aabb_intersection(
       ray.origin,
@@ -222,7 +222,7 @@ physics_query_sphere :: proc(
     max = center + [3]f32{radius, radius, radius},
   }
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  geometry.bvh_query_aabb(&physics.spatial_index, query_bounds, &candidates)
+  bvh_query_aabb_fast(&physics.spatial_index, query_bounds, &candidates)
   for candidate in candidates {
     body := cont.get(physics.bodies, candidate.handle) or_continue
     node := cont.get(w.nodes, body.node_handle) or_continue
@@ -244,7 +244,7 @@ physics_query_box :: proc(
 ) {
   clear(results)
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  geometry.bvh_query_aabb(&physics.spatial_index, bounds, &candidates)
+  bvh_query_aabb_fast(&physics.spatial_index, bounds, &candidates)
   for candidate in candidates {
     body := cont.get(physics.bodies, candidate.handle) or_continue
     node := cont.get(w.nodes, body.node_handle) or_continue
@@ -285,7 +285,11 @@ test_collider_sphere_overlap :: proc(
     h := shape.height * 0.5
     line_start := center + [3]f32{0, -h, 0}
     line_end := center + [3]f32{0, h, 0}
-    closest := geometry.closest_point_on_segment(sphere_center, line_start, line_end)
+    closest := geometry.closest_point_on_segment(
+      sphere_center,
+      line_start,
+      line_end,
+    )
     len := shape.radius + sphere_radius
     return linalg.length2(closest - sphere_center) <= len * len
   case CylinderCollider:

@@ -40,7 +40,7 @@ build_widget_tree_commands :: proc(self: ^Manager, handle: WidgetHandle) {
   child := widget.first_child
   for child.index != 0 {
     build_widget_tree_commands(self, child)
-    child_widget, _ := cont.get(self.widgets, child)
+    child_widget := cont.get(self.widgets, child)
     child = child_widget.next_sibling
   }
 }

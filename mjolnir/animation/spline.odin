@@ -135,13 +135,13 @@ spline_sample :: proc(spline: Spline($T), t: f32) -> T {
     h01 := hermite_h01(u)
     h11 := hermite_h11(u)
 
-    result_x := h00 * p0.x + h10 * m0_scaled.x + h01 * p1.x + h11 * m1_scaled.x
-    result_y := h00 * p0.y + h10 * m0_scaled.y + h01 * p1.y + h11 * m1_scaled.y
-    result_z := h00 * p0.z + h10 * m0_scaled.z + h01 * p1.z + h11 * m1_scaled.z
-    result_w := h00 * p0.w + h10 * m0_scaled.w + h01 * p1.w + h11 * m1_scaled.w
-
     return linalg.normalize(
-      quaternion(x = result_x, y = result_y, z = result_z, w = result_w),
+      quaternion(
+        x = h00 * p0.x + h10 * m0_scaled.x + h01 * p1.x + h11 * m1_scaled.x,
+        y = h00 * p0.y + h10 * m0_scaled.y + h01 * p1.y + h11 * m1_scaled.y,
+        z = h00 * p0.z + h10 * m0_scaled.z + h01 * p1.z + h11 * m1_scaled.z,
+        w = h00 * p0.w + h10 * m0_scaled.w + h01 * p1.w + h11 * m1_scaled.w,
+      ),
     )
   } else {
     // For vectors and scalars

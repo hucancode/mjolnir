@@ -9,23 +9,6 @@ import "core:slice"
 import "core:testing"
 import "core:time"
 
-matrix4_almost_equal :: proc(
-  t: ^testing.T,
-  actual, expected: matrix[4, 4]f32,
-) {
-  for i in 0 ..< 4 {
-    for j in 0 ..< 4 {
-      delta := math.abs(actual[i, j] - expected[i, j])
-      // Use a more lenient epsilon for floating point comparisons
-      testing.expect(
-        t,
-        delta < 0.01,
-        fmt.tprintf("Matrix difference at [%d,%d], actual: %v . expected: %v", i, j, actual, expected),
-      )
-    }
-  }
-}
-
 // @(test)
 matrix_from_array :: proc(t: ^testing.T) {
   a := [16]f32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}

@@ -71,7 +71,7 @@ deselect_radio_group :: proc(
   child := widget.first_child
   for child.index != 0 {
     deselect_radio_group(self, child, group_id, exclude_handle)
-    child_widget, _ := cont.get(self.widgets, child)
+    child_widget := cont.get(self.widgets, child)
     child = child_widget.next_sibling
   }
 }
@@ -205,7 +205,7 @@ update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
   child := widget.first_child
   for child.index != 0 {
     update_widget_input(self, child)
-    child_widget, _ := cont.get(self.widgets, child)
+    child_widget := cont.get(self.widgets, child)
     child = child_widget.next_sibling
   }
 }

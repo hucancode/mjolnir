@@ -50,7 +50,10 @@ Collider :: struct {
   },
 }
 
-collider_get_aabb :: proc(self: ^Collider, position: [3]f32) -> geometry.Aabb {
+collider_calculate_aabb :: proc(
+  self: ^Collider,
+  position: [3]f32,
+) -> geometry.Aabb {
   center := position + self.offset
   switch sh in self.shape {
   case SphereCollider:

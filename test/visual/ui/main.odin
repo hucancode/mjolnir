@@ -124,7 +124,7 @@ main :: proc() {
     // Get the engine's built-in retained UI manager
     ui := &engine.render.retained_ui
     // Create a window container
-    state.window_handle, _ = retained_ui.create_window(
+    state.window_handle = retained_ui.create_window(
       ui,
       "Retained UI Widget Showcase",
       20,
@@ -132,7 +132,7 @@ main :: proc() {
       760,
       560,
     )
-    state.button_handle, _ = retained_ui.create_button(
+    state.button_handle = retained_ui.create_button(
       ui,
       "Click Me!",
       40,
@@ -143,7 +143,7 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    state.label_handle, _ = retained_ui.create_label(
+    state.label_handle = retained_ui.create_label(
       ui,
       "Clicks: 0",
       40,
@@ -151,7 +151,7 @@ main :: proc() {
       state.window_handle,
       true, // autosize - test dynamic resizing
     )
-    button2, _ := retained_ui.create_button(
+    button2 := retained_ui.create_button(
       ui,
       "Toggle Image",
       40,
@@ -162,7 +162,7 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    state.checkbox_handle, _ = retained_ui.create_checkbox(
+    state.checkbox_handle = retained_ui.create_checkbox(
       ui,
       "Enable Music",
       40,
@@ -172,7 +172,7 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    state.combobox_handle, _ = retained_ui.create_combobox(
+    state.combobox_handle = retained_ui.create_combobox(
       ui,
       quality_items[:],
       40,
@@ -226,7 +226,7 @@ main :: proc() {
       state.window_handle,
     )
     retained_ui.create_label(ui, "Player Name:", 40, 460, state.window_handle, true)
-    state.textbox_handle, _ = retained_ui.create_textbox(
+    state.textbox_handle = retained_ui.create_textbox(
       ui,
       "Enter your name...",
       40,
@@ -238,7 +238,7 @@ main :: proc() {
       nil,
       state.window_handle,
     )
-    state.status_label, _ = retained_ui.create_label(
+    state.status_label = retained_ui.create_label(
       ui,
       "Status: Ready",
       220,
@@ -252,7 +252,7 @@ main :: proc() {
       &engine.rm,
       image_data,
     )
-    state.image_handle, _ = retained_ui.create_image(
+    state.image_handle = retained_ui.create_image(
       ui,
       state.texture_handle,
       420,

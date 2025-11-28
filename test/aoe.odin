@@ -14,7 +14,7 @@ import "core:time"
 // Helper to create minimal physics world for testing
 make_test_physics :: proc() -> (physics.PhysicsWorld, world.World) {
   phys: physics.PhysicsWorld
-  physics.init(&phys)
+  physics.init(&phys, enable_parallel = false)
   w: world.World
   world.init(&w)
   return phys, w
@@ -27,7 +27,7 @@ spawn_test_body :: proc(
   position: [3]f32,
   is_static: bool = true,
 ) -> physics.RigidBodyHandle {
-  node_handle, _ := world.spawn(w, position)
+  node_handle := world.spawn(w, position)
   // Update world matrix
   world.traverse(w, nil, nil, nil, 0)
   body_handle := physics.create_body(phys, node_handle, 1.0, is_static)
@@ -293,7 +293,7 @@ test_physics_cylinder_collision :: proc(t: ^testing.T) {
   defer physics.destroy(&phys)
   defer world.shutdown(&w, nil, nil)
   // Spawn a cylinder body
-  node_handle, _ := world.spawn(&w, {0, 0, 0})
+  node_handle := world.spawn(&w, {0, 0, 0})
   world.traverse(&w, nil, nil, nil, 0)
   body_handle := physics.create_body(&phys, node_handle, 1.0, true)
   physics.create_collider_cylinder(&phys, body_handle, 2.0, 4.0)
