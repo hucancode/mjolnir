@@ -25,6 +25,7 @@ _________ end frame, sync _________
 1,2 and a,b,c,d run in parallel
 */
 
+FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 SHADER_SPHERECAM_CULLING :: #load(
   "../../shader/occlusion_culling/sphere_cull.spv",
 )
@@ -418,7 +419,7 @@ perform_culling :: proc(
     self.cull_layout,
     camera.descriptor_set[frame_index],
   )
-  prev_frame := alg.prev(frame_index, resources.FRAMES_IN_FLIGHT)
+  prev_frame := alg.prev(frame_index, FRAMES_IN_FLIGHT)
   push_constants := VisibilityPushConstants {
     camera_index      = camera_index,
     node_count        = self.node_count,

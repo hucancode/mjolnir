@@ -29,7 +29,7 @@ import mu "vendor:microui"
 import vk "vendor:vulkan"
 import "world"
 
-FRAMES_IN_FLIGHT :: 2
+FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 RENDER_FPS :: 60.0
 FRAME_TIME :: 1.0 / RENDER_FPS
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
@@ -585,7 +585,7 @@ create_light_camera :: proc(
       return {}, false
     }
     // Allocate camera descriptors
-    for frame in 0 ..< resources.FRAMES_IN_FLIGHT {
+    for frame in 0 ..< FRAMES_IN_FLIGHT {
       alloc_result := resources.camera_allocate_descriptors(
         &engine.gctx,
         &engine.rm,

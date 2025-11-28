@@ -7,6 +7,7 @@ import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
 
+FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 SHADER_NAVMESH_VERT :: #load("../../shader/navmesh/vert.spv")
 SHADER_NAVMESH_FRAG :: #load("../../shader/navmesh/frag.spv")
 
@@ -20,7 +21,7 @@ Renderer :: struct {
   index_count:        u32,
   enabled:            bool,
   color_mode:         ColorMode,
-  commands:           [resources.FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  commands:           [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   path_vertex_buffer: gpu.MutableBuffer(Vertex),
   path_vertex_count:  u32,
   path_enabled:       bool,

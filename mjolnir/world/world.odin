@@ -12,6 +12,8 @@ import "core:slice"
 import "core:strings"
 import "core:sync"
 
+FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
+
 LightAttachment :: struct {
   handle: resources.LightHandle,
 }

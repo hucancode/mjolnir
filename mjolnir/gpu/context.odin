@@ -16,7 +16,7 @@ when ODIN_OS == .Darwin {
   @(require, extra_linker_flags = "-rpath /usr/local/lib")
   foreign import __ "system:System.framework"
 }
-
+FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 ENGINE_NAME :: "Mjolnir"
 TITLE :: "Mjolnir"
 
@@ -540,7 +540,6 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
 
 @(private = "file")
 descriptor_pool_init :: proc(self: ^GPUContext) -> vk.Result {
-  FRAMES_IN_FLIGHT :: 2 // TODO: get this from a common place
   MAX_DEPTH_PYRAMID_MIPS :: 16
   MAX_ACTIVE_CAMERAS :: 128
   // Storage images needed for depth pyramid mip reduction (one per mip per frame per camera)

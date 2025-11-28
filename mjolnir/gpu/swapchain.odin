@@ -6,8 +6,6 @@ import "core:slice"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
-FRAMES_IN_FLIGHT :: 2
-
 Swapchain :: struct {
   handle:                      vk.SwapchainKHR,
   format:                      vk.SurfaceFormatKHR,

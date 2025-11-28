@@ -876,7 +876,7 @@ create_camera :: proc(
     return {}, false
   }
   // Allocate camera descriptors after camera is initialized
-  for frame in 0 ..< resources.FRAMES_IN_FLIGHT {
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     if resources.camera_allocate_descriptors(
          &engine.gctx,
          &engine.rm,

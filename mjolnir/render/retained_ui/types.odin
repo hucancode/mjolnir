@@ -6,7 +6,7 @@ import resources "../../resources"
 import fs "vendor:fontstash"
 import vk "vendor:vulkan"
 
-FRAMES_IN_FLIGHT :: resources.FRAMES_IN_FLIGHT
+FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 SHADER_UI_VERT :: #load("../../shader/retained_ui/vert.spv")
 SHADER_UI_FRAG :: #load("../../shader/retained_ui/frag.spv")
 

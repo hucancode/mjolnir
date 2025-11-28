@@ -20,6 +20,8 @@ import "transparency"
 import vk "vendor:vulkan"
 import "visibility"
 
+FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
+
 Manager :: struct {
   geometry:     geometry.Renderer,
   lighting:     lighting.Renderer,
@@ -50,7 +52,7 @@ record_compute_commands :: proc(
   gpu.begin_record(compute_buffer) or_return
   // Compute for frame N prepares data for frame N+1
   // Buffer indices with FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
-  next_frame_index := alg.next(frame_index, resources.FRAMES_IN_FLIGHT)
+  next_frame_index := alg.next(frame_index, FRAMES_IN_FLIGHT)
   for &entry, cam_index in rm.cameras.entries do if entry.active {
     cam := &entry.item
     resources.camera_upload_data(rm, u32(cam_index), frame_index)
@@ -143,7 +145,7 @@ init :: proc(
     swapchain_extent.width,
     swapchain_extent.height,
   ) or_return
-  for frame in 0 ..< resources.FRAMES_IN_FLIGHT {
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
     resources.camera_allocate_descriptors(
       gctx,
       rm,
