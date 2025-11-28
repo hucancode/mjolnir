@@ -96,17 +96,3 @@ collider_calculate_aabb :: proc(
   }
   return {}
 }
-
-// Get OBB for a box collider
-collider_get_obb :: proc(
-  collider: ^Collider,
-  position: [3]f32,
-) -> geometry.Obb {
-  center := position + collider.offset
-  box := collider.shape.(BoxCollider)
-  return geometry.Obb {
-    center = center,
-    half_extents = box.half_extents,
-    rotation = box.rotation,
-  }
-}
