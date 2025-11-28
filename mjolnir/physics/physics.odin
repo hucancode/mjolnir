@@ -12,7 +12,7 @@ import "core:slice"
 import "core:thread"
 import "core:time"
 
-KILL_Y :: -50.0
+KILL_Y :: #config(PHYSICS_KILL_Y, -50.0)
 SEA_LEVEL_AIR_DENSITY :: 1.225
 NUM_SUBSTEPS :: 1
 CONSTRAINT_SOLVER_ITERS :: 1
