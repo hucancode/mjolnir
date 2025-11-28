@@ -14,6 +14,10 @@ import "core:time"
 
 KILL_Y :: -50.0
 SEA_LEVEL_AIR_DENSITY :: 1.225
+NUM_SUBSTEPS :: 1
+CONSTRAINT_SOLVER_ITERS :: 1
+STABILIZATION_ITERS :: 1
+
 RigidBodyHandle :: distinct cont.Handle
 ColliderHandle :: distinct cont.Handle
 
@@ -23,7 +27,6 @@ PhysicsWorld :: struct {
   contacts:              [dynamic]Contact,
   prev_contacts:         map[u64]Contact, // Contact cache for warmstarting
   gravity:               [3]f32,
-  iterations:            i32, // Per-substep iterations
   spatial_index:         geometry.BVH(BroadPhaseEntry),
   body_bounds:           [dynamic]geometry.Aabb,
   enable_air_resistance: bool,
@@ -49,7 +52,6 @@ init :: proc(
   world.contacts = make([dynamic]Contact)
   world.prev_contacts = make(map[u64]Contact)
   world.gravity = gravity
-  world.iterations = 6
   world.spatial_index = geometry.BVH(BroadPhaseEntry) {
     nodes = make([dynamic]geometry.BVHNode),
     primitives = make([dynamic]BroadPhaseEntry),
@@ -278,7 +280,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         cross_section = math.PI * c.radius * c.radius
       case BoxCollider:
         // Frontal area of box (average of three face areas)
-        cross_section = (c.half_extents.x * c.half_extents.y * 4.0 + c.half_extents.y * c.half_extents.z * 4.0 + c.half_extents.x * c.half_extents.z * 4.0) / 3.0
+        cross_section = (c.half_extents.x * c.half_extents.y + c.half_extents.y * c.half_extents.z + c.half_extents.x * c.half_extents.z) * 4.0 / 3.0
       case CylinderCollider:
         // Cross-section of cylinder (average of circular and rectangular face)
         cross_section = (math.PI * c.radius * c.radius + c.radius * 2.0 * c.height) * 0.5
@@ -338,7 +340,6 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   ccd_time := time.since(ccd_start)
   // integrate position multiple times per frame
   // more substeps = smaller steps = less tunneling through thin objects
-  NUM_SUBSTEPS :: 1
   substep_dt := dt / f32(NUM_SUBSTEPS)
   active_body_count := 0
   for &entry, idx in physics.bodies.entries do if entry.active {
@@ -429,7 +430,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       }
     }
     // Solve constraints with bias (includes position correction + restitution)
-    for _ in 0 ..< physics.iterations {
+    #unroll for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
       for &contact in physics.contacts {
         body_a := cont.get(physics.bodies, contact.body_a) or_continue
         body_b := cont.get(physics.bodies, contact.body_b) or_continue
@@ -442,8 +443,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     }
     // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
     // This prevents jitter without adding artificial velocity
-    stabilization_iters :: 2
-    #unroll for _ in 0 ..< stabilization_iters {
+    #unroll for _ in 0 ..< STABILIZATION_ITERS {
       for &contact in physics.contacts {
         body_a := cont.get(physics.bodies, contact.body_a) or_continue
         body_b := cont.get(physics.bodies, contact.body_b) or_continue
