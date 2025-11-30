@@ -457,6 +457,23 @@ load_skins :: proc(
         read := cgltf.accessor_read_float(gltf_skin.inverse_bind_matrices, uint(i), raw_data(ibm_floats[:]), 16)
         if read {
           bones[i].inverse_bind_matrix = geometry.matrix_from_arr(ibm_floats)
+
+          // DEBUG: Print first 3 loaded inverse bind matrices
+          if i < 3 {
+            log.infof("\n=== ODIN INVERSE BIND MATRIX %d ===", i)
+            log.info("Raw floats: ")
+            for f, idx in ibm_floats {
+              log.infof("%.6f", f)
+              if idx < 15 do log.info(", ")
+            }
+            log.info("")
+            log.info("Matrix:")
+            mat := bones[i].inverse_bind_matrix
+            log.infof("  [%.6f, %.6f, %.6f, %.6f]", mat[0][0], mat[0][1], mat[0][2], mat[0][3])
+            log.infof("  [%.6f, %.6f, %.6f, %.6f]", mat[1][0], mat[1][1], mat[1][2], mat[1][3])
+            log.infof("  [%.6f, %.6f, %.6f, %.6f]", mat[2][0], mat[2][1], mat[2][2], mat[2][3])
+            log.infof("  [%.6f, %.6f, %.6f, %.6f]", mat[3][0], mat[3][1], mat[3][2], mat[3][3])
+          }
           continue
         }
       }

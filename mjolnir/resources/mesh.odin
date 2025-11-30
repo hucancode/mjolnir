@@ -263,10 +263,12 @@ sample_layers :: proc(
         bone := &skin.bones[entry.bone_index]
         local_transform: geometry.Transform
         if entry.bone_index < u32(len(clip.channels)) {
+          // HARDCODED: Sample at frame 0
+          debug_time: f32 = 0.0
           local_transform.position, local_transform.rotation, local_transform.scale =
             animation.channel_sample_all(
               clip.channels[entry.bone_index],
-              layer_data.time,
+              debug_time,
             )
         } else {
           local_transform.scale = [3]f32{1, 1, 1}
@@ -420,6 +422,29 @@ sample_layers :: proc(
     world_matrix := world_transforms[i].world_matrix
     out_bone_matrices[i] = world_matrix * skin.bones[i].inverse_bind_matrix
   }
+
+  // DEBUG: Print first 10 bone matrices
+  max_bones_to_print := min(10, bone_count)
+  log.infof("\n=== ODIN BONE MATRICES (Frame 0, first %d bones) ===", max_bones_to_print)
+  for i in 0 ..< max_bones_to_print {
+    mat := out_bone_matrices[i]
+    log.infof("Bone %d:", i)
+
+    // Print as bytes (hex)
+    bytes := transmute([64]u8)mat
+    log.info("  Bytes: ")
+    for b in bytes {
+      log.infof("%02x ", b)
+    }
+    log.info("")
+
+    // Print as floats
+    log.infof("  Floats: [%.6f, %.6f, %.6f, %.6f]", mat[0][0], mat[0][1], mat[0][2], mat[0][3])
+    log.infof("          [%.6f, %.6f, %.6f, %.6f]", mat[1][0], mat[1][1], mat[1][2], mat[1][3])
+    log.infof("          [%.6f, %.6f, %.6f, %.6f]", mat[2][0], mat[2][1], mat[2][2], mat[2][3])
+    log.infof("          [%.6f, %.6f, %.6f, %.6f]", mat[3][0], mat[3][1], mat[3][2], mat[3][3])
+  }
+  log.info("=== END ODIN BONE MATRICES ===\n")
 }
 
 // Sample animation clip with IK corrections applied
