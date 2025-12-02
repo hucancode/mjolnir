@@ -417,8 +417,7 @@ sample_layers :: proc(
 
   // Compute final skinning matrices
   for i in 0 ..< bone_count {
-    world_matrix := world_transforms[i].world_matrix
-    out_bone_matrices[i] = world_matrix * skin.bones[i].inverse_bind_matrix
+    out_bone_matrices[i] = world_transforms[i].world_matrix * skin.bones[i].inverse_bind_matrix
   }
 }
 
