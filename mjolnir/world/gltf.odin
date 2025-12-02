@@ -452,15 +452,13 @@ load_skins :: proc(
     bones := make([]resources.Bone, len(gltf_skin.joints))
     for joint_node, i in gltf_skin.joints {
       bones[i].name = string(joint_node.name)
+      bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
       if gltf_skin.inverse_bind_matrices != nil {
-        ibm_floats: [16]f32
-        read := cgltf.accessor_read_float(gltf_skin.inverse_bind_matrices, uint(i), raw_data(ibm_floats[:]), 16)
-        if read {
-          bones[i].inverse_bind_matrix = geometry.matrix_from_arr(ibm_floats)
-          continue
+        read := cgltf.accessor_read_float(gltf_skin.inverse_bind_matrices, uint(i), auto_cast &bones[i].inverse_bind_matrix, 16)
+        if !read {
+          log.warnf("could not load inverse bind matrices for bone #%v", i)
         }
       }
-      bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
     }
     for joint_node, i in gltf_skin.joints {
       bones[i].children = make([]u32, len(joint_node.children))
@@ -543,7 +541,7 @@ construct_scene :: proc(
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
       node.transform = geometry.decompose_matrix(
-        geometry.matrix_from_arr(gltf_node.matrix_),
+        transmute(matrix[4, 4]f32)gltf_node.matrix_,
       )
     } else {
       if gltf_node.has_translation {
