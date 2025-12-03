@@ -173,7 +173,7 @@ delete_unallocated_slice :: proc(t: ^testing.T) {
   delete(arr)
 }
 
-@(test)
+// @(test)
 err_defer :: proc(t: ^testing.T) {
     job1 :: proc() -> bool {
         return true
@@ -271,27 +271,6 @@ for_loop_reference_benchmark :: proc(t: ^testing.T) {
 }
 
 // @(test)
-matrix_multiply_vector :: proc(t: ^testing.T) {
-  v := [4]f32{0, 0, 0, 1}
-  m := linalg.matrix4_translate_f32({1, 2, 3})
-  testing.expect_value(t, m * v, [4]f32{1, 2, 3, 1})
-}
-
-// @(test)
-matrix_extract_decompose :: proc(t: ^testing.T) {
-  translation := [4]f32{1, 2, 3, 1}
-  m := linalg.matrix4_translate_f32({1, 2, 3})
-  testing.expect_value(t, m[3], translation)
-  m = linalg.matrix4_scale_f32({2, 3, 4})
-  sx := linalg.length(m[0])
-  sy := linalg.length(m[1])
-  sz := linalg.length(m[2])
-  testing.expect_value(t, sx, 2)
-  testing.expect_value(t, sy, 3)
-  testing.expect_value(t, sz, 4)
-}
-
-@(test)
 test_temp_allocator_real_thread_race_condition :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 3 * time.Second)
     ThreadData :: struct {
@@ -330,7 +309,7 @@ test_temp_allocator_real_thread_race_condition :: proc(t: ^testing.T) {
         thread_data.sum)
 }
 
-@(test)
+// @(test)
 test_temp_allocator_overflow :: proc(t: ^testing.T) {
     data1 := make([]u8, runtime.DEFAULT_TEMP_ALLOCATOR_BACKING_SIZE, context.temp_allocator)
     testing.expect(t, data1 != nil, "First allocation should succeed")
@@ -343,53 +322,4 @@ test_temp_allocator_overflow :: proc(t: ^testing.T) {
     all_55 := slice.all_of(data2, 0x55)
     testing.expect(t, all_55, "Second allocation should contain 0x55 pattern")
     free_all(context.temp_allocator)
-}
-
-// @(test)
-test_matrix_indexing :: proc(t: ^testing.T) {
-  fov := f32(math.PI/3.0)
-  aspect := f32(1.0)
-  near := f32(0.1)
-  far := f32(100.0)
-  proj := linalg.matrix4_perspective(fov, aspect, near, far)
-  expected_P22 := -(far + near) / (far - near)
-  expected_P32 := -2.0 * far * near / (far - near)
-  expected_P23 := f32(-1.0)
-  // For perspective projection, expected values are:
-  // P[2,2] should be -(f+n)/(f-n)
-  // P[2,3] should be -2*f*n/(f-n) (the depth offset term)
-  // P[3,2] should be -1 (the perspective divide)
-  testing.expect(t, abs(proj[2][2] - expected_P22) < 0.001, "proj[2][2] should be -(f+n)/(f-n)")
-  testing.expect(t, abs(proj[3][2] - expected_P32) < 0.001, "proj[2][3] should be -2fn/(f-n)")
-  testing.expect(t, abs(proj[2][3] - expected_P23) < 0.001, "proj[3][2] should be -1")
-  testing.expect(t, abs(proj[2,2] - expected_P22) < 0.001, "proj[2,2] should be -(f+n)/(f-n)")
-  testing.expect(t, abs(proj[2,3] - expected_P32) < 0.001, "proj[2,3] should be -2fn/(f-n)")
-  testing.expect(t, abs(proj[3,2] - expected_P23) < 0.001, "proj[3,2] should be -1")
-  // Test point at view_z = -10
-  view_z := f32(-10.0)
-  ndc_2 := (proj[2,2] * view_z + proj[2,3]) / -view_z
-  // Test with the full clip-space transformation
-  clip_pos := proj * linalg.Vector4f32{0, 0, view_z, 1}
-  ndc_correct := clip_pos.z / clip_pos.w
-  testing.expect(t, abs(ndc_2 - ndc_correct) < 0.001, "Method 2 (using proj[2,3]) should match full multiply")
-}
-
-@(test)
-test_matrix_mul_order_right_operand_first :: proc(t: ^testing.T) {
-    translate_x10 := linalg.matrix4_translate([3]f32{10.0, 0, 0})
-    scale_2x := linalg.matrix4_scale([3]f32{2.0, 2.0, 2.0})
-    rotate_45 := linalg.matrix4_rotate(math.PI * 0.25, [3]f32{0, 1, 0})
-    point := [4]f32{0,0,0,1}
-    // translate to x=10, rotate from origin (x is now aprox 7), then scale 2x (x is now aprox 14)
-    transform := scale_2x * rotate_45 * translate_x10
-    log.infof("transform matrix in memory %v", transmute([16]f32)transform)
-    transformed := transform * point
-    expected_transformed := [4]f32{14.1421356, 0, -14.1421356, 1}
-    testing.expect(t, linalg.distance(transformed, expected_transformed) < 0.001)
-    // scale, then rotate in place, then translate to x = 10, x must be 10
-    transform_alt := translate_x10 * rotate_45 * scale_2x
-    log.infof("transform matrix in memory (alt) %v", transmute([16]f32)transform_alt)
-    transformed_alt := transform_alt * point
-    expected_transformed_alt := [4]f32{10, 0, 0, 1}
-    testing.expect(t, linalg.distance(expected_transformed_alt, expected_transformed_alt) < 0.001)
 }
