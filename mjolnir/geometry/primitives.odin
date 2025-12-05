@@ -236,7 +236,7 @@ make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.vertices[21] = {{-1, 1, 1}, VEC_LEFT, color, {1, 1}, {0, 1, 0, 1}}
   ret.vertices[22] = {{-1, 1, -1}, VEC_LEFT, color, {1, 0}, {0, 1, 0, 1}}
   ret.vertices[23] = {{-1, -1, -1}, VEC_LEFT, color, {0, 0}, {0, 1, 0, 1}}
-  for face in 0 ..< 6 {
+  #unroll for face in 0 ..< 6 {
     i := u32(face * 4)
     p := ret.indices[face * 6:]
     p[0], p[1], p[2], p[3], p[4], p[5] = i, i + 1, i + 2, i + 2, i + 3, i

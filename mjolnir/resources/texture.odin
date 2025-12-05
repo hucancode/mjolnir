@@ -56,7 +56,7 @@ create_empty_texture_cube :: proc(
   texture.base = gpu.image_create(gctx, spec) or_return
   texture.base.auto_purge = auto_purge
   // Create 6 face views for rendering
-  for i in 0 ..< 6 {
+  #unroll for i in 0 ..< 6 {
     texture.face_views[i] = gpu.image_create_view(
       gctx.device,
       &texture.base,

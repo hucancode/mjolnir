@@ -268,7 +268,7 @@ node_query_aabb_limited :: proc(
     }
   }
   if node.children[0] != nil {
-    for i in 0 ..< 8 {
+    #unroll for i in 0 ..< 8 {
       if len(results) >= max_results do return
       node_query_aabb_limited(
         octree,

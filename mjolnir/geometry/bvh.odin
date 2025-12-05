@@ -151,7 +151,7 @@ split_sah :: proc(
   // Sample fewer split positions for better performance
   num_samples := min(len(prims), 32)
   step := max(1, len(prims) / num_samples)
-  for ax in 0 ..< 3 {
+  #unroll for ax in 0 ..< 3 {
     // Sort by axis
     if ax == 0 {
       slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
@@ -347,7 +347,7 @@ ray_aabb_intersection_safe :: proc(
 ) {
   t_min := [3]f32{-F32_MAX, -F32_MAX, -F32_MAX}
   t_max := [3]f32{F32_MAX, F32_MAX, F32_MAX}
-  for i in 0 ..< 3 {
+  #unroll for i in 0 ..< 3 {
     if math.abs(direction[i]) < 1e-6 {
       // Ray is parallel to this axis
       if origin[i] < aabb.min[i] || origin[i] > aabb.max[i] {

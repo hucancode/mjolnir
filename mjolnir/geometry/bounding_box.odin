@@ -118,7 +118,7 @@ ray_aabb_intersection :: proc "contextless" (
 ) {
   t_min := [3]f32{-F32_MAX, -F32_MAX, -F32_MAX}
   t_max := [3]f32{F32_MAX, F32_MAX, F32_MAX}
-  for i in 0 ..< 3 {
+  #unroll for i in 0 ..< 3 {
     if math.abs(inv_dir[i]) < 1e-6 {
       // Ray is parallel to this axis
       if origin[i] < aabb.min[i] || origin[i] > aabb.max[i] {
@@ -352,7 +352,7 @@ obb_capsule_intersect :: proc(
   min_dist_sq := f32(math.F32_MAX)
   closest_on_line: [3]f32
   // Sample 5 points along the line segment
-  for i in 0 ..= 4 {
+  #unroll for i in 0 ..= 4 {
     t := f32(i) / 4.0
     sample := linalg.mix(line_start, line_end, t)
     point_on_obb := obb_closest_point(obb, sample)

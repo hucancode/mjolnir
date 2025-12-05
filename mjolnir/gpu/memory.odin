@@ -282,7 +282,7 @@ cube_depth_texture_init :: proc(
   spec := image_spec_cube(size, format, usage)
   self.base = image_create(gctx, spec) or_return
   // Create 6 face views (one per face for rendering to individual faces)
-  for i in 0 ..< 6 {
+  #unroll for i in 0 ..< 6 {
     view_info := vk.ImageViewCreateInfo {
       sType = .IMAGE_VIEW_CREATE_INFO,
       image = self.image,
