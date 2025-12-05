@@ -2,6 +2,7 @@ package world
 
 import cont "../containers"
 import "../geometry"
+import physics "../physics"
 import "../resources"
 import "core:math"
 import "core:math/linalg"
@@ -162,7 +163,7 @@ node_scale :: proc(world: ^World, handle: resources.NodeHandle, s: f32) {
   }
 }
 
-get_node :: proc(world: ^World, handle: resources.NodeHandle) -> ^Node {
+get_node :: proc(world: ^World, handle: resources.NodeHandle) -> (^Node, bool) #optional_ok {
   return cont.get(world.nodes, handle)
 }
 
@@ -184,4 +185,31 @@ disable_actor_tick :: proc(
   if !pool_exists do return
   pool := cast(^ActorPool(T))entry.pool_ptr
   actor_disable_tick(pool, handle)
+}
+
+// Sync all nodes with rigid body attachments from physics to world
+sync_all_physics_to_world :: proc(world: ^World, physics_world: ^physics.PhysicsWorld) {
+  for &entry in world.nodes.entries do if entry.active {
+    node := &entry.item
+    if attachment, ok := node.attachment.(RigidBodyAttachment); ok {
+      if body, ok := physics.get_body(physics_world, attachment.body_handle); ok {
+        node.transform.position = body.position
+        node.transform.rotation = body.rotation
+        node.transform.is_dirty = true
+      }
+    }
+  }
+}
+
+// Sync all nodes with rigid body attachments from world to physics
+sync_all_world_to_physics :: proc(world: ^World, physics_world: ^physics.PhysicsWorld) {
+  for &entry in world.nodes.entries do if entry.active {
+    node := &entry.item
+    if attachment, ok := node.attachment.(RigidBodyAttachment); ok {
+      if body, ok := physics.get_body(physics_world, attachment.body_handle); ok {
+        body.position = node.transform.position
+        body.rotation = node.transform.rotation
+      }
+    }
+  }
 }

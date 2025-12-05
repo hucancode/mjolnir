@@ -3,7 +3,6 @@ package physics
 import cont "../containers"
 import "../geometry"
 import "../resources"
-import "../world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -90,7 +89,8 @@ destroy :: proc(world: ^PhysicsWorld) {
 
 create_body :: proc(
   world: ^PhysicsWorld,
-  node_handle: resources.NodeHandle,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
   is_static: bool = false,
   trigger_only: bool = false,
@@ -100,7 +100,7 @@ create_body :: proc(
 ) #optional_ok {
   body: ^RigidBody
   handle, body = cont.alloc(&world.bodies, RigidBodyHandle) or_return
-  rigid_body_init(body, node_handle, mass, is_static)
+  rigid_body_init(body, position, rotation, mass, is_static)
   body.trigger_only = trigger_only
   return handle, true
 }
@@ -232,7 +232,7 @@ create_collider_fan :: proc(
   return handle, true
 }
 
-step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
+step :: proc(physics: ^PhysicsWorld, dt: f32) {
   step_start := time.now()
   @(static) frame_counter := 0
   frame_counter += 1
@@ -324,7 +324,6 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   if physics.enable_parallel {
     ccd_bodies_tested, ccd_total_candidates = parallel_ccd(
       physics,
-      w,
       dt,
       ccd_handled[:],
       physics.thread_count,
@@ -332,7 +331,6 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   } else {
     ccd_bodies_tested, ccd_total_candidates = sequential_ccd(
       physics,
-      w,
       dt,
       ccd_handled[:],
     )
@@ -363,10 +361,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     for &entry, idx in physics.bodies.entries do if entry.active {
       body := &entry.item
       if body.collider_handle.generation == 0 do continue
-      node := cont.get(w.nodes, body.node_handle) or_continue
       collider := cont.get(physics.colliders, body.collider_handle) or_continue
-      pos := node.transform.position
-      update_cached_aabb(body, collider, pos)
+      update_cached_aabb(body, collider)
       handle := RigidBodyHandle {
         index      = u32(idx),
         generation = entry.generation,
@@ -390,16 +386,16 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     refit_start := time.now()
     clear(&physics.contacts)
     if physics.enable_parallel {
-      parallel_bvh_refit(physics, w, physics.thread_count)
+      parallel_bvh_refit(physics, physics.thread_count)
     } else {
-      sequential_bvh_refit(physics, w)
+      sequential_bvh_refit(physics)
     }
     refit_time += time.since(refit_start)
     broadphase_start := time.now()
     if physics.enable_parallel {
-      parallel_collision_detection(physics, w, physics.thread_count)
+      parallel_collision_detection(physics, physics.thread_count)
     } else {
-      sequential_collision_detection(physics, w)
+      sequential_collision_detection(physics)
     }
     collision_time := time.since(broadphase_start)
     broadphase_time += collision_time
@@ -409,11 +405,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     for &contact in physics.contacts {
       body_a := cont.get(physics.bodies, contact.body_a) or_continue
       body_b := cont.get(physics.bodies, contact.body_b) or_continue
-      node_a := cont.get(w.nodes, body_a.node_handle) or_continue
-      node_b := cont.get(w.nodes, body_b.node_handle) or_continue
-      pos_a := node_a.transform.position
-      pos_b := node_b.transform.position
-      prepare_contact(&contact, body_a, body_b, pos_a, pos_b, substep_dt)
+      prepare_contact(&contact, body_a, body_b, substep_dt)
     }
     prepare_time += time.since(prepare_start)
     // Warmstart with cached impulses (only on first substep)
@@ -422,11 +414,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       for &contact in physics.contacts {
         body_a := cont.get(physics.bodies, contact.body_a) or_continue
         body_b := cont.get(physics.bodies, contact.body_b) or_continue
-        node_a := cont.get(w.nodes, body_a.node_handle) or_continue
-        node_b := cont.get(w.nodes, body_b.node_handle) or_continue
-        pos_a := node_a.transform.position
-        pos_b := node_b.transform.position
-        warmstart_contact(&contact, body_a, body_b, pos_a, pos_b)
+        warmstart_contact(&contact, body_a, body_b)
       }
     }
     // Solve constraints with bias (includes position correction + restitution)
@@ -434,11 +422,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       for &contact in physics.contacts {
         body_a := cont.get(physics.bodies, contact.body_a) or_continue
         body_b := cont.get(physics.bodies, contact.body_b) or_continue
-        node_a := cont.get(w.nodes, body_a.node_handle) or_continue
-        node_b := cont.get(w.nodes, body_b.node_handle) or_continue
-        pos_a := node_a.transform.position
-        pos_b := node_b.transform.position
-        resolve_contact(&contact, body_a, body_b, pos_a, pos_b)
+        resolve_contact(&contact, body_a, body_b)
       }
     }
     // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
@@ -447,12 +431,8 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       for &contact in physics.contacts {
         body_a := cont.get(physics.bodies, contact.body_a) or_continue
         body_b := cont.get(physics.bodies, contact.body_b) or_continue
-        node_a := cont.get(w.nodes, body_a.node_handle) or_continue
-        node_b := cont.get(w.nodes, body_b.node_handle) or_continue
-        pos_a := node_a.transform.position
-        pos_b := node_b.transform.position
         // Solve without bias - only enforce zero relative velocity at contact
-        resolve_contact_no_bias(&contact, body_a, body_b, pos_a, pos_b)
+        resolve_contact_no_bias(&contact, body_a, body_b)
       }
     }
     solver_time += time.since(solver_start)
@@ -466,10 +446,9 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
       if idx < len(ccd_handled) && ccd_handled[idx] {
         continue
       }
-      node := cont.get(w.nodes, body.node_handle) or_continue
       // Update position using substep timestep
       vel := body.velocity * substep_dt
-      geometry.translate_by(&node.transform, vel.x, vel.y, vel.z)
+      body.position += vel
       // Update rotation from angular velocity (if enabled)
       // Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
       // Skip rotation if angular velocity is negligible or rotation is disabled
@@ -478,7 +457,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
         if ang_vel_mag_sq >= math.F32_EPSILON {
           // Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
           omega_quat := quaternion(w = 0, x = body.angular_velocity.x, y = body.angular_velocity.y, z = body.angular_velocity.z)
-          q_old := node.transform.rotation
+          q_old := body.rotation
           // Calculate derivative: q_dot = 0.5 * omega * q_old
           q_dot := omega_quat * q_old
           q_dot.w *= 0.5
@@ -489,7 +468,7 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
           q_new := quaternion(w = q_old.w + q_dot.w * substep_dt, x = q_old.x + q_dot.x * substep_dt, y = q_old.y + q_dot.y * substep_dt, z = q_old.z + q_dot.z * substep_dt)
           // Normalize to prevent drift
           q_new = linalg.normalize(q_new)
-          geometry.rotate(&node.transform, q_new)
+          body.rotation = q_new
         }
       }
     }
@@ -499,9 +478,9 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
   // Update cached AABBs after all substeps complete
   cache_update_start := time.now()
   if physics.enable_parallel {
-    parallel_update_aabb_cache(physics, w, physics.thread_count)
+    parallel_update_aabb_cache(physics, physics.thread_count)
   } else {
-    sequential_update_aabb_cache(physics, w)
+    sequential_update_aabb_cache(physics)
   }
   cache_update_time := time.since(cache_update_start)
   cleanup_start := time.now()
@@ -510,16 +489,13 @@ step :: proc(physics: ^PhysicsWorld, w: ^world.World, dt: f32) {
     if body.is_static || body.is_kinematic {
       continue
     }
-    node := cont.get(w.nodes, body.node_handle) or_continue
-    if node.transform.position.y < KILL_Y {
+    if body.position.y < KILL_Y {
       handle := RigidBodyHandle {
         index      = u32(idx),
         generation = entry.generation,
       }
       defer destroy_body(physics, handle)
-      body := cont.get(physics.bodies, handle) or_continue
-      node := cont.get(w.nodes, body.node_handle)
-      log.infof("Removing body at y=%.2f (below KILL_Y=%.2f)", node.transform.position.y, KILL_Y)
+      log.infof("Removing body at y=%.2f (below KILL_Y=%.2f)", body.position.y, KILL_Y)
     }
   }
   cleanup_time := time.since(cleanup_start)

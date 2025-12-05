@@ -2,7 +2,6 @@ package physics
 
 import cont "../containers"
 import "../geometry"
-import "../world"
 import "core:math/linalg"
 import "core:mem"
 import "core:sync"
@@ -12,21 +11,18 @@ DEFAULT_THREAD_COUNT :: 16
 
 BVH_Refit_Task_Data :: struct {
   physics: ^PhysicsWorld,
-  world:   ^world.World,
   start:   int,
   end:     int,
 }
 
 AABB_Cache_Task_Data :: struct {
   physics: ^PhysicsWorld,
-  world:   ^world.World,
   start:   int,
   end:     int,
 }
 
 Collision_Detection_Task_Data :: struct {
   physics:  ^PhysicsWorld,
-  world:    ^world.World,
   start:    int,
   end:      int,
   contacts: [dynamic]Contact,
@@ -34,7 +30,6 @@ Collision_Detection_Task_Data :: struct {
 
 CCD_Task_Data :: struct {
   physics:          ^PhysicsWorld,
-  world:            ^world.World,
   start:            int,
   end:              int,
   dt:               f32,
@@ -55,13 +50,12 @@ bvh_refit_task :: proc(task: thread.Task) {
 
 parallel_bvh_refit :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
   num_threads := DEFAULT_THREAD_COUNT,
 ) {
   primitive_count := len(physics.spatial_index.primitives)
   if primitive_count == 0 do return
   if primitive_count < 100 || num_threads == 1 || !physics.thread_pool_running {
-    sequential_bvh_refit(physics, w)
+    sequential_bvh_refit(physics)
     return
   }
   chunk_size := (primitive_count + num_threads - 1) / num_threads
@@ -72,7 +66,6 @@ parallel_bvh_refit :: proc(
     if start >= primitive_count do break
     task_data_array[i] = BVH_Refit_Task_Data {
       physics = physics,
-      world   = w,
       start   = start,
       end     = end,
     }
@@ -88,7 +81,7 @@ parallel_bvh_refit :: proc(
   geometry.bvh_refit(&physics.spatial_index)
 }
 
-sequential_bvh_refit :: proc(physics: ^PhysicsWorld, w: ^world.World) {
+sequential_bvh_refit :: proc(physics: ^PhysicsWorld) {
   for &bvh_entry in physics.spatial_index.primitives {
     body := cont.get(physics.bodies, bvh_entry.handle) or_continue
     bvh_entry.bounds = body.cached_aabb
@@ -103,24 +96,22 @@ aabb_cache_update_task :: proc(task: thread.Task) {
     entry := &data.physics.bodies.entries[i]
     if !entry.active do continue
     body := &entry.item
-    node := cont.get(data.world.nodes, body.node_handle) or_continue
     collider := cont.get(
       data.physics.colliders,
       body.collider_handle,
     ) or_continue
-    update_cached_aabb(body, collider, node.transform.position)
+    update_cached_aabb(body, collider)
   }
 }
 
 parallel_update_aabb_cache :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
   num_threads := DEFAULT_THREAD_COUNT,
 ) {
   body_count := len(physics.bodies.entries)
   if body_count == 0 do return
   if body_count < 100 || num_threads == 1 || !physics.thread_pool_running {
-    sequential_update_aabb_cache(physics, w)
+    sequential_update_aabb_cache(physics)
     return
   }
   chunk_size := (body_count + num_threads - 1) / num_threads
@@ -131,7 +122,6 @@ parallel_update_aabb_cache :: proc(
     if start >= body_count do break
     task_data_array[i] = AABB_Cache_Task_Data {
       physics = physics,
-      world   = w,
       start   = start,
       end     = end,
     }
@@ -146,12 +136,11 @@ parallel_update_aabb_cache :: proc(
   thread.pool_finish(&physics.thread_pool)
 }
 
-sequential_update_aabb_cache :: proc(physics: ^PhysicsWorld, w: ^world.World) {
+sequential_update_aabb_cache :: proc(physics: ^PhysicsWorld) {
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
-    node := cont.get(w.nodes, body.node_handle) or_continue
     collider := cont.get(physics.colliders, body.collider_handle) or_continue
-    update_cached_aabb(body, collider, node.transform.position)
+    update_cached_aabb(body, collider)
   }
 }
 
@@ -175,8 +164,6 @@ collision_detection_task :: proc(task: thread.Task) {
       body_b := cont.get(data.physics.bodies, handle_b) or_continue
       if body_a.is_static && body_b.is_static do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      node_a := cont.get(data.world.nodes, body_a.node_handle) or_continue
-      node_b := cont.get(data.world.nodes, body_b.node_handle) or_continue
       collider_a := cont.get(
         data.physics.colliders,
         body_a.collider_handle,
@@ -185,8 +172,8 @@ collision_detection_task :: proc(task: thread.Task) {
         data.physics.colliders,
         body_b.collider_handle,
       ) or_continue
-      pos_a := node_a.transform.position
-      pos_b := node_b.transform.position
+      pos_a := body_a.position
+      pos_b := body_b.position
       point, normal, penetration, hit := test_collision(
         collider_a,
         pos_a,
@@ -231,13 +218,12 @@ collision_detection_task :: proc(task: thread.Task) {
 
 parallel_collision_detection :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
   num_threads := DEFAULT_THREAD_COUNT,
 ) {
   primitive_count := len(physics.spatial_index.primitives)
   if primitive_count == 0 do return
   if primitive_count < 100 || num_threads == 1 || !physics.thread_pool_running {
-    sequential_collision_detection(physics, w)
+    sequential_collision_detection(physics)
     return
   }
   chunk_size := (primitive_count + num_threads - 1) / num_threads
@@ -248,7 +234,6 @@ parallel_collision_detection :: proc(
     if start >= primitive_count do break
     task_data_array[i] = Collision_Detection_Task_Data {
       physics  = physics,
-      world    = w,
       start    = start,
       end      = end,
       contacts = make([dynamic]Contact, 0, 100, context.temp_allocator),
@@ -271,7 +256,6 @@ parallel_collision_detection :: proc(
 
 sequential_collision_detection :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
 ) {
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   for &bvh_entry in physics.spatial_index.primitives {
@@ -290,8 +274,6 @@ sequential_collision_detection :: proc(
       body_b := cont.get(physics.bodies, handle_b) or_continue
       if body_a.is_static && body_b.is_static do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      node_a := cont.get(w.nodes, body_a.node_handle) or_continue
-      node_b := cont.get(w.nodes, body_b.node_handle) or_continue
       collider_a := cont.get(
         physics.colliders,
         body_a.collider_handle,
@@ -300,8 +282,8 @@ sequential_collision_detection :: proc(
         physics.colliders,
         body_b.collider_handle,
       ) or_continue
-      pos_a := node_a.transform.position
-      pos_b := node_b.transform.position
+      pos_a := body_a.position
+      pos_b := body_b.position
       point, normal, penetration, hit := test_collision(
         collider_a,
         pos_a,
@@ -360,12 +342,11 @@ ccd_task :: proc(task: thread.Task) {
     sync.mutex_lock(data.stats_mtx)
     data.bodies_tested += 1
     sync.mutex_unlock(data.stats_mtx)
-    node_a := cont.get(data.world.nodes, body_a.node_handle) or_continue
     collider_a := cont.get(
       data.physics.colliders,
       body_a.collider_handle,
     ) or_continue
-    pos_a := node_a.transform.position
+    pos_a := body_a.position
     motion := body_a.velocity * data.dt
     earliest_toi := f32(1.0)
     earliest_normal := linalg.VECTOR3F32_Y_AXIS
@@ -393,12 +374,11 @@ ccd_task :: proc(task: thread.Task) {
       handle_b := candidate.handle
       if u32(idx_a) == handle_b.index do continue
       body_b := cont.get(data.physics.bodies, handle_b) or_continue
-      node_b := cont.get(data.world.nodes, body_b.node_handle) or_continue
       collider_b := cont.get(
         data.physics.colliders,
         body_b.collider_handle,
       ) or_continue
-      pos_b := node_b.transform.position
+      pos_b := body_b.position
       toi := swept_test(collider_a, pos_a, motion, collider_b, pos_b)
       if toi.has_impact && toi.time < earliest_toi {
         earliest_toi = toi.time
@@ -409,8 +389,8 @@ ccd_task :: proc(task: thread.Task) {
     }
     if has_ccd_hit && earliest_toi < 0.99 {
       safe_time := earliest_toi * 0.98
-      node_a.transform.position += body_a.velocity * data.dt * safe_time
-      update_cached_aabb(body_a, collider_a, node_a.transform.position)
+      body_a.position += body_a.velocity * data.dt * safe_time
+      update_cached_aabb(body_a, collider_a)
       vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
       if vel_along_normal < 0 {
         restitution := body_a.restitution
@@ -436,7 +416,6 @@ ccd_task :: proc(task: thread.Task) {
 
 parallel_ccd :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
   dt: f32,
   ccd_handled: []bool,
   num_threads := DEFAULT_THREAD_COUNT,
@@ -447,7 +426,7 @@ parallel_ccd :: proc(
   body_count := len(physics.bodies.entries)
   if body_count == 0 do return
   if body_count < 100 || num_threads == 1 || !physics.thread_pool_running {
-    return sequential_ccd(physics, w, dt, ccd_handled)
+    return sequential_ccd(physics, dt, ccd_handled)
   }
   chunk_size := (body_count + num_threads - 1) / num_threads
   task_data_array := make([]CCD_Task_Data, num_threads, context.temp_allocator)
@@ -458,7 +437,6 @@ parallel_ccd :: proc(
     if start >= body_count do break
     task_data_array[i] = CCD_Task_Data {
       physics     = physics,
-      world       = w,
       start       = start,
       end         = end,
       dt          = dt,
@@ -483,7 +461,6 @@ parallel_ccd :: proc(
 
 sequential_ccd :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
   dt: f32,
   ccd_handled: []bool,
 ) -> (
@@ -498,9 +475,8 @@ sequential_ccd :: proc(
     velocity_mag := linalg.length(body_a.velocity)
     if velocity_mag < ccd_threshold do continue
     bodies_tested += 1
-    node_a := cont.get(w.nodes, body_a.node_handle) or_continue
     collider_a := cont.get(physics.colliders, body_a.collider_handle) or_continue
-    pos_a := node_a.transform.position
+    pos_a := body_a.position
     motion := body_a.velocity * dt
     earliest_toi := f32(1.0)
     earliest_normal := linalg.VECTOR3F32_Y_AXIS
@@ -522,9 +498,8 @@ sequential_ccd :: proc(
       handle_b := candidate.handle
       if u32(idx_a) == handle_b.index do continue
       body_b := cont.get(physics.bodies, handle_b) or_continue
-      node_b := cont.get(w.nodes, body_b.node_handle) or_continue
       collider_b := cont.get(physics.colliders, body_b.collider_handle) or_continue
-      pos_b := node_b.transform.position
+      pos_b := body_b.position
       toi := swept_test(collider_a, pos_a, motion, collider_b, pos_b)
       if toi.has_impact && toi.time < earliest_toi {
         earliest_toi = toi.time
@@ -535,8 +510,8 @@ sequential_ccd :: proc(
     }
     if has_ccd_hit && earliest_toi < 0.99 {
       safe_time := earliest_toi * 0.98
-      node_a.transform.position += body_a.velocity * dt * safe_time
-      update_cached_aabb(body_a, collider_a, node_a.transform.position)
+      body_a.position += body_a.velocity * dt * safe_time
+      update_cached_aabb(body_a, collider_a)
       vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
       if vel_along_normal < 0 {
         restitution := body_a.restitution

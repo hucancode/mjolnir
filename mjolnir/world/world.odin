@@ -4,6 +4,7 @@ import anim "../animation"
 import cont "../containers"
 import "../geometry"
 import "../gpu"
+import physics "../physics"
 import "../resources"
 import "core:log"
 import "core:math"
@@ -45,6 +46,11 @@ SpriteAttachment :: struct {
   material:      resources.MaterialHandle,
 }
 
+RigidBodyAttachment :: struct {
+  body_handle:     physics.RigidBodyHandle,
+  collider_handle: physics.ColliderHandle,
+}
+
 NodeAttachment :: union {
   LightAttachment,
   MeshAttachment,
@@ -53,6 +59,7 @@ NodeAttachment :: union {
   NavMeshAgentAttachment,
   NavMeshObstacleAttachment,
   SpriteAttachment,
+  RigidBodyAttachment,
 }
 
 NodeTag :: enum u32 {

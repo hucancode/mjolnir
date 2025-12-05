@@ -17,12 +17,6 @@ CUBE_COUNT :: NX*NY*NZ
 SPHERE_RADIUS :: 3.0
 
 physics_world: physics.PhysicsWorld
-cube_handles: [CUBE_COUNT]resources.NodeHandle
-sphere_handle: resources.NodeHandle
-ground_handle: resources.NodeHandle
-cube_bodies: [CUBE_COUNT]physics.RigidBodyHandle
-sphere_body: physics.RigidBodyHandle
-ground_body: physics.RigidBodyHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -36,56 +30,92 @@ setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   physics.init(&physics_world, {0, -20, 0}) // 2x earth gravity
   physics_world.enable_air_resistance = true
+
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  ground_handle = spawn(
-    engine,
-    [3]f32{0, -0.5, 0},
-    world.MeshAttachment{handle = ground_mesh, material = ground_mat},
-  )
-  world.scale_xyz(&engine.world, ground_handle, 10.0, 0.5, 10.0)
-  ground_node, ground_node_ok := cont.get(engine.world.nodes, ground_handle)
-  if ground_node_ok {
-    body_handle, ok := physics.create_body(
-      &physics_world,
-      ground_handle,
-      is_static = true,
-    )
-    if ok {
-      ground_body = body_handle
-      physics.create_collider_box(&physics_world, body_handle, [3]f32{10.0, 0.5, 10.0})
-      log.info("Ground body created")
-    }
-  }
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
   sphere_mat := engine.rm.builtin_materials[resources.Color.MAGENTA]
-  sphere_handle = spawn(
-    engine,
-    [3]f32{0, SPHERE_RADIUS, 0},
-    world.MeshAttachment {
-      handle = sphere_mesh,
-      material = sphere_mat,
-      cast_shadow = true,
-    },
-  )
-  mjolnir.scale(engine, sphere_handle, SPHERE_RADIUS)
-  sphere_node, sphere_node_ok := cont.get(engine.world.nodes, sphere_handle)
-  if sphere_node_ok {
-    body_handle, ok := physics.create_body(
-      &physics_world,
-      sphere_handle,
-      is_static = true,
-    )
-    if ok {
-      body := physics.get(&physics_world, body_handle)
-      sphere_body = body_handle
-      physics.create_collider_sphere(&physics_world, body_handle, SPHERE_RADIUS)
-      physics.set_sphere_inertia(body, SPHERE_RADIUS)
-      log.info("Sphere body created with low friction (slippery surface)")
-    }
-  }
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.RED]
+
+  // Create ground
+  {
+    // Parent node with physics
+    ground_node_handle := world.spawn(&engine.world, {0, -0.5, 0})
+    ground_node := world.get_node(&engine.world, ground_node_handle)
+    
+    body_handle, body_ok := physics.create_body(
+      &physics_world,
+      ground_node.transform.position,
+      ground_node.transform.rotation,
+      is_static = true,
+    )
+    if body_ok {
+      collider_handle, _ := physics.create_collider_box(
+        &physics_world,
+        body_handle,
+        [3]f32{10.0, 0.5, 10.0},
+      )
+      ground_node.attachment = world.RigidBodyAttachment{
+        body_handle = body_handle,
+        collider_handle = collider_handle,
+      }
+    }
+
+    // Child node with mesh
+    ground_mesh_handle := mjolnir.spawn_child(
+      engine,
+      ground_node_handle,
+      [3]f32{0, 0, 0}, // local position relative to parent
+      world.MeshAttachment{handle = ground_mesh, material = ground_mat},
+    )
+    world.scale_xyz(&engine.world, ground_mesh_handle, 10.0, 0.5, 10.0)
+    
+    log.info("Ground created")
+  }
+
+  // Create sphere
+  {
+    // Parent node with physics
+    sphere_node_handle := world.spawn(&engine.world, {0, SPHERE_RADIUS, 0})
+    sphere_node := world.get_node(&engine.world, sphere_node_handle)
+    
+    body_handle, body_ok := physics.create_body(
+      &physics_world,
+      sphere_node.transform.position,
+      sphere_node.transform.rotation,
+      is_static = true,
+    )
+    if body_ok {
+      collider_handle, _ := physics.create_collider_sphere(
+        &physics_world,
+        body_handle,
+        SPHERE_RADIUS,
+      )
+      
+      if body, ok := physics.get_body(&physics_world, body_handle); ok {
+        physics.set_sphere_inertia(body, SPHERE_RADIUS)
+      }
+      
+      sphere_node.attachment = world.RigidBodyAttachment{
+        body_handle = body_handle,
+        collider_handle = collider_handle,
+      }
+    }
+
+    // Child node with mesh
+    sphere_mesh_handle := mjolnir.spawn_child(
+      engine,
+      sphere_node_handle,
+      [3]f32{0, 0, 0}, // local position
+      world.MeshAttachment{handle = sphere_mesh, material = sphere_mat, cast_shadow = true},
+    )
+    mjolnir.scale(engine, sphere_mesh_handle, SPHERE_RADIUS)
+    
+    log.info("Sphere created")
+  }
+
+  // Create cube grid
   cube_positions: [CUBE_COUNT][3]f32
   idx := 0
   for x in 0 ..< NX {
@@ -101,38 +131,46 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
+
   for pos, i in cube_positions {
-    cube_handles[i] = spawn(
-      engine,
-      pos,
-      world.MeshAttachment {
-        handle = cube_mesh,
-        material = cube_mat,
-        cast_shadow = true,
-      },
+    // Parent node with physics
+    cube_node_handle := world.spawn(&engine.world, pos)
+    cube_node := world.get_node(&engine.world, cube_node_handle)
+    
+    body_handle, body_ok := physics.create_body(
+      &physics_world,
+      cube_node.transform.position,
+      cube_node.transform.rotation,
+      50, // mass
     )
-    cube_node, cube_node_ok := cont.get(engine.world.nodes, cube_handles[i])
-    if cube_node_ok {
-      body_handle, ok := physics.create_body(
+    if body_ok {
+      collider_handle, _ := physics.create_collider_box(
         &physics_world,
-        cube_handles[i],
-        50, // mass
+        body_handle,
+        [3]f32{1.0, 1.0, 1.0},
       )
-      if ok {
-        body := physics.get(&physics_world, body_handle)
-        cube_bodies[i] = body_handle
-        physics.create_collider_box(&physics_world, body_handle, [3]f32{1.0, 1.0, 1.0})
+      
+      if body, ok := physics.get_body(&physics_world, body_handle); ok {
         physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
-        log.infof(
-          "Cube %d body created at position (%.2f, %.2f, %.2f)",
-          i,
-          pos.x,
-          pos.y,
-          pos.z,
-        )
+      }
+      
+      cube_node.attachment = world.RigidBodyAttachment{
+        body_handle = body_handle,
+        collider_handle = collider_handle,
       }
     }
+
+    // Child node with mesh
+    cube_mesh_handle := mjolnir.spawn_child(
+      engine,
+      cube_node_handle,
+      [3]f32{0, 0, 0}, // local position
+      world.MeshAttachment{handle = cube_mesh, material = cube_mat, cast_shadow = true},
+    )
   }
+
+  log.infof("Created %d cubes", CUBE_COUNT)
+
   if camera := get_main_camera(engine); camera != nil {
     camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
     sync_active_camera_controller(engine)
@@ -142,5 +180,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  physics.step(&physics_world, &engine.world, delta_time)
+  // Step physics simulation
+  physics.step(&physics_world, delta_time)
+
+  // Sync physics transforms back to world nodes
+  world.sync_all_physics_to_world(&engine.world, &physics_world)
 }

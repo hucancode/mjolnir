@@ -3,7 +3,6 @@ package physics
 import cont "../containers"
 import "../geometry"
 import "../resources"
-import "../world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -20,7 +19,6 @@ PhysicsRayHit :: struct {
 // Physics raycast - finds closest body hit by ray
 physics_raycast :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
 ) -> PhysicsRayHit {
@@ -33,9 +31,8 @@ physics_raycast :: proc(
   for candidate in candidates {
     body := cont.get(physics.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
-    node := cont.get(w.nodes, body.node_handle) or_continue
     collider := cont.get(physics.colliders, body.collider_handle) or_continue
-    pos := node.transform.position
+    pos := body.position
     // Narrow phase - test actual collider shape
     t, normal, hit := raycast_collider(ray, collider, pos, closest_hit.t)
     if hit && t < closest_hit.t {
@@ -52,7 +49,6 @@ physics_raycast :: proc(
 // Physics raycast - finds any body hit by ray (early exit)
 physics_raycast_single :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
 ) -> PhysicsRayHit {
@@ -61,9 +57,8 @@ physics_raycast_single :: proc(
   for candidate in candidates {
     body := cont.get(physics.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
-    node := cont.get(w.nodes, body.node_handle) or_continue
     collider := cont.get(physics.colliders, body.collider_handle) or_continue
-    pos := node.transform.position
+    pos := body.position
     // Narrow phase - test actual collider shape
     t, normal, hit := raycast_collider(ray, collider, pos, max_dist)
     if hit {
@@ -211,7 +206,6 @@ raycast_collider :: proc(
 // Query sphere - finds all bodies within a sphere
 physics_query_sphere :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
   center: [3]f32,
   radius: f32,
   results: ^[dynamic]RigidBodyHandle,
@@ -225,9 +219,8 @@ physics_query_sphere :: proc(
   bvh_query_aabb_fast(&physics.spatial_index, query_bounds, &candidates)
   for candidate in candidates {
     body := cont.get(physics.bodies, candidate.handle) or_continue
-    node := cont.get(w.nodes, body.node_handle) or_continue
     collider := cont.get(physics.colliders, body.collider_handle) or_continue
-    pos := node.transform.position
+    pos := body.position
     // Test if collider is within sphere
     if test_collider_sphere_overlap(collider, pos, center, radius) {
       append(results, candidate.handle)
@@ -238,7 +231,6 @@ physics_query_sphere :: proc(
 // Query box - finds all bodies within an AABB
 physics_query_box :: proc(
   physics: ^PhysicsWorld,
-  w: ^world.World,
   bounds: geometry.Aabb,
   results: ^[dynamic]RigidBodyHandle,
 ) {
@@ -247,9 +239,8 @@ physics_query_box :: proc(
   bvh_query_aabb_fast(&physics.spatial_index, bounds, &candidates)
   for candidate in candidates {
     body := cont.get(physics.bodies, candidate.handle) or_continue
-    node := cont.get(w.nodes, body.node_handle) or_continue
     collider := cont.get(physics.colliders, body.collider_handle) or_continue
-    pos := node.transform.position
+    pos := body.position
     // Test if collider is within box
     if test_collider_aabb_overlap(collider, pos, bounds) {
       append(results, candidate.handle)

@@ -57,8 +57,7 @@ collider_calculate_aabb :: proc(
   center := position + self.offset
   switch sh in self.shape {
   case SphereCollider:
-    r := [3]f32{sh.radius, sh.radius, sh.radius}
-    return geometry.Aabb{min = center - r, max = center + r}
+    return geometry.Aabb{min = center - sh.radius, max = center + sh.radius}
   case BoxCollider:
     obb := geometry.Obb {
       center       = center,

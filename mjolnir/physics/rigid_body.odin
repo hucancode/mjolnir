@@ -5,7 +5,8 @@ import "../resources"
 import "core:math/linalg"
 
 RigidBody :: struct {
-  node_handle:          resources.NodeHandle,
+  position:             [3]f32,
+  rotation:             quaternion128,
   collider_handle:      ColliderHandle,
   mass:                 f32,
   inv_mass:             f32,
@@ -31,13 +32,15 @@ RigidBody :: struct {
 
 rigid_body_init :: proc(
   self: ^RigidBody,
-  node_handle: resources.NodeHandle,
-  mass: f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  mass: f32 = 1.0,
   is_static := false,
   enable_rotation := true,
   trigger_only := false,
 ) {
-  self.node_handle = node_handle
+  self.position = position
+  self.rotation = rotation
   self.mass = mass
   self.inv_mass = is_static ? 0.0 : 1.0 / mass
   self.restitution = 0.2 // Low bounce - objects stay in contact
@@ -123,12 +126,12 @@ apply_impulse_at_point :: proc(
   self: ^RigidBody,
   impulse: [3]f32,
   point: [3]f32,
-  center: [3]f32,
+
 ) {
   if self.is_static do return
   self.velocity += impulse * self.inv_mass
   if !self.enable_rotation do return
-  r := point - center
+  r := point - self.position
   angular_impulse := linalg.cross(r, impulse)
   self.angular_velocity += self.inv_inertia * angular_impulse
 }
@@ -160,7 +163,6 @@ clear_forces :: proc(self: ^RigidBody) {
 update_cached_aabb :: proc(
   self: ^RigidBody,
   collider: ^Collider,
-  position: [3]f32,
 ) {
-  self.cached_aabb = collider_calculate_aabb(collider, position)
+  self.cached_aabb = collider_calculate_aabb(collider, self.position)
 }
