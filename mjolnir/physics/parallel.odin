@@ -10,26 +10,26 @@ import "core:thread"
 DEFAULT_THREAD_COUNT :: 16
 
 BVH_Refit_Task_Data :: struct {
-  physics: ^PhysicsWorld,
+  physics: ^World,
   start:   int,
   end:     int,
 }
 
 AABB_Cache_Task_Data :: struct {
-  physics: ^PhysicsWorld,
+  physics: ^World,
   start:   int,
   end:     int,
 }
 
 Collision_Detection_Task_Data :: struct {
-  physics:  ^PhysicsWorld,
+  physics:  ^World,
   start:    int,
   end:      int,
   contacts: [dynamic]Contact,
 }
 
 CCD_Task_Data :: struct {
-  physics:          ^PhysicsWorld,
+  physics:          ^World,
   start:            int,
   end:              int,
   dt:               f32,
@@ -49,7 +49,7 @@ bvh_refit_task :: proc(task: thread.Task) {
 }
 
 parallel_bvh_refit :: proc(
-  physics: ^PhysicsWorld,
+  physics: ^World,
   num_threads := DEFAULT_THREAD_COUNT,
 ) {
   primitive_count := len(physics.spatial_index.primitives)
@@ -81,7 +81,7 @@ parallel_bvh_refit :: proc(
   geometry.bvh_refit(&physics.spatial_index)
 }
 
-sequential_bvh_refit :: proc(physics: ^PhysicsWorld) {
+sequential_bvh_refit :: proc(physics: ^World) {
   for &bvh_entry in physics.spatial_index.primitives {
     body := cont.get(physics.bodies, bvh_entry.handle) or_continue
     bvh_entry.bounds = body.cached_aabb
@@ -105,7 +105,7 @@ aabb_cache_update_task :: proc(task: thread.Task) {
 }
 
 parallel_update_aabb_cache :: proc(
-  physics: ^PhysicsWorld,
+  physics: ^World,
   num_threads := DEFAULT_THREAD_COUNT,
 ) {
   body_count := len(physics.bodies.entries)
@@ -136,7 +136,7 @@ parallel_update_aabb_cache :: proc(
   thread.pool_finish(&physics.thread_pool)
 }
 
-sequential_update_aabb_cache :: proc(physics: ^PhysicsWorld) {
+sequential_update_aabb_cache :: proc(physics: ^World) {
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
     collider := cont.get(physics.colliders, body.collider_handle) or_continue
@@ -217,7 +217,7 @@ collision_detection_task :: proc(task: thread.Task) {
 }
 
 parallel_collision_detection :: proc(
-  physics: ^PhysicsWorld,
+  physics: ^World,
   num_threads := DEFAULT_THREAD_COUNT,
 ) {
   primitive_count := len(physics.spatial_index.primitives)
@@ -255,7 +255,7 @@ parallel_collision_detection :: proc(
 }
 
 sequential_collision_detection :: proc(
-  physics: ^PhysicsWorld,
+  physics: ^World,
 ) {
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   for &bvh_entry in physics.spatial_index.primitives {
@@ -415,7 +415,7 @@ ccd_task :: proc(task: thread.Task) {
 }
 
 parallel_ccd :: proc(
-  physics: ^PhysicsWorld,
+  physics: ^World,
   dt: f32,
   ccd_handled: []bool,
   num_threads := DEFAULT_THREAD_COUNT,
@@ -460,7 +460,7 @@ parallel_ccd :: proc(
 }
 
 sequential_ccd :: proc(
-  physics: ^PhysicsWorld,
+  physics: ^World,
   dt: f32,
   ccd_handled: []bool,
 ) -> (

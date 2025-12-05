@@ -17,8 +17,8 @@ PhysicsRayHit :: struct {
 }
 
 // Physics raycast - finds closest body hit by ray
-physics_raycast :: proc(
-  physics: ^PhysicsWorld,
+raycast :: proc(
+  self: ^World,
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
 ) -> PhysicsRayHit {
@@ -27,11 +27,11 @@ physics_raycast :: proc(
     t   = max_dist,
   }
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  bvh_query_ray_fast(&physics.spatial_index, ray, max_dist, &candidates)
+  bvh_query_ray_fast(&self.spatial_index, ray, max_dist, &candidates)
   for candidate in candidates {
-    body := cont.get(physics.bodies, candidate.handle) or_continue
+    body := cont.get(self.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
-    collider := cont.get(physics.colliders, body.collider_handle) or_continue
+    collider := cont.get(self.colliders, body.collider_handle) or_continue
     pos := body.position
     // Narrow phase - test actual collider shape
     t, normal, hit := raycast_collider(ray, collider, pos, closest_hit.t)
@@ -47,17 +47,17 @@ physics_raycast :: proc(
 }
 
 // Physics raycast - finds any body hit by ray (early exit)
-physics_raycast_single :: proc(
-  physics: ^PhysicsWorld,
+raycast_single :: proc(
+  self: ^World,
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
 ) -> PhysicsRayHit {
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  bvh_query_ray_fast(&physics.spatial_index, ray, max_dist, &candidates)
+  bvh_query_ray_fast(&self.spatial_index, ray, max_dist, &candidates)
   for candidate in candidates {
-    body := cont.get(physics.bodies, candidate.handle) or_continue
+    body := cont.get(self.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
-    collider := cont.get(physics.colliders, body.collider_handle) or_continue
+    collider := cont.get(self.colliders, body.collider_handle) or_continue
     pos := body.position
     // Narrow phase - test actual collider shape
     t, normal, hit := raycast_collider(ray, collider, pos, max_dist)
@@ -204,8 +204,8 @@ raycast_collider :: proc(
 }
 
 // Query sphere - finds all bodies within a sphere
-physics_query_sphere :: proc(
-  physics: ^PhysicsWorld,
+query_sphere :: proc(
+  self: ^World,
   center: [3]f32,
   radius: f32,
   results: ^[dynamic]RigidBodyHandle,
@@ -216,10 +216,10 @@ physics_query_sphere :: proc(
     max = center + [3]f32{radius, radius, radius},
   }
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  bvh_query_aabb_fast(&physics.spatial_index, query_bounds, &candidates)
+  bvh_query_aabb_fast(&self.spatial_index, query_bounds, &candidates)
   for candidate in candidates {
-    body := cont.get(physics.bodies, candidate.handle) or_continue
-    collider := cont.get(physics.colliders, body.collider_handle) or_continue
+    body := cont.get(self.bodies, candidate.handle) or_continue
+    collider := cont.get(self.colliders, body.collider_handle) or_continue
     pos := body.position
     // Test if collider is within sphere
     if test_collider_sphere_overlap(collider, pos, center, radius) {
@@ -229,17 +229,17 @@ physics_query_sphere :: proc(
 }
 
 // Query box - finds all bodies within an AABB
-physics_query_box :: proc(
-  physics: ^PhysicsWorld,
+query_box :: proc(
+  self: ^World,
   bounds: geometry.Aabb,
   results: ^[dynamic]RigidBodyHandle,
 ) {
   clear(results)
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  bvh_query_aabb_fast(&physics.spatial_index, bounds, &candidates)
+  bvh_query_aabb_fast(&self.spatial_index, bounds, &candidates)
   for candidate in candidates {
-    body := cont.get(physics.bodies, candidate.handle) or_continue
-    collider := cont.get(physics.colliders, body.collider_handle) or_continue
+    body := cont.get(self.bodies, candidate.handle) or_continue
+    collider := cont.get(self.colliders, body.collider_handle) or_continue
     pos := body.position
     // Test if collider is within box
     if test_collider_aabb_overlap(collider, pos, bounds) {

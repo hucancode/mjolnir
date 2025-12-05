@@ -48,7 +48,6 @@ SpriteAttachment :: struct {
 
 RigidBodyAttachment :: struct {
   body_handle:     physics.RigidBodyHandle,
-  collider_handle: physics.ColliderHandle,
 }
 
 NodeAttachment :: union {

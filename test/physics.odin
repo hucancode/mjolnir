@@ -90,7 +90,7 @@ test_rigid_body_integration :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_gravity_application :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, {0, -10, 0}, false)
   defer physics.destroy(&physics_world)
   body_handle, body_ok := physics.create_body(&physics_world, mass = 2.0)
@@ -110,7 +110,7 @@ test_physics_world_gravity_application :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_two_body_collision :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
   body_a_handle := physics.create_body(&physics_world)
@@ -142,7 +142,7 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_static_body_collision :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
   body_static_handle := physics.create_body(&physics_world, is_static = true)
@@ -234,7 +234,7 @@ test_rigid_body_apply_force_at_point_generates_torque :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
   body_bullet_handle := physics.create_body(
@@ -268,7 +268,7 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_angular_integration :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
   body_handle := physics.create_body(&physics_world)
@@ -292,7 +292,7 @@ test_physics_world_angular_integration :: proc(t: ^testing.T) {
 
 @(test)
 test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, enable_parallel = false)
   defer physics.destroy(&physics_world)
   body_handle := physics.create_body(
@@ -1197,7 +1197,7 @@ test_off_center_impulse_creates_rotation :: proc(t: ^testing.T) {
 
 @(test)
 test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
   body_handle := physics.create_body(&physics_world)
@@ -1221,7 +1221,7 @@ test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
 
 @(test)
 test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
   body_a_handle := physics.create_body(&physics_world)
@@ -1306,7 +1306,7 @@ test_resolve_contact_friction_reduces_tangent_velocity :: proc(t: ^testing.T) {
 
 @(test)
 test_integration_box_stack_stability :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, {0, -9.81, 0}, false)
   defer physics.destroy(&physics_world)
   body_ground_h := physics.create_body(
@@ -1425,7 +1425,7 @@ test_disable_rotation_prevents_torque_application :: proc(t: ^testing.T) {
 
 @(test)
 test_disable_rotation_prevents_quaternion_update :: proc(t: ^testing.T) {
-  physics_world: physics.PhysicsWorld
+  physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
   body_handle := physics.create_body(&physics_world)
@@ -1612,7 +1612,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
 
   Physics_Raycast_State :: struct {
-    physics:     physics.PhysicsWorld,
+    physics:     physics.World,
     w:           world.World,
     rays:        []geometry.Ray,
     current_ray: int,
@@ -1671,7 +1671,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
     for _ in 0 ..< options.rounds {
       ray := state.rays[state.current_ray]
       state.current_ray = (state.current_ray + 1) % len(state.rays)
-      hit := physics.physics_raycast(&state.physics, ray, 100.0)
+      hit := physics.raycast(&state.physics, ray, 100.0)
       if hit.hit {
         state.hit_count += 1
       }

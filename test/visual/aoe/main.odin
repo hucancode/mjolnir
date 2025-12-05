@@ -12,7 +12,7 @@ import "core:math/linalg"
 import "core:os"
 import "vendor:glfw"
 
-physics_world: physics.PhysicsWorld
+physics_world: physics.World
 cube_handles: [dynamic]resources.NodeHandle
 cube_bodies: [dynamic]physics.RigidBodyHandle
 effector_sphere: resources.NodeHandle
@@ -131,7 +131,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       }
       log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
       // Use physics raycast
-      hit := physics.physics_raycast(
+      hit := physics.raycast(
         &physics_world,
         &engine.world,
         ray,
@@ -164,7 +164,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Query for cubes within effect radius using physics
   affected: [dynamic]physics.RigidBodyHandle
   defer delete(affected)
-  physics.physics_query_sphere(
+  physics.query_sphere(
     &physics_world,
     &engine.world,
     effector_position,

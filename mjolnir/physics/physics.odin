@@ -20,7 +20,7 @@ STABILIZATION_ITERS :: 1
 RigidBodyHandle :: distinct cont.Handle
 ColliderHandle :: distinct cont.Handle
 
-PhysicsWorld :: struct {
+World :: struct {
   bodies:                resources.Pool(RigidBody),
   colliders:             resources.Pool(Collider),
   contacts:              [dynamic]Contact,
@@ -42,53 +42,53 @@ BroadPhaseEntry :: struct {
 }
 
 init :: proc(
-  world: ^PhysicsWorld,
+  self: ^World,
   gravity := [3]f32{0, -9.81, 0},
   enable_parallel: bool = true,
 ) {
-  cont.init(&world.bodies)
-  cont.init(&world.colliders)
-  world.contacts = make([dynamic]Contact)
-  world.prev_contacts = make(map[u64]Contact)
-  world.gravity = gravity
-  world.spatial_index = geometry.BVH(BroadPhaseEntry) {
+  cont.init(&self.bodies)
+  cont.init(&self.colliders)
+  self.contacts = make([dynamic]Contact)
+  self.prev_contacts = make(map[u64]Contact)
+  self.gravity = gravity
+  self.spatial_index = geometry.BVH(BroadPhaseEntry) {
     nodes = make([dynamic]geometry.BVHNode),
     primitives = make([dynamic]BroadPhaseEntry),
     bounds_func = proc(entry: BroadPhaseEntry) -> geometry.Aabb {
       return entry.bounds
     },
   }
-  world.body_bounds = make([dynamic]geometry.Aabb)
-  world.enable_air_resistance = false
-  world.air_density = SEA_LEVEL_AIR_DENSITY
-  world.enable_parallel = enable_parallel
-  if world.enable_parallel {
-    world.thread_count = DEFAULT_THREAD_COUNT
+  self.body_bounds = make([dynamic]geometry.Aabb)
+  self.enable_air_resistance = false
+  self.air_density = SEA_LEVEL_AIR_DENSITY
+  self.enable_parallel = enable_parallel
+  if self.enable_parallel {
+    self.thread_count = DEFAULT_THREAD_COUNT
     thread.pool_init(
-      &world.thread_pool,
+      &self.thread_pool,
       context.allocator,
       DEFAULT_THREAD_COUNT,
     )
-    thread.pool_start(&world.thread_pool)
-    world.thread_pool_running = true
+    thread.pool_start(&self.thread_pool)
+    self.thread_pool_running = true
   }
 }
 
-destroy :: proc(world: ^PhysicsWorld) {
-  if world.thread_pool_running {
-    thread.pool_destroy(&world.thread_pool)
-    world.thread_pool_running = false
+destroy :: proc(self: ^World) {
+  if self.thread_pool_running {
+    thread.pool_destroy(&self.thread_pool)
+    self.thread_pool_running = false
   }
-  cont.destroy(world.bodies, proc(body: ^RigidBody) {})
-  cont.destroy(world.colliders, proc(col: ^Collider) {})
-  delete(world.body_bounds)
-  delete(world.contacts)
-  delete(world.prev_contacts)
-  geometry.bvh_destroy(&world.spatial_index)
+  cont.destroy(self.bodies, proc(body: ^RigidBody) {})
+  cont.destroy(self.colliders, proc(col: ^Collider) {})
+  delete(self.body_bounds)
+  delete(self.contacts)
+  delete(self.prev_contacts)
+  geometry.bvh_destroy(&self.spatial_index)
 }
 
 create_body :: proc(
-  world: ^PhysicsWorld,
+  self: ^World,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
@@ -99,21 +99,21 @@ create_body :: proc(
   ok: bool,
 ) #optional_ok {
   body: ^RigidBody
-  handle, body = cont.alloc(&world.bodies, RigidBodyHandle) or_return
+  handle, body = cont.alloc(&self.bodies, RigidBodyHandle) or_return
   rigid_body_init(body, position, rotation, mass, is_static)
   body.trigger_only = trigger_only
   return handle, true
 }
 
-destroy_body :: proc(world: ^PhysicsWorld, handle: RigidBodyHandle) {
-  if body, ok := cont.get(world.bodies, handle); ok {
-    cont.free(&world.colliders, body.collider_handle)
+destroy_body :: proc(self: ^World, handle: RigidBodyHandle) {
+  if body, ok := cont.get(self.bodies, handle); ok {
+    cont.free(&self.colliders, body.collider_handle)
   }
-  cont.free(&world.bodies, handle)
+  cont.free(&self.bodies, handle)
 }
 
 create_collider_sphere :: proc(
-  self: ^PhysicsWorld,
+  self: ^World,
   body_handle: RigidBodyHandle,
   radius: f32 = 1.0,
   offset: [3]f32 = {},
@@ -135,7 +135,7 @@ create_collider_sphere :: proc(
 }
 
 create_collider_box :: proc(
-  self: ^PhysicsWorld,
+  self: ^World,
   body_handle: RigidBodyHandle,
   half_extents: [3]f32,
   offset: [3]f32 = {},
@@ -158,7 +158,7 @@ create_collider_box :: proc(
 }
 
 create_collider_capsule :: proc(
-  self: ^PhysicsWorld,
+  self: ^World,
   body_handle: RigidBodyHandle,
   radius: f32,
   height: f32,
@@ -181,7 +181,7 @@ create_collider_capsule :: proc(
 }
 
 create_collider_cylinder :: proc(
-  self: ^PhysicsWorld,
+  self: ^World,
   body_handle: RigidBodyHandle,
   radius: f32,
   height: f32,
@@ -206,7 +206,7 @@ create_collider_cylinder :: proc(
 }
 
 create_collider_fan :: proc(
-  self: ^PhysicsWorld,
+  self: ^World,
   body_handle: RigidBodyHandle,
   radius: f32,
   height: f32,
@@ -232,31 +232,31 @@ create_collider_fan :: proc(
   return handle, true
 }
 
-step :: proc(physics: ^PhysicsWorld, dt: f32) {
+step :: proc(self: ^World, dt: f32) {
   step_start := time.now()
   @(static) frame_counter := 0
   frame_counter += 1
   // Save previous contacts for warmstarting
   warmstart_prep_start := time.now()
-  clear(&physics.prev_contacts)
-  for contact in physics.contacts {
+  clear(&self.prev_contacts)
+  for contact in self.contacts {
     hash := collision_pair_hash({contact.body_a, contact.body_b})
-    physics.prev_contacts[hash] = contact
+    self.prev_contacts[hash] = contact
   }
   warmstart_prep_time := time.since(warmstart_prep_start)
   // Apply forces to all bodies (gravity, air resistance, etc.)
   force_application_start := time.now()
   awake_body_count := 0
-  for &entry, idx in physics.bodies.entries do if entry.active {
+  for &entry, idx in self.bodies.entries do if entry.active {
     body := &entry.item
     if body.is_static || body.is_kinematic || body.trigger_only {
       continue
     }
     awake_body_count += 1
     // Apply gravity
-    gravity_force := physics.gravity * body.mass * body.gravity_scale
+    gravity_force := self.gravity * body.mass * body.gravity_scale
     apply_force(body, gravity_force)
-    if !physics.enable_air_resistance do continue
+    if !self.enable_air_resistance do continue
     // Apply air resistance (drag)
     // Drag force: F_d = -0.5 * p * v * v * C_d * A
     // Where: p=air density, v=velocity, C_d=drag coefficient, A=cross-sectional area
@@ -271,7 +271,7 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
         cross_section = math.pow(body.mass, 2.0 / 3.0) * 0.1
         break calculate_cross_section
       }
-      collider := cont.get(physics.colliders, body.collider_handle) or_break calculate_cross_section
+      collider := cont.get(self.colliders, body.collider_handle) or_break calculate_cross_section
       // Estimate frontal area based on collider type
       switch c in collider.shape {
       case SphereCollider:
@@ -292,14 +292,14 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
         cross_section = math.pow(body.mass, 2.0 / 3.0) * 0.1
       }
     }
-    drag_magnitude := 0.5 * physics.air_density * vel_mag * vel_mag * body.drag_coefficient * cross_section
+    drag_magnitude := 0.5 * self.air_density * vel_mag * vel_mag * body.drag_coefficient * cross_section
     drag_direction := -linalg.normalize(body.velocity)
     drag_force := drag_direction * drag_magnitude
     // clamp drag acceleration to prevent numerical instability
     // without this, ultra-light objects with large colliders experience extreme deceleration
     // that can cause velocity to explode or reverse in a single timestep
     drag_accel := drag_magnitude * body.inv_mass
-    max_accel := linalg.length(physics.gravity) * 30.0
+    max_accel := linalg.length(self.gravity) * 30.0
     if drag_accel > max_accel {
       drag_force *= max_accel / drag_accel
     }
@@ -308,7 +308,7 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
   force_application_time := time.since(force_application_start)
   // Integrate velocities from forces ONCE for the entire frame
   integration_start := time.now()
-  for &entry, idx in physics.bodies.entries do if entry.active {
+  for &entry, idx in self.bodies.entries do if entry.active {
     body := &entry.item
     integrate(body, dt)
   }
@@ -317,20 +317,20 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
   ccd_start := time.now()
   ccd_handled := make(
     [dynamic]bool,
-    len(physics.bodies.entries),
+    len(self.bodies.entries),
     context.temp_allocator,
   )
   ccd_bodies_tested, ccd_total_candidates := 0, 0
-  if physics.enable_parallel {
+  if self.enable_parallel {
     ccd_bodies_tested, ccd_total_candidates = parallel_ccd(
-      physics,
+      self,
       dt,
       ccd_handled[:],
-      physics.thread_count,
+      self.thread_count,
     )
   } else {
     ccd_bodies_tested, ccd_total_candidates = sequential_ccd(
-      physics,
+      self,
       dt,
       ccd_handled[:],
     )
@@ -340,28 +340,28 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
   // more substeps = smaller steps = less tunneling through thin objects
   substep_dt := dt / f32(NUM_SUBSTEPS)
   active_body_count := 0
-  for &entry, idx in physics.bodies.entries do if entry.active {
+  for &entry, idx in self.bodies.entries do if entry.active {
     if entry.item.collider_handle.generation != 0 {
       active_body_count += 1
     }
   }
   // Rebuild BVH only when body count changes (bodies added/removed)
-  rebuild_bvh := len(physics.spatial_index.primitives) != active_body_count
+  rebuild_bvh := len(self.spatial_index.primitives) != active_body_count
   bvh_build_time: time.Duration
   if rebuild_bvh {
     bvh_build_start := time.now()
-    clear(&physics.spatial_index.nodes)
-    clear(&physics.spatial_index.primitives)
+    clear(&self.spatial_index.nodes)
+    clear(&self.spatial_index.primitives)
     entries := make(
       [dynamic]BroadPhaseEntry,
       0,
       active_body_count,
       context.temp_allocator,
     )
-    for &entry, idx in physics.bodies.entries do if entry.active {
+    for &entry, idx in self.bodies.entries do if entry.active {
       body := &entry.item
       if body.collider_handle.generation == 0 do continue
-      collider := cont.get(physics.colliders, body.collider_handle) or_continue
+      collider := cont.get(self.colliders, body.collider_handle) or_continue
       update_cached_aabb(body, collider)
       handle := RigidBodyHandle {
         index      = u32(idx),
@@ -369,7 +369,7 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
       }
       append(&entries, BroadPhaseEntry{handle = handle, bounds = body.cached_aabb})
     }
-    geometry.bvh_build(&physics.spatial_index, entries[:], 4)
+    geometry.bvh_build(&self.spatial_index, entries[:], 4)
     bvh_build_time = time.since(bvh_build_start)
   }
   substep_start := time.now()
@@ -384,60 +384,60 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
   #unroll for substep in 0 ..< NUM_SUBSTEPS {
     // clear and redetect contacts at current positions
     refit_start := time.now()
-    clear(&physics.contacts)
-    if physics.enable_parallel {
-      parallel_bvh_refit(physics, physics.thread_count)
+    clear(&self.contacts)
+    if self.enable_parallel {
+      parallel_bvh_refit(self, self.thread_count)
     } else {
-      sequential_bvh_refit(physics)
+      sequential_bvh_refit(self)
     }
     refit_time += time.since(refit_start)
     broadphase_start := time.now()
-    if physics.enable_parallel {
-      parallel_collision_detection(physics, physics.thread_count)
+    if self.enable_parallel {
+      parallel_collision_detection(self, self.thread_count)
     } else {
-      sequential_collision_detection(physics)
+      sequential_collision_detection(self)
     }
     collision_time := time.since(broadphase_start)
     broadphase_time += collision_time
     narrowphase_time += collision_time
     // Prepare all contacts (compute mass matrices and bias terms)
     prepare_start := time.now()
-    for &contact in physics.contacts {
-      body_a := cont.get(physics.bodies, contact.body_a) or_continue
-      body_b := cont.get(physics.bodies, contact.body_b) or_continue
+    for &contact in self.contacts {
+      body_a := cont.get(self.bodies, contact.body_a) or_continue
+      body_b := cont.get(self.bodies, contact.body_b) or_continue
       prepare_contact(&contact, body_a, body_b, substep_dt)
     }
     prepare_time += time.since(prepare_start)
     // Warmstart with cached impulses (only on first substep)
     solver_start := time.now()
     if substep == 0 {
-      for &contact in physics.contacts {
-        body_a := cont.get(physics.bodies, contact.body_a) or_continue
-        body_b := cont.get(physics.bodies, contact.body_b) or_continue
+      for &contact in self.contacts {
+        body_a := cont.get(self.bodies, contact.body_a) or_continue
+        body_b := cont.get(self.bodies, contact.body_b) or_continue
         warmstart_contact(&contact, body_a, body_b)
       }
     }
     // Solve constraints with bias (includes position correction + restitution)
     #unroll for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
-      for &contact in physics.contacts {
-        body_a := cont.get(physics.bodies, contact.body_a) or_continue
-        body_b := cont.get(physics.bodies, contact.body_b) or_continue
+      for &contact in self.contacts {
+        body_a := cont.get(self.bodies, contact.body_a) or_continue
+        body_b := cont.get(self.bodies, contact.body_b) or_continue
         resolve_contact(&contact, body_a, body_b)
       }
     }
     // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
     // This prevents jitter without adding artificial velocity
     #unroll for _ in 0 ..< STABILIZATION_ITERS {
-      for &contact in physics.contacts {
-        body_a := cont.get(physics.bodies, contact.body_a) or_continue
-        body_b := cont.get(physics.bodies, contact.body_b) or_continue
+      for &contact in self.contacts {
+        body_a := cont.get(self.bodies, contact.body_a) or_continue
+        body_b := cont.get(self.bodies, contact.body_b) or_continue
         // Solve without bias - only enforce zero relative velocity at contact
         resolve_contact_no_bias(&contact, body_a, body_b)
       }
     }
     solver_time += time.since(solver_start)
     integration_start_substep := time.now()
-    for &entry, idx in physics.bodies.entries do if entry.active {
+    for &entry, idx in self.bodies.entries do if entry.active {
       body := &entry.item
       if body.is_static || body.is_kinematic || body.trigger_only {
         continue
@@ -477,14 +477,14 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
   substep_time := time.since(substep_start)
   // Update cached AABBs after all substeps complete
   cache_update_start := time.now()
-  if physics.enable_parallel {
-    parallel_update_aabb_cache(physics, physics.thread_count)
+  if self.enable_parallel {
+    parallel_update_aabb_cache(self, self.thread_count)
   } else {
-    sequential_update_aabb_cache(physics)
+    sequential_update_aabb_cache(self)
   }
   cache_update_time := time.since(cache_update_start)
   cleanup_start := time.now()
-  for &entry, idx in physics.bodies.entries do if entry.active {
+  for &entry, idx in self.bodies.entries do if entry.active {
     body := &entry.item
     if body.is_static || body.is_kinematic {
       continue
@@ -494,7 +494,7 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
         index      = u32(idx),
         generation = entry.generation,
       }
-      defer destroy_body(physics, handle)
+      defer destroy_body(self, handle)
       log.infof("Removing body at y=%.2f (below KILL_Y=%.2f)", body.position.y, KILL_Y)
     }
   }
@@ -522,12 +522,12 @@ step :: proc(physics: ^PhysicsWorld, dt: f32) {
     time.duration_milliseconds(cleanup_time),
     active_body_count,
     awake_body_count,
-    len(physics.contacts),
+    len(self.contacts),
   )
 }
 
 get_body :: proc(
-  self: ^PhysicsWorld,
+  self: ^World,
   handle: RigidBodyHandle,
 ) -> (
   ret: ^RigidBody,
@@ -537,7 +537,7 @@ get_body :: proc(
 }
 
 get_collider :: proc(
-  self: ^PhysicsWorld,
+  self: ^World,
   handle: ColliderHandle,
 ) -> (
   ret: ^Collider,
