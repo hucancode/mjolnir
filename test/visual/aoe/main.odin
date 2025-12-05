@@ -65,12 +65,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
       scale(engine, node_handle, cube_scale)
       append(&cube_handles, node_handle)
       // Create physics body for cube
-      body_handle := physics.create_body(
+      body_handle := physics.create_body_box(
         &physics_world,
-        node_handle,
+        half_extents = {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
+        position = {world_x, 0.5, world_z},
         is_static = true,
       )
-      physics.create_collider_box(&physics_world, body_handle, 0.5 * cube_scale)
       append(&cube_bodies, body_handle)
     }
   }

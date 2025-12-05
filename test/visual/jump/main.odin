@@ -36,11 +36,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world, {0, -10, 0})
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  ground_body := physics.create_body(&physics_world, is_static = true)
-  physics.create_collider_box(
+  ground_body := physics.create_body_box(
     &physics_world,
-    ground_body,
-    [3]f32{40.0, 0.5, 40.0},
+    half_extents = {40.0, 0.5, 40.0},
+    is_static = true,
   )
   ground_handle = spawn(
     engine,
@@ -59,11 +58,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Ground body created")
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
-  cube_body = physics.create_body(&physics_world, {0, 3, 0}, mass = 2.0)
+  cube_body, _, _ = physics.create_body_box(
+    &physics_world,
+    half_extents = {1.0, 1.0, 1.0},
+    position = {0, 3, 0},
+    mass = 2.0,
+  )
   if body, ok := physics.get(&physics_world, cube_body); ok {
     physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
   }
-  physics.create_collider_box(&physics_world, cube_body, [3]f32{1.0, 1.0, 1.0})
   cube_handle = spawn(
     engine,
     [3]f32{0, 3, 0},

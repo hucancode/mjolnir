@@ -126,7 +126,6 @@ apply_impulse_at_point :: proc(
   self: ^RigidBody,
   impulse: [3]f32,
   point: [3]f32,
-
 ) {
   if self.is_static do return
   self.velocity += impulse * self.inv_mass

@@ -232,6 +232,170 @@ create_collider_fan :: proc(
   return handle, true
 }
 
+create_body_sphere :: proc(
+  self: ^World,
+  radius: f32 = 1.0,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  mass: f32 = 1.0,
+  is_static: bool = false,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+) -> (
+  body_handle: RigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  body_handle = create_body(
+    self,
+    position,
+    rotation,
+    mass,
+    is_static,
+    trigger_only,
+  ) or_return
+  _ = create_collider_sphere(
+    self,
+    body_handle,
+    radius,
+    offset,
+  ) or_return
+  return body_handle, true
+}
+
+create_body_box :: proc(
+  self: ^World,
+  half_extents: [3]f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  mass: f32 = 1.0,
+  is_static: bool = false,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+  collider_rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (
+  body_handle: RigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  body_handle = create_body(
+    self,
+    position,
+    rotation,
+    mass,
+    is_static,
+    trigger_only,
+  ) or_return
+  _ = create_collider_box(
+    self,
+    body_handle,
+    half_extents,
+    offset,
+    collider_rotation,
+  ) or_return
+  return body_handle, true
+}
+
+create_body_capsule :: proc(
+  self: ^World,
+  radius: f32,
+  height: f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  mass: f32 = 1.0,
+  is_static: bool = false,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+) -> (
+  body_handle: RigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  body_handle = create_body(
+    self,
+    position,
+    rotation,
+    mass,
+    is_static,
+    trigger_only,
+  ) or_return
+  _ = create_collider_capsule(
+    self,
+    body_handle,
+    radius,
+    height,
+    offset,
+  ) or_return
+  return body_handle, true
+}
+
+create_body_cylinder :: proc(
+  self: ^World,
+  radius: f32,
+  height: f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  mass: f32 = 1.0,
+  is_static: bool = false,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+  collider_rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (
+  body_handle: RigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  body_handle = create_body(
+    self,
+    position,
+    rotation,
+    mass,
+    is_static,
+    trigger_only,
+  ) or_return
+  _ = create_collider_cylinder(
+    self,
+    body_handle,
+    radius,
+    height,
+    offset,
+    collider_rotation,
+  ) or_return
+  return body_handle, true
+}
+
+create_body_fan :: proc(
+  self: ^World,
+  radius: f32,
+  height: f32,
+  angle: f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  mass: f32 = 1.0,
+  is_static: bool = false,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+  collider_rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (
+  body_handle: RigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  body_handle = create_body(
+    self,
+    position,
+    rotation,
+    mass,
+    is_static,
+    trigger_only,
+  ) or_return
+  _ = create_collider_fan(
+    self,
+    body_handle,
+    radius,
+    height,
+    angle,
+    offset,
+    collider_rotation,
+  ) or_return
+  return body_handle, true
+}
+
 step :: proc(self: ^World, dt: f32) {
   step_start := time.now()
   @(static) frame_counter := 0

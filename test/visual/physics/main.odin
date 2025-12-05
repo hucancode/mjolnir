@@ -41,16 +41,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   {
     ground_node_handle := world.spawn(&engine.world, {0, -0.5, 0})
     ground_node := world.get_node(&engine.world, ground_node_handle)
-    body_handle := physics.create_body(
+    body_handle := physics.create_body_box(
       &physics_world,
-      ground_node.transform.position,
-      ground_node.transform.rotation,
+      half_extents = {10.0, 0.5, 10.0},
+      position = ground_node.transform.position,
+      rotation = ground_node.transform.rotation,
       is_static = true,
-    )
-    collider_handle := physics.create_collider_box(
-      &physics_world,
-      body_handle,
-      [3]f32{10.0, 0.5, 10.0},
     )
     ground_node.attachment = world.RigidBodyAttachment {
       body_handle = body_handle,
@@ -71,16 +67,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   {
     sphere_node_handle := world.spawn(&engine.world, {0, SPHERE_RADIUS, 0})
     sphere_node := world.get_node(&engine.world, sphere_node_handle)
-    body_handle := physics.create_body(
+    body_handle := physics.create_body_sphere(
       &physics_world,
-      sphere_node.transform.position,
-      sphere_node.transform.rotation,
+      radius = SPHERE_RADIUS,
+      position = sphere_node.transform.position,
+      rotation = sphere_node.transform.rotation,
       is_static = true,
-    )
-    collider_handle := physics.create_collider_sphere(
-      &physics_world,
-      body_handle,
-      SPHERE_RADIUS,
     )
     if body, ok := physics.get_body(&physics_world, body_handle); ok {
       physics.set_sphere_inertia(body, SPHERE_RADIUS)
@@ -120,16 +112,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Parent node with physics
     cube_node_handle := world.spawn(&engine.world, pos)
     cube_node := world.get_node(&engine.world, cube_node_handle)
-    body_handle := physics.create_body(
+    body_handle := physics.create_body_box(
       &physics_world,
-      cube_node.transform.position,
-      cube_node.transform.rotation,
+      half_extents = {1.0, 1.0, 1.0},
+      position = cube_node.transform.position,
+      rotation = cube_node.transform.rotation,
       mass = 50,
-    )
-    collider_handle := physics.create_collider_box(
-      &physics_world,
-      body_handle,
-      [3]f32{1.0, 1.0, 1.0},
     )
     cube_node.attachment = world.RigidBodyAttachment {
       body_handle = body_handle,

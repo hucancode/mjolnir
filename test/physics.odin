@@ -113,12 +113,17 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
   physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
-  body_a_handle := physics.create_body(&physics_world)
-  body_b_handle := physics.create_body(&physics_world, {1.5, 0, 0})
+  body_a_handle := physics.create_body_sphere(
+    &physics_world,
+    radius = 1.0,
+  )
+  body_b_handle := physics.create_body_sphere(
+    &physics_world,
+    radius = 1.0,
+    position = {1.5, 0, 0},
+  )
   body_a := physics.get_body(&physics_world, body_a_handle)
   body_b := physics.get_body(&physics_world, body_b_handle)
-  physics.create_collider_sphere(&physics_world, body_a_handle, 1.0)
-  physics.create_collider_sphere(&physics_world, body_b_handle, 1.0)
   body_a.velocity = {10, 0, 0}
   body_b.velocity = {-10, 0, 0}
   dt := f32(0.016)
@@ -145,12 +150,16 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
   physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
-  body_static_handle := physics.create_body(&physics_world, is_static = true)
-  body_dynamic_handle := physics.create_body(&physics_world, {1.5, 0, 0})
+  body_static_handle := physics.create_body_sphere(
+    &physics_world,
+    is_static = true,
+  )
+  body_dynamic_handle := physics.create_body_sphere(
+    &physics_world,
+    position = {1.5, 0, 0},
+  )
   body_static := physics.get_body(&physics_world, body_static_handle)
   body_dynamic := physics.get_body(&physics_world, body_dynamic_handle)
-  physics.create_collider_sphere(&physics_world, body_static_handle)
-  physics.create_collider_sphere(&physics_world, body_dynamic_handle)
   body_dynamic.velocity = {-10, 0, 0}
   initial_static_velocity := body_static.velocity
   dt := f32(0.016)
@@ -237,20 +246,20 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
   physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
-  body_bullet_handle := physics.create_body(
+  body_bullet_handle := physics.create_body_sphere(
     &physics_world,
-    {-5, 0, 0},
+    radius = 0.1,
+    position = {-5, 0, 0},
     mass = 0.1,
   )
-  body_wall_handle := physics.create_body(
+  body_wall_handle := physics.create_body_box(
     &physics_world,
-    {0, 0, 0},
+    half_extents = {0.5, 5, 5},
+    position = {0, 0, 0},
     mass = 100.0,
     is_static = true,
   )
   body_bullet := physics.get_body(&physics_world, body_bullet_handle)
-  physics.create_collider_sphere(&physics_world, body_bullet_handle, 0.1)
-  physics.create_collider_box(&physics_world, body_wall_handle, {0.5, 5, 5})
   body_bullet.velocity = {100, 0, 0}
   dt := f32(0.016)
   physics.step(&physics_world, dt)
@@ -1224,12 +1233,17 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
   physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
-  body_a_handle := physics.create_body(&physics_world)
-  body_b_handle := physics.create_body(&physics_world, {0.5, 0.5, 0})
+  body_a_handle := physics.create_body_sphere(
+    &physics_world,
+    radius = 1.0,
+  )
+  body_b_handle := physics.create_body_sphere(
+    &physics_world,
+    radius = 1.0,
+    position = {0.5, 0.5, 0},
+  )
   body_a := physics.get_body(&physics_world, body_a_handle)
   physics.set_box_inertia(body_a, {1, 1, 1})
-  physics.create_collider_sphere(&physics_world, body_a_handle, 1.0)
-  physics.create_collider_sphere(&physics_world, body_b_handle, 1.0)
   body_a.velocity = {10, 0, 0}
   dt := f32(0.016)
   physics.step(&physics_world, dt)
@@ -1309,21 +1323,33 @@ test_integration_box_stack_stability :: proc(t: ^testing.T) {
   physics_world: physics.World
   physics.init(&physics_world, {0, -9.81, 0}, false)
   defer physics.destroy(&physics_world)
-  body_ground_h := physics.create_body(
+  _ = physics.create_body_box(
     &physics_world,
-    {0, -0.5, 0},
+    half_extents = {5, 0.5, 5},
+    position = {0, -0.5, 0},
     is_static = true,
   )
-  physics.create_collider_box(&physics_world, body_ground_h, {5, 0.5, 5})
-  body_1_h := physics.create_body(&physics_world, {0, 0.5, 0}, mass = 10.0)
+  body_1_h := physics.create_body_box(
+    &physics_world,
+    half_extents = {0.5, 0.5, 0.5},
+    position = {0, 0.5, 0},
+    mass = 10.0,
+  )
   body_1 := physics.get_body(&physics_world, body_1_h)
-  physics.create_collider_box(&physics_world, body_1_h, {0.5, 0.5, 0.5})
-  body_2_h := physics.create_body(&physics_world, {0, 1.5, 0}, mass = 10.0)
+  body_2_h := physics.create_body_box(
+    &physics_world,
+    half_extents = {0.5, 0.5, 0.5},
+    position = {0, 1.5, 0},
+    mass = 10.0,
+  )
   body_2 := physics.get_body(&physics_world, body_2_h)
-  physics.create_collider_box(&physics_world, body_2_h, {0.5, 0.5, 0.5})
-  body_3_h := physics.create_body(&physics_world, {0, 2.5, 0}, mass = 10.0)
+  body_3_h := physics.create_body_box(
+    &physics_world,
+    half_extents = {0.5, 0.5, 0.5},
+    position = {0, 2.5, 0},
+    mass = 10.0,
+  )
   body_3 := physics.get_body(&physics_world, body_3_h)
-  physics.create_collider_box(&physics_world, body_3_h, {0.5, 0.5, 0.5})
   dt := f32(0.016)
   for i in 0 ..< 120 {
     physics.step(&physics_world, dt)
@@ -1638,9 +1664,11 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
         world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
         pos := [3]f32{world_x, 0.5, world_z}
         node_handle := world.spawn(&state.w, pos)
-
-        body_handle := physics.create_body(&state.physics, is_static = true)
-        physics.create_collider_sphere(&state.physics, body_handle, 0.5)
+        _ = physics.create_body_sphere(
+          &state.physics,
+          radius = 0.5,
+          is_static = true,
+        )
       }
     }
     physics.step(&state.physics, 0.0)
