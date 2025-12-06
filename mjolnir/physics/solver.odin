@@ -161,7 +161,7 @@ resolve_contact_no_bias :: proc(
 }
 
 compute_tangent_basis :: proc(normal: [3]f32) -> ([3]f32, [3]f32) {
-  tangent1 := linalg.normalize(linalg.vector3_orthogonal(normal))
+  tangent1 := linalg.orthogonal(normal)
   tangent2 := linalg.cross(normal, tangent1)
   return tangent1, tangent2
 }
