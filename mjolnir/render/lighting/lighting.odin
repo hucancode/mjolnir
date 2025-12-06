@@ -248,6 +248,7 @@ init :: proc(
     .VIEWPORT,
     .SCISSOR,
     .DEPTH_COMPARE_OP,
+    .CULL_MODE,
   }
   lighting_dynamic_state := gpu.create_dynamic_state(
     lighting_dynamic_states[:],
@@ -274,7 +275,7 @@ init :: proc(
     pVertexInputState   = &lighting_vertex_input,
     pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
     pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-    pRasterizationState = &gpu.INVERSE_RASTERIZER,
+    pRasterizationState = &gpu.STANDARD_RASTERIZER,
     pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
     pColorBlendState    = &gpu.COLOR_BLENDING_OVERFLOW,
     pDynamicState       = &lighting_dynamic_state,
@@ -471,12 +472,15 @@ render :: proc(
     switch light.type {
     case .POINT:
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
+      vk.CmdSetCullMode(command_buffer, {.FRONT})
       bind_and_draw_mesh(self.sphere_mesh, command_buffer, rm)
     case .DIRECTIONAL:
       vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
+      vk.CmdSetCullMode(command_buffer, {.BACK})
       bind_and_draw_mesh(self.triangle_mesh, command_buffer, rm)
     case .SPOT:
-      vk.CmdSetDepthCompareOp(command_buffer, .LESS_OR_EQUAL)
+      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
+      vk.CmdSetCullMode(command_buffer, {.BACK})
       bind_and_draw_mesh(self.cone_mesh, command_buffer, rm)
     }
   }

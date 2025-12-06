@@ -10,9 +10,9 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-NX :: 20
+NX :: 10
 NY :: 10
-NZ :: 20
+NZ :: 10
 CUBE_COUNT :: NX * NY * NZ
 SPHERE_RADIUS :: 3.0
 
@@ -138,7 +138,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
     sync_active_camera_controller(engine)
   }
-  spawn_point_light(engine, {0.8, 0.9, 1, 1}, 50.0, position = {0, 20, 0})
+  light_handle := spawn_spot_light(engine, {0.8, 0.9, 1, 1}, 50.0, math.PI * 0.25, position = {0, 20, 0})
+  rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   log.info("Physics demo setup complete")
 }
 

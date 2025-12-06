@@ -333,7 +333,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           engine,
           color,
           14.0,
-          math.PI * 0.15,
+          math.PI * 0.25,
           lights_root_handle,
         ) or_continue
         translate(engine, light_handle, local_x, local_y, local_z)
