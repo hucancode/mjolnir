@@ -95,8 +95,8 @@ test_box_box :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  is_a_aligned := is_identity_quaternion(rot_a) || true
-  is_b_aligned := is_identity_quaternion(rot_b) || true
+  is_a_aligned := is_identity_quaternion(rot_a)
+  is_b_aligned := is_identity_quaternion(rot_b)
   // Fast path for axis-aligned boxes
   if is_a_aligned && is_b_aligned {
     min_a := pos_a - box_a.half_extents
@@ -120,7 +120,7 @@ test_box_box :: proc(
         (max(min_a.z, min_b.z) + min(max_a.z, max_b.z)) * 0.5,
       }
     } else if min_overlap == overlap_y {
-      normal = pos_b.y > pos_a.y ? linalg.VECTOR3F32_Y_AXIS : -linalg.VECTOR3F32_X_AXIS
+      normal = pos_b.y > pos_a.y ? linalg.VECTOR3F32_Y_AXIS : -linalg.VECTOR3F32_Y_AXIS
       contact_y := pos_b.y > pos_a.y ? max_a.y : min_a.y
       point = [3]f32 {
         (max(min_a.x, min_b.x) + min(max_a.x, max_b.x)) * 0.5,
@@ -284,7 +284,7 @@ test_box_capsule :: proc(
   hit: bool,
 ) {
   is_aligned := is_identity_quaternion(rot_box) && is_identity_quaternion(rot_capsule)
-  if is_aligned || true{
+  if is_aligned {
     h := capsule.height * 0.5
     line_start := pos_capsule + [3]f32{0, -h, 0}
     line_end := pos_capsule + [3]f32{0, h, 0}
@@ -308,25 +308,39 @@ test_box_capsule :: proc(
     hit = true
     return
   }
-  // OBB case
-  obb := geometry.Obb {
-    center       = pos_box,
-    half_extents = box.half_extents,
-    rotation     = rot_box,
+  // OBB case - transform capsule to box's local space
+  // The geometry function assumes Y-aligned capsule, so we rotate the capsule
+  h := capsule.height * 0.5
+  capsule_axis := linalg.mul(rot_capsule, linalg.VECTOR3F32_Y_AXIS)
+  line_start := pos_capsule - capsule_axis * h
+  line_end := pos_capsule + capsule_axis * h
+  // Transform capsule line segment to box's local space
+  inv_rot_box := linalg.quaternion_inverse(rot_box)
+  local_start := linalg.mul(inv_rot_box, line_start - pos_box)
+  local_end := linalg.mul(inv_rot_box, line_end - pos_box)
+  local_center := (local_start + local_end) * 0.5
+  local_axis := local_end - local_start
+  local_height := linalg.length(local_axis)
+  // Find closest points between line segment and box in local space
+  clamped_start := linalg.clamp(local_start, -box.half_extents, box.half_extents)
+  clamped_end := linalg.clamp(local_end, -box.half_extents, box.half_extents)
+  dist_start_sq := linalg.length2(local_start - clamped_start)
+  dist_end_sq := linalg.length2(local_end - clamped_end)
+  local_closest_on_box := dist_start_sq < dist_end_sq ? clamped_start : clamped_end
+  local_point_on_line := dist_start_sq < dist_end_sq ? local_start : local_end
+  delta := local_point_on_line - local_closest_on_box
+  distance_sq := linalg.length2(delta)
+  if distance_sq >= capsule.radius * capsule.radius {
+    return
   }
-  // This geometry function assumes capsule is Y-aligned?
-  // TODO: Update geometry.obb_capsule_intersect to handle capsule rotation or pre-transform capsule
-  // For now, let's assume Y-aligned if we can't pass rotation
-  // But we removed rotation from capsule collider struct so we must pass it somewhere or assume logic above
-  // If geometry function doesn't support rotation, we might need GJK fallback or update geometry lib
-  // Assuming geometry lib update is out of scope, let's check if we can transform everything to OBB space
-
-  closest, normal, penetration, hit = geometry.obb_capsule_intersect(
-    obb,
-    pos_capsule,
-    capsule.radius,
-    capsule.height,
-  )
+  distance := math.sqrt(distance_sq)
+  local_normal :=
+    distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  // Transform back to world space
+  normal = linalg.mul(rot_box, local_normal)
+  closest = pos_box + linalg.mul(rot_box, local_closest_on_box)
+  penetration = capsule.radius - distance
+  hit = true
   return
 }
 
