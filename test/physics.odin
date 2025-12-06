@@ -113,10 +113,7 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
   physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
-  body_a_handle := physics.create_body_sphere(
-    &physics_world,
-    radius = 1.0,
-  )
+  body_a_handle := physics.create_body_sphere(&physics_world, radius = 1.0)
   body_b_handle := physics.create_body_sphere(
     &physics_world,
     radius = 1.0,
@@ -327,7 +324,15 @@ test_gjk_sphere_sphere_intersecting :: proc(t: ^testing.T) {
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
   simplex: physics.Simplex
-  result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
+  result := physics.gjk(
+    &collider_a,
+    pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
+    &collider_b,
+    pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
+    &simplex,
+  )
   testing.expect(
     t,
     result,
@@ -344,7 +349,15 @@ test_gjk_sphere_sphere_separated :: proc(t: ^testing.T) {
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{3, 0, 0}
   simplex: physics.Simplex
-  result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
+  result := physics.gjk(
+    &collider_a,
+    pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
+    &collider_b,
+    pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
+    &simplex,
+  )
   testing.expect(
     t,
     !result,
@@ -355,16 +368,21 @@ test_gjk_sphere_sphere_separated :: proc(t: ^testing.T) {
 @(test)
 test_gjk_box_box_intersecting :: proc(t: ^testing.T) {
   collider_a := physics.Collider {
-    shape = physics.BoxCollider {
-      half_extents = {1, 1, 1},
-      rotation = linalg.QUATERNIONF32_IDENTITY,
-    },
+    shape = physics.BoxCollider{half_extents = {1, 1, 1}},
   }
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
   simplex: physics.Simplex
-  result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
+  result := physics.gjk(
+    &collider_a,
+    pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
+    &collider_b,
+    pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
+    &simplex,
+  )
   testing.expect(
     t,
     result,
@@ -375,16 +393,21 @@ test_gjk_box_box_intersecting :: proc(t: ^testing.T) {
 @(test)
 test_gjk_box_box_separated :: proc(t: ^testing.T) {
   collider_a := physics.Collider {
-    shape = physics.BoxCollider {
-      half_extents = {1, 1, 1},
-      rotation = linalg.QUATERNIONF32_IDENTITY,
-    },
+    shape = physics.BoxCollider{half_extents = {1, 1, 1}},
   }
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{5, 0, 0}
   simplex: physics.Simplex
-  result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
+  result := physics.gjk(
+    &collider_a,
+    pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
+    &collider_b,
+    pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
+    &simplex,
+  )
   testing.expect(
     t,
     !result,
@@ -401,7 +424,15 @@ test_gjk_capsule_capsule_intersecting :: proc(t: ^testing.T) {
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{0.8, 0, 0}
   simplex: physics.Simplex
-  result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
+  result := physics.gjk(
+    &collider_a,
+    pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
+    &collider_b,
+    pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
+    &simplex,
+  )
   testing.expect(
     t,
     result,
@@ -418,7 +449,15 @@ test_gjk_capsule_capsule_separated :: proc(t: ^testing.T) {
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{5, 0, 0}
   simplex: physics.Simplex
-  result := physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex)
+  result := physics.gjk(
+    &collider_a,
+    pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
+    &collider_b,
+    pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
+    &simplex,
+  )
   testing.expect(
     t,
     !result,
@@ -432,10 +471,7 @@ test_gjk_sphere_box_intersecting :: proc(t: ^testing.T) {
     shape = physics.SphereCollider{radius = 1.0},
   }
   collider_box := physics.Collider {
-    shape = physics.BoxCollider {
-      half_extents = {1, 1, 1},
-      rotation = linalg.QUATERNIONF32_IDENTITY,
-    },
+    shape = physics.BoxCollider{half_extents = {1, 1, 1}},
   }
   // Sphere at (1.5, 0, 0) with radius 1.0 reaches from 0.5 to 2.5
   // Box at (0, 0, 0) with extents 1 reaches from -1 to 1
@@ -446,8 +482,10 @@ test_gjk_sphere_box_intersecting :: proc(t: ^testing.T) {
   result := physics.gjk(
     &collider_sphere,
     pos_sphere,
+    linalg.QUATERNIONF32_IDENTITY,
     &collider_box,
     pos_box,
+    linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   )
   testing.expect(
@@ -463,10 +501,7 @@ test_gjk_sphere_box_separated :: proc(t: ^testing.T) {
     shape = physics.SphereCollider{radius = 1.0},
   }
   collider_box := physics.Collider {
-    shape = physics.BoxCollider {
-      half_extents = {1, 1, 1},
-      rotation = linalg.QUATERNIONF32_IDENTITY,
-    },
+    shape = physics.BoxCollider{half_extents = {1, 1, 1}},
   }
   pos_sphere := [3]f32{5, 0, 0}
   pos_box := [3]f32{0, 0, 0}
@@ -474,8 +509,10 @@ test_gjk_sphere_box_separated :: proc(t: ^testing.T) {
   result := physics.gjk(
     &collider_sphere,
     pos_sphere,
+    linalg.QUATERNIONF32_IDENTITY,
     &collider_box,
     pos_box,
+    linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   )
   testing.expect(
@@ -494,15 +531,25 @@ test_epa_sphere_sphere_penetration :: proc(t: ^testing.T) {
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
   simplex: physics.Simplex
-  if !physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex) {
+  if !physics.gjk(
+    &collider_a,
+    pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
+    &collider_b,
+    pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
+    &simplex,
+  ) {
     testing.fail_now(t, "GJK should detect collision")
   }
   normal, depth, ok := physics.epa(
     simplex,
     &collider_a,
     pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
   )
   testing.expect(t, ok, "EPA should succeed")
   testing.expect(
@@ -520,24 +567,31 @@ test_epa_sphere_sphere_penetration :: proc(t: ^testing.T) {
 @(test)
 test_epa_box_box_penetration :: proc(t: ^testing.T) {
   collider_a := physics.Collider {
-    shape = physics.BoxCollider {
-      half_extents = {1, 1, 1},
-      rotation = linalg.QUATERNIONF32_IDENTITY,
-    },
+    shape = physics.BoxCollider{half_extents = {1, 1, 1}},
   }
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
   simplex: physics.Simplex
-  if !physics.gjk(&collider_a, pos_a, &collider_b, pos_b, &simplex) {
+  if !physics.gjk(
+    &collider_a,
+    pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
+    &collider_b,
+    pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
+    &simplex,
+  ) {
     testing.fail_now(t, "GJK should detect collision")
   }
   normal, depth, ok := physics.epa(
     simplex,
     &collider_a,
     pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
   )
   testing.expect(t, ok, "EPA should succeed")
   testing.expect(
@@ -563,8 +617,10 @@ test_collision_gjk_sphere_sphere :: proc(t: ^testing.T) {
   point, normal, penetration, hit := physics.test_collision_gjk(
     &collider_a,
     pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
   )
   testing.expect(t, hit, "Should detect collision")
   testing.expect(
@@ -577,10 +633,7 @@ test_collision_gjk_sphere_sphere :: proc(t: ^testing.T) {
 @(test)
 test_collision_gjk_box_box :: proc(t: ^testing.T) {
   collider_a := physics.Collider {
-    shape = physics.BoxCollider {
-      half_extents = {1, 1, 1},
-      rotation = linalg.QUATERNIONF32_IDENTITY,
-    },
+    shape = physics.BoxCollider{half_extents = {1, 1, 1}},
   }
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
@@ -588,8 +641,10 @@ test_collision_gjk_box_box :: proc(t: ^testing.T) {
   point, normal, penetration, hit := physics.test_collision_gjk(
     &collider_a,
     pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
   )
   testing.expect(t, hit, "Should detect collision")
   testing.expect(
@@ -606,7 +661,12 @@ test_support_function_sphere :: proc(t: ^testing.T) {
   }
   position := [3]f32{0, 0, 0}
   direction := [3]f32{1, 0, 0}
-  point := physics.find_furthest_point(&collider, position, direction)
+  point := physics.find_furthest_point(
+    &collider,
+    position,
+    linalg.QUATERNIONF32_IDENTITY,
+    direction,
+  )
   expected := [3]f32{2, 0, 0}
   testing.expect(
     t,
@@ -620,14 +680,16 @@ test_support_function_sphere :: proc(t: ^testing.T) {
 @(test)
 test_support_function_box :: proc(t: ^testing.T) {
   collider := physics.Collider {
-    shape = physics.BoxCollider {
-      half_extents = {1, 2, 3},
-      rotation = linalg.QUATERNIONF32_IDENTITY,
-    },
+    shape = physics.BoxCollider{half_extents = {1, 2, 3}},
   }
   position := [3]f32{0, 0, 0}
   direction := [3]f32{1, 1, 1}
-  point := physics.find_furthest_point(&collider, position, direction)
+  point := physics.find_furthest_point(
+    &collider,
+    position,
+    linalg.QUATERNIONF32_IDENTITY,
+    direction,
+  )
   expected := [3]f32{1, 2, 3}
   testing.expect(
     t,
@@ -645,7 +707,12 @@ test_support_function_capsule :: proc(t: ^testing.T) {
   }
   position := [3]f32{0, 0, 0}
   direction := linalg.VECTOR3F32_Y_AXIS
-  point := physics.find_furthest_point(&collider, position, direction)
+  point := physics.find_furthest_point(
+    &collider,
+    position,
+    linalg.QUATERNIONF32_IDENTITY,
+    direction,
+  )
   expected_y := f32(2.0 + 1.0)
   testing.expect(
     t,
@@ -727,18 +794,18 @@ test_sphere_sphere_collision_overlapping :: proc(t: ^testing.T) {
 test_box_box_collision_intersecting :: proc(t: ^testing.T) {
   box_a := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   box_b := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
   point, normal, penetration, hit := physics.test_box_box(
     pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
     box_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     box_b,
   )
   testing.expect(t, hit, "Boxes should intersect")
@@ -760,15 +827,18 @@ test_box_box_collision_intersecting :: proc(t: ^testing.T) {
 test_box_box_collision_separated :: proc(t: ^testing.T) {
   box_a := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   box_b := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
-  pos_a := [3]f32{0, 0, 0}
-  pos_b := [3]f32{5, 0, 0}
-  _, _, _, hit := physics.test_box_box(pos_a, box_a, pos_b, box_b)
+  _, _, _, hit := physics.test_box_box(
+    {0, 0, 0},
+    linalg.QUATERNIONF32_IDENTITY,
+    box_a,
+    {5, 0, 0},
+    linalg.QUATERNIONF32_IDENTITY,
+    box_b,
+  )
   testing.expect(t, !hit, "Separated boxes should not intersect")
 }
 
@@ -776,18 +846,18 @@ test_box_box_collision_separated :: proc(t: ^testing.T) {
 test_box_box_collision_y_axis :: proc(t: ^testing.T) {
   box_a := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   box_b := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{0, 1.5, 0}
   _, normal, penetration, hit := physics.test_box_box(
     pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
     box_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     box_b,
   )
   testing.expect(t, hit, "Boxes should intersect")
@@ -812,7 +882,6 @@ test_sphere_box_collision_intersecting :: proc(t: ^testing.T) {
   }
   box := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   // Sphere at (1.5, 0, 0) with radius 1.0 reaches from 0.5 to 2.5
   // Box at (0, 0, 0) with extents 1 reaches from -1 to 1
@@ -821,6 +890,7 @@ test_sphere_box_collision_intersecting :: proc(t: ^testing.T) {
   pos_box := [3]f32{0, 0, 0}
   point, normal, penetration, hit := physics.test_box_sphere(
     pos_box,
+    linalg.QUATERNIONF32_IDENTITY,
     box,
     pos_sphere,
     sphere,
@@ -846,11 +916,16 @@ test_sphere_box_collision_separated :: proc(t: ^testing.T) {
   }
   box := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   pos_sphere := [3]f32{5, 0, 0}
   pos_box := [3]f32{0, 0, 0}
-  _, _, _, hit := physics.test_box_sphere(pos_box, box, pos_sphere, sphere)
+  _, _, _, hit := physics.test_box_sphere(
+    pos_box,
+    linalg.QUATERNIONF32_IDENTITY,
+    box,
+    pos_sphere,
+    sphere,
+  )
   testing.expect(t, !hit, "Separated sphere and box should not intersect")
 }
 
@@ -861,11 +936,16 @@ test_sphere_box_collision_corner :: proc(t: ^testing.T) {
   }
   box := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   pos_sphere := [3]f32{1.5, 1.5, 1.5}
   pos_box := [3]f32{0, 0, 0}
-  _, _, _, hit := physics.test_box_sphere(pos_box, box, pos_sphere, sphere)
+  _, _, _, hit := physics.test_box_sphere(
+    pos_box,
+    linalg.QUATERNIONF32_IDENTITY,
+    box,
+    pos_sphere,
+    sphere,
+  )
   testing.expect(t, hit, "Sphere should collide with box corner")
 }
 
@@ -883,8 +963,10 @@ test_capsule_capsule_collision_parallel :: proc(t: ^testing.T) {
   pos_b := [3]f32{0.8, 0, 0}
   _, _, penetration, hit := physics.test_capsule_capsule(
     pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
     capsule_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     capsule_b,
   )
   testing.expect(t, hit, "Parallel capsules should intersect")
@@ -909,8 +991,10 @@ test_capsule_capsule_collision_separated :: proc(t: ^testing.T) {
   pos_b := [3]f32{5, 0, 0}
   _, _, _, hit := physics.test_capsule_capsule(
     pos_a,
+    linalg.QUATERNIONF32_IDENTITY,
     capsule_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     capsule_b,
   )
   testing.expect(t, !hit, "Separated capsules should not intersect")
@@ -929,6 +1013,7 @@ test_sphere_capsule_collision :: proc(t: ^testing.T) {
   pos_capsule := [3]f32{0, 0, 0}
   _, _, penetration, hit := physics.test_capsule_sphere(
     pos_capsule,
+    linalg.QUATERNIONF32_IDENTITY,
     capsule,
     pos_sphere,
     sphere,
@@ -945,7 +1030,6 @@ test_sphere_capsule_collision :: proc(t: ^testing.T) {
 test_box_capsule_collision :: proc(t: ^testing.T) {
   box := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   capsule := physics.CapsuleCollider {
     radius = 0.5,
@@ -953,7 +1037,14 @@ test_box_capsule_collision :: proc(t: ^testing.T) {
   }
   pos_box := [3]f32{0, 0, 0}
   pos_capsule := [3]f32{1.3, 0, 0}
-  _, _, _, hit := physics.test_box_capsule(pos_box, box, pos_capsule, capsule)
+  _, _, _, hit := physics.test_box_capsule(
+    pos_box,
+    linalg.QUATERNIONF32_IDENTITY,
+    box,
+    pos_capsule,
+    linalg.QUATERNIONF32_IDENTITY,
+    capsule,
+  )
   testing.expect(t, hit, "Box and capsule should intersect")
 }
 
@@ -964,7 +1055,11 @@ test_collider_get_aabb_sphere :: proc(t: ^testing.T) {
     shape = physics.SphereCollider{radius = 2.0},
   }
   position := [3]f32{5, 3, 1}
-  aabb := physics.collider_calculate_aabb(&collider, position)
+  aabb := physics.collider_calculate_aabb(
+    &collider,
+    position,
+    linalg.QUATERNIONF32_IDENTITY,
+  )
   expected_min := [3]f32{4, 1, -1}
   expected_max := [3]f32{8, 5, 3}
   testing.expect(
@@ -987,13 +1082,14 @@ test_collider_get_aabb_sphere :: proc(t: ^testing.T) {
 test_collider_get_aabb_box :: proc(t: ^testing.T) {
   collider := physics.Collider {
     offset = {0.5, 0, 0},
-    shape = physics.BoxCollider {
-      half_extents = {1, 2, 0.5},
-      rotation = linalg.QUATERNIONF32_IDENTITY,
-    },
+    shape = physics.BoxCollider{half_extents = {1, 2, 0.5}},
   }
   position := [3]f32{10, 5, 2}
-  aabb := physics.collider_calculate_aabb(&collider, position)
+  aabb := physics.collider_calculate_aabb(
+    &collider,
+    position,
+    linalg.QUATERNIONF32_IDENTITY,
+  )
   expected_min := [3]f32{9.5, 3, 1.5}
   expected_max := [3]f32{11.5, 7, 2.5}
   testing.expect(
@@ -1018,7 +1114,11 @@ test_collider_get_aabb_capsule :: proc(t: ^testing.T) {
     shape = physics.CapsuleCollider{radius = 1.0, height = 4.0},
   }
   position := [3]f32{0, 0, 0}
-  aabb := physics.collider_calculate_aabb(&collider, position)
+  aabb := physics.collider_calculate_aabb(
+    &collider,
+    position,
+    linalg.QUATERNIONF32_IDENTITY,
+  )
   expected_min := [3]f32{-1, -3, -1}
   expected_max := [3]f32{1, 3, 1}
   testing.expect(
@@ -1144,15 +1244,15 @@ test_swept_collider_sphere_sphere :: proc(t: ^testing.T) {
     shape = physics.SphereCollider{radius = 1.0},
   }
   collider_b := collider_a
-  pos_a := [3]f32{0, 0, 0}
-  pos_b := [3]f32{5, 0, 0}
   velocity := [3]f32{10, 0, 0}
   result := physics.swept_test(
     &collider_a,
-    pos_a,
+    {0, 0, 0},
+    linalg.QUATERNIONF32_IDENTITY,
     velocity,
     &collider_b,
-    pos_b,
+    {5, 0, 0},
+    linalg.QUATERNIONF32_IDENTITY,
   )
   testing.expect(t, result.has_impact, "Swept test should detect collision")
   testing.expect(
@@ -1233,10 +1333,7 @@ test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
   physics_world: physics.World
   physics.init(&physics_world, {0, 0, 0}, false)
   defer physics.destroy(&physics_world)
-  body_a_handle := physics.create_body_sphere(
-    &physics_world,
-    radius = 1.0,
-  )
+  body_a_handle := physics.create_body_sphere(&physics_world, radius = 1.0)
   body_b_handle := physics.create_body_sphere(
     &physics_world,
     radius = 1.0,
@@ -1527,18 +1624,16 @@ test_force_application :: proc(t: ^testing.T) {
 test_obb_obb_collision_aligned :: proc(t: ^testing.T) {
   box_a := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
   box_b := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
-  pos_a := [3]f32{0, 0, 0}
-  pos_b := [3]f32{1.5, 0, 0}
   _, normal, penetration, hit := physics.test_box_box(
-    pos_a,
+    {0, 0, 0},
+    linalg.QUATERNIONF32_IDENTITY,
     box_a,
-    pos_b,
+    {1.5, 0, 0},
+    linalg.QUATERNIONF32_IDENTITY,
     box_b,
   )
   testing.expect(t, hit, "Aligned OBBs should intersect")
@@ -1558,15 +1653,18 @@ test_obb_obb_collision_rotated_45 :: proc(t: ^testing.T) {
   )
   box_a := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = rotation_a,
   }
   box_b := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
-  pos_a := [3]f32{0, 0, 0}
-  pos_b := [3]f32{1.2, 0, 0}
-  _, _, _, hit := physics.test_box_box(pos_a, box_a, pos_b, box_b)
+  _, _, _, hit := physics.test_box_box(
+    {0, 0, 0},
+    rotation_a,
+    box_a,
+    {1.2, 0, 0},
+    linalg.QUATERNIONF32_IDENTITY,
+    box_b,
+  )
   testing.expect(t, hit, "Rotated OBB should still intersect with aligned box")
 }
 
@@ -1582,15 +1680,20 @@ test_obb_obb_collision_both_rotated :: proc(t: ^testing.T) {
   )
   box_a := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = rotation_a,
   }
   box_b := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = rotation_b,
   }
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
-  _, _, _, hit := physics.test_box_box(pos_a, box_a, pos_b, box_b)
+  _, _, _, hit := physics.test_box_box(
+    pos_a,
+    rotation_a,
+    box_a,
+    pos_b,
+    rotation_b,
+    box_b,
+  )
   testing.expect(t, hit, "Both rotated OBBs should intersect")
 }
 
@@ -1602,15 +1705,18 @@ test_obb_obb_collision_separated :: proc(t: ^testing.T) {
   )
   box_a := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = rotation,
   }
   box_b := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
   }
-  pos_a := [3]f32{0, 0, 0}
-  pos_b := [3]f32{5, 0, 0}
-  _, _, _, hit := physics.test_box_box(pos_a, box_a, pos_b, box_b)
+  _, _, _, hit := physics.test_box_box(
+    {0, 0, 0},
+    rotation,
+    box_a,
+    {5, 0, 0},
+    linalg.QUATERNIONF32_IDENTITY,
+    box_b,
+  )
   testing.expect(t, !hit, "Separated OBBs should not intersect")
 }
 
@@ -1625,11 +1731,16 @@ test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
   )
   box := physics.BoxCollider {
     half_extents = {1, 1, 1},
-    rotation     = rotation,
   }
   pos_sphere := [3]f32{1.5, 0, 0}
   pos_box := [3]f32{0, 0, 0}
-  _, _, _, hit := physics.test_box_sphere(pos_box, box, pos_sphere, sphere)
+  _, _, _, hit := physics.test_box_sphere(
+    pos_box,
+    rotation,
+    box,
+    pos_sphere,
+    sphere,
+  )
   testing.expect(t, hit, "Sphere should collide with rotated OBB")
 }
 

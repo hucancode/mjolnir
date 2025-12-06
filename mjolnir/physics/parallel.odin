@@ -172,20 +172,22 @@ collision_detection_task :: proc(task: thread.Task) {
         data.physics.colliders,
         body_b.collider_handle,
       ) or_continue
-      pos_a := body_a.position
-      pos_b := body_b.position
       point, normal, penetration, hit := test_collision(
         collider_a,
-        pos_a,
+        body_a.position,
+        body_a.rotation,
         collider_b,
-        pos_b,
+        body_b.position,
+        body_b.rotation,
       )
       if !hit {
         point, normal, penetration, hit = test_collision_gjk(
           collider_a,
-          pos_a,
+          body_a.position,
+          body_a.rotation,
           collider_b,
-          pos_b,
+          body_b.position,
+          body_b.rotation,
         )
       }
       if !hit do continue
@@ -254,9 +256,7 @@ parallel_collision_detection :: proc(
   }
 }
 
-sequential_collision_detection :: proc(
-  physics: ^World,
-) {
+sequential_collision_detection :: proc(physics: ^World) {
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   for &bvh_entry in physics.spatial_index.primitives {
     handle_a := bvh_entry.handle
@@ -282,20 +282,22 @@ sequential_collision_detection :: proc(
         physics.colliders,
         body_b.collider_handle,
       ) or_continue
-      pos_a := body_a.position
-      pos_b := body_b.position
       point, normal, penetration, hit := test_collision(
         collider_a,
-        pos_a,
+        body_a.position,
+        body_a.rotation,
         collider_b,
-        pos_b,
+        body_b.position,
+        body_b.rotation,
       )
       if !hit {
         point, normal, penetration, hit = test_collision_gjk(
           collider_a,
-          pos_a,
+          body_a.position,
+          body_a.rotation,
           collider_b,
-          pos_b,
+          body_b.position,
+          body_b.rotation,
         )
       }
       if !hit do continue
@@ -346,7 +348,6 @@ ccd_task :: proc(task: thread.Task) {
       data.physics.colliders,
       body_a.collider_handle,
     ) or_continue
-    pos_a := body_a.position
     motion := body_a.velocity * data.dt
     earliest_toi := f32(1.0)
     earliest_normal := linalg.VECTOR3F32_Y_AXIS
@@ -379,7 +380,15 @@ ccd_task :: proc(task: thread.Task) {
         body_b.collider_handle,
       ) or_continue
       pos_b := body_b.position
-      toi := swept_test(collider_a, pos_a, motion, collider_b, pos_b)
+      toi := swept_test(
+        collider_a,
+        body_a.position,
+        body_a.rotation,
+        motion,
+        collider_b,
+        body_b.position,
+        body_b.rotation,
+      )
       if toi.has_impact && toi.time < earliest_toi {
         earliest_toi = toi.time
         earliest_normal = toi.normal
@@ -476,7 +485,6 @@ sequential_ccd :: proc(
     if velocity_mag < ccd_threshold do continue
     bodies_tested += 1
     collider_a := cont.get(physics.colliders, body_a.collider_handle) or_continue
-    pos_a := body_a.position
     motion := body_a.velocity * dt
     earliest_toi := f32(1.0)
     earliest_normal := linalg.VECTOR3F32_Y_AXIS
@@ -499,8 +507,7 @@ sequential_ccd :: proc(
       if u32(idx_a) == handle_b.index do continue
       body_b := cont.get(physics.bodies, handle_b) or_continue
       collider_b := cont.get(physics.colliders, body_b.collider_handle) or_continue
-      pos_b := body_b.position
-      toi := swept_test(collider_a, pos_a, motion, collider_b, pos_b)
+      toi := swept_test(collider_a, body_a.position, body_a.rotation, motion, collider_b, body_b.position, body_b.rotation)
       if toi.has_impact && toi.time < earliest_toi {
         earliest_toi = toi.time
         earliest_normal = toi.normal

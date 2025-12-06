@@ -8,12 +8,14 @@ import "core:math/linalg"
 support :: proc(
   collider_a: ^Collider,
   pos_a: [3]f32,
+  rot_a: quaternion128,
   collider_b: ^Collider,
   pos_b: [3]f32,
+  rot_b: quaternion128,
   direction: [3]f32,
 ) -> [3]f32 {
-  point_a := find_furthest_point(collider_a, pos_a, direction)
-  point_b := find_furthest_point(collider_b, pos_b, -direction)
+  point_a := find_furthest_point(collider_a, pos_a, rot_a, direction)
+  point_b := find_furthest_point(collider_b, pos_b, rot_b, -direction)
   return point_a - point_b
 }
 
@@ -21,6 +23,7 @@ support :: proc(
 find_furthest_point :: proc(
   collider: ^Collider,
   position: [3]f32,
+  rotation: quaternion128,
   direction: [3]f32,
 ) -> [3]f32 {
   center := position + collider.offset
@@ -43,7 +46,7 @@ find_furthest_point :: proc(
     return line_point + linalg.normalize0(direction) * shape.radius
   case CylinderCollider:
     // Transform direction to cylinder's local space
-    inv_rot := linalg.quaternion_inverse(shape.rotation)
+    inv_rot := linalg.quaternion_inverse(rotation)
     local_dir := linalg.mul(inv_rot, direction)
     // In local space, cylinder axis is Y
     h := shape.height * 0.5
@@ -53,18 +56,18 @@ find_furthest_point :: proc(
     radial_point := linalg.normalize0(local_dir.xz) * shape.radius
     local_point := [3]f32{radial_point.x, y_component, radial_point.y}
     // Transform back to world space
-    world_point := linalg.mul(shape.rotation, local_point)
+    world_point := linalg.mul(rotation, local_point)
     return center + world_point
   case FanCollider:
     // Fan is trigger-only, but provide support for completeness
     // Treat as full cylinder for support function
-    inv_rot := linalg.quaternion_inverse(shape.rotation)
+    inv_rot := linalg.quaternion_inverse(rotation)
     local_dir := linalg.mul(inv_rot, direction)
     h := shape.height * 0.5
     y_component := local_dir.y >= 0 ? h : -h
     radial_point := linalg.normalize0(local_dir.xz) * shape.radius
     local_point := [3]f32{radial_point.x, y_component, radial_point.y}
-    world_point := linalg.mul(shape.rotation, local_point)
+    world_point := linalg.mul(rotation, local_point)
     return center + world_point
   }
   return center
@@ -96,8 +99,10 @@ simplex_set :: proc(s: ^Simplex, points: ..[3]f32) {
 gjk :: proc(
   collider_a: ^Collider,
   pos_a: [3]f32,
+  rot_a: quaternion128,
   collider_b: ^Collider,
   pos_b: [3]f32,
+  rot_b: quaternion128,
   simplex_out: ^Simplex,
 ) -> bool {
   // Initial direction (from B to A)
@@ -109,13 +114,13 @@ gjk :: proc(
   simplex: Simplex
   simplex_push_front(
     &simplex,
-    support(collider_a, pos_a, collider_b, pos_b, direction),
+    support(collider_a, pos_a, rot_a, collider_b, pos_b, rot_b, direction),
   )
   // Reverse direction
   direction = -simplex.points[0]
   max_iterations := 32
   for iteration in 0 ..< max_iterations {
-    a := support(collider_a, pos_a, collider_b, pos_b, direction)
+    a := support(collider_a, pos_a, rot_a, collider_b, pos_b, rot_b, direction)
     // If we didn't pass the origin, there's no collision
     if linalg.dot(a, direction) < 0 {
       return false

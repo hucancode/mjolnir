@@ -32,9 +32,8 @@ raycast :: proc(
     body := cont.get(self.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
     collider := cont.get(self.colliders, body.collider_handle) or_continue
-    pos := body.position
     // Narrow phase - test actual collider shape
-    t, normal, hit := raycast_collider(ray, collider, pos, closest_hit.t)
+    t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, closest_hit.t)
     if hit && t < closest_hit.t {
       closest_hit.body_handle = candidate.handle
       closest_hit.t = t
@@ -58,9 +57,8 @@ raycast_single :: proc(
     body := cont.get(self.bodies, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
     collider := cont.get(self.colliders, body.collider_handle) or_continue
-    pos := body.position
     // Narrow phase - test actual collider shape
-    t, normal, hit := raycast_collider(ray, collider, pos, max_dist)
+    t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
     if hit {
       return PhysicsRayHit {
         body_handle = candidate.handle,
@@ -79,13 +77,14 @@ raycast_collider :: proc(
   ray: geometry.Ray,
   collider: ^Collider,
   position: [3]f32,
+  rotation: quaternion128,
   max_dist: f32,
 ) -> (
   t: f32,
   normal: [3]f32,
   hit: bool,
 ) {
-  center := position + collider.offset
+  center := position + linalg.mul(rotation, collider.offset)
   switch shape in collider.shape {
   case SphereCollider:
     sphere_prim := geometry.Sphere {
@@ -102,10 +101,10 @@ raycast_collider :: proc(
     obb := geometry.Obb {
       center       = center,
       half_extents = shape.half_extents,
-      rotation     = shape.rotation,
+      rotation     = rotation,
     }
     // Use AABB intersection for axis-aligned boxes
-    if is_identity_quaternion(shape.rotation) {
+    if is_identity_quaternion(rotation) || true {
       bounds := geometry.Aabb {
         min = center - shape.half_extents,
         max = center + shape.half_extents,
@@ -187,7 +186,7 @@ raycast_collider :: proc(
   case CylinderCollider, FanCollider:
     // Cylinder and Fan use GJK for collision, but for raycasting we'll use a simplified approach
     // Transform to AABB for now
-    bounds := collider_calculate_aabb(collider, position)
+    bounds := collider_calculate_aabb(collider, position, rotation)
     inv_dir := 1.0 / ray.direction
     t_near, t_far := geometry.ray_aabb_intersection(
       ray.origin,
@@ -220,9 +219,8 @@ query_sphere :: proc(
   for candidate in candidates {
     body := cont.get(self.bodies, candidate.handle) or_continue
     collider := cont.get(self.colliders, body.collider_handle) or_continue
-    pos := body.position
     // Test if collider is within sphere
-    if test_collider_sphere_overlap(collider, pos, center, radius) {
+    if test_collider_sphere_overlap(collider, body.position, body.rotation, center, radius) {
       append(results, candidate.handle)
     }
   }
@@ -241,8 +239,9 @@ query_box :: proc(
     body := cont.get(self.bodies, candidate.handle) or_continue
     collider := cont.get(self.colliders, body.collider_handle) or_continue
     pos := body.position
+    rot := body.rotation
     // Test if collider is within box
-    if test_collider_aabb_overlap(collider, pos, bounds) {
+    if test_collider_aabb_overlap(collider, pos, rot, bounds) {
       append(results, candidate.handle)
     }
   }
@@ -252,10 +251,11 @@ query_box :: proc(
 test_collider_sphere_overlap :: proc(
   collider: ^Collider,
   collider_pos: [3]f32,
+  collider_rot: quaternion128,
   sphere_center: [3]f32,
   sphere_radius: f32,
 ) -> bool {
-  center := collider_pos + collider.offset
+  center := collider_pos + linalg.mul(collider_rot, collider.offset)
   switch shape in collider.shape {
   case SphereCollider:
     len := shape.radius + sphere_radius
@@ -264,7 +264,7 @@ test_collider_sphere_overlap :: proc(
     obb := geometry.Obb {
       center       = center,
       half_extents = shape.half_extents,
-      rotation     = shape.rotation,
+      rotation     = collider_rot,
     }
     _, _, _, hit := geometry.obb_sphere_intersect(
       obb,
@@ -284,9 +284,9 @@ test_collider_sphere_overlap :: proc(
     len := shape.radius + sphere_radius
     return linalg.length2(closest - sphere_center) <= len * len
   case CylinderCollider:
-    return test_point_cylinder(sphere_center, center, shape)
+    return test_point_cylinder(sphere_center, center, collider_rot, shape)
   case FanCollider:
-    return test_point_fan(sphere_center, center, shape)
+    return test_point_fan(sphere_center, center, collider_rot, shape)
   }
   return false
 }
@@ -295,9 +295,10 @@ test_collider_sphere_overlap :: proc(
 test_collider_aabb_overlap :: proc(
   collider: ^Collider,
   collider_pos: [3]f32,
+  collider_rot: quaternion128,
   bounds: geometry.Aabb,
 ) -> bool {
-  center := collider_pos + collider.offset
+  center := collider_pos + linalg.mul(collider_rot, collider.offset)
   // Use center point test for now - could be more precise
   return geometry.aabb_contains_point(bounds, center)
 }

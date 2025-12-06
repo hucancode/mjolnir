@@ -1,25 +1,24 @@
 package main
 
 import "../../../mjolnir"
-import cont "../../../mjolnir/containers"
 import "../../../mjolnir/geometry"
 import "../../../mjolnir/physics"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 import "core:log"
 import "core:math"
-import "core:math/linalg"
 import "core:os"
 import "vendor:glfw"
 
 physics_world: physics.World
-cube_handles: [dynamic]resources.NodeHandle
-cube_bodies: [dynamic]physics.RigidBodyHandle
+cube_mesh_handles: [dynamic]resources.NodeHandle
+cube_body_to_mesh: map[physics.RigidBodyHandle]resources.NodeHandle
 effector_sphere: resources.NodeHandle
 effector_position: [3]f32
 orbit_angle: f32 = 0.0
 orbit_radius: f32 = 15.0
 effect_radius: f32 = 10.0
+cube_scale: f32 = 0.3
 clicked_cube: resources.NodeHandle
 last_mouse_button_state: bool = false
 
@@ -36,6 +35,9 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   physics.init(&physics_world)
+  cube_body_to_mesh = make(
+    map[physics.RigidBodyHandle]resources.NodeHandle,
+  )
   set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
   // Use builtin meshes and materials
@@ -47,31 +49,37 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Spawn 50x50 grid of cubes
   grid_size := 50
   spacing: f32 = 1.0
-  cube_scale: f32 = 0.3
   log.infof("Spawning %dx%d grid of cubes...", grid_size, grid_size)
   for x in 0 ..< grid_size {
     for z in 0 ..< grid_size {
       world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
       world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
-      node_handle := spawn(
-        engine,
-        attachment = world.MeshAttachment {
-          handle = cube_mesh,
-          material = cube_mat,
-          cast_shadow = false,
-        },
-      ) or_continue
-      translate(engine, node_handle, world_x, 0.5, world_z)
-      scale(engine, node_handle, cube_scale)
-      append(&cube_handles, node_handle)
       // Create physics body for cube
       body_handle := physics.create_body_box(
         &physics_world,
         half_extents = {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
         position = {world_x, 0.5, world_z},
         is_static = true,
-      )
-      append(&cube_bodies, body_handle)
+      ) or_continue
+      physics_node := spawn(
+        engine,
+        position = [3]f32{world_x, 0.5, world_z},
+        attachment = world.RigidBodyAttachment {
+          body_handle = body_handle,
+        },
+      ) or_continue
+      mesh_handle := spawn_child(
+        engine,
+        physics_node,
+        attachment = world.MeshAttachment {
+          handle = cube_mesh,
+          material = cube_mat,
+          cast_shadow = false,
+        },
+      ) or_continue
+      scale(engine, mesh_handle, cube_scale)
+      append(&cube_mesh_handles, mesh_handle)
+      cube_body_to_mesh[body_handle] = mesh_handle
     }
   }
   // Spawn effector sphere
@@ -97,14 +105,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
     sync_active_camera_controller(engine)
   }
   // Build initial BVH for all bodies
-  physics.step(&physics_world, &engine.world, 0.0)
-  log.infof("AOE test setup complete: %d cubes", len(cube_handles))
+  physics.step(&physics_world, 0.0)
+  world.sync_all_physics_to_world(&engine.world, &physics_world)
+  log.infof("AOE test setup complete: %d cubes", len(cube_mesh_handles))
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir
   // Update physics (needed for BVH queries even with static bodies)
-  physics.step(&physics_world, &engine.world, delta_time)
+  physics.step(&physics_world, delta_time)
+  world.sync_all_physics_to_world(&engine.world, &physics_world)
   // Handle mouse click for raycasting
   mouse_button_pressed := engine.input.mouse_buttons[glfw.MOUSE_BUTTON_LEFT]
   mouse_just_clicked := mouse_button_pressed && !last_mouse_button_state
@@ -133,16 +143,14 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       // Use physics raycast
       hit := physics.raycast(
         &physics_world,
-        &engine.world,
         ray,
       )
       if !hit.hit {
         clicked_cube = {}
         break mouse_click
       }
-      if body, ok := cont.get(physics_world.bodies, hit.body_handle); ok {
-        clicked_cube = body.node_handle
-      }
+      mesh_handle, ok := cube_body_to_mesh[hit.body_handle]
+      clicked_cube = ok ? mesh_handle : resources.NodeHandle{}
     }
   }
   // Move effector sphere in circular orbit
@@ -158,26 +166,24 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     effector_position.z,
   )
   // Reset all cubes to normal scale
-  for handle in cube_handles {
-    scale(engine, handle, 0.3)
+  for handle in cube_mesh_handles {
+    scale(engine, handle, cube_scale)
   }
   // Query for cubes within effect radius using physics
   affected: [dynamic]physics.RigidBodyHandle
   defer delete(affected)
   physics.query_sphere(
     &physics_world,
-    &engine.world,
     effector_position,
     effect_radius,
     &affected,
   )
   // Shrink affected cubes
   for body_handle in affected {
-    body := cont.get(physics_world.bodies, body_handle)
-    if body != nil {
-      scale(engine, body.node_handle, 0.1)
+    if mesh_handle, ok := cube_body_to_mesh[body_handle]; ok {
+      scale(engine, mesh_handle, 0.1)
     }
   }
   // Scale the clicked cube 3x (0.3 * 3 = 0.9)
-  scale(engine, clicked_cube, 0.9)
+  scale(engine, clicked_cube, cube_scale * 3.0)
 }

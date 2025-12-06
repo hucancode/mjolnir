@@ -17,26 +17,22 @@ SphereCollider :: struct {
 
 BoxCollider :: struct {
   half_extents: [3]f32,
-  rotation:     quaternion128,
 }
 
 CapsuleCollider :: struct {
   radius: f32,
   height: f32,
-  // TODO: implement rotation on capsule
 }
 
 CylinderCollider :: struct {
-  radius:   f32,
-  height:   f32,
-  rotation: quaternion128,
+  radius: f32,
+  height: f32,
 }
 
 FanCollider :: struct {
-  radius:   f32,
-  height:   f32,
-  angle:    f32, // radians - total angle of the fan sector
-  rotation: quaternion128, // orientation - forward direction is center of fan
+  radius: f32,
+  height: f32,
+  angle:  f32, // radians - total angle of the fan sector
 }
 
 Collider :: struct {
@@ -53,6 +49,7 @@ Collider :: struct {
 collider_calculate_aabb :: proc(
   self: ^Collider,
   position: [3]f32,
+  rotation: quaternion128,
 ) -> geometry.Aabb {
   center := position + self.offset
   switch sh in self.shape {
@@ -62,7 +59,7 @@ collider_calculate_aabb :: proc(
     obb := geometry.Obb {
       center       = center,
       half_extents = sh.half_extents,
-      rotation     = sh.rotation,
+      rotation     = rotation,
     }
     return geometry.obb_to_aabb(obb)
   case CapsuleCollider:
@@ -78,7 +75,7 @@ collider_calculate_aabb :: proc(
     obb := geometry.Obb {
       center       = center,
       half_extents = half_extents,
-      rotation     = sh.rotation,
+      rotation     = rotation,
     }
     return geometry.obb_to_aabb(obb)
   case FanCollider:
@@ -89,7 +86,7 @@ collider_calculate_aabb :: proc(
     obb := geometry.Obb {
       center       = center,
       half_extents = half_extents,
-      rotation     = sh.rotation,
+      rotation     = rotation,
     }
     return geometry.obb_to_aabb(obb)
   }

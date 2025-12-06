@@ -25,8 +25,10 @@ epa :: proc(
   simplex: Simplex,
   collider_a: ^Collider,
   pos_a: [3]f32,
+  rot_a: quaternion128,
   collider_b: ^Collider,
   pos_b: [3]f32,
+  rot_b: quaternion128,
 ) -> (
   normal: [3]f32,
   depth: f32,
@@ -124,8 +126,10 @@ epa :: proc(
     support_point := support(
       collider_a,
       pos_a,
+      rot_a,
       collider_b,
       pos_b,
+      rot_b,
       closest_face.normal,
     )
     // Calculate distance from origin to support point along normal

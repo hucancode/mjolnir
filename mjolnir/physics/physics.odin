@@ -139,7 +139,6 @@ create_collider_box :: proc(
   body_handle: RigidBodyHandle,
   half_extents: [3]f32,
   offset: [3]f32 = {},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> (
   handle: ColliderHandle,
   ok: bool,
@@ -149,7 +148,6 @@ create_collider_box :: proc(
   ptr.offset = offset
   ptr.shape = BoxCollider {
     half_extents = half_extents,
-    rotation     = rotation,
   }
   if body, ok := cont.get(self.bodies, body_handle); ok {
     body.collider_handle = handle
@@ -186,7 +184,6 @@ create_collider_cylinder :: proc(
   radius: f32,
   height: f32,
   offset: [3]f32 = {},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> (
   handle: ColliderHandle,
   ok: bool,
@@ -197,7 +194,6 @@ create_collider_cylinder :: proc(
   ptr.shape = CylinderCollider {
     radius   = radius,
     height   = height,
-    rotation = rotation,
   }
   if body, ok := cont.get(self.bodies, body_handle); ok {
     body.collider_handle = handle
@@ -212,7 +208,6 @@ create_collider_fan :: proc(
   height: f32,
   angle: f32,
   offset: [3]f32 = {},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> (
   handle: ColliderHandle,
   ok: bool,
@@ -224,7 +219,6 @@ create_collider_fan :: proc(
     radius   = radius,
     height   = height,
     angle    = angle,
-    rotation = rotation,
   }
   if body, ok := cont.get(self.bodies, body_handle); ok {
     body.collider_handle = handle
@@ -271,7 +265,6 @@ create_body_box :: proc(
   is_static: bool = false,
   trigger_only: bool = false,
   offset: [3]f32 = {},
-  collider_rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> (
   body_handle: RigidBodyHandle,
   ok: bool,
@@ -289,7 +282,6 @@ create_body_box :: proc(
     body_handle,
     half_extents,
     offset,
-    collider_rotation,
   ) or_return
   return body_handle, true
 }
@@ -336,7 +328,6 @@ create_body_cylinder :: proc(
   is_static: bool = false,
   trigger_only: bool = false,
   offset: [3]f32 = {},
-  collider_rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> (
   body_handle: RigidBodyHandle,
   ok: bool,
@@ -355,7 +346,6 @@ create_body_cylinder :: proc(
     radius,
     height,
     offset,
-    collider_rotation,
   ) or_return
   return body_handle, true
 }
@@ -371,7 +361,6 @@ create_body_fan :: proc(
   is_static: bool = false,
   trigger_only: bool = false,
   offset: [3]f32 = {},
-  collider_rotation := linalg.QUATERNIONF32_IDENTITY,
 ) -> (
   body_handle: RigidBodyHandle,
   ok: bool,
@@ -391,7 +380,6 @@ create_body_fan :: proc(
     height,
     angle,
     offset,
-    collider_rotation,
   ) or_return
   return body_handle, true
 }

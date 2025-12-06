@@ -163,5 +163,9 @@ update_cached_aabb :: proc(
   self: ^RigidBody,
   collider: ^Collider,
 ) {
-  self.cached_aabb = collider_calculate_aabb(collider, self.position)
+  self.cached_aabb = collider_calculate_aabb(
+    collider,
+    self.position,
+    self.rotation,
+  )
 }

@@ -58,7 +58,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Ground body created")
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
-  cube_body, _, _ = physics.create_body_box(
+  cube_body = physics.create_body_box(
     &physics_world,
     half_extents = {1.0, 1.0, 1.0},
     position = {0, 3, 0},

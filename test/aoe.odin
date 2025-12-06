@@ -139,30 +139,29 @@ test_point_cylinder :: proc(t: ^testing.T) {
   cylinder := physics.CylinderCollider {
     radius   = 2.0,
     height   = 4.0,
-    rotation = linalg.QUATERNIONF32_IDENTITY,
   }
   center := [3]f32{0, 0, 0}
   // Point inside cylinder
   testing.expect(
     t,
-    physics.test_point_cylinder({0, 0, 0}, center, cylinder),
+    physics.test_point_cylinder({0, 0, 0}, center, linalg.QUATERNIONF32_IDENTITY, cylinder),
     "Point at center should be inside",
   )
   testing.expect(
     t,
-    physics.test_point_cylinder({1, 1, 0}, center, cylinder),
+    physics.test_point_cylinder({1, 1, 0}, center, linalg.QUATERNIONF32_IDENTITY, cylinder),
     "Point within radius and height should be inside",
   )
   // Point outside cylinder (beyond radius)
   testing.expect(
     t,
-    !physics.test_point_cylinder({3, 0, 0}, center, cylinder),
+    !physics.test_point_cylinder({3, 0, 0}, center, linalg.QUATERNIONF32_IDENTITY, cylinder),
     "Point beyond radius should be outside",
   )
   // Point outside cylinder (beyond height)
   testing.expect(
     t,
-    !physics.test_point_cylinder({0, 3, 0}, center, cylinder),
+    !physics.test_point_cylinder({0, 3, 0}, center, linalg.QUATERNIONF32_IDENTITY, cylinder),
     "Point beyond height should be outside",
   )
 }
@@ -173,43 +172,42 @@ test_point_fan :: proc(t: ^testing.T) {
     radius   = 5.0,
     height   = 2.0,
     angle    = math.PI / 2, // 90 degrees
-    rotation = linalg.QUATERNIONF32_IDENTITY, // Forward is +Z
   }
   center := [3]f32{0, 0, 0}
   // Point inside fan (forward direction +Z)
   testing.expect(
     t,
-    physics.test_point_fan({0, 0, 3}, center, fan),
+    physics.test_point_fan({0, 0, 3}, center, linalg.QUATERNIONF32_IDENTITY, fan),
     "Point in forward direction should be inside",
   )
   // Point inside fan (45 degrees from forward)
   testing.expect(
     t,
-    physics.test_point_fan({2, 0, 2}, center, fan),
+    physics.test_point_fan({2, 0, 2}, center, linalg.QUATERNIONF32_IDENTITY, fan),
     "Point at 45 degrees should be inside 90-degree fan",
   )
   // Point outside fan (beyond angle)
   testing.expect(
     t,
-    !physics.test_point_fan({3, 0, 0}, center, fan),
+    !physics.test_point_fan({3, 0, 0}, center, linalg.QUATERNIONF32_IDENTITY, fan),
     "Point at 90 degrees (perpendicular) should be outside",
   )
   // Point outside fan (opposite direction)
   testing.expect(
     t,
-    !physics.test_point_fan({0, 0, -3}, center, fan),
+    !physics.test_point_fan({0, 0, -3}, center, linalg.QUATERNIONF32_IDENTITY, fan),
     "Point in opposite direction should be outside",
   )
   // Point outside fan (beyond radius)
   testing.expect(
     t,
-    !physics.test_point_fan({0, 0, 6}, center, fan),
+    !physics.test_point_fan({0, 0, 6}, center, linalg.QUATERNIONF32_IDENTITY, fan),
     "Point beyond radius should be outside",
   )
   // Point outside fan (beyond height)
   testing.expect(
     t,
-    !physics.test_point_fan({0, 3, 3}, center, fan),
+    !physics.test_point_fan({0, 3, 3}, center, linalg.QUATERNIONF32_IDENTITY, fan),
     "Point beyond height should be outside",
   )
 }
@@ -299,16 +297,15 @@ test_physics_fan_trigger :: proc(t: ^testing.T) {
     radius   = 5.0,
     height   = 2.0,
     angle    = math.PI * 0.5,
-    rotation = linalg.QUATERNIONF32_IDENTITY,
   }
   testing.expect(
     t,
-    physics.test_point_fan({0, 0, 3}, {0, 0, 0}, fan),
+    physics.test_point_fan({0, 0, 3}, {0, 0, 0}, linalg.QUATERNIONF32_IDENTITY, fan),
     "Point should be inside fan",
   )
   testing.expect(
     t,
-    !physics.test_point_fan({3, 0, 0}, {0, 0, 0}, fan),
+    !physics.test_point_fan({3, 0, 0}, {0, 0, 0}, linalg.QUATERNIONF32_IDENTITY, fan),
     "Point should be outside fan",
   )
 }

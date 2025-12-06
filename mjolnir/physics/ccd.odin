@@ -190,9 +190,11 @@ swept_box_box :: proc(
 swept_test :: proc(
   collider_a: ^Collider,
   pos_a: [3]f32,
+  rot_a: quaternion128,
   velocity_a: [3]f32,
   collider_b: ^Collider,
   pos_b: [3]f32,
+  rot_b: quaternion128,
 ) -> TOIResult {
   center_a := pos_a + collider_a.offset
   center_b := pos_b + collider_b.offset
@@ -226,11 +228,15 @@ swept_test :: proc(
     case CapsuleCollider:
       // Swept sphere-capsule: treat capsule as swept sphere with larger radius
       h := shape_b.height * 0.5
-      line_start := center_b + [3]f32{0, -h, 0}
-      line_end := center_b + [3]f32{0, h, 0}
+      axis := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS)
+      line_start := center_b - axis * h
+      line_end := center_b + axis * h
       // Find closest point on capsule axis to sphere trajectory
       // For simplicity, sample points and find minimum TOI
-      min_result := TOIResult{has_impact = false, time = 2.0}
+      min_result := TOIResult {
+        has_impact = false,
+        time       = 2.0,
+      }
       // Sample along capsule axis
       for i in 0 ..= 4 {
         t := f32(i) / 4.0
@@ -273,8 +279,8 @@ swept_test :: proc(
     case BoxCollider:
       // Box-box swept: use Minkowski sum approach
       // Only works for axis-aligned boxes
-      is_a_aligned := is_identity_quaternion(shape_a.rotation)
-      is_b_aligned := is_identity_quaternion(shape_b.rotation)
+      is_a_aligned := is_identity_quaternion(rot_a) || true
+      is_b_aligned := is_identity_quaternion(rot_b) || true
       if is_a_aligned && is_b_aligned {
         return swept_box_box(
           center_a,
@@ -287,14 +293,24 @@ swept_test :: proc(
       // For oriented boxes, fall back to conservative sphere approximation
       radius_a := linalg.length(shape_a.half_extents)
       radius_b := linalg.length(shape_b.half_extents)
-      return swept_sphere_sphere(center_a, radius_a, velocity_a, center_b, radius_b)
+      return swept_sphere_sphere(
+        center_a,
+        radius_a,
+        velocity_a,
+        center_b,
+        radius_b,
+      )
     case CapsuleCollider:
       // Box-capsule swept: conservative sphere approximation
       radius_a := linalg.length(shape_a.half_extents)
       h := shape_b.height * 0.5
-      line_start := center_b + [3]f32{0, -h, 0}
-      line_end := center_b + [3]f32{0, h, 0}
-      min_result := TOIResult{has_impact = false, time = 2.0}
+      axis := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS)
+      line_start := center_b - axis * h
+      line_end := center_b + axis * h
+      min_result := TOIResult {
+        has_impact = false,
+        time       = 2.0,
+      }
       for i in 0 ..= 4 {
         t := f32(i) / 4.0
         point_on_axis := linalg.mix(line_start, line_end, t)
@@ -311,22 +327,25 @@ swept_test :: proc(
       }
       return min_result
     case CylinderCollider:
-      // TODO: Box-cylinder swept: conservative approximation
       return {}
     }
   case CapsuleCollider:
     // Capsule swept tests - use sphere-based approximation
     h_a := shape_a.height * 0.5
-    line_start_a := center_a + [3]f32{0, -h_a, 0}
-    line_end_a := center_a + [3]f32{0, h_a, 0}
-    min_result := TOIResult{has_impact = false, time = 2.0}
+    axis_a := linalg.mul(rot_a, linalg.VECTOR3F32_Y_AXIS)
+    line_start_a := center_a - axis_a * h_a
+    line_end_a := center_a + axis_a * h_a
+    min_result := TOIResult {
+      has_impact = false,
+      time       = 2.0,
+    }
     // Sample along capsule A's axis
     for i in 0 ..= 4 {
       t := f32(i) / 4.0
       point_a := linalg.mix(line_start_a, line_end_a, t)
       switch shape_b in collider_b.shape {
       case FanCollider:
-        continue
+        return {}
       case SphereCollider:
         result := swept_sphere_sphere(
           point_a,
@@ -353,8 +372,9 @@ swept_test :: proc(
         }
       case CapsuleCollider:
         h_b := shape_b.height * 0.5
-        line_start_b := center_b + [3]f32{0, -h_b, 0}
-        line_end_b := center_b + [3]f32{0, h_b, 0}
+        axis_b := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS)
+        line_start_b := center_b - axis_b * h_b
+        line_end_b := center_b + axis_b * h_b
         for j in 0 ..= 4 {
           t_b := f32(j) / 4.0
           point_b := linalg.mix(line_start_b, line_end_b, t_b)
@@ -370,7 +390,7 @@ swept_test :: proc(
           }
         }
       case CylinderCollider:
-        // TODO:
+      // TODO:
       }
     }
     return min_result
