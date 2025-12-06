@@ -32,9 +32,14 @@ find_furthest_point :: proc(
     dir_normalized := linalg.normalize0(direction)
     return center + dir_normalized * shape.radius
   case BoxCollider:
-    // For a box, the furthest point is one of the 8 vertices
-    offset := shape.half_extents * linalg.sign(direction)
-    return center + offset
+    // Transform direction to box's local space
+    inv_rot := linalg.quaternion_inverse(rotation)
+    local_dir := linalg.mul(inv_rot, direction)
+    // Find furthest vertex in local space (sign gives us the correct octant)
+    local_vertex := shape.half_extents * linalg.sign(local_dir)
+    // Transform back to world space
+    world_vertex := linalg.mul(rotation, local_vertex)
+    return center + world_vertex
   case CapsuleCollider:
     h := shape.height * 0.5
     // Capsule is two hemispheres connected by a cylinder
