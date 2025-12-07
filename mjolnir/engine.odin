@@ -1,5 +1,6 @@
 package mjolnir
 
+import alg "algebra"
 import "animation"
 import "base:runtime"
 import cont "containers"
@@ -15,7 +16,6 @@ import "core:thread"
 import "core:time"
 import "core:unicode/utf8"
 import "gpu"
-import alg "algebra"
 import "level_manager"
 import nav "navigation"
 import "render"
@@ -374,6 +374,15 @@ update_input :: proc(self: ^Engine) -> bool {
   return true
 }
 
+update_visibility_node_count :: proc(
+  render: ^render.Manager,
+  world: ^world.World,
+) {
+  n := min(u32(len(world.nodes.entries)), render.visibility.max_draws)
+  for ; n > 0; n -= 1 do if world.nodes.entries[n - 1].active do break
+  render.visibility.node_count = n
+}
+
 update :: proc(self: ^Engine) -> bool {
   context.user_ptr = self
   delta_time := get_delta_time(self)
@@ -430,7 +439,12 @@ update :: proc(self: ^Engine) -> bool {
     self.update_proc(self, delta_time)
   }
   world.update_node_animations(&self.world, &self.rm, delta_time)
-  world.update_skeletal_animations(&self.world, &self.rm, delta_time, self.frame_index)
+  world.update_skeletal_animations(
+    &self.world,
+    &self.rm,
+    delta_time,
+    self.frame_index,
+  )
   world.update_sprite_animations(&self.rm, delta_time)
   self.last_update_timestamp = time.now()
   return true
@@ -664,7 +678,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   command_buffer := self.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
   world.begin_frame(&self.world, &self.rm, 0.016, nil, self.frame_index)
-  render.update_visibility_node_count(&self.render, &self.world)
+  update_visibility_node_count(&self.render, &self.world)
   resources.update_light_camera(&self.rm, self.frame_index)
   if self.pre_render_proc != nil {
     self.pre_render_proc(self)
@@ -674,7 +688,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
     &self.gctx,
     &self.rm,
-    &self.world,
     command_buffer,
   ) or_return
   for &entry, cam_index in self.rm.cameras.entries {
@@ -690,7 +703,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
         self.frame_index,
         &self.gctx,
         &self.rm,
-        &self.world,
         cam_handle,
         command_buffer,
       )
@@ -721,7 +733,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
         self.frame_index,
         &self.gctx,
         &self.rm,
-        &self.world,
         cam_handle,
         self.swapchain.format.format,
         command_buffer,
@@ -746,7 +757,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
     &self.gctx,
     &self.rm,
-    &self.world,
     compute_cmd_buffer,
   ) or_return
   populate_debug_ui(self)
@@ -878,8 +888,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     if res != .SUCCESS {
       log.errorf("Error during rendering %v", res)
       render_error_count += 1
-      if render_error_count >=
-         MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
+      if render_error_count >= MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
         log.errorf("Too many render errors, exiting...")
         break
       }

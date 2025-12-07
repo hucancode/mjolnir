@@ -1,10 +1,9 @@
 package render
 
+import alg "../algebra"
 import cont "../containers"
 import "../gpu"
 import "../resources"
-import alg "../algebra"
-import "../world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -35,18 +34,11 @@ Manager :: struct {
   visibility:   visibility.VisibilitySystem,
 }
 
-update_visibility_node_count :: proc(self: ^Manager, world: ^world.World) {
-  n := min(u32(len(world.nodes.entries)), self.visibility.max_draws)
-  for ; n > 0; n -= 1 do if world.nodes.entries[n - 1].active do break
-  self.visibility.node_count = n
-}
-
 record_compute_commands :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
-  world_state: ^world.World,
   compute_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   gpu.begin_record(compute_buffer) or_return
@@ -56,41 +48,13 @@ record_compute_commands :: proc(
   for &entry, cam_index in rm.cameras.entries do if entry.active {
     cam := &entry.item
     resources.camera_upload_data(rm, u32(cam_index), frame_index)
-    visibility.build_pyramid(
-      &self.visibility,
-      gctx,
-      compute_buffer,
-      cam,
-      u32(cam_index),
-      frame_index, // Build pyramid[N]
-      rm,
-    )
-    visibility.perform_culling(
-      &self.visibility,
-      gctx,
-      compute_buffer,
-      cam,
-      u32(cam_index),
-      next_frame_index, // Write draw_list[N+1]
-      {.VISIBLE},
-      {},
-      rm,
-    )
+    visibility.build_pyramid(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), frame_index,  rm)// Build pyramid[N]
+    visibility.perform_culling(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), next_frame_index,  {.VISIBLE}, {}, rm)// Write draw_list[N+1]
   }
   for &entry, cam_index in rm.spherical_cameras.entries do if entry.active {
     cam := &entry.item
     resources.spherical_camera_upload_data(rm, cam, u32(cam_index), frame_index)
-    visibility.perform_sphere_culling(
-      &self.visibility,
-      gctx,
-      compute_buffer,
-      cam,
-      u32(cam_index),
-      next_frame_index, // Write draw_list[N+1]
-      {.VISIBLE},
-      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-      rm,
-    )
+    visibility.perform_sphere_culling(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), next_frame_index,  {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, rm)// Write draw_list[N+1]
   }
   particles.simulate(
     &self.particles,
@@ -112,10 +76,7 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  camera_handle, camera, ok := cont.alloc(
-    &rm.cameras,
-    resources.CameraHandle,
-  )
+  camera_handle, camera, ok := cont.alloc(&rm.cameras, resources.CameraHandle)
   if !ok {
     return .ERROR_INITIALIZATION_FAILED
   }
@@ -256,36 +217,15 @@ render_camera_depth :: proc(
   frame_index: u32,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
-  world_state: ^world.World,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   for &entry, cam_index in rm.cameras.entries do if entry.active {
     cam := &entry.item
-    visibility.render_depth(
-      &self.visibility,
-      gctx,
-      command_buffer,
-      cam,
-      u32(cam_index),
-      frame_index,
-      {.VISIBLE},
-      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-      rm,
-    )
+    visibility.render_depth(&self.visibility, gctx, command_buffer, cam, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, rm)
   }
   for &entry, cam_index in rm.spherical_cameras.entries do if entry.active {
     cam := &entry.item
-    visibility.render_sphere_depth(
-      &self.visibility,
-      gctx,
-      command_buffer,
-      cam,
-      u32(cam_index),
-      frame_index,
-      {.VISIBLE},
-      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-      rm,
-    )
+    visibility.render_sphere_depth(&self.visibility, gctx, command_buffer, cam, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, rm)
   }
   return .SUCCESS
 }
@@ -295,7 +235,6 @@ record_geometry_pass :: proc(
   frame_index: u32,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
-  world_state: ^world.World,
   camera_handle: resources.CameraHandle,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
@@ -381,7 +320,6 @@ record_transparency_pass :: proc(
   frame_index: u32,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
-  world_state: ^world.World,
   camera_handle: resources.CameraHandle,
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
