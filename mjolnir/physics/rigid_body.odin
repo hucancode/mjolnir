@@ -27,6 +27,8 @@ RigidBody :: struct {
   gravity_scale:        f32,
   drag_coefficient:     f32,
   cross_sectional_area: f32, // m2 - set to 0 for automatic calculation
+  is_sleeping:          bool,
+  sleep_timer:          f32,
   cached_aabb:          geometry.Aabb,
 }
 
@@ -55,6 +57,13 @@ rigid_body_init :: proc(
   self.cross_sectional_area = 0.0 // 0 = auto-calculate from mass
   self.inertia = is_static ? {} : linalg.MATRIX3F32_IDENTITY
   self.inv_inertia = is_static ? {} : linalg.MATRIX3F32_IDENTITY
+  self.is_sleeping = false
+  self.sleep_timer = 0.0
+}
+
+wake_up :: proc(self: ^RigidBody) {
+  self.is_sleeping = false
+  self.sleep_timer = 0.0
 }
 
 set_mass :: proc(self: ^RigidBody, mass: f32) {
@@ -102,6 +111,7 @@ set_capsule_inertia :: proc(self: ^RigidBody, radius: f32, height: f32) {
 apply_force :: proc(self: ^RigidBody, force: [3]f32) {
   if self.is_static do return
   self.force += force
+  wake_up(self)
 }
 
 apply_force_at_point :: proc(
@@ -115,11 +125,13 @@ apply_force_at_point :: proc(
   if !self.enable_rotation do return
   r := point - center
   self.torque += linalg.cross(r, force)
+  wake_up(self)
 }
 
 apply_impulse :: proc(self: ^RigidBody, impulse: [3]f32) {
   if self.is_static do return
   self.velocity += impulse * self.inv_mass
+  wake_up(self)
 }
 
 apply_impulse_at_point :: proc(
@@ -133,10 +145,11 @@ apply_impulse_at_point :: proc(
   r := point - self.position
   angular_impulse := linalg.cross(r, impulse)
   self.angular_velocity += self.inv_inertia * angular_impulse
+  wake_up(self)
 }
 
 integrate :: proc(self: ^RigidBody, dt: f32) {
-  if self.is_static || self.is_kinematic || self.trigger_only do return
+  if self.is_static || self.is_kinematic || self.trigger_only || self.is_sleeping do return
   // Apply forces
   self.velocity += self.force * self.inv_mass * dt
   if self.enable_rotation {

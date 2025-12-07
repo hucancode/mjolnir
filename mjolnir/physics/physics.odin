@@ -16,6 +16,9 @@ SEA_LEVEL_AIR_DENSITY :: 1.225
 NUM_SUBSTEPS :: 2
 CONSTRAINT_SOLVER_ITERS :: 1
 STABILIZATION_ITERS :: 1
+SLEEP_LINEAR_THRESHOLD :: 0.05
+SLEEP_ANGULAR_THRESHOLD :: 0.05
+SLEEP_TIME_THRESHOLD :: 0.5
 
 RigidBodyHandle :: distinct cont.Handle
 ColliderHandle :: distinct cont.Handle
@@ -383,6 +386,28 @@ step :: proc(self: ^World, dt: f32) {
     self.prev_contacts[hash] = contact
   }
   warmstart_prep_time := time.since(warmstart_prep_start)
+
+  // Sleep Update
+  for &entry in self.bodies.entries do if entry.active {
+    body := &entry.item
+    if body.is_static || body.is_kinematic || body.trigger_only {
+      continue
+    }
+    lin_speed := linalg.length(body.velocity)
+    ang_speed := linalg.length(body.angular_velocity)
+    if lin_speed < SLEEP_LINEAR_THRESHOLD && ang_speed < SLEEP_ANGULAR_THRESHOLD {
+      body.sleep_timer += dt
+    } else {
+      body.sleep_timer = 0
+      body.is_sleeping = false
+    }
+    if body.sleep_timer > SLEEP_TIME_THRESHOLD {
+      body.is_sleeping = true
+      body.velocity = {}
+      body.angular_velocity = {}
+    }
+  }
+
   // Apply forces to all bodies (gravity, air resistance, etc.)
   force_application_start := time.now()
   awake_body_count := 0
@@ -391,6 +416,7 @@ step :: proc(self: ^World, dt: f32) {
     if body.is_static || body.is_kinematic || body.trigger_only {
       continue
     }
+    if body.is_sleeping do continue
     awake_body_count += 1
     // Apply gravity
     gravity_force := self.gravity * body.mass * body.gravity_scale
@@ -449,6 +475,7 @@ step :: proc(self: ^World, dt: f32) {
   integration_start := time.now()
   for &entry, idx in self.bodies.entries do if entry.active {
     body := &entry.item
+    if body.is_sleeping do continue
     integrate(body, dt)
   }
   integration_time := time.since(integration_start)
@@ -581,6 +608,7 @@ step :: proc(self: ^World, dt: f32) {
       if body.is_static || body.is_kinematic || body.trigger_only {
         continue
       }
+      if body.is_sleeping do continue
       // Skip if already handled by CCD
       if idx < len(ccd_handled) && ccd_handled[idx] {
         continue

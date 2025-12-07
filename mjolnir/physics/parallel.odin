@@ -96,6 +96,7 @@ aabb_cache_update_task :: proc(task: thread.Task) {
     entry := &data.physics.bodies.entries[i]
     if !entry.active do continue
     body := &entry.item
+    if body.is_sleeping do continue
     collider := cont.get(
       data.physics.colliders,
       body.collider_handle,
@@ -139,6 +140,7 @@ parallel_update_aabb_cache :: proc(
 sequential_update_aabb_cache :: proc(physics: ^World) {
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
+    if body.is_sleeping do continue
     collider := cont.get(physics.colliders, body.collider_handle) or_continue
     update_cached_aabb(body, collider)
   }
@@ -151,6 +153,10 @@ collision_detection_task :: proc(task: thread.Task) {
     bvh_entry := &data.physics.spatial_index.primitives[i]
     handle_a := bvh_entry.handle
     body_a := cont.get(data.physics.bodies, handle_a) or_continue
+    
+    // Skip query for static or sleeping bodies (they don't initiate collisions)
+    if body_a.is_static || body_a.is_sleeping do continue
+    
     clear(&candidates)
     bvh_query_aabb_fast(
       &data.physics.spatial_index,
@@ -160,8 +166,8 @@ collision_detection_task :: proc(task: thread.Task) {
     for entry_b in candidates {
       handle_b := entry_b.handle
       if handle_a == handle_b do continue
-      if handle_a.index > handle_b.index do continue
       body_b := cont.get(data.physics.bodies, handle_b) or_continue
+      if handle_a.index > handle_b.index && !body_b.is_static && !body_b.is_sleeping do continue
       if body_a.is_static && body_b.is_static do continue
       if body_a.trigger_only || body_b.trigger_only do continue
       collider_a := cont.get(
@@ -191,6 +197,11 @@ collision_detection_task :: proc(task: thread.Task) {
         )
       }
       if !hit do continue
+      
+      // Wake up bodies involved in collision
+      if body_a.is_sleeping do wake_up(body_a)
+      if body_b.is_sleeping do wake_up(body_b)
+      
       contact := Contact {
         body_a      = handle_a,
         body_b      = handle_b,
@@ -261,6 +272,10 @@ sequential_collision_detection :: proc(physics: ^World) {
   for &bvh_entry in physics.spatial_index.primitives {
     handle_a := bvh_entry.handle
     body_a := cont.get(physics.bodies, handle_a) or_continue
+    
+    // Skip query for static or sleeping bodies
+    if body_a.is_static || body_a.is_sleeping do continue
+    
     clear(&candidates)
     bvh_query_aabb_fast(
       &physics.spatial_index,
@@ -270,8 +285,8 @@ sequential_collision_detection :: proc(physics: ^World) {
     for entry_b in candidates {
       handle_b := entry_b.handle
       if handle_a == handle_b do continue
-      if handle_a.index > handle_b.index do continue
       body_b := cont.get(physics.bodies, handle_b) or_continue
+      if handle_a.index > handle_b.index && !body_b.is_static && !body_b.is_sleeping do continue
       if body_a.is_static && body_b.is_static do continue
       if body_a.trigger_only || body_b.trigger_only do continue
       collider_a := cont.get(
@@ -301,6 +316,11 @@ sequential_collision_detection :: proc(physics: ^World) {
         )
       }
       if !hit do continue
+      
+      // Wake up bodies involved in collision
+      if body_a.is_sleeping do wake_up(body_a)
+      if body_b.is_sleeping do wake_up(body_b)
+
       contact := Contact {
         body_a      = handle_a,
         body_b      = handle_b,
@@ -338,7 +358,7 @@ ccd_task :: proc(task: thread.Task) {
     entry_a := &data.physics.bodies.entries[idx_a]
     if !entry_a.active do continue
     body_a := &entry_a.item
-    if body_a.is_static || body_a.trigger_only do continue
+    if body_a.is_static || body_a.trigger_only || body_a.is_sleeping do continue
     velocity_mag := linalg.length(body_a.velocity)
     if velocity_mag < ccd_threshold do continue
     sync.mutex_lock(data.stats_mtx)
@@ -402,6 +422,8 @@ ccd_task :: proc(task: thread.Task) {
       update_cached_aabb(body_a, collider_a)
       vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
       if vel_along_normal < 0 {
+        wake_up(body_a)
+        if earliest_body_b != nil do wake_up(earliest_body_b)
         restitution := body_a.restitution
         if earliest_body_b != nil {
           restitution =
@@ -480,7 +502,7 @@ sequential_ccd :: proc(
   ccd_candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   for &entry_a, idx_a in physics.bodies.entries do if entry_a.active {
     body_a := &entry_a.item
-    if body_a.is_static || body_a.trigger_only do continue
+    if body_a.is_static || body_a.trigger_only || body_a.is_sleeping do continue
     velocity_mag := linalg.length(body_a.velocity)
     if velocity_mag < ccd_threshold do continue
     bodies_tested += 1
@@ -521,6 +543,8 @@ sequential_ccd :: proc(
       update_cached_aabb(body_a, collider_a)
       vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
       if vel_along_normal < 0 {
+        wake_up(body_a)
+        if earliest_body_b != nil do wake_up(earliest_body_b)
         restitution := body_a.restitution
         friction := body_a.friction
         if earliest_body_b != nil {
