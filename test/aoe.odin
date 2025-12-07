@@ -17,8 +17,7 @@ spawn_test_body :: proc(
   position: [3]f32,
   is_static: bool = true,
 ) -> physics.RigidBodyHandle {
-  body_handle := physics.create_body(phys, position, is_static = is_static)
-  physics.create_collider_sphere(phys, body_handle, 0.5)
+  body_handle, _ := physics.create_body_sphere(phys, radius = 0.5, position = position, is_static = is_static)
   return body_handle
 }
 
@@ -276,8 +275,7 @@ test_physics_cylinder_collision :: proc(t: ^testing.T) {
   phys: physics.World
   physics.init(&phys, enable_parallel = false)
   defer physics.destroy(&phys)
-  body_handle := physics.create_body(&phys, is_static = true)
-  physics.create_collider_cylinder(&phys, body_handle, 2.0, 4.0)
+  body_handle, _ := physics.create_body_cylinder(&phys, radius = 2.0, height = 4.0, is_static = true)
   physics.step(&phys, 0.0)
   // Query for bodies - should find the cylinder
   results := make([dynamic]physics.RigidBodyHandle)
