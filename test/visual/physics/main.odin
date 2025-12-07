@@ -108,16 +108,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
+  box_collider := physics.create_collider_box(&physics_world, {1.0, 1.0, 1.0})
   for pos, i in cube_positions {
     // Parent node with physics
     cube_node_handle := world.spawn(&engine.world, pos)
     cube_node := world.get_node(&engine.world, cube_node_handle)
-    body_handle := physics.create_body_box(
+    body_handle := physics.create_body(
       &physics_world,
-      half_extents = {1.0, 1.0, 1.0},
-      position = cube_node.transform.position,
-      rotation = cube_node.transform.rotation,
+      cube_node.transform.position,
+      cube_node.transform.rotation,
       mass = 50,
+      collider_handle = box_collider,
     )
     cube_node.attachment = world.RigidBodyAttachment {
       body_handle = body_handle,
@@ -138,7 +139,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
     camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
     sync_active_camera_controller(engine)
   }
-  light_handle := spawn_spot_light(engine, {0.8, 0.9, 1, 1}, 50.0, math.PI * 0.25, position = {0, 20, 0})
+  light_handle := spawn_spot_light(
+    engine,
+    {0.8, 0.9, 1, 1},
+    50.0,
+    math.PI * 0.25,
+    position = {0, 20, 0},
+  )
   rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   log.info("Physics demo setup complete")
 }

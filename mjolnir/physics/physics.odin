@@ -94,6 +94,7 @@ create_body :: proc(
   mass: f32 = 1.0,
   is_static: bool = false,
   trigger_only: bool = false,
+  collider_handle: ColliderHandle = {},
 ) -> (
   handle: RigidBodyHandle,
   ok: bool,
@@ -102,19 +103,20 @@ create_body :: proc(
   handle, body = cont.alloc(&self.bodies, RigidBodyHandle) or_return
   rigid_body_init(body, position, rotation, mass, is_static)
   body.trigger_only = trigger_only
+  body.collider_handle = collider_handle
   return handle, true
 }
 
 destroy_body :: proc(self: ^World, handle: RigidBodyHandle) {
-  if body, ok := cont.get(self.bodies, handle); ok {
-    cont.free(&self.colliders, body.collider_handle)
-  }
   cont.free(&self.bodies, handle)
+}
+
+destroy_collider :: proc(self: ^World, handle: ColliderHandle) {
+  cont.free(&self.colliders, handle)
 }
 
 create_collider_sphere :: proc(
   self: ^World,
-  body_handle: RigidBodyHandle,
   radius: f32 = 1.0,
   offset: [3]f32 = {},
 ) -> (
@@ -127,16 +129,11 @@ create_collider_sphere :: proc(
   ptr.shape = SphereCollider {
     radius = radius,
   }
-  if body, ok := cont.get(self.bodies, body_handle); ok {
-    body.collider_handle = handle
-  }
   return handle, true
-
 }
 
 create_collider_box :: proc(
   self: ^World,
-  body_handle: RigidBodyHandle,
   half_extents: [3]f32,
   offset: [3]f32 = {},
 ) -> (
@@ -149,15 +146,11 @@ create_collider_box :: proc(
   ptr.shape = BoxCollider {
     half_extents = half_extents,
   }
-  if body, ok := cont.get(self.bodies, body_handle); ok {
-    body.collider_handle = handle
-  }
   return handle, true
 }
 
 create_collider_capsule :: proc(
   self: ^World,
-  body_handle: RigidBodyHandle,
   radius: f32,
   height: f32,
   offset: [3]f32 = {},
@@ -172,15 +165,11 @@ create_collider_capsule :: proc(
     radius = radius,
     height = height,
   }
-  if body, ok := cont.get(self.bodies, body_handle); ok {
-    body.collider_handle = handle
-  }
   return handle, true
 }
 
 create_collider_cylinder :: proc(
   self: ^World,
-  body_handle: RigidBodyHandle,
   radius: f32,
   height: f32,
   offset: [3]f32 = {},
@@ -192,18 +181,14 @@ create_collider_cylinder :: proc(
   handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
   ptr.offset = offset
   ptr.shape = CylinderCollider {
-    radius   = radius,
-    height   = height,
-  }
-  if body, ok := cont.get(self.bodies, body_handle); ok {
-    body.collider_handle = handle
+    radius = radius,
+    height = height,
   }
   return handle, true
 }
 
 create_collider_fan :: proc(
   self: ^World,
-  body_handle: RigidBodyHandle,
   radius: f32,
   height: f32,
   angle: f32,
@@ -216,12 +201,9 @@ create_collider_fan :: proc(
   handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
   ptr.offset = offset
   ptr.shape = FanCollider {
-    radius   = radius,
-    height   = height,
-    angle    = angle,
-  }
-  if body, ok := cont.get(self.bodies, body_handle); ok {
-    body.collider_handle = handle
+    radius = radius,
+    height = height,
+    angle  = angle,
   }
   return handle, true
 }
@@ -247,12 +229,13 @@ create_body_sphere :: proc(
     is_static,
     trigger_only,
   ) or_return
-  _ = create_collider_sphere(
-    self,
-    body_handle,
-    radius,
-    offset,
-  ) or_return
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = create_collider_sphere(
+      self,
+      radius,
+      offset,
+    ) or_return
+  }
   return body_handle, true
 }
 
@@ -277,12 +260,13 @@ create_body_box :: proc(
     is_static,
     trigger_only,
   ) or_return
-  _ = create_collider_box(
-    self,
-    body_handle,
-    half_extents,
-    offset,
-  ) or_return
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = create_collider_box(
+      self,
+      half_extents,
+      offset,
+    ) or_return
+  }
   return body_handle, true
 }
 
@@ -308,13 +292,14 @@ create_body_capsule :: proc(
     is_static,
     trigger_only,
   ) or_return
-  _ = create_collider_capsule(
-    self,
-    body_handle,
-    radius,
-    height,
-    offset,
-  ) or_return
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = create_collider_capsule(
+      self,
+      radius,
+      height,
+      offset,
+    ) or_return
+  }
   return body_handle, true
 }
 
@@ -340,13 +325,14 @@ create_body_cylinder :: proc(
     is_static,
     trigger_only,
   ) or_return
-  _ = create_collider_cylinder(
-    self,
-    body_handle,
-    radius,
-    height,
-    offset,
-  ) or_return
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = create_collider_cylinder(
+      self,
+      radius,
+      height,
+      offset,
+    ) or_return
+  }
   return body_handle, true
 }
 
@@ -373,14 +359,15 @@ create_body_fan :: proc(
     is_static,
     trigger_only,
   ) or_return
-  _ = create_collider_fan(
-    self,
-    body_handle,
-    radius,
-    height,
-    angle,
-    offset,
-  ) or_return
+  if body, ok := cont.get(self.bodies, body_handle); ok {
+    body.collider_handle = create_collider_fan(
+      self,
+      radius,
+      height,
+      angle,
+      offset,
+    ) or_return
+  }
   return body_handle, true
 }
 
