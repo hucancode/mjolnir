@@ -87,14 +87,13 @@ epa :: proc(
       return
     }
     // The penetration is approximately the distance from origin to the line
-    t := -linalg.dot(vertices[0], ab) / linalg.length2(ab)
-    t = linalg.saturate(t)
+    t := linalg.saturate(-linalg.dot(vertices[0], ab) / linalg.length2(ab))
     closest_point := vertices[0] + ab * t
-    dist := linalg.length(closest_point)
-    if dist < math.F32_EPSILON {
+    dist_sq := linalg.length2(closest_point)
+    if dist_sq < math.F32_EPSILON {
       return linalg.normalize(ab), 0.001, true
     }
-    return linalg.normalize(closest_point), dist, true
+    return linalg.normalize(closest_point), math.sqrt(dist_sq), true
   } else {
     // Invalid simplex
     ok = false

@@ -54,12 +54,18 @@ parallel_bvh_refit :: proc(
 ) {
   primitive_count := len(physics.spatial_index.primitives)
   if primitive_count == 0 do return
-  if primitive_count < 100 || num_threads == 1 || !physics.thread_pool_running {
+  if primitive_count < 100 ||
+     num_threads == 1 ||
+     !physics.thread_pool_running {
     sequential_bvh_refit(physics)
     return
   }
   chunk_size := (primitive_count + num_threads - 1) / num_threads
-  task_data_array := make([]BVH_Refit_Task_Data, num_threads, context.temp_allocator)
+  task_data_array := make(
+    []BVH_Refit_Task_Data,
+    num_threads,
+    context.temp_allocator,
+  )
   for i in 0 ..< num_threads {
     start := i * chunk_size
     end := min(start + chunk_size, primitive_count)
@@ -116,7 +122,11 @@ parallel_update_aabb_cache :: proc(
     return
   }
   chunk_size := (body_count + num_threads - 1) / num_threads
-  task_data_array := make([]AABB_Cache_Task_Data, num_threads, context.temp_allocator)
+  task_data_array := make(
+    []AABB_Cache_Task_Data,
+    num_threads,
+    context.temp_allocator,
+  )
   for i in 0 ..< num_threads {
     start := i * chunk_size
     end := min(start + chunk_size, body_count)
@@ -153,10 +163,8 @@ collision_detection_task :: proc(task: thread.Task) {
     bvh_entry := &data.physics.spatial_index.primitives[i]
     handle_a := bvh_entry.handle
     body_a := cont.get(data.physics.bodies, handle_a) or_continue
-    
     // Skip query for static or sleeping bodies (they don't initiate collisions)
     if body_a.is_static || body_a.is_sleeping do continue
-    
     clear(&candidates)
     bvh_query_aabb_fast(
       &data.physics.spatial_index,
@@ -197,11 +205,9 @@ collision_detection_task :: proc(task: thread.Task) {
         )
       }
       if !hit do continue
-      
       // Wake up bodies involved in collision
       if body_a.is_sleeping do wake_up(body_a)
       if body_b.is_sleeping do wake_up(body_b)
-      
       contact := Contact {
         body_a      = handle_a,
         body_b      = handle_b,
@@ -235,12 +241,18 @@ parallel_collision_detection :: proc(
 ) {
   primitive_count := len(physics.spatial_index.primitives)
   if primitive_count == 0 do return
-  if primitive_count < 100 || num_threads == 1 || !physics.thread_pool_running {
+  if primitive_count < 100 ||
+     num_threads == 1 ||
+     !physics.thread_pool_running {
     sequential_collision_detection(physics)
     return
   }
   chunk_size := (primitive_count + num_threads - 1) / num_threads
-  task_data_array := make([]Collision_Detection_Task_Data, num_threads, context.temp_allocator)
+  task_data_array := make(
+    []Collision_Detection_Task_Data,
+    num_threads,
+    context.temp_allocator,
+  )
   for i in 0 ..< num_threads {
     start := i * chunk_size
     end := min(start + chunk_size, primitive_count)
@@ -272,16 +284,12 @@ sequential_collision_detection :: proc(physics: ^World) {
   for &bvh_entry in physics.spatial_index.primitives {
     handle_a := bvh_entry.handle
     body_a := cont.get(physics.bodies, handle_a) or_continue
-    
+
     // Skip query for static or sleeping bodies
     if body_a.is_static || body_a.is_sleeping do continue
-    
+
     clear(&candidates)
-    bvh_query_aabb_fast(
-      &physics.spatial_index,
-      bvh_entry.bounds,
-      &candidates,
-    )
+    bvh_query_aabb_fast(&physics.spatial_index, bvh_entry.bounds, &candidates)
     for entry_b in candidates {
       handle_b := entry_b.handle
       if handle_a == handle_b do continue
@@ -316,7 +324,6 @@ sequential_collision_detection :: proc(physics: ^World) {
         )
       }
       if !hit do continue
-      
       // Wake up bodies involved in collision
       if body_a.is_sleeping do wake_up(body_a)
       if body_b.is_sleeping do wake_up(body_b)
