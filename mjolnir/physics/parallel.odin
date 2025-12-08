@@ -186,15 +186,22 @@ collision_detection_task :: proc(task: thread.Task) {
         data.physics.colliders,
         body_b.collider_handle,
       ) or_continue
-      point, normal, penetration, hit := test_collision(
-        collider_a,
-        body_a.position,
-        body_a.rotation,
-        collider_b,
-        body_b.position,
-        body_b.rotation,
-      )
-      if !hit {
+      is_primitive_shape := true
+      // TODO: if we have custom physics shape, we must use GJK algorithm, otherwise use a fast path
+      point: [3]f32
+      normal: [3]f32
+      penetration: f32
+      hit: bool
+      if is_primitive_shape {
+        point, normal, penetration, hit = test_collision(
+          collider_a,
+          body_a.position,
+          body_a.rotation,
+          collider_b,
+          body_b.position,
+          body_b.rotation,
+        )
+      } else {
         point, normal, penetration, hit = test_collision_gjk(
           collider_a,
           body_a.position,
@@ -305,15 +312,22 @@ sequential_collision_detection :: proc(physics: ^World) {
         physics.colliders,
         body_b.collider_handle,
       ) or_continue
-      point, normal, penetration, hit := test_collision(
-        collider_a,
-        body_a.position,
-        body_a.rotation,
-        collider_b,
-        body_b.position,
-        body_b.rotation,
-      )
-      if !hit {
+      is_primitive_shape := true
+      // TODO: if we have custom physics shape, we must use GJK algorithm, otherwise use a fast path
+      point: [3]f32
+      normal: [3]f32
+      penetration: f32
+      hit: bool
+      if is_primitive_shape {
+        point, normal, penetration, hit = test_collision(
+          collider_a,
+          body_a.position,
+          body_a.rotation,
+          collider_b,
+          body_b.position,
+          body_b.rotation,
+        )
+      } else {
         point, normal, penetration, hit = test_collision_gjk(
           collider_a,
           body_a.position,
