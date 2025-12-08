@@ -2,6 +2,7 @@ package physics
 
 import "../geometry"
 import "../resources"
+import "core:math"
 import "core:math/linalg"
 
 RigidBody :: struct {
@@ -30,6 +31,8 @@ RigidBody :: struct {
   is_sleeping:          bool,
   sleep_timer:          f32,
   cached_aabb:          geometry.Aabb,
+  cached_sphere_center: [3]f32, // Bounding sphere for fast broad phase filtering
+  cached_sphere_radius: f32,
 }
 
 rigid_body_init :: proc(
@@ -181,4 +184,8 @@ update_cached_aabb :: proc(
     self.position,
     self.rotation,
   )
+  // Compute bounding sphere from AABB (conservative but fast)
+  self.cached_sphere_center = geometry.aabb_center(self.cached_aabb)
+  aabb_half_extents := (self.cached_aabb.max - self.cached_aabb.min) * 0.5
+  self.cached_sphere_radius = linalg.length(aabb_half_extents)
 }

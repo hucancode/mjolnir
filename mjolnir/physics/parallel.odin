@@ -189,6 +189,8 @@ collision_detection_task :: proc(task: thread.Task) {
         data.physics.colliders,
         body_b.collider_handle,
       ) or_continue
+      // Bounding sphere pre-filter: cheap test before expensive narrow phase
+      bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) or_continue
       is_primitive_shape := true
       // TODO: if we have custom physics shape, we must use GJK algorithm, otherwise use a fast path
       point: [3]f32
@@ -281,7 +283,59 @@ parallel_collision_detection :: proc(
   }
 }
 
+// Phase 1: Retest persistent contacts from previous frame (no BVH query needed)
+retest_persistent_contacts :: proc(physics: ^World) -> (persistent_tested: int) {
+  tested_pairs := make(map[u64]bool, context.temp_allocator)
+  for pair_hash, prev_contact in physics.prev_contacts {
+    body_a := cont.get(physics.bodies, prev_contact.body_a) or_continue
+    body_b := cont.get(physics.bodies, prev_contact.body_b) or_continue
+    // early rejection
+    geometry.aabb_intersects(body_a.cached_aabb, body_b.cached_aabb) or_continue
+    bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) or_continue
+    // Static-static pairs don't need retesting
+    if body_a.is_static && body_b.is_static do continue
+    if body_a.trigger_only || body_b.trigger_only do continue
+    collider_a := cont.get(physics.colliders, body_a.collider_handle) or_continue
+    collider_b := cont.get(physics.colliders, body_b.collider_handle) or_continue
+    // Narrow phase
+    point, normal, penetration := test_collision(
+      collider_a,
+      body_a.position,
+      body_a.rotation,
+      collider_b,
+      body_b.position,
+      body_b.rotation,
+    ) or_continue
+    if body_a.is_sleeping do wake_up(body_a)
+    if body_b.is_sleeping do wake_up(body_b)
+    contact := Contact {
+      body_a      = prev_contact.body_a,
+      body_b      = prev_contact.body_b,
+      point       = point,
+      normal      = normal,
+      penetration = penetration,
+      restitution = (body_a.restitution + body_b.restitution) * 0.5,
+      friction    = (body_a.friction + body_b.friction) * 0.5,
+    }
+    // Warmstart from previous frame
+    contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
+    contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
+    append(&physics.contacts, contact)
+    tested_pairs[pair_hash] = true
+    persistent_tested += 1
+  }
+  return
+}
+
 sequential_collision_detection :: proc(physics: ^World) {
+  // Phase 1: Retest persistent pairs directly (no BVH query)
+  persistent_tested := retest_persistent_contacts(physics)
+  // Phase 2: Find new pairs via BVH query (exclude already-tested persistent pairs)
+  tested_pairs := make(map[u64]bool, context.temp_allocator)
+  for contact in physics.contacts {
+    hash := collision_pair_hash(contact.body_a, contact.body_b)
+    tested_pairs[hash] = true
+  }
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   test_collision_time: time.Duration
   test_collision_start := time.now()
@@ -295,6 +349,9 @@ sequential_collision_detection :: proc(physics: ^World) {
     for entry_b in candidates {
       handle_b := entry_b.handle
       if handle_a == handle_b do continue
+      // Skip pairs already tested in persistent phase
+      pair_hash := collision_pair_hash(handle_a, handle_b)
+      if tested_pairs[pair_hash] do continue
       body_b := cont.get(physics.bodies, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_static && !body_b.is_sleeping do continue
       if body_a.is_static && body_b.is_static do continue
@@ -307,6 +364,8 @@ sequential_collision_detection :: proc(physics: ^World) {
         physics.colliders,
         body_b.collider_handle,
       ) or_continue
+      // Bounding sphere pre-filter: cheap test before expensive narrow phase
+      if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
       is_primitive_shape := true
       // TODO: if we have custom physics shape, we must use GJK algorithm, otherwise use a fast path
       point: [3]f32
@@ -355,10 +414,14 @@ sequential_collision_detection :: proc(physics: ^World) {
       append(&physics.contacts, contact)
     }
   }
+  new_pairs := len(physics.contacts) - persistent_tested
   log.infof(
-    "Test collision time: %.2fms | total time %.2fms",
+    "Test collision time: %.2fms | total time %.2fms | persistent=%d new=%d total=%d",
     time.duration_milliseconds(test_collision_time),
     time.duration_milliseconds(time.since(test_collision_start)),
+    persistent_tested,
+    new_pairs,
+    len(physics.contacts),
   )
 }
 

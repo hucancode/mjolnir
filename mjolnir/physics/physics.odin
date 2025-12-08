@@ -64,7 +64,7 @@ init :: proc(
   self.body_bounds = make([dynamic]geometry.Aabb)
   self.enable_air_resistance = false
   self.air_density = SEA_LEVEL_AIR_DENSITY
-  // self.enable_parallel = enable_parallel
+  self.enable_parallel = enable_parallel
   if self.enable_parallel {
     self.thread_count = DEFAULT_THREAD_COUNT
     thread.pool_init(

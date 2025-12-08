@@ -38,6 +38,19 @@ collision_pair_hash :: proc "contextless" (body_a: RigidBodyHandle, body_b: Rigi
   return (u64(body_a.index) << 32) | u64(body_b.index)
 }
 
+// Fast bounding sphere intersection test (use before expensive narrow phase)
+bounding_spheres_intersect :: proc "contextless" (
+  center_a: [3]f32,
+  radius_a: f32,
+  center_b: [3]f32,
+  radius_b: f32,
+) -> bool {
+  delta := center_b - center_a
+  dist_sq := linalg.dot(delta, delta)
+  radius_sum := radius_a + radius_b
+  return dist_sq <= radius_sum * radius_sum
+}
+
 test_sphere_sphere :: proc(
   pos_a: [3]f32,
   sphere_a: SphereCollider,
