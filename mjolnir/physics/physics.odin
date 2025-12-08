@@ -64,7 +64,7 @@ init :: proc(
   self.body_bounds = make([dynamic]geometry.Aabb)
   self.enable_air_resistance = false
   self.air_density = SEA_LEVEL_AIR_DENSITY
-  self.enable_parallel = enable_parallel
+  // self.enable_parallel = enable_parallel
   if self.enable_parallel {
     self.thread_count = DEFAULT_THREAD_COUNT
     thread.pool_init(
@@ -382,7 +382,7 @@ step :: proc(self: ^World, dt: f32) {
   warmstart_prep_start := time.now()
   clear(&self.prev_contacts)
   for contact in self.contacts {
-    hash := collision_pair_hash({contact.body_a, contact.body_b})
+    hash := collision_pair_hash(contact.body_a, contact.body_b)
     self.prev_contacts[hash] = contact
   }
   warmstart_prep_time := time.since(warmstart_prep_start)

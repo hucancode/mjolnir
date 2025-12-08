@@ -228,20 +228,16 @@ obb_obb_intersect :: proc(
   penetration_depth: f32,
   hit: bool,
 ) {
-  // Get rotation matrices for both OBBs
-  ax, ay, az := obb_axes(a)
-  bx, by, bz := obb_axes(b)
-
-  // Translation vector from A to B
+  mat_a := linalg.matrix3_from_quaternion(a.rotation)
+  mat_b := linalg.matrix3_from_quaternion(b.rotation)
+  ax, ay, az := mat_a[0], mat_a[1], mat_a[2]
+  bx, by, bz := mat_b[0], mat_b[1], mat_b[2]
   t := b.center - a.center
-
-  // Find separating axis with minimum penetration
   min_overlap := f32(math.F32_MAX)
   best_axis: [3]f32
   best_axis_index := -1 // 0-2: A faces, 3-5: B faces, 6+: edges
-
   // Helper to test a single axis
-  test_axis :: proc(
+  test_axis :: #force_inline proc(
     axis: [3]f32,
     t: [3]f32,
     a: Obb,
@@ -252,60 +248,55 @@ obb_obb_intersect :: proc(
     best_index: ^int,
     current_index: int,
   ) -> bool {
-    length_sq := linalg.length2(axis)
-    if length_sq < 1e-6 do return true // Degenerate axis, skip
-    normalized_axis := axis / math.sqrt(length_sq)
+    // Skip degenerate axes (e.g., parallel edges produce near-zero cross products)
+    axis_sq := linalg.length2(axis)
+    if axis_sq < 1e-8 do return true
     // Project centers onto axis
-    dist := linalg.dot(t, normalized_axis)
+    dist := linalg.dot(t, axis)
     // Project extents of A onto axis
     ra :=
-      a.half_extents.x * math.abs(linalg.dot(ax, normalized_axis)) +
-      a.half_extents.y * math.abs(linalg.dot(ay, normalized_axis)) +
-      a.half_extents.z * math.abs(linalg.dot(az, normalized_axis))
+      a.half_extents.x * math.abs(linalg.dot(ax, axis)) +
+      a.half_extents.y * math.abs(linalg.dot(ay, axis)) +
+      a.half_extents.z * math.abs(linalg.dot(az, axis))
     // Project extents of B onto axis
     rb :=
-      b.half_extents.x * math.abs(linalg.dot(bx, normalized_axis)) +
-      b.half_extents.y * math.abs(linalg.dot(by, normalized_axis)) +
-      b.half_extents.z * math.abs(linalg.dot(bz, normalized_axis))
+      b.half_extents.x * math.abs(linalg.dot(bx, axis)) +
+      b.half_extents.y * math.abs(linalg.dot(by, axis)) +
+      b.half_extents.z * math.abs(linalg.dot(bz, axis))
     // Check for separation
-    abs_dist := math.abs(dist)
-    overlap := ra + rb - abs_dist
+    overlap := ra + rb - math.abs(dist)
     if overlap < 0 do return false // Separating axis found
     // Track minimum overlap
     if overlap < min_overlap^ {
       min_overlap^ = overlap
       // Ensure normal points from A to B
-      best_axis^ = dist < 0 ? -normalized_axis : normalized_axis
+      best_axis^ = dist < 0 ? -axis : axis
       best_index^ = current_index
     }
     return true
   }
-
   // Test face normals of A (indices 0-2)
-  if !test_axis(ax, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 0) do return
-  if !test_axis(ay, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 1) do return
-  if !test_axis(az, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 2) do return
-
+  test_axis(ax, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 0) or_return
+  test_axis(ay, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 1) or_return
+  test_axis(az, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 2) or_return
   // Test face normals of B (indices 3-5)
-  if !test_axis(bx, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 3) do return
-  if !test_axis(by, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 4) do return
-  if !test_axis(bz, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 5) do return
-
+  test_axis(bx, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 3) or_return
+  test_axis(by, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 4) or_return
+  test_axis(bz, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 5) or_return
   // Test edge-edge axes (indices 6+)
-  if !test_axis(linalg.cross(ax, bx), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 6) do return
-  if !test_axis(linalg.cross(ax, by), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 7) do return
-  if !test_axis(linalg.cross(ax, bz), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 8) do return
-  if !test_axis(linalg.cross(ay, bx), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 9) do return
-  if !test_axis(linalg.cross(ay, by), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 10) do return
-  if !test_axis(linalg.cross(ay, bz), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 11) do return
-  if !test_axis(linalg.cross(az, bx), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 12) do return
-  if !test_axis(linalg.cross(az, by), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 13) do return
-  if !test_axis(linalg.cross(az, bz), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 14) do return
-
+  test_axis(linalg.cross(ax, bx), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 6) or_return
+  test_axis(linalg.cross(ax, by), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 7) or_return
+  test_axis(linalg.cross(ax, bz), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 8) or_return
+  test_axis(linalg.cross(ay, bx), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 9) or_return
+  test_axis(linalg.cross(ay, by), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 10) or_return
+  test_axis(linalg.cross(ay, bz), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 11) or_return
+  test_axis(linalg.cross(az, bx), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 12) or_return
+  test_axis(linalg.cross(az, by), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 13) or_return
+  test_axis(linalg.cross(az, bz), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 14) or_return
   // All tests passed - OBBs are intersecting
-  normal = best_axis
+  // Normalize the best axis (face normals are already unit length, but edge axes may not be)
+  normal = linalg.normalize0(best_axis)
   penetration_depth = min_overlap
-
   // For face-face collisions (best axis is a face normal), compute better contact point
   if best_axis_index >= 0 && best_axis_index <= 5 {
     // Face-face collision: find the center of the contact region on the reference face
@@ -317,23 +308,22 @@ obb_obb_intersect :: proc(
     reference_normal := reference_is_a ? best_axis : -best_axis
     reference_face_center :=
       reference_obb.center + reference_normal * reference_obb.half_extents[axis_index]
-
-    // Get all 8 vertices of incident box
+    // Get all 8 vertices of incident box using cached axes
+    inc_x, inc_y, inc_z := (reference_is_a ? bx : ax), (reference_is_a ? by : ay), (reference_is_a ? bz : az)
+    inc_ex, inc_ey, inc_ez := incident_obb.half_extents.x, incident_obb.half_extents.y, incident_obb.half_extents.z
     incident_vertices := [8][3]f32{
-      incident_obb.center + linalg.mul(incident_obb.rotation, [3]f32{-incident_obb.half_extents.x, -incident_obb.half_extents.y, -incident_obb.half_extents.z}),
-      incident_obb.center + linalg.mul(incident_obb.rotation, [3]f32{ incident_obb.half_extents.x, -incident_obb.half_extents.y, -incident_obb.half_extents.z}),
-      incident_obb.center + linalg.mul(incident_obb.rotation, [3]f32{-incident_obb.half_extents.x,  incident_obb.half_extents.y, -incident_obb.half_extents.z}),
-      incident_obb.center + linalg.mul(incident_obb.rotation, [3]f32{ incident_obb.half_extents.x,  incident_obb.half_extents.y, -incident_obb.half_extents.z}),
-      incident_obb.center + linalg.mul(incident_obb.rotation, [3]f32{-incident_obb.half_extents.x, -incident_obb.half_extents.y,  incident_obb.half_extents.z}),
-      incident_obb.center + linalg.mul(incident_obb.rotation, [3]f32{ incident_obb.half_extents.x, -incident_obb.half_extents.y,  incident_obb.half_extents.z}),
-      incident_obb.center + linalg.mul(incident_obb.rotation, [3]f32{-incident_obb.half_extents.x,  incident_obb.half_extents.y,  incident_obb.half_extents.z}),
-      incident_obb.center + linalg.mul(incident_obb.rotation, [3]f32{ incident_obb.half_extents.x,  incident_obb.half_extents.y,  incident_obb.half_extents.z}),
+      incident_obb.center - inc_x * inc_ex - inc_y * inc_ey - inc_z * inc_ez,
+      incident_obb.center + inc_x * inc_ex - inc_y * inc_ey - inc_z * inc_ez,
+      incident_obb.center - inc_x * inc_ex + inc_y * inc_ey - inc_z * inc_ez,
+      incident_obb.center + inc_x * inc_ex + inc_y * inc_ey - inc_z * inc_ez,
+      incident_obb.center - inc_x * inc_ex - inc_y * inc_ey + inc_z * inc_ez,
+      incident_obb.center + inc_x * inc_ex - inc_y * inc_ey + inc_z * inc_ez,
+      incident_obb.center - inc_x * inc_ex + inc_y * inc_ey + inc_z * inc_ez,
+      incident_obb.center + inc_x * inc_ex + inc_y * inc_ey + inc_z * inc_ez,
     }
-
     // Find vertices that are penetrating the reference face
     contact_sum := [3]f32{0, 0, 0}
     contact_count := 0
-
     for vertex in incident_vertices {
       // Signed distance from vertex to reference face plane (reference_normal points out of reference)
       dist_to_face := linalg.dot(vertex - reference_face_center, reference_normal)
@@ -344,18 +334,17 @@ obb_obb_intersect :: proc(
         contact_count += 1
       }
     }
-
     // Average the penetrating vertices
     if contact_count > 0 {
       contact = contact_sum / f32(contact_count)
     } else {
       // Fallback: midpoint between the reference face and incident object along the collision normal
       contact =
-        reference_face_center - reference_normal * (min_overlap * 0.5)
+        reference_face_center - reference_normal * min_overlap * 0.5
     }
   } else {
     // Edge-edge collision: use midpoint approximation
-    contact = a.center + best_axis * (min_overlap * 0.5)
+    contact = a.center + best_axis * min_overlap * 0.5
   }
   hit = true
   return

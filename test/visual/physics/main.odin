@@ -10,9 +10,9 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-NX :: 10
+NX :: 20
 NY :: 10
-NZ :: 10
+NZ :: 20
 CUBE_COUNT :: NX * NY * NZ
 SPHERE_RADIUS :: 3.0
 

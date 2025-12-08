@@ -33,27 +33,9 @@ Contact :: struct {
   bias:            f32, // Position correction bias term
 }
 
-CollisionPair :: struct {
-  body_a: RigidBodyHandle,
-  body_b: RigidBodyHandle,
-}
-
 // Hash function for collision pairs (for contact caching)
-collision_pair_hash :: proc "contextless" (pair: CollisionPair) -> u64 {
-  // Ensure consistent ordering: smaller index first
-  a := min(pair.body_a.index, pair.body_b.index)
-  b := max(pair.body_a.index, pair.body_b.index)
-  return (u64(a) << 32) | u64(b)
-}
-
-collision_pair_eq :: proc "contextless" (
-  a: CollisionPair,
-  b: CollisionPair,
-) -> bool {
-  return(
-    (a.body_a == b.body_a && a.body_b == b.body_b) ||
-    (a.body_a == b.body_b && a.body_b == b.body_a) \
-  )
+collision_pair_hash :: proc "contextless" (body_a: RigidBodyHandle, body_b: RigidBodyHandle) -> u64 {
+  return (u64(body_a.index) << 32) | u64(body_b.index)
 }
 
 test_sphere_sphere :: proc(

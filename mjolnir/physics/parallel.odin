@@ -2,12 +2,15 @@ package physics
 
 import cont "../containers"
 import "../geometry"
+import "core:log"
 import "core:math/linalg"
 import "core:mem"
 import "core:sync"
 import "core:thread"
+import "core:time"
 
 DEFAULT_THREAD_COUNT :: 16
+WARMSTART_COEF :: 0.8
 
 BVH_Refit_Task_Data :: struct {
   physics: ^World,
@@ -224,18 +227,10 @@ collision_detection_task :: proc(task: thread.Task) {
         restitution = (body_a.restitution + body_b.restitution) * 0.5,
         friction    = (body_a.friction + body_b.friction) * 0.5,
       }
-      pair := CollisionPair {
-        body_a = handle_a,
-        body_b = handle_b,
-      }
-      hash := collision_pair_hash(pair)
+      hash := collision_pair_hash(handle_a, handle_b)
       if prev_contact, found := data.physics.prev_contacts[hash]; found {
-        warmstart_coef :: 0.8
-        contact.normal_impulse = prev_contact.normal_impulse * warmstart_coef
-        contact.tangent_impulse[0] =
-          prev_contact.tangent_impulse[0] * warmstart_coef
-        contact.tangent_impulse[1] =
-          prev_contact.tangent_impulse[1] * warmstart_coef
+        contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
+        contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
       }
       append(&data.contacts, contact)
     }
@@ -288,13 +283,13 @@ parallel_collision_detection :: proc(
 
 sequential_collision_detection :: proc(physics: ^World) {
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  test_collision_time: time.Duration
+  test_collision_start := time.now()
   for &bvh_entry in physics.spatial_index.primitives {
     handle_a := bvh_entry.handle
     body_a := cont.get(physics.bodies, handle_a) or_continue
-
     // Skip query for static or sleeping bodies
     if body_a.is_static || body_a.is_sleeping do continue
-
     clear(&candidates)
     bvh_query_aabb_fast(&physics.spatial_index, bvh_entry.bounds, &candidates)
     for entry_b in candidates {
@@ -318,6 +313,7 @@ sequential_collision_detection :: proc(physics: ^World) {
       normal: [3]f32
       penetration: f32
       hit: bool
+      test_collision_start := time.now()
       if is_primitive_shape {
         point, normal, penetration, hit = test_collision(
           collider_a,
@@ -337,11 +333,11 @@ sequential_collision_detection :: proc(physics: ^World) {
           body_b.rotation,
         )
       }
+      test_collision_time += time.since(test_collision_start)
       if !hit do continue
       // Wake up bodies involved in collision
       if body_a.is_sleeping do wake_up(body_a)
       if body_b.is_sleeping do wake_up(body_b)
-
       contact := Contact {
         body_a      = handle_a,
         body_b      = handle_b,
@@ -351,22 +347,19 @@ sequential_collision_detection :: proc(physics: ^World) {
         restitution = (body_a.restitution + body_b.restitution) * 0.5,
         friction    = (body_a.friction + body_b.friction) * 0.5,
       }
-      pair := CollisionPair {
-        body_a = handle_a,
-        body_b = handle_b,
-      }
-      hash := collision_pair_hash(pair)
+      hash := collision_pair_hash(handle_a, handle_b)
       if prev_contact, found := physics.prev_contacts[hash]; found {
-        warmstart_coef :: 0.8
-        contact.normal_impulse = prev_contact.normal_impulse * warmstart_coef
-        contact.tangent_impulse[0] =
-          prev_contact.tangent_impulse[0] * warmstart_coef
-        contact.tangent_impulse[1] =
-          prev_contact.tangent_impulse[1] * warmstart_coef
+        contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
+        contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
       }
       append(&physics.contacts, contact)
     }
   }
+  log.infof(
+    "Test collision time: %.2fms | total time %.2fms",
+    time.duration_milliseconds(test_collision_time),
+    time.duration_milliseconds(time.since(test_collision_start)),
+  )
 }
 
 
