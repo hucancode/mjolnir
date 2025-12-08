@@ -64,7 +64,7 @@ rigid_body_init :: proc(
   self.sleep_timer = 0.0
 }
 
-wake_up :: proc(self: ^RigidBody) {
+wake_up :: #force_inline proc(self: ^RigidBody) {
   self.is_sleeping = false
   self.sleep_timer = 0.0
 }
@@ -175,10 +175,7 @@ clear_forces :: proc(self: ^RigidBody) {
   self.torque = {}
 }
 
-update_cached_aabb :: proc(
-  self: ^RigidBody,
-  collider: ^Collider,
-) {
+update_cached_aabb :: proc(self: ^RigidBody, collider: ^Collider) {
   self.cached_aabb = collider_calculate_aabb(
     collider,
     self.position,

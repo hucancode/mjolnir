@@ -46,7 +46,7 @@ bvh_refit_task :: proc(task: thread.Task) {
   data := (^BVH_Refit_Task_Data)(task.data)
   for i in data.start ..< data.end {
     bvh_entry := &data.physics.spatial_index.primitives[i]
-    body := cont.get(data.physics.bodies, bvh_entry.handle) or_continue
+    body := get(data.physics, bvh_entry.handle) or_continue
     bvh_entry.bounds = body.cached_aabb
   }
 }
@@ -92,7 +92,7 @@ parallel_bvh_refit :: proc(
 
 sequential_bvh_refit :: proc(physics: ^World) {
   for &bvh_entry in physics.spatial_index.primitives {
-    body := cont.get(physics.bodies, bvh_entry.handle) or_continue
+    body := get(physics, bvh_entry.handle) or_continue
     bvh_entry.bounds = body.cached_aabb
   }
   geometry.bvh_refit(&physics.spatial_index)
@@ -106,8 +106,8 @@ aabb_cache_update_task :: proc(task: thread.Task) {
     if !entry.active do continue
     body := &entry.item
     if body.is_sleeping do continue
-    collider := cont.get(
-      data.physics.colliders,
+    collider := get(
+      data.physics,
       body.collider_handle,
     ) or_continue
     update_cached_aabb(body, collider)
@@ -154,7 +154,7 @@ sequential_update_aabb_cache :: proc(physics: ^World) {
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
     if body.is_sleeping do continue
-    collider := cont.get(physics.colliders, body.collider_handle) or_continue
+    collider := get(physics, body.collider_handle) or_continue
     update_cached_aabb(body, collider)
   }
 }
@@ -165,7 +165,7 @@ collision_detection_task :: proc(task: thread.Task) {
   for i in data.start ..< data.end {
     bvh_entry := &data.physics.spatial_index.primitives[i]
     handle_a := bvh_entry.handle
-    body_a := cont.get(data.physics.bodies, handle_a) or_continue
+    body_a := get(data.physics, handle_a) or_continue
     // Skip query for static or sleeping bodies (they don't initiate collisions)
     if body_a.is_static || body_a.is_sleeping do continue
     clear(&candidates)
@@ -177,16 +177,16 @@ collision_detection_task :: proc(task: thread.Task) {
     for entry_b in candidates {
       handle_b := entry_b.handle
       if handle_a == handle_b do continue
-      body_b := cont.get(data.physics.bodies, handle_b) or_continue
+      body_b := get(data.physics, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_static && !body_b.is_sleeping do continue
       if body_a.is_static && body_b.is_static do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := cont.get(
-        data.physics.colliders,
+      collider_a := get(
+        data.physics,
         body_a.collider_handle,
       ) or_continue
-      collider_b := cont.get(
-        data.physics.colliders,
+      collider_b := get(
+        data.physics,
         body_b.collider_handle,
       ) or_continue
       // Bounding sphere pre-filter: cheap test before expensive narrow phase
@@ -287,16 +287,16 @@ parallel_collision_detection :: proc(
 retest_persistent_contacts :: proc(physics: ^World) -> (persistent_tested: int) {
   tested_pairs := make(map[u64]bool, context.temp_allocator)
   for pair_hash, prev_contact in physics.prev_contacts {
-    body_a := cont.get(physics.bodies, prev_contact.body_a) or_continue
-    body_b := cont.get(physics.bodies, prev_contact.body_b) or_continue
+    body_a := get(physics, prev_contact.body_a) or_continue
+    body_b := get(physics, prev_contact.body_b) or_continue
     // early rejection
     geometry.aabb_intersects(body_a.cached_aabb, body_b.cached_aabb) or_continue
     bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) or_continue
     // Static-static pairs don't need retesting
     if body_a.is_static && body_b.is_static do continue
     if body_a.trigger_only || body_b.trigger_only do continue
-    collider_a := cont.get(physics.colliders, body_a.collider_handle) or_continue
-    collider_b := cont.get(physics.colliders, body_b.collider_handle) or_continue
+    collider_a := get(physics, body_a.collider_handle) or_continue
+    collider_b := get(physics, body_b.collider_handle) or_continue
     // Narrow phase
     point, normal, penetration := test_collision(
       collider_a,
@@ -341,7 +341,7 @@ sequential_collision_detection :: proc(physics: ^World) {
   test_collision_start := time.now()
   for &bvh_entry in physics.spatial_index.primitives {
     handle_a := bvh_entry.handle
-    body_a := cont.get(physics.bodies, handle_a) or_continue
+    body_a := get(physics, handle_a) or_continue
     // Skip query for static or sleeping bodies
     if body_a.is_static || body_a.is_sleeping do continue
     clear(&candidates)
@@ -352,16 +352,16 @@ sequential_collision_detection :: proc(physics: ^World) {
       // Skip pairs already tested in persistent phase
       pair_hash := collision_pair_hash(handle_a, handle_b)
       if tested_pairs[pair_hash] do continue
-      body_b := cont.get(physics.bodies, handle_b) or_continue
+      body_b := get(physics, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_static && !body_b.is_sleeping do continue
       if body_a.is_static && body_b.is_static do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := cont.get(
-        physics.colliders,
+      collider_a := get(
+        physics,
         body_a.collider_handle,
       ) or_continue
-      collider_b := cont.get(
-        physics.colliders,
+      collider_b := get(
+        physics,
         body_b.collider_handle,
       ) or_continue
       // Bounding sphere pre-filter: cheap test before expensive narrow phase
@@ -441,8 +441,8 @@ ccd_task :: proc(task: thread.Task) {
     sync.mutex_lock(data.stats_mtx)
     data.bodies_tested += 1
     sync.mutex_unlock(data.stats_mtx)
-    collider_a := cont.get(
-      data.physics.colliders,
+    collider_a := get(
+      data.physics,
       body_a.collider_handle,
     ) or_continue
     motion := body_a.velocity * data.dt
@@ -471,9 +471,9 @@ ccd_task :: proc(task: thread.Task) {
     for candidate in ccd_candidates {
       handle_b := candidate.handle
       if u32(idx_a) == handle_b.index do continue
-      body_b := cont.get(data.physics.bodies, handle_b) or_continue
-      collider_b := cont.get(
-        data.physics.colliders,
+      body_b := get(data.physics, handle_b) or_continue
+      collider_b := get(
+        data.physics,
         body_b.collider_handle,
       ) or_continue
       pos_b := body_b.position
@@ -583,7 +583,7 @@ sequential_ccd :: proc(
     velocity_mag := linalg.length(body_a.velocity)
     if velocity_mag < ccd_threshold do continue
     bodies_tested += 1
-    collider_a := cont.get(physics.colliders, body_a.collider_handle) or_continue
+    collider_a := get(physics, body_a.collider_handle) or_continue
     motion := body_a.velocity * dt
     earliest_toi := f32(1.0)
     earliest_normal := linalg.VECTOR3F32_Y_AXIS
@@ -604,8 +604,8 @@ sequential_ccd :: proc(
     for candidate in ccd_candidates {
       handle_b := candidate.handle
       if u32(idx_a) == handle_b.index do continue
-      body_b := cont.get(physics.bodies, handle_b) or_continue
-      collider_b := cont.get(physics.colliders, body_b.collider_handle) or_continue
+      body_b := get(physics, handle_b) or_continue
+      collider_b := get(physics, body_b.collider_handle) or_continue
       toi := swept_test(collider_a, body_a.position, body_a.rotation, motion, collider_b, body_b.position, body_b.rotation)
       if toi.has_impact && toi.time < earliest_toi {
         earliest_toi = toi.time

@@ -232,7 +232,7 @@ create_body_sphere :: proc(
     is_static,
     trigger_only,
   ) or_return
-  if body, ok := cont.get(self.bodies, body_handle); ok {
+  if body, ok := get(self, body_handle); ok {
     body.collider_handle = create_collider_sphere(
       self,
       radius,
@@ -263,7 +263,7 @@ create_body_box :: proc(
     is_static,
     trigger_only,
   ) or_return
-  if body, ok := cont.get(self.bodies, body_handle); ok {
+  if body, ok := get(self, body_handle); ok {
     body.collider_handle = create_collider_box(
       self,
       half_extents,
@@ -295,7 +295,7 @@ create_body_capsule :: proc(
     is_static,
     trigger_only,
   ) or_return
-  if body, ok := cont.get(self.bodies, body_handle); ok {
+  if body, ok := get(self, body_handle); ok {
     body.collider_handle = create_collider_capsule(
       self,
       radius,
@@ -328,7 +328,7 @@ create_body_cylinder :: proc(
     is_static,
     trigger_only,
   ) or_return
-  if body, ok := cont.get(self.bodies, body_handle); ok {
+  if body, ok := get(self, body_handle); ok {
     body.collider_handle = create_collider_cylinder(
       self,
       radius,
@@ -362,7 +362,7 @@ create_body_fan :: proc(
     is_static,
     trigger_only,
   ) or_return
-  if body, ok := cont.get(self.bodies, body_handle); ok {
+  if body, ok := get(self, body_handle); ok {
     body.collider_handle = create_collider_fan(
       self,
       radius,
@@ -436,7 +436,7 @@ step :: proc(self: ^World, dt: f32) {
         cross_section = math.pow(body.mass, 2.0 / 3.0) * 0.1
         break calculate_cross_section
       }
-      collider := cont.get(self.colliders, body.collider_handle) or_break calculate_cross_section
+      collider := get(self, body.collider_handle) or_break calculate_cross_section
       // Estimate frontal area based on collider type
       switch c in collider.shape {
       case SphereCollider:
@@ -527,7 +527,7 @@ step :: proc(self: ^World, dt: f32) {
     for &entry, idx in self.bodies.entries do if entry.active {
       body := &entry.item
       if body.collider_handle.generation == 0 do continue
-      collider := cont.get(self.colliders, body.collider_handle) or_continue
+      collider := get(self, body.collider_handle) or_continue
       update_cached_aabb(body, collider)
       handle := RigidBodyHandle {
         index      = u32(idx),
@@ -569,8 +569,8 @@ step :: proc(self: ^World, dt: f32) {
     // Prepare all contacts (compute mass matrices and bias terms)
     prepare_start := time.now()
     for &contact in self.contacts {
-      body_a := cont.get(self.bodies, contact.body_a) or_continue
-      body_b := cont.get(self.bodies, contact.body_b) or_continue
+      body_a := get(self, contact.body_a) or_continue
+      body_b := get(self, contact.body_b) or_continue
       prepare_contact(&contact, body_a, body_b, substep_dt)
     }
     prepare_time += time.since(prepare_start)
@@ -578,16 +578,16 @@ step :: proc(self: ^World, dt: f32) {
     solver_start := time.now()
     if substep == 0 {
       for &contact in self.contacts {
-        body_a := cont.get(self.bodies, contact.body_a) or_continue
-        body_b := cont.get(self.bodies, contact.body_b) or_continue
+        body_a := get(self, contact.body_a) or_continue
+        body_b := get(self, contact.body_b) or_continue
         warmstart_contact(&contact, body_a, body_b)
       }
     }
     // Solve constraints with bias (includes position correction + restitution)
     #unroll for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
       for &contact in self.contacts {
-        body_a := cont.get(self.bodies, contact.body_a) or_continue
-        body_b := cont.get(self.bodies, contact.body_b) or_continue
+        body_a := get(self, contact.body_a) or_continue
+        body_b := get(self, contact.body_b) or_continue
         resolve_contact(&contact, body_a, body_b)
       }
     }
@@ -595,8 +595,8 @@ step :: proc(self: ^World, dt: f32) {
     // This prevents jitter without adding artificial velocity
     #unroll for _ in 0 ..< STABILIZATION_ITERS {
       for &contact in self.contacts {
-        body_a := cont.get(self.bodies, contact.body_a) or_continue
-        body_b := cont.get(self.bodies, contact.body_b) or_continue
+        body_a := get(self, contact.body_a) or_continue
+        body_b := get(self, contact.body_b) or_continue
         // Solve without bias - only enforce zero relative velocity at contact
         resolve_contact_no_bias(&contact, body_a, body_b)
       }

@@ -29,9 +29,9 @@ raycast :: proc(
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   bvh_query_ray_fast(&self.spatial_index, ray, max_dist, &candidates)
   for candidate in candidates {
-    body := cont.get(self.bodies, candidate.handle) or_continue
+    body := get(self, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
-    collider := cont.get(self.colliders, body.collider_handle) or_continue
+    collider := get(self, body.collider_handle) or_continue
     // Narrow phase - test actual collider shape
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, closest_hit.t)
     if hit && t < closest_hit.t {
@@ -54,9 +54,9 @@ raycast_single :: proc(
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   bvh_query_ray_fast(&self.spatial_index, ray, max_dist, &candidates)
   for candidate in candidates {
-    body := cont.get(self.bodies, candidate.handle) or_continue
+    body := get(self, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
-    collider := cont.get(self.colliders, body.collider_handle) or_continue
+    collider := get(self, body.collider_handle) or_continue
     // Narrow phase - test actual collider shape
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
     if hit {
@@ -217,8 +217,8 @@ query_sphere :: proc(
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   bvh_query_aabb_fast(&self.spatial_index, query_bounds, &candidates)
   for candidate in candidates {
-    body := cont.get(self.bodies, candidate.handle) or_continue
-    collider := cont.get(self.colliders, body.collider_handle) or_continue
+    body := get(self, candidate.handle) or_continue
+    collider := get(self, body.collider_handle) or_continue
     // Test if collider is within sphere
     if test_collider_sphere_overlap(collider, body.position, body.rotation, center, radius) {
       append(results, candidate.handle)
@@ -236,8 +236,8 @@ query_box :: proc(
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   bvh_query_aabb_fast(&self.spatial_index, bounds, &candidates)
   for candidate in candidates {
-    body := cont.get(self.bodies, candidate.handle) or_continue
-    collider := cont.get(self.colliders, body.collider_handle) or_continue
+    body := get(self, candidate.handle) or_continue
+    collider := get(self, body.collider_handle) or_continue
     pos := body.position
     rot := body.rotation
     // Test if collider is within box

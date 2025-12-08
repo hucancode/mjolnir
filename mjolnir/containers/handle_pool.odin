@@ -101,7 +101,7 @@ free :: proc(pool: ^Pool($T), handle: $HT) -> (item: ^T, freed: bool) {
 }
 
 // get retrieves an item by handle. Returns (item_ptr, found).
-get :: proc "contextless" (
+get :: #force_inline proc "contextless" (
   pool: Pool($T),
   handle: $HT,
 ) -> (
