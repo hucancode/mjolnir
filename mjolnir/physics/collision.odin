@@ -505,7 +505,7 @@ test_box_cylinder :: proc(
   }
   // Conservative collision: report collision if AABB check passes
   // This is not perfectly accurate but prevents tunneling
-  normal = linalg.mul(rot_cylinder, [3]f32{1, 0, 0})
+  normal = linalg.mul(rot_cylinder, linalg.VECTOR3F32_X_AXIS)
   point = pos_box
   if invert_normal do normal = -normal
   penetration = 0.1 // Conservative small penetration
@@ -669,7 +669,6 @@ test_collision :: proc(
 ) {
   center_a := pos_a + linalg.mul(rot_a, collider_a.offset)
   center_b := pos_b + linalg.mul(rot_b, collider_b.offset)
-  // Cylinder can be solid and uses GJK fallback
   switch shape_a in collider_a.shape {
   case FanCollider:
     return
