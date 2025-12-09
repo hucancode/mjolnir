@@ -237,9 +237,7 @@ buffer_get_all :: proc(
   }
   vk.CmdCopyBuffer(cmd_buffer, buffer.buffer, staging.buffer, 1, &region)
   end_single_time_command(gctx, &cmd_buffer) or_return
-  for i in 0 ..< len(output) {
-    output[i] = staging.mapped[i]
-  }
+  copy(output, mutable_buffer_get_all(&staging))
   return .SUCCESS
 }
 
