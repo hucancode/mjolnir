@@ -21,14 +21,11 @@ Renderer :: struct {
   index_count:        u32,
   enabled:            bool,
   color_mode:         ColorMode,
-  commands:           [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   path_vertex_buffer: gpu.MutableBuffer(Vertex),
   path_vertex_count:  u32,
   path_enabled:       bool,
-  debug_mode:         bool,
   alpha:              f32,
   height_offset:      f32,
-  base_color:         [3]f32,
 }
 
 Vertex :: struct {
@@ -61,15 +58,9 @@ init :: proc(
 ) {
   self.enabled = true
   self.color_mode = .Random_Colors
-  self.debug_mode = false
   self.alpha = 0.6
   self.height_offset = 0.05
-  self.base_color = {0.0, 0.8, 0.2}
   self.path_enabled = false
-  gpu.allocate_command_buffer(gctx, self.commands[:], .SECONDARY) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, ..self.commands[:])
-  }
   create_pipeline(self, gctx, rm) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.line_pipeline, nil)
@@ -281,10 +272,6 @@ regenerate_colors :: proc(renderer: ^Renderer, poly_count: u32) {
     }
   case .Random_Colors:
     // Random colors are generated in shader using gl_PrimitiveID
-    // Just set a default color (will be ignored by shader)
-    for &vertex in vertices {
-      vertex.color = {1.0, 1.0, 1.0, 0.6}
-    }
   case .Region_Colors:
     // Similar to random but with different seed
     for i in 0 ..< renderer.vertex_count {
