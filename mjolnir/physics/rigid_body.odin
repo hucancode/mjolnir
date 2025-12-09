@@ -27,7 +27,6 @@ RigidBody :: struct {
   trigger_only:         bool,
   gravity_scale:        f32,
   drag_coefficient:     f32,
-  cross_sectional_area: f32, // m2 - set to 0 for automatic calculation
   is_sleeping:          bool,
   sleep_timer:          f32,
   cached_aabb:          geometry.Aabb,
@@ -57,7 +56,6 @@ rigid_body_init :: proc(
   self.trigger_only = trigger_only // turn this to true to stop response to collision resolution
   self.gravity_scale = 1.0
   self.drag_coefficient = 0.47 // sphere drag coefficient (0.47), cube ~1.05, use 0.1-2.0 range
-  self.cross_sectional_area = 0.0 // 0 = auto-calculate from mass
   self.inertia = is_static ? {} : linalg.MATRIX3F32_IDENTITY
   self.inv_inertia = is_static ? {} : linalg.MATRIX3F32_IDENTITY
   self.is_sleeping = false

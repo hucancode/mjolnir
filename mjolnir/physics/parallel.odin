@@ -10,7 +10,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-DEFAULT_THREAD_COUNT :: 12 // Match physical core count (not hyperthreaded) for best efficiency
+DEFAULT_THREAD_COUNT :: 16
 WARMSTART_COEF :: 0.8
 
 BVH_Refit_Task_Data :: struct {

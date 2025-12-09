@@ -1,6 +1,7 @@
 package physics
 
 import "../geometry"
+import "core:math"
 import "core:math/linalg"
 
 ColliderType :: enum {
@@ -36,8 +37,9 @@ FanCollider :: struct {
 }
 
 Collider :: struct {
-  offset: [3]f32,
-  shape:  union {
+  offset:               [3]f32,
+  cross_sectional_area: f32,
+  shape:                union {
     SphereCollider,
     BoxCollider,
     CapsuleCollider,

@@ -140,6 +140,7 @@ create_collider_sphere :: proc(
   ptr.shape = SphereCollider {
     radius = radius,
   }
+  ptr.cross_sectional_area = math.PI * radius * radius
   return handle, true
 }
 
@@ -157,6 +158,7 @@ create_collider_box :: proc(
   ptr.shape = BoxCollider {
     half_extents = half_extents,
   }
+  ptr.cross_sectional_area = (half_extents.x * half_extents.y + half_extents.y * half_extents.z + half_extents.x * half_extents.z) * 4.0 / 3.0
   return handle, true
 }
 
@@ -176,6 +178,7 @@ create_collider_capsule :: proc(
     radius = radius,
     height = height,
   }
+  ptr.cross_sectional_area = math.PI * radius * radius
   return handle, true
 }
 
@@ -195,6 +198,7 @@ create_collider_cylinder :: proc(
     radius = radius,
     height = height,
   }
+  ptr.cross_sectional_area = math.PI * radius * radius + radius * height
   return handle, true
 }
 
@@ -216,6 +220,7 @@ create_collider_fan :: proc(
     height = height,
     angle  = angle,
   }
+  ptr.cross_sectional_area = math.PI * radius * radius + radius * height
   return handle, true
 }
 
@@ -435,36 +440,8 @@ step :: proc(self: ^World, dt: f32) {
     // Where: p=air density, v=velocity, C_d=drag coefficient, A=cross-sectional area
     vel_mag := linalg.length(body.velocity)
     if vel_mag < 0.001 do continue
-    // Calculate cross-sectional area
-    cross_section := body.cross_sectional_area
-    calculate_cross_section: if cross_section <= 0.0 {
-      // Auto-calculate from collider if available
-      if body.collider_handle.generation == 0 {
-        // No collider: fallback to mass-based estimate
-        cross_section = math.pow(body.mass, 2.0 / 3.0) * 0.1
-        break calculate_cross_section
-      }
-      collider := get(self, body.collider_handle) or_break calculate_cross_section
-      // Estimate frontal area based on collider type
-      switch c in collider.shape {
-      case SphereCollider:
-        cross_section = math.PI * c.radius * c.radius
-      case CapsuleCollider:
-        cross_section = math.PI * c.radius * c.radius
-      case BoxCollider:
-        // Frontal area of box (average of three face areas)
-        cross_section = (c.half_extents.x * c.half_extents.y + c.half_extents.y * c.half_extents.z + c.half_extents.x * c.half_extents.z) * 4.0 / 3.0
-      case CylinderCollider:
-        // Cross-section of cylinder (average of circular and rectangular face)
-        cross_section = (math.PI * c.radius * c.radius + c.radius * 2.0 * c.height) * 0.5
-      case FanCollider:
-        // Treat as cylinder for air resistance
-        cross_section = (math.PI * c.radius * c.radius + c.radius * 2.0 * c.height) * 0.5
-      case:
-        // Fallback: estimate from mass (objects with same mass are assumed same size)
-        cross_section = math.pow(body.mass, 2.0 / 3.0) * 0.1
-      }
-    }
+    collider := get(self, body.collider_handle) or_continue
+    cross_section := collider.cross_sectional_area
     drag_magnitude := 0.5 * self.air_density * vel_mag * vel_mag * body.drag_coefficient * cross_section
     drag_direction := -linalg.normalize(body.velocity)
     drag_force := drag_direction * drag_magnitude
@@ -599,7 +576,6 @@ step :: proc(self: ^World, dt: f32) {
       }
     }
     // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
-    // This prevents jitter without adding artificial velocity
     #unroll for _ in 0 ..< STABILIZATION_ITERS {
       for &contact in self.contacts {
         body_a := get(self, contact.body_a) or_continue
