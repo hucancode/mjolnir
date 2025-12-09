@@ -244,6 +244,7 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
     detail_sample_max_error  = 1.0 * 0.2,
     border_size              = 0,
   }
+  world.traverse(&engine.world, &engine.rm)
   success := build_and_visualize_navigation_mesh(
     engine,
     config,

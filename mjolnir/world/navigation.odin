@@ -9,6 +9,7 @@ import "../navigation/recast"
 import navmesh_renderer "../render/navigation"
 import "../resources"
 import "core:log"
+import "core:slice"
 import "core:math"
 import "core:math/linalg"
 
@@ -31,105 +32,53 @@ NavMeshObstacleAttachment :: struct {
   obstacle_type:       nav.NavObstacleType,
 }
 
-SceneGeometryCollector :: struct {
-  vertices:         [dynamic][3]f32,
-  indices:          [dynamic]i32,
-  area_types:       [dynamic]u8,
-  mesh_count:       i32,
-  include_filter:   proc(node: ^Node) -> bool,
-  area_type_mapper: proc(node: ^Node) -> u8,
-  world:            ^World,
-  rm:               ^resources.Manager,
-  gctx:             ^gpu.GPUContext,
-}
-
-scene_geometry_collector_init :: proc(collector: ^SceneGeometryCollector) {
-  collector.include_filter = proc(node: ^Node) -> bool {
-    _, is_mesh := node.attachment.(MeshAttachment)
-    return is_mesh
-  }
-  collector.area_type_mapper = proc(node: ^Node) -> u8 {
-    return u8(recast.RC_WALKABLE_AREA)
-  }
-}
-
-scene_geometry_collector_destroy :: proc(collector: ^SceneGeometryCollector) {
-  delete(collector.vertices)
-  delete(collector.indices)
-  delete(collector.area_types)
-}
-
-scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
-  collector := cast(^SceneGeometryCollector)ctx
-  if collector.include_filter != nil && !collector.include_filter(node) {
-    return true
-  }
-  if mesh_attachment, is_mesh := node.attachment.(MeshAttachment); is_mesh {
-    mesh := cont.get(collector.rm.meshes, mesh_attachment.handle)
-    if mesh == nil do return true
-    world_matrix := node.transform.world_matrix
-    area_type := u8(recast.RC_WALKABLE_AREA)
-    if collector.area_type_mapper != nil {
-      area_type = collector.area_type_mapper(node)
-    }
-    add_mesh_to_collector(
-      collector,
-      mesh,
-      collector.rm,
-      collector.gctx,
-      world_matrix,
-      area_type,
-    )
-    collector.mesh_count += 1
-  }
-  return true
-}
-
-add_mesh_to_collector :: proc(
-  collector: ^SceneGeometryCollector,
+add_mesh_to_navigation_geometry :: proc(
+  vertices: ^[dynamic][3]f32,
+  indices: ^[dynamic]i32,
+  area_types: ^[dynamic]u8,
   mesh: ^resources.Mesh,
   rm: ^resources.Manager,
   gctx: ^gpu.GPUContext,
   transform: matrix[4, 4]f32,
   area_type: u8,
 ) {
-  vertex_offset := i32(len(collector.vertices))
+  vertex_offset := i32(len(vertices))
   vertex_count := int(mesh.vertex_allocation.count)
-  vertices := make([]geometry.Vertex, vertex_count, context.temp_allocator)
+  mesh_vertices := make([]geometry.Vertex, vertex_count, context.temp_allocator)
   ret := gpu.get_all(
     gctx,
     &rm.vertex_buffer,
-    vertices,
+    mesh_vertices,
     int(mesh.vertex_allocation.offset),
   )
   if ret != .SUCCESS {
     log.error("Failed to read vertex data from StaticBuffer")
     return
   }
-  for vertex in vertices {
+  for vertex in mesh_vertices {
     transformed_pos :=
       (transform * [4]f32{vertex.position.x, vertex.position.y, vertex.position.z, 1.0}).xyz
-    append(&collector.vertices, transformed_pos)
+    append(vertices, transformed_pos)
   }
   index_count := int(mesh.index_allocation.count)
-  indices := make([]u32, index_count, context.temp_allocator)
+  mesh_indices := make([]u32, index_count, context.temp_allocator)
   ret = gpu.get_all(
     gctx,
     &rm.index_buffer,
-    indices,
+    mesh_indices,
     int(mesh.index_allocation.offset),
   )
   if ret != .SUCCESS {
     log.error("Failed to read index data from StaticBuffer")
     return
   }
-  for index in indices {
-    append(&collector.indices, i32(index) + vertex_offset)
+  for index in mesh_indices {
+    append(indices, i32(index) + vertex_offset)
   }
   triangle_count := index_count / 3
-  for _ in 0 ..< triangle_count {
-    append(&collector.area_types, area_type)
-  }
+  n := len(area_types)
+  resize(area_types, n + triangle_count)
+  slice.fill(area_types[n:], area_type)
 }
 
 build_navigation_mesh_from_world :: proc(
@@ -139,51 +88,59 @@ build_navigation_mesh_from_world :: proc(
   nav_sys: ^nav.NavigationSystem,
   config: recast.Config = {},
 ) -> bool {
-  collector: SceneGeometryCollector
-  scene_geometry_collector_init(&collector)
-  collector.world, collector.rm, collector.gctx = world, rm, gctx
-  defer scene_geometry_collector_destroy(&collector)
-  collector.include_filter = proc(node: ^Node) -> bool {
-    _, is_mesh := node.attachment.(MeshAttachment)
-    return is_mesh
+  vertices := make([dynamic][3]f32)
+  indices := make([dynamic]i32)
+  area_types := make([dynamic]u8)
+  defer delete(vertices)
+  defer delete(indices)
+  defer delete(area_types)
+  mesh_count := 0
+  for &entry in world.nodes.entries do if entry.active {
+    node := &entry.item
+    mesh_attachment, is_mesh := node.attachment.(MeshAttachment)
+    if !is_mesh do continue
+    mesh := cont.get(rm.meshes, mesh_attachment.handle) or_continue
+    area_type := mesh_attachment.navigation_obstacle ? u8(recast.RC_NULL_AREA) : u8(recast.RC_WALKABLE_AREA)
+    add_mesh_to_navigation_geometry(
+      &vertices,
+      &indices,
+      &area_types,
+      mesh,
+      rm,
+      gctx,
+      node.transform.world_matrix,
+      area_type,
+    )
+    mesh_count += 1
   }
-  collector.area_type_mapper = proc(node: ^Node) -> u8 {
-    return u8(recast.RC_WALKABLE_AREA)
-  }
-  traverse(
-    collector.world,
-    collector.rm,
-    &collector,
-    scene_geometry_collector_traverse,
-  )
-  if len(collector.vertices) == 0 || len(collector.indices) == 0 {
+  if len(vertices) == 0 || len(indices) == 0 {
     log.error("No geometry found in world for navigation mesh building")
     return false
   }
   log.infof(
     "Collected %d vertices, %d indices from %d meshes for world navigation mesh",
-    len(collector.vertices),
-    len(collector.indices),
-    collector.mesh_count,
+    len(vertices),
+    len(indices),
+    mesh_count,
   )
-  if len(collector.vertices) > 0 {
+  if len(vertices) > 0 {
     log.infof(
       "First vertex: (%.3f, %.3f, %.3f)",
-      collector.vertices[0].x,
-      collector.vertices[0].y,
-      collector.vertices[0].z,
+      vertices[0].x,
+      vertices[0].y,
+      vertices[0].z,
     )
-    if len(collector.vertices) > 1 {
+    if len(vertices) > 1 {
       log.infof(
         "Second vertex: (%.3f, %.3f, %.3f)",
-        collector.vertices[1].x,
-        collector.vertices[1].y,
-        collector.vertices[1].z,
+        vertices[1].x,
+        vertices[1].y,
+        vertices[1].z,
       )
     }
-    min_pos := collector.vertices[0]
-    max_pos := collector.vertices[0]
-    for vertex in collector.vertices[1:] {
+    min_pos := vertices[0]
+    max_pos := vertices[0]
+    for vertex in vertices[1:] {
       min_pos.x = min(min_pos.x, vertex.x)
       min_pos.y = min(min_pos.y, vertex.y)
       min_pos.z = min(min_pos.z, vertex.z)
@@ -203,7 +160,7 @@ build_navigation_mesh_from_world :: proc(
   }
   walkable_count := 0
   obstacle_count := 0
-  for area in collector.area_types {
+  for area in area_types {
     if area == u8(recast.RC_WALKABLE_AREA) {
       walkable_count += 1
     } else if area == u8(recast.RC_NULL_AREA) {
@@ -223,9 +180,9 @@ build_navigation_mesh_from_world :: proc(
     config.min_region_area,
   )
   geom := nav.NavigationGeometry {
-    vertices   = collector.vertices[:],
-    indices    = collector.indices[:],
-    area_types = collector.area_types[:],
+    vertices   = vertices[:],
+    indices    = indices[:],
+    area_types = area_types[:],
   }
   nav.build_navmesh(&nav_sys.nav_mesh, geom, config) or_return
   log.info("Successfully built world navigation mesh")

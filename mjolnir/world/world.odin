@@ -381,7 +381,7 @@ begin_frame :: proc(
   game_state: rawptr = nil,
   frame_index: u32 = 0,
 ) {
-  traverse(world, rm, nil, nil, frame_index)
+  traverse(world, rm, frame_index)
   world_tick_actors(world, rm, delta_time, game_state)
 }
 
@@ -472,8 +472,6 @@ process_pending_deletions :: proc(
 traverse :: proc(
   world: ^World,
   rm: ^resources.Manager = nil,
-  cb_context: rawptr = nil,
-  callback: TraversalCallback = nil,
   frame_index: u32 = 0,
 ) -> bool {
   using geometry
@@ -584,9 +582,6 @@ traverse :: proc(
         _apply_sprite_to_node_data(&data, sprite_attachment, current_node, rm)
       }
       resources.node_upload_data(rm, entry.handle, &data)
-    }
-    if callback != nil && current_node.parent_visible && current_node.visible {
-      if !callback(current_node, cb_context) do continue
     }
     for child_handle in current_node.children {
       append(
