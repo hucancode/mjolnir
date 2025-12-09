@@ -19,6 +19,7 @@ STABILIZATION_ITERS :: 1
 SLEEP_LINEAR_THRESHOLD :: 0.05
 SLEEP_ANGULAR_THRESHOLD :: 0.05
 SLEEP_TIME_THRESHOLD :: 0.5
+ENABLE_VERBOSE_LOG :: false
 
 RigidBodyHandle :: distinct cont.Handle
 ColliderHandle :: distinct cont.Handle
@@ -36,7 +37,6 @@ World :: struct {
   enable_parallel:       bool,
   thread_count:          int,
   thread_pool:           thread.Pool,
-  thread_pool_running:   bool,
 }
 
 BroadPhaseEntry :: struct {
@@ -73,14 +73,22 @@ init :: proc(
       DEFAULT_THREAD_COUNT,
     )
     thread.pool_start(&self.thread_pool)
-    self.thread_pool_running = true
+    log.infof(
+      "Physics.init: Thread pool started - running=%v, threads=%d",
+      self.thread_pool.is_running,
+      len(self.thread_pool.threads),
+    )
   }
 }
 
 destroy :: proc(self: ^World) {
-  if self.thread_pool_running {
+  if self.enable_parallel {
+    log.infof(
+      "Physics.destroy: Destroying thread pool - running=%v, threads=%d",
+      self.thread_pool.is_running,
+      len(self.thread_pool.threads),
+    )
     thread.pool_destroy(&self.thread_pool)
-    self.thread_pool_running = false
   }
   cont.destroy(self.bodies, proc(body: ^RigidBody) {})
   cont.destroy(self.colliders, proc(col: ^Collider) {})
@@ -543,7 +551,6 @@ step :: proc(self: ^World, dt: f32) {
   defer delete(candidates)
   refit_time: time.Duration
   broadphase_time: time.Duration
-  narrowphase_time: time.Duration
   prepare_time: time.Duration
   solver_time: time.Duration
   integration_time_substep: time.Duration
@@ -551,7 +558,8 @@ step :: proc(self: ^World, dt: f32) {
     // clear and redetect contacts at current positions
     refit_start := time.now()
     clear(&self.contacts)
-    if self.enable_parallel {
+    // parallel_bvh_refit are slower than sequential_bvh_refit
+    if self.enable_parallel && false {
       parallel_bvh_refit(self, self.thread_count)
     } else {
       sequential_bvh_refit(self)
@@ -565,7 +573,6 @@ step :: proc(self: ^World, dt: f32) {
     }
     collision_time := time.since(broadphase_start)
     broadphase_time += collision_time
-    narrowphase_time += collision_time
     // Prepare all contacts (compute mass matrices and bias terms)
     prepare_start := time.now()
     for &contact in self.contacts {
@@ -670,7 +677,7 @@ step :: proc(self: ^World, dt: f32) {
   avg_candidates :=
     ccd_bodies_tested > 0 ? f32(ccd_total_candidates) / f32(ccd_bodies_tested) : 0.0
   log.infof(
-    "Physics: %.2fms total | warmstart=%.2fms force=%.2fms integ=%.2fms ccd=%.2fms (fast=%d avg_cands=%.1f) bvh=%.2fms substeps=%.2fms [refit=%.2fms broad=%.2fms narrow=%.2fms prep=%.2fms solve=%.2fms integ=%.2fms] cleanup=%.2fms | bodies=%d awake=%d contacts=%d",
+    "Physics: %.2fms total | warmstart=%.2fms force=%.2fms integ=%.2fms ccd=%.2fms (fast=%d avg_cands=%.1f) bvh=%.2fms substeps=%.2fms [refit=%.2fms collision=%.2fms prep=%.2fms solve=%.2fms integ=%.2fms] cleanup=%.2fms | bodies=%d awake=%d contacts=%d",
     time.duration_milliseconds(total_time),
     time.duration_milliseconds(warmstart_prep_time),
     time.duration_milliseconds(force_application_time),
@@ -682,7 +689,6 @@ step :: proc(self: ^World, dt: f32) {
     time.duration_milliseconds(substep_time),
     time.duration_milliseconds(refit_time),
     time.duration_milliseconds(broadphase_time),
-    time.duration_milliseconds(narrowphase_time),
     time.duration_milliseconds(prepare_time),
     time.duration_milliseconds(solver_time),
     time.duration_milliseconds(integration_time_substep),
@@ -693,7 +699,7 @@ step :: proc(self: ^World, dt: f32) {
   )
 }
 
-get_body :: proc(
+get_body :: #force_inline proc(
   self: ^World,
   handle: RigidBodyHandle,
 ) -> (
@@ -703,7 +709,7 @@ get_body :: proc(
   return cont.get(self.bodies, handle)
 }
 
-get_collider :: proc(
+get_collider :: #force_inline proc(
   self: ^World,
   handle: ColliderHandle,
 ) -> (

@@ -3,13 +3,14 @@ package physics
 import cont "../containers"
 import "../geometry"
 import "core:log"
+import "core:math"
 import "core:math/linalg"
 import "core:mem"
 import "core:sync"
 import "core:thread"
 import "core:time"
 
-DEFAULT_THREAD_COUNT :: 16
+DEFAULT_THREAD_COUNT :: 12 // Match physical core count (not hyperthreaded) for best efficiency
 WARMSTART_COEF :: 0.8
 
 BVH_Refit_Task_Data :: struct {
@@ -25,10 +26,16 @@ AABB_Cache_Task_Data :: struct {
 }
 
 Collision_Detection_Task_Data :: struct {
-  physics:  ^World,
-  start:    int,
-  end:      int,
-  contacts: [dynamic]Contact,
+  physics:            ^World,
+  start:              int,
+  end:                int,
+  contacts:           [dynamic]Contact,
+  // Thread timing instrumentation
+  thread_id:          int,
+  elapsed_time:       time.Duration,
+  bodies_tested:      int,
+  candidates_found:   int,
+  narrow_phase_tests: int,
 }
 
 CCD_Task_Data :: struct {
@@ -57,9 +64,7 @@ parallel_bvh_refit :: proc(
 ) {
   primitive_count := len(physics.spatial_index.primitives)
   if primitive_count == 0 do return
-  if primitive_count < 100 ||
-     num_threads == 1 ||
-     !physics.thread_pool_running {
+  if primitive_count < 100 || num_threads == 1 {
     sequential_bvh_refit(physics)
     return
   }
@@ -86,7 +91,9 @@ parallel_bvh_refit :: proc(
       i,
     )
   }
-  thread.pool_finish(&physics.thread_pool)
+  for thread.pool_num_outstanding(&physics.thread_pool) > 0 {
+      time.sleep(time.Microsecond * 100)
+  }
   geometry.bvh_refit(&physics.spatial_index)
 }
 
@@ -106,10 +113,7 @@ aabb_cache_update_task :: proc(task: thread.Task) {
     if !entry.active do continue
     body := &entry.item
     if body.is_sleeping do continue
-    collider := get(
-      data.physics,
-      body.collider_handle,
-    ) or_continue
+    collider := get(data.physics, body.collider_handle) or_continue
     update_cached_aabb(body, collider)
   }
 }
@@ -120,7 +124,7 @@ parallel_update_aabb_cache :: proc(
 ) {
   body_count := len(physics.bodies.entries)
   if body_count == 0 do return
-  if body_count < 100 || num_threads == 1 || !physics.thread_pool_running {
+  if body_count < 100 || num_threads == 1 {
     sequential_update_aabb_cache(physics)
     return
   }
@@ -147,7 +151,9 @@ parallel_update_aabb_cache :: proc(
       i,
     )
   }
-  thread.pool_finish(&physics.thread_pool)
+  for thread.pool_num_outstanding(&physics.thread_pool) > 0 {
+      time.sleep(time.Microsecond * 100)
+  }
 }
 
 sequential_update_aabb_cache :: proc(physics: ^World) {
@@ -161,6 +167,8 @@ sequential_update_aabb_cache :: proc(physics: ^World) {
 
 collision_detection_task :: proc(task: thread.Task) {
   data := (^Collision_Detection_Task_Data)(task.data)
+  task_start := time.now()
+  defer data.elapsed_time = time.since(task_start)
   candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
   for i in data.start ..< data.end {
     bvh_entry := &data.physics.spatial_index.primitives[i]
@@ -168,12 +176,14 @@ collision_detection_task :: proc(task: thread.Task) {
     body_a := get(data.physics, handle_a) or_continue
     // Skip query for static or sleeping bodies (they don't initiate collisions)
     if body_a.is_static || body_a.is_sleeping do continue
+    data.bodies_tested += 1
     clear(&candidates)
     bvh_query_aabb_fast(
       &data.physics.spatial_index,
       bvh_entry.bounds,
       &candidates,
     )
+    data.candidates_found += len(candidates)
     for entry_b in candidates {
       handle_b := entry_b.handle
       if handle_a == handle_b do continue
@@ -181,16 +191,16 @@ collision_detection_task :: proc(task: thread.Task) {
       if handle_a.index > handle_b.index && !body_b.is_static && !body_b.is_sleeping do continue
       if body_a.is_static && body_b.is_static do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := get(
-        data.physics,
-        body_a.collider_handle,
-      ) or_continue
-      collider_b := get(
-        data.physics,
-        body_b.collider_handle,
-      ) or_continue
+      collider_a := get(data.physics, body_a.collider_handle) or_continue
+      collider_b := get(data.physics, body_b.collider_handle) or_continue
       // Bounding sphere pre-filter: cheap test before expensive narrow phase
-      bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) or_continue
+      bounding_spheres_intersect(
+        body_a.cached_sphere_center,
+        body_a.cached_sphere_radius,
+        body_b.cached_sphere_center,
+        body_b.cached_sphere_radius,
+      ) or_continue
+      data.narrow_phase_tests += 1
       is_primitive_shape := true
       // TODO: if we have custom physics shape, we must use GJK algorithm, otherwise use a fast path
       point: [3]f32
@@ -240,17 +250,19 @@ collision_detection_task :: proc(task: thread.Task) {
 }
 
 parallel_collision_detection :: proc(
-  physics: ^World,
+  self: ^World,
   num_threads := DEFAULT_THREAD_COUNT,
 ) {
-  primitive_count := len(physics.spatial_index.primitives)
+  parallel_start := time.now()
+  primitive_count := len(self.spatial_index.primitives)
   if primitive_count == 0 do return
-  if primitive_count < 100 ||
-     num_threads == 1 ||
-     !physics.thread_pool_running {
-    sequential_collision_detection(physics)
+  if primitive_count < 100 || num_threads == 1 {
+    sequential_collision_detection(self)
     return
   }
+  setup_start := time.now()
+  // Simple equal partitioning - 1 task per thread
+  // More complex load balancing strategies have too much overhead
   chunk_size := (primitive_count + num_threads - 1) / num_threads
   task_data_array := make(
     []Collision_Detection_Task_Data,
@@ -262,36 +274,105 @@ parallel_collision_detection :: proc(
     end := min(start + chunk_size, primitive_count)
     if start >= primitive_count do break
     task_data_array[i] = Collision_Detection_Task_Data {
-      physics  = physics,
-      start    = start,
-      end      = end,
-      contacts = make([dynamic]Contact, 0, 100, context.temp_allocator),
+      physics   = self,
+      start     = start,
+      end       = end,
+      contacts  = make([dynamic]Contact, 0, 100, context.temp_allocator),
+      thread_id = i,
     }
     thread.pool_add_task(
-      &physics.thread_pool,
-      mem.nil_allocator(),
+      &self.thread_pool,
+      context.allocator,
       collision_detection_task,
       &task_data_array[i],
       i,
     )
   }
-  thread.pool_finish(&physics.thread_pool)
+  setup_time := time.since(setup_start)
+  parallel_exec_start := time.now()
+  // Wait for all tasks without stopping pool (pool_finish would terminate threads)
+  for thread.pool_num_outstanding(&self.thread_pool) > 0 {
+    time.sleep(time.Microsecond * 100)
+  }
+  parallel_exec_time := time.since(parallel_exec_start)
+  // Collect per-thread statistics
+  collection_start := time.now()
+  total_bodies_tested := 0
+  total_candidates := 0
+  total_narrow_tests := 0
+  min_time := time.Duration(math.F64_MAX)
+  max_time := time.Duration(0)
+  total_time := time.Duration(0)
+
   for &task_data in task_data_array {
     for contact in task_data.contacts {
-      append(&physics.contacts, contact)
+      append(&self.contacts, contact)
     }
+    if task_data.bodies_tested > 0 {
+      total_bodies_tested += task_data.bodies_tested
+      total_candidates += task_data.candidates_found
+      total_narrow_tests += task_data.narrow_phase_tests
+      min_time = min(min_time, task_data.elapsed_time)
+      max_time = max(max_time, task_data.elapsed_time)
+      total_time += task_data.elapsed_time
+    }
+  }
+  collection_time := time.since(collection_start)
+  total_parallel_time := time.since(parallel_start)
+
+  // Log detailed thread performance
+  avg_time := total_time / time.Duration(num_threads)
+  variance_pct := 0.0
+  if avg_time > 0 {
+    variance_pct = f64(max_time - min_time) / f64(avg_time) * 100.0
+  }
+  when ENABLE_VERBOSE_LOG {
+    log.infof(
+      "Thread Timing | min=%.2fms avg=%.2fms max=%.2fms variance=%.1f%%",
+      time.duration_milliseconds(min_time),
+      time.duration_milliseconds(avg_time),
+      time.duration_milliseconds(max_time),
+      variance_pct,
+    )
+    // Log timing breakdown
+    actual_pool_threads := len(self.thread_pool.threads)
+    speedup := f64(total_time) / f64(parallel_exec_time)
+    efficiency := speedup / f64(num_threads) * 100.0
+    log.infof(
+      "Parallel Timing | total=%.2fms (setup=%.2fms exec=%.2fms collect=%.2fms) | max_thread=%.2fms speedup=%.1fx efficiency=%.1f%% | pool_threads=%d",
+      time.duration_milliseconds(total_parallel_time),
+      time.duration_milliseconds(setup_time),
+      time.duration_milliseconds(parallel_exec_time),
+      time.duration_milliseconds(collection_time),
+      time.duration_milliseconds(max_time),
+      speedup,
+      efficiency,
+      actual_pool_threads,
+    )
   }
 }
 
 // Phase 1: Retest persistent contacts from previous frame (no BVH query needed)
-retest_persistent_contacts :: proc(physics: ^World) -> (persistent_tested: int) {
+retest_persistent_contacts :: proc(
+  physics: ^World,
+) -> (
+  persistent_tested: int,
+) {
   tested_pairs := make(map[u64]bool, context.temp_allocator)
   for pair_hash, prev_contact in physics.prev_contacts {
     body_a := get(physics, prev_contact.body_a) or_continue
     body_b := get(physics, prev_contact.body_b) or_continue
     // early rejection
-    geometry.aabb_intersects(body_a.cached_aabb, body_b.cached_aabb) or_continue
-    bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) or_continue
+    geometry.aabb_intersects(
+      body_a.cached_aabb,
+      body_b.cached_aabb,
+    ) or_continue
+    bounding_spheres_intersect(
+      body_a.cached_sphere_center,
+      body_a.cached_sphere_radius,
+      body_b.cached_sphere_center,
+      body_b.cached_sphere_radius,
+    ) or_continue
     // Static-static pairs don't need retesting
     if body_a.is_static && body_b.is_static do continue
     if body_a.trigger_only || body_b.trigger_only do continue
@@ -356,14 +437,8 @@ sequential_collision_detection :: proc(physics: ^World) {
       if handle_a.index > handle_b.index && !body_b.is_static && !body_b.is_sleeping do continue
       if body_a.is_static && body_b.is_static do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := get(
-        physics,
-        body_a.collider_handle,
-      ) or_continue
-      collider_b := get(
-        physics,
-        body_b.collider_handle,
-      ) or_continue
+      collider_a := get(physics, body_a.collider_handle) or_continue
+      collider_b := get(physics, body_b.collider_handle) or_continue
       // Bounding sphere pre-filter: cheap test before expensive narrow phase
       if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
       is_primitive_shape := true
@@ -441,10 +516,7 @@ ccd_task :: proc(task: thread.Task) {
     sync.mutex_lock(data.stats_mtx)
     data.bodies_tested += 1
     sync.mutex_unlock(data.stats_mtx)
-    collider_a := get(
-      data.physics,
-      body_a.collider_handle,
-    ) or_continue
+    collider_a := get(data.physics, body_a.collider_handle) or_continue
     motion := body_a.velocity * data.dt
     earliest_toi := f32(1.0)
     earliest_normal := linalg.VECTOR3F32_Y_AXIS
@@ -472,10 +544,7 @@ ccd_task :: proc(task: thread.Task) {
       handle_b := candidate.handle
       if u32(idx_a) == handle_b.index do continue
       body_b := get(data.physics, handle_b) or_continue
-      collider_b := get(
-        data.physics,
-        body_b.collider_handle,
-      ) or_continue
+      collider_b := get(data.physics, body_b.collider_handle) or_continue
       pos_b := body_b.position
       toi := swept_test(
         collider_a,
@@ -533,7 +602,7 @@ parallel_ccd :: proc(
 ) {
   body_count := len(physics.bodies.entries)
   if body_count == 0 do return
-  if body_count < 100 || num_threads == 1 || !physics.thread_pool_running {
+  if body_count < 100 || num_threads == 1 {
     return sequential_ccd(physics, dt, ccd_handled)
   }
   chunk_size := (body_count + num_threads - 1) / num_threads
@@ -559,7 +628,9 @@ parallel_ccd :: proc(
       i,
     )
   }
-  thread.pool_finish(&physics.thread_pool)
+  for thread.pool_num_outstanding(&physics.thread_pool) > 0 {
+      time.sleep(time.Microsecond * 100)
+  }
   for &task_data in task_data_array {
     bodies_tested += task_data.bodies_tested
     total_candidates += task_data.total_candidates
