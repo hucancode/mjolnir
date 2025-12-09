@@ -989,10 +989,6 @@ build_and_visualize_navigation_mesh :: proc(
   )
 }
 
-create_navigation_context :: proc(engine: ^Engine) -> bool {
-  return nav.create_context(&engine.nav_sys)
-}
-
 nav_find_path :: proc(
   engine: ^Engine,
   start_pos: [3]f32,

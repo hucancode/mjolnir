@@ -254,7 +254,7 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
   }
   demo_state.nav_mesh_ready = true
   log.info("Navigation mesh built successfully")
-  context_ok := nav.create_context(&engine.nav_sys)
+  context_ok := nav.init(&engine.nav_sys)
   if !context_ok {
     log.error("Failed to create navigation context")
     return

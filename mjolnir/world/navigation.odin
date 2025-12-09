@@ -227,9 +227,7 @@ build_navigation_mesh_from_world :: proc(
     indices    = collector.indices[:],
     area_types = collector.area_types[:],
   }
-  navmesh, build_ok := nav.build_navmesh_from_geometry(geom, config)
-  if !build_ok do return false
-  if !nav.set_navmesh(nav_sys, navmesh) do return false
+  nav.build_navmesh(&nav_sys.nav_mesh, geom, config) or_return
   log.info("Successfully built world navigation mesh")
   return true
 }
@@ -294,16 +292,13 @@ build_and_visualize_navigation_mesh :: proc(
   renderer: ^navmesh_renderer.Renderer,
   config: recast.Config = {},
 ) -> bool {
-  if !build_navigation_mesh_from_world(
+  build_navigation_mesh_from_world(
     world,
     rm,
     gctx,
     nav_sys,
     config,
-  ) {
-    return false
-  }
-  if !nav_sys.has_mesh do return false
+  ) or_return
   tile := detour.get_tile_at(&nav_sys.nav_mesh.detour_mesh, 0, 0, 0)
   if tile == nil || tile.header == nil {
     log.error("Failed to get navigation mesh tile for visualization")
