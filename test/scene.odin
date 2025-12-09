@@ -207,20 +207,9 @@ traverse_scene_benchmark :: proc(
     light_count: u32,
     mesh_count:  u32,
   }
-  callback :: proc(node: ^world.Node, cb_context: rawptr) -> bool {
-    using world
-    ctx := (^Context)(cb_context)
-    #partial switch inner in node.attachment {
-    case MeshAttachment:
-      ctx.mesh_count += 1
-    case LightAttachment:
-      ctx.light_count += 1
-    }
-    return true
-  }
   for _ in 0 ..< options.rounds {
     ctx: Context
-    traverse(scene, nil, &ctx, callback)
+    traverse(scene, nil)
     options.processed += size_of(Node) * len(scene.nodes.entries)
   }
   return nil
@@ -348,46 +337,4 @@ test_scene_memory_cleanup :: proc(t: ^testing.T) {
   for i in 0 ..< 1000 {
     spawn(&scene)
   }
-}
-
-@(test)
-test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
-  using world
-  scene: World
-  init(&scene)
-  defer shutdown(&scene, nil, nil)
-  spawn(
-    &scene,
-    attachment = LightAttachment {
-      // In reality we would need valid light
-    },
-  )
-  spawn(
-    &scene,
-    attachment = MeshAttachment {
-      // In reality we would need valid mesh handle
-    },
-  )
-  Context :: struct {
-    light_count: int,
-    mesh_count:  int,
-  }
-  callback :: proc(node: ^world.Node, ctx: rawptr) -> bool {
-    using world
-    counter := (^Context)(ctx)
-    #partial switch attachment in node.attachment {
-    case LightAttachment:
-      counter.light_count += 1
-    case MeshAttachment:
-      counter.mesh_count += 1
-    }
-    return true
-  }
-  ctx := Context {
-    light_count = 0,
-    mesh_count  = 0,
-  }
-  world.traverse(&scene, nil, &ctx, callback)
-  testing.expect_value(t, ctx.light_count, 1)
-  testing.expect_value(t, ctx.mesh_count, 1)
 }
