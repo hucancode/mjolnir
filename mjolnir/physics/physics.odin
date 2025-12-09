@@ -57,7 +57,7 @@ init :: proc(
   self.spatial_index = geometry.BVH(BroadPhaseEntry) {
     nodes = make([dynamic]geometry.BVHNode),
     primitives = make([dynamic]BroadPhaseEntry),
-    bounds_func = proc(entry: BroadPhaseEntry) -> geometry.Aabb {
+    bounds_func = #force_inline proc(entry: BroadPhaseEntry) -> geometry.Aabb {
       return entry.bounds
     },
   }

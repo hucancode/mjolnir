@@ -82,7 +82,6 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
     bvh.primitives[i] = items[prim.index]
   }
   flatten_bvh(bvh, root)
-  // No need to free build nodes - arena will clean up
 }
 
 @(private)
