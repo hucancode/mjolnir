@@ -559,7 +559,7 @@ step :: proc(self: ^World, dt: f32) {
     refit_start := time.now()
     clear(&self.contacts)
     // parallel_bvh_refit are slower than sequential_bvh_refit
-    if self.enable_parallel && false {
+    if self.enable_parallel {
       parallel_bvh_refit(self, self.thread_count)
     } else {
       sequential_bvh_refit(self)

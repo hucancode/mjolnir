@@ -67,11 +67,26 @@ CCD_Task_Data :: struct {
   stats_mtx:        ^sync.Mutex,
 }
 
+CCD_Work_Queue :: struct {
+  current_index: i32,
+  total_count:   int,
+}
+
+CCD_Task_Data_Dynamic :: struct {
+  physics:          ^World,
+  work_queue:       ^CCD_Work_Queue,
+  dt:               f32,
+  ccd_handled:      []bool,
+  bodies_tested:    int,
+  total_candidates: int,
+}
+
 bvh_refit_task :: proc(task: thread.Task) {
   data := (^BVH_Refit_Task_Data)(task.data)
   for i in data.start ..< data.end {
     bvh_entry := &data.physics.spatial_index.primitives[i]
     body := get(data.physics, bvh_entry.handle) or_continue
+    if body.is_static || body.is_sleeping do continue
     bvh_entry.bounds = body.cached_aabb
   }
 }
@@ -118,6 +133,7 @@ parallel_bvh_refit :: proc(
 sequential_bvh_refit :: proc(physics: ^World) {
   for &bvh_entry in physics.spatial_index.primitives {
     body := get(physics, bvh_entry.handle) or_continue
+    if body.is_static || body.is_sleeping do continue
     bvh_entry.bounds = body.cached_aabb
   }
   geometry.bvh_refit(&physics.spatial_index)
@@ -698,6 +714,81 @@ ccd_task :: proc(task: thread.Task) {
   }
 }
 
+ccd_task_dynamic :: proc(task: thread.Task) {
+  data := (^CCD_Task_Data_Dynamic)(task.data)
+  ccd_threshold :: 5.0
+  ccd_candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  BATCH_SIZE :: 32
+  for {
+    start_idx := i32(sync.atomic_add(&data.work_queue.current_index, i32(BATCH_SIZE)))
+    if int(start_idx) >= data.work_queue.total_count do break
+    end_idx := min(int(start_idx) + BATCH_SIZE, data.work_queue.total_count)
+    for idx_a in int(start_idx) ..< end_idx {
+      if idx_a >= len(data.physics.bodies.entries) do break
+      entry_a := &data.physics.bodies.entries[idx_a]
+      if !entry_a.active do continue
+      body_a := &entry_a.item
+      if body_a.is_static || body_a.trigger_only || body_a.is_sleeping do continue
+      velocity_mag := linalg.length(body_a.velocity)
+      if velocity_mag < ccd_threshold do continue
+      data.bodies_tested += 1
+      collider_a := get(data.physics, body_a.collider_handle) or_continue
+      motion := body_a.velocity * data.dt
+      earliest_toi := f32(1.0)
+      earliest_normal := linalg.VECTOR3F32_Y_AXIS
+      earliest_body_b: ^RigidBody = nil
+      has_ccd_hit := false
+      current_aabb := body_a.cached_aabb
+      swept_aabb := current_aabb
+      #unroll for i in 0 ..< 3 {
+        if motion[i] < 0 {
+          swept_aabb.min[i] += motion[i]
+        } else {
+          swept_aabb.max[i] += motion[i]
+        }
+      }
+      clear(&ccd_candidates)
+      bvh_query_aabb_fast(&data.physics.spatial_index, swept_aabb, &ccd_candidates)
+      data.total_candidates += len(ccd_candidates)
+      for candidate in ccd_candidates {
+        handle_b := candidate.handle
+        if u32(idx_a) == handle_b.index do continue
+        body_b := get(data.physics, handle_b) or_continue
+        collider_b := get(data.physics, body_b.collider_handle) or_continue
+        toi := swept_test(collider_a, body_a.position, body_a.rotation, motion, collider_b, body_b.position, body_b.rotation)
+        if toi.has_impact && toi.time < earliest_toi {
+          earliest_toi = toi.time
+          earliest_normal = toi.normal
+          earliest_body_b = body_b
+          has_ccd_hit = true
+        }
+      }
+      if has_ccd_hit && earliest_toi < 0.99 {
+        safe_time := earliest_toi * 0.98
+        body_a.position += body_a.velocity * data.dt * safe_time
+        update_cached_aabb(body_a, collider_a)
+        vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
+        if vel_along_normal < 0 {
+          wake_up(body_a)
+          if earliest_body_b != nil do wake_up(earliest_body_b)
+          restitution := body_a.restitution
+          if earliest_body_b != nil {
+            restitution = (body_a.restitution + earliest_body_b.restitution) * 0.5
+          }
+          body_a.velocity -= earliest_normal * vel_along_normal * (1.0 + restitution)
+          friction := body_a.friction
+          if earliest_body_b != nil {
+            friction = (body_a.friction + earliest_body_b.friction) * 0.5
+          }
+          tangent_vel := body_a.velocity - earliest_normal * linalg.dot(body_a.velocity, earliest_normal)
+          body_a.velocity -= tangent_vel * friction * 0.5
+        }
+        data.ccd_handled[idx_a] = true
+      }
+    }
+  }
+}
+
 parallel_ccd :: proc(
   physics: ^World,
   dt: f32,
@@ -712,25 +803,22 @@ parallel_ccd :: proc(
   if body_count < 100 || num_threads == 1 {
     return sequential_ccd(physics, dt, ccd_handled)
   }
-  chunk_size := (body_count + num_threads - 1) / num_threads
-  task_data_array := make([]CCD_Task_Data, num_threads, context.temp_allocator)
-  stats_mtx: sync.Mutex
+  work_queue := CCD_Work_Queue {
+    current_index = 0,
+    total_count   = body_count,
+  }
+  task_data_array := make([]CCD_Task_Data_Dynamic, num_threads, context.temp_allocator)
   for i in 0 ..< num_threads {
-    start := i * chunk_size
-    end := min(start + chunk_size, body_count)
-    if start >= body_count do break
-    task_data_array[i] = CCD_Task_Data {
+    task_data_array[i] = CCD_Task_Data_Dynamic {
       physics     = physics,
-      start       = start,
-      end         = end,
+      work_queue  = &work_queue,
       dt          = dt,
       ccd_handled = ccd_handled,
-      stats_mtx   = &stats_mtx,
     }
     thread.pool_add_task(
       &physics.thread_pool,
       mem.nil_allocator(),
-      ccd_task,
+      ccd_task_dynamic,
       &task_data_array[i],
       i,
     )
