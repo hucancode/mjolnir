@@ -38,6 +38,24 @@ Collision_Detection_Task_Data :: struct {
   narrow_phase_tests: int,
 }
 
+// Shared work queue for dynamic load balancing
+Collision_Work_Queue :: struct {
+  current_index: i32,
+  total_count:   int,
+}
+
+Collision_Detection_Task_Data_Dynamic :: struct {
+  physics:            ^World,
+  work_queue:         ^Collision_Work_Queue,
+  contacts:           [dynamic]Contact,
+  // Thread timing instrumentation
+  thread_id:          int,
+  elapsed_time:       time.Duration,
+  bodies_tested:      int,
+  candidates_found:   int,
+  narrow_phase_tests: int,
+}
+
 CCD_Task_Data :: struct {
   physics:          ^World,
   start:            int,
@@ -249,6 +267,97 @@ collision_detection_task :: proc(task: thread.Task) {
   }
 }
 
+// Dynamic collision detection task - pulls work atomically from shared queue
+collision_detection_task_dynamic :: proc(task: thread.Task) {
+  data := (^Collision_Detection_Task_Data_Dynamic)(task.data)
+  task_start := time.now()
+  defer data.elapsed_time = time.since(task_start)
+  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
+  BATCH_SIZE :: 32 // Process bodies in batches to reduce atomic contention
+  for {
+    // Atomically claim next batch of work
+    start_idx := i32(sync.atomic_add(&data.work_queue.current_index, i32(BATCH_SIZE)))
+    if int(start_idx) >= data.work_queue.total_count do break
+    end_idx := min(int(start_idx) + BATCH_SIZE, data.work_queue.total_count)
+    for i in int(start_idx) ..< end_idx {
+      bvh_entry := &data.physics.spatial_index.primitives[i]
+      handle_a := bvh_entry.handle
+      body_a := get(data.physics, handle_a) or_continue
+      // Skip query for static or sleeping bodies (they don't initiate collisions)
+      if body_a.is_static || body_a.is_sleeping do continue
+      data.bodies_tested += 1
+      clear(&candidates)
+      bvh_query_aabb_fast(
+        &data.physics.spatial_index,
+        bvh_entry.bounds,
+        &candidates,
+      )
+      data.candidates_found += len(candidates)
+      for entry_b in candidates {
+        handle_b := entry_b.handle
+        if handle_a == handle_b do continue
+        body_b := get(data.physics, handle_b) or_continue
+        if handle_a.index > handle_b.index && !body_b.is_static && !body_b.is_sleeping do continue
+        if body_a.is_static && body_b.is_static do continue
+        if body_a.trigger_only || body_b.trigger_only do continue
+        collider_a := get(data.physics, body_a.collider_handle) or_continue
+        collider_b := get(data.physics, body_b.collider_handle) or_continue
+        // Bounding sphere pre-filter: cheap test before expensive narrow phase
+        bounding_spheres_intersect(
+          body_a.cached_sphere_center,
+          body_a.cached_sphere_radius,
+          body_b.cached_sphere_center,
+          body_b.cached_sphere_radius,
+        ) or_continue
+        data.narrow_phase_tests += 1
+        is_primitive_shape := true
+        point: [3]f32
+        normal: [3]f32
+        penetration: f32
+        hit: bool
+        if is_primitive_shape {
+          point, normal, penetration, hit = test_collision(
+            collider_a,
+            body_a.position,
+            body_a.rotation,
+            collider_b,
+            body_b.position,
+            body_b.rotation,
+          )
+        } else {
+          point, normal, penetration, hit = test_collision_gjk(
+            collider_a,
+            body_a.position,
+            body_a.rotation,
+            collider_b,
+            body_b.position,
+            body_b.rotation,
+          )
+        }
+        if !hit do continue
+        // Wake up bodies involved in collision
+        if body_a.is_sleeping do wake_up(body_a)
+        if body_b.is_sleeping do wake_up(body_b)
+        contact := Contact {
+          body_a      = handle_a,
+          body_b      = handle_b,
+          point       = point,
+          normal      = normal,
+          penetration = penetration,
+          restitution = (body_a.restitution + body_b.restitution) * 0.5,
+          friction    = (body_a.friction + body_b.friction) * 0.5,
+        }
+        hash := collision_pair_hash(handle_a, handle_b)
+        if prev_contact, found := data.physics.prev_contacts[hash]; found {
+          contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
+          contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
+        }
+        append(&data.contacts, contact)
+      }
+    }
+  }
+}
+
 parallel_collision_detection :: proc(
   self: ^World,
   num_threads := DEFAULT_THREAD_COUNT,
@@ -261,29 +370,27 @@ parallel_collision_detection :: proc(
     return
   }
   setup_start := time.now()
-  // Simple equal partitioning - 1 task per thread
-  // More complex load balancing strategies have too much overhead
-  chunk_size := (primitive_count + num_threads - 1) / num_threads
+  // Dynamic work queue - threads pull work atomically to balance load
+  work_queue := Collision_Work_Queue {
+    current_index = 0,
+    total_count   = primitive_count,
+  }
   task_data_array := make(
-    []Collision_Detection_Task_Data,
+    []Collision_Detection_Task_Data_Dynamic,
     num_threads,
     context.temp_allocator,
   )
   for i in 0 ..< num_threads {
-    start := i * chunk_size
-    end := min(start + chunk_size, primitive_count)
-    if start >= primitive_count do break
-    task_data_array[i] = Collision_Detection_Task_Data {
-      physics   = self,
-      start     = start,
-      end       = end,
-      contacts  = make([dynamic]Contact, 0, 100, context.temp_allocator),
-      thread_id = i,
+    task_data_array[i] = Collision_Detection_Task_Data_Dynamic {
+      physics    = self,
+      work_queue = &work_queue,
+      contacts   = make([dynamic]Contact, 0, 100, context.temp_allocator),
+      thread_id  = i,
     }
     thread.pool_add_task(
       &self.thread_pool,
       context.allocator,
-      collision_detection_task,
+      collision_detection_task_dynamic,
       &task_data_array[i],
       i,
     )
