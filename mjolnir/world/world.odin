@@ -78,6 +78,7 @@ NodeTag :: enum u32 {
   PROJECTILE, // projectile entity
   STATIC, // static, non-moving entity
   DYNAMIC, // dynamic, moving entity
+  ENVIRONMENT, // static environment mesh (walls, floors, etc.)
 }
 
 NodeTagSet :: bit_set[NodeTag;u32]

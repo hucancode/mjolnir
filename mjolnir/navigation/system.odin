@@ -273,3 +273,45 @@ find_nearest_point :: proc(
   }
   return {}, false
 }
+
+build_geometry :: proc(nav_mesh: ^NavMesh) -> geometry.Geometry {
+  vertices := make([dynamic]geometry.Vertex, 0, 4096)
+  indices := make([dynamic]u32, 0, 16384)
+  defer delete(vertices)
+  defer delete(indices)
+  for i in 0 ..< nav_mesh.detour_mesh.max_tiles {
+    tile := &nav_mesh.detour_mesh.tiles[i]
+    if tile.header == nil do continue
+    vertex_base := u32(len(vertices))
+    for poly_idx in 0 ..< i32(tile.header.poly_count) {
+      poly := tile.polys[poly_idx]
+      detail_mesh := tile.detail_meshes[poly_idx]
+      for tri_idx in 0 ..< i32(detail_mesh.tri_count) {
+        tri := tile.detail_tris[detail_mesh.tri_base + u32(tri_idx)]
+        for l in 0 ..< 3 {
+          vert_idx := tri[l]
+          pos: [3]f32
+          if vert_idx < poly.vert_count {
+            pos = tile.verts[poly.verts[vert_idx]]
+          } else {
+            detail_idx := detail_mesh.vert_base + u32(vert_idx - poly.vert_count)
+            pos = tile.detail_verts[detail_idx]
+          }
+          append(&vertices, geometry.Vertex{position = pos})
+        }
+      }
+    }
+    tri_count := (len(vertices) - int(vertex_base)) / 3
+    for t in 0 ..< tri_count {
+      base_idx := vertex_base + u32(t * 3)
+      append(&indices, base_idx, base_idx + 1, base_idx + 2)
+    }
+  }
+  result := geometry.Geometry {
+    vertices = make([]geometry.Vertex, len(vertices)),
+    indices  = make([]u32, len(indices)),
+  }
+  copy(result.vertices, vertices[:])
+  copy(result.indices, indices[:])
+  return result
+}
