@@ -155,7 +155,7 @@ find_path :: proc(
 ) -> (
   path: [][3]f32,
   ok: bool,
-) {
+) #optional_ok {
   half_extents := [3]f32{2.0, 4.0, 2.0}
   status, start_ref, start_pos := detour.find_nearest_poly(
     &sys.nav_mesh_query,

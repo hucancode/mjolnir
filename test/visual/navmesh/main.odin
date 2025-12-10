@@ -95,7 +95,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
     demo_state.end_pos,
     {1, 0, 0, 1},
   )
-  find_path(engine)
+  start_find_path(engine)
   // engine.debug_ui_enabled = true
   log.info("Navigation mesh demo setup complete")
 }
@@ -268,7 +268,7 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
   log.info("Navigation mesh building and visualization complete")
 }
 
-find_path :: proc(engine: ^mjolnir.Engine) {
+start_find_path :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   if !demo_state.nav_context_ready {
     log.error("No navigation context available for pathfinding")
@@ -283,7 +283,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
     demo_state.end_pos.y,
     demo_state.end_pos.z,
   )
-  path := nav_find_path(
+  path := find_path(
     engine,
     demo_state.start_pos,
     demo_state.end_pos,
@@ -506,7 +506,7 @@ generate_random_path :: proc(engine: ^mjolnir.Engine) {
     demo_state.end_pos,
     {1, 0, 0, 1},
   )
-  find_path(engine)
+  start_find_path(engine)
 }
 
 demo_mouse_pressed :: proc(
@@ -558,7 +558,7 @@ demo_mouse_pressed :: proc(
         pos,
         {1, 0, 0, 1},
       )
-      find_path(engine)
+      start_find_path(engine)
     } else {
       log.warn("No valid navmesh position found at right click location")
     }

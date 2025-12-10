@@ -150,8 +150,7 @@ update_world :: proc "contextless" (
   t: ^Transform,
   parent: matrix[4, 4]f32,
 ) -> bool {
-  new_world_matrix := parent * t.local_matrix
-  t.world_matrix = new_world_matrix
+  t.world_matrix = parent * t.local_matrix
   t.is_dirty = false
   return true
 }

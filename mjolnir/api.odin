@@ -989,22 +989,18 @@ build_and_visualize_navigation_mesh :: proc(
   )
 }
 
-nav_find_path :: proc(
+find_path :: proc(
   engine: ^Engine,
   start_pos: [3]f32,
   end_pos: [3]f32,
   max_path_length: i32 = 256,
-) -> [][3]f32 {
-  path, success := nav.find_path(
+) -> (path: [][3]f32, ok: bool) #optional_ok {
+  return nav.find_path(
     &engine.nav_sys,
     start_pos,
     end_pos,
     max_path_length,
   )
-  if !success {
-    return nil
-  }
-  return path
 }
 
 nav_is_position_walkable :: proc(engine: ^Engine, position: [3]f32) -> bool {
