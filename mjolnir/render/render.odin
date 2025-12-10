@@ -8,6 +8,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
+import "debug_draw"
 import "debug_ui"
 import "geometry"
 import "lighting"
@@ -27,6 +28,7 @@ Manager :: struct {
   transparency: transparency.Renderer,
   particles:    particles.Renderer,
   navigation:   navigation.Renderer,
+  debug_draw:   debug_draw.Renderer,
   post_process: post_process.Renderer,
   debug_ui:     debug_ui.Renderer,
   retained_ui:  retained_ui.Manager,
@@ -91,7 +93,7 @@ init :: proc(
     swapchain_extent.height,
     swapchain_format,
     .D32_SFLOAT,
-    {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .POST_PROCESS},
+    {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .DEBUG_DRAW, .POST_PROCESS},
     {3, 4, 3}, // Camera slightly above and diagonal to origin
     {0, 0, 0}, // Looking at origin
     math.PI * 0.5, // FOV
@@ -167,6 +169,7 @@ init :: proc(
     rm,
   ) or_return
   navigation.init(&self.navigation, gctx, rm) or_return
+  debug_draw.init(&self.debug_draw, gctx, rm) or_return
   return .SUCCESS
 }
 
@@ -177,6 +180,7 @@ shutdown :: proc(
 ) {
   retained_ui.shutdown(&self.retained_ui, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
+  debug_draw.shutdown(&self.debug_draw, gctx)
   navigation.shutdown(&self.navigation, gctx)
   post_process.shutdown(&self.post_process, gctx, rm)
   particles.shutdown(&self.particles, gctx)
@@ -398,6 +402,32 @@ record_transparency_pass :: proc(
     camera.sprite_draw_count[frame_index].buffer,
   )
   transparency.end_pass(&self.transparency, command_buffer)
+  return .SUCCESS
+}
+
+record_debug_draw_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  rm: ^resources.Manager,
+  camera_handle: resources.CameraHandle,
+  command_buffer: vk.CommandBuffer,
+) -> vk.Result {
+  debug_draw.update(&self.debug_draw, rm)
+  debug_draw.begin_pass(
+    &self.debug_draw,
+    camera_handle,
+    command_buffer,
+    rm,
+    frame_index,
+  )
+  debug_draw.render(
+    &self.debug_draw,
+    camera_handle,
+    command_buffer,
+    rm,
+    frame_index,
+  )
+  debug_draw.end_pass(&self.debug_draw, command_buffer)
   return .SUCCESS
 }
 

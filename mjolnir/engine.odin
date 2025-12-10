@@ -738,6 +738,15 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
         command_buffer,
       )
     }
+    if resources.PassType.DEBUG_DRAW in cam.enabled_passes {
+      render.record_debug_draw_pass(
+        &self.render,
+        self.frame_index,
+        &self.rm,
+        cam_handle,
+        command_buffer,
+      )
+    }
   }
   render.record_post_process_pass(
     &self.render,

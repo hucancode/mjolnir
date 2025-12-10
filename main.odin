@@ -529,6 +529,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     scale(engine, handle, 0.2)
   }
+  when true {
+    debug_sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
+    translation := linalg.matrix4_translate_f32({0, 5, 0})
+    scale_mat := linalg.matrix4_scale_f32({5, 5, 5})
+    transform := translation * scale_mat
+    debug_handle, ok := debug_draw_spawn_mesh_temporary(
+      engine,
+      debug_sphere_mesh,
+      transform,
+      duration_seconds = 5.0,
+      color = {1.0, 1.0, 1.0, 0.4}, // White with alpha 0.4
+      style = .RANDOM_COLOR,
+      bypass_depth = true,
+    )
+  }
   add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
   add_crosshatch(engine, [2]f32{1280, 720})
