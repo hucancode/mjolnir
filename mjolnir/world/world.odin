@@ -29,7 +29,6 @@ MeshAttachment :: struct {
   material:            resources.MaterialHandle,
   skinning:            Maybe(NodeSkinning),
   cast_shadow:         bool,
-  navigation_obstacle: bool,
 }
 
 EmitterAttachment :: struct {
@@ -55,8 +54,6 @@ NodeAttachment :: union {
   MeshAttachment,
   EmitterAttachment,
   ForceFieldAttachment,
-  NavMeshAgentAttachment,
-  NavMeshObstacleAttachment,
   SpriteAttachment,
   RigidBodyAttachment,
 }
@@ -151,10 +148,6 @@ update_node_tags :: proc(node: ^Node) {
     node.tags |= {.EMITTER}
   case ForceFieldAttachment:
     node.tags |= {.FORCEFIELD}
-  case NavMeshAgentAttachment:
-    node.tags |= {.NAVMESH_AGENT}
-  case NavMeshObstacleAttachment:
-    node.tags |= {.NAVMESH_OBSTACLE}
   }
   if node.visible && node.parent_visible {
     node.tags |= {.VISIBLE}
@@ -322,7 +315,6 @@ spawn_child :: proc(
         if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
         if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
         if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
-        if mesh_attachment.navigation_obstacle do data.flags |= {.NAVIGATION_OBSTACLE}
         if material, has_mat := cont.get(rm.materials, mesh_attachment.material);
            has_mat {
           switch material.type {
@@ -340,10 +332,6 @@ spawn_child :: proc(
       if sprite_attachment, has_sprite := node.attachment.(SpriteAttachment);
          has_sprite {
         _apply_sprite_to_node_data(&data, sprite_attachment, node, rm)
-      }
-      if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment);
-         is_obstacle {
-        data.flags |= {.NAVIGATION_OBSTACLE}
       }
       resources.node_upload_data(rm, handle, &data)
   }

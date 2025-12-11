@@ -935,63 +935,6 @@ update_material_texture :: proc(
   return result == .SUCCESS
 }
 
-build_navigation_mesh_from_world :: proc(
-  engine: ^Engine,
-  cell_size: f32 = 0.3,
-  cell_height: f32 = 0.2,
-  agent_height: f32 = 2.0,
-  agent_radius: f32 = 0.6,
-  agent_max_climb: f32 = 0.9,
-  agent_max_slope: f32 = math.PI * 0.25,
-  region_min_size: f32 = 8.0,
-  region_merge_size: f32 = 20.0,
-  edge_max_len: f32 = 12.0,
-  edge_max_error: f32 = 1.3,
-  verts_per_poly: f32 = 6.0,
-  detail_sample_dist: f32 = 6.0,
-  detail_sample_max_error: f32 = 1.0,
-) -> bool {
-  config: recast.Config
-  config.cs = cell_size
-  config.ch = cell_height
-  config.walkable_height = i32(math.ceil(f64(agent_height / config.ch)))
-  config.walkable_radius = i32(math.ceil(f64(agent_radius / config.cs)))
-  config.walkable_climb = i32(math.floor(f64(agent_max_climb / config.ch)))
-  config.walkable_slope = agent_max_slope
-  config.min_region_area = i32(
-    math.floor(f64(region_min_size * region_min_size)),
-  )
-  config.merge_region_area = i32(
-    math.floor(f64(region_merge_size * region_merge_size)),
-  )
-  config.max_edge_len = i32(math.floor(f64(edge_max_len / config.cs)))
-  config.max_simplification_error = edge_max_error
-  config.max_verts_per_poly = i32(verts_per_poly)
-  config.detail_sample_dist = detail_sample_dist
-  config.detail_sample_max_error = detail_sample_max_error
-  return world.build_navigation_mesh_from_world(
-    &engine.world,
-    &engine.rm,
-    &engine.gctx,
-    &engine.nav_sys,
-    config,
-  )
-}
-
-build_and_visualize_navigation_mesh :: proc(
-  engine: ^Engine,
-  config: recast.Config = {},
-) -> bool {
-  return world.build_and_visualize_navigation_mesh(
-    &engine.world,
-    &engine.rm,
-    &engine.gctx,
-    &engine.nav_sys,
-    &engine.render.navigation,
-    config,
-  )
-}
-
 find_path :: proc(
   engine: ^Engine,
   start_pos: [3]f32,
@@ -1019,31 +962,6 @@ nav_find_nearest_point :: proc(
   found: bool,
 ) {
   return nav.find_nearest_point(&engine.nav_sys, position, search_extents)
-}
-
-spawn_nav_agent_at :: proc(
-  engine: ^Engine,
-  position: [3]f32,
-  radius: f32 = 0.6,
-  height: f32 = 2.0,
-) -> (
-  handle: resources.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  return world.spawn_nav_agent_at(&engine.world, position, radius, height)
-}
-
-nav_agent_set_target :: proc(
-  engine: ^Engine,
-  agent_handle: resources.NodeHandle,
-  target_pos: [3]f32,
-) -> bool {
-  return world.nav_agent_set_target(
-    &engine.world,
-    &engine.nav_sys,
-    agent_handle,
-    target_pos,
-  )
 }
 
 add_bloom :: proc(

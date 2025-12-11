@@ -12,7 +12,6 @@ import "debug_draw"
 import "debug_ui"
 import "geometry"
 import "lighting"
-import "navigation"
 import "particles"
 import "post_process"
 import "retained_ui"
@@ -27,7 +26,6 @@ Manager :: struct {
   lighting:     lighting.Renderer,
   transparency: transparency.Renderer,
   particles:    particles.Renderer,
-  navigation:   navigation.Renderer,
   debug_draw:   debug_draw.Renderer,
   post_process: post_process.Renderer,
   debug_ui:     debug_ui.Renderer,
@@ -168,7 +166,6 @@ init :: proc(
     dpi_scale,
     rm,
   ) or_return
-  navigation.init(&self.navigation, gctx, rm) or_return
   debug_draw.init(&self.debug_draw, gctx, rm) or_return
   return .SUCCESS
 }
@@ -181,7 +178,6 @@ shutdown :: proc(
   retained_ui.shutdown(&self.retained_ui, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
   debug_draw.shutdown(&self.debug_draw, gctx)
-  navigation.shutdown(&self.navigation, gctx)
   post_process.shutdown(&self.post_process, gctx, rm)
   particles.shutdown(&self.particles, gctx)
   transparency.shutdown(&self.transparency, gctx)
@@ -373,13 +369,6 @@ record_transparency_pass :: proc(
     command_buffer,
     rm,
     frame_index,
-  )
-  navigation.render(
-    &self.navigation,
-    command_buffer,
-    linalg.MATRIX4F32_IDENTITY,
-    camera_handle.index,
-    rm,
   )
   transparency.render(
     &self.transparency,

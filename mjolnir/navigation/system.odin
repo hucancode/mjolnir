@@ -283,28 +283,22 @@ build_geometry :: proc(nav_mesh: ^NavMesh) -> geometry.Geometry {
     tile := &nav_mesh.detour_mesh.tiles[i]
     if tile.header == nil do continue
     vertex_base := u32(len(vertices))
-    for poly_idx in 0 ..< i32(tile.header.poly_count) {
-      poly := tile.polys[poly_idx]
-      detail_mesh := tile.detail_meshes[poly_idx]
-      for tri_idx in 0 ..< i32(detail_mesh.tri_count) {
-        tri := tile.detail_tris[detail_mesh.tri_base + u32(tri_idx)]
-        for l in 0 ..< 3 {
-          vert_idx := tri[l]
-          pos: [3]f32
-          if vert_idx < poly.vert_count {
-            pos = tile.verts[poly.verts[vert_idx]]
-          } else {
-            detail_idx := detail_mesh.vert_base + u32(vert_idx - poly.vert_count)
-            pos = tile.detail_verts[detail_idx]
-          }
-          append(&vertices, geometry.Vertex{position = pos})
-        }
-      }
+    for vert_idx in 0 ..< tile.header.vert_count {
+      pos := tile.verts[vert_idx]
+      append(&vertices, geometry.Vertex{position = pos})
     }
-    tri_count := (len(vertices) - int(vertex_base)) / 3
-    for t in 0 ..< tri_count {
-      base_idx := vertex_base + u32(t * 3)
-      append(&indices, base_idx, base_idx + 1, base_idx + 2)
+    for poly_idx in 0 ..< tile.header.poly_count {
+      poly := &tile.polys[poly_idx]
+      vert_count := int(poly.vert_count)
+      if vert_count < 3 do continue
+      for j in 1 ..< vert_count - 1 {
+        append(
+          &indices,
+          vertex_base + u32(poly.verts[0]),
+          vertex_base + u32(poly.verts[j]),
+          vertex_base + u32(poly.verts[j + 1]),
+        )
+      }
     }
   }
   result := geometry.Geometry {
