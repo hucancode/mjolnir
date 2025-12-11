@@ -41,6 +41,7 @@ init :: proc(
   half_w: f32 = 0.5
   half_h: f32 = 0.5
   vertices := make([]geometry.Vertex, 4)
+  defer if ret != .SUCCESS do delete(vertices)
   vertices[0] = {
     position = {-half_w, -half_h, 0},
     normal   = {0, 0, 1},
@@ -66,6 +67,7 @@ init :: proc(
     color    = {1, 1, 1, 1},
   }
   indices := make([]u32, 6)
+  defer if ret != .SUCCESS do delete(indices)
   indices[0] = 0
   indices[1] = 1
   indices[2] = 2

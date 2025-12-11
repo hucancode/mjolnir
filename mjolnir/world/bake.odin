@@ -57,10 +57,11 @@ bake_geometry :: proc(
     )
   }
   vertices := make([dynamic]geometry.Vertex, 0, 4096)
+  defer if ret != .SUCCESS do delete(vertices)
   indices := make([dynamic]u32, 0, 16384)
+  defer if ret != .SUCCESS do delete(indices)
   nodes_info := make([dynamic]BakedNodeInfo, 0, 64) if with_node_info else nil
-  defer if !with_node_info do delete(nodes_info)
-
+  defer if ret != .SUCCESS && with_node_info do delete(nodes_info)
   // Track which meshes we've already read to avoid duplicate reads
   read_meshes := make(map[resources.MeshHandle]geometry.Geometry)
   defer {
@@ -81,12 +82,9 @@ bake_geometry :: proc(
     if cached_geom, already_read := read_meshes[mesh_attachment.handle]; already_read {
       geom = cached_geom
     } else {
-      // Read mesh data from GPU
       mesh := cont.get(rm.meshes, mesh_attachment.handle) or_continue
-
       vertex_count := int(mesh.vertex_allocation.count)
       mesh_vertices := make([]geometry.Vertex, vertex_count)
-
       read_result := gpu.get_all(gctx, &rm.vertex_buffer, mesh_vertices, int(mesh.vertex_allocation.offset))
       if read_result != .SUCCESS {
         log.errorf("Failed to read vertex data for mesh %v", mesh_attachment.handle)
@@ -116,7 +114,6 @@ bake_geometry :: proc(
     for src_index in geom.indices {
       append(&indices, vertex_base + src_index)
     }
-
     // Track node info if requested
     if with_node_info {
       append(&nodes_info, BakedNodeInfo{
@@ -125,11 +122,9 @@ bake_geometry :: proc(
         index_count = len(geom.indices),
       })
     }
-
     mesh_count += 1
   }
   if len(vertices) == 0 {
-    if with_node_info do delete(nodes_info)
     return {}, nil, .ERROR_INITIALIZATION_FAILED
   }
   log.infof(
@@ -142,6 +137,6 @@ bake_geometry :: proc(
     vertices = vertices[:],
     indices  = indices[:],
   }
-  node_info = nodes_info[:] if with_node_info else nil
+  node_info = nodes_info[:]
   return
 }

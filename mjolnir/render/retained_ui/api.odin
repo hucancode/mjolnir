@@ -116,8 +116,10 @@ create_textbox :: proc(
   widget.position = {x, y}
   widget.size = {w, h}
   widget.bg_color = {255, 255, 255, 255}
+  text := make([dynamic]u8, 0, max_length)
+  defer if !ok do delete(text)
   widget.data = TextBoxData {
-    text            = make([dynamic]u8, 0, max_length),
+    text            = text,
     max_length      = max_length,
     placeholder     = placeholder,
     cursor_pos      = 0,
@@ -127,6 +129,7 @@ create_textbox :: proc(
     user_data       = user_data,
   }
   mark_dirty(self, handle)
+  ok = true
   return
 }
 

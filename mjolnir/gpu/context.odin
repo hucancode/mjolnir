@@ -235,6 +235,7 @@ query_swapchain_support :: proc(
   ) or_return
   if count > 0 {
     support.formats = make([]vk.SurfaceFormatKHR, count)
+    defer if res != .SUCCESS do delete(support.formats)
     vk.GetPhysicalDeviceSurfaceFormatsKHR(
       physical_device,
       surface,
@@ -250,6 +251,7 @@ query_swapchain_support :: proc(
   ) or_return
   if count > 0 {
     support.present_modes = make([]vk.PresentModeKHR, count)
+    defer if res != .SUCCESS do delete(support.present_modes)
     vk.GetPhysicalDeviceSurfacePresentModesKHR(
       physical_device,
       surface,
@@ -257,7 +259,8 @@ query_swapchain_support :: proc(
       raw_data(support.present_modes),
     ) or_return
   }
-  return support, .SUCCESS
+  res = .SUCCESS
+  return
 }
 
 @(private = "file")

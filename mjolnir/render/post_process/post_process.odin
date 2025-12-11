@@ -356,6 +356,7 @@ init :: proc(
   ret: vk.Result,
 ) {
   self.effect_stack = make([dynamic]PostprocessEffect)
+  defer if ret != .SUCCESS do delete(self.effect_stack)
   count :: len(PostProcessEffectType)
   vert_module := gpu.create_shader_module(
     gctx.device,

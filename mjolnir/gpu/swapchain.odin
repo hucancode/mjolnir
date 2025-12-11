@@ -23,7 +23,9 @@ swapchain_init :: proc(
   self: ^Swapchain,
   gctx: ^GPUContext,
   window: glfw.WindowHandle,
-) -> vk.Result {
+) -> (
+  ret: vk.Result,
+) {
   pick_swap_present_mode :: proc(
     present_modes: []vk.PresentModeKHR,
   ) -> vk.PresentModeKHR {
@@ -114,6 +116,7 @@ swapchain_init :: proc(
     nil,
   )
   self.images = make([]vk.Image, swapchain_image_count)
+  defer if ret != .SUCCESS do delete(self.images)
   vk.GetSwapchainImagesKHR(
     gctx.device,
     self.handle,
@@ -121,6 +124,7 @@ swapchain_init :: proc(
     raw_data(self.images),
   )
   self.views = make([]vk.ImageView, swapchain_image_count)
+  defer if ret != .SUCCESS do delete(self.views)
   for i in 0 ..< swapchain_image_count {
     vk.CreateImageView(
       gctx.device,
@@ -147,6 +151,7 @@ swapchain_init :: proc(
   }
   // Allocate per-swapchain-image semaphores for presentation
   self.render_finished_semaphores = make([]vk.Semaphore, swapchain_image_count)
+  defer if ret != .SUCCESS do delete(self.render_finished_semaphores)
   semaphore_info := vk.SemaphoreCreateInfo {
     sType = .SEMAPHORE_CREATE_INFO,
   }
@@ -182,7 +187,8 @@ swapchain_init :: proc(
       &self.in_flight_fences[i],
     ) or_return
   }
-  return .SUCCESS
+  ret = .SUCCESS
+  return
 }
 
 swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {

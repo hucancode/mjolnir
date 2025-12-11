@@ -287,7 +287,7 @@ allocate_descriptor_set_multi :: proc(
   layout: vk.DescriptorSetLayout,
 ) -> vk.Result {
   layouts := make([]vk.DescriptorSetLayout, len(ret))
-  delete(layouts)
+  defer delete(layouts)
   slice.fill(layouts, layout)
   return vk.AllocateDescriptorSets(
     gctx.device,

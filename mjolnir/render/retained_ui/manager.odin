@@ -26,9 +26,14 @@ init :: proc(
 ) {
   cont.init(&self.widgets, 1000)
   self.root_widgets = make([dynamic]WidgetHandle, 0, 100)
+  defer if ret != .SUCCESS do delete(self.root_widgets)
   self.dirty_widgets = make([dynamic]WidgetHandle, 0, 100)
+  defer if ret != .SUCCESS do delete(self.dirty_widgets)
   for &v in self.draw_lists {
     v.commands = make([dynamic]DrawCommand, 0, 1000)
+  }
+  defer if ret != .SUCCESS {
+    for &v in self.draw_lists do delete(v.commands)
   }
   self.frame_width = width
   self.frame_height = height

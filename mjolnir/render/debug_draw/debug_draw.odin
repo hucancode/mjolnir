@@ -392,10 +392,12 @@ spawn_line_strip_temporary :: proc(
   ok: bool,
 ) #optional_ok {
   indices := make([]u32, len(points))
+  defer if !ok do delete(indices)
   for i in 0 ..< len(points) {
     indices[i] = u32(i)
   }
   vertices_copy := make([]geometry.Vertex, len(points))
+  defer if !ok do delete(vertices_copy)
   copy(vertices_copy, points)
   geom := geometry.Geometry {
     vertices = vertices_copy,
