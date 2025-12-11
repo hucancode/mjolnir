@@ -33,13 +33,15 @@ DebugObject :: struct {
 }
 
 Renderer :: struct {
-  objects:                cont.Pool(DebugObject),
-  pipeline_layout:        vk.PipelineLayout,
-  solid_pipeline:         vk.Pipeline,
-  wireframe_pipeline:     vk.Pipeline,
-  depth_test_pipeline:    vk.Pipeline,
-  depth_bypass_pipeline:  vk.Pipeline,
-  wireframe_depth_bypass: vk.Pipeline,
+  objects:                   cont.Pool(DebugObject),
+  pipeline_layout:           vk.PipelineLayout,
+  solid_pipeline:            vk.Pipeline,
+  wireframe_pipeline:        vk.Pipeline,
+  depth_test_pipeline:       vk.Pipeline,
+  depth_bypass_pipeline:     vk.Pipeline,
+  wireframe_depth_bypass:    vk.Pipeline,
+  line_strip_pipeline:       vk.Pipeline,
+  line_strip_depth_bypass:   vk.Pipeline,
 }
 
 PushConstant :: struct {
@@ -214,6 +216,54 @@ create_pipelines :: proc(
     nil,
     &self.wireframe_depth_bypass,
   ) or_return
+  // Line strip pipeline with depth test
+  line_strip_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &gpu.LINE_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.LINE_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
+    pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
+    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
+    layout              = pipeline_layout,
+    pNext               = &gpu.STANDARD_RENDERING_INFO,
+  }
+  vk.CreateGraphicsPipelines(
+    gctx.device,
+    0,
+    1,
+    &line_strip_info,
+    nil,
+    &self.line_strip_pipeline,
+  ) or_return
+  // Line strip pipeline without depth test
+  line_strip_bypass_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &gpu.LINE_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.LINE_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pDepthStencilState  = &depth_bypass_state,
+    pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
+    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
+    layout              = pipeline_layout,
+    pNext               = &gpu.STANDARD_RENDERING_INFO,
+  }
+  vk.CreateGraphicsPipelines(
+    gctx.device,
+    0,
+    1,
+    &line_strip_bypass_info,
+    nil,
+    &self.line_strip_depth_bypass,
+  ) or_return
   return .SUCCESS
 }
 
@@ -222,11 +272,15 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_bypass_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.wireframe_depth_bypass, nil)
+  vk.DestroyPipeline(gctx.device, self.line_strip_pipeline, nil)
+  vk.DestroyPipeline(gctx.device, self.line_strip_depth_bypass, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   self.solid_pipeline = 0
   self.wireframe_pipeline = 0
   self.depth_bypass_pipeline = 0
   self.wireframe_depth_bypass = 0
+  self.line_strip_pipeline = 0
+  self.line_strip_depth_bypass = 0
   self.pipeline_layout = 0
 }
 
@@ -338,12 +392,10 @@ spawn_line_strip_temporary :: proc(
   ok: bool,
 ) #optional_ok {
   indices := make([]u32, len(points))
-  defer delete(indices)
   for i in 0 ..< len(points) {
     indices[i] = u32(i)
   }
   vertices_copy := make([]geometry.Vertex, len(points))
-  defer delete(vertices_copy)
   copy(vertices_copy, points)
   geom := geometry.Geometry {
     vertices = vertices_copy,
@@ -452,9 +504,12 @@ render :: proc(
       log.warnf("Debug draw: mesh not found for object %d", idx)
       continue
     }
-    // Select pipeline based on style and depth settings
+    // Select pipeline based on style, topology, and depth settings
     pipeline: vk.Pipeline
-    if obj.style == .WIREFRAME {
+    if obj.is_line_strip {
+      pipeline =
+        self.line_strip_depth_bypass if obj.bypass_depth else self.line_strip_pipeline
+    } else if obj.style == .WIREFRAME {
       pipeline =
         self.wireframe_depth_bypass if obj.bypass_depth else self.wireframe_pipeline
     } else {
