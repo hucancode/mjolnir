@@ -165,11 +165,9 @@ Obb :: struct {
 }
 
 // Get the 3 local axes of the OBB (columns of rotation matrix)
-obb_axes :: proc "contextless" (obb: Obb) -> (x, y, z: [3]f32) {
-  x = linalg.mul(obb.rotation, linalg.VECTOR3F32_X_AXIS)
-  y = linalg.mul(obb.rotation, linalg.VECTOR3F32_Y_AXIS)
-  z = linalg.mul(obb.rotation, linalg.VECTOR3F32_Z_AXIS)
-  return
+obb_axes :: #force_inline proc "contextless" (obb: Obb) -> (x, y, z: [3]f32) {
+  mat := linalg.matrix3_from_quaternion(obb.rotation)
+  return mat[0], mat[1], mat[2]
 }
 
 // Convert OBB to AABB by computing bounds of all 8 corners
@@ -220,18 +218,15 @@ obb_contains_point :: proc "contextless" (obb: Obb, point: [3]f32) -> bool {
 
 // OBB-OBB intersection test using Separating Axis Theorem
 obb_obb_intersect :: proc(
-  a: Obb,
-  b: Obb,
+  a, b: Obb,
 ) -> (
   contact: [3]f32,
   normal: [3]f32,
   penetration_depth: f32,
   hit: bool,
 ) {
-  mat_a := linalg.matrix3_from_quaternion(a.rotation)
-  mat_b := linalg.matrix3_from_quaternion(b.rotation)
-  ax, ay, az := mat_a[0], mat_a[1], mat_a[2]
-  bx, by, bz := mat_b[0], mat_b[1], mat_b[2]
+  ax, ay, az := obb_axes(a)
+  bx, by, bz := obb_axes(b)
   t := b.center - a.center
   min_overlap := f32(math.F32_MAX)
   best_axis: [3]f32

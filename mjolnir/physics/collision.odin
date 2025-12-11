@@ -140,18 +140,10 @@ test_box_box :: proc(
     hit = true
     return
   }
-  // General case: OBB-OBB collision using SAT
-  obb_a := geometry.Obb {
-    center       = pos_a,
-    half_extents = box_a.half_extents,
-    rotation     = rot_a,
-  }
-  obb_b := geometry.Obb {
-    center       = pos_b,
-    half_extents = box_b.half_extents,
-    rotation     = rot_b,
-  }
-  return geometry.obb_obb_intersect(obb_a, obb_b)
+  return geometry.obb_obb_intersect(
+    {center = pos_a, half_extents = box_a.half_extents, rotation = rot_a},
+    {center = pos_b, half_extents = box_b.half_extents, rotation = rot_b},
+  )
 }
 
 test_box_sphere :: proc(
