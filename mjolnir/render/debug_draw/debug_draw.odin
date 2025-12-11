@@ -461,16 +461,16 @@ render :: proc(
       pipeline =
         self.depth_bypass_pipeline if obj.bypass_depth else self.solid_pipeline
     }
-    if frame_index == 0 && active_count == 1 {
-      log.infof(
-        "Debug draw object %d: pipeline=%v, indices=%d, style=%v, bypass=%v",
-        idx,
-        pipeline,
-        mesh.index_count,
-        obj.style,
-        obj.bypass_depth,
-      )
-    }
+    // if frame_index == 0 && active_count == 1 {
+    //   log.infof(
+    //     "Debug draw object %d: pipeline=%v, indices=%d, style=%v, bypass=%v",
+    //     idx,
+    //     pipeline,
+    //     mesh.index_count,
+    //     obj.style,
+    //     obj.bypass_depth,
+    //   )
+    // }
     gpu.bind_graphics_pipeline(
       command_buffer,
       pipeline,
@@ -521,7 +521,7 @@ render :: proc(
     )
   }
   if active_count > 0 && frame_index == 0 {
-    log.infof("Debug draw rendered %d objects", active_count)
+    // log.infof("Debug draw rendered %d objects", active_count)
   }
 }
 
