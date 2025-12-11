@@ -21,7 +21,6 @@ demo_state: struct {
   start_pos:            [3]f32,
   end_pos:              [3]f32,
   current_path:         [][3]f32,
-  has_path:             bool,
   // Visual markers
   start_marker_handle:  resources.NodeHandle,
   end_marker_handle:    resources.NodeHandle,
@@ -31,8 +30,6 @@ demo_state: struct {
   // OBJ file support
   obj_mesh_handle:      resources.MeshHandle,
   obj_node_handle:      resources.NodeHandle,
-  obj_mesh_node:        ^world.Node,
-  show_original_mesh:   bool,
   use_procedural:       bool,
   // Camera control
   camera_auto_rotate:   bool,
@@ -46,15 +43,12 @@ demo_state: struct {
   navmesh_info:         string,
   // Debug draw handles
   navmesh_debug_handle: mjolnir.DebugObjectHandle,
-  path_debug_handle:    mjolnir.DebugObjectHandle,
-  path_mesh_handle:     resources.MeshHandle,
 } = {
   camera_distance      = 40,
   camera_height        = 25,
   camera_angle         = 0,
   camera_auto_rotate   = false,
   mouse_move_threshold = 5.0,
-  show_original_mesh   = true,
   use_procedural       = true,
 }
 
@@ -124,7 +118,6 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
       attachment = world.MeshAttachment {
         handle              = ground_mesh_handle,
         material            = ground_material_handle,
-        cast_shadow         = false,
       },
     )
     // Tag as environment for baking
@@ -171,7 +164,6 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
         world.MeshAttachment {
           handle              = obstacle_mesh_handle,
           material            = obstacle_material_handle,
-          cast_shadow         = true,
         },
       )
       // Tag obstacles as NAVMESH_OBSTACLE for baking
@@ -218,16 +210,12 @@ create_obj_visualization_mesh :: proc(
       world.MeshAttachment {
         handle              = demo_state.obj_mesh_handle,
         material            = obj_material_handle,
-        cast_shadow         = false,
       },
     )
-    demo_state.obj_mesh_node = get_node(engine, demo_state.obj_node_handle)
   }
-  if obj_spawn_ok {
-    demo_state.obj_mesh_node.name = "obj_mesh"
-    demo_state.show_original_mesh = true
-    // Tag OBJ mesh as environment for baking
-    demo_state.obj_mesh_node.tags += {.ENVIRONMENT}
+  if node, ok := get_node(engine, demo_state.obj_node_handle); ok {
+    node.name = "obj_mesh"
+    node.tags += {.ENVIRONMENT}
     log.infof(
       "Created OBJ visualization mesh with %d vertices",
       len(geom.vertices),
@@ -383,7 +371,6 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
   if path != nil && len(path) > 0 {
     delete(demo_state.current_path)
     demo_state.current_path = path
-    demo_state.has_path = true
     log.infof("Path found with %d waypoints", len(path))
     for point, idx in path {
       log.infof(
@@ -395,9 +382,6 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
       )
     }
     visualize_path(engine)
-  } else {
-    log.warn("Failed to find path")
-    demo_state.has_path = false
   }
 }
 
@@ -426,7 +410,6 @@ update_position_marker :: proc(
       world.MeshAttachment {
         handle              = marker_mesh_handle,
         material            = marker_material_handle,
-        cast_shadow         = false,
       },
     )
   }
@@ -616,7 +599,6 @@ demo_mouse_pressed :: proc(
         pos,
         {0, 1, 0, 1},
       )
-      demo_state.has_path = false
     } else {
       log.warn("No valid navmesh position found at click location")
     }
@@ -676,7 +658,7 @@ demo_render2d :: proc(engine: ^mjolnir.Engine) {
     mu.checkbox(ctx, "Auto Rotate", &demo_state.camera_auto_rotate)
     mu.label(ctx, "")
     mu.label(ctx, "Pathfinding:")
-    if demo_state.has_path {
+    if len(demo_state.current_path) > 0 {
       mu.label(
         ctx,
         fmt.tprintf("Path Points: %d", len(demo_state.current_path)),
@@ -705,13 +687,6 @@ demo_render2d :: proc(engine: ^mjolnir.Engine) {
     if .SUBMIT in mu.button(ctx, "Generate Random Path (SPACE)") {
       generate_random_path(engine)
     }
-    if .SUBMIT in mu.button(ctx, "Clear Path (C)") {
-      demo_state.has_path = false
-      log.info("Path cleared")
-    }
-    if .SUBMIT in mu.button(ctx, "Rebuild NavMesh (R)") {
-      setup_navigation_mesh(engine)
-    }
     if demo_state.navmesh_info != "" {
       mu.label(ctx, "")
       mu.label(ctx, "NavMesh Info:")
@@ -723,13 +698,6 @@ demo_render2d :: proc(engine: ^mjolnir.Engine) {
       mu.label(ctx, "Procedural geometry")
     } else {
       mu.label(ctx, "OBJ file loaded")
-      if demo_state.obj_mesh_node != nil {
-        visibility_text := demo_state.show_original_mesh ? "visible" : "hidden"
-        mu.label(ctx, fmt.tprintf("Original mesh: %s", visibility_text))
-        if .SUBMIT in mu.button(ctx, "Toggle Mesh (M)") {
-          demo_state.show_original_mesh = !demo_state.show_original_mesh
-        }
-      }
     }
     mu.label(ctx, "")
     mu.label(ctx, "Controls:")
@@ -740,7 +708,6 @@ demo_render2d :: proc(engine: ^mjolnir.Engine) {
     mu.label(ctx, "D - Cycle Color Modes")
     mu.label(ctx, "M - Toggle Original Mesh")
     mu.label(ctx, "P - Print NavMesh Info")
-    mu.label(ctx, "R - Rebuild NavMesh")
     mu.label(ctx, "S - Save NavMesh")
     mu.label(ctx, "L - Load NavMesh")
     mu.label(ctx, "V - Toggle NavMesh")
