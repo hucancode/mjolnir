@@ -18,11 +18,18 @@ BVH :: struct($T: typeid) {
   nodes:       [dynamic]BVHNode,
   primitives:  [dynamic]T,
   bounds_func: proc(t: T) -> Aabb,
+  // Level-order traversal data for parallel refit
+  node_levels: [dynamic][dynamic]i32,
+  max_depth:   i32,
 }
 
 bvh_destroy :: proc(bvh: ^BVH($T)) {
   delete(bvh.nodes)
   delete(bvh.primitives)
+  for &level in bvh.node_levels {
+    delete(level)
+  }
+  delete(bvh.node_levels)
 }
 
 BVHBuildNode :: struct {
@@ -128,6 +135,95 @@ build_recursive :: proc(
   return node
 }
 
+SAHBin :: struct {
+  bounds: Aabb,
+  count:  i32,
+}
+
+@(private)
+split_sah_binned :: proc(
+  prims: []BVHPrimitive,
+  node_bounds: Aabb,
+  allocator: mem.Allocator,
+) -> (
+  axis: i32,
+  split_pos: i32,
+) {
+  NUM_BINS :: 16
+  if len(prims) <= 8 {
+    return split_median(prims, node_bounds)
+  }
+  best_cost := f32(F32_MAX)
+  best_axis := -1
+  best_split_bin := -1
+  extent := node_bounds.max - node_bounds.min
+  #unroll for ax in 0 ..< 3 {
+    if extent[ax] < 0.0001 {
+      // Skip degenerate axes
+    } else {
+    bins := make([]SAHBin, NUM_BINS, context.temp_allocator)
+    for &bin in bins {
+      bin.bounds = AABB_UNDEFINED
+      bin.count = 0
+    }
+    bin_scale := f32(NUM_BINS) / extent[ax]
+    for prim in prims {
+      bin_idx := i32((prim.centroid[ax] - node_bounds.min[ax]) * bin_scale)
+      bin_idx = clamp(bin_idx, 0, NUM_BINS - 1)
+      bins[bin_idx].count += 1
+      bins[bin_idx].bounds = aabb_union(bins[bin_idx].bounds, prim.bounds)
+    }
+    left_counts := make([]i32, NUM_BINS - 1, context.temp_allocator)
+    left_bounds_array := make([]Aabb, NUM_BINS - 1, context.temp_allocator)
+    running_count: i32 = 0
+    running_bounds := AABB_UNDEFINED
+    for i in 0 ..< NUM_BINS - 1 {
+      running_count += bins[i].count
+      running_bounds = aabb_union(running_bounds, bins[i].bounds)
+      left_counts[i] = running_count
+      left_bounds_array[i] = running_bounds
+    }
+    right_counts := make([]i32, NUM_BINS - 1, context.temp_allocator)
+    right_bounds_array := make([]Aabb, NUM_BINS - 1, context.temp_allocator)
+    running_count = 0
+    running_bounds = AABB_UNDEFINED
+    for i := NUM_BINS - 1; i > 0; i -= 1 {
+      running_count += bins[i].count
+      running_bounds = aabb_union(running_bounds, bins[i].bounds)
+      right_counts[i - 1] = running_count
+      right_bounds_array[i - 1] = running_bounds
+    }
+    for i in 0 ..< NUM_BINS - 1 {
+      if left_counts[i] == 0 || right_counts[i] == 0 do continue
+      cost := sah_cost(left_bounds_array[i], left_counts[i], right_bounds_array[i], right_counts[i], node_bounds)
+      if cost < best_cost {
+        best_cost = cost
+        best_axis = ax
+        best_split_bin = i
+      }
+    }
+    }
+  }
+  if best_axis < 0 || best_split_bin < 0 {
+    return split_median(prims, node_bounds)
+  }
+  bin_scale := f32(NUM_BINS) / (node_bounds.max[best_axis] - node_bounds.min[best_axis])
+  split_threshold := node_bounds.min[best_axis] + f32(best_split_bin + 1) / bin_scale
+  split_idx := 0
+  for i in 0 ..< len(prims) {
+    if prims[i].centroid[best_axis] < split_threshold {
+      if i != split_idx {
+        prims[split_idx], prims[i] = prims[i], prims[split_idx]
+      }
+      split_idx += 1
+    }
+  }
+  if split_idx == 0 || split_idx >= len(prims) {
+    return split_median(prims, node_bounds)
+  }
+  return i32(best_axis), i32(split_idx)
+}
+
 @(private)
 split_sah :: proc(
   prims: []BVHPrimitive,
@@ -137,78 +233,7 @@ split_sah :: proc(
   axis: i32,
   split_pos: i32,
 ) {
-  best_cost := f32(F32_MAX)
-  best_axis := -1
-  best_split := -1
-  // Fast path for small arrays - use simple median split
-  if len(prims) <= 8 {
-    return split_median(prims, node_bounds)
-  }
-  // Use the arena allocator for prefix/suffix bounds computation
-  left_bounds := make([]Aabb, len(prims), allocator)
-  right_bounds := make([]Aabb, len(prims), allocator)
-  // Sample fewer split positions for better performance
-  num_samples := min(len(prims), 32)
-  step := max(1, len(prims) / num_samples)
-  #unroll for ax in 0 ..< 3 {
-    // Sort by axis
-    if ax == 0 {
-      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-        return a.centroid[0] < b.centroid[0]
-      })
-    } else if ax == 1 {
-      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-        return a.centroid[1] < b.centroid[1]
-      })
-    } else {
-      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-        return a.centroid[2] < b.centroid[2]
-      })
-    }
-    // Compute prefix bounds (left side)
-    left_bounds[0] = prims[0].bounds
-    for i in 1 ..< len(prims) {
-      left_bounds[i] = aabb_union(left_bounds[i - 1], prims[i].bounds)
-    }
-    // Compute suffix bounds (right side)
-    right_bounds[len(prims) - 1] = prims[len(prims) - 1].bounds
-    for i := len(prims) - 2; i >= 0; i -= 1 {
-      right_bounds[i] = aabb_union(right_bounds[i + 1], prims[i].bounds)
-    }
-    // Sample split positions instead of testing all
-    for i := step; i < len(prims); i += step {
-      if i >= len(prims) - 1 do break
-      cost := sah_cost(
-        left_bounds[i - 1],
-        i32(i),
-        right_bounds[i],
-        i32(len(prims) - i),
-        node_bounds,
-      )
-      if cost < best_cost {
-        best_cost = cost
-        best_axis = ax
-        best_split = i
-      }
-    }
-  }
-  // Re-sort by best axis if needed
-  if best_axis >= 0 {
-    if best_axis == 0 {
-      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-        return a.centroid[0] < b.centroid[0]
-      })
-    } else if best_axis == 1 {
-      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-        return a.centroid[1] < b.centroid[1]
-      })
-    } else if best_axis == 2 {
-      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-        return a.centroid[2] < b.centroid[2]
-      })
-    }
-  }
-  return i32(best_axis), i32(best_split)
+  return split_sah_binned(prims, node_bounds, allocator)
 }
 
 @(private)
@@ -276,6 +301,7 @@ flatten_bvh :: proc(bvh: ^BVH($T), root: ^BVHBuildNode) {
   resize(&bvh.nodes, int(node_count))
   next_node_idx: i32 = 0
   flatten_node(bvh, root, &next_node_idx)
+  compute_bvh_levels(bvh)
 }
 
 @(private)
@@ -673,6 +699,32 @@ bvh_refit :: proc(bvh: ^BVH($T)) {
       left_bounds := bvh.nodes[node.left_child].bounds
       right_bounds := bvh.nodes[node.right_child].bounds
       node.bounds = aabb_union(left_bounds, right_bounds)
+    }
+  }
+}
+
+@(private)
+compute_bvh_levels :: proc(bvh: ^BVH($T)) {
+  if len(bvh.nodes) == 0 do return
+  for &level in bvh.node_levels {
+    delete(level)
+  }
+  clear(&bvh.node_levels)
+  queue := make([dynamic]struct{idx: i32, depth: i32}, context.temp_allocator)
+  append(&queue, struct{idx: i32, depth: i32}{idx = 0, depth = 0})
+  bvh.max_depth = 0
+  for len(queue) > 0 {
+    current := queue[0]
+    ordered_remove(&queue, 0)
+    for i32(len(bvh.node_levels)) <= current.depth {
+      append(&bvh.node_levels, make([dynamic]i32))
+    }
+    append(&bvh.node_levels[current.depth], current.idx)
+    bvh.max_depth = max(bvh.max_depth, current.depth)
+    node := &bvh.nodes[current.idx]
+    if node.left_child >= 0 {
+      append(&queue, struct{idx: i32, depth: i32}{idx = node.left_child, depth = current.depth + 1})
+      append(&queue, struct{idx: i32, depth: i32}{idx = node.right_child, depth = current.depth + 1})
     }
   }
 }
