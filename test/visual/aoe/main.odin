@@ -12,7 +12,7 @@ import "vendor:glfw"
 
 physics_world: physics.World
 cube_mesh_handles: [dynamic]resources.NodeHandle
-cube_body_to_mesh: map[physics.RigidBodyHandle]resources.NodeHandle
+cube_body_to_mesh: map[physics.DynamicRigidBodyHandle]resources.NodeHandle
 effector_sphere: resources.NodeHandle
 effector_position: [3]f32
 orbit_angle: f32 = 0.0
@@ -36,7 +36,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   physics.init(&physics_world)
   cube_body_to_mesh = make(
-    map[physics.RigidBodyHandle]resources.NodeHandle,
+    map[physics.DynamicRigidBodyHandle]resources.NodeHandle,
   )
   set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
@@ -170,7 +170,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     scale(engine, handle, cube_scale)
   }
   // Query for cubes within effect radius using physics
-  affected: [dynamic]physics.RigidBodyHandle
+  affected: [dynamic]physics.DynamicRigidBodyHandle
   defer delete(affected)
   physics.query_sphere(
     &physics_world,

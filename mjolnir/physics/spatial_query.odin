@@ -9,11 +9,17 @@ import "core:math/linalg"
 
 // Physics raycast hit result
 PhysicsRayHit :: struct {
-  body_handle: RigidBodyHandle,
+  body_handle: BodyHandleResult,
   t:           f32,
   point:       [3]f32,
   normal:      [3]f32,
   hit:         bool,
+}
+
+// Union type for raycast results (can hit either dynamic or static bodies)
+BodyHandleResult :: union {
+  DynamicRigidBodyHandle,
+  StaticRigidBodyHandle,
 }
 
 // Physics raycast - finds closest body hit by ray
@@ -26,13 +32,29 @@ raycast :: proc(
     hit = false,
     t   = max_dist,
   }
-  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  bvh_query_ray_fast(&self.spatial_index, ray, max_dist, &candidates)
-  for candidate in candidates {
+  // Query dynamic BVH
+  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  bvh_query_ray_fast(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
+  for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
     collider := get(self, body.collider_handle) or_continue
-    // Narrow phase - test actual collider shape
+    t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, closest_hit.t)
+    if hit && t < closest_hit.t {
+      closest_hit.body_handle = candidate.handle
+      closest_hit.t = t
+      closest_hit.point = ray.origin + ray.direction * t
+      closest_hit.normal = normal
+      closest_hit.hit = true
+    }
+  }
+  // Query static BVH
+  static_candidates := make([dynamic]StaticBroadPhaseEntry, context.temp_allocator)
+  bvh_query_ray_fast(&self.static_bvh, ray, max_dist, &static_candidates)
+  for candidate in static_candidates {
+    body := get(self, candidate.handle) or_continue
+    if body.collider_handle.generation == 0 do continue
+    collider := get(self, body.collider_handle) or_continue
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, closest_hit.t)
     if hit && t < closest_hit.t {
       closest_hit.body_handle = candidate.handle
@@ -51,13 +73,31 @@ raycast_single :: proc(
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
 ) -> PhysicsRayHit {
-  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  bvh_query_ray_fast(&self.spatial_index, ray, max_dist, &candidates)
-  for candidate in candidates {
+  // Query dynamic BVH
+  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  bvh_query_ray_fast(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
+  for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     if body.collider_handle.generation == 0 do continue
     collider := get(self, body.collider_handle) or_continue
-    // Narrow phase - test actual collider shape
+    t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
+    if hit {
+      return PhysicsRayHit {
+        body_handle = candidate.handle,
+        t = t,
+        point = ray.origin + ray.direction * t,
+        normal = normal,
+        hit = true,
+      }
+    }
+  }
+  // Query static BVH
+  static_candidates := make([dynamic]StaticBroadPhaseEntry, context.temp_allocator)
+  bvh_query_ray_fast(&self.static_bvh, ray, max_dist, &static_candidates)
+  for candidate in static_candidates {
+    body := get(self, candidate.handle) or_continue
+    if body.collider_handle.generation == 0 do continue
+    collider := get(self, body.collider_handle) or_continue
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
     if hit {
       return PhysicsRayHit {
@@ -207,19 +247,19 @@ query_sphere :: proc(
   self: ^World,
   center: [3]f32,
   radius: f32,
-  results: ^[dynamic]RigidBodyHandle,
+  results: ^[dynamic]DynamicRigidBodyHandle,
 ) {
   clear(results)
   query_bounds := geometry.Aabb {
     min = center - [3]f32{radius, radius, radius},
     max = center + [3]f32{radius, radius, radius},
   }
-  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  bvh_query_aabb_fast(&self.spatial_index, query_bounds, &candidates)
-  for candidate in candidates {
+  // Only query dynamic bodies (static bodies don't need sphere queries typically)
+  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  bvh_query_aabb_fast(&self.dynamic_bvh, query_bounds, &dyn_candidates)
+  for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := get(self, body.collider_handle) or_continue
-    // Test if collider is within sphere
     if test_collider_sphere_overlap(collider, body.position, body.rotation, center, radius) {
       append(results, candidate.handle)
     }
@@ -230,18 +270,16 @@ query_sphere :: proc(
 query_box :: proc(
   self: ^World,
   bounds: geometry.Aabb,
-  results: ^[dynamic]RigidBodyHandle,
+  results: ^[dynamic]DynamicRigidBodyHandle,
 ) {
   clear(results)
-  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  bvh_query_aabb_fast(&self.spatial_index, bounds, &candidates)
-  for candidate in candidates {
+  // Only query dynamic bodies
+  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  bvh_query_aabb_fast(&self.dynamic_bvh, bounds, &dyn_candidates)
+  for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := get(self, body.collider_handle) or_continue
-    pos := body.position
-    rot := body.rotation
-    // Test if collider is within box
-    if test_collider_aabb_overlap(collider, pos, rot, bounds) {
+    if test_collider_aabb_overlap(collider, body.position, body.rotation, bounds) {
       append(results, candidate.handle)
     }
   }

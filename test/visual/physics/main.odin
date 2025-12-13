@@ -10,9 +10,9 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-NX :: 33
-NY :: 10
-NZ :: 33
+NX :: 8
+NY :: 5
+NZ :: 8
 CUBE_COUNT :: NX * NY * NZ
 SPHERE_RADIUS :: 3.0
 
@@ -41,16 +41,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
   {
     ground_node_handle := world.spawn(&engine.world, {0, -0.5, 0})
     ground_node := world.get_node(&engine.world, ground_node_handle)
-    body_handle := physics.create_body_box(
+    // Create static physics body (no attachment needed - it doesn't move)
+    physics.create_static_body_box(
       &physics_world,
-      half_extents = {10.0, 0.5, 10.0},
-      position = ground_node.transform.position,
-      rotation = ground_node.transform.rotation,
-      is_static = true,
+      {10.0, 0.5, 10.0},
+      ground_node.transform.position,
+      ground_node.transform.rotation,
     )
-    ground_node.attachment = world.RigidBodyAttachment {
-      body_handle = body_handle,
-    }
     // Child node with mesh
     ground_mesh_handle := mjolnir.spawn_child(
       engine,
@@ -67,19 +64,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
   {
     sphere_node_handle := world.spawn(&engine.world, {0, SPHERE_RADIUS, 0})
     sphere_node := world.get_node(&engine.world, sphere_node_handle)
-    body_handle := physics.create_body_sphere(
+    // Create static physics body (no attachment needed - it doesn't move)
+    physics.create_static_body_sphere(
       &physics_world,
-      radius = SPHERE_RADIUS,
-      position = sphere_node.transform.position,
-      rotation = sphere_node.transform.rotation,
-      is_static = true,
+      SPHERE_RADIUS,
+      sphere_node.transform.position,
+      sphere_node.transform.rotation,
     )
-    if body, ok := physics.get_body(&physics_world, body_handle); ok {
-      physics.set_sphere_inertia(body, SPHERE_RADIUS)
-    }
-    sphere_node.attachment = world.RigidBodyAttachment {
-      body_handle = body_handle,
-    }
     sphere_mesh_handle := mjolnir.spawn_child(
       engine,
       sphere_node_handle,
@@ -113,13 +104,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Parent node with physics
     cube_node_handle := world.spawn(&engine.world, pos)
     cube_node := world.get_node(&engine.world, cube_node_handle)
-    body_handle := physics.create_body(
+    body_handle := physics.create_dynamic_body(
       &physics_world,
       cube_node.transform.position,
       cube_node.transform.rotation,
-      mass = 50,
-      collider_handle = box_collider,
+      50.0,
+      false,
+      box_collider,
     )
+    if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
+      physics.set_box_inertia(body, {1.0, 1.0, 1.0})
+    }
     cube_node.attachment = world.RigidBodyAttachment {
       body_handle = body_handle,
     }

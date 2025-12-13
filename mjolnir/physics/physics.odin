@@ -21,26 +21,36 @@ SLEEP_ANGULAR_THRESHOLD :: 0.05
 SLEEP_TIME_THRESHOLD :: 0.5
 ENABLE_VERBOSE_LOG :: false
 
-RigidBodyHandle :: distinct cont.Handle
+DynamicRigidBodyHandle :: distinct cont.Handle
+StaticRigidBodyHandle :: distinct cont.Handle
 ColliderHandle :: distinct cont.Handle
 
 World :: struct {
-  bodies:                resources.Pool(RigidBody),
+  bodies:                resources.Pool(DynamicRigidBody),
+  static_bodies:         resources.Pool(StaticRigidBody),
   colliders:             resources.Pool(Collider),
-  contacts:              [dynamic]Contact,
-  prev_contacts:         map[u64]Contact, // Contact cache for warmstarting
+  dynamic_contacts:      [dynamic]DynamicContact,
+  static_contacts:       [dynamic]StaticContact,
+  prev_dynamic_contacts: map[u64]DynamicContact,
+  prev_static_contacts:  map[u64]StaticContact,
   gravity:               [3]f32,
-  spatial_index:         geometry.BVH(BroadPhaseEntry),
+  dynamic_bvh:           geometry.BVH(DynamicBroadPhaseEntry),
+  static_bvh:            geometry.BVH(StaticBroadPhaseEntry),
   body_bounds:           [dynamic]geometry.Aabb,
   enable_air_resistance: bool,
-  air_density:           f32, // kg/m3
+  air_density:           f32,
   enable_parallel:       bool,
   thread_count:          int,
   thread_pool:           thread.Pool,
 }
 
-BroadPhaseEntry :: struct {
-  handle: RigidBodyHandle,
+DynamicBroadPhaseEntry :: struct {
+  handle: DynamicRigidBodyHandle,
+  bounds: geometry.Aabb,
+}
+
+StaticBroadPhaseEntry :: struct {
+  handle: StaticRigidBodyHandle,
   bounds: geometry.Aabb,
 }
 
@@ -50,14 +60,24 @@ init :: proc(
   enable_parallel: bool = true,
 ) {
   cont.init(&self.bodies)
+  cont.init(&self.static_bodies)
   cont.init(&self.colliders)
-  self.contacts = make([dynamic]Contact)
-  self.prev_contacts = make(map[u64]Contact)
+  self.dynamic_contacts = make([dynamic]DynamicContact)
+  self.static_contacts = make([dynamic]StaticContact)
+  self.prev_dynamic_contacts = make(map[u64]DynamicContact)
+  self.prev_static_contacts = make(map[u64]StaticContact)
   self.gravity = gravity
-  self.spatial_index = geometry.BVH(BroadPhaseEntry) {
+  self.dynamic_bvh = geometry.BVH(DynamicBroadPhaseEntry) {
     nodes = make([dynamic]geometry.BVHNode),
-    primitives = make([dynamic]BroadPhaseEntry),
-    bounds_func = #force_inline proc(entry: BroadPhaseEntry) -> geometry.Aabb {
+    primitives = make([dynamic]DynamicBroadPhaseEntry),
+    bounds_func = #force_inline proc(entry: DynamicBroadPhaseEntry) -> geometry.Aabb {
+      return entry.bounds
+    },
+  }
+  self.static_bvh = geometry.BVH(StaticBroadPhaseEntry) {
+    nodes = make([dynamic]geometry.BVHNode),
+    primitives = make([dynamic]StaticBroadPhaseEntry),
+    bounds_func = #force_inline proc(entry: StaticBroadPhaseEntry) -> geometry.Aabb {
       return entry.bounds
     },
   }
@@ -90,36 +110,65 @@ destroy :: proc(self: ^World) {
     )
     thread.pool_destroy(&self.thread_pool)
   }
-  cont.destroy(self.bodies, proc(body: ^RigidBody) {})
+  cont.destroy(self.bodies, proc(body: ^DynamicRigidBody) {})
+  cont.destroy(self.static_bodies, proc(body: ^StaticRigidBody) {})
   cont.destroy(self.colliders, proc(col: ^Collider) {})
   delete(self.body_bounds)
-  delete(self.contacts)
-  delete(self.prev_contacts)
-  geometry.bvh_destroy(&self.spatial_index)
+  delete(self.dynamic_contacts)
+  delete(self.static_contacts)
+  delete(self.prev_dynamic_contacts)
+  delete(self.prev_static_contacts)
+  geometry.bvh_destroy(&self.dynamic_bvh)
+  geometry.bvh_destroy(&self.static_bvh)
 }
 
-create_body :: proc(
+create_dynamic_body :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  is_static: bool = false,
   trigger_only: bool = false,
   collider_handle: ColliderHandle = {},
 ) -> (
-  handle: RigidBodyHandle,
+  handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  body: ^RigidBody
-  handle, body = cont.alloc(&self.bodies, RigidBodyHandle) or_return
-  rigid_body_init(body, position, rotation, mass, is_static)
+  body: ^DynamicRigidBody
+  handle, body = cont.alloc(&self.bodies, DynamicRigidBodyHandle) or_return
+  rigid_body_init(body, position, rotation, mass)
   body.trigger_only = trigger_only
   body.collider_handle = collider_handle
   return handle, true
 }
 
-destroy_body :: proc(self: ^World, handle: RigidBodyHandle) {
+create_static_body :: proc(
+  self: ^World,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  trigger_only: bool = false,
+  collider_handle: ColliderHandle = {},
+) -> (
+  handle: StaticRigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  body: ^StaticRigidBody
+  handle, body = cont.alloc(&self.static_bodies, StaticRigidBodyHandle) or_return
+  static_rigid_body_init(body, position, rotation, trigger_only)
+  body.collider_handle = collider_handle
+  return handle, true
+}
+
+destroy_dynamic_body :: proc(self: ^World, handle: DynamicRigidBodyHandle) {
   cont.free(&self.bodies, handle)
+}
+
+destroy_static_body :: proc(self: ^World, handle: StaticRigidBodyHandle) {
+  cont.free(&self.static_bodies, handle)
+}
+
+destroy_body :: proc {
+  destroy_dynamic_body,
+  destroy_static_body,
 }
 
 destroy_collider :: proc(self: ^World, handle: ColliderHandle) {
@@ -224,135 +273,195 @@ create_collider_fan :: proc(
   return handle, true
 }
 
-create_body_sphere :: proc(
+create_dynamic_body_sphere :: proc(
   self: ^World,
   radius: f32 = 1.0,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  is_static: bool = false,
   trigger_only: bool = false,
   offset: [3]f32 = {},
 ) -> (
-  body_handle: RigidBodyHandle,
+  body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  body_handle = create_body(
+  collider_handle := create_collider_sphere(self, radius, offset) or_return
+  body_handle = create_dynamic_body(
     self,
     position,
     rotation,
     mass,
-    is_static,
     trigger_only,
+    collider_handle,
   ) or_return
-  if body, ok := get(self, body_handle); ok {
-    body.collider_handle = create_collider_sphere(
-      self,
-      radius,
-      offset,
-    ) or_return
-  }
   return body_handle, true
 }
 
-create_body_box :: proc(
+create_static_body_sphere :: proc(
+  self: ^World,
+  radius: f32 = 1.0,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+) -> (
+  body_handle: StaticRigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  collider_handle := create_collider_sphere(self, radius, offset) or_return
+  body_handle = create_static_body(
+    self,
+    position,
+    rotation,
+    trigger_only,
+    collider_handle,
+  ) or_return
+  return body_handle, true
+}
+
+create_dynamic_body_box :: proc(
   self: ^World,
   half_extents: [3]f32,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  is_static: bool = false,
   trigger_only: bool = false,
   offset: [3]f32 = {},
 ) -> (
-  body_handle: RigidBodyHandle,
+  body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  body_handle = create_body(
+  collider_handle := create_collider_box(self, half_extents, offset) or_return
+  body_handle = create_dynamic_body(
     self,
     position,
     rotation,
     mass,
-    is_static,
     trigger_only,
+    collider_handle,
   ) or_return
-  if body, ok := get(self, body_handle); ok {
-    body.collider_handle = create_collider_box(
-      self,
-      half_extents,
-      offset,
-    ) or_return
-  }
   return body_handle, true
 }
 
-create_body_capsule :: proc(
+create_static_body_box :: proc(
+  self: ^World,
+  half_extents: [3]f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+) -> (
+  body_handle: StaticRigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  collider_handle := create_collider_box(self, half_extents, offset) or_return
+  body_handle = create_static_body(
+    self,
+    position,
+    rotation,
+    trigger_only,
+    collider_handle,
+  ) or_return
+  return body_handle, true
+}
+
+create_dynamic_body_capsule :: proc(
   self: ^World,
   radius: f32,
   height: f32,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  is_static: bool = false,
   trigger_only: bool = false,
   offset: [3]f32 = {},
 ) -> (
-  body_handle: RigidBodyHandle,
+  body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  body_handle = create_body(
+  collider_handle := create_collider_capsule(self, radius, height, offset) or_return
+  body_handle = create_dynamic_body(
     self,
     position,
     rotation,
     mass,
-    is_static,
     trigger_only,
+    collider_handle,
   ) or_return
-  if body, ok := get(self, body_handle); ok {
-    body.collider_handle = create_collider_capsule(
-      self,
-      radius,
-      height,
-      offset,
-    ) or_return
-  }
   return body_handle, true
 }
 
-create_body_cylinder :: proc(
+create_static_body_capsule :: proc(
+  self: ^World,
+  radius: f32,
+  height: f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+) -> (
+  body_handle: StaticRigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  collider_handle := create_collider_capsule(self, radius, height, offset) or_return
+  body_handle = create_static_body(
+    self,
+    position,
+    rotation,
+    trigger_only,
+    collider_handle,
+  ) or_return
+  return body_handle, true
+}
+
+create_dynamic_body_cylinder :: proc(
   self: ^World,
   radius: f32,
   height: f32,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  is_static: bool = false,
   trigger_only: bool = false,
   offset: [3]f32 = {},
 ) -> (
-  body_handle: RigidBodyHandle,
+  body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  body_handle = create_body(
+  collider_handle := create_collider_cylinder(self, radius, height, offset) or_return
+  body_handle = create_dynamic_body(
     self,
     position,
     rotation,
     mass,
-    is_static,
     trigger_only,
+    collider_handle,
   ) or_return
-  if body, ok := get(self, body_handle); ok {
-    body.collider_handle = create_collider_cylinder(
-      self,
-      radius,
-      height,
-      offset,
-    ) or_return
-  }
   return body_handle, true
 }
 
-create_body_fan :: proc(
+create_static_body_cylinder :: proc(
+  self: ^World,
+  radius: f32,
+  height: f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+) -> (
+  body_handle: StaticRigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  collider_handle := create_collider_cylinder(self, radius, height, offset) or_return
+  body_handle = create_static_body(
+    self,
+    position,
+    rotation,
+    trigger_only,
+    collider_handle,
+  ) or_return
+  return body_handle, true
+}
+
+create_dynamic_body_fan :: proc(
   self: ^World,
   radius: f32,
   height: f32,
@@ -360,30 +469,45 @@ create_body_fan :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  is_static: bool = false,
   trigger_only: bool = false,
   offset: [3]f32 = {},
 ) -> (
-  body_handle: RigidBodyHandle,
+  body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  body_handle = create_body(
+  collider_handle := create_collider_fan(self, radius, height, angle, offset) or_return
+  body_handle = create_dynamic_body(
     self,
     position,
     rotation,
     mass,
-    is_static,
     trigger_only,
+    collider_handle,
   ) or_return
-  if body, ok := get(self, body_handle); ok {
-    body.collider_handle = create_collider_fan(
-      self,
-      radius,
-      height,
-      angle,
-      offset,
-    ) or_return
-  }
+  return body_handle, true
+}
+
+create_static_body_fan :: proc(
+  self: ^World,
+  radius: f32,
+  height: f32,
+  angle: f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  trigger_only: bool = false,
+  offset: [3]f32 = {},
+) -> (
+  body_handle: StaticRigidBodyHandle,
+  ok: bool,
+) #optional_ok {
+  collider_handle := create_collider_fan(self, radius, height, angle, offset) or_return
+  body_handle = create_static_body(
+    self,
+    position,
+    rotation,
+    trigger_only,
+    collider_handle,
+  ) or_return
   return body_handle, true
 }
 
@@ -393,19 +517,22 @@ step :: proc(self: ^World, dt: f32) {
   frame_counter += 1
   // Save previous contacts for warmstarting
   warmstart_prep_start := time.now()
-  clear(&self.prev_contacts)
-  for contact in self.contacts {
+  clear(&self.prev_dynamic_contacts)
+  clear(&self.prev_static_contacts)
+  for contact in self.dynamic_contacts {
     hash := collision_pair_hash(contact.body_a, contact.body_b)
-    self.prev_contacts[hash] = contact
+    self.prev_dynamic_contacts[hash] = contact
+  }
+  for contact in self.static_contacts {
+    hash := collision_pair_hash(contact.body_a, contact.body_b)
+    self.prev_static_contacts[hash] = contact
   }
   warmstart_prep_time := time.since(warmstart_prep_start)
 
   // Sleep Update
   for &entry in self.bodies.entries do if entry.active {
     body := &entry.item
-    if body.is_static || body.is_kinematic || body.trigger_only {
-      continue
-    }
+    if body.is_kinematic || body.trigger_only do continue
     lin_speed := linalg.length(body.velocity)
     ang_speed := linalg.length(body.angular_velocity)
     if lin_speed < SLEEP_LINEAR_THRESHOLD && ang_speed < SLEEP_ANGULAR_THRESHOLD {
@@ -426,18 +553,12 @@ step :: proc(self: ^World, dt: f32) {
   awake_body_count := 0
   for &entry, idx in self.bodies.entries do if entry.active {
     body := &entry.item
-    if body.is_static || body.is_kinematic || body.trigger_only {
-      continue
-    }
+    if body.is_kinematic || body.trigger_only do continue
     if body.is_sleeping do continue
     awake_body_count += 1
-    // Apply gravity
     gravity_force := self.gravity * body.mass * body.gravity_scale
     apply_force(body, gravity_force)
     if !self.enable_air_resistance do continue
-    // Apply air resistance (drag)
-    // Drag force: F_d = -0.5 * p * v * v * C_d * A
-    // Where: p=air density, v=velocity, C_d=drag coefficient, A=cross-sectional area
     vel_mag := linalg.length(body.velocity)
     if vel_mag < 0.001 do continue
     collider := get(self, body.collider_handle) or_continue
@@ -445,9 +566,6 @@ step :: proc(self: ^World, dt: f32) {
     drag_magnitude := 0.5 * self.air_density * vel_mag * vel_mag * body.drag_coefficient * cross_section
     drag_direction := -linalg.normalize(body.velocity)
     drag_force := drag_direction * drag_magnitude
-    // clamp drag acceleration to prevent numerical instability
-    // without this, ultra-light objects with large colliders experience extreme deceleration
-    // that can cause velocity to explode or reverse in a single timestep
     drag_accel := drag_magnitude * body.inv_mass
     max_accel := linalg.length(self.gravity) * 30.0
     if drag_accel > max_accel {
@@ -487,26 +605,32 @@ step :: proc(self: ^World, dt: f32) {
     )
   }
   ccd_time := time.since(ccd_start)
-  // integrate position multiple times per frame
-  // more substeps = smaller steps = less tunneling through thin objects
   substep_dt := dt / f32(NUM_SUBSTEPS)
-  active_body_count := 0
-  for &entry, idx in self.bodies.entries do if entry.active {
+  dynamic_body_count := 0
+  for &entry in self.bodies.entries do if entry.active {
     if entry.item.collider_handle.generation != 0 {
-      active_body_count += 1
+      dynamic_body_count += 1
     }
   }
-  // Rebuild BVH only when body count changes (bodies added/removed)
-  rebuild_bvh := len(self.spatial_index.primitives) != active_body_count
+  static_body_count := 0
+  for &entry in self.static_bodies.entries do if entry.active {
+    if entry.item.collider_handle.generation != 0 {
+      static_body_count += 1
+    }
+  }
+  // Rebuild dynamic BVH when count changes
+  rebuild_dynamic_bvh := len(self.dynamic_bvh.primitives) != dynamic_body_count
+  // Rebuild static BVH when count changes
+  rebuild_static_bvh := len(self.static_bvh.primitives) != static_body_count
   bvh_build_time: time.Duration
-  if rebuild_bvh {
+  if rebuild_dynamic_bvh {
     bvh_build_start := time.now()
-    clear(&self.spatial_index.nodes)
-    clear(&self.spatial_index.primitives)
+    clear(&self.dynamic_bvh.nodes)
+    clear(&self.dynamic_bvh.primitives)
     entries := make(
-      [dynamic]BroadPhaseEntry,
+      [dynamic]DynamicBroadPhaseEntry,
       0,
-      active_body_count,
+      dynamic_body_count,
       context.temp_allocator,
     )
     for &entry, idx in self.bodies.entries do if entry.active {
@@ -514,18 +638,42 @@ step :: proc(self: ^World, dt: f32) {
       if body.collider_handle.generation == 0 do continue
       collider := get(self, body.collider_handle) or_continue
       update_cached_aabb(body, collider)
-      handle := RigidBodyHandle {
+      handle := DynamicRigidBodyHandle {
         index      = u32(idx),
         generation = entry.generation,
       }
-      append(&entries, BroadPhaseEntry{handle = handle, bounds = body.cached_aabb})
+      append(&entries, DynamicBroadPhaseEntry{handle = handle, bounds = body.cached_aabb})
     }
-    geometry.bvh_build(&self.spatial_index, entries[:], 4)
-    bvh_build_time = time.since(bvh_build_start)
+    geometry.bvh_build(&self.dynamic_bvh, entries[:], 4)
+    bvh_build_time += time.since(bvh_build_start)
+  }
+  if rebuild_static_bvh {
+    bvh_build_start := time.now()
+    clear(&self.static_bvh.nodes)
+    clear(&self.static_bvh.primitives)
+    entries := make(
+      [dynamic]StaticBroadPhaseEntry,
+      0,
+      static_body_count,
+      context.temp_allocator,
+    )
+    for &entry, idx in self.static_bodies.entries do if entry.active {
+      body := &entry.item
+      if body.collider_handle.generation == 0 do continue
+      collider := get(self, body.collider_handle) or_continue
+      update_cached_aabb(body, collider)
+      handle := StaticRigidBodyHandle {
+        index      = u32(idx),
+        generation = entry.generation,
+      }
+      append(&entries, StaticBroadPhaseEntry{handle = handle, bounds = body.cached_aabb})
+    }
+    geometry.bvh_build(&self.static_bvh, entries[:], 4)
+    bvh_build_time += time.since(bvh_build_start)
   }
   substep_start := time.now()
-  candidates := make([dynamic]BroadPhaseEntry, context.temp_allocator)
-  defer delete(candidates)
+  dynamic_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  static_candidates := make([dynamic]StaticBroadPhaseEntry, context.temp_allocator)
   refit_time: time.Duration
   broadphase_time: time.Duration
   prepare_time: time.Duration
@@ -534,7 +682,8 @@ step :: proc(self: ^World, dt: f32) {
   #unroll for substep in 0 ..< NUM_SUBSTEPS {
     // clear and redetect contacts at current positions
     refit_start := time.now()
-    clear(&self.contacts)
+    clear(&self.dynamic_contacts)
+    clear(&self.static_contacts)
     // parallel_bvh_refit are slower than sequential_bvh_refit
     if self.enable_parallel {
       parallel_bvh_refit(self, self.thread_count)
@@ -552,7 +701,12 @@ step :: proc(self: ^World, dt: f32) {
     broadphase_time += collision_time
     // Prepare all contacts (compute mass matrices and bias terms)
     prepare_start := time.now()
-    for &contact in self.contacts {
+    for &contact in self.dynamic_contacts {
+      body_a := get(self, contact.body_a) or_continue
+      body_b := get(self, contact.body_b) or_continue
+      prepare_contact(&contact, body_a, body_b, substep_dt)
+    }
+    for &contact in self.static_contacts {
       body_a := get(self, contact.body_a) or_continue
       body_b := get(self, contact.body_b) or_continue
       prepare_contact(&contact, body_a, body_b, substep_dt)
@@ -561,7 +715,12 @@ step :: proc(self: ^World, dt: f32) {
     // Warmstart with cached impulses (only on first substep)
     solver_start := time.now()
     if substep == 0 {
-      for &contact in self.contacts {
+      for &contact in self.dynamic_contacts {
+        body_a := get(self, contact.body_a) or_continue
+        body_b := get(self, contact.body_b) or_continue
+        warmstart_contact(&contact, body_a, body_b)
+      }
+      for &contact in self.static_contacts {
         body_a := get(self, contact.body_a) or_continue
         body_b := get(self, contact.body_b) or_continue
         warmstart_contact(&contact, body_a, body_b)
@@ -569,7 +728,12 @@ step :: proc(self: ^World, dt: f32) {
     }
     // Solve constraints with bias (includes position correction + restitution)
     #unroll for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
-      for &contact in self.contacts {
+      for &contact in self.dynamic_contacts {
+        body_a := get(self, contact.body_a) or_continue
+        body_b := get(self, contact.body_b) or_continue
+        resolve_contact(&contact, body_a, body_b)
+      }
+      for &contact in self.static_contacts {
         body_a := get(self, contact.body_a) or_continue
         body_b := get(self, contact.body_b) or_continue
         resolve_contact(&contact, body_a, body_b)
@@ -577,10 +741,14 @@ step :: proc(self: ^World, dt: f32) {
     }
     // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
     #unroll for _ in 0 ..< STABILIZATION_ITERS {
-      for &contact in self.contacts {
+      for &contact in self.dynamic_contacts {
         body_a := get(self, contact.body_a) or_continue
         body_b := get(self, contact.body_b) or_continue
-        // Solve without bias - only enforce zero relative velocity at contact
+        resolve_contact_no_bias(&contact, body_a, body_b)
+      }
+      for &contact in self.static_contacts {
+        body_a := get(self, contact.body_a) or_continue
+        body_b := get(self, contact.body_b) or_continue
         resolve_contact_no_bias(&contact, body_a, body_b)
       }
     }
@@ -588,35 +756,22 @@ step :: proc(self: ^World, dt: f32) {
     integration_start_substep := time.now()
     for &entry, idx in self.bodies.entries do if entry.active {
       body := &entry.item
-      if body.is_static || body.is_kinematic || body.trigger_only {
-        continue
-      }
+      if body.is_kinematic || body.trigger_only do continue
       if body.is_sleeping do continue
-      // Skip if already handled by CCD
-      if idx < len(ccd_handled) && ccd_handled[idx] {
-        continue
-      }
-      // Update position using substep timestep
+      if idx < len(ccd_handled) && ccd_handled[idx] do continue
       vel := body.velocity * substep_dt
       body.position += vel
-      // Update rotation from angular velocity (if enabled)
-      // Use quaternion integration: q_new = q_old + 0.5 * dt * (omega * q_old)
-      // Skip rotation if angular velocity is negligible or rotation is disabled
       if body.enable_rotation {
         ang_vel_mag_sq := linalg.length2(body.angular_velocity)
         if ang_vel_mag_sq >= math.F32_EPSILON {
-          // Create pure quaternion from angular velocity (w=0, xyz=angular_velocity)
           omega_quat := quaternion(w = 0, x = body.angular_velocity.x, y = body.angular_velocity.y, z = body.angular_velocity.z)
           q_old := body.rotation
-          // Calculate derivative: q_dot = 0.5 * omega * q_old
           q_dot := omega_quat * q_old
           q_dot.w *= 0.5
           q_dot.x *= 0.5
           q_dot.y *= 0.5
           q_dot.z *= 0.5
-          // Integrate: q_new = q_old + q_dot * substep_dt
           q_new := quaternion(w = q_old.w + q_dot.w * substep_dt, x = q_old.x + q_dot.x * substep_dt, y = q_old.y + q_dot.y * substep_dt, z = q_old.z + q_dot.z * substep_dt)
-          // Normalize to prevent drift
           q_new = linalg.normalize(q_new)
           body.rotation = q_new
         }
@@ -636,11 +791,9 @@ step :: proc(self: ^World, dt: f32) {
   cleanup_start := time.now()
   for &entry, idx in self.bodies.entries do if entry.active {
     body := &entry.item
-    if body.is_static || body.is_kinematic {
-      continue
-    }
+    if body.is_kinematic do continue
     if body.position.y < KILL_Y {
-      handle := RigidBodyHandle {
+      handle := DynamicRigidBodyHandle {
         index      = u32(idx),
         generation = entry.generation,
       }
@@ -652,8 +805,9 @@ step :: proc(self: ^World, dt: f32) {
   total_time := time.since(step_start)
   avg_candidates :=
     ccd_bodies_tested > 0 ? f32(ccd_total_candidates) / f32(ccd_bodies_tested) : 0.0
+  total_body_count := dynamic_body_count + static_body_count
   log.infof(
-    "Physics: %.2fms total | warmstart=%.2fms force=%.2fms integ=%.2fms ccd=%.2fms (fast=%d avg_cands=%.1f) bvh=%.2fms substeps=%.2fms [refit=%.2fms collision=%.2fms prep=%.2fms solve=%.2fms integ=%.2fms] cleanup=%.2fms | bodies=%d awake=%d contacts=%d",
+    "Physics: %.2fms total | warmstart=%.2fms force=%.2fms integ=%.2fms ccd=%.2fms (fast=%d avg_cands=%.1f) bvh=%.2fms substeps=%.2fms [refit=%.2fms collision=%.2fms prep=%.2fms solve=%.2fms integ=%.2fms] cleanup=%.2fms | bodies=%d (dyn=%d sta=%d) awake=%d contacts=%d (dyn=%d sta=%d)",
     time.duration_milliseconds(total_time),
     time.duration_milliseconds(warmstart_prep_time),
     time.duration_milliseconds(force_application_time),
@@ -669,20 +823,34 @@ step :: proc(self: ^World, dt: f32) {
     time.duration_milliseconds(solver_time),
     time.duration_milliseconds(integration_time_substep),
     time.duration_milliseconds(cleanup_time),
-    active_body_count,
+    total_body_count,
+    dynamic_body_count,
+    static_body_count,
     awake_body_count,
-    len(self.contacts),
+    len(self.dynamic_contacts) + len(self.static_contacts),
+    len(self.dynamic_contacts),
+    len(self.static_contacts),
   )
 }
 
-get_body :: #force_inline proc(
+get_dynamic_body :: #force_inline proc(
   self: ^World,
-  handle: RigidBodyHandle,
+  handle: DynamicRigidBodyHandle,
 ) -> (
-  ret: ^RigidBody,
+  ret: ^DynamicRigidBody,
   ok: bool,
 ) #optional_ok {
   return cont.get(self.bodies, handle)
+}
+
+get_static_body :: #force_inline proc(
+  self: ^World,
+  handle: StaticRigidBodyHandle,
+) -> (
+  ret: ^StaticRigidBody,
+  ok: bool,
+) #optional_ok {
+  return cont.get(self.static_bodies, handle)
 }
 
 get_collider :: #force_inline proc(
@@ -696,6 +864,7 @@ get_collider :: #force_inline proc(
 }
 
 get :: proc {
-  get_body,
+  get_dynamic_body,
+  get_static_body,
   get_collider,
 }

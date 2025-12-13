@@ -16,7 +16,7 @@ spawn_test_body :: proc(
   phys: ^physics.World,
   position: [3]f32,
   is_static: bool = true,
-) -> physics.RigidBodyHandle {
+) -> physics.DynamicRigidBodyHandle {
   body_handle, _ := physics.create_body_sphere(phys, radius = 0.5, position = position, is_static = is_static)
   return body_handle
 }
@@ -32,7 +32,7 @@ test_physics_query_sphere :: proc(t: ^testing.T) {
   b3 := spawn_test_body(&phys, {10, 0, 0})
   physics.step(&phys, 0.0)
   // Query sphere at origin with radius 3
-  results := make([dynamic]physics.RigidBodyHandle)
+  results := make([dynamic]physics.DynamicRigidBodyHandle)
   defer delete(results)
   physics.query_sphere(&phys, {0, 0, 0}, 3.0, &results)
   testing.expect(
@@ -61,7 +61,7 @@ test_physics_query_box :: proc(t: ^testing.T) {
   b3 := spawn_test_body(&phys, {-2, -2, -2})
   b4 := spawn_test_body(&phys, {10, 10, 10})
   physics.step(&phys, 0.0)
-  results := make([dynamic]physics.RigidBodyHandle)
+  results := make([dynamic]physics.DynamicRigidBodyHandle)
   defer delete(results)
   // Query box centered at origin with half-extent 3
   bounds := geometry.Aabb {
@@ -228,7 +228,7 @@ test_physics_world_integration :: proc(t: ^testing.T) {
     "All bodies should be created",
   )
   // Query for bodies within range
-  results := make([dynamic]physics.RigidBodyHandle)
+  results := make([dynamic]physics.DynamicRigidBodyHandle)
   defer delete(results)
   physics.query_sphere(&phys, {5, 0, 0}, 8.0, &results)
   testing.expect(t, len(results) >= 2, "Should find at least 2 bodies")
@@ -239,7 +239,7 @@ test_physics_edge_cases :: proc(t: ^testing.T) {
   phys: physics.World
   physics.init(&phys, enable_parallel = false)
   defer physics.destroy(&phys)
-  results := make([dynamic]physics.RigidBodyHandle)
+  results := make([dynamic]physics.DynamicRigidBodyHandle)
   defer delete(results)
   physics.query_sphere(&phys, {0, 0, 0}, 5.0, &results)
   testing.expect(
@@ -278,7 +278,7 @@ test_physics_cylinder_collision :: proc(t: ^testing.T) {
   body_handle, _ := physics.create_body_cylinder(&phys, radius = 2.0, height = 4.0, is_static = true)
   physics.step(&phys, 0.0)
   // Query for bodies - should find the cylinder
-  results := make([dynamic]physics.RigidBodyHandle)
+  results := make([dynamic]physics.DynamicRigidBodyHandle)
   defer delete(results)
   physics.query_sphere(&phys, {0, 0, 0}, 5.0, &results)
   testing.expect(t, len(results) == 1, "Should find cylinder body")

@@ -40,7 +40,7 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
   }
 
   // Create cube grid (3x1x3 = 9 cubes)
-  cube_handles: [CUBE_COUNT]physics.RigidBodyHandle
+  cube_handles: [CUBE_COUNT]physics.DynamicRigidBodyHandle
   idx := 0
   for x in 0 ..< NX {
     for y in 0 ..< NY {

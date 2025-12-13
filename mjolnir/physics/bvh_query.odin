@@ -5,9 +5,9 @@ import "../geometry"
 // Optimized BVH query specifically for BroadPhaseEntry
 // Avoids calling bounds_func since bounds are already stored in the entry
 bvh_query_aabb_fast :: proc(
-  bvh: ^geometry.BVH(BroadPhaseEntry),
+  bvh: ^geometry.BVH($T),
   query_bounds: geometry.Aabb,
-  results: ^[dynamic]BroadPhaseEntry,
+  results: ^[dynamic]T,
 ) {
   if bvh == nil || results == nil do return
   clear(results)
@@ -34,10 +34,10 @@ bvh_query_aabb_fast :: proc(
 
 // Optimized BVH ray query specifically for BroadPhaseEntry
 bvh_query_ray_fast :: proc(
-  bvh: ^geometry.BVH(BroadPhaseEntry),
+  bvh: ^geometry.BVH($T),
   ray: geometry.Ray,
   max_dist: f32,
-  results: ^[dynamic]BroadPhaseEntry,
+  results: ^[dynamic]T,
 ) {
   clear(results)
   if len(bvh.nodes) == 0 do return

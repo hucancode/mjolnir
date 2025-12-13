@@ -14,8 +14,8 @@ import "vendor:glfw"
 physics_world: physics.World
 cube_handle: resources.NodeHandle
 ground_handle: resources.NodeHandle
-cube_body: physics.RigidBodyHandle
-ground_body: physics.RigidBodyHandle
+cube_body: physics.DynamicRigidBodyHandle
+ground_body: physics.DynamicRigidBodyHandle
 time_since_jump: f32
 
 JUMP_INTERVAL :: 5.0

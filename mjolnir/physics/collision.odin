@@ -16,29 +16,57 @@ is_identity_quaternion :: proc "contextless" (q: quaternion128) -> bool {
   )
 }
 
-Contact :: struct {
-  body_a:          RigidBodyHandle,
-  body_b:          RigidBodyHandle,
+// Contact between two dynamic bodies
+DynamicContact :: struct {
+  body_a:          DynamicRigidBodyHandle,
+  body_b:          DynamicRigidBodyHandle,
   point:           [3]f32,
   normal:          [3]f32,
   penetration:     f32,
   restitution:     f32,
   friction:        f32,
-  // Warmstarting: accumulated impulses from this contact
   normal_impulse:  f32,
   tangent_impulse: [2]f32,
-  // Cached data for constraint solving
   normal_mass:     f32,
   tangent_mass:    [2]f32,
-  bias:            f32, // Position correction bias term
+  bias:            f32,
 }
 
-// Hash function for collision pairs (for contact caching)
-collision_pair_hash :: proc "contextless" (
-  body_a: RigidBodyHandle,
-  body_b: RigidBodyHandle,
+// Contact between dynamic body (A) and static body (B)
+StaticContact :: struct {
+  body_a:          DynamicRigidBodyHandle,
+  body_b:          StaticRigidBodyHandle,
+  point:           [3]f32,
+  normal:          [3]f32,
+  penetration:     f32,
+  restitution:     f32,
+  friction:        f32,
+  normal_impulse:  f32,
+  tangent_impulse: [2]f32,
+  normal_mass:     f32,
+  tangent_mass:    [2]f32,
+  bias:            f32,
+}
+
+collision_pair_hash_dynamic :: proc "contextless" (
+  body_a: DynamicRigidBodyHandle,
+  body_b: DynamicRigidBodyHandle,
 ) -> u64 {
   return (u64(body_a.index) << 32) | u64(body_b.index)
+}
+
+collision_pair_hash_static :: proc "contextless" (
+  body_a: DynamicRigidBodyHandle,
+  body_b: StaticRigidBodyHandle,
+) -> u64 {
+  a_index := body_a.index
+  b_index := body_b.index | 0x80000000
+  return (u64(a_index) << 32) | u64(b_index)
+}
+
+collision_pair_hash :: proc {
+  collision_pair_hash_dynamic,
+  collision_pair_hash_static,
 }
 
 // Fast bounding sphere intersection test (use before expensive narrow phase)
