@@ -11,7 +11,7 @@ import "core:math"
 import "core:math/linalg"
 
 NX :: 8
-NY :: 5
+NY :: 1
 NZ :: 8
 CUBE_COUNT :: NX * NY * NZ
 SPHERE_RADIUS :: 3.0
@@ -44,7 +44,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create static physics body (no attachment needed - it doesn't move)
     physics.create_static_body_box(
       &physics_world,
-      {10.0, 0.5, 10.0},
+      {14.0, 0.5, 14.0},
       ground_node.transform.position,
       ground_node.transform.rotation,
     )
@@ -57,7 +57,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         material = ground_mat,
       },
     )
-    world.scale_xyz(&engine.world, ground_mesh_handle, 10.0, 0.5, 10.0)
+    world.scale_xyz(&engine.world, ground_mesh_handle, 14.0, 0.5, 14.0)
     log.info("Ground created")
   }
   // Create sphere
