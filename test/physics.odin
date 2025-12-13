@@ -1745,6 +1745,57 @@ test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_rotated_offset_collider_aabb :: proc(t: ^testing.T) {
+  collider := physics.Collider {
+    offset = {1, 0, 0},
+    shape  = physics.BoxCollider{half_extents = {0.5, 0.5, 0.5}},
+  }
+  position := [3]f32{0, 0, 0}
+  rotation := linalg.quaternion_angle_axis(math.PI / 2.0, linalg.VECTOR3F32_Y_AXIS)
+  aabb := physics.collider_calculate_aabb(&collider, position, rotation)
+  rotated_offset := linalg.mul(rotation, collider.offset)
+  expected_center := position + rotated_offset
+  actual_center := (aabb.min + aabb.max) * 0.5
+  testing.expect(
+    t,
+    abs(actual_center.x - expected_center.x) < 0.1 &&
+    abs(actual_center.y - expected_center.y) < 0.1 &&
+    abs(actual_center.z - expected_center.z) < 0.1,
+    "AABB center should account for rotated offset",
+  )
+}
+
+@(test)
+test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
+  physics_world: physics.World
+  physics.init(&physics_world, {0, -10, 0}, false)
+  defer physics.destroy(&physics_world)
+  _ = physics.create_body_box(
+    &physics_world,
+    half_extents = {10, 0.5, 10},
+    position = {0, -0.5, 0},
+    is_static = true,
+  )
+  box_handle := physics.create_body_box(
+    &physics_world,
+    half_extents = {0.5, 0.5, 0.5},
+    position = {0, 2, 0},
+    offset = {0.3, 0, 0},
+  )
+  box := physics.get_body(&physics_world, box_handle)
+  box.rotation = linalg.quaternion_angle_axis(math.PI / 4.0, linalg.VECTOR3F32_Z_AXIS)
+  dt := f32(0.016)
+  for i in 0 ..< 60 {
+    physics.step(&physics_world, dt)
+  }
+  testing.expect(
+    t,
+    box.position.y > -5.0,
+    "Rotated body with offset should not sink through floor",
+  )
+}
+
+@(test)
 benchmark_physics_raycast :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
 

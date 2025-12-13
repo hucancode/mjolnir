@@ -196,8 +196,8 @@ swept_test :: proc(
   pos_b: [3]f32,
   rot_b: quaternion128,
 ) -> TOIResult {
-  center_a := pos_a + collider_a.offset
-  center_b := pos_b + collider_b.offset
+  center_a := pos_a + linalg.mul(rot_a, collider_a.offset)
+  center_b := pos_b + linalg.mul(rot_b, collider_b.offset)
   // For now, implement sphere-sphere and sphere-box
   // Can extend to other shapes later
   switch shape_a in collider_a.shape {
@@ -279,8 +279,8 @@ swept_test :: proc(
     case BoxCollider:
       // Box-box swept: use Minkowski sum approach
       // Only works for axis-aligned boxes
-      is_a_aligned := is_identity_quaternion(rot_a) || true
-      is_b_aligned := is_identity_quaternion(rot_b) || true
+      is_a_aligned := is_identity_quaternion(rot_a)
+      is_b_aligned := is_identity_quaternion(rot_b)
       if is_a_aligned && is_b_aligned {
         return swept_box_box(
           center_a,
