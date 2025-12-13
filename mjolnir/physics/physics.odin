@@ -623,16 +623,16 @@ step :: proc(self: ^World, dt: f32) {
       }
     }
     integration_time_substep += time.since(integration_start_substep)
+    cache_update_start_substep := time.now()
+    if self.enable_parallel {
+      parallel_update_aabb_cache(self, self.thread_count)
+    } else {
+      sequential_update_aabb_cache(self)
+    }
+    refit_time += time.since(cache_update_start_substep)
   }
   substep_time := time.since(substep_start)
-  // Update cached AABBs after all substeps complete
-  cache_update_start := time.now()
-  if self.enable_parallel {
-    parallel_update_aabb_cache(self, self.thread_count)
-  } else {
-    sequential_update_aabb_cache(self)
-  }
-  cache_update_time := time.since(cache_update_start)
+  cache_update_time: time.Duration = 0
   cleanup_start := time.now()
   for &entry, idx in self.bodies.entries do if entry.active {
     body := &entry.item
