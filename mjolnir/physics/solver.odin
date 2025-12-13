@@ -3,6 +3,9 @@ package physics
 import "core:math"
 import "core:math/linalg"
 
+BAUMGARTE_COEF :: 0.4
+SLOP :: 0.002
+
 prepare_contact_dynamic_dynamic :: proc(
   contact: ^DynamicContact,
   body_a: ^DynamicRigidBody,
@@ -36,10 +39,8 @@ prepare_contact_dynamic_dynamic :: proc(
       contact.tangent_mass[i] = 0
     }
   }
-  baumgarte_coef :: 0.15
-  slop :: 0.002
-  penetration_to_resolve := max(contact.penetration - slop, 0.0)
-  contact.bias = (baumgarte_coef / dt) * penetration_to_resolve
+  penetration_to_resolve := max(contact.penetration - SLOP, 0.0)
+  contact.bias = (BAUMGARTE_COEF / dt) * penetration_to_resolve
   vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, r_a)
   vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, r_b)
   relative_velocity := vel_b - vel_a
@@ -80,10 +81,8 @@ prepare_contact_dynamic_static :: proc(
       contact.tangent_mass[i] = 0
     }
   }
-  baumgarte_coef :: 0.15
-  slop :: 0.002
-  penetration_to_resolve := max(contact.penetration - slop, 0.0)
-  contact.bias = (baumgarte_coef / dt) * penetration_to_resolve
+  penetration_to_resolve := max(contact.penetration - SLOP, 0.0)
+  contact.bias = (BAUMGARTE_COEF / dt) * penetration_to_resolve
   vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, r_a)
   relative_velocity := -vel_a
   velocity_along_normal := linalg.dot(relative_velocity, contact.normal)
