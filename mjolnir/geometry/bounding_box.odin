@@ -246,18 +246,24 @@ obb_obb_intersect :: proc(
     // Skip degenerate axes (e.g., parallel edges produce near-zero cross products)
     axis_sq := linalg.length2(axis)
     if axis_sq < 1e-8 do return true
+    // Normalize axis for edge-edge cross products (face normals are already unit vectors)
+    // Without normalization, edge axes produce scaled overlaps leading to incorrect penetration depths
+    normalized_axis := axis
+    if axis_sq < 0.9999 || axis_sq > 1.0001 {
+      normalized_axis = axis / math.sqrt(axis_sq)
+    }
     // Project centers onto axis
-    dist := linalg.dot(t, axis)
+    dist := linalg.dot(t, normalized_axis)
     // Project extents of A onto axis
     ra :=
-      a.half_extents.x * math.abs(linalg.dot(ax, axis)) +
-      a.half_extents.y * math.abs(linalg.dot(ay, axis)) +
-      a.half_extents.z * math.abs(linalg.dot(az, axis))
+      a.half_extents.x * math.abs(linalg.dot(ax, normalized_axis)) +
+      a.half_extents.y * math.abs(linalg.dot(ay, normalized_axis)) +
+      a.half_extents.z * math.abs(linalg.dot(az, normalized_axis))
     // Project extents of B onto axis
     rb :=
-      b.half_extents.x * math.abs(linalg.dot(bx, axis)) +
-      b.half_extents.y * math.abs(linalg.dot(by, axis)) +
-      b.half_extents.z * math.abs(linalg.dot(bz, axis))
+      b.half_extents.x * math.abs(linalg.dot(bx, normalized_axis)) +
+      b.half_extents.y * math.abs(linalg.dot(by, normalized_axis)) +
+      b.half_extents.z * math.abs(linalg.dot(bz, normalized_axis))
     // Check for separation
     overlap := ra + rb - math.abs(dist)
     if overlap < 0 do return false // Separating axis found
@@ -265,7 +271,7 @@ obb_obb_intersect :: proc(
     if overlap < min_overlap^ {
       min_overlap^ = overlap
       // Ensure normal points from A to B
-      best_axis^ = dist < 0 ? -axis : axis
+      best_axis^ = dist < 0 ? -normalized_axis : normalized_axis
       best_index^ = current_index
     }
     return true
