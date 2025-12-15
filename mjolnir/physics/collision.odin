@@ -30,6 +30,10 @@ DynamicContact :: struct {
   normal_mass:     f32,
   tangent_mass:    [2]f32,
   bias:            f32,
+  r_a:             [3]f32,
+  r_b:             [3]f32,
+  tangent1:        [3]f32,
+  tangent2:        [3]f32,
 }
 
 // Contact between dynamic body (A) and static body (B)
@@ -46,6 +50,9 @@ StaticContact :: struct {
   normal_mass:     f32,
   tangent_mass:    [2]f32,
   bias:            f32,
+  r_a:             [3]f32,
+  tangent1:        [3]f32,
+  tangent2:        [3]f32,
 }
 
 collision_pair_hash_dynamic :: proc "contextless" (
