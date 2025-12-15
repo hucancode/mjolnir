@@ -10,9 +10,9 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-NX :: 33
-NY :: 10
-NZ :: 33
+NX :: 1
+NY :: 1
+NZ :: 1
 CUBE_COUNT :: NX * NY * NZ
 SPHERE_RADIUS :: 3.0
 
@@ -62,9 +62,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   // Create sphere
   {
-    sphere_node_handle := world.spawn(&engine.world, {0, SPHERE_RADIUS, 0})
+    sphere_node_handle := world.spawn(&engine.world, {2.5, SPHERE_RADIUS, 0})
     sphere_node := world.get_node(&engine.world, sphere_node_handle)
-    // Create static physics body (no attachment needed - it doesn't move)
     physics.create_static_body_sphere(
       &physics_world,
       SPHERE_RADIUS,
