@@ -1,13 +1,10 @@
 package main
 
 import "../../../mjolnir"
-import cont "../../../mjolnir/containers"
-import "../../../mjolnir/geometry"
 import "../../../mjolnir/physics"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 import "core:log"
-import "core:math"
 import "core:math/linalg"
 import "vendor:glfw"
 
@@ -15,7 +12,6 @@ physics_world: physics.World
 cube_handle: resources.NodeHandle
 ground_handle: resources.NodeHandle
 cube_body: physics.DynamicRigidBodyHandle
-ground_body: physics.DynamicRigidBodyHandle
 time_since_jump: f32
 
 JUMP_INTERVAL :: 5.0
@@ -27,7 +23,6 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
-  engine.key_press_proc = on_key_press
   mjolnir.run(engine, 800, 600, "Physics Visual Test - Jumping Cube")
 }
 
@@ -36,15 +31,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world, {0, -10, 0})
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  ground_body := physics.create_body_box(
+  if _, ok := physics.create_static_body_box(
     &physics_world,
-    half_extents = {40.0, 0.5, 40.0},
-    is_static = true,
-  )
+    {40.0, 0.5, 40.0},
+    position = {0, -0.5, 0},
+  ); !ok {
+    log.error("Failed to create ground body")
+    return
+  }
   ground_handle = spawn(
     engine,
     [3]f32{0, -0.5, 0},
-    world.RigidBodyAttachment{body_handle = ground_body},
   )
   ground_mesh_handle := spawn_child(
     engine,
@@ -58,13 +55,25 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Ground body created")
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
-  cube_body = physics.create_body_box(
+  cube_collider, collider_ok := physics.create_collider_box(
     &physics_world,
-    half_extents = {1.0, 1.0, 1.0},
+    {1.0, 1.0, 1.0},
+  )
+  if !collider_ok {
+    log.error("Failed to create cube collider")
+    return
+  }
+  cube_body, cube_body_ok := physics.create_dynamic_body(
+    &physics_world,
     position = {0, 3, 0},
     mass = 2.0,
+    collider_handle = cube_collider,
   )
-  if body, ok := physics.get(&physics_world, cube_body); ok {
+  if !cube_body_ok {
+    log.error("Failed to create cube body")
+    return
+  }
+  if body, ok := physics.get_dynamic_body(&physics_world, cube_body); ok {
     physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
   }
   cube_handle = spawn(
@@ -97,60 +106,59 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("====================================")
 }
 
-on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
-  // Only handle key press events, not release or repeat
-  if action != glfw.PRESS {
-    return
-  }
-  cube_body, body_ok := cont.get(physics_world.bodies, cube_body)
-  if !body_ok {
-    return
-  }
-  switch key {
-  case glfw.KEY_SPACE:
-    time_since_jump = 0.0
-    physics.apply_force(cube_body, [3]f32{0, JUMP_FORCE, 0})
-  case glfw.KEY_1:
-    physics.set_mass(cube_body, 5.0)
-    physics.set_box_inertia(cube_body, [3]f32{1.0, 1.0, 1.0})
-    log.info("Mass set to 5.0 kg (Light)")
-  case glfw.KEY_2:
-    physics.set_mass(cube_body, 20.0)
-    physics.set_box_inertia(cube_body, [3]f32{1.0, 1.0, 1.0})
-    log.info("Mass set to 20.0 kg (Medium)")
-  case glfw.KEY_3:
-    physics.set_mass(cube_body, 50.0)
-    physics.set_box_inertia(cube_body, [3]f32{1.0, 1.0, 1.0})
-    log.info("Mass set to 50.0 kg (Heavy)")
-  }
-}
-
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   time_since_jump += delta_time
-  cube_body, body_ok := cont.get(physics_world.bodies, cube_body)
+  cube_body_ptr, body_ok := physics.get_dynamic_body(
+    &physics_world,
+    cube_body,
+  )
   if !body_ok {
     return
   }
+  // Input is sampled in update_input on the main thread; use the cached state
+  space_pressed := engine.input.keys[glfw.KEY_SPACE] &&
+                   !engine.input.key_holding[glfw.KEY_SPACE]
+  mass_light_pressed := engine.input.keys[glfw.KEY_1] &&
+                        !engine.input.key_holding[glfw.KEY_1]
+  mass_medium_pressed := engine.input.keys[glfw.KEY_2] &&
+                         !engine.input.key_holding[glfw.KEY_2]
+  mass_heavy_pressed := engine.input.keys[glfw.KEY_3] &&
+                        !engine.input.key_holding[glfw.KEY_3]
   // Horizontal movement controls (WASD) - continuous polling for smooth movement
   move_force := [3]f32{0, 0, 0}
-  if glfw.GetKey(engine.window, glfw.KEY_W) == glfw.PRESS {
+  if engine.input.keys[glfw.KEY_W] {
     move_force.z -= MOVEMENT_FORCE
   }
-  if glfw.GetKey(engine.window, glfw.KEY_S) == glfw.PRESS {
+  if engine.input.keys[glfw.KEY_S] {
     move_force.z += MOVEMENT_FORCE
   }
-  if glfw.GetKey(engine.window, glfw.KEY_A) == glfw.PRESS {
+  if engine.input.keys[glfw.KEY_A] {
     move_force.x -= MOVEMENT_FORCE
   }
-  if glfw.GetKey(engine.window, glfw.KEY_D) == glfw.PRESS {
+  if engine.input.keys[glfw.KEY_D] {
     move_force.x += MOVEMENT_FORCE
   }
   if linalg.length(move_force) > 0.1 {
-    physics.apply_force(cube_body, move_force)
+    physics.apply_force(cube_body_ptr, move_force)
   }
-  if time_since_jump >= JUMP_INTERVAL {
+  if mass_light_pressed {
+    physics.set_mass(cube_body_ptr, 5.0)
+    physics.set_box_inertia(cube_body_ptr, [3]f32{1.0, 1.0, 1.0})
+    log.info("Mass set to 5.0 kg (Light)")
+  }
+  if mass_medium_pressed {
+    physics.set_mass(cube_body_ptr, 20.0)
+    physics.set_box_inertia(cube_body_ptr, [3]f32{1.0, 1.0, 1.0})
+    log.info("Mass set to 20.0 kg (Medium)")
+  }
+  if mass_heavy_pressed {
+    physics.set_mass(cube_body_ptr, 50.0)
+    physics.set_box_inertia(cube_body_ptr, [3]f32{1.0, 1.0, 1.0})
+    log.info("Mass set to 50.0 kg (Heavy)")
+  }
+  if space_pressed || time_since_jump >= JUMP_INTERVAL {
     time_since_jump = 0.0
-    physics.apply_force(cube_body, [3]f32{0, JUMP_FORCE, 0})
+    physics.apply_force(cube_body_ptr, [3]f32{0, JUMP_FORCE, 0})
   }
   physics.step(&physics_world, delta_time)
   world.sync_all_physics_to_world(&engine.world, &physics_world)

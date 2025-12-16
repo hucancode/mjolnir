@@ -40,15 +40,6 @@ find_furthest_point :: proc(
     // Transform back to world space
     world_vertex := linalg.mul(rotation, local_vertex)
     return center + world_vertex
-  case CapsuleCollider:
-    h := shape.height * 0.5
-    // Capsule is two hemispheres connected by a cylinder
-    // First find the furthest point on the central line segment
-    line_dir := linalg.VECTOR3F32_Y_AXIS
-    dot := linalg.dot(direction, line_dir)
-    line_point := center + line_dir * (dot >= 0 ? h : -h)
-    // Then add the sphere radius in the direction
-    return line_point + linalg.normalize0(direction) * shape.radius
   case CylinderCollider:
     // Transform direction to cylinder's local space
     inv_rot := linalg.quaternion_inverse(rotation)

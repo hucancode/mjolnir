@@ -20,11 +20,6 @@ BoxCollider :: struct {
   half_extents: [3]f32,
 }
 
-CapsuleCollider :: struct {
-  radius: f32,
-  height: f32,
-}
-
 CylinderCollider :: struct {
   radius: f32,
   height: f32,
@@ -42,7 +37,6 @@ Collider :: struct {
   shape:                union {
     SphereCollider,
     BoxCollider,
-    CapsuleCollider,
     CylinderCollider,
     FanCollider,
   },
@@ -64,11 +58,6 @@ collider_calculate_aabb :: proc(
       rotation     = rotation,
     }
     return geometry.obb_to_aabb(obb)
-  case CapsuleCollider:
-    r := sh.radius
-    h := sh.height * 0.5
-    extents := [3]f32{r, h + r, r}
-    return geometry.Aabb{min = center - extents, max = center + extents}
   case CylinderCollider:
     r := sh.radius
     h := sh.height * 0.5
