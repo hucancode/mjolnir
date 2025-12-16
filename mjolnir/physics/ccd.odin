@@ -225,34 +225,6 @@ swept_test :: proc(
         box_min,
         box_max,
       )
-    case CapsuleCollider:
-      // Swept sphere-capsule: treat capsule as swept sphere with larger radius
-      h := shape_b.height * 0.5
-      axis := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS)
-      line_start := center_b - axis * h
-      line_end := center_b + axis * h
-      // Find closest point on capsule axis to sphere trajectory
-      // For simplicity, sample points and find minimum TOI
-      min_result := TOIResult {
-        has_impact = false,
-        time       = 2.0,
-      }
-      // Sample along capsule axis
-      for i in 0 ..= 4 {
-        t := f32(i) / 4.0
-        point_on_axis := linalg.mix(line_start, line_end, t)
-        result := swept_sphere_sphere(
-          center_a,
-          shape_a.radius,
-          velocity_a,
-          point_on_axis,
-          shape_b.radius,
-        )
-        if result.has_impact && result.time < min_result.time {
-          min_result = result
-        }
-      }
-      return min_result
     case CylinderCollider:
       // TODO: Swept sphere-cylinder: transform to cylinder space and test
       // For simplicity, return conservative AABB-based result
@@ -300,100 +272,9 @@ swept_test :: proc(
         center_b,
         radius_b,
       )
-    case CapsuleCollider:
-      // Box-capsule swept: conservative sphere approximation
-      radius_a := linalg.length(shape_a.half_extents)
-      h := shape_b.height * 0.5
-      axis := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS)
-      line_start := center_b - axis * h
-      line_end := center_b + axis * h
-      min_result := TOIResult {
-        has_impact = false,
-        time       = 2.0,
-      }
-      for i in 0 ..= 4 {
-        t := f32(i) / 4.0
-        point_on_axis := linalg.mix(line_start, line_end, t)
-        result := swept_sphere_sphere(
-          center_a,
-          radius_a,
-          velocity_a,
-          point_on_axis,
-          shape_b.radius,
-        )
-        if result.has_impact && result.time < min_result.time {
-          min_result = result
-        }
-      }
-      return min_result
     case CylinderCollider:
       return {}
     }
-  case CapsuleCollider:
-    // Capsule swept tests - use sphere-based approximation
-    h_a := shape_a.height * 0.5
-    axis_a := linalg.mul(rot_a, linalg.VECTOR3F32_Y_AXIS)
-    line_start_a := center_a - axis_a * h_a
-    line_end_a := center_a + axis_a * h_a
-    min_result := TOIResult {
-      has_impact = false,
-      time       = 2.0,
-    }
-    // Sample along capsule A's axis
-    for i in 0 ..= 4 {
-      t := f32(i) / 4.0
-      point_a := linalg.mix(line_start_a, line_end_a, t)
-      switch shape_b in collider_b.shape {
-      case FanCollider:
-        return {}
-      case SphereCollider:
-        result := swept_sphere_sphere(
-          point_a,
-          shape_a.radius,
-          velocity_a,
-          center_b,
-          shape_b.radius,
-        )
-        if result.has_impact && result.time < min_result.time {
-          min_result = result
-        }
-      case BoxCollider:
-        box_min := center_b - shape_b.half_extents
-        box_max := center_b + shape_b.half_extents
-        result := swept_sphere_box(
-          point_a,
-          shape_a.radius,
-          velocity_a,
-          box_min,
-          box_max,
-        )
-        if result.has_impact && result.time < min_result.time {
-          min_result = result
-        }
-      case CapsuleCollider:
-        h_b := shape_b.height * 0.5
-        axis_b := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS)
-        line_start_b := center_b - axis_b * h_b
-        line_end_b := center_b + axis_b * h_b
-        for j in 0 ..= 4 {
-          t_b := f32(j) / 4.0
-          point_b := linalg.mix(line_start_b, line_end_b, t_b)
-          result := swept_sphere_sphere(
-            point_a,
-            shape_a.radius,
-            velocity_a,
-            point_b,
-            shape_b.radius,
-          )
-          if result.has_impact && result.time < min_result.time {
-            min_result = result
-          }
-        }
-      case CylinderCollider:
-      // TODO:
-      }
-    }
-    return min_result
   case CylinderCollider:
     // TODO: Cylinder swept tests
     return {}

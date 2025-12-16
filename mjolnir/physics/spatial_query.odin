@@ -188,41 +188,6 @@ raycast_collider :: proc(
       return t, linalg.VECTOR3F32_Y_AXIS, true // approximate normal
     }
     return 0, {}, false
-  case CapsuleCollider:
-    h := shape.height * 0.5
-    line_start := center + [3]f32{0, -h, 0}
-    line_end := center + [3]f32{0, h, 0}
-    // Raycast as sphere sweep along line segment
-    // Find closest point on segment to ray
-    // For now, use simplified approach: test sphere at each endpoint
-    s1 := geometry.Sphere {
-      center = line_start,
-      radius = shape.radius,
-    }
-    s2 := geometry.Sphere {
-      center = line_end,
-      radius = shape.radius,
-    }
-    hit1, t1 := geometry.ray_sphere_intersection(ray, s1, max_dist)
-    hit2, t2 := geometry.ray_sphere_intersection(ray, s2, max_dist)
-    if hit1 && hit2 {
-      t = min(t1, t2)
-      hit_point := ray.origin + ray.direction * t
-      sphere_center := t == t1 ? line_start : line_end
-      normal = linalg.normalize(hit_point - sphere_center)
-      return t, normal, true
-    } else if hit1 {
-      t = t1
-      hit_point := ray.origin + ray.direction * t
-      normal = linalg.normalize(hit_point - line_start)
-      return t, normal, true
-    } else if hit2 {
-      t = t2
-      hit_point := ray.origin + ray.direction * t
-      normal = linalg.normalize(hit_point - line_end)
-      return t, normal, true
-    }
-    return 0, {}, false
   case CylinderCollider, FanCollider:
     // Cylinder and Fan use GJK for collision, but for raycasting we'll use a simplified approach
     // Transform to AABB for now
@@ -310,17 +275,6 @@ test_collider_sphere_overlap :: proc(
       sphere_radius,
     )
     return hit
-  case CapsuleCollider:
-    h := shape.height * 0.5
-    line_start := center + [3]f32{0, -h, 0}
-    line_end := center + [3]f32{0, h, 0}
-    closest := geometry.closest_point_on_segment(
-      sphere_center,
-      line_start,
-      line_end,
-    )
-    len := shape.radius + sphere_radius
-    return linalg.length2(closest - sphere_center) <= len * len
   case CylinderCollider:
     return test_point_cylinder(sphere_center, center, collider_rot, shape)
   case FanCollider:

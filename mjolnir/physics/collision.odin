@@ -220,169 +220,6 @@ test_box_sphere :: proc(
   return geometry.obb_sphere_intersect(obb, pos_sphere, sphere.radius)
 }
 
-test_capsule_capsule :: proc(
-  pos_a: [3]f32,
-  rot_a: quaternion128,
-  capsule_a: CapsuleCollider,
-  pos_b: [3]f32,
-  rot_b: quaternion128,
-  capsule_b: CapsuleCollider,
-) -> (
-  point: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  hit: bool,
-) {
-  h_a := capsule_a.height * 0.5
-  h_b := capsule_b.height * 0.5
-  axis_a := linalg.mul(rot_a, linalg.VECTOR3F32_Y_AXIS)
-  axis_b := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS)
-  line_a_start := pos_a - axis_a * h_a
-  line_a_end := pos_a + axis_a * h_a
-  line_b_start := pos_b - axis_b * h_b
-  line_b_end := pos_b + axis_b * h_b
-  point_a, point_b, _, _ := geometry.segment_segment_closest_points(
-    line_a_start,
-    line_a_end,
-    line_b_start,
-    line_b_end,
-  )
-  delta := point_b - point_a
-  distance_sq := linalg.length2(delta)
-  radius_sum := capsule_a.radius + capsule_b.radius
-  if distance_sq >= radius_sum * radius_sum {
-    return
-  }
-  distance := math.sqrt(distance_sq)
-  normal =
-    distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
-  penetration = radius_sum - distance
-  point = point_a + normal * (capsule_a.radius - penetration * 0.5)
-  hit = true
-  return
-}
-
-test_capsule_sphere :: proc(
-  pos_capsule: [3]f32,
-  rot_capsule: quaternion128,
-  capsule: CapsuleCollider,
-  pos_sphere: [3]f32,
-  sphere: SphereCollider,
-  invert_normal: bool = false,
-) -> (
-  point: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  hit: bool,
-) {
-  h := capsule.height * 0.5
-  axis := linalg.mul(rot_capsule, linalg.VECTOR3F32_Y_AXIS)
-  line_start := pos_capsule - axis * h
-  line_end := pos_capsule + axis * h
-  line_dir := line_end - line_start
-  line_length_sq := linalg.length2(line_dir)
-  t :=
-    line_length_sq < math.F32_EPSILON ? 0 : linalg.saturate(linalg.dot(pos_sphere - line_start, line_dir) / line_length_sq)
-  closest := line_start + line_dir * t
-  delta := pos_sphere - closest
-  distance_sq := linalg.length2(delta)
-  radius_sum := sphere.radius + capsule.radius
-  if distance_sq >= radius_sum * radius_sum {
-    return
-  }
-  distance := math.sqrt(distance_sq)
-  normal =
-    distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
-  if invert_normal do normal = -normal
-  penetration = radius_sum - distance
-  point = closest + normal * (capsule.radius - penetration * 0.5)
-  hit = true
-  return
-}
-
-test_box_capsule :: proc(
-  pos_box: [3]f32,
-  rot_box: quaternion128,
-  box: BoxCollider,
-  pos_capsule: [3]f32,
-  rot_capsule: quaternion128,
-  capsule: CapsuleCollider,
-  invert_normal: bool = false,
-) -> (
-  closest: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  hit: bool,
-) {
-  is_aligned :=
-    is_identity_quaternion(rot_box) && is_identity_quaternion(rot_capsule)
-  if is_aligned {
-    h := capsule.height * 0.5
-    line_start := pos_capsule + [3]f32{0, -h, 0}
-    line_end := pos_capsule + [3]f32{0, h, 0}
-    min_box := pos_box - box.half_extents
-    max_box := pos_box + box.half_extents
-    closest_start := linalg.clamp(line_start, min_box, max_box)
-    closest_end := linalg.clamp(line_end, min_box, max_box)
-    dist_start_sq := linalg.length2(line_start - closest_start)
-    dist_end_sq := linalg.length2(line_end - closest_end)
-    closest = dist_start_sq < dist_end_sq ? closest_start : closest_end
-    point_on_line := dist_start_sq < dist_end_sq ? line_start : line_end
-    delta := point_on_line - closest
-    distance_sq := linalg.length2(delta)
-    if distance_sq >= capsule.radius * capsule.radius {
-      return
-    }
-    distance := math.sqrt(distance_sq)
-    normal =
-      distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
-    if invert_normal do normal = -normal
-    penetration = capsule.radius - distance
-    hit = true
-    return
-  }
-  // OBB case - transform capsule to box's local space
-  // The geometry function assumes Y-aligned capsule, so we rotate the capsule
-  h := capsule.height * 0.5
-  capsule_axis := linalg.mul(rot_capsule, linalg.VECTOR3F32_Y_AXIS)
-  line_start := pos_capsule - capsule_axis * h
-  line_end := pos_capsule + capsule_axis * h
-  // Transform capsule line segment to box's local space
-  inv_rot_box := linalg.quaternion_inverse(rot_box)
-  local_start := linalg.mul(inv_rot_box, line_start - pos_box)
-  local_end := linalg.mul(inv_rot_box, line_end - pos_box)
-  local_center := (local_start + local_end) * 0.5
-  local_axis := local_end - local_start
-  local_height := linalg.length(local_axis)
-  // Find closest points between line segment and box in local space
-  clamped_start := linalg.clamp(
-    local_start,
-    -box.half_extents,
-    box.half_extents,
-  )
-  clamped_end := linalg.clamp(local_end, -box.half_extents, box.half_extents)
-  dist_start_sq := linalg.length2(local_start - clamped_start)
-  dist_end_sq := linalg.length2(local_end - clamped_end)
-  local_closest_on_box :=
-    dist_start_sq < dist_end_sq ? clamped_start : clamped_end
-  local_point_on_line := dist_start_sq < dist_end_sq ? local_start : local_end
-  delta := local_point_on_line - local_closest_on_box
-  distance_sq := linalg.length2(delta)
-  if distance_sq >= capsule.radius * capsule.radius {
-    return
-  }
-  distance := math.sqrt(distance_sq)
-  local_normal :=
-    distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
-  // Transform back to world space
-  normal = linalg.mul(rot_box, local_normal)
-  if invert_normal do normal = -normal
-  closest = pos_box + linalg.mul(rot_box, local_closest_on_box)
-  penetration = capsule.radius - distance
-  hit = true
-  return
-}
-
 // Point-in-cylinder test - checks if point is inside a cylinder
 test_point_cylinder :: proc(
   point: [3]f32,
@@ -540,71 +377,6 @@ test_box_cylinder :: proc(
   return
 }
 
-test_capsule_cylinder :: proc(
-  pos_capsule: [3]f32,
-  rot_capsule: quaternion128,
-  capsule: CapsuleCollider,
-  pos_cylinder: [3]f32,
-  rot_cylinder: quaternion128,
-  cylinder: CylinderCollider,
-  invert_normal: bool = false,
-) -> (
-  point: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  hit: bool,
-) {
-  // Transform capsule to cylinder's local space
-  to_capsule := pos_capsule - pos_cylinder
-  inv_rot := linalg.quaternion_inverse(rot_cylinder)
-  local_capsule_center := linalg.mul(inv_rot, to_capsule)
-  // In local space, cylinder is Y-aligned
-  // Capsule also has a rotation now
-  local_capsule_rot := linalg.mul(inv_rot, rot_capsule)
-  half_height_capsule := capsule.height * 0.5
-  half_height_cylinder := cylinder.height * 0.5
-  // Capsule line segment in cylinder local space
-  capsule_axis := linalg.mul(local_capsule_rot, linalg.VECTOR3F32_Y_AXIS)
-  line_start := local_capsule_center - capsule_axis * half_height_capsule
-  line_end := local_capsule_center + capsule_axis * half_height_capsule
-  // Simplified check if both are Y-aligned (common case)
-  // is_capsule_y_aligned := math.abs(capsule_axis.y) > 0.99
-  // if !is_capsule_y_aligned {
-  //   return
-  // }
-  // Since both shapes are Y-aligned in cylinder's local space, check radial distance
-  // Find radial distance in XZ plane at capsule center height
-  radial := [3]f32{local_capsule_center.x, 0, local_capsule_center.z}
-  radial_dist := linalg.length(radial)
-  radius_sum := capsule.radius + cylinder.radius
-  // Check if capsule is within radial distance
-  if radial_dist >= radius_sum {
-    return
-  }
-  // Check height overlap
-  min_capsule := local_capsule_center.y - half_height_capsule
-  max_capsule := local_capsule_center.y + half_height_capsule
-  min_cylinder := -half_height_cylinder
-  max_cylinder := half_height_cylinder
-  if max_capsule < min_cylinder || min_capsule > max_cylinder {
-    return
-  }
-  // Calculate collision
-  radial_dir :=
-    radial_dist > math.F32_EPSILON ? radial / radial_dist : [3]f32{1, 0, 0}
-  local_normal := radial_dir
-  local_point :=
-    local_capsule_center +
-    local_normal * (capsule.radius - (radius_sum - radial_dist) * 0.5)
-  // Transform back to world space
-  normal = linalg.mul(rot_cylinder, local_normal)
-  point = pos_cylinder + linalg.mul(rot_cylinder, local_point)
-  if invert_normal do normal = -normal
-  penetration = radius_sum - radial_dist
-  hit = true
-  return
-}
-
 test_cylinder_cylinder :: proc(
   pos_a: [3]f32,
   rot_a: quaternion128,
@@ -714,15 +486,6 @@ test_collision :: proc(
         shape_a,
         invert_normal = true,
       )
-    case CapsuleCollider:
-      return test_capsule_sphere(
-        center_b,
-        rot_b,
-        shape_b,
-        center_a,
-        shape_a,
-        invert_normal = true,
-      )
     case CylinderCollider:
       return test_sphere_cylinder(center_a, shape_a, center_b, rot_b, shape_b)
     }
@@ -734,52 +497,8 @@ test_collision :: proc(
       return test_box_sphere(center_a, rot_a, shape_a, center_b, shape_b)
     case BoxCollider:
       return test_box_box(center_a, rot_a, shape_a, center_b, rot_b, shape_b)
-    case CapsuleCollider:
-      return test_box_capsule(
-        center_a,
-        rot_a,
-        shape_a,
-        center_b,
-        rot_b,
-        shape_b,
-      )
     case CylinderCollider:
       return test_box_cylinder(
-        center_a,
-        rot_a,
-        shape_a,
-        center_b,
-        rot_b,
-        shape_b,
-      )
-    }
-  case CapsuleCollider:
-    switch shape_b in collider_b.shape {
-    case FanCollider:
-      return
-    case SphereCollider:
-      return test_capsule_sphere(center_a, rot_a, shape_a, center_b, shape_b)
-    case BoxCollider:
-      return test_box_capsule(
-        center_b,
-        rot_b,
-        shape_b,
-        center_a,
-        rot_a,
-        shape_a,
-        invert_normal = true,
-      )
-    case CapsuleCollider:
-      return test_capsule_capsule(
-        center_a,
-        rot_a,
-        shape_a,
-        center_b,
-        rot_b,
-        shape_b,
-      )
-    case CylinderCollider:
-      return test_capsule_cylinder(
         center_a,
         rot_a,
         shape_a,
@@ -803,16 +522,6 @@ test_collision :: proc(
       )
     case BoxCollider:
       return test_box_cylinder(
-        center_b,
-        rot_b,
-        shape_b,
-        center_a,
-        rot_a,
-        shape_a,
-        invert_normal = true,
-      )
-    case CapsuleCollider:
-      return test_capsule_cylinder(
         center_b,
         rot_b,
         shape_b,

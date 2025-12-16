@@ -211,26 +211,6 @@ create_collider_box :: proc(
   return handle, true
 }
 
-create_collider_capsule :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  offset: [3]f32 = {},
-) -> (
-  handle: ColliderHandle,
-  ok: bool,
-) #optional_ok {
-  ptr: ^Collider
-  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
-  ptr.offset = offset
-  ptr.shape = CapsuleCollider {
-    radius = radius,
-    height = height,
-  }
-  ptr.cross_sectional_area = math.PI * radius * radius
-  return handle, true
-}
-
 create_collider_cylinder :: proc(
   self: ^World,
   radius: f32,
@@ -355,54 +335,6 @@ create_static_body_box :: proc(
   ok: bool,
 ) #optional_ok {
   collider_handle := create_collider_box(self, half_extents, offset) or_return
-  body_handle = create_static_body(
-    self,
-    position,
-    rotation,
-    trigger_only,
-    collider_handle,
-  ) or_return
-  return body_handle, true
-}
-
-create_dynamic_body_capsule :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-  mass: f32 = 1.0,
-  trigger_only: bool = false,
-  offset: [3]f32 = {},
-) -> (
-  body_handle: DynamicRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider_handle := create_collider_capsule(self, radius, height, offset) or_return
-  body_handle = create_dynamic_body(
-    self,
-    position,
-    rotation,
-    mass,
-    trigger_only,
-    collider_handle,
-  ) or_return
-  return body_handle, true
-}
-
-create_static_body_capsule :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-  trigger_only: bool = false,
-  offset: [3]f32 = {},
-) -> (
-  body_handle: StaticRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider_handle := create_collider_capsule(self, radius, height, offset) or_return
   body_handle = create_static_body(
     self,
     position,
