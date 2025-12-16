@@ -46,6 +46,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
   // Emissive material for effector sphere
   effector_mat := create_material(engine, emissive_value = 5.0)
+  cube_collider, collider_ok := physics.create_collider_box(
+    &physics_world,
+    {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
+  )
+  if !collider_ok {
+    log.error("Failed to create cube collider")
+    return
+  }
   // Spawn 50x50 grid of cubes
   grid_size := 50
   spacing: f32 = 1.0
@@ -55,11 +63,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
       world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
       world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
       // Create physics body for cube
-      body_handle := physics.create_body_box(
+      body_handle := physics.create_dynamic_body(
         &physics_world,
-        half_extents = {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
         position = {world_x, 0.5, world_z},
-        is_static = true,
+        trigger_only = true,
+        collider_handle = cube_collider,
       ) or_continue
       physics_node := spawn(
         engine,
@@ -149,8 +157,15 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
         clicked_cube = {}
         break mouse_click
       }
-      mesh_handle, ok := cube_body_to_mesh[hit.body_handle]
-      clicked_cube = ok ? mesh_handle : resources.NodeHandle{}
+      clicked_cube = {}
+      switch body_handle in hit.body_handle {
+      case physics.DynamicRigidBodyHandle:
+        if mesh_handle, ok := cube_body_to_mesh[body_handle]; ok {
+          clicked_cube = mesh_handle
+        }
+      case physics.StaticRigidBodyHandle:
+        // Ignore static hits for highlighting
+      }
     }
   }
   // Move effector sphere in circular orbit

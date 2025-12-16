@@ -1,24 +1,24 @@
 package tests
 
-import cont "../mjolnir/containers"
 import "../mjolnir/geometry"
 import "../mjolnir/physics"
-import "../mjolnir/resources"
-import "../mjolnir/world"
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:testing"
-import "core:time"
 
-// Helper to spawn a test body at a position
+// Helper to spawn a dynamic test body at a position
 spawn_test_body :: proc(
   phys: ^physics.World,
   position: [3]f32,
-  is_static: bool = true,
 ) -> physics.DynamicRigidBodyHandle {
-  body_handle, _ := physics.create_body_sphere(phys, radius = 0.5, position = position, is_static = is_static)
-  return body_handle
+  handle, _ := physics.create_dynamic_body_sphere(
+    phys,
+    0.5,
+    position,
+    linalg.QUATERNIONF32_IDENTITY,
+    1.0,
+  )
+  return handle
 }
 
 @(test)
@@ -275,7 +275,14 @@ test_physics_cylinder_collision :: proc(t: ^testing.T) {
   phys: physics.World
   physics.init(&phys, enable_parallel = false)
   defer physics.destroy(&phys)
-  body_handle, _ := physics.create_body_cylinder(&phys, radius = 2.0, height = 4.0, is_static = true)
+  body_handle, _ := physics.create_dynamic_body_cylinder(
+    &phys,
+    2.0,
+    4.0,
+    {},
+    linalg.QUATERNIONF32_IDENTITY,
+    1.0,
+  )
   physics.step(&phys, 0.0)
   // Query for bodies - should find the cylinder
   results := make([dynamic]physics.DynamicRigidBodyHandle)
