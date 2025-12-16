@@ -31,14 +31,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world, {0, -10, 0})
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  if _, ok := physics.create_static_body_box(
+  physics.create_static_body_box(
     &physics_world,
     {40.0, 0.5, 40.0},
-    position = {0, -0.5, 0},
-  ); !ok {
-    log.error("Failed to create ground body")
-    return
-  }
+    {0, -0.5, 0},
+  )
   ground_handle = spawn(
     engine,
     [3]f32{0, -0.5, 0},
@@ -55,24 +52,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Ground body created")
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
-  cube_collider, collider_ok := physics.create_collider_box(
+  cube_collider := physics.create_collider_box(
     &physics_world,
     {1.0, 1.0, 1.0},
   )
-  if !collider_ok {
-    log.error("Failed to create cube collider")
-    return
-  }
-  cube_body, cube_body_ok := physics.create_dynamic_body(
+  cube_body := physics.create_dynamic_body(
     &physics_world,
-    position = {0, 3, 0},
-    mass = 2.0,
-    collider_handle = cube_collider,
+    {0, 3, 0},
+    linalg.QUATERNIONF32_IDENTITY,
+    2.0,
+    false,
+    cube_collider,
   )
-  if !cube_body_ok {
-    log.error("Failed to create cube body")
-    return
-  }
   if body, ok := physics.get_dynamic_body(&physics_world, cube_body); ok {
     physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
   }
