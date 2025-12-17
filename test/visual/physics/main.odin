@@ -13,7 +13,7 @@ import "core:math/linalg"
 NX :: 33
 NY :: 10
 NZ :: 33
-CUBE_COUNT :: NX * NY * NZ
+PIECE_COUNT :: NX * NY * NZ
 SPHERE_RADIUS :: 3.0
 
 physics_world: physics.World
@@ -34,6 +34,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
+  cylinder_mesh := engine.rm.builtin_meshes[resources.Primitive.CYLINDER]
   sphere_mat := engine.rm.builtin_materials[resources.Color.MAGENTA]
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.RED]
@@ -83,13 +84,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("Sphere created")
   }
   // Create cube grid
-  cube_positions: [CUBE_COUNT][3]f32
+  piece_positions: [PIECE_COUNT][3]f32
   idx := 0
   for x in 0 ..< NX {
     for y in 0 ..< NY {
       for z in 0 ..< NZ {
-        if idx >= CUBE_COUNT do break
-        cube_positions[idx] = {
+        if idx >= PIECE_COUNT do break
+        piece_positions[idx] = {
           f32(x - NX / 2) * 3.0,
           f32(y) * 3.0 + 10.0,
           f32(z - NZ / 2) * 3.0,
@@ -99,36 +100,38 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   box_collider := physics.create_collider_box(&physics_world, {1.0, 1.0, 1.0})
-  for pos, i in cube_positions {
+  sphere_collider := physics.create_collider_sphere(&physics_world, 1.0)
+  cylinder_collider := physics.create_collider_cylinder(&physics_world, 1.0, 2.0)
+  for pos, i in piece_positions {
     // Parent node with physics
-    cube_node_handle := world.spawn(&engine.world, pos)
-    cube_node := world.get_node(&engine.world, cube_node_handle)
+    physics_node_handle := world.spawn(&engine.world, pos)
+    physics_node := world.get_node(&engine.world, physics_node_handle)
     body_handle := physics.create_dynamic_body(
       &physics_world,
-      cube_node.transform.position,
-      cube_node.transform.rotation,
+      physics_node.transform.position,
+      physics_node.transform.rotation,
       50.0,
       false,
-      box_collider,
+      cylinder_collider,
     )
     if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
-      physics.set_box_inertia(body, {1.0, 1.0, 1.0})
+      physics.set_cylinder_inertia(body, 1.0, 2.0)
     }
-    cube_node.attachment = world.RigidBodyAttachment {
+    physics_node.attachment = world.RigidBodyAttachment {
       body_handle = body_handle,
     }
     // Child node with mesh
-    cube_mesh_handle := mjolnir.spawn_child(
+    visual_node_handle := mjolnir.spawn_child(
       engine,
-      cube_node_handle,
+      physics_node_handle,
       attachment = world.MeshAttachment {
-        handle = cube_mesh,
+        handle = cylinder_mesh,
         material = cube_mat,
         cast_shadow = true,
       },
     )
   }
-  log.infof("Created %d cubes", CUBE_COUNT)
+  log.infof("Created %d cubes", PIECE_COUNT)
   if camera := get_main_camera(engine); camera != nil {
     camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
     sync_active_camera_controller(engine)
