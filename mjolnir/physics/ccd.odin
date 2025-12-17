@@ -226,9 +226,15 @@ swept_test :: proc(
         box_max,
       )
     case CylinderCollider:
-      // TODO: Swept sphere-cylinder: transform to cylinder space and test
-      // For simplicity, return conservative AABB-based result
-      return {}
+      // Use cylinder radius (not bounding sphere) for radial collision
+      // This better matches the actual collision detection
+      return swept_sphere_sphere(
+        center_a,
+        shape_a.radius,
+        velocity_a,
+        center_b,
+        shape_b.radius,
+      )
     }
   case BoxCollider:
     box_min := center_a - shape_a.half_extents
@@ -273,11 +279,55 @@ swept_test :: proc(
         radius_b,
       )
     case CylinderCollider:
-      return {}
+      // Use cylinder radius for radial collision
+      box_radius := linalg.length(shape_a.half_extents)
+      return swept_sphere_sphere(
+        center_a,
+        box_radius,
+        velocity_a,
+        center_b,
+        shape_b.radius,
+      )
     }
   case CylinderCollider:
-    // TODO: Cylinder swept tests
-    return {}
+    // Use cylinder radius for radial collision
+    switch shape_b in collider_b.shape {
+    case FanCollider:
+      return {}
+    case SphereCollider:
+      result := swept_sphere_sphere(
+        center_b,
+        shape_b.radius,
+        -velocity_a,
+        center_a,
+        shape_a.radius,
+      )
+      if result.has_impact {
+        result.normal = -result.normal
+      }
+      return result
+    case BoxCollider:
+      // Use cylinder radius for radial collision
+      box_min := center_b - shape_b.half_extents
+      box_max := center_b + shape_b.half_extents
+      result := swept_sphere_box(
+        center_a,
+        shape_a.radius,
+        velocity_a,
+        box_min,
+        box_max,
+      )
+      return result
+    case CylinderCollider:
+      // Use radii for radial collision
+      return swept_sphere_sphere(
+        center_a,
+        shape_a.radius,
+        velocity_a,
+        center_b,
+        shape_b.radius,
+      )
+    }
   }
   return {}
 }

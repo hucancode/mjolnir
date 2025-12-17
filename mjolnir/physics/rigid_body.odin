@@ -112,7 +112,7 @@ set_sphere_inertia :: proc(self: ^DynamicRigidBody, radius: f32) {
   self.inv_inertia = linalg.matrix3_inverse(self.inertia)
 }
 
-set_capsule_inertia :: proc(self: ^DynamicRigidBody, radius: f32, height: f32) {
+set_cylinder_inertia :: proc(self: ^DynamicRigidBody, radius: f32, height: f32) {
   m := self.mass
   r2 := radius * radius
   h2 := height * height

@@ -201,7 +201,7 @@ test_box_sphere :: proc(
     closest = linalg.clamp(pos_sphere, min_box, max_box)
     delta := pos_sphere - closest
     distance_sq := linalg.length2(delta)
-    if distance_sq >= sphere.radius * sphere.radius {
+    if distance_sq > sphere.radius * sphere.radius {
       return
     }
     distance := math.sqrt(distance_sq)
@@ -311,7 +311,7 @@ test_sphere_cylinder :: proc(
   world_closest := pos_cylinder + linalg.mul(rot_cylinder, local_closest)
   delta := pos_sphere - world_closest
   dist_sq := linalg.length2(delta)
-  if dist_sq >= sphere.radius * sphere.radius {
+  if dist_sq > sphere.radius * sphere.radius {
     return
   }
   distance := math.sqrt(dist_sq)
@@ -338,42 +338,19 @@ test_box_cylinder :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  // Transform box to cylinder's local space
-  to_box := pos_box - pos_cylinder
-  inv_rot := linalg.quaternion_inverse(rot_cylinder)
-  local_box_center := linalg.mul(inv_rot, to_box)
-  // Transform box rotation to cylinder's local space
-  local_box_rot := linalg.mul(inv_rot, rot_box)
-  // In cylinder's local space, cylinder is Y-aligned
-  half_height := cylinder.height * 0.5
-  // Check if box center is within cylinder height range
-  if math.abs(local_box_center.y) > half_height + box.half_extents.y {
-    return // Box is outside cylinder height range
+  obb := geometry.Obb {
+    center       = pos_box,
+    half_extents = box.half_extents,
+    rotation     = rot_box,
   }
-  // Find closest point on box to cylinder axis
-  // For simplicity, check if box AABB (in cylinder space) intersects cylinder
-  // Get box axes in cylinder local space
-  box_x := linalg.mul(local_box_rot, linalg.VECTOR3F32_X_AXIS)
-  box_y := linalg.mul(local_box_rot, linalg.VECTOR3F32_Y_AXIS)
-  box_z := linalg.mul(local_box_rot, linalg.VECTOR3F32_Z_AXIS)
-  // Find closest point on box surface to cylinder axis (Y-axis)
-  // Project box center onto XZ plane
-  radial_center := [3]f32{local_box_center.x, 0, local_box_center.z}
-  radial_dist := linalg.length(radial_center)
-  // Find the point on the box closest to the cylinder axis
-  // This is a simplification - we check the box center's radial distance
-  // and compare with an expanded radius
-  max_box_radius := linalg.length(box.half_extents.xz)
-  if radial_dist > cylinder.radius + max_box_radius {
-    return // Box is too far from cylinder axis
-  }
-  // Conservative collision: report collision if AABB check passes
-  // This is not perfectly accurate but prevents tunneling
-  normal = linalg.mul(rot_cylinder, linalg.VECTOR3F32_X_AXIS)
-  point = pos_box
-  if invert_normal do normal = -normal
-  penetration = 0.1 // Conservative small penetration
-  hit = true
+  point, normal, penetration, hit = geometry.obb_cylinder_intersect(
+    obb,
+    pos_cylinder,
+    rot_cylinder,
+    cylinder.radius,
+    cylinder.height,
+  )
+  if invert_normal && hit do normal = -normal
   return
 }
 
@@ -404,7 +381,7 @@ test_cylinder_cylinder :: proc(
     radial := [3]f32{local_b_center.x, 0, local_b_center.z}
     radial_dist := linalg.length(radial)
     radius_sum := cylinder_a.radius + cylinder_b.radius
-    if radial_dist >= radius_sum {
+    if radial_dist > radius_sum {
       return
     }
     // Check height overlap
@@ -441,7 +418,7 @@ test_cylinder_cylinder :: proc(
   delta := pos_b - pos_a
   dist_sq := linalg.length2(delta)
   radius_sum := sphere_a_radius + sphere_b_radius
-  if dist_sq >= radius_sum * radius_sum {
+  if dist_sq > radius_sum * radius_sum {
     return
   }
   distance := math.sqrt(dist_sq)

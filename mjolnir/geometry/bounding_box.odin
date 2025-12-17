@@ -368,7 +368,7 @@ obb_sphere_intersect :: proc(
   delta := sphere_center - closest
   dist_sq := linalg.length2(delta)
   // Check if sphere intersects
-  if dist_sq >= sphere_radius * sphere_radius {
+  if dist_sq > sphere_radius * sphere_radius {
     return
   }
   distance := math.sqrt(dist_sq)
@@ -425,12 +425,67 @@ obb_capsule_intersect :: proc(
   // Check if within capsule radius
   delta := closest_on_line - closest_on_obb
   dist_sq := linalg.length2(delta)
-  if dist_sq >= capsule_radius * capsule_radius {
+  if dist_sq > capsule_radius * capsule_radius {
     return
   }
   distance := math.sqrt(dist_sq)
   normal = distance > 1e-6 ? delta / distance : [3]f32{0, 1, 0}
   penetration = capsule_radius - distance
+  hit = true
+  return
+}
+
+obb_cylinder_intersect :: proc(
+  obb: Obb,
+  cylinder_center: [3]f32,
+  cylinder_rotation: quaternion128,
+  cylinder_radius: f32,
+  cylinder_height: f32,
+) -> (
+  closest_on_obb: [3]f32,
+  normal: [3]f32,
+  penetration: f32,
+  hit: bool,
+) {
+  // Cylinder axis in world space
+  cylinder_axis := linalg.mul(cylinder_rotation, linalg.VECTOR3F32_Y_AXIS)
+  h := cylinder_height * 0.5
+  line_start := cylinder_center - cylinder_axis * h
+  line_end := cylinder_center + cylinder_axis * h
+  // Find closest point on line segment to OBB
+  min_dist_sq := f32(math.F32_MAX)
+  closest_on_line: [3]f32
+  // Sample 5 points along the cylinder's central axis
+  #unroll for i in 0 ..= 4 {
+    t := f32(i) / 4.0
+    sample := linalg.mix(line_start, line_end, t)
+    point_on_obb := obb_closest_point(obb, sample)
+    dist_sq := linalg.length2(sample - point_on_obb)
+    if dist_sq < min_dist_sq {
+      min_dist_sq = dist_sq
+      closest_on_line = sample
+      closest_on_obb = point_on_obb
+    }
+  }
+  // Refine: project the closest OBB point back onto the line segment
+  line_dir := line_end - line_start
+  line_length_sq := linalg.length2(line_dir)
+  if line_length_sq > 1e-6 {
+    t := linalg.saturate(
+      linalg.dot(closest_on_obb - line_start, line_dir) / line_length_sq,
+    )
+    closest_on_line = linalg.mix(line_start, line_end, t)
+    closest_on_obb = obb_closest_point(obb, closest_on_line)
+  }
+  // Check if within cylinder radius
+  delta := closest_on_line - closest_on_obb
+  dist_sq := linalg.length2(delta)
+  if dist_sq > cylinder_radius * cylinder_radius {
+    return
+  }
+  distance := math.sqrt(dist_sq)
+  normal = distance > 1e-6 ? delta / distance : [3]f32{0, 1, 0}
+  penetration = cylinder_radius - distance
   hit = true
   return
 }
