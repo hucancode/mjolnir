@@ -103,7 +103,7 @@ test_sphere_sphere :: proc(
   delta := pos_b - pos_a
   distance_sq := linalg.length2(delta)
   radius_sum := sphere_a.radius + sphere_b.radius
-  if distance_sq >= radius_sum * radius_sum {
+  if distance_sq > radius_sum * radius_sum {
     return
   }
   distance := math.sqrt(distance_sq)

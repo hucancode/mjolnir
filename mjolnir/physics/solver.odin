@@ -1,6 +1,7 @@
 package physics
 
 import "core:math"
+import "core:log"
 import "core:math/linalg"
 
 BAUMGARTE_COEF :: 0.4

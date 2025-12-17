@@ -838,7 +838,7 @@ ccd_task :: proc(task: thread.Task) {
         has_ccd_hit = true
       }
     }
-    if has_ccd_hit && earliest_toi < 0.99 {
+    if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
       safe_time := earliest_toi * 0.98
       body_a.position += body_a.velocity * data.dt * safe_time
       update_cached_aabb(body_a, collider_a)
@@ -934,7 +934,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
           has_ccd_hit = true
         }
       }
-      if has_ccd_hit && earliest_toi < 0.99 {
+      if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
         safe_time := earliest_toi * 0.98
         body_a.position += body_a.velocity * data.dt * safe_time
         update_cached_aabb(body_a, collider_a)
@@ -1073,7 +1073,7 @@ sequential_ccd :: proc(
         has_ccd_hit = true
       }
     }
-    if has_ccd_hit && earliest_toi < 0.99 {
+    if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
       safe_time := earliest_toi * 0.98
       body_a.position += body_a.velocity * dt * safe_time
       update_cached_aabb(body_a, collider_a)
