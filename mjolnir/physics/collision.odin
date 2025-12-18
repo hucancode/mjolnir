@@ -289,37 +289,95 @@ test_sphere_cylinder :: proc(
   local_sphere := linalg.mul(inv_rot, to_sphere)
   // In local space, cylinder axis is Y
   half_height := cylinder.height * 0.5
-  // Clamp sphere center to cylinder height
-  clamped_y := linalg.clamp(local_sphere.y, -half_height, half_height)
-  // Find closest point on cylinder axis
-  axis_point := [3]f32{0, clamped_y, 0}
   // Vector from axis to sphere center in XZ plane
   radial := [3]f32{local_sphere.x, 0, local_sphere.z}
-  radial_dist_sq := linalg.length2(radial)
-  radial_dist := math.sqrt(radial_dist_sq)
+  radial_dist := linalg.length(radial)
+  // Determine which region the sphere center is in
+  above_cylinder := local_sphere.y > half_height
+  below_cylinder := local_sphere.y < -half_height
+  inside_height := !above_cylinder && !below_cylinder
+  inside_radial := radial_dist < cylinder.radius
   // Find closest point on cylinder surface
   local_closest: [3]f32
-  if radial_dist < math.F32_EPSILON {
-    // Sphere is on the cylinder axis
-    local_closest = [3]f32{cylinder.radius, clamped_y, 0}
+  if above_cylinder || below_cylinder {
+    // Sphere center is above or below the cylinder
+    cap_y := above_cylinder ? half_height : -half_height
+    if inside_radial {
+      // Closest point is on the cap (directly above/below sphere)
+      local_closest = [3]f32{local_sphere.x, cap_y, local_sphere.z}
+    } else {
+      // Closest point is on the rim (edge of cap)
+      radial_dir := radial / radial_dist
+      local_closest = [3]f32 {
+        radial_dir.x * cylinder.radius,
+        cap_y,
+        radial_dir.z * cylinder.radius,
+      }
+    }
+  } else if inside_radial {
+    // Sphere center is INSIDE the cylinder - find minimum penetration axis
+    dist_to_top := half_height - local_sphere.y
+    dist_to_bottom := local_sphere.y + half_height
+    dist_to_side := cylinder.radius - radial_dist
+    if dist_to_side <= dist_to_top && dist_to_side <= dist_to_bottom {
+      // Push out through curved surface
+      if radial_dist < math.F32_EPSILON {
+        local_closest = [3]f32{cylinder.radius, local_sphere.y, 0}
+      } else {
+        radial_dir := radial / radial_dist
+        local_closest = [3]f32 {
+          radial_dir.x * cylinder.radius,
+          local_sphere.y,
+          radial_dir.z * cylinder.radius,
+        }
+      }
+    } else if dist_to_top <= dist_to_bottom {
+      // Push out through top cap
+      local_closest = [3]f32{local_sphere.x, half_height, local_sphere.z}
+    } else {
+      // Push out through bottom cap
+      local_closest = [3]f32{local_sphere.x, -half_height, local_sphere.z}
+    }
   } else {
-    // Project to cylinder surface
+    // Sphere center is outside radial extent - closest on curved surface
     radial_dir := radial / radial_dist
-    local_closest = axis_point + radial_dir * cylinder.radius
+    clamped_y := linalg.clamp(local_sphere.y, -half_height, half_height)
+    local_closest = [3]f32 {
+      radial_dir.x * cylinder.radius,
+      clamped_y,
+      radial_dir.z * cylinder.radius,
+    }
   }
-  // Transform back to world space
+  // Compute surface normal based on which surface the closest point is on
+  local_normal: [3]f32
+  if local_closest.y >= half_height - math.F32_EPSILON {
+    // On top cap
+    local_normal = {0, 1, 0}
+  } else if local_closest.y <= -half_height + math.F32_EPSILON {
+    // On bottom cap
+    local_normal = {0, -1, 0}
+  } else {
+    // On curved surface
+    local_normal = linalg.normalize([3]f32{local_closest.x, 0, local_closest.z})
+  }
+  // Transform to world space
   world_closest := pos_cylinder + linalg.mul(rot_cylinder, local_closest)
+  world_normal := linalg.mul(rot_cylinder, local_normal)
   delta := pos_sphere - world_closest
   dist_sq := linalg.length2(delta)
   if dist_sq > sphere.radius * sphere.radius {
     return
   }
   distance := math.sqrt(dist_sq)
-  normal =
-    distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
-  if invert_normal do normal = -normal
+  // Use surface normal (more stable than delta-based normal when deeply penetrating)
+  normal = world_normal
   penetration = sphere.radius - distance
+  // Contact point is between the surfaces
   point = world_closest + normal * (penetration * 0.5)
+  // Invert normal for collision response direction
+  // Convention: normal points FROM body_a TO body_b
+  // When invert_normal=true, cylinder is body_a, so normal should point toward sphere (negate surface normal)
+  if !invert_normal do normal = -normal
   hit = true
   return
 }
