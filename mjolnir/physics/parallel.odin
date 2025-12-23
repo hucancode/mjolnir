@@ -760,113 +760,8 @@ sequential_collision_detection :: proc(physics: ^World) {
   )
 }
 
-
-ccd_task :: proc(task: thread.Task) {
-  data := (^CCD_Task_Data)(task.data)
-  ccd_threshold :: 5.0
-  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
-  static_candidates := make([dynamic]StaticBroadPhaseEntry, context.temp_allocator)
-  for idx_a in data.start ..< data.end {
-    if idx_a >= len(data.physics.bodies.entries) do break
-    entry_a := &data.physics.bodies.entries[idx_a]
-    if !entry_a.active do continue
-    body_a := &entry_a.item
-    if body_a.trigger_only || body_a.is_sleeping do continue
-    velocity_mag := linalg.length(body_a.velocity)
-    if velocity_mag < ccd_threshold do continue
-    sync.mutex_lock(data.stats_mtx)
-    data.bodies_tested += 1
-    sync.mutex_unlock(data.stats_mtx)
-    collider_a := get(data.physics, body_a.collider_handle) or_continue
-    motion := body_a.velocity * data.dt
-    earliest_toi := f32(1.0)
-    earliest_normal := linalg.VECTOR3F32_Y_AXIS
-    earliest_body_dyn: ^DynamicRigidBody = nil
-    earliest_body_static: ^StaticRigidBody = nil
-    has_ccd_hit := false
-    current_aabb := body_a.cached_aabb
-    swept_aabb := current_aabb
-    #unroll for i in 0 ..< 3 {
-      if motion[i] < 0 {
-        swept_aabb.min[i] += motion[i]
-      } else {
-        swept_aabb.max[i] += motion[i]
-      }
-    }
-    // Query dynamic BVH
-    clear(&dyn_candidates)
-    bvh_query_aabb_fast(&data.physics.dynamic_bvh, swept_aabb, &dyn_candidates)
-    sync.mutex_lock(data.stats_mtx)
-    data.total_candidates += len(dyn_candidates)
-    sync.mutex_unlock(data.stats_mtx)
-    for candidate in dyn_candidates {
-      handle_b := candidate.handle
-      if u32(idx_a) == handle_b.index do continue
-      body_b := get(data.physics, handle_b) or_continue
-      collider_b := get(data.physics, body_b.collider_handle) or_continue
-      toi := swept_test(
-        collider_a, body_a.position, body_a.rotation, motion,
-        collider_b, body_b.position, body_b.rotation,
-      )
-      if toi.has_impact && toi.time < earliest_toi {
-        earliest_toi = toi.time
-        earliest_normal = toi.normal
-        earliest_body_dyn = body_b
-        earliest_body_static = nil
-        has_ccd_hit = true
-      }
-    }
-    // Query static BVH
-    clear(&static_candidates)
-    bvh_query_aabb_fast(&data.physics.static_bvh, swept_aabb, &static_candidates)
-    sync.mutex_lock(data.stats_mtx)
-    data.total_candidates += len(static_candidates)
-    sync.mutex_unlock(data.stats_mtx)
-    for candidate in static_candidates {
-      handle_b := candidate.handle
-      body_b := get(data.physics, handle_b) or_continue
-      collider_b := get(data.physics, body_b.collider_handle) or_continue
-      toi := swept_test(
-        collider_a, body_a.position, body_a.rotation, motion,
-        collider_b, body_b.position, body_b.rotation,
-      )
-      if toi.has_impact && toi.time < earliest_toi {
-        earliest_toi = toi.time
-        earliest_normal = toi.normal
-        earliest_body_dyn = nil
-        earliest_body_static = body_b
-        has_ccd_hit = true
-      }
-    }
-    if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
-      safe_time := earliest_toi * 0.98
-      body_a.position += body_a.velocity * data.dt * safe_time
-      update_cached_aabb(body_a, collider_a)
-      vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
-      if vel_along_normal < 0 {
-        wake_up(body_a)
-        if earliest_body_dyn != nil do wake_up(earliest_body_dyn)
-        restitution := body_a.restitution
-        friction := body_a.friction
-        if earliest_body_dyn != nil {
-          restitution = (body_a.restitution + earliest_body_dyn.restitution) * 0.5
-          friction = (body_a.friction + earliest_body_dyn.friction) * 0.5
-        } else if earliest_body_static != nil {
-          restitution = (body_a.restitution + earliest_body_static.restitution) * 0.5
-          friction = (body_a.friction + earliest_body_static.friction) * 0.5
-        }
-        body_a.velocity -= earliest_normal * vel_along_normal * (1.0 + restitution)
-        tangent_vel := body_a.velocity - earliest_normal * linalg.dot(body_a.velocity, earliest_normal)
-        body_a.velocity -= tangent_vel * friction * 0.5
-      }
-      data.ccd_handled[idx_a] = true
-    }
-  }
-}
-
 ccd_task_dynamic :: proc(task: thread.Task) {
   data := (^CCD_Task_Data_Dynamic)(task.data)
-  ccd_threshold :: 5.0
   dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
   static_candidates := make([dynamic]StaticBroadPhaseEntry, context.temp_allocator)
   BATCH_SIZE :: 32
@@ -880,10 +775,12 @@ ccd_task_dynamic :: proc(task: thread.Task) {
       if !entry_a.active do continue
       body_a := &entry_a.item
       if body_a.trigger_only || body_a.is_sleeping do continue
-      velocity_mag := linalg.length(body_a.velocity)
-      if velocity_mag < ccd_threshold do continue
-      data.bodies_tested += 1
       collider_a := get(data.physics, body_a.collider_handle) or_continue
+      velocity_mag := linalg.length(body_a.velocity)
+      motion_distance := velocity_mag * data.dt
+      min_extent := collider_min_extent(collider_a)
+      if motion_distance < min_extent * 0.5 do continue
+      data.bodies_tested += 1
       motion := body_a.velocity * data.dt
       earliest_toi := f32(1.0)
       earliest_normal := linalg.VECTOR3F32_Y_AXIS

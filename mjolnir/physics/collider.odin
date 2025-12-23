@@ -83,3 +83,17 @@ collider_calculate_aabb :: proc(
   }
   return {}
 }
+
+collider_min_extent :: proc(self: ^Collider) -> f32 {
+  switch sh in self.shape {
+  case SphereCollider:
+    return sh.radius * 2.0
+  case BoxCollider:
+    return min(sh.half_extents.x, sh.half_extents.y, sh.half_extents.z) * 2.0
+  case CylinderCollider:
+    return min(sh.radius, sh.height * 0.5) * 2.0
+  case FanCollider:
+    return min(sh.radius, sh.height * 0.5) * 2.0
+  }
+  return 1.0
+}
