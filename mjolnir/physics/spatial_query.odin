@@ -144,7 +144,7 @@ raycast_collider :: proc(
       rotation     = rotation,
     }
     // Use AABB intersection for axis-aligned boxes
-    if is_identity_quaternion(rotation) || true {
+    if is_identity_quaternion(rotation) {
       bounds := geometry.Aabb {
         min = center - shape.half_extents,
         max = center + shape.half_extents,
