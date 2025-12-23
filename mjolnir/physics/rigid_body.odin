@@ -164,8 +164,8 @@ integrate :: proc(self: ^DynamicRigidBody, dt: f32) {
   if self.enable_rotation {
     self.angular_velocity += (self.inv_inertia * self.torque) * dt
   }
-  damping_factor := 1.0 - self.linear_damping
-  angular_damping_factor := 1.0 - self.angular_damping
+  damping_factor := math.pow(1.0 - self.linear_damping, dt)
+  angular_damping_factor := math.pow(1.0 - self.angular_damping, dt)
   self.velocity *= damping_factor
   if self.enable_rotation {
     self.angular_velocity *= angular_damping_factor
