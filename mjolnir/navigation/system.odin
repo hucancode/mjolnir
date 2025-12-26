@@ -1,6 +1,7 @@
 package navigation
 
 import "../geometry"
+import "../world"
 import "core:log"
 import "core:math/linalg"
 import "detour"
@@ -308,4 +309,37 @@ build_geometry :: proc(nav_mesh: ^NavMesh) -> geometry.Geometry {
   copy(result.vertices, vertices[:])
   copy(result.indices, indices[:])
   return result
+}
+
+convert_geometry_to_nav :: proc(
+  vertices: []geometry.Vertex,
+  indices: []u32,
+) -> (
+  nav_vertices: [][3]f32,
+  nav_indices: []i32,
+) {
+  nav_vertices = make([][3]f32, len(vertices))
+  for v, i in vertices {
+    nav_vertices[i] = v.position
+  }
+  nav_indices = make([]i32, len(indices))
+  for idx, i in indices {
+    nav_indices[i] = i32(idx)
+  }
+  return
+}
+
+build_area_types_from_tags :: proc(
+  node_infos: []world.BakedNodeInfo,
+) -> []u8 {
+  area_types := make([dynamic]u8, 0, len(node_infos) * 10)
+  for info in node_infos {
+    triangle_count := info.index_count / 3
+    area_type :=
+      .NAVMESH_OBSTACLE in info.tags ? u8(recast.RC_NULL_AREA) : u8(recast.RC_WALKABLE_AREA)
+    for _ in 0 ..< triangle_count {
+      append(&area_types, area_type)
+    }
+  }
+  return area_types[:]
 }

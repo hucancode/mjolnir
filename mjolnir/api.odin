@@ -10,6 +10,7 @@ import "core:time"
 import "geometry"
 import "level_manager"
 import nav "navigation"
+import "physics"
 import "navigation/recast"
 import "render"
 import "render/debug_draw"
@@ -44,6 +45,38 @@ SpriteHandle :: resources.SpriteHandle
 LightHandle :: resources.LightHandle
 DebugObjectHandle :: debug_draw.DebugObjectHandle
 DebugRenderStyle :: debug_draw.RenderStyle
+
+NavMeshConfig :: struct {
+  cell_size:               f32,
+  cell_height:             f32,
+  agent_height:            f32,
+  agent_radius:            f32,
+  agent_max_climb:         f32,
+  agent_max_slope:         f32,
+  min_region_area:         i32,
+  merge_region_area:       i32,
+  max_edge_length:         f32,
+  max_edge_error:          f32,
+  detail_sample_dist:      f32, // multiplier (will be multiplied by cell_size)
+  detail_sample_max_error: f32, // multiplier (will be multiplied by cell_height)
+  max_verts_per_poly:      i32,
+}
+
+DEFAULT_NAVMESH_CONFIG :: NavMeshConfig {
+  cell_size               = 0.3,
+  cell_height             = 0.2,
+  agent_height            = 2.0,
+  agent_radius            = 0.6,
+  agent_max_climb         = 0.9,
+  agent_max_slope         = math.PI * 0.25,
+  min_region_area         = 64,
+  merge_region_area       = 400,
+  max_edge_length         = 12.0,
+  max_edge_error          = 1.3,
+  detail_sample_dist      = 6.0,
+  detail_sample_max_error = 1.0,
+  max_verts_per_poly      = 6,
+}
 
 // Backward compatibility: Convenience wrappers
 init_level_manager :: level_manager.init
@@ -274,6 +307,126 @@ spawn_primitive_mesh :: proc(
     scale(engine, handle, scale_factor)
   }
   return handle, true
+}
+
+spawn_cube :: proc(
+  engine: ^Engine,
+  color: resources.Color = .WHITE,
+  position: [3]f32 = {0, 0, 0},
+  rotation_angle: f32 = 0,
+  rotation_axis: [3]f32 = {0, 1, 0},
+  scale_factor: f32 = 1.0,
+  cast_shadow := true,
+) -> (
+  ret: resources.NodeHandle,
+  ok: bool,
+) #optional_ok {
+  return spawn_primitive_mesh(
+    engine,
+    .CUBE,
+    color,
+    position,
+    rotation_angle,
+    rotation_axis,
+    scale_factor,
+    cast_shadow,
+  )
+}
+
+spawn_sphere :: proc(
+  engine: ^Engine,
+  color: resources.Color = .WHITE,
+  position: [3]f32 = {0, 0, 0},
+  rotation_angle: f32 = 0,
+  rotation_axis: [3]f32 = {0, 1, 0},
+  scale_factor: f32 = 1.0,
+  cast_shadow := true,
+) -> (
+  ret: resources.NodeHandle,
+  ok: bool,
+) #optional_ok {
+  return spawn_primitive_mesh(
+    engine,
+    .SPHERE,
+    color,
+    position,
+    rotation_angle,
+    rotation_axis,
+    scale_factor,
+    cast_shadow,
+  )
+}
+
+spawn_cylinder :: proc(
+  engine: ^Engine,
+  color: resources.Color = .WHITE,
+  position: [3]f32 = {0, 0, 0},
+  rotation_angle: f32 = 0,
+  rotation_axis: [3]f32 = {0, 1, 0},
+  scale_factor: f32 = 1.0,
+  cast_shadow := true,
+) -> (
+  ret: resources.NodeHandle,
+  ok: bool,
+) #optional_ok {
+  return spawn_primitive_mesh(
+    engine,
+    .CYLINDER,
+    color,
+    position,
+    rotation_angle,
+    rotation_axis,
+    scale_factor,
+    cast_shadow,
+  )
+}
+
+spawn_quad :: proc(
+  engine: ^Engine,
+  color: resources.Color = .WHITE,
+  position: [3]f32 = {0, 0, 0},
+  rotation_angle: f32 = 0,
+  rotation_axis: [3]f32 = {0, 1, 0},
+  scale_factor: f32 = 1.0,
+  cast_shadow := true,
+) -> (
+  ret: resources.NodeHandle,
+  ok: bool,
+) #optional_ok {
+  return spawn_primitive_mesh(
+    engine,
+    .QUAD,
+    color,
+    position,
+    rotation_angle,
+    rotation_axis,
+    scale_factor,
+    cast_shadow,
+  )
+}
+
+spawn_cone :: proc(
+  engine: ^Engine,
+  color: resources.Color = .WHITE,
+  position: [3]f32 = {0, 0, 0},
+  rotation_angle: f32 = 0,
+  rotation_axis: [3]f32 = {0, 1, 0},
+  scale_factor: f32 = 1.0,
+  cast_shadow := true,
+) -> (
+  ret: resources.NodeHandle,
+  ok: bool,
+) #optional_ok {
+  return spawn_primitive_mesh(
+    engine,
+    .CONE,
+    color,
+    position,
+    rotation_angle,
+    rotation_axis,
+    scale_factor,
+    cast_shadow,
+  )
 }
 
 load_gltf :: proc(
@@ -935,6 +1088,74 @@ update_material_texture :: proc(
   return result == .SUCCESS
 }
 
+@(private)
+navmesh_config_to_recast :: proc(cfg: NavMeshConfig) -> recast.Config {
+  return recast.Config {
+    cs                       = cfg.cell_size,
+    ch                       = cfg.cell_height,
+    walkable_slope           = cfg.agent_max_slope,
+    walkable_height          = i32(math.ceil_f32(cfg.agent_height / cfg.cell_height)),
+    walkable_climb           = i32(math.floor_f32(cfg.agent_max_climb / cfg.cell_height)),
+    walkable_radius          = i32(math.ceil_f32(cfg.agent_radius / cfg.cell_size)),
+    max_edge_len             = i32(cfg.max_edge_length / cfg.cell_size),
+    max_simplification_error = cfg.max_edge_error,
+    min_region_area          = cfg.min_region_area,
+    merge_region_area        = cfg.merge_region_area,
+    max_verts_per_poly       = cfg.max_verts_per_poly,
+    detail_sample_dist       = cfg.detail_sample_dist * cfg.cell_size,
+    detail_sample_max_error  = cfg.detail_sample_max_error * cfg.cell_height,
+    border_size              = 0,
+  }
+}
+
+setup_navmesh :: proc(
+  engine: ^Engine,
+  config: NavMeshConfig = DEFAULT_NAVMESH_CONFIG,
+  include_filter: world.NodeTagSet = {},
+  exclude_filter: world.NodeTagSet = {},
+) -> bool {
+  world.traverse(&engine.world, &engine.rm)
+  baked_geom, node_infos, bake_result := world.bake_geometry(
+    &engine.world,
+    &engine.gctx,
+    &engine.rm,
+    include_filter,
+    exclude_filter,
+    true,
+  )
+  if bake_result != .SUCCESS {
+    return false
+  }
+  defer {
+    delete(baked_geom.vertices)
+    delete(baked_geom.indices)
+    delete(node_infos)
+  }
+  nav_vertices, nav_indices := nav.convert_geometry_to_nav(
+    baked_geom.vertices,
+    baked_geom.indices,
+  )
+  defer {
+    delete(nav_vertices)
+    delete(nav_indices)
+  }
+  area_types := nav.build_area_types_from_tags(node_infos)
+  defer delete(area_types)
+  recast_config := navmesh_config_to_recast(config)
+  nav_geom := nav.NavigationGeometry {
+    vertices   = nav_vertices,
+    indices    = nav_indices,
+    area_types = area_types,
+  }
+  if !nav.build_navmesh(&engine.nav_sys.nav_mesh, nav_geom, recast_config) {
+    return false
+  }
+  if !nav.init(&engine.nav_sys) {
+    return false
+  }
+  return true
+}
+
 find_path :: proc(
   engine: ^Engine,
   start_pos: [3]f32,
@@ -1200,8 +1421,31 @@ sync_active_camera_controller :: proc(engine: ^Engine) {
   world.camera_controller_sync(engine.active_controller, main_camera)
 }
 
+@(private)
+find_node_by_body_handle :: proc(
+  engine: ^Engine,
+  body_handle: physics.BodyHandleResult,
+) -> (
+  handle: resources.NodeHandle,
+  ok: bool,
+) {
+  #partial switch h in body_handle {
+  case physics.DynamicRigidBodyHandle:
+    for &entry, i in engine.world.nodes.entries do if entry.active {
+      if attachment, is_rb := entry.item.attachment.(world.RigidBodyAttachment); is_rb {
+        if attachment.body_handle == h {
+          return resources.NodeHandle{index = u32(i), generation = entry.generation}, true
+        }
+      }
+    }
+  case physics.StaticRigidBodyHandle:
+  }
+  return {}, false
+}
+
 raycast :: proc(
   engine: ^Engine,
+  physics_world: ^physics.World,
   origin: [3]f32,
   direction: [3]f32,
   max_distance: f32 = 1000.0,
@@ -1211,28 +1455,52 @@ raycast :: proc(
   normal: [3]f32,
   handle: resources.NodeHandle,
 ) {
-  // TODO: Implement using world BVH + geometry.ray_primitive_intersection
-  return false, 0, {0, 0, 0}, {}
+  dir := linalg.normalize(direction)
+  ray := geometry.Ray{origin = origin, direction = dir}
+  physics_hit := physics.raycast(physics_world, ray, max_distance)
+  if !physics_hit.hit {
+    return false, 0, {0, 0, 0}, {}
+  }
+  node_handle, found := find_node_by_body_handle(engine, physics_hit.body_handle)
+  if !found {
+    return false, 0, {0, 0, 0}, {}
+  }
+  return true, physics_hit.t, physics_hit.normal, node_handle
 }
 
 query_sphere :: proc(
   engine: ^Engine,
+  physics_world: ^physics.World,
   center: [3]f32,
   radius: f32,
 ) -> []resources.NodeHandle {
-  // TODO: Implement using physics.physics_query_sphere
-  // Need to convert RigidBodyHandle to NodeHandle
-  return {}
+  results := make([dynamic]physics.DynamicRigidBodyHandle, context.temp_allocator)
+  physics.query_sphere(physics_world, center, radius, &results)
+  node_handles := make([dynamic]resources.NodeHandle, context.temp_allocator)
+  for body_handle in results {
+    if node_handle, ok := find_node_by_body_handle(engine, body_handle); ok {
+      append(&node_handles, node_handle)
+    }
+  }
+  return node_handles[:]
 }
 
 query_box :: proc(
   engine: ^Engine,
+  physics_world: ^physics.World,
   min: [3]f32,
   max: [3]f32,
 ) -> []resources.NodeHandle {
-  // TODO: Implement using physics.physics_query_box
-  // Need to convert RigidBodyHandle to NodeHandle
-  return {}
+  bounds := geometry.Aabb{min = min, max = max}
+  results := make([dynamic]physics.DynamicRigidBodyHandle, context.temp_allocator)
+  physics.query_box(physics_world, bounds, &results)
+  node_handles := make([dynamic]resources.NodeHandle, context.temp_allocator)
+  for body_handle in results {
+    if node_handle, ok := find_node_by_body_handle(engine, body_handle); ok {
+      append(&node_handles, node_handle)
+    }
+  }
+  return node_handles[:]
 }
 
 draw_debug_line :: proc(

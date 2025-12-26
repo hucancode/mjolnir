@@ -226,100 +226,10 @@ create_obj_visualization_mesh :: proc(
 setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   log.info("Setting up navigation mesh with visualization")
-  config := recast.Config {
-    cs                       = 0.3, // Cell size
-    ch                       = 0.2, // Cell height
-    walkable_slope           = math.PI * 0.25, // Max slope
-    walkable_height          = i32(math.ceil_f32(2.0 / 0.2)), // Agent height
-    walkable_climb           = i32(math.floor_f32(0.9 / 0.2)), // Agent max climb
-    walkable_radius          = i32(math.ceil_f32(0.6 / 0.3)), // Agent radius
-    max_edge_len             = i32(12.0 / 0.3), // Max edge length
-    max_simplification_error = 1.3,
-    min_region_area          = 8 * 8,
-    merge_region_area        = 20 * 20,
-    max_verts_per_poly       = 6,
-    detail_sample_dist       = 6.0 * 0.3,
-    detail_sample_max_error  = 1.0 * 0.2,
-    border_size              = 0,
-  }
-  world.traverse(&engine.world, &engine.rm)
-
-  // Use bake_geometry with node info to get geometry and metadata
-  baked_geom, node_infos, bake_result := world.bake_geometry(
-    &engine.world,
-    &engine.gctx,
-    &engine.rm,
-    {}, // No filter - include all mesh nodes
-    {},
-    true, // Request node info
-  )
-  if bake_result != .SUCCESS {
-    log.error("Failed to bake geometry for navigation")
+  if !setup_navmesh(engine) {
+    log.error("Failed to setup navigation mesh")
     return
   }
-  defer {
-    delete(baked_geom.vertices)
-    delete(baked_geom.indices)
-    delete(node_infos)
-  }
-
-  // Convert geometry.Vertex to [3]f32 for navigation
-  nav_vertices := make([][3]f32, len(baked_geom.vertices))
-  defer delete(nav_vertices)
-  for v, i in baked_geom.vertices {
-    nav_vertices[i] = v.position
-  }
-
-  // Convert u32 indices to i32 for navigation
-  nav_indices := make([]i32, len(baked_geom.indices))
-  defer delete(nav_indices)
-  for idx, i in baked_geom.indices {
-    nav_indices[i] = i32(idx)
-  }
-
-  // Build area types based on node tags
-  nav_area_types := make([dynamic]u8, 0, len(baked_geom.indices) / 3)
-  defer delete(nav_area_types)
-
-  vertex_offset := 0
-  for info in node_infos {
-    triangle_count := info.index_count / 3
-    // Check if node has NAVMESH_OBSTACLE tag
-    area_type :=
-      .NAVMESH_OBSTACLE in info.tags ? u8(recast.RC_NULL_AREA) : u8(recast.RC_WALKABLE_AREA)
-    for i in 0 ..< triangle_count {
-      append(&nav_area_types, area_type)
-    }
-    vertex_offset += info.vertex_count
-  }
-
-  log.infof(
-    "Baked %d vertices, %d indices for navigation from %d nodes",
-    len(nav_vertices),
-    len(nav_indices),
-    len(node_infos),
-  )
-
-  // Build navigation mesh
-  nav_geom := nav.NavigationGeometry {
-    vertices   = nav_vertices,
-    indices    = nav_indices,
-    area_types = nav_area_types[:],
-  }
-
-  if !nav.build_navmesh(&engine.nav_sys.nav_mesh, nav_geom, config) {
-    log.error("Failed to build navigation mesh")
-    return
-  }
-
-  // Initialize navigation context
-  context_ok := nav.init(&engine.nav_sys)
-  if !context_ok {
-    log.error("Failed to create navigation context")
-    return
-  }
-  log.info("Navigation context created successfully")
-  // Step 5: Visualize using debug draw
   visualize_navmesh(engine)
   log.info("Navigation mesh building and visualization complete")
 }
