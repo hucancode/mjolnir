@@ -354,13 +354,7 @@ sample_layers :: proc(
   // Apply all IK
   for target in all_ik_targets {
     if !target.enabled do continue
-    chain_length := len(target.bone_indices)
-    bone_lengths := make([]f32, chain_length - 1, context.temp_allocator)
-    for i in 0 ..< chain_length - 1 {
-      child_bone_idx := target.bone_indices[i + 1]
-      bone_lengths[i] = skin.bone_lengths[child_bone_idx]
-    }
-    animation.fabrik_solve(world_transforms[:], target, bone_lengths[:])
+    animation.fabrik_solve(world_transforms[:], target)
   }
 
   // Update child bones after IK (same as sample_clip_with_ik)
@@ -480,19 +474,19 @@ sample_clip_with_ik :: proc(
     }
   }
   // Phase 2: Apply IK corrections
-  for target in ik_targets {
+  for &target in ik_targets {
     if !target.enabled do continue
-    chain_length := len(target.bone_indices)
-    bone_lengths := make([]f32, chain_length - 1, context.temp_allocator)
-    // bone_lengths[child] = distance from parent to child
-    // For chain [A, B, C], we need: [length(A->B), length(B->C)]
-    // Which is: [bone_lengths[B], bone_lengths[C]]
-    for i in 0 ..< chain_length - 1 {
-      child_bone_idx := target.bone_indices[i + 1]
-      bone_lengths[i] = skin.bone_lengths[child_bone_idx]
+    // Fallback: compute bone_lengths if not cached (for external callers)
+    if len(target.bone_lengths) == 0 {
+      chain_length := len(target.bone_indices)
+      bone_lengths := make([]f32, chain_length - 1, context.temp_allocator)
+      for i in 0 ..< chain_length - 1 {
+        child_bone_idx := target.bone_indices[i + 1]
+        bone_lengths[i] = skin.bone_lengths[child_bone_idx]
+      }
+      target.bone_lengths = bone_lengths
     }
-    // Apply IK
-    animation.fabrik_solve(world_transforms[:], target, bone_lengths[:])
+    animation.fabrik_solve(world_transforms[:], target)
   }
   // Phase 2.5: Update child bones after IK modifications
   // After IK modifies parent bones, we need to recompute world transforms for their children

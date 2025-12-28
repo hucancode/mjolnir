@@ -8,6 +8,7 @@ import "core:math/linalg"
 // IK target for FABRIK solver (supports N bones, minimum 2)
 IKTarget :: struct {
   bone_indices:    []u32, // All bones in chain from root to end (min 2 bones)
+  bone_lengths:    []f32, // Cached bone lengths (len = bone_indices - 1)
   target_position: [3]f32,
   pole_vector:     [3]f32, // Controls the bending plane
   max_iterations:  int,
@@ -36,7 +37,6 @@ BoneTransform :: struct {
 fabrik_solve :: proc(
   world_transforms: []BoneTransform,
   target: IKTarget,
-  bone_lengths: []f32,
 ) {
   if !target.enabled || target.weight <= 0.0 {
     return
@@ -51,6 +51,7 @@ fabrik_solve :: proc(
       return
     }
   }
+  bone_lengths := target.bone_lengths
   if len(bone_lengths) != chain_length - 1 {
     return
   }

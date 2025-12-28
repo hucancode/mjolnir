@@ -246,6 +246,16 @@ clear_animation_layers :: proc(
   return true
 }
 
+// Convert world-space position to skeleton-local space
+world_to_skeleton_local :: proc(
+  node_world_inv: matrix[4, 4]f32,
+  world_pos: [3]f32,
+) -> [3]f32 {
+  world_h := linalg.Vector4f32{world_pos.x, world_pos.y, world_pos.z, 1.0}
+  local_h := node_world_inv * world_h
+  return local_h.xyz
+}
+
 // Add an IK layer at specified index
 // IK targets are in world space and will be converted to skeleton-local space internally
 add_ik_layer :: proc(
@@ -284,26 +294,26 @@ add_ik_layer :: proc(
   }
   // Transform IK target from world space to skeleton-local space
   node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
-  target_world_h := linalg.Vector4f32 {
-    target_world_pos.x,
-    target_world_pos.y,
-    target_world_pos.z,
-    1.0,
+  target_local := world_to_skeleton_local(node_world_inv, target_world_pos)
+  pole_local := world_to_skeleton_local(node_world_inv, pole_world_pos)
+
+  // Pre-compute and cache bone lengths for IK chain
+  mesh_skin, has_mesh_skin := mesh.skinning.?
+  if !has_mesh_skin {
+    delete(bone_indices)
+    return false
   }
-  pole_world_h := linalg.Vector4f32 {
-    pole_world_pos.x,
-    pole_world_pos.y,
-    pole_world_pos.z,
-    1.0,
+  chain_length := len(bone_names)
+  bone_lengths := make([]f32, chain_length - 1)
+  for i in 0 ..< chain_length - 1 {
+    child_bone_idx := bone_indices[i + 1]
+    bone_lengths[i] = mesh_skin.bone_lengths[child_bone_idx]
   }
-  target_local_h := node_world_inv * target_world_h
-  pole_local_h := node_world_inv * pole_world_h
-  target_local := target_local_h.xyz
-  pole_local := pole_local_h.xyz
 
   // Create IK target (in skeleton-local space)
   ik_target := anim.IKTarget {
     bone_indices    = bone_indices,
+    bone_lengths    = bone_lengths,
     target_position = target_local,
     pole_vector     = pole_local,
     max_iterations  = max_iterations,
@@ -345,22 +355,8 @@ set_ik_layer_target :: proc(
 
   // Transform from world space to skeleton-local space
   node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
-  target_world_h := linalg.Vector4f32 {
-    target_world_pos.x,
-    target_world_pos.y,
-    target_world_pos.z,
-    1.0,
-  }
-  pole_world_h := linalg.Vector4f32 {
-    pole_world_pos.x,
-    pole_world_pos.y,
-    pole_world_pos.z,
-    1.0,
-  }
-  target_local_h := node_world_inv * target_world_h
-  pole_local_h := node_world_inv * pole_world_h
-  target_local := target_local_h.xyz
-  pole_local := pole_local_h.xyz
+  target_local := world_to_skeleton_local(node_world_inv, target_world_pos)
+  pole_local := world_to_skeleton_local(node_world_inv, pole_world_pos)
 
   // Check if this is an IK layer
   switch &layer_data in skinning.layers[layer_index].data {

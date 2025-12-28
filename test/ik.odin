@@ -32,8 +32,10 @@ test_fabrik_two_bone_straight_reach :: proc(t: ^testing.T) {
   }
   // IK target: reach to (1, -1.5, 0) - reachable within chain length
   bone_indices := []u32{0, 1, 2}
+  bone_lengths := []f32{1.0, 1.0} // Each bone is length 1
   target := animation.IKTarget {
     bone_indices    = bone_indices,
+    bone_lengths    = bone_lengths,
     target_position = [3]f32{1, -1.5, 0},
     pole_vector     = linalg.VECTOR3F32_Z_AXIS, // Bend toward +Z
     max_iterations  = 20,
@@ -41,9 +43,8 @@ test_fabrik_two_bone_straight_reach :: proc(t: ^testing.T) {
     weight          = 1.0,
     enabled         = true,
   }
-  bone_lengths := []f32{1.0, 1.0} // Each bone is length 1
   // Apply IK
-  animation.fabrik_solve(world_transforms[:], target, bone_lengths)
+  animation.fabrik_solve(world_transforms[:], target)
   // Verify end effector reached target (within tolerance)
   end_pos := world_transforms[2].world_position
   dist := linalg.distance(end_pos, target.target_position)
@@ -97,8 +98,10 @@ test_fabrik_unreachable_target :: proc(t: ^testing.T) {
   }
   // Target beyond max reach (bone lengths are 1+1=2, target at distance 3)
   bone_indices := []u32{0, 1, 2}
+  bone_lengths := []f32{1.0, 1.0}
   target := animation.IKTarget {
     bone_indices    = bone_indices,
+    bone_lengths    = bone_lengths,
     target_position = [3]f32{3, 0, 0},
     pole_vector     = linalg.VECTOR3F32_Z_AXIS,
     max_iterations  = 20,
@@ -106,8 +109,7 @@ test_fabrik_unreachable_target :: proc(t: ^testing.T) {
     weight          = 1.0,
     enabled         = true,
   }
-  bone_lengths := []f32{1.0, 1.0}
-  animation.fabrik_solve(world_transforms[:], target, bone_lengths)
+  animation.fabrik_solve(world_transforms[:], target)
   // Verify chain is stretched toward target but not beyond max reach
   end_pos := world_transforms[2].world_position
   root_pos := world_transforms[0].world_position
@@ -144,8 +146,10 @@ test_fabrik_four_bone_chain :: proc(t: ^testing.T) {
   }
   // Target position
   bone_indices := []u32{0, 1, 2, 3, 4}
+  bone_lengths := []f32{1.0, 1.0, 1.0, 1.0}
   target := animation.IKTarget {
     bone_indices    = bone_indices,
+    bone_lengths    = bone_lengths,
     target_position = [3]f32{2, -3, 0},
     pole_vector     = [3]f32{0, -2, 1},
     max_iterations  = 20,
@@ -153,8 +157,7 @@ test_fabrik_four_bone_chain :: proc(t: ^testing.T) {
     weight          = 1.0,
     enabled         = true,
   }
-  bone_lengths := []f32{1.0, 1.0, 1.0, 1.0}
-  animation.fabrik_solve(world_transforms[:], target, bone_lengths)
+  animation.fabrik_solve(world_transforms[:], target)
   // Verify end effector reached target
   end_pos := world_transforms[4].world_position
   dist := linalg.distance(end_pos, target.target_position)
@@ -197,8 +200,10 @@ test_fabrik_pole_vector :: proc(t: ^testing.T) {
   }
   // Target with pole pointing +Z
   bone_indices := []u32{0, 1, 2, 3}
+  bone_lengths := []f32{1.0, 1.0, 1.0}
   target := animation.IKTarget {
     bone_indices    = bone_indices,
+    bone_lengths    = bone_lengths,
     target_position = [3]f32{1.5, -2, 0},
     pole_vector     = [3]f32{0, -1, 2}, // Pole toward +Z
     max_iterations  = 20,
@@ -206,8 +211,7 @@ test_fabrik_pole_vector :: proc(t: ^testing.T) {
     weight          = 1.0,
     enabled         = true,
   }
-  bone_lengths := []f32{1.0, 1.0, 1.0}
-  animation.fabrik_solve(world_transforms[:], target, bone_lengths)
+  animation.fabrik_solve(world_transforms[:], target)
   // Middle joints should have positive Z component (bent toward pole)
   mid_pos_1 := world_transforms[1].world_position
   mid_pos_2 := world_transforms[2].world_position
@@ -245,8 +249,10 @@ test_fabrik_convergence :: proc(t: ^testing.T) {
     }
   }
   bone_indices := []u32{0, 1, 2, 3, 4, 5}
+  bone_lengths := []f32{0.5, 0.5, 0.5, 0.5, 0.5}
   target := animation.IKTarget {
     bone_indices    = bone_indices,
+    bone_lengths    = bone_lengths,
     target_position = [3]f32{1, -2, 0},
     pole_vector     = linalg.VECTOR3F32_Z_AXIS,
     max_iterations  = 30,
@@ -254,8 +260,7 @@ test_fabrik_convergence :: proc(t: ^testing.T) {
     weight          = 1.0,
     enabled         = true,
   }
-  bone_lengths := []f32{0.5, 0.5, 0.5, 0.5, 0.5}
-  animation.fabrik_solve(world_transforms[:], target, bone_lengths)
+  animation.fabrik_solve(world_transforms[:], target)
   // Should converge to target within tolerance
   end_pos := world_transforms[5].world_position
   dist := linalg.distance(end_pos, target.target_position)
