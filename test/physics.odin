@@ -67,8 +67,8 @@ test_rigid_body_integration :: proc(t: ^testing.T) {
   physics.apply_force(&body, force)
   dt := f32(0.016)
   physics.integrate(&body, dt)
-  // Account for damping: velocity gets multiplied by (1 - linear_damping) after integration
-  damping_factor := 1.0 - body.linear_damping
+  // Account for damping: velocity gets multiplied by exponential decay factor pow(1 - damping, dt)
+  damping_factor := math.pow(1.0 - body.linear_damping, dt)
   expected_velocity := force * body.inv_mass * dt * damping_factor
   testing.expect(
     t,

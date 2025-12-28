@@ -56,8 +56,9 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
           50,
         )
         if body, ok := physics.get_dynamic_body(&physics_world, cube_handles[idx]); ok {
-          body.linear_damping = 0.1
-          body.angular_damping = 0.1
+          // Higher damping needed with exponential decay formula to settle within 1000 steps
+          body.linear_damping = 0.5
+          body.angular_damping = 0.5
         }
         idx += 1
       }
