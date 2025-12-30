@@ -212,13 +212,19 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
         attenuation *= spotEffect;
     }
     float NdotL = max(dot(N, L), 0.0);
-    // Cook-Torrance BRDF
-    float NDF = pow(roughness, 4.0) / (PI * pow((dot(N, H) * dot(N, H)) * (pow(roughness, 4.0) - 1.0) + 1.0, 2.0));
+    float NdotV = max(dot(N, V), 0.01);
+    float NdotH = max(dot(N, H), 0.0);
+    // Cook-Torrance BRDF (GGX/Trowbridge-Reitz NDF)
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+    float denom = NdotH * NdotH * (alpha2 - 1.0) + 1.0;
+    denom = max(denom, 0.001);
+    float NDF = alpha2 / (PI * denom * denom);
     float k = pow(roughness + 1.0, 2.0) / 8.0;
     float G = NdotL / (NdotL * (1.0 - k) + k);
-    G *= max(dot(N, V), 0.0) / (max(dot(N, V), 0.0) * (1.0 - k) + k);
+    G *= NdotV / (NdotV * (1.0 - k) + k);
     vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
-    vec3 spec = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.001);
+    vec3 spec = (NDF * G * F) / (4.0 * NdotV * NdotL + 0.01);
     vec3 kS = F;
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
     Lo += (kD * albedo / PI + spec) * light_color * NdotL * attenuation;
@@ -263,21 +269,21 @@ void main() {
     }
     Camera camera = camera_buffer.cameras[scene_camera_idx];
     vec2 uv = (gl_FragCoord.xy / camera.viewport_params.xy);
-    vec3 position = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz;
+    vec3 position = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz;
     float depth = texture(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).r;
-    vec3 normal = texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz * 2.0 - 1.0;
-    vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rgb;
-    vec2 mr = texture(sampler2D(textures[metallic_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rg;
+    vec3 normal = normalize(texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz * 2.0 - 1.0);
+    vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rgb;
+    vec2 mr = texture(sampler2D(textures[metallic_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rg;
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.0, 1.0);
-    roughness = max(roughness, 0.05);
+    roughness = max(roughness, 0.08);
     vec3 V = normalize(camera.position.xyz - position);
     vec3 light_position = dynamic_light_data_buffer.dynamic_light_data[light_index].position.xyz;
     mat4 lightWorldMatrix = world_matrices_buffer.world_matrices[light.node_index];
     vec3 light_direction = lightWorldMatrix[2].xyz;
     float shadowFactor = calculateShadow(position, normal, light, light_index, light_position, light_direction);
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_position, light_direction);
-    direct = min(vec3(1.0), direct);
+    direct = direct / (direct + vec3(1.0));
     outColor = vec4(direct * shadowFactor, 1.0);
     // outColor.b = clamp(outColor.b, 0.1, 1.0);
 }
