@@ -14,6 +14,14 @@ SpiderLeg :: struct {
 	accumulated_time:      f32,    // internal
 }
 
+SpiderLegConfig :: struct {
+	initial_target:   [3]f32,
+	lift_height:      f32,
+	lift_frequency:   f32,
+	lift_duration:    f32,
+	time_offset:      f32,
+}
+
 spider_leg_init :: proc(
 	self: ^SpiderLeg,
 	initial_target: [3]f32,

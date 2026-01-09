@@ -352,6 +352,15 @@ sample_layers :: proc(
           layer.weight,
           skin.bone_lengths,
         )
+      case animation.SpiderLegModifier:
+        animation.spider_leg_modifier_update(
+          &layer_data.state,
+          &modifier,
+          delta_time,
+          world_transforms[:],
+          layer.weight,
+          skin.bone_lengths,
+        )
       }
     case animation.FKLayer, animation.IKLayer:
       continue

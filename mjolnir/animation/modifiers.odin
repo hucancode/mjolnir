@@ -17,9 +17,16 @@ PathModifier :: struct {
 	loop:   bool,
 }
 
+SpiderLegModifier :: struct {
+	legs:          []SpiderLeg,
+	chain_starts:  []u32,
+	chain_lengths: []u32,
+}
+
 Modifier :: union {
 	TailModifier,
 	PathModifier,
+	SpiderLegModifier,
 }
 
 ProceduralState :: struct {
@@ -162,6 +169,81 @@ path_modifier_update :: proc(
 
 		if i < chain_length - 1 {
 			cumulative_length += bone_lengths[state.bone_indices[i + 1]]
+		}
+	}
+}
+
+spider_leg_modifier_update :: proc(
+	state: ^ProceduralState,
+	params: ^SpiderLegModifier,
+	delta_time: f32,
+	world_transforms: []BoneTransform,
+	layer_weight: f32,
+	bone_lengths: []f32,
+) {
+	num_legs := len(params.legs)
+	if num_legs == 0 do return
+
+	for leg_idx in 0 ..< num_legs {
+		leg := &params.legs[leg_idx]
+		chain_start := params.chain_starts[leg_idx]
+		chain_len := params.chain_lengths[leg_idx]
+
+		if chain_len < 2 do continue
+
+		spider_leg_update(leg, delta_time)
+
+		leg_bone_indices := state.bone_indices[chain_start:chain_start + chain_len]
+
+		leg_bone_lengths := make([]f32, chain_len - 1, context.temp_allocator)
+		for i in 0 ..< int(chain_len - 1) {
+			bone_idx := leg_bone_indices[i + 1]
+			leg_bone_lengths[i] = bone_lengths[bone_idx]
+		}
+
+		fk_transforms := make([]BoneTransform, chain_len, context.temp_allocator)
+		for i in 0 ..< int(chain_len) {
+			bone_idx := leg_bone_indices[i]
+			fk_transforms[i] = world_transforms[bone_idx]
+		}
+
+		ik_target := IKTarget {
+			bone_indices    = leg_bone_indices,
+			bone_lengths    = leg_bone_lengths,
+			target_position = leg.feet_position,
+			pole_vector     = [3]f32{0, 0, 0},
+			max_iterations  = 10,
+			tolerance       = 0.01,
+			weight          = 1.0,
+			enabled         = true,
+		}
+		fabrik_solve(world_transforms, ik_target)
+
+		for i in 0 ..< int(chain_len) {
+			bone_idx := leg_bone_indices[i]
+
+			ik_pos := world_transforms[bone_idx].world_position
+			fk_pos := fk_transforms[i].world_position
+			world_transforms[bone_idx].world_position = linalg.lerp(
+				fk_pos,
+				ik_pos,
+				layer_weight,
+			)
+
+			ik_rot := world_transforms[bone_idx].world_rotation
+			fk_rot := fk_transforms[i].world_rotation
+			world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+				fk_rot,
+				ik_rot,
+				layer_weight,
+			)
+
+			scale := extract_scale(world_transforms[bone_idx].world_matrix)
+			world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
+				world_transforms[bone_idx].world_position,
+				world_transforms[bone_idx].world_rotation,
+				scale,
+			)
 		}
 	}
 }

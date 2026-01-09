@@ -543,6 +543,116 @@ add_path_modifier_layer :: proc(
   return true
 }
 
+add_spider_leg_modifier_layer :: proc(
+  world: ^World,
+  rm: ^resources.Manager,
+  node_handle: resources.NodeHandle,
+  leg_root_names: []string,
+  leg_chain_lengths: []u32,
+  leg_configs: []anim.SpiderLegConfig,
+  weight: f32 = 1.0,
+  layer_index: int = -1,
+) -> bool {
+  if len(leg_root_names) != len(leg_chain_lengths) do return false
+  if len(leg_root_names) != len(leg_configs) do return false
+  if len(leg_root_names) == 0 do return false
+
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
+  if !has_mesh do return false
+
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return false
+
+  mesh := cont.get(rm.meshes, mesh_attachment.handle) or_return
+
+  num_legs := len(leg_root_names)
+  all_bone_indices := make([dynamic]u32, 0, context.temp_allocator)
+  chain_starts := make([]u32, num_legs)
+  chain_lengths := make([]u32, num_legs)
+  legs := make([]anim.SpiderLeg, num_legs)
+
+  for i in 0 ..< num_legs {
+    leg_indices := resolve_bone_chain(
+      mesh,
+      leg_root_names[i],
+      leg_chain_lengths[i],
+    ) or_return
+    defer delete(leg_indices)
+
+    chain_starts[i] = u32(len(all_bone_indices))
+    chain_lengths[i] = u32(len(leg_indices))
+
+    for idx in leg_indices {
+      append(&all_bone_indices, idx)
+    }
+
+    cfg := leg_configs[i]
+    anim.spider_leg_init(
+      &legs[i],
+      cfg.initial_target,
+      cfg.lift_height,
+      cfg.lift_frequency,
+      cfg.lift_duration,
+      cfg.time_offset,
+    )
+  }
+
+  bone_indices := make([]u32, len(all_bone_indices))
+  copy(bone_indices, all_bone_indices[:])
+
+  layer := anim.Layer {
+    weight = weight,
+    data   = anim.ProceduralLayer {
+      state = anim.ProceduralState {
+        bone_indices     = bone_indices,
+        accumulated_time = 0,
+        modifier         = anim.SpiderLegModifier {
+          legs          = legs,
+          chain_starts  = chain_starts,
+          chain_lengths = chain_lengths,
+        },
+      },
+    },
+  }
+
+  if layer_index < 0 || layer_index >= len(skinning.layers) {
+    append(&skinning.layers, layer)
+  } else {
+    skinning.layers[layer_index] = layer
+  }
+
+  register_animatable_node(world, node_handle)
+  return true
+}
+
+get_spider_leg_target :: proc(
+  world: ^World,
+  node_handle: resources.NodeHandle,
+  layer_index: int,
+  leg_index: int,
+) -> (target: ^[3]f32, ok: bool) {
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
+  if !has_mesh do return nil, false
+
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return nil, false
+
+  if layer_index < 0 || layer_index >= len(skinning.layers) do return nil, false
+
+  #partial switch &layer_data in skinning.layers[layer_index].data {
+  case anim.ProceduralLayer:
+    #partial switch &modifier in layer_data.state.modifier {
+    case anim.SpiderLegModifier:
+      if leg_index < 0 || leg_index >= len(modifier.legs) do return nil, false
+      return &modifier.legs[leg_index].feet_target, true
+    }
+  }
+
+  return nil, false
+}
+
 set_tail_modifier_params :: proc(
   world: ^World,
   node_handle: resources.NodeHandle,
@@ -578,7 +688,7 @@ set_tail_modifier_params :: proc(
         modifier.damping = damp
       }
       return true
-    case anim.PathModifier:
+    case anim.PathModifier, anim.SpiderLegModifier:
       return false
     }
   case anim.FKLayer, anim.IKLayer:
@@ -638,7 +748,7 @@ set_path_modifier_params :: proc(
         modifier.loop = lp
       }
       return true
-    case anim.TailModifier:
+    case anim.TailModifier, anim.SpiderLegModifier:
       return false
     }
   case anim.FKLayer, anim.IKLayer:
