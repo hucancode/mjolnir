@@ -497,6 +497,7 @@ IKLayer :: struct {
 LayerData :: union {
   FKLayer,
   IKLayer,
+  ProceduralLayer,
 }
 
 Layer :: struct {
@@ -563,5 +564,7 @@ layer_update :: proc(self: ^Layer, delta_time: f32) {
     }
   case IKLayer:
   // IK doesn't have time-based updates
+  case ProceduralLayer:
+  // Procedural modifiers update time during sampling
   }
 }

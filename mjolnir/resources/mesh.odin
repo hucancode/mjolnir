@@ -215,6 +215,7 @@ sample_layers :: proc(
   layers: []animation.Layer,
   ik_targets: []animation.IKTarget,
   out_bone_matrices: []matrix[4, 4]f32,
+  delta_time: f32,
 ) {
   TraverseEntry :: struct {
     parent_transform: matrix[4, 4]f32,
@@ -243,7 +244,7 @@ sample_layers :: proc(
   // Sample and accumulate FK layers
   for &layer in layers {
     if layer.weight <= 0 do continue
-    switch &layer_data in layer.data {
+    #partial switch &layer_data in layer.data {
     case animation.FKLayer:
       // Resolve clip handle at runtime
       clip_handle := transmute(ClipHandle)layer_data.clip_handle
@@ -326,6 +327,37 @@ sample_layers :: proc(
     }
   }
 
+  // Apply procedural modifiers
+  for &layer in layers {
+    if layer.weight <= 0 do continue
+    switch &layer_data in layer.data {
+    case animation.ProceduralLayer:
+      layer_data.state.accumulated_time += delta_time
+
+      switch &modifier in layer_data.state.modifier {
+      case animation.TailModifier:
+        animation.tail_modifier_update(
+          &layer_data.state,
+          modifier,
+          delta_time,
+          world_transforms[:],
+          layer.weight,
+        )
+      case animation.PathModifier:
+        animation.path_modifier_update(
+          &layer_data.state,
+          &modifier,
+          delta_time,
+          world_transforms[:],
+          layer.weight,
+          skin.bone_lengths,
+        )
+      }
+    case animation.FKLayer, animation.IKLayer:
+      continue
+    }
+  }
+
   // Apply IK targets (from both layer-embedded IK and external IK targets)
   all_ik_targets := make(
     [dynamic]animation.IKTarget,
@@ -336,7 +368,7 @@ sample_layers :: proc(
   // Collect IK from layers
   for &layer in layers {
     if layer.weight <= 0 do continue
-    switch &layer_data in layer.data {
+    #partial switch &layer_data in layer.data {
     case animation.IKLayer:
       target := layer_data.target
       target.weight = layer.weight

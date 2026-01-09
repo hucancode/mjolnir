@@ -64,7 +64,7 @@ update_skeletal_animations :: proc(
       skinning.bone_matrix_buffer_offset,
     )
     matrices := slice.from_ptr(matrices_ptr, bone_count)
-    resources.sample_layers(mesh, rm, skinning.layers[:], nil, matrices)
+    resources.sample_layers(mesh, rm, skinning.layers[:], nil, matrices, delta_time)
   }
 }
 
@@ -359,13 +359,11 @@ set_ik_layer_target :: proc(
   pole_local := world_to_skeleton_local(node_world_inv, pole_world_pos)
 
   // Check if this is an IK layer
-  switch &layer_data in skinning.layers[layer_index].data {
+  #partial switch &layer_data in skinning.layers[layer_index].data {
   case anim.IKLayer:
     layer_data.target.target_position = target_local
     layer_data.target.pole_vector = pole_local
     return true
-  case anim.FKLayer:
-    return false
   }
 
   return false
@@ -386,11 +384,264 @@ set_ik_layer_enabled :: proc(
   if layer_index < 0 || layer_index >= len(skinning.layers) do return false
 
   // Check if this is an IK layer
-  switch &layer_data in skinning.layers[layer_index].data {
+  #partial switch &layer_data in skinning.layers[layer_index].data {
   case anim.IKLayer:
     layer_data.target.enabled = enabled
     return true
-  case anim.FKLayer:
+  }
+
+  return false
+}
+
+resolve_bone_chain :: proc(
+  mesh: ^resources.Mesh,
+  root_bone_name: string,
+  chain_length: u32,
+  allocator := context.allocator,
+) -> (
+  bone_indices: []u32,
+  ok: bool,
+) {
+  skin, has_skin := &mesh.skinning.?
+  if !has_skin do return nil, false
+
+  root_idx, found := resources.find_bone_by_name(mesh, root_bone_name)
+  if !found do return nil, false
+
+  indices := make([dynamic]u32, 0, chain_length, context.temp_allocator)
+  append(&indices, root_idx)
+
+  current_idx := root_idx
+  for len(indices) < int(chain_length) {
+    bone := &skin.bones[current_idx]
+    if len(bone.children) == 0 do break
+
+    child_idx := bone.children[0]
+    append(&indices, child_idx)
+    current_idx = child_idx
+  }
+
+  if len(indices) < 2 do return nil, false
+
+  result := make([]u32, len(indices), allocator)
+  copy(result, indices[:])
+  return result, true
+}
+
+add_tail_modifier_layer :: proc(
+  world: ^World,
+  rm: ^resources.Manager,
+  node_handle: resources.NodeHandle,
+  root_bone_name: string,
+  tail_length: u32,
+  frequency: f32 = 1.0,
+  amplitude: f32 = 0.3,
+  propagation_speed: f32 = 0.5,
+  damping: f32 = 0.9,
+  weight: f32 = 1.0,
+  layer_index: int = -1,
+) -> bool {
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
+  if !has_mesh do return false
+
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return false
+
+  mesh := cont.get(rm.meshes, mesh_attachment.handle) or_return
+
+  bone_indices := resolve_bone_chain(mesh, root_bone_name, tail_length) or_return
+
+  layer := anim.Layer {
+    weight = weight,
+    data   = anim.ProceduralLayer {
+      state = anim.ProceduralState {
+        bone_indices = bone_indices,
+        accumulated_time = 0,
+        modifier = anim.TailModifier {
+          frequency = frequency,
+          amplitude = amplitude,
+          propagation_speed = propagation_speed,
+          damping = damping,
+        },
+      },
+    },
+  }
+
+  if layer_index < 0 || layer_index >= len(skinning.layers) {
+    append(&skinning.layers, layer)
+  } else {
+    skinning.layers[layer_index] = layer
+  }
+
+  register_animatable_node(world, node_handle)
+  return true
+}
+
+add_path_modifier_layer :: proc(
+  world: ^World,
+  rm: ^resources.Manager,
+  node_handle: resources.NodeHandle,
+  root_bone_name: string,
+  tail_length: u32,
+  path: [][3]f32,
+  offset: f32 = 0.0,
+  speed: f32 = 0.0,
+  loop: bool = false,
+  weight: f32 = 1.0,
+  layer_index: int = -1,
+) -> bool {
+  if len(path) < 2 do return false
+
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
+  if !has_mesh do return false
+
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return false
+
+  mesh := cont.get(rm.meshes, mesh_attachment.handle) or_return
+
+  bone_indices := resolve_bone_chain(mesh, root_bone_name, tail_length) or_return
+
+  points := make([][3]f32, len(path))
+  copy(points, path)
+
+  times := make([]f32, len(path))
+  for i in 0 ..< len(times) {
+    times[i] = f32(i)
+  }
+
+  spline := anim.Spline([3]f32) {
+    points = points,
+    times  = times,
+  }
+
+  layer := anim.Layer {
+    weight = weight,
+    data   = anim.ProceduralLayer {
+      state = anim.ProceduralState {
+        bone_indices = bone_indices,
+        accumulated_time = 0,
+        modifier = anim.PathModifier {
+          spline = spline,
+          offset = offset,
+          speed = speed,
+          loop = loop,
+        },
+      },
+    },
+  }
+
+  if layer_index < 0 || layer_index >= len(skinning.layers) {
+    append(&skinning.layers, layer)
+  } else {
+    skinning.layers[layer_index] = layer
+  }
+
+  register_animatable_node(world, node_handle)
+  return true
+}
+
+set_tail_modifier_params :: proc(
+  world: ^World,
+  node_handle: resources.NodeHandle,
+  layer_index: int,
+  frequency: Maybe(f32) = nil,
+  amplitude: Maybe(f32) = nil,
+  propagation_speed: Maybe(f32) = nil,
+  damping: Maybe(f32) = nil,
+) -> bool {
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
+  if !has_mesh do return false
+
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return false
+
+  if layer_index < 0 || layer_index >= len(skinning.layers) do return false
+
+  switch &layer_data in skinning.layers[layer_index].data {
+  case anim.ProceduralLayer:
+    switch &modifier in layer_data.state.modifier {
+    case anim.TailModifier:
+      if freq, has_freq := frequency.?; has_freq {
+        modifier.frequency = freq
+      }
+      if amp, has_amp := amplitude.?; has_amp {
+        modifier.amplitude = amp
+      }
+      if prop, has_prop := propagation_speed.?; has_prop {
+        modifier.propagation_speed = prop
+      }
+      if damp, has_damp := damping.?; has_damp {
+        modifier.damping = damp
+      }
+      return true
+    case anim.PathModifier:
+      return false
+    }
+  case anim.FKLayer, anim.IKLayer:
+    return false
+  }
+
+  return false
+}
+
+set_path_modifier_params :: proc(
+  world: ^World,
+  node_handle: resources.NodeHandle,
+  layer_index: int,
+  path: Maybe([][3]f32) = nil,
+  offset: Maybe(f32) = nil,
+  speed: Maybe(f32) = nil,
+  loop: Maybe(bool) = nil,
+) -> bool {
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
+  if !has_mesh do return false
+
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return false
+
+  if layer_index < 0 || layer_index >= len(skinning.layers) do return false
+
+  switch &layer_data in skinning.layers[layer_index].data {
+  case anim.ProceduralLayer:
+    switch &modifier in layer_data.state.modifier {
+    case anim.PathModifier:
+      if new_path, has_path := path.?; has_path {
+        if len(new_path) >= 2 {
+          anim.spline_destroy(&modifier.spline)
+
+          points := make([][3]f32, len(new_path))
+          copy(points, new_path)
+
+          times := make([]f32, len(new_path))
+          for i in 0 ..< len(times) {
+            times[i] = f32(i)
+          }
+
+          modifier.spline = anim.Spline([3]f32) {
+            points = points,
+            times  = times,
+          }
+        }
+      }
+      if off, has_off := offset.?; has_off {
+        modifier.offset = off
+      }
+      if spd, has_spd := speed.?; has_spd {
+        modifier.speed = spd
+      }
+      if lp, has_lp := loop.?; has_lp {
+        modifier.loop = lp
+      }
+      return true
+    case anim.TailModifier:
+      return false
+    }
+  case anim.FKLayer, anim.IKLayer:
     return false
   }
 
