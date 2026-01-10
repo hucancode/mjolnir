@@ -98,6 +98,17 @@ path_modifier_update :: proc(
 	layer_weight: f32,
 	bone_lengths: []f32,
 ) {
+	chain_length := len(state.bone_indices)
+	if chain_length < 2 || len(params.spline.points) < 2 do return
+
+	// Build arc table BEFORE updating offset!
+	if _, has_table := params.spline.arc_table.?; !has_table {
+		spline_build_arc_table(&params.spline)
+	}
+
+	if bone_lengths == nil do return
+
+	// Now update offset after arc table exists
 	if params.speed != 0 {
 		params.offset += params.speed * delta_time
 		spline_length := spline_arc_length(params.spline)
@@ -108,19 +119,12 @@ path_modifier_update :: proc(
 		}
 	}
 
-	chain_length := len(state.bone_indices)
-	if chain_length < 2 || len(params.spline.points) < 2 do return
-
-	if _, has_table := params.spline.arc_table.?; !has_table {
-		spline_build_arc_table(&params.spline)
-	}
-
-	if bone_lengths == nil do return
-
 	total_chain_length: f32 = 0
 	for i in 1 ..< chain_length {
 		total_chain_length += bone_lengths[state.bone_indices[i]]
 	}
+
+	if total_chain_length <= 0 do return
 
 	spline_length := spline_arc_length(params.spline)
 	cumulative_length: f32 = 0
