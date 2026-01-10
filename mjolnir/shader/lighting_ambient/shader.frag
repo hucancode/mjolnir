@@ -69,8 +69,8 @@ void main() {
     vec3 normal = texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz * 2.0 - 1.0;
     vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rgb;
     vec2 mr = texture(sampler2D(textures[metallic_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rg;
-    float metallic = clamp(mr.r, 0.0, 1.0);
-    float roughness = clamp(mr.g, 0.0, 1.0);
+    float metallic = mr.r;
+    float roughness = mr.g;
     vec3 emissive = texture(sampler2D(textures[emissive_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rgb;
     // Camera position from bindless camera buffer
     vec3 V = normalize(camera.position.xyz - position);
@@ -86,18 +86,16 @@ void main() {
         float specularLod = roughness * environment_max_lod;
         vec3 prefilteredColor = textureLod(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_REPEAT]), uvR, specularLod).rgb * ibl_intensity;
         vec2 brdfSample = texture(sampler2D(textures[brdf_lut_index], samplers[SAMPLER_LINEAR_CLAMP]), vec2(NdotV, roughness)).rg;
-        vec3 f_metal_fresnel_ibl = albedo * brdfSample.x + brdfSample.y;
+        vec3 f_metal_fresnel_ibl = clamp(albedo * brdfSample.x + brdfSample.y, 0.0, 1.0);
         vec3 f_metal_brdf_ibl = f_metal_fresnel_ibl * prefilteredColor;
-        vec3 f_dielectric_fresnel_ibl = vec3(0.04) * brdfSample.x + brdfSample.y;
+        vec3 f_dielectric_fresnel_ibl = clamp(vec3(0.04) * brdfSample.x + brdfSample.y, 0.0, 1.0);
         vec3 f_dielectric_brdf_ibl = mix(diffuseIBL, prefilteredColor * f_dielectric_fresnel_ibl, f_dielectric_fresnel_ibl);
         ambient = mix(f_dielectric_brdf_ibl, f_metal_brdf_ibl, metallic);
     }
     // Fresnel effect for edge highlighting
-    float fresnel_strength = mix(metallic, 0.5 * roughness, 0.5);
-    float fresnel = 1.0 - pow(1.0 - NdotV, fresnel_strength);
+    float fresnel_strength = clamp(mix(metallic, 0.5 * roughness, 0.5), 0.0, 1.0);
+    float fresnel = 1.0 - pow(clamp(1.0 - NdotV, 0.0, 1.0), max(fresnel_strength, 0.001));
     vec3 fresnelColor = (albedo + emissive) * fresnel * fresnel_strength;
-    vec3 final = (albedo * ambient + fresnelColor) * AMBIENT_STRENGTH
-        + emissive;
+    vec3 final = (albedo * ambient + fresnelColor) * AMBIENT_STRENGTH + emissive;
     outColor = vec4(final, 1.0);
-    // outColor = vec4(vec3(0.01), 1);
 }
