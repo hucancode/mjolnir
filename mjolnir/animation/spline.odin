@@ -1,5 +1,6 @@
 package animation
 
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -227,7 +228,7 @@ spline_sample_uniform :: proc(spline: Spline($T), s: f32) -> T {
   if !ok do return spline_sample(spline, s)
   n := len(table.arc_lengths)
   if n == 0 do return T{}
-  if s <= 0 do return spline_sample(spline, table.times[0])
+  if math.is_nan(s) || s <= table.arc_lengths[0] do return spline_sample(spline, table.times[0])
   total := table.arc_lengths[n - 1]
   if s >= total do return spline_sample(spline, table.times[n - 1])
   cmp :: proc(item: f32, s: f32) -> slice.Ordering {
