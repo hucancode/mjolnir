@@ -302,6 +302,189 @@ camera_init :: proc(
   return .SUCCESS
 }
 
+camera_init_orthographic :: proc(
+  camera: ^Camera,
+  gctx: ^gpu.GPUContext,
+  rm: ^Manager,
+  width, height: u32,
+  color_format, depth_format: vk.Format,
+  enabled_passes: PassTypeSet = {.SHADOW},
+  camera_position: [3]f32 = {0, 0, 0},
+  camera_target: [3]f32 = {0, 0, -1},
+  ortho_width: f32 = 100.0,
+  ortho_height: f32 = 100.0,
+  near_plane: f32 = 1.0,
+  far_plane: f32 = 1000.0,
+  max_draws: u32 = MAX_NODES_IN_SCENE,
+) -> vk.Result {
+  camera.rotation = linalg.QUATERNIONF32_IDENTITY
+  camera.projection = OrthographicProjection {
+    width  = ortho_width,
+    height = ortho_height,
+    near   = near_plane,
+    far    = far_plane,
+  }
+  camera.position = camera_position
+  forward := linalg.normalize(camera_target - camera_position)
+  safe_up := linalg.VECTOR3F32_Y_AXIS
+  if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
+    safe_up = linalg.VECTOR3F32_Z_AXIS
+    if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
+      safe_up = linalg.VECTOR3F32_X_AXIS
+    }
+  }
+  right := linalg.normalize(linalg.cross(forward, safe_up))
+  recalc_up := linalg.cross(right, forward)
+  rotation_matrix := matrix[3, 3]f32{
+    right.x, recalc_up.x, -forward.x,
+    right.y, recalc_up.y, -forward.y,
+    right.z, recalc_up.z, -forward.z,
+  }
+  camera.rotation = linalg.to_quaternion(rotation_matrix)
+  camera.extent = {width, height}
+  camera.enabled_passes = enabled_passes
+  needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
+  needs_final :=
+    .LIGHTING in enabled_passes ||
+    .TRANSPARENCY in enabled_passes ||
+    .PARTICLES in enabled_passes ||
+    .POST_PROCESS in enabled_passes
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    if needs_final {
+      camera.attachments[.FINAL_IMAGE][frame] =
+      create_texture(
+        gctx,
+        rm,
+        width,
+        height,
+        color_format,
+        vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_continue
+    }
+    if needs_gbuffer {
+      camera.attachments[.POSITION][frame] =
+      create_texture(
+        gctx,
+        rm,
+        width,
+        height,
+        vk.Format.R32G32B32A32_SFLOAT,
+        vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_continue
+      camera.attachments[.NORMAL][frame] =
+      create_texture(
+        gctx,
+        rm,
+        width,
+        height,
+        vk.Format.R8G8B8A8_UNORM,
+        vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_continue
+      camera.attachments[.ALBEDO][frame] =
+      create_texture(
+        gctx,
+        rm,
+        width,
+        height,
+        vk.Format.R8G8B8A8_UNORM,
+        vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_continue
+      camera.attachments[.METALLIC_ROUGHNESS][frame] =
+      create_texture(
+        gctx,
+        rm,
+        width,
+        height,
+        vk.Format.R8G8B8A8_UNORM,
+        vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_continue
+      camera.attachments[.EMISSIVE][frame] =
+      create_texture(
+        gctx,
+        rm,
+        width,
+        height,
+        vk.Format.R8G8B8A8_UNORM,
+        vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_continue
+    }
+    camera.attachments[.DEPTH][frame] =
+    create_texture(
+      gctx,
+      rm,
+      width,
+      height,
+      depth_format,
+      vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    ) or_continue
+    if depth, ok := cont.get(rm.images_2d, camera.attachments[.DEPTH][frame]);
+       ok {
+      cmd_buf := gpu.begin_single_time_command(gctx) or_return
+      gpu.image_barrier(
+        cmd_buf,
+        depth.image,
+        .UNDEFINED,
+        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        {},
+        {.DEPTH_STENCIL_ATTACHMENT_READ},
+        {.TOP_OF_PIPE},
+        {.EARLY_FRAGMENT_TESTS},
+        {.DEPTH},
+      )
+      gpu.end_single_time_command(gctx, &cmd_buf) or_return
+    }
+  }
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    camera.opaque_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.opaque_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.transparent_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.transparent_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.sprite_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.sprite_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+  }
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    create_camera_depth_pyramid(
+      gctx,
+      rm,
+      camera,
+      width,
+      height,
+      u32(frame),
+    ) or_return
+  }
+  return .SUCCESS
+}
+
 camera_destroy :: proc(self: ^Camera, gctx: ^gpu.GPUContext, rm: ^Manager) {
   for handles in self.attachments {
     for handle in handles {
@@ -359,14 +542,22 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
       proj.far,
     )
   case OrthographicProjection:
-    return linalg.matrix_ortho3d(
-      -proj.width / 2,
-      proj.width / 2,
-      -proj.height / 2,
-      proj.height / 2,
-      proj.near,
-      proj.far,
-    )
+    // return linalg.matrix_ortho3d(
+    //   -proj.width / 2,
+    //   proj.width / 2,
+    //   -proj.height / 2,
+    //   proj.height / 2,
+    //   proj.near,
+    //   proj.far,
+    // )
+    hw := proj.width / 2
+    hh := proj.height / 2
+    return matrix[4, 4]f32{
+      1/hw, 0,    0,                                0,
+      0,    1/hh, 0,                                0,
+      0,    0,    1/(proj.near - proj.far),         0,
+      0,    0,    proj.near/(proj.near - proj.far), 1,
+    }
   case:
     return linalg.MATRIX4F32_IDENTITY
   }

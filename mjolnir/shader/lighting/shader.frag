@@ -132,7 +132,8 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint light_idx, vec
             return 1.0;
         }
         shadowCoord.z = clamp(shadowCoord.z, 0.0, 1.0);
-        vec3 lightDir = normalize(light_direction);
+        // For directional lights, negate direction (it points where light shines, we need direction TO light)
+        vec3 lightDir = normalize(-light_direction);
         float cosTheta = clamp(dot(n, lightDir), 0.0, 1.0);
         float bias = 0.005 * tan(acos(cosTheta));
         bias = clamp(bias, 0.001, 0.01);
@@ -181,8 +182,10 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
     vec3 light_color = light.color.rgb * light.color.a; // RGB * intensity
-    // Light direction and distance (light_direction is already -Z forward direction)
-    vec3 L = light.type == DIRECTIONAL_LIGHT ? normalize(light_direction) : normalize(light_position - fragPos);
+    // Light direction and distance
+    // For directional lights: negate direction (it points where light shines, we need direction TO light source)
+    // For point/spot lights: calculate vector from fragment to light position
+    vec3 L = light.type == DIRECTIONAL_LIGHT ? normalize(-light_direction) : normalize(light_position - fragPos);
     vec3 H = normalize(V + L);
     float distance = light.type == DIRECTIONAL_LIGHT ? 1.0 : length(light_position - fragPos);
     float attenuation = light.radius;

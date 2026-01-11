@@ -123,7 +123,31 @@ update_light_gpu_data :: proc(rm: ^Manager, handle: LightHandle) {
   }
 }
 
-update_light_camera :: proc(rm: ^Manager, frame_index: u32 = 0) {
+@(private)
+compute_light_space_aabb :: proc(
+  world_corners: [8][3]f32,
+  light_view_matrix: matrix[4, 4]f32,
+) -> (
+  min_bounds, max_bounds: [3]f32,
+) {
+  first_light_space :=
+    (light_view_matrix * [4]f32{world_corners[0].x, world_corners[0].y, world_corners[0].z, 1.0}).xyz
+  min_bounds = first_light_space
+  max_bounds = first_light_space
+  for i in 1 ..< 8 {
+    light_space :=
+      (light_view_matrix * [4]f32{world_corners[i].x, world_corners[i].y, world_corners[i].z, 1.0}).xyz
+    min_bounds = linalg.min(min_bounds, light_space)
+    max_bounds = linalg.max(max_bounds, light_space)
+  }
+  return min_bounds, max_bounds
+}
+
+update_light_camera :: proc(
+  rm: ^Manager,
+  main_camera_handle: CameraHandle,
+  frame_index: u32 = 0,
+) {
   for handle, light_index in rm.active_lights {
     light := cont.get(rm.lights, handle) or_continue
     // Get light's world transform from node
@@ -146,14 +170,129 @@ update_light_camera :: proc(rm: ^Manager, frame_index: u32 = 0) {
           shadow_map_id = spherical_cam.depth_cube[frame_index].index
         }
       case .DIRECTIONAL:
-        // TODO: Implement directional light later
         cam := cont.get(rm.cameras, light.camera_handle)
-        if cam != nil {
-          camera_position := light_position - light_direction * 50.0 // Far back
-          target_position := light_position
+        if cam == nil do continue
+        main_cam := cont.get(rm.cameras, main_camera_handle)
+        if main_cam == nil {
+          far_dist: f32 = 100.0
+          if ortho, ok := cam.projection.(OrthographicProjection); ok {
+            far_dist = ortho.far
+          }
+          camera_position :=
+            light_position - light_direction * (far_dist * 0.5)
+          target_position := light_position + light_direction
           camera_look_at(cam, camera_position, target_position)
           shadow_map_id = cam.attachments[.DEPTH][frame_index].index
+          continue
         }
+        main_view := camera_view_matrix(main_cam)
+        // Build projection matrix from limited projection
+        limited_proj_matrix := linalg.MATRIX4F32_IDENTITY
+        DIRECTIONAL_LIGHT_SHADOW_MAX_DISTANCE :: 10.0
+        switch proj in main_cam.projection {
+        case PerspectiveProjection:
+          limited_proj_matrix = linalg.matrix4_perspective(
+            proj.fov,
+            proj.aspect_ratio,
+            proj.near,
+            min(proj.far, DIRECTIONAL_LIGHT_SHADOW_MAX_DISTANCE),
+          )
+        case OrthographicProjection:
+          limited_proj_matrix = linalg.matrix_ortho3d(
+            -proj.width / 2,
+            proj.width / 2,
+            -proj.height / 2,
+            proj.height / 2,
+            proj.near,
+            min(proj.far, DIRECTIONAL_LIGHT_SHADOW_MAX_DISTANCE),
+          )
+        }
+        frustum_corners := geometry.frustum_corners_world(
+          main_view,
+          limited_proj_matrix,
+        )
+        // Build light coordinate system (rotation only, no translation)
+        light_forward := linalg.normalize(light_direction)
+        light_up := linalg.VECTOR3F32_Y_AXIS
+        if math.abs(linalg.dot(light_forward, light_up)) > 0.95 {
+          light_up = linalg.VECTOR3F32_Z_AXIS
+        }
+        light_right := linalg.normalize(linalg.cross(light_up, light_forward))
+        light_up_recalc := linalg.cross(light_forward, light_right)
+        // Build 3x3 rotation matrix: world → light rotated frame
+        // Each row is a basis vector (right, up, forward)
+        light_rotation := matrix[3, 3]f32{
+          light_right.x, light_right.y, light_right.z,
+          light_up_recalc.x, light_up_recalc.y, light_up_recalc.z,
+          light_forward.x, light_forward.y, light_forward.z,
+        }
+        // Transform frustum corners to light-rotated frame (rotation only)
+        rotated_corners: [8][3]f32
+        for corner, i in frustum_corners {
+          rotated_corners[i] = light_rotation * corner
+        }
+        // Compute AABB in rotated frame
+        aabb_min := rotated_corners[0]
+        aabb_max := rotated_corners[0]
+        #unroll for i in 1 ..< 8 {
+          aabb_min = linalg.min(aabb_min, rotated_corners[i])
+          aabb_max = linalg.max(aabb_max, rotated_corners[i])
+        }
+        // Add padding to ensure objects near frustum edges cast shadows
+        padding_factor: f32 = 0.1
+        aabb_size := aabb_max - aabb_min
+        aabb_min -= aabb_size * padding_factor
+        aabb_max += aabb_size * padding_factor
+        aabb_size = aabb_max - aabb_min
+        // Compute AABB center in rotated frame
+        aabb_center_rotated := (aabb_min + aabb_max) * 0.5
+        // Position camera in rotated frame:
+        // - Centered on AABB in XY
+        // - Positioned behind AABB center in Z for balanced depth range
+        // This allows shadow casters on both sides of the frustum
+        near_plane: f32 = 0.1
+        camera_distance := (aabb_size.z * 0.5) + near_plane
+        camera_pos_rotated := [3]f32 {
+          aabb_center_rotated.x,
+          aabb_center_rotated.y,
+          aabb_center_rotated.z - camera_distance,
+        }
+        log.debugf(
+          "frustum_corners=%v, rotated_coners=%v, camera_pos_rotated=%v, aabb_center_rotated=%v, aabb_size=%v",
+          frustum_corners,
+          rotated_corners,
+          camera_pos_rotated,
+          aabb_center_rotated,
+          aabb_size,
+        )
+        far_plane := aabb_size.z + near_plane
+        // Transform camera position back to world space (inverse rotation)
+        light_rotation_inv := linalg.transpose(light_rotation)
+        camera_position := light_rotation_inv * camera_pos_rotated
+        // Build view matrix: look from camera_position in light_forward direction
+        target_position := camera_position + light_forward
+        // Set orthographic projection bounds based on AABB
+        if ortho_proj, ok := &cam.projection.(OrthographicProjection); ok {
+          ortho_proj.width = aabb_size.x
+          ortho_proj.height = aabb_size.y
+          ortho_proj.near = near_plane
+          ortho_proj.far = far_plane
+          log.debugf(
+            "light ortho projection %v",
+            ortho_proj,
+          )
+        }
+        // Set camera transform
+        camera_look_at(cam, camera_position, target_position)
+        log.debugf(
+          "light position %v looking at %v with the aabb %v camera p=%v, r=%v",
+          camera_position,
+          target_position,
+          aabb_size,
+          cam.position,
+          cam.rotation,
+        )
+        shadow_map_id = cam.attachments[.DEPTH][frame_index].index
       case .SPOT:
         cam := cont.get(rm.cameras, light.camera_handle)
         if cam != nil {

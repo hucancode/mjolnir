@@ -661,14 +661,20 @@ spawn_child_point_light :: proc(
 spawn_directional_light :: proc(
   engine: ^Engine,
   color: [4]f32,
-  position: [3]f32 = {0, 0, 0},
+  rotation: quaternion128 = linalg.QUATERNIONF32_IDENTITY, // Rotation of the light (identity = pointing down -Z)
   cast_shadow := true,
 ) -> (
   handle: resources.NodeHandle,
   ok: bool,
 ) #optional_ok {
-  handle = spawn(engine, position) or_return
+  // Position doesn't matter for directional lights (infinite distance)
+  handle = spawn(engine, {0, 0, 0}) or_return
   node := get_node(engine, handle) or_return
+
+  // Set rotation directly
+  node.transform.rotation = rotation
+  node.transform.is_dirty = true
+
   attachment := world.create_directional_light_attachment(
     handle,
     &engine.rm,
