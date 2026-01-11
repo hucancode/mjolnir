@@ -10,7 +10,7 @@ import "mjolnir/resources"
 import "mjolnir/world"
 import "vendor:glfw"
 
-LIGHT_COUNT :: 10
+LIGHT_COUNT :: 0
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 portal_camera_handle: mjolnir.CameraHandle
@@ -306,66 +306,68 @@ setup :: proc(engine: ^mjolnir.Engine) {
         log.info("created light rotating animation with 5 keyframes")
       }
     }
-    // Create lights as children of the root, arranged in a circle
-    radius: f32 = 10.0
-    for i in 0 ..< LIGHT_COUNT {
-      color := [4]f32 {
-        math.sin(f32(i)),
-        math.cos(f32(i)),
-        math.sin(f32(i)),
-        1.0,
-      }
-      // Calculate fixed local position in a circle
-      angle := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
-      local_x := math.cos(angle) * radius
-      local_z := math.sin(angle) * radius
-      local_y: f32 = 4.0
-      should_make_spot_light := i % 2 != 1
-      if ALL_SPOT_LIGHT {
-        should_make_spot_light = true
-      } else if ALL_POINT_LIGHT {
-        should_make_spot_light = false
-      }
-      light_handle: NodeHandle
-      if should_make_spot_light {
-        light_handle =
-        spawn_child_spot_light(
+    when LIGHT_COUNT > 0 {
+      // Create lights as children of the root, arranged in a circle
+      radius: f32 = 10.0
+      for i in 0 ..< LIGHT_COUNT {
+        color := [4]f32 {
+          math.sin(f32(i)),
+          math.cos(f32(i)),
+          math.sin(f32(i)),
+          1.0,
+        }
+        // Calculate fixed local position in a circle
+        angle := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
+        local_x := math.cos(angle) * radius
+        local_z := math.sin(angle) * radius
+        local_y: f32 = 4.0
+        should_make_spot_light := i % 2 != 1
+        if ALL_SPOT_LIGHT {
+          should_make_spot_light = true
+        } else if ALL_POINT_LIGHT {
+          should_make_spot_light = false
+        }
+        light_handle: NodeHandle
+        if should_make_spot_light {
+          light_handle =
+          spawn_child_spot_light(
+            engine,
+            color,
+            14.0,
+            math.PI * 0.25,
+            lights_root_handle,
+          ) or_continue
+          translate(engine, light_handle, local_x, local_y, local_z)
+          rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+        } else {
+          light_handle =
+          spawn_child_point_light(
+            engine,
+            color,
+            14.0,
+            lights_root_handle,
+          ) or_continue
+          translate(engine, light_handle, local_x, local_y, local_z)
+        }
+        cube_handle := spawn_child(
           engine,
-          color,
-          14.0,
-          math.PI * 0.25,
-          lights_root_handle,
-        ) or_continue
-        translate(engine, light_handle, local_x, local_y, local_z)
-        rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-      } else {
-        light_handle =
-        spawn_child_point_light(
-          engine,
-          color,
-          14.0,
-          lights_root_handle,
-        ) or_continue
-        translate(engine, light_handle, local_x, local_y, local_z)
+          light_handle,
+          attachment = world.MeshAttachment {
+            handle = cube_mesh_handle,
+            material = plain_material_handle,
+            cast_shadow = false,
+          },
+        )
+        scale(engine, cube_handle, 0.05)
+        translate(engine, cube_handle, y = 0.5)
       }
-      cube_handle := spawn_child(
-        engine,
-        light_handle,
-        attachment = world.MeshAttachment {
-          handle = cube_mesh_handle,
-          material = plain_material_handle,
-          cast_shadow = false,
-        },
-      )
-      scale(engine, cube_handle, 0.05)
-      translate(engine, cube_handle, y = 0.5)
     }
     when false {
       dir_light_handle := spawn_directional_light(
         engine,
         {0.2, 0.5, 0.9, 1.0},
-        true,
         {0, 10, 0},
+        true,
       )
       rotate(
         engine,
