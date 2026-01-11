@@ -10,7 +10,7 @@ import "mjolnir/resources"
 import "mjolnir/world"
 import "vendor:glfw"
 
-LIGHT_COUNT :: 0
+LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 portal_camera_handle: mjolnir.CameraHandle
@@ -38,7 +38,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 4.1
     cube_size: f32 = 0.3
-    nx, ny, nz := 20, 1, 20
+    nx, ny, nz := 240, 1, 240
     mat_handle := engine.rm.builtin_materials[resources.Color.CYAN]
     spawn_loop: for x in 0 ..< nx {
       for y in 0 ..< ny {

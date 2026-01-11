@@ -48,8 +48,14 @@ record_compute_commands :: proc(
   for &entry, cam_index in rm.cameras.entries do if entry.active {
     cam := &entry.item
     resources.camera_upload_data(rm, u32(cam_index), frame_index)
-    visibility.build_pyramid(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), frame_index,  rm)// Build pyramid[N]
-    visibility.perform_culling(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), next_frame_index,  {.VISIBLE}, {}, rm)// Write draw_list[N+1]
+    // Only build pyramid if enabled for this camera
+    if cam.enable_depth_pyramid {
+      visibility.build_pyramid(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), frame_index,  rm)// Build pyramid[N]
+    }
+    // Only perform culling if enabled for this camera
+    if cam.enable_culling {
+      visibility.perform_culling(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), next_frame_index,  {.VISIBLE}, {}, rm)// Write draw_list[N+1]
+    }
   }
   for &entry, cam_index in rm.spherical_cameras.entries do if entry.active {
     cam := &entry.item

@@ -284,6 +284,9 @@ update_light_camera :: proc(
         }
         // Set camera transform
         camera_look_at(cam, camera_position, target_position)
+        // Configure directional light shadow camera to use main camera's draw lists
+        // This skips expensive culling compute passes for shadow rendering
+        camera_use_external_draw_list(cam, main_cam)
         log.debugf(
           "light position %v looking at %v with the aabb %v camera p=%v, r=%v",
           camera_position,

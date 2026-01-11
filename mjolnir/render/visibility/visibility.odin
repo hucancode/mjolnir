@@ -278,11 +278,13 @@ render_depth :: proc(
   )
   // Use current frame's draw list (prepared by frame N-1 compute)
   // draw_list[frame_index] was written by Compute N-1, safe to read during Render N
+  // If draw_list_source is set, use external camera's draw lists
+  draw_source := camera.draw_list_source if camera.draw_list_source != nil else camera
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
-    camera.opaque_draw_commands[frame_index].buffer,
+    draw_source.opaque_draw_commands[frame_index].buffer,
     0, // offset
-    camera.opaque_draw_count[frame_index].buffer,
+    draw_source.opaque_draw_count[frame_index].buffer,
     0, // count offset
     self.max_draws,
     u32(size_of(vk.DrawIndexedIndirectCommand)),

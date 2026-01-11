@@ -130,6 +130,7 @@ spherical_camera_upload_data :: proc(
     aspect,
     camera.near,
     camera.far,
+    flip_z_axis = false,  // Vulkan-style: Z in [0, 1]
   )
   dst.position = [4]f32 {
     camera.center[0],

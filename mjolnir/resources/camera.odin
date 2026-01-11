@@ -80,6 +80,9 @@ Camera :: struct {
   extent:                       vk.Extent2D,
   attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]Image2DHandle,
   enabled_passes:               PassTypeSet,
+  // Visibility culling control flags
+  enable_culling:               bool, // If false, skip culling compute pass
+  enable_depth_pyramid:         bool, // If false, skip depth pyramid generation
   // Double-buffered draw lists for lock-free async compute:
   //   - Frame N graphics reads from draw_commands[N-1]
   //   - Frame N compute writes to draw_commands[N]
@@ -96,6 +99,8 @@ Camera :: struct {
   sprite_draw_commands:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
+  // External draw list source (if set, use this camera's draw lists instead of own)
+  draw_list_source:             ^Camera,
   depth_pyramid:                [FRAMES_IN_FLIGHT]DepthPyramid,
   descriptor_set:               [FRAMES_IN_FLIGHT]vk.DescriptorSet,
   depth_reduce_descriptor_sets: [FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
@@ -159,6 +164,10 @@ camera_init :: proc(
   camera.rotation = linalg.to_quaternion(rotation_matrix)
   camera.extent = {width, height}
   camera.enabled_passes = enabled_passes
+  // Enable culling and depth pyramid by default
+  camera.enable_culling = true
+  camera.enable_depth_pyramid = true
+  camera.draw_list_source = nil
   needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
   needs_final :=
     .LIGHTING in enabled_passes ||
@@ -343,6 +352,10 @@ camera_init_orthographic :: proc(
   camera.rotation = linalg.to_quaternion(rotation_matrix)
   camera.extent = {width, height}
   camera.enabled_passes = enabled_passes
+  // Enable culling and depth pyramid by default
+  camera.enable_culling = true
+  camera.enable_depth_pyramid = true
+  camera.draw_list_source = nil
   needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
   needs_final :=
     .LIGHTING in enabled_passes ||
@@ -535,6 +548,7 @@ camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
 camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
+    // Use Odin's perspective - it works with Vulkan
     return linalg.matrix4_perspective(
       proj.fov,
       proj.aspect_ratio,
@@ -542,14 +556,8 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
       proj.far,
     )
   case OrthographicProjection:
-    // return linalg.matrix_ortho3d(
-    //   -proj.width / 2,
-    //   proj.width / 2,
-    //   -proj.height / 2,
-    //   proj.height / 2,
-    //   proj.near,
-    //   proj.far,
-    // )
+    // Vulkan-style orthographic projection
+    // Maps z_view in [-far, -near] to z_ndc in [0, 1]
     hw := proj.width / 2
     hh := proj.height / 2
     return matrix[4, 4]f32{
@@ -1063,4 +1071,16 @@ camera_upload_data :: proc(
     &camera.data[frame_index],
     int(camera_index),
   )
+}
+
+// Configure a camera to use external draw lists from another camera
+// This is useful when you know for sure that 2 cameras will produce identical draw list
+// Disables culling and depth pyramid generation for the target camera
+camera_use_external_draw_list :: proc(
+  target_camera: ^Camera,
+  source_camera: ^Camera,
+) {
+  target_camera.draw_list_source = source_camera
+  target_camera.enable_culling = false
+  target_camera.enable_depth_pyramid = false
 }
