@@ -18,14 +18,14 @@ main :: proc() {
       sync_active_camera_controller(engine)
     }
     nodes = load_gltf(engine, "assets/CesiumMan.glb")
+    q1 := linalg.quaternion_angle_axis(math.PI * -0.4, linalg.VECTOR3F32_X_AXIS)
+    q2 := linalg.quaternion_angle_axis(math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
     handle := spawn_directional_light(
       engine,
       {1.0, 1.0, 1.0, 1.0},
+      rotation = q2 * q1,
       cast_shadow = true,
-      position = {-3.0, 5.0, -2.0},
     )
-    rotate(engine, handle, math.PI * -0.4, linalg.VECTOR3F32_X_AXIS)
-    rotate(engine, handle, math.PI * 0.35)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rotation := delta_time * math.PI * 0.15

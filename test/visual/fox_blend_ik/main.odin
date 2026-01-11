@@ -111,7 +111,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     engine,
     {1.0, 1.0, 1.0, 1.0},
     cast_shadow = true,
-    position = {5.0, 10.0, 5.0},
   )
 
   log.info("Setup complete!")

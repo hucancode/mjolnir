@@ -58,7 +58,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     engine,
     {1.0, 1.0, 1.0, 1.0},
     cast_shadow = true,
-    position = {0.0, 5.0, 0.0},
   )
   // Visualize IK target with a small red cube
   target_pos := [3]f32{0.0, 0.0, 0.9}

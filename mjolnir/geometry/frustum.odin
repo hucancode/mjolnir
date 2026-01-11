@@ -133,3 +133,27 @@ aabb_transform :: proc "contextless" (
   }
   return
 }
+
+frustum_corners_world :: proc(
+  view_matrix: matrix[4, 4]f32,
+  proj_matrix: matrix[4, 4]f32,
+) -> [8][3]f32 {
+  view_proj := proj_matrix * view_matrix
+  inv_view_proj := linalg.matrix4_inverse(view_proj)
+  ndc_corners := [8][4]f32 {
+    {-1, -1, 0, 1},
+    {1, -1, 0, 1},
+    {1, 1, 0, 1},
+    {-1, 1, 0, 1},
+    {-1, -1, 1, 1},
+    {1, -1, 1, 1},
+    {1, 1, 1, 1},
+    {-1, 1, 1, 1},
+  }
+  world_corners: [8][3]f32
+  for ndc, i in ndc_corners {
+    world_homogeneous := inv_view_proj * ndc
+    world_corners[i] = world_homogeneous.xyz / world_homogeneous.w
+  }
+  return world_corners
+}

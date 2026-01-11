@@ -44,17 +44,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
+  q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
+  q2 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_X_AXIS)
   light_handle := mjolnir.spawn_directional_light(
     engine,
     {1.0, 1.0, 1.0, 1.0},
+    rotation = q2 * q1,
     cast_shadow = false,
-    position = {3.0, 5.0, 2.0},
-  )
-  mjolnir.rotate(
-    engine,
-    light_handle,
-    -math.PI * 0.35,
-    linalg.VECTOR3F32_X_AXIS,
   )
 }
 

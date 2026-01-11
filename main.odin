@@ -283,7 +283,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
         return linalg.quaternion_angle_axis(angle, linalg.VECTOR3F32_Y_AXIS)
       }
-
       init_animation_channel(
         engine,
         rotation_clip_handle,
@@ -362,18 +361,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
         translate(engine, cube_handle, y = 0.5)
       }
     }
-    when false {
+    when true {
+      // Create quaternion: 45° rotation around X-axis (tilts light forward)
+      q := linalg.quaternion_angle_axis(math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
       dir_light_handle := spawn_directional_light(
         engine,
         {0.2, 0.5, 0.9, 1.0},
-        {0, 10, 0},
-        true,
-      )
-      rotate(
-        engine,
-        dir_light_handle,
-        math.PI * 0.25,
-        linalg.VECTOR3F32_X_AXIS,
+        rotation = q,
+        cast_shadow = true,
       )
     }
   }
@@ -531,7 +526,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     scale(engine, handle, 0.2)
   }
-  when true {
+  when false {
     debug_sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
     translation := linalg.matrix4_translate_f32({0, 5, 0})
     scale_mat := linalg.matrix4_scale_f32({5, 5, 5})
@@ -554,7 +549,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // add_dof(engine)
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
-  when true {
+  when false {
     portal_camera_handle = create_camera(
       engine,
       512, // width

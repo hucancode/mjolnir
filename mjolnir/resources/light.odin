@@ -123,7 +123,35 @@ update_light_gpu_data :: proc(rm: ^Manager, handle: LightHandle) {
   }
 }
 
-update_light_camera :: proc(rm: ^Manager, frame_index: u32 = 0) {
+@(private)
+compute_light_space_aabb :: proc(
+  world_corners: [8][3]f32,
+  light_view_matrix: matrix[4, 4]f32,
+) -> (
+  min_bounds, max_bounds: [3]f32,
+) {
+  first_light_space := (
+    light_view_matrix *
+    [4]f32{world_corners[0].x, world_corners[0].y, world_corners[0].z, 1.0} \
+  ).xyz
+  min_bounds = first_light_space
+  max_bounds = first_light_space
+  for i in 1 ..< 8 {
+    light_space := (
+      light_view_matrix *
+      [4]f32{world_corners[i].x, world_corners[i].y, world_corners[i].z, 1.0} \
+    ).xyz
+    min_bounds = linalg.min(min_bounds, light_space)
+    max_bounds = linalg.max(max_bounds, light_space)
+  }
+  return min_bounds, max_bounds
+}
+
+update_light_camera :: proc(
+  rm: ^Manager,
+  main_camera_handle: CameraHandle,
+  frame_index: u32 = 0,
+) {
   for handle, light_index in rm.active_lights {
     light := cont.get(rm.lights, handle) or_continue
     // Get light's world transform from node
@@ -146,14 +174,63 @@ update_light_camera :: proc(rm: ^Manager, frame_index: u32 = 0) {
           shadow_map_id = spherical_cam.depth_cube[frame_index].index
         }
       case .DIRECTIONAL:
-        // TODO: Implement directional light later
         cam := cont.get(rm.cameras, light.camera_handle)
-        if cam != nil {
-          camera_position := light_position - light_direction * 50.0 // Far back
-          target_position := light_position
+        if cam == nil do continue
+        main_cam := cont.get(rm.cameras, main_camera_handle)
+        if main_cam == nil {
+          far_dist: f32 = 100.0
+          if ortho, ok := cam.projection.(OrthographicProjection); ok {
+            far_dist = ortho.far
+          }
+          camera_position := light_position - light_direction * (far_dist * 0.5)
+          target_position := light_position + light_direction
           camera_look_at(cam, camera_position, target_position)
           shadow_map_id = cam.attachments[.DEPTH][frame_index].index
+          continue
         }
+        main_view := camera_view_matrix(main_cam)
+        main_proj := camera_projection_matrix(main_cam)
+        frustum_corners := geometry.frustum_corners_world(main_view, main_proj)
+        light_forward := linalg.normalize(light_direction)
+        light_up := linalg.VECTOR3F32_Y_AXIS
+        if math.abs(linalg.dot(light_forward, light_up)) > 0.95 {
+          light_up = linalg.VECTOR3F32_Z_AXIS
+        }
+        light_right := linalg.normalize(linalg.cross(light_up, light_forward))
+        light_up_recalc := linalg.cross(light_forward, light_right)
+        light_view := linalg.matrix4_look_at(
+          [3]f32{0, 0, 0},
+          light_forward,
+          light_up_recalc,
+        )
+        min_bounds, max_bounds := compute_light_space_aabb(frustum_corners, light_view)
+        padding_factor: f32 = 0.05
+        x_range := max_bounds.x - min_bounds.x
+        y_range := max_bounds.y - min_bounds.y
+        z_range := max_bounds.z - min_bounds.z
+        min_bounds.x -= x_range * padding_factor
+        max_bounds.x += x_range * padding_factor
+        min_bounds.y -= y_range * padding_factor
+        max_bounds.y += y_range * padding_factor
+        min_bounds.z -= z_range * padding_factor
+        max_bounds.z += z_range * padding_factor
+        if ortho_proj, ok := &cam.projection.(OrthographicProjection); ok {
+          ortho_proj.width = max_bounds.x - min_bounds.x
+          ortho_proj.height = max_bounds.y - min_bounds.y
+          ortho_proj.near = -max_bounds.z
+          ortho_proj.far = -min_bounds.z
+        }
+        center_x := (min_bounds.x + max_bounds.x) * 0.5
+        center_y := (min_bounds.y + max_bounds.y) * 0.5
+        center_z := (min_bounds.z + max_bounds.z) * 0.5
+        inv_light_view := linalg.matrix4_inverse(light_view)
+        center_world := (
+          inv_light_view * [4]f32{center_x, center_y, center_z, 1.0} \
+        ).xyz
+        camera_position := center_world
+        target_position := center_world + light_forward
+        camera_look_at(cam, camera_position, target_position)
+        shadow_map_id = cam.attachments[.DEPTH][frame_index].index
       case .SPOT:
         cam := cont.get(rm.cameras, light.camera_handle)
         if cam != nil {

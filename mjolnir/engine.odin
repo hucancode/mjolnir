@@ -571,15 +571,10 @@ create_light_camera :: proc(
     light.camera_index = cam_handle.index
     resources.update_light_gpu_data(&engine.rm, light_handle)
     return cam_handle, true
-  case .DIRECTIONAL, .SPOT:
-    // Directional and spot lights use regular cameras
+  case .DIRECTIONAL:
     cam_handle, cam := cont.alloc(&engine.rm.cameras, CameraHandle) or_return
-    // Camera parameters differ by light type
-    fov := f32(math.PI * 0.5) // 90 degrees default
-    if light.type == .SPOT {
-      fov = light.angle_outer * 2.0 // FOV should cover the spot cone
-    }
-    init_result := resources.camera_init(
+    ortho_size := light.radius * 2.0
+    init_result := resources.camera_init_orthographic(
       cam,
       &engine.gctx,
       &engine.rm,
@@ -587,18 +582,18 @@ create_light_camera :: proc(
       resources.SHADOW_MAP_SIZE,
       engine.swapchain.format.format,
       .D32_SFLOAT,
-      {.SHADOW}, // only shadow pass enabled
-      {0, 0, 0}, // position will be updated from light node
-      {0, -1, 0}, // looking down by default
-      fov,
-      light.radius * 0.01, // near plane as 1% of radius
-      light.radius, // far
+      {.SHADOW},
+      {0, 0, 0},
+      {0, 0, -1},
+      ortho_size,
+      ortho_size,
+      1.0,
+      light.radius * 2.0,
     )
     if init_result != .SUCCESS {
       cont.free(&engine.rm.cameras, cam_handle)
       return {}, false
     }
-    // Allocate camera descriptors
     for frame in 0 ..< FRAMES_IN_FLIGHT {
       alloc_result := resources.camera_allocate_descriptors(
         &engine.gctx,
@@ -613,7 +608,46 @@ create_light_camera :: proc(
         return {}, false
       }
     }
-    // Update the light to reference this camera
+    light.camera_handle = cam_handle
+    light.camera_index = cam_handle.index
+    resources.update_light_gpu_data(&engine.rm, light_handle)
+    return cam_handle, true
+  case .SPOT:
+    cam_handle, cam := cont.alloc(&engine.rm.cameras, CameraHandle) or_return
+    fov := light.angle_outer * 2.0
+    init_result := resources.camera_init(
+      cam,
+      &engine.gctx,
+      &engine.rm,
+      resources.SHADOW_MAP_SIZE,
+      resources.SHADOW_MAP_SIZE,
+      engine.swapchain.format.format,
+      .D32_SFLOAT,
+      {.SHADOW},
+      {0, 0, 0},
+      {0, -1, 0},
+      fov,
+      light.radius * 0.01,
+      light.radius,
+    )
+    if init_result != .SUCCESS {
+      cont.free(&engine.rm.cameras, cam_handle)
+      return {}, false
+    }
+    for frame in 0 ..< FRAMES_IN_FLIGHT {
+      alloc_result := resources.camera_allocate_descriptors(
+        &engine.gctx,
+        &engine.rm,
+        cam,
+        u32(frame),
+        &engine.render.visibility.normal_cam_descriptor_layout,
+        &engine.render.visibility.depth_reduce_descriptor_layout,
+      )
+      if alloc_result != .SUCCESS {
+        cont.free(&engine.rm.cameras, cam_handle)
+        return {}, false
+      }
+    }
     light.camera_handle = cam_handle
     light.camera_index = cam_handle.index
     resources.update_light_gpu_data(&engine.rm, light_handle)
@@ -679,7 +713,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   gpu.begin_record(command_buffer) or_return
   world.begin_frame(&self.world, &self.rm, 0.016, nil, self.frame_index)
   update_visibility_node_count(&self.render, &self.world)
-  resources.update_light_camera(&self.rm, self.frame_index)
+  resources.update_light_camera(&self.rm, self.render.main_camera, self.frame_index)
   if self.pre_render_proc != nil {
     self.pre_render_proc(self)
   }

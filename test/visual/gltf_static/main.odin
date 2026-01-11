@@ -22,7 +22,6 @@ main :: proc() {
       engine,
       {1.0, 1.0, 1.0, 1.0},
       cast_shadow = false,
-      position = {-4.0, 6.0, 2.0},
     )
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
