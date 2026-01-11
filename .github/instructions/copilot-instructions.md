@@ -1,11 +1,9 @@
-
 # AGENTS.md
-As a human, you may find this document verbose but that verbosity is intentional, you should read README.md instead.
 This file provides essential guidance for agentic coding assistants working with the project.
 
 # Project Overview
 
-Mjolnir is a minimalistic 3D rendering engine written in Odin, using Vulkan for graphics rendering. It implements a deferred rendering pipeline with features like PBR (Physically Based Rendering), particle systems, shadow mapping, and post-processing effects.
+Mjolnir is a 3D rendering engine written in Odin, using Vulkan for rendering
 
 ## Build Commands
 
@@ -57,7 +55,7 @@ The engine is organized into sub-systems with clear responsibility boundaries:
   + Depends on Resources for data access
 
 ### Rendering Pipeline
-The engine uses a deferred rendering approach with multiple passes:
+The engine uses a deferred rendering with multiple passes:
 
 1. **Visibility Pass** - Calculate visibility with frustum culling and occlusion culling, produce optimized draw lists and depth maps
 2. **G-Buffer Pass** - Geometry data (position, normal, albedo, metallic/roughness, emissive)
@@ -66,8 +64,8 @@ The engine uses a deferred rendering approach with multiple passes:
 5. **Post-Processing** - Effects like bloom, fog, cross-hatching, tone mapping
 
 ### Asset Support
-- **GLTF Loading**: Full support for loading 3D models via `mjolnir/world/gltf.odin`
-- **Texture Loading**: Various formats supported
+- **GLTF Loading**: Support loading 3D models `mjolnir/world/gltf.odin`
+- **OBJ Loading**: Support loading 3D models `mjolnir/world/obj.odin`
 - **Navigation Meshes**: OBJ loading for navmesh geometry
 - **Shader System**: GLSL shaders compiled to SPIR-V (in `mjolnir/shader/`)
   + vertex shader must be `shader.vert` and compiled to `vert.spv`
@@ -82,49 +80,12 @@ The engine uses a deferred rendering approach with multiple passes:
 
 ## Development Notes
 
-### Code Style
-- Minimal comments except for complex mathematical formulas
-- Variable naming:
-  + Long names for wide scope variables
-  + Short names for narrow scope (i,j,k for counters, u,v,x,y,z for coordinates, r,g,b for colors)
-- Use meaningful variable names instead of comments for clarity
-- We use right handed Y up coordinate system
-- Avoid thin wrapper functions, especially getters and setters that does nothing but get/set the variable
-- Don't introduce unnecessary indirections, extra structs
-- Don't store pointer on struct, struct should own all of its members
-
 ### Shader Development
 - Shaders are in `mjolnir/shader/` organized by render pass
 - Use `make shader` to rebuild all shaders. It's fast and incremental, you need not to build individual shader
 - Compute shaders include:
   + Particle system: `compute.comp`, `compact.comp`, `emitter.comp`
   + Culling systems: `culling.comp` for visibility
-
-### Testing
-**Philosophy**: Crash immediately on bad input - don't hide bugs with guards or workarounds. Fix root causes.
-
-**Test Types** (write all three):
-- **Unit**: Isolated functions with hard-coded perfect inputs
-- **Integration**: Components working together with pipeline-generated inputs
-- **End-to-End**: Full user workflow from start to final output
-
-**Requirements**:
-- Test in complete isolation with hard-coded inputs that verify specific behaviors
-- Each test confirms ONE aspect of functionality (no duplicates)
-- Verify exact outputs (allow floating-point precision tolerance)
-- Fulfill all pre-conditions before testing
-- Cover edge cases (boundaries, empty, invalid) AND normal cases
-
-**Avoid Trivial Tests**:
-- Only checking "something > 0" instead of exact values
-- Only testing creation/destruction without business logic
-- Only empty inputs producing empty outputs
-- Lacking diversity in test cases
-
-**Anti-patterns**:
-- Don't disable tests to get more passing rates
-- Don't add guards and babysitter to hide failing tests
-- Don't duplicate production code logic in tests - just call and verify, no implementation should exist in tests.
 
 ### Common File Locations
 
@@ -146,7 +107,6 @@ The engine uses a deferred rendering approach with multiple passes:
 
 ### Debugging Tips
 
-- Color blind consideration: Avoid using red/green color distinctions for debugging (developer has protan color blindness)
 - To debug visual issues, hardcode frame count limit in `engine.odin` `run` procedure to stop after few frames and examine logs
 - To slow down the engine to avoid excessive logs. Set FPS in `engine.odin` to low value like 4 or 2.
 - To capture visual result, run `make capture`, then analyze the newly created `screenshot.png`
@@ -157,56 +117,3 @@ The engine uses a deferred rendering approach with multiple passes:
 - **REQUIRE_GEOMETRY_SHADER**: Compile with geometry shader support (required for spherical shadow mapping)
 - **USE_PARALLEL_UPDATE**: Enable dedicated update thread for parallel scene updates
 - **FRAME_LIMIT**: limit renderer to only render a few frames, useful for collecting logs from render procedure. without this logs would be super noisy
-
-# Odin Language Quick Reference
-
-**Notes**: `odin check` only works on root project directory. `context` is a reserved keyword. Package declaration must be at the top of files.
-
-```odin
-// Variable declaration & inference
-a: int = 42
-b := a + 10  // type inferred
-arr := [4]f32{1.0, 2.0, 3.0, 4.0}
-
-// Array swizzling
-speed: [3]f32
-speed.xy  // 2D access
-color: [4]f32
-color.rgb  // RGB access
-
-// Error propagation
-do_all :: proc() -> vk.Result {
-    do_a() or_return  // propagates errors
-    do_b() or_return
-    return .SUCCESS
-}
-
-// Same-folder access (no imports needed)
-// Functions and types in same folder are automatically accessible
-
-// Slice to pointer
-my_slice := [4]int{1, 2, 3, 4}
-my_function(len(my_slice), raw_data(my_slice))
-
-// Parameters (immutable by default, pass ^T to modify)
-my_function :: proc(data: MyStruct) {
-    // data.a = 42  // ERROR: immutable
-}
-my_function2 :: proc(data: ^MyStruct) {
-    data.a = 42  // OK: modifies original
-}
-
-// Loops & ranges
-for i in 0..<len(arr) {}        // exclusive
-for i in 0..=len(arr)-1 {}      // inclusive
-for v, i in arr {}              // value + index
-for v in arr {}                 // value only
-for v in arr do log.info(v)     // single statement
-
-// Slice types
-dynamic := make([dynamic]f32, 0)  // growable
-defer delete(dynamic)
-fixed := make([]f32, 10)          // runtime size
-defer delete(fixed)
-static := [10]f32{}               // compile-time (fastest)
-```
