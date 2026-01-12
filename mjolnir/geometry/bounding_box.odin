@@ -170,26 +170,16 @@ obb_axes :: #force_inline proc "contextless" (obb: Obb) -> (x, y, z: [3]f32) {
   return mat[0], mat[1], mat[2]
 }
 
-// Convert OBB to AABB by computing bounds of all 8 corners
+// Convert OBB to AABB
 obb_to_aabb :: proc "contextless" (obb: Obb) -> Aabb {
-  corners := [8][3]f32 {
-    {-obb.half_extents.x, -obb.half_extents.y, -obb.half_extents.z},
-    {obb.half_extents.x, -obb.half_extents.y, -obb.half_extents.z},
-    {-obb.half_extents.x, obb.half_extents.y, -obb.half_extents.z},
-    {obb.half_extents.x, obb.half_extents.y, -obb.half_extents.z},
-    {-obb.half_extents.x, -obb.half_extents.y, obb.half_extents.z},
-    {obb.half_extents.x, -obb.half_extents.y, obb.half_extents.z},
-    {-obb.half_extents.x, obb.half_extents.y, obb.half_extents.z},
-    {obb.half_extents.x, obb.half_extents.y, obb.half_extents.z},
+  r := linalg.matrix3_from_quaternion(obb.rotation)
+  h := obb.half_extents
+  e := [3]f32{
+    linalg.dot(linalg.abs(r[0]), h),
+    linalg.dot(linalg.abs(r[1]), h),
+    linalg.dot(linalg.abs(r[2]), h),
   }
-  aabb := AABB_UNDEFINED
-  for corner in corners {
-    rotated := linalg.mul(obb.rotation, corner)
-    world_corner := obb.center + rotated
-    aabb.min = linalg.min(aabb.min, world_corner)
-    aabb.max = linalg.max(aabb.max, world_corner)
-  }
-  return aabb
+  return Aabb{min = obb.center - e, max = obb.center + e}
 }
 
 // Find closest point on OBB to a given point
