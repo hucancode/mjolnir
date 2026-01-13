@@ -312,6 +312,15 @@ sample_layers :: proc(
       rotation := linalg.normalize(accumulated_rotations[bone_idx])
       scale := accumulated_scales[bone_idx] / weight
       local_matrix = linalg.matrix4_from_trs(position, rotation, scale)
+    } else {
+      // No FK animation - use bind pose as fallback
+      // inverse_bind_matrix transforms from model space to bone space
+      // So bind_matrix gives the bone's world transform in bind pose
+      bind_world_matrix := linalg.matrix4_inverse(bone.inverse_bind_matrix)
+      // Compute local transform: local = inverse(parent_world) * child_world
+      // entry.parent_transform is parent's world in bind pose (since all use bind)
+      parent_inv := linalg.matrix4_inverse(entry.parent_transform)
+      local_matrix = parent_inv * bind_world_matrix
     }
 
     // Compute world transform
@@ -347,6 +356,7 @@ sample_layers :: proc(
           delta_time,
           world_transforms[:],
           layer.weight,
+          skin.bone_lengths,
         )
       case animation.PathModifier:
         animation.path_modifier_update(

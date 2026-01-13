@@ -46,33 +46,42 @@ tail_modifier_update :: proc(
 	delta_time: f32,
 	world_transforms: []BoneTransform,
 	layer_weight: f32,
+	bone_lengths: []f32,
 ) {
 	chain_length := len(state.bone_indices)
 	if chain_length < 2 do return
 
+	// Use a consistent rotation axis for the wave (perpendicular to initial bone chain direction)
+	// This prevents bones from counter-rotating when parents move
+	root_idx := state.bone_indices[0]
+	first_child_idx := state.bone_indices[1]
+
+	// Compute initial chain direction from bind pose
+	initial_direction := linalg.normalize(
+		world_transforms[first_child_idx].world_position -
+		world_transforms[root_idx].world_position,
+	)
+
+	world_up := [3]f32{0, 1, 0}
+	consistent_rotation_axis := linalg.normalize(linalg.cross(initial_direction, world_up))
+	if linalg.length(consistent_rotation_axis) < 0.001 {
+		consistent_rotation_axis = [3]f32{1, 0, 0}
+	}
+
+	// Apply rotations and propagate positions down the chain
 	for i in 1 ..< chain_length {
 		bone_idx := state.bone_indices[i]
+		parent_idx := state.bone_indices[i - 1]
 
+		// Compute wave rotation for this bone
 		phase := state.accumulated_time * params.frequency * 2 * math.PI
 		phase += f32(i) * params.propagation_speed
 
 		damped_amplitude := params.amplitude * math.pow(params.damping, f32(i))
-
 		angle_offset := damped_amplitude * math.sin(phase)
 
-		parent_idx := state.bone_indices[i - 1]
-		bone_direction := linalg.normalize(
-			world_transforms[bone_idx].world_position -
-			world_transforms[parent_idx].world_position,
-		)
-
-		world_up := [3]f32{0, 1, 0}
-		rotation_axis := linalg.normalize(linalg.cross(bone_direction, world_up))
-		if linalg.length(rotation_axis) < 0.001 {
-			rotation_axis = [3]f32{1, 0, 0}
-		}
-
-		delta_rotation := linalg.quaternion_angle_axis(angle_offset, rotation_axis)
+		// Apply rotation around consistent axis (not recomputed per-bone)
+		delta_rotation := linalg.quaternion_angle_axis(angle_offset, consistent_rotation_axis)
 		fk_rotation := world_transforms[bone_idx].world_rotation
 		procedural_rotation := delta_rotation * fk_rotation
 
@@ -82,6 +91,21 @@ tail_modifier_update :: proc(
 			layer_weight,
 		)
 
+		// Update this bone's position based on parent's current orientation
+		// This makes children follow parent's rotation smoothly
+		if bone_lengths != nil {
+			bone_length := bone_lengths[bone_idx]
+			parent_up := linalg.normalize(world_transforms[parent_idx].world_matrix[1].xyz)
+			new_position := world_transforms[parent_idx].world_position + parent_up * bone_length
+
+			world_transforms[bone_idx].world_position = linalg.lerp(
+				world_transforms[bone_idx].world_position,
+				new_position,
+				layer_weight,
+			)
+		}
+
+		// Update world matrix
 		scale := extract_scale(world_transforms[bone_idx].world_matrix)
 		world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
 			world_transforms[bone_idx].world_position,
