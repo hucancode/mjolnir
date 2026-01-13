@@ -434,12 +434,11 @@ add_tail_modifier_layer :: proc(
   node_handle: resources.NodeHandle,
   root_bone_name: string,
   tail_length: u32,
-  frequency: f32 = 1.0,
-  amplitude: f32 = 0.3,
   propagation_speed: f32 = 0.5,
   damping: f32 = 0.9,
   weight: f32 = 1.0,
   layer_index: int = -1,
+  reverse_chain: bool = false, // Set true if root is at tail end (reverses to head→tail)
 ) -> bool {
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
@@ -452,6 +451,22 @@ add_tail_modifier_layer :: proc(
 
   bone_indices := resolve_bone_chain(mesh, root_bone_name, tail_length) or_return
 
+  // Reverse the chain if needed (when root is at tail, we want head→tail order)
+  if reverse_chain {
+    slice.reverse(bone_indices)
+  }
+
+  chain_length := len(bone_indices)
+
+  // Initialize per-bone state for tail animation
+  bones := make([]anim.TailBone, chain_length)
+  for i in 0 ..< chain_length {
+    bones[i] = anim.TailBone {
+      target_tip_world = {0, 0, 0},
+      is_initialized   = false,
+    }
+  }
+
   layer := anim.Layer {
     weight = weight,
     data   = anim.ProceduralLayer {
@@ -459,10 +474,9 @@ add_tail_modifier_layer :: proc(
         bone_indices = bone_indices,
         accumulated_time = 0,
         modifier = anim.TailModifier {
-          frequency = frequency,
-          amplitude = amplitude,
           propagation_speed = propagation_speed,
           damping = damping,
+          bones = bones,
         },
       },
     },
@@ -659,8 +673,6 @@ set_tail_modifier_params :: proc(
   world: ^World,
   node_handle: resources.NodeHandle,
   layer_index: int,
-  frequency: Maybe(f32) = nil,
-  amplitude: Maybe(f32) = nil,
   propagation_speed: Maybe(f32) = nil,
   damping: Maybe(f32) = nil,
 ) -> bool {
@@ -677,12 +689,6 @@ set_tail_modifier_params :: proc(
   case anim.ProceduralLayer:
     switch &modifier in layer_data.state.modifier {
     case anim.TailModifier:
-      if freq, has_freq := frequency.?; has_freq {
-        modifier.frequency = freq
-      }
-      if amp, has_amp := amplitude.?; has_amp {
-        modifier.amplitude = amp
-      }
       if prop, has_prop := propagation_speed.?; has_prop {
         modifier.propagation_speed = prop
       }
@@ -690,7 +696,7 @@ set_tail_modifier_params :: proc(
         modifier.damping = damp
       }
       return true
-    case anim.PathModifier, anim.SpiderLegModifier:
+    case anim.PathModifier, anim.SpiderLegModifier, anim.SingleBoneRotationModifier:
       return false
     }
   case anim.FKLayer, anim.IKLayer:
@@ -754,7 +760,7 @@ set_path_modifier_params :: proc(
         modifier.loop = lp
       }
       return true
-    case anim.TailModifier, anim.SpiderLegModifier:
+    case anim.TailModifier, anim.SpiderLegModifier, anim.SingleBoneRotationModifier:
       return false
     }
   case anim.FKLayer, anim.IKLayer:
@@ -762,4 +768,64 @@ set_path_modifier_params :: proc(
   }
 
   return false
+}
+
+add_single_bone_rotation_modifier_layer :: proc(
+  world: ^World,
+  rm: ^resources.Manager,
+  node_handle: resources.NodeHandle,
+  bone_name: string,
+  weight: f32 = 1.0,
+  layer_index: int = -1,
+) -> (modifier: ^anim.SingleBoneRotationModifier, ok: bool) {
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
+  if !has_mesh do return nil, false
+
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return nil, false
+
+  mesh := cont.get(rm.meshes, mesh_attachment.handle) or_return
+
+  // Resolve bone name to index
+  bone_idx, found := resources.find_bone_by_name(mesh, bone_name)
+  if !found do return nil, false
+
+  // Initialize rotation to identity
+  identity := quaternion128{}
+  identity.w = 1
+
+  layer := anim.Layer {
+    weight = weight,
+    data   = anim.ProceduralLayer {
+      state = anim.ProceduralState {
+        bone_indices     = nil, // Single bone modifier doesn't use this array
+        accumulated_time = 0,
+        modifier         = anim.SingleBoneRotationModifier {
+          bone_index = bone_idx,
+          rotation   = identity,
+        },
+      },
+    },
+  }
+
+  if layer_index < 0 || layer_index >= len(skinning.layers) {
+    append(&skinning.layers, layer)
+  } else {
+    skinning.layers[layer_index] = layer
+  }
+
+  register_animatable_node(world, node_handle)
+
+  // Return pointer to the modifier so caller can update rotation
+  layer_ptr := &skinning.layers[len(skinning.layers) - 1] if layer_index < 0 else &skinning.layers[layer_index]
+  #partial switch &layer_data in layer_ptr.data {
+  case anim.ProceduralLayer:
+    #partial switch &mod in layer_data.state.modifier {
+    case anim.SingleBoneRotationModifier:
+      return &mod, true
+    }
+  }
+
+  return nil, false
 }

@@ -3,11 +3,17 @@ package animation
 import "core:math"
 import "core:math/linalg"
 
+// Per-bone state for tail animation
+// Tracks tip position to create follow-through drag effect
+TailBone :: struct {
+	target_tip_world: [3]f32, // Where the tip wants to be in world space (has inertia)
+	is_initialized:   bool,   // Flag to initialize on first frame
+}
+
 TailModifier :: struct {
-	frequency:         f32,
-	amplitude:         f32,
-	propagation_speed: f32,
-	damping:           f32,
+	propagation_speed: f32, // How fast rotation influence travels down the chain (0-1)
+	damping:           f32, // How quickly bones return to rest pose (0-1)
+	bones:             []TailBone, // Per-bone state
 }
 
 PathModifier :: struct {
@@ -24,10 +30,18 @@ SpiderLegModifier :: struct {
 	chain_lengths: []u32,
 }
 
+// Simple modifier to directly set a single bone's rotation
+// Useful for driving animations or testing
+SingleBoneRotationModifier :: struct {
+	bone_index: u32,         // Index of the bone to modify
+	rotation:   quaternion128, // Local rotation to apply
+}
+
 Modifier :: union {
 	TailModifier,
 	PathModifier,
 	SpiderLegModifier,
+	SingleBoneRotationModifier,
 }
 
 ProceduralState :: struct {
@@ -42,7 +56,7 @@ ProceduralLayer :: struct {
 
 tail_modifier_update :: proc(
 	state: ^ProceduralState,
-	params: TailModifier,
+	params: ^TailModifier,
 	delta_time: f32,
 	world_transforms: []BoneTransform,
 	layer_weight: f32,
@@ -50,57 +64,67 @@ tail_modifier_update :: proc(
 ) {
 	chain_length := len(state.bone_indices)
 	if chain_length < 2 do return
+	if len(params.bones) != chain_length do return
+	if bone_lengths == nil do return
 
-	// Use a consistent rotation axis for the wave (perpendicular to initial bone chain direction)
-	// This prevents bones from counter-rotating when parents move
-	root_idx := state.bone_indices[0]
-	first_child_idx := state.bone_indices[1]
-
-	// Compute initial chain direction from bind pose
-	initial_direction := linalg.normalize(
-		world_transforms[first_child_idx].world_position -
-		world_transforms[root_idx].world_position,
-	)
-
-	world_up := [3]f32{0, 1, 0}
-	consistent_rotation_axis := linalg.normalize(linalg.cross(initial_direction, world_up))
-	if linalg.length(consistent_rotation_axis) < 0.001 {
-		consistent_rotation_axis = [3]f32{1, 0, 0}
-	}
-
-	// Apply rotations and propagate positions down the chain
+	// Process each bone (starting from bone[1], skip root at bone[0])
+	// Algorithm:
+	// 1. Track where the bone's tip was in world space (target_tip_world)
+	// 2. When bone root moves (due to parent FK), rotate bone to point at remembered tip position
+	// 3. Damping: over time, move target_tip toward rest pose tip position
 	for i in 1 ..< chain_length {
 		bone_idx := state.bone_indices[i]
 		parent_idx := state.bone_indices[i - 1]
+		bone_state := &params.bones[i]
 
-		// Compute wave rotation for this bone
-		phase := state.accumulated_time * params.frequency * 2 * math.PI
-		phase += f32(i) * params.propagation_speed
+		bone_length := bone_lengths[bone_idx]
 
-		damped_amplitude := params.amplitude * math.pow(params.damping, f32(i))
-		angle_offset := damped_amplitude * math.sin(phase)
-
-		// Apply rotation around consistent axis (not recomputed per-bone)
-		delta_rotation := linalg.quaternion_angle_axis(angle_offset, consistent_rotation_axis)
+		// Get FK rotation before we modify it
+		fk_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
 		fk_rotation := world_transforms[bone_idx].world_rotation
-		procedural_rotation := delta_rotation * fk_rotation
 
-		world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
-			fk_rotation,
-			procedural_rotation,
+		// Update position FIRST: child's root follows parent's tip
+		// Note: bone_lengths[bone_idx] is the distance from parent to this child bone
+		parent_up := linalg.normalize(world_transforms[parent_idx].world_matrix[1].xyz)
+		new_position := world_transforms[parent_idx].world_position + parent_up * bone_length
+
+		world_transforms[bone_idx].world_position = linalg.lerp(
+			world_transforms[bone_idx].world_position,
+			new_position,
 			layer_weight,
 		)
 
-		// Update this bone's position based on parent's current orientation
-		// This makes children follow parent's rotation smoothly
-		if bone_lengths != nil {
-			bone_length := bone_lengths[bone_idx]
-			parent_up := linalg.normalize(world_transforms[parent_idx].world_matrix[1].xyz)
-			new_position := world_transforms[parent_idx].world_position + parent_up * bone_length
+		bone_world_pos := world_transforms[bone_idx].world_position
 
-			world_transforms[bone_idx].world_position = linalg.lerp(
-				world_transforms[bone_idx].world_position,
-				new_position,
+		// Calculate FK rest tip from the UPDATED position
+		rest_tip := bone_world_pos + fk_up * bone_length
+
+		// Initialize target tip position on first frame
+		if !bone_state.is_initialized {
+			bone_state.target_tip_world = rest_tip
+			bone_state.is_initialized = true
+		}
+
+		// Calculate desired direction to point at target tip
+		tip_direction := bone_state.target_tip_world - bone_world_pos
+		distance := linalg.length(tip_direction)
+
+		// Only apply rotation if we have a valid direction
+		if distance > 0.001 {
+			desired_direction := tip_direction / distance
+
+			// Calculate rotation needed to point at target
+			target_rotation := linalg.quaternion_between_two_vector3(
+				fk_up,
+				desired_direction,
+			)
+
+			// Apply rotation to world transform
+			procedural_rotation := target_rotation * fk_rotation
+
+			world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+				fk_rotation,
+				procedural_rotation,
 				layer_weight,
 			)
 		}
@@ -111,6 +135,21 @@ tail_modifier_update :: proc(
 			world_transforms[bone_idx].world_position,
 			world_transforms[bone_idx].world_rotation,
 			scale,
+		)
+
+		// Calculate where bone now points after our rotation
+		current_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
+		current_tip := bone_world_pos + current_up * bone_length
+
+		// Update target for next frame: blend current position with FK rest position
+		// This creates inertia (follows current) and damping (returns to FK rest)
+		// damping close to 1.0 = slow return to rest (more inertia)
+		// damping close to 0.0 = fast return to rest (less inertia)
+		damping_factor := 1.0 - math.pow(params.damping, delta_time)
+		bone_state.target_tip_world = linalg.lerp(
+			current_tip,  // Where we point now (inertia)
+			rest_tip,     // Where FK wants us (damping)
+			damping_factor,
 		)
 	}
 }
@@ -324,6 +363,35 @@ spider_leg_modifier_update :: proc(
 			)
 		}
 	}
+}
+
+single_bone_rotation_modifier_update :: proc(
+	state: ^ProceduralState,
+	params: ^SingleBoneRotationModifier,
+	delta_time: f32,
+	world_transforms: []BoneTransform,
+	layer_weight: f32,
+	bone_lengths: []f32,
+) {
+	bone_idx := params.bone_index
+
+	// Apply the rotation as a local rotation override
+	fk_rotation := world_transforms[bone_idx].world_rotation
+	procedural_rotation := params.rotation * fk_rotation
+
+	world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+		fk_rotation,
+		procedural_rotation,
+		layer_weight,
+	)
+
+	// Update world matrix
+	scale := extract_scale(world_transforms[bone_idx].world_matrix)
+	world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
+		world_transforms[bone_idx].world_position,
+		world_transforms[bone_idx].world_rotation,
+		scale,
+	)
 }
 
 extract_scale :: proc(m: matrix[4, 4]f32) -> [3]f32 {

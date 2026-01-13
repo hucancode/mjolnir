@@ -3,6 +3,7 @@ package main
 import "../../../mjolnir"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
+import anim "../../../mjolnir/animation"
 import cont "../../../mjolnir/containers"
 import "../../../mjolnir/gpu"
 import "core:log"
@@ -12,6 +13,9 @@ import "core:slice"
 
 root_nodes: [dynamic]resources.NodeHandle
 markers: [dynamic]resources.NodeHandle
+animation_time: f32 = 0
+snake_child_node: resources.NodeHandle
+root_bone_modifier: ^anim.SingleBoneRotationModifier
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -26,17 +30,38 @@ main :: proc() {
     for handle in root_nodes {
       node := get_node(engine, handle) or_continue
       for child in node.children {
+        snake_child_node = child // Store for animation
+
+        // Add single bone rotation modifier to control the root bone
+        root_bone_modifier = world.add_single_bone_rotation_modifier_layer(
+          &engine.world,
+          &engine.rm,
+          child,
+          bone_name = "root",
+          weight = 1.0,
+          layer_index = -1,
+        ) or_else nil
+        if root_bone_modifier != nil {
+          log.infof("Added root bone rotation modifier")
+        }
+
+        // Add tail modifier layer (reacts to root bone rotation)
+        // propagation_speed: how strongly bones react to parent changes (0-1)
+        //   Higher = stronger immediate reaction to parent
+        // damping: how quickly bones return to rest pose (0-1, higher = slower)
+        //   Higher = slower return, longer wave propagation
+        // reverse_chain: if true, reverses bone order so bone[0] is driver
+        //   Use true when root bone is at tail end (need head→tail order)
         success := world.add_tail_modifier_layer(
           &engine.world,
           &engine.rm,
           child,
           root_bone_name = "root",
           tail_length = 10,
-          frequency = 0.8,
-          amplitude = 1.4,
-          propagation_speed = 0.5,
-          damping = 0.5,
+          propagation_speed = 0.85, // Strong counter-rotation creates visible drag
+          damping = 0.1, // Slow return creates wave propagation
           weight = 1.0,
+          reverse_chain = false,
         )
         if success {
           log.infof("Added tail modifier to node")
@@ -72,6 +97,11 @@ main :: proc() {
 
         log.infof("Found skinned mesh with %d bones", len(skin.bones))
 
+        // Debug: print bone names to understand hierarchy
+        for bone, idx in skin.bones {
+          log.infof("Bone[%d]: name='%s'", idx, bone.name)
+        }
+
         // Create one marker per bone
         for i in 0 ..< len(skin.bones) {
           marker := spawn(
@@ -81,7 +111,7 @@ main :: proc() {
               material = mat,
             },
           )
-          scale(engine, marker, 0.08)
+          scale(engine, marker, 0.2)
           append(&markers, marker)
           log.infof("Created marker %d at default position", i)
         }
@@ -100,20 +130,18 @@ main :: proc() {
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     using mjolnir
-    rotation := delta_time * math.PI * 0.1
-    for handle in root_nodes {
-      mjolnir.rotate_by(engine, handle, rotation)
-    }
 
-    // Update marker positions to match bone transforms
-    if engine.frame_index < 5 {
-      log.infof("Frame %d: Starting marker update, total markers: %d", engine.frame_index, len(markers))
+    // Animate the root bone directly via the single bone rotation modifier
+    // This creates motion that the tail modifier will react to
+    animation_time += delta_time
+    frequency :: 0.5 // Hz - oscillation speed
+    amplitude :: math.PI * 0.35 // Radians - swing angle
+    target_angle := amplitude * math.sin(animation_time * frequency * 2 * math.PI)
 
-      // Debug: Print first few marker positions
-      for i in 0 ..< min(5, len(markers)) {
-        marker := get_node(engine, markers[i]) or_continue
-        log.infof("  Marker %d position: %v", i, marker.transform.position)
-      }
+    // Update the root bone rotation via the modifier
+    if root_bone_modifier != nil {
+      axis := linalg.Vector3f32{0, 1, 0}
+      root_bone_modifier.rotation = linalg.quaternion_angle_axis_f32(target_angle, axis)
     }
 
     marker_idx := 0
@@ -121,24 +149,12 @@ main :: proc() {
       node := get_node(engine, handle) or_continue
       for child in node.children {
         child_node := get_node(engine, child) or_continue
-
-        if engine.frame_index < 5 {
-          log.infof("Frame %d: Processing child node, attachment type: %v", engine.frame_index, child_node.attachment)
-        }
-
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
-          if engine.frame_index < 5 {
-            log.warnf("Frame %d: Child has no mesh attachment in update (type is %v)", engine.frame_index, child_node.attachment)
-          }
           continue
         }
-
         skinning, has_skinning := mesh_attachment.skinning.?
         if !has_skinning {
-          if engine.frame_index < 5 {
-            log.warnf("Frame %d: No skinning data in mesh_attachment", engine.frame_index)
-          }
           continue
         }
 
@@ -149,66 +165,28 @@ main :: proc() {
         frame_index := engine.frame_index
         bone_buffer := &engine.rm.bone_buffer.buffers[frame_index]
         if bone_buffer.mapped == nil {
-          if engine.frame_index < 5 {
-            log.warnf("Frame %d: Bone buffer not mapped", engine.frame_index)
-          }
           continue
         }
-
         bone_count := len(skin.bones)
         if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF {
-          if engine.frame_index < 5 {
-            log.warnf("Frame %d: Invalid bone matrix buffer offset", engine.frame_index)
-          }
           continue
         }
-
-        if engine.frame_index < 5 {
-          log.infof("Frame %d: Updating %d markers from bone data", engine.frame_index, bone_count)
-        }
-
-        // Get bone matrices using gpu.get
         matrices_ptr := gpu.get(bone_buffer, skinning.bone_matrix_buffer_offset)
         bone_matrices := slice.from_ptr(matrices_ptr, bone_count)
-
-        // Read bone transforms
         for i in 0 ..< bone_count {
           if marker_idx >= len(markers) do break
-
           // Read skinning matrix from GPU buffer
           skinning_matrix := bone_matrices[i]
-
-          if engine.frame_index < 3 && i < 3 {
-            log.infof("Frame %d Bone %d: skinning_matrix[3] = %v", engine.frame_index, i, skinning_matrix[3])
-            log.infof("Frame %d Bone %d: inverse_bind[3] = %v", engine.frame_index, i, skin.bones[i].inverse_bind_matrix[3])
-          }
-
           // Convert skinning matrix to world matrix
           // skinning_matrix = world_matrix * inverse_bind_matrix
           // world_matrix = skinning_matrix * bind_matrix
           bind_matrix := linalg.matrix4_inverse(skin.bones[i].inverse_bind_matrix)
-
-          if engine.frame_index < 3 && i < 3 {
-            log.infof("Frame %d Bone %d: bind_matrix[3] = %v", engine.frame_index, i, bind_matrix[3])
-          }
-
           bone_local_world := skinning_matrix * bind_matrix
-
-          if engine.frame_index < 3 && i < 3 {
-            log.infof("Frame %d Bone %d: bone_local_world[3] = %v", engine.frame_index, i, bone_local_world[3])
-          }
-
           // Apply node's world transform
           node_world := child_node.transform.world_matrix
           bone_world := node_world * bone_local_world
-
           bone_pos := bone_world[3].xyz
           bone_rot := linalg.to_quaternion(bone_world)
-
-          if engine.frame_index < 3 && i < 3 {
-            log.infof("Frame %d Bone %d: final pos = %v", engine.frame_index, i, bone_pos)
-          }
-
           // Update marker transform
           marker := get_node(engine, markers[marker_idx]) or_continue
           marker.transform.position = bone_pos

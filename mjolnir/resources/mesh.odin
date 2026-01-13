@@ -352,7 +352,7 @@ sample_layers :: proc(
       case animation.TailModifier:
         animation.tail_modifier_update(
           &layer_data.state,
-          modifier,
+          &modifier,
           delta_time,
           world_transforms[:],
           layer.weight,
@@ -376,11 +376,28 @@ sample_layers :: proc(
           layer.weight,
           skin.bone_lengths,
         )
+      case animation.SingleBoneRotationModifier:
+        animation.single_bone_rotation_modifier_update(
+          &layer_data.state,
+          &modifier,
+          delta_time,
+          world_transforms[:],
+          layer.weight,
+          skin.bone_lengths,
+        )
       }
 
       // Track affected bones for child update
-      for bone_idx in layer_data.state.bone_indices {
-        procedural_affected_bones[bone_idx] = true
+      if layer_data.state.bone_indices != nil {
+        for bone_idx in layer_data.state.bone_indices {
+          procedural_affected_bones[bone_idx] = true
+        }
+      } else {
+        // SingleBoneRotationModifier stores bone_index directly
+        #partial switch &modifier in layer_data.state.modifier {
+        case animation.SingleBoneRotationModifier:
+          procedural_affected_bones[modifier.bone_index] = true
+        }
       }
     case animation.FKLayer, animation.IKLayer:
       continue
