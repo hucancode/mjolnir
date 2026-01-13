@@ -486,6 +486,7 @@ add_path_modifier_layer :: proc(
   tail_length: u32,
   path: [][3]f32,
   offset: f32 = 0.0,
+  length: f32 = 0.0,  // Length of path segment to fit skeleton (0 = auto-calculate from offset to end)
   speed: f32 = 0.0,
   loop: bool = false,
   weight: f32 = 1.0,
@@ -526,6 +527,7 @@ add_path_modifier_layer :: proc(
         modifier = anim.PathModifier {
           spline = spline,
           offset = offset,
+          length = length,
           speed = speed,
           loop = loop,
         },
@@ -704,6 +706,7 @@ set_path_modifier_params :: proc(
   layer_index: int,
   path: Maybe([][3]f32) = nil,
   offset: Maybe(f32) = nil,
+  length: Maybe(f32) = nil,
   speed: Maybe(f32) = nil,
   loop: Maybe(bool) = nil,
 ) -> bool {
@@ -740,6 +743,9 @@ set_path_modifier_params :: proc(
       }
       if off, has_off := offset.?; has_off {
         modifier.offset = off
+      }
+      if len_val, has_len := length.?; has_len {
+        modifier.length = len_val
       }
       if spd, has_spd := speed.?; has_spd {
         modifier.speed = spd

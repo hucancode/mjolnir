@@ -328,6 +328,11 @@ sample_layers :: proc(
   }
 
   // Apply procedural modifiers
+  procedural_affected_bones := make(
+    map[u32]bool,
+    bone_count,
+    context.temp_allocator,
+  )
   for &layer in layers {
     if layer.weight <= 0 do continue
     switch &layer_data in layer.data {
@@ -362,8 +367,57 @@ sample_layers :: proc(
           skin.bone_lengths,
         )
       }
+
+      // Track affected bones for child update
+      for bone_idx in layer_data.state.bone_indices {
+        procedural_affected_bones[bone_idx] = true
+      }
     case animation.FKLayer, animation.IKLayer:
       continue
+    }
+  }
+
+  // Update child bones after procedural modifiers
+  if len(procedural_affected_bones) > 0 {
+    update_stack := make(
+      [dynamic]TraverseEntry,
+      0,
+      bone_count,
+      context.temp_allocator,
+    )
+    for bone_idx in procedural_affected_bones {
+      bone := &skin.bones[bone_idx]
+      parent_world := world_transforms[bone_idx].world_matrix
+      for child_idx in bone.children {
+        if child_idx in procedural_affected_bones do continue
+        append(&update_stack, TraverseEntry{parent_world, child_idx})
+      }
+    }
+
+    for len(update_stack) > 0 {
+      entry := pop(&update_stack)
+      bone := &skin.bones[entry.bone_index]
+      bone_idx := entry.bone_index
+
+      // Get normalized local transform
+      local_matrix := linalg.MATRIX4F32_IDENTITY
+      if accumulated_weights[bone_idx] > 0 {
+        weight := accumulated_weights[bone_idx]
+        position := accumulated_positions[bone_idx] / weight
+        rotation := linalg.normalize(accumulated_rotations[bone_idx])
+        scale := accumulated_scales[bone_idx] / weight
+        local_matrix = linalg.matrix4_from_trs(position, rotation, scale)
+      }
+      world_matrix := entry.parent_transform * local_matrix
+      world_transforms[bone_idx].world_matrix = world_matrix
+      world_transforms[bone_idx].world_position = world_matrix[3].xyz
+      world_transforms[bone_idx].world_rotation = linalg.to_quaternion(
+        world_matrix,
+      )
+
+      for child_idx in bone.children {
+        append(&update_stack, TraverseEntry{world_matrix, child_idx})
+      }
     }
   }
 

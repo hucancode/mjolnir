@@ -257,14 +257,14 @@ update_light_camera :: proc(
           aabb_center_rotated.y,
           aabb_center_rotated.z - camera_distance,
         }
-        log.debugf(
-          "frustum_corners=%v, rotated_coners=%v, camera_pos_rotated=%v, aabb_center_rotated=%v, aabb_size=%v",
-          frustum_corners,
-          rotated_corners,
-          camera_pos_rotated,
-          aabb_center_rotated,
-          aabb_size,
-        )
+        // log.debugf(
+        //   "frustum_corners=%v, rotated_coners=%v, camera_pos_rotated=%v, aabb_center_rotated=%v, aabb_size=%v",
+        //   frustum_corners,
+        //   rotated_corners,
+        //   camera_pos_rotated,
+        //   aabb_center_rotated,
+        //   aabb_size,
+        // )
         far_plane := aabb_size.z + near_plane
         // Transform camera position back to world space (inverse rotation)
         light_rotation_inv := linalg.transpose(light_rotation)
@@ -277,24 +277,24 @@ update_light_camera :: proc(
           ortho_proj.height = aabb_size.y
           ortho_proj.near = near_plane
           ortho_proj.far = far_plane
-          log.debugf(
-            "light ortho projection %v",
-            ortho_proj,
-          )
+          // log.debugf(
+          //   "light ortho projection %v",
+          //   ortho_proj,
+          // )
         }
         // Set camera transform
         camera_look_at(cam, camera_position, target_position)
         // Configure directional light shadow camera to use main camera's draw lists
         // This skips expensive culling compute passes for shadow rendering
         camera_use_external_draw_list(cam, main_cam)
-        log.debugf(
-          "light position %v looking at %v with the aabb %v camera p=%v, r=%v",
-          camera_position,
-          target_position,
-          aabb_size,
-          cam.position,
-          cam.rotation,
-        )
+        // log.debugf(
+        //   "light position %v looking at %v with the aabb %v camera p=%v, r=%v",
+        //   camera_position,
+        //   target_position,
+        //   aabb_size,
+        //   cam.position,
+        //   cam.rotation,
+        // )
         shadow_map_id = cam.attachments[.DEPTH][frame_index].index
       case .SPOT:
         cam := cont.get(rm.cameras, light.camera_handle)

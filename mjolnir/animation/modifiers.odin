@@ -13,6 +13,7 @@ TailModifier :: struct {
 PathModifier :: struct {
 	spline: Spline([3]f32),
 	offset: f32,
+	length: f32,  // Length of the path segment to fit the skeleton to
 	speed:  f32,
 	loop:   bool,
 }
@@ -127,26 +128,27 @@ path_modifier_update :: proc(
 	if total_chain_length <= 0 do return
 
 	spline_length := spline_arc_length(params.spline)
+
+	// Determine the segment length to use
+	segment_length := params.length if params.length > 0 else spline_length - params.offset
 	cumulative_length: f32 = 0
 
+	// First pass: position all bones along the path segment [offset, offset + segment_length]
 	for i in 0 ..< chain_length {
 		bone_idx := state.bone_indices[i]
 
-		s := params.offset + (cumulative_length / total_chain_length) * (spline_length - params.offset)
-		path_pos := spline_sample_uniform(params.spline, s)
+		// Map bone position to segment: offset + (bone_progress * segment_length)
+		t := cumulative_length / total_chain_length if total_chain_length > 0 else 0
+		s := params.offset + (t * segment_length)
 
-		tangent: [3]f32
-		if i < chain_length - 1 {
-			next_length := cumulative_length + bone_lengths[state.bone_indices[i + 1]]
-			next_s := params.offset + (next_length / total_chain_length) * (spline_length - params.offset)
-			next_pos := spline_sample_uniform(params.spline, next_s)
-			tangent = linalg.normalize(next_pos - path_pos)
+		// Clamp to spline bounds
+		if params.loop {
+			s = math.mod_f32(s, spline_length)
 		} else {
-			epsilon := f32(0.01)
-			s_tangent := clamp(s + epsilon, 0, spline_length)
-			tangent_pos := spline_sample_uniform(params.spline, s_tangent)
-			tangent = linalg.normalize(tangent_pos - path_pos)
+			s = clamp(s, 0, spline_length)
 		}
+
+		path_pos := spline_sample_uniform(params.spline, s)
 
 		fk_pos := world_transforms[bone_idx].world_position
 		world_transforms[bone_idx].world_position = linalg.lerp(
@@ -155,8 +157,25 @@ path_modifier_update :: proc(
 			layer_weight,
 		)
 
-		fk_forward := extract_forward_from_matrix(world_transforms[bone_idx].world_matrix)
-		target_rotation := linalg.quaternion_between_two_vector3(fk_forward, tangent)
+		if i < chain_length - 1 {
+			cumulative_length += bone_lengths[state.bone_indices[i + 1]]
+		}
+	}
+
+	// Second pass: orient each parent bone toward its child
+	for i in 0 ..< chain_length - 1 {
+		bone_idx := state.bone_indices[i]
+		child_idx := state.bone_indices[i + 1]
+
+		// Compute direction from parent to child
+		bone_direction := linalg.normalize(
+			world_transforms[child_idx].world_position -
+			world_transforms[bone_idx].world_position,
+		)
+
+		// Bones typically extend along Y-axis (up) in bind pose
+		bone_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
+		target_rotation := linalg.quaternion_between_two_vector3(bone_up, bone_direction)
 		procedural_rotation := target_rotation * world_transforms[bone_idx].world_rotation
 		world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
 			world_transforms[bone_idx].world_rotation,
@@ -170,10 +189,41 @@ path_modifier_update :: proc(
 			world_transforms[bone_idx].world_rotation,
 			scale,
 		)
+	}
 
-		if i < chain_length - 1 {
-			cumulative_length += bone_lengths[state.bone_indices[i + 1]]
+	// Handle last bone (no child to point to, use spline tangent)
+	if chain_length > 0 {
+		last_idx := chain_length - 1
+		bone_idx := state.bone_indices[last_idx]
+
+		cumulative_length = 0
+		for i in 1 ..< chain_length {
+			cumulative_length += bone_lengths[state.bone_indices[i]]
 		}
+
+		s := params.offset + (cumulative_length / total_chain_length) * (spline_length - params.offset)
+		epsilon := f32(0.01)
+		s_tangent := clamp(s + epsilon, 0, spline_length)
+		tangent_pos := spline_sample_uniform(params.spline, s_tangent)
+		current_pos := world_transforms[bone_idx].world_position
+		tangent := linalg.normalize(tangent_pos - current_pos)
+
+		// Bones typically extend along Y-axis (up) in bind pose
+		bone_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
+		target_rotation := linalg.quaternion_between_two_vector3(bone_up, tangent)
+		procedural_rotation := target_rotation * world_transforms[bone_idx].world_rotation
+		world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+			world_transforms[bone_idx].world_rotation,
+			procedural_rotation,
+			layer_weight,
+		)
+
+		scale := extract_scale(world_transforms[bone_idx].world_matrix)
+		world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
+			world_transforms[bone_idx].world_position,
+			world_transforms[bone_idx].world_rotation,
+			scale,
+		)
 	}
 }
 
