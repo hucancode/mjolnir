@@ -6,401 +6,417 @@ import "core:math/linalg"
 // Per-bone state for tail animation
 // Tracks tip position to create follow-through drag effect
 TailBone :: struct {
-	target_tip_world: [3]f32, // Where the tip wants to be in world space (has inertia)
-	is_initialized:   bool,   // Flag to initialize on first frame
+  target_tip_world: [3]f32, // Where the tip wants to be in world space (has inertia)
+  is_initialized:   bool, // Flag to initialize on first frame
 }
 
 TailModifier :: struct {
-	propagation_speed: f32, // How fast rotation influence travels down the chain (0-1)
-	damping:           f32, // How quickly bones return to rest pose (0-1)
-	bones:             []TailBone, // Per-bone state
+  propagation_speed: f32, // How fast rotation influence travels down the chain (0-1)
+  damping:           f32, // How quickly bones return to rest pose (0-1)
+  bones:             []TailBone, // Per-bone state
 }
 
 PathModifier :: struct {
-	spline: Spline([3]f32),
-	offset: f32,
-	length: f32,  // Length of the path segment to fit the skeleton to
-	speed:  f32,
-	loop:   bool,
+  spline: Spline([3]f32),
+  offset: f32,
+  length: f32, // Length of the path segment to fit the skeleton to
+  speed:  f32,
+  loop:   bool,
 }
 
 SpiderLegModifier :: struct {
-	legs:          []SpiderLeg,
-	chain_starts:  []u32,
-	chain_lengths: []u32,
+  legs:          []SpiderLeg,
+  chain_starts:  []u32,
+  chain_lengths: []u32,
 }
 
 // Simple modifier to directly set a single bone's rotation
 // Useful for driving animations or testing
 SingleBoneRotationModifier :: struct {
-	bone_index: u32,         // Index of the bone to modify
-	rotation:   quaternion128, // Local rotation to apply
+  bone_index: u32, // Index of the bone to modify
+  rotation:   quaternion128, // Local rotation to apply
 }
 
 Modifier :: union {
-	TailModifier,
-	PathModifier,
-	SpiderLegModifier,
-	SingleBoneRotationModifier,
+  TailModifier,
+  PathModifier,
+  SpiderLegModifier,
+  SingleBoneRotationModifier,
 }
 
 ProceduralState :: struct {
-	bone_indices:     []u32,
-	accumulated_time: f32,
-	modifier:         Modifier,
+  bone_indices:     []u32,
+  accumulated_time: f32,
+  modifier:         Modifier,
 }
 
 ProceduralLayer :: struct {
-	state: ProceduralState,
+  state: ProceduralState,
 }
 
 tail_modifier_update :: proc(
-	state: ^ProceduralState,
-	params: ^TailModifier,
-	delta_time: f32,
-	world_transforms: []BoneTransform,
-	layer_weight: f32,
-	bone_lengths: []f32,
+  state: ^ProceduralState,
+  params: ^TailModifier,
+  delta_time: f32,
+  world_transforms: []BoneTransform,
+  layer_weight: f32,
+  bone_lengths: []f32,
 ) {
-	chain_length := len(state.bone_indices)
-	if chain_length < 2 do return
-	if len(params.bones) != chain_length do return
-	if bone_lengths == nil do return
+  chain_length := len(state.bone_indices)
+  if chain_length < 2 do return
+  if len(params.bones) != chain_length do return
+  if bone_lengths == nil do return
 
-	// Process each bone (starting from bone[1], skip root at bone[0])
-	// Algorithm:
-	// 1. Track where the bone's tip was in world space (target_tip_world)
-	// 2. When bone root moves (due to parent FK), rotate bone to point at remembered tip position
-	// 3. Damping: over time, move target_tip toward rest pose tip position
-	for i in 1 ..< chain_length {
-		bone_idx := state.bone_indices[i]
-		parent_idx := state.bone_indices[i - 1]
-		bone_state := &params.bones[i]
+  // Process each bone (starting from bone[1], skip root at bone[0])
+  // Algorithm:
+  // 1. Track where the bone's tip was in world space (target_tip_world)
+  // 2. When bone root moves (due to parent FK), rotate bone to point at remembered tip position
+  // 3. Damping: over time, move target_tip toward rest pose tip position
+  for i in 1 ..< chain_length {
+    bone_idx := state.bone_indices[i]
+    parent_idx := state.bone_indices[i - 1]
+    bone_state := &params.bones[i]
 
-		bone_length := bone_lengths[bone_idx]
+    bone_length := bone_lengths[bone_idx]
 
-		// Get FK rotation before we modify it
-		fk_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
-		fk_rotation := world_transforms[bone_idx].world_rotation
+    // Get FK rotation before we modify it
+    fk_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
+    fk_rotation := world_transforms[bone_idx].world_rotation
 
-		// Update position FIRST: child's root follows parent's tip
-		// Note: bone_lengths[bone_idx] is the distance from parent to this child bone
-		parent_up := linalg.normalize(world_transforms[parent_idx].world_matrix[1].xyz)
-		new_position := world_transforms[parent_idx].world_position + parent_up * bone_length
+    // Update position FIRST: child's root follows parent's tip
+    // Note: bone_lengths[bone_idx] is the distance from parent to this child bone
+    parent_up := linalg.normalize(
+      world_transforms[parent_idx].world_matrix[1].xyz,
+    )
+    new_position :=
+      world_transforms[parent_idx].world_position + parent_up * bone_length
 
-		world_transforms[bone_idx].world_position = linalg.lerp(
-			world_transforms[bone_idx].world_position,
-			new_position,
-			layer_weight,
-		)
+    world_transforms[bone_idx].world_position = linalg.lerp(
+      world_transforms[bone_idx].world_position,
+      new_position,
+      layer_weight,
+    )
 
-		bone_world_pos := world_transforms[bone_idx].world_position
+    bone_world_pos := world_transforms[bone_idx].world_position
 
-		// Calculate FK rest tip from the UPDATED position
-		rest_tip := bone_world_pos + fk_up * bone_length
+    // Calculate FK rest tip from the UPDATED position
+    rest_tip := bone_world_pos + fk_up * bone_length
 
-		// Initialize target tip position on first frame
-		if !bone_state.is_initialized {
-			bone_state.target_tip_world = rest_tip
-			bone_state.is_initialized = true
-		}
+    // Initialize target tip position on first frame
+    if !bone_state.is_initialized {
+      bone_state.target_tip_world = rest_tip
+      bone_state.is_initialized = true
+    }
 
-		// Calculate desired direction to point at target tip
-		tip_direction := bone_state.target_tip_world - bone_world_pos
-		distance := linalg.length(tip_direction)
+    // Calculate desired direction to point at target tip
+    tip_direction := bone_state.target_tip_world - bone_world_pos
+    distance := linalg.length(tip_direction)
 
-		// Only apply rotation if we have a valid direction
-		if distance > 0.001 {
-			desired_direction := tip_direction / distance
+    // Only apply rotation if we have a valid direction
+    if distance > 0.001 {
+      desired_direction := tip_direction / distance
 
-			// Calculate rotation needed to point at target
-			target_rotation := linalg.quaternion_between_two_vector3(
-				fk_up,
-				desired_direction,
-			)
+      // Calculate rotation needed to point at target
+      target_rotation := linalg.quaternion_between_two_vector3(
+        fk_up,
+        desired_direction,
+      )
 
-			// Apply rotation to world transform
-			procedural_rotation := target_rotation * fk_rotation
+      // Apply rotation to world transform
+      procedural_rotation := target_rotation * fk_rotation
 
-			world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
-				fk_rotation,
-				procedural_rotation,
-				layer_weight,
-			)
-		}
+      world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+        fk_rotation,
+        procedural_rotation,
+        layer_weight,
+      )
+    }
 
-		// Update world matrix
-		scale := extract_scale(world_transforms[bone_idx].world_matrix)
-		world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
-			world_transforms[bone_idx].world_position,
-			world_transforms[bone_idx].world_rotation,
-			scale,
-		)
+    // Update world matrix
+    scale := extract_scale(world_transforms[bone_idx].world_matrix)
+    world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
+      world_transforms[bone_idx].world_position,
+      world_transforms[bone_idx].world_rotation,
+      scale,
+    )
 
-		// Calculate where bone now points after our rotation
-		current_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
-		current_tip := bone_world_pos + current_up * bone_length
+    // Calculate where bone now points after our rotation
+    current_up := linalg.normalize(
+      world_transforms[bone_idx].world_matrix[1].xyz,
+    )
+    current_tip := bone_world_pos + current_up * bone_length
 
-		// Update target for next frame: blend current position with FK rest position
-		// This creates inertia (follows current) and damping (returns to FK rest)
-		// damping close to 1.0 = slow return to rest (more inertia)
-		// damping close to 0.0 = fast return to rest (less inertia)
-		damping_factor := 1.0 - math.pow(params.damping, delta_time)
-		bone_state.target_tip_world = linalg.lerp(
-			current_tip,  // Where we point now (inertia)
-			rest_tip,     // Where FK wants us (damping)
-			damping_factor,
-		)
-	}
+    // Update target for next frame: blend current position with FK rest position
+    // This creates inertia (follows current) and damping (returns to FK rest)
+    // damping close to 1.0 = slow return to rest (more inertia)
+    // damping close to 0.0 = fast return to rest (less inertia)
+    damping_factor := 1.0 - math.pow(params.damping, delta_time)
+    bone_state.target_tip_world = linalg.lerp(
+      current_tip, // Where we point now (inertia)
+      rest_tip, // Where FK wants us (damping)
+      damping_factor,
+    )
+  }
 }
 
 path_modifier_update :: proc(
-	state: ^ProceduralState,
-	params: ^PathModifier,
-	delta_time: f32,
-	world_transforms: []BoneTransform,
-	layer_weight: f32,
-	bone_lengths: []f32,
+  state: ^ProceduralState,
+  params: ^PathModifier,
+  delta_time: f32,
+  world_transforms: []BoneTransform,
+  layer_weight: f32,
+  bone_lengths: []f32,
 ) {
-	chain_length := len(state.bone_indices)
-	if chain_length < 2 || len(params.spline.points) < 2 do return
+  chain_length := len(state.bone_indices)
+  if chain_length < 2 || len(params.spline.points) < 2 do return
 
-	// Build arc table BEFORE updating offset!
-	if _, has_table := params.spline.arc_table.?; !has_table {
-		spline_build_arc_table(&params.spline)
-	}
+  // Build arc table BEFORE updating offset!
+  if _, has_table := params.spline.arc_table.?; !has_table {
+    spline_build_arc_table(&params.spline)
+  }
 
-	if bone_lengths == nil do return
+  if bone_lengths == nil do return
 
-	// Now update offset after arc table exists
-	if params.speed != 0 {
-		params.offset += params.speed * delta_time
-		spline_length := spline_arc_length(params.spline)
-		if params.loop {
-			params.offset = math.mod_f32(params.offset, spline_length)
-		} else {
-			params.offset = clamp(params.offset, 0.0, spline_length)
-		}
-	}
+  // Now update offset after arc table exists
+  if params.speed != 0 {
+    params.offset += params.speed * delta_time
+    spline_length := spline_arc_length(params.spline)
+    if params.loop {
+      params.offset = math.mod_f32(params.offset, spline_length)
+    } else {
+      params.offset = clamp(params.offset, 0.0, spline_length)
+    }
+  }
 
-	total_chain_length: f32 = 0
-	for i in 1 ..< chain_length {
-		total_chain_length += bone_lengths[state.bone_indices[i]]
-	}
+  total_chain_length: f32 = 0
+  for i in 1 ..< chain_length {
+    total_chain_length += bone_lengths[state.bone_indices[i]]
+  }
 
-	if total_chain_length <= 0 do return
+  if total_chain_length <= 0 do return
 
-	spline_length := spline_arc_length(params.spline)
+  spline_length := spline_arc_length(params.spline)
 
-	// Determine the segment length to use
-	segment_length := params.length if params.length > 0 else spline_length - params.offset
-	cumulative_length: f32 = 0
+  // Determine the segment length to use
+  segment_length :=
+    params.length if params.length > 0 else spline_length - params.offset
+  cumulative_length: f32 = 0
 
-	// First pass: position all bones along the path segment [offset, offset + segment_length]
-	for i in 0 ..< chain_length {
-		bone_idx := state.bone_indices[i]
+  // First pass: position all bones along the path segment [offset, offset + segment_length]
+  for i in 0 ..< chain_length {
+    bone_idx := state.bone_indices[i]
 
-		// Map bone position to segment: offset + (bone_progress * segment_length)
-		t := cumulative_length / total_chain_length if total_chain_length > 0 else 0
-		s := params.offset + (t * segment_length)
+    // Map bone position to segment: offset + (bone_progress * segment_length)
+    t :=
+      cumulative_length / total_chain_length if total_chain_length > 0 else 0
+    s := params.offset + (t * segment_length)
 
-		// Clamp to spline bounds
-		if params.loop {
-			s = math.mod_f32(s, spline_length)
-		} else {
-			s = clamp(s, 0, spline_length)
-		}
+    // Clamp to spline bounds
+    if params.loop {
+      s = math.mod_f32(s, spline_length)
+    } else {
+      s = clamp(s, 0, spline_length)
+    }
 
-		path_pos := spline_sample_uniform(params.spline, s)
+    path_pos := spline_sample_uniform(params.spline, s)
 
-		fk_pos := world_transforms[bone_idx].world_position
-		world_transforms[bone_idx].world_position = linalg.lerp(
-			fk_pos,
-			path_pos,
-			layer_weight,
-		)
+    fk_pos := world_transforms[bone_idx].world_position
+    world_transforms[bone_idx].world_position = linalg.lerp(
+      fk_pos,
+      path_pos,
+      layer_weight,
+    )
 
-		if i < chain_length - 1 {
-			cumulative_length += bone_lengths[state.bone_indices[i + 1]]
-		}
-	}
+    if i < chain_length - 1 {
+      cumulative_length += bone_lengths[state.bone_indices[i + 1]]
+    }
+  }
 
-	// Second pass: orient each parent bone toward its child
-	for i in 0 ..< chain_length - 1 {
-		bone_idx := state.bone_indices[i]
-		child_idx := state.bone_indices[i + 1]
+  // Second pass: orient each parent bone toward its child
+  for i in 0 ..< chain_length - 1 {
+    bone_idx := state.bone_indices[i]
+    child_idx := state.bone_indices[i + 1]
 
-		// Compute direction from parent to child
-		bone_direction := linalg.normalize(
-			world_transforms[child_idx].world_position -
-			world_transforms[bone_idx].world_position,
-		)
+    // Compute direction from parent to child
+    bone_direction := linalg.normalize(
+      world_transforms[child_idx].world_position -
+      world_transforms[bone_idx].world_position,
+    )
 
-		// Bones typically extend along Y-axis (up) in bind pose
-		bone_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
-		target_rotation := linalg.quaternion_between_two_vector3(bone_up, bone_direction)
-		procedural_rotation := target_rotation * world_transforms[bone_idx].world_rotation
-		world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
-			world_transforms[bone_idx].world_rotation,
-			procedural_rotation,
-			layer_weight,
-		)
+    // Bones typically extend along Y-axis (up) in bind pose
+    bone_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
+    target_rotation := linalg.quaternion_between_two_vector3(
+      bone_up,
+      bone_direction,
+    )
+    procedural_rotation :=
+      target_rotation * world_transforms[bone_idx].world_rotation
+    world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+      world_transforms[bone_idx].world_rotation,
+      procedural_rotation,
+      layer_weight,
+    )
 
-		scale := extract_scale(world_transforms[bone_idx].world_matrix)
-		world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
-			world_transforms[bone_idx].world_position,
-			world_transforms[bone_idx].world_rotation,
-			scale,
-		)
-	}
+    scale := extract_scale(world_transforms[bone_idx].world_matrix)
+    world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
+      world_transforms[bone_idx].world_position,
+      world_transforms[bone_idx].world_rotation,
+      scale,
+    )
+  }
 
-	// Handle last bone (no child to point to, use spline tangent)
-	if chain_length > 0 {
-		last_idx := chain_length - 1
-		bone_idx := state.bone_indices[last_idx]
+  // Handle last bone (no child to point to, use spline tangent)
+  if chain_length > 0 {
+    last_idx := chain_length - 1
+    bone_idx := state.bone_indices[last_idx]
 
-		cumulative_length = 0
-		for i in 1 ..< chain_length {
-			cumulative_length += bone_lengths[state.bone_indices[i]]
-		}
+    cumulative_length = 0
+    for i in 1 ..< chain_length {
+      cumulative_length += bone_lengths[state.bone_indices[i]]
+    }
 
-		s := params.offset + (cumulative_length / total_chain_length) * (spline_length - params.offset)
-		epsilon := f32(0.01)
-		s_tangent := clamp(s + epsilon, 0, spline_length)
-		tangent_pos := spline_sample_uniform(params.spline, s_tangent)
-		current_pos := world_transforms[bone_idx].world_position
-		tangent := linalg.normalize(tangent_pos - current_pos)
+    s :=
+      params.offset +
+      (cumulative_length / total_chain_length) *
+        (spline_length - params.offset)
+    epsilon := f32(0.01)
+    s_tangent := clamp(s + epsilon, 0, spline_length)
+    tangent_pos := spline_sample_uniform(params.spline, s_tangent)
+    current_pos := world_transforms[bone_idx].world_position
+    tangent := linalg.normalize(tangent_pos - current_pos)
 
-		// Bones typically extend along Y-axis (up) in bind pose
-		bone_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
-		target_rotation := linalg.quaternion_between_two_vector3(bone_up, tangent)
-		procedural_rotation := target_rotation * world_transforms[bone_idx].world_rotation
-		world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
-			world_transforms[bone_idx].world_rotation,
-			procedural_rotation,
-			layer_weight,
-		)
+    // Bones typically extend along Y-axis (up) in bind pose
+    bone_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
+    target_rotation := linalg.quaternion_between_two_vector3(bone_up, tangent)
+    procedural_rotation :=
+      target_rotation * world_transforms[bone_idx].world_rotation
+    world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+      world_transforms[bone_idx].world_rotation,
+      procedural_rotation,
+      layer_weight,
+    )
 
-		scale := extract_scale(world_transforms[bone_idx].world_matrix)
-		world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
-			world_transforms[bone_idx].world_position,
-			world_transforms[bone_idx].world_rotation,
-			scale,
-		)
-	}
+    scale := extract_scale(world_transforms[bone_idx].world_matrix)
+    world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
+      world_transforms[bone_idx].world_position,
+      world_transforms[bone_idx].world_rotation,
+      scale,
+    )
+  }
 }
 
 spider_leg_modifier_update :: proc(
-	state: ^ProceduralState,
-	params: ^SpiderLegModifier,
-	delta_time: f32,
-	world_transforms: []BoneTransform,
-	layer_weight: f32,
-	bone_lengths: []f32,
+  state: ^ProceduralState,
+  params: ^SpiderLegModifier,
+  delta_time: f32,
+  world_transforms: []BoneTransform,
+  layer_weight: f32,
+  bone_lengths: []f32,
 ) {
-	num_legs := len(params.legs)
-	if num_legs == 0 do return
+  num_legs := len(params.legs)
+  if num_legs == 0 do return
 
-	for leg_idx in 0 ..< num_legs {
-		leg := &params.legs[leg_idx]
-		chain_start := params.chain_starts[leg_idx]
-		chain_len := params.chain_lengths[leg_idx]
+  for leg_idx in 0 ..< num_legs {
+    leg := &params.legs[leg_idx]
+    chain_start := params.chain_starts[leg_idx]
+    chain_len := params.chain_lengths[leg_idx]
 
-		if chain_len < 2 do continue
+    if chain_len < 2 do continue
 
-		spider_leg_update(leg, delta_time)
+    spider_leg_update(leg, delta_time)
 
-		leg_bone_indices := state.bone_indices[chain_start:chain_start + chain_len]
+    leg_bone_indices := state.bone_indices[chain_start:chain_start + chain_len]
 
-		leg_bone_lengths := make([]f32, chain_len - 1, context.temp_allocator)
-		for i in 0 ..< int(chain_len - 1) {
-			bone_idx := leg_bone_indices[i + 1]
-			leg_bone_lengths[i] = bone_lengths[bone_idx]
-		}
+    leg_bone_lengths := make([]f32, chain_len - 1, context.temp_allocator)
+    for i in 0 ..< int(chain_len - 1) {
+      bone_idx := leg_bone_indices[i + 1]
+      leg_bone_lengths[i] = bone_lengths[bone_idx]
+    }
 
-		fk_transforms := make([]BoneTransform, chain_len, context.temp_allocator)
-		for i in 0 ..< int(chain_len) {
-			bone_idx := leg_bone_indices[i]
-			fk_transforms[i] = world_transforms[bone_idx]
-		}
+    fk_transforms := make([]BoneTransform, chain_len, context.temp_allocator)
+    for i in 0 ..< int(chain_len) {
+      bone_idx := leg_bone_indices[i]
+      fk_transforms[i] = world_transforms[bone_idx]
+    }
 
-		ik_target := IKTarget {
-			bone_indices    = leg_bone_indices,
-			bone_lengths    = leg_bone_lengths,
-			target_position = leg.feet_position,
-			pole_vector     = [3]f32{0, 0, 0},
-			max_iterations  = 10,
-			tolerance       = 0.01,
-			weight          = 1.0,
-			enabled         = true,
-		}
-		fabrik_solve(world_transforms, ik_target)
+    ik_target := IKTarget {
+      bone_indices    = leg_bone_indices,
+      bone_lengths    = leg_bone_lengths,
+      target_position = leg.feet_position,
+      pole_vector     = [3]f32{0, 0, 0},
+      max_iterations  = 10,
+      tolerance       = 0.01,
+      weight          = 1.0,
+      enabled         = true,
+    }
+    fabrik_solve(world_transforms, ik_target)
 
-		for i in 0 ..< int(chain_len) {
-			bone_idx := leg_bone_indices[i]
+    for i in 0 ..< int(chain_len) {
+      bone_idx := leg_bone_indices[i]
 
-			ik_pos := world_transforms[bone_idx].world_position
-			fk_pos := fk_transforms[i].world_position
-			world_transforms[bone_idx].world_position = linalg.lerp(
-				fk_pos,
-				ik_pos,
-				layer_weight,
-			)
+      ik_pos := world_transforms[bone_idx].world_position
+      fk_pos := fk_transforms[i].world_position
+      world_transforms[bone_idx].world_position = linalg.lerp(
+        fk_pos,
+        ik_pos,
+        layer_weight,
+      )
 
-			ik_rot := world_transforms[bone_idx].world_rotation
-			fk_rot := fk_transforms[i].world_rotation
-			world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
-				fk_rot,
-				ik_rot,
-				layer_weight,
-			)
+      ik_rot := world_transforms[bone_idx].world_rotation
+      fk_rot := fk_transforms[i].world_rotation
+      world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+        fk_rot,
+        ik_rot,
+        layer_weight,
+      )
 
-			scale := extract_scale(world_transforms[bone_idx].world_matrix)
-			world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
-				world_transforms[bone_idx].world_position,
-				world_transforms[bone_idx].world_rotation,
-				scale,
-			)
-		}
-	}
+      scale := extract_scale(world_transforms[bone_idx].world_matrix)
+      world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
+        world_transforms[bone_idx].world_position,
+        world_transforms[bone_idx].world_rotation,
+        scale,
+      )
+    }
+  }
 }
 
 single_bone_rotation_modifier_update :: proc(
-	state: ^ProceduralState,
-	params: ^SingleBoneRotationModifier,
-	delta_time: f32,
-	world_transforms: []BoneTransform,
-	layer_weight: f32,
-	bone_lengths: []f32,
+  state: ^ProceduralState,
+  params: ^SingleBoneRotationModifier,
+  delta_time: f32,
+  world_transforms: []BoneTransform,
+  layer_weight: f32,
+  bone_lengths: []f32,
 ) {
-	bone_idx := params.bone_index
+  bone_idx := params.bone_index
 
-	// Apply the rotation as a local rotation override
-	fk_rotation := world_transforms[bone_idx].world_rotation
-	procedural_rotation := params.rotation * fk_rotation
+  // Apply the rotation as a local rotation override
+  fk_rotation := world_transforms[bone_idx].world_rotation
+  procedural_rotation := params.rotation * fk_rotation
 
-	world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
-		fk_rotation,
-		procedural_rotation,
-		layer_weight,
-	)
+  world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+    fk_rotation,
+    procedural_rotation,
+    layer_weight,
+  )
 
-	// Update world matrix
-	scale := extract_scale(world_transforms[bone_idx].world_matrix)
-	world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
-		world_transforms[bone_idx].world_position,
-		world_transforms[bone_idx].world_rotation,
-		scale,
-	)
+  // Update world matrix
+  scale := extract_scale(world_transforms[bone_idx].world_matrix)
+  world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
+    world_transforms[bone_idx].world_position,
+    world_transforms[bone_idx].world_rotation,
+    scale,
+  )
 }
 
 extract_scale :: proc(m: matrix[4, 4]f32) -> [3]f32 {
-	scale_x := linalg.length(m[0].xyz)
-	scale_y := linalg.length(m[1].xyz)
-	scale_z := linalg.length(m[2].xyz)
-	return [3]f32{scale_x, scale_y, scale_z}
+  return [3]f32 {
+    linalg.length(m[0].xyz),
+    linalg.length(m[1].xyz),
+    linalg.length(m[2].xyz),
+  }
 }
 
-extract_forward_from_matrix :: proc(m: matrix[4, 4]f32) -> [3]f32 {
-	return linalg.normalize(m[2].xyz)
+extract_z_axis :: proc(m: matrix[4, 4]f32) -> [3]f32 {
+  return linalg.normalize(m[2].xyz)
 }
