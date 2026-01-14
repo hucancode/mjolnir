@@ -312,6 +312,7 @@ spider_leg_modifier_update :: proc(
   world_transforms: []BoneTransform,
   layer_weight: f32,
   bone_lengths: []f32,
+  node_world_matrix: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY,
 ) {
   num_legs := len(params.legs)
   if num_legs == 0 do return
@@ -323,9 +324,24 @@ spider_leg_modifier_update :: proc(
 
     if chain_len < 2 do continue
 
-    spider_leg_update(leg, delta_time)
-
+    // Get leg root bone index and position
     leg_bone_indices := state.bone_indices[chain_start:chain_start + chain_len]
+    root_bone_idx := leg_bone_indices[0]
+    root_position_skeleton := world_transforms[root_bone_idx].world_position
+
+    // Convert root position from skeleton space to true world space
+    root_position_world_h := node_world_matrix * linalg.Vector4f32{root_position_skeleton.x, root_position_skeleton.y, root_position_skeleton.z, 1.0}
+    root_position_world := root_position_world_h.xyz
+
+    // Update spider leg with world space root position
+    // The algorithm works in world space to keep feet grounded
+    spider_leg_update_with_root(leg, delta_time, root_position_world)
+
+    // Convert feet position from world space back to skeleton space for IK
+    node_world_inv := linalg.matrix4_inverse(node_world_matrix)
+    feet_world_h := linalg.Vector4f32{leg.feet_position.x, leg.feet_position.y, leg.feet_position.z, 1.0}
+    feet_skeleton_h := node_world_inv * feet_world_h
+    feet_position_skeleton := feet_skeleton_h.xyz
 
     leg_bone_lengths := make([]f32, chain_len - 1, context.temp_allocator)
     for i in 0 ..< int(chain_len - 1) {
@@ -342,7 +358,7 @@ spider_leg_modifier_update :: proc(
     ik_target := IKTarget {
       bone_indices    = leg_bone_indices,
       bone_lengths    = leg_bone_lengths,
-      target_position = leg.feet_position,
+      target_position = feet_position_skeleton,  // Use skeleton-space position for IK
       pole_vector     = [3]f32{0, 0, 0},
       max_iterations  = 10,
       tolerance       = 0.01,

@@ -64,7 +64,7 @@ update_skeletal_animations :: proc(
       skinning.bone_matrix_buffer_offset,
     )
     matrices := slice.from_ptr(matrices_ptr, bone_count)
-    resources.sample_layers(mesh, rm, skinning.layers[:], nil, matrices, delta_time)
+    resources.sample_layers(mesh, rm, skinning.layers[:], nil, matrices, delta_time, node.transform.world_matrix)
   }
 }
 
@@ -606,7 +606,7 @@ add_spider_leg_modifier_layer :: proc(
     cfg := leg_configs[i]
     anim.spider_leg_init(
       &legs[i],
-      cfg.initial_target,
+      cfg.initial_offset,
       cfg.lift_height,
       cfg.lift_frequency,
       cfg.lift_duration,

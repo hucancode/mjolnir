@@ -216,6 +216,7 @@ sample_layers :: proc(
   ik_targets: []animation.IKTarget,
   out_bone_matrices: []matrix[4, 4]f32,
   delta_time: f32,
+  node_world_matrix: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY,
 ) {
   TraverseEntry :: struct {
     parent_transform: matrix[4, 4]f32,
@@ -375,6 +376,7 @@ sample_layers :: proc(
           world_transforms[:],
           layer.weight,
           skin.bone_lengths,
+          node_world_matrix,
         )
       case animation.SingleBoneRotationModifier:
         animation.single_bone_rotation_modifier_update(

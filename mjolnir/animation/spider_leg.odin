@@ -4,18 +4,19 @@ import "core:math"
 import "core:math/linalg"
 
 SpiderLeg :: struct {
-	feet_target:           [3]f32,
-	feet_lift_height:      f32,
-	feet_lift_frequency:   f32,
-	feet_lift_time_offset: f32,
-	feet_lift_duration:    f32,
-	feet_position:         [3]f32,
-	feet_last_target:      [3]f32, // internal
-	accumulated_time:      f32,    // internal
+	feet_offset:            [3]f32,
+	feet_target:            [3]f32,  // Current target in world space
+	feet_lift_height:       f32,
+	feet_lift_frequency:    f32,
+	feet_lift_time_offset:  f32,
+	feet_lift_duration:     f32,
+	feet_position:          [3]f32,  // Current foot position in world space
+	feet_last_target:       [3]f32,  // Last grounded position in world space
+	accumulated_time:       f32,     // internal
 }
 
 SpiderLegConfig :: struct {
-	initial_target:   [3]f32,
+	initial_offset:   [3]f32,
 	lift_height:      f32,
 	lift_frequency:   f32,
 	lift_duration:    f32,
@@ -24,19 +25,20 @@ SpiderLegConfig :: struct {
 
 spider_leg_init :: proc(
 	self: ^SpiderLeg,
-	initial_target: [3]f32,
+	initial_offset: [3]f32,
 	lift_height: f32 = 0.5,
 	lift_frequency: f32 = 2.0,
 	lift_duration: f32 = 0.4,
 	time_offset: f32 = 0.0,
 ) {
-	self.feet_target = initial_target
+	self.feet_offset = initial_offset
+	self.feet_target = {0, 0, 0}
 	self.feet_lift_height = lift_height
 	self.feet_lift_frequency = lift_frequency
 	self.feet_lift_time_offset = time_offset
 	self.feet_lift_duration = lift_duration
-	self.feet_position = initial_target
-	self.feet_last_target = initial_target
+	self.feet_position = {0, 0, 0}
+	self.feet_last_target = {0, 0, 0}
 	self.accumulated_time = 0.0
 }
 
@@ -75,6 +77,20 @@ spider_leg_update :: proc(self: ^SpiderLeg, delta_time: f32) {
 		self.feet_position = self.feet_target
 		self.feet_last_target = self.feet_target
 	}
+}
+
+spider_leg_update_with_root :: proc(self: ^SpiderLeg, delta_time: f32, root_position: [3]f32) {
+	// Compute target from root + offset
+	self.feet_target = root_position + self.feet_offset
+
+	// Initialize on first call (when accumulated_time is still 0)
+	if self.accumulated_time == 0.0 && delta_time > 0.0 {
+		self.feet_last_target = self.feet_target
+		self.feet_position = self.feet_target
+	}
+
+	// Then run existing update logic
+	spider_leg_update(self, delta_time)
 }
 
 // h(t) = 4ht(1-t): parabola with h(0)=0, h(0.5)=h, h(1)=0
