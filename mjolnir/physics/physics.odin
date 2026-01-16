@@ -18,6 +18,8 @@ CONSTRAINT_SOLVER_ITERS :: 4
 STABILIZATION_ITERS :: 2
 SLEEP_LINEAR_THRESHOLD :: 0.05
 SLEEP_ANGULAR_THRESHOLD :: 0.05
+SLEEP_LINEAR_THRESHOLD_SQ :: SLEEP_LINEAR_THRESHOLD * SLEEP_LINEAR_THRESHOLD
+SLEEP_ANGULAR_THRESHOLD_SQ :: SLEEP_ANGULAR_THRESHOLD * SLEEP_ANGULAR_THRESHOLD
 SLEEP_TIME_THRESHOLD :: 0.5
 ENABLE_VERBOSE_LOG :: false
 
@@ -34,6 +36,7 @@ World :: struct {
   prev_dynamic_contacts: map[u64]DynamicContact,
   prev_static_contacts:  map[u64]StaticContact,
   gravity:               [3]f32,
+  gravity_magnitude:     f32,
   dynamic_bvh:           geometry.BVH(DynamicBroadPhaseEntry),
   static_bvh:            geometry.BVH(StaticBroadPhaseEntry),
   body_bounds:           [dynamic]geometry.Aabb,
@@ -67,6 +70,7 @@ init :: proc(
   self.prev_dynamic_contacts = make(map[u64]DynamicContact)
   self.prev_static_contacts = make(map[u64]StaticContact)
   self.gravity = gravity
+  self.gravity_magnitude = linalg.length(gravity)
   self.dynamic_bvh = geometry.BVH(DynamicBroadPhaseEntry) {
     nodes = make([dynamic]geometry.BVHNode),
     primitives = make([dynamic]DynamicBroadPhaseEntry),
@@ -465,9 +469,9 @@ step :: proc(self: ^World, dt: f32) {
   for &entry in self.bodies.entries do if entry.active {
     body := &entry.item
     if body.is_kinematic || body.trigger_only do continue
-    lin_speed := linalg.length(body.velocity)
-    ang_speed := linalg.length(body.angular_velocity)
-    if lin_speed < SLEEP_LINEAR_THRESHOLD && ang_speed < SLEEP_ANGULAR_THRESHOLD {
+    lin_speed_sq := linalg.length2(body.velocity)
+    ang_speed_sq := linalg.length2(body.angular_velocity)
+    if lin_speed_sq < SLEEP_LINEAR_THRESHOLD_SQ && ang_speed_sq < SLEEP_ANGULAR_THRESHOLD_SQ {
       body.sleep_timer += dt
     } else {
       body.sleep_timer = 0
@@ -491,15 +495,16 @@ step :: proc(self: ^World, dt: f32) {
     gravity_force := self.gravity * body.mass * body.gravity_scale
     apply_force(body, gravity_force)
     if !self.enable_air_resistance do continue
-    vel_mag := linalg.length(body.velocity)
-    if vel_mag < 0.001 do continue
+    vel_mag_sq := linalg.length2(body.velocity)
+    if vel_mag_sq < 0.000001 do continue  // 0.001^2
     collider := get(self, body.collider_handle) or_continue
     cross_section := collider.cross_sectional_area
-    drag_magnitude := 0.5 * self.air_density * vel_mag * vel_mag * body.drag_coefficient * cross_section
-    drag_direction := -linalg.normalize(body.velocity)
+    vel_mag := math.sqrt(vel_mag_sq)
+    drag_magnitude := 0.5 * self.air_density * vel_mag_sq * body.drag_coefficient * cross_section
+    drag_direction := body.velocity * (-1.0 / vel_mag)  // reuse vel_mag, avoid normalize
     drag_force := drag_direction * drag_magnitude
     drag_accel := drag_magnitude * body.inv_mass
-    max_accel := linalg.length(self.gravity) * 30.0
+    max_accel := self.gravity_magnitude * 30.0  // use cached gravity magnitude
     if drag_accel > max_accel {
       drag_force *= max_accel / drag_accel
     }
