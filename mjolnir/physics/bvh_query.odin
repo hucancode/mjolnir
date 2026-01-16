@@ -18,16 +18,15 @@ bvh_query_aabb_fast :: proc(
     node_idx := pop(&stack)
     node := &bvh.nodes[node_idx]
     if !geometry.aabb_intersects(node.bounds, query_bounds) do continue
-    if node.primitive_count > 0 {
-      for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
-        prim := bvh.primitives[i]
-        // Direct access to cached bounds - no function call!
-        if geometry.aabb_intersects(prim.bounds, query_bounds) {
-          append(results, prim)
-        }
-      }
-    } else {
+    if node.primitive_count <= 0 {
       append(&stack, node.right_child, node.left_child)
+      continue
+    }
+    for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
+      prim := bvh.primitives[i]
+      if geometry.aabb_intersects(prim.bounds, query_bounds) {
+        append(results, prim)
+      }
     }
   }
 }
@@ -52,21 +51,21 @@ bvh_query_ray_fast :: proc(
       node.bounds,
     )
     if t_near > max_dist || t_far < 0 do continue
-    if node.primitive_count > 0 {
-      for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
-        prim := bvh.primitives[i]
-        // Direct access to cached bounds - no function call!
-        prim_t_near, prim_t_far := geometry.ray_aabb_intersection(
-          ray.origin,
-          ray.direction,
-          prim.bounds,
-        )
-        if prim_t_near <= max_dist && prim_t_far >= 0 {
-          append(results, prim)
-        }
-      }
-    } else {
+    if node.primitive_count <= 0 {
       append(&stack, node.right_child, node.left_child)
+      continue
+    }
+    for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
+      prim := bvh.primitives[i]
+      // Direct access to cached bounds - no function call!
+      prim_t_near, prim_t_far := geometry.ray_aabb_intersection(
+        ray.origin,
+        ray.direction,
+        prim.bounds,
+      )
+      if prim_t_near <= max_dist && prim_t_far >= 0 {
+        append(results, prim)
+      }
     }
   }
 }
