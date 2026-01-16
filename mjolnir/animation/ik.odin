@@ -35,23 +35,15 @@ BoneTransform :: struct {
 // Expects world_transforms to contain FK-computed world transforms for all bones
 // Modifies transforms for all bones in the chain to reach the target
 fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
-  if !target.enabled || target.weight <= 0.0 {
-    return
-  }
+  if !target.enabled || target.weight <= 0.0 do return
   chain_length := len(target.bone_indices)
-  if chain_length < 2 {
-    return
-  }
+  if chain_length < 2 do return
   // Validate all indices
   for idx in target.bone_indices {
-    if idx >= u32(len(world_transforms)) {
-      return
-    }
+    if idx >= u32(len(world_transforms)) do return
   }
   bone_lengths := target.bone_lengths
-  if len(bone_lengths) != chain_length - 1 {
-    return
-  }
+  if len(bone_lengths) != chain_length - 1 do return
   // Allocate temporary positions for the chain
   positions := make([][3]f32, chain_length, context.temp_allocator)
   // Extract initial positions from world transforms
@@ -61,11 +53,8 @@ fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
   }
   root_position := positions[0]
   target_pos := target.target_position
-  // Compute total chain length
   total_length: f32 = 0
-  for length in bone_lengths {
-    total_length += length
-  }
+  for length in bone_lengths do total_length += length
   // Check if target is reachable
   dist_to_target := linalg.distance(root_position, target_pos)
   if dist_to_target > total_length * 0.999 {
@@ -92,9 +81,9 @@ fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
         dir := linalg.normalize(positions[i + 1] - positions[i])
         positions[i + 1] = positions[i] + dir * bone_lengths[i]
       }
-      // Check convergence
-      end_dist := linalg.distance(positions[chain_length - 1], target_pos)
-      if end_dist < tolerance {
+      // Check convergence (using squared distance avoids sqrt)
+      end_dist_sq := linalg.length2(positions[chain_length - 1] - target_pos)
+      if end_dist_sq < tolerance * tolerance {
         break
       }
     }
@@ -127,32 +116,45 @@ apply_pole_constraint :: proc(
   to_end := end - root
   line_dir := linalg.normalize(to_end)
   // For each internal joint (not root or end)
-  if linalg.length2(to_end) > math.F32_EPSILON do return
+  if linalg.length2(to_end) < math.F32_EPSILON do return
+  // Pre-compute pole direction once (hoist out of loop)
+  pole_dir_unnorm := pole_vector - root
+  pole_dir_valid := linalg.length2(pole_dir_unnorm) > math.F32_EPSILON
+  pole_dir_from_root := pole_dir_valid ? linalg.normalize(pole_dir_unnorm) : line_dir
+
   for i in 1 ..< chain_length - 1 {
     to_joint := positions[i] - root
     projection_dist := linalg.dot(to_joint, line_dir)
     projection_point := root + line_dir * projection_dist
+
     // Current perpendicular offset
     offset := positions[i] - projection_point
     offset_length_sq := linalg.length2(offset)
-    if offset_length_sq < math.F32_EPSILON {
-      // Joint on the line, use pole to create offset
-      pole_dir := linalg.normalize(pole_vector - root)
-      offset = linalg.normalize(
-        pole_dir - line_dir * linalg.dot(pole_dir, line_dir),
-      )
-      offset_length_sq = 0.01
-    }
+
+    // Handle edge case: joint on the line (branchless using max)
+    is_on_line := offset_length_sq < math.F32_EPSILON
+    when_on_line := linalg.normalize(
+      pole_dir_from_root - line_dir * linalg.dot(pole_dir_from_root, line_dir),
+    )
+    offset = is_on_line ? when_on_line : offset
+    offset_length_sq = max(offset_length_sq, 0.01)
+
     // Desired offset direction toward pole
     to_pole := pole_vector - projection_point
     pole_offset := to_pole - line_dir * linalg.dot(to_pole, line_dir)
-    if linalg.length2(pole_offset) > math.F32_EPSILON {
-      pole_dir := linalg.normalize(pole_offset)
-      current_dir := linalg.normalize(offset)
-      new_offset := linalg.normalize(linalg.lerp(current_dir, pole_dir, 0.5))
-      positions[i] =
-        projection_point + new_offset * math.sqrt(offset_length_sq)
-    }
+    pole_offset_len_sq := linalg.length2(pole_offset)
+
+    // Branchless: compute everything, use result only if valid
+    valid_pole := pole_offset_len_sq > math.F32_EPSILON
+    inv_pole_len := valid_pole ? 1.0 / math.sqrt(pole_offset_len_sq) : 1.0
+    pole_dir := pole_offset * inv_pole_len
+    inv_offset_len := 1.0 / math.sqrt(offset_length_sq)
+    current_dir := offset * inv_offset_len
+    new_offset := linalg.normalize(linalg.lerp(current_dir, pole_dir, 0.5))
+
+    // Update position (branchless conditional)
+    new_pos := projection_point + new_offset * math.sqrt(offset_length_sq)
+    positions[i] = valid_pole ? new_pos : positions[i]
   }
   // Re-enforce bone lengths after pole constraint
   for i in 1 ..< chain_length {
@@ -175,36 +177,40 @@ update_transforms_from_positions :: proc(
     bone_idx := bone_indices[i]
     fk_positions[i] = world_transforms[bone_idx].world_position
   }
-  for i in 0 ..< chain_length {
+  // Process all bones except the last
+  for i in 0 ..< chain_length - 1 {
     bone_idx := bone_indices[i]
-    // Update position
     world_transforms[bone_idx].world_position = positions[i]
-    // Update rotation to point toward next bone
-    if i < chain_length - 1 {
-      // Get original FK direction
-      fk_dir := linalg.normalize(fk_positions[i + 1] - fk_positions[i])
-      // Get IK direction
-      ik_dir := linalg.normalize(positions[i + 1] - positions[i])
-      delta_rotation := linalg.quaternion_between_two_vector3(fk_dir, ik_dir)
-      world_transforms[bone_idx].world_rotation =
-        delta_rotation * world_transforms[bone_idx].world_rotation
-    } else if chain_length >= 2 {
-      // Last bone: orient in same direction as incoming bone segment
-      // This makes the bone "point toward" the direction it reached
-      // Original direction from previous to current (in FK)
-      fk_dir := linalg.normalize(fk_positions[i] - fk_positions[i - 1])
-      // IK direction from previous to current
-      ik_dir := linalg.normalize(positions[i] - positions[i - 1])
+    fk_dir := fk_positions[i + 1] - fk_positions[i]
+    ik_dir := positions[i + 1] - positions[i]
+    delta_rotation := linalg.quaternion_between_two_vector3(fk_dir, ik_dir)
+    world_transforms[bone_idx].world_rotation =
+      delta_rotation * world_transforms[bone_idx].world_rotation
+    // IMPORTANT: this algorithm do a deliberate assumption that all scale are 1.0, avoid costly scale computation
+    // If non-uniform scaling is needed, extract scale once before the loop
+    world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
+      world_transforms[bone_idx].world_position,
+      world_transforms[bone_idx].world_rotation,
+      [3]f32{1.0, 1.0, 1.0},
+    )
+  }
+  // Process last bone separately
+  if chain_length >= 1 {
+    i := chain_length - 1
+    bone_idx := bone_indices[i]
+    world_transforms[bone_idx].world_position = positions[i]
+    // Last bone: orient in same direction as incoming bone segment
+    if chain_length >= 2 {
+      fk_dir := fk_positions[i] - fk_positions[i - 1]
+      ik_dir := positions[i] - positions[i - 1]
       delta_rotation := linalg.quaternion_between_two_vector3(fk_dir, ik_dir)
       world_transforms[bone_idx].world_rotation =
         delta_rotation * world_transforms[bone_idx].world_rotation
     }
-    // Update matrix
-    t := geometry.decompose_matrix(world_transforms[bone_idx].world_matrix)
     world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
       world_transforms[bone_idx].world_position,
       world_transforms[bone_idx].world_rotation,
-      t.scale,
+      [3]f32{1.0, 1.0, 1.0},
     )
   }
 }

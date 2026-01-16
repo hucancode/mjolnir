@@ -114,12 +114,10 @@ tail_modifier_update :: proc(
 
     // Only apply rotation if we have a valid direction
     if distance > 0.001 {
-      desired_direction := tip_direction / distance
-
       // Calculate rotation needed to point at target
       target_rotation := linalg.quaternion_between_two_vector3(
         fk_up,
-        desired_direction,
+        tip_direction,
       )
 
       // Apply rotation to world transform
@@ -238,13 +236,12 @@ path_modifier_update :: proc(
     child_idx := state.bone_indices[i + 1]
 
     // Compute direction from parent to child
-    bone_direction := linalg.normalize(
+    bone_direction :=
       world_transforms[child_idx].world_position -
-      world_transforms[bone_idx].world_position,
-    )
+      world_transforms[bone_idx].world_position
 
     // Bones typically extend along Y-axis (up) in bind pose
-    bone_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
+    bone_up := world_transforms[bone_idx].world_matrix[1].xyz
     target_rotation := linalg.quaternion_between_two_vector3(
       bone_up,
       bone_direction,
@@ -283,10 +280,10 @@ path_modifier_update :: proc(
     s_tangent := clamp(s + epsilon, 0, spline_length)
     tangent_pos := spline_sample_uniform(params.spline, s_tangent)
     current_pos := world_transforms[bone_idx].world_position
-    tangent := linalg.normalize(tangent_pos - current_pos)
+    tangent := tangent_pos - current_pos
 
     // Bones typically extend along Y-axis (up) in bind pose
-    bone_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
+    bone_up := world_transforms[bone_idx].world_matrix[1].xyz
     target_rotation := linalg.quaternion_between_two_vector3(bone_up, tangent)
     procedural_rotation :=
       target_rotation * world_transforms[bone_idx].world_rotation
@@ -314,51 +311,51 @@ spider_leg_modifier_update :: proc(
   bone_lengths: []f32,
   node_world_matrix: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY,
 ) {
-  num_legs := len(params.legs)
-  if num_legs == 0 do return
-
-  for leg_idx in 0 ..< num_legs {
-    leg := &params.legs[leg_idx]
+  for &leg, leg_idx in params.legs {
     chain_start := params.chain_starts[leg_idx]
     chain_len := params.chain_lengths[leg_idx]
-
     if chain_len < 2 do continue
-
     // Get leg root bone index and position
     leg_bone_indices := state.bone_indices[chain_start:chain_start + chain_len]
     root_bone_idx := leg_bone_indices[0]
     root_position_skeleton := world_transforms[root_bone_idx].world_position
-
     // Convert root position from skeleton space to true world space
-    root_position_world_h := node_world_matrix * linalg.Vector4f32{root_position_skeleton.x, root_position_skeleton.y, root_position_skeleton.z, 1.0}
+    root_position_world_h :=
+      node_world_matrix *
+      linalg.Vector4f32 {
+          root_position_skeleton.x,
+          root_position_skeleton.y,
+          root_position_skeleton.z,
+          1.0,
+        }
     root_position_world := root_position_world_h.xyz
-
     // Update spider leg with world space root position
     // The algorithm works in world space to keep feet grounded
-    spider_leg_update_with_root(leg, delta_time, root_position_world)
-
+    spider_leg_update_with_root(&leg, delta_time, root_position_world)
     // Convert feet position from world space back to skeleton space for IK
     node_world_inv := linalg.matrix4_inverse(node_world_matrix)
-    feet_world_h := linalg.Vector4f32{leg.feet_position.x, leg.feet_position.y, leg.feet_position.z, 1.0}
+    feet_world_h := linalg.Vector4f32 {
+      leg.feet_position.x,
+      leg.feet_position.y,
+      leg.feet_position.z,
+      1.0,
+    }
     feet_skeleton_h := node_world_inv * feet_world_h
     feet_position_skeleton := feet_skeleton_h.xyz
-
     leg_bone_lengths := make([]f32, chain_len - 1, context.temp_allocator)
     for i in 0 ..< int(chain_len - 1) {
       bone_idx := leg_bone_indices[i + 1]
       leg_bone_lengths[i] = bone_lengths[bone_idx]
     }
-
     fk_transforms := make([]BoneTransform, chain_len, context.temp_allocator)
     for i in 0 ..< int(chain_len) {
       bone_idx := leg_bone_indices[i]
       fk_transforms[i] = world_transforms[bone_idx]
     }
-
     ik_target := IKTarget {
       bone_indices    = leg_bone_indices,
       bone_lengths    = leg_bone_lengths,
-      target_position = feet_position_skeleton,  // Use skeleton-space position for IK
+      target_position = feet_position_skeleton, // Use skeleton-space position for IK
       pole_vector     = [3]f32{0, 0, 0},
       max_iterations  = 10,
       tolerance       = 0.01,
@@ -366,10 +363,8 @@ spider_leg_modifier_update :: proc(
       enabled         = true,
     }
     fabrik_solve(world_transforms, ik_target)
-
     for i in 0 ..< int(chain_len) {
       bone_idx := leg_bone_indices[i]
-
       ik_pos := world_transforms[bone_idx].world_position
       fk_pos := fk_transforms[i].world_position
       world_transforms[bone_idx].world_position = linalg.lerp(
@@ -377,7 +372,6 @@ spider_leg_modifier_update :: proc(
         ik_pos,
         layer_weight,
       )
-
       ik_rot := world_transforms[bone_idx].world_rotation
       fk_rot := fk_transforms[i].world_rotation
       world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
@@ -385,7 +379,6 @@ spider_leg_modifier_update :: proc(
         ik_rot,
         layer_weight,
       )
-
       scale := extract_scale(world_transforms[bone_idx].world_matrix)
       world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
         world_transforms[bone_idx].world_position,
@@ -405,17 +398,14 @@ single_bone_rotation_modifier_update :: proc(
   bone_lengths: []f32,
 ) {
   bone_idx := params.bone_index
-
   // Apply the rotation as a local rotation override
   fk_rotation := world_transforms[bone_idx].world_rotation
   procedural_rotation := params.rotation * fk_rotation
-
   world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
     fk_rotation,
     procedural_rotation,
     layer_weight,
   )
-
   // Update world matrix
   scale := extract_scale(world_transforms[bone_idx].world_matrix)
   world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
