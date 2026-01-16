@@ -34,10 +34,7 @@ BoneTransform :: struct {
 //
 // Expects world_transforms to contain FK-computed world transforms for all bones
 // Modifies transforms for all bones in the chain to reach the target
-fabrik_solve :: proc(
-  world_transforms: []BoneTransform,
-  target: IKTarget,
-) {
+fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
   if !target.enabled || target.weight <= 0.0 {
     return
   }
@@ -125,15 +122,13 @@ apply_pole_constraint :: proc(
   if chain_length < 3 {
     return
   }
+  root := positions[0]
+  end := positions[chain_length - 1]
+  to_end := end - root
+  line_dir := linalg.normalize(to_end)
   // For each internal joint (not root or end)
+  if linalg.length2(to_end) > math.F32_EPSILON do return
   for i in 1 ..< chain_length - 1 {
-    root := positions[0]
-    end := positions[chain_length - 1]
-    to_end := end - root
-    if linalg.length2(to_end) < math.F32_EPSILON {
-      continue
-    }
-    line_dir := linalg.normalize(to_end)
     to_joint := positions[i] - root
     projection_dist := linalg.dot(to_joint, line_dir)
     projection_point := root + line_dir * projection_dist
