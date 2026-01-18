@@ -352,11 +352,20 @@ spider_leg_modifier_update :: proc(
       bone_idx := leg_bone_indices[i]
       fk_transforms[i] = world_transforms[bone_idx]
     }
+    // Compute pole pointing upward (perpendicular to leg direction)
+    // This makes the leg bend naturally with the "knee" pointing outward/upward
+    leg_dir := feet_position_skeleton - root_position_skeleton
+    up := [3]f32{0, 1, 0} // World up
+    // Pole is positioned above the root, perpendicular to the leg direction
+    pole_offset := up - leg_dir * linalg.dot(up, leg_dir) / linalg.dot(leg_dir, leg_dir)
+    pole := root_position_skeleton + linalg.normalize(pole_offset) * 10.0
+
     ik_target := IKTarget {
       bone_indices    = leg_bone_indices,
       bone_lengths    = leg_bone_lengths,
       target_position = feet_position_skeleton, // Use skeleton-space position for IK
-      pole_vector     = [3]f32{0, 0, 0},
+      pole_vector     = pole,
+      pole_weight     = 0.8, // Strong but not absolute pole influence
       max_iterations  = 10,
       tolerance       = 0.01,
       weight          = 1.0,
