@@ -32,13 +32,13 @@ spider_leg_init :: proc(
 	time_offset: f32 = 0.0,
 ) {
 	self.feet_offset = initial_offset
-	self.feet_target = {0, 0, 0}
+	self.feet_target = initial_offset
 	self.feet_lift_height = lift_height
 	self.feet_lift_frequency = lift_frequency
 	self.feet_lift_time_offset = time_offset
 	self.feet_lift_duration = lift_duration
-	self.feet_position = {0, 0, 0}
-	self.feet_last_target = {0, 0, 0}
+	self.feet_position = initial_offset
+	self.feet_last_target = initial_offset
 	self.accumulated_time = 0.0
 }
 
