@@ -14,8 +14,8 @@ import "core:slice"
 root_nodes: [dynamic]resources.NodeHandle
 markers: [dynamic]resources.NodeHandle
 animation_time: f32 = 0
-spider_leg_nodes: [8]resources.NodeHandle
-target_markers: [8]resources.NodeHandle
+spider_root_node: resources.NodeHandle
+target_markers: [6]resources.NodeHandle
 ground_plane: resources.NodeHandle
 
 main :: proc() {
@@ -27,58 +27,82 @@ main :: proc() {
 			camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
 			sync_active_camera_controller(engine)
 		}
-		// Load 8 spider leg models
-		leg_offsets := [8][3]f32{
-			{3, 0, 2},   // Front right
-			{1, 0, 3},   // Mid-front right
-			{-1, 0, 3},  // Mid-back right
-			{-3, 0, 2},  // Back right
-			{3, 0, -2},  // Front left
-			{1, 0, -3},  // Mid-front left
-			{-1, 0, -3}, // Mid-back left
-			{-3, 0, -2}, // Back left
+		// Load spider model with 6 legs
+		spider_roots := load_gltf(engine, "assets/spider.glb")
+		append(&root_nodes, ..spider_roots[:])
+
+		// Position the spider
+		for handle in spider_roots {
+			node := get_node(engine, handle) or_continue
+			spider_root_node = handle
+			node.transform.position = {0, 5, 0}
+			node.transform.is_dirty = true
+		}
+
+		// Configure 6 legs with spider leg modifiers
+		// Each leg has 6 bones (bone_0 to bone_5)
+		leg_configs := []struct {
+			root_name:      string,
+			initial_offset: [3]f32,
+			time_offset:    f32,
+		}{
+			{"leg_front_r_0",  {5, 0, 3},   0.0},        // Front right
+			{"leg_middle_r_0", {0, 0, 5},   0.2},        // Middle right
+			{"leg_back_r_0",   {-5, 0, 3},  0.4},        // Back right
+			{"leg_front_l_0",  {5, 0, -3},  0.5},        // Front left
+			{"leg_middle_l_0", {0, 0, -5},  0.7},        // Middle left
+			{"leg_back_l_0",   {-5, 0, -3}, 0.9},        // Back left
 		}
 
 		lift_frequency :: 0.8
-		for i in 0..<8 {
-			leg_roots := load_gltf(engine, "assets/spider_leg.glb")
-			for handle in leg_roots {
-				node := get_node(engine, handle) or_continue
-				node.transform.position = {0, 2, 0}
-				node.transform.is_dirty = true
 
-				for child in node.children {
-					spider_leg_nodes[i] = child
+		// Find the skinned mesh node and add spider leg modifiers
+		for handle in spider_roots {
+			root_node := get_node(engine, handle) or_continue
 
-					leg_root_names := []string{"root"}
-					leg_chain_lengths := []u32{7}
+			// Find the child with the mesh attachment
+			for child in root_node.children {
+				child_node := get_node(engine, child) or_continue
+				_, has_mesh := &child_node.attachment.(world.MeshAttachment)
+				if !has_mesh {
+					continue
+				}
 
-					leg_configs := []anim.SpiderLegConfig{
-						{
-							initial_offset = leg_offsets[i],
-							lift_height = 2.0,
-							lift_frequency = lift_frequency,
-							lift_duration = 0.6,
-							time_offset = f32(i) * (lift_frequency / 8.0),
-						},
-					}
+				// Build arrays for all 6 leg roots and configurations
+				leg_root_names := make([]string, 6)
+				leg_chain_lengths := make([]u32, 6)
+				spider_leg_configs := make([]anim.SpiderLegConfig, 6)
 
-					success := world.add_spider_leg_modifier_layer(
-						&engine.world,
-						&engine.rm,
-						child,
-						leg_root_names,
-						leg_chain_lengths,
-						leg_configs,
-						weight = 1.0,
-						layer_index = -1,
-					)
-					if success {
-						log.infof("Added spider leg modifier %d", i)
+				for i in 0..<6 {
+					leg_root_names[i] = leg_configs[i].root_name
+					leg_chain_lengths[i] = 6  // Each leg has 6 bones
+
+					spider_leg_configs[i] = anim.SpiderLegConfig{
+						initial_offset = leg_configs[i].initial_offset,
+						lift_height = 2.0,
+						lift_frequency = lift_frequency,
+						lift_duration = 0.6,
+						time_offset = leg_configs[i].time_offset,
 					}
 				}
+
+				success := world.add_spider_leg_modifier_layer(
+					&engine.world,
+					&engine.rm,
+					child,
+					leg_root_names,
+					leg_chain_lengths,
+					spider_leg_configs,
+					weight = 1.0,
+					layer_index = -1,
+				)
+
+				if success {
+					log.infof("Added spider leg modifiers for all 6 legs")
+				}
+
+				break
 			}
-			append(&root_nodes, ..leg_roots[:])
 		}
 
 		// Create cone markers for each bone
@@ -135,7 +159,7 @@ main :: proc() {
 		// Create visual markers for each leg target (red spheres)
 		sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
 		red_mat := engine.rm.builtin_materials[resources.Color.RED]
-		for i in 0..<8 {
+		for i in 0..<6 {
 			target_markers[i] = spawn(
 				engine,
 				attachment = world.MeshAttachment{
@@ -168,29 +192,40 @@ main :: proc() {
 		speed :: 0.1 // Oscillation speed (Hz)
 
 		body_x := amplitude * math.sin(animation_time * speed * 2 * math.PI)
-		body_pos := [3]f32{body_x, 2, 0}
+		body_pos := [3]f32{body_x, 5, 0}
 
 		// Move the spider body
-		for handle in root_nodes {
-			if node := get_node(engine, handle); node != nil {
-				node.transform.position = body_pos
-				node.transform.is_dirty = true
-			}
+		if node := get_node(engine, spider_root_node); node != nil {
+			node.transform.position = body_pos
+			node.transform.is_dirty = true
 		}
 
 		// Target is now automatically computed from leg root + offset in world space
 		// Fetch and display the world-space target for each leg
-		for i in 0..<8 {
-			if target, ok := world.get_spider_leg_target(
-				&engine.world,
-				spider_leg_nodes[i],
-				layer_index = 0,
-				leg_index = 0,
-			); ok {
-				if marker_node := get_node(engine, target_markers[i]); marker_node != nil {
-					marker_node.transform.position = target^
-					marker_node.transform.is_dirty = true
+		// Find the skinned mesh child to query leg targets
+		if root_node := get_node(engine, spider_root_node); root_node != nil {
+			for child in root_node.children {
+				child_node := get_node(engine, child) or_continue
+				_, has_mesh := &child_node.attachment.(world.MeshAttachment)
+				if !has_mesh {
+					continue
 				}
+
+				for i in 0..<6 {
+					if target, ok := world.get_spider_leg_target(
+						&engine.world,
+						child,
+						layer_index = 0,
+						leg_index = i,
+					); ok {
+						if marker_node := get_node(engine, target_markers[i]); marker_node != nil {
+							marker_node.transform.position = target^
+							marker_node.transform.is_dirty = true
+						}
+					}
+				}
+
+				break
 			}
 		}
 
