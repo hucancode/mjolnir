@@ -363,11 +363,12 @@ update_input :: proc(self: ^Engine) -> bool {
     self.input.mouse_holding[i] = is_pressed && self.input.mouse_buttons[i]
     self.input.mouse_buttons[i] = is_pressed
   }
-  for k in 0 ..< len(self.input.keys) {
-    is_pressed := glfw.GetKey(self.window, c.int(k)) == glfw.PRESS
-    self.input.key_holding[k] = is_pressed && self.input.keys[k]
-    self.input.keys[k] = is_pressed
-  }
+  // PERF: Disabled polling all 512 keys every frame (7ms~ CPU overhead)
+  // for k in 0 ..< len(self.input.keys) {
+  //   is_pressed := glfw.GetKey(self.window, c.int(k)) == glfw.PRESS
+  //   self.input.key_holding[k] = is_pressed && self.input.keys[k]
+  //   self.input.keys[k] = is_pressed
+  // }
   if self.mouse_move_proc != nil {
     self.mouse_move_proc(self, self.input.mouse_pos, delta)
   }

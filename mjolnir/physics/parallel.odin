@@ -87,10 +87,10 @@ CCD_Task_Data_Dynamic :: struct {
 
 bvh_refit_task :: proc(task: thread.Task) {
   data := (^BVH_Refit_Task_Data)(task.data)
-  for i in data.start ..< data.end {
+  #no_bounds_check for i in data.start ..< data.end {
     bvh_entry := &data.physics.dynamic_bvh.primitives[i]
     body := get(data.physics, bvh_entry.handle) or_continue
-    if body.is_sleeping do continue
+    if body.is_killed || body.is_sleeping do continue
     bvh_entry.bounds = body.cached_aabb
   }
 }
@@ -137,7 +137,7 @@ parallel_bvh_refit :: proc(
 sequential_bvh_refit :: proc(physics: ^World) {
   for &bvh_entry in physics.dynamic_bvh.primitives {
     body := get(physics, bvh_entry.handle) or_continue
-    if body.is_sleeping do continue
+    if body.is_killed || body.is_sleeping do continue
     bvh_entry.bounds = body.cached_aabb
   }
   geometry.bvh_refit(&physics.dynamic_bvh)
@@ -145,12 +145,12 @@ sequential_bvh_refit :: proc(physics: ^World) {
 
 aabb_cache_update_task :: proc(task: thread.Task) {
   data := (^AABB_Cache_Task_Data)(task.data)
-  for i in data.start ..< data.end {
+  #no_bounds_check for i in data.start ..< data.end {
     if i >= len(data.physics.bodies.entries) do break
     entry := &data.physics.bodies.entries[i]
     if !entry.active do continue
     body := &entry.item
-    if body.is_sleeping do continue
+    if body.is_killed || body.is_sleeping do continue
     collider := get(data.physics, body.collider_handle) or_continue
     update_cached_aabb(body, collider)
   }
@@ -197,7 +197,7 @@ parallel_update_aabb_cache :: proc(
 sequential_update_aabb_cache :: proc(physics: ^World) {
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
-    if body.is_sleeping do continue
+    if body.is_killed || body.is_sleeping do continue
     collider := get(physics, body.collider_handle) or_continue
     update_cached_aabb(body, collider)
   }
@@ -207,19 +207,24 @@ collision_detection_task :: proc(task: thread.Task) {
   data := (^Collision_Detection_Task_Data)(task.data)
   task_start := time.now()
   defer data.elapsed_time = time.since(task_start)
+  // Pre-allocate with capacity to avoid reallocations
   dyn_candidates := make(
     [dynamic]DynamicBroadPhaseEntry,
+    0,
+    128,
     context.temp_allocator,
   )
   static_candidates := make(
     [dynamic]StaticBroadPhaseEntry,
+    0,
+    128,
     context.temp_allocator,
   )
-  for i in data.start ..< data.end {
+  #no_bounds_check for i in data.start ..< data.end {
     bvh_entry := &data.physics.dynamic_bvh.primitives[i]
     handle_a := bvh_entry.handle
     body_a := get(data.physics, handle_a) or_continue
-    if body_a.is_sleeping do continue
+    if body_a.is_killed || body_a.is_sleeping do continue
     data.bodies_tested += 1
     // Query dynamic BVH for dynamic-dynamic collisions
     clear(&dyn_candidates)
@@ -360,26 +365,31 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
   data := (^Collision_Detection_Task_Data_Dynamic)(task.data)
   task_start := time.now()
   defer data.elapsed_time = time.since(task_start)
+  // Pre-allocate with capacity to avoid reallocations
   dyn_candidates := make(
     [dynamic]DynamicBroadPhaseEntry,
+    0,
+    128,
     context.temp_allocator,
   )
   static_candidates := make(
     [dynamic]StaticBroadPhaseEntry,
+    0,
+    128,
     context.temp_allocator,
   )
-  BATCH_SIZE :: 32
+  BATCH_SIZE :: 256
   for {
     start_idx := i32(
       sync.atomic_add(&data.work_queue.current_index, i32(BATCH_SIZE)),
     )
     if int(start_idx) >= data.work_queue.total_count do break
     end_idx := min(int(start_idx) + BATCH_SIZE, data.work_queue.total_count)
-    for i in int(start_idx) ..< end_idx {
+    #no_bounds_check for i in int(start_idx) ..< end_idx {
       bvh_entry := &data.physics.dynamic_bvh.primitives[i]
       handle_a := bvh_entry.handle
       body_a := get(data.physics, handle_a) or_continue
-      if body_a.is_sleeping do continue
+      if body_a.is_killed || body_a.is_sleeping do continue
       data.bodies_tested += 1
       // Query dynamic BVH for dynamic-dynamic collisions
       clear(&dyn_candidates)
@@ -739,12 +749,17 @@ sequential_collision_detection :: proc(physics: ^World) {
     hash := collision_pair_hash(contact.body_a, contact.body_b)
     tested_pairs[hash] = true
   }
+  // Pre-allocate with capacity to avoid reallocations
   dyn_candidates := make(
     [dynamic]DynamicBroadPhaseEntry,
+    0,
+    128,
     context.temp_allocator,
   )
   static_candidates := make(
     [dynamic]StaticBroadPhaseEntry,
+    0,
+    128,
     context.temp_allocator,
   )
   test_collision_time: time.Duration
@@ -752,7 +767,7 @@ sequential_collision_detection :: proc(physics: ^World) {
   for &bvh_entry in physics.dynamic_bvh.primitives {
     handle_a := bvh_entry.handle
     body_a := get(physics, handle_a) or_continue
-    if body_a.is_sleeping do continue
+    if body_a.is_killed || body_a.is_sleeping do continue
     // Query dynamic BVH for dynamic-dynamic collisions
     clear(&dyn_candidates)
     bvh_query_aabb_fast(
@@ -893,27 +908,32 @@ sequential_collision_detection :: proc(physics: ^World) {
 
 ccd_task_dynamic :: proc(task: thread.Task) {
   data := (^CCD_Task_Data_Dynamic)(task.data)
+  // Pre-allocate with capacity to avoid reallocations
   dyn_candidates := make(
     [dynamic]DynamicBroadPhaseEntry,
+    0,
+    64,
     context.temp_allocator,
   )
   static_candidates := make(
     [dynamic]StaticBroadPhaseEntry,
+    0,
+    64,
     context.temp_allocator,
   )
-  BATCH_SIZE :: 32
+  BATCH_SIZE :: 256
   for {
     start_idx := i32(
       sync.atomic_add(&data.work_queue.current_index, i32(BATCH_SIZE)),
     )
     if int(start_idx) >= data.work_queue.total_count do break
     end_idx := min(int(start_idx) + BATCH_SIZE, data.work_queue.total_count)
-    for idx_a in int(start_idx) ..< end_idx {
+    #no_bounds_check for idx_a in int(start_idx) ..< end_idx {
       if idx_a >= len(data.physics.bodies.entries) do break
       entry_a := &data.physics.bodies.entries[idx_a]
       if !entry_a.active do continue
       body_a := &entry_a.item
-      if body_a.trigger_only || body_a.is_sleeping do continue
+      if body_a.is_killed || body_a.trigger_only || body_a.is_sleeping do continue
       collider_a := get(data.physics, body_a.collider_handle) or_continue
       velocity_mag_sq := linalg.length2(body_a.velocity)
       dt_sq := data.dt * data.dt
@@ -1084,17 +1104,22 @@ sequential_ccd :: proc(
   bodies_tested: int,
   total_candidates: int,
 ) {
+  // Pre-allocate with capacity to avoid reallocations
   dyn_candidates := make(
     [dynamic]DynamicBroadPhaseEntry,
+    0,
+    64,
     context.temp_allocator,
   )
   static_candidates := make(
     [dynamic]StaticBroadPhaseEntry,
+    0,
+    64,
     context.temp_allocator,
   )
-  for &entry_a, idx_a in physics.bodies.entries do if entry_a.active {
+  #no_bounds_check for &entry_a, idx_a in physics.bodies.entries do if entry_a.active {
     body_a := &entry_a.item
-    if body_a.trigger_only || body_a.is_sleeping do continue
+    if body_a.is_killed || body_a.trigger_only || body_a.is_sleeping do continue
     velocity_mag_sq := linalg.length2(body_a.velocity)
     if velocity_mag_sq < CCD_THRESHOLD_SQ do continue
     bodies_tested += 1

@@ -39,6 +39,7 @@ DynamicRigidBody :: struct {
   drag_coefficient:     f32,
   is_sleeping:          bool,
   sleep_timer:          f32,
+  is_killed:            bool, // Flag for deferred removal
 }
 
 static_rigid_body_init :: proc(
