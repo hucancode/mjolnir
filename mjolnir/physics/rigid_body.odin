@@ -146,7 +146,7 @@ apply_impulse :: proc(self: ^DynamicRigidBody, impulse: [3]f32) {
   wake_up(self)
 }
 
-apply_impulse_at_point :: proc(
+apply_impulse_at_point :: #force_inline proc(
   self: ^DynamicRigidBody,
   impulse: [3]f32,
   point: [3]f32,

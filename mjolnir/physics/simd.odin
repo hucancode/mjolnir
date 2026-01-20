@@ -96,21 +96,6 @@ quaternion_mul_vector3 :: proc "contextless" (q: quaternion128, v: [3]f32) -> [3
   }
 }
 
-// Single vector cross product with SIMD
-// Targets: linalg::vector_cross3 (7.04% CPU)
-vector_cross3 :: proc "contextless" (a, b: [3]f32) -> [3]f32 {
-  when ODIN_ARCH == .amd64 {
-    // Simple scalar is fine here - CPU does the SIMD internally
-    return {
-      a.y * b.z - a.z * b.y,
-      a.z * b.x - a.x * b.z,
-      a.x * b.y - a.y * b.x,
-    }
-  } else {
-    return linalg.cross(a, b)
-  }
-}
-
 // ============================================================================
 // Batch-4 SIMD operations (SSE - 4-wide)
 // ============================================================================

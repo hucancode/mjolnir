@@ -66,10 +66,9 @@ bvh_query_aabb_fast :: proc(
         intersects := aabb_intersects_batch4(bounds_batch, query_batch)
 
         // Append matching primitives
-        if intersects[0] do append(results, primitives[i + 0])
-        if intersects[1] do append(results, primitives[i + 1])
-        if intersects[2] do append(results, primitives[i + 2])
-        if intersects[3] do append(results, primitives[i + 3])
+        #unroll for j in 0..<4 {
+          if intersects[j] do append(results, primitives[i + i32(j)])
+        }
 
         i += 4
       }

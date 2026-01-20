@@ -154,8 +154,7 @@ line_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
   ao := -a
   // If origin is in the direction of AB
   if same_direction(ab, ao) {
-    ab_ao := linalg.cross(ab, ao)
-    new_dir := linalg.cross(ab_ao, ab)
+    new_dir := linalg.cross(linalg.cross(ab, ao), ab)
     direction^ = linalg.length2(new_dir) < math.F32_EPSILON ? ao : new_dir
   } else {
     // Origin is closer to A
@@ -178,8 +177,7 @@ triangle_case :: proc(simplex: ^Simplex, direction: ^[3]f32) -> bool {
   if same_direction(linalg.cross(abc, ac), ao) {
     if same_direction(ac, ao) {
       simplex_set(simplex, a, c)
-      ac_ao := linalg.cross(ac, ao)
-      new_dir := linalg.cross(ac_ao, ac)
+      new_dir := linalg.cross(linalg.cross(ac, ao), ac)
       direction^ = linalg.length2(new_dir) < math.F32_EPSILON ? ao : new_dir
     } else {
       return line_case(simplex, direction)

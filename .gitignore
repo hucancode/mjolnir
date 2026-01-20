@@ -3,3 +3,5 @@
 test.bin
 screenshot.png
 artifacts/
+perf.data
+perf.data.old
