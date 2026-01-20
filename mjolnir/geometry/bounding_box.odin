@@ -25,11 +25,11 @@ aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
   return ret
 }
 
-aabb_union :: proc "contextless" (a, b: Aabb) -> Aabb {
+aabb_union :: #force_inline proc "contextless" (a, b: Aabb) -> Aabb {
   return Aabb{min = linalg.min(a.min, b.min), max = linalg.max(a.max, b.max)}
 }
 
-aabb_intersects :: proc "contextless" (a, b: Aabb) -> bool {
+aabb_intersects :: #force_inline proc "contextless" (a, b: Aabb) -> bool {
   return(
     a.min.x <= b.max.x &&
     a.max.x >= b.min.x &&
@@ -171,7 +171,7 @@ obb_axes :: #force_inline proc "contextless" (obb: Obb) -> (x, y, z: [3]f32) {
 }
 
 // Convert OBB to AABB
-obb_to_aabb :: proc "contextless" (obb: Obb) -> Aabb {
+obb_to_aabb :: #force_inline proc "contextless" (obb: Obb) -> Aabb {
   r := linalg.matrix3_from_quaternion(obb.rotation)
   h := obb.half_extents
   e := [3]f32{
