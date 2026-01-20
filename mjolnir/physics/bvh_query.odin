@@ -38,14 +38,49 @@ bvh_query_aabb_fast :: proc(
       stack_size += 2
       continue
     }
-
-    // Leaf node - check primitives
+    // Leaf node - check primitives with SIMD batching
     prim_end := node.primitive_start + node.primitive_count
-    for i in node.primitive_start ..< prim_end {
+    prim_count := prim_end - node.primitive_start
+
+    // Process in batches of 4 using SIMD
+    i := node.primitive_start
+    batch_end := node.primitive_start + (prim_count / 4) * 4
+
+    // SIMD batch path - process 4 primitives at once (with runtime detection)
+    for i < batch_end {
+        // Load 4 primitive bounds
+        bounds_batch: [4]geometry.Aabb
+        bounds_batch[0] = primitives[i + 0].bounds
+        bounds_batch[1] = primitives[i + 1].bounds
+        bounds_batch[2] = primitives[i + 2].bounds
+        bounds_batch[3] = primitives[i + 3].bounds
+
+        // Batch query bounds for SIMD comparison
+        query_batch: [4]geometry.Aabb
+        query_batch[0] = query_bounds
+        query_batch[1] = query_bounds
+        query_batch[2] = query_bounds
+        query_batch[3] = query_bounds
+
+        // Test all 4 AABBs at once
+        intersects := aabb_intersects_batch4(bounds_batch, query_batch)
+
+        // Append matching primitives
+        if intersects[0] do append(results, primitives[i + 0])
+        if intersects[1] do append(results, primitives[i + 1])
+        if intersects[2] do append(results, primitives[i + 2])
+        if intersects[3] do append(results, primitives[i + 3])
+
+        i += 4
+      }
+
+    // Handle remaining primitives (less than 4) with scalar path
+    for i < prim_end {
       prim := primitives[i]
       if geometry.aabb_intersects(prim.bounds, query_bounds) {
         append(results, prim)
       }
+      i += 1
     }
   }
 }

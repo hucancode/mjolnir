@@ -145,15 +145,105 @@ sequential_bvh_refit :: proc(physics: ^World) {
 
 aabb_cache_update_task :: proc(task: thread.Task) {
   data := (^AABB_Cache_Task_Data)(task.data)
-  #no_bounds_check for i in data.start ..< data.end {
-    if i >= len(data.physics.bodies.entries) do break
-    entry := &data.physics.bodies.entries[i]
-    if !entry.active do continue
-    body := &entry.item
-    if body.is_killed || body.is_sleeping do continue
-    collider := get(data.physics, body.collider_handle) or_continue
-    update_cached_aabb(body, collider)
-  }
+
+  // SIMD path: Process bodies in batches of 4 for OBB colliders (Box/Cylinder/Fan) with runtime detection
+    // Batch buffer for collecting OBB colliders
+    obb_batch: [4]geometry.Obb
+    body_batch: [4]^DynamicRigidBody
+    collider_batch: [4]^Collider
+    batch_count := 0
+
+    #no_bounds_check for i in data.start ..< data.end {
+      if i >= len(data.physics.bodies.entries) do break
+      entry := &data.physics.bodies.entries[i]
+      if !entry.active do continue
+      body := &entry.item
+      if body.is_killed || body.is_sleeping do continue
+      collider := get(data.physics, body.collider_handle) or_continue
+
+      // Check if collider needs OBB-to-AABB conversion
+      needs_obb := false
+      obb: geometry.Obb
+      center := body.position + quaternion_mul_vector3(body.rotation, collider.offset)
+
+      switch sh in collider.shape {
+      case SphereCollider:
+        // Spheres don't need OBB conversion - process directly
+        body.cached_aabb = geometry.Aabb {
+          min = center - sh.radius,
+          max = center + sh.radius,
+        }
+        body.cached_sphere_center = center
+        body.cached_sphere_radius = sh.radius
+        continue
+
+      case BoxCollider:
+        obb = geometry.Obb {
+          center       = center,
+          half_extents = sh.half_extents,
+          rotation     = body.rotation,
+        }
+        needs_obb = true
+
+      case CylinderCollider:
+        r := sh.radius
+        h := sh.height * 0.5
+        half_extents := [3]f32{r, h, r}
+        obb = geometry.Obb {
+          center       = center,
+          half_extents = half_extents,
+          rotation     = body.rotation,
+        }
+        needs_obb = true
+
+      case FanCollider:
+        r := sh.radius
+        h := sh.height * 0.5
+        half_extents := [3]f32{r, h, r}
+        obb = geometry.Obb {
+          center       = center,
+          half_extents = half_extents,
+          rotation     = body.rotation,
+        }
+        needs_obb = true
+      }
+
+      if needs_obb {
+        // Add to batch
+        obb_batch[batch_count] = obb
+        body_batch[batch_count] = body
+        collider_batch[batch_count] = collider
+        batch_count += 1
+
+        // Process batch when full
+        if batch_count == 4 {
+          aabb_batch: [4]geometry.Aabb
+          obb_to_aabb_batch4(obb_batch, &aabb_batch)
+
+          // Update bodies with results
+          for j in 0 ..< 4 {
+            b := body_batch[j]
+            b.cached_aabb = aabb_batch[j]
+            b.cached_sphere_center = geometry.aabb_center(b.cached_aabb)
+            aabb_half_extents := (b.cached_aabb.max - b.cached_aabb.min) * 0.5
+            b.cached_sphere_radius = linalg.length(aabb_half_extents)
+          }
+
+          batch_count = 0
+        }
+      }
+    }
+
+    // Process remainder
+    if batch_count > 0 {
+      #no_bounds_check for j in 0 ..< batch_count {
+        body := body_batch[j]
+        body.cached_aabb = geometry.obb_to_aabb(obb_batch[j])
+        body.cached_sphere_center = geometry.aabb_center(body.cached_aabb)
+        aabb_half_extents := (body.cached_aabb.max - body.cached_aabb.min) * 0.5
+        body.cached_sphere_radius = linalg.length(aabb_half_extents)
+      }
+    }
 }
 
 parallel_update_aabb_cache :: proc(

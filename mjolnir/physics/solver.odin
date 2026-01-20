@@ -16,8 +16,8 @@ prepare_contact_dynamic_dynamic :: proc(
 ) {
   contact.r_a = contact.point - body_a.position
   contact.r_b = contact.point - body_b.position
-  r_a_cross_n := linalg.cross(contact.r_a, contact.normal)
-  r_b_cross_n := linalg.cross(contact.r_b, contact.normal)
+  r_a_cross_n := vector_cross3(contact.r_a, contact.normal)
+  r_b_cross_n := vector_cross3(contact.r_b, contact.normal)
   inv_mass_sum := body_a.inv_mass + body_b.inv_mass
   angular_factor_a := linalg.dot(body_a.inv_inertia * r_a_cross_n, r_a_cross_n)
   angular_factor_b := linalg.dot(body_b.inv_inertia * r_b_cross_n, r_b_cross_n)
@@ -30,8 +30,8 @@ prepare_contact_dynamic_dynamic :: proc(
   contact.tangent1, contact.tangent2 = compute_tangent_basis(contact.normal)
   #unroll for i in 0 ..< 2 {
     tangent := i == 0 ? contact.tangent1 : contact.tangent2
-    r_a_cross_t := linalg.cross(contact.r_a, tangent)
-    r_b_cross_t := linalg.cross(contact.r_b, tangent)
+    r_a_cross_t := vector_cross3(contact.r_a, tangent)
+    r_b_cross_t := vector_cross3(contact.r_b, tangent)
     angular_factor_a_t := linalg.dot(body_a.inv_inertia * r_a_cross_t, r_a_cross_t)
     angular_factor_b_t := linalg.dot(body_b.inv_inertia * r_b_cross_t, r_b_cross_t)
     tangent_mass := inv_mass_sum + angular_factor_a_t + angular_factor_b_t
@@ -43,8 +43,8 @@ prepare_contact_dynamic_dynamic :: proc(
   }
   penetration_to_resolve := max(contact.penetration - SLOP, 0.0)
   contact.bias = (BAUMGARTE_COEF / dt) * penetration_to_resolve
-  vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-  vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
+  vel_a := body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
+  vel_b := body_b.velocity + vector_cross3(body_b.angular_velocity, contact.r_b)
   relative_velocity := vel_b - vel_a
   velocity_along_normal := linalg.dot(relative_velocity, contact.normal)
   if velocity_along_normal < RESTITUTION_THRESHOLD {
@@ -59,7 +59,7 @@ prepare_contact_dynamic_static :: proc(
   dt: f32,
 ) {
   contact.r_a = contact.point - body_a.position
-  r_a_cross_n := linalg.cross(contact.r_a, contact.normal)
+  r_a_cross_n := vector_cross3(contact.r_a, contact.normal)
   inv_mass_sum := body_a.inv_mass
   angular_factor_a := linalg.dot(body_a.inv_inertia * r_a_cross_n, r_a_cross_n)
   normal_mass := inv_mass_sum + angular_factor_a
@@ -71,7 +71,7 @@ prepare_contact_dynamic_static :: proc(
   contact.tangent1, contact.tangent2 = compute_tangent_basis(contact.normal)
   #unroll for i in 0 ..< 2 {
     tangent := i == 0 ? contact.tangent1 : contact.tangent2
-    r_a_cross_t := linalg.cross(contact.r_a, tangent)
+    r_a_cross_t := vector_cross3(contact.r_a, tangent)
     angular_factor_a_t := linalg.dot(body_a.inv_inertia * r_a_cross_t, r_a_cross_t)
     tangent_mass := inv_mass_sum + angular_factor_a_t
     if tangent_mass > math.F32_EPSILON {
@@ -82,7 +82,7 @@ prepare_contact_dynamic_static :: proc(
   }
   penetration_to_resolve := max(contact.penetration - SLOP, 0.0)
   contact.bias = (BAUMGARTE_COEF / dt) * penetration_to_resolve
-  vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
+  vel_a := body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
   relative_velocity := -vel_a
   velocity_along_normal := linalg.dot(relative_velocity, contact.normal)
   if velocity_along_normal < RESTITUTION_THRESHOLD {
@@ -135,8 +135,8 @@ resolve_contact_dynamic_dynamic :: proc(
   body_a: ^DynamicRigidBody,
   body_b: ^DynamicRigidBody,
 ) {
-  vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-  vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
+  vel_a := body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
+  vel_b := body_b.velocity + vector_cross3(body_b.angular_velocity, contact.r_b)
   relative_velocity := vel_b - vel_a
   velocity_along_normal := linalg.dot(relative_velocity, contact.normal)
   delta_impulse := contact.normal_mass * (-velocity_along_normal + contact.bias)
@@ -149,8 +149,8 @@ resolve_contact_dynamic_dynamic :: proc(
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
   max_friction := contact.friction * contact.normal_impulse
   #unroll for i in 0 ..< 2 {
-    vel_a = body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-    vel_b = body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
+    vel_a = body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
+    vel_b = body_b.velocity + vector_cross3(body_b.angular_velocity, contact.r_b)
     velocity_along_tangent := linalg.dot(vel_b - vel_a, tangents[i])
     delta_impulse_t := contact.tangent_mass[i] * (-velocity_along_tangent)
     old_impulse_t := contact.tangent_impulse[i]
@@ -166,7 +166,7 @@ resolve_contact_dynamic_static :: proc(
   body_a: ^DynamicRigidBody,
   body_b: ^StaticRigidBody,
 ) {
-  vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
+  vel_a := body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
   velocity_along_normal := linalg.dot(-vel_a, contact.normal)
   delta_impulse := contact.normal_mass * (-velocity_along_normal + contact.bias)
   old_impulse := contact.normal_impulse
@@ -177,7 +177,7 @@ resolve_contact_dynamic_static :: proc(
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
   max_friction := contact.friction * contact.normal_impulse
   #unroll for i in 0 ..< 2 {
-    vel_a = body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
+    vel_a = body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
     velocity_along_tangent := linalg.dot(-vel_a, tangents[i])
     delta_impulse_t := contact.tangent_mass[i] * (-velocity_along_tangent)
     old_impulse_t := contact.tangent_impulse[i]
@@ -197,8 +197,8 @@ resolve_contact_no_bias_dynamic_dynamic :: proc(
   body_a: ^DynamicRigidBody,
   body_b: ^DynamicRigidBody,
 ) {
-  vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-  vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
+  vel_a := body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
+  vel_b := body_b.velocity + vector_cross3(body_b.angular_velocity, contact.r_b)
   velocity_along_normal := linalg.dot(vel_b - vel_a, contact.normal)
   delta_impulse := contact.normal_mass * (-velocity_along_normal)
   old_impulse := contact.normal_impulse
@@ -209,8 +209,8 @@ resolve_contact_no_bias_dynamic_dynamic :: proc(
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
   max_friction := contact.friction * contact.normal_impulse
   for i in 0 ..< 2 {
-    vel_a = body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-    vel_b = body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
+    vel_a = body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
+    vel_b = body_b.velocity + vector_cross3(body_b.angular_velocity, contact.r_b)
     velocity_along_tangent := linalg.dot(vel_b - vel_a, tangents[i])
     delta_impulse_t := contact.tangent_mass[i] * (-velocity_along_tangent)
     old_impulse_t := contact.tangent_impulse[i]
@@ -226,7 +226,7 @@ resolve_contact_no_bias_dynamic_static :: proc(
   body_a: ^DynamicRigidBody,
   body_b: ^StaticRigidBody,
 ) {
-  vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
+  vel_a := body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
   velocity_along_normal := linalg.dot(-vel_a, contact.normal)
   delta_impulse := contact.normal_mass * (-velocity_along_normal)
   old_impulse := contact.normal_impulse
@@ -236,7 +236,7 @@ resolve_contact_no_bias_dynamic_static :: proc(
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
   max_friction := contact.friction * contact.normal_impulse
   for i in 0 ..< 2 {
-    vel_a = body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
+    vel_a = body_a.velocity + vector_cross3(body_a.angular_velocity, contact.r_a)
     velocity_along_tangent := linalg.dot(-vel_a, tangents[i])
     delta_impulse_t := contact.tangent_mass[i] * (-velocity_along_tangent)
     old_impulse_t := contact.tangent_impulse[i]
@@ -253,6 +253,6 @@ resolve_contact_no_bias :: proc {
 
 compute_tangent_basis :: proc(normal: [3]f32) -> ([3]f32, [3]f32) {
   tangent1 := linalg.orthogonal(normal)
-  tangent2 := linalg.cross(normal, tangent1)
+  tangent2 := vector_cross3(normal, tangent1)
   return tangent1, tangent2
 }

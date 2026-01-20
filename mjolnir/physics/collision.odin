@@ -428,10 +428,10 @@ test_cylinder_cylinder :: proc(
   // Transform cylinder B to cylinder A's local space
   to_b := pos_b - pos_a
   inv_rot_a := linalg.quaternion_inverse(rot_a)
-  local_b_center := linalg.mul(inv_rot_a, to_b)
+  local_b_center := quaternion_mul_vector3(inv_rot_a, to_b)
   // Cylinder B's axis in cylinder A's local space
-  b_axis_world := linalg.mul(rot_b, linalg.VECTOR3F32_Y_AXIS)
-  b_axis_local := linalg.mul(inv_rot_a, b_axis_world)
+  b_axis_world := quaternion_mul_vector3(rot_b, linalg.VECTOR3F32_Y_AXIS)
+  b_axis_local := quaternion_mul_vector3(inv_rot_a, b_axis_world)
   // Check if axes are parallel
   parallel := math.abs(math.abs(b_axis_local.y) - 1.0) < 0.01
   if parallel {
@@ -459,8 +459,8 @@ test_cylinder_cylinder :: proc(
     local_point :=
       local_normal * (cylinder_a.radius - (radius_sum - radial_dist) * 0.5)
     // Transform back to world space
-    normal = linalg.mul(rot_a, local_normal)
-    point = pos_a + linalg.mul(rot_a, local_point)
+    normal = quaternion_mul_vector3(rot_a, local_normal)
+    point = pos_a + quaternion_mul_vector3(rot_a, local_point)
     penetration = radius_sum - radial_dist
     hit = true
     return
@@ -501,8 +501,8 @@ test_collision :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  center_a := pos_a + linalg.mul(rot_a, collider_a.offset)
-  center_b := pos_b + linalg.mul(rot_b, collider_b.offset)
+  center_a := pos_a + quaternion_mul_vector3(rot_a, collider_a.offset)
+  center_b := pos_b + quaternion_mul_vector3(rot_b, collider_b.offset)
   switch shape_a in collider_a.shape {
   case FanCollider:
     return
@@ -608,8 +608,8 @@ test_collision_gjk :: proc(
   if !hit {
     return
   }
-  center_a := pos_a + linalg.mul(rot_a, collider_a.offset)
-  center_b := pos_b + linalg.mul(rot_b, collider_b.offset)
+  center_a := pos_a + quaternion_mul_vector3(rot_a, collider_a.offset)
+  center_b := pos_b + quaternion_mul_vector3(rot_b, collider_b.offset)
   point = center_a + normal * penetration * 0.5
   return
 }
