@@ -168,7 +168,10 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
   )
-  body_dynamic, _ := physics.get_dynamic_body(&physics_world, body_dynamic_handle)
+  body_dynamic, _ := physics.get_dynamic_body(
+    &physics_world,
+    body_dynamic_handle,
+  )
   body_dynamic.velocity = {-10, 0, 0}
   dt := f32(0.016)
   physics.step(&physics_world, dt)
@@ -256,10 +259,7 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
     linalg.QUATERNIONF32_IDENTITY,
     0.1,
   )
-  physics.create_static_body_box(
-    &physics_world,
-    {0.5, 5, 5},
-  )
+  physics.create_static_body_box(&physics_world, {0.5, 5, 5})
   body_bullet := physics.get_dynamic_body(&physics_world, body_bullet_handle)
   body_bullet.velocity = {100, 0, 0}
   dt := f32(0.016)
@@ -311,10 +311,10 @@ test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
   )
   dt := f32(0.016)
   physics.step(&physics_world, dt)
-  destroyed_body, _ := physics.get_dynamic_body(&physics_world, body_handle)
+  destroyed_body, ok := physics.get_dynamic_body(&physics_world, body_handle)
   testing.expect(
     t,
-    destroyed_body == nil,
+    !ok || destroyed_body.is_killed,
     "Body below KILL_Y should be destroyed",
   )
 }
@@ -1236,11 +1236,7 @@ test_integration_box_stack_stability :: proc(t: ^testing.T) {
   physics_world: physics.World
   physics.init(&physics_world, {0, -9.81, 0}, false)
   defer physics.destroy(&physics_world)
-  physics.create_static_body_box(
-    &physics_world,
-    {5, 0.5, 5},
-    {0, -0.5, 0},
-  )
+  physics.create_static_body_box(&physics_world, {5, 0.5, 5}, {0, -0.5, 0})
   body_1_h, _ := physics.create_dynamic_body_box(
     &physics_world,
     {0.5, 0.5, 0.5},
@@ -1569,10 +1565,13 @@ test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
 test_rotated_offset_collider_aabb :: proc(t: ^testing.T) {
   collider := physics.Collider {
     offset = {1, 0, 0},
-    shape  = physics.BoxCollider{half_extents = {0.5, 0.5, 0.5}},
+    shape = physics.BoxCollider{half_extents = {0.5, 0.5, 0.5}},
   }
   position := [3]f32{0, 0, 0}
-  rotation := linalg.quaternion_angle_axis(math.PI / 2.0, linalg.VECTOR3F32_Y_AXIS)
+  rotation := linalg.quaternion_angle_axis(
+    math.PI / 2.0,
+    linalg.VECTOR3F32_Y_AXIS,
+  )
   aabb := physics.collider_calculate_aabb(&collider, position, rotation)
   rotated_offset := linalg.mul(rotation, collider.offset)
   expected_center := position + rotated_offset
@@ -1591,11 +1590,7 @@ test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
   physics_world: physics.World
   physics.init(&physics_world, {0, -10, 0}, false)
   defer physics.destroy(&physics_world)
-  physics.create_static_body_box(
-    &physics_world,
-    {10, 0.5, 10},
-    {0, -0.5, 0},
-  )
+  physics.create_static_body_box(&physics_world, {10, 0.5, 10}, {0, -0.5, 0})
   box_handle, _ := physics.create_dynamic_body_box(
     &physics_world,
     {0.5, 0.5, 0.5},
@@ -1606,7 +1601,10 @@ test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
     {0.3, 0, 0},
   )
   box, _ := physics.get_dynamic_body(&physics_world, box_handle)
-  box.rotation = linalg.quaternion_angle_axis(math.PI / 4.0, linalg.VECTOR3F32_Z_AXIS)
+  box.rotation = linalg.quaternion_angle_axis(
+    math.PI / 4.0,
+    linalg.VECTOR3F32_Z_AXIS,
+  )
   dt := f32(0.016)
   for i in 0 ..< 60 {
     physics.step(&physics_world, dt)
@@ -1649,11 +1647,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
         world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
         pos := [3]f32{world_x, 0.5, world_z}
         world.spawn(&state.w, pos)
-        physics.create_static_body_sphere(
-          &state.physics,
-          0.5,
-          pos,
-        )
+        physics.create_static_body_sphere(&state.physics, 0.5, pos)
       }
     }
     physics.step(&state.physics, 0.0)
