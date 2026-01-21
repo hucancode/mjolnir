@@ -1110,7 +1110,7 @@ benchmark_quaternion_mul_vector3_single :: proc(t: ^testing.T) {
 		data_ptr := cast(^Benchmark_Single_Quaternion_Data)raw_data(options.input)
 		for i in 0 ..< options.rounds {
 			for idx in 0 ..< len(data_ptr.quaternions) {
-				_ = physics.quaternion_mul_vector3(
+				_ = geometry.qmv(
 					data_ptr.quaternions[idx],
 					data_ptr.vectors[idx],
 				)

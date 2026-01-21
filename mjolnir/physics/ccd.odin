@@ -1,5 +1,6 @@
 package physics
 
+import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
@@ -196,8 +197,8 @@ swept_test :: proc(
   pos_b: [3]f32,
   rot_b: quaternion128,
 ) -> TOIResult {
-  center_a := pos_a + linalg.mul(rot_a, collider_a.offset)
-  center_b := pos_b + linalg.mul(rot_b, collider_b.offset)
+  center_a := pos_a + geometry.qmv(rot_a, collider_a.offset)
+  center_b := pos_b + geometry.qmv(rot_b, collider_b.offset)
   // For now, implement sphere-sphere and sphere-box
   // Can extend to other shapes later
   switch shape_a in collider_a.shape {

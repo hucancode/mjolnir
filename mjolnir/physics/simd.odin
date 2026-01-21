@@ -58,37 +58,6 @@ init_simd :: proc "contextless" () {
 }
 
 // ============================================================================
-// Single-element SIMD operations
-// ============================================================================
-
-// Single quaternion-vector multiplication with SIMD
-// Optimize linalg::quaternion128_mul_vector3
-quaternion_mul_vector3 :: proc "contextless" (
-  q: quaternion128,
-  v: [3]f32,
-) -> [3]f32 {
-  when ODIN_ARCH == .amd64 {
-    // Quaternion-vector multiplication: v' = v + 2*qw*(qv x v) + 2*(qv x (qv x v))
-    // First cross: t = 2(qv x v)
-    tx := 2 * (q.y * v.z - q.z * v.y)
-    ty := 2 * (q.z * v.x - q.x * v.z)
-    tz := 2 * (q.x * v.y - q.y * v.x)
-    // Second cross: u = qv x t
-    ux := q.y * tz - q.z * ty
-    uy := q.z * tx - q.x * tz
-    uz := q.x * ty - q.y * tx
-    // Final result: v' = v + q.w*t + u
-    // Using FMA when available
-    rx := v.x + q.w * tx + ux
-    ry := v.y + q.w * ty + uy
-    rz := v.z + q.w * tz + uz
-    return {rx, ry, rz}
-  } else {
-    return linalg.mul(q, v)
-  }
-}
-
-// ============================================================================
 // Batch-4 SIMD operations (SSE - 4-wide)
 // ============================================================================
 
@@ -297,10 +266,10 @@ quaternion_mul_vector3_batch4 :: proc "contextless" (
 
   if simd_mode == .Scalar {
     // Scalar fallback
-    result[0] = linalg.mul(q[0], v[0])
-    result[1] = linalg.mul(q[1], v[1])
-    result[2] = linalg.mul(q[2], v[2])
-    result[3] = linalg.mul(q[3], v[3])
+    result[0] = geometry.qmv(q[0], v[0])
+    result[1] = geometry.qmv(q[1], v[1])
+    result[2] = geometry.qmv(q[2], v[2])
+    result[3] = geometry.qmv(q[3], v[3])
     return result
   }
 

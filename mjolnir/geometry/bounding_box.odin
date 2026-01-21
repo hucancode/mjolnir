@@ -187,18 +187,18 @@ obb_closest_point :: proc "contextless" (obb: Obb, point: [3]f32) -> [3]f32 {
   d := point - obb.center
   // Transform point to OBB local space
   inv_rot := linalg.quaternion_inverse(obb.rotation)
-  local := linalg.mul(inv_rot, d)
+  local := qmv(inv_rot, d)
   // Clamp to box extents
   clamped := linalg.clamp(local, -obb.half_extents, obb.half_extents)
   // Transform back to world space
-  return obb.center + linalg.mul(obb.rotation, clamped)
+  return obb.center + qmv(obb.rotation, clamped)
 }
 
 // Check if point is inside OBB
 obb_contains_point :: proc "contextless" (obb: Obb, point: [3]f32) -> bool {
   d := point - obb.center
   inv_rot := linalg.quaternion_inverse(obb.rotation)
-  local := linalg.mul(inv_rot, d)
+  local := qmv(inv_rot, d)
   return(
     math.abs(local.x) <= obb.half_extents.x &&
     math.abs(local.y) <= obb.half_extents.y &&
@@ -438,7 +438,7 @@ obb_cylinder_intersect :: proc(
   hit: bool,
 ) {
   // Cylinder axis in world space
-  cylinder_axis := linalg.mul(cylinder_rotation, linalg.VECTOR3F32_Y_AXIS)
+  cylinder_axis := qmv(cylinder_rotation, linalg.VECTOR3F32_Y_AXIS)
   h := cylinder_height * 0.5
   line_start := cylinder_center - cylinder_axis * h
   line_end := cylinder_center + cylinder_axis * h

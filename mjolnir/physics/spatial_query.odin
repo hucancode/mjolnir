@@ -124,7 +124,7 @@ raycast_collider :: proc(
   normal: [3]f32,
   hit: bool,
 ) {
-  center := position + linalg.mul(rotation, collider.offset)
+  center := position + geometry.qmv(rotation, collider.offset)
   switch shape in collider.shape {
   case SphereCollider:
     sphere_prim := geometry.Sphere {
@@ -258,7 +258,7 @@ test_collider_sphere_overlap :: proc(
   sphere_center: [3]f32,
   sphere_radius: f32,
 ) -> bool {
-  center := collider_pos + linalg.mul(collider_rot, collider.offset)
+  center := collider_pos + geometry.qmv(collider_rot, collider.offset)
   switch shape in collider.shape {
   case SphereCollider:
     len := shape.radius + sphere_radius
@@ -290,7 +290,7 @@ test_collider_aabb_overlap :: proc(
   collider_rot: quaternion128,
   bounds: geometry.Aabb,
 ) -> bool {
-  center := collider_pos + linalg.mul(collider_rot, collider.offset)
+  center := collider_pos + geometry.qmv(collider_rot, collider.offset)
   // Use center point test for now - could be more precise
   return geometry.aabb_contains_point(bounds, center)
 }

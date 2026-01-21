@@ -135,10 +135,10 @@ update_transforms_from_positions :: proc(
 
       // Get FK bone's perpendicular axis (local X transformed to world)
       fk_rotation := world_transforms[bone_idx].world_rotation
-      fk_perp := linalg.mul(fk_rotation, [3]f32{1, 0, 0})
+      fk_perp := geometry.qmv(fk_rotation, [3]f32{1, 0, 0})
 
       // Apply swing to get current perpendicular
-      current_perp := linalg.mul(swing, fk_perp)
+      current_perp := geometry.qmv(swing, fk_perp)
 
       // Compute desired perpendicular from pole
       to_pole := pole_vector - positions[i]

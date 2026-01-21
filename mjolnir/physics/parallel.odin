@@ -164,7 +164,7 @@ aabb_cache_update_task :: proc(task: thread.Task) {
       // Check if collider needs OBB-to-AABB conversion
       needs_obb := false
       obb: geometry.Obb
-      center := body.position + quaternion_mul_vector3(body.rotation, collider.offset)
+      center := body.position + geometry.qmv(body.rotation, collider.offset)
 
       switch sh in collider.shape {
       case SphereCollider:

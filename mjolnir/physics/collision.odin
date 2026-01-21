@@ -231,7 +231,7 @@ test_point_cylinder :: proc(
   local_point := point - cylinder_center
   // Rotate point by inverse of cylinder's rotation
   inv_rot := linalg.quaternion_inverse(cylinder_rot)
-  local_point = linalg.mul(inv_rot, local_point)
+  local_point = geometry.qmv(inv_rot, local_point)
   // In local space, cylinder axis is Y, check radial distance and height
   half_height := cylinder.height * 0.5
   return(
@@ -251,7 +251,7 @@ test_point_fan :: proc(
   local_point := point - fan_center
   // Rotate point by inverse of fan's rotation
   inv_rot := linalg.quaternion_inverse(fan_rot)
-  local_point = linalg.mul(inv_rot, local_point)
+  local_point = geometry.qmv(inv_rot, local_point)
   // In local space, fan forward direction is +Z, axis is Y
   // Check radial distance and height first (like cylinder)
   radial_dist_sq := linalg.length2(local_point)
@@ -286,7 +286,7 @@ test_sphere_cylinder :: proc(
   // Transform sphere to cylinder's local space
   to_sphere := pos_sphere - pos_cylinder
   inv_rot := linalg.quaternion_inverse(rot_cylinder)
-  local_sphere := linalg.mul(inv_rot, to_sphere)
+  local_sphere := geometry.qmv(inv_rot, to_sphere)
   // In local space, cylinder axis is Y
   half_height := cylinder.height * 0.5
   // Vector from axis to sphere center in XZ plane
@@ -361,8 +361,8 @@ test_sphere_cylinder :: proc(
     local_normal = linalg.normalize([3]f32{local_closest.x, 0, local_closest.z})
   }
   // Transform to world space
-  world_closest := pos_cylinder + linalg.mul(rot_cylinder, local_closest)
-  world_normal := linalg.mul(rot_cylinder, local_normal)
+  world_closest := pos_cylinder + geometry.qmv(rot_cylinder, local_closest)
+  world_normal := geometry.qmv(rot_cylinder, local_normal)
   delta := pos_sphere - world_closest
   dist_sq := linalg.length2(delta)
   if dist_sq > sphere.radius * sphere.radius {
@@ -428,10 +428,10 @@ test_cylinder_cylinder :: proc(
   // Transform cylinder B to cylinder A's local space
   to_b := pos_b - pos_a
   inv_rot_a := linalg.quaternion_inverse(rot_a)
-  local_b_center := quaternion_mul_vector3(inv_rot_a, to_b)
+  local_b_center := geometry.qmv(inv_rot_a, to_b)
   // Cylinder B's axis in cylinder A's local space
-  b_axis_world := quaternion_mul_vector3(rot_b, linalg.VECTOR3F32_Y_AXIS)
-  b_axis_local := quaternion_mul_vector3(inv_rot_a, b_axis_world)
+  b_axis_world := geometry.qmv(rot_b, linalg.VECTOR3F32_Y_AXIS)
+  b_axis_local := geometry.qmv(inv_rot_a, b_axis_world)
   // Check if axes are parallel
   parallel := math.abs(math.abs(b_axis_local.y) - 1.0) < 0.01
   if parallel {
@@ -459,8 +459,8 @@ test_cylinder_cylinder :: proc(
     local_point :=
       local_normal * (cylinder_a.radius - (radius_sum - radial_dist) * 0.5)
     // Transform back to world space
-    normal = quaternion_mul_vector3(rot_a, local_normal)
-    point = pos_a + quaternion_mul_vector3(rot_a, local_point)
+    normal = geometry.qmv(rot_a, local_normal)
+    point = pos_a + geometry.qmv(rot_a, local_point)
     penetration = radius_sum - radial_dist
     hit = true
     return
@@ -501,8 +501,8 @@ test_collision :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  center_a := pos_a + quaternion_mul_vector3(rot_a, collider_a.offset)
-  center_b := pos_b + quaternion_mul_vector3(rot_b, collider_b.offset)
+  center_a := pos_a + geometry.qmv(rot_a, collider_a.offset)
+  center_b := pos_b + geometry.qmv(rot_b, collider_b.offset)
   switch shape_a in collider_a.shape {
   case FanCollider:
     return
@@ -608,8 +608,8 @@ test_collision_gjk :: proc(
   if !hit {
     return
   }
-  center_a := pos_a + quaternion_mul_vector3(rot_a, collider_a.offset)
-  center_b := pos_b + quaternion_mul_vector3(rot_b, collider_b.offset)
+  center_a := pos_a + geometry.qmv(rot_a, collider_a.offset)
+  center_b := pos_b + geometry.qmv(rot_b, collider_b.offset)
   point = center_a + normal * penetration * 0.5
   return
 }

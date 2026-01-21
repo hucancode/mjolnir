@@ -1,5 +1,6 @@
 package physics
 
+import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
@@ -34,16 +35,16 @@ find_furthest_point :: proc(
   case BoxCollider:
     // Transform direction to box's local space
     inv_rot := linalg.quaternion_inverse(rotation)
-    local_dir := linalg.mul(inv_rot, direction)
+    local_dir := geometry.qmv(inv_rot, direction)
     // Find furthest vertex in local space (sign gives us the correct octant)
     local_vertex := shape.half_extents * linalg.sign(local_dir)
     // Transform back to world space
-    world_vertex := linalg.mul(rotation, local_vertex)
+    world_vertex := geometry.qmv(rotation, local_vertex)
     return center + world_vertex
   case CylinderCollider:
     // Transform direction to cylinder's local space
     inv_rot := linalg.quaternion_inverse(rotation)
-    local_dir := linalg.mul(inv_rot, direction)
+    local_dir := geometry.qmv(inv_rot, direction)
     // In local space, cylinder axis is Y
     h := shape.height * 0.5
     // Get Y component (along axis)
@@ -52,18 +53,18 @@ find_furthest_point :: proc(
     radial_point := linalg.normalize0(local_dir.xz) * shape.radius
     local_point := [3]f32{radial_point.x, y_component, radial_point.y}
     // Transform back to world space
-    world_point := linalg.mul(rotation, local_point)
+    world_point := geometry.qmv(rotation, local_point)
     return center + world_point
   case FanCollider:
     // Fan is trigger-only, but provide support for completeness
     // Treat as full cylinder for support function
     inv_rot := linalg.quaternion_inverse(rotation)
-    local_dir := linalg.mul(inv_rot, direction)
+    local_dir := geometry.qmv(inv_rot, direction)
     h := shape.height * 0.5
     y_component := local_dir.y >= 0 ? h : -h
     radial_point := linalg.normalize0(local_dir.xz) * shape.radius
     local_point := [3]f32{radial_point.x, y_component, radial_point.y}
-    world_point := linalg.mul(rotation, local_point)
+    world_point := geometry.qmv(rotation, local_point)
     return center + world_point
   }
   return center

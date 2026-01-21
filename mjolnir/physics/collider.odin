@@ -47,7 +47,7 @@ collider_calculate_aabb :: #force_inline proc(
   position: [3]f32,
   rotation: quaternion128,
 ) -> geometry.Aabb {
-  center := position + linalg.mul(rotation, self.offset)
+  center := position + geometry.qmv(rotation, self.offset)
   switch sh in self.shape {
   case SphereCollider:
     return geometry.Aabb{min = center - sh.radius, max = center + sh.radius}
