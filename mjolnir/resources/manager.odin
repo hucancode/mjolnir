@@ -22,18 +22,19 @@ BINDLESS_VERTEX_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
 BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024 // 64MB
 BINDLESS_SKINNING_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
 // Configuration for different allocation sizes
-// Total capacity: 256*512 + 1024*256 + 4096*128 + 16384*64 + 65536*16 + 262144*4 + 1048576*1 + 0*0 = 2,097,152 vertices
+// Total capacity MUST equal buffer capacity: 128MB / 64 bytes = 2,097,152 vertices
+// Current: 256*512 + 1024*128 + 4096*64 + 16384*16 + 65536*8 + 131072*4 = 2,097,152 vertices
 VERTEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   block_size, block_count: u32,
 } {
-  {block_size = 256, block_count = 512}, // Small meshes: 131,072 vertices
-  {block_size = 1024, block_count = 256}, // Medium meshes: 262,144 vertices
-  {block_size = 4096, block_count = 128}, // Large meshes: 524,288 vertices
-  {block_size = 16384, block_count = 64}, // Very large meshes: 1,048,576 vertices
-  {block_size = 65536, block_count = 16}, // Huge meshes: 1,048,576 vertices
-  {block_size = 262144, block_count = 4}, // Massive meshes: 1,048,576 vertices
-  {block_size = 1048576, block_count = 1}, // Giant meshes: 1,048,576 vertices
-  {block_size = 0, block_count = 0}, // Unused - disabled to fit within buffer
+  {block_size = 256, block_count = 512},    // Small meshes: 131,072 vertices, range [0, 131K)
+  {block_size = 1024, block_count = 128},   // Medium meshes: 131,072 vertices, range [131K, 262K)
+  {block_size = 4096, block_count = 64},    // Large meshes: 262,144 vertices, range [262K, 524K)
+  {block_size = 16384, block_count = 16},   // Very large meshes: 262,144 vertices, range [524K, 786K)
+  {block_size = 65536, block_count = 8},    // Huge meshes: 524,288 vertices, range [786K, 1310K)
+  {block_size = 131072, block_count = 4},   // Massive meshes: 524,288 vertices, range [1310K, 1835K)
+  {block_size = 262144, block_count = 1},   // Giant meshes: 262,144 vertices, range [1835K, 2097K)
+  {block_size = 0, block_count = 0},        // Unused
 }
 
 // Total capacity: 128*2048 + 512*1024 + 2048*512 + 8192*256 + 32768*128 + 131072*32 + 524288*8 + 2097152*4 = 16,777,216 indices
