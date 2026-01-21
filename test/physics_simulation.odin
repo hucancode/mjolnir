@@ -43,7 +43,7 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
     for y in 0 ..< NY {
       for z in 0 ..< NZ {
         if idx >= CUBE_COUNT do break
-        pos := [3]f32{
+        pos := [3]f32 {
           f32(x - NX / 2) * 3.0,
           f32(y) * 3.0 + 10.0, // Start at height 10
           f32(z - NZ / 2) * 3.0,
@@ -55,7 +55,10 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
           linalg.QUATERNIONF32_IDENTITY,
           50,
         )
-        if body, ok := physics.get_dynamic_body(&physics_world, cube_handles[idx]); ok {
+        if body, ok := physics.get_dynamic_body(
+          &physics_world,
+          cube_handles[idx],
+        ); ok {
           // Higher damping needed with exponential decay formula to settle within 1000 steps
           body.linear_damping = 0.5
           body.angular_damping = 0.5
@@ -73,13 +76,21 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
 
     // Log cube positions periodically to debug
     if step % 100 == 0 {
-      contact_count := len(physics_world.dynamic_contacts) + len(physics_world.static_contacts)
+      contact_count :=
+        len(physics_world.dynamic_contacts) +
+        len(physics_world.static_contacts)
       fmt.printf("\n=== Step %d, %d contacts ===\n", step, contact_count)
       for handle, i in cube_handles {
         if body, ok := physics.get_dynamic_body(&physics_world, handle); ok {
-          fmt.printf("  Cube %d: pos=(%.3f,%.3f,%.3f) vel=%.3f angvel=%.3f\n",
-            i, body.position.x, body.position.y, body.position.z,
-            linalg.length(body.velocity), linalg.length(body.angular_velocity))
+          fmt.printf(
+            "  Cube %d: pos=(%.3f,%.3f,%.3f) vel=%.3f angvel=%.3f\n",
+            i,
+            body.position.x,
+            body.position.y,
+            body.position.z,
+            linalg.length(body.velocity),
+            linalg.length(body.angular_velocity),
+          )
         } else {
           fmt.printf("  Cube %d: REMOVED\n", i)
         }
@@ -89,15 +100,25 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
         fmt.printf("  Sample contacts:\n")
         printed := 0
         for contact in physics_world.dynamic_contacts {
-          fmt.printf("    [dyn] penetration=%.4f normal=(%.2f,%.2f,%.2f)\n",
-            contact.penetration, contact.normal.x, contact.normal.y, contact.normal.z)
+          fmt.printf(
+            "    [dyn] penetration=%.4f normal=(%.2f,%.2f,%.2f)\n",
+            contact.penetration,
+            contact.normal.x,
+            contact.normal.y,
+            contact.normal.z,
+          )
           printed += 1
           if printed >= 3 do break
         }
         if printed < 3 {
           for contact in physics_world.static_contacts {
-            fmt.printf("    [sta] penetration=%.4f normal=(%.2f,%.2f,%.2f)\n",
-              contact.penetration, contact.normal.x, contact.normal.y, contact.normal.z)
+            fmt.printf(
+              "    [sta] penetration=%.4f normal=(%.2f,%.2f,%.2f)\n",
+              contact.penetration,
+              contact.normal.x,
+              contact.normal.y,
+              contact.normal.z,
+            )
             printed += 1
             if printed >= 3 do break
           }
@@ -127,8 +148,15 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
     linear_vel := linalg.length(body.velocity)
     angular_vel := linalg.length(body.angular_velocity)
 
-    fmt.printf("Cube %d: pos=(%.3f,%.3f,%.3f) vel=%.3f angvel=%.3f\n",
-      i, body.position.x, body.position.y, body.position.z, linear_vel, angular_vel)
+    fmt.printf(
+      "Cube %d: pos=(%.3f,%.3f,%.3f) vel=%.3f angvel=%.3f\n",
+      i,
+      body.position.x,
+      body.position.y,
+      body.position.z,
+      linear_vel,
+      angular_vel,
+    )
 
     // Check not sinking
     testing.expectf(
@@ -141,15 +169,21 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
     )
 
     // Check if settled (at rest)
-    if linear_vel < velocity_threshold && angular_vel < angular_velocity_threshold {
+    if linear_vel < velocity_threshold &&
+       angular_vel < angular_velocity_threshold {
       settled_cubes += 1
     }
   }
 
   // Log final statistics
-  final_contacts := len(physics_world.dynamic_contacts) + len(physics_world.static_contacts)
-  fmt.printf("Final state: %d contacts, %d/%d cubes alive/settled\n",
-    final_contacts, alive_cubes, settled_cubes)
+  final_contacts :=
+    len(physics_world.dynamic_contacts) + len(physics_world.static_contacts)
+  fmt.printf(
+    "Final state: %d contacts, %d/%d cubes alive/settled\n",
+    final_contacts,
+    alive_cubes,
+    settled_cubes,
+  )
 
   testing.expectf(
     t,

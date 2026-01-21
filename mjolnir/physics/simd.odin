@@ -1,20 +1,18 @@
 package physics
 
-import "core:simd"
-import "core:sys/info"
-import "core:log"
 import "../geometry"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:simd"
+import "core:sys/info"
 
-// Runtime SIMD detection
 SIMD_Mode :: enum {
   Scalar,
-  SSE,    // 4-wide (128-bit)
-  AVX2,   // 8-wide (256-bit)
+  SSE, // 4-wide (128-bit)
+  AVX2, // 8-wide (256-bit)
 }
 
-// Global SIMD configuration (initialized at runtime)
 simd_mode: SIMD_Mode
 simd_lanes: int
 
@@ -22,14 +20,19 @@ f32x4 :: #simd[4]f32
 f32x8 :: #simd[8]f32
 
 // SIMD constants (computed once, not per-call)
-SIMD_ZERO_4    := f32x4{0, 0, 0, 0}
-SIMD_ONE_4     := f32x4{1, 1, 1, 1}
-SIMD_TWO_4     := f32x4{2, 2, 2, 2}
-SIMD_EPSILON_4 := f32x4{math.F32_EPSILON, math.F32_EPSILON, math.F32_EPSILON, math.F32_EPSILON}
+SIMD_ZERO_4 := f32x4{0, 0, 0, 0}
+SIMD_ONE_4 := f32x4{1, 1, 1, 1}
+SIMD_TWO_4 := f32x4{2, 2, 2, 2}
+SIMD_EPSILON_4 := f32x4 {
+  math.F32_EPSILON,
+  math.F32_EPSILON,
+  math.F32_EPSILON,
+  math.F32_EPSILON,
+}
 
-SIMD_ZERO_8    := f32x8{0, 0, 0, 0, 0, 0, 0, 0}
-SIMD_ONE_8     := f32x8{1, 1, 1, 1, 1, 1, 1, 1}
-SIMD_TWO_8     := f32x8{2, 2, 2, 2, 2, 2, 2, 2}
+SIMD_ZERO_8 := f32x8{0, 0, 0, 0, 0, 0, 0, 0}
+SIMD_ONE_8 := f32x8{1, 1, 1, 1, 1, 1, 1, 1}
+SIMD_TWO_8 := f32x8{2, 2, 2, 2, 2, 2, 2, 2}
 
 @(init, private)
 init_simd :: proc "contextless" () {
@@ -55,41 +58,30 @@ init_simd :: proc "contextless" () {
 }
 
 // ============================================================================
-// Single-element SIMD operations (targets the 18% scalar hotspots)
+// Single-element SIMD operations
 // ============================================================================
 
 // Single quaternion-vector multiplication with SIMD
-// Targets: linalg::quaternion128_mul_vector3 (11.03% CPU)
-quaternion_mul_vector3 :: proc "contextless" (q: quaternion128, v: [3]f32) -> [3]f32 {
+// Optimize linalg::quaternion128_mul_vector3
+quaternion_mul_vector3 :: proc "contextless" (
+  q: quaternion128,
+  v: [3]f32,
+) -> [3]f32 {
   when ODIN_ARCH == .amd64 {
-    // Use SIMD even for single operation
-    // Load into first lane, compute, extract
-    qx := q.x
-    qy := q.y
-    qz := q.z
-    qw := q.w
-
-    vx := v.x
-    vy := v.y
-    vz := v.z
-
     // Quaternion-vector multiplication: v' = v + 2*qw*(qv x v) + 2*(qv x (qv x v))
-    // First cross: t = qv x v
-    tx := qy * vz - qz * vy
-    ty := qz * vx - qx * vz
-    tz := qx * vy - qy * vx
-
+    // First cross: t = 2(qv x v)
+    tx := 2 * (q.y * v.z - q.z * v.y)
+    ty := 2 * (q.z * v.x - q.x * v.z)
+    tz := 2 * (q.x * v.y - q.y * v.x)
     // Second cross: u = qv x t
-    ux := qy * tz - qz * ty
-    uy := qz * tx - qx * tz
-    uz := qx * ty - qy * tx
-
-    // Final result: v' = v + 2*qw*t + 2*u
+    ux := q.y * tz - q.z * ty
+    uy := q.z * tx - q.x * tz
+    uz := q.x * ty - q.y * tx
+    // Final result: v' = v + q.w*t + u
     // Using FMA when available
-    rx := vx + 2 * qw * tx + 2 * ux
-    ry := vy + 2 * qw * ty + 2 * uy
-    rz := vz + 2 * qw * tz + 2 * uz
-
+    rx := v.x + q.w * tx + ux
+    ry := v.y + q.w * ty + uy
+    rz := v.z + q.w * tz + uz
     return {rx, ry, rz}
   } else {
     return linalg.mul(q, v)
@@ -116,19 +108,69 @@ obb_to_aabb_batch4 :: proc "contextless" (
   }
 
   // Extract centers and half_extents (transpose from AoS to SoA)
-  center_x := f32x4{obbs[0].center.x, obbs[1].center.x, obbs[2].center.x, obbs[3].center.x}
-  center_y := f32x4{obbs[0].center.y, obbs[1].center.y, obbs[2].center.y, obbs[3].center.y}
-  center_z := f32x4{obbs[0].center.z, obbs[1].center.z, obbs[2].center.z, obbs[3].center.z}
+  center_x := f32x4 {
+    obbs[0].center.x,
+    obbs[1].center.x,
+    obbs[2].center.x,
+    obbs[3].center.x,
+  }
+  center_y := f32x4 {
+    obbs[0].center.y,
+    obbs[1].center.y,
+    obbs[2].center.y,
+    obbs[3].center.y,
+  }
+  center_z := f32x4 {
+    obbs[0].center.z,
+    obbs[1].center.z,
+    obbs[2].center.z,
+    obbs[3].center.z,
+  }
 
-  hx := f32x4{obbs[0].half_extents.x, obbs[1].half_extents.x, obbs[2].half_extents.x, obbs[3].half_extents.x}
-  hy := f32x4{obbs[0].half_extents.y, obbs[1].half_extents.y, obbs[2].half_extents.y, obbs[3].half_extents.y}
-  hz := f32x4{obbs[0].half_extents.z, obbs[1].half_extents.z, obbs[2].half_extents.z, obbs[3].half_extents.z}
+  hx := f32x4 {
+    obbs[0].half_extents.x,
+    obbs[1].half_extents.x,
+    obbs[2].half_extents.x,
+    obbs[3].half_extents.x,
+  }
+  hy := f32x4 {
+    obbs[0].half_extents.y,
+    obbs[1].half_extents.y,
+    obbs[2].half_extents.y,
+    obbs[3].half_extents.y,
+  }
+  hz := f32x4 {
+    obbs[0].half_extents.z,
+    obbs[1].half_extents.z,
+    obbs[2].half_extents.z,
+    obbs[3].half_extents.z,
+  }
 
   // Extract quaternion components
-  qx := f32x4{obbs[0].rotation.x, obbs[1].rotation.x, obbs[2].rotation.x, obbs[3].rotation.x}
-  qy := f32x4{obbs[0].rotation.y, obbs[1].rotation.y, obbs[2].rotation.y, obbs[3].rotation.y}
-  qz := f32x4{obbs[0].rotation.z, obbs[1].rotation.z, obbs[2].rotation.z, obbs[3].rotation.z}
-  qw := f32x4{obbs[0].rotation.w, obbs[1].rotation.w, obbs[2].rotation.w, obbs[3].rotation.w}
+  qx := f32x4 {
+    obbs[0].rotation.x,
+    obbs[1].rotation.x,
+    obbs[2].rotation.x,
+    obbs[3].rotation.x,
+  }
+  qy := f32x4 {
+    obbs[0].rotation.y,
+    obbs[1].rotation.y,
+    obbs[2].rotation.y,
+    obbs[3].rotation.y,
+  }
+  qz := f32x4 {
+    obbs[0].rotation.z,
+    obbs[1].rotation.z,
+    obbs[2].rotation.z,
+    obbs[3].rotation.z,
+  }
+  qw := f32x4 {
+    obbs[0].rotation.w,
+    obbs[1].rotation.w,
+    obbs[2].rotation.w,
+    obbs[3].rotation.w,
+  }
 
   // Precompute rotation matrix terms
   xx := qx * qx

@@ -128,7 +128,10 @@ test_obb_to_aabb_batch4_rotated :: proc(t: ^testing.T) {
   obbs[3] = geometry.Obb {
     center       = {10, -10, 5},
     half_extents = {1, 1, 2},
-    rotation     = linalg.quaternion_angle_axis_f32(f32(math.PI / 6.0), [3]f32{1, 1, 1}),
+    rotation     = linalg.quaternion_angle_axis_f32(
+      f32(math.PI / 6.0),
+      [3]f32{1, 1, 1},
+    ),
   }
 
   // Compute reference AABBs with scalar path
@@ -531,7 +534,10 @@ benchmark_vector_cross3 :: proc(t: ^testing.T) {
       for idx in 0 ..< len(data_ptr.vectors_a) {
         result: [4][3]f32
         for j in 0 ..< 4 {
-          result[j] = linalg.cross(data_ptr.vectors_a[idx][j], data_ptr.vectors_b[idx][j])
+          result[j] = linalg.cross(
+            data_ptr.vectors_a[idx][j],
+            data_ptr.vectors_b[idx][j],
+          )
         }
         options.processed += 4 * size_of([3]f32)
       }
@@ -616,7 +622,10 @@ benchmark_quaternion_mul_vector3 :: proc(t: ^testing.T) {
       for idx in 0 ..< len(data_ptr.quaternions) {
         result: [4][3]f32
         for j in 0 ..< 4 {
-          result[j] = linalg.mul(data_ptr.quaternions[idx][j], data_ptr.vectors[idx][j])
+          result[j] = linalg.mul(
+            data_ptr.quaternions[idx][j],
+            data_ptr.vectors[idx][j],
+          )
         }
         options.processed += 4 * size_of([3]f32)
       }
@@ -677,7 +686,10 @@ benchmark_vector_dot3 :: proc(t: ^testing.T) {
     data_ptr := cast(^Benchmark_Vector_Data)raw_data(options.input)
     for i in 0 ..< options.rounds {
       for idx in 0 ..< len(data_ptr.vectors_a) {
-        _ = physics.vector_dot3_batch4(data_ptr.vectors_a[idx], data_ptr.vectors_b[idx])
+        _ = physics.vector_dot3_batch4(
+          data_ptr.vectors_a[idx],
+          data_ptr.vectors_b[idx],
+        )
         options.processed += 4 * size_of(f32)
       }
     }
@@ -694,7 +706,10 @@ benchmark_vector_dot3 :: proc(t: ^testing.T) {
       for idx in 0 ..< len(data_ptr.vectors_a) {
         result: [4]f32
         for j in 0 ..< 4 {
-          result[j] = linalg.dot(data_ptr.vectors_a[idx][j], data_ptr.vectors_b[idx][j])
+          result[j] = linalg.dot(
+            data_ptr.vectors_a[idx][j],
+            data_ptr.vectors_b[idx][j],
+          )
         }
         options.processed += 4 * size_of(f32)
       }
@@ -894,20 +909,44 @@ test_aabb_intersects_batch4 :: proc(t: ^testing.T) {
   b: [4]geometry.Aabb
 
   // Case 1: AABBs that intersect
-  a[0] = geometry.Aabb{min = {0, 0, 0}, max = {2, 2, 2}}
-  b[0] = geometry.Aabb{min = {1, 1, 1}, max = {3, 3, 3}}
+  a[0] = geometry.Aabb {
+    min = {0, 0, 0},
+    max = {2, 2, 2},
+  }
+  b[0] = geometry.Aabb {
+    min = {1, 1, 1},
+    max = {3, 3, 3},
+  }
 
   // Case 2: AABBs that don't intersect (separated on X axis)
-  a[1] = geometry.Aabb{min = {0, 0, 0}, max = {1, 1, 1}}
-  b[1] = geometry.Aabb{min = {2, 0, 0}, max = {3, 1, 1}}
+  a[1] = geometry.Aabb {
+    min = {0, 0, 0},
+    max = {1, 1, 1},
+  }
+  b[1] = geometry.Aabb {
+    min = {2, 0, 0},
+    max = {3, 1, 1},
+  }
 
   // Case 3: AABBs that touch (edge case)
-  a[2] = geometry.Aabb{min = {0, 0, 0}, max = {1, 1, 1}}
-  b[2] = geometry.Aabb{min = {1, 0, 0}, max = {2, 1, 1}}
+  a[2] = geometry.Aabb {
+    min = {0, 0, 0},
+    max = {1, 1, 1},
+  }
+  b[2] = geometry.Aabb {
+    min = {1, 0, 0},
+    max = {2, 1, 1},
+  }
 
   // Case 4: One AABB completely inside another
-  a[3] = geometry.Aabb{min = {0, 0, 0}, max = {10, 10, 10}}
-  b[3] = geometry.Aabb{min = {2, 2, 2}, max = {8, 8, 8}}
+  a[3] = geometry.Aabb {
+    min = {0, 0, 0},
+    max = {10, 10, 10},
+  }
+  b[3] = geometry.Aabb {
+    min = {2, 2, 2},
+    max = {8, 8, 8},
+  }
 
   // Compute reference with scalar path
   expected: [4]bool
@@ -968,7 +1007,10 @@ benchmark_obb_to_aabb :: proc(t: ^testing.T) {
       data.obbs[i][j] = geometry.Obb {
         center       = {f32(i + j), f32(i * 2 + j), f32(i * 3 + j)},
         half_extents = {1.5, 2.0, 2.5},
-        rotation     = linalg.quaternion_angle_axis_f32(angle, [3]f32{1, 1, 1}),
+        rotation     = linalg.quaternion_angle_axis_f32(
+          angle,
+          [3]f32{1, 1, 1},
+        ),
       }
     }
   }
@@ -1038,6 +1080,95 @@ benchmark_obb_to_aabb :: proc(t: ^testing.T) {
   )
 }
 
+// Benchmark data structure for single quaternion-vector operations
+Benchmark_Single_Quaternion_Data :: struct {
+	quaternions: [100000]quaternion128,
+	vectors:     [100000][3]f32,
+}
+
+@(test)
+benchmark_quaternion_mul_vector3_single :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+
+	// Setup test data - use heap allocation to avoid stack overflow
+	data := new(Benchmark_Single_Quaternion_Data)
+	defer free(data)
+	for i in 0 ..< len(data.quaternions) {
+		angle := f32(i) * 0.01
+		data.quaternions[i] = linalg.quaternion_angle_axis_f32(
+			angle,
+			[3]f32{1, 1, 1},
+		)
+		data.vectors[i] = {f32(i % 100 + 1), f32((i * 2) % 100 + 1), f32((i * 3) % 100 + 1)}
+	}
+
+	// Benchmark custom SIMD implementation
+	custom_proc :: proc(
+		options: ^time.Benchmark_Options,
+		allocator := context.allocator,
+	) -> time.Benchmark_Error {
+		data_ptr := cast(^Benchmark_Single_Quaternion_Data)raw_data(options.input)
+		for i in 0 ..< options.rounds {
+			for idx in 0 ..< len(data_ptr.quaternions) {
+				_ = physics.quaternion_mul_vector3(
+					data_ptr.quaternions[idx],
+					data_ptr.vectors[idx],
+				)
+				options.processed += size_of([3]f32)
+			}
+		}
+		return nil
+	}
+
+	// Benchmark linalg.mul (standard library)
+	linalg_proc :: proc(
+		options: ^time.Benchmark_Options,
+		allocator := context.allocator,
+	) -> time.Benchmark_Error {
+		data_ptr := cast(^Benchmark_Single_Quaternion_Data)raw_data(options.input)
+		for i in 0 ..< options.rounds {
+			for idx in 0 ..< len(data_ptr.quaternions) {
+				_ = linalg.mul(
+					data_ptr.quaternions[idx],
+					data_ptr.vectors[idx],
+				)
+				options.processed += size_of([3]f32)
+			}
+		}
+		return nil
+	}
+
+	input_bytes := slice.bytes_from_ptr(data, size_of(Benchmark_Single_Quaternion_Data))
+
+	// Run custom SIMD benchmark
+	custom_options := &time.Benchmark_Options {
+		rounds = 100,
+		bytes = len(data.quaternions) * size_of([3]f32) * 100,
+		input = input_bytes,
+		bench = custom_proc,
+	}
+	time.benchmark(custom_options)
+
+	// Run linalg benchmark
+	linalg_options := &time.Benchmark_Options {
+		rounds = 100,
+		bytes = len(data.quaternions) * size_of([3]f32) * 100,
+		input = input_bytes,
+		bench = linalg_proc,
+	}
+	time.benchmark(linalg_options)
+
+	speedup := f64(linalg_options.duration) / f64(custom_options.duration)
+	log.infof(
+		"Single Quat-Vec Mul: Custom %.2f ms (%.2f MB/s) | linalg %.2f ms (%.2f MB/s) | Speedup: %.2fx",
+		f64(custom_options.duration) / 1_000_000,
+		custom_options.megabytes_per_second,
+		f64(linalg_options.duration) / 1_000_000,
+		linalg_options.megabytes_per_second,
+		speedup,
+	)
+}
+
 @(test)
 benchmark_aabb_intersects :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 30 * time.Second)
@@ -1054,8 +1185,16 @@ benchmark_aabb_intersects :: proc(t: ^testing.T) {
         max = {f32(i + j) + 5, f32(i * 2 + j) + 5, f32(i * 3 + j) + 5},
       }
       data.aabbs_b[i][j] = geometry.Aabb {
-        min = {f32(i + j) + offset, f32(i * 2 + j) + offset, f32(i * 3 + j) + offset},
-        max = {f32(i + j) + offset + 5, f32(i * 2 + j) + offset + 5, f32(i * 3 + j) + offset + 5},
+        min = {
+          f32(i + j) + offset,
+          f32(i * 2 + j) + offset,
+          f32(i * 3 + j) + offset,
+        },
+        max = {
+          f32(i + j) + offset + 5,
+          f32(i * 2 + j) + offset + 5,
+          f32(i * 3 + j) + offset + 5,
+        },
       }
     }
   }
@@ -1068,7 +1207,10 @@ benchmark_aabb_intersects :: proc(t: ^testing.T) {
     data_ptr := cast(^Benchmark_Aabb_Data)raw_data(options.input)
     for i in 0 ..< options.rounds {
       for idx in 0 ..< len(data_ptr.aabbs_a) {
-        _ = physics.aabb_intersects_batch4(data_ptr.aabbs_a[idx], data_ptr.aabbs_b[idx])
+        _ = physics.aabb_intersects_batch4(
+          data_ptr.aabbs_a[idx],
+          data_ptr.aabbs_b[idx],
+        )
         options.processed += 4 * size_of(bool)
       }
     }
@@ -1085,7 +1227,10 @@ benchmark_aabb_intersects :: proc(t: ^testing.T) {
       for idx in 0 ..< len(data_ptr.aabbs_a) {
         result: [4]bool
         for j in 0 ..< 4 {
-          result[j] = geometry.aabb_intersects(data_ptr.aabbs_a[idx][j], data_ptr.aabbs_b[idx][j])
+          result[j] = geometry.aabb_intersects(
+            data_ptr.aabbs_a[idx][j],
+            data_ptr.aabbs_b[idx][j],
+          )
         }
         options.processed += 4 * size_of(bool)
       }
