@@ -1080,99 +1080,92 @@ benchmark_obb_to_aabb :: proc(t: ^testing.T) {
   )
 }
 
-// Benchmark data structure for single quaternion-vector operations
-Benchmark_Single_Quaternion_Data :: struct {
-	quaternions: [100000]quaternion128,
-	vectors:     [100000][3]f32,
-}
 
 @(test)
 benchmark_quaternion_mul_vector3_single :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 30 * time.Second)
+  Benchmark_Data :: struct {
+    quaternions: [100000]quaternion128,
+    vectors:     [100000][3]f32,
+  }
+  data := new(Benchmark_Data)
+  defer free(data)
+  for i in 0 ..< len(data.quaternions) {
+    angle := f32(i) * 0.01
+    data.quaternions[i] = linalg.quaternion_angle_axis_f32(
+      angle,
+      [3]f32{1, 1, 1},
+    )
+    data.vectors[i] = {
+      f32(i % 100 + 1),
+      f32((i * 2) % 100 + 1),
+      f32((i * 3) % 100 + 1),
+    }
+  }
 
-	// Setup test data - use heap allocation to avoid stack overflow
-	data := new(Benchmark_Single_Quaternion_Data)
-	defer free(data)
-	for i in 0 ..< len(data.quaternions) {
-		angle := f32(i) * 0.01
-		data.quaternions[i] = linalg.quaternion_angle_axis_f32(
-			angle,
-			[3]f32{1, 1, 1},
-		)
-		data.vectors[i] = {f32(i % 100 + 1), f32((i * 2) % 100 + 1), f32((i * 3) % 100 + 1)}
-	}
+  custom_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    data_ptr := cast(^Benchmark_Data)raw_data(options.input)
+    for i in 0 ..< options.rounds {
+      for idx in 0 ..< len(data_ptr.quaternions) {
+        _ = geometry.qmv(data_ptr.quaternions[idx], data_ptr.vectors[idx])
+        options.processed += size_of([3]f32)
+      }
+    }
+    return nil
+  }
 
-	// Benchmark custom SIMD implementation
-	custom_proc :: proc(
-		options: ^time.Benchmark_Options,
-		allocator := context.allocator,
-	) -> time.Benchmark_Error {
-		data_ptr := cast(^Benchmark_Single_Quaternion_Data)raw_data(options.input)
-		for i in 0 ..< options.rounds {
-			for idx in 0 ..< len(data_ptr.quaternions) {
-				_ = geometry.qmv(
-					data_ptr.quaternions[idx],
-					data_ptr.vectors[idx],
-				)
-				options.processed += size_of([3]f32)
-			}
-		}
-		return nil
-	}
+  linalg_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    data_ptr := cast(^Benchmark_Data)raw_data(options.input)
+    for i in 0 ..< options.rounds {
+      for idx in 0 ..< len(data_ptr.quaternions) {
+        _ = linalg.mul(data_ptr.quaternions[idx], data_ptr.vectors[idx])
+        options.processed += size_of([3]f32)
+      }
+    }
+    return nil
+  }
 
-	// Benchmark linalg.mul (standard library)
-	linalg_proc :: proc(
-		options: ^time.Benchmark_Options,
-		allocator := context.allocator,
-	) -> time.Benchmark_Error {
-		data_ptr := cast(^Benchmark_Single_Quaternion_Data)raw_data(options.input)
-		for i in 0 ..< options.rounds {
-			for idx in 0 ..< len(data_ptr.quaternions) {
-				_ = linalg.mul(
-					data_ptr.quaternions[idx],
-					data_ptr.vectors[idx],
-				)
-				options.processed += size_of([3]f32)
-			}
-		}
-		return nil
-	}
+  input_bytes := slice.bytes_from_ptr(
+    data,
+    size_of(Benchmark_Data),
+  )
 
-	input_bytes := slice.bytes_from_ptr(data, size_of(Benchmark_Single_Quaternion_Data))
+  custom_options := &time.Benchmark_Options {
+    rounds = 100,
+    bytes = len(data.quaternions) * size_of([3]f32) * 100,
+    input = input_bytes,
+    bench = custom_proc,
+  }
+  time.benchmark(custom_options)
 
-	// Run custom SIMD benchmark
-	custom_options := &time.Benchmark_Options {
-		rounds = 100,
-		bytes = len(data.quaternions) * size_of([3]f32) * 100,
-		input = input_bytes,
-		bench = custom_proc,
-	}
-	time.benchmark(custom_options)
+  linalg_options := &time.Benchmark_Options {
+    rounds = 100,
+    bytes = len(data.quaternions) * size_of([3]f32) * 100,
+    input = input_bytes,
+    bench = linalg_proc,
+  }
+  time.benchmark(linalg_options)
 
-	// Run linalg benchmark
-	linalg_options := &time.Benchmark_Options {
-		rounds = 100,
-		bytes = len(data.quaternions) * size_of([3]f32) * 100,
-		input = input_bytes,
-		bench = linalg_proc,
-	}
-	time.benchmark(linalg_options)
-
-	speedup := f64(linalg_options.duration) / f64(custom_options.duration)
-	log.infof(
-		"Single Quat-Vec Mul: Custom %.2f ms (%.2f MB/s) | linalg %.2f ms (%.2f MB/s) | Speedup: %.2fx",
-		f64(custom_options.duration) / 1_000_000,
-		custom_options.megabytes_per_second,
-		f64(linalg_options.duration) / 1_000_000,
-		linalg_options.megabytes_per_second,
-		speedup,
-	)
+  speedup := f64(linalg_options.duration) / f64(custom_options.duration)
+  log.infof(
+    "Single Quat-Vec Mul: Custom %.2f ms (%.2f MB/s) | linalg %.2f ms (%.2f MB/s) | Speedup: %.2fx",
+    f64(custom_options.duration) / 1_000_000,
+    custom_options.megabytes_per_second,
+    f64(linalg_options.duration) / 1_000_000,
+    linalg_options.megabytes_per_second,
+    speedup,
+  )
 }
 
 // Benchmark data structure for EPA face operations
 Benchmark_EPA_Face_Data :: struct {
   vertices: [25000][4][3]f32, // 4 vertices per tetrahedron
-  indices:  [4][3]int,        // Standard tetrahedron indices
+  indices:  [4][3]int, // Standard tetrahedron indices
 }
 
 @(test)
