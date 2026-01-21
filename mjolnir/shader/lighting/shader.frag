@@ -227,8 +227,8 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     float G = NdotL / (NdotL * (1.0 - k) + k);
     G *= NdotV / (NdotV * (1.0 - k) + k);
     vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
-    vec3 spec = (NDF * G * F) / (4.0 * NdotV * NdotL + 0.01);
-    vec3 kS = F;
+    vec3 spec = NDF * G * F / (4.0 * NdotV * NdotL + 0.01);
+    vec3 kS = clamp(F, 0.0, 1.0);
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
     Lo += (kD * albedo / PI + spec) * light_color * NdotL * attenuation;
     return Lo;
@@ -278,15 +278,13 @@ void main() {
     vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rgb;
     vec2 mr = texture(sampler2D(textures[metallic_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rg;
     float metallic = clamp(mr.r, 0.0, 1.0);
-    float roughness = clamp(mr.g, 0.0, 1.0);
-    roughness = max(roughness, 0.08);
+    float roughness = clamp(mr.g, 0.08, 1.0);
     vec3 V = normalize(camera.position.xyz - position);
     vec3 light_position = dynamic_light_data_buffer.dynamic_light_data[light_index].position.xyz;
     mat4 lightWorldMatrix = world_matrices_buffer.world_matrices[light.node_index];
     vec3 light_direction = lightWorldMatrix[2].xyz;
     float shadowFactor = calculateShadow(position, normal, light, light_index, light_position, light_direction);
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_position, light_direction);
-    direct = direct / (direct + vec3(1.0));
     outColor = vec4(direct * shadowFactor, 1.0);
     // outColor.b = clamp(outColor.b, 0.1, 1.0);
 }
