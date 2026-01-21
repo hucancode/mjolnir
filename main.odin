@@ -255,6 +255,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   when true {
+    log.info("loading SciFiHelmet GLTF...")
+    if gltf_nodes, ok := load_gltf(engine, "assets/SciFiHelmet.glb"); ok {
+      log.infof("Loaded GLTF nodes: %v", gltf_nodes)
+      for handle in gltf_nodes {
+        translate(engine, handle, 3, 0, 3)
+        scale(engine, handle, 0.5)
+      }
+    }
+  }
+  when true {
     log.info("loading Fox GLTF...")
     if gltf_nodes, ok := load_gltf(engine, "assets/Fox2.glb"); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
