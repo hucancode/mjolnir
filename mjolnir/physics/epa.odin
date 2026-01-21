@@ -52,10 +52,12 @@ epa :: proc(
   vertex_count := len(vertices)
   // Create initial tetrahedron faces
   if vertex_count == 4 {
-    add_face(&faces, &vertices, 0, 1, 2)
-    add_face(&faces, &vertices, 0, 3, 1)
-    add_face(&faces, &vertices, 0, 2, 3)
-    add_face(&faces, &vertices, 1, 3, 2)
+    reserve(&faces, 4)
+    add_faces_batch4(
+      &faces,
+      &vertices,
+      {{0, 1, 2}, {0, 3, 1}, {0, 2, 3}, {1, 3, 2}},
+    )
   } else if vertex_count == 3 {
     // If we only have a triangle, we need to create a thin tetrahedron
     // Add a point slightly offset from the triangle
@@ -183,6 +185,51 @@ epa :: proc(
   }
   ok = false
   return
+}
+
+// Batch add 4 faces using SIMD for normal normalization
+add_faces_batch4 :: proc(
+  faces: ^[dynamic]EPAFace,
+  vertices: ^[dynamic][3]f32,
+  indices: [4][3]int,
+) {
+  // Compute all 4 normals (un-normalized cross products)
+  normals: [4][3]f32
+  for i in 0 ..< 4 {
+    va := vertices[indices[i][0]]
+    vb := vertices[indices[i][1]]
+    vc := vertices[indices[i][2]]
+    ab := vb - va
+    ac := vc - va
+    normals[i] = linalg.cross(ab, ac)
+  }
+  // Batch normalize using SIMD
+  normalized := vector_normalize3_batch4(normals)
+  // Check for degenerate faces and use fallback if needed
+  for i in 0 ..< 4 {
+    normal := normalized[i]
+    // Handle degenerate case (zero-length cross product)
+    if linalg.length2(normals[i]) <= math.F32_EPSILON {
+      normal = linalg.VECTOR3F32_Y_AXIS
+    }
+    va := vertices[indices[i][0]]
+    distance := linalg.dot(normal, va)
+    // Ensure normal points toward origin
+    face_a, face_b, face_c := indices[i][0], indices[i][1], indices[i][2]
+    if distance < 0 {
+      normal = -normal
+      distance = -distance
+      face_b, face_c = face_c, face_b
+    }
+    face := EPAFace {
+      a        = face_a,
+      b        = face_b,
+      c        = face_c,
+      normal   = normal,
+      distance = distance,
+    }
+    append(faces, face)
+  }
 }
 
 // Add a face to the polytope with proper normal calculation

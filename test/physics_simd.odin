@@ -1169,6 +1169,114 @@ benchmark_quaternion_mul_vector3_single :: proc(t: ^testing.T) {
 	)
 }
 
+// Benchmark data structure for EPA face operations
+Benchmark_EPA_Face_Data :: struct {
+  vertices: [25000][4][3]f32, // 4 vertices per tetrahedron
+  indices:  [4][3]int,        // Standard tetrahedron indices
+}
+
+@(test)
+benchmark_add_faces_batch4 :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 30 * time.Second)
+
+  // Setup test data - use heap allocation to avoid stack overflow
+  data := new(Benchmark_EPA_Face_Data)
+  defer free(data)
+
+  // Standard tetrahedron face indices
+  data.indices = {{0, 1, 2}, {0, 3, 1}, {0, 2, 3}, {1, 3, 2}}
+
+  // Generate random tetrahedron vertices
+  for i in 0 ..< len(data.vertices) {
+    // Create random but valid tetrahedron vertices
+    base := f32(i % 100)
+    data.vertices[i][0] = {base, base, base}
+    data.vertices[i][1] = {base + 1, base, base}
+    data.vertices[i][2] = {base + 0.5, base + 1, base}
+    data.vertices[i][3] = {base + 0.5, base + 0.5, base + 1}
+  }
+
+  // Benchmark SIMD batch path (add_faces_batch4)
+  simd_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    data_ptr := cast(^Benchmark_EPA_Face_Data)raw_data(options.input)
+    faces := make([dynamic]physics.EPAFace, 0, 4, context.temp_allocator)
+    vertices := make([dynamic][3]f32, 0, 4, context.temp_allocator)
+
+    for _ in 0 ..< options.rounds {
+      for idx in 0 ..< len(data_ptr.vertices) {
+        clear(&faces)
+        clear(&vertices)
+        for j in 0 ..< 4 {
+          append(&vertices, data_ptr.vertices[idx][j])
+        }
+        physics.add_faces_batch4(&faces, &vertices, data_ptr.indices)
+        options.processed += 4 * size_of(physics.EPAFace)
+      }
+    }
+    return nil
+  }
+
+  // Benchmark scalar path (4x add_face)
+  scalar_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    data_ptr := cast(^Benchmark_EPA_Face_Data)raw_data(options.input)
+    faces := make([dynamic]physics.EPAFace, 0, 4, context.temp_allocator)
+    vertices := make([dynamic][3]f32, 0, 4, context.temp_allocator)
+
+    for _ in 0 ..< options.rounds {
+      for idx in 0 ..< len(data_ptr.vertices) {
+        clear(&faces)
+        clear(&vertices)
+        for j in 0 ..< 4 {
+          append(&vertices, data_ptr.vertices[idx][j])
+        }
+        // Call add_face 4 times (scalar path)
+        physics.add_face(&faces, &vertices, 0, 1, 2)
+        physics.add_face(&faces, &vertices, 0, 3, 1)
+        physics.add_face(&faces, &vertices, 0, 2, 3)
+        physics.add_face(&faces, &vertices, 1, 3, 2)
+        options.processed += 4 * size_of(physics.EPAFace)
+      }
+    }
+    return nil
+  }
+
+  input_bytes := slice.bytes_from_ptr(data, size_of(Benchmark_EPA_Face_Data))
+
+  // Run SIMD benchmark
+  simd_options := &time.Benchmark_Options {
+    rounds = 100,
+    bytes = len(data.vertices) * 4 * size_of(physics.EPAFace) * 100,
+    input = input_bytes,
+    bench = simd_proc,
+  }
+  time.benchmark(simd_options)
+
+  // Run scalar benchmark
+  scalar_options := &time.Benchmark_Options {
+    rounds = 100,
+    bytes = len(data.vertices) * 4 * size_of(physics.EPAFace) * 100,
+    input = input_bytes,
+    bench = scalar_proc,
+  }
+  time.benchmark(scalar_options)
+
+  speedup := f64(scalar_options.duration) / f64(simd_options.duration)
+  log.infof(
+    "EPA add_faces_batch4: SIMD %.2f ms (%.2f MB/s) | Scalar %.2f ms (%.2f MB/s) | Speedup: %.2fx",
+    f64(simd_options.duration) / 1_000_000,
+    simd_options.megabytes_per_second,
+    f64(scalar_options.duration) / 1_000_000,
+    scalar_options.megabytes_per_second,
+    speedup,
+  )
+}
+
 @(test)
 benchmark_aabb_intersects :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 30 * time.Second)
