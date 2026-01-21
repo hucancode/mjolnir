@@ -2,7 +2,6 @@ package geometry
 
 import "core:math/linalg"
 
-// Single quaternion-vector multiplication with SIMD
 // Optimize linalg::quaternion128_mul_vector3
 qmv :: proc "contextless" (q: quaternion128, v: [3]f32) -> [3]f32 {
   // Quaternion-vector multiplication: v' = v + 2*qw*(qv x v) + 2*(qv x (qv x v))
