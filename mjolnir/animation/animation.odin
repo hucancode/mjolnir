@@ -305,6 +305,108 @@ PlayMode :: enum {
   PING_PONG,
 }
 
+BlendMode :: enum {
+  REPLACE,   // Default: weighted blend (current behavior)
+  ADD,       // Add transforms on top of accumulated (additive blending)
+  MULTIPLY,  // Multiply scales (position ignored, rotation composed)
+  OVERRIDE,  // Completely replace accumulated (weight acts as 0/1 gate)
+}
+
+TransitionState :: enum {
+  NONE,     // No transition active
+  ACTIVE,   // Transition in progress
+  COMPLETE, // Transition finished
+}
+
+Transition :: struct {
+  from_layer: int,  // Source layer index
+  to_layer:   int,  // Target layer index
+  duration:   f32,  // Total transition time
+  elapsed:    f32,  // Time elapsed
+  curve:      TweenMode, // Easing curve
+  state:      TransitionState,
+}
+
+// Blend position based on mode
+blend_position :: proc(
+  accumulated: [3]f32,
+  new_value: [3]f32,
+  weight: f32,
+  mode: BlendMode,
+) -> [3]f32 {
+  switch mode {
+  case .REPLACE:
+    // Default weighted accumulation
+    return accumulated + new_value * weight
+  case .ADD:
+    // Additive blending: add on top of accumulated
+    return accumulated + new_value * weight
+  case .MULTIPLY:
+    // Position ignored for multiply mode
+    return accumulated
+  case .OVERRIDE:
+    // Hard switch based on weight threshold
+    return new_value if weight > 0.5 else accumulated
+  }
+  return accumulated
+}
+
+// Blend rotation based on mode
+blend_rotation :: proc(
+  accumulated: quaternion128,
+  accumulated_weight: f32,
+  new_value: quaternion128,
+  weight: f32,
+  mode: BlendMode,
+) -> quaternion128 {
+  switch mode {
+  case .REPLACE:
+    // Default SLERP accumulation
+    if accumulated_weight > 0 {
+      return linalg.quaternion_slerp(
+        accumulated,
+        new_value,
+        weight / (accumulated_weight + weight),
+      )
+    }
+    return new_value
+  case .ADD:
+    // Additive blending: multiply quaternions
+    return linalg.quaternion_mul_quaternion(accumulated, new_value)
+  case .MULTIPLY:
+    // Same as ADD for rotations
+    return linalg.quaternion_mul_quaternion(accumulated, new_value)
+  case .OVERRIDE:
+    // Hard switch based on weight threshold
+    return new_value if weight > 0.5 else accumulated
+  }
+  return accumulated
+}
+
+// Blend scale based on mode
+blend_scale :: proc(
+  accumulated: [3]f32,
+  new_value: [3]f32,
+  weight: f32,
+  mode: BlendMode,
+) -> [3]f32 {
+  switch mode {
+  case .REPLACE:
+    // Default weighted accumulation
+    return accumulated + new_value * weight
+  case .ADD:
+    // Additive blending
+    return accumulated + new_value * weight
+  case .MULTIPLY:
+    // Multiplicative blending
+    return accumulated * (1 + (new_value - 1) * weight)
+  case .OVERRIDE:
+    // Hard switch based on weight threshold
+    return new_value if weight > 0.5 else accumulated
+  }
+  return accumulated
+}
+
 Channel :: struct {
   positions: []Keyframe([3]f32),
   rotations: []Keyframe(quaternion128),
@@ -501,8 +603,10 @@ LayerData :: union {
 }
 
 Layer :: struct {
-  weight: f32, // Blend weight (0.0 to 1.0)
-  data:   LayerData, // FK or IK layer data
+  weight:     f32,            // Blend weight (0.0 to 1.0)
+  blend_mode: BlendMode,      // Blending mode for this layer
+  bone_mask:  Maybe([]bool),  // nil = affect all bones, []bool = per-bone enable
+  data:       LayerData,      // FK or IK layer data
 }
 
 layer_init_fk :: proc(
@@ -512,8 +616,10 @@ layer_init_fk :: proc(
   weight: f32 = 1.0,
   mode: PlayMode = .LOOP,
   speed: f32 = 1.0,
+  blend_mode: BlendMode = .REPLACE,
 ) {
   self.weight = weight
+  self.blend_mode = blend_mode
   self.data = FKLayer {
     clip_handle = clip_handle,
     mode        = mode,
@@ -524,8 +630,14 @@ layer_init_fk :: proc(
   }
 }
 
-layer_init_ik :: proc(self: ^Layer, target: IKTarget, weight: f32 = 1.0) {
+layer_init_ik :: proc(
+  self: ^Layer,
+  target: IKTarget,
+  weight: f32 = 1.0,
+  blend_mode: BlendMode = .REPLACE,
+) {
   self.weight = weight
+  self.blend_mode = blend_mode
   self.data = IKLayer {
     target = target,
   }

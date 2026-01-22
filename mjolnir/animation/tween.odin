@@ -2,7 +2,7 @@ package animation
 
 import "core:math"
 
-Mode :: enum {
+TweenMode :: enum {
   Linear,
   QuadIn,
   QuadOut,
@@ -187,7 +187,7 @@ ease_bounce_in_out :: proc "contextless" (x: f32) -> f32 {
 }
 
 // Dispatch function for all easing modes
-ease :: proc "contextless" (x: f32, mode: Mode) -> f32 {
+ease :: proc "contextless" (x: f32, mode: TweenMode) -> f32 {
   switch mode {
   case .Linear:
     return ease_linear(x)
@@ -253,7 +253,7 @@ sample :: proc "contextless" (
   x: f32,
   a: f32 = 0,
   b: f32 = 1,
-  mode: Mode = .Linear,
+  mode: TweenMode = .Linear,
 ) -> f32 {
   t := ease(x, mode)
   return a + (b - a) * t

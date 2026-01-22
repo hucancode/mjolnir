@@ -280,7 +280,7 @@ test_tween_custom_range :: proc(t: ^testing.T) {
 
 @(test)
 test_tween_symmetry :: proc(t: ^testing.T) {
-  modes := []animation.Mode {
+  modes := []animation.TweenMode {
     .QuadInOut,
     .CubicInOut,
     .QuintInOut,
@@ -304,7 +304,7 @@ test_tween_symmetry :: proc(t: ^testing.T) {
 
 @(test)
 test_tween_endpoint_consistency :: proc(t: ^testing.T) {
-  modes := []animation.Mode {
+  modes := []animation.TweenMode {
     .Linear,
     .QuadIn,
     .QuadOut,

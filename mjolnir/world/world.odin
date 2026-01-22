@@ -20,8 +20,9 @@ LightAttachment :: struct {
 }
 
 NodeSkinning :: struct {
-  layers:                    [dynamic]anim.Layer, // Animation layers (FK + IK)
-  bone_matrix_buffer_offset: u32, // offset into bone matrix buffer for skinned mesh
+  layers:                    [dynamic]anim.Layer,     // Animation layers (FK + IK)
+  bone_matrix_buffer_offset: u32,                     // offset into bone matrix buffer for skinned mesh
+  active_transition:         Maybe(anim.Transition),  // Active transition state
 }
 
 MeshAttachment :: struct {

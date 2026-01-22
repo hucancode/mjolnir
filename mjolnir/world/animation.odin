@@ -56,6 +56,34 @@ update_skeletal_animations :: proc(
     bone_count := len(mesh_skinning.bones)
     if bone_count == 0 do continue
     if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do continue
+
+    // Update active transition
+    if transition, has_transition := &skinning.active_transition.?; has_transition {
+      if transition.state == .ACTIVE {
+        transition.elapsed += delta_time
+
+        if transition.elapsed >= transition.duration {
+          // Transition complete
+          transition.elapsed = transition.duration
+          transition.state = .COMPLETE
+
+          // Set final weights
+          skinning.layers[transition.from_layer].weight = 0.0
+          skinning.layers[transition.to_layer].weight = 1.0
+
+          // Clear transition
+          skinning.active_transition = nil
+        } else {
+          // Interpolate weights
+          t := transition.elapsed / transition.duration
+          eased_t := anim.ease(t, transition.curve)
+
+          skinning.layers[transition.from_layer].weight = 1.0 - eased_t
+          skinning.layers[transition.to_layer].weight = eased_t
+        }
+      }
+    }
+
     for &layer in skinning.layers {
       anim.layer_update(&layer, delta_time)
     }
@@ -140,6 +168,7 @@ add_animation_layer :: proc(
   mode: anim.PlayMode = .LOOP,
   speed: f32 = 1.0,
   layer_index: int = -1, // -1 means append new layer
+  blend_mode: anim.BlendMode = .REPLACE,
 ) -> bool {
   if rm == nil do return false
   node := cont.get(world.nodes, node_handle) or_return
@@ -182,6 +211,7 @@ add_animation_layer :: proc(
     weight,
     mode,
     speed,
+    blend_mode,
   )
   // Add or replace layer
   if layer_index >= 0 && layer_index < len(skinning.layers) {
@@ -243,6 +273,148 @@ clear_animation_layers :: proc(
   if _, has_node_anim := node.animation.?; !has_node_anim {
     unregister_animatable_node(world, node_handle)
   }
+  return true
+}
+
+// Create bone mask from bone name list
+create_bone_mask :: proc(
+  mesh: ^resources.Mesh,
+  bone_names: []string,
+  allocator := context.allocator,
+) -> (
+  mask: []bool,
+  ok: bool,
+) #optional_ok {
+  skin := mesh.skinning.? or_return
+  mask = make([]bool, len(skin.bones), allocator)
+
+  for name in bone_names {
+    idx, found := resources.find_bone_by_name(mesh, name)
+    if !found do continue
+    mask[idx] = true
+  }
+
+  return mask, true
+}
+
+// Create bone mask for bone chain (root + all descendants)
+create_bone_chain_mask :: proc(
+  mesh: ^resources.Mesh,
+  root_bone_name: string,
+  allocator := context.allocator,
+) -> (
+  mask: []bool,
+  ok: bool,
+) #optional_ok {
+  skin := mesh.skinning.? or_return
+  root_idx, found := resources.find_bone_by_name(mesh, root_bone_name)
+  if !found do return nil, false
+
+  mask = make([]bool, len(skin.bones), allocator)
+
+  // BFS to find all descendants
+  queue := make([dynamic]u32, context.temp_allocator)
+  append(&queue, root_idx)
+
+  for len(queue) > 0 {
+    bone_idx := pop_front(&queue)
+    mask[bone_idx] = true
+
+    // Add children to queue
+    bone := &skin.bones[bone_idx]
+    for child_idx in bone.children {
+      append(&queue, child_idx)
+    }
+  }
+
+  return mask, true
+}
+
+// Set bone mask on existing layer
+set_animation_layer_bone_mask :: proc(
+  world: ^World,
+  node_handle: resources.NodeHandle,
+  layer_index: int,
+  mask: []bool,
+) -> bool {
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, ok := &node.attachment.(MeshAttachment)
+  if !ok do return false
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return false
+  if layer_index < 0 || layer_index >= len(skinning.layers) do return false
+
+  skinning.layers[layer_index].bone_mask = mask
+  return true
+}
+
+// Transition smoothly from one animation to another
+transition_to_animation :: proc(
+  world: ^World,
+  rm: ^resources.Manager,
+  node_handle: resources.NodeHandle,
+  animation_name: string,
+  duration: f32,
+  from_layer: int = 0,
+  to_layer: int = 1,
+  curve: anim.TweenMode = .Linear,
+  blend_mode: anim.BlendMode = .REPLACE,
+  mode: anim.PlayMode = .LOOP,
+  speed: f32 = 1.0,
+) -> bool {
+  if rm == nil do return false
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, ok := &node.attachment.(MeshAttachment)
+  if !ok do return false
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return false
+
+  // Ensure we have enough layers
+  for len(skinning.layers) <= max(from_layer, to_layer) {
+    append(&skinning.layers, anim.Layer{})
+  }
+
+  // Find the animation clip
+  clip_handle: resources.ClipHandle
+  clip_duration: f32
+  found := false
+  for &entry, idx in rm.animation_clips.entries do if entry.active {
+    if entry.item.name == animation_name {
+      clip_handle = resources.ClipHandle{
+        index      = u32(idx),
+        generation = entry.generation,
+      }
+      clip_duration = entry.item.duration
+      found = true
+      break
+    }
+  }
+  if !found do return false
+
+  // Setup target layer with new animation
+  layer: anim.Layer
+  clip_handle_u64 := transmute(u64)clip_handle
+  anim.layer_init_fk(
+    &layer,
+    clip_handle_u64,
+    clip_duration,
+    0.0, // Start with weight 0
+    mode,
+    speed,
+    blend_mode,
+  )
+  skinning.layers[to_layer] = layer
+
+  // Create transition
+  skinning.active_transition = anim.Transition{
+    from_layer = from_layer,
+    to_layer   = to_layer,
+    duration   = duration,
+    elapsed    = 0.0,
+    curve      = curve,
+    state      = .ACTIVE,
+  }
+
   return true
 }
 
@@ -468,8 +640,9 @@ add_tail_modifier_layer :: proc(
   }
 
   layer := anim.Layer {
-    weight = weight,
-    data   = anim.ProceduralLayer {
+    weight     = weight,
+    blend_mode = .REPLACE,
+    data       = anim.ProceduralLayer {
       state = anim.ProceduralState {
         bone_indices = bone_indices,
         accumulated_time = 0,
@@ -533,8 +706,9 @@ add_path_modifier_layer :: proc(
   }
 
   layer := anim.Layer {
-    weight = weight,
-    data   = anim.ProceduralLayer {
+    weight     = weight,
+    blend_mode = .REPLACE,
+    data       = anim.ProceduralLayer {
       state = anim.ProceduralState {
         bone_indices = bone_indices,
         accumulated_time = 0,
@@ -618,8 +792,9 @@ add_spider_leg_modifier_layer :: proc(
   copy(bone_indices, all_bone_indices[:])
 
   layer := anim.Layer {
-    weight = weight,
-    data   = anim.ProceduralLayer {
+    weight     = weight,
+    blend_mode = .REPLACE,
+    data       = anim.ProceduralLayer {
       state = anim.ProceduralState {
         bone_indices     = bone_indices,
         accumulated_time = 0,
@@ -796,8 +971,9 @@ add_single_bone_rotation_modifier_layer :: proc(
   identity.w = 1
 
   layer := anim.Layer {
-    weight = weight,
-    data   = anim.ProceduralLayer {
+    weight     = weight,
+    blend_mode = .REPLACE,
+    data       = anim.ProceduralLayer {
       state = anim.ProceduralState {
         bone_indices     = nil, // Single bone modifier doesn't use this array
         accumulated_time = 0,

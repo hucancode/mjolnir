@@ -274,12 +274,39 @@ sample_layers :: proc(
           local_transform.scale = [3]f32{1, 1, 1}
           local_transform.rotation = linalg.QUATERNIONF32_IDENTITY
         }
-        // Accumulate weighted transform
+
+        // Check bone mask - skip if bone is masked out
+        if mask, has_mask := layer.bone_mask.?; has_mask {
+          if entry.bone_index >= u32(len(mask)) || !mask[entry.bone_index] {
+            // Skip this bone - continue to children
+            for child_index in bone.children {
+              append(&stack, TraverseEntry{entry.parent_transform, child_index})
+            }
+            continue
+          }
+        }
+
+        // Accumulate weighted transform using blend mode
         w := layer.weight
-        accumulated_positions[entry.bone_index] += local_transform.position * w
-        accumulated_rotations[entry.bone_index] =
-          linalg.quaternion_slerp(accumulated_rotations[entry.bone_index], local_transform.rotation, w / (accumulated_weights[entry.bone_index] + w)) if accumulated_weights[entry.bone_index] > 0 else local_transform.rotation
-        accumulated_scales[entry.bone_index] += local_transform.scale * w
+        accumulated_positions[entry.bone_index] = animation.blend_position(
+          accumulated_positions[entry.bone_index],
+          local_transform.position,
+          w,
+          layer.blend_mode,
+        )
+        accumulated_rotations[entry.bone_index] = animation.blend_rotation(
+          accumulated_rotations[entry.bone_index],
+          accumulated_weights[entry.bone_index],
+          local_transform.rotation,
+          w,
+          layer.blend_mode,
+        )
+        accumulated_scales[entry.bone_index] = animation.blend_scale(
+          accumulated_scales[entry.bone_index],
+          local_transform.scale,
+          w,
+          layer.blend_mode,
+        )
         accumulated_weights[entry.bone_index] += w
         for child_index in bone.children {
           append(&stack, TraverseEntry{entry.parent_transform, child_index})

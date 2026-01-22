@@ -885,7 +885,10 @@ add_animation_layer :: proc(
   handle: resources.NodeHandle,
   animation_name: string,
   weight: f32 = 1.0,
+  mode: animation.PlayMode = .LOOP,
+  speed: f32 = 1.0,
   layer_index: int = -1, // -1 to append, >= 0 to replace existing layer
+  blend_mode: animation.BlendMode = .REPLACE,
 ) -> bool {
   return world.add_animation_layer(
     &engine.world,
@@ -893,7 +896,10 @@ add_animation_layer :: proc(
     handle,
     animation_name,
     weight,
-    layer_index = layer_index,
+    mode,
+    speed,
+    layer_index,
+    blend_mode,
   )
 }
 
@@ -927,6 +933,51 @@ clear_animation_layers :: proc(
   handle: resources.NodeHandle,
 ) -> bool {
   return world.clear_animation_layers(&engine.world, handle)
+}
+
+// Set bone mask on animation layer to filter which bones are affected
+set_animation_layer_bone_mask :: proc(
+  engine: ^Engine,
+  node: resources.NodeHandle,
+  layer_index: int,
+  bone_names: []string,
+) -> bool {
+  // Get the mesh to create bone mask
+  node_ptr := cont.get(engine.world.nodes, node) or_return
+  mesh_attachment, ok := &node_ptr.attachment.(world.MeshAttachment)
+  if !ok do return false
+  mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_return
+
+  // Create bone mask from bone names
+  mask := world.create_bone_mask(mesh, bone_names) or_return
+
+  // Set mask on layer
+  return world.set_animation_layer_bone_mask(
+    &engine.world,
+    node,
+    layer_index,
+    mask,
+  )
+}
+
+// Transition smoothly from current animation to a new animation
+transition_to_animation :: proc(
+  engine: ^Engine,
+  node: resources.NodeHandle,
+  animation_name: string,
+  duration: f32,
+  curve: animation.TweenMode = .Linear,
+) -> bool {
+  return world.transition_to_animation(
+    &engine.world,
+    &engine.rm,
+    node,
+    animation_name,
+    duration,
+    0, // from_layer
+    1, // to_layer
+    curve,
+  )
 }
 
 // Add an IK layer to control specific bones
