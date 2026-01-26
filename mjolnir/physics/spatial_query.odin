@@ -8,7 +8,7 @@ import "core:math"
 import "core:math/linalg"
 
 // Physics raycast hit result
-PhysicsRayHit :: struct {
+RayHit :: struct {
   body_handle: BodyHandleResult,
   t:           f32,
   point:       [3]f32,
@@ -27,8 +27,8 @@ raycast :: proc(
   self: ^World,
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
-) -> PhysicsRayHit {
-  closest_hit := PhysicsRayHit {
+) -> RayHit {
+  closest_hit := RayHit {
     hit = false,
     t   = max_dist,
   }
@@ -72,7 +72,7 @@ raycast_single :: proc(
   self: ^World,
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
-) -> PhysicsRayHit {
+) -> RayHit {
   // Query dynamic BVH
   dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
   bvh_query_ray_fast(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
@@ -82,7 +82,7 @@ raycast_single :: proc(
     collider := get(self, body.collider_handle) or_continue
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
     if hit {
-      return PhysicsRayHit {
+      return RayHit {
         body_handle = candidate.handle,
         t = t,
         point = ray.origin + ray.direction * t,
@@ -100,7 +100,7 @@ raycast_single :: proc(
     collider := get(self, body.collider_handle) or_continue
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
     if hit {
-      return PhysicsRayHit {
+      return RayHit {
         body_handle = candidate.handle,
         t = t,
         point = ray.origin + ray.direction * t,

@@ -18,8 +18,8 @@ make build
 make build-debug
 # Run tests
 make test
-# run a single test called "name"
-odin test test -out:bin/test -define:ODIN_TEST_NAMES=tests.name
+# run a single test called "test_name" inside "module_name"
+odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 # Check for compiler errors without building
 make check
 # Build all shaders
@@ -100,17 +100,17 @@ The engine uses a deferred rendering with multiple passes:
 - **Resources**: `mjolnir/resources/` (handles, materials, meshes, nodes, lights, cameras, tracking)
 - **Level Manager**: `mjolnir/level_manager/` (level transitions, loading screens)
 - **World**: `mjolnir/world/` (scene graph, visibility, GLTF loading)
-- **Rendering**: Various renderer implementations
-- **Shaders**: `mjolnir/shader/{pass_name}/`
+- **Shaders**: `mjolnir/shader/{shader_name}/`
 - **Assets**: `assets/` (models, textures, etc.)
-- **Tests**: `test/` - Unit tests and `test/visual/` for end-to-end visual tests
+- **Tests**: `test_*.odin` - Unit tests
+- **Examples**: `examples/` for end-to-end graphics tests (double as examples)
 
 ### Debugging Tips
 
 - To debug visual issues, hardcode frame count limit in `engine.odin` `run` procedure to stop after few frames and examine logs
 - To slow down the engine to avoid excessive logs. Set FPS in `engine.odin` to low value like 4 or 2.
 - To capture visual result, run `make capture`, then analyze the newly created `screenshot.png`
-- Visual test runner: `test/visual/run.py` - Runs all visual tests and compares against golden images
+- Graphics test runner: `examples/run.py` - Runs all graphics tests and compares against golden images
 
 ### Build Flags
 

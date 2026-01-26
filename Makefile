@@ -29,9 +29,7 @@ shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 	@echo "Shader compilation complete."
 
 test:
-	timeout 50s odin test test -out:bin/test && \
-	timeout 50s odin test test/recast -out:bin/test && \
-	timeout 50s odin test test/detour -out:bin/test
+	timeout 120s odin test . --all-packages
 
 VISUAL_TESTS := cube gltf_ik gltf_animation gltf_skinning gltf_static grid256 grid300 grid5 light material navmesh shadow aoe crosshatch ui spline
 
@@ -42,7 +40,7 @@ vtest:
 	for test_name in $(VISUAL_TESTS); do \
 		echo "Testing $$test_name..."; \
 		date; \
-		./test/visual/run.py "$$test_name" artifacts || failed=$$((failed + 1)); \
+		./examples/run.py "$$test_name" artifacts || failed=$$((failed + 1)); \
 	done; \
 	if [ $$failed -ne 0 ]; then \
 		echo "$$failed visual test(s) failed" >&2; \
@@ -55,7 +53,7 @@ golden:
 	@mkdir -p artifacts
 	@for test_name in $(VISUAL_TESTS); do \
 		echo "Updating golden image for $$test_name..."; \
-		UPDATE_GOLDEN=1 ./test/visual/run.py "$$test_name" artifacts || exit 1; \
+		UPDATE_GOLDEN=1 ./examples/run.py "$$test_name" artifacts || exit 1; \
 	done
 	@echo "All golden images updated successfully."
 

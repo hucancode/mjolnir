@@ -2,7 +2,7 @@ package world
 
 import cont "../containers"
 import "../geometry"
-import physics "../physics"
+import "../physics"
 import "../resources"
 import "core:math"
 import "core:math/linalg"
