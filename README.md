@@ -1,11 +1,33 @@
 # Mjolnir Engine
 
-Mjolnir is a minimalistic rendering engine. Implementation will sometimes prefer simplicity over comprehensive functionality. The goal is to create a simple set of tools to help people quickly create fast graphical applications
+Mjolnir is a minimalistic game engine. Implementation will prefer simplicity over fancy features. The goal is to create a simple set of tools to help people enjoy game programming
 
 [![Logic Tests](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml)
 [![Graphics Tests](https://github.com/hucancode/mjolnir/actions/workflows/visual-test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/visual-test.yml)
 
-![](./readme/transparent.png)
+![](./readme/lights.png)
+
+# Notable features
+
+- Physically-Based Rendering
+- Camera, Light, Shadow
+- Skinning, Animation
+- GLTF
+- Post-processing
+- Billboard, Sprite
+- Tween, Spline
+- Particles Simulation
+- Render to texture
+
+## WIP
+
+- Physics
+- Recast/Detour
+- UI, fonts
+- Inverse Kinematics
+- Procedural Animation (Tail, Leg)
+- Animation Layering
+- Level Manager
 
 # Build scripts
 ```sh
