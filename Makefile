@@ -31,29 +31,29 @@ shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 test:
 	timeout 120s odin test . --all-packages
 
-VISUAL_TESTS := cube gltf_ik gltf_animation gltf_skinning gltf_static grid256 grid300 grid5 light material navmesh shadow aoe crosshatch ui spline
+VISUAL_TESTS := cube gltf_ik gltf_animation gltf_skinning gltf_static grid256 grid300 grid5 light material navmesh shadow aoe crosshatch ui spline fox_blend_ik
 
 vtest:
-	@echo "Running all visual tests..."
+	@echo "Running all samples..."
 	@mkdir -p artifacts
 	@failed=0; \
 	for test_name in $(VISUAL_TESTS); do \
 		echo "Testing $$test_name..."; \
 		date; \
-		./examples/run.py "$$test_name" artifacts || failed=$$((failed + 1)); \
+		./examples/run.sh "$$test_name" artifacts || failed=$$((failed + 1)); \
 	done; \
 	if [ $$failed -ne 0 ]; then \
-		echo "$$failed visual test(s) failed" >&2; \
+		echo "$$failed example(s) malfunctioned" >&2; \
 		exit 1; \
 	fi; \
-	echo "All visual tests passed."
+	echo "All examples are working normally."
 
 golden:
-	@echo "Regenerating all visual test golden images..."
+	@echo "Regenerating all golden images..."
 	@mkdir -p artifacts
 	@for test_name in $(VISUAL_TESTS); do \
 		echo "Updating golden image for $$test_name..."; \
-		UPDATE_GOLDEN=1 ./examples/run.py "$$test_name" artifacts || exit 1; \
+		UPDATE_GOLDEN=1 ./examples/run.sh "$$test_name" artifacts || exit 1; \
 	done
 	@echo "All golden images updated successfully."
 
@@ -65,7 +65,7 @@ capture: build
 	TIMEOUT_SEC="10"; \
 	\
 	command -v xvfb-run >/dev/null || { echo "Error: 'xvfb-run' not found" >&2; exit 1; }; \
-	command -v python3 >/dev/null || { echo "Error: 'python3' not found" >&2; exit 1; }; \
+	command -v magick >/dev/null || { echo "Error: 'magick' not found" >&2; exit 1; }; \
 	\
 	echo "Running $$APP_PATH for $$TIMEOUT_SEC seconds to capture frame $$FRAME_N..."; \
 	VK_INSTANCE_LAYERS="VK_LAYER_LUNARG_screenshot" \
@@ -75,8 +75,10 @@ capture: build
 	timeout "$${TIMEOUT_SEC}s" "$$APP_PATH" || true; \
 	\
 	echo "Converting PPM to PNG..."; \
-	python3 -c "from pathlib import Path; from skimage import io; \
-	[io.imsave(str(f.with_suffix('.png')), io.imread(str(f))) for f in Path('$$OUT_DIR').glob('*.ppm')]"; \
+	for ppm in $$OUT_DIR/*.ppm; do \
+		[ -f "$$ppm" ] || continue; \
+		magick "$$ppm" "$${ppm%.ppm}.png"; \
+	done; \
 	echo "Screenshots saved to $$OUT_DIR/"
 clean:
 	rm -rf bin/*

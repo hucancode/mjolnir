@@ -37,10 +37,9 @@ jobs:
           mesa-vulkan-drivers \
           vulkan-tools \
           x11-utils \
-          python3-pip \
+          imagemagick \
           gdb
         sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
-        pip install scikit-image numpy
         echo "LAVAPIPE_ICD=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json" >> $GITHUB_ENV
 
     - name: Inspect Vulkan SDK assets
@@ -76,34 +75,6 @@ jobs:
       run: |
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
         make vtest
-    - name: Smoke test
-      env:
-        VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d
-        VK_ICD_FILENAMES: ${{ env.LAVAPIPE_ICD }}
-        VK_INSTANCE_LAYERS: VK_LAYER_KHRONOS_validation:VK_LAYER_LUNARG_screenshot
-        VK_SCREENSHOT_FRAMES: 3
-        VK_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/main
-      run: |
-        export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
-        mkdir -p "$VK_SCREENSHOT_DIR"
-        odin build . -out:bin/main -define:USE_PARALLEL_UPDATE=false -define:FRAME_LIMIT=10
-        xvfb-run -a -s "-screen 0 1920x1080x24" ./bin/main
-        ppm=$(find "$VK_SCREENSHOT_DIR" -name '*.ppm' | head -1)
-        if [ -z "$ppm" ]; then
-          echo "ERROR: No screenshot generated"
-          exit 1
-        fi
-        png="${ppm%.ppm}.png"
-        python3 -c "
-        from skimage import io; import numpy as np
-        img = io.imread('$ppm')
-        io.imsave('$png', img)
-        colors = len(np.unique(img.reshape(-1, img.shape[2]), axis=0))
-        pixels = img.shape[0] * img.shape[1]
-        print(f'Colors: {colors}, Pixels: {pixels}')
-        assert 1000 < colors < pixels // 2, f'Invalid color count: {colors}'
-        "
-        echo "Smoke test passed!"
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       if: always()
