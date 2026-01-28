@@ -75,19 +75,49 @@ fi
 
 # Simple image comparison using ImageMagick
 if [[ -n "$threshold" ]]; then
-    # ImageMagick SSIM returns format like "dissimilarity (ssim_value)"
-    # We need to parse the SSIM value in parentheses and convert to similarity (1 - dissim)
-    if [[ "$metric" == "SSIM" ]]; then
-        # magick compare returns non-zero when images differ, so disable exit-on-error
-        raw_output=$(magick compare -metric SSIM "$golden" "$png_file" null: 2>&1 || true)
-        # Extract the value in parentheses
-        ssim_dissim=$(echo "$raw_output" | sed 's/.*(\(.*\)).*/\1/')
-        # Convert dissimilarity to similarity: similarity = 1 - dissimilarity
-        diff=$(awk "BEGIN {printf \"%.6f\", 1 - $ssim_dissim}")
-    else
-        # magick compare returns non-zero when images differ, so disable exit-on-error
-        diff=$(magick compare -metric "$metric" "$golden" "$png_file" null: 2>&1 | cut -d' ' -f1 || true)
-    fi
+    # Handle different metric types with appropriate parsing
+    case "$metric" in
+        SSIM)
+            # SSIM returns "dissimilarity (ssim_value)"
+            # Extract SSIM from parentheses and convert to similarity: 1 - dissimilarity
+            raw_output=$(magick compare -metric SSIM "$golden" "$png_file" null: 2>&1 || true)
+
+            # Check if SSIM is unsupported
+            if echo "$raw_output" | grep -q "unrecognized metric"; then
+                echo "Error: SSIM metric not supported by installed ImageMagick version"
+                echo "ImageMagick 7.x or later is required for SSIM support"
+                magick --version | head -1
+                exit 1
+            fi
+
+            ssim_dissim=$(echo "$raw_output" | sed 's/.*(\(.*\)).*/\1/')
+            diff=$(awk "BEGIN {printf \"%.6f\", 1 - $ssim_dissim}")
+            ;;
+
+        PHASH)
+            # Perceptual hash - returns distance value (lower is better)
+            # Format: "distance (normalized)"
+            raw_output=$(magick compare -metric PHASH "$golden" "$png_file" null: 2>&1 || true)
+            diff=$(echo "$raw_output" | cut -d' ' -f1)
+            ;;
+
+        RMSE|MAE|MSE)
+            # Error metrics - return "value (normalized)"
+            # Use non-normalized value for better precision
+            raw_output=$(magick compare -metric "$metric" "$golden" "$png_file" null: 2>&1 || true)
+            diff=$(echo "$raw_output" | cut -d' ' -f1)
+            ;;
+
+        AE)
+            # Absolute error count - just a number
+            diff=$(magick compare -metric AE "$golden" "$png_file" null: 2>&1 || true)
+            ;;
+
+        *)
+            # Default: try to extract first value
+            diff=$(magick compare -metric "$metric" "$golden" "$png_file" null: 2>&1 | cut -d' ' -f1 || true)
+            ;;
+    esac
 
     echo "$metric: $diff (threshold $threshold, $direction)"
     if [[ "$direction" == "higher" ]]; then

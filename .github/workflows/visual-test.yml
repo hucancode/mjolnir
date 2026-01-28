@@ -37,10 +37,27 @@ jobs:
           mesa-vulkan-drivers \
           vulkan-tools \
           x11-utils \
-          imagemagick \
           gdb
+
         sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
         echo "LAVAPIPE_ICD=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json" >> $GITHUB_ENV
+
+    - name: Install ImageMagick 7
+      run: |
+        sudo apt-get install -y build-essential wget pkg-config libpng-dev
+        wget -q https://imagemagick.org/archive/ImageMagick.tar.gz
+        tar xzf ImageMagick.tar.gz
+        cd ImageMagick-7.*
+
+        # Minimal static build with PNG and SSIM support
+        ./configure --quiet --disable-shared
+
+        make -j$(nproc)
+        sudo make install
+        sudo ldconfig /usr/local/lib
+
+        # Verify installation
+        magick --version | head -3
 
     - name: Inspect Vulkan SDK assets
       run: |
