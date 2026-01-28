@@ -61,22 +61,14 @@ init :: proc(
   log.info("Initializing debug draw renderer")
   cont.init(&self.objects, MAX_DEBUG_OBJECTS)
   // Create dedicated pipeline layout with larger push constant range
+  // Debug draw only needs camera buffer - everything else is in push constants
   self.pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
       stageFlags = {.VERTEX, .FRAGMENT},
       size = size_of(PushConstant),
     },
-    rm.camera_buffer.set_layout,
-    rm.textures_set_layout,
-    rm.bone_buffer.set_layout,
-    rm.material_buffer.set_layout,
-    rm.world_matrix_buffer.set_layout,
-    rm.node_data_buffer.set_layout,
-    rm.mesh_data_buffer.set_layout,
-    rm.vertex_skinning_buffer.set_layout,
-    rm.lights_buffer.set_layout,
-    rm.sprite_buffer.set_layout,
+    rm.camera_buffer.set_layout, // Set 0
   ) or_return
   create_pipelines(gctx, self, self.pipeline_layout) or_return
   log.infof(
@@ -532,16 +524,7 @@ render :: proc(
       command_buffer,
       pipeline,
       self.pipeline_layout,
-      rm.camera_buffer.descriptor_sets[frame_index],
-      rm.textures_descriptor_set,
-      rm.bone_buffer.descriptor_sets[frame_index],
-      rm.material_buffer.descriptor_set,
-      rm.world_matrix_buffer.descriptor_set,
-      rm.node_data_buffer.descriptor_set,
-      rm.mesh_data_buffer.descriptor_set,
-      rm.vertex_skinning_buffer.descriptor_set,
-      rm.lights_buffer.descriptor_set,
-      rm.sprite_buffer.descriptor_set,
+      rm.camera_buffer.descriptor_sets[frame_index], // Set 0 (only one needed)
     )
     push_constants := PushConstant {
       camera_index = camera_handle.index,

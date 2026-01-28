@@ -18,7 +18,7 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
 };
 
-layout(set = 4, binding = 0) readonly buffer WorldMatrices {
+layout(set = 2, binding = 0) readonly buffer WorldMatrices {
     mat4 world_matrices[];
 };
 
@@ -29,7 +29,7 @@ struct NodeData {
     uint flags;
 };
 
-layout(set = 5, binding = 0) readonly buffer NodeBuffer {
+layout(set = 3, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
@@ -43,7 +43,7 @@ struct SpriteData {
     vec4 color;
 };
 
-layout(set = 9, binding = 0) readonly buffer SpriteBuffer {
+layout(set = 4, binding = 0) readonly buffer SpriteBuffer {
     SpriteData sprites[];
 };
 

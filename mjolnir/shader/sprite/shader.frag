@@ -20,7 +20,7 @@ struct SpriteData {
     vec4 color;
 };
 
-layout(set = 9, binding = 0) readonly buffer SpriteBuffer {
+layout(set = 4, binding = 0) readonly buffer SpriteBuffer {
     SpriteData sprites[];
 };
 

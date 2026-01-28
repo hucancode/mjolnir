@@ -9,6 +9,9 @@ import "core:slice"
 import vk "vendor:vulkan"
 
 FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
+// Bone matrix buffer capacity (default: 60MB per frame × 2 frames = 120MB total)
+// Override at build time: -define:BONE_BUFFER_CAPACITY_MB=80
+BONE_BUFFER_CAPACITY_MB :: #config(BONE_BUFFER_CAPACITY_MB, 60)
 MAX_TEXTURES :: 1000
 MAX_CUBE_TEXTURES :: 200
 MAX_NODES_IN_SCENE :: 65536
@@ -131,6 +134,7 @@ Manager :: struct {
   textures_set_layout:       vk.DescriptorSetLayout,
   textures_descriptor_set:   vk.DescriptorSet,
   general_pipeline_layout:   vk.PipelineLayout, // general purpose layout, used by geometry, transparency, depth renderers
+  sprite_pipeline_layout:    vk.PipelineLayout, // 5-set layout for sprite rendering
   sphere_pipeline_layout:    vk.PipelineLayout, // general purpose layout, used by spherical depth rendering, same as general_pipeline_layout but use spherical camera instead
   vertex_buffer:             gpu.ImmutableBuffer(geometry.Vertex),
   index_buffer:              gpu.ImmutableBuffer(u32),
@@ -156,19 +160,23 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   log.infof("All resource pools initialized successfully")
   init_global_samplers(self, gctx)
   log.info("Initializing bindless buffer systems...")
+  // Calculate slab configuration to fit within BONE_BUFFER_CAPACITY_MB
+  // Each bone matrix is 64 bytes (matrix[4,4]f32)
+  // Distribution: favor smaller allocations, reduce large blocks
+  // This configuration totals to ~60MB with default setting
   cont.slab_init(
     &self.bone_matrix_slab,
     {
-      {32, 64}, // 64 bytes * 32   bones * 64   blocks = 128K bytes
-      {64, 128}, // 64 bytes * 64   bones * 128  blocks = 512K bytes
-      {128, 8192}, // 64 bytes * 128  bones * 8192 blocks = 64M bytes
-      {256, 4096}, // 64 bytes * 256  bones * 4096 blocks = 64M bytes
-      {512, 256}, // 64 bytes * 512  bones * 256  blocks = 8M bytes
-      {1024, 128}, // 64 bytes * 1024 bones * 256  blocks = 8M bytes
-      {2048, 32}, // 64 bytes * 2048 bones * 32   blocks = 4M bytes
-      {4096, 16}, // 64 bytes * 4096 bones * 16   blocks = 4M bytes
-      // Total size: ~153M bytes for bone matrices
-      // This could roughly fit 12000 animated characters with 128 bones each
+      {32, 64}, // 64 bytes × 32 bones × 64 blocks = 128KB
+      {64, 128}, // 64 bytes × 64 bones × 128 blocks = 512KB
+      {128, 4096}, // 64 bytes × 128 bones × 4096 blocks = 32MB
+      {256, 1792}, // 64 bytes × 256 bones × 1792 blocks = 28MB
+      {512, 0}, // Disabled (users can override BONE_BUFFER_CAPACITY_MB if needed)
+      {1024, 0}, // Disabled
+      {2048, 0}, // Disabled
+      {4096, 0}, // Disabled
+      // Total: ~60MB per frame, 120MB for 2 frames (default)
+      // To increase: odin build -define:BONE_BUFFER_CAPACITY_MB=80
     },
   )
   gpu.per_frame_bindless_buffer_init(
@@ -285,20 +293,37 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
       stageFlags = {.VERTEX, .FRAGMENT},
       size = size_of(u32),
     },
-    self.camera_buffer.set_layout,
-    self.textures_set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.world_matrix_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
-    self.vertex_skinning_buffer.set_layout,
-    self.lights_buffer.set_layout,
-    self.sprite_buffer.set_layout,
+    self.camera_buffer.set_layout, // Set 0
+    self.textures_set_layout, // Set 1
+    self.bone_buffer.set_layout, // Set 2
+    self.material_buffer.set_layout, // Set 3
+    self.world_matrix_buffer.set_layout, // Set 4
+    self.node_data_buffer.set_layout, // Set 5
+    self.mesh_data_buffer.set_layout, // Set 6
+    self.vertex_skinning_buffer.set_layout, // Set 7
+    // Removed: lights_buffer (set 8 - never used)
+    // Removed: sprite_buffer (set 9 - moved to sprite_pipeline_layout)
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
     self.general_pipeline_layout = 0
+  }
+  // Pipeline layout for sprite rendering (no bones/skinning needed)
+  self.sprite_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange {
+      stageFlags = {.VERTEX, .FRAGMENT},
+      size = size_of(u32),
+    },
+    self.camera_buffer.set_layout, // Set 0
+    self.textures_set_layout, // Set 1
+    self.world_matrix_buffer.set_layout, // Set 2 (renumbered from 4)
+    self.node_data_buffer.set_layout, // Set 3 (renumbered from 5)
+    self.sprite_buffer.set_layout, // Set 4 (renumbered from 9)
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
+    self.sprite_pipeline_layout = 0
   }
   // Pipeline layout for spherical depth rendering (point light shadows)
   self.sphere_pipeline_layout = gpu.create_pipeline_layout(
@@ -307,16 +332,16 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
       stageFlags = {.VERTEX, .GEOMETRY, .FRAGMENT},
       size = size_of(u32),
     },
-    self.spherical_camera_buffer.set_layout,
-    self.textures_set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.world_matrix_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
-    self.vertex_skinning_buffer.set_layout,
-    self.lights_buffer.set_layout,
-    self.sprite_buffer.set_layout,
+    self.spherical_camera_buffer.set_layout, // Set 0
+    self.textures_set_layout, // Set 1
+    self.bone_buffer.set_layout, // Set 2
+    self.material_buffer.set_layout, // Set 3
+    self.world_matrix_buffer.set_layout, // Set 4
+    self.node_data_buffer.set_layout, // Set 5
+    self.mesh_data_buffer.set_layout, // Set 6
+    self.vertex_skinning_buffer.set_layout, // Set 7
+    // Removed: lights_buffer (set 8 - never used)
+    // Removed: sprite_buffer (set 9 - not used in spherical rendering)
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.sphere_pipeline_layout, nil)
@@ -414,6 +439,8 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   destroy_vertex_index_buffers(self, gctx)
   vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
   self.general_pipeline_layout = 0
+  vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
+  self.sprite_pipeline_layout = 0
   vk.DestroyPipelineLayout(gctx.device, self.sphere_pipeline_layout, nil)
   self.sphere_pipeline_layout = 0
   vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)

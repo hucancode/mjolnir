@@ -95,7 +95,7 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
   }
-  create_sprite_pipeline(gctx, self, rm.general_pipeline_layout) or_return
+  create_sprite_pipeline(gctx, self, rm.sprite_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.sprite_pipeline, nil)
   }
@@ -332,27 +332,44 @@ render :: proc(
     log.warn("Transparency render: draw_buffer or count_buffer is null")
     return
   }
-  gpu.bind_graphics_pipeline(
-    command_buffer,
-    pipeline,
-    rm.general_pipeline_layout,
-    rm.camera_buffer.descriptor_sets[frame_index], // Per-frame to avoid overlap
-    rm.textures_descriptor_set,
-    rm.bone_buffer.descriptor_sets[frame_index],
-    rm.material_buffer.descriptor_set,
-    rm.world_matrix_buffer.descriptor_set,
-    rm.node_data_buffer.descriptor_set,
-    rm.mesh_data_buffer.descriptor_set,
-    rm.vertex_skinning_buffer.descriptor_set,
-    rm.lights_buffer.descriptor_set,
-    rm.sprite_buffer.descriptor_set,
-  )
+  // Determine which pipeline layout to use
+  pipeline_layout := pipeline == self.sprite_pipeline ? rm.sprite_pipeline_layout : rm.general_pipeline_layout
+
+  if pipeline == self.sprite_pipeline {
+    // Sprite pipeline: 5 descriptor sets (0, 1, 2, 3, 4)
+    gpu.bind_graphics_pipeline(
+      command_buffer,
+      pipeline,
+      pipeline_layout,
+      rm.camera_buffer.descriptor_sets[frame_index], // Set 0
+      rm.textures_descriptor_set, // Set 1
+      rm.world_matrix_buffer.descriptor_set, // Set 2
+      rm.node_data_buffer.descriptor_set, // Set 3
+      rm.sprite_buffer.descriptor_set, // Set 4
+    )
+  } else {
+    // General pipeline: 8 descriptor sets (0-7)
+    gpu.bind_graphics_pipeline(
+      command_buffer,
+      pipeline,
+      pipeline_layout,
+      rm.camera_buffer.descriptor_sets[frame_index], // Set 0
+      rm.textures_descriptor_set, // Set 1
+      rm.bone_buffer.descriptor_sets[frame_index], // Set 2
+      rm.material_buffer.descriptor_set, // Set 3
+      rm.world_matrix_buffer.descriptor_set, // Set 4
+      rm.node_data_buffer.descriptor_set, // Set 5
+      rm.mesh_data_buffer.descriptor_set, // Set 6
+      rm.vertex_skinning_buffer.descriptor_set, // Set 7
+    )
+  }
+
   push_constants := PushConstant {
     camera_index = camera_handle.index,
   }
   vk.CmdPushConstants(
     command_buffer,
-    rm.general_pipeline_layout,
+    pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
