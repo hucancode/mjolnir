@@ -486,10 +486,14 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     dynamicRendering               = true,
     shaderDemoteToHelperInvocation = true,
   }
+  REQUIRE_GEOMETRY_SHADER :: #config(
+    REQUIRE_GEOMETRY_SHADER,
+    ODIN_OS != .Darwin,
+  )
   basic_features := vk.PhysicalDeviceFeatures {
     multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
-    geometryShader            = true,
+    geometryShader            = REQUIRE_GEOMETRY_SHADER,
     fillModeNonSolid          = true, // Required for VK_POLYGON_MODE_LINE wireframe rendering
     wideLines                 = true, // Required for lineWidth > 1.0
   }
