@@ -41,7 +41,6 @@ record_compute_commands :: proc(
   rm: ^resources.Manager,
   compute_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  gpu.begin_record(compute_buffer) or_return
   // Compute for frame N prepares data for frame N+1
   // Buffer indices with FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
   next_frame_index := alg.next(frame_index, FRAMES_IN_FLIGHT)
@@ -68,7 +67,6 @@ record_compute_commands :: proc(
     rm.world_matrix_buffer.descriptor_set,
     rm,
   )
-  gpu.end_record(compute_buffer) or_return
   return .SUCCESS
 }
 

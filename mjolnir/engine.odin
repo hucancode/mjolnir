@@ -160,15 +160,17 @@ init :: proc(
   defer if ret != .SUCCESS {
     gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
   }
-  gpu.allocate_compute_command_buffer(
-    &self.gctx,
-    self.compute_command_buffers[:],
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_compute_command_buffer(
+  if self.gctx.has_async_compute {
+    gpu.allocate_compute_command_buffer(
       &self.gctx,
       self.compute_command_buffers[:],
-    )
+    ) or_return
+    defer if ret != .SUCCESS {
+      gpu.free_compute_command_buffer(
+        &self.gctx,
+        self.compute_command_buffers[:],
+      )
+    }
   }
   render.init(
     &self.render,
@@ -455,7 +457,9 @@ shutdown :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(self.gctx.device)
   level_manager.shutdown(&self.level_manager)
   gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
-  gpu.free_compute_command_buffer(&self.gctx, self.compute_command_buffers[:])
+  if self.gctx.has_async_compute {
+    gpu.free_compute_command_buffer(&self.gctx, self.compute_command_buffers[:])
+  }
   render.shutdown(&self.render, &self.gctx, &self.rm)
   world.shutdown(&self.world, &self.gctx, &self.rm)
   nav.shutdown(&self.nav_sys)
@@ -794,8 +798,13 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.views[self.swapchain.image_index],
     command_buffer,
   )
-  compute_cmd_buffer :=
-    self.compute_command_buffers[self.frame_index] if self.gctx.has_async_compute else command_buffer
+  compute_cmd_buffer: vk.CommandBuffer
+  if self.gctx.has_async_compute {
+    compute_cmd_buffer = self.compute_command_buffers[self.frame_index]
+    gpu.begin_record(compute_cmd_buffer) or_return
+  } else {
+    compute_cmd_buffer = command_buffer
+  }
   render.record_compute_commands(
     &self.render,
     self.frame_index,
@@ -803,6 +812,9 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.rm,
     compute_cmd_buffer,
   ) or_return
+  if self.gctx.has_async_compute {
+    gpu.end_record(compute_cmd_buffer) or_return
+  }
   populate_debug_ui(self)
   if self.post_render_proc != nil {
     self.post_render_proc(self)
