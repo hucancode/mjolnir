@@ -358,7 +358,9 @@ test_sphere_cylinder :: proc(
     local_normal = {0, -1, 0}
   } else {
     // On curved surface
-    local_normal = linalg.normalize([3]f32{local_closest.x, 0, local_closest.z})
+    local_normal = linalg.normalize(
+      [3]f32{local_closest.x, 0, local_closest.z},
+    )
   }
   // Transform to world space
   world_closest := pos_cylinder + geometry.qmv(rot_cylinder, local_closest)
@@ -580,12 +582,9 @@ test_collision :: proc(
 }
 
 test_collision_gjk :: proc(
-  collider_a: ^Collider,
-  pos_a: [3]f32,
-  rot_a: quaternion128,
-  collider_b: ^Collider,
-  pos_b: [3]f32,
-  rot_b: quaternion128,
+  collider_a, collider_b: ^Collider,
+  pos_a, pos_b: [3]f32,
+  rot_a, rot_b: quaternion128,
 ) -> (
   point: [3]f32,
   normal: [3]f32,
@@ -593,7 +592,7 @@ test_collision_gjk :: proc(
   hit: bool,
 ) {
   simplex: Simplex
-  if !gjk(collider_a, pos_a, rot_a, collider_b, pos_b, rot_b, &simplex) {
+  if !gjk(collider_a, collider_b, pos_a, pos_b, rot_a, rot_b, &simplex) {
     return
   }
   normal, penetration, hit = epa(

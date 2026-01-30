@@ -126,10 +126,10 @@ epa :: proc(
     // Get support point in direction of closest face normal
     support_point := support(
       collider_a,
-      pos_a,
-      rot_a,
       collider_b,
+      pos_a,
       pos_b,
+      rot_a,
       rot_b,
       closest_face.normal,
     )

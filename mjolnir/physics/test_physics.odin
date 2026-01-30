@@ -11,13 +11,7 @@ import "core:time"
 @(test)
 test_rigid_body_apply_force :: proc(t: ^testing.T) {
   body: DynamicRigidBody
-  rigid_body_init(
-    &body,
-    {},
-    linalg.QUATERNIONF32_IDENTITY,
-    10.0,
-    false,
-  )
+  rigid_body_init(&body, {}, linalg.QUATERNIONF32_IDENTITY, 10.0, false)
   force := [3]f32{100, 0, 0}
   apply_force(&body, force)
   testing.expect(
@@ -32,13 +26,7 @@ test_rigid_body_apply_force :: proc(t: ^testing.T) {
 @(test)
 test_rigid_body_apply_impulse :: proc(t: ^testing.T) {
   body: DynamicRigidBody
-  rigid_body_init(
-    &body,
-    {},
-    linalg.QUATERNIONF32_IDENTITY,
-    10.0,
-    false,
-  )
+  rigid_body_init(&body, {}, linalg.QUATERNIONF32_IDENTITY, 10.0, false)
   impulse := [3]f32{50, 0, 0}
   apply_impulse(&body, impulse)
   expected_velocity := impulse * body.inv_mass
@@ -54,13 +42,7 @@ test_rigid_body_apply_impulse :: proc(t: ^testing.T) {
 @(test)
 test_rigid_body_integration :: proc(t: ^testing.T) {
   body: DynamicRigidBody
-  rigid_body_init(
-    &body,
-    {},
-    linalg.QUATERNIONF32_IDENTITY,
-    10.0,
-    false,
-  )
+  rigid_body_init(&body, {}, linalg.QUATERNIONF32_IDENTITY, 10.0, false)
   force := [3]f32{100, 0, 0}
   apply_force(&body, force)
   dt := f32(0.016)
@@ -166,10 +148,7 @@ test_physics_world_static_body_collision :: proc(t: ^testing.T) {
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
   )
-  body_dynamic, _ := get_dynamic_body(
-    &physics_world,
-    body_dynamic_handle,
-  )
+  body_dynamic, _ := get_dynamic_body(&physics_world, body_dynamic_handle)
   body_dynamic.velocity = {-10, 0, 0}
   dt := f32(0.016)
   step(&physics_world, dt)
@@ -303,10 +282,7 @@ test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, enable_parallel = false)
   defer destroy(&physics_world)
-  body_handle, _ := create_dynamic_body(
-    &physics_world,
-    {0, KILL_Y - 1, 0},
-  )
+  body_handle, _ := create_dynamic_body(&physics_world, {0, KILL_Y - 1, 0})
   dt := f32(0.016)
   step(&physics_world, dt)
   destroyed_body, ok := get_dynamic_body(&physics_world, body_handle)
@@ -328,10 +304,10 @@ test_gjk_sphere_sphere_intersecting :: proc(t: ^testing.T) {
   simplex: Simplex
   result := gjk(
     &collider_a,
-    pos_a,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
+    pos_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   )
@@ -353,10 +329,10 @@ test_gjk_sphere_sphere_separated :: proc(t: ^testing.T) {
   simplex: Simplex
   result := gjk(
     &collider_a,
-    pos_a,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
+    pos_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   )
@@ -378,10 +354,10 @@ test_gjk_box_box_intersecting :: proc(t: ^testing.T) {
   simplex: Simplex
   result := gjk(
     &collider_a,
-    pos_a,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
+    pos_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   )
@@ -403,10 +379,10 @@ test_gjk_box_box_separated :: proc(t: ^testing.T) {
   simplex: Simplex
   result := gjk(
     &collider_a,
-    pos_a,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
+    pos_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   )
@@ -433,10 +409,10 @@ test_gjk_sphere_box_intersecting :: proc(t: ^testing.T) {
   simplex: Simplex
   result := gjk(
     &collider_sphere,
-    pos_sphere,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_box,
+    pos_sphere,
     pos_box,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   )
@@ -460,10 +436,10 @@ test_gjk_sphere_box_separated :: proc(t: ^testing.T) {
   simplex: Simplex
   result := gjk(
     &collider_sphere,
-    pos_sphere,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_box,
+    pos_sphere,
     pos_box,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   )
@@ -485,10 +461,10 @@ test_epa_sphere_sphere_penetration :: proc(t: ^testing.T) {
   simplex: Simplex
   if !gjk(
     &collider_a,
-    pos_a,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
+    pos_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   ) {
@@ -527,10 +503,10 @@ test_epa_box_box_penetration :: proc(t: ^testing.T) {
   simplex: Simplex
   if !gjk(
     &collider_a,
-    pos_a,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
+    pos_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
     &simplex,
   ) {
@@ -568,10 +544,10 @@ test_collision_gjk_sphere_sphere :: proc(t: ^testing.T) {
   pos_b := [3]f32{1.5, 0, 0}
   point, normal, penetration, hit := test_collision_gjk(
     &collider_a,
-    pos_a,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
+    pos_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
   )
   testing.expect(t, hit, "Should detect collision")
@@ -592,10 +568,10 @@ test_collision_gjk_box_box :: proc(t: ^testing.T) {
   pos_b := [3]f32{1.5, 0, 0}
   point, normal, penetration, hit := test_collision_gjk(
     &collider_a,
-    pos_a,
-    linalg.QUATERNIONF32_IDENTITY,
     &collider_b,
+    pos_a,
     pos_b,
+    linalg.QUATERNIONF32_IDENTITY,
     linalg.QUATERNIONF32_IDENTITY,
   )
   testing.expect(t, hit, "Should detect collision")
@@ -949,10 +925,10 @@ test_swept_sphere_sphere_hit :: proc(t: ^testing.T) {
   radius_b := f32(1.0)
   result := swept_sphere_sphere(
     center_a,
-    radius_a,
-    velocity,
     center_b,
+    radius_a,
     radius_b,
+    velocity,
   )
   testing.expect(t, result.has_impact, "Should detect impact")
   testing.expect(
@@ -976,10 +952,10 @@ test_swept_sphere_sphere_miss :: proc(t: ^testing.T) {
   radius_b := f32(1.0)
   result := swept_sphere_sphere(
     center_a,
-    radius_a,
-    velocity,
     center_b,
+    radius_a,
     radius_b,
+    velocity,
   )
   testing.expect(t, !result.has_impact, "Should not detect impact")
 }
@@ -993,10 +969,10 @@ test_swept_sphere_sphere_already_touching :: proc(t: ^testing.T) {
   radius_b := f32(1.0)
   result := swept_sphere_sphere(
     center_a,
-    radius_a,
-    velocity,
     center_b,
+    radius_a,
     radius_b,
+    velocity,
   )
   testing.expect(t, result.has_impact, "Should detect impact")
   testing.expect(t, result.time < 0.01, "TOI should be at start")
@@ -1009,13 +985,7 @@ test_swept_sphere_box_hit :: proc(t: ^testing.T) {
   velocity := [3]f32{10, 0, 0}
   box_min := [3]f32{4, -1, -1}
   box_max := [3]f32{6, 1, 1}
-  result := swept_sphere_box(
-    center,
-    radius,
-    velocity,
-    box_min,
-    box_max,
-  )
+  result := swept_sphere_box(center, radius, velocity, box_min, box_max)
   testing.expect(t, result.has_impact, "Should detect impact with box")
   testing.expect(
     t,
@@ -1031,13 +1001,7 @@ test_swept_sphere_box_miss :: proc(t: ^testing.T) {
   velocity := [3]f32{-10, 0, 0}
   box_min := [3]f32{4, -1, -1}
   box_max := [3]f32{6, 1, 1}
-  result := swept_sphere_box(
-    center,
-    radius,
-    velocity,
-    box_min,
-    box_max,
-  )
+  result := swept_sphere_box(center, radius, velocity, box_min, box_max)
   testing.expect(t, !result.has_impact, "Should not hit box when moving away")
 }
 
@@ -1050,12 +1014,12 @@ test_swept_collider_sphere_sphere :: proc(t: ^testing.T) {
   velocity := [3]f32{10, 0, 0}
   result := swept_test(
     &collider_a,
-    {0, 0, 0},
-    linalg.QUATERNIONF32_IDENTITY,
-    velocity,
     &collider_b,
+    {0, 0, 0},
     {5, 0, 0},
     linalg.QUATERNIONF32_IDENTITY,
+    linalg.QUATERNIONF32_IDENTITY,
+    velocity,
   )
   testing.expect(t, result.has_impact, "Swept test should detect collision")
   testing.expect(
@@ -1549,13 +1513,7 @@ test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
   }
   pos_sphere := [3]f32{1.5, 0, 0}
   pos_box := [3]f32{0, 0, 0}
-  _, _, _, hit := test_box_sphere(
-    pos_box,
-    rotation,
-    box,
-    pos_sphere,
-    sphere,
-  )
+  _, _, _, hit := test_box_sphere(pos_box, rotation, box, pos_sphere, sphere)
   testing.expect(t, hit, "Sphere should collide with rotated OBB")
 }
 

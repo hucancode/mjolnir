@@ -13,11 +13,9 @@ TOIResult :: struct {
 }
 
 swept_sphere_sphere :: proc(
-  center_a: [3]f32,
-  radius_a: f32,
+  center_a, center_b: [3]f32,
+  radius_a, radius_b: f32,
   velocity_a: [3]f32,
-  center_b: [3]f32,
-  radius_b: f32,
 ) -> TOIResult {
   result: TOIResult
   // Relative motion
@@ -78,8 +76,7 @@ swept_sphere_box :: proc(
   center: [3]f32,
   radius: f32,
   velocity: [3]f32,
-  box_min: [3]f32,
-  box_max: [3]f32,
+  box_min, box_max: [3]f32,
 ) -> TOIResult {
   result: TOIResult
   // Expand the box by sphere radius - now ray vs expanded box
@@ -131,11 +128,9 @@ swept_sphere_box :: proc(
 }
 
 swept_box_box :: proc(
-  center_a: [3]f32,
-  half_extents_a: [3]f32,
+  center_a, center_b: [3]f32,
+  half_extents_a, half_extents_b: [3]f32,
   velocity_a: [3]f32,
-  center_b: [3]f32,
-  half_extents_b: [3]f32,
 ) -> TOIResult {
   result: TOIResult
   // Minkowski sum: treat as a point (center_a) moving toward an expanded box
@@ -189,13 +184,10 @@ swept_box_box :: proc(
 }
 
 swept_test :: proc(
-  collider_a: ^Collider,
-  pos_a: [3]f32,
-  rot_a: quaternion128,
+  collider_a, collider_b: ^Collider,
+  pos_a, pos_b: [3]f32,
+  rot_a, rot_b: quaternion128,
   velocity_a: [3]f32,
-  collider_b: ^Collider,
-  pos_b: [3]f32,
-  rot_b: quaternion128,
 ) -> TOIResult {
   center_a := pos_a + geometry.qmv(rot_a, collider_a.offset)
   center_b := pos_b + geometry.qmv(rot_b, collider_b.offset)
@@ -211,10 +203,10 @@ swept_test :: proc(
     case SphereCollider:
       return swept_sphere_sphere(
         center_a,
-        shape_a.radius,
-        velocity_a,
         center_b,
+        shape_a.radius,
         shape_b.radius,
+        velocity_a,
       )
     case BoxCollider:
       box_min := center_b - shape_b.half_extents
@@ -231,10 +223,10 @@ swept_test :: proc(
       // This better matches the actual collision detection
       return swept_sphere_sphere(
         center_a,
-        shape_a.radius,
-        velocity_a,
         center_b,
+        shape_a.radius,
         shape_b.radius,
+        velocity_a,
       )
     }
   case BoxCollider:
@@ -263,10 +255,10 @@ swept_test :: proc(
       if is_a_aligned && is_b_aligned {
         return swept_box_box(
           center_a,
-          shape_a.half_extents,
-          velocity_a,
           center_b,
+          shape_a.half_extents,
           shape_b.half_extents,
+          velocity_a,
         )
       }
       // For oriented boxes, fall back to conservative sphere approximation
@@ -274,20 +266,20 @@ swept_test :: proc(
       radius_b := linalg.length(shape_b.half_extents)
       return swept_sphere_sphere(
         center_a,
-        radius_a,
-        velocity_a,
         center_b,
+        radius_a,
         radius_b,
+        velocity_a,
       )
     case CylinderCollider:
       // Use cylinder radius for radial collision
       box_radius := linalg.length(shape_a.half_extents)
       return swept_sphere_sphere(
         center_a,
-        box_radius,
-        velocity_a,
         center_b,
+        box_radius,
         shape_b.radius,
+        velocity_a,
       )
     }
   case CylinderCollider:
@@ -298,10 +290,10 @@ swept_test :: proc(
     case SphereCollider:
       result := swept_sphere_sphere(
         center_b,
-        shape_b.radius,
-        -velocity_a,
         center_a,
+        shape_b.radius,
         shape_a.radius,
+        -velocity_a,
       )
       if result.has_impact {
         result.normal = -result.normal
@@ -323,10 +315,10 @@ swept_test :: proc(
       // Use radii for radial collision
       return swept_sphere_sphere(
         center_a,
-        shape_a.radius,
-        velocity_a,
         center_b,
+        shape_a.radius,
         shape_b.radius,
+        velocity_a,
       )
     }
   }

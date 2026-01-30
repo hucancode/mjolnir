@@ -7,12 +7,9 @@ import "core:math/linalg"
 // Support function: finds the furthest point in a given direction
 // This is the core of GJK - it queries both shapes and returns a point in Minkowski space
 support :: proc(
-  collider_a: ^Collider,
-  pos_a: [3]f32,
-  rot_a: quaternion128,
-  collider_b: ^Collider,
-  pos_b: [3]f32,
-  rot_b: quaternion128,
+  collider_a, collider_b: ^Collider,
+  pos_a, pos_b: [3]f32,
+  rot_a, rot_b: quaternion128,
   direction: [3]f32,
 ) -> [3]f32 {
   point_a := find_furthest_point(collider_a, pos_a, rot_a, direction)
@@ -94,12 +91,9 @@ simplex_set :: proc(s: ^Simplex, points: ..[3]f32) {
 
 // GJK algorithm - returns true if shapes collide
 gjk :: proc(
-  collider_a: ^Collider,
-  pos_a: [3]f32,
-  rot_a: quaternion128,
-  collider_b: ^Collider,
-  pos_b: [3]f32,
-  rot_b: quaternion128,
+  collider_a, collider_b: ^Collider,
+  pos_a, pos_b: [3]f32,
+  rot_a, rot_b: quaternion128,
   simplex_out: ^Simplex,
 ) -> bool {
   // Initial direction (from B to A)
@@ -111,13 +105,13 @@ gjk :: proc(
   simplex: Simplex
   simplex_push_front(
     &simplex,
-    support(collider_a, pos_a, rot_a, collider_b, pos_b, rot_b, direction),
+    support(collider_a, collider_b, pos_a, pos_b, rot_a, rot_b, direction),
   )
   // Reverse direction
   direction = -simplex.points[0]
   max_iterations := 32
   for iteration in 0 ..< max_iterations {
-    a := support(collider_a, pos_a, rot_a, collider_b, pos_b, rot_b, direction)
+    a := support(collider_a, collider_b, pos_a, pos_b, rot_a, rot_b, direction)
     // If we didn't pass the origin, there's no collision
     if linalg.dot(a, direction) < 0 {
       return false
