@@ -356,9 +356,10 @@ spider_leg_modifier_update :: proc(
     // This makes the leg bend naturally with the "knee" pointing outward/upward
     leg_dir := feet_position_skeleton - root_position_skeleton
     up := [3]f32{0, 1, 0} // World up
-    // Pole is positioned above the root, perpendicular to the leg direction
+    // Pole is positioned perpendicular to the leg direction, offset from the midpoint
     pole_offset := up - leg_dir * linalg.dot(up, leg_dir) / linalg.dot(leg_dir, leg_dir)
-    pole := root_position_skeleton + linalg.normalize(pole_offset) * 10.0
+    mid_point := (root_position_skeleton + feet_position_skeleton) / 2.0
+    pole := mid_point + linalg.normalize(pole_offset) * 10.0
 
     ik_target := IKTarget {
       bone_indices    = leg_bone_indices,
