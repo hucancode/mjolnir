@@ -503,11 +503,11 @@ test_collision :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  switch shape_a in collider_a.shape {
+  switch shape_a in collider_a {
   case FanCollider:
     return
   case SphereCollider:
-    switch shape_b in collider_b.shape {
+    switch shape_b in collider_b {
     case FanCollider:
       return
     case SphereCollider:
@@ -525,7 +525,7 @@ test_collision :: proc(
       return test_sphere_cylinder(pos_a, shape_a, pos_b, rot_b, shape_b)
     }
   case BoxCollider:
-    switch shape_b in collider_b.shape {
+    switch shape_b in collider_b {
     case FanCollider:
       return
     case SphereCollider:
@@ -543,7 +543,7 @@ test_collision :: proc(
       )
     }
   case CylinderCollider:
-    switch shape_b in collider_b.shape {
+    switch shape_b in collider_b {
     case FanCollider:
       return
     case SphereCollider:

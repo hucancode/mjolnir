@@ -29,8 +29,6 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   physics.init(&physics_world, {0, -20, 0}) // 2x earth gravity
-  physics_world.enable_air_resistance = true
-
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]

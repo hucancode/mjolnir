@@ -191,11 +191,11 @@ swept_test :: proc(
 ) -> TOIResult {
       // For now, implement sphere-sphere and sphere-box
   // Can extend to other shapes later
-  switch shape_a in collider_a.shape {
+  switch shape_a in collider_a {
   case FanCollider:
     return {} // fan collider are trigger-only
   case SphereCollider:
-    switch shape_b in collider_b.shape {
+    switch shape_b in collider_b {
     case FanCollider:
       return {}
     case SphereCollider:
@@ -230,7 +230,7 @@ swept_test :: proc(
   case BoxCollider:
     box_min := pos_a - shape_a.half_extents
     box_max := pos_a + shape_a.half_extents
-    switch shape_b in collider_b.shape {
+    switch shape_b in collider_b {
     case FanCollider:
       return {}
     case SphereCollider:
@@ -282,7 +282,7 @@ swept_test :: proc(
     }
   case CylinderCollider:
     // Use cylinder radius for radial collision
-    switch shape_b in collider_b.shape {
+    switch shape_b in collider_b {
     case FanCollider:
       return {}
     case SphereCollider:

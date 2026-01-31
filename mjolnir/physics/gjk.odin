@@ -24,7 +24,7 @@ find_furthest_point :: proc(
   rotation: quaternion128,
   direction: [3]f32,
 ) -> [3]f32 {
-  switch shape in collider.shape {
+  switch shape in collider {
   case SphereCollider:
     dir_normalized := linalg.normalize0(direction)
     return position + dir_normalized * shape.radius

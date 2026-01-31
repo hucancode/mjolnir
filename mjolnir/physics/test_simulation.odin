@@ -14,7 +14,6 @@ SPHERE_RADIUS :: 3.0
 test_cubes_should_not_sink :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, -20, 0}, false) // 2x earth gravity
-  physics_world.enable_air_resistance = true
   defer destroy(&physics_world)
 
   // Create ground

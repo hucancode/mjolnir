@@ -160,7 +160,7 @@ aabb_cache_update_task :: proc(task: thread.Task) {
     // Check if collider needs OBB-to-AABB conversion
     needs_obb := false
     obb: geometry.Obb
-    switch sh in body.collider.shape {
+    switch sh in body.collider {
     case SphereCollider:
       // Spheres don't need OBB conversion - process directly
       body.cached_aabb = geometry.Aabb {

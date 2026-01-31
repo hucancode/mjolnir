@@ -295,9 +295,7 @@ test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
 
 @(test)
 test_gjk_sphere_sphere_intersecting :: proc(t: ^testing.T) {
-  collider_a := Collider {
-    shape = SphereCollider{radius = 1.0},
-  }
+  collider_a: Collider = SphereCollider{radius = 1.0}
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
@@ -320,9 +318,7 @@ test_gjk_sphere_sphere_intersecting :: proc(t: ^testing.T) {
 
 @(test)
 test_gjk_sphere_sphere_separated :: proc(t: ^testing.T) {
-  collider_a := Collider {
-    shape = SphereCollider{radius = 1.0},
-  }
+  collider_a: Collider = SphereCollider{radius = 1.0}
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{3, 0, 0}
@@ -345,9 +341,7 @@ test_gjk_sphere_sphere_separated :: proc(t: ^testing.T) {
 
 @(test)
 test_gjk_box_box_intersecting :: proc(t: ^testing.T) {
-  collider_a := Collider {
-    shape = BoxCollider{half_extents = {1, 1, 1}},
-  }
+  collider_a: Collider = BoxCollider{half_extents = {1, 1, 1}}
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
@@ -370,9 +364,7 @@ test_gjk_box_box_intersecting :: proc(t: ^testing.T) {
 
 @(test)
 test_gjk_box_box_separated :: proc(t: ^testing.T) {
-  collider_a := Collider {
-    shape = BoxCollider{half_extents = {1, 1, 1}},
-  }
+  collider_a: Collider = BoxCollider{half_extents = {1, 1, 1}}
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{5, 0, 0}
@@ -395,12 +387,8 @@ test_gjk_box_box_separated :: proc(t: ^testing.T) {
 
 @(test)
 test_gjk_sphere_box_intersecting :: proc(t: ^testing.T) {
-  collider_sphere := Collider {
-    shape = SphereCollider{radius = 1.0},
-  }
-  collider_box := Collider {
-    shape = BoxCollider{half_extents = {1, 1, 1}},
-  }
+  collider_sphere: Collider = SphereCollider{radius = 1.0}
+  collider_box: Collider = BoxCollider{half_extents = {1, 1, 1}}
   // Sphere at (1.5, 0, 0) with radius 1.0 reaches from 0.5 to 2.5
   // Box at (0, 0, 0) with extents 1 reaches from -1 to 1
   // They overlap from 0.5 to 1.0
@@ -425,12 +413,8 @@ test_gjk_sphere_box_intersecting :: proc(t: ^testing.T) {
 
 @(test)
 test_gjk_sphere_box_separated :: proc(t: ^testing.T) {
-  collider_sphere := Collider {
-    shape = SphereCollider{radius = 1.0},
-  }
-  collider_box := Collider {
-    shape = BoxCollider{half_extents = {1, 1, 1}},
-  }
+  collider_sphere: Collider = SphereCollider{radius = 1.0}
+  collider_box: Collider = BoxCollider{half_extents = {1, 1, 1}}
   pos_sphere := [3]f32{5, 0, 0}
   pos_box := [3]f32{0, 0, 0}
   simplex: Simplex
@@ -452,9 +436,7 @@ test_gjk_sphere_box_separated :: proc(t: ^testing.T) {
 
 @(test)
 test_epa_sphere_sphere_penetration :: proc(t: ^testing.T) {
-  collider_a := Collider {
-    shape = SphereCollider{radius = 1.0},
-  }
+  collider_a: Collider = SphereCollider{radius = 1.0}
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
@@ -494,9 +476,7 @@ test_epa_sphere_sphere_penetration :: proc(t: ^testing.T) {
 
 @(test)
 test_epa_box_box_penetration :: proc(t: ^testing.T) {
-  collider_a := Collider {
-    shape = BoxCollider{half_extents = {1, 1, 1}},
-  }
+  collider_a: Collider = BoxCollider{half_extents = {1, 1, 1}}
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
@@ -536,9 +516,7 @@ test_epa_box_box_penetration :: proc(t: ^testing.T) {
 
 @(test)
 test_collision_gjk_sphere_sphere :: proc(t: ^testing.T) {
-  collider_a := Collider {
-    shape = SphereCollider{radius = 1.0},
-  }
+  collider_a: Collider = SphereCollider{radius = 1.0}
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
@@ -560,9 +538,7 @@ test_collision_gjk_sphere_sphere :: proc(t: ^testing.T) {
 
 @(test)
 test_collision_gjk_box_box :: proc(t: ^testing.T) {
-  collider_a := Collider {
-    shape = BoxCollider{half_extents = {1, 1, 1}},
-  }
+  collider_a: Collider = BoxCollider{half_extents = {1, 1, 1}}
   collider_b := collider_a
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{1.5, 0, 0}
@@ -584,9 +560,7 @@ test_collision_gjk_box_box :: proc(t: ^testing.T) {
 
 @(test)
 test_support_function_sphere :: proc(t: ^testing.T) {
-  collider := Collider {
-    shape = SphereCollider{radius = 2.0},
-  }
+  collider: Collider = SphereCollider{radius = 2.0}
   position := [3]f32{0, 0, 0}
   direction := [3]f32{1, 0, 0}
   point := find_furthest_point(
@@ -607,9 +581,7 @@ test_support_function_sphere :: proc(t: ^testing.T) {
 
 @(test)
 test_support_function_box :: proc(t: ^testing.T) {
-  collider := Collider {
-    shape = BoxCollider{half_extents = {1, 2, 3}},
-  }
+  collider: Collider = BoxCollider{half_extents = {1, 2, 3}}
   position := [3]f32{0, 0, 0}
   direction := [3]f32{1, 1, 1}
   point := find_furthest_point(
@@ -858,9 +830,7 @@ test_sphere_box_collision_corner :: proc(t: ^testing.T) {
 
 @(test)
 test_collider_get_aabb_sphere :: proc(t: ^testing.T) {
-  collider := Collider {
-    shape = SphereCollider{radius = 2.0},
-  }
+  collider: Collider = SphereCollider{radius = 2.0}
   position := [3]f32{5, 3, 1}
   aabb := collider_calculate_aabb(
     &collider,
@@ -887,9 +857,7 @@ test_collider_get_aabb_sphere :: proc(t: ^testing.T) {
 
 @(test)
 test_collider_get_aabb_box :: proc(t: ^testing.T) {
-  collider := Collider {
-    shape = BoxCollider{half_extents = {1, 2, 0.5}},
-  }
+  collider: Collider = BoxCollider{half_extents = {1, 2, 0.5}}
   position := [3]f32{10, 5, 2}
   aabb := collider_calculate_aabb(
     &collider,
@@ -1005,9 +973,7 @@ test_swept_sphere_box_miss :: proc(t: ^testing.T) {
 
 @(test)
 test_swept_collider_sphere_sphere :: proc(t: ^testing.T) {
-  collider_a := Collider {
-    shape = SphereCollider{radius = 1.0},
-  }
+  collider_a: Collider = SphereCollider{radius = 1.0}
   collider_b := collider_a
   velocity := [3]f32{10, 0, 0}
   result := swept_test(
@@ -1517,9 +1483,7 @@ test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
 
 @(test)
 test_rotated_offset_collider_aabb :: proc(t: ^testing.T) {
-  collider := Collider {
-    shape = BoxCollider{half_extents = {0.5, 0.5, 0.5}},
-  }
+  collider: Collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}
   position := [3]f32{0, 0, 0}
   rotation := linalg.quaternion_angle_axis(
     math.PI / 2.0,

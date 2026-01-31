@@ -39,8 +39,6 @@ World :: struct {
   dynamic_bvh:           geometry.BVH(DynamicBroadPhaseEntry),
   static_bvh:            geometry.BVH(StaticBroadPhaseEntry),
   body_bounds:           [dynamic]geometry.Aabb,
-  enable_air_resistance: bool,
-  air_density:           f32,
   enable_parallel:       bool,
   thread_count:          int,
   thread_pool:           thread.Pool,
@@ -93,8 +91,6 @@ init :: proc(
     },
   }
   self.body_bounds = make([dynamic]geometry.Aabb)
-  self.enable_air_resistance = false
-  self.air_density = SEA_LEVEL_AIR_DENSITY
   self.enable_parallel = enable_parallel
   self.killed_body_count = 0
   self.last_dynamic_count = 0
@@ -199,10 +195,7 @@ create_dynamic_body_sphere :: proc(
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := Collider {
-    cross_sectional_area = math.PI * radius * radius,
-    shape                = SphereCollider{radius = radius},
-  }
+  collider := SphereCollider{radius = radius}
   body_handle = create_dynamic_body(
     self,
     position,
@@ -224,10 +217,7 @@ create_static_body_sphere :: proc(
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := Collider {
-    cross_sectional_area = math.PI * radius * radius,
-    shape                = SphereCollider{radius = radius},
-  }
+  collider := SphereCollider{radius = radius}
   body_handle = create_static_body(
     self,
     position,
@@ -249,10 +239,7 @@ create_dynamic_body_box :: proc(
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := Collider {
-    cross_sectional_area = (half_extents.x * half_extents.y + half_extents.y * half_extents.z + half_extents.x * half_extents.z) * 4.0 / 3.0,
-    shape                = BoxCollider{half_extents = half_extents},
-  }
+  collider := BoxCollider{half_extents = half_extents}
   body_handle = create_dynamic_body(
     self,
     position,
@@ -274,10 +261,7 @@ create_static_body_box :: proc(
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := Collider {
-    cross_sectional_area = (half_extents.x * half_extents.y + half_extents.y * half_extents.z + half_extents.x * half_extents.z) * 4.0 / 3.0,
-    shape                = BoxCollider{half_extents = half_extents},
-  }
+  collider := BoxCollider{half_extents = half_extents}
   body_handle = create_static_body(
     self,
     position,
@@ -300,10 +284,7 @@ create_dynamic_body_cylinder :: proc(
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := Collider {
-    cross_sectional_area = math.PI * radius * radius + radius * height,
-    shape                = CylinderCollider{radius = radius, height = height},
-  }
+  collider := CylinderCollider{radius = radius, height = height}
   body_handle = create_dynamic_body(
     self,
     position,
@@ -326,10 +307,7 @@ create_static_body_cylinder :: proc(
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := Collider {
-    cross_sectional_area = math.PI * radius * radius + radius * height,
-    shape                = CylinderCollider{radius = radius, height = height},
-  }
+  collider := CylinderCollider{radius = radius, height = height}
   body_handle = create_static_body(
     self,
     position,
@@ -353,10 +331,7 @@ create_dynamic_body_fan :: proc(
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := Collider {
-    cross_sectional_area = math.PI * radius * radius + radius * height,
-    shape                = FanCollider{radius = radius, height = height, angle = angle},
-  }
+  collider := FanCollider{radius = radius, height = height, angle = angle}
   body_handle = create_dynamic_body(
     self,
     position,
@@ -380,10 +355,7 @@ create_static_body_fan :: proc(
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := Collider {
-    cross_sectional_area = math.PI * radius * radius + radius * height,
-    shape                = FanCollider{radius = radius, height = height, angle = angle},
-  }
+  collider := FanCollider{radius = radius, height = height, angle = angle}
   body_handle = create_static_body(
     self,
     position,
@@ -441,20 +413,6 @@ step :: proc(self: ^World, dt: f32) {
     awake_body_count += 1
     gravity_force := self.gravity * body.mass * body.gravity_scale
     apply_force(body, gravity_force)
-    if !self.enable_air_resistance do continue
-    vel_mag_sq := linalg.length2(body.velocity)
-    if vel_mag_sq < 0.000001 do continue // 0.001^2
-    cross_section := body.collider.cross_sectional_area
-    vel_mag := math.sqrt(vel_mag_sq)
-    drag_magnitude := 0.5 * self.air_density * vel_mag_sq * body.drag_coefficient * cross_section
-    drag_direction := body.velocity * (-1.0 / vel_mag) // reuse vel_mag, avoid normalize
-    drag_force := drag_direction * drag_magnitude
-    drag_accel := drag_magnitude * body.inv_mass
-    max_accel := self.gravity_magnitude * 30.0 // use cached gravity magnitude
-    if drag_accel > max_accel {
-      drag_force *= max_accel / drag_accel
-    }
-    apply_force(body, drag_force)
   }
   force_application_time := time.since(force_application_start)
   // Integrate velocities from forces ONCE for the entire frame

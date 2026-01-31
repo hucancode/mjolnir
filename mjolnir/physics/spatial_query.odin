@@ -120,7 +120,7 @@ raycast_collider :: proc(
   normal: [3]f32,
   hit: bool,
 ) {
-  switch shape in collider.shape {
+  switch shape in collider {
   case SphereCollider:
     sphere_prim := geometry.Sphere {
       center = position,
@@ -253,7 +253,7 @@ test_collider_sphere_overlap :: proc(
   sphere_center: [3]f32,
   sphere_radius: f32,
 ) -> bool {
-  switch shape in collider.shape {
+  switch shape in collider {
   case SphereCollider:
     len := shape.radius + sphere_radius
     return linalg.length2(collider_pos - sphere_center) <= len * len

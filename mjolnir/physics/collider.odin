@@ -31,14 +31,11 @@ FanCollider :: struct {
   angle:  f32, // radians - total angle of the fan sector
 }
 
-Collider :: struct {
-  cross_sectional_area: f32,
-  shape:                union {
-    SphereCollider,
-    BoxCollider,
-    CylinderCollider,
-    FanCollider,
-  },
+Collider :: union {
+  SphereCollider,
+  BoxCollider,
+  CylinderCollider,
+  FanCollider,
 }
 
 collider_calculate_aabb :: #force_inline proc(
@@ -46,7 +43,7 @@ collider_calculate_aabb :: #force_inline proc(
   position: [3]f32,
   rotation: quaternion128,
 ) -> geometry.Aabb {
-  switch sh in self.shape {
+  switch sh in self {
   case SphereCollider:
     return geometry.Aabb{min = position - sh.radius, max = position + sh.radius}
   case BoxCollider:
@@ -83,7 +80,7 @@ collider_calculate_aabb :: #force_inline proc(
 }
 
 collider_min_extent :: proc(self: ^Collider) -> f32 {
-  switch sh in self.shape {
+  switch sh in self {
   case SphereCollider:
     return sh.radius * 2.0
   case BoxCollider:
