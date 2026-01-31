@@ -273,8 +273,9 @@ parallel_update_aabb_cache :: proc(
 }
 
 sequential_update_aabb_cache :: proc(physics: ^World) {
-  for &entry in physics.bodies.entries do if entry.active {
-    body := &entry.item
+  for i in 0..<len(physics.bodies.entries) {
+    if !physics.bodies.entries[i].active do continue
+    body := &physics.bodies.entries[i].item
     if body.is_killed || body.is_sleeping do continue
     collider := &body.collider
     update_cached_aabb(body)

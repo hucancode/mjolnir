@@ -28,8 +28,8 @@ DynamicRigidBodyHandle :: distinct cont.Handle
 StaticRigidBodyHandle :: distinct cont.Handle
 
 World :: struct {
-  bodies:                resources.Pool(DynamicRigidBody),
-  static_bodies:         resources.Pool(StaticRigidBody),
+  bodies:                cont.PoolSoA(DynamicRigidBody),
+  static_bodies:         cont.PoolSoA(StaticRigidBody),
   dynamic_contacts:      [dynamic]DynamicContact,
   static_contacts:       [dynamic]StaticContact,
   prev_dynamic_contacts: map[u64]DynamicContact,
@@ -64,8 +64,8 @@ init :: proc(
   gravity := [3]f32{0, -9.81, 0},
   enable_parallel: bool = true,
 ) {
-  cont.init(&self.bodies)
-  cont.init(&self.static_bodies)
+  cont.init_soa(&self.bodies)
+  cont.init_soa(&self.static_bodies)
   self.dynamic_contacts = make([dynamic]DynamicContact)
   self.static_contacts = make([dynamic]StaticContact)
   self.prev_dynamic_contacts = make(map[u64]DynamicContact)
@@ -109,7 +109,7 @@ init :: proc(
       len(self.thread_pool.threads),
     )
   }
-  init_simd()
+  log_simd_mode()
 }
 
 destroy :: proc(self: ^World) {
@@ -121,8 +121,8 @@ destroy :: proc(self: ^World) {
     )
     thread.pool_destroy(&self.thread_pool)
   }
-  cont.destroy(self.bodies, proc(body: ^DynamicRigidBody) {})
-  cont.destroy(self.static_bodies, proc(body: ^StaticRigidBody) {})
+  cont.destroy_soa(self.bodies, proc(body: ^DynamicRigidBody) {})
+  cont.destroy_soa(self.static_bodies, proc(body: ^StaticRigidBody) {})
   delete(self.body_bounds)
   delete(self.dynamic_contacts)
   delete(self.static_contacts)
@@ -144,7 +144,7 @@ create_dynamic_body :: proc(
   ok: bool,
 ) #optional_ok {
   body: ^DynamicRigidBody
-  handle, body = cont.alloc(&self.bodies, DynamicRigidBodyHandle) or_return
+  handle, body = cont.alloc_soa(&self.bodies, DynamicRigidBodyHandle) or_return
   rigid_body_init(body, position, rotation, mass)
   body.trigger_only = trigger_only
   body.collider = collider
@@ -162,7 +162,7 @@ create_static_body :: proc(
   ok: bool,
 ) #optional_ok {
   body: ^StaticRigidBody
-  handle, body = cont.alloc(
+  handle, body = cont.alloc_soa(
     &self.static_bodies,
     StaticRigidBodyHandle,
   ) or_return
@@ -172,11 +172,11 @@ create_static_body :: proc(
 }
 
 destroy_dynamic_body :: proc(self: ^World, handle: DynamicRigidBodyHandle) {
-  cont.free(&self.bodies, handle)
+  cont.free_soa(&self.bodies, handle)
 }
 
 destroy_static_body :: proc(self: ^World, handle: StaticRigidBodyHandle) {
-  cont.free(&self.static_bodies, handle)
+  cont.free_soa(&self.static_bodies, handle)
 }
 
 destroy_body :: proc {
@@ -195,7 +195,9 @@ create_dynamic_body_sphere :: proc(
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := SphereCollider{radius = radius}
+  collider := SphereCollider {
+    radius = radius,
+  }
   body_handle = create_dynamic_body(
     self,
     position,
@@ -217,7 +219,9 @@ create_static_body_sphere :: proc(
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := SphereCollider{radius = radius}
+  collider := SphereCollider {
+    radius = radius,
+  }
   body_handle = create_static_body(
     self,
     position,
@@ -239,7 +243,9 @@ create_dynamic_body_box :: proc(
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := BoxCollider{half_extents = half_extents}
+  collider := BoxCollider {
+    half_extents = half_extents,
+  }
   body_handle = create_dynamic_body(
     self,
     position,
@@ -261,7 +267,9 @@ create_static_body_box :: proc(
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := BoxCollider{half_extents = half_extents}
+  collider := BoxCollider {
+    half_extents = half_extents,
+  }
   body_handle = create_static_body(
     self,
     position,
@@ -284,7 +292,10 @@ create_dynamic_body_cylinder :: proc(
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := CylinderCollider{radius = radius, height = height}
+  collider := CylinderCollider {
+    radius = radius,
+    height = height,
+  }
   body_handle = create_dynamic_body(
     self,
     position,
@@ -307,7 +318,10 @@ create_static_body_cylinder :: proc(
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := CylinderCollider{radius = radius, height = height}
+  collider := CylinderCollider {
+    radius = radius,
+    height = height,
+  }
   body_handle = create_static_body(
     self,
     position,
@@ -331,7 +345,11 @@ create_dynamic_body_fan :: proc(
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := FanCollider{radius = radius, height = height, angle = angle}
+  collider := FanCollider {
+    radius = radius,
+    height = height,
+    angle  = angle,
+  }
   body_handle = create_dynamic_body(
     self,
     position,
@@ -355,7 +373,11 @@ create_static_body_fan :: proc(
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider := FanCollider{radius = radius, height = height, angle = angle}
+  collider := FanCollider {
+    radius = radius,
+    height = height,
+    angle  = angle,
+  }
   body_handle = create_static_body(
     self,
     position,
@@ -385,12 +407,14 @@ step :: proc(self: ^World, dt: f32) {
   warmstart_prep_time := time.since(warmstart_prep_start)
 
   // Sleep Update
-  for &entry in self.bodies.entries do if entry.active {
-    body := &entry.item
+  for i in 0 ..< len(self.bodies.entries) {
+    if !self.bodies.entries[i].active do continue
+    body := &self.bodies.entries[i].item
     if body.is_killed || body.is_kinematic || body.trigger_only do continue
     lin_speed_sq := linalg.length2(body.velocity)
     ang_speed_sq := linalg.length2(body.angular_velocity)
-    if lin_speed_sq < SLEEP_LINEAR_THRESHOLD_SQ && ang_speed_sq < SLEEP_ANGULAR_THRESHOLD_SQ {
+    if lin_speed_sq < SLEEP_LINEAR_THRESHOLD_SQ &&
+       ang_speed_sq < SLEEP_ANGULAR_THRESHOLD_SQ {
       body.sleep_timer += dt
     } else {
       body.sleep_timer = 0
@@ -405,23 +429,19 @@ step :: proc(self: ^World, dt: f32) {
 
   // Apply forces to all bodies (gravity, air resistance, etc.)
   force_application_start := time.now()
+  apply_gravity_simd(self)
+  // Count awake bodies for logging
   awake_body_count := 0
-  for &entry, idx in self.bodies.entries do if entry.active {
-    body := &entry.item
-    if body.is_killed || body.is_kinematic || body.trigger_only do continue
-    if body.is_sleeping do continue
+  for idx in 0 ..< len(self.bodies.entries) {
+    if !self.bodies.entries[idx].active do continue
+    body := &self.bodies.entries[idx].item
+    if body.is_killed || body.is_kinematic || body.trigger_only || body.is_sleeping do continue
     awake_body_count += 1
-    gravity_force := self.gravity * body.mass * body.gravity_scale
-    apply_force(body, gravity_force)
   }
   force_application_time := time.since(force_application_start)
   // Integrate velocities from forces ONCE for the entire frame
   integration_start := time.now()
-  for &entry, idx in self.bodies.entries do if entry.active {
-    body := &entry.item
-    if body.is_killed || body.is_sleeping do continue
-    integrate(body, dt)
-  }
+  integrate_velocities_simd(self, dt)
   integration_time := time.since(integration_start)
   // Track which bodies were handled by CCD (outside substep loop)
   ccd_start := time.now()
@@ -448,13 +468,15 @@ step :: proc(self: ^World, dt: f32) {
   ccd_time := time.since(ccd_start)
   substep_dt := dt / f32(NUM_SUBSTEPS)
   dynamic_body_count := 0
-  for &entry in self.bodies.entries do if entry.active {
-    body := &entry.item
+  for i in 0 ..< len(self.bodies.entries) {
+    if !self.bodies.entries[i].active do continue
+    body := &self.bodies.entries[i].item
     if body.is_killed do continue
     dynamic_body_count += 1
   }
   static_body_count := 0
-  for &entry in self.static_bodies.entries do if entry.active {
+  for i in 0 ..< len(self.static_bodies.entries) {
+    if !self.static_bodies.entries[i].active do continue
     static_body_count += 1
   }
   // Rebuild dynamic BVH when NOT batching AND either:
@@ -478,13 +500,14 @@ step :: proc(self: ^World, dt: f32) {
       context.temp_allocator,
     )
     // Destroy killed bodies and rebuild BVH with remaining bodies
-    for &entry, idx in self.bodies.entries do if entry.active {
-      body := &entry.item
+    for idx in 0 ..< len(self.bodies.entries) {
+      if !self.bodies.entries[idx].active do continue
+      body := &self.bodies.entries[idx].item
       if body.is_killed {
         // Actually destroy killed bodies during BVH rebuild
         handle := DynamicRigidBodyHandle {
           index      = u32(idx),
-          generation = entry.generation,
+          generation = self.bodies.entries[idx].generation,
         }
         destroy_body(self, handle)
         continue
@@ -492,9 +515,12 @@ step :: proc(self: ^World, dt: f32) {
       update_cached_aabb(body)
       handle := DynamicRigidBodyHandle {
         index      = u32(idx),
-        generation = entry.generation,
+        generation = self.bodies.entries[idx].generation,
       }
-      append(&entries, DynamicBroadPhaseEntry{handle = handle, bounds = body.cached_aabb})
+      append(
+        &entries,
+        DynamicBroadPhaseEntry{handle = handle, bounds = body.cached_aabb},
+      )
     }
     geometry.bvh_build(&self.dynamic_bvh, entries[:], 4)
     self.killed_body_count = 0 // Reset counter after cleanup
@@ -511,14 +537,18 @@ step :: proc(self: ^World, dt: f32) {
       static_body_count,
       context.temp_allocator,
     )
-    for &entry, idx in self.static_bodies.entries do if entry.active {
-      body := &entry.item
+    for idx in 0 ..< len(self.static_bodies.entries) {
+      if !self.static_bodies.entries[idx].active do continue
+      body := &self.static_bodies.entries[idx].item
       update_cached_aabb(body)
       handle := StaticRigidBodyHandle {
         index      = u32(idx),
-        generation = entry.generation,
+        generation = self.static_bodies.entries[idx].generation,
       }
-      append(&entries, StaticBroadPhaseEntry{handle = handle, bounds = body.cached_aabb})
+      append(
+        &entries,
+        StaticBroadPhaseEntry{handle = handle, bounds = body.cached_aabb},
+      )
     }
     geometry.bvh_build(&self.static_bvh, entries[:], 4)
     self.last_static_count = static_body_count // Update tracked count
@@ -613,29 +643,7 @@ step :: proc(self: ^World, dt: f32) {
     }
     solver_time += time.since(solver_start)
     integration_start_substep := time.now()
-    for &entry, idx in self.bodies.entries do if entry.active {
-      body := &entry.item
-      if body.is_killed || body.is_kinematic || body.trigger_only do continue
-      if body.is_sleeping do continue
-      if idx < len(ccd_handled) && ccd_handled[idx] do continue
-      vel := body.velocity * substep_dt
-      body.position += vel
-      if body.enable_rotation {
-        ang_vel_mag_sq := linalg.length2(body.angular_velocity)
-        if ang_vel_mag_sq >= math.F32_EPSILON {
-          omega_quat := quaternion(w = 0, x = body.angular_velocity.x, y = body.angular_velocity.y, z = body.angular_velocity.z)
-          q_old := body.rotation
-          q_dot := omega_quat * q_old
-          q_dot.w *= 0.5
-          q_dot.x *= 0.5
-          q_dot.y *= 0.5
-          q_dot.z *= 0.5
-          q_new := quaternion(w = q_old.w + q_dot.w * substep_dt, x = q_old.x + q_dot.x * substep_dt, y = q_old.y + q_dot.y * substep_dt, z = q_old.z + q_dot.z * substep_dt)
-          q_new = linalg.normalize(q_new)
-          body.rotation = q_new
-        }
-      }
-    }
+    integrate_positions_simd(self, substep_dt, ccd_handled[:])
     integration_time_substep += time.since(integration_start_substep)
     cache_update_start_substep := time.now()
     if self.enable_parallel {
@@ -648,14 +656,19 @@ step :: proc(self: ^World, dt: f32) {
   substep_time := time.since(substep_start)
   cache_update_time: time.Duration = 0
   cleanup_start := time.now()
-  for &entry, idx in self.bodies.entries do if entry.active {
-    body := &entry.item
+  for idx in 0 ..< len(self.bodies.entries) {
+    if !self.bodies.entries[idx].active do continue
+    body := &self.bodies.entries[idx].item
     if body.is_kinematic || body.is_killed do continue
     if body.position.y < KILL_Y {
       body.is_killed = true
       self.killed_body_count += 1
       when ENABLE_VERBOSE_LOG {
-        log.infof("Marking body for removal at y=%.2f (below KILL_Y=%.2f)", body.position.y, KILL_Y)
+        log.infof(
+          "Marking body for removal at y=%.2f (below KILL_Y=%.2f)",
+          body.position.y,
+          KILL_Y,
+        )
       }
     }
   }
@@ -698,7 +711,7 @@ get_dynamic_body :: #force_inline proc(
   ret: ^DynamicRigidBody,
   ok: bool,
 ) #optional_ok {
-  return cont.get(self.bodies, handle)
+  return cont.get_soa(&self.bodies, handle)
 }
 
 get_static_body :: #force_inline proc(
@@ -708,7 +721,7 @@ get_static_body :: #force_inline proc(
   ret: ^StaticRigidBody,
   ok: bool,
 ) #optional_ok {
-  return cont.get(self.static_bodies, handle)
+  return cont.get_soa(&self.static_bodies, handle)
 }
 
 get :: proc {

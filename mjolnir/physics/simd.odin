@@ -1,5 +1,6 @@
 package physics
 
+import cont "../containers"
 import "../geometry"
 import "core:log"
 import "core:math"
@@ -57,9 +58,351 @@ init_simd :: proc "contextless" () {
   simd_lanes = 1
 }
 
-// ============================================================================
-// Batch-4 SIMD operations (SSE - 4-wide)
-// ============================================================================
+log_simd_mode :: proc() {
+  switch simd_mode {
+  case .AVX2:
+    log.infof("Physics SIMD: AVX2 detected (8-wide)")
+  case .SSE:
+    log.infof("Physics SIMD: SSE detected (4-wide)")
+  case .Scalar:
+    log.infof("Physics SIMD: Scalar mode (1-wide)")
+  }
+}
+// Configurable SIMD width - can be overridden at compile time
+WIDTH :: #config(PHYSICS_SIMD_WIDTH, 8)  // Default to 8-wide (AVX2)
+Vec :: #simd[WIDTH]f32
+Maski :: #simd[WIDTH]i32
+Masku :: #simd[WIDTH]u32
+
+// SIMD constants for configured width
+when WIDTH == 4 {
+  SIMD_ZERO :: f32x4{0, 0, 0, 0}
+  SIMD_ONE :: f32x4{1, 1, 1, 1}
+} else when WIDTH == 8 {
+  SIMD_ZERO :: f32x8{0, 0, 0, 0, 0, 0, 0, 0}
+  SIMD_ONE :: f32x8{1, 1, 1, 1, 1, 1, 1, 1}
+}
+
+// Helper: Create mask for active bodies in a PoolSoA
+create_active_mask :: proc(
+  pool: ^cont.PoolSoA($T),
+  start: int,
+  count: int,
+) -> Masku {
+  mask: Masku
+  for i in 0..<min(count, WIDTH) {
+    if start + i < len(pool.entries) && pool.entries[start + i].active {
+      mask = simd.replace(mask, i, max(u32))  // All bits set = active
+    }
+  }
+  return mask
+}
+
+apply_gravity_simd :: proc(world: ^World) {
+  pool := &world.bodies
+  bodies := pool.entries
+
+  // Broadcast gravity to all lanes
+  gx := Vec{} + world.gravity.x
+  gy := Vec{} + world.gravity.y
+  gz := Vec{} + world.gravity.z
+
+  // Process full chunks
+  i := 0
+  for i + WIDTH <= len(bodies) {
+    // Create mask for active, awake bodies
+    mask: Masku
+    for j in 0..<WIDTH {
+      idx := i + j
+      active := bodies[idx].active
+      // Access body fields through indexing
+      body := &bodies[idx].item
+      is_killed := body.is_killed
+      is_kinematic := body.is_kinematic
+      trigger_only := body.trigger_only
+      is_sleeping := body.is_sleeping
+
+      should_process := active && !is_killed && !is_kinematic && !trigger_only && !is_sleeping
+      if should_process {
+        mask = simd.replace(mask, j, max(u32))
+      }
+    }
+
+    // Load masses and gravity scales (through indexing)
+    masses: Vec
+    g_scales: Vec
+    for j in 0..<WIDTH {
+      body := &bodies[i + j].item
+      masses = simd.replace(masses, j, body.mass)
+      g_scales = simd.replace(g_scales, j, body.gravity_scale)
+    }
+
+    // Compute: F = g * mass * g_scale
+    fx := gx * masses * g_scales
+    fy := gy * masses * g_scales
+    fz := gz * masses * g_scales
+
+    // Load-modify-store forces
+    old_fx, old_fy, old_fz: Vec
+    for j in 0..<WIDTH {
+      body := &bodies[i + j].item
+      old_fx = simd.replace(old_fx, j, body.force.x)
+      old_fy = simd.replace(old_fy, j, body.force.y)
+      old_fz = simd.replace(old_fz, j, body.force.z)
+    }
+
+    // Add forces (masked)
+    new_fx := old_fx + fx
+    new_fy := old_fy + fy
+    new_fz := old_fz + fz
+
+    // Store back (only for masked bodies)
+    for j in 0..<WIDTH {
+      mask_val := simd.extract(mask, j)
+      if mask_val != 0 {
+        body := &bodies[i + j].item
+        body.force.x = simd.extract(new_fx, j)
+        body.force.y = simd.extract(new_fy, j)
+        body.force.z = simd.extract(new_fz, j)
+      }
+    }
+
+    i += WIDTH
+  }
+
+  // Handle remainder with scalar code
+  for i < len(bodies) {
+    if bodies[i].active {
+      body := &bodies[i].item
+      if !body.is_killed && !body.is_kinematic && !body.trigger_only && !body.is_sleeping {
+        gravity_force := world.gravity * body.mass * body.gravity_scale
+        body.force += gravity_force
+      }
+    }
+    i += 1
+  }
+}
+
+// Scalar version for comparison/fallback
+apply_gravity_scalar :: proc(world: ^World) {
+  pool := &world.bodies
+  for i in 0..<len(pool.entries) {
+    if !pool.entries[i].active do continue
+    body := &pool.entries[i].item
+    if body.is_killed || body.is_kinematic || body.trigger_only || body.is_sleeping do continue
+
+    gravity_force := world.gravity * body.mass * body.gravity_scale
+    body.force += gravity_force
+  }
+}
+
+integrate_velocities_simd :: proc(world: ^World, dt: f32) {
+  pool := &world.bodies
+  bodies := pool.entries
+  dt_vec := Vec{} + dt
+
+  i := 0
+  for i + WIDTH <= len(bodies) {
+    // Create mask
+    mask: Masku
+    for j in 0..<WIDTH {
+      idx := i + j
+      active := bodies[idx].active
+      body := &bodies[idx].item
+      should_process := active && !body.is_killed && !body.is_sleeping
+      if should_process {
+        mask = simd.replace(mask, j, max(u32))
+      }
+    }
+
+    // Load forces and velocities
+    fx, fy, fz, vx, vy, vz, inv_m, lin_damp: Vec
+    for j in 0..<WIDTH {
+      body := &bodies[i + j].item
+      fx = simd.replace(fx, j, body.force.x)
+      fy = simd.replace(fy, j, body.force.y)
+      fz = simd.replace(fz, j, body.force.z)
+      vx = simd.replace(vx, j, body.velocity.x)
+      vy = simd.replace(vy, j, body.velocity.y)
+      vz = simd.replace(vz, j, body.velocity.z)
+      inv_m = simd.replace(inv_m, j, body.inv_mass)
+      lin_damp = simd.replace(lin_damp, j, math.pow(1.0 - body.linear_damping, dt))
+    }
+
+    // Integrate: v += f * inv_m * dt
+    vx += fx * inv_m * dt_vec
+    vy += fy * inv_m * dt_vec
+    vz += fz * inv_m * dt_vec
+
+    // Apply damping
+    vx *= lin_damp
+    vy *= lin_damp
+    vz *= lin_damp
+
+    // Store velocities and clear forces (masked)
+    for j in 0..<WIDTH {
+      mask_val := simd.extract(mask, j)
+      if mask_val != 0 {
+        body := &bodies[i + j].item
+        body.velocity.x = simd.extract(vx, j)
+        body.velocity.y = simd.extract(vy, j)
+        body.velocity.z = simd.extract(vz, j)
+        body.force = {}
+        body.torque = {}
+      }
+    }
+
+    i += WIDTH
+  }
+
+  // Handle remainder
+  for i < len(bodies) {
+    if bodies[i].active {
+      body := &bodies[i].item
+      if !body.is_killed && !body.is_sleeping {
+        body.velocity += body.force * body.inv_mass * dt
+        damping_factor := math.pow(1.0 - body.linear_damping, dt)
+        body.velocity *= damping_factor
+        body.force = {}
+        body.torque = {}
+      }
+    }
+    i += 1
+  }
+}
+
+// Scalar version
+integrate_velocities_scalar :: proc(world: ^World, dt: f32) {
+  pool := &world.bodies
+  for i in 0..<len(pool.entries) {
+    if !pool.entries[i].active do continue
+    body := &pool.entries[i].item
+    if body.is_killed || body.is_sleeping do continue
+
+    body.velocity += body.force * body.inv_mass * dt
+    damping_factor := math.pow(1.0 - body.linear_damping, dt)
+    body.velocity *= damping_factor
+    body.force = {}
+    body.torque = {}
+  }
+}
+
+integrate_positions_simd :: proc(world: ^World, dt: f32, ccd_handled: []bool) {
+  pool := &world.bodies
+  bodies := pool.entries
+  dt_vec := Vec{} + dt
+
+  i := 0
+  for i + WIDTH <= len(bodies) {
+    // Create mask
+    mask: Masku
+    for j in 0..<WIDTH {
+      idx := i + j
+      active := bodies[idx].active
+      body := &bodies[idx].item
+      ccd_skip := idx < len(ccd_handled) && ccd_handled[idx]
+      should_process := active && !body.is_killed && !body.is_kinematic && !body.trigger_only && !body.is_sleeping && !ccd_skip
+      if should_process {
+        mask = simd.replace(mask, j, max(u32))
+      }
+    }
+
+    // Load positions and velocities
+    px, py, pz, vx, vy, vz: Vec
+    for j in 0..<WIDTH {
+      body := &bodies[i + j].item
+      px = simd.replace(px, j, body.position.x)
+      py = simd.replace(py, j, body.position.y)
+      pz = simd.replace(pz, j, body.position.z)
+      vx = simd.replace(vx, j, body.velocity.x)
+      vy = simd.replace(vy, j, body.velocity.y)
+      vz = simd.replace(vz, j, body.velocity.z)
+    }
+
+    // Integrate: p += v * dt
+    px += vx * dt_vec
+    py += vy * dt_vec
+    pz += vz * dt_vec
+
+    // Store positions (masked)
+    for j in 0..<WIDTH {
+      mask_val := simd.extract(mask, j)
+      if mask_val != 0 {
+        body := &bodies[i + j].item
+        body.position.x = simd.extract(px, j)
+        body.position.y = simd.extract(py, j)
+        body.position.z = simd.extract(pz, j)
+      }
+    }
+
+    i += WIDTH
+  }
+
+  // Handle remainder
+  for i < len(bodies) {
+    if bodies[i].active {
+      body := &bodies[i].item
+      ccd_skip := i < len(ccd_handled) && ccd_handled[i]
+      if !body.is_killed && !body.is_kinematic && !body.trigger_only && !body.is_sleeping && !ccd_skip {
+        body.position += body.velocity * dt
+      }
+    }
+    i += 1
+  }
+
+  // Quaternion rotation integration (scalar - too complex for SIMD benefit)
+  integrate_rotations_scalar(world, dt, ccd_handled)
+}
+
+// Scalar position integration
+integrate_positions_scalar :: proc(world: ^World, dt: f32, ccd_handled: []bool) {
+  pool := &world.bodies
+  for i in 0..<len(pool.entries) {
+    if !pool.entries[i].active do continue
+    body := &pool.entries[i].item
+    if body.is_killed || body.is_kinematic || body.trigger_only || body.is_sleeping do continue
+    if i < len(ccd_handled) && ccd_handled[i] do continue
+
+    body.position += body.velocity * dt
+  }
+  integrate_rotations_scalar(world, dt, ccd_handled)
+}
+
+// Rotation integration (scalar - quaternion math is complex)
+integrate_rotations_scalar :: proc(world: ^World, dt: f32, ccd_handled: []bool) {
+  pool := &world.bodies
+  for i in 0..<len(pool.entries) {
+    if !pool.entries[i].active do continue
+    body := &pool.entries[i].item
+    if body.is_killed || body.is_kinematic || body.trigger_only || body.is_sleeping do continue
+    if i < len(ccd_handled) && ccd_handled[i] do continue
+    if !body.enable_rotation do continue
+
+    ang_vel_mag_sq := linalg.length2(body.angular_velocity)
+    if ang_vel_mag_sq >= math.F32_EPSILON {
+      omega_quat := quaternion(
+        w = 0,
+        x = body.angular_velocity.x,
+        y = body.angular_velocity.y,
+        z = body.angular_velocity.z,
+      )
+      q_old := body.rotation
+      q_dot := omega_quat * q_old
+      q_dot.w *= 0.5
+      q_dot.x *= 0.5
+      q_dot.y *= 0.5
+      q_dot.z *= 0.5
+      q_new := quaternion(
+        w = q_old.w + q_dot.w * dt,
+        x = q_old.x + q_dot.x * dt,
+        y = q_old.y + q_dot.y * dt,
+        z = q_old.z + q_dot.z * dt,
+      )
+      q_new = linalg.normalize(q_new)
+      body.rotation = q_new
+    }
+  }
+}
 
 // Batch OBB-to-AABB conversion using SIMD (SSE - 4-wide)
 // Processes 4 OBBs simultaneously and produces 4 AABBs
