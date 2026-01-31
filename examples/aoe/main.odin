@@ -46,14 +46,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
   // Emissive material for effector sphere
   effector_mat := create_material(engine, emissive_value = 5.0)
-  cube_collider, collider_ok := physics.create_collider_box(
-    &physics_world,
-    {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
-  )
-  if !collider_ok {
-    log.error("Failed to create cube collider")
-    return
-  }
   // Spawn 50x50 grid of cubes
   grid_size := 50
   spacing: f32 = 1.0
@@ -63,11 +55,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
       world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
       world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
       // Create physics body for cube
-      body_handle := physics.create_dynamic_body(
+      body_handle := physics.create_dynamic_body_box(
         &physics_world,
+        {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
         position = {world_x, 0.5, world_z},
         trigger_only = true,
-        collider_handle = cube_collider,
       ) or_continue
       physics_node := spawn(
         engine,

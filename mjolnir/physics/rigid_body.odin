@@ -8,7 +8,7 @@ import "core:math/linalg"
 RigidBody :: struct {
   position:             [3]f32,
   rotation:             quaternion128,
-  collider_handle:      ColliderHandle,
+  collider:             Collider,
   restitution:          f32,
   friction:             f32,
   trigger_only:         bool,
@@ -175,9 +175,9 @@ clear_forces :: proc(self: ^DynamicRigidBody) {
   self.torque = {}
 }
 
-update_cached_aabb_static :: proc(self: ^StaticRigidBody, collider: ^Collider) {
+update_cached_aabb_static :: proc(self: ^StaticRigidBody) {
   self.cached_aabb = collider_calculate_aabb(
-    collider,
+    &self.collider,
     self.position,
     self.rotation,
   )
@@ -186,9 +186,9 @@ update_cached_aabb_static :: proc(self: ^StaticRigidBody, collider: ^Collider) {
   self.cached_sphere_radius = linalg.length(aabb_half_extents)
 }
 
-update_cached_aabb_dynamic :: proc(self: ^DynamicRigidBody, collider: ^Collider) {
+update_cached_aabb_dynamic :: proc(self: ^DynamicRigidBody) {
   self.cached_aabb = collider_calculate_aabb(
-    collider,
+    &self.collider,
     self.position,
     self.rotation,
   )

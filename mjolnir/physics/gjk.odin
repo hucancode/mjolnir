@@ -24,11 +24,10 @@ find_furthest_point :: proc(
   rotation: quaternion128,
   direction: [3]f32,
 ) -> [3]f32 {
-  center := position + collider.offset
   switch shape in collider.shape {
   case SphereCollider:
     dir_normalized := linalg.normalize0(direction)
-    return center + dir_normalized * shape.radius
+    return position + dir_normalized * shape.radius
   case BoxCollider:
     // Transform direction to box's local space
     inv_rot := linalg.quaternion_inverse(rotation)
@@ -37,7 +36,7 @@ find_furthest_point :: proc(
     local_vertex := shape.half_extents * linalg.sign(local_dir)
     // Transform back to world space
     world_vertex := geometry.qmv(rotation, local_vertex)
-    return center + world_vertex
+    return position + world_vertex
   case CylinderCollider:
     // Transform direction to cylinder's local space
     inv_rot := linalg.quaternion_inverse(rotation)
@@ -51,7 +50,7 @@ find_furthest_point :: proc(
     local_point := [3]f32{radial_point.x, y_component, radial_point.y}
     // Transform back to world space
     world_point := geometry.qmv(rotation, local_point)
-    return center + world_point
+    return position + world_point
   case FanCollider:
     // Fan is trigger-only, but provide support for completeness
     // Treat as full cylinder for support function
@@ -62,9 +61,9 @@ find_furthest_point :: proc(
     radial_point := linalg.normalize0(local_dir.xz) * shape.radius
     local_point := [3]f32{radial_point.x, y_component, radial_point.y}
     world_point := geometry.qmv(rotation, local_point)
-    return center + world_point
+    return position + world_point
   }
-  return center
+  return position
 }
 
 // Simplex for 3D GJK - can be a point, line, triangle, or tetrahedron

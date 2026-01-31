@@ -37,8 +37,7 @@ raycast :: proc(
   bvh_query_ray_fast(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
-    if body.collider_handle.generation == 0 do continue
-    collider := get(self, body.collider_handle) or_continue
+    collider := &body.collider
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, closest_hit.t)
     if hit && t < closest_hit.t {
       closest_hit.body_handle = candidate.handle
@@ -53,8 +52,7 @@ raycast :: proc(
   bvh_query_ray_fast(&self.static_bvh, ray, max_dist, &static_candidates)
   for candidate in static_candidates {
     body := get(self, candidate.handle) or_continue
-    if body.collider_handle.generation == 0 do continue
-    collider := get(self, body.collider_handle) or_continue
+    collider := &body.collider
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, closest_hit.t)
     if hit && t < closest_hit.t {
       closest_hit.body_handle = candidate.handle
@@ -78,8 +76,7 @@ raycast_single :: proc(
   bvh_query_ray_fast(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
-    if body.collider_handle.generation == 0 do continue
-    collider := get(self, body.collider_handle) or_continue
+    collider := &body.collider
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
     if hit {
       return RayHit {
@@ -96,8 +93,7 @@ raycast_single :: proc(
   bvh_query_ray_fast(&self.static_bvh, ray, max_dist, &static_candidates)
   for candidate in static_candidates {
     body := get(self, candidate.handle) or_continue
-    if body.collider_handle.generation == 0 do continue
-    collider := get(self, body.collider_handle) or_continue
+    collider := &body.collider
     t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
     if hit {
       return RayHit {
@@ -124,30 +120,29 @@ raycast_collider :: proc(
   normal: [3]f32,
   hit: bool,
 ) {
-  center := position + geometry.qmv(rotation, collider.offset)
   switch shape in collider.shape {
   case SphereCollider:
     sphere_prim := geometry.Sphere {
-      center = center,
+      center = position,
       radius = shape.radius,
     }
     hit, t = geometry.ray_sphere_intersection(ray, sphere_prim, max_dist)
     if hit {
       hit_point := ray.origin + ray.direction * t
-      normal = linalg.normalize(hit_point - center)
+      normal = linalg.normalize(hit_point - position)
     }
     return t, normal, hit
   case BoxCollider:
     obb := geometry.Obb {
-      center       = center,
+      center       = position,
       half_extents = shape.half_extents,
       rotation     = rotation,
     }
     // Use AABB intersection for axis-aligned boxes
     if is_identity_quaternion(rotation) {
       bounds := geometry.Aabb {
-        min = center - shape.half_extents,
-        max = center + shape.half_extents,
+        min = position - shape.half_extents,
+        max = position + shape.half_extents,
       }
       inv_dir := 1.0 / ray.direction
       t_near, t_far := geometry.ray_aabb_intersection(
@@ -224,7 +219,7 @@ query_sphere :: proc(
   bvh_query_aabb_fast(&self.dynamic_bvh, query_bounds, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
-    collider := get(self, body.collider_handle) or_continue
+    collider := &body.collider
     if test_collider_sphere_overlap(collider, body.position, body.rotation, center, radius) {
       append(results, candidate.handle)
     }
@@ -243,7 +238,7 @@ query_box :: proc(
   bvh_query_aabb_fast(&self.dynamic_bvh, bounds, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
-    collider := get(self, body.collider_handle) or_continue
+    collider := &body.collider
     if test_collider_aabb_overlap(collider, body.position, body.rotation, bounds) {
       append(results, candidate.handle)
     }
@@ -258,14 +253,13 @@ test_collider_sphere_overlap :: proc(
   sphere_center: [3]f32,
   sphere_radius: f32,
 ) -> bool {
-  center := collider_pos + geometry.qmv(collider_rot, collider.offset)
   switch shape in collider.shape {
   case SphereCollider:
     len := shape.radius + sphere_radius
-    return linalg.length2(center - sphere_center) <= len * len
+    return linalg.length2(collider_pos - sphere_center) <= len * len
   case BoxCollider:
     obb := geometry.Obb {
-      center       = center,
+      center       = collider_pos,
       half_extents = shape.half_extents,
       rotation     = collider_rot,
     }
@@ -276,9 +270,9 @@ test_collider_sphere_overlap :: proc(
     )
     return hit
   case CylinderCollider:
-    return test_point_cylinder(sphere_center, center, collider_rot, shape)
+    return test_point_cylinder(sphere_center, collider_pos, collider_rot, shape)
   case FanCollider:
-    return test_point_fan(sphere_center, center, collider_rot, shape)
+    return test_point_fan(sphere_center, collider_pos, collider_rot, shape)
   }
   return false
 }
@@ -290,7 +284,6 @@ test_collider_aabb_overlap :: proc(
   collider_rot: quaternion128,
   bounds: geometry.Aabb,
 ) -> bool {
-  center := collider_pos + geometry.qmv(collider_rot, collider.offset)
   // Use center point test for now - could be more precise
-  return geometry.aabb_contains_point(bounds, center)
+  return geometry.aabb_contains_point(bounds, collider_pos)
 }

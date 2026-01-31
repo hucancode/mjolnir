@@ -26,12 +26,10 @@ BVH_REBUILD_THRESHOLD :: #config(PHYSICS_BVH_REBUILD_THRESHOLD, 512) // Rebuild 
 
 DynamicRigidBodyHandle :: distinct cont.Handle
 StaticRigidBodyHandle :: distinct cont.Handle
-ColliderHandle :: distinct cont.Handle
 
 World :: struct {
   bodies:                resources.Pool(DynamicRigidBody),
   static_bodies:         resources.Pool(StaticRigidBody),
-  colliders:             resources.Pool(Collider),
   dynamic_contacts:      [dynamic]DynamicContact,
   static_contacts:       [dynamic]StaticContact,
   prev_dynamic_contacts: map[u64]DynamicContact,
@@ -70,7 +68,6 @@ init :: proc(
 ) {
   cont.init(&self.bodies)
   cont.init(&self.static_bodies)
-  cont.init(&self.colliders)
   self.dynamic_contacts = make([dynamic]DynamicContact)
   self.static_contacts = make([dynamic]StaticContact)
   self.prev_dynamic_contacts = make(map[u64]DynamicContact)
@@ -130,7 +127,6 @@ destroy :: proc(self: ^World) {
   }
   cont.destroy(self.bodies, proc(body: ^DynamicRigidBody) {})
   cont.destroy(self.static_bodies, proc(body: ^StaticRigidBody) {})
-  cont.destroy(self.colliders, proc(col: ^Collider) {})
   delete(self.body_bounds)
   delete(self.dynamic_contacts)
   delete(self.static_contacts)
@@ -146,7 +142,7 @@ create_dynamic_body :: proc(
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
   trigger_only: bool = false,
-  collider_handle: ColliderHandle = {},
+  collider: Collider = {},
 ) -> (
   handle: DynamicRigidBodyHandle,
   ok: bool,
@@ -155,7 +151,7 @@ create_dynamic_body :: proc(
   handle, body = cont.alloc(&self.bodies, DynamicRigidBodyHandle) or_return
   rigid_body_init(body, position, rotation, mass)
   body.trigger_only = trigger_only
-  body.collider_handle = collider_handle
+  body.collider = collider
   return handle, true
 }
 
@@ -164,7 +160,7 @@ create_static_body :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   trigger_only: bool = false,
-  collider_handle: ColliderHandle = {},
+  collider: Collider = {},
 ) -> (
   handle: StaticRigidBodyHandle,
   ok: bool,
@@ -175,7 +171,7 @@ create_static_body :: proc(
     StaticRigidBodyHandle,
   ) or_return
   static_rigid_body_init(body, position, rotation, trigger_only)
-  body.collider_handle = collider_handle
+  body.collider = collider
   return handle, true
 }
 
@@ -192,93 +188,6 @@ destroy_body :: proc {
   destroy_static_body,
 }
 
-destroy_collider :: proc(self: ^World, handle: ColliderHandle) {
-  cont.free(&self.colliders, handle)
-}
-
-create_collider_sphere :: proc(
-  self: ^World,
-  radius: f32 = 1.0,
-  offset: [3]f32 = {},
-) -> (
-  handle: ColliderHandle,
-  ok: bool,
-) #optional_ok {
-  ptr: ^Collider
-  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
-  ptr.offset = offset
-  ptr.shape = SphereCollider {
-    radius = radius,
-  }
-  ptr.cross_sectional_area = math.PI * radius * radius
-  return handle, true
-}
-
-create_collider_box :: proc(
-  self: ^World,
-  half_extents: [3]f32,
-  offset: [3]f32 = {},
-) -> (
-  handle: ColliderHandle,
-  ok: bool,
-) #optional_ok {
-  ptr: ^Collider
-  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
-  ptr.offset = offset
-  ptr.shape = BoxCollider {
-    half_extents = half_extents,
-  }
-  ptr.cross_sectional_area =
-    (half_extents.x * half_extents.y +
-      half_extents.y * half_extents.z +
-      half_extents.x * half_extents.z) *
-    4.0 /
-    3.0
-  return handle, true
-}
-
-create_collider_cylinder :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  offset: [3]f32 = {},
-) -> (
-  handle: ColliderHandle,
-  ok: bool,
-) #optional_ok {
-  ptr: ^Collider
-  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
-  ptr.offset = offset
-  ptr.shape = CylinderCollider {
-    radius = radius,
-    height = height,
-  }
-  ptr.cross_sectional_area = math.PI * radius * radius + radius * height
-  return handle, true
-}
-
-create_collider_fan :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  angle: f32,
-  offset: [3]f32 = {},
-) -> (
-  handle: ColliderHandle,
-  ok: bool,
-) #optional_ok {
-  ptr: ^Collider
-  handle, ptr = cont.alloc(&self.colliders, ColliderHandle) or_return
-  ptr.offset = offset
-  ptr.shape = FanCollider {
-    radius = radius,
-    height = height,
-    angle  = angle,
-  }
-  ptr.cross_sectional_area = math.PI * radius * radius + radius * height
-  return handle, true
-}
-
 create_dynamic_body_sphere :: proc(
   self: ^World,
   radius: f32 = 1.0,
@@ -286,19 +195,21 @@ create_dynamic_body_sphere :: proc(
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
   trigger_only: bool = false,
-  offset: [3]f32 = {},
 ) -> (
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider_handle := create_collider_sphere(self, radius, offset) or_return
+  collider := Collider {
+    cross_sectional_area = math.PI * radius * radius,
+    shape                = SphereCollider{radius = radius},
+  }
   body_handle = create_dynamic_body(
     self,
     position,
     rotation,
     mass,
     trigger_only,
-    collider_handle,
+    collider,
   ) or_return
   return body_handle, true
 }
@@ -309,18 +220,20 @@ create_static_body_sphere :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   trigger_only: bool = false,
-  offset: [3]f32 = {},
 ) -> (
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider_handle := create_collider_sphere(self, radius, offset) or_return
+  collider := Collider {
+    cross_sectional_area = math.PI * radius * radius,
+    shape                = SphereCollider{radius = radius},
+  }
   body_handle = create_static_body(
     self,
     position,
     rotation,
     trigger_only,
-    collider_handle,
+    collider,
   ) or_return
   return body_handle, true
 }
@@ -332,19 +245,21 @@ create_dynamic_body_box :: proc(
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
   trigger_only: bool = false,
-  offset: [3]f32 = {},
 ) -> (
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider_handle := create_collider_box(self, half_extents, offset) or_return
+  collider := Collider {
+    cross_sectional_area = (half_extents.x * half_extents.y + half_extents.y * half_extents.z + half_extents.x * half_extents.z) * 4.0 / 3.0,
+    shape                = BoxCollider{half_extents = half_extents},
+  }
   body_handle = create_dynamic_body(
     self,
     position,
     rotation,
     mass,
     trigger_only,
-    collider_handle,
+    collider,
   ) or_return
   return body_handle, true
 }
@@ -355,18 +270,20 @@ create_static_body_box :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   trigger_only: bool = false,
-  offset: [3]f32 = {},
 ) -> (
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider_handle := create_collider_box(self, half_extents, offset) or_return
+  collider := Collider {
+    cross_sectional_area = (half_extents.x * half_extents.y + half_extents.y * half_extents.z + half_extents.x * half_extents.z) * 4.0 / 3.0,
+    shape                = BoxCollider{half_extents = half_extents},
+  }
   body_handle = create_static_body(
     self,
     position,
     rotation,
     trigger_only,
-    collider_handle,
+    collider,
   ) or_return
   return body_handle, true
 }
@@ -379,24 +296,21 @@ create_dynamic_body_cylinder :: proc(
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
   trigger_only: bool = false,
-  offset: [3]f32 = {},
 ) -> (
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider_handle := create_collider_cylinder(
-    self,
-    radius,
-    height,
-    offset,
-  ) or_return
+  collider := Collider {
+    cross_sectional_area = math.PI * radius * radius + radius * height,
+    shape                = CylinderCollider{radius = radius, height = height},
+  }
   body_handle = create_dynamic_body(
     self,
     position,
     rotation,
     mass,
     trigger_only,
-    collider_handle,
+    collider,
   ) or_return
   return body_handle, true
 }
@@ -408,23 +322,20 @@ create_static_body_cylinder :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   trigger_only: bool = false,
-  offset: [3]f32 = {},
 ) -> (
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider_handle := create_collider_cylinder(
-    self,
-    radius,
-    height,
-    offset,
-  ) or_return
+  collider := Collider {
+    cross_sectional_area = math.PI * radius * radius + radius * height,
+    shape                = CylinderCollider{radius = radius, height = height},
+  }
   body_handle = create_static_body(
     self,
     position,
     rotation,
     trigger_only,
-    collider_handle,
+    collider,
   ) or_return
   return body_handle, true
 }
@@ -438,25 +349,21 @@ create_dynamic_body_fan :: proc(
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
   trigger_only: bool = false,
-  offset: [3]f32 = {},
 ) -> (
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider_handle := create_collider_fan(
-    self,
-    radius,
-    height,
-    angle,
-    offset,
-  ) or_return
+  collider := Collider {
+    cross_sectional_area = math.PI * radius * radius + radius * height,
+    shape                = FanCollider{radius = radius, height = height, angle = angle},
+  }
   body_handle = create_dynamic_body(
     self,
     position,
     rotation,
     mass,
     trigger_only,
-    collider_handle,
+    collider,
   ) or_return
   return body_handle, true
 }
@@ -469,24 +376,20 @@ create_static_body_fan :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   trigger_only: bool = false,
-  offset: [3]f32 = {},
 ) -> (
   body_handle: StaticRigidBodyHandle,
   ok: bool,
 ) #optional_ok {
-  collider_handle := create_collider_fan(
-    self,
-    radius,
-    height,
-    angle,
-    offset,
-  ) or_return
+  collider := Collider {
+    cross_sectional_area = math.PI * radius * radius + radius * height,
+    shape                = FanCollider{radius = radius, height = height, angle = angle},
+  }
   body_handle = create_static_body(
     self,
     position,
     rotation,
     trigger_only,
-    collider_handle,
+    collider,
   ) or_return
   return body_handle, true
 }
@@ -541,8 +444,7 @@ step :: proc(self: ^World, dt: f32) {
     if !self.enable_air_resistance do continue
     vel_mag_sq := linalg.length2(body.velocity)
     if vel_mag_sq < 0.000001 do continue // 0.001^2
-    collider := get(self, body.collider_handle) or_continue
-    cross_section := collider.cross_sectional_area
+    cross_section := body.collider.cross_sectional_area
     vel_mag := math.sqrt(vel_mag_sq)
     drag_magnitude := 0.5 * self.air_density * vel_mag_sq * body.drag_coefficient * cross_section
     drag_direction := body.velocity * (-1.0 / vel_mag) // reuse vel_mag, avoid normalize
@@ -590,14 +492,12 @@ step :: proc(self: ^World, dt: f32) {
   dynamic_body_count := 0
   for &entry in self.bodies.entries do if entry.active {
     body := &entry.item
-    if body.is_killed || body.collider_handle.generation == 0 do continue
+    if body.is_killed do continue
     dynamic_body_count += 1
   }
   static_body_count := 0
   for &entry in self.static_bodies.entries do if entry.active {
-    if entry.item.collider_handle.generation != 0 {
-      static_body_count += 1
-    }
+    static_body_count += 1
   }
   // Rebuild dynamic BVH when NOT batching AND either:
   // 1. New primitives were spawned (count increased)
@@ -631,9 +531,7 @@ step :: proc(self: ^World, dt: f32) {
         destroy_body(self, handle)
         continue
       }
-      if body.collider_handle.generation == 0 do continue
-      collider := get(self, body.collider_handle) or_continue
-      update_cached_aabb(body, collider)
+      update_cached_aabb(body)
       handle := DynamicRigidBodyHandle {
         index      = u32(idx),
         generation = entry.generation,
@@ -657,9 +555,7 @@ step :: proc(self: ^World, dt: f32) {
     )
     for &entry, idx in self.static_bodies.entries do if entry.active {
       body := &entry.item
-      if body.collider_handle.generation == 0 do continue
-      collider := get(self, body.collider_handle) or_continue
-      update_cached_aabb(body, collider)
+      update_cached_aabb(body)
       handle := StaticRigidBodyHandle {
         index      = u32(idx),
         generation = entry.generation,
@@ -857,18 +753,7 @@ get_static_body :: #force_inline proc(
   return cont.get(self.static_bodies, handle)
 }
 
-get_collider :: #force_inline proc(
-  self: ^World,
-  handle: ColliderHandle,
-) -> (
-  ret: ^Collider,
-  ok: bool,
-) #optional_ok {
-  return cont.get(self.colliders, handle)
-}
-
 get :: proc {
   get_dynamic_body,
   get_static_body,
-  get_collider,
 }

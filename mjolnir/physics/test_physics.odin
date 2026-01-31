@@ -859,7 +859,6 @@ test_sphere_box_collision_corner :: proc(t: ^testing.T) {
 @(test)
 test_collider_get_aabb_sphere :: proc(t: ^testing.T) {
   collider := Collider {
-    offset = {1, 0, 0},
     shape = SphereCollider{radius = 2.0},
   }
   position := [3]f32{5, 3, 1}
@@ -868,8 +867,8 @@ test_collider_get_aabb_sphere :: proc(t: ^testing.T) {
     position,
     linalg.QUATERNIONF32_IDENTITY,
   )
-  expected_min := [3]f32{4, 1, -1}
-  expected_max := [3]f32{8, 5, 3}
+  expected_min := [3]f32{3, 1, -1}
+  expected_max := [3]f32{7, 5, 3}
   testing.expect(
     t,
     abs(aabb.min.x - expected_min.x) < 0.001 &&
@@ -889,7 +888,6 @@ test_collider_get_aabb_sphere :: proc(t: ^testing.T) {
 @(test)
 test_collider_get_aabb_box :: proc(t: ^testing.T) {
   collider := Collider {
-    offset = {0.5, 0, 0},
     shape = BoxCollider{half_extents = {1, 2, 0.5}},
   }
   position := [3]f32{10, 5, 2}
@@ -898,8 +896,8 @@ test_collider_get_aabb_box :: proc(t: ^testing.T) {
     position,
     linalg.QUATERNIONF32_IDENTITY,
   )
-  expected_min := [3]f32{9.5, 3, 1.5}
-  expected_max := [3]f32{11.5, 7, 2.5}
+  expected_min := [3]f32{9, 3, 1.5}
+  expected_max := [3]f32{11, 7, 2.5}
   testing.expect(
     t,
     abs(aabb.min.x - expected_min.x) < 0.001 &&
@@ -1520,7 +1518,6 @@ test_sphere_obb_collision_rotated :: proc(t: ^testing.T) {
 @(test)
 test_rotated_offset_collider_aabb :: proc(t: ^testing.T) {
   collider := Collider {
-    offset = {1, 0, 0},
     shape = BoxCollider{half_extents = {0.5, 0.5, 0.5}},
   }
   position := [3]f32{0, 0, 0}
@@ -1529,15 +1526,14 @@ test_rotated_offset_collider_aabb :: proc(t: ^testing.T) {
     linalg.VECTOR3F32_Y_AXIS,
   )
   aabb := collider_calculate_aabb(&collider, position, rotation)
-  rotated_offset := linalg.mul(rotation, collider.offset)
-  expected_center := position + rotated_offset
+  expected_center := position
   actual_center := (aabb.min + aabb.max) * 0.5
   testing.expect(
     t,
     abs(actual_center.x - expected_center.x) < 0.1 &&
     abs(actual_center.y - expected_center.y) < 0.1 &&
     abs(actual_center.z - expected_center.z) < 0.1,
-    "AABB center should account for rotated offset",
+    "AABB center should match position",
   )
 }
 
@@ -1554,7 +1550,6 @@ test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
     false,
-    {0.3, 0, 0},
   )
   box, _ := get_dynamic_body(&physics_world, box_handle)
   box.rotation = linalg.quaternion_angle_axis(
@@ -1568,6 +1563,6 @@ test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
   testing.expect(
     t,
     box.position.y > -5.0,
-    "Rotated body with offset should not sink through floor",
+    "Rotated body should not sink through floor",
   )
 }

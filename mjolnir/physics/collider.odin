@@ -32,7 +32,6 @@ FanCollider :: struct {
 }
 
 Collider :: struct {
-  offset:               [3]f32,
   cross_sectional_area: f32,
   shape:                union {
     SphereCollider,
@@ -47,13 +46,12 @@ collider_calculate_aabb :: #force_inline proc(
   position: [3]f32,
   rotation: quaternion128,
 ) -> geometry.Aabb {
-  center := position + geometry.qmv(rotation, self.offset)
   switch sh in self.shape {
   case SphereCollider:
-    return geometry.Aabb{min = center - sh.radius, max = center + sh.radius}
+    return geometry.Aabb{min = position - sh.radius, max = position + sh.radius}
   case BoxCollider:
     obb := geometry.Obb {
-      center       = center,
+      center       = position,
       half_extents = sh.half_extents,
       rotation     = rotation,
     }
@@ -64,7 +62,7 @@ collider_calculate_aabb :: #force_inline proc(
     // Conservative AABB for rotated cylinder
     half_extents := [3]f32{r, h, r}
     obb := geometry.Obb {
-      center       = center,
+      center       = position,
       half_extents = half_extents,
       rotation     = rotation,
     }
@@ -75,7 +73,7 @@ collider_calculate_aabb :: #force_inline proc(
     // Conservative AABB for fan (treat as full cylinder)
     half_extents := [3]f32{r, h, r}
     obb := geometry.Obb {
-      center       = center,
+      center       = position,
       half_extents = half_extents,
       rotation     = rotation,
     }

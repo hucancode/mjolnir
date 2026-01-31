@@ -99,20 +99,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  box_collider := physics.create_collider_box(&physics_world, {1.0, 1.0, 1.0})
-  sphere_collider := physics.create_collider_sphere(&physics_world, 1.0)
-  cylinder_collider := physics.create_collider_cylinder(&physics_world, 1.0, 2.0)
   for pos, i in piece_positions {
     // Parent node with physics
     physics_node_handle := world.spawn(&engine.world, pos)
     physics_node := world.get_node(&engine.world, physics_node_handle)
-    body_handle := physics.create_dynamic_body(
+    body_handle := physics.create_dynamic_body_cylinder(
       &physics_world,
+      1.0,
+      2.0,
       physics_node.transform.position,
       physics_node.transform.rotation,
       50.0,
       false,
-      cylinder_collider,
     )
     if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
       physics.set_cylinder_inertia(body, 1.0, 2.0)

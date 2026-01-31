@@ -78,12 +78,12 @@ collision_pair_hash :: proc {
 
 // Fast bounding sphere intersection test (use before expensive narrow phase)
 bounding_spheres_intersect :: proc "contextless" (
-  center_a: [3]f32,
+  pos_a: [3]f32,
   radius_a: f32,
-  center_b: [3]f32,
+  pos_b: [3]f32,
   radius_b: f32,
 ) -> bool {
-  delta := center_b - center_a
+  delta := pos_b - pos_a
   dist_sq := linalg.dot(delta, delta)
   radius_sum := radius_a + radius_b
   return dist_sq <= radius_sum * radius_sum
@@ -503,8 +503,6 @@ test_collision :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  center_a := pos_a + geometry.qmv(rot_a, collider_a.offset)
-  center_b := pos_b + geometry.qmv(rot_b, collider_b.offset)
   switch shape_a in collider_a.shape {
   case FanCollider:
     return
@@ -513,33 +511,33 @@ test_collision :: proc(
     case FanCollider:
       return
     case SphereCollider:
-      return test_sphere_sphere(center_a, shape_a, center_b, shape_b)
+      return test_sphere_sphere(pos_a, shape_a, pos_b, shape_b)
     case BoxCollider:
       return test_box_sphere(
-        center_b,
+        pos_b,
         rot_b,
         shape_b,
-        center_a,
+        pos_a,
         shape_a,
         invert_normal = true,
       )
     case CylinderCollider:
-      return test_sphere_cylinder(center_a, shape_a, center_b, rot_b, shape_b)
+      return test_sphere_cylinder(pos_a, shape_a, pos_b, rot_b, shape_b)
     }
   case BoxCollider:
     switch shape_b in collider_b.shape {
     case FanCollider:
       return
     case SphereCollider:
-      return test_box_sphere(center_a, rot_a, shape_a, center_b, shape_b)
+      return test_box_sphere(pos_a, rot_a, shape_a, pos_b, shape_b)
     case BoxCollider:
-      return test_box_box(center_a, rot_a, shape_a, center_b, rot_b, shape_b)
+      return test_box_box(pos_a, rot_a, shape_a, pos_b, rot_b, shape_b)
     case CylinderCollider:
       return test_box_cylinder(
-        center_a,
+        pos_a,
         rot_a,
         shape_a,
-        center_b,
+        pos_b,
         rot_b,
         shape_b,
       )
@@ -550,29 +548,29 @@ test_collision :: proc(
       return
     case SphereCollider:
       return test_sphere_cylinder(
-        center_b,
+        pos_b,
         shape_b,
-        center_a,
+        pos_a,
         rot_a,
         shape_a,
         invert_normal = true,
       )
     case BoxCollider:
       return test_box_cylinder(
-        center_b,
+        pos_b,
         rot_b,
         shape_b,
-        center_a,
+        pos_a,
         rot_a,
         shape_a,
         invert_normal = true,
       )
     case CylinderCollider:
       return test_cylinder_cylinder(
-        center_a,
+        pos_a,
         rot_a,
         shape_a,
-        center_b,
+        pos_b,
         rot_b,
         shape_b,
       )
@@ -607,8 +605,6 @@ test_collision_gjk :: proc(
   if !hit {
     return
   }
-  center_a := pos_a + geometry.qmv(rot_a, collider_a.offset)
-  center_b := pos_b + geometry.qmv(rot_b, collider_b.offset)
-  point = center_a + normal * penetration * 0.5
+  point = pos_a + normal * penetration * 0.5
   return
 }

@@ -157,24 +157,22 @@ aabb_cache_update_task :: proc(task: thread.Task) {
     if !entry.active do continue
     body := &entry.item
     if body.is_killed || body.is_sleeping do continue
-    collider := get(data.physics, body.collider_handle) or_continue
     // Check if collider needs OBB-to-AABB conversion
     needs_obb := false
     obb: geometry.Obb
-    center := body.position + geometry.qmv(body.rotation, collider.offset)
-    switch sh in collider.shape {
+    switch sh in body.collider.shape {
     case SphereCollider:
       // Spheres don't need OBB conversion - process directly
       body.cached_aabb = geometry.Aabb {
-        min = center - sh.radius,
-        max = center + sh.radius,
+        min = body.position - sh.radius,
+        max = body.position + sh.radius,
       }
-      body.cached_sphere_center = center
+      body.cached_sphere_center = body.position
       body.cached_sphere_radius = sh.radius
       continue
     case BoxCollider:
       obb = geometry.Obb {
-        center       = center,
+        center       = body.position,
         half_extents = sh.half_extents,
         rotation     = body.rotation,
       }
@@ -184,7 +182,7 @@ aabb_cache_update_task :: proc(task: thread.Task) {
       h := sh.height * 0.5
       half_extents := [3]f32{r, h, r}
       obb = geometry.Obb {
-        center       = center,
+        center       = body.position,
         half_extents = half_extents,
         rotation     = body.rotation,
       }
@@ -194,7 +192,7 @@ aabb_cache_update_task :: proc(task: thread.Task) {
       h := sh.height * 0.5
       half_extents := [3]f32{r, h, r}
       obb = geometry.Obb {
-        center       = center,
+        center       = body.position,
         half_extents = half_extents,
         rotation     = body.rotation,
       }
@@ -204,7 +202,7 @@ aabb_cache_update_task :: proc(task: thread.Task) {
       // Add to batch
       obb_batch[batch_count] = obb
       body_batch[batch_count] = body
-      collider_batch[batch_count] = collider
+      collider_batch[batch_count] = &body.collider
       batch_count += 1
 
       // Process batch when full
@@ -278,8 +276,8 @@ sequential_update_aabb_cache :: proc(physics: ^World) {
   for &entry in physics.bodies.entries do if entry.active {
     body := &entry.item
     if body.is_killed || body.is_sleeping do continue
-    collider := get(physics, body.collider_handle) or_continue
-    update_cached_aabb(body, collider)
+    collider := &body.collider
+    update_cached_aabb(body)
   }
 }
 
@@ -320,8 +318,8 @@ collision_detection_task :: proc(task: thread.Task) {
       body_b := get(data.physics, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := get(data.physics, body_a.collider_handle) or_continue
-      collider_b := get(data.physics, body_b.collider_handle) or_continue
+      collider_a := &body_a.collider
+      collider_b := &body_b.collider
       bounding_spheres_intersect(
         body_a.cached_sphere_center,
         body_a.cached_sphere_radius,
@@ -385,8 +383,8 @@ collision_detection_task :: proc(task: thread.Task) {
       handle_b := entry_b.handle
       body_b := get(data.physics, handle_b) or_continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := get(data.physics, body_a.collider_handle) or_continue
-      collider_b := get(data.physics, body_b.collider_handle) or_continue
+      collider_a := &body_a.collider
+      collider_b := &body_b.collider
       bounding_spheres_intersect(
         body_a.cached_sphere_center,
         body_a.cached_sphere_radius,
@@ -485,8 +483,8 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
         body_b := get(data.physics, handle_b) or_continue
         if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
         if body_a.trigger_only || body_b.trigger_only do continue
-        collider_a := get(data.physics, body_a.collider_handle) or_continue
-        collider_b := get(data.physics, body_b.collider_handle) or_continue
+        collider_a := &body_a.collider
+        collider_b := &body_b.collider
         bounding_spheres_intersect(
           body_a.cached_sphere_center,
           body_a.cached_sphere_radius,
@@ -551,8 +549,8 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
         handle_b := entry_b.handle
         body_b := get(data.physics, handle_b) or_continue
         if body_a.trigger_only || body_b.trigger_only do continue
-        collider_a := get(data.physics, body_a.collider_handle) or_continue
-        collider_b := get(data.physics, body_b.collider_handle) or_continue
+        collider_a := &body_a.collider
+        collider_b := &body_b.collider
         bounding_spheres_intersect(
           body_a.cached_sphere_center,
           body_a.cached_sphere_radius,
@@ -745,8 +743,8 @@ retest_persistent_contacts :: proc(
       body_b.cached_sphere_radius,
     ) or_continue
     if body_a.trigger_only || body_b.trigger_only do continue
-    collider_a := get(physics, body_a.collider_handle) or_continue
-    collider_b := get(physics, body_b.collider_handle) or_continue
+    collider_a := &body_a.collider
+    collider_b := &body_b.collider
     point, normal, penetration := test_collision(
       collider_a,
       body_a.position,
@@ -787,8 +785,8 @@ retest_persistent_contacts :: proc(
       body_b.cached_sphere_radius,
     ) or_continue
     if body_a.trigger_only || body_b.trigger_only do continue
-    collider_a := get(physics, body_a.collider_handle) or_continue
-    collider_b := get(physics, body_b.collider_handle) or_continue
+    collider_a := &body_a.collider
+    collider_b := &body_b.collider
     point, normal, penetration := test_collision(
       collider_a,
       body_a.position,
@@ -863,8 +861,8 @@ sequential_collision_detection :: proc(physics: ^World) {
       body_b := get(physics, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := get(physics, body_a.collider_handle) or_continue
-      collider_b := get(physics, body_b.collider_handle) or_continue
+      collider_a := &body_a.collider
+      collider_b := &body_b.collider
       if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
       is_primitive_shape := true
       point: [3]f32
@@ -924,8 +922,8 @@ sequential_collision_detection :: proc(physics: ^World) {
       if tested_pairs[pair_hash] do continue
       body_b := get(physics, handle_b) or_continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := get(physics, body_a.collider_handle) or_continue
-      collider_b := get(physics, body_b.collider_handle) or_continue
+      collider_a := &body_a.collider
+      collider_b := &body_b.collider
       if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
       is_primitive_shape := true
       point: [3]f32
@@ -1014,7 +1012,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
       if !entry_a.active do continue
       body_a := &entry_a.item
       if body_a.is_killed || body_a.trigger_only || body_a.is_sleeping do continue
-      collider_a := get(data.physics, body_a.collider_handle) or_continue
+      collider_a := &body_a.collider
       velocity_mag_sq := linalg.length2(body_a.velocity)
       dt_sq := data.dt * data.dt
       min_extent := collider_min_extent(collider_a)
@@ -1049,7 +1047,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
         handle_b := candidate.handle
         if u32(idx_a) == handle_b.index do continue
         body_b := get(data.physics, handle_b) or_continue
-        collider_b := get(data.physics, body_b.collider_handle) or_continue
+        collider_b := &body_b.collider
         toi := swept_test(
           collider_a,
           collider_b,
@@ -1078,7 +1076,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
       for candidate in static_candidates {
         handle_b := candidate.handle
         body_b := get(data.physics, handle_b) or_continue
-        collider_b := get(data.physics, body_b.collider_handle) or_continue
+        collider_b := &body_b.collider
         toi := swept_test(
           collider_a,
           collider_b,
@@ -1099,7 +1097,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
       if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
         safe_time := earliest_toi * 0.98
         body_a.position += body_a.velocity * data.dt * safe_time
-        update_cached_aabb(body_a, collider_a)
+        update_cached_aabb(body_a)
         vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
         if vel_along_normal < 0 {
           wake_up(body_a)
@@ -1203,7 +1201,7 @@ sequential_ccd :: proc(
     velocity_mag_sq := linalg.length2(body_a.velocity)
     if velocity_mag_sq < CCD_THRESHOLD_SQ do continue
     bodies_tested += 1
-    collider_a := get(physics, body_a.collider_handle) or_continue
+    collider_a := &body_a.collider
     motion := body_a.velocity * dt
     earliest_toi := f32(1.0)
     earliest_normal := linalg.VECTOR3F32_Y_AXIS
@@ -1221,7 +1219,7 @@ sequential_ccd :: proc(
       handle_b := candidate.handle
       if u32(idx_a) == handle_b.index do continue
       body_b := get(physics, handle_b) or_continue
-      collider_b := get(physics, body_b.collider_handle) or_continue
+      collider_b := &body_b.collider
       toi := swept_test(collider_a, collider_b, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
       if toi.has_impact && toi.time < earliest_toi {
         earliest_toi = toi.time
@@ -1238,7 +1236,7 @@ sequential_ccd :: proc(
     for candidate in static_candidates {
       handle_b := candidate.handle
       body_b := get(physics, handle_b) or_continue
-      collider_b := get(physics, body_b.collider_handle) or_continue
+      collider_b := &body_b.collider
       toi := swept_test(collider_a, collider_b, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
       if toi.has_impact && toi.time < earliest_toi {
         earliest_toi = toi.time
@@ -1251,7 +1249,7 @@ sequential_ccd :: proc(
     if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
       safe_time := earliest_toi * 0.98
       body_a.position += body_a.velocity * dt * safe_time
-      update_cached_aabb(body_a, collider_a)
+      update_cached_aabb(body_a)
       vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
       if vel_along_normal < 0 {
         wake_up(body_a)
