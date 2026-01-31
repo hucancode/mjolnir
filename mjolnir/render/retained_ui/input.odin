@@ -2,210 +2,191 @@ package retained_ui
 
 import cont "../../containers"
 
-update_input :: proc(self: ^Manager, mouse_x, mouse_y: f32, mouse_down: bool) {
-  self.mouse_pos = {mouse_x, mouse_y}
-  mouse_clicked := !self.mouse_down && mouse_down
-  mouse_released := self.mouse_down && !mouse_down
-  self.mouse_clicked = mouse_clicked
-  self.mouse_released = mouse_released
-  self.mouse_down = mouse_down
-  for root_handle in self.root_widgets {
-    update_widget_input(self, root_handle)
-  }
-}
+// =============================================================================
+// Input Processing
+// =============================================================================
 
-input_text :: proc(self: ^Manager, text: string) {
-  if self.focused_widget.index == 0 do return
-  widget, found := cont.get(self.widgets, self.focused_widget)
-  if !found do return
-  data, ok := &widget.data.(TextBoxData)
-  if !ok do return
-  if !data.focused do return
-  for ch in text {
-    if len(data.text) >= int(data.max_length) do break
-    append(&data.text, u8(ch))
-  }
-  data.text_as_string = string(data.text[:])
-  if data.callback != nil {
-    data.callback(data.user_data)
-  }
-  mark_dirty(self, self.focused_widget)
-}
-
-input_key :: proc(self: ^Manager, key: int, action: int) {
-  if self.focused_widget.index == 0 do return
-  widget, found := cont.get(self.widgets, self.focused_widget)
-  if !found do return
-  data, ok := &widget.data.(TextBoxData)
-  if !ok do return
-  if !data.focused do return
-  if action != 1 && action != 2 do return
-  if key == 259 {
-    if len(data.text) > 0 {
-      pop(&data.text)
-      data.text_as_string = string(data.text[:])
-      if data.callback != nil {
-        data.callback(data.user_data)
-      }
-      mark_dirty(self, self.focused_widget)
-    }
-  }
-}
-
-deselect_radio_group :: proc(
-  self: ^Manager,
-  handle: WidgetHandle,
-  group_id: u32,
-  exclude_handle: WidgetHandle,
+update_input :: proc(
+  manager: ^Manager,
+  mouse_x, mouse_y: f32,
+  mouse_down: bool,
 ) {
-  widget, found := cont.get(self.widgets, handle)
-  if !found do return
-  if handle != exclude_handle {
-    data, ok := &widget.data.(RadioButtonData)
-    if !ok do return
-    if data.group_id == group_id && data.selected {
-      data.selected = false
-      mark_dirty(self, handle)
+  manager.mouse_pos = {mouse_x, mouse_y}
+  mouse_clicked := !manager.mouse_down && mouse_down
+  mouse_released := manager.mouse_down && !mouse_down
+  manager.mouse_clicked = mouse_clicked
+  manager.mouse_released = mouse_released
+  manager.mouse_down = mouse_down
+
+  // Find element under cursor
+  new_hovered, found := find_element_at_point(manager, manager.mouse_pos)
+
+  // Handle hover enter/leave
+  if new_hovered != manager.hovered_element {
+    // Dispatch leave event to old element
+    if manager.hovered_element.index != 0 ||
+       manager.hovered_element.generation != 0 {
+      leave_event := Event {
+        type          = .MOUSE_LEAVE,
+        target        = manager.hovered_element,
+        mouse_pos_abs = manager.mouse_pos,
+      }
+      dispatch_event(manager, &leave_event)
+    }
+
+    // Dispatch enter event to new element
+    if found {
+      enter_event := Event {
+        type          = .MOUSE_ENTER,
+        target        = new_hovered,
+        mouse_pos     = get_local_point(
+          manager,
+          new_hovered,
+          manager.mouse_pos,
+        ),
+        mouse_pos_abs = manager.mouse_pos,
+      }
+      dispatch_event(manager, &enter_event)
+    }
+
+    manager.hovered_element = new_hovered
+  }
+
+  // Handle mouse down
+  if mouse_clicked && found {
+    down_event := Event {
+      type          = .MOUSE_DOWN,
+      target        = new_hovered,
+      mouse_pos     = get_local_point(manager, new_hovered, manager.mouse_pos),
+      mouse_pos_abs = manager.mouse_pos,
+      mouse_button  = 0,
+    }
+    dispatch_event(manager, &down_event)
+
+    // Update focus
+    manager.focused_element = new_hovered
+  }
+
+  // Handle mouse up
+  if mouse_released {
+    if manager.hovered_element.index != 0 ||
+       manager.hovered_element.generation != 0 {
+      up_event := Event {
+        type          = .MOUSE_UP,
+        target        = manager.hovered_element,
+        mouse_pos     = get_local_point(
+          manager,
+          manager.hovered_element,
+          manager.mouse_pos,
+        ),
+        mouse_pos_abs = manager.mouse_pos,
+        mouse_button  = 0,
+      }
+      dispatch_event(manager, &up_event)
     }
   }
-  child := widget.first_child
-  for child.index != 0 {
-    deselect_radio_group(self, child, group_id, exclude_handle)
-    child_widget := cont.get(self.widgets, child)
-    child = child_widget.next_sibling
+
+  // Handle click (mouse up over same element that was clicked down on)
+  if mouse_released && found && new_hovered == manager.hovered_element {
+    click_event := Event {
+      type          = .CLICK,
+      target        = new_hovered,
+      mouse_pos     = get_local_point(manager, new_hovered, manager.mouse_pos),
+      mouse_pos_abs = manager.mouse_pos,
+      mouse_button  = 0,
+    }
+    dispatch_event(manager, &click_event)
+  }
+
+  // Clear focus if clicked outside any element
+  if mouse_clicked && !found {
+    manager.focused_element = {}
   }
 }
 
-update_widget_input :: proc(self: ^Manager, handle: WidgetHandle) {
-  widget, found := cont.get(self.widgets, handle)
-  if !found || !widget.visible || !widget.enabled do return
-  mx, my := self.mouse_pos.x, self.mouse_pos.y
-  wx, wy := widget.position.x, widget.position.y
-  ww, wh := widget.size.x, widget.size.y
-  hovered := mx >= wx && mx <= wx + ww && my >= wy && my <= wy + wh
-  switch &data in widget.data {
-  case ButtonData:
-    old_hovered := data.hovered
-    data.hovered = hovered
-    if hovered && self.mouse_clicked {
-      data.pressed = true
-      mark_dirty(self, handle)
-    }
-    if data.pressed && self.mouse_released {
-      data.pressed = false
-      mark_dirty(self, handle)
-      if hovered && data.callback != nil {
-        data.callback(data.user_data)
-      }
-    }
-    if old_hovered != data.hovered {
-      mark_dirty(self, handle)
-    }
-  case CheckBoxData:
-    box_size: f32 = 20
-    old_hovered := data.hovered
-    data.hovered = hovered && mx <= wx + box_size && my <= wy + box_size
-    if data.hovered && self.mouse_clicked {
-      data.checked = !data.checked
-      if data.callback != nil {
-        data.callback(data.user_data, data.checked)
-      }
-      mark_dirty(self, handle)
-    }
-    if old_hovered != data.hovered {
-      mark_dirty(self, handle)
-    }
-  case RadioButtonData:
-    circle_size: f32 = 20
-    old_hovered := data.hovered
-    data.hovered = hovered && mx <= wx + circle_size && my <= wy + circle_size
-    if data.hovered && self.mouse_clicked && !data.selected {
-      for other_handle in self.root_widgets {
-        deselect_radio_group(self, other_handle, data.group_id, handle)
-      }
-      data.selected = true
-      if data.callback != nil {
-        data.callback(data.user_data)
-      }
-      mark_dirty(self, handle)
-    }
-    if old_hovered != data.hovered {
-      mark_dirty(self, handle)
-    }
-  case TextBoxData:
-    old_hovered := data.hovered
-    old_focused := data.focused
-    data.hovered = hovered
-    if self.mouse_clicked {
-      if self.focused_widget.index != 0 && self.focused_widget != handle {
-        if old_focused_widget, ok := cont.get(
-          self.widgets,
-          self.focused_widget,
-        ); ok {
-          if old_data, is_textbox := &old_focused_widget.data.(TextBoxData);
-             is_textbox {
-            old_data.focused = false
-            mark_dirty(self, self.focused_widget)
-          }
-        }
-      }
-      data.focused = hovered
-      if hovered {
-        self.focused_widget = handle
-      } else if self.focused_widget == handle {
-        self.focused_widget = {}
-      }
-    }
-    if old_hovered != data.hovered || old_focused != data.focused {
-      mark_dirty(self, handle)
-    }
-  case ComboBoxData:
-    old_hovered := data.hovered
-    old_expanded := data.expanded
-    data.hovered = hovered && my <= wy + widget.size.y
-    if data.hovered && self.mouse_clicked {
-      data.expanded = !data.expanded
-      mark_dirty(self, handle)
-    }
-    if data.expanded {
-      item_height: f32 = 24
-      dropdown_y := wy + widget.size.y
-      old_hovered_item := data.hovered_item
-      data.hovered_item = -1
-      for item, i in data.items {
-        item_y := dropdown_y + f32(i) * item_height
-        if mx >= wx &&
-           mx <= wx + ww &&
-           my >= item_y &&
-           my <= item_y + item_height {
-          data.hovered_item = i32(i)
-          if self.mouse_clicked {
-            selected_index := i32(i)
-            callback := data.callback
-            user_data := data.user_data
-            data.selected = selected_index
-            data.expanded = false
-            mark_dirty(self, handle)
-            if callback != nil {
-              callback(user_data, selected_index)
-            }
-            break
-          }
-        }
-      }
-      if old_hovered_item != data.hovered_item {
-        mark_dirty(self, handle)
-      }
-    }
-    if old_hovered != data.hovered || old_expanded != data.expanded {
-      mark_dirty(self, handle)
-    }
-  case LabelData, ImageData, WindowData:
+// Handle text input for focused TextInput widgets
+input_text :: proc(manager: ^Manager, text: string) {
+  if manager.focused_element.index == 0 &&
+     manager.focused_element.generation == 0 {
+    return
   }
-  child := widget.first_child
-  for child.index != 0 {
-    update_widget_input(self, child)
-    child_widget := cont.get(self.widgets, child)
-    child = child_widget.next_sibling
+
+  // This will be called from widget-level handlers
+  // For now, just store the focused element
+}
+
+// Handle key input (backspace, etc)
+input_key :: proc(manager: ^Manager, key: int, action: int) {
+  if manager.focused_element.index == 0 &&
+     manager.focused_element.generation == 0 {
+    return
   }
+
+  // Key codes (GLFW-style)
+  KEY_BACKSPACE :: 259
+  KEY_DELETE :: 261
+  KEY_LEFT :: 263
+  KEY_RIGHT :: 262
+
+  // Action codes
+  ACTION_PRESS :: 1
+  ACTION_REPEAT :: 2
+
+  if action != ACTION_PRESS && action != ACTION_REPEAT {
+    return
+  }
+
+  // Handle key events at widget level
+}
+
+// =============================================================================
+// Focus Management
+// =============================================================================
+
+set_focus :: proc(manager: ^Manager, handle: ElementHandle) {
+  manager.focused_element = handle
+}
+
+clear_focus :: proc(manager: ^Manager) {
+  manager.focused_element = {}
+}
+
+get_focused_element :: proc(manager: ^Manager) -> ElementHandle {
+  return manager.focused_element
+}
+
+is_focused :: proc(manager: ^Manager, handle: ElementHandle) -> bool {
+  return manager.focused_element == handle
+}
+
+// =============================================================================
+// Hover State
+// =============================================================================
+
+get_hovered_element :: proc(manager: ^Manager) -> ElementHandle {
+  return manager.hovered_element
+}
+
+is_hovered :: proc(manager: ^Manager, handle: ElementHandle) -> bool {
+  return manager.hovered_element == handle
+}
+
+// =============================================================================
+// Mouse State Queries
+// =============================================================================
+
+get_mouse_position :: proc(manager: ^Manager) -> [2]f32 {
+  return manager.mouse_pos
+}
+
+is_mouse_down :: proc(manager: ^Manager) -> bool {
+  return manager.mouse_down
+}
+
+was_mouse_clicked :: proc(manager: ^Manager) -> bool {
+  return manager.mouse_clicked
+}
+
+was_mouse_released :: proc(manager: ^Manager) -> bool {
+  return manager.mouse_released
 }

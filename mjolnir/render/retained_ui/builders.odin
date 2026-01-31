@@ -1,555 +1,330 @@
 package retained_ui
 
-import cont "../../containers"
-import fs "vendor:fontstash"
-import "core:log"
+import "core:math/linalg"
 
-build_widget_draw_commands :: proc(self: ^Manager, handle: WidgetHandle) {
-  widget, found := cont.get(self.widgets, handle)
-  if !found || !widget.visible do return
-  for &v in self.draw_lists {
-    switch data in widget.data {
-    case ButtonData:
-      build_button_commands(self, &v, handle, widget)
-    case LabelData:
-      build_label_commands(self, &v, handle, widget)
-    case ImageData:
-      build_image_commands(self, &v, handle, widget)
-    case WindowData:
-      build_window_commands(self, &v, handle, widget)
-    case TextBoxData:
-      build_textbox_commands(self, &v, handle, widget)
-    case ComboBoxData:
-      build_combobox_commands(self, &v, handle, widget)
-    case CheckBoxData:
-      build_checkbox_commands(self, &v, handle, widget)
-    case RadioButtonData:
-      build_radiobutton_commands(self, &v, handle, widget)
+// =============================================================================
+// Transform Builders
+// =============================================================================
+
+// Create a transform with just position
+make_transform_position :: proc(x, y: f32) -> Transform2D {
+  t := TRANSFORM2D_IDENTITY
+  t.position = {x, y}
+  return t
+}
+
+// Create a transform with position and rotation
+make_transform_rotated :: proc(x, y: f32, radians: f32) -> Transform2D {
+  t := TRANSFORM2D_IDENTITY
+  t.position = {x, y}
+  t.rotation = radians
+  return t
+}
+
+// Create a transform with position and scale
+make_transform_scaled :: proc(
+  x, y: f32,
+  scale_x, scale_y: f32,
+) -> Transform2D {
+  t := TRANSFORM2D_IDENTITY
+  t.position = {x, y}
+  t.scale = {scale_x, scale_y}
+  return t
+}
+
+// Create a full transform
+make_transform :: proc(
+  position: [2]f32,
+  rotation: f32,
+  scale: [2]f32,
+  pivot: [2]f32,
+) -> Transform2D {
+  return Transform2D {
+    position = position,
+    rotation = rotation,
+    scale = scale,
+    pivot = pivot,
+  }
+}
+
+// =============================================================================
+// Quad Vertex Generation
+// =============================================================================
+
+// Generate quad vertices for a rectangle
+generate_quad_vertices :: proc(
+  rect: [4]f32,
+  uv: [4]f32,
+  color: [4]u8,
+) -> [4]Mesh2DVertex {
+  x, y, w, h := rect.x, rect.y, rect.z, rect.w
+  u0, v0, u1, v1 := uv.x, uv.y, uv.z, uv.w
+
+  return {
+    {pos = {x, y}, uv = {u0, v0}, color = color},
+    {pos = {x + w, y}, uv = {u1, v0}, color = color},
+    {pos = {x + w, y + h}, uv = {u1, v1}, color = color},
+    {pos = {x, y + h}, uv = {u0, v1}, color = color},
+  }
+}
+
+// Generate quad indices
+generate_quad_indices :: proc() -> [6]u32 {
+  return {0, 1, 2, 2, 3, 0}
+}
+
+// =============================================================================
+// Mesh Builders
+// =============================================================================
+
+// Create a simple rectangle mesh
+build_rect_mesh :: proc(
+  width, height: f32,
+  color: [4]u8 = WHITE,
+) -> (
+  vertices: [dynamic]Mesh2DVertex,
+  indices: [dynamic]u32,
+) {
+  vertices = make([dynamic]Mesh2DVertex, 4)
+  indices = make([dynamic]u32, 6)
+
+  vertices[0] = {
+    pos   = {0, 0},
+    uv    = {0, 0},
+    color = color,
+  }
+  vertices[1] = {
+    pos   = {width, 0},
+    uv    = {1, 0},
+    color = color,
+  }
+  vertices[2] = {
+    pos   = {width, height},
+    uv    = {1, 1},
+    color = color,
+  }
+  vertices[3] = {
+    pos   = {0, height},
+    uv    = {0, 1},
+    color = color,
+  }
+
+  indices[0] = 0
+  indices[1] = 1
+  indices[2] = 2
+  indices[3] = 2
+  indices[4] = 3
+  indices[5] = 0
+
+  return
+}
+
+// Create a triangle mesh
+build_triangle_mesh :: proc(
+  p1, p2, p3: [2]f32,
+  color: [4]u8 = WHITE,
+) -> (
+  vertices: [dynamic]Mesh2DVertex,
+  indices: [dynamic]u32,
+) {
+  vertices = make([dynamic]Mesh2DVertex, 3)
+  indices = make([dynamic]u32, 3)
+
+  vertices[0] = {
+    pos   = p1,
+    uv    = {0.5, 0},
+    color = color,
+  }
+  vertices[1] = {
+    pos   = p2,
+    uv    = {0, 1},
+    color = color,
+  }
+  vertices[2] = {
+    pos   = p3,
+    uv    = {1, 1},
+    color = color,
+  }
+
+  indices[0] = 0
+  indices[1] = 1
+  indices[2] = 2
+
+  return
+}
+
+// Create a circle mesh (approximated with segments)
+build_circle_mesh :: proc(
+  radius: f32,
+  segments: int = 32,
+  color: [4]u8 = WHITE,
+) -> (
+  vertices: [dynamic]Mesh2DVertex,
+  indices: [dynamic]u32,
+) {
+  vertices = make([dynamic]Mesh2DVertex, segments + 1)
+  indices = make([dynamic]u32, segments * 3)
+
+  // Center vertex
+  vertices[0] = {
+    pos   = {0, 0},
+    uv    = {0.5, 0.5},
+    color = color,
+  }
+
+  // Circle vertices
+  for i in 0 ..< segments {
+    angle := f32(i) / f32(segments) * 2 * 3.14159265
+    x := radius * linalg.cos(angle)
+    y := radius * linalg.sin(angle)
+    u := (linalg.cos(angle) + 1) * 0.5
+    v := (linalg.sin(angle) + 1) * 0.5
+
+    vertices[i + 1] = {
+      pos   = {x, y},
+      uv    = {u, v},
+      color = color,
     }
   }
-  // re-fetch widget pointer in case pool was modified
-  if widget, found = cont.get(self.widgets, handle); found {
-    widget.dirty = false
+
+  // Triangle indices (fan from center)
+  for i in 0 ..< segments {
+    base := i * 3
+    indices[base + 0] = 0
+    indices[base + 1] = u32(i + 1)
+    indices[base + 2] = u32((i + 1) % segments + 1)
   }
+
+  return
 }
 
-build_widget_tree_commands :: proc(self: ^Manager, handle: WidgetHandle) {
-  widget, found := cont.get(self.widgets, handle)
-  if !found || !widget.visible do return
-  build_widget_draw_commands(self, handle)
-  child := widget.first_child
-  for child.index != 0 {
-    build_widget_tree_commands(self, child)
-    child_widget := cont.get(self.widgets, child)
-    child = child_widget.next_sibling
-  }
-}
-
-build_button_commands :: proc(
-  self: ^Manager,
-  draw_list: ^DrawList,
-  handle: WidgetHandle,
-  widget: ^Widget,
+// Create a rounded rectangle mesh
+build_rounded_rect_mesh :: proc(
+  width, height: f32,
+  radius: f32,
+  segments_per_corner: int = 8,
+  color: [4]u8 = WHITE,
+) -> (
+  vertices: [dynamic]Mesh2DVertex,
+  indices: [dynamic]u32,
 ) {
-  data := widget.data.(ButtonData)
-  bg_color := widget.bg_color
-  if data.pressed {
-    bg_color = {
-      u8(widget.bg_color.r / 2),
-      u8(widget.bg_color.g / 2),
-      u8(widget.bg_color.b / 2),
-      widget.bg_color.a,
-    }
-  } else if data.hovered {
-    bg_color = {
-      max(widget.bg_color.r - 40, 0),
-      max(widget.bg_color.g - 40, 0),
-      max(widget.bg_color.b - 40, 0),
-      widget.bg_color.a,
-    }
-  }
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .RECT,
-      widget = handle,
-      rect = {
-        widget.position.x,
-        widget.position.y,
-        widget.size.x,
-        widget.size.y,
-      },
-      color = bg_color,
-      uv = {0, 0, 1, 1},
-    },
-  )
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .TEXT,
-      widget = handle,
-      rect = {
-        widget.position.x + 10,
-        widget.position.y + 10,
-        widget.size.x - 20,
-        widget.size.y - 20,
-      },
-      color = widget.fg_color,
-      text = data.text,
-      text_align = .CENTER,
-    },
-  )
-}
+  // Clamp radius to half of smaller dimension
+  r := min(radius, width / 2, height / 2)
+  segs := segments_per_corner
 
-build_label_commands :: proc(
-  self: ^Manager,
-  draw_list: ^DrawList,
-  handle: WidgetHandle,
-  widget: ^Widget,
-) {
-  data := widget.data.(LabelData)
+  // Calculate vertex count: 4 corners × segments + 4 edge vertices + 1 center
+  vertex_count := segs * 4 + 4 + 1
+  vertices = make([dynamic]Mesh2DVertex, vertex_count)
+  indices = make([dynamic]u32, 0, vertex_count * 3)
 
-  if data.autosize && len(data.text) > 0 {
-    font_size := widget.size.y
-    fs.SetFont(&self.font_ctx, self.default_font)
-    fs.SetSize(&self.font_ctx, font_size)
-    bounds: [4]f32
-    fs.TextBounds(&self.font_ctx, data.text, 0, 0, &bounds)
-    text_width := bounds[2] - bounds[0]
-    widget.size.x = text_width + 4
+  // Center vertex
+  center := [2]f32{width / 2, height / 2}
+  vertices[0] = {
+    pos   = center,
+    uv    = {0.5, 0.5},
+    color = color,
   }
 
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .TEXT,
-      widget = handle,
-      rect = {
-        widget.position.x,
-        widget.position.y,
-        widget.size.x,
-        widget.size.y,
-      },
-      color = widget.fg_color,
-      text = data.text,
-      text_align = .LEFT,
-    },
-  )
-}
+  idx := 1
 
-build_image_commands :: proc(
-  self: ^Manager,
-  draw_list: ^DrawList,
-  handle: WidgetHandle,
-  widget: ^Widget,
-) {
-  data := widget.data.(ImageData)
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .IMAGE,
-      widget = handle,
-      rect = {
-        widget.position.x,
-        widget.position.y,
-        widget.size.x,
-        widget.size.y,
-      },
-      color = WHITE,
-      texture_id = data.texture_handle.index,
-      uv = data.uv,
-      z = 0.0,
-    },
-  )
-}
+  // Generate corner vertices
+  corners := [4][2]f32 {
+    {r, r}, // Top-left
+    {width - r, r}, // Top-right
+    {width - r, height - r}, // Bottom-right
+    {r, height - r}, // Bottom-left
+  }
 
-build_window_commands :: proc(
-  self: ^Manager,
-  draw_list: ^DrawList,
-  handle: WidgetHandle,
-  widget: ^Widget,
-) {
-  data := widget.data.(WindowData)
-  title_bar_height: f32 = 30
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .RECT,
-      widget = handle,
-      rect = {
-        widget.position.x,
-        widget.position.y,
-        widget.size.x,
-        title_bar_height,
-      },
-      color = BUTTON_SHADOW_COLOR,
-      uv = {0, 0, 1, 1},
-    },
-  )
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .TEXT,
-      widget = handle,
-      rect = {
-        widget.position.x + 10,
-        widget.position.y + 5,
-        widget.size.x - 20,
-        title_bar_height - 10,
-      },
-      color = WHITE,
-      text = data.title,
-      text_align = .LEFT,
-    },
-  )
-  if !data.minimized {
-    append(
-      &draw_list.commands,
-      DrawCommand {
-        type = .RECT,
-        widget = handle,
-        rect = {
-          widget.position.x,
-          widget.position.y + title_bar_height,
-          widget.size.x,
-          widget.size.y - title_bar_height,
-        },
-        color = widget.bg_color,
-        uv = {0, 0, 1, 1},
-      },
-    )
+  start_angles := [4]f32 {
+    3.14159265, // Top-left: π to 3π/2
+    3.14159265 * 1.5, // Top-right: 3π/2 to 2π
+    0, // Bottom-right: 0 to π/2
+    3.14159265 * 0.5, // Bottom-left: π/2 to π
   }
-}
 
-build_textbox_commands :: proc(
-  self: ^Manager,
-  draw_list: ^DrawList,
-  handle: WidgetHandle,
-  widget: ^Widget,
-) {
-  data := widget.data.(TextBoxData)
-  bg_color := widget.bg_color
-  if data.focused {
-    bg_color = WHITE
-  } else if data.hovered {
-    bg_color = TEXTBOX_BG_HOVERED
-  }
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .RECT,
-      widget = handle,
-      rect = {
-        widget.position.x,
-        widget.position.y,
-        widget.size.x,
-        widget.size.y,
-      },
-      color = bg_color,
-      uv = {0, 0, 1, 1},
-    },
-  )
-  border_color := data.focused ? TEXTBOX_BORDER_FOCUSED : widget.border_color
-  if len(data.text) == 0 {
-    if len(data.placeholder) > 0 {
-      append(
-        &draw_list.commands,
-        DrawCommand {
-          type = .TEXT,
-          widget = handle,
-          rect = {
-            widget.position.x + 8,
-            widget.position.y + 8,
-            widget.size.x - 16,
-            widget.size.y - 16,
-          },
-          color = TEXTBOX_PLACEHOLDER_COLOR,
-          text = data.placeholder,
-          text_align = .LEFT,
-        },
-      )
-    }
-  } else {
-    append(
-      &draw_list.commands,
-      DrawCommand {
-        type        = .TEXT,
-        widget      = handle,
-        rect        = {
-          widget.position.x + 8,
-          widget.position.y + 8,
-          widget.size.x - 16,
-          widget.size.y - 16,
-        },
-        color       = widget.fg_color,
-        text        = data.text_as_string,
-        text_align  = .LEFT,
-        text_suffix = true,
-      },
-    )
-  }
-  if data.focused {
-    text_width: f32 = 0
-    available_width := widget.size.x - 16
-    text_offset: f32 = 0
-    if len(data.text) > 0 {
-      font_size := widget.size.y - 16
-      fs.SetFont(&self.font_ctx, self.default_font)
-      fs.SetSize(&self.font_ctx, font_size)
-      bounds: [4]f32
-      fs.TextBounds(&self.font_ctx, data.text_as_string, 0, 0, &bounds)
-      text_width = bounds[2] - bounds[0]
-      if text_width > available_width {
-        text_offset = available_width - text_width
+  for corner in 0 ..< 4 {
+    corner_center := corners[corner]
+    start_angle := start_angles[corner]
+
+    for i in 0 ..= segs {
+      angle := start_angle + f32(i) / f32(segs) * (3.14159265 / 2)
+      x := corner_center.x + r * linalg.cos(angle)
+      y := corner_center.y + r * linalg.sin(angle)
+      u := x / width
+      v := y / height
+
+      vertices[idx] = {
+        pos   = {x, y},
+        uv    = {u, v},
+        color = color,
       }
-    }
-    cursor_x := widget.position.x + 8 + text_offset + text_width
-    if cursor_x > widget.position.x + 8 + available_width {
-      cursor_x = widget.position.x + 8 + available_width
-    }
-    cursor_y := widget.position.y + 6
-    cursor_height := widget.size.y - 12
-    append(
-      &draw_list.commands,
-      DrawCommand {
-        type   = .RECT,
-        widget = handle,
-        rect   = {cursor_x, cursor_y, 2, cursor_height},
-        color  = {0, 0, 0, 255},
-        uv     = {0, 0, 1, 1},
-      },
-    )
-  }
-}
-
-build_combobox_commands :: proc(
-  self: ^Manager,
-  draw_list: ^DrawList,
-  handle: WidgetHandle,
-  widget: ^Widget,
-) {
-  data := widget.data.(ComboBoxData)
-  bg_color := data.hovered ? DROPDOWN_HOVER_BG : widget.bg_color
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .RECT,
-      widget = handle,
-      rect = {
-        widget.position.x,
-        widget.position.y,
-        widget.size.x,
-        widget.size.y,
-      },
-      color = bg_color,
-      uv = {0, 0, 1, 1},
-    },
-  )
-  if data.selected >= 0 && data.selected < i32(len(data.items)) {
-    append(
-      &draw_list.commands,
-      DrawCommand {
-        type = .TEXT,
-        widget = handle,
-        rect = {
-          widget.position.x + 8,
-          widget.position.y + 8,
-          widget.size.x - 32,
-          widget.size.y - 16,
-        },
-        color = widget.fg_color,
-        text = data.items[data.selected],
-        text_align = .LEFT,
-      },
-    )
-  } else {
-    append(
-      &draw_list.commands,
-      DrawCommand {
-        type = .TEXT,
-        widget = handle,
-        rect = {
-          widget.position.x + 8,
-          widget.position.y + 8,
-          widget.size.x - 32,
-          widget.size.y - 16,
-        },
-        color = widget.fg_color,
-        text = "Select...",
-        text_align = .LEFT,
-      },
-    )
-  }
-  cue_width: f32 = 8
-  cue_color := data.expanded ? DROPDOWN_OPEN_HINT_BG : DROPDOWN_CLOSE_HINT_BG
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .RECT,
-      widget = handle,
-      rect = {
-        widget.position.x + widget.size.x - cue_width,
-        widget.position.y,
-        cue_width,
-        widget.size.y,
-      },
-      color = cue_color,
-      uv = {0, 0, 1, 1},
-    },
-  )
-  if data.expanded {
-    item_height: f32 = 24
-    dropdown_y := widget.position.y + widget.size.y
-    for item, i in data.items {
-      item_bg :=
-        data.hovered_item == i32(i) ? DROPDOWN_LIST_HOVER_BG : DROPDOWN_LIST_BG
-      append(
-        &draw_list.commands,
-        DrawCommand {
-          type = .RECT,
-          widget = handle,
-          rect = {
-            widget.position.x,
-            dropdown_y + f32(i) * item_height,
-            widget.size.x,
-            item_height,
-          },
-          color = item_bg,
-          uv = {0, 0, 1, 1},
-          z = -0.01,
-        },
-      )
-      append(
-        &draw_list.commands,
-        DrawCommand {
-          type = .TEXT,
-          widget = handle,
-          rect = {
-            widget.position.x + 8,
-            dropdown_y + f32(i) * item_height + 4,
-            widget.size.x - 16,
-            item_height - 8,
-          },
-          color = BLACK,
-          text = item,
-          text_align = .LEFT,
-          z = -0.01,
-        },
-      )
+      idx += 1
     }
   }
+
+  // Generate triangle indices (fan from center)
+  total_edge_verts := (segs + 1) * 4
+  for i in 0 ..< total_edge_verts {
+    next := (i + 1) % total_edge_verts
+    append(&indices, u32(0))
+    append(&indices, u32(i + 1))
+    append(&indices, u32(next + 1))
+  }
+
+  return
 }
 
-build_checkbox_commands :: proc(
-  self: ^Manager,
-  draw_list: ^DrawList,
-  handle: WidgetHandle,
-  widget: ^Widget,
-) {
-  data := widget.data.(CheckBoxData)
-  box_size: f32 = 20
-  spacing: f32 = 8
-  box_bg := data.hovered ? CHECKBOX_HOVER_BG : widget.bg_color
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .RECT,
-      widget = handle,
-      rect = {widget.position.x, widget.position.y, box_size, box_size},
-      color = box_bg,
-      uv = {0, 0, 1, 1},
-    },
-  )
-  if data.checked {
-    append(
-      &draw_list.commands,
-      DrawCommand {
-        type = .RECT,
-        widget = handle,
-        rect = {
-          widget.position.x + 2,
-          widget.position.y + 2,
-          box_size - 4,
-          box_size - 4,
-        },
-        color = BLACK,
-        uv = {0, 0, 1, 1},
-      },
-    )
-  }
-  if len(data.label) > 0 {
-    append(
-      &draw_list.commands,
-      DrawCommand {
-        type = .TEXT,
-        widget = handle,
-        rect = {
-          widget.position.x + box_size + spacing,
-          widget.position.y,
-          widget.size.x - box_size - spacing,
-          box_size,
-        },
-        color = widget.fg_color,
-        text = data.label,
-        text_align = .LEFT,
-      },
-    )
-  }
+// =============================================================================
+// Size Mode Helpers
+// =============================================================================
+
+// Create absolute size
+absolute_size :: proc(width, height: f32) -> SizeMode {
+  return SizeAbsolute{width, height}
 }
 
-build_radiobutton_commands :: proc(
-  self: ^Manager,
-  draw_list: ^DrawList,
-  handle: WidgetHandle,
-  widget: ^Widget,
-) {
-  data := widget.data.(RadioButtonData)
-  circle_size: f32 = 20
-  spacing: f32 = 8
-  circle_bg := data.hovered ? RADIO_BUTTON_HOVER_BG : widget.bg_color
-  append(
-    &draw_list.commands,
-    DrawCommand {
-      type = .RECT,
-      widget = handle,
-      rect = {widget.position.x, widget.position.y, circle_size, circle_size},
-      color = circle_bg,
-      uv = {0, 0, 1, 1},
-    },
-  )
-  if data.selected {
-    append(
-      &draw_list.commands,
-      DrawCommand {
-        type = .RECT,
-        widget = handle,
-        rect = {
-          widget.position.x + 4,
-          widget.position.y + 4,
-          circle_size - 8,
-          circle_size - 8,
-        },
-        color = BLACK,
-        uv = {0, 0, 1, 1},
-      },
-    )
-  }
-  if len(data.label) > 0 {
-    append(
-      &draw_list.commands,
-      DrawCommand {
-        type = .TEXT,
-        widget = handle,
-        rect = {
-          widget.position.x + circle_size + spacing,
-          widget.position.y,
-          widget.size.x - circle_size - spacing,
-          circle_size,
-        },
-        color = widget.fg_color,
-        text = data.label,
-        text_align = .LEFT,
-      },
-    )
-  }
+// Create relative size (percentage of parent)
+relative_size :: proc(width_pct, height_pct: f32) -> SizeMode {
+  return SizeRelativeParent{width_pct, height_pct}
+}
+
+// Create fill remaining size
+fill_size :: proc(
+  width_weight: f32 = 1.0,
+  height_weight: f32 = 1.0,
+) -> SizeMode {
+  return SizeFillRemaining{width_weight, height_weight}
+}
+
+// =============================================================================
+// Position Mode Helpers
+// =============================================================================
+
+// Create absolute position
+absolute_pos :: proc(x, y: f32) -> PositionMode {
+  return PosAbsolute{x, y}
+}
+
+// Create relative position (percentage of parent)
+relative_pos :: proc(x_pct, y_pct: f32) -> PositionMode {
+  return PosRelative{x_pct, y_pct}
+}
+
+// =============================================================================
+// Edge Insets Helpers
+// =============================================================================
+
+// Create uniform edge insets
+uniform_insets :: proc(value: f32) -> EdgeInsets {
+  return EdgeInsets{value, value, value, value}
+}
+
+// Create symmetric edge insets
+symmetric_insets :: proc(vertical, horizontal: f32) -> EdgeInsets {
+  return EdgeInsets{vertical, horizontal, vertical, horizontal}
+}
+
+// Create edge insets from individual values
+edge_insets :: proc(top, right, bottom, left: f32) -> EdgeInsets {
+  return EdgeInsets{top, right, bottom, left}
 }

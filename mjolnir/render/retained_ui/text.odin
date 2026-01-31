@@ -71,10 +71,6 @@ draw_text_internal :: proc(
   if len(text) == 0 {
     return
   }
-  if raw_data(text) == nil {
-    log.warnf("draw_text_internal: nil text pointer")
-    return
-  }
   fs.SetFont(&self.font_ctx, self.default_font)
   fs.SetSize(&self.font_ctx, size)
   fs.SetColor(&self.font_ctx, color)

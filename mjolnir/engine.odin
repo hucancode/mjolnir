@@ -665,11 +665,7 @@ create_light_camera :: proc(
 ensure_light_cameras :: proc(engine: ^Engine) {
   for light_handle in engine.rm.active_lights {
     light := cont.get(engine.rm.lights, light_handle) or_continue
-    // Skip if light doesn't cast shadow or already has a camera
-    if !light.cast_shadow || light.camera_handle.generation > 0 {
-      continue
-    }
-    // Create camera for this light
+    if !light.cast_shadow || light.camera_handle.generation > 0 do continue
     create_light_camera(engine, light_handle) or_continue
   }
 }
@@ -707,6 +703,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 render_and_present :: proc(self: ^Engine) -> vk.Result {
+  ensure_light_cameras(self)
   context.user_ptr = self
   gpu.acquire_next_image(
     self.gctx.device,
@@ -936,7 +933,6 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
       continue
     }
     self.last_frame_timestamp = time.now()
-    ensure_light_cameras(self)
     res := render_and_present(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       recreate_swapchain(self) or_continue
