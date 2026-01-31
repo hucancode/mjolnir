@@ -25,8 +25,7 @@ DynamicRigidBody :: struct {
   using base: RigidBody,
   mass:                 f32,
   inv_mass:             f32,
-  inertia:              matrix[3, 3]f32,
-  inv_inertia:          matrix[3, 3]f32,
+  inv_inertia:          [3]f32, // Diagonal inverse inertia for primitive shapes
   velocity:             [3]f32,
   angular_velocity:     [3]f32,
   force:                [3]f32,
@@ -75,8 +74,7 @@ rigid_body_init :: proc(
   self.trigger_only = trigger_only
   self.gravity_scale = 1.0
   self.drag_coefficient = 0.47
-  self.inertia = linalg.MATRIX3F32_IDENTITY
-  self.inv_inertia = linalg.MATRIX3F32_IDENTITY
+  self.inv_inertia = {1.0, 1.0, 1.0}
   self.is_sleeping = false
   self.sleep_timer = 0.0
 }
@@ -92,25 +90,22 @@ set_mass :: proc(self: ^DynamicRigidBody, mass: f32) {
   self.mass = mass
   self.inv_mass = 1.0 / mass
   if old_mass > 0.0 {
-    mass_ratio := mass / old_mass
-    self.inertia = mass_ratio * self.inertia
-    self.inv_inertia = linalg.matrix3_inverse(self.inertia)
+    mass_ratio := old_mass / mass
+    self.inv_inertia = mass_ratio * self.inv_inertia
   }
 }
 
 set_box_inertia :: proc(self: ^DynamicRigidBody, half_extents: [3]f32) {
   m := self.mass
   v := half_extents * half_extents
-  self.inertia = linalg.matrix3_scale(
-    [3]f32{v.y + v.z, v.x + v.z, v.x + v.y} * m / 3.0,
-  )
-  self.inv_inertia = linalg.matrix3_inverse(self.inertia)
+  inertia := [3]f32{v.y + v.z, v.x + v.z, v.x + v.y} * m / 3.0
+  self.inv_inertia = 1.0 / inertia
 }
 
 set_sphere_inertia :: proc(self: ^DynamicRigidBody, radius: f32) {
   i := (2.0 / 5.0) * self.mass * radius * radius
-  self.inertia = linalg.matrix3_scale([3]f32{i, i, i})
-  self.inv_inertia = linalg.matrix3_inverse(self.inertia)
+  inv_i := 1.0 / i
+  self.inv_inertia = {inv_i, inv_i, inv_i}
 }
 
 set_cylinder_inertia :: proc(self: ^DynamicRigidBody, radius: f32, height: f32) {
@@ -119,8 +114,7 @@ set_cylinder_inertia :: proc(self: ^DynamicRigidBody, radius: f32, height: f32) 
   h2 := height * height
   ix := (m / 12.0) * (3.0 * r2 + h2)
   iy := (m / 2.0) * r2
-  self.inertia = linalg.matrix3_scale([3]f32{ix, iy, ix})
-  self.inv_inertia = linalg.matrix3_inverse(self.inertia)
+  self.inv_inertia = [3]f32{1.0 / ix, 1.0 / iy, 1.0 / ix}
 }
 
 apply_force :: proc(self: ^DynamicRigidBody, force: [3]f32) {
