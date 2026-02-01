@@ -18,12 +18,16 @@ import mu "vendor:microui"
 
 demo_state: struct {
   // Pathfinding state
-  start_pos:            [3]f32,
   end_pos:              [3]f32,
   current_path:         [][3]f32,
   // Visual markers
-  start_marker_handle:  resources.NodeHandle,
   end_marker_handle:    resources.NodeHandle,
+  // Agent
+  agent_handle:         resources.NodeHandle,
+  agent_pos:            [3]f32,
+  agent_speed:          f32,
+  current_waypoint_idx: int,
+  path_completed:       bool,
   // Demo scene nodes
   ground_handle:        resources.NodeHandle,
   obstacle_handles:     [dynamic]resources.NodeHandle,
@@ -31,25 +35,14 @@ demo_state: struct {
   obj_mesh_handle:      resources.MeshHandle,
   obj_node_handle:      resources.NodeHandle,
   use_procedural:       bool,
-  // Camera control
-  camera_auto_rotate:   bool,
-  camera_distance:      f32,
-  camera_height:        f32,
-  camera_angle:         f32,
-  // Mouse picking
-  last_mouse_pos:       [2]f32,
-  mouse_move_threshold: f32,
   // Navigation mesh info
   navmesh_info:         string,
   // Debug draw handles
   navmesh_debug_handle: mjolnir.DebugObjectHandle,
 } = {
-  camera_distance      = 40,
-  camera_height        = 25,
-  camera_angle         = 0,
-  camera_auto_rotate   = false,
-  mouse_move_threshold = 5.0,
-  use_procedural       = true,
+  use_procedural = true,
+  agent_speed    = 5.0,
+  agent_pos      = {-20, 0, -20},
 }
 
 main :: proc() {
@@ -58,16 +51,15 @@ main :: proc() {
   engine.setup_proc = demo_setup
   engine.update_proc = demo_update
   engine.mouse_press_proc = demo_mouse_pressed
-  engine.mouse_move_proc = demo_mouse_moved
   mjolnir.run(engine, 800, 600, "Navigation Mesh")
 }
 
 demo_setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   log.info("Navigation mesh demo setup with world integration")
-  // engine.debug_ui_enabled = true
+  // Setup camera
   main_camera := get_main_camera(engine)
-  if main_camera != nil {
+  if camera := get_main_camera(engine); camera != nil {
     camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0})
     sync_active_camera_controller(engine)
   }
@@ -77,22 +69,16 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
     create_obj_visualization_mesh(engine, "assets/nav_test.obj")
   }
   setup_navigation_mesh(engine)
-  demo_state.start_pos = {-20, 0, -20}
+  demo_state.agent_pos = {-20, 0, -20}
   demo_state.end_pos = {20, 0, 20}
-  update_position_marker(
-    engine,
-    &demo_state.start_marker_handle,
-    demo_state.start_pos,
-    {0, 1, 0, 1},
-  )
   update_position_marker(
     engine,
     &demo_state.end_marker_handle,
     demo_state.end_pos,
     {1, 0, 0, 1},
   )
+  create_agent(engine)
   start_find_path(engine)
-  // engine.debug_ui_enabled = true
   log.info("Navigation mesh demo setup complete")
 }
 
@@ -115,8 +101,8 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
     demo_state.ground_handle = spawn(
       engine,
       attachment = world.MeshAttachment {
-        handle              = ground_mesh_handle,
-        material            = ground_material_handle,
+        handle = ground_mesh_handle,
+        material = ground_material_handle,
       },
     )
     // Tag as environment for baking
@@ -161,8 +147,8 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
         engine,
         position,
         world.MeshAttachment {
-          handle              = obstacle_mesh_handle,
-          material            = obstacle_material_handle,
+          handle = obstacle_mesh_handle,
+          material = obstacle_material_handle,
         },
       )
       // Tag obstacles as NAVMESH_OBSTACLE for baking
@@ -176,6 +162,34 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
     "Created demo scene with ground and %d obstacles",
     len(demo_state.obstacle_handles),
   )
+}
+
+create_agent :: proc(engine: ^mjolnir.Engine) {
+  using mjolnir
+  log.info("Creating agent cylinder")
+  // Create a cylinder geometry for the agent
+  agent_geom := geometry.make_cylinder(16, 2, 0.5, {0.2, 0.5, 1.0, 1.0})
+  agent_mesh_handle, agent_mesh_ok := create_mesh(engine, agent_geom)
+  agent_material_handle, agent_material_ok := create_material(
+    engine,
+    metallic_value = 0.3,
+    roughness_value = 0.6,
+    emissive_value = 0.3,
+  )
+  if agent_mesh_ok && agent_material_ok {
+    demo_state.agent_handle = spawn(
+      engine,
+      demo_state.agent_pos + [3]f32{0, 1, 0}, // Raise to half height
+      world.MeshAttachment {
+        handle = agent_mesh_handle,
+        material = agent_material_handle,
+      },
+    )
+    if agent_node, ok := get_node(engine, demo_state.agent_handle); ok {
+      agent_node.name = "agent"
+      log.info("Agent cylinder created successfully")
+    }
+  }
 }
 
 create_obj_visualization_mesh :: proc(
@@ -207,8 +221,8 @@ create_obj_visualization_mesh :: proc(
       engine,
       [3]f32{0, 0, 0},
       world.MeshAttachment {
-        handle              = demo_state.obj_mesh_handle,
-        material            = obj_material_handle,
+        handle = demo_state.obj_mesh_handle,
+        material = obj_material_handle,
       },
     )
   }
@@ -269,14 +283,14 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   log.infof(
     "Finding path from (%.2f, %.2f, %.2f) to (%.2f, %.2f, %.2f)",
-    demo_state.start_pos.x,
-    demo_state.start_pos.y,
-    demo_state.start_pos.z,
+    demo_state.agent_pos.x,
+    demo_state.agent_pos.y,
+    demo_state.agent_pos.z,
     demo_state.end_pos.x,
     demo_state.end_pos.y,
     demo_state.end_pos.z,
   )
-  path := find_path(engine, demo_state.start_pos, demo_state.end_pos, 256)
+  path := find_path(engine, demo_state.agent_pos, demo_state.end_pos, 256)
   if path != nil && len(path) > 0 {
     delete(demo_state.current_path)
     demo_state.current_path = path
@@ -291,6 +305,9 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
       )
     }
     visualize_path(engine)
+    // Start following the path
+    demo_state.current_waypoint_idx = 0
+    demo_state.path_completed = false
   }
 }
 
@@ -317,12 +334,18 @@ update_position_marker :: proc(
       engine,
       pos + [3]f32{0, 0.2, 0}, // Slightly above ground
       world.MeshAttachment {
-        handle              = marker_mesh_handle,
-        material            = marker_material_handle,
+        handle = marker_mesh_handle,
+        material = marker_material_handle,
       },
     )
   }
   if !spawn_ok do handle^ = {}
+}
+
+update_agent_position :: proc(engine: ^mjolnir.Engine) {
+  using mjolnir
+  pos := demo_state.agent_pos + [3]f32{0, 1, 0}
+  translate(engine, demo_state.agent_handle, pos.x, pos.y, pos.z)
 }
 
 visualize_path :: proc(engine: ^mjolnir.Engine) {
@@ -453,29 +476,6 @@ demo_mouse_pressed :: proc(
   }
   mouse_x, mouse_y := glfw.GetCursorPos(engine.window)
   switch button {
-  case glfw.MOUSE_BUTTON_LEFT:
-    pos, valid := find_navmesh_point_from_mouse(
-      engine,
-      f32(mouse_x),
-      f32(mouse_y),
-    )
-    if valid {
-      demo_state.start_pos = pos
-      log.infof(
-        "Start position set to: (%.2f, %.2f, %.2f)",
-        pos.x,
-        pos.y,
-        pos.z,
-      )
-      update_position_marker(
-        engine,
-        &demo_state.start_marker_handle,
-        pos,
-        {0, 1, 0, 1},
-      )
-    } else {
-      log.warn("No valid navmesh position found at click location")
-    }
   case glfw.MOUSE_BUTTON_RIGHT:
     pos, valid := find_navmesh_point_from_mouse(
       engine,
@@ -484,7 +484,7 @@ demo_mouse_pressed :: proc(
     )
     if valid {
       demo_state.end_pos = pos
-      log.infof("End position set to: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z)
+      log.infof("Destination set to: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z)
       update_position_marker(
         engine,
         &demo_state.end_marker_handle,
@@ -493,28 +493,39 @@ demo_mouse_pressed :: proc(
       )
       start_find_path(engine)
     } else {
-      log.warn("No valid navmesh position found at right click location")
+      log.warn("No valid navmesh position found at click location")
     }
-  case glfw.MOUSE_BUTTON_MIDDLE:
-    demo_state.camera_auto_rotate = !demo_state.camera_auto_rotate
   }
-}
-
-demo_mouse_moved :: proc(engine: ^mjolnir.Engine, pos, delta: [2]f64) {
-  demo_state.last_mouse_pos = [2]f32{f32(pos.x), f32(pos.y)}
 }
 
 demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir
-  main_camera := get_main_camera(engine)
-  if main_camera != nil {
-    if demo_state.camera_auto_rotate {
-      demo_state.camera_angle += delta_time * 0.2
+  // Update camera controller
+  update_camera_controller(engine, delta_time)
+  // Update agent movement along path
+  if len(demo_state.current_path) > 0 && !demo_state.path_completed {
+    if demo_state.current_waypoint_idx < len(demo_state.current_path) {
+      target_pos := demo_state.current_path[demo_state.current_waypoint_idx]
+      // Calculate direction to target
+      direction := target_pos - demo_state.agent_pos
+      distance := linalg.length(direction)
+      // Check if we reached the waypoint
+      if distance < 0.5 {
+        demo_state.current_waypoint_idx += 1
+        if demo_state.current_waypoint_idx >= len(demo_state.current_path) {
+          demo_state.path_completed = true
+          log.info("Agent reached destination!")
+        }
+      } else {
+        // Move toward the waypoint
+        direction = linalg.normalize(direction)
+        move_distance := demo_state.agent_speed * delta_time
+        if move_distance > distance {
+          move_distance = distance
+        }
+        demo_state.agent_pos += direction * move_distance
+        update_agent_position(engine)
+      }
     }
-    camera_x := math.cos(demo_state.camera_angle) * demo_state.camera_distance
-    camera_z := math.sin(demo_state.camera_angle) * demo_state.camera_distance
-    camera_pos := [3]f32{camera_x, demo_state.camera_height, camera_z}
-    camera_look_at(main_camera, camera_pos, {0, 0, 0})
-    sync_active_camera_controller(engine)
   }
 }
