@@ -319,8 +319,6 @@ collision_detection_task :: proc(task: thread.Task) {
       body_b := get(data.physics, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := &body_a.collider
-      collider_b := &body_b.collider
       bounding_spheres_intersect(
         body_a.cached_sphere_center,
         body_a.cached_sphere_radius,
@@ -328,30 +326,7 @@ collision_detection_task :: proc(task: thread.Task) {
         body_b.cached_sphere_radius,
       ) or_continue
       data.narrow_phase_tests += 1
-      is_primitive_shape := true
-      point: [3]f32
-      normal: [3]f32
-      penetration: f32
-      hit: bool
-      if is_primitive_shape {
-        point, normal, penetration, hit = test_collision(
-          collider_a,
-          body_a.position,
-          body_a.rotation,
-          collider_b,
-          body_b.position,
-          body_b.rotation,
-        )
-      } else {
-        point, normal, penetration, hit = test_collision_gjk(
-          collider_a,
-          collider_b,
-          body_a.position,
-          body_b.position,
-          body_a.rotation,
-          body_b.rotation,
-        )
-      }
+      point, normal, penetration, hit := test_collision(body_a, body_b)
       if !hit do continue
       if body_a.is_sleeping do wake_up(body_a)
       if body_b.is_sleeping do wake_up(body_b)
@@ -384,8 +359,6 @@ collision_detection_task :: proc(task: thread.Task) {
       handle_b := entry_b.handle
       body_b := get(data.physics, handle_b) or_continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := &body_a.collider
-      collider_b := &body_b.collider
       bounding_spheres_intersect(
         body_a.cached_sphere_center,
         body_a.cached_sphere_radius,
@@ -393,30 +366,7 @@ collision_detection_task :: proc(task: thread.Task) {
         body_b.cached_sphere_radius,
       ) or_continue
       data.narrow_phase_tests += 1
-      is_primitive_shape := true
-      point: [3]f32
-      normal: [3]f32
-      penetration: f32
-      hit: bool
-      if is_primitive_shape {
-        point, normal, penetration, hit = test_collision(
-          collider_a,
-          body_a.position,
-          body_a.rotation,
-          collider_b,
-          body_b.position,
-          body_b.rotation,
-        )
-      } else {
-        point, normal, penetration, hit = test_collision_gjk(
-          collider_a,
-          collider_b,
-          body_a.position,
-          body_b.position,
-          body_a.rotation,
-          body_b.rotation,
-        )
-      }
+      point, normal, penetration, hit := test_collision(body_a, body_b)
       if !hit do continue
       if body_a.is_sleeping do wake_up(body_a)
       contact := StaticContact {
@@ -484,8 +434,6 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
         body_b := get(data.physics, handle_b) or_continue
         if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
         if body_a.trigger_only || body_b.trigger_only do continue
-        collider_a := &body_a.collider
-        collider_b := &body_b.collider
         bounding_spheres_intersect(
           body_a.cached_sphere_center,
           body_a.cached_sphere_radius,
@@ -493,30 +441,7 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
           body_b.cached_sphere_radius,
         ) or_continue
         data.narrow_phase_tests += 1
-        is_primitive_shape := true
-        point: [3]f32
-        normal: [3]f32
-        penetration: f32
-        hit: bool
-        if is_primitive_shape {
-          point, normal, penetration, hit = test_collision(
-            collider_a,
-            body_a.position,
-            body_a.rotation,
-            collider_b,
-            body_b.position,
-            body_b.rotation,
-          )
-        } else {
-          point, normal, penetration, hit = test_collision_gjk(
-            collider_a,
-            collider_b,
-            body_a.position,
-            body_b.position,
-            body_a.rotation,
-            body_b.rotation,
-          )
-        }
+        point, normal, penetration, hit := test_collision(body_a, body_b)
         if !hit do continue
         if body_a.is_sleeping do wake_up(body_a)
         if body_b.is_sleeping do wake_up(body_b)
@@ -550,8 +475,6 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
         handle_b := entry_b.handle
         body_b := get(data.physics, handle_b) or_continue
         if body_a.trigger_only || body_b.trigger_only do continue
-        collider_a := &body_a.collider
-        collider_b := &body_b.collider
         bounding_spheres_intersect(
           body_a.cached_sphere_center,
           body_a.cached_sphere_radius,
@@ -559,30 +482,7 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
           body_b.cached_sphere_radius,
         ) or_continue
         data.narrow_phase_tests += 1
-        is_primitive_shape := true
-        point: [3]f32
-        normal: [3]f32
-        penetration: f32
-        hit: bool
-        if is_primitive_shape {
-          point, normal, penetration, hit = test_collision(
-            collider_a,
-            body_a.position,
-            body_a.rotation,
-            collider_b,
-            body_b.position,
-            body_b.rotation,
-          )
-        } else {
-          point, normal, penetration, hit = test_collision_gjk(
-            collider_a,
-            collider_b,
-            body_a.position,
-            body_b.position,
-            body_a.rotation,
-            body_b.rotation,
-          )
-        }
+        point, normal, penetration, hit := test_collision(body_a, body_b)
         if !hit do continue
         if body_a.is_sleeping do wake_up(body_a)
         contact := StaticContact {
@@ -744,16 +644,7 @@ retest_persistent_contacts :: proc(
       body_b.cached_sphere_radius,
     ) or_continue
     if body_a.trigger_only || body_b.trigger_only do continue
-    collider_a := &body_a.collider
-    collider_b := &body_b.collider
-    point, normal, penetration := test_collision(
-      collider_a,
-      body_a.position,
-      body_a.rotation,
-      collider_b,
-      body_b.position,
-      body_b.rotation,
-    ) or_continue
+    point, normal, penetration := test_collision(body_a, body_b) or_continue
     if body_a.is_sleeping do wake_up(body_a)
     if body_b.is_sleeping do wake_up(body_b)
     contact := DynamicContact {
@@ -786,16 +677,7 @@ retest_persistent_contacts :: proc(
       body_b.cached_sphere_radius,
     ) or_continue
     if body_a.trigger_only || body_b.trigger_only do continue
-    collider_a := &body_a.collider
-    collider_b := &body_b.collider
-    point, normal, penetration := test_collision(
-      collider_a,
-      body_a.position,
-      body_a.rotation,
-      collider_b,
-      body_b.position,
-      body_b.rotation,
-    ) or_continue
+    point, normal, penetration := test_collision(body_a, body_b) or_continue
     if body_a.is_sleeping do wake_up(body_a)
     contact := StaticContact {
       body_a      = prev_contact.body_a,
@@ -862,34 +744,9 @@ sequential_collision_detection :: proc(physics: ^World) {
       body_b := get(physics, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := &body_a.collider
-      collider_b := &body_b.collider
       if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
-      is_primitive_shape := true
-      point: [3]f32
-      normal: [3]f32
-      penetration: f32
-      hit: bool
       test_collision_start := time.now()
-      if is_primitive_shape {
-        point, normal, penetration, hit = test_collision(
-          collider_a,
-          body_a.position,
-          body_a.rotation,
-          collider_b,
-          body_b.position,
-          body_b.rotation,
-        )
-      } else {
-        point, normal, penetration, hit = test_collision_gjk(
-          collider_a,
-          collider_b,
-          body_a.position,
-          body_b.position,
-          body_a.rotation,
-          body_b.rotation,
-        )
-      }
+      point, normal, penetration, hit := test_collision(body_a, body_b)
       test_collision_time += time.since(test_collision_start)
       if !hit do continue
       if body_a.is_sleeping do wake_up(body_a)
@@ -923,34 +780,9 @@ sequential_collision_detection :: proc(physics: ^World) {
       if tested_pairs[pair_hash] do continue
       body_b := get(physics, handle_b) or_continue
       if body_a.trigger_only || body_b.trigger_only do continue
-      collider_a := &body_a.collider
-      collider_b := &body_b.collider
       if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
-      is_primitive_shape := true
-      point: [3]f32
-      normal: [3]f32
-      penetration: f32
-      hit: bool
       test_collision_start := time.now()
-      if is_primitive_shape {
-        point, normal, penetration, hit = test_collision(
-          collider_a,
-          body_a.position,
-          body_a.rotation,
-          collider_b,
-          body_b.position,
-          body_b.rotation,
-        )
-      } else {
-        point, normal, penetration, hit = test_collision_gjk(
-          collider_a,
-          collider_b,
-          body_a.position,
-          body_b.position,
-          body_a.rotation,
-          body_b.rotation,
-        )
-      }
+      point, normal, penetration, hit := test_collision(body_a, body_b)
       test_collision_time += time.since(test_collision_start)
       if !hit do continue
       if body_a.is_sleeping do wake_up(body_a)
