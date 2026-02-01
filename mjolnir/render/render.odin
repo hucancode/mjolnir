@@ -14,7 +14,6 @@ import "geometry"
 import "lighting"
 import "particles"
 import "post_process"
-import "retained_ui"
 import "transparency"
 import vk "vendor:vulkan"
 import "visibility"
@@ -29,7 +28,6 @@ Manager :: struct {
   debug_draw:   debug_draw.Renderer,
   post_process: post_process.Renderer,
   debug_ui:     debug_ui.Renderer,
-  retained_ui:  retained_ui.Manager,
   main_camera:  resources.CameraHandle,
   visibility:   visibility.VisibilitySystem,
 }
@@ -161,15 +159,6 @@ init :: proc(
     dpi_scale,
     rm,
   ) or_return
-  retained_ui.init(
-    &self.retained_ui,
-    gctx,
-    swapchain_format,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    dpi_scale,
-    rm,
-  ) or_return
   debug_draw.init(&self.debug_draw, gctx, rm) or_return
   return .SUCCESS
 }
@@ -179,7 +168,6 @@ shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  retained_ui.shutdown(&self.retained_ui, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
   debug_draw.shutdown(&self.debug_draw, gctx)
   post_process.shutdown(&self.post_process, gctx, rm)

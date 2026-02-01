@@ -21,7 +21,6 @@ import nav "navigation"
 import "render"
 import "render/debug_ui"
 import "render/particles"
-import "render/retained_ui"
 import "render/visibility"
 import "resources"
 import "vendor:glfw"
@@ -194,7 +193,6 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-      retained_ui.input_key(&engine.render.retained_ui, int(key), int(action))
       if engine.key_press_proc != nil {
         engine.key_press_proc(engine, int(key), int(action), int(mods))
       }
@@ -314,7 +312,6 @@ init :: proc(
       bytes, size := utf8.encode_rune(ch)
       text_str := string(bytes[:size])
       mu.input_text(&engine.render.debug_ui.ctx, text_str)
-      retained_ui.input_text(&engine.render.retained_ui, text_str)
     },
   )
   if self.camera_controller_enabled {
@@ -405,13 +402,6 @@ update :: proc(self: ^Engine) -> bool {
   params.forcefield_count = u32(
     min(len(self.rm.forcefields.entries), resources.MAX_FORCE_FIELDS),
   )
-  retained_ui.update_input(
-    &self.render.retained_ui,
-    f32(self.input.mouse_pos.x),
-    f32(self.input.mouse_pos.y),
-    self.input.mouse_holding[0],
-  )
-  retained_ui.update(&self.render.retained_ui, self.frame_index)
   if self.camera_controller_enabled && self.active_controller != nil {
     main_camera := get_main_camera(self)
     if main_camera != nil {
@@ -665,11 +655,7 @@ create_light_camera :: proc(
 ensure_light_cameras :: proc(engine: ^Engine) {
   for light_handle in engine.rm.active_lights {
     light := cont.get(engine.rm.lights, light_handle) or_continue
-    // Skip if light doesn't cast shadow or already has a camera
-    if !light.cast_shadow || light.camera_handle.generation > 0 {
-      continue
-    }
-    // Create camera for this light
+    if !light.cast_shadow || light.camera_handle.generation > 0 do continue
     create_light_camera(engine, light_handle) or_continue
   }
 }
@@ -707,6 +693,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 render_and_present :: proc(self: ^Engine) -> vk.Result {
+  ensure_light_cameras(self)
   context.user_ptr = self
   gpu.acquire_next_image(
     self.gctx.device,
@@ -851,20 +838,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     debug_ui.render(&self.render.debug_ui, command_buffer)
     debug_ui.end_pass(&self.render.debug_ui, command_buffer)
   }
-  retained_ui.begin_pass(
-    &self.render.retained_ui,
-    command_buffer,
-    self.swapchain.views[self.swapchain.image_index],
-    self.swapchain.extent,
-  )
-  retained_ui.render(
-    &self.render.retained_ui,
-    command_buffer,
-    self.frame_index,
-    &self.rm,
-    &self.gctx,
-  )
-  retained_ui.end_pass(command_buffer)
   // Transition swapchain image to present layout
   present_barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -936,7 +909,6 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
       continue
     }
     self.last_frame_timestamp = time.now()
-    ensure_light_cameras(self)
     res := render_and_present(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       recreate_swapchain(self) or_continue
