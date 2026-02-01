@@ -2,10 +2,16 @@
 
 Mjolnir is a minimalistic game engine. Implementation will prefer simplicity over fancy features. The goal is to create a simple set of tools to help people enjoy game programming
 
+* Disclaimer: this is a project under active development, it may contain bugs and surprise
+
 [![Logic Tests](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml)
 [![Graphics Tests](https://github.com/hucancode/mjolnir/actions/workflows/visual-test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/visual-test.yml)
 
 ![](./readme/lights.png)
+
+# Get Started
+To use Mjolnir in your odin code, run `make shader` to compile shaders to SPIR-V and then copy `mjolnir` directory to your project and start using mjolnir API.
+See `examples` for common use cases.
 
 # Notable features
 
@@ -18,28 +24,13 @@ Mjolnir is a minimalistic game engine. Implementation will prefer simplicity ove
 - Tween, Spline
 - Particles Simulation
 - Render to texture
-
-## WIP
-
 - Physics
 - Recast/Detour
-- UI, fonts
 - Inverse Kinematics
-- Procedural Animation (Tail, Leg)
-- Animation Layering
 - Level Manager
 
-# Build scripts
-```sh
-make build # build the project in release mode without running
-make run # build and run the project in release mode
-make debug # build and run the project in debug mode
-make test # run the tests
-make clean # clean the build artifacts
-make check # check for compiler errors without building
-make shader # build all shaders
-```
+And more in development
 
-# Disclaimer
-
-This is a project under active development ([roadmap](https://notes.hucanco.de/mjolnir)). It is not yet stable, may contain bugs or incomplete features
+- UI, fonts
+- Procedural Animation (Tail, Leg)
+- Animation Layering
