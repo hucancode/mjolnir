@@ -57,10 +57,9 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = demo_setup
   engine.update_proc = demo_update
-  engine.post_render_proc = demo_render2d
   engine.mouse_press_proc = demo_mouse_pressed
   engine.mouse_move_proc = demo_mouse_moved
-  mjolnir.run(engine, 800, 600, "Navigation Mesh Visual Test")
+  mjolnir.run(engine, 800, 600, "Navigation Mesh")
 }
 
 demo_setup :: proc(engine: ^mjolnir.Engine) {
@@ -444,41 +443,6 @@ find_navmesh_point_from_mouse :: proc(
   return {}, false
 }
 
-generate_random_path :: proc(engine: ^mjolnir.Engine) {
-  demo_state.start_pos = {
-    rand.float32_range(-15, 15),
-    0,
-    rand.float32_range(-15, 15),
-  }
-  demo_state.end_pos = {
-    rand.float32_range(-15, 15),
-    0,
-    rand.float32_range(-15, 15),
-  }
-  log.infof(
-    "Generated random path: start=(%.2f, %.2f, %.2f) end=(%.2f, %.2f, %.2f)",
-    demo_state.start_pos.x,
-    demo_state.start_pos.y,
-    demo_state.start_pos.z,
-    demo_state.end_pos.x,
-    demo_state.end_pos.y,
-    demo_state.end_pos.z,
-  )
-  update_position_marker(
-    engine,
-    &demo_state.start_marker_handle,
-    demo_state.start_pos,
-    {0, 1, 0, 1},
-  )
-  update_position_marker(
-    engine,
-    &demo_state.end_marker_handle,
-    demo_state.end_pos,
-    {1, 0, 0, 1},
-  )
-  start_find_path(engine)
-}
-
 demo_mouse_pressed :: proc(
   engine: ^mjolnir.Engine,
   button, action, mods: int,
@@ -552,75 +516,5 @@ demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     camera_pos := [3]f32{camera_x, demo_state.camera_height, camera_z}
     camera_look_at(main_camera, camera_pos, {0, 0, 0})
     sync_active_camera_controller(engine)
-  }
-}
-
-demo_render2d :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
-  ctx := &engine.render.debug_ui.ctx
-  if mu.window(ctx, "Navigation Mesh Demo", {40, 40, 380, 500}, {.NO_CLOSE}) {
-    mu.label(ctx, "World-Integrated Navigation System")
-    mu.label(ctx, "Status: Navigation mesh ready")
-    mu.label(ctx, "")
-    mu.label(ctx, "NavMesh Settings:")
-    mu.label(ctx, "")
-    mu.label(ctx, "Camera:")
-    mu.checkbox(ctx, "Auto Rotate", &demo_state.camera_auto_rotate)
-    mu.label(ctx, "")
-    mu.label(ctx, "Pathfinding:")
-    if len(demo_state.current_path) > 0 {
-      mu.label(
-        ctx,
-        fmt.tprintf("Path Points: %d", len(demo_state.current_path)),
-      )
-      mu.label(
-        ctx,
-        fmt.tprintf(
-          "Start: (%.1f, %.1f, %.1f)",
-          demo_state.start_pos.x,
-          demo_state.start_pos.y,
-          demo_state.start_pos.z,
-        ),
-      )
-      mu.label(
-        ctx,
-        fmt.tprintf(
-          "End: (%.1f, %.1f, %.1f)",
-          demo_state.end_pos.x,
-          demo_state.end_pos.y,
-          demo_state.end_pos.z,
-        ),
-      )
-    } else {
-      mu.label(ctx, "No path set")
-    }
-    if .SUBMIT in mu.button(ctx, "Generate Random Path (SPACE)") {
-      generate_random_path(engine)
-    }
-    if demo_state.navmesh_info != "" {
-      mu.label(ctx, "")
-      mu.label(ctx, "NavMesh Info:")
-      mu.label(ctx, demo_state.navmesh_info)
-    }
-    mu.label(ctx, "")
-    mu.label(ctx, "Scene Type:")
-    if demo_state.use_procedural {
-      mu.label(ctx, "Procedural geometry")
-    } else {
-      mu.label(ctx, "OBJ file loaded")
-    }
-    mu.label(ctx, "")
-    mu.label(ctx, "Controls:")
-    mu.label(ctx, "Left Click - Set Start")
-    mu.label(ctx, "Right Click - Set End & Find Path")
-    mu.label(ctx, "Middle Click - Toggle Auto Rotate")
-    mu.label(ctx, "C - Clear Path")
-    mu.label(ctx, "D - Cycle Color Modes")
-    mu.label(ctx, "M - Toggle Original Mesh")
-    mu.label(ctx, "P - Print NavMesh Info")
-    mu.label(ctx, "S - Save NavMesh")
-    mu.label(ctx, "L - Load NavMesh")
-    mu.label(ctx, "V - Toggle NavMesh")
-    mu.label(ctx, "SPACE - Random Path")
   }
 }
