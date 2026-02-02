@@ -28,9 +28,9 @@ See `examples` for common use cases.
 - Recast/Detour
 - Inverse Kinematics
 - Level Manager
+- HUD, text
 
 And more in development
 
-- UI, fonts
 - Procedural Animation (Tail, Leg)
 - Animation Layering
