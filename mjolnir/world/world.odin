@@ -124,6 +124,7 @@ World :: struct {
   animatable_nodes:        [dynamic]resources.NodeHandle,
   pending_node_deletions:  [dynamic]resources.NodeHandle,
   pending_deletions_mutex: sync.Mutex,
+  debug_draw_ik:           bool, // Enable debug visualization for IK chains and pole vectors
 }
 
 init_node :: proc(self: ^Node, name: string = "") {

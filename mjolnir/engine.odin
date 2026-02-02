@@ -515,6 +515,8 @@ update :: proc(self: ^Engine) -> bool {
     &self.rm,
     delta_time,
     self.frame_index,
+    &self.gctx,
+    &self.render.debug_draw,
   )
   world.update_sprite_animations(&self.rm, delta_time)
   self.last_update_timestamp = time.now()

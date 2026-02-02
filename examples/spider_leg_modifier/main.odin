@@ -23,6 +23,10 @@ main :: proc() {
 	engine := new(mjolnir.Engine)
 	engine.setup_proc = proc(engine: ^mjolnir.Engine) {
 		using mjolnir
+
+		// Enable IK debug drawing
+		engine.world.debug_draw_ik = true
+
 		if camera := get_main_camera(engine); camera != nil {
 			camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
 			sync_active_camera_controller(engine)
@@ -41,31 +45,79 @@ main :: proc() {
 
 		// Configure 6 legs with spider leg modifiers
 		// Each leg has 6 bones (bone_0 to bone_5)
+		// Time offsets arranged for diagonal alternating pairs:
+		// - Pair 1 (0.0): Front right + Back left
+		// - Pair 2 (0.33): Middle right + Middle left
+		// - Pair 3 (0.67): Front left + Back right
 		leg_configs := []struct {
 			root_name:      string,
+			tip_name:       string,
 			initial_offset: [3]f32,
 			time_offset:    f32,
 		}{
-			{"leg_front_r_0",  {5, 0, 3},   0.0},        // Front right
-			{"leg_middle_r_0", {0, 0, 5},   0.2},        // Middle right
-			{"leg_back_r_0",   {-5, 0, 3},  0.4},        // Back right
-			{"leg_front_l_0",  {5, 0, -3},  0.5},        // Front left
-			{"leg_middle_l_0", {0, 0, -5},  0.7},        // Middle left
-			{"leg_back_l_0",   {-5, 0, -3}, 0.9},        // Back left
+			{"leg_front_r_0",  "leg_front_r_5",  {0, 0, 0},  0.0},   // Front right
+			{"leg_middle_r_0", "leg_middle_r_5", {0, 0, 0},  0.33},  // Middle right
+			{"leg_back_r_0",   "leg_back_r_5",   {0, 0, 0},  0.67},  // Back right
+			{"leg_front_l_0",  "leg_front_l_5",  {0, 0, 0},  0.67},  // Front left
+			{"leg_middle_l_0", "leg_middle_l_5", {0, 0, 0},  0.33},  // Middle left
+			{"leg_back_l_0",   "leg_back_l_5",   {0, 0, 0},  0.0},   // Back left
 		}
 
 		lift_frequency :: 0.8
 
-		// Find the skinned mesh node and add spider leg modifiers
+		// Find the skinned mesh node and calculate initial offsets from rest pose
 		for handle in spider_roots {
 			root_node := get_node(engine, handle) or_continue
 
 			// Find the child with the mesh attachment
 			for child in root_node.children {
 				child_node := get_node(engine, child) or_continue
-				_, has_mesh := &child_node.attachment.(world.MeshAttachment)
+				mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
 				if !has_mesh {
 					continue
+				}
+
+				// Get the mesh and skin data to calculate rest pose positions
+				mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+				skin, has_skin := mesh.skinning.?
+				if !has_skin {
+					continue
+				}
+
+				// Calculate initial offsets from rest pose
+				for i in 0..<6 {
+					root_bone_idx := -1
+					tip_bone_idx := -1
+
+					// Find root and tip bones for this leg
+					for bone, idx in skin.bones {
+						if bone.name == leg_configs[i].root_name {
+							root_bone_idx = idx
+						}
+						if bone.name == leg_configs[i].tip_name {
+							tip_bone_idx = idx
+						}
+					}
+
+					if root_bone_idx >= 0 && tip_bone_idx >= 0 {
+						// Get bind matrices (rest pose)
+						root_bind := linalg.matrix4_inverse(skin.bones[root_bone_idx].inverse_bind_matrix)
+						tip_bind := linalg.matrix4_inverse(skin.bones[tip_bone_idx].inverse_bind_matrix)
+
+						// Extract positions
+						root_pos := root_bind[3].xyz
+						tip_pos := tip_bind[3].xyz
+
+						// Calculate offset from root to tip in local space
+						offset := tip_pos - root_pos
+						leg_configs[i].initial_offset = offset
+
+						log.infof("Leg %s: calculated offset = %v (root at %v, tip at %v)",
+							leg_configs[i].root_name, offset, root_pos, tip_pos)
+					} else {
+						log.warnf("Could not find bones for leg %s (root_idx=%d, tip_idx=%d)",
+							leg_configs[i].root_name, root_bone_idx, tip_bone_idx)
+					}
 				}
 
 				// Build arrays for all 6 leg roots and configurations

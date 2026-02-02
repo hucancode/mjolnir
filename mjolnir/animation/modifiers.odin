@@ -24,10 +24,19 @@ PathModifier :: struct {
   loop:   bool,
 }
 
+// Debug info for one IK chain
+IKDebugInfo :: struct {
+  positions:      [][3]f32, // Joint positions in skeleton space
+  target:         [3]f32,   // Target position in skeleton space
+  pole:           [3]f32,   // Pole vector position in skeleton space
+  has_pole:       bool,     // Whether pole vector is active
+}
+
 SpiderLegModifier :: struct {
   legs:          []SpiderLeg,
   chain_starts:  []u32,
   chain_lengths: []u32,
+  debug_info:    []IKDebugInfo, // Debug info for each leg (allocated if debug enabled)
 }
 
 // Simple modifier to directly set a single bone's rotation
@@ -310,7 +319,15 @@ spider_leg_modifier_update :: proc(
   layer_weight: f32,
   bone_lengths: []f32,
   node_world_matrix: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY,
+  debug_enabled: bool = false,
 ) {
+  // Allocate debug info if needed
+  if debug_enabled && len(params.debug_info) != len(params.legs) {
+    params.debug_info = make([]IKDebugInfo, len(params.legs))
+    for &info in params.debug_info {
+      info.positions = make([][3]f32, 0)
+    }
+  }
   for &leg, leg_idx in params.legs {
     chain_start := params.chain_starts[leg_idx]
     chain_len := params.chain_lengths[leg_idx]
@@ -373,6 +390,27 @@ spider_leg_modifier_update :: proc(
       enabled         = true,
     }
     fabrik_solve(world_transforms, ik_target)
+
+    // Store debug info if enabled
+    if debug_enabled && leg_idx < len(params.debug_info) {
+      info := &params.debug_info[leg_idx]
+
+      // Resize positions array if needed
+      if len(info.positions) != int(chain_len) {
+        delete(info.positions)
+        info.positions = make([][3]f32, chain_len)
+      }
+
+      // Copy joint positions
+      for i in 0 ..< int(chain_len) {
+        bone_idx := leg_bone_indices[i]
+        info.positions[i] = world_transforms[bone_idx].world_position
+      }
+
+      info.target = feet_position_skeleton
+      info.pole = pole
+      info.has_pole = true
+    }
     for i in 0 ..< int(chain_len) {
       bone_idx := leg_bone_indices[i]
       ik_pos := world_transforms[bone_idx].world_position
