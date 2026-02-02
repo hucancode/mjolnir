@@ -7,6 +7,7 @@ import "core:math"
 g_button: mjolnir.Quad2DHandle
 g_label: mjolnir.Text2DHandle
 g_star: mjolnir.Mesh2DHandle
+g_image_quad: mjolnir.Quad2DHandle
 
 // Helper function to create a 5-pointed star shape
 create_star_mesh :: proc(
@@ -115,6 +116,25 @@ main :: proc() {
     )
     log.infof("Star mesh created: handle=%v, ok=%v", g_star, star_ok)
 
+    // Load image texture for display
+    star_texture, texture_ok := mjolnir.create_texture_from_path(
+      engine,
+      "assets/gold-star.png",
+    )
+    log.infof("Star texture loaded: handle=%v, ok=%v", star_texture, texture_ok)
+
+    // Create a textured quad to display the image
+    if texture_ok {
+      g_image_quad, image_quad_ok := mjolnir.ui_create_quad2d(
+        engine,
+        position = {350, 300},
+        size = {128, 128},
+        texture = star_texture,
+        z_order = 1,
+      )
+      log.infof("Image quad created: handle=%v, ok=%v", g_image_quad, image_quad_ok)
+    }
+
     // Create a simple colored quad as a button
     g_button, button_ok := mjolnir.ui_create_quad2d(
       engine,
@@ -187,10 +207,21 @@ main :: proc() {
       z_order = 1,
     )
     log.infof("Text label created: handle=%v, ok=%v", g_label, label_ok)
+
+    // Add label for the textured quad
+    image_label, image_label_ok := mjolnir.ui_create_text2d(
+      engine,
+      position = {300, 440},
+      text = "Image display using Quad2D with texture",
+      font_size = 20,
+      color = {255, 255, 255, 255},
+      z_order = 1,
+    )
+    log.infof("Image label created: handle=%v, ok=%v", image_label, image_label_ok)
     mjolnir.spawn_cube(engine, .BLUE)
     if camera := mjolnir.get_main_camera(engine); camera != nil {
       mjolnir.camera_look_at(camera, {3, 2, 3}, {0, 0, 0})
     }
   }
-  mjolnir.run(engine, 800, 650, "UI Demo - Text Alignment")
+  mjolnir.run(engine, 800, 700, "UI")
 }
