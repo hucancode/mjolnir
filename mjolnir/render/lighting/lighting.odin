@@ -182,7 +182,7 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   }
-  self.environment_map = resources.create_texture_from_path(
+  env_map, env_result := resources.create_texture_from_path(
     gctx,
     rm,
     "assets/Cannon_Exterior.hdr",
@@ -190,21 +190,31 @@ init :: proc(
     true,
     {.SAMPLED},
     true,
-  ) or_return
+  )
+  if env_result == .SUCCESS {
+    self.environment_map = env_map
+  } else {
+    log.warn("HDR environment map not found, using default lighting")
+    self.environment_map = {} // Empty handle - renderer should handle gracefully
+  }
   defer if ret != .SUCCESS {
     if item, freed := cont.free(&rm.images_2d, self.environment_map); freed {
       gpu.image_destroy(gctx.device, item)
     }
   }
   environment_map := cont.get(rm.images_2d, self.environment_map)
-  self.environment_max_lod =
-    f32(
-      gpu.calculate_mip_levels(
-        environment_map.spec.width,
-        environment_map.spec.height,
-      ),
-    ) -
-    1.0
+  if environment_map != nil {
+    self.environment_max_lod =
+      f32(
+        gpu.calculate_mip_levels(
+          environment_map.spec.width,
+          environment_map.spec.height,
+        ),
+      ) -
+      1.0
+  } else {
+    self.environment_max_lod = 0.0
+  }
   brdf_handle := resources.create_texture_from_data(
     gctx,
     rm,

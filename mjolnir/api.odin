@@ -16,6 +16,7 @@ import "render"
 import "render/debug_draw"
 import "render/post_process"
 import "resources"
+import "ui"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 import "world"
@@ -45,6 +46,24 @@ SpriteHandle :: resources.SpriteHandle
 LightHandle :: resources.LightHandle
 DebugObjectHandle :: debug_draw.DebugObjectHandle
 DebugRenderStyle :: debug_draw.RenderStyle
+
+// UI types
+UIWidgetHandle :: ui.UIWidgetHandle
+Mesh2DHandle :: ui.Mesh2DHandle
+Quad2DHandle :: ui.Quad2DHandle
+Text2DHandle :: ui.Text2DHandle
+BoxHandle :: ui.BoxHandle
+UIWidget :: ui.Widget
+Mesh2D :: ui.Mesh2D
+Quad2D :: ui.Quad2D
+Text2D :: ui.Text2D
+Box :: ui.Box
+Vertex2D :: ui.Vertex2D
+HorizontalAlign :: ui.HorizontalAlign
+VerticalAlign :: ui.VerticalAlign
+MouseEvent :: ui.MouseEvent
+KeyEvent :: ui.KeyEvent
+EventHandlers :: ui.EventHandlers
 
 // NavMeshQuality controls navmesh generation precision vs performance tradeoff
 NavMeshQuality :: enum {
@@ -1753,4 +1772,118 @@ debug_draw_spawn_line_strip_temporary :: proc(
 
 debug_draw_destroy :: proc(engine: ^Engine, handle: DebugObjectHandle) {
   debug_draw.destroy(&engine.render.debug_draw, handle, &engine.rm)
+}
+
+// ============================================================================
+// UI System API
+// ============================================================================
+
+ui_create_mesh2d :: proc(
+  engine: ^Engine,
+  position: [2]f32,
+  vertices: []ui.Vertex2D,
+  indices: []u32,
+  texture: Image2DHandle = {},
+  z_order: i32 = 0,
+) -> (
+  Mesh2DHandle,
+  bool,
+) #optional_ok {
+  return ui.create_mesh2d(&engine.render.ui_system, position, vertices, indices, texture, z_order)
+}
+
+ui_create_quad2d :: proc(
+  engine: ^Engine,
+  position: [2]f32,
+  size: [2]f32,
+  texture: Image2DHandle = {},
+  color: [4]u8 = {255, 255, 255, 255},
+  z_order: i32 = 0,
+) -> (
+  Quad2DHandle,
+  bool,
+) #optional_ok {
+  return ui.create_quad2d(&engine.render.ui_system, position, size, texture, color, z_order)
+}
+
+ui_create_text2d :: proc(
+  engine: ^Engine,
+  position: [2]f32,
+  text: string,
+  font_size: f32,
+  color: [4]u8 = {255, 255, 255, 255},
+  z_order: i32 = 0,
+  bounds: [2]f32 = {0, 0},
+  h_align: HorizontalAlign = .Left,
+  v_align: VerticalAlign = .Top,
+) -> (
+  Text2DHandle,
+  bool,
+) #optional_ok {
+  return ui.create_text2d(&engine.render.ui_system, &engine.render.ui_renderer, position, text, font_size, color, z_order, bounds, h_align, v_align)
+}
+
+ui_create_box :: proc(
+  engine: ^Engine,
+  position: [2]f32,
+  size: [2]f32,
+  background_color: [4]u8 = {0, 0, 0, 0},
+  z_order: i32 = 0,
+) -> (
+  BoxHandle,
+  bool,
+) #optional_ok {
+  return ui.create_box(&engine.render.ui_system, position, size, background_color, z_order)
+}
+
+ui_get_widget :: proc(engine: ^Engine, handle: UIWidgetHandle) -> ^UIWidget {
+  return ui.get_widget(&engine.render.ui_system, handle)
+}
+
+ui_get_mesh2d :: proc(engine: ^Engine, handle: Mesh2DHandle) -> ^Mesh2D {
+  return ui.get_mesh2d(&engine.render.ui_system, handle)
+}
+
+ui_get_quad2d :: proc(engine: ^Engine, handle: Quad2DHandle) -> ^Quad2D {
+  return ui.get_quad2d(&engine.render.ui_system, handle)
+}
+
+ui_get_text2d :: proc(engine: ^Engine, handle: Text2DHandle) -> ^Text2D {
+  return ui.get_text2d(&engine.render.ui_system, handle)
+}
+
+ui_get_box :: proc(engine: ^Engine, handle: BoxHandle) -> ^Box {
+  return ui.get_box(&engine.render.ui_system, handle)
+}
+
+ui_set_position :: proc(widget: ^UIWidget, position: [2]f32) {
+  ui.set_position(widget, position)
+}
+
+ui_set_z_order :: proc(widget: ^UIWidget, z: i32) {
+  ui.set_z_order(widget, z)
+}
+
+ui_set_visible :: proc(widget: ^UIWidget, visible: bool) {
+  ui.set_visible(widget, visible)
+}
+
+ui_set_event_handler :: proc(widget: ^UIWidget, handlers: EventHandlers) {
+  ui.set_event_handler(widget, handlers)
+}
+
+ui_set_user_data :: proc(widget: ^UIWidget, data: rawptr) {
+  ui.set_user_data(widget, data)
+}
+
+ui_destroy_widget :: proc(engine: ^Engine, handle: UIWidgetHandle) {
+  ui.destroy_widget(&engine.render.ui_system, handle)
+}
+
+ui_box_add_child :: proc(engine: ^Engine, box_handle: BoxHandle, child_handle: UIWidgetHandle) {
+  ui.box_add_child(&engine.render.ui_system, box_handle, child_handle)
+}
+
+ui_set_text :: proc(engine: ^Engine, handle: Text2DHandle, text: string) {
+  ui.set_text(&engine.render.ui_system, &engine.render.ui_renderer, handle, text)
 }

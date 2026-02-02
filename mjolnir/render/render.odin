@@ -4,6 +4,7 @@ import alg "../algebra"
 import cont "../containers"
 import "../gpu"
 import "../resources"
+import "../ui"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -28,6 +29,8 @@ Manager :: struct {
   debug_draw:   debug_draw.Renderer,
   post_process: post_process.Renderer,
   debug_ui:     debug_ui.Renderer,
+  ui_system:    ui.System,
+  ui_renderer:  ui.Renderer,
   main_camera:  resources.CameraHandle,
   visibility:   visibility.VisibilitySystem,
 }
@@ -160,6 +163,16 @@ init :: proc(
     rm,
   ) or_return
   debug_draw.init(&self.debug_draw, gctx, rm) or_return
+  ui.init_ui_system(&self.ui_system)
+  ui.init_renderer(
+    &self.ui_renderer,
+    &self.ui_system,
+    gctx,
+    rm,
+    swapchain_extent.width,
+    swapchain_extent.height,
+    swapchain_format,
+  ) or_return
   return .SUCCESS
 }
 
@@ -168,6 +181,8 @@ shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
+  ui.shutdown(&self.ui_renderer, gctx, rm)
+  ui.shutdown_ui_system(&self.ui_system)
   debug_ui.shutdown(&self.debug_ui, gctx)
   debug_draw.shutdown(&self.debug_draw, gctx)
   post_process.shutdown(&self.post_process, gctx, rm)
@@ -464,4 +479,78 @@ record_post_process_pass :: proc(
   )
   post_process.end_pass(&self.post_process, command_buffer)
   return .SUCCESS
+}
+
+record_ui_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  gctx: ^gpu.GPUContext,
+  rm: ^resources.Manager,
+  swapchain_view: vk.ImageView,
+  swapchain_extent: vk.Extent2D,
+  command_buffer: vk.CommandBuffer,
+) {
+  // UI rendering pass - renders on top of post-processed image
+  rendering_attachment_info := vk.RenderingAttachmentInfo {
+    sType = .RENDERING_ATTACHMENT_INFO,
+    imageView = swapchain_view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .LOAD,
+    storeOp = .STORE,
+  }
+
+  rendering_info := vk.RenderingInfo {
+    sType = .RENDERING_INFO,
+    renderArea = {extent = swapchain_extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &rendering_attachment_info,
+  }
+
+  vk.CmdBeginRendering(command_buffer, &rendering_info)
+
+  // Set viewport and scissor
+  viewport := vk.Viewport {
+    x = 0,
+    y = f32(swapchain_extent.height),
+    width = f32(swapchain_extent.width),
+    height = -f32(swapchain_extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D {
+    offset = {0, 0},
+    extent = swapchain_extent,
+  }
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+
+  // Bind pipeline and descriptor sets
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.ui_renderer.pipeline)
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    self.ui_renderer.pipeline_layout,
+    0,
+    1,
+    &self.ui_renderer.projection_descriptor_set,
+    0,
+    nil,
+  )
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    self.ui_renderer.pipeline_layout,
+    1,
+    1,
+    &rm.textures_descriptor_set,
+    0,
+    nil,
+  )
+
+  // Render UI
+  ui.compute_layout_all(&self.ui_system)
+  ui.render(&self.ui_renderer, &self.ui_system, rm, gctx, command_buffer, swapchain_extent.width, swapchain_extent.height, frame_index)
+
+  vk.CmdEndRendering(command_buffer)
 }

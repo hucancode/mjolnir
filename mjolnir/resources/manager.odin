@@ -21,6 +21,7 @@ MAX_FORCE_FIELDS :: 32
 MAX_LIGHTS :: 256
 MAX_SHADOW_MAPS :: 16
 SHADOW_MAP_SIZE :: 512
+MAX_UI_WIDGETS :: 4096
 BINDLESS_VERTEX_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
 BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024 // 64MB
 BINDLESS_SKINNING_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
@@ -143,6 +144,7 @@ Manager :: struct {
   current_frame_index:       u32,
   animatable_sprites:        [dynamic]SpriteHandle,
   active_lights:             [dynamic]LightHandle,
+  ui_widgets:                rawptr, // Pool(ui.Widget), set by ui module to avoid circular dependency
 }
 
 init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {

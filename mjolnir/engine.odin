@@ -23,6 +23,7 @@ import "render/debug_ui"
 import "render/particles"
 import "render/visibility"
 import "resources"
+import "ui"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -102,6 +103,7 @@ Engine :: struct {
   active_controller:         ^CameraController,
   camera_controller_enabled: bool,
   level_manager:             level_manager.Level_Manager,
+  ui_hovered_widget:         Maybe(ui.UIWidgetHandle),
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -368,6 +370,82 @@ update_input :: proc(self: ^Engine) -> bool {
   //   self.input.key_holding[k] = is_pressed && self.input.keys[k]
   //   self.input.keys[k] = is_pressed
   // }
+
+  // UI event handling
+  {
+    mouse_pos := [2]f32{f32(self.input.mouse_pos.x), f32(self.input.mouse_pos.y)}
+    current_widget := ui.pick_widget(&self.render.ui_system, mouse_pos)
+
+    // Handle hover in/out events
+    if old_handle, had_old := self.ui_hovered_widget.?; had_old {
+      if new_handle, has_new := current_widget.?; has_new {
+        // Check if it's a different widget
+        old_raw := transmute(cont.Handle)old_handle
+        new_raw := transmute(cont.Handle)new_handle
+        if old_raw.index != new_raw.index || old_raw.generation != new_raw.generation {
+          // Hover out from old widget
+          event := ui.MouseEvent {
+            type = .HOVER_OUT,
+            position = mouse_pos,
+            button = 0,
+            widget = old_handle,
+          }
+          ui.dispatch_mouse_event(&self.render.ui_system, old_handle, event, true)
+
+          // Hover in to new widget
+          event.type = .HOVER_IN
+          event.widget = new_handle
+          ui.dispatch_mouse_event(&self.render.ui_system, new_handle, event, true)
+        }
+      } else {
+        // No widget under cursor, hover out from old
+        event := ui.MouseEvent {
+          type = .HOVER_OUT,
+          position = mouse_pos,
+          button = 0,
+          widget = old_handle,
+        }
+        ui.dispatch_mouse_event(&self.render.ui_system, old_handle, event, true)
+      }
+    } else if new_handle, has_new := current_widget.?; has_new {
+      // Hover in to new widget (no previous widget)
+      event := ui.MouseEvent {
+        type = .HOVER_IN,
+        position = mouse_pos,
+        button = 0,
+        widget = new_handle,
+      }
+      ui.dispatch_mouse_event(&self.render.ui_system, new_handle, event, true)
+    }
+
+    // Handle click events
+    if widget_handle, has_widget := current_widget.?; has_widget {
+      for i in 0 ..< len(self.input.mouse_buttons) {
+        if self.input.mouse_buttons[i] && !self.input.mouse_holding[i] {
+          // Mouse down
+          event := ui.MouseEvent {
+            type = .CLICK_DOWN,
+            position = mouse_pos,
+            button = i32(i),
+            widget = widget_handle,
+          }
+          ui.dispatch_mouse_event(&self.render.ui_system, widget_handle, event, true)
+        } else if !self.input.mouse_buttons[i] && self.input.mouse_holding[i] {
+          // Mouse up
+          event := ui.MouseEvent {
+            type = .CLICK_UP,
+            position = mouse_pos,
+            button = i32(i),
+            widget = widget_handle,
+          }
+          ui.dispatch_mouse_event(&self.render.ui_system, widget_handle, event, true)
+        }
+      }
+    }
+
+    self.ui_hovered_widget = current_widget
+  }
+
   if self.mouse_move_proc != nil {
     self.mouse_move_proc(self, self.input.mouse_pos, delta)
   }
@@ -783,6 +861,15 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.extent,
     self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
+    command_buffer,
+  )
+  render.record_ui_pass(
+    &self.render,
+    self.frame_index,
+    &self.gctx,
+    &self.rm,
+    self.swapchain.views[self.swapchain.image_index],
+    self.swapchain.extent,
     command_buffer,
   )
   compute_cmd_buffer: vk.CommandBuffer
