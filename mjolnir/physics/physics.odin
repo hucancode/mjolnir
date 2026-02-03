@@ -23,6 +23,7 @@ SLEEP_ANGULAR_THRESHOLD_SQ :: SLEEP_ANGULAR_THRESHOLD * SLEEP_ANGULAR_THRESHOLD
 SLEEP_TIME_THRESHOLD :: 0.5
 ENABLE_VERBOSE_LOG :: false
 BVH_REBUILD_THRESHOLD :: #config(PHYSICS_BVH_REBUILD_THRESHOLD, 512) // Rebuild BVH when killed bodies exceed this
+BROADPHASE_BVH_SELF_TRAVERSAL :: #config(PHYSICS_BROADPHASE_BVH_SELF_TRAVERSAL, true)
 
 DynamicRigidBodyHandle :: distinct cont.Handle
 StaticRigidBodyHandle :: distinct cont.Handle
@@ -582,9 +583,17 @@ step :: proc(self: ^World, dt: f32) {
     refit_time += time.since(refit_start)
     broadphase_start := time.now()
     if self.enable_parallel {
-      parallel_collision_detection(self, self.thread_count)
+      when BROADPHASE_BVH_SELF_TRAVERSAL {
+        parallel_collision_detection_traversal(self, self.thread_count)
+      } else {
+        parallel_collision_detection(self, self.thread_count)
+      }
     } else {
-      sequential_collision_detection(self)
+      when BROADPHASE_BVH_SELF_TRAVERSAL {
+        sequential_collision_detection_traversal(self)
+      } else {
+        sequential_collision_detection(self)
+      }
     }
     collision_time := time.since(broadphase_start)
     broadphase_time += collision_time

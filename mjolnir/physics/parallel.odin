@@ -817,6 +817,161 @@ sequential_collision_detection :: proc(physics: ^World) {
   )
 }
 
+// Sequential collision detection using tree traversal (O(N) instead of O(N log N))
+sequential_collision_detection_traversal :: proc(physics: ^World) {
+  start_time := time.now()
+
+  // Find all dynamic-dynamic overlapping pairs using tree traversal
+  traversal_start := time.now()
+  dynamic_pairs := make(
+    [dynamic]BVHOverlapPair(DynamicBroadPhaseEntry),
+    context.temp_allocator,
+  )
+  bvh_find_all_overlaps_fast(&physics.dynamic_bvh, &dynamic_pairs)
+
+  // Find all dynamic-static overlapping pairs
+  static_pairs := make(
+    [dynamic]BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
+    context.temp_allocator,
+  )
+  bvh_find_cross_overlaps_fast(&physics.dynamic_bvh, &physics.static_bvh, &static_pairs)
+
+  traversal_time := time.since(traversal_start)
+
+  when ENABLE_VERBOSE_LOG {
+    log.infof(
+      "Tree traversal found %d dynamic pairs + %d static pairs in %v",
+      len(dynamic_pairs),
+      len(static_pairs),
+      traversal_time,
+    )
+  }
+
+  // Process dynamic-dynamic pairs
+  narrow_phase_start := time.now()
+  narrow_phase_tests := 0
+
+  for pair in dynamic_pairs {
+    handle_a := pair.a.handle
+    handle_b := pair.b.handle
+
+    body_a := get(physics, handle_a) or_continue
+    body_b := get(physics, handle_b) or_continue
+
+    // Skip killed or sleeping bodies
+    if body_a.is_killed || body_b.is_killed do continue
+    if body_a.is_sleeping && body_b.is_sleeping do continue
+
+    // Skip triggers
+    if body_a.trigger_only || body_b.trigger_only do continue
+
+    // Bounding sphere test
+    if !bounding_spheres_intersect(
+      body_a.cached_sphere_center,
+      body_a.cached_sphere_radius,
+      body_b.cached_sphere_center,
+      body_b.cached_sphere_radius,
+    ) {
+      continue
+    }
+
+    // Narrow phase collision test
+    narrow_phase_tests += 1
+    point, normal, penetration, hit := test_collision(body_a, body_b)
+    if !hit do continue
+
+    // Wake up sleeping bodies
+    if body_a.is_sleeping do wake_up(body_a)
+    if body_b.is_sleeping do wake_up(body_b)
+
+    contact := DynamicContact {
+      body_a      = handle_a,
+      body_b      = handle_b,
+      point       = point,
+      normal      = normal,
+      penetration = penetration,
+      restitution = (body_a.restitution + body_b.restitution) * 0.5,
+      friction    = (body_a.friction + body_b.friction) * 0.5,
+    }
+
+    // Warm starting
+    hash := collision_pair_hash(handle_a, handle_b)
+    if prev_contact, found := physics.prev_dynamic_contacts[hash]; found {
+      contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
+      contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
+    }
+
+    append(&physics.dynamic_contacts, contact)
+  }
+
+  // Process dynamic-static pairs
+  for pair in static_pairs {
+    handle_a := pair.a.handle
+    handle_b := pair.b.handle
+
+    body_a := get(physics, handle_a) or_continue
+    body_b := get(physics, handle_b) or_continue
+
+    // Skip killed or sleeping dynamic bodies
+    if body_a.is_killed || body_a.is_sleeping do continue
+
+    // Skip triggers
+    if body_a.trigger_only || body_b.trigger_only do continue
+
+    // Bounding sphere test
+    if !bounding_spheres_intersect(
+      body_a.cached_sphere_center,
+      body_a.cached_sphere_radius,
+      body_b.cached_sphere_center,
+      body_b.cached_sphere_radius,
+    ) {
+      continue
+    }
+
+    // Narrow phase collision test
+    narrow_phase_tests += 1
+    point, normal, penetration, hit := test_collision(body_a, body_b)
+    if !hit do continue
+
+    // Wake up sleeping body
+    if body_a.is_sleeping do wake_up(body_a)
+
+    contact := StaticContact {
+      body_a      = handle_a,
+      body_b      = handle_b,
+      point       = point,
+      normal      = normal,
+      penetration = penetration,
+      restitution = (body_a.restitution + body_b.restitution) * 0.5,
+      friction    = (body_a.friction + body_b.friction) * 0.5,
+    }
+
+    // Warm starting
+    hash := collision_pair_hash(handle_a, handle_b)
+    if prev_contact, found := physics.prev_static_contacts[hash]; found {
+      contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
+      contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
+    }
+
+    append(&physics.static_contacts, contact)
+  }
+
+  narrow_phase_time := time.since(narrow_phase_start)
+  total_time := time.since(start_time)
+
+  when ENABLE_VERBOSE_LOG {
+    log.infof(
+      "Sequential Traversal: %d pairs, %d narrow tests, %d contacts in %v (traversal: %v, narrow: %v)",
+      len(dynamic_pairs) + len(static_pairs),
+      narrow_phase_tests,
+      len(physics.dynamic_contacts) + len(physics.static_contacts),
+      total_time,
+      traversal_time,
+      narrow_phase_time,
+    )
+  }
+}
+
 ccd_task_dynamic :: proc(task: thread.Task) {
   data := (^CCD_Task_Data_Dynamic)(task.data)
   // Pre-allocate with capacity to avoid reallocations
@@ -1104,4 +1259,296 @@ sequential_ccd :: proc(
     }
   }
   return
+}
+
+// Collision detection using BVH tree traversal (O(N) instead of O(N log N))
+// This finds all overlapping pairs in a single tree traversal
+Collision_Detection_Task_Data_Traversal :: struct {
+  physics:            ^World,
+  dynamic_pairs:      []BVHOverlapPair(DynamicBroadPhaseEntry),
+  static_pairs:       []BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
+  start:              int,
+  end:                int,
+  dynamic_contacts:   [dynamic]DynamicContact,
+  static_contacts:    [dynamic]StaticContact,
+  // Thread timing instrumentation
+  thread_id:          int,
+  elapsed_time:       time.Duration,
+  pairs_tested:       int,
+  narrow_phase_tests: int,
+}
+
+collision_detection_task_traversal :: proc(task: thread.Task) {
+  data := (^Collision_Detection_Task_Data_Traversal)(task.data)
+  task_start := time.now()
+  defer data.elapsed_time = time.since(task_start)
+
+  // Process dynamic-dynamic pairs
+  #no_bounds_check for i in data.start ..< data.end {
+    if i >= len(data.dynamic_pairs) do break
+    pair := data.dynamic_pairs[i]
+    data.pairs_tested += 1
+
+    handle_a := pair.a.handle
+    handle_b := pair.b.handle
+
+    body_a := get(data.physics, handle_a) or_continue
+    body_b := get(data.physics, handle_b) or_continue
+
+    // Skip killed or sleeping bodies
+    if body_a.is_killed || body_b.is_killed do continue
+    if body_a.is_sleeping && body_b.is_sleeping do continue
+
+    // Skip triggers
+    if body_a.trigger_only || body_b.trigger_only do continue
+
+    // Bounding sphere test
+    bounding_spheres_intersect(
+      body_a.cached_sphere_center,
+      body_a.cached_sphere_radius,
+      body_b.cached_sphere_center,
+      body_b.cached_sphere_radius,
+    ) or_continue
+
+    // Narrow phase collision test
+    data.narrow_phase_tests += 1
+    point, normal, penetration, hit := test_collision(body_a, body_b)
+    if !hit do continue
+
+    // Wake up sleeping bodies
+    if body_a.is_sleeping do wake_up(body_a)
+    if body_b.is_sleeping do wake_up(body_b)
+
+    contact := DynamicContact {
+      body_a      = handle_a,
+      body_b      = handle_b,
+      point       = point,
+      normal      = normal,
+      penetration = penetration,
+      restitution = (body_a.restitution + body_b.restitution) * 0.5,
+      friction    = (body_a.friction + body_b.friction) * 0.5,
+    }
+
+    // Warm starting
+    hash := collision_pair_hash(handle_a, handle_b)
+    if prev_contact, found := data.physics.prev_dynamic_contacts[hash]; found {
+      contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
+      contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
+    }
+
+    append(&data.dynamic_contacts, contact)
+  }
+
+  // Process dynamic-static pairs
+  static_start := data.start - len(data.dynamic_pairs)
+  static_end := data.end - len(data.dynamic_pairs)
+  if static_start < 0 do static_start = 0
+  if static_end > len(data.static_pairs) do static_end = len(data.static_pairs)
+
+  #no_bounds_check for i in static_start ..< static_end {
+    if i >= len(data.static_pairs) do break
+    pair := data.static_pairs[i]
+    data.pairs_tested += 1
+
+    handle_a := pair.a.handle
+    handle_b := pair.b.handle
+
+    body_a := get(data.physics, handle_a) or_continue
+    body_b := get(data.physics, handle_b) or_continue
+
+    // Skip killed or sleeping dynamic bodies
+    if body_a.is_killed || body_a.is_sleeping do continue
+
+    // Skip triggers
+    if body_a.trigger_only || body_b.trigger_only do continue
+
+    // Bounding sphere test
+    bounding_spheres_intersect(
+      body_a.cached_sphere_center,
+      body_a.cached_sphere_radius,
+      body_b.cached_sphere_center,
+      body_b.cached_sphere_radius,
+    ) or_continue
+
+    // Narrow phase collision test
+    data.narrow_phase_tests += 1
+    point, normal, penetration, hit := test_collision(body_a, body_b)
+    if !hit do continue
+
+    // Wake up sleeping body
+    if body_a.is_sleeping do wake_up(body_a)
+
+    contact := StaticContact {
+      body_a      = handle_a,
+      body_b      = handle_b,
+      point       = point,
+      normal      = normal,
+      penetration = penetration,
+      restitution = (body_a.restitution + body_b.restitution) * 0.5,
+      friction    = (body_a.friction + body_b.friction) * 0.5,
+    }
+
+    // Warm starting
+    hash := collision_pair_hash(handle_a, handle_b)
+    if prev_contact, found := data.physics.prev_static_contacts[hash]; found {
+      contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
+      contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
+    }
+
+    append(&data.static_contacts, contact)
+  }
+}
+
+// New collision detection using tree-vs-tree traversal
+// This is O(N + K) instead of O(N log N) where K is number of overlapping pairs
+parallel_collision_detection_traversal :: proc(
+  self: ^World,
+  num_threads := DEFAULT_THREAD_COUNT,
+) {
+  parallel_start := time.now()
+
+  if len(self.dynamic_bvh.primitives) == 0 do return
+
+  // Find all dynamic-dynamic overlapping pairs using tree traversal
+  traversal_start := time.now()
+  dynamic_pairs := make(
+    [dynamic]BVHOverlapPair(DynamicBroadPhaseEntry),
+    context.temp_allocator,
+  )
+  bvh_find_all_overlaps_fast(&self.dynamic_bvh, &dynamic_pairs)
+
+  // Find all dynamic-static overlapping pairs
+  static_pairs := make(
+    [dynamic]BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
+    context.temp_allocator,
+  )
+  bvh_find_cross_overlaps_fast(&self.dynamic_bvh, &self.static_bvh, &static_pairs)
+
+  traversal_time := time.since(traversal_start)
+
+  total_pairs := len(dynamic_pairs) + len(static_pairs)
+
+  when ENABLE_VERBOSE_LOG {
+    log.infof(
+      "Tree traversal found %d dynamic pairs + %d static pairs = %d total in %v",
+      len(dynamic_pairs),
+      len(static_pairs),
+      total_pairs,
+      traversal_time,
+    )
+  }
+
+  if total_pairs == 0 do return
+
+  // If few pairs or single threaded, process sequentially
+  if total_pairs < 100 || num_threads == 1 {
+    task_data := Collision_Detection_Task_Data_Traversal {
+      physics       = self,
+      dynamic_pairs = dynamic_pairs[:],
+      static_pairs  = static_pairs[:],
+      start         = 0,
+      end           = total_pairs,
+      dynamic_contacts = make([dynamic]DynamicContact, 0, 100, context.temp_allocator),
+      static_contacts = make([dynamic]StaticContact, 0, 100, context.temp_allocator),
+    }
+    collision_detection_task_traversal(thread.Task{data = &task_data})
+
+    for contact in task_data.dynamic_contacts {
+      append(&self.dynamic_contacts, contact)
+    }
+    for contact in task_data.static_contacts {
+      append(&self.static_contacts, contact)
+    }
+    return
+  }
+
+  // Parallel processing of pairs
+  setup_start := time.now()
+  pairs_per_thread := (total_pairs + num_threads - 1) / num_threads
+
+  task_data_array := make(
+    []Collision_Detection_Task_Data_Traversal,
+    num_threads,
+    context.temp_allocator,
+  )
+
+  for i in 0 ..< num_threads {
+    start := i * pairs_per_thread
+    end := min((i + 1) * pairs_per_thread, total_pairs)
+    if start >= total_pairs do break
+
+    task_data_array[i] = Collision_Detection_Task_Data_Traversal {
+      physics          = self,
+      dynamic_pairs    = dynamic_pairs[:],
+      static_pairs     = static_pairs[:],
+      start            = start,
+      end              = end,
+      dynamic_contacts = make([dynamic]DynamicContact, 0, 100, context.temp_allocator),
+      static_contacts  = make([dynamic]StaticContact, 0, 100, context.temp_allocator),
+      thread_id        = i,
+    }
+
+    thread.pool_add_task(
+      &self.thread_pool,
+      context.allocator,
+      collision_detection_task_traversal,
+      &task_data_array[i],
+      i,
+    )
+  }
+  setup_time := time.since(setup_start)
+
+  // Wait for completion
+  parallel_exec_start := time.now()
+  for thread.pool_num_outstanding(&self.thread_pool) > 0 {
+    time.sleep(time.Microsecond * 100)
+  }
+  parallel_exec_time := time.since(parallel_exec_start)
+
+  // Collect results
+  collection_start := time.now()
+  total_pairs_tested := 0
+  total_narrow_tests := 0
+  min_time := time.Duration(math.F64_MAX)
+  max_time := time.Duration(0)
+  total_time := time.Duration(0)
+
+  for &task_data in task_data_array {
+    for contact in task_data.dynamic_contacts {
+      append(&self.dynamic_contacts, contact)
+    }
+    for contact in task_data.static_contacts {
+      append(&self.static_contacts, contact)
+    }
+    if task_data.pairs_tested > 0 {
+      total_pairs_tested += task_data.pairs_tested
+      total_narrow_tests += task_data.narrow_phase_tests
+      min_time = min(min_time, task_data.elapsed_time)
+      max_time = max(max_time, task_data.elapsed_time)
+      total_time += task_data.elapsed_time
+    }
+  }
+  collection_time := time.since(collection_start)
+  total_parallel_time := time.since(parallel_start)
+
+  when ENABLE_VERBOSE_LOG {
+    avg_time := total_time / time.Duration(num_threads)
+    variance_pct := 0.0
+    if avg_time > 0 {
+      variance_pct = f64(max_time - min_time) / f64(avg_time) * 100.0
+    }
+
+    log.infof(
+      "Traversal Collision Detection: %d pairs, %d narrow tests, %d contacts in %v (traversal: %v, setup: %v, exec: %v, collect: %v, variance: %.1f%%)",
+      total_pairs_tested,
+      total_narrow_tests,
+      len(self.dynamic_contacts) + len(self.static_contacts),
+      total_parallel_time,
+      traversal_time,
+      setup_time,
+      parallel_exec_time,
+      collection_time,
+      variance_pct,
+    )
+  }
 }

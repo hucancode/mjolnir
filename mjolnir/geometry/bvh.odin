@@ -860,3 +860,94 @@ refit_from_node :: proc(bvh: ^BVH($T), start_node_idx: int) {
   // For now, just refit the entire tree
   bvh_refit(bvh)
 }
+
+// Pair of overlapping primitives from self-collision detection
+BVHOverlapPair :: struct($T: typeid) {
+  a: T,
+  b: T,
+}
+
+// Find all overlapping pairs within a single BVH (self-collision)
+// This is O(N + K) where K is the number of overlapping pairs
+// Much faster than N * O(log N) individual queries
+bvh_find_all_overlaps :: proc(
+  bvh: ^BVH($T),
+  results: ^[dynamic]BVHOverlapPair(T),
+) {
+  clear(results)
+  if len(bvh.nodes) == 0 do return
+  if bvh.bounds_func == nil do return
+
+  // Start self-collision detection from root
+  find_overlaps_recursive(bvh, 0, 0, results)
+}
+
+@(private)
+find_overlaps_recursive :: proc(
+  bvh: ^BVH($T),
+  node_a_idx: i32,
+  node_b_idx: i32,
+  results: ^[dynamic]BVHOverlapPair(T),
+) {
+  node_a := &bvh.nodes[node_a_idx]
+  node_b := &bvh.nodes[node_b_idx]
+
+  // Early out if bounds don't overlap
+  if !aabb_intersects(node_a.bounds, node_b.bounds) do return
+
+  a_is_leaf := node_a.primitive_count > 0
+  b_is_leaf := node_b.primitive_count > 0
+
+  // Both are leaf nodes - test all primitive pairs
+  if a_is_leaf && b_is_leaf {
+    prim_a_start := node_a.primitive_start
+    prim_a_end := node_a.primitive_start + node_a.primitive_count
+    prim_b_start := node_b.primitive_start
+    prim_b_end := node_b.primitive_start + node_b.primitive_count
+
+    for i in prim_a_start ..< prim_a_end {
+      prim_a := bvh.primitives[i]
+      bounds_a := bvh.bounds_func(prim_a)
+
+      // Determine the starting index for the inner loop
+      // If same node, start after current index to avoid duplicates
+      j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
+
+      for j in j_start ..< prim_b_end {
+        prim_b := bvh.primitives[j]
+        bounds_b := bvh.bounds_func(prim_b)
+
+        if aabb_intersects(bounds_a, bounds_b) {
+          append(results, BVHOverlapPair(T){a = prim_a, b = prim_b})
+        }
+      }
+    }
+    return
+  }
+
+  // One or both are internal nodes - recurse on children
+  if a_is_leaf {
+    // Only split node_b
+    find_overlaps_recursive(bvh, node_a_idx, node_b.left_child, results)
+    find_overlaps_recursive(bvh, node_a_idx, node_b.right_child, results)
+  } else if b_is_leaf {
+    // Only split node_a
+    find_overlaps_recursive(bvh, node_a.left_child, node_b_idx, results)
+    find_overlaps_recursive(bvh, node_a.right_child, node_b_idx, results)
+  } else {
+    // Both are internal - split both and test all combinations
+    // When testing the same node against itself, avoid redundant tests
+    if node_a_idx == node_b_idx {
+      // Self-test: only test unique combinations
+      find_overlaps_recursive(bvh, node_a.left_child, node_a.left_child, results)
+      find_overlaps_recursive(bvh, node_a.left_child, node_a.right_child, results)
+      find_overlaps_recursive(bvh, node_a.right_child, node_a.right_child, results)
+    } else {
+      // Different nodes: test all combinations
+      find_overlaps_recursive(bvh, node_a.left_child, node_b.left_child, results)
+      find_overlaps_recursive(bvh, node_a.left_child, node_b.right_child, results)
+      find_overlaps_recursive(bvh, node_a.right_child, node_b.left_child, results)
+      find_overlaps_recursive(bvh, node_a.right_child, node_b.right_child, results)
+    }
+  }
+}
