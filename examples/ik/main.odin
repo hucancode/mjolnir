@@ -1,0 +1,327 @@
+package main
+
+import "../../mjolnir"
+import cont "../../mjolnir/containers"
+import "../../mjolnir/gpu"
+import "../../mjolnir/resources"
+import "../../mjolnir/world"
+import "core:log"
+import "core:math"
+import "core:math/linalg"
+import "core:slice"
+
+root_nodes: [dynamic]resources.NodeHandle
+animation_time: f32 = 0
+spider_root_node: resources.NodeHandle
+mesh_node: resources.NodeHandle
+target_markers: [6]resources.NodeHandle
+ground_plane: resources.NodeHandle
+
+// Fixed ground targets for each leg (computed from initial pose)
+leg_targets: [6][3]f32
+
+main :: proc() {
+  context.logger = log.create_console_logger()
+  engine := new(mjolnir.Engine)
+  engine.setup_proc = setup
+  engine.update_proc = update
+  mjolnir.run(engine, 800, 600, "spider-ik")
+}
+
+setup :: proc(engine: ^mjolnir.Engine) {
+  using mjolnir
+
+  // Enable IK debug drawing
+  engine.world.debug_draw_ik = true
+
+  if camera := get_main_camera(engine); camera != nil {
+    camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
+    sync_active_camera_controller(engine)
+  }
+
+  // Load spider model
+  spider_roots := load_gltf(engine, "assets/spider.glb")
+  append(&root_nodes, ..spider_roots[:])
+
+  // Position the spider
+  for handle in spider_roots {
+    node := get_node(engine, handle) or_continue
+    spider_root_node = handle
+    node.transform.position = {0, 5, 0}
+    node.transform.is_dirty = true
+  }
+
+  // Leg configurations: root bone, tip bone
+  leg_configs := []struct {
+    root_name: string,
+    tip_name:  string,
+  } {
+    {"leg_front_r_0", "leg_front_r_5"},
+    {"leg_middle_r_0", "leg_middle_r_5"},
+    {"leg_back_r_0", "leg_back_r_5"},
+    {"leg_front_l_0", "leg_front_l_5"},
+    {"leg_middle_l_0", "leg_middle_l_5"},
+    {"leg_back_l_0", "leg_back_l_5"},
+  }
+
+  // Find the skinned mesh node and set up IK for each leg
+  for handle in spider_roots {
+    root_node := get_node(engine, handle) or_continue
+
+    for child in root_node.children {
+      child_node := get_node(engine, child) or_continue
+      mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
+      if !has_mesh {
+        continue
+      }
+
+      mesh_node = child
+
+      mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+      skin, has_skin := mesh.skinning.?
+      if !has_skin {
+        continue
+      }
+
+      // Get initial body position
+      body_pos := [3]f32{0, 5, 0}
+
+      // For each leg, find all bones in the chain and calculate initial target
+      for i in 0 ..< 6 {
+        root_name := leg_configs[i].root_name
+        tip_name := leg_configs[i].tip_name
+
+        // Find all bones in the chain from root to tip
+        bone_names := find_bone_chain(skin, root_name, tip_name)
+        if len(bone_names) == 0 {
+          log.warnf("Could not find bone chain for leg %d", i)
+          continue
+        }
+
+        log.infof("Leg %d chain: %v", i, bone_names)
+
+        // Calculate initial tip position in world space from bind pose
+        tip_bone_idx := -1
+        for bone, idx in skin.bones {
+          if bone.name == tip_name {
+            tip_bone_idx = idx
+            break
+          }
+        }
+
+        if tip_bone_idx >= 0 {
+          // Get bind matrix (rest pose) and compute world position
+          tip_bind := linalg.matrix4_inverse(
+            skin.bones[tip_bone_idx].inverse_bind_matrix,
+          )
+          tip_local_pos := tip_bind[3].xyz
+
+          // Transform to world space (apply body position)
+          tip_world_pos := tip_local_pos + body_pos
+          // Set Y to ground level (0) so legs stick to ground
+          leg_targets[i] = {tip_world_pos.x, 0, tip_world_pos.z}
+
+          log.infof(
+            "Leg %d target: %v (tip local: %v)",
+            i,
+            leg_targets[i],
+            tip_local_pos,
+          )
+        }
+
+        // Calculate pole position (above and behind the leg root for natural bending)
+        root_bone_idx := -1
+        for bone, idx in skin.bones {
+          if bone.name == root_name {
+            root_bone_idx = idx
+            break
+          }
+        }
+
+        pole_pos := [3]f32{0, 10, 0}
+        if root_bone_idx >= 0 {
+          root_bind := linalg.matrix4_inverse(
+            skin.bones[root_bone_idx].inverse_bind_matrix,
+          )
+          root_local_pos := root_bind[3].xyz
+          root_world_pos := root_local_pos + body_pos
+          // Pole is above and slightly toward center
+          pole_pos = {
+            root_world_pos.x * 0.5,
+            root_world_pos.y + 10,
+            root_world_pos.z * 0.5,
+          }
+        }
+
+        // Add IK layer for this leg
+        add_ik_layer(
+          engine,
+          child,
+          bone_names,
+          leg_targets[i],
+          pole_pos,
+          weight = 1.0,
+          layer_index = -1, // Append new layer
+        )
+      }
+
+      break
+    }
+  }
+
+  mat := engine.rm.builtin_materials[resources.Color.YELLOW]
+
+  // Find the skinned mesh and create markers for bones
+  for handle in root_nodes {
+    node := get_node(engine, handle) or_continue
+    for child in node.children {
+      child_node := get_node(engine, child) or_continue
+      mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
+      if !has_mesh {
+        continue
+      }
+
+      mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+      skin, has_skin := mesh.skinning.?
+      if !has_skin {
+        continue
+      }
+      log.infof("Found skinned mesh with %d bones", len(skin.bones))
+    }
+  }
+
+  // Create visual markers for each leg target (red spheres)
+  sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
+  red_mat := engine.rm.builtin_materials[resources.Color.RED]
+  for i in 0 ..< 6 {
+    target_markers[i] = spawn(
+      engine,
+      attachment = world.MeshAttachment {
+        handle = sphere_mesh,
+        material = red_mat,
+      },
+    )
+    scale(engine, target_markers[i], 0.5)
+    // Position at the fixed target
+    if marker_node := get_node(engine, target_markers[i]); marker_node != nil {
+      marker_node.transform.position = leg_targets[i]
+      marker_node.transform.is_dirty = true
+    }
+  }
+
+  // Ground plane for reference
+  cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
+  gray_mat := engine.rm.builtin_materials[resources.Color.GRAY]
+  ground_plane = spawn(
+    engine,
+    attachment = world.MeshAttachment{handle = cube_mesh, material = gray_mat},
+  )
+  world.scale_xyz(&engine.world, ground_plane, 40, 0.2, 40)
+
+  spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
+}
+
+update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+  using mjolnir
+
+  // Move the spider body back and forth along the X axis
+  animation_time += delta_time
+  amplitude: f32 = 2.5
+  speed: f32 = 0.15
+
+  body_x := amplitude * math.sin(animation_time * speed * 2 * math.PI)
+  body_pos := [3]f32{body_x, 0, 0}
+
+  // Move the spider body
+  if node := get_node(engine, spider_root_node); node != nil {
+    node.transform.position = body_pos
+    node.transform.is_dirty = true
+  }
+
+  // Update IK targets for each leg - targets stay fixed at ground positions
+  // Each leg has its own IK layer (0-5)
+  for i in 0 ..< 6 {
+    // Calculate pole position for this leg (above the target, toward the body)
+    pole_pos := [3]f32{
+      leg_targets[i].x * 0.5 + body_pos.x * 0.5,
+      5,
+      leg_targets[i].z * 0.5,
+    }
+
+    target_pos := leg_targets[i]
+    target_pos.y += amplitude * math.max(math.sin(animation_time * speed * math.PI), 0)
+    set_ik_layer_target(
+      engine,
+      mesh_node,
+      i, // IK layer index (0-5 for the 6 legs)
+      target_pos, // Fixed ground target
+      pole_pos,
+    )
+    // Debug draw pole position
+    pole_transform := linalg.matrix4_translate(pole_pos)
+    pole_transform *= linalg.matrix4_scale([3]f32{0.2, 0.2, 0.2})
+    debug_draw_spawn_mesh_temporary(
+      engine,
+      engine.rm.builtin_meshes[resources.Primitive.SPHERE],
+      pole_transform,
+      duration_seconds = 0.05,
+      color = {0.0, 1.0, 0.0, 1.0}, // Green for poles
+    )
+  }
+}
+
+// Find all bone names in a chain from root to tip
+find_bone_chain :: proc(
+  skin: resources.Skinning,
+  root_name: string,
+  tip_name: string,
+) -> []string {
+  // Build parent map from children arrays
+  parent_map := make(map[int]int)
+  defer delete(parent_map)
+
+  name_to_idx := make(map[string]int)
+  defer delete(name_to_idx)
+
+  for bone, idx in skin.bones {
+    name_to_idx[bone.name] = idx
+    // Build parent map by iterating children
+    for child_idx in bone.children {
+      parent_map[int(child_idx)] = idx
+    }
+  }
+
+  root_idx, has_root := name_to_idx[root_name]
+  tip_idx, has_tip := name_to_idx[tip_name]
+
+  if !has_root || !has_tip {
+    return nil
+  }
+
+  // Walk from tip to root to find the chain
+  chain_indices := make([dynamic]int)
+  defer delete(chain_indices)
+
+  current := tip_idx
+  for {
+    append(&chain_indices, current)
+    if current == root_idx {
+      break
+    }
+    parent, has_parent := parent_map[current]
+    if !has_parent {
+      // Couldn't reach root - invalid chain
+      return nil
+    }
+    current = parent
+  }
+
+  // Reverse to get root-to-tip order
+  result := make([]string, len(chain_indices))
+  for i in 0 ..< len(chain_indices) {
+    idx := chain_indices[len(chain_indices) - 1 - i]
+    result[i] = skin.bones[idx].name
+  }
+
+  return result
+}
