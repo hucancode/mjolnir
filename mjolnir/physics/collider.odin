@@ -38,7 +38,7 @@ Collider :: union {
   FanCollider,
 }
 
-collider_calculate_aabb :: #force_inline proc(
+collider_calculate_aabb :: proc(
   self: ^Collider,
   position: [3]f32,
   rotation: quaternion128,

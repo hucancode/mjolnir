@@ -617,11 +617,54 @@ step :: proc(self: ^World, dt: f32) {
     }
     // Solve constraints with bias (includes position correction + restitution)
     #unroll for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
-      for &contact in self.dynamic_contacts {
-        body_a := get(self, contact.body_a) or_continue
-        body_b := get(self, contact.body_b) or_continue
-        resolve_contact(&contact, body_a, body_b)
+      // Process dynamic contacts in batches of 4
+      i := 0
+      for i + 4 <= len(self.dynamic_contacts) {
+        contacts: [4]^DynamicContact
+        bodies_a: [4]^DynamicRigidBody
+        bodies_b: [4]^DynamicRigidBody
+        valid := true
+        // Gather batch of 4 contacts
+        for j in 0..<4 {
+          contact := &self.dynamic_contacts[i + j]
+          body_a := get(self, contact.body_a) or_else nil
+          body_b := get(self, contact.body_b) or_else nil
+          if body_a == nil || body_b == nil {
+            valid = false
+            break
+          }
+          contacts[j] = contact
+          bodies_a[j] = body_a
+          bodies_b[j] = body_b
+        }
+        if valid {
+          resolve_contact_batch4_dynamic_dynamic(contacts, bodies_a, bodies_b)
+          i += 4
+        } else {
+          // Fall back to scalar for this contact
+          contact := &self.dynamic_contacts[i]
+          body_a, body_b: ^DynamicRigidBody
+          body_a = get(self, contact.body_a) or_else nil
+          body_b = get(self, contact.body_b) or_else nil
+          if body_a != nil && body_b != nil {
+            resolve_contact(contact, body_a, body_b)
+          }
+          i += 1
+        }
       }
+
+      // Handle remainder with scalar processing
+      for i < len(self.dynamic_contacts) {
+        contact := &self.dynamic_contacts[i]
+        body_a := get(self, contact.body_a) or_else nil
+        body_b := get(self, contact.body_b) or_else nil
+        if body_a != nil && body_b != nil {
+          resolve_contact(contact, body_a, body_b)
+        }
+        i += 1
+      }
+
+      // Static contacts use scalar path
       for &contact in self.static_contacts {
         body_a := get(self, contact.body_a) or_continue
         body_b := get(self, contact.body_b) or_continue
@@ -630,11 +673,56 @@ step :: proc(self: ^World, dt: f32) {
     }
     // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
     #unroll for _ in 0 ..< STABILIZATION_ITERS {
-      for &contact in self.dynamic_contacts {
-        body_a := get(self, contact.body_a) or_continue
-        body_b := get(self, contact.body_b) or_continue
-        resolve_contact_no_bias(&contact, body_a, body_b)
+      // Process dynamic contacts in batches of 4
+      i := 0
+      for i + 4 <= len(self.dynamic_contacts) {
+        contacts: [4]^DynamicContact
+        bodies_a: [4]^DynamicRigidBody
+        bodies_b: [4]^DynamicRigidBody
+        valid := true
+
+        // Gather batch of 4 contacts
+        for j in 0..<4 {
+          contact := &self.dynamic_contacts[i + j]
+          body_a := get(self, contact.body_a) or_else nil
+          body_b := get(self, contact.body_b) or_else nil
+          if body_a == nil || body_b == nil {
+            valid = false
+            break
+          }
+          contacts[j] = contact
+          bodies_a[j] = body_a
+          bodies_b[j] = body_b
+        }
+
+        if valid {
+          resolve_contact_batch4_no_bias_dynamic_dynamic(contacts, bodies_a, bodies_b)
+          i += 4
+        } else {
+          // Fall back to scalar for this contact
+          contact := &self.dynamic_contacts[i]
+          body_a, body_b: ^DynamicRigidBody
+          body_a = get(self, contact.body_a) or_else nil
+          body_b = get(self, contact.body_b) or_else nil
+          if body_a != nil && body_b != nil {
+            resolve_contact_no_bias(contact, body_a, body_b)
+          }
+          i += 1
+        }
       }
+
+      // Handle remainder with scalar processing
+      for i < len(self.dynamic_contacts) {
+        contact := &self.dynamic_contacts[i]
+        body_a := get(self, contact.body_a) or_else nil
+        body_b := get(self, contact.body_b) or_else nil
+        if body_a != nil && body_b != nil {
+          resolve_contact_no_bias(contact, body_a, body_b)
+        }
+        i += 1
+      }
+
+      // Static contacts use scalar path
       for &contact in self.static_contacts {
         body_a := get(self, contact.body_a) or_continue
         body_b := get(self, contact.body_b) or_continue

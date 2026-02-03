@@ -467,25 +467,82 @@ test_cylinder_cylinder :: proc(
     hit = true
     return
   }
-  // Non-parallel cylinders - use sphere approximation at cylinder centers
-  // This is conservative but prevents tunneling
-  sphere_a_radius := linalg.length(
-    [2]f32{cylinder_a.radius, cylinder_a.height * 0.5},
-  )
-  sphere_b_radius := linalg.length(
-    [2]f32{cylinder_b.radius, cylinder_b.height * 0.5},
-  )
-  delta := pos_b - pos_a
+  // Non-parallel cylinders - use capsule-capsule approximation
+  // More accurate than sphere approximation while remaining fast
+  axis_a := geometry.qy(rot_a)
+  axis_b := geometry.qy(rot_b)
+
+  half_height_a := cylinder_a.height * 0.5
+  half_height_b := cylinder_b.height * 0.5
+
+  // Compute capsule endpoints
+  p0_a := pos_a - axis_a * half_height_a
+  p1_a := pos_a + axis_a * half_height_a
+  p0_b := pos_b - axis_b * half_height_b
+  p1_b := pos_b + axis_b * half_height_b
+
+  // Find closest points between two line segments (capsule axes)
+  d1 := p1_a - p0_a
+  d2 := p1_b - p0_b
+  r := p0_a - p0_b
+
+  a := linalg.dot(d1, d1)
+  e := linalg.dot(d2, d2)
+  f := linalg.dot(d2, r)
+
+  s, t: f32
+
+  // Check if either or both segments degenerate into points
+  if a <= math.F32_EPSILON && e <= math.F32_EPSILON {
+    s = 0.0
+    t = 0.0
+  } else if a <= math.F32_EPSILON {
+    s = 0.0
+    t = clamp(f / e, 0.0, 1.0)
+  } else {
+    c := linalg.dot(d1, r)
+    if e <= math.F32_EPSILON {
+      t = 0.0
+      s = clamp(-c / a, 0.0, 1.0)
+    } else {
+      b := linalg.dot(d1, d2)
+      denom := a * e - b * b
+
+      if denom != 0.0 {
+        s = clamp((b * f - c * e) / denom, 0.0, 1.0)
+      } else {
+        s = 0.0
+      }
+
+      t = (b * s + f) / e
+
+      if t < 0.0 {
+        t = 0.0
+        s = clamp(-c / a, 0.0, 1.0)
+      } else if t > 1.0 {
+        t = 1.0
+        s = clamp((b - c) / a, 0.0, 1.0)
+      }
+    }
+  }
+
+  // Compute closest points
+  c1 := p0_a + d1 * s
+  c2 := p0_b + d2 * t
+
+  // Check distance between closest points
+  delta := c2 - c1
   dist_sq := linalg.length2(delta)
-  radius_sum := sphere_a_radius + sphere_b_radius
+  radius_sum := cylinder_a.radius + cylinder_b.radius
+
   if dist_sq > radius_sum * radius_sum {
     return
   }
+
   distance := math.sqrt(dist_sq)
-  normal =
-    distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
+  normal = distance > math.F32_EPSILON ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration = radius_sum - distance
-  point = pos_a + normal * (sphere_a_radius - penetration * 0.5)
+  point = c1 + normal * (cylinder_a.radius - penetration * 0.5)
   hit = true
   return
 }

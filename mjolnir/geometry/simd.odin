@@ -1,7 +1,7 @@
 package geometry
 
 // Optimize linalg::quaternion128_mul_vector3
-qmv :: #force_inline proc "contextless" (q: quaternion128, v: [3]f32) -> [3]f32 {
+qmv :: proc "contextless" (q: quaternion128, v: [3]f32) -> [3]f32 {
   // Quaternion-vector multiplication: v' = v + 2*qw*(qv x v) + 2*(qv x (qv x v))
   // First cross: t = 2(qv x v)
   tx := 2 * (q.y * v.z - q.z * v.y)
@@ -20,7 +20,7 @@ qmv :: #force_inline proc "contextless" (q: quaternion128, v: [3]f32) -> [3]f32 
 }
 
 // get x axis of a quaternion, basically linalg::quaternion128_mul_vector3 where input vector is {1, 0, 0}
-qx :: #force_inline proc "contextless" (q: quaternion128) -> [3]f32 {
+qx :: proc "contextless" (q: quaternion128) -> [3]f32 {
   return {
     1 - 2 * (q.y * q.y + q.z * q.z),
     2 * (q.x * q.y + q.w * q.z),
@@ -29,7 +29,7 @@ qx :: #force_inline proc "contextless" (q: quaternion128) -> [3]f32 {
 }
 
 // get y axis of a quaternion, basically linalg::quaternion128_mul_vector3 where input vector is {0, 1, 0}
-qy :: #force_inline proc "contextless" (q: quaternion128) -> [3]f32 {
+qy :: proc "contextless" (q: quaternion128) -> [3]f32 {
   return {
     2 * (q.x * q.y - q.w * q.z),
     1 - 2 * (q.x * q.x + q.z * q.z),
@@ -38,7 +38,7 @@ qy :: #force_inline proc "contextless" (q: quaternion128) -> [3]f32 {
 }
 
 // get z axis of a quaternion, basically linalg::quaternion128_mul_vector3 where input vector is {0, 0, 1}
-qz :: #force_inline proc "contextless" (q: quaternion128) -> [3]f32 {
+qz :: proc "contextless" (q: quaternion128) -> [3]f32 {
   return {
     2 * (q.x * q.z + q.w * q.y),
     2 * (q.y * q.z - q.w * q.x),

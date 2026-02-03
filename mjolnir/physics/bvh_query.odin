@@ -15,6 +15,7 @@ bvh_query_aabb_fast :: proc(
   if bvh == nil || results == nil do return
   clear(results)
   if len(bvh.nodes) == 0 do return
+  reserve(results, len(bvh.primitives))
 
   // Fixed-size stack to avoid dynamic array append/pop overhead
   stack: [BVH_MAX_STACK_DEPTH]i32
@@ -93,6 +94,7 @@ bvh_query_ray_fast :: proc(
 ) {
   clear(results)
   if len(bvh.nodes) == 0 do return
+  reserve(results, len(bvh.primitives))
 
   // Fixed-size stack to avoid dynamic array append/pop overhead
   stack: [BVH_MAX_STACK_DEPTH]i32

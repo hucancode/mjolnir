@@ -832,7 +832,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
     64,
     context.temp_allocator,
   )
-  BATCH_SIZE :: 256
+  BATCH_SIZE :: 32
   for {
     start_idx := i32(
       sync.atomic_add(&data.work_queue.current_index, i32(BATCH_SIZE)),
