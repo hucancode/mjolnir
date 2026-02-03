@@ -31,7 +31,7 @@ shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 test:
 	timeout 120s odin test . --all-packages
 
-VISUAL_TESTS := cube gltf_ik gltf_animation gltf_skinning gltf_static grid256 grid300 grid5 light material navmesh shadow aoe crosshatch ui spline fox_blend_ik
+VISUAL_TESTS := cube blend_ik_cesium_man blend_ik_fox gltf_animation gltf_skinning gltf_static grid256 grid300 grid5 light material navmesh shadow aoe crosshatch ui spline
 
 vtest:
 	@echo "Running all samples..."
