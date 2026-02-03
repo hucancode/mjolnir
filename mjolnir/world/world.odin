@@ -446,7 +446,6 @@ process_pending_deletions :: proc(
   gctx: ^gpu.GPUContext,
 ) {
   sync.mutex_lock(&world.pending_deletions_mutex)
-  defer sync.mutex_unlock(&world.pending_deletions_mutex)
   for handle in world.pending_node_deletions {
     despawn(world, handle)
   }
@@ -457,7 +456,6 @@ process_pending_deletions :: proc(
   if had_deletions {
     resources.purge_unused_resources(rm, gctx)
   }
-  sync.mutex_lock(&world.pending_deletions_mutex)
 }
 
 traverse :: proc(
