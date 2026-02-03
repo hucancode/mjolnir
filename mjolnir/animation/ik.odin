@@ -133,15 +133,23 @@ update_transforms_from_positions :: proc(
       if perp_len > math.F32_EPSILON {
         desired_perp /= perp_len
         twist := linalg.quaternion_between_two_vector3(current_perp, desired_perp)
-        swing *= linalg.quaternion_slerp(
+        // Apply twist AFTER swing: twist rotates around ik_dir (the new bone direction),
+        // so swing must be applied first to establish that direction.
+        interpolated_twist := linalg.quaternion_slerp(
           linalg.QUATERNIONF32_IDENTITY,
           twist,
           pole_weight,
         )
+        world_transforms[bone_idx].world_rotation =
+          interpolated_twist * swing * world_transforms[bone_idx].world_rotation
+      } else {
+        world_transforms[bone_idx].world_rotation =
+          swing * world_transforms[bone_idx].world_rotation
       }
+    } else {
+      world_transforms[bone_idx].world_rotation =
+        swing * world_transforms[bone_idx].world_rotation
     }
-    world_transforms[bone_idx].world_rotation =
-      swing * world_transforms[bone_idx].world_rotation
     // IMPORTANT: this algorithm do a deliberate assumption that all scale are 1.0, avoid costly scale computation
     // If non-uniform scaling is needed, extract scale once before the loop
     world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
