@@ -376,7 +376,7 @@ spider_leg_modifier_update :: proc(
     // Pole is positioned perpendicular to the leg direction, offset from the midpoint
     pole_offset := up - leg_dir * linalg.dot(up, leg_dir) / linalg.dot(leg_dir, leg_dir)
     mid_point := (root_position_skeleton + feet_position_skeleton) / 2.0
-    pole := mid_point + linalg.normalize(pole_offset) * 10.0
+    pole := mid_point + linalg.normalize(pole_offset) * 2.0
 
     ik_target := IKTarget {
       bone_indices    = leg_bone_indices,

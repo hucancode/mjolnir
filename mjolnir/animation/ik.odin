@@ -115,62 +115,33 @@ update_transforms_from_positions :: proc(
     bone_idx := bone_indices[i]
     fk_positions[i] = world_transforms[bone_idx].world_position
   }
-
   has_pole := linalg.length2(pole_vector) > math.F32_EPSILON && pole_weight > 0
-
   // Process all bones except the last
   for i in 0 ..< chain_length - 1 {
     bone_idx := bone_indices[i]
     world_transforms[bone_idx].world_position = positions[i]
-
     fk_dir := linalg.normalize(fk_positions[i + 1] - fk_positions[i])
     ik_dir := linalg.normalize(positions[i + 1] - positions[i])
-
-    // Swing: align bone direction
     swing := linalg.quaternion_between_two_vector3(fk_dir, ik_dir)
-
-    delta_rotation: quaternion128
-    if has_pole && i > 0 && i < chain_length - 1 {
-      // Internal bones: apply pole-controlled twist
-
-      // Get FK bone's perpendicular axis (local X transformed to world)
+    if has_pole && i > 0 {
       fk_rotation := world_transforms[bone_idx].world_rotation
       fk_perp := geometry.qmv(fk_rotation, [3]f32{1, 0, 0})
-
-      // Apply swing to get current perpendicular
       current_perp := geometry.qmv(swing, fk_perp)
-
-      // Compute desired perpendicular from pole
       to_pole := pole_vector - positions[i]
       desired_perp := to_pole - ik_dir * linalg.dot(to_pole, ik_dir)
       perp_len := linalg.length(desired_perp)
-
       if perp_len > math.F32_EPSILON {
         desired_perp /= perp_len
-
-        // Compute twist rotation
         twist := linalg.quaternion_between_two_vector3(current_perp, desired_perp)
-
-        // Blend twist based on pole_weight
-        blended_twist := linalg.quaternion_slerp(
+        swing *= linalg.quaternion_slerp(
           linalg.QUATERNIONF32_IDENTITY,
           twist,
           pole_weight,
         )
-
-        // Combine: swing then twist
-        delta_rotation = blended_twist * swing
-      } else {
-        delta_rotation = swing
       }
-    } else {
-      // Root/end bones or no pole: just swing
-      delta_rotation = swing
     }
-
     world_transforms[bone_idx].world_rotation =
-      delta_rotation * world_transforms[bone_idx].world_rotation
-
+      swing * world_transforms[bone_idx].world_rotation
     // IMPORTANT: this algorithm do a deliberate assumption that all scale are 1.0, avoid costly scale computation
     // If non-uniform scaling is needed, extract scale once before the loop
     world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
