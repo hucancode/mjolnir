@@ -125,7 +125,7 @@ update_transforms_from_positions :: proc(
     swing := linalg.quaternion_between_two_vector3(fk_dir, ik_dir)
     if has_pole && i > 0 {
       fk_rotation := world_transforms[bone_idx].world_rotation
-      fk_perp := geometry.qmv(fk_rotation, [3]f32{1, 0, 0})
+      fk_perp := geometry.qx(fk_rotation)
       current_perp := geometry.qmv(swing, fk_perp)
       to_pole := pole_vector - positions[i]
       desired_perp := to_pole - ik_dir * linalg.dot(to_pole, ik_dir)

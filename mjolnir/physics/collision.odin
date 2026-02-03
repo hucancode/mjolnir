@@ -432,7 +432,7 @@ test_cylinder_cylinder :: proc(
   inv_rot_a := linalg.quaternion_inverse(rot_a)
   local_b_center := geometry.qmv(inv_rot_a, to_b)
   // Cylinder B's axis in cylinder A's local space
-  b_axis_world := geometry.qmv(rot_b, linalg.VECTOR3F32_Y_AXIS)
+  b_axis_world := geometry.qy(rot_b)
   b_axis_local := geometry.qmv(inv_rot_a, b_axis_world)
   // Check if axes are parallel
   parallel := math.abs(math.abs(b_axis_local.y) - 1.0) < 0.01

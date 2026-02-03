@@ -438,7 +438,7 @@ obb_cylinder_intersect :: proc(
   hit: bool,
 ) {
   // Cylinder axis in world space
-  cylinder_axis := qmv(cylinder_rotation, linalg.VECTOR3F32_Y_AXIS)
+  cylinder_axis := qy(cylinder_rotation)
   h := cylinder_height * 0.5
   line_start := cylinder_center - cylinder_axis * h
   line_end := cylinder_center + cylinder_axis * h

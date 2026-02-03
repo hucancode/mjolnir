@@ -572,15 +572,15 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
 }
 
 camera_forward :: proc(self: ^Camera) -> [3]f32 {
-  return geometry.qmv(self.rotation, -linalg.VECTOR3F32_Z_AXIS)
+  return -geometry.qz(self.rotation)
 }
 
 camera_right :: proc(self: ^Camera) -> [3]f32 {
-  return geometry.qmv(self.rotation, linalg.VECTOR3F32_X_AXIS)
+  return geometry.qx(self.rotation)
 }
 
 camera_up :: proc(self: ^Camera) -> [3]f32 {
-  return geometry.qmv(self.rotation, linalg.VECTOR3F32_Y_AXIS)
+  return geometry.qy(self.rotation)
 }
 
 camera_get_near_far :: proc(self: ^Camera) -> (near: f32, far: f32) {
