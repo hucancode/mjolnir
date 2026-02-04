@@ -724,33 +724,3 @@ test_collision :: proc {
   test_collision_static_dynamic,
   test_collision_static_static,
 }
-
-test_collision_gjk :: proc(
-  collider_a, collider_b: ^Collider,
-  pos_a, pos_b: [3]f32,
-  rot_a, rot_b: quaternion128,
-) -> (
-  point: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  hit: bool,
-) {
-  simplex: Simplex
-  if !gjk(collider_a, collider_b, pos_a, pos_b, rot_a, rot_b, &simplex) {
-    return
-  }
-  normal, penetration, hit = epa(
-    simplex,
-    collider_a,
-    pos_a,
-    rot_a,
-    collider_b,
-    pos_b,
-    rot_b,
-  )
-  if !hit {
-    return
-  }
-  point = pos_a + normal * penetration * 0.5
-  return
-}

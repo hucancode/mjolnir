@@ -110,7 +110,6 @@ init :: proc(
       len(self.thread_pool.threads),
     )
   }
-  log_simd_mode()
 }
 
 destroy :: proc(self: ^World) {

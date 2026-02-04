@@ -49,21 +49,8 @@ init_simd :: proc "contextless" () {
   simd_lanes = 1
 }
 
-log_simd_mode :: proc() {
-  switch simd_mode {
-  case .AVX2:
-    log.infof("Physics SIMD: AVX2 detected (8-wide)")
-  case .SSE:
-    log.infof("Physics SIMD: SSE detected (4-wide)")
-  case .Scalar:
-    log.infof("Physics SIMD: Scalar mode (1-wide)")
-  }
-}
 // Configurable SIMD width - can be overridden at compile time
 WIDTH :: #config(PHYSICS_SIMD_WIDTH, 8)  // Default to 8-wide (AVX2)
-Vec :: #simd[WIDTH]f32
-Maski :: #simd[WIDTH]i32
-Masku :: #simd[WIDTH]u32
 
 // SIMD constants for configured width
 when WIDTH == 4 {
@@ -72,21 +59,6 @@ when WIDTH == 4 {
 } else when WIDTH == 8 {
   SIMD_ZERO :: f32x8{0, 0, 0, 0, 0, 0, 0, 0}
   SIMD_ONE :: f32x8{1, 1, 1, 1, 1, 1, 1, 1}
-}
-
-// Helper: Create mask for active bodies in a PoolSoA
-create_active_mask :: proc(
-  pool: ^cont.PoolSoA($T),
-  start: int,
-  count: int,
-) -> Masku {
-  mask: Masku
-  for i in 0..<min(count, WIDTH) {
-    if start + i < len(pool.entries) && pool.entries[start + i].active {
-      mask = simd.replace(mask, i, max(u32))  // All bits set = active
-    }
-  }
-  return mask
 }
 
 apply_gravity :: proc(world: ^World) {
