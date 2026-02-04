@@ -32,10 +32,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
-  cylinder_mesh := engine.rm.builtin_meshes[resources.Primitive.CYLINDER]
   sphere_mat := engine.rm.builtin_materials[resources.Color.MAGENTA]
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.RED]
+  rand_sphere_mesh := create_mesh(engine, geometry.make_sphere(random_colors = true))
+  rand_cylinder_mesh := create_mesh(engine, geometry.make_cylinder(random_colors = true))
+  rand_mat := engine.rm.builtin_materials[resources.Color.WHITE]
   // Create ground
   {
     ground_node_handle := world.spawn(&engine.world, {0, -0.5, 0})
@@ -106,6 +108,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     shape_type := i % 3
     body_handle: physics.DynamicRigidBodyHandle
     mesh_handle: resources.MeshHandle
+    mat_handle: resources.MaterialHandle
 
     switch shape_type {
     case 0: // Cylinder
@@ -121,7 +124,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
         physics.set_cylinder_inertia(body, 1.0, 2.0)
       }
-      mesh_handle = cylinder_mesh
+      mesh_handle = rand_cylinder_mesh
+      mat_handle = rand_mat
     case 1: // Cube
       body_handle = physics.create_dynamic_body_box(
         &physics_world,
@@ -135,6 +139,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         physics.set_box_inertia(body, {1.0, 1.0, 1.0})
       }
       mesh_handle = cube_mesh
+      mat_handle = cube_mat
     case 2: // Sphere
       body_handle = physics.create_dynamic_body_sphere(
         &physics_world,
@@ -147,7 +152,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
         physics.set_sphere_inertia(body, 1.0)
       }
-      mesh_handle = sphere_mesh
+      mesh_handle = rand_sphere_mesh
+      mat_handle = rand_mat
     }
 
     physics_node.attachment = world.RigidBodyAttachment {
@@ -159,7 +165,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       physics_node_handle,
       attachment = world.MeshAttachment {
         handle = mesh_handle,
-        material = cube_mat,
+        material = mat_handle,
         cast_shadow = true,
       },
     )
@@ -172,7 +178,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   light_handle := spawn_spot_light(
     engine,
     {0.8, 0.9, 1, 1},
-    50.0,
+    25.0,
     math.PI * 0.25,
     position = {0, 20, 0},
   )

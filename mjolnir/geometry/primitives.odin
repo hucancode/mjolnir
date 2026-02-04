@@ -2,6 +2,7 @@ package geometry
 
 import "core:math"
 import "core:math/linalg"
+import "core:math/rand"
 
 Geometry :: struct {
   vertices:  []Vertex,
@@ -203,7 +204,7 @@ delete_geometry :: proc(geometry: Geometry) {
   delete(geometry.indices)
 }
 
-make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
+make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}, random_colors: bool = false) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 24)
   ret.indices = make([]u32, 36)
   // Front face
@@ -245,11 +246,17 @@ make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
     min = {-1, -1, -1},
     max = {1, 1, 1},
   }
+  if random_colors {
+    for &v in ret.vertices {
+      v.color = {rand.float32(), rand.float32(), rand.float32(), color.w}
+    }
+  }
   return
 }
 
 make_triangle :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  random_colors: bool = false,
 ) -> (
   ret: Geometry,
 ) {
@@ -281,11 +288,16 @@ make_triangle :: proc(
     min = {0, 0, 0},
     max = {1, 1, 0.1}, // add some thickness
   }
+  if random_colors {
+    for &v in ret.vertices {
+      v.color = {rand.float32(), rand.float32(), rand.float32(), color.w}
+    }
+  }
   return
 }
 
 // Quad (on XZ plane, facing Y up)
-make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
+make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}, random_colors: bool = false) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 4)
   ret.indices = make([]u32, 6)
   ret.vertices[0] = {{-1, 0, -1}, VEC_UP, color, {0, 0}, {0, 1, 0, 1}}
@@ -298,6 +310,11 @@ make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
     min = {-1, 0, -1},
     max = {1, 0.1, 1}, // add some thickness
   }
+  if random_colors {
+    for &v in ret.vertices {
+      v.color = {rand.float32(), rand.float32(), rand.float32(), color.w}
+    }
+  }
   return
 }
 
@@ -306,6 +323,7 @@ make_sphere :: proc(
   rings: u32 = 16,
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  random_colors: bool = false,
 ) -> (
   ret: Geometry,
 ) {
@@ -341,6 +359,11 @@ make_sphere :: proc(
     }
   }
   ret.aabb = aabb_from_vertices(ret.vertices)
+  if random_colors {
+    for &v in ret.vertices {
+      v.color = {rand.float32(), rand.float32(), rand.float32(), color.w}
+    }
+  }
   return
 }
 
@@ -349,6 +372,7 @@ make_cone :: proc(
   height: f32 = 2.0,
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  random_colors: bool = false,
 ) -> (
   ret: Geometry,
 ) {
@@ -400,6 +424,11 @@ make_cone :: proc(
     idx += 3
   }
   ret.aabb = aabb_from_vertices(ret.vertices)
+  if random_colors {
+    for &v in ret.vertices {
+      v.color = {rand.float32(), rand.float32(), rand.float32(), color.w}
+    }
+  }
   return
 }
 
@@ -446,6 +475,7 @@ make_capsule :: proc(
   height: f32 = 2.0,
   radius: f32 = 0.5,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  random_colors: bool = false,
 ) -> (
   ret: Geometry,
 ) {
@@ -570,6 +600,11 @@ make_capsule :: proc(
     i += 6
   }
   ret.aabb = aabb_from_vertices(ret.vertices)
+  if random_colors {
+    for &v in ret.vertices {
+      v.color = {rand.float32(), rand.float32(), rand.float32(), color.w}
+    }
+  }
   return
 }
 
@@ -579,6 +614,7 @@ make_torus :: proc(
   major_radius: f32 = 1.0,
   minor_radius: f32 = 0.3,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  random_colors: bool = false,
 ) -> (
   ret: Geometry,
 ) {
@@ -620,6 +656,11 @@ make_torus :: proc(
     }
   }
   ret.aabb = aabb_from_vertices(ret.vertices)
+  if random_colors {
+    for &v in ret.vertices {
+      v.color = {rand.float32(), rand.float32(), rand.float32(), color.w}
+    }
+  }
   return
 }
 
@@ -628,6 +669,7 @@ make_cylinder :: proc(
   height: f32 = 2.0,
   radius: f32 = 1.0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  random_colors: bool = false,
 ) -> (
   ret: Geometry,
 ) {
@@ -731,5 +773,10 @@ make_cylinder :: proc(
     i += 3
   }
   ret.aabb = aabb_from_vertices(ret.vertices)
+  if random_colors {
+    for &v in ret.vertices {
+      v.color = {rand.float32(), rand.float32(), rand.float32(), color.w}
+    }
+  }
   return
 }
