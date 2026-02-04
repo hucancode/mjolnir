@@ -7,35 +7,38 @@ import "core:math/linalg"
 
 RigidBody :: struct {
   position:             [3]f32,
-  restitution:          f32,
+  cached_sphere_radius: f32,
   rotation:             quaternion128,
   collider:             Collider,
-  friction:             f32,
   cached_aabb:          geometry.Aabb,
   cached_sphere_center: [3]f32,
-  cached_sphere_radius: f32,
-  trigger_only:         bool,
+}
+
+TriggerBody :: struct {
+  using base: RigidBody,
 }
 
 StaticRigidBody :: struct {
-  using base: RigidBody,
+  using base:   RigidBody,
+  restitution:  f32,
+  friction:     f32,
 }
 
 DynamicRigidBody :: struct {
-  using base: RigidBody,
-  inv_inertia:          [3]f32, // Diagonal inverse inertia for primitive shapes
-  mass:                 f32,
-  velocity:             [3]f32,
-  inv_mass:             f32,
-  angular_velocity:     [3]f32,
-  linear_damping:       f32,
-  force:                [3]f32,
-  angular_damping:      f32,
-  torque:               [3]f32,
-  sleep_timer:          f32,
-  is_sleeping:          bool,
-  enable_rotation:      bool,
-  is_killed:            bool,
+  using body:       StaticRigidBody,
+  enable_rotation:  bool,
+  is_sleeping:      bool,
+  inv_inertia:      [3]f32, // Diagonal inverse inertia for primitive shapes
+  mass:             f32,
+  velocity:         [3]f32,
+  inv_mass:         f32,
+  angular_velocity: [3]f32,
+  linear_damping:   f32,
+  force:            [3]f32,
+  angular_damping:  f32,
+  torque:           [3]f32,
+  sleep_timer:      f32,
+  is_killed:        bool,
 }
 
 static_rigid_body_init :: proc(
@@ -103,7 +106,11 @@ set_sphere_inertia :: proc(self: ^DynamicRigidBody, radius: f32) {
   self.inv_inertia = {inv_i, inv_i, inv_i}
 }
 
-set_cylinder_inertia :: proc(self: ^DynamicRigidBody, radius: f32, height: f32) {
+set_cylinder_inertia :: proc(
+  self: ^DynamicRigidBody,
+  radius: f32,
+  height: f32,
+) {
   m := self.mass
   r2 := radius * radius
   h2 := height * height
