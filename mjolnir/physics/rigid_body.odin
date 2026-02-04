@@ -45,13 +45,11 @@ static_rigid_body_init :: proc(
   self: ^StaticRigidBody,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
-  trigger_only := false,
 ) {
   self.position = position
   self.rotation = rotation
   self.restitution = 0.2
   self.friction = 0.8
-  self.trigger_only = trigger_only
 }
 
 rigid_body_init :: proc(
@@ -60,7 +58,6 @@ rigid_body_init :: proc(
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
   enable_rotation := true,
-  trigger_only := false,
 ) {
   self.position = position
   self.rotation = rotation
@@ -71,7 +68,6 @@ rigid_body_init :: proc(
   self.linear_damping = 0.01
   self.angular_damping = 0.05
   self.enable_rotation = enable_rotation
-  self.trigger_only = trigger_only
   self.inv_inertia = {1.0, 1.0, 1.0}
   self.is_sleeping = false
   self.sleep_timer = 0.0
@@ -156,7 +152,7 @@ apply_impulse_at_point :: #force_inline proc(
 }
 
 integrate :: proc(self: ^DynamicRigidBody, dt: f32) {
-  if self.trigger_only || self.is_sleeping do return
+  if self.is_sleeping do return
   self.velocity += self.force * self.inv_mass * dt
   if self.enable_rotation {
     self.angular_velocity += (self.inv_inertia * self.torque) * dt
@@ -177,7 +173,7 @@ clear_forces :: proc(self: ^DynamicRigidBody) {
   self.torque = {}
 }
 
-update_cached_aabb_static :: proc(self: ^StaticRigidBody) {
+update_cached_aabb :: proc(self: ^RigidBody) {
   self.cached_aabb = collider_calculate_aabb(
     &self.collider,
     self.position,
@@ -186,20 +182,4 @@ update_cached_aabb_static :: proc(self: ^StaticRigidBody) {
   self.cached_sphere_center = geometry.aabb_center(self.cached_aabb)
   aabb_half_extents := (self.cached_aabb.max - self.cached_aabb.min) * 0.5
   self.cached_sphere_radius = linalg.length(aabb_half_extents)
-}
-
-update_cached_aabb_dynamic :: proc(self: ^DynamicRigidBody) {
-  self.cached_aabb = collider_calculate_aabb(
-    &self.collider,
-    self.position,
-    self.rotation,
-  )
-  self.cached_sphere_center = geometry.aabb_center(self.cached_aabb)
-  aabb_half_extents := (self.cached_aabb.max - self.cached_aabb.min) * 0.5
-  self.cached_sphere_radius = linalg.length(aabb_half_extents)
-}
-
-update_cached_aabb :: proc {
-  update_cached_aabb_static,
-  update_cached_aabb_dynamic,
 }

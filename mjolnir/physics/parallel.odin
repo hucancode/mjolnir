@@ -278,7 +278,7 @@ sequential_update_aabb_cache :: proc(physics: ^World) {
     body := &physics.bodies.entries[i].item
     if body.is_killed || body.is_sleeping do continue
     collider := &body.collider
-    update_cached_aabb(body)
+    update_cached_aabb(&body.base)
   }
 }
 
@@ -318,7 +318,6 @@ collision_detection_task :: proc(task: thread.Task) {
       if handle_a == handle_b do continue
       body_b := get(data.physics, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
-      if body_a.trigger_only || body_b.trigger_only do continue
       bounding_spheres_intersect(
         body_a.cached_sphere_center,
         body_a.cached_sphere_radius,
@@ -358,7 +357,6 @@ collision_detection_task :: proc(task: thread.Task) {
     for entry_b in static_candidates {
       handle_b := entry_b.handle
       body_b := get(data.physics, handle_b) or_continue
-      if body_a.trigger_only || body_b.trigger_only do continue
       bounding_spheres_intersect(
         body_a.cached_sphere_center,
         body_a.cached_sphere_radius,
@@ -433,7 +431,6 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
         if handle_a == handle_b do continue
         body_b := get(data.physics, handle_b) or_continue
         if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
-        if body_a.trigger_only || body_b.trigger_only do continue
         bounding_spheres_intersect(
           body_a.cached_sphere_center,
           body_a.cached_sphere_radius,
@@ -474,7 +471,6 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
       for entry_b in static_candidates {
         handle_b := entry_b.handle
         body_b := get(data.physics, handle_b) or_continue
-        if body_a.trigger_only || body_b.trigger_only do continue
         bounding_spheres_intersect(
           body_a.cached_sphere_center,
           body_a.cached_sphere_radius,
@@ -643,7 +639,6 @@ retest_persistent_contacts :: proc(
       body_b.cached_sphere_center,
       body_b.cached_sphere_radius,
     ) or_continue
-    if body_a.trigger_only || body_b.trigger_only do continue
     point, normal, penetration := test_collision(body_a, body_b) or_continue
     if body_a.is_sleeping do wake_up(body_a)
     if body_b.is_sleeping do wake_up(body_b)
@@ -676,7 +671,6 @@ retest_persistent_contacts :: proc(
       body_b.cached_sphere_center,
       body_b.cached_sphere_radius,
     ) or_continue
-    if body_a.trigger_only || body_b.trigger_only do continue
     point, normal, penetration := test_collision(body_a, body_b) or_continue
     if body_a.is_sleeping do wake_up(body_a)
     contact := StaticContact {
@@ -743,7 +737,6 @@ sequential_collision_detection :: proc(physics: ^World) {
       if tested_pairs[pair_hash] do continue
       body_b := get(physics, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
-      if body_a.trigger_only || body_b.trigger_only do continue
       if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
       test_collision_start := time.now()
       point, normal, penetration, hit := test_collision(body_a, body_b)
@@ -779,7 +772,6 @@ sequential_collision_detection :: proc(physics: ^World) {
       pair_hash := collision_pair_hash(handle_a, handle_b)
       if tested_pairs[pair_hash] do continue
       body_b := get(physics, handle_b) or_continue
-      if body_a.trigger_only || body_b.trigger_only do continue
       if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
       test_collision_start := time.now()
       point, normal, penetration, hit := test_collision(body_a, body_b)
@@ -862,9 +854,6 @@ sequential_collision_detection_traversal :: proc(physics: ^World) {
     if body_a.is_killed || body_b.is_killed do continue
     if body_a.is_sleeping && body_b.is_sleeping do continue
 
-    // Skip triggers
-    if body_a.trigger_only || body_b.trigger_only do continue
-
     // Bounding sphere test
     if !bounding_spheres_intersect(
       body_a.cached_sphere_center,
@@ -914,9 +903,6 @@ sequential_collision_detection_traversal :: proc(physics: ^World) {
 
     // Skip killed or sleeping dynamic bodies
     if body_a.is_killed || body_a.is_sleeping do continue
-
-    // Skip triggers
-    if body_a.trigger_only || body_b.trigger_only do continue
 
     // Bounding sphere test
     if !bounding_spheres_intersect(
@@ -999,7 +985,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
       entry_a := &data.physics.bodies.entries[idx_a]
       if !entry_a.active do continue
       body_a := &entry_a.item
-      if body_a.is_killed || body_a.trigger_only || body_a.is_sleeping do continue
+      if body_a.is_killed || body_a.is_sleeping do continue
       collider_a := &body_a.collider
       velocity_mag_sq := linalg.length2(body_a.velocity)
       dt_sq := data.dt * data.dt
@@ -1085,7 +1071,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
       if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
         safe_time := earliest_toi * 0.98
         body_a.position += body_a.velocity * data.dt * safe_time
-        update_cached_aabb(body_a)
+        update_cached_aabb(&body_a.base)
         vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
         if vel_along_normal < 0 {
           wake_up(body_a)
@@ -1185,7 +1171,7 @@ sequential_ccd :: proc(
   )
   #no_bounds_check for &entry_a, idx_a in physics.bodies.entries do if entry_a.active {
     body_a := &entry_a.item
-    if body_a.is_killed || body_a.trigger_only || body_a.is_sleeping do continue
+    if body_a.is_killed || body_a.is_sleeping do continue
     velocity_mag_sq := linalg.length2(body_a.velocity)
     if velocity_mag_sq < CCD_THRESHOLD_SQ do continue
     bodies_tested += 1
@@ -1237,7 +1223,7 @@ sequential_ccd :: proc(
     if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
       safe_time := earliest_toi * 0.98
       body_a.position += body_a.velocity * dt * safe_time
-      update_cached_aabb(body_a)
+      update_cached_aabb(&body_a.base)
       vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
       if vel_along_normal < 0 {
         wake_up(body_a)
@@ -1299,9 +1285,6 @@ collision_detection_task_traversal :: proc(task: thread.Task) {
     if body_a.is_killed || body_b.is_killed do continue
     if body_a.is_sleeping && body_b.is_sleeping do continue
 
-    // Skip triggers
-    if body_a.trigger_only || body_b.trigger_only do continue
-
     // Bounding sphere test
     bounding_spheres_intersect(
       body_a.cached_sphere_center,
@@ -1358,9 +1341,6 @@ collision_detection_task_traversal :: proc(task: thread.Task) {
 
     // Skip killed or sleeping dynamic bodies
     if body_a.is_killed || body_a.is_sleeping do continue
-
-    // Skip triggers
-    if body_a.trigger_only || body_b.trigger_only do continue
 
     // Bounding sphere test
     bounding_spheres_intersect(

@@ -119,7 +119,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         physics_node.transform.position,
         physics_node.transform.rotation,
         50.0,
-        false,
       )
       if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
         physics.set_cylinder_inertia(body, 1.0, 2.0)
@@ -133,7 +132,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         physics_node.transform.position,
         physics_node.transform.rotation,
         50.0,
-        false,
       )
       if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
         physics.set_box_inertia(body, {1.0, 1.0, 1.0})
@@ -147,7 +145,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         physics_node.transform.position,
         physics_node.transform.rotation,
         50.0,
-        false,
       )
       if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
         physics.set_sphere_inertia(body, 1.0)

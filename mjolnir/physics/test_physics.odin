@@ -1206,7 +1206,6 @@ test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
     {0, 2, 0},
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
-    false,
   )
   box, _ := get_dynamic_body(&physics_world, box_handle)
   box.rotation = linalg.quaternion_angle_axis(

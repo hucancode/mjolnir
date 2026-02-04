@@ -49,7 +49,6 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
             pos,
             linalg.QUATERNIONF32_IDENTITY,
             50.0,
-            false,
           )
           if body, ok := get_dynamic_body(&physics_world, body_handles[idx]);
              ok {
@@ -63,7 +62,6 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
             pos,
             linalg.QUATERNIONF32_IDENTITY,
             50.0,
-            false,
           )
           if body, ok := get_dynamic_body(&physics_world, body_handles[idx]);
              ok {
@@ -77,7 +75,6 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
             pos,
             linalg.QUATERNIONF32_IDENTITY,
             50.0,
-            false,
           )
           if body, ok := get_dynamic_body(&physics_world, body_handles[idx]);
              ok {

@@ -20,6 +20,7 @@ RayHit :: struct {
 BodyHandleResult :: union {
   DynamicRigidBodyHandle,
   StaticRigidBodyHandle,
+  TriggerHandle,
 }
 
 // Physics raycast - finds closest body hit by ray
@@ -106,6 +107,37 @@ raycast_single :: proc(
     }
   }
   return {}
+}
+
+// Raycast against trigger bodies only — linear scan over trigger pool
+raycast_trigger :: proc(
+  self: ^World,
+  ray: geometry.Ray,
+  max_dist: f32 = max(f32),
+) -> RayHit {
+  closest_hit := RayHit{hit = false, t = max_dist}
+  for i in 0 ..< len(self.trigger_bodies.entries) {
+    if !self.trigger_bodies.entries[i].active do continue
+    trigger := &self.trigger_bodies.entries[i].item
+    // Broad phase: ray vs cached AABB
+    inv_dir := 1.0 / ray.direction
+    t_near, t_far := geometry.ray_aabb_intersection(ray.origin, inv_dir, trigger.cached_aabb)
+    if t_near > t_far || t_far < 0 || t_near > closest_hit.t do continue
+    // Narrow phase
+    t, normal, hit := raycast_collider(ray, &trigger.collider, trigger.position, trigger.rotation, closest_hit.t)
+    if hit && t < closest_hit.t {
+      handle := TriggerHandle{
+        index      = u32(i),
+        generation = self.trigger_bodies.entries[i].generation,
+      }
+      closest_hit.body_handle = handle
+      closest_hit.t = t
+      closest_hit.point = ray.origin + ray.direction * t
+      closest_hit.normal = normal
+      closest_hit.hit = true
+    }
+  }
+  return closest_hit
 }
 
 // Raycast against a specific collider
@@ -241,6 +273,57 @@ query_box :: proc(
     collider := &body.collider
     if test_collider_aabb_overlap(collider, body.position, body.rotation, bounds) {
       append(results, candidate.handle)
+    }
+  }
+}
+
+// Query a single trigger against dynamic bodies — on-demand variant of trigger_overlaps
+query_trigger :: proc(
+  self: ^World,
+  handle: TriggerHandle,
+  results: ^[dynamic]DynamicRigidBodyHandle,
+) {
+  clear(results)
+  trigger, ok := get_trigger(self, handle)
+  if !ok do return
+  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  bvh_query_aabb_fast(&self.dynamic_bvh, trigger.cached_aabb, &dyn_candidates)
+  for candidate in dyn_candidates {
+    body := get(self, candidate.handle) or_continue
+    if body.is_killed do continue
+    _, _, _, hit := test_collision(
+      &trigger.collider, trigger.position, trigger.rotation,
+      &body.collider,    body.position,    body.rotation,
+    )
+    if hit {
+      append(results, candidate.handle)
+    }
+  }
+}
+
+// Find all triggers whose colliders overlap a given sphere
+query_triggers_in_sphere :: proc(
+  self: ^World,
+  center: [3]f32,
+  radius: f32,
+  results: ^[dynamic]TriggerHandle,
+) {
+  clear(results)
+  for i in 0 ..< len(self.trigger_bodies.entries) {
+    if !self.trigger_bodies.entries[i].active do continue
+    trigger := &self.trigger_bodies.entries[i].item
+    // Broad phase: bounding sphere check
+    bounding_spheres_intersect(
+      trigger.cached_sphere_center, trigger.cached_sphere_radius,
+      center, radius,
+    ) or_continue
+    // Narrow phase: collider vs sphere
+    if test_collider_sphere_overlap(&trigger.collider, trigger.position, trigger.rotation, center, radius) {
+      handle := TriggerHandle{
+        index      = u32(i),
+        generation = self.trigger_bodies.entries[i].generation,
+      }
+      append(results, handle)
     }
   }
 }

@@ -12,7 +12,7 @@ import "vendor:glfw"
 
 physics_world: physics.World
 cube_mesh_handles: [dynamic]resources.NodeHandle
-cube_body_to_mesh: map[physics.DynamicRigidBodyHandle]resources.NodeHandle
+cube_body_to_mesh: map[physics.TriggerHandle]resources.NodeHandle
 effector_sphere: resources.NodeHandle
 effector_position: [3]f32
 orbit_angle: f32 = 0.0
@@ -36,7 +36,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   physics.init(&physics_world)
   cube_body_to_mesh = make(
-    map[physics.DynamicRigidBodyHandle]resources.NodeHandle,
+    map[physics.TriggerHandle]resources.NodeHandle,
   )
   set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
@@ -54,19 +54,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for z in 0 ..< grid_size {
       world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
       world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
-      // Create physics body for cube
-      body_handle := physics.create_dynamic_body_box(
+      // Create trigger body for cube
+      body_handle := physics.create_trigger_box(
         &physics_world,
         {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
         position = {world_x, 0.5, world_z},
-        trigger_only = true,
       ) or_continue
       physics_node := spawn(
         engine,
         position = [3]f32{world_x, 0.5, world_z},
-        attachment = world.RigidBodyAttachment {
-          body_handle = body_handle,
-        },
       ) or_continue
       mesh_handle := spawn_child(
         engine,
@@ -141,7 +137,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       }
       log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
       // Use physics raycast
-      hit := physics.raycast(
+      hit := physics.raycast_trigger(
         &physics_world,
         ray,
       )
@@ -150,13 +146,11 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
         break mouse_click
       }
       clicked_cube = {}
-      switch body_handle in hit.body_handle {
-      case physics.DynamicRigidBodyHandle:
+      #partial switch body_handle in hit.body_handle {
+      case physics.TriggerHandle:
         if mesh_handle, ok := cube_body_to_mesh[body_handle]; ok {
           clicked_cube = mesh_handle
         }
-      case physics.StaticRigidBodyHandle:
-        // Ignore static hits for highlighting
       }
     }
   }
@@ -177,9 +171,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     scale(engine, handle, cube_scale)
   }
   // Query for cubes within effect radius using physics
-  affected: [dynamic]physics.DynamicRigidBodyHandle
+  affected: [dynamic]physics.TriggerHandle
   defer delete(affected)
-  physics.query_sphere(
+  physics.query_triggers_in_sphere(
     &physics_world,
     effector_position,
     effect_radius,

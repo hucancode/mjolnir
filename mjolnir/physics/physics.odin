@@ -27,6 +27,12 @@ BROADPHASE_BVH_SELF_TRAVERSAL :: #config(PHYSICS_BROADPHASE_BVH_SELF_TRAVERSAL, 
 
 DynamicRigidBodyHandle :: distinct cont.Handle
 StaticRigidBodyHandle :: distinct cont.Handle
+TriggerHandle :: distinct cont.Handle
+
+TriggerOverlap :: struct {
+  trigger: TriggerHandle,
+  body:    DynamicRigidBodyHandle,
+}
 
 World :: struct {
   bodies:                cont.PoolSoA(DynamicRigidBody),
@@ -40,6 +46,8 @@ World :: struct {
   dynamic_bvh:           geometry.BVH(DynamicBroadPhaseEntry),
   static_bvh:            geometry.BVH(StaticBroadPhaseEntry),
   body_bounds:           [dynamic]geometry.Aabb,
+  trigger_bodies:        cont.PoolSoA(TriggerBody),
+  trigger_overlaps:      [dynamic]TriggerOverlap,
   enable_parallel:       bool,
   thread_count:          int,
   thread_pool:           thread.Pool,
@@ -67,6 +75,8 @@ init :: proc(
 ) {
   cont.init_soa(&self.bodies)
   cont.init_soa(&self.static_bodies)
+  cont.init_soa(&self.trigger_bodies)
+  self.trigger_overlaps = make([dynamic]TriggerOverlap)
   self.dynamic_contacts = make([dynamic]DynamicContact)
   self.static_contacts = make([dynamic]StaticContact)
   self.prev_dynamic_contacts = make(map[u64]DynamicContact)
@@ -123,6 +133,8 @@ destroy :: proc(self: ^World) {
   }
   cont.destroy_soa(self.bodies, proc(body: ^DynamicRigidBody) {})
   cont.destroy_soa(self.static_bodies, proc(body: ^StaticRigidBody) {})
+  cont.destroy_soa(self.trigger_bodies, proc(body: ^TriggerBody) {})
+  delete(self.trigger_overlaps)
   delete(self.body_bounds)
   delete(self.dynamic_contacts)
   delete(self.static_contacts)
@@ -137,7 +149,6 @@ create_dynamic_body :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  trigger_only: bool = false,
   collider: Collider = {},
 ) -> (
   handle: DynamicRigidBodyHandle,
@@ -146,7 +157,6 @@ create_dynamic_body :: proc(
   body: ^DynamicRigidBody
   handle, body = cont.alloc_soa(&self.bodies, DynamicRigidBodyHandle) or_return
   rigid_body_init(body, position, rotation, mass)
-  body.trigger_only = trigger_only
   body.collider = collider
   return handle, true
 }
@@ -155,7 +165,6 @@ create_static_body :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
-  trigger_only: bool = false,
   collider: Collider = {},
 ) -> (
   handle: StaticRigidBodyHandle,
@@ -166,7 +175,7 @@ create_static_body :: proc(
     &self.static_bodies,
     StaticRigidBodyHandle,
   ) or_return
-  static_rigid_body_init(body, position, rotation, trigger_only)
+  static_rigid_body_init(body, position, rotation)
   body.collider = collider
   return handle, true
 }
@@ -190,7 +199,6 @@ create_dynamic_body_sphere :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  trigger_only: bool = false,
 ) -> (
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
@@ -203,7 +211,6 @@ create_dynamic_body_sphere :: proc(
     position,
     rotation,
     mass,
-    trigger_only,
     collider,
   ) or_return
   return body_handle, true
@@ -214,7 +221,6 @@ create_static_body_sphere :: proc(
   radius: f32 = 1.0,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
-  trigger_only: bool = false,
 ) -> (
   body_handle: StaticRigidBodyHandle,
   ok: bool,
@@ -226,7 +232,6 @@ create_static_body_sphere :: proc(
     self,
     position,
     rotation,
-    trigger_only,
     collider,
   ) or_return
   return body_handle, true
@@ -238,7 +243,6 @@ create_dynamic_body_box :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  trigger_only: bool = false,
 ) -> (
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
@@ -251,7 +255,6 @@ create_dynamic_body_box :: proc(
     position,
     rotation,
     mass,
-    trigger_only,
     collider,
   ) or_return
   return body_handle, true
@@ -262,7 +265,6 @@ create_static_body_box :: proc(
   half_extents: [3]f32,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
-  trigger_only: bool = false,
 ) -> (
   body_handle: StaticRigidBodyHandle,
   ok: bool,
@@ -274,7 +276,6 @@ create_static_body_box :: proc(
     self,
     position,
     rotation,
-    trigger_only,
     collider,
   ) or_return
   return body_handle, true
@@ -287,7 +288,6 @@ create_dynamic_body_cylinder :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  trigger_only: bool = false,
 ) -> (
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
@@ -301,7 +301,6 @@ create_dynamic_body_cylinder :: proc(
     position,
     rotation,
     mass,
-    trigger_only,
     collider,
   ) or_return
   return body_handle, true
@@ -313,7 +312,6 @@ create_static_body_cylinder :: proc(
   height: f32,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
-  trigger_only: bool = false,
 ) -> (
   body_handle: StaticRigidBodyHandle,
   ok: bool,
@@ -326,7 +324,6 @@ create_static_body_cylinder :: proc(
     self,
     position,
     rotation,
-    trigger_only,
     collider,
   ) or_return
   return body_handle, true
@@ -340,7 +337,6 @@ create_dynamic_body_fan :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
-  trigger_only: bool = false,
 ) -> (
   body_handle: DynamicRigidBodyHandle,
   ok: bool,
@@ -355,7 +351,6 @@ create_dynamic_body_fan :: proc(
     position,
     rotation,
     mass,
-    trigger_only,
     collider,
   ) or_return
   return body_handle, true
@@ -368,7 +363,6 @@ create_static_body_fan :: proc(
   angle: f32,
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
-  trigger_only: bool = false,
 ) -> (
   body_handle: StaticRigidBodyHandle,
   ok: bool,
@@ -382,7 +376,6 @@ create_static_body_fan :: proc(
     self,
     position,
     rotation,
-    trigger_only,
     collider,
   ) or_return
   return body_handle, true
@@ -410,7 +403,7 @@ step :: proc(self: ^World, dt: f32) {
   for i in 0 ..< len(self.bodies.entries) {
     if !self.bodies.entries[i].active do continue
     body := &self.bodies.entries[i].item
-    if body.is_killed || body.trigger_only do continue
+    if body.is_killed do continue
     lin_speed_sq := linalg.length2(body.velocity)
     ang_speed_sq := linalg.length2(body.angular_velocity)
     if lin_speed_sq < SLEEP_LINEAR_THRESHOLD_SQ &&
@@ -435,7 +428,7 @@ step :: proc(self: ^World, dt: f32) {
   for idx in 0 ..< len(self.bodies.entries) {
     if !self.bodies.entries[idx].active do continue
     body := &self.bodies.entries[idx].item
-    if body.is_killed || body.trigger_only || body.is_sleeping do continue
+    if body.is_killed || body.is_sleeping do continue
     awake_body_count += 1
   }
   force_application_time := time.since(force_application_start)
@@ -512,7 +505,7 @@ step :: proc(self: ^World, dt: f32) {
         destroy_body(self, handle)
         continue
       }
-      update_cached_aabb(body)
+      update_cached_aabb(&body.base)
       handle := DynamicRigidBodyHandle {
         index      = u32(idx),
         generation = self.bodies.entries[idx].generation,
@@ -540,7 +533,7 @@ step :: proc(self: ^World, dt: f32) {
     for idx in 0 ..< len(self.static_bodies.entries) {
       if !self.static_bodies.entries[idx].active do continue
       body := &self.static_bodies.entries[idx].item
-      update_cached_aabb(body)
+      update_cached_aabb(&body.base)
       handle := StaticRigidBodyHandle {
         index      = u32(idx),
         generation = self.static_bodies.entries[idx].generation,
@@ -750,6 +743,34 @@ step :: proc(self: ^World, dt: f32) {
     refit_time += time.since(cache_update_start_substep)
   }
   substep_time := time.since(substep_start)
+  // Trigger overlap detection
+  clear(&self.trigger_overlaps)
+  trigger_dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  for i in 0 ..< len(self.trigger_bodies.entries) {
+    if !self.trigger_bodies.entries[i].active do continue
+    trigger := &self.trigger_bodies.entries[i].item
+    trigger_handle := TriggerHandle{
+      index      = u32(i),
+      generation = self.trigger_bodies.entries[i].generation,
+    }
+    update_cached_aabb(&trigger.base)
+    clear(&trigger_dyn_candidates)
+    bvh_query_aabb_fast(&self.dynamic_bvh, trigger.cached_aabb, &trigger_dyn_candidates)
+    for candidate in trigger_dyn_candidates {
+      body := get(self, candidate.handle) or_continue
+      if body.is_killed do continue
+      _, _, _, hit := test_collision(
+        &trigger.collider, trigger.position, trigger.rotation,
+        &body.collider,    body.position,    body.rotation,
+      )
+      if hit {
+        append(&self.trigger_overlaps, TriggerOverlap{
+          trigger = trigger_handle,
+          body    = candidate.handle,
+        })
+      }
+    }
+  }
   cache_update_time: time.Duration = 0
   cleanup_start := time.now()
   for idx in 0 ..< len(self.bodies.entries) {
@@ -820,7 +841,107 @@ get_static_body :: #force_inline proc(
   return cont.get_soa(&self.static_bodies, handle)
 }
 
+get_trigger :: #force_inline proc(
+  self: ^World,
+  handle: TriggerHandle,
+) -> (
+  ret: ^TriggerBody,
+  ok: bool,
+) #optional_ok {
+  return cont.get_soa(&self.trigger_bodies, handle)
+}
+
 get :: proc {
   get_dynamic_body,
   get_static_body,
+  get_trigger,
+}
+
+create_trigger :: proc(
+  self: ^World,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+  collider: Collider = {},
+) -> (handle: TriggerHandle, ok: bool) #optional_ok {
+  body: ^TriggerBody
+  handle, body = cont.alloc_soa(&self.trigger_bodies, TriggerHandle) or_return
+  body.position = position
+  body.rotation = rotation
+  body.collider = collider
+  update_cached_aabb(&body.base)
+  return handle, true
+}
+
+create_trigger_sphere :: proc(
+  self: ^World,
+  radius: f32 = 1.0,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (handle: TriggerHandle, ok: bool) #optional_ok {
+  collider := SphereCollider{radius = radius}
+  return create_trigger(self, position, rotation, collider)
+}
+
+create_trigger_box :: proc(
+  self: ^World,
+  half_extents: [3]f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (handle: TriggerHandle, ok: bool) #optional_ok {
+  collider := BoxCollider{half_extents = half_extents}
+  return create_trigger(self, position, rotation, collider)
+}
+
+create_trigger_cylinder :: proc(
+  self: ^World,
+  radius: f32,
+  height: f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (handle: TriggerHandle, ok: bool) #optional_ok {
+  collider := CylinderCollider{radius = radius, height = height}
+  return create_trigger(self, position, rotation, collider)
+}
+
+create_trigger_fan :: proc(
+  self: ^World,
+  radius: f32,
+  height: f32,
+  angle: f32,
+  position: [3]f32 = {0, 0, 0},
+  rotation := linalg.QUATERNIONF32_IDENTITY,
+) -> (handle: TriggerHandle, ok: bool) #optional_ok {
+  collider := FanCollider{radius = radius, height = height, angle = angle}
+  return create_trigger(self, position, rotation, collider)
+}
+
+destroy_trigger :: proc(self: ^World, handle: TriggerHandle) {
+  cont.free_soa(&self.trigger_bodies, handle)
+}
+
+set_trigger_position :: proc(self: ^World, handle: TriggerHandle, position: [3]f32) {
+  body, ok := get_trigger(self, handle)
+  if !ok do return
+  body.position = position
+  update_cached_aabb(&body.base)
+}
+
+set_trigger_rotation :: proc(self: ^World, handle: TriggerHandle, rotation: quaternion128) {
+  body, ok := get_trigger(self, handle)
+  if !ok do return
+  body.rotation = rotation
+  update_cached_aabb(&body.base)
+}
+
+set_trigger_transform :: proc(
+  self: ^World,
+  handle: TriggerHandle,
+  position: [3]f32,
+  rotation: quaternion128,
+) {
+  body, ok := get_trigger(self, handle)
+  if !ok do return
+  body.position = position
+  body.rotation = rotation
+  update_cached_aabb(&body.base)
 }
