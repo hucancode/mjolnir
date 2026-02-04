@@ -30,7 +30,7 @@ Manager :: struct {
   post_process: post_process.Renderer,
   debug_ui:     debug_ui.Renderer,
   ui_system:    ui.System,
-  ui_renderer:  ui.Renderer,
+  ui:           ui.Renderer,
   main_camera:  resources.CameraHandle,
   visibility:   visibility.VisibilitySystem,
 }
@@ -50,17 +50,17 @@ record_compute_commands :: proc(
     resources.camera_upload_data(rm, u32(cam_index), frame_index)
     // Only build pyramid if enabled for this camera
     if cam.enable_depth_pyramid {
-      visibility.build_pyramid(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), frame_index,  rm)// Build pyramid[N]
+      visibility.build_pyramid(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), frame_index, rm) // Build pyramid[N]
     }
     // Only perform culling if enabled for this camera
     if cam.enable_culling {
-      visibility.perform_culling(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), next_frame_index,  {.VISIBLE}, {}, rm)// Write draw_list[N+1]
+      visibility.perform_culling(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), next_frame_index, {.VISIBLE}, {}, rm) // Write draw_list[N+1]
     }
   }
   for &entry, cam_index in rm.spherical_cameras.entries do if entry.active {
     cam := &entry.item
     resources.spherical_camera_upload_data(rm, cam, u32(cam_index), frame_index)
-    visibility.perform_sphere_culling(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), next_frame_index,  {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, rm)// Write draw_list[N+1]
+    visibility.perform_sphere_culling(&self.visibility, gctx, compute_buffer, cam, u32(cam_index), next_frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, rm) // Write draw_list[N+1]
   }
   particles.simulate(
     &self.particles,
@@ -96,7 +96,15 @@ init :: proc(
     swapchain_extent.height,
     swapchain_format,
     .D32_SFLOAT,
-    {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .DEBUG_DRAW, .POST_PROCESS},
+    {
+      .SHADOW,
+      .GEOMETRY,
+      .LIGHTING,
+      .TRANSPARENCY,
+      .PARTICLES,
+      .DEBUG_DRAW,
+      .POST_PROCESS,
+    },
     {3, 4, 3}, // Camera slightly above and diagonal to origin
     {0, 0, 0}, // Looking at origin
     math.PI * 0.5, // FOV
@@ -165,7 +173,7 @@ init :: proc(
   debug_draw.init(&self.debug_draw, gctx, rm) or_return
   ui.init_ui_system(&self.ui_system)
   ui.init_renderer(
-    &self.ui_renderer,
+    &self.ui,
     &self.ui_system,
     gctx,
     rm,
@@ -181,7 +189,7 @@ shutdown :: proc(
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  ui.shutdown(&self.ui_renderer, gctx, rm)
+  ui.shutdown(&self.ui, gctx, rm)
   ui.shutdown_ui_system(&self.ui_system)
   debug_ui.shutdown(&self.debug_ui, gctx)
   debug_draw.shutdown(&self.debug_draw, gctx)
@@ -492,11 +500,11 @@ record_ui_pass :: proc(
 ) {
   // UI rendering pass - renders on top of post-processed image
   rendering_attachment_info := vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = swapchain_view,
+    sType       = .RENDERING_ATTACHMENT_INFO,
+    imageView   = swapchain_view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .LOAD,
-    storeOp = .STORE,
+    loadOp      = .LOAD,
+    storeOp     = .STORE,
   }
 
   rendering_info := vk.RenderingInfo {
@@ -511,10 +519,10 @@ record_ui_pass :: proc(
 
   // Set viewport and scissor
   viewport := vk.Viewport {
-    x = 0,
-    y = f32(swapchain_extent.height),
-    width = f32(swapchain_extent.width),
-    height = -f32(swapchain_extent.height),
+    x        = 0,
+    y        = f32(swapchain_extent.height),
+    width    = f32(swapchain_extent.width),
+    height   = -f32(swapchain_extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
@@ -526,21 +534,21 @@ record_ui_pass :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 
   // Bind pipeline and descriptor sets
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.ui_renderer.pipeline)
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.ui.pipeline)
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    self.ui_renderer.pipeline_layout,
+    self.ui.pipeline_layout,
     0,
     1,
-    &self.ui_renderer.projection_descriptor_set,
+    &self.ui.projection_descriptor_set,
     0,
     nil,
   )
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    self.ui_renderer.pipeline_layout,
+    self.ui.pipeline_layout,
     1,
     1,
     &rm.textures_descriptor_set,
@@ -550,7 +558,16 @@ record_ui_pass :: proc(
 
   // Render UI
   ui.compute_layout_all(&self.ui_system)
-  ui.render(&self.ui_renderer, &self.ui_system, rm, gctx, command_buffer, swapchain_extent.width, swapchain_extent.height, frame_index)
+  ui.render(
+    &self.ui,
+    &self.ui_system,
+    rm,
+    gctx,
+    command_buffer,
+    swapchain_extent.width,
+    swapchain_extent.height,
+    frame_index,
+  )
 
   vk.CmdEndRendering(command_buffer)
 }

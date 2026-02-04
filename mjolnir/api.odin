@@ -10,8 +10,8 @@ import "core:time"
 import "geometry"
 import "level_manager"
 import nav "navigation"
-import "physics"
 import "navigation/recast"
+import "physics"
 import "render"
 import "render/debug_draw"
 import "render/post_process"
@@ -67,10 +67,10 @@ EventHandlers :: ui.EventHandlers
 
 // NavMeshQuality controls navmesh generation precision vs performance tradeoff
 NavMeshQuality :: enum {
-  LOW,    // Fast generation, coarse mesh - good for large open areas
+  LOW, // Fast generation, coarse mesh - good for large open areas
   MEDIUM, // Balanced quality and performance - recommended default
-  HIGH,   // Higher precision - better for detailed environments
-  ULTRA,  // Maximum precision - use for small intricate spaces
+  HIGH, // Higher precision - better for detailed environments
+  ULTRA, // Maximum precision - use for small intricate spaces
 }
 
 // NavMeshConfig provides user-friendly agent-centric parameters
@@ -1177,8 +1177,8 @@ navmesh_config_to_recast :: proc(cfg: NavMeshConfig) -> recast.Config {
   switch cfg.quality {
   case .LOW:
     // Coarse mesh - fast generation, suitable for large open areas
-    cell_size = cfg.agent_radius * 0.5        // ~0.3 for radius 0.6
-    cell_height = cfg.agent_radius * 0.33     // ~0.2 for radius 0.6
+    cell_size = cfg.agent_radius * 0.5 // ~0.3 for radius 0.6
+    cell_height = cfg.agent_radius * 0.33 // ~0.2 for radius 0.6
     min_region_area = 32
     merge_region_area = 200
     max_edge_length = 20.0
@@ -1222,20 +1222,20 @@ navmesh_config_to_recast :: proc(cfg: NavMeshConfig) -> recast.Config {
   }
 
   return recast.Config {
-    cs                       = cell_size,
-    ch                       = cell_height,
-    walkable_slope           = cfg.agent_max_slope,
-    walkable_height          = i32(math.ceil_f32(cfg.agent_height / cell_height)),
-    walkable_climb           = i32(math.floor_f32(cfg.agent_max_climb / cell_height)),
-    walkable_radius          = i32(math.ceil_f32(cfg.agent_radius / cell_size)),
-    max_edge_len             = i32(max_edge_length / cell_size),
+    cs = cell_size,
+    ch = cell_height,
+    walkable_slope = cfg.agent_max_slope,
+    walkable_height = i32(math.ceil_f32(cfg.agent_height / cell_height)),
+    walkable_climb = i32(math.floor_f32(cfg.agent_max_climb / cell_height)),
+    walkable_radius = i32(math.ceil_f32(cfg.agent_radius / cell_size)),
+    max_edge_len = i32(max_edge_length / cell_size),
     max_simplification_error = max_edge_error,
-    min_region_area          = min_region_area,
-    merge_region_area        = merge_region_area,
-    max_verts_per_poly       = max_verts_per_poly,
-    detail_sample_dist       = detail_sample_dist * cell_size,
-    detail_sample_max_error  = detail_sample_max_error * cell_height,
-    border_size              = 0,
+    min_region_area = min_region_area,
+    merge_region_area = merge_region_area,
+    max_verts_per_poly = max_verts_per_poly,
+    detail_sample_dist = detail_sample_dist * cell_size,
+    detail_sample_max_error = detail_sample_max_error * cell_height,
+    border_size = 0,
   }
 }
 
@@ -1292,13 +1292,11 @@ find_path :: proc(
   start_pos: [3]f32,
   end_pos: [3]f32,
   max_path_length: i32 = 256,
-) -> (path: [][3]f32, ok: bool) #optional_ok {
-  return nav.find_path(
-    &engine.nav_sys,
-    start_pos,
-    end_pos,
-    max_path_length,
-  )
+) -> (
+  path: [][3]f32,
+  ok: bool,
+) #optional_ok {
+  return nav.find_path(&engine.nav_sys, start_pos, end_pos, max_path_length)
 }
 
 nav_is_position_walkable :: proc(engine: ^Engine, position: [3]f32) -> bool {
@@ -1587,12 +1585,18 @@ raycast :: proc(
   handle: resources.NodeHandle,
 ) {
   dir := linalg.normalize(direction)
-  ray := geometry.Ray{origin = origin, direction = dir}
+  ray := geometry.Ray {
+    origin    = origin,
+    direction = dir,
+  }
   physics_hit := physics.raycast(physics_world, ray, max_distance)
   if !physics_hit.hit {
     return false, 0, {0, 0, 0}, {}
   }
-  node_handle, found := find_node_by_body_handle(engine, physics_hit.body_handle)
+  node_handle, found := find_node_by_body_handle(
+    engine,
+    physics_hit.body_handle,
+  )
   if !found {
     return false, 0, {0, 0, 0}, {}
   }
@@ -1605,7 +1609,10 @@ query_sphere :: proc(
   center: [3]f32,
   radius: f32,
 ) -> []resources.NodeHandle {
-  results := make([dynamic]physics.DynamicRigidBodyHandle, context.temp_allocator)
+  results := make(
+    [dynamic]physics.DynamicRigidBodyHandle,
+    context.temp_allocator,
+  )
   physics.query_sphere(physics_world, center, radius, &results)
   node_handles := make([dynamic]resources.NodeHandle, context.temp_allocator)
   for body_handle in results {
@@ -1622,8 +1629,14 @@ query_box :: proc(
   min: [3]f32,
   max: [3]f32,
 ) -> []resources.NodeHandle {
-  bounds := geometry.Aabb{min = min, max = max}
-  results := make([dynamic]physics.DynamicRigidBodyHandle, context.temp_allocator)
+  bounds := geometry.Aabb {
+    min = min,
+    max = max,
+  }
+  results := make(
+    [dynamic]physics.DynamicRigidBodyHandle,
+    context.temp_allocator,
+  )
   physics.query_box(physics_world, bounds, &results)
   node_handles := make([dynamic]resources.NodeHandle, context.temp_allocator)
   for body_handle in results {
@@ -1789,7 +1802,14 @@ ui_create_mesh2d :: proc(
   Mesh2DHandle,
   bool,
 ) #optional_ok {
-  return ui.create_mesh2d(&engine.render.ui_system, position, vertices, indices, texture, z_order)
+  return ui.create_mesh2d(
+    &engine.render.ui_system,
+    position,
+    vertices,
+    indices,
+    texture,
+    z_order,
+  )
 }
 
 ui_create_quad2d :: proc(
@@ -1803,7 +1823,14 @@ ui_create_quad2d :: proc(
   Quad2DHandle,
   bool,
 ) #optional_ok {
-  return ui.create_quad2d(&engine.render.ui_system, position, size, texture, color, z_order)
+  return ui.create_quad2d(
+    &engine.render.ui_system,
+    position,
+    size,
+    texture,
+    color,
+    z_order,
+  )
 }
 
 ui_create_text2d :: proc(
@@ -1820,7 +1847,18 @@ ui_create_text2d :: proc(
   Text2DHandle,
   bool,
 ) #optional_ok {
-  return ui.create_text2d(&engine.render.ui_system, &engine.render.ui_renderer, position, text, font_size, color, z_order, bounds, h_align, v_align)
+  return ui.create_text2d(
+    &engine.render.ui_system,
+    &engine.render.ui,
+    position,
+    text,
+    font_size,
+    color,
+    z_order,
+    bounds,
+    h_align,
+    v_align,
+  )
 }
 
 ui_create_box :: proc(
@@ -1833,7 +1871,13 @@ ui_create_box :: proc(
   BoxHandle,
   bool,
 ) #optional_ok {
-  return ui.create_box(&engine.render.ui_system, position, size, background_color, z_order)
+  return ui.create_box(
+    &engine.render.ui_system,
+    position,
+    size,
+    background_color,
+    z_order,
+  )
 }
 
 ui_get_widget :: proc(engine: ^Engine, handle: UIWidgetHandle) -> ^UIWidget {
@@ -1880,10 +1924,14 @@ ui_destroy_widget :: proc(engine: ^Engine, handle: UIWidgetHandle) {
   ui.destroy_widget(&engine.render.ui_system, handle)
 }
 
-ui_box_add_child :: proc(engine: ^Engine, box_handle: BoxHandle, child_handle: UIWidgetHandle) {
+ui_box_add_child :: proc(
+  engine: ^Engine,
+  box_handle: BoxHandle,
+  child_handle: UIWidgetHandle,
+) {
   ui.box_add_child(&engine.render.ui_system, box_handle, child_handle)
 }
 
 ui_set_text :: proc(engine: ^Engine, handle: Text2DHandle, text: string) {
-  ui.set_text(&engine.render.ui_system, &engine.render.ui_renderer, handle, text)
+  ui.set_text(&engine.render.ui_system, &engine.render.ui, handle, text)
 }
