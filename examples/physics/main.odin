@@ -23,7 +23,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
-  mjolnir.run(engine, 800, 600, "Physics Visual Test - Falling Cubes")
+  mjolnir.run(engine, 800, 600, "Physics Stress Test")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -101,18 +101,55 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Parent node with physics
     physics_node_handle := world.spawn(&engine.world, pos)
     physics_node := world.get_node(&engine.world, physics_node_handle)
-    body_handle := physics.create_dynamic_body_cylinder(
-      &physics_world,
-      1.0,
-      2.0,
-      physics_node.transform.position,
-      physics_node.transform.rotation,
-      50.0,
-      false,
-    )
-    if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
-      physics.set_cylinder_inertia(body, 1.0, 2.0)
+
+    // Alternate between cylinder (0), cube (1), and sphere (2)
+    shape_type := i % 3
+    body_handle: physics.DynamicRigidBodyHandle
+    mesh_handle: resources.MeshHandle
+
+    switch shape_type {
+    case 0: // Cylinder
+      body_handle = physics.create_dynamic_body_cylinder(
+        &physics_world,
+        1.0,
+        2.0,
+        physics_node.transform.position,
+        physics_node.transform.rotation,
+        50.0,
+        false,
+      )
+      if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
+        physics.set_cylinder_inertia(body, 1.0, 2.0)
+      }
+      mesh_handle = cylinder_mesh
+    case 1: // Cube
+      body_handle = physics.create_dynamic_body_box(
+        &physics_world,
+        {1.0, 1.0, 1.0},
+        physics_node.transform.position,
+        physics_node.transform.rotation,
+        50.0,
+        false,
+      )
+      if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
+        physics.set_box_inertia(body, {1.0, 1.0, 1.0})
+      }
+      mesh_handle = cube_mesh
+    case 2: // Sphere
+      body_handle = physics.create_dynamic_body_sphere(
+        &physics_world,
+        1.0,
+        physics_node.transform.position,
+        physics_node.transform.rotation,
+        50.0,
+        false,
+      )
+      if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
+        physics.set_sphere_inertia(body, 1.0)
+      }
+      mesh_handle = sphere_mesh
     }
+
     physics_node.attachment = world.RigidBodyAttachment {
       body_handle = body_handle,
     }
@@ -121,13 +158,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
       engine,
       physics_node_handle,
       attachment = world.MeshAttachment {
-        handle = cylinder_mesh,
+        handle = mesh_handle,
         material = cube_mat,
         cast_shadow = true,
       },
     )
   }
-  log.infof("Created %d cubes", PIECE_COUNT)
+  log.infof("Created %d physics objects", PIECE_COUNT)
   if camera := get_main_camera(engine); camera != nil {
     camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
     sync_active_camera_controller(engine)

@@ -217,7 +217,9 @@ test_box_sphere :: proc(
     half_extents = box.half_extents,
     rotation     = rot_box,
   }
-  return geometry.obb_sphere_intersect(obb, pos_sphere, sphere.radius)
+  closest, normal, penetration, hit = geometry.obb_sphere_intersect(obb, pos_sphere, sphere.radius)
+  if invert_normal && hit do normal = -normal
+  return
 }
 
 // Point-in-cylinder test - checks if point is inside a cylinder
@@ -235,7 +237,7 @@ test_point_cylinder :: proc(
   // In local space, cylinder axis is Y, check radial distance and height
   half_height := cylinder.height * 0.5
   return(
-    linalg.length2(local_point) <= cylinder.radius * cylinder.radius &&
+    linalg.length2(local_point.xz) <= cylinder.radius * cylinder.radius &&
     math.abs(local_point.y) <= half_height \
   )
 }
@@ -254,7 +256,7 @@ test_point_fan :: proc(
   local_point = geometry.qmv(inv_rot, local_point)
   // In local space, fan forward direction is +Z, axis is Y
   // Check radial distance and height first (like cylinder)
-  radial_dist_sq := linalg.length2(local_point)
+  radial_dist_sq := linalg.length2(local_point.xz)
   half_height := fan.height * 0.5
   if radial_dist_sq > fan.radius * fan.radius ||
      math.abs(local_point.y) > half_height {
