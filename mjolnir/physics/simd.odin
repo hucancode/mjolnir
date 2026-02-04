@@ -627,21 +627,21 @@ quaternion_mul_vector3_batch4 :: proc "contextless" (
   vy := f32x4{v[0].y, v[1].y, v[2].y, v[3].y}
   vz := f32x4{v[0].z, v[1].z, v[2].z, v[3].z}
 
-  // Quaternion-vector multiplication: v' = v + 2*qw*(qv x v) + 2*(qv x (qv x v))
-  // First cross: t = qv x v
-  tx := qy * vz - qz * vy
-  ty := qz * vx - qx * vz
-  tz := qx * vy - qy * vx
+  // v' = v + 2*(qw*(qv x v) + qv x (qv x v))
+  // s = qv x v
+  sx := qy * vz - qz * vy
+  sy := qz * vx - qx * vz
+  sz := qx * vy - qy * vx
 
-  // Second cross: u = qv x t
-  ux := qy * tz - qz * ty
-  uy := qz * tx - qx * tz
-  uz := qx * ty - qy * tx
+  // a = qw*s + qv x s
+  ax := qw * sx + (qy * sz - qz * sy)
+  ay := qw * sy + (qz * sx - qx * sz)
+  az := qw * sz + (qx * sy - qy * sx)
 
-  // Final result: v' = v + 2*qw*t + 2*u (use constants)
-  rx := vx + SIMD_TWO_4 * qw * tx + SIMD_TWO_4 * ux
-  ry := vy + SIMD_TWO_4 * qw * ty + SIMD_TWO_4 * uy
-  rz := vz + SIMD_TWO_4 * qw * tz + SIMD_TWO_4 * uz
+  // v' = v + 2*a
+  rx := vx + ax + ax
+  ry := vy + ay + ay
+  rz := vz + az + az
 
   // Store results
   rx_arr := transmute([4]f32)rx
