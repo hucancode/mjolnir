@@ -430,7 +430,7 @@ step :: proc(self: ^World, dt: f32) {
 
   // Apply forces to all bodies (gravity, air resistance, etc.)
   force_application_start := time.now()
-  apply_gravity_simd(self)
+  apply_gravity(self)
   // Count awake bodies for logging
   awake_body_count := 0
   for idx in 0 ..< len(self.bodies.entries) {
@@ -442,7 +442,7 @@ step :: proc(self: ^World, dt: f32) {
   force_application_time := time.since(force_application_start)
   // Integrate velocities from forces ONCE for the entire frame
   integration_start := time.now()
-  integrate_velocities_simd(self, dt)
+  integrate_velocities(self, dt)
   integration_time := time.since(integration_start)
   // Track which bodies were handled by CCD (outside substep loop)
   ccd_start := time.now()
@@ -740,7 +740,7 @@ step :: proc(self: ^World, dt: f32) {
     }
     solver_time += time.since(solver_start)
     integration_start_substep := time.now()
-    integrate_positions_simd(self, substep_dt, ccd_handled[:])
+    integrate_positions(self, substep_dt, ccd_handled[:])
     integration_time_substep += time.since(integration_start_substep)
     cache_update_start_substep := time.now()
     if self.enable_parallel {
