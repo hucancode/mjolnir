@@ -66,7 +66,7 @@ apply_gravity :: proc(world: ^World) {
   for i in 0..<len(pool.entries) {
     if !pool.entries[i].active do continue
     body := &pool.entries[i].item
-    if body.is_killed || body.is_kinematic || body.trigger_only || body.is_sleeping do continue
+    if body.is_killed || body.trigger_only || body.is_sleeping do continue
 
     gravity_force := world.gravity * body.mass
     body.force += gravity_force
@@ -93,7 +93,7 @@ integrate_positions :: proc(world: ^World, dt: f32, ccd_handled: []bool) {
   for i in 0..<len(pool.entries) {
     if !pool.entries[i].active do continue
     body := &pool.entries[i].item
-    if body.is_killed || body.is_kinematic || body.trigger_only || body.is_sleeping do continue
+    if body.is_killed || body.trigger_only || body.is_sleeping do continue
     if i < len(ccd_handled) && ccd_handled[i] do continue
 
     body.position += body.velocity * dt
@@ -106,7 +106,7 @@ integrate_rotations :: proc(world: ^World, dt: f32, ccd_handled: []bool) {
   for i in 0..<len(pool.entries) {
     if !pool.entries[i].active do continue
     body := &pool.entries[i].item
-    if body.is_killed || body.is_kinematic || body.trigger_only || body.is_sleeping do continue
+    if body.is_killed || body.trigger_only || body.is_sleeping do continue
     if i < len(ccd_handled) && ccd_handled[i] do continue
     if !body.enable_rotation do continue
 

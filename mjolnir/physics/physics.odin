@@ -410,7 +410,7 @@ step :: proc(self: ^World, dt: f32) {
   for i in 0 ..< len(self.bodies.entries) {
     if !self.bodies.entries[i].active do continue
     body := &self.bodies.entries[i].item
-    if body.is_killed || body.is_kinematic || body.trigger_only do continue
+    if body.is_killed || body.trigger_only do continue
     lin_speed_sq := linalg.length2(body.velocity)
     ang_speed_sq := linalg.length2(body.angular_velocity)
     if lin_speed_sq < SLEEP_LINEAR_THRESHOLD_SQ &&
@@ -435,7 +435,7 @@ step :: proc(self: ^World, dt: f32) {
   for idx in 0 ..< len(self.bodies.entries) {
     if !self.bodies.entries[idx].active do continue
     body := &self.bodies.entries[idx].item
-    if body.is_killed || body.is_kinematic || body.trigger_only || body.is_sleeping do continue
+    if body.is_killed || body.trigger_only || body.is_sleeping do continue
     awake_body_count += 1
   }
   force_application_time := time.since(force_application_start)
@@ -755,7 +755,7 @@ step :: proc(self: ^World, dt: f32) {
   for idx in 0 ..< len(self.bodies.entries) {
     if !self.bodies.entries[idx].active do continue
     body := &self.bodies.entries[idx].item
-    if body.is_kinematic || body.is_killed do continue
+    if body.is_killed do continue
     if body.position.y < KILL_Y {
       body.is_killed = true
       self.killed_body_count += 1

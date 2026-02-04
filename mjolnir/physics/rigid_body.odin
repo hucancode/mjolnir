@@ -11,10 +11,10 @@ RigidBody :: struct {
   rotation:             quaternion128,
   collider:             Collider,
   friction:             f32,
-  trigger_only:         bool,
   cached_aabb:          geometry.Aabb,
   cached_sphere_center: [3]f32,
   cached_sphere_radius: f32,
+  trigger_only:         bool,
 }
 
 StaticRigidBody :: struct {
@@ -23,20 +23,19 @@ StaticRigidBody :: struct {
 
 DynamicRigidBody :: struct {
   using base: RigidBody,
-  mass:                 f32,
-  inv_mass:             f32,
   inv_inertia:          [3]f32, // Diagonal inverse inertia for primitive shapes
+  mass:                 f32,
   velocity:             [3]f32,
+  inv_mass:             f32,
   angular_velocity:     [3]f32,
-  force:                [3]f32,
-  torque:               [3]f32,
   linear_damping:       f32,
+  force:                [3]f32,
   angular_damping:      f32,
-  is_kinematic:         bool,
-  enable_rotation:      bool,
-  is_sleeping:          bool,
+  torque:               [3]f32,
   sleep_timer:          f32,
-  is_killed:            bool, // Flag for deferred removal
+  is_sleeping:          bool,
+  enable_rotation:      bool,
+  is_killed:            bool,
 }
 
 static_rigid_body_init :: proc(
@@ -150,7 +149,7 @@ apply_impulse_at_point :: #force_inline proc(
 }
 
 integrate :: proc(self: ^DynamicRigidBody, dt: f32) {
-  if self.is_kinematic || self.trigger_only || self.is_sleeping do return
+  if self.trigger_only || self.is_sleeping do return
   self.velocity += self.force * self.inv_mass * dt
   if self.enable_rotation {
     self.angular_velocity += (self.inv_inertia * self.torque) * dt
