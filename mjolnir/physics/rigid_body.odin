@@ -7,9 +7,9 @@ import "core:math/linalg"
 
 RigidBody :: struct {
   position:             [3]f32,
+  restitution:          f32,
   rotation:             quaternion128,
   collider:             Collider,
-  restitution:          f32,
   friction:             f32,
   trigger_only:         bool,
   cached_aabb:          geometry.Aabb,
@@ -34,8 +34,6 @@ DynamicRigidBody :: struct {
   angular_damping:      f32,
   is_kinematic:         bool,
   enable_rotation:      bool,
-  gravity_scale:        f32,
-  drag_coefficient:     f32,
   is_sleeping:          bool,
   sleep_timer:          f32,
   is_killed:            bool, // Flag for deferred removal
@@ -72,8 +70,6 @@ rigid_body_init :: proc(
   self.angular_damping = 0.05
   self.enable_rotation = enable_rotation
   self.trigger_only = trigger_only
-  self.gravity_scale = 1.0
-  self.drag_coefficient = 0.47
   self.inv_inertia = {1.0, 1.0, 1.0}
   self.is_sleeping = false
   self.sleep_timer = 0.0

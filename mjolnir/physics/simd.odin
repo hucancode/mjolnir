@@ -20,18 +20,9 @@ simd_lanes: int
 f32x4 :: #simd[4]f32
 f32x8 :: #simd[8]f32
 
-// SIMD constants (computed once, not per-call)
-SIMD_ZERO_4 := f32x4{0, 0, 0, 0}
+// SIMD constants
 SIMD_ONE_4 := f32x4{1, 1, 1, 1}
 SIMD_TWO_4 := f32x4{2, 2, 2, 2}
-SIMD_EPSILON_4 := f32x4 {
-  math.F32_EPSILON,
-  math.F32_EPSILON,
-  math.F32_EPSILON,
-  math.F32_EPSILON,
-}
-
-SIMD_ZERO_8 := f32x8{0, 0, 0, 0, 0, 0, 0, 0}
 SIMD_ONE_8 := f32x8{1, 1, 1, 1, 1, 1, 1, 1}
 SIMD_TWO_8 := f32x8{2, 2, 2, 2, 2, 2, 2, 2}
 
@@ -130,17 +121,15 @@ apply_gravity_simd :: proc(world: ^World) {
 
     // Load masses and gravity scales (through indexing)
     masses: Vec
-    g_scales: Vec
     for j in 0..<WIDTH {
       body := &bodies[i + j].item
       masses = simd.replace(masses, j, body.mass)
-      g_scales = simd.replace(g_scales, j, body.gravity_scale)
     }
 
     // Compute: F = g * mass * g_scale
-    fx := gx * masses * g_scales
-    fy := gy * masses * g_scales
-    fz := gz * masses * g_scales
+    fx := gx * masses
+    fy := gy * masses
+    fz := gz * masses
 
     // Load-modify-store forces
     old_fx, old_fy, old_fz: Vec
@@ -175,7 +164,7 @@ apply_gravity_simd :: proc(world: ^World) {
     if bodies[i].active {
       body := &bodies[i].item
       if !body.is_killed && !body.is_kinematic && !body.trigger_only && !body.is_sleeping {
-        gravity_force := world.gravity * body.mass * body.gravity_scale
+        gravity_force := world.gravity * body.mass
         body.force += gravity_force
       }
     }
@@ -191,7 +180,7 @@ apply_gravity_scalar :: proc(world: ^World) {
     body := &pool.entries[i].item
     if body.is_killed || body.is_kinematic || body.trigger_only || body.is_sleeping do continue
 
-    gravity_force := world.gravity * body.mass * body.gravity_scale
+    gravity_force := world.gravity * body.mass
     body.force += gravity_force
   }
 }
