@@ -562,7 +562,7 @@ parallel_collision_detection :: proc(
   total_bodies_tested := 0
   total_candidates := 0
   total_narrow_tests := 0
-  min_time := time.Duration(math.F64_MAX)
+  min_time := time.Duration(1e10) // 10 billion nano seconds = 10s
   max_time := time.Duration(0)
   total_time := time.Duration(0)
 
@@ -1389,7 +1389,7 @@ parallel_collision_detection_traversal :: proc(
   collection_start := time.now()
   total_pairs_tested := 0
   total_narrow_tests := 0
-  min_time := time.Duration(math.F64_MAX)
+  min_time := time.Duration(1e10) // 10 billion nano seconds = 10s
   max_time := time.Duration(0)
   total_time := time.Duration(0)
 
