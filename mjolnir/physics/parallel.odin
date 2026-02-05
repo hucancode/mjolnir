@@ -509,7 +509,6 @@ parallel_collision_detection :: proc(
 ) {
   parallel_start := time.now()
   primitive_count := len(self.dynamic_bvh.primitives)
-  if primitive_count == 0 do return
   if primitive_count < 100 || num_threads == 1 {
     sequential_collision_detection(self)
     return
@@ -618,93 +617,7 @@ parallel_collision_detection :: proc(
   }
 }
 
-// Phase 1: Retest persistent contacts from previous frame (no BVH query needed)
-retest_persistent_contacts :: proc(
-  physics: ^World,
-) -> (
-  persistent_tested: int,
-) {
-  tested_pairs := make(map[u64]bool, context.temp_allocator)
-  // Retest dynamic-dynamic contacts
-  for pair_hash, prev_contact in physics.prev_dynamic_contacts {
-    body_a := get(physics, prev_contact.body_a) or_continue
-    body_b := get(physics, prev_contact.body_b) or_continue
-    geometry.aabb_intersects(
-      body_a.cached_aabb,
-      body_b.cached_aabb,
-    ) or_continue
-    bounding_spheres_intersect(
-      body_a.cached_sphere_center,
-      body_a.cached_sphere_radius,
-      body_b.cached_sphere_center,
-      body_b.cached_sphere_radius,
-    ) or_continue
-    point, normal, penetration := test_collision(body_a, body_b) or_continue
-    if body_a.is_sleeping do wake_up(body_a)
-    if body_b.is_sleeping do wake_up(body_b)
-    contact := DynamicContact {
-      body_a      = prev_contact.body_a,
-      body_b      = prev_contact.body_b,
-      point       = point,
-      normal      = normal,
-      penetration = penetration,
-      restitution = (body_a.restitution + body_b.restitution) * 0.5,
-      friction    = (body_a.friction + body_b.friction) * 0.5,
-    }
-    contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-    contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-    append(&physics.dynamic_contacts, contact)
-    tested_pairs[pair_hash] = true
-    persistent_tested += 1
-  }
-  // Retest dynamic-static contacts
-  for pair_hash, prev_contact in physics.prev_static_contacts {
-    body_a := get(physics, prev_contact.body_a) or_continue
-    body_b := get(physics, prev_contact.body_b) or_continue
-    geometry.aabb_intersects(
-      body_a.cached_aabb,
-      body_b.cached_aabb,
-    ) or_continue
-    bounding_spheres_intersect(
-      body_a.cached_sphere_center,
-      body_a.cached_sphere_radius,
-      body_b.cached_sphere_center,
-      body_b.cached_sphere_radius,
-    ) or_continue
-    point, normal, penetration := test_collision(body_a, body_b) or_continue
-    if body_a.is_sleeping do wake_up(body_a)
-    contact := StaticContact {
-      body_a      = prev_contact.body_a,
-      body_b      = prev_contact.body_b,
-      point       = point,
-      normal      = normal,
-      penetration = penetration,
-      restitution = (body_a.restitution + body_b.restitution) * 0.5,
-      friction    = (body_a.friction + body_b.friction) * 0.5,
-    }
-    contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-    contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-    append(&physics.static_contacts, contact)
-    tested_pairs[pair_hash] = true
-    persistent_tested += 1
-  }
-  return
-}
-
 sequential_collision_detection :: proc(physics: ^World) {
-  // Phase 1: Retest persistent pairs directly (no BVH query)
-  persistent_tested := retest_persistent_contacts(physics)
-  // Phase 2: Find new pairs via BVH query (exclude already-tested persistent pairs)
-  tested_pairs := make(map[u64]bool, context.temp_allocator)
-  for contact in physics.dynamic_contacts {
-    hash := collision_pair_hash(contact.body_a, contact.body_b)
-    tested_pairs[hash] = true
-  }
-  for contact in physics.static_contacts {
-    hash := collision_pair_hash(contact.body_a, contact.body_b)
-    tested_pairs[hash] = true
-  }
-  // Pre-allocate with capacity to avoid reallocations
   dyn_candidates := make(
     [dynamic]DynamicBroadPhaseEntry,
     0,
@@ -717,7 +630,6 @@ sequential_collision_detection :: proc(physics: ^World) {
     128,
     context.temp_allocator,
   )
-  test_collision_time: time.Duration
   test_collision_start := time.now()
   for &bvh_entry in physics.dynamic_bvh.primitives {
     handle_a := bvh_entry.handle
@@ -734,13 +646,11 @@ sequential_collision_detection :: proc(physics: ^World) {
       handle_b := entry_b.handle
       if handle_a == handle_b do continue
       pair_hash := collision_pair_hash(handle_a, handle_b)
-      if tested_pairs[pair_hash] do continue
       body_b := get(physics, handle_b) or_continue
       if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
       if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
       test_collision_start := time.now()
       point, normal, penetration, hit := test_collision(body_a, body_b)
-      test_collision_time += time.since(test_collision_start)
       if !hit do continue
       if body_a.is_sleeping do wake_up(body_a)
       if body_b.is_sleeping do wake_up(body_b)
@@ -770,12 +680,10 @@ sequential_collision_detection :: proc(physics: ^World) {
     for entry_b in static_candidates {
       handle_b := entry_b.handle
       pair_hash := collision_pair_hash(handle_a, handle_b)
-      if tested_pairs[pair_hash] do continue
       body_b := get(physics, handle_b) or_continue
       if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
       test_collision_start := time.now()
       point, normal, penetration, hit := test_collision(body_a, body_b)
-      test_collision_time += time.since(test_collision_start)
       if !hit do continue
       if body_a.is_sleeping do wake_up(body_a)
       contact := StaticContact {
@@ -795,17 +703,9 @@ sequential_collision_detection :: proc(physics: ^World) {
       append(&physics.static_contacts, contact)
     }
   }
-  new_pairs :=
-    len(physics.dynamic_contacts) +
-    len(physics.static_contacts) -
-    persistent_tested
   log.infof(
-    "Test collision time: %.2fms | total time %.2fms | persistent=%d new=%d total=%d",
-    time.duration_milliseconds(test_collision_time),
+    "Test collision time: %.2fms",
     time.duration_milliseconds(time.since(test_collision_start)),
-    persistent_tested,
-    new_pairs,
-    len(physics.dynamic_contacts) + len(physics.static_contacts),
   )
 }
 

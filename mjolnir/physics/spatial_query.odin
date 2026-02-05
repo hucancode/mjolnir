@@ -34,12 +34,21 @@ raycast :: proc(
     t   = max_dist,
   }
   // Query dynamic BVH
-  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  dyn_candidates := make(
+    [dynamic]DynamicBroadPhaseEntry,
+    context.temp_allocator,
+  )
   bvh_query_ray_fast(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
-    t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, closest_hit.t)
+    t, normal, hit := raycast_collider(
+      ray,
+      collider,
+      body.position,
+      body.rotation,
+      closest_hit.t,
+    )
     if hit && t < closest_hit.t {
       closest_hit.body_handle = candidate.handle
       closest_hit.t = t
@@ -49,12 +58,21 @@ raycast :: proc(
     }
   }
   // Query static BVH
-  static_candidates := make([dynamic]StaticBroadPhaseEntry, context.temp_allocator)
+  static_candidates := make(
+    [dynamic]StaticBroadPhaseEntry,
+    context.temp_allocator,
+  )
   bvh_query_ray_fast(&self.static_bvh, ray, max_dist, &static_candidates)
   for candidate in static_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
-    t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, closest_hit.t)
+    t, normal, hit := raycast_collider(
+      ray,
+      collider,
+      body.position,
+      body.rotation,
+      closest_hit.t,
+    )
     if hit && t < closest_hit.t {
       closest_hit.body_handle = candidate.handle
       closest_hit.t = t
@@ -73,12 +91,21 @@ raycast_single :: proc(
   max_dist: f32 = max(f32),
 ) -> RayHit {
   // Query dynamic BVH
-  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  dyn_candidates := make(
+    [dynamic]DynamicBroadPhaseEntry,
+    context.temp_allocator,
+  )
   bvh_query_ray_fast(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
-    t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
+    t, normal, hit := raycast_collider(
+      ray,
+      collider,
+      body.position,
+      body.rotation,
+      max_dist,
+    )
     if hit {
       return RayHit {
         body_handle = candidate.handle,
@@ -90,12 +117,21 @@ raycast_single :: proc(
     }
   }
   // Query static BVH
-  static_candidates := make([dynamic]StaticBroadPhaseEntry, context.temp_allocator)
+  static_candidates := make(
+    [dynamic]StaticBroadPhaseEntry,
+    context.temp_allocator,
+  )
   bvh_query_ray_fast(&self.static_bvh, ray, max_dist, &static_candidates)
   for candidate in static_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
-    t, normal, hit := raycast_collider(ray, collider, body.position, body.rotation, max_dist)
+    t, normal, hit := raycast_collider(
+      ray,
+      collider,
+      body.position,
+      body.rotation,
+      max_dist,
+    )
     if hit {
       return RayHit {
         body_handle = candidate.handle,
@@ -115,18 +151,31 @@ raycast_trigger :: proc(
   ray: geometry.Ray,
   max_dist: f32 = max(f32),
 ) -> RayHit {
-  closest_hit := RayHit{hit = false, t = max_dist}
+  closest_hit := RayHit {
+    hit = false,
+    t   = max_dist,
+  }
   for i in 0 ..< len(self.trigger_bodies.entries) {
     if !self.trigger_bodies.entries[i].active do continue
     trigger := &self.trigger_bodies.entries[i].item
     // Broad phase: ray vs cached AABB
     inv_dir := 1.0 / ray.direction
-    t_near, t_far := geometry.ray_aabb_intersection(ray.origin, inv_dir, trigger.cached_aabb)
+    t_near, t_far := geometry.ray_aabb_intersection(
+      ray.origin,
+      inv_dir,
+      trigger.cached_aabb,
+    )
     if t_near > t_far || t_far < 0 || t_near > closest_hit.t do continue
     // Narrow phase
-    t, normal, hit := raycast_collider(ray, &trigger.collider, trigger.position, trigger.rotation, closest_hit.t)
+    t, normal, hit := raycast_collider(
+      ray,
+      &trigger.collider,
+      trigger.position,
+      trigger.rotation,
+      closest_hit.t,
+    )
     if hit && t < closest_hit.t {
-      handle := TriggerHandle{
+      handle := TriggerHandle {
         index      = u32(i),
         generation = self.trigger_bodies.entries[i].generation,
       }
@@ -247,12 +296,21 @@ query_sphere :: proc(
     max = center + [3]f32{radius, radius, radius},
   }
   // Only query dynamic bodies (static bodies don't need sphere queries typically)
-  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  dyn_candidates := make(
+    [dynamic]DynamicBroadPhaseEntry,
+    context.temp_allocator,
+  )
   bvh_query_aabb_fast(&self.dynamic_bvh, query_bounds, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
-    if test_collider_sphere_overlap(collider, body.position, body.rotation, center, radius) {
+    if test_collider_sphere_overlap(
+      collider,
+      body.position,
+      body.rotation,
+      center,
+      radius,
+    ) {
       append(results, candidate.handle)
     }
   }
@@ -266,12 +324,20 @@ query_box :: proc(
 ) {
   clear(results)
   // Only query dynamic bodies
-  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  dyn_candidates := make(
+    [dynamic]DynamicBroadPhaseEntry,
+    context.temp_allocator,
+  )
   bvh_query_aabb_fast(&self.dynamic_bvh, bounds, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
-    if test_collider_aabb_overlap(collider, body.position, body.rotation, bounds) {
+    if test_collider_aabb_overlap(
+      collider,
+      body.position,
+      body.rotation,
+      bounds,
+    ) {
       append(results, candidate.handle)
     }
   }
@@ -286,14 +352,55 @@ query_trigger :: proc(
   clear(results)
   trigger, ok := get_trigger(self, handle)
   if !ok do return
-  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
+  dyn_candidates := make(
+    [dynamic]DynamicBroadPhaseEntry,
+    context.temp_allocator,
+  )
   bvh_query_aabb_fast(&self.dynamic_bvh, trigger.cached_aabb, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     if body.is_killed do continue
     _, _, _, hit := test_collision(
-      &trigger.collider, trigger.position, trigger.rotation,
-      &body.collider,    body.position,    body.rotation,
+      &trigger.collider,
+      trigger.position,
+      trigger.rotation,
+      &body.collider,
+      body.position,
+      body.rotation,
+    )
+    if hit {
+      append(results, candidate.handle)
+    }
+  }
+}
+
+// Query a single trigger against static bodies — on-demand variant of trigger_static_overlaps
+query_trigger_static :: proc(
+  self: ^World,
+  handle: TriggerHandle,
+  results: ^[dynamic]StaticRigidBodyHandle,
+) {
+  clear(results)
+  trigger, ok := get_trigger(self, handle)
+  if !ok do return
+  static_candidates := make(
+    [dynamic]StaticBroadPhaseEntry,
+    context.temp_allocator,
+  )
+  bvh_query_aabb_fast(
+    &self.static_bvh,
+    trigger.cached_aabb,
+    &static_candidates,
+  )
+  for candidate in static_candidates {
+    body := get(self, candidate.handle) or_continue
+    _, _, _, hit := test_collision(
+      &trigger.collider,
+      trigger.position,
+      trigger.rotation,
+      &body.collider,
+      body.position,
+      body.rotation,
     )
     if hit {
       append(results, candidate.handle)
@@ -314,12 +421,20 @@ query_triggers_in_sphere :: proc(
     trigger := &self.trigger_bodies.entries[i].item
     // Broad phase: bounding sphere check
     bounding_spheres_intersect(
-      trigger.cached_sphere_center, trigger.cached_sphere_radius,
-      center, radius,
+      trigger.cached_sphere_center,
+      trigger.cached_sphere_radius,
+      center,
+      radius,
     ) or_continue
     // Narrow phase: collider vs sphere
-    if test_collider_sphere_overlap(&trigger.collider, trigger.position, trigger.rotation, center, radius) {
-      handle := TriggerHandle{
+    if test_collider_sphere_overlap(
+      &trigger.collider,
+      trigger.position,
+      trigger.rotation,
+      center,
+      radius,
+    ) {
+      handle := TriggerHandle {
         index      = u32(i),
         generation = self.trigger_bodies.entries[i].generation,
       }
@@ -353,7 +468,12 @@ test_collider_sphere_overlap :: proc(
     )
     return hit
   case CylinderCollider:
-    return test_point_cylinder(sphere_center, collider_pos, collider_rot, shape)
+    return test_point_cylinder(
+      sphere_center,
+      collider_pos,
+      collider_rot,
+      shape,
+    )
   case FanCollider:
     return test_point_fan(sphere_center, collider_pos, collider_rot, shape)
   }
