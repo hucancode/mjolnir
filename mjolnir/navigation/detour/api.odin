@@ -1,4 +1,4 @@
-package navigation_detour
+package detour
 
 import "../recast"
 import "core:math"

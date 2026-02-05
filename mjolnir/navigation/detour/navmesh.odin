@@ -1,4 +1,4 @@
-package navigation_detour
+package detour
 
 import "../../geometry"
 import alg "../../algebra"

@@ -1,4 +1,4 @@
-package navigation_crowd
+package crowd
 
 import "core:math"
 import "../recast"

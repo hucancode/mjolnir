@@ -1,4 +1,4 @@
-package navigation_recast
+package recast
 
 get_dir_offset_x :: proc "contextless" (dir: int) -> i32 {
   offset := [4]i32{-1, 0, 1, 0}

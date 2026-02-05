@@ -1,4 +1,4 @@
-package navigation_recast
+package recast
 
 import "core:log"
 import "core:slice"

@@ -1,4 +1,4 @@
-package navigation_recast
+package recast
 
 Span :: struct {
   using data: bit_field u32 {
