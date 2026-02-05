@@ -12,15 +12,14 @@ nodes: [dynamic]resources.NodeHandle
 main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    using mjolnir
-    if camera := get_main_camera(engine); camera != nil {
-      camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
-      sync_active_camera_controller(engine)
+    if camera := mjolnir.get_main_camera(engine); camera != nil {
+      mjolnir.camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
+      mjolnir.sync_active_camera_controller(engine)
     }
-    nodes = load_gltf(engine, "assets/CesiumMan.glb")
+    nodes = mjolnir.load_gltf(engine, "assets/CesiumMan.glb")
     q1 := linalg.quaternion_angle_axis(math.PI * -0.4, linalg.VECTOR3F32_X_AXIS)
     q2 := linalg.quaternion_angle_axis(math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
-    handle := spawn_directional_light(
+    handle := mjolnir.spawn_directional_light(
       engine,
       {1.0, 1.0, 1.0, 1.0},
       rotation = q2 * q1,

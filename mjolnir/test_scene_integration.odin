@@ -259,7 +259,6 @@ test_node_chain_transform :: proc(t: ^testing.T) {
 }
 
 create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
-  using world
   target_nodes := max_node
   if scene.nodes.capacity > 0 {
     target_nodes = min(target_nodes, int(scene.nodes.capacity))
@@ -277,14 +276,14 @@ create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
   for len(queue) > 0 && len(scene.nodes.entries) < target_nodes {
     current := pop_front(&queue)
     if current.depth < max_depth {
-      child_handle := spawn_child(scene, current.handle) or_continue
-      translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
-      rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
+      child_handle := world.spawn_child(scene, current.handle) or_continue
+      world.translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
+      world.rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, current.depth + 1})
     } else {
-      child_handle := spawn(scene) or_continue
-      translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
-      rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
+      child_handle := world.spawn(scene) or_continue
+      world.translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
+      world.rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, 1})
     }
     n += 1
@@ -300,8 +299,7 @@ traverse_scene_benchmark :: proc(
   options: ^time.Benchmark_Options,
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
-  using world
-  scene := cast(^World)(raw_data(options.input))
+  scene := cast(^world.World)(raw_data(options.input))
   // simulate an use case that traverse the scene and count the number of lights and meshes
   Context :: struct {
     light_count: u32,
@@ -309,8 +307,8 @@ traverse_scene_benchmark :: proc(
   }
   for _ in 0 ..< options.rounds {
     ctx: Context
-    traverse(scene, nil)
-    options.processed += size_of(Node) * len(scene.nodes.entries)
+    world.traverse(scene, nil)
+    options.processed += size_of(world.Node) * len(scene.nodes.entries)
   }
   return nil
 }
@@ -319,9 +317,8 @@ teardown_scene :: proc(
   options: ^time.Benchmark_Options,
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
-  using world
-  scene := cast(^World)(raw_data(options.input))
-  shutdown(scene, nil, nil)
+  scene := cast(^world.World)(raw_data(options.input))
+  world.shutdown(scene, nil, nil)
   free(scene, allocator)
   return nil
 }
@@ -337,11 +334,10 @@ benchmark_deep_scene_traversal :: proc(t: ^testing.T) {
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      using world
-      scene := new(World)
-      init(scene)
+      scene := new(world.World)
+      world.init(scene)
       create_scene(scene, N, N)
-      options.input = slice.bytes_from_ptr(scene, size_of(^World))
+      options.input = slice.bytes_from_ptr(scene, size_of(^world.World))
       return nil
     },
     bench = traverse_scene_benchmark,
@@ -371,11 +367,10 @@ benchmark_flat_scene_traversal :: proc(t: ^testing.T) {
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      using world
-      scene := new(World)
-      init(scene)
+      scene := new(world.World)
+      world.init(scene)
       create_scene(scene, N, 1)
-      options.input = slice.bytes_from_ptr(scene, size_of(^World))
+      options.input = slice.bytes_from_ptr(scene, size_of(^world.World))
       return nil
     },
     bench = traverse_scene_benchmark,
@@ -405,11 +400,10 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      using world
-      scene := new(World)
-      init(scene)
+      scene := new(world.World)
+      world.init(scene)
       create_scene(scene, N, MAX_DEPTH)
-      options.input = slice.bytes_from_ptr(scene, size_of(^World))
+      options.input = slice.bytes_from_ptr(scene, size_of(^world.World))
       return nil
     },
     bench = traverse_scene_benchmark,
@@ -430,11 +424,11 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
 
 @(test)
 test_scene_memory_cleanup :: proc(t: ^testing.T) {
-  using world
-  scene: World
-  init(&scene)
-  defer shutdown(&scene, nil, nil)
+  scene: world.World
+  world.init(&scene)
+  defer world.shutdown(&scene, nil, nil)
   for i in 0 ..< 1000 {
-    spawn(&scene)
+    world.spawn(&scene)
   }
+  // expect no memory leaks in the test report
 }

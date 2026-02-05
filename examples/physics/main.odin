@@ -10,9 +10,9 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-NX :: 3
-NY :: 2
-NZ :: 3
+NX :: #config(NX, 3)
+NY :: #config(NY, 2)
+NZ :: #config(NZ, 3)
 PIECE_COUNT :: NX * NY * NZ
 SPHERE_RADIUS :: 3.0
 
@@ -27,7 +27,6 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
   physics.init(&physics_world, {0, -20, 0}) // 2x earth gravity
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
@@ -35,8 +34,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   sphere_mat := engine.rm.builtin_materials[resources.Color.MAGENTA]
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   cube_mat := engine.rm.builtin_materials[resources.Color.RED]
-  rand_sphere_mesh := create_mesh(engine, geometry.make_sphere(random_colors = true))
-  rand_cylinder_mesh := create_mesh(engine, geometry.make_cylinder(random_colors = true))
+  rand_sphere_mesh := mjolnir.create_mesh(engine, geometry.make_sphere(random_colors = true))
+  rand_cylinder_mesh := mjolnir.create_mesh(engine, geometry.make_cylinder(random_colors = true))
   rand_mat := engine.rm.builtin_materials[resources.Color.WHITE]
   // Create ground
   {
@@ -168,18 +167,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
   }
   log.infof("Created %d physics objects", PIECE_COUNT)
-  if camera := get_main_camera(engine); camera != nil {
-    camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
-    sync_active_camera_controller(engine)
+  if camera := mjolnir.get_main_camera(engine); camera != nil {
+    mjolnir.camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
+    mjolnir.sync_active_camera_controller(engine)
   }
-  light_handle := spawn_spot_light(
+  light_handle := mjolnir.spawn_spot_light(
     engine,
     {0.8, 0.9, 1, 1},
     25.0,
     math.PI * 0.25,
     position = {0, 20, 0},
   )
-  rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  mjolnir.rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   log.info("Physics demo setup complete")
 }
 

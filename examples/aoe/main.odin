@@ -33,19 +33,18 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
   physics.init(&physics_world)
   cube_body_to_mesh = make(
     map[physics.TriggerHandle]resources.NodeHandle,
   )
-  set_visibility_stats(engine, false)
+  mjolnir.set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
   // Use builtin meshes and materials
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
   cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
   // Emissive material for effector sphere
-  effector_mat := create_material(engine, emissive_value = 5.0)
+  effector_mat := mjolnir.create_material(engine, emissive_value = 5.0)
   // Spawn 50x50 grid of cubes
   grid_size := 50
   spacing: f32 = 1.0
@@ -60,11 +59,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
         {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
         position = {world_x, 0.5, world_z},
       ) or_continue
-      physics_node := spawn(
+      physics_node := mjolnir.spawn(
         engine,
         position = [3]f32{world_x, 0.5, world_z},
       ) or_continue
-      mesh_handle := spawn_child(
+      mesh_handle := mjolnir.spawn_child(
         engine,
         physics_node,
         attachment = world.MeshAttachment {
@@ -73,14 +72,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
           cast_shadow = false,
         },
       ) or_continue
-      scale(engine, mesh_handle, cube_scale)
+      mjolnir.scale(engine, mesh_handle, cube_scale)
       append(&cube_mesh_handles, mesh_handle)
       cube_body_to_mesh[body_handle] = mesh_handle
     }
   }
   // Spawn effector sphere
   effector_position = {0, 1, 0}
-  effector_sphere = spawn(
+  effector_sphere = mjolnir.spawn(
     engine,
     attachment = world.MeshAttachment {
       handle = sphere_mesh,
@@ -88,17 +87,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = false,
     },
   )
-  translate(
+  mjolnir.translate(
     engine,
     effector_sphere,
     effector_position.x,
     effector_position.y,
     effector_position.z,
   )
-  scale(engine, effector_sphere, 0.5)
-  if main_camera := get_main_camera(engine); main_camera != nil {
-    camera_look_at(main_camera, {10, 30, 10}, {0, 0, 0})
-    sync_active_camera_controller(engine)
+  mjolnir.scale(engine, effector_sphere, 0.5)
+  if main_camera := mjolnir.get_main_camera(engine); main_camera != nil {
+    mjolnir.camera_look_at(main_camera, {10, 30, 10}, {0, 0, 0})
+    mjolnir.sync_active_camera_controller(engine)
   }
   // Build initial BVH for all bodies
   physics.step(&physics_world, 0.0)
@@ -107,7 +106,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  using mjolnir
   // Update physics (needed for BVH queries even with static bodies)
   physics.step(&physics_world, delta_time)
   world.sync_all_physics_to_world(&engine.world, &physics_world)
@@ -116,13 +114,13 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   mouse_just_clicked := mouse_button_pressed && !last_mouse_button_state
   last_mouse_button_state = mouse_button_pressed
   mouse_click: if mouse_just_clicked {
-    camera := get_main_camera(engine)
+    camera := mjolnir.get_main_camera(engine)
     if camera != nil {
       // Get mouse position in window coordinates
       mouse_x_window := f32(engine.input.mouse_pos.x)
       mouse_y_window := f32(engine.input.mouse_pos.y)
       // Convert to framebuffer coordinates by scaling with content scale
-      dpi_scale := get_window_dpi(engine.window)
+      dpi_scale := mjolnir.get_window_dpi(engine.window)
       mouse_x := mouse_x_window * dpi_scale
       mouse_y := mouse_y_window * dpi_scale
       // Perform raycast from camera through mouse position
@@ -159,7 +157,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   effector_position.x = math.cos(orbit_angle) * orbit_radius
   effector_position.y = 1.0
   effector_position.z = math.sin(orbit_angle) * orbit_radius
-  translate(
+  mjolnir.translate(
     engine,
     effector_sphere,
     effector_position.x,
@@ -168,7 +166,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   )
   // Reset all cubes to normal scale
   for handle in cube_mesh_handles {
-    scale(engine, handle, cube_scale)
+    mjolnir.scale(engine, handle, cube_scale)
   }
   // Query for cubes within effect radius using physics
   affected: [dynamic]physics.TriggerHandle
@@ -182,9 +180,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Shrink affected cubes
   for body_handle in affected {
     if mesh_handle, ok := cube_body_to_mesh[body_handle]; ok {
-      scale(engine, mesh_handle, 0.1)
+      mjolnir.scale(engine, mesh_handle, 0.1)
     }
   }
-  // Scale the clicked cube 3x (0.3 * 3 = 0.9)
-  scale(engine, clicked_cube, cube_scale * 3.0)
+  // Scale the clicked cube 3x
+  mjolnir.scale(engine, clicked_cube, cube_scale * 3.0)
 }

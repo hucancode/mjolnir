@@ -68,8 +68,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  using mjolnir
-  t := time_since_start(engine)
+  t := mjolnir.time_since_start(engine)
   mjolnir.rotate(
     engine,
     light_handle,

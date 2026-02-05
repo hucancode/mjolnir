@@ -18,11 +18,9 @@ main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    using mjolnir
-    // Setup camera
-    if camera := get_main_camera(engine); camera != nil {
-      camera_look_at(camera, {0, 10, 0}, {0, 0, 0})
-      sync_active_camera_controller(engine)
+    if camera := mjolnir.get_main_camera(engine); camera != nil {
+      mjolnir.camera_look_at(camera, {0, 10, 0}, {0, 0, 0})
+      mjolnir.sync_active_camera_controller(engine)
     }
     // Create figure-8/infinity symbol spline path
     // Parametric equations for figure-8: x = sin(t), y = 0, z = sin(2t)/2
@@ -56,28 +54,28 @@ main :: proc() {
     }
     cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
     for i in 0 ..< CUBE_COUNT {
-      cubes[i] = spawn(
+      cubes[i] = mjolnir.spawn(
         engine,
         attachment = world.MeshAttachment {
           handle = cube_mesh,
           material = mat_handles[i % len(mat_handles)],
         },
       )
-      scale(engine, cubes[i], 0.3)
+      mjolnir.scale(engine, cubes[i], 0.3)
     }
     // Add ground plane
     ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
     quad_mesh := engine.rm.builtin_meshes[resources.Primitive.QUAD]
-    ground := spawn(
+    ground := mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {
         handle = quad_mesh,
         material = ground_mat,
       },
     )
-    scale(engine, ground, 20.0)
-    translate(engine, ground, 0, -2, 0)
-    spawn_point_light(
+    mjolnir.scale(engine, ground, 20.0)
+    mjolnir.translate(engine, ground, 0, -2, 0)
+    mjolnir.spawn_point_light(
       engine,
       {1.0, 1.0, 1.0, 1.0},
       20.0,
@@ -85,11 +83,10 @@ main :: proc() {
     )
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
-    using mjolnir
     total_length := animation.spline_arc_length(spline)
     for i in 0 ..< CUBE_COUNT {
       offset := f32(i) / f32(CUBE_COUNT) * total_length
-      elapsed := time_since_start(engine)
+      elapsed := mjolnir.time_since_start(engine)
       current_s := math.mod_f32(
         elapsed * (total_length / ANIMATION_DURATION) + offset,
         total_length,
@@ -97,7 +94,7 @@ main :: proc() {
       normalized := current_s / total_length
       tweened := animation.sample(normalized, 0, total_length, .QuadInOut)
       pos := animation.spline_sample_uniform(spline, tweened)
-      translate(engine, cubes[i], pos.x, pos.y, pos.z)
+      mjolnir.translate(engine, cubes[i], pos.x, pos.y, pos.z)
     }
   }
   mjolnir.run(engine, 800, 600, "visual-spline")

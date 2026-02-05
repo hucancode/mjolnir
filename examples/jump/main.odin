@@ -28,11 +28,10 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
   physics.init(&physics_world, {0, -10, 0})
   ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  ground_handle = spawn(
+  ground_handle = mjolnir.spawn(
     engine,
     [3]f32{0, -0.5, 0},
   )
@@ -43,7 +42,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ground_node.transform.position,
     ground_node.transform.rotation,
   )
-  ground_mesh_handle := spawn_child(
+  ground_mesh_handle := mjolnir.spawn_child(
     engine,
     ground_handle,
     attachment = world.MeshAttachment {
@@ -75,7 +74,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     cube_node.transform.position,
     world.RigidBodyAttachment{body_handle = cube_body},
   )
-  spawn_child(
+  mjolnir.spawn_child(
     engine,
     cube_handle,
     attachment = world.MeshAttachment {
@@ -85,9 +84,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     },
   )
   log.info("Cube body created")
-  if camera := get_main_camera(engine); camera != nil {
-    camera_look_at(camera, {8, 5, 8}, {0, 2, 0})
-    sync_active_camera_controller(engine)
+  if camera := mjolnir.get_main_camera(engine); camera != nil {
+    mjolnir.camera_look_at(camera, {8, 5, 8}, {0, 2, 0})
+    mjolnir.sync_active_camera_controller(engine)
   }
   time_since_jump = 0.0
   log.info("====================================")

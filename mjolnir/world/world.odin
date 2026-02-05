@@ -463,7 +463,6 @@ traverse :: proc(
   rm: ^resources.Manager = nil,
   frame_index: u32 = 0,
 ) -> bool {
-  using geometry
   append(
     &world.traversal_stack,
     TraverseEntry{world.root, linalg.MATRIX4F32_IDENTITY, false, true},
@@ -475,7 +474,7 @@ traverse :: proc(
     visibility_changed :=
       current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
-    is_dirty := update_local(&current_node.transform)
+    is_dirty := geometry.update_local(&current_node.transform)
     if visibility_changed {
       update_node_tags(current_node)
     }
@@ -518,7 +517,7 @@ traverse :: proc(
     if entry.parent_is_dirty || is_dirty || has_bone_socket {
       // Bone socket provides an additional transform layer between parent and local
       // transform_update_world will multiply: (parent * bone_socket) * local_matrix
-      update_world(
+      geometry.update_world(
         &current_node.transform,
         entry.parent_transform * bone_socket_transform,
       )

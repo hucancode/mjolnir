@@ -26,10 +26,8 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
-  log.info("Setup function called!")
-  set_visibility_stats(engine, false)
-  // engine.debug_ui_enabled = true
+  mjolnir.set_visibility_stats(engine, false)
+  engine.debug_ui_enabled = true
   plain_material_handle := engine.rm.builtin_materials[resources.Color.WHITE]
   cube_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   sphere_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
@@ -46,10 +44,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
           world_x := (f32(x) - f32(nx) * 0.5) * space
           world_y := (f32(y) - f32(ny) * 0.5) * space + 2.25
           world_z := (f32(z) - f32(nz) * 0.5) * space
-          node_handle: NodeHandle
+          node_handle: mjolnir.NodeHandle
           node_ok := false
           if x % 3 == 0 {
-            node_handle, node_ok = spawn(
+            node_handle, node_ok = mjolnir.spawn(
               engine,
               attachment = world.MeshAttachment {
                 handle = cube_mesh_handle,
@@ -58,7 +56,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
               },
             )
           } else if x % 3 == 1 {
-            node_handle, node_ok = spawn(
+            node_handle, node_ok = mjolnir.spawn(
               engine,
               attachment = world.MeshAttachment {
                 handle = cone_mesh_handle,
@@ -67,7 +65,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
               },
             )
           } else {
-            node_handle, node_ok = spawn(
+            node_handle, node_ok = mjolnir.spawn(
               engine,
               attachment = world.MeshAttachment {
                 handle = sphere_mesh_handle,
@@ -77,21 +75,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
             )
           }
           if !node_ok do break spawn_loop
-          translate(engine, node_handle, world_x, world_y, world_z)
-          scale(engine, node_handle, cube_size)
+          mjolnir.translate(engine, node_handle, world_x, world_y, world_z)
+          mjolnir.scale(engine, node_handle, cube_size)
         }
       }
     }
   }
   when true {
-    brick_wall_mat_handle: MaterialHandle
+    brick_wall_mat_handle: mjolnir.MaterialHandle
     brick_wall_mat_ok := false
-    brick_albedo_handle, brick_albedo_ok := create_texture(
+    brick_albedo_handle, brick_albedo_ok := mjolnir.create_texture(
       engine,
       "assets/t_brick_floor_002_diffuse_1k.jpg",
     )
     if brick_albedo_ok {
-      brick_wall_mat_handle, brick_wall_mat_ok = create_material(
+      brick_wall_mat_handle, brick_wall_mat_ok = mjolnir.create_material(
         engine,
         {.ALBEDO_TEXTURE},
         albedo_handle = brick_albedo_handle,
@@ -101,88 +99,103 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning ground and walls")
     size: f32 = 15.0
     if brick_wall_mat_ok {
-      ground_handle := spawn(
+      ground_handle := mjolnir.spawn(
         engine,
         attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      scale(engine, ground_handle, size)
-      left_wall_handle := spawn(
+      mjolnir.scale(engine, ground_handle, size)
+      left_wall_handle := mjolnir.spawn(
         engine,
         attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      translate(engine, left_wall_handle, x = size, y = size)
-      rotate(engine, left_wall_handle, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
-      scale(engine, left_wall_handle, size)
-      right_wall_handle := spawn(
+      mjolnir.translate(engine, left_wall_handle, x = size, y = size)
+      mjolnir.rotate(
+        engine,
+        left_wall_handle,
+        math.PI * 0.5,
+        linalg.VECTOR3F32_Z_AXIS,
+      )
+      mjolnir.scale(engine, left_wall_handle, size)
+      right_wall_handle := mjolnir.spawn(
         engine,
         attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      translate(engine, right_wall_handle, x = -size, y = size)
-      rotate(
+      mjolnir.translate(engine, right_wall_handle, x = -size, y = size)
+      mjolnir.rotate(
         engine,
         right_wall_handle,
         -math.PI * 0.5,
         linalg.VECTOR3F32_Z_AXIS,
       )
-      scale(engine, right_wall_handle, size)
-      back_wall_handle := spawn(
+      mjolnir.scale(engine, right_wall_handle, size)
+      back_wall_handle := mjolnir.spawn(
         engine,
         attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      translate(engine, back_wall_handle, y = size, z = -size)
-      rotate(engine, back_wall_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-      scale(engine, back_wall_handle, size)
-      ceiling_handle := spawn(
+      mjolnir.translate(engine, back_wall_handle, y = size, z = -size)
+      mjolnir.rotate(
+        engine,
+        back_wall_handle,
+        math.PI * 0.5,
+        linalg.VECTOR3F32_X_AXIS,
+      )
+      mjolnir.scale(engine, back_wall_handle, size)
+      ceiling_handle := mjolnir.spawn(
         engine,
         attachment = world.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      translate(engine, ceiling_handle, y = 2 * size)
-      rotate(engine, ceiling_handle, -math.PI, linalg.VECTOR3F32_X_AXIS)
-      scale(engine, ceiling_handle, size)
+      mjolnir.translate(engine, ceiling_handle, y = 2 * size)
+      mjolnir.rotate(
+        engine,
+        ceiling_handle,
+        -math.PI,
+        linalg.VECTOR3F32_X_AXIS,
+      )
+      mjolnir.scale(engine, ceiling_handle, size)
     }
   }
   when true {
     log.info("loading Hammer GLTF...")
-    if gltf_nodes, ok := load_gltf(engine, "assets/Mjolnir.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Mjolnir.glb"); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for handle in gltf_nodes {
-        translate(engine, handle, 3, 1, -2)
-        scale(engine, handle, 0.2)
+        mjolnir.translate(engine, handle, 3, 1, -2)
+        mjolnir.scale(engine, handle, 0.2)
       }
     }
   }
   when true {
     log.info("loading Warrior GLTF...")
-    if gltf_nodes, ok := load_gltf(engine, "assets/Warrior.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Warrior.glb"); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for armature in gltf_nodes {
-        armature_ptr := get_node(engine, armature)
+        armature_ptr := mjolnir.get_node(engine, armature)
         for i in 1 ..< len(armature_ptr.children) {
-          play_animation(engine, armature_ptr.children[i], "idle")
+          mjolnir.play_animation(engine, armature_ptr.children[i], "idle")
         }
-        translate(engine, armature, 0, 0, 1)
+        mjolnir.translate(engine, armature, 0, 0, 1)
         for child_handle in armature_ptr.children {
-          child_node := get_node(engine, child_handle) or_continue
+          child_node := mjolnir.get_node(engine, child_handle) or_continue
           mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment)
           if !has_mesh do continue
           _, has_skin := mesh_attachment.skinning.?
           if !has_skin do continue
-          hand_cube_handle := spawn_child(
+          hand_cube_handle := mjolnir.spawn_child(
             engine,
             child_handle,
             attachment = world.MeshAttachment {
@@ -191,13 +204,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
               cast_shadow = true,
             },
           ) or_continue
-          hand_cube_node := get_node(engine, hand_cube_handle)
+          hand_cube_node := mjolnir.get_node(engine, hand_cube_handle)
           // Attach a cube to the hand.L bone
           hand_cube_node.bone_socket = "hand.L"
-          scale(engine, hand_cube_handle, 0.1)
+          mjolnir.scale(engine, hand_cube_handle, 0.1)
           // Create a spinning animation
           spin_duration: f32 = 2.0
-          if spin_clip_handle, spin_ok := create_animation_clip(
+          if spin_clip_handle, spin_ok := mjolnir.create_animation_clip(
             engine,
             channel_count = 1,
             duration = spin_duration,
@@ -210,7 +223,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 linalg.VECTOR3F32_Y_AXIS,
               )
             }
-            init_animation_channel(
+            mjolnir.init_animation_channel(
               engine,
               spin_clip_handle,
               channel_idx = 0,
@@ -218,7 +231,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
               rotation_fn = rotation_fn,
               rotation_interpolation = .CUBICSPLINE,
             )
-            if node, ok := get_node(engine, hand_cube_handle); ok {
+            if node, ok := mjolnir.get_node(engine, hand_cube_handle); ok {
               node.animation = world.AnimationInstance {
                 clip_handle = spin_clip_handle,
                 mode        = .LOOP,
@@ -237,42 +250,42 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   when true {
     log.info("loading Damaged Helmet GLTF...")
-    if gltf_nodes, ok := load_gltf(engine, "assets/DamagedHelmet.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/DamagedHelmet.glb"); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for handle in gltf_nodes {
-        translate(engine, handle, 0, 1, 3)
-        scale(engine, handle, 0.5)
+       mjolnir.translate(engine, handle, 0, 1, 3)
+       mjolnir.scale(engine, handle, 0.5)
       }
     }
   }
   when true {
     log.info("loading Suzanne GLTF...")
-    if gltf_nodes, ok := load_gltf(engine, "assets/Suzanne.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Suzanne.glb"); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for handle in gltf_nodes {
-        translate(engine, handle, -3, 1, 0)
+        mjolnir.translate(engine, handle, -3, 1, 0)
       }
     }
   }
   when true {
     log.info("loading SciFiHelmet GLTF...")
-    if gltf_nodes, ok := load_gltf(engine, "assets/SciFiHelmet.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/SciFiHelmet.glb"); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for handle in gltf_nodes {
-        translate(engine, handle, 3, 0, 3)
-        scale(engine, handle, 0.5)
+       mjolnir.translate(engine, handle, 3, 0, 3)
+       mjolnir.scale(engine, handle, 0.5)
       }
     }
   }
   when true {
     log.info("loading Fox GLTF...")
-    if gltf_nodes, ok := load_gltf(engine, "assets/Fox2.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Fox2.glb"); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for handle in gltf_nodes {
-        translate(engine, handle, 6, 0, 0)
-        armature_ptr := get_node(engine, handle)
+        mjolnir.translate(engine, handle, 6, 0, 0)
+        armature_ptr := mjolnir.get_node(engine, handle)
         for i in 1 ..< len(armature_ptr.children) {
-          play_animation(engine, armature_ptr.children[i], "Run")
+          mjolnir.play_animation(engine, armature_ptr.children[i], "Run")
         }
       }
     }
@@ -280,10 +293,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   when true {
     log.infof("creating %d lights with animated root", LIGHT_COUNT)
     // Create root node for all lights with rotation animation
-    lights_root_handle := spawn(engine, {0, 2, 0})
+    lights_root_handle := mjolnir.spawn(engine, {0, 2, 0})
     // Create rotation animation
     rotation_duration: f32 = 10.0
-    if rotation_clip_handle, rotation_ok := create_animation_clip(
+    if rotation_clip_handle, rotation_ok := mjolnir.create_animation_clip(
       engine,
       channel_count = 1,
       duration = rotation_duration,
@@ -293,7 +306,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
         return linalg.quaternion_angle_axis(angle, linalg.VECTOR3F32_Y_AXIS)
       }
-      init_animation_channel(
+      mjolnir.init_animation_channel(
         engine,
         rotation_clip_handle,
         channel_idx = 0,
@@ -302,7 +315,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         rotation_interpolation = .LINEAR,
       )
 
-      if lights_root_node, ok := get_node(engine, lights_root_handle); ok {
+      if lights_root_node, ok := mjolnir.get_node(engine, lights_root_handle); ok {
         lights_root_node.animation = world.AnimationInstance {
           clip_handle = rotation_clip_handle,
           mode        = .LOOP,
@@ -336,29 +349,29 @@ setup :: proc(engine: ^mjolnir.Engine) {
         } else if ALL_POINT_LIGHT {
           should_make_spot_light = false
         }
-        light_handle: NodeHandle
+        light_handle: mjolnir.NodeHandle
         if should_make_spot_light {
           light_handle =
-          spawn_child_spot_light(
+          mjolnir.spawn_child_spot_light(
             engine,
             color,
             14.0,
             math.PI * 0.25,
             lights_root_handle,
           ) or_continue
-          translate(engine, light_handle, local_x, local_y, local_z)
-          rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+         mjolnir.translate(engine, light_handle, local_x, local_y, local_z)
+         mjolnir.rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
         } else {
           light_handle =
-          spawn_child_point_light(
+          mjolnir.spawn_child_point_light(
             engine,
             color,
             14.0,
             lights_root_handle,
           ) or_continue
-          translate(engine, light_handle, local_x, local_y, local_z)
+          mjolnir.translate(engine, light_handle, local_x, local_y, local_z)
         }
-        cube_handle := spawn_child(
+        cube_handle := mjolnir.spawn_child(
           engine,
           light_handle,
           attachment = world.MeshAttachment {
@@ -367,14 +380,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
             cast_shadow = false,
           },
         )
-        scale(engine, cube_handle, 0.05)
-        translate(engine, cube_handle, y = 0.5)
+       mjolnir.scale(engine, cube_handle, 0.05)
+       mjolnir.translate(engine, cube_handle, y = 0.5)
       }
     }
     when true {
       // Create quaternion: 45° rotation around X-axis (tilts light forward)
-      q := linalg.quaternion_angle_axis(math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
-      dir_light_handle := spawn_directional_light(
+      q := linalg.quaternion_angle_axis(
+        math.PI * 0.3,
+        linalg.VECTOR3F32_X_AXIS,
+      )
+      dir_light_handle := mjolnir.spawn_directional_light(
         engine,
         {0.2, 0.5, 0.9, 1.0},
         rotation = q,
@@ -407,27 +423,27 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   when true {
     log.info("Setting up particles...")
-    black_circle_texture_handle, black_circle_ok := create_texture(
+    black_circle_texture_handle, black_circle_ok := mjolnir.create_texture(
       engine,
       "assets/black-circle.png",
     )
-    goldstar_texture_handle, goldstar_texture_ok := create_texture(
+    goldstar_texture_handle, goldstar_texture_ok := mjolnir.create_texture(
       engine,
       "assets/gold-star.png",
     )
-    goldstar_material_handle: MaterialHandle
+    goldstar_material_handle: mjolnir.MaterialHandle
     goldstar_material_ok := false
     if goldstar_texture_ok {
-      goldstar_material_handle, goldstar_material_ok = create_material(
+      goldstar_material_handle, goldstar_material_ok = mjolnir.create_material(
         engine,
         {.ALBEDO_TEXTURE},
         type = .TRANSPARENT,
         albedo_handle = goldstar_texture_handle,
       )
     }
-    psys_handle1 := spawn(engine, {-2.0, 1.9, 0.3})
+    psys_handle1 := mjolnir.spawn(engine, {-2.0, 1.9, 0.3})
     if goldstar_texture_ok {
-      emitter_handle1, emitter1_ok := create_emitter(
+      emitter_handle1, emitter1_ok := mjolnir.create_emitter(
         engine,
         psys_handle1,
         texture_handle = goldstar_texture_handle,
@@ -446,16 +462,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
         aabb_max = {2, 2, 2},
       )
       if emitter1_ok {
-        spawn_child(
+        mjolnir.spawn_child(
           engine,
           psys_handle1,
           attachment = world.EmitterAttachment{emitter_handle1},
         )
       }
     }
-    psys_handle2 := spawn(engine, {2.0, 1.9, 0.3})
+    psys_handle2 := mjolnir.spawn(engine, {2.0, 1.9, 0.3})
     if black_circle_ok {
-      emitter_handle2, emitter2_ok := create_emitter(
+      emitter_handle2, emitter2_ok := mjolnir.create_emitter(
         engine,
         psys_handle2,
         texture_handle = black_circle_texture_handle,
@@ -474,15 +490,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
         aabb_max = {1, 1, 1},
       )
       if emitter2_ok {
-        spawn_child(
+        mjolnir.spawn_child(
           engine,
           psys_handle2,
           attachment = world.EmitterAttachment{emitter_handle2},
         )
       }
     }
-    forcefield_root_handle := spawn(engine, {0, 4, 0})
-    if forcefield_clip_handle, ok := create_animation_clip(
+    forcefield_root_handle := mjolnir.spawn(engine, {0, 4, 0})
+    if forcefield_clip_handle, ok := mjolnir.create_animation_clip(
       engine,
       channel_count = 1,
       duration = 8,
@@ -492,7 +508,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
         return linalg.quaternion_angle_axis(angle, linalg.VECTOR3F32_Y_AXIS)
       }
-      init_animation_channel(
+      mjolnir.init_animation_channel(
         engine,
         forcefield_clip_handle,
         channel_idx = 0,
@@ -500,7 +516,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         rotation_fn = rotation_fn,
         rotation_interpolation = .LINEAR,
       )
-      if node, ok := get_node(engine, forcefield_root_handle); ok {
+      if node, ok := mjolnir.get_node(engine, forcefield_root_handle); ok {
         node.animation = world.AnimationInstance {
           clip_handle = forcefield_clip_handle,
           mode        = .LOOP,
@@ -512,11 +528,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
         world.register_animatable_node(&engine.world, forcefield_root_handle)
       }
     }
-    forcefield_handle := spawn_child(engine, forcefield_root_handle)
-    translate(engine, forcefield_handle, 3.0, 0.0, 0.0)
-    if node, ok := get_node(engine, forcefield_handle); ok {
+    forcefield_handle := mjolnir.spawn_child(engine, forcefield_root_handle)
+    mjolnir.translate(engine, forcefield_handle, 3.0, 0.0, 0.0)
+    if node, ok := mjolnir.get_node(engine, forcefield_handle); ok {
       node.attachment = world.ForceFieldAttachment {
-        handle = create_forcefield(
+        handle = mjolnir.create_forcefield(
           engine,
           forcefield_handle,
           tangent_strength = 2.0,
@@ -525,7 +541,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         ),
       }
     }
-    handle := spawn_child(
+    handle := mjolnir.spawn_child(
       engine,
       forcefield_handle,
       attachment = world.MeshAttachment {
@@ -534,7 +550,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = false,
       },
     )
-    scale(engine, handle, 0.2)
+    mjolnir.scale(engine, handle, 0.2)
   }
   when false {
     debug_sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
@@ -596,7 +612,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info(
       "spawning Warrior effect sprite with animation (99 frames @ 24fps)...",
     )
-    warrior_sprite_texture, warrior_sprite_ok := create_texture(
+    warrior_sprite_texture, warrior_sprite_ok := mjolnir.create_texture(
       engine,
       "assets/Warrior_Sheet-Effect.png",
     )
@@ -619,7 +635,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         animation = warrior_animation,
       )
       if sprite_ok {
-        sprite_material, mat_ok := create_material(
+        sprite_material, mat_ok := mjolnir.create_material(
           engine,
           {.ALBEDO_TEXTURE},
           type = .TRANSPARENT,
@@ -638,7 +654,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             &engine.rm,
           )
           if spawn_ok {
-            scale(engine, handle, 3.0)
+            mjolnir.scale(engine, handle, 3.0)
             // sprite_node.culling_enabled = false
           }
         }
@@ -649,26 +665,24 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
-  using mjolnir
   log.infof("key pressed key %d action %d mods %x", key, action, mods)
   if action == glfw.RELEASE do return
   if key == glfw.KEY_TAB {
-    current_type := get_active_camera_controller_type(engine)
+    current_type := mjolnir.get_active_camera_controller_type(engine)
     if current_type == .ORBIT {
-      switch_camera_controller(engine, .FREE)
+      mjolnir.switch_camera_controller(engine, .FREE)
     } else {
-      switch_camera_controller(engine, .ORBIT)
+      mjolnir.switch_camera_controller(engine, .ORBIT)
     }
   }
 }
 
 on_post_render :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
-  update_material_texture(
+  mjolnir.update_material_texture(
     engine,
     portal_material_handle,
     .ALBEDO_TEXTURE,
-    get_camera_attachment(
+    mjolnir.get_camera_attachment(
       engine,
       portal_camera_handle,
       .FINAL_IMAGE,

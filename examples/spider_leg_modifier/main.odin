@@ -22,17 +22,15 @@ main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    using mjolnir
-
     // Enable IK debug drawing
     engine.world.debug_draw_ik = true
 
-    if camera := get_main_camera(engine); camera != nil {
-      camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
-      sync_active_camera_controller(engine)
+    if camera := mjolnir.get_main_camera(engine); camera != nil {
+      mjolnir.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
+      mjolnir.sync_active_camera_controller(engine)
     }
     // Load spider model with 6 legs
-    spider_roots := load_gltf(engine, "assets/spider.glb")
+    spider_roots := mjolnir.load_gltf(engine, "assets/spider.glb")
     append(&root_nodes, ..spider_roots[:])
 
     // Position the spider
@@ -65,11 +63,11 @@ main :: proc() {
 
     // Find the skinned mesh node and calculate initial offsets from rest pose
     for handle in spider_roots {
-      root_node := get_node(engine, handle) or_continue
+      root_node := mjolnir.get_node(engine, handle) or_continue
 
       // Find the child with the mesh attachment
       for child in root_node.children {
-        child_node := get_node(engine, child) or_continue
+        child_node := mjolnir.get_node(engine, child) or_continue
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
           continue
@@ -174,10 +172,10 @@ main :: proc() {
 
     // Find the skinned mesh and create markers for bones
     for handle in root_nodes {
-      node := get_node(engine, handle) or_continue
+      node := mjolnir.get_node(engine, handle) or_continue
       log.infof("Root node found")
       for child in node.children {
-        child_node := get_node(engine, child) or_continue
+        child_node := mjolnir.get_node(engine, child) or_continue
         log.infof("Child node found")
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
@@ -203,14 +201,14 @@ main :: proc() {
 
         // Create one marker per bone
         for i in 0 ..< len(skin.bones) {
-          marker := spawn(
+          marker := mjolnir.spawn(
             engine,
             attachment = world.MeshAttachment {
               handle = cone_mesh,
               material = mat,
             },
           )
-          scale(engine, marker, 0.15)
+          mjolnir.scale(engine, marker, 0.15)
           append(&markers, marker)
           log.infof("Created marker %d at default position", i)
         }
@@ -223,20 +221,20 @@ main :: proc() {
     sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
     red_mat := engine.rm.builtin_materials[resources.Color.RED]
     for i in 0 ..< 6 {
-      target_markers[i] = spawn(
+      target_markers[i] = mjolnir.spawn(
         engine,
         attachment = world.MeshAttachment {
           handle = sphere_mesh,
           material = red_mat,
         },
       )
-      scale(engine, target_markers[i], 0.2)
+      mjolnir.scale(engine, target_markers[i], 0.2)
     }
 
     // Ground plane for reference
     cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
     gray_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-    ground_plane = spawn(
+    ground_plane = mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {
         handle = cube_mesh,
@@ -244,11 +242,9 @@ main :: proc() {
       },
     )
     world.scale_xyz(&engine.world, ground_plane, 20, 0.2, 20)
-    spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
+    mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
-    using mjolnir
-
     // Move the spider body back and forth along the X axis
     animation_time += delta_time
     amplitude :: 8.0 // How far to move left/right
@@ -258,7 +254,7 @@ main :: proc() {
     body_pos := [3]f32{body_x, 2, 0}
 
     // Move the spider body
-    if node := get_node(engine, spider_root_node); node != nil {
+    if node := mjolnir.get_node(engine, spider_root_node); node != nil {
       node.transform.position = body_pos
       node.transform.is_dirty = true
     }
@@ -266,9 +262,9 @@ main :: proc() {
     // Target is now automatically computed from leg root + offset in world space
     // Fetch and display the world-space target for each leg
     // Find the skinned mesh child to query leg targets
-    if root_node := get_node(engine, spider_root_node); root_node != nil {
+    if root_node := mjolnir.get_node(engine, spider_root_node); root_node != nil {
       for child in root_node.children {
-        child_node := get_node(engine, child) or_continue
+        child_node := mjolnir.get_node(engine, child) or_continue
         _, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
           continue
@@ -281,7 +277,7 @@ main :: proc() {
             layer_index = 0,
             leg_index = i,
           ); ok {
-            if marker_node := get_node(engine, target_markers[i]);
+            if marker_node := mjolnir.get_node(engine, target_markers[i]);
                marker_node != nil {
               marker_node.transform.position = target^
               marker_node.transform.is_dirty = true
@@ -296,9 +292,9 @@ main :: proc() {
     // Update bone markers
     marker_idx := 0
     for handle in root_nodes {
-      node := get_node(engine, handle) or_continue
+      node := mjolnir.get_node(engine, handle) or_continue
       for child in node.children {
-        child_node := get_node(engine, child) or_continue
+        child_node := mjolnir.get_node(engine, child) or_continue
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
           continue
@@ -343,7 +339,7 @@ main :: proc() {
           bone_pos := bone_world[3].xyz
           bone_rot := linalg.to_quaternion(bone_world)
           // Update marker transform
-          marker := get_node(engine, markers[marker_idx]) or_continue
+          marker := mjolnir.get_node(engine, markers[marker_idx]) or_continue
           marker.transform.position = bone_pos
           marker.transform.rotation = bone_rot
           marker.transform.is_dirty = true

@@ -19,12 +19,11 @@ main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    using mjolnir
-    if camera := get_main_camera(engine); camera != nil {
-      camera_look_at(camera, {5, 15, 8}, {0, 3, 0})
-      sync_active_camera_controller(engine)
+    if camera := mjolnir.get_main_camera(engine); camera != nil {
+      mjolnir.camera_look_at(camera, {5, 15, 8}, {0, 3, 0})
+      mjolnir.sync_active_camera_controller(engine)
     }
-    root_nodes = load_gltf(engine, "assets/stuffed_snake_rigged.glb")
+    root_nodes = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
 
     CONTROL_POINTS :: 8
     path := make([][3]f32, CONTROL_POINTS)
@@ -40,7 +39,7 @@ main :: proc() {
     }
 
     for handle in root_nodes {
-      node := get_node(engine, handle) or_continue
+      node := mjolnir.get_node(engine, handle) or_continue
       for child in node.children {
         world.add_path_modifier_layer(
           &engine.world,
@@ -64,9 +63,9 @@ main :: proc() {
 
     // Find the skinned mesh and create markers for bones
     for handle in root_nodes {
-      node := get_node(engine, handle) or_continue
+      node := mjolnir.get_node(engine, handle) or_continue
       for child in node.children {
-        child_node := get_node(engine, child) or_continue
+        child_node := mjolnir.get_node(engine, child) or_continue
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh do continue
 
@@ -75,21 +74,20 @@ main :: proc() {
 
         // Create one marker per bone
         for i in 0 ..< len(skin.bones) {
-          marker := spawn(
+          marker := mjolnir.spawn(
             engine,
             attachment = world.MeshAttachment {
               handle = cone_mesh,
               material = mat,
             },
           )
-          scale(engine, marker, 0.08)
+          mjolnir.scale(engine, marker, 0.08)
           append(&markers, marker)
         }
       }
     }
-
-    spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
-    spawn_point_light(
+    mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
+    mjolnir.spawn_point_light(
       engine,
       {1.0, 0.9, 0.8, 1.0},
       500.0,
@@ -98,13 +96,12 @@ main :: proc() {
   }
 
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
-    using mjolnir
     // Update marker positions to match bone transforms
     marker_idx := 0
     for handle in root_nodes {
-      node := get_node(engine, handle) or_continue
+      node := mjolnir.get_node(engine, handle) or_continue
       for child in node.children {
-        child_node := get_node(engine, child) or_continue
+        child_node := mjolnir.get_node(engine, child) or_continue
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh do continue
 
@@ -147,7 +144,7 @@ main :: proc() {
           bone_rot := linalg.to_quaternion(bone_world)
 
           // Update marker transform
-          marker := get_node(engine, markers[marker_idx]) or_continue
+          marker := mjolnir.get_node(engine, markers[marker_idx]) or_continue
           marker.transform.position = bone_pos
           marker.transform.rotation = bone_rot
           marker.transform.is_dirty = true

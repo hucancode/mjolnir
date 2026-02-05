@@ -21,16 +21,15 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
-  if camera := get_main_camera(engine); camera != nil {
-    camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
-    sync_active_camera_controller(engine)
+  if camera := mjolnir.get_main_camera(engine); camera != nil {
+    mjolnir.camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
+    mjolnir.sync_active_camera_controller(engine)
   }
-  root_nodes := load_gltf(engine, "assets/CesiumMan.glb")
+  root_nodes := mjolnir.load_gltf(engine, "assets/CesiumMan.glb")
   for handle in root_nodes {
-    node := get_node(engine, handle) or_continue
+    node := mjolnir.get_node(engine, handle) or_continue
     for child in node.children {
-      if play_animation(engine, child, "Anim_0") {
+      if mjolnir.play_animation(engine, child, "Anim_0") {
         // Setup IK for right arm using FABRIK solver
         // Based on logs: shoulder is at [-0.106, 1.036, 0.043]
         // Arm length is ~0.43m, so target must be within that reach
@@ -38,7 +37,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         pole := [3]f32{0.3, 0.4, 0.0} // Elbow points right and slightly down
 
         // Add IK as a layer (layer 1, since animation is on layer 0)
-        add_ik_layer(
+        mjolnir.add_ik_layer(
           engine,
           child,
           bone_names = []string {
@@ -54,16 +53,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  spawn_directional_light(
+  mjolnir.spawn_directional_light(
     engine,
     {1.0, 1.0, 1.0, 1.0},
     cast_shadow = true,
   )
   // Visualize IK target with a small red cube
   target_pos := [3]f32{0.0, 0.0, 0.9}
-  cube_mesh := get_builtin_mesh(engine, .CUBE)
-  cube_material := get_builtin_material(engine, .RED)
-  target_cube = spawn(
+  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  cube_material := mjolnir.get_builtin_material(engine, .RED)
+  target_cube = mjolnir.spawn(
     engine,
     target_pos,
     world.MeshAttachment {
@@ -76,20 +75,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  using mjolnir
-  t := time_since_start(engine) * 0.5
+  t := mjolnir.time_since_start(engine) * 0.5
   y := 0.5 + 0.5 * math.sin(t)
   new_target := [3]f32{0.0, y * 2, 0.9}
   pole := [3]f32{0.3, 0.4, 0.0}
 
   // Update IK layer 1 (animation is on layer 0)
-  set_ik_layer_target(
+  mjolnir.set_ik_layer_target(
     engine,
     character_handle,
     1, // IK layer index
     new_target,
     pole,
   )
-
-  translate(engine, target_cube, new_target.x, new_target.y, new_target.z)
+  mjolnir.translate(engine, target_cube, new_target.x, new_target.y, new_target.z)
 }

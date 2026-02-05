@@ -29,23 +29,19 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
-
-  // Enable IK debug drawing
   engine.world.debug_draw_ik = true
-
-  if camera := get_main_camera(engine); camera != nil {
-    camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
-    sync_active_camera_controller(engine)
+  if camera := mjolnir.get_main_camera(engine); camera != nil {
+    mjolnir.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
+    mjolnir.sync_active_camera_controller(engine)
   }
 
   // Load spider model
-  spider_roots := load_gltf(engine, "assets/spider.glb")
+  spider_roots := mjolnir.load_gltf(engine, "assets/spider.glb")
   append(&root_nodes, ..spider_roots[:])
 
   // Position the spider
   for handle in spider_roots {
-    node := get_node(engine, handle) or_continue
+    node := mjolnir.get_node(engine, handle) or_continue
     spider_root_node = handle
     node.transform.position = {0, 5, 0}
     node.transform.is_dirty = true
@@ -66,10 +62,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Find the skinned mesh node and set up IK for each leg
   for handle in spider_roots {
-    root_node := get_node(engine, handle) or_continue
+    root_node := mjolnir.get_node(engine, handle) or_continue
 
     for child in root_node.children {
-      child_node := get_node(engine, child) or_continue
+      child_node := mjolnir.get_node(engine, child) or_continue
       mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
       if !has_mesh {
         continue
@@ -154,7 +150,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
 
         // Add IK layer for this leg
-        add_ik_layer(
+        mjolnir.add_ik_layer(
           engine,
           child,
           bone_names,
@@ -173,9 +169,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Find the skinned mesh and create markers for bones
   for handle in root_nodes {
-    node := get_node(engine, handle) or_continue
+    node := mjolnir.get_node(engine, handle) or_continue
     for child in node.children {
-      child_node := get_node(engine, child) or_continue
+      child_node := mjolnir.get_node(engine, child) or_continue
       mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
       if !has_mesh {
         continue
@@ -194,16 +190,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
   sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
   red_mat := engine.rm.builtin_materials[resources.Color.RED]
   for i in 0 ..< 6 {
-    target_markers[i] = spawn(
+    target_markers[i] = mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {
         handle = sphere_mesh,
         material = red_mat,
       },
     )
-    scale(engine, target_markers[i], 0.5)
+    mjolnir.scale(engine, target_markers[i], 0.5)
     // Position at the fixed target
-    if marker_node := get_node(engine, target_markers[i]); marker_node != nil {
+    if marker_node := mjolnir.get_node(engine, target_markers[i]); marker_node != nil {
       marker_node.transform.position = leg_targets[i]
       marker_node.transform.is_dirty = true
     }
@@ -212,18 +208,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Ground plane for reference
   cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
   gray_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  ground_plane = spawn(
+  ground_plane = mjolnir.spawn(
     engine,
     attachment = world.MeshAttachment{handle = cube_mesh, material = gray_mat},
   )
   world.scale_xyz(&engine.world, ground_plane, 40, 0.2, 40)
 
-  spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
+  mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  using mjolnir
-
   // Move the spider body back and forth along the X axis
   animation_time += delta_time
   amplitude: f32 = 2.5
@@ -233,7 +227,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   body_pos := [3]f32{body_x, 0, 0}
 
   // Move the spider body
-  if node := get_node(engine, spider_root_node); node != nil {
+  if node := mjolnir.get_node(engine, spider_root_node); node != nil {
     node.transform.position = body_pos
     node.transform.is_dirty = true
   }
@@ -250,7 +244,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
     target_pos := leg_targets[i]
     target_pos.y += amplitude * math.max(math.sin(animation_time * speed * math.PI), 0)
-    set_ik_layer_target(
+    mjolnir.set_ik_layer_target(
       engine,
       mesh_node,
       i, // IK layer index (0-5 for the 6 legs)
@@ -260,7 +254,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // Debug draw pole position
     pole_transform := linalg.matrix4_translate(pole_pos)
     pole_transform *= linalg.matrix4_scale([3]f32{0.2, 0.2, 0.2})
-    debug_draw_spawn_mesh_temporary(
+    mjolnir.debug_draw_spawn_mesh_temporary(
       engine,
       engine.rm.builtin_meshes[resources.Primitive.SPHERE],
       pole_transform,

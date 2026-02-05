@@ -12,13 +12,12 @@ nodes: [dynamic]resources.NodeHandle
 main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    using mjolnir
-    if camera := get_main_camera(engine); camera != nil {
-      camera_look_at(camera, {3, 4, 3}, {0.0, 2.0, 0.0})
-      sync_active_camera_controller(engine)
+    if camera := mjolnir.get_main_camera(engine); camera != nil {
+      mjolnir.camera_look_at(camera, {5, 6, 5}, {0, 5, 0})
+      mjolnir.sync_active_camera_controller(engine)
     }
-    nodes = load_gltf(engine, "assets/Duck.glb")
-    spawn_directional_light(
+    nodes = mjolnir.load_gltf(engine, "assets/Duck.glb")
+    mjolnir.spawn_directional_light(
       engine,
       {1.0, 1.0, 1.0, 1.0},
       cast_shadow = false,

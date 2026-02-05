@@ -50,8 +50,6 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
-
   log.info("=== Animation Layering Demo ===")
   log.info("Controls:")
   log.info("  1 - Toggle Walk/Run blend")
@@ -70,13 +68,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
   state.enable_ik = false
 
   // Setup camera
-  if camera := get_main_camera(engine); camera != nil {
-    camera_look_at(camera, {3, 2, 3}, {0, 1, 0})
-    sync_active_camera_controller(engine)
+  if camera := mjolnir.get_main_camera(engine); camera != nil {
+    mjolnir.camera_look_at(camera, {3, 2, 3}, {0, 1, 0})
+    mjolnir.sync_active_camera_controller(engine)
   }
 
   // Load Fox model
-  root_nodes := load_gltf(engine, "assets/Fox2.glb")
+  root_nodes := mjolnir.load_gltf(engine, "assets/Fox2.glb")
   log.infof("Loaded Fox with %d root nodes", len(root_nodes))
 
   if len(root_nodes) == 0 {
@@ -86,15 +84,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Find the mesh node and setup animation layers
   for handle in root_nodes {
-    node := get_node(engine, handle) or_continue
+    node := mjolnir.get_node(engine, handle) or_continue
     for child in node.children {
-      child_node := get_node(engine, child) or_continue
+      child_node := mjolnir.get_node(engine, child) or_continue
       _, has_mesh := child_node.attachment.(world.MeshAttachment)
       if has_mesh {
         state.fox_handle = child
 
         // === Layer 0: Walk animation (base layer, REPLACE mode) ===
-        if !add_animation_layer(
+        if !mjolnir.add_animation_layer(
           engine,
           child,
           "Walk",
@@ -107,7 +105,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
 
         // === Layer 1: Run animation (REPLACE mode, starts at 0 weight) ===
-        if !add_animation_layer(
+        if !mjolnir.add_animation_layer(
           engine,
           child,
           "Run",
@@ -121,7 +119,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
         // === Layer 2: Survey animation (REPLACE mode with bone mask for upper body) ===
         // Note: Standard animation clips should use REPLACE mode, not ADD
-        if !add_animation_layer(
+        if !mjolnir.add_animation_layer(
           engine,
           child,
           "Survey",
@@ -141,7 +139,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         target_pos := [3]f32{0.0, 4.0, 5.0}
         pole_pos := [3]f32{0.0, 5.0, 2.5}
 
-        if !add_ik_layer(
+        if !mjolnir.add_ik_layer(
           engine,
           child,
           bone_names = []string {
@@ -167,9 +165,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Create target cube for IK visualization
-  cube_mesh := get_builtin_mesh(engine, .CUBE)
-  cube_material := get_builtin_material(engine, .RED)
-  state.target_cube = spawn(
+  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  cube_material := mjolnir.get_builtin_material(engine, .RED)
+  state.target_cube = mjolnir.spawn(
     engine,
     {0.0, 4.0, 5.0},
     world.MeshAttachment {
@@ -178,15 +176,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = false,
     },
   )
-  scale(engine, state.target_cube, 0.25)
-
+  mjolnir.scale(engine, state.target_cube, 0.25)
   // Add lighting
-  spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0}, cast_shadow = true)
+  mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0}, cast_shadow = true)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  using mjolnir
-
   if state.fox_handle.index == 0 do return
 
   // === Update Walk/Run blend ===
@@ -204,22 +199,22 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     state.run_weight = math.lerp(state.run_weight, target_run, dt * 0.2)
   }
 
-  set_animation_layer_weight(engine, state.fox_handle, 0, state.walk_weight)
-  set_animation_layer_weight(engine, state.fox_handle, 1, state.run_weight)
+  mjolnir.set_animation_layer_weight(engine, state.fox_handle, 0, state.walk_weight)
+  mjolnir.set_animation_layer_weight(engine, state.fox_handle, 1, state.run_weight)
 
   // === Update survey animation (upper body) ===
   target_survey := state.enable_survey ? f32(1.0) : f32(0.0)
   state.survey_weight = math.lerp(state.survey_weight, target_survey, dt)
-  set_animation_layer_weight(engine, state.fox_handle, 2, state.survey_weight)
+  mjolnir.set_animation_layer_weight(engine, state.fox_handle, 2, state.survey_weight)
 
   // === Update IK layer ===
   target_ik := state.enable_ik ? f32(1.0) : f32(0.0)
   state.ik_weight = math.lerp(state.ik_weight, target_ik, dt * 2.0)
-  set_animation_layer_weight(engine, state.fox_handle, 3, state.ik_weight)
+  mjolnir.set_animation_layer_weight(engine, state.fox_handle, 3, state.ik_weight)
 
   // Move IK target in a circle
   if state.enable_ik {
-    t := time_since_start(engine)
+    t := mjolnir.time_since_start(engine)
     radius: f32 = 4.0
     target_x := math.cos(t) * radius
     target_z := math.sin(t) * radius
@@ -227,16 +222,15 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     new_target := [3]f32{target_x, target_y, target_z}
     pole := [3]f32{0.0, 5.0, 0.0}
 
-    set_ik_layer_target(engine, state.fox_handle, 3, new_target, pole)
+    mjolnir.set_ik_layer_target(engine, state.fox_handle, 3, new_target, pole)
 
     // Move the visual cube
     if state.target_cube.index != 0 {
-      translate(engine, state.target_cube, target_x, target_y, target_z)
+      mjolnir.translate(engine, state.target_cube, target_x, target_y, target_z)
     }
   }
-
   // Debug output every 60 frames
-  frame := int(time_since_start(engine) * 60)
+  frame := int(mjolnir.time_since_start(engine) * 60)
   if frame % 60 == 0 {
     log.infof(
       "Weights - Walk: %.2f, Run: %.2f, Survey: %.2f, IK: %.2f",
@@ -255,31 +249,31 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   case '1': // '1' key
     state.blend_walk_run = !state.blend_walk_run
     if state.blend_walk_run {
-      log.info("→ Blending to RUN animation")
+      log.info("Blending to RUN animation")
     } else {
-      log.info("→ Blending to WALK animation")
+      log.info("Blending to WALK animation")
     }
 
   case '2': // '2' key
     state.enable_survey = !state.enable_survey
     if state.enable_survey {
-      log.info("→ SURVEY animation ENABLED (upper body layer)")
+      log.info("SURVEY animation ENABLED (upper body layer)")
     } else {
-      log.info("→ SURVEY animation DISABLED")
+      log.info("SURVEY animation DISABLED")
     }
 
   case '3': // '3' key
     state.enable_ik = !state.enable_ik
     if state.enable_ik {
-      log.info("→ IK head tracking ENABLED")
+      log.info("IK head tracking ENABLED")
     } else {
-      log.info("→ IK head tracking DISABLED")
+      log.info("IK head tracking DISABLED")
     }
 
   case 32: // Space key
     state.blend_walk_run = false
     state.enable_survey = false
     state.enable_ik = false
-    log.info("→ RESET: All layers reset to defaults")
+    log.info("RESET: All layers reset to defaults")
   }
 }
