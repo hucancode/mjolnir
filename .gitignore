@@ -5,3 +5,5 @@ screenshot.png
 artifacts/
 perf.data
 perf.data.old
+screenshots/*.ppm
+screenshots/*.png
