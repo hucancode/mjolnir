@@ -27,12 +27,6 @@ LightData :: struct {
   _padding:     u32, // Maintain 16-byte alignment
 }
 
-DynamicLightData :: struct {
-  position:   [4]f32, // xyz = position, w = unused
-  shadow_map: u32, // texture index in bindless array (per-frame)
-  _padding:   [3]u32, // Maintain 16-byte alignment
-}
-
 Light :: struct {
   using data:    LightData,
   node_handle:   NodeHandle, // Associated scene node for transform updates
@@ -148,7 +142,7 @@ update_light_camera :: proc(
   main_camera_handle: CameraHandle,
   frame_index: u32 = 0,
 ) {
-  for handle, light_index in rm.active_lights {
+  for handle in rm.active_lights {
     light := cont.get(rm.lights, handle) or_continue
     // Get light's world transform from node
     node_data := gpu.get(&rm.node_data_buffer.buffer, light.node_index)
@@ -305,16 +299,6 @@ update_light_camera :: proc(
         }
       }
     }
-    // Always write dynamic light data (position + shadow_map) for all lights
-    dynamic_data := DynamicLightData {
-      position   = {light_position.x, light_position.y, light_position.z, 1.0},
-      shadow_map = shadow_map_id,
-    }
-    gpu.write(
-      &rm.dynamic_light_data_buffer.buffers[frame_index],
-      &dynamic_data,
-      light_index,
-    )
   }
 }
 

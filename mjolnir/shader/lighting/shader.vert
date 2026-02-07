@@ -35,12 +35,6 @@ struct LightData {
     uint _padding;
 };
 
-struct DynamicLightData {
-    vec4 position;
-    uint shadow_map;
-    uint _padding[3];
-};
-
 // Bindless camera buffer (set 0, binding 0)
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
@@ -53,10 +47,6 @@ layout(set = 2, binding = 0) readonly buffer LightsBuffer {
 layout(set = 3, binding = 0) readonly buffer WorldMatricesBuffer {
     mat4 world_matrices[];
 } world_matrices_buffer;
-// Per-frame dynamic light data buffer (set 5, binding 0) - Position + shadow map synchronized
-layout(set = 5, binding = 0) readonly buffer DynamicLightDataBuffer {
-    DynamicLightData dynamic_light_data[];
-} dynamic_light_data_buffer;
 
 layout(push_constant) uniform PushConstant {
     uint light_index;
@@ -67,8 +57,10 @@ layout(push_constant) uniform PushConstant {
     uint metallic_texture_index;
     uint emissive_texture_index;
     uint depth_texture_index;
+    vec4 light_position;
     uint input_image_index;
-    uint padding[3];
+    uint shadow_map_index;
+    uint padding[2];
 };
 
 void main() {
@@ -91,8 +83,7 @@ void main() {
         return;
     }
 
-    // Get light position from dynamic data buffer (synchronized with fragment shader)
-    vec3 light_position = dynamic_light_data_buffer.dynamic_light_data[light_index].position.xyz;
+    vec3 light_pos = light_position.xyz;
     // Get light direction from world matrix
     mat4 lightWorldMatrix = world_matrices_buffer.world_matrices[light.node_index];
     vec3 light_direction = lightWorldMatrix[2].xyz; // Light forward is -Z direction
@@ -104,7 +95,7 @@ void main() {
         vec3 world_position;
         if (light.type == POINT_LIGHT) {
             // Scale unit sphere by light radius and translate to light position
-            world_position = light_position + a_position * light.radius;
+            world_position = light_pos + a_position * light.radius;
         } else if (light.type == SPOT_LIGHT) {
             // Standard cone mesh: height=1 (Y+), base radius=1 (XZ)
             float tana = tan(min(light.angle_outer, PI*0.45));
@@ -117,7 +108,7 @@ void main() {
             vec3 right = cross(up, forward);
             // Create orientation matrix: right=+X, up=+Y, forward=-Z
             mat3 orientation = mat3(right, up, forward);
-            world_position = light_position + orientation * scaled_pos;
+            world_position = light_pos + orientation * scaled_pos;
         }
         // Transform world position to clip space using camera view-projection
         gl_Position = camera.projection * camera.view * vec4(world_position, 1.0);

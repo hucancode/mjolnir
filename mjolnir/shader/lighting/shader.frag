@@ -43,12 +43,6 @@ struct LightData {
     uint _padding;
 };
 
-struct DynamicLightData {
-    vec4 position;
-    uint shadow_map;
-    uint _padding[3];
-};
-
 // Bindless camera buffer (set 0, binding 0) - Regular cameras
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
@@ -68,10 +62,6 @@ layout(set = 3, binding = 0) readonly buffer WorldMatricesBuffer {
 layout(set = 4, binding = 0) readonly buffer SphericalCameraBuffer {
     SphericalCamera spherical_cameras[];
 } spherical_camera_buffer;
-// Per-frame dynamic light data buffer (set 5, binding 0) - Position + shadow map synchronized
-layout(set = 5, binding = 0) readonly buffer DynamicLightDataBuffer {
-    DynamicLightData dynamic_light_data[];
-} dynamic_light_data_buffer;
 
 layout(push_constant) uniform PushConstant {
     uint light_index;
@@ -82,8 +72,10 @@ layout(push_constant) uniform PushConstant {
     uint metallic_texture_index;
     uint emissive_texture_index;
     uint depth_texture_index;
+    vec4 light_position;
     uint input_image_index;
-    uint padding[3];
+    uint shadow_map_index;
+    uint padding[2];
 };
 
 // Convert a direction vector to equirectangular UV coordinates
@@ -99,20 +91,17 @@ float linearizeDepth(float depth, float near, float far) {
     return (2.0 * near * far) / (far + near - z * (far - near));
 }
 
-bool has_shadow_resource(uint light_idx) {
-    uint shadow_map = dynamic_light_data_buffer.dynamic_light_data[light_idx].shadow_map;
-    LightData light = lights_buffer.lights[light_idx];
+bool has_shadow_resource(LightData light, uint shadow_map) {
     if (light.type == POINT_LIGHT) {
         return shadow_map < MAX_CUBE_TEXTURES;
     }
     return shadow_map < MAX_TEXTURES;
 }
 
-float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint light_idx, vec3 light_position, vec3 light_direction) {
+float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint shadow_map, vec3 light_pos, vec3 light_direction) {
     if (light.cast_shadow == 0u) {
         return 1.0;
     }
-    uint shadow_map = dynamic_light_data_buffer.dynamic_light_data[light_idx].shadow_map;
     if (shadow_map >= MAX_CUBE_TEXTURES && light.type == POINT_LIGHT) {
         return 1.0; // No valid shadow map for point light
     }
@@ -140,7 +129,7 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint light_idx, vec
         float shadowDepth = texture(sampler2D(textures[shadow_map], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
         return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     } else if (light.type == POINT_LIGHT) {
-        vec3 lightToFrag = fragPos - light_position;
+        vec3 lightToFrag = fragPos - light_pos;
         // we must invert the direction for coordinate because the cube map has all faces oriented inward
         vec3 coord = normalize(-lightToFrag);
         float linearDepth = length(lightToFrag);
@@ -169,7 +158,7 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint light_idx, vec
         }
         shadowCoord.z = clamp(shadowCoord.z, 0.0, 1.0);
         float shadowDepth = texture(sampler2D(textures[shadow_map], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
-        vec3 lightDir = normalize(light_position - fragPos);
+        vec3 lightDir = normalize(light_pos - fragPos);
         float cosTheta = clamp(dot(n, lightDir), 0.0, 1.0);
         float bias = 0.0005 * tan(acos(cosTheta));
         bias = clamp(bias, 0.001, 0.01);
@@ -178,16 +167,16 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint light_idx, vec
     return 1.0;
 }
 
-vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fragPos, LightData light, vec3 light_position, vec3 light_direction) {
+vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fragPos, LightData light, vec3 light_pos, vec3 light_direction) {
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
     vec3 light_color = light.color.rgb * light.color.a; // RGB * intensity
     // Light direction and distance
     // For directional lights: negate direction (it points where light shines, we need direction TO light source)
     // For point/spot lights: calculate vector from fragment to light position
-    vec3 L = light.type == DIRECTIONAL_LIGHT ? normalize(-light_direction) : normalize(light_position - fragPos);
+    vec3 L = light.type == DIRECTIONAL_LIGHT ? normalize(-light_direction) : normalize(light_pos - fragPos);
     vec3 H = normalize(V + L);
-    float distance = light.type == DIRECTIONAL_LIGHT ? 1.0 : length(light_position - fragPos);
+    float distance = light.type == DIRECTIONAL_LIGHT ? 1.0 : length(light_pos - fragPos);
     float attenuation = light.radius;
     if (light.type == POINT_LIGHT) {
         float norm_dist = distance / max(0.01, light.radius);
@@ -195,7 +184,7 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     }
     if (light.type == SPOT_LIGHT) {
         // Vector from cone tip to fragment
-        vec3 tipToFrag = fragPos - light_position;
+        vec3 tipToFrag = fragPos - light_pos;
         vec3 cone_axis = normalize(light_direction);
         // Project onto cone axis to get distance along the axis
         float distance_along_axis = dot(tipToFrag, cone_axis);
@@ -265,7 +254,7 @@ void main() {
         return;
     }
     // Only validate camera index if shadows are enabled
-    bool will_use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light_index);
+    bool will_use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light, shadow_map_index);
     if (will_use_shadow && light.camera_index >= camera_buffer.cameras.length()) {
         outColor = vec4(1.0, 0.0, 1.0, 1.0); // Magenta for invalid light camera index
         return;
@@ -280,11 +269,11 @@ void main() {
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.08, 1.0);
     vec3 V = normalize(camera.position.xyz - position);
-    vec3 light_position = dynamic_light_data_buffer.dynamic_light_data[light_index].position.xyz;
+    vec3 light_pos = light_position.xyz;
     mat4 lightWorldMatrix = world_matrices_buffer.world_matrices[light.node_index];
     vec3 light_direction = lightWorldMatrix[2].xyz;
-    float shadowFactor = calculateShadow(position, normal, light, light_index, light_position, light_direction);
-    vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_position, light_direction);
+    float shadowFactor = calculateShadow(position, normal, light, shadow_map_index, light_pos, light_direction);
+    vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_pos, light_direction);
     outColor = vec4(direct * shadowFactor, 1.0);
     // outColor.b = clamp(outColor.b, 0.1, 1.0);
 }

@@ -128,10 +128,6 @@ Manager :: struct {
   ),
   vertex_skinning_slab:      SlabAllocator,
   lights_buffer:             gpu.BindlessBuffer(LightData),
-  dynamic_light_data_buffer: gpu.PerFrameBindlessBuffer(
-    DynamicLightData,
-    FRAMES_IN_FLIGHT,
-  ),
   textures_set_layout:       vk.DescriptorSetLayout,
   textures_descriptor_set:   vk.DescriptorSet,
   general_pipeline_layout:   vk.PipelineLayout, // general purpose layout, used by geometry, transparency, depth renderers
@@ -260,13 +256,6 @@ init :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     {.VERTEX, .FRAGMENT},
   ) or_return
   defer if ret != .SUCCESS do gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
-  gpu.per_frame_bindless_buffer_init(
-    &self.dynamic_light_data_buffer,
-    gctx,
-    MAX_LIGHTS,
-    {.VERTEX, .FRAGMENT},
-  ) or_return
-  defer if ret != .SUCCESS do gpu.per_frame_bindless_buffer_destroy(&self.dynamic_light_data_buffer, gctx.device)
   gpu.bindless_buffer_init(
     &self.sprite_buffer,
     gctx,
@@ -375,10 +364,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
-  gpu.per_frame_bindless_buffer_destroy(
-    &self.dynamic_light_data_buffer,
-    gctx.device,
-  )
   gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
   // Clean up lights (which may own shadow cameras with textures)
   for &entry, i in self.lights.entries do if entry.generation > 0 && entry.active {

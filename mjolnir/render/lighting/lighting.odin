@@ -43,8 +43,10 @@ LightPushConstant :: struct {
   metallic_texture_index: u32,
   emissive_texture_index: u32,
   depth_texture_index:    u32,
+  light_position:         [4]f32,
   input_image_index:      u32,
-  padding:                [3]u32,
+  shadow_map_index:       u32,
+  padding:                [2]u32,
 }
 
 begin_ambient_pass :: proc(
@@ -239,7 +241,6 @@ init :: proc(
     rm.lights_buffer.set_layout,
     rm.world_matrix_buffer.set_layout,
     rm.spherical_camera_buffer.set_layout,
-    rm.dynamic_light_data_buffer.set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
@@ -417,7 +418,6 @@ begin_pass :: proc(
     rm.lights_buffer.descriptor_set, // set = 2 (lights)
     rm.world_matrix_buffer.descriptor_set, // set = 3 (world matrices)
     rm.spherical_camera_buffer.descriptor_sets[frame_index], // set = 4 (per-frame spherical cameras)
-    rm.dynamic_light_data_buffer.descriptor_sets[frame_index], // set = 5 (per-frame position + shadow map)
   )
 }
 
@@ -470,7 +470,30 @@ render :: proc(
   }
   for handle in rm.active_lights {
     light := cont.get(rm.lights, handle) or_continue
+    world_matrix := gpu.get(&rm.world_matrix_buffer.buffer, light.node_index)
+    if world_matrix == nil do continue
+    light_position := world_matrix[3].xyz
+    shadow_map_index: u32 = 0xFFFFFFFF
+    if light.cast_shadow {
+      switch light.type {
+      case .POINT:
+        if spherical_cam := cont.get(rm.spherical_cameras, light.camera_handle); spherical_cam != nil {
+          shadow_map_index = spherical_cam.depth_cube[frame_index].index
+        }
+      case .DIRECTIONAL, .SPOT:
+        if shadow_cam := cont.get(rm.cameras, light.camera_handle); shadow_cam != nil {
+          shadow_map_index = shadow_cam.attachments[.DEPTH][frame_index].index
+        }
+      }
+    }
     push_constant.light_index = handle.index
+    push_constant.light_position = {
+      light_position.x,
+      light_position.y,
+      light_position.z,
+      1.0,
+    }
+    push_constant.shadow_map_index = shadow_map_index
     vk.CmdPushConstants(
       command_buffer,
       self.lighting_pipeline_layout,
