@@ -8,6 +8,7 @@ import "../render/debug_draw"
 import "../resources"
 import "core:log"
 import "core:math"
+import "core:math/ease"
 import "core:math/linalg"
 import "core:slice"
 
@@ -79,7 +80,7 @@ update_skeletal_animations :: proc(
         } else {
           // Interpolate weights
           t := transition.elapsed / transition.duration
-          eased_t := anim.ease(t, transition.curve)
+          eased_t := ease.ease(transition.curve, t)
 
           skinning.layers[transition.from_layer].weight = 1.0 - eased_t
           skinning.layers[transition.to_layer].weight = eased_t
@@ -367,7 +368,7 @@ transition_to_animation :: proc(
   duration: f32,
   from_layer: int = 0,
   to_layer: int = 1,
-  curve: anim.TweenMode = .Linear,
+  curve: ease.Ease = .Linear,
   blend_mode: anim.BlendMode = .REPLACE,
   mode: anim.PlayMode = .LOOP,
   speed: f32 = 1.0,

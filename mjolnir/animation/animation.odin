@@ -1,6 +1,7 @@
 package animation
 
 import "core:math"
+import "core:math/ease"
 import "core:math/linalg"
 import "core:slice"
 
@@ -323,7 +324,7 @@ Transition :: struct {
   to_layer:   int,  // Target layer index
   duration:   f32,  // Total transition time
   elapsed:    f32,  // Time elapsed
-  curve:      TweenMode, // Easing curve
+  curve:      ease.Ease, // Easing curve
   state:      TransitionState,
 }
 

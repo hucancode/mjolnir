@@ -6,6 +6,7 @@ import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
+import "core:math/ease"
 import "core:math/linalg"
 
 CUBE_COUNT :: 50
@@ -92,7 +93,7 @@ main :: proc() {
         total_length,
       )
       normalized := current_s / total_length
-      tweened := animation.sample(normalized, 0, total_length, .QuadInOut)
+      tweened := ease.ease(.Quadratic_In_Out, normalized) * total_length
       pos := animation.spline_sample_uniform(spline, tweened)
       mjolnir.translate(engine, cubes[i], pos.x, pos.y, pos.z)
     }

@@ -3,6 +3,7 @@ package mjolnir
 import "animation"
 import cont "containers"
 import "core:math"
+import "core:math/ease"
 import "core:math/linalg"
 import "core:strings"
 import "core:sync"
@@ -985,7 +986,7 @@ transition_to_animation :: proc(
   node: resources.NodeHandle,
   animation_name: string,
   duration: f32,
-  curve: animation.TweenMode = .Linear,
+  curve: ease.Ease = .Linear,
 ) -> bool {
   return world.transition_to_animation(
     &engine.world,
