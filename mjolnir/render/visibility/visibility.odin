@@ -59,7 +59,7 @@ CullingStats :: struct {
   frame_index:       u32,
 }
 
-VisibilitySystem :: struct {
+System :: struct {
   cull_layout:                    vk.PipelineLayout,
   cull_pipeline:                  vk.Pipeline, // Generates 3 draw lists in one dispatch
   depth_pipeline:                 vk.Pipeline, // uses general_pipeline_layout
@@ -80,7 +80,7 @@ VisibilitySystem :: struct {
 }
 
 init :: proc(
-  self: ^VisibilitySystem,
+  self: ^System,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
   depth_width, depth_height: u32,
@@ -161,7 +161,7 @@ init :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(self: ^VisibilitySystem, gctx: ^gpu.GPUContext) {
+shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.sphere_cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_reduce_pipeline, nil)
@@ -191,7 +191,7 @@ shutdown :: proc(self: ^VisibilitySystem, gctx: ^gpu.GPUContext) {
 }
 
 stats :: proc(
-  self: ^VisibilitySystem,
+  self: ^System,
   camera: ^resources.Camera,
   camera_index: u32,
   frame_index: u32,
@@ -208,7 +208,7 @@ stats :: proc(
 
 // STEP 2: Render depth - reads draw list, writes depth[N]
 render_depth :: proc(
-  self: ^VisibilitySystem,
+  self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera: ^resources.Camera,
@@ -307,7 +307,7 @@ render_depth :: proc(
 
 // STEP 3: Build pyramid - reads depth[N-1], builds pyramid[N]
 build_pyramid :: proc(
-  self: ^VisibilitySystem,
+  self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera: ^resources.Camera,
@@ -383,7 +383,7 @@ build_pyramid :: proc(
 // Frame N compute writes to buffer[N], while frame N graphics reads buffer[N-1]
 // Uses multi_pass pipeline but only opaque_draw_count/commands are used
 perform_culling :: proc(
-  self: ^VisibilitySystem,
+  self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera: ^resources.Camera,
@@ -446,7 +446,7 @@ perform_culling :: proc(
 }
 
 perform_sphere_culling :: proc(
-  self: ^VisibilitySystem,
+  self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera: ^resources.SphericalCamera,
@@ -496,7 +496,7 @@ perform_sphere_culling :: proc(
 
 // SphericalCamera visibility dispatch - culling + depth cube rendering
 render_sphere_depth :: proc(
-  self: ^VisibilitySystem,
+  self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera: ^resources.SphericalCamera,
@@ -614,7 +614,7 @@ render_sphere_depth :: proc(
 
 @(private)
 create_compute_pipelines :: proc(
-  self: ^VisibilitySystem,
+  self: ^System,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) -> vk.Result {
@@ -674,7 +674,7 @@ create_compute_pipelines :: proc(
 
 @(private)
 create_depth_pipeline :: proc(
-  self: ^VisibilitySystem,
+  self: ^System,
   gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) -> vk.Result {

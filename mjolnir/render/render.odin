@@ -32,7 +32,7 @@ Manager :: struct {
   ui_system:    ui.System,
   ui:           ui.Renderer,
   main_camera:  resources.CameraHandle,
-  visibility:   visibility.VisibilitySystem,
+  visibility:   visibility.System,
 }
 
 record_compute_commands :: proc(
