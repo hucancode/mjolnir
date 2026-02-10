@@ -1,14 +1,13 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "vendor:glfw"
 
-cube_handle: resources.NodeHandle
+cube_handle: mjolnir.NodeHandle
 
 main :: proc() {
   engine := new(mjolnir.Engine)
@@ -22,7 +21,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     mjolnir.camera_look_at(camera, {2, 2, 2}, {0.0, 0.0, 0.0})
     mjolnir.sync_active_camera_controller(engine)
   }
-  cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
+  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
   albedo_texture := mjolnir.create_texture(
     engine,
     #load("statue-1275469_1280.jpg"),
@@ -31,7 +30,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   material_handle := mjolnir.create_material(
     engine,
     {.ALBEDO_TEXTURE},
-    type = resources.MaterialType.PBR,
+    type = .PBR,
     albedo_handle = albedo_texture,
     roughness_value = 0.35,
     metallic_value = 0.1,

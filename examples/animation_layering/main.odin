@@ -2,7 +2,6 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/animation"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -23,8 +22,8 @@ import "core:math"
 // - Space: Reset all
 
 State :: struct {
-  fox_handle:        resources.NodeHandle,
-  target_cube:       resources.NodeHandle,
+  fox_handle:        mjolnir.NodeHandle,
+  target_cube:       mjolnir.NodeHandle,
 
   // Layer weights
   walk_weight:       f32,

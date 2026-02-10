@@ -4,7 +4,6 @@ import "../../mjolnir"
 import cont "../../mjolnir/containers"
 import "../../mjolnir/geometry"
 import "../../mjolnir/physics"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -28,15 +27,15 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world, {0, -20, 0}) // 2x earth gravity
-  ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-  ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-  sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
-  sphere_mat := engine.rm.builtin_materials[resources.Color.MAGENTA]
-  cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-  cube_mat := engine.rm.builtin_materials[resources.Color.RED]
+  ground_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  ground_mat := mjolnir.get_builtin_material(engine, .GRAY)
+  sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
+  sphere_mat := mjolnir.get_builtin_material(engine, .MAGENTA)
+  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  cube_mat := mjolnir.get_builtin_material(engine, .RED)
   rand_sphere_mesh := mjolnir.create_mesh(engine, geometry.make_sphere(random_colors = true))
   rand_cylinder_mesh := mjolnir.create_mesh(engine, geometry.make_cylinder(random_colors = true))
-  rand_mat := engine.rm.builtin_materials[resources.Color.WHITE]
+  rand_mat := mjolnir.get_builtin_material(engine, .WHITE)
   // Create ground
   {
     ground_node_handle := world.spawn(&engine.world, {0, -0.5, 0})
@@ -106,8 +105,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Alternate between cylinder (0), cube (1), and sphere (2)
     shape_type := i % 3
     body_handle: physics.DynamicRigidBodyHandle
-    mesh_handle: resources.MeshHandle
-    mat_handle: resources.MaterialHandle
+    mesh_handle: mjolnir.MeshHandle
+    mat_handle: mjolnir.MaterialHandle
 
     switch shape_type {
     case 0: // Cylinder

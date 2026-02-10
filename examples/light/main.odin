@@ -2,7 +2,6 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/geometry"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -10,7 +9,7 @@ import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
 
-light_handle: resources.NodeHandle
+light_handle: mjolnir.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -26,8 +25,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     mjolnir.sync_active_camera_controller(engine)
   }
   // Camera controller is automatically set up by engine
-  plane_mesh := engine.rm.builtin_meshes[resources.Primitive.QUAD]
-  plane_material := engine.rm.builtin_materials[resources.Color.GRAY]
+  plane_mesh := mjolnir.get_builtin_mesh(engine, .QUAD_XZ)
+  plane_material := mjolnir.get_builtin_material(engine, .GRAY)
   plane_handle := mjolnir.spawn(
     engine,
     attachment = world.MeshAttachment {
@@ -38,8 +37,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   mjolnir.scale(engine, plane_handle, 6.5)
   mjolnir.translate(engine, plane_handle, 0.0, -0.05, 0.0)
-  sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
-  sphere_material := engine.rm.builtin_materials[resources.Color.RED]
+  sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
+  sphere_material := mjolnir.get_builtin_material(engine, .RED)
   sphere_handle := mjolnir.spawn(
     engine,
     attachment = world.MeshAttachment {

@@ -6,7 +6,6 @@ import "../../mjolnir/gpu"
 import nav "../../mjolnir/navigation"
 import "../../mjolnir/navigation/detour"
 import "../../mjolnir/navigation/recast"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
@@ -21,22 +20,25 @@ demo_state: struct {
   end_pos:              [3]f32,
   current_path:         [][3]f32,
   // Visual markers
-  end_marker_handle:    resources.NodeHandle,
+  end_marker_handle:    mjolnir.NodeHandle,
   // Agent
-  agent_handle:         resources.NodeHandle,
+  agent_handle:         mjolnir.NodeHandle,
   agent_pos:            [3]f32,
   agent_speed:          f32,
   current_waypoint_idx: int,
   path_completed:       bool,
   // Demo scene nodes
-  ground_handle:        resources.NodeHandle,
-  obstacle_handles:     [dynamic]resources.NodeHandle,
+  ground_handle:        mjolnir.NodeHandle,
+  obstacle_handles:     [dynamic]mjolnir.NodeHandle,
   // OBJ file support
-  obj_mesh_handle:      resources.MeshHandle,
-  obj_node_handle:      resources.NodeHandle,
+  obj_mesh_handle:      mjolnir.MeshHandle,
+  obj_node_handle:      mjolnir.NodeHandle,
   use_procedural:       bool,
   // Navigation mesh info
   navmesh_info:         string,
+  nav_vertices:         [dynamic][3]f32,
+  nav_indices:          [dynamic]i32,
+  nav_area_types:       [dynamic]u8,
   // Debug draw handles
   navmesh_debug_handle: mjolnir.DebugObjectHandle,
 } = {
@@ -54,8 +56,31 @@ main :: proc() {
   mjolnir.run(engine, 800, 600, "Navigation Mesh")
 }
 
+append_nav_geometry :: proc(
+  geom: geometry.Geometry,
+  offset: [3]f32 = {},
+  is_obstacle := false,
+) {
+  vertex_base := i32(len(demo_state.nav_vertices))
+  for vertex in geom.vertices {
+    append(&demo_state.nav_vertices, vertex.position + offset)
+  }
+  for index in geom.indices {
+    append(&demo_state.nav_indices, vertex_base + i32(index))
+  }
+  triangle_count := len(geom.indices) / 3
+  area_type :=
+    is_obstacle ? u8(recast.RC_NULL_AREA) : u8(recast.RC_WALKABLE_AREA)
+  for _ in 0 ..< triangle_count {
+    append(&demo_state.nav_area_types, area_type)
+  }
+}
+
 demo_setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Navigation mesh demo setup with world integration")
+  clear(&demo_state.nav_vertices)
+  clear(&demo_state.nav_indices)
+  clear(&demo_state.nav_area_types)
   // Setup camera
   main_camera := mjolnir.get_main_camera(engine)
   if camera := mjolnir.get_main_camera(engine); camera != nil {
@@ -88,6 +113,7 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
     vertex.position.x *= 50
     vertex.position.z *= 50
   }
+  append_nav_geometry(ground_geom)
   ground_mesh_handle, ground_mesh_ok := mjolnir.create_mesh(engine, ground_geom)
   ground_material_handle, ground_material_ok := mjolnir.create_material(
     engine,
@@ -130,6 +156,7 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
       vertex.position.y *= size.y
       vertex.position.z *= size.z
     }
+    append_nav_geometry(obstacle_geom, position, true)
     obstacle_mesh_handle, obstacle_mesh_ok := mjolnir.create_mesh(
       engine,
       obstacle_geom,
@@ -199,6 +226,7 @@ create_obj_visualization_mesh :: proc(
     log.error("Failed to load OBJ file as geometry")
     return
   }
+  append_nav_geometry(geom)
   obj_mesh_handle, obj_mesh_ok := mjolnir.create_mesh(engine, geom)
   if obj_mesh_ok {
     demo_state.obj_mesh_handle = obj_mesh_handle
@@ -234,8 +262,22 @@ create_obj_visualization_mesh :: proc(
 
 setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
   log.info("Setting up navigation mesh with visualization")
-  if !mjolnir.setup_navmesh(engine) {
-    log.error("Failed to setup navigation mesh")
+  if len(demo_state.nav_vertices) == 0 || len(demo_state.nav_indices) == 0 {
+    log.error("No source geometry available for navmesh generation")
+    return
+  }
+  nav_geom := nav.NavigationGeometry {
+    vertices   = demo_state.nav_vertices[:],
+    indices    = demo_state.nav_indices[:],
+    area_types = demo_state.nav_area_types[:],
+  }
+  cfg := recast.config_create()
+  if !nav.build_navmesh(&engine.nav_sys.nav_mesh, nav_geom, cfg) {
+    log.error("Failed to build navmesh")
+    return
+  }
+  if !nav.init(&engine.nav_sys) {
+    log.error("Failed to initialize navmesh query")
     return
   }
   visualize_navmesh(engine)
@@ -306,7 +348,7 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
 
 update_position_marker :: proc(
   engine: ^mjolnir.Engine,
-  handle: ^resources.NodeHandle,
+  handle: ^mjolnir.NodeHandle,
   pos: [3]f32,
   color: [4]f32,
 ) {
@@ -356,12 +398,14 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
         position = pos,
       }
     }
-    mjolnir.debug_draw_spawn_line_strip_temporary(
-      engine,
-      path_vertices,
-      5.0,
-      [4]f32{1.0, 0.8, 0.0, 1.0}, // Orange/yellow path
-    )
+    if engine.world.debug_draw_line_strip != nil {
+      engine.world.debug_draw_line_strip(
+        path_vertices,
+        5.0,
+        [4]f32{1.0, 0.8, 0.0, 1.0}, // Orange/yellow path
+        false,
+      )
+    }
   }
 }
 
@@ -382,7 +426,7 @@ find_navmesh_point_from_mouse :: proc(
   )
   // GLFW returns coordinates with origin at top-left, Y increases downward
   camera := mjolnir.get_main_camera(engine)
-  ray_origin, ray_dir := resources.camera_viewport_to_world_ray(
+  ray_origin, ray_dir := world.camera_viewport_to_world_ray(
     camera,
     mouse_x,
     mouse_y,
@@ -397,7 +441,7 @@ find_navmesh_point_from_mouse :: proc(
     ray_dir.z,
   )
   // Strategy 1: Try intersection with ground plane (y=0) first
-  if abs(ray_dir.y) > 0.001 {
+  if math.abs(ray_dir.y) > 0.001 {
     t := -ray_origin.y / ray_dir.y
     if t > 0 && t < 1000 {   // Reasonable distance
       ground_intersection := ray_origin + ray_dir * t

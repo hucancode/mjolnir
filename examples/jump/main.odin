@@ -2,15 +2,14 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/physics"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math/linalg"
 import "vendor:glfw"
 
 physics_world: physics.World
-cube_handle: resources.NodeHandle
-ground_handle: resources.NodeHandle
+cube_handle: mjolnir.NodeHandle
+ground_handle: mjolnir.NodeHandle
 cube_body: physics.DynamicRigidBodyHandle
 time_since_jump: f32
 
@@ -29,8 +28,8 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world, {0, -10, 0})
-  ground_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-  ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
+  ground_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  ground_mat := mjolnir.get_builtin_material(engine, .GRAY)
   ground_handle = mjolnir.spawn(
     engine,
     [3]f32{0, -0.5, 0},
@@ -52,9 +51,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   world.scale_xyz(&engine.world, ground_mesh_handle, 40.0, 0.5, 40.0)
   log.info("Ground body created")
-  cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-  cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
-  cube_handle = spawn(
+  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  cube_mat := mjolnir.get_builtin_material(engine, .CYAN)
+  cube_handle = mjolnir.spawn(
     engine,
     [3]f32{0, 3, 0},
   )
@@ -69,7 +68,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if body, ok := physics.get_dynamic_body(&physics_world, cube_body); ok {
     physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
   }
-  cube_handle = spawn(
+  cube_handle = mjolnir.spawn(
     engine,
     cube_node.transform.position,
     world.RigidBodyAttachment{body_handle = cube_body},

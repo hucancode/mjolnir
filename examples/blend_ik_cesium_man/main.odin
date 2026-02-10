@@ -1,16 +1,15 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:time"
 
-root_nodes: [dynamic]resources.NodeHandle
-character_handle: resources.NodeHandle
-target_cube: resources.NodeHandle
+root_nodes: [dynamic]mjolnir.NodeHandle
+character_handle: mjolnir.NodeHandle
+target_cube: mjolnir.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()

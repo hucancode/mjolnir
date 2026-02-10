@@ -2,7 +2,6 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/geometry"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -11,7 +10,7 @@ import "core:time"
 import cgltf "vendor:cgltf"
 import "vendor:glfw"
 
-root_nodes: [dynamic]resources.NodeHandle
+root_nodes: [dynamic]mjolnir.NodeHandle
 frame_counter: int
 
 main :: proc() {

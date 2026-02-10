@@ -4,26 +4,25 @@ import "../../mjolnir"
 import anim "../../mjolnir/animation"
 import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-root_nodes: [dynamic]resources.NodeHandle
-markers: [dynamic]resources.NodeHandle
+root_nodes: [dynamic]mjolnir.NodeHandle
+markers: [dynamic]mjolnir.NodeHandle
 animation_time: f32 = 0
-spider_root_node: resources.NodeHandle
-target_markers: [6]resources.NodeHandle
-ground_plane: resources.NodeHandle
+spider_root_node: mjolnir.NodeHandle
+target_markers: [6]mjolnir.NodeHandle
+ground_plane: mjolnir.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     // Enable IK debug drawing
-    engine.world.debug_draw_ik = true
+    // engine.world.debug_draw_ik = true // Removed: debug_draw_ik no longer available
 
     if camera := mjolnir.get_main_camera(engine); camera != nil {
       mjolnir.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
@@ -74,7 +73,7 @@ main :: proc() {
         }
 
         // Get the mesh and skin data to calculate rest pose positions
-        mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
         skin, has_skin := mesh.skinning.?
         if !has_skin {
           continue
@@ -149,7 +148,6 @@ main :: proc() {
 
         success := world.add_spider_leg_modifier_layer(
           &engine.world,
-          &engine.rm,
           child,
           leg_root_names,
           leg_chain_lengths,
@@ -167,8 +165,8 @@ main :: proc() {
     }
 
     // Create cone markers for each bone
-    cone_mesh := engine.rm.builtin_meshes[resources.Primitive.CONE]
-    mat := engine.rm.builtin_materials[resources.Color.YELLOW]
+    cone_mesh := mjolnir.get_builtin_mesh(engine, .CONE)
+    mat := mjolnir.get_builtin_material(engine, .YELLOW)
 
     // Find the skinned mesh and create markers for bones
     for handle in root_nodes {
@@ -183,7 +181,7 @@ main :: proc() {
           continue
         }
 
-        mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
         log.infof("Mesh found")
 
         skin, has_skin := mesh.skinning.?
@@ -218,8 +216,8 @@ main :: proc() {
     }
 
     // Create visual markers for each leg target (red spheres)
-    sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
-    red_mat := engine.rm.builtin_materials[resources.Color.RED]
+    sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
+    red_mat := mjolnir.get_builtin_material(engine, .RED)
     for i in 0 ..< 6 {
       target_markers[i] = mjolnir.spawn(
         engine,
@@ -232,8 +230,8 @@ main :: proc() {
     }
 
     // Ground plane for reference
-    cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-    gray_mat := engine.rm.builtin_materials[resources.Color.GRAY]
+    cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+    gray_mat := mjolnir.get_builtin_material(engine, .GRAY)
     ground_plane = mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {
@@ -304,22 +302,23 @@ main :: proc() {
           continue
         }
 
-        mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
         skin := mesh.skinning.? or_continue
 
         // Get bone matrices from GPU buffer
         frame_index := engine.frame_index
-        bone_buffer := &engine.rm.bone_buffer.buffers[frame_index]
+        bone_buffer := &engine.render.bone_buffer.buffers[frame_index]
         if bone_buffer.mapped == nil {
           continue
         }
         bone_count := len(skin.bones)
-        if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF {
+        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[child]
+        if !has_offset {
           continue
         }
         matrices_ptr := gpu.get(
           bone_buffer,
-          skinning.bone_matrix_buffer_offset,
+          bone_matrix_buffer_offset,
         )
         bone_matrices := slice.from_ptr(matrices_ptr, bone_count)
         for i in 0 ..< bone_count {

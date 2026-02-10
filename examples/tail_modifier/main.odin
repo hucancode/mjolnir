@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import anim "../../mjolnir/animation"
 import cont "../../mjolnir/containers"
@@ -11,10 +10,10 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-root_nodes: [dynamic]resources.NodeHandle
-markers: [dynamic]resources.NodeHandle
+root_nodes: [dynamic]mjolnir.NodeHandle
+markers: [dynamic]mjolnir.NodeHandle
 animation_time: f32 = 0
-snake_child_node: resources.NodeHandle
+snake_child_node: mjolnir.NodeHandle
 root_bone_modifier: ^anim.SingleBoneRotationModifier
 
 main :: proc() {
@@ -34,7 +33,6 @@ main :: proc() {
         // Add single bone rotation modifier to control the root bone
         root_bone_modifier = world.add_single_bone_rotation_modifier_layer(
           &engine.world,
-          &engine.rm,
           child,
           bone_name = "root",
           weight = 1.0,
@@ -53,7 +51,6 @@ main :: proc() {
         //   Use true when root bone is at tail end (need head→tail order)
         success := world.add_tail_modifier_layer(
           &engine.world,
-          &engine.rm,
           child,
           root_bone_name = "root",
           tail_length = 10,
@@ -69,8 +66,8 @@ main :: proc() {
     }
 
     // Create cone markers for each bone
-    cone_mesh := engine.rm.builtin_meshes[resources.Primitive.CONE]
-    mat := engine.rm.builtin_materials[resources.Color.YELLOW]
+    cone_mesh := mjolnir.get_builtin_mesh(engine, .CONE)
+    mat := mjolnir.get_builtin_material(engine, .YELLOW)
 
     // Find the skinned mesh and create markers for bones
     for handle in root_nodes {
@@ -85,7 +82,7 @@ main :: proc() {
           continue
         }
 
-        mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
         log.infof("Mesh found")
 
         skin, has_skin := mesh.skinning.?
@@ -155,20 +152,21 @@ main :: proc() {
           continue
         }
 
-        mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
         skin := mesh.skinning.? or_continue
 
         // Get bone matrices from GPU buffer
         frame_index := engine.frame_index
-        bone_buffer := &engine.rm.bone_buffer.buffers[frame_index]
+        bone_buffer := &engine.render.bone_buffer.buffers[frame_index]
         if bone_buffer.mapped == nil {
           continue
         }
         bone_count := len(skin.bones)
-        if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF {
+        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[child]
+        if !has_offset {
           continue
         }
-        matrices_ptr := gpu.get(bone_buffer, skinning.bone_matrix_buffer_offset)
+        matrices_ptr := gpu.get(bone_buffer, bone_matrix_buffer_offset)
         bone_matrices := slice.from_ptr(matrices_ptr, bone_count)
         for i in 0 ..< bone_count {
           if marker_idx >= len(markers) do break

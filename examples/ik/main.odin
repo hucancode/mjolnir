@@ -2,20 +2,20 @@ package main
 
 import "../../mjolnir"
 import cont "../../mjolnir/containers"
+import d "../../mjolnir/data"
 import "../../mjolnir/gpu"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-root_nodes: [dynamic]resources.NodeHandle
+root_nodes: [dynamic]mjolnir.NodeHandle
 animation_time: f32 = 0
-spider_root_node: resources.NodeHandle
-mesh_node: resources.NodeHandle
-target_markers: [6]resources.NodeHandle
-ground_plane: resources.NodeHandle
+spider_root_node: mjolnir.NodeHandle
+mesh_node: mjolnir.NodeHandle
+target_markers: [6]mjolnir.NodeHandle
+ground_plane: mjolnir.NodeHandle
 
 // Fixed ground targets for each leg (computed from initial pose)
 leg_targets: [6][3]f32
@@ -29,7 +29,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  engine.world.debug_draw_ik = true
+  // engine.world.debug_draw_ik = true // Removed: debug_draw_ik no longer available
   if camera := mjolnir.get_main_camera(engine); camera != nil {
     mjolnir.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
     mjolnir.sync_active_camera_controller(engine)
@@ -73,7 +73,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
       mesh_node = child
 
-      mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+      mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
       skin, has_skin := mesh.skinning.?
       if !has_skin {
         continue
@@ -165,7 +165,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
 
-  mat := engine.rm.builtin_materials[resources.Color.YELLOW]
+  mat := mjolnir.get_builtin_material(engine, .YELLOW)
 
   // Find the skinned mesh and create markers for bones
   for handle in root_nodes {
@@ -177,7 +177,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         continue
       }
 
-      mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+      mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
       skin, has_skin := mesh.skinning.?
       if !has_skin {
         continue
@@ -187,8 +187,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Create visual markers for each leg target (red spheres)
-  sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
-  red_mat := engine.rm.builtin_materials[resources.Color.RED]
+  sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
+  red_mat := mjolnir.get_builtin_material(engine, .RED)
   for i in 0 ..< 6 {
     target_markers[i] = mjolnir.spawn(
       engine,
@@ -206,8 +206,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Ground plane for reference
-  cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-  gray_mat := engine.rm.builtin_materials[resources.Color.GRAY]
+  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  gray_mat := mjolnir.get_builtin_material(engine, .GRAY)
   ground_plane = mjolnir.spawn(
     engine,
     attachment = world.MeshAttachment{handle = cube_mesh, material = gray_mat},
@@ -256,7 +256,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     pole_transform *= linalg.matrix4_scale([3]f32{0.2, 0.2, 0.2})
     mjolnir.debug_draw_spawn_mesh_temporary(
       engine,
-      engine.rm.builtin_meshes[resources.Primitive.SPHERE],
+      mjolnir.get_builtin_mesh(engine, .SPHERE),
       pole_transform,
       duration_seconds = 0.05,
       color = {0.0, 1.0, 0.0, 1.0}, // Green for poles
@@ -266,7 +266,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
 // Find all bone names in a chain from root to tip
 find_bone_chain :: proc(
-  skin: resources.Skinning,
+  skin: d.Skinning,
   root_name: string,
   tip_name: string,
 ) -> []string {

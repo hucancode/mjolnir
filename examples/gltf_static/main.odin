@@ -1,13 +1,12 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:time"
 
-nodes: [dynamic]resources.NodeHandle
+nodes: [dynamic]mjolnir.NodeHandle
 
 main :: proc() {
   engine := new(mjolnir.Engine)

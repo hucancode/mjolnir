@@ -1,13 +1,12 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 
-fox_handle: resources.NodeHandle
-target_cube: resources.NodeHandle
+fox_handle: mjolnir.NodeHandle
+target_cube: mjolnir.NodeHandle
 blend_factor: f32 = 0.0 // 0.0 = Walk, 1.0 = Run
 blend_direction: f32 = 1.0
 
@@ -40,7 +39,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     node := mjolnir.get_node(engine, handle) or_continue
     log.infof("Root node has %d children", len(node.children))
     for child in node.children {
-      child_node := get_node(engine, child) or_continue
+      child_node := mjolnir.get_node(engine, child) or_continue
       log.infof("Child node attachment: %v", child_node.attachment)
       // Check if this is a mesh
       mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment)
