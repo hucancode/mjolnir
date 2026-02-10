@@ -188,7 +188,7 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   }
-  env_map, env_result := shared.create_texture_2d_from_path(
+  env_map, env_result := gpu.create_texture_2d_from_path(
     gctx,
     texture_manager,
     "assets/Cannon_Exterior.hdr",
@@ -204,9 +204,9 @@ init :: proc(
     self.environment_map = {} // Empty handle - renderer should handle gracefully
   }
   defer if ret != .SUCCESS {
-    shared.destroy_texture_2d(gctx, texture_manager, self.environment_map)
+    gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
   }
-  environment_map := shared.get_texture_2d(texture_manager, self.environment_map)
+  environment_map := gpu.get_texture_2d(texture_manager, self.environment_map)
   if environment_map != nil {
     self.environment_max_lod =
       f32(
@@ -219,13 +219,13 @@ init :: proc(
   } else {
     self.environment_max_lod = 0.0
   }
-  brdf_handle := shared.create_texture_2d_from_data(
+  brdf_handle := gpu.create_texture_2d_from_data(
     gctx,
     texture_manager,
     TEXTURE_LUT_GGX,
   ) or_return
   defer if ret != .SUCCESS {
-    shared.destroy_texture_2d(gctx, texture_manager, brdf_handle)
+    gpu.free_texture_2d(texture_manager, gctx, brdf_handle)
   }
   self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0
@@ -321,8 +321,8 @@ shutdown :: proc(
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
   self.ambient_pipeline_layout = 0
-  shared.destroy_texture_2d(gctx, texture_manager, self.environment_map)
-  shared.destroy_texture_2d(gctx, texture_manager, self.brdf_lut)
+  gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
+  gpu.free_texture_2d(texture_manager, gctx, self.brdf_lut)
   vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
 }

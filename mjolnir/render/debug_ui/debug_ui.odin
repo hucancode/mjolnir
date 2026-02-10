@@ -170,15 +170,6 @@ init :: proc(
     vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
     self.projection_layout = 0
   }
-  log.infof("init UI texture...")
-  self.atlas_handle = shared.create_texture_2d_from_pixels(
-    gctx,
-    texture_manager,
-    mu.default_atlas_alpha[:],
-    mu.DEFAULT_ATLAS_WIDTH,
-    mu.DEFAULT_ATLAS_HEIGHT,
-    .R8_UNORM,
-  ) or_return
   defer if ret != .SUCCESS {
     // texture is managed by resource manager, no manual cleanup needed
     vk.DestroyPipeline(gctx.device, self.pipeline, nil)
@@ -188,6 +179,17 @@ init :: proc(
     vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
     self.projection_layout = 0
   }
+  log.infof("init UI texture...")
+  gpu.allocate_texture_2d_with_data(
+    texture_manager,
+    gctx,
+    raw_data(mu.default_atlas_alpha[:]),
+    vk.DeviceSize(len(mu.default_atlas_alpha)),
+    mu.DEFAULT_ATLAS_WIDTH,
+    mu.DEFAULT_ATLAS_HEIGHT,
+    .R8_UNORM,
+    {.SAMPLED},
+  )
   log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
   log.infof("init UI vertex buffer...")
   self.vertex_buffer = gpu.create_mutable_buffer(

@@ -471,9 +471,9 @@ create_images :: proc(
   format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
-    handle = shared.create_texture_2d_empty(
-      gctx,
+    handle = gpu.allocate_texture_2d(
       texture_manager,
+      gctx,
       width,
       height,
       format,
@@ -484,6 +484,7 @@ create_images :: proc(
         .TRANSFER_DST,
       },
     ) or_return
+
   }
   log.debugf("created post-process image")
   return .SUCCESS
@@ -495,7 +496,7 @@ destroy_images :: proc(
   texture_manager: ^gpu.TextureManager,
 ) {
   for handle in self.images {
-    shared.destroy_texture_2d(gctx, texture_manager, handle)
+    gpu.free_texture_2d(texture_manager, gctx, handle)
   }
 }
 
@@ -507,14 +508,7 @@ recreate_images :: proc(
   format: vk.Format,
 ) -> vk.Result {
   destroy_images(self, gctx, texture_manager)
-  return create_images(
-    gctx,
-    self,
-    texture_manager,
-    width,
-    height,
-    format,
-  )
+  return create_images(gctx, self, texture_manager, width, height, format)
 }
 
 shutdown :: proc(
@@ -572,7 +566,8 @@ render :: proc(
     input_image_index: u32
     dst_image_idx: u32
     if is_first {
-      input_image_index = camera_gpu.attachments[.FINAL_IMAGE][frame_index].index // Use original input
+      input_image_index =
+        camera_gpu.attachments[.FINAL_IMAGE][frame_index].index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -586,7 +581,10 @@ render :: proc(
     // Pass N: image[(N+1)%2] -> swapchain (src: image[(N-1)%2], dst: swapchain)
     dst_view := output_view
     if !is_last {
-      dst_texture := gpu.get_texture_2d(texture_manager, self.images[dst_image_idx])
+      dst_texture := gpu.get_texture_2d(
+        texture_manager,
+        self.images[dst_image_idx],
+      )
       if dst_texture == nil {
         log.errorf(
           "Post-process image handle %v not found",
@@ -612,7 +610,10 @@ render :: proc(
     }
     if !is_first {
       src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
-      src_texture := gpu.get_texture_2d(texture_manager, self.images[src_texture_idx])
+      src_texture := gpu.get_texture_2d(
+        texture_manager,
+        self.images[src_texture_idx],
+      )
       if src_texture == nil {
         log.errorf(
           "Post-process source image handle %v not found",
@@ -650,13 +651,16 @@ render :: proc(
     base: BasePushConstant
     base.position_texture_index =
       camera_gpu.attachments[.POSITION][frame_index].index
-    base.normal_texture_index = camera_gpu.attachments[.NORMAL][frame_index].index
-    base.albedo_texture_index = camera_gpu.attachments[.ALBEDO][frame_index].index
+    base.normal_texture_index =
+      camera_gpu.attachments[.NORMAL][frame_index].index
+    base.albedo_texture_index =
+      camera_gpu.attachments[.ALBEDO][frame_index].index
     base.metallic_texture_index =
       camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index].index
     base.emissive_texture_index =
       camera_gpu.attachments[.EMISSIVE][frame_index].index
-    base.depth_texture_index = camera_gpu.attachments[.DEPTH][frame_index].index
+    base.depth_texture_index =
+      camera_gpu.attachments[.DEPTH][frame_index].index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

@@ -1,16 +1,12 @@
 package render
 
-import d "../data"
 import cont "../containers"
+import d "../data"
 import "../geometry"
 import "../gpu"
-import shared "shared"
-import "core:c"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:strings"
-import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
 allocate_vertices :: proc(
@@ -80,7 +76,10 @@ free_indices :: proc(render: ^Manager, allocation: d.BufferAllocation) {
   cont.slab_free(&render.index_slab, allocation.offset)
 }
 
-free_vertex_skinning :: proc(render: ^Manager, allocation: d.BufferAllocation) {
+free_vertex_skinning :: proc(
+  render: ^Manager,
+  allocation: d.BufferAllocation,
+) {
   cont.slab_free(&render.vertex_skinning_slab, allocation.offset)
 }
 
@@ -94,40 +93,64 @@ init_builtin_meshes :: proc(
 
   // CUBE
   builtin_meshes[d.Primitive.CUBE] = allocate_mesh_geometry(
-    gctx, render, meshes, geometry.make_cube(),
+    gctx,
+    render,
+    meshes,
+    geometry.make_cube(),
   ) or_return
 
   // SPHERE
   builtin_meshes[d.Primitive.SPHERE] = allocate_mesh_geometry(
-    gctx, render, meshes, geometry.make_sphere(),
+    gctx,
+    render,
+    meshes,
+    geometry.make_sphere(),
   ) or_return
 
   // QUAD
   builtin_meshes[d.Primitive.QUAD_XZ] = allocate_mesh_geometry(
-    gctx, render, meshes, geometry.make_quad(),
+    gctx,
+    render,
+    meshes,
+    geometry.make_quad(),
   ) or_return
   builtin_meshes[d.Primitive.QUAD_XY] = allocate_mesh_geometry(
-    gctx, render, meshes, geometry.make_billboard_quad(),
+    gctx,
+    render,
+    meshes,
+    geometry.make_billboard_quad(),
   ) or_return
 
   // CONE
   builtin_meshes[d.Primitive.CONE] = allocate_mesh_geometry(
-    gctx, render, meshes, geometry.make_cone(),
+    gctx,
+    render,
+    meshes,
+    geometry.make_cone(),
   ) or_return
 
   // CAPSULE
   builtin_meshes[d.Primitive.CAPSULE] = allocate_mesh_geometry(
-    gctx, render, meshes, geometry.make_capsule(),
+    gctx,
+    render,
+    meshes,
+    geometry.make_capsule(),
   ) or_return
 
   // CYLINDER
   builtin_meshes[d.Primitive.CYLINDER] = allocate_mesh_geometry(
-    gctx, render, meshes, geometry.make_cylinder(),
+    gctx,
+    render,
+    meshes,
+    geometry.make_cylinder(),
   ) or_return
 
   // TORUS
   builtin_meshes[d.Primitive.TORUS] = allocate_mesh_geometry(
-    gctx, render, meshes, geometry.make_torus(),
+    gctx,
+    render,
+    meshes,
+    geometry.make_torus(),
   ) or_return
 
   log.info("Builtin meshes created successfully")
@@ -152,20 +175,32 @@ allocate_mesh_geometry :: proc(
   mesh.aabb_max = geometry_data.aabb.max
   mesh.auto_purge = auto_purge
   if len(geometry_data.skinnings) > 0 {
-    mesh.skinning = d.Skinning{
+    mesh.skinning = d.Skinning {
       bones      = make([]d.Bone, 0),
       allocation = {},
     }
   }
 
   // Allocate geometry buffers in render module
-  mesh.vertex_allocation = allocate_vertices(render, gctx, geometry_data.vertices) or_return
-  mesh.index_allocation = allocate_indices(render, gctx, geometry_data.indices) or_return
+  mesh.vertex_allocation = allocate_vertices(
+    render,
+    gctx,
+    geometry_data.vertices,
+  ) or_return
+  mesh.index_allocation = allocate_indices(
+    render,
+    gctx,
+    geometry_data.indices,
+  ) or_return
 
   // Handle skinning data if present
   if len(geometry_data.skinnings) > 0 {
     if skin, has_skin := &mesh.skinning.?; has_skin {
-      skin.allocation = allocate_vertex_skinning(render, gctx, geometry_data.skinnings) or_return
+      skin.allocation = allocate_vertex_skinning(
+        render,
+        gctx,
+        geometry_data.skinnings,
+      ) or_return
     }
   }
 
@@ -174,10 +209,7 @@ allocate_mesh_geometry :: proc(
   return handle, .SUCCESS
 }
 
-free_mesh_geometry :: proc(
-  meshes: ^d.Pool(d.Mesh),
-  handle: d.MeshHandle,
-) {
+free_mesh_geometry :: proc(meshes: ^d.Pool(d.Mesh), handle: d.MeshHandle) {
   mesh, ok := cont.free(meshes, handle)
   if !ok do return
   if skin, has_skin := &mesh.skinning.?; has_skin {
@@ -192,7 +224,9 @@ register_texture_2d :: proc(
   handle: d.Image2DHandle,
   auto_purge: bool = false,
 ) {
-  render.texture_2d_tracking[handle] = TextureTracking{auto_purge = auto_purge}
+  render.texture_2d_tracking[handle] = TextureTracking {
+    auto_purge = auto_purge,
+  }
 }
 
 unregister_texture_2d :: proc(render: ^Manager, handle: d.Image2DHandle) {
@@ -204,17 +238,16 @@ register_texture_cube :: proc(
   handle: d.ImageCubeHandle,
   auto_purge: bool = false,
 ) {
-  render.texture_cube_tracking[handle] = TextureTracking{auto_purge = auto_purge}
+  render.texture_cube_tracking[handle] = TextureTracking {
+    auto_purge = auto_purge,
+  }
 }
 
 unregister_texture_cube :: proc(render: ^Manager, handle: d.ImageCubeHandle) {
   delete_key(&render.texture_cube_tracking, handle)
 }
 
-enqueue_texture_2d_retire :: proc(
-  render: ^Manager,
-  handle: d.Image2DHandle,
-) {
+enqueue_texture_2d_retire :: proc(render: ^Manager, handle: d.Image2DHandle) {
   if _, exists := render.retired_textures_2d[handle]; exists do return
   if img := gpu.get_texture_2d(&render.texture_manager, handle); img == nil {
     return
@@ -236,7 +269,9 @@ enqueue_texture_cube_retire :: proc(
 process_retired_gpu_resources :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
-) -> (retired_count: int) {
+) -> (
+  retired_count: int,
+) {
   stale_2d: [dynamic]d.Image2DHandle
   stale_cube: [dynamic]d.ImageCubeHandle
   defer delete(stale_2d)
@@ -336,13 +371,19 @@ texture_cube_unref :: proc(
   return meta.ref_count, true
 }
 
-texture_2d_should_purge :: proc(render: ^Manager, handle: d.Image2DHandle) -> bool {
+texture_2d_should_purge :: proc(
+  render: ^Manager,
+  handle: d.Image2DHandle,
+) -> bool {
   meta, ok := render.texture_2d_tracking[handle]
   if !ok do return false
   return meta.auto_purge && meta.ref_count == 0
 }
 
-texture_cube_should_purge :: proc(render: ^Manager, handle: d.ImageCubeHandle) -> bool {
+texture_cube_should_purge :: proc(
+  render: ^Manager,
+  handle: d.ImageCubeHandle,
+) -> bool {
   meta, ok := render.texture_cube_tracking[handle]
   if !ok do return false
   return meta.auto_purge && meta.ref_count == 0
@@ -359,7 +400,14 @@ create_empty_texture_2d :: proc(
   handle: d.Image2DHandle,
   ret: vk.Result,
 ) {
-  handle = gpu.allocate_texture_2d(&render.texture_manager, gctx, width, height, format, usage) or_return
+  handle = gpu.allocate_texture_2d(
+    &render.texture_manager,
+    gctx,
+    width,
+    height,
+    format,
+    usage,
+  ) or_return
   register_texture_2d(render, handle, auto_purge)
   return handle, .SUCCESS
 }
@@ -375,7 +423,13 @@ create_empty_texture_cube :: proc(
   handle: d.ImageCubeHandle,
   ret: vk.Result,
 ) {
-  handle = gpu.allocate_texture_cube(&render.texture_manager, gctx, size, format, usage) or_return
+  handle = gpu.allocate_texture_cube(
+    &render.texture_manager,
+    gctx,
+    size,
+    format,
+    usage,
+  ) or_return
   register_texture_cube(render, handle, auto_purge)
   return handle, .SUCCESS
 }
@@ -392,7 +446,7 @@ create_texture_from_path :: proc(
   handle: d.Image2DHandle,
   ret: vk.Result,
 ) {
-  handle = shared.create_texture_2d_from_path(
+  handle = gpu.create_texture_2d_from_path(
     gctx,
     &render.texture_manager,
     path,
@@ -415,7 +469,13 @@ create_texture_from_data :: proc(
   handle: d.Image2DHandle,
   ret: vk.Result,
 ) {
-  handle = shared.create_texture_2d_from_data(gctx, &render.texture_manager, data, format, generate_mips) or_return
+  handle = gpu.create_texture_2d_from_data(
+    gctx,
+    &render.texture_manager,
+    data,
+    format,
+    generate_mips,
+  ) or_return
   register_texture_2d(render, handle, false)
   return handle, .SUCCESS
 }
@@ -431,13 +491,15 @@ create_texture_from_pixels :: proc(
   handle: d.Image2DHandle,
   ret: vk.Result,
 ) {
-  handle = shared.create_texture_2d_from_pixels(
-    gctx,
+  handle = gpu.allocate_texture_2d_with_data(
     &render.texture_manager,
-    pixels,
-    width,
-    height,
+    gctx,
+    raw_data(pixels),
+    vk.DeviceSize(len(pixels)),
+    u32(width),
+    u32(height),
     format,
+    {.SAMPLED},
     generate_mips,
   ) or_return
   register_texture_2d(render, handle, false)
@@ -487,7 +549,7 @@ set_texture_2d_descriptor :: proc(
     {
       .SAMPLED_IMAGE,
       vk.DescriptorImageInfo {
-        imageView   = image_view,
+        imageView = image_view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     },
@@ -501,7 +563,10 @@ set_texture_cube_descriptor :: proc(
   image_view: vk.ImageView,
 ) {
   if texture_index >= d.MAX_CUBE_TEXTURES {
-    log.warnf("Index %d out of bounds for bindless cube textures", texture_index)
+    log.warnf(
+      "Index %d out of bounds for bindless cube textures",
+      texture_index,
+    )
     return
   }
   if textures_descriptor_set == 0 {
@@ -516,7 +581,7 @@ set_texture_cube_descriptor :: proc(
     {
       .SAMPLED_IMAGE,
       vk.DescriptorImageInfo {
-        imageView   = image_view,
+        imageView = image_view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     },
@@ -526,11 +591,15 @@ set_texture_cube_descriptor :: proc(
 purge_unused_textures_2d :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
-) -> (purged_count: int) {
+) -> (
+  purged_count: int,
+) {
   _ = gctx
   for &img, i in render.texture_manager.images_2d {
     if img.image == 0 do continue // Skip free slots
-    handle := d.Image2DHandle{index = u32(i)}
+    handle := d.Image2DHandle {
+      index = u32(i),
+    }
     if texture_2d_should_purge(render, handle) {
       enqueue_texture_2d_retire(render, handle)
       unregister_texture_2d(render, handle)
@@ -546,11 +615,15 @@ purge_unused_textures_2d :: proc(
 purge_unused_textures_cube :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
-) -> (purged_count: int) {
+) -> (
+  purged_count: int,
+) {
   _ = gctx
   for &img, i in render.texture_manager.images_cube {
     if img.image == 0 do continue // Skip free slots
-    handle := d.ImageCubeHandle{index = u32(i)}
+    handle := d.ImageCubeHandle {
+      index = u32(i),
+    }
     if texture_cube_should_purge(render, handle) {
       enqueue_texture_cube_retire(render, handle)
       unregister_texture_cube(render, handle)
@@ -566,7 +639,9 @@ purge_unused_textures_cube :: proc(
 purge_unused_gpu_resources :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
-) -> (total_purged: int) {
+) -> (
+  total_purged: int,
+) {
   total_purged += purge_unused_textures_2d(render, gctx)
   total_purged += purge_unused_textures_cube(render, gctx)
   if total_purged > 0 {
@@ -583,7 +658,10 @@ active_texture_cube_count :: proc(render: ^Manager) -> int {
   return len(render.texture_cube_tracking)
 }
 
-get_texture_2d :: proc(render: ^Manager, handle: d.Image2DHandle) -> ^gpu.Image {
+get_texture_2d :: proc(
+  render: ^Manager,
+  handle: d.Image2DHandle,
+) -> ^gpu.Image {
   return gpu.get_texture_2d(&render.texture_manager, handle)
 }
 
@@ -609,7 +687,11 @@ upload_node_transform :: proc(
   handle: d.NodeHandle,
   world_matrix: ^matrix[4, 4]f32,
 ) {
-  gpu.write(&render.world_matrix_buffer.buffer, world_matrix, int(handle.index))
+  gpu.write(
+    &render.world_matrix_buffer.buffer,
+    world_matrix,
+    int(handle.index),
+  )
 }
 
 upload_node_data :: proc(
@@ -655,7 +737,11 @@ upload_forcefield_data :: proc(
   handle: d.ForceFieldHandle,
   forcefield_data: ^d.ForceFieldData,
 ) {
-  gpu.write(&render.forcefield_buffer.buffer, forcefield_data, int(handle.index))
+  gpu.write(
+    &render.forcefield_buffer.buffer,
+    forcefield_data,
+    int(handle.index),
+  )
 }
 
 upload_light_data :: proc(
@@ -680,7 +766,10 @@ update_light_camera :: proc(
     light := cont.get(lights, handle) or_continue
     node_data := gpu.get(&render.node_data_buffer.buffer, light.node_index)
     if node_data == nil do continue
-    world_matrix := gpu.get(&render.world_matrix_buffer.buffer, light.node_index)
+    world_matrix := gpu.get(
+      &render.world_matrix_buffer.buffer,
+      light.node_index,
+    )
     if world_matrix == nil do continue
     light_position := world_matrix[3].xyz
     light_direction := world_matrix[2].xyz
@@ -805,11 +894,7 @@ upload_mesh_data_raw :: proc(
   handle: d.MeshHandle,
   mesh_data: ^d.MeshData,
 ) {
-  gpu.write(
-    &render.mesh_data_buffer.buffer,
-    mesh_data,
-    int(handle.index),
-  )
+  gpu.write(&render.mesh_data_buffer.buffer, mesh_data, int(handle.index))
 }
 
 upload_material_data :: proc(
@@ -828,25 +913,15 @@ upload_material_data_raw :: proc(
   material_data: ^d.MaterialData,
 ) {
   if handle.index >= d.MAX_MATERIALS do return
-  gpu.write(
-    &render.material_buffer.buffer,
-    material_data,
-    int(handle.index),
-  )
+  gpu.write(&render.material_buffer.buffer, material_data, int(handle.index))
 }
 
-allocate_bone_matrix_range :: proc(
-  render: ^Manager,
-  bone_count: u32,
-) -> u32 {
+allocate_bone_matrix_range :: proc(render: ^Manager, bone_count: u32) -> u32 {
   if bone_count == 0 do return 0xFFFFFFFF
   return cont.slab_alloc(&render.bone_matrix_slab, bone_count)
 }
 
-free_bone_matrix_range :: proc(
-  render: ^Manager,
-  offset: u32,
-) {
+free_bone_matrix_range :: proc(render: ^Manager, offset: u32) {
   if offset == 0xFFFFFFFF do return
   cont.slab_free(&render.bone_matrix_slab, offset)
 }
@@ -900,9 +975,7 @@ upload_camera_data :: proc(
     camera.position[2],
     1.0,
   }
-  frustum := geometry.make_frustum(
-    camera_data.projection * camera_data.view,
-  )
+  frustum := geometry.make_frustum(camera_data.projection * camera_data.view)
   camera_data.frustum_planes = frustum.planes
   gpu.write(
     &render.camera_buffer.buffers[frame_index],
@@ -917,7 +990,10 @@ upload_spherical_camera_data :: proc(
   camera_index: u32,
   frame_index: u32 = 0,
 ) {
-  dst := gpu.get(&render.spherical_camera_buffer.buffers[frame_index], camera_index)
+  dst := gpu.get(
+    &render.spherical_camera_buffer.buffers[frame_index],
+    camera_index,
+  )
   if dst == nil do return
   fov := f32(math.PI * 0.5)
   aspect := f32(1.0)
