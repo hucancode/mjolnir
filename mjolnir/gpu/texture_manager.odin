@@ -3,6 +3,9 @@ package gpu
 import d "../data"
 import "core:log"
 import vk "vendor:vulkan"
+import stbi "vendor:stb/image"
+import "core:c"
+import "core:strings"
 
 // TextureManager manages textures using simple dynamic arrays for bindless rendering.
 // Handles are array indices, mapping directly to descriptor array indices.
@@ -230,4 +233,83 @@ set_texture_cube_descriptor :: proc(
 			},
 		},
 	)
+}
+
+create_texture_2d_from_data :: proc(
+  gctx: ^GPUContext,
+  texture_manager: ^TextureManager,
+  data: []u8,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips: bool = false,
+) -> (
+  handle: d.Image2DHandle,
+  ret: vk.Result,
+) {
+  width, height, channels: c.int
+  pixels := stbi.load_from_memory(raw_data(data), c.int(len(data)), &width, &height, &channels, 4)
+  if pixels == nil {
+    log.errorf("Failed to decode texture data: %s", stbi.failure_reason())
+    return {}, .ERROR_UNKNOWN
+  }
+  defer stbi.image_free(pixels)
+  pixel_size := vk.DeviceSize(width * height * 4)
+  return allocate_texture_2d_with_data(
+    texture_manager,
+    gctx,
+    pixels,
+    pixel_size,
+    u32(width),
+    u32(height),
+    format,
+    {.SAMPLED},
+    generate_mips,
+  )
+}
+
+create_texture_2d_from_path :: proc(
+  gctx: ^GPUContext,
+  texture_manager: ^TextureManager,
+  path: string,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips: bool = false,
+  usage: vk.ImageUsageFlags = {.SAMPLED},
+  is_hdr: bool = false,
+) -> (
+  handle: d.Image2DHandle,
+  ret: vk.Result,
+) {
+  path_cstr := strings.clone_to_cstring(path)
+  defer delete(path_cstr)
+  width, height, channels: c.int
+  pixel_data: rawptr
+  data_size: vk.DeviceSize
+  if is_hdr {
+    pixels := stbi.loadf(path_cstr, &width, &height, &channels, 4)
+    if pixels == nil {
+      log.errorf("Failed to load HDR texture '%s': %s", path, stbi.failure_reason())
+      return {}, .ERROR_UNKNOWN
+    }
+    pixel_data = pixels
+    data_size = vk.DeviceSize(width * height * 4 * size_of(f32))
+  } else {
+    pixels := stbi.load(path_cstr, &width, &height, &channels, 4)
+    if pixels == nil {
+      log.errorf("Failed to load texture '%s': %s", path, stbi.failure_reason())
+      return {}, .ERROR_UNKNOWN
+    }
+    pixel_data = pixels
+    data_size = vk.DeviceSize(width * height * 4)
+  }
+  defer stbi.image_free(pixel_data)
+  return allocate_texture_2d_with_data(
+    texture_manager,
+    gctx,
+    pixel_data,
+    data_size,
+    u32(width),
+    u32(height),
+    format,
+    usage,
+    generate_mips,
+  )
 }

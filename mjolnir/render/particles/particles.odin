@@ -514,13 +514,13 @@ create_render_pipeline :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
   }
-  default_texture_handle := shared.create_texture_2d_from_data(
+  default_texture_handle := gpu.create_texture_2d_from_data(
     gctx,
     texture_manager,
     TEXTURE_BLACK_CIRCLE,
   ) or_return
   defer if ret != .SUCCESS {
-    shared.destroy_texture_2d(gctx, texture_manager, default_texture_handle)
+    gpu.free_texture_2d(texture_manager, gctx, default_texture_handle)
   }
   self.default_texture_index = default_texture_handle.index
   vertex_binding := vk.VertexInputBindingDescription {

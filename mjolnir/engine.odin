@@ -188,7 +188,13 @@ init :: proc(
   ) or_return
 
   // Set up debug draw callbacks for world module
-  self.world.debug_draw_line_strip = proc(points: []geometry.Vertex, duration_seconds: f64, color: [4]f32, bypass_depth: bool) {
+  self.world.debug_draw_line_strip =
+  proc(
+    points: []geometry.Vertex,
+    duration_seconds: f64,
+    color: [4]f32,
+    bypass_depth: bool,
+  ) {
     engine := cast(^Engine)context.user_ptr
     if engine == nil do return
 
@@ -211,7 +217,10 @@ init :: proc(
     mesh_handle, result := render.allocate_mesh_geometry(
       &engine.gctx,
       &engine.render,
-      &engine.world.meshes, geom, auto_purge = true)
+      &engine.world.meshes,
+      geom,
+      auto_purge = true,
+    )
     if result != .SUCCESS {
       log.warnf("Failed to allocate debug line strip mesh: %v", result)
       return
@@ -227,7 +236,14 @@ init :: proc(
     )
   }
 
-  self.world.debug_draw_mesh = proc(mesh_handle: d.MeshHandle, transform: matrix[4, 4]f32, duration_seconds: f64, color: [4]f32, bypass_depth: bool) {
+  self.world.debug_draw_mesh =
+  proc(
+    mesh_handle: d.MeshHandle,
+    transform: matrix[4, 4]f32,
+    duration_seconds: f64,
+    color: [4]f32,
+    bypass_depth: bool,
+  ) {
     engine := cast(^Engine)context.user_ptr
     if engine == nil do return
     debug_draw.spawn_mesh_temporary(
@@ -433,7 +449,10 @@ update_input :: proc(self: ^Engine) -> bool {
 
   // UI event handling
   {
-    mouse_pos := [2]f32{f32(self.input.mouse_pos.x), f32(self.input.mouse_pos.y)}
+    mouse_pos := [2]f32 {
+      f32(self.input.mouse_pos.x),
+      f32(self.input.mouse_pos.y),
+    }
     current_widget := ui.pick_widget(&self.render.ui_system, mouse_pos)
 
     // Handle hover in/out events
@@ -442,38 +461,54 @@ update_input :: proc(self: ^Engine) -> bool {
         // Check if it's a different widget
         old_raw := transmute(cont.Handle)old_handle
         new_raw := transmute(cont.Handle)new_handle
-        if old_raw.index != new_raw.index || old_raw.generation != new_raw.generation {
+        if old_raw.index != new_raw.index ||
+           old_raw.generation != new_raw.generation {
           // Hover out from old widget
           event := ui.MouseEvent {
-            type = .HOVER_OUT,
+            type     = .HOVER_OUT,
             position = mouse_pos,
-            button = 0,
-            widget = old_handle,
+            button   = 0,
+            widget   = old_handle,
           }
-          ui.dispatch_mouse_event(&self.render.ui_system, old_handle, event, true)
+          ui.dispatch_mouse_event(
+            &self.render.ui_system,
+            old_handle,
+            event,
+            true,
+          )
 
           // Hover in to new widget
           event.type = .HOVER_IN
           event.widget = new_handle
-          ui.dispatch_mouse_event(&self.render.ui_system, new_handle, event, true)
+          ui.dispatch_mouse_event(
+            &self.render.ui_system,
+            new_handle,
+            event,
+            true,
+          )
         }
       } else {
         // No widget under cursor, hover out from old
         event := ui.MouseEvent {
-          type = .HOVER_OUT,
+          type     = .HOVER_OUT,
           position = mouse_pos,
-          button = 0,
-          widget = old_handle,
+          button   = 0,
+          widget   = old_handle,
         }
-        ui.dispatch_mouse_event(&self.render.ui_system, old_handle, event, true)
+        ui.dispatch_mouse_event(
+          &self.render.ui_system,
+          old_handle,
+          event,
+          true,
+        )
       }
     } else if new_handle, has_new := current_widget.?; has_new {
       // Hover in to new widget (no previous widget)
       event := ui.MouseEvent {
-        type = .HOVER_IN,
+        type     = .HOVER_IN,
         position = mouse_pos,
-        button = 0,
-        widget = new_handle,
+        button   = 0,
+        widget   = new_handle,
       }
       ui.dispatch_mouse_event(&self.render.ui_system, new_handle, event, true)
     }
@@ -484,21 +519,31 @@ update_input :: proc(self: ^Engine) -> bool {
         if self.input.mouse_buttons[i] && !self.input.mouse_holding[i] {
           // Mouse down
           event := ui.MouseEvent {
-            type = .CLICK_DOWN,
+            type     = .CLICK_DOWN,
             position = mouse_pos,
-            button = i32(i),
-            widget = widget_handle,
+            button   = i32(i),
+            widget   = widget_handle,
           }
-          ui.dispatch_mouse_event(&self.render.ui_system, widget_handle, event, true)
+          ui.dispatch_mouse_event(
+            &self.render.ui_system,
+            widget_handle,
+            event,
+            true,
+          )
         } else if !self.input.mouse_buttons[i] && self.input.mouse_holding[i] {
           // Mouse up
           event := ui.MouseEvent {
-            type = .CLICK_UP,
+            type     = .CLICK_UP,
             position = mouse_pos,
-            button = i32(i),
-            widget = widget_handle,
+            button   = i32(i),
+            widget   = widget_handle,
           }
-          ui.dispatch_mouse_event(&self.render.ui_system, widget_handle, event, true)
+          ui.dispatch_mouse_event(
+            &self.render.ui_system,
+            widget_handle,
+            event,
+            true,
+          )
         }
       }
     }
@@ -530,7 +575,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   stale_bone_nodes := make([dynamic]d.NodeHandle, context.temp_allocator)
   stale_sprites := make([dynamic]d.SpriteHandle, context.temp_allocator)
   stale_emitters := make([dynamic]d.EmitterHandle, context.temp_allocator)
-  stale_forcefields := make([dynamic]d.ForceFieldHandle, context.temp_allocator)
+  stale_forcefields := make(
+    [dynamic]d.ForceFieldHandle,
+    context.temp_allocator,
+  )
   stale_lights := make([dynamic]d.LightHandle, context.temp_allocator)
   for handle, &entry in self.world.staging.transforms {
     if entry.n < d.FRAMES_IN_FLIGHT {
@@ -552,12 +600,15 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
       if node == nil {
         render.release_bone_matrix_range_for_node(&self.render, handle)
         node_data.attachment_data_index = 0xFFFFFFFF
-      } else if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment); has_mesh {
+      } else if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment);
+         has_mesh {
         if _, has_skin := mesh_attachment.skinning.?; has_skin {
-          if bone_offset, has_offset := self.render.bone_matrix_offsets[handle]; has_offset {
+          if bone_offset, has_offset :=
+               self.render.bone_matrix_offsets[handle]; has_offset {
             node_data.attachment_data_index = bone_offset
-          } else if bone_entry, has_bones := self.world.staging.bone_updates[handle];
-                    has_bones && len(bone_entry.data) > 0 {
+          } else if bone_entry, has_bones :=
+               self.world.staging.bone_updates[handle];
+             has_bones && len(bone_entry.data) > 0 {
             bone_offset := render.ensure_bone_matrix_range_for_node(
               &self.render,
               handle,
@@ -572,7 +623,8 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           render.release_bone_matrix_range_for_node(&self.render, handle)
           node_data.attachment_data_index = 0xFFFFFFFF
         }
-      } else if _, has_sprite := node.attachment.(world.SpriteAttachment); has_sprite {
+      } else if _, has_sprite := node.attachment.(world.SpriteAttachment);
+         has_sprite {
         render.release_bone_matrix_range_for_node(&self.render, handle)
         // attachment_data_index already set to sprite_handle.index by staging
       } else {
@@ -758,7 +810,10 @@ shutdown :: proc(self: ^Engine) {
   level_manager.shutdown(&self.level_manager)
   gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
   if self.gctx.has_async_compute {
-    gpu.free_compute_command_buffer(&self.gctx, self.compute_command_buffers[:])
+    gpu.free_compute_command_buffer(
+      &self.gctx,
+      self.compute_command_buffers[:],
+    )
   }
   render.shutdown(&self.render, &self.gctx)
   world.shutdown(&self.world)
@@ -787,16 +842,14 @@ populate_debug_ui :: proc(self: ^Engine) {
     )
     mu.label(
       &self.render.debug_ui.ctx,
-      fmt.tprintf(
-        "Textures %d",
-        render.active_texture_2d_count(&self.render),
-      ),
+      fmt.tprintf("Textures %d", render.active_texture_2d_count(&self.render)),
     )
     mu.label(
       &self.render.debug_ui.ctx,
       fmt.tprintf(
         "Materials %d",
-        len(self.world.materials.entries) - len(self.world.materials.free_indices),
+        len(self.world.materials.entries) -
+        len(self.world.materials.free_indices),
       ),
     )
     mu.label(
@@ -890,7 +943,10 @@ create_light_camera :: proc(
     render.upload_light_data(&engine.render, light_handle, &light.data)
     return cam_handle, true
   case .DIRECTIONAL:
-    cam_handle, cam := cont.alloc(&engine.world.cameras, d.CameraHandle) or_return
+    cam_handle, cam := cont.alloc(
+      &engine.world.cameras,
+      d.CameraHandle,
+    ) or_return
     ortho_size := light.radius * 2.0
     init_ok := world.camera_init_orthographic(
       cam,
@@ -910,7 +966,11 @@ create_light_camera :: proc(
     }
     cam_gpu := &engine.render.cameras_gpu[cam_handle.index]
     descriptor_set := engine.render.textures_descriptor_set
-    set_descriptor :: proc(gctx: ^gpu.GPUContext, index: u32, view: vk.ImageView) {
+    set_descriptor :: proc(
+      gctx: ^gpu.GPUContext,
+      index: u32,
+      view: vk.ImageView,
+    ) {
       desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
       render.set_texture_2d_descriptor(gctx, desc_set, index, view)
     }
@@ -951,7 +1011,10 @@ create_light_camera :: proc(
     render.upload_light_data(&engine.render, light_handle, &light.data)
     return cam_handle, true
   case .SPOT:
-    cam_handle, cam := cont.alloc(&engine.world.cameras, d.CameraHandle) or_return
+    cam_handle, cam := cont.alloc(
+      &engine.world.cameras,
+      d.CameraHandle,
+    ) or_return
     fov := light.angle_outer * 2.0
     init_ok := world.camera_init(
       cam,
@@ -970,7 +1033,11 @@ create_light_camera :: proc(
     }
     cam_gpu := &engine.render.cameras_gpu[cam_handle.index]
     descriptor_set := engine.render.textures_descriptor_set
-    set_descriptor :: proc(gctx: ^gpu.GPUContext, index: u32, view: vk.ImageView) {
+    set_descriptor :: proc(
+      gctx: ^gpu.GPUContext,
+      index: u32,
+      view: vk.ImageView,
+    ) {
       desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
       render.set_texture_2d_descriptor(gctx, desc_set, index, view)
     }
@@ -1035,7 +1102,11 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   if main_camera := get_main_camera(engine); main_camera != nil {
     d.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
     descriptor_set := engine.render.textures_descriptor_set
-    set_descriptor :: proc(gctx: ^gpu.GPUContext, index: u32, view: vk.ImageView) {
+    set_descriptor :: proc(
+      gctx: ^gpu.GPUContext,
+      index: u32,
+      view: vk.ImageView,
+    ) {
       desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
       render.set_texture_2d_descriptor(gctx, desc_set, index, view)
     }
