@@ -2,7 +2,6 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/animation"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -12,7 +11,7 @@ import "core:math/linalg"
 CUBE_COUNT :: 50
 ANIMATION_DURATION :: 8.0
 
-cubes: [CUBE_COUNT]resources.NodeHandle
+cubes: [CUBE_COUNT]mjolnir.NodeHandle
 spline: animation.Spline([3]f32)
 
 main :: proc() {
@@ -42,18 +41,18 @@ main :: proc() {
     }
     // Build arc-length table for uniform spatial sampling
     animation.spline_build_arc_table(&spline, 200)
-    mat_handles := [?]resources.MaterialHandle {
-      engine.rm.builtin_materials[resources.Color.RED],
-      engine.rm.builtin_materials[resources.Color.GREEN],
-      engine.rm.builtin_materials[resources.Color.BLUE],
-      engine.rm.builtin_materials[resources.Color.YELLOW],
-      engine.rm.builtin_materials[resources.Color.CYAN],
-      engine.rm.builtin_materials[resources.Color.MAGENTA],
-      engine.rm.builtin_materials[resources.Color.WHITE],
-      engine.rm.builtin_materials[resources.Color.GRAY],
-      engine.rm.builtin_materials[resources.Color.BLACK],
+    mat_handles := [?]mjolnir.MaterialHandle {
+      mjolnir.get_builtin_material(engine, .RED),
+      mjolnir.get_builtin_material(engine, .GREEN),
+      mjolnir.get_builtin_material(engine, .BLUE),
+      mjolnir.get_builtin_material(engine, .YELLOW),
+      mjolnir.get_builtin_material(engine, .CYAN),
+      mjolnir.get_builtin_material(engine, .MAGENTA),
+      mjolnir.get_builtin_material(engine, .WHITE),
+      mjolnir.get_builtin_material(engine, .GRAY),
+      mjolnir.get_builtin_material(engine, .BLACK),
     }
-    cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
+    cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
     for i in 0 ..< CUBE_COUNT {
       cubes[i] = mjolnir.spawn(
         engine,
@@ -65,8 +64,8 @@ main :: proc() {
       mjolnir.scale(engine, cubes[i], 0.3)
     }
     // Add ground plane
-    ground_mat := engine.rm.builtin_materials[resources.Color.GRAY]
-    quad_mesh := engine.rm.builtin_meshes[resources.Primitive.QUAD]
+    ground_mat := mjolnir.get_builtin_material(engine, .GRAY)
+    quad_mesh := mjolnir.get_builtin_mesh(engine, .QUAD_XZ)
     ground := mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {

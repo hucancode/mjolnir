@@ -2,16 +2,15 @@ package main
 
 import "../../mjolnir"
 import anim "../../mjolnir/animation"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 
 // Visual markers
-leg_root_node: resources.NodeHandle
-target_markers: [8]resources.NodeHandle
-feet_markers: [8]resources.NodeHandle
-ground_plane_node: resources.NodeHandle
+leg_root_node: mjolnir.NodeHandle
+target_markers: [8]mjolnir.NodeHandle
+feet_markers: [8]mjolnir.NodeHandle
+ground_plane_node: mjolnir.NodeHandle
 
 // Core spider leg state - 8 legs (4 per side)
 spider_legs: [8]anim.SpiderLeg
@@ -55,11 +54,11 @@ main :: proc() {
     }
 
     // Create visual markers
-    cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-    sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
+    cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+    sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
 
     // Leg root (blue cube) - represents spider body
-    blue_mat := engine.rm.builtin_materials[resources.Color.BLUE]
+    blue_mat := mjolnir.get_builtin_material(engine, .BLUE)
     leg_root_node = mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {
@@ -71,8 +70,8 @@ main :: proc() {
     mjolnir.scale(engine, leg_root_node, 2.0)
 
     // Create markers for each leg
-    yellow_mat := engine.rm.builtin_materials[resources.Color.YELLOW]
-    green_mat := engine.rm.builtin_materials[resources.Color.GREEN]
+    yellow_mat := mjolnir.get_builtin_material(engine, .YELLOW)
+    green_mat := mjolnir.get_builtin_material(engine, .GREEN)
 
     for i in 0 ..< 8 {
       // Target marker (small yellow cube) - shows computed target position
@@ -97,7 +96,7 @@ main :: proc() {
     }
 
     // Ground plane (gray, large and flat)
-    gray_mat := engine.rm.builtin_materials[resources.Color.GRAY]
+    gray_mat := mjolnir.get_builtin_material(engine, .GRAY)
     ground_plane_node = mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {

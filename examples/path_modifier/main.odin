@@ -3,7 +3,6 @@ package main
 import "../../mjolnir"
 import "../../mjolnir/animation"
 import "../../mjolnir/geometry"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
@@ -12,8 +11,8 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-root_nodes: [dynamic]resources.NodeHandle
-markers: [dynamic]resources.NodeHandle
+root_nodes: [dynamic]mjolnir.NodeHandle
+markers: [dynamic]mjolnir.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -43,7 +42,6 @@ main :: proc() {
       for child in node.children {
         world.add_path_modifier_layer(
           &engine.world,
-          &engine.rm,
           child,
           root_bone_name = "root",
           tail_length = 14,
@@ -58,8 +56,8 @@ main :: proc() {
     }
 
     // Create cone markers for each bone
-    cone_mesh := engine.rm.builtin_meshes[resources.Primitive.CONE]
-    mat := engine.rm.builtin_materials[resources.Color.YELLOW]
+    cone_mesh := mjolnir.get_builtin_mesh(engine, .CONE)
+    mat := mjolnir.get_builtin_material(engine, .YELLOW)
 
     // Find the skinned mesh and create markers for bones
     for handle in root_nodes {
@@ -69,7 +67,7 @@ main :: proc() {
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh do continue
 
-        mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
         skin := mesh.skinning.? or_continue
 
         // Create one marker per bone
@@ -108,19 +106,20 @@ main :: proc() {
         skinning, has_skinning := mesh_attachment.skinning.?
         if !has_skinning do continue
 
-        mesh := cont.get(engine.rm.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
         skin := mesh.skinning.? or_continue
 
         // Get bone matrices from GPU buffer
         frame_index := engine.frame_index
-        bone_buffer := &engine.rm.bone_buffer.buffers[frame_index]
+        bone_buffer := &engine.render.bone_buffer.buffers[frame_index]
         if bone_buffer.mapped == nil do continue
 
         bone_count := len(skin.bones)
-        if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do continue
+        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[child]
+        if !has_offset do continue
 
         // Get bone matrices using gpu.get
-        matrices_ptr := gpu.get(bone_buffer, skinning.bone_matrix_buffer_offset)
+        matrices_ptr := gpu.get(bone_buffer, bone_matrix_buffer_offset)
         bone_matrices := slice.from_ptr(matrices_ptr, bone_count)
 
         // Read bone transforms

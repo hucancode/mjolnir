@@ -3,7 +3,6 @@ package main
 import "../../mjolnir"
 import "../../mjolnir/geometry"
 import "../../mjolnir/physics"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -11,15 +10,15 @@ import "core:os"
 import "vendor:glfw"
 
 physics_world: physics.World
-cube_mesh_handles: [dynamic]resources.NodeHandle
-cube_body_to_mesh: map[physics.TriggerHandle]resources.NodeHandle
-effector_sphere: resources.NodeHandle
+cube_mesh_handles: [dynamic]mjolnir.NodeHandle
+cube_body_to_mesh: map[physics.TriggerHandle]mjolnir.NodeHandle
+effector_sphere: mjolnir.NodeHandle
 effector_position: [3]f32
 orbit_angle: f32 = 0.0
 orbit_radius: f32 = 15.0
 effect_radius: f32 = 10.0
 cube_scale: f32 = 0.3
-clicked_cube: resources.NodeHandle
+clicked_cube: mjolnir.NodeHandle
 last_mouse_button_state: bool = false
 
 main :: proc() {
@@ -35,14 +34,14 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world)
   cube_body_to_mesh = make(
-    map[physics.TriggerHandle]resources.NodeHandle,
+    map[physics.TriggerHandle]mjolnir.NodeHandle,
   )
   mjolnir.set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
   // Use builtin meshes and materials
-  cube_mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-  sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
-  cube_mat := engine.rm.builtin_materials[resources.Color.CYAN]
+  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
+  cube_mat := mjolnir.get_builtin_material(engine, .CYAN)
   // Emissive material for effector sphere
   effector_mat := mjolnir.create_material(engine, emissive_value = 5.0)
   // Spawn 50x50 grid of cubes
@@ -124,7 +123,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       mouse_x := mouse_x_window * dpi_scale
       mouse_y := mouse_y_window * dpi_scale
       // Perform raycast from camera through mouse position
-      ray_origin, ray_dir := resources.camera_viewport_to_world_ray(
+      ray_origin, ray_dir := world.camera_viewport_to_world_ray(
         camera,
         mouse_x,
         mouse_y,

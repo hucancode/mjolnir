@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:log"
 
@@ -9,8 +8,8 @@ main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    mat := engine.rm.builtin_materials[resources.Color.GREEN]
-    mesh := engine.rm.builtin_meshes[resources.Primitive.CUBE]
+    mat := mjolnir.get_builtin_material(engine, .GREEN)
+    mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
     for z in 0 ..< 256 {
       for x in 0 ..< 256 {
         handle := mjolnir.spawn(

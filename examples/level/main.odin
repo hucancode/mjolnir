@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/resources"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
@@ -9,7 +8,7 @@ import mu "vendor:microui"
 
 Level_Data :: struct {
   engine: ^mjolnir.Engine,
-  nodes:  [dynamic]resources.NodeHandle,
+  nodes:  [dynamic]mjolnir.NodeHandle,
 }
 
 g_level_1_data: Level_Data
@@ -28,7 +27,7 @@ level_1_setup :: proc(user_data: rawptr) -> bool {
   log.infof("Level 1 loaded %d nodes", len(nodes))
   if camera := mjolnir.get_main_camera(engine); camera != nil {
     mjolnir.camera_look_at(camera, {0, 0, 3}, {0, 0, 0})
-    sync_active_camera_controller(engine)
+    mjolnir.sync_active_camera_controller(engine)
   }
   log.info("Level 1 setup complete")
   return true
@@ -71,7 +70,7 @@ level_2_setup :: proc(user_data: rawptr) -> bool {
 
   if camera := mjolnir.get_main_camera(engine); camera != nil {
     mjolnir.camera_look_at(camera, {0, 2, 5}, {0, 1, 0})
-    sync_active_camera_controller(engine)
+    mjolnir.sync_active_camera_controller(engine)
   }
 
   log.info("Level 2 setup complete")
