@@ -1280,6 +1280,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   ) or_return
   self.frame_index = alg.next(self.frame_index, FRAMES_IN_FLIGHT)
+  render.process_retired_gpu_resources(&self.render, &self.gctx)
   if world.process_pending_deletions(&self.world) {
     world.purge_unused_resources(&self.world)
     render.purge_unused_gpu_resources(&self.render, &self.gctx)

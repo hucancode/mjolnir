@@ -81,6 +81,8 @@ Manager :: struct {
   texture_manager:             gpu.TextureManager,
   texture_2d_tracking:         map[d.Image2DHandle]TextureTracking,
   texture_cube_tracking:       map[d.ImageCubeHandle]TextureTracking,
+  retired_textures_2d:         map[d.Image2DHandle]u32,
+  retired_textures_cube:       map[d.ImageCubeHandle]u32,
   // Camera GPU resources (indexed by camera handle.index)
   cameras_gpu:                 [d.MAX_CAMERAS]camera.CameraGPU,
   spherical_cameras_gpu:       [d.MAX_CAMERAS]camera.SphericalCameraGPU,
@@ -574,6 +576,8 @@ init :: proc(
   // Initialize texture tracking maps
   self.texture_2d_tracking = make(map[d.Image2DHandle]TextureTracking)
   self.texture_cube_tracking = make(map[d.ImageCubeHandle]TextureTracking)
+  self.retired_textures_2d = make(map[d.Image2DHandle]u32)
+  self.retired_textures_cube = make(map[d.ImageCubeHandle]u32)
   init_geometry_buffers(self, gctx) or_return
   defer if ret != .SUCCESS {
     shutdown_geometry_buffers(self, gctx)
@@ -782,6 +786,8 @@ shutdown :: proc(
   // Cleanup texture tracking maps
   delete(self.texture_2d_tracking)
   delete(self.texture_cube_tracking)
+  delete(self.retired_textures_2d)
+  delete(self.retired_textures_cube)
 }
 
 resize :: proc(

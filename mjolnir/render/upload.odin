@@ -211,6 +211,63 @@ unregister_texture_cube :: proc(render: ^Manager, handle: d.ImageCubeHandle) {
   delete_key(&render.texture_cube_tracking, handle)
 }
 
+enqueue_texture_2d_retire :: proc(
+  render: ^Manager,
+  handle: d.Image2DHandle,
+) {
+  if _, exists := render.retired_textures_2d[handle]; exists do return
+  if img := gpu.get_texture_2d(&render.texture_manager, handle); img == nil {
+    return
+  }
+  render.retired_textures_2d[handle] = 0
+}
+
+enqueue_texture_cube_retire :: proc(
+  render: ^Manager,
+  handle: d.ImageCubeHandle,
+) {
+  if _, exists := render.retired_textures_cube[handle]; exists do return
+  if img := gpu.get_texture_cube(&render.texture_manager, handle); img == nil {
+    return
+  }
+  render.retired_textures_cube[handle] = 0
+}
+
+process_retired_gpu_resources :: proc(
+  render: ^Manager,
+  gctx: ^gpu.GPUContext,
+) -> (retired_count: int) {
+  stale_2d: [dynamic]d.Image2DHandle
+  stale_cube: [dynamic]d.ImageCubeHandle
+  defer delete(stale_2d)
+  defer delete(stale_cube)
+  for handle, age in render.retired_textures_2d {
+    if age < d.FRAMES_IN_FLIGHT {
+      render.retired_textures_2d[handle] = age + 1
+    } else {
+      append(&stale_2d, handle)
+    }
+  }
+  for handle, age in render.retired_textures_cube {
+    if age < d.FRAMES_IN_FLIGHT {
+      render.retired_textures_cube[handle] = age + 1
+    } else {
+      append(&stale_cube, handle)
+    }
+  }
+  for handle in stale_2d {
+    gpu.free_texture_2d(&render.texture_manager, gctx, handle)
+    delete_key(&render.retired_textures_2d, handle)
+    retired_count += 1
+  }
+  for handle in stale_cube {
+    gpu.free_texture_cube(&render.texture_manager, gctx, handle)
+    delete_key(&render.retired_textures_cube, handle)
+    retired_count += 1
+  }
+  return
+}
+
 set_texture_2d_auto_purge :: proc(
   render: ^Manager,
   handle: d.Image2DHandle,
@@ -234,7 +291,6 @@ set_texture_cube_auto_purge :: proc(
 }
 
 texture_2d_ref :: proc(render: ^Manager, handle: d.Image2DHandle) -> bool {
-  if handle.generation == 0 do return false
   meta, ok := &render.texture_2d_tracking[handle]
   if !ok do return false
   meta.ref_count += 1
@@ -248,7 +304,6 @@ texture_2d_unref :: proc(
   ref_count: u32,
   ok: bool,
 ) #optional_ok {
-  if handle.generation == 0 do return 0, false
   meta, exists := &render.texture_2d_tracking[handle]
   if !exists do return
   if meta.ref_count == 0 {
@@ -259,7 +314,6 @@ texture_2d_unref :: proc(
 }
 
 texture_cube_ref :: proc(render: ^Manager, handle: d.ImageCubeHandle) -> bool {
-  if handle.generation == 0 do return false
   meta, ok := &render.texture_cube_tracking[handle]
   if !ok do return false
   meta.ref_count += 1
@@ -273,7 +327,6 @@ texture_cube_unref :: proc(
   ref_count: u32,
   ok: bool,
 ) #optional_ok {
-  if handle.generation == 0 do return 0, false
   meta, exists := &render.texture_cube_tracking[handle]
   if !exists do return
   if meta.ref_count == 0 {
@@ -407,7 +460,8 @@ destroy_texture :: proc(
   render: ^Manager,
   handle: d.Image2DHandle,
 ) {
-  gpu.free_texture_2d(&render.texture_manager, gctx, handle)
+  _ = gctx
+  enqueue_texture_2d_retire(render, handle)
   unregister_texture_2d(render, handle)
 }
 
@@ -473,11 +527,12 @@ purge_unused_textures_2d :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
 ) -> (purged_count: int) {
+  _ = gctx
   for &img, i in render.texture_manager.images_2d {
     if img.image == 0 do continue // Skip free slots
     handle := d.Image2DHandle{index = u32(i)}
     if texture_2d_should_purge(render, handle) {
-      gpu.free_texture_2d(&render.texture_manager, gctx, handle)
+      enqueue_texture_2d_retire(render, handle)
       unregister_texture_2d(render, handle)
       purged_count += 1
     }
@@ -492,11 +547,12 @@ purge_unused_textures_cube :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
 ) -> (purged_count: int) {
+  _ = gctx
   for &img, i in render.texture_manager.images_cube {
     if img.image == 0 do continue // Skip free slots
     handle := d.ImageCubeHandle{index = u32(i)}
     if texture_cube_should_purge(render, handle) {
-      gpu.free_texture_cube(&render.texture_manager, gctx, handle)
+      enqueue_texture_cube_retire(render, handle)
       unregister_texture_cube(render, handle)
       purged_count += 1
     }
@@ -543,7 +599,8 @@ destroy_cube_texture :: proc(
   render: ^Manager,
   handle: d.ImageCubeHandle,
 ) {
-  shared.destroy_texture_cube(gctx, &render.texture_manager, handle)
+  _ = gctx
+  enqueue_texture_cube_retire(render, handle)
   unregister_texture_cube(render, handle)
 }
 
