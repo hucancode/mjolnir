@@ -1,7 +1,7 @@
 package shared
 
+import d "../../data"
 import "../../gpu"
-import "../../resources"
 import vk "vendor:vulkan"
 
 Constants :: struct {
@@ -18,16 +18,16 @@ Constants :: struct {
 }
 
 SHADER_SPEC_DATA := Constants {
-  max_textures           = u32(resources.MAX_TEXTURES),
-  max_cube_textures      = u32(resources.MAX_CUBE_TEXTURES),
+  max_textures           = u32(d.MAX_TEXTURES),
+  max_cube_textures      = u32(d.MAX_CUBE_TEXTURES),
   max_samplers           = u32(gpu.MAX_SAMPLERS),
-  sampler_nearest_clamp  = u32(resources.SamplerType.NEAREST_CLAMP),
-  sampler_linear_clamp   = u32(resources.SamplerType.LINEAR_CLAMP),
-  sampler_nearest_repeat = u32(resources.SamplerType.NEAREST_REPEAT),
-  sampler_linear_repeat  = u32(resources.SamplerType.LINEAR_REPEAT),
-  light_kind_point       = u32(resources.LightType.POINT),
-  light_kind_directional = u32(resources.LightType.DIRECTIONAL),
-  light_kind_spot        = u32(resources.LightType.SPOT),
+  sampler_nearest_clamp  = u32(d.SamplerType.NEAREST_CLAMP),
+  sampler_linear_clamp   = u32(d.SamplerType.LINEAR_CLAMP),
+  sampler_nearest_repeat = u32(d.SamplerType.NEAREST_REPEAT),
+  sampler_linear_repeat  = u32(d.SamplerType.LINEAR_REPEAT),
+  light_kind_point       = u32(d.LightType.POINT),
+  light_kind_directional = u32(d.LightType.DIRECTIONAL),
+  light_kind_spot        = u32(d.LightType.SPOT),
 }
 
 SHADER_SPEC_ENTRIES := [?]vk.SpecializationMapEntry {

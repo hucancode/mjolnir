@@ -5,8 +5,8 @@ import "core:math"
 import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/animation"
+import d "mjolnir/data"
 import "mjolnir/geometry"
-import "mjolnir/resources"
 import "mjolnir/world"
 import "vendor:glfw"
 
@@ -28,16 +28,16 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   mjolnir.set_visibility_stats(engine, false)
   engine.debug_ui_enabled = true
-  plain_material_handle := engine.rm.builtin_materials[resources.Color.WHITE]
-  cube_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.CUBE]
-  sphere_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
-  cone_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.CONE]
+  plain_material_handle := engine.world.builtin_materials[d.Color.WHITE]
+  cube_mesh_handle := engine.world.builtin_meshes[d.Primitive.CUBE]
+  sphere_mesh_handle := engine.world.builtin_meshes[d.Primitive.SPHERE]
+  cone_mesh_handle := engine.world.builtin_meshes[d.Primitive.CONE]
   when true {
     log.info("spawning cubes in a grid")
     space: f32 = 4.1
     cube_size: f32 = 0.3
     nx, ny, nz := 240, 1, 240
-    mat_handle := engine.rm.builtin_materials[resources.Color.CYAN]
+    mat_handle := engine.world.builtin_materials[d.Color.CYAN]
     spawn_loop: for x in 0 ..< nx {
       for y in 0 ..< ny {
         for z in 0 ..< nz {
@@ -95,7 +95,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         albedo_handle = brick_albedo_handle,
       )
     }
-    ground_mesh_handle := engine.rm.builtin_meshes[resources.Primitive.QUAD]
+    ground_mesh_handle := engine.world.builtin_meshes[d.Primitive.QUAD_XZ]
     log.info("spawning ground and walls")
     size: f32 = 15.0
     if brick_wall_mat_ok {
@@ -250,11 +250,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   when true {
     log.info("loading Damaged Helmet GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/DamagedHelmet.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/DamagedHelmet.glb");
+       ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for handle in gltf_nodes {
-       mjolnir.translate(engine, handle, 0, 1, 3)
-       mjolnir.scale(engine, handle, 0.5)
+        mjolnir.translate(engine, handle, 0, 1, 3)
+        mjolnir.scale(engine, handle, 0.5)
       }
     }
   }
@@ -269,11 +270,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   when true {
     log.info("loading SciFiHelmet GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/SciFiHelmet.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/SciFiHelmet.glb");
+       ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes)
       for handle in gltf_nodes {
-       mjolnir.translate(engine, handle, 3, 0, 3)
-       mjolnir.scale(engine, handle, 0.5)
+        mjolnir.translate(engine, handle, 3, 0, 3)
+        mjolnir.scale(engine, handle, 0.5)
       }
     }
   }
@@ -315,7 +317,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         rotation_interpolation = .LINEAR,
       )
 
-      if lights_root_node, ok := mjolnir.get_node(engine, lights_root_handle); ok {
+      if lights_root_node, ok := mjolnir.get_node(engine, lights_root_handle);
+         ok {
         lights_root_node.animation = world.AnimationInstance {
           clip_handle = rotation_clip_handle,
           mode        = .LOOP,
@@ -359,8 +362,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
             math.PI * 0.25,
             lights_root_handle,
           ) or_continue
-         mjolnir.translate(engine, light_handle, local_x, local_y, local_z)
-         mjolnir.rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+          mjolnir.translate(engine, light_handle, local_x, local_y, local_z)
+          mjolnir.rotate(
+            engine,
+            light_handle,
+            math.PI * 0.5,
+            linalg.VECTOR3F32_X_AXIS,
+          )
         } else {
           light_handle =
           mjolnir.spawn_child_point_light(
@@ -380,11 +388,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
             cast_shadow = false,
           },
         )
-       mjolnir.scale(engine, cube_handle, 0.05)
-       mjolnir.translate(engine, cube_handle, y = 0.5)
+        mjolnir.scale(engine, cube_handle, 0.05)
+        mjolnir.translate(engine, cube_handle, y = 0.5)
       }
     }
-    when true {
+    when false {
       // Create quaternion: 45° rotation around X-axis (tilts light forward)
       q := linalg.quaternion_angle_axis(
         math.PI * 0.3,
@@ -553,7 +561,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     mjolnir.scale(engine, handle, 0.2)
   }
   when false {
-    debug_sphere_mesh := engine.rm.builtin_meshes[resources.Primitive.SPHERE]
+    debug_sphere_mesh := engine.world.builtin_meshes[d.Primitive.SPHERE]
     translation := linalg.matrix4_translate_f32({0, 5, 0})
     scale_mat := linalg.matrix4_scale_f32({5, 5, 5})
     transform := translation * scale_mat
@@ -567,16 +575,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
       bypass_depth = true,
     )
   }
-  // add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  mjolnir.add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  // add_crosshatch(engine, [2]f32{1280, 720})
+  mjolnir.add_crosshatch(engine, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
-  when false {
-    portal_camera_handle = create_camera(
+  when true {
+    portal_camera_handle = mjolnir.create_camera(
       engine,
       512, // width
       512, // height
@@ -588,14 +596,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
       100.0, // far plane
     )
     portal_material_ok: bool
-    portal_material_handle, portal_material_ok = create_material(
+    portal_material_handle, portal_material_ok = mjolnir.create_material(
       engine,
       {.ALBEDO_TEXTURE},
     )
-    portal_quad_handle := engine.rm.builtin_meshes[resources.Primitive.QUAD]
+    portal_quad_handle := engine.world.builtin_meshes[d.Primitive.QUAD_XY]
     portal_mesh_ok := true
     if portal_material_ok && portal_mesh_ok {
-      handle := spawn(
+      handle := mjolnir.spawn(
         engine,
         attachment = world.MeshAttachment {
           handle = portal_quad_handle,
@@ -603,9 +611,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
           cast_shadow = false,
         },
       )
-      translate(engine, handle, 0, 3, -5)
-      rotate(engine, handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-      scale(engine, handle, 2.0)
+      mjolnir.translate(engine, handle, 0, 3, -5)
+      mjolnir.scale(engine, handle, 2.0)
     }
   }
   when true {
@@ -617,21 +624,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
       "assets/Warrior_Sheet-Effect.png",
     )
     if warrior_sprite_ok {
-      sprite_quad := engine.render.transparency.sprite_quad_mesh
+      sprite_quad := engine.world.builtin_meshes[d.Primitive.QUAD_XY]
       // 6x17 sprite sheet: 6 columns, 17 rows, using frames 0-98 (99 total)
       // Create animation: 99 frames at 24fps, looping
-      warrior_animation := resources.sprite_animation_init(
+      warrior_animation := d.sprite_animation_init(
         frame_count = 99,
         fps = 24.0,
         mode = .LOOP,
       )
-      sprite_handle, sprite_ok := resources.create_sprite(
-        &engine.rm,
+      sprite_handle, sprite_ok := world.create_sprite(
+        &engine.world,
         warrior_sprite_texture,
         frame_columns = 6, // 6 columns in sprite sheet
         frame_rows = 17, // 17 rows in sprite sheet
         frame_index = 0, // Starting frame (animation will override this)
-        color = {1.0, 1.0, 1.0, 1.0},
         animation = warrior_animation,
       )
       if sprite_ok {
@@ -651,11 +657,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
             &engine.world,
             {4, 1.5, 0},
             sprite_attachment,
-            &engine.rm,
           )
           if spawn_ok {
             mjolnir.scale(engine, handle, 3.0)
-            // sprite_node.culling_enabled = false
           }
         }
       }

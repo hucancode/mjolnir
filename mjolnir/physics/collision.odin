@@ -1,7 +1,6 @@
 package physics
 
 import "../geometry"
-import "../resources"
 import "core:log"
 import "core:math"
 import "core:math/linalg"

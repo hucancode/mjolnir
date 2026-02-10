@@ -1,9 +1,10 @@
 package geometry_pass
 
 import cont "../../containers"
+import d "../../data"
 import "../../geometry"
 import "../../gpu"
-import "../../resources"
+import "../camera"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -23,12 +24,12 @@ init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   width, height: u32,
-  rm: ^resources.Manager,
+  general_pipeline_layout: vk.PipelineLayout,
 ) -> (
   ret: vk.Result,
 ) {
   depth_format: vk.Format = .D32_SFLOAT
-  if rm.general_pipeline_layout == 0 {
+  if general_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
   log.info("About to build G-buffer pipelines...")
@@ -97,7 +98,7 @@ init :: proc(
     pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
     pColorBlendState    = &color_blending,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = rm.general_pipeline_layout,
+    layout              = general_pipeline_layout,
     pNext               = &rendering_info,
   }
   vk.CreateGraphicsPipelines(
@@ -113,37 +114,30 @@ init :: proc(
 }
 
 begin_pass :: proc(
-  camera_handle: resources.CameraHandle,
+  camera_gpu: ^camera.CameraGPU,
+  camera_cpu: ^d.Camera,
+  texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
-  position_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.POSITION][frame_index],
+  position_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.POSITION][frame_index],
   )
-  normal_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.NORMAL][frame_index],
+  normal_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.NORMAL][frame_index],
   )
-  albedo_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.ALBEDO][frame_index],
+  albedo_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.ALBEDO][frame_index],
   )
-  metallic_roughness_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
+  metallic_roughness_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index],
   )
-  emissive_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.EMISSIVE][frame_index],
+  emissive_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.EMISSIVE][frame_index],
   )
-  final_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+  final_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
   // Transition all G-buffer images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
   gpu.image_barrier(
@@ -212,14 +206,13 @@ begin_pass :: proc(
     {.COLOR_ATTACHMENT_OUTPUT},
     {.COLOR},
   )
-  depth_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.DEPTH][frame_index],
+  depth_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.DEPTH][frame_index],
   )
   gpu.begin_rendering(
     command_buffer,
-    camera.extent.width,
-    camera.extent.height,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(position_texture),
     gpu.create_color_attachment(normal_texture),
@@ -229,40 +222,33 @@ begin_pass :: proc(
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera.extent.width,
-    camera.extent.height,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
   )
 }
 
 end_pass :: proc(
-  camera_handle: resources.CameraHandle,
+  camera_gpu: ^camera.CameraGPU,
+  texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
   frame_index: u32,
 ) {
   vk.CmdEndRendering(command_buffer)
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
   // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting and post-processing
-  position_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.POSITION][frame_index],
+  position_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.POSITION][frame_index],
   )
-  normal_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.NORMAL][frame_index],
+  normal_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.NORMAL][frame_index],
   )
-  albedo_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.ALBEDO][frame_index],
+  albedo_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.ALBEDO][frame_index],
   )
-  metallic_roughness_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
+  metallic_roughness_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index],
   )
-  emissive_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.EMISSIVE][frame_index],
+  emissive_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.EMISSIVE][frame_index],
   )
   // transition all G-buffer attachments + depth to SHADER_READ_ONLY_OPTIMAL
   gpu.image_barrier(
@@ -324,10 +310,20 @@ end_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  camera_handle: resources.CameraHandle,
-  command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
+  camera_gpu: ^camera.CameraGPU,
+  camera_handle: d.CameraHandle,
   frame_index: u32,
+  command_buffer: vk.CommandBuffer,
+  general_pipeline_layout: vk.PipelineLayout,
+  textures_descriptor_set: vk.DescriptorSet,
+  bone_descriptor_set: vk.DescriptorSet,
+  material_descriptor_set: vk.DescriptorSet,
+  world_matrix_descriptor_set: vk.DescriptorSet,
+  node_data_descriptor_set: vk.DescriptorSet,
+  mesh_data_descriptor_set: vk.DescriptorSet,
+  vertex_skinning_descriptor_set: vk.DescriptorSet,
+  vertex_buffer: vk.Buffer,
+  index_buffer: vk.Buffer,
   draw_buffer: vk.Buffer,
   count_buffer: vk.Buffer,
 ) {
@@ -337,22 +333,22 @@ render :: proc(
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.pipeline,
-    rm.general_pipeline_layout,
-    rm.camera_buffer.descriptor_sets[frame_index], // Per-frame to avoid overlap
-    rm.textures_descriptor_set,
-    rm.bone_buffer.descriptor_sets[frame_index],
-    rm.material_buffer.descriptor_set,
-    rm.world_matrix_buffer.descriptor_set,
-    rm.node_data_buffer.descriptor_set,
-    rm.mesh_data_buffer.descriptor_set,
-    rm.vertex_skinning_buffer.descriptor_set,
+    general_pipeline_layout,
+    camera_gpu.camera_buffer_descriptor_sets[frame_index],
+    textures_descriptor_set,
+    bone_descriptor_set,
+    material_descriptor_set,
+    world_matrix_descriptor_set,
+    node_data_descriptor_set,
+    mesh_data_descriptor_set,
+    vertex_skinning_descriptor_set,
   )
   push_constants := PushConstant {
     camera_index = camera_handle.index,
   }
   vk.CmdPushConstants(
     command_buffer,
-    rm.general_pipeline_layout,
+    general_pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
@@ -360,8 +356,8 @@ render :: proc(
   )
   gpu.bind_vertex_index_buffers(
     command_buffer,
-    rm.vertex_buffer.buffer,
-    rm.index_buffer.buffer,
+    vertex_buffer,
+    index_buffer,
   )
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
@@ -369,7 +365,7 @@ render :: proc(
     0,
     count_buffer,
     0,
-    resources.MAX_NODES_IN_SCENE,
+    d.MAX_NODES_IN_SCENE,
     u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
 }

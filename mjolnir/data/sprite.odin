@@ -1,50 +1,39 @@
-package resources
+package data
 
-import cont "../containers"
-import "../gpu"
-import "core:log"
 import "core:math"
-import "core:slice"
-import vk "vendor:vulkan"
-
-MAX_SPRITES :: 4096
-
-SpriteAnimationState :: enum {
-  PLAYING,
-  PAUSED,
-  STOPPED,
-}
-
-SpriteAnimationMode :: enum {
-  ONCE, // Play through once, then stop
-  LOOP, // Play through, repeat
-  PINGPONG, // Play forward, then reverse, repeat
-}
-
-SpriteAnimation :: struct {
-  frame_count:   u32,
-  current_frame: u32,
-  fps:           f32,
-  time:          f32,
-  state:         SpriteAnimationState,
-  mode:          SpriteAnimationMode,
-  forward:       bool, // Direction flag: true = forward (0->N-1), false = reverse (N-1->0)
-}
 
 SpriteData :: struct {
-  texture_index: u32,
-  sampler_type:  SamplerType,
-  frame_columns: u32, // Number of columns in sprite sheet
-  frame_rows:    u32, // Number of rows in sprite sheet
-  frame_index:   u32, // Current frame (0-based)
-  _padding:      [3]u32, // Align to 16 bytes
-  color:         [4]f32,
-  // Total: 48 bytes (16 + 16 + 16)
+	texture_index: u32,
+	frame_columns: u32, // Number of columns in sprite sheet
+	frame_rows:    u32, // Number of rows in sprite sheet
+	frame_index:   u32, // Current frame (0-based)
 }
 
 Sprite :: struct {
-  using data: SpriteData,
-  animation:  Maybe(SpriteAnimation),
+	using data: SpriteData,
+	animation:  Maybe(SpriteAnimation),
+}
+
+SpriteAnimationState :: enum {
+	PLAYING,
+	PAUSED,
+	STOPPED,
+}
+
+SpriteAnimationMode :: enum {
+	ONCE, // Play through once, then stop
+	LOOP, // Play through, repeat
+	PINGPONG, // Play forward, then reverse, repeat
+}
+
+SpriteAnimation :: struct {
+	frame_count:   u32,
+	current_frame: u32,
+	fps:           f32,
+	time:          f32,
+	state:         SpriteAnimationState,
+	mode:          SpriteAnimationMode,
+	forward:       bool, // Direction flag: true = forward (0->N-1), false = reverse (N-1->0)
 }
 
 sprite_animation_init :: proc(
@@ -190,90 +179,15 @@ sprite_init :: proc(
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
   frame_index: u32 = 0,
-  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-  sampler: SamplerType = .NEAREST_REPEAT,
 ) {
   self.texture_index = texture.index
-  self.sampler_type = sampler
   self.frame_columns = frame_columns
   self.frame_rows = frame_rows
   self.frame_index = frame_index
-  self.color = color
 }
 
 sprite_update_gpu_data :: proc(sprite: ^Sprite) {
   if anim, has_anim := &sprite.animation.?; has_anim {
     sprite.frame_index = anim.current_frame
-  }
-}
-
-sprite_write_to_gpu :: proc(
-  rm: ^Manager,
-  handle: SpriteHandle,
-  sprite: ^Sprite,
-) -> vk.Result {
-  if handle.index >= MAX_SPRITES {
-    log.errorf(
-      "Sprite index %d exceeds capacity %d",
-      handle.index,
-      MAX_SPRITES,
-    )
-    return .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  sprite_update_gpu_data(sprite)
-  return gpu.write(&rm.sprite_buffer.buffer, &sprite.data, int(handle.index))
-}
-
-create_sprite :: proc(
-  rm: ^Manager,
-  texture: Image2DHandle,
-  frame_columns: u32 = 1,
-  frame_rows: u32 = 1,
-  frame_index: u32 = 0,
-  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-  sampler: SamplerType = .NEAREST_REPEAT,
-  animation: Maybe(SpriteAnimation) = nil,
-) -> (
-  handle: SpriteHandle,
-  ok: bool,
-) #optional_ok {
-  sprite: ^Sprite
-  handle, sprite = cont.alloc(&rm.sprites, SpriteHandle) or_return
-  sprite_init(
-    sprite,
-    texture,
-    frame_columns,
-    frame_rows,
-    frame_index,
-    color,
-    sampler,
-  )
-  sprite.animation = animation
-  res := sprite_write_to_gpu(rm, handle, sprite)
-  if res != .SUCCESS {
-    cont.free(&rm.sprites, handle)
-    return {}, false
-  }
-  if _, has_anim := animation.?; has_anim {
-    register_animatable_sprite(rm, handle)
-  }
-  return handle, true
-}
-
-destroy_sprite :: proc(rm: ^Manager, handle: SpriteHandle) {
-  unregister_animatable_sprite(rm, handle)
-  cont.free(&rm.sprites, handle)
-}
-
-register_animatable_sprite :: proc(rm: ^Manager, handle: SpriteHandle) {
-  // TODO: if this list get more than 10000 items, we need to use a map
-  if slice.contains(rm.animatable_sprites[:], handle) do return
-  append(&rm.animatable_sprites, handle)
-}
-
-unregister_animatable_sprite :: proc(rm: ^Manager, handle: SpriteHandle) {
-  if i, found := slice.linear_search(rm.animatable_sprites[:], handle);
-     found {
-    unordered_remove(&rm.animatable_sprites, i)
   }
 }

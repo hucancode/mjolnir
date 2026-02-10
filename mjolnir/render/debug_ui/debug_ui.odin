@@ -1,9 +1,11 @@
 package debug_ui
 
+import cont "../../containers"
+import d "../../data"
 import gpu "../../gpu"
-import resources "../../resources"
 import "core:log"
 import "core:math/linalg"
+import "../shared"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
@@ -22,7 +24,7 @@ Renderer :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  atlas_handle:              resources.Image2DHandle,
+  atlas_handle:              d.Image2DHandle,
   proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
   vertex_buffer:             gpu.MutableBuffer(Vertex2D),
   index_buffer:              gpu.MutableBuffer(u32),
@@ -46,10 +48,11 @@ Vertex2D :: struct {
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
   color_format: vk.Format,
   width, height: u32,
   dpi_scale: f32 = 1.0,
-  rm: ^resources.Manager,
+  textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -123,13 +126,13 @@ init :: proc(
     vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
     self.projection_layout = 0
   }
-  self.texture_layout = rm.textures_set_layout
-  self.texture_descriptor_set = rm.textures_descriptor_set
+  self.texture_layout = textures_set_layout
+  self.texture_descriptor_set = texture_manager.textures_descriptor_set
   self.pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     nil,
     self.projection_layout,
-    rm.textures_set_layout,
+    textures_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
@@ -168,9 +171,9 @@ init :: proc(
     self.projection_layout = 0
   }
   log.infof("init UI texture...")
-  self.atlas_handle = resources.create_texture_from_pixels(
+  self.atlas_handle = shared.create_texture_2d_from_pixels(
     gctx,
-    rm,
+    texture_manager,
     mu.default_atlas_alpha[:],
     mu.DEFAULT_ATLAS_WIDTH,
     mu.DEFAULT_ATLAS_HEIGHT,

@@ -44,7 +44,7 @@ mob_tick2 :: proc(
 test_spawn_and_get_actor :: proc(t: ^testing.T) {
   w: World
   init(&w)
-  defer shutdown(&w, nil, nil)
+	defer shutdown(&w)
   actor_handle, ok := spawn_actor(&w, TestPlayerData2)
   testing.expect(t, ok)
   actor := get_actor(&w, TestPlayerData2, actor_handle)
@@ -60,7 +60,7 @@ test_spawn_and_get_actor :: proc(t: ^testing.T) {
 test_auto_tick_actors :: proc(t: ^testing.T) {
   w: World
   init(&w)
-  defer shutdown(&w, nil, nil)
+	defer shutdown(&w)
   player_handle := spawn_actor(&w, TestPlayerData2)
   player := get_actor(&w, TestPlayerData2, player_handle)
   player.data = TestPlayerData2 {
@@ -78,11 +78,11 @@ test_auto_tick_actors :: proc(t: ^testing.T) {
   enable_actor_tick(&w, TestMobData2, mob_handle)
   testing.expect(t, player.data.ticks_elapsed == 0)
   testing.expect(t, mob.data.ticks_elapsed == 0)
-  world_tick_actors(&w, nil, 0.016)
+  world_tick_actors(&w, 0.016)
   testing.expect(t, player.data.ticks_elapsed == 1)
   testing.expect(t, mob.data.ticks_elapsed == 1)
   testing.expect(t, mob.data.ai_state == .CHASING)
-  world_tick_actors(&w, nil, 0.016)
+  world_tick_actors(&w, 0.016)
   testing.expect(t, player.data.ticks_elapsed == 2)
   testing.expect(t, mob.data.ticks_elapsed == 2)
 }
@@ -91,7 +91,7 @@ test_auto_tick_actors :: proc(t: ^testing.T) {
 test_lazy_pool_creation :: proc(t: ^testing.T) {
   w: World
   init(&w)
-  defer shutdown(&w, nil, nil)
+	defer shutdown(&w)
   testing.expect(t, len(w.actor_pools) == 0)
   _, ok1 := spawn_actor(&w, TestPlayerData2)
   testing.expect(t, ok1)
@@ -133,7 +133,7 @@ enemy_tick :: proc(
 test_custom_game_state :: proc(t: ^testing.T) {
   w: World
   init(&w)
-  defer shutdown(&w, nil, nil)
+	defer shutdown(&w)
   game := GameState {
     score          = 0,
     enemies_killed = 0,
@@ -151,7 +151,7 @@ test_custom_game_state :: proc(t: ^testing.T) {
   testing.expect(t, game.score == 0)
   testing.expect(t, game.enemies_killed == 0)
   // Tick with custom game state
-  world_tick_actors(&w, nil, 0.016, &game)
+  world_tick_actors(&w, 0.016, &game)
   testing.expect(t, game.score == 100, "Score should be updated")
   testing.expect(
     t,

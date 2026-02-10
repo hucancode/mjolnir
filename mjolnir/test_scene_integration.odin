@@ -1,7 +1,7 @@
 package mjolnir
 
 import "physics"
-import "resources"
+import d "data"
 import "geometry"
 import "world"
 import "core:fmt"
@@ -89,7 +89,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
   ) -> time.Benchmark_Error {
     state := cast(^Physics_Raycast_State)raw_data(options.input)
     physics.destroy(&state.physics)
-    world.shutdown(&state.w, nil, nil)
+    world.shutdown(&state.w)
     delete(state.rays)
     free(state)
     return nil
@@ -137,14 +137,14 @@ matrix4_almost_equal :: proc(
 test_node_translate :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.shutdown(&w, nil, nil)
+  defer world.shutdown(&w)
   parent_handle, parent_ok := world.spawn(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
   child, ok := world.spawn_child(&w, parent_handle)
   child_ptr := world.get_node(&w, child)
   testing.expectf(t, ok, "failed to spawn child node")
   world.translate(&w, child, 4, 5, 6)
-  world.begin_frame(&w, nil)
+  world.begin_frame(&w)
   actual := child_ptr.transform.world_matrix
   expected := matrix[4, 4]f32{
     1.0, 0.0, 0.0, 5.0,
@@ -159,13 +159,13 @@ test_node_translate :: proc(t: ^testing.T) {
 test_node_rotate :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.shutdown(&w, nil, nil)
+  defer world.shutdown(&w)
   child, ok := world.spawn(&w)
   child_ptr := world.get_node(&w, child)
   testing.expectf(t, ok, "failed to spawn node")
   world.rotate(&w, child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   world.translate(&w, child, 1, 0, 0)
-  world.begin_frame(&w, nil)
+  world.begin_frame(&w)
   actual := child_ptr.transform.world_matrix
   expected := matrix[4, 4]f32{
     0.0, 0.0, 1.0, 1.0,
@@ -180,14 +180,14 @@ test_node_rotate :: proc(t: ^testing.T) {
 test_node_scale :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.shutdown(&w, nil, nil)
+  defer world.shutdown(&w)
   parent_handle, parent_ok := world.spawn(&w, {1, 2, 3})
   testing.expectf(t, parent_ok, "failed to spawn parent node")
   child, child_ok := world.spawn_child(&w, parent_handle)
   child_ptr := world.get_node(&w, child)
   testing.expectf(t, child_ok, "failed to spawn child node")
   world.scale_xyz(&w, child, 5, 6, 7)
-  world.begin_frame(&w, nil)
+  world.begin_frame(&w)
   actual := child_ptr.transform.world_matrix
   expected := matrix[4, 4]f32{
     5.0, 0.0, 0.0, 1.0,
@@ -202,14 +202,14 @@ test_node_scale :: proc(t: ^testing.T) {
 test_node_combined_transform :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.shutdown(&w, nil, nil)
+  defer world.shutdown(&w)
   node, node_ok := world.spawn(&w)
   node_ptr := world.get_node(&w, node)
   testing.expectf(t, node_ok, "failed to spawn node")
   world.scale(&w, node, 2)
   world.rotate(&w, node, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   world.translate(&w, node, 3, 4, 5)
-  world.begin_frame(&w, nil)
+  world.begin_frame(&w)
   actual := node_ptr.transform.world_matrix
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
@@ -226,7 +226,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
 test_node_chain_transform :: proc(t: ^testing.T) {
   w: world.World
   world.init(&w)
-  defer world.shutdown(&w, nil, nil)
+  defer world.shutdown(&w)
   // Create a 4-node chain
   node1_handle, node1_ok := world.spawn(&w)
   testing.expectf(t, node1_ok, "failed to spawn node1")
@@ -238,7 +238,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   world.translate(&w, node1_handle, x = 1)
   world.rotate(&w, node2_handle, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   world.scale(&w, node3_handle, 2)
-  world.begin_frame(&w, nil)
+  world.begin_frame(&w)
   // The transforms should cascade:
   // node1: translate(1,0,0)
   // node2: translate(1,0,0) * rotate_y(90°)
@@ -265,7 +265,7 @@ create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
   }
   if max_depth <= 0 || target_nodes <= 0 do return
   QueueEntry :: struct {
-    handle: resources.NodeHandle,
+    handle: d.NodeHandle,
     depth:  int,
   }
   queue: [dynamic]QueueEntry
@@ -307,7 +307,7 @@ traverse_scene_benchmark :: proc(
   }
   for _ in 0 ..< options.rounds {
     ctx: Context
-    world.traverse(scene, nil)
+    world.traverse(scene)
     options.processed += size_of(world.Node) * len(scene.nodes.entries)
   }
   return nil
@@ -318,7 +318,7 @@ teardown_scene :: proc(
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
   scene := cast(^world.World)(raw_data(options.input))
-  world.shutdown(scene, nil, nil)
+  world.shutdown(scene)
   free(scene, allocator)
   return nil
 }
@@ -426,7 +426,7 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
 test_scene_memory_cleanup :: proc(t: ^testing.T) {
   scene: world.World
   world.init(&scene)
-  defer world.shutdown(&scene, nil, nil)
+  defer world.shutdown(&scene)
   for i in 0 ..< 1000 {
     world.spawn(&scene)
   }

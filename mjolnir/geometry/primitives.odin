@@ -318,6 +318,30 @@ make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}, random_colors: bool = fa
   return
 }
 
+// Billboard Quad (on XY plane, facing Z forward, for camera-facing sprites)
+make_billboard_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}, random_colors: bool = false) -> (ret: Geometry) {
+  ret.vertices = make([]Vertex, 4)
+  ret.indices = make([]u32, 6)
+  // Vertices in XY plane (Z=0), centered at origin
+  // Y axis is vertical, X axis is horizontal
+  ret.vertices[0] = {{-1, -1, 0}, VEC_FORWARD, color, {0, 1}, {0, 0, 1, 1}}  // Bottom-left
+  ret.vertices[1] = {{1, -1, 0}, VEC_FORWARD, color, {1, 1}, {0, 0, 1, 1}}   // Bottom-right
+  ret.vertices[2] = {{1, 1, 0}, VEC_FORWARD, color, {1, 0}, {0, 0, 1, 1}}    // Top-right
+  ret.vertices[3] = {{-1, 1, 0}, VEC_FORWARD, color, {0, 0}, {0, 0, 1, 1}}   // Top-left
+  ret.indices[0], ret.indices[1], ret.indices[2] = 0, 1, 2
+  ret.indices[3], ret.indices[4], ret.indices[5] = 2, 3, 0
+  ret.aabb = Aabb {
+    min = {-1, -1, 0},
+    max = {1, 1, 0.1}, // add some thickness
+  }
+  if random_colors {
+    for &v in ret.vertices {
+      v.color = {rand.float32(), rand.float32(), rand.float32(), color.w}
+    }
+  }
+  return
+}
+
 make_sphere :: proc(
   segments: u32 = 16,
   rings: u32 = 16,

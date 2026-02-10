@@ -1,7 +1,6 @@
 package ui
 
 import cont "../containers"
-import res "../resources"
 import "core:log"
 
 compute_layout :: proc(sys: ^System, root: UIWidgetHandle) {
