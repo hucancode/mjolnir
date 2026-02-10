@@ -354,6 +354,25 @@ shutdown_camera_buffers :: proc(
 }
 
 @(private)
+shutdown_camera_resources :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+) {
+  for i in 0 ..< d.MAX_CAMERAS {
+    camera.destroy_gpu(
+      gctx,
+      &self.cameras_gpu[i],
+      &self.texture_manager,
+    )
+    camera.destroy_spherical_gpu(
+      gctx,
+      &self.spherical_cameras_gpu[i],
+      &self.texture_manager,
+    )
+  }
+}
+
+@(private)
 init_bindless_layouts :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
@@ -754,6 +773,7 @@ shutdown :: proc(
   lighting.shutdown(&self.lighting, gctx, &self.texture_manager)
   geometry.shutdown(&self.geometry, gctx)
   visibility.shutdown(&self.visibility, gctx)
+  shutdown_camera_resources(self, gctx)
   shutdown_bindless_layouts(self, gctx)
   shutdown_scene_buffers(self, gctx)
   shutdown_camera_buffers(self, gctx)
