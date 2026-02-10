@@ -1,8 +1,8 @@
 package ui
 
-import cont "../containers"
-import d "../data"
-import "../gpu"
+import cont "../../containers"
+import d "../../data"
+import "../../gpu"
 import "core:log"
 import "core:math/linalg"
 import "core:mem"
@@ -220,8 +220,8 @@ create_pipeline :: proc(
   format: vk.Format,
 ) -> vk.Result {
   // Load shaders
-  vert_code := #load("../shader/ui/vert.spv")
-  frag_code := #load("../shader/ui/frag.spv")
+  vert_code := #load("../../shader/ui/vert.spv")
+  frag_code := #load("../../shader/ui/frag.spv")
 
   vert_module := gpu.create_shader_module(gctx.device, vert_code) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)

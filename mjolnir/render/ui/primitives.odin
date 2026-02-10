@@ -1,7 +1,7 @@
 package ui
 
-import cont "../containers"
-import d "../data"
+import cont "../../containers"
+import d "../../data"
 import "core:log"
 import "core:slice"
 

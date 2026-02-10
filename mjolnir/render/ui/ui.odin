@@ -1,8 +1,8 @@
 package ui
 
-import cont "../containers"
-import "../gpu"
-import d "../data"
+import cont "../../containers"
+import "../../gpu"
+import d "../../data"
 import "core:log"
 import vk "vendor:vulkan"
 

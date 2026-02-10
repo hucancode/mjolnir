@@ -1,6 +1,6 @@
 package ui
 
-import d "../data"
+import d "../../data"
 import "core:log"
 
 HorizontalAlign :: enum {
