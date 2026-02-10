@@ -1,9 +1,10 @@
 package debug_draw
 
 import cont "../../containers"
+import d "../../data"
 import "../../geometry"
 import "../../gpu"
-import "../../resources"
+import "../camera"
 import "core:log"
 import "core:math/linalg"
 import "core:time"
@@ -14,7 +15,7 @@ SHADER_FRAG :: #load("../../shader/debug_draw/frag.spv")
 
 MAX_DEBUG_OBJECTS :: 4096
 
-DebugObjectHandle :: distinct resources.Handle
+DebugObjectHandle :: distinct d.Handle
 
 RenderStyle :: enum u32 {
   UNIFORM_COLOR = 0,
@@ -23,7 +24,7 @@ RenderStyle :: enum u32 {
 }
 
 DebugObject :: struct {
-  mesh_handle:   resources.MeshHandle,
+  mesh_handle:   d.MeshHandle,
   transform:     matrix[4, 4]f32,
   color:         [4]f32, // RGBA
   style:         RenderStyle,
@@ -54,7 +55,7 @@ PushConstant :: struct {
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
+  camera_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -68,7 +69,7 @@ init :: proc(
       stageFlags = {.VERTEX, .FRAGMENT},
       size = size_of(PushConstant),
     },
-    rm.camera_buffer.set_layout, // Set 0
+    camera_set_layout, // Set 0
   ) or_return
   create_pipelines(gctx, self, self.pipeline_layout) or_return
   log.infof(
@@ -278,7 +279,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 
 spawn_mesh :: proc(
   self: ^Renderer,
-  mesh_handle: resources.MeshHandle,
+  mesh_handle: d.MeshHandle,
   transform: matrix[4, 4]f32,
   color: [4]f32 = {1.0, 0.0, 0.75, 1.0}, // Pink default
   style: RenderStyle = .UNIFORM_COLOR,
@@ -305,11 +306,14 @@ spawn_mesh :: proc(
   return h, true
 }
 
+// TODO: Refactor to avoid circular dependency - need parent render.Manager for mesh allocation
+// For now, these functions are disabled
+/*
 spawn_line_strip :: proc(
   self: ^Renderer,
   points: []geometry.Vertex,
   gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
+  parent_render: ^render.Manager,
   color: [4]f32 = {1.0, 0.0, 0.75, 1.0}, // Pink default
   bypass_depth: bool = false,
 ) -> (
@@ -330,8 +334,7 @@ spawn_line_strip :: proc(
     indices  = indices,
     aabb     = geometry.aabb_from_vertices(points),
   }
-  mesh_h, mesh_res := resources.create_mesh(gctx, rm, geom)
-  if mesh_res != .SUCCESS do return {}, false
+  mesh_h := render.allocate_mesh_geometry(gctx, parent_render, rm, geom) or_return
   h, obj := cont.alloc(&self.objects, DebugObjectHandle) or_return
   obj^ = DebugObject {
     mesh_handle   = mesh_h,
@@ -343,10 +346,11 @@ spawn_line_strip :: proc(
   }
   return h, true
 }
+*/
 
 spawn_mesh_temporary :: proc(
   self: ^Renderer,
-  mesh_handle: resources.MeshHandle,
+  mesh_handle: d.MeshHandle,
   transform: matrix[4, 4]f32,
   duration_seconds: f64,
   color: [4]f32 = {1.0, 0.0, 0.75, 1.0},
@@ -371,11 +375,11 @@ spawn_mesh_temporary :: proc(
   return h, true
 }
 
+// Note: This function takes a pre-allocated mesh handle (line strip mesh created by caller)
+// This avoids circular dependency with render module
 spawn_line_strip_temporary :: proc(
   self: ^Renderer,
-  points: []geometry.Vertex,
-  gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
+  mesh_handle: d.MeshHandle,
   duration_seconds: f64,
   color: [4]f32 = {1.0, 0.0, 0.75, 1.0},
   bypass_depth: bool = false,
@@ -383,26 +387,11 @@ spawn_line_strip_temporary :: proc(
   handle: DebugObjectHandle,
   ok: bool,
 ) #optional_ok {
-  indices := make([]u32, len(points))
-  defer if !ok do delete(indices)
-  for i in 0 ..< len(points) {
-    indices[i] = u32(i)
-  }
-  vertices_copy := make([]geometry.Vertex, len(points))
-  defer if !ok do delete(vertices_copy)
-  copy(vertices_copy, points)
-  geom := geometry.Geometry {
-    vertices = vertices_copy,
-    indices  = indices,
-    aabb     = geometry.aabb_from_vertices(points),
-  }
-  mesh_h, mesh_res := resources.create_mesh(gctx, rm, geom)
-  if mesh_res != .SUCCESS do return {}, false
   h, obj := cont.alloc(&self.objects, DebugObjectHandle) or_return
   duration := time.Duration(duration_seconds * f64(time.Second))
   expiry := time.time_add(time.now(), duration)
   obj^ = DebugObject {
-    mesh_handle   = mesh_h,
+    mesh_handle   = mesh_handle,
     transform     = linalg.MATRIX4F32_IDENTITY,
     color         = color,
     style         = .UNIFORM_COLOR,
@@ -416,19 +405,21 @@ spawn_line_strip_temporary :: proc(
 destroy :: proc(
   self: ^Renderer,
   handle: DebugObjectHandle,
-  rm: ^resources.Manager,
+  destroy_mesh_ctx: rawptr,
+  destroy_line_strip_mesh: proc(ctx: rawptr, handle: d.MeshHandle),
 ) {
   obj := cont.get(self.objects, handle)
   if obj != nil {
-    // Only destroy mesh if this debug object owns it (line strips)
-    if obj.is_line_strip {
-      resources.destroy_mesh(rm, obj.mesh_handle)
-    }
+    if obj.is_line_strip do destroy_line_strip_mesh(destroy_mesh_ctx, obj.mesh_handle)
   }
   cont.free(&self.objects, handle)
 }
 
-update :: proc(self: ^Renderer, rm: ^resources.Manager) {
+update :: proc(
+  self: ^Renderer,
+  destroy_mesh_ctx: rawptr,
+  destroy_line_strip_mesh: proc(ctx: rawptr, handle: d.MeshHandle),
+) {
   // Clean up expired objects
   now := time.now()
   for &entry, idx in self.objects.entries do if entry.active {
@@ -440,52 +431,51 @@ update :: proc(self: ^Renderer, rm: ^resources.Manager) {
       index      = u32(idx),
       generation = entry.generation,
     }
-    destroy(self, handle, rm)
+    destroy(self, handle, destroy_mesh_ctx, destroy_line_strip_mesh)
   }
 }
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera_handle: resources.CameraHandle,
+  camera_gpu: ^camera.CameraGPU,
+  camera_cpu: ^d.Camera,
+  texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
-  color_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+  color_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Debug draw missing color attachment")
     return
   }
-  depth_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.DEPTH][frame_index],
+  depth_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
     log.error("Debug draw missing depth attachment")
     return
   }
-  extent := camera.extent
   gpu.begin_rendering(
     command_buffer,
-    extent.width,
-    extent.height,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(command_buffer, extent.width, extent.height)
+  gpu.set_viewport_scissor(command_buffer, camera_cpu.extent[0], camera_cpu.extent[1])
 }
 
 render :: proc(
   self: ^Renderer,
-  camera_handle: resources.CameraHandle,
+  camera_gpu: ^camera.CameraGPU,
+  camera_handle: d.CameraHandle,
   command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
+  meshes: d.Pool(d.Mesh),
   frame_index: u32,
+  vertex_buffer: vk.Buffer,
+  index_buffer: vk.Buffer,
 ) {
   // Render all debug objects
   active_count := 0
@@ -493,7 +483,7 @@ render :: proc(
     if !entry.active do continue
     active_count += 1
     obj := &entry.item
-    mesh := cont.get(rm.meshes, obj.mesh_handle)
+    mesh := cont.get(meshes, obj.mesh_handle)
     if mesh == nil {
       log.warnf("Debug draw: mesh not found for object %d", idx)
       continue
@@ -524,7 +514,7 @@ render :: proc(
       command_buffer,
       pipeline,
       self.pipeline_layout,
-      rm.camera_buffer.descriptor_sets[frame_index], // Set 0 (only one needed)
+      camera_gpu.camera_buffer_descriptor_sets[frame_index], // Set 0 (only one needed)
     )
     push_constants := PushConstant {
       camera_index = camera_handle.index,
@@ -540,7 +530,7 @@ render :: proc(
       size_of(PushConstant),
       &push_constants,
     )
-    vertex_buffers := [?]vk.Buffer{rm.vertex_buffer.buffer}
+    vertex_buffers := [?]vk.Buffer{vertex_buffer}
     vertex_offsets := [?]vk.DeviceSize{0}
     vk.CmdBindVertexBuffers(
       command_buffer,
@@ -549,7 +539,7 @@ render :: proc(
       raw_data(vertex_buffers[:]),
       raw_data(vertex_offsets[:]),
     )
-    vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
+    vk.CmdBindIndexBuffer(command_buffer, index_buffer, 0, .UINT32)
     // Simple indexed draw (not indirect)
     vk.CmdDrawIndexed(
       command_buffer,

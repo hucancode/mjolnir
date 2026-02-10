@@ -2,7 +2,6 @@ package physics
 
 import cont "../containers"
 import "../geometry"
-import "../resources"
 import "core:log"
 import "core:math"
 import "core:math/linalg"

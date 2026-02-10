@@ -2,9 +2,8 @@ package world
 
 import anim "../animation"
 import cont "../containers"
+import d "../data"
 import "../geometry"
-import "../gpu"
-import "../resources"
 import "core:fmt"
 import "core:log"
 import "core:math/linalg"
@@ -26,23 +25,44 @@ AssetManifest :: struct {
 @(private = "file")
 GeometryData :: struct {
   geometry:        geometry.Geometry,
-  material_handle: resources.MaterialHandle,
+  material_handle: d.MaterialHandle,
 }
 
 @(private = "file")
 SkinData :: struct {
-  bones:                []resources.Bone,
-  root_bone_idx:        u32,
-  matrix_buffer_offset: u32,
+  bones:         []d.Bone,
+  root_bone_idx: u32,
 }
+
+MeshGeometryAllocator :: #type proc(
+  world: ^World,
+  geometry_data: geometry.Geometry,
+  auto_purge: bool,
+) -> (
+  handle: d.MeshHandle,
+  ok: bool,
+)
+
+TextureFromDataAllocator :: #type proc(
+  world: ^World,
+  pixel_data: []u8,
+) -> (
+  handle: d.Image2DHandle,
+  ok: bool,
+)
+
+Texture2DRefProc :: #type proc(
+  handle: d.Image2DHandle,
+) -> bool
 
 load_gltf :: proc(
   world: ^World,
-  rm: ^resources.Manager,
-  gctx: ^gpu.GPUContext,
+  allocate_mesh_geometry: MeshGeometryAllocator,
+  create_texture_from_data: TextureFromDataAllocator,
+  texture_2d_ref: Texture2DRefProc,
   path: string,
 ) -> (
-  nodes: [dynamic]resources.NodeHandle,
+  nodes: [dynamic]d.NodeHandle,
   ret: cgltf.result,
 ) {
   // step 0: cgltf
@@ -66,17 +86,16 @@ load_gltf :: proc(
   }
   // step 2: Resource Loading
   texture_cache := make(
-    map[^cgltf.texture]resources.Image2DHandle,
+    map[^cgltf.texture]d.Image2DHandle,
     context.temp_allocator,
   )
   material_cache := make(
-    map[^cgltf.material]resources.MaterialHandle,
+    map[^cgltf.material]d.MaterialHandle,
     context.temp_allocator,
   )
   load_textures_batch(
     world,
-    rm,
-    gctx,
+    create_texture_from_data,
     path,
     gltf_data,
     manifest.unique_textures[:],
@@ -84,7 +103,7 @@ load_gltf :: proc(
   ) or_return
   load_materials_batch(
     world,
-    rm,
+    texture_2d_ref,
     path,
     gltf_data,
     manifest.unique_materials[:],
@@ -105,12 +124,11 @@ load_gltf :: proc(
   }
   // step 4: Skinning Processing
   skin_cache := make(map[^cgltf.skin]SkinData, context.temp_allocator)
-  load_skins(world, rm, gltf_data, manifest.skins[:], &skin_cache)
+  load_skins(world, gltf_data, manifest.skins[:], &skin_cache)
   // step 5: Scene Construction
   construct_scene(
     world,
-    rm,
-    gctx,
+    allocate_mesh_geometry,
     gltf_data,
     &geometry_cache,
     &skin_cache,
@@ -173,13 +191,13 @@ discover_assets :: proc(gltf_data: ^cgltf.data) -> AssetManifest {
 @(private = "file")
 load_textures_batch :: proc(
   world: ^World,
-  rm: ^resources.Manager,
-  gctx: ^gpu.GPUContext,
+  create_texture_from_data: TextureFromDataAllocator,
   gltf_path: string,
   gltf_data: ^cgltf.data,
   textures: []^cgltf.texture,
-  cache: ^map[^cgltf.texture]resources.Image2DHandle,
+  cache: ^map[^cgltf.texture]d.Image2DHandle,
 ) -> cgltf.result {
+  _ = gltf_data
   for texture in textures do if texture != nil && texture.image_ != nil {
     pixel_data: []u8
     own_pixel_data: bool
@@ -198,11 +216,8 @@ load_textures_batch :: proc(
     } else {
       continue
     }
-    handle, result := resources.create_texture(gctx, rm, pixel_data)
-    if result != .SUCCESS do return .io_error
-    if tex := cont.get(rm.images_2d, handle); tex != nil {
-      tex.auto_purge = true // Enable auto-purge for GLTF-loaded textures
-    }
+    handle, ok := create_texture_from_data(world, pixel_data)
+    if !ok do return .io_error
     cache[texture] = handle
     log.infof("Created texture %v", handle)
   }
@@ -212,28 +227,34 @@ load_textures_batch :: proc(
 @(private = "file")
 load_materials_batch :: proc(
   world: ^World,
-  rm: ^resources.Manager,
+  texture_2d_ref: Texture2DRefProc,
   gltf_path: string,
   gltf_data: ^cgltf.data,
   materials: []^cgltf.material,
-  texture_cache: ^map[^cgltf.texture]resources.Image2DHandle,
-  material_cache: ^map[^cgltf.material]resources.MaterialHandle,
+  texture_cache: ^map[^cgltf.texture]d.Image2DHandle,
+  material_cache: ^map[^cgltf.material]d.MaterialHandle,
 ) -> (
   ret: cgltf.result,
 ) {
   ret = .success
+  _ = gltf_data
+  _ = gltf_path
   for gltf_mat in materials do if gltf_mat != nil {
     albedo, metallic_roughness, normal, emissive, occlusion, features := load_material_textures(gltf_mat, texture_cache)
     defer if ret != .success {
       // TODO: clean up textures
     }
-    material_handle, ok := resources.create_material(rm, features, .PBR, albedo, metallic_roughness, normal, emissive, occlusion, auto_purge = true)
+    material_handle, ok := create_material(world, features, .PBR, albedo, metallic_roughness, normal, emissive, occlusion, auto_purge = true)
     if !ok do return .invalid_gltf
-    resources.texture_2d_ref(rm, albedo)
-    resources.texture_2d_ref(rm, metallic_roughness)
-    resources.texture_2d_ref(rm, normal)
-    resources.texture_2d_ref(rm, emissive)
-    resources.texture_2d_ref(rm, occlusion)
+    material, material_ok := cont.get(world.materials, material_handle)
+    if !material_ok do return .invalid_gltf
+    d.prepare_material_data(material)
+    stage_material_data(&world.staging, material_handle, material.data)
+    texture_2d_ref(albedo)
+    texture_2d_ref(metallic_roughness)
+    texture_2d_ref(normal)
+    texture_2d_ref(emissive)
+    texture_2d_ref(occlusion)
     material_cache[gltf_mat] = material_handle
     log.infof("Created material %v", material_handle)
   }
@@ -243,14 +264,14 @@ load_materials_batch :: proc(
 @(private = "file")
 load_material_textures :: proc(
   mat: ^cgltf.material,
-  cache: ^map[^cgltf.texture]resources.Image2DHandle,
+  cache: ^map[^cgltf.texture]d.Image2DHandle,
 ) -> (
-  albedo: resources.Image2DHandle,
-  metallic_roughness: resources.Image2DHandle,
-  normal: resources.Image2DHandle,
-  emissive: resources.Image2DHandle,
-  occlusion: resources.Image2DHandle,
-  features: resources.ShaderFeatureSet,
+  albedo: d.Image2DHandle,
+  metallic_roughness: d.Image2DHandle,
+  normal: d.Image2DHandle,
+  emissive: d.Image2DHandle,
+  occlusion: d.Image2DHandle,
+  features: d.ShaderFeatureSet,
 ) {
   if mat.has_pbr_metallic_roughness {
     if tex := mat.pbr_metallic_roughness.metallic_roughness_texture.texture;
@@ -282,7 +303,7 @@ load_material_textures :: proc(
 @(private = "file")
 load_mesh_primitives :: proc(
   mesh: ^cgltf.mesh,
-  cache: ^map[^cgltf.material]resources.MaterialHandle,
+  cache: ^map[^cgltf.material]d.MaterialHandle,
   include_skinning: bool,
 ) -> (
   GeometryData,
@@ -290,7 +311,7 @@ load_mesh_primitives :: proc(
 ) {
   primitives := mesh.primitives
   if len(primitives) == 0 do return {}, .invalid_gltf
-  material_handle: resources.MaterialHandle
+  material_handle: d.MaterialHandle
   if mat := primitives[0].material; mat != nil && mat in cache {
     material_handle = cache[mat]
   }
@@ -443,13 +464,12 @@ load_vertex_attributes :: proc(
 @(private = "file")
 load_skins :: proc(
   world: ^World,
-  rm: ^resources.Manager,
   gltf_data: ^cgltf.data,
   skins: []^cgltf.skin,
   skin_cache: ^map[^cgltf.skin]SkinData,
 ) {
   for gltf_skin in skins do if gltf_skin != nil {
-    bones := make([]resources.Bone, len(gltf_skin.joints))
+    bones := make([]d.Bone, len(gltf_skin.joints))
     for joint_node, i in gltf_skin.joints {
       bones[i].name = string(joint_node.name)
       bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
@@ -479,17 +499,9 @@ load_skins :: proc(
         break
       }
     }
-    matrix_buffer_offset := cont.slab_alloc(&rm.bone_matrix_slab, u32(len(bones)))
-    l := matrix_buffer_offset
-    r := l + u32(len(bones))
-    for frame_idx in 0 ..< FRAMES_IN_FLIGHT {
-      bone_matrices := gpu.get_all(&rm.bone_buffer.buffers[frame_idx])[l:r]
-      slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
-    }
     skin_cache[gltf_skin] = SkinData {
-      bones                = bones,
-      root_bone_idx        = root_bone_idx,
-      matrix_buffer_offset = matrix_buffer_offset,
+      bones         = bones,
+      root_bone_idx = root_bone_idx,
     }
     log.infof("Processed skin with %d bones, root bone %d", len(bones), root_bone_idx)
   }
@@ -498,22 +510,21 @@ load_skins :: proc(
 @(private = "file")
 construct_scene :: proc(
   world: ^World,
-  rm: ^resources.Manager,
-  gctx: ^gpu.GPUContext,
+  allocate_mesh_geometry: MeshGeometryAllocator,
   gltf_data: ^cgltf.data,
   geometry_cache: ^map[^cgltf.mesh]GeometryData,
   skin_cache: ^map[^cgltf.skin]SkinData,
-  nodes: ^[dynamic]resources.NodeHandle,
+  nodes: ^[dynamic]d.NodeHandle,
 ) -> cgltf.result {
   TraverseEntry :: struct {
     idx:    u32,
-    parent: resources.NodeHandle,
+    parent: d.NodeHandle,
   }
   stack := make([dynamic]TraverseEntry, 0, context.temp_allocator)
   bones_with_parent := make([dynamic]u32, 0, context.temp_allocator)
   node_ptr_to_idx_map := make(map[^cgltf.node]u32, context.temp_allocator)
   skin_to_first_mesh := make(
-    map[^cgltf.skin]resources.MeshHandle,
+    map[^cgltf.skin]d.MeshHandle,
     context.temp_allocator,
   )
   for &node, i in gltf_data.nodes {
@@ -535,7 +546,7 @@ construct_scene :: proc(
     gltf_node := &gltf_data.nodes[entry.idx]
     node_handle, node := cont.alloc(
       &world.nodes,
-      resources.NodeHandle,
+      d.NodeHandle,
     ) or_continue
     init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
@@ -563,62 +574,66 @@ construct_scene :: proc(
     node.parent = entry.parent
     if gltf_node.mesh in geometry_cache {
       geometry_data := geometry_cache[gltf_node.mesh]
-      mesh_handle: resources.MeshHandle
+      mesh_handle: d.MeshHandle
       if gltf_node.skin in skin_cache {
         skin_data := skin_cache[gltf_node.skin]
-        mesh_handle =
-        resources.create_mesh(
-          gctx,
-          rm,
+        mesh_handle, alloc_result := allocate_mesh_geometry(
+          world,
           geometry_data.geometry,
           true,
-        ) or_continue
-        mesh := cont.get(rm.meshes, mesh_handle) or_continue
+        )
+        if !alloc_result do continue
+        mesh := cont.get(world.meshes, mesh_handle) or_continue
         skinning, _ := &mesh.skinning.?
-        skinning.bones = make([]resources.Bone, len(skin_data.bones))
+        skinning.bones = make([]d.Bone, len(skin_data.bones))
         for src_bone, i in skin_data.bones {
           skinning.bones[i] = src_bone
           skinning.bones[i].children = slice.clone(src_bone.children)
           skinning.bones[i].name = strings.clone(src_bone.name)
         }
         skinning.root_bone_index = skin_data.root_bone_idx
-        resources.compute_bone_lengths(skinning)
+        d.compute_bone_lengths(skinning)
+        identity_matrices := make(
+          [dynamic]matrix[4, 4]f32,
+          len(skin_data.bones),
+        )
+        slice.fill(identity_matrices[:], linalg.MATRIX4F32_IDENTITY)
         node.attachment = MeshAttachment {
           handle = mesh_handle,
           material = geometry_data.material_handle,
           cast_shadow = true,
-          skinning = NodeSkinning {
-            bone_matrix_buffer_offset = skin_data.matrix_buffer_offset,
-          },
+          skinning = NodeSkinning{},
         }
+        stage_bone_matrices(
+          &world.staging,
+          node_handle,
+          identity_matrices[:],
+        )
         if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin];
            !has_first_mesh {
           skin_to_first_mesh[gltf_node.skin] = mesh_handle
           load_animations(
             world,
-            rm,
-            gctx,
             gltf_data,
             gltf_node.skin,
             mesh_handle,
           )
         }
       } else {
-        mesh_handle =
-        resources.create_mesh(
-          gctx,
-          rm,
+        mesh_handle, alloc_result := allocate_mesh_geometry(
+          world,
           geometry_data.geometry,
           true,
-        ) or_continue
+        )
+        if !alloc_result do continue
         node.attachment = MeshAttachment {
           handle      = mesh_handle,
           material    = geometry_data.material_handle,
           cast_shadow = true,
         }
       }
-      resources.mesh_ref(rm, mesh_handle)
-      resources.material_ref(rm, geometry_data.material_handle)
+      mesh_ref(world, mesh_handle)
+      material_ref(world, geometry_data.material_handle)
     }
     attach(world.nodes, entry.parent, node_handle)
     if entry.parent == world.root do append(nodes, node_handle)
@@ -634,11 +649,9 @@ construct_scene :: proc(
 @(private = "file")
 load_animations :: proc(
   world: ^World,
-  rm: ^resources.Manager,
-  gctx: ^gpu.GPUContext,
   gltf_data: ^cgltf.data,
   gltf_skin: ^cgltf.skin,
-  mesh_handle: resources.MeshHandle,
+  mesh_handle: d.MeshHandle,
 ) -> bool {
   load_keyframe_cubic_spline :: proc "contextless" (
     $T: typeid,
@@ -697,7 +710,7 @@ load_animations :: proc(
     ) or_return
     return true
   }
-  mesh := cont.get(rm.meshes, mesh_handle)
+  mesh := cont.get(world.meshes, mesh_handle)
   if mesh == nil do return false
   skinning := &mesh.skinning.?
   for gltf_anim, i in gltf_data.animations {
@@ -707,12 +720,12 @@ load_animations :: proc(
     } else {
       name = fmt.tprintf("animation_%d", i)
     }
-    clip_handle := resources.create_animation_clip(
-      rm,
+    clip_handle := create_animation_clip(
+      world,
       len(skinning.bones),
       name = name,
     ) or_continue
-    clip := cont.get(rm.animation_clips, clip_handle)
+    clip := cont.get(world.animation_clips, clip_handle)
     for gltf_channel in gltf_anim.channels do if gltf_channel.target_node != nil && gltf_channel.sampler != nil {
       n := gltf_channel.sampler.input.count
       bone_idx := slice.linear_search(gltf_skin.joints, gltf_channel.target_node) or_continue

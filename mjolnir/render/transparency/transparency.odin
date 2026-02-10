@@ -1,9 +1,10 @@
 package transparency
 
 import cont "../../containers"
+import d "../../data"
 import "../../geometry"
 import "../../gpu"
-import "../../resources"
+import "../camera"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -19,7 +20,7 @@ Renderer :: struct {
   transparent_pipeline: vk.Pipeline,
   wireframe_pipeline:   vk.Pipeline,
   sprite_pipeline:      vk.Pipeline,
-  sprite_quad_mesh:     resources.MeshHandle,
+  sprite_quad_mesh:     d.MeshHandle,
 }
 
 PushConstant :: struct {
@@ -30,72 +31,30 @@ init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   width, height: u32,
-  rm: ^resources.Manager,
+  general_pipeline_layout: vk.PipelineLayout,
+  sprite_pipeline_layout: vk.PipelineLayout,
+  sprite_quad_mesh: d.MeshHandle,
 ) -> (
   ret: vk.Result,
 ) {
   log.info("Initializing transparent renderer")
-  if rm.general_pipeline_layout == 0 {
+  if general_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-  half_w: f32 = 0.5
-  half_h: f32 = 0.5
-  vertices := make([]geometry.Vertex, 4)
-  defer if ret != .SUCCESS do delete(vertices)
-  vertices[0] = {
-    position = {-half_w, -half_h, 0},
-    normal   = {0, 0, 1},
-    uv       = {0, 1},
-    color    = {1, 1, 1, 1},
-  }
-  vertices[1] = {
-    position = {half_w, -half_h, 0},
-    normal   = {0, 0, 1},
-    uv       = {1, 1},
-    color    = {1, 1, 1, 1},
-  }
-  vertices[2] = {
-    position = {half_w, half_h, 0},
-    normal   = {0, 0, 1},
-    uv       = {1, 0},
-    color    = {1, 1, 1, 1},
-  }
-  vertices[3] = {
-    position = {-half_w, half_h, 0},
-    normal   = {0, 0, 1},
-    uv       = {0, 0},
-    color    = {1, 1, 1, 1},
-  }
-  indices := make([]u32, 6)
-  defer if ret != .SUCCESS do delete(indices)
-  indices[0] = 0
-  indices[1] = 1
-  indices[2] = 2
-  indices[3] = 2
-  indices[4] = 3
-  indices[5] = 0
-  quad_geom := geometry.Geometry {
-    vertices = vertices,
-    indices  = indices,
-    aabb     = geometry.aabb_from_vertices(vertices),
-  }
-  self.sprite_quad_mesh = resources.create_mesh(gctx, rm, quad_geom) or_return
-  defer if ret != .SUCCESS {
-    resources.destroy_mesh(rm, self.sprite_quad_mesh)
-  }
+  self.sprite_quad_mesh = sprite_quad_mesh
   create_transparent_pipelines(
     gctx,
     self,
-    rm.general_pipeline_layout,
+    general_pipeline_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.transparent_pipeline, nil)
   }
-  create_wireframe_pipelines(gctx, self, rm.general_pipeline_layout) or_return
+  create_wireframe_pipelines(gctx, self, general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
   }
-  create_sprite_pipeline(gctx, self, rm.sprite_pipeline_layout) or_return
+  create_sprite_pipeline(gctx, self, sprite_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.sprite_pipeline, nil)
   }
@@ -284,47 +243,55 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera_handle: resources.CameraHandle,
+  camera_gpu: ^camera.CameraGPU,
+  camera_cpu: ^d.Camera,
+  texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
-  color_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+  color_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Transparent lighting missing color attachment")
     return
   }
-  depth_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.DEPTH][frame_index],
+  depth_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
     log.error("Transparent lighting missing depth attachment")
     return
   }
-  extent := camera.extent
   gpu.begin_rendering(
     command_buffer,
-    extent.width,
-    extent.height,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(command_buffer, extent.width, extent.height)
+  gpu.set_viewport_scissor(command_buffer, camera_cpu.extent[0], camera_cpu.extent[1])
 }
 
 render :: proc(
   self: ^Renderer,
+  camera_gpu: ^camera.CameraGPU,
   pipeline: vk.Pipeline,
-  camera_handle: resources.CameraHandle,
-  command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
+  general_pipeline_layout: vk.PipelineLayout,
+  sprite_pipeline_layout: vk.PipelineLayout,
+  textures_descriptor_set: vk.DescriptorSet,
+  bone_descriptor_set: vk.DescriptorSet,
+  material_descriptor_set: vk.DescriptorSet,
+  world_matrix_descriptor_set: vk.DescriptorSet,
+  node_data_descriptor_set: vk.DescriptorSet,
+  mesh_data_descriptor_set: vk.DescriptorSet,
+  sprite_descriptor_set: vk.DescriptorSet,
+  vertex_skinning_descriptor_set: vk.DescriptorSet,
+  vertex_buffer: vk.Buffer,
+  index_buffer: vk.Buffer,
+  camera_handle: d.CameraHandle,
   frame_index: u32,
+  command_buffer: vk.CommandBuffer,
   draw_buffer: vk.Buffer,
   count_buffer: vk.Buffer,
 ) {
@@ -333,7 +300,7 @@ render :: proc(
     return
   }
   // Determine which pipeline layout to use
-  pipeline_layout := pipeline == self.sprite_pipeline ? rm.sprite_pipeline_layout : rm.general_pipeline_layout
+  pipeline_layout := pipeline == self.sprite_pipeline ? sprite_pipeline_layout : general_pipeline_layout
 
   if pipeline == self.sprite_pipeline {
     // Sprite pipeline: 5 descriptor sets (0, 1, 2, 3, 4)
@@ -341,11 +308,11 @@ render :: proc(
       command_buffer,
       pipeline,
       pipeline_layout,
-      rm.camera_buffer.descriptor_sets[frame_index], // Set 0
-      rm.textures_descriptor_set, // Set 1
-      rm.world_matrix_buffer.descriptor_set, // Set 2
-      rm.node_data_buffer.descriptor_set, // Set 3
-      rm.sprite_buffer.descriptor_set, // Set 4
+      camera_gpu.camera_buffer_descriptor_sets[frame_index], // Set 0
+      textures_descriptor_set, // Set 1
+      world_matrix_descriptor_set, // Set 2
+      node_data_descriptor_set, // Set 3
+      sprite_descriptor_set, // Set 4
     )
   } else {
     // General pipeline: 8 descriptor sets (0-7)
@@ -353,14 +320,14 @@ render :: proc(
       command_buffer,
       pipeline,
       pipeline_layout,
-      rm.camera_buffer.descriptor_sets[frame_index], // Set 0
-      rm.textures_descriptor_set, // Set 1
-      rm.bone_buffer.descriptor_sets[frame_index], // Set 2
-      rm.material_buffer.descriptor_set, // Set 3
-      rm.world_matrix_buffer.descriptor_set, // Set 4
-      rm.node_data_buffer.descriptor_set, // Set 5
-      rm.mesh_data_buffer.descriptor_set, // Set 6
-      rm.vertex_skinning_buffer.descriptor_set, // Set 7
+      camera_gpu.camera_buffer_descriptor_sets[frame_index], // Set 0
+      textures_descriptor_set, // Set 1
+      bone_descriptor_set, // Set 2
+      material_descriptor_set, // Set 3
+      world_matrix_descriptor_set, // Set 4
+      node_data_descriptor_set, // Set 5
+      mesh_data_descriptor_set, // Set 6
+      vertex_skinning_descriptor_set, // Set 7
     )
   }
 
@@ -375,7 +342,7 @@ render :: proc(
     size_of(PushConstant),
     &push_constants,
   )
-  vertex_buffers := [?]vk.Buffer{rm.vertex_buffer.buffer}
+  vertex_buffers := [?]vk.Buffer{vertex_buffer}
   vertex_offsets := [?]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -384,14 +351,14 @@ render :: proc(
     raw_data(vertex_buffers[:]),
     raw_data(vertex_offsets[:]),
   )
-  vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
+  vk.CmdBindIndexBuffer(command_buffer, index_buffer, 0, .UINT32)
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     draw_buffer,
     0,
     count_buffer,
     0,
-    resources.MAX_NODES_IN_SCENE,
+    d.MAX_NODES_IN_SCENE,
     u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
 }

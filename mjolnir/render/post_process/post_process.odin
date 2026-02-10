@@ -1,8 +1,9 @@
 package post_process
 
 import cont "../../containers"
+import d "../../data"
 import "../../gpu"
-import "../../resources"
+import "../camera"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -182,7 +183,7 @@ Renderer :: struct {
   pipelines:        [len(PostProcessEffectType)]vk.Pipeline,
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
-  images:           [2]resources.Image2DHandle,
+  images:           [2]d.Image2DHandle,
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -349,9 +350,10 @@ effect_clear :: proc(self: ^Renderer) {
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
   color_format: vk.Format,
   width, height: u32,
-  rm: ^resources.Manager,
+  textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -392,7 +394,14 @@ init :: proc(
       shader_code,
     ) or_return
   }
-  create_images(gctx, self, rm, width, height, color_format) or_return
+  create_images(
+    gctx,
+    self,
+    texture_manager,
+    width,
+    height,
+    color_format,
+  ) or_return
   shader_stages: [count][2]vk.PipelineShaderStageCreateInfo
   pipeline_infos: [count]vk.GraphicsPipelineCreateInfo
   for effect_type, i in PostProcessEffectType {
@@ -420,7 +429,7 @@ init :: proc(
     self.pipeline_layouts[i] = gpu.create_pipeline_layout(
       gctx,
       vk.PushConstantRange{stageFlags = {.FRAGMENT}, size = push_constant_size} if push_constant_size > 0 else nil,
-      rm.textures_set_layout,
+      textures_set_layout,
     ) or_return
     shader_stages[i] = gpu.create_vert_frag_stages(
       vert_module,
@@ -457,14 +466,14 @@ init :: proc(
 create_images :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  rm: ^resources.Manager,
+  texture_manager: ^gpu.TextureManager,
   width, height: u32,
   format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
-    handle = resources.create_texture(
+    handle = shared.create_texture_2d_empty(
       gctx,
-      rm,
+      texture_manager,
       width,
       height,
       format,
@@ -482,31 +491,36 @@ create_images :: proc(
 
 destroy_images :: proc(
   self: ^Renderer,
-  device: vk.Device,
-  rm: ^resources.Manager,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
 ) {
   for handle in self.images {
-    if item, freed := cont.free(&rm.images_2d, handle); freed {
-      gpu.image_destroy(device, item)
-    }
+    shared.destroy_texture_2d(gctx, texture_manager, handle)
   }
 }
 
 recreate_images :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
+  texture_manager: ^gpu.TextureManager,
   width, height: u32,
   format: vk.Format,
-  rm: ^resources.Manager,
 ) -> vk.Result {
-  destroy_images(self, gctx.device, rm)
-  return create_images(gctx, self, rm, width, height, format)
+  destroy_images(self, gctx, texture_manager)
+  return create_images(
+    gctx,
+    self,
+    texture_manager,
+    width,
+    height,
+    format,
+  )
 }
 
 shutdown :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
+  texture_manager: ^gpu.TextureManager,
 ) {
   for &p in self.pipelines {
     vk.DestroyPipeline(gctx.device, p, nil)
@@ -517,7 +531,7 @@ shutdown :: proc(
     layout = 0
   }
   delete(self.effect_stack)
-  destroy_images(self, gctx.device, rm)
+  destroy_images(self, gctx, texture_manager)
 }
 
 // Modular postprocess API
@@ -543,12 +557,10 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  camera_handle: resources.CameraHandle,
-  rm: ^resources.Manager,
+  camera_gpu: ^camera.CameraGPU,
+  texture_manager: ^gpu.TextureManager,
   frame_index: u32,
 ) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
   for effect, i in self.effect_stack {
     is_first := i == 0
     is_last := i == len(self.effect_stack) - 1
@@ -560,7 +572,7 @@ render :: proc(
     input_image_index: u32
     dst_image_idx: u32
     if is_first {
-      input_image_index = camera.attachments[.FINAL_IMAGE][frame_index].index // Use original input
+      input_image_index = camera_gpu.attachments[.FINAL_IMAGE][frame_index].index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -574,7 +586,7 @@ render :: proc(
     // Pass N: image[(N+1)%2] -> swapchain (src: image[(N-1)%2], dst: swapchain)
     dst_view := output_view
     if !is_last {
-      dst_texture := cont.get(rm.images_2d, self.images[dst_image_idx])
+      dst_texture := gpu.get_texture_2d(texture_manager, self.images[dst_image_idx])
       if dst_texture == nil {
         log.errorf(
           "Post-process image handle %v not found",
@@ -600,7 +612,7 @@ render :: proc(
     }
     if !is_first {
       src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
-      src_texture := cont.get(rm.images_2d, self.images[src_texture_idx])
+      src_texture := gpu.get_texture_2d(texture_manager, self.images[src_texture_idx])
       if src_texture == nil {
         log.errorf(
           "Post-process source image handle %v not found",
@@ -633,18 +645,18 @@ render :: proc(
       command_buffer,
       self.pipelines[effect_type],
       self.pipeline_layouts[effect_type],
-      rm.textures_descriptor_set,
+      texture_manager.textures_descriptor_set,
     )
     base: BasePushConstant
     base.position_texture_index =
-      camera.attachments[.POSITION][frame_index].index
-    base.normal_texture_index = camera.attachments[.NORMAL][frame_index].index
-    base.albedo_texture_index = camera.attachments[.ALBEDO][frame_index].index
+      camera_gpu.attachments[.POSITION][frame_index].index
+    base.normal_texture_index = camera_gpu.attachments[.NORMAL][frame_index].index
+    base.albedo_texture_index = camera_gpu.attachments[.ALBEDO][frame_index].index
     base.metallic_texture_index =
-      camera.attachments[.METALLIC_ROUGHNESS][frame_index].index
+      camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index].index
     base.emissive_texture_index =
-      camera.attachments[.EMISSIVE][frame_index].index
-    base.depth_texture_index = camera.attachments[.DEPTH][frame_index].index
+      camera_gpu.attachments[.EMISSIVE][frame_index].index
+    base.depth_texture_index = camera_gpu.attachments[.DEPTH][frame_index].index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

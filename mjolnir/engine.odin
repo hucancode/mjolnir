@@ -15,14 +15,17 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 import "core:unicode/utf8"
+import d "data"
+import "geometry"
 import "gpu"
 import "level_manager"
 import nav "navigation"
 import "render"
+import render_camera "render/camera"
+import "render/debug_draw"
 import "render/debug_ui"
 import "render/particles"
 import "render/visibility"
-import "resources"
 import "ui"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -72,7 +75,6 @@ InputState :: struct {
 Engine :: struct {
   window:                    glfw.WindowHandle,
   gctx:                      gpu.GPUContext,
-  rm:                        resources.Manager,
   frame_index:               u32,
   swapchain:                 gpu.Swapchain,
   world:                     world.World,
@@ -148,7 +150,6 @@ init :: proc(
   }
   log.infof("Window created %v\n", self.window)
   gpu.gpu_context_init(&self.gctx, self.window) or_return
-  resources.init(&self.rm, &self.gctx) or_return
   nav.init(&self.nav_sys)
   self.camera_controller_enabled = true
   self.start_timestamp = time.now()
@@ -176,11 +177,70 @@ init :: proc(
   render.init(
     &self.render,
     &self.gctx,
-    &self.rm,
+    &self.world.materials,
+    &self.world.meshes,
+    &self.world.cameras,
+    &self.world.spherical_cameras,
+    &self.world.builtin_meshes,
     self.swapchain.extent,
     self.swapchain.format.format,
     get_window_dpi(self.window),
   ) or_return
+
+  // Set up debug draw callbacks for world module
+  self.world.debug_draw_line_strip = proc(points: []geometry.Vertex, duration_seconds: f64, color: [4]f32, bypass_depth: bool) {
+    engine := cast(^Engine)context.user_ptr
+    if engine == nil do return
+
+    // Create mesh from points
+    indices := make([]u32, len(points))
+    defer delete(indices)
+    for i in 0 ..< len(points) {
+      indices[i] = u32(i)
+    }
+    vertices_copy := make([]geometry.Vertex, len(points))
+    defer delete(vertices_copy)
+    copy(vertices_copy, points)
+    geom := geometry.Geometry {
+      vertices = vertices_copy,
+      indices  = indices,
+      aabb     = geometry.aabb_from_vertices(points),
+    }
+
+    // Allocate mesh using render upload function
+    mesh_handle, result := render.allocate_mesh_geometry(
+      &engine.gctx,
+      &engine.render,
+      &engine.world.meshes, geom, auto_purge = true)
+    if result != .SUCCESS {
+      log.warnf("Failed to allocate debug line strip mesh: %v", result)
+      return
+    }
+
+    // Spawn debug object
+    debug_draw.spawn_line_strip_temporary(
+      &engine.render.debug_draw,
+      mesh_handle,
+      duration_seconds,
+      color,
+      bypass_depth,
+    )
+  }
+
+  self.world.debug_draw_mesh = proc(mesh_handle: d.MeshHandle, transform: matrix[4, 4]f32, duration_seconds: f64, color: [4]f32, bypass_depth: bool) {
+    engine := cast(^Engine)context.user_ptr
+    if engine == nil do return
+    debug_draw.spawn_mesh_temporary(
+      &engine.render.debug_draw,
+      mesh_handle,
+      transform,
+      duration_seconds,
+      color,
+      .UNIFORM_COLOR,
+      bypass_depth,
+    )
+  }
+
   if self.gctx.has_async_compute {
     log.infof(
       "Async compute bootstrap: both draw buffers initialized on compute queue",
@@ -345,8 +405,8 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 }
 
 @(private = "file")
-get_main_camera :: proc(self: ^Engine) -> ^resources.Camera {
-  return cont.get(self.rm.cameras, self.render.main_camera)
+get_main_camera :: proc(self: ^Engine) -> ^d.Camera {
+  return cont.get(self.world.cameras, self.render.main_camera)
 }
 
 update_input :: proc(self: ^Engine) -> bool {
@@ -461,6 +521,178 @@ update_visibility_node_count :: proc(
   render.visibility.node_count = n
 }
 
+sync_staging_to_gpu :: proc(self: ^Engine) {
+  sync.mutex_lock(&self.world.staging.mutex)
+  defer sync.mutex_unlock(&self.world.staging.mutex)
+  stale_handles := make([dynamic]d.NodeHandle, context.temp_allocator)
+  stale_meshes := make([dynamic]d.MeshHandle, context.temp_allocator)
+  stale_materials := make([dynamic]d.MaterialHandle, context.temp_allocator)
+  stale_bone_nodes := make([dynamic]d.NodeHandle, context.temp_allocator)
+  stale_sprites := make([dynamic]d.SpriteHandle, context.temp_allocator)
+  stale_emitters := make([dynamic]d.EmitterHandle, context.temp_allocator)
+  stale_forcefields := make([dynamic]d.ForceFieldHandle, context.temp_allocator)
+  stale_lights := make([dynamic]d.LightHandle, context.temp_allocator)
+  for handle, &entry in self.world.staging.transforms {
+    if entry.n < d.FRAMES_IN_FLIGHT {
+      render.upload_node_transform(&self.render, handle, &entry.data)
+      entry.n += 1
+    }
+    if entry.n >= d.FRAMES_IN_FLIGHT {
+      append(&stale_handles, handle)
+    }
+  }
+  for handle in stale_handles {
+    delete_key(&self.world.staging.transforms, handle)
+  }
+  clear(&stale_handles)
+  for handle, &entry in self.world.staging.node_data {
+    node_data := entry.data
+    if entry.n < d.FRAMES_IN_FLIGHT {
+      node := cont.get(self.world.nodes, handle)
+      if node == nil {
+        render.release_bone_matrix_range_for_node(&self.render, handle)
+        node_data.attachment_data_index = 0xFFFFFFFF
+      } else if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment); has_mesh {
+        if _, has_skin := mesh_attachment.skinning.?; has_skin {
+          if bone_offset, has_offset := self.render.bone_matrix_offsets[handle]; has_offset {
+            node_data.attachment_data_index = bone_offset
+          } else if bone_entry, has_bones := self.world.staging.bone_updates[handle];
+                    has_bones && len(bone_entry.data) > 0 {
+            bone_offset := render.ensure_bone_matrix_range_for_node(
+              &self.render,
+              handle,
+              u32(len(bone_entry.data)),
+            )
+            node_data.attachment_data_index = bone_offset
+          } else {
+            render.release_bone_matrix_range_for_node(&self.render, handle)
+            node_data.attachment_data_index = 0xFFFFFFFF
+          }
+        } else {
+          render.release_bone_matrix_range_for_node(&self.render, handle)
+          node_data.attachment_data_index = 0xFFFFFFFF
+        }
+      } else if _, has_sprite := node.attachment.(world.SpriteAttachment); has_sprite {
+        render.release_bone_matrix_range_for_node(&self.render, handle)
+        // attachment_data_index already set to sprite_handle.index by staging
+      } else {
+        render.release_bone_matrix_range_for_node(&self.render, handle)
+        node_data.attachment_data_index = 0xFFFFFFFF
+      }
+      render.upload_node_data(&self.render, handle, &node_data)
+      entry.n += 1
+    }
+    if entry.n >= d.FRAMES_IN_FLIGHT {
+      append(&stale_handles, handle)
+    }
+  }
+  for handle in stale_handles {
+    delete_key(&self.world.staging.node_data, handle)
+  }
+  for handle, &entry in self.world.staging.mesh_updates {
+    if entry.n < d.FRAMES_IN_FLIGHT {
+      render.upload_mesh_data_raw(&self.render, handle, &entry.data)
+      entry.n += 1
+    }
+    if entry.n >= d.FRAMES_IN_FLIGHT {
+      append(&stale_meshes, handle)
+    }
+  }
+  for handle in stale_meshes {
+    delete_key(&self.world.staging.mesh_updates, handle)
+  }
+  for handle, &entry in self.world.staging.material_updates {
+    if entry.n < d.FRAMES_IN_FLIGHT {
+      render.upload_material_data_raw(&self.render, handle, &entry.data)
+      entry.n += 1
+    }
+    if entry.n >= d.FRAMES_IN_FLIGHT {
+      append(&stale_materials, handle)
+    }
+  }
+  for handle in stale_materials {
+    delete_key(&self.world.staging.material_updates, handle)
+  }
+  for handle, &entry in self.world.staging.bone_updates {
+    if entry.n < d.FRAMES_IN_FLIGHT {
+      bone_count := u32(len(entry.data))
+      if bone_count > 0 {
+        offset := render.ensure_bone_matrix_range_for_node(
+          &self.render,
+          handle,
+          bone_count,
+        )
+        if offset != 0xFFFFFFFF {
+          render.upload_bone_matrices(
+            &self.render,
+            self.frame_index,
+            offset,
+            entry.data[:],
+          )
+        }
+      }
+      entry.n += 1
+    }
+    if entry.n >= d.FRAMES_IN_FLIGHT {
+      append(&stale_bone_nodes, handle)
+    }
+  }
+  for handle in stale_bone_nodes {
+    if entry, ok := self.world.staging.bone_updates[handle]; ok {
+      delete(entry.data)
+    }
+    delete_key(&self.world.staging.bone_updates, handle)
+  }
+  for handle, &entry in self.world.staging.sprite_updates {
+    if entry.n < d.FRAMES_IN_FLIGHT {
+      render.upload_sprite_data(&self.render, handle, &entry.data)
+      entry.n += 1
+    }
+    if entry.n >= d.FRAMES_IN_FLIGHT {
+      append(&stale_sprites, handle)
+    }
+  }
+  for handle in stale_sprites {
+    delete_key(&self.world.staging.sprite_updates, handle)
+  }
+  for handle, &entry in self.world.staging.emitter_updates {
+    if entry.n < d.FRAMES_IN_FLIGHT {
+      render.upload_emitter_data(&self.render, handle, &entry.data)
+      entry.n += 1
+    }
+    if entry.n >= d.FRAMES_IN_FLIGHT {
+      append(&stale_emitters, handle)
+    }
+  }
+  for handle in stale_emitters {
+    delete_key(&self.world.staging.emitter_updates, handle)
+  }
+  for handle, &entry in self.world.staging.forcefield_updates {
+    if entry.n < d.FRAMES_IN_FLIGHT {
+      render.upload_forcefield_data(&self.render, handle, &entry.data)
+      entry.n += 1
+    }
+    if entry.n >= d.FRAMES_IN_FLIGHT {
+      append(&stale_forcefields, handle)
+    }
+  }
+  for handle in stale_forcefields {
+    delete_key(&self.world.staging.forcefield_updates, handle)
+  }
+  for handle, &entry in self.world.staging.light_updates {
+    if entry.n < d.FRAMES_IN_FLIGHT {
+      render.upload_light_data(&self.render, handle, &entry.data)
+      entry.n += 1
+    }
+    if entry.n >= d.FRAMES_IN_FLIGHT {
+      append(&stale_lights, handle)
+    }
+  }
+  for handle in stale_lights {
+    delete_key(&self.world.staging.light_updates, handle)
+  }
+}
+
 update :: proc(self: ^Engine) -> bool {
   context.user_ptr = self
   delta_time := get_delta_time(self)
@@ -475,10 +707,10 @@ update :: proc(self: ^Engine) -> bool {
   params := gpu.get(&self.render.particles.params_buffer, 0)
   params.delta_time = delta_time
   params.emitter_count = u32(
-    min(len(self.rm.emitters.entries), resources.MAX_EMITTERS),
+    min(len(self.world.emitters.entries), d.MAX_EMITTERS),
   )
   params.forcefield_count = u32(
-    min(len(self.rm.forcefields.entries), resources.MAX_FORCE_FIELDS),
+    min(len(self.world.forcefields.entries), d.MAX_FORCE_FIELDS),
   )
   if self.camera_controller_enabled && self.active_controller != nil {
     main_camera := get_main_camera(self)
@@ -509,16 +741,14 @@ update :: proc(self: ^Engine) -> bool {
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
-  world.update_node_animations(&self.world, &self.rm, delta_time)
+  world.update_node_animations(&self.world, delta_time)
   world.update_skeletal_animations(
     &self.world,
-    &self.rm,
     delta_time,
-    self.frame_index,
-    &self.gctx,
+    self.render.debug_draw_ik,
     &self.render.debug_draw,
   )
-  world.update_sprite_animations(&self.rm, delta_time)
+  world.update_sprite_animations(&self.world, delta_time)
   self.last_update_timestamp = time.now()
   return true
 }
@@ -530,10 +760,9 @@ shutdown :: proc(self: ^Engine) {
   if self.gctx.has_async_compute {
     gpu.free_compute_command_buffer(&self.gctx, self.compute_command_buffers[:])
   }
-  render.shutdown(&self.render, &self.gctx, &self.rm)
-  world.shutdown(&self.world, &self.gctx, &self.rm)
+  render.shutdown(&self.render, &self.gctx)
+  world.shutdown(&self.world)
   nav.shutdown(&self.nav_sys)
-  resources.shutdown(&self.rm, &self.gctx)
   gpu.swapchain_destroy(&self.swapchain, self.gctx.device)
   gpu.shutdown(&self.gctx)
   glfw.DestroyWindow(self.window)
@@ -560,27 +789,28 @@ populate_debug_ui :: proc(self: ^Engine) {
       &self.render.debug_ui.ctx,
       fmt.tprintf(
         "Textures %d",
-        len(self.rm.images_2d.entries) - len(self.rm.images_2d.free_indices),
+        render.active_texture_2d_count(&self.render),
       ),
     )
     mu.label(
       &self.render.debug_ui.ctx,
       fmt.tprintf(
         "Materials %d",
-        len(self.rm.materials.entries) - len(self.rm.materials.free_indices),
+        len(self.world.materials.entries) - len(self.world.materials.free_indices),
       ),
     )
     mu.label(
       &self.render.debug_ui.ctx,
       fmt.tprintf(
         "Meshes %d",
-        len(self.rm.meshes.entries) - len(self.rm.meshes.free_indices),
+        len(self.world.meshes.entries) - len(self.world.meshes.free_indices),
       ),
     )
     if main_camera := get_main_camera(self); main_camera != nil {
+      main_camera_gpu := &self.render.cameras_gpu[self.render.main_camera.index]
       main_stats := visibility.stats(
         &self.render.visibility,
-        main_camera,
+        main_camera_gpu,
         self.render.main_camera.index,
         self.frame_index,
       )
@@ -599,64 +829,73 @@ populate_debug_ui :: proc(self: ^Engine) {
 @(private)
 create_light_camera :: proc(
   engine: ^Engine,
-  light_handle: LightHandle,
+  light_handle: d.LightHandle,
 ) -> (
-  camera_handle: CameraHandle,
+  camera_handle: d.CameraHandle,
   ok: bool,
 ) #optional_ok {
-  light := cont.get(engine.rm.lights, light_handle) or_return
+  light := cont.get(engine.world.lights, light_handle) or_return
   // Only create cameras for lights that cast shadows
   if !light.cast_shadow do return {}, false
   #partial switch light.type {
   case .POINT:
     // Point lights use spherical cameras for omnidirectional shadows
     cam_handle, spherical_cam := cont.alloc(
-      &engine.rm.spherical_cameras,
-      SphereCameraHandle,
+      &engine.world.spherical_cameras,
+      d.SphereCameraHandle,
     ) or_return
-    init_result := resources.spherical_camera_init(
+    // Initialize CPU data
+    init_ok := world.spherical_camera_init(
       spherical_cam,
-      &engine.gctx,
-      &engine.rm,
-      resources.SHADOW_MAP_SIZE,
-      {0, 0, 0}, // center will be updated from light node
-      light.radius,
-      0.1, // near
-      light.radius, // far
-      .D32_SFLOAT,
-      resources.MAX_NODES_IN_SCENE,
+      d.SHADOW_MAP_SIZE,
+      radius = light.radius,
+      near = 0.1,
+      far = light.radius,
     )
-    if init_result != .SUCCESS {
-      cont.free(&engine.rm.spherical_cameras, cam_handle)
+    if !init_ok {
+      cont.free(&engine.world.spherical_cameras, cam_handle)
+      return {}, false
+    }
+    // Initialize GPU resources
+    cam_gpu := &engine.render.spherical_cameras_gpu[cam_handle.index]
+    gpu_result := render_camera.init_spherical_gpu(
+      &engine.gctx,
+      cam_gpu,
+      &engine.render.texture_manager,
+      d.SHADOW_MAP_SIZE,
+      .D32_SFLOAT,
+      d.MAX_NODES_IN_SCENE,
+    )
+    if gpu_result != .SUCCESS {
+      cont.free(&engine.world.spherical_cameras, cam_handle)
       return {}, false
     }
     // Allocate descriptors for the spherical camera
-    alloc_result := resources.spherical_camera_allocate_descriptors(
-      spherical_cam,
+    alloc_result := render_camera.allocate_descriptors_spherical(
       &engine.gctx,
-      &engine.rm,
+      cam_gpu,
       &engine.render.visibility.sphere_cam_descriptor_layout,
+      &engine.render.node_data_buffer,
+      &engine.render.mesh_data_buffer,
+      &engine.render.world_matrix_buffer,
+      &engine.render.spherical_camera_buffer,
     )
     if alloc_result != .SUCCESS {
-      cont.free(&engine.rm.spherical_cameras, cam_handle)
+      cont.free(&engine.world.spherical_cameras, cam_handle)
       return {}, false
     }
     // Update the light to reference this camera
     light.camera_handle = cam_handle
     light.camera_index = cam_handle.index
-    resources.update_light_gpu_data(&engine.rm, light_handle)
+    render.upload_light_data(&engine.render, light_handle, &light.data)
     return cam_handle, true
   case .DIRECTIONAL:
-    cam_handle, cam := cont.alloc(&engine.rm.cameras, CameraHandle) or_return
+    cam_handle, cam := cont.alloc(&engine.world.cameras, d.CameraHandle) or_return
     ortho_size := light.radius * 2.0
-    init_result := resources.camera_init_orthographic(
+    init_ok := world.camera_init_orthographic(
       cam,
-      &engine.gctx,
-      &engine.rm,
-      resources.SHADOW_MAP_SIZE,
-      resources.SHADOW_MAP_SIZE,
-      engine.swapchain.format.format,
-      .D32_SFLOAT,
+      d.SHADOW_MAP_SIZE,
+      d.SHADOW_MAP_SIZE,
       {.SHADOW},
       {0, 0, 0},
       {0, 0, -1},
@@ -665,39 +904,59 @@ create_light_camera :: proc(
       1.0,
       light.radius * 2.0,
     )
-    if init_result != .SUCCESS {
-      cont.free(&engine.rm.cameras, cam_handle)
+    if !init_ok {
+      cont.free(&engine.world.cameras, cam_handle)
       return {}, false
     }
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
-      alloc_result := resources.camera_allocate_descriptors(
-        &engine.gctx,
-        &engine.rm,
-        cam,
-        u32(frame),
-        &engine.render.visibility.normal_cam_descriptor_layout,
-        &engine.render.visibility.depth_reduce_descriptor_layout,
-      )
-      if alloc_result != .SUCCESS {
-        cont.free(&engine.rm.cameras, cam_handle)
-        return {}, false
-      }
+    cam_gpu := &engine.render.cameras_gpu[cam_handle.index]
+    descriptor_set := engine.render.textures_descriptor_set
+    set_descriptor :: proc(gctx: ^gpu.GPUContext, index: u32, view: vk.ImageView) {
+      desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
+      render.set_texture_2d_descriptor(gctx, desc_set, index, view)
+    }
+    context.user_ptr = &descriptor_set
+    gpu_result := render_camera.init_orthographic_gpu(
+      &engine.gctx,
+      cam_gpu,
+      cam,
+      &engine.render.texture_manager,
+      d.SHADOW_MAP_SIZE,
+      d.SHADOW_MAP_SIZE,
+      engine.swapchain.format.format,
+      vk.Format.D32_SFLOAT,
+      cam.enabled_passes,
+      d.MAX_NODES_IN_SCENE,
+    )
+    if gpu_result != .SUCCESS {
+      cont.free(&engine.world.cameras, cam_handle)
+      return {}, false
+    }
+    alloc_result := render_camera.allocate_descriptors(
+      &engine.gctx,
+      cam_gpu,
+      &engine.render.texture_manager,
+      &engine.render.visibility.normal_cam_descriptor_layout,
+      &engine.render.visibility.depth_reduce_descriptor_layout,
+      &engine.render.node_data_buffer,
+      &engine.render.mesh_data_buffer,
+      &engine.render.world_matrix_buffer,
+      &engine.render.camera_buffer,
+    )
+    if alloc_result != .SUCCESS {
+      cont.free(&engine.world.cameras, cam_handle)
+      return {}, false
     }
     light.camera_handle = cam_handle
     light.camera_index = cam_handle.index
-    resources.update_light_gpu_data(&engine.rm, light_handle)
+    render.upload_light_data(&engine.render, light_handle, &light.data)
     return cam_handle, true
   case .SPOT:
-    cam_handle, cam := cont.alloc(&engine.rm.cameras, CameraHandle) or_return
+    cam_handle, cam := cont.alloc(&engine.world.cameras, d.CameraHandle) or_return
     fov := light.angle_outer * 2.0
-    init_result := resources.camera_init(
+    init_ok := world.camera_init(
       cam,
-      &engine.gctx,
-      &engine.rm,
-      resources.SHADOW_MAP_SIZE,
-      resources.SHADOW_MAP_SIZE,
-      engine.swapchain.format.format,
-      .D32_SFLOAT,
+      d.SHADOW_MAP_SIZE,
+      d.SHADOW_MAP_SIZE,
       {.SHADOW},
       {0, 0, 0},
       {0, -1, 0},
@@ -705,27 +964,51 @@ create_light_camera :: proc(
       light.radius * 0.01,
       light.radius,
     )
-    if init_result != .SUCCESS {
-      cont.free(&engine.rm.cameras, cam_handle)
+    if !init_ok {
+      cont.free(&engine.world.cameras, cam_handle)
       return {}, false
     }
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
-      alloc_result := resources.camera_allocate_descriptors(
-        &engine.gctx,
-        &engine.rm,
-        cam,
-        u32(frame),
-        &engine.render.visibility.normal_cam_descriptor_layout,
-        &engine.render.visibility.depth_reduce_descriptor_layout,
-      )
-      if alloc_result != .SUCCESS {
-        cont.free(&engine.rm.cameras, cam_handle)
-        return {}, false
-      }
+    cam_gpu := &engine.render.cameras_gpu[cam_handle.index]
+    descriptor_set := engine.render.textures_descriptor_set
+    set_descriptor :: proc(gctx: ^gpu.GPUContext, index: u32, view: vk.ImageView) {
+      desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
+      render.set_texture_2d_descriptor(gctx, desc_set, index, view)
+    }
+    context.user_ptr = &descriptor_set
+    gpu_result := render_camera.init_gpu(
+      &engine.gctx,
+      cam_gpu,
+      cam,
+      &engine.render.texture_manager,
+      d.SHADOW_MAP_SIZE,
+      d.SHADOW_MAP_SIZE,
+      engine.swapchain.format.format,
+      vk.Format.D32_SFLOAT,
+      cam.enabled_passes,
+      d.MAX_NODES_IN_SCENE,
+    )
+    if gpu_result != .SUCCESS {
+      cont.free(&engine.world.cameras, cam_handle)
+      return {}, false
+    }
+    alloc_result := render_camera.allocate_descriptors(
+      &engine.gctx,
+      cam_gpu,
+      &engine.render.texture_manager,
+      &engine.render.visibility.normal_cam_descriptor_layout,
+      &engine.render.visibility.depth_reduce_descriptor_layout,
+      &engine.render.node_data_buffer,
+      &engine.render.mesh_data_buffer,
+      &engine.render.world_matrix_buffer,
+      &engine.render.camera_buffer,
+    )
+    if alloc_result != .SUCCESS {
+      cont.free(&engine.world.cameras, cam_handle)
+      return {}, false
     }
     light.camera_handle = cam_handle
     light.camera_index = cam_handle.index
-    resources.update_light_gpu_data(&engine.rm, light_handle)
+    render.upload_light_data(&engine.render, light_handle, &light.data)
     return cam_handle, true
   }
   return {}, false
@@ -733,8 +1016,8 @@ create_light_camera :: proc(
 
 @(private)
 ensure_light_cameras :: proc(engine: ^Engine) {
-  for light_handle in engine.rm.active_lights {
-    light := cont.get(engine.rm.lights, light_handle) or_continue
+  for light_handle in engine.world.active_lights {
+    light := cont.get(engine.world.lights, light_handle) or_continue
     if !light.cast_shadow || light.camera_handle.generation > 0 do continue
     create_light_camera(engine, light_handle) or_continue
   }
@@ -750,21 +1033,39 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   if main_camera := get_main_camera(engine); main_camera != nil {
-    resources.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
-    resources.camera_resize(
-      main_camera,
+    d.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
+    descriptor_set := engine.render.textures_descriptor_set
+    set_descriptor :: proc(gctx: ^gpu.GPUContext, index: u32, view: vk.ImageView) {
+      desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
+      render.set_texture_2d_descriptor(gctx, desc_set, index, view)
+    }
+    context.user_ptr = &descriptor_set
+    camera_gpu := &engine.render.cameras_gpu[engine.render.main_camera.index]
+    render_camera.resize_gpu(
       &engine.gctx,
-      &engine.rm,
+      camera_gpu,
+      main_camera,
+      &engine.render.texture_manager,
       engine.swapchain.extent.width,
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
       vk.Format.D32_SFLOAT,
     ) or_return
+    render_camera.allocate_descriptors(
+      &engine.gctx,
+      camera_gpu,
+      &engine.render.texture_manager,
+      &engine.render.visibility.normal_cam_descriptor_layout,
+      &engine.render.visibility.depth_reduce_descriptor_layout,
+      &engine.render.node_data_buffer,
+      &engine.render.mesh_data_buffer,
+      &engine.render.world_matrix_buffer,
+      &engine.render.camera_buffer,
+    ) or_return
   }
   render.resize(
     &engine.render,
     &engine.gctx,
-    &engine.rm,
     engine.swapchain.extent,
     engine.swapchain.format.format,
     get_window_dpi(engine.window),
@@ -783,9 +1084,18 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   mu.begin(&self.render.debug_ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
-  world.begin_frame(&self.world, &self.rm, 0.016, nil, self.frame_index)
+  world.begin_frame(&self.world, 0.016, nil)
+  sync_staging_to_gpu(self)
   update_visibility_node_count(&self.render, &self.world)
-  resources.update_light_camera(&self.rm, self.render.main_camera, self.frame_index)
+  render.update_light_camera(
+    &self.render,
+    self.world.cameras,
+    self.world.spherical_cameras,
+    self.world.lights,
+    self.world.active_lights[:],
+    self.render.main_camera,
+    self.frame_index,
+  )
   if self.pre_render_proc != nil {
     self.pre_render_proc(self)
   }
@@ -793,62 +1103,72 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.render,
     self.frame_index,
     &self.gctx,
-    &self.rm,
+    &self.world.cameras,
+    &self.world.spherical_cameras,
     command_buffer,
   ) or_return
-  for &entry, cam_index in self.rm.cameras.entries {
+  for &entry, cam_index in self.world.cameras.entries {
     if !entry.active do continue
     cam_handle := CameraHandle {
       index      = u32(cam_index),
       generation = entry.generation,
     }
     cam := &entry.item
-    if resources.PassType.GEOMETRY in cam.enabled_passes {
+    if d.PassType.GEOMETRY in cam.enabled_passes {
       render.record_geometry_pass(
         &self.render,
         self.frame_index,
         &self.gctx,
-        &self.rm,
+        self.world.cameras,
         cam_handle,
         command_buffer,
       )
     }
-    if resources.PassType.LIGHTING in cam.enabled_passes {
+    if d.PassType.LIGHTING in cam.enabled_passes {
       render.record_lighting_pass(
         &self.render,
         self.frame_index,
-        &self.rm,
+        self.world.cameras,
+        self.world.meshes,
+        self.world.lights,
+        self.world.active_lights[:],
         cam_handle,
         self.swapchain.format.format,
         command_buffer,
       )
     }
-    if resources.PassType.PARTICLES in cam.enabled_passes {
+    if d.PassType.PARTICLES in cam.enabled_passes {
       render.record_particles_pass(
         &self.render,
         self.frame_index,
-        &self.rm,
+        self.world.cameras,
         cam_handle,
         self.swapchain.format.format,
         command_buffer,
       )
     }
-    if resources.PassType.TRANSPARENCY in cam.enabled_passes {
+    if d.PassType.TRANSPARENCY in cam.enabled_passes {
       render.record_transparency_pass(
         &self.render,
         self.frame_index,
         &self.gctx,
-        &self.rm,
+        self.world.cameras,
         cam_handle,
         self.swapchain.format.format,
         command_buffer,
       )
     }
-    if resources.PassType.DEBUG_DRAW in cam.enabled_passes {
+    if d.PassType.DEBUG_DRAW in cam.enabled_passes {
       render.record_debug_draw_pass(
         &self.render,
         self.frame_index,
-        &self.rm,
+        self.world.cameras,
+        self.world.meshes,
+        &self.world.meshes,
+        proc(ctx: rawptr, handle: d.MeshHandle) {
+          mesh_pool := cast(^d.Pool(d.Mesh))ctx
+          render.free_mesh_geometry(mesh_pool, handle)
+        },
         cam_handle,
         command_buffer,
       )
@@ -857,7 +1177,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   render.record_post_process_pass(
     &self.render,
     self.frame_index,
-    &self.rm,
+    self.world.cameras,
     self.render.main_camera,
     self.swapchain.format.format,
     self.swapchain.extent,
@@ -869,7 +1189,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.render,
     self.frame_index,
     &self.gctx,
-    &self.rm,
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
     command_buffer,
@@ -885,7 +1204,8 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.render,
     self.frame_index,
     &self.gctx,
-    &self.rm,
+    &self.world.cameras,
+    &self.world.spherical_cameras,
     compute_cmd_buffer,
   ) or_return
   if self.gctx.has_async_compute {
@@ -960,7 +1280,10 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   ) or_return
   self.frame_index = alg.next(self.frame_index, FRAMES_IN_FLIGHT)
-  world.process_pending_deletions(&self.world, &self.rm, &self.gctx)
+  if world.process_pending_deletions(&self.world) {
+    world.purge_unused_resources(&self.world)
+    render.purge_unused_gpu_resources(&self.render, &self.gctx)
+  }
   self.last_render_timestamp = time.now()
   return .SUCCESS
 }

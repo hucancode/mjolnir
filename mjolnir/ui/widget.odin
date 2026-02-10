@@ -1,6 +1,6 @@
 package ui
 
-import res "../resources"
+import d "../data"
 import "core:log"
 
 HorizontalAlign :: enum {
@@ -30,7 +30,7 @@ Mesh2D :: struct {
   using widget_base: WidgetBase,
   vertices:          []Vertex2D,
   indices:           []u32,
-  texture:           res.Image2DHandle,
+  texture:           d.Image2DHandle,
   vertex_offset:     u32,
   index_offset:      u32,
 }
@@ -38,7 +38,7 @@ Mesh2D :: struct {
 Quad2D :: struct {
   using widget_base: WidgetBase,
   size:              [2]f32,
-  texture:           res.Image2DHandle,
+  texture:           d.Image2DHandle,
   color:             [4]u8,
 }
 

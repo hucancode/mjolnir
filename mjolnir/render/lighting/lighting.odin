@@ -1,9 +1,10 @@
 package lighting
 
 import cont "../../containers"
+import d "../../data"
 import "../../geometry"
 import "../../gpu"
-import "../../resources"
+import "../camera"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -51,58 +52,54 @@ LightPushConstant :: struct {
 
 begin_ambient_pass :: proc(
   self: ^Renderer,
-  camera_handle: resources.CameraHandle,
+  camera_gpu: ^camera.CameraGPU,
+  camera_cpu: ^d.Camera,
+  texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
-  color_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+  color_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
   gpu.begin_rendering(
     command_buffer,
-    camera.extent.width,
-    camera.extent.height,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
     nil,
     gpu.create_color_attachment(color_texture),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera.extent.width,
-    camera.extent.height,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
     flip_y = false,
   )
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.ambient_pipeline,
     self.ambient_pipeline_layout,
-    rm.camera_buffer.descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
-    rm.textures_descriptor_set, // set = 1 (bindless textures)
+    camera_gpu.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
+    texture_manager.textures_descriptor_set, // set = 1 (bindless textures)
   )
 }
 
 render_ambient :: proc(
   self: ^Renderer,
-  camera_handle: resources.CameraHandle,
+  camera_handle: d.CameraHandle,
+  camera_gpu: ^camera.CameraGPU,
   command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
   push := AmbientPushConstant {
     camera_index           = camera_handle.index,
     environment_index      = self.environment_map.index,
     brdf_lut_index         = self.brdf_lut.index,
-    position_texture_index = camera.attachments[.POSITION][frame_index].index,
-    normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
-    albedo_texture_index   = camera.attachments[.ALBEDO][frame_index].index,
-    metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
-    depth_texture_index    = camera.attachments[.DEPTH][frame_index].index,
+    position_texture_index = camera_gpu.attachments[.POSITION][frame_index].index,
+    normal_texture_index   = camera_gpu.attachments[.NORMAL][frame_index].index,
+    albedo_texture_index   = camera_gpu.attachments[.ALBEDO][frame_index].index,
+    metallic_texture_index = camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    emissive_texture_index = camera_gpu.attachments[.EMISSIVE][frame_index].index,
+    depth_texture_index    = camera_gpu.attachments[.DEPTH][frame_index].index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }
@@ -124,7 +121,14 @@ end_ambient_pass :: proc(command_buffer: vk.CommandBuffer) {
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
+  texture_manager: ^gpu.TextureManager,
+  camera_set_layout: vk.DescriptorSetLayout,
+  lights_set_layout: vk.DescriptorSetLayout,
+  world_matrix_set_layout: vk.DescriptorSetLayout,
+  spherical_camera_set_layout: vk.DescriptorSetLayout,
+  mesh_data_buffer: ^gpu.BindlessBuffer(d.MeshData),
+  textures_set_layout: vk.DescriptorSetLayout,
+  sphere_mesh, cone_mesh, triangle_mesh: d.MeshHandle,
   width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
@@ -138,8 +142,8 @@ init :: proc(
       stageFlags = {.FRAGMENT},
       size = size_of(AmbientPushConstant),
     },
-    rm.camera_buffer.set_layout,
-    rm.textures_set_layout,
+    camera_set_layout,
+    textures_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
@@ -184,9 +188,9 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   }
-  env_map, env_result := resources.create_texture_from_path(
+  env_map, env_result := shared.create_texture_2d_from_path(
     gctx,
-    rm,
+    texture_manager,
     "assets/Cannon_Exterior.hdr",
     .R32G32B32A32_SFLOAT,
     true,
@@ -200,11 +204,9 @@ init :: proc(
     self.environment_map = {} // Empty handle - renderer should handle gracefully
   }
   defer if ret != .SUCCESS {
-    if item, freed := cont.free(&rm.images_2d, self.environment_map); freed {
-      gpu.image_destroy(gctx.device, item)
-    }
+    shared.destroy_texture_2d(gctx, texture_manager, self.environment_map)
   }
-  environment_map := cont.get(rm.images_2d, self.environment_map)
+  environment_map := shared.get_texture_2d(texture_manager, self.environment_map)
   if environment_map != nil {
     self.environment_max_lod =
       f32(
@@ -217,15 +219,13 @@ init :: proc(
   } else {
     self.environment_max_lod = 0.0
   }
-  brdf_handle := resources.create_texture_from_data(
+  brdf_handle := shared.create_texture_2d_from_data(
     gctx,
-    rm,
+    texture_manager,
     TEXTURE_LUT_GGX,
   ) or_return
   defer if ret != .SUCCESS {
-    if item, freed := cont.free(&rm.images_2d, brdf_handle); freed {
-      gpu.image_destroy(gctx.device, item)
-    }
+    shared.destroy_texture_2d(gctx, texture_manager, brdf_handle)
   }
   self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0
@@ -236,11 +236,11 @@ init :: proc(
       stageFlags = {.VERTEX, .FRAGMENT},
       size = size_of(LightPushConstant),
     },
-    rm.camera_buffer.set_layout,
-    rm.textures_set_layout,
-    rm.lights_buffer.set_layout,
-    rm.world_matrix_buffer.set_layout,
-    rm.spherical_camera_buffer.set_layout,
+    camera_set_layout,
+    textures_set_layout,
+    lights_set_layout,
+    world_matrix_set_layout,
+    spherical_camera_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
@@ -305,30 +305,9 @@ init :: proc(
     vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
   }
   log.info("Lighting pipeline initialized successfully")
-  self.sphere_mesh = resources.create_mesh(
-    gctx,
-    rm,
-    geometry.make_sphere(segments = 64, rings = 64),
-  ) or_return
-  defer if ret != .SUCCESS {
-    resources.destroy_mesh(rm, self.sphere_mesh)
-  }
-  self.cone_mesh = resources.create_mesh(
-    gctx,
-    rm,
-    geometry.make_cone(segments = 128, height = 1, radius = 0.5),
-  ) or_return
-  defer if ret != .SUCCESS {
-    resources.destroy_mesh(rm, self.cone_mesh)
-  }
-  self.triangle_mesh = resources.create_mesh(
-    gctx,
-    rm,
-    geometry.make_fullscreen_triangle(),
-  ) or_return
-  defer if ret != .SUCCESS {
-    resources.destroy_mesh(rm, self.triangle_mesh)
-  }
+  self.sphere_mesh = sphere_mesh
+  self.cone_mesh = cone_mesh
+  self.triangle_mesh = triangle_mesh
   log.info("Light volume meshes initialized")
   return .SUCCESS
 }
@@ -336,18 +315,14 @@ init :: proc(
 shutdown :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
+  texture_manager: ^gpu.TextureManager,
 ) {
   vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
   self.ambient_pipeline_layout = 0
-  if item, freed := cont.free(&rm.images_2d, self.environment_map); freed {
-    gpu.image_destroy(gctx.device, item)
-  }
-  if item, freed := cont.free(&rm.images_2d, self.brdf_lut); freed {
-    gpu.image_destroy(gctx.device, item)
-  }
+  shared.destroy_texture_2d(gctx, texture_manager, self.environment_map)
+  shared.destroy_texture_2d(gctx, texture_manager, self.brdf_lut)
   vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
 }
@@ -359,15 +334,15 @@ BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 Renderer :: struct {
   ambient_pipeline:         vk.Pipeline,
   ambient_pipeline_layout:  vk.PipelineLayout,
-  environment_map:          resources.Image2DHandle,
-  brdf_lut:                 resources.Image2DHandle,
+  environment_map:          d.Image2DHandle,
+  brdf_lut:                 d.Image2DHandle,
   environment_max_lod:      f32,
   ibl_intensity:            f32,
   lighting_pipeline:        vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
-  sphere_mesh:              resources.MeshHandle,
-  cone_mesh:                resources.MeshHandle,
-  triangle_mesh:            resources.MeshHandle,
+  sphere_mesh:              d.MeshHandle,
+  cone_mesh:                d.MeshHandle,
+  triangle_mesh:            d.MeshHandle,
 }
 
 recreate_images :: proc(
@@ -382,68 +357,77 @@ recreate_images :: proc(
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera_handle: resources.CameraHandle,
+  camera_gpu: ^camera.CameraGPU,
+  camera_cpu: ^d.Camera,
+  texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
+  lights_descriptor_set: vk.DescriptorSet,
+  world_matrix_descriptor_set: vk.DescriptorSet,
+  spherical_camera_descriptor_set: vk.DescriptorSet,
   frame_index: u32,
 ) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
-  final_image := cont.get(
-    rm.images_2d,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+  final_image := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
-  depth_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.DEPTH][frame_index],
+  depth_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.DEPTH][frame_index],
   )
   gpu.begin_rendering(
     command_buffer,
-    camera.extent.width,
-    camera.extent.height,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
     gpu.create_depth_attachment(depth_texture, .LOAD, .DONT_CARE),
     gpu.create_color_attachment(final_image, .LOAD, .STORE, BG_BLUE_GRAY),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera.extent.width,
-    camera.extent.height,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
   )
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.lighting_pipeline,
     self.lighting_pipeline_layout,
-    rm.camera_buffer.descriptor_sets[frame_index], // set = 0 (per-frame cameras)
-    rm.textures_descriptor_set, // set = 1 (textures/samplers)
-    rm.lights_buffer.descriptor_set, // set = 2 (lights)
-    rm.world_matrix_buffer.descriptor_set, // set = 3 (world matrices)
-    rm.spherical_camera_buffer.descriptor_sets[frame_index], // set = 4 (per-frame spherical cameras)
+    camera_gpu.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame cameras)
+    texture_manager.textures_descriptor_set, // set = 1 (textures/samplers)
+    lights_descriptor_set, // set = 2 (lights)
+    world_matrix_descriptor_set, // set = 3 (world matrices)
+    spherical_camera_descriptor_set, // set = 4 (per-frame spherical cameras)
   )
 }
 
 render :: proc(
   self: ^Renderer,
-  camera_handle: resources.CameraHandle,
+  camera_handle: d.CameraHandle,
+  camera_gpu: ^camera.CameraGPU,
+  cameras_gpu: ^[d.MAX_CAMERAS]camera.CameraGPU,
+  spherical_cameras_gpu: ^[d.MAX_CAMERAS]camera.SphericalCameraGPU,
   command_buffer: vk.CommandBuffer,
-  rm: ^resources.Manager,
+  meshes: d.Pool(d.Mesh),
+  cameras: d.Pool(d.Camera),
+  lights: d.Pool(d.Light),
+  active_lights: []d.LightHandle,
+  world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
+  vertex_buffer: vk.Buffer,
+  index_buffer: vk.Buffer,
   frame_index: u32,
 ) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
   bind_and_draw_mesh :: proc(
-    mesh_handle: resources.MeshHandle,
+    mesh_handle: d.MeshHandle,
     command_buffer: vk.CommandBuffer,
-    rm: ^resources.Manager,
+    meshes: d.Pool(d.Mesh),
+    vertex_buffer: vk.Buffer,
+    index_buffer: vk.Buffer,
   ) {
-    mesh_ptr := cont.get(rm.meshes, mesh_handle)
+    mesh_ptr := cont.get(meshes, mesh_handle)
     if mesh_ptr == nil {
       log.errorf("Failed to get mesh for handle %v", mesh_handle)
       return
     }
     gpu.bind_vertex_index_buffers(
       command_buffer,
-      rm.vertex_buffer.buffer,
-      rm.index_buffer.buffer,
+      vertex_buffer,
+      index_buffer,
       vk.DeviceSize(
         mesh_ptr.vertex_allocation.offset * size_of(geometry.Vertex),
       ),
@@ -460,29 +444,31 @@ render :: proc(
   }
   push_constant := LightPushConstant {
     scene_camera_idx       = camera_handle.index,
-    position_texture_index = camera.attachments[.POSITION][frame_index].index,
-    normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
-    albedo_texture_index   = camera.attachments[.ALBEDO][frame_index].index,
-    metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
-    depth_texture_index    = camera.attachments[.DEPTH][frame_index].index,
-    input_image_index      = camera.attachments[.FINAL_IMAGE][frame_index].index,
+    position_texture_index = camera_gpu.attachments[.POSITION][frame_index].index,
+    normal_texture_index   = camera_gpu.attachments[.NORMAL][frame_index].index,
+    albedo_texture_index   = camera_gpu.attachments[.ALBEDO][frame_index].index,
+    metallic_texture_index = camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    emissive_texture_index = camera_gpu.attachments[.EMISSIVE][frame_index].index,
+    depth_texture_index    = camera_gpu.attachments[.DEPTH][frame_index].index,
+    input_image_index      = camera_gpu.attachments[.FINAL_IMAGE][frame_index].index,
   }
-  for handle in rm.active_lights {
-    light := cont.get(rm.lights, handle) or_continue
-    world_matrix := gpu.get(&rm.world_matrix_buffer.buffer, light.node_index)
+  for handle in active_lights {
+    light := cont.get(lights, handle) or_continue
+    world_matrix := gpu.get(&world_matrix_buffer.buffer, light.node_index)
     if world_matrix == nil do continue
     light_position := world_matrix[3].xyz
     shadow_map_index: u32 = 0xFFFFFFFF
     if light.cast_shadow {
       switch light.type {
       case .POINT:
-        if spherical_cam := cont.get(rm.spherical_cameras, light.camera_handle); spherical_cam != nil {
-          shadow_map_index = spherical_cam.depth_cube[frame_index].index
+        if light.camera_handle.index > 0 {
+          spherical_cam_gpu := &spherical_cameras_gpu[light.camera_handle.index]
+          shadow_map_index = spherical_cam_gpu.depth_cube[frame_index].index
         }
       case .DIRECTIONAL, .SPOT:
-        if shadow_cam := cont.get(rm.cameras, light.camera_handle); shadow_cam != nil {
-          shadow_map_index = shadow_cam.attachments[.DEPTH][frame_index].index
+        if shadow_cam := cont.get(cameras, light.camera_handle); shadow_cam != nil {
+          shadow_cam_gpu := &cameras_gpu[light.camera_handle.index]
+          shadow_map_index = shadow_cam_gpu.attachments[.DEPTH][frame_index].index
         }
       }
     }
@@ -506,15 +492,33 @@ render :: proc(
     case .POINT:
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
       vk.CmdSetCullMode(command_buffer, {.FRONT})
-      bind_and_draw_mesh(self.sphere_mesh, command_buffer, rm)
+      bind_and_draw_mesh(
+        self.sphere_mesh,
+        command_buffer,
+        meshes,
+        vertex_buffer,
+        index_buffer,
+      )
     case .DIRECTIONAL:
       vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
       vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(self.triangle_mesh, command_buffer, rm)
+      bind_and_draw_mesh(
+        self.triangle_mesh,
+        command_buffer,
+        meshes,
+        vertex_buffer,
+        index_buffer,
+      )
     case .SPOT:
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
       vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(self.cone_mesh, command_buffer, rm)
+      bind_and_draw_mesh(
+        self.cone_mesh,
+        command_buffer,
+        meshes,
+        vertex_buffer,
+        index_buffer,
+      )
     }
   }
 }

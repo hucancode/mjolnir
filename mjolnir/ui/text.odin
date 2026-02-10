@@ -1,7 +1,6 @@
 package ui
 
 import cont "../containers"
-import res "../resources"
 import "core:log"
 import "core:strings"
 import fs "vendor:fontstash"

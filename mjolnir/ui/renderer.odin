@@ -2,7 +2,8 @@ package ui
 
 import cont "../containers"
 import "../gpu"
-import res "../resources"
+import shared "../render/shared"
+import d "../data"
 import "core:log"
 import "core:math/linalg"
 import "core:mem"
@@ -27,11 +28,12 @@ Renderer :: struct {
   vertex_count:              u32,
   index_count:               u32,
   font_context:              ^fs.FontContext,
-  font_atlas:                res.Image2DHandle,
+  font_atlas:                d.Image2DHandle,
   font_atlas_width:          i32,
   font_atlas_height:         i32,
   font_atlas_dirty:          bool,
-  white_texture:             res.Image2DHandle,
+  white_texture:             d.Image2DHandle,
+  texture_manager:           ^gpu.TextureManager,
 }
 
 DrawBatch :: struct {
@@ -49,12 +51,14 @@ init_renderer :: proc(
   self: ^Renderer,
   sys: ^System,
   gctx: ^gpu.GPUContext,
-  rm: ^res.Manager,
+  texture_manager: ^gpu.TextureManager,
+  textures_set_layout: vk.DescriptorSetLayout,
   width: u32,
   height: u32,
   format: vk.Format,
 ) -> vk.Result {
   log.info("Initializing UI renderer...")
+  self.texture_manager = texture_manager
 
   // Create projection buffer
   self.proj_buffer = gpu.create_mutable_buffer(
@@ -132,7 +136,7 @@ init_renderer :: proc(
   // Create pipeline layout (set 0 = projection, set 1 = textures from resource manager)
   set_layouts := [2]vk.DescriptorSetLayout {
     self.projection_layout,
-    rm.textures_set_layout,
+    textures_set_layout,
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
     sType          = .PIPELINE_LAYOUT_CREATE_INFO,
@@ -152,22 +156,18 @@ init_renderer :: proc(
   // Create default white texture (1x1 white pixel)
   white_pixel := [4]u8{255, 255, 255, 255}
   {
-    handle, texture, ok := cont.alloc(&rm.images_2d, res.Image2DHandle)
-    if !ok {
-      log.error("Failed to allocate white texture handle")
-      return .ERROR_INITIALIZATION_FAILED
-    }
-
-    spec := gpu.image_spec_2d(1, 1, .R8G8B8A8_UNORM, {.SAMPLED})
-    img, result := gpu.image_create_with_data(gctx, spec, &white_pixel[0], 4)
+    handle, result := shared.create_texture_2d_from_pixels(
+      gctx,
+      self.texture_manager,
+      white_pixel[:],
+      1,
+      1,
+      .R8G8B8A8_UNORM,
+    )
     if result != .SUCCESS {
       log.errorf("Failed to create white texture: %v", result)
-      cont.free(&rm.images_2d, handle)
       return result
     }
-
-    texture^ = img
-    res.set_texture_2d_descriptor(gctx, rm, handle.index, texture.view)
     self.white_texture = handle
 
     // Set as default texture for UI widgets
@@ -241,7 +241,7 @@ init_renderer :: proc(
 
   // Force initial font atlas creation
   self.font_atlas_dirty = true
-  update_font_atlas(self, rm, gctx)
+  update_font_atlas(self, gctx)
 
   log.info("UI renderer initialized successfully")
   return .SUCCESS
@@ -433,27 +433,20 @@ create_pipeline :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext, rm: ^res.Manager) {
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   if self.font_context != nil {
     fs.Destroy(self.font_context)
     free(self.font_context)
   }
 
   // Clean up white texture
-  if self.white_texture != (res.Image2DHandle{}) {
-    if white_tex := cont.get(rm.images_2d, self.white_texture);
-       white_tex != nil {
-      gpu.image_destroy(gctx.device, white_tex)
-    }
-    cont.free(&rm.images_2d, self.white_texture)
+  if self.white_texture != (d.Image2DHandle{}) {
+    shared.destroy_texture_2d(gctx, self.texture_manager, self.white_texture)
   }
 
   // Clean up font atlas
-  if self.font_atlas != (res.Image2DHandle{}) {
-    if font_tex := cont.get(rm.images_2d, self.font_atlas); font_tex != nil {
-      gpu.image_destroy(gctx.device, font_tex)
-    }
-    cont.free(&rm.images_2d, self.font_atlas)
+  if self.font_atlas != (d.Image2DHandle{}) {
+    shared.destroy_texture_2d(gctx, self.texture_manager, self.font_atlas)
   }
 
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
@@ -470,7 +463,6 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext, rm: ^res.Manager) {
 render :: proc(
   self: ^Renderer,
   sys: ^System,
-  rm: ^res.Manager,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   width: u32,
@@ -483,7 +475,7 @@ render :: proc(
 
   // Update font atlas if dirty
   if self.font_atlas_dirty {
-    update_font_atlas(self, rm, gctx)
+    update_font_atlas(self, gctx)
     self.font_atlas_dirty = false
   }
   // Collect and sort widgets
@@ -740,7 +732,6 @@ fs_render_update :: proc(user_ptr: rawptr, rect: [4]f32, data: rawptr) {
 
 update_font_atlas :: proc(
   self: ^Renderer,
-  rm: ^res.Manager,
   gctx: ^gpu.GPUContext,
 ) {
   if !self.font_atlas_dirty do return
@@ -773,33 +764,21 @@ update_font_atlas :: proc(
     height,
     len(atlas_data),
   )
-  if self.font_atlas != (res.Image2DHandle{}) {
-    old_texture := cont.get(rm.images_2d, self.font_atlas) or_else nil
-    if old_texture != nil {
-      gpu.image_destroy(gctx.device, old_texture)
-    }
-    cont.free(&rm.images_2d, self.font_atlas)
+  if self.font_atlas != (d.Image2DHandle{}) {
+    shared.destroy_texture_2d(gctx, self.texture_manager, self.font_atlas)
   }
-  handle, texture, ok := cont.alloc(&rm.images_2d, res.Image2DHandle)
-  if !ok {
-    log.error("Failed to allocate font atlas texture handle")
-    return
-  }
-  spec := gpu.image_spec_2d(width, height, .R8_UNORM, {.SAMPLED})
-  data_size := vk.DeviceSize(len(atlas_data))
-  img, result := gpu.image_create_with_data(
+  handle, result := shared.create_texture_2d_from_pixels(
     gctx,
-    spec,
-    raw_data(atlas_data),
-    data_size,
+    self.texture_manager,
+    atlas_data,
+    int(width),
+    int(height),
+    .R8_UNORM,
   )
   if result != .SUCCESS {
     log.errorf("Failed to create font atlas image: %v", result)
-    cont.free(&rm.images_2d, handle)
     return
   }
-  texture^ = img
-  res.set_texture_2d_descriptor(gctx, rm, handle.index, texture.view)
   self.font_atlas = handle
   self.font_atlas_dirty = false
   log.infof(

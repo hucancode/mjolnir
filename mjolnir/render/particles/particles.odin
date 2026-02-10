@@ -1,8 +1,9 @@
 package particles
 
 import cont "../../containers"
+import d "../../data"
 import "../../gpu"
-import "../../resources"
+import "../camera"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -72,7 +73,6 @@ simulate :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   world_matrix_set: vk.DescriptorSet,
-  rm: ^resources.Manager,
 ) {
   params_ptr := gpu.get(&self.params_buffer)
   counter_ptr := gpu.get(&self.particle_count_buffer)
@@ -87,7 +87,7 @@ simulate :: proc(
     world_matrix_set,
   )
   // One thread per emitter (local_size_x = 64)
-  vk.CmdDispatch(command_buffer, u32(resources.MAX_EMITTERS + 63) / 64, 1, 1)
+  vk.CmdDispatch(command_buffer, u32(d.MAX_EMITTERS + 63) / 64, 1, 1)
   // Barrier to ensure emission is complete before compaction
   gpu.memory_barrier(
     command_buffer,
@@ -112,7 +112,7 @@ simulate :: proc(
     self.compute_pipeline_layout,
     self.compute_descriptor_set,
     self.forcefield_bindless_descriptor_set,
-    rm.world_matrix_buffer.descriptor_set,
+    world_matrix_set,
   )
   vk.CmdDispatch(
     command_buffer,
@@ -195,7 +195,14 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  rm: ^resources.Manager,
+  texture_manager: ^gpu.TextureManager,
+  camera_set_layout: vk.DescriptorSetLayout,
+  emitter_set_layout: vk.DescriptorSetLayout,
+  forcefield_set_layout: vk.DescriptorSetLayout,
+  world_matrix_set_layout: vk.DescriptorSetLayout,
+  emitter_descriptor_set: vk.DescriptorSet,
+  forcefield_descriptor_set: vk.DescriptorSet,
+  textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -227,9 +234,9 @@ init :: proc(
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
   }
-  self.emitter_bindless_descriptor_set = rm.emitter_buffer.descriptor_set
-  self.forcefield_bindless_descriptor_set = rm.forcefield_buffer.descriptor_set
-  create_emitter_pipeline(gctx, self, rm) or_return
+  self.emitter_bindless_descriptor_set = emitter_descriptor_set
+  self.forcefield_bindless_descriptor_set = forcefield_descriptor_set
+  create_emitter_pipeline(gctx, self, emitter_set_layout, world_matrix_set_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
       gctx.device,
@@ -249,7 +256,7 @@ init :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
     vk.DestroyPipeline(gctx.device, self.compact_pipeline, nil)
   }
-  create_compute_pipeline(gctx, self, rm) or_return
+  create_compute_pipeline(gctx, self, forcefield_set_layout, world_matrix_set_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
       gctx.device,
@@ -259,7 +266,13 @@ init :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
     vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
   }
-  create_render_pipeline(gctx, self, rm) or_return
+  create_render_pipeline(
+    gctx,
+    self,
+    texture_manager,
+    camera_set_layout,
+    textures_set_layout,
+  ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
     vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
@@ -270,7 +283,8 @@ init :: proc(
 create_emitter_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  rm: ^resources.Manager,
+  emitter_set_layout: vk.DescriptorSetLayout,
+  world_matrix_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -283,9 +297,9 @@ create_emitter_pipeline :: proc(
   self.emitter_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     nil,
-    rm.emitter_buffer.set_layout,
+    emitter_set_layout,
     self.emitter_descriptor_set_layout,
-    rm.world_matrix_buffer.set_layout,
+    world_matrix_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
@@ -326,7 +340,8 @@ create_emitter_pipeline :: proc(
 create_compute_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  rm: ^resources.Manager,
+  forcefield_set_layout: vk.DescriptorSetLayout,
+  world_matrix_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -347,8 +362,8 @@ create_compute_pipeline :: proc(
     gctx,
     nil,
     self.compute_descriptor_set_layout,
-    rm.forcefield_buffer.set_layout,
-    rm.world_matrix_buffer.set_layout,
+    forcefield_set_layout,
+    world_matrix_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
@@ -484,26 +499,28 @@ create_compact_pipeline :: proc(
 create_render_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  rm: ^resources.Manager,
+  texture_manager: ^gpu.TextureManager,
+  camera_set_layout: vk.DescriptorSetLayout,
+  textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
   self.render_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange{stageFlags = {.VERTEX}, size = size_of(u32)},
-    rm.camera_buffer.set_layout,
-    rm.textures_set_layout,
+    camera_set_layout,
+    textures_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
   }
-  default_texture_handle := resources.create_texture_from_data(
+  default_texture_handle := shared.create_texture_2d_from_data(
     gctx,
-    rm,
+    texture_manager,
     TEXTURE_BLACK_CIRCLE,
   ) or_return
   defer if ret != .SUCCESS {
-    resources.destroy_texture(gctx.device, rm, default_texture_handle)
+    shared.destroy_texture_2d(gctx, texture_manager, default_texture_handle)
   }
   self.default_texture_index = default_texture_handle.index
   vertex_binding := vk.VertexInputBindingDescription {
@@ -588,53 +605,50 @@ create_render_pipeline :: proc(
 begin_pass :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  camera_handle: resources.CameraHandle,
-  rm: ^resources.Manager,
+  camera_gpu: ^camera.CameraGPU,
+  camera_cpu: ^d.Camera,
+  texture_manager: ^gpu.TextureManager,
   frame_index: u32,
 ) {
-  camera := cont.get(rm.cameras, camera_handle)
-  if camera == nil do return
-  color_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+  color_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Particle renderer missing color attachment")
     return
   }
-  depth_texture := cont.get(
-    rm.images_2d,
-    camera.attachments[.DEPTH][frame_index],
+  depth_texture := gpu.get_texture_2d(texture_manager,
+    camera_gpu.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
     log.error("Particle renderer missing depth attachment")
     return
   }
-  extent := camera.extent
   gpu.begin_rendering(
     command_buffer,
-    extent.width,
-    extent.height,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(command_buffer, extent.width, extent.height)
+  gpu.set_viewport_scissor(command_buffer, camera_cpu.extent[0], camera_cpu.extent[1])
 }
 
 render :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
+  camera_gpu: ^camera.CameraGPU,
   camera_index: u32,
-  rm: ^resources.Manager,
-  frame_index: u32 = 0,
+  frame_index: u32,
+  textures_descriptor_set: vk.DescriptorSet,
 ) {
   // Use indirect draw - GPU handles the count
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.render_pipeline,
     self.render_pipeline_layout,
-    rm.camera_buffer.descriptor_sets[frame_index],
-    rm.textures_descriptor_set,
+    camera_gpu.camera_buffer_descriptor_sets[frame_index],
+    textures_descriptor_set,
   )
   camera_idx := camera_index
   vk.CmdPushConstants(

@@ -1,12 +1,12 @@
 package world
 
 import cont "../containers"
-import "../resources"
+import d "../data"
 import "core:log"
 import "core:slice"
 
 Actor :: struct($T: typeid) {
-  node_handle:  resources.NodeHandle,
+  node_handle:  d.NodeHandle,
   data:         T,
   tick_proc:    proc(actor: ^Actor(T), ctx: ^ActorContext, dt: f32),
   tick_enabled: bool,
@@ -15,13 +15,12 @@ Actor :: struct($T: typeid) {
 ActorHandle :: distinct cont.Handle
 
 ActorPool :: struct($T: typeid) {
-  actors:    resources.Pool(Actor(T)),
+  actors:    d.Pool(Actor(T)),
   tick_list: [dynamic]ActorHandle,
 }
 
 ActorContext :: struct {
   world:      ^World,
-  rm:         ^resources.Manager,
   delta_time: f32,
   game_state: rawptr,
 }
@@ -37,7 +36,7 @@ actor_pool_destroy :: proc(pool: ^ActorPool($T)) {
 
 actor_alloc :: proc(
   pool: ^ActorPool($T),
-  node_handle: resources.NodeHandle,
+  node_handle: d.NodeHandle,
 ) -> (
   handle: ActorHandle,
   ok: bool,
@@ -117,7 +116,7 @@ ActorPoolEntry :: struct {
   tick_fn:    proc(pool_ptr: rawptr, ctx: ^ActorContext),
   alloc_fn:   proc(
     pool_ptr: rawptr,
-    node_handle: resources.NodeHandle,
+    node_handle: d.NodeHandle,
   ) -> (
     ActorHandle,
     bool,
