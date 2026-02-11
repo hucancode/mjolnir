@@ -56,11 +56,9 @@ layout(push_constant) uniform PushConstant {
     uint albedo_texture_index;
     uint metallic_texture_index;
     uint emissive_texture_index;
-    uint depth_texture_index;
-    vec4 light_position;
     uint input_image_index;
+    vec4 light_position;
     uint shadow_map_index;
-    uint padding[2];
 };
 
 void main() {

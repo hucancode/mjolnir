@@ -30,7 +30,6 @@ AmbientPushConstant :: struct {
   albedo_texture_index:   u32,
   metallic_texture_index: u32,
   emissive_texture_index: u32,
-  depth_texture_index:    u32,
   environment_max_lod:    f32,
   ibl_intensity:          f32,
 }
@@ -43,11 +42,9 @@ LightPushConstant :: struct {
   albedo_texture_index:   u32,
   metallic_texture_index: u32,
   emissive_texture_index: u32,
-  depth_texture_index:    u32,
-  light_position:         [4]f32,
   input_image_index:      u32,
+  light_position:         [4]f32,
   shadow_map_index:       u32,
-  padding:                [2]u32,
 }
 
 begin_ambient_pass :: proc(
@@ -99,7 +96,6 @@ render_ambient :: proc(
     albedo_texture_index   = camera_gpu.attachments[.ALBEDO][frame_index].index,
     metallic_texture_index = camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index].index,
     emissive_texture_index = camera_gpu.attachments[.EMISSIVE][frame_index].index,
-    depth_texture_index    = camera_gpu.attachments[.DEPTH][frame_index].index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }
@@ -509,7 +505,6 @@ render :: proc(
     albedo_texture_index   = camera_gpu.attachments[.ALBEDO][frame_index].index,
     metallic_texture_index = camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index].index,
     emissive_texture_index = camera_gpu.attachments[.EMISSIVE][frame_index].index,
-    depth_texture_index    = camera_gpu.attachments[.DEPTH][frame_index].index,
     input_image_index      = camera_gpu.attachments[.FINAL_IMAGE][frame_index].index,
   }
   for handle in active_lights {
