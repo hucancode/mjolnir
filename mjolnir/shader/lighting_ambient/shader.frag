@@ -45,7 +45,6 @@ layout(push_constant) uniform AmbientPushConstant {
     uint albedo_texture_index;
     uint metallic_texture_index;
     uint emissive_texture_index;
-    uint depth_texture_index;
     float environment_max_lod;
     float ibl_intensity;
 };

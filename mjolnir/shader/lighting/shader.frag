@@ -71,11 +71,9 @@ layout(push_constant) uniform PushConstant {
     uint albedo_texture_index;
     uint metallic_texture_index;
     uint emissive_texture_index;
-    uint depth_texture_index;
-    vec4 light_position;
     uint input_image_index;
+    vec4 light_position;
     uint shadow_map_index;
-    uint padding[2];
 };
 
 // Convert a direction vector to equirectangular UV coordinates
@@ -262,7 +260,6 @@ void main() {
     Camera camera = camera_buffer.cameras[scene_camera_idx];
     vec2 uv = (gl_FragCoord.xy / camera.viewport_params.xy);
     vec3 position = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz;
-    float depth = texture(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).r;
     vec3 normal = normalize(texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz * 2.0 - 1.0);
     vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rgb;
     vec2 mr = texture(sampler2D(textures[metallic_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rg;
