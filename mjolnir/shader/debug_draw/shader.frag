@@ -1,9 +1,13 @@
 #version 450
 
-layout(location = 0) in vec4 inColor;
-layout(location = 1) flat in uint inStyle;
-
 layout(location = 0) out vec4 outColor;
+
+layout(push_constant) uniform PushConstants {
+    mat4 transform;
+    vec4 color;
+    uint camera_index;
+    uint style;
+};
 
 // Simple hash function for pseudo-random color generation
 float hash(uint x) {
@@ -19,16 +23,16 @@ vec3 hsv_to_rgb(vec3 hsv) {
 }
 
 void main() {
-    if (inStyle == 1u) {
+    if (style == 1u) {
         // Random color mode - generate color from gl_PrimitiveID
         uint seed = uint(gl_PrimitiveID);
         float h = hash(seed);
         float s = 0.7 + hash(seed + 1u) * 0.3;
         float v = 0.8 + hash(seed + 2u) * 0.2;
         vec3 rgb = hsv_to_rgb(vec3(h, s, v));
-        outColor = vec4(rgb, inColor.a);
+        outColor = vec4(rgb, color.a);
     } else {
         // Uniform color or wireframe mode
-        outColor = inColor;
+        outColor = color;
     }
 }

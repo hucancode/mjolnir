@@ -15,7 +15,6 @@ import cam "camera"
 import "debug_draw"
 import "debug_ui"
 import "geometry"
-import "light"
 import "lighting"
 import "particles"
 import "post_process"
@@ -45,12 +44,8 @@ Manager :: struct {
   main_camera:             d.CameraHandle,
   cameras:                 d.Pool(camera.Camera),
   spherical_cameras:       d.Pool(camera.SphericalCamera),
-  lights:                  d.Pool(light.Light),
-  materials:               d.Pool(Material),
+  lights:                  d.Pool(Light),
   meshes:                  d.Pool(Mesh),
-  emitters:                d.Pool(Emitter),
-  forcefields:             d.Pool(ForceField),
-  sprites:                 d.Pool(Sprite),
   visibility:              visibility.System,
   textures_set_layout:     vk.DescriptorSetLayout,
   textures_descriptor_set: vk.DescriptorSet,
@@ -73,14 +68,14 @@ Manager :: struct {
     cam.SphericalCameraData,
     FRAMES_IN_FLIGHT,
   ),
-  material_buffer:         gpu.BindlessBuffer(MaterialData),
+  material_buffer:         gpu.BindlessBuffer(Material),
   world_matrix_buffer:     gpu.BindlessBuffer(matrix[4, 4]f32),
-  node_data_buffer:        gpu.BindlessBuffer(rd.NodeData),
+  node_data_buffer:        gpu.BindlessBuffer(NodeData),
   mesh_data_buffer:        gpu.BindlessBuffer(MeshData),
-  emitter_buffer:          gpu.BindlessBuffer(EmitterData),
-  forcefield_buffer:       gpu.BindlessBuffer(ForceFieldData),
-  sprite_buffer:           gpu.BindlessBuffer(SpriteData),
-  lights_buffer:           gpu.BindlessBuffer(light.LightData),
+  emitter_buffer:          gpu.BindlessBuffer(Emitter),
+  forcefield_buffer:       gpu.BindlessBuffer(ForceField),
+  sprite_buffer:           gpu.BindlessBuffer(Sprite),
+  lights_buffer:           gpu.BindlessBuffer(Light),
   vertex_skinning_buffer:  gpu.ImmutableBindlessBuffer(geo.SkinningData),
   vertex_buffer:           gpu.ImmutableBuffer(geo.Vertex),
   index_buffer:            gpu.ImmutableBuffer(u32),
@@ -276,27 +271,6 @@ destroy_geometry_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   cont.slab_destroy(&self.vertex_slab)
   cont.slab_destroy(&self.index_slab)
 }
-
-@(private)
-sync_existing_resource_data :: proc(
-  self: ^Manager,
-) {
-  for &entry, i in self.materials.entries do if entry.active {
-    handle := d.MaterialHandle {
-      index      = u32(i),
-      generation = entry.generation,
-    }
-    upload_material_data(self, handle, &entry.item)
-  }
-  for &entry, i in self.meshes.entries do if entry.active {
-    handle := d.MeshHandle {
-      index      = u32(i),
-      generation = entry.generation,
-    }
-    upload_mesh_data(self, handle, &entry.item)
-  }
-}
-
 
 @(private)
 init_bone_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
@@ -583,39 +557,19 @@ ensure_spherical_camera_slot :: proc(
   return &entry.item
 }
 
-@(private)
+// @(private)
 ensure_light_slot :: proc(
   self: ^Manager,
   handle: d.LightHandle,
-) -> ^light.Light {
+) -> ^d.Light {
   for u32(len(self.lights.entries)) <= handle.index {
-    append(&self.lights.entries, cont.Entry(light.Light) {})
+    append(&self.lights.entries, cont.Entry(Light) {})
   }
   entry := &self.lights.entries[handle.index]
   entry.generation = handle.generation
   entry.active = true
   if i, ok := slice.linear_search(self.lights.free_indices[:], handle.index); ok {
     unordered_remove(&self.lights.free_indices, i)
-  }
-  return &entry.item
-}
-
-@(private)
-ensure_material_slot :: proc(
-  self: ^Manager,
-  handle: d.MaterialHandle,
-) -> ^Material {
-  for u32(len(self.materials.entries)) <= handle.index {
-    append(&self.materials.entries, cont.Entry(Material) {})
-  }
-  entry := &self.materials.entries[handle.index]
-  entry.generation = handle.generation
-  entry.active = true
-  if i, ok := slice.linear_search(
-    self.materials.free_indices[:],
-    handle.index,
-  ); ok {
-    unordered_remove(&self.materials.free_indices, i)
   }
   return &entry.item
 }
@@ -630,60 +584,6 @@ ensure_mesh_slot :: proc(self: ^Manager, handle: d.MeshHandle) -> ^Mesh {
   entry.active = true
   if i, ok := slice.linear_search(self.meshes.free_indices[:], handle.index); ok {
     unordered_remove(&self.meshes.free_indices, i)
-  }
-  return &entry.item
-}
-
-@(private)
-ensure_sprite_slot :: proc(self: ^Manager, handle: d.SpriteHandle) -> ^Sprite {
-  for u32(len(self.sprites.entries)) <= handle.index {
-    append(&self.sprites.entries, cont.Entry(Sprite) {})
-  }
-  entry := &self.sprites.entries[handle.index]
-  entry.generation = handle.generation
-  entry.active = true
-  if i, ok := slice.linear_search(self.sprites.free_indices[:], handle.index); ok {
-    unordered_remove(&self.sprites.free_indices, i)
-  }
-  return &entry.item
-}
-
-@(private)
-ensure_emitter_slot :: proc(
-  self: ^Manager,
-  handle: d.EmitterHandle,
-) -> ^Emitter {
-  for u32(len(self.emitters.entries)) <= handle.index {
-    append(&self.emitters.entries, cont.Entry(Emitter) {})
-  }
-  entry := &self.emitters.entries[handle.index]
-  entry.generation = handle.generation
-  entry.active = true
-  if i, ok := slice.linear_search(
-    self.emitters.free_indices[:],
-    handle.index,
-  ); ok {
-    unordered_remove(&self.emitters.free_indices, i)
-  }
-  return &entry.item
-}
-
-@(private)
-ensure_forcefield_slot :: proc(
-  self: ^Manager,
-  handle: d.ForceFieldHandle,
-) -> ^ForceField {
-  for u32(len(self.forcefields.entries)) <= handle.index {
-    append(&self.forcefields.entries, cont.Entry(ForceField) {})
-  }
-  entry := &self.forcefields.entries[handle.index]
-  entry.generation = handle.generation
-  entry.active = true
-  if i, ok := slice.linear_search(
-    self.forcefields.free_indices[:],
-    handle.index,
-  ); ok {
-    unordered_remove(&self.forcefields.free_indices, i)
   }
   return &entry.item
 }
@@ -713,26 +613,6 @@ sync_spherical_camera_from_world :: proc(
   dst^ = world_camera^
 }
 
-sync_light_from_world :: proc(
-  self: ^Manager,
-  handle: d.LightHandle,
-  world_light: ^light.Light,
-) {
-  dst := ensure_light_slot(self, handle)
-  dst^ = world_light^
-  upload_light_data(self, handle, &dst.data)
-}
-
-sync_material_from_world :: proc(
-  self: ^Manager,
-  handle: d.MaterialHandle,
-  world_material: ^Material,
-) {
-  dst := ensure_material_slot(self, handle)
-  dst^ = world_material^
-  upload_material_data(self, handle, dst)
-}
-
 sync_mesh_from_world :: proc(
   self: ^Manager,
   handle: d.MeshHandle,
@@ -743,35 +623,6 @@ sync_mesh_from_world :: proc(
   upload_mesh_data(self, handle, dst)
 }
 
-sync_sprite_from_world :: proc(
-  self: ^Manager,
-  handle: d.SpriteHandle,
-  world_sprite: ^Sprite,
-) {
-  dst := ensure_sprite_slot(self, handle)
-  dst^ = world_sprite^
-  upload_sprite_data(self, handle, &dst.data)
-}
-
-sync_emitter_from_world :: proc(
-  self: ^Manager,
-  handle: d.EmitterHandle,
-  world_emitter: ^Emitter,
-) {
-  dst := ensure_emitter_slot(self, handle)
-  dst^ = world_emitter^
-  upload_emitter_data(self, handle, &dst.data)
-}
-
-sync_forcefield_from_world :: proc(
-  self: ^Manager,
-  handle: d.ForceFieldHandle,
-  world_forcefield: ^ForceField,
-) {
-  dst := ensure_forcefield_slot(self, handle)
-  dst^ = world_forcefield^
-  upload_forcefield_data(self, handle, &dst.data)
-}
 
 clear_mesh :: proc(self: ^Manager, handle: d.MeshHandle) {
   if u32(len(self.meshes.entries)) <= handle.index do return
@@ -780,46 +631,6 @@ clear_mesh :: proc(self: ^Manager, handle: d.MeshHandle) {
   free_mesh_geometry(self, handle)
   zero_mesh_data: MeshData
   upload_mesh_data_raw(self, handle, &zero_mesh_data)
-}
-
-clear_material :: proc(self: ^Manager, handle: d.MaterialHandle) {
-  if u32(len(self.materials.entries)) <= handle.index do return
-  entry := &self.materials.entries[handle.index]
-  if !entry.active || entry.generation != handle.generation do return
-  entry.active = false
-  append(&self.materials.free_indices, handle.index)
-  zero_material_data: MaterialData
-  upload_material_data_raw(self, handle, &zero_material_data)
-}
-
-clear_sprite :: proc(self: ^Manager, handle: d.SpriteHandle) {
-  if u32(len(self.sprites.entries)) <= handle.index do return
-  entry := &self.sprites.entries[handle.index]
-  if !entry.active || entry.generation != handle.generation do return
-  entry.active = false
-  append(&self.sprites.free_indices, handle.index)
-  zero_sprite_data: SpriteData
-  upload_sprite_data(self, handle, &zero_sprite_data)
-}
-
-clear_emitter :: proc(self: ^Manager, handle: d.EmitterHandle) {
-  if u32(len(self.emitters.entries)) <= handle.index do return
-  entry := &self.emitters.entries[handle.index]
-  if !entry.active || entry.generation != handle.generation do return
-  entry.active = false
-  append(&self.emitters.free_indices, handle.index)
-  zero_emitter_data: EmitterData
-  upload_emitter_data(self, handle, &zero_emitter_data)
-}
-
-clear_forcefield :: proc(self: ^Manager, handle: d.ForceFieldHandle) {
-  if u32(len(self.forcefields.entries)) <= handle.index do return
-  entry := &self.forcefields.entries[handle.index]
-  if !entry.active || entry.generation != handle.generation do return
-  entry.active = false
-  append(&self.forcefields.free_indices, handle.index)
-  zero_forcefield_data: ForceFieldData
-  upload_forcefield_data(self, handle, &zero_forcefield_data)
 }
 
 record_compute_commands :: proc(
@@ -870,11 +681,7 @@ init :: proc(
   cont.init(&self.cameras, d.MAX_CAMERAS)
   cont.init(&self.spherical_cameras, d.MAX_CAMERAS)
   cont.init(&self.lights, d.MAX_LIGHTS)
-  cont.init(&self.materials, d.MAX_MATERIALS)
   cont.init(&self.meshes, d.MAX_MESHES)
-  cont.init(&self.emitters, d.MAX_EMITTERS)
-  cont.init(&self.forcefields, d.MAX_FORCE_FIELDS)
-  cont.init(&self.sprites, d.MAX_SPRITES)
   // Initialize texture tracking maps
   self.texture_2d_tracking = make(map[gpu.Texture2DHandle]TextureTracking)
   self.texture_cube_tracking = make(map[gpu.TextureCubeHandle]TextureTracking)
@@ -896,7 +703,6 @@ init :: proc(
   defer if ret != .SUCCESS {
     shutdown_scene_buffers(self, gctx)
   }
-  sync_existing_resource_data(self)
   init_bindless_layouts(self, gctx) or_return
   defer if ret != .SUCCESS {
     shutdown_bindless_layouts(self, gctx)
@@ -1070,16 +876,8 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   delete(self.spherical_cameras.free_indices)
   delete(self.lights.entries)
   delete(self.lights.free_indices)
-  delete(self.materials.entries)
-  delete(self.materials.free_indices)
   delete(self.meshes.entries)
   delete(self.meshes.free_indices)
-  delete(self.emitters.entries)
-  delete(self.emitters.free_indices)
-  delete(self.forcefields.entries)
-  delete(self.forcefields.free_indices)
-  delete(self.sprites.entries)
-  delete(self.sprites.free_indices)
 }
 
 resize :: proc(

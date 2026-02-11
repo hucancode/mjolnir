@@ -41,18 +41,14 @@ The engine is organized into sub-systems with clear responsibility boundaries:
 - **Level Manager**: `mjolnir/level_manager/` - Async/blocking level transitions with loading screen support
 
 **Higher Level Systems:**
-- **Resources**: `mjolnir/resources/` - Data management (Mesh, Material, Node, Skin, Light, Camera, etc.)
-  + Handle-based system with generational handle pools
-  + Reference counting for shared resources (meshes, materials, textures)
-  + Builtin materials and primitive meshes for quick prototyping
-- **Render**: Rendering sub-systems that depend on Resources
+- **Render**: Rendering sub-systems
   + Geometry Renderer
   + Lighting Renderer
   + Transparency Renderer
   + Particle Renderer
   + Post-process Renderer
-- **World**: `mjolnir/world/` - Scene graph, visibility management, GLTF loading
-  + Depends on Resources for data access
+  + Culling
+- **World**: `mjolnir/world/` - Scene graph, GLTF loading
 
 ### Rendering Pipeline
 The engine uses a deferred rendering with multiple passes:
@@ -97,7 +93,6 @@ The engine uses a deferred rendering with multiple passes:
 - **Animation**: `mjolnir/animation/` (skeletal animation)
 - **Navigation**: `mjolnir/navigation/` (Recast + Detour integration)
 - **Physics**: `mjolnir/physics/` (rigid body, collision, character controllers)
-- **Resources**: `mjolnir/resources/` (handles, materials, meshes, nodes, lights, cameras, tracking)
 - **Level Manager**: `mjolnir/level_manager/` (level transitions, loading screens)
 - **World**: `mjolnir/world/` (scene graph, visibility, GLTF loading)
 - **Shaders**: `mjolnir/shader/{shader_name}/`

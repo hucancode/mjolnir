@@ -20,19 +20,12 @@ MaterialType :: enum {
   TRANSPARENT,
 }
 
-MaterialData :: struct {
-	albedo_index:             u32,
-	metallic_roughness_index: u32,
-	normal_index:             u32,
-	emissive_index:           u32,
+Material :: struct {
+	features:                 ShaderFeatureSet,
+	base_color_factor:        [4]f32,
 	metallic_value:           f32,
 	roughness_value:          f32,
 	emissive_value:           f32,
-	features:                 ShaderFeatureSet,
-	base_color_factor:        [4]f32,
-}
-Material :: struct {
-	using data:         MaterialData,
 	type:               MaterialType,
 	albedo:             Image2DHandle,
 	metallic_roughness: Image2DHandle,
@@ -40,16 +33,6 @@ Material :: struct {
 	emissive:           Image2DHandle,
 	occlusion:          Image2DHandle,
 	using meta:         ResourceMetadata,
-}
-
-prepare_material_data :: proc(material: ^Material) {
-	material.albedo_index = min(MAX_TEXTURES - 1, material.albedo.index)
-	material.metallic_roughness_index = min(
-		MAX_TEXTURES - 1,
-		material.metallic_roughness.index,
-	)
-	material.normal_index = min(MAX_TEXTURES - 1, material.normal.index)
-	material.emissive_index = min(MAX_TEXTURES - 1, material.emissive.index)
 }
 
 material_init :: proc(

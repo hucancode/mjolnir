@@ -574,15 +574,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
       bypass_depth = true,
     )
   }
-  mjolnir.add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  // mjolnir.add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  mjolnir.add_crosshatch(engine, [2]f32{1280, 720})
+  // mjolnir.add_crosshatch(engine, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
-  when true {
+  when false {
     portal_camera_handle = mjolnir.create_camera(
       engine,
       512, // width
