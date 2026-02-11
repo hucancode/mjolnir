@@ -23,10 +23,9 @@ import "render"
 import render_camera "render/camera"
 import "render/debug_draw"
 import "render/debug_ui"
-import render_light "render/light"
 import "render/particles"
-import "render/visibility"
 import "render/ui"
+import "render/visibility"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -479,7 +478,10 @@ load_gltf :: proc(
     if engine_ctx == nil {
       return false
     }
-    return render.texture_2d_ref(&engine_ctx.render, transmute(render.Image2DHandle)handle)
+    return render.texture_2d_ref(
+      &engine_ctx.render,
+      transmute(render.Image2DHandle)handle,
+    )
   }
   old_user_ptr := context.user_ptr
   context.user_ptr = engine
@@ -495,7 +497,10 @@ load_gltf :: proc(
 
 @(private = "file")
 get_main_camera :: proc(self: ^Engine) -> ^world.Camera {
-  return cont.get(self.world.cameras, transmute(world.CameraHandle)self.render.main_camera)
+  return cont.get(
+    self.world.cameras,
+    transmute(world.CameraHandle)self.render.main_camera,
+  )
 }
 
 update_input :: proc(self: ^Engine) -> bool {
@@ -644,7 +649,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   defer sync.mutex_unlock(&self.world.staging.mutex)
   stale_handles := make([dynamic]world.NodeHandle, context.temp_allocator)
   stale_meshes := make([dynamic]world.MeshHandle, context.temp_allocator)
-  stale_materials := make([dynamic]world.MaterialHandle, context.temp_allocator)
+  stale_materials := make(
+    [dynamic]world.MaterialHandle,
+    context.temp_allocator,
+  )
   stale_bone_nodes := make([dynamic]world.NodeHandle, context.temp_allocator)
   stale_sprites := make([dynamic]world.SpriteHandle, context.temp_allocator)
   stale_emitters := make([dynamic]world.EmitterHandle, context.temp_allocator)
@@ -669,7 +677,11 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
         )
       } else {
         zero_matrix: matrix[4, 4]f32
-        render.upload_node_transform(&self.render, transmute(render.NodeHandle)handle, &zero_matrix)
+        render.upload_node_transform(
+          &self.render,
+          transmute(render.NodeHandle)handle,
+          &zero_matrix,
+        )
       }
       next_n += 1
       self.world.staging.transforms[handle] = next_n
@@ -692,12 +704,16 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
       }
       node := cont.get(self.world.nodes, handle)
       if node == nil {
-        render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
+        render.release_bone_matrix_range_for_node(
+          &self.render,
+          transmute(render.NodeHandle)handle,
+        )
       } else if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment);
          has_mesh {
         if _, has_skin := mesh_attachment.skinning.?; has_skin {
           if bone_offset, has_offset :=
-               self.render.bone_matrix_offsets[transmute(render.NodeHandle)handle]; has_offset {
+               self.render.bone_matrix_offsets[transmute(render.NodeHandle)handle];
+             has_offset {
             node_data.attachment_data_index = bone_offset
           } else if skinning, has_skinning := mesh_attachment.skinning.?;
              has_skinning && len(skinning.matrices) > 0 {
@@ -708,11 +724,17 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
             )
             node_data.attachment_data_index = bone_offset
           } else {
-            render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
+            render.release_bone_matrix_range_for_node(
+              &self.render,
+              transmute(render.NodeHandle)handle,
+            )
             node_data.attachment_data_index = 0xFFFFFFFF
           }
         } else {
-          render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
+          render.release_bone_matrix_range_for_node(
+            &self.render,
+            transmute(render.NodeHandle)handle,
+          )
           node_data.attachment_data_index = 0xFFFFFFFF
         }
         node_data.material_id = mesh_attachment.material.index
@@ -720,8 +742,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
         if node.visible && node.parent_visible do node_data.flags |= {.VISIBLE}
         if node.culling_enabled do node_data.flags |= {.CULLING_ENABLED}
         if mesh_attachment.cast_shadow do node_data.flags |= {.CASTS_SHADOW}
-        if material, has_mat := cont.get(self.world.materials, mesh_attachment.material);
-           has_mat {
+        if material, has_mat := cont.get(
+          self.world.materials,
+          mesh_attachment.material,
+        ); has_mat {
           switch material.type {
           case .TRANSPARENT:
             node_data.flags |= {.MATERIAL_TRANSPARENT}
@@ -732,7 +756,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
         }
       } else if _, has_sprite := node.attachment.(world.SpriteAttachment);
          has_sprite {
-        render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
+        render.release_bone_matrix_range_for_node(
+          &self.render,
+          transmute(render.NodeHandle)handle,
+        )
         sprite_attachment, _ := node.attachment.(world.SpriteAttachment)
         node_data.material_id = sprite_attachment.material.index
         node_data.mesh_id = sprite_attachment.mesh_handle.index
@@ -740,8 +767,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
         if node.visible && node.parent_visible do node_data.flags |= {.VISIBLE}
         if node.culling_enabled do node_data.flags |= {.CULLING_ENABLED}
         node_data.flags |= {.MATERIAL_SPRITE}
-        if material, has_mat := cont.get(self.world.materials, sprite_attachment.material);
-           has_mat {
+        if material, has_mat := cont.get(
+          self.world.materials,
+          sprite_attachment.material,
+        ); has_mat {
           switch material.type {
           case .TRANSPARENT:
             node_data.flags |= {.MATERIAL_TRANSPARENT}
@@ -751,15 +780,22 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           }
         }
       } else {
-        render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
+        render.release_bone_matrix_range_for_node(
+          &self.render,
+          transmute(render.NodeHandle)handle,
+        )
       }
       render_node_data := render.NodeData {
         material_id           = node_data.material_id,
         mesh_id               = node_data.mesh_id,
         attachment_data_index = node_data.attachment_data_index,
-        flags = transmute(render.NodeFlagSet)node_data.flags,
+        flags                 = transmute(render.NodeFlagSet)node_data.flags,
       }
-      render.upload_node_data(&self.render, transmute(render.NodeHandle)handle, &render_node_data)
+      render.upload_node_data(
+        &self.render,
+        transmute(render.NodeHandle)handle,
+        &render_node_data,
+      )
       next_n += 1
       self.world.staging.node_data[handle] = next_n
     }
@@ -776,18 +812,24 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
       if mesh := cont.get(self.world.meshes, handle); mesh != nil {
         if geom, has_geom := mesh.cpu_geometry.?; has_geom {
           if render.sync_mesh_geometry_for_handle(
-            &self.gctx,
-            &self.render,
-            transmute(render.MeshHandle)handle,
-            geom,
-            mesh.auto_purge,
-          ) == .SUCCESS {
-            if mesh_render := cont.get(self.render.meshes, transmute(render.MeshHandle)handle);
-               mesh_render != nil {
-              mesh.vertex_allocation = transmute(world.BufferAllocation)mesh_render.vertex_allocation
-              mesh.index_allocation = transmute(world.BufferAllocation)mesh_render.index_allocation
+               &self.gctx,
+               &self.render,
+               transmute(render.MeshHandle)handle,
+               geom,
+               mesh.auto_purge,
+             ) ==
+             .SUCCESS {
+            if mesh_render := cont.get(
+              self.render.meshes,
+              transmute(render.MeshHandle)handle,
+            ); mesh_render != nil {
+              mesh.vertex_allocation =
+              transmute(world.BufferAllocation)mesh_render.vertex_allocation
+              mesh.index_allocation =
+              transmute(world.BufferAllocation)mesh_render.index_allocation
               if skin, has_skin := &mesh.skinning.?; has_skin {
-                skin.allocation = transmute(world.BufferAllocation)mesh_render.skinning_allocation
+                skin.allocation =
+                transmute(world.BufferAllocation)mesh_render.skinning_allocation
               }
             }
           }
@@ -803,9 +845,14 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
         }
         if skin, has_skin := mesh.skinning.?; has_skin {
           mesh_render.has_skinning = true
-          mesh_render.skinning_allocation = transmute(render.BufferAllocation)skin.allocation
+          mesh_render.skinning_allocation =
+          transmute(render.BufferAllocation)skin.allocation
         }
-        render.sync_mesh_from_world(&self.render, transmute(render.MeshHandle)handle, &mesh_render)
+        render.sync_mesh_from_world(
+          &self.render,
+          transmute(render.MeshHandle)handle,
+          &mesh_render,
+        )
       } else {
         render.clear_mesh(&self.render, transmute(render.MeshHandle)handle)
       }
@@ -823,24 +870,22 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
       if material := cont.get(self.world.materials, handle); material != nil {
-        material_render := render.Material {
-          type               = transmute(render.MaterialType)material.type,
-          albedo             = transmute(render.Image2DHandle)material.albedo,
-          metallic_roughness = transmute(render.Image2DHandle)material.metallic_roughness,
-          normal             = transmute(render.Image2DHandle)material.normal,
-          emissive           = transmute(render.Image2DHandle)material.emissive,
-          occlusion          = transmute(render.Image2DHandle)material.occlusion,
-          features           = transmute(render.ShaderFeatureSet)material.features,
-          metallic_value     = material.metallic_value,
-          roughness_value    = material.roughness_value,
-          emissive_value     = material.emissive_value,
-          base_color_factor  = material.base_color_factor,
-          auto_purge         = material.auto_purge,
-          ref_count          = material.ref_count,
-        }
-        render.sync_material_from_world(&self.render, transmute(render.MaterialHandle)handle, &material_render)
-      } else {
-        render.clear_material(&self.render, transmute(render.MaterialHandle)handle)
+        render.upload_material_data(
+          &self.render,
+          handle.index,
+          &render.Material {
+            // type = transmute(render.MaterialType)material.type,
+            albedo_index = material.albedo.index,
+            metallic_roughness_index = material.metallic_roughness.index,
+            normal_index = material.normal.index,
+            emissive_index = material.emissive.index,
+            features = transmute(render.ShaderFeatureSet)material.features,
+            metallic_value = material.metallic_value,
+            roughness_value = material.roughness_value,
+            emissive_value = material.emissive_value,
+            base_color_factor = material.base_color_factor,
+          },
+        )
       }
       next_n += 1
       self.world.staging.material_updates[handle] = next_n
@@ -863,8 +908,8 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
             bone_count := u32(len(skinning.matrices))
             if bone_count > 0 {
               offset := render.ensure_bone_matrix_range_for_node(
-              &self.render,
-              transmute(render.NodeHandle)handle,
+                &self.render,
+                transmute(render.NodeHandle)handle,
                 bone_count,
               )
               if offset != 0xFFFFFFFF {
@@ -893,15 +938,16 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
       if sprite := cont.get(self.world.sprites, handle); sprite != nil {
-        sprite_render := render.Sprite {
-          texture_index = sprite.texture_index,
-          frame_columns = sprite.frame_columns,
-          frame_rows    = sprite.frame_rows,
-          frame_index   = sprite.frame_index,
-        }
-        render.sync_sprite_from_world(&self.render, transmute(render.SpriteHandle)handle, &sprite_render)
-      } else {
-        render.clear_sprite(&self.render, transmute(render.SpriteHandle)handle)
+        render.upload_sprite_data(
+          &self.render,
+          handle.index,
+          &render.Sprite {
+            texture_index = sprite.texture_index,
+            frame_columns = sprite.frame_columns,
+            frame_rows = sprite.frame_rows,
+            frame_index = sprite.frame_index,
+          },
+        )
       }
       next_n += 1
       self.world.staging.sprite_updates[handle] = next_n
@@ -917,30 +963,27 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
       if emitter := cont.get(self.world.emitters, handle); emitter != nil {
-        emitter_render := render.Emitter {
-          initial_velocity  = emitter.initial_velocity,
-          size_start        = emitter.size_start,
-          color_start       = emitter.color_start,
-          color_end         = emitter.color_end,
-          aabb_min          = emitter.aabb_min,
-          emission_rate     = emitter.emission_rate,
-          aabb_max          = emitter.aabb_max,
-          particle_lifetime = emitter.particle_lifetime,
-          position_spread   = emitter.position_spread,
-          velocity_spread   = emitter.velocity_spread,
-          time_accumulator  = emitter.time_accumulator,
-          size_end          = emitter.size_end,
-          weight            = emitter.weight,
-          weight_spread     = emitter.weight_spread,
-          texture_index     = emitter.texture_index,
-          node_index        = emitter.node_index,
-          enabled           = emitter.enabled,
-          texture_handle    = transmute(render.Image2DHandle)emitter.texture_handle,
-          node_handle       = transmute(render.NodeHandle)emitter.node_handle,
-        }
-        render.sync_emitter_from_world(&self.render, transmute(render.EmitterHandle)handle, &emitter_render)
-      } else {
-        render.clear_emitter(&self.render, transmute(render.EmitterHandle)handle)
+        render.upload_emitter_data(
+          &self.render,
+          handle.index,
+          &render.Emitter {
+            initial_velocity = emitter.initial_velocity,
+            size_start = emitter.size_start,
+            color_start = emitter.color_start,
+            color_end = emitter.color_end,
+            aabb_min = emitter.aabb_min,
+            emission_rate = emitter.emission_rate,
+            aabb_max = emitter.aabb_max,
+            particle_lifetime = emitter.particle_lifetime,
+            position_spread = emitter.position_spread,
+            velocity_spread = emitter.velocity_spread,
+            size_end = emitter.size_end,
+            weight = emitter.weight,
+            weight_spread = emitter.weight_spread,
+            texture_index = emitter.texture_handle.index,
+            node_index = emitter.node_handle.index,
+          },
+        )
       }
       next_n += 1
       self.world.staging.emitter_updates[handle] = next_n
@@ -955,21 +998,18 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   for handle, n in self.world.staging.forcefield_updates {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
-      if forcefield := cont.get(self.world.forcefields, handle); forcefield != nil {
-        forcefield_render := render.ForceField {
-          tangent_strength = forcefield.tangent_strength,
-          strength         = forcefield.strength,
-          area_of_effect   = forcefield.area_of_effect,
-          node_index       = forcefield.node_index,
-          node_handle      = transmute(render.NodeHandle)forcefield.node_handle,
-        }
-        render.sync_forcefield_from_world(
+      if forcefield := cont.get(self.world.forcefields, handle);
+         forcefield != nil {
+        render.upload_forcefield_data(
           &self.render,
           transmute(render.ForceFieldHandle)handle,
-          &forcefield_render,
+          &render.ForceField {
+            tangent_strength = forcefield.tangent_strength,
+            strength = forcefield.strength,
+            area_of_effect = forcefield.area_of_effect,
+            node_index = forcefield.node_handle.index,
+          },
         )
-      } else {
-        render.clear_forcefield(&self.render, transmute(render.ForceFieldHandle)handle)
       }
       next_n += 1
       self.world.staging.forcefield_updates[handle] = next_n
@@ -984,12 +1024,22 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   for handle, n in self.world.staging.light_updates {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
-      if light := cont.get(self.world.lights, handle); light != nil {
-        render.sync_light_from_world(
+      if light, ok := cont.get(self.world.lights, handle); ok {
+        dst := render.ensure_light_slot(
           &self.render,
           transmute(render.LightHandle)handle,
-          transmute(^render_light.Light)light,
         )
+        dst^ = render.Light {
+          color        = light.color,
+          radius       = light.radius,
+          angle_inner  = light.angle_inner,
+          angle_outer  = light.angle_outer,
+          type         = transmute(render.LightType)light.type,
+          node_index   = light.node_handle.index,
+          camera_index = light.camera_handle.index,
+          cast_shadow  = light.cast_shadow,
+        }
+        render.upload_light_data(&self.render, handle.index, dst)
       }
       next_n += 1
       self.world.staging.light_updates[handle] = next_n
@@ -1212,10 +1262,7 @@ create_light_camera :: proc(
       cont.free(&engine.world.spherical_cameras, cam_handle)
       return {}, false
     }
-    world.stage_spherical_camera_data(
-      &engine.world.staging,
-      cam_handle,
-    )
+    world.stage_spherical_camera_data(&engine.world.staging, cam_handle)
     // Initialize GPU resources
     cam_gpu := &engine.render.spherical_cameras_gpu[cam_handle.index]
     gpu_result := render_camera.init_spherical_gpu(
@@ -1246,7 +1293,6 @@ create_light_camera :: proc(
     }
     // Update the light to reference this camera
     light.camera_handle = cam_handle
-    light.camera_index = cam_handle.index
     world.stage_light_data(&engine.world.staging, light_handle)
     return cam_handle, true
   case .DIRECTIONAL:
@@ -1315,7 +1361,6 @@ create_light_camera :: proc(
       return {}, false
     }
     light.camera_handle = cam_handle
-    light.camera_index = cam_handle.index
     world.stage_light_data(&engine.world.staging, light_handle)
     return cam_handle, true
   case .SPOT:
@@ -1383,7 +1428,6 @@ create_light_camera :: proc(
       return {}, false
     }
     light.camera_handle = cam_handle
-    light.camera_index = cam_handle.index
     world.stage_light_data(&engine.world.staging, light_handle)
     return cam_handle, true
   }

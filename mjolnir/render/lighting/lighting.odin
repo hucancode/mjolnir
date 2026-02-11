@@ -5,7 +5,6 @@ import d "../data"
 import "../../geometry"
 import "../../gpu"
 import "../camera"
-import "../light"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -478,7 +477,7 @@ render :: proc(
   spherical_cameras_gpu: ^[d.MAX_CAMERAS]camera.SphericalCameraGPU,
   command_buffer: vk.CommandBuffer,
   cameras: d.Pool(camera.Camera),
-  lights: d.Pool(light.Light),
+  lights: d.Pool(d.Light),
   active_lights: []d.LightHandle,
   world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
   frame_index: u32,
@@ -522,13 +521,13 @@ render :: proc(
     if light.cast_shadow {
       switch light.type {
       case .POINT:
-        if light.camera_handle.index > 0 {
-          spherical_cam_gpu := &spherical_cameras_gpu[light.camera_handle.index]
+        if light.camera_index > 0 {
+          spherical_cam_gpu := &spherical_cameras_gpu[light.camera_index]
           shadow_map_index = spherical_cam_gpu.depth_cube[frame_index].index
         }
       case .DIRECTIONAL, .SPOT:
-        if shadow_cam := cont.get(cameras, light.camera_handle); shadow_cam != nil {
-          shadow_cam_gpu := &cameras_gpu[light.camera_handle.index]
+        if shadow_cam := &cameras.entries[light.camera_index].item; shadow_cam != nil {
+          shadow_cam_gpu := &cameras_gpu[light.camera_index]
           shadow_map_index = shadow_cam_gpu.attachments[.DEPTH][frame_index].index
         }
       }

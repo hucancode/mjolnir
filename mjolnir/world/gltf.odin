@@ -57,10 +57,17 @@ load_gltf :: proc(
   // step 0: cgltf
   gltf_path_cstr := strings.clone_to_cstring(path, context.temp_allocator)
   options: cgltf.options
-  gltf_data := cgltf.parse_file(options, gltf_path_cstr) or_return
+  gltf_data, parse_result := cgltf.parse_file(options, gltf_path_cstr)
+  if parse_result != .success {
+    return nodes, parse_result
+  }
   defer cgltf.free(gltf_data)
+  result := cgltf.result.success
   if len(gltf_data.buffers) > 0 {
-    cgltf.load_buffers(options, gltf_data, gltf_path_cstr) or_return
+    result = cgltf.load_buffers(options, gltf_data, gltf_path_cstr)
+    if result != .success {
+      return nodes, result
+    }
   }
   if len(gltf_data.nodes) == 0 {
     return nodes, .success
@@ -236,7 +243,6 @@ load_materials_batch :: proc(
     if !ok do return .invalid_gltf
     material, material_ok := cont.get(world.materials, material_handle)
     if !material_ok do return .invalid_gltf
-    prepare_material_data(material)
     stage_material_data(&world.staging, material_handle)
     texture_2d_ref(albedo)
     texture_2d_ref(metallic_roughness)

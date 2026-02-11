@@ -109,57 +109,6 @@ ShaderFeature :: enum {
 
 ShaderFeatureSet :: bit_set[ShaderFeature;u32]
 
-MaterialType :: enum {
-  PBR,
-  UNLIT,
-  WIREFRAME,
-  TRANSPARENT,
-}
-MaterialData :: struct {
-  albedo_index:             u32,
-  metallic_roughness_index: u32,
-  normal_index:             u32,
-  emissive_index:           u32,
-  metallic_value:           f32,
-  roughness_value:          f32,
-  emissive_value:           f32,
-  features:                 ShaderFeatureSet,
-  base_color_factor:        [4]f32,
-}
-
-EmitterData :: struct {
-  initial_velocity:  [3]f32,
-  size_start:        f32,
-  color_start:       [4]f32,
-  color_end:         [4]f32,
-  aabb_min:          [3]f32,
-  emission_rate:     f32,
-  aabb_max:          [3]f32,
-  particle_lifetime: f32,
-  position_spread:   f32,
-  velocity_spread:   f32,
-  time_accumulator:  f32,
-  size_end:          f32,
-  weight:            f32,
-  weight_spread:     f32,
-  texture_index:     u32,
-  node_index:        u32,
-}
-
-ForceFieldData :: struct {
-  tangent_strength: f32,
-  strength:         f32,
-  area_of_effect:   f32,
-  node_index:       u32,
-}
-
-SpriteData :: struct {
-  texture_index: u32,
-  frame_columns: u32,
-  frame_rows:    u32,
-  frame_index:   u32,
-}
-
 NodeFlag :: enum u32 {
   VISIBLE,
   CULLING_ENABLED,
@@ -200,51 +149,64 @@ prepare_mesh_data :: proc(mesh: ^Mesh) {
 }
 
 Material :: struct {
-  using data:         MaterialData,
-  type:               MaterialType,
-  albedo:             gpu.Texture2DHandle,
-  metallic_roughness: gpu.Texture2DHandle,
-  normal:             gpu.Texture2DHandle,
-  emissive:           gpu.Texture2DHandle,
-  occlusion:          gpu.Texture2DHandle,
-  using meta:         ResourceMetadata,
-}
-
-prepare_material_data :: proc(material: ^Material) {
-  material.albedo_index = min(MAX_TEXTURES - 1, material.albedo.index)
-  material.metallic_roughness_index = min(
-    MAX_TEXTURES - 1,
-    material.metallic_roughness.index,
-  )
-  material.normal_index = min(MAX_TEXTURES - 1, material.normal.index)
-  material.emissive_index = min(MAX_TEXTURES - 1, material.emissive.index)
+  albedo_index:             u32,
+  metallic_roughness_index: u32,
+  normal_index:             u32,
+  emissive_index:           u32,
+  metallic_value:           f32,
+  roughness_value:          f32,
+  emissive_value:           f32,
+  features:                 ShaderFeatureSet,
+  base_color_factor:        [4]f32,
 }
 
 Emitter :: struct {
-  using data:     EmitterData,
-  enabled:        b32,
-  texture_handle: gpu.Texture2DHandle,
-  node_handle:    NodeHandle,
-}
-
-emitter_update_gpu_data :: proc(
-  emitter: ^Emitter,
-  time_accumulator: f32 = 0.0,
-) {
-  emitter.time_accumulator = time_accumulator
-  emitter.texture_index = emitter.texture_handle.index
-  emitter.node_index = emitter.node_handle.index
+  initial_velocity:  [3]f32,
+  size_start:        f32,
+  color_start:       [4]f32,
+  color_end:         [4]f32,
+  aabb_min:          [3]f32,
+  emission_rate:     f32,
+  aabb_max:          [3]f32,
+  particle_lifetime: f32,
+  position_spread:   f32,
+  velocity_spread:   f32,
+  time_accumulator:  f32,
+  size_end:          f32,
+  weight:            f32,
+  weight_spread:     f32,
+  texture_index:     u32,
+  node_index:        u32,
 }
 
 ForceField :: struct {
-  using data:  ForceFieldData,
-  node_handle: NodeHandle,
-}
-
-forcefield_update_gpu_data :: proc(ff: ^ForceField) {
-  ff.node_index = ff.node_handle.index
+  tangent_strength: f32,
+  strength:         f32,
+  area_of_effect:   f32,
+  node_index:       u32,
 }
 
 Sprite :: struct {
-  using data: SpriteData,
+  texture_index: u32,
+  frame_columns: u32,
+  frame_rows:    u32,
+  frame_index:   u32,
+}
+
+LightType :: enum u32 {
+  POINT       = 0,
+  DIRECTIONAL = 1,
+  SPOT        = 2,
+}
+
+Light :: struct {
+  color:        [4]f32, // RGB + intensity
+  radius:       f32, // range for point/spot lights
+  angle_inner:  f32, // inner cone angle for spot lights
+  angle_outer:  f32, // outer cone angle for spot lights
+  type:         LightType, // LightType
+  node_index:   u32, // index into world matrices buffer
+  camera_index: u32, // index into camera matrices buffer
+  cast_shadow:  b32, // 0 = no shadow, 1 = cast shadow
+  _padding:     u32, // Maintain 16-byte alignment
 }

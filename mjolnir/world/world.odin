@@ -182,6 +182,7 @@ destroy_node :: proc(
   world: ^World = nil,
 ) {
   delete(self.children)
+  self.children = {}
   if world == nil {
     return
   }
@@ -512,6 +513,8 @@ cleanup_pending_deletions :: proc(
     unregister_animatable_node(world, handle)
     if node, ok := cont.free(&world.nodes, handle); ok {
       destroy_node(node, world)
+      // Clear the node struct to prevent use-after-free
+      node^ = {}
     }
   }
 }
@@ -653,7 +656,6 @@ assign_emitter_to_node :: proc(
   emitter, ok := cont.get(world.emitters, attachment.handle)
   if ok {
     emitter.node_handle = node_handle
-    emitter_update_gpu_data(emitter)
     stage_emitter_data(&world.staging, attachment.handle)
   }
 }
@@ -671,7 +673,6 @@ assign_forcefield_to_node :: proc(
   forcefield, ok := cont.get(world.forcefields, attachment.handle)
   if ok {
     forcefield.node_handle = node_handle
-    forcefield_update_gpu_data(forcefield)
     stage_forcefield_data(&world.staging, attachment.handle)
   }
 }
@@ -688,7 +689,6 @@ assign_light_to_node :: proc(
   }
   if light, ok := cont.get(world.lights, attachment.handle); ok {
     light.node_handle = node_handle
-    light.node_index = node_handle.index
     stage_light_data(&world.staging, attachment.handle)
   }
 }

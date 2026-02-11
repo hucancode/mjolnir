@@ -34,10 +34,6 @@ init_builtin_materials :: proc(world: ^World) {
 	for color, i in colors {
 		world.builtin_materials[i] =
 		create_material(world, type = .PBR, base_color_factor = color) or_continue
-		if mat, ok := cont.get(world.materials, world.builtin_materials[i]); ok {
-			mat.auto_purge = false
-			prepare_material_data(mat)
-		}
 		stage_material_data(&world.staging, world.builtin_materials[i])
 	}
 	log.info("Builtin materials created successfully")

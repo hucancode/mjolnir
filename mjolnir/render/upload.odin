@@ -9,7 +9,6 @@ import cam "camera"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "light"
 import vk "vendor:vulkan"
 
 allocate_vertices :: proc(
@@ -673,8 +672,8 @@ upload_node_transform :: proc(
 
 upload_node_data :: proc(
   render: ^Manager,
-  handle: d.NodeHandle,
-  node_data: ^rd.NodeData,
+  handle: NodeHandle,
+  node_data: ^NodeData,
 ) {
   gpu.write(&render.node_data_buffer.buffer, node_data, int(handle.index))
 }
@@ -695,38 +694,38 @@ upload_bone_matrices :: proc(
 
 upload_sprite_data :: proc(
   render: ^Manager,
-  handle: d.SpriteHandle,
-  sprite_data: ^SpriteData,
+  index: u32,
+  sprite_data: ^Sprite,
 ) {
-  gpu.write(&render.sprite_buffer.buffer, sprite_data, int(handle.index))
+  gpu.write(&render.sprite_buffer.buffer, sprite_data, int(index))
 }
 
 upload_emitter_data :: proc(
   render: ^Manager,
-  handle: d.EmitterHandle,
-  emitter_data: ^EmitterData,
+  index: u32,
+  emitter: ^Emitter,
 ) {
-  gpu.write(&render.emitter_buffer.buffer, emitter_data, int(handle.index))
+  gpu.write(&render.emitter_buffer.buffer, emitter, int(index))
 }
 
 upload_forcefield_data :: proc(
   render: ^Manager,
   handle: d.ForceFieldHandle,
-  forcefield_data: ^ForceFieldData,
+  forcefield: ^ForceField,
 ) {
   gpu.write(
     &render.forcefield_buffer.buffer,
-    forcefield_data,
+    forcefield,
     int(handle.index),
   )
 }
 
 upload_light_data :: proc(
   render: ^Manager,
-  handle: d.LightHandle,
-  light_data: ^light.LightData,
+  index: u32,
+  light_data: ^d.Light,
 ) {
-  gpu.write(&render.lights_buffer.buffer, light_data, int(handle.index))
+	gpu.write(&render.lights_buffer.buffer, light_data, int(index))
 }
 
 update_light_camera :: proc(
@@ -748,12 +747,12 @@ update_light_camera :: proc(
     if light.cast_shadow {
       #partial switch light.type {
       case .POINT:
-        spherical_cam := cont.get(render.spherical_cameras, light.camera_handle)
+        spherical_cam := &render.spherical_cameras.entries[light.camera_index].item
         if spherical_cam != nil {
           spherical_cam.center = light_position
         }
       case .DIRECTIONAL:
-        shadow_camera := cont.get(render.cameras, light.camera_handle)
+        shadow_camera := &render.cameras.entries[light.camera_index].item
         if shadow_camera == nil do continue
         main_cam := cont.get(render.cameras, main_camera_handle)
         if main_cam == nil {
@@ -848,7 +847,7 @@ update_light_camera :: proc(
         shadow_camera.enable_culling = false
         shadow_camera.enable_depth_pyramid = false
       case .SPOT:
-        shadow_camera := cont.get(render.cameras, light.camera_handle)
+        shadow_camera := &render.cameras.entries[light.camera_index].item
         if shadow_camera != nil {
           shadow_camera.draw_list_source_handle = {}
           shadow_camera.enable_culling = true
@@ -881,21 +880,10 @@ upload_mesh_data_raw :: proc(
 
 upload_material_data :: proc(
   render: ^Manager,
-  handle: d.MaterialHandle,
+  index: u32,
   material: ^Material,
 ) {
-  if handle.index >= d.MAX_MATERIALS do return
-  prepare_material_data(material)
-  upload_material_data_raw(render, handle, &material.data)
-}
-
-upload_material_data_raw :: proc(
-  render: ^Manager,
-  handle: d.MaterialHandle,
-  material_data: ^MaterialData,
-) {
-  if handle.index >= d.MAX_MATERIALS do return
-  gpu.write(&render.material_buffer.buffer, material_data, int(handle.index))
+  gpu.write(&render.material_buffer.buffer, material, int(index))
 }
 
 allocate_bone_matrix_range :: proc(render: ^Manager, bone_count: u32) -> u32 {
