@@ -46,7 +46,11 @@ ForceFieldHandle :: world.ForceFieldHandle
 ClipHandle :: world.ClipHandle
 SpriteHandle :: world.SpriteHandle
 LightHandle :: world.LightHandle
-LightType :: world.LightType
+LightType :: enum u32 {
+  POINT       = 0,
+  DIRECTIONAL = 1,
+  SPOT        = 2,
+}
 DebugObjectHandle :: debug_draw.DebugObjectHandle
 DebugRenderStyle :: debug_draw.RenderStyle
 
@@ -572,23 +576,13 @@ spawn_spot_light :: proc(
   handle: world.NodeHandle,
   ok: bool,
 ) #optional_ok {
-  handle = spawn(engine) or_return
-  node := get_node(engine, handle) or_return
   attachment := world.create_spot_light_attachment(
-    handle,
-    &engine.world,
     color,
     radius,
     angle,
-    b32(cast_shadow),
-  ) or_return
-  node.attachment = attachment
-  if light, exists := cont.get(engine.world.lights, attachment.handle); exists {
-    world.stage_light_data(&engine.world.staging, attachment.handle)
-  }
-  translate(engine, handle, position.x, position.y, position.z)
-  ok = true
-  return
+    cast_shadow,
+  )
+  return spawn(engine, position, attachment)
 }
 
 spawn_child_spot_light :: proc(
@@ -603,22 +597,13 @@ spawn_child_spot_light :: proc(
   handle: world.NodeHandle,
   ok: bool,
 ) #optional_ok {
-  handle = spawn_child(engine, parent, position) or_return
-  node := get_node(engine, handle) or_return
   attachment := world.create_spot_light_attachment(
-    handle,
-    &engine.world,
     color,
     radius,
     angle,
-    b32(cast_shadow),
-  ) or_return
-  node.attachment = attachment
-  if light, exists := cont.get(engine.world.lights, attachment.handle); exists {
-    world.stage_light_data(&engine.world.staging, attachment.handle)
-  }
-  ok = true
-  return
+    cast_shadow,
+  )
+  return spawn_child(engine, parent, position, attachment)
 }
 
 spawn_point_light :: proc(
@@ -631,21 +616,12 @@ spawn_point_light :: proc(
   handle: world.NodeHandle,
   ok: bool,
 ) #optional_ok {
-  handle = spawn(engine, position) or_return
-  node := get_node(engine, handle) or_return
   attachment := world.create_point_light_attachment(
-    handle,
-    &engine.world,
     color,
     radius,
-    b32(cast_shadow),
-  ) or_return
-  node.attachment = attachment
-  if light, exists := cont.get(engine.world.lights, attachment.handle); exists {
-    world.stage_light_data(&engine.world.staging, attachment.handle)
-  }
-  ok = true
-  return
+    cast_shadow,
+  )
+  return spawn(engine, position, attachment)
 }
 
 spawn_child_point_light :: proc(
@@ -659,21 +635,12 @@ spawn_child_point_light :: proc(
   handle: world.NodeHandle,
   ok: bool,
 ) #optional_ok {
-  handle = spawn_child(engine, parent, position) or_return
-  node := get_node(engine, handle) or_return
   attachment := world.create_point_light_attachment(
-    handle,
-    &engine.world,
     color,
     radius,
-    b32(cast_shadow),
-  ) or_return
-  node.attachment = attachment
-  if light, exists := cont.get(engine.world.lights, attachment.handle); exists {
-    world.stage_light_data(&engine.world.staging, attachment.handle)
-  }
-  ok = true
-  return
+    cast_shadow,
+  )
+  return spawn_child(engine, parent, position, attachment)
 }
 
 spawn_directional_light :: proc(
@@ -685,26 +652,16 @@ spawn_directional_light :: proc(
   handle: world.NodeHandle,
   ok: bool,
 ) #optional_ok {
-  // Position doesn't matter for directional lights (infinite distance)
-  handle = spawn(engine, {0, 0, 0}) or_return
+  attachment := world.create_directional_light_attachment(
+    color,
+    cast_shadow = cast_shadow,
+  )
+  // Position does not matter for directional lights.
+  handle = spawn(engine, {0, 0, 0}, attachment) or_return
   node := get_node(engine, handle) or_return
-
-  // Set rotation directly
   node.transform.rotation = rotation
   node.transform.is_dirty = true
-
-  attachment := world.create_directional_light_attachment(
-    handle,
-    &engine.world,
-    color,
-    b32(cast_shadow),
-  ) or_return
-  node.attachment = attachment
-  if light, exists := cont.get(engine.world.lights, attachment.handle); exists {
-    world.stage_light_data(&engine.world.staging, attachment.handle)
-  }
-  ok = true
-  return
+  return handle, true
 }
 
 create_emitter :: proc(
@@ -779,30 +736,40 @@ create_light :: proc(
   radius: f32 = 10.0,
   angle_inner: f32 = 0.0,
   angle_outer: f32 = 0.0,
-  cast_shadow: b32 = true,
+  cast_shadow: bool = true,
 ) -> (
-  light_handle: world.LightHandle,
+  handle: world.NodeHandle,
   ok: bool,
 ) #optional_ok {
-  // Create the light resource
-  light_handle = world.create_light(
-    &engine.world,
-    light_type,
-    node_handle,
-    color,
-    radius,
-    angle_inner,
-    angle_outer,
-    cast_shadow,
-  ) or_return
-  if light, exists := cont.get(engine.world.lights, light_handle); exists {
-    world.stage_light_data(&engine.world.staging, light_handle)
+  node := get_node(engine, node_handle) or_return
+  switch light_type {
+  case .POINT:
+    node.attachment = world.create_point_light_attachment(
+      color,
+      radius,
+      cast_shadow,
+    )
+  case .DIRECTIONAL:
+    node.attachment = world.create_directional_light_attachment(
+      color,
+      radius,
+      cast_shadow,
+    )
+  case .SPOT:
+    node.attachment = world.SpotLightAttachment {
+      color = color,
+      radius = radius,
+      angle_inner = angle_inner,
+      angle_outer = angle_outer,
+      cast_shadow = cast_shadow,
+    }
   }
-  // If the light casts shadows, create a camera for it
+  world.register_active_light(&engine.world, node_handle)
+  world.stage_light_data(&engine.world.staging, node_handle)
   if cast_shadow {
-    create_light_camera(engine, light_handle) or_return
+    create_light_camera(engine, node_handle) or_return
   }
-  return light_handle, true
+  return node_handle, true
 }
 
 // Create an animation clip with automatic allocation and initialization
