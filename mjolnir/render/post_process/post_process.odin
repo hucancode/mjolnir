@@ -1,7 +1,7 @@
 package post_process
 
 import cont "../../containers"
-import d "../../data"
+import d "../data"
 import "../../gpu"
 import "../camera"
 import "../shared"
@@ -183,7 +183,7 @@ Renderer :: struct {
   pipelines:        [len(PostProcessEffectType)]vk.Pipeline,
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
-  images:           [2]d.Image2DHandle,
+  images:           [2]gpu.Texture2DHandle,
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {

@@ -5,7 +5,6 @@ import "core:math"
 import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/animation"
-import d "mjolnir/data"
 import "mjolnir/geometry"
 import "mjolnir/world"
 import "vendor:glfw"
@@ -28,16 +27,16 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   mjolnir.set_visibility_stats(engine, false)
   engine.debug_ui_enabled = true
-  plain_material_handle := engine.world.builtin_materials[d.Color.WHITE]
-  cube_mesh_handle := engine.world.builtin_meshes[d.Primitive.CUBE]
-  sphere_mesh_handle := engine.world.builtin_meshes[d.Primitive.SPHERE]
-  cone_mesh_handle := engine.world.builtin_meshes[d.Primitive.CONE]
+  plain_material_handle := engine.world.builtin_materials[world.Color.WHITE]
+  cube_mesh_handle := engine.world.builtin_meshes[world.Primitive.CUBE]
+  sphere_mesh_handle := engine.world.builtin_meshes[world.Primitive.SPHERE]
+  cone_mesh_handle := engine.world.builtin_meshes[world.Primitive.CONE]
   when true {
     log.info("spawning cubes in a grid")
     space: f32 = 4.1
     cube_size: f32 = 0.3
     nx, ny, nz := 240, 1, 240
-    mat_handle := engine.world.builtin_materials[d.Color.CYAN]
+    mat_handle := engine.world.builtin_materials[world.Color.CYAN]
     spawn_loop: for x in 0 ..< nx {
       for y in 0 ..< ny {
         for z in 0 ..< nz {
@@ -95,7 +94,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         albedo_handle = brick_albedo_handle,
       )
     }
-    ground_mesh_handle := engine.world.builtin_meshes[d.Primitive.QUAD_XZ]
+    ground_mesh_handle := engine.world.builtin_meshes[world.Primitive.QUAD_XZ]
     log.info("spawning ground and walls")
     size: f32 = 15.0
     if brick_wall_mat_ok {
@@ -561,7 +560,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     mjolnir.scale(engine, handle, 0.2)
   }
   when false {
-    debug_sphere_mesh := engine.world.builtin_meshes[d.Primitive.SPHERE]
+    debug_sphere_mesh := engine.world.builtin_meshes[world.Primitive.SPHERE]
     translation := linalg.matrix4_translate_f32({0, 5, 0})
     scale_mat := linalg.matrix4_scale_f32({5, 5, 5})
     transform := translation * scale_mat
@@ -600,7 +599,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       engine,
       {.ALBEDO_TEXTURE},
     )
-    portal_quad_handle := engine.world.builtin_meshes[d.Primitive.QUAD_XY]
+    portal_quad_handle := engine.world.builtin_meshes[world.Primitive.QUAD_XY]
     portal_mesh_ok := true
     if portal_material_ok && portal_mesh_ok {
       handle := mjolnir.spawn(
@@ -624,10 +623,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
       "assets/Warrior_Sheet-Effect.png",
     )
     if warrior_sprite_ok {
-      sprite_quad := engine.world.builtin_meshes[d.Primitive.QUAD_XY]
+      sprite_quad := engine.world.builtin_meshes[world.Primitive.QUAD_XY]
       // 6x17 sprite sheet: 6 columns, 17 rows, using frames 0-98 (99 total)
       // Create animation: 99 frames at 24fps, looping
-      warrior_animation := d.sprite_animation_init(
+      warrior_animation := world.sprite_animation_init(
         frame_count = 99,
         fps = 24.0,
         mode = .LOOP,

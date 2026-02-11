@@ -1,7 +1,7 @@
 package particles
 
 import cont "../../containers"
-import d "../../data"
+import d "../data"
 import "../../gpu"
 import "../camera"
 import "../shared"
@@ -606,7 +606,7 @@ begin_pass :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^d.Camera,
+  camera_cpu: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   frame_index: u32,
 ) {

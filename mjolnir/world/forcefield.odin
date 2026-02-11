@@ -1,23 +1,34 @@
 package world
 
 import cont "../containers"
-import d "../data"
 
-ForceFieldData :: d.ForceFieldData
-ForceField :: d.ForceField
-forcefield_update_gpu_data :: d.forcefield_update_gpu_data
+ForceFieldData :: struct {
+  tangent_strength: f32,
+  strength:         f32,
+  area_of_effect:   f32,
+  node_index:       u32,
+}
+
+ForceField :: struct {
+  using data:  ForceFieldData,
+  node_handle: NodeHandle,
+}
+
+forcefield_update_gpu_data :: proc(ff: ^ForceField) {
+  ff.node_index = ff.node_handle.index
+}
 
 create_forcefield :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   area_of_effect: f32,
   strength: f32,
   tangent_strength: f32,
 ) -> (
-  ret: d.ForceFieldHandle,
+  ret: ForceFieldHandle,
   ok: bool,
 ) #optional_ok {
-  handle, forcefield := cont.alloc(&world.forcefields, d.ForceFieldHandle) or_return
+  handle, forcefield := cont.alloc(&world.forcefields, ForceFieldHandle) or_return
   forcefield.tangent_strength = tangent_strength
   forcefield.strength = strength
   forcefield.area_of_effect = area_of_effect
@@ -26,7 +37,7 @@ create_forcefield :: proc(
   return handle, true
 }
 
-destroy_forcefield :: proc(world: ^World, handle: d.ForceFieldHandle) -> bool {
+destroy_forcefield :: proc(world: ^World, handle: ForceFieldHandle) -> bool {
   _, freed := cont.free(&world.forcefields, handle)
   return freed
 }

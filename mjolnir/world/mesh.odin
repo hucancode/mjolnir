@@ -2,35 +2,79 @@ package world
 
 import "../animation"
 import cont "../containers"
-import d "../data"
 import "../geometry"
 import "core:log"
 import "core:math/linalg"
+import "core:slice"
 
-// Re-export types from data module
-Bone :: d.Bone
-bone_destroy :: d.bone_destroy
-MAX_MESHES :: d.MAX_MESHES
-MeshFlag :: d.MeshFlag
-MeshFlagSet :: d.MeshFlagSet
-MeshData :: d.MeshData
-Skinning :: d.Skinning
-Mesh :: d.Mesh
-BufferAllocation :: d.BufferAllocation
-Primitive :: d.Primitive
-find_bone_by_name :: d.find_bone_by_name
-compute_bone_lengths :: d.compute_bone_lengths
-sample_clip :: d.sample_clip
-sample_clip_with_ik :: d.sample_clip_with_ik
-prepare_mesh_data :: d.prepare_mesh_data
+MeshFlag :: enum u32 {
+	SKINNED,
+}
+
+MeshFlagSet :: bit_set[MeshFlag;u32]
+
+MeshData :: struct {
+	aabb_min:        [3]f32,
+	index_count:     u32,
+	aabb_max:        [3]f32,
+	first_index:     u32,
+	vertex_offset:   i32,
+	skinning_offset: u32,
+	flags:           MeshFlagSet,
+	padding:         u32,
+}
+
+Mesh :: struct {
+	using data:        MeshData,
+	cpu_geometry:      Maybe(geometry.Geometry),
+	vertex_allocation: BufferAllocation,
+	index_allocation:  BufferAllocation,
+	skinning:          Maybe(Skinning),
+	using meta:        ResourceMetadata,
+}
+
+find_bone_by_name :: proc(
+	self: ^Mesh,
+	name: string,
+) -> (
+	index: u32,
+	ok: bool,
+) #optional_ok {
+	skin, has_skin := &self.skinning.?
+	if !has_skin do return
+	for bone, i in skin.bones {
+		if bone.name == name {
+			return u32(i), true
+		}
+	}
+	return 0, false
+}
+
+prepare_mesh_data :: proc(mesh: ^Mesh) {
+	mesh.index_count = mesh.index_allocation.count
+	mesh.first_index = mesh.index_allocation.offset
+	mesh.vertex_offset = cast(i32)mesh.vertex_allocation.offset
+	mesh.flags = {}
+	skin, has_skin := mesh.skinning.?
+	if has_skin && skin.allocation.count > 0 {
+		mesh.flags |= {.SKINNED}
+		mesh.skinning_offset = skin.allocation.offset
+	}
+}
 
 mesh_destroy :: proc(self: ^Mesh, world: ^World) {
 	_ = world
 	skin, has_skin := &self.skinning.?
 	if has_skin {
-		for &bone in skin.bones do d.bone_destroy(&bone)
+		for &bone in skin.bones do bone_destroy(&bone)
 		delete(skin.bones)
 		delete(skin.bone_lengths)
+	}
+	geom, has_geom := self.cpu_geometry.?
+	if has_geom {
+		delete(geom.vertices)
+		delete(geom.indices)
+		delete(geom.skinnings)
 	}
 }
 
@@ -41,6 +85,12 @@ mesh_init :: proc(
 ) {
 	self.aabb_min = geometry_data.aabb.min
 	self.aabb_max = geometry_data.aabb.max
+	self.cpu_geometry = geometry.Geometry {
+		vertices  = slice.clone(geometry_data.vertices),
+		skinnings = slice.clone(geometry_data.skinnings),
+		indices   = slice.clone(geometry_data.indices),
+		aabb      = geometry_data.aabb,
+	}
 	// Allocations are filled in outside this module after creation.
 	if len(geometry_data.skinnings) > 0 {
 		self.skinning = Skinning {
@@ -92,7 +142,7 @@ sample_layers :: proc(
 		#partial switch &layer_data in layer.data {
 		case animation.FKLayer:
 			// Resolve clip handle at runtime
-			clip_handle := transmute(d.ClipHandle)layer_data.clip_handle
+			clip_handle := transmute(ClipHandle)layer_data.clip_handle
 			clip := cont.get(world.animation_clips, clip_handle) or_continue
 			stack := make(
 				[dynamic]TraverseEntry,
@@ -413,11 +463,11 @@ create_mesh :: proc(
 	geometry_data: geometry.Geometry,
 	auto_purge: bool = false,
 ) -> (
-	handle: d.MeshHandle,
+	handle: MeshHandle,
 	mesh: ^Mesh,
 	ok: bool,
 ) {
-	handle, mesh, ok = cont.alloc(&world.meshes, d.MeshHandle)
+	handle, mesh, ok = cont.alloc(&world.meshes, MeshHandle)
 	if !ok do return
 	mesh_init(mesh, geometry_data)
 	mesh.auto_purge = auto_purge
@@ -428,17 +478,17 @@ create_mesh :: proc(
 sync_mesh_data :: proc(
 	mesh: ^Mesh,
 ) {
-	d.prepare_mesh_data(mesh)
+	prepare_mesh_data(mesh)
 }
 
-destroy_mesh :: proc(self: ^World, handle: d.MeshHandle) {
+destroy_mesh :: proc(self: ^World, handle: MeshHandle) {
 	if mesh, ok := cont.free(&self.meshes, handle); ok {
 		mesh_destroy(mesh, self)
 	}
 }
 
 // Reference counting functions
-mesh_ref :: proc(world: ^World, handle: d.MeshHandle) -> bool {
+mesh_ref :: proc(world: ^World, handle: MeshHandle) -> bool {
 	mesh := cont.get(world.meshes, handle) or_return
 	mesh.ref_count += 1
 	return true
@@ -446,7 +496,7 @@ mesh_ref :: proc(world: ^World, handle: d.MeshHandle) -> bool {
 
 mesh_unref :: proc(
 	world: ^World,
-	handle: d.MeshHandle,
+	handle: MeshHandle,
 ) -> (
 	ref_count: u32,
 	ok: bool,
@@ -481,4 +531,84 @@ purge_unused_meshes :: proc(
 		log.infof("Purged %d unused meshes", purged_count)
 	}
 	return
+}
+
+Color :: enum {
+  WHITE,
+  BLACK,
+  GRAY,
+  RED,
+  GREEN,
+  BLUE,
+  YELLOW,
+  CYAN,
+  MAGENTA,
+}
+
+Bone :: struct {
+  children:            []u32,
+  inverse_bind_matrix: matrix[4, 4]f32,
+  name:                string,
+}
+
+bone_destroy :: proc(bone: ^Bone) {
+  delete(bone.children)
+  bone.children = nil
+}
+
+BufferAllocation :: struct {
+  offset: u32,
+  count:  u32,
+}
+
+Skinning :: struct {
+  root_bone_index: u32,
+  bones:           []Bone,
+  allocation:      BufferAllocation,
+  bone_lengths:    []f32,
+}
+
+Primitive :: enum {
+  CUBE,
+  SPHERE,
+  QUAD_XZ,
+  QUAD_XY,
+  CONE,
+  CAPSULE,
+  CYLINDER,
+  TORUS,
+}
+
+compute_bone_lengths :: proc(skin: ^Skinning) {
+  bone_count := len(skin.bones)
+  if bone_count == 0 do return
+  skin.bone_lengths = make([]f32, bone_count)
+  bind_positions := make([][3]f32, bone_count, context.temp_allocator)
+  for bone, i in skin.bones {
+    bind_matrix := linalg.matrix4_inverse(bone.inverse_bind_matrix)
+    bind_positions[i] = bind_matrix[3].xyz
+  }
+  TraverseEntry :: struct {
+    bone_idx:   u32,
+    parent_pos: [3]f32,
+  }
+  stack := make([dynamic]TraverseEntry, 0, bone_count, context.temp_allocator)
+  root_pos := bind_positions[skin.root_bone_index]
+  skin.bone_lengths[skin.root_bone_index] = 0
+  root_bone := &skin.bones[skin.root_bone_index]
+  for child_idx in root_bone.children {
+    append(&stack, TraverseEntry{child_idx, root_pos})
+  }
+  for len(stack) > 0 {
+    entry := pop(&stack)
+    bone := &skin.bones[entry.bone_idx]
+    bone_pos := bind_positions[entry.bone_idx]
+    skin.bone_lengths[entry.bone_idx] = linalg.distance(
+      entry.parent_pos,
+      bone_pos,
+    )
+    for child_idx in bone.children {
+      append(&stack, TraverseEntry{child_idx, bone_pos})
+    }
+  }
 }

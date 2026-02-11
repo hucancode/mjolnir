@@ -1,17 +1,22 @@
 package gpu
 
-import d "../data"
+import cont "../containers"
 import "core:log"
 import vk "vendor:vulkan"
 import stbi "vendor:stb/image"
 import "core:c"
 import "core:strings"
 
-// TextureManager manages textures using simple dynamic arrays for bindless rendering.
-// Handles are array indices, mapping directly to descriptor array indices.
+MAX_TEXTURES :: 1000
+MAX_CUBE_TEXTURES :: 200
+Texture2DHandle :: distinct cont.Handle
+TextureCubeHandle :: distinct cont.Handle
+
+// TextureManager manages textures with handle pools.
+// Handle.index maps directly to descriptor array indices.
 TextureManager :: struct {
-	images_2d:              [dynamic]Image,
-	images_cube:            [dynamic]CubeImage,
+	images_2d:              cont.Pool(Image),
+	images_cube:            cont.Pool(CubeImage),
 	textures_descriptor_set: vk.DescriptorSet,
 }
 
@@ -22,27 +27,22 @@ texture_manager_init :: proc(
 	allocator := context.allocator,
 ) -> vk.Result {
 	tm.textures_descriptor_set = descriptor_set
-	tm.images_2d = make([dynamic]Image, 0, 256, allocator)
-	tm.images_cube = make([dynamic]CubeImage, 0, 64, allocator)
+	_ = allocator
+	cont.init(&tm.images_2d, MAX_TEXTURES)
+	cont.init(&tm.images_cube, MAX_CUBE_TEXTURES)
 	return .SUCCESS
 }
 
 // Shutdown and cleanup all resources
 texture_manager_shutdown :: proc(tm: ^TextureManager, gctx: ^GPUContext) {
-	// Free all 2D textures
-	for &img, i in tm.images_2d {
-		if img.image != 0 {
-			image_destroy(gctx.device, &img)
-		}
+	for &entry in tm.images_2d.entries do if entry.active {
+		if entry.item.image != 0 do image_destroy(gctx.device, &entry.item)
 	}
-	delete(tm.images_2d)
-	// Free all cube textures
-	for &img, i in tm.images_cube {
-		if img.image != 0 {
-			cube_depth_texture_destroy(gctx.device, &img)
-		}
+	for &entry in tm.images_cube.entries do if entry.active {
+		if entry.item.image != 0 do cube_depth_texture_destroy(gctx.device, &entry.item)
 	}
-	delete(tm.images_cube)
+	cont.destroy(tm.images_2d, proc(_: ^Image) {})
+	cont.destroy(tm.images_cube, proc(_: ^CubeImage) {})
 }
 
 // Allocate a 2D texture with the given parameters
@@ -54,27 +54,20 @@ allocate_texture_2d :: proc(
 	usage: vk.ImageUsageFlags,
 	generate_mips: bool = false,
 ) -> (
-	handle: d.Image2DHandle,
+	handle: Texture2DHandle,
 	ret: vk.Result,
 ) {
 	spec := image_spec_2d(width, height, format, usage, generate_mips)
 	img := image_create(gctx, spec) or_return
-	// Find free slot or append
-	index := u32(len(tm.images_2d))
-	for &slot, i in tm.images_2d {
-		if slot.image == 0 {
-			index = u32(i)
-			slot = img
-			break
-		}
+	gpu_handle, slot, ok := cont.alloc(&tm.images_2d, Texture2DHandle)
+	if !ok {
+		image_destroy(gctx.device, &img)
+		return {}, .ERROR_OUT_OF_DEVICE_MEMORY
 	}
-	if index == u32(len(tm.images_2d)) {
-		append(&tm.images_2d, img)
-	}
+	slot^ = img
 	// Update descriptor set
-	set_texture_2d_descriptor(gctx, tm.textures_descriptor_set, index, img.view)
-	handle = d.Image2DHandle{index = index}
-	return handle, .SUCCESS
+	set_texture_2d_descriptor(gctx, tm.textures_descriptor_set, gpu_handle.index, img.view)
+	return gpu_handle, .SUCCESS
 }
 
 // Allocate a 2D texture with initial data
@@ -88,7 +81,7 @@ allocate_texture_2d_with_data :: proc(
 	usage: vk.ImageUsageFlags,
 	generate_mips: bool = false,
 ) -> (
-	handle: d.Image2DHandle,
+	handle: Texture2DHandle,
 	ret: vk.Result,
 ) {
 	spec := image_spec_2d(width, height, format, usage, generate_mips)
@@ -98,39 +91,30 @@ allocate_texture_2d_with_data :: proc(
 	} else {
 		img = image_create_with_data(gctx, spec, pixel_data, data_size) or_return
 	}
-	// Find free slot or append
-	index := u32(len(tm.images_2d))
-	for &slot, i in tm.images_2d {
-		if slot.image == 0 {
-			index = u32(i)
-			slot = img
-			break
-		}
+	gpu_handle, slot, ok := cont.alloc(&tm.images_2d, Texture2DHandle)
+	if !ok {
+		image_destroy(gctx.device, &img)
+		return {}, .ERROR_OUT_OF_DEVICE_MEMORY
 	}
-	if index == u32(len(tm.images_2d)) {
-		append(&tm.images_2d, img)
-	}
+	slot^ = img
 	// Update descriptor set
-	set_texture_2d_descriptor(gctx, tm.textures_descriptor_set, index, img.view)
-	handle = d.Image2DHandle{index = index}
-	return handle, .SUCCESS
+	set_texture_2d_descriptor(gctx, tm.textures_descriptor_set, gpu_handle.index, img.view)
+	return gpu_handle, .SUCCESS
 }
 
 // Free a 2D texture
-free_texture_2d :: proc(tm: ^TextureManager, gctx: ^GPUContext, handle: d.Image2DHandle) {
-	if handle.index >= u32(len(tm.images_2d)) do return
-	img := &tm.images_2d[handle.index]
-	if img.image == 0 do return
-	image_destroy(gctx.device, img)
-	// Mark slot as free (zero out the image handle)
-	img^ = {}
+free_texture_2d :: proc(tm: ^TextureManager, gctx: ^GPUContext, handle: $H) {
+	gpu_handle := transmute(Texture2DHandle)handle
+	img, ok := cont.get(tm.images_2d, gpu_handle)
+	if !ok do return
+	if img.image != 0 do image_destroy(gctx.device, img)
+	cont.free(&tm.images_2d, gpu_handle)
 }
 
 // Get a pointer to a 2D texture
-get_texture_2d :: proc(tm: ^TextureManager, handle: d.Image2DHandle) -> ^Image {
-	if handle.index >= u32(len(tm.images_2d)) do return nil
-	img := &tm.images_2d[handle.index]
-	if img.image == 0 do return nil
+get_texture_2d :: proc(tm: ^TextureManager, handle: $H) -> ^Image {
+	gpu_handle := transmute(Texture2DHandle)handle
+	img, _ := cont.get(tm.images_2d, gpu_handle)
 	return img
 }
 
@@ -142,46 +126,35 @@ allocate_texture_cube :: proc(
 	format: vk.Format,
 	usage: vk.ImageUsageFlags,
 ) -> (
-	handle: d.ImageCubeHandle,
+	handle: TextureCubeHandle,
 	ret: vk.Result,
 ) {
-	// Find free slot or allocate new
-	index := u32(len(tm.images_cube))
-	img: ^CubeImage
-	for &slot, i in tm.images_cube {
-		if slot.image == 0 {
-			index = u32(i)
-			img = &slot
-			break
-		}
-	}
-	if img == nil {
-		append(&tm.images_cube, CubeImage{})
-		img = &tm.images_cube[len(tm.images_cube) - 1]
-	}
+	h, img, ok := cont.alloc(&tm.images_cube, TextureCubeHandle)
+	if !ok do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
 	// Initialize the cube image
-	cube_depth_texture_init(gctx, img, size, format, usage) or_return
+	init_ret := cube_depth_texture_init(gctx, img, size, format, usage)
+	if init_ret != .SUCCESS {
+		cont.free(&tm.images_cube, h)
+		return {}, init_ret
+	}
 	// Update descriptor set
-	set_texture_cube_descriptor(gctx, tm.textures_descriptor_set, index, img.view)
-	handle = d.ImageCubeHandle{index = index}
-	return handle, .SUCCESS
+	set_texture_cube_descriptor(gctx, tm.textures_descriptor_set, h.index, img.view)
+	return h, .SUCCESS
 }
 
 // Free a cube texture
-free_texture_cube :: proc(tm: ^TextureManager, gctx: ^GPUContext, handle: d.ImageCubeHandle) {
-	if handle.index >= u32(len(tm.images_cube)) do return
-	img := &tm.images_cube[handle.index]
-	if img.image == 0 do return
-	cube_depth_texture_destroy(gctx.device, img)
-	// Mark slot as free
-	img^ = {}
+free_texture_cube :: proc(tm: ^TextureManager, gctx: ^GPUContext, handle: $H) {
+	gpu_handle := transmute(TextureCubeHandle)handle
+	img, ok := cont.get(tm.images_cube, gpu_handle)
+	if !ok do return
+	if img.image != 0 do cube_depth_texture_destroy(gctx.device, img)
+	cont.free(&tm.images_cube, gpu_handle)
 }
 
 // Get a pointer to a cube texture
-get_texture_cube :: proc(tm: ^TextureManager, handle: d.ImageCubeHandle) -> ^CubeImage {
-	if handle.index >= u32(len(tm.images_cube)) do return nil
-	img := &tm.images_cube[handle.index]
-	if img.image == 0 do return nil
+get_texture_cube :: proc(tm: ^TextureManager, handle: $H) -> ^CubeImage {
+	gpu_handle := transmute(TextureCubeHandle)handle
+	img, _ := cont.get(tm.images_cube, gpu_handle)
 	return img
 }
 
@@ -193,7 +166,7 @@ set_texture_2d_descriptor :: proc(
 	index: u32,
 	image_view: vk.ImageView,
 ) {
-	if index >= d.MAX_TEXTURES do return
+	if index >= MAX_TEXTURES do return
 	if textures_descriptor_set == 0 do return
 	update_descriptor_set_array_offset(
 		gctx,
@@ -218,7 +191,7 @@ set_texture_cube_descriptor :: proc(
 	index: u32,
 	image_view: vk.ImageView,
 ) {
-	if index >= d.MAX_CUBE_TEXTURES do return
+	if index >= MAX_CUBE_TEXTURES do return
 	if textures_descriptor_set == 0 do return
 	update_descriptor_set_array_offset(
 		gctx,
@@ -242,7 +215,7 @@ create_texture_2d_from_data :: proc(
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips: bool = false,
 ) -> (
-  handle: d.Image2DHandle,
+  handle: Texture2DHandle,
   ret: vk.Result,
 ) {
   width, height, channels: c.int
@@ -275,7 +248,7 @@ create_texture_2d_from_path :: proc(
   usage: vk.ImageUsageFlags = {.SAMPLED},
   is_hdr: bool = false,
 ) -> (
-  handle: d.Image2DHandle,
+  handle: Texture2DHandle,
   ret: vk.Result,
 ) {
   path_cstr := strings.clone_to_cstring(path)

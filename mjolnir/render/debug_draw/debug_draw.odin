@@ -1,9 +1,10 @@
 package debug_draw
 
 import cont "../../containers"
-import d "../../data"
+import d "../data"
 import "../../geometry"
 import "../../gpu"
+import rd "../data"
 import "../camera"
 import "core:log"
 import "core:math/linalg"
@@ -438,7 +439,7 @@ update :: proc(
 begin_pass :: proc(
   self: ^Renderer,
   camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^d.Camera,
+  camera_cpu: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
@@ -472,7 +473,7 @@ render :: proc(
   camera_gpu: ^camera.CameraGPU,
   camera_handle: d.CameraHandle,
   command_buffer: vk.CommandBuffer,
-  meshes: d.Pool(d.Mesh),
+  meshes: d.Pool(rd.Mesh),
   frame_index: u32,
   vertex_buffer: vk.Buffer,
   index_buffer: vk.Buffer,

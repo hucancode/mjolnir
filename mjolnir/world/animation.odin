@@ -2,7 +2,6 @@ package world
 
 import anim "../animation"
 import cont "../containers"
-import d "../data"
 import "../geometry"
 import "core:log"
 import "core:math"
@@ -91,11 +90,12 @@ update_skeletal_animations :: proc(
 
     debug_enabled := debug_draw_ik && debug_draw_renderer != nil
     sample_layers(mesh, world, skinning.layers[:], nil, matrices, delta_time, node.transform.world_matrix, debug_enabled)
-    stage_bone_matrices(
-      &world.staging,
-      handle,
-      matrices,
-    )
+    if len(skinning.matrices) != bone_count {
+      delete(skinning.matrices)
+      skinning.matrices = make([]matrix[4, 4]f32, bone_count)
+    }
+    copy(skinning.matrices, matrices)
+    stage_bone_matrices(&world.staging, handle)
 
     // Draw debug visualization for IK if enabled
     if debug_enabled {
@@ -152,15 +152,15 @@ update_sprite_animations :: proc(
     anim_inst, has_anim := &sprite.animation.?
     if !has_anim do continue
     sprite_animation_update(anim_inst, delta_time)
-    d.sprite_update_gpu_data(sprite)
-    stage_sprite_data(&world.staging, handle, sprite.data)
+    sprite_update_gpu_data(sprite)
+    stage_sprite_data(&world.staging, handle)
   }
 }
 
 // Play animation on layer 0 (for backward compatibility)
 play_animation :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   name: string,
   mode: anim.PlayMode = .LOOP,
   speed: f32 = 1.0,
@@ -171,7 +171,7 @@ play_animation :: proc(
 // Add or replace an animation layer at specified index
 add_animation_layer :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   animation_name: string,
   weight: f32 = 1.0,
   mode: anim.PlayMode = .LOOP,
@@ -192,14 +192,14 @@ add_animation_layer :: proc(
   }
   skinning := &mesh_attachment.skinning.?
   // Find animation clip handle and duration
-  clip_handle: d.ClipHandle
+  clip_handle: ClipHandle
   clip_duration: f32
   found := false
   // TODO: use linear search as a first working implementation
   // later we need to do better than this linear search
   for &entry, idx in world.animation_clips.entries do if entry.active {
     if entry.item.name == animation_name {
-      clip_handle = d.ClipHandle {
+      clip_handle = ClipHandle {
         index      = u32(idx),
         generation = entry.generation,
       }
@@ -234,7 +234,7 @@ add_animation_layer :: proc(
 // Remove animation layer at specified index
 remove_animation_layer :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   layer_index: int,
 ) -> bool {
   node := cont.get(world.nodes, node_handle) or_return
@@ -251,7 +251,7 @@ remove_animation_layer :: proc(
 // Set weight for an animation layer
 set_animation_layer_weight :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   layer_index: int,
   weight: f32,
 ) -> bool {
@@ -269,7 +269,7 @@ set_animation_layer_weight :: proc(
 // Clear all animation layers
 clear_animation_layers :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
 ) -> bool {
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, ok := &node.attachment.(MeshAttachment)
@@ -286,7 +286,7 @@ clear_animation_layers :: proc(
 
 // Create bone mask from bone name list
 create_bone_mask :: proc(
-  mesh: ^d.Mesh,
+  mesh: ^Mesh,
   bone_names: []string,
   allocator := context.allocator,
 ) -> (
@@ -297,7 +297,7 @@ create_bone_mask :: proc(
   mask = make([]bool, len(skin.bones), allocator)
 
   for name in bone_names {
-    idx, found := d.find_bone_by_name(mesh, name)
+    idx, found := find_bone_by_name(mesh, name)
     if !found do continue
     mask[idx] = true
   }
@@ -307,7 +307,7 @@ create_bone_mask :: proc(
 
 // Create bone mask for bone chain (root + all descendants)
 create_bone_chain_mask :: proc(
-  mesh: ^d.Mesh,
+  mesh: ^Mesh,
   root_bone_name: string,
   allocator := context.allocator,
 ) -> (
@@ -315,7 +315,7 @@ create_bone_chain_mask :: proc(
   ok: bool,
 ) #optional_ok {
   skin := mesh.skinning.? or_return
-  root_idx, found := d.find_bone_by_name(mesh, root_bone_name)
+  root_idx, found := find_bone_by_name(mesh, root_bone_name)
   if !found do return nil, false
 
   mask = make([]bool, len(skin.bones), allocator)
@@ -341,7 +341,7 @@ create_bone_chain_mask :: proc(
 // Set bone mask on existing layer
 set_animation_layer_bone_mask :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   layer_index: int,
   mask: []bool,
 ) -> bool {
@@ -359,7 +359,7 @@ set_animation_layer_bone_mask :: proc(
 // Transition smoothly from one animation to another
 transition_to_animation :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   animation_name: string,
   duration: f32,
   from_layer: int = 0,
@@ -382,12 +382,12 @@ transition_to_animation :: proc(
   }
 
   // Find the animation clip
-  clip_handle: d.ClipHandle
+  clip_handle: ClipHandle
   clip_duration: f32
   found := false
   for &entry, idx in world.animation_clips.entries do if entry.active {
     if entry.item.name == animation_name {
-      clip_handle = d.ClipHandle{
+      clip_handle = ClipHandle{
         index      = u32(idx),
         generation = entry.generation,
       }
@@ -439,7 +439,7 @@ world_to_skeleton_local :: proc(
 // IK targets are in world space and will be converted to skeleton-local space internally
 add_ik_layer :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   bone_names: []string,
   target_world_pos: [3]f32,
   pole_world_pos: [3]f32,
@@ -462,7 +462,7 @@ add_ik_layer :: proc(
   if len(bone_names) < 2 do return false
   bone_indices := make([]u32, len(bone_names))
   for name, i in bone_names {
-    idx, ok := d.find_bone_by_name(mesh, name)
+    idx, ok := find_bone_by_name(mesh, name)
     if !ok {
       delete(bone_indices)
       return false
@@ -518,7 +518,7 @@ add_ik_layer :: proc(
 // Targets are in world space and will be converted to skeleton-local space internally
 set_ik_layer_target :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   layer_index: int,
   target_world_pos: [3]f32,
   pole_world_pos: [3]f32,
@@ -549,7 +549,7 @@ set_ik_layer_target :: proc(
 // Enable or disable an IK layer
 set_ik_layer_enabled :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   layer_index: int,
   enabled: bool,
 ) -> bool {
@@ -571,7 +571,7 @@ set_ik_layer_enabled :: proc(
 }
 
 resolve_bone_chain :: proc(
-  mesh: ^d.Mesh,
+  mesh: ^Mesh,
   root_bone_name: string,
   chain_length: u32,
   allocator := context.allocator,
@@ -582,7 +582,7 @@ resolve_bone_chain :: proc(
   skin, has_skin := &mesh.skinning.?
   if !has_skin do return nil, false
 
-  root_idx, found := d.find_bone_by_name(mesh, root_bone_name)
+  root_idx, found := find_bone_by_name(mesh, root_bone_name)
   if !found do return nil, false
 
   indices := make([dynamic]u32, 0, chain_length, context.temp_allocator)
@@ -607,7 +607,7 @@ resolve_bone_chain :: proc(
 
 add_tail_modifier_layer :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   root_bone_name: string,
   tail_length: u32,
   propagation_speed: f32 = 0.5,
@@ -671,7 +671,7 @@ add_tail_modifier_layer :: proc(
 
 add_path_modifier_layer :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   root_bone_name: string,
   tail_length: u32,
   path: [][3]f32,
@@ -738,7 +738,7 @@ add_path_modifier_layer :: proc(
 
 add_spider_leg_modifier_layer :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   leg_root_names: []string,
   leg_chain_lengths: []u32,
   leg_configs: []anim.SpiderLegConfig,
@@ -821,7 +821,7 @@ add_spider_leg_modifier_layer :: proc(
 
 get_spider_leg_target :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   layer_index: int,
   leg_index: int,
 ) -> (target: ^[3]f32, ok: bool) {
@@ -848,7 +848,7 @@ get_spider_leg_target :: proc(
 
 set_tail_modifier_params :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   layer_index: int,
   propagation_speed: Maybe(f32) = nil,
   damping: Maybe(f32) = nil,
@@ -953,33 +953,33 @@ draw_ik_debug_for_node :: proc(
             }
 
             // Draw pole marker (small magenta sphere)
-            // TODO: Need builtin meshes in world module or pass sphere handle via callback
-            // if world.debug_draw_mesh != nil {
-            //   transform := linalg.matrix4_translate(pole_world) * linalg.matrix4_scale([3]f32{0.3, 0.3, 0.3})
-            //   world.debug_draw_mesh(
-            //     sphere_mesh_handle,
-            //     transform,
-            //     duration_seconds = 0.016,
-            //     color = {1.0, 0.0, 1.0, 1.0}, // Magenta
-            //     bypass_depth = true,
-            //   )
-            // }
+            if world.debug_draw_mesh != nil {
+              sphere_mesh_handle := get_builtin_mesh(world, .SPHERE)
+              transform := linalg.matrix4_translate(pole_world) * linalg.matrix4_scale([3]f32{0.3, 0.3, 0.3})
+              world.debug_draw_mesh(
+                sphere_mesh_handle,
+                transform,
+                duration_seconds = 0.016,
+                color = {1.0, 0.0, 1.0, 1.0}, // Magenta
+                bypass_depth = true,
+              )
+            }
           }
 
           // Draw target marker (cyan sphere)
-          // TODO: Need builtin meshes in world module or pass sphere handle via callback
-          // target_world_h := node_world_matrix * linalg.Vector4f32{info.target.x, info.target.y, info.target.z, 1.0}
-          // target_world := target_world_h.xyz
-          // if world.debug_draw_mesh != nil {
-          //   transform := linalg.matrix4_translate(target_world) * linalg.matrix4_scale([3]f32{0.25, 0.25, 0.25})
-          //   world.debug_draw_mesh(
-          //     sphere_mesh_handle,
-          //     transform,
-          //     duration_seconds = 0.016,
-          //     color = {0.0, 1.0, 1.0, 1.0}, // Cyan
-          //     bypass_depth = true,
-          //   )
-          // }
+          target_world_h := node_world_matrix * linalg.Vector4f32{info.target.x, info.target.y, info.target.z, 1.0}
+          target_world := target_world_h.xyz
+          if world.debug_draw_mesh != nil {
+            sphere_mesh_handle := get_builtin_mesh(world, .SPHERE)
+            transform := linalg.matrix4_translate(target_world) * linalg.matrix4_scale([3]f32{0.25, 0.25, 0.25})
+            world.debug_draw_mesh(
+              sphere_mesh_handle,
+              transform,
+              duration_seconds = 0.016,
+              color = {0.0, 1.0, 1.0, 1.0}, // Cyan
+              bypass_depth = true,
+            )
+          }
         }
       }
     }
@@ -988,7 +988,7 @@ draw_ik_debug_for_node :: proc(
 
 set_path_modifier_params :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   layer_index: int,
   path: Maybe([][3]f32) = nil,
   offset: Maybe(f32) = nil,
@@ -1052,7 +1052,7 @@ set_path_modifier_params :: proc(
 
 add_single_bone_rotation_modifier_layer :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   bone_name: string,
   weight: f32 = 1.0,
   layer_index: int = -1,
@@ -1067,7 +1067,7 @@ add_single_bone_rotation_modifier_layer :: proc(
   mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
 
   // Resolve bone name to index
-  bone_idx, found := d.find_bone_by_name(mesh, bone_name)
+  bone_idx, found := find_bone_by_name(mesh, bone_name)
   if !found do return nil, false
 
   // Initialize rotation to identity

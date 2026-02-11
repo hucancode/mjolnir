@@ -1,9 +1,10 @@
-package data
+package world
 
 import cont "../containers"
 
 Handle :: cont.Handle
 Pool :: cont.Pool
+
 NodeHandle :: distinct Handle
 MeshHandle :: distinct Handle
 MaterialHandle :: distinct Handle
@@ -16,3 +17,5 @@ ForceFieldHandle :: distinct Handle
 ClipHandle :: distinct Handle
 SpriteHandle :: distinct Handle
 LightHandle :: distinct Handle
+
+MAX_CAMERAS :: 64

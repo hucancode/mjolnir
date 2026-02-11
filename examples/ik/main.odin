@@ -2,7 +2,6 @@ package main
 
 import "../../mjolnir"
 import cont "../../mjolnir/containers"
-import d "../../mjolnir/data"
 import "../../mjolnir/gpu"
 import "../../mjolnir/world"
 import "core:log"
@@ -266,7 +265,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
 // Find all bone names in a chain from root to tip
 find_bone_chain :: proc(
-  skin: d.Skinning,
+  skin: world.Skinning,
   root_name: string,
   tip_name: string,
 ) -> []string {

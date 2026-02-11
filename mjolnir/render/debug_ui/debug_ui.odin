@@ -1,7 +1,7 @@
 package debug_ui
 
 import cont "../../containers"
-import d "../../data"
+import d "../data"
 import gpu "../../gpu"
 import "core:log"
 import "core:math/linalg"
@@ -24,7 +24,7 @@ Renderer :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  atlas_handle:              d.Image2DHandle,
+  atlas_handle:              gpu.Texture2DHandle,
   proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
   vertex_buffer:             gpu.MutableBuffer(Vertex2D),
   index_buffer:              gpu.MutableBuffer(u32),

@@ -1,7 +1,6 @@
 package ui
 
 import cont "../../containers"
-import d "../../data"
 import "../../gpu"
 import "core:log"
 import "core:math/linalg"
@@ -27,11 +26,11 @@ Renderer :: struct {
   vertex_count:              u32,
   index_count:               u32,
   font_context:              ^fs.FontContext,
-  font_atlas:                d.Image2DHandle,
+  font_atlas:                gpu.Texture2DHandle,
   font_atlas_width:          i32,
   font_atlas_height:         i32,
   font_atlas_dirty:          bool,
-  white_texture:             d.Image2DHandle,
+  white_texture:             gpu.Texture2DHandle,
 }
 
 DrawBatch :: struct {
@@ -407,12 +406,12 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext, texture_manager: ^gpu.T
   }
 
   // Clean up white texture
-  if self.white_texture != (d.Image2DHandle{}) {
+  if self.white_texture != (gpu.Texture2DHandle{}) {
     gpu.free_texture_2d(texture_manager, gctx, self.white_texture)
   }
 
   // Clean up font atlas
-  if self.font_atlas != (d.Image2DHandle{}) {
+  if self.font_atlas != (gpu.Texture2DHandle{}) {
     gpu.free_texture_2d(texture_manager, gctx, self.font_atlas)
   }
 
@@ -735,7 +734,7 @@ update_font_atlas :: proc(
     height,
     len(atlas_data),
   )
-  if self.font_atlas != (d.Image2DHandle{}) {
+  if self.font_atlas != (gpu.Texture2DHandle{}) {
     gpu.free_texture_2d(texture_manager, gctx, self.font_atlas)
   }
   font_atlas_result: vk.Result
