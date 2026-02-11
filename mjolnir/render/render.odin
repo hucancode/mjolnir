@@ -2,7 +2,7 @@ package render
 
 import alg "../algebra"
 import cont "../containers"
-import d "../data"
+import d "data"
 import geo "../geometry"
 import "../gpu"
 import "ui"
@@ -11,15 +11,18 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
+import cam "camera"
 import "debug_draw"
 import "debug_ui"
 import "geometry"
+import "light"
 import "lighting"
 import "particles"
 import "post_process"
 import "transparency"
 import vk "vendor:vulkan"
 import "visibility"
+import rd "data"
 
 FRAMES_IN_FLIGHT :: d.FRAMES_IN_FLIGHT
 
@@ -40,6 +43,14 @@ Manager :: struct {
   ui_system:               ui.System,
   ui:                      ui.Renderer,
   main_camera:             d.CameraHandle,
+  cameras:                 d.Pool(camera.Camera),
+  spherical_cameras:       d.Pool(camera.SphericalCamera),
+  lights:                  d.Pool(light.Light),
+  materials:               d.Pool(Material),
+  meshes:                  d.Pool(Mesh),
+  emitters:                d.Pool(Emitter),
+  forcefields:             d.Pool(ForceField),
+  sprites:                 d.Pool(Sprite),
   visibility:              visibility.System,
   textures_set_layout:     vk.DescriptorSetLayout,
   textures_descriptor_set: vk.DescriptorSet,
@@ -55,21 +66,21 @@ Manager :: struct {
     FRAMES_IN_FLIGHT,
   ),
   camera_buffer:           gpu.PerFrameBindlessBuffer(
-    d.CameraData,
+    cam.CameraData,
     FRAMES_IN_FLIGHT,
   ),
   spherical_camera_buffer: gpu.PerFrameBindlessBuffer(
-    d.SphericalCameraData,
+    cam.SphericalCameraData,
     FRAMES_IN_FLIGHT,
   ),
-  material_buffer:         gpu.BindlessBuffer(d.MaterialData),
+  material_buffer:         gpu.BindlessBuffer(MaterialData),
   world_matrix_buffer:     gpu.BindlessBuffer(matrix[4, 4]f32),
-  node_data_buffer:        gpu.BindlessBuffer(d.NodeData),
-  mesh_data_buffer:        gpu.BindlessBuffer(d.MeshData),
-  emitter_buffer:          gpu.BindlessBuffer(d.EmitterData),
-  forcefield_buffer:       gpu.BindlessBuffer(d.ForceFieldData),
-  sprite_buffer:           gpu.BindlessBuffer(d.SpriteData),
-  lights_buffer:           gpu.BindlessBuffer(d.LightData),
+  node_data_buffer:        gpu.BindlessBuffer(rd.NodeData),
+  mesh_data_buffer:        gpu.BindlessBuffer(MeshData),
+  emitter_buffer:          gpu.BindlessBuffer(EmitterData),
+  forcefield_buffer:       gpu.BindlessBuffer(ForceFieldData),
+  sprite_buffer:           gpu.BindlessBuffer(SpriteData),
+  lights_buffer:           gpu.BindlessBuffer(light.LightData),
   vertex_skinning_buffer:  gpu.ImmutableBindlessBuffer(geo.SkinningData),
   vertex_buffer:           gpu.ImmutableBuffer(geo.Vertex),
   index_buffer:            gpu.ImmutableBuffer(u32),
@@ -79,10 +90,10 @@ Manager :: struct {
   vertex_slab:             cont.SlabAllocator,
   index_slab:              cont.SlabAllocator,
   texture_manager:         gpu.TextureManager,
-  texture_2d_tracking:     map[d.Image2DHandle]TextureTracking,
-  texture_cube_tracking:   map[d.ImageCubeHandle]TextureTracking,
-  retired_textures_2d:     map[d.Image2DHandle]u32,
-  retired_textures_cube:   map[d.ImageCubeHandle]u32,
+  texture_2d_tracking:     map[gpu.Texture2DHandle]TextureTracking,
+  texture_cube_tracking:   map[gpu.TextureCubeHandle]TextureTracking,
+  retired_textures_2d:     map[gpu.Texture2DHandle]u32,
+  retired_textures_cube:   map[gpu.TextureCubeHandle]u32,
   // Camera GPU resources (indexed by camera handle.index)
   cameras_gpu:             [d.MAX_CAMERAS]camera.CameraGPU,
   spherical_cameras_gpu:   [d.MAX_CAMERAS]camera.SphericalCameraGPU,
@@ -269,17 +280,15 @@ destroy_geometry_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
 @(private)
 sync_existing_resource_data :: proc(
   self: ^Manager,
-  materials: ^d.Pool(d.Material),
-  meshes: ^d.Pool(d.Mesh),
 ) {
-  for &entry, i in materials.entries do if entry.active {
+  for &entry, i in self.materials.entries do if entry.active {
     handle := d.MaterialHandle {
       index      = u32(i),
       generation = entry.generation,
     }
     upload_material_data(self, handle, &entry.item)
   }
-  for &entry, i in meshes.entries do if entry.active {
+  for &entry, i in self.meshes.entries do if entry.active {
     handle := d.MeshHandle {
       index      = u32(i),
       generation = entry.generation,
@@ -534,21 +543,298 @@ shutdown_bindless_layouts :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   self.nearest_clamp_sampler = 0
 }
 
+@(private)
+ensure_camera_slot :: proc(
+  self: ^Manager,
+  handle: d.CameraHandle,
+) -> ^camera.Camera {
+  for u32(len(self.cameras.entries)) <= handle.index {
+    append(&self.cameras.entries, cont.Entry(camera.Camera) {})
+  }
+  entry := &self.cameras.entries[handle.index]
+  entry.generation = handle.generation
+  entry.active = true
+  if i, ok := slice.linear_search(self.cameras.free_indices[:], handle.index); ok {
+    unordered_remove(&self.cameras.free_indices, i)
+  }
+  return &entry.item
+}
+
+@(private)
+ensure_spherical_camera_slot :: proc(
+  self: ^Manager,
+  handle: d.SphereCameraHandle,
+) -> ^camera.SphericalCamera {
+  for u32(len(self.spherical_cameras.entries)) <= handle.index {
+    append(
+      &self.spherical_cameras.entries,
+      cont.Entry(camera.SphericalCamera) {},
+    )
+  }
+  entry := &self.spherical_cameras.entries[handle.index]
+  entry.generation = handle.generation
+  entry.active = true
+  if i, ok := slice.linear_search(
+    self.spherical_cameras.free_indices[:],
+    handle.index,
+  ); ok {
+    unordered_remove(&self.spherical_cameras.free_indices, i)
+  }
+  return &entry.item
+}
+
+@(private)
+ensure_light_slot :: proc(
+  self: ^Manager,
+  handle: d.LightHandle,
+) -> ^light.Light {
+  for u32(len(self.lights.entries)) <= handle.index {
+    append(&self.lights.entries, cont.Entry(light.Light) {})
+  }
+  entry := &self.lights.entries[handle.index]
+  entry.generation = handle.generation
+  entry.active = true
+  if i, ok := slice.linear_search(self.lights.free_indices[:], handle.index); ok {
+    unordered_remove(&self.lights.free_indices, i)
+  }
+  return &entry.item
+}
+
+@(private)
+ensure_material_slot :: proc(
+  self: ^Manager,
+  handle: d.MaterialHandle,
+) -> ^Material {
+  for u32(len(self.materials.entries)) <= handle.index {
+    append(&self.materials.entries, cont.Entry(Material) {})
+  }
+  entry := &self.materials.entries[handle.index]
+  entry.generation = handle.generation
+  entry.active = true
+  if i, ok := slice.linear_search(
+    self.materials.free_indices[:],
+    handle.index,
+  ); ok {
+    unordered_remove(&self.materials.free_indices, i)
+  }
+  return &entry.item
+}
+
+@(private)
+ensure_mesh_slot :: proc(self: ^Manager, handle: d.MeshHandle) -> ^Mesh {
+  for u32(len(self.meshes.entries)) <= handle.index {
+    append(&self.meshes.entries, cont.Entry(Mesh) {})
+  }
+  entry := &self.meshes.entries[handle.index]
+  entry.generation = handle.generation
+  entry.active = true
+  if i, ok := slice.linear_search(self.meshes.free_indices[:], handle.index); ok {
+    unordered_remove(&self.meshes.free_indices, i)
+  }
+  return &entry.item
+}
+
+@(private)
+ensure_sprite_slot :: proc(self: ^Manager, handle: d.SpriteHandle) -> ^Sprite {
+  for u32(len(self.sprites.entries)) <= handle.index {
+    append(&self.sprites.entries, cont.Entry(Sprite) {})
+  }
+  entry := &self.sprites.entries[handle.index]
+  entry.generation = handle.generation
+  entry.active = true
+  if i, ok := slice.linear_search(self.sprites.free_indices[:], handle.index); ok {
+    unordered_remove(&self.sprites.free_indices, i)
+  }
+  return &entry.item
+}
+
+@(private)
+ensure_emitter_slot :: proc(
+  self: ^Manager,
+  handle: d.EmitterHandle,
+) -> ^Emitter {
+  for u32(len(self.emitters.entries)) <= handle.index {
+    append(&self.emitters.entries, cont.Entry(Emitter) {})
+  }
+  entry := &self.emitters.entries[handle.index]
+  entry.generation = handle.generation
+  entry.active = true
+  if i, ok := slice.linear_search(
+    self.emitters.free_indices[:],
+    handle.index,
+  ); ok {
+    unordered_remove(&self.emitters.free_indices, i)
+  }
+  return &entry.item
+}
+
+@(private)
+ensure_forcefield_slot :: proc(
+  self: ^Manager,
+  handle: d.ForceFieldHandle,
+) -> ^ForceField {
+  for u32(len(self.forcefields.entries)) <= handle.index {
+    append(&self.forcefields.entries, cont.Entry(ForceField) {})
+  }
+  entry := &self.forcefields.entries[handle.index]
+  entry.generation = handle.generation
+  entry.active = true
+  if i, ok := slice.linear_search(
+    self.forcefields.free_indices[:],
+    handle.index,
+  ); ok {
+    unordered_remove(&self.forcefields.free_indices, i)
+  }
+  return &entry.item
+}
+
+sync_camera_from_world :: proc(
+  self: ^Manager,
+  handle: d.CameraHandle,
+  world_camera: ^camera.Camera,
+) {
+  dst := ensure_camera_slot(self, handle)
+  dst.position = world_camera.position
+  dst.rotation = world_camera.rotation
+  dst.projection = world_camera.projection
+  dst.extent = world_camera.extent
+  dst.enabled_passes = world_camera.enabled_passes
+  dst.enable_culling = world_camera.enable_culling
+  dst.enable_depth_pyramid = world_camera.enable_depth_pyramid
+  dst.draw_list_source_handle = world_camera.draw_list_source_handle
+}
+
+sync_spherical_camera_from_world :: proc(
+  self: ^Manager,
+  handle: d.SphereCameraHandle,
+  world_camera: ^camera.SphericalCamera,
+) {
+  dst := ensure_spherical_camera_slot(self, handle)
+  dst^ = world_camera^
+}
+
+sync_light_from_world :: proc(
+  self: ^Manager,
+  handle: d.LightHandle,
+  world_light: ^light.Light,
+) {
+  dst := ensure_light_slot(self, handle)
+  dst^ = world_light^
+  upload_light_data(self, handle, &dst.data)
+}
+
+sync_material_from_world :: proc(
+  self: ^Manager,
+  handle: d.MaterialHandle,
+  world_material: ^Material,
+) {
+  dst := ensure_material_slot(self, handle)
+  dst^ = world_material^
+  upload_material_data(self, handle, dst)
+}
+
+sync_mesh_from_world :: proc(
+  self: ^Manager,
+  handle: d.MeshHandle,
+  world_mesh: ^Mesh,
+) {
+  dst := ensure_mesh_slot(self, handle)
+  dst^ = world_mesh^
+  upload_mesh_data(self, handle, dst)
+}
+
+sync_sprite_from_world :: proc(
+  self: ^Manager,
+  handle: d.SpriteHandle,
+  world_sprite: ^Sprite,
+) {
+  dst := ensure_sprite_slot(self, handle)
+  dst^ = world_sprite^
+  upload_sprite_data(self, handle, &dst.data)
+}
+
+sync_emitter_from_world :: proc(
+  self: ^Manager,
+  handle: d.EmitterHandle,
+  world_emitter: ^Emitter,
+) {
+  dst := ensure_emitter_slot(self, handle)
+  dst^ = world_emitter^
+  upload_emitter_data(self, handle, &dst.data)
+}
+
+sync_forcefield_from_world :: proc(
+  self: ^Manager,
+  handle: d.ForceFieldHandle,
+  world_forcefield: ^ForceField,
+) {
+  dst := ensure_forcefield_slot(self, handle)
+  dst^ = world_forcefield^
+  upload_forcefield_data(self, handle, &dst.data)
+}
+
+clear_mesh :: proc(self: ^Manager, handle: d.MeshHandle) {
+  if u32(len(self.meshes.entries)) <= handle.index do return
+  entry := &self.meshes.entries[handle.index]
+  if !entry.active || entry.generation != handle.generation do return
+  free_mesh_geometry(self, handle)
+  zero_mesh_data: MeshData
+  upload_mesh_data_raw(self, handle, &zero_mesh_data)
+}
+
+clear_material :: proc(self: ^Manager, handle: d.MaterialHandle) {
+  if u32(len(self.materials.entries)) <= handle.index do return
+  entry := &self.materials.entries[handle.index]
+  if !entry.active || entry.generation != handle.generation do return
+  entry.active = false
+  append(&self.materials.free_indices, handle.index)
+  zero_material_data: MaterialData
+  upload_material_data_raw(self, handle, &zero_material_data)
+}
+
+clear_sprite :: proc(self: ^Manager, handle: d.SpriteHandle) {
+  if u32(len(self.sprites.entries)) <= handle.index do return
+  entry := &self.sprites.entries[handle.index]
+  if !entry.active || entry.generation != handle.generation do return
+  entry.active = false
+  append(&self.sprites.free_indices, handle.index)
+  zero_sprite_data: SpriteData
+  upload_sprite_data(self, handle, &zero_sprite_data)
+}
+
+clear_emitter :: proc(self: ^Manager, handle: d.EmitterHandle) {
+  if u32(len(self.emitters.entries)) <= handle.index do return
+  entry := &self.emitters.entries[handle.index]
+  if !entry.active || entry.generation != handle.generation do return
+  entry.active = false
+  append(&self.emitters.free_indices, handle.index)
+  zero_emitter_data: EmitterData
+  upload_emitter_data(self, handle, &zero_emitter_data)
+}
+
+clear_forcefield :: proc(self: ^Manager, handle: d.ForceFieldHandle) {
+  if u32(len(self.forcefields.entries)) <= handle.index do return
+  entry := &self.forcefields.entries[handle.index]
+  if !entry.active || entry.generation != handle.generation do return
+  entry.active = false
+  append(&self.forcefields.free_indices, handle.index)
+  zero_forcefield_data: ForceFieldData
+  upload_forcefield_data(self, handle, &zero_forcefield_data)
+}
+
 record_compute_commands :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
-  cameras: ^d.Pool(d.Camera),
-  spherical_cameras: ^d.Pool(d.SphericalCamera),
   compute_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   // Compute for frame N prepares data for frame N+1
   // Buffer indices with d.FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
   next_frame_index := alg.next(frame_index, d.FRAMES_IN_FLIGHT)
-  for &entry, cam_index in cameras.entries do if entry.active {
+  for &entry, cam_index in self.cameras.entries do if entry.active {
     cam_cpu := &entry.item
     cam_gpu := &self.cameras_gpu[cam_index]
-    upload_camera_data(self, cameras, u32(cam_index), frame_index)
+    upload_camera_data(self, &self.cameras, u32(cam_index), frame_index)
     // Only build pyramid if enabled for this camera
     if cam_cpu.enable_depth_pyramid {
       visibility.build_pyramid(&self.visibility, gctx, compute_buffer, cam_gpu, u32(cam_index), frame_index) // Build pyramid[N]
@@ -558,7 +844,7 @@ record_compute_commands :: proc(
       visibility.perform_culling(&self.visibility, gctx, compute_buffer, cam_gpu, u32(cam_index), next_frame_index, {.VISIBLE}, {}) // Write draw_list[N+1]
     }
   }
-  for &entry, cam_index in spherical_cameras.entries do if entry.active {
+  for &entry, cam_index in self.spherical_cameras.entries do if entry.active {
     cam_cpu := &entry.item
     cam_gpu := &self.spherical_cameras_gpu[cam_index]
     upload_spherical_camera_data(self, cam_cpu, u32(cam_index), frame_index)
@@ -575,22 +861,25 @@ record_compute_commands :: proc(
 init :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
-  materials: ^d.Pool(d.Material),
-  meshes: ^d.Pool(d.Mesh),
-  cameras: ^d.Pool(d.Camera),
-  spherical_cameras: ^d.Pool(d.SphericalCamera),
-  builtin_meshes: ^[len(d.Primitive)]d.MeshHandle,
   swapchain_extent: vk.Extent2D,
   swapchain_format: vk.Format,
   dpi_scale: f32,
 ) -> (
   ret: vk.Result,
 ) {
+  cont.init(&self.cameras, d.MAX_CAMERAS)
+  cont.init(&self.spherical_cameras, d.MAX_CAMERAS)
+  cont.init(&self.lights, d.MAX_LIGHTS)
+  cont.init(&self.materials, d.MAX_MATERIALS)
+  cont.init(&self.meshes, d.MAX_MESHES)
+  cont.init(&self.emitters, d.MAX_EMITTERS)
+  cont.init(&self.forcefields, d.MAX_FORCE_FIELDS)
+  cont.init(&self.sprites, d.MAX_SPRITES)
   // Initialize texture tracking maps
-  self.texture_2d_tracking = make(map[d.Image2DHandle]TextureTracking)
-  self.texture_cube_tracking = make(map[d.ImageCubeHandle]TextureTracking)
-  self.retired_textures_2d = make(map[d.Image2DHandle]u32)
-  self.retired_textures_cube = make(map[d.ImageCubeHandle]u32)
+  self.texture_2d_tracking = make(map[gpu.Texture2DHandle]TextureTracking)
+  self.texture_cube_tracking = make(map[gpu.TextureCubeHandle]TextureTracking)
+  self.retired_textures_2d = make(map[gpu.Texture2DHandle]u32)
+  self.retired_textures_cube = make(map[gpu.TextureCubeHandle]u32)
   init_geometry_buffers(self, gctx) or_return
   defer if ret != .SUCCESS {
     destroy_geometry_buffers(self, gctx)
@@ -607,50 +896,51 @@ init :: proc(
   defer if ret != .SUCCESS {
     shutdown_scene_buffers(self, gctx)
   }
-  sync_existing_resource_data(self, materials, meshes)
+  sync_existing_resource_data(self)
   init_bindless_layouts(self, gctx) or_return
   defer if ret != .SUCCESS {
     shutdown_bindless_layouts(self, gctx)
   }
-  init_builtin_meshes(gctx, self, meshes, builtin_meshes) or_return
-  camera_handle, camera_cpu, ok := cont.alloc(cameras, d.CameraHandle)
+  camera_handle, camera_cpu, ok := cont.alloc(&self.cameras, d.CameraHandle)
   if !ok {
     return .ERROR_INITIALIZATION_FAILED
   }
   defer if ret != .SUCCESS {
-    cont.free(cameras, camera_handle)
+    cont.free(&self.cameras, camera_handle)
   }
-  d.camera_init(
-    camera_cpu,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    {
-      .SHADOW,
-      .GEOMETRY,
-      .LIGHTING,
-      .TRANSPARENCY,
-      .PARTICLES,
-      .DEBUG_DRAW,
-      .POST_PROCESS,
-    },
-    {3, 4, 3}, // Camera slightly above and diagonal to origin
-    {0, 0, 0}, // Looking at origin
-    math.PI * 0.5, // FOV
-    0.1, // near plane
-    100.0, // far plane
-  ) or_return
+  camera_cpu.position = {3, 4, 3}
+  camera_cpu.rotation = linalg.QUATERNIONF32_IDENTITY
+  camera_cpu.projection = camera.PerspectiveProjection {
+    fov          = math.PI * 0.5,
+    aspect_ratio = f32(swapchain_extent.width) / f32(swapchain_extent.height),
+    near         = 0.1,
+    far          = 100.0,
+  }
+  camera_cpu.extent = {swapchain_extent.width, swapchain_extent.height}
+  camera_cpu.enabled_passes = {
+    .SHADOW,
+    .GEOMETRY,
+    .LIGHTING,
+    .TRANSPARENCY,
+    .PARTICLES,
+    .DEBUG_DRAW,
+    .POST_PROCESS,
+  }
+  camera_cpu.enable_culling = true
+  camera_cpu.enable_depth_pyramid = true
+  camera_cpu.draw_list_source_handle = {}
   // Initialize GPU resources for the camera
   camera_gpu := &self.cameras_gpu[camera_handle.index]
   camera.init_gpu(
     gctx,
     camera_gpu,
-    camera_cpu,
     &self.texture_manager,
     swapchain_extent.width,
     swapchain_extent.height,
     swapchain_format,
     vk.Format.D32_SFLOAT,
     camera_cpu.enabled_passes,
+    camera_cpu.enable_depth_pyramid,
     d.MAX_NODES_IN_SCENE,
   ) or_return
   self.main_camera = camera_handle
@@ -673,25 +963,6 @@ init :: proc(
     &self.world_matrix_buffer,
     &self.camera_buffer,
   ) or_return
-  // Create light volume meshes for lighting renderer
-  sphere_mesh := allocate_mesh_geometry(
-    gctx,
-    self,
-    meshes,
-    geo.make_sphere(segments = 64, rings = 64),
-  ) or_return
-  cone_mesh := allocate_mesh_geometry(
-    gctx,
-    self,
-    meshes,
-    geo.make_cone(segments = 128, height = 1, radius = 0.5),
-  ) or_return
-  triangle_mesh := allocate_mesh_geometry(
-    gctx,
-    self,
-    meshes,
-    geo.make_fullscreen_triangle(),
-  ) or_return
   lighting.init(
     &self.lighting,
     gctx,
@@ -700,11 +971,7 @@ init :: proc(
     self.lights_buffer.set_layout,
     self.world_matrix_buffer.set_layout,
     self.spherical_camera_buffer.set_layout,
-    &self.mesh_data_buffer,
     self.textures_set_layout,
-    sphere_mesh,
-    cone_mesh,
-    triangle_mesh,
     swapchain_extent.width,
     swapchain_extent.height,
     swapchain_format,
@@ -736,7 +1003,6 @@ init :: proc(
     swapchain_extent.height,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
-    builtin_meshes[d.Primitive.QUAD_XY],
   ) or_return
   post_process.init(
     &self.post_process,
@@ -798,6 +1064,22 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   delete(self.texture_cube_tracking)
   delete(self.retired_textures_2d)
   delete(self.retired_textures_cube)
+  delete(self.cameras.entries)
+  delete(self.cameras.free_indices)
+  delete(self.spherical_cameras.entries)
+  delete(self.spherical_cameras.free_indices)
+  delete(self.lights.entries)
+  delete(self.lights.free_indices)
+  delete(self.materials.entries)
+  delete(self.materials.free_indices)
+  delete(self.meshes.entries)
+  delete(self.meshes.free_indices)
+  delete(self.emitters.entries)
+  delete(self.emitters.free_indices)
+  delete(self.forcefields.entries)
+  delete(self.forcefields.free_indices)
+  delete(self.sprites.entries)
+  delete(self.sprites.free_indices)
 }
 
 resize :: proc(
@@ -829,11 +1111,9 @@ render_camera_depth :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
-  cameras: ^d.Pool(d.Camera),
-  spherical_cameras: ^d.Pool(d.SphericalCamera),
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  for &entry, cam_index in cameras.entries do if entry.active {
+  for &entry, cam_index in self.cameras.entries do if entry.active {
     cam_cpu := &entry.item
     cam_gpu := &self.cameras_gpu[cam_index]
     // Look up draw list source if specified (allows sharing culling between cameras)
@@ -843,7 +1123,7 @@ render_camera_depth :: proc(
     }
     visibility.render_depth(&self.visibility, gctx, command_buffer, cam_gpu, cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, self.textures_descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.vertex_skinning_buffer.descriptor_set, self.vertex_buffer.buffer, self.index_buffer.buffer, draw_list_source_gpu)
   }
-  for &entry, cam_index in spherical_cameras.entries do if entry.active {
+  for &entry, cam_index in self.spherical_cameras.entries do if entry.active {
     cam_cpu := &entry.item
     cam_gpu := &self.spherical_cameras_gpu[cam_index]
     visibility.render_sphere_depth(&self.visibility, gctx, command_buffer, cam_gpu, cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, self.sphere_pipeline_layout, self.textures_descriptor_set, self.spherical_camera_buffer.descriptor_sets[frame_index], self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.vertex_skinning_buffer.descriptor_set, self.vertex_buffer.buffer, self.index_buffer.buffer)
@@ -855,11 +1135,10 @@ record_geometry_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
-  cameras: d.Pool(d.Camera),
   camera_handle: d.CameraHandle,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  camera_cpu := cont.get(cameras, camera_handle)
+  camera_cpu := cont.get(self.cameras, camera_handle)
   if camera_cpu == nil do return .ERROR_UNKNOWN
   camera_gpu := &self.cameras_gpu[camera_handle.index]
   geometry.begin_pass(
@@ -900,15 +1179,12 @@ record_geometry_pass :: proc(
 record_lighting_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  cameras: d.Pool(d.Camera),
-  meshes: d.Pool(d.Mesh),
-  lights: d.Pool(d.Light),
   active_lights: []d.LightHandle,
   camera_handle: d.CameraHandle,
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  camera_cpu := cont.get(cameras, camera_handle)
+  camera_cpu := cont.get(self.cameras, camera_handle)
   if camera_cpu == nil do return .ERROR_UNKNOWN
   camera_gpu := &self.cameras_gpu[camera_handle.index]
   lighting.begin_ambient_pass(
@@ -945,13 +1221,10 @@ record_lighting_pass :: proc(
     &self.cameras_gpu,
     &self.spherical_cameras_gpu,
     command_buffer,
-    meshes,
-    cameras,
-    lights,
+    self.cameras,
+    self.lights,
     active_lights,
     &self.world_matrix_buffer,
-    self.vertex_buffer.buffer,
-    self.index_buffer.buffer,
     frame_index,
   )
   lighting.end_pass(command_buffer)
@@ -961,12 +1234,11 @@ record_lighting_pass :: proc(
 record_particles_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  cameras: d.Pool(d.Camera),
   camera_handle: d.CameraHandle,
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  camera_cpu, ok := cont.get(cameras, camera_handle)
+  camera_cpu, ok := cont.get(self.cameras, camera_handle)
   if !ok do return .ERROR_UNKNOWN
   camera_gpu := &self.cameras_gpu[camera_handle.index]
   particles.begin_pass(
@@ -993,12 +1265,11 @@ record_transparency_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
-  cameras: d.Pool(d.Camera),
   camera_handle: d.CameraHandle,
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  camera_cpu, ok := cont.get(cameras, camera_handle)
+  camera_cpu, ok := cont.get(self.cameras, camera_handle)
   if !ok do return .ERROR_UNKNOWN
   camera_gpu := &self.cameras_gpu[camera_handle.index]
   // Barrier: Wait for compute to finish before reading draw commands
@@ -1099,14 +1370,12 @@ record_transparency_pass :: proc(
 record_debug_draw_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  cameras: d.Pool(d.Camera),
-  meshes: d.Pool(d.Mesh),
   destroy_line_strip_mesh_ctx: rawptr,
   destroy_line_strip_mesh: proc(ctx: rawptr, handle: d.MeshHandle),
   camera_handle: d.CameraHandle,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  camera_cpu, ok := cont.get(cameras, camera_handle)
+  camera_cpu, ok := cont.get(self.cameras, camera_handle)
   if !ok do return .ERROR_UNKNOWN
   camera_gpu := &self.cameras_gpu[camera_handle.index]
   debug_draw.update(
@@ -1127,7 +1396,7 @@ record_debug_draw_pass :: proc(
     camera_gpu,
     camera_handle,
     command_buffer,
-    meshes,
+    self.meshes,
     frame_index,
     self.vertex_buffer.buffer,
     self.index_buffer.buffer,
@@ -1139,7 +1408,6 @@ record_debug_draw_pass :: proc(
 record_post_process_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  cameras: d.Pool(d.Camera),
   camera_handle: d.CameraHandle,
   color_format: vk.Format,
   swapchain_extent: vk.Extent2D,
@@ -1147,7 +1415,7 @@ record_post_process_pass :: proc(
   swapchain_view: vk.ImageView,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  camera_cpu, ok := cont.get(cameras, camera_handle)
+  camera_cpu, ok := cont.get(self.cameras, camera_handle)
   if !ok do return .ERROR_UNKNOWN
   camera_gpu := &self.cameras_gpu[camera_handle.index]
   if final_image := gpu.get_texture_2d(
@@ -1276,9 +1544,9 @@ record_ui_pass :: proc(
 get_camera_attachment :: proc(
   self: ^Manager,
   camera_handle: d.CameraHandle,
-  attachment_type: d.AttachmentType,
+  attachment_type: camera.AttachmentType,
   frame_index: u32 = 0,
-) -> d.Image2DHandle {
+) -> gpu.Texture2DHandle {
   return camera.get_attachment(
     &self.cameras_gpu[camera_handle.index],
     attachment_type,

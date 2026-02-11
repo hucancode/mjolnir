@@ -1,11 +1,12 @@
 package visibility
 
 import cont "../../containers"
-import d "../../data"
+import d "../data"
 import "../../geometry"
 import alg "../../algebra"
 import "../../gpu"
 import "../camera"
+import rd "../data"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -40,8 +41,8 @@ VisibilityPushConstants :: struct {
   camera_index:      u32,
   node_count:        u32,
   max_draws:         u32,
-  include_flags:     d.NodeFlagSet,
-  exclude_flags:     d.NodeFlagSet,
+  include_flags:     rd.NodeFlagSet,
+  exclude_flags:     rd.NodeFlagSet,
   pyramid_width:     f32,
   pyramid_height:    f32,
   depth_bias:        f32,
@@ -218,12 +219,12 @@ render_depth :: proc(
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^d.Camera,
+  camera_cpu: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   camera_index: u32,
   frame_index: u32,
-  include_flags: d.NodeFlagSet,
-  exclude_flags: d.NodeFlagSet,
+  include_flags: rd.NodeFlagSet,
+  exclude_flags: rd.NodeFlagSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
   material_descriptor_set: vk.DescriptorSet,
@@ -404,8 +405,8 @@ perform_culling :: proc(
   camera_gpu: ^camera.CameraGPU,
   camera_index: u32,
   frame_index: u32,
-  include_flags: d.NodeFlagSet,
-  exclude_flags: d.NodeFlagSet,
+  include_flags: rd.NodeFlagSet,
+  exclude_flags: rd.NodeFlagSet,
 ) {
   if self.node_count == 0 do return
   vk.CmdFillBuffer(
@@ -466,8 +467,8 @@ perform_sphere_culling :: proc(
   camera_gpu: ^camera.SphericalCameraGPU,
   camera_index: u32,
   frame_index: u32,
-  include_flags: d.NodeFlagSet,
-  exclude_flags: d.NodeFlagSet,
+  include_flags: rd.NodeFlagSet,
+  exclude_flags: rd.NodeFlagSet,
 ) {
   if self.node_count == 0 do return
   // STEP 1: Clear draw count and execute sphere culling
@@ -513,12 +514,12 @@ render_sphere_depth :: proc(
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   camera_gpu: ^camera.SphericalCameraGPU,
-  camera_cpu: ^d.SphericalCamera,
+  camera_cpu: ^camera.SphericalCamera,
   texture_manager: ^gpu.TextureManager,
   camera_index: u32,
   frame_index: u32,
-  include_flags: d.NodeFlagSet,
-  exclude_flags: d.NodeFlagSet,
+  include_flags: rd.NodeFlagSet,
+  exclude_flags: rd.NodeFlagSet,
   sphere_pipeline_layout: vk.PipelineLayout,
   textures_descriptor_set: vk.DescriptorSet,
   spherical_camera_descriptor_set: vk.DescriptorSet,

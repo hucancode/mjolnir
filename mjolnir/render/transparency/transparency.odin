@@ -1,7 +1,7 @@
 package transparency
 
 import cont "../../containers"
-import d "../../data"
+import d "../data"
 import "../../geometry"
 import "../../gpu"
 import "../camera"
@@ -20,7 +20,6 @@ Renderer :: struct {
   transparent_pipeline: vk.Pipeline,
   wireframe_pipeline:   vk.Pipeline,
   sprite_pipeline:      vk.Pipeline,
-  sprite_quad_mesh:     d.MeshHandle,
 }
 
 PushConstant :: struct {
@@ -33,7 +32,6 @@ init :: proc(
   width, height: u32,
   general_pipeline_layout: vk.PipelineLayout,
   sprite_pipeline_layout: vk.PipelineLayout,
-  sprite_quad_mesh: d.MeshHandle,
 ) -> (
   ret: vk.Result,
 ) {
@@ -41,7 +39,6 @@ init :: proc(
   if general_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-  self.sprite_quad_mesh = sprite_quad_mesh
   create_transparent_pipelines(
     gctx,
     self,
@@ -244,7 +241,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 begin_pass :: proc(
   self: ^Renderer,
   camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^d.Camera,
+  camera_cpu: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,

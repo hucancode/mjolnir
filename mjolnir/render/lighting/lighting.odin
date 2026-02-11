@@ -1,10 +1,11 @@
 package lighting
 
 import cont "../../containers"
-import d "../../data"
+import d "../data"
 import "../../geometry"
 import "../../gpu"
 import "../camera"
+import "../light"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -53,7 +54,7 @@ LightPushConstant :: struct {
 begin_ambient_pass :: proc(
   self: ^Renderer,
   camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^d.Camera,
+  camera_cpu: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
@@ -126,9 +127,7 @@ init :: proc(
   lights_set_layout: vk.DescriptorSetLayout,
   world_matrix_set_layout: vk.DescriptorSetLayout,
   spherical_camera_set_layout: vk.DescriptorSetLayout,
-  mesh_data_buffer: ^gpu.BindlessBuffer(d.MeshData),
   textures_set_layout: vk.DescriptorSetLayout,
-  sphere_mesh, cone_mesh, triangle_mesh: d.MeshHandle,
   width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
@@ -305,9 +304,30 @@ init :: proc(
     vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
   }
   log.info("Lighting pipeline initialized successfully")
-  self.sphere_mesh = sphere_mesh
-  self.cone_mesh = cone_mesh
-  self.triangle_mesh = triangle_mesh
+  create_light_volume_mesh(
+    gctx,
+    &self.sphere_mesh,
+    geometry.make_sphere(),
+  ) or_return
+  defer if ret != .SUCCESS {
+    destroy_light_volume_mesh(gctx.device, &self.sphere_mesh)
+  }
+  create_light_volume_mesh(
+    gctx,
+    &self.cone_mesh,
+    geometry.make_cone(),
+  ) or_return
+  defer if ret != .SUCCESS {
+    destroy_light_volume_mesh(gctx.device, &self.cone_mesh)
+  }
+  create_light_volume_mesh(
+    gctx,
+    &self.triangle_mesh,
+    geometry.make_fullscreen_triangle(),
+  ) or_return
+  defer if ret != .SUCCESS {
+    destroy_light_volume_mesh(gctx.device, &self.triangle_mesh)
+  }
   log.info("Light volume meshes initialized")
   return .SUCCESS
 }
@@ -323,6 +343,9 @@ shutdown :: proc(
   self.ambient_pipeline_layout = 0
   gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
   gpu.free_texture_2d(texture_manager, gctx, self.brdf_lut)
+  destroy_light_volume_mesh(gctx.device, &self.sphere_mesh)
+  destroy_light_volume_mesh(gctx.device, &self.cone_mesh)
+  destroy_light_volume_mesh(gctx.device, &self.triangle_mesh)
   vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
 }
@@ -334,15 +357,66 @@ BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 Renderer :: struct {
   ambient_pipeline:         vk.Pipeline,
   ambient_pipeline_layout:  vk.PipelineLayout,
-  environment_map:          d.Image2DHandle,
-  brdf_lut:                 d.Image2DHandle,
+  environment_map:          gpu.Texture2DHandle,
+  brdf_lut:                 gpu.Texture2DHandle,
   environment_max_lod:      f32,
   ibl_intensity:            f32,
   lighting_pipeline:        vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
-  sphere_mesh:              d.MeshHandle,
-  cone_mesh:                d.MeshHandle,
-  triangle_mesh:            d.MeshHandle,
+  sphere_mesh:              LightVolumeMesh,
+  cone_mesh:                LightVolumeMesh,
+  triangle_mesh:            LightVolumeMesh,
+}
+
+LightVolumeMesh :: struct {
+  vertex_buffer: gpu.ImmutableBuffer(geometry.Vertex),
+  index_buffer:  gpu.ImmutableBuffer(u32),
+  index_count:   u32,
+}
+
+@(private)
+create_light_volume_mesh :: proc(
+  gctx: ^gpu.GPUContext,
+  out_mesh: ^LightVolumeMesh,
+  geom: geometry.Geometry,
+) -> vk.Result {
+  out_mesh^ = {}
+  vertex_buffer, ret_vertex := gpu.malloc_buffer(
+    gctx,
+    geometry.Vertex,
+    len(geom.vertices),
+    {.VERTEX_BUFFER},
+  )
+  if ret_vertex != .SUCCESS do return ret_vertex
+  out_mesh.vertex_buffer = vertex_buffer
+  index_buffer, ret_index := gpu.malloc_buffer(
+    gctx,
+    u32,
+    len(geom.indices),
+    {.INDEX_BUFFER},
+  )
+  if ret_index != .SUCCESS {
+    gpu.buffer_destroy(gctx.device, &out_mesh.vertex_buffer)
+    return ret_index
+  }
+  out_mesh.index_buffer = index_buffer
+  if gpu.write(gctx, &out_mesh.vertex_buffer, geom.vertices) != .SUCCESS {
+    destroy_light_volume_mesh(gctx.device, out_mesh)
+    return .ERROR_UNKNOWN
+  }
+  if gpu.write(gctx, &out_mesh.index_buffer, geom.indices) != .SUCCESS {
+    destroy_light_volume_mesh(gctx.device, out_mesh)
+    return .ERROR_UNKNOWN
+  }
+  out_mesh.index_count = u32(len(geom.indices))
+  return .SUCCESS
+}
+
+@(private)
+destroy_light_volume_mesh :: proc(device: vk.Device, mesh: ^LightVolumeMesh) {
+  gpu.buffer_destroy(device, &mesh.vertex_buffer)
+  gpu.buffer_destroy(device, &mesh.index_buffer)
+  mesh.index_count = 0
 }
 
 recreate_images :: proc(
@@ -358,7 +432,7 @@ recreate_images :: proc(
 begin_pass :: proc(
   self: ^Renderer,
   camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^d.Camera,
+  camera_cpu: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   lights_descriptor_set: vk.DescriptorSet,
@@ -403,39 +477,26 @@ render :: proc(
   cameras_gpu: ^[d.MAX_CAMERAS]camera.CameraGPU,
   spherical_cameras_gpu: ^[d.MAX_CAMERAS]camera.SphericalCameraGPU,
   command_buffer: vk.CommandBuffer,
-  meshes: d.Pool(d.Mesh),
-  cameras: d.Pool(d.Camera),
-  lights: d.Pool(d.Light),
+  cameras: d.Pool(camera.Camera),
+  lights: d.Pool(light.Light),
   active_lights: []d.LightHandle,
   world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
-  vertex_buffer: vk.Buffer,
-  index_buffer: vk.Buffer,
   frame_index: u32,
 ) {
   bind_and_draw_mesh :: proc(
-    mesh_handle: d.MeshHandle,
+    mesh: ^LightVolumeMesh,
     command_buffer: vk.CommandBuffer,
-    meshes: d.Pool(d.Mesh),
-    vertex_buffer: vk.Buffer,
-    index_buffer: vk.Buffer,
   ) {
-    mesh_ptr := cont.get(meshes, mesh_handle)
-    if mesh_ptr == nil {
-      log.errorf("Failed to get mesh for handle %v", mesh_handle)
-      return
-    }
     gpu.bind_vertex_index_buffers(
       command_buffer,
-      vertex_buffer,
-      index_buffer,
-      vk.DeviceSize(
-        mesh_ptr.vertex_allocation.offset * size_of(geometry.Vertex),
-      ),
-      vk.DeviceSize(mesh_ptr.index_allocation.offset * size_of(u32)),
+      mesh.vertex_buffer.buffer,
+      mesh.index_buffer.buffer,
+      0,
+      0,
     )
     vk.CmdDrawIndexed(
       command_buffer,
-      mesh_ptr.index_allocation.count,
+      mesh.index_count,
       1,
       0,
       0,
@@ -493,31 +554,22 @@ render :: proc(
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
       vk.CmdSetCullMode(command_buffer, {.FRONT})
       bind_and_draw_mesh(
-        self.sphere_mesh,
+        &self.sphere_mesh,
         command_buffer,
-        meshes,
-        vertex_buffer,
-        index_buffer,
       )
     case .DIRECTIONAL:
       vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
       vk.CmdSetCullMode(command_buffer, {.BACK})
       bind_and_draw_mesh(
-        self.triangle_mesh,
+        &self.triangle_mesh,
         command_buffer,
-        meshes,
-        vertex_buffer,
-        index_buffer,
       )
     case .SPOT:
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
       vk.CmdSetCullMode(command_buffer, {.BACK})
       bind_and_draw_mesh(
-        self.cone_mesh,
+        &self.cone_mesh,
         command_buffer,
-        meshes,
-        vertex_buffer,
-        index_buffer,
       )
     }
   }

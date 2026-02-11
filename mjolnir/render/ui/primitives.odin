@@ -1,7 +1,7 @@
 package ui
 
 import cont "../../containers"
-import d "../../data"
+import "../../gpu"
 import "core:log"
 import "core:slice"
 
@@ -10,7 +10,7 @@ create_mesh2d :: proc(
   position: [2]f32,
   vertices: []Vertex2D,
   indices: []u32,
-  texture: d.Image2DHandle = {},
+  texture: gpu.Texture2DHandle = {},
   z_order: i32 = 0,
 ) -> (
   Mesh2DHandle,
@@ -30,7 +30,7 @@ create_mesh2d :: proc(
 
   // Use default texture if none specified
   final_texture :=
-    texture if texture != (d.Image2DHandle{}) else sys.default_texture
+    texture if texture != (gpu.Texture2DHandle{}) else sys.default_texture
 
   widget^ = Mesh2D {
     type           = .Mesh2D,
@@ -50,7 +50,7 @@ create_quad2d :: proc(
   sys: ^System,
   position: [2]f32,
   size: [2]f32,
-  texture: d.Image2DHandle = {},
+  texture: gpu.Texture2DHandle = {},
   color: [4]u8 = {255, 255, 255, 255},
   z_order: i32 = 0,
 ) -> (
@@ -65,7 +65,7 @@ create_quad2d :: proc(
 
   // Use default texture if none specified
   final_texture :=
-    texture if texture != (d.Image2DHandle{}) else sys.default_texture
+    texture if texture != (gpu.Texture2DHandle{}) else sys.default_texture
 
   widget^ = Quad2D {
     type           = .Quad2D,

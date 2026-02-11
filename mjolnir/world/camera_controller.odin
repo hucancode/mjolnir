@@ -1,6 +1,5 @@
 package world
 
-import d "../data"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -151,7 +150,7 @@ camera_controller_follow_init :: proc(
 
 camera_controller_orbit_update :: proc(
   self: ^CameraController,
-  camera: ^d.Camera,
+  camera: ^Camera,
   delta_time: f32,
 ) {
   orbit := &self.data.(OrbitCameraData)
@@ -189,7 +188,7 @@ camera_controller_orbit_update :: proc(
         glfw.GetKey(self.window, glfw.KEY_RIGHT_SHIFT) == glfw.PRESS
       if shift_pressed {
         // Pan mode - move the target point
-        camera := d.Camera {
+        camera := Camera {
           position = orbit.target + [3]f32{orbit.distance * math.cos(orbit.pitch) * math.cos(orbit.yaw), orbit.distance * math.sin(orbit.pitch), orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw)},
         }
         // Calculate camera right and up vectors for panning
@@ -220,13 +219,13 @@ camera_controller_orbit_update :: proc(
     y := orbit.distance * math.sin(orbit.pitch)
     z := orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw)
     camera_position := orbit.target + [3]f32{x, y, z}
-    d.camera_look_at(camera, camera_position, orbit.target)
+    camera_look_at(camera, camera_position, orbit.target)
   }
 }
 
 camera_controller_free_update :: proc(
   self: ^CameraController,
-  camera: ^d.Camera,
+  camera: ^Camera,
   delta_time: f32,
 ) {
   free := &self.data.(FreeCameraData)
@@ -238,10 +237,10 @@ camera_controller_free_update :: proc(
     speed *= free.boost_multiplier
   }
   // WASD movement
-  if glfw.GetKey(self.window, glfw.KEY_W) == glfw.PRESS do move_vector += d.camera_forward(camera)
-  if glfw.GetKey(self.window, glfw.KEY_S) == glfw.PRESS do move_vector -= d.camera_forward(camera)
-  if glfw.GetKey(self.window, glfw.KEY_A) == glfw.PRESS do move_vector -= d.camera_right(camera)
-  if glfw.GetKey(self.window, glfw.KEY_D) == glfw.PRESS do move_vector += d.camera_right(camera)
+  if glfw.GetKey(self.window, glfw.KEY_W) == glfw.PRESS do move_vector += camera_forward(camera)
+  if glfw.GetKey(self.window, glfw.KEY_S) == glfw.PRESS do move_vector -= camera_forward(camera)
+  if glfw.GetKey(self.window, glfw.KEY_A) == glfw.PRESS do move_vector -= camera_right(camera)
+  if glfw.GetKey(self.window, glfw.KEY_D) == glfw.PRESS do move_vector += camera_right(camera)
   if glfw.GetKey(self.window, glfw.KEY_Q) == glfw.PRESS do move_vector.y -= 1
   if glfw.GetKey(self.window, glfw.KEY_E) == glfw.PRESS do move_vector.y += 1
   if linalg.length2(move_vector) > 0 {
@@ -264,7 +263,7 @@ camera_controller_free_update :: proc(
     )
     camera.rotation = yaw_quat * camera.rotation
     // rotate around local right for pitch
-    right := d.camera_right(camera)
+    right := camera_right(camera)
     pitch_quat := linalg.quaternion_angle_axis(-pitch_delta, right)
     camera.rotation = pitch_quat * camera.rotation
   }
@@ -272,7 +271,7 @@ camera_controller_free_update :: proc(
 
 camera_controller_follow_update :: proc(
   self: ^CameraController,
-  camera: ^d.Camera,
+  camera: ^Camera,
   delta_time: f32,
 ) {
   follow := &self.data.(FollowCameraData)
@@ -286,7 +285,7 @@ camera_controller_follow_update :: proc(
       follow.follow_speed * delta_time,
     )
     if follow.look_at_target {
-      d.camera_look_at(camera, new_pos, target_pos)
+      camera_look_at(camera, new_pos, target_pos)
     } else {
       camera.position = new_pos
     }
@@ -295,7 +294,7 @@ camera_controller_follow_update :: proc(
 
 camera_controller_orbit_sync :: proc(
   controller: ^CameraController,
-  camera: ^d.Camera,
+  camera: ^Camera,
 ) {
   if orbit, ok := &controller.data.(OrbitCameraData); ok {
     offset := camera.position - orbit.target
@@ -320,14 +319,14 @@ camera_controller_orbit_sync :: proc(
       y := orbit.distance * math.sin(orbit.pitch)
       z := orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw)
       camera_position := orbit.target + [3]f32{x, y, z}
-      d.camera_look_at(camera, camera_position, orbit.target)
+      camera_look_at(camera, camera_position, orbit.target)
     }
   }
 }
 
 camera_controller_free_sync :: proc(
   controller: ^CameraController,
-  camera: ^d.Camera,
+  camera: ^Camera,
 ) {
   // Free camera controller doesn't need explicit syncing since it directly modifies
   // the camera's position and rotation. The camera object already contains the current state.
@@ -336,7 +335,7 @@ camera_controller_free_sync :: proc(
 
 camera_controller_sync :: proc(
   controller: ^CameraController,
-  camera: ^d.Camera,
+  camera: ^Camera,
 ) {
   switch controller.type {
   case .ORBIT:

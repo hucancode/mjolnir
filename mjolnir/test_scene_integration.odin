@@ -1,7 +1,6 @@
 package mjolnir
 
 import "physics"
-import d "data"
 import "geometry"
 import "world"
 import "core:fmt"
@@ -265,7 +264,7 @@ create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
   }
   if max_depth <= 0 || target_nodes <= 0 do return
   QueueEntry :: struct {
-    handle: d.NodeHandle,
+    handle: world.NodeHandle,
     depth:  int,
   }
   queue: [dynamic]QueueEntry

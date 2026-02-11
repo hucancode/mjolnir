@@ -2,7 +2,6 @@ package world
 
 import anim "../animation"
 import cont "../containers"
-import d "../data"
 import "../geometry"
 import physics "../physics"
 import "core:log"
@@ -13,33 +12,34 @@ import "core:strings"
 import "core:sync"
 
 LightAttachment :: struct {
-  handle: d.LightHandle,
+  handle: LightHandle,
 }
 
 NodeSkinning :: struct {
   layers:            [dynamic]anim.Layer,    // Animation layers (FK + IK)
   active_transition: Maybe(anim.Transition), // Active transition state
+  matrices:          []matrix[4, 4]f32,      // Latest computed skinning matrices
 }
 
 MeshAttachment :: struct {
-  handle:              d.MeshHandle,
-  material:            d.MaterialHandle,
+  handle:              MeshHandle,
+  material:            MaterialHandle,
   skinning:            Maybe(NodeSkinning),
   cast_shadow:         bool,
 }
 
 EmitterAttachment :: struct {
-  handle: d.EmitterHandle,
+  handle: EmitterHandle,
 }
 
 ForceFieldAttachment :: struct {
-  handle: d.ForceFieldHandle,
+  handle: ForceFieldHandle,
 }
 
 SpriteAttachment :: struct {
-  sprite_handle: d.SpriteHandle,
-  mesh_handle:   d.MeshHandle,
-  material:      d.MaterialHandle,
+  sprite_handle: SpriteHandle,
+  mesh_handle:   MeshHandle,
+  material:      MaterialHandle,
 }
 
 RigidBodyAttachment :: struct {
@@ -80,7 +80,7 @@ NodeTagSet :: bit_set[NodeTag;u32]
 // AnimationInstance represents a playing animation clip on a node
 // Uses handle-based lookup to avoid pointer invalidation when pools resize
 AnimationInstance :: struct {
-  clip_handle: d.ClipHandle, // handle to animation clip (resolved at runtime)
+  clip_handle: ClipHandle, // handle to animation clip (resolved at runtime)
   mode:        anim.PlayMode,
   status:      anim.Status,
   time:        f32,
@@ -89,8 +89,8 @@ AnimationInstance :: struct {
 }
 
 Node :: struct {
-  parent:           d.NodeHandle,
-  children:         [dynamic]d.NodeHandle,
+  parent:           NodeHandle,
+  children:         [dynamic]NodeHandle,
   transform:        geometry.Transform,
   name:             string,
   bone_socket:      string, // if not empty, attach to this bone on parent skinned mesh
@@ -106,7 +106,7 @@ Node :: struct {
 TraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 
 TraverseEntry :: struct {
-  handle:            d.NodeHandle,
+  handle:            NodeHandle,
   parent_transform:  matrix[4, 4]f32,
   parent_is_dirty:   bool,
   parent_is_visible: bool,
@@ -114,36 +114,36 @@ TraverseEntry :: struct {
 
 // Debug draw callbacks - engine can set these to enable debug visualization
 DebugDrawLineStripCallback :: proc(points: []geometry.Vertex, duration_seconds: f64, color: [4]f32, bypass_depth: bool)
-DebugDrawMeshCallback :: proc(mesh_handle: d.MeshHandle, transform: matrix[4, 4]f32, duration_seconds: f64, color: [4]f32, bypass_depth: bool)
+DebugDrawMeshCallback :: proc(mesh_handle: MeshHandle, transform: matrix[4, 4]f32, duration_seconds: f64, color: [4]f32, bypass_depth: bool)
 
 World :: struct {
-  root:                    d.NodeHandle,
-  nodes:                   d.Pool(Node),
+  root:                    NodeHandle,
+  nodes:                   Pool(Node),
   traversal_stack:         [dynamic]TraverseEntry,
   staging:                 StagingList,
   actor_pools:             map[typeid]ActorPoolEntry,
-  animatable_nodes:        [dynamic]d.NodeHandle,
-  pending_node_deletions:  [dynamic]d.NodeHandle,
+  animatable_nodes:        [dynamic]NodeHandle,
+  pending_node_deletions:  [dynamic]NodeHandle,
   pending_deletions_mutex: sync.Mutex,
   // Debug draw callbacks (optional, set by engine)
   debug_draw_line_strip:   DebugDrawLineStripCallback,
   debug_draw_mesh:         DebugDrawMeshCallback,
   // CPU resource pools (moved from resources.Manager)
-  meshes:                  cont.Pool(d.Mesh),
-  materials:               cont.Pool(d.Material),
-  cameras:                 cont.Pool(d.Camera),
-  spherical_cameras:       cont.Pool(d.SphericalCamera),
-  emitters:                cont.Pool(d.Emitter),
-  forcefields:             cont.Pool(d.ForceField),
-  sprites:                 cont.Pool(d.Sprite),
-  lights:                  cont.Pool(d.Light),
+  meshes:                  cont.Pool(Mesh),
+  materials:               cont.Pool(Material),
+  cameras:                 cont.Pool(Camera),
+  spherical_cameras:       cont.Pool(SphericalCamera),
+  emitters:                cont.Pool(Emitter),
+  forcefields:             cont.Pool(ForceField),
+  sprites:                 cont.Pool(Sprite),
+  lights:                  cont.Pool(Light),
   animation_clips:         cont.Pool(anim.Clip),
   // Active resource tracking
-  animatable_sprites:      [dynamic]d.SpriteHandle,
-  active_lights:           [dynamic]d.LightHandle,
+  animatable_sprites:      [dynamic]SpriteHandle,
+  active_lights:           [dynamic]LightHandle,
   // Builtin resources
-  builtin_materials:       [len(d.Color)]d.MaterialHandle,
-  builtin_meshes:          [len(d.Primitive)]d.MeshHandle,
+  builtin_materials:       [len(Color)]MaterialHandle,
+  builtin_meshes:          [len(Primitive)]MeshHandle,
 }
 
 init_node :: proc(self: ^Node, name: string = "") {
@@ -209,8 +209,8 @@ destroy_node :: proc(
 }
 
 detach :: proc(
-  nodes: d.Pool(Node),
-  child_handle: d.NodeHandle,
+  nodes: Pool(Node),
+  child_handle: NodeHandle,
 ) {
   child_node := cont.get(nodes, child_handle)
   if child_node == nil {
@@ -232,8 +232,8 @@ detach :: proc(
 }
 
 attach :: proc(
-  nodes: d.Pool(Node),
-  parent_handle, child_handle: d.NodeHandle,
+  nodes: Pool(Node),
+  parent_handle, child_handle: NodeHandle,
 ) {
   child_node := cont.get(nodes, child_handle)
   parent_node := cont.get(nodes, parent_handle)
@@ -257,7 +257,7 @@ attach :: proc(
 
 @(private = "file")
 _apply_sprite_to_node_data :: proc(
-  data: ^d.NodeData,
+  data: ^NodeData,
   sprite_attachment: SpriteAttachment,
   node: ^Node,
   world: ^World = nil,
@@ -288,7 +288,7 @@ spawn :: proc(
   position: [3]f32 = {0, 0, 0},
   attachment: NodeAttachment = nil,
 ) -> (
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   ok: bool,
 ) #optional_ok {
   return spawn_child(self, self.root, position, attachment)
@@ -296,15 +296,15 @@ spawn :: proc(
 
 spawn_child :: proc(
   self: ^World,
-  parent: d.NodeHandle,
+  parent: NodeHandle,
   position: [3]f32 = {0, 0, 0},
   attachment: NodeAttachment = nil,
 ) -> (
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   ok: bool,
 ) #optional_ok {
   node: ^Node
-  handle, node = cont.alloc(&self.nodes, d.NodeHandle) or_return
+  handle, node = cont.alloc(&self.nodes, NodeHandle) or_return
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(self, handle, node)
@@ -314,8 +314,8 @@ spawn_child :: proc(
   node.transform.position = position
   node.transform.is_dirty = true
   attach(self.nodes, parent, handle)
-  stage_node_transform(&self.staging, handle, node.transform.world_matrix)
-  data := d.NodeData {
+  stage_node_transform(&self.staging, handle)
+  data := NodeData {
     material_id           = 0xFFFFFFFF,
     mesh_id               = 0xFFFFFFFF,
     attachment_data_index = 0xFFFFFFFF,
@@ -342,38 +342,39 @@ spawn_child :: proc(
      has_sprite {
     _apply_sprite_to_node_data(&data, sprite_attachment, node, self)
   }
-  stage_node_data(&self.staging, handle, data)
+  stage_node_data(&self.staging, handle)
   return handle, true
 }
 
 init :: proc(world: ^World) {
   // Scene graph
-  cont.init(&world.nodes, d.MAX_NODES_IN_SCENE)
+  cont.init(&world.nodes, MAX_NODES_IN_SCENE)
   staging_init(&world.staging)
   root: ^Node
-  world.root, root, _ = cont.alloc(&world.nodes, d.NodeHandle)
+  world.root, root, _ = cont.alloc(&world.nodes, NodeHandle)
   init_node(root, "root")
   root.parent = world.root
 
   // Resource pools
-  cont.init(&world.meshes, d.MAX_MESHES)
-  cont.init(&world.materials, d.MAX_MATERIALS)
-  cont.init(&world.cameras, d.MAX_ACTIVE_CAMERAS)
-  cont.init(&world.spherical_cameras, d.MAX_ACTIVE_CAMERAS)
-  cont.init(&world.emitters, d.MAX_EMITTERS)
-  cont.init(&world.forcefields, d.MAX_FORCE_FIELDS)
-  cont.init(&world.sprites, d.MAX_SPRITES)
-  cont.init(&world.lights, d.MAX_LIGHTS)
+  cont.init(&world.meshes, MAX_MESHES)
+  cont.init(&world.materials, MAX_MATERIALS)
+  cont.init(&world.cameras, MAX_ACTIVE_CAMERAS)
+  cont.init(&world.spherical_cameras, MAX_ACTIVE_CAMERAS)
+  cont.init(&world.emitters, MAX_EMITTERS)
+  cont.init(&world.forcefields, MAX_FORCE_FIELDS)
+  cont.init(&world.sprites, MAX_SPRITES)
+  cont.init(&world.lights, MAX_LIGHTS)
   cont.init(&world.animation_clips, 0)
 
   // Initialize builtin resources
   init_builtin_materials(world)
+  init_builtin_meshes(world)
 
   log.info("World resource pools initialized")
 }
 
 
-register_animatable_node :: proc(world: ^World, handle: d.NodeHandle) {
+register_animatable_node :: proc(world: ^World, handle: NodeHandle) {
   // TODO: if this list get more than 10000 items, we need to use a map
   if slice.contains(world.animatable_nodes[:], handle) do return
   append(&world.animatable_nodes, handle)
@@ -381,7 +382,7 @@ register_animatable_node :: proc(world: ^World, handle: d.NodeHandle) {
 
 unregister_animatable_node :: proc(
   world: ^World,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
 ) {
   if i, found := slice.linear_search(world.animatable_nodes[:], handle);
      found {
@@ -404,7 +405,7 @@ shutdown :: proc(
   // Clean up lights
   for &entry, i in world.lights.entries {
     if entry.generation > 0 && entry.active {
-      destroy_light(world, d.LightHandle{index = u32(i), generation = entry.generation})
+      destroy_light(world, LightHandle{index = u32(i), generation = entry.generation})
     }
   }
   delete(world.lights.entries)
@@ -419,12 +420,6 @@ shutdown :: proc(
   delete(world.spherical_cameras.entries)
   delete(world.spherical_cameras.free_indices)
 
-  // Clean up cameras
-  for &entry in world.cameras.entries {
-    if entry.generation > 0 && entry.active {
-      camera_destroy(&entry.item)
-    }
-  }
   delete(world.cameras.entries)
   delete(world.cameras.free_indices)
 
@@ -480,7 +475,7 @@ shutdown :: proc(
   staging_destroy(&world.staging)
 }
 
-despawn :: proc(world: ^World, handle: d.NodeHandle) -> bool {
+despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
   node := cont.get(world.nodes, handle)
   if node == nil {
     log.warnf("despawn: node %v not found (already freed or invalid)", handle)
@@ -504,16 +499,16 @@ cleanup_pending_deletions :: proc(
   world: ^World,
 ) {
   zero_matrix: matrix[4, 4]f32
-  zero_data: d.NodeData
+  zero_data: NodeData
   for entry, i in world.nodes.entries do if entry.active {
     if !entry.item.pending_deletion do continue
-    handle := d.NodeHandle {
+    handle := NodeHandle {
       index      = u32(i),
       generation = entry.generation,
     }
     // Clear GPU buffers BEFORE freeing the node
-    stage_node_transform(&world.staging, handle, zero_matrix)
-    stage_node_data(&world.staging, handle, zero_data)
+    stage_node_transform(&world.staging, handle)
+    stage_node_data(&world.staging, handle)
     unregister_animatable_node(world, handle)
     if node, ok := cont.free(&world.nodes, handle); ok {
       destroy_node(node, world)
@@ -563,27 +558,17 @@ traverse :: proc(
         world.meshes,
         parent_mesh_attachment.handle,
       ) or_break
-      bone_index := d.find_bone_by_name(
+      bone_index := find_bone_by_name(
         parent_mesh,
         current_node.bone_socket,
       ) or_break
       parent_skinning := parent_mesh_attachment.skinning.? or_break
       parent_mesh_skinning := parent_mesh.skinning.? or_break
       if bone_index >= u32(len(parent_mesh_skinning.bones)) do break apply_bone_socket
-      _ = parent_skinning
-      // Staged matrices are skinning matrices (world_transform * inverse_bind).
+      if bone_index >= u32(len(parent_skinning.matrices)) do break apply_bone_socket
+      // Stored matrices are skinning matrices (world_transform * inverse_bind).
       // To recover bone world transform, multiply by bind matrix.
-      skinning_matrix: matrix[4, 4]f32
-      has_skinning_matrix := false
-      sync.mutex_lock(&world.staging.mutex)
-      if staged_bones, ok := world.staging.bone_updates[current_node.parent]; ok {
-        if bone_index < u32(len(staged_bones.data)) {
-          skinning_matrix = staged_bones.data[bone_index]
-          has_skinning_matrix = true
-        }
-      }
-      sync.mutex_unlock(&world.staging.mutex)
-      if !has_skinning_matrix do break apply_bone_socket
+      skinning_matrix := parent_skinning.matrices[bone_index]
       bone := parent_mesh_skinning.bones[bone_index]
       bind_matrix := linalg.matrix4_inverse(bone.inverse_bind_matrix)
       bone_socket_transform = skinning_matrix * bind_matrix
@@ -599,11 +584,10 @@ traverse :: proc(
       stage_node_transform(
         &world.staging,
         entry.handle,
-        current_node.transform.world_matrix,
       )
     }
     if visibility_changed || is_dirty || entry.parent_is_dirty {
-      data := d.NodeData {
+      data := NodeData {
         material_id           = 0xFFFFFFFF,
         mesh_id               = 0xFFFFFFFF,
         attachment_data_index = 0xFFFFFFFF,
@@ -613,13 +597,13 @@ traverse :: proc(
         data.material_id = mesh_attachment.material.index
         data.mesh_id = mesh_attachment.handle.index
         if current_node.visible && current_node.parent_visible {
-          data.flags |= d.NodeFlagSet{.VISIBLE}
+          data.flags |= NodeFlagSet{.VISIBLE}
         }
         if current_node.culling_enabled {
           data.flags |= {.CULLING_ENABLED}
         }
         if mesh_attachment.cast_shadow {
-          data.flags |= d.NodeFlagSet{.CASTS_SHADOW}
+          data.flags |= NodeFlagSet{.CASTS_SHADOW}
         }
         if material_entry, has_material := cont.get(
           world.materials,
@@ -627,9 +611,9 @@ traverse :: proc(
         ); has_material {
           switch material_entry.type {
           case .TRANSPARENT:
-            data.flags |= d.NodeFlagSet{.MATERIAL_TRANSPARENT}
+            data.flags |= NodeFlagSet{.MATERIAL_TRANSPARENT}
           case .WIREFRAME:
-            data.flags |= d.NodeFlagSet{.MATERIAL_WIREFRAME}
+            data.flags |= NodeFlagSet{.MATERIAL_WIREFRAME}
           case .PBR, .UNLIT:
           // No additional flags needed
           }
@@ -639,7 +623,7 @@ traverse :: proc(
          has_sprite {
         _apply_sprite_to_node_data(&data, sprite_attachment, current_node, world)
       }
-      stage_node_data(&world.staging, entry.handle, data)
+      stage_node_data(&world.staging, entry.handle)
     }
     for child_handle in current_node.children {
       append(
@@ -659,7 +643,7 @@ traverse :: proc(
 @(private)
 assign_emitter_to_node :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   node: ^Node,
 ) {
   attachment, is_emitter := &node.attachment.(EmitterAttachment)
@@ -669,15 +653,15 @@ assign_emitter_to_node :: proc(
   emitter, ok := cont.get(world.emitters, attachment.handle)
   if ok {
     emitter.node_handle = node_handle
-    d.emitter_update_gpu_data(emitter)
-    stage_emitter_data(&world.staging, attachment.handle, emitter.data)
+    emitter_update_gpu_data(emitter)
+    stage_emitter_data(&world.staging, attachment.handle)
   }
 }
 
 @(private)
 assign_forcefield_to_node :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   node: ^Node,
 ) {
   attachment, is_forcefield := &node.attachment.(ForceFieldAttachment)
@@ -687,15 +671,15 @@ assign_forcefield_to_node :: proc(
   forcefield, ok := cont.get(world.forcefields, attachment.handle)
   if ok {
     forcefield.node_handle = node_handle
-    d.forcefield_update_gpu_data(forcefield)
-    stage_forcefield_data(&world.staging, attachment.handle, forcefield.data)
+    forcefield_update_gpu_data(forcefield)
+    stage_forcefield_data(&world.staging, attachment.handle)
   }
 }
 
 @(private)
 assign_light_to_node :: proc(
   world: ^World,
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   node: ^Node,
 ) {
   attachment, is_light := &node.attachment.(LightAttachment)
@@ -705,12 +689,12 @@ assign_light_to_node :: proc(
   if light, ok := cont.get(world.lights, attachment.handle); ok {
     light.node_handle = node_handle
     light.node_index = node_handle.index
-    stage_light_data(&world.staging, attachment.handle, light.data)
+    stage_light_data(&world.staging, attachment.handle)
   }
 }
 
 create_point_light_attachment :: proc(
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   world: ^World,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
@@ -719,7 +703,7 @@ create_point_light_attachment :: proc(
   attachment: LightAttachment,
   ok: bool,
 ) #optional_ok {
-  handle: d.LightHandle
+  handle: LightHandle
   handle, ok = create_light(
     world,
     .POINT,
@@ -733,7 +717,7 @@ create_point_light_attachment :: proc(
 }
 
 create_directional_light_attachment :: proc(
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   world: ^World,
   color: [4]f32 = {1, 1, 1, 1},
   cast_shadow: b32 = false,
@@ -741,7 +725,7 @@ create_directional_light_attachment :: proc(
   attachment: LightAttachment,
   ok: bool,
 ) #optional_ok {
-  handle: d.LightHandle
+  handle: LightHandle
   handle, ok = create_light(
     world,
     .DIRECTIONAL,
@@ -754,7 +738,7 @@ create_directional_light_attachment :: proc(
 }
 
 create_spot_light_attachment :: proc(
-  node_handle: d.NodeHandle,
+  node_handle: NodeHandle,
   world: ^World,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
@@ -766,7 +750,7 @@ create_spot_light_attachment :: proc(
 ) #optional_ok {
   angle_inner := angle * 0.8
   angle_outer := angle
-  handle: d.LightHandle
+  handle: LightHandle
   handle, ok = create_light(
     world,
     .SPOT,
@@ -797,7 +781,7 @@ _ensure_actor_pool :: proc(world: ^World, $T: typeid) -> ^ActorPool(T) {
     },
     alloc_fn = proc(
       pool_ptr: rawptr,
-      node_handle: d.NodeHandle,
+      node_handle: NodeHandle,
     ) -> (
       ActorHandle,
       bool,
@@ -837,7 +821,7 @@ spawn_actor :: proc(
 spawn_actor_child :: proc(
   world: ^World,
   $T: typeid,
-  parent: d.NodeHandle,
+  parent: NodeHandle,
   position: [3]f32 = {},
   attachment: NodeAttachment = nil,
 ) -> (

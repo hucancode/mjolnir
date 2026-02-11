@@ -15,7 +15,6 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 import "core:unicode/utf8"
-import d "data"
 import "geometry"
 import "gpu"
 import "level_manager"
@@ -24,6 +23,7 @@ import "render"
 import render_camera "render/camera"
 import "render/debug_draw"
 import "render/debug_ui"
+import render_light "render/light"
 import "render/particles"
 import "render/visibility"
 import "render/ui"
@@ -177,15 +177,40 @@ init :: proc(
   render.init(
     &self.render,
     &self.gctx,
-    &self.world.materials,
-    &self.world.meshes,
-    &self.world.cameras,
-    &self.world.spherical_cameras,
-    &self.world.builtin_meshes,
     self.swapchain.extent,
     self.swapchain.format.format,
     get_window_dpi(self.window),
   ) or_return
+
+  main_world_handle, main_world_camera, ok_main_camera := cont.alloc(
+    &self.world.cameras,
+    world.CameraHandle,
+  )
+  if !ok_main_camera do return .ERROR_INITIALIZATION_FAILED
+  if main_world_handle.index != self.render.main_camera.index ||
+     main_world_handle.generation != self.render.main_camera.generation {
+    return .ERROR_INITIALIZATION_FAILED
+  }
+  world.camera_init(
+    main_world_camera,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
+    {
+      .SHADOW,
+      .GEOMETRY,
+      .LIGHTING,
+      .TRANSPARENCY,
+      .PARTICLES,
+      .DEBUG_DRAW,
+      .POST_PROCESS,
+    },
+    {3, 4, 3},
+    {0, 0, 0},
+    math.PI * 0.5,
+    0.1,
+    100.0,
+  ) or_return
+  world.stage_camera_data(&self.world.staging, main_world_handle)
 
   // Set up debug draw callbacks for world module
   self.world.debug_draw_line_strip =
@@ -217,7 +242,6 @@ init :: proc(
     mesh_handle, result := render.allocate_mesh_geometry(
       &engine.gctx,
       &engine.render,
-      &engine.world.meshes,
       geom,
       auto_purge = true,
     )
@@ -238,7 +262,7 @@ init :: proc(
 
   self.world.debug_draw_mesh =
   proc(
-    mesh_handle: d.MeshHandle,
+    mesh_handle: world.MeshHandle,
     transform: matrix[4, 4]f32,
     duration_seconds: f64,
     color: [4]f32,
@@ -248,7 +272,7 @@ init :: proc(
     if engine == nil do return
     debug_draw.spawn_mesh_temporary(
       &engine.render.debug_draw,
-      mesh_handle,
+      transmute(render.MeshHandle)mesh_handle,
       transform,
       duration_seconds,
       color,
@@ -420,9 +444,58 @@ time_since_start :: proc(self: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(self.start_timestamp)))
 }
 
+load_gltf :: proc(
+  engine: ^Engine,
+  path: string,
+) -> (
+  nodes: [dynamic]world.NodeHandle,
+  ok: bool,
+) #optional_ok {
+  create_texture_from_data_adapter := proc(
+    world_ptr: ^world.World,
+    pixel_data: []u8,
+  ) -> (
+    handle: world.Image2DHandle,
+    ok: bool,
+  ) {
+    _ = world_ptr
+    engine_ctx := cast(^Engine)context.user_ptr
+    if engine_ctx == nil {
+      return {}, false
+    }
+    out_handle, ret := render.create_texture_from_data(
+      &engine_ctx.gctx,
+      &engine_ctx.render,
+      pixel_data,
+    )
+    if ret != .SUCCESS {
+      return {}, false
+    }
+    render.set_texture_2d_auto_purge(&engine_ctx.render, out_handle, true)
+    return transmute(world.Image2DHandle)out_handle, true
+  }
+  texture_2d_ref_adapter := proc(handle: world.Image2DHandle) -> bool {
+    engine_ctx := cast(^Engine)context.user_ptr
+    if engine_ctx == nil {
+      return false
+    }
+    return render.texture_2d_ref(&engine_ctx.render, transmute(render.Image2DHandle)handle)
+  }
+  old_user_ptr := context.user_ptr
+  context.user_ptr = engine
+  defer context.user_ptr = old_user_ptr
+  handles, result := world.load_gltf(
+    &engine.world,
+    create_texture_from_data_adapter,
+    texture_2d_ref_adapter,
+    path,
+  )
+  return handles, result == .success
+}
+
 @(private = "file")
-get_main_camera :: proc(self: ^Engine) -> ^d.Camera {
-  return cont.get(self.world.cameras, self.render.main_camera)
+get_main_camera :: proc(self: ^Engine) -> ^world.Camera {
+  return cont.get(self.world.cameras, transmute(world.CameraHandle)self.render.main_camera)
 }
 
 update_input :: proc(self: ^Engine) -> bool {
@@ -569,23 +642,39 @@ update_visibility_node_count :: proc(
 sync_staging_to_gpu :: proc(self: ^Engine) {
   sync.mutex_lock(&self.world.staging.mutex)
   defer sync.mutex_unlock(&self.world.staging.mutex)
-  stale_handles := make([dynamic]d.NodeHandle, context.temp_allocator)
-  stale_meshes := make([dynamic]d.MeshHandle, context.temp_allocator)
-  stale_materials := make([dynamic]d.MaterialHandle, context.temp_allocator)
-  stale_bone_nodes := make([dynamic]d.NodeHandle, context.temp_allocator)
-  stale_sprites := make([dynamic]d.SpriteHandle, context.temp_allocator)
-  stale_emitters := make([dynamic]d.EmitterHandle, context.temp_allocator)
+  stale_handles := make([dynamic]world.NodeHandle, context.temp_allocator)
+  stale_meshes := make([dynamic]world.MeshHandle, context.temp_allocator)
+  stale_materials := make([dynamic]world.MaterialHandle, context.temp_allocator)
+  stale_bone_nodes := make([dynamic]world.NodeHandle, context.temp_allocator)
+  stale_sprites := make([dynamic]world.SpriteHandle, context.temp_allocator)
+  stale_emitters := make([dynamic]world.EmitterHandle, context.temp_allocator)
   stale_forcefields := make(
-    [dynamic]d.ForceFieldHandle,
+    [dynamic]world.ForceFieldHandle,
     context.temp_allocator,
   )
-  stale_lights := make([dynamic]d.LightHandle, context.temp_allocator)
-  for handle, &entry in self.world.staging.transforms {
-    if entry.n < d.FRAMES_IN_FLIGHT {
-      render.upload_node_transform(&self.render, handle, &entry.data)
-      entry.n += 1
+  stale_lights := make([dynamic]world.LightHandle, context.temp_allocator)
+  stale_cameras := make([dynamic]world.CameraHandle, context.temp_allocator)
+  stale_spherical_cameras := make(
+    [dynamic]world.SphereCameraHandle,
+    context.temp_allocator,
+  )
+  for handle, n in self.world.staging.transforms {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if node := cont.get(self.world.nodes, handle); node != nil {
+        render.upload_node_transform(
+          &self.render,
+          transmute(render.NodeHandle)handle,
+          &node.transform.world_matrix,
+        )
+      } else {
+        zero_matrix: matrix[4, 4]f32
+        render.upload_node_transform(&self.render, transmute(render.NodeHandle)handle, &zero_matrix)
+      }
+      next_n += 1
+      self.world.staging.transforms[handle] = next_n
     }
-    if entry.n >= d.FRAMES_IN_FLIGHT {
+    if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_handles, handle)
     }
   }
@@ -593,155 +682,365 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
     delete_key(&self.world.staging.transforms, handle)
   }
   clear(&stale_handles)
-  for handle, &entry in self.world.staging.node_data {
-    node_data := entry.data
-    if entry.n < d.FRAMES_IN_FLIGHT {
+  for handle, n in self.world.staging.node_data {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      node_data := world.NodeData {
+        material_id           = 0xFFFFFFFF,
+        mesh_id               = 0xFFFFFFFF,
+        attachment_data_index = 0xFFFFFFFF,
+      }
       node := cont.get(self.world.nodes, handle)
       if node == nil {
-        render.release_bone_matrix_range_for_node(&self.render, handle)
-        node_data.attachment_data_index = 0xFFFFFFFF
+        render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
       } else if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment);
          has_mesh {
         if _, has_skin := mesh_attachment.skinning.?; has_skin {
           if bone_offset, has_offset :=
-               self.render.bone_matrix_offsets[handle]; has_offset {
+               self.render.bone_matrix_offsets[transmute(render.NodeHandle)handle]; has_offset {
             node_data.attachment_data_index = bone_offset
-          } else if bone_entry, has_bones :=
-               self.world.staging.bone_updates[handle];
-             has_bones && len(bone_entry.data) > 0 {
+          } else if skinning, has_skinning := mesh_attachment.skinning.?;
+             has_skinning && len(skinning.matrices) > 0 {
             bone_offset := render.ensure_bone_matrix_range_for_node(
               &self.render,
-              handle,
-              u32(len(bone_entry.data)),
+              transmute(render.NodeHandle)handle,
+              u32(len(skinning.matrices)),
             )
             node_data.attachment_data_index = bone_offset
           } else {
-            render.release_bone_matrix_range_for_node(&self.render, handle)
+            render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
             node_data.attachment_data_index = 0xFFFFFFFF
           }
         } else {
-          render.release_bone_matrix_range_for_node(&self.render, handle)
+          render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
           node_data.attachment_data_index = 0xFFFFFFFF
+        }
+        node_data.material_id = mesh_attachment.material.index
+        node_data.mesh_id = mesh_attachment.handle.index
+        if node.visible && node.parent_visible do node_data.flags |= {.VISIBLE}
+        if node.culling_enabled do node_data.flags |= {.CULLING_ENABLED}
+        if mesh_attachment.cast_shadow do node_data.flags |= {.CASTS_SHADOW}
+        if material, has_mat := cont.get(self.world.materials, mesh_attachment.material);
+           has_mat {
+          switch material.type {
+          case .TRANSPARENT:
+            node_data.flags |= {.MATERIAL_TRANSPARENT}
+          case .WIREFRAME:
+            node_data.flags |= {.MATERIAL_WIREFRAME}
+          case .PBR, .UNLIT:
+          }
         }
       } else if _, has_sprite := node.attachment.(world.SpriteAttachment);
          has_sprite {
-        render.release_bone_matrix_range_for_node(&self.render, handle)
-        // attachment_data_index already set to sprite_handle.index by staging
+        render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
+        sprite_attachment, _ := node.attachment.(world.SpriteAttachment)
+        node_data.material_id = sprite_attachment.material.index
+        node_data.mesh_id = sprite_attachment.mesh_handle.index
+        node_data.attachment_data_index = sprite_attachment.sprite_handle.index
+        if node.visible && node.parent_visible do node_data.flags |= {.VISIBLE}
+        if node.culling_enabled do node_data.flags |= {.CULLING_ENABLED}
+        node_data.flags |= {.MATERIAL_SPRITE}
+        if material, has_mat := cont.get(self.world.materials, sprite_attachment.material);
+           has_mat {
+          switch material.type {
+          case .TRANSPARENT:
+            node_data.flags |= {.MATERIAL_TRANSPARENT}
+          case .WIREFRAME:
+            node_data.flags |= {.MATERIAL_WIREFRAME}
+          case .PBR, .UNLIT:
+          }
+        }
       } else {
-        render.release_bone_matrix_range_for_node(&self.render, handle)
-        node_data.attachment_data_index = 0xFFFFFFFF
+        render.release_bone_matrix_range_for_node(&self.render, transmute(render.NodeHandle)handle)
       }
-      render.upload_node_data(&self.render, handle, &node_data)
-      entry.n += 1
+      render_node_data := render.NodeData {
+        material_id           = node_data.material_id,
+        mesh_id               = node_data.mesh_id,
+        attachment_data_index = node_data.attachment_data_index,
+        flags = transmute(render.NodeFlagSet)node_data.flags,
+      }
+      render.upload_node_data(&self.render, transmute(render.NodeHandle)handle, &render_node_data)
+      next_n += 1
+      self.world.staging.node_data[handle] = next_n
     }
-    if entry.n >= d.FRAMES_IN_FLIGHT {
+    if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_handles, handle)
     }
   }
   for handle in stale_handles {
     delete_key(&self.world.staging.node_data, handle)
   }
-  for handle, &entry in self.world.staging.mesh_updates {
-    if entry.n < d.FRAMES_IN_FLIGHT {
-      render.upload_mesh_data_raw(&self.render, handle, &entry.data)
-      entry.n += 1
+  for handle, n in self.world.staging.mesh_updates {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if mesh := cont.get(self.world.meshes, handle); mesh != nil {
+        if geom, has_geom := mesh.cpu_geometry.?; has_geom {
+          if render.sync_mesh_geometry_for_handle(
+            &self.gctx,
+            &self.render,
+            transmute(render.MeshHandle)handle,
+            geom,
+            mesh.auto_purge,
+          ) == .SUCCESS {
+            if mesh_render := cont.get(self.render.meshes, transmute(render.MeshHandle)handle);
+               mesh_render != nil {
+              mesh.vertex_allocation = transmute(world.BufferAllocation)mesh_render.vertex_allocation
+              mesh.index_allocation = transmute(world.BufferAllocation)mesh_render.index_allocation
+              if skin, has_skin := &mesh.skinning.?; has_skin {
+                skin.allocation = transmute(world.BufferAllocation)mesh_render.skinning_allocation
+              }
+            }
+          }
+        }
+        mesh_render := render.Mesh {
+          aabb_min          = mesh.aabb_min,
+          aabb_max          = mesh.aabb_max,
+          vertex_allocation = transmute(render.BufferAllocation)mesh.vertex_allocation,
+          index_allocation  = transmute(render.BufferAllocation)mesh.index_allocation,
+          auto_purge        = mesh.auto_purge,
+          ref_count         = mesh.ref_count,
+          has_skinning      = false,
+        }
+        if skin, has_skin := mesh.skinning.?; has_skin {
+          mesh_render.has_skinning = true
+          mesh_render.skinning_allocation = transmute(render.BufferAllocation)skin.allocation
+        }
+        render.sync_mesh_from_world(&self.render, transmute(render.MeshHandle)handle, &mesh_render)
+      } else {
+        render.clear_mesh(&self.render, transmute(render.MeshHandle)handle)
+      }
+      next_n += 1
+      self.world.staging.mesh_updates[handle] = next_n
     }
-    if entry.n >= d.FRAMES_IN_FLIGHT {
+    if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_meshes, handle)
     }
   }
   for handle in stale_meshes {
     delete_key(&self.world.staging.mesh_updates, handle)
   }
-  for handle, &entry in self.world.staging.material_updates {
-    if entry.n < d.FRAMES_IN_FLIGHT {
-      render.upload_material_data_raw(&self.render, handle, &entry.data)
-      entry.n += 1
+  for handle, n in self.world.staging.material_updates {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if material := cont.get(self.world.materials, handle); material != nil {
+        material_render := render.Material {
+          type               = transmute(render.MaterialType)material.type,
+          albedo             = transmute(render.Image2DHandle)material.albedo,
+          metallic_roughness = transmute(render.Image2DHandle)material.metallic_roughness,
+          normal             = transmute(render.Image2DHandle)material.normal,
+          emissive           = transmute(render.Image2DHandle)material.emissive,
+          occlusion          = transmute(render.Image2DHandle)material.occlusion,
+          features           = transmute(render.ShaderFeatureSet)material.features,
+          metallic_value     = material.metallic_value,
+          roughness_value    = material.roughness_value,
+          emissive_value     = material.emissive_value,
+          base_color_factor  = material.base_color_factor,
+          auto_purge         = material.auto_purge,
+          ref_count          = material.ref_count,
+        }
+        render.sync_material_from_world(&self.render, transmute(render.MaterialHandle)handle, &material_render)
+      } else {
+        render.clear_material(&self.render, transmute(render.MaterialHandle)handle)
+      }
+      next_n += 1
+      self.world.staging.material_updates[handle] = next_n
     }
-    if entry.n >= d.FRAMES_IN_FLIGHT {
+    if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_materials, handle)
     }
   }
   for handle in stale_materials {
     delete_key(&self.world.staging.material_updates, handle)
   }
-  for handle, &entry in self.world.staging.bone_updates {
-    if entry.n < d.FRAMES_IN_FLIGHT {
-      bone_count := u32(len(entry.data))
-      if bone_count > 0 {
-        offset := render.ensure_bone_matrix_range_for_node(
-          &self.render,
-          handle,
-          bone_count,
-        )
-        if offset != 0xFFFFFFFF {
-          render.upload_bone_matrices(
-            &self.render,
-            self.frame_index,
-            offset,
-            entry.data[:],
-          )
+  for handle, n in self.world.staging.bone_updates {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if node := cont.get(self.world.nodes, handle); node != nil {
+        if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment);
+           has_mesh {
+          if skinning, has_skinning := mesh_attachment.skinning.?;
+             has_skinning {
+            bone_count := u32(len(skinning.matrices))
+            if bone_count > 0 {
+              offset := render.ensure_bone_matrix_range_for_node(
+              &self.render,
+              transmute(render.NodeHandle)handle,
+                bone_count,
+              )
+              if offset != 0xFFFFFFFF {
+                render.upload_bone_matrices(
+                  &self.render,
+                  self.frame_index,
+                  offset,
+                  skinning.matrices[:],
+                )
+              }
+            }
+          }
         }
       }
-      entry.n += 1
+      next_n += 1
+      self.world.staging.bone_updates[handle] = next_n
     }
-    if entry.n >= d.FRAMES_IN_FLIGHT {
+    if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_bone_nodes, handle)
     }
   }
   for handle in stale_bone_nodes {
-    if entry, ok := self.world.staging.bone_updates[handle]; ok {
-      delete(entry.data)
-    }
     delete_key(&self.world.staging.bone_updates, handle)
   }
-  for handle, &entry in self.world.staging.sprite_updates {
-    if entry.n < d.FRAMES_IN_FLIGHT {
-      render.upload_sprite_data(&self.render, handle, &entry.data)
-      entry.n += 1
+  for handle, n in self.world.staging.sprite_updates {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if sprite := cont.get(self.world.sprites, handle); sprite != nil {
+        sprite_render := render.Sprite {
+          texture_index = sprite.texture_index,
+          frame_columns = sprite.frame_columns,
+          frame_rows    = sprite.frame_rows,
+          frame_index   = sprite.frame_index,
+        }
+        render.sync_sprite_from_world(&self.render, transmute(render.SpriteHandle)handle, &sprite_render)
+      } else {
+        render.clear_sprite(&self.render, transmute(render.SpriteHandle)handle)
+      }
+      next_n += 1
+      self.world.staging.sprite_updates[handle] = next_n
     }
-    if entry.n >= d.FRAMES_IN_FLIGHT {
+    if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_sprites, handle)
     }
   }
   for handle in stale_sprites {
     delete_key(&self.world.staging.sprite_updates, handle)
   }
-  for handle, &entry in self.world.staging.emitter_updates {
-    if entry.n < d.FRAMES_IN_FLIGHT {
-      render.upload_emitter_data(&self.render, handle, &entry.data)
-      entry.n += 1
+  for handle, n in self.world.staging.emitter_updates {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if emitter := cont.get(self.world.emitters, handle); emitter != nil {
+        emitter_render := render.Emitter {
+          initial_velocity  = emitter.initial_velocity,
+          size_start        = emitter.size_start,
+          color_start       = emitter.color_start,
+          color_end         = emitter.color_end,
+          aabb_min          = emitter.aabb_min,
+          emission_rate     = emitter.emission_rate,
+          aabb_max          = emitter.aabb_max,
+          particle_lifetime = emitter.particle_lifetime,
+          position_spread   = emitter.position_spread,
+          velocity_spread   = emitter.velocity_spread,
+          time_accumulator  = emitter.time_accumulator,
+          size_end          = emitter.size_end,
+          weight            = emitter.weight,
+          weight_spread     = emitter.weight_spread,
+          texture_index     = emitter.texture_index,
+          node_index        = emitter.node_index,
+          enabled           = emitter.enabled,
+          texture_handle    = transmute(render.Image2DHandle)emitter.texture_handle,
+          node_handle       = transmute(render.NodeHandle)emitter.node_handle,
+        }
+        render.sync_emitter_from_world(&self.render, transmute(render.EmitterHandle)handle, &emitter_render)
+      } else {
+        render.clear_emitter(&self.render, transmute(render.EmitterHandle)handle)
+      }
+      next_n += 1
+      self.world.staging.emitter_updates[handle] = next_n
     }
-    if entry.n >= d.FRAMES_IN_FLIGHT {
+    if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_emitters, handle)
     }
   }
   for handle in stale_emitters {
     delete_key(&self.world.staging.emitter_updates, handle)
   }
-  for handle, &entry in self.world.staging.forcefield_updates {
-    if entry.n < d.FRAMES_IN_FLIGHT {
-      render.upload_forcefield_data(&self.render, handle, &entry.data)
-      entry.n += 1
+  for handle, n in self.world.staging.forcefield_updates {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if forcefield := cont.get(self.world.forcefields, handle); forcefield != nil {
+        forcefield_render := render.ForceField {
+          tangent_strength = forcefield.tangent_strength,
+          strength         = forcefield.strength,
+          area_of_effect   = forcefield.area_of_effect,
+          node_index       = forcefield.node_index,
+          node_handle      = transmute(render.NodeHandle)forcefield.node_handle,
+        }
+        render.sync_forcefield_from_world(
+          &self.render,
+          transmute(render.ForceFieldHandle)handle,
+          &forcefield_render,
+        )
+      } else {
+        render.clear_forcefield(&self.render, transmute(render.ForceFieldHandle)handle)
+      }
+      next_n += 1
+      self.world.staging.forcefield_updates[handle] = next_n
     }
-    if entry.n >= d.FRAMES_IN_FLIGHT {
+    if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_forcefields, handle)
     }
   }
   for handle in stale_forcefields {
     delete_key(&self.world.staging.forcefield_updates, handle)
   }
-  for handle, &entry in self.world.staging.light_updates {
-    if entry.n < d.FRAMES_IN_FLIGHT {
-      render.upload_light_data(&self.render, handle, &entry.data)
-      entry.n += 1
+  for handle, n in self.world.staging.light_updates {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if light := cont.get(self.world.lights, handle); light != nil {
+        render.sync_light_from_world(
+          &self.render,
+          transmute(render.LightHandle)handle,
+          transmute(^render_light.Light)light,
+        )
+      }
+      next_n += 1
+      self.world.staging.light_updates[handle] = next_n
     }
-    if entry.n >= d.FRAMES_IN_FLIGHT {
+    if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_lights, handle)
     }
   }
   for handle in stale_lights {
     delete_key(&self.world.staging.light_updates, handle)
+  }
+  for handle, n in self.world.staging.camera_updates {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if camera := cont.get(self.world.cameras, handle); camera != nil {
+        render.sync_camera_from_world(
+          &self.render,
+          transmute(render.CameraHandle)handle,
+          transmute(^render_camera.Camera)camera,
+        )
+      }
+      next_n += 1
+      self.world.staging.camera_updates[handle] = next_n
+    }
+    if next_n >= world.FRAMES_IN_FLIGHT {
+      append(&stale_cameras, handle)
+    }
+  }
+  for handle in stale_cameras {
+    delete_key(&self.world.staging.camera_updates, handle)
+  }
+  for handle, n in self.world.staging.spherical_camera_updates {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      if spherical_camera := cont.get(self.world.spherical_cameras, handle);
+         spherical_camera != nil {
+        render.sync_spherical_camera_from_world(
+          &self.render,
+          transmute(render.SphereCameraHandle)handle,
+          transmute(^render_camera.SphericalCamera)spherical_camera,
+        )
+      }
+      next_n += 1
+      self.world.staging.spherical_camera_updates[handle] = next_n
+    }
+    if next_n >= world.FRAMES_IN_FLIGHT {
+      append(&stale_spherical_cameras, handle)
+    }
+  }
+  for handle in stale_spherical_cameras {
+    delete_key(&self.world.staging.spherical_camera_updates, handle)
   }
 }
 
@@ -759,10 +1058,10 @@ update :: proc(self: ^Engine) -> bool {
   params := gpu.get(&self.render.particles.params_buffer, 0)
   params.delta_time = delta_time
   params.emitter_count = u32(
-    min(len(self.world.emitters.entries), d.MAX_EMITTERS),
+    min(len(self.world.emitters.entries), world.MAX_EMITTERS),
   )
   params.forcefield_count = u32(
-    min(len(self.world.forcefields.entries), d.MAX_FORCE_FIELDS),
+    min(len(self.world.forcefields.entries), world.MAX_FORCE_FIELDS),
   )
   if self.camera_controller_enabled && self.active_controller != nil {
     main_camera := get_main_camera(self)
@@ -788,6 +1087,10 @@ update :: proc(self: ^Engine) -> bool {
         )
       case .CINEMATIC:
       }
+      world.stage_camera_data(
+        &self.world.staging,
+        transmute(world.CameraHandle)self.render.main_camera,
+      )
     }
   }
   if self.update_proc != nil {
@@ -882,9 +1185,9 @@ populate_debug_ui :: proc(self: ^Engine) {
 @(private)
 create_light_camera :: proc(
   engine: ^Engine,
-  light_handle: d.LightHandle,
+  light_handle: world.LightHandle,
 ) -> (
-  camera_handle: d.CameraHandle,
+  camera_handle: world.CameraHandle,
   ok: bool,
 ) #optional_ok {
   light := cont.get(engine.world.lights, light_handle) or_return
@@ -895,12 +1198,12 @@ create_light_camera :: proc(
     // Point lights use spherical cameras for omnidirectional shadows
     cam_handle, spherical_cam := cont.alloc(
       &engine.world.spherical_cameras,
-      d.SphereCameraHandle,
+      world.SphereCameraHandle,
     ) or_return
     // Initialize CPU data
     init_ok := world.spherical_camera_init(
       spherical_cam,
-      d.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
       radius = light.radius,
       near = 0.1,
       far = light.radius,
@@ -909,15 +1212,19 @@ create_light_camera :: proc(
       cont.free(&engine.world.spherical_cameras, cam_handle)
       return {}, false
     }
+    world.stage_spherical_camera_data(
+      &engine.world.staging,
+      cam_handle,
+    )
     // Initialize GPU resources
     cam_gpu := &engine.render.spherical_cameras_gpu[cam_handle.index]
     gpu_result := render_camera.init_spherical_gpu(
       &engine.gctx,
       cam_gpu,
       &engine.render.texture_manager,
-      d.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
       .D32_SFLOAT,
-      d.MAX_NODES_IN_SCENE,
+      world.MAX_NODES_IN_SCENE,
     )
     if gpu_result != .SUCCESS {
       cont.free(&engine.world.spherical_cameras, cam_handle)
@@ -940,18 +1247,18 @@ create_light_camera :: proc(
     // Update the light to reference this camera
     light.camera_handle = cam_handle
     light.camera_index = cam_handle.index
-    render.upload_light_data(&engine.render, light_handle, &light.data)
+    world.stage_light_data(&engine.world.staging, light_handle)
     return cam_handle, true
   case .DIRECTIONAL:
     cam_handle, cam := cont.alloc(
       &engine.world.cameras,
-      d.CameraHandle,
+      world.CameraHandle,
     ) or_return
     ortho_size := light.radius * 2.0
-    init_ok := world.camera_init_orthographic(
+    init_result := world.camera_init_orthographic(
       cam,
-      d.SHADOW_MAP_SIZE,
-      d.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
       {.SHADOW},
       {0, 0, 0},
       {0, 0, -1},
@@ -960,10 +1267,11 @@ create_light_camera :: proc(
       1.0,
       light.radius * 2.0,
     )
-    if !init_ok {
+    if init_result != .SUCCESS {
       cont.free(&engine.world.cameras, cam_handle)
       return {}, false
     }
+    world.stage_camera_data(&engine.world.staging, cam_handle)
     cam_gpu := &engine.render.cameras_gpu[cam_handle.index]
     descriptor_set := engine.render.textures_descriptor_set
     set_descriptor :: proc(
@@ -978,14 +1286,14 @@ create_light_camera :: proc(
     gpu_result := render_camera.init_orthographic_gpu(
       &engine.gctx,
       cam_gpu,
-      cam,
       &engine.render.texture_manager,
-      d.SHADOW_MAP_SIZE,
-      d.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
       engine.swapchain.format.format,
       vk.Format.D32_SFLOAT,
-      cam.enabled_passes,
-      d.MAX_NODES_IN_SCENE,
+      transmute(render_camera.PassTypeSet)cam.enabled_passes,
+      cam.enable_depth_pyramid,
+      world.MAX_NODES_IN_SCENE,
     )
     if gpu_result != .SUCCESS {
       cont.free(&engine.world.cameras, cam_handle)
@@ -1008,18 +1316,18 @@ create_light_camera :: proc(
     }
     light.camera_handle = cam_handle
     light.camera_index = cam_handle.index
-    render.upload_light_data(&engine.render, light_handle, &light.data)
+    world.stage_light_data(&engine.world.staging, light_handle)
     return cam_handle, true
   case .SPOT:
     cam_handle, cam := cont.alloc(
       &engine.world.cameras,
-      d.CameraHandle,
+      world.CameraHandle,
     ) or_return
     fov := light.angle_outer * 2.0
-    init_ok := world.camera_init(
+    init_result := world.camera_init(
       cam,
-      d.SHADOW_MAP_SIZE,
-      d.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
       {.SHADOW},
       {0, 0, 0},
       {0, -1, 0},
@@ -1027,10 +1335,11 @@ create_light_camera :: proc(
       light.radius * 0.01,
       light.radius,
     )
-    if !init_ok {
+    if init_result != .SUCCESS {
       cont.free(&engine.world.cameras, cam_handle)
       return {}, false
     }
+    world.stage_camera_data(&engine.world.staging, cam_handle)
     cam_gpu := &engine.render.cameras_gpu[cam_handle.index]
     descriptor_set := engine.render.textures_descriptor_set
     set_descriptor :: proc(
@@ -1045,14 +1354,14 @@ create_light_camera :: proc(
     gpu_result := render_camera.init_gpu(
       &engine.gctx,
       cam_gpu,
-      cam,
       &engine.render.texture_manager,
-      d.SHADOW_MAP_SIZE,
-      d.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
+      world.SHADOW_MAP_SIZE,
       engine.swapchain.format.format,
       vk.Format.D32_SFLOAT,
-      cam.enabled_passes,
-      d.MAX_NODES_IN_SCENE,
+      transmute(render_camera.PassTypeSet)cam.enabled_passes,
+      cam.enable_depth_pyramid,
+      world.MAX_NODES_IN_SCENE,
     )
     if gpu_result != .SUCCESS {
       cont.free(&engine.world.cameras, cam_handle)
@@ -1075,7 +1384,7 @@ create_light_camera :: proc(
     }
     light.camera_handle = cam_handle
     light.camera_index = cam_handle.index
-    render.upload_light_data(&engine.render, light_handle, &light.data)
+    world.stage_light_data(&engine.world.staging, light_handle)
     return cam_handle, true
   }
   return {}, false
@@ -1100,7 +1409,11 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   if main_camera := get_main_camera(engine); main_camera != nil {
-    d.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
+    world.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
+    world.stage_camera_data(
+      &engine.world.staging,
+      transmute(world.CameraHandle)engine.render.main_camera,
+    )
     descriptor_set := engine.render.textures_descriptor_set
     set_descriptor :: proc(
       gctx: ^gpu.GPUContext,
@@ -1115,12 +1428,13 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     render_camera.resize_gpu(
       &engine.gctx,
       camera_gpu,
-      main_camera,
       &engine.render.texture_manager,
       engine.swapchain.extent.width,
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
       vk.Format.D32_SFLOAT,
+      transmute(render_camera.PassTypeSet)main_camera.enabled_passes,
+      main_camera.enable_depth_pyramid,
     ) or_return
     render_camera.allocate_descriptors(
       &engine.gctx,
@@ -1160,10 +1474,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   update_visibility_node_count(&self.render, &self.world)
   render.update_light_camera(
     &self.render,
-    self.world.cameras,
-    self.world.spherical_cameras,
-    self.world.lights,
-    self.world.active_lights[:],
+    transmute([]render.LightHandle)self.world.active_lights[:],
     self.render.main_camera,
     self.frame_index,
   )
@@ -1174,71 +1485,61 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.render,
     self.frame_index,
     &self.gctx,
-    &self.world.cameras,
-    &self.world.spherical_cameras,
     command_buffer,
   ) or_return
   for &entry, cam_index in self.world.cameras.entries {
     if !entry.active do continue
-    cam_handle := CameraHandle {
+    cam_handle := render.CameraHandle {
       index      = u32(cam_index),
       generation = entry.generation,
     }
     cam := &entry.item
-    if d.PassType.GEOMETRY in cam.enabled_passes {
+    if world.PassType.GEOMETRY in cam.enabled_passes {
       render.record_geometry_pass(
         &self.render,
         self.frame_index,
         &self.gctx,
-        self.world.cameras,
         cam_handle,
         command_buffer,
       )
     }
-    if d.PassType.LIGHTING in cam.enabled_passes {
+    if world.PassType.LIGHTING in cam.enabled_passes {
       render.record_lighting_pass(
         &self.render,
         self.frame_index,
-        self.world.cameras,
-        self.world.meshes,
-        self.world.lights,
-        self.world.active_lights[:],
+        transmute([]render.LightHandle)self.world.active_lights[:],
         cam_handle,
         self.swapchain.format.format,
         command_buffer,
       )
     }
-    if d.PassType.PARTICLES in cam.enabled_passes {
+    if world.PassType.PARTICLES in cam.enabled_passes {
       render.record_particles_pass(
         &self.render,
         self.frame_index,
-        self.world.cameras,
         cam_handle,
         self.swapchain.format.format,
         command_buffer,
       )
     }
-    if d.PassType.TRANSPARENCY in cam.enabled_passes {
+    if world.PassType.TRANSPARENCY in cam.enabled_passes {
       render.record_transparency_pass(
         &self.render,
         self.frame_index,
         &self.gctx,
-        self.world.cameras,
         cam_handle,
         self.swapchain.format.format,
         command_buffer,
       )
     }
-    if d.PassType.DEBUG_DRAW in cam.enabled_passes {
+    if world.PassType.DEBUG_DRAW in cam.enabled_passes {
       render.record_debug_draw_pass(
         &self.render,
         self.frame_index,
-        self.world.cameras,
-        self.world.meshes,
-        &self.world.meshes,
-        proc(ctx: rawptr, handle: d.MeshHandle) {
-          mesh_pool := cast(^d.Pool(d.Mesh))ctx
-          render.free_mesh_geometry(mesh_pool, handle)
+        &self.render,
+        proc(ctx: rawptr, handle: render.MeshHandle) {
+          render_mgr := cast(^render.Manager)ctx
+          render.free_mesh_geometry(render_mgr, handle)
         },
         cam_handle,
         command_buffer,
@@ -1248,7 +1549,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   render.record_post_process_pass(
     &self.render,
     self.frame_index,
-    self.world.cameras,
     self.render.main_camera,
     self.swapchain.format.format,
     self.swapchain.extent,
@@ -1275,8 +1575,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.render,
     self.frame_index,
     &self.gctx,
-    &self.world.cameras,
-    &self.world.spherical_cameras,
     compute_cmd_buffer,
   ) or_return
   if self.gctx.has_async_compute {

@@ -1,42 +1,37 @@
 package world
 
-import d "../data"
 import "core:sync"
 
-StagingEntry :: struct($T: typeid) {
-  data: T,
-  n:    u32,
-}
-
 StagingList :: struct {
-  transforms: map[d.NodeHandle]StagingEntry(matrix[4, 4]f32),
-  node_data:  map[d.NodeHandle]StagingEntry(d.NodeData),
-  mesh_updates: map[d.MeshHandle]StagingEntry(d.MeshData),
-  material_updates: map[d.MaterialHandle]StagingEntry(d.MaterialData),
-  bone_updates: map[d.NodeHandle]StagingEntry([dynamic]matrix[4, 4]f32),
-  sprite_updates: map[d.SpriteHandle]StagingEntry(d.SpriteData),
-  emitter_updates: map[d.EmitterHandle]StagingEntry(d.EmitterData),
-  forcefield_updates: map[d.ForceFieldHandle]StagingEntry(d.ForceFieldData),
-  light_updates: map[d.LightHandle]StagingEntry(d.LightData),
+  transforms: map[NodeHandle]u32,
+  node_data:  map[NodeHandle]u32,
+  mesh_updates: map[MeshHandle]u32,
+  material_updates: map[MaterialHandle]u32,
+  bone_updates: map[NodeHandle]u32,
+  sprite_updates: map[SpriteHandle]u32,
+  emitter_updates: map[EmitterHandle]u32,
+  forcefield_updates: map[ForceFieldHandle]u32,
+  light_updates: map[LightHandle]u32,
+  camera_updates: map[CameraHandle]u32,
+  spherical_camera_updates: map[SphereCameraHandle]u32,
   mutex: sync.Mutex,
 }
 
 staging_init :: proc(staging: ^StagingList) {
-  staging.transforms = make(map[d.NodeHandle]StagingEntry(matrix[4, 4]f32))
-  staging.node_data = make(map[d.NodeHandle]StagingEntry(d.NodeData))
-  staging.mesh_updates = make(map[d.MeshHandle]StagingEntry(d.MeshData))
-  staging.material_updates = make(map[d.MaterialHandle]StagingEntry(d.MaterialData))
-  staging.bone_updates = make(map[d.NodeHandle]StagingEntry([dynamic]matrix[4, 4]f32))
-  staging.sprite_updates = make(map[d.SpriteHandle]StagingEntry(d.SpriteData))
-  staging.emitter_updates = make(map[d.EmitterHandle]StagingEntry(d.EmitterData))
-  staging.forcefield_updates = make(map[d.ForceFieldHandle]StagingEntry(d.ForceFieldData))
-  staging.light_updates = make(map[d.LightHandle]StagingEntry(d.LightData))
+  staging.transforms = make(map[NodeHandle]u32)
+  staging.node_data = make(map[NodeHandle]u32)
+  staging.mesh_updates = make(map[MeshHandle]u32)
+  staging.material_updates = make(map[MaterialHandle]u32)
+  staging.bone_updates = make(map[NodeHandle]u32)
+  staging.sprite_updates = make(map[SpriteHandle]u32)
+  staging.emitter_updates = make(map[EmitterHandle]u32)
+  staging.forcefield_updates = make(map[ForceFieldHandle]u32)
+  staging.light_updates = make(map[LightHandle]u32)
+  staging.camera_updates = make(map[CameraHandle]u32)
+  staging.spherical_camera_updates = make(map[SphereCameraHandle]u32)
 }
 
 staging_destroy :: proc(staging: ^StagingList) {
-  for _, entry in staging.bone_updates {
-    delete(entry.data)
-  }
   delete(staging.transforms)
   delete(staging.node_data)
   delete(staging.mesh_updates)
@@ -46,126 +41,105 @@ staging_destroy :: proc(staging: ^StagingList) {
   delete(staging.emitter_updates)
   delete(staging.forcefield_updates)
   delete(staging.light_updates)
+  delete(staging.camera_updates)
+  delete(staging.spherical_camera_updates)
 }
 
 stage_node_transform :: proc(
   staging: ^StagingList,
-  handle: d.NodeHandle,
-  world_matrix: matrix[4, 4]f32,
+  handle: NodeHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  staging.transforms[handle] = {
-    data = world_matrix,
-    n    = 0,
-  }
+  staging.transforms[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_node_data :: proc(
   staging: ^StagingList,
-  handle: d.NodeHandle,
-  node_data: d.NodeData,
+  handle: NodeHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  staging.node_data[handle] = {
-    data = node_data,
-    n    = 0,
-  }
+  staging.node_data[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_mesh_data :: proc(
   staging: ^StagingList,
-  handle: d.MeshHandle,
-  mesh_data: d.MeshData,
+  handle: MeshHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  staging.mesh_updates[handle] = {
-    data = mesh_data,
-    n    = 0,
-  }
+  staging.mesh_updates[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_material_data :: proc(
   staging: ^StagingList,
-  handle: d.MaterialHandle,
-  material_data: d.MaterialData,
+  handle: MaterialHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  staging.material_updates[handle] = {
-    data = material_data,
-    n    = 0,
-  }
+  staging.material_updates[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_bone_matrices :: proc(
   staging: ^StagingList,
-  handle: d.NodeHandle,
-  matrices: []matrix[4, 4]f32,
+  handle: NodeHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  owned_copy := make([dynamic]matrix[4, 4]f32, 0, len(matrices))
-  append(&owned_copy, ..matrices[:])
-  if old, exists := staging.bone_updates[handle]; exists {
-    delete(old.data)
-  }
-  staging.bone_updates[handle] = {
-    data = owned_copy,
-    n    = 0,
-  }
+  staging.bone_updates[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_sprite_data :: proc(
   staging: ^StagingList,
-  handle: d.SpriteHandle,
-  sprite_data: d.SpriteData,
+  handle: SpriteHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  staging.sprite_updates[handle] = {
-    data = sprite_data,
-    n    = 0,
-  }
+  staging.sprite_updates[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_emitter_data :: proc(
   staging: ^StagingList,
-  handle: d.EmitterHandle,
-  emitter_data: d.EmitterData,
+  handle: EmitterHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  staging.emitter_updates[handle] = {
-    data = emitter_data,
-    n    = 0,
-  }
+  staging.emitter_updates[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_forcefield_data :: proc(
   staging: ^StagingList,
-  handle: d.ForceFieldHandle,
-  forcefield_data: d.ForceFieldData,
+  handle: ForceFieldHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  staging.forcefield_updates[handle] = {
-    data = forcefield_data,
-    n    = 0,
-  }
+  staging.forcefield_updates[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_light_data :: proc(
   staging: ^StagingList,
-  handle: d.LightHandle,
-  light_data: d.LightData,
+  handle: LightHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  staging.light_updates[handle] = {
-    data = light_data,
-    n    = 0,
-  }
+  staging.light_updates[handle] = 0
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_camera_data :: proc(
+  staging: ^StagingList,
+  handle: CameraHandle,
+) {
+  sync.mutex_lock(&staging.mutex)
+  staging.camera_updates[handle] = 0
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_spherical_camera_data :: proc(
+  staging: ^StagingList,
+  handle: SphereCameraHandle,
+) {
+  sync.mutex_lock(&staging.mutex)
+  staging.spherical_camera_updates[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }

@@ -1,28 +1,66 @@
 package world
 
 import cont "../containers"
-import d "../data"
 import "core:log"
 
-// Re-export types from data module
-ShaderFeature :: d.ShaderFeature
-ShaderFeatureSet :: d.ShaderFeatureSet
-MaterialType :: d.MaterialType
-MAX_MATERIALS :: d.MAX_MATERIALS
-MaterialData :: d.MaterialData
-Material :: d.Material
-Color :: d.Color
-prepare_material_data :: d.prepare_material_data
+ShaderFeature :: enum {
+  ALBEDO_TEXTURE             = 0,
+  METALLIC_ROUGHNESS_TEXTURE = 1,
+  NORMAL_TEXTURE             = 2,
+  EMISSIVE_TEXTURE           = 3,
+  OCCLUSION_TEXTURE          = 4,
+}
+
+ShaderFeatureSet :: bit_set[ShaderFeature;u32]
+
+MaterialType :: enum {
+  PBR,
+  UNLIT,
+  WIREFRAME,
+  TRANSPARENT,
+}
+
+MaterialData :: struct {
+	albedo_index:             u32,
+	metallic_roughness_index: u32,
+	normal_index:             u32,
+	emissive_index:           u32,
+	metallic_value:           f32,
+	roughness_value:          f32,
+	emissive_value:           f32,
+	features:                 ShaderFeatureSet,
+	base_color_factor:        [4]f32,
+}
+Material :: struct {
+	using data:         MaterialData,
+	type:               MaterialType,
+	albedo:             Image2DHandle,
+	metallic_roughness: Image2DHandle,
+	normal:             Image2DHandle,
+	emissive:           Image2DHandle,
+	occlusion:          Image2DHandle,
+	using meta:         ResourceMetadata,
+}
+
+prepare_material_data :: proc(material: ^Material) {
+	material.albedo_index = min(MAX_TEXTURES - 1, material.albedo.index)
+	material.metallic_roughness_index = min(
+		MAX_TEXTURES - 1,
+		material.metallic_roughness.index,
+	)
+	material.normal_index = min(MAX_TEXTURES - 1, material.normal.index)
+	material.emissive_index = min(MAX_TEXTURES - 1, material.emissive.index)
+}
 
 material_init :: proc(
 	self: ^Material,
 	features: ShaderFeatureSet,
 	type: MaterialType,
-	albedo_handle: d.Image2DHandle,
-	metallic_roughness_handle: d.Image2DHandle,
-	normal_handle: d.Image2DHandle,
-	emissive_handle: d.Image2DHandle,
-	occlusion_handle: d.Image2DHandle,
+	albedo_handle: Image2DHandle,
+	metallic_roughness_handle: Image2DHandle,
+	normal_handle: Image2DHandle,
+	emissive_handle: Image2DHandle,
+	occlusion_handle: Image2DHandle,
 	metallic_value: f32,
 	roughness_value: f32,
 	emissive_value: f32,
@@ -50,22 +88,22 @@ create_material :: proc(
 	world: ^World,
 	features: ShaderFeatureSet = {},
 	type: MaterialType = .PBR,
-	albedo_handle: d.Image2DHandle = {},
-	metallic_roughness_handle: d.Image2DHandle = {},
-	normal_handle: d.Image2DHandle = {},
-	emissive_handle: d.Image2DHandle = {},
-	occlusion_handle: d.Image2DHandle = {},
+	albedo_handle: Image2DHandle = {},
+	metallic_roughness_handle: Image2DHandle = {},
+	normal_handle: Image2DHandle = {},
+	emissive_handle: Image2DHandle = {},
+	occlusion_handle: Image2DHandle = {},
 	metallic_value: f32 = 0.0,
 	roughness_value: f32 = 1.0,
 	emissive_value: f32 = 0.0,
 	base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 	auto_purge: bool = false,
 ) -> (
-	handle: d.MaterialHandle,
+	handle: MaterialHandle,
 	ok: bool,
 ) #optional_ok {
 	mat: ^Material
-	handle, mat = cont.alloc(&world.materials, d.MaterialHandle) or_return
+	handle, mat = cont.alloc(&world.materials, MaterialHandle) or_return
 	defer if !ok {
 		cont.free(&world.materials, handle)
 	}
@@ -88,7 +126,7 @@ create_material :: proc(
 }
 
 // Reference counting functions
-material_ref :: proc(world: ^World, handle: d.MaterialHandle) -> bool {
+material_ref :: proc(world: ^World, handle: MaterialHandle) -> bool {
 	mat := cont.get(world.materials, handle) or_return
 	mat.ref_count += 1
 	return true
@@ -96,7 +134,7 @@ material_ref :: proc(world: ^World, handle: d.MaterialHandle) -> bool {
 
 material_unref :: proc(
 	world: ^World,
-	handle: d.MaterialHandle,
+	handle: MaterialHandle,
 ) -> (
 	ref_count: u32,
 	ok: bool,

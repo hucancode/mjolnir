@@ -2,13 +2,12 @@ package ui
 
 import cont "../../containers"
 import "../../gpu"
-import d "../../data"
 import "core:log"
 import vk "vendor:vulkan"
 
 System :: struct {
   widget_pool:     cont.Pool(Widget),
-  default_texture: d.Image2DHandle,
+  default_texture: gpu.Texture2DHandle,
 }
 
 init_ui_system :: proc(self: ^System, max_widgets: u32 = 4096) {

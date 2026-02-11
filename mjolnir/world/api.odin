@@ -1,7 +1,6 @@
 package world
 
 import cont "../containers"
-import d "../data"
 import "../geometry"
 import "../physics"
 import "core:math"
@@ -53,7 +52,7 @@ scale :: proc {
 
 node_translate_by :: proc(
   world: ^World,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   x: f32 = 0,
   y: f32 = 0,
   z: f32 = 0,
@@ -65,7 +64,7 @@ node_translate_by :: proc(
 
 node_translate :: proc(
   world: ^World,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   x: f32 = 0,
   y: f32 = 0,
   z: f32 = 0,
@@ -82,7 +81,7 @@ node_rotate_by :: proc {
 
 node_rotate_by_quaternion :: proc(
   world: ^World,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   q: quaternion128,
 ) {
   if node, ok := cont.get(world.nodes, handle); ok {
@@ -92,7 +91,7 @@ node_rotate_by_quaternion :: proc(
 
 node_rotate_by_angle :: proc(
   world: ^World,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
@@ -108,7 +107,7 @@ node_rotate :: proc {
 
 node_rotate_quaternion :: proc(
   world: ^World,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   q: quaternion128,
 ) {
   if node, ok := cont.get(world.nodes, handle); ok {
@@ -118,7 +117,7 @@ node_rotate_quaternion :: proc(
 
 node_rotate_angle :: proc(
   world: ^World,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
@@ -129,7 +128,7 @@ node_rotate_angle :: proc(
 
 node_scale_xyz_by :: proc(
   world: ^World,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   x: f32 = 1,
   y: f32 = 1,
   z: f32 = 1,
@@ -139,7 +138,7 @@ node_scale_xyz_by :: proc(
   }
 }
 
-node_scale_by :: proc(world: ^World, handle: d.NodeHandle, s: f32) {
+node_scale_by :: proc(world: ^World, handle: NodeHandle, s: f32) {
   if node, ok := cont.get(world.nodes, handle); ok {
     geometry.scale_by(&node.transform, s)
   }
@@ -147,7 +146,7 @@ node_scale_by :: proc(world: ^World, handle: d.NodeHandle, s: f32) {
 
 node_scale_xyz :: proc(
   world: ^World,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
   x: f32 = 1,
   y: f32 = 1,
   z: f32 = 1,
@@ -157,13 +156,13 @@ node_scale_xyz :: proc(
   }
 }
 
-node_scale :: proc(world: ^World, handle: d.NodeHandle, s: f32) {
+node_scale :: proc(world: ^World, handle: NodeHandle, s: f32) {
   if node, ok := cont.get(world.nodes, handle); ok {
     geometry.scale(&node.transform, s)
   }
 }
 
-get_node :: proc(world: ^World, handle: d.NodeHandle) -> (^Node, bool) #optional_ok {
+get_node :: proc(world: ^World, handle: NodeHandle) -> (^Node, bool) #optional_ok {
   return cont.get(world.nodes, handle)
 }
 
@@ -179,7 +178,7 @@ enable_actor_tick :: proc(
 disable_actor_tick :: proc(
   world: ^World,
   $T: typeid,
-  handle: d.NodeHandle,
+  handle: NodeHandle,
 ) {
   entry, pool_exists := world.actor_pools[typeid_of(T)]
   if !pool_exists do return

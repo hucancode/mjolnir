@@ -1,7 +1,7 @@
 package geometry_pass
 
 import cont "../../containers"
-import d "../../data"
+import d "../data"
 import "../../geometry"
 import "../../gpu"
 import "../camera"
@@ -115,7 +115,7 @@ init :: proc(
 
 begin_pass :: proc(
   camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^d.Camera,
+  camera_cpu: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
