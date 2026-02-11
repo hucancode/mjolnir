@@ -180,7 +180,7 @@ init :: proc(
     self.projection_layout = 0
   }
   log.infof("init UI texture...")
-  gpu.allocate_texture_2d_with_data(
+  self.atlas_handle, ret = gpu.allocate_texture_2d_with_data(
     texture_manager,
     gctx,
     raw_data(mu.default_atlas_alpha[:]),
@@ -190,6 +190,7 @@ init :: proc(
     .R8_UNORM,
     {.SAMPLED},
   )
+  if ret != .SUCCESS do return
   log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
   log.infof("init UI vertex buffer...")
   self.vertex_buffer = gpu.create_mutable_buffer(
