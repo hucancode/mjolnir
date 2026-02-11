@@ -11,8 +11,27 @@ import "core:slice"
 import "core:strings"
 import "core:sync"
 
-LightAttachment :: struct {
-  handle: LightHandle,
+PointLightAttachment :: struct {
+  color:         [4]f32, // RGB + intensity
+  radius:        f32, // range
+  cast_shadow:   bool,
+  camera_handle: SphereCameraHandle, // Shadow camera (point lights use spherical camera)
+}
+
+DirectionalLightAttachment :: struct {
+  color:         [4]f32, // RGB + intensity
+  radius:        f32, // shadow camera projection radius
+  cast_shadow:   bool,
+  camera_handle: CameraHandle, // Shadow camera
+}
+
+SpotLightAttachment :: struct {
+  color:         [4]f32, // RGB + intensity
+  radius:        f32, // range
+  angle_inner:   f32, // inner cone angle
+  angle_outer:   f32, // outer cone angle
+  cast_shadow:   bool,
+  camera_handle: CameraHandle, // Shadow camera
 }
 
 NodeSkinning :: struct {
@@ -47,7 +66,9 @@ RigidBodyAttachment :: struct {
 }
 
 NodeAttachment :: union {
-  LightAttachment,
+  PointLightAttachment,
+  DirectionalLightAttachment,
+  SpotLightAttachment,
   MeshAttachment,
   EmitterAttachment,
   ForceFieldAttachment,
@@ -136,11 +157,10 @@ World :: struct {
   emitters:                cont.Pool(Emitter),
   forcefields:             cont.Pool(ForceField),
   sprites:                 cont.Pool(Sprite),
-  lights:                  cont.Pool(Light),
   animation_clips:         cont.Pool(anim.Clip),
   // Active resource tracking
   animatable_sprites:      [dynamic]SpriteHandle,
-  active_lights:           [dynamic]LightHandle,
+  active_light_nodes:      [dynamic]NodeHandle,
   // Builtin resources
   builtin_materials:       [len(Color)]MaterialHandle,
   builtin_meshes:          [len(Primitive)]MeshHandle,
@@ -163,7 +183,7 @@ update_node_tags :: proc(node: ^Node) {
     node.tags |= {.MESH}
   case SpriteAttachment:
     node.tags |= {.SPRITE}
-  case LightAttachment:
+  case PointLightAttachment, DirectionalLightAttachment, SpotLightAttachment:
     node.tags |= {.LIGHT}
   case EmitterAttachment:
     node.tags |= {.EMITTER}
@@ -180,6 +200,7 @@ update_node_tags :: proc(node: ^Node) {
 destroy_node :: proc(
   self: ^Node,
   world: ^World = nil,
+  node_handle: NodeHandle = {},
 ) {
   delete(self.children)
   self.children = {}
@@ -187,9 +208,12 @@ destroy_node :: proc(
     return
   }
   #partial switch &attachment in &self.attachment {
-  case LightAttachment:
-    destroy_light(world, attachment.handle)
-    attachment.handle = {}
+  case PointLightAttachment:
+    unregister_active_light(world, node_handle)
+  case DirectionalLightAttachment:
+    unregister_active_light(world, node_handle)
+  case SpotLightAttachment:
+    unregister_active_light(world, node_handle)
   case EmitterAttachment:
     destroy_emitter(world, attachment.handle)
     attachment.handle = {}
@@ -364,7 +388,6 @@ init :: proc(world: ^World) {
   cont.init(&world.emitters, MAX_EMITTERS)
   cont.init(&world.forcefields, MAX_FORCE_FIELDS)
   cont.init(&world.sprites, MAX_SPRITES)
-  cont.init(&world.lights, MAX_LIGHTS)
   cont.init(&world.animation_clips, 0)
 
   // Initialize builtin resources
@@ -403,15 +426,6 @@ begin_frame :: proc(
 shutdown :: proc(
   world: ^World,
 ) {
-  // Clean up lights
-  for &entry, i in world.lights.entries {
-    if entry.generation > 0 && entry.active {
-      destroy_light(world, LightHandle{index = u32(i), generation = entry.generation})
-    }
-  }
-  delete(world.lights.entries)
-  delete(world.lights.free_indices)
-
   // Clean up spherical cameras
   for &entry in world.spherical_cameras.entries {
     if entry.generation > 0 && entry.active {
@@ -455,16 +469,20 @@ shutdown :: proc(
 
   // Clean up active resource tracking
   delete(world.animatable_sprites)
-  delete(world.active_lights)
 
   // Clean up nodes
-  for &entry in world.nodes.entries {
+  for &entry, i in world.nodes.entries {
     if entry.active {
-      destroy_node(&entry.item, world)
+      handle := NodeHandle {
+        index      = u32(i),
+        generation = entry.generation,
+      }
+      destroy_node(&entry.item, world, handle)
     }
   }
   cont.destroy(world.nodes, proc(node: ^Node) {})
   delete(world.traversal_stack)
+  delete(world.active_light_nodes)
 
   // Clean up actor pools
   for _, entry in world.actor_pools {
@@ -512,7 +530,7 @@ cleanup_pending_deletions :: proc(
     stage_node_data(&world.staging, handle)
     unregister_animatable_node(world, handle)
     if node, ok := cont.free(&world.nodes, handle); ok {
-      destroy_node(node, world)
+      destroy_node(node, world, handle)
       // Clear the node struct to prevent use-after-free
       node^ = {}
     }
@@ -683,86 +701,57 @@ assign_light_to_node :: proc(
   node_handle: NodeHandle,
   node: ^Node,
 ) {
-  attachment, is_light := &node.attachment.(LightAttachment)
-  if !is_light {
-    return
-  }
-  if light, ok := cont.get(world.lights, attachment.handle); ok {
-    light.node_handle = node_handle
-    stage_light_data(&world.staging, attachment.handle)
+  #partial switch _ in node.attachment {
+  case PointLightAttachment, DirectionalLightAttachment, SpotLightAttachment:
+    register_active_light(world, node_handle)
   }
 }
 
 create_point_light_attachment :: proc(
-  node_handle: NodeHandle,
-  world: ^World,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
-  cast_shadow: b32 = true,
+  cast_shadow: bool = true,
 ) -> (
-  attachment: LightAttachment,
-  ok: bool,
-) #optional_ok {
-  handle: LightHandle
-  handle, ok = create_light(
-    world,
-    .POINT,
-    node_handle,
-    color,
-    radius,
+  attachment: PointLightAttachment,
+) {
+  return PointLightAttachment {
+    color = color,
+    radius = radius,
     cast_shadow = cast_shadow,
-  )
-  attachment = LightAttachment{handle}
-  return
+  }
 }
 
 create_directional_light_attachment :: proc(
-  node_handle: NodeHandle,
-  world: ^World,
   color: [4]f32 = {1, 1, 1, 1},
-  cast_shadow: b32 = false,
+  radius: f32 = 10.0,
+  cast_shadow: bool = false,
 ) -> (
-  attachment: LightAttachment,
-  ok: bool,
-) #optional_ok {
-  handle: LightHandle
-  handle, ok = create_light(
-    world,
-    .DIRECTIONAL,
-    node_handle,
-    color,
+  attachment: DirectionalLightAttachment,
+) {
+  return DirectionalLightAttachment {
+    color = color,
+    radius = radius,
     cast_shadow = cast_shadow,
-  )
-  attachment = LightAttachment{handle}
-  return
+  }
 }
 
 create_spot_light_attachment :: proc(
-  node_handle: NodeHandle,
-  world: ^World,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   angle: f32 = math.PI * 0.2,
-  cast_shadow: b32 = true,
+  cast_shadow: bool = true,
 ) -> (
-  attachment: LightAttachment,
-  ok: bool,
-) #optional_ok {
+  attachment: SpotLightAttachment,
+) {
   angle_inner := angle * 0.8
   angle_outer := angle
-  handle: LightHandle
-  handle, ok = create_light(
-    world,
-    .SPOT,
-    node_handle,
-    color,
-    radius,
-    angle_inner,
-    angle_outer,
-    cast_shadow,
-  )
-  attachment = LightAttachment{handle}
-  return
+  return SpotLightAttachment {
+    color = color,
+    radius = radius,
+    angle_inner = angle_inner,
+    angle_outer = angle_outer,
+    cast_shadow = cast_shadow,
+  }
 }
 
 @(private)

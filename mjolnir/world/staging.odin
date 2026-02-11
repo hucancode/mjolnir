@@ -11,7 +11,7 @@ StagingList :: struct {
   sprite_updates: map[SpriteHandle]u32,
   emitter_updates: map[EmitterHandle]u32,
   forcefield_updates: map[ForceFieldHandle]u32,
-  light_updates: map[LightHandle]u32,
+  light_updates: map[NodeHandle]u32,
   camera_updates: map[CameraHandle]u32,
   spherical_camera_updates: map[SphereCameraHandle]u32,
   mutex: sync.Mutex,
@@ -26,7 +26,7 @@ staging_init :: proc(staging: ^StagingList) {
   staging.sprite_updates = make(map[SpriteHandle]u32)
   staging.emitter_updates = make(map[EmitterHandle]u32)
   staging.forcefield_updates = make(map[ForceFieldHandle]u32)
-  staging.light_updates = make(map[LightHandle]u32)
+  staging.light_updates = make(map[NodeHandle]u32)
   staging.camera_updates = make(map[CameraHandle]u32)
   staging.spherical_camera_updates = make(map[SphereCameraHandle]u32)
 }
@@ -119,7 +119,7 @@ stage_forcefield_data :: proc(
 
 stage_light_data :: proc(
   staging: ^StagingList,
-  handle: LightHandle,
+  handle: NodeHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
   staging.light_updates[handle] = 0

@@ -660,7 +660,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
     [dynamic]world.ForceFieldHandle,
     context.temp_allocator,
   )
-  stale_lights := make([dynamic]world.LightHandle, context.temp_allocator)
+  stale_lights := make([dynamic]world.NodeHandle, context.temp_allocator)
   stale_cameras := make([dynamic]world.CameraHandle, context.temp_allocator)
   stale_spherical_cameras := make(
     [dynamic]world.SphereCameraHandle,
@@ -1021,35 +1021,70 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   for handle in stale_forcefields {
     delete_key(&self.world.staging.forcefield_updates, handle)
   }
-  for handle, n in self.world.staging.light_updates {
+  for node_handle, n in self.world.staging.light_updates {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
-      if light, ok := cont.get(self.world.lights, handle); ok {
-        dst := render.ensure_light_slot(
-          &self.render,
-          transmute(render.LightHandle)handle,
-        )
-        dst^ = render.Light {
-          color        = light.color,
-          radius       = light.radius,
-          angle_inner  = light.angle_inner,
-          angle_outer  = light.angle_outer,
-          type         = transmute(render.LightType)light.type,
-          node_index   = light.node_handle.index,
-          camera_index = light.camera_handle.index,
-          cast_shadow  = light.cast_shadow,
+      light_slot, in_active := slice.linear_search(
+        self.world.active_light_nodes[:],
+        node_handle,
+      )
+      if in_active {
+        node := cont.get(self.world.nodes, node_handle)
+        if node != nil {
+          render_handle := render.LightHandle {
+            index      = u32(light_slot),
+            generation = 1,
+          }
+          dst := render.ensure_light_slot(&self.render, render_handle)
+          #partial switch attachment in node.attachment {
+          case world.PointLightAttachment:
+            dst^ = render.Light {
+              color        = attachment.color,
+              radius       = attachment.radius,
+              angle_inner  = 0.0,
+              angle_outer  = 0.0,
+              type         = .POINT,
+              node_index   = node_handle.index,
+              camera_index = attachment.camera_handle.index,
+              cast_shadow  = b32(attachment.cast_shadow),
+            }
+          case world.DirectionalLightAttachment:
+            dst^ = render.Light {
+              color        = attachment.color,
+              radius       = attachment.radius,
+              angle_inner  = 0.0,
+              angle_outer  = 0.0,
+              type         = .DIRECTIONAL,
+              node_index   = node_handle.index,
+              camera_index = attachment.camera_handle.index,
+              cast_shadow  = b32(attachment.cast_shadow),
+            }
+          case world.SpotLightAttachment:
+            dst^ = render.Light {
+              color        = attachment.color,
+              radius       = attachment.radius,
+              angle_inner  = attachment.angle_inner,
+              angle_outer  = attachment.angle_outer,
+              type         = .SPOT,
+              node_index   = node_handle.index,
+              camera_index = attachment.camera_handle.index,
+              cast_shadow  = b32(attachment.cast_shadow),
+            }
+          case:
+            dst^ = {}
+          }
+          render.upload_light_data(&self.render, render_handle.index, dst)
         }
-        render.upload_light_data(&self.render, handle.index, dst)
       }
       next_n += 1
-      self.world.staging.light_updates[handle] = next_n
+      self.world.staging.light_updates[node_handle] = next_n
     }
     if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_lights, handle)
+      append(&stale_lights, node_handle)
     }
   }
-  for handle in stale_lights {
-    delete_key(&self.world.staging.light_updates, handle)
+  for node_handle in stale_lights {
+    delete_key(&self.world.staging.light_updates, node_handle)
   }
   for handle, n in self.world.staging.camera_updates {
     next_n := n
@@ -1235,35 +1270,32 @@ populate_debug_ui :: proc(self: ^Engine) {
 @(private)
 create_light_camera :: proc(
   engine: ^Engine,
-  light_handle: world.LightHandle,
+  light_node_handle: world.NodeHandle,
 ) -> (
   camera_handle: world.CameraHandle,
   ok: bool,
 ) #optional_ok {
-  light := cont.get(engine.world.lights, light_handle) or_return
-  // Only create cameras for lights that cast shadows
-  if !light.cast_shadow do return {}, false
-  #partial switch light.type {
-  case .POINT:
+  node := cont.get(engine.world.nodes, light_node_handle) or_return
+  #partial switch &attachment in &node.attachment {
+  case world.PointLightAttachment:
+    if !attachment.cast_shadow do return {}, false
     // Point lights use spherical cameras for omnidirectional shadows
     cam_handle, spherical_cam := cont.alloc(
       &engine.world.spherical_cameras,
       world.SphereCameraHandle,
     ) or_return
-    // Initialize CPU data
     init_ok := world.spherical_camera_init(
       spherical_cam,
       world.SHADOW_MAP_SIZE,
-      radius = light.radius,
+      radius = attachment.radius,
       near = 0.1,
-      far = light.radius,
+      far = attachment.radius,
     )
     if !init_ok {
       cont.free(&engine.world.spherical_cameras, cam_handle)
       return {}, false
     }
     world.stage_spherical_camera_data(&engine.world.staging, cam_handle)
-    // Initialize GPU resources
     cam_gpu := &engine.render.spherical_cameras_gpu[cam_handle.index]
     gpu_result := render_camera.init_spherical_gpu(
       &engine.gctx,
@@ -1291,16 +1323,16 @@ create_light_camera :: proc(
       cont.free(&engine.world.spherical_cameras, cam_handle)
       return {}, false
     }
-    // Update the light to reference this camera
-    light.camera_handle = cam_handle
-    world.stage_light_data(&engine.world.staging, light_handle)
+    attachment.camera_handle = cam_handle
+    world.stage_light_data(&engine.world.staging, light_node_handle)
     return cam_handle, true
-  case .DIRECTIONAL:
+  case world.DirectionalLightAttachment:
+    if !attachment.cast_shadow do return {}, false
     cam_handle, cam := cont.alloc(
       &engine.world.cameras,
       world.CameraHandle,
     ) or_return
-    ortho_size := light.radius * 2.0
+    ortho_size := attachment.radius * 2.0
     init_result := world.camera_init_orthographic(
       cam,
       world.SHADOW_MAP_SIZE,
@@ -1311,7 +1343,7 @@ create_light_camera :: proc(
       ortho_size,
       ortho_size,
       1.0,
-      light.radius * 2.0,
+      attachment.radius * 2.0,
     )
     if init_result != .SUCCESS {
       cont.free(&engine.world.cameras, cam_handle)
@@ -1360,15 +1392,16 @@ create_light_camera :: proc(
       cont.free(&engine.world.cameras, cam_handle)
       return {}, false
     }
-    light.camera_handle = cam_handle
-    world.stage_light_data(&engine.world.staging, light_handle)
+    attachment.camera_handle = cam_handle
+    world.stage_light_data(&engine.world.staging, light_node_handle)
     return cam_handle, true
-  case .SPOT:
+  case world.SpotLightAttachment:
+    if !attachment.cast_shadow do return {}, false
     cam_handle, cam := cont.alloc(
       &engine.world.cameras,
       world.CameraHandle,
     ) or_return
-    fov := light.angle_outer * 2.0
+    fov := attachment.angle_outer * 2.0
     init_result := world.camera_init(
       cam,
       world.SHADOW_MAP_SIZE,
@@ -1377,8 +1410,8 @@ create_light_camera :: proc(
       {0, 0, 0},
       {0, -1, 0},
       fov,
-      light.radius * 0.01,
-      light.radius,
+      attachment.radius * 0.01,
+      attachment.radius,
     )
     if init_result != .SUCCESS {
       cont.free(&engine.world.cameras, cam_handle)
@@ -1427,20 +1460,58 @@ create_light_camera :: proc(
       cont.free(&engine.world.cameras, cam_handle)
       return {}, false
     }
-    light.camera_handle = cam_handle
-    world.stage_light_data(&engine.world.staging, light_handle)
+    attachment.camera_handle = cam_handle
+    world.stage_light_data(&engine.world.staging, light_node_handle)
     return cam_handle, true
+  case:
+    return {}, false
   }
-  return {}, false
 }
 
 @(private)
 ensure_light_cameras :: proc(engine: ^Engine) {
-  for light_handle in engine.world.active_lights {
-    light := cont.get(engine.world.lights, light_handle) or_continue
-    if !light.cast_shadow || light.camera_handle.generation > 0 do continue
-    create_light_camera(engine, light_handle) or_continue
+  for light_node_handle in engine.world.active_light_nodes {
+    node := cont.get(engine.world.nodes, light_node_handle) or_continue
+    should_create_camera := false
+    #partial switch attachment in node.attachment {
+    case world.PointLightAttachment:
+      should_create_camera = bool(attachment.cast_shadow) &&
+      attachment.camera_handle.generation == 0
+    case world.DirectionalLightAttachment:
+      should_create_camera = bool(attachment.cast_shadow) &&
+      attachment.camera_handle.generation == 0
+    case world.SpotLightAttachment:
+      should_create_camera = bool(attachment.cast_shadow) &&
+      attachment.camera_handle.generation == 0
+    case:
+      should_create_camera = false
+    }
+    if !should_create_camera do continue
+    create_light_camera(engine, light_node_handle) or_continue
   }
+}
+
+@(private)
+build_active_render_light_handles :: proc(
+  engine: ^Engine,
+  allocator := context.temp_allocator,
+) -> [dynamic]render.LightHandle {
+  active_render_lights := make(
+    [dynamic]render.LightHandle,
+    len(engine.world.active_light_nodes),
+    allocator,
+  )
+  clear(&active_render_lights)
+  for _, light_idx in engine.world.active_light_nodes {
+    append(
+      &active_render_lights,
+      render.LightHandle {
+        index      = u32(light_idx),
+        generation = 1,
+      },
+    )
+  }
+  return active_render_lights
 }
 
 @(private = "file")
@@ -1504,6 +1575,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 
 render_and_present :: proc(self: ^Engine) -> vk.Result {
   ensure_light_cameras(self)
+  active_render_lights := build_active_render_light_handles(self)
   context.user_ptr = self
   gpu.acquire_next_image(
     self.gctx.device,
@@ -1518,7 +1590,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   update_visibility_node_count(&self.render, &self.world)
   render.update_light_camera(
     &self.render,
-    transmute([]render.LightHandle)self.world.active_lights[:],
+    active_render_lights[:],
     self.render.main_camera,
     self.frame_index,
   )
@@ -1551,7 +1623,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
       render.record_lighting_pass(
         &self.render,
         self.frame_index,
-        transmute([]render.LightHandle)self.world.active_lights[:],
+        active_render_lights[:],
         cam_handle,
         self.swapchain.format.format,
         command_buffer,
