@@ -1265,29 +1265,122 @@ navmesh_config_to_recast :: proc(cfg: NavMeshConfig) -> recast.Config {
   }
 }
 
-// TODO: Refactor to not depend on world.bake_geometry (which does GPU work, violating module boundaries)
-// Option 1: Move bake_geometry to render module
-// Option 2: Create a callback system for engine to orchestrate GPU reads
-// Option 3: Keep geometry in CPU-side pools that can be read directly
-/*
+build_area_types_from_tags :: proc(
+  node_infos: []world.BakedNodeInfo,
+) -> []u8 {
+  area_types := make([dynamic]u8, 0, len(node_infos) * 10)
+  for info in node_infos {
+    triangle_count := info.index_count / 3
+    area_type :=
+      .NAVMESH_OBSTACLE in info.tags ? u8(recast.RC_NULL_AREA) : u8(recast.RC_WALKABLE_AREA)
+    for _ in 0 ..< triangle_count {
+      append(&area_types, area_type)
+    }
+  }
+  return area_types[:]
+}
+
+@(private)
+match_bake_node_filter :: proc(
+  tags: world.NodeTagSet,
+  include: world.NodeTagSet,
+  exclude: world.NodeTagSet,
+) -> bool {
+  return (exclude == {} || (tags & exclude) == {}) && (include == {} || (tags & include) != {})
+}
+
+bake_geometry :: proc(
+  engine: ^Engine,
+  include_filter: world.NodeTagSet = {.ENVIRONMENT},
+  exclude_filter: world.NodeTagSet = {},
+  with_node_info: bool = false,
+) -> (
+  geom: geometry.Geometry,
+  node_infos: []world.BakedNodeInfo,
+  ok: bool,
+) {
+  vertices := make([dynamic]geometry.Vertex, 0, 4096)
+  indices := make([dynamic]u32, 0, 16384)
+  infos := make([dynamic]world.BakedNodeInfo, 0, 64) if with_node_info else nil
+  for &entry in engine.world.nodes.entries do if entry.active {
+    node := &entry.item
+    if !match_bake_node_filter(node.tags, include_filter, exclude_filter) do continue
+    mesh_attachment, is_mesh := node.attachment.(world.MeshAttachment)
+    if !is_mesh do continue
+    mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
+    mesh_geom, has_geom := mesh.cpu_geometry.?
+    if !has_geom do continue
+    vertex_base := u32(len(vertices))
+    for v in mesh_geom.vertices {
+      p := node.transform.world_matrix * [4]f32{v.position.x, v.position.y, v.position.z, 1.0}
+      append(&vertices, geometry.Vertex{position = p.xyz})
+    }
+    for src_index in mesh_geom.indices {
+      append(&indices, vertex_base + src_index)
+    }
+    if with_node_info {
+      append(&infos, world.BakedNodeInfo{
+        tags = node.tags,
+        vertex_count = len(mesh_geom.vertices),
+        index_count = len(mesh_geom.indices),
+      })
+    }
+  }
+  if len(vertices) == 0 {
+    delete(vertices)
+    delete(indices)
+    if with_node_info do delete(infos)
+    return {}, nil, false
+  }
+  geom = geometry.Geometry{
+    vertices = vertices[:],
+    indices = indices[:],
+    aabb = geometry.aabb_from_vertices(vertices[:]),
+  }
+  if with_node_info {
+    node_infos = infos[:]
+  } else {
+    node_infos = nil
+  }
+  return geom, node_infos, true
+}
+
+bake :: proc(
+  engine: ^Engine,
+  include_filter: world.NodeTagSet = {.ENVIRONMENT},
+  exclude_filter: world.NodeTagSet = {},
+) -> (
+  mesh_handle: world.MeshHandle,
+  ok: bool,
+) #optional_ok {
+  baked_geom, _, baked_ok := bake_geometry(
+    engine,
+    include_filter,
+    exclude_filter,
+  )
+  if !baked_ok do return
+  defer {
+    delete(baked_geom.vertices)
+    delete(baked_geom.indices)
+  }
+  mesh_handle, ok = create_mesh(engine, baked_geom, false)
+  return
+}
+
 setup_navmesh :: proc(
   engine: ^Engine,
   config: NavMeshConfig = DEFAULT_NAVMESH_CONFIG,
   include_filter: world.NodeTagSet = {},
   exclude_filter: world.NodeTagSet = {},
 ) -> bool {
-  world.traverse(&engine.world, &engine.world)
-  baked_geom, node_infos, bake_result := world.bake_geometry(
-    &engine.world,
-    &engine.gctx,
-    &engine.world,
-    &engine.render.vertex_buffer,
-    &engine.render.index_buffer,
+  world.traverse(&engine.world)
+  baked_geom, node_infos, bake_ok := bake_geometry(
+    engine,
     include_filter,
     exclude_filter,
     true,
   )
-  if bake_result != .SUCCESS {
+  if !bake_ok {
     return false
   }
   defer {
@@ -1303,7 +1396,7 @@ setup_navmesh :: proc(
     delete(nav_vertices)
     delete(nav_indices)
   }
-  area_types := nav.build_area_types_from_tags(node_infos)
+  area_types := build_area_types_from_tags(node_infos)
   defer delete(area_types)
   recast_config := navmesh_config_to_recast(config)
   nav_geom := nav.NavigationGeometry {
@@ -1319,7 +1412,6 @@ setup_navmesh :: proc(
   }
   return true
 }
-*/
 
 find_path :: proc(
   engine: ^Engine,
