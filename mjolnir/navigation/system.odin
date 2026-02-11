@@ -1,7 +1,6 @@
 package navigation
 
 import "../geometry"
-import "../world"
 import "core:log"
 import "core:math/linalg"
 import "detour"
@@ -327,19 +326,4 @@ convert_geometry_to_nav :: proc(
     nav_indices[i] = i32(idx)
   }
   return
-}
-
-build_area_types_from_tags :: proc(
-  node_infos: []world.BakedNodeInfo,
-) -> []u8 {
-  area_types := make([dynamic]u8, 0, len(node_infos) * 10)
-  for info in node_infos {
-    triangle_count := info.index_count / 3
-    area_type :=
-      .NAVMESH_OBSTACLE in info.tags ? u8(recast.RC_NULL_AREA) : u8(recast.RC_WALKABLE_AREA)
-    for _ in 0 ..< triangle_count {
-      append(&area_types, area_type)
-    }
-  }
-  return area_types[:]
 }
