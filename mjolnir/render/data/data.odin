@@ -7,7 +7,7 @@ Handle :: cont.Handle
 Pool :: cont.Pool
 
 NodeHandle :: distinct Handle
-MeshHandle :: distinct Handle
+MeshHandle :: gpu.MeshHandle
 MaterialHandle :: distinct Handle
 CameraHandle :: distinct Handle
 SphereCameraHandle :: CameraHandle
@@ -64,10 +64,7 @@ ResourceMetadata :: struct {
   auto_purge: bool,
 }
 
-BufferAllocation :: struct {
-  offset: u32,
-  count:  u32,
-}
+BufferAllocation :: gpu.BufferAllocation
 
 Primitive :: enum {
   CUBE,
