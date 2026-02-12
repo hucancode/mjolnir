@@ -1,14 +1,14 @@
 package render
 
 import cont "../containers"
-import d "data"
 import "../geometry"
 import "../gpu"
-import rd "data"
 import cam "camera"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import d "data"
+import rd "data"
 import light "lighting"
 import vk "vendor:vulkan"
 
@@ -53,10 +53,7 @@ free_indices :: proc(render: ^Manager, allocation: BufferAllocation) {
   gpu.free_indices(&render.mesh_manager, allocation)
 }
 
-free_vertex_skinning :: proc(
-  render: ^Manager,
-  allocation: BufferAllocation,
-) {
+free_vertex_skinning :: proc(render: ^Manager, allocation: BufferAllocation) {
   gpu.free_vertex_skinning(&render.mesh_manager, allocation)
 }
 
@@ -76,8 +73,16 @@ allocate_mesh_geometry :: proc(
   mesh.aabb_max = geometry_data.aabb.max
   mesh.flags = {}
   mesh.index_count = u32(len(geometry_data.indices))
-  vertex_allocation := allocate_vertices(render, gctx, geometry_data.vertices) or_return
-  index_allocation := allocate_indices(render, gctx, geometry_data.indices) or_return
+  vertex_allocation := allocate_vertices(
+    render,
+    gctx,
+    geometry_data.vertices,
+  ) or_return
+  index_allocation := allocate_indices(
+    render,
+    gctx,
+    geometry_data.indices,
+  ) or_return
   mesh.first_index = index_allocation.offset
   mesh.vertex_offset = i32(vertex_allocation.offset)
   mesh.skinning_offset = 0
@@ -102,18 +107,35 @@ sync_mesh_geometry_for_handle :: proc(
 ) -> vk.Result {
   mesh := ensure_mesh_slot(render, handle)
   if mesh.index_count > 0 {
-    free_vertices(render, BufferAllocation{offset = u32(mesh.vertex_offset), count = 1})
-    free_indices(render, BufferAllocation{offset = mesh.first_index, count = 1})
+    free_vertices(
+      render,
+      BufferAllocation{offset = u32(mesh.vertex_offset), count = 1},
+    )
+    free_indices(
+      render,
+      BufferAllocation{offset = mesh.first_index, count = 1},
+    )
     if .SKINNED in mesh.flags {
-      free_vertex_skinning(render, BufferAllocation{offset = mesh.skinning_offset, count = 1})
+      free_vertex_skinning(
+        render,
+        BufferAllocation{offset = mesh.skinning_offset, count = 1},
+      )
     }
   }
   mesh.aabb_min = geometry_data.aabb.min
   mesh.aabb_max = geometry_data.aabb.max
   mesh.flags = {}
   mesh.index_count = u32(len(geometry_data.indices))
-  vertex_allocation := allocate_vertices(render, gctx, geometry_data.vertices) or_return
-  index_allocation := allocate_indices(render, gctx, geometry_data.indices) or_return
+  vertex_allocation := allocate_vertices(
+    render,
+    gctx,
+    geometry_data.vertices,
+  ) or_return
+  index_allocation := allocate_indices(
+    render,
+    gctx,
+    geometry_data.indices,
+  ) or_return
   mesh.first_index = index_allocation.offset
   mesh.vertex_offset = i32(vertex_allocation.offset)
   mesh.skinning_offset = 0
@@ -134,11 +156,20 @@ free_mesh_geometry :: proc(render: ^Manager, handle: d.MeshHandle) {
   mesh, ok := cont.free(&render.meshes, handle)
   if !ok do return
   if mesh.index_count > 0 {
-    free_vertices(render, BufferAllocation{offset = u32(mesh.vertex_offset), count = 1})
-    free_indices(render, BufferAllocation{offset = mesh.first_index, count = 1})
+    free_vertices(
+      render,
+      BufferAllocation{offset = u32(mesh.vertex_offset), count = 1},
+    )
+    free_indices(
+      render,
+      BufferAllocation{offset = mesh.first_index, count = 1},
+    )
   }
   if .SKINNED in mesh.flags {
-    free_vertex_skinning(render, BufferAllocation{offset = mesh.skinning_offset, count = 1})
+    free_vertex_skinning(
+      render,
+      BufferAllocation{offset = mesh.skinning_offset, count = 1},
+    )
   }
 }
 
@@ -416,11 +447,7 @@ upload_sprite_data :: proc(
   gpu.write(&render.sprite_buffer.buffer, sprite_data, int(index))
 }
 
-upload_emitter_data :: proc(
-  render: ^Manager,
-  index: u32,
-  emitter: ^Emitter,
-) {
+upload_emitter_data :: proc(render: ^Manager, index: u32, emitter: ^Emitter) {
   gpu.write(&render.emitter_buffer.buffer, emitter, int(index))
 }
 
@@ -429,36 +456,16 @@ upload_forcefield_data :: proc(
   handle: d.ForceFieldHandle,
   forcefield: ^ForceField,
 ) {
-  gpu.write(
-    &render.forcefield_buffer.buffer,
-    forcefield,
-    int(handle.index),
-  )
+  gpu.write(&render.forcefield_buffer.buffer, forcefield, int(handle.index))
 }
 
-upload_light_data :: proc(
-  render: ^Manager,
-  index: u32,
-  light_data: ^d.Light,
-) {
+upload_light_data :: proc(render: ^Manager, index: u32, light_data: ^d.Light) {
   gpu.write(&render.lights_buffer.buffer, light_data, int(index))
   light.shadow_invalidate_light(&render.shadow, index)
 }
 
-upload_mesh_data :: proc(
-  render: ^Manager,
-  handle: d.MeshHandle,
-  mesh: ^Mesh,
-) {
-  upload_mesh_data_raw(render, handle, mesh)
-}
-
-upload_mesh_data_raw :: proc(
-  render: ^Manager,
-  handle: d.MeshHandle,
-  mesh_data: ^Mesh,
-) {
-  gpu.write(&render.mesh_data_buffer.buffer, mesh_data, int(handle.index))
+upload_mesh_data :: proc(render: ^Manager, handle: d.MeshHandle, mesh: ^Mesh) {
+  gpu.write(&render.mesh_data_buffer.buffer, mesh, int(handle.index))
 }
 
 upload_material_data :: proc(

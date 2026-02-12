@@ -812,15 +812,15 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           handle.index,
           &render.Material {
             // type = transmute(render.MaterialType)material.type,
-            albedo_index = material.albedo.index,
+            albedo_index             = material.albedo.index,
             metallic_roughness_index = material.metallic_roughness.index,
-            normal_index = material.normal.index,
-            emissive_index = material.emissive.index,
-            features = transmute(render.ShaderFeatureSet)material.features,
-            metallic_value = material.metallic_value,
-            roughness_value = material.roughness_value,
-            emissive_value = material.emissive_value,
-            base_color_factor = material.base_color_factor,
+            normal_index             = material.normal.index,
+            emissive_index           = material.emissive.index,
+            features                 = transmute(render.ShaderFeatureSet)material.features,
+            metallic_value           = material.metallic_value,
+            roughness_value          = material.roughness_value,
+            emissive_value           = material.emissive_value,
+            base_color_factor        = material.base_color_factor,
           },
         )
       }
@@ -984,8 +984,18 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           case world.PointLightAttachment:
             light_data = render.Light {
               color        = attachment.color,
-              position     = {light_position.x, light_position.y, light_position.z, 1.0},
-              direction    = {light_direction.x, light_direction.y, light_direction.z, 0.0},
+              position     = {
+                light_position.x,
+                light_position.y,
+                light_position.z,
+                1.0,
+              },
+              direction    = {
+                light_direction.x,
+                light_direction.y,
+                light_direction.z,
+                0.0,
+              },
               radius       = attachment.radius,
               angle_inner  = 0.0,
               angle_outer  = 0.0,
@@ -996,8 +1006,18 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           case world.DirectionalLightAttachment:
             light_data = render.Light {
               color        = attachment.color,
-              position     = {light_position.x, light_position.y, light_position.z, 1.0},
-              direction    = {light_direction.x, light_direction.y, light_direction.z, 0.0},
+              position     = {
+                light_position.x,
+                light_position.y,
+                light_position.z,
+                1.0,
+              },
+              direction    = {
+                light_direction.x,
+                light_direction.y,
+                light_direction.z,
+                0.0,
+              },
               radius       = attachment.radius,
               angle_inner  = 0.0,
               angle_outer  = 0.0,
@@ -1008,8 +1028,18 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           case world.SpotLightAttachment:
             light_data = render.Light {
               color        = attachment.color,
-              position     = {light_position.x, light_position.y, light_position.z, 1.0},
-              direction    = {light_direction.x, light_direction.y, light_direction.z, 0.0},
+              position     = {
+                light_position.x,
+                light_position.y,
+                light_position.z,
+                1.0,
+              },
+              direction    = {
+                light_direction.x,
+                light_direction.y,
+                light_direction.z,
+                0.0,
+              },
               radius       = attachment.radius,
               angle_inner  = attachment.angle_inner,
               angle_outer  = attachment.angle_outer,
@@ -1020,7 +1050,11 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           case:
             light_data = {}
           }
-          render.upload_light_data(&self.render, render_handle.index, &light_data)
+          render.upload_light_data(
+            &self.render,
+            render_handle.index,
+            &light_data,
+          )
         }
       }
       next_n += 1
@@ -1151,7 +1185,10 @@ populate_debug_ui :: proc(self: ^Engine) {
     )
     mu.label(
       &self.render.debug_ui.ctx,
-      fmt.tprintf("Textures %d", cont.count(self.render.texture_manager.images_2d)),
+      fmt.tprintf(
+        "Textures %d",
+        cont.count(self.render.texture_manager.images_2d),
+      ),
     )
     mu.label(
       &self.render.debug_ui.ctx,
@@ -1202,10 +1239,7 @@ build_active_render_light_handles :: proc(
   for _, light_idx in engine.world.active_light_nodes {
     append(
       &active_render_lights,
-      render.LightHandle {
-        index      = u32(light_idx),
-        generation = 1,
-      },
+      render.LightHandle{index = u32(light_idx), generation = 1},
     )
   }
   return active_render_lights

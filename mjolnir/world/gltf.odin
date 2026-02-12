@@ -41,9 +41,7 @@ TextureFromDataAllocator :: #type proc(
   ok: bool,
 )
 
-Texture2DRefProc :: #type proc(
-  handle: Image2DHandle,
-) -> bool
+Texture2DRefProc :: #type proc(handle: Image2DHandle) -> bool
 
 load_gltf :: proc(
   world: ^World,
@@ -529,10 +527,7 @@ construct_scene :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := cont.alloc(
-      &world.nodes,
-      NodeHandle,
-    ) or_continue
+    node_handle, node := cont.alloc(&world.nodes, NodeHandle) or_continue
     init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
@@ -584,12 +579,13 @@ construct_scene :: proc(
         )
         slice.fill(identity_matrices[:], linalg.MATRIX4F32_IDENTITY)
         node.attachment = MeshAttachment {
-          handle = mesh_handle,
-          material = geometry_data.material_handle,
+          handle      = mesh_handle,
+          material    = geometry_data.material_handle,
           cast_shadow = true,
-          skinning = NodeSkinning{},
+          skinning    = NodeSkinning{},
         }
-        if mesh_attachment, has_mesh := &node.attachment.(MeshAttachment); has_mesh {
+        if mesh_attachment, has_mesh := &node.attachment.(MeshAttachment);
+           has_mesh {
           skinning, has_skinning := &mesh_attachment.skinning.?
           if has_skinning {
             skinning.matrices = make([]matrix[4, 4]f32, len(identity_matrices))
@@ -600,12 +596,7 @@ construct_scene :: proc(
         if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin];
            !has_first_mesh {
           skin_to_first_mesh[gltf_node.skin] = mesh_handle
-          load_animations(
-            world,
-            gltf_data,
-            gltf_node.skin,
-            mesh_handle,
-          )
+          load_animations(world, gltf_data, gltf_node.skin, mesh_handle)
         }
       } else {
         mesh_handle, _, alloc_result := create_mesh(

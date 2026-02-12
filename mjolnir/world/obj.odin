@@ -17,7 +17,11 @@ load_obj :: proc(
   // step 1: Load geometry from OBJ file
   geom := geometry.load_obj(path, scale) or_return
   log.infof("Loaded OBJ file: %s", path)
-  log.infof("  Vertices: %d, Triangles: %d", len(geom.vertices), len(geom.indices) / 3)
+  log.infof(
+    "  Vertices: %d, Triangles: %d",
+    len(geom.vertices),
+    len(geom.indices) / 3,
+  )
   // step 2: Create mesh resource in CPU pools
   mesh_handle: MeshHandle
   mesh_ptr: ^Mesh
@@ -27,7 +31,9 @@ load_obj :: proc(
     return nodes, false
   }
   // Geometry upload is handled by engine/render staging sync.
-  log.warn("OBJ mesh created in CPU pools; geometry upload must be scheduled by engine")
+  log.warn(
+    "OBJ mesh created in CPU pools; geometry upload must be scheduled by engine",
+  )
   stage_mesh_data(&world.staging, mesh_handle)
   log.infof("Created mesh %v", mesh_handle)
   // step 3: Create node with mesh attachment

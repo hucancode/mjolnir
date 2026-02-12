@@ -32,16 +32,16 @@ SpotLightAttachment :: struct {
 }
 
 NodeSkinning :: struct {
-  layers:            [dynamic]anim.Layer,    // Animation layers (FK + IK)
+  layers:            [dynamic]anim.Layer, // Animation layers (FK + IK)
   active_transition: Maybe(anim.Transition), // Active transition state
-  matrices:          []matrix[4, 4]f32,      // Latest computed skinning matrices
+  matrices:          []matrix[4, 4]f32, // Latest computed skinning matrices
 }
 
 MeshAttachment :: struct {
-  handle:              MeshHandle,
-  material:            MaterialHandle,
-  skinning:            Maybe(NodeSkinning),
-  cast_shadow:         bool,
+  handle:      MeshHandle,
+  material:    MaterialHandle,
+  skinning:    Maybe(NodeSkinning),
+  cast_shadow: bool,
 }
 
 EmitterAttachment :: struct {
@@ -59,7 +59,7 @@ SpriteAttachment :: struct {
 }
 
 RigidBodyAttachment :: struct {
-  body_handle:     physics.DynamicRigidBodyHandle,
+  body_handle: physics.DynamicRigidBodyHandle,
 }
 
 NodeAttachment :: union {
@@ -131,8 +131,19 @@ TraverseEntry :: struct {
 }
 
 // Debug draw callbacks - engine can set these to enable debug visualization
-DebugDrawLineStripCallback :: proc(points: []geometry.Vertex, duration_seconds: f64, color: [4]f32, bypass_depth: bool)
-DebugDrawMeshCallback :: proc(mesh_handle: MeshHandle, transform: matrix[4, 4]f32, duration_seconds: f64, color: [4]f32, bypass_depth: bool)
+DebugDrawLineStripCallback :: proc(
+  points: []geometry.Vertex,
+  duration_seconds: f64,
+  color: [4]f32,
+  bypass_depth: bool,
+)
+DebugDrawMeshCallback :: proc(
+  mesh_handle: MeshHandle,
+  transform: matrix[4, 4]f32,
+  duration_seconds: f64,
+  color: [4]f32,
+  bypass_depth: bool,
+)
 
 World :: struct {
   root:                    NodeHandle,
@@ -226,10 +237,7 @@ destroy_node :: proc(
   }
 }
 
-detach :: proc(
-  nodes: Pool(Node),
-  child_handle: NodeHandle,
-) {
+detach :: proc(nodes: Pool(Node), child_handle: NodeHandle) {
   child_node := cont.get(nodes, child_handle)
   if child_node == nil {
     return
@@ -249,10 +257,7 @@ detach :: proc(
   child_node.parent = child_handle
 }
 
-attach :: proc(
-  nodes: Pool(Node),
-  parent_handle, child_handle: NodeHandle,
-) {
+attach :: proc(nodes: Pool(Node), parent_handle, child_handle: NodeHandle) {
   child_node := cont.get(nodes, child_handle)
   parent_node := cont.get(nodes, parent_handle)
   if child_node == nil || parent_node == nil {
@@ -341,10 +346,7 @@ register_animatable_node :: proc(world: ^World, handle: NodeHandle) {
   append(&world.animatable_nodes, handle)
 }
 
-unregister_animatable_node :: proc(
-  world: ^World,
-  handle: NodeHandle,
-) {
+unregister_animatable_node :: proc(world: ^World, handle: NodeHandle) {
   if i, found := slice.linear_search(world.animatable_nodes[:], handle);
      found {
     unordered_remove(&world.animatable_nodes, i)
@@ -359,9 +361,7 @@ begin_frame :: proc(
   traverse(world)
 }
 
-shutdown :: proc(
-  world: ^World,
-) {
+shutdown :: proc(world: ^World) {
   delete(world.cameras.entries)
   delete(world.cameras.free_indices)
 
@@ -435,9 +435,7 @@ despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
   return true
 }
 
-cleanup_pending_deletions :: proc(
-  world: ^World,
-) {
+cleanup_pending_deletions :: proc(world: ^World) {
   for entry, i in world.nodes.entries do if entry.active {
     if !entry.item.pending_deletion do continue
     handle := NodeHandle {
@@ -456,9 +454,7 @@ cleanup_pending_deletions :: proc(
   }
 }
 
-process_pending_deletions :: proc(
-  world: ^World,
- ) -> bool {
+process_pending_deletions :: proc(world: ^World) -> bool {
   sync.mutex_lock(&world.pending_deletions_mutex)
   for handle in world.pending_node_deletions {
     despawn(world, handle)
@@ -470,9 +466,7 @@ process_pending_deletions :: proc(
   return had_deletions
 }
 
-traverse :: proc(
-  world: ^World,
-) -> bool {
+traverse :: proc(world: ^World) -> bool {
   append(
     &world.traversal_stack,
     TraverseEntry{world.root, linalg.MATRIX4F32_IDENTITY, false, true},
@@ -521,12 +515,11 @@ traverse :: proc(
         &current_node.transform,
         entry.parent_transform * bone_socket_transform,
       )
-      stage_node_transform(
-        &world.staging,
-        entry.handle,
-      )
+      stage_node_transform(&world.staging, entry.handle)
       #partial switch _ in current_node.attachment {
-      case PointLightAttachment, DirectionalLightAttachment, SpotLightAttachment:
+      case PointLightAttachment,
+           DirectionalLightAttachment,
+           SpotLightAttachment:
         stage_light_data(&world.staging, entry.handle)
       }
     }

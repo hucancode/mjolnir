@@ -162,12 +162,21 @@ node_scale :: proc(world: ^World, handle: NodeHandle, s: f32) {
   }
 }
 
-get_node :: proc(world: ^World, handle: NodeHandle) -> (^Node, bool) #optional_ok {
+get_node :: proc(
+  world: ^World,
+  handle: NodeHandle,
+) -> (
+  ^Node,
+  bool,
+) #optional_ok {
   return cont.get(world.nodes, handle)
 }
 
 // Sync all nodes with rigid body attachments from physics to world
-sync_all_physics_to_world :: proc(world: ^World, physics_world: ^physics.World) {
+sync_all_physics_to_world :: proc(
+  world: ^World,
+  physics_world: ^physics.World,
+) {
   for &entry in world.nodes.entries do if entry.active {
     node := &entry.item
     if attachment, ok := node.attachment.(RigidBodyAttachment); ok {
@@ -181,7 +190,10 @@ sync_all_physics_to_world :: proc(world: ^World, physics_world: ^physics.World) 
 }
 
 // Sync all nodes with rigid body attachments from world to physics
-sync_all_world_to_physics :: proc(world: ^World, physics_world: ^physics.World) {
+sync_all_world_to_physics :: proc(
+  world: ^World,
+  physics_world: ^physics.World,
+) {
   for &entry in world.nodes.entries do if entry.active {
     node := &entry.item
     if attachment, ok := node.attachment.(RigidBodyAttachment); ok {

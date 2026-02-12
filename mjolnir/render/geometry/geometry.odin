@@ -1,10 +1,10 @@
 package geometry_pass
 
 import cont "../../containers"
-import d "../data"
 import "../../geometry"
 import "../../gpu"
 import "../camera"
+import d "../data"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -121,22 +121,28 @@ begin_pass :: proc(
   frame_index: u32,
 ) {
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
-  position_texture := gpu.get_texture_2d(texture_manager,
+  position_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.POSITION][frame_index],
   )
-  normal_texture := gpu.get_texture_2d(texture_manager,
+  normal_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.NORMAL][frame_index],
   )
-  albedo_texture := gpu.get_texture_2d(texture_manager,
+  albedo_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.ALBEDO][frame_index],
   )
-  metallic_roughness_texture := gpu.get_texture_2d(texture_manager,
+  metallic_roughness_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index],
   )
-  emissive_texture := gpu.get_texture_2d(texture_manager,
+  emissive_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.EMISSIVE][frame_index],
   )
-  final_texture := gpu.get_texture_2d(texture_manager,
+  final_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
   // Transition all G-buffer images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
@@ -206,7 +212,8 @@ begin_pass :: proc(
     {.COLOR_ATTACHMENT_OUTPUT},
     {.COLOR},
   )
-  depth_texture := gpu.get_texture_2d(texture_manager,
+  depth_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.DEPTH][frame_index],
   )
   gpu.begin_rendering(
@@ -235,19 +242,24 @@ end_pass :: proc(
 ) {
   vk.CmdEndRendering(command_buffer)
   // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting and post-processing
-  position_texture := gpu.get_texture_2d(texture_manager,
+  position_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.POSITION][frame_index],
   )
-  normal_texture := gpu.get_texture_2d(texture_manager,
+  normal_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.NORMAL][frame_index],
   )
-  albedo_texture := gpu.get_texture_2d(texture_manager,
+  albedo_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.ALBEDO][frame_index],
   )
-  metallic_roughness_texture := gpu.get_texture_2d(texture_manager,
+  metallic_roughness_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index],
   )
-  emissive_texture := gpu.get_texture_2d(texture_manager,
+  emissive_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.EMISSIVE][frame_index],
   )
   // transition all G-buffer attachments + depth to SHADER_READ_ONLY_OPTIMAL
@@ -354,11 +366,7 @@ render :: proc(
     size_of(PushConstant),
     &push_constants,
   )
-  gpu.bind_vertex_index_buffers(
-    command_buffer,
-    vertex_buffer,
-    index_buffer,
-  )
+  gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     draw_buffer,

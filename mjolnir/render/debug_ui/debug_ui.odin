@@ -1,11 +1,11 @@
 package debug_ui
 
 import cont "../../containers"
-import d "../data"
 import gpu "../../gpu"
+import d "../data"
+import "../shared"
 import "core:log"
 import "core:math/linalg"
-import "../shared"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 

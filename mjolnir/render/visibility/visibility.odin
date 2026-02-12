@@ -1,11 +1,11 @@
 package visibility
 
-import cont "../../containers"
-import d "../data"
-import "../../geometry"
 import alg "../../algebra"
+import cont "../../containers"
+import "../../geometry"
 import "../../gpu"
 import "../camera"
+import d "../data"
 import rd "../data"
 import "core:fmt"
 import "core:log"
@@ -85,18 +85,18 @@ init :: proc(
   self.depth_bias = 0.0001
   self.general_pipeline_layout = general_pipeline_layout
   self.normal_cam_descriptor_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}}, // node data
-    {.STORAGE_BUFFER, {.COMPUTE}}, // mesh data
-    {.STORAGE_BUFFER, {.COMPUTE}}, // world matrices
-    {.STORAGE_BUFFER, {.COMPUTE}}, // camera data
-    {.STORAGE_BUFFER, {.COMPUTE}}, // late draw count
-    {.STORAGE_BUFFER, {.COMPUTE}}, // late draw commands
-    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw count
-    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw commands
-    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw count
-    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw commands
-    {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // depth pyramid
+  gctx,
+  {.STORAGE_BUFFER, {.COMPUTE}}, // node data
+  {.STORAGE_BUFFER, {.COMPUTE}}, // mesh data
+  {.STORAGE_BUFFER, {.COMPUTE}}, // world matrices
+  {.STORAGE_BUFFER, {.COMPUTE}}, // camera data
+  {.STORAGE_BUFFER, {.COMPUTE}}, // late draw count
+  {.STORAGE_BUFFER, {.COMPUTE}}, // late draw commands
+  {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw count
+  {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw commands
+  {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw count
+  {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw commands
+  {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // depth pyramid
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
@@ -159,7 +159,8 @@ stats :: proc(
     frame_index  = frame_index,
   }
   if camera_gpu.opaque_draw_count[frame_index].mapped != nil {
-    stats.opaque_draw_count = camera_gpu.opaque_draw_count[frame_index].mapped[0]
+    stats.opaque_draw_count =
+      camera_gpu.opaque_draw_count[frame_index].mapped[0]
   }
   return stats
 }
@@ -186,9 +187,9 @@ render_depth :: proc(
   vertex_skinning_descriptor_set: vk.DescriptorSet,
   vertex_buffer: vk.Buffer,
   index_buffer: vk.Buffer,
-  draw_list_source_gpu: ^camera.CameraGPU = nil,
 ) {
-  depth_texture := gpu.get_texture_2d(texture_manager,
+  depth_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.DEPTH][frame_index],
   )
   gpu.image_barrier(
@@ -240,20 +241,14 @@ render_depth :: proc(
     size_of(u32),
     &camera_index,
   )
-  gpu.bind_vertex_index_buffers(
-    command_buffer,
-    vertex_buffer,
-    index_buffer,
-  )
+  gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
   // Use current frame's draw list (prepared by frame N-1 compute)
   // draw_list[frame_index] was written by Compute N-1, safe to read during Render N
-  // If draw_list_source_gpu is provided, use that camera's draw lists instead
-  draw_source_gpu := draw_list_source_gpu if draw_list_source_gpu != nil else camera_gpu
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
-    draw_source_gpu.opaque_draw_commands[frame_index].buffer,
+    camera_gpu.opaque_draw_commands[frame_index].buffer,
     0, // offset
-    draw_source_gpu.opaque_draw_count[frame_index].buffer,
+    camera_gpu.opaque_draw_count[frame_index].buffer,
     0, // count offset
     self.max_draws,
     u32(size_of(vk.DrawIndexedIndirectCommand)),

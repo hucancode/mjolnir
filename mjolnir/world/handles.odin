@@ -12,7 +12,6 @@ MaterialHandle :: distinct Handle
 Image2DHandle :: distinct Handle
 ImageCubeHandle :: distinct Handle
 CameraHandle :: distinct Handle
-SphereCameraHandle :: CameraHandle // TODO: for better type-safety, make this distinct
 EmitterHandle :: distinct Handle
 ForceFieldHandle :: distinct Handle
 ClipHandle :: distinct Handle

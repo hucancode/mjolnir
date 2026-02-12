@@ -1,11 +1,11 @@
 package debug_draw
 
 import cont "../../containers"
-import d "../data"
 import "../../geometry"
 import "../../gpu"
-import rd "../data"
 import "../camera"
+import d "../data"
+import rd "../data"
 import "core:log"
 import "core:math/linalg"
 import "core:time"
@@ -35,15 +35,15 @@ DebugObject :: struct {
 }
 
 Renderer :: struct {
-  objects:                   cont.Pool(DebugObject),
-  pipeline_layout:           vk.PipelineLayout,
-  solid_pipeline:            vk.Pipeline,
-  wireframe_pipeline:        vk.Pipeline,
-  depth_test_pipeline:       vk.Pipeline,
-  depth_bypass_pipeline:     vk.Pipeline,
-  wireframe_depth_bypass:    vk.Pipeline,
-  line_strip_pipeline:       vk.Pipeline,
-  line_strip_depth_bypass:   vk.Pipeline,
+  objects:                 cont.Pool(DebugObject),
+  pipeline_layout:         vk.PipelineLayout,
+  solid_pipeline:          vk.Pipeline,
+  wireframe_pipeline:      vk.Pipeline,
+  depth_test_pipeline:     vk.Pipeline,
+  depth_bypass_pipeline:   vk.Pipeline,
+  wireframe_depth_bypass:  vk.Pipeline,
+  line_strip_pipeline:     vk.Pipeline,
+  line_strip_depth_bypass: vk.Pipeline,
 }
 
 PushConstant :: struct {
@@ -444,14 +444,16 @@ begin_pass :: proc(
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
 ) {
-  color_texture := gpu.get_texture_2d(texture_manager,
+  color_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Debug draw missing color attachment")
     return
   }
-  depth_texture := gpu.get_texture_2d(texture_manager,
+  depth_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
@@ -465,7 +467,11 @@ begin_pass :: proc(
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(command_buffer, camera_cpu.extent[0], camera_cpu.extent[1])
+  gpu.set_viewport_scissor(
+    command_buffer,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
+  )
 }
 
 render :: proc(

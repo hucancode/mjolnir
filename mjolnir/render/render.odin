@@ -2,14 +2,14 @@ package render
 
 import alg "../algebra"
 import cont "../containers"
-import d "data"
 import "../gpu"
-import "ui"
 import "camera"
+import cam "camera"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import cam "camera"
+import d "data"
+import rd "data"
 import "debug_draw"
 import "debug_ui"
 import "geometry"
@@ -17,9 +17,9 @@ import light "lighting"
 import "particles"
 import "post_process"
 import "transparency"
+import "ui"
 import vk "vendor:vulkan"
 import "visibility"
-import rd "data"
 
 FRAMES_IN_FLIGHT :: d.FRAMES_IN_FLIGHT
 
@@ -401,12 +401,13 @@ ensure_camera_slot :: proc(
   handle: d.CameraHandle,
 ) -> ^camera.Camera {
   for u32(len(self.cameras.entries)) <= handle.index {
-    append(&self.cameras.entries, cont.Entry(camera.Camera) {})
+    append(&self.cameras.entries, cont.Entry(camera.Camera){})
   }
   entry := &self.cameras.entries[handle.index]
   entry.generation = handle.generation
   entry.active = true
-  if i, ok := slice.linear_search(self.cameras.free_indices[:], handle.index); ok {
+  if i, ok := slice.linear_search(self.cameras.free_indices[:], handle.index);
+     ok {
     unordered_remove(&self.cameras.free_indices, i)
   }
   return &entry.item
@@ -415,12 +416,13 @@ ensure_camera_slot :: proc(
 @(private)
 ensure_mesh_slot :: proc(self: ^Manager, handle: d.MeshHandle) -> ^Mesh {
   for u32(len(self.meshes.entries)) <= handle.index {
-    append(&self.meshes.entries, cont.Entry(Mesh) {})
+    append(&self.meshes.entries, cont.Entry(Mesh){})
   }
   entry := &self.meshes.entries[handle.index]
   entry.generation = handle.generation
   entry.active = true
-  if i, ok := slice.linear_search(self.meshes.free_indices[:], handle.index); ok {
+  if i, ok := slice.linear_search(self.meshes.free_indices[:], handle.index);
+     ok {
     unordered_remove(&self.meshes.free_indices, i)
   }
   return &entry.item
@@ -439,17 +441,6 @@ sync_camera_from_world :: proc(
   dst.enabled_passes = world_camera.enabled_passes
   dst.enable_culling = world_camera.enable_culling
   dst.enable_depth_pyramid = world_camera.enable_depth_pyramid
-  dst.draw_list_source_handle = world_camera.draw_list_source_handle
-}
-
-sync_mesh_from_world :: proc(
-  self: ^Manager,
-  handle: d.MeshHandle,
-  world_mesh: ^Mesh,
-) {
-  dst := ensure_mesh_slot(self, handle)
-  dst^ = world_mesh^
-  upload_mesh_data(self, handle, dst)
 }
 
 clear_mesh :: proc(self: ^Manager, handle: d.MeshHandle) {
@@ -457,7 +448,7 @@ clear_mesh :: proc(self: ^Manager, handle: d.MeshHandle) {
   entry := &self.meshes.entries[handle.index]
   if !entry.active || entry.generation != handle.generation do return
   free_mesh_geometry(self, handle)
-  upload_mesh_data_raw(self, handle, &Mesh{})
+  upload_mesh_data(self, handle, &Mesh{})
 }
 
 record_compute_commands :: proc(
@@ -549,7 +540,6 @@ init :: proc(
   }
   camera_cpu.enable_culling = true
   camera_cpu.enable_depth_pyramid = true
-  camera_cpu.draw_list_source_handle = {}
   // Initialize GPU resources for the camera
   camera_gpu := &self.cameras_gpu[camera_handle.index]
   camera.init_gpu(
@@ -766,12 +756,7 @@ render_camera_depth :: proc(
   for &entry, cam_index in self.cameras.entries do if entry.active {
     cam_cpu := &entry.item
     cam_gpu := &self.cameras_gpu[cam_index]
-    // Look up draw list source if specified (allows sharing culling between cameras)
-    draw_list_source_gpu: ^camera.CameraGPU = nil
-    if source := cam_cpu.draw_list_source_handle; source.generation > 0 {
-      draw_list_source_gpu = &self.cameras_gpu[source.index]
-    }
-    visibility.render_depth(&self.visibility, gctx, command_buffer, cam_gpu, cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, self.textures_descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.mesh_manager.vertex_skinning_buffer.descriptor_set, self.mesh_manager.vertex_buffer.buffer, self.mesh_manager.index_buffer.buffer, draw_list_source_gpu)
+    visibility.render_depth(&self.visibility, gctx, command_buffer, cam_gpu, cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, self.textures_descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.mesh_manager.vertex_skinning_buffer.descriptor_set, self.mesh_manager.vertex_buffer.buffer, self.mesh_manager.index_buffer.buffer)
   }
   return .SUCCESS
 }
