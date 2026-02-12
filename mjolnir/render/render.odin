@@ -57,7 +57,7 @@ Manager :: struct {
   ),
   material_buffer:         gpu.BindlessBuffer(Material),
   world_matrix_buffer:     gpu.BindlessBuffer(matrix[4, 4]f32),
-  node_data_buffer:        gpu.BindlessBuffer(NodeData),
+  node_data_buffer:        gpu.BindlessBuffer(Node),
   mesh_data_buffer:        gpu.BindlessBuffer(Mesh),
   emitter_buffer:          gpu.BindlessBuffer(Emitter),
   forcefield_buffer:       gpu.BindlessBuffer(ForceField),

@@ -675,7 +675,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   for handle, n in self.world.staging.node_data {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
-      node_data := world.NodeData {
+      node_data := render.Node {
         material_id           = 0xFFFFFFFF,
         mesh_id               = 0xFFFFFFFF,
         attachment_data_index = 0xFFFFFFFF,
@@ -763,16 +763,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           transmute(render.NodeHandle)handle,
         )
       }
-      render_node_data := render.NodeData {
-        material_id           = node_data.material_id,
-        mesh_id               = node_data.mesh_id,
-        attachment_data_index = node_data.attachment_data_index,
-        flags                 = transmute(render.NodeFlagSet)node_data.flags,
-      }
       render.upload_node_data(
         &self.render,
         transmute(render.NodeHandle)handle,
-        &render_node_data,
+        &node_data,
       )
       next_n += 1
       self.world.staging.node_data[handle] = next_n
