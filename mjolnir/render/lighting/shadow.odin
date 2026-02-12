@@ -124,7 +124,7 @@ shadow_init :: proc(
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
   node_data_buffer: ^gpu.BindlessBuffer(d.NodeData),
-  mesh_data_buffer: ^gpu.BindlessBuffer(d.MeshData),
+  mesh_data_buffer: ^gpu.BindlessBuffer(d.Mesh),
   world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
   textures_set_layout: vk.DescriptorSetLayout,
   bone_set_layout: vk.DescriptorSetLayout,

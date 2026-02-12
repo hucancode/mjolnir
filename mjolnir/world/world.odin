@@ -220,8 +220,6 @@ destroy_node :: proc(
     destroy_sprite(world, attachment.sprite_handle)
     attachment.sprite_handle = {}
   case MeshAttachment:
-    mesh_unref(world, attachment.handle)
-    material_unref(world, attachment.material)
     skinning, has_skin := &attachment.skinning.?
     if has_skin {
       delete(skinning.layers)

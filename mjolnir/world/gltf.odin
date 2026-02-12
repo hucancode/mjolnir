@@ -48,7 +48,6 @@ Texture2DRefProc :: #type proc(
 load_gltf :: proc(
   world: ^World,
   create_texture_from_data: TextureFromDataAllocator,
-  texture_2d_ref: Texture2DRefProc,
   path: string,
 ) -> (
   nodes: [dynamic]NodeHandle,
@@ -99,7 +98,6 @@ load_gltf :: proc(
   ) or_return
   load_materials_batch(
     world,
-    texture_2d_ref,
     path,
     gltf_data,
     manifest.unique_materials[:],
@@ -222,7 +220,6 @@ load_textures_batch :: proc(
 @(private = "file")
 load_materials_batch :: proc(
   world: ^World,
-  texture_2d_ref: Texture2DRefProc,
   gltf_path: string,
   gltf_data: ^cgltf.data,
   materials: []^cgltf.material,
@@ -239,16 +236,11 @@ load_materials_batch :: proc(
     defer if ret != .success {
       // TODO: clean up textures
     }
-    material_handle, ok := create_material(world, features, .PBR, albedo, metallic_roughness, normal, emissive, occlusion, auto_purge = true)
+    material_handle, ok := create_material(world, features, .PBR, albedo, metallic_roughness, normal, emissive, occlusion)
     if !ok do return .invalid_gltf
     material, material_ok := cont.get(world.materials, material_handle)
     if !material_ok do return .invalid_gltf
     stage_material_data(&world.staging, material_handle)
-    texture_2d_ref(albedo)
-    texture_2d_ref(metallic_roughness)
-    texture_2d_ref(normal)
-    texture_2d_ref(emissive)
-    texture_2d_ref(occlusion)
     material_cache[gltf_mat] = material_handle
     log.infof("Created material %v", material_handle)
   }
@@ -629,8 +621,6 @@ construct_scene :: proc(
           cast_shadow = true,
         }
       }
-      mesh_ref(world, mesh_handle)
-      material_ref(world, geometry_data.material_handle)
     }
     attach(world.nodes, entry.parent, node_handle)
     if entry.parent == world.root do append(nodes, node_handle)

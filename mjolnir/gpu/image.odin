@@ -34,8 +34,6 @@ Image :: struct {
   memory:     vk.DeviceMemory,
   spec:       ImageSpec,
   view:       vk.ImageView,
-  ref_count:  u32,
-  auto_purge: bool,
 }
 
 infer_view_type :: proc(

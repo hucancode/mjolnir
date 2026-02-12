@@ -21,14 +21,12 @@ MeshFlag :: rd.MeshFlag
 MeshFlagSet :: rd.MeshFlagSet
 BufferAllocation :: rd.BufferAllocation
 Primitive :: rd.Primitive
-MeshData :: rd.MeshData
 ShaderFeature :: rd.ShaderFeature
 ShaderFeatureSet :: rd.ShaderFeatureSet
 NodeFlag :: rd.NodeFlag
 NodeFlagSet :: rd.NodeFlagSet
 NodeData :: rd.NodeData
 Mesh :: rd.Mesh
-prepare_mesh_data :: rd.prepare_mesh_data
 Material :: rd.Material
 Emitter :: rd.Emitter
 ForceField :: rd.ForceField

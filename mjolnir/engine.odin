@@ -17,7 +17,6 @@ import "core:time"
 import "core:unicode/utf8"
 import "geometry"
 import "gpu"
-import "level_manager"
 import nav "navigation"
 import "render"
 import render_camera "render/camera"
@@ -103,7 +102,6 @@ Engine :: struct {
   free_controller:           CameraController,
   active_controller:         ^CameraController,
   camera_controller_enabled: bool,
-  level_manager:             level_manager.Level_Manager,
   ui_hovered_widget:         Maybe(ui.UIWidgetHandle),
 }
 
@@ -155,7 +153,6 @@ init :: proc(
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
   world.init(&self.world)
-  level_manager.init(&self.level_manager)
   gpu.swapchain_init(&self.swapchain, &self.gctx, self.window) or_return
   gpu.allocate_command_buffer(&self.gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
@@ -242,7 +239,6 @@ init :: proc(
       &engine.gctx,
       &engine.render,
       geom,
-      auto_purge = true,
     )
     if result != .SUCCESS {
       log.warnf("Failed to allocate debug line strip mesh: %v", result)
@@ -470,18 +466,7 @@ load_gltf :: proc(
     if ret != .SUCCESS {
       return {}, false
     }
-    render.set_texture_2d_auto_purge(&engine_ctx.render, out_handle, true)
     return transmute(world.Image2DHandle)out_handle, true
-  }
-  texture_2d_ref_adapter := proc(handle: world.Image2DHandle) -> bool {
-    engine_ctx := cast(^Engine)context.user_ptr
-    if engine_ctx == nil {
-      return false
-    }
-    return render.texture_2d_ref(
-      &engine_ctx.render,
-      transmute(render.Image2DHandle)handle,
-    )
   }
   old_user_ptr := context.user_ptr
   context.user_ptr = engine
@@ -489,7 +474,6 @@ load_gltf :: proc(
   handles, result := world.load_gltf(
     &engine.world,
     create_texture_from_data_adapter,
-    texture_2d_ref_adapter,
     path,
   )
   return handles, result == .success
@@ -504,9 +488,6 @@ get_main_camera :: proc(self: ^Engine) -> ^world.Camera {
 }
 
 update_input :: proc(self: ^Engine) -> bool {
-  if level_manager.is_transitioning(&self.level_manager) {
-    return true
-  }
   glfw.PollEvents()
   last_mouse_pos := self.input.mouse_pos
   self.input.mouse_pos.x, self.input.mouse_pos.y = glfw.GetCursorPos(
@@ -808,48 +789,13 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
     if n < world.FRAMES_IN_FLIGHT {
       if mesh := cont.get(self.world.meshes, handle); mesh != nil {
         if geom, has_geom := mesh.cpu_geometry.?; has_geom {
-          if render.sync_mesh_geometry_for_handle(
-               &self.gctx,
-               &self.render,
-               transmute(render.MeshHandle)handle,
-               geom,
-               mesh.auto_purge,
-             ) ==
-             .SUCCESS {
-            if mesh_render := cont.get(
-              self.render.meshes,
-              transmute(render.MeshHandle)handle,
-            ); mesh_render != nil {
-              mesh.vertex_allocation =
-              transmute(world.BufferAllocation)mesh_render.vertex_allocation
-              mesh.index_allocation =
-              transmute(world.BufferAllocation)mesh_render.index_allocation
-              if skin, has_skin := &mesh.skinning.?; has_skin {
-                skin.allocation =
-                transmute(world.BufferAllocation)mesh_render.skinning_allocation
-              }
-            }
-          }
+          render.sync_mesh_geometry_for_handle(
+            &self.gctx,
+            &self.render,
+            transmute(render.MeshHandle)handle,
+            geom,
+          )
         }
-        mesh_render := render.Mesh {
-          aabb_min          = mesh.aabb_min,
-          aabb_max          = mesh.aabb_max,
-          vertex_allocation = transmute(render.BufferAllocation)mesh.vertex_allocation,
-          index_allocation  = transmute(render.BufferAllocation)mesh.index_allocation,
-          auto_purge        = mesh.auto_purge,
-          ref_count         = mesh.ref_count,
-          has_skinning      = false,
-        }
-        if skin, has_skin := mesh.skinning.?; has_skin {
-          mesh_render.has_skinning = true
-          mesh_render.skinning_allocation =
-          transmute(render.BufferAllocation)skin.allocation
-        }
-        render.sync_mesh_from_world(
-          &self.render,
-          transmute(render.MeshHandle)handle,
-          &mesh_render,
-        )
       } else {
         render.clear_mesh(&self.render, transmute(render.MeshHandle)handle)
       }
@@ -1121,11 +1067,7 @@ update :: proc(self: ^Engine) -> bool {
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
-  level_manager.update(&self.level_manager)
-  if level_manager.is_transitioning(&self.level_manager) {
-    self.last_update_timestamp = time.now()
-    return true
-  }
+  self.last_update_timestamp = time.now()
   params := gpu.get(&self.render.particles.params_buffer, 0)
   params.delta_time = delta_time
   params.emitter_count = u32(
@@ -1181,7 +1123,6 @@ update :: proc(self: ^Engine) -> bool {
 
 shutdown :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(self.gctx.device)
-  level_manager.shutdown(&self.level_manager)
   gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
   if self.gctx.has_async_compute {
     gpu.free_compute_command_buffer(
@@ -1216,7 +1157,7 @@ populate_debug_ui :: proc(self: ^Engine) {
     )
     mu.label(
       &self.render.debug_ui.ctx,
-      fmt.tprintf("Textures %d", render.active_texture_2d_count(&self.render)),
+      fmt.tprintf("Textures %d", cont.count(self.render.texture_manager.images_2d)),
     )
     mu.label(
       &self.render.debug_ui.ctx,
@@ -1461,27 +1402,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   if self.post_render_proc != nil {
     self.post_render_proc(self)
   }
-  if level_manager.should_show_loading(&self.level_manager) {
-    TEXT :: "Loading..."
-    ctx := &self.render.debug_ui.ctx
-    w := i32(self.swapchain.extent.width)
-    h := i32(self.swapchain.extent.height)
-    container_w: i32 = 400
-    container_h: i32 = 200
-    x := (w - container_w) / 2
-    y := (h - container_h) / 2
-    if mu.begin_window(
-      ctx,
-      "##loading",
-      {x, y, container_w, container_h},
-      {.NO_TITLE, .NO_RESIZE, .NO_CLOSE, .NO_SCROLL},
-    ) {
-      mu.layout_row(ctx, {-1}, 0)
-      mu.layout_row(ctx, {-1}, 80)
-      mu.label(ctx, TEXT)
-      mu.end_window(ctx)
-    }
-  }
   mu.end(&self.render.debug_ui.ctx)
   if self.debug_ui_enabled {
     debug_ui.begin_pass(
@@ -1526,11 +1446,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   ) or_return
   self.frame_index = alg.next(self.frame_index, FRAMES_IN_FLIGHT)
-  render.process_retired_gpu_resources(&self.render, &self.gctx)
-  if world.process_pending_deletions(&self.world) {
-    world.purge_unused_resources(&self.world)
-    render.purge_unused_gpu_resources(&self.render, &self.gctx)
-  }
+  world.process_pending_deletions(&self.world)
   self.last_render_timestamp = time.now()
   return .SUCCESS
 }

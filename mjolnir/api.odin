@@ -10,7 +10,6 @@ import "core:sync"
 import "core:time"
 import "geometry"
 import "gpu"
-import "level_manager"
 import nav "navigation"
 import "navigation/recast"
 import "physics"
@@ -22,17 +21,6 @@ import "render/ui"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 import "world"
-
-// Backward compatibility: Re-export types from level_manager
-Level_Descriptor :: level_manager.Level_Descriptor
-Level_Setup_Proc :: level_manager.Level_Setup_Proc
-Level_Teardown_Proc :: level_manager.Level_Teardown_Proc
-Level_Finished_Proc :: level_manager.Level_Finished_Proc
-Setup_Mode :: level_manager.Setup_Mode
-Teardown_Mode :: level_manager.Teardown_Mode
-Transition_Pattern :: level_manager.Transition_Pattern
-Level_State :: level_manager.Level_State
-Level_Manager :: level_manager.Level_Manager
 
 NodeHandle :: world.NodeHandle
 MeshHandle :: world.MeshHandle
@@ -97,13 +85,6 @@ DEFAULT_NAVMESH_CONFIG :: NavMeshConfig {
   agent_max_slope = math.PI * 0.25,
   quality         = .MEDIUM,
 }
-
-// Backward compatibility: Convenience wrappers
-init_level_manager :: level_manager.init
-is_level_transitioning :: level_manager.is_transitioning
-should_show_loading_screen :: level_manager.should_show_loading
-get_current_level_id :: level_manager.get_current_level_id
-load_level :: level_manager.load_level
 
 create_texture :: proc {
   create_texture_from_path,
@@ -247,12 +228,11 @@ create_material :: proc(
 create_mesh :: proc(
   engine: ^Engine,
   geom: geometry.Geometry,
-  auto_purge: bool = true,
 ) -> (
   handle: world.MeshHandle,
   ok: bool,
 ) #optional_ok {
-  handle, _, ok = world.create_mesh(&engine.world, geom, auto_purge)
+  handle, _, ok = world.create_mesh(&engine.world, geom)
   if !ok do return
   world.stage_mesh_data(&engine.world.staging, handle)
   return handle, true
@@ -1327,7 +1307,7 @@ bake :: proc(
     delete(baked_geom.vertices)
     delete(baked_geom.indices)
   }
-  mesh_handle, ok = create_mesh(engine, baked_geom, false)
+  mesh_handle, ok = create_mesh(engine, baked_geom)
   return
 }
 
@@ -1523,10 +1503,6 @@ get_mesh_count :: proc(engine: ^Engine) -> u32 {
   return u32(
     len(engine.world.meshes.entries) - len(engine.world.meshes.free_indices),
   )
-}
-
-get_texture_count :: proc(engine: ^Engine) -> u32 {
-  return u32(render.active_texture_2d_count(&engine.render))
 }
 
 set_visibility_stats :: proc(engine: ^Engine, enabled: bool) {

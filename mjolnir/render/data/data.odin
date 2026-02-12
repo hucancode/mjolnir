@@ -59,11 +59,6 @@ INDEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   {block_size = 2097152, block_count = 4},
 }
 
-ResourceMetadata :: struct {
-  ref_count:  u32,
-  auto_purge: bool,
-}
-
 BufferAllocation :: gpu.BufferAllocation
 
 Primitive :: enum {
@@ -82,17 +77,6 @@ MeshFlag :: enum u32 {
 }
 
 MeshFlagSet :: bit_set[MeshFlag;u32]
-
-MeshData :: struct {
-  aabb_min:        [3]f32,
-  index_count:     u32,
-  aabb_max:        [3]f32,
-  first_index:     u32,
-  vertex_offset:   i32,
-  skinning_offset: u32,
-  flags:           MeshFlagSet,
-  padding:         u32,
-}
 
 ShaderFeature :: enum {
   ALBEDO_TEXTURE             = 0,
@@ -124,23 +108,14 @@ NodeData :: struct {
 }
 
 Mesh :: struct {
-  using data:          MeshData,
-  vertex_allocation:   BufferAllocation,
-  index_allocation:    BufferAllocation,
-  skinning_allocation: BufferAllocation,
-  has_skinning:        bool,
-  using meta:          ResourceMetadata,
-}
-
-prepare_mesh_data :: proc(mesh: ^Mesh) {
-  mesh.index_count = mesh.index_allocation.count
-  mesh.first_index = mesh.index_allocation.offset
-  mesh.vertex_offset = cast(i32)mesh.vertex_allocation.offset
-  mesh.flags = {}
-  if mesh.has_skinning && mesh.skinning_allocation.count > 0 {
-    mesh.flags |= {.SKINNED}
-    mesh.skinning_offset = mesh.skinning_allocation.offset
-  }
+  aabb_min:        [3]f32,
+  index_count:     u32,
+  aabb_max:        [3]f32,
+  first_index:     u32,
+  vertex_offset:   i32,
+  skinning_offset: u32,
+  flags:           MeshFlagSet,
+  padding:         u32,
 }
 
 Material :: struct {
