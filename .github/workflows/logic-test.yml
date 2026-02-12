@@ -38,7 +38,7 @@ jobs:
         make -v
 
     - name: Check Odin code
-      run: make check
+      run: make shader && odin check .
 
     - name: Run tests
-      run: make test
+      run: odin test . --all-packages

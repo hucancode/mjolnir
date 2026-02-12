@@ -27,7 +27,6 @@ See `examples` for common use cases.
 - Physics
 - Recast/Detour
 - Inverse Kinematics
-- Level Manager
 - HUD, text
 
 And more in development
@@ -40,18 +39,16 @@ And more in development
 ```bash
 # Build and run in release mode
 make run
-# Build and run in debug mode
+# Build and run in debug mode and vulkan validation
 make debug
 # Build only (release mode)
 make build
 # Build only (debug mode)
 make build-debug
-# Run tests
-make test
+# Run all tests
+odin test . --all-packages
 # run a single test called "test_name" inside "module_name"
 odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
-# Check for compiler errors without building
-make check
 # Build all shaders
 make shader
 ```
@@ -96,13 +93,11 @@ The engine is organized 2 layers with clear responsibility boundaries:
 
 ### Debugging Tips
 
-- To debug visual issues, hardcode frame count limit in `engine.odin` `run` procedure to stop after few frames and examine logs
-- To slow down the engine to avoid excessive logs. Set FPS in `engine.odin` to low value like 4 or 2.
-- To capture visual result, run `make capture`, then analyze the newly created `screenshot.png`
-- Graphics test runner: `examples/run.py` - Runs all graphics tests and compares against golden images
+- To debug visual issues, build with *FRAME_LIMIT* set to something like 10, then check the log. You can alternatively collect screenshot with `make capture`
+- To slow down the engine to examine render logs. Set FPS in `engine.odin` to low value like 4 or 2.
 
 ### Build Flags
 
 - **REQUIRE_GEOMETRY_SHADER**: Compile with geometry shader support (required for spherical shadow mapping)
 - **USE_PARALLEL_UPDATE**: Enable dedicated update thread for parallel scene updates
-- **FRAME_LIMIT**: limit renderer to only render a few frames, useful for collecting logs from render procedure. without this logs would be super noisy
+- **FRAME_LIMIT**: limit renderer to only render a few frames
