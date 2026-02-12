@@ -34,3 +34,75 @@ And more in development
 
 - Procedural Animation (Tail, Leg)
 - Animation Layering
+
+## Build Commands
+
+```bash
+# Build and run in release mode
+make run
+# Build and run in debug mode
+make debug
+# Build only (release mode)
+make build
+# Build only (debug mode)
+make build-debug
+# Run tests
+make test
+# run a single test called "test_name" inside "module_name"
+odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
+# Check for compiler errors without building
+make check
+# Build all shaders
+make shader
+```
+
+## Architecture Overview
+
+### Core Engine Structure
+The engine is organized 2 layers with clear responsibility boundaries:
+
+**Lower Level Systems:**
+- **GPU**: `mjolnir/gpu/` - Vulkan context, memory/texture/mesh management, swapchain, pipeline helpers
+- **Containers**: `mjolnir/containers/` - Generic data structures (handle pools, slab allocators)
+- **Geometry**: `mjolnir/geometry/` - Camera, transforms, primitives, BVH, octree, AABB, frustum
+- **Animation**: `mjolnir/animation/` - Skeletal animation support
+
+**Higher Level Systems:**
+- **Render**: `mjolnir/render/` - Consists of render sub-systems
+  + Geometry Renderer
+  + Lighting/Shadow Renderer
+  + Transparency Renderer
+  + Particle Renderer
+  + Post-process Renderer
+  + Camera/Visibility Culling
+  + UI Renderer
+  + Debug Draw
+- **World**: `mjolnir/world/` - Scene graph, GLTF/OBJ loading
+- **Physics**: `mjolnir/physics/` - Rigid body dynamics, collision detection
+- **Navigation**: `mjolnir/navigation/` - Recast + Detour integration
+
+### GPU Resource Management
+- Uses custom slab allocators and generational handle pools
+- **Bindless**: All GPU resources managed in array-based system. Draw commands send resource IDs to index into GPU arrays instead of raw data
+
+## Development Notes
+
+### Shader Development
+- Shaders are in `mjolnir/shader/` organized by render pass
+- Use `make shader` to rebuild all shaders. It's fast and incremental, you need not to build individual shader
+- Compute shaders include:
+  + Particle system: `compute.comp`, `compact.comp`, `emitter.comp`
+  + Culling systems: `culling.comp` for visibility
+
+### Debugging Tips
+
+- To debug visual issues, hardcode frame count limit in `engine.odin` `run` procedure to stop after few frames and examine logs
+- To slow down the engine to avoid excessive logs. Set FPS in `engine.odin` to low value like 4 or 2.
+- To capture visual result, run `make capture`, then analyze the newly created `screenshot.png`
+- Graphics test runner: `examples/run.py` - Runs all graphics tests and compares against golden images
+
+### Build Flags
+
+- **REQUIRE_GEOMETRY_SHADER**: Compile with geometry shader support (required for spherical shadow mapping)
+- **USE_PARALLEL_UPDATE**: Enable dedicated update thread for parallel scene updates
+- **FRAME_LIMIT**: limit renderer to only render a few frames, useful for collecting logs from render procedure. without this logs would be super noisy
