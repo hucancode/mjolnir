@@ -166,26 +166,6 @@ get_node :: proc(world: ^World, handle: NodeHandle) -> (^Node, bool) #optional_o
   return cont.get(world.nodes, handle)
 }
 
-enable_actor_tick :: proc(
-  world: ^World,
-  $T: typeid,
-  handle: ActorHandle,
-) {
-  pool := _ensure_actor_pool(world, T)
-  actor_enable_tick(pool, handle)
-}
-
-disable_actor_tick :: proc(
-  world: ^World,
-  $T: typeid,
-  handle: NodeHandle,
-) {
-  entry, pool_exists := world.actor_pools[typeid_of(T)]
-  if !pool_exists do return
-  pool := cast(^ActorPool(T))entry.pool_ptr
-  actor_disable_tick(pool, handle)
-}
-
 // Sync all nodes with rigid body attachments from physics to world
 sync_all_physics_to_world :: proc(world: ^World, physics_world: ^physics.World) {
   for &entry in world.nodes.entries do if entry.active {

@@ -139,7 +139,6 @@ World :: struct {
   nodes:                   Pool(Node),
   traversal_stack:         [dynamic]TraverseEntry,
   staging:                 StagingList,
-  actor_pools:             map[typeid]ActorPoolEntry,
   animatable_nodes:        [dynamic]NodeHandle,
   pending_node_deletions:  [dynamic]NodeHandle,
   pending_deletions_mutex: sync.Mutex,
@@ -358,7 +357,6 @@ begin_frame :: proc(
   game_state: rawptr = nil,
 ) {
   traverse(world)
-  world_tick_actors(world, delta_time, game_state)
 }
 
 shutdown :: proc(
@@ -412,12 +410,6 @@ shutdown :: proc(
   cont.destroy(world.nodes, proc(node: ^Node) {})
   delete(world.traversal_stack)
   delete(world.active_light_nodes)
-
-  // Clean up actor pools
-  for _, entry in world.actor_pools {
-    entry.destroy_fn(entry.pool_ptr)
-  }
-  delete(world.actor_pools)
   delete(world.animatable_nodes)
   delete(world.pending_node_deletions)
   staging_destroy(&world.staging)
@@ -646,109 +638,5 @@ create_spot_light_attachment :: proc(
     angle_inner = angle_inner,
     angle_outer = angle_outer,
     cast_shadow = cast_shadow,
-  }
-}
-
-@(private)
-_ensure_actor_pool :: proc(world: ^World, $T: typeid) -> ^ActorPool(T) {
-  tid := typeid_of(T)
-  entry, exists := &world.actor_pools[tid]
-  if exists {
-    return auto_cast entry.pool_ptr
-  }
-  pool := new(ActorPool(T))
-  actor_pool_init(pool)
-  world.actor_pools[tid] = ActorPoolEntry {
-    pool_ptr = rawptr(pool),
-    tick_fn = proc(pool_ptr: rawptr, ctx: ^ActorContext) {
-      actor_pool_tick(cast(^ActorPool(T))pool_ptr, ctx)
-    },
-    alloc_fn = proc(
-      pool_ptr: rawptr,
-      node_handle: NodeHandle,
-    ) -> (
-      ActorHandle,
-      bool,
-    ) {
-      return actor_alloc(cast(^ActorPool(T))pool_ptr, node_handle)
-    },
-    get_fn = proc(pool_ptr: rawptr, handle: ActorHandle) -> (rawptr, bool) {
-      return actor_get(cast(^ActorPool(T))pool_ptr, handle)
-    },
-    free_fn = proc(pool_ptr: rawptr, handle: ActorHandle) -> bool {
-      _, freed := actor_free(cast(^ActorPool(T))pool_ptr, handle)
-      return freed
-    },
-    destroy_fn = proc(pool_ptr: rawptr) {
-      p := cast(^ActorPool(T))pool_ptr
-      actor_pool_destroy(p)
-      free(p)
-    },
-  }
-  return pool
-}
-
-spawn_actor :: proc(
-  world: ^World,
-  $T: typeid,
-  position: [3]f32 = {},
-  attachment: NodeAttachment = nil,
-) -> (
-  actor_handle: ActorHandle,
-  ok: bool,
-) #optional_ok {
-  node_handle := spawn(world, position, attachment) or_return
-  pool := _ensure_actor_pool(world, T)
-  return actor_alloc(pool, node_handle)
-}
-
-spawn_actor_child :: proc(
-  world: ^World,
-  $T: typeid,
-  parent: NodeHandle,
-  position: [3]f32 = {},
-  attachment: NodeAttachment = nil,
-) -> (
-  actor_handle: ActorHandle,
-  ok: bool,
-) #optional_ok {
-  node_handle := spawn_child(world, parent, position, attachment) or_return
-  pool := _ensure_actor_pool(world, T)
-  return actor_alloc(pool, node_handle)
-}
-
-get_actor :: proc(
-  world: ^World,
-  $T: typeid,
-  handle: ActorHandle,
-) -> (
-  actor: ^Actor(T),
-  ok: bool,
-) #optional_ok {
-  entry, pool_exists := world.actor_pools[typeid_of(T)]
-  if !pool_exists do return nil, false
-  actor_ptr, found := entry.get_fn(entry.pool_ptr, handle)
-  if !found do return nil, false
-  return cast(^Actor(T))actor_ptr, true
-}
-
-free_actor :: proc(world: ^World, $T: typeid, handle: ActorHandle) -> bool {
-  entry, pool_exists := world.actor_pools[typeid_of(T)]
-  if !pool_exists do return false
-  return entry.free_fn(entry.pool_ptr, handle)
-}
-
-world_tick_actors :: proc(
-  world: ^World,
-  delta_time: f32,
-  game_state: rawptr = nil,
-) {
-  ctx := ActorContext {
-    world      = world,
-    delta_time = delta_time,
-    game_state = game_state,
-  }
-  for t, entry in world.actor_pools {
-    entry.tick_fn(entry.pool_ptr, &ctx)
   }
 }
