@@ -4,7 +4,6 @@ import "../gpu"
 import rd "data"
 
 Handle :: rd.Handle
-Pool :: rd.Pool
 NodeHandle :: rd.NodeHandle
 MeshHandle :: rd.MeshHandle
 MaterialHandle :: rd.MaterialHandle

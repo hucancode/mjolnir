@@ -153,9 +153,6 @@ World :: struct {
   animatable_nodes:        [dynamic]NodeHandle,
   pending_node_deletions:  [dynamic]NodeHandle,
   pending_deletions_mutex: sync.Mutex,
-  // Debug draw callbacks (optional, set by engine)
-  debug_draw_line_strip:   DebugDrawLineStripCallback,
-  debug_draw_mesh:         DebugDrawMeshCallback,
   // CPU resource pools (moved from resources.Manager)
   meshes:                  cont.Pool(Mesh),
   materials:               cont.Pool(Material),

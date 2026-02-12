@@ -36,8 +36,6 @@ animation_instance_update :: proc(self: ^AnimationInstance, delta_time: f32) {
 update_skeletal_animations :: proc(
   world: ^World,
   delta_time: f32,
-  debug_draw_ik: bool = false,
-  debug_draw_renderer: rawptr = nil, // ^debug_draw.Renderer
 ) {
   if delta_time <= 0 do return
   for handle in world.animatable_nodes {
@@ -85,7 +83,6 @@ update_skeletal_animations :: proc(
     }
     matrices := make([]matrix[4, 4]f32, bone_count, context.temp_allocator)
 
-    debug_enabled := debug_draw_ik && debug_draw_renderer != nil
     sample_layers(
       mesh,
       world,
@@ -94,7 +91,6 @@ update_skeletal_animations :: proc(
       matrices,
       delta_time,
       node.transform.world_matrix,
-      debug_enabled,
     )
     if len(skinning.matrices) != bone_count {
       delete(skinning.matrices)
@@ -102,15 +98,6 @@ update_skeletal_animations :: proc(
     }
     copy(skinning.matrices, matrices)
     stage_bone_matrices(&world.staging, handle)
-
-    // Draw debug visualization for IK if enabled
-    if debug_enabled {
-      draw_ik_debug_for_node(
-        world,
-        skinning.layers[:],
-        node.transform.world_matrix,
-      )
-    }
   }
 }
 
@@ -896,136 +883,6 @@ set_tail_modifier_params :: proc(
   }
 
   return false
-}
-
-// Draw IK debug visualization for all layers in a node
-draw_ik_debug_for_node :: proc(
-  world: ^World,
-  layers: []anim.Layer,
-  node_world_matrix: matrix[4, 4]f32,
-) {
-  // Early exit if no callbacks are set
-  if world.debug_draw_line_strip == nil && world.debug_draw_mesh == nil do return
-
-  for &layer in layers {
-    #partial switch &layer_data in layer.data {
-    case anim.ProceduralLayer:
-      #partial switch &modifier in layer_data.state.modifier {
-      case anim.SpiderLegModifier:
-        // Draw debug info for each leg
-        for info, leg_idx in modifier.debug_info {
-          if len(info.positions) < 2 do continue
-
-          // Draw IK chain bones (green lines)
-          for i in 0 ..< len(info.positions) - 1 {
-            start_skel := info.positions[i]
-            end_skel := info.positions[i + 1]
-
-            // Transform from skeleton space to world space
-            start_world_h :=
-              node_world_matrix *
-              linalg.Vector4f32{start_skel.x, start_skel.y, start_skel.z, 1.0}
-            end_world_h :=
-              node_world_matrix *
-              linalg.Vector4f32{end_skel.x, end_skel.y, end_skel.z, 1.0}
-
-            start_world := start_world_h.xyz
-            end_world := end_world_h.xyz
-
-            // Draw IK chain bones (green lines)
-            if world.debug_draw_line_strip != nil {
-              points := make([]geometry.Vertex, 2, context.temp_allocator)
-              points[0] = geometry.Vertex {
-                position = start_world,
-              }
-              points[1] = geometry.Vertex {
-                position = end_world,
-              }
-              world.debug_draw_line_strip(
-                points,
-                duration_seconds = 0.016, // ~1 frame at 60fps
-                color = {0.0, 1.0, 0.0, 1.0}, // Green
-                bypass_depth = true,
-              )
-            }
-          }
-
-          // Draw pole vector lines (yellow lines from each joint to pole)
-          if info.has_pole {
-            pole_world_h :=
-              node_world_matrix *
-              linalg.Vector4f32{info.pole.x, info.pole.y, info.pole.z, 1.0}
-            pole_world := pole_world_h.xyz
-
-            // Draw line from each internal joint to pole
-            if world.debug_draw_line_strip != nil {
-              for i in 1 ..< len(info.positions) - 1 {
-                joint_skel := info.positions[i]
-                joint_world_h :=
-                  node_world_matrix *
-                  linalg.Vector4f32 {
-                      joint_skel.x,
-                      joint_skel.y,
-                      joint_skel.z,
-                      1.0,
-                    }
-                joint_world := joint_world_h.xyz
-
-                points := make([]geometry.Vertex, 2, context.temp_allocator)
-                points[0] = geometry.Vertex {
-                  position = joint_world,
-                }
-                points[1] = geometry.Vertex {
-                  position = pole_world,
-                }
-
-                world.debug_draw_line_strip(
-                  points,
-                  duration_seconds = 0.016,
-                  color = {1.0, 1.0, 0.0, 1.0}, // Yellow
-                  bypass_depth = true,
-                )
-              }
-            }
-
-            // Draw pole marker (small magenta sphere)
-            if world.debug_draw_mesh != nil {
-              sphere_mesh_handle := get_builtin_mesh(world, .SPHERE)
-              transform :=
-                linalg.matrix4_translate(pole_world) *
-                linalg.matrix4_scale([3]f32{0.3, 0.3, 0.3})
-              world.debug_draw_mesh(
-                sphere_mesh_handle,
-                transform,
-                duration_seconds = 0.016,
-                color = {1.0, 0.0, 1.0, 1.0}, // Magenta
-                bypass_depth = true,
-              )
-            }
-          }
-
-          // Draw target marker (cyan sphere)
-          target_world_h :=
-            node_world_matrix *
-            linalg.Vector4f32{info.target.x, info.target.y, info.target.z, 1.0}
-          target_world := target_world_h.xyz
-          if world.debug_draw_mesh != nil {
-            sphere_mesh_handle := get_builtin_mesh(world, .SPHERE)
-            transform :=
-              linalg.matrix4_translate(target_world) *
-              linalg.matrix4_scale([3]f32{0.25, 0.25, 0.25})
-            world.debug_draw_mesh(
-              sphere_mesh_handle,
-              transform,
-              duration_seconds = 0.016,
-              color = {0.0, 1.0, 1.0, 1.0}, // Cyan
-              bypass_depth = true,
-            )
-          }
-        }
-      }
-    }
-  }
 }
 
 set_path_modifier_params :: proc(

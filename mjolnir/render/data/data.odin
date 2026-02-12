@@ -4,7 +4,6 @@ import cont "../../containers"
 import "../../gpu"
 
 Handle :: cont.Handle
-Pool :: cont.Pool
 
 NodeHandle :: distinct Handle
 MeshHandle :: gpu.MeshHandle
@@ -93,6 +92,8 @@ NodeFlag :: enum u32 {
   MATERIAL_TRANSPARENT,
   MATERIAL_WIREFRAME,
   MATERIAL_SPRITE,
+  MATERIAL_RANDOM_COLOR,
+  MATERIAL_LINE_STRIP,
   CASTS_SHADOW,
   NAVIGATION_OBSTACLE,
 }

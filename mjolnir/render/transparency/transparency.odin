@@ -15,11 +15,17 @@ SHADER_SPRITE_VERT := #load("../../shader/sprite/vert.spv")
 SHADER_SPRITE_FRAG := #load("../../shader/sprite/frag.spv")
 SHADER_WIREFRAME_VERT := #load("../../shader/wireframe/vert.spv")
 SHADER_WIREFRAME_FRAG := #load("../../shader/wireframe/frag.spv")
+SHADER_RANDOM_COLOR_VERT := #load("../../shader/random_color/vert.spv")
+SHADER_RANDOM_COLOR_FRAG := #load("../../shader/random_color/frag.spv")
+SHADER_LINE_STRIP_VERT := #load("../../shader/line_strip/vert.spv")
+SHADER_LINE_STRIP_FRAG := #load("../../shader/line_strip/frag.spv")
 
 Renderer :: struct {
-  transparent_pipeline: vk.Pipeline,
-  wireframe_pipeline:   vk.Pipeline,
-  sprite_pipeline:      vk.Pipeline,
+  line_strip_pipeline:   vk.Pipeline,
+  random_color_pipeline: vk.Pipeline,
+  transparent_pipeline:  vk.Pipeline,
+  wireframe_pipeline:    vk.Pipeline,
+  sprite_pipeline:       vk.Pipeline,
 }
 
 PushConstant :: struct {
@@ -50,6 +56,14 @@ init :: proc(
   create_wireframe_pipelines(gctx, self, general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
+  }
+  create_random_color_pipeline(gctx, self, general_pipeline_layout) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyPipeline(gctx.device, self.random_color_pipeline, nil)
+  }
+  create_line_strip_pipeline(gctx, self, general_pipeline_layout) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyPipeline(gctx.device, self.line_strip_pipeline, nil)
   }
   create_sprite_pipeline(gctx, self, sprite_pipeline_layout) or_return
   defer if ret != .SUCCESS {
@@ -229,11 +243,125 @@ create_sprite_pipeline :: proc(
   return .SUCCESS
 }
 
+create_random_color_pipeline :: proc(
+  gctx: ^gpu.GPUContext,
+  self: ^Renderer,
+  pipeline_layout: vk.PipelineLayout,
+) -> vk.Result {
+  vert_module := gpu.create_shader_module(
+    gctx.device,
+    SHADER_RANDOM_COLOR_VERT,
+  ) or_return
+  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
+  frag_module := gpu.create_shader_module(
+    gctx.device,
+    SHADER_RANDOM_COLOR_FRAG,
+  ) or_return
+  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
+  }
+  shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module)
+  create_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.STANDARD_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
+    pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
+    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
+    layout              = pipeline_layout,
+    pNext               = &gpu.STANDARD_RENDERING_INFO,
+  }
+  vk.CreateGraphicsPipelines(
+    gctx.device,
+    0,
+    1,
+    &create_info,
+    nil,
+    &self.random_color_pipeline,
+  ) or_return
+  return .SUCCESS
+}
+
+create_line_strip_pipeline :: proc(
+  gctx: ^gpu.GPUContext,
+  self: ^Renderer,
+  pipeline_layout: vk.PipelineLayout,
+) -> vk.Result {
+  vert_module := gpu.create_shader_module(
+    gctx.device,
+    SHADER_LINE_STRIP_VERT,
+  ) or_return
+  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
+  frag_module := gpu.create_shader_module(
+    gctx.device,
+    SHADER_LINE_STRIP_FRAG,
+  ) or_return
+  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
+  }
+  shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module)
+  create_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &gpu.LINE_INPUT_ASSEMBLY,
+    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+    pRasterizationState = &gpu.LINE_RASTERIZER,
+    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+    pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
+    pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
+    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
+    layout              = pipeline_layout,
+    pNext               = &gpu.STANDARD_RENDERING_INFO,
+  }
+  vk.CreateGraphicsPipelines(
+    gctx.device,
+    0,
+    1,
+    &create_info,
+    nil,
+    &self.line_strip_pipeline,
+  ) or_return
+  return .SUCCESS
+}
+
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.transparent_pipeline, nil)
   self.transparent_pipeline = 0
   vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
   self.wireframe_pipeline = 0
+  vk.DestroyPipeline(gctx.device, self.random_color_pipeline, nil)
+  self.random_color_pipeline = 0
+  vk.DestroyPipeline(gctx.device, self.line_strip_pipeline, nil)
+  self.line_strip_pipeline = 0
   vk.DestroyPipeline(gctx.device, self.sprite_pipeline, nil)
   self.sprite_pipeline = 0
 }

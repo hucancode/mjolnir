@@ -15,7 +15,6 @@ import "navigation/recast"
 import "physics"
 import "render"
 import render_camera "render/camera"
-import "render/debug_draw"
 import "render/post_process"
 import "render/ui"
 import "vendor:glfw"
@@ -38,8 +37,6 @@ LightType :: enum u32 {
   DIRECTIONAL = 1,
   SPOT        = 2,
 }
-DebugObjectHandle :: debug_draw.DebugObjectHandle
-DebugRenderStyle :: debug_draw.RenderStyle
 
 // UI types
 UIWidgetHandle :: ui.UIWidgetHandle
@@ -1717,160 +1714,6 @@ query_box :: proc(
     }
   }
   return node_handles[:]
-}
-
-draw_debug_line :: proc(
-  engine: ^Engine,
-  from: [3]f32,
-  to: [3]f32,
-  color: [4]f32 = {1, 1, 1, 1},
-  duration: f32 = 0.0,
-) {
-  // TODO: Spawn a line mesh with wireframe material
-  // Schedule for removal after duration (0 = one frame)
-  // Need to create custom line geometry or use cylinder
-}
-
-draw_debug_box :: proc(
-  engine: ^Engine,
-  center: [3]f32,
-  size: [3]f32,
-  color: [4]f32 = {1, 1, 1, 1},
-  duration: f32 = 0.0,
-) {
-  // TODO: Spawn cube primitive with wireframe material at center
-  // Set scale to size
-  // Schedule for removal after duration (0 = one frame)
-  // Need wireframe material support in ShaderFeatureSet
-}
-
-draw_debug_sphere :: proc(
-  engine: ^Engine,
-  center: [3]f32,
-  radius: f32,
-  color: [4]f32 = {1, 1, 1, 1},
-  duration: f32 = 0.0,
-) {
-  // TODO: Spawn sphere primitive with wireframe material at center
-  // Set scale to radius
-  // Schedule for removal after duration (0 = one frame)
-  // Need wireframe material support in ShaderFeatureSet
-}
-
-draw_debug_aabb :: proc(
-  engine: ^Engine,
-  min: [3]f32,
-  max: [3]f32,
-  color: [4]f32 = {1, 1, 1, 1},
-  duration: f32 = 0.0,
-) {
-  center := (min + max) * 0.5
-  size := max - min
-  draw_debug_box(engine, center, size, color, duration)
-}
-
-// Debug Draw API - Spawn debug objects for visualization
-
-debug_draw_spawn_mesh :: proc(
-  engine: ^Engine,
-  mesh_handle: MeshHandle,
-  transform: matrix[4, 4]f32,
-  color: [4]f32 = {1.0, 0.0, 0.75, 1.0},
-  style: DebugRenderStyle = .UNIFORM_COLOR,
-  bypass_depth := false,
-) -> (
-  handle: DebugObjectHandle,
-  ok: bool,
-) #optional_ok {
-  return debug_draw.spawn_mesh(
-    &engine.render.debug_draw,
-    transmute(render.MeshHandle)mesh_handle,
-    transform,
-    color,
-    style,
-    bypass_depth,
-  )
-}
-
-// TODO: Re-enable when debug_draw.spawn_line_strip is refactored to not do GPU work
-/*
-debug_draw_spawn_line_strip :: proc(
-  engine: ^Engine,
-  points: []geometry.Vertex,
-  color: [4]f32 = {1.0, 0.0, 0.75, 1.0},
-  bypass_depth := false,
-) -> (
-  handle: DebugObjectHandle,
-  ok: bool,
-) #optional_ok {
-  return debug_draw.spawn_line_strip(
-    &engine.render.debug_draw,
-    points,
-    &engine.gctx,
-    &engine.world,
-    color,
-    bypass_depth,
-  )
-}
-*/
-
-debug_draw_spawn_mesh_temporary :: proc(
-  engine: ^Engine,
-  mesh_handle: MeshHandle,
-  transform: matrix[4, 4]f32,
-  duration_seconds: f64,
-  color: [4]f32 = {1.0, 0.0, 0.75, 1.0},
-  style: DebugRenderStyle = .UNIFORM_COLOR,
-  bypass_depth := false,
-) -> (
-  handle: DebugObjectHandle,
-  ok: bool,
-) #optional_ok {
-  return debug_draw.spawn_mesh_temporary(
-    &engine.render.debug_draw,
-    transmute(render.MeshHandle)mesh_handle,
-    transform,
-    duration_seconds,
-    color,
-    style,
-    bypass_depth,
-  )
-}
-
-// TODO: Re-enable when debug_draw.spawn_line_strip_temporary is refactored to not do GPU work
-/*
-debug_draw_spawn_line_strip_temporary :: proc(
-  engine: ^Engine,
-  points: []geometry.Vertex,
-  duration_seconds: f64,
-  color: [4]f32 = {1.0, 0.0, 0.75, 1.0},
-  bypass_depth := false,
-) -> (
-  handle: DebugObjectHandle,
-  ok: bool,
-) #optional_ok {
-  return debug_draw.spawn_line_strip_temporary(
-    &engine.render.debug_draw,
-    points,
-    &engine.gctx,
-    &engine.world,
-    duration_seconds,
-    color,
-    bypass_depth,
-  )
-}
-*/
-
-debug_draw_destroy :: proc(engine: ^Engine, handle: DebugObjectHandle) {
-  debug_draw.destroy(
-    &engine.render.debug_draw,
-    handle,
-    &engine.world,
-    proc(ctx: rawptr, mesh_handle: render.MeshHandle) {
-      world_ptr := cast(^world.World)ctx
-      world.destroy_mesh(world_ptr, transmute(world.MeshHandle)mesh_handle)
-    },
-  )
 }
 
 // ============================================================================

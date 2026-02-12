@@ -12,8 +12,10 @@ const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
 const uint NODE_FLAG_MATERIAL_TRANSPARENT = 1u << 2;
 const uint NODE_FLAG_MATERIAL_WIREFRAME = 1u << 3;
 const uint NODE_FLAG_MATERIAL_SPRITE = 1u << 4;
-const uint NODE_FLAG_CASTS_SHADOW = 1u << 5;
-const uint NODE_FLAG_NAVIGATION_OBSTACLE = 1u << 6;
+const uint NODE_FLAG_MATERIAL_RANDOM_COLOR = 1u << 5;
+const uint NODE_FLAG_MATERIAL_LINE_STRIP = 1u << 6;
+const uint NODE_FLAG_CASTS_SHADOW = 1u << 7;
+const uint NODE_FLAG_NAVIGATION_OBSTACLE = 1u << 8;
 const uint INVALID_ID = 0xFFFFFFFFu;
 
 struct Camera {
@@ -232,9 +234,13 @@ void main() {
 
     // Occlusion culling (only for opaque objects)
     bool is_transparent = (node.flags & NODE_FLAG_MATERIAL_TRANSPARENT) != 0u;
+    bool is_wireframe = (node.flags & NODE_FLAG_MATERIAL_WIREFRAME) != 0u;
+    bool is_random_color = (node.flags & NODE_FLAG_MATERIAL_RANDOM_COLOR) != 0u;
+    bool is_line_strip = (node.flags & NODE_FLAG_MATERIAL_LINE_STRIP) != 0u;
     bool is_sprite = (node.flags & NODE_FLAG_MATERIAL_SPRITE) != 0u;
+    bool is_non_opaque = is_transparent || is_wireframe || is_random_color || is_line_strip || is_sprite;
 
-    if (visible && params.occlusion_enabled == 1u && !is_transparent && !is_sprite) {
+    if (visible && params.occlusion_enabled == 1u && !is_non_opaque) {
         visible = occlusion_test(world_center, radius, camera);
     }
 
@@ -255,8 +261,8 @@ void main() {
         if (draw_index < params.max_draws) {
             sprite_commands[draw_index] = cmd;
         }
-    } else if (is_transparent) {
-        // Transparent pass (non-sprite transparent objects)
+    } else if (is_non_opaque) {
+        // Transparent pass (all non-opaque materials: transparent, wireframe, random_color, line_strip)
         uint draw_index = atomicAdd(transparent_draw_count, 1);
         if (draw_index < params.max_draws) {
             transparent_commands[draw_index] = cmd;

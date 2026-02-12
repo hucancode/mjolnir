@@ -20,7 +20,6 @@ import "gpu"
 import nav "navigation"
 import "render"
 import render_camera "render/camera"
-import "render/debug_draw"
 import "render/debug_ui"
 import "render/particles"
 import "render/ui"
@@ -197,7 +196,6 @@ init :: proc(
       .LIGHTING,
       .TRANSPARENCY,
       .PARTICLES,
-      .DEBUG_DRAW,
       .POST_PROCESS,
     },
     {3, 4, 3},
@@ -207,74 +205,6 @@ init :: proc(
     100.0,
   ) or_return
   world.stage_camera_data(&self.world.staging, main_world_handle)
-
-  // Set up debug draw callbacks for world module
-  self.world.debug_draw_line_strip =
-  proc(
-    points: []geometry.Vertex,
-    duration_seconds: f64,
-    color: [4]f32,
-    bypass_depth: bool,
-  ) {
-    engine := cast(^Engine)context.user_ptr
-    if engine == nil do return
-
-    // Create mesh from points
-    indices := make([]u32, len(points))
-    defer delete(indices)
-    for i in 0 ..< len(points) {
-      indices[i] = u32(i)
-    }
-    vertices_copy := make([]geometry.Vertex, len(points))
-    defer delete(vertices_copy)
-    copy(vertices_copy, points)
-    geom := geometry.Geometry {
-      vertices = vertices_copy,
-      indices  = indices,
-      aabb     = geometry.aabb_from_vertices(points),
-    }
-
-    // Allocate mesh using render upload function
-    mesh_handle, result := render.allocate_mesh_geometry(
-      &engine.gctx,
-      &engine.render,
-      geom,
-    )
-    if result != .SUCCESS {
-      log.warnf("Failed to allocate debug line strip mesh: %v", result)
-      return
-    }
-
-    // Spawn debug object
-    debug_draw.spawn_line_strip_temporary(
-      &engine.render.debug_draw,
-      mesh_handle,
-      duration_seconds,
-      color,
-      bypass_depth,
-    )
-  }
-
-  self.world.debug_draw_mesh =
-  proc(
-    mesh_handle: world.MeshHandle,
-    transform: matrix[4, 4]f32,
-    duration_seconds: f64,
-    color: [4]f32,
-    bypass_depth: bool,
-  ) {
-    engine := cast(^Engine)context.user_ptr
-    if engine == nil do return
-    debug_draw.spawn_mesh_temporary(
-      &engine.render.debug_draw,
-      transmute(render.MeshHandle)mesh_handle,
-      transform,
-      duration_seconds,
-      color,
-      .UNIFORM_COLOR,
-      bypass_depth,
-    )
-  }
 
   if self.gctx.has_async_compute {
     log.infof(
@@ -729,6 +659,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
             node_data.flags |= {.MATERIAL_TRANSPARENT}
           case .WIREFRAME:
             node_data.flags |= {.MATERIAL_WIREFRAME}
+          case .RANDOM_COLOR:
+            node_data.flags |= {.MATERIAL_RANDOM_COLOR}
+          case .LINE_STRIP:
+            node_data.flags |= {.MATERIAL_LINE_STRIP}
           case .PBR, .UNLIT:
           }
         }
@@ -754,6 +688,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
             node_data.flags |= {.MATERIAL_TRANSPARENT}
           case .WIREFRAME:
             node_data.flags |= {.MATERIAL_WIREFRAME}
+          case .RANDOM_COLOR:
+            node_data.flags |= {.MATERIAL_RANDOM_COLOR}
+          case .LINE_STRIP:
+            node_data.flags |= {.MATERIAL_LINE_STRIP}
           case .PBR, .UNLIT:
           }
         }
@@ -786,12 +724,12 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           render.sync_mesh_geometry_for_handle(
             &self.gctx,
             &self.render,
-            transmute(render.MeshHandle)handle,
+            handle.index,
             geom,
           )
         }
       } else {
-        render.clear_mesh(&self.render, transmute(render.MeshHandle)handle)
+        render.clear_mesh(&self.render, handle.index)
       }
       next_n += 1
       self.world.staging.mesh_updates[handle] = next_n
@@ -1141,8 +1079,6 @@ update :: proc(self: ^Engine) -> bool {
   world.update_skeletal_animations(
     &self.world,
     delta_time,
-    self.render.debug_draw_ik,
-    &self.render.debug_draw,
   )
   world.update_sprite_animations(&self.world, delta_time)
   self.last_update_timestamp = time.now()
@@ -1271,7 +1207,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     }
     context.user_ptr = &descriptor_set
     camera_gpu := &engine.render.cameras_gpu[engine.render.main_camera.index]
-    render_camera.resize_gpu(
+    render_camera.resize(
       &engine.gctx,
       camera_gpu,
       &engine.render.texture_manager,
@@ -1375,19 +1311,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
         &self.gctx,
         cam_handle,
         self.swapchain.format.format,
-        command_buffer,
-      )
-    }
-    if world.PassType.DEBUG_DRAW in cam.enabled_passes {
-      render.record_debug_draw_pass(
-        &self.render,
-        self.frame_index,
-        &self.render,
-        proc(ctx: rawptr, handle: render.MeshHandle) {
-          render_mgr := cast(^render.Manager)ctx
-          render.free_mesh_geometry(render_mgr, handle)
-        },
-        cam_handle,
         command_buffer,
       )
     }

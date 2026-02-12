@@ -39,8 +39,12 @@ demo_state: struct {
   nav_vertices:         [dynamic][3]f32,
   nav_indices:          [dynamic]i32,
   nav_area_types:       [dynamic]u8,
-  // Debug draw handles
-  navmesh_debug_handle: mjolnir.DebugObjectHandle,
+  // Navmesh visualization
+  navmesh_node_handle:  mjolnir.NodeHandle,
+  // Path visualization
+  path_node_handle:     mjolnir.NodeHandle,
+  path_mesh_handle:     mjolnir.MeshHandle,
+  path_spawn_time:      f32,
 } = {
   use_procedural = true,
   agent_speed    = 5.0,
@@ -285,34 +289,33 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
 }
 
 visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
-  if demo_state.navmesh_debug_handle != {} {
-    mjolnir.debug_draw_destroy(engine, demo_state.navmesh_debug_handle)
-    demo_state.navmesh_debug_handle = {}
-  }
+  mjolnir.despawn(engine, demo_state.navmesh_node_handle)
   navmesh_geom := nav.build_geometry(&engine.nav_sys.nav_mesh)
   log.infof(
     "Built navmesh visualization geometry: %d vertices, %d indices",
     len(navmesh_geom.vertices),
     len(navmesh_geom.indices),
   )
-  // NOTE: create_mesh takes ownership of geometry and will delete it
   navmesh_mesh_handle, mesh_ok := mjolnir.create_mesh(engine, navmesh_geom)
   if !mesh_ok {
     log.error("Failed to create navmesh visualization mesh")
     return
   }
-  demo_state.navmesh_debug_handle = mjolnir.debug_draw_spawn_mesh(
+  navmesh_material, mat_ok := mjolnir.create_material(
     engine,
-    navmesh_mesh_handle,
-    linalg.MATRIX4F32_IDENTITY,
-    {1.0, 0.8, 0.3, 0.2},
-    .RANDOM_COLOR,
+    type = .RANDOM_COLOR,
+    base_color_factor = {1.0, 0.8, 0.3, 0.3},
   )
-  log.infof(
-    "Navmesh visualization spawned with debug draw %v %v",
-    navmesh_mesh_handle,
-    demo_state.navmesh_debug_handle,
+  if !mat_ok {
+    log.error("Failed to create navmesh material")
+    return
+  }
+  demo_state.navmesh_node_handle = mjolnir.spawn(
+    engine,
+    {0, 0, 0},
+    world.MeshAttachment{handle = navmesh_mesh_handle, material = navmesh_material},
   )
+  log.info("Navmesh visualization spawned with random_color material")
 }
 
 start_find_path :: proc(engine: ^mjolnir.Engine) {
@@ -339,6 +342,9 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
         point.z,
       )
     }
+    // Despawn old path before creating new one
+    mjolnir.despawn(engine, demo_state.path_node_handle)
+    demo_state.path_node_handle = {}
     visualize_path(engine)
     // Start following the path
     demo_state.current_waypoint_idx = 0
@@ -382,31 +388,50 @@ update_agent_position :: proc(engine: ^mjolnir.Engine) {
 }
 
 visualize_path :: proc(engine: ^mjolnir.Engine) {
-  if len(demo_state.current_path) >= 2 {
-    log.infof(
-      "Visualizing path with %d points using debug draw",
-      len(demo_state.current_path),
-    )
-    // Convert [3]f32 positions to geometry.Vertex
-    path_vertices := make(
-      []geometry.Vertex,
-      len(demo_state.current_path),
-      context.temp_allocator,
-    )
-    for pos, i in demo_state.current_path {
-      path_vertices[i] = geometry.Vertex {
-        position = pos,
-      }
-    }
-    if engine.world.debug_draw_line_strip != nil {
-      engine.world.debug_draw_line_strip(
-        path_vertices,
-        5.0,
-        [4]f32{1.0, 0.8, 0.0, 1.0}, // Orange/yellow path
-        false,
-      )
-    }
+  // Clean up old path
+  mjolnir.despawn(engine, demo_state.path_node_handle)
+  if demo_state.path_mesh_handle != {} {
+    world.destroy_mesh(&engine.world, demo_state.path_mesh_handle)
+    demo_state.path_mesh_handle = {}
   }
+  
+  if len(demo_state.current_path) < 2 do return
+  log.infof("Visualizing path with %d points", len(demo_state.current_path))
+  
+  // Create line strip geometry
+  path_vertices := make([]geometry.Vertex, len(demo_state.current_path))
+  defer delete(path_vertices)
+  for pos, i in demo_state.current_path {
+    path_vertices[i] = geometry.Vertex{position = pos}
+  }
+  indices := make([]u32, len(path_vertices))
+  defer delete(indices)
+  for i in 0 ..< len(indices) {
+    indices[i] = u32(i)
+  }
+  path_geom := geometry.Geometry {
+    vertices = path_vertices,
+    indices  = indices,
+    aabb     = geometry.aabb_from_vertices(path_vertices),
+  }
+  
+  path_mesh, mesh_ok := mjolnir.create_mesh(engine, path_geom)
+  if !mesh_ok do return
+  demo_state.path_mesh_handle = path_mesh
+  
+  path_material, mat_ok := mjolnir.create_material(
+    engine,
+    type = .LINE_STRIP,
+    base_color_factor = {1.0, 0.8, 0.0, 1.0},
+  )
+  if !mat_ok do return
+  
+  demo_state.path_node_handle = mjolnir.spawn(
+    engine,
+    {0, 0, 0},
+    world.MeshAttachment{handle = path_mesh, material = path_material},
+  )
+  demo_state.path_spawn_time = 0
 }
 
 find_navmesh_point_from_mouse :: proc(
@@ -534,6 +559,20 @@ demo_mouse_pressed :: proc(
 demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Update camera controller
   mjolnir.update_camera_controller(engine, delta_time)
+  
+  // Auto-remove path after 5 seconds
+  if demo_state.path_node_handle != {} {
+    demo_state.path_spawn_time += delta_time
+    if demo_state.path_spawn_time >= 5.0 {
+      mjolnir.despawn(engine, demo_state.path_node_handle)
+      demo_state.path_node_handle = {}
+      if demo_state.path_mesh_handle != {} {
+        world.destroy_mesh(&engine.world, demo_state.path_mesh_handle)
+        demo_state.path_mesh_handle = {}
+      }
+    }
+  }
+  
   // Update agent movement along path
   if len(demo_state.current_path) > 0 && !demo_state.path_completed {
     if demo_state.current_waypoint_idx < len(demo_state.current_path) {

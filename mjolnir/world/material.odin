@@ -18,6 +18,8 @@ MaterialType :: enum {
   UNLIT,
   WIREFRAME,
   TRANSPARENT,
+  RANDOM_COLOR,
+  LINE_STRIP,
 }
 
 Material :: struct {

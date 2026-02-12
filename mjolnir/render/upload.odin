@@ -62,13 +62,21 @@ allocate_mesh_geometry :: proc(
   render: ^Manager,
   geometry_data: geometry.Geometry,
 ) -> (
-  handle: d.MeshHandle,
+  handle: u32,
   ret: vk.Result,
 ) {
-  mesh: ^Mesh
-  ok: bool
-  handle, mesh, ok = cont.alloc(&render.meshes, d.MeshHandle)
-  if !ok do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  if len(render.meshes) >= d.MAX_MESHES do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  found := false
+  // TODO: eliminate this inefficiency
+  for i in u32(0) ..< d.MAX_MESHES {
+    if _, ok := render.meshes[i]; !ok {
+      handle = i
+      found = true
+      break
+    }
+  }
+  if !found do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  mesh := Mesh{}
   mesh.aabb_min = geometry_data.aabb.min
   mesh.aabb_max = geometry_data.aabb.max
   mesh.flags = {}
@@ -95,17 +103,19 @@ allocate_mesh_geometry :: proc(
     mesh.skinning_offset = skinning_allocation.offset
     mesh.flags |= {.SKINNED}
   }
-  upload_mesh_data(render, handle, mesh)
+  render.meshes[handle] = mesh
+  upload_mesh_data(render, handle, &mesh)
   return handle, .SUCCESS
 }
 
 sync_mesh_geometry_for_handle :: proc(
   gctx: ^gpu.GPUContext,
   render: ^Manager,
-  handle: d.MeshHandle,
+  handle: u32,
   geometry_data: geometry.Geometry,
 ) -> vk.Result {
-  mesh := ensure_mesh_slot(render, handle)
+  ensure_mesh_slot(render, handle)
+  mesh := render.meshes[handle]
   if mesh.index_count > 0 {
     free_vertices(
       render,
@@ -148,12 +158,13 @@ sync_mesh_geometry_for_handle :: proc(
     mesh.skinning_offset = skinning_allocation.offset
     mesh.flags |= {.SKINNED}
   }
-  upload_mesh_data(render, handle, mesh)
+  render.meshes[handle] = mesh
+  upload_mesh_data(render, handle, &mesh)
   return .SUCCESS
 }
 
-free_mesh_geometry :: proc(render: ^Manager, handle: d.MeshHandle) {
-  mesh, ok := cont.free(&render.meshes, handle)
+free_mesh_geometry :: proc(render: ^Manager, handle: u32) {
+  mesh, ok := render.meshes[handle]
   if !ok do return
   if mesh.index_count > 0 {
     free_vertices(
@@ -171,6 +182,7 @@ free_mesh_geometry :: proc(render: ^Manager, handle: d.MeshHandle) {
       BufferAllocation{offset = mesh.skinning_offset, count = 1},
     )
   }
+  delete_key(&render.meshes, handle)
 }
 
 create_empty_texture_2d :: proc(
@@ -464,8 +476,8 @@ upload_light_data :: proc(render: ^Manager, index: u32, light_data: ^d.Light) {
   light.shadow_invalidate_light(&render.shadow, index)
 }
 
-upload_mesh_data :: proc(render: ^Manager, handle: d.MeshHandle, mesh: ^Mesh) {
-  gpu.write(&render.mesh_data_buffer.buffer, mesh, int(handle.index))
+upload_mesh_data :: proc(render: ^Manager, index: u32, mesh: ^Mesh) {
+  gpu.write(&render.mesh_data_buffer.buffer, mesh, int(index))
 }
 
 upload_material_data :: proc(
@@ -514,25 +526,25 @@ release_bone_matrix_range_for_node :: proc(
 // Takes single CPU camera data and copies to the specified frame index
 upload_camera_data :: proc(
   render: ^Manager,
-  cameras: ^d.Pool(cam.Camera),
   camera_index: u32,
+  camera: cam.Camera,
   frame_index: u32,
 ) {
-  camera := &cameras.entries[camera_index].item
+  camera_copy := camera
   camera_data: cam.CameraData
-  camera_data.view = cam.camera_view_matrix(camera)
-  camera_data.projection = cam.camera_projection_matrix(camera)
-  near, far := cam.camera_get_near_far(camera)
+  camera_data.view = cam.camera_view_matrix(&camera_copy)
+  camera_data.projection = cam.camera_projection_matrix(&camera_copy)
+  near, far := cam.camera_get_near_far(&camera_copy)
   camera_data.viewport_params = [4]f32 {
-    f32(camera.extent[0]),
-    f32(camera.extent[1]),
+    f32(camera_copy.extent[0]),
+    f32(camera_copy.extent[1]),
     near,
     far,
   }
   camera_data.position = [4]f32 {
-    camera.position[0],
-    camera.position[1],
-    camera.position[2],
+    camera_copy.position[0],
+    camera_copy.position[1],
+    camera_copy.position[2],
     1.0,
   }
   frustum := geometry.make_frustum(camera_data.projection * camera_data.view)

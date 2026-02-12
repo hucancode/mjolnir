@@ -700,7 +700,7 @@ shadow_compute_draw_lists :: proc(
   frame_index: u32,
 ) {
   include_flags: d.NodeFlagSet = {.VISIBLE}
-  exclude_flags: d.NodeFlagSet = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}
+  exclude_flags: d.NodeFlagSet = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP}
   for slot in 0 ..< MAX_SHADOW_MAPS {
     if !self.slot_active[slot] do continue
     kind := self.slot_kind[slot]
