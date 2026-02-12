@@ -20,13 +20,7 @@ allocate_vertices :: proc(
   allocation: BufferAllocation,
   ret: vk.Result,
 ) {
-  vertex_count := u32(len(vertices))
-  offset, ok := cont.slab_alloc(&render.vertex_slab, vertex_count)
-  if !ok {
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  gpu.write(gctx, &render.vertex_buffer, vertices, int(offset)) or_return
-  return BufferAllocation{offset = offset, count = vertex_count}, .SUCCESS
+  return gpu.allocate_vertices(&render.mesh_manager, gctx, vertices)
 }
 
 allocate_indices :: proc(
@@ -37,13 +31,7 @@ allocate_indices :: proc(
   allocation: BufferAllocation,
   ret: vk.Result,
 ) {
-  index_count := u32(len(indices))
-  offset, ok := cont.slab_alloc(&render.index_slab, index_count)
-  if !ok {
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  gpu.write(gctx, &render.index_buffer, indices, int(offset)) or_return
-  return BufferAllocation{offset = offset, count = index_count}, .SUCCESS
+  return gpu.allocate_indices(&render.mesh_manager, gctx, indices)
 }
 
 allocate_vertex_skinning :: proc(
@@ -54,36 +42,22 @@ allocate_vertex_skinning :: proc(
   allocation: BufferAllocation,
   ret: vk.Result,
 ) {
-  if len(skinnings) == 0 {
-    return {}, .SUCCESS
-  }
-  skinning_count := u32(len(skinnings))
-  offset, ok := cont.slab_alloc(&render.vertex_skinning_slab, skinning_count)
-  if !ok {
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  gpu.write(
-    gctx,
-    &render.vertex_skinning_buffer,
-    skinnings,
-    int(offset),
-  ) or_return
-  return BufferAllocation{offset = offset, count = skinning_count}, .SUCCESS
+  return gpu.allocate_vertex_skinning(&render.mesh_manager, gctx, skinnings)
 }
 
 free_vertices :: proc(render: ^Manager, allocation: BufferAllocation) {
-  cont.slab_free(&render.vertex_slab, allocation.offset)
+  gpu.free_vertices(&render.mesh_manager, allocation)
 }
 
 free_indices :: proc(render: ^Manager, allocation: BufferAllocation) {
-  cont.slab_free(&render.index_slab, allocation.offset)
+  gpu.free_indices(&render.mesh_manager, allocation)
 }
 
 free_vertex_skinning :: proc(
   render: ^Manager,
   allocation: BufferAllocation,
 ) {
-  cont.slab_free(&render.vertex_skinning_slab, allocation.offset)
+  gpu.free_vertex_skinning(&render.mesh_manager, allocation)
 }
 
 allocate_mesh_geometry :: proc(

@@ -1,12 +1,13 @@
 package world
 
 import cont "../containers"
+import "../gpu"
 
 Handle :: cont.Handle
 Pool :: cont.Pool
 
 NodeHandle :: distinct Handle
-MeshHandle :: distinct Handle
+MeshHandle :: gpu.MeshHandle
 MaterialHandle :: distinct Handle
 Image2DHandle :: distinct Handle
 ImageCubeHandle :: distinct Handle

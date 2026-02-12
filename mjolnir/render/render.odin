@@ -3,11 +3,9 @@ package render
 import alg "../algebra"
 import cont "../containers"
 import d "data"
-import geo "../geometry"
 import "../gpu"
 import "ui"
 import "camera"
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -70,14 +68,9 @@ Manager :: struct {
   forcefield_buffer:       gpu.BindlessBuffer(ForceField),
   sprite_buffer:           gpu.BindlessBuffer(Sprite),
   lights_buffer:           gpu.BindlessBuffer(Light),
-  vertex_skinning_buffer:  gpu.ImmutableBindlessBuffer(geo.SkinningData),
-  vertex_buffer:           gpu.ImmutableBuffer(geo.Vertex),
-  index_buffer:            gpu.ImmutableBuffer(u32),
+  mesh_manager:            gpu.MeshManager,
   bone_matrix_slab:        cont.SlabAllocator,
   bone_matrix_offsets:     map[d.NodeHandle]u32,
-  vertex_skinning_slab:    cont.SlabAllocator,
-  vertex_slab:             cont.SlabAllocator,
-  index_slab:              cont.SlabAllocator,
   texture_manager:         gpu.TextureManager,
   texture_2d_tracking:     map[gpu.Texture2DHandle]TextureTracking,
   texture_cube_tracking:   map[gpu.TextureCubeHandle]TextureTracking,
@@ -194,75 +187,12 @@ init_geometry_buffers :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  // Initialize vertex skinning buffer
-  skinning_count := d.BINDLESS_SKINNING_BUFFER_SIZE / size_of(geo.SkinningData)
-  log.infof(
-    "Creating vertex skinning buffer with capacity %d entries...",
-    skinning_count,
-  )
-  gpu.immutable_bindless_buffer_init(
-    &self.vertex_skinning_buffer,
-    gctx,
-    skinning_count,
-    {.VERTEX},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.immutable_bindless_buffer_destroy(
-      &self.vertex_skinning_buffer,
-      gctx.device,
-    )
-  }
-  cont.slab_init(&self.vertex_skinning_slab, d.VERTEX_SLAB_CONFIG)
-  defer if ret != .SUCCESS {
-    cont.slab_destroy(&self.vertex_skinning_slab)
-  }
-
-  // Initialize vertex and index buffers
-  vertex_count := d.BINDLESS_VERTEX_BUFFER_SIZE / size_of(geo.Vertex)
-  index_count := d.BINDLESS_INDEX_BUFFER_SIZE / size_of(u32)
-  self.vertex_buffer = gpu.malloc_buffer(
-    gctx,
-    geo.Vertex,
-    vertex_count,
-    {.VERTEX_BUFFER},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.buffer_destroy(gctx.device, &self.vertex_buffer)
-  }
-  self.index_buffer = gpu.malloc_buffer(
-    gctx,
-    u32,
-    index_count,
-    {.INDEX_BUFFER},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.buffer_destroy(gctx.device, &self.index_buffer)
-  }
-  cont.slab_init(&self.vertex_slab, d.VERTEX_SLAB_CONFIG)
-  defer if ret != .SUCCESS {
-    cont.slab_destroy(&self.vertex_slab)
-  }
-  cont.slab_init(&self.index_slab, d.INDEX_SLAB_CONFIG)
-  defer if ret != .SUCCESS {
-    cont.slab_destroy(&self.index_slab)
-  }
-
-  log.info("Vertex buffer capacity:", vertex_count, "vertices")
-  log.info("Index buffer capacity:", index_count, "indices")
-  return .SUCCESS
+  return gpu.mesh_manager_init(&self.mesh_manager, gctx)
 }
 
 @(private)
 destroy_geometry_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  cont.slab_destroy(&self.vertex_skinning_slab)
-  gpu.immutable_bindless_buffer_destroy(
-    &self.vertex_skinning_buffer,
-    gctx.device,
-  )
-  gpu.buffer_destroy(gctx.device, &self.vertex_buffer)
-  gpu.buffer_destroy(gctx.device, &self.index_buffer)
-  cont.slab_destroy(&self.vertex_slab)
-  cont.slab_destroy(&self.index_slab)
+  gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
 }
 
 @(private)
@@ -410,7 +340,7 @@ init_bindless_layouts :: proc(
     self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
-    self.vertex_skinning_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
@@ -669,7 +599,7 @@ init :: proc(
     self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
-    self.vertex_skinning_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   camera.allocate_descriptors(
     gctx,
@@ -837,9 +767,9 @@ render_shadow_depth :: proc(
     self.world_matrix_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
-    self.vertex_skinning_buffer.descriptor_set,
-    self.vertex_buffer.buffer,
-    self.index_buffer.buffer,
+    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    self.mesh_manager.vertex_buffer.buffer,
+    self.mesh_manager.index_buffer.buffer,
     frame_index,
   )
   return .SUCCESS
@@ -859,7 +789,7 @@ render_camera_depth :: proc(
     if source := cam_cpu.draw_list_source_handle; source.generation > 0 {
       draw_list_source_gpu = &self.cameras_gpu[source.index]
     }
-    visibility.render_depth(&self.visibility, gctx, command_buffer, cam_gpu, cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, self.textures_descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.vertex_skinning_buffer.descriptor_set, self.vertex_buffer.buffer, self.index_buffer.buffer, draw_list_source_gpu)
+    visibility.render_depth(&self.visibility, gctx, command_buffer, cam_gpu, cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, self.textures_descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.mesh_manager.vertex_skinning_buffer.descriptor_set, self.mesh_manager.vertex_buffer.buffer, self.mesh_manager.index_buffer.buffer, draw_list_source_gpu)
   }
   return .SUCCESS
 }
@@ -894,9 +824,9 @@ record_geometry_pass :: proc(
     self.world_matrix_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
-    self.vertex_skinning_buffer.descriptor_set,
-    self.vertex_buffer.buffer,
-    self.index_buffer.buffer,
+    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    self.mesh_manager.vertex_buffer.buffer,
+    self.mesh_manager.index_buffer.buffer,
     camera_gpu.opaque_draw_commands[frame_index].buffer,
     camera_gpu.opaque_draw_count[frame_index].buffer,
   )
@@ -1074,9 +1004,9 @@ record_transparency_pass :: proc(
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
     self.sprite_buffer.descriptor_set,
-    self.vertex_skinning_buffer.descriptor_set,
-    self.vertex_buffer.buffer,
-    self.index_buffer.buffer,
+    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    self.mesh_manager.vertex_buffer.buffer,
+    self.mesh_manager.index_buffer.buffer,
     camera_handle,
     frame_index,
     command_buffer,
@@ -1096,9 +1026,9 @@ record_transparency_pass :: proc(
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
     self.sprite_buffer.descriptor_set,
-    self.vertex_skinning_buffer.descriptor_set,
-    self.vertex_buffer.buffer,
-    self.index_buffer.buffer,
+    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    self.mesh_manager.vertex_buffer.buffer,
+    self.mesh_manager.index_buffer.buffer,
     camera_handle,
     frame_index,
     command_buffer,
@@ -1140,8 +1070,8 @@ record_debug_draw_pass :: proc(
     command_buffer,
     self.meshes,
     frame_index,
-    self.vertex_buffer.buffer,
-    self.index_buffer.buffer,
+    self.mesh_manager.vertex_buffer.buffer,
+    self.mesh_manager.index_buffer.buffer,
   )
   debug_draw.end_pass(&self.debug_draw, command_buffer)
   return .SUCCESS
