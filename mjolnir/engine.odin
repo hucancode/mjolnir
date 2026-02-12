@@ -642,6 +642,7 @@ update_visibility_node_count :: proc(
   n := min(u32(len(world.nodes.entries)), render.visibility.max_draws)
   for ; n > 0; n -= 1 do if world.nodes.entries[n - 1].active do break
   render.visibility.node_count = n
+  render.shadow.node_count = n
 }
 
 sync_staging_to_gpu :: proc(self: ^Engine) {
@@ -662,10 +663,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   )
   stale_lights := make([dynamic]world.NodeHandle, context.temp_allocator)
   stale_cameras := make([dynamic]world.CameraHandle, context.temp_allocator)
-  stale_spherical_cameras := make(
-    [dynamic]world.SphereCameraHandle,
-    context.temp_allocator,
-  )
   for handle, n in self.world.staging.transforms {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
@@ -1031,6 +1028,13 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
       if in_active {
         node := cont.get(self.world.nodes, node_handle)
         if node != nil {
+          light_position := node.transform.world_matrix[3].xyz
+          light_direction := node.transform.world_matrix[2].xyz
+          if linalg.dot(light_direction, light_direction) < 1e-6 {
+            light_direction = {0, -1, 0}
+          } else {
+            light_direction = linalg.normalize(light_direction)
+          }
           render_handle := render.LightHandle {
             index      = u32(light_slot),
             generation = 1,
@@ -1040,35 +1044,38 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           case world.PointLightAttachment:
             dst^ = render.Light {
               color        = attachment.color,
+              position     = {light_position.x, light_position.y, light_position.z, 1.0},
+              direction    = {light_direction.x, light_direction.y, light_direction.z, 0.0},
               radius       = attachment.radius,
               angle_inner  = 0.0,
               angle_outer  = 0.0,
               type         = .POINT,
-              node_index   = node_handle.index,
-              camera_index = attachment.camera_handle.index,
               cast_shadow  = b32(attachment.cast_shadow),
+              shadow_index = 0xFFFFFFFF,
             }
           case world.DirectionalLightAttachment:
             dst^ = render.Light {
               color        = attachment.color,
+              position     = {light_position.x, light_position.y, light_position.z, 1.0},
+              direction    = {light_direction.x, light_direction.y, light_direction.z, 0.0},
               radius       = attachment.radius,
               angle_inner  = 0.0,
               angle_outer  = 0.0,
               type         = .DIRECTIONAL,
-              node_index   = node_handle.index,
-              camera_index = attachment.camera_handle.index,
               cast_shadow  = b32(attachment.cast_shadow),
+              shadow_index = 0xFFFFFFFF,
             }
           case world.SpotLightAttachment:
             dst^ = render.Light {
               color        = attachment.color,
+              position     = {light_position.x, light_position.y, light_position.z, 1.0},
+              direction    = {light_direction.x, light_direction.y, light_direction.z, 0.0},
               radius       = attachment.radius,
               angle_inner  = attachment.angle_inner,
               angle_outer  = attachment.angle_outer,
               type         = .SPOT,
-              node_index   = node_handle.index,
-              camera_index = attachment.camera_handle.index,
               cast_shadow  = b32(attachment.cast_shadow),
+              shadow_index = 0xFFFFFFFF,
             }
           case:
             dst^ = {}
@@ -1105,27 +1112,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   }
   for handle in stale_cameras {
     delete_key(&self.world.staging.camera_updates, handle)
-  }
-  for handle, n in self.world.staging.spherical_camera_updates {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      if spherical_camera := cont.get(self.world.spherical_cameras, handle);
-         spherical_camera != nil {
-        render.sync_spherical_camera_from_world(
-          &self.render,
-          transmute(render.SphereCameraHandle)handle,
-          transmute(^render_camera.SphericalCamera)spherical_camera,
-        )
-      }
-      next_n += 1
-      self.world.staging.spherical_camera_updates[handle] = next_n
-    }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_spherical_cameras, handle)
-    }
-  }
-  for handle in stale_spherical_cameras {
-    delete_key(&self.world.staging.spherical_camera_updates, handle)
   }
 }
 
@@ -1268,230 +1254,6 @@ populate_debug_ui :: proc(self: ^Engine) {
 }
 
 @(private)
-create_light_camera :: proc(
-  engine: ^Engine,
-  light_node_handle: world.NodeHandle,
-) -> (
-  camera_handle: world.CameraHandle,
-  ok: bool,
-) #optional_ok {
-  node := cont.get(engine.world.nodes, light_node_handle) or_return
-  #partial switch &attachment in &node.attachment {
-  case world.PointLightAttachment:
-    if !attachment.cast_shadow do return {}, false
-    // Point lights use spherical cameras for omnidirectional shadows
-    cam_handle, spherical_cam := cont.alloc(
-      &engine.world.spherical_cameras,
-      world.SphereCameraHandle,
-    ) or_return
-    init_ok := world.spherical_camera_init(
-      spherical_cam,
-      world.SHADOW_MAP_SIZE,
-      radius = attachment.radius,
-      near = 0.1,
-      far = attachment.radius,
-    )
-    if !init_ok {
-      cont.free(&engine.world.spherical_cameras, cam_handle)
-      return {}, false
-    }
-    world.stage_spherical_camera_data(&engine.world.staging, cam_handle)
-    cam_gpu := &engine.render.spherical_cameras_gpu[cam_handle.index]
-    gpu_result := render_camera.init_spherical_gpu(
-      &engine.gctx,
-      cam_gpu,
-      &engine.render.texture_manager,
-      world.SHADOW_MAP_SIZE,
-      .D32_SFLOAT,
-      world.MAX_NODES_IN_SCENE,
-    )
-    if gpu_result != .SUCCESS {
-      cont.free(&engine.world.spherical_cameras, cam_handle)
-      return {}, false
-    }
-    // Allocate descriptors for the spherical camera
-    alloc_result := render_camera.allocate_descriptors_spherical(
-      &engine.gctx,
-      cam_gpu,
-      &engine.render.visibility.sphere_cam_descriptor_layout,
-      &engine.render.node_data_buffer,
-      &engine.render.mesh_data_buffer,
-      &engine.render.world_matrix_buffer,
-      &engine.render.spherical_camera_buffer,
-    )
-    if alloc_result != .SUCCESS {
-      cont.free(&engine.world.spherical_cameras, cam_handle)
-      return {}, false
-    }
-    attachment.camera_handle = cam_handle
-    world.stage_light_data(&engine.world.staging, light_node_handle)
-    return cam_handle, true
-  case world.DirectionalLightAttachment:
-    if !attachment.cast_shadow do return {}, false
-    cam_handle, cam := cont.alloc(
-      &engine.world.cameras,
-      world.CameraHandle,
-    ) or_return
-    ortho_size := attachment.radius * 2.0
-    init_result := world.camera_init_orthographic(
-      cam,
-      world.SHADOW_MAP_SIZE,
-      world.SHADOW_MAP_SIZE,
-      {.SHADOW},
-      {0, 0, 0},
-      {0, 0, -1},
-      ortho_size,
-      ortho_size,
-      1.0,
-      attachment.radius * 2.0,
-    )
-    if init_result != .SUCCESS {
-      cont.free(&engine.world.cameras, cam_handle)
-      return {}, false
-    }
-    world.stage_camera_data(&engine.world.staging, cam_handle)
-    cam_gpu := &engine.render.cameras_gpu[cam_handle.index]
-    descriptor_set := engine.render.textures_descriptor_set
-    set_descriptor :: proc(
-      gctx: ^gpu.GPUContext,
-      index: u32,
-      view: vk.ImageView,
-    ) {
-      desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
-      render.set_texture_2d_descriptor(gctx, desc_set, index, view)
-    }
-    context.user_ptr = &descriptor_set
-    gpu_result := render_camera.init_orthographic_gpu(
-      &engine.gctx,
-      cam_gpu,
-      &engine.render.texture_manager,
-      world.SHADOW_MAP_SIZE,
-      world.SHADOW_MAP_SIZE,
-      engine.swapchain.format.format,
-      vk.Format.D32_SFLOAT,
-      transmute(render_camera.PassTypeSet)cam.enabled_passes,
-      cam.enable_depth_pyramid,
-      world.MAX_NODES_IN_SCENE,
-    )
-    if gpu_result != .SUCCESS {
-      cont.free(&engine.world.cameras, cam_handle)
-      return {}, false
-    }
-    alloc_result := render_camera.allocate_descriptors(
-      &engine.gctx,
-      cam_gpu,
-      &engine.render.texture_manager,
-      &engine.render.visibility.normal_cam_descriptor_layout,
-      &engine.render.visibility.depth_reduce_descriptor_layout,
-      &engine.render.node_data_buffer,
-      &engine.render.mesh_data_buffer,
-      &engine.render.world_matrix_buffer,
-      &engine.render.camera_buffer,
-    )
-    if alloc_result != .SUCCESS {
-      cont.free(&engine.world.cameras, cam_handle)
-      return {}, false
-    }
-    attachment.camera_handle = cam_handle
-    world.stage_light_data(&engine.world.staging, light_node_handle)
-    return cam_handle, true
-  case world.SpotLightAttachment:
-    if !attachment.cast_shadow do return {}, false
-    cam_handle, cam := cont.alloc(
-      &engine.world.cameras,
-      world.CameraHandle,
-    ) or_return
-    fov := attachment.angle_outer * 2.0
-    init_result := world.camera_init(
-      cam,
-      world.SHADOW_MAP_SIZE,
-      world.SHADOW_MAP_SIZE,
-      {.SHADOW},
-      {0, 0, 0},
-      {0, -1, 0},
-      fov,
-      attachment.radius * 0.01,
-      attachment.radius,
-    )
-    if init_result != .SUCCESS {
-      cont.free(&engine.world.cameras, cam_handle)
-      return {}, false
-    }
-    world.stage_camera_data(&engine.world.staging, cam_handle)
-    cam_gpu := &engine.render.cameras_gpu[cam_handle.index]
-    descriptor_set := engine.render.textures_descriptor_set
-    set_descriptor :: proc(
-      gctx: ^gpu.GPUContext,
-      index: u32,
-      view: vk.ImageView,
-    ) {
-      desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
-      render.set_texture_2d_descriptor(gctx, desc_set, index, view)
-    }
-    context.user_ptr = &descriptor_set
-    gpu_result := render_camera.init_gpu(
-      &engine.gctx,
-      cam_gpu,
-      &engine.render.texture_manager,
-      world.SHADOW_MAP_SIZE,
-      world.SHADOW_MAP_SIZE,
-      engine.swapchain.format.format,
-      vk.Format.D32_SFLOAT,
-      transmute(render_camera.PassTypeSet)cam.enabled_passes,
-      cam.enable_depth_pyramid,
-      world.MAX_NODES_IN_SCENE,
-    )
-    if gpu_result != .SUCCESS {
-      cont.free(&engine.world.cameras, cam_handle)
-      return {}, false
-    }
-    alloc_result := render_camera.allocate_descriptors(
-      &engine.gctx,
-      cam_gpu,
-      &engine.render.texture_manager,
-      &engine.render.visibility.normal_cam_descriptor_layout,
-      &engine.render.visibility.depth_reduce_descriptor_layout,
-      &engine.render.node_data_buffer,
-      &engine.render.mesh_data_buffer,
-      &engine.render.world_matrix_buffer,
-      &engine.render.camera_buffer,
-    )
-    if alloc_result != .SUCCESS {
-      cont.free(&engine.world.cameras, cam_handle)
-      return {}, false
-    }
-    attachment.camera_handle = cam_handle
-    world.stage_light_data(&engine.world.staging, light_node_handle)
-    return cam_handle, true
-  case:
-    return {}, false
-  }
-}
-
-@(private)
-ensure_light_cameras :: proc(engine: ^Engine) {
-  for light_node_handle in engine.world.active_light_nodes {
-    node := cont.get(engine.world.nodes, light_node_handle) or_continue
-    should_create_camera := false
-    #partial switch attachment in node.attachment {
-    case world.PointLightAttachment:
-      should_create_camera = bool(attachment.cast_shadow) &&
-      attachment.camera_handle.generation == 0
-    case world.DirectionalLightAttachment:
-      should_create_camera = bool(attachment.cast_shadow) &&
-      attachment.camera_handle.generation == 0
-    case world.SpotLightAttachment:
-      should_create_camera = bool(attachment.cast_shadow) &&
-      attachment.camera_handle.generation == 0
-    case:
-      should_create_camera = false
-    }
-    if !should_create_camera do continue
-    create_light_camera(engine, light_node_handle) or_continue
-  }
-}
-
-@(private)
 build_active_render_light_handles :: proc(
   engine: ^Engine,
   allocator := context.temp_allocator,
@@ -1574,7 +1336,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 render_and_present :: proc(self: ^Engine) -> vk.Result {
-  ensure_light_cameras(self)
   active_render_lights := build_active_render_light_handles(self)
   context.user_ptr = self
   gpu.acquire_next_image(
@@ -1588,15 +1349,15 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   world.begin_frame(&self.world, 0.016, nil)
   sync_staging_to_gpu(self)
   update_visibility_node_count(&self.render, &self.world)
-  render.update_light_camera(
-    &self.render,
-    active_render_lights[:],
-    self.render.main_camera,
-    self.frame_index,
-  )
   if self.pre_render_proc != nil {
     self.pre_render_proc(self)
   }
+  render.render_shadow_depth(
+    &self.render,
+    self.frame_index,
+    command_buffer,
+    active_render_lights[:],
+  ) or_return
   render.render_camera_depth(
     &self.render,
     self.frame_index,

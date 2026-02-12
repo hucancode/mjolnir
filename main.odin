@@ -582,7 +582,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // add_dof(engine)
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
-  when false {
+  when true {
     portal_camera_handle = mjolnir.create_camera(
       engine,
       512, // width

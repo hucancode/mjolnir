@@ -35,7 +35,6 @@ PassType :: enum {
 PassTypeSet :: bit_set[PassType;u32]
 
 CameraHandle :: rd.CameraHandle
-SphericalCameraHandle :: rd.SphereCameraHandle
 
 PerspectiveProjection :: struct {
   fov:          f32,
@@ -63,15 +62,6 @@ Camera :: struct {
   enable_culling:          bool,
   enable_depth_pyramid:    bool,
   draw_list_source_handle: CameraHandle,
-}
-
-SphericalCamera :: struct {
-  center:    [3]f32,
-  radius:    f32,
-  near:      f32,
-  far:       f32,
-  size:      u32,
-  max_draws: u32,
 }
 
 camera_forward :: proc(self: ^Camera) -> [3]f32 {
@@ -131,14 +121,6 @@ CameraData :: struct {
   frustum_planes:  [6][4]f32,
 }
 
-// GPU-side spherical camera data (optimized for point light shadows)
-SphericalCameraData :: struct {
-  projection: matrix[4, 4]f32, // 90-degree FOV for cube faces
-  position:   [4]f32, // center.xyz, radius in w
-  near_far:   [2]f32, // near, far planes
-  _padding:   [2]f32, // Align to 16 bytes
-}
-
 // DepthPyramid - Hierarchical depth buffer for occlusion culling (GPU resource)
 DepthPyramid :: struct {
   texture:    gpu.Texture2DHandle,
@@ -183,19 +165,6 @@ CameraGPU :: struct {
   // Descriptor sets for visibility culling compute shaders
   descriptor_set:                [FRAMES_IN_FLIGHT]vk.DescriptorSet,
   depth_reduce_descriptor_sets:  [FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
-}
-
-// SphericalCameraGPU - GPU-side spherical camera resources (for point light shadows)
-SphericalCameraGPU :: struct {
-  // Cube depth textures (per-frame double-buffering)
-  depth_cube:      [FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
-  // Indirect draw buffers
-  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
-    vk.DrawIndexedIndirectCommand,
-  ),
-  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  // Descriptor sets for sphere culling
-  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 // Initialize GPU resources for perspective camera
@@ -393,45 +362,6 @@ init_orthographic_gpu :: proc(
   )
 }
 
-// Initialize GPU resources for spherical camera (omnidirectional shadow mapping)
-init_spherical_gpu :: proc(
-  gctx: ^gpu.GPUContext,
-  camera_gpu: ^SphericalCameraGPU,
-  texture_manager: ^gpu.TextureManager,
-  size: u32,
-  depth_format: vk.Format,
-  max_draws: u32,
-) -> vk.Result {
-  // Create cube depth textures for omnidirectional shadows
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
-    camera_gpu.depth_cube[frame] = gpu.allocate_texture_cube(
-      texture_manager,
-      gctx,
-      size,
-      depth_format,
-      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    ) or_return
-  }
-
-  // Create indirect draw buffers
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
-    camera_gpu.draw_count[frame] = gpu.create_mutable_buffer(
-      gctx,
-      u32,
-      1,
-      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
-    ) or_return
-    camera_gpu.draw_commands[frame] = gpu.create_mutable_buffer(
-      gctx,
-      vk.DrawIndexedIndirectCommand,
-      int(max_draws),
-      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
-    ) or_return
-  }
-
-  return .SUCCESS
-}
-
 // Destroy GPU resources for perspective/orthographic camera
 destroy_gpu :: proc(
   gctx: ^gpu.GPUContext,
@@ -491,65 +421,6 @@ destroy_gpu :: proc(
 
   // Zero out the GPU struct
   camera_gpu^ = {}
-}
-
-// Destroy GPU resources for spherical camera
-destroy_spherical_gpu :: proc(
-  gctx: ^gpu.GPUContext,
-  camera_gpu: ^SphericalCameraGPU,
-  texture_manager: ^gpu.TextureManager,
-) {
-  // Destroy cube depth textures
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
-    handle := camera_gpu.depth_cube[frame]
-    if handle.index == 0 do continue
-    gpu.free_texture_cube(texture_manager, gctx, handle)
-  }
-
-  // Destroy indirect draw buffers
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
-    gpu.mutable_buffer_destroy(gctx.device, &camera_gpu.draw_count[frame])
-    gpu.mutable_buffer_destroy(gctx.device, &camera_gpu.draw_commands[frame])
-  }
-
-  // Zero out the GPU struct
-  camera_gpu^ = {}
-}
-
-// Allocate descriptor sets for spherical camera
-allocate_descriptors_spherical :: proc(
-  gctx: ^gpu.GPUContext,
-  camera_gpu: ^SphericalCameraGPU,
-  descriptor_layout: ^vk.DescriptorSetLayout,
-  node_data_buffer: ^gpu.BindlessBuffer(rd.NodeData),
-  mesh_data_buffer: ^gpu.BindlessBuffer(rd.MeshData),
-  world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
-  spherical_camera_buffer: ^gpu.PerFrameBindlessBuffer(
-    SphericalCameraData,
-    FRAMES_IN_FLIGHT,
-  ),
-) -> vk.Result {
-  // Create per-frame descriptor sets for sphere culling compute shader
-  for frame_index in 0 ..< FRAMES_IN_FLIGHT {
-    camera_gpu.descriptor_sets[frame_index] = gpu.create_descriptor_set(
-      gctx,
-      descriptor_layout,
-      {.STORAGE_BUFFER, gpu.buffer_info(&node_data_buffer.buffer)},
-      {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)},
-      {.STORAGE_BUFFER, gpu.buffer_info(&world_matrix_buffer.buffer)},
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&spherical_camera_buffer.buffers[frame_index]),
-      },
-      {.STORAGE_BUFFER, gpu.buffer_info(&camera_gpu.draw_count[frame_index])},
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&camera_gpu.draw_commands[frame_index]),
-      },
-    ) or_return
-  }
-
-  return .SUCCESS
 }
 
 // Allocate descriptor sets for perspective/orthographic camera culling pipelines

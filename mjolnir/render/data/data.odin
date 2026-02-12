@@ -25,8 +25,6 @@ MAX_ACTIVE_CAMERAS :: 128
 MAX_EMITTERS :: 64
 MAX_FORCE_FIELDS :: 32
 MAX_LIGHTS :: 256
-MAX_SHADOW_MAPS :: 16
-SHADOW_MAP_SIZE :: 512
 MAX_MESHES :: 65536
 MAX_MATERIALS :: 4096
 MAX_SPRITES :: 4096
@@ -201,12 +199,13 @@ LightType :: enum u32 {
 
 Light :: struct {
   color:        [4]f32, // RGB + intensity
+  position:     [4]f32, // xyz world position
+  direction:    [4]f32, // xyz world forward direction
   radius:       f32, // range for point/spot lights
   angle_inner:  f32, // inner cone angle for spot lights
   angle_outer:  f32, // outer cone angle for spot lights
   type:         LightType, // LightType
-  node_index:   u32, // index into world matrices buffer
-  camera_index: u32, // index into camera matrices buffer
   cast_shadow:  b32, // 0 = no shadow, 1 = cast shadow
-  _padding:     u32, // Maintain 16-byte alignment
+  shadow_index: u32, // index into shadow buffers
+  _padding:     [2]u32, // Maintain 16-byte alignment
 }

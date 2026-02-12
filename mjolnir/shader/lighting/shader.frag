@@ -24,23 +24,29 @@ struct Camera {
     vec4 frustum_planes[6];
 };
 
-struct SphericalCamera {
+struct ShadowData {
+    mat4 view;
     mat4 projection;
-    vec4 position; // center.xyz, radius in w
+    vec4 viewport_params;
+    vec4 position;
+    vec4 direction;
+    vec4 frustum_planes[6];
     vec2 near_far;
-    vec2 _padding;
+    uint kind;
+    uint _padding;
 };
 
 struct LightData {
     vec4 color;
+    vec4 position;
+    vec4 direction;
     float radius;
     float angle_inner;
     float angle_outer;
     uint type;
-    uint node_index;
-    uint camera_index;
     uint cast_shadow;
-    uint _padding;
+    uint shadow_index;
+    uint padding[2];
 };
 
 // Bindless camera buffer (set 0, binding 0) - Regular cameras
@@ -54,14 +60,10 @@ layout(set = 1, binding = 2) uniform textureCube cube_textures[];
 layout(set = 2, binding = 0) readonly buffer LightsBuffer {
     LightData lights[];
 } lights_buffer;
-// World matrices buffer (set 3, binding 0)
-layout(set = 3, binding = 0) readonly buffer WorldMatricesBuffer {
-    mat4 world_matrices[];
-} world_matrices_buffer;
-// Spherical camera buffer (set 4, binding 0) - For point light shadows
-layout(set = 4, binding = 0) readonly buffer SphericalCameraBuffer {
-    SphericalCamera spherical_cameras[];
-} spherical_camera_buffer;
+// Shadow data buffer (set 3, binding 0)
+layout(set = 3, binding = 0) readonly buffer ShadowDataBuffer {
+    ShadowData shadows[];
+} shadow_data_buffer;
 
 layout(push_constant) uniform PushConstant {
     uint light_index;
@@ -106,9 +108,12 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint shadow_map, ve
     if (shadow_map >= MAX_TEXTURES && (light.type == DIRECTIONAL_LIGHT || light.type == SPOT_LIGHT)) {
         return 1.0; // No valid shadow map for directional/spot light
     }
+    if (light.shadow_index >= shadow_data_buffer.shadows.length()) {
+        return 1.0;
+    }
+    ShadowData shadow = shadow_data_buffer.shadows[light.shadow_index];
     if (light.type == DIRECTIONAL_LIGHT) {
-        Camera lightCamera = camera_buffer.cameras[light.camera_index];
-        vec4 lightSpacePos = lightCamera.projection * lightCamera.view * vec4(fragPos, 1.0);
+        vec4 lightSpacePos = shadow.projection * shadow.view * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         // Transform XY from [-1,1] to [0,1], but Z is already [0,1] in Vulkan!
         shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
@@ -128,13 +133,12 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint shadow_map, ve
         return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     } else if (light.type == POINT_LIGHT) {
         vec3 lightToFrag = fragPos - light_pos;
-        // we must invert the direction for coordinate because the cube map has all faces oriented inward
-        vec3 coord = normalize(-lightToFrag);
+        vec3 coord = normalize(lightToFrag);
         float linearDepth = length(lightToFrag);
         float shadowDepth = texture(samplerCube(cube_textures[shadow_map], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
-        SphericalCamera spherical_cam = spherical_camera_buffer.spherical_cameras[light.camera_index];
-        float near = spherical_cam.near_far.x;
-        float far = spherical_cam.near_far.y;
+        // return shadowDepth;
+        float near = shadow.near_far.x;
+        float far = shadow.near_far.y;
         // Linear depth mapping: [near, far] -> [0, 1]
         float currentDepth = (linearDepth - near) / (far - near);
         currentDepth = clamp(currentDepth, 0.0, 1.0);
@@ -144,8 +148,7 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint shadow_map, ve
         float brightness = (currentDepth > shadowDepth + bias) ? 0.1 : 1.0;
         return brightness;
     } else if (light.type == SPOT_LIGHT) {
-        Camera lightCamera = camera_buffer.cameras[light.camera_index];
-        vec4 lightSpacePos = lightCamera.projection * lightCamera.view * vec4(fragPos, 1.0);
+        vec4 lightSpacePos = shadow.projection * shadow.view * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         // Transform XY from [-1,1] to [0,1], Z is already [0,1]
         shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
@@ -246,14 +249,9 @@ void main() {
     }
     // Get light data from the lights buffer
     LightData light = lights_buffer.lights[light_index];
-    // Additional bounds check for node index
-    if (light.node_index >= world_matrices_buffer.world_matrices.length()) {
-        outColor = vec4(1.0, 1.0, 0.0, 1.0); // Yellow for invalid node index
-        return;
-    }
-    // Only validate camera index if shadows are enabled
+    // Only validate shadow index if shadows are enabled
     bool will_use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light, shadow_map_index);
-    if (will_use_shadow && light.camera_index >= camera_buffer.cameras.length()) {
+    if (will_use_shadow && light.shadow_index >= shadow_data_buffer.shadows.length()) {
         outColor = vec4(1.0, 0.0, 1.0, 1.0); // Magenta for invalid light camera index
         return;
     }
@@ -267,8 +265,7 @@ void main() {
     float roughness = clamp(mr.g, 0.08, 1.0);
     vec3 V = normalize(camera.position.xyz - position);
     vec3 light_pos = light_position.xyz;
-    mat4 lightWorldMatrix = world_matrices_buffer.world_matrices[light.node_index];
-    vec3 light_direction = lightWorldMatrix[2].xyz;
+    vec3 light_direction = light.direction.xyz;
     float shadowFactor = calculateShadow(position, normal, light, shadow_map_index, light_pos, light_direction);
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_pos, light_direction);
     outColor = vec4(direct * shadowFactor, 1.0);

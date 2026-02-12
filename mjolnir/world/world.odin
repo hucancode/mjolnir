@@ -12,26 +12,23 @@ import "core:strings"
 import "core:sync"
 
 PointLightAttachment :: struct {
-  color:         [4]f32, // RGB + intensity
-  radius:        f32, // range
-  cast_shadow:   bool,
-  camera_handle: SphereCameraHandle, // Shadow camera (point lights use spherical camera)
+  color:       [4]f32, // RGB + intensity
+  radius:      f32, // range
+  cast_shadow: bool,
 }
 
 DirectionalLightAttachment :: struct {
-  color:         [4]f32, // RGB + intensity
-  radius:        f32, // shadow camera projection radius
-  cast_shadow:   bool,
-  camera_handle: CameraHandle, // Shadow camera
+  color:       [4]f32, // RGB + intensity
+  radius:      f32, // shadow projection radius
+  cast_shadow: bool,
 }
 
 SpotLightAttachment :: struct {
-  color:         [4]f32, // RGB + intensity
-  radius:        f32, // range
-  angle_inner:   f32, // inner cone angle
-  angle_outer:   f32, // outer cone angle
-  cast_shadow:   bool,
-  camera_handle: CameraHandle, // Shadow camera
+  color:       [4]f32, // RGB + intensity
+  radius:      f32, // range
+  angle_inner: f32, // inner cone angle
+  angle_outer: f32, // outer cone angle
+  cast_shadow: bool,
 }
 
 NodeSkinning :: struct {
@@ -153,7 +150,6 @@ World :: struct {
   meshes:                  cont.Pool(Mesh),
   materials:               cont.Pool(Material),
   cameras:                 cont.Pool(Camera),
-  spherical_cameras:       cont.Pool(SphericalCamera),
   emitters:                cont.Pool(Emitter),
   forcefields:             cont.Pool(ForceField),
   sprites:                 cont.Pool(Sprite),
@@ -384,7 +380,6 @@ init :: proc(world: ^World) {
   cont.init(&world.meshes, MAX_MESHES)
   cont.init(&world.materials, MAX_MATERIALS)
   cont.init(&world.cameras, MAX_ACTIVE_CAMERAS)
-  cont.init(&world.spherical_cameras, MAX_ACTIVE_CAMERAS)
   cont.init(&world.emitters, MAX_EMITTERS)
   cont.init(&world.forcefields, MAX_FORCE_FIELDS)
   cont.init(&world.sprites, MAX_SPRITES)
@@ -426,15 +421,6 @@ begin_frame :: proc(
 shutdown :: proc(
   world: ^World,
 ) {
-  // Clean up spherical cameras
-  for &entry in world.spherical_cameras.entries {
-    if entry.generation > 0 && entry.active {
-      spherical_camera_destroy(&entry.item)
-    }
-  }
-  delete(world.spherical_cameras.entries)
-  delete(world.spherical_cameras.free_indices)
-
   delete(world.cameras.entries)
   delete(world.cameras.free_indices)
 
@@ -606,6 +592,10 @@ traverse :: proc(
         &world.staging,
         entry.handle,
       )
+      #partial switch _ in current_node.attachment {
+      case PointLightAttachment, DirectionalLightAttachment, SpotLightAttachment:
+        stage_light_data(&world.staging, entry.handle)
+      }
     }
     if visibility_changed || is_dirty || entry.parent_is_dirty {
       data := NodeData {
