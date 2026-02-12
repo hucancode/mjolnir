@@ -32,7 +32,6 @@ Material :: struct {
 	normal:             Image2DHandle,
 	emissive:           Image2DHandle,
 	occlusion:          Image2DHandle,
-	using meta:         ResourceMetadata,
 }
 
 material_init :: proc(
@@ -80,7 +79,6 @@ create_material :: proc(
 	roughness_value: f32 = 1.0,
 	emissive_value: f32 = 0.0,
 	base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-	auto_purge: bool = false,
 ) -> (
 	handle: MaterialHandle,
 	ok: bool,
@@ -104,62 +102,5 @@ create_material :: proc(
 		emissive_value,
 		base_color_factor,
 	)
-	mat.auto_purge = auto_purge
 	return handle, true
-}
-
-// Reference counting functions
-material_ref :: proc(world: ^World, handle: MaterialHandle) -> bool {
-	mat := cont.get(world.materials, handle) or_return
-	mat.ref_count += 1
-	return true
-}
-
-material_unref :: proc(
-	world: ^World,
-	handle: MaterialHandle,
-) -> (
-	ref_count: u32,
-	ok: bool,
-) #optional_ok {
-	mat := cont.get(world.materials, handle) or_return
-	if mat.ref_count == 0 {
-		return 0, true
-	}
-	mat.ref_count -= 1
-	return mat.ref_count, true
-}
-
-purge_unused_materials :: proc(world: ^World) -> (purged_count: int) {
-	for &entry, i in world.materials.entries do if entry.active {
-		if entry.item.auto_purge && entry.item.ref_count == 0 {
-			handle := cont.Handle {
-				index      = u32(i),
-				generation = entry.generation,
-			}
-			mat, freed := cont.free(&world.materials, handle)
-			if freed {
-				material_destroy(mat, world)
-				purged_count += 1
-			}
-		}
-	}
-	if purged_count > 0 {
-		log.infof("Purged %d unused materials", purged_count)
-	}
-	return
-}
-
-purge_unused_resources :: proc(
-	world: ^World,
-) -> (
-	total_purged: int,
-) {
-	// TODO: purging procedure is now running a full scan O(n) over all resources, which is expensive. we need to optimize this
-	total_purged += purge_unused_meshes(world)
-	total_purged += purge_unused_materials(world)
-	if total_purged > 0 {
-		log.infof("Total resources purged: %d", total_purged)
-	}
-	return
 }

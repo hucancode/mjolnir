@@ -28,7 +28,6 @@ load_obj :: proc(
   }
   // Geometry upload is handled by engine/render staging sync.
   log.warn("OBJ mesh created in CPU pools; geometry upload must be scheduled by engine")
-  prepare_mesh_data(mesh_ptr)
   stage_mesh_data(&world.staging, mesh_handle)
   log.infof("Created mesh %v", mesh_handle)
   // step 3: Create node with mesh attachment
@@ -45,8 +44,6 @@ load_obj :: proc(
   node.parent = world.root
   attach(world.nodes, world.root, node_handle)
   // Reference the mesh and material to prevent auto-purge
-  mesh_ref(world, mesh_handle)
-  material_ref(world, material)
   append(&nodes, node_handle)
   log.infof("OBJ loading complete: 1 node created")
   return nodes, true

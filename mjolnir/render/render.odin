@@ -23,11 +23,6 @@ import rd "data"
 
 FRAMES_IN_FLIGHT :: d.FRAMES_IN_FLIGHT
 
-TextureTracking :: struct {
-  ref_count:  u32,
-  auto_purge: bool,
-}
-
 Manager :: struct {
   geometry:                geometry.Renderer,
   lighting:                light.Renderer,
@@ -63,7 +58,7 @@ Manager :: struct {
   material_buffer:         gpu.BindlessBuffer(Material),
   world_matrix_buffer:     gpu.BindlessBuffer(matrix[4, 4]f32),
   node_data_buffer:        gpu.BindlessBuffer(NodeData),
-  mesh_data_buffer:        gpu.BindlessBuffer(MeshData),
+  mesh_data_buffer:        gpu.BindlessBuffer(Mesh),
   emitter_buffer:          gpu.BindlessBuffer(Emitter),
   forcefield_buffer:       gpu.BindlessBuffer(ForceField),
   sprite_buffer:           gpu.BindlessBuffer(Sprite),
@@ -72,10 +67,6 @@ Manager :: struct {
   bone_matrix_slab:        cont.SlabAllocator,
   bone_matrix_offsets:     map[d.NodeHandle]u32,
   texture_manager:         gpu.TextureManager,
-  texture_2d_tracking:     map[gpu.Texture2DHandle]TextureTracking,
-  texture_cube_tracking:   map[gpu.TextureCubeHandle]TextureTracking,
-  retired_textures_2d:     map[gpu.Texture2DHandle]u32,
-  retired_textures_cube:   map[gpu.TextureCubeHandle]u32,
   // Camera GPU resources (indexed by camera handle.index)
   cameras_gpu:             [d.MAX_CAMERAS]camera.CameraGPU,
 }
@@ -466,8 +457,7 @@ clear_mesh :: proc(self: ^Manager, handle: d.MeshHandle) {
   entry := &self.meshes.entries[handle.index]
   if !entry.active || entry.generation != handle.generation do return
   free_mesh_geometry(self, handle)
-  zero_mesh_data: MeshData
-  upload_mesh_data_raw(self, handle, &zero_mesh_data)
+  upload_mesh_data_raw(self, handle, &Mesh{})
 }
 
 record_compute_commands :: proc(
@@ -512,10 +502,6 @@ init :: proc(
   cont.init(&self.cameras, d.MAX_CAMERAS)
   cont.init(&self.meshes, d.MAX_MESHES)
   // Initialize texture tracking maps
-  self.texture_2d_tracking = make(map[gpu.Texture2DHandle]TextureTracking)
-  self.texture_cube_tracking = make(map[gpu.TextureCubeHandle]TextureTracking)
-  self.retired_textures_2d = make(map[gpu.Texture2DHandle]u32)
-  self.retired_textures_cube = make(map[gpu.TextureCubeHandle]u32)
   init_geometry_buffers(self, gctx) or_return
   defer if ret != .SUCCESS {
     destroy_geometry_buffers(self, gctx)
@@ -709,10 +695,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   shutdown_bone_buffer(self, gctx)
   destroy_geometry_buffers(self, gctx)
   // Cleanup texture tracking maps
-  delete(self.texture_2d_tracking)
-  delete(self.texture_cube_tracking)
-  delete(self.retired_textures_2d)
-  delete(self.retired_textures_cube)
   delete(self.cameras.entries)
   delete(self.cameras.free_indices)
   delete(self.meshes.entries)
