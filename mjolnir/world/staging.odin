@@ -13,7 +13,6 @@ StagingList :: struct {
   forcefield_updates: map[ForceFieldHandle]u32,
   light_updates: map[NodeHandle]u32,
   camera_updates: map[CameraHandle]u32,
-  spherical_camera_updates: map[SphereCameraHandle]u32,
   mutex: sync.Mutex,
 }
 
@@ -28,7 +27,6 @@ staging_init :: proc(staging: ^StagingList) {
   staging.forcefield_updates = make(map[ForceFieldHandle]u32)
   staging.light_updates = make(map[NodeHandle]u32)
   staging.camera_updates = make(map[CameraHandle]u32)
-  staging.spherical_camera_updates = make(map[SphereCameraHandle]u32)
 }
 
 staging_destroy :: proc(staging: ^StagingList) {
@@ -42,7 +40,6 @@ staging_destroy :: proc(staging: ^StagingList) {
   delete(staging.forcefield_updates)
   delete(staging.light_updates)
   delete(staging.camera_updates)
-  delete(staging.spherical_camera_updates)
 }
 
 stage_node_transform :: proc(
@@ -132,14 +129,5 @@ stage_camera_data :: proc(
 ) {
   sync.mutex_lock(&staging.mutex)
   staging.camera_updates[handle] = 0
-  sync.mutex_unlock(&staging.mutex)
-}
-
-stage_spherical_camera_data :: proc(
-  staging: ^StagingList,
-  handle: SphereCameraHandle,
-) {
-  sync.mutex_lock(&staging.mutex)
-  staging.spherical_camera_updates[handle] = 0
   sync.mutex_unlock(&staging.mutex)
 }
