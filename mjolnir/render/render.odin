@@ -43,7 +43,6 @@ Manager :: struct {
   ui:                      ui.Renderer,
   main_camera:             d.CameraHandle,
   cameras:                 d.Pool(camera.Camera),
-  lights:                  d.Pool(Light),
   meshes:                  d.Pool(Mesh),
   visibility:              visibility.System,
   shadow:                  light.ShadowSystem,
@@ -492,23 +491,6 @@ ensure_camera_slot :: proc(
   return &entry.item
 }
 
-// @(private)
-ensure_light_slot :: proc(
-  self: ^Manager,
-  handle: d.LightHandle,
-) -> ^d.Light {
-  for u32(len(self.lights.entries)) <= handle.index {
-    append(&self.lights.entries, cont.Entry(Light) {})
-  }
-  entry := &self.lights.entries[handle.index]
-  entry.generation = handle.generation
-  entry.active = true
-  if i, ok := slice.linear_search(self.lights.free_indices[:], handle.index); ok {
-    unordered_remove(&self.lights.free_indices, i)
-  }
-  return &entry.item
-}
-
 @(private)
 ensure_mesh_slot :: proc(self: ^Manager, handle: d.MeshHandle) -> ^Mesh {
   for u32(len(self.meshes.entries)) <= handle.index {
@@ -598,7 +580,6 @@ init :: proc(
   ret: vk.Result,
 ) {
   cont.init(&self.cameras, d.MAX_CAMERAS)
-  cont.init(&self.lights, d.MAX_LIGHTS)
   cont.init(&self.meshes, d.MAX_MESHES)
   // Initialize texture tracking maps
   self.texture_2d_tracking = make(map[gpu.Texture2DHandle]TextureTracking)
@@ -804,8 +785,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   delete(self.retired_textures_cube)
   delete(self.cameras.entries)
   delete(self.cameras.free_indices)
-  delete(self.lights.entries)
-  delete(self.lights.free_indices)
   delete(self.meshes.entries)
   delete(self.meshes.free_indices)
 }
@@ -843,7 +822,6 @@ render_shadow_depth :: proc(
 ) -> vk.Result {
   light.shadow_sync_lights(
     &self.shadow,
-    &self.lights,
     &self.lights_buffer,
     active_lights,
     frame_index,
@@ -973,7 +951,7 @@ record_lighting_pass :: proc(
     shadow_texture_indices[i] = 0xFFFFFFFF
   }
   for handle in active_lights {
-    light_data := cont.get(self.lights, handle) or_continue
+    light_data := gpu.get(&self.lights_buffer.buffer, handle.index)
     shadow_texture_indices[handle.index] = light.shadow_get_texture_index(
       &self.shadow,
       light_data.type,
@@ -987,7 +965,7 @@ record_lighting_pass :: proc(
     camera_gpu,
     &shadow_texture_indices,
     command_buffer,
-    self.lights,
+    &self.lights_buffer,
     active_lights,
     frame_index,
   )

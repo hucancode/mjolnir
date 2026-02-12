@@ -1,6 +1,5 @@
 package lighting
 
-import cont "../../containers"
 import d "../data"
 import "../../geometry"
 import "../../gpu"
@@ -482,7 +481,6 @@ shadow_shutdown :: proc(
 
 shadow_sync_lights :: proc(
   self: ^ShadowSystem,
-  lights: ^d.Pool(d.Light),
   lights_buffer: ^gpu.BindlessBuffer(d.Light),
   active_lights: []d.LightHandle,
   frame_index: u32,
@@ -503,7 +501,7 @@ shadow_sync_lights :: proc(
   }
   next_slot: u32 = 0
   for handle in active_lights {
-    light := cont.get(lights^, handle) or_continue
+    light := gpu.get(&lights_buffer.buffer, handle.index)
     position := light.position.xyz
     direction := safe_normalize(light.direction.xyz, {0, -1, 0})
     if !light.cast_shadow || next_slot >= MAX_SHADOW_MAPS {
@@ -612,6 +610,14 @@ shadow_sync_lights :: proc(
       int(slot),
     )
   }
+}
+
+shadow_invalidate_light :: proc(self: ^ShadowSystem, light_index: u32) {
+  if light_index >= d.MAX_LIGHTS do return
+  slot := self.light_to_slot[light_index]
+  if slot == INVALID_SHADOW_INDEX do return
+  self.slot_active[slot] = false
+  self.light_to_slot[light_index] = INVALID_SHADOW_INDEX
 }
 
 shadow_compute_draw_lists :: proc(

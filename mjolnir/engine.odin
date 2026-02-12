@@ -1039,10 +1039,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
             index      = u32(light_slot),
             generation = 1,
           }
-          dst := render.ensure_light_slot(&self.render, render_handle)
+          light_data: render.Light
           #partial switch attachment in node.attachment {
           case world.PointLightAttachment:
-            dst^ = render.Light {
+            light_data = render.Light {
               color        = attachment.color,
               position     = {light_position.x, light_position.y, light_position.z, 1.0},
               direction    = {light_direction.x, light_direction.y, light_direction.z, 0.0},
@@ -1054,7 +1054,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
               shadow_index = 0xFFFFFFFF,
             }
           case world.DirectionalLightAttachment:
-            dst^ = render.Light {
+            light_data = render.Light {
               color        = attachment.color,
               position     = {light_position.x, light_position.y, light_position.z, 1.0},
               direction    = {light_direction.x, light_direction.y, light_direction.z, 0.0},
@@ -1066,7 +1066,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
               shadow_index = 0xFFFFFFFF,
             }
           case world.SpotLightAttachment:
-            dst^ = render.Light {
+            light_data = render.Light {
               color        = attachment.color,
               position     = {light_position.x, light_position.y, light_position.z, 1.0},
               direction    = {light_direction.x, light_direction.y, light_direction.z, 0.0},
@@ -1078,9 +1078,9 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
               shadow_index = 0xFFFFFFFF,
             }
           case:
-            dst^ = {}
+            light_data = {}
           }
-          render.upload_light_data(&self.render, render_handle.index, dst)
+          render.upload_light_data(&self.render, render_handle.index, &light_data)
         }
       }
       next_n += 1

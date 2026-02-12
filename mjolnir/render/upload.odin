@@ -9,6 +9,7 @@ import cam "camera"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import light "lighting"
 import vk "vendor:vulkan"
 
 allocate_vertices :: proc(
@@ -725,7 +726,8 @@ upload_light_data :: proc(
   index: u32,
   light_data: ^d.Light,
 ) {
-	gpu.write(&render.lights_buffer.buffer, light_data, int(index))
+  gpu.write(&render.lights_buffer.buffer, light_data, int(index))
+  light.shadow_invalidate_light(&render.shadow, index)
 }
 
 upload_mesh_data :: proc(

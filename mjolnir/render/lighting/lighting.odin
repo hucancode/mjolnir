@@ -1,6 +1,5 @@
 package lighting
 
-import cont "../../containers"
 import d "../data"
 import "../../geometry"
 import "../../gpu"
@@ -493,7 +492,7 @@ render :: proc(
   camera_gpu: ^camera.CameraGPU,
   shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
   command_buffer: vk.CommandBuffer,
-  lights: d.Pool(d.Light),
+  lights_buffer: ^gpu.BindlessBuffer(d.Light),
   active_lights: []d.LightHandle,
   frame_index: u32,
 ) {
@@ -527,7 +526,7 @@ render :: proc(
     input_image_index      = camera_gpu.attachments[.FINAL_IMAGE][frame_index].index,
   }
   for handle in active_lights {
-    light := cont.get(lights, handle) or_continue
+    light := gpu.get(&lights_buffer.buffer, handle.index)
     shadow_map_index := shadow_texture_indices[handle.index]
     push_constant.light_index = handle.index
     push_constant.light_position = light.position
