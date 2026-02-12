@@ -16,9 +16,9 @@ Emitter :: struct {
   size_end:          f32,
   weight:            f32,
   weight_spread:     f32,
-  enabled:        b32,
-  texture_handle: Image2DHandle,
-  node_handle:    NodeHandle,
+  enabled:           b32,
+  texture_handle:    Image2DHandle,
+  node_handle:       NodeHandle,
 }
 
 create_emitter :: proc(

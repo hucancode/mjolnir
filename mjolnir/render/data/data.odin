@@ -10,7 +10,6 @@ NodeHandle :: distinct Handle
 MeshHandle :: gpu.MeshHandle
 MaterialHandle :: distinct Handle
 CameraHandle :: distinct Handle
-SphereCameraHandle :: CameraHandle
 EmitterHandle :: distinct Handle
 ForceFieldHandle :: distinct Handle
 SpriteHandle :: distinct Handle

@@ -28,7 +28,6 @@ MaterialHandle :: world.MaterialHandle
 Image2DHandle :: world.Image2DHandle
 ImageCubeHandle :: world.ImageCubeHandle
 CameraHandle :: world.CameraHandle
-SphereCameraHandle :: world.SphereCameraHandle
 EmitterHandle :: world.EmitterHandle
 ForceFieldHandle :: world.ForceFieldHandle
 ClipHandle :: world.ClipHandle
@@ -1210,7 +1209,7 @@ navmesh_config_to_recast :: proc(cfg: NavMeshConfig) -> recast.Config {
 }
 
 build_area_types_from_tags :: proc(
-  node_infos: []world.BakedNodeInfo,
+  node_infos: []BakedNodeInfo,
 ) -> []u8 {
   area_types := make([dynamic]u8, 0, len(node_infos) * 10)
   for info in node_infos {
@@ -1233,6 +1232,12 @@ match_bake_node_filter :: proc(
   return (exclude == {} || (tags & exclude) == {}) && (include == {} || (tags & include) != {})
 }
 
+BakedNodeInfo :: struct {
+  tags:         world.NodeTagSet,
+  vertex_count: int,
+  index_count:  int,
+}
+
 bake_geometry :: proc(
   engine: ^Engine,
   include_filter: world.NodeTagSet = {.ENVIRONMENT},
@@ -1240,12 +1245,12 @@ bake_geometry :: proc(
   with_node_info: bool = false,
 ) -> (
   geom: geometry.Geometry,
-  node_infos: []world.BakedNodeInfo,
+  node_infos: []BakedNodeInfo,
   ok: bool,
 ) {
   vertices := make([dynamic]geometry.Vertex, 0, 4096)
   indices := make([dynamic]u32, 0, 16384)
-  infos := make([dynamic]world.BakedNodeInfo, 0, 64) if with_node_info else nil
+  infos := make([dynamic]BakedNodeInfo, 0, 64) if with_node_info else nil
   for &entry in engine.world.nodes.entries do if entry.active {
     node := &entry.item
     if !match_bake_node_filter(node.tags, include_filter, exclude_filter) do continue
@@ -1263,7 +1268,7 @@ bake_geometry :: proc(
       append(&indices, vertex_base + src_index)
     }
     if with_node_info {
-      append(&infos, world.BakedNodeInfo{
+      append(&infos, BakedNodeInfo{
         tags = node.tags,
         vertex_count = len(mesh_geom.vertices),
         index_count = len(mesh_geom.indices),

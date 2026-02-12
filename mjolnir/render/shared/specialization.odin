@@ -5,10 +5,10 @@ import d "../data"
 import vk "vendor:vulkan"
 
 SamplerType :: enum u32 {
-	NEAREST_CLAMP  = 0,
-	LINEAR_CLAMP   = 1,
-	NEAREST_REPEAT = 2,
-	LINEAR_REPEAT  = 3,
+  NEAREST_CLAMP  = 0,
+  LINEAR_CLAMP   = 1,
+  NEAREST_REPEAT = 2,
+  LINEAR_REPEAT  = 3,
 }
 Constants :: struct {
   max_textures:           u32,

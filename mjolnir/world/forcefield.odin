@@ -6,9 +6,8 @@ ForceField :: struct {
   tangent_strength: f32,
   strength:         f32,
   area_of_effect:   f32,
-  node_handle: NodeHandle,
+  node_handle:      NodeHandle,
 }
-
 
 create_forcefield :: proc(
   world: ^World,
@@ -20,7 +19,10 @@ create_forcefield :: proc(
   ret: ForceFieldHandle,
   ok: bool,
 ) #optional_ok {
-  handle, forcefield := cont.alloc(&world.forcefields, ForceFieldHandle) or_return
+  handle, forcefield := cont.alloc(
+    &world.forcefields,
+    ForceFieldHandle,
+  ) or_return
   forcefield.tangent_strength = tangent_strength
   forcefield.strength = strength
   forcefield.area_of_effect = area_of_effect

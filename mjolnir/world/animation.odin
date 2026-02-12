@@ -53,7 +53,8 @@ update_skeletal_animations :: proc(
     bone_count := len(mesh_skinning.bones)
     if bone_count == 0 do continue
     // Update active transition
-    if transition, has_transition := &skinning.active_transition.?; has_transition {
+    if transition, has_transition := &skinning.active_transition.?;
+       has_transition {
       if transition.state == .ACTIVE {
         transition.elapsed += delta_time
 
@@ -82,14 +83,19 @@ update_skeletal_animations :: proc(
     for &layer in skinning.layers {
       anim.layer_update(&layer, delta_time)
     }
-    matrices := make(
-      []matrix[4, 4]f32,
-      bone_count,
-      context.temp_allocator,
-    )
+    matrices := make([]matrix[4, 4]f32, bone_count, context.temp_allocator)
 
     debug_enabled := debug_draw_ik && debug_draw_renderer != nil
-    sample_layers(mesh, world, skinning.layers[:], nil, matrices, delta_time, node.transform.world_matrix, debug_enabled)
+    sample_layers(
+      mesh,
+      world,
+      skinning.layers[:],
+      nil,
+      matrices,
+      delta_time,
+      node.transform.world_matrix,
+      debug_enabled,
+    )
     if len(skinning.matrices) != bone_count {
       delete(skinning.matrices)
       skinning.matrices = make([]matrix[4, 4]f32, bone_count)
@@ -99,7 +105,11 @@ update_skeletal_animations :: proc(
 
     // Draw debug visualization for IK if enabled
     if debug_enabled {
-      draw_ik_debug_for_node(world, skinning.layers[:], node.transform.world_matrix)
+      draw_ik_debug_for_node(
+        world,
+        skinning.layers[:],
+        node.transform.world_matrix,
+      )
     }
   }
 }
@@ -107,10 +117,7 @@ update_skeletal_animations :: proc(
 // Update all node animations (generic node transform animations)
 // This animates the node's local transform (position, rotation, scale)
 // Works for any node type: lights, static meshes, cameras, etc.
-update_node_animations :: proc(
-  world: ^World,
-  delta_time: f32,
-) {
+update_node_animations :: proc(world: ^World, delta_time: f32) {
   if delta_time <= 0 do return
   for handle in world.animatable_nodes {
     node := cont.get(world.nodes, handle) or_continue
@@ -141,10 +148,7 @@ update_node_animations :: proc(
 }
 
 // Update all sprite animations
-update_sprite_animations :: proc(
-  world: ^World,
-  delta_time: f32,
-) {
+update_sprite_animations :: proc(world: ^World, delta_time: f32) {
   if delta_time <= 0 do return
 
   for handle in world.animatable_sprites {
@@ -187,8 +191,7 @@ add_animation_layer :: proc(
   // Get or initialize skinning
   if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
     // Initialize skinning with empty layers
-    mesh_attachment.skinning = NodeSkinning {
-    }
+    mesh_attachment.skinning = NodeSkinning{}
   }
   skinning := &mesh_attachment.skinning.?
   // Find animation clip handle and duration
@@ -387,7 +390,7 @@ transition_to_animation :: proc(
   found := false
   for &entry, idx in world.animation_clips.entries do if entry.active {
     if entry.item.name == animation_name {
-      clip_handle = ClipHandle{
+      clip_handle = ClipHandle {
         index      = u32(idx),
         generation = entry.generation,
       }
@@ -413,7 +416,7 @@ transition_to_animation :: proc(
   skinning.layers[to_layer] = layer
 
   // Create transition
-  skinning.active_transition = anim.Transition{
+  skinning.active_transition = anim.Transition {
     from_layer = from_layer,
     to_layer   = to_layer,
     duration   = duration,
@@ -454,8 +457,7 @@ add_ik_layer :: proc(
   mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
   // Get or initialize skinning
   if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
-    mesh_attachment.skinning = NodeSkinning {
-    }
+    mesh_attachment.skinning = NodeSkinning{}
   }
   skinning := &mesh_attachment.skinning.?
   // Resolve bone names to indices
@@ -625,7 +627,11 @@ add_tail_modifier_layer :: proc(
 
   mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
 
-  bone_indices := resolve_bone_chain(mesh, root_bone_name, tail_length) or_return
+  bone_indices := resolve_bone_chain(
+    mesh,
+    root_bone_name,
+    tail_length,
+  ) or_return
 
   // Reverse the chain if needed (when root is at tail, we want head→tail order)
   if reverse_chain {
@@ -644,9 +650,9 @@ add_tail_modifier_layer :: proc(
   }
 
   layer := anim.Layer {
-    weight     = weight,
+    weight = weight,
     blend_mode = .REPLACE,
-    data       = anim.ProceduralLayer {
+    data = anim.ProceduralLayer {
       state = anim.ProceduralState {
         bone_indices = bone_indices,
         accumulated_time = 0,
@@ -676,7 +682,7 @@ add_path_modifier_layer :: proc(
   tail_length: u32,
   path: [][3]f32,
   offset: f32 = 0.0,
-  length: f32 = 0.0,  // Length of path segment to fit skeleton (0 = auto-calculate from offset to end)
+  length: f32 = 0.0, // Length of path segment to fit skeleton (0 = auto-calculate from offset to end)
   speed: f32 = 0.0,
   loop: bool = false,
   weight: f32 = 1.0,
@@ -693,7 +699,11 @@ add_path_modifier_layer :: proc(
 
   mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
 
-  bone_indices := resolve_bone_chain(mesh, root_bone_name, tail_length) or_return
+  bone_indices := resolve_bone_chain(
+    mesh,
+    root_bone_name,
+    tail_length,
+  ) or_return
 
   points := make([][3]f32, len(path))
   copy(points, path)
@@ -709,9 +719,9 @@ add_path_modifier_layer :: proc(
   }
 
   layer := anim.Layer {
-    weight     = weight,
+    weight = weight,
     blend_mode = .REPLACE,
-    data       = anim.ProceduralLayer {
+    data = anim.ProceduralLayer {
       state = anim.ProceduralState {
         bone_indices = bone_indices,
         accumulated_time = 0,
@@ -794,15 +804,15 @@ add_spider_leg_modifier_layer :: proc(
   copy(bone_indices, all_bone_indices[:])
 
   layer := anim.Layer {
-    weight     = weight,
+    weight = weight,
     blend_mode = .REPLACE,
-    data       = anim.ProceduralLayer {
+    data = anim.ProceduralLayer {
       state = anim.ProceduralState {
-        bone_indices     = bone_indices,
+        bone_indices = bone_indices,
         accumulated_time = 0,
-        modifier         = anim.SpiderLegModifier {
-          legs          = legs,
-          chain_starts  = chain_starts,
+        modifier = anim.SpiderLegModifier {
+          legs = legs,
+          chain_starts = chain_starts,
           chain_lengths = chain_lengths,
         },
       },
@@ -824,7 +834,10 @@ get_spider_leg_target :: proc(
   node_handle: NodeHandle,
   layer_index: int,
   leg_index: int,
-) -> (target: ^[3]f32, ok: bool) {
+) -> (
+  target: ^[3]f32,
+  ok: bool,
+) {
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
   if !has_mesh do return nil, false
@@ -873,7 +886,9 @@ set_tail_modifier_params :: proc(
         modifier.damping = damp
       }
       return true
-    case anim.PathModifier, anim.SpiderLegModifier, anim.SingleBoneRotationModifier:
+    case anim.PathModifier,
+         anim.SpiderLegModifier,
+         anim.SingleBoneRotationModifier:
       return false
     }
   case anim.FKLayer, anim.IKLayer:
@@ -907,8 +922,12 @@ draw_ik_debug_for_node :: proc(
             end_skel := info.positions[i + 1]
 
             // Transform from skeleton space to world space
-            start_world_h := node_world_matrix * linalg.Vector4f32{start_skel.x, start_skel.y, start_skel.z, 1.0}
-            end_world_h := node_world_matrix * linalg.Vector4f32{end_skel.x, end_skel.y, end_skel.z, 1.0}
+            start_world_h :=
+              node_world_matrix *
+              linalg.Vector4f32{start_skel.x, start_skel.y, start_skel.z, 1.0}
+            end_world_h :=
+              node_world_matrix *
+              linalg.Vector4f32{end_skel.x, end_skel.y, end_skel.z, 1.0}
 
             start_world := start_world_h.xyz
             end_world := end_world_h.xyz
@@ -916,8 +935,12 @@ draw_ik_debug_for_node :: proc(
             // Draw IK chain bones (green lines)
             if world.debug_draw_line_strip != nil {
               points := make([]geometry.Vertex, 2, context.temp_allocator)
-              points[0] = geometry.Vertex{position = start_world}
-              points[1] = geometry.Vertex{position = end_world}
+              points[0] = geometry.Vertex {
+                position = start_world,
+              }
+              points[1] = geometry.Vertex {
+                position = end_world,
+              }
               world.debug_draw_line_strip(
                 points,
                 duration_seconds = 0.016, // ~1 frame at 60fps
@@ -929,19 +952,32 @@ draw_ik_debug_for_node :: proc(
 
           // Draw pole vector lines (yellow lines from each joint to pole)
           if info.has_pole {
-            pole_world_h := node_world_matrix * linalg.Vector4f32{info.pole.x, info.pole.y, info.pole.z, 1.0}
+            pole_world_h :=
+              node_world_matrix *
+              linalg.Vector4f32{info.pole.x, info.pole.y, info.pole.z, 1.0}
             pole_world := pole_world_h.xyz
 
             // Draw line from each internal joint to pole
             if world.debug_draw_line_strip != nil {
               for i in 1 ..< len(info.positions) - 1 {
                 joint_skel := info.positions[i]
-                joint_world_h := node_world_matrix * linalg.Vector4f32{joint_skel.x, joint_skel.y, joint_skel.z, 1.0}
+                joint_world_h :=
+                  node_world_matrix *
+                  linalg.Vector4f32 {
+                      joint_skel.x,
+                      joint_skel.y,
+                      joint_skel.z,
+                      1.0,
+                    }
                 joint_world := joint_world_h.xyz
 
                 points := make([]geometry.Vertex, 2, context.temp_allocator)
-                points[0] = geometry.Vertex{position = joint_world}
-                points[1] = geometry.Vertex{position = pole_world}
+                points[0] = geometry.Vertex {
+                  position = joint_world,
+                }
+                points[1] = geometry.Vertex {
+                  position = pole_world,
+                }
 
                 world.debug_draw_line_strip(
                   points,
@@ -955,7 +991,9 @@ draw_ik_debug_for_node :: proc(
             // Draw pole marker (small magenta sphere)
             if world.debug_draw_mesh != nil {
               sphere_mesh_handle := get_builtin_mesh(world, .SPHERE)
-              transform := linalg.matrix4_translate(pole_world) * linalg.matrix4_scale([3]f32{0.3, 0.3, 0.3})
+              transform :=
+                linalg.matrix4_translate(pole_world) *
+                linalg.matrix4_scale([3]f32{0.3, 0.3, 0.3})
               world.debug_draw_mesh(
                 sphere_mesh_handle,
                 transform,
@@ -967,11 +1005,15 @@ draw_ik_debug_for_node :: proc(
           }
 
           // Draw target marker (cyan sphere)
-          target_world_h := node_world_matrix * linalg.Vector4f32{info.target.x, info.target.y, info.target.z, 1.0}
+          target_world_h :=
+            node_world_matrix *
+            linalg.Vector4f32{info.target.x, info.target.y, info.target.z, 1.0}
           target_world := target_world_h.xyz
           if world.debug_draw_mesh != nil {
             sphere_mesh_handle := get_builtin_mesh(world, .SPHERE)
-            transform := linalg.matrix4_translate(target_world) * linalg.matrix4_scale([3]f32{0.25, 0.25, 0.25})
+            transform :=
+              linalg.matrix4_translate(target_world) *
+              linalg.matrix4_scale([3]f32{0.25, 0.25, 0.25})
             world.debug_draw_mesh(
               sphere_mesh_handle,
               transform,
@@ -1040,7 +1082,9 @@ set_path_modifier_params :: proc(
         modifier.loop = lp
       }
       return true
-    case anim.TailModifier, anim.SpiderLegModifier, anim.SingleBoneRotationModifier:
+    case anim.TailModifier,
+         anim.SpiderLegModifier,
+         anim.SingleBoneRotationModifier:
       return false
     }
   case anim.FKLayer, anim.IKLayer:
@@ -1056,7 +1100,10 @@ add_single_bone_rotation_modifier_layer :: proc(
   bone_name: string,
   weight: f32 = 1.0,
   layer_index: int = -1,
-) -> (modifier: ^anim.SingleBoneRotationModifier, ok: bool) {
+) -> (
+  modifier: ^anim.SingleBoneRotationModifier,
+  ok: bool,
+) {
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
   if !has_mesh do return nil, false
@@ -1075,15 +1122,15 @@ add_single_bone_rotation_modifier_layer :: proc(
   identity.w = 1
 
   layer := anim.Layer {
-    weight     = weight,
+    weight = weight,
     blend_mode = .REPLACE,
-    data       = anim.ProceduralLayer {
+    data = anim.ProceduralLayer {
       state = anim.ProceduralState {
-        bone_indices     = nil, // Single bone modifier doesn't use this array
+        bone_indices = nil, // Single bone modifier doesn't use this array
         accumulated_time = 0,
-        modifier         = anim.SingleBoneRotationModifier {
+        modifier = anim.SingleBoneRotationModifier {
           bone_index = bone_idx,
-          rotation   = identity,
+          rotation = identity,
         },
       },
     },
@@ -1098,7 +1145,8 @@ add_single_bone_rotation_modifier_layer :: proc(
   register_animatable_node(world, node_handle)
 
   // Return pointer to the modifier so caller can update rotation
-  layer_ptr := &skinning.layers[len(skinning.layers) - 1] if layer_index < 0 else &skinning.layers[layer_index]
+  layer_ptr :=
+    &skinning.layers[len(skinning.layers) - 1] if layer_index < 0 else &skinning.layers[layer_index]
   #partial switch &layer_data in layer_ptr.data {
   case anim.ProceduralLayer:
     #partial switch &mod in layer_data.state.modifier {

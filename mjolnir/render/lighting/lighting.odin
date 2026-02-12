@@ -1,9 +1,9 @@
 package lighting
 
-import d "../data"
 import "../../geometry"
 import "../../gpu"
 import "../camera"
+import d "../data"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -15,33 +15,29 @@ SHADER_LIGHTING_FRAG := #load("../../shader/lighting/frag.spv")
 TEXTURE_LUT_GGX :: #load("../../assets/lut_ggx.png")
 
 SpotLightGPU :: struct {
-  color:            [4]f32, // RGB + intensity
-  radius:           f32,
-  angle_inner:      f32,
-  angle_outer:      f32,
-  projection:       matrix[4, 4]f32,
-  view:             matrix[4, 4]f32,
-  position:         [4]f32,
-  direction:        [4]f32,
-  near_far:         [2]f32,
-  shadow_map:       [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
-    vk.DrawIndexedIndirectCommand,
-  ),
+  color:           [4]f32, // RGB + intensity
+  radius:          f32,
+  angle_inner:     f32,
+  angle_outer:     f32,
+  projection:      matrix[4, 4]f32,
+  view:            matrix[4, 4]f32,
+  position:        [4]f32,
+  direction:       [4]f32,
+  near_far:        [2]f32,
+  shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 PointLightGPU :: struct {
-  color:            [4]f32, // RGB + intensity
-  radius:           f32,
-  projection:       matrix[4, 4]f32,
-  position:         [4]f32,
-  near_far:         [2]f32,
-  shadow_cube:      [d.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
-  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
-    vk.DrawIndexedIndirectCommand,
-  ),
+  color:           [4]f32, // RGB + intensity
+  radius:          f32,
+  projection:      matrix[4, 4]f32,
+  position:        [4]f32,
+  near_far:        [2]f32,
+  shadow_cube:     [d.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
+  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
@@ -80,7 +76,8 @@ begin_ambient_pass :: proc(
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
 ) {
-  color_texture := gpu.get_texture_2d(texture_manager,
+  color_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
   gpu.begin_rendering(
@@ -457,10 +454,12 @@ begin_pass :: proc(
   shadow_data_descriptor_set: vk.DescriptorSet,
   frame_index: u32,
 ) {
-  final_image := gpu.get_texture_2d(texture_manager,
+  final_image := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
-  depth_texture := gpu.get_texture_2d(texture_manager,
+  depth_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.DEPTH][frame_index],
   )
   gpu.begin_rendering(
@@ -507,14 +506,7 @@ render :: proc(
       0,
       0,
     )
-    vk.CmdDrawIndexed(
-      command_buffer,
-      mesh.index_count,
-      1,
-      0,
-      0,
-      0,
-    )
+    vk.CmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0)
   }
   push_constant := LightPushConstant {
     scene_camera_idx       = camera_handle.index,
@@ -543,24 +535,15 @@ render :: proc(
     case .POINT:
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
       vk.CmdSetCullMode(command_buffer, {.FRONT})
-      bind_and_draw_mesh(
-        &self.sphere_mesh,
-        command_buffer,
-      )
+      bind_and_draw_mesh(&self.sphere_mesh, command_buffer)
     case .DIRECTIONAL:
       vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
       vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(
-        &self.triangle_mesh,
-        command_buffer,
-      )
+      bind_and_draw_mesh(&self.triangle_mesh, command_buffer)
     case .SPOT:
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
       vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(
-        &self.cone_mesh,
-        command_buffer,
-      )
+      bind_and_draw_mesh(&self.cone_mesh, command_buffer)
     }
   }
 }

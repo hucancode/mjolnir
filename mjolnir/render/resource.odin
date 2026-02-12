@@ -1,7 +1,7 @@
 package render
 
-import rd "data"
 import "../gpu"
+import rd "data"
 
 Handle :: rd.Handle
 Pool :: rd.Pool
@@ -11,7 +11,6 @@ MaterialHandle :: rd.MaterialHandle
 Image2DHandle :: gpu.Texture2DHandle
 ImageCubeHandle :: gpu.TextureCubeHandle
 CameraHandle :: rd.CameraHandle
-SphereCameraHandle :: rd.SphereCameraHandle
 EmitterHandle :: rd.EmitterHandle
 ForceFieldHandle :: rd.ForceFieldHandle
 SpriteHandle :: rd.SpriteHandle

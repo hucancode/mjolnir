@@ -1,8 +1,5 @@
 package mjolnir
 
-import "physics"
-import "geometry"
-import "world"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -10,6 +7,9 @@ import "core:math/linalg"
 import "core:slice"
 import "core:testing"
 import "core:time"
+import "geometry"
+import "physics"
+import "world"
 
 @(test)
 benchmark_physics_raycast :: proc(t: ^testing.T) {
@@ -126,7 +126,13 @@ matrix4_almost_equal :: proc(
       testing.expect(
         t,
         delta < 0.01,
-        fmt.tprintf("Matrix difference at [%d,%d], actual: %v . expected: %v", i, j, actual, expected),
+        fmt.tprintf(
+          "Matrix difference at [%d,%d], actual: %v . expected: %v",
+          i,
+          j,
+          actual,
+          expected,
+        ),
       )
     }
   }
@@ -277,12 +283,22 @@ create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
     if current.depth < max_depth {
       child_handle := world.spawn_child(scene, current.handle) or_continue
       world.translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
-      world.rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
+      world.rotate(
+        scene,
+        child_handle,
+        f32(n) * 0.01,
+        linalg.VECTOR3F32_Y_AXIS,
+      )
       append(&queue, QueueEntry{child_handle, current.depth + 1})
     } else {
       child_handle := world.spawn(scene) or_continue
       world.translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
-      world.rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
+      world.rotate(
+        scene,
+        child_handle,
+        f32(n) * 0.01,
+        linalg.VECTOR3F32_Y_AXIS,
+      )
       append(&queue, QueueEntry{child_handle, 1})
     }
     n += 1

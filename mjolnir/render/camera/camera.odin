@@ -51,17 +51,16 @@ OrthographicProjection :: struct {
 }
 
 Camera :: struct {
-  position:                [3]f32,
-  rotation:                quaternion128,
-  projection:              union {
+  position:             [3]f32,
+  rotation:             quaternion128,
+  projection:           union {
     PerspectiveProjection,
     OrthographicProjection,
   },
-  extent:                  [2]u32,
-  enabled_passes:          PassTypeSet,
-  enable_culling:          bool,
-  enable_depth_pyramid:    bool,
-  draw_list_source_handle: CameraHandle,
+  extent:               [2]u32,
+  enabled_passes:       PassTypeSet,
+  enable_culling:       bool,
+  enable_depth_pyramid: bool,
 }
 
 camera_forward :: proc(self: ^Camera) -> [3]f32 {
@@ -140,8 +139,6 @@ CameraGPU :: struct {
   // Visibility culling control flags
   enable_culling:                bool, // If false, skip culling compute pass
   enable_depth_pyramid:          bool, // If false, skip depth pyramid generation
-  // External draw list source (if set, use that camera's draw lists)
-  draw_list_source_handle:       CameraHandle, // 0 = use own draw lists
   // Render target attachments (G-buffer textures, depth, final image)
   attachments:                   [AttachmentType][FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
   // Per-frame camera buffer descriptor sets used by graphics/compute passes

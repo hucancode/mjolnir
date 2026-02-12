@@ -1,9 +1,9 @@
 package particles
 
 import cont "../../containers"
-import d "../data"
 import "../../gpu"
 import "../camera"
+import d "../data"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -236,7 +236,12 @@ init :: proc(
   }
   self.emitter_bindless_descriptor_set = emitter_descriptor_set
   self.forcefield_bindless_descriptor_set = forcefield_descriptor_set
-  create_emitter_pipeline(gctx, self, emitter_set_layout, world_matrix_set_layout) or_return
+  create_emitter_pipeline(
+    gctx,
+    self,
+    emitter_set_layout,
+    world_matrix_set_layout,
+  ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
       gctx.device,
@@ -256,7 +261,12 @@ init :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
     vk.DestroyPipeline(gctx.device, self.compact_pipeline, nil)
   }
-  create_compute_pipeline(gctx, self, forcefield_set_layout, world_matrix_set_layout) or_return
+  create_compute_pipeline(
+    gctx,
+    self,
+    forcefield_set_layout,
+    world_matrix_set_layout,
+  ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
       gctx.device,
@@ -610,14 +620,16 @@ begin_pass :: proc(
   texture_manager: ^gpu.TextureManager,
   frame_index: u32,
 ) {
-  color_texture := gpu.get_texture_2d(texture_manager,
+  color_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Particle renderer missing color attachment")
     return
   }
-  depth_texture := gpu.get_texture_2d(texture_manager,
+  depth_texture := gpu.get_texture_2d(
+    texture_manager,
     camera_gpu.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
@@ -631,7 +643,11 @@ begin_pass :: proc(
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(command_buffer, camera_cpu.extent[0], camera_cpu.extent[1])
+  gpu.set_viewport_scissor(
+    command_buffer,
+    camera_cpu.extent[0],
+    camera_cpu.extent[1],
+  )
 }
 
 render :: proc(

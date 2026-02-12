@@ -10,7 +10,8 @@ register_active_light :: proc(world: ^World, node_handle: NodeHandle) {
 }
 
 unregister_active_light :: proc(world: ^World, node_handle: NodeHandle) {
-  if i, found := slice.linear_search(world.active_light_nodes[:], node_handle); found {
+  if i, found := slice.linear_search(world.active_light_nodes[:], node_handle);
+     found {
     unordered_remove(&world.active_light_nodes, i)
     for active_node_handle in world.active_light_nodes {
       stage_light_data(&world.staging, active_node_handle)

@@ -1,8 +1,8 @@
 package lighting
 
-import d "../data"
 import "../../geometry"
 import "../../gpu"
+import d "../data"
 import "core:math"
 import "core:math/linalg"
 import vk "vendor:vulkan"
@@ -45,9 +45,7 @@ DirectionalLightGPU :: struct {
   direction:       [4]f32,
   near_far:        [2]f32,
   shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
-    vk.DrawIndexedIndirectCommand,
-  ),
+  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
@@ -61,44 +59,44 @@ VisibilityPushConstants :: struct {
 }
 
 SphereVisibilityPushConstants :: struct {
-  camera_index:      u32,
-  node_count:        u32,
-  max_draws:         u32,
-  include_flags:     d.NodeFlagSet,
-  exclude_flags:     d.NodeFlagSet,
-  _unused_pyramid_w: f32,
-  _unused_pyramid_h: f32,
+  camera_index:       u32,
+  node_count:         u32,
+  max_draws:          u32,
+  include_flags:      d.NodeFlagSet,
+  exclude_flags:      d.NodeFlagSet,
+  _unused_pyramid_w:  f32,
+  _unused_pyramid_h:  f32,
   _unused_depth_bias: f32,
-  _unused_occlusion: u32,
+  _unused_occlusion:  u32,
 }
 
 ShadowSystem :: struct {
-  node_count:                     u32,
-  max_draws:                      u32,
-  shadow_cube_buffer:             gpu.PerFrameBindlessBuffer(
+  node_count:                    u32,
+  max_draws:                     u32,
+  shadow_cube_buffer:            gpu.PerFrameBindlessBuffer(
     ShadowCubeData,
     d.FRAMES_IN_FLIGHT,
   ),
-  shadow_data_buffer:             gpu.PerFrameBindlessBuffer(
+  shadow_data_buffer:            gpu.PerFrameBindlessBuffer(
     ShadowData,
     d.FRAMES_IN_FLIGHT,
   ),
-  spot_lights:                    [MAX_SHADOW_MAPS]SpotLightGPU,
-  directional_lights:             [MAX_SHADOW_MAPS]DirectionalLightGPU,
-  point_lights:                   [MAX_SHADOW_MAPS]PointLightGPU,
-  slot_active:                    [MAX_SHADOW_MAPS]bool,
-  slot_kind:                      [MAX_SHADOW_MAPS]d.LightType,
-  light_to_slot:                  [d.MAX_LIGHTS]u32,
-  shadow_cull_descriptor_layout:  vk.DescriptorSetLayout,
-  sphere_cull_descriptor_layout:  vk.DescriptorSetLayout,
-  shadow_cull_layout:             vk.PipelineLayout,
-  sphere_cull_layout:             vk.PipelineLayout,
-  shadow_cull_pipeline:           vk.Pipeline,
-  sphere_cull_pipeline:           vk.Pipeline,
-  depth_pipeline_layout:          vk.PipelineLayout,
-  depth_pipeline:                 vk.Pipeline,
-  sphere_depth_pipeline_layout:   vk.PipelineLayout,
-  sphere_depth_pipeline:          vk.Pipeline,
+  spot_lights:                   [MAX_SHADOW_MAPS]SpotLightGPU,
+  directional_lights:            [MAX_SHADOW_MAPS]DirectionalLightGPU,
+  point_lights:                  [MAX_SHADOW_MAPS]PointLightGPU,
+  slot_active:                   [MAX_SHADOW_MAPS]bool,
+  slot_kind:                     [MAX_SHADOW_MAPS]d.LightType,
+  light_to_slot:                 [d.MAX_LIGHTS]u32,
+  shadow_cull_descriptor_layout: vk.DescriptorSetLayout,
+  sphere_cull_descriptor_layout: vk.DescriptorSetLayout,
+  shadow_cull_layout:            vk.PipelineLayout,
+  sphere_cull_layout:            vk.PipelineLayout,
+  shadow_cull_pipeline:          vk.Pipeline,
+  sphere_cull_pipeline:          vk.Pipeline,
+  depth_pipeline_layout:         vk.PipelineLayout,
+  depth_pipeline:                vk.Pipeline,
+  sphere_depth_pipeline_layout:  vk.PipelineLayout,
+  sphere_depth_pipeline:         vk.Pipeline,
 }
 
 @(private)
@@ -147,7 +145,10 @@ shadow_init :: proc(
     {.VERTEX, .FRAGMENT, .GEOMETRY, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(&self.shadow_cube_buffer, gctx.device)
+    gpu.per_frame_bindless_buffer_destroy(
+      &self.shadow_cube_buffer,
+      gctx.device,
+    )
   }
   gpu.per_frame_bindless_buffer_init(
     &self.shadow_data_buffer,
@@ -156,7 +157,10 @@ shadow_init :: proc(
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
+    gpu.per_frame_bindless_buffer_destroy(
+      &self.shadow_data_buffer,
+      gctx.device,
+    )
   }
   self.shadow_cull_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
@@ -168,7 +172,11 @@ shadow_init :: proc(
     {.STORAGE_BUFFER, {.COMPUTE}},
   ) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.shadow_cull_descriptor_layout, nil)
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.shadow_cull_descriptor_layout,
+      nil,
+    )
     self.shadow_cull_descriptor_layout = 0
   }
   self.sphere_cull_descriptor_layout = gpu.create_descriptor_set_layout(
@@ -181,7 +189,11 @@ shadow_init :: proc(
     {.STORAGE_BUFFER, {.COMPUTE}},
   ) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.sphere_cull_descriptor_layout, nil)
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.sphere_cull_descriptor_layout,
+      nil,
+    )
     self.sphere_cull_descriptor_layout = 0
   }
   self.shadow_cull_layout = gpu.create_pipeline_layout(
@@ -208,9 +220,15 @@ shadow_init :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.sphere_cull_layout, nil)
     self.sphere_cull_layout = 0
   }
-  shadow_cull_shader := gpu.create_shader_module(gctx.device, SHADER_SHADOW_CULLING) or_return
+  shadow_cull_shader := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SHADOW_CULLING,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, shadow_cull_shader, nil)
-  sphere_cull_shader := gpu.create_shader_module(gctx.device, SHADER_SPHERE_CULLING) or_return
+  sphere_cull_shader := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SPHERE_CULLING,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, sphere_cull_shader, nil)
   self.shadow_cull_pipeline = gpu.create_compute_pipeline(
     gctx,
@@ -265,10 +283,17 @@ shadow_init :: proc(
     vertex_skinning_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(gctx.device, self.sphere_depth_pipeline_layout, nil)
+    vk.DestroyPipelineLayout(
+      gctx.device,
+      self.sphere_depth_pipeline_layout,
+      nil,
+    )
     self.sphere_depth_pipeline_layout = 0
   }
-  shadow_vert_shader := gpu.create_shader_module(gctx.device, SHADER_SHADOW_DEPTH_VERT) or_return
+  shadow_vert_shader := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SHADOW_DEPTH_VERT,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, shadow_vert_shader, nil)
   vertex_bindings := [?]vk.VertexInputBindingDescription {
     {binding = 0, stride = size_of(geometry.Vertex), inputRate = .VERTEX},
@@ -303,16 +328,32 @@ shadow_init :: proc(
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
     layout              = self.depth_pipeline_layout,
   }
-  vk.CreateGraphicsPipelines(gctx.device, 0, 1, &shadow_info, nil, &self.depth_pipeline) or_return
+  vk.CreateGraphicsPipelines(
+    gctx.device,
+    0,
+    1,
+    &shadow_info,
+    nil,
+    &self.depth_pipeline,
+  ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
     self.depth_pipeline = 0
   }
-  sphere_vert_shader := gpu.create_shader_module(gctx.device, SHADER_SPHERE_DEPTH_VERT) or_return
+  sphere_vert_shader := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SPHERE_DEPTH_VERT,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, sphere_vert_shader, nil)
-  sphere_geom_shader := gpu.create_shader_module(gctx.device, SHADER_SPHERE_DEPTH_GEOM) or_return
+  sphere_geom_shader := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SPHERE_DEPTH_GEOM,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, sphere_geom_shader, nil)
-  sphere_frag_shader := gpu.create_shader_module(gctx.device, SHADER_SPHERE_DEPTH_FRAG) or_return
+  sphere_frag_shader := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SPHERE_DEPTH_FRAG,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, sphere_frag_shader, nil)
   sphere_stages := gpu.create_vert_geo_frag_stages(
     sphere_vert_shader,
@@ -415,7 +456,10 @@ shadow_init :: proc(
         {.STORAGE_BUFFER, gpu.buffer_info(&node_data_buffer.buffer)},
         {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)},
         {.STORAGE_BUFFER, gpu.buffer_info(&world_matrix_buffer.buffer)},
-        {.STORAGE_BUFFER, gpu.buffer_info(&self.shadow_data_buffer.buffers[frame])},
+        {
+          .STORAGE_BUFFER,
+          gpu.buffer_info(&self.shadow_data_buffer.buffers[frame]),
+        },
         {.STORAGE_BUFFER, gpu.buffer_info(&spot.draw_count[frame])},
         {.STORAGE_BUFFER, gpu.buffer_info(&spot.draw_commands[frame])},
       ) or_return
@@ -425,7 +469,10 @@ shadow_init :: proc(
         {.STORAGE_BUFFER, gpu.buffer_info(&node_data_buffer.buffer)},
         {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)},
         {.STORAGE_BUFFER, gpu.buffer_info(&world_matrix_buffer.buffer)},
-        {.STORAGE_BUFFER, gpu.buffer_info(&self.shadow_data_buffer.buffers[frame])},
+        {
+          .STORAGE_BUFFER,
+          gpu.buffer_info(&self.shadow_data_buffer.buffers[frame]),
+        },
         {.STORAGE_BUFFER, gpu.buffer_info(&directional.draw_count[frame])},
         {.STORAGE_BUFFER, gpu.buffer_info(&directional.draw_commands[frame])},
       ) or_return
@@ -435,7 +482,10 @@ shadow_init :: proc(
         {.STORAGE_BUFFER, gpu.buffer_info(&node_data_buffer.buffer)},
         {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)},
         {.STORAGE_BUFFER, gpu.buffer_info(&world_matrix_buffer.buffer)},
-        {.STORAGE_BUFFER, gpu.buffer_info(&self.shadow_cube_buffer.buffers[frame])},
+        {
+          .STORAGE_BUFFER,
+          gpu.buffer_info(&self.shadow_cube_buffer.buffers[frame]),
+        },
         {.STORAGE_BUFFER, gpu.buffer_info(&point.draw_count[frame])},
         {.STORAGE_BUFFER, gpu.buffer_info(&point.draw_commands[frame])},
       ) or_return
@@ -460,7 +510,10 @@ shadow_shutdown :: proc(
       gpu.mutable_buffer_destroy(gctx.device, &spot.draw_count[frame])
       gpu.mutable_buffer_destroy(gctx.device, &spot.draw_commands[frame])
       gpu.mutable_buffer_destroy(gctx.device, &directional.draw_count[frame])
-      gpu.mutable_buffer_destroy(gctx.device, &directional.draw_commands[frame])
+      gpu.mutable_buffer_destroy(
+        gctx.device,
+        &directional.draw_commands[frame],
+      )
       gpu.mutable_buffer_destroy(gctx.device, &point.draw_count[frame])
       gpu.mutable_buffer_destroy(gctx.device, &point.draw_commands[frame])
     }
@@ -473,8 +526,16 @@ shadow_shutdown :: proc(
   vk.DestroyPipelineLayout(gctx.device, self.depth_pipeline_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.sphere_cull_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.shadow_cull_layout, nil)
-  vk.DestroyDescriptorSetLayout(gctx.device, self.sphere_cull_descriptor_layout, nil)
-  vk.DestroyDescriptorSetLayout(gctx.device, self.shadow_cull_descriptor_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.sphere_cull_descriptor_layout,
+    nil,
+  )
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.shadow_cull_descriptor_layout,
+    nil,
+  )
   gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
   gpu.per_frame_bindless_buffer_destroy(&self.shadow_cube_buffer, gctx.device)
 }
@@ -517,12 +578,17 @@ shadow_sync_lights :: proc(
     light.shadow_index = slot
     gpu.write(&lights_buffer.buffer, light, int(handle.index))
     shadow_data := ShadowData {
-      view = linalg.MATRIX4F32_IDENTITY,
-      projection = linalg.MATRIX4F32_IDENTITY,
-      viewport_params = {f32(SHADOW_MAP_SIZE), f32(SHADOW_MAP_SIZE), 0.1, max(0.2, light.radius)},
-      position = {position.x, position.y, position.z, 1.0},
-      direction = {direction.x, direction.y, direction.z, 0.0},
-      kind = u32(light.type),
+      view            = linalg.MATRIX4F32_IDENTITY,
+      projection      = linalg.MATRIX4F32_IDENTITY,
+      viewport_params = {
+        f32(SHADOW_MAP_SIZE),
+        f32(SHADOW_MAP_SIZE),
+        0.1,
+        max(0.2, light.radius),
+      },
+      position        = {position.x, position.y, position.z, 1.0},
+      direction       = {direction.x, direction.y, direction.z, 0.0},
+      kind            = u32(light.type),
     }
     switch light.type {
     case .POINT:
@@ -543,8 +609,8 @@ shadow_sync_lights :: proc(
       shadow_data.viewport_params[3] = far_plane
       cube_data := ShadowCubeData {
         projection = point.projection,
-        position = point.position,
-        near_far = point.near_far,
+        position   = point.position,
+        near_far   = point.near_far,
       }
       gpu.write(
         &self.shadow_cube_buffer.buffers[frame_index],
@@ -571,10 +637,14 @@ shadow_sync_lights :: proc(
       )
       shadow_data.view = spot.view
       shadow_data.projection = spot.projection
-      shadow_data.viewport_params = {f32(SHADOW_MAP_SIZE), f32(SHADOW_MAP_SIZE), near_plane, far_plane}
-      shadow_data.frustum_planes = geometry.make_frustum(
-        spot.projection * spot.view,
-      ).planes
+      shadow_data.viewport_params = {
+        f32(SHADOW_MAP_SIZE),
+        f32(SHADOW_MAP_SIZE),
+        near_plane,
+        far_plane,
+      }
+      shadow_data.frustum_planes =
+        geometry.make_frustum(spot.projection * spot.view).planes
       shadow_data.near_far = spot.near_far
     case .DIRECTIONAL:
       near_plane: f32 = 0.1
@@ -597,11 +667,15 @@ shadow_sync_lights :: proc(
       )
       shadow_data.view = directional.view
       shadow_data.projection = directional.projection
-      shadow_data.viewport_params = {f32(SHADOW_MAP_SIZE), f32(SHADOW_MAP_SIZE), near_plane, far_plane}
+      shadow_data.viewport_params = {
+        f32(SHADOW_MAP_SIZE),
+        f32(SHADOW_MAP_SIZE),
+        near_plane,
+        far_plane,
+      }
       shadow_data.position = {camera_pos.x, camera_pos.y, camera_pos.z, 1.0}
-      shadow_data.frustum_planes = geometry.make_frustum(
-        directional.projection * directional.view,
-      ).planes
+      shadow_data.frustum_planes =
+        geometry.make_frustum(directional.projection * directional.view).planes
       shadow_data.near_far = directional.near_far
     }
     gpu.write(
@@ -656,9 +730,9 @@ shadow_compute_draw_lists :: proc(
         spot.descriptor_sets[frame_index],
       )
       push := VisibilityPushConstants {
-        camera_index = u32(slot),
-        node_count = self.node_count,
-        max_draws = self.max_draws,
+        camera_index  = u32(slot),
+        node_count    = self.node_count,
+        max_draws     = self.max_draws,
         include_flags = include_flags,
         exclude_flags = exclude_flags,
       }
@@ -695,9 +769,9 @@ shadow_compute_draw_lists :: proc(
         directional.descriptor_sets[frame_index],
       )
       push := VisibilityPushConstants {
-        camera_index = u32(slot),
-        node_count = self.node_count,
-        max_draws = self.max_draws,
+        camera_index  = u32(slot),
+        node_count    = self.node_count,
+        max_draws     = self.max_draws,
         include_flags = include_flags,
         exclude_flags = exclude_flags,
       }
@@ -734,9 +808,9 @@ shadow_compute_draw_lists :: proc(
         point.descriptor_sets[frame_index],
       )
       push := SphereVisibilityPushConstants {
-        camera_index = u32(slot),
-        node_count = self.node_count,
-        max_draws = self.max_draws,
+        camera_index  = u32(slot),
+        node_count    = self.node_count,
+        max_draws     = self.max_draws,
         include_flags = include_flags,
         exclude_flags = exclude_flags,
       }
@@ -792,7 +866,10 @@ shadow_render_depth :: proc(
         {.COMPUTE_SHADER},
         {.DRAW_INDIRECT},
       )
-      depth_texture := gpu.get_texture_2d(texture_manager, spot.shadow_map[frame_index])
+      depth_texture := gpu.get_texture_2d(
+        texture_manager,
+        spot.shadow_map[frame_index],
+      )
       if depth_texture == nil do continue
       gpu.image_barrier(
         command_buffer,
@@ -805,14 +882,22 @@ shadow_render_depth :: proc(
         {.EARLY_FRAGMENT_TESTS},
         {.DEPTH},
       )
-      depth_attachment := gpu.create_depth_attachment(depth_texture, .CLEAR, .STORE)
+      depth_attachment := gpu.create_depth_attachment(
+        depth_texture,
+        .CLEAR,
+        .STORE,
+      )
       gpu.begin_depth_rendering(
         command_buffer,
         SHADOW_MAP_SIZE,
         SHADOW_MAP_SIZE,
         &depth_attachment,
       )
-      gpu.set_viewport_scissor(command_buffer, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE)
+      gpu.set_viewport_scissor(
+        command_buffer,
+        SHADOW_MAP_SIZE,
+        SHADOW_MAP_SIZE,
+      )
       gpu.bind_graphics_pipeline(
         command_buffer,
         self.depth_pipeline,
@@ -835,7 +920,11 @@ shadow_render_depth :: proc(
         size_of(u32),
         &cam_idx,
       )
-      gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
+      gpu.bind_vertex_index_buffers(
+        command_buffer,
+        vertex_buffer,
+        index_buffer,
+      )
       vk.CmdDrawIndexedIndirectCount(
         command_buffer,
         spot.draw_commands[frame_index].buffer,
@@ -893,14 +982,22 @@ shadow_render_depth :: proc(
         {.EARLY_FRAGMENT_TESTS},
         {.DEPTH},
       )
-      depth_attachment := gpu.create_depth_attachment(depth_texture, .CLEAR, .STORE)
+      depth_attachment := gpu.create_depth_attachment(
+        depth_texture,
+        .CLEAR,
+        .STORE,
+      )
       gpu.begin_depth_rendering(
         command_buffer,
         SHADOW_MAP_SIZE,
         SHADOW_MAP_SIZE,
         &depth_attachment,
       )
-      gpu.set_viewport_scissor(command_buffer, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE)
+      gpu.set_viewport_scissor(
+        command_buffer,
+        SHADOW_MAP_SIZE,
+        SHADOW_MAP_SIZE,
+      )
       gpu.bind_graphics_pipeline(
         command_buffer,
         self.depth_pipeline,
@@ -923,7 +1020,11 @@ shadow_render_depth :: proc(
         size_of(u32),
         &cam_idx,
       )
-      gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
+      gpu.bind_vertex_index_buffers(
+        command_buffer,
+        vertex_buffer,
+        index_buffer,
+      )
       vk.CmdDrawIndexedIndirectCount(
         command_buffer,
         directional.draw_commands[frame_index].buffer,
@@ -965,7 +1066,10 @@ shadow_render_depth :: proc(
         {.COMPUTE_SHADER},
         {.DRAW_INDIRECT},
       )
-      depth_cube := gpu.get_texture_cube(texture_manager, point.shadow_cube[frame_index])
+      depth_cube := gpu.get_texture_cube(
+        texture_manager,
+        point.shadow_cube[frame_index],
+      )
       if depth_cube == nil do continue
       gpu.image_barrier(
         command_buffer,
@@ -979,7 +1083,11 @@ shadow_render_depth :: proc(
         {.DEPTH},
         layer_count = 6,
       )
-      depth_attachment := gpu.create_cube_depth_attachment(depth_cube, .CLEAR, .STORE)
+      depth_attachment := gpu.create_cube_depth_attachment(
+        depth_cube,
+        .CLEAR,
+        .STORE,
+      )
       gpu.begin_depth_rendering(
         command_buffer,
         SHADOW_MAP_SIZE,
@@ -987,7 +1095,13 @@ shadow_render_depth :: proc(
         &depth_attachment,
         layer_count = 6,
       )
-      gpu.set_viewport_scissor(command_buffer, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, flip_x = true, flip_y = false)
+      gpu.set_viewport_scissor(
+        command_buffer,
+        SHADOW_MAP_SIZE,
+        SHADOW_MAP_SIZE,
+        flip_x = true,
+        flip_y = false,
+      )
       gpu.bind_graphics_pipeline(
         command_buffer,
         self.sphere_depth_pipeline,
@@ -1010,7 +1124,11 @@ shadow_render_depth :: proc(
         size_of(u32),
         &cam_idx,
       )
-      gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
+      gpu.bind_vertex_index_buffers(
+        command_buffer,
+        vertex_buffer,
+        index_buffer,
+      )
       vk.CmdDrawIndexedIndirectCount(
         command_buffer,
         point.draw_commands[frame_index].buffer,

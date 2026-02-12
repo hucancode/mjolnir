@@ -6,14 +6,14 @@ import "core:math"
 import "core:slice"
 
 SpriteData :: struct {
-	texture_index: u32,
-	frame_columns: u32, // Number of columns in sprite sheet
-	frame_rows:    u32, // Number of rows in sprite sheet
-	frame_index:   u32, // Current frame (0-based)
+  texture_index: u32,
+  frame_columns: u32, // Number of columns in sprite sheet
+  frame_rows:    u32, // Number of rows in sprite sheet
+  frame_index:   u32, // Current frame (0-based)
 }
 Sprite :: struct {
-	using data: SpriteData,
-	animation:  Maybe(SpriteAnimation),
+  using data: SpriteData,
+  animation:  Maybe(SpriteAnimation),
 }
 
 sprite_init :: proc(
@@ -45,7 +45,7 @@ create_sprite :: proc(
 ) -> (
   handle: SpriteHandle,
   ok: bool,
-  ) #optional_ok {
+) #optional_ok {
   sprite: ^Sprite
   handle, sprite = cont.alloc(&world.sprites, SpriteHandle) or_return
   if handle.index >= MAX_SPRITES {
@@ -57,13 +57,7 @@ create_sprite :: proc(
     cont.free(&world.sprites, handle)
     return {}, false
   }
-  sprite_init(
-    sprite,
-    texture,
-    frame_columns,
-    frame_rows,
-    frame_index,
-  )
+  sprite_init(sprite, texture, frame_columns, frame_rows, frame_index)
   sprite.animation = animation
   sprite_update_gpu_data(sprite)
   stage_sprite_data(&world.staging, handle)
@@ -84,7 +78,8 @@ register_animatable_sprite :: proc(world: ^World, handle: SpriteHandle) {
 }
 
 unregister_animatable_sprite :: proc(world: ^World, handle: SpriteHandle) {
-  if i, found := slice.linear_search(world.animatable_sprites[:], handle); found {
+  if i, found := slice.linear_search(world.animatable_sprites[:], handle);
+     found {
     unordered_remove(&world.animatable_sprites, i)
   }
 }
