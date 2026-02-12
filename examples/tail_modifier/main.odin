@@ -2,6 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/world"
+import "../../mjolnir/render"
 import anim "../../mjolnir/animation"
 import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
@@ -162,7 +163,7 @@ main :: proc() {
           continue
         }
         bone_count := len(skin.bones)
-        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[child]
+        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[transmute(render.NodeHandle)child]
         if !has_offset {
           continue
         }
