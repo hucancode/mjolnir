@@ -389,7 +389,7 @@ upload_node_transform :: proc(
 upload_node_data :: proc(
   render: ^Manager,
   handle: NodeHandle,
-  node_data: ^NodeData,
+  node_data: ^Node,
 ) {
   gpu.write(&render.node_data_buffer.buffer, node_data, int(handle.index))
 }

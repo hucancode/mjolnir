@@ -25,7 +25,7 @@ ShaderFeature :: rd.ShaderFeature
 ShaderFeatureSet :: rd.ShaderFeatureSet
 NodeFlag :: rd.NodeFlag
 NodeFlagSet :: rd.NodeFlagSet
-NodeData :: rd.NodeData
+Node :: rd.Node
 Mesh :: rd.Mesh
 Material :: rd.Material
 Emitter :: rd.Emitter

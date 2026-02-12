@@ -274,34 +274,6 @@ attach :: proc(
   }
 }
 
-@(private = "file")
-_apply_sprite_to_node_data :: proc(
-  data: ^NodeData,
-  sprite_attachment: SpriteAttachment,
-  node: ^Node,
-  world: ^World = nil,
-) {
-  data.material_id = sprite_attachment.material.index
-  data.mesh_id = sprite_attachment.mesh_handle.index
-  data.attachment_data_index = sprite_attachment.sprite_handle.index
-  if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
-  if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
-  // Mark as sprite
-  data.flags |= {.MATERIAL_SPRITE}
-  if world != nil {
-    if material, has_mat := cont.get(world.materials, sprite_attachment.material);
-       has_mat {
-      switch material.type {
-      case .TRANSPARENT:
-        data.flags |= {.MATERIAL_TRANSPARENT}
-      case .WIREFRAME:
-        data.flags |= {.MATERIAL_WIREFRAME}
-      case .PBR, .UNLIT: // No flags
-      }
-    }
-  }
-}
-
 spawn :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
@@ -334,33 +306,6 @@ spawn_child :: proc(
   node.transform.is_dirty = true
   attach(self.nodes, parent, handle)
   stage_node_transform(&self.staging, handle)
-  data := NodeData {
-    material_id           = 0xFFFFFFFF,
-    mesh_id               = 0xFFFFFFFF,
-    attachment_data_index = 0xFFFFFFFF,
-  }
-  if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-    data.material_id = mesh_attachment.material.index
-    data.mesh_id = mesh_attachment.handle.index
-    // FIX: Must check both node.visible AND node.parent_visible (same as traverse logic)
-    if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
-    if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
-    if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
-    if material, has_mat := cont.get(self.materials, mesh_attachment.material);
-       has_mat {
-      switch material.type {
-      case .TRANSPARENT:
-        data.flags |= {.MATERIAL_TRANSPARENT}
-      case .WIREFRAME:
-        data.flags |= {.MATERIAL_WIREFRAME}
-      case .PBR, .UNLIT: // No flags
-      }
-    }
-  }
-  if sprite_attachment, has_sprite := node.attachment.(SpriteAttachment);
-     has_sprite {
-    _apply_sprite_to_node_data(&data, sprite_attachment, node, self)
-  }
   stage_node_data(&self.staging, handle)
   return handle, true
 }
@@ -501,8 +446,6 @@ despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
 cleanup_pending_deletions :: proc(
   world: ^World,
 ) {
-  zero_matrix: matrix[4, 4]f32
-  zero_data: NodeData
   for entry, i in world.nodes.entries do if entry.active {
     if !entry.item.pending_deletion do continue
     handle := NodeHandle {
@@ -596,42 +539,6 @@ traverse :: proc(
       }
     }
     if visibility_changed || is_dirty || entry.parent_is_dirty {
-      data := NodeData {
-        material_id           = 0xFFFFFFFF,
-        mesh_id               = 0xFFFFFFFF,
-        attachment_data_index = 0xFFFFFFFF,
-      }
-      if mesh_attachment, has_mesh := current_node.attachment.(MeshAttachment);
-         has_mesh {
-        data.material_id = mesh_attachment.material.index
-        data.mesh_id = mesh_attachment.handle.index
-        if current_node.visible && current_node.parent_visible {
-          data.flags |= NodeFlagSet{.VISIBLE}
-        }
-        if current_node.culling_enabled {
-          data.flags |= {.CULLING_ENABLED}
-        }
-        if mesh_attachment.cast_shadow {
-          data.flags |= NodeFlagSet{.CASTS_SHADOW}
-        }
-        if material_entry, has_material := cont.get(
-          world.materials,
-          mesh_attachment.material,
-        ); has_material {
-          switch material_entry.type {
-          case .TRANSPARENT:
-            data.flags |= NodeFlagSet{.MATERIAL_TRANSPARENT}
-          case .WIREFRAME:
-            data.flags |= NodeFlagSet{.MATERIAL_WIREFRAME}
-          case .PBR, .UNLIT:
-          // No additional flags needed
-          }
-        }
-      }
-      if sprite_attachment, has_sprite := current_node.attachment.(SpriteAttachment);
-         has_sprite {
-        _apply_sprite_to_node_data(&data, sprite_attachment, current_node, world)
-      }
       stage_node_data(&world.staging, entry.handle)
     }
     for child_handle in current_node.children {
