@@ -443,6 +443,7 @@ create_mesh :: proc(
 
 destroy_mesh :: proc(self: ^World, handle: MeshHandle) {
   if mesh, ok := cont.free(&self.meshes, handle); ok {
+    stage_mesh_removal(&self.staging, handle)
     mesh_destroy(mesh, self)
   }
 }

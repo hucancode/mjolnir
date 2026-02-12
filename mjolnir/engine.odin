@@ -561,6 +561,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   defer sync.mutex_unlock(&self.world.staging.mutex)
   stale_handles := make([dynamic]world.NodeHandle, context.temp_allocator)
   stale_meshes := make([dynamic]world.MeshHandle, context.temp_allocator)
+  stale_mesh_removals := make([dynamic]u32, context.temp_allocator)
   stale_materials := make(
     [dynamic]world.MaterialHandle,
     context.temp_allocator,
@@ -716,6 +717,20 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   for handle in stale_handles {
     delete_key(&self.world.staging.node_data, handle)
   }
+  for handle, n in self.world.staging.mesh_removals {
+    next_n := n
+    if n < world.FRAMES_IN_FLIGHT {
+      render.clear_mesh(&self.render, handle)
+      next_n += 1
+      self.world.staging.mesh_removals[handle] = next_n
+    }
+    if next_n >= world.FRAMES_IN_FLIGHT {
+      append(&stale_mesh_removals, handle)
+    }
+  }
+  for handle in stale_mesh_removals {
+    delete_key(&self.world.staging.mesh_removals, handle)
+  }
   for handle, n in self.world.staging.mesh_updates {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
@@ -728,8 +743,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
             geom,
           )
         }
-      } else {
-        render.clear_mesh(&self.render, handle.index)
       }
       next_n += 1
       self.world.staging.mesh_updates[handle] = next_n
