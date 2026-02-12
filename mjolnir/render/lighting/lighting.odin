@@ -15,10 +15,36 @@ SHADER_LIGHTING_VERT := #load("../../shader/lighting/vert.spv")
 SHADER_LIGHTING_FRAG := #load("../../shader/lighting/frag.spv")
 TEXTURE_LUT_GGX :: #load("../../assets/lut_ggx.png")
 
-LightKind :: enum u32 {
-  POINT       = 0,
-  DIRECTIONAL = 1,
-  SPOT        = 2,
+SpotLightGPU :: struct {
+  color:            [4]f32, // RGB + intensity
+  radius:           f32,
+  angle_inner:      f32,
+  angle_outer:      f32,
+  projection:       matrix[4, 4]f32,
+  view:             matrix[4, 4]f32,
+  position:         [4]f32,
+  direction:        [4]f32,
+  near_far:         [2]f32,
+  shadow_map:       [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
+}
+
+PointLightGPU :: struct {
+  color:            [4]f32, // RGB + intensity
+  radius:           f32,
+  projection:       matrix[4, 4]f32,
+  position:         [4]f32,
+  near_far:         [2]f32,
+  shadow_cube:      [d.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
+  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 AmbientPushConstant :: struct {
@@ -120,8 +146,7 @@ init :: proc(
   texture_manager: ^gpu.TextureManager,
   camera_set_layout: vk.DescriptorSetLayout,
   lights_set_layout: vk.DescriptorSetLayout,
-  world_matrix_set_layout: vk.DescriptorSetLayout,
-  spherical_camera_set_layout: vk.DescriptorSetLayout,
+  shadow_data_set_layout: vk.DescriptorSetLayout,
   textures_set_layout: vk.DescriptorSetLayout,
   width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
@@ -233,8 +258,7 @@ init :: proc(
     camera_set_layout,
     textures_set_layout,
     lights_set_layout,
-    world_matrix_set_layout,
-    spherical_camera_set_layout,
+    shadow_data_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
@@ -431,8 +455,7 @@ begin_pass :: proc(
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   lights_descriptor_set: vk.DescriptorSet,
-  world_matrix_descriptor_set: vk.DescriptorSet,
-  spherical_camera_descriptor_set: vk.DescriptorSet,
+  shadow_data_descriptor_set: vk.DescriptorSet,
   frame_index: u32,
 ) {
   final_image := gpu.get_texture_2d(texture_manager,
@@ -460,8 +483,7 @@ begin_pass :: proc(
     camera_gpu.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame cameras)
     texture_manager.textures_descriptor_set, // set = 1 (textures/samplers)
     lights_descriptor_set, // set = 2 (lights)
-    world_matrix_descriptor_set, // set = 3 (world matrices)
-    spherical_camera_descriptor_set, // set = 4 (per-frame spherical cameras)
+    shadow_data_descriptor_set, // set = 3 (per-frame shadow data)
   )
 }
 
@@ -469,13 +491,10 @@ render :: proc(
   self: ^Renderer,
   camera_handle: d.CameraHandle,
   camera_gpu: ^camera.CameraGPU,
-  cameras_gpu: ^[d.MAX_CAMERAS]camera.CameraGPU,
-  spherical_cameras_gpu: ^[d.MAX_CAMERAS]camera.SphericalCameraGPU,
+  shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
   command_buffer: vk.CommandBuffer,
-  cameras: d.Pool(camera.Camera),
   lights: d.Pool(d.Light),
   active_lights: []d.LightHandle,
-  world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
   frame_index: u32,
 ) {
   bind_and_draw_mesh :: proc(
@@ -509,31 +528,9 @@ render :: proc(
   }
   for handle in active_lights {
     light := cont.get(lights, handle) or_continue
-    world_matrix := gpu.get(&world_matrix_buffer.buffer, light.node_index)
-    if world_matrix == nil do continue
-    light_position := world_matrix[3].xyz
-    shadow_map_index: u32 = 0xFFFFFFFF
-    if light.cast_shadow {
-      switch light.type {
-      case .POINT:
-        if light.camera_index > 0 {
-          spherical_cam_gpu := &spherical_cameras_gpu[light.camera_index]
-          shadow_map_index = spherical_cam_gpu.depth_cube[frame_index].index
-        }
-      case .DIRECTIONAL, .SPOT:
-        if shadow_cam := &cameras.entries[light.camera_index].item; shadow_cam != nil {
-          shadow_cam_gpu := &cameras_gpu[light.camera_index]
-          shadow_map_index = shadow_cam_gpu.attachments[.DEPTH][frame_index].index
-        }
-      }
-    }
+    shadow_map_index := shadow_texture_indices[handle.index]
     push_constant.light_index = handle.index
-    push_constant.light_position = {
-      light_position.x,
-      light_position.y,
-      light_position.z,
-      1.0,
-    }
+    push_constant.light_position = light.position
     push_constant.shadow_map_index = shadow_map_index
     vk.CmdPushConstants(
       command_buffer,

@@ -766,9 +766,6 @@ create_light :: proc(
   }
   world.register_active_light(&engine.world, node_handle)
   world.stage_light_data(&engine.world.staging, node_handle)
-  if cast_shadow {
-    create_light_camera(engine, node_handle) or_return
-  }
   return node_handle, true
 }
 

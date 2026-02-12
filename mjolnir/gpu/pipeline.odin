@@ -823,12 +823,13 @@ set_viewport_scissor :: proc(
   command_buffer: vk.CommandBuffer,
   width: u32,
   height: u32,
+  flip_x: bool = false,
   flip_y: bool = true,
 ) {
   viewport := vk.Viewport {
-    x        = 0,
+    x        = flip_x ? f32(width) : 0,
     y        = flip_y ? f32(height) : 0,
-    width    = f32(width),
+    width    = flip_x ? -f32(width) : f32(width),
     height   = flip_y ? -f32(height) : f32(height),
     minDepth = 0.0,
     maxDepth = 1.0,

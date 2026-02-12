@@ -25,14 +25,15 @@ struct Camera {
 
 struct LightData {
     vec4 color;           // RGB + intensity
+    vec4 position;
+    vec4 direction;
     float radius;
     float angle_inner;
     float angle_outer;
     uint type;
-    uint node_index;
-    uint camera_index;
     uint cast_shadow;
-    uint _padding;
+    uint shadow_index;
+    uint padding[2];
 };
 
 // Bindless camera buffer (set 0, binding 0)
@@ -43,10 +44,6 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 layout(set = 2, binding = 0) readonly buffer LightsBuffer {
     LightData lights[];
 } lights_buffer;
-// World matrices buffer (set 3, binding 0)
-layout(set = 3, binding = 0) readonly buffer WorldMatricesBuffer {
-    mat4 world_matrices[];
-} world_matrices_buffer;
 
 layout(push_constant) uniform PushConstant {
     uint light_index;
@@ -75,16 +72,8 @@ void main() {
     Camera camera = camera_buffer.cameras[scene_camera_idx];
     LightData light = lights_buffer.lights[light_index];
 
-    // Additional bounds check for node index
-    if (light.node_index >= world_matrices_buffer.world_matrices.length()) {
-        gl_Position = vec4(0.0); // Invalid position to indicate error
-        return;
-    }
-
     vec3 light_pos = light_position.xyz;
-    // Get light direction from world matrix
-    mat4 lightWorldMatrix = world_matrices_buffer.world_matrices[light.node_index];
-    vec3 light_direction = lightWorldMatrix[2].xyz; // Light forward is -Z direction
+    vec3 light_direction = light.direction.xyz;
 
     if (light.type == DIRECTIONAL_LIGHT) {
         // For directional lights, use the NDC triangle mesh directly

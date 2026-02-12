@@ -15,7 +15,7 @@ import cam "camera"
 import "debug_draw"
 import "debug_ui"
 import "geometry"
-import "lighting"
+import light "lighting"
 import "particles"
 import "post_process"
 import "transparency"
@@ -32,7 +32,7 @@ TextureTracking :: struct {
 
 Manager :: struct {
   geometry:                geometry.Renderer,
-  lighting:                lighting.Renderer,
+  lighting:                light.Renderer,
   transparency:            transparency.Renderer,
   particles:               particles.Renderer,
   debug_draw:              debug_draw.Renderer,
@@ -43,15 +43,14 @@ Manager :: struct {
   ui:                      ui.Renderer,
   main_camera:             d.CameraHandle,
   cameras:                 d.Pool(camera.Camera),
-  spherical_cameras:       d.Pool(camera.SphericalCamera),
   lights:                  d.Pool(Light),
   meshes:                  d.Pool(Mesh),
   visibility:              visibility.System,
+  shadow:                  light.ShadowSystem,
   textures_set_layout:     vk.DescriptorSetLayout,
   textures_descriptor_set: vk.DescriptorSet,
   general_pipeline_layout: vk.PipelineLayout,
   sprite_pipeline_layout:  vk.PipelineLayout,
-  sphere_pipeline_layout:  vk.PipelineLayout,
   linear_repeat_sampler:   vk.Sampler,
   linear_clamp_sampler:    vk.Sampler,
   nearest_repeat_sampler:  vk.Sampler,
@@ -62,10 +61,6 @@ Manager :: struct {
   ),
   camera_buffer:           gpu.PerFrameBindlessBuffer(
     cam.CameraData,
-    FRAMES_IN_FLIGHT,
-  ),
-  spherical_camera_buffer: gpu.PerFrameBindlessBuffer(
-    cam.SphericalCameraData,
     FRAMES_IN_FLIGHT,
   ),
   material_buffer:         gpu.BindlessBuffer(Material),
@@ -91,7 +86,6 @@ Manager :: struct {
   retired_textures_cube:   map[gpu.TextureCubeHandle]u32,
   // Camera GPU resources (indexed by camera handle.index)
   cameras_gpu:             [d.MAX_CAMERAS]camera.CameraGPU,
-  spherical_cameras_gpu:   [d.MAX_CAMERAS]camera.SphericalCameraGPU,
 }
 
 @(private)
@@ -315,33 +309,18 @@ init_camera_buffers :: proc(
     d.MAX_ACTIVE_CAMERAS,
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
-  gpu.per_frame_bindless_buffer_init(
-    &self.spherical_camera_buffer,
-    gctx,
-    d.MAX_ACTIVE_CAMERAS,
-    {.VERTEX, .FRAGMENT, .COMPUTE, .GEOMETRY},
-  ) or_return
   return .SUCCESS
 }
 
 @(private)
 shutdown_camera_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
-  gpu.per_frame_bindless_buffer_destroy(
-    &self.spherical_camera_buffer,
-    gctx.device,
-  )
 }
 
 @(private)
 shutdown_camera_resources :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   for i in 0 ..< d.MAX_CAMERAS {
     camera.destroy_gpu(gctx, &self.cameras_gpu[i], &self.texture_manager)
-    camera.destroy_spherical_gpu(
-      gctx,
-      &self.spherical_cameras_gpu[i],
-      &self.texture_manager,
-    )
   }
 }
 
@@ -454,25 +433,6 @@ init_bindless_layouts :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
     self.sprite_pipeline_layout = 0
   }
-  self.sphere_pipeline_layout = gpu.create_pipeline_layout(
-    gctx,
-    vk.PushConstantRange {
-      stageFlags = {.VERTEX, .GEOMETRY, .FRAGMENT},
-      size = size_of(u32),
-    },
-    self.spherical_camera_buffer.set_layout,
-    self.textures_set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.world_matrix_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
-    self.vertex_skinning_buffer.set_layout,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(gctx.device, self.sphere_pipeline_layout, nil)
-    self.sphere_pipeline_layout = 0
-  }
   gpu.allocate_descriptor_set(
     gctx,
     &self.textures_descriptor_set,
@@ -500,7 +460,6 @@ shutdown_bindless_layouts :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.texture_manager_shutdown(&self.texture_manager, gctx)
   vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.sphere_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)
   vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
   vk.DestroySampler(gctx.device, self.linear_clamp_sampler, nil)
@@ -508,7 +467,6 @@ shutdown_bindless_layouts :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   vk.DestroySampler(gctx.device, self.nearest_clamp_sampler, nil)
   self.general_pipeline_layout = 0
   self.sprite_pipeline_layout = 0
-  self.sphere_pipeline_layout = 0
   self.textures_set_layout = 0
   self.textures_descriptor_set = 0
   self.linear_repeat_sampler = 0
@@ -530,29 +488,6 @@ ensure_camera_slot :: proc(
   entry.active = true
   if i, ok := slice.linear_search(self.cameras.free_indices[:], handle.index); ok {
     unordered_remove(&self.cameras.free_indices, i)
-  }
-  return &entry.item
-}
-
-@(private)
-ensure_spherical_camera_slot :: proc(
-  self: ^Manager,
-  handle: d.SphereCameraHandle,
-) -> ^camera.SphericalCamera {
-  for u32(len(self.spherical_cameras.entries)) <= handle.index {
-    append(
-      &self.spherical_cameras.entries,
-      cont.Entry(camera.SphericalCamera) {},
-    )
-  }
-  entry := &self.spherical_cameras.entries[handle.index]
-  entry.generation = handle.generation
-  entry.active = true
-  if i, ok := slice.linear_search(
-    self.spherical_cameras.free_indices[:],
-    handle.index,
-  ); ok {
-    unordered_remove(&self.spherical_cameras.free_indices, i)
   }
   return &entry.item
 }
@@ -604,15 +539,6 @@ sync_camera_from_world :: proc(
   dst.draw_list_source_handle = world_camera.draw_list_source_handle
 }
 
-sync_spherical_camera_from_world :: proc(
-  self: ^Manager,
-  handle: d.SphereCameraHandle,
-  world_camera: ^camera.SphericalCamera,
-) {
-  dst := ensure_spherical_camera_slot(self, handle)
-  dst^ = world_camera^
-}
-
 sync_mesh_from_world :: proc(
   self: ^Manager,
   handle: d.MeshHandle,
@@ -622,7 +548,6 @@ sync_mesh_from_world :: proc(
   dst^ = world_mesh^
   upload_mesh_data(self, handle, dst)
 }
-
 
 clear_mesh :: proc(self: ^Manager, handle: d.MeshHandle) {
   if u32(len(self.meshes.entries)) <= handle.index do return
@@ -655,12 +580,6 @@ record_compute_commands :: proc(
       visibility.perform_culling(&self.visibility, gctx, compute_buffer, cam_gpu, u32(cam_index), next_frame_index, {.VISIBLE}, {}) // Write draw_list[N+1]
     }
   }
-  for &entry, cam_index in self.spherical_cameras.entries do if entry.active {
-    cam_cpu := &entry.item
-    cam_gpu := &self.spherical_cameras_gpu[cam_index]
-    upload_spherical_camera_data(self, cam_cpu, u32(cam_index), frame_index)
-    visibility.perform_sphere_culling(&self.visibility, gctx, compute_buffer, cam_gpu, u32(cam_index), next_frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}) // Write draw_list[N+1]
-  }
   particles.simulate(
     &self.particles,
     compute_buffer,
@@ -679,7 +598,6 @@ init :: proc(
   ret: vk.Result,
 ) {
   cont.init(&self.cameras, d.MAX_CAMERAS)
-  cont.init(&self.spherical_cameras, d.MAX_CAMERAS)
   cont.init(&self.lights, d.MAX_LIGHTS)
   cont.init(&self.meshes, d.MAX_MESHES)
   // Initialize texture tracking maps
@@ -756,7 +674,21 @@ init :: proc(
     swapchain_extent.width,
     swapchain_extent.height,
     self.general_pipeline_layout,
-    self.sphere_pipeline_layout,
+  ) or_return
+  light.shadow_init(
+    &self.shadow,
+    gctx,
+    &self.texture_manager,
+    &self.node_data_buffer,
+    &self.mesh_data_buffer,
+    &self.world_matrix_buffer,
+    self.textures_set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.world_matrix_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
+    self.vertex_skinning_buffer.set_layout,
   ) or_return
   camera.allocate_descriptors(
     gctx,
@@ -769,14 +701,13 @@ init :: proc(
     &self.world_matrix_buffer,
     &self.camera_buffer,
   ) or_return
-  lighting.init(
+  light.init(
     &self.lighting,
     gctx,
     &self.texture_manager,
     self.camera_buffer.set_layout,
     self.lights_buffer.set_layout,
-    self.world_matrix_buffer.set_layout,
-    self.spherical_camera_buffer.set_layout,
+    self.shadow.shadow_data_buffer.set_layout,
     self.textures_set_layout,
     swapchain_extent.width,
     swapchain_extent.height,
@@ -856,7 +787,8 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   post_process.shutdown(&self.post_process, gctx, &self.texture_manager)
   particles.shutdown(&self.particles, gctx)
   transparency.shutdown(&self.transparency, gctx)
-  lighting.shutdown(&self.lighting, gctx, &self.texture_manager)
+  light.shutdown(&self.lighting, gctx, &self.texture_manager)
+  light.shadow_shutdown(&self.shadow, gctx, &self.texture_manager)
   geometry.shutdown(&self.geometry, gctx)
   visibility.shutdown(&self.visibility, gctx)
   shutdown_camera_resources(self, gctx)
@@ -872,8 +804,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   delete(self.retired_textures_cube)
   delete(self.cameras.entries)
   delete(self.cameras.free_indices)
-  delete(self.spherical_cameras.entries)
-  delete(self.spherical_cameras.free_indices)
   delete(self.lights.entries)
   delete(self.lights.free_indices)
   delete(self.meshes.entries)
@@ -887,7 +817,7 @@ resize :: proc(
   color_format: vk.Format,
   dpi_scale: f32,
 ) -> vk.Result {
-  lighting.recreate_images(
+  light.recreate_images(
     &self.lighting,
     extent.width,
     extent.height,
@@ -902,6 +832,38 @@ resize :: proc(
     extent.height,
     color_format,
   ) or_return
+  return .SUCCESS
+}
+
+render_shadow_depth :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  command_buffer: vk.CommandBuffer,
+  active_lights: []d.LightHandle,
+) -> vk.Result {
+  light.shadow_sync_lights(
+    &self.shadow,
+    &self.lights,
+    &self.lights_buffer,
+    active_lights,
+    frame_index,
+  )
+  light.shadow_compute_draw_lists(&self.shadow, command_buffer, frame_index)
+  light.shadow_render_depth(
+    &self.shadow,
+    command_buffer,
+    &self.texture_manager,
+    self.textures_descriptor_set,
+    self.bone_buffer.descriptor_sets[frame_index],
+    self.material_buffer.descriptor_set,
+    self.world_matrix_buffer.descriptor_set,
+    self.node_data_buffer.descriptor_set,
+    self.mesh_data_buffer.descriptor_set,
+    self.vertex_skinning_buffer.descriptor_set,
+    self.vertex_buffer.buffer,
+    self.index_buffer.buffer,
+    frame_index,
+  )
   return .SUCCESS
 }
 
@@ -920,11 +882,6 @@ render_camera_depth :: proc(
       draw_list_source_gpu = &self.cameras_gpu[source.index]
     }
     visibility.render_depth(&self.visibility, gctx, command_buffer, cam_gpu, cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, self.textures_descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.vertex_skinning_buffer.descriptor_set, self.vertex_buffer.buffer, self.index_buffer.buffer, draw_list_source_gpu)
-  }
-  for &entry, cam_index in self.spherical_cameras.entries do if entry.active {
-    cam_cpu := &entry.item
-    cam_gpu := &self.spherical_cameras_gpu[cam_index]
-    visibility.render_sphere_depth(&self.visibility, gctx, command_buffer, cam_gpu, cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}, self.sphere_pipeline_layout, self.textures_descriptor_set, self.spherical_camera_buffer.descriptor_sets[frame_index], self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.vertex_skinning_buffer.descriptor_set, self.vertex_buffer.buffer, self.index_buffer.buffer)
   }
   return .SUCCESS
 }
@@ -985,7 +942,7 @@ record_lighting_pass :: proc(
   camera_cpu := cont.get(self.cameras, camera_handle)
   if camera_cpu == nil do return .ERROR_UNKNOWN
   camera_gpu := &self.cameras_gpu[camera_handle.index]
-  lighting.begin_ambient_pass(
+  light.begin_ambient_pass(
     &self.lighting,
     camera_gpu,
     camera_cpu,
@@ -993,39 +950,48 @@ record_lighting_pass :: proc(
     command_buffer,
     frame_index,
   )
-  lighting.render_ambient(
+  light.render_ambient(
     &self.lighting,
     camera_handle,
     camera_gpu,
     command_buffer,
     frame_index,
   )
-  lighting.end_ambient_pass(command_buffer)
-  lighting.begin_pass(
+  light.end_ambient_pass(command_buffer)
+  light.begin_pass(
     &self.lighting,
     camera_gpu,
     camera_cpu,
     &self.texture_manager,
     command_buffer,
     self.lights_buffer.descriptor_set,
-    self.world_matrix_buffer.descriptor_set,
-    self.spherical_camera_buffer.descriptor_sets[frame_index],
+    self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
     frame_index,
   )
-  lighting.render(
+  shadow_texture_indices: [d.MAX_LIGHTS]u32
+  for i in 0 ..< d.MAX_LIGHTS {
+    shadow_texture_indices[i] = 0xFFFFFFFF
+  }
+  for handle in active_lights {
+    light_data := cont.get(self.lights, handle) or_continue
+    shadow_texture_indices[handle.index] = light.shadow_get_texture_index(
+      &self.shadow,
+      light_data.type,
+      light_data.shadow_index,
+      frame_index,
+    )
+  }
+  light.render(
     &self.lighting,
     camera_handle,
     camera_gpu,
-    &self.cameras_gpu,
-    &self.spherical_cameras_gpu,
+    &shadow_texture_indices,
     command_buffer,
-    self.cameras,
     self.lights,
     active_lights,
-    &self.world_matrix_buffer,
     frame_index,
   )
-  lighting.end_pass(command_buffer)
+  light.end_pass(command_buffer)
   return .SUCCESS
 }
 

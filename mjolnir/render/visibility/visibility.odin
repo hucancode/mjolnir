@@ -27,15 +27,9 @@ _________ end frame, sync _________
 1,2 and a,b,c,d run in parallel
 */
 
-SHADER_SPHERECAM_CULLING :: #load(
-  "../../shader/occlusion_culling/sphere_cull.spv",
-)
 SHADER_CULLING :: #load("../../shader/occlusion_culling/cull.spv")
 SHADER_DEPTH_REDUCE :: #load("../../shader/occlusion_culling/depth_reduce.spv")
 SHADER_DEPTH_VERT :: #load("../../shader/occlusion_culling/vert.spv")
-SHADER_SPHERECAM_DEPTH_VERT :: #load("../../shader/shadow_spherical/vert.spv")
-SHADER_SPHERECAM_DEPTH_GEOM :: #load("../../shader/shadow_spherical/geom.spv")
-SHADER_SPHERECAM_DEPTH_FRAG :: #load("../../shader/shadow_spherical/frag.spv")
 
 VisibilityPushConstants :: struct {
   camera_index:      u32,
@@ -66,10 +60,6 @@ System :: struct {
   depth_pipeline:                 vk.Pipeline, // uses general_pipeline_layout
   depth_reduce_layout:            vk.PipelineLayout,
   depth_reduce_pipeline:          vk.Pipeline,
-  sphere_cull_layout:             vk.PipelineLayout,
-  sphere_cull_pipeline:           vk.Pipeline,
-  sphere_depth_pipeline:          vk.Pipeline,
-  sphere_cam_descriptor_layout:   vk.DescriptorSetLayout,
   normal_cam_descriptor_layout:   vk.DescriptorSetLayout,
   depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
   max_draws:                      u32,
@@ -79,7 +69,6 @@ System :: struct {
   depth_bias:                     f32,
   stats_enabled:                  bool,
   general_pipeline_layout:        vk.PipelineLayout,
-  sphere_pipeline_layout:         vk.PipelineLayout,
 }
 
 init :: proc(
@@ -87,7 +76,6 @@ init :: proc(
   gctx: ^gpu.GPUContext,
   depth_width, depth_height: u32,
   general_pipeline_layout: vk.PipelineLayout,
-  sphere_pipeline_layout: vk.PipelineLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -96,25 +84,6 @@ init :: proc(
   self.depth_height = depth_height
   self.depth_bias = 0.0001
   self.general_pipeline_layout = general_pipeline_layout
-  self.sphere_pipeline_layout = sphere_pipeline_layout
-  // Create descriptor set layouts
-  self.sphere_cam_descriptor_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      self.sphere_cam_descriptor_layout,
-      nil,
-    )
-    self.sphere_cam_descriptor_layout = 0
-  }
   self.normal_cam_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.STORAGE_BUFFER, {.COMPUTE}}, // node data
@@ -156,37 +125,20 @@ init :: proc(
     vk.DestroyPipeline(gctx.device, self.depth_reduce_pipeline, nil)
     vk.DestroyPipelineLayout(gctx.device, self.cull_layout, nil)
     vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
-    vk.DestroyPipelineLayout(gctx.device, self.sphere_cull_layout, nil)
-    vk.DestroyPipeline(gctx.device, self.sphere_cull_pipeline, nil)
   }
   create_depth_pipeline(self, gctx) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
-    vk.DestroyPipeline(gctx.device, self.sphere_depth_pipeline, nil)
   }
   return .SUCCESS
 }
 
 shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
-  vk.DestroyPipeline(gctx.device, self.sphere_cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_reduce_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
-  vk.DestroyPipeline(gctx.device, self.sphere_depth_pipeline, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.sphere_cull_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.cull_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.depth_reduce_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.sphere_cam_descriptor_layout,
-    nil,
-  )
-  self.sphere_cam_descriptor_layout = 0
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.normal_cam_descriptor_layout,
-    nil,
-  )
   self.normal_cam_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
@@ -460,197 +412,11 @@ perform_culling :: proc(
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
 }
 
-perform_sphere_culling :: proc(
-  self: ^System,
-  gctx: ^gpu.GPUContext,
-  command_buffer: vk.CommandBuffer,
-  camera_gpu: ^camera.SphericalCameraGPU,
-  camera_index: u32,
-  frame_index: u32,
-  include_flags: rd.NodeFlagSet,
-  exclude_flags: rd.NodeFlagSet,
-) {
-  if self.node_count == 0 do return
-  // STEP 1: Clear draw count and execute sphere culling
-  vk.CmdFillBuffer(
-    command_buffer,
-    camera_gpu.draw_count[frame_index].buffer,
-    0,
-    vk.DeviceSize(camera_gpu.draw_count[frame_index].bytes_count),
-    0,
-  )
-  gpu.bind_compute_pipeline(
-    command_buffer,
-    self.sphere_cull_pipeline,
-    self.sphere_cull_layout,
-    camera_gpu.descriptor_sets[frame_index],
-  )
-  push_constants := VisibilityPushConstants {
-    camera_index      = camera_index,
-    node_count        = self.node_count,
-    max_draws         = self.max_draws,
-    include_flags     = include_flags,
-    exclude_flags     = exclude_flags,
-    pyramid_width     = 0,
-    pyramid_height    = 0,
-    depth_bias        = 0,
-    occlusion_enabled = 0,
-  }
-  vk.CmdPushConstants(
-    command_buffer,
-    self.sphere_cull_layout,
-    {.COMPUTE},
-    0,
-    size_of(push_constants),
-    &push_constants,
-  )
-  dispatch_x := (self.node_count + 63) / 64
-  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
-}
-
-// SphericalCamera visibility dispatch - culling + depth cube rendering
-render_sphere_depth :: proc(
-  self: ^System,
-  gctx: ^gpu.GPUContext,
-  command_buffer: vk.CommandBuffer,
-  camera_gpu: ^camera.SphericalCameraGPU,
-  camera_cpu: ^camera.SphericalCamera,
-  texture_manager: ^gpu.TextureManager,
-  camera_index: u32,
-  frame_index: u32,
-  include_flags: rd.NodeFlagSet,
-  exclude_flags: rd.NodeFlagSet,
-  sphere_pipeline_layout: vk.PipelineLayout,
-  textures_descriptor_set: vk.DescriptorSet,
-  spherical_camera_descriptor_set: vk.DescriptorSet,
-  bone_descriptor_set: vk.DescriptorSet,
-  material_descriptor_set: vk.DescriptorSet,
-  world_matrix_descriptor_set: vk.DescriptorSet,
-  node_data_descriptor_set: vk.DescriptorSet,
-  mesh_data_descriptor_set: vk.DescriptorSet,
-  vertex_skinning_descriptor_set: vk.DescriptorSet,
-  vertex_buffer: vk.Buffer,
-  index_buffer: vk.Buffer,
-) {
-  // STEP 2: Barrier - Wait for compute to finish before reading draw commands
-  gpu.buffer_barrier(
-    command_buffer,
-    camera_gpu.draw_commands[frame_index].buffer,
-    vk.DeviceSize(camera_gpu.draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    command_buffer,
-    camera_gpu.draw_count[frame_index].buffer,
-    vk.DeviceSize(camera_gpu.draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  // STEP 3: Render depth to cube map
-  // Frame N writes to depth_cube[N]
-  depth_cube := gpu.get_texture_cube(texture_manager, camera_gpu.depth_cube[frame_index])
-  if depth_cube == nil {
-    log.error("Failed to get depth cube for spherical camera")
-    return
-  }
-  // Layout transition before rendering shadow depth
-  gpu.image_barrier(
-    command_buffer,
-    depth_cube.image,
-    .UNDEFINED,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    {},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.EARLY_FRAGMENT_TESTS},
-    {.DEPTH},
-    layer_count = 6,
-  )
-  depth_attachment := gpu.create_cube_depth_attachment(
-    depth_cube,
-    .CLEAR,
-    .STORE,
-  )
-  // the geometry shader will emit primitives to each face using gl_Layer
-  gpu.begin_depth_rendering(
-    command_buffer,
-    camera_cpu.size,
-    camera_cpu.size,
-    &depth_attachment,
-    layer_count = 6,
-  )
-  gpu.set_viewport_scissor(command_buffer, camera_cpu.size, camera_cpu.size)
-  gpu.bind_graphics_pipeline(
-    command_buffer,
-    self.sphere_depth_pipeline,
-    sphere_pipeline_layout,
-    spherical_camera_descriptor_set,
-    textures_descriptor_set,
-    bone_descriptor_set,
-    material_descriptor_set,
-    world_matrix_descriptor_set,
-    node_data_descriptor_set,
-    mesh_data_descriptor_set,
-    vertex_skinning_descriptor_set,
-  )
-  cam_idx := camera_index
-  vk.CmdPushConstants(
-    command_buffer,
-    sphere_pipeline_layout,
-    {.VERTEX, .GEOMETRY, .FRAGMENT},
-    0,
-    size_of(u32),
-    &cam_idx,
-  )
-  gpu.bind_vertex_index_buffers(
-    command_buffer,
-    vertex_buffer,
-    index_buffer,
-  )
-  vk.CmdDrawIndexedIndirectCount(
-    command_buffer,
-    camera_gpu.draw_commands[frame_index].buffer,
-    0, // offset
-    camera_gpu.draw_count[frame_index].buffer,
-    0, // count offset
-    self.max_draws,
-    u32(size_of(vk.DrawIndexedIndirectCommand)),
-  )
-  vk.CmdEndRendering(command_buffer)
-  // Barrier: depth cube writes complete, transition for fragment shader reads
-  // Lighting samples this cube map for point light shadows
-  gpu.image_barrier(
-    command_buffer,
-    depth_cube.image,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.LATE_FRAGMENT_TESTS},
-    {.FRAGMENT_SHADER},
-    {.DEPTH},
-    layer_count = 6,
-  )
-}
-
 @(private)
 create_compute_pipelines :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
 ) -> vk.Result {
-  self.sphere_cull_layout = gpu.create_pipeline_layout(
-    gctx,
-    vk.PushConstantRange {
-      stageFlags = {.COMPUTE},
-      size = size_of(VisibilityPushConstants),
-    },
-    self.sphere_cam_descriptor_layout,
-  ) or_return
   self.cull_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
@@ -667,11 +433,6 @@ create_compute_pipelines :: proc(
     },
     self.depth_reduce_descriptor_layout,
   ) or_return
-  sphere_shader := gpu.create_shader_module(
-    gctx.device,
-    SHADER_SPHERECAM_CULLING,
-  ) or_return
-  defer vk.DestroyShaderModule(gctx.device, sphere_shader, nil)
   shader := gpu.create_shader_module(gctx.device, SHADER_CULLING) or_return
   defer vk.DestroyShaderModule(gctx.device, shader, nil)
   depth_shader := gpu.create_shader_module(
@@ -679,11 +440,6 @@ create_compute_pipelines :: proc(
     SHADER_DEPTH_REDUCE,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, depth_shader, nil)
-  self.sphere_cull_pipeline = gpu.create_compute_pipeline(
-    gctx,
-    sphere_shader,
-    self.sphere_cull_layout,
-  ) or_return
   self.cull_pipeline = gpu.create_compute_pipeline(
     gctx,
     shader,
@@ -750,53 +506,6 @@ create_depth_pipeline :: proc(
     &pipeline_info,
     nil,
     &self.depth_pipeline,
-  ) or_return
-  // create depth rendering pipeline for spherical cameras (point light shadows)
-  // uses geometry shader to render to all 6 cube faces in one pass
-  sphere_vert_shader := gpu.create_shader_module(
-    gctx.device,
-    SHADER_SPHERECAM_DEPTH_VERT,
-  ) or_return
-  defer vk.DestroyShaderModule(gctx.device, sphere_vert_shader, nil)
-  sphere_geom_shader := gpu.create_shader_module(
-    gctx.device,
-    SHADER_SPHERECAM_DEPTH_GEOM,
-  ) or_return
-  defer vk.DestroyShaderModule(gctx.device, sphere_geom_shader, nil)
-  sphere_frag_shader := gpu.create_shader_module(
-    gctx.device,
-    SHADER_SPHERECAM_DEPTH_FRAG,
-  ) or_return
-  defer vk.DestroyShaderModule(gctx.device, sphere_frag_shader, nil)
-  sphere_shader_stages := gpu.create_vert_geo_frag_stages(
-    sphere_vert_shader,
-    sphere_geom_shader,
-    sphere_frag_shader,
-  )
-  if self.sphere_pipeline_layout == 0 {
-    return .ERROR_INITIALIZATION_FAILED
-  }
-  sphere_pipeline_info := vk.GraphicsPipelineCreateInfo {
-    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &gpu.DEPTH_ONLY_RENDERING_INFO,
-    stageCount          = len(sphere_shader_stages),
-    pStages             = raw_data(sphere_shader_stages[:]),
-    pVertexInputState   = &vertex_input_info,
-    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-    pRasterizationState = &gpu.STANDARD_RASTERIZER,
-    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-    pDepthStencilState  = &gpu.READ_WRITE_DEPTH_STATE,
-    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = self.sphere_pipeline_layout,
-  }
-  vk.CreateGraphicsPipelines(
-    gctx.device,
-    0,
-    1,
-    &sphere_pipeline_info,
-    nil,
-    &self.sphere_depth_pipeline,
   ) or_return
   return .SUCCESS
 }
