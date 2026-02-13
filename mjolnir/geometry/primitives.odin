@@ -58,9 +58,10 @@ disc_bounds :: proc "contextless" (disc: Disc) -> Aabb {
   p2 := disc.center - ext1
   p3 := disc.center + ext2
   p4 := disc.center - ext2
-  min := linalg.min(linalg.min(p1, p2), linalg.min(p3, p4))
-  max := linalg.max(linalg.max(p1, p2), linalg.max(p3, p4))
-  return Aabb{min = min, max = max}
+  return Aabb {
+    min = linalg.min(linalg.min(p1, p2), linalg.min(p3, p4)),
+    max = linalg.max(linalg.max(p1, p2), linalg.max(p3, p4)),
+  }
 }
 
 ray_triangle_intersection :: proc "contextless" (
@@ -124,21 +125,13 @@ ray_sphere_intersection :: proc "contextless" (
   return true, root
 }
 
-PrimitiveType :: enum {
-  Triangle,
-  Sphere,
-}
-
-Primitive :: struct {
-  type: PrimitiveType,
-  data: union {
+Primitive :: union {
     Triangle,
     Sphere,
-  },
 }
 
 primitive_bounds :: proc(prim: Primitive) -> Aabb {
-  switch p in prim.data {
+  switch p in prim {
   case Triangle:
     return triangle_bounds(p)
   case Sphere:
@@ -204,7 +197,12 @@ delete_geometry :: proc(geometry: Geometry) {
   delete(geometry.indices)
 }
 
-make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}, random_colors: bool = false) -> (ret: Geometry) {
+make_cube :: proc(
+  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  random_colors: bool = false,
+) -> (
+  ret: Geometry,
+) {
   ret.vertices = make([]Vertex, 24)
   ret.indices = make([]u32, 36)
   // Front face
@@ -297,7 +295,12 @@ make_triangle :: proc(
 }
 
 // Quad (on XZ plane, facing Y up)
-make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}, random_colors: bool = false) -> (ret: Geometry) {
+make_quad :: proc(
+  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  random_colors: bool = false,
+) -> (
+  ret: Geometry,
+) {
   ret.vertices = make([]Vertex, 4)
   ret.indices = make([]u32, 6)
   ret.vertices[0] = {{-1, 0, -1}, VEC_UP, color, {0, 0}, {0, 1, 0, 1}}
@@ -319,15 +322,20 @@ make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}, random_colors: bool = fa
 }
 
 // Billboard Quad (on XY plane, facing Z forward, for camera-facing sprites)
-make_billboard_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}, random_colors: bool = false) -> (ret: Geometry) {
+make_billboard_quad :: proc(
+  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  random_colors: bool = false,
+) -> (
+  ret: Geometry,
+) {
   ret.vertices = make([]Vertex, 4)
   ret.indices = make([]u32, 6)
   // Vertices in XY plane (Z=0), centered at origin
   // Y axis is vertical, X axis is horizontal
-  ret.vertices[0] = {{-1, -1, 0}, VEC_FORWARD, color, {0, 1}, {0, 0, 1, 1}}  // Bottom-left
-  ret.vertices[1] = {{1, -1, 0}, VEC_FORWARD, color, {1, 1}, {0, 0, 1, 1}}   // Bottom-right
-  ret.vertices[2] = {{1, 1, 0}, VEC_FORWARD, color, {1, 0}, {0, 0, 1, 1}}    // Top-right
-  ret.vertices[3] = {{-1, 1, 0}, VEC_FORWARD, color, {0, 0}, {0, 0, 1, 1}}   // Top-left
+  ret.vertices[0] = {{-1, -1, 0}, VEC_FORWARD, color, {0, 1}, {0, 0, 1, 1}} // Bottom-left
+  ret.vertices[1] = {{1, -1, 0}, VEC_FORWARD, color, {1, 1}, {0, 0, 1, 1}} // Bottom-right
+  ret.vertices[2] = {{1, 1, 0}, VEC_FORWARD, color, {1, 0}, {0, 0, 1, 1}} // Top-right
+  ret.vertices[3] = {{-1, 1, 0}, VEC_FORWARD, color, {0, 0}, {0, 0, 1, 1}} // Top-left
   ret.indices[0], ret.indices[1], ret.indices[2] = 0, 1, 2
   ret.indices[3], ret.indices[4], ret.indices[5] = 2, 3, 0
   ret.aabb = Aabb {

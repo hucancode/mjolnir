@@ -500,7 +500,7 @@ ray_primitive_intersection :: proc (
   hit: bool,
   t: f32,
 ) {
-  switch p in prim.data {
+  switch p in prim {
   case Triangle:
     return ray_triangle_intersection(ray, p, max_t)
   case Sphere:
@@ -570,7 +570,7 @@ sphere_primitive_intersection :: proc (
   sphere: Sphere,
   prim: Primitive,
 ) -> bool {
-  switch p in prim.data {
+  switch p in prim {
   case Triangle:
     return sphere_triangle_intersection(sphere, p)
   case Sphere:

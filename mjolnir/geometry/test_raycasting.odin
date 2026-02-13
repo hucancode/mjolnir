@@ -245,27 +245,9 @@ test_sphere_triangle_intersection :: proc(t: ^testing.T) {
 @(test)
 test_bvh_basic_raycasting :: proc(t: ^testing.T) {
   primitives: [dynamic]Primitive
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {0, 0, 0}, v1 = {1, 0, 0}, v2 = {0, 1, 0}},
-    },
-  )
-  append(
-    &primitives,
-    Primitive {
-      type = .Sphere,
-      data = Sphere{center = {3, 0, 0}, radius = 1},
-    },
-  )
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {5, 0, 0}, v1 = {6, 0, 0}, v2 = {5, 1, 0}},
-    },
-  )
+  append(&primitives, Triangle{v0 = {0, 0, 0}, v1 = {1, 0, 0}, v2 = {0, 1, 0}})
+  append(&primitives, Sphere{center = {3, 0, 0}, radius = 1})
+  append(&primitives, Triangle{v0 = {5, 0, 0}, v1 = {6, 0, 0}, v2 = {5, 1, 0}})
   bvh: BVH(Primitive)
   bvh.bounds_func = primitive_bounds
   bvh_build(&bvh, primitives[:])
@@ -273,24 +255,14 @@ test_bvh_basic_raycasting :: proc(t: ^testing.T) {
     origin    = {0.25, 0.25, 1},
     direction = {0, 0, -1},
   }
-  hit := bvh_raycast(
-    &bvh,
-    ray,
-    100.0,
-    ray_primitive_intersection,
-  )
+  hit := bvh_raycast(&bvh, ray, 100.0, ray_primitive_intersection)
   testing.expect(t, hit.hit, "Ray should hit something in BVH")
   testing.expect_value(t, hit.t, 1.0)
   ray2 := Ray {
     origin    = {3, 0, 5},
     direction = {0, 0, -1},
   }
-  hit2 := bvh_raycast(
-    &bvh,
-    ray2,
-    100.0,
-    ray_primitive_intersection,
-  )
+  hit2 := bvh_raycast(&bvh, ray2, 100.0, ray_primitive_intersection)
   testing.expect(t, hit2.hit, "Ray should hit sphere in BVH")
   testing.expect_value(t, hit2.t, 4.0)
   bvh_destroy(&bvh)
@@ -301,27 +273,9 @@ test_bvh_basic_raycasting :: proc(t: ^testing.T) {
 test_bvh_single_vs_multi_raycast :: proc(t: ^testing.T) {
   primitives: [dynamic]Primitive
   // Create overlapping shapes along a ray path
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {0, 0, 1}, v1 = {1, 0, 1}, v2 = {0, 1, 1}},
-    },
-  )
-  append(
-    &primitives,
-    Primitive {
-      type = .Sphere,
-      data = Sphere{center = {0.5, 0.5, 3}, radius = 0.5},
-    },
-  )
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {0, 0, 5}, v1 = {1, 0, 5}, v2 = {0, 1, 5}},
-    },
-  )
+  append(&primitives, Triangle{v0 = {0, 0, 1}, v1 = {1, 0, 1}, v2 = {0, 1, 1}})
+  append(&primitives, Sphere{center = {0.5, 0.5, 3}, radius = 0.5})
+  append(&primitives, Triangle{v0 = {0, 0, 5}, v1 = {1, 0, 5}, v2 = {0, 1, 5}})
   bvh: BVH(Primitive)
   bvh.bounds_func = primitive_bounds
   bvh_build(&bvh, primitives[:])
@@ -340,13 +294,7 @@ test_bvh_single_vs_multi_raycast :: proc(t: ^testing.T) {
   testing.expect_value(t, single_hit.t, 1.0) // First triangle at z=1
   // Test multi raycast - should return all hits
   multi_hits: [dynamic]RayHit(Primitive)
-  bvh_raycast_multi(
-    &bvh,
-    ray,
-    100.0,
-    ray_primitive_intersection,
-    &multi_hits,
-  )
+  bvh_raycast_multi(&bvh, ray, 100.0, ray_primitive_intersection, &multi_hits)
   testing.expect_value(t, len(multi_hits), 3) // Should hit all 3 objects
   testing.expect_value(t, multi_hits[0].t, 1.0) // First triangle
   testing.expect(
@@ -366,21 +314,9 @@ test_bvh_single_vs_multi_raycast :: proc(t: ^testing.T) {
 test_bvh_max_distance :: proc(t: ^testing.T) {
   primitives: [dynamic]Primitive
   // Triangle at distance 5
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {0, 0, 5}, v1 = {1, 0, 5}, v2 = {0, 1, 5}},
-    },
-  )
+  append(&primitives, Triangle{v0 = {0, 0, 5}, v1 = {1, 0, 5}, v2 = {0, 1, 5}})
   // Sphere at distance 10
-  append(
-    &primitives,
-    Primitive {
-      type = .Sphere,
-      data = Sphere{center = {0.5, 0.5, 10}, radius = 0.5},
-    },
-  )
+  append(&primitives, Sphere{center = {0.5, 0.5, 10}, radius = 0.5})
   bvh: BVH(Primitive)
   bvh.bounds_func = primitive_bounds
   bvh_build(&bvh, primitives[:])
@@ -389,33 +325,16 @@ test_bvh_max_distance :: proc(t: ^testing.T) {
     direction = {0, 0, 1},
   }
   // Test with max distance that excludes sphere
-  hit_limited := bvh_raycast_single(
-    &bvh,
-    ray,
-    7.0,
-    ray_primitive_intersection,
-  )
+  hit_limited := bvh_raycast_single(&bvh, ray, 7.0, ray_primitive_intersection)
   testing.expect(t, hit_limited.hit, "Should hit triangle within range")
   testing.expect_value(t, hit_limited.t, 5.0)
   // Test multi raycast with limited distance
   multi_hits: [dynamic]RayHit(Primitive)
-  bvh_raycast_multi(
-    &bvh,
-    ray,
-    7.0,
-    ray_primitive_intersection,
-    &multi_hits,
-  )
+  bvh_raycast_multi(&bvh, ray, 7.0, ray_primitive_intersection, &multi_hits)
   testing.expect_value(t, len(multi_hits), 1)
   // Test with unlimited distance
   clear(&multi_hits)
-  bvh_raycast_multi(
-    &bvh,
-    ray,
-    100.0,
-    ray_primitive_intersection,
-    &multi_hits,
-  )
+  bvh_raycast_multi(&bvh, ray, 100.0, ray_primitive_intersection, &multi_hits)
   testing.expect_value(t, len(multi_hits), 2)
   bvh_destroy(&bvh)
   delete(primitives)
@@ -425,20 +344,8 @@ test_bvh_max_distance :: proc(t: ^testing.T) {
 @(test)
 test_bvh_sphere_query :: proc(t: ^testing.T) {
   primitives: [dynamic]Primitive
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {0, 0, 0}, v1 = {1, 0, 0}, v2 = {0, 1, 0}},
-    },
-  )
-  append(
-    &primitives,
-    Primitive {
-      type = .Sphere,
-      data = Sphere{center = {3, 0, 0}, radius = 0.5},
-    },
-  )
+  append(&primitives, Triangle{v0 = {0, 0, 0}, v1 = {1, 0, 0}, v2 = {0, 1, 0}})
+  append(&primitives, Sphere{center = {3, 0, 0}, radius = 0.5})
   bvh: BVH(Primitive)
   bvh.bounds_func = primitive_bounds
   bvh_build(&bvh, primitives[:])
@@ -475,32 +382,13 @@ test_bvh_sphere_query :: proc(t: ^testing.T) {
 test_bvh_aabb_query :: proc(t: ^testing.T) {
   primitives: [dynamic]Primitive
   // Triangle fully inside query AABB
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {1, 1, 1}, v1 = {2, 1, 1}, v2 = {1, 2, 1}},
-    },
-  )
+  append(&primitives, Triangle{v0 = {1, 1, 1}, v1 = {2, 1, 1}, v2 = {1, 2, 1}})
   // Sphere partially overlapping
-  append(
-    &primitives,
-    Primitive {
-      type = .Sphere,
-      data = Sphere{center = {3, 0, 0}, radius = 1.5},
-    },
-  )
+  append(&primitives, Sphere{center = {3, 0, 0}, radius = 1.5})
   // Triangle outside query
   append(
     &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle {
-        v0 = {10, 10, 10},
-        v1 = {11, 10, 10},
-        v2 = {10, 11, 10},
-      },
-    },
+    Triangle{v0 = {10, 10, 10}, v1 = {11, 10, 10}, v2 = {10, 11, 10}},
   )
   bvh: BVH(Primitive)
   bvh.bounds_func = primitive_bounds
@@ -535,12 +423,7 @@ test_bvh_empty :: proc(t: ^testing.T) {
     origin    = {0, 0, 0},
     direction = {0, 0, 1},
   }
-  hit := bvh_raycast_single(
-    &empty_bvh,
-    ray,
-    100.0,
-    ray_primitive_intersection,
-  )
+  hit := bvh_raycast_single(&empty_bvh, ray, 100.0, ray_primitive_intersection)
   testing.expect(t, !hit.hit, "Empty BVH should return no hit")
   multi_hits: [dynamic]RayHit(Primitive)
   bvh_raycast_multi(
@@ -558,24 +441,12 @@ test_bvh_empty :: proc(t: ^testing.T) {
 @(test)
 test_octree_basic_raycasting :: proc(t: ^testing.T) {
   primitives: [dynamic]Primitive
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {0, 0, 0}, v1 = {1, 0, 0}, v2 = {0, 1, 0}},
-    },
-  )
-  append(
-    &primitives,
-    Primitive {
-      type = .Sphere,
-      data = Sphere{center = {3, 0, 0}, radius = 1},
-    },
-  )
+  append(&primitives, Triangle{v0 = {0, 0, 0}, v1 = {1, 0, 0}, v2 = {0, 1, 0}})
+  append(&primitives, Sphere{center = {3, 0, 0}, radius = 1})
   octree: Octree(Primitive)
   octree.bounds_func = primitive_bounds
   octree.point_func = proc(p: Primitive) -> [3]f32 {
-    switch prim in p.data {
+    switch prim in p {
     case Triangle:
       return (prim.v0 + prim.v1 + prim.v2) / 3.0
     case Sphere:
@@ -595,24 +466,14 @@ test_octree_basic_raycasting :: proc(t: ^testing.T) {
     origin    = {0.25, 0.25, 1},
     direction = {0, 0, -1},
   }
-  hit := octree_raycast(
-    &octree,
-    ray,
-    100.0,
-    ray_primitive_intersection,
-  )
+  hit := octree_raycast(&octree, ray, 100.0, ray_primitive_intersection)
   testing.expect(t, hit.hit, "Ray should hit something in octree")
   testing.expect_value(t, hit.t, 1.0)
   ray2 := Ray {
     origin    = {3, 0, 5},
     direction = {0, 0, -1},
   }
-  hit2 := octree_raycast(
-    &octree,
-    ray2,
-    100.0,
-    ray_primitive_intersection,
-  )
+  hit2 := octree_raycast(&octree, ray2, 100.0, ray_primitive_intersection)
   testing.expect(t, hit2.hit, "Ray should hit sphere in octree")
   testing.expect_value(t, hit2.t, 4.0)
   octree_destroy(&octree)
@@ -623,31 +484,13 @@ test_octree_basic_raycasting :: proc(t: ^testing.T) {
 test_octree_single_vs_multi_raycast :: proc(t: ^testing.T) {
   primitives: [dynamic]Primitive
   // Create overlapping shapes along a ray path
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {0, 0, 1}, v1 = {1, 0, 1}, v2 = {0, 1, 1}},
-    },
-  )
-  append(
-    &primitives,
-    Primitive {
-      type = .Sphere,
-      data = Sphere{center = {0.5, 0.5, 3}, radius = 0.5},
-    },
-  )
-  append(
-    &primitives,
-    Primitive {
-      type = .Triangle,
-      data = Triangle{v0 = {0, 0, 5}, v1 = {1, 0, 5}, v2 = {0, 1, 5}},
-    },
-  )
+  append(&primitives, Triangle{v0 = {0, 0, 1}, v1 = {1, 0, 1}, v2 = {0, 1, 1}})
+  append(&primitives, Sphere{center = {0.5, 0.5, 3}, radius = 0.5})
+  append(&primitives, Triangle{v0 = {0, 0, 5}, v1 = {1, 0, 5}, v2 = {0, 1, 5}})
   octree: Octree(Primitive)
   octree.bounds_func = primitive_bounds
   octree.point_func = proc(p: Primitive) -> [3]f32 {
-    switch prim in p.data {
+    switch prim in p {
     case Triangle:
       return (prim.v0 + prim.v1 + prim.v2) / 3.0
     case Sphere:
@@ -704,18 +547,12 @@ test_octree_subdivision_with_raycast :: proc(t: ^testing.T) {
   // Create clustered primitives to force subdivision
   for i in 0 ..< 10 {
     fi := f32(i) * 0.1
-    append(
-      &primitives,
-      Primitive {
-        type = .Sphere,
-        data = Sphere{center = {fi, fi, fi}, radius = 0.05},
-      },
-    )
+    append(&primitives, Sphere{center = {fi, fi, fi}, radius = 0.05})
   }
   octree: Octree(Primitive)
   octree.bounds_func = primitive_bounds
   octree.point_func = proc(p: Primitive) -> [3]f32 {
-    switch prim in p.data {
+    switch prim in p {
     case Triangle:
       return (prim.v0 + prim.v1 + prim.v2) / 3.0
     case Sphere:
@@ -762,7 +599,7 @@ test_octree_empty :: proc(t: ^testing.T) {
   empty_octree: Octree(Primitive)
   empty_octree.bounds_func = primitive_bounds
   empty_octree.point_func = proc(p: Primitive) -> [3]f32 {
-    switch prim in p.data {
+    switch prim in p {
     case Triangle:
       return (prim.v0 + prim.v1 + prim.v2) / 3.0
     case Sphere:
@@ -800,13 +637,10 @@ test_large_scene_raycasting :: proc(t: ^testing.T) {
       fz := f32(z)
       append(
         &primitives,
-        Primitive {
-          type = .Triangle,
-          data = Triangle {
-            v0 = {fx, 0, fz},
-            v1 = {fx + 0.8, 0, fz},
-            v2 = {fx, 0, fz + 0.8},
-          },
+        Triangle {
+          v0 = {fx, 0, fz},
+          v1 = {fx + 0.8, 0, fz},
+          v2 = {fx, 0, fz + 0.8},
         },
       )
     }
@@ -814,13 +648,7 @@ test_large_scene_raycasting :: proc(t: ^testing.T) {
   // Add some spheres
   for i in 0 ..< 20 {
     fi := f32(i)
-    append(
-      &primitives,
-      Primitive {
-        type = .Sphere,
-        data = Sphere{center = {fi * 0.5, 1, fi * 0.5}, radius = 0.3},
-      },
-    )
+    append(&primitives, Sphere{center = {fi * 0.5, 1, fi * 0.5}, radius = 0.3})
   }
   bvh: BVH(Primitive)
   bvh.bounds_func = primitive_bounds
@@ -832,12 +660,7 @@ test_large_scene_raycasting :: proc(t: ^testing.T) {
       origin    = {f32(i), 5, f32(i)},
       direction = {0, -1, 0},
     }
-    hit := bvh_raycast_single(
-      &bvh,
-      ray,
-      100.0,
-      ray_primitive_intersection,
-    )
+    hit := bvh_raycast_single(&bvh, ray, 100.0, ray_primitive_intersection)
     if hit.hit do num_hits += 1
   }
   testing.expect(t, num_hits > 0, "Should have some hits in large scene")
@@ -878,8 +701,7 @@ benchmark_bvh_ray_single :: proc(t: ^testing.T) {
     state.rays = generate_random_rays(100_000, bounds)
     state.current_ray = 0
     options.input = slice.bytes_from_ptr(state, size_of(BVH_Ray_Single_State))
-    options.bytes =
-      size_of(Ray) + size_of(RayHit(Primitive))
+    options.bytes = size_of(Ray) + size_of(RayHit(Primitive))
     return nil
   }
   bench_proc :: proc(
@@ -962,9 +784,7 @@ benchmark_bvh_ray_multi :: proc(t: ^testing.T) {
     state.current_ray = 0
     state.multi_hits = make([dynamic]RayHit(Primitive))
     options.input = slice.bytes_from_ptr(state, size_of(BVH_Ray_Multi_State))
-    options.bytes =
-      size_of(Ray) +
-      size_of([dynamic]RayHit(Primitive))
+    options.bytes = size_of(Ray) + size_of([dynamic]RayHit(Primitive))
     return nil
   }
   bench_proc :: proc(
@@ -988,8 +808,7 @@ benchmark_bvh_ray_multi :: proc(t: ^testing.T) {
       }
       clear(&state.multi_hits)
       options.processed +=
-        size_of(Ray) +
-        len(state.multi_hits) * size_of(RayHit(Primitive))
+        size_of(Ray) + len(state.multi_hits) * size_of(RayHit(Primitive))
     }
     return nil
   }
@@ -1054,8 +873,7 @@ benchmark_bvh_sphere :: proc(t: ^testing.T) {
     state.current_sphere = 0
     state.results = make([dynamic]Primitive)
     options.input = slice.bytes_from_ptr(state, size_of(BVH_Sphere_State))
-    options.bytes =
-      size_of(Sphere) + size_of([dynamic]Primitive)
+    options.bytes = size_of(Sphere) + size_of([dynamic]Primitive)
     return nil
   }
   bench_proc :: proc(
@@ -1078,8 +896,7 @@ benchmark_bvh_sphere :: proc(t: ^testing.T) {
       }
       clear(&state.results)
       options.processed +=
-        size_of(Sphere) +
-        len(state.results) * size_of(Primitive)
+        size_of(Sphere) + len(state.results) * size_of(Primitive)
     }
     return nil
   }
@@ -1164,8 +981,7 @@ benchmark_bvh_aabb :: proc(t: ^testing.T) {
     state.current_aabb = 0
     state.results = make([dynamic]Primitive)
     options.input = slice.bytes_from_ptr(state, size_of(BVH_AABB_State))
-    options.bytes =
-      size_of(Aabb) + size_of([dynamic]Primitive)
+    options.bytes = size_of(Aabb) + size_of([dynamic]Primitive)
     return nil
   }
   bench_proc :: proc(
@@ -1183,8 +999,7 @@ benchmark_bvh_aabb :: proc(t: ^testing.T) {
       }
       clear(&state.results)
       options.processed +=
-        size_of(Aabb) +
-        len(state.results) * size_of(Primitive)
+        size_of(Aabb) + len(state.results) * size_of(Primitive)
     }
     return nil
   }
@@ -1245,7 +1060,7 @@ benchmark_octree_ray_single :: proc(t: ^testing.T) {
     state.primitives = generate_random_primitives(100_000, bounds)
     state.octree.bounds_func = primitive_bounds
     state.octree.point_func = proc(p: Primitive) -> [3]f32 {
-      switch prim in p.data {
+      switch prim in p {
       case Triangle:
         return (prim.v0 + prim.v1 + prim.v2) / 3.0
       case Sphere:
@@ -1263,8 +1078,7 @@ benchmark_octree_ray_single :: proc(t: ^testing.T) {
       state,
       size_of(Octree_Ray_Single_State),
     )
-    options.bytes =
-      size_of(Ray) + size_of(RayHit(Primitive))
+    options.bytes = size_of(Ray) + size_of(RayHit(Primitive))
     return nil
   }
   bench_proc :: proc(
@@ -1342,7 +1156,7 @@ benchmark_octree_ray_multi :: proc(t: ^testing.T) {
     state.primitives = generate_random_primitives(100_000, bounds)
     state.octree.bounds_func = primitive_bounds
     state.octree.point_func = proc(p: Primitive) -> [3]f32 {
-      switch prim in p.data {
+      switch prim in p {
       case Triangle:
         return (prim.v0 + prim.v1 + prim.v2) / 3.0
       case Sphere:
@@ -1361,9 +1175,7 @@ benchmark_octree_ray_multi :: proc(t: ^testing.T) {
       state,
       size_of(Octree_Ray_Multi_State),
     )
-    options.bytes =
-      size_of(Ray) +
-      size_of([dynamic]RayHit(Primitive))
+    options.bytes = size_of(Ray) + size_of([dynamic]RayHit(Primitive))
     return nil
   }
   bench_proc :: proc(
@@ -1387,8 +1199,7 @@ benchmark_octree_ray_multi :: proc(t: ^testing.T) {
       }
       clear(&state.multi_hits)
       options.processed +=
-        size_of(Ray) +
-        len(state.multi_hits) * size_of(RayHit(Primitive))
+        size_of(Ray) + len(state.multi_hits) * size_of(RayHit(Primitive))
     }
     return nil
   }
@@ -1449,7 +1260,7 @@ benchmark_octree_sphere :: proc(t: ^testing.T) {
     state.primitives = generate_random_primitives(100_000, bounds)
     state.octree.bounds_func = primitive_bounds
     state.octree.point_func = proc(p: Primitive) -> [3]f32 {
-      switch prim in p.data {
+      switch prim in p {
       case Triangle:
         return (prim.v0 + prim.v1 + prim.v2) / 3.0
       case Sphere:
@@ -1465,8 +1276,7 @@ benchmark_octree_sphere :: proc(t: ^testing.T) {
     state.current_sphere = 0
     state.results = make([dynamic]Primitive)
     options.input = slice.bytes_from_ptr(state, size_of(Octree_Sphere_State))
-    options.bytes =
-      size_of(Sphere) + size_of([dynamic]Primitive)
+    options.bytes = size_of(Sphere) + size_of([dynamic]Primitive)
     return nil
   }
   bench_proc :: proc(
@@ -1489,8 +1299,7 @@ benchmark_octree_sphere :: proc(t: ^testing.T) {
       }
       clear(&state.results)
       options.processed +=
-        size_of(Sphere) +
-        len(state.results) * size_of(Primitive)
+        size_of(Sphere) + len(state.results) * size_of(Primitive)
     }
     return nil
   }
@@ -1614,7 +1423,7 @@ benchmark_octree_build :: proc(t: ^testing.T) {
     state.primitives = generate_random_primitives(100_000, state.bounds)
     state.octree.bounds_func = primitive_bounds
     state.octree.point_func = proc(p: Primitive) -> [3]f32 {
-      switch prim in p.data {
+      switch prim in p {
       case Triangle:
         return (prim.v0 + prim.v1 + prim.v2) / 3.0
       case Sphere:
@@ -1675,10 +1484,7 @@ Octree_Build_State :: struct {
   bounds:     Aabb,
 }
 
-generate_random_primitives :: proc(
-  count: int,
-  bounds: Aabb,
-) -> []Primitive {
+generate_random_primitives :: proc(count: int, bounds: Aabb) -> []Primitive {
   primitives := make([]Primitive, count)
   extent := bounds.max - bounds.min
   for i in 0 ..< count {
@@ -1694,32 +1500,23 @@ generate_random_primitives :: proc(
           }
       // Create triangle with random size (0.1 to 1.0 units)
       size := 0.1 + rand.float32() * 0.9
-      primitives[i] = Primitive {
-        type = .Triangle,
-        data = Triangle {
-          v0 = center + [3]f32{0, 0, 0},
-          v1 = center + [3]f32{size, 0, 0},
-          v2 = center + [3]f32{0, size, 0},
-        },
+      primitives[i] = Triangle {
+        v0 = center + [3]f32{0, 0, 0},
+        v1 = center + [3]f32{size, 0, 0},
+        v2 = center + [3]f32{0, size, 0},
       }
     } else {
       // Random sphere
-      primitives[i] = Primitive {
-        type = .Sphere,
-        data = Sphere {
-          center = bounds.min + [3]f32{rand.float32() * extent.x, rand.float32() * extent.y, rand.float32() * extent.z},
-          radius = 0.1 + rand.float32() * 0.4, // 0.1 to 0.5 radius
-        },
+      primitives[i] = Sphere {
+        center = bounds.min + [3]f32{rand.float32() * extent.x, rand.float32() * extent.y, rand.float32() * extent.z},
+        radius = 0.1 + rand.float32() * 0.4, // 0.1 to 0.5 radius
       }
     }
   }
   return primitives
 }
 
-generate_random_rays :: proc(
-  count: int,
-  bounds: Aabb,
-) -> []Ray {
+generate_random_rays :: proc(count: int, bounds: Aabb) -> []Ray {
   rays := make([]Ray, count)
   extent := bounds.max - bounds.min
   for i in 0 ..< count {
@@ -1752,10 +1549,7 @@ generate_random_rays :: proc(
   return rays
 }
 
-generate_random_spheres :: proc(
-  count: int,
-  bounds: Aabb,
-) -> []Sphere {
+generate_random_spheres :: proc(count: int, bounds: Aabb) -> []Sphere {
   spheres := make([]Sphere, count)
   extent := bounds.max - bounds.min
   for i in 0 ..< count {
