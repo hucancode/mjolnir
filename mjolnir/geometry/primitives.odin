@@ -126,8 +126,9 @@ ray_sphere_intersection :: proc "contextless" (
 }
 
 Primitive :: union {
-    Triangle,
-    Sphere,
+  Triangle,
+  Sphere,
+  Disc,
 }
 
 primitive_bounds :: proc(prim: Primitive) -> Aabb {
@@ -136,6 +137,8 @@ primitive_bounds :: proc(prim: Primitive) -> Aabb {
     return triangle_bounds(p)
   case Sphere:
     return sphere_bounds(p)
+  case Disc:
+    return disc_bounds(p)
   }
   return AABB_UNDEFINED
 }

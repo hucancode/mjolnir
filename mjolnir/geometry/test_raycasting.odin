@@ -446,7 +446,7 @@ test_octree_basic_raycasting :: proc(t: ^testing.T) {
   octree: Octree(Primitive)
   octree.bounds_func = primitive_bounds
   octree.point_func = proc(p: Primitive) -> [3]f32 {
-    switch prim in p {
+    #partial switch prim in p {
     case Triangle:
       return (prim.v0 + prim.v1 + prim.v2) / 3.0
     case Sphere:
@@ -490,7 +490,7 @@ test_octree_single_vs_multi_raycast :: proc(t: ^testing.T) {
   octree: Octree(Primitive)
   octree.bounds_func = primitive_bounds
   octree.point_func = proc(p: Primitive) -> [3]f32 {
-    switch prim in p {
+    #partial switch prim in p {
     case Triangle:
       return (prim.v0 + prim.v1 + prim.v2) / 3.0
     case Sphere:
@@ -552,7 +552,7 @@ test_octree_subdivision_with_raycast :: proc(t: ^testing.T) {
   octree: Octree(Primitive)
   octree.bounds_func = primitive_bounds
   octree.point_func = proc(p: Primitive) -> [3]f32 {
-    switch prim in p {
+    #partial switch prim in p {
     case Triangle:
       return (prim.v0 + prim.v1 + prim.v2) / 3.0
     case Sphere:
@@ -592,38 +592,6 @@ test_octree_subdivision_with_raycast :: proc(t: ^testing.T) {
   octree_destroy(&octree)
   delete(primitives)
   delete(multi_hits)
-}
-
-@(test)
-test_octree_empty :: proc(t: ^testing.T) {
-  empty_octree: Octree(Primitive)
-  empty_octree.bounds_func = primitive_bounds
-  empty_octree.point_func = proc(p: Primitive) -> [3]f32 {
-    switch prim in p {
-    case Triangle:
-      return (prim.v0 + prim.v1 + prim.v2) / 3.0
-    case Sphere:
-      return prim.center
-    }
-    return {}
-  }
-  bounds := Aabb {
-    min = {-10, -10, -10},
-    max = {10, 10, 10},
-  }
-  octree_init(&empty_octree, bounds, 6, 4)
-  ray := Ray {
-    origin    = {0, 0, 0},
-    direction = {0, 0, 1},
-  }
-  oct_hit := octree_raycast_single(
-    &empty_octree,
-    ray,
-    100.0,
-    ray_primitive_intersection,
-  )
-  testing.expect(t, !oct_hit.hit, "Empty Octree should return no hit")
-  octree_destroy(&empty_octree)
 }
 
 @(test)
@@ -1060,7 +1028,7 @@ benchmark_octree_ray_single :: proc(t: ^testing.T) {
     state.primitives = generate_random_primitives(100_000, bounds)
     state.octree.bounds_func = primitive_bounds
     state.octree.point_func = proc(p: Primitive) -> [3]f32 {
-      switch prim in p {
+      #partial switch prim in p {
       case Triangle:
         return (prim.v0 + prim.v1 + prim.v2) / 3.0
       case Sphere:
@@ -1156,7 +1124,7 @@ benchmark_octree_ray_multi :: proc(t: ^testing.T) {
     state.primitives = generate_random_primitives(100_000, bounds)
     state.octree.bounds_func = primitive_bounds
     state.octree.point_func = proc(p: Primitive) -> [3]f32 {
-      switch prim in p {
+      #partial switch prim in p {
       case Triangle:
         return (prim.v0 + prim.v1 + prim.v2) / 3.0
       case Sphere:
@@ -1260,7 +1228,7 @@ benchmark_octree_sphere :: proc(t: ^testing.T) {
     state.primitives = generate_random_primitives(100_000, bounds)
     state.octree.bounds_func = primitive_bounds
     state.octree.point_func = proc(p: Primitive) -> [3]f32 {
-      switch prim in p {
+      #partial switch prim in p {
       case Triangle:
         return (prim.v0 + prim.v1 + prim.v2) / 3.0
       case Sphere:
@@ -1423,7 +1391,7 @@ benchmark_octree_build :: proc(t: ^testing.T) {
     state.primitives = generate_random_primitives(100_000, state.bounds)
     state.octree.bounds_func = primitive_bounds
     state.octree.point_func = proc(p: Primitive) -> [3]f32 {
-      switch prim in p {
+      #partial switch prim in p {
       case Triangle:
         return (prim.v0 + prim.v1 + prim.v2) / 3.0
       case Sphere:

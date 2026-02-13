@@ -492,7 +492,7 @@ overlap_circle_segment :: proc "contextless" (
   return dist_sqr <= radius * radius
 }
 
-ray_primitive_intersection :: proc (
+ray_primitive_intersection :: proc(
   ray: Ray,
   prim: Primitive,
   max_t: f32 = F32_MAX,
@@ -505,6 +505,8 @@ ray_primitive_intersection :: proc (
     return ray_triangle_intersection(ray, p, max_t)
   case Sphere:
     return ray_sphere_intersection(ray, p, max_t)
+  case Disc:
+    return false, 0
   }
   return false, 0
 }
@@ -524,6 +526,101 @@ sphere_triangle_intersection :: proc "contextless" (
   closest := closest_point_on_triangle_struct(sphere.center, tri)
   d := linalg.length(sphere.center - closest)
   return d <= sphere.radius
+}
+
+sphere_disc_intersection :: proc "contextless" (
+  sphere: Sphere,
+  disc: Disc,
+) -> bool {
+  n_len_sq := linalg.length2(disc.normal)
+  if n_len_sq <= math.F32_EPSILON * math.F32_EPSILON do return false
+  n := disc.normal / math.sqrt(n_len_sq)
+  to_center := sphere.center - disc.center
+  dist_to_plane := linalg.dot(to_center, n)
+  projected := sphere.center - n * dist_to_plane
+  radial := projected - disc.center
+  radial_len_sq := linalg.length2(radial)
+  closest := projected
+  radius_sq := disc.radius * disc.radius
+  if radial_len_sq > radius_sq && radial_len_sq > math.F32_EPSILON {
+    closest = disc.center + radial * (disc.radius / math.sqrt(radial_len_sq))
+  }
+  return(
+    linalg.length2(sphere.center - closest) <=
+    sphere.radius * sphere.radius \
+  )
+}
+
+triangle_disc_intersection :: proc "contextless" (
+  tri: Triangle,
+  disc: Disc,
+) -> bool {
+  n_len_sq := linalg.length2(disc.normal)
+  if n_len_sq <= math.F32_EPSILON * math.F32_EPSILON do return false
+  n := disc.normal / math.sqrt(n_len_sq)
+  epsilon :: 1e-6
+  d0 := linalg.dot(tri.v0 - disc.center, n)
+  d1 := linalg.dot(tri.v1 - disc.center, n)
+  d2 := linalg.dot(tri.v2 - disc.center, n)
+  radius_sq := disc.radius * disc.radius
+  // Coplanar case reduces to point-to-triangle distance in disc plane.
+  if math.abs(d0) <= epsilon &&
+     math.abs(d1) <= epsilon &&
+     math.abs(d2) <= epsilon {
+    closest := closest_point_on_triangle_struct(disc.center, tri)
+    return linalg.length2(closest - disc.center) <= radius_sq
+  }
+  // Triangle is fully on one side of the disc plane.
+  if (d0 > epsilon && d1 > epsilon && d2 > epsilon) ||
+     (d0 < -epsilon && d1 < -epsilon && d2 < -epsilon) {
+    return false
+  }
+  points: [6][3]f32
+  count := 0
+  if math.abs(d0) <= epsilon {
+    points[count] = tri.v0
+    count += 1
+  }
+  if d0 * d1 < 0 {
+    t := d0 / (d0 - d1)
+    points[count] = tri.v0 + (tri.v1 - tri.v0) * t
+    count += 1
+  }
+  if math.abs(d1) <= epsilon {
+    points[count] = tri.v1
+    count += 1
+  }
+  if d1 * d2 < 0 {
+    t := d1 / (d1 - d2)
+    points[count] = tri.v1 + (tri.v2 - tri.v1) * t
+    count += 1
+  }
+  if math.abs(d2) <= epsilon {
+    points[count] = tri.v2
+    count += 1
+  }
+  if d2 * d0 < 0 {
+    t := d2 / (d2 - d0)
+    points[count] = tri.v2 + (tri.v0 - tri.v2) * t
+    count += 1
+  }
+  if count == 0 do return false
+  for i in 0 ..< count {
+    if linalg.length2(points[i] - disc.center) <= radius_sq {
+      return true
+    }
+  }
+  if count >= 2 {
+    for i in 0 ..< count - 1 {
+      for j in i + 1 ..< count {
+        closest := closest_point_on_segment(disc.center, points[i], points[j])
+        if linalg.length2(closest - disc.center) <= radius_sq {
+          return true
+        }
+      }
+    }
+  }
+  return false
 }
 
 @(private)
@@ -566,7 +663,7 @@ closest_point_on_triangle_struct :: proc "contextless" (
   return tri.v0 + ab * v + ac * w
 }
 
-sphere_primitive_intersection :: proc (
+sphere_primitive_intersection :: proc(
   sphere: Sphere,
   prim: Primitive,
 ) -> bool {
@@ -575,6 +672,20 @@ sphere_primitive_intersection :: proc (
     return sphere_triangle_intersection(sphere, p)
   case Sphere:
     return sphere_sphere_intersection(sphere, p)
+  case Disc:
+    return sphere_disc_intersection(sphere, p)
+  }
+  return false
+}
+
+disc_primitive_intersection :: proc(disc: Disc, prim: Primitive) -> bool {
+  switch p in prim {
+  case Triangle:
+    return triangle_disc_intersection(p, disc)
+  case Sphere:
+    return sphere_disc_intersection(p, disc)
+  case Disc:
+    return false
   }
   return false
 }
