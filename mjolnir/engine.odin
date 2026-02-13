@@ -581,14 +581,14 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
       if node := cont.get(self.world.nodes, handle); node != nil {
         render.upload_node_transform(
           &self.render,
-          transmute(render.NodeHandle)handle,
+          handle.index,
           &node.transform.world_matrix,
         )
       } else {
         zero_matrix: matrix[4, 4]f32
         render.upload_node_transform(
           &self.render,
-          transmute(render.NodeHandle)handle,
+          handle.index,
           &zero_matrix,
         )
       }
@@ -615,34 +615,34 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
       if node == nil {
         render.release_bone_matrix_range_for_node(
           &self.render,
-          transmute(render.NodeHandle)handle,
+          handle.index,
         )
       } else if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment);
          has_mesh {
         if _, has_skin := mesh_attachment.skinning.?; has_skin {
           if bone_offset, has_offset :=
-               self.render.bone_matrix_offsets[transmute(render.NodeHandle)handle];
+               self.render.bone_matrix_offsets[handle.index];
              has_offset {
             node_data.attachment_data_index = bone_offset
           } else if skinning, has_skinning := mesh_attachment.skinning.?;
              has_skinning && len(skinning.matrices) > 0 {
             bone_offset := render.ensure_bone_matrix_range_for_node(
               &self.render,
-              transmute(render.NodeHandle)handle,
+              handle.index,
               u32(len(skinning.matrices)),
             )
             node_data.attachment_data_index = bone_offset
           } else {
             render.release_bone_matrix_range_for_node(
               &self.render,
-              transmute(render.NodeHandle)handle,
+              handle.index,
             )
             node_data.attachment_data_index = 0xFFFFFFFF
           }
         } else {
           render.release_bone_matrix_range_for_node(
             &self.render,
-            transmute(render.NodeHandle)handle,
+            handle.index,
           )
           node_data.attachment_data_index = 0xFFFFFFFF
         }
@@ -671,7 +671,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
          has_sprite {
         render.release_bone_matrix_range_for_node(
           &self.render,
-          transmute(render.NodeHandle)handle,
+          handle.index,
         )
         sprite_attachment, _ := node.attachment.(world.SpriteAttachment)
         node_data.material_id = sprite_attachment.material.index
@@ -699,12 +699,12 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
       } else {
         render.release_bone_matrix_range_for_node(
           &self.render,
-          transmute(render.NodeHandle)handle,
+          handle.index,
         )
       }
       render.upload_node_data(
         &self.render,
-        transmute(render.NodeHandle)handle,
+        handle.index,
         &node_data,
       )
       next_n += 1
@@ -797,7 +797,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
             if bone_count > 0 {
               offset := render.ensure_bone_matrix_range_for_node(
                 &self.render,
-                transmute(render.NodeHandle)handle,
+                handle.index,
                 bone_count,
               )
               if offset != 0xFFFFFFFF {
@@ -890,7 +890,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
          forcefield != nil {
         render.upload_forcefield_data(
           &self.render,
-          transmute(render.ForceFieldHandle)handle,
+          handle.index,
           &render.ForceField {
             tangent_strength = forcefield.tangent_strength,
             strength = forcefield.strength,

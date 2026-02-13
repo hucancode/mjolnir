@@ -116,7 +116,7 @@ main :: proc() {
         if bone_buffer.mapped == nil do continue
 
         bone_count := len(skin.bones)
-        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[transmute(render.NodeHandle)child]
+        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[child.index]
         if !has_offset do continue
 
         // Get bone matrices using gpu.get

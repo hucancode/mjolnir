@@ -163,7 +163,7 @@ main :: proc() {
           continue
         }
         bone_count := len(skin.bones)
-        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[transmute(render.NodeHandle)child]
+        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[child.index]
         if !has_offset {
           continue
         }

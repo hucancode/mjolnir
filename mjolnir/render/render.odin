@@ -3,8 +3,10 @@ package render
 import alg "../algebra"
 import cont "../containers"
 import "../gpu"
+import geom "../geometry"
 import "camera"
 import cam "camera"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import d "data"
@@ -20,6 +22,31 @@ import vk "vendor:vulkan"
 import "visibility"
 
 FRAMES_IN_FLIGHT :: d.FRAMES_IN_FLIGHT
+
+Handle :: rd.Handle
+MeshHandle :: rd.MeshHandle
+MaterialHandle :: rd.MaterialHandle
+Image2DHandle :: gpu.Texture2DHandle
+ImageCubeHandle :: gpu.TextureCubeHandle
+CameraHandle :: rd.CameraHandle
+LightHandle :: rd.LightHandle
+
+MeshFlag :: rd.MeshFlag
+MeshFlagSet :: rd.MeshFlagSet
+BufferAllocation :: rd.BufferAllocation
+Primitive :: rd.Primitive
+ShaderFeature :: rd.ShaderFeature
+ShaderFeatureSet :: rd.ShaderFeatureSet
+NodeFlag :: rd.NodeFlag
+NodeFlagSet :: rd.NodeFlagSet
+Node :: rd.Node
+Mesh :: rd.Mesh
+Material :: rd.Material
+Emitter :: rd.Emitter
+ForceField :: rd.ForceField
+Sprite :: rd.Sprite
+Light :: rd.Light
+LightType :: rd.LightType
 
 Manager :: struct {
   geometry:                geometry.Renderer,
@@ -61,7 +88,7 @@ Manager :: struct {
   lights_buffer:           gpu.BindlessBuffer(Light),
   mesh_manager:            gpu.MeshManager,
   bone_matrix_slab:        cont.SlabAllocator,
-  bone_matrix_offsets:     map[d.NodeHandle]u32,
+  bone_matrix_offsets:     map[u32]u32,
   texture_manager:         gpu.TextureManager,
   // Camera GPU resources (indexed by camera handle.index)
   cameras_gpu:             [d.MAX_CAMERAS]camera.CameraGPU,
@@ -203,7 +230,7 @@ init_bone_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
     int(self.bone_matrix_slab.capacity),
     {.VERTEX},
   ) or_return
-  self.bone_matrix_offsets = make(map[d.NodeHandle]u32)
+  self.bone_matrix_offsets = make(map[u32]u32)
   return .SUCCESS
 }
 
@@ -1194,5 +1221,453 @@ get_camera_attachment :: proc(
     &self.cameras_gpu[camera_handle.index],
     attachment_type,
     frame_index,
+  )
+}
+
+allocate_mesh_geometry :: proc(
+  gctx: ^gpu.GPUContext,
+  render: ^Manager,
+  geometry_data: geom.Geometry,
+) -> (
+  handle: u32,
+  ret: vk.Result,
+) {
+  if len(render.meshes) >= rd.MAX_MESHES do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  found := false
+  // TODO: eliminate this inefficiency
+  for i in u32(0) ..< rd.MAX_MESHES {
+    if _, ok := render.meshes[i]; !ok {
+      handle = i
+      found = true
+      break
+    }
+  }
+  if !found do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  mesh := Mesh{}
+  mesh.aabb_min = geometry_data.aabb.min
+  mesh.aabb_max = geometry_data.aabb.max
+  mesh.flags = {}
+  mesh.index_count = u32(len(geometry_data.indices))
+  vertex_allocation := gpu.allocate_vertices(
+    &render.mesh_manager,
+    gctx,
+    geometry_data.vertices,
+  ) or_return
+  index_allocation := gpu.allocate_indices(
+    &render.mesh_manager,
+    gctx,
+    geometry_data.indices,
+  ) or_return
+  mesh.first_index = index_allocation.offset
+  mesh.vertex_offset = i32(vertex_allocation.offset)
+  mesh.skinning_offset = 0
+  if len(geometry_data.skinnings) > 0 {
+    skinning_allocation := gpu.allocate_vertex_skinning(
+      &render.mesh_manager,
+      gctx,
+      geometry_data.skinnings,
+    ) or_return
+    mesh.skinning_offset = skinning_allocation.offset
+    mesh.flags |= {.SKINNED}
+  }
+  render.meshes[handle] = mesh
+  upload_mesh_data(render, handle, &mesh)
+  return handle, .SUCCESS
+}
+
+sync_mesh_geometry_for_handle :: proc(
+  gctx: ^gpu.GPUContext,
+  render: ^Manager,
+  handle: u32,
+  geometry_data: geom.Geometry,
+) -> vk.Result {
+  ensure_mesh_slot(render, handle)
+  mesh := render.meshes[handle]
+  if mesh.index_count > 0 {
+    gpu.free_vertices(
+      &render.mesh_manager,
+      BufferAllocation{offset = u32(mesh.vertex_offset), count = 1},
+    )
+    gpu.free_indices(
+      &render.mesh_manager,
+      BufferAllocation{offset = mesh.first_index, count = 1},
+    )
+    if .SKINNED in mesh.flags {
+      gpu.free_vertex_skinning(
+        &render.mesh_manager,
+        BufferAllocation{offset = mesh.skinning_offset, count = 1},
+      )
+    }
+  }
+  mesh.aabb_min = geometry_data.aabb.min
+  mesh.aabb_max = geometry_data.aabb.max
+  mesh.flags = {}
+  mesh.index_count = u32(len(geometry_data.indices))
+  vertex_allocation := gpu.allocate_vertices(
+    &render.mesh_manager,
+    gctx,
+    geometry_data.vertices,
+  ) or_return
+  index_allocation := gpu.allocate_indices(
+    &render.mesh_manager,
+    gctx,
+    geometry_data.indices,
+  ) or_return
+  mesh.first_index = index_allocation.offset
+  mesh.vertex_offset = i32(vertex_allocation.offset)
+  mesh.skinning_offset = 0
+  if len(geometry_data.skinnings) > 0 {
+    skinning_allocation := gpu.allocate_vertex_skinning(
+      &render.mesh_manager,
+      gctx,
+      geometry_data.skinnings,
+    ) or_return
+    mesh.skinning_offset = skinning_allocation.offset
+    mesh.flags |= {.SKINNED}
+  }
+  render.meshes[handle] = mesh
+  upload_mesh_data(render, handle, &mesh)
+  return .SUCCESS
+}
+
+free_mesh_geometry :: proc(render: ^Manager, handle: u32) {
+  mesh, ok := render.meshes[handle]
+  if !ok do return
+  if mesh.index_count > 0 {
+    gpu.free_vertices(
+      &render.mesh_manager,
+      BufferAllocation{offset = u32(mesh.vertex_offset), count = 1},
+    )
+    gpu.free_indices(
+      &render.mesh_manager,
+      BufferAllocation{offset = mesh.first_index, count = 1},
+    )
+  }
+  if .SKINNED in mesh.flags {
+    gpu.free_vertex_skinning(
+      &render.mesh_manager,
+      BufferAllocation{offset = mesh.skinning_offset, count = 1},
+    )
+  }
+  delete_key(&render.meshes, handle)
+}
+
+create_empty_texture_2d :: proc(
+  gctx: ^gpu.GPUContext,
+  render: ^Manager,
+  width, height: u32,
+  format: vk.Format,
+  usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
+) -> (
+  handle: gpu.Texture2DHandle,
+  ret: vk.Result,
+) {
+  gpu_handle, gpu_ret := gpu.allocate_texture_2d(
+    &render.texture_manager,
+    gctx,
+    width,
+    height,
+    format,
+    usage,
+  )
+  if gpu_ret != .SUCCESS {
+    return {}, gpu_ret
+  }
+  handle = gpu_handle
+  return handle, .SUCCESS
+}
+
+create_empty_texture_cube :: proc(
+  gctx: ^gpu.GPUContext,
+  render: ^Manager,
+  size: u32,
+  format: vk.Format = .D32_SFLOAT,
+  usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+) -> (
+  handle: gpu.TextureCubeHandle,
+  ret: vk.Result,
+) {
+  gpu_handle, gpu_ret := gpu.allocate_texture_cube(
+    &render.texture_manager,
+    gctx,
+    size,
+    format,
+    usage,
+  )
+  if gpu_ret != .SUCCESS {
+    return {}, gpu_ret
+  }
+  handle = transmute(gpu.TextureCubeHandle)gpu_handle
+  return handle, .SUCCESS
+}
+
+create_texture_from_path :: proc(
+  gctx: ^gpu.GPUContext,
+  render: ^Manager,
+  path: string,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
+  usage: vk.ImageUsageFlags = {.SAMPLED},
+  is_hdr := false,
+) -> (
+  handle: gpu.Texture2DHandle,
+  ret: vk.Result,
+) {
+  gpu_handle, gpu_ret := gpu.create_texture_2d_from_path(
+    gctx,
+    &render.texture_manager,
+    path,
+    format,
+    generate_mips,
+    usage,
+    is_hdr,
+  )
+  if gpu_ret != .SUCCESS {
+    return {}, gpu_ret
+  }
+  handle = transmute(gpu.Texture2DHandle)gpu_handle
+  return handle, .SUCCESS
+}
+
+create_texture_from_data :: proc(
+  gctx: ^gpu.GPUContext,
+  render: ^Manager,
+  data: []u8,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
+) -> (
+  handle: gpu.Texture2DHandle,
+  ret: vk.Result,
+) {
+  gpu_handle, gpu_ret := gpu.create_texture_2d_from_data(
+    gctx,
+    &render.texture_manager,
+    data,
+    format,
+    generate_mips,
+  )
+  if gpu_ret != .SUCCESS {
+    return {}, gpu_ret
+  }
+  handle = transmute(gpu.Texture2DHandle)gpu_handle
+  return handle, .SUCCESS
+}
+
+create_texture_from_pixels :: proc(
+  gctx: ^gpu.GPUContext,
+  render: ^Manager,
+  pixels: []u8,
+  width, height: int,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
+) -> (
+  handle: gpu.Texture2DHandle,
+  ret: vk.Result,
+) {
+  gpu_handle, gpu_ret := gpu.allocate_texture_2d_with_data(
+    &render.texture_manager,
+    gctx,
+    raw_data(pixels),
+    vk.DeviceSize(len(pixels)),
+    u32(width),
+    u32(height),
+    format,
+    {.SAMPLED},
+    generate_mips,
+  )
+  if gpu_ret != .SUCCESS {
+    return {}, gpu_ret
+  }
+  handle = transmute(gpu.Texture2DHandle)gpu_handle
+  return handle, .SUCCESS
+}
+
+create_texture :: proc {
+  create_empty_texture_2d,
+  create_texture_from_path,
+  create_texture_from_data,
+  create_texture_from_pixels,
+}
+
+create_cube_texture :: proc {
+  create_empty_texture_cube,
+}
+
+set_texture_2d_descriptor :: proc(
+  gctx: ^gpu.GPUContext,
+  textures_descriptor_set: vk.DescriptorSet,
+  texture_index: u32,
+  image_view: vk.ImageView,
+) {
+  if texture_index >= rd.MAX_TEXTURES {
+    log.warnf("Index %d out of bounds for bindless textures", texture_index)
+    return
+  }
+  if textures_descriptor_set == 0 {
+    log.error("textures_descriptor_set is not initialized")
+    return
+  }
+  gpu.update_descriptor_set_array_offset(
+    gctx,
+    textures_descriptor_set,
+    0,
+    texture_index,
+    {
+      .SAMPLED_IMAGE,
+      vk.DescriptorImageInfo {
+        imageView = image_view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    },
+  )
+}
+
+set_texture_cube_descriptor :: proc(
+  gctx: ^gpu.GPUContext,
+  textures_descriptor_set: vk.DescriptorSet,
+  texture_index: u32,
+  image_view: vk.ImageView,
+) {
+  if texture_index >= rd.MAX_CUBE_TEXTURES {
+    log.warnf(
+      "Index %d out of bounds for bindless cube textures",
+      texture_index,
+    )
+    return
+  }
+  if textures_descriptor_set == 0 {
+    log.error("textures_descriptor_set is not initialized")
+    return
+  }
+  gpu.update_descriptor_set_array_offset(
+    gctx,
+    textures_descriptor_set,
+    2,
+    texture_index,
+    {
+      .SAMPLED_IMAGE,
+      vk.DescriptorImageInfo {
+        imageView = image_view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    },
+  )
+}
+
+upload_node_transform :: proc(
+  render: ^Manager,
+  index: u32,
+  world_matrix: ^matrix[4, 4]f32,
+) {
+  gpu.write(&render.world_matrix_buffer.buffer, world_matrix, int(index))
+}
+
+upload_node_data :: proc(render: ^Manager, index: u32, node_data: ^Node) {
+  gpu.write(&render.node_data_buffer.buffer, node_data, int(index))
+}
+
+upload_bone_matrices :: proc(
+  render: ^Manager,
+  frame_index: u32,
+  offset: u32,
+  matrices: []matrix[4, 4]f32,
+) {
+  frame_buffer := &render.bone_buffer.buffers[frame_index]
+  if frame_buffer.mapped == nil do return
+  l := int(offset)
+  r := l + len(matrices)
+  gpu_slice := gpu.get_all(frame_buffer)
+  copy(gpu_slice[l:r], matrices[:])
+}
+
+upload_sprite_data :: proc(
+  render: ^Manager,
+  index: u32,
+  sprite_data: ^Sprite,
+) {
+  gpu.write(&render.sprite_buffer.buffer, sprite_data, int(index))
+}
+
+upload_emitter_data :: proc(render: ^Manager, index: u32, emitter: ^Emitter) {
+  gpu.write(&render.emitter_buffer.buffer, emitter, int(index))
+}
+
+upload_forcefield_data :: proc(
+  render: ^Manager,
+  index: u32,
+  forcefield: ^ForceField,
+) {
+  gpu.write(&render.forcefield_buffer.buffer, forcefield, int(index))
+}
+
+upload_light_data :: proc(render: ^Manager, index: u32, light_data: ^rd.Light) {
+  gpu.write(&render.lights_buffer.buffer, light_data, int(index))
+  light.shadow_invalidate_light(&render.shadow, index)
+}
+
+upload_mesh_data :: proc(render: ^Manager, index: u32, mesh: ^Mesh) {
+  gpu.write(&render.mesh_data_buffer.buffer, mesh, int(index))
+}
+
+upload_material_data :: proc(
+  render: ^Manager,
+  index: u32,
+  material: ^Material,
+) {
+  gpu.write(&render.material_buffer.buffer, material, int(index))
+}
+
+ensure_bone_matrix_range_for_node :: proc(
+  render: ^Manager,
+  handle: u32,
+  bone_count: u32,
+) -> u32 {
+  if existing, ok := render.bone_matrix_offsets[handle]; ok {
+    return existing
+  }
+  offset := cont.slab_alloc(&render.bone_matrix_slab, bone_count)
+  if offset == 0xFFFFFFFF do return 0xFFFFFFFF
+  render.bone_matrix_offsets[handle] = offset
+  return offset
+}
+
+release_bone_matrix_range_for_node :: proc(render: ^Manager, handle: u32) {
+  if offset, ok := render.bone_matrix_offsets[handle]; ok {
+    cont.slab_free(&render.bone_matrix_slab, offset)
+    delete_key(&render.bone_matrix_offsets, handle)
+  }
+}
+
+// Upload camera CPU data to GPU per-frame buffer
+// Takes single CPU camera data and copies to the specified frame index
+upload_camera_data :: proc(
+  render: ^Manager,
+  camera_index: u32,
+  camera: cam.Camera,
+  frame_index: u32,
+) {
+  camera_copy := camera
+  camera_data: cam.CameraData
+  camera_data.view = cam.camera_view_matrix(&camera_copy)
+  camera_data.projection = cam.camera_projection_matrix(&camera_copy)
+  near, far := cam.camera_get_near_far(&camera_copy)
+  camera_data.viewport_params = [4]f32 {
+    f32(camera_copy.extent[0]),
+    f32(camera_copy.extent[1]),
+    near,
+    far,
+  }
+  camera_data.position = [4]f32 {
+    camera_copy.position[0],
+    camera_copy.position[1],
+    camera_copy.position[2],
+    1.0,
+  }
+  frustum := geom.make_frustum(camera_data.projection * camera_data.view)
+  camera_data.frustum_planes = frustum.planes
+  gpu.write(
+    &render.camera_buffer.buffers[frame_index],
+    &camera_data,
+    int(camera_index),
   )
 }

@@ -5,13 +5,9 @@ import "../../gpu"
 
 Handle :: cont.Handle
 
-NodeHandle :: distinct Handle
 MeshHandle :: gpu.MeshHandle
 MaterialHandle :: distinct Handle
 CameraHandle :: distinct Handle
-EmitterHandle :: distinct Handle
-ForceFieldHandle :: distinct Handle
-SpriteHandle :: distinct Handle
 LightHandle :: distinct Handle
 
 FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
@@ -27,35 +23,6 @@ MAX_MESHES :: 65536
 MAX_MATERIALS :: 4096
 MAX_SPRITES :: 4096
 MAX_CAMERAS :: 64
-BINDLESS_VERTEX_BUFFER_SIZE :: 128 * 1024 * 1024
-BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024
-BINDLESS_SKINNING_BUFFER_SIZE :: 128 * 1024 * 1024
-
-VERTEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
-  block_size, block_count: u32,
-} {
-  {block_size = 256, block_count = 512},
-  {block_size = 1024, block_count = 128},
-  {block_size = 4096, block_count = 64},
-  {block_size = 16384, block_count = 16},
-  {block_size = 65536, block_count = 8},
-  {block_size = 131072, block_count = 4},
-  {block_size = 262144, block_count = 1},
-  {block_size = 0, block_count = 0},
-}
-
-INDEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
-  block_size, block_count: u32,
-} {
-  {block_size = 128, block_count = 2048},
-  {block_size = 512, block_count = 1024},
-  {block_size = 2048, block_count = 512},
-  {block_size = 8192, block_count = 256},
-  {block_size = 32768, block_count = 128},
-  {block_size = 131072, block_count = 32},
-  {block_size = 524288, block_count = 8},
-  {block_size = 2097152, block_count = 4},
-}
 
 BufferAllocation :: gpu.BufferAllocation
 
