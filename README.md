@@ -45,18 +45,19 @@ make debug
 make build
 # Build only (debug mode)
 make build-debug
+# Build all shaders
+make shader
 # Run all tests
 odin test . --all-packages
 # run a single test called "test_name" inside "module_name"
 odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
-# Build all shaders
-make shader
 ```
 
 ## Architecture Overview
 
 ### Core Engine Structure
-The engine is organized 2 layers with clear responsibility boundaries:
+The engine is organized 3 layers with clear responsibility boundaries.
+Systems on the same level must not depends on each other directly or indirectly. For example *Render* module and *World* module must be able to independently developed by 2 different teams without much communication. 
 
 **Lower Level Systems:**
 - **GPU**: `mjolnir/gpu/` - Vulkan context, memory/texture/mesh management, swapchain, pipeline helpers
@@ -73,16 +74,18 @@ The engine is organized 2 layers with clear responsibility boundaries:
   + Post-process Renderer
   + Camera/Visibility Culling
   + UI Renderer
-  + Debug Draw
 - **World**: `mjolnir/world/` - Scene graph, GLTF/OBJ loading
 - **Physics**: `mjolnir/physics/` - Rigid body dynamics, collision detection
-- **Navigation**: `mjolnir/navigation/` - Recast + Detour integration
+- **Navigation**: `mjolnir/navigation/` - Recast + Detour
 
-### GPU Resource Management
-- Uses custom slab allocators and generational handle pools
-- **Bindless**: All GPU resources managed in array-based system. Draw commands send resource IDs to index into GPU arrays instead of raw data
+**Engine System:**
+- **Engine**: `mjolnir/engine.odin` - Final integration point, user-facing API
 
 ## Development Notes
+
+### GPU Resource Management
+- Uses custom slab allocators to sub-allocate vertices/indices/bone matrices
+- **Bindless**: All GPU resources managed in array-based system. Draw commands send resource IDs to index into GPU arrays instead of raw data
 
 ### Shader Development
 - Shaders are in `mjolnir/shader/` organized by render pass
@@ -93,11 +96,14 @@ The engine is organized 2 layers with clear responsibility boundaries:
 
 ### Debugging Tips
 
-- To debug visual issues, build with *FRAME_LIMIT* set to something like 10, then check the log. You can alternatively collect screenshot with `make capture`
-- To slow down the engine to examine render logs. Set FPS in `engine.odin` to low value like 4 or 2.
+- To debug visual issues, build with *FRAME_LIMIT* set to something like 10, then check the log
+- Collect screenshot with `make capture`
+- To slow down the engine to examine render logs, build with *RENDER_FPS* set to low value like 4 or 2
 
 ### Build Flags
 
 - **REQUIRE_GEOMETRY_SHADER**: Compile with geometry shader support (required for spherical shadow mapping)
 - **USE_PARALLEL_UPDATE**: Enable dedicated update thread for parallel scene updates
 - **FRAME_LIMIT**: limit renderer to only render a few frames
+- **RENDER_FPS**: limit renderer FPS
+- **UPDATE_FPS**: limit logic update FPS
