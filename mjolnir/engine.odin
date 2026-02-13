@@ -56,10 +56,6 @@ PreRenderProc :: #type proc(engine: ^Engine)
 PostRenderProc :: #type proc(engine: ^Engine)
 CameraController :: world.CameraController
 
-UpdateThreadData :: struct {
-  engine: ^Engine,
-}
-
 InputState :: struct {
   mouse_pos:         [2]f64,
   mouse_drag_origin: [2]f32,
@@ -1391,11 +1387,8 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
   defer shutdown(self)
   when USE_PARALLEL_UPDATE {
     self.update_active = true
-    update_data := UpdateThreadData {
-      engine = self,
-    }
     update_thread := thread.create(update_thread_proc)
-    update_thread.data = &update_data
+    update_thread.data = self
     update_thread.init_context = context
     thread.start(update_thread)
     self.update_thread = update_thread
@@ -1442,8 +1435,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
 }
 
 update_thread_proc :: proc(thread: ^thread.Thread) {
-  data := cast(^UpdateThreadData)thread.data
-  engine := data.engine
+  engine := cast(^Engine)thread.data
   for engine.update_active {
     should_update := update(engine)
     if !should_update {
