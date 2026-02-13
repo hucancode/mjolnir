@@ -537,17 +537,15 @@ construct_scene :: proc(
     } else {
       if gltf_node.has_translation {
         node.transform.position = gltf_node.translation
-        node.transform.is_dirty = true
       }
       if gltf_node.has_rotation {
         node.transform.rotation = transmute(quaternion128)gltf_node.rotation
-        node.transform.is_dirty = true
       }
       if gltf_node.has_scale {
         node.transform.scale = gltf_node.scale
-        node.transform.is_dirty = true
       }
     }
+    node.transform.is_dirty = true
     node.parent = entry.parent
     if gltf_node.mesh in geometry_cache {
       geometry_data := geometry_cache[gltf_node.mesh]
@@ -578,7 +576,8 @@ construct_scene :: proc(
         }
         if mesh_attachment, has_mesh := &node.attachment.(MeshAttachment);
            has_mesh {
-          if skinning, has_skinning := &mesh_attachment.skinning.?; has_skinning {
+          if skinning, has_skinning := &mesh_attachment.skinning.?;
+             has_skinning {
             skinning.matrices = make([]matrix[4, 4]f32, len(skin_data.bones))
             slice.fill(skinning.matrices, linalg.MATRIX4F32_IDENTITY)
           }
