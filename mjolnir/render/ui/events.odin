@@ -68,14 +68,12 @@ point_in_widget :: proc(widget: ^Widget, point: [2]f32) -> bool {
     max_x := min_x
     max_y := min_y
     for glyph in w.glyphs {
-      x0 := w.world_position.x + glyph.x0
-      y0 := w.world_position.y + glyph.y0
-      x1 := w.world_position.x + glyph.x1
-      y1 := w.world_position.y + glyph.y1
-      min_x = min(min_x, x0)
-      min_y = min(min_y, y0)
-      max_x = max(max_x, x1)
-      max_y = max(max_y, y1)
+      p0 := w.world_position + glyph.p0
+      p1 := w.world_position + glyph.p1
+      min_x = min(min_x, p0.x)
+      min_y = min(min_y, p0.y)
+      max_x = max(max_x, p1.x)
+      max_y = max(max_y, p1.y)
     }
     return(
       point.x >= min_x &&

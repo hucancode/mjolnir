@@ -438,6 +438,7 @@ create_mesh :: proc(
   handle, mesh, ok = cont.alloc(&world.meshes, MeshHandle)
   if !ok do return
   mesh_init(mesh, geometry_data)
+  stage_mesh_data(&world.staging, handle)
   return handle, mesh, true
 }
 

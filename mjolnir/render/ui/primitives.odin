@@ -33,7 +33,6 @@ create_mesh2d :: proc(
     texture if texture != (gpu.Texture2DHandle{}) else sys.default_texture
 
   widget^ = Mesh2D {
-    type           = .Mesh2D,
     position       = position,
     world_position = position,
     z_order        = z_order,
@@ -68,7 +67,6 @@ create_quad2d :: proc(
     texture if texture != (gpu.Texture2DHandle{}) else sys.default_texture
 
   widget^ = Quad2D {
-    type           = .Quad2D,
     position       = position,
     world_position = position,
     z_order        = z_order,

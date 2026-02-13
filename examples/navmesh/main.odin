@@ -276,11 +276,11 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
     area_types = demo_state.nav_area_types[:],
   }
   cfg := recast.config_create()
-  if !nav.build_navmesh(&engine.nav_sys.nav_mesh, nav_geom, cfg) {
+  if !nav.build_navmesh(&engine.nav.nav_mesh, nav_geom, cfg) {
     log.error("Failed to build navmesh")
     return
   }
-  if !nav.init(&engine.nav_sys) {
+  if !nav.init(&engine.nav) {
     log.error("Failed to initialize navmesh query")
     return
   }
@@ -290,7 +290,7 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
 
 visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
   mjolnir.despawn(engine, demo_state.navmesh_node_handle)
-  navmesh_geom := nav.build_geometry(&engine.nav_sys.nav_mesh)
+  navmesh_geom := nav.build_geometry(&engine.nav.nav_mesh)
   log.infof(
     "Built navmesh visualization geometry: %d vertices, %d indices",
     len(navmesh_geom.vertices),
@@ -394,10 +394,10 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
     world.destroy_mesh(&engine.world, demo_state.path_mesh_handle)
     demo_state.path_mesh_handle = {}
   }
-  
+
   if len(demo_state.current_path) < 2 do return
   log.infof("Visualizing path with %d points", len(demo_state.current_path))
-  
+
   // Create line strip geometry
   path_vertices := make([]geometry.Vertex, len(demo_state.current_path))
   defer delete(path_vertices)
@@ -414,18 +414,18 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
     indices  = indices,
     aabb     = geometry.aabb_from_vertices(path_vertices),
   }
-  
+
   path_mesh, mesh_ok := mjolnir.create_mesh(engine, path_geom)
   if !mesh_ok do return
   demo_state.path_mesh_handle = path_mesh
-  
+
   path_material, mat_ok := mjolnir.create_material(
     engine,
     type = .LINE_STRIP,
     base_color_factor = {1.0, 0.8, 0.0, 1.0},
   )
   if !mat_ok do return
-  
+
   demo_state.path_node_handle = mjolnir.spawn(
     engine,
     {0, 0, 0},
@@ -559,7 +559,7 @@ demo_mouse_pressed :: proc(
 demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Update camera controller
   mjolnir.update_camera_controller(engine, delta_time)
-  
+
   // Auto-remove path after 5 seconds
   if demo_state.path_node_handle != {} {
     demo_state.path_spawn_time += delta_time
@@ -572,7 +572,7 @@ demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       }
     }
   }
-  
+
   // Update agent movement along path
   if len(demo_state.current_path) > 0 && !demo_state.path_completed {
     if demo_state.current_waypoint_idx < len(demo_state.current_path) {

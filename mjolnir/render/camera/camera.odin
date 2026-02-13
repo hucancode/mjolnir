@@ -529,14 +529,6 @@ allocate_descriptors :: proc(
   return .SUCCESS
 }
 
-get_attachment :: proc(
-  camera_gpu: ^CameraGPU,
-  attachment_type: AttachmentType,
-  frame_index: u32 = 0,
-) -> gpu.Texture2DHandle {
-  return camera_gpu.attachments[attachment_type][frame_index]
-}
-
 // Resize camera render targets (called on window resize)
 resize :: proc(
   gctx: ^gpu.GPUContext,

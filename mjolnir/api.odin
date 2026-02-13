@@ -101,9 +101,9 @@ create_texture_from_path :: proc(
   ok: bool,
 ) #optional_ok {
   ret: vk.Result
-  render_handle, render_ret := render.create_texture_from_path(
+  render_handle, render_ret := gpu.create_texture_2d_from_path(
     &engine.gctx,
-    &engine.render,
+    &engine.render.texture_manager,
     path,
     format,
     generate_mips,
@@ -121,45 +121,43 @@ create_texture_from_data :: proc(
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips := false,
 ) -> (
-  handle: world.Image2DHandle,
+  handle: gpu.Texture2DHandle,
   ok: bool,
 ) #optional_ok {
   ret: vk.Result
-  render_handle, render_ret := render.create_texture_from_data(
+  handle, ret = gpu.create_texture_2d_from_data(
     &engine.gctx,
-    &engine.render,
+    &engine.render.texture_manager,
     data,
     format,
     generate_mips,
   )
-  handle = transmute(world.Image2DHandle)render_handle
-  ret = render_ret
   return handle, ret == .SUCCESS
 }
 
 create_texture_from_pixels :: proc(
   engine: ^Engine,
   pixels: []u8,
-  width: int,
-  height: int,
+  width: u32,
+  height: u32,
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips := false,
 ) -> (
-  handle: world.Image2DHandle,
+  handle: gpu.Texture2DHandle,
   ok: bool,
 ) #optional_ok {
   ret: vk.Result
-  render_handle, render_ret := render.create_texture_from_pixels(
+  handle, ret = gpu.allocate_texture_2d_with_data(
+    &engine.render.texture_manager,
     &engine.gctx,
-    &engine.render,
-    pixels,
+    raw_data(pixels),
+    vk.DeviceSize(len(pixels)),
     width,
     height,
     format,
+    {.SAMPLED},
     generate_mips,
   )
-  handle = transmute(world.Image2DHandle)render_handle
-  ret = render_ret
   return handle, ret == .SUCCESS
 }
 
@@ -173,16 +171,14 @@ create_texture_empty :: proc(
   ok: bool,
 ) #optional_ok {
   ret: vk.Result
-  render_handle, render_ret := render.create_empty_texture_2d(
+  handle, ret = gpu.allocate_texture_2d(
+    &engine.render.texture_manager,
     &engine.gctx,
-    &engine.render,
     width,
     height,
     format,
     usage,
   )
-  handle = transmute(world.Image2DHandle)render_handle
-  ret = render_ret
   return handle, ret == .SUCCESS
 }
 
@@ -1091,14 +1087,8 @@ get_camera_attachment :: proc(
   handle: world.Image2DHandle,
   ok: bool,
 ) #optional_ok {
-  if _, exists := cont.get(engine.world.cameras, camera_handle); !exists do return {}, false
-  render_handle := render.get_camera_attachment(
-    &engine.render,
-    transmute(render.CameraHandle)camera_handle,
-    attachment_type,
-    frame_index,
-  )
-  return transmute(world.Image2DHandle)render_handle, true
+  if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
+  return engine.render.cameras_gpu[camera_handle.index].attachments[attachment_type][frame_index], true
 }
 
 update_material_texture :: proc(
@@ -1350,10 +1340,10 @@ setup_navmesh :: proc(
     indices    = nav_indices,
     area_types = area_types,
   }
-  if !nav.build_navmesh(&engine.nav_sys.nav_mesh, nav_geom, recast_config) {
+  if !nav.build_navmesh(&engine.nav.nav_mesh, nav_geom, recast_config) {
     return false
   }
-  if !nav.init(&engine.nav_sys) {
+  if !nav.init(&engine.nav) {
     return false
   }
   return true
@@ -1368,11 +1358,11 @@ find_path :: proc(
   path: [][3]f32,
   ok: bool,
 ) #optional_ok {
-  return nav.find_path(&engine.nav_sys, start_pos, end_pos, max_path_length)
+  return nav.find_path(&engine.nav, start_pos, end_pos, max_path_length)
 }
 
 nav_is_position_walkable :: proc(engine: ^Engine, position: [3]f32) -> bool {
-  return nav.is_position_walkable(&engine.nav_sys, position)
+  return nav.is_position_walkable(&engine.nav, position)
 }
 
 nav_find_nearest_point :: proc(
@@ -1383,7 +1373,7 @@ nav_find_nearest_point :: proc(
   nearest_pos: [3]f32,
   found: bool,
 ) {
-  return nav.find_nearest_point(&engine.nav_sys, position, search_extents)
+  return nav.find_nearest_point(&engine.nav, position, search_extents)
 }
 
 add_bloom :: proc(

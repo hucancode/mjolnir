@@ -20,7 +20,6 @@ create_box :: proc(
   }
 
   widget^ = Box {
-    type             = .Box,
     position         = position,
     world_position   = position,
     z_order          = z_order,

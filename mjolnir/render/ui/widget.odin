@@ -16,7 +16,6 @@ VerticalAlign :: enum {
 }
 
 WidgetBase :: struct {
-  type:           WidgetType,
   position:       [2]f32,
   world_position: [2]f32,
   z_order:        i32,
@@ -27,45 +26,45 @@ WidgetBase :: struct {
 }
 
 Mesh2D :: struct {
-  using widget_base: WidgetBase,
-  vertices:          []Vertex2D,
-  indices:           []u32,
-  texture:           gpu.Texture2DHandle,
-  vertex_offset:     u32,
-  index_offset:      u32,
+  using base:    WidgetBase,
+  vertices:      []Vertex2D,
+  indices:       []u32,
+  texture:       gpu.Texture2DHandle,
+  vertex_offset: u32,
+  index_offset:  u32,
 }
 
 Quad2D :: struct {
-  using widget_base: WidgetBase,
-  size:              [2]f32,
-  texture:           gpu.Texture2DHandle,
-  color:             [4]u8,
+  using base: WidgetBase,
+  size:       [2]f32,
+  texture:    gpu.Texture2DHandle,
+  color:      [4]u8,
 }
 
 // Store fontstash quad directly for correct rendering
 GlyphQuad :: struct {
-  x0, y0, x1, y1: f32, // positions
-  s0, t0, s1, t1: f32, // UVs
+  p0, p1: [2]f32, // positions
+  uv0, uv1: [2]f32, // UVs
 }
 
 Text2D :: struct {
-  using widget_base: WidgetBase,
-  text:              string,
-  font_size:         f32,
-  color:             [4]u8,
-  glyphs:            [dynamic]GlyphQuad,
-  bounds:            [2]f32, // Width and height of the alignment rectangle (0,0 = no bounds)
-  h_align:           HorizontalAlign,
-  v_align:           VerticalAlign,
-  text_width:        f32, // Actual width of the laid out text
-  text_height:       f32, // Actual height of the laid out text
+  using base:  WidgetBase,
+  text:        string,
+  font_size:   f32,
+  color:       [4]u8,
+  glyphs:      [dynamic]GlyphQuad,
+  bounds:      [2]f32, // Width and height of the alignment rectangle (0,0 = no bounds)
+  h_align:     HorizontalAlign,
+  v_align:     VerticalAlign,
+  text_width:  f32, // Actual width of the laid out text
+  text_height: f32, // Actual height of the laid out text
 }
 
 Box :: struct {
-  using widget_base: WidgetBase,
-  size:              [2]f32,
-  background_color:  [4]u8,
-  children:          [dynamic]UIWidgetHandle,
+  using base:       WidgetBase,
+  size:             [2]f32,
+  background_color: [4]u8,
+  children:         [dynamic]UIWidgetHandle,
 }
 
 Widget :: union {
@@ -78,27 +77,13 @@ Widget :: union {
 get_widget_base :: proc(widget: ^Widget) -> ^WidgetBase {
   switch &w in widget {
   case Mesh2D:
-    return &w.widget_base
+    return &w.base
   case Quad2D:
-    return &w.widget_base
+    return &w.base
   case Text2D:
-    return &w.widget_base
+    return &w.base
   case Box:
-    return &w.widget_base
+    return &w.base
   }
   return nil
-}
-
-get_widget_type :: proc(widget: ^Widget) -> WidgetType {
-  switch w in widget {
-  case Mesh2D:
-    return .Mesh2D
-  case Quad2D:
-    return .Quad2D
-  case Text2D:
-    return .Text2D
-  case Box:
-    return .Box
-  }
-  return .Box
 }

@@ -104,5 +104,6 @@ create_material :: proc(
     emissive_value,
     base_color_factor,
   )
+  stage_material_data(&world.staging, handle)
   return handle, true
 }

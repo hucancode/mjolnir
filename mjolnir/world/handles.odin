@@ -9,8 +9,8 @@ Pool :: cont.Pool
 NodeHandle :: distinct Handle
 MeshHandle :: gpu.MeshHandle
 MaterialHandle :: distinct Handle
-Image2DHandle :: distinct Handle
-ImageCubeHandle :: distinct Handle
+Image2DHandle :: gpu.Texture2DHandle
+ImageCubeHandle :: gpu.TextureCubeHandle
 CameraHandle :: distinct Handle
 EmitterHandle :: distinct Handle
 ForceFieldHandle :: distinct Handle

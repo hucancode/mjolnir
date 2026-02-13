@@ -20,10 +20,10 @@ import "gpu"
 import nav "navigation"
 import "render"
 import render_camera "render/camera"
+import "render/camera"
 import "render/debug_ui"
 import "render/particles"
 import "render/ui"
-import "render/camera"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -75,7 +75,7 @@ Engine :: struct {
   frame_index:               u32,
   swapchain:                 gpu.Swapchain,
   world:                     world.World,
-  nav_sys:                   nav.NavigationSystem,
+  nav:                       nav.NavigationSystem,
   last_frame_timestamp:      time.Time,
   last_update_timestamp:     time.Time,
   start_timestamp:           time.Time,
@@ -146,7 +146,7 @@ init :: proc(
   }
   log.infof("Window created %v\n", self.window)
   gpu.gpu_context_init(&self.gctx, self.window) or_return
-  nav.init(&self.nav_sys)
+  nav.init(&self.nav)
   self.camera_controller_enabled = true
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
@@ -190,14 +190,7 @@ init :: proc(
     main_world_camera,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
-    {
-      .SHADOW,
-      .GEOMETRY,
-      .LIGHTING,
-      .TRANSPARENCY,
-      .PARTICLES,
-      .POST_PROCESS,
-    },
+    {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .POST_PROCESS},
     {3, 4, 3},
     {0, 0, 0},
     math.PI * 0.5,
@@ -388,9 +381,9 @@ load_gltf :: proc(
     if engine_ctx == nil {
       return {}, false
     }
-    out_handle, ret := render.create_texture_from_data(
+    out_handle, ret := gpu.create_texture_2d_from_data(
       &engine_ctx.gctx,
-      &engine_ctx.render,
+      &engine_ctx.render.texture_manager,
       pixel_data,
     )
     if ret != .SUCCESS {
@@ -586,11 +579,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
         )
       } else {
         zero_matrix: matrix[4, 4]f32
-        render.upload_node_transform(
-          &self.render,
-          handle.index,
-          &zero_matrix,
-        )
+        render.upload_node_transform(&self.render, handle.index, &zero_matrix)
       }
       next_n += 1
       self.world.staging.transforms[handle] = next_n
@@ -613,16 +602,12 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
       }
       node := cont.get(self.world.nodes, handle)
       if node == nil {
-        render.release_bone_matrix_range_for_node(
-          &self.render,
-          handle.index,
-        )
+        render.release_bone_matrix_range_for_node(&self.render, handle.index)
       } else if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment);
          has_mesh {
         if _, has_skin := mesh_attachment.skinning.?; has_skin {
           if bone_offset, has_offset :=
-               self.render.bone_matrix_offsets[handle.index];
-             has_offset {
+               self.render.bone_matrix_offsets[handle.index]; has_offset {
             node_data.attachment_data_index = bone_offset
           } else if skinning, has_skinning := mesh_attachment.skinning.?;
              has_skinning && len(skinning.matrices) > 0 {
@@ -640,10 +625,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
             node_data.attachment_data_index = 0xFFFFFFFF
           }
         } else {
-          render.release_bone_matrix_range_for_node(
-            &self.render,
-            handle.index,
-          )
+          render.release_bone_matrix_range_for_node(&self.render, handle.index)
           node_data.attachment_data_index = 0xFFFFFFFF
         }
         node_data.material_id = mesh_attachment.material.index
@@ -669,10 +651,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
         }
       } else if _, has_sprite := node.attachment.(world.SpriteAttachment);
          has_sprite {
-        render.release_bone_matrix_range_for_node(
-          &self.render,
-          handle.index,
-        )
+        render.release_bone_matrix_range_for_node(&self.render, handle.index)
         sprite_attachment, _ := node.attachment.(world.SpriteAttachment)
         node_data.material_id = sprite_attachment.material.index
         node_data.mesh_id = sprite_attachment.mesh_handle.index
@@ -697,16 +676,9 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
           }
         }
       } else {
-        render.release_bone_matrix_range_for_node(
-          &self.render,
-          handle.index,
-        )
+        render.release_bone_matrix_range_for_node(&self.render, handle.index)
       }
-      render.upload_node_data(
-        &self.render,
-        handle.index,
-        &node_data,
-      )
+      render.upload_node_data(&self.render, handle.index, &node_data)
       next_n += 1
       self.world.staging.node_data[handle] = next_n
     }
@@ -1089,10 +1061,7 @@ update :: proc(self: ^Engine) -> bool {
     self.update_proc(self, delta_time)
   }
   world.update_node_animations(&self.world, delta_time)
-  world.update_skeletal_animations(
-    &self.world,
-    delta_time,
-  )
+  world.update_skeletal_animations(&self.world, delta_time)
   world.update_sprite_animations(&self.world, delta_time)
   self.last_update_timestamp = time.now()
   return true
@@ -1109,7 +1078,7 @@ shutdown :: proc(self: ^Engine) {
   }
   render.shutdown(&self.render, &self.gctx)
   world.shutdown(&self.world)
-  nav.shutdown(&self.nav_sys)
+  nav.shutdown(&self.nav)
   gpu.swapchain_destroy(&self.swapchain, self.gctx.device)
   gpu.shutdown(&self.gctx)
   glfw.DestroyWindow(self.window)

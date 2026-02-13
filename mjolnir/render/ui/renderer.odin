@@ -641,34 +641,32 @@ add_text_to_batch :: proc(self: ^Renderer, text: ^Text2D, texture_id: u32) {
   for glyph in text.glyphs {
     base_vertex := self.vertex_count
     // Use fontstash quad positions directly, offset by text world position
-    x0 := text.world_position.x + glyph.x0
-    y0 := text.world_position.y + glyph.y0
-    x1 := text.world_position.x + glyph.x1
-    y1 := text.world_position.y + glyph.y1
+    p0 := text.world_position + glyph.p0
+    p1 := text.world_position + glyph.p1
     self.vertices[self.vertex_count] = Vertex2D {
-      {x0, y0},
-      {glyph.s0, glyph.t0},
+      p0,
+      glyph.uv0,
       color,
       texture_id,
     }
     self.vertex_count += 1
     self.vertices[self.vertex_count] = Vertex2D {
-      {x1, y0},
-      {glyph.s1, glyph.t0},
+      {p1.x, p0.y},
+      {glyph.uv1.x, glyph.uv0.y},
       color,
       texture_id,
     }
     self.vertex_count += 1
     self.vertices[self.vertex_count] = Vertex2D {
-      {x1, y1},
-      {glyph.s1, glyph.t1},
+      p1,
+      glyph.uv1,
       color,
       texture_id,
     }
     self.vertex_count += 1
     self.vertices[self.vertex_count] = Vertex2D {
-      {x0, y1},
-      {glyph.s0, glyph.t1},
+      {p0.x, p1.y},
+      {glyph.uv0.x, glyph.uv1.y},
       color,
       texture_id,
     }

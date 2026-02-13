@@ -537,19 +537,16 @@ construct_scene :: proc(
     } else {
       if gltf_node.has_translation {
         node.transform.position = gltf_node.translation
+        node.transform.is_dirty = true
       }
       if gltf_node.has_rotation {
-        node.transform.rotation = quaternion(
-          x = gltf_node.rotation[0],
-          y = gltf_node.rotation[1],
-          z = gltf_node.rotation[2],
-          w = gltf_node.rotation[3],
-        )
+        node.transform.rotation = transmute(quaternion128)gltf_node.rotation
+        node.transform.is_dirty = true
       }
       if gltf_node.has_scale {
         node.transform.scale = gltf_node.scale
+        node.transform.is_dirty = true
       }
-      node.transform.is_dirty = true
     }
     node.parent = entry.parent
     if gltf_node.mesh in geometry_cache {
@@ -573,11 +570,6 @@ construct_scene :: proc(
         }
         skinning.root_bone_index = skin_data.root_bone_idx
         compute_bone_lengths(skinning)
-        identity_matrices := make(
-          [dynamic]matrix[4, 4]f32,
-          len(skin_data.bones),
-        )
-        slice.fill(identity_matrices[:], linalg.MATRIX4F32_IDENTITY)
         node.attachment = MeshAttachment {
           handle      = mesh_handle,
           material    = geometry_data.material_handle,
@@ -586,10 +578,9 @@ construct_scene :: proc(
         }
         if mesh_attachment, has_mesh := &node.attachment.(MeshAttachment);
            has_mesh {
-          skinning, has_skinning := &mesh_attachment.skinning.?
-          if has_skinning {
-            skinning.matrices = make([]matrix[4, 4]f32, len(identity_matrices))
-            copy(skinning.matrices, identity_matrices[:])
+          if skinning, has_skinning := &mesh_attachment.skinning.?; has_skinning {
+            skinning.matrices = make([]matrix[4, 4]f32, len(skin_data.bones))
+            slice.fill(skinning.matrices, linalg.MATRIX4F32_IDENTITY)
           }
         }
         stage_bone_matrices(&world.staging, node_handle)

@@ -30,7 +30,6 @@ create_text2d :: proc(
   glyphs := make([dynamic]GlyphQuad, 0, len(text))
 
   widget^ = Text2D {
-    type           = .Text2D,
     position       = position,
     world_position = position,
     z_order        = z_order,
@@ -103,14 +102,10 @@ text_layout :: proc(text: ^Text2D, font_ctx: ^fs.FontContext) {
   for fs.TextIterNext(font_ctx, &iter, &quad) {
     // Store the fontstash quad directly
     glyph := GlyphQuad {
-      x0 = quad.x0,
-      y0 = quad.y0,
-      x1 = quad.x1,
-      y1 = quad.y1,
-      s0 = quad.s0,
-      t0 = quad.t0,
-      s1 = quad.s1,
-      t1 = quad.t1,
+      p0 = {quad.x0, quad.y0},
+      p1 = {quad.x1, quad.y1},
+      uv0 = {quad.s0, quad.t0},
+      uv1 = {quad.s1, quad.t1},
     }
     append(&text.glyphs, glyph)
     glyph_index += 1
