@@ -21,40 +21,11 @@ import "vendor:glfw"
 import vk "vendor:vulkan"
 import "world"
 
-NodeHandle :: world.NodeHandle
-MeshHandle :: world.MeshHandle
-MaterialHandle :: world.MaterialHandle
-Image2DHandle :: world.Image2DHandle
-ImageCubeHandle :: world.ImageCubeHandle
-CameraHandle :: world.CameraHandle
-EmitterHandle :: world.EmitterHandle
-ForceFieldHandle :: world.ForceFieldHandle
-ClipHandle :: world.ClipHandle
-SpriteHandle :: world.SpriteHandle
-LightHandle :: world.LightHandle
 LightType :: enum u32 {
   POINT       = 0,
   DIRECTIONAL = 1,
   SPOT        = 2,
 }
-
-// UI types
-UIWidgetHandle :: ui.UIWidgetHandle
-Mesh2DHandle :: ui.Mesh2DHandle
-Quad2DHandle :: ui.Quad2DHandle
-Text2DHandle :: ui.Text2DHandle
-BoxHandle :: ui.BoxHandle
-UIWidget :: ui.Widget
-Mesh2D :: ui.Mesh2D
-Quad2D :: ui.Quad2D
-Text2D :: ui.Text2D
-Box :: ui.Box
-Vertex2D :: ui.Vertex2D
-HorizontalAlign :: ui.HorizontalAlign
-VerticalAlign :: ui.VerticalAlign
-MouseEvent :: ui.MouseEvent
-KeyEvent :: ui.KeyEvent
-EventHandlers :: ui.EventHandlers
 
 // NavMeshQuality controls navmesh generation precision vs performance tradeoff
 NavMeshQuality :: enum {
@@ -171,7 +142,8 @@ create_texture_empty :: proc(
   ok: bool,
 ) #optional_ok {
   ret: vk.Result
-  handle, ret = gpu.allocate_texture_2d(
+  gpu_handle: gpu.Texture2DHandle
+  gpu_handle, ret = gpu.allocate_texture_2d(
     &engine.render.texture_manager,
     &engine.gctx,
     width,
@@ -179,6 +151,7 @@ create_texture_empty :: proc(
     format,
     usage,
   )
+  handle = transmute(world.Image2DHandle)gpu_handle
   return handle, ret == .SUCCESS
 }
 
@@ -230,26 +203,13 @@ create_mesh :: proc(
   return handle, true
 }
 
-get_builtin_mesh :: proc(
-  engine: ^Engine,
-  primitive: world.Primitive,
-) -> world.MeshHandle {
-  return world.get_builtin_mesh(&engine.world, primitive)
-}
-
-get_builtin_material :: proc(
-  engine: ^Engine,
-  color: world.Color,
-) -> world.MaterialHandle {
-  return world.get_builtin_material(&engine.world, color)
-}
 
 spawn :: proc(
   engine: ^Engine,
   position: [3]f32 = {0, 0, 0},
   attachment: world.NodeAttachment = nil,
 ) -> (
-  ret: NodeHandle,
+  ret: world.NodeHandle,
   ok: bool,
 ) #optional_ok {
   return world.spawn(&engine.world, position, attachment)
@@ -285,8 +245,8 @@ spawn_primitive_mesh :: proc(
   ret: world.NodeHandle,
   ok: bool,
 ) #optional_ok {
-  mesh := get_builtin_mesh(engine, primitive)
-  mat := get_builtin_material(engine, color)
+  mesh := world.get_builtin_mesh(&engine.world, primitive)
+  mat := world.get_builtin_material(&engine.world, color)
   handle := spawn(
     engine,
     position,
@@ -297,10 +257,10 @@ spawn_primitive_mesh :: proc(
     },
   ) or_return
   if rotation_angle != 0 {
-    rotate(engine, handle, rotation_angle, rotation_axis)
+    world.rotate(&engine.world, handle, rotation_angle, rotation_axis)
   }
   if scale_factor != 1.0 {
-    scale(engine, handle, scale_factor)
+    world.scale(&engine.world, handle, scale_factor)
   }
   return handle, true
 }
@@ -447,51 +407,6 @@ queue_node_deletion :: proc(engine: ^Engine, handle: world.NodeHandle) {
   append(&engine.world.pending_node_deletions, handle)
 }
 
-translate :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  x: f32 = 0,
-  y: f32 = 0,
-  z: f32 = 0,
-) {
-  world.translate(&engine.world, handle, x, y, z)
-}
-
-translate_by :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  x: f32 = 0,
-  y: f32 = 0,
-  z: f32 = 0,
-) {
-  world.translate_by(&engine.world, handle, x, y, z)
-}
-
-rotate :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  angle: f32,
-  axis: [3]f32 = {0, 1, 0},
-) {
-  world.rotate(&engine.world, handle, angle, axis)
-}
-
-rotate_by :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  angle: f32,
-  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
-) {
-  world.rotate_by(&engine.world, handle, angle, axis)
-}
-
-scale :: proc(engine: ^Engine, handle: world.NodeHandle, s: f32) {
-  world.scale(&engine.world, handle, s)
-}
-
-scale_by :: proc(engine: ^Engine, handle: world.NodeHandle, s: f32) {
-  world.scale_by(&engine.world, handle, s)
-}
 
 get_position :: proc(
   engine: ^Engine,
@@ -833,68 +748,6 @@ init_animation_channel :: proc(
   }
 }
 
-play_animation :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  name: string,
-) -> bool {
-  return world.play_animation(&engine.world, handle, name)
-}
-
-// Add an animation layer to a skinned mesh node
-add_animation_layer :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  animation_name: string,
-  weight: f32 = 1.0,
-  mode: animation.PlayMode = .LOOP,
-  speed: f32 = 1.0,
-  layer_index: int = -1, // -1 to append, >= 0 to replace existing layer
-  blend_mode: animation.BlendMode = .REPLACE,
-) -> bool {
-  return world.add_animation_layer(
-    &engine.world,
-    handle,
-    animation_name,
-    weight,
-    mode,
-    speed,
-    layer_index,
-    blend_mode,
-  )
-}
-
-// Remove an animation layer from a skinned mesh node
-remove_animation_layer :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  layer_index: int,
-) -> bool {
-  return world.remove_animation_layer(&engine.world, handle, layer_index)
-}
-
-// Set the blend weight for an animation layer
-set_animation_layer_weight :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  layer_index: int,
-  weight: f32,
-) -> bool {
-  return world.set_animation_layer_weight(
-    &engine.world,
-    handle,
-    layer_index,
-    weight,
-  )
-}
-
-// Clear all animation layers from a skinned mesh node
-clear_animation_layers :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-) -> bool {
-  return world.clear_animation_layers(&engine.world, handle)
-}
 
 // Set bone mask on animation layer to filter which bones are affected
 set_animation_layer_bone_mask :: proc(
@@ -940,63 +793,6 @@ transition_to_animation :: proc(
   )
 }
 
-// Add an IK layer to control specific bones
-// IK targets are in world space and will be converted internally
-add_ik_layer :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  bone_names: []string,
-  target_pos: [3]f32,
-  pole_pos: [3]f32,
-  weight: f32 = 1.0,
-  max_iterations: int = 10,
-  tolerance: f32 = 0.001,
-  layer_index: int = -1, // -1 to append, >= 0 to replace existing layer
-) -> bool {
-  return world.add_ik_layer(
-    &engine.world,
-    handle,
-    bone_names,
-    target_pos,
-    pole_pos,
-    weight,
-    max_iterations,
-    tolerance,
-    layer_index,
-  )
-}
-
-// Update IK target position and pole vector for an existing IK layer
-set_ik_layer_target :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  layer_index: int,
-  target_pos: [3]f32,
-  pole_pos: [3]f32,
-) -> bool {
-  return world.set_ik_layer_target(
-    &engine.world,
-    handle,
-    layer_index,
-    target_pos,
-    pole_pos,
-  )
-}
-
-// Enable or disable an IK layer
-set_ik_layer_enabled :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-  layer_index: int,
-  enabled: bool,
-) -> bool {
-  return world.set_ik_layer_enabled(
-    &engine.world,
-    handle,
-    layer_index,
-    enabled,
-  )
-}
 
 create_camera :: proc(
   engine: ^Engine,
@@ -1024,7 +820,7 @@ create_camera :: proc(
     world.CameraHandle,
   ) or_return
   defer if !ok do cont.free(&engine.world.cameras, camera_handle)
-  if world.camera_init(
+  if !world.camera_init(
        camera_ptr,
        width,
        height,
@@ -1034,8 +830,7 @@ create_camera :: proc(
        fov,
        near_plane,
        far_plane,
-     ) !=
-     .SUCCESS {
+     ) {
     return {}, false
   }
   world.stage_camera_data(&engine.world.staging, camera_handle)
@@ -1088,7 +883,8 @@ get_camera_attachment :: proc(
   ok: bool,
 ) #optional_ok {
   if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
-  return engine.render.cameras_gpu[camera_handle.index].attachments[attachment_type][frame_index], true
+  gpu_handle := engine.render.cameras_gpu[camera_handle.index].attachments[attachment_type][frame_index]
+  return transmute(world.Image2DHandle)gpu_handle, true
 }
 
 update_material_texture :: proc(
@@ -1501,11 +1297,7 @@ set_visibility_stats :: proc(engine: ^Engine, enabled: bool) {
   engine.render.visibility.stats_enabled = enabled
 }
 
-camera_look_at :: world.camera_look_at
-
-CameraControllerType :: world.CameraControllerType
-
-switch_camera_controller :: proc(engine: ^Engine, type: CameraControllerType) {
+switch_camera_controller :: proc(engine: ^Engine, type: world.CameraControllerType) {
   main_camera := get_main_camera(engine)
   if main_camera == nil do return
   switch type {
@@ -1548,7 +1340,7 @@ update_camera_controller :: proc(engine: ^Engine, delta_time: f32) {
 
 get_active_camera_controller_type :: proc(
   engine: ^Engine,
-) -> CameraControllerType {
+) -> world.CameraControllerType {
   if engine.active_controller == nil do return .ORBIT
   return engine.active_controller.type
 }
@@ -1590,7 +1382,7 @@ get_main_camera :: proc(engine: ^Engine) -> ^world.Camera {
   )
 }
 
-sync_camera_controller :: proc(engine: ^Engine, type: CameraControllerType) {
+sync_camera_controller :: proc(engine: ^Engine, type: world.CameraControllerType) {
   main_camera := get_main_camera(engine)
   if main_camera == nil do return
   switch type {
@@ -1715,10 +1507,10 @@ ui_create_mesh2d :: proc(
   position: [2]f32,
   vertices: []ui.Vertex2D,
   indices: []u32,
-  texture: Image2DHandle = {},
+  texture: world.Image2DHandle = {},
   z_order: i32 = 0,
 ) -> (
-  Mesh2DHandle,
+  ui.Mesh2DHandle,
   bool,
 ) #optional_ok {
   return ui.create_mesh2d(
@@ -1735,11 +1527,11 @@ ui_create_quad2d :: proc(
   engine: ^Engine,
   position: [2]f32,
   size: [2]f32,
-  texture: Image2DHandle = {},
+  texture: world.Image2DHandle = {},
   color: [4]u8 = {255, 255, 255, 255},
   z_order: i32 = 0,
 ) -> (
-  Quad2DHandle,
+  ui.Quad2DHandle,
   bool,
 ) #optional_ok {
   return ui.create_quad2d(
@@ -1760,10 +1552,10 @@ ui_create_text2d :: proc(
   color: [4]u8 = {255, 255, 255, 255},
   z_order: i32 = 0,
   bounds: [2]f32 = {0, 0},
-  h_align: HorizontalAlign = .Left,
-  v_align: VerticalAlign = .Top,
+  h_align: ui.HorizontalAlign = .Left,
+  v_align: ui.VerticalAlign = .Top,
 ) -> (
-  Text2DHandle,
+  ui.Text2DHandle,
   bool,
 ) #optional_ok {
   return ui.create_text2d(
@@ -1787,7 +1579,7 @@ ui_create_box :: proc(
   background_color: [4]u8 = {0, 0, 0, 0},
   z_order: i32 = 0,
 ) -> (
-  BoxHandle,
+  ui.BoxHandle,
   bool,
 ) #optional_ok {
   return ui.create_box(
@@ -1799,58 +1591,58 @@ ui_create_box :: proc(
   )
 }
 
-ui_get_widget :: proc(engine: ^Engine, handle: UIWidgetHandle) -> ^UIWidget {
+ui_get_widget :: proc(engine: ^Engine, handle: ui.UIWidgetHandle) -> ^ui.Widget {
   return ui.get_widget(&engine.render.ui_system, handle)
 }
 
-ui_get_mesh2d :: proc(engine: ^Engine, handle: Mesh2DHandle) -> ^Mesh2D {
+ui_get_mesh2d :: proc(engine: ^Engine, handle: ui.Mesh2DHandle) -> ^ui.Mesh2D {
   return ui.get_mesh2d(&engine.render.ui_system, handle)
 }
 
-ui_get_quad2d :: proc(engine: ^Engine, handle: Quad2DHandle) -> ^Quad2D {
+ui_get_quad2d :: proc(engine: ^Engine, handle: ui.Quad2DHandle) -> ^ui.Quad2D {
   return ui.get_quad2d(&engine.render.ui_system, handle)
 }
 
-ui_get_text2d :: proc(engine: ^Engine, handle: Text2DHandle) -> ^Text2D {
+ui_get_text2d :: proc(engine: ^Engine, handle: ui.Text2DHandle) -> ^ui.Text2D {
   return ui.get_text2d(&engine.render.ui_system, handle)
 }
 
-ui_get_box :: proc(engine: ^Engine, handle: BoxHandle) -> ^Box {
+ui_get_box :: proc(engine: ^Engine, handle: ui.BoxHandle) -> ^ui.Box {
   return ui.get_box(&engine.render.ui_system, handle)
 }
 
-ui_set_position :: proc(widget: ^UIWidget, position: [2]f32) {
+ui_set_position :: proc(widget: ^ui.Widget, position: [2]f32) {
   ui.set_position(widget, position)
 }
 
-ui_set_z_order :: proc(widget: ^UIWidget, z: i32) {
+ui_set_z_order :: proc(widget: ^ui.Widget, z: i32) {
   ui.set_z_order(widget, z)
 }
 
-ui_set_visible :: proc(widget: ^UIWidget, visible: bool) {
+ui_set_visible :: proc(widget: ^ui.Widget, visible: bool) {
   ui.set_visible(widget, visible)
 }
 
-ui_set_event_handler :: proc(widget: ^UIWidget, handlers: EventHandlers) {
+ui_set_event_handler :: proc(widget: ^ui.Widget, handlers: ui.EventHandlers) {
   ui.set_event_handler(widget, handlers)
 }
 
-ui_set_user_data :: proc(widget: ^UIWidget, data: rawptr) {
+ui_set_user_data :: proc(widget: ^ui.Widget, data: rawptr) {
   ui.set_user_data(widget, data)
 }
 
-ui_destroy_widget :: proc(engine: ^Engine, handle: UIWidgetHandle) {
+ui_destroy_widget :: proc(engine: ^Engine, handle: ui.UIWidgetHandle) {
   ui.destroy_widget(&engine.render.ui_system, handle)
 }
 
 ui_box_add_child :: proc(
   engine: ^Engine,
-  box_handle: BoxHandle,
-  child_handle: UIWidgetHandle,
+  box_handle: ui.BoxHandle,
+  child_handle: ui.UIWidgetHandle,
 ) {
   ui.box_add_child(&engine.render.ui_system, box_handle, child_handle)
 }
 
-ui_set_text :: proc(engine: ^Engine, handle: Text2DHandle, text: string) {
+ui_set_text :: proc(engine: ^Engine, handle: ui.Text2DHandle, text: string) {
   ui.set_text(&engine.render.ui_system, &engine.render.ui, handle, text)
 }

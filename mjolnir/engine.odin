@@ -29,6 +29,12 @@ import mu "vendor:microui"
 import vk "vendor:vulkan"
 import "world"
 
+// Verify world and GPU handle types have identical memory layout for safe transmutes
+#assert(size_of(world.MeshHandle) == size_of(gpu.MeshHandle))
+#assert(size_of(world.Image2DHandle) == size_of(gpu.Texture2DHandle))
+#assert(size_of(world.ImageCubeHandle) == size_of(gpu.TextureCubeHandle))
+#assert(size_of(world.CameraHandle) == size_of(render_camera.CameraHandle))
+
 FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 RENDER_FPS :: #config(RENDER_FPS, 60)
 FRAME_TIME :: 1.0 / RENDER_FPS
@@ -182,7 +188,7 @@ init :: proc(
      main_world_handle.generation != self.render.main_camera.generation {
     return .ERROR_INITIALIZATION_FAILED
   }
-  world.camera_init(
+  if !world.camera_init(
     main_world_camera,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
@@ -192,7 +198,9 @@ init :: proc(
     math.PI * 0.5,
     0.1,
     100.0,
-  ) or_return
+  ) {
+    return .ERROR_INITIALIZATION_FAILED
+  }
   world.stage_camera_data(&self.world.staging, main_world_handle)
 
   if self.gctx.has_async_compute {

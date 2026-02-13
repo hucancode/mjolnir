@@ -11,12 +11,12 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-root_nodes: [dynamic]mjolnir.NodeHandle
-markers: [dynamic]mjolnir.NodeHandle
+root_nodes: [dynamic]world.NodeHandle
+markers: [dynamic]world.NodeHandle
 animation_time: f32 = 0
-spider_root_node: mjolnir.NodeHandle
-target_markers: [6]mjolnir.NodeHandle
-ground_plane: mjolnir.NodeHandle
+spider_root_node: world.NodeHandle
+target_markers: [6]world.NodeHandle
+ground_plane: world.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -26,7 +26,7 @@ main :: proc() {
     // engine.world.debug_draw_ik = true // Removed: debug_draw_ik no longer available
 
     if camera := mjolnir.get_main_camera(engine); camera != nil {
-      mjolnir.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
+      world.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
       mjolnir.sync_active_camera_controller(engine)
     }
     // Load spider model with 6 legs
@@ -36,7 +36,7 @@ main :: proc() {
     // Position the spider
     for handle in spider_roots {
       spider_root_node = handle
-      mjolnir.translate(engine, handle, y=5)
+      world.translate(&engine.world, handle, y=5)
     }
 
     // Configure 6 legs with spider leg modifiers
@@ -166,8 +166,8 @@ main :: proc() {
     }
 
     // Create cone markers for each bone
-    cone_mesh := mjolnir.get_builtin_mesh(engine, .CONE)
-    mat := mjolnir.get_builtin_material(engine, .YELLOW)
+    cone_mesh := world.get_builtin_mesh(&engine.world, .CONE)
+    mat := world.get_builtin_material(&engine.world, .YELLOW)
 
     // Find the skinned mesh and create markers for bones
     for handle in root_nodes {
@@ -207,7 +207,7 @@ main :: proc() {
               material = mat,
             },
           )
-          mjolnir.scale(engine, marker, 0.15)
+          world.scale(&engine.world, marker, 0.15)
           append(&markers, marker)
           log.infof("Created marker %d at default position", i)
         }
@@ -217,8 +217,8 @@ main :: proc() {
     }
 
     // Create visual markers for each leg target (red spheres)
-    sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
-    red_mat := mjolnir.get_builtin_material(engine, .RED)
+    sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
+    red_mat := world.get_builtin_material(&engine.world, .RED)
     for i in 0 ..< 6 {
       target_markers[i] = mjolnir.spawn(
         engine,
@@ -227,12 +227,12 @@ main :: proc() {
           material = red_mat,
         },
       )
-      mjolnir.scale(engine, target_markers[i], 0.2)
+      world.scale(&engine.world, target_markers[i], 0.2)
     }
 
     // Ground plane for reference
-    cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-    gray_mat := mjolnir.get_builtin_material(engine, .GRAY)
+    cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+    gray_mat := world.get_builtin_material(&engine.world, .GRAY)
     ground_plane = mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {

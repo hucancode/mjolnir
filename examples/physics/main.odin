@@ -27,15 +27,15 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world, {0, -20, 0}) // 2x earth gravity
-  ground_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-  ground_mat := mjolnir.get_builtin_material(engine, .GRAY)
-  sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
-  sphere_mat := mjolnir.get_builtin_material(engine, .MAGENTA)
-  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-  cube_mat := mjolnir.get_builtin_material(engine, .RED)
+  ground_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  ground_mat := world.get_builtin_material(&engine.world, .GRAY)
+  sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
+  sphere_mat := world.get_builtin_material(&engine.world, .MAGENTA)
+  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  cube_mat := world.get_builtin_material(&engine.world, .RED)
   rand_sphere_mesh := mjolnir.create_mesh(engine, geometry.make_sphere(random_colors = true))
   rand_cylinder_mesh := mjolnir.create_mesh(engine, geometry.make_cylinder(random_colors = true))
-  rand_mat := mjolnir.get_builtin_material(engine, .WHITE)
+  rand_mat := world.get_builtin_material(&engine.world, .WHITE)
   // Create ground
   {
     ground_node_handle := world.spawn(&engine.world, {0, -0.5, 0})
@@ -78,7 +78,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    mjolnir.scale(engine, sphere_mesh_handle, SPHERE_RADIUS)
+    world.scale(&engine.world, sphere_mesh_handle, SPHERE_RADIUS)
     log.info("Sphere created")
   }
   // Create cube grid
@@ -105,8 +105,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Alternate between cylinder (0), cube (1), and sphere (2)
     shape_type := i % 3
     body_handle: physics.DynamicRigidBodyHandle
-    mesh_handle: mjolnir.MeshHandle
-    mat_handle: mjolnir.MaterialHandle
+    mesh_handle: world.MeshHandle
+    mat_handle: world.MaterialHandle
 
     switch shape_type {
     case 0: // Cylinder
@@ -167,7 +167,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   log.infof("Created %d physics objects", PIECE_COUNT)
   if camera := mjolnir.get_main_camera(engine); camera != nil {
-    mjolnir.camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
+    world.camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
     mjolnir.sync_active_camera_controller(engine)
   }
   light_handle := mjolnir.spawn_spot_light(
@@ -177,7 +177,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     math.PI * 0.25,
     position = {0, 20, 0},
   )
-  mjolnir.rotate(engine, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  world.rotate(&engine.world, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   log.info("Physics demo setup complete")
 }
 

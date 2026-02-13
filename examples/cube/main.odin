@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import world "../../mjolnir/world"
 import "core:log"
 
 main :: proc() {
@@ -9,7 +10,7 @@ main :: proc() {
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     mjolnir.spawn_cube(engine, .RED)
     if camera := mjolnir.get_main_camera(engine); camera != nil {
-      mjolnir.camera_look_at(camera, {3, 2, 3}, {0, 0, 0})
+      world.camera_look_at(camera, {3, 2, 3}, {0, 0, 0})
     }
   }
   mjolnir.run(engine, 800, 600, "visual-single-cube")

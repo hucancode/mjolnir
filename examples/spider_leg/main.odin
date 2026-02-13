@@ -7,10 +7,10 @@ import "core:log"
 import "core:math"
 
 // Visual markers
-leg_root_node: mjolnir.NodeHandle
-target_markers: [8]mjolnir.NodeHandle
-feet_markers: [8]mjolnir.NodeHandle
-ground_plane_node: mjolnir.NodeHandle
+leg_root_node: world.NodeHandle
+target_markers: [8]world.NodeHandle
+feet_markers: [8]world.NodeHandle
+ground_plane_node: world.NodeHandle
 
 // Core spider leg state - 8 legs (4 per side)
 spider_legs: [8]anim.SpiderLeg
@@ -21,7 +21,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     if camera := mjolnir.get_main_camera(engine); camera != nil {
-      mjolnir.camera_look_at(camera, {0, 50, 100}, {0, 0, 0})
+      world.camera_look_at(camera, {0, 50, 100}, {0, 0, 0})
       mjolnir.sync_active_camera_controller(engine)
     }
 
@@ -54,11 +54,11 @@ main :: proc() {
     }
 
     // Create visual markers
-    cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-    sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
+    cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+    sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
 
     // Leg root (blue cube) - represents spider body
-    blue_mat := mjolnir.get_builtin_material(engine, .BLUE)
+    blue_mat := world.get_builtin_material(&engine.world, .BLUE)
     leg_root_node = mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {
@@ -67,11 +67,11 @@ main :: proc() {
       },
       position = {0, 10, 0},
     )
-    mjolnir.scale(engine, leg_root_node, 2.0)
+    world.scale(&engine.world, leg_root_node, 2.0)
 
     // Create markers for each leg
-    yellow_mat := mjolnir.get_builtin_material(engine, .YELLOW)
-    green_mat := mjolnir.get_builtin_material(engine, .GREEN)
+    yellow_mat := world.get_builtin_material(&engine.world, .YELLOW)
+    green_mat := world.get_builtin_material(&engine.world, .GREEN)
 
     for i in 0 ..< 8 {
       // Target marker (small yellow cube) - shows computed target position
@@ -82,7 +82,7 @@ main :: proc() {
           material = yellow_mat,
         },
       )
-      mjolnir.scale(engine, target_markers[i], 0.3)
+      world.scale(&engine.world, target_markers[i], 0.3)
 
       // Feet marker (green sphere) - shows actual feet position
       feet_markers[i] = mjolnir.spawn(
@@ -92,11 +92,11 @@ main :: proc() {
           material = green_mat,
         },
       )
-      mjolnir.scale(engine, feet_markers[i], 0.8)
+      world.scale(&engine.world, feet_markers[i], 0.8)
     }
 
     // Ground plane (gray, large and flat)
-    gray_mat := mjolnir.get_builtin_material(engine, .GRAY)
+    gray_mat := world.get_builtin_material(&engine.world, .GRAY)
     ground_plane_node = mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {

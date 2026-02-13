@@ -5,8 +5,8 @@ import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 
-fox_handle: mjolnir.NodeHandle
-target_cube: mjolnir.NodeHandle
+fox_handle: world.NodeHandle
+target_cube: world.NodeHandle
 blend_factor: f32 = 0.0 // 0.0 = Walk, 1.0 = Run
 blend_direction: f32 = 1.0
 
@@ -22,7 +22,7 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   // Setup camera - try a closer view first
   if camera := mjolnir.get_main_camera(engine); camera != nil {
-    mjolnir.camera_look_at(camera, {3, 2, 3}, {0, 1, 0})
+    world.camera_look_at(camera, {3, 2, 3}, {0, 1, 0})
     mjolnir.sync_active_camera_controller(engine)
   }
 
@@ -48,14 +48,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
         fox_handle = child
 
         // Layer 0: Walk animation (starts at full weight)
-        if !mjolnir.add_animation_layer(engine, child, "Walk", weight = 1.0) {
+        if !world.add_animation_layer(&engine.world, child, "Walk", weight = 1.0) {
           log.error("Failed to add Walk animation")
         } else {
           log.info("Added Walk animation on layer 0")
         }
 
         // Layer 1: Run animation (starts at zero weight)
-        if !mjolnir.add_animation_layer(engine, child, "Run", weight = 0.0) {
+        if !world.add_animation_layer(&engine.world, child, "Run", weight = 0.0) {
           log.error("Failed to add Run animation")
         } else {
           log.info("Added Run animation on layer 1")
@@ -66,8 +66,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         target_pos := [3]f32{0.0, 4.0, 5.0} // scaled from {0, 80, 100}
         pole_pos := [3]f32{0.0, 5.0, 2.5} // scaled from {0, 100, 50}
 
-        if !mjolnir.add_ik_layer(
-          engine,
+        if !world.add_ik_layer(&engine.world,
           child,
           bone_names = []string {
             "b_Spine01_02",
@@ -75,8 +74,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
             "b_Neck_04",
             "b_Head_05",
           },
-          target_pos = target_pos,
-          pole_pos = pole_pos,
+          target_world_pos = target_pos,
+          pole_world_pos = pole_pos,
           weight = 1.0,
         ) {
           log.error("Failed to add IK layer")
@@ -90,8 +89,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Create target cube for IK visualization
-  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-  cube_material := mjolnir.get_builtin_material(engine, .RED)
+  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  cube_material := world.get_builtin_material(&engine.world, .RED)
   target_cube = mjolnir.spawn(
   engine,
   {0.0, 4.0, 5.0}, // Initial IK target position
@@ -101,7 +100,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     cast_shadow = false,
   },
   )
-  mjolnir.scale(engine, target_cube, 0.25) // Make it smaller for the scaled scene
+  world.scale(&engine.world, target_cube, 0.25) // Make it smaller for the scaled scene
 
   // Add lighting
   mjolnir.spawn_directional_light(
@@ -128,8 +127,8 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   // Layer 0 (Walk): weight goes from 1.0 to 0.0
   // Layer 1 (Run): weight goes from 0.0 to 1.0
   if fox_handle.index != 0 {
-    mjolnir.set_animation_layer_weight(engine, fox_handle, 0, 1.0 - blend_factor)
-    mjolnir.set_animation_layer_weight(engine, fox_handle, 1, blend_factor)
+    world.set_animation_layer_weight(&engine.world, fox_handle, 0, 1.0 - blend_factor)
+    world.set_animation_layer_weight(&engine.world, fox_handle, 1, blend_factor)
   }
 
   // Move target cube in a circle (scaled coordinates: 80->4, 100->5)
@@ -143,12 +142,12 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
   // Update IK target (layer 2)
   if fox_handle.index != 0 {
-    mjolnir.set_ik_layer_target(engine, fox_handle, 2, new_target, pole)
+    world.set_ik_layer_target(&engine.world, fox_handle, 2, new_target, pole)
   }
 
   // Move the visual cube
   if target_cube.index != 0 {
-    mjolnir.translate(engine, target_cube, target_x, target_y, target_z)
+    world.translate(&engine.world, target_cube, target_x, target_y, target_z)
   }
 }
 

@@ -12,15 +12,15 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-root_nodes: [dynamic]mjolnir.NodeHandle
-markers: [dynamic]mjolnir.NodeHandle
+root_nodes: [dynamic]world.NodeHandle
+markers: [dynamic]world.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     if camera := mjolnir.get_main_camera(engine); camera != nil {
-      mjolnir.camera_look_at(camera, {5, 15, 8}, {0, 3, 0})
+      world.camera_look_at(camera, {5, 15, 8}, {0, 3, 0})
       mjolnir.sync_active_camera_controller(engine)
     }
     root_nodes = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
@@ -57,8 +57,8 @@ main :: proc() {
     }
 
     // Create cone markers for each bone
-    cone_mesh := mjolnir.get_builtin_mesh(engine, .CONE)
-    mat := mjolnir.get_builtin_material(engine, .YELLOW)
+    cone_mesh := world.get_builtin_mesh(&engine.world, .CONE)
+    mat := world.get_builtin_material(&engine.world, .YELLOW)
 
     // Find the skinned mesh and create markers for bones
     for handle in root_nodes {
@@ -80,7 +80,7 @@ main :: proc() {
               material = mat,
             },
           )
-          mjolnir.scale(engine, marker, 0.08)
+          world.scale(&engine.world, marker, 0.08)
           append(&markers, marker)
         }
       }

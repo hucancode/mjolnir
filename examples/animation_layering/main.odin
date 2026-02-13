@@ -22,8 +22,8 @@ import "core:math"
 // - Space: Reset all
 
 State :: struct {
-  fox_handle:        mjolnir.NodeHandle,
-  target_cube:       mjolnir.NodeHandle,
+  fox_handle:        world.NodeHandle,
+  target_cube:       world.NodeHandle,
 
   // Layer weights
   walk_weight:       f32,
@@ -68,7 +68,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Setup camera
   if camera := mjolnir.get_main_camera(engine); camera != nil {
-    mjolnir.camera_look_at(camera, {3, 2, 3}, {0, 1, 0})
+    world.camera_look_at(camera, {3, 2, 3}, {0, 1, 0})
     mjolnir.sync_active_camera_controller(engine)
   }
 
@@ -91,8 +91,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         state.fox_handle = child
 
         // === Layer 0: Walk animation (base layer, REPLACE mode) ===
-        if !mjolnir.add_animation_layer(
-          engine,
+        if !world.add_animation_layer(&engine.world,
           child,
           "Walk",
           weight = 1.0,
@@ -104,8 +103,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
 
         // === Layer 1: Run animation (REPLACE mode, starts at 0 weight) ===
-        if !mjolnir.add_animation_layer(
-          engine,
+        if !world.add_animation_layer(&engine.world,
           child,
           "Run",
           weight = 0.0,
@@ -118,8 +116,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
         // === Layer 2: Survey animation (REPLACE mode with bone mask for upper body) ===
         // Note: Standard animation clips should use REPLACE mode, not ADD
-        if !mjolnir.add_animation_layer(
-          engine,
+        if !world.add_animation_layer(&engine.world,
           child,
           "Survey",
           weight = 0.0,
@@ -164,8 +161,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Create target cube for IK visualization
-  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-  cube_material := mjolnir.get_builtin_material(engine, .RED)
+  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  cube_material := world.get_builtin_material(&engine.world, .RED)
   state.target_cube = mjolnir.spawn(
     engine,
     {0.0, 4.0, 5.0},
@@ -175,7 +172,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = false,
     },
   )
-  mjolnir.scale(engine, state.target_cube, 0.25)
+  world.scale(&engine.world, state.target_cube, 0.25)
   // Add lighting
   mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0}, cast_shadow = true)
 }
@@ -198,18 +195,18 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     state.run_weight = math.lerp(state.run_weight, target_run, dt * 0.2)
   }
 
-  mjolnir.set_animation_layer_weight(engine, state.fox_handle, 0, state.walk_weight)
-  mjolnir.set_animation_layer_weight(engine, state.fox_handle, 1, state.run_weight)
+  world.set_animation_layer_weight(&engine.world, state.fox_handle, 0, state.walk_weight)
+  world.set_animation_layer_weight(&engine.world, state.fox_handle, 1, state.run_weight)
 
   // === Update survey animation (upper body) ===
   target_survey := state.enable_survey ? f32(1.0) : f32(0.0)
   state.survey_weight = math.lerp(state.survey_weight, target_survey, dt)
-  mjolnir.set_animation_layer_weight(engine, state.fox_handle, 2, state.survey_weight)
+  world.set_animation_layer_weight(&engine.world, state.fox_handle, 2, state.survey_weight)
 
   // === Update IK layer ===
   target_ik := state.enable_ik ? f32(1.0) : f32(0.0)
   state.ik_weight = math.lerp(state.ik_weight, target_ik, dt * 2.0)
-  mjolnir.set_animation_layer_weight(engine, state.fox_handle, 3, state.ik_weight)
+  world.set_animation_layer_weight(&engine.world, state.fox_handle, 3, state.ik_weight)
 
   // Move IK target in a circle
   if state.enable_ik {
@@ -221,11 +218,11 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     new_target := [3]f32{target_x, target_y, target_z}
     pole := [3]f32{0.0, 5.0, 0.0}
 
-    mjolnir.set_ik_layer_target(engine, state.fox_handle, 3, new_target, pole)
+    world.set_ik_layer_target(&engine.world, state.fox_handle, 3, new_target, pole)
 
     // Move the visual cube
     if state.target_cube.index != 0 {
-      mjolnir.translate(engine, state.target_cube, target_x, target_y, target_z)
+      world.translate(&engine.world, state.target_cube, target_x, target_y, target_z)
     }
   }
   // Debug output every 60 frames

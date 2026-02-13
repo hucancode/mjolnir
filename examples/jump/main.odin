@@ -8,8 +8,8 @@ import "core:math/linalg"
 import "vendor:glfw"
 
 physics_world: physics.World
-cube_handle: mjolnir.NodeHandle
-ground_handle: mjolnir.NodeHandle
+cube_handle: world.NodeHandle
+ground_handle: world.NodeHandle
 cube_body: physics.DynamicRigidBodyHandle
 time_since_jump: f32
 
@@ -28,8 +28,8 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world, {0, -10, 0})
-  ground_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-  ground_mat := mjolnir.get_builtin_material(engine, .GRAY)
+  ground_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  ground_mat := world.get_builtin_material(&engine.world, .GRAY)
   ground_handle = mjolnir.spawn(
     engine,
     [3]f32{0, -0.5, 0},
@@ -51,8 +51,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   world.scale_xyz(&engine.world, ground_mesh_handle, 40.0, 0.5, 40.0)
   log.info("Ground body created")
-  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-  cube_mat := mjolnir.get_builtin_material(engine, .CYAN)
+  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  cube_mat := world.get_builtin_material(&engine.world, .CYAN)
   cube_handle = mjolnir.spawn(
     engine,
     [3]f32{0, 3, 0},
@@ -84,7 +84,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   log.info("Cube body created")
   if camera := mjolnir.get_main_camera(engine); camera != nil {
-    mjolnir.camera_look_at(camera, {8, 5, 8}, {0, 2, 0})
+    world.camera_look_at(camera, {8, 5, 8}, {0, 2, 0})
     mjolnir.sync_active_camera_controller(engine)
   }
   time_since_jump = 0.0

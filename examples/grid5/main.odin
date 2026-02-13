@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/world"
 import "core:log"
 
 main :: proc() {
@@ -13,7 +14,7 @@ main :: proc() {
       }
     }
     if camera := mjolnir.get_main_camera(engine); camera != nil {
-      mjolnir.camera_look_at(camera, {10, 15, 10}, {0, 0, 0})
+      world.camera_look_at(camera, {10, 15, 10}, {0, 0, 0})
       mjolnir.sync_active_camera_controller(engine)
     }
   }

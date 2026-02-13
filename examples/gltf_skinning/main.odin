@@ -6,13 +6,13 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-nodes: [dynamic]mjolnir.NodeHandle
+nodes: [dynamic]world.NodeHandle
 
 main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     if camera := mjolnir.get_main_camera(engine); camera != nil {
-      mjolnir.camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
+      world.camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
       mjolnir.sync_active_camera_controller(engine)
     }
     nodes = mjolnir.load_gltf(engine, "assets/CesiumMan.glb")
@@ -28,7 +28,7 @@ main :: proc() {
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rotation := delta_time * math.PI * 0.15
     for handle in nodes {
-      mjolnir.rotate_by(engine, handle, rotation)
+      world.rotate_by(&engine.world, handle, rotation)
     }
   }
   mjolnir.run(engine, 800, 600, "visual-gltf-skinning")

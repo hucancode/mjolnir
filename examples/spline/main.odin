@@ -11,7 +11,7 @@ import "core:math/linalg"
 CUBE_COUNT :: 50
 ANIMATION_DURATION :: 8.0
 
-cubes: [CUBE_COUNT]mjolnir.NodeHandle
+cubes: [CUBE_COUNT]world.NodeHandle
 spline: animation.Spline([3]f32)
 
 main :: proc() {
@@ -19,7 +19,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     if camera := mjolnir.get_main_camera(engine); camera != nil {
-      mjolnir.camera_look_at(camera, {0, 10, 0}, {0, 0, 0})
+      world.camera_look_at(camera, {0, 10, 0}, {0, 0, 0})
       mjolnir.sync_active_camera_controller(engine)
     }
     // Create figure-8/infinity symbol spline path
@@ -41,18 +41,18 @@ main :: proc() {
     }
     // Build arc-length table for uniform spatial sampling
     animation.spline_build_arc_table(&spline, 200)
-    mat_handles := [?]mjolnir.MaterialHandle {
-      mjolnir.get_builtin_material(engine, .RED),
-      mjolnir.get_builtin_material(engine, .GREEN),
-      mjolnir.get_builtin_material(engine, .BLUE),
-      mjolnir.get_builtin_material(engine, .YELLOW),
-      mjolnir.get_builtin_material(engine, .CYAN),
-      mjolnir.get_builtin_material(engine, .MAGENTA),
-      mjolnir.get_builtin_material(engine, .WHITE),
-      mjolnir.get_builtin_material(engine, .GRAY),
-      mjolnir.get_builtin_material(engine, .BLACK),
+    mat_handles := [?]world.MaterialHandle {
+      world.get_builtin_material(&engine.world, .RED),
+      world.get_builtin_material(&engine.world, .GREEN),
+      world.get_builtin_material(&engine.world, .BLUE),
+      world.get_builtin_material(&engine.world, .YELLOW),
+      world.get_builtin_material(&engine.world, .CYAN),
+      world.get_builtin_material(&engine.world, .MAGENTA),
+      world.get_builtin_material(&engine.world, .WHITE),
+      world.get_builtin_material(&engine.world, .GRAY),
+      world.get_builtin_material(&engine.world, .BLACK),
     }
-    cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+    cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
     for i in 0 ..< CUBE_COUNT {
       cubes[i] = mjolnir.spawn(
         engine,
@@ -61,11 +61,11 @@ main :: proc() {
           material = mat_handles[i % len(mat_handles)],
         },
       )
-      mjolnir.scale(engine, cubes[i], 0.3)
+      world.scale(&engine.world, cubes[i], 0.3)
     }
     // Add ground plane
-    ground_mat := mjolnir.get_builtin_material(engine, .GRAY)
-    quad_mesh := mjolnir.get_builtin_mesh(engine, .QUAD_XZ)
+    ground_mat := world.get_builtin_material(&engine.world, .GRAY)
+    quad_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
     ground := mjolnir.spawn(
       engine,
       attachment = world.MeshAttachment {
@@ -73,8 +73,8 @@ main :: proc() {
         material = ground_mat,
       },
     )
-    mjolnir.scale(engine, ground, 20.0)
-    mjolnir.translate(engine, ground, 0, -2, 0)
+    world.scale(&engine.world, ground, 20.0)
+    world.translate(&engine.world, ground, 0, -2, 0)
     mjolnir.spawn_point_light(
       engine,
       {1.0, 1.0, 1.0, 1.0},
@@ -94,7 +94,7 @@ main :: proc() {
       normalized := current_s / total_length
       tweened := ease.ease(.Quadratic_In_Out, normalized) * total_length
       pos := animation.spline_sample_uniform(spline, tweened)
-      mjolnir.translate(engine, cubes[i], pos.x, pos.y, pos.z)
+      world.translate(&engine.world, cubes[i], pos.x, pos.y, pos.z)
     }
   }
   mjolnir.run(engine, 800, 600, "visual-spline")

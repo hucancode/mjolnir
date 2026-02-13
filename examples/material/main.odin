@@ -7,7 +7,7 @@ import "core:math"
 import "core:math/linalg"
 import "vendor:glfw"
 
-cube_handle: mjolnir.NodeHandle
+cube_handle: world.NodeHandle
 
 main :: proc() {
   engine := new(mjolnir.Engine)
@@ -18,10 +18,10 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   if camera := mjolnir.get_main_camera(engine); camera != nil {
-    mjolnir.camera_look_at(camera, {2, 2, 2}, {0.0, 0.0, 0.0})
+    world.camera_look_at(camera, {2, 2, 2}, {0.0, 0.0, 0.0})
     mjolnir.sync_active_camera_controller(engine)
   }
-  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
+  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   albedo_texture := mjolnir.create_texture(
     engine,
     #load("statue-1275469_1280.jpg"),
@@ -31,7 +31,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     engine,
     {.ALBEDO_TEXTURE},
     type = .PBR,
-    albedo_handle = albedo_texture,
+    albedo_handle = transmute(world.Image2DHandle)albedo_texture,
     roughness_value = 0.35,
     metallic_value = 0.1,
   )
@@ -54,8 +54,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  mjolnir.rotate(
-    engine,
+  world.rotate(&engine.world,
     cube_handle,
     mjolnir.time_since_start(engine),
     linalg.VECTOR3F32_Y_AXIS,

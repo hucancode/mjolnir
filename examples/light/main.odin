@@ -9,7 +9,7 @@ import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
 
-light_handle: mjolnir.NodeHandle
+light_handle: world.NodeHandle
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -21,12 +21,12 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   if camera := mjolnir.get_main_camera(engine); camera != nil {
-    mjolnir.camera_look_at(camera, {6.0, 4.0, 6.0}, {0.0, 0.0, 0.0})
+    world.camera_look_at(camera, {6.0, 4.0, 6.0}, {0.0, 0.0, 0.0})
     mjolnir.sync_active_camera_controller(engine)
   }
   // Camera controller is automatically set up by engine
-  plane_mesh := mjolnir.get_builtin_mesh(engine, .QUAD_XZ)
-  plane_material := mjolnir.get_builtin_material(engine, .GRAY)
+  plane_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
+  plane_material := world.get_builtin_material(&engine.world, .GRAY)
   plane_handle := mjolnir.spawn(
     engine,
     attachment = world.MeshAttachment {
@@ -35,10 +35,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = false,
     },
   )
-  mjolnir.scale(engine, plane_handle, 6.5)
-  mjolnir.translate(engine, plane_handle, 0.0, -0.05, 0.0)
-  sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
-  sphere_material := mjolnir.get_builtin_material(engine, .RED)
+  world.scale(&engine.world, plane_handle, 6.5)
+  world.translate(&engine.world, plane_handle, 0.0, -0.05, 0.0)
+  sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
+  sphere_material := world.get_builtin_material(&engine.world, .RED)
   sphere_handle := mjolnir.spawn(
     engine,
     attachment = world.MeshAttachment {
@@ -47,8 +47,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = false,
     },
   )
-  mjolnir.translate(engine, sphere_handle, 0.0, 1.2, 0.0)
-  mjolnir.scale(engine, sphere_handle, 1.1)
+  world.translate(&engine.world, sphere_handle, 0.0, 1.2, 0.0)
+  world.scale(&engine.world, sphere_handle, 1.1)
   mjolnir.spawn_point_light(
     engine,
     {1.0, 0.85, 0.6, 1.0},
@@ -68,8 +68,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   t := mjolnir.time_since_start(engine)
-  mjolnir.rotate(
-    engine,
+  world.rotate(&engine.world,
     light_handle,
     math.PI * (math.sin(t) * 0.5 + 0.5),
     linalg.VECTOR3F32_X_AXIS,

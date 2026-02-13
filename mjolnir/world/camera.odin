@@ -4,7 +4,6 @@ import "../geometry"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import vk "vendor:vulkan"
 
 PassType :: enum {
   SHADOW       = 0,
@@ -184,7 +183,7 @@ camera_init :: proc(
   fov: f32 = 1.57079632679,
   near_plane: f32 = 0.1,
   far_plane: f32 = 100.0,
-) -> vk.Result {
+) -> bool {
   camera.rotation = linalg.QUATERNIONF32_IDENTITY
   camera.projection = PerspectiveProjection {
     fov          = fov,
@@ -199,7 +198,7 @@ camera_init :: proc(
   camera.enable_culling = true
   camera.enable_depth_pyramid = true
   camera.draw_list_source_handle = {}
-  return .SUCCESS
+  return true
 }
 
 camera_init_orthographic :: proc(
@@ -212,7 +211,7 @@ camera_init_orthographic :: proc(
   ortho_height: f32 = 100.0,
   near_plane: f32 = 1.0,
   far_plane: f32 = 1000.0,
-) -> vk.Result {
+) -> bool {
   camera.rotation = linalg.QUATERNIONF32_IDENTITY
   camera.projection = OrthographicProjection {
     width  = ortho_width,
@@ -227,16 +226,16 @@ camera_init_orthographic :: proc(
   camera.enable_culling = true
   camera.enable_depth_pyramid = true
   camera.draw_list_source_handle = {}
-  return .SUCCESS
+  return true
 }
 
-camera_resize :: proc(camera: ^Camera, width, height: u32) -> vk.Result {
-  if camera.extent[0] == width && camera.extent[1] == height do return .SUCCESS
+camera_resize :: proc(camera: ^Camera, width, height: u32) -> bool {
+  if camera.extent[0] == width && camera.extent[1] == height do return true
   camera.extent = {width, height}
   if perspective, ok := &camera.projection.(PerspectiveProjection); ok {
     perspective.aspect_ratio = f32(width) / f32(height)
   }
-  return .SUCCESS
+  return true
 }
 
 camera_use_external_draw_list_handle :: proc(

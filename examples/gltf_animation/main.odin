@@ -10,7 +10,7 @@ import "core:time"
 import cgltf "vendor:cgltf"
 import "vendor:glfw"
 
-root_nodes: [dynamic]mjolnir.NodeHandle
+root_nodes: [dynamic]world.NodeHandle
 frame_counter: int
 
 main :: proc() {
@@ -18,14 +18,14 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     if camera := mjolnir.get_main_camera(engine); camera != nil {
-      mjolnir.camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
+      world.camera_look_at(camera, {1.5, 1.5, 1.5}, {0, 1, 0})
       mjolnir.sync_active_camera_controller(engine)
     }
     root_nodes = mjolnir.load_gltf(engine, "assets/CesiumMan.glb")
     for handle in root_nodes {
       node := mjolnir.get_node(engine, handle) or_continue
       for child in node.children {
-        if mjolnir.play_animation(engine, child, "Anim_0") do break
+        if world.play_animation(&engine.world, child, "Anim_0") do break
       }
     }
     mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
@@ -33,7 +33,7 @@ main :: proc() {
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rotation := delta_time * math.PI * 0.05
     for handle in root_nodes {
-      mjolnir.rotate_by(engine, handle, rotation)
+      world.rotate_by(&engine.world, handle, rotation)
     }
   }
   mjolnir.run(engine, 800, 600, "visual-gltf-animation")

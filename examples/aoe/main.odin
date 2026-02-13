@@ -10,15 +10,15 @@ import "core:os"
 import "vendor:glfw"
 
 physics_world: physics.World
-cube_mesh_handles: [dynamic]mjolnir.NodeHandle
-cube_body_to_mesh: map[physics.TriggerHandle]mjolnir.NodeHandle
-effector_sphere: mjolnir.NodeHandle
+cube_mesh_handles: [dynamic]world.NodeHandle
+cube_body_to_mesh: map[physics.TriggerHandle]world.NodeHandle
+effector_sphere: world.NodeHandle
 effector_position: [3]f32
 orbit_angle: f32 = 0.0
 orbit_radius: f32 = 15.0
 effect_radius: f32 = 10.0
 cube_scale: f32 = 0.3
-clicked_cube: mjolnir.NodeHandle
+clicked_cube: world.NodeHandle
 last_mouse_button_state: bool = false
 
 main :: proc() {
@@ -34,14 +34,14 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world)
   cube_body_to_mesh = make(
-    map[physics.TriggerHandle]mjolnir.NodeHandle,
+    map[physics.TriggerHandle]world.NodeHandle,
   )
   mjolnir.set_visibility_stats(engine, false)
   engine.debug_ui_enabled = false
   // Use builtin meshes and materials
-  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-  sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
-  cube_mat := mjolnir.get_builtin_material(engine, .CYAN)
+  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
+  cube_mat := world.get_builtin_material(&engine.world, .CYAN)
   // Emissive material for effector sphere
   effector_mat := mjolnir.create_material(engine, emissive_value = 5.0)
   // Spawn 50x50 grid of cubes
@@ -71,7 +71,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           cast_shadow = false,
         },
       ) or_continue
-      mjolnir.scale(engine, mesh_handle, cube_scale)
+      world.scale(&engine.world, mesh_handle, cube_scale)
       append(&cube_mesh_handles, mesh_handle)
       cube_body_to_mesh[body_handle] = mesh_handle
     }
@@ -86,16 +86,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = false,
     },
   )
-  mjolnir.translate(
-    engine,
+  world.translate(&engine.world,
     effector_sphere,
     effector_position.x,
     effector_position.y,
     effector_position.z,
   )
-  mjolnir.scale(engine, effector_sphere, 0.5)
+  world.scale(&engine.world, effector_sphere, 0.5)
   if main_camera := mjolnir.get_main_camera(engine); main_camera != nil {
-    mjolnir.camera_look_at(main_camera, {10, 30, 10}, {0, 0, 0})
+    world.camera_look_at(main_camera, {10, 30, 10}, {0, 0, 0})
     mjolnir.sync_active_camera_controller(engine)
   }
   // Build initial BVH for all bodies
@@ -156,8 +155,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   effector_position.x = math.cos(orbit_angle) * orbit_radius
   effector_position.y = 1.0
   effector_position.z = math.sin(orbit_angle) * orbit_radius
-  mjolnir.translate(
-    engine,
+  world.translate(&engine.world,
     effector_sphere,
     effector_position.x,
     effector_position.y,
@@ -165,7 +163,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   )
   // Reset all cubes to normal scale
   for handle in cube_mesh_handles {
-    mjolnir.scale(engine, handle, cube_scale)
+    world.scale(&engine.world, handle, cube_scale)
   }
   // Query for cubes within effect radius using physics
   affected: [dynamic]physics.TriggerHandle
@@ -179,9 +177,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Shrink affected cubes
   for body_handle in affected {
     if mesh_handle, ok := cube_body_to_mesh[body_handle]; ok {
-      mjolnir.scale(engine, mesh_handle, 0.1)
+      world.scale(&engine.world, mesh_handle, 0.1)
     }
   }
   // Scale the clicked cube 3x
-  mjolnir.scale(engine, clicked_cube, cube_scale * 3.0)
+  world.scale(&engine.world, clicked_cube, cube_scale * 3.0)
 }

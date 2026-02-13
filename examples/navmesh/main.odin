@@ -20,19 +20,19 @@ demo_state: struct {
   end_pos:              [3]f32,
   current_path:         [][3]f32,
   // Visual markers
-  end_marker_handle:    mjolnir.NodeHandle,
+  end_marker_handle:    world.NodeHandle,
   // Agent
-  agent_handle:         mjolnir.NodeHandle,
+  agent_handle:         world.NodeHandle,
   agent_pos:            [3]f32,
   agent_speed:          f32,
   current_waypoint_idx: int,
   path_completed:       bool,
   // Demo scene nodes
-  ground_handle:        mjolnir.NodeHandle,
-  obstacle_handles:     [dynamic]mjolnir.NodeHandle,
+  ground_handle:        world.NodeHandle,
+  obstacle_handles:     [dynamic]world.NodeHandle,
   // OBJ file support
-  obj_mesh_handle:      mjolnir.MeshHandle,
-  obj_node_handle:      mjolnir.NodeHandle,
+  obj_mesh_handle:      world.MeshHandle,
+  obj_node_handle:      world.NodeHandle,
   use_procedural:       bool,
   // Navigation mesh info
   navmesh_info:         string,
@@ -40,10 +40,10 @@ demo_state: struct {
   nav_indices:          [dynamic]i32,
   nav_area_types:       [dynamic]u8,
   // Navmesh visualization
-  navmesh_node_handle:  mjolnir.NodeHandle,
+  navmesh_node_handle:  world.NodeHandle,
   // Path visualization
-  path_node_handle:     mjolnir.NodeHandle,
-  path_mesh_handle:     mjolnir.MeshHandle,
+  path_node_handle:     world.NodeHandle,
+  path_mesh_handle:     world.MeshHandle,
   path_spawn_time:      f32,
 } = {
   use_procedural = true,
@@ -88,7 +88,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
   // Setup camera
   main_camera := mjolnir.get_main_camera(engine)
   if camera := mjolnir.get_main_camera(engine); camera != nil {
-    mjolnir.camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0})
+    world.camera_look_at(camera, {35, 25, 35}, {0, 0, 0})
     mjolnir.sync_active_camera_controller(engine)
   }
   if demo_state.use_procedural {
@@ -354,7 +354,7 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
 
 update_position_marker :: proc(
   engine: ^mjolnir.Engine,
-  handle: ^mjolnir.NodeHandle,
+  handle: ^world.NodeHandle,
   pos: [3]f32,
   color: [4]f32,
 ) {
@@ -384,7 +384,7 @@ update_position_marker :: proc(
 
 update_agent_position :: proc(engine: ^mjolnir.Engine) {
   pos := demo_state.agent_pos + [3]f32{0, 1, 0}
-  mjolnir.translate(engine, demo_state.agent_handle, pos.x, pos.y, pos.z)
+  world.translate(&engine.world, demo_state.agent_handle, pos.x, pos.y, pos.z)
 }
 
 visualize_path :: proc(engine: ^mjolnir.Engine) {

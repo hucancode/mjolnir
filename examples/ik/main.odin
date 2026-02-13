@@ -9,12 +9,12 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
-root_nodes: [dynamic]mjolnir.NodeHandle
+root_nodes: [dynamic]world.NodeHandle
 animation_time: f32 = 0
-spider_root_node: mjolnir.NodeHandle
-mesh_node: mjolnir.NodeHandle
-target_markers: [6]mjolnir.NodeHandle
-ground_plane: mjolnir.NodeHandle
+spider_root_node: world.NodeHandle
+mesh_node: world.NodeHandle
+target_markers: [6]world.NodeHandle
+ground_plane: world.NodeHandle
 
 // Fixed ground targets for each leg (computed from initial pose)
 leg_targets: [6][3]f32
@@ -30,7 +30,7 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   // engine.world.debug_draw_ik = true // Removed: debug_draw_ik no longer available
   if camera := mjolnir.get_main_camera(engine); camera != nil {
-    mjolnir.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
+    world.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
     mjolnir.sync_active_camera_controller(engine)
   }
 
@@ -149,8 +149,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
 
         // Add IK layer for this leg
-        mjolnir.add_ik_layer(
-          engine,
+        world.add_ik_layer(&engine.world,
           child,
           bone_names,
           leg_targets[i],
@@ -164,7 +163,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
 
-  mat := mjolnir.get_builtin_material(engine, .YELLOW)
+  mat := world.get_builtin_material(&engine.world, .YELLOW)
 
   // Find the skinned mesh and create markers for bones
   for handle in root_nodes {
@@ -186,8 +185,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Create visual markers for each leg target (red spheres)
-  sphere_mesh := mjolnir.get_builtin_mesh(engine, .SPHERE)
-  red_mat := mjolnir.get_builtin_material(engine, .RED)
+  sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
+  red_mat := world.get_builtin_material(&engine.world, .RED)
   for i in 0 ..< 6 {
     target_markers[i] = mjolnir.spawn(
       engine,
@@ -196,7 +195,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         material = red_mat,
       },
     )
-    mjolnir.scale(engine, target_markers[i], 0.5)
+    world.scale(&engine.world, target_markers[i], 0.5)
     // Position at the fixed target
     if marker_node := mjolnir.get_node(engine, target_markers[i]); marker_node != nil {
       marker_node.transform.position = leg_targets[i]
@@ -205,8 +204,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Ground plane for reference
-  cube_mesh := mjolnir.get_builtin_mesh(engine, .CUBE)
-  gray_mat := mjolnir.get_builtin_material(engine, .GRAY)
+  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  gray_mat := world.get_builtin_material(&engine.world, .GRAY)
   ground_plane = mjolnir.spawn(
     engine,
     attachment = world.MeshAttachment{handle = cube_mesh, material = gray_mat},
@@ -243,8 +242,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
     target_pos := leg_targets[i]
     target_pos.y += amplitude * math.max(math.sin(animation_time * speed * math.PI), 0)
-    mjolnir.set_ik_layer_target(
-      engine,
+    world.set_ik_layer_target(&engine.world,
       mesh_node,
       i, // IK layer index (0-5 for the 6 legs)
       target_pos, // Fixed ground target
@@ -253,13 +251,6 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // Debug draw pole position
     pole_transform := linalg.matrix4_translate(pole_pos)
     pole_transform *= linalg.matrix4_scale([3]f32{0.2, 0.2, 0.2})
-    mjolnir.debug_draw_spawn_mesh_temporary(
-      engine,
-      mjolnir.get_builtin_mesh(engine, .SPHERE),
-      pole_transform,
-      duration_seconds = 0.05,
-      color = {0.0, 1.0, 0.0, 1.0}, // Green for poles
-    )
   }
 }
 
