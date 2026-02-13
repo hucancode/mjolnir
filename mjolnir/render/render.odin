@@ -19,7 +19,6 @@ import "post_process"
 import "transparency"
 import "ui"
 import vk "vendor:vulkan"
-import "visibility"
 
 FRAMES_IN_FLIGHT :: d.FRAMES_IN_FLIGHT
 
@@ -60,7 +59,7 @@ Manager :: struct {
   main_camera:             d.CameraHandle,
   cameras:                 map[u32]camera.Camera,
   meshes:                  map[u32]Mesh,
-  visibility:              visibility.System,
+  visibility:              camera.System,
   shadow:                  light.ShadowSystem,
   textures_set_layout:     vk.DescriptorSetLayout,
   textures_descriptor_set: vk.DescriptorSet,
@@ -477,11 +476,11 @@ record_compute_commands :: proc(
     upload_camera_data(self, cam_index, cam_cpu, frame_index)
     // Only build pyramid if enabled for this camera
     if cam_cpu.enable_depth_pyramid {
-      visibility.build_pyramid(&self.visibility, gctx, compute_buffer, cam_gpu, u32(cam_index), frame_index) // Build pyramid[N]
+      camera.build_pyramid(&self.visibility, gctx, compute_buffer, cam_gpu, u32(cam_index), frame_index) // Build pyramid[N]
     }
     // Only perform culling if enabled for this camera
     if cam_cpu.enable_culling {
-      visibility.perform_culling(&self.visibility, gctx, compute_buffer, cam_gpu, u32(cam_index), next_frame_index, {.VISIBLE}, {}) // Write draw_list[N+1]
+      camera.perform_culling(&self.visibility, gctx, compute_buffer, cam_gpu, u32(cam_index), next_frame_index, {.VISIBLE}, {}) // Write draw_list[N+1]
     }
   }
   particles.simulate(
@@ -562,7 +561,7 @@ init :: proc(
     d.MAX_NODES_IN_SCENE,
   ) or_return
   self.main_camera = camera_handle
-  visibility.init(
+  camera.init(
     &self.visibility,
     gctx,
     swapchain_extent.width,
@@ -678,7 +677,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   light.shutdown(&self.lighting, gctx, &self.texture_manager)
   light.shadow_shutdown(&self.shadow, gctx, &self.texture_manager)
   geometry.shutdown(&self.geometry, gctx)
-  visibility.shutdown(&self.visibility, gctx)
+  camera.shutdown(&self.visibility, gctx)
   shutdown_camera_resources(self, gctx)
   shutdown_bindless_layouts(self, gctx)
   shutdown_scene_buffers(self, gctx)
@@ -754,7 +753,7 @@ render_camera_depth :: proc(
 ) -> vk.Result {
   for cam_index, &cam_cpu in self.cameras {
     cam_gpu := &self.cameras_gpu[cam_index]
-    visibility.render_depth(&self.visibility, gctx, command_buffer, cam_gpu, &cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP}, self.textures_descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.mesh_manager.vertex_skinning_buffer.descriptor_set, self.mesh_manager.vertex_buffer.buffer, self.mesh_manager.index_buffer.buffer)
+    camera.render_depth(&self.visibility, gctx, command_buffer, cam_gpu, &cam_cpu, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP}, self.textures_descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.mesh_manager.vertex_skinning_buffer.descriptor_set, self.mesh_manager.vertex_buffer.buffer, self.mesh_manager.index_buffer.buffer)
   }
   return .SUCCESS
 }

@@ -23,7 +23,7 @@ import render_camera "render/camera"
 import "render/debug_ui"
 import "render/particles"
 import "render/ui"
-import "render/visibility"
+import "render/camera"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -1156,7 +1156,7 @@ populate_debug_ui :: proc(self: ^Engine) {
     )
     if main_camera := get_main_camera(self); main_camera != nil {
       main_camera_gpu := &self.render.cameras_gpu[self.render.main_camera.index]
-      main_stats := visibility.stats(
+      main_stats := camera.stats(
         &self.render.visibility,
         main_camera_gpu,
         self.render.main_camera.index,
