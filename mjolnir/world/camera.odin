@@ -1,5 +1,6 @@
 package world
 
+import cont "../containers"
 import "../geometry"
 import "core:log"
 import "core:math"
@@ -129,6 +130,20 @@ camera_look_at :: proc(self: ^Camera, from, to: [3]f32) {
   }
   self.rotation = linalg.to_quaternion(rotation_matrix)
 }
+
+main_camera_look_at :: proc(
+  world: ^World,
+  main_camera_handle: CameraHandle,
+  from, to: [3]f32,
+) {
+  camera, ok := cont.get(world.cameras, main_camera_handle)
+  if !ok do return
+  camera_look_at(camera, from, to)
+  if world.active_controller != nil {
+    camera_controller_sync(world.active_controller, camera)
+  }
+}
+
 
 camera_update_aspect_ratio :: proc(self: ^Camera, new_aspect_ratio: f32) {
   switch &proj in self.projection {

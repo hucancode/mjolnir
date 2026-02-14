@@ -5,9 +5,7 @@ import cont "containers"
 import "core:math"
 import "core:math/ease"
 import "core:math/linalg"
-import "core:strings"
 import "core:sync"
-import "core:time"
 import "geometry"
 import "gpu"
 import nav "navigation"
@@ -16,8 +14,6 @@ import "physics"
 import "render"
 import render_camera "render/camera"
 import "render/post_process"
-import "render/ui"
-import "vendor:glfw"
 import vk "vendor:vulkan"
 import "world"
 
@@ -155,83 +151,7 @@ create_texture_empty :: proc(
   return handle, ret == .SUCCESS
 }
 
-create_material :: proc(
-  engine: ^Engine,
-  features: world.ShaderFeatureSet = {},
-  type: world.MaterialType = .PBR,
-  albedo_handle: world.Image2DHandle = {},
-  metallic_roughness_handle: world.Image2DHandle = {},
-  normal_handle: world.Image2DHandle = {},
-  emissive_handle: world.Image2DHandle = {},
-  occlusion_handle: world.Image2DHandle = {},
-  metallic_value: f32 = 0.0,
-  roughness_value: f32 = 1.0,
-  emissive_value: f32 = 0.0,
-  base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> (
-  handle: world.MaterialHandle,
-  ok: bool,
-) #optional_ok {
-  handle = world.create_material(
-    &engine.world,
-    features,
-    type,
-    albedo_handle,
-    metallic_roughness_handle,
-    normal_handle,
-    emissive_handle,
-    occlusion_handle,
-    metallic_value,
-    roughness_value,
-    emissive_value,
-    base_color_factor,
-  ) or_return
-  world.stage_material_data(&engine.world.staging, handle)
-  return handle, true
-}
-
-create_mesh :: proc(
-  engine: ^Engine,
-  geom: geometry.Geometry,
-) -> (
-  handle: world.MeshHandle,
-  ok: bool,
-) #optional_ok {
-  handle, _, ok = world.create_mesh(&engine.world, geom)
-  if !ok do return
-  world.stage_mesh_data(&engine.world.staging, handle)
-  return handle, true
-}
-
-
-spawn :: proc(
-  engine: ^Engine,
-  position: [3]f32 = {0, 0, 0},
-  attachment: world.NodeAttachment = nil,
-) -> (
-  ret: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  return world.spawn(&engine.world, position, attachment)
-}
-
-spawn_child :: proc(
-  engine: ^Engine,
-  parent: world.NodeHandle,
-  position: [3]f32 = {0, 0, 0},
-  attachment: world.NodeAttachment = nil,
-) -> (
-  world.NodeHandle,
-  bool,
-) #optional_ok {
-  return world.spawn_child(
-    &engine.world,
-    parent,
-    position,
-    attachment,
-  )
-}
-
+// Bundles primitive mesh/material lookup with transform setup
 spawn_primitive_mesh :: proc(
   engine: ^Engine,
   primitive: world.Primitive = .CUBE,
@@ -247,8 +167,8 @@ spawn_primitive_mesh :: proc(
 ) #optional_ok {
   mesh := world.get_builtin_mesh(&engine.world, primitive)
   mat := world.get_builtin_material(&engine.world, color)
-  handle := spawn(
-    engine,
+  handle := world.spawn(
+    &engine.world,
     position,
     world.MeshAttachment {
       handle = mesh,
@@ -265,414 +185,12 @@ spawn_primitive_mesh :: proc(
   return handle, true
 }
 
-spawn_cube :: proc(
-  engine: ^Engine,
-  color: world.Color = .WHITE,
-  position: [3]f32 = {0, 0, 0},
-  rotation_angle: f32 = 0,
-  rotation_axis: [3]f32 = {0, 1, 0},
-  scale_factor: f32 = 1.0,
-  cast_shadow := true,
-) -> (
-  ret: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  return spawn_primitive_mesh(
-    engine,
-    .CUBE,
-    color,
-    position,
-    rotation_angle,
-    rotation_axis,
-    scale_factor,
-    cast_shadow,
-  )
-}
-
-spawn_sphere :: proc(
-  engine: ^Engine,
-  color: world.Color = .WHITE,
-  position: [3]f32 = {0, 0, 0},
-  rotation_angle: f32 = 0,
-  rotation_axis: [3]f32 = {0, 1, 0},
-  scale_factor: f32 = 1.0,
-  cast_shadow := true,
-) -> (
-  ret: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  return spawn_primitive_mesh(
-    engine,
-    .SPHERE,
-    color,
-    position,
-    rotation_angle,
-    rotation_axis,
-    scale_factor,
-    cast_shadow,
-  )
-}
-
-spawn_cylinder :: proc(
-  engine: ^Engine,
-  color: world.Color = .WHITE,
-  position: [3]f32 = {0, 0, 0},
-  rotation_angle: f32 = 0,
-  rotation_axis: [3]f32 = {0, 1, 0},
-  scale_factor: f32 = 1.0,
-  cast_shadow := true,
-) -> (
-  ret: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  return spawn_primitive_mesh(
-    engine,
-    .CYLINDER,
-    color,
-    position,
-    rotation_angle,
-    rotation_axis,
-    scale_factor,
-    cast_shadow,
-  )
-}
-
-spawn_quad :: proc(
-  engine: ^Engine,
-  color: world.Color = .WHITE,
-  position: [3]f32 = {0, 0, 0},
-  rotation_angle: f32 = 0,
-  rotation_axis: [3]f32 = {0, 1, 0},
-  scale_factor: f32 = 1.0,
-  cast_shadow := true,
-) -> (
-  ret: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  return spawn_primitive_mesh(
-    engine,
-    .QUAD_XZ,
-    color,
-    position,
-    rotation_angle,
-    rotation_axis,
-    scale_factor,
-    cast_shadow,
-  )
-}
-
-spawn_cone :: proc(
-  engine: ^Engine,
-  color: world.Color = .WHITE,
-  position: [3]f32 = {0, 0, 0},
-  rotation_angle: f32 = 0,
-  rotation_axis: [3]f32 = {0, 1, 0},
-  scale_factor: f32 = 1.0,
-  cast_shadow := true,
-) -> (
-  ret: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  return spawn_primitive_mesh(
-    engine,
-    .CONE,
-    color,
-    position,
-    rotation_angle,
-    rotation_axis,
-    scale_factor,
-    cast_shadow,
-  )
-}
-
-get_node :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-) -> (
-  ret: ^world.Node,
-  ok: bool,
-) #optional_ok {
-  return cont.get(engine.world.nodes, handle)
-}
-
-despawn :: proc(engine: ^Engine, handle: world.NodeHandle) {
-  world.despawn(&engine.world, handle)
-}
-
 // Thread-safe: Queue a node for deletion from background threads
 // The actual despawn will happen on the main thread during process_pending_deletions
 queue_node_deletion :: proc(engine: ^Engine, handle: world.NodeHandle) {
   sync.mutex_lock(&engine.world.pending_deletions_mutex)
   defer sync.mutex_unlock(&engine.world.pending_deletions_mutex)
   append(&engine.world.pending_node_deletions, handle)
-}
-
-
-get_position :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-) -> (
-  ret: [3]f32,
-  ok: bool,
-) #optional_ok {
-  node := get_node(engine, handle) or_return
-  return node.transform.position, true
-}
-
-get_world_position :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-) -> (
-  ret: [3]f32,
-  ok: bool,
-) #optional_ok {
-  node := get_node(engine, handle) or_return
-  return node.transform.world_matrix[3].xyz, true
-}
-
-get_rotation :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-) -> (
-  ret: quaternion128,
-  ok: bool,
-) #optional_ok {
-  node := get_node(engine, handle) or_return
-  return node.transform.rotation, true
-}
-
-get_scale :: proc(
-  engine: ^Engine,
-  handle: world.NodeHandle,
-) -> (
-  ret: [3]f32,
-  ok: bool,
-) #optional_ok {
-  node := get_node(engine, handle) or_return
-  return node.transform.scale, true
-}
-
-spawn_spot_light :: proc(
-  engine: ^Engine,
-  color: [4]f32,
-  radius: f32,
-  angle: f32,
-  position: [3]f32 = {0, 0, 0},
-  cast_shadow := true,
-) -> (
-  handle: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  attachment := world.create_spot_light_attachment(
-    color,
-    radius,
-    angle,
-    cast_shadow,
-  )
-  return spawn(engine, position, attachment)
-}
-
-spawn_child_spot_light :: proc(
-  engine: ^Engine,
-  color: [4]f32,
-  radius: f32,
-  angle: f32,
-  parent: world.NodeHandle,
-  position: [3]f32 = {0, 0, 0},
-  cast_shadow := true,
-) -> (
-  handle: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  attachment := world.create_spot_light_attachment(
-    color,
-    radius,
-    angle,
-    cast_shadow,
-  )
-  return spawn_child(engine, parent, position, attachment)
-}
-
-spawn_point_light :: proc(
-  engine: ^Engine,
-  color: [4]f32,
-  radius: f32,
-  position: [3]f32 = {0, 0, 0},
-  cast_shadow := true,
-) -> (
-  handle: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  attachment := world.create_point_light_attachment(
-    color,
-    radius,
-    cast_shadow,
-  )
-  return spawn(engine, position, attachment)
-}
-
-spawn_child_point_light :: proc(
-  engine: ^Engine,
-  color: [4]f32,
-  radius: f32,
-  parent: world.NodeHandle,
-  position: [3]f32 = {0, 0, 0},
-  cast_shadow := true,
-) -> (
-  handle: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  attachment := world.create_point_light_attachment(
-    color,
-    radius,
-    cast_shadow,
-  )
-  return spawn_child(engine, parent, position, attachment)
-}
-
-spawn_directional_light :: proc(
-  engine: ^Engine,
-  color: [4]f32,
-  rotation: quaternion128 = linalg.QUATERNIONF32_IDENTITY, // Rotation of the light (identity = pointing down -Z)
-  cast_shadow := true,
-) -> (
-  handle: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  attachment := world.create_directional_light_attachment(
-    color,
-    cast_shadow = cast_shadow,
-  )
-  // Position does not matter for directional lights.
-  handle = spawn(engine, {0, 0, 0}, attachment) or_return
-  node := get_node(engine, handle) or_return
-  node.transform.rotation = rotation
-  node.transform.is_dirty = true
-  return handle, true
-}
-
-create_emitter :: proc(
-  engine: ^Engine,
-  owner: world.NodeHandle,
-  texture_handle: world.Image2DHandle,
-  emission_rate: f32,
-  initial_velocity: [3]f32,
-  velocity_spread: f32,
-  color_start: [4]f32,
-  color_end: [4]f32,
-  aabb_min: [3]f32,
-  aabb_max: [3]f32,
-  particle_lifetime: f32,
-  position_spread: f32,
-  size_start: f32,
-  size_end: f32,
-  weight: f32,
-  weight_spread: f32,
-) -> (
-  handle: world.EmitterHandle,
-  ok: bool,
-) #optional_ok {
-  handle = world.create_emitter(
-    &engine.world,
-    owner,
-    texture_handle,
-    emission_rate,
-    initial_velocity,
-    velocity_spread,
-    color_start,
-    color_end,
-    aabb_min,
-    aabb_max,
-    particle_lifetime,
-    position_spread,
-    size_start,
-    size_end,
-    weight,
-    weight_spread,
-  ) or_return
-  world.stage_emitter_data(&engine.world.staging, handle)
-  return handle, true
-}
-
-create_forcefield :: proc(
-  engine: ^Engine,
-  owner: world.NodeHandle,
-  area_of_effect: f32 = 1.0,
-  strength: f32 = 1.0,
-  tangent_strength: f32 = 0.0,
-) -> (
-  handle: world.ForceFieldHandle,
-  ok: bool,
-) #optional_ok {
-  handle = world.create_forcefield(
-    &engine.world,
-    owner,
-    area_of_effect,
-    strength,
-    tangent_strength,
-  ) or_return
-  world.stage_forcefield_data(&engine.world.staging, handle)
-  return handle, true
-}
-
-create_light :: proc(
-  engine: ^Engine,
-  light_type: LightType,
-  node_handle: world.NodeHandle,
-  color: [4]f32 = {1, 1, 1, 1},
-  radius: f32 = 10.0,
-  angle_inner: f32 = 0.0,
-  angle_outer: f32 = 0.0,
-  cast_shadow: bool = true,
-) -> (
-  handle: world.NodeHandle,
-  ok: bool,
-) #optional_ok {
-  node := get_node(engine, node_handle) or_return
-  switch light_type {
-  case .POINT:
-    node.attachment = world.create_point_light_attachment(
-      color,
-      radius,
-      cast_shadow,
-    )
-  case .DIRECTIONAL:
-    node.attachment = world.create_directional_light_attachment(
-      color,
-      radius,
-      cast_shadow,
-    )
-  case .SPOT:
-    node.attachment = world.SpotLightAttachment {
-      color = color,
-      radius = radius,
-      angle_inner = angle_inner,
-      angle_outer = angle_outer,
-      cast_shadow = cast_shadow,
-    }
-  }
-  world.register_active_light(&engine.world, node_handle)
-  world.stage_light_data(&engine.world.staging, node_handle)
-  return node_handle, true
-}
-
-// Create an animation clip with automatic allocation and initialization
-// Use init_animation_channel to populate the channels after creation
-create_animation_clip :: proc(
-  engine: ^Engine,
-  channel_count: int,
-  duration: f32 = 1.0,
-  name: string = "",
-) -> (
-  handle: world.ClipHandle,
-  ok: bool,
-) #optional_ok {
-  return world.create_animation_clip(
-    &engine.world,
-    channel_count,
-    duration,
-    name,
-  )
 }
 
 // Initialize an animation channel with callback functions for generating keyframe values
@@ -821,22 +339,26 @@ create_camera :: proc(
   ) or_return
   defer if !ok do cont.free(&engine.world.cameras, camera_handle)
   if !world.camera_init(
-       camera_ptr,
-       width,
-       height,
-       enabled_passes,
-       position,
-       target,
-       fov,
-       near_plane,
-       far_plane,
-     ) {
+    camera_ptr,
+    width,
+    height,
+    enabled_passes,
+    position,
+    target,
+    fov,
+    near_plane,
+    far_plane,
+  ) {
     return {}, false
   }
   world.stage_camera_data(&engine.world.staging, camera_handle)
   camera_gpu := &engine.render.cameras_gpu[camera_handle.index]
   descriptor_set := engine.render.textures_descriptor_set
-  set_descriptor :: proc(gctx: ^gpu.GPUContext, index: u32, view: vk.ImageView) {
+  set_descriptor :: proc(
+    gctx: ^gpu.GPUContext,
+    index: u32,
+    view: vk.ImageView,
+  ) {
     desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
     render.set_texture_2d_descriptor(gctx, desc_set, index, view)
   }
@@ -883,31 +405,9 @@ get_camera_attachment :: proc(
   ok: bool,
 ) #optional_ok {
   if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
-  gpu_handle := engine.render.cameras_gpu[camera_handle.index].attachments[attachment_type][frame_index]
+  gpu_handle :=
+    engine.render.cameras_gpu[camera_handle.index].attachments[attachment_type][frame_index]
   return transmute(world.Image2DHandle)gpu_handle, true
-}
-
-update_material_texture :: proc(
-  engine: ^Engine,
-  material_handle: world.MaterialHandle,
-  texture_type: world.ShaderFeature,
-  texture_handle: world.Image2DHandle,
-) -> bool {
-  material := cont.get(engine.world.materials, material_handle) or_return
-  switch texture_type {
-  case .ALBEDO_TEXTURE:
-    material.albedo = texture_handle
-  case .METALLIC_ROUGHNESS_TEXTURE:
-    material.metallic_roughness = texture_handle
-  case .NORMAL_TEXTURE:
-    material.normal = texture_handle
-  case .EMISSIVE_TEXTURE:
-    material.emissive = texture_handle
-  case .OCCLUSION_TEXTURE:
-    material.occlusion = texture_handle
-  }
-  world.stage_material_data(&engine.world.staging, material_handle)
-  return true
 }
 
 // Derive Recast parameters from quality level and agent dimensions
@@ -991,9 +491,7 @@ navmesh_config_to_recast :: proc(cfg: NavMeshConfig) -> recast.Config {
   }
 }
 
-build_area_types_from_tags :: proc(
-  node_infos: []BakedNodeInfo,
-) -> []u8 {
+build_area_types_from_tags :: proc(node_infos: []BakedNodeInfo) -> []u8 {
   area_types := make([dynamic]u8, 0, len(node_infos) * 10)
   for info in node_infos {
     triangle_count := info.index_count / 3
@@ -1012,7 +510,10 @@ match_bake_node_filter :: proc(
   include: world.NodeTagSet,
   exclude: world.NodeTagSet,
 ) -> bool {
-  return (exclude == {} || (tags & exclude) == {}) && (include == {} || (tags & include) != {})
+  return(
+    (exclude == {} || (tags & exclude) == {}) &&
+    (include == {} || (tags & include) != {}) \
+  )
 }
 
 BakedNodeInfo :: struct {
@@ -1051,11 +552,7 @@ bake_geometry :: proc(
       append(&indices, vertex_base + src_index)
     }
     if with_node_info {
-      append(&infos, BakedNodeInfo{
-        tags = node.tags,
-        vertex_count = len(mesh_geom.vertices),
-        index_count = len(mesh_geom.indices),
-      })
+      append(&infos, BakedNodeInfo{tags = node.tags, vertex_count = len(mesh_geom.vertices), index_count = len(mesh_geom.indices)})
     }
   }
   if len(vertices) == 0 {
@@ -1064,10 +561,10 @@ bake_geometry :: proc(
     if with_node_info do delete(infos)
     return {}, nil, false
   }
-  geom = geometry.Geometry{
+  geom = geometry.Geometry {
     vertices = vertices[:],
-    indices = indices[:],
-    aabb = geometry.aabb_from_vertices(vertices[:]),
+    indices  = indices[:],
+    aabb     = geometry.aabb_from_vertices(vertices[:]),
   }
   if with_node_info {
     node_infos = infos[:]
@@ -1095,7 +592,7 @@ bake :: proc(
     delete(baked_geom.vertices)
     delete(baked_geom.indices)
   }
-  mesh_handle, ok = create_mesh(engine, baked_geom)
+  mesh_handle, _, ok = world.create_mesh(&engine.world, baked_geom)
   return
 }
 
@@ -1143,262 +640,6 @@ setup_navmesh :: proc(
     return false
   }
   return true
-}
-
-find_path :: proc(
-  engine: ^Engine,
-  start_pos: [3]f32,
-  end_pos: [3]f32,
-  max_path_length: i32 = 256,
-) -> (
-  path: [][3]f32,
-  ok: bool,
-) #optional_ok {
-  return nav.find_path(&engine.nav, start_pos, end_pos, max_path_length)
-}
-
-nav_is_position_walkable :: proc(engine: ^Engine, position: [3]f32) -> bool {
-  return nav.is_position_walkable(&engine.nav, position)
-}
-
-nav_find_nearest_point :: proc(
-  engine: ^Engine,
-  position: [3]f32,
-  search_extents: [3]f32 = {2.0, 4.0, 2.0},
-) -> (
-  nearest_pos: [3]f32,
-  found: bool,
-) {
-  return nav.find_nearest_point(&engine.nav, position, search_extents)
-}
-
-add_bloom :: proc(
-  engine: ^Engine,
-  threshold: f32 = 0.2,
-  intensity: f32 = 1.0,
-  blur_radius: f32 = 4.0,
-) {
-  post_process.add_bloom(
-    &engine.render.post_process,
-    threshold,
-    intensity,
-    blur_radius,
-  )
-}
-
-add_tonemap :: proc(engine: ^Engine, exposure: f32 = 1.0, gamma: f32 = 2.2) {
-  post_process.add_tonemap(&engine.render.post_process, exposure, gamma)
-}
-
-add_fog :: proc(
-  engine: ^Engine,
-  color: [3]f32 = {0.7, 0.7, 0.8},
-  density: f32 = 0.02,
-  start: f32 = 10.0,
-  end: f32 = 100.0,
-) {
-  post_process.add_fog(&engine.render.post_process, color, density, start, end)
-}
-
-add_grayscale :: proc(
-  engine: ^Engine,
-  strength: f32 = 1.0,
-  weights: [3]f32 = {0.299, 0.587, 0.114},
-) {
-  post_process.add_grayscale(&engine.render.post_process, strength, weights)
-}
-
-add_blur :: proc(engine: ^Engine, radius: f32, gaussian: bool = true) {
-  post_process.add_blur(&engine.render.post_process, radius, gaussian)
-}
-
-add_outline :: proc(engine: ^Engine, thickness: f32, color: [3]f32) {
-  post_process.add_outline(&engine.render.post_process, thickness, color)
-}
-
-add_crosshatch :: proc(
-  engine: ^Engine,
-  resolution: [2]f32 = {800, 600},
-  hatch_offset_y: f32 = 0.0,
-  lum_threshold_01: f32 = 0.2,
-  lum_threshold_02: f32 = 0.4,
-  lum_threshold_03: f32 = 0.6,
-  lum_threshold_04: f32 = 0.8,
-) {
-  post_process.add_crosshatch(
-    &engine.render.post_process,
-    resolution,
-    hatch_offset_y,
-    lum_threshold_01,
-    lum_threshold_02,
-    lum_threshold_03,
-    lum_threshold_04,
-  )
-}
-
-add_dof :: proc(
-  engine: ^Engine,
-  focus_distance: f32 = 10.0,
-  focus_range: f32 = 2.0,
-  blur_strength: f32 = 1.0,
-  bokeh_intensity: f32 = 0.5,
-) {
-  post_process.add_dof(
-    &engine.render.post_process,
-    focus_distance,
-    focus_range,
-    blur_strength,
-    bokeh_intensity,
-  )
-}
-
-clear_post_process_effects :: proc(engine: ^Engine) {
-  post_process.clear_effects(&engine.render.post_process)
-}
-
-get_window_size :: proc(engine: ^Engine) -> (i32, i32) {
-  width, height := glfw.GetWindowSize(engine.window)
-  return i32(width), i32(height)
-}
-
-set_window_title :: proc(engine: ^Engine, title: string) {
-  title_cstr := strings.clone_to_cstring(title)
-  defer delete(title_cstr)
-  glfw.SetWindowTitle(engine.window, title_cstr)
-}
-
-get_fps :: proc(engine: ^Engine) -> f32 {
-  delta := get_delta_time(engine)
-  if delta <= 0 {
-    return 0
-  }
-  return 1.0 / delta
-}
-
-get_node_count :: proc(engine: ^Engine) -> u32 {
-  return u32(
-    len(engine.world.nodes.entries) - len(engine.world.nodes.free_indices),
-  )
-}
-
-get_material_count :: proc(engine: ^Engine) -> u32 {
-  return u32(
-    len(engine.world.materials.entries) - len(engine.world.materials.free_indices),
-  )
-}
-
-get_mesh_count :: proc(engine: ^Engine) -> u32 {
-  return u32(
-    len(engine.world.meshes.entries) - len(engine.world.meshes.free_indices),
-  )
-}
-
-set_visibility_stats :: proc(engine: ^Engine, enabled: bool) {
-  engine.render.visibility.stats_enabled = enabled
-}
-
-switch_camera_controller :: proc(engine: ^Engine, type: world.CameraControllerType) {
-  main_camera := get_main_camera(engine)
-  if main_camera == nil do return
-  switch type {
-  case .ORBIT:
-    world.camera_controller_sync(&engine.orbit_controller, main_camera)
-    engine.active_controller = &engine.orbit_controller
-  case .FREE:
-    world.camera_controller_sync(&engine.free_controller, main_camera)
-    engine.active_controller = &engine.free_controller
-  case .FOLLOW, .CINEMATIC:
-  }
-}
-
-update_camera_controller :: proc(engine: ^Engine, delta_time: f32) {
-  if engine.active_controller == nil do return
-  main_camera := get_main_camera(engine)
-  if main_camera == nil do return
-  switch engine.active_controller.type {
-  case .ORBIT:
-    world.camera_controller_orbit_update(
-      engine.active_controller,
-      main_camera,
-      delta_time,
-    )
-  case .FREE:
-    world.camera_controller_free_update(
-      engine.active_controller,
-      main_camera,
-      delta_time,
-    )
-  case .FOLLOW:
-    world.camera_controller_follow_update(
-      engine.active_controller,
-      main_camera,
-      delta_time,
-    )
-  case .CINEMATIC:
-  }
-}
-
-get_active_camera_controller_type :: proc(
-  engine: ^Engine,
-) -> world.CameraControllerType {
-  if engine.active_controller == nil do return .ORBIT
-  return engine.active_controller.type
-}
-
-set_orbit_camera_target :: proc(engine: ^Engine, target: [3]f32) {
-  world.camera_controller_orbit_set_target(&engine.orbit_controller, target)
-}
-
-set_orbit_camera_distance :: proc(engine: ^Engine, distance: f32) {
-  world.camera_controller_orbit_set_distance(
-    &engine.orbit_controller,
-    distance,
-  )
-}
-
-set_orbit_camera_angles :: proc(engine: ^Engine, yaw, pitch: f32) {
-  world.camera_controller_orbit_set_yaw_pitch(
-    &engine.orbit_controller,
-    yaw,
-    pitch,
-  )
-}
-
-set_free_camera_speed :: proc(engine: ^Engine, speed: f32) {
-  world.camera_controller_free_set_speed(&engine.free_controller, speed)
-}
-
-set_free_camera_sensitivity :: proc(engine: ^Engine, sensitivity: f32) {
-  world.camera_controller_free_set_sensitivity(
-    &engine.free_controller,
-    sensitivity,
-  )
-}
-
-get_main_camera :: proc(engine: ^Engine) -> ^world.Camera {
-  return cont.get(
-    engine.world.cameras,
-    transmute(world.CameraHandle)engine.render.main_camera,
-  )
-}
-
-sync_camera_controller :: proc(engine: ^Engine, type: world.CameraControllerType) {
-  main_camera := get_main_camera(engine)
-  if main_camera == nil do return
-  switch type {
-  case .ORBIT:
-    world.camera_controller_sync(&engine.orbit_controller, main_camera)
-  case .FREE:
-    world.camera_controller_sync(&engine.free_controller, main_camera)
-  case .FOLLOW, .CINEMATIC:
-  }
-}
-
-sync_active_camera_controller :: proc(engine: ^Engine) {
-  if engine.active_controller == nil do return
-  main_camera := get_main_camera(engine)
-  if main_camera == nil do return
-  world.camera_controller_sync(engine.active_controller, main_camera)
 }
 
 @(private)
@@ -1496,153 +737,4 @@ query_box :: proc(
     }
   }
   return node_handles[:]
-}
-
-// ============================================================================
-// UI System API
-// ============================================================================
-
-ui_create_mesh2d :: proc(
-  engine: ^Engine,
-  position: [2]f32,
-  vertices: []ui.Vertex2D,
-  indices: []u32,
-  texture: world.Image2DHandle = {},
-  z_order: i32 = 0,
-) -> (
-  ui.Mesh2DHandle,
-  bool,
-) #optional_ok {
-  return ui.create_mesh2d(
-    &engine.render.ui_system,
-    position,
-    vertices,
-    indices,
-    transmute(render.Image2DHandle)texture,
-    z_order,
-  )
-}
-
-ui_create_quad2d :: proc(
-  engine: ^Engine,
-  position: [2]f32,
-  size: [2]f32,
-  texture: world.Image2DHandle = {},
-  color: [4]u8 = {255, 255, 255, 255},
-  z_order: i32 = 0,
-) -> (
-  ui.Quad2DHandle,
-  bool,
-) #optional_ok {
-  return ui.create_quad2d(
-    &engine.render.ui_system,
-    position,
-    size,
-    transmute(render.Image2DHandle)texture,
-    color,
-    z_order,
-  )
-}
-
-ui_create_text2d :: proc(
-  engine: ^Engine,
-  position: [2]f32,
-  text: string,
-  font_size: f32,
-  color: [4]u8 = {255, 255, 255, 255},
-  z_order: i32 = 0,
-  bounds: [2]f32 = {0, 0},
-  h_align: ui.HorizontalAlign = .Left,
-  v_align: ui.VerticalAlign = .Top,
-) -> (
-  ui.Text2DHandle,
-  bool,
-) #optional_ok {
-  return ui.create_text2d(
-    &engine.render.ui_system,
-    &engine.render.ui,
-    position,
-    text,
-    font_size,
-    color,
-    z_order,
-    bounds,
-    h_align,
-    v_align,
-  )
-}
-
-ui_create_box :: proc(
-  engine: ^Engine,
-  position: [2]f32,
-  size: [2]f32,
-  background_color: [4]u8 = {0, 0, 0, 0},
-  z_order: i32 = 0,
-) -> (
-  ui.BoxHandle,
-  bool,
-) #optional_ok {
-  return ui.create_box(
-    &engine.render.ui_system,
-    position,
-    size,
-    background_color,
-    z_order,
-  )
-}
-
-ui_get_widget :: proc(engine: ^Engine, handle: ui.UIWidgetHandle) -> ^ui.Widget {
-  return ui.get_widget(&engine.render.ui_system, handle)
-}
-
-ui_get_mesh2d :: proc(engine: ^Engine, handle: ui.Mesh2DHandle) -> ^ui.Mesh2D {
-  return ui.get_mesh2d(&engine.render.ui_system, handle)
-}
-
-ui_get_quad2d :: proc(engine: ^Engine, handle: ui.Quad2DHandle) -> ^ui.Quad2D {
-  return ui.get_quad2d(&engine.render.ui_system, handle)
-}
-
-ui_get_text2d :: proc(engine: ^Engine, handle: ui.Text2DHandle) -> ^ui.Text2D {
-  return ui.get_text2d(&engine.render.ui_system, handle)
-}
-
-ui_get_box :: proc(engine: ^Engine, handle: ui.BoxHandle) -> ^ui.Box {
-  return ui.get_box(&engine.render.ui_system, handle)
-}
-
-ui_set_position :: proc(widget: ^ui.Widget, position: [2]f32) {
-  ui.set_position(widget, position)
-}
-
-ui_set_z_order :: proc(widget: ^ui.Widget, z: i32) {
-  ui.set_z_order(widget, z)
-}
-
-ui_set_visible :: proc(widget: ^ui.Widget, visible: bool) {
-  ui.set_visible(widget, visible)
-}
-
-ui_set_event_handler :: proc(widget: ^ui.Widget, handlers: ui.EventHandlers) {
-  ui.set_event_handler(widget, handlers)
-}
-
-ui_set_user_data :: proc(widget: ^ui.Widget, data: rawptr) {
-  ui.set_user_data(widget, data)
-}
-
-ui_destroy_widget :: proc(engine: ^Engine, handle: ui.UIWidgetHandle) {
-  ui.destroy_widget(&engine.render.ui_system, handle)
-}
-
-ui_box_add_child :: proc(
-  engine: ^Engine,
-  box_handle: ui.BoxHandle,
-  child_handle: ui.UIWidgetHandle,
-) {
-  ui.box_add_child(&engine.render.ui_system, box_handle, child_handle)
-}
-
-ui_set_text :: proc(engine: ^Engine, handle: ui.Text2DHandle, text: string) {
-  ui.set_text(&engine.render.ui_system, &engine.render.ui, handle, text)
 }

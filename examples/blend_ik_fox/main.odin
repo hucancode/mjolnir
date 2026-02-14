@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -21,10 +22,12 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   // Setup camera - try a closer view first
-  if camera := mjolnir.get_main_camera(engine); camera != nil {
-    world.camera_look_at(camera, {3, 2, 3}, {0, 1, 0})
-    mjolnir.sync_active_camera_controller(engine)
-  }
+  world.main_camera_look_at(
+    &engine.world,
+    transmute(world.CameraHandle)engine.render.main_camera,
+    {3, 2, 3},
+    {0, 1, 0},
+  )
 
   // Load Fox model
   root_nodes := mjolnir.load_gltf(engine, "assets/Fox2.glb")
@@ -36,10 +39,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   for handle in root_nodes {
-    node := mjolnir.get_node(engine, handle) or_continue
+    node := cont.get(engine.world.nodes, handle) or_continue
     log.infof("Root node has %d children", len(node.children))
     for child in node.children {
-      child_node := mjolnir.get_node(engine, child) or_continue
+      child_node := cont.get(engine.world.nodes, child) or_continue
       log.infof("Child node attachment: %v", child_node.attachment)
       // Check if this is a mesh
       mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment)
@@ -48,14 +51,24 @@ setup :: proc(engine: ^mjolnir.Engine) {
         fox_handle = child
 
         // Layer 0: Walk animation (starts at full weight)
-        if !world.add_animation_layer(&engine.world, child, "Walk", weight = 1.0) {
+        if !world.add_animation_layer(
+          &engine.world,
+          child,
+          "Walk",
+          weight = 1.0,
+        ) {
           log.error("Failed to add Walk animation")
         } else {
           log.info("Added Walk animation on layer 0")
         }
 
         // Layer 1: Run animation (starts at zero weight)
-        if !world.add_animation_layer(&engine.world, child, "Run", weight = 0.0) {
+        if !world.add_animation_layer(
+          &engine.world,
+          child,
+          "Run",
+          weight = 0.0,
+        ) {
           log.error("Failed to add Run animation")
         } else {
           log.info("Added Run animation on layer 1")
@@ -66,7 +79,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         target_pos := [3]f32{0.0, 4.0, 5.0} // scaled from {0, 80, 100}
         pole_pos := [3]f32{0.0, 5.0, 2.5} // scaled from {0, 100, 50}
 
-        if !world.add_ik_layer(&engine.world,
+        if !world.add_ik_layer(
+          &engine.world,
           child,
           bone_names = []string {
             "b_Spine01_02",
@@ -91,23 +105,29 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Create target cube for IK visualization
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   cube_material := world.get_builtin_material(&engine.world, .RED)
-  target_cube = mjolnir.spawn(
-  engine,
-  {0.0, 4.0, 5.0}, // Initial IK target position
-  world.MeshAttachment {
-    handle = cube_mesh,
-    material = cube_material,
-    cast_shadow = false,
-  },
-  )
+  target_cube = world.spawn(
+    &engine.world,
+    {0.0, 4.0, 5.0}, // Initial IK target position
+    world.MeshAttachment {
+      handle = cube_mesh,
+      material = cube_material,
+      cast_shadow = false,
+    },
+    ) or_else {}
   world.scale(&engine.world, target_cube, 0.25) // Make it smaller for the scaled scene
 
   // Add lighting
-  mjolnir.spawn_directional_light(
-    engine,
-    {1.0, 1.0, 1.0, 1.0},
-    cast_shadow = true,
-  )
+  light_handle :=
+    world.spawn(
+      &engine.world,
+      {0, 0, 0},
+      world.create_directional_light_attachment(
+        {1.0, 1.0, 1.0, 1.0},
+        10.0,
+        true,
+      ),
+    ) or_else {}
+  world.register_active_light(&engine.world, light_handle)
 
   log.info("Setup complete!")
 }
@@ -127,8 +147,18 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   // Layer 0 (Walk): weight goes from 1.0 to 0.0
   // Layer 1 (Run): weight goes from 0.0 to 1.0
   if fox_handle.index != 0 {
-    world.set_animation_layer_weight(&engine.world, fox_handle, 0, 1.0 - blend_factor)
-    world.set_animation_layer_weight(&engine.world, fox_handle, 1, blend_factor)
+    world.set_animation_layer_weight(
+      &engine.world,
+      fox_handle,
+      0,
+      1.0 - blend_factor,
+    )
+    world.set_animation_layer_weight(
+      &engine.world,
+      fox_handle,
+      1,
+      blend_factor,
+    )
   }
 
   // Move target cube in a circle (scaled coordinates: 80->4, 100->5)

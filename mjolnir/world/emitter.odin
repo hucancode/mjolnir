@@ -59,6 +59,7 @@ create_emitter :: proc(
   emitter.node_handle = node_handle
   emitter.texture_handle = texture_handle
   emitter.enabled = true
+  stage_emitter_data(&world.staging, handle)
   return handle, true
 }
 

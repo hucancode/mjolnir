@@ -4,8 +4,8 @@ import "../../mjolnir"
 import anim "../../mjolnir/animation"
 import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
-import "../../mjolnir/world"
 import "../../mjolnir/render"
+import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -25,10 +25,12 @@ main :: proc() {
     // Enable IK debug drawing
     // engine.world.debug_draw_ik = true // Removed: debug_draw_ik no longer available
 
-    if camera := mjolnir.get_main_camera(engine); camera != nil {
-      world.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
-      mjolnir.sync_active_camera_controller(engine)
-    }
+    world.main_camera_look_at(
+      &engine.world,
+      transmute(world.CameraHandle)engine.render.main_camera,
+      {0, 80, 120},
+      {0, 0, 0},
+    )
     // Load spider model with 6 legs
     spider_roots := mjolnir.load_gltf(engine, "assets/spider.glb")
     append(&root_nodes, ..spider_roots[:])
@@ -36,7 +38,7 @@ main :: proc() {
     // Position the spider
     for handle in spider_roots {
       spider_root_node = handle
-      world.translate(&engine.world, handle, y=5)
+      world.translate(&engine.world, handle, y = 5)
     }
 
     // Configure 6 legs with spider leg modifiers
@@ -63,18 +65,21 @@ main :: proc() {
 
     // Find the skinned mesh node and calculate initial offsets from rest pose
     for handle in spider_roots {
-      root_node := mjolnir.get_node(engine, handle) or_continue
+      root_node := cont.get(engine.world.nodes, handle) or_continue
 
       // Find the child with the mesh attachment
       for child in root_node.children {
-        child_node := mjolnir.get_node(engine, child) or_continue
+        child_node := cont.get(engine.world.nodes, child) or_continue
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
           continue
         }
 
         // Get the mesh and skin data to calculate rest pose positions
-        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(
+          engine.world.meshes,
+          mesh_attachment.handle,
+        ) or_continue
         skin, has_skin := mesh.skinning.?
         if !has_skin {
           continue
@@ -171,10 +176,10 @@ main :: proc() {
 
     // Find the skinned mesh and create markers for bones
     for handle in root_nodes {
-      node := mjolnir.get_node(engine, handle) or_continue
+      node := cont.get(engine.world.nodes, handle) or_continue
       log.infof("Root node found")
       for child in node.children {
-        child_node := mjolnir.get_node(engine, child) or_continue
+        child_node := cont.get(engine.world.nodes, child) or_continue
         log.infof("Child node found")
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
@@ -182,7 +187,10 @@ main :: proc() {
           continue
         }
 
-        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(
+          engine.world.meshes,
+          mesh_attachment.handle,
+        ) or_continue
         log.infof("Mesh found")
 
         skin, has_skin := mesh.skinning.?
@@ -200,13 +208,15 @@ main :: proc() {
 
         // Create one marker per bone
         for i in 0 ..< len(skin.bones) {
-          marker := mjolnir.spawn(
-            engine,
-            attachment = world.MeshAttachment {
-              handle = cone_mesh,
-              material = mat,
-            },
-          )
+          marker :=
+            world.spawn(
+              &engine.world,
+              {0, 0, 0},
+              attachment = world.MeshAttachment {
+                handle = cone_mesh,
+                material = mat,
+              },
+            ) or_else {}
           world.scale(&engine.world, marker, 0.15)
           append(&markers, marker)
           log.infof("Created marker %d at default position", i)
@@ -220,28 +230,42 @@ main :: proc() {
     sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
     red_mat := world.get_builtin_material(&engine.world, .RED)
     for i in 0 ..< 6 {
-      target_markers[i] = mjolnir.spawn(
-        engine,
-        attachment = world.MeshAttachment {
-          handle = sphere_mesh,
-          material = red_mat,
-        },
-      )
+      target_markers[i] =
+        world.spawn(
+          &engine.world,
+          {0, 0, 0},
+          attachment = world.MeshAttachment {
+            handle = sphere_mesh,
+            material = red_mat,
+          },
+        ) or_else {}
       world.scale(&engine.world, target_markers[i], 0.2)
     }
 
     // Ground plane for reference
     cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
     gray_mat := world.get_builtin_material(&engine.world, .GRAY)
-    ground_plane = mjolnir.spawn(
-      engine,
-      attachment = world.MeshAttachment {
-        handle = cube_mesh,
-        material = gray_mat,
-      },
-    )
+    ground_plane =
+      world.spawn(
+        &engine.world,
+        {0, 0, 0},
+        attachment = world.MeshAttachment {
+          handle = cube_mesh,
+          material = gray_mat,
+        },
+      ) or_else {}
     world.scale_xyz(&engine.world, ground_plane, 20, 0.2, 20)
-    mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
+    light_handle :=
+      world.spawn(
+        &engine.world,
+        {0, 0, 0},
+        world.create_directional_light_attachment(
+          {1.0, 1.0, 1.0, 1.0},
+          10.0,
+          false,
+        ),
+      ) or_else {}
+    world.register_active_light(&engine.world, light_handle)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // Move the spider body back and forth along the X axis
@@ -253,7 +277,7 @@ main :: proc() {
     body_pos := [3]f32{body_x, 2, 0}
 
     // Move the spider body
-    if node := mjolnir.get_node(engine, spider_root_node); node != nil {
+    if node := cont.get(engine.world.nodes, spider_root_node); node != nil {
       node.transform.position = body_pos
       node.transform.is_dirty = true
     }
@@ -261,9 +285,10 @@ main :: proc() {
     // Target is now automatically computed from leg root + offset in world space
     // Fetch and display the world-space target for each leg
     // Find the skinned mesh child to query leg targets
-    if root_node := mjolnir.get_node(engine, spider_root_node); root_node != nil {
+    if root_node := cont.get(engine.world.nodes, spider_root_node);
+       root_node != nil {
       for child in root_node.children {
-        child_node := mjolnir.get_node(engine, child) or_continue
+        child_node := cont.get(engine.world.nodes, child) or_continue
         _, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
           continue
@@ -276,7 +301,7 @@ main :: proc() {
             layer_index = 0,
             leg_index = i,
           ); ok {
-            if marker_node := mjolnir.get_node(engine, target_markers[i]);
+            if marker_node := cont.get(engine.world.nodes, target_markers[i]);
                marker_node != nil {
               marker_node.transform.position = target^
               marker_node.transform.is_dirty = true
@@ -291,9 +316,9 @@ main :: proc() {
     // Update bone markers
     marker_idx := 0
     for handle in root_nodes {
-      node := mjolnir.get_node(engine, handle) or_continue
+      node := cont.get(engine.world.nodes, handle) or_continue
       for child in node.children {
-        child_node := mjolnir.get_node(engine, child) or_continue
+        child_node := cont.get(engine.world.nodes, child) or_continue
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
           continue
@@ -303,7 +328,10 @@ main :: proc() {
           continue
         }
 
-        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(
+          engine.world.meshes,
+          mesh_attachment.handle,
+        ) or_continue
         skin := mesh.skinning.? or_continue
 
         // Get bone matrices from GPU buffer
@@ -313,14 +341,12 @@ main :: proc() {
           continue
         }
         bone_count := len(skin.bones)
-        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[child.index]
+        bone_matrix_buffer_offset, has_offset :=
+          engine.render.bone_matrix_offsets[child.index]
         if !has_offset {
           continue
         }
-        matrices_ptr := gpu.get(
-          bone_buffer,
-          bone_matrix_buffer_offset,
-        )
+        matrices_ptr := gpu.get(bone_buffer, bone_matrix_buffer_offset)
         bone_matrices := slice.from_ptr(matrices_ptr, bone_count)
         for i in 0 ..< bone_count {
           if marker_idx >= len(markers) do break
@@ -339,7 +365,10 @@ main :: proc() {
           bone_pos := bone_world[3].xyz
           bone_rot := linalg.to_quaternion(bone_world)
           // Update marker transform
-          marker := mjolnir.get_node(engine, markers[marker_idx]) or_continue
+          marker := cont.get(
+            engine.world.nodes,
+            markers[marker_idx],
+          ) or_continue
           marker.transform.position = bone_pos
           marker.transform.rotation = bone_rot
           marker.transform.is_dirty = true

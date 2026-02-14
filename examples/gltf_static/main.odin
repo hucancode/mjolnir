@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -11,16 +12,24 @@ nodes: [dynamic]world.NodeHandle
 main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    if camera := mjolnir.get_main_camera(engine); camera != nil {
-      world.camera_look_at(camera, {5, 6, 5}, {0, 5, 0})
-      mjolnir.sync_active_camera_controller(engine)
-    }
-    nodes = mjolnir.load_gltf(engine, "assets/Duck.glb")
-    mjolnir.spawn_directional_light(
-      engine,
-      {1.0, 1.0, 1.0, 1.0},
-      cast_shadow = false,
+    world.main_camera_look_at(
+      &engine.world,
+      transmute(world.CameraHandle)engine.render.main_camera,
+      {5, 6, 5},
+      {0, 5, 0},
     )
+    nodes = mjolnir.load_gltf(engine, "assets/Duck.glb")
+    light_handle :=
+      world.spawn(
+        &engine.world,
+        {0, 0, 0},
+        world.create_directional_light_attachment(
+          {1.0, 1.0, 1.0, 1.0},
+          10.0,
+          false,
+        ),
+      ) or_else {}
+    world.register_active_light(&engine.world, light_handle)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rotation := delta_time * math.PI * 0.5

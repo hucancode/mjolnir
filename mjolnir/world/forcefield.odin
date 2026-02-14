@@ -27,6 +27,7 @@ create_forcefield :: proc(
   forcefield.strength = strength
   forcefield.area_of_effect = area_of_effect
   forcefield.node_handle = node_handle
+  stage_forcefield_data(&world.staging, handle)
   return handle, true
 }
 

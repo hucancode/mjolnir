@@ -33,12 +33,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
   sphere_mat := world.get_builtin_material(&engine.world, .MAGENTA)
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   cube_mat := world.get_builtin_material(&engine.world, .RED)
-  rand_sphere_mesh := mjolnir.create_mesh(engine, geometry.make_sphere(random_colors = true))
-  rand_cylinder_mesh := mjolnir.create_mesh(engine, geometry.make_cylinder(random_colors = true))
+  rand_sphere_mesh, _, _ := world.create_mesh(
+    &engine.world,
+    geometry.make_sphere(random_colors = true),
+  )
+  rand_cylinder_mesh, _, _ := world.create_mesh(
+    &engine.world,
+    geometry.make_cylinder(random_colors = true),
+  )
   rand_mat := world.get_builtin_material(&engine.world, .WHITE)
   // Create ground
   {
-    ground_node_handle := world.spawn(&engine.world, {0, -0.5, 0})
+    ground_node_handle := world.spawn(&engine.world, {0, -0.5, 0}) or_else {}
     ground_node := world.get_node(&engine.world, ground_node_handle)
     // Create static physics body (no attachment needed - it doesn't move)
     physics.create_static_body_box(
@@ -48,20 +54,22 @@ setup :: proc(engine: ^mjolnir.Engine) {
       ground_node.transform.rotation,
     )
     // Child node with mesh
-    ground_mesh_handle := mjolnir.spawn_child(
-      engine,
-      ground_node_handle,
-      attachment = world.MeshAttachment {
-        handle = ground_mesh,
-        material = ground_mat,
-      },
-    )
+    ground_mesh_handle :=
+      world.spawn_child(
+        &engine.world,
+        ground_node_handle,
+        attachment = world.MeshAttachment {
+          handle = ground_mesh,
+          material = ground_mat,
+        },
+      ) or_else {}
     world.scale_xyz(&engine.world, ground_mesh_handle, 14.0, 0.5, 14.0)
     log.info("Ground created")
   }
   // Create sphere
   {
-    sphere_node_handle := world.spawn(&engine.world, {2.5, SPHERE_RADIUS, 0})
+    sphere_node_handle :=
+      world.spawn(&engine.world, {2.5, SPHERE_RADIUS, 0}) or_else {}
     sphere_node := world.get_node(&engine.world, sphere_node_handle)
     physics.create_static_body_sphere(
       &physics_world,
@@ -69,15 +77,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
       sphere_node.transform.position,
       sphere_node.transform.rotation,
     )
-    sphere_mesh_handle := mjolnir.spawn_child(
-      engine,
-      sphere_node_handle,
-      attachment = world.MeshAttachment {
-        handle = sphere_mesh,
-        material = sphere_mat,
-        cast_shadow = true,
-      },
-    )
+    sphere_mesh_handle :=
+      world.spawn_child(
+        &engine.world,
+        sphere_node_handle,
+        attachment = world.MeshAttachment {
+          handle = sphere_mesh,
+          material = sphere_mat,
+          cast_shadow = true,
+        },
+      ) or_else {}
     world.scale(&engine.world, sphere_mesh_handle, SPHERE_RADIUS)
     log.info("Sphere created")
   }
@@ -99,7 +108,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   for pos, i in piece_positions {
     // Parent node with physics
-    physics_node_handle := world.spawn(&engine.world, pos)
+    physics_node_handle := world.spawn(&engine.world, pos) or_else {}
     physics_node := world.get_node(&engine.world, physics_node_handle)
 
     // Alternate between cylinder (0), cube (1), and sphere (2)
@@ -109,7 +118,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     mat_handle: world.MaterialHandle
 
     switch shape_type {
-    case 0: // Cylinder
+    case 0:
+      // Cylinder
       body_handle = physics.create_dynamic_body_cylinder(
         &physics_world,
         1.0,
@@ -118,12 +128,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
         physics_node.transform.rotation,
         50.0,
       )
-      if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
+      if body, ok := physics.get_dynamic_body(&physics_world, body_handle);
+         ok {
         physics.set_cylinder_inertia(body, 1.0, 2.0)
       }
       mesh_handle = rand_cylinder_mesh
       mat_handle = rand_mat
-    case 1: // Cube
+    case 1:
+      // Cube
       body_handle = physics.create_dynamic_body_box(
         &physics_world,
         {1.0, 1.0, 1.0},
@@ -131,12 +143,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
         physics_node.transform.rotation,
         50.0,
       )
-      if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
+      if body, ok := physics.get_dynamic_body(&physics_world, body_handle);
+         ok {
         physics.set_box_inertia(body, {1.0, 1.0, 1.0})
       }
       mesh_handle = cube_mesh
       mat_handle = cube_mat
-    case 2: // Sphere
+    case 2:
+      // Sphere
       body_handle = physics.create_dynamic_body_sphere(
         &physics_world,
         1.0,
@@ -144,7 +158,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         physics_node.transform.rotation,
         50.0,
       )
-      if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
+      if body, ok := physics.get_dynamic_body(&physics_world, body_handle);
+         ok {
         physics.set_sphere_inertia(body, 1.0)
       }
       mesh_handle = rand_sphere_mesh
@@ -155,29 +170,42 @@ setup :: proc(engine: ^mjolnir.Engine) {
       body_handle = body_handle,
     }
     // Child node with mesh
-    visual_node_handle := mjolnir.spawn_child(
-      engine,
-      physics_node_handle,
-      attachment = world.MeshAttachment {
-        handle = mesh_handle,
-        material = mat_handle,
-        cast_shadow = true,
-      },
-    )
+    visual_node_handle :=
+      world.spawn_child(
+        &engine.world,
+        physics_node_handle,
+        attachment = world.MeshAttachment {
+          handle = mesh_handle,
+          material = mat_handle,
+          cast_shadow = true,
+        },
+      ) or_else {}
   }
   log.infof("Created %d physics objects", PIECE_COUNT)
-  if camera := mjolnir.get_main_camera(engine); camera != nil {
-    world.camera_look_at(camera, {30, 25, 30}, {0, 5, 0})
-    mjolnir.sync_active_camera_controller(engine)
-  }
-  light_handle := mjolnir.spawn_spot_light(
-    engine,
-    {0.8, 0.9, 1, 1},
-    25.0,
-    math.PI * 0.25,
-    position = {0, 20, 0},
+  world.main_camera_look_at(
+    &engine.world,
+    transmute(world.CameraHandle)engine.render.main_camera,
+    {30, 25, 30},
+    {0, 5, 0},
   )
-  world.rotate(&engine.world, light_handle, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  light_handle :=
+    world.spawn(
+      &engine.world,
+      {0, 20, 0},
+      world.create_spot_light_attachment(
+        {0.8, 0.9, 1, 1},
+        25.0,
+        math.PI * 0.25,
+        true,
+      ),
+    ) or_else {}
+  world.register_active_light(&engine.world, light_handle)
+  world.rotate(
+    &engine.world,
+    light_handle,
+    math.PI * 0.5,
+    linalg.VECTOR3F32_X_AXIS,
+  )
   log.info("Physics demo setup complete")
 }
 

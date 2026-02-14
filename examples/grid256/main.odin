@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 
@@ -12,11 +13,13 @@ main :: proc() {
     mesh := world.get_builtin_mesh(&engine.world, .CUBE)
     for z in 0 ..< 256 {
       for x in 0 ..< 256 {
-        handle := mjolnir.spawn(
-          engine,
+        handle := world.spawn(
+          &engine.world,
+          {0, 0, 0},
           attachment = world.MeshAttachment{handle = mesh, material = mat},
         ) or_continue
-        world.translate(&engine.world,
+        world.translate(
+          &engine.world,
           handle,
           f32(x - 128) * 4,
           0,
@@ -24,10 +27,12 @@ main :: proc() {
         )
       }
     }
-    if camera := mjolnir.get_main_camera(engine); camera != nil {
-      world.camera_look_at(camera, {6, 20, 6}, {0, 0, 0})
-      mjolnir.sync_active_camera_controller(engine)
-    }
+    world.main_camera_look_at(
+      &engine.world,
+      transmute(world.CameraHandle)engine.render.main_camera,
+      {6, 20, 6},
+      {0, 0, 0},
+    )
   }
   mjolnir.run(engine, 800, 600, "visual-grid-256")
 }

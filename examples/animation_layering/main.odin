@@ -2,6 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/animation"
+import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -22,19 +23,19 @@ import "core:math"
 // - Space: Reset all
 
 State :: struct {
-  fox_handle:        world.NodeHandle,
-  target_cube:       world.NodeHandle,
+  fox_handle:     world.NodeHandle,
+  target_cube:    world.NodeHandle,
 
   // Layer weights
-  walk_weight:       f32,
-  run_weight:        f32,
-  survey_weight:     f32,
-  ik_weight:         f32,
+  walk_weight:    f32,
+  run_weight:     f32,
+  survey_weight:  f32,
+  ik_weight:      f32,
 
   // Animation state
-  blend_walk_run:    bool,
-  enable_survey:     bool,
-  enable_ik:         bool,
+  blend_walk_run: bool,
+  enable_survey:  bool,
+  enable_ik:      bool,
 }
 
 state: State
@@ -67,10 +68,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   state.enable_ik = false
 
   // Setup camera
-  if camera := mjolnir.get_main_camera(engine); camera != nil {
-    world.camera_look_at(camera, {3, 2, 3}, {0, 1, 0})
-    mjolnir.sync_active_camera_controller(engine)
-  }
+  world.main_camera_look_at(
+    &engine.world,
+    transmute(world.CameraHandle)engine.render.main_camera,
+    {3, 2, 3},
+    {0, 1, 0},
+  )
 
   // Load Fox model
   root_nodes := mjolnir.load_gltf(engine, "assets/Fox2.glb")
@@ -83,15 +86,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Find the mesh node and setup animation layers
   for handle in root_nodes {
-    node := mjolnir.get_node(engine, handle) or_continue
+    node := cont.get(engine.world.nodes, handle) or_continue
     for child in node.children {
-      child_node := mjolnir.get_node(engine, child) or_continue
+      child_node := cont.get(engine.world.nodes, child) or_continue
       _, has_mesh := child_node.attachment.(world.MeshAttachment)
       if has_mesh {
         state.fox_handle = child
 
         // === Layer 0: Walk animation (base layer, REPLACE mode) ===
-        if !world.add_animation_layer(&engine.world,
+        if !world.add_animation_layer(
+          &engine.world,
           child,
           "Walk",
           weight = 1.0,
@@ -103,7 +107,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
 
         // === Layer 1: Run animation (REPLACE mode, starts at 0 weight) ===
-        if !world.add_animation_layer(&engine.world,
+        if !world.add_animation_layer(
+          &engine.world,
           child,
           "Run",
           weight = 0.0,
@@ -116,7 +121,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
         // === Layer 2: Survey animation (REPLACE mode with bone mask for upper body) ===
         // Note: Standard animation clips should use REPLACE mode, not ADD
-        if !world.add_animation_layer(&engine.world,
+        if !world.add_animation_layer(
+          &engine.world,
           child,
           "Survey",
           weight = 0.0,
@@ -135,17 +141,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
         target_pos := [3]f32{0.0, 4.0, 5.0}
         pole_pos := [3]f32{0.0, 5.0, 2.5}
 
-        if !mjolnir.add_ik_layer(
-          engine,
+        if !world.add_ik_layer(
+          &engine.world,
           child,
-          bone_names = []string {
-            "b_Spine01_02",
-            "b_Spine02_03",
-            "b_Neck_04",
-            "b_Head_05",
-          },
-          target_pos = target_pos,
-          pole_pos = pole_pos,
+          []string{"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"},
+          target_pos,
+          pole_pos,
           weight = 0.0, // Start disabled
         ) {
           log.error("Failed to add IK layer")
@@ -163,18 +164,29 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Create target cube for IK visualization
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   cube_material := world.get_builtin_material(&engine.world, .RED)
-  state.target_cube = mjolnir.spawn(
-    engine,
-    {0.0, 4.0, 5.0},
-    world.MeshAttachment {
-      handle = cube_mesh,
-      material = cube_material,
-      cast_shadow = false,
-    },
-  )
+  state.target_cube =
+    world.spawn(
+      &engine.world,
+      {0.0, 4.0, 5.0},
+      world.MeshAttachment {
+        handle = cube_mesh,
+        material = cube_material,
+        cast_shadow = false,
+      },
+    ) or_else {}
   world.scale(&engine.world, state.target_cube, 0.25)
   // Add lighting
-  mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0}, cast_shadow = true)
+  light_handle :=
+    world.spawn(
+      &engine.world,
+      {0, 0, 0},
+      world.create_directional_light_attachment(
+        {1.0, 1.0, 1.0, 1.0},
+        10.0,
+        true,
+      ),
+    ) or_else {}
+  world.register_active_light(&engine.world, light_handle)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -195,18 +207,38 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     state.run_weight = math.lerp(state.run_weight, target_run, dt * 0.2)
   }
 
-  world.set_animation_layer_weight(&engine.world, state.fox_handle, 0, state.walk_weight)
-  world.set_animation_layer_weight(&engine.world, state.fox_handle, 1, state.run_weight)
+  world.set_animation_layer_weight(
+    &engine.world,
+    state.fox_handle,
+    0,
+    state.walk_weight,
+  )
+  world.set_animation_layer_weight(
+    &engine.world,
+    state.fox_handle,
+    1,
+    state.run_weight,
+  )
 
   // === Update survey animation (upper body) ===
   target_survey := state.enable_survey ? f32(1.0) : f32(0.0)
   state.survey_weight = math.lerp(state.survey_weight, target_survey, dt)
-  world.set_animation_layer_weight(&engine.world, state.fox_handle, 2, state.survey_weight)
+  world.set_animation_layer_weight(
+    &engine.world,
+    state.fox_handle,
+    2,
+    state.survey_weight,
+  )
 
   // === Update IK layer ===
   target_ik := state.enable_ik ? f32(1.0) : f32(0.0)
   state.ik_weight = math.lerp(state.ik_weight, target_ik, dt * 2.0)
-  world.set_animation_layer_weight(&engine.world, state.fox_handle, 3, state.ik_weight)
+  world.set_animation_layer_weight(
+    &engine.world,
+    state.fox_handle,
+    3,
+    state.ik_weight,
+  )
 
   // Move IK target in a circle
   if state.enable_ik {
@@ -218,11 +250,23 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     new_target := [3]f32{target_x, target_y, target_z}
     pole := [3]f32{0.0, 5.0, 0.0}
 
-    world.set_ik_layer_target(&engine.world, state.fox_handle, 3, new_target, pole)
+    world.set_ik_layer_target(
+      &engine.world,
+      state.fox_handle,
+      3,
+      new_target,
+      pole,
+    )
 
     // Move the visual cube
     if state.target_cube.index != 0 {
-      world.translate(&engine.world, state.target_cube, target_x, target_y, target_z)
+      world.translate(
+        &engine.world,
+        state.target_cube,
+        target_x,
+        target_y,
+        target_z,
+      )
     }
   }
   // Debug output every 60 frames
@@ -242,7 +286,8 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   if action != 1 do return // Only handle press events
 
   switch key {
-  case '1': // '1' key
+  case '1':
+    // '1' key
     state.blend_walk_run = !state.blend_walk_run
     if state.blend_walk_run {
       log.info("Blending to RUN animation")
@@ -250,7 +295,8 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
       log.info("Blending to WALK animation")
     }
 
-  case '2': // '2' key
+  case '2':
+    // '2' key
     state.enable_survey = !state.enable_survey
     if state.enable_survey {
       log.info("SURVEY animation ENABLED (upper body layer)")
@@ -258,7 +304,8 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
       log.info("SURVEY animation DISABLED")
     }
 
-  case '3': // '3' key
+  case '3':
+    // '3' key
     state.enable_ik = !state.enable_ik
     if state.enable_ik {
       log.info("IK head tracking ENABLED")
@@ -266,7 +313,8 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
       log.info("IK head tracking DISABLED")
     }
 
-  case 32: // Space key
+  case 32:
+    // Space key
     state.blend_walk_run = false
     state.enable_survey = false
     state.enable_ik = false

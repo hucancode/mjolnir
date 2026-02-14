@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import cont "../../mjolnir/containers"
 import world "../../mjolnir/world"
 import "core:log"
 
@@ -8,8 +9,11 @@ main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    mjolnir.spawn_cube(engine, .RED)
-    if camera := mjolnir.get_main_camera(engine); camera != nil {
+    mjolnir.spawn_primitive_mesh(engine, .CUBE, .RED)
+    if camera := cont.get(
+      engine.world.cameras,
+      transmute(world.CameraHandle)engine.render.main_camera,
+    ); camera != nil {
       world.camera_look_at(camera, {3, 2, 3}, {0, 0, 0})
     }
   }

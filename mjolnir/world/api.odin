@@ -188,19 +188,3 @@ sync_all_physics_to_world :: proc(
     }
   }
 }
-
-// Sync all nodes with rigid body attachments from world to physics
-sync_all_world_to_physics :: proc(
-  world: ^World,
-  physics_world: ^physics.World,
-) {
-  for &entry in world.nodes.entries do if entry.active {
-    node := &entry.item
-    if attachment, ok := node.attachment.(RigidBodyAttachment); ok {
-      if body, ok := physics.get_dynamic_body(physics_world, attachment.body_handle); ok {
-        body.position = node.transform.position
-        body.rotation = node.transform.rotation
-      }
-    }
-  }
-}

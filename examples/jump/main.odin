@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import cont "../../mjolnir/containers"
 import "../../mjolnir/physics"
 import "../../mjolnir/world"
 import "core:log"
@@ -30,10 +31,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world, {0, -10, 0})
   ground_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   ground_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground_handle = mjolnir.spawn(
-    engine,
-    [3]f32{0, -0.5, 0},
-  )
+  ground_handle = world.spawn(&engine.world, {0, -0.5, 0}) or_else {}
   ground_node := world.get_node(&engine.world, ground_handle)
   physics.create_static_body_box(
     &physics_world,
@@ -41,22 +39,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ground_node.transform.position,
     ground_node.transform.rotation,
   )
-  ground_mesh_handle := mjolnir.spawn_child(
-    engine,
-    ground_handle,
-    attachment = world.MeshAttachment {
-      handle = ground_mesh,
-      material = ground_mat,
-    },
-  )
+  ground_mesh_handle :=
+    world.spawn_child(
+      &engine.world,
+      ground_handle,
+      attachment = world.MeshAttachment {
+        handle = ground_mesh,
+        material = ground_mat,
+      },
+    ) or_else {}
   world.scale_xyz(&engine.world, ground_mesh_handle, 40.0, 0.5, 40.0)
   log.info("Ground body created")
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   cube_mat := world.get_builtin_material(&engine.world, .CYAN)
-  cube_handle = mjolnir.spawn(
-    engine,
-    [3]f32{0, 3, 0},
-  )
+  cube_handle = world.spawn(&engine.world, {0, 3, 0}) or_else {}
   cube_node := world.get_node(&engine.world, cube_handle)
   cube_body = physics.create_dynamic_body_box(
     &physics_world,
@@ -68,25 +64,29 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if body, ok := physics.get_dynamic_body(&physics_world, cube_body); ok {
     physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
   }
-  cube_handle = mjolnir.spawn(
-    engine,
-    cube_node.transform.position,
-    world.RigidBodyAttachment{body_handle = cube_body},
-  )
-  mjolnir.spawn_child(
-    engine,
-    cube_handle,
-    attachment = world.MeshAttachment {
-      handle = cube_mesh,
-      material = cube_mat,
-      cast_shadow = true,
-    },
-  )
+  cube_handle =
+    world.spawn(
+      &engine.world,
+      cube_node.transform.position,
+      world.RigidBodyAttachment{body_handle = cube_body},
+    ) or_else {}
+  _ =
+    world.spawn_child(
+      &engine.world,
+      cube_handle,
+      attachment = world.MeshAttachment {
+        handle = cube_mesh,
+        material = cube_mat,
+        cast_shadow = true,
+      },
+    ) or_else {}
   log.info("Cube body created")
-  if camera := mjolnir.get_main_camera(engine); camera != nil {
-    world.camera_look_at(camera, {8, 5, 8}, {0, 2, 0})
-    mjolnir.sync_active_camera_controller(engine)
-  }
+  world.main_camera_look_at(
+    &engine.world,
+    transmute(world.CameraHandle)engine.render.main_camera,
+    {8, 5, 8},
+    {0, 2, 0},
+  )
   time_since_jump = 0.0
   log.info("====================================")
   log.info("CONTROLS:")
@@ -103,10 +103,7 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   if action != glfw.PRESS {
     return
   }
-  cube_body_ptr, body_ok := physics.get_dynamic_body(
-    &physics_world,
-    cube_body,
-  )
+  cube_body_ptr, body_ok := physics.get_dynamic_body(&physics_world, cube_body)
   if !body_ok {
     return
   }
@@ -131,22 +128,20 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   time_since_jump += delta_time
-  cube_body_ptr, body_ok := physics.get_dynamic_body(
-    &physics_world,
-    cube_body,
-  )
+  cube_body_ptr, body_ok := physics.get_dynamic_body(&physics_world, cube_body)
   if !body_ok {
     return
   }
   // Input is sampled in update_input on the main thread; use the cached state
-  space_pressed := engine.input.keys[glfw.KEY_SPACE] &&
-                   !engine.input.key_holding[glfw.KEY_SPACE]
-  mass_light_pressed := engine.input.keys[glfw.KEY_1] &&
-                        !engine.input.key_holding[glfw.KEY_1]
-  mass_medium_pressed := engine.input.keys[glfw.KEY_2] &&
-                         !engine.input.key_holding[glfw.KEY_2]
-  mass_heavy_pressed := engine.input.keys[glfw.KEY_3] &&
-                        !engine.input.key_holding[glfw.KEY_3]
+  space_pressed :=
+    engine.input.keys[glfw.KEY_SPACE] &&
+    !engine.input.key_holding[glfw.KEY_SPACE]
+  mass_light_pressed :=
+    engine.input.keys[glfw.KEY_1] && !engine.input.key_holding[glfw.KEY_1]
+  mass_medium_pressed :=
+    engine.input.keys[glfw.KEY_2] && !engine.input.key_holding[glfw.KEY_2]
+  mass_heavy_pressed :=
+    engine.input.keys[glfw.KEY_3] && !engine.input.key_holding[glfw.KEY_3]
   // Horizontal movement controls (WASD) - continuous polling for smooth movement
   move_force := [3]f32{0, 0, 0}
   if engine.input.keys[glfw.KEY_W] {

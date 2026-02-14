@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import cont "../../mjolnir/containers"
 import "../../mjolnir/geometry"
 import "../../mjolnir/physics"
 import "../../mjolnir/world"
@@ -33,17 +34,15 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world)
-  cube_body_to_mesh = make(
-    map[physics.TriggerHandle]world.NodeHandle,
-  )
-  mjolnir.set_visibility_stats(engine, false)
+  cube_body_to_mesh = make(map[physics.TriggerHandle]world.NodeHandle)
+  engine.render.visibility.stats_enabled = false
   engine.debug_ui_enabled = false
   // Use builtin meshes and materials
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
   cube_mat := world.get_builtin_material(&engine.world, .CYAN)
   // Emissive material for effector sphere
-  effector_mat := mjolnir.create_material(engine, emissive_value = 5.0)
+  effector_mat := world.create_material(&engine.world, emissive_value = 5.0)
   // Spawn 50x50 grid of cubes
   grid_size := 50
   spacing: f32 = 1.0
@@ -58,12 +57,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
         {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
         position = {world_x, 0.5, world_z},
       ) or_continue
-      physics_node := mjolnir.spawn(
-        engine,
-        position = [3]f32{world_x, 0.5, world_z},
+      physics_node := world.spawn(
+        &engine.world,
+        {world_x, 0.5, world_z},
       ) or_continue
-      mesh_handle := mjolnir.spawn_child(
-        engine,
+      mesh_handle := world.spawn_child(
+        &engine.world,
         physics_node,
         attachment = world.MeshAttachment {
           handle = cube_mesh,
@@ -78,25 +77,30 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   // Spawn effector sphere
   effector_position = {0, 1, 0}
-  effector_sphere = mjolnir.spawn(
-    engine,
-    attachment = world.MeshAttachment {
-      handle = sphere_mesh,
-      material = effector_mat,
-      cast_shadow = false,
-    },
-  )
-  world.translate(&engine.world,
+  effector_sphere =
+    world.spawn(
+      &engine.world,
+      {0, 0, 0},
+      attachment = world.MeshAttachment {
+        handle = sphere_mesh,
+        material = effector_mat,
+        cast_shadow = false,
+      },
+    ) or_else {}
+  world.translate(
+    &engine.world,
     effector_sphere,
     effector_position.x,
     effector_position.y,
     effector_position.z,
   )
   world.scale(&engine.world, effector_sphere, 0.5)
-  if main_camera := mjolnir.get_main_camera(engine); main_camera != nil {
-    world.camera_look_at(main_camera, {10, 30, 10}, {0, 0, 0})
-    mjolnir.sync_active_camera_controller(engine)
-  }
+  world.main_camera_look_at(
+    &engine.world,
+    transmute(world.CameraHandle)engine.render.main_camera,
+    {10, 30, 10},
+    {0, 0, 0},
+  )
   // Build initial BVH for all bodies
   physics.step(&physics_world, 0.0)
   world.sync_all_physics_to_world(&engine.world, &physics_world)
@@ -112,7 +116,10 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   mouse_just_clicked := mouse_button_pressed && !last_mouse_button_state
   last_mouse_button_state = mouse_button_pressed
   mouse_click: if mouse_just_clicked {
-    camera := mjolnir.get_main_camera(engine)
+    camera := cont.get(
+      engine.world.cameras,
+      transmute(world.CameraHandle)engine.render.main_camera,
+    )
     if camera != nil {
       // Get mouse position in window coordinates
       mouse_x_window := f32(engine.input.mouse_pos.x)
@@ -133,10 +140,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       }
       log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
       // Use physics raycast
-      hit := physics.raycast_trigger(
-        &physics_world,
-        ray,
-      )
+      hit := physics.raycast_trigger(&physics_world, ray)
       if !hit.hit {
         clicked_cube = {}
         break mouse_click
@@ -155,7 +159,8 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   effector_position.x = math.cos(orbit_angle) * orbit_radius
   effector_position.y = 1.0
   effector_position.z = math.sin(orbit_angle) * orbit_radius
-  world.translate(&engine.world,
+  world.translate(
+    &engine.world,
     effector_sphere,
     effector_position.x,
     effector_position.y,

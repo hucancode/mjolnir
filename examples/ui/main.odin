@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
 import "../../mjolnir/render/ui"
 import "../../mjolnir/world"
@@ -251,10 +252,13 @@ main :: proc() {
       image_label,
       image_label_ok,
     )
-    mjolnir.spawn_cube(engine, .BLUE)
-    if camera := mjolnir.get_main_camera(engine); camera != nil {
-      world.camera_look_at(camera, {3, 2, 3}, {0, 0, 0})
-    }
+    mjolnir.spawn_primitive_mesh(engine, .CUBE, .BLUE)
+    world.main_camera_look_at(
+      &engine.world,
+      transmute(world.CameraHandle)engine.render.main_camera,
+      {3, 2, 3},
+      {0, 0, 0},
+    )
   }
   mjolnir.run(engine, 800, 700, "UI")
 }

@@ -99,9 +99,6 @@ Engine :: struct {
   update_thread:             Maybe(^thread.Thread),
   update_active:             bool,
   last_render_timestamp:     time.Time,
-  orbit_controller:          CameraController,
-  free_controller:           CameraController,
-  active_controller:         ^CameraController,
   camera_controller_enabled: bool,
   ui_hovered_widget:         Maybe(ui.UIWidgetHandle),
 }
@@ -340,13 +337,15 @@ init :: proc(
   )
   if self.camera_controller_enabled {
     world.setup_camera_controller_callbacks(self.window)
-    self.orbit_controller = world.camera_controller_orbit_init(self.window)
-    self.free_controller = world.camera_controller_free_init(self.window)
+    self.world.orbit_controller = world.camera_controller_orbit_init(
+      self.window,
+    )
+    self.world.free_controller = world.camera_controller_free_init(self.window)
     if main_camera := get_main_camera(self); main_camera != nil {
-      world.camera_controller_sync(&self.orbit_controller, main_camera)
-      world.camera_controller_sync(&self.free_controller, main_camera)
+      world.camera_controller_sync(&self.world.orbit_controller, main_camera)
+      world.camera_controller_sync(&self.world.free_controller, main_camera)
     }
-    self.active_controller = &self.orbit_controller
+    self.world.active_controller = &self.world.orbit_controller
   }
   if self.setup_proc != nil {
     self.setup_proc(self)
@@ -1031,25 +1030,25 @@ update :: proc(self: ^Engine) -> bool {
   params.forcefield_count = u32(
     min(len(self.world.forcefields.entries), world.MAX_FORCE_FIELDS),
   )
-  if self.camera_controller_enabled && self.active_controller != nil {
+  if self.camera_controller_enabled && self.world.active_controller != nil {
     main_camera := get_main_camera(self)
     if main_camera != nil {
-      switch self.active_controller.type {
+      switch self.world.active_controller.type {
       case .ORBIT:
         world.camera_controller_orbit_update(
-          self.active_controller,
+          self.world.active_controller,
           main_camera,
           delta_time,
         )
       case .FREE:
         world.camera_controller_free_update(
-          self.active_controller,
+          self.world.active_controller,
           main_camera,
           delta_time,
         )
       case .FOLLOW:
         world.camera_controller_follow_update(
-          self.active_controller,
+          self.world.active_controller,
           main_camera,
           delta_time,
         )

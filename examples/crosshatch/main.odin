@@ -1,6 +1,8 @@
 package main
 
 import "../../mjolnir"
+import cont "../../mjolnir/containers"
+import post_process "../../mjolnir/render/post_process"
 import "../../mjolnir/world"
 import "core:log"
 
@@ -15,11 +17,14 @@ main :: proc() {
     for z in 0 ..< 5 {
       for x in 0 ..< 5 {
         mat := mat1 if (x + z) % 2 == 0 else mat2
-        handle := mjolnir.spawn(
-          engine,
-          attachment = world.MeshAttachment{handle = mesh, material = mat},
-        )
-        world.translate(&engine.world,
+        handle :=
+          world.spawn(
+            &engine.world,
+            {0, 0, 0},
+            world.MeshAttachment{handle = mesh, material = mat},
+          ) or_else {}
+        world.translate(
+          &engine.world,
           handle,
           (f32(x) - half) * 2.5,
           0,
@@ -27,11 +32,13 @@ main :: proc() {
         )
       }
     }
-    if camera := mjolnir.get_main_camera(engine); camera != nil {
-      world.camera_look_at(camera, {8, 6, 8}, {0, 0, 0})
-      mjolnir.sync_active_camera_controller(engine)
-    }
-    mjolnir.add_crosshatch(engine, resolution = {800, 600})
+    world.main_camera_look_at(
+      &engine.world,
+      transmute(world.CameraHandle)engine.render.main_camera,
+      {8, 6, 8},
+      {0, 0, 0},
+    )
+    post_process.add_crosshatch(&engine.render.post_process, {800, 600})
   }
   mjolnir.run(engine, 800, 600, "visual-postprocess-crosshatch")
 }

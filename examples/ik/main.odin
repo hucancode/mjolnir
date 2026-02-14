@@ -29,10 +29,12 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   // engine.world.debug_draw_ik = true // Removed: debug_draw_ik no longer available
-  if camera := mjolnir.get_main_camera(engine); camera != nil {
-    world.camera_look_at(camera, {0, 80, 120}, {0, 0, 0})
-    mjolnir.sync_active_camera_controller(engine)
-  }
+  world.main_camera_look_at(
+    &engine.world,
+    transmute(world.CameraHandle)engine.render.main_camera,
+    {0, 80, 120},
+    {0, 0, 0},
+  )
 
   // Load spider model
   spider_roots := mjolnir.load_gltf(engine, "assets/spider.glb")
@@ -40,7 +42,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Position the spider
   for handle in spider_roots {
-    node := mjolnir.get_node(engine, handle) or_continue
+    node := cont.get(engine.world.nodes, handle) or_continue
     spider_root_node = handle
     node.transform.position = {0, 5, 0}
     node.transform.is_dirty = true
@@ -61,10 +63,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Find the skinned mesh node and set up IK for each leg
   for handle in spider_roots {
-    root_node := mjolnir.get_node(engine, handle) or_continue
+    root_node := cont.get(engine.world.nodes, handle) or_continue
 
     for child in root_node.children {
-      child_node := mjolnir.get_node(engine, child) or_continue
+      child_node := cont.get(engine.world.nodes, child) or_continue
       mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
       if !has_mesh {
         continue
@@ -149,7 +151,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
 
         // Add IK layer for this leg
-        world.add_ik_layer(&engine.world,
+        world.add_ik_layer(
+          &engine.world,
           child,
           bone_names,
           leg_targets[i],
@@ -167,9 +170,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Find the skinned mesh and create markers for bones
   for handle in root_nodes {
-    node := mjolnir.get_node(engine, handle) or_continue
+    node := cont.get(engine.world.nodes, handle) or_continue
     for child in node.children {
-      child_node := mjolnir.get_node(engine, child) or_continue
+      child_node := cont.get(engine.world.nodes, child) or_continue
       mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
       if !has_mesh {
         continue
@@ -188,16 +191,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
   sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
   red_mat := world.get_builtin_material(&engine.world, .RED)
   for i in 0 ..< 6 {
-    target_markers[i] = mjolnir.spawn(
-      engine,
-      attachment = world.MeshAttachment {
-        handle = sphere_mesh,
-        material = red_mat,
-      },
-    )
+    target_markers[i] =
+      world.spawn(
+        &engine.world,
+        {0, 0, 0},
+        attachment = world.MeshAttachment {
+          handle = sphere_mesh,
+          material = red_mat,
+        },
+      ) or_else {}
     world.scale(&engine.world, target_markers[i], 0.5)
     // Position at the fixed target
-    if marker_node := mjolnir.get_node(engine, target_markers[i]); marker_node != nil {
+    if marker_node := cont.get(engine.world.nodes, target_markers[i]);
+       marker_node != nil {
       marker_node.transform.position = leg_targets[i]
       marker_node.transform.is_dirty = true
     }
@@ -206,13 +212,28 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Ground plane for reference
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   gray_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground_plane = mjolnir.spawn(
-    engine,
-    attachment = world.MeshAttachment{handle = cube_mesh, material = gray_mat},
-  )
+  ground_plane =
+    world.spawn(
+      &engine.world,
+      {0, 0, 0},
+      attachment = world.MeshAttachment {
+        handle = cube_mesh,
+        material = gray_mat,
+      },
+    ) or_else {}
   world.scale_xyz(&engine.world, ground_plane, 40, 0.2, 40)
 
-  mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
+  light_handle :=
+    world.spawn(
+      &engine.world,
+      {0, 0, 0},
+      world.create_directional_light_attachment(
+        {1.0, 1.0, 1.0, 1.0},
+        10.0,
+        false,
+      ),
+    ) or_else {}
+  world.register_active_light(&engine.world, light_handle)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
@@ -225,7 +246,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   body_pos := [3]f32{body_x, 0, 0}
 
   // Move the spider body
-  if node := mjolnir.get_node(engine, spider_root_node); node != nil {
+  if node := cont.get(engine.world.nodes, spider_root_node); node != nil {
     node.transform.position = body_pos
     node.transform.is_dirty = true
   }
@@ -234,15 +255,17 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Each leg has its own IK layer (0-5)
   for i in 0 ..< 6 {
     // Calculate pole position for this leg (above the target, toward the body)
-    pole_pos := [3]f32{
+    pole_pos := [3]f32 {
       leg_targets[i].x * 0.5 + body_pos.x * 0.5,
       5,
       leg_targets[i].z * 0.5,
     }
 
     target_pos := leg_targets[i]
-    target_pos.y += amplitude * math.max(math.sin(animation_time * speed * math.PI), 0)
-    world.set_ik_layer_target(&engine.world,
+    target_pos.y +=
+      amplitude * math.max(math.sin(animation_time * speed * math.PI), 0)
+    world.set_ik_layer_target(
+      &engine.world,
       mesh_node,
       i, // IK layer index (0-5 for the 6 legs)
       target_pos, // Fixed ground target

@@ -86,11 +86,12 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
   clear(&demo_state.nav_indices)
   clear(&demo_state.nav_area_types)
   // Setup camera
-  main_camera := mjolnir.get_main_camera(engine)
-  if camera := mjolnir.get_main_camera(engine); camera != nil {
-    world.camera_look_at(camera, {35, 25, 35}, {0, 0, 0})
-    mjolnir.sync_active_camera_controller(engine)
-  }
+  world.main_camera_look_at(
+    &engine.world,
+    transmute(world.CameraHandle)engine.render.main_camera,
+    {35, 25, 35},
+    {0, 0, 0},
+  )
   if demo_state.use_procedural {
     create_demo_scene(engine)
   } else {
@@ -118,23 +119,31 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
     vertex.position.z *= 50
   }
   append_nav_geometry(ground_geom)
-  ground_mesh_handle, ground_mesh_ok := mjolnir.create_mesh(engine, ground_geom)
-  ground_material_handle, ground_material_ok := mjolnir.create_material(
-    engine,
+  ground_mesh_handle, _, ground_mesh_ok := world.create_mesh(
+    &engine.world,
+    ground_geom,
+  )
+  ground_material_handle, ground_material_ok := world.create_material(
+    &engine.world,
     metallic_value = 0.1,
     roughness_value = 0.8,
     emissive_value = 0.02,
   )
   if ground_mesh_ok && ground_material_ok {
-    demo_state.ground_handle = mjolnir.spawn(
-      engine,
-      attachment = world.MeshAttachment {
-        handle = ground_mesh_handle,
-        material = ground_material_handle,
-      },
-    )
+    demo_state.ground_handle =
+      world.spawn(
+        &engine.world,
+        {0, 0, 0},
+        world.MeshAttachment {
+          handle = ground_mesh_handle,
+          material = ground_material_handle,
+        },
+      ) or_else {}
     // Tag as environment for baking
-    if ground_node, ok := mjolnir.get_node(engine, demo_state.ground_handle); ok {
+    if ground_node, ok := cont.get(
+      engine.world.nodes,
+      demo_state.ground_handle,
+    ); ok {
       ground_node.tags += {.ENVIRONMENT}
     }
   }
@@ -161,27 +170,29 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
       vertex.position.z *= size.z
     }
     append_nav_geometry(obstacle_geom, position, true)
-    obstacle_mesh_handle, obstacle_mesh_ok := mjolnir.create_mesh(
-      engine,
+    obstacle_mesh_handle, _, obstacle_mesh_ok := world.create_mesh(
+      &engine.world,
       obstacle_geom,
     )
-    obstacle_material_handle, obstacle_material_ok := mjolnir.create_material(
-      engine,
+    obstacle_material_handle, obstacle_material_ok := world.create_material(
+      &engine.world,
       metallic_value = 0.3,
       roughness_value = 0.7,
       emissive_value = 0.1,
     )
     if obstacle_mesh_ok && obstacle_material_ok {
-      obstacle_handle := mjolnir.spawn(
-        engine,
-        position,
-        world.MeshAttachment {
-          handle = obstacle_mesh_handle,
-          material = obstacle_material_handle,
-        },
-      )
+      obstacle_handle :=
+        world.spawn(
+          &engine.world,
+          position,
+          world.MeshAttachment {
+            handle = obstacle_mesh_handle,
+            material = obstacle_material_handle,
+          },
+        ) or_else {}
       // Tag obstacles as NAVMESH_OBSTACLE for baking
-      if obstacle_node, ok := mjolnir.get_node(engine, obstacle_handle); ok {
+      if obstacle_node, ok := cont.get(engine.world.nodes, obstacle_handle);
+         ok {
         obstacle_node.tags += {.NAVMESH_OBSTACLE}
       }
       append(&demo_state.obstacle_handles, obstacle_handle)
@@ -197,23 +208,27 @@ create_agent :: proc(engine: ^mjolnir.Engine) {
   log.info("Creating agent cylinder")
   // Create a cylinder geometry for the agent
   agent_geom := geometry.make_cylinder(16, 2, 0.5, {0.2, 0.5, 1.0, 1.0})
-  agent_mesh_handle, agent_mesh_ok := mjolnir.create_mesh(engine, agent_geom)
-  agent_material_handle, agent_material_ok := mjolnir.create_material(
-    engine,
+  agent_mesh_handle, _, agent_mesh_ok := world.create_mesh(
+    &engine.world,
+    agent_geom,
+  )
+  agent_material_handle, agent_material_ok := world.create_material(
+    &engine.world,
     metallic_value = 0.3,
     roughness_value = 0.6,
     emissive_value = 0.3,
   )
   if agent_mesh_ok && agent_material_ok {
-    demo_state.agent_handle = mjolnir.spawn(
-      engine,
-      demo_state.agent_pos + [3]f32{0, 1, 0}, // Raise to half height
-      world.MeshAttachment {
-        handle = agent_mesh_handle,
-        material = agent_material_handle,
-      },
-    )
-    if agent_node, ok := mjolnir.get_node(engine, demo_state.agent_handle); ok {
+    demo_state.agent_handle = world.spawn(
+        &engine.world,
+        demo_state.agent_pos + [3]f32{0, 1, 0}, // Raise to half height
+        world.MeshAttachment {
+          handle = agent_mesh_handle,
+          material = agent_material_handle,
+        },
+      ) or_else {}
+    if agent_node, ok := cont.get(engine.world.nodes, demo_state.agent_handle);
+       ok {
       agent_node.name = "agent"
       log.info("Agent cylinder created successfully")
     }
@@ -231,30 +246,31 @@ create_obj_visualization_mesh :: proc(
     return
   }
   append_nav_geometry(geom)
-  obj_mesh_handle, obj_mesh_ok := mjolnir.create_mesh(engine, geom)
+  obj_mesh_handle, _, obj_mesh_ok := world.create_mesh(&engine.world, geom)
   if obj_mesh_ok {
     demo_state.obj_mesh_handle = obj_mesh_handle
   } else {
     demo_state.obj_mesh_handle = {}
   }
-  obj_material_handle, obj_material_ok := mjolnir.create_material(
-    engine,
+  obj_material_handle, obj_material_ok := world.create_material(
+    &engine.world,
     metallic_value = 0.1,
     roughness_value = 0.8,
     emissive_value = 0.02,
   )
   obj_spawn_ok: bool
   if obj_mesh_ok && obj_material_ok {
-    demo_state.obj_node_handle, obj_spawn_ok = mjolnir.spawn(
-      engine,
-      [3]f32{0, 0, 0},
-      world.MeshAttachment {
-        handle = demo_state.obj_mesh_handle,
-        material = obj_material_handle,
-      },
-    )
+    demo_state.obj_node_handle =
+      world.spawn(
+        &engine.world,
+        {0, 0, 0},
+        world.MeshAttachment {
+          handle = demo_state.obj_mesh_handle,
+          material = obj_material_handle,
+        },
+      ) or_else {}
   }
-  if node, ok := mjolnir.get_node(engine, demo_state.obj_node_handle); ok {
+  if node, ok := cont.get(engine.world.nodes, demo_state.obj_node_handle); ok {
     node.name = "obj_mesh"
     node.tags += {.ENVIRONMENT}
     log.infof(
@@ -289,20 +305,23 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
 }
 
 visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.despawn(engine, demo_state.navmesh_node_handle)
+  world.despawn(&engine.world, demo_state.navmesh_node_handle)
   navmesh_geom := nav.build_geometry(&engine.nav.nav_mesh)
   log.infof(
     "Built navmesh visualization geometry: %d vertices, %d indices",
     len(navmesh_geom.vertices),
     len(navmesh_geom.indices),
   )
-  navmesh_mesh_handle, mesh_ok := mjolnir.create_mesh(engine, navmesh_geom)
+  navmesh_mesh_handle, _, mesh_ok := world.create_mesh(
+    &engine.world,
+    navmesh_geom,
+  )
   if !mesh_ok {
     log.error("Failed to create navmesh visualization mesh")
     return
   }
-  navmesh_material, mat_ok := mjolnir.create_material(
-    engine,
+  navmesh_material, mat_ok := world.create_material(
+    &engine.world,
     type = .RANDOM_COLOR,
     base_color_factor = {1.0, 0.8, 0.3, 0.3},
   )
@@ -310,11 +329,15 @@ visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
     log.error("Failed to create navmesh material")
     return
   }
-  demo_state.navmesh_node_handle = mjolnir.spawn(
-    engine,
-    {0, 0, 0},
-    world.MeshAttachment{handle = navmesh_mesh_handle, material = navmesh_material},
-  )
+  demo_state.navmesh_node_handle =
+    world.spawn(
+      &engine.world,
+      {0, 0, 0},
+      world.MeshAttachment {
+        handle = navmesh_mesh_handle,
+        material = navmesh_material,
+      },
+    ) or_else {}
   log.info("Navmesh visualization spawned with random_color material")
 }
 
@@ -328,7 +351,12 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
     demo_state.end_pos.y,
     demo_state.end_pos.z,
   )
-  path := mjolnir.find_path(engine, demo_state.agent_pos, demo_state.end_pos, 256)
+  path := nav.find_path(
+    &engine.nav,
+    demo_state.agent_pos,
+    demo_state.end_pos,
+    256,
+  )
   if path != nil && len(path) > 0 {
     delete(demo_state.current_path)
     demo_state.current_path = path
@@ -343,7 +371,7 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
       )
     }
     // Despawn old path before creating new one
-    mjolnir.despawn(engine, demo_state.path_node_handle)
+    world.despawn(&engine.world, demo_state.path_node_handle)
     demo_state.path_node_handle = {}
     visualize_path(engine)
     // Start following the path
@@ -358,28 +386,29 @@ update_position_marker :: proc(
   pos: [3]f32,
   color: [4]f32,
 ) {
-  mjolnir.despawn(engine, handle^)
+  world.despawn(&engine.world, handle^)
   marker_geom := geometry.make_sphere(12, 6, 0.3, color)
-  marker_mesh_handle, marker_mesh_ok := mjolnir.create_mesh(engine, marker_geom)
-  marker_material_handle, marker_material_ok := mjolnir.create_material(
-    engine,
+  marker_mesh_handle, _, marker_mesh_ok := world.create_mesh(
+    &engine.world,
+    marker_geom,
+  )
+  marker_material_handle, marker_material_ok := world.create_material(
+    &engine.world,
     metallic_value = 0.2,
     roughness_value = 0.8,
     emissive_value = 0.5,
   )
   node: ^world.Node
-  spawn_ok: bool
   if marker_mesh_ok && marker_material_ok {
-    handle^, spawn_ok = mjolnir.spawn(
-      engine,
-      pos + [3]f32{0, 0.2, 0}, // Slightly above ground
-      world.MeshAttachment {
-        handle = marker_mesh_handle,
-        material = marker_material_handle,
-      },
-    )
+    handle^ = world.spawn(
+        &engine.world,
+        pos + [3]f32{0, 0.2, 0}, // Slightly above ground
+        world.MeshAttachment {
+          handle = marker_mesh_handle,
+          material = marker_material_handle,
+        },
+      ) or_else {}
   }
-  if !spawn_ok do handle^ = {}
 }
 
 update_agent_position :: proc(engine: ^mjolnir.Engine) {
@@ -389,7 +418,7 @@ update_agent_position :: proc(engine: ^mjolnir.Engine) {
 
 visualize_path :: proc(engine: ^mjolnir.Engine) {
   // Clean up old path
-  mjolnir.despawn(engine, demo_state.path_node_handle)
+  world.despawn(&engine.world, demo_state.path_node_handle)
   if demo_state.path_mesh_handle != {} {
     world.destroy_mesh(&engine.world, demo_state.path_mesh_handle)
     demo_state.path_mesh_handle = {}
@@ -402,7 +431,9 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
   path_vertices := make([]geometry.Vertex, len(demo_state.current_path))
   defer delete(path_vertices)
   for pos, i in demo_state.current_path {
-    path_vertices[i] = geometry.Vertex{position = pos}
+    path_vertices[i] = geometry.Vertex {
+      position = pos,
+    }
   }
   indices := make([]u32, len(path_vertices))
   defer delete(indices)
@@ -415,22 +446,23 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
     aabb     = geometry.aabb_from_vertices(path_vertices),
   }
 
-  path_mesh, mesh_ok := mjolnir.create_mesh(engine, path_geom)
+  path_mesh, _, mesh_ok := world.create_mesh(&engine.world, path_geom)
   if !mesh_ok do return
   demo_state.path_mesh_handle = path_mesh
 
-  path_material, mat_ok := mjolnir.create_material(
-    engine,
+  path_material, mat_ok := world.create_material(
+    &engine.world,
     type = .LINE_STRIP,
     base_color_factor = {1.0, 0.8, 0.0, 1.0},
   )
   if !mat_ok do return
 
-  demo_state.path_node_handle = mjolnir.spawn(
-    engine,
-    {0, 0, 0},
-    world.MeshAttachment{handle = path_mesh, material = path_material},
-  )
+  demo_state.path_node_handle =
+    world.spawn(
+      &engine.world,
+      {0, 0, 0},
+      world.MeshAttachment{handle = path_mesh, material = path_material},
+    ) or_else {}
   demo_state.path_spawn_time = 0
 }
 
@@ -450,7 +482,10 @@ find_navmesh_point_from_mouse :: proc(
     height,
   )
   // GLFW returns coordinates with origin at top-left, Y increases downward
-  camera := mjolnir.get_main_camera(engine)
+  camera := cont.get(
+    engine.world.cameras,
+    transmute(world.CameraHandle)engine.render.main_camera,
+  )
   ray_origin, ray_dir := world.camera_viewport_to_world_ray(
     camera,
     mouse_x,
@@ -477,8 +512,8 @@ find_navmesh_point_from_mouse :: proc(
         ground_intersection.z,
       )
       search_extents := [3]f32{2.0, 5.0, 2.0}
-      nearest_pos, found := mjolnir.nav_find_nearest_point(
-        engine,
+      nearest_pos, found := nav.find_nearest_point(
+        &engine.nav,
         ground_intersection,
         search_extents,
       )
@@ -505,8 +540,8 @@ find_navmesh_point_from_mouse :: proc(
       sample_pos.z,
     )
     search_extents := [3]f32{5.0, 10.0, 5.0}
-    nearest_pos, found := mjolnir.nav_find_nearest_point(
-      engine,
+    nearest_pos, found := nav.find_nearest_point(
+      &engine.nav,
       sample_pos,
       search_extents,
     )
@@ -557,14 +592,12 @@ demo_mouse_pressed :: proc(
 }
 
 demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  // Update camera controller
-  mjolnir.update_camera_controller(engine, delta_time)
 
   // Auto-remove path after 5 seconds
   if demo_state.path_node_handle != {} {
     demo_state.path_spawn_time += delta_time
     if demo_state.path_spawn_time >= 5.0 {
-      mjolnir.despawn(engine, demo_state.path_node_handle)
+      world.despawn(&engine.world, demo_state.path_node_handle)
       demo_state.path_node_handle = {}
       if demo_state.path_mesh_handle != {} {
         world.destroy_mesh(&engine.world, demo_state.path_mesh_handle)

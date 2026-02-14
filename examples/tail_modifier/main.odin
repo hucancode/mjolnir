@@ -1,11 +1,11 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/world"
-import "../../mjolnir/render"
 import anim "../../mjolnir/animation"
 import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -21,24 +21,27 @@ main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    if camera := mjolnir.get_main_camera(engine); camera != nil {
-      world.camera_look_at(camera, {0, 100, 150}, {0, 30, 0})
-      mjolnir.sync_active_camera_controller(engine)
-    }
+    world.main_camera_look_at(
+      &engine.world,
+      transmute(world.CameraHandle)engine.render.main_camera,
+      {0, 100, 150},
+      {0, 30, 0},
+    )
     root_nodes = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
     for handle in root_nodes {
-      node := mjolnir.get_node(engine, handle) or_continue
+      node := cont.get(engine.world.nodes, handle) or_continue
       for child in node.children {
         snake_child_node = child // Store for animation
 
         // Add single bone rotation modifier to control the root bone
-        root_bone_modifier = world.add_single_bone_rotation_modifier_layer(
-          &engine.world,
-          child,
-          bone_name = "root",
-          weight = 1.0,
-          layer_index = -1,
-        ) or_else nil
+        root_bone_modifier =
+          world.add_single_bone_rotation_modifier_layer(
+            &engine.world,
+            child,
+            bone_name = "root",
+            weight = 1.0,
+            layer_index = -1,
+          ) or_else nil
         if root_bone_modifier != nil {
           log.infof("Added root bone rotation modifier")
         }
@@ -72,10 +75,10 @@ main :: proc() {
 
     // Find the skinned mesh and create markers for bones
     for handle in root_nodes {
-      node := mjolnir.get_node(engine, handle) or_continue
+      node := cont.get(engine.world.nodes, handle) or_continue
       log.infof("Root node found")
       for child in node.children {
-        child_node := mjolnir.get_node(engine, child) or_continue
+        child_node := cont.get(engine.world.nodes, child) or_continue
         log.infof("Child node found")
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
@@ -83,7 +86,10 @@ main :: proc() {
           continue
         }
 
-        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(
+          engine.world.meshes,
+          mesh_attachment.handle,
+        ) or_continue
         log.infof("Mesh found")
 
         skin, has_skin := mesh.skinning.?
@@ -101,13 +107,15 @@ main :: proc() {
 
         // Create one marker per bone
         for i in 0 ..< len(skin.bones) {
-          marker := mjolnir.spawn(
-            engine,
-            attachment = world.MeshAttachment {
-              handle = cone_mesh,
-              material = mat,
-            },
-          )
+          marker :=
+            world.spawn(
+              &engine.world,
+              {0, 0, 0},
+              attachment = world.MeshAttachment {
+                handle = cone_mesh,
+                material = mat,
+              },
+            ) or_else {}
           world.scale(&engine.world, marker, 0.2)
           append(&markers, marker)
           log.infof("Created marker %d at default position", i)
@@ -117,13 +125,28 @@ main :: proc() {
       }
     }
 
-    mjolnir.spawn_directional_light(engine, {1.0, 1.0, 1.0, 1.0})
-    mjolnir.spawn_point_light(
-      engine,
-      {1.0, 0.9, 0.8, 1.0},
-      1000.0,
-      position = {0, 50, 50},
-    )
+    light_handle :=
+      world.spawn(
+        &engine.world,
+        {0, 0, 0},
+        world.create_directional_light_attachment(
+          {1.0, 1.0, 1.0, 1.0},
+          10.0,
+          false,
+        ),
+      ) or_else {}
+    world.register_active_light(&engine.world, light_handle)
+    point_light_handle :=
+      world.spawn(
+        &engine.world,
+        {0, 50, 50},
+        world.create_point_light_attachment(
+          {1.0, 0.9, 0.8, 1.0},
+          1000.0,
+          true,
+        ),
+      ) or_else {}
+    world.register_active_light(&engine.world, point_light_handle)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // Animate the root bone directly via the single bone rotation modifier
@@ -131,19 +154,23 @@ main :: proc() {
     animation_time += delta_time
     frequency :: 0.5 // Hz - oscillation speed
     amplitude :: math.PI * 0.35 // Radians - swing angle
-    target_angle := amplitude * math.sin(animation_time * frequency * 2 * math.PI)
+    target_angle :=
+      amplitude * math.sin(animation_time * frequency * 2 * math.PI)
 
     // Update the root bone rotation via the modifier
     if root_bone_modifier != nil {
       axis := linalg.Vector3f32{0, 1, 0}
-      root_bone_modifier.rotation = linalg.quaternion_angle_axis_f32(target_angle, axis)
+      root_bone_modifier.rotation = linalg.quaternion_angle_axis_f32(
+        target_angle,
+        axis,
+      )
     }
 
     marker_idx := 0
     for handle in root_nodes {
-      node := mjolnir.get_node(engine, handle) or_continue
+      node := cont.get(engine.world.nodes, handle) or_continue
       for child in node.children {
-        child_node := mjolnir.get_node(engine, child) or_continue
+        child_node := cont.get(engine.world.nodes, child) or_continue
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
           continue
@@ -153,7 +180,10 @@ main :: proc() {
           continue
         }
 
-        mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
+        mesh := cont.get(
+          engine.world.meshes,
+          mesh_attachment.handle,
+        ) or_continue
         skin := mesh.skinning.? or_continue
 
         // Get bone matrices from GPU buffer
@@ -163,7 +193,8 @@ main :: proc() {
           continue
         }
         bone_count := len(skin.bones)
-        bone_matrix_buffer_offset, has_offset := engine.render.bone_matrix_offsets[child.index]
+        bone_matrix_buffer_offset, has_offset :=
+          engine.render.bone_matrix_offsets[child.index]
         if !has_offset {
           continue
         }
@@ -176,7 +207,9 @@ main :: proc() {
           // Convert skinning matrix to world matrix
           // skinning_matrix = world_matrix * inverse_bind_matrix
           // world_matrix = skinning_matrix * bind_matrix
-          bind_matrix := linalg.matrix4_inverse(skin.bones[i].inverse_bind_matrix)
+          bind_matrix := linalg.matrix4_inverse(
+            skin.bones[i].inverse_bind_matrix,
+          )
           bone_local_world := skinning_matrix * bind_matrix
           // Apply node's world transform
           node_world := child_node.transform.world_matrix
@@ -184,7 +217,10 @@ main :: proc() {
           bone_pos := bone_world[3].xyz
           bone_rot := linalg.to_quaternion(bone_world)
           // Update marker transform
-          marker := mjolnir.get_node(engine, markers[marker_idx]) or_continue
+          marker := cont.get(
+            engine.world.nodes,
+            markers[marker_idx],
+          ) or_continue
           marker.transform.position = bone_pos
           marker.transform.rotation = bone_rot
           marker.transform.is_dirty = true

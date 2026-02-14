@@ -167,6 +167,10 @@ World :: struct {
   // Builtin resources
   builtin_materials:       [len(Color)]MaterialHandle,
   builtin_meshes:          [len(Primitive)]MeshHandle,
+  // Camera controllers
+  orbit_controller:        CameraController,
+  free_controller:         CameraController,
+  active_controller:       ^CameraController,
 }
 
 init_node :: proc(self: ^Node, name: string = "") {
