@@ -266,7 +266,6 @@ init_animation_channel :: proc(
   }
 }
 
-
 // Set bone mask on animation layer to filter which bones are affected
 set_animation_layer_bone_mask :: proc(
   engine: ^Engine,
@@ -310,7 +309,6 @@ transition_to_animation :: proc(
     curve,
   )
 }
-
 
 create_camera :: proc(
   engine: ^Engine,
@@ -662,79 +660,4 @@ find_node_by_body_handle :: proc(
   case physics.StaticRigidBodyHandle:
   }
   return {}, false
-}
-
-raycast :: proc(
-  engine: ^Engine,
-  physics_world: ^physics.World,
-  origin: [3]f32,
-  direction: [3]f32,
-  max_distance: f32 = 1000.0,
-) -> (
-  hit: bool,
-  distance: f32,
-  normal: [3]f32,
-  handle: world.NodeHandle,
-) {
-  dir := linalg.normalize(direction)
-  ray := geometry.Ray {
-    origin    = origin,
-    direction = dir,
-  }
-  physics_hit := physics.raycast(physics_world, ray, max_distance)
-  if !physics_hit.hit {
-    return false, 0, {0, 0, 0}, {}
-  }
-  node_handle, found := find_node_by_body_handle(
-    engine,
-    physics_hit.body_handle,
-  )
-  if !found {
-    return false, 0, {0, 0, 0}, {}
-  }
-  return true, physics_hit.t, physics_hit.normal, node_handle
-}
-
-query_sphere :: proc(
-  engine: ^Engine,
-  physics_world: ^physics.World,
-  center: [3]f32,
-  radius: f32,
-) -> []world.NodeHandle {
-  results := make(
-    [dynamic]physics.DynamicRigidBodyHandle,
-    context.temp_allocator,
-  )
-  physics.query_sphere(physics_world, center, radius, &results)
-  node_handles := make([dynamic]world.NodeHandle, context.temp_allocator)
-  for body_handle in results {
-    if node_handle, ok := find_node_by_body_handle(engine, body_handle); ok {
-      append(&node_handles, node_handle)
-    }
-  }
-  return node_handles[:]
-}
-
-query_box :: proc(
-  engine: ^Engine,
-  physics_world: ^physics.World,
-  min: [3]f32,
-  max: [3]f32,
-) -> []world.NodeHandle {
-  bounds := geometry.Aabb {
-    min = min,
-    max = max,
-  }
-  results := make(
-    [dynamic]physics.DynamicRigidBodyHandle,
-    context.temp_allocator,
-  )
-  physics.query_box(physics_world, bounds, &results)
-  node_handles := make([dynamic]world.NodeHandle, context.temp_allocator)
-  for body_handle in results {
-    if node_handle, ok := find_node_by_body_handle(engine, body_handle); ok {
-      append(&node_handles, node_handle)
-    }
-  }
-  return node_handles[:]
 }
