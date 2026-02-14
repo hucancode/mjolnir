@@ -111,14 +111,6 @@ camera_get_near_far :: proc(self: ^Camera) -> (near: f32, far: f32) {
   }
 }
 
-CameraData :: struct {
-  view:            matrix[4, 4]f32,
-  projection:      matrix[4, 4]f32,
-  viewport_params: [4]f32,
-  position:        [4]f32,
-  frustum_planes:  [6][4]f32,
-}
-
 // DepthPyramid - Hierarchical depth buffer for occlusion culling (GPU resource)
 DepthPyramid :: struct {
   texture:    gpu.Texture2DHandle,
@@ -429,7 +421,7 @@ allocate_descriptors :: proc(
   node_data_buffer: ^gpu.BindlessBuffer(rd.Node),
   mesh_data_buffer: ^gpu.BindlessBuffer(rd.Mesh),
   world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
-  camera_buffer: ^gpu.PerFrameBindlessBuffer(CameraData, FRAMES_IN_FLIGHT),
+  camera_buffer: ^gpu.PerFrameBindlessBuffer(rd.Camera, FRAMES_IN_FLIGHT),
 ) -> vk.Result {
   for frame_index in 0 ..< FRAMES_IN_FLIGHT {
     camera_gpu.camera_buffer_descriptor_sets[frame_index] =

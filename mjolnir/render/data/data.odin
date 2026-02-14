@@ -148,3 +148,11 @@ Light :: struct {
   shadow_index: u32, // index into shadow buffers
   _padding:     [2]u32, // Maintain 16-byte alignment
 }
+
+Camera :: struct {
+  view:            matrix[4, 4]f32,
+  projection:      matrix[4, 4]f32,
+  viewport_params: [4]f32,
+  position:        [4]f32,
+  frustum_planes:  [6][4]f32,
+}

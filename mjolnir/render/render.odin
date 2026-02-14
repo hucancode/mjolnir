@@ -74,7 +74,7 @@ Manager :: struct {
     FRAMES_IN_FLIGHT,
   ),
   camera_buffer:           gpu.PerFrameBindlessBuffer(
-    cam.CameraData,
+    rd.Camera,
     FRAMES_IN_FLIGHT,
   ),
   material_buffer:         gpu.BindlessBuffer(Material),
@@ -1492,7 +1492,7 @@ upload_camera_data :: proc(
   frame_index: u32,
 ) {
   camera_copy := camera
-  camera_data: cam.CameraData
+  camera_data: rd.Camera
   camera_data.view = cam.camera_view_matrix(&camera_copy)
   camera_data.projection = cam.camera_projection_matrix(&camera_copy)
   near, far := cam.camera_get_near_far(&camera_copy)
