@@ -332,9 +332,9 @@ init_bindless_layouts :: proc(
   }
   self.textures_set_layout = gpu.create_descriptor_set_layout_array(
     gctx,
-    {.SAMPLED_IMAGE, d.MAX_TEXTURES, {.FRAGMENT}},
+    {.SAMPLED_IMAGE, gpu.MAX_TEXTURES, {.FRAGMENT}},
     {.SAMPLER, gpu.MAX_SAMPLERS, {.FRAGMENT}},
-    {.SAMPLED_IMAGE, d.MAX_CUBE_TEXTURES, {.FRAGMENT}},
+    {.SAMPLED_IMAGE, gpu.MAX_CUBE_TEXTURES, {.FRAGMENT}},
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)
@@ -1344,7 +1344,7 @@ set_texture_2d_descriptor :: proc(
   texture_index: u32,
   image_view: vk.ImageView,
 ) {
-  if texture_index >= rd.MAX_TEXTURES {
+  if texture_index >= gpu.MAX_TEXTURES {
     log.warnf("Index %d out of bounds for bindless textures", texture_index)
     return
   }
@@ -1373,7 +1373,7 @@ set_texture_cube_descriptor :: proc(
   texture_index: u32,
   image_view: vk.ImageView,
 ) {
-  if texture_index >= rd.MAX_CUBE_TEXTURES {
+  if texture_index >= gpu.MAX_CUBE_TEXTURES {
     log.warnf(
       "Index %d out of bounds for bindless cube textures",
       texture_index,
