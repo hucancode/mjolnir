@@ -17,12 +17,6 @@ import "render/post_process"
 import vk "vendor:vulkan"
 import "world"
 
-LightType :: enum u32 {
-  POINT       = 0,
-  DIRECTIONAL = 1,
-  SPOT        = 2,
-}
-
 // NavMeshQuality controls navmesh generation precision vs performance tradeoff
 NavMeshQuality :: enum {
   LOW, // Fast generation, coarse mesh - good for large open areas
@@ -322,7 +316,6 @@ create_camera :: proc(
   handle: world.CameraHandle,
   ok: bool,
 ) #optional_ok {
-  render_enabled_passes := transmute(render_camera.PassTypeSet)enabled_passes
   camera_handle, camera_ptr := cont.alloc(
     &engine.world.cameras,
     world.CameraHandle,
@@ -342,54 +335,6 @@ create_camera :: proc(
     return {}, false
   }
   world.stage_camera_data(&engine.world.staging, camera_handle)
-  engine.render.cameras[camera_handle.index] = {}
-  camera := &engine.render.cameras[camera_handle.index]
-  camera.position = camera_ptr.position
-  camera.rotation = camera_ptr.rotation
-  camera.projection = transmute(render_camera.CameraProjection)camera_ptr.projection
-  camera.extent = camera_ptr.extent
-  camera.enabled_passes = render_enabled_passes
-  camera.enable_culling = camera_ptr.enable_culling
-  camera.enable_depth_pyramid = camera_ptr.enable_depth_pyramid
-  descriptor_set := engine.render.textures_descriptor_set
-  set_descriptor :: proc(
-    gctx: ^gpu.GPUContext,
-    index: u32,
-    view: vk.ImageView,
-  ) {
-    desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
-    render.set_texture_2d_descriptor(gctx, desc_set, index, view)
-  }
-  context.user_ptr = &descriptor_set
-  if render_camera.init_gpu(
-       &engine.gctx,
-       camera,
-       &engine.render.texture_manager,
-       width,
-       height,
-       engine.swapchain.format.format,
-       vk.Format.D32_SFLOAT,
-       render_enabled_passes,
-       camera_ptr.enable_depth_pyramid,
-       world.MAX_NODES_IN_SCENE,
-     ) !=
-     .SUCCESS {
-    return {}, false
-  }
-  if render_camera.allocate_descriptors(
-       &engine.gctx,
-       camera,
-       &engine.render.texture_manager,
-       &engine.render.visibility.normal_cam_descriptor_layout,
-       &engine.render.visibility.depth_reduce_descriptor_layout,
-       &engine.render.node_data_buffer,
-       &engine.render.mesh_data_buffer,
-       &engine.render.world_matrix_buffer,
-       &engine.render.camera_buffer,
-     ) !=
-     .SUCCESS {
-    return {}, false
-  }
   return camera_handle, true
 }
 

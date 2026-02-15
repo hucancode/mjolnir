@@ -158,8 +158,7 @@ stats :: proc(
     frame_index  = frame_index,
   }
   if camera.opaque_draw_count[frame_index].mapped != nil {
-    stats.opaque_draw_count =
-      camera.opaque_draw_count[frame_index].mapped[0]
+    stats.opaque_draw_count = camera.opaque_draw_count[frame_index].mapped[0]
   }
   return stats
 }
@@ -208,14 +207,14 @@ render_depth :: proc(
   )
   gpu.begin_depth_rendering(
     command_buffer,
-    camera.extent[0],
-    camera.extent[1],
+    depth_texture.spec.width,
+    depth_texture.spec.height,
     &depth_attachment,
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera.extent[0],
-    camera.extent[1],
+    depth_texture.spec.width,
+    depth_texture.spec.height,
   )
   gpu.bind_graphics_pipeline(
     command_buffer,

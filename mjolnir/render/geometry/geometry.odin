@@ -217,8 +217,8 @@ begin_pass :: proc(
   )
   gpu.begin_rendering(
     command_buffer,
-    camera.extent[0],
-    camera.extent[1],
+    depth_texture.spec.width,
+    depth_texture.spec.height,
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(position_texture),
     gpu.create_color_attachment(normal_texture),
@@ -228,8 +228,8 @@ begin_pass :: proc(
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera.extent[0],
-    camera.extent[1],
+    depth_texture.spec.width,
+    depth_texture.spec.height,
   )
 }
 

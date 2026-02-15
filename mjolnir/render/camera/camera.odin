@@ -1,11 +1,9 @@
 package camera
 
-import geo "../../geometry"
 import "../../gpu"
 import rd "../data"
 import "core:log"
 import "core:math"
-import "core:math/linalg"
 import vk "vendor:vulkan"
 
 FRAMES_IN_FLIGHT :: rd.FRAMES_IN_FLIGHT
@@ -27,35 +25,12 @@ PassType :: enum {
   LIGHTING     = 2,
   TRANSPARENCY = 3,
   PARTICLES    = 4,
-  NAVIGATION   = 5,
-  POST_PROCESS = 6,
+  POST_PROCESS = 5,
 }
 
 PassTypeSet :: bit_set[PassType;u32]
 
-PerspectiveProjection :: struct {
-  fov:          f32,
-  aspect_ratio: f32,
-  near:         f32,
-  far:          f32,
-}
-
-OrthographicProjection :: struct {
-  width:  f32,
-  height: f32,
-  near:   f32,
-  far:    f32,
-}
-CameraProjection :: union {
-  PerspectiveProjection,
-  OrthographicProjection,
-}
 Camera :: struct {
-  // CPU-side camera transform and projection
-  position:                      [3]f32,
-  rotation:                      quaternion128,
-  projection:                    CameraProjection,
-  extent:                        [2]u32,
   // Render pass configuration
   enabled_passes:                PassTypeSet,
   // Visibility culling control flags
@@ -86,53 +61,23 @@ Camera :: struct {
   depth_reduce_descriptor_sets:  [FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
 }
 
-camera_forward :: proc(self: ^Camera) -> [3]f32 {
-  return -geo.qz(self.rotation)
-}
-
-camera_up :: proc(self: ^Camera) -> [3]f32 {
-  return geo.qy(self.rotation)
-}
-
-camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
-  forward_vec := camera_forward(camera)
-  up_vec := camera_up(camera)
-  target_point := camera.position + forward_vec
-  return linalg.matrix4_look_at(camera.position, target_point, up_vec)
-}
-
-camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
-  switch proj in camera.projection {
-  case PerspectiveProjection:
-    return linalg.matrix4_perspective(
-      proj.fov,
-      proj.aspect_ratio,
-      proj.near,
-      proj.far,
-    )
-  case OrthographicProjection:
-    hw := proj.width / 2
-    hh := proj.height / 2
-    return matrix[4, 4]f32{
-      1 / hw, 0, 0, 0,
-      0, 1 / hh, 0, 0,
-      0, 0, 1 / (proj.near - proj.far), 0,
-      0, 0, proj.near / (proj.near - proj.far), 1,
-    }
-  case:
-    return linalg.MATRIX4F32_IDENTITY
+// Get camera viewport extent from its depth attachment
+get_extent :: proc(
+  camera: ^Camera,
+  texture_manager: ^gpu.TextureManager,
+  frame_index: u32,
+) -> (
+  width: u32,
+  height: u32,
+) {
+  depth_texture := gpu.get_texture_2d(
+    texture_manager,
+    camera.attachments[.DEPTH][frame_index],
+  )
+  if depth_texture != nil {
+    return depth_texture.spec.width, depth_texture.spec.height
   }
-}
-
-camera_get_near_far :: proc(self: ^Camera) -> (near: f32, far: f32) {
-  switch proj in self.projection {
-  case PerspectiveProjection:
-    return proj.near, proj.far
-  case OrthographicProjection:
-    return proj.near, proj.far
-  case:
-    return 0.1, 50.0
-  }
+  return 0, 0
 }
 
 // DepthPyramid - Hierarchical depth buffer for occlusion culling (GPU resource)
@@ -161,7 +106,6 @@ init_gpu :: proc(
     .LIGHTING,
     .TRANSPARENCY,
     .PARTICLES,
-    .NAVIGATION,
     .POST_PROCESS,
   },
   enable_depth_pyramid: bool = true,

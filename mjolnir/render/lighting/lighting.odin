@@ -81,15 +81,15 @@ begin_ambient_pass :: proc(
   )
   gpu.begin_rendering(
     command_buffer,
-    camera.extent[0],
-    camera.extent[1],
+    color_texture.spec.width,
+    color_texture.spec.height,
     nil,
     gpu.create_color_attachment(color_texture),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera.extent[0],
-    camera.extent[1],
+    color_texture.spec.width,
+    color_texture.spec.height,
     flip_y = false,
   )
   gpu.bind_graphics_pipeline(
@@ -462,15 +462,15 @@ begin_pass :: proc(
   )
   gpu.begin_rendering(
     command_buffer,
-    camera.extent[0],
-    camera.extent[1],
+    depth_texture.spec.width,
+    depth_texture.spec.height,
     gpu.create_depth_attachment(depth_texture, .LOAD, .DONT_CARE),
     gpu.create_color_attachment(final_image, .LOAD, .STORE, BG_BLUE_GRAY),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera.extent[0],
-    camera.extent[1],
+    depth_texture.spec.width,
+    depth_texture.spec.height,
   )
   gpu.bind_graphics_pipeline(
     command_buffer,

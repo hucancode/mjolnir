@@ -468,7 +468,6 @@ record_compute_commands :: proc(
   // Buffer indices with d.FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
   next_frame_index := alg.next(frame_index, d.FRAMES_IN_FLIGHT)
   for cam_index, &cam in self.cameras {
-    upload_camera_data(self, cam_index, cam, frame_index)
     // Only build pyramid if enabled for this camera
     if cam.enable_depth_pyramid {
       camera.build_pyramid(&self.visibility, gctx, compute_buffer, &cam, u32(cam_index), frame_index) // Build pyramid[N]
@@ -1419,28 +1418,28 @@ release_bone_matrix_range_for_node :: proc(render: ^Manager, handle: u32) {
 }
 
 // Upload camera CPU data to GPU per-frame buffer
-// Takes single CPU camera data and copies to the specified frame index
 upload_camera_data :: proc(
   render: ^Manager,
   camera_index: u32,
-  camera: cam.Camera,
+  view, projection: matrix[4, 4]f32,
+  position: [3]f32,
+  extent: [2]u32,
+  near, far: f32,
   frame_index: u32,
 ) {
-  camera_copy := camera
   camera_data: rd.Camera
-  camera_data.view = cam.camera_view_matrix(&camera_copy)
-  camera_data.projection = cam.camera_projection_matrix(&camera_copy)
-  near, far := cam.camera_get_near_far(&camera_copy)
+  camera_data.view = view
+  camera_data.projection = projection
   camera_data.viewport_params = [4]f32 {
-    f32(camera_copy.extent[0]),
-    f32(camera_copy.extent[1]),
+    f32(extent[0]),
+    f32(extent[1]),
     near,
     far,
   }
   camera_data.position = [4]f32 {
-    camera_copy.position[0],
-    camera_copy.position[1],
-    camera_copy.position[2],
+    position[0],
+    position[1],
+    position[2],
     1.0,
   }
   frustum := geom.make_frustum(camera_data.projection * camera_data.view)

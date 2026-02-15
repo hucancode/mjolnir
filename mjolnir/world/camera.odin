@@ -12,8 +12,7 @@ PassType :: enum {
   LIGHTING     = 2,
   TRANSPARENCY = 3,
   PARTICLES    = 4,
-  NAVIGATION   = 5,
-  POST_PROCESS = 6,
+  POST_PROCESS = 5,
 }
 
 PassTypeSet :: bit_set[PassType;u32]

@@ -998,25 +998,35 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         if is_new_camera {
           self.render.cameras[handle.index] = {}
         }
-        // Copy camera data from world
+        // Sync camera configuration
         cam := &self.render.cameras[handle.index]
-        cam.position = world_camera.position
-        cam.rotation = world_camera.rotation
-        cam.projection =
-        transmute(camera.CameraProjection)world_camera.projection
-        cam.extent = world_camera.extent
         cam.enabled_passes =
         transmute(camera.PassTypeSet)world_camera.enabled_passes
         cam.enable_culling = world_camera.enable_culling
         cam.enable_depth_pyramid = world_camera.enable_depth_pyramid
+        // Upload camera transform data to GPU buffer
+        view_matrix := world.camera_view_matrix(world_camera)
+        projection_matrix := world.camera_projection_matrix(world_camera)
+        near, far := world.camera_get_near_far(world_camera)
+        render.upload_camera_data(
+          &self.render,
+          handle.index,
+          view_matrix,
+          projection_matrix,
+          world_camera.position,
+          world_camera.extent,
+          near,
+          far,
+          self.frame_index,
+        )
         // Initialize GPU resources for new cameras
         if is_new_camera {
           camera.init_gpu(
             &self.gctx,
             cam,
             &self.render.texture_manager,
-            cam.extent[0],
-            cam.extent[1],
+            world_camera.extent[0],
+            world_camera.extent[1],
             self.swapchain.format.format,
             vk.Format.D32_SFLOAT,
             cam.enabled_passes,

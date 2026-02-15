@@ -1,10 +1,10 @@
 package transparency
 
 import cont "../../containers"
-import d "../data"
 import "../../geometry"
 import "../../gpu"
 import "../camera"
+import d "../data"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -45,11 +45,7 @@ init :: proc(
   if general_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-  create_transparent_pipelines(
-    gctx,
-    self,
-    general_pipeline_layout,
-  ) or_return
+  create_transparent_pipelines(gctx, self, general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.transparent_pipeline, nil)
   }
@@ -373,14 +369,16 @@ begin_pass :: proc(
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
 ) {
-  color_texture := gpu.get_texture_2d(texture_manager,
+  color_texture := gpu.get_texture_2d(
+    texture_manager,
     camera.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Transparent lighting missing color attachment")
     return
   }
-  depth_texture := gpu.get_texture_2d(texture_manager,
+  depth_texture := gpu.get_texture_2d(
+    texture_manager,
     camera.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
@@ -389,12 +387,16 @@ begin_pass :: proc(
   }
   gpu.begin_rendering(
     command_buffer,
-    camera.extent[0],
-    camera.extent[1],
+    depth_texture.spec.width,
+    depth_texture.spec.height,
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(command_buffer, camera.extent[0], camera.extent[1])
+  gpu.set_viewport_scissor(
+    command_buffer,
+    depth_texture.spec.width,
+    depth_texture.spec.height,
+  )
 }
 
 render :: proc(
@@ -424,7 +426,8 @@ render :: proc(
     return
   }
   // Determine which pipeline layout to use
-  pipeline_layout := pipeline == self.sprite_pipeline ? sprite_pipeline_layout : general_pipeline_layout
+  pipeline_layout :=
+    pipeline == self.sprite_pipeline ? sprite_pipeline_layout : general_pipeline_layout
 
   if pipeline == self.sprite_pipeline {
     // Sprite pipeline: 5 descriptor sets (0, 1, 2, 3, 4)
