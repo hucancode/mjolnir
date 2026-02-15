@@ -185,14 +185,6 @@ spawn_primitive_mesh :: proc(
   return handle, true
 }
 
-// Thread-safe: Queue a node for deletion from background threads
-// The actual despawn will happen on the main thread during process_pending_deletions
-queue_node_deletion :: proc(engine: ^Engine, handle: world.NodeHandle) {
-  sync.mutex_lock(&engine.world.pending_deletions_mutex)
-  defer sync.mutex_unlock(&engine.world.pending_deletions_mutex)
-  append(&engine.world.pending_node_deletions, handle)
-}
-
 // Initialize an animation channel with callback functions for generating keyframe values
 // Callbacks take index and return the value for that keyframe
 // This allows procedural generation of keyframe values without manual loops

@@ -117,7 +117,6 @@ Node :: struct {
   culling_enabled:  bool,
   visible:          bool, // node's own visibility state
   parent_visible:   bool, // visibility inherited from parent chain
-  pending_deletion: bool, // atomic flag for safe deletion
   tags:             NodeTagSet, // tags for queries and filtering
 }
 
@@ -151,8 +150,6 @@ World :: struct {
   traversal_stack:         [dynamic]TraverseEntry,
   staging:                 StagingList,
   animatable_nodes:        [dynamic]NodeHandle,
-  pending_node_deletions:  [dynamic]NodeHandle,
-  pending_deletions_mutex: sync.Mutex,
   // CPU resource pools (moved from resources.Manager)
   meshes:                  cont.Pool(Mesh),
   materials:               cont.Pool(Material),
@@ -180,7 +177,6 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.culling_enabled = true
   self.visible = true
   self.parent_visible = true
-  self.pending_deletion = false
   self.tags = {}
 }
 
@@ -412,59 +408,47 @@ shutdown :: proc(world: ^World) {
   delete(world.traversal_stack)
   delete(world.active_light_nodes)
   delete(world.animatable_nodes)
-  delete(world.pending_node_deletions)
   staging_destroy(&world.staging)
 }
 
+// Despawn a node and all its children recursively.
+// The node is staged for GPU cleanup and freed immediately.
+// Engine's sync will detect the nil node and release GPU resources.
 despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
   node := cont.get(world.nodes, handle)
   if node == nil {
     log.warnf("despawn: node %v not found (already freed or invalid)", handle)
     return false
   }
-  if !node.pending_deletion {
-    log.infof("despawn: marking node %v '%s' for deletion", handle, node.name)
-    node.pending_deletion = true
-    detach(world.nodes, handle)
-  } else {
-    log.warnf(
-      "despawn: node %v '%s' already marked for deletion",
-      handle,
-      node.name,
-    )
+
+  log.infof("despawn: freeing node %v '%s' and %d children", handle, node.name, len(node.children))
+
+  // Recursively despawn all children FIRST (bottom-up cleanup)
+  // Make a copy since we'll modify the children array during iteration
+  children_copy := make([dynamic]NodeHandle, len(node.children), context.temp_allocator)
+  copy(children_copy[:], node.children[:])
+  for child_handle in children_copy {
+    despawn(world, child_handle)
   }
+
+  // Detach from parent (removes self from parent's children array)
+  detach(world.nodes, handle)
+
+  // Stage for GPU cleanup - Engine will detect nil and trigger Render cleanup
+  stage_node_transform(&world.staging, handle)
+  stage_node_data(&world.staging, handle)
+
+  // Unregister from tracking lists
+  unregister_animatable_node(world, handle)
+
+  // Free immediately
+  if freed_node, ok := cont.free(&world.nodes, handle); ok {
+    destroy_node(freed_node, world, handle)
+    // Clear the node struct to prevent use-after-free
+    freed_node^ = {}
+  }
+
   return true
-}
-
-cleanup_pending_deletions :: proc(world: ^World) {
-  for entry, i in world.nodes.entries do if entry.active {
-    if !entry.item.pending_deletion do continue
-    handle := NodeHandle {
-      index      = u32(i),
-      generation = entry.generation,
-    }
-    // Clear GPU buffers BEFORE freeing the node
-    stage_node_transform(&world.staging, handle)
-    stage_node_data(&world.staging, handle)
-    unregister_animatable_node(world, handle)
-    if node, ok := cont.free(&world.nodes, handle); ok {
-      destroy_node(node, world, handle)
-      // Clear the node struct to prevent use-after-free
-      node^ = {}
-    }
-  }
-}
-
-process_pending_deletions :: proc(world: ^World) -> bool {
-  sync.mutex_lock(&world.pending_deletions_mutex)
-  for handle in world.pending_node_deletions {
-    despawn(world, handle)
-  }
-  had_deletions := len(world.pending_node_deletions) > 0
-  clear(&world.pending_node_deletions)
-  sync.mutex_unlock(&world.pending_deletions_mutex)
-  cleanup_pending_deletions(world)
-  return had_deletions
 }
 
 traverse :: proc(world: ^World) -> bool {
@@ -475,7 +459,6 @@ traverse :: proc(world: ^World) -> bool {
   for len(world.traversal_stack) > 0 {
     entry := pop(&world.traversal_stack)
     current_node := cont.get(world.nodes, entry.handle) or_continue
-    if current_node.pending_deletion do continue
     visibility_changed :=
       current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible

@@ -604,6 +604,9 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
         attachment_data_index = 0xFFFFFFFF,
       }
       node := cont.get(self.world.nodes, handle)
+      // When a staged node is not found (nil), it means the node was despawned.
+      // Trigger cleanup in Render module by releasing GPU resources.
+      // This eliminates the need for a separate pending removal list in World module.
       if node == nil {
         render.release_bone_matrix_range_for_node(&self.render, handle.index)
       } else if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment);
@@ -1382,7 +1385,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   ) or_return
   self.frame_index = alg.next(self.frame_index, FRAMES_IN_FLIGHT)
-  world.process_pending_deletions(&self.world)
   self.last_render_timestamp = time.now()
   return .SUCCESS
 }
