@@ -265,7 +265,6 @@ main :: proc() {
           false,
         ),
       ) or_else {}
-    world.register_active_light(&engine.world, light_handle)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // Move the spider body back and forth along the X axis

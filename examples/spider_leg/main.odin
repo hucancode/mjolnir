@@ -118,7 +118,6 @@ main :: proc() {
           false,
         ),
       ) or_else {}
-    world.register_active_light(&engine.world, light_handle)
     point_light_handle :=
       world.spawn(
         &engine.world,
@@ -129,7 +128,6 @@ main :: proc() {
           true,
         ),
       ) or_else {}
-    world.register_active_light(&engine.world, point_light_handle)
 
     log.infof("Visual Test: Spider Leg Core Algorithm - 8 Legs")
     log.infof("Blue cube = Spider body (leg root)")

@@ -41,7 +41,6 @@ main :: proc() {
       light_node.transform.rotation = q2 * q1
       light_node.transform.is_dirty = true
     }
-    world.register_active_light(&engine.world, handle)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rotation := delta_time * math.PI * 0.15

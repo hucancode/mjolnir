@@ -102,14 +102,12 @@ main :: proc() {
           false,
         ),
       ) or_else {}
-    world.register_active_light(&engine.world, light_handle)
     point_light_handle :=
       world.spawn(
         &engine.world,
         {20, 20, 40},
         world.create_point_light_attachment({1.0, 0.9, 0.8, 1.0}, 500.0, true),
       ) or_else {}
-    world.register_active_light(&engine.world, point_light_handle)
   }
 
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {

@@ -87,7 +87,6 @@ main :: proc() {
         {0, 10, 0},
         world.create_point_light_attachment({1.0, 1.0, 1.0, 1.0}, 20.0, true),
       ) or_else {}
-    world.register_active_light(&engine.world, light_handle)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     total_length := animation.spline_arc_length(spline)

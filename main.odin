@@ -380,7 +380,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
               true,
             ),
           ) or_continue
-          world.register_active_light(&engine.world, light_handle)
           world.translate(
             &engine.world,
             light_handle,
@@ -402,7 +401,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
             {0, 0, 0},
             world.create_point_light_attachment(color, 14.0, true),
           ) or_continue
-          world.register_active_light(&engine.world, light_handle)
           world.translate(
             &engine.world,
             light_handle,
@@ -445,7 +443,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         dir_light_node.transform.rotation = q
         dir_light_node.transform.is_dirty = true
       }
-      world.register_active_light(&engine.world, dir_light_handle)
     }
   }
   when false {

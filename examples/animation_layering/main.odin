@@ -186,7 +186,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         true,
       ),
     ) or_else {}
-  world.register_active_light(&engine.world, light_handle)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {

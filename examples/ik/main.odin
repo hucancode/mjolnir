@@ -233,7 +233,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         false,
       ),
     ) or_else {}
-  world.register_active_light(&engine.world, light_handle)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

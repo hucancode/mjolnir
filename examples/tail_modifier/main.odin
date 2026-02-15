@@ -135,7 +135,6 @@ main :: proc() {
           false,
         ),
       ) or_else {}
-    world.register_active_light(&engine.world, light_handle)
     point_light_handle :=
       world.spawn(
         &engine.world,
@@ -146,7 +145,6 @@ main :: proc() {
           true,
         ),
       ) or_else {}
-    world.register_active_light(&engine.world, point_light_handle)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // Animate the root bone directly via the single bone rotation modifier

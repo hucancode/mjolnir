@@ -65,7 +65,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         true,
       ),
     ) or_else {}
-  world.register_active_light(&engine.world, light_handle)
   // Visualize IK target with a small red cube
   target_pos := [3]f32{0.0, 0.0, 0.9}
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)

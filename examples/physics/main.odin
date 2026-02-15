@@ -199,7 +199,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         true,
       ),
     ) or_else {}
-  world.register_active_light(&engine.world, light_handle)
   world.rotate(
     &engine.world,
     light_handle,

@@ -62,7 +62,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       {0.0, 3.0, 0.0},
       world.create_point_light_attachment({1.0, 0.85, 0.6, 1.0}, 5.0, false),
     ) or_else {}
-  world.register_active_light(&engine.world, point_light_handle)
   light_handle =
     world.spawn(
       &engine.world,
@@ -74,7 +73,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         false,
       ),
     ) or_else {}
-  world.register_active_light(&engine.world, light_handle)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
