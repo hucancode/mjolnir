@@ -1014,3 +1014,66 @@ add_single_bone_rotation_modifier_layer :: proc(
 
   return nil, false
 }
+
+// Get the current skinning matrices for a node (computed each frame by animation system)
+get_bone_matrices :: proc(
+  world: ^World,
+  node_handle: NodeHandle,
+) -> (
+  matrices: []matrix[4, 4]f32,
+  skin: ^Skinning,
+  node: ^Node,
+  ok: bool,
+) {
+  node = cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
+  if !has_mesh do return nil, nil, nil, false
+
+  skinning, has_skinning := &mesh_attachment.skinning.?
+  if !has_skinning do return nil, nil, nil, false
+
+  mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
+  mesh_skin, has_skin := &mesh.skinning.?
+  if !has_skin do return nil, nil, nil, false
+  skin = mesh_skin
+
+  matrices = skinning.matrices
+  return matrices, skin, node, true
+}
+
+BoneWorldTransform :: struct {
+  position: [3]f32,
+  rotation: quaternion128,
+  mat:      matrix[4, 4]f32,
+}
+
+// Computes world-space position and rotation for a single bone by index
+get_bone_world_transform :: proc(
+  world: ^World,
+  node_handle: NodeHandle,
+  bone_index: u32,
+) -> (
+  transform: BoneWorldTransform,
+  ok: bool,
+) {
+  matrices, skin, node := get_bone_matrices(world, node_handle) or_return
+
+  if int(bone_index) >= len(skin.bones) do return {}, false
+  if int(bone_index) >= len(matrices) do return {}, false
+
+  // Convert skinning matrix to world matrix
+  // skinning_matrix = world_matrix * inverse_bind_matrix
+  // world_matrix = skinning_matrix * bind_matrix
+  skinning_matrix := matrices[bone_index]
+  bind_matrix := linalg.matrix4_inverse(skin.bones[bone_index].inverse_bind_matrix)
+  bone_local_world := skinning_matrix * bind_matrix
+
+  // Apply node's world transform
+  bone_world := node.transform.world_matrix * bone_local_world
+
+  transform.mat = bone_world
+  transform.position = bone_world[3].xyz
+  transform.rotation = linalg.to_quaternion(bone_world)
+
+  return transform, true
+}

@@ -116,69 +116,19 @@ main :: proc() {
     for handle in root_nodes {
       node := cont.get(engine.world.nodes, handle) or_continue
       for child in node.children {
-        child_node := cont.get(engine.world.nodes, child) or_continue
-        mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
-        if !has_mesh do continue
-
-        skinning, has_skinning := mesh_attachment.skinning.?
-        if !has_skinning do continue
-
-        mesh := cont.get(
-          engine.world.meshes,
-          mesh_attachment.handle,
-        ) or_continue
-        skin := mesh.skinning.? or_continue
-
-        // Get bone matrices from GPU buffer
-        frame_index := engine.frame_index
-        bone_buffer := &engine.render.bone_buffer.buffers[frame_index]
-        if bone_buffer.mapped == nil do continue
-
-        bone_count := len(skin.bones)
-        bone_matrix_buffer_offset, has_offset :=
-          engine.render.bone_matrix_offsets[child.index]
-        if !has_offset do continue
-
-        // Get bone matrices using gpu.get
-        matrices_ptr := gpu.get(bone_buffer, bone_matrix_buffer_offset)
-        bone_matrices := slice.from_ptr(matrices_ptr, bone_count)
-
-        // Read bone transforms
-        for i in 0 ..< bone_count {
+        matrices, skin, child_node := world.get_bone_matrices(&engine.world, child) or_continue
+        for i in 0 ..< len(skin.bones) {
           if marker_idx >= len(markers) do break
-
-          // Read skinning matrix from GPU buffer
-          skinning_matrix := bone_matrices[i]
-
-          // Convert skinning matrix to world matrix
-          // skinning_matrix = world_matrix * inverse_bind_matrix
-          // world_matrix = skinning_matrix * bind_matrix
-          bind_matrix := linalg.matrix4_inverse(
-            skin.bones[i].inverse_bind_matrix,
-          )
-          bone_local_world := skinning_matrix * bind_matrix
-
-          // Apply node's world transform
-          node_world := child_node.transform.world_matrix
-          bone_world := node_world * bone_local_world
-
-          bone_pos := bone_world[3].xyz
-          bone_rot := linalg.to_quaternion(bone_world)
-
-          // Update marker transform
-          marker := cont.get(
-            engine.world.nodes,
-            markers[marker_idx],
-          ) or_continue
-          marker.transform.position = bone_pos
-          marker.transform.rotation = bone_rot
+          t := world.get_bone_world_transform(&engine.world, child, u32(i)) or_continue
+          marker := cont.get(engine.world.nodes, markers[marker_idx]) or_continue
+          marker.transform.position = t.position
+          marker.transform.rotation = t.rotation
           marker.transform.is_dirty = true
-
           marker_idx += 1
         }
       }
     }
   }
 
-  mjolnir.run(engine, 800, 600, "visual-path-modifier")
+  mjolnir.run(engine, 800, 600, "Path Modifier")
 }
