@@ -37,11 +37,8 @@ load_obj :: proc(
   stage_mesh_data(&world.staging, mesh_handle)
   log.infof("Created mesh %v", mesh_handle)
   // step 3: Create node with mesh attachment
-  node_handle: NodeHandle
-  node: ^Node
-  node_handle, node = cont.alloc(&world.nodes, NodeHandle) or_return
+  node_handle, node := cont.alloc(&world.nodes, NodeHandle) or_return
   init_node(node, path)
-  node.transform = geometry.TRANSFORM_IDENTITY
   node.attachment = MeshAttachment {
     handle      = mesh_handle,
     material    = material,

@@ -46,10 +46,10 @@ compute_layout_all :: proc(sys: ^System) {
     // Only process root widgets
     if _, has_parent := base.parent.?; !has_parent {
       // Construct handle from entry
-      raw_handle: cont.Handle
-      raw_handle.index = u32(i)
-      raw_handle.generation = entry.generation
-      handle := transmute(UIWidgetHandle)raw_handle
+      handle: UIWidgetHandle = {
+        index      = u32(i),
+        generation = entry.generation,
+      }
       compute_layout(sys, handle)
     }
   }
