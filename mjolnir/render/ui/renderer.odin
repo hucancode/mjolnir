@@ -238,7 +238,6 @@ create_pipeline :: proc(
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology               = .TRIANGLE_LIST,
-    primitiveRestartEnable = false,
   }
 
   // Viewport and scissor (dynamic)
@@ -251,12 +250,8 @@ create_pipeline :: proc(
   // Rasterization
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    depthClampEnable        = false,
-    rasterizerDiscardEnable = false,
     polygonMode             = .FILL,
-    cullMode                = {}, // No culling for UI
     frontFace               = .COUNTER_CLOCKWISE,
-    depthBiasEnable         = false,
     lineWidth               = 1.0,
   }
 
@@ -281,7 +276,6 @@ create_pipeline :: proc(
 
   color_blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    logicOpEnable   = false,
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
