@@ -15,41 +15,35 @@ import "core:math/rand"
 import "vendor:glfw"
 import mu "vendor:microui"
 
-demo_state: struct {
-  // Pathfinding state
-  end_pos:              [3]f32,
-  current_path:         [][3]f32,
-  // Visual markers
-  end_marker_handle:    world.NodeHandle,
-  // Agent
-  agent_handle:         world.NodeHandle,
-  agent_pos:            [3]f32,
-  agent_speed:          f32,
-  current_waypoint_idx: int,
-  path_completed:       bool,
-  // Demo scene nodes
-  ground_handle:        world.NodeHandle,
-  obstacle_handles:     [dynamic]world.NodeHandle,
-  // OBJ file support
-  obj_mesh_handle:      world.MeshHandle,
-  obj_node_handle:      world.NodeHandle,
-  use_procedural:       bool,
-  // Navigation mesh info
-  navmesh_info:         string,
-  nav_vertices:         [dynamic][3]f32,
-  nav_indices:          [dynamic]i32,
-  nav_area_types:       [dynamic]u8,
-  // Navmesh visualization
-  navmesh_node_handle:  world.NodeHandle,
-  // Path visualization
-  path_node_handle:     world.NodeHandle,
-  path_mesh_handle:     world.MeshHandle,
-  path_spawn_time:      f32,
-} = {
-  use_procedural = true,
-  agent_speed    = 5.0,
-  agent_pos      = {-20, 0, -20},
-}
+// Pathfinding state
+end_pos: [3]f32
+current_path: [][3]f32
+// Visual markers
+end_marker_handle: world.NodeHandle
+// Agent
+agent_handle: world.NodeHandle
+agent_pos: [3]f32 = {-20, 0, -20}
+agent_speed: f32 = 5.0
+current_waypoint_idx: int
+path_completed: bool
+// Demo scene nodes
+ground_handle: world.NodeHandle
+obstacle_handles: [dynamic]world.NodeHandle
+// OBJ file support
+obj_mesh_handle: world.MeshHandle
+obj_node_handle: world.NodeHandle
+use_procedural: bool = true
+// Navigation mesh info
+navmesh_info: string
+nav_vertices: [dynamic][3]f32
+nav_indices: [dynamic]i32
+nav_area_types: [dynamic]u8
+// Navmesh visualization
+navmesh_node_handle: world.NodeHandle
+// Path visualization
+path_node_handle: world.NodeHandle
+path_mesh_handle: world.MeshHandle
+path_spawn_time: f32
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -65,26 +59,26 @@ append_nav_geometry :: proc(
   offset: [3]f32 = {},
   is_obstacle := false,
 ) {
-  vertex_base := i32(len(demo_state.nav_vertices))
+  vertex_base := i32(len(nav_vertices))
   for vertex in geom.vertices {
-    append(&demo_state.nav_vertices, vertex.position + offset)
+    append(&nav_vertices, vertex.position + offset)
   }
   for index in geom.indices {
-    append(&demo_state.nav_indices, vertex_base + i32(index))
+    append(&nav_indices, vertex_base + i32(index))
   }
   triangle_count := len(geom.indices) / 3
   area_type :=
     is_obstacle ? u8(recast.RC_NULL_AREA) : u8(recast.RC_WALKABLE_AREA)
   for _ in 0 ..< triangle_count {
-    append(&demo_state.nav_area_types, area_type)
+    append(&nav_area_types, area_type)
   }
 }
 
 demo_setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Navigation mesh demo setup with world integration")
-  clear(&demo_state.nav_vertices)
-  clear(&demo_state.nav_indices)
-  clear(&demo_state.nav_area_types)
+  clear(&nav_vertices)
+  clear(&nav_indices)
+  clear(&nav_area_types)
   // Setup camera
   world.main_camera_look_at(
     &engine.world,
@@ -92,20 +86,15 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
     {35, 25, 35},
     {0, 0, 0},
   )
-  if demo_state.use_procedural {
+  if use_procedural {
     create_demo_scene(engine)
   } else {
     create_obj_visualization_mesh(engine, "assets/nav_test.obj")
   }
   setup_navigation_mesh(engine)
-  demo_state.agent_pos = {-20, 0, -20}
-  demo_state.end_pos = {20, 0, 20}
-  update_position_marker(
-    engine,
-    &demo_state.end_marker_handle,
-    demo_state.end_pos,
-    {1, 0, 0, 1},
-  )
+  agent_pos = {-20, 0, -20}
+  end_pos = {20, 0, 20}
+  update_position_marker(engine, &end_marker_handle, end_pos, {1, 0, 0, 1})
   create_agent(engine)
   start_find_path(engine)
   log.info("Navigation mesh demo setup complete")
@@ -130,7 +119,7 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
     emissive_value = 0.02,
   )
   if ground_mesh_ok && ground_material_ok {
-    demo_state.ground_handle =
+    ground_handle =
       world.spawn(
         &engine.world,
         {0, 0, 0},
@@ -140,10 +129,7 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
         },
       ) or_else {}
     // Tag as environment for baking
-    if ground_node, ok := cont.get(
-      engine.world.nodes,
-      demo_state.ground_handle,
-    ); ok {
+    if ground_node, ok := cont.get(engine.world.nodes, ground_handle); ok {
       ground_node.tags += {.ENVIRONMENT}
     }
   }
@@ -195,12 +181,12 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
          ok {
         obstacle_node.tags += {.NAVMESH_OBSTACLE}
       }
-      append(&demo_state.obstacle_handles, obstacle_handle)
+      append(&obstacle_handles, obstacle_handle)
     }
   }
   log.infof(
     "Created demo scene with ground and %d obstacles",
-    len(demo_state.obstacle_handles),
+    len(obstacle_handles),
   )
 }
 
@@ -219,16 +205,15 @@ create_agent :: proc(engine: ^mjolnir.Engine) {
     emissive_value = 0.3,
   )
   if agent_mesh_ok && agent_material_ok {
-    demo_state.agent_handle = world.spawn(
+    agent_handle = world.spawn(
         &engine.world,
-        demo_state.agent_pos + [3]f32{0, 1, 0}, // Raise to half height
+        agent_pos + [3]f32{0, 1, 0}, // Raise to half height
         world.MeshAttachment {
           handle = agent_mesh_handle,
           material = agent_material_handle,
         },
       ) or_else {}
-    if agent_node, ok := cont.get(engine.world.nodes, demo_state.agent_handle);
-       ok {
+    if agent_node, ok := cont.get(engine.world.nodes, agent_handle); ok {
       agent_node.name = "agent"
       log.info("Agent cylinder created successfully")
     }
@@ -248,9 +233,9 @@ create_obj_visualization_mesh :: proc(
   append_nav_geometry(geom)
   obj_mesh_handle, _, obj_mesh_ok := world.create_mesh(&engine.world, geom)
   if obj_mesh_ok {
-    demo_state.obj_mesh_handle = obj_mesh_handle
+    obj_mesh_handle = obj_mesh_handle
   } else {
-    demo_state.obj_mesh_handle = {}
+    obj_mesh_handle = {}
   }
   obj_material_handle, obj_material_ok := world.create_material(
     &engine.world,
@@ -260,17 +245,17 @@ create_obj_visualization_mesh :: proc(
   )
   obj_spawn_ok: bool
   if obj_mesh_ok && obj_material_ok {
-    demo_state.obj_node_handle =
+    obj_node_handle =
       world.spawn(
         &engine.world,
         {0, 0, 0},
         world.MeshAttachment {
-          handle = demo_state.obj_mesh_handle,
+          handle = obj_mesh_handle,
           material = obj_material_handle,
         },
       ) or_else {}
   }
-  if node, ok := cont.get(engine.world.nodes, demo_state.obj_node_handle); ok {
+  if node, ok := cont.get(engine.world.nodes, obj_node_handle); ok {
     node.name = "obj_mesh"
     node.tags += {.ENVIRONMENT}
     log.infof(
@@ -282,14 +267,14 @@ create_obj_visualization_mesh :: proc(
 
 setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
   log.info("Setting up navigation mesh with visualization")
-  if len(demo_state.nav_vertices) == 0 || len(demo_state.nav_indices) == 0 {
+  if len(nav_vertices) == 0 || len(nav_indices) == 0 {
     log.error("No source geometry available for navmesh generation")
     return
   }
   nav_geom := nav.NavigationGeometry {
-    vertices   = demo_state.nav_vertices[:],
-    indices    = demo_state.nav_indices[:],
-    area_types = demo_state.nav_area_types[:],
+    vertices   = nav_vertices[:],
+    indices    = nav_indices[:],
+    area_types = nav_area_types[:],
   }
   cfg := recast.config_create()
   if !nav.build_navmesh(&engine.nav.nav_mesh, nav_geom, cfg) {
@@ -305,7 +290,7 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
 }
 
 visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
-  world.despawn(&engine.world, demo_state.navmesh_node_handle)
+  world.despawn(&engine.world, navmesh_node_handle)
   navmesh_geom := nav.build_geometry(&engine.nav.nav_mesh)
   log.infof(
     "Built navmesh visualization geometry: %d vertices, %d indices",
@@ -329,7 +314,7 @@ visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
     log.error("Failed to create navmesh material")
     return
   }
-  demo_state.navmesh_node_handle =
+  navmesh_node_handle =
     world.spawn(
       &engine.world,
       {0, 0, 0},
@@ -344,22 +329,17 @@ visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
 start_find_path :: proc(engine: ^mjolnir.Engine) {
   log.infof(
     "Finding path from (%.2f, %.2f, %.2f) to (%.2f, %.2f, %.2f)",
-    demo_state.agent_pos.x,
-    demo_state.agent_pos.y,
-    demo_state.agent_pos.z,
-    demo_state.end_pos.x,
-    demo_state.end_pos.y,
-    demo_state.end_pos.z,
+    agent_pos.x,
+    agent_pos.y,
+    agent_pos.z,
+    end_pos.x,
+    end_pos.y,
+    end_pos.z,
   )
-  path := nav.find_path(
-    &engine.nav,
-    demo_state.agent_pos,
-    demo_state.end_pos,
-    256,
-  )
+  path := nav.find_path(&engine.nav, agent_pos, end_pos, 256)
   if path != nil && len(path) > 0 {
-    delete(demo_state.current_path)
-    demo_state.current_path = path
+    delete(current_path)
+    current_path = path
     log.infof("Path found with %d waypoints", len(path))
     for point, idx in path {
       log.infof(
@@ -371,12 +351,12 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
       )
     }
     // Despawn old path before creating new one
-    world.despawn(&engine.world, demo_state.path_node_handle)
-    demo_state.path_node_handle = {}
+    world.despawn(&engine.world, path_node_handle)
+    path_node_handle = {}
     visualize_path(engine)
     // Start following the path
-    demo_state.current_waypoint_idx = 0
-    demo_state.path_completed = false
+    current_waypoint_idx = 0
+    path_completed = false
   }
 }
 
@@ -412,25 +392,25 @@ update_position_marker :: proc(
 }
 
 update_agent_position :: proc(engine: ^mjolnir.Engine) {
-  pos := demo_state.agent_pos + [3]f32{0, 1, 0}
-  world.translate(&engine.world, demo_state.agent_handle, pos.x, pos.y, pos.z)
+  pos := agent_pos + [3]f32{0, 1, 0}
+  world.translate(&engine.world, agent_handle, pos.x, pos.y, pos.z)
 }
 
 visualize_path :: proc(engine: ^mjolnir.Engine) {
   // Clean up old path
-  world.despawn(&engine.world, demo_state.path_node_handle)
-  if demo_state.path_mesh_handle != {} {
-    world.destroy_mesh(&engine.world, demo_state.path_mesh_handle)
-    demo_state.path_mesh_handle = {}
+  world.despawn(&engine.world, path_node_handle)
+  if path_mesh_handle != {} {
+    world.destroy_mesh(&engine.world, path_mesh_handle)
+    path_mesh_handle = {}
   }
 
-  if len(demo_state.current_path) < 2 do return
-  log.infof("Visualizing path with %d points", len(demo_state.current_path))
+  if len(current_path) < 2 do return
+  log.infof("Visualizing path with %d points", len(current_path))
 
   // Create line strip geometry
-  path_vertices := make([]geometry.Vertex, len(demo_state.current_path))
+  path_vertices := make([]geometry.Vertex, len(current_path))
   defer delete(path_vertices)
-  for pos, i in demo_state.current_path {
+  for pos, i in current_path {
     path_vertices[i] = geometry.Vertex {
       position = pos,
     }
@@ -448,7 +428,7 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
 
   path_mesh, _, mesh_ok := world.create_mesh(&engine.world, path_geom)
   if !mesh_ok do return
-  demo_state.path_mesh_handle = path_mesh
+  path_mesh_handle = path_mesh
 
   path_material, mat_ok := world.create_material(
     &engine.world,
@@ -457,13 +437,13 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
   )
   if !mat_ok do return
 
-  demo_state.path_node_handle =
+  path_node_handle =
     world.spawn(
       &engine.world,
       {0, 0, 0},
       world.MeshAttachment{handle = path_mesh, material = path_material},
     ) or_else {}
-  demo_state.path_spawn_time = 0
+  path_spawn_time = 0
 }
 
 find_navmesh_point_from_mouse :: proc(
@@ -482,10 +462,7 @@ find_navmesh_point_from_mouse :: proc(
     height,
   )
   // GLFW returns coordinates with origin at top-left, Y increases downward
-  camera := cont.get(
-    engine.world.cameras,
-    engine.world.main_camera,
-  )
+  camera := cont.get(engine.world.cameras, engine.world.main_camera)
   ray_origin, ray_dir := world.camera_viewport_to_world_ray(
     camera,
     mouse_x,
@@ -576,14 +553,9 @@ demo_mouse_pressed :: proc(
       f32(mouse_y),
     )
     if valid {
-      demo_state.end_pos = pos
+      end_pos = pos
       log.infof("Destination set to: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z)
-      update_position_marker(
-        engine,
-        &demo_state.end_marker_handle,
-        pos,
-        {1, 0, 0, 1},
-      )
+      update_position_marker(engine, &end_marker_handle, pos, {1, 0, 0, 1})
       start_find_path(engine)
     } else {
       log.warn("No valid navmesh position found at click location")
@@ -594,40 +566,40 @@ demo_mouse_pressed :: proc(
 demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
   // Auto-remove path after 5 seconds
-  if demo_state.path_node_handle != {} {
-    demo_state.path_spawn_time += delta_time
-    if demo_state.path_spawn_time >= 5.0 {
-      world.despawn(&engine.world, demo_state.path_node_handle)
-      demo_state.path_node_handle = {}
-      if demo_state.path_mesh_handle != {} {
-        world.destroy_mesh(&engine.world, demo_state.path_mesh_handle)
-        demo_state.path_mesh_handle = {}
+  if path_node_handle != {} {
+    path_spawn_time += delta_time
+    if path_spawn_time >= 5.0 {
+      world.despawn(&engine.world, path_node_handle)
+      path_node_handle = {}
+      if path_mesh_handle != {} {
+        world.destroy_mesh(&engine.world, path_mesh_handle)
+        path_mesh_handle = {}
       }
     }
   }
 
   // Update agent movement along path
-  if len(demo_state.current_path) > 0 && !demo_state.path_completed {
-    if demo_state.current_waypoint_idx < len(demo_state.current_path) {
-      target_pos := demo_state.current_path[demo_state.current_waypoint_idx]
+  if len(current_path) > 0 && !path_completed {
+    if current_waypoint_idx < len(current_path) {
+      target_pos := current_path[current_waypoint_idx]
       // Calculate direction to target
-      direction := target_pos - demo_state.agent_pos
+      direction := target_pos - agent_pos
       distance := linalg.length(direction)
       // Check if we reached the waypoint
       if distance < 0.5 {
-        demo_state.current_waypoint_idx += 1
-        if demo_state.current_waypoint_idx >= len(demo_state.current_path) {
-          demo_state.path_completed = true
+        current_waypoint_idx += 1
+        if current_waypoint_idx >= len(current_path) {
+          path_completed = true
           log.info("Agent reached destination!")
         }
       } else {
         // Move toward the waypoint
         direction = linalg.normalize(direction)
-        move_distance := demo_state.agent_speed * delta_time
+        move_distance := agent_speed * delta_time
         if move_distance > distance {
           move_distance = distance
         }
-        demo_state.agent_pos += direction * move_distance
+        agent_pos += direction * move_distance
         update_agent_position(engine)
       }
     }
