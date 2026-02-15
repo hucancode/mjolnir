@@ -3,15 +3,16 @@ package main
 import "../../mjolnir"
 import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
-import "../../mjolnir/render/ui"
+import cmd "../../mjolnir/gpu/ui"
+import "../../mjolnir/ui"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 
-g_button: ui.Quad2DHandle
-g_label: ui.Text2DHandle
-g_star: ui.Mesh2DHandle
-g_image_quad: ui.Quad2DHandle
+button: ui.Quad2DHandle
+label: ui.Text2DHandle
+star: ui.Mesh2DHandle
+image_quad: ui.Quad2DHandle
 
 // Helper function to create a 5-pointed star shape
 create_star_mesh :: proc(
@@ -20,15 +21,15 @@ create_star_mesh :: proc(
   inner_radius: f32,
   color: [4]u8,
 ) -> (
-  vertices: []ui.Vertex2D,
+  vertices: []cmd.Vertex2D,
   indices: []u32,
 ) {
   // Create vertices: center + 5 outer points + 5 inner points
-  vertices = make([]ui.Vertex2D, 11)
+  vertices = make([]cmd.Vertex2D, 11)
   indices = make([]u32, 30) // 10 triangles * 3 indices each
 
   // Center vertex
-  vertices[0] = ui.Vertex2D {
+  vertices[0] = cmd.Vertex2D {
     pos   = center,
     uv    = {0.5, 0.5},
     color = color,
@@ -40,7 +41,7 @@ create_star_mesh :: proc(
 
     // Outer point
     outer_idx := 1 + i * 2
-    vertices[outer_idx] = ui.Vertex2D {
+    vertices[outer_idx] = cmd.Vertex2D {
       pos   = {
         center.x + math.cos(angle) * outer_radius,
         center.y + math.sin(angle) * outer_radius,
@@ -52,7 +53,7 @@ create_star_mesh :: proc(
     // Inner point (between outer points)
     inner_angle := angle + (math.PI / 5.0)
     inner_idx := 2 + i * 2
-    vertices[inner_idx] = ui.Vertex2D {
+    vertices[inner_idx] = cmd.Vertex2D {
       pos   = {
         center.x + math.cos(inner_angle) * inner_radius,
         center.y + math.sin(inner_angle) * inner_radius,
@@ -90,7 +91,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     bg_quad, _ := ui.create_quad2d(
-      &engine.render.ui_system,
+      &engine.ui,
       position = {50, 50},
       size = {700, 200},
       color = {40, 40, 60, 200},
@@ -108,14 +109,14 @@ main :: proc() {
     defer delete(star_vertices)
     defer delete(star_indices)
 
-    g_star, star_ok := ui.create_mesh2d(
-      &engine.render.ui_system,
+    star, star_ok := ui.create_mesh2d(
+      &engine.ui,
       position = {0, 0},
       vertices = star_vertices,
       indices = star_indices,
       z_order = 1,
     )
-    log.infof("Star mesh created: handle=%v, ok=%v", g_star, star_ok)
+    log.infof("Star mesh created: handle=%v, ok=%v", star, star_ok)
 
     // Load image texture for display
     star_texture, texture_ok := gpu.create_texture_2d_from_path(
@@ -131,8 +132,8 @@ main :: proc() {
 
     // Create a textured quad to display the image
     if texture_ok == .SUCCESS {
-      g_image_quad, image_quad_ok := ui.create_quad2d(
-        &engine.render.ui_system,
+      image_quad, image_quad_ok := ui.create_quad2d(
+        &engine.ui,
         position = {350, 300},
         size = {128, 128},
         texture = star_texture,
@@ -140,24 +141,23 @@ main :: proc() {
       )
       log.infof(
         "Image quad created: handle=%v, ok=%v",
-        g_image_quad,
+        image_quad,
         image_quad_ok,
       )
     }
 
     // Create a simple colored quad as a button
-    g_button, button_ok := ui.create_quad2d(
-      &engine.render.ui_system,
+    button, button_ok := ui.create_quad2d(
+      &engine.ui,
       position = {100, 100},
       size = {200, 50},
       color = {255, 100, 100, 255}, // Red
       z_order = 0,
     )
-    log.infof("Button quad created: handle=%v, ok=%v", g_button, button_ok)
+    log.infof("Button quad created: handle=%v, ok=%v", button, button_ok)
     // Add "Click me!" label on the button, centered within the button bounds
     button_label, button_label_ok := ui.create_text2d(
-      &engine.render.ui_system,
-      &engine.render.ui,
+      &engine.ui,
       position = {100, 100}, // Same as button position
       text = "Click me!",
       font_size = 20,
@@ -174,7 +174,7 @@ main :: proc() {
     )
 
     // Add event handlers to the button
-    if button := ui.get_quad2d(&engine.render.ui_system, g_button);
+    if button := ui.get_quad2d(&engine.ui, button);
        button != nil {
       handlers := ui.EventHandlers {
         on_mouse_down = proc(event: ui.MouseEvent) {
@@ -182,7 +182,7 @@ main :: proc() {
           engine := cast(^mjolnir.Engine)event.user_data
           if engine == nil do return
           if quad := ui.get_quad2d(
-            &engine.render.ui_system,
+            &engine.ui,
             ui.Quad2DHandle(event.widget),
           ); quad != nil {
             quad.color = {100, 255, 100, 255}
@@ -193,7 +193,7 @@ main :: proc() {
           engine := cast(^mjolnir.Engine)event.user_data
           if engine == nil do return
           if quad := ui.get_quad2d(
-            &engine.render.ui_system,
+            &engine.ui,
             ui.Quad2DHandle(event.widget),
           ); quad != nil {
             quad.color = {255, 150, 100, 255}
@@ -204,7 +204,7 @@ main :: proc() {
           engine := cast(^mjolnir.Engine)event.user_data
           if engine == nil do return
           if quad := ui.get_quad2d(
-            &engine.render.ui_system,
+            &engine.ui,
             ui.Quad2DHandle(event.widget),
           ); quad != nil {
             quad.color = {255, 150, 100, 255}
@@ -215,7 +215,7 @@ main :: proc() {
           engine := cast(^mjolnir.Engine)event.user_data
           if engine == nil do return
           if quad := ui.get_quad2d(
-            &engine.render.ui_system,
+            &engine.ui,
             ui.Quad2DHandle(event.widget),
           ); quad != nil {
             quad.color = {255, 100, 100, 255}
@@ -226,21 +226,19 @@ main :: proc() {
       ui.set_event_handler(widget, handlers)
       ui.set_user_data(widget, engine)
     }
-    g_label, label_ok := ui.create_text2d(
-      &engine.render.ui_system,
-      &engine.render.ui,
+    label, label_ok := ui.create_text2d(
+      &engine.ui,
       position = {100, 180},
       text = "The star is created using Mesh2D API!",
       font_size = 20,
       color = {255, 255, 255, 255},
       z_order = 1,
     )
-    log.infof("Text label created: handle=%v, ok=%v", g_label, label_ok)
+    log.infof("Text label created: handle=%v, ok=%v", label, label_ok)
 
     // Add label for the textured quad
     image_label, image_label_ok := ui.create_text2d(
-      &engine.render.ui_system,
-      &engine.render.ui,
+      &engine.ui,
       position = {300, 440},
       text = "Image display using Quad2D with texture",
       font_size = 20,

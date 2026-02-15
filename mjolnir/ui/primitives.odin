@@ -1,14 +1,15 @@
 package ui
 
-import cont "../../containers"
-import "../../gpu"
+import cont "../containers"
+import "../gpu"
+import cmd "../gpu/ui"
 import "core:log"
 import "core:slice"
 
 create_mesh2d :: proc(
   sys: ^System,
   position: [2]f32,
-  vertices: []Vertex2D,
+  vertices: []cmd.Vertex2D,
   indices: []u32,
   texture: gpu.Texture2DHandle = {},
   z_order: i32 = 0,
@@ -23,7 +24,7 @@ create_mesh2d :: proc(
   }
 
   // Copy vertices and indices
-  vertices_copy := make([]Vertex2D, len(vertices))
+  vertices_copy := make([]cmd.Vertex2D, len(vertices))
   copy(vertices_copy, vertices)
   indices_copy := make([]u32, len(indices))
   copy(indices_copy, indices)

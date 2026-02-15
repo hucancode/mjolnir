@@ -1,6 +1,7 @@
 package ui
 
-import "../../gpu"
+import "../gpu"
+import cmd "../gpu/ui"
 import "core:log"
 
 HorizontalAlign :: enum {
@@ -27,7 +28,7 @@ WidgetBase :: struct {
 
 Mesh2D :: struct {
   using base:    WidgetBase,
-  vertices:      []Vertex2D,
+  vertices:      []cmd.Vertex2D,
   indices:       []u32,
   texture:       gpu.Texture2DHandle,
   vertex_offset: u32,
@@ -43,7 +44,7 @@ Quad2D :: struct {
 
 // Store fontstash quad directly for correct rendering
 GlyphQuad :: struct {
-  p0, p1: [2]f32, // positions
+  p0, p1:   [2]f32, // positions
   uv0, uv1: [2]f32, // UVs
 }
 

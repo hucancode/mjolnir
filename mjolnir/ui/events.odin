@@ -1,6 +1,6 @@
 package ui
 
-import cont "../../containers"
+import cont "../containers"
 import "core:log"
 import "core:math/linalg"
 

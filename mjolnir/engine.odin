@@ -23,7 +23,7 @@ import "render/camera"
 import rd "render/data"
 import "render/debug_ui"
 import "render/particles"
-import "render/ui"
+import ui_module "ui"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -90,6 +90,7 @@ Engine :: struct {
   mouse_scroll_proc:         MouseScrollProc,
   pre_render_proc:           PreRenderProc,
   post_render_proc:          PostRenderProc,
+  ui:                        ui_module.System,  // NEW: Logical UI system (moved from render.Manager)
   render:                    render.Manager,
   command_buffers:           [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers:   [FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -99,7 +100,7 @@ Engine :: struct {
   update_active:             bool,
   last_render_timestamp:     time.Time,
   camera_controller_enabled: bool,
-  ui_hovered_widget:         Maybe(ui.UIWidgetHandle),
+  ui_hovered_widget:         Maybe(ui_module.UIWidgetHandle),
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -167,6 +168,8 @@ init :: proc(
       )
     }
   }
+  // Initialize UI system (logical, before renderer)
+  ui_module.init(&self.ui)
   render.init(
     &self.render,
     &self.gctx,
@@ -174,6 +177,12 @@ init :: proc(
     self.swapchain.format.format,
     get_window_dpi(self.window),
   ) or_return
+  // Initialize UI GPU resources (font atlas, default texture)
+  ui_module.init_gpu_resources(
+    &self.ui,
+    &self.gctx,
+    &self.render.texture_manager,
+  )
 
   main_world_handle, main_world_camera, ok_main_camera := cont.alloc(
     &self.world.cameras,
@@ -431,7 +440,7 @@ update_input :: proc(self: ^Engine) -> bool {
       f32(self.input.mouse_pos.x),
       f32(self.input.mouse_pos.y),
     }
-    current_widget := ui.pick_widget(&self.render.ui_system, mouse_pos)
+    current_widget := ui_module.pick_widget(&self.ui, mouse_pos)
 
     // Handle hover in/out events
     if old_handle, had_old := self.ui_hovered_widget.?; had_old {
@@ -442,14 +451,14 @@ update_input :: proc(self: ^Engine) -> bool {
         if old_raw.index != new_raw.index ||
            old_raw.generation != new_raw.generation {
           // Hover out from old widget
-          event := ui.MouseEvent {
+          event := ui_module.MouseEvent {
             type     = .HOVER_OUT,
             position = mouse_pos,
             button   = 0,
             widget   = old_handle,
           }
-          ui.dispatch_mouse_event(
-            &self.render.ui_system,
+          ui_module.dispatch_mouse_event(
+            &self.ui,
             old_handle,
             event,
             true,
@@ -458,8 +467,8 @@ update_input :: proc(self: ^Engine) -> bool {
           // Hover in to new widget
           event.type = .HOVER_IN
           event.widget = new_handle
-          ui.dispatch_mouse_event(
-            &self.render.ui_system,
+          ui_module.dispatch_mouse_event(
+            &self.ui,
             new_handle,
             event,
             true,
@@ -467,14 +476,14 @@ update_input :: proc(self: ^Engine) -> bool {
         }
       } else {
         // No widget under cursor, hover out from old
-        event := ui.MouseEvent {
+        event := ui_module.MouseEvent {
           type     = .HOVER_OUT,
           position = mouse_pos,
           button   = 0,
           widget   = old_handle,
         }
-        ui.dispatch_mouse_event(
-          &self.render.ui_system,
+        ui_module.dispatch_mouse_event(
+          &self.ui,
           old_handle,
           event,
           true,
@@ -482,13 +491,13 @@ update_input :: proc(self: ^Engine) -> bool {
       }
     } else if new_handle, has_new := current_widget.?; has_new {
       // Hover in to new widget (no previous widget)
-      event := ui.MouseEvent {
+      event := ui_module.MouseEvent {
         type     = .HOVER_IN,
         position = mouse_pos,
         button   = 0,
         widget   = new_handle,
       }
-      ui.dispatch_mouse_event(&self.render.ui_system, new_handle, event, true)
+      ui_module.dispatch_mouse_event(&self.ui, new_handle, event, true)
     }
 
     // Handle click events
@@ -496,28 +505,28 @@ update_input :: proc(self: ^Engine) -> bool {
       for i in 0 ..< len(self.input.mouse_buttons) {
         if self.input.mouse_buttons[i] && !self.input.mouse_holding[i] {
           // Mouse down
-          event := ui.MouseEvent {
+          event := ui_module.MouseEvent {
             type     = .CLICK_DOWN,
             position = mouse_pos,
             button   = i32(i),
             widget   = widget_handle,
           }
-          ui.dispatch_mouse_event(
-            &self.render.ui_system,
+          ui_module.dispatch_mouse_event(
+            &self.ui,
             widget_handle,
             event,
             true,
           )
         } else if !self.input.mouse_buttons[i] && self.input.mouse_holding[i] {
           // Mouse up
-          event := ui.MouseEvent {
+          event := ui_module.MouseEvent {
             type     = .CLICK_UP,
             position = mouse_pos,
             button   = i32(i),
             widget   = widget_handle,
           }
-          ui.dispatch_mouse_event(
-            &self.render.ui_system,
+          ui_module.dispatch_mouse_event(
+            &self.ui,
             widget_handle,
             event,
             true,
@@ -1059,6 +1068,21 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
+// Sync UI render commands to the renderer (staging list pattern)
+sync_ui_to_renderer :: proc(self: ^Engine) {
+  // Update font atlas if dirty
+  ui_module.update_font_atlas(&self.ui, &self.gctx, &self.render.texture_manager)
+
+  // Compute layout before generating commands
+  ui_module.compute_layout_all(&self.ui)
+
+  // Generate render commands from widgets
+  ui_module.generate_render_commands(&self.ui)
+
+  // Stage commands to renderer
+  render.stage_ui_commands(&self.render, self.ui.staging[:])
+}
+
 update :: proc(self: ^Engine) -> bool {
   context.user_ptr = self
   delta_time := get_delta_time(self)
@@ -1121,6 +1145,7 @@ shutdown :: proc(self: ^Engine) {
     )
   }
   render.shutdown(&self.render, &self.gctx)
+  ui_module.shutdown(&self.ui, &self.gctx, &self.render.texture_manager)
   world.shutdown(&self.world)
   nav.shutdown(&self.nav)
   gpu.swapchain_destroy(&self.swapchain, self.gctx.device)
@@ -1344,6 +1369,8 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.views[self.swapchain.image_index],
     command_buffer,
   )
+  // Sync UI commands to renderer before recording UI pass
+  sync_ui_to_renderer(self)
   render.record_ui_pass(
     &self.render,
     self.frame_index,

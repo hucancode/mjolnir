@@ -1,13 +1,12 @@
 package ui
 
-import cont "../../containers"
+import cont "../containers"
 import "core:log"
 import "core:strings"
 import fs "vendor:fontstash"
 
 create_text2d :: proc(
   sys: ^System,
-  renderer: ^Renderer,
   position: [2]f32,
   text: string,
   font_size: f32,
@@ -43,8 +42,8 @@ create_text2d :: proc(
     v_align        = v_align,
   }
 
-  // Layout text
-  text_layout(&widget.(Text2D), renderer.font_context)
+  // Layout text using fontstash
+  text_layout(&widget.(Text2D), sys.font_context)
 
   return Text2DHandle(handle), true
 }
@@ -102,8 +101,8 @@ text_layout :: proc(text: ^Text2D, font_ctx: ^fs.FontContext) {
   for fs.TextIterNext(font_ctx, &iter, &quad) {
     // Store the fontstash quad directly
     glyph := GlyphQuad {
-      p0 = {quad.x0, quad.y0},
-      p1 = {quad.x1, quad.y1},
+      p0  = {quad.x0, quad.y0},
+      p1  = {quad.x1, quad.y1},
       uv0 = {quad.s0, quad.t0},
       uv1 = {quad.s1, quad.t1},
     }
@@ -132,12 +131,7 @@ text_layout :: proc(text: ^Text2D, font_ctx: ^fs.FontContext) {
   )
 }
 
-set_text :: proc(
-  sys: ^System,
-  renderer: ^Renderer,
-  handle: Text2DHandle,
-  new_text: string,
-) {
+set_text :: proc(sys: ^System, handle: Text2DHandle, new_text: string) {
   text_widget := get_text2d(sys, handle)
   if text_widget == nil do return
 
@@ -145,5 +139,5 @@ set_text :: proc(
   text_widget.text = strings.clone(new_text)
 
   // Re-layout
-  text_layout(text_widget, renderer.font_context)
+  text_layout(text_widget, sys.font_context)
 }

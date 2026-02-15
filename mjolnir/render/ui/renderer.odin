@@ -1,17 +1,24 @@
-package ui
+package ui_render
 
-import cont "../../containers"
 import "../../gpu"
+import cmd "../../gpu/ui"
 import "core:log"
 import "core:math/linalg"
 import "core:mem"
 import "core:slice"
-import fs "vendor:fontstash"
 import vk "vendor:vulkan"
 
 UI_MAX_VERTICES :: 65536
 UI_MAX_INDICES :: 98304
 FRAMES_IN_FLIGHT :: 2
+
+// Vertex format for UI rendering
+Vertex2D :: struct {
+  pos:        [2]f32,
+  uv:         [2]f32,
+  color:      [4]u8,
+  texture_id: u32,
+}
 
 Renderer :: struct {
   pipeline_layout:           vk.PipelineLayout,
@@ -25,12 +32,6 @@ Renderer :: struct {
   indices:                   [UI_MAX_INDICES]u32,
   vertex_count:              u32,
   index_count:               u32,
-  font_context:              ^fs.FontContext,
-  font_atlas:                gpu.Texture2DHandle,
-  font_atlas_width:          i32,
-  font_atlas_height:         i32,
-  font_atlas_dirty:          bool,
-  white_texture:             gpu.Texture2DHandle,
 }
 
 DrawBatch :: struct {
@@ -38,15 +39,14 @@ DrawBatch :: struct {
   index_count: u32,
 }
 
-SortKey :: struct {
+CommandSortKey :: struct {
   z_order:    i32,
   texture_id: u32,
-  handle:     UIWidgetHandle,
+  cmd_index:  int,
 }
 
 init_renderer :: proc(
   self: ^Renderer,
-  sys: ^System,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
   textures_set_layout: vk.DescriptorSetLayout,
@@ -142,72 +142,6 @@ init_renderer :: proc(
 
   // Create pipeline
   create_pipeline(self, gctx, format) or_return
-  // Create default white texture (1x1 white pixel)
-  white_pixel := [4]u8{255, 255, 255, 255}
-  self.white_texture = gpu.allocate_texture_2d_with_data(
-    texture_manager,
-    gctx,
-    raw_data(white_pixel[:]),
-    vk.DeviceSize(len(white_pixel)),
-    1,
-    1,
-    .R8G8B8A8_UNORM,
-    {.SAMPLED},
-  ) or_return
-  // Set as default texture for UI widgets
-  sys.default_texture = self.white_texture
-  // Initialize fontstash
-  self.font_atlas_width = 512
-  self.font_atlas_height = 512
-  self.font_context = new(fs.FontContext)
-  fs.Init(
-    self.font_context,
-    int(self.font_atlas_width),
-    int(self.font_atlas_height),
-    .TOPLEFT,
-  )
-  // Set callbacks
-  self.font_context.callbackResize = fs_render_create
-  self.font_context.callbackUpdate = fs_render_update
-  self.font_context.userData = self
-  log.infof(
-    "Fontstash initialized: textureData=%v, len=%d",
-    self.font_context.textureData != nil,
-    len(self.font_context.textureData),
-  )
-  log.infof(
-    "Callbacks set: resize=%v, update=%v",
-    self.font_context.callbackResize != nil,
-    self.font_context.callbackUpdate != nil,
-  )
-  // Add default font
-  default_font_path := "assets/Outfit-Regular.ttf"
-  font_index := fs.AddFont(self.font_context, "default", default_font_path, 0)
-  if font_index == fs.INVALID {
-    log.errorf("Failed to load default font from %s", default_font_path)
-    return .ERROR_INITIALIZATION_FAILED
-  }
-  log.infof(
-    "Loaded default font from %s (index: %d)",
-    default_font_path,
-    font_index,
-  )
-  // Pre-rasterize common glyphs to populate the atlas
-  log.info("Pre-rasterizing common glyphs...")
-  fs.SetFont(self.font_context, font_index)
-  fs.SetColor(self.font_context, {255, 255, 255, 255})
-  test_string := " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-  common_sizes := [?]f32{12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96}
-  for size in common_sizes {
-    fs.SetSize(self.font_context, size)
-    iter := fs.TextIterInit(self.font_context, 0, 0, test_string)
-    quad: fs.Quad
-    for fs.TextIterNext(self.font_context, &iter, &quad) {}
-  }
-  log.info("Pre-rasterization complete")
-  // Force initial font atlas creation
-  self.font_atlas_dirty = true
-  update_font_atlas(self, gctx, texture_manager)
 
   log.info("UI renderer initialized successfully")
   return .SUCCESS
@@ -399,22 +333,11 @@ create_pipeline :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext, texture_manager: ^gpu.TextureManager) {
-  if self.font_context != nil {
-    fs.Destroy(self.font_context)
-    free(self.font_context)
-  }
-
-  // Clean up white texture
-  if self.white_texture != (gpu.Texture2DHandle{}) {
-    gpu.free_texture_2d(texture_manager, gctx, self.white_texture)
-  }
-
-  // Clean up font atlas
-  if self.font_atlas != (gpu.Texture2DHandle{}) {
-    gpu.free_texture_2d(texture_manager, gctx, self.font_atlas)
-  }
-
+shutdown :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
+) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
@@ -426,9 +349,10 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext, texture_manager: ^gpu.T
   }
 }
 
+// Render using commands instead of iterating widgets
 render :: proc(
   self: ^Renderer,
-  sys: ^System,
+  commands: []cmd.RenderCommand,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
@@ -440,61 +364,54 @@ render :: proc(
   ortho := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
   gpu.mutable_buffer_write(&self.proj_buffer, &ortho, 0)
 
-  // Update font atlas if dirty
-  if self.font_atlas_dirty {
-    update_font_atlas(self, gctx, texture_manager)
-    self.font_atlas_dirty = false
-  }
-  // Collect and sort widgets
-  sort_keys := make([dynamic]SortKey, 0, len(sys.widget_pool.entries))
+  // Sort commands by z-order and texture for batching
+  sort_keys := make(
+    [dynamic]CommandSortKey,
+    0,
+    len(commands),
+    context.temp_allocator,
+  )
   defer delete(sort_keys)
-  font_atlas_id := transmute(cont.Handle)self.font_atlas
-  for &entry, i in sys.widget_pool.entries {
-    if !entry.active do continue
 
-    widget := &entry.item
-    if widget == nil do continue
-    if !get_widget_base(widget).visible do continue
+  for command, idx in commands {
+    texture_id: u32
+    z_order: i32
 
-    texture_id: u32 = 0
-    switch w in widget {
-    case Mesh2D:
-      raw_handle := transmute(cont.Handle)w.texture
-      texture_id = raw_handle.index
-    case Quad2D:
-      raw_handle := transmute(cont.Handle)w.texture
-      texture_id = raw_handle.index
-    case Text2D:
-      texture_id = font_atlas_id.index
-    case Box:
-      continue
+    switch c in command {
+    case cmd.DrawQuadCommand:
+      texture_id = c.texture_id
+      z_order = c.z_order
+    case cmd.DrawMeshCommand:
+      texture_id = c.texture_id
+      z_order = c.z_order
+    case cmd.DrawTextCommand:
+      texture_id = c.font_atlas_id
+      z_order = c.z_order
     }
-    raw_handle: cont.Handle
-    raw_handle.index = u32(i)
-    raw_handle.generation = entry.generation
-    handle := transmute(UIWidgetHandle)raw_handle
+
     append(
       &sort_keys,
-      SortKey {
-        z_order = get_widget_base(widget).z_order,
+      CommandSortKey {
+        z_order = z_order,
         texture_id = texture_id,
-        handle = handle,
+        cmd_index = idx,
       },
     )
   }
-  slice.sort_by(sort_keys[:], proc(a, b: SortKey) -> bool {
-    if a.z_order != b.z_order do return a.z_order < b.z_order
-    return a.texture_id < b.texture_id
-  })
+
+  slice.sort_by(sort_keys[:], proc(a, b: CommandSortKey) -> bool {
+      if a.z_order != b.z_order do return a.z_order < b.z_order
+      return a.texture_id < b.texture_id
+    })
+
   self.vertex_count = 0
   self.index_count = 0
-  draw_batches := make([dynamic]DrawBatch, 0, 16)
+  draw_batches := make([dynamic]DrawBatch, 0, 16, context.temp_allocator)
   defer delete(draw_batches)
   current_texture: u32 = max(u32)
   batch_start_index: u32 = 0
+
   for key in sort_keys {
-    widget := get_widget(sys, key.handle)
-    if widget == nil do continue
     if key.texture_id != current_texture {
       if self.index_count > batch_start_index {
         append(
@@ -508,8 +425,9 @@ render :: proc(
       current_texture = key.texture_id
       batch_start_index = self.index_count
     }
-    add_widget_to_batch(self, widget, key.texture_id)
+    add_command_to_batch(self, commands[key.cmd_index], key.texture_id)
   }
+
   if self.index_count > batch_start_index {
     append(
       &draw_batches,
@@ -519,6 +437,7 @@ render :: proc(
       },
     )
   }
+
   if self.vertex_count > 0 {
     gpu.write(
       &self.vertex_buffers[frame_index],
@@ -555,49 +474,51 @@ render :: proc(
   }
 }
 
-add_widget_to_batch :: proc(
+add_command_to_batch :: proc(
   self: ^Renderer,
-  widget: ^Widget,
+  command: cmd.RenderCommand,
   texture_id: u32,
 ) {
-  switch &w in widget {
-  case Quad2D:
-    add_quad_to_batch(self, &w, texture_id)
-  case Mesh2D:
-    add_mesh_to_batch(self, &w, texture_id)
-  case Text2D:
-    add_text_to_batch(self, &w, texture_id)
-  case Box:
-  // Boxes don't render
+  switch c in command {
+  case cmd.DrawQuadCommand:
+    add_quad_to_batch(self, c, texture_id)
+  case cmd.DrawMeshCommand:
+    add_mesh_to_batch(self, c, texture_id)
+  case cmd.DrawTextCommand:
+    add_text_to_batch(self, c, texture_id)
   }
 }
 
-add_quad_to_batch :: proc(self: ^Renderer, quad: ^Quad2D, texture_id: u32) {
+add_quad_to_batch :: proc(
+  self: ^Renderer,
+  quad: cmd.DrawQuadCommand,
+  texture_id: u32,
+) {
   base_vertex := self.vertex_count
   color := quad.color
   self.vertices[self.vertex_count] = Vertex2D {
-    {quad.world_position.x, quad.world_position.y},
+    {quad.position.x, quad.position.y},
     {0, 0},
     color,
     texture_id,
   }
   self.vertex_count += 1
   self.vertices[self.vertex_count] = Vertex2D {
-    {quad.world_position.x + quad.size.x, quad.world_position.y},
+    {quad.position.x + quad.size.x, quad.position.y},
     {1, 0},
     color,
     texture_id,
   }
   self.vertex_count += 1
   self.vertices[self.vertex_count] = Vertex2D {
-    {quad.world_position.x + quad.size.x, quad.world_position.y + quad.size.y},
+    {quad.position.x + quad.size.x, quad.position.y + quad.size.y},
     {1, 1},
     color,
     texture_id,
   }
   self.vertex_count += 1
   self.vertices[self.vertex_count] = Vertex2D {
-    {quad.world_position.x, quad.world_position.y + quad.size.y},
+    {quad.position.x, quad.position.y + quad.size.y},
     {0, 1},
     color,
     texture_id,
@@ -619,11 +540,15 @@ add_quad_to_batch :: proc(self: ^Renderer, quad: ^Quad2D, texture_id: u32) {
   self.index_count += 1
 }
 
-add_mesh_to_batch :: proc(self: ^Renderer, mesh: ^Mesh2D, texture_id: u32) {
+add_mesh_to_batch :: proc(
+  self: ^Renderer,
+  mesh: cmd.DrawMeshCommand,
+  texture_id: u32,
+) {
   base_vertex := self.vertex_count
   for v in mesh.vertices {
     self.vertices[self.vertex_count] = Vertex2D {
-      pos        = mesh.world_position + v.pos,
+      pos        = mesh.position + v.pos,
       uv         = v.uv,
       color      = v.color,
       texture_id = texture_id,
@@ -636,38 +561,41 @@ add_mesh_to_batch :: proc(self: ^Renderer, mesh: ^Mesh2D, texture_id: u32) {
   }
 }
 
-add_text_to_batch :: proc(self: ^Renderer, text: ^Text2D, texture_id: u32) {
-  color := text.color
+add_text_to_batch :: proc(
+  self: ^Renderer,
+  text: cmd.DrawTextCommand,
+  texture_id: u32,
+) {
   for glyph in text.glyphs {
     base_vertex := self.vertex_count
-    // Use fontstash quad positions directly, offset by text world position
-    p0 := text.world_position + glyph.p0
-    p1 := text.world_position + glyph.p1
+    // Use fontstash quad positions directly, offset by text position
+    p0 := text.position + glyph.p0
+    p1 := text.position + glyph.p1
     self.vertices[self.vertex_count] = Vertex2D {
       p0,
       glyph.uv0,
-      color,
+      glyph.color,
       texture_id,
     }
     self.vertex_count += 1
     self.vertices[self.vertex_count] = Vertex2D {
       {p1.x, p0.y},
       {glyph.uv1.x, glyph.uv0.y},
-      color,
+      glyph.color,
       texture_id,
     }
     self.vertex_count += 1
     self.vertices[self.vertex_count] = Vertex2D {
       p1,
       glyph.uv1,
-      color,
+      glyph.color,
       texture_id,
     }
     self.vertex_count += 1
     self.vertices[self.vertex_count] = Vertex2D {
       {p0.x, p1.y},
       {glyph.uv0.x, glyph.uv1.y},
-      color,
+      glyph.color,
       texture_id,
     }
     self.vertex_count += 1
@@ -684,70 +612,4 @@ add_text_to_batch :: proc(self: ^Renderer, text: ^Text2D, texture_id: u32) {
     self.indices[self.index_count] = base_vertex + 3
     self.index_count += 1
   }
-}
-
-fs_render_create :: proc(user_ptr: rawptr, width, height: int) {
-  self := cast(^Renderer)user_ptr
-  self.font_atlas_width = i32(width)
-  self.font_atlas_height = i32(height)
-  self.font_atlas_dirty = true
-}
-
-fs_render_update :: proc(user_ptr: rawptr, rect: [4]f32, data: rawptr) {
-  self := cast(^Renderer)user_ptr
-  self.font_atlas_dirty = true
-}
-
-update_font_atlas :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
-) {
-  if !self.font_atlas_dirty do return
-  if self.font_context == nil do return
-
-  // Force fontstash to rasterize any pending glyphs
-  dirty_rect: [4]f32
-  if fs.ValidateTexture(self.font_context, &dirty_rect) {
-    log.debugf(
-      "Fontstash texture validated, dirty rect: (%.0f,%.0f,%.0f,%.0f)",
-      dirty_rect[0],
-      dirty_rect[1],
-      dirty_rect[2],
-      dirty_rect[3],
-    )
-  }
-
-  // Get atlas data from fontstash
-  atlas_data := self.font_context.textureData
-  width := u32(self.font_context.width)
-  height := u32(self.font_context.height)
-  if len(atlas_data) == 0 {
-    log.warn("Font atlas data is empty, cannot create texture")
-    return
-  }
-  log.debugf(
-    "Updating font atlas: %dx%d, data size: %d bytes",
-    width,
-    height,
-    len(atlas_data),
-  )
-  if self.font_atlas != (gpu.Texture2DHandle{}) {
-    gpu.free_texture_2d(texture_manager, gctx, self.font_atlas)
-  }
-  font_atlas_result: vk.Result
-  self.font_atlas, font_atlas_result = gpu.allocate_texture_2d_with_data(
-    texture_manager,
-    gctx,
-    raw_data(atlas_data),
-    vk.DeviceSize(len(atlas_data)),
-    u32(width),
-    u32(height),
-    .R8_UNORM,
-    {.SAMPLED},
-  )
-  if font_atlas_result != .SUCCESS {
-  	return
-  }
-  self.font_atlas_dirty = false
 }

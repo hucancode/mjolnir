@@ -17,7 +17,8 @@ import light "lighting"
 import "particles"
 import "post_process"
 import "transparency"
-import "ui"
+import ui_render "ui"
+import cmd "../gpu/ui"
 import vk "vendor:vulkan"
 
 FRAMES_IN_FLIGHT :: d.FRAMES_IN_FLIGHT
@@ -53,8 +54,8 @@ Manager :: struct {
   particles:               particles.Renderer,
   post_process:            post_process.Renderer,
   debug_ui:                debug_ui.Renderer,
-  ui_system:               ui.System,
-  ui:                      ui.Renderer,
+  ui:                      ui_render.Renderer,
+  ui_commands:             [dynamic]cmd.RenderCommand,  // Staged commands from UI module
   cameras:                 map[u32]camera.Camera,
   meshes:                  map[u32]Mesh,
   visibility:              camera.System,
@@ -599,10 +600,10 @@ init :: proc(
     dpi_scale,
     self.textures_set_layout,
   ) or_return
-  ui.init_ui_system(&self.ui_system)
-  ui.init_renderer(
+  // Initialize UI renderer (command-based, no ui_system dependency)
+  self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
+  ui_render.init_renderer(
     &self.ui,
-    &self.ui_system,
     gctx,
     &self.texture_manager,
     self.textures_set_layout,
@@ -610,12 +611,21 @@ init :: proc(
     swapchain_extent.height,
     swapchain_format,
   ) or_return
+
   return .SUCCESS
 }
 
+// Stage UI commands from UI module
+stage_ui_commands :: proc(self: ^Manager, commands: []cmd.RenderCommand) {
+  clear(&self.ui_commands)
+  for command in commands {
+    append(&self.ui_commands, command)
+  }
+}
+
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  ui.shutdown(&self.ui, gctx, &self.texture_manager)
-  ui.shutdown_ui_system(&self.ui_system)
+  ui_render.shutdown(&self.ui, gctx, &self.texture_manager)
+  delete(self.ui_commands)
   debug_ui.shutdown(&self.debug_ui, gctx)
   post_process.shutdown(&self.post_process, gctx, &self.texture_manager)
   particles.shutdown(&self.particles, gctx)
@@ -1128,11 +1138,10 @@ record_ui_pass :: proc(
     nil,
   )
 
-  // Render UI
-  ui.compute_layout_all(&self.ui_system)
-  ui.render(
+  // Render UI using staged commands
+  ui_render.render(
     &self.ui,
-    &self.ui_system,
+    self.ui_commands[:],
     gctx,
     &self.texture_manager,
     command_buffer,
