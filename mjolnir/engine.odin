@@ -19,8 +19,8 @@ import "geometry"
 import "gpu"
 import nav "navigation"
 import "render"
-import render_camera "render/camera"
 import "render/camera"
+import rd "render/data"
 import "render/debug_ui"
 import "render/particles"
 import "render/ui"
@@ -33,7 +33,6 @@ import "world"
 #assert(size_of(world.MeshHandle) == size_of(gpu.MeshHandle))
 #assert(size_of(world.Image2DHandle) == size_of(gpu.Texture2DHandle))
 #assert(size_of(world.ImageCubeHandle) == size_of(gpu.TextureCubeHandle))
-#assert(size_of(world.CameraHandle) == size_of(render_camera.CameraHandle))
 
 FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 RENDER_FPS :: #config(RENDER_FPS, 60)
@@ -181,10 +180,7 @@ init :: proc(
     world.CameraHandle,
   )
   if !ok_main_camera do return .ERROR_INITIALIZATION_FAILED
-  if main_world_handle.index != self.render.main_camera.index ||
-     main_world_handle.generation != self.render.main_camera.generation {
-    return .ERROR_INITIALIZATION_FAILED
-  }
+  self.world.main_camera = main_world_handle
   if !world.camera_init(
     main_world_camera,
     self.swapchain.extent.width,
@@ -407,10 +403,7 @@ load_gltf :: proc(
 
 @(private = "file")
 get_main_camera :: proc(self: ^Engine) -> ^world.Camera {
-  return cont.get(
-    self.world.cameras,
-    transmute(world.CameraHandle)self.render.main_camera,
-  )
+  return cont.get(self.world.cameras, self.world.main_camera)
 }
 
 update_input :: proc(self: ^Engine) -> bool {
@@ -552,7 +545,7 @@ update_visibility_node_count :: proc(
   render.shadow.node_count = n
 }
 
-sync_staging_to_gpu :: proc(self: ^Engine) {
+sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   sync.mutex_lock(&self.world.staging.mutex)
   defer sync.mutex_unlock(&self.world.staging.mutex)
   stale_handles := make([dynamic]world.NodeHandle, context.temp_allocator)
@@ -999,12 +992,49 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   for handle, n in self.world.staging.camera_updates {
     next_n := n
     if n < world.FRAMES_IN_FLIGHT {
-      if camera := cont.get(self.world.cameras, handle); camera != nil {
-        render.sync_camera_from_world(
-          &self.render,
-          transmute(render.CameraHandle)handle,
-          transmute(^render_camera.Camera)camera,
-        )
+      if world_camera := cont.get(self.world.cameras, handle);
+         world_camera != nil {
+        is_new_camera := handle.index not_in self.render.cameras
+        if is_new_camera {
+          self.render.cameras[handle.index] = {}
+        }
+        // Copy camera data from world
+        cam := &self.render.cameras[handle.index]
+        cam.position = world_camera.position
+        cam.rotation = world_camera.rotation
+        cam.projection =
+        transmute(camera.CameraProjection)world_camera.projection
+        cam.extent = world_camera.extent
+        cam.enabled_passes =
+        transmute(camera.PassTypeSet)world_camera.enabled_passes
+        cam.enable_culling = world_camera.enable_culling
+        cam.enable_depth_pyramid = world_camera.enable_depth_pyramid
+        // Initialize GPU resources for new cameras
+        if is_new_camera {
+          camera.init_gpu(
+            &self.gctx,
+            cam,
+            &self.render.texture_manager,
+            cam.extent[0],
+            cam.extent[1],
+            self.swapchain.format.format,
+            vk.Format.D32_SFLOAT,
+            cam.enabled_passes,
+            cam.enable_depth_pyramid,
+            rd.MAX_NODES_IN_SCENE,
+          ) or_return
+          camera.allocate_descriptors(
+            &self.gctx,
+            cam,
+            &self.render.texture_manager,
+            &self.render.visibility.normal_cam_descriptor_layout,
+            &self.render.visibility.depth_reduce_descriptor_layout,
+            &self.render.node_data_buffer,
+            &self.render.mesh_data_buffer,
+            &self.render.world_matrix_buffer,
+            &self.render.camera_buffer,
+          ) or_return
+        }
       }
       next_n += 1
       self.world.staging.camera_updates[handle] = next_n
@@ -1016,6 +1046,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) {
   for handle in stale_cameras {
     delete_key(&self.world.staging.camera_updates, handle)
   }
+  return .SUCCESS
 }
 
 update :: proc(self: ^Engine) -> bool {
@@ -1057,10 +1088,7 @@ update :: proc(self: ^Engine) -> bool {
         )
       case .CINEMATIC:
       }
-      world.stage_camera_data(
-        &self.world.staging,
-        transmute(world.CameraHandle)self.render.main_camera,
-      )
+      world.stage_camera_data(&self.world.staging, self.world.main_camera)
     }
   }
   if self.update_proc != nil {
@@ -1130,11 +1158,11 @@ populate_debug_ui :: proc(self: ^Engine) {
       ),
     )
     if main_camera := get_main_camera(self); main_camera != nil {
-      main_camera_gpu := &self.render.cameras_gpu[self.render.main_camera.index]
+      main_camera := &self.render.cameras[self.world.main_camera.index]
       main_stats := camera.stats(
         &self.render.visibility,
-        main_camera_gpu,
-        self.render.main_camera.index,
+        main_camera,
+        self.world.main_camera.index,
         self.frame_index,
       )
       mu.label(
@@ -1180,10 +1208,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   if main_camera := get_main_camera(engine); main_camera != nil {
     world.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
-    world.stage_camera_data(
-      &engine.world.staging,
-      transmute(world.CameraHandle)engine.render.main_camera,
-    )
+    world.stage_camera_data(&engine.world.staging, engine.world.main_camera)
     descriptor_set := engine.render.textures_descriptor_set
     set_descriptor :: proc(
       gctx: ^gpu.GPUContext,
@@ -1194,8 +1219,8 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       render.set_texture_2d_descriptor(gctx, desc_set, index, view)
     }
     context.user_ptr = &descriptor_set
-    camera_gpu := &engine.render.cameras_gpu[engine.render.main_camera.index]
-    render_camera.resize(
+    camera_gpu := &engine.render.cameras[engine.world.main_camera.index]
+    camera.resize(
       &engine.gctx,
       camera_gpu,
       &engine.render.texture_manager,
@@ -1203,10 +1228,10 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
       vk.Format.D32_SFLOAT,
-      transmute(render_camera.PassTypeSet)main_camera.enabled_passes,
+      transmute(camera.PassTypeSet)main_camera.enabled_passes,
       main_camera.enable_depth_pyramid,
     ) or_return
-    render_camera.allocate_descriptors(
+    camera.allocate_descriptors(
       &engine.gctx,
       camera_gpu,
       &engine.render.texture_manager,
@@ -1259,17 +1284,13 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   for &entry, cam_index in self.world.cameras.entries {
     if !entry.active do continue
-    cam_handle := render.CameraHandle {
-      index      = u32(cam_index),
-      generation = entry.generation,
-    }
     cam := &entry.item
     if world.PassType.GEOMETRY in cam.enabled_passes {
       render.record_geometry_pass(
         &self.render,
         self.frame_index,
         &self.gctx,
-        cam_handle,
+        u32(cam_index),
         command_buffer,
       )
     }
@@ -1278,7 +1299,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
         &self.render,
         self.frame_index,
         active_render_lights[:],
-        cam_handle,
+        u32(cam_index),
         self.swapchain.format.format,
         command_buffer,
       )
@@ -1287,7 +1308,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
       render.record_particles_pass(
         &self.render,
         self.frame_index,
-        cam_handle,
+        u32(cam_index),
         self.swapchain.format.format,
         command_buffer,
       )
@@ -1297,7 +1318,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
         &self.render,
         self.frame_index,
         &self.gctx,
-        cam_handle,
+        u32(cam_index),
         self.swapchain.format.format,
         command_buffer,
       )
@@ -1306,7 +1327,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   render.record_post_process_pass(
     &self.render,
     self.frame_index,
-    self.render.main_camera,
+    self.world.main_camera.index,
     self.swapchain.format.format,
     self.swapchain.extent,
     self.swapchain.images[self.swapchain.image_index],

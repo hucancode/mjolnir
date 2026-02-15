@@ -7,7 +7,6 @@ Handle :: cont.Handle
 
 MeshHandle :: gpu.MeshHandle
 MaterialHandle :: distinct Handle
-CameraHandle :: distinct Handle
 LightHandle :: distinct Handle
 
 FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)

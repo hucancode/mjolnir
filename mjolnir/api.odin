@@ -342,7 +342,15 @@ create_camera :: proc(
     return {}, false
   }
   world.stage_camera_data(&engine.world.staging, camera_handle)
-  camera_gpu := &engine.render.cameras_gpu[camera_handle.index]
+  engine.render.cameras[camera_handle.index] = {}
+  camera := &engine.render.cameras[camera_handle.index]
+  camera.position = camera_ptr.position
+  camera.rotation = camera_ptr.rotation
+  camera.projection = transmute(render_camera.CameraProjection)camera_ptr.projection
+  camera.extent = camera_ptr.extent
+  camera.enabled_passes = render_enabled_passes
+  camera.enable_culling = camera_ptr.enable_culling
+  camera.enable_depth_pyramid = camera_ptr.enable_depth_pyramid
   descriptor_set := engine.render.textures_descriptor_set
   set_descriptor :: proc(
     gctx: ^gpu.GPUContext,
@@ -355,7 +363,7 @@ create_camera :: proc(
   context.user_ptr = &descriptor_set
   if render_camera.init_gpu(
        &engine.gctx,
-       camera_gpu,
+       camera,
        &engine.render.texture_manager,
        width,
        height,
@@ -370,7 +378,7 @@ create_camera :: proc(
   }
   if render_camera.allocate_descriptors(
        &engine.gctx,
-       camera_gpu,
+       camera,
        &engine.render.texture_manager,
        &engine.render.visibility.normal_cam_descriptor_layout,
        &engine.render.visibility.depth_reduce_descriptor_layout,
@@ -396,7 +404,7 @@ get_camera_attachment :: proc(
 ) #optional_ok {
   if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
   gpu_handle :=
-    engine.render.cameras_gpu[camera_handle.index].attachments[attachment_type][frame_index]
+    engine.render.cameras[camera_handle.index].attachments[attachment_type][frame_index]
   return transmute(world.Image2DHandle)gpu_handle, true
 }
 

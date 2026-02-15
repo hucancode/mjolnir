@@ -97,7 +97,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   world.scale(&engine.world, effector_sphere, 0.5)
   world.main_camera_look_at(
     &engine.world,
-    transmute(world.CameraHandle)engine.render.main_camera,
+    engine.world.main_camera,
     {10, 30, 10},
     {0, 0, 0},
   )
@@ -118,7 +118,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   mouse_click: if mouse_just_clicked {
     camera := cont.get(
       engine.world.cameras,
-      transmute(world.CameraHandle)engine.render.main_camera,
+      engine.world.main_camera,
     )
     if camera != nil {
       // Get mouse position in window coordinates

@@ -83,7 +83,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Cube body created")
   world.main_camera_look_at(
     &engine.world,
-    transmute(world.CameraHandle)engine.render.main_camera,
+    engine.world.main_camera,
     {8, 5, 8},
     {0, 2, 0},
   )

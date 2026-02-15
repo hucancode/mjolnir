@@ -149,7 +149,7 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
 
 stats :: proc(
   self: ^System,
-  camera_gpu: ^CameraGPU,
+  camera: ^Camera,
   camera_index: u32,
   frame_index: u32,
 ) -> CullingStats {
@@ -157,9 +157,9 @@ stats :: proc(
     camera_index = camera_index,
     frame_index  = frame_index,
   }
-  if camera_gpu.opaque_draw_count[frame_index].mapped != nil {
+  if camera.opaque_draw_count[frame_index].mapped != nil {
     stats.opaque_draw_count =
-      camera_gpu.opaque_draw_count[frame_index].mapped[0]
+      camera.opaque_draw_count[frame_index].mapped[0]
   }
   return stats
 }
@@ -170,8 +170,7 @@ render_depth :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
-  camera_gpu: ^CameraGPU,
-  camera_cpu: ^Camera,
+  camera: ^Camera,
   texture_manager: ^gpu.TextureManager,
   camera_index: u32,
   frame_index: u32,
@@ -189,7 +188,7 @@ render_depth :: proc(
 ) {
   depth_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.DEPTH][frame_index],
+    camera.attachments[.DEPTH][frame_index],
   )
   gpu.image_barrier(
     command_buffer,
@@ -209,20 +208,20 @@ render_depth :: proc(
   )
   gpu.begin_depth_rendering(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
     &depth_attachment,
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
   )
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.depth_pipeline,
     self.general_pipeline_layout,
-    camera_gpu.camera_buffer_descriptor_sets[frame_index],
+    camera.camera_buffer_descriptor_sets[frame_index],
     textures_descriptor_set,
     bone_descriptor_set,
     material_descriptor_set,
@@ -245,9 +244,9 @@ render_depth :: proc(
   // draw_list[frame_index] was written by Compute N-1, safe to read during Render N
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
-    camera_gpu.opaque_draw_commands[frame_index].buffer,
+    camera.opaque_draw_commands[frame_index].buffer,
     0, // offset
-    camera_gpu.opaque_draw_count[frame_index].buffer,
+    camera.opaque_draw_count[frame_index].buffer,
     0, // count offset
     self.max_draws,
     u32(size_of(vk.DrawIndexedIndirectCommand)),
@@ -273,7 +272,7 @@ build_pyramid :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
-  camera_gpu: ^CameraGPU,
+  camera: ^Camera,
   camera_index: u32,
   frame_index: u32, // Which pyramid to write to
 ) {
@@ -284,14 +283,14 @@ build_pyramid :: proc(
   // Generate ALL mip levels using the same shader
   // Mip 0: reads from depth[N-1] (configured in descriptor sets)
   // Other mips: read from pyramid[N] mip-1
-  for mip in 0 ..< camera_gpu.depth_pyramid[frame_index].mip_levels {
+  for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
     vk.CmdBindDescriptorSets(
       command_buffer,
       .COMPUTE,
       self.depth_reduce_layout,
       0,
       1,
-      &camera_gpu.depth_reduce_descriptor_sets[frame_index][mip],
+      &camera.depth_reduce_descriptor_sets[frame_index][mip],
       0,
       nil,
     )
@@ -306,13 +305,13 @@ build_pyramid :: proc(
       size_of(push_constants),
       &push_constants,
     )
-    mip_width := max(1, camera_gpu.depth_pyramid[frame_index].width >> mip)
-    mip_height := max(1, camera_gpu.depth_pyramid[frame_index].height >> mip)
+    mip_width := max(1, camera.depth_pyramid[frame_index].width >> mip)
+    mip_height := max(1, camera.depth_pyramid[frame_index].height >> mip)
     dispatch_x := (mip_width + 31) / 32
     dispatch_y := (mip_height + 31) / 32
     vk.CmdDispatch(command_buffer, dispatch_x, dispatch_y, 1)
     // only synchronize the dependency chain, don't transition layouts
-    if mip < camera_gpu.depth_pyramid[frame_index].mip_levels - 1 {
+    if mip < camera.depth_pyramid[frame_index].mip_levels - 1 {
       gpu.memory_barrier(
         command_buffer,
         {.SHADER_WRITE},
@@ -324,8 +323,8 @@ build_pyramid :: proc(
   }
   if self.stats_enabled {
     count: u32 = 0
-    if camera_gpu.opaque_draw_count[frame_index].mapped != nil {
-      count = camera_gpu.opaque_draw_count[frame_index].mapped[0]
+    if camera.opaque_draw_count[frame_index].mapped != nil {
+      count = camera.opaque_draw_count[frame_index].mapped[0]
     }
     efficiency: f32 = 0.0
     if self.node_count > 0 {
@@ -348,7 +347,7 @@ perform_culling :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
-  camera_gpu: ^CameraGPU,
+  camera: ^Camera,
   camera_index: u32,
   frame_index: u32,
   include_flags: rd.NodeFlagSet,
@@ -357,30 +356,30 @@ perform_culling :: proc(
   if self.node_count == 0 do return
   vk.CmdFillBuffer(
     command_buffer,
-    camera_gpu.opaque_draw_count[frame_index].buffer,
+    camera.opaque_draw_count[frame_index].buffer,
     0,
-    vk.DeviceSize(camera_gpu.opaque_draw_count[frame_index].bytes_count),
-    0,
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    camera_gpu.transparent_draw_count[frame_index].buffer,
-    0,
-    vk.DeviceSize(camera_gpu.transparent_draw_count[frame_index].bytes_count),
+    vk.DeviceSize(camera.opaque_draw_count[frame_index].bytes_count),
     0,
   )
   vk.CmdFillBuffer(
     command_buffer,
-    camera_gpu.sprite_draw_count[frame_index].buffer,
+    camera.transparent_draw_count[frame_index].buffer,
     0,
-    vk.DeviceSize(camera_gpu.sprite_draw_count[frame_index].bytes_count),
+    vk.DeviceSize(camera.transparent_draw_count[frame_index].bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.sprite_draw_count[frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
     0,
   )
   gpu.bind_compute_pipeline(
     command_buffer,
     self.cull_pipeline,
     self.cull_layout,
-    camera_gpu.descriptor_set[frame_index],
+    camera.descriptor_set[frame_index],
   )
   prev_frame := alg.prev(frame_index, d.FRAMES_IN_FLIGHT)
   push_constants := VisibilityPushConstants {
@@ -389,8 +388,8 @@ perform_culling :: proc(
     max_draws         = self.max_draws,
     include_flags     = include_flags,
     exclude_flags     = exclude_flags,
-    pyramid_width     = f32(camera_gpu.depth_pyramid[prev_frame].width),
-    pyramid_height    = f32(camera_gpu.depth_pyramid[prev_frame].height),
+    pyramid_width     = f32(camera.depth_pyramid[prev_frame].width),
+    pyramid_height    = f32(camera.depth_pyramid[prev_frame].height),
     depth_bias        = self.depth_bias,
     occlusion_enabled = 1,
   }

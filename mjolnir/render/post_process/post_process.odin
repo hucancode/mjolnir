@@ -551,7 +551,7 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  camera_gpu: ^camera.CameraGPU,
+  camera: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   frame_index: u32,
 ) {
@@ -567,7 +567,7 @@ render :: proc(
     dst_image_idx: u32
     if is_first {
       input_image_index =
-        camera_gpu.attachments[.FINAL_IMAGE][frame_index].index // Use original input
+        camera.attachments[.FINAL_IMAGE][frame_index].index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -650,17 +650,17 @@ render :: proc(
     )
     base: BasePushConstant
     base.position_texture_index =
-      camera_gpu.attachments[.POSITION][frame_index].index
+      camera.attachments[.POSITION][frame_index].index
     base.normal_texture_index =
-      camera_gpu.attachments[.NORMAL][frame_index].index
+      camera.attachments[.NORMAL][frame_index].index
     base.albedo_texture_index =
-      camera_gpu.attachments[.ALBEDO][frame_index].index
+      camera.attachments[.ALBEDO][frame_index].index
     base.metallic_texture_index =
-      camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index].index
+      camera.attachments[.METALLIC_ROUGHNESS][frame_index].index
     base.emissive_texture_index =
-      camera_gpu.attachments[.EMISSIVE][frame_index].index
+      camera.attachments[.EMISSIVE][frame_index].index
     base.depth_texture_index =
-      camera_gpu.attachments[.DEPTH][frame_index].index
+      camera.attachments[.DEPTH][frame_index].index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

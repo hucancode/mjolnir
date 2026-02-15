@@ -615,14 +615,13 @@ create_render_pipeline :: proc(
 begin_pass :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^camera.Camera,
+  camera: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   frame_index: u32,
 ) {
   color_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Particle renderer missing color attachment")
@@ -630,7 +629,7 @@ begin_pass :: proc(
   }
   depth_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.DEPTH][frame_index],
+    camera.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
     log.error("Particle renderer missing depth attachment")
@@ -638,22 +637,22 @@ begin_pass :: proc(
   }
   gpu.begin_rendering(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
   )
 }
 
 render :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  camera_gpu: ^camera.CameraGPU,
+  camera: ^camera.Camera,
   camera_index: u32,
   frame_index: u32,
   textures_descriptor_set: vk.DescriptorSet,
@@ -663,7 +662,7 @@ render :: proc(
     command_buffer,
     self.render_pipeline,
     self.render_pipeline_layout,
-    camera_gpu.camera_buffer_descriptor_sets[frame_index],
+    camera.camera_buffer_descriptor_sets[frame_index],
     textures_descriptor_set,
   )
   camera_idx := camera_index

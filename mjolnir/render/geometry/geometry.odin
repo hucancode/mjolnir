@@ -114,8 +114,7 @@ init :: proc(
 }
 
 begin_pass :: proc(
-  camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^camera.Camera,
+  camera: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
@@ -123,27 +122,27 @@ begin_pass :: proc(
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
   position_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.POSITION][frame_index],
+    camera.attachments[.POSITION][frame_index],
   )
   normal_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.NORMAL][frame_index],
+    camera.attachments[.NORMAL][frame_index],
   )
   albedo_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.ALBEDO][frame_index],
+    camera.attachments[.ALBEDO][frame_index],
   )
   metallic_roughness_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index],
+    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
   )
   emissive_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.EMISSIVE][frame_index],
+    camera.attachments[.EMISSIVE][frame_index],
   )
   final_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
   // Transition all G-buffer images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
   gpu.image_barrier(
@@ -214,12 +213,12 @@ begin_pass :: proc(
   )
   depth_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.DEPTH][frame_index],
+    camera.attachments[.DEPTH][frame_index],
   )
   gpu.begin_rendering(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(position_texture),
     gpu.create_color_attachment(normal_texture),
@@ -229,13 +228,13 @@ begin_pass :: proc(
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
   )
 }
 
 end_pass :: proc(
-  camera_gpu: ^camera.CameraGPU,
+  camera: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
@@ -244,23 +243,23 @@ end_pass :: proc(
   // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting and post-processing
   position_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.POSITION][frame_index],
+    camera.attachments[.POSITION][frame_index],
   )
   normal_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.NORMAL][frame_index],
+    camera.attachments[.NORMAL][frame_index],
   )
   albedo_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.ALBEDO][frame_index],
+    camera.attachments[.ALBEDO][frame_index],
   )
   metallic_roughness_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index],
+    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
   )
   emissive_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.EMISSIVE][frame_index],
+    camera.attachments[.EMISSIVE][frame_index],
   )
   // transition all G-buffer attachments + depth to SHADER_READ_ONLY_OPTIMAL
   gpu.image_barrier(
@@ -322,8 +321,8 @@ end_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  camera_gpu: ^camera.CameraGPU,
-  camera_handle: d.CameraHandle,
+  camera: ^camera.Camera,
+  camera_handle: u32,
   frame_index: u32,
   command_buffer: vk.CommandBuffer,
   general_pipeline_layout: vk.PipelineLayout,
@@ -346,7 +345,7 @@ render :: proc(
     command_buffer,
     self.pipeline,
     general_pipeline_layout,
-    camera_gpu.camera_buffer_descriptor_sets[frame_index],
+    camera.camera_buffer_descriptor_sets[frame_index],
     textures_descriptor_set,
     bone_descriptor_set,
     material_descriptor_set,
@@ -356,7 +355,7 @@ render :: proc(
     vertex_skinning_descriptor_set,
   )
   push_constants := PushConstant {
-    camera_index = camera_handle.index,
+    camera_index = camera_handle,
   }
   vk.CmdPushConstants(
     command_buffer,

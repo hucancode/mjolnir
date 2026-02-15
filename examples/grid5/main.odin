@@ -21,7 +21,7 @@ main :: proc() {
     }
     world.main_camera_look_at(
       &engine.world,
-      transmute(world.CameraHandle)engine.render.main_camera,
+      engine.world.main_camera,
       {10, 15, 10},
       {0, 0, 0},
     )

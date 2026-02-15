@@ -31,7 +31,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // engine.world.debug_draw_ik = true // Removed: debug_draw_ik no longer available
   world.main_camera_look_at(
     &engine.world,
-    transmute(world.CameraHandle)engine.render.main_camera,
+    engine.world.main_camera,
     {0, 80, 120},
     {0, 0, 0},
   )

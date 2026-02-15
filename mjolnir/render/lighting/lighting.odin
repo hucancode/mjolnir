@@ -70,54 +70,53 @@ LightPushConstant :: struct {
 
 begin_ambient_pass :: proc(
   self: ^Renderer,
-  camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^camera.Camera,
+  camera: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
 ) {
   color_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
   gpu.begin_rendering(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
     nil,
     gpu.create_color_attachment(color_texture),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
     flip_y = false,
   )
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.ambient_pipeline,
     self.ambient_pipeline_layout,
-    camera_gpu.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
+    camera.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
     texture_manager.textures_descriptor_set, // set = 1 (bindless textures)
   )
 }
 
 render_ambient :: proc(
   self: ^Renderer,
-  camera_handle: d.CameraHandle,
-  camera_gpu: ^camera.CameraGPU,
+  camera_handle: u32,
+  camera: ^camera.Camera,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
 ) {
   push := AmbientPushConstant {
-    camera_index           = camera_handle.index,
+    camera_index           = camera_handle,
     environment_index      = self.environment_map.index,
     brdf_lut_index         = self.brdf_lut.index,
-    position_texture_index = camera_gpu.attachments[.POSITION][frame_index].index,
-    normal_texture_index   = camera_gpu.attachments[.NORMAL][frame_index].index,
-    albedo_texture_index   = camera_gpu.attachments[.ALBEDO][frame_index].index,
-    metallic_texture_index = camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    emissive_texture_index = camera_gpu.attachments[.EMISSIVE][frame_index].index,
+    position_texture_index = camera.attachments[.POSITION][frame_index].index,
+    normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
+    albedo_texture_index   = camera.attachments[.ALBEDO][frame_index].index,
+    metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }
@@ -446,8 +445,7 @@ recreate_images :: proc(
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^camera.Camera,
+  camera: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   lights_descriptor_set: vk.DescriptorSet,
@@ -456,29 +454,29 @@ begin_pass :: proc(
 ) {
   final_image := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
   depth_texture := gpu.get_texture_2d(
     texture_manager,
-    camera_gpu.attachments[.DEPTH][frame_index],
+    camera.attachments[.DEPTH][frame_index],
   )
   gpu.begin_rendering(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
     gpu.create_depth_attachment(depth_texture, .LOAD, .DONT_CARE),
     gpu.create_color_attachment(final_image, .LOAD, .STORE, BG_BLUE_GRAY),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
   )
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.lighting_pipeline,
     self.lighting_pipeline_layout,
-    camera_gpu.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame cameras)
+    camera.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame cameras)
     texture_manager.textures_descriptor_set, // set = 1 (textures/samplers)
     lights_descriptor_set, // set = 2 (lights)
     shadow_data_descriptor_set, // set = 3 (per-frame shadow data)
@@ -487,8 +485,8 @@ begin_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  camera_handle: d.CameraHandle,
-  camera_gpu: ^camera.CameraGPU,
+  camera_handle: u32,
+  camera: ^camera.Camera,
   shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
   command_buffer: vk.CommandBuffer,
   lights_buffer: ^gpu.BindlessBuffer(d.Light),
@@ -509,13 +507,13 @@ render :: proc(
     vk.CmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0)
   }
   push_constant := LightPushConstant {
-    scene_camera_idx       = camera_handle.index,
-    position_texture_index = camera_gpu.attachments[.POSITION][frame_index].index,
-    normal_texture_index   = camera_gpu.attachments[.NORMAL][frame_index].index,
-    albedo_texture_index   = camera_gpu.attachments[.ALBEDO][frame_index].index,
-    metallic_texture_index = camera_gpu.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    emissive_texture_index = camera_gpu.attachments[.EMISSIVE][frame_index].index,
-    input_image_index      = camera_gpu.attachments[.FINAL_IMAGE][frame_index].index,
+    scene_camera_idx       = camera_handle,
+    position_texture_index = camera.attachments[.POSITION][frame_index].index,
+    normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
+    albedo_texture_index   = camera.attachments[.ALBEDO][frame_index].index,
+    metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
+    input_image_index      = camera.attachments[.FINAL_IMAGE][frame_index].index,
   }
   for handle in active_lights {
     light := gpu.get(&lights_buffer.buffer, handle.index)

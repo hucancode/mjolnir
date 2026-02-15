@@ -24,7 +24,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Setup camera - try a closer view first
   world.main_camera_look_at(
     &engine.world,
-    transmute(world.CameraHandle)engine.render.main_camera,
+    engine.world.main_camera,
     {3, 2, 3},
     {0, 1, 0},
   )

@@ -88,7 +88,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
   // Setup camera
   world.main_camera_look_at(
     &engine.world,
-    transmute(world.CameraHandle)engine.render.main_camera,
+    engine.world.main_camera,
     {35, 25, 35},
     {0, 0, 0},
   )
@@ -484,7 +484,7 @@ find_navmesh_point_from_mouse :: proc(
   // GLFW returns coordinates with origin at top-left, Y increases downward
   camera := cont.get(
     engine.world.cameras,
-    transmute(world.CameraHandle)engine.render.main_camera,
+    engine.world.main_camera,
   )
   ray_origin, ray_dir := world.camera_viewport_to_world_ray(
     camera,

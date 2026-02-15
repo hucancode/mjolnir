@@ -32,30 +32,21 @@ OrthographicProjection :: struct {
   far:    f32,
 }
 
+CameraProjection :: union {
+  PerspectiveProjection,
+  OrthographicProjection,
+}
+
 // Camera (CPU-only data, managed by World module)
 Camera :: struct {
   position:                [3]f32,
   rotation:                quaternion128,
-  projection:              union {
-    PerspectiveProjection,
-    OrthographicProjection,
-  },
+  projection:              CameraProjection,
   extent:                  [2]u32, // width, height
   enabled_passes:          PassTypeSet,
   enable_culling:          bool,
   enable_depth_pyramid:    bool,
   draw_list_source_handle: CameraHandle,
-}
-
-// SphericalCamera (CPU-only data, managed by World module)
-// Captures a full sphere (omnidirectional view) into a cube map
-SphericalCamera :: struct {
-  center:    [3]f32, // Center position of the sphere
-  radius:    f32, // Capture radius
-  near:      f32, // Near plane
-  far:       f32, // Far plane
-  size:      u32, // Resolution of cube map faces (size x size)
-  max_draws: u32, // Maximum number of draw calls
 }
 
 camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
@@ -266,27 +257,4 @@ camera_use_own_draw_list :: proc(target_camera: ^Camera) {
   target_camera.draw_list_source_handle = {}
   target_camera.enable_culling = true
   target_camera.enable_depth_pyramid = true
-}
-
-spherical_camera_init :: proc(
-  self: ^SphericalCamera,
-  size: u32,
-  center: [3]f32 = {0, 0, 0},
-  radius: f32 = 1.0,
-  near: f32 = 0.1,
-  far: f32 = 100.0,
-  max_draws: u32 = MAX_NODES_IN_SCENE,
-) -> bool {
-  // Initialize CPU-only fields
-  self.center = center
-  self.radius = radius
-  self.near = near
-  self.far = far
-  self.size = size
-  self.max_draws = max_draws
-  return true
-}
-
-spherical_camera_destroy :: proc(self: ^SphericalCamera) {
-  self^ = {}
 }

@@ -368,21 +368,20 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera_gpu: ^camera.CameraGPU,
-  camera_cpu: ^camera.Camera,
+  camera: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
 ) {
   color_texture := gpu.get_texture_2d(texture_manager,
-    camera_gpu.attachments[.FINAL_IMAGE][frame_index],
+    camera.attachments[.FINAL_IMAGE][frame_index],
   )
   if color_texture == nil {
     log.error("Transparent lighting missing color attachment")
     return
   }
   depth_texture := gpu.get_texture_2d(texture_manager,
-    camera_gpu.attachments[.DEPTH][frame_index],
+    camera.attachments[.DEPTH][frame_index],
   )
   if depth_texture == nil {
     log.error("Transparent lighting missing depth attachment")
@@ -390,17 +389,17 @@ begin_pass :: proc(
   }
   gpu.begin_rendering(
     command_buffer,
-    camera_cpu.extent[0],
-    camera_cpu.extent[1],
+    camera.extent[0],
+    camera.extent[1],
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(command_buffer, camera_cpu.extent[0], camera_cpu.extent[1])
+  gpu.set_viewport_scissor(command_buffer, camera.extent[0], camera.extent[1])
 }
 
 render :: proc(
   self: ^Renderer,
-  camera_gpu: ^camera.CameraGPU,
+  camera: ^camera.Camera,
   pipeline: vk.Pipeline,
   general_pipeline_layout: vk.PipelineLayout,
   sprite_pipeline_layout: vk.PipelineLayout,
@@ -414,7 +413,7 @@ render :: proc(
   vertex_skinning_descriptor_set: vk.DescriptorSet,
   vertex_buffer: vk.Buffer,
   index_buffer: vk.Buffer,
-  camera_handle: d.CameraHandle,
+  camera_handle: u32,
   frame_index: u32,
   command_buffer: vk.CommandBuffer,
   draw_buffer: vk.Buffer,
@@ -433,7 +432,7 @@ render :: proc(
       command_buffer,
       pipeline,
       pipeline_layout,
-      camera_gpu.camera_buffer_descriptor_sets[frame_index], // Set 0
+      camera.camera_buffer_descriptor_sets[frame_index], // Set 0
       textures_descriptor_set, // Set 1
       world_matrix_descriptor_set, // Set 2
       node_data_descriptor_set, // Set 3
@@ -445,7 +444,7 @@ render :: proc(
       command_buffer,
       pipeline,
       pipeline_layout,
-      camera_gpu.camera_buffer_descriptor_sets[frame_index], // Set 0
+      camera.camera_buffer_descriptor_sets[frame_index], // Set 0
       textures_descriptor_set, // Set 1
       bone_descriptor_set, // Set 2
       material_descriptor_set, // Set 3
@@ -457,7 +456,7 @@ render :: proc(
   }
 
   push_constants := PushConstant {
-    camera_index = camera_handle.index,
+    camera_index = camera_handle,
   }
   vk.CmdPushConstants(
     command_buffer,

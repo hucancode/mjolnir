@@ -725,7 +725,7 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
       engine.world.active_controller.type if engine.world.active_controller != nil else .ORBIT
     main_camera := cont.get(
       engine.world.cameras,
-      transmute(world.CameraHandle)engine.render.main_camera,
+      engine.world.main_camera,
     )
     if main_camera != nil {
       if current_type == .ORBIT {

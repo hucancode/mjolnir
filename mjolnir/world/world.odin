@@ -154,6 +154,7 @@ World :: struct {
   meshes:                  cont.Pool(Mesh),
   materials:               cont.Pool(Material),
   cameras:                 cont.Pool(Camera),
+  main_camera:             CameraHandle,
   emitters:                cont.Pool(Emitter),
   forcefields:             cont.Pool(ForceField),
   sprites:                 cont.Pool(Sprite),
