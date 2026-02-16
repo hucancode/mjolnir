@@ -38,42 +38,42 @@ init_builtin_meshes :: proc(world: ^World) {
   world.builtin_meshes[Primitive.CUBE], _, _ = create_mesh(
     world,
     geometry.make_cube(),
+    true,
   )
-  stage_mesh_data(&world.staging, world.builtin_meshes[Primitive.CUBE])
   world.builtin_meshes[Primitive.SPHERE], _, _ = create_mesh(
     world,
     geometry.make_sphere(),
+    true,
   )
-  stage_mesh_data(&world.staging, world.builtin_meshes[Primitive.SPHERE])
   world.builtin_meshes[Primitive.QUAD_XZ], _, _ = create_mesh(
     world,
     geometry.make_quad(),
+    true,
   )
-  stage_mesh_data(&world.staging, world.builtin_meshes[Primitive.QUAD_XZ])
   world.builtin_meshes[Primitive.QUAD_XY], _, _ = create_mesh(
     world,
     geometry.make_billboard_quad(),
+    true,
   )
-  stage_mesh_data(&world.staging, world.builtin_meshes[Primitive.QUAD_XY])
   world.builtin_meshes[Primitive.CONE], _, _ = create_mesh(
     world,
     geometry.make_cone(),
+    true,
   )
-  stage_mesh_data(&world.staging, world.builtin_meshes[Primitive.CONE])
   world.builtin_meshes[Primitive.CAPSULE], _, _ = create_mesh(
     world,
     geometry.make_capsule(),
+    true,
   )
-  stage_mesh_data(&world.staging, world.builtin_meshes[Primitive.CAPSULE])
   world.builtin_meshes[Primitive.CYLINDER], _, _ = create_mesh(
     world,
     geometry.make_cylinder(),
+    true,
   )
-  stage_mesh_data(&world.staging, world.builtin_meshes[Primitive.CYLINDER])
   world.builtin_meshes[Primitive.TORUS], _, _ = create_mesh(
     world,
     geometry.make_torus(),
+    true,
   )
-  stage_mesh_data(&world.staging, world.builtin_meshes[Primitive.TORUS])
   log.info("Builtin meshes created successfully")
 }

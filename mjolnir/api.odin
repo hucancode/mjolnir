@@ -531,11 +531,7 @@ bake :: proc(
     exclude_filter,
   )
   if !baked_ok do return
-  defer {
-    delete(baked_geom.vertices)
-    delete(baked_geom.indices)
-  }
-  mesh_handle, _, ok = world.create_mesh(&engine.world, baked_geom)
+  mesh_handle, _, ok = world.create_mesh(&engine.world, baked_geom, true)
   return
 }
 

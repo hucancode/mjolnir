@@ -5,14 +5,14 @@ import cont "../containers"
 import "../geometry"
 import "core:log"
 import "core:math/linalg"
-import "core:slice"
 
 Mesh :: struct {
-  aabb_min:     [3]f32,
-  index_count:  u32,
-  aabb_max:     [3]f32,
-  skinning:     Maybe(Skinning),
-  cpu_geometry: Maybe(geometry.Geometry),
+  aabb_min:                    [3]f32,
+  index_count:                 u32,
+  aabb_max:                    [3]f32,
+  skinning:                    Maybe(Skinning),
+  cpu_geometry:                Maybe(geometry.Geometry),
+  auto_purge_cpu_geometry:     bool,
 }
 
 find_bone_by_name :: proc(
@@ -40,24 +40,23 @@ mesh_destroy :: proc(self: ^Mesh, world: ^World) {
     delete(skin.bones)
     delete(skin.bone_lengths)
   }
-  geom, has_geom := self.cpu_geometry.?
-  if has_geom {
-    delete(geom.vertices)
-    delete(geom.indices)
-    delete(geom.skinnings)
-  }
+  mesh_release_memory(self)
 }
 
-// Initialize mesh CPU data only.
+mesh_release_memory :: proc(self: ^Mesh) {
+  geom, has_geom := self.cpu_geometry.?
+  if !has_geom do return
+  delete(geom.vertices)
+  delete(geom.indices)
+  delete(geom.skinnings)
+  self.cpu_geometry = nil
+}
+
+// Initialize mesh CPU data only. Geometry ownership is transferred to mesh.
 mesh_init :: proc(self: ^Mesh, geometry_data: geometry.Geometry) {
   self.aabb_min = geometry_data.aabb.min
   self.aabb_max = geometry_data.aabb.max
-  self.cpu_geometry = geometry.Geometry {
-    vertices  = slice.clone(geometry_data.vertices),
-    skinnings = slice.clone(geometry_data.skinnings),
-    indices   = slice.clone(geometry_data.indices),
-    aabb      = geometry_data.aabb,
-  }
+  self.cpu_geometry = geometry_data
   // Allocations are filled in outside this module after creation.
   if len(geometry_data.skinnings) > 0 {
     self.skinning = Skinning {
@@ -422,10 +421,8 @@ sample_layers :: proc(
   }
 }
 
-// Creates mesh in resource pool - geometry allocation handled by caller.
-// Creates mesh in resource pool WITHOUT geometry allocation
-// Geometry buffers are allocated outside this module.
-// This is now an internal function used by higher-level allocation paths.
+// Creates mesh in CPU resource pool.
+// Geometry ownership is transferred to the mesh on success.
 create_mesh :: proc(
   world: ^World,
   geometry_data: geometry.Geometry,
@@ -436,7 +433,11 @@ create_mesh :: proc(
   ok: bool,
 ) {
   handle, mesh, ok = cont.alloc(&world.meshes, MeshHandle)
-  if !ok do return
+  if !ok {
+    geometry.delete_geometry(geometry_data)
+    return
+  }
+  mesh.auto_purge_cpu_geometry = auto_purge
   mesh_init(mesh, geometry_data)
   stage_mesh_data(&world.staging, handle)
   return handle, mesh, true

@@ -732,6 +732,11 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     }
   }
   for handle in stale_meshes {
+    if mesh := cont.get(self.world.meshes, handle); mesh != nil {
+      if mesh.auto_purge_cpu_geometry {
+        world.mesh_release_memory(mesh)
+      }
+    }
     delete_key(&self.world.staging.mesh_updates, handle)
   }
   for handle, n in self.world.staging.material_updates {

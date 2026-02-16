@@ -363,7 +363,12 @@ shutdown :: proc(world: ^World) {
   delete(world.cameras.entries)
   delete(world.cameras.free_indices)
 
-  // Clean up meshes (TODO: mesh_destroy needs world version)
+  // Clean up meshes
+  for &entry in world.meshes.entries {
+    if entry.generation > 0 && entry.active {
+      mesh_destroy(&entry.item, world)
+    }
+  }
   delete(world.meshes.entries)
   delete(world.meshes.free_indices)
 

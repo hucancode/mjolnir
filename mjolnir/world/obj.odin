@@ -30,11 +30,6 @@ load_obj :: proc(
     log.errorf("Failed to create mesh from OBJ file: %s", path)
     return nodes, false
   }
-  // Geometry upload is handled by engine/render staging sync.
-  log.warn(
-    "OBJ mesh created in CPU pools; geometry upload must be scheduled by engine",
-  )
-  stage_mesh_data(&world.staging, mesh_handle)
   log.infof("Created mesh %v", mesh_handle)
   // step 3: Create node with mesh attachment
   node_handle, node := cont.alloc(&world.nodes, NodeHandle) or_return

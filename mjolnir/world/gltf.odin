@@ -104,6 +104,9 @@ load_gltf :: proc(
   ) or_return
   // step 3: Geometry Processing
   geometry_cache := make(map[^cgltf.mesh]GeometryData, context.temp_allocator)
+  defer for _, geometry_data in geometry_cache {
+    geometry.delete_geometry(geometry_data.geometry)
+  }
   mesh_skinning_map := make(map[^cgltf.mesh]bool, context.temp_allocator)
   for &node in gltf_data.nodes do if node.mesh != nil && node.skin != nil {
     mesh_skinning_map[node.mesh] = true
@@ -549,16 +552,21 @@ construct_scene :: proc(
     node.parent = entry.parent
     if gltf_node.mesh in geometry_cache {
       geometry_data := geometry_cache[gltf_node.mesh]
+      geometry_copy := geometry.Geometry{
+        vertices  = slice.clone(geometry_data.geometry.vertices),
+        skinnings = slice.clone(geometry_data.geometry.skinnings),
+        indices   = slice.clone(geometry_data.geometry.indices),
+        aabb      = geometry_data.geometry.aabb,
+      }
       mesh_handle: MeshHandle
       if gltf_node.skin in skin_cache {
         skin_data := skin_cache[gltf_node.skin]
         mesh_handle, mesh, alloc_result := create_mesh(
           world,
-          geometry_data.geometry,
+          geometry_copy,
           true,
         )
         if !alloc_result do continue
-        stage_mesh_data(&world.staging, mesh_handle)
         skinning, _ := &mesh.skinning.?
         skinning.bones = make([]Bone, len(skin_data.bones))
         for src_bone, i in skin_data.bones {
@@ -591,11 +599,10 @@ construct_scene :: proc(
       } else {
         mesh_handle, _, alloc_result := create_mesh(
           world,
-          geometry_data.geometry,
+          geometry_copy,
           true,
         )
         if !alloc_result do continue
-        stage_mesh_data(&world.staging, mesh_handle)
         node.attachment = MeshAttachment {
           handle      = mesh_handle,
           material    = geometry_data.material_handle,
