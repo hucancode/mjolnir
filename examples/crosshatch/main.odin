@@ -40,5 +40,5 @@ main :: proc() {
     )
     post_process.add_crosshatch(&engine.render.post_process, {800, 600})
   }
-  mjolnir.run(engine, 800, 600, "visual-postprocess-crosshatch")
+  mjolnir.run(engine, 800, 600, "Crosshatch")
 }

@@ -103,6 +103,6 @@ main :: proc() {
       world.translate(&engine.world, cubes[i], pos.x, pos.y, pos.z)
     }
   }
-  mjolnir.run(engine, 800, 600, "visual-spline")
+  mjolnir.run(engine, 800, 600, "Spline")
   animation.spline_destroy(&spline)
 }

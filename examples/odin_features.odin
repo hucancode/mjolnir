@@ -14,7 +14,7 @@ import "core:math"
 import "base:runtime"
 
 // This test file demonstrates various features of Odin
-// It does not test any functionality
+// It does not test any functionality, it serve as a live documentation
 
 // @(test)
 test_zero_vs_minus_zero :: proc(t: ^testing.T) {

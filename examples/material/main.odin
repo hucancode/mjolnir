@@ -14,7 +14,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
-  mjolnir.run(engine, 800, 600, "visual-material-textured-cube")
+  mjolnir.run(engine, 800, 600, "Material")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {

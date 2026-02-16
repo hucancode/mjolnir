@@ -34,5 +34,5 @@ main :: proc() {
       {0, 0, 0},
     )
   }
-  mjolnir.run(engine, 800, 600, "visual-grid-256")
+  mjolnir.run(engine, 800, 600, "Cube 256x256")
 }

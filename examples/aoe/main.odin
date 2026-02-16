@@ -24,12 +24,10 @@ last_mouse_button_state: bool = false
 
 main :: proc() {
   context.logger = log.create_console_logger()
-  args := os.args
-  log.infof("Starting AOE Visual Test with %d arguments", len(args))
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
-  mjolnir.run(engine, 800, 600, "Mjolnir - AOE Test")
+  mjolnir.run(engine, 800, 600, "AOE Query")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {

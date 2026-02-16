@@ -17,7 +17,7 @@ main :: proc() {
   engine.setup_proc = setup
   engine.update_proc = update
   engine.key_press_proc = on_key_press
-  mjolnir.run(engine, 1280, 720, "Fox Animation Blending + IK")
+  mjolnir.run(engine, 1280, 720, "Fox IK")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -127,8 +127,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         true,
       ),
     ) or_else {}
-
-  log.info("Setup complete!")
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {

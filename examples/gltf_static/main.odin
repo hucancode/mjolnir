@@ -36,5 +36,5 @@ main :: proc() {
       world.rotate_by(&engine.world, handle, rotation)
     }
   }
-  mjolnir.run(engine, 800, 600, "visual-gltf-static")
+  mjolnir.run(engine, 800, 600, "GLTF Static")
 }

@@ -22,7 +22,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
-  mjolnir.run(engine, 800, 600, "Physics Stress Test")
+  mjolnir.run(engine, 800, 600, "Physics")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -205,7 +205,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     math.PI * 0.5,
     linalg.VECTOR3F32_X_AXIS,
   )
-  log.info("Physics demo setup complete")
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

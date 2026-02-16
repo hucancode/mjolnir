@@ -12,5 +12,5 @@ main :: proc() {
     mjolnir.spawn_primitive_mesh(engine, .CUBE, .RED)
     world.main_camera_look_at(&engine.world, engine.world.main_camera, {3, 2, 3}, {0, 0, 0})
   }
-  mjolnir.run(engine, 800, 600, "visual-single-cube")
+  mjolnir.run(engine, 800, 600, "Cube")
 }

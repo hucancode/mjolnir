@@ -17,7 +17,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
-  mjolnir.run(engine, 800, 600, "visual-lights-no-shadows")
+  mjolnir.run(engine, 800, 600, "Light")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {

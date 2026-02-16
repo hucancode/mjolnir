@@ -24,7 +24,7 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
-  mjolnir.run(engine, 800, 600, "spider-ik")
+  mjolnir.run(engine, 800, 600, "IK")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {

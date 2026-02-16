@@ -24,7 +24,7 @@ main :: proc() {
   engine.setup_proc = setup
   engine.update_proc = update
   engine.key_press_proc = on_key_press
-  mjolnir.run(engine, 800, 600, "Physics Visual Test - Jumping Cube")
+  mjolnir.run(engine, 800, 600, "Character Controller")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {

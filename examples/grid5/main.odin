@@ -26,5 +26,5 @@ main :: proc() {
       {0, 0, 0},
     )
   }
-  mjolnir.run(engine, 800, 600, "visual-grid-5")
+  mjolnir.run(engine, 800, 600, "Cube 5x5")
 }

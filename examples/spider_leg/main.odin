@@ -106,18 +106,6 @@ main :: proc() {
         },
       ) or_else {}
     world.scale_xyz(&engine.world, ground_plane_node, 100, 0.2, 100)
-
-    // Lighting
-    light_handle :=
-      world.spawn(
-        &engine.world,
-        {0, 0, 0},
-        world.create_directional_light_attachment(
-          {1.0, 1.0, 1.0, 1.0},
-          10.0,
-          false,
-        ),
-      ) or_else {}
     point_light_handle :=
       world.spawn(
         &engine.world,
@@ -128,12 +116,6 @@ main :: proc() {
           true,
         ),
       ) or_else {}
-
-    log.infof("Visual Test: Spider Leg Core Algorithm - 8 Legs")
-    log.infof("Blue cube = Spider body (leg root)")
-    log.infof("Yellow cubes = Computed targets (root + offset)")
-    log.infof("Green spheres = Actual feet positions")
-    log.infof("Watch the legs lift in sequence creating a walking gait!")
   }
 
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
@@ -169,6 +151,5 @@ main :: proc() {
       }
     }
   }
-
-  mjolnir.run(engine, 800, 600, "visual-spider-leg-core")
+  mjolnir.run(engine, 800, 600, "Spider Leg")
 }

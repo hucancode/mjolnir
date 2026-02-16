@@ -48,5 +48,5 @@ main :: proc() {
       world.rotate_by(&engine.world, handle, rotation)
     }
   }
-  mjolnir.run(engine, 800, 600, "visual-gltf-animation")
+  mjolnir.run(engine, 800, 600, "GLTF Animation")
 }
