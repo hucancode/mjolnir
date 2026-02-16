@@ -21,7 +21,6 @@ main :: proc() {
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     world.main_camera_look_at(
       &engine.world,
-      engine.world.main_camera,
       {0, 10, 0},
       {0, 0, 0},
     )

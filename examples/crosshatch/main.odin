@@ -34,7 +34,6 @@ main :: proc() {
     }
     world.main_camera_look_at(
       &engine.world,
-      engine.world.main_camera,
       {8, 6, 8},
       {0, 0, 0},
     )

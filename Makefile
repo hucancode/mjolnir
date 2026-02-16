@@ -103,6 +103,9 @@ long-proc:
 long-file:
 	find mjolnir -type f -name "*.odin" -exec wc -l {} + | sort -rn | head -n20
 
+long-example:
+	find examples -type f -name "main.odin" -exec wc -l {} + | sort -rn | head -n20
+
 doc:
 	pandoc docs/home.md -s -c style.css -o docs/index.html
 

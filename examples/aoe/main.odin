@@ -95,7 +95,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   world.scale(&engine.world, effector_sphere, 0.5)
   world.main_camera_look_at(
     &engine.world,
-    engine.world.main_camera,
     {10, 30, 10},
     {0, 0, 0},
   )

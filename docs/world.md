@@ -177,7 +177,6 @@ spot_light := world.spawn(
 // Position camera looking at target
 world.main_camera_look_at(
   &engine.world,
-  engine.world.main_camera,
   eye_position = {10, 5, 10},
   target_position = {0, 0, 0},
 )

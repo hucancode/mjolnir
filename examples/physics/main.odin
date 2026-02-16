@@ -186,7 +186,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.infof("Created %d physics objects", PIECE_COUNT)
   world.main_camera_look_at(
     &engine.world,
-    engine.world.main_camera,
     {30, 25, 30},
     {0, 5, 0},
   )

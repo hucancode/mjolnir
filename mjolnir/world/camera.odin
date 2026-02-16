@@ -123,10 +123,9 @@ camera_look_at :: proc(self: ^Camera, from, to: [3]f32) {
 
 main_camera_look_at :: proc(
   world: ^World,
-  main_camera_handle: CameraHandle,
   from, to: [3]f32,
 ) {
-  camera, ok := cont.get(world.cameras, main_camera_handle)
+  camera, ok := cont.get(world.cameras, world.main_camera)
   if !ok do return
   camera_look_at(camera, from, to)
   if world.active_controller != nil {

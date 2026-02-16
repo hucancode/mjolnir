@@ -22,12 +22,8 @@ main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
-    // Enable IK debug drawing
-    // engine.world.debug_draw_ik = true // Removed: debug_draw_ik no longer available
-
     world.main_camera_look_at(
       &engine.world,
-      engine.world.main_camera,
       {0, 80, 120},
       {0, 0, 0},
     )

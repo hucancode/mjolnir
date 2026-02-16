@@ -253,7 +253,6 @@ main :: proc() {
     mjolnir.spawn_primitive_mesh(engine, .CUBE, .BLUE)
     world.main_camera_look_at(
       &engine.world,
-      engine.world.main_camera,
       {3, 2, 3},
       {0, 0, 0},
     )
