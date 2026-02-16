@@ -1239,6 +1239,7 @@ build_active_render_light_handles :: proc(
 
 @(private = "file")
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
+  old_extent := engine.swapchain.extent
   gpu.swapchain_recreate(
     &engine.gctx,
     &engine.swapchain,
@@ -1246,42 +1247,50 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   ) or_return
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
-  if main_camera := get_main_camera(engine); main_camera != nil {
-    world.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
-    world.stage_camera_data(&engine.world.staging, engine.world.main_camera)
-    descriptor_set := engine.render.textures_descriptor_set
-    set_descriptor :: proc(
-      gctx: ^gpu.GPUContext,
-      index: u32,
-      view: vk.ImageView,
-    ) {
-      desc_set := (cast(^vk.DescriptorSet)context.user_ptr)^
-      render.set_texture_2d_descriptor(gctx, desc_set, index, view)
+  for &entry, cam_index in engine.world.cameras.entries {
+    if !entry.active do continue
+    world_camera := &entry.item
+    world.camera_update_aspect_ratio(world_camera, new_aspect_ratio)
+    if world_camera.extent[0] == old_extent.width &&
+       world_camera.extent[1] == old_extent.height {
+      world.camera_resize(
+        world_camera,
+        engine.swapchain.extent.width,
+        engine.swapchain.extent.height,
+      )
     }
-    context.user_ptr = &descriptor_set
-    camera_gpu := &engine.render.cameras[engine.world.main_camera.index]
-    camera.resize(
-      &engine.gctx,
-      camera_gpu,
-      &engine.render.texture_manager,
-      engine.swapchain.extent.width,
-      engine.swapchain.extent.height,
-      engine.swapchain.format.format,
-      vk.Format.D32_SFLOAT,
-      transmute(camera.PassTypeSet)main_camera.enabled_passes,
-      main_camera.enable_depth_pyramid,
-    ) or_return
-    camera.allocate_descriptors(
-      &engine.gctx,
-      camera_gpu,
-      &engine.render.texture_manager,
-      &engine.render.visibility.normal_cam_descriptor_layout,
-      &engine.render.visibility.depth_reduce_descriptor_layout,
-      &engine.render.node_data_buffer,
-      &engine.render.mesh_data_buffer,
-      &engine.render.world_matrix_buffer,
-      &engine.render.camera_buffer,
-    ) or_return
+    world.stage_camera_data(
+      &engine.world.staging,
+      world.CameraHandle{
+        index = u32(cam_index),
+        generation = entry.generation,
+      },
+    )
+    if camera_gpu := &engine.render.cameras[u32(cam_index)];
+       camera_gpu != nil {
+      camera.resize(
+        &engine.gctx,
+        camera_gpu,
+        &engine.render.texture_manager,
+        world_camera.extent[0],
+        world_camera.extent[1],
+        engine.swapchain.format.format,
+        vk.Format.D32_SFLOAT,
+        transmute(camera.PassTypeSet)world_camera.enabled_passes,
+        world_camera.enable_depth_pyramid,
+      ) or_return
+      camera.allocate_descriptors(
+        &engine.gctx,
+        camera_gpu,
+        &engine.render.texture_manager,
+        &engine.render.visibility.normal_cam_descriptor_layout,
+        &engine.render.visibility.depth_reduce_descriptor_layout,
+        &engine.render.node_data_buffer,
+        &engine.render.mesh_data_buffer,
+        &engine.render.world_matrix_buffer,
+        &engine.render.camera_buffer,
+      ) or_return
+    }
   }
   render.resize(
     &engine.render,

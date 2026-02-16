@@ -667,6 +667,13 @@ resize :: proc(
     extent.height,
     color_format,
   ) or_return
+  debug_ui.recreate_images(
+    &self.debug_ui,
+    color_format,
+    extent.width,
+    extent.height,
+    dpi_scale,
+  ) or_return
   return .SUCCESS
 }
 
@@ -853,58 +860,52 @@ record_transparency_pass :: proc(
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  camera, ok := &self.cameras[camera_handle]
+  cam, ok := &self.cameras[camera_handle]
   if !ok do return .ERROR_UNKNOWN
-  // Barrier: Wait for compute to finish before reading draw commands
-  gpu.buffer_barrier(
-    command_buffer,
-    camera.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(
-      camera.transparent_draw_commands[frame_index].bytes_count,
-    ),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    command_buffer,
-    camera.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(camera.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    command_buffer,
-    camera.sprite_draw_commands[frame_index].buffer,
-    vk.DeviceSize(camera.sprite_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    command_buffer,
-    camera.sprite_draw_count[frame_index].buffer,
-    vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
   transparency.begin_pass(
     &self.transparency,
-    camera,
+    cam,
     &self.texture_manager,
     command_buffer,
     frame_index,
   )
   // Render transparent objects
+  camera.perform_culling(
+    &self.visibility,
+    gctx,
+    command_buffer,
+    cam,
+    camera_handle,
+    frame_index,
+    NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT},
+    NodeFlagSet{
+      .MATERIAL_WIREFRAME,
+      .MATERIAL_RANDOM_COLOR,
+      .MATERIAL_LINE_STRIP,
+      .MATERIAL_SPRITE,
+    },
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.transparent_draw_commands[frame_index].buffer,
+    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.transparent_draw_count[frame_index].buffer,
+    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
   transparency.render(
     &self.transparency,
-    camera,
+    cam,
     self.transparency.transparent_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
@@ -921,13 +922,46 @@ record_transparency_pass :: proc(
     camera_handle,
     frame_index,
     command_buffer,
-    camera.transparent_draw_commands[frame_index].buffer,
-    camera.transparent_draw_count[frame_index].buffer,
+    cam.transparent_draw_commands[frame_index].buffer,
+    cam.transparent_draw_count[frame_index].buffer,
   )
   // Render wireframe objects
+  camera.perform_culling(
+    &self.visibility,
+    gctx,
+    command_buffer,
+    cam,
+    camera_handle,
+    frame_index,
+    NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME},
+    NodeFlagSet{
+      .MATERIAL_TRANSPARENT,
+      .MATERIAL_RANDOM_COLOR,
+      .MATERIAL_LINE_STRIP,
+      .MATERIAL_SPRITE,
+    },
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.transparent_draw_commands[frame_index].buffer,
+    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.transparent_draw_count[frame_index].buffer,
+    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
   transparency.render(
     &self.transparency,
-    camera,
+    cam,
     self.transparency.wireframe_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
@@ -944,13 +978,46 @@ record_transparency_pass :: proc(
     camera_handle,
     frame_index,
     command_buffer,
-    camera.transparent_draw_commands[frame_index].buffer,
-    camera.transparent_draw_count[frame_index].buffer,
+    cam.transparent_draw_commands[frame_index].buffer,
+    cam.transparent_draw_count[frame_index].buffer,
   )
   // Render random_color objects
+  camera.perform_culling(
+    &self.visibility,
+    gctx,
+    command_buffer,
+    cam,
+    camera_handle,
+    frame_index,
+    NodeFlagSet{.VISIBLE, .MATERIAL_RANDOM_COLOR},
+    NodeFlagSet{
+      .MATERIAL_TRANSPARENT,
+      .MATERIAL_WIREFRAME,
+      .MATERIAL_LINE_STRIP,
+      .MATERIAL_SPRITE,
+    },
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.transparent_draw_commands[frame_index].buffer,
+    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.transparent_draw_count[frame_index].buffer,
+    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
   transparency.render(
     &self.transparency,
-    camera,
+    cam,
     self.transparency.random_color_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
@@ -967,13 +1034,46 @@ record_transparency_pass :: proc(
     camera_handle,
     frame_index,
     command_buffer,
-    camera.transparent_draw_commands[frame_index].buffer,
-    camera.transparent_draw_count[frame_index].buffer,
+    cam.transparent_draw_commands[frame_index].buffer,
+    cam.transparent_draw_count[frame_index].buffer,
   )
   // Render line_strip objects
+  camera.perform_culling(
+    &self.visibility,
+    gctx,
+    command_buffer,
+    cam,
+    camera_handle,
+    frame_index,
+    NodeFlagSet{.VISIBLE, .MATERIAL_LINE_STRIP},
+    NodeFlagSet{
+      .MATERIAL_TRANSPARENT,
+      .MATERIAL_WIREFRAME,
+      .MATERIAL_RANDOM_COLOR,
+      .MATERIAL_SPRITE,
+    },
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.transparent_draw_commands[frame_index].buffer,
+    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.transparent_draw_count[frame_index].buffer,
+    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
   transparency.render(
     &self.transparency,
-    camera,
+    cam,
     self.transparency.line_strip_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
@@ -990,13 +1090,41 @@ record_transparency_pass :: proc(
     camera_handle,
     frame_index,
     command_buffer,
-    camera.transparent_draw_commands[frame_index].buffer,
-    camera.transparent_draw_count[frame_index].buffer,
+    cam.transparent_draw_commands[frame_index].buffer,
+    cam.transparent_draw_count[frame_index].buffer,
   )
   // Render sprites
+  camera.perform_culling(
+    &self.visibility,
+    gctx,
+    command_buffer,
+    cam,
+    camera_handle,
+    frame_index,
+    NodeFlagSet{.VISIBLE, .MATERIAL_SPRITE},
+    NodeFlagSet{},
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.sprite_draw_commands[frame_index].buffer,
+    vk.DeviceSize(cam.sprite_draw_commands[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    cam.sprite_draw_count[frame_index].buffer,
+    vk.DeviceSize(cam.sprite_draw_count[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
   transparency.render(
     &self.transparency,
-    camera,
+    cam,
     self.transparency.sprite_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
@@ -1013,8 +1141,8 @@ record_transparency_pass :: proc(
     camera_handle,
     frame_index,
     command_buffer,
-    camera.sprite_draw_commands[frame_index].buffer,
-    camera.sprite_draw_count[frame_index].buffer,
+    cam.sprite_draw_commands[frame_index].buffer,
+    cam.sprite_draw_count[frame_index].buffer,
   )
   transparency.end_pass(&self.transparency, command_buffer)
   return .SUCCESS
