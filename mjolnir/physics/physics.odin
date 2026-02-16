@@ -135,6 +135,7 @@ destroy :: proc(self: ^World) {
       self.thread_pool.is_running,
       len(self.thread_pool.threads),
     )
+    thread.pool_join(&self.thread_pool)
     thread.pool_destroy(&self.thread_pool)
   }
   cont.destroy_soa(self.bodies, proc(body: ^DynamicRigidBody) {})

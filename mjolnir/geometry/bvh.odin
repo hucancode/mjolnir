@@ -1344,7 +1344,6 @@ bvh_build_task :: proc(task: thread.Task) {
     &left_task_data,
     0,
   )
-
   thread.pool_add_task(
     data.thread_pool,
     mem.nil_allocator(),
@@ -1352,10 +1351,13 @@ bvh_build_task :: proc(task: thread.Task) {
     &right_task_data,
     0,
   )
-
   // Wait for both subtasks to complete
   for sync.atomic_load(&left_result) == nil || sync.atomic_load(&right_result) == nil {
-    time.sleep(time.Microsecond * 10)
+    if queued_task, ok := thread.pool_pop_waiting(data.thread_pool); ok {
+      thread.pool_do_work(data.thread_pool, queued_task)
+      continue
+    }
+    time.sleep(time.Microsecond * 100)
   }
 
   node.left = left_result
@@ -1397,6 +1399,10 @@ parallel_build_recursive :: proc(
 
   // Wait for root task to complete
   for sync.atomic_load(&result) == nil {
+    if queued_task, ok := thread.pool_pop_waiting(pool); ok {
+      thread.pool_do_work(pool, queued_task)
+      continue
+    }
     time.sleep(time.Microsecond * 100)
   }
 
@@ -1419,7 +1425,7 @@ bvh_build_parallel :: proc(
   if len(items) == 0 do return
 
   // Fallback to sequential for small datasets or no thread pool
-  if len(items) < parallel_threshold || thread_pool == nil {
+  if len(items) < parallel_threshold || thread_pool == nil || !thread_pool.is_running || len(thread_pool.threads) == 0 {
     bvh_build(bvh, items, max_leaf_size)
     return
   }

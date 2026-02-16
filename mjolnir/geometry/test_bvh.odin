@@ -1,11 +1,13 @@
 package geometry
 
 import "core:log"
+import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:testing"
 import "core:time"
+import "core:thread"
 
 BVHTestItem :: struct {
   id:     i32,
@@ -933,6 +935,141 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
   err := time.benchmark(options)
   log.infof(
     "BVH refit: %d refits in %v (%.2f MB/s) | %.2f ms/refit",
+    options.rounds,
+    options.duration,
+    options.megabytes_per_second,
+    f64(options.duration) / 1000000 / f64(options.rounds),
+  )
+}
+
+@(test)
+bvh_build_sequential_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 30 * time.Second)
+  BuildInput :: struct {
+    items: []BVHTestItem,
+  }
+  setup_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    input := new(BuildInput)
+    input.items = make([]BVHTestItem, 100000)
+    for i in 0 ..< len(input.items) {
+      x := f32(i % 200 - 100) * 2
+      y := f32((i / 200) % 200 - 100) * 2
+      z := f32((i / 40000) % 200 - 100) * 2
+      input.items[i] = make_test_item(i32(i), {x, y, z}, 1.5)
+    }
+    options.input = slice.bytes_from_ptr(
+      input,
+      size_of(^BuildInput),
+    )
+    return nil
+  }
+  bench_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    input := cast(^BuildInput)raw_data(options.input)
+    for _ in 0 ..< options.rounds {
+      bvh: BVH(BVHTestItem)
+      bvh.bounds_func = test_bvh_item_bounds
+      bvh_build(&bvh, input.items)
+      options.processed += len(input.items) * size_of(BVHTestItem)
+      bvh_destroy(&bvh)
+    }
+    return nil
+  }
+  teardown_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    input := cast(^BuildInput)raw_data(options.input)
+    delete(input.items)
+    free(input)
+    return nil
+  }
+  options := &time.Benchmark_Options {
+    rounds = 5,
+    bytes = size_of(BVHTestItem) * 100000 * 5,
+    setup = setup_proc,
+    bench = bench_proc,
+    teardown = teardown_proc,
+  }
+  _ = time.benchmark(options)
+  log.infof(
+    "BVH sequential build: %d items built %d times in %v (%.2f MB/s) | %.2f ms/build",
+    100000,
+    options.rounds,
+    options.duration,
+    options.megabytes_per_second,
+    f64(options.duration) / 1000000 / f64(options.rounds),
+  )
+}
+
+@(test)
+bvh_build_parallel_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 30 * time.Second)
+  BuildParallelInput :: struct {
+    items: []BVHTestItem,
+    pool:  thread.Pool,
+  }
+  setup_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    input := new(BuildParallelInput)
+    input.items = make([]BVHTestItem, 100000)
+    for i in 0 ..< len(input.items) {
+      x := f32(i % 200 - 100) * 2
+      y := f32((i / 200) % 200 - 100) * 2
+      z := f32((i / 40000) % 200 - 100) * 2
+      input.items[i] = make_test_item(i32(i), {x, y, z}, 1.5)
+    }
+    thread.pool_init(&input.pool, context.allocator, 16)
+    thread.pool_start(&input.pool)
+    options.input = slice.bytes_from_ptr(
+      input,
+      size_of(^BuildParallelInput),
+    )
+    return nil
+  }
+  bench_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    input := cast(^BuildParallelInput)raw_data(options.input)
+    for _ in 0 ..< options.rounds {
+      bvh: BVH(BVHTestItem)
+      bvh.bounds_func = test_bvh_item_bounds
+      bvh_build_parallel(&bvh, input.items, &input.pool)
+      options.processed += len(input.items) * size_of(BVHTestItem)
+      bvh_destroy(&bvh)
+    }
+    return nil
+  }
+  teardown_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    input := cast(^BuildParallelInput)raw_data(options.input)
+    thread.pool_join(&input.pool)
+    thread.pool_destroy(&input.pool)
+    delete(input.items)
+    free(input)
+    return nil
+  }
+  options := &time.Benchmark_Options {
+    rounds = 5,
+    bytes = size_of(BVHTestItem) * 100000 * 5,
+    setup = setup_proc,
+    bench = bench_proc,
+    teardown = teardown_proc,
+  }
+  _ = time.benchmark(options)
+  log.infof(
+    "BVH parallel build: %d items built %d times in %v (%.2f MB/s) | %.2f ms/build",
+    100000,
     options.rounds,
     options.duration,
     options.megabytes_per_second,
