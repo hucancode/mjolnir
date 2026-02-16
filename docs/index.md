@@ -1,6 +1,6 @@
 # Mjolnir Engine
 
-Mjolnir is a minimalistic game engine to help people enjoy game programming.
+[Mjolnir](https://github.com/hucancode/mjolnir) is a minimalistic game engine to help people enjoy game programming
 
 ![](images/lights.png)
 
