@@ -1,38 +1,41 @@
 #version 450
 
 layout(location = 0) out vec4 outColor;
+layout(location = 0) flat in uint node_index;
 
-layout(push_constant) uniform PushConstants {
-    mat4 transform;
-    vec4 color;
-    uint camera_index;
-    uint style;
+struct MaterialData {
+    uint albedo_index;
+    uint metallic_roughness_index;
+    uint normal_index;
+    uint emissive_index;
+    float metallic_value;
+    float roughness_value;
+    float emissive_value;
+    uint features;
+    vec4 base_color_factor;
 };
 
-// Simple hash function for pseudo-random color generation
-float hash(uint x) {
-    x = ((x >> 16) ^ x) * 0x45d9f3bu;
-    x = ((x >> 16) ^ x) * 0x45d9f3bu;
-    x = (x >> 16) ^ x;
-    return float(x) / 4294967295.0;
-}
+layout(set = 3, binding = 0) readonly buffer MaterialBuffer {
+    MaterialData materials[];
+};
 
-vec3 hsv_to_rgb(vec3 hsv) {
-    vec3 rgb = clamp(abs(mod(hsv.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
-    return hsv.z * mix(vec3(1.0), rgb, hsv.y);
-}
+struct NodeData {
+    uint material_id;
+    uint mesh_id;
+    uint attachment_data_index;
+    uint flags;
+};
+
+layout(set = 5, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint camera_index;
+};
 
 void main() {
-    if (style == 1u) {
-        // Random color mode - generate color from gl_PrimitiveID
-        uint seed = uint(gl_PrimitiveID);
-        float h = hash(seed);
-        float s = 0.7 + hash(seed + 1u) * 0.3;
-        float v = 0.8 + hash(seed + 2u) * 0.2;
-        vec3 rgb = hsv_to_rgb(vec3(h, s, v));
-        outColor = vec4(rgb, color.a);
-    } else {
-        // Uniform color or wireframe mode
-        outColor = color;
-    }
+    NodeData node = nodes[node_index];
+    MaterialData material = materials[node.material_id];
+    outColor = material.base_color_factor;
 }
