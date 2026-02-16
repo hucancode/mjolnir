@@ -522,7 +522,17 @@ step :: proc(self: ^World, dt: f32) {
         DynamicBroadPhaseEntry{handle = handle, bounds = body.cached_aabb},
       )
     }
-    geometry.bvh_build(&self.dynamic_bvh, entries[:], 4)
+    if self.enable_parallel {
+      geometry.bvh_build_parallel(
+        &self.dynamic_bvh,
+        entries[:],
+        &self.thread_pool,
+        4,
+        1000,
+      )
+    } else {
+      geometry.bvh_build(&self.dynamic_bvh, entries[:], 4)
+    }
     self.killed_body_count = 0 // Reset counter after cleanup
     self.last_dynamic_count = dynamic_body_count // Update tracked count
     bvh_build_time += time.since(bvh_build_start)
@@ -550,7 +560,17 @@ step :: proc(self: ^World, dt: f32) {
         StaticBroadPhaseEntry{handle = handle, bounds = body.cached_aabb},
       )
     }
-    geometry.bvh_build(&self.static_bvh, entries[:], 4)
+    if self.enable_parallel {
+      geometry.bvh_build_parallel(
+        &self.static_bvh,
+        entries[:],
+        &self.thread_pool,
+        4,
+        1000,
+      )
+    } else {
+      geometry.bvh_build(&self.static_bvh, entries[:], 4)
+    }
     self.last_static_count = static_body_count // Update tracked count
     bvh_build_time += time.since(bvh_build_start)
   }
