@@ -103,4 +103,7 @@ long-proc:
 long-file:
 	find mjolnir -type f -name "*.odin" -exec wc -l {} + | sort -rn | head -n20
 
-.PHONY: build run debug shader check clean vtest golden long-proc long-file
+doc:
+	pandoc docs/home.md -s -c style.css -o docs/index.html
+
+.PHONY: build run debug shader check clean vtest golden long-proc long-file doc
