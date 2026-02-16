@@ -15,6 +15,7 @@ body {
   font-family: sans-serif;
   color: var(--fg);
   background: var(--bg);
+  line-height: 1.3em;
 }
 
 blockquote {
