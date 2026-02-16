@@ -14,6 +14,8 @@ NY :: #config(NY, 2)
 NZ :: #config(NZ, 3)
 PIECE_COUNT :: NX * NY * NZ
 SPHERE_RADIUS :: 3.0
+PLANE_WIDTH :: NX * 0.8
+PLANE_HEIGHT :: NZ * 0.8
 
 physics_world: physics.World
 
@@ -49,7 +51,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create static physics body (no attachment needed - it doesn't move)
     physics.create_static_body_box(
       &physics_world,
-      {14.0, 0.5, 14.0},
+      {PLANE_WIDTH, 0.5, PLANE_HEIGHT},
       ground_node.transform.position,
       ground_node.transform.rotation,
     )
@@ -63,7 +65,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           material = ground_mat,
         },
       ) or_else {}
-    world.scale_xyz(&engine.world, ground_mesh_handle, 14.0, 0.5, 14.0)
+    world.scale_xyz(&engine.world, ground_mesh_handle, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
     log.info("Ground created")
   }
   // Create sphere
@@ -91,7 +93,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("Sphere created")
   }
   // Create cube grid
-  piece_positions: [PIECE_COUNT][3]f32
+  piece_positions: [][3]f32 = make([][3]f32, PIECE_COUNT)
   idx := 0
   for x in 0 ..< NX {
     for y in 0 ..< NY {
