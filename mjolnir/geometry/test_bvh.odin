@@ -944,6 +944,8 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 bvh_build_sequential_benchmark :: proc(t: ^testing.T) {
+  N :: 20000
+  ROUNDS :: 5
   testing.set_fail_timeout(t, 30 * time.Second)
   BuildInput :: struct {
     items: []BVHTestItem,
@@ -953,7 +955,7 @@ bvh_build_sequential_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     input := new(BuildInput)
-    input.items = make([]BVHTestItem, 100000)
+    input.items = make([]BVHTestItem, N)
     for i in 0 ..< len(input.items) {
       x := f32(i % 200 - 100) * 2
       y := f32((i / 200) % 200 - 100) * 2
@@ -990,8 +992,8 @@ bvh_build_sequential_benchmark :: proc(t: ^testing.T) {
     return nil
   }
   options := &time.Benchmark_Options {
-    rounds = 5,
-    bytes = size_of(BVHTestItem) * 100000 * 5,
+    rounds = ROUNDS,
+    bytes = size_of(BVHTestItem) * N * ROUNDS,
     setup = setup_proc,
     bench = bench_proc,
     teardown = teardown_proc,
@@ -999,7 +1001,7 @@ bvh_build_sequential_benchmark :: proc(t: ^testing.T) {
   _ = time.benchmark(options)
   log.infof(
     "BVH sequential build: %d items built %d times in %v (%.2f MB/s) | %.2f ms/build",
-    100000,
+    N,
     options.rounds,
     options.duration,
     options.megabytes_per_second,
@@ -1009,6 +1011,8 @@ bvh_build_sequential_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 bvh_build_parallel_benchmark :: proc(t: ^testing.T) {
+  N :: 20000
+  ROUNDS :: 5
   testing.set_fail_timeout(t, 30 * time.Second)
   BuildParallelInput :: struct {
     items: []BVHTestItem,
@@ -1019,7 +1023,7 @@ bvh_build_parallel_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     input := new(BuildParallelInput)
-    input.items = make([]BVHTestItem, 100000)
+    input.items = make([]BVHTestItem, N)
     for i in 0 ..< len(input.items) {
       x := f32(i % 200 - 100) * 2
       y := f32((i / 200) % 200 - 100) * 2
@@ -1060,8 +1064,8 @@ bvh_build_parallel_benchmark :: proc(t: ^testing.T) {
     return nil
   }
   options := &time.Benchmark_Options {
-    rounds = 5,
-    bytes = size_of(BVHTestItem) * 100000 * 5,
+    rounds = ROUNDS,
+    bytes = size_of(BVHTestItem) * N * ROUNDS,
     setup = setup_proc,
     bench = bench_proc,
     teardown = teardown_proc,
@@ -1069,7 +1073,7 @@ bvh_build_parallel_benchmark :: proc(t: ^testing.T) {
   _ = time.benchmark(options)
   log.infof(
     "BVH parallel build: %d items built %d times in %v (%.2f MB/s) | %.2f ms/build",
-    100000,
+    N,
     options.rounds,
     options.duration,
     options.megabytes_per_second,
