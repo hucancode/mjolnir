@@ -409,14 +409,12 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
 
   // Create line strip geometry
   path_vertices := make([]geometry.Vertex, len(current_path))
-  defer delete(path_vertices)
   for pos, i in current_path {
     path_vertices[i] = geometry.Vertex {
       position = pos,
     }
   }
   indices := make([]u32, len(path_vertices))
-  defer delete(indices)
   for i in 0 ..< len(indices) {
     indices[i] = u32(i)
   }
