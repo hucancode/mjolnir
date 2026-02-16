@@ -775,7 +775,7 @@ step :: proc(self: ^World, dt: f32) {
     update_cached_aabb(&trigger.base)
     // Dynamic body overlaps
     clear(&trigger_dyn_candidates)
-    bvh_query_aabb_fast(
+    geometry.bvh_query_aabb(
       &self.dynamic_bvh,
       trigger.cached_aabb,
       &trigger_dyn_candidates,
@@ -800,7 +800,7 @@ step :: proc(self: ^World, dt: f32) {
     }
     // Static body overlaps
     clear(&trigger_static_candidates)
-    bvh_query_aabb_fast(
+    geometry.bvh_query_aabb(
       &self.static_bvh,
       trigger.cached_aabb,
       &trigger_static_candidates,

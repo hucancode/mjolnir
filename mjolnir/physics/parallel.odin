@@ -307,7 +307,7 @@ collision_detection_task :: proc(task: thread.Task) {
     data.bodies_tested += 1
     // Query dynamic BVH for dynamic-dynamic collisions
     clear(&dyn_candidates)
-    bvh_query_aabb_fast(
+    geometry.bvh_query_aabb(
       &data.physics.dynamic_bvh,
       bvh_entry.bounds,
       &dyn_candidates,
@@ -348,7 +348,7 @@ collision_detection_task :: proc(task: thread.Task) {
     }
     // Query static BVH for dynamic-static collisions
     clear(&static_candidates)
-    bvh_query_aabb_fast(
+    geometry.bvh_query_aabb(
       &data.physics.static_bvh,
       bvh_entry.bounds,
       &static_candidates,
@@ -420,7 +420,7 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
       data.bodies_tested += 1
       // Query dynamic BVH for dynamic-dynamic collisions
       clear(&dyn_candidates)
-      bvh_query_aabb_fast(
+      geometry.bvh_query_aabb(
         &data.physics.dynamic_bvh,
         bvh_entry.bounds,
         &dyn_candidates,
@@ -462,7 +462,7 @@ collision_detection_task_dynamic :: proc(task: thread.Task) {
       }
       // Query static BVH for dynamic-static collisions
       clear(&static_candidates)
-      bvh_query_aabb_fast(
+      geometry.bvh_query_aabb(
         &data.physics.static_bvh,
         bvh_entry.bounds,
         &static_candidates,
@@ -637,7 +637,7 @@ sequential_collision_detection :: proc(physics: ^World) {
     if body_a.is_killed || body_a.is_sleeping do continue
     // Query dynamic BVH for dynamic-dynamic collisions
     clear(&dyn_candidates)
-    bvh_query_aabb_fast(
+    geometry.bvh_query_aabb(
       &physics.dynamic_bvh,
       bvh_entry.bounds,
       &dyn_candidates,
@@ -672,7 +672,7 @@ sequential_collision_detection :: proc(physics: ^World) {
     }
     // Query static BVH for dynamic-static collisions
     clear(&static_candidates)
-    bvh_query_aabb_fast(
+    geometry.bvh_query_aabb(
       &physics.static_bvh,
       bvh_entry.bounds,
       &static_candidates,
@@ -716,17 +716,17 @@ sequential_collision_detection_traversal :: proc(physics: ^World) {
   // Find all dynamic-dynamic overlapping pairs using tree traversal
   traversal_start := time.now()
   dynamic_pairs := make(
-    [dynamic]BVHOverlapPair(DynamicBroadPhaseEntry),
+    [dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry),
     context.temp_allocator,
   )
-  bvh_find_all_overlaps_fast(&physics.dynamic_bvh, &dynamic_pairs)
+  geometry.bvh_find_all_overlaps(&physics.dynamic_bvh, &dynamic_pairs)
 
   // Find all dynamic-static overlapping pairs
   static_pairs := make(
-    [dynamic]BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
+    [dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
     context.temp_allocator,
   )
-  bvh_find_cross_overlaps_fast(&physics.dynamic_bvh, &physics.static_bvh, &static_pairs)
+  geometry.bvh_find_cross_overlaps(&physics.dynamic_bvh, &physics.static_bvh, &static_pairs)
 
   traversal_time := time.since(traversal_start)
 
@@ -911,7 +911,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
       )
       // Query dynamic BVH
       clear(&dyn_candidates)
-      bvh_query_aabb_fast(
+      geometry.bvh_query_aabb(
         &data.physics.dynamic_bvh,
         swept_aabb,
         &dyn_candidates,
@@ -941,7 +941,7 @@ ccd_task_dynamic :: proc(task: thread.Task) {
       }
       // Query static BVH
       clear(&static_candidates)
-      bvh_query_aabb_fast(
+      geometry.bvh_query_aabb(
         &data.physics.static_bvh,
         swept_aabb,
         &static_candidates,
@@ -1087,7 +1087,7 @@ sequential_ccd :: proc(
     swept_aabb.max = linalg.max(body_a.cached_aabb.max, body_a.cached_aabb.max + motion)
     // Query dynamic BVH
     clear(&dyn_candidates)
-    bvh_query_aabb_fast(&physics.dynamic_bvh, swept_aabb, &dyn_candidates)
+    geometry.bvh_query_aabb(&physics.dynamic_bvh, swept_aabb, &dyn_candidates)
     total_candidates += len(dyn_candidates)
     for candidate in dyn_candidates {
       handle_b := candidate.handle
@@ -1105,7 +1105,7 @@ sequential_ccd :: proc(
     }
     // Query static BVH
     clear(&static_candidates)
-    bvh_query_aabb_fast(&physics.static_bvh, swept_aabb, &static_candidates)
+    geometry.bvh_query_aabb(&physics.static_bvh, swept_aabb, &static_candidates)
     total_candidates += len(static_candidates)
     for candidate in static_candidates {
       handle_b := candidate.handle
@@ -1151,8 +1151,8 @@ sequential_ccd :: proc(
 // This finds all overlapping pairs in a single tree traversal
 Collision_Detection_Task_Data_Traversal :: struct {
   physics:            ^World,
-  dynamic_pairs:      []BVHOverlapPair(DynamicBroadPhaseEntry),
-  static_pairs:       []BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
+  dynamic_pairs:      []geometry.BVHOverlapPair(DynamicBroadPhaseEntry),
+  static_pairs:       []geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
   start:              int,
   end:                int,
   dynamic_contacts:   [dynamic]DynamicContact,
@@ -1292,17 +1292,17 @@ parallel_collision_detection_traversal :: proc(
   // Find all dynamic-dynamic overlapping pairs using tree traversal
   traversal_start := time.now()
   dynamic_pairs := make(
-    [dynamic]BVHOverlapPair(DynamicBroadPhaseEntry),
+    [dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry),
     context.temp_allocator,
   )
-  bvh_find_all_overlaps_fast(&self.dynamic_bvh, &dynamic_pairs)
+  geometry.bvh_find_all_overlaps(&self.dynamic_bvh, &dynamic_pairs)
 
   // Find all dynamic-static overlapping pairs
   static_pairs := make(
-    [dynamic]BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
+    [dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
     context.temp_allocator,
   )
-  bvh_find_cross_overlaps_fast(&self.dynamic_bvh, &self.static_bvh, &static_pairs)
+  geometry.bvh_find_cross_overlaps(&self.dynamic_bvh, &self.static_bvh, &static_pairs)
 
   traversal_time := time.since(traversal_start)
 

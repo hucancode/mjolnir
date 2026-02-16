@@ -1,5 +1,6 @@
 package geometry
 
+import "base:intrinsics"
 import "core:log"
 import "core:math"
 import "core:mem"
@@ -338,26 +339,81 @@ bvh_query_aabb :: proc(
   if bvh == nil || results == nil do return
   clear(results)
   if len(bvh.nodes) == 0 do return
-  if bvh.bounds_func == nil do return
-  // Use dynamic stack to prevent overflow on deep trees
-  stack := make([dynamic]i32, 0, 64, context.temp_allocator)
-  append(&stack, 0)
-  for len(stack) > 0 {
-    node_idx := pop(&stack)
+
+  BVH_MAX_STACK_DEPTH :: 64
+  stack: [BVH_MAX_STACK_DEPTH]i32
+  stack_size := 1
+  stack[0] = 0
+
+  for stack_size > 0 {
+    stack_size -= 1
+    node_idx := stack[stack_size]
     node := &bvh.nodes[node_idx]
+
     if !aabb_intersects(node.bounds, query_bounds) do continue
+
     if node.primitive_count > 0 {
-      // Cache bounds function call
-      for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
-        prim := bvh.primitives[i]
-        prim_bounds := bvh.bounds_func(prim)
-        if aabb_intersects(prim_bounds, query_bounds) {
-          append(results, prim)
+      prim_start := node.primitive_start
+      prim_end := node.primitive_start + node.primitive_count
+
+      when intrinsics.type_has_field(T, "bounds") {
+        // Fast path - direct field access with SIMD batching
+        if simd_mode != .Scalar {
+          // Process in batches of 4 using SIMD
+          query_batch := [4]Aabb{query_bounds, query_bounds, query_bounds, query_bounds}
+
+          i := prim_start
+          batch_end := prim_end - 3
+
+          #no_bounds_check for i < batch_end {
+            bounds_batch := [4]Aabb{
+              bvh.primitives[i + 0].bounds,
+              bvh.primitives[i + 1].bounds,
+              bvh.primitives[i + 2].bounds,
+              bvh.primitives[i + 3].bounds,
+            }
+
+            intersects := aabb_intersects_batch4(bounds_batch, query_batch)
+
+            #unroll for j in 0 ..< 4 {
+              if intersects[j] do append(results, bvh.primitives[i + i32(j)])
+            }
+
+            i += 4
+          }
+
+          // Process remaining primitives (< 4)
+          #no_bounds_check for i < prim_end {
+            if aabb_intersects(bvh.primitives[i].bounds, query_bounds) {
+              append(results, bvh.primitives[i])
+            }
+            i += 1
+          }
+        } else {
+          // Scalar fast path
+          #no_bounds_check for i in prim_start ..< prim_end {
+            if aabb_intersects(bvh.primitives[i].bounds, query_bounds) {
+              append(results, bvh.primitives[i])
+            }
+          }
+        }
+      } else {
+        // Callback path (no SIMD) - for types without cached bounds
+        if bvh.bounds_func == nil do continue
+        for i in prim_start ..< prim_end {
+          prim := bvh.primitives[i]
+          prim_bounds := bvh.bounds_func(prim)
+          if aabb_intersects(prim_bounds, query_bounds) {
+            append(results, prim)
+          }
         }
       }
     } else {
-      // Add children to stack
-      append(&stack, node.right_child, node.left_child)
+      // Internal node - push children
+      stack[stack_size] = node.left_child
+      stack_size += 1
+      stack[stack_size] = node.right_child
+      stack_size += 1
     }
   }
 }
@@ -403,32 +459,63 @@ bvh_query_ray :: proc(
 ) {
   clear(results)
   if len(bvh.nodes) == 0 do return
-  stack := make([dynamic]i32, 0, 64, context.temp_allocator)
-  append(&stack, 0)
-  for len(stack) > 0 {
-    node_idx := pop(&stack)
+
+  BVH_MAX_STACK_DEPTH :: 64
+  stack: [BVH_MAX_STACK_DEPTH]i32
+  stack_size := 1
+  stack[0] = 0
+
+  for stack_size > 0 {
+    stack_size -= 1
+    node_idx := stack[stack_size]
     node := &bvh.nodes[node_idx]
+
     t_near, t_far := ray_aabb_intersection_safe(
       ray.origin,
       ray.direction,
       node.bounds,
     )
     if t_near > max_dist || t_far < 0 do continue
+
     if node.primitive_count > 0 {
-      for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
-        prim := bvh.primitives[i]
-        prim_bounds := bvh.bounds_func(prim)
-        prim_t_near, prim_t_far := ray_aabb_intersection_safe(
-          ray.origin,
-          ray.direction,
-          prim_bounds,
-        )
-        if prim_t_near <= max_dist && prim_t_far >= 0 {
-          append(results, prim)
+      prim_start := node.primitive_start
+      prim_end := node.primitive_start + node.primitive_count
+
+      when intrinsics.type_has_field(T, "bounds") {
+        // Fast path - direct field access
+        #no_bounds_check for i in prim_start ..< prim_end {
+          prim := bvh.primitives[i]
+          prim_t_near, prim_t_far := ray_aabb_intersection_safe(
+            ray.origin,
+            ray.direction,
+            prim.bounds,
+          )
+          if prim_t_near <= max_dist && prim_t_far >= 0 {
+            append(results, prim)
+          }
+        }
+      } else {
+        // Callback path
+        if bvh.bounds_func == nil do continue
+        for i in prim_start ..< prim_end {
+          prim := bvh.primitives[i]
+          prim_bounds := bvh.bounds_func(prim)
+          prim_t_near, prim_t_far := ray_aabb_intersection_safe(
+            ray.origin,
+            ray.direction,
+            prim_bounds,
+          )
+          if prim_t_near <= max_dist && prim_t_far >= 0 {
+            append(results, prim)
+          }
         }
       }
     } else {
-      append(&stack, node.left_child, node.right_child)
+      // Internal node - push children
+      stack[stack_size] = node.left_child
+      stack_size += 1
+      stack[stack_size] = node.right_child
+      stack_size += 1
     }
   }
 }
@@ -867,6 +954,12 @@ BVHOverlapPair :: struct($T: typeid) {
   b: T,
 }
 
+// Pair of overlapping primitives from cross-tree collision detection
+BVHCrossPair :: struct($T: typeid, $U: typeid) {
+  a: T,
+  b: U,
+}
+
 // Find all overlapping pairs within a single BVH (self-collision)
 // This is O(N + K) where K is the number of overlapping pairs
 // Much faster than N * O(log N) individual queries
@@ -905,20 +998,43 @@ find_overlaps_recursive :: proc(
     prim_b_start := node_b.primitive_start
     prim_b_end := node_b.primitive_start + node_b.primitive_count
 
-    for i in prim_a_start ..< prim_a_end {
-      prim_a := bvh.primitives[i]
-      bounds_a := bvh.bounds_func(prim_a)
+    // Compile-time specialization based on type
+    when intrinsics.type_has_field(T, "bounds") {
+      // Fast path - direct field access
+      #no_bounds_check for i in prim_a_start ..< prim_a_end {
+        prim_a := bvh.primitives[i]
+        bounds_a := prim_a.bounds
 
-      // Determine the starting index for the inner loop
-      // If same node, start after current index to avoid duplicates
-      j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
+        // Determine the starting index for the inner loop
+        // If same node, start after current index to avoid duplicates
+        j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
 
-      for j in j_start ..< prim_b_end {
-        prim_b := bvh.primitives[j]
-        bounds_b := bvh.bounds_func(prim_b)
+        #no_bounds_check for j in j_start ..< prim_b_end {
+          prim_b := bvh.primitives[j]
+          bounds_b := prim_b.bounds
 
-        if aabb_intersects(bounds_a, bounds_b) {
-          append(results, BVHOverlapPair(T){a = prim_a, b = prim_b})
+          if aabb_intersects(bounds_a, bounds_b) {
+            append(results, BVHOverlapPair(T){a = prim_a, b = prim_b})
+          }
+        }
+      }
+    } else {
+      // Callback path - for types without cached bounds
+      for i in prim_a_start ..< prim_a_end {
+        prim_a := bvh.primitives[i]
+        bounds_a := bvh.bounds_func(prim_a)
+
+        // Determine the starting index for the inner loop
+        // If same node, start after current index to avoid duplicates
+        j_start := prim_b_start if node_a_idx != node_b_idx else i + 1
+
+        for j in j_start ..< prim_b_end {
+          prim_b := bvh.primitives[j]
+          bounds_b := bvh.bounds_func(prim_b)
+
+          if aabb_intersects(bounds_a, bounds_b) {
+            append(results, BVHOverlapPair(T){a = prim_a, b = prim_b})
+          }
         }
       }
     }
@@ -949,5 +1065,125 @@ find_overlaps_recursive :: proc(
       find_overlaps_recursive(bvh, node_a.right_child, node_b.left_child, results)
       find_overlaps_recursive(bvh, node_a.right_child, node_b.right_child, results)
     }
+  }
+}
+
+// Find all overlapping pairs between two different BVHs (cross-tree collision)
+// This is O(N + M + K) where K is the number of overlapping pairs
+bvh_find_cross_overlaps :: proc(
+  bvh_a: ^BVH($T),
+  bvh_b: ^BVH($U),
+  results: ^[dynamic]BVHCrossPair(T, U),
+) {
+  clear(results)
+  if len(bvh_a.nodes) == 0 || len(bvh_b.nodes) == 0 do return
+  find_cross_overlaps_recursive(bvh_a, bvh_b, 0, 0, results)
+}
+
+@(private)
+find_cross_overlaps_recursive :: proc(
+  bvh_a: ^BVH($T),
+  bvh_b: ^BVH($U),
+  node_a_idx: i32,
+  node_b_idx: i32,
+  results: ^[dynamic]BVHCrossPair(T, U),
+) {
+  node_a := &bvh_a.nodes[node_a_idx]
+  node_b := &bvh_b.nodes[node_b_idx]
+
+  // Early out if bounds don't overlap
+  if !aabb_intersects(node_a.bounds, node_b.bounds) do return
+
+  a_is_leaf := node_a.primitive_count > 0
+  b_is_leaf := node_b.primitive_count > 0
+
+  // Both are leaf nodes - test all primitive pairs
+  if a_is_leaf && b_is_leaf {
+    prim_a_start := node_a.primitive_start
+    prim_a_end := node_a.primitive_start + node_a.primitive_count
+    prim_b_start := node_b.primitive_start
+    prim_b_end := node_b.primitive_start + node_b.primitive_count
+
+    // Compile-time specialization for both types
+    when intrinsics.type_has_field(T, "bounds") &&
+         intrinsics.type_has_field(U, "bounds") {
+      // Both fast
+      #no_bounds_check for i in prim_a_start ..< prim_a_end {
+        prim_a := bvh_a.primitives[i]
+        bounds_a := prim_a.bounds
+
+        #no_bounds_check for j in prim_b_start ..< prim_b_end {
+          prim_b := bvh_b.primitives[j]
+          bounds_b := prim_b.bounds
+
+          if aabb_intersects(bounds_a, bounds_b) {
+            append(results, BVHCrossPair(T, U){a = prim_a, b = prim_b})
+          }
+        }
+      }
+    } else when intrinsics.type_has_field(T, "bounds") {
+      // A fast, B callback
+      #no_bounds_check for i in prim_a_start ..< prim_a_end {
+        prim_a := bvh_a.primitives[i]
+        bounds_a := prim_a.bounds
+
+        for j in prim_b_start ..< prim_b_end {
+          prim_b := bvh_b.primitives[j]
+          bounds_b := bvh_b.bounds_func(prim_b)
+
+          if aabb_intersects(bounds_a, bounds_b) {
+            append(results, BVHCrossPair(T, U){a = prim_a, b = prim_b})
+          }
+        }
+      }
+    } else when intrinsics.type_has_field(U, "bounds") {
+      // A callback, B fast
+      for i in prim_a_start ..< prim_a_end {
+        prim_a := bvh_a.primitives[i]
+        bounds_a := bvh_a.bounds_func(prim_a)
+
+        #no_bounds_check for j in prim_b_start ..< prim_b_end {
+          prim_b := bvh_b.primitives[j]
+          bounds_b := prim_b.bounds
+
+          if aabb_intersects(bounds_a, bounds_b) {
+            append(results, BVHCrossPair(T, U){a = prim_a, b = prim_b})
+          }
+        }
+      }
+    } else {
+      // Both callback
+      for i in prim_a_start ..< prim_a_end {
+        prim_a := bvh_a.primitives[i]
+        bounds_a := bvh_a.bounds_func(prim_a)
+
+        for j in prim_b_start ..< prim_b_end {
+          prim_b := bvh_b.primitives[j]
+          bounds_b := bvh_b.bounds_func(prim_b)
+
+          if aabb_intersects(bounds_a, bounds_b) {
+            append(results, BVHCrossPair(T, U){a = prim_a, b = prim_b})
+          }
+        }
+      }
+    }
+    return
+  }
+
+  // One or both are internal nodes - recurse on children
+  if a_is_leaf {
+    // Only split node_b
+    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a_idx, node_b.left_child, results)
+    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a_idx, node_b.right_child, results)
+  } else if b_is_leaf {
+    // Only split node_a
+    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.left_child, node_b_idx, results)
+    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.right_child, node_b_idx, results)
+  } else {
+    // Both are internal - test all combinations
+    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.left_child, node_b.left_child, results)
+    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.left_child, node_b.right_child, results)
+    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.right_child, node_b.left_child, results)
+    find_cross_overlaps_recursive(bvh_a, bvh_b, node_a.right_child, node_b.right_child, results)
   }
 }

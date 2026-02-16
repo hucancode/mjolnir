@@ -37,7 +37,7 @@ raycast :: proc(
     [dynamic]DynamicBroadPhaseEntry,
     context.temp_allocator,
   )
-  bvh_query_ray_fast(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
+  geometry.bvh_query_ray(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
@@ -61,7 +61,7 @@ raycast :: proc(
     [dynamic]StaticBroadPhaseEntry,
     context.temp_allocator,
   )
-  bvh_query_ray_fast(&self.static_bvh, ray, max_dist, &static_candidates)
+  geometry.bvh_query_ray(&self.static_bvh, ray, max_dist, &static_candidates)
   for candidate in static_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
@@ -94,7 +94,7 @@ raycast_single :: proc(
     [dynamic]DynamicBroadPhaseEntry,
     context.temp_allocator,
   )
-  bvh_query_ray_fast(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
+  geometry.bvh_query_ray(&self.dynamic_bvh, ray, max_dist, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
@@ -120,7 +120,7 @@ raycast_single :: proc(
     [dynamic]StaticBroadPhaseEntry,
     context.temp_allocator,
   )
-  bvh_query_ray_fast(&self.static_bvh, ray, max_dist, &static_candidates)
+  geometry.bvh_query_ray(&self.static_bvh, ray, max_dist, &static_candidates)
   for candidate in static_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
@@ -299,7 +299,7 @@ query_sphere :: proc(
     [dynamic]DynamicBroadPhaseEntry,
     context.temp_allocator,
   )
-  bvh_query_aabb_fast(&self.dynamic_bvh, query_bounds, &dyn_candidates)
+  geometry.bvh_query_aabb(&self.dynamic_bvh, query_bounds, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
@@ -327,7 +327,7 @@ query_box :: proc(
     [dynamic]DynamicBroadPhaseEntry,
     context.temp_allocator,
   )
-  bvh_query_aabb_fast(&self.dynamic_bvh, bounds, &dyn_candidates)
+  geometry.bvh_query_aabb(&self.dynamic_bvh, bounds, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     collider := &body.collider
@@ -355,7 +355,7 @@ query_trigger :: proc(
     [dynamic]DynamicBroadPhaseEntry,
     context.temp_allocator,
   )
-  bvh_query_aabb_fast(&self.dynamic_bvh, trigger.cached_aabb, &dyn_candidates)
+  geometry.bvh_query_aabb(&self.dynamic_bvh, trigger.cached_aabb, &dyn_candidates)
   for candidate in dyn_candidates {
     body := get(self, candidate.handle) or_continue
     if body.is_killed do continue
@@ -386,7 +386,7 @@ query_trigger_static :: proc(
     [dynamic]StaticBroadPhaseEntry,
     context.temp_allocator,
   )
-  bvh_query_aabb_fast(
+  geometry.bvh_query_aabb(
     &self.static_bvh,
     trigger.cached_aabb,
     &static_candidates,
