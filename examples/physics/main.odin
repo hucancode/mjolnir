@@ -9,13 +9,13 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-NX :: #config(NX, 3)
-NY :: #config(NY, 2)
-NZ :: #config(NZ, 3)
+NX :: #config(NX, 4)
+NY :: #config(NY, 3)
+NZ :: #config(NZ, 5)
 PIECE_COUNT :: NX * NY * NZ
 SPHERE_RADIUS :: 3.0
-PLANE_WIDTH :: NX * 0.8
-PLANE_HEIGHT :: NZ * 0.8
+PLANE_WIDTH :: max(10.0, NX * 0.8)
+PLANE_HEIGHT :: max(10.0, NZ * 0.8)
 
 physics_world: physics.World
 
