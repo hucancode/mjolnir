@@ -90,7 +90,7 @@ Engine :: struct {
   mouse_scroll_proc:         MouseScrollProc,
   pre_render_proc:           PreRenderProc,
   post_render_proc:          PostRenderProc,
-  ui:                        ui_module.System,  // NEW: Logical UI system (moved from render.Manager)
+  ui:                        ui_module.System, // NEW: Logical UI system (moved from render.Manager)
   render:                    render.Manager,
   command_buffers:           [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers:   [FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -457,22 +457,12 @@ update_input :: proc(self: ^Engine) -> bool {
             button   = 0,
             widget   = old_handle,
           }
-          ui_module.dispatch_mouse_event(
-            &self.ui,
-            old_handle,
-            event,
-            true,
-          )
+          ui_module.dispatch_mouse_event(&self.ui, old_handle, event, true)
 
           // Hover in to new widget
           event.type = .HOVER_IN
           event.widget = new_handle
-          ui_module.dispatch_mouse_event(
-            &self.ui,
-            new_handle,
-            event,
-            true,
-          )
+          ui_module.dispatch_mouse_event(&self.ui, new_handle, event, true)
         }
       } else {
         // No widget under cursor, hover out from old
@@ -482,12 +472,7 @@ update_input :: proc(self: ^Engine) -> bool {
           button   = 0,
           widget   = old_handle,
         }
-        ui_module.dispatch_mouse_event(
-          &self.ui,
-          old_handle,
-          event,
-          true,
-        )
+        ui_module.dispatch_mouse_event(&self.ui, old_handle, event, true)
       }
     } else if new_handle, has_new := current_widget.?; has_new {
       // Hover in to new widget (no previous widget)
@@ -511,12 +496,7 @@ update_input :: proc(self: ^Engine) -> bool {
             button   = i32(i),
             widget   = widget_handle,
           }
-          ui_module.dispatch_mouse_event(
-            &self.ui,
-            widget_handle,
-            event,
-            true,
-          )
+          ui_module.dispatch_mouse_event(&self.ui, widget_handle, event, true)
         } else if !self.input.mouse_buttons[i] && self.input.mouse_holding[i] {
           // Mouse up
           event := ui_module.MouseEvent {
@@ -525,12 +505,7 @@ update_input :: proc(self: ^Engine) -> bool {
             button   = i32(i),
             widget   = widget_handle,
           }
-          ui_module.dispatch_mouse_event(
-            &self.ui,
-            widget_handle,
-            event,
-            true,
-          )
+          ui_module.dispatch_mouse_event(&self.ui, widget_handle, event, true)
         }
       }
     }
@@ -598,138 +573,105 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   }
   clear(&stale_handles)
   for handle, n in self.world.staging.node_data {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      node_data := render.Node {
-        material_id           = 0xFFFFFFFF,
-        mesh_id               = 0xFFFFFFFF,
-        attachment_data_index = 0xFFFFFFFF,
-      }
-      node := cont.get(self.world.nodes, handle)
-      // When a staged node is not found (nil), it means the node was despawned.
-      // Trigger cleanup in Render module by releasing GPU resources.
-      // This eliminates the need for a separate pending removal list in World module.
-      if node == nil {
-        render.release_bone_matrix_range_for_node(&self.render, handle.index)
-      } else if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment);
-         has_mesh {
-        if _, has_skin := mesh_attachment.skinning.?; has_skin {
-          if bone_offset, has_offset :=
-               self.render.bone_matrix_offsets[handle.index]; has_offset {
-            node_data.attachment_data_index = bone_offset
-          } else if skinning, has_skinning := mesh_attachment.skinning.?;
-             has_skinning && len(skinning.matrices) > 0 {
-            bone_offset := render.ensure_bone_matrix_range_for_node(
-              &self.render,
-              handle.index,
-              u32(len(skinning.matrices)),
-            )
-            node_data.attachment_data_index = bone_offset
-          } else {
-            render.release_bone_matrix_range_for_node(
-              &self.render,
-              handle.index,
-            )
-            node_data.attachment_data_index = 0xFFFFFFFF
-          }
-        } else {
-          render.release_bone_matrix_range_for_node(&self.render, handle.index)
-          node_data.attachment_data_index = 0xFFFFFFFF
-        }
-        node_data.material_id = mesh_attachment.material.index
-        node_data.mesh_id = mesh_attachment.handle.index
-        if node.visible && node.parent_visible do node_data.flags |= {.VISIBLE}
-        if node.culling_enabled do node_data.flags |= {.CULLING_ENABLED}
-        if mesh_attachment.cast_shadow do node_data.flags |= {.CASTS_SHADOW}
-        if material, has_mat := cont.get(
-          self.world.materials,
-          mesh_attachment.material,
-        ); has_mat {
-          switch material.type {
-          case .TRANSPARENT:
-            node_data.flags |= {.MATERIAL_TRANSPARENT}
-          case .WIREFRAME:
-            node_data.flags |= {.MATERIAL_WIREFRAME}
-          case .RANDOM_COLOR:
-            node_data.flags |= {.MATERIAL_RANDOM_COLOR}
-          case .LINE_STRIP:
-            node_data.flags |= {.MATERIAL_LINE_STRIP}
-          case .PBR, .UNLIT:
-          }
-        }
-      } else if _, has_sprite := node.attachment.(world.SpriteAttachment);
-         has_sprite {
-        render.release_bone_matrix_range_for_node(&self.render, handle.index)
-        sprite_attachment, _ := node.attachment.(world.SpriteAttachment)
-        node_data.material_id = sprite_attachment.material.index
-        node_data.mesh_id = sprite_attachment.mesh_handle.index
-        node_data.attachment_data_index = sprite_attachment.sprite_handle.index
-        if node.visible && node.parent_visible do node_data.flags |= {.VISIBLE}
-        if node.culling_enabled do node_data.flags |= {.CULLING_ENABLED}
-        node_data.flags |= {.MATERIAL_SPRITE}
-        if material, has_mat := cont.get(
-          self.world.materials,
-          sprite_attachment.material,
-        ); has_mat {
-          switch material.type {
-          case .TRANSPARENT:
-            node_data.flags |= {.MATERIAL_TRANSPARENT}
-          case .WIREFRAME:
-            node_data.flags |= {.MATERIAL_WIREFRAME}
-          case .RANDOM_COLOR:
-            node_data.flags |= {.MATERIAL_RANDOM_COLOR}
-          case .LINE_STRIP:
-            node_data.flags |= {.MATERIAL_LINE_STRIP}
-          case .PBR, .UNLIT:
-          }
-        }
-      } else {
-        render.release_bone_matrix_range_for_node(&self.render, handle.index)
-      }
-      render.upload_node_data(&self.render, handle.index, &node_data)
-      next_n += 1
-      self.world.staging.node_data[handle] = next_n
+    defer {
+      self.world.staging.node_data[handle] = n + 1
+      if n+1 >= world.FRAMES_IN_FLIGHT do append(&stale_handles, handle)
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_handles, handle)
+    node_data := render.Node {
+      material_id           = 0xFFFFFFFF,
+      mesh_id               = 0xFFFFFFFF,
+      attachment_data_index = 0xFFFFFFFF,
+    }
+    defer render.upload_node_data(&self.render, handle.index, &node_data)
+    node := cont.get(self.world.nodes, handle) or_continue
+    // When a staged node is not found (nil), it means the node was despawned.
+    // Trigger cleanup in Render module by releasing GPU resources.
+    // This eliminates the need for a separate pending removal list in World module.
+    #partial switch attachment in node.attachment {
+    case world.MeshAttachment:
+      if skinning, has_skin := attachment.skinning.?; has_skin {
+        node_data.attachment_data_index =
+          render.ensure_bone_matrix_range_for_node(
+            &self.render,
+            handle.index,
+            u32(len(skinning.matrices)),
+          )
+      }
+      node_data.material_id = attachment.material.index
+      node_data.mesh_id = attachment.handle.index
+      if node.visible && node.parent_visible do node_data.flags |= {.VISIBLE}
+      if node.culling_enabled do node_data.flags |= {.CULLING_ENABLED}
+      if attachment.cast_shadow do node_data.flags |= {.CASTS_SHADOW}
+      if material, has_mat := cont.get(
+        self.world.materials,
+        attachment.material,
+      ); has_mat {
+        switch material.type {
+        case .TRANSPARENT:
+          node_data.flags |= {.MATERIAL_TRANSPARENT}
+        case .WIREFRAME:
+          node_data.flags |= {.MATERIAL_WIREFRAME}
+        case .RANDOM_COLOR:
+          node_data.flags |= {.MATERIAL_RANDOM_COLOR}
+        case .LINE_STRIP:
+          node_data.flags |= {.MATERIAL_LINE_STRIP}
+        case .PBR, .UNLIT:
+        }
+      }
+    case world.SpriteAttachment:
+      node_data.material_id = attachment.material.index
+      node_data.mesh_id = attachment.mesh_handle.index
+      node_data.attachment_data_index = attachment.sprite_handle.index
+      if node.visible && node.parent_visible do node_data.flags |= {.VISIBLE}
+      if node.culling_enabled do node_data.flags |= {.CULLING_ENABLED}
+      node_data.flags |= {.MATERIAL_SPRITE}
+      if material, has_mat := cont.get(
+        self.world.materials,
+        attachment.material,
+      ); has_mat {
+        switch material.type {
+        case .TRANSPARENT:
+          node_data.flags |= {.MATERIAL_TRANSPARENT}
+        case .WIREFRAME:
+          node_data.flags |= {.MATERIAL_WIREFRAME}
+        case .RANDOM_COLOR:
+          node_data.flags |= {.MATERIAL_RANDOM_COLOR}
+        case .LINE_STRIP:
+          node_data.flags |= {.MATERIAL_LINE_STRIP}
+        case .PBR, .UNLIT:
+        }
+      }
     }
   }
   for handle in stale_handles {
     delete_key(&self.world.staging.node_data, handle)
+    render.release_bone_matrix_range_for_node(&self.render, handle.index)
   }
   for handle, n in self.world.staging.mesh_removals {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      render.clear_mesh(&self.render, handle)
-      next_n += 1
-      self.world.staging.mesh_removals[handle] = next_n
-    }
+    next_n := n + 1
+    self.world.staging.mesh_removals[handle] = next_n
     if next_n >= world.FRAMES_IN_FLIGHT {
       append(&stale_mesh_removals, handle)
     }
   }
   for handle in stale_mesh_removals {
+    render.clear_mesh(&self.render, handle)
     delete_key(&self.world.staging.mesh_removals, handle)
   }
   for handle, n in self.world.staging.mesh_updates {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      if mesh := cont.get(self.world.meshes, handle); mesh != nil {
-        if geom, has_geom := mesh.cpu_geometry.?; has_geom {
-          render.sync_mesh_geometry_for_handle(
-            &self.gctx,
-            &self.render,
-            handle.index,
-            geom,
-          )
-        }
-      }
-      next_n += 1
-      self.world.staging.mesh_updates[handle] = next_n
+    defer {
+      self.world.staging.mesh_updates[handle] = n + 1
+      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_meshes, handle)
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_meshes, handle)
-    }
+    mesh := cont.get(self.world.meshes, handle) or_continue
+    geom, has_geom := mesh.cpu_geometry.?
+    if !has_geom do continue
+    render.sync_mesh_geometry_for_handle(
+      &self.gctx,
+      &self.render,
+      handle.index,
+      geom,
+    )
   }
   for handle in stale_meshes {
     if mesh := cont.get(self.world.meshes, handle); mesh != nil {
@@ -740,337 +682,290 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     delete_key(&self.world.staging.mesh_updates, handle)
   }
   for handle, n in self.world.staging.material_updates {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      if material := cont.get(self.world.materials, handle); material != nil {
-        render.upload_material_data(
-          &self.render,
-          handle.index,
-          &render.Material {
-            // type = transmute(render.MaterialType)material.type,
-            albedo_index             = material.albedo.index,
-            metallic_roughness_index = material.metallic_roughness.index,
-            normal_index             = material.normal.index,
-            emissive_index           = material.emissive.index,
-            features                 = transmute(render.ShaderFeatureSet)material.features,
-            metallic_value           = material.metallic_value,
-            roughness_value          = material.roughness_value,
-            emissive_value           = material.emissive_value,
-            base_color_factor        = material.base_color_factor,
-          },
-        )
-      }
-      next_n += 1
-      self.world.staging.material_updates[handle] = next_n
+    defer {
+      self.world.staging.material_updates[handle] = n + 1
+      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_materials, handle)
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_materials, handle)
-    }
+    material := cont.get(self.world.materials, handle) or_continue
+    render.upload_material_data(
+      &self.render,
+      handle.index,
+      &render.Material {
+        albedo_index = material.albedo.index,
+        metallic_roughness_index = material.metallic_roughness.index,
+        normal_index = material.normal.index,
+        emissive_index = material.emissive.index,
+        features = transmute(render.ShaderFeatureSet)material.features,
+        metallic_value = material.metallic_value,
+        roughness_value = material.roughness_value,
+        emissive_value = material.emissive_value,
+        base_color_factor = material.base_color_factor,
+      },
+    )
   }
   for handle in stale_materials {
     delete_key(&self.world.staging.material_updates, handle)
   }
   for handle, n in self.world.staging.bone_updates {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      if node := cont.get(self.world.nodes, handle); node != nil {
-        if mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment);
-           has_mesh {
-          if skinning, has_skinning := mesh_attachment.skinning.?;
-             has_skinning {
-            bone_count := u32(len(skinning.matrices))
-            if bone_count > 0 {
-              offset := render.ensure_bone_matrix_range_for_node(
-                &self.render,
-                handle.index,
-                bone_count,
-              )
-              if offset != 0xFFFFFFFF {
-                render.upload_bone_matrices(
-                  &self.render,
-                  self.frame_index,
-                  offset,
-                  skinning.matrices[:],
-                )
-              }
-            }
-          }
-        }
-      }
-      next_n += 1
-      self.world.staging.bone_updates[handle] = next_n
+    defer {
+      self.world.staging.bone_updates[handle] = n + 1
+      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_bone_nodes, handle)
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_bone_nodes, handle)
+    node := cont.get(self.world.nodes, handle) or_continue
+    mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment)
+    if !has_mesh do continue
+    skinning, has_skinning := mesh_attachment.skinning.?
+    if !has_skinning do continue
+    bone_count := u32(len(skinning.matrices))
+    if bone_count <= 0 do continue
+    offset := render.ensure_bone_matrix_range_for_node(
+      &self.render,
+      handle.index,
+      bone_count,
+    )
+    if offset != 0xFFFFFFFF {
+      render.upload_bone_matrices(
+        &self.render,
+        self.frame_index,
+        offset,
+        skinning.matrices[:],
+      )
     }
   }
   for handle in stale_bone_nodes {
     delete_key(&self.world.staging.bone_updates, handle)
   }
   for handle, n in self.world.staging.sprite_updates {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      if sprite := cont.get(self.world.sprites, handle); sprite != nil {
-        render.upload_sprite_data(
-          &self.render,
-          handle.index,
-          &render.Sprite {
-            texture_index = sprite.texture_index,
-            frame_columns = sprite.frame_columns,
-            frame_rows = sprite.frame_rows,
-            frame_index = sprite.frame_index,
-          },
-        )
-      }
-      next_n += 1
-      self.world.staging.sprite_updates[handle] = next_n
+    defer {
+      self.world.staging.sprite_updates[handle] = n + 1
+      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_sprites, handle)
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_sprites, handle)
-    }
+    sprite := cont.get(self.world.sprites, handle) or_continue
+    render.upload_sprite_data(
+      &self.render,
+      handle.index,
+      &render.Sprite {
+        texture_index = sprite.texture_index,
+        frame_columns = sprite.frame_columns,
+        frame_rows = sprite.frame_rows,
+        frame_index = sprite.frame_index,
+      },
+    )
   }
   for handle in stale_sprites {
     delete_key(&self.world.staging.sprite_updates, handle)
   }
   for handle, n in self.world.staging.emitter_updates {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      if emitter := cont.get(self.world.emitters, handle); emitter != nil {
-        render.upload_emitter_data(
-          &self.render,
-          handle.index,
-          &render.Emitter {
-            initial_velocity = emitter.initial_velocity,
-            size_start = emitter.size_start,
-            color_start = emitter.color_start,
-            color_end = emitter.color_end,
-            aabb_min = emitter.aabb_min,
-            emission_rate = emitter.emission_rate,
-            aabb_max = emitter.aabb_max,
-            particle_lifetime = emitter.particle_lifetime,
-            position_spread = emitter.position_spread,
-            velocity_spread = emitter.velocity_spread,
-            size_end = emitter.size_end,
-            weight = emitter.weight,
-            weight_spread = emitter.weight_spread,
-            texture_index = emitter.texture_handle.index,
-            node_index = emitter.node_handle.index,
-          },
-        )
-      }
-      next_n += 1
-      self.world.staging.emitter_updates[handle] = next_n
+    defer {
+      self.world.staging.emitter_updates[handle] = n + 1
+      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_emitters, handle)
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_emitters, handle)
-    }
+    emitter := cont.get(self.world.emitters, handle) or_continue
+    render.upload_emitter_data(
+      &self.render,
+      handle.index,
+      &render.Emitter {
+        initial_velocity = emitter.initial_velocity,
+        size_start = emitter.size_start,
+        color_start = emitter.color_start,
+        color_end = emitter.color_end,
+        aabb_min = emitter.aabb_min,
+        emission_rate = emitter.emission_rate,
+        aabb_max = emitter.aabb_max,
+        particle_lifetime = emitter.particle_lifetime,
+        position_spread = emitter.position_spread,
+        velocity_spread = emitter.velocity_spread,
+        size_end = emitter.size_end,
+        weight = emitter.weight,
+        weight_spread = emitter.weight_spread,
+        texture_index = emitter.texture_handle.index,
+        node_index = emitter.node_handle.index,
+      },
+    )
   }
   for handle in stale_emitters {
     delete_key(&self.world.staging.emitter_updates, handle)
   }
   for handle, n in self.world.staging.forcefield_updates {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      if forcefield := cont.get(self.world.forcefields, handle);
-         forcefield != nil {
-        render.upload_forcefield_data(
-          &self.render,
-          handle.index,
-          &render.ForceField {
-            tangent_strength = forcefield.tangent_strength,
-            strength = forcefield.strength,
-            area_of_effect = forcefield.area_of_effect,
-            node_index = forcefield.node_handle.index,
-          },
-        )
-      }
-      next_n += 1
-      self.world.staging.forcefield_updates[handle] = next_n
+    defer {
+      self.world.staging.forcefield_updates[handle] = n + 1
+      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_forcefields, handle)
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_forcefields, handle)
-    }
+    forcefield := cont.get(self.world.forcefields, handle) or_continue
+    render.upload_forcefield_data(
+      &self.render,
+      handle.index,
+      &render.ForceField {
+        tangent_strength = forcefield.tangent_strength,
+        strength = forcefield.strength,
+        area_of_effect = forcefield.area_of_effect,
+        node_index = forcefield.node_handle.index,
+      },
+    )
   }
   for handle in stale_forcefields {
     delete_key(&self.world.staging.forcefield_updates, handle)
   }
   for node_handle, n in self.world.staging.light_updates {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      light_slot, in_active := slice.linear_search(
-        self.world.active_light_nodes[:],
-        node_handle,
-      )
-      if in_active {
-        node := cont.get(self.world.nodes, node_handle)
-        if node != nil {
-          light_position := node.transform.world_matrix[3].xyz
-          light_direction := node.transform.world_matrix[2].xyz
-          if linalg.dot(light_direction, light_direction) < 1e-6 {
-            light_direction = {0, -1, 0}
-          } else {
-            light_direction = linalg.normalize(light_direction)
-          }
-          render_handle := render.LightHandle {
-            index      = u32(light_slot),
-            generation = 1,
-          }
-          light_data: render.Light
-          #partial switch attachment in node.attachment {
-          case world.PointLightAttachment:
-            light_data = render.Light {
-              color        = attachment.color,
-              position     = {
-                light_position.x,
-                light_position.y,
-                light_position.z,
-                1.0,
-              },
-              direction    = {
-                light_direction.x,
-                light_direction.y,
-                light_direction.z,
-                0.0,
-              },
-              radius       = attachment.radius,
-              angle_inner  = 0.0,
-              angle_outer  = 0.0,
-              type         = .POINT,
-              cast_shadow  = b32(attachment.cast_shadow),
-              shadow_index = 0xFFFFFFFF,
-            }
-          case world.DirectionalLightAttachment:
-            light_data = render.Light {
-              color        = attachment.color,
-              position     = {
-                light_position.x,
-                light_position.y,
-                light_position.z,
-                1.0,
-              },
-              direction    = {
-                light_direction.x,
-                light_direction.y,
-                light_direction.z,
-                0.0,
-              },
-              radius       = attachment.radius,
-              angle_inner  = 0.0,
-              angle_outer  = 0.0,
-              type         = .DIRECTIONAL,
-              cast_shadow  = b32(attachment.cast_shadow),
-              shadow_index = 0xFFFFFFFF,
-            }
-          case world.SpotLightAttachment:
-            light_data = render.Light {
-              color        = attachment.color,
-              position     = {
-                light_position.x,
-                light_position.y,
-                light_position.z,
-                1.0,
-              },
-              direction    = {
-                light_direction.x,
-                light_direction.y,
-                light_direction.z,
-                0.0,
-              },
-              radius       = attachment.radius,
-              angle_inner  = attachment.angle_inner,
-              angle_outer  = attachment.angle_outer,
-              type         = .SPOT,
-              cast_shadow  = b32(attachment.cast_shadow),
-              shadow_index = 0xFFFFFFFF,
-            }
-          case:
-            light_data = {}
-          }
-          render.upload_light_data(
-            &self.render,
-            render_handle.index,
-            &light_data,
-          )
-        }
-      }
-      next_n += 1
-      self.world.staging.light_updates[node_handle] = next_n
+    defer {
+      self.world.staging.light_updates[node_handle] = n + 1
+      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_lights, node_handle)
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_lights, node_handle)
+    light_slot, in_active := slice.linear_search(
+      self.world.active_light_nodes[:],
+      node_handle,
+    )
+    if in_active {
+      node := cont.get(self.world.nodes, node_handle) or_continue
+      light_position := node.transform.world_matrix[3].xyz
+      light_direction := node.transform.world_matrix[2].xyz
+      if linalg.dot(light_direction, light_direction) < 1e-6 {
+        light_direction = {0, -1, 0}
+      } else {
+        light_direction = linalg.normalize(light_direction)
+      }
+      render_handle := render.LightHandle {
+        index      = u32(light_slot),
+        generation = 1,
+      }
+      light_data: render.Light
+      #partial switch attachment in node.attachment {
+      case world.PointLightAttachment:
+        light_data = render.Light {
+          color        = attachment.color,
+          position     = {
+            light_position.x,
+            light_position.y,
+            light_position.z,
+            1.0,
+          },
+          direction    = {
+            light_direction.x,
+            light_direction.y,
+            light_direction.z,
+            0.0,
+          },
+          radius       = attachment.radius,
+          angle_inner  = 0.0,
+          angle_outer  = 0.0,
+          type         = .POINT,
+          cast_shadow  = b32(attachment.cast_shadow),
+          shadow_index = 0xFFFFFFFF,
+        }
+      case world.DirectionalLightAttachment:
+        light_data = render.Light {
+          color        = attachment.color,
+          position     = {
+            light_position.x,
+            light_position.y,
+            light_position.z,
+            1.0,
+          },
+          direction    = {
+            light_direction.x,
+            light_direction.y,
+            light_direction.z,
+            0.0,
+          },
+          radius       = attachment.radius,
+          angle_inner  = 0.0,
+          angle_outer  = 0.0,
+          type         = .DIRECTIONAL,
+          cast_shadow  = b32(attachment.cast_shadow),
+          shadow_index = 0xFFFFFFFF,
+        }
+      case world.SpotLightAttachment:
+        light_data = render.Light {
+          color        = attachment.color,
+          position     = {
+            light_position.x,
+            light_position.y,
+            light_position.z,
+            1.0,
+          },
+          direction    = {
+            light_direction.x,
+            light_direction.y,
+            light_direction.z,
+            0.0,
+          },
+          radius       = attachment.radius,
+          angle_inner  = attachment.angle_inner,
+          angle_outer  = attachment.angle_outer,
+          type         = .SPOT,
+          cast_shadow  = b32(attachment.cast_shadow),
+          shadow_index = 0xFFFFFFFF,
+        }
+      case:
+        light_data = {}
+      }
+      render.upload_light_data(&self.render, render_handle.index, &light_data)
     }
   }
   for node_handle in stale_lights {
     delete_key(&self.world.staging.light_updates, node_handle)
   }
   for handle, n in self.world.staging.camera_updates {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
-      if world_camera := cont.get(self.world.cameras, handle);
-         world_camera != nil {
-        is_new_camera := handle.index not_in self.render.cameras
-        if is_new_camera {
-          self.render.cameras[handle.index] = {}
-        }
-        // Sync camera configuration
-        cam := &self.render.cameras[handle.index]
-        cam.enabled_passes =
-        transmute(camera.PassTypeSet)world_camera.enabled_passes
-        cam.enable_culling = world_camera.enable_culling
-        cam.enable_depth_pyramid = world_camera.enable_depth_pyramid
-        // Upload camera transform data to GPU buffer
-        view_matrix := world.camera_view_matrix(world_camera)
-        projection_matrix := world.camera_projection_matrix(world_camera)
-        near, far := world.camera_get_near_far(world_camera)
-        render.upload_camera_data(
-          &self.render,
-          handle.index,
-          view_matrix,
-          projection_matrix,
-          world_camera.position,
-          world_camera.extent,
-          near,
-          far,
-          self.frame_index,
-        )
-        // Initialize GPU resources for new cameras
-        if is_new_camera {
-          camera.init_gpu(
-            &self.gctx,
-            cam,
-            &self.render.texture_manager,
-            world_camera.extent[0],
-            world_camera.extent[1],
-            self.swapchain.format.format,
-            vk.Format.D32_SFLOAT,
-            cam.enabled_passes,
-            cam.enable_depth_pyramid,
-            rd.MAX_NODES_IN_SCENE,
-          ) or_return
-          camera.allocate_descriptors(
-            &self.gctx,
-            cam,
-            &self.render.texture_manager,
-            &self.render.visibility.normal_cam_descriptor_layout,
-            &self.render.visibility.depth_reduce_descriptor_layout,
-            &self.render.node_data_buffer,
-            &self.render.mesh_data_buffer,
-            &self.render.world_matrix_buffer,
-            &self.render.camera_buffer,
-          ) or_return
-        }
-      }
-      next_n += 1
-      self.world.staging.camera_updates[handle] = next_n
+    defer {
+      self.world.staging.camera_updates[handle] = n + 1
+      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_cameras, handle)
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_cameras, handle)
+    world_camera := cont.get(self.world.cameras, handle) or_continue
+    is_new_camera := handle.index not_in self.render.cameras
+    if is_new_camera {
+      self.render.cameras[handle.index] = {}
+    }
+    // Sync camera configuration
+    cam := &self.render.cameras[handle.index]
+    cam.enabled_passes =
+    transmute(camera.PassTypeSet)world_camera.enabled_passes
+    cam.enable_culling = world_camera.enable_culling
+    cam.enable_depth_pyramid = world_camera.enable_depth_pyramid
+    // Upload camera transform data to GPU buffer
+    view_matrix := world.camera_view_matrix(world_camera)
+    projection_matrix := world.camera_projection_matrix(world_camera)
+    near, far := world.camera_get_near_far(world_camera)
+    render.upload_camera_data(
+      &self.render,
+      handle.index,
+      view_matrix,
+      projection_matrix,
+      world_camera.position,
+      world_camera.extent,
+      near,
+      far,
+      self.frame_index,
+    )
+    // Initialize GPU resources for new cameras
+    if is_new_camera {
+      camera.init_gpu(
+        &self.gctx,
+        cam,
+        &self.render.texture_manager,
+        world_camera.extent[0],
+        world_camera.extent[1],
+        self.swapchain.format.format,
+        vk.Format.D32_SFLOAT,
+        cam.enabled_passes,
+        cam.enable_depth_pyramid,
+        rd.MAX_NODES_IN_SCENE,
+      ) or_return
+      camera.allocate_descriptors(
+        &self.gctx,
+        cam,
+        &self.render.texture_manager,
+        &self.render.visibility.normal_cam_descriptor_layout,
+        &self.render.visibility.depth_reduce_descriptor_layout,
+        &self.render.node_data_buffer,
+        &self.render.mesh_data_buffer,
+        &self.render.world_matrix_buffer,
+        &self.render.camera_buffer,
+      ) or_return
     }
   }
   for handle in stale_cameras {
     delete_key(&self.world.staging.camera_updates, handle)
   }
-
   // Collect and stage bone visualization data for debug rendering (compile-time controlled)
   when render.DEBUG_SHOW_BONES {
     palette := render.DEBUG_BONE_PALETTE
@@ -1081,9 +976,12 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       context.temp_allocator,
     )
     defer delete(bone_vis)
-
     // Convert to render.BoneInstance format
-    bone_instances := make([dynamic]render.BoneInstance, len(bone_vis), context.temp_allocator)
+    bone_instances := make(
+      [dynamic]render.BoneInstance,
+      len(bone_vis),
+      context.temp_allocator,
+    )
     for instance, i in bone_vis {
       bone_instances[i] = render.BoneInstance {
         position = instance.position,
@@ -1091,19 +989,21 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         scale    = instance.scale,
       }
     }
-
     render.stage_bone_visualization(&self.render, bone_instances[:])
   } else {
     render.clear_debug_visualization(&self.render)
   }
-
   return .SUCCESS
 }
 
 // Sync UI render commands to the renderer (staging list pattern)
 sync_ui_to_renderer :: proc(self: ^Engine) {
   // Update font atlas if dirty
-  ui_module.update_font_atlas(&self.ui, &self.gctx, &self.render.texture_manager)
+  ui_module.update_font_atlas(
+    &self.ui,
+    &self.gctx,
+    &self.render.texture_manager,
+  )
 
   // Compute layout before generating commands
   ui_module.compute_layout_all(&self.ui)
@@ -1288,7 +1188,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     }
     world.stage_camera_data(
       &engine.world.staging,
-      world.CameraHandle{
+      world.CameraHandle {
         index = u32(cam_index),
         generation = entry.generation,
       },
