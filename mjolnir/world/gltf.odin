@@ -576,6 +576,13 @@ construct_scene :: proc(
         }
         skinning.root_bone_index = skin_data.root_bone_idx
         compute_bone_lengths(skinning)
+        // Compute and cache bind matrices (inverse of inverse_bind_matrix)
+        skinning.bind_matrices = make([]matrix[4, 4]f32, len(skinning.bones))
+        for bone, i in skinning.bones {
+          skinning.bind_matrices[i] = linalg.matrix4_inverse(bone.inverse_bind_matrix)
+        }
+        // Compute and cache bone hierarchy depths for visualization
+        skinning.bone_depths = calculate_bone_depths(skinning)
         node.attachment = MeshAttachment {
           handle      = mesh_handle,
           material    = geometry_data.material_handle,

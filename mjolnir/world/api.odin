@@ -172,6 +172,50 @@ get_node :: proc(
   return cont.get(world.nodes, handle)
 }
 
+// Find first mesh child of a parent node
+// Returns (child_handle, child_node, mesh_attachment, ok)
+find_first_mesh_child :: proc(
+  world: ^World,
+  parent_handle: NodeHandle,
+) -> (
+  child_handle: NodeHandle,
+  child_node: ^Node,
+  mesh_attachment: ^MeshAttachment,
+  ok: bool,
+) {
+  node := cont.get(world.nodes, parent_handle) or_return
+  for child in node.children {
+    child_node = cont.get(world.nodes, child) or_continue
+    mesh_attachment, has_mesh := &child_node.attachment.(MeshAttachment)
+    if has_mesh do return child, child_node, mesh_attachment, true
+  }
+  return {}, nil, nil, false
+}
+
+// Add tags to a node by handle
+// Returns false if node not found
+tag_node :: proc(
+  world: ^World,
+  handle: NodeHandle,
+  tags: NodeTagSet,
+) -> bool {
+  node := cont.get(world.nodes, handle) or_return
+  node.tags += tags
+  return true
+}
+
+// Remove tags from a node
+// Returns false if node not found
+untag_node :: proc(
+  world: ^World,
+  handle: NodeHandle,
+  tags: NodeTagSet,
+) -> bool {
+  node := cont.get(world.nodes, handle) or_return
+  node.tags -= tags
+  return true
+}
+
 // Sync all nodes with rigid body attachments from physics to world
 sync_all_physics_to_world :: proc(
   world: ^World,

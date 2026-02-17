@@ -1065,7 +1065,7 @@ get_bone_world_transform :: proc(
   // skinning_matrix = world_matrix * inverse_bind_matrix
   // world_matrix = skinning_matrix * bind_matrix
   skinning_matrix := matrices[bone_index]
-  bind_matrix := linalg.matrix4_inverse(skin.bones[bone_index].inverse_bind_matrix)
+  bind_matrix := skin.bind_matrices[bone_index]
   bone_local_world := skinning_matrix * bind_matrix
 
   // Apply node's world transform
@@ -1076,4 +1076,65 @@ get_bone_world_transform :: proc(
   transform.rotation = linalg.to_quaternion(bone_world)
 
   return transform, true
+}
+
+// Data structure for bone visualization
+BoneVisualizationInstance :: struct {
+  position: [3]f32,
+  color:    [4]f32,
+  scale:    f32,
+}
+
+// Collect bone visualization data from all skinned meshes in the world
+// Returns dynamic array of bone instances with hierarchical coloring
+// Caller is responsible for deleting the returned array
+collect_bone_visualization_data :: proc(
+  world: ^World,
+  bone_palette: [][4]f32,
+  bone_scale: f32,
+  allocator := context.allocator,
+) -> [dynamic]BoneVisualizationInstance {
+  instances := make([dynamic]BoneVisualizationInstance, 0, 256, allocator)
+
+  // Iterate all nodes to find skinned meshes
+  for &entry, idx in world.nodes.entries {
+    if !entry.active do continue
+
+    node := &entry.item
+
+    // Check if node has a mesh attachment with skinning
+    if mesh_attachment, ok := &node.attachment.(MeshAttachment); ok {
+      mesh := cont.get(world.meshes, mesh_attachment.handle) or_continue
+      skin := mesh.skinning.? or_continue
+
+      // Verify node has skinning data (animation layers, matrices)
+      _ = mesh_attachment.skinning.? or_continue
+
+      // Construct node handle for bone transform lookup
+      node_handle := NodeHandle{index = u32(idx), generation = entry.generation}
+
+      // Use cached bone depths for hierarchical coloring
+      bone_depths := skin.bone_depths
+
+      // Extract world-space bone positions
+      for i in 0 ..< len(skin.bones) {
+        // Get bone world transform
+        bone_transform := get_bone_world_transform(world, node_handle, u32(i)) or_continue
+
+        // Assign color based on hierarchical depth (modulo palette length)
+        depth := bone_depths[i]
+        color := bone_palette[depth % u32(len(bone_palette))]
+
+        // Add instance
+        instance := BoneVisualizationInstance {
+          position = bone_transform.position,
+          color    = color,
+          scale    = bone_scale,
+        }
+        append(&instances, instance)
+      }
+    }
+  }
+
+  return instances
 }

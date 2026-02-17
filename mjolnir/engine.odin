@@ -1070,6 +1070,33 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   for handle in stale_cameras {
     delete_key(&self.world.staging.camera_updates, handle)
   }
+
+  // Collect and stage bone visualization data for debug rendering (compile-time controlled)
+  when render.DEBUG_SHOW_BONES {
+    palette := render.DEBUG_BONE_PALETTE
+    bone_vis := world.collect_bone_visualization_data(
+      &self.world,
+      palette[:],
+      render.DEBUG_BONE_SCALE,
+      context.temp_allocator,
+    )
+    defer delete(bone_vis)
+
+    // Convert to render.BoneInstance format
+    bone_instances := make([dynamic]render.BoneInstance, len(bone_vis), context.temp_allocator)
+    for instance, i in bone_vis {
+      bone_instances[i] = render.BoneInstance {
+        position = instance.position,
+        color    = instance.color,
+        scale    = instance.scale,
+      }
+    }
+
+    render.stage_bone_visualization(&self.render, bone_instances[:])
+  } else {
+    render.clear_debug_visualization(&self.render)
+  }
+
   return .SUCCESS
 }
 
@@ -1373,6 +1400,14 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
       )
     }
   }
+  // Debug rendering pass (bones, etc.) - renders after transparency
+  // Only renders on main camera, not all cameras
+  render.record_debug_pass(
+    &self.render,
+    self.frame_index,
+    self.world.main_camera.index,
+    command_buffer,
+  )
   render.record_post_process_pass(
     &self.render,
     self.frame_index,

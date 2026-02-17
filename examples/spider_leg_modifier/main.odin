@@ -12,7 +12,6 @@ import "core:math/linalg"
 import "core:slice"
 
 root_nodes: [dynamic]world.NodeHandle
-markers: [dynamic]world.NodeHandle
 animation_time: f32 = 0
 spider_root_node: world.NodeHandle
 target_markers: [6]world.NodeHandle
@@ -166,62 +165,6 @@ main :: proc() {
       }
     }
 
-    // Create cone markers for each bone
-    cone_mesh := world.get_builtin_mesh(&engine.world, .CONE)
-    mat := world.get_builtin_material(&engine.world, .YELLOW)
-
-    // Find the skinned mesh and create markers for bones
-    for handle in root_nodes {
-      node := cont.get(engine.world.nodes, handle) or_continue
-      log.infof("Root node found")
-      for child in node.children {
-        child_node := cont.get(engine.world.nodes, child) or_continue
-        log.infof("Child node found")
-        mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
-        if !has_mesh {
-          log.infof("Child has no mesh attachment")
-          continue
-        }
-
-        mesh := cont.get(
-          engine.world.meshes,
-          mesh_attachment.handle,
-        ) or_continue
-        log.infof("Mesh found")
-
-        skin, has_skin := mesh.skinning.?
-        if !has_skin {
-          log.infof("Mesh has no skinning data")
-          continue
-        }
-
-        log.infof("Found skinned mesh with %d bones", len(skin.bones))
-
-        // Debug: print bone names to understand hierarchy
-        for bone, idx in skin.bones {
-          log.infof("Bone[%d]: name='%s'", idx, bone.name)
-        }
-
-        // Create one marker per bone
-        for i in 0 ..< len(skin.bones) {
-          marker :=
-            world.spawn(
-              &engine.world,
-              {0, 0, 0},
-              attachment = world.MeshAttachment {
-                handle = cone_mesh,
-                material = mat,
-              },
-            ) or_else {}
-          world.scale(&engine.world, marker, 0.15)
-          append(&markers, marker)
-          log.infof("Created marker %d at default position", i)
-        }
-
-        log.infof("Total markers created: %d", len(markers))
-      }
-    }
-
     // Create visual markers for each leg target (red spheres)
     sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
     red_mat := world.get_builtin_material(&engine.world, .RED)
@@ -307,24 +250,7 @@ main :: proc() {
         break
       }
     }
-
-    // Update bone markers
-    marker_idx := 0
-    for handle in root_nodes {
-      node := cont.get(engine.world.nodes, handle) or_continue
-      for child in node.children {
-        matrices, skin, child_node := world.get_bone_matrices(&engine.world, child) or_continue
-        for i in 0 ..< len(skin.bones) {
-          if marker_idx >= len(markers) do break
-          t := world.get_bone_world_transform(&engine.world, child, u32(i)) or_continue
-          marker := cont.get(engine.world.nodes, markers[marker_idx]) or_continue
-          marker.transform.position = t.position
-          marker.transform.rotation = t.rotation
-          marker.transform.is_dirty = true
-          marker_idx += 1
-        }
-      }
-    }
   }
+
   mjolnir.run(engine, 800, 600, "Spider Leg")
 }

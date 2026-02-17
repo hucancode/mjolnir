@@ -11,6 +11,7 @@ import "core:math"
 import "core:math/linalg"
 import d "data"
 import rd "data"
+import "debug"
 import "debug_ui"
 import "geometry"
 import light "lighting"
@@ -46,6 +47,18 @@ ForceField :: rd.ForceField
 Sprite :: rd.Sprite
 Light :: rd.Light
 LightType :: rd.LightType
+BoneInstance :: debug.BoneInstance
+
+DEBUG_SHOW_BONES :: #config(DEBUG_SHOW_BONES, false)
+DEBUG_BONE_SCALE :: #config(DEBUG_BONE_SCALE, 0.15)
+DEBUG_BONE_PALETTE :: [6][4]f32 {
+  {1.0, 0.0, 0.0, 1.0}, // Level 0: Red (root bones)
+  {0.0, 1.0, 0.0, 1.0}, // Level 1: Green
+  {0.0, 0.0, 1.0, 1.0}, // Level 2: Blue
+  {1.0, 1.0, 1.0, 1.0}, // Level 3: White
+  {1.0, 0.5, 0.0, 1.0}, // Level 4: Orange
+  {0.0, 1.0, 1.0, 1.0}, // Level 5: Cyan
+}
 
 Manager :: struct {
   geometry:                geometry.Renderer,
@@ -54,6 +67,7 @@ Manager :: struct {
   particles:               particles.Renderer,
   post_process:            post_process.Renderer,
   debug_ui:                debug_ui.Renderer,
+  debug_renderer:          debug.Renderer,
   ui:                      ui_render.Renderer,
   ui_commands:             [dynamic]cmd.RenderCommand,  // Staged commands from UI module
   cameras:                 map[u32]camera.Camera,
@@ -600,6 +614,11 @@ init :: proc(
     dpi_scale,
     self.textures_set_layout,
   ) or_return
+  debug.init(
+    &self.debug_renderer,
+    gctx,
+    self.camera_buffer.set_layout,
+  ) or_return
   // Initialize UI renderer (command-based, no ui_system dependency)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
   ui_render.init_renderer(
@@ -623,9 +642,20 @@ stage_ui_commands :: proc(self: ^Manager, commands: []cmd.RenderCommand) {
   }
 }
 
+// Stage bone visualization instances for debug rendering
+stage_bone_visualization :: proc(self: ^Manager, instances: []debug.BoneInstance) {
+  debug.stage_bones(&self.debug_renderer, instances)
+}
+
+// Clear staged debug visualization data
+clear_debug_visualization :: proc(self: ^Manager) {
+  debug.clear_bones(&self.debug_renderer)
+}
+
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   ui_render.shutdown(&self.ui, gctx, &self.texture_manager)
   delete(self.ui_commands)
+  debug.shutdown(&self.debug_renderer, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
   post_process.shutdown(&self.post_process, gctx, &self.texture_manager)
   particles.shutdown(&self.particles, gctx)
@@ -1144,7 +1174,45 @@ record_transparency_pass :: proc(
     cam.sprite_draw_commands[frame_index].buffer,
     cam.sprite_draw_count[frame_index].buffer,
   )
+
   transparency.end_pass(&self.transparency, command_buffer)
+  return .SUCCESS
+}
+
+record_debug_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  camera_handle: u32,
+  command_buffer: vk.CommandBuffer,
+) -> vk.Result {
+  // Skip debug rendering if no instances are staged
+  if len(self.debug_renderer.bone_instances) == 0 do return .SUCCESS
+
+  cam, ok := &self.cameras[camera_handle]
+  if !ok do return .ERROR_UNKNOWN
+
+  // Begin debug render pass (renders on top of transparency)
+  // Skip rendering if attachments are missing
+  if !debug.begin_pass(
+    &self.debug_renderer,
+    cam,
+    &self.texture_manager,
+    command_buffer,
+    frame_index,
+  ) {
+    return .SUCCESS
+  }
+
+  // Render debug visualization (bones, etc.)
+  debug.render(
+    &self.debug_renderer,
+    command_buffer,
+    self.camera_buffer.descriptor_sets[frame_index],
+    camera_handle,
+  ) or_return
+
+  debug.end_pass(&self.debug_renderer, command_buffer)
+
   return .SUCCESS
 }
 

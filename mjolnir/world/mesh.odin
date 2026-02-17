@@ -32,6 +32,96 @@ find_bone_by_name :: proc(
   return 0, false
 }
 
+// Build parent index map for efficient traversal
+// Returns map of child_index -> parent_index
+build_bone_parent_map :: proc(
+  skin: ^Skinning,
+  allocator := context.allocator,
+) -> map[u32]u32 {
+  parent_map := make(map[u32]u32, len(skin.bones), allocator)
+  for bone, idx in skin.bones {
+    for child_idx in bone.children {
+      parent_map[child_idx] = u32(idx)
+    }
+  }
+  return parent_map
+}
+
+// Find bone chain from tip to root
+// Walks skeleton hierarchy and returns ordered array of bone names (root -> tip)
+// Returns error if tip is not a descendant of root
+find_bone_chain_to_root :: proc(
+  skin: ^Skinning,
+  tip_name: string,
+  root_name: string,
+  allocator := context.allocator,
+) -> (
+  chain: []string,
+  ok: bool,
+) #optional_ok {
+  // Build name→index map
+  name_to_idx := make(map[string]u32, len(skin.bones), context.temp_allocator)
+  defer delete(name_to_idx)
+
+  for bone, idx in skin.bones {
+    name_to_idx[bone.name] = u32(idx)
+  }
+
+  root_idx, has_root := name_to_idx[root_name]
+  tip_idx, has_tip := name_to_idx[tip_name]
+  if !has_root || !has_tip do return nil, false
+
+  // Build parent map
+  parent_map := build_bone_parent_map(skin, context.temp_allocator)
+  defer delete(parent_map)
+
+  // Walk from tip to root
+  chain_indices := make([dynamic]u32, context.temp_allocator)
+  defer delete(chain_indices)
+
+  current := tip_idx
+  for {
+    append(&chain_indices, current)
+    if current == root_idx do break
+    parent, has_parent := parent_map[current]
+    if !has_parent do return nil, false // tip not descendant of root
+    current = parent
+  }
+
+  // Reverse to get root→tip order
+  chain = make([]string, len(chain_indices), allocator)
+  for i in 0 ..< len(chain_indices) {
+    idx := chain_indices[len(chain_indices) - 1 - i]
+    chain[i] = skin.bones[idx].name
+  }
+
+  return chain, true
+}
+
+// Batch bone name lookup
+// Returns array of bone indices matching the provided names
+// Returns error if any name is not found
+find_bones_by_names :: proc(
+  mesh: ^Mesh,
+  names: []string,
+  allocator := context.allocator,
+) -> (
+  indices: []u32,
+  ok: bool,
+) #optional_ok {
+  skin := mesh.skinning.? or_return
+  indices = make([]u32, len(names), allocator)
+  for name, i in names {
+    idx, found := find_bone_by_name(mesh, name)
+    if !found {
+      delete(indices)
+      return nil, false
+    }
+    indices[i] = idx
+  }
+  return indices, true
+}
+
 mesh_destroy :: proc(self: ^Mesh, world: ^World) {
   _ = world
   skin, has_skin := &self.skinning.?
@@ -39,6 +129,8 @@ mesh_destroy :: proc(self: ^Mesh, world: ^World) {
     for &bone in skin.bones do bone_destroy(&bone)
     delete(skin.bones)
     delete(skin.bone_lengths)
+    delete(skin.bind_matrices)
+    delete(skin.bone_depths)
   }
   mesh_release_memory(self)
 }
@@ -477,6 +569,8 @@ Skinning :: struct {
   root_bone_index: u32,
   bones:           []Bone,
   bone_lengths:    []f32,
+  bind_matrices:   []matrix[4, 4]f32, // Cached inverse of inverse_bind_matrix
+  bone_depths:     []u32,              // Cached hierarchical depth for visualization
 }
 
 Primitive :: enum {
@@ -522,4 +616,53 @@ compute_bone_lengths :: proc(skin: ^Skinning) {
       append(&stack, TraverseEntry{child_idx, bone_pos})
     }
   }
+}
+
+// Calculate hierarchical depth for each bone (used for color-coded visualization)
+// Returns array of depth values where root bones are depth 0, their children are depth 1, etc.
+calculate_bone_depths :: proc(
+  skin: ^Skinning,
+  allocator := context.allocator,
+) -> []u32 {
+  bone_count := len(skin.bones)
+  if bone_count == 0 do return nil
+
+  depths := make([]u32, bone_count, allocator)
+
+  // Build parent map for efficient traversal
+  parent_map := build_bone_parent_map(skin, context.temp_allocator)
+  defer delete(parent_map)
+
+  // Find root bones (bones with no parent)
+  roots := make([dynamic]u32, context.temp_allocator)
+  defer delete(roots)
+
+  for i in 0 ..< u32(bone_count) {
+    if i not_in parent_map {
+      append(&roots, i)
+      depths[i] = 0
+    }
+  }
+
+  // BFS to assign depths
+  queue := make([dynamic]u32, context.temp_allocator)
+  defer delete(queue)
+
+  append(&queue, ..roots[:])
+
+  for len(queue) > 0 {
+    // Pop from back (more efficient than ordered_remove from front)
+    current := pop(&queue)
+
+    current_depth := depths[current]
+
+    // Process children
+    bone := &skin.bones[current]
+    for child_idx in bone.children {
+      depths[child_idx] = current_depth + 1
+      append(&queue, child_idx)
+    }
+  }
+
+  return depths
 }
