@@ -2,8 +2,9 @@ package render
 
 import alg "../algebra"
 import cont "../containers"
-import "../gpu"
 import geom "../geometry"
+import "../gpu"
+import cmd "../gpu/ui"
 import "camera"
 import cam "camera"
 import "core:log"
@@ -18,7 +19,6 @@ import "particles"
 import "post_process"
 import "transparency"
 import ui_render "ui"
-import cmd "../gpu/ui"
 import vk "vendor:vulkan"
 
 FRAMES_IN_FLIGHT :: rd.FRAMES_IN_FLIGHT
@@ -70,7 +70,7 @@ Manager :: struct {
   debug_ui:                debug_ui.Renderer,
   debug_renderer:          debug.Renderer,
   ui:                      ui_render.Renderer,
-  ui_commands:             [dynamic]cmd.RenderCommand,  // Staged commands from UI module
+  ui_commands:             [dynamic]cmd.RenderCommand, // Staged commands from UI module
   cameras:                 map[u32]camera.Camera,
   meshes:                  map[u32]Mesh,
   visibility:              camera.System,
@@ -103,13 +103,70 @@ Manager :: struct {
   texture_manager:         gpu.TextureManager,
 }
 
-@(private)
-init_scene_buffers :: proc(
+init :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
+  swapchain_extent: vk.Extent2D,
+  swapchain_format: vk.Format,
+  dpi_scale: f32,
 ) -> (
   ret: vk.Result,
 ) {
+  self.cameras = make(map[u32]camera.Camera)
+  self.meshes = make(map[u32]Mesh)
+  self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
+  gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
+  defer if ret != .SUCCESS {
+    gpu.free_command_buffer(gctx, ..self.command_buffers[:])
+  }
+  if gctx.has_async_compute {
+    gpu.allocate_compute_command_buffer(
+      gctx,
+      self.compute_command_buffers[:],
+    ) or_return
+    defer if ret != .SUCCESS {
+      gpu.free_compute_command_buffer(gctx, self.compute_command_buffers[:])
+    }
+  }
+  // Initialize geometry/bone/camera/scene buffers (survive teardown/setup cycles)
+  gpu.mesh_manager_init(&self.mesh_manager, gctx)
+  defer if ret != .SUCCESS {
+    gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
+  }
+  cont.slab_init(
+    &self.bone_matrix_slab,
+    {
+      {32, 64},
+      {64, 128},
+      {128, 4096},
+      {256, 1792},
+      {512, 0},
+      {1024, 0},
+      {2048, 0},
+      {4096, 0},
+    },
+  )
+  gpu.per_frame_bindless_buffer_init(
+    &self.bone_buffer,
+    gctx,
+    int(self.bone_matrix_slab.capacity),
+    {.VERTEX},
+  ) or_return
+  self.bone_matrix_offsets = make(map[u32]u32)
+  defer if ret != .SUCCESS {
+    delete(self.bone_matrix_offsets)
+    gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
+    cont.slab_destroy(&self.bone_matrix_slab)
+  }
+  gpu.per_frame_bindless_buffer_init(
+    &self.camera_buffer,
+    gctx,
+    rd.MAX_ACTIVE_CAMERAS,
+    {.VERTEX, .FRAGMENT, .COMPUTE},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
+  }
   gpu.bindless_buffer_init(
     &self.material_buffer,
     gctx,
@@ -155,8 +212,6 @@ init_scene_buffers :: proc(
   defer if ret != .SUCCESS {
     gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
   }
-  emitters := gpu.get_all(&self.emitter_buffer.buffer)
-  for &emitter in emitters do emitter = {}
   gpu.bindless_buffer_init(
     &self.forcefield_buffer,
     gctx,
@@ -166,8 +221,6 @@ init_scene_buffers :: proc(
   defer if ret != .SUCCESS {
     gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
   }
-  forcefields := gpu.get_all(&self.forcefield_buffer.buffer)
-  for &forcefield in forcefields do forcefield = {}
   gpu.bindless_buffer_init(
     &self.sprite_buffer,
     gctx,
@@ -177,8 +230,6 @@ init_scene_buffers :: proc(
   defer if ret != .SUCCESS {
     gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
   }
-  sprites := gpu.get_all(&self.sprite_buffer.buffer)
-  for &sprite in sprites do sprite = {}
   gpu.bindless_buffer_init(
     &self.lights_buffer,
     gctx,
@@ -188,87 +239,11 @@ init_scene_buffers :: proc(
   defer if ret != .SUCCESS {
     gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
   }
-  return .SUCCESS
-}
-
-@(private)
-shutdown_scene_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.bindless_buffer_destroy(&self.material_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.world_matrix_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.node_data_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.mesh_data_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
-}
-
-@(private)
-init_geometry_buffers :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> (
-  ret: vk.Result,
-) {
-  return gpu.mesh_manager_init(&self.mesh_manager, gctx)
-}
-
-@(private)
-destroy_geometry_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
-}
-
-@(private)
-init_bone_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
-  cont.slab_init(
-    &self.bone_matrix_slab,
-    {
-      {32, 64},
-      {64, 128},
-      {128, 4096},
-      {256, 1792},
-      {512, 0},
-      {1024, 0},
-      {2048, 0},
-      {4096, 0},
-    },
-  )
-  gpu.per_frame_bindless_buffer_init(
-    &self.bone_buffer,
-    gctx,
-    int(self.bone_matrix_slab.capacity),
-    {.VERTEX},
-  ) or_return
-  self.bone_matrix_offsets = make(map[u32]u32)
-  return .SUCCESS
-}
-
-@(private)
-shutdown_bone_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  delete(self.bone_matrix_offsets)
-  gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
-  cont.slab_destroy(&self.bone_matrix_slab)
-}
-
-@(private)
-shutdown_camera_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
-}
-
-@(private)
-shutdown_camera_resources :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  for _, &cam in self.cameras {
-    camera.destroy_gpu(gctx, &cam, &self.texture_manager)
+  // Initialize texture manager layout (must precede pipeline layout creation)
+  gpu.texture_manager_init(&self.texture_manager, gctx) or_return
+  defer if ret != .SUCCESS {
+    gpu.texture_manager_shutdown(&self.texture_manager, gctx)
   }
-}
-
-@(private)
-init_bindless_layouts_infra :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> (
-  ret: vk.Result,
-) {
   info := vk.SamplerCreateInfo {
     sType        = .SAMPLER_CREATE_INFO,
     magFilter    = .LINEAR,
@@ -360,152 +335,6 @@ init_bindless_layouts_infra :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
     self.sprite_pipeline_layout = 0
-  }
-  return .SUCCESS
-}
-
-
-@(private)
-shutdown_bindless_layouts_infra :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
-  vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
-  vk.DestroySampler(gctx.device, self.linear_clamp_sampler, nil)
-  vk.DestroySampler(gctx.device, self.nearest_repeat_sampler, nil)
-  vk.DestroySampler(gctx.device, self.nearest_clamp_sampler, nil)
-  self.general_pipeline_layout = 0
-  self.sprite_pipeline_layout = 0
-  self.linear_repeat_sampler = 0
-  self.linear_clamp_sampler = 0
-  self.nearest_repeat_sampler = 0
-  self.nearest_clamp_sampler = 0
-}
-
-@(private)
-ensure_camera_slot :: proc(
-  self: ^Manager,
-  handle: u32,
-) {
-  if handle not_in self.cameras {
-    self.cameras[handle] = {}
-  }
-}
-
-@(private)
-get_camera :: proc(
-  self: ^Manager,
-  handle: u32,
-) -> (
-  cam: camera.Camera,
-  ok: bool,
-) #optional_ok {
-  cam, ok = self.cameras[handle]
-  if !ok do return {}, false
-  return cam, true
-}
-
-@(private)
-ensure_mesh_slot :: proc(self: ^Manager, handle: u32) {
-  if _, ok := self.meshes[handle]; !ok {
-    self.meshes[handle] = {}
-  }
-}
-
-sync_camera_from_world :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-  handle: u32,
-  world_camera: ^camera.Camera,
-  swapchain_format: vk.Format,
-) {
-}
-
-clear_mesh :: proc(self: ^Manager, handle: u32) {
-  if _, ok := self.meshes[handle]; !ok do return
-  free_mesh_geometry(self, handle)
-  upload_mesh_data(self, handle, &Mesh{})
-}
-
-record_compute_commands :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  compute_buffer: vk.CommandBuffer,
-) -> vk.Result {
-  // Compute for frame N prepares data for frame N+1
-  // Buffer indices with rd.FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
-  next_frame_index := alg.next(frame_index, rd.FRAMES_IN_FLIGHT)
-  for cam_index, &cam in self.cameras {
-    // Only build pyramid if enabled for this camera
-    if cam.enable_depth_pyramid {
-      camera.build_pyramid(&self.visibility, gctx, compute_buffer, &cam, u32(cam_index), frame_index) // Build pyramid[N]
-    }
-    // Only perform culling if enabled for this camera
-    if cam.enable_culling {
-      camera.perform_culling(&self.visibility, gctx, compute_buffer, &cam, u32(cam_index), next_frame_index, {.VISIBLE}, {}) // Write draw_list[N+1]
-    }
-  }
-  particles.simulate(
-    &self.particles,
-    compute_buffer,
-    self.world_matrix_buffer.descriptor_set,
-  )
-  return .SUCCESS
-}
-
-init :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-  swapchain_extent: vk.Extent2D,
-  swapchain_format: vk.Format,
-  dpi_scale: f32,
-) -> (
-  ret: vk.Result,
-) {
-  self.cameras = make(map[u32]camera.Camera)
-  self.meshes = make(map[u32]Mesh)
-  self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
-  gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, ..self.command_buffers[:])
-  }
-  if gctx.has_async_compute {
-    gpu.allocate_compute_command_buffer(gctx, self.compute_command_buffers[:]) or_return
-    defer if ret != .SUCCESS {
-      gpu.free_compute_command_buffer(gctx, self.compute_command_buffers[:])
-    }
-  }
-  // Initialize geometry/bone/camera/scene buffers (survive teardown/setup cycles)
-  init_geometry_buffers(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    destroy_geometry_buffers(self, gctx)
-  }
-  init_bone_buffer(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    shutdown_bone_buffer(self, gctx)
-  }
-  gpu.per_frame_bindless_buffer_init(
-    &self.camera_buffer,
-    gctx,
-    rd.MAX_ACTIVE_CAMERAS,
-    {.VERTEX, .FRAGMENT, .COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    shutdown_camera_buffers(self, gctx)
-  }
-  init_scene_buffers(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    shutdown_scene_buffers(self, gctx)
-  }
-  // Initialize texture manager layout (must precede pipeline layout creation)
-  gpu.texture_manager_init(&self.texture_manager, gctx) or_return
-  defer if ret != .SUCCESS {
-    gpu.texture_manager_shutdown(&self.texture_manager, gctx)
-  }
-  // Initialize bindless infra (samplers + pipeline layouts)
-  init_bindless_layouts_infra(self, gctx) or_return
-  defer if ret != .SUCCESS {
-    shutdown_bindless_layouts_infra(self, gctx)
   }
   // Initialize all subsystems (pipeline creation only)
   camera.init(
@@ -615,15 +444,33 @@ setup :: proc(
   }
   // Re-allocate descriptor sets for scene buffers (freed by previous ResetDescriptorPool)
   gpu.bindless_buffer_realloc_descriptor(&self.material_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.world_matrix_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.node_data_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.mesh_data_buffer, gctx) or_return
+  gpu.bindless_buffer_realloc_descriptor(
+    &self.world_matrix_buffer,
+    gctx,
+  ) or_return
+  gpu.bindless_buffer_realloc_descriptor(
+    &self.node_data_buffer,
+    gctx,
+  ) or_return
+  gpu.bindless_buffer_realloc_descriptor(
+    &self.mesh_data_buffer,
+    gctx,
+  ) or_return
   gpu.bindless_buffer_realloc_descriptor(&self.emitter_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.forcefield_buffer, gctx) or_return
+  gpu.bindless_buffer_realloc_descriptor(
+    &self.forcefield_buffer,
+    gctx,
+  ) or_return
   gpu.bindless_buffer_realloc_descriptor(&self.sprite_buffer, gctx) or_return
   gpu.bindless_buffer_realloc_descriptor(&self.lights_buffer, gctx) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.bone_buffer, gctx) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.camera_buffer, gctx) or_return
+  gpu.per_frame_bindless_buffer_realloc_descriptors(
+    &self.bone_buffer,
+    gctx,
+  ) or_return
+  gpu.per_frame_bindless_buffer_realloc_descriptors(
+    &self.camera_buffer,
+    gctx,
+  ) or_return
   gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
   // Setup subsystem GPU resources
   light.setup(&self.lighting, gctx, &self.texture_manager) or_return
@@ -657,7 +504,9 @@ setup :: proc(
 
 teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   // Destroy camera GPU resources (VkImages, draw command buffers) before texture_manager goes away
-  shutdown_camera_resources(self, gctx)
+  for _, &cam in self.cameras {
+    camera.destroy_gpu(gctx, &cam, &self.texture_manager)
+  }
   clear(&self.cameras)
   ui_render.teardown(&self.ui, gctx)
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
@@ -682,6 +531,92 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   vk.ResetDescriptorPool(gctx.device, gctx.descriptor_pool, {})
 }
 
+@(private)
+ensure_camera_slot :: proc(self: ^Manager, handle: u32) {
+  if handle not_in self.cameras {
+    self.cameras[handle] = {}
+  }
+}
+
+@(private)
+get_camera :: proc(
+  self: ^Manager,
+  handle: u32,
+) -> (
+  cam: camera.Camera,
+  ok: bool,
+) #optional_ok {
+  cam, ok = self.cameras[handle]
+  if !ok do return {}, false
+  return cam, true
+}
+
+@(private)
+ensure_mesh_slot :: proc(self: ^Manager, handle: u32) {
+  if _, ok := self.meshes[handle]; !ok {
+    self.meshes[handle] = {}
+  }
+}
+
+sync_camera_from_world :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  handle: u32,
+  world_camera: ^camera.Camera,
+  swapchain_format: vk.Format,
+) {
+}
+
+clear_mesh :: proc(self: ^Manager, handle: u32) {
+  if _, ok := self.meshes[handle]; !ok do return
+  free_mesh_geometry(self, handle)
+  upload_mesh_data(self, handle, &Mesh{})
+}
+
+record_compute_commands :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  gctx: ^gpu.GPUContext,
+) -> vk.Result {
+  cmd :=
+    gctx.has_async_compute ? self.compute_command_buffers[frame_index] : self.command_buffers[frame_index]
+  // Compute for frame N prepares data for frame N+1
+  // Buffer indices with rd.FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
+  next_frame_index := alg.next(frame_index, rd.FRAMES_IN_FLIGHT)
+  for cam_index, &cam in self.cameras {
+    // Only build pyramid if enabled for this camera
+    if cam.enable_depth_pyramid {
+      camera.build_pyramid(
+        &self.visibility,
+        gctx,
+        cmd,
+        &cam,
+        u32(cam_index),
+        frame_index,
+      ) // Build pyramid[N]
+    }
+    // Only perform culling if enabled for this camera
+    if cam.enable_culling {
+      camera.perform_culling(
+        &self.visibility,
+        gctx,
+        cmd,
+        &cam,
+        u32(cam_index),
+        next_frame_index,
+        {.VISIBLE},
+        {},
+      ) // Write draw_list[N+1]
+    }
+  }
+  particles.simulate(
+    &self.particles,
+    cmd,
+    self.world_matrix_buffer.descriptor_set,
+  )
+  return .SUCCESS
+}
+
 // Stage UI commands from UI module
 stage_ui_commands :: proc(self: ^Manager, commands: []cmd.RenderCommand) {
   clear(&self.ui_commands)
@@ -691,7 +626,10 @@ stage_ui_commands :: proc(self: ^Manager, commands: []cmd.RenderCommand) {
 }
 
 // Stage bone visualization instances for debug rendering
-stage_bone_visualization :: proc(self: ^Manager, instances: []debug.BoneInstance) {
+stage_bone_visualization :: proc(
+  self: ^Manager,
+  instances: []debug.BoneInstance,
+) {
   debug.stage_bones(&self.debug_renderer, instances)
 }
 
@@ -716,12 +654,32 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   light.shadow_shutdown(&self.shadow, gctx)
   geometry.shutdown(&self.geometry, gctx)
   camera.shutdown(&self.visibility, gctx)
-  shutdown_bindless_layouts_infra(self, gctx)
+  vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
+  self.general_pipeline_layout = 0
+  vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
+  self.sprite_pipeline_layout = 0
+  vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
+  self.linear_repeat_sampler = 0
+  vk.DestroySampler(gctx.device, self.linear_clamp_sampler, nil)
+  self.linear_clamp_sampler = 0
+  vk.DestroySampler(gctx.device, self.nearest_repeat_sampler, nil)
+  self.nearest_repeat_sampler = 0
+  vk.DestroySampler(gctx.device, self.nearest_clamp_sampler, nil)
+  self.nearest_clamp_sampler = 0
   gpu.texture_manager_shutdown(&self.texture_manager, gctx)
-  shutdown_scene_buffers(self, gctx)
-  shutdown_camera_buffers(self, gctx)
-  shutdown_bone_buffer(self, gctx)
-  destroy_geometry_buffers(self, gctx)
+  gpu.bindless_buffer_destroy(&self.material_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.world_matrix_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.node_data_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.mesh_data_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
+  gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
+  delete(self.bone_matrix_offsets)
+  gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
+  cont.slab_destroy(&self.bone_matrix_slab)
+  gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
   delete(self.cameras)
   delete(self.meshes)
 }
@@ -761,19 +719,19 @@ resize :: proc(
 render_shadow_depth :: proc(
   self: ^Manager,
   frame_index: u32,
-  command_buffer: vk.CommandBuffer,
   active_lights: []rd.LightHandle,
 ) -> vk.Result {
+  cmd := self.command_buffers[frame_index]
   light.shadow_sync_lights(
     &self.shadow,
     &self.lights_buffer,
     active_lights,
     frame_index,
   )
-  light.shadow_compute_draw_lists(&self.shadow, command_buffer, frame_index)
+  light.shadow_compute_draw_lists(&self.shadow, cmd, frame_index)
   light.shadow_render_depth(
     &self.shadow,
-    command_buffer,
+    cmd,
     &self.texture_manager,
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
@@ -793,10 +751,34 @@ render_camera_depth :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
-  command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
+  cmd := self.command_buffers[frame_index]
   for cam_index, &cam in self.cameras {
-    camera.render_depth(&self.visibility, gctx, command_buffer, &cam, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP}, self.texture_manager.descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.mesh_manager.vertex_skinning_buffer.descriptor_set, self.mesh_manager.vertex_buffer.buffer, self.mesh_manager.index_buffer.buffer)
+    camera.render_depth(
+      &self.visibility,
+      gctx,
+      cmd,
+      &cam,
+      &self.texture_manager,
+      u32(cam_index),
+      frame_index,
+      {.VISIBLE},
+      {
+        .MATERIAL_TRANSPARENT,
+        .MATERIAL_WIREFRAME,
+        .MATERIAL_RANDOM_COLOR,
+        .MATERIAL_LINE_STRIP,
+      },
+      self.texture_manager.descriptor_set,
+      self.bone_buffer.descriptor_sets[frame_index],
+      self.material_buffer.descriptor_set,
+      self.world_matrix_buffer.descriptor_set,
+      self.node_data_buffer.descriptor_set,
+      self.mesh_data_buffer.descriptor_set,
+      self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+      self.mesh_manager.vertex_buffer.buffer,
+      self.mesh_manager.index_buffer.buffer,
+    )
   }
   return .SUCCESS
 }
@@ -804,24 +786,17 @@ render_camera_depth :: proc(
 record_geometry_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  camera_handle: u32,
-  command_buffer: vk.CommandBuffer,
+  cam_index: u32,
+  cam: ^camera.Camera,
 ) -> vk.Result {
-  camera, ok := &self.cameras[camera_handle]
-  if !ok do return .ERROR_UNKNOWN
-  geometry.begin_pass(
-    camera,
-    &self.texture_manager,
-    command_buffer,
-    frame_index,
-  )
+  cmd := self.command_buffers[frame_index]
+  geometry.begin_pass(cam, &self.texture_manager, cmd, frame_index)
   geometry.render(
     &self.geometry,
-    camera,
-    camera_handle,
+    cam,
+    cam_index,
     frame_index,
-    command_buffer,
+    cmd,
     self.general_pipeline_layout,
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
@@ -832,15 +807,10 @@ record_geometry_pass :: proc(
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    camera.opaque_draw_commands[frame_index].buffer,
-    camera.opaque_draw_count[frame_index].buffer,
+    cam.opaque_draw_commands[frame_index].buffer,
+    cam.opaque_draw_count[frame_index].buffer,
   )
-  geometry.end_pass(
-    camera,
-    &self.texture_manager,
-    command_buffer,
-    frame_index,
-  )
+  geometry.end_pass(cam, &self.texture_manager, cmd, frame_index)
   return .SUCCESS
 }
 
@@ -848,32 +818,24 @@ record_lighting_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   active_lights: []rd.LightHandle,
-  camera_handle: u32,
-  color_format: vk.Format,
-  command_buffer: vk.CommandBuffer,
+  cam_index: u32,
+  cam: ^camera.Camera,
 ) -> vk.Result {
-  camera, ok := &self.cameras[camera_handle]
-  if !ok do return .ERROR_UNKNOWN
+  cmd := self.command_buffers[frame_index]
   light.begin_ambient_pass(
     &self.lighting,
-    camera,
+    cam,
     &self.texture_manager,
-    command_buffer,
+    cmd,
     frame_index,
   )
-  light.render_ambient(
-    &self.lighting,
-    camera_handle,
-    camera,
-    command_buffer,
-    frame_index,
-  )
-  light.end_ambient_pass(command_buffer)
+  light.render_ambient(&self.lighting, cam_index, cam, cmd, frame_index)
+  light.end_ambient_pass(cmd)
   light.begin_pass(
     &self.lighting,
-    camera,
+    cam,
     &self.texture_manager,
-    command_buffer,
+    cmd,
     self.lights_buffer.descriptor_set,
     self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
     frame_index,
@@ -893,43 +855,41 @@ record_lighting_pass :: proc(
   }
   light.render(
     &self.lighting,
-    camera_handle,
-    camera,
+    cam_index,
+    cam,
     &shadow_texture_indices,
-    command_buffer,
+    cmd,
     &self.lights_buffer,
     active_lights,
     frame_index,
   )
-  light.end_pass(command_buffer)
+  light.end_pass(cmd)
   return .SUCCESS
 }
 
 record_particles_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  camera_handle: u32,
-  color_format: vk.Format,
-  command_buffer: vk.CommandBuffer,
+  cam_index: u32,
+  cam: ^camera.Camera,
 ) -> vk.Result {
-  camera, ok := &self.cameras[camera_handle]
-  if !ok do return .ERROR_UNKNOWN
+  cmd := self.command_buffers[frame_index]
   particles.begin_pass(
     &self.particles,
-    command_buffer,
-    camera,
+    cmd,
+    cam,
     &self.texture_manager,
     frame_index,
   )
   particles.render(
     &self.particles,
-    command_buffer,
-    camera,
-    camera_handle,
+    cmd,
+    cam,
+    cam_index,
     frame_index,
     self.texture_manager.descriptor_set,
   )
-  particles.end_pass(command_buffer)
+  particles.end_pass(cmd)
   return .SUCCESS
 }
 
@@ -937,29 +897,27 @@ record_transparency_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
-  camera_handle: u32,
-  color_format: vk.Format,
-  command_buffer: vk.CommandBuffer,
+  cam_index: u32,
+  cam: ^camera.Camera,
 ) -> vk.Result {
-  cam, ok := &self.cameras[camera_handle]
-  if !ok do return .ERROR_UNKNOWN
+  cmd := self.command_buffers[frame_index]
   transparency.begin_pass(
     &self.transparency,
     cam,
     &self.texture_manager,
-    command_buffer,
+    cmd,
     frame_index,
   )
   // Render transparent objects
   camera.perform_culling(
     &self.visibility,
     gctx,
-    command_buffer,
+    cmd,
     cam,
-    camera_handle,
+    cam_index,
     frame_index,
     NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT},
-    NodeFlagSet{
+    NodeFlagSet {
       .MATERIAL_WIREFRAME,
       .MATERIAL_RANDOM_COLOR,
       .MATERIAL_LINE_STRIP,
@@ -967,7 +925,7 @@ record_transparency_pass :: proc(
     },
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -976,7 +934,7 @@ record_transparency_pass :: proc(
     {.DRAW_INDIRECT},
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.transparent_draw_count[frame_index].buffer,
     vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -1000,9 +958,9 @@ record_transparency_pass :: proc(
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    camera_handle,
+    cam_index,
     frame_index,
-    command_buffer,
+    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     cam.transparent_draw_count[frame_index].buffer,
   )
@@ -1010,12 +968,12 @@ record_transparency_pass :: proc(
   camera.perform_culling(
     &self.visibility,
     gctx,
-    command_buffer,
+    cmd,
     cam,
-    camera_handle,
+    cam_index,
     frame_index,
     NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME},
-    NodeFlagSet{
+    NodeFlagSet {
       .MATERIAL_TRANSPARENT,
       .MATERIAL_RANDOM_COLOR,
       .MATERIAL_LINE_STRIP,
@@ -1023,7 +981,7 @@ record_transparency_pass :: proc(
     },
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -1032,7 +990,7 @@ record_transparency_pass :: proc(
     {.DRAW_INDIRECT},
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.transparent_draw_count[frame_index].buffer,
     vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -1056,9 +1014,9 @@ record_transparency_pass :: proc(
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    camera_handle,
+    cam_index,
     frame_index,
-    command_buffer,
+    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     cam.transparent_draw_count[frame_index].buffer,
   )
@@ -1066,12 +1024,12 @@ record_transparency_pass :: proc(
   camera.perform_culling(
     &self.visibility,
     gctx,
-    command_buffer,
+    cmd,
     cam,
-    camera_handle,
+    cam_index,
     frame_index,
     NodeFlagSet{.VISIBLE, .MATERIAL_RANDOM_COLOR},
-    NodeFlagSet{
+    NodeFlagSet {
       .MATERIAL_TRANSPARENT,
       .MATERIAL_WIREFRAME,
       .MATERIAL_LINE_STRIP,
@@ -1079,7 +1037,7 @@ record_transparency_pass :: proc(
     },
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -1088,7 +1046,7 @@ record_transparency_pass :: proc(
     {.DRAW_INDIRECT},
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.transparent_draw_count[frame_index].buffer,
     vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -1112,9 +1070,9 @@ record_transparency_pass :: proc(
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    camera_handle,
+    cam_index,
     frame_index,
-    command_buffer,
+    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     cam.transparent_draw_count[frame_index].buffer,
   )
@@ -1122,12 +1080,12 @@ record_transparency_pass :: proc(
   camera.perform_culling(
     &self.visibility,
     gctx,
-    command_buffer,
+    cmd,
     cam,
-    camera_handle,
+    cam_index,
     frame_index,
     NodeFlagSet{.VISIBLE, .MATERIAL_LINE_STRIP},
-    NodeFlagSet{
+    NodeFlagSet {
       .MATERIAL_TRANSPARENT,
       .MATERIAL_WIREFRAME,
       .MATERIAL_RANDOM_COLOR,
@@ -1135,7 +1093,7 @@ record_transparency_pass :: proc(
     },
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -1144,7 +1102,7 @@ record_transparency_pass :: proc(
     {.DRAW_INDIRECT},
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.transparent_draw_count[frame_index].buffer,
     vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -1168,9 +1126,9 @@ record_transparency_pass :: proc(
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    camera_handle,
+    cam_index,
     frame_index,
-    command_buffer,
+    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     cam.transparent_draw_count[frame_index].buffer,
   )
@@ -1178,15 +1136,15 @@ record_transparency_pass :: proc(
   camera.perform_culling(
     &self.visibility,
     gctx,
-    command_buffer,
+    cmd,
     cam,
-    camera_handle,
+    cam_index,
     frame_index,
     NodeFlagSet{.VISIBLE, .MATERIAL_SPRITE},
     NodeFlagSet{},
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.sprite_draw_commands[frame_index].buffer,
     vk.DeviceSize(cam.sprite_draw_commands[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -1195,7 +1153,7 @@ record_transparency_pass :: proc(
     {.DRAW_INDIRECT},
   )
   gpu.buffer_barrier(
-    command_buffer,
+    cmd,
     cam.sprite_draw_count[frame_index].buffer,
     vk.DeviceSize(cam.sprite_draw_count[frame_index].bytes_count),
     {.SHADER_WRITE},
@@ -1219,28 +1177,27 @@ record_transparency_pass :: proc(
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    camera_handle,
+    cam_index,
     frame_index,
-    command_buffer,
+    cmd,
     cam.sprite_draw_commands[frame_index].buffer,
     cam.sprite_draw_count[frame_index].buffer,
   )
 
-  transparency.end_pass(&self.transparency, command_buffer)
+  transparency.end_pass(&self.transparency, cmd)
   return .SUCCESS
 }
 
 record_debug_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  camera_handle: u32,
-  command_buffer: vk.CommandBuffer,
+  cam_index: u32,
+  cam: ^camera.Camera,
 ) -> vk.Result {
   // Skip debug rendering if no instances are staged
   if len(self.debug_renderer.bone_instances) == 0 do return .SUCCESS
 
-  cam, ok := &self.cameras[camera_handle]
-  if !ok do return .ERROR_UNKNOWN
+  cmd := self.command_buffers[frame_index]
 
   // Begin debug render pass (renders on top of transparency)
   // Skip rendering if attachments are missing
@@ -1248,7 +1205,7 @@ record_debug_pass :: proc(
     &self.debug_renderer,
     cam,
     &self.texture_manager,
-    command_buffer,
+    cmd,
     frame_index,
   ) {
     return .SUCCESS
@@ -1257,12 +1214,12 @@ record_debug_pass :: proc(
   // Render debug visualization (bones, etc.)
   debug.render(
     &self.debug_renderer,
-    command_buffer,
+    cmd,
     self.camera_buffer.descriptor_sets[frame_index],
-    camera_handle,
+    cam_index,
   ) or_return
 
-  debug.end_pass(&self.debug_renderer, command_buffer)
+  debug.end_pass(&self.debug_renderer, cmd)
 
   return .SUCCESS
 }
@@ -1270,20 +1227,18 @@ record_debug_pass :: proc(
 record_post_process_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  camera_handle: u32,
-  color_format: vk.Format,
+  cam: ^camera.Camera,
   swapchain_extent: vk.Extent2D,
   swapchain_image: vk.Image,
   swapchain_view: vk.ImageView,
-  command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  camera := &self.cameras[camera_handle]
+  cmd := self.command_buffers[frame_index]
   if final_image := gpu.get_texture_2d(
     &self.texture_manager,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+    cam.attachments[.FINAL_IMAGE][frame_index],
   ); final_image != nil {
     gpu.image_barrier(
-      command_buffer,
+      cmd,
       final_image.image,
       .COLOR_ATTACHMENT_OPTIMAL,
       .SHADER_READ_ONLY_OPTIMAL,
@@ -1295,7 +1250,7 @@ record_post_process_pass :: proc(
     )
   }
   gpu.image_barrier(
-    command_buffer,
+    cmd,
     swapchain_image,
     .UNDEFINED,
     .COLOR_ATTACHMENT_OPTIMAL,
@@ -1305,17 +1260,17 @@ record_post_process_pass :: proc(
     {.COLOR_ATTACHMENT_OUTPUT},
     {.COLOR},
   )
-  post_process.begin_pass(&self.post_process, command_buffer, swapchain_extent)
+  post_process.begin_pass(&self.post_process, cmd, swapchain_extent)
   post_process.render(
     &self.post_process,
-    command_buffer,
+    cmd,
     swapchain_extent,
     swapchain_view,
-    camera,
+    cam,
     &self.texture_manager,
     frame_index,
   )
-  post_process.end_pass(&self.post_process, command_buffer)
+  post_process.end_pass(&self.post_process, cmd)
   return .SUCCESS
 }
 
@@ -1325,8 +1280,8 @@ record_ui_pass :: proc(
   gctx: ^gpu.GPUContext,
   swapchain_view: vk.ImageView,
   swapchain_extent: vk.Extent2D,
-  command_buffer: vk.CommandBuffer,
 ) {
+  cmd := self.command_buffers[frame_index]
   // UI rendering pass - renders on top of post-processed image
   rendering_attachment_info := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
@@ -1344,7 +1299,7 @@ record_ui_pass :: proc(
     pColorAttachments = &rendering_attachment_info,
   }
 
-  vk.CmdBeginRendering(command_buffer, &rendering_info)
+  vk.CmdBeginRendering(cmd, &rendering_info)
 
   // Set viewport and scissor
   viewport := vk.Viewport {
@@ -1359,13 +1314,13 @@ record_ui_pass :: proc(
     offset = {0, 0},
     extent = swapchain_extent,
   }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  vk.CmdSetViewport(cmd, 0, 1, &viewport)
+  vk.CmdSetScissor(cmd, 0, 1, &scissor)
 
   // Bind pipeline and descriptor sets
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.ui.pipeline)
+  vk.CmdBindPipeline(cmd, .GRAPHICS, self.ui.pipeline)
   vk.CmdBindDescriptorSets(
-    command_buffer,
+    cmd,
     .GRAPHICS,
     self.ui.pipeline_layout,
     0,
@@ -1381,13 +1336,13 @@ record_ui_pass :: proc(
     self.ui_commands[:],
     gctx,
     &self.texture_manager,
-    command_buffer,
+    cmd,
     swapchain_extent.width,
     swapchain_extent.height,
     frame_index,
   )
 
-  vk.CmdEndRendering(command_buffer)
+  vk.CmdEndRendering(cmd)
 }
 
 allocate_mesh_geometry :: proc(
@@ -1625,7 +1580,11 @@ upload_forcefield_data :: proc(
   gpu.write(&render.forcefield_buffer.buffer, forcefield, int(index))
 }
 
-upload_light_data :: proc(render: ^Manager, index: u32, light_data: ^rd.Light) {
+upload_light_data :: proc(
+  render: ^Manager,
+  index: u32,
+  light_data: ^rd.Light,
+) {
   gpu.write(&render.lights_buffer.buffer, light_data, int(index))
   light.shadow_invalidate_light(&render.shadow, index)
 }
@@ -1682,12 +1641,7 @@ upload_camera_data :: proc(
     near,
     far,
   }
-  camera_data.position = [4]f32 {
-    position[0],
-    position[1],
-    position[2],
-    1.0,
-  }
+  camera_data.position = [4]f32{position[0], position[1], position[2], 1.0}
   frustum := geom.make_frustum(camera_data.projection * camera_data.view)
   camera_data.frustum_planes = frustum.planes
   gpu.write(

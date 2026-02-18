@@ -1286,73 +1286,67 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   render.render_shadow_depth(
     &self.render,
     self.frame_index,
-    command_buffer,
     active_render_lights[:],
   ) or_return
   render.render_camera_depth(
     &self.render,
     self.frame_index,
     &self.gctx,
-    command_buffer,
   ) or_return
   for &entry, cam_index in self.world.cameras.entries {
     if !entry.active do continue
-    cam := &entry.item
-    if world.PassType.GEOMETRY in cam.enabled_passes {
+    world_cam := &entry.item
+    render_cam := &self.render.cameras[u32(cam_index)]
+    if world.PassType.GEOMETRY in world_cam.enabled_passes {
       render.record_geometry_pass(
         &self.render,
         self.frame_index,
-        &self.gctx,
         u32(cam_index),
-        command_buffer,
+        render_cam,
       )
     }
-    if world.PassType.LIGHTING in cam.enabled_passes {
+    if world.PassType.LIGHTING in world_cam.enabled_passes {
       render.record_lighting_pass(
         &self.render,
         self.frame_index,
         active_render_lights[:],
         u32(cam_index),
-        self.swapchain.format.format,
-        command_buffer,
+        render_cam,
       )
     }
-    if world.PassType.PARTICLES in cam.enabled_passes {
+    if world.PassType.PARTICLES in world_cam.enabled_passes {
       render.record_particles_pass(
         &self.render,
         self.frame_index,
         u32(cam_index),
-        self.swapchain.format.format,
-        command_buffer,
+        render_cam,
       )
     }
-    if world.PassType.TRANSPARENCY in cam.enabled_passes {
+    if world.PassType.TRANSPARENCY in world_cam.enabled_passes {
       render.record_transparency_pass(
         &self.render,
         self.frame_index,
         &self.gctx,
         u32(cam_index),
-        self.swapchain.format.format,
-        command_buffer,
+        render_cam,
       )
     }
   }
+  main_render_cam := &self.render.cameras[self.world.main_camera.index]
   // Debug rendering pass (bones, etc.) - renders after transparency
   render.record_debug_pass(
     &self.render,
     self.frame_index,
     self.world.main_camera.index,
-    command_buffer,
+    main_render_cam,
   )
   render.record_post_process_pass(
     &self.render,
     self.frame_index,
-    self.world.main_camera.index,
-    self.swapchain.format.format,
+    main_render_cam,
     self.swapchain.extent,
     self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
-    command_buffer,
   )
   render.record_ui_pass(
     &self.render,
@@ -1360,7 +1354,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.gctx,
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
-    command_buffer,
   )
   compute_cmd_buffer: vk.CommandBuffer
   if self.gctx.has_async_compute {
@@ -1373,7 +1366,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.render,
     self.frame_index,
     &self.gctx,
-    compute_cmd_buffer,
   ) or_return
   if self.gctx.has_async_compute {
     gpu.end_record(compute_cmd_buffer) or_return
