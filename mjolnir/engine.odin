@@ -1382,7 +1382,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
       self.swapchain.views[self.swapchain.image_index],
       self.swapchain.extent,
     )
-    debug_ui.render(&self.render.debug_ui, command_buffer, self.render.textures_descriptor_set)
+    debug_ui.render(&self.render.debug_ui, command_buffer, self.render.texture_manager.descriptor_set)
     debug_ui.end_pass(&self.render.debug_ui, command_buffer)
   }
   // Transition swapchain image to present layout

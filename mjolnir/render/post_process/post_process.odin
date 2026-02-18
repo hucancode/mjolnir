@@ -649,7 +649,7 @@ render :: proc(
       command_buffer,
       self.pipelines[effect_type],
       self.pipeline_layouts[effect_type],
-      texture_manager.textures_descriptor_set,
+      texture_manager.descriptor_set,
     )
     base: BasePushConstant
     base.position_texture_index =

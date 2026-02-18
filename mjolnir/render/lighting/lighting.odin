@@ -97,7 +97,7 @@ begin_ambient_pass :: proc(
     self.ambient_pipeline,
     self.ambient_pipeline_layout,
     camera.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
-    texture_manager.textures_descriptor_set, // set = 1 (bindless textures)
+    texture_manager.descriptor_set, // set = 1 (bindless textures)
   )
 }
 
@@ -494,7 +494,7 @@ begin_pass :: proc(
     self.lighting_pipeline,
     self.lighting_pipeline_layout,
     camera.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame cameras)
-    texture_manager.textures_descriptor_set, // set = 1 (textures/samplers)
+    texture_manager.descriptor_set, // set = 1 (textures/samplers)
     lights_descriptor_set, // set = 2 (lights)
     shadow_data_descriptor_set, // set = 3 (per-frame shadow data)
   )

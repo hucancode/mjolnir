@@ -74,8 +74,6 @@ Manager :: struct {
   meshes:                  map[u32]Mesh,
   visibility:              camera.System,
   shadow:                  light.ShadowSystem,
-  textures_set_layout:     vk.DescriptorSetLayout,
-  textures_descriptor_set: vk.DescriptorSet,
   general_pipeline_layout: vk.PipelineLayout,
   sprite_pipeline_layout:  vk.PipelineLayout,
   linear_repeat_sampler:   vk.Sampler,
@@ -327,16 +325,6 @@ init_bindless_layouts_infra :: proc(
     vk.DestroySampler(gctx.device, self.nearest_clamp_sampler, nil)
     self.nearest_clamp_sampler = 0
   }
-  self.textures_set_layout = gpu.create_descriptor_set_layout_array(
-    gctx,
-    {.SAMPLED_IMAGE, gpu.MAX_TEXTURES, {.FRAGMENT}},
-    {.SAMPLER, gpu.MAX_SAMPLERS, {.FRAGMENT}},
-    {.SAMPLED_IMAGE, gpu.MAX_CUBE_TEXTURES, {.FRAGMENT}},
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)
-    self.textures_set_layout = 0
-  }
   self.general_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
@@ -344,7 +332,7 @@ init_bindless_layouts_infra :: proc(
       size = size_of(u32),
     },
     self.camera_buffer.set_layout,
-    self.textures_set_layout,
+    self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
     self.world_matrix_buffer.set_layout,
@@ -363,7 +351,7 @@ init_bindless_layouts_infra :: proc(
       size = size_of(u32),
     },
     self.camera_buffer.set_layout,
-    self.textures_set_layout,
+    self.texture_manager.set_layout,
     self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.sprite_buffer.set_layout,
@@ -375,47 +363,17 @@ init_bindless_layouts_infra :: proc(
   return .SUCCESS
 }
 
-@(private)
-setup_bindless_textures :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
-  gpu.allocate_descriptor_set(
-    gctx,
-    &self.textures_descriptor_set,
-    &self.textures_set_layout,
-  ) or_return
-  gpu.update_descriptor_set_array(
-    gctx,
-    self.textures_descriptor_set,
-    1,
-    {.SAMPLER, vk.DescriptorImageInfo{sampler = self.nearest_clamp_sampler}},
-    {.SAMPLER, vk.DescriptorImageInfo{sampler = self.linear_clamp_sampler}},
-    {.SAMPLER, vk.DescriptorImageInfo{sampler = self.nearest_repeat_sampler}},
-    {.SAMPLER, vk.DescriptorImageInfo{sampler = self.linear_repeat_sampler}},
-  )
-  gpu.texture_manager_init(
-    &self.texture_manager,
-    self.textures_descriptor_set,
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
-teardown_bindless_textures :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.texture_manager_shutdown(&self.texture_manager, gctx)
-  self.textures_descriptor_set = 0
-}
 
 @(private)
 shutdown_bindless_layouts_infra :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)
   vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
   vk.DestroySampler(gctx.device, self.linear_clamp_sampler, nil)
   vk.DestroySampler(gctx.device, self.nearest_repeat_sampler, nil)
   vk.DestroySampler(gctx.device, self.nearest_clamp_sampler, nil)
   self.general_pipeline_layout = 0
   self.sprite_pipeline_layout = 0
-  self.textures_set_layout = 0
   self.linear_repeat_sampler = 0
   self.linear_clamp_sampler = 0
   self.nearest_repeat_sampler = 0
@@ -528,7 +486,12 @@ init :: proc(
   defer if ret != .SUCCESS {
     shutdown_scene_buffers(self, gctx)
   }
-  // Initialize bindless infra (samplers + descriptor set layouts + pipeline layouts)
+  // Initialize texture manager layout (must precede pipeline layout creation)
+  gpu.texture_manager_init(&self.texture_manager, gctx) or_return
+  defer if ret != .SUCCESS {
+    gpu.texture_manager_shutdown(&self.texture_manager, gctx)
+  }
+  // Initialize bindless infra (samplers + pipeline layouts)
   init_bindless_layouts_infra(self, gctx) or_return
   defer if ret != .SUCCESS {
     shutdown_bindless_layouts_infra(self, gctx)
@@ -544,7 +507,7 @@ init :: proc(
   light.shadow_init(
     &self.shadow,
     gctx,
-    self.textures_set_layout,
+    self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
     self.world_matrix_buffer.set_layout,
@@ -558,7 +521,7 @@ init :: proc(
     self.camera_buffer.set_layout,
     self.lights_buffer.set_layout,
     self.shadow.shadow_data_buffer.set_layout,
-    self.textures_set_layout,
+    self.texture_manager.set_layout,
     swapchain_extent.width,
     swapchain_extent.height,
     swapchain_format,
@@ -578,7 +541,7 @@ init :: proc(
     self.emitter_buffer.set_layout,
     self.forcefield_buffer.set_layout,
     self.world_matrix_buffer.set_layout,
-    self.textures_set_layout,
+    self.texture_manager.set_layout,
   ) or_return
   transparency.init(
     &self.transparency,
@@ -592,7 +555,7 @@ init :: proc(
     &self.post_process,
     gctx,
     swapchain_format,
-    self.textures_set_layout,
+    self.texture_manager.set_layout,
   ) or_return
   debug_ui.init(
     &self.debug_ui,
@@ -601,7 +564,7 @@ init :: proc(
     swapchain_extent.width,
     swapchain_extent.height,
     dpi_scale,
-    self.textures_set_layout,
+    self.texture_manager.set_layout,
   ) or_return
   debug.init(
     &self.debug_renderer,
@@ -611,7 +574,7 @@ init :: proc(
   ui_render.init_renderer(
     &self.ui,
     gctx,
-    self.textures_set_layout,
+    self.texture_manager.set_layout,
     swapchain_format,
   ) or_return
   return .SUCCESS
@@ -625,10 +588,19 @@ setup :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  // Allocate textures_descriptor_set and init texture_manager
-  setup_bindless_textures(self, gctx) or_return
+  // Allocate textures descriptor set and init texture pools
+  gpu.texture_manager_setup(
+    &self.texture_manager,
+    gctx,
+    {
+      self.nearest_clamp_sampler,
+      self.linear_clamp_sampler,
+      self.nearest_repeat_sampler,
+      self.linear_repeat_sampler,
+    },
+  ) or_return
   defer if ret != .SUCCESS {
-    teardown_bindless_textures(self, gctx)
+    gpu.texture_manager_teardown(&self.texture_manager, gctx)
   }
   // Re-allocate descriptor sets for scene buffers (freed by previous ResetDescriptorPool)
   gpu.bindless_buffer_realloc_descriptor(&self.material_buffer, gctx) or_return
@@ -682,7 +654,7 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   particles.teardown(&self.particles, gctx)
   light.shadow_teardown(&self.shadow, gctx, &self.texture_manager)
   light.teardown(&self.lighting, gctx, &self.texture_manager)
-  teardown_bindless_textures(self, gctx)
+  gpu.texture_manager_teardown(&self.texture_manager, gctx)
   // Zero all descriptor set handles (freed in bulk below)
   self.material_buffer.descriptor_set = 0
   self.world_matrix_buffer.descriptor_set = 0
@@ -730,6 +702,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   geometry.shutdown(&self.geometry, gctx)
   camera.shutdown(&self.visibility, gctx)
   shutdown_bindless_layouts_infra(self, gctx)
+  gpu.texture_manager_shutdown(&self.texture_manager, gctx)
   shutdown_scene_buffers(self, gctx)
   shutdown_camera_buffers(self, gctx)
   shutdown_bone_buffer(self, gctx)
@@ -787,7 +760,7 @@ render_shadow_depth :: proc(
     &self.shadow,
     command_buffer,
     &self.texture_manager,
-    self.textures_descriptor_set,
+    self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.world_matrix_buffer.descriptor_set,
@@ -808,7 +781,7 @@ render_camera_depth :: proc(
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   for cam_index, &cam in self.cameras {
-    camera.render_depth(&self.visibility, gctx, command_buffer, &cam, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP}, self.textures_descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.mesh_manager.vertex_skinning_buffer.descriptor_set, self.mesh_manager.vertex_buffer.buffer, self.mesh_manager.index_buffer.buffer)
+    camera.render_depth(&self.visibility, gctx, command_buffer, &cam, &self.texture_manager, u32(cam_index), frame_index, {.VISIBLE}, {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP}, self.texture_manager.descriptor_set, self.bone_buffer.descriptor_sets[frame_index], self.material_buffer.descriptor_set, self.world_matrix_buffer.descriptor_set, self.node_data_buffer.descriptor_set, self.mesh_data_buffer.descriptor_set, self.mesh_manager.vertex_skinning_buffer.descriptor_set, self.mesh_manager.vertex_buffer.buffer, self.mesh_manager.index_buffer.buffer)
   }
   return .SUCCESS
 }
@@ -835,7 +808,7 @@ record_geometry_pass :: proc(
     frame_index,
     command_buffer,
     self.general_pipeline_layout,
-    self.textures_descriptor_set,
+    self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.world_matrix_buffer.descriptor_set,
@@ -939,7 +912,7 @@ record_particles_pass :: proc(
     camera,
     camera_handle,
     frame_index,
-    self.textures_descriptor_set,
+    self.texture_manager.descriptor_set,
   )
   particles.end_pass(command_buffer)
   return .SUCCESS
@@ -1002,7 +975,7 @@ record_transparency_pass :: proc(
     self.transparency.transparent_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
-    self.textures_descriptor_set,
+    self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.world_matrix_buffer.descriptor_set,
@@ -1058,7 +1031,7 @@ record_transparency_pass :: proc(
     self.transparency.wireframe_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
-    self.textures_descriptor_set,
+    self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.world_matrix_buffer.descriptor_set,
@@ -1114,7 +1087,7 @@ record_transparency_pass :: proc(
     self.transparency.random_color_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
-    self.textures_descriptor_set,
+    self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.world_matrix_buffer.descriptor_set,
@@ -1170,7 +1143,7 @@ record_transparency_pass :: proc(
     self.transparency.line_strip_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
-    self.textures_descriptor_set,
+    self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.world_matrix_buffer.descriptor_set,
@@ -1221,7 +1194,7 @@ record_transparency_pass :: proc(
     self.transparency.sprite_pipeline,
     self.general_pipeline_layout,
     self.sprite_pipeline_layout,
-    self.textures_descriptor_set,
+    self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.world_matrix_buffer.descriptor_set,
@@ -1382,7 +1355,7 @@ record_ui_pass :: proc(
     self.ui.pipeline_layout,
     0,
     1,
-    &self.textures_descriptor_set,
+    &self.texture_manager.descriptor_set,
     0,
     nil,
   )
