@@ -9,7 +9,6 @@ import cam "camera"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import d "data"
 import rd "data"
 import "debug"
 import "debug_ui"
@@ -22,7 +21,7 @@ import ui_render "ui"
 import cmd "../gpu/ui"
 import vk "vendor:vulkan"
 
-FRAMES_IN_FLIGHT :: d.FRAMES_IN_FLIGHT
+FRAMES_IN_FLIGHT :: rd.FRAMES_IN_FLIGHT
 
 Handle :: rd.Handle
 MeshHandle :: rd.MeshHandle
@@ -61,6 +60,8 @@ DEBUG_BONE_PALETTE :: [6][4]f32 {
 }
 
 Manager :: struct {
+  command_buffers:         [FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   geometry:                geometry.Renderer,
   lighting:                light.Renderer,
   transparency:            transparency.Renderer,
@@ -112,7 +113,7 @@ init_scene_buffers :: proc(
   gpu.bindless_buffer_init(
     &self.material_buffer,
     gctx,
-    d.MAX_MATERIALS,
+    rd.MAX_MATERIALS,
     {.VERTEX, .FRAGMENT},
   ) or_return
   defer if ret != .SUCCESS {
@@ -121,7 +122,7 @@ init_scene_buffers :: proc(
   gpu.bindless_buffer_init(
     &self.world_matrix_buffer,
     gctx,
-    d.MAX_NODES_IN_SCENE,
+    rd.MAX_NODES_IN_SCENE,
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
@@ -130,7 +131,7 @@ init_scene_buffers :: proc(
   gpu.bindless_buffer_init(
     &self.node_data_buffer,
     gctx,
-    d.MAX_NODES_IN_SCENE,
+    rd.MAX_NODES_IN_SCENE,
     {.VERTEX, .FRAGMENT},
   ) or_return
   defer if ret != .SUCCESS {
@@ -139,7 +140,7 @@ init_scene_buffers :: proc(
   gpu.bindless_buffer_init(
     &self.mesh_data_buffer,
     gctx,
-    d.MAX_MESHES,
+    rd.MAX_MESHES,
     {.VERTEX},
   ) or_return
   defer if ret != .SUCCESS {
@@ -148,7 +149,7 @@ init_scene_buffers :: proc(
   gpu.bindless_buffer_init(
     &self.emitter_buffer,
     gctx,
-    d.MAX_EMITTERS,
+    rd.MAX_EMITTERS,
     {.COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
@@ -159,7 +160,7 @@ init_scene_buffers :: proc(
   gpu.bindless_buffer_init(
     &self.forcefield_buffer,
     gctx,
-    d.MAX_FORCE_FIELDS,
+    rd.MAX_FORCE_FIELDS,
     {.COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
@@ -170,7 +171,7 @@ init_scene_buffers :: proc(
   gpu.bindless_buffer_init(
     &self.sprite_buffer,
     gctx,
-    d.MAX_SPRITES,
+    rd.MAX_SPRITES,
     {.VERTEX, .FRAGMENT},
   ) or_return
   defer if ret != .SUCCESS {
@@ -181,7 +182,7 @@ init_scene_buffers :: proc(
   gpu.bindless_buffer_init(
     &self.lights_buffer,
     gctx,
-    d.MAX_LIGHTS,
+    rd.MAX_LIGHTS,
     {.VERTEX, .FRAGMENT},
   ) or_return
   defer if ret != .SUCCESS {
@@ -432,8 +433,8 @@ record_compute_commands :: proc(
   compute_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   // Compute for frame N prepares data for frame N+1
-  // Buffer indices with d.FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
-  next_frame_index := alg.next(frame_index, d.FRAMES_IN_FLIGHT)
+  // Buffer indices with rd.FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
+  next_frame_index := alg.next(frame_index, rd.FRAMES_IN_FLIGHT)
   for cam_index, &cam in self.cameras {
     // Only build pyramid if enabled for this camera
     if cam.enable_depth_pyramid {
@@ -464,6 +465,16 @@ init :: proc(
   self.cameras = make(map[u32]camera.Camera)
   self.meshes = make(map[u32]Mesh)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
+  gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
+  defer if ret != .SUCCESS {
+    gpu.free_command_buffer(gctx, ..self.command_buffers[:])
+  }
+  if gctx.has_async_compute {
+    gpu.allocate_compute_command_buffer(gctx, self.compute_command_buffers[:]) or_return
+    defer if ret != .SUCCESS {
+      gpu.free_compute_command_buffer(gctx, self.compute_command_buffers[:])
+    }
+  }
   // Initialize geometry/bone/camera/scene buffers (survive teardown/setup cycles)
   init_geometry_buffers(self, gctx) or_return
   defer if ret != .SUCCESS {
@@ -476,7 +487,7 @@ init :: proc(
   gpu.per_frame_bindless_buffer_init(
     &self.camera_buffer,
     gctx,
-    d.MAX_ACTIVE_CAMERAS,
+    rd.MAX_ACTIVE_CAMERAS,
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
@@ -690,6 +701,10 @@ clear_debug_visualization :: proc(self: ^Manager) {
 }
 
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
+  gpu.free_command_buffer(gctx, ..self.command_buffers[:])
+  if gctx.has_async_compute {
+    gpu.free_compute_command_buffer(gctx, self.compute_command_buffers[:])
+  }
   ui_render.shutdown(&self.ui, gctx)
   delete(self.ui_commands)
   debug.shutdown(&self.debug_renderer, gctx)
@@ -747,7 +762,7 @@ render_shadow_depth :: proc(
   self: ^Manager,
   frame_index: u32,
   command_buffer: vk.CommandBuffer,
-  active_lights: []d.LightHandle,
+  active_lights: []rd.LightHandle,
 ) -> vk.Result {
   light.shadow_sync_lights(
     &self.shadow,
@@ -832,7 +847,7 @@ record_geometry_pass :: proc(
 record_lighting_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  active_lights: []d.LightHandle,
+  active_lights: []rd.LightHandle,
   camera_handle: u32,
   color_format: vk.Format,
   command_buffer: vk.CommandBuffer,
@@ -863,8 +878,8 @@ record_lighting_pass :: proc(
     self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
     frame_index,
   )
-  shadow_texture_indices: [d.MAX_LIGHTS]u32
-  for i in 0 ..< d.MAX_LIGHTS {
+  shadow_texture_indices: [rd.MAX_LIGHTS]u32
+  for i in 0 ..< rd.MAX_LIGHTS {
     shadow_texture_indices[i] = 0xFFFFFFFF
   }
   for handle in active_lights {

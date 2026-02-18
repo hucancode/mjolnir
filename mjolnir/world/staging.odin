@@ -2,40 +2,47 @@ package world
 
 import "core:sync"
 
+StagingOp :: enum u16 {
+  Update,
+  Remove,
+}
+
+StagingEntry :: struct {
+  age: u16,
+  op:  StagingOp,
+}
+
 StagingList :: struct {
-  transforms:         map[NodeHandle]u32,
-  node_data:          map[NodeHandle]u32,
-  mesh_updates:       map[MeshHandle]u32,
-  mesh_removals:      map[u32]u32,
-  material_updates:   map[MaterialHandle]u32,
-  bone_updates:       map[NodeHandle]u32,
-  sprite_updates:     map[SpriteHandle]u32,
-  emitter_updates:    map[EmitterHandle]u32,
-  forcefield_updates: map[ForceFieldHandle]u32,
-  light_updates:      map[NodeHandle]u32,
-  camera_updates:     map[CameraHandle]u32,
+  transforms:         map[NodeHandle]StagingEntry,
+  node_data:          map[NodeHandle]StagingEntry,
+  mesh_updates:       map[MeshHandle]StagingEntry,
+  material_updates:   map[MaterialHandle]StagingEntry,
+  bone_updates:       map[NodeHandle]StagingEntry,
+  sprite_updates:     map[SpriteHandle]StagingEntry,
+  emitter_updates:    map[EmitterHandle]StagingEntry,
+  forcefield_updates: map[ForceFieldHandle]StagingEntry,
+  light_updates:      map[NodeHandle]StagingEntry,
+  camera_updates:     map[CameraHandle]StagingEntry,
   mutex:              sync.Mutex,
 }
 
 staging_init :: proc(staging: ^StagingList) {
-  staging.transforms = make(map[NodeHandle]u32)
-  staging.node_data = make(map[NodeHandle]u32)
-  staging.mesh_updates = make(map[MeshHandle]u32)
-  staging.mesh_removals = make(map[u32]u32)
-  staging.material_updates = make(map[MaterialHandle]u32)
-  staging.bone_updates = make(map[NodeHandle]u32)
-  staging.sprite_updates = make(map[SpriteHandle]u32)
-  staging.emitter_updates = make(map[EmitterHandle]u32)
-  staging.forcefield_updates = make(map[ForceFieldHandle]u32)
-  staging.light_updates = make(map[NodeHandle]u32)
-  staging.camera_updates = make(map[CameraHandle]u32)
+  staging.transforms = make(map[NodeHandle]StagingEntry)
+  staging.node_data = make(map[NodeHandle]StagingEntry)
+  staging.mesh_updates = make(map[MeshHandle]StagingEntry)
+  staging.material_updates = make(map[MaterialHandle]StagingEntry)
+  staging.bone_updates = make(map[NodeHandle]StagingEntry)
+  staging.sprite_updates = make(map[SpriteHandle]StagingEntry)
+  staging.emitter_updates = make(map[EmitterHandle]StagingEntry)
+  staging.forcefield_updates = make(map[ForceFieldHandle]StagingEntry)
+  staging.light_updates = make(map[NodeHandle]StagingEntry)
+  staging.camera_updates = make(map[CameraHandle]StagingEntry)
 }
 
 staging_destroy :: proc(staging: ^StagingList) {
   delete(staging.transforms)
   delete(staging.node_data)
   delete(staging.mesh_updates)
-  delete(staging.mesh_removals)
   delete(staging.material_updates)
   delete(staging.bone_updates)
   delete(staging.sprite_updates)
@@ -47,49 +54,85 @@ staging_destroy :: proc(staging: ^StagingList) {
 
 stage_node_transform :: proc(staging: ^StagingList, handle: NodeHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.transforms[handle] = 0
+  staging.transforms[handle] = {op = .Update}
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_node_transform_removal :: proc(staging: ^StagingList, handle: NodeHandle) {
+  sync.mutex_lock(&staging.mutex)
+  staging.transforms[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_node_data :: proc(staging: ^StagingList, handle: NodeHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.node_data[handle] = 0
+  staging.node_data[handle] = {op = .Update}
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_node_data_removal :: proc(staging: ^StagingList, handle: NodeHandle) {
+  sync.mutex_lock(&staging.mutex)
+  staging.node_data[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_mesh_data :: proc(staging: ^StagingList, handle: MeshHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.mesh_updates[handle] = 0
+  staging.mesh_updates[handle] = {op = .Update}
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_mesh_removal :: proc(staging: ^StagingList, handle: MeshHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.mesh_removals[handle.index] = 0
+  staging.mesh_updates[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_material_data :: proc(staging: ^StagingList, handle: MaterialHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.material_updates[handle] = 0
+  staging.material_updates[handle] = {op = .Update}
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_material_removal :: proc(staging: ^StagingList, handle: MaterialHandle) {
+  sync.mutex_lock(&staging.mutex)
+  staging.material_updates[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_bone_matrices :: proc(staging: ^StagingList, handle: NodeHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.bone_updates[handle] = 0
+  staging.bone_updates[handle] = {op = .Update}
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_bone_matrices_removal :: proc(staging: ^StagingList, handle: NodeHandle) {
+  sync.mutex_lock(&staging.mutex)
+  staging.bone_updates[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_sprite_data :: proc(staging: ^StagingList, handle: SpriteHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.sprite_updates[handle] = 0
+  staging.sprite_updates[handle] = {op = .Update}
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_sprite_removal :: proc(staging: ^StagingList, handle: SpriteHandle) {
+  sync.mutex_lock(&staging.mutex)
+  staging.sprite_updates[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_emitter_data :: proc(staging: ^StagingList, handle: EmitterHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.emitter_updates[handle] = 0
+  staging.emitter_updates[handle] = {op = .Update}
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_emitter_removal :: proc(staging: ^StagingList, handle: EmitterHandle) {
+  sync.mutex_lock(&staging.mutex)
+  staging.emitter_updates[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }
 
@@ -98,18 +141,39 @@ stage_forcefield_data :: proc(
   handle: ForceFieldHandle,
 ) {
   sync.mutex_lock(&staging.mutex)
-  staging.forcefield_updates[handle] = 0
+  staging.forcefield_updates[handle] = {op = .Update}
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_forcefield_removal :: proc(
+  staging: ^StagingList,
+  handle: ForceFieldHandle,
+) {
+  sync.mutex_lock(&staging.mutex)
+  staging.forcefield_updates[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_light_data :: proc(staging: ^StagingList, handle: NodeHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.light_updates[handle] = 0
+  staging.light_updates[handle] = {op = .Update}
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_light_removal :: proc(staging: ^StagingList, handle: NodeHandle) {
+  sync.mutex_lock(&staging.mutex)
+  staging.light_updates[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }
 
 stage_camera_data :: proc(staging: ^StagingList, handle: CameraHandle) {
   sync.mutex_lock(&staging.mutex)
-  staging.camera_updates[handle] = 0
+  staging.camera_updates[handle] = {op = .Update}
+  sync.mutex_unlock(&staging.mutex)
+}
+
+stage_camera_removal :: proc(staging: ^StagingList, handle: CameraHandle) {
+  sync.mutex_lock(&staging.mutex)
+  staging.camera_updates[handle] = {op = .Remove}
   sync.mutex_unlock(&staging.mutex)
 }

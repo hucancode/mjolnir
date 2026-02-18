@@ -92,8 +92,6 @@ Engine :: struct {
   post_render_proc:          PostRenderProc,
   ui:                        ui_module.System, // NEW: Logical UI system (moved from render.Manager)
   render:                    render.Manager,
-  command_buffers:           [FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  compute_command_buffers:   [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                [2]i32,
   debug_ui_enabled:          bool,
   update_thread:             Maybe(^thread.Thread),
@@ -152,22 +150,6 @@ init :: proc(
   self.last_update_timestamp = self.start_timestamp
   world.init(&self.world)
   gpu.swapchain_init(&self.swapchain, &self.gctx, self.window) or_return
-  gpu.allocate_command_buffer(&self.gctx, self.command_buffers[:]) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
-  }
-  if self.gctx.has_async_compute {
-    gpu.allocate_compute_command_buffer(
-      &self.gctx,
-      self.compute_command_buffers[:],
-    ) or_return
-    defer if ret != .SUCCESS {
-      gpu.free_compute_command_buffer(
-        &self.gctx,
-        self.compute_command_buffers[:],
-      )
-    }
-  }
   // Initialize UI system (logical, before renderer)
   ui_module.init(&self.ui)
   render.init(
@@ -361,7 +343,14 @@ setup :: proc(self: ^Engine) -> (ret: vk.Result) {
       main_world_camera,
       self.swapchain.extent.width,
       self.swapchain.extent.height,
-      {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .POST_PROCESS},
+      {
+        .SHADOW,
+        .GEOMETRY,
+        .LIGHTING,
+        .TRANSPARENCY,
+        .PARTICLES,
+        .POST_PROCESS,
+      },
       {3, 4, 3},
       {0, 0, 0},
       math.PI * 0.5,
@@ -560,7 +549,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   defer sync.mutex_unlock(&self.world.staging.mutex)
   stale_handles := make([dynamic]world.NodeHandle, context.temp_allocator)
   stale_meshes := make([dynamic]world.MeshHandle, context.temp_allocator)
-  stale_mesh_removals := make([dynamic]u32, context.temp_allocator)
   stale_materials := make(
     [dynamic]world.MaterialHandle,
     context.temp_allocator,
@@ -574,9 +562,15 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   )
   stale_lights := make([dynamic]world.NodeHandle, context.temp_allocator)
   stale_cameras := make([dynamic]world.CameraHandle, context.temp_allocator)
-  for handle, n in self.world.staging.transforms {
-    next_n := n
-    if n < world.FRAMES_IN_FLIGHT {
+  for handle, entry in self.world.staging.transforms {
+    if entry.op == .Remove {
+      zero_matrix: matrix[4, 4]f32
+      render.upload_node_transform(&self.render, handle.index, &zero_matrix)
+      append(&stale_handles, handle)
+      continue
+    }
+    next_age := entry.age
+    if entry.age < world.FRAMES_IN_FLIGHT {
       if node := cont.get(self.world.nodes, handle); node != nil {
         render.upload_node_transform(
           &self.render,
@@ -587,10 +581,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         zero_matrix: matrix[4, 4]f32
         render.upload_node_transform(&self.render, handle.index, &zero_matrix)
       }
-      next_n += 1
-      self.world.staging.transforms[handle] = next_n
+      next_age += 1
+      self.world.staging.transforms[handle] = {next_age, .Update}
     }
-    if next_n >= world.FRAMES_IN_FLIGHT {
+    if next_age >= world.FRAMES_IN_FLIGHT {
       append(&stale_handles, handle)
     }
   }
@@ -598,10 +592,20 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     delete_key(&self.world.staging.transforms, handle)
   }
   clear(&stale_handles)
-  for handle, n in self.world.staging.node_data {
+  for handle, entry in self.world.staging.node_data {
+    if entry.op == .Remove {
+      node_data := render.Node {
+        material_id           = 0xFFFFFFFF,
+        mesh_id               = 0xFFFFFFFF,
+        attachment_data_index = 0xFFFFFFFF,
+      }
+      render.upload_node_data(&self.render, handle.index, &node_data)
+      append(&stale_handles, handle)
+      continue
+    }
     defer {
-      self.world.staging.node_data[handle] = n + 1
-      if n+1 >= world.FRAMES_IN_FLIGHT do append(&stale_handles, handle)
+      self.world.staging.node_data[handle] = {entry.age + 1, .Update}
+      if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_handles, handle)
     }
     node_data := render.Node {
       material_id           = 0xFFFFFFFF,
@@ -673,44 +677,45 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     delete_key(&self.world.staging.node_data, handle)
     render.release_bone_matrix_range_for_node(&self.render, handle.index)
   }
-  for handle, n in self.world.staging.mesh_removals {
-    next_n := n + 1
-    self.world.staging.mesh_removals[handle] = next_n
-    if next_n >= world.FRAMES_IN_FLIGHT {
-      append(&stale_mesh_removals, handle)
+  for handle, entry in self.world.staging.mesh_updates {
+    new_age := entry.age + 1
+    self.world.staging.mesh_updates[handle] = {new_age, entry.op}
+    if new_age >= world.FRAMES_IN_FLIGHT {
+      append(&stale_meshes, handle)
+      continue
     }
-  }
-  for handle in stale_mesh_removals {
-    render.clear_mesh(&self.render, handle)
-    delete_key(&self.world.staging.mesh_removals, handle)
-  }
-  for handle, n in self.world.staging.mesh_updates {
-    defer {
-      self.world.staging.mesh_updates[handle] = n + 1
-      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_meshes, handle)
+    if entry.op == .Update {
+      if mesh := cont.get(self.world.meshes, handle); mesh != nil {
+        if geom, has_geom := mesh.cpu_geometry.?; has_geom {
+          render.sync_mesh_geometry_for_handle(
+            &self.gctx,
+            &self.render,
+            handle.index,
+            geom,
+          )
+        }
+      }
     }
-    mesh := cont.get(self.world.meshes, handle) or_continue
-    geom, has_geom := mesh.cpu_geometry.?
-    if !has_geom do continue
-    render.sync_mesh_geometry_for_handle(
-      &self.gctx,
-      &self.render,
-      handle.index,
-      geom,
-    )
   }
   for handle in stale_meshes {
-    if mesh := cont.get(self.world.meshes, handle); mesh != nil {
+    entry := self.world.staging.mesh_updates[handle]
+    if entry.op == .Remove {
+      render.clear_mesh(&self.render, handle.index)
+    } else if mesh := cont.get(self.world.meshes, handle); mesh != nil {
       if mesh.auto_purge_cpu_geometry {
         world.mesh_release_memory(mesh)
       }
     }
     delete_key(&self.world.staging.mesh_updates, handle)
   }
-  for handle, n in self.world.staging.material_updates {
+  for handle, entry in self.world.staging.material_updates {
+    if entry.op == .Remove {
+      append(&stale_materials, handle)
+      continue
+    }
     defer {
-      self.world.staging.material_updates[handle] = n + 1
-      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_materials, handle)
+      self.world.staging.material_updates[handle] = {entry.age + 1, .Update}
+      if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_materials, handle)
     }
     material := cont.get(self.world.materials, handle) or_continue
     render.upload_material_data(
@@ -732,10 +737,14 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   for handle in stale_materials {
     delete_key(&self.world.staging.material_updates, handle)
   }
-  for handle, n in self.world.staging.bone_updates {
+  for handle, entry in self.world.staging.bone_updates {
+    if entry.op == .Remove {
+      append(&stale_bone_nodes, handle)
+      continue
+    }
     defer {
-      self.world.staging.bone_updates[handle] = n + 1
-      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_bone_nodes, handle)
+      self.world.staging.bone_updates[handle] = {entry.age + 1, .Update}
+      if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_bone_nodes, handle)
     }
     node := cont.get(self.world.nodes, handle) or_continue
     mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment)
@@ -761,10 +770,14 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   for handle in stale_bone_nodes {
     delete_key(&self.world.staging.bone_updates, handle)
   }
-  for handle, n in self.world.staging.sprite_updates {
+  for handle, entry in self.world.staging.sprite_updates {
+    if entry.op == .Remove {
+      append(&stale_sprites, handle)
+      continue
+    }
     defer {
-      self.world.staging.sprite_updates[handle] = n + 1
-      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_sprites, handle)
+      self.world.staging.sprite_updates[handle] = {entry.age + 1, .Update}
+      if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_sprites, handle)
     }
     sprite := cont.get(self.world.sprites, handle) or_continue
     render.upload_sprite_data(
@@ -781,10 +794,14 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   for handle in stale_sprites {
     delete_key(&self.world.staging.sprite_updates, handle)
   }
-  for handle, n in self.world.staging.emitter_updates {
+  for handle, entry in self.world.staging.emitter_updates {
+    if entry.op == .Remove {
+      append(&stale_emitters, handle)
+      continue
+    }
     defer {
-      self.world.staging.emitter_updates[handle] = n + 1
-      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_emitters, handle)
+      self.world.staging.emitter_updates[handle] = {entry.age + 1, .Update}
+      if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_emitters, handle)
     }
     emitter := cont.get(self.world.emitters, handle) or_continue
     render.upload_emitter_data(
@@ -812,10 +829,14 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   for handle in stale_emitters {
     delete_key(&self.world.staging.emitter_updates, handle)
   }
-  for handle, n in self.world.staging.forcefield_updates {
+  for handle, entry in self.world.staging.forcefield_updates {
+    if entry.op == .Remove {
+      append(&stale_forcefields, handle)
+      continue
+    }
     defer {
-      self.world.staging.forcefield_updates[handle] = n + 1
-      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_forcefields, handle)
+      self.world.staging.forcefield_updates[handle] = {entry.age + 1, .Update}
+      if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_forcefields, handle)
     }
     forcefield := cont.get(self.world.forcefields, handle) or_continue
     render.upload_forcefield_data(
@@ -832,10 +853,14 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   for handle in stale_forcefields {
     delete_key(&self.world.staging.forcefield_updates, handle)
   }
-  for node_handle, n in self.world.staging.light_updates {
+  for node_handle, entry in self.world.staging.light_updates {
+    if entry.op == .Remove {
+      append(&stale_lights, node_handle)
+      continue
+    }
     defer {
-      self.world.staging.light_updates[node_handle] = n + 1
-      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_lights, node_handle)
+      self.world.staging.light_updates[node_handle] = {entry.age + 1, .Update}
+      if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_lights, node_handle)
     }
     light_slot, in_active := slice.linear_search(
       self.world.active_light_nodes[:],
@@ -931,10 +956,14 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   for node_handle in stale_lights {
     delete_key(&self.world.staging.light_updates, node_handle)
   }
-  for handle, n in self.world.staging.camera_updates {
+  for handle, entry in self.world.staging.camera_updates {
+    if entry.op == .Remove {
+      append(&stale_cameras, handle)
+      continue
+    }
     defer {
-      self.world.staging.camera_updates[handle] = n + 1
-      if n + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_cameras, handle)
+      self.world.staging.camera_updates[handle] = {entry.age + 1, .Update}
+      if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_cameras, handle)
     }
     world_camera := cont.get(self.world.cameras, handle) or_continue
     is_new_camera := handle.index not_in self.render.cameras
@@ -1030,13 +1059,10 @@ sync_ui_to_renderer :: proc(self: ^Engine) {
     &self.gctx,
     &self.render.texture_manager,
   )
-
   // Compute layout before generating commands
   ui_module.compute_layout_all(&self.ui)
-
   // Generate render commands from widgets
   ui_module.generate_render_commands(&self.ui)
-
   // Stage commands to renderer
   render.stage_ui_commands(&self.render, self.ui.staging[:])
 }
@@ -1095,13 +1121,6 @@ update :: proc(self: ^Engine) -> bool {
 
 shutdown :: proc(self: ^Engine) {
   teardown(self)
-  gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
-  if self.gctx.has_async_compute {
-    gpu.free_compute_command_buffer(
-      &self.gctx,
-      self.compute_command_buffers[:],
-    )
-  }
   render.shutdown(&self.render, &self.gctx)
   ui_module.shutdown(&self.ui)
   world.shutdown(&self.world)
@@ -1257,21 +1276,13 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 
 render_and_present :: proc(self: ^Engine) -> vk.Result {
   active_render_lights := build_active_render_light_handles(self)
-  context.user_ptr = self
   gpu.acquire_next_image(
     self.gctx.device,
     &self.swapchain,
     self.frame_index,
   ) or_return
-  mu.begin(&self.render.debug_ui.ctx)
-  command_buffer := self.command_buffers[self.frame_index]
+  command_buffer := self.render.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
-  world.begin_frame(&self.world, 0.016, nil)
-  sync_staging_to_gpu(self)
-  update_visibility_node_count(&self.render, &self.world)
-  if self.pre_render_proc != nil {
-    self.pre_render_proc(self)
-  }
   render.render_shadow_depth(
     &self.render,
     self.frame_index,
@@ -1327,7 +1338,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     }
   }
   // Debug rendering pass (bones, etc.) - renders after transparency
-  // Only renders on main camera, not all cameras
   render.record_debug_pass(
     &self.render,
     self.frame_index,
@@ -1344,8 +1354,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.views[self.swapchain.image_index],
     command_buffer,
   )
-  // Sync UI commands to renderer before recording UI pass
-  sync_ui_to_renderer(self)
   render.record_ui_pass(
     &self.render,
     self.frame_index,
@@ -1356,7 +1364,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   )
   compute_cmd_buffer: vk.CommandBuffer
   if self.gctx.has_async_compute {
-    compute_cmd_buffer = self.compute_command_buffers[self.frame_index]
+    compute_cmd_buffer = self.render.compute_command_buffers[self.frame_index]
     gpu.begin_record(compute_cmd_buffer) or_return
   } else {
     compute_cmd_buffer = command_buffer
@@ -1371,9 +1379,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     gpu.end_record(compute_cmd_buffer) or_return
   }
   populate_debug_ui(self)
-  if self.post_render_proc != nil {
-    self.post_render_proc(self)
-  }
   mu.end(&self.render.debug_ui.ctx)
   if self.debug_ui_enabled {
     debug_ui.begin_pass(
@@ -1382,7 +1387,11 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
       self.swapchain.views[self.swapchain.image_index],
       self.swapchain.extent,
     )
-    debug_ui.render(&self.render.debug_ui, command_buffer, self.render.texture_manager.descriptor_set)
+    debug_ui.render(
+      &self.render.debug_ui,
+      command_buffer,
+      self.render.texture_manager.descriptor_set,
+    )
     debug_ui.end_pass(&self.render.debug_ui, command_buffer)
   }
   // Transition swapchain image to present layout
@@ -1452,9 +1461,21 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
       continue
     }
     self.last_frame_timestamp = time.now()
+    world.begin_frame(&self.world, 0.016, nil)
+    mu.begin(&self.render.debug_ui.ctx)
+    sync_staging_to_gpu(self)
+    update_visibility_node_count(&self.render, &self.world)
+    sync_ui_to_renderer(self)
+    if self.pre_render_proc != nil {
+      self.pre_render_proc(self)
+    }
+    context.user_ptr = self
     res := render_and_present(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       recreate_swapchain(self) or_continue
+    }
+    if self.post_render_proc != nil {
+      self.post_render_proc(self)
     }
     if res != .SUCCESS {
       log.errorf("Error during rendering %v", res)
