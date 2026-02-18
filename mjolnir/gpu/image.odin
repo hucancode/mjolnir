@@ -502,26 +502,6 @@ image_spec_2d :: proc(
   }
 }
 
-image_spec_depth :: proc(
-  width, height: u32,
-  format: vk.Format = .D32_SFLOAT,
-  usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
-) -> ImageSpec {
-  return ImageSpec {
-    type = .D2,
-    width = width,
-    height = height,
-    depth = 1,
-    array_layers = 1,
-    format = format,
-    mip_levels = 1,
-    tiling = .OPTIMAL,
-    usage = usage,
-    memory_flags = {.DEVICE_LOCAL},
-    create_view = true,
-  }
-}
-
 image_spec_cube :: proc(
   size: u32,
   format: vk.Format,
