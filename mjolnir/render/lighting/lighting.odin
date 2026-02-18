@@ -15,15 +15,6 @@ SHADER_LIGHTING_FRAG := #load("../../shader/lighting/frag.spv")
 TEXTURE_LUT_GGX :: #load("../../assets/lut_ggx.png")
 
 SpotLightGPU :: struct {
-  color:           [4]f32, // RGB + intensity
-  radius:          f32,
-  angle_inner:     f32,
-  angle_outer:     f32,
-  projection:      matrix[4, 4]f32,
-  view:            matrix[4, 4]f32,
-  position:        [4]f32,
-  direction:       [4]f32,
-  near_far:        [2]f32,
   shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
   draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
@@ -31,11 +22,6 @@ SpotLightGPU :: struct {
 }
 
 PointLightGPU :: struct {
-  color:           [4]f32, // RGB + intensity
-  radius:          f32,
-  projection:      matrix[4, 4]f32,
-  position:        [4]f32,
-  near_far:        [2]f32,
   shadow_cube:     [d.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
   draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),

@@ -18,23 +18,14 @@ INVALID_SHADOW_INDEX :: 0xFFFFFFFF
 MAX_SHADOW_MAPS :: 16
 SHADOW_MAP_SIZE :: 512
 
-ShadowCubeData :: struct {
-  projection: matrix[4, 4]f32,
-  position:   [4]f32,
-  near_far:   [2]f32,
-  _padding:   [2]f32,
-}
-
 ShadowData :: struct {
-  view:            matrix[4, 4]f32,
-  projection:      matrix[4, 4]f32,
-  viewport_params: [4]f32,
-  position:        [4]f32,
-  direction:       [4]f32,
-  frustum_planes:  [6][4]f32,
-  near_far:        [2]f32,
-  kind:            u32,
-  _padding:        u32,
+  view:           matrix[4, 4]f32,
+  projection:     matrix[4, 4]f32,
+  position:       [3]f32,
+  near:           f32,
+  direction:      [3]f32,
+  far:            f32,
+  frustum_planes: [6][4]f32,
 }
 
 DirectionalLightGPU :: struct {
@@ -59,24 +50,16 @@ VisibilityPushConstants :: struct {
 }
 
 SphereVisibilityPushConstants :: struct {
-  camera_index:       u32,
-  node_count:         u32,
-  max_draws:          u32,
-  include_flags:      d.NodeFlagSet,
-  exclude_flags:      d.NodeFlagSet,
-  _unused_pyramid_w:  f32,
-  _unused_pyramid_h:  f32,
-  _unused_depth_bias: f32,
-  _unused_occlusion:  u32,
+  camera_index:  u32,
+  node_count:    u32,
+  max_draws:     u32,
+  include_flags: d.NodeFlagSet,
+  exclude_flags: d.NodeFlagSet,
 }
 
 ShadowSystem :: struct {
   node_count:                    u32,
   max_draws:                     u32,
-  shadow_cube_buffer:            gpu.PerFrameBindlessBuffer(
-    ShadowCubeData,
-    d.FRAMES_IN_FLIGHT,
-  ),
   shadow_data_buffer:            gpu.PerFrameBindlessBuffer(
     ShadowData,
     d.FRAMES_IN_FLIGHT,
@@ -139,23 +122,11 @@ shadow_init :: proc(
     &self.shadow_data_buffer,
     gctx,
     MAX_SHADOW_MAPS,
-    {.VERTEX, .FRAGMENT, .COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(
-      &self.shadow_data_buffer,
-      gctx.device,
-    )
-  }
-  gpu.per_frame_bindless_buffer_init(
-    &self.shadow_cube_buffer,
-    gctx,
-    MAX_SHADOW_MAPS,
     {.VERTEX, .FRAGMENT, .GEOMETRY, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
     gpu.per_frame_bindless_buffer_destroy(
-      &self.shadow_cube_buffer,
+      &self.shadow_data_buffer,
       gctx.device,
     )
   }
@@ -270,7 +241,7 @@ shadow_init :: proc(
       stageFlags = {.VERTEX, .GEOMETRY, .FRAGMENT},
       size = size_of(u32),
     },
-    self.shadow_cube_buffer.set_layout,
+    self.shadow_data_buffer.set_layout,
     textures_set_layout,
     bone_set_layout,
     material_set_layout,
@@ -398,10 +369,6 @@ shadow_setup :: proc(
 ) {
   // Buffers + set_layouts created in shadow_init; just re-allocate descriptor sets here
   gpu.per_frame_bindless_buffer_realloc_descriptors(
-    &self.shadow_cube_buffer,
-    gctx,
-  ) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(
     &self.shadow_data_buffer,
     gctx,
   ) or_return
@@ -501,7 +468,7 @@ shadow_setup :: proc(
         {.STORAGE_BUFFER, gpu.buffer_info(&world_matrix_buffer.buffer)},
         {
           .STORAGE_BUFFER,
-          gpu.buffer_info(&self.shadow_cube_buffer.buffers[frame]),
+          gpu.buffer_info(&self.shadow_data_buffer.buffers[frame]),
         },
         {.STORAGE_BUFFER, gpu.buffer_info(&point.draw_count[frame])},
         {.STORAGE_BUFFER, gpu.buffer_info(&point.draw_commands[frame])},
@@ -543,12 +510,10 @@ shadow_teardown :: proc(
   }
   // Zero shadow buffer descriptor sets; buffers+set_layouts persist until shadow_shutdown
   for &ds in self.shadow_data_buffer.descriptor_sets do ds = 0
-  for &ds in self.shadow_cube_buffer.descriptor_sets do ds = 0
 }
 
 shadow_shutdown :: proc(self: ^ShadowSystem, gctx: ^gpu.GPUContext) {
   gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
-  gpu.per_frame_bindless_buffer_destroy(&self.shadow_cube_buffer, gctx.device)
   vk.DestroyPipeline(gctx.device, self.sphere_depth_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.sphere_cull_pipeline, nil)
@@ -607,86 +572,48 @@ shadow_sync_lights :: proc(
     light.shadow_index = slot
     gpu.write(&lights_buffer.buffer, light, int(handle.index))
     shadow_data := ShadowData {
-      view            = linalg.MATRIX4F32_IDENTITY,
-      projection      = linalg.MATRIX4F32_IDENTITY,
-      viewport_params = {
-        f32(SHADOW_MAP_SIZE),
-        f32(SHADOW_MAP_SIZE),
-        0.1,
-        max(0.2, light.radius),
-      },
-      position        = {position.x, position.y, position.z, 1.0},
-      direction       = {direction.x, direction.y, direction.z, 0.0},
-      kind            = u32(light.type),
+      view       = linalg.MATRIX4F32_IDENTITY,
+      projection = linalg.MATRIX4F32_IDENTITY,
+      near       = 0.1,
+      far        = max(0.2, light.radius),
+      position   = position,
+      direction  = direction,
     }
     switch light.type {
     case .POINT:
       near_plane: f32 = 0.1
       far_plane := max(near_plane + 0.1, light.radius)
-      point := &self.point_lights[slot]
-      point.position = {position.x, position.y, position.z, far_plane}
-      point.radius = light.radius
-      point.projection = linalg.matrix4_perspective(
+      shadow_data.near = near_plane
+      shadow_data.far = far_plane
+      shadow_data.projection = linalg.matrix4_perspective(
         f32(math.PI * 0.5),
         1.0,
         near_plane,
         far_plane,
         flip_z_axis = false,
       )
-      point.near_far = {near_plane, far_plane}
-      shadow_data.viewport_params[2] = near_plane
-      shadow_data.viewport_params[3] = far_plane
-      cube_data := ShadowCubeData {
-        projection = point.projection,
-        position   = point.position,
-        near_far   = point.near_far,
-      }
-      gpu.write(
-        &self.shadow_cube_buffer.buffers[frame_index],
-        &cube_data,
-        int(slot),
-      )
-      shadow_data.near_far = point.near_far
+      shadow_data.position = position
     case .SPOT:
       near_plane: f32 = 0.1
       far_plane := max(near_plane + 0.1, light.radius)
-      spot := &self.spot_lights[slot]
-      spot.position = shadow_data.position
-      spot.direction = shadow_data.direction
-      spot.radius = light.radius
-      spot.angle_inner = light.angle_inner
-      spot.angle_outer = light.angle_outer
-      spot.near_far = {near_plane, far_plane}
-      spot.view = make_light_view(position, direction)
-      spot.projection = linalg.matrix4_perspective(
+      shadow_data.view = make_light_view(position, direction)
+      shadow_data.projection = linalg.matrix4_perspective(
         max(light.angle_outer * 2.0, 0.001),
         1.0,
         near_plane,
         far_plane,
       )
-      shadow_data.view = spot.view
-      shadow_data.projection = spot.projection
-      shadow_data.viewport_params = {
-        f32(SHADOW_MAP_SIZE),
-        f32(SHADOW_MAP_SIZE),
-        near_plane,
-        far_plane,
-      }
+      shadow_data.near = near_plane
+      shadow_data.far = far_plane
       shadow_data.frustum_planes =
-        geometry.make_frustum(spot.projection * spot.view).planes
-      shadow_data.near_far = spot.near_far
+        geometry.make_frustum(shadow_data.projection * shadow_data.view).planes
     case .DIRECTIONAL:
       near_plane: f32 = 0.1
       far_plane := max(near_plane + 0.1, light.radius * 2.0)
-      directional := &self.directional_lights[slot]
-      directional.position = shadow_data.position
-      directional.direction = shadow_data.direction
-      directional.radius = light.radius
-      directional.near_far = {near_plane, far_plane}
       camera_pos := position - direction * light.radius
-      directional.view = make_light_view(camera_pos, direction)
+      shadow_data.view = make_light_view(camera_pos, direction)
       half_extent := max(light.radius, 0.5)
-      directional.projection = linalg.matrix_ortho3d(
+      shadow_data.projection = linalg.matrix_ortho3d(
         -half_extent,
         half_extent,
         -half_extent,
@@ -694,18 +621,11 @@ shadow_sync_lights :: proc(
         near_plane,
         far_plane,
       )
-      shadow_data.view = directional.view
-      shadow_data.projection = directional.projection
-      shadow_data.viewport_params = {
-        f32(SHADOW_MAP_SIZE),
-        f32(SHADOW_MAP_SIZE),
-        near_plane,
-        far_plane,
-      }
-      shadow_data.position = {camera_pos.x, camera_pos.y, camera_pos.z, 1.0}
+      shadow_data.near = near_plane
+      shadow_data.far = far_plane
+      shadow_data.position = camera_pos
       shadow_data.frustum_planes =
-        geometry.make_frustum(directional.projection * directional.view).planes
-      shadow_data.near_far = directional.near_far
+        geometry.make_frustum(shadow_data.projection * shadow_data.view).planes
     }
     gpu.write(
       &self.shadow_data_buffer.buffers[frame_index],
@@ -1134,7 +1054,7 @@ shadow_render_depth :: proc(
         command_buffer,
         self.sphere_depth_pipeline,
         self.sphere_depth_pipeline_layout,
-        self.shadow_cube_buffer.descriptor_sets[frame_index],
+        self.shadow_data_buffer.descriptor_sets[frame_index],
         textures_descriptor_set,
         bone_descriptor_set,
         material_descriptor_set,

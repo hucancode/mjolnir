@@ -27,13 +27,11 @@ struct Camera {
 struct ShadowData {
     mat4 view;
     mat4 projection;
-    vec4 viewport_params;
-    vec4 position;
-    vec4 direction;
+    vec3 position;
+    float near;
+    vec3 direction;
+    float far;
     vec4 frustum_planes[6];
-    vec2 near_far;
-    uint kind;
-    uint _padding;
 };
 
 struct LightData {
@@ -137,10 +135,8 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light, uint shadow_map, ve
         float linearDepth = length(lightToFrag);
         float shadowDepth = texture(samplerCube(cube_textures[shadow_map], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
         // return shadowDepth;
-        float near = shadow.near_far.x;
-        float far = shadow.near_far.y;
         // Linear depth mapping: [near, far] -> [0, 1]
-        float currentDepth = (linearDepth - near) / (far - near);
+        float currentDepth = (linearDepth - shadow.near) / (shadow.far - shadow.near);
         currentDepth = clamp(currentDepth, 0.0, 1.0);
         float cosTheta = clamp(dot(n, -lightToFrag), 0.0, 1.0);
         float bias = 0.0005 * tan(acos(cosTheta));

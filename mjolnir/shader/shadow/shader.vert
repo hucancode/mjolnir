@@ -5,13 +5,11 @@ layout(location = 0) in vec3 inPosition;
 struct ShadowData {
     mat4 view;
     mat4 projection;
-    vec4 viewport_params;
-    vec4 position;
-    vec4 direction;
+    vec3 position;
+    float near;
+    vec3 direction;
+    float far;
     vec4 frustum_planes[6];
-    vec2 near_far;
-    uint kind;
-    uint _padding;
 };
 
 layout(set = 0, binding = 0) readonly buffer ShadowBuffer {
@@ -64,11 +62,11 @@ layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint camera_index;
+    uint shadow_index;
 };
 
 void main() {
-    ShadowData camera = shadows[camera_index];
+    ShadowData camera = shadows[shadow_index];
     uint node_index = uint(gl_InstanceIndex);
     mat4 world = world_matrices[node_index];
     NodeData node = nodes[node_index];

@@ -5,15 +5,18 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 0) out vec3 worldPos;
 layout(location = 1) out uint instanceIndex;
 
-struct SphericalCamera {
+struct ShadowData {
+    mat4 view;
     mat4 projection;
-    vec4 position; // center.xyz, radius in w
-    vec2 near_far;
-    vec2 _padding;
+    vec3 position;
+    float near;
+    vec3 direction;
+    float far;
+    vec4 frustum_planes[6];
 };
 
-layout(set = 0, binding = 0) readonly buffer SphericalCameraBuffer {
-    SphericalCamera cameras[];
+layout(set = 0, binding = 0) readonly buffer ShadowBuffer {
+    ShadowData shadows[];
 };
 
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
@@ -62,7 +65,7 @@ layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint camera_index;
+    uint shadow_index;
 };
 
 void main() {

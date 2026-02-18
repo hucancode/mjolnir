@@ -8,13 +8,11 @@ const uint INVALID_ID = 0xFFFFFFFFu;
 struct ShadowData {
     mat4 view;
     mat4 projection;
-    vec4 viewport_params;
-    vec4 position;
-    vec4 direction;
+    vec3 position;
+    float near;
+    vec3 direction;
+    float far;
     vec4 frustum_planes[6];
-    vec2 near_far;
-    uint kind;
-    uint _padding;
 };
 
 struct NodeData {
@@ -44,7 +42,7 @@ struct DrawCommand {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint camera_index;
+    uint shadow_index;
     uint node_count;
     uint max_draws;
     uint include_flags;
@@ -75,9 +73,9 @@ layout(set = 0, binding = 5) buffer DrawCommandBuffer {
     DrawCommand commands[];
 };
 
-bool frustum_cull(vec3 center, vec3 extent, ShadowData camera) {
+bool frustum_cull(vec3 center, vec3 extent, ShadowData shadow) {
     for (int i = 0; i < 6; ++i) {
-        vec4 plane_raw = camera.frustum_planes[i];
+        vec4 plane_raw = shadow.frustum_planes[i];
         float denom = length(plane_raw.xyz);
         if (denom <= 1e-6) continue;
 
@@ -108,7 +106,7 @@ void main() {
     }
 
     MeshData mesh = meshes[node.mesh_id];
-    ShadowData camera = shadows[params.camera_index];
+    ShadowData shadow = shadows[params.shadow_index];
     mat4 world = world_matrices[node_id];
 
     vec3 local_min = mesh.aabb_min;
@@ -123,7 +121,7 @@ void main() {
 
     bool visible = true;
     if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
-        visible = frustum_cull(world_center, world_extent, camera);
+        visible = frustum_cull(world_center, world_extent, shadow);
     }
     if (!visible) return;
 

@@ -9,11 +9,14 @@ const uint NODE_FLAG_VISIBLE = 1u << 0;
 const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
 const uint INVALID_ID = 0xFFFFFFFFu;
 
-struct SphericalCamera {
+struct ShadowData {
+    mat4 view;
     mat4 projection;
-    vec4 position; // xyz = center position, w = radius
-    vec2 near_far;
-    vec2 _padding;
+    vec3 position;
+    float near;
+    vec3 direction;
+    float far;
+    vec4 frustum_planes[6];
 };
 
 struct NodeData {
@@ -43,15 +46,11 @@ struct DrawCommand {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint camera_index;
+    uint shadow_index;
     uint node_count;
     uint max_draws;
     uint include_flags;
     uint exclude_flags;
-    float _unused1; // pyramid_width (not used)
-    float _unused2; // pyramid_height (not used)
-    float _unused3; // depth_bias (not used)
-    uint _unused4;  // occlusion_enabled (not used)
 } params;
 
 layout(set = 0, binding = 0) readonly buffer NodeBuffer {
@@ -66,8 +65,8 @@ layout(set = 0, binding = 2) readonly buffer WorldBuffer {
     mat4 world_matrices[];
 };
 
-layout(set = 0, binding = 3) readonly buffer SphericalCameraBuffer {
-    SphericalCamera cameras[];
+layout(set = 0, binding = 3) readonly buffer ShadowBuffer {
+    ShadowData shadows[];
 };
 
 layout(set = 0, binding = 4) buffer DrawCountBuffer {
@@ -113,7 +112,7 @@ void main() {
         return;
     }
 
-    SphericalCamera camera = cameras[params.camera_index];
+    ShadowData shadow = shadows[params.shadow_index];
     mat4 world = world_matrices[node_id];
 
     // Transform AABB to world space
@@ -134,8 +133,8 @@ void main() {
     vec3 world_max = world_center + world_extent;
 
     // Extract sphere center and radius from camera data
-    vec3 sphere_center = camera.position.xyz;
-    float sphere_radius = camera.position.w;
+    vec3 sphere_center = shadow.position;
+    float sphere_radius = shadow.far;
 
     // Simple sphere test
     bool visible = true;

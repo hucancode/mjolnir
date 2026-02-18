@@ -9,19 +9,22 @@ layout(location = 1) in uint instanceIndex[];
 
 layout(location = 0) out vec3 fragWorldPos;
 
-struct SphericalCamera {
+struct ShadowData {
+    mat4 view;
     mat4 projection;
-    vec4 position; // center.xyz, radius in w
-    vec2 near_far;
-    vec2 _padding;
+    vec3 position;
+    float near;
+    vec3 direction;
+    float far;
+    vec4 frustum_planes[6];
 };
 
-layout(set = 0, binding = 0) readonly buffer SphericalCameraBuffer {
-    SphericalCamera cameras[];
+layout(set = 0, binding = 0) readonly buffer ShadowBuffer {
+    ShadowData shadows[];
 };
 
 layout(push_constant) uniform PushConstants {
-    uint camera_index;
+    uint shadow_index;
 };
 
 mat4 makeView(vec3 pos, vec3 forward, vec3 up)
@@ -43,8 +46,8 @@ mat4 makeView(vec3 pos, vec3 forward, vec3 up)
 }
 
 void main() {
-    SphericalCamera camera = cameras[camera_index];
-    vec3 center = camera.position.xyz;
+    ShadowData shadow = shadows[shadow_index];
+    vec3 center = shadow.position.xyz;
 
     mat4 views[6];
     // (+X, -X, +Y, -Y, +Z, -Z)
@@ -59,7 +62,7 @@ void main() {
         gl_Layer = face;
         for (int i = 0; i < 3; i++) {
             fragWorldPos = worldPos[i];
-            gl_Position = camera.projection * views[face] * vec4(worldPos[i], 1.0);
+            gl_Position = shadow.projection * views[face] * vec4(worldPos[i], 1.0);
             EmitVertex();
         }
         EndPrimitive();
