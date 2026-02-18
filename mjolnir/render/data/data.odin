@@ -134,8 +134,9 @@ LightType :: enum u32 {
 
 Light :: struct {
   color:        [4]f32, // RGB + intensity
-  position:     [4]f32, // xyz world position
-  direction:    [4]f32, // xyz world forward direction
+  position:     [3]f32, // world position
+  type:         LightType, // LightType
+  direction:    [3]f32, // world forward direction
   radius:       f32, // range for point/spot lights
   angle_inner:  f32, // inner cone angle for spot lights
   angle_outer:  f32, // outer cone angle for spot lights

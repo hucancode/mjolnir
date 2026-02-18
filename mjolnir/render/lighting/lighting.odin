@@ -50,7 +50,6 @@ LightPushConstant :: struct {
   metallic_texture_index: u32,
   emissive_texture_index: u32,
   input_image_index:      u32,
-  light_position:         [4]f32,
   shadow_map_index:       u32,
 }
 
@@ -518,7 +517,6 @@ render :: proc(
     light := gpu.get(&lights_buffer.buffer, handle.index)
     shadow_map_index := shadow_texture_indices[handle.index]
     push_constant.light_index = handle.index
-    push_constant.light_position = light.position
     push_constant.shadow_map_index = shadow_map_index
     vk.CmdPushConstants(
       command_buffer,

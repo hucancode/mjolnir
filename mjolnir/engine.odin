@@ -884,18 +884,8 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       case world.PointLightAttachment:
         light_data = render.Light {
           color        = attachment.color,
-          position     = {
-            light_position.x,
-            light_position.y,
-            light_position.z,
-            1.0,
-          },
-          direction    = {
-            light_direction.x,
-            light_direction.y,
-            light_direction.z,
-            0.0,
-          },
+          position     = light_position,
+          direction    = light_direction,
           radius       = attachment.radius,
           angle_inner  = 0.0,
           angle_outer  = 0.0,
@@ -906,18 +896,8 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       case world.DirectionalLightAttachment:
         light_data = render.Light {
           color        = attachment.color,
-          position     = {
-            light_position.x,
-            light_position.y,
-            light_position.z,
-            1.0,
-          },
-          direction    = {
-            light_direction.x,
-            light_direction.y,
-            light_direction.z,
-            0.0,
-          },
+          position     = light_position,
+          direction    = light_direction,
           radius       = attachment.radius,
           angle_inner  = 0.0,
           angle_outer  = 0.0,
@@ -928,18 +908,8 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       case world.SpotLightAttachment:
         light_data = render.Light {
           color        = attachment.color,
-          position     = {
-            light_position.x,
-            light_position.y,
-            light_position.z,
-            1.0,
-          },
-          direction    = {
-            light_direction.x,
-            light_direction.y,
-            light_direction.z,
-            0.0,
-          },
+          position     = light_position,
+          direction    = light_direction,
           radius       = attachment.radius,
           angle_inner  = attachment.angle_inner,
           angle_outer  = attachment.angle_outer,

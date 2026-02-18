@@ -27,15 +27,14 @@ struct Camera {
 
 struct LightData {
     vec4 color;           // RGB + intensity
-    vec4 position;
-    vec4 direction;
+    vec3 position;
+    uint type;
+    vec3 direction;
     float radius;
     float angle_inner;
     float angle_outer;
-    uint type;
     uint cast_shadow;
     uint shadow_index;
-    uint padding[2];
 };
 
 // Bindless camera buffer (set 0, binding 0)
@@ -56,7 +55,6 @@ layout(push_constant) uniform PushConstant {
     uint metallic_texture_index;
     uint emissive_texture_index;
     uint input_image_index;
-    vec4 light_position;
     uint shadow_map_index;
 };
 
@@ -74,9 +72,6 @@ void main() {
     Camera camera = camera_buffer.cameras[scene_camera_idx];
     LightData light = lights_buffer.lights[light_index];
 
-    vec3 light_pos = light_position.xyz;
-    vec3 light_direction = light.direction.xyz;
-
     if (light.type == DIRECTIONAL_LIGHT) {
         // For directional lights, use the NDC triangle mesh directly
         gl_Position = vec4(a_position, 1.0);
@@ -84,7 +79,7 @@ void main() {
         vec3 world_position;
         if (light.type == POINT_LIGHT) {
             // Scale unit sphere by light radius and translate to light position
-            world_position = light_pos + a_position * light.radius;
+            world_position = light.position + a_position * light.radius;
         } else if (light.type == SPOT_LIGHT) {
             // Standard cone mesh: height=1 (Y+), base radius=1 (XZ)
             float tana = tan(min(light.angle_outer, PI*0.45));
@@ -92,12 +87,12 @@ void main() {
             float xz_scale = light.radius * tana * 2;
             vec3 scaled_pos = vec3(a_position.x * xz_scale, (a_position.y - 0.5) * -y_scale, a_position.z * xz_scale);
             // Orient cone along light_direction (which is already -Z forward)
-            vec3 up = normalize(light_direction);
+            vec3 up = normalize(light.direction);
             vec3 forward = abs(up.y) < 0.9 ? normalize(cross(vec3(0, 1, 0), up)) : vec3(1, 0, 0);
             vec3 right = cross(up, forward);
             // Create orientation matrix: right=+X, up=+Y, forward=-Z
             mat3 orientation = mat3(right, up, forward);
-            world_position = light_pos + orientation * scaled_pos;
+            world_position = light.position + orientation * scaled_pos;
         }
         // Transform world position to clip space using camera view-projection
         gl_Position = camera.projection * camera.view * vec4(world_position, 1.0);
