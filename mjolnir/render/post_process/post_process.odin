@@ -351,10 +351,10 @@ setup :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
-  width, height: u32,
+  extent: vk.Extent2D,
   format: vk.Format,
 ) -> vk.Result {
-  return create_images(gctx, self, texture_manager, width, height, format)
+  return create_images(gctx, self, texture_manager, extent, format)
 }
 
 teardown :: proc(
@@ -475,15 +475,14 @@ create_images :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   texture_manager: ^gpu.TextureManager,
-  width, height: u32,
+  extent: vk.Extent2D,
   format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
     handle = gpu.allocate_texture_2d(
       texture_manager,
       gctx,
-      width,
-      height,
+      extent,
       format,
       vk.ImageUsageFlags {
         .COLOR_ATTACHMENT,
@@ -512,11 +511,11 @@ recreate_images :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   texture_manager: ^gpu.TextureManager,
-  width, height: u32,
+  extent: vk.Extent2D,
   format: vk.Format,
 ) -> vk.Result {
   destroy_images(self, gctx, texture_manager)
-  return create_images(gctx, self, texture_manager, width, height, format)
+  return create_images(gctx, self, texture_manager, extent, format)
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
@@ -543,8 +542,7 @@ begin_pass :: proc(
   }
   gpu.set_viewport_scissor(
     command_buffer,
-    extent.width,
-    extent.height,
+    extent,
     flip_y = false,
   )
 }
@@ -639,8 +637,7 @@ render :: proc(
     }
     gpu.begin_rendering(
       command_buffer,
-      extent.width,
-      extent.height,
+      extent,
       nil,
       gpu.create_color_attachment_view(dst_view, .CLEAR, .STORE, BG_BLUE_GRAY),
     )

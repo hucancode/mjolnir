@@ -1,5 +1,6 @@
 package camera
 
+import alg "../../algebra"
 import "../../gpu"
 import rd "../data"
 import "core:log"
@@ -87,8 +88,7 @@ DepthPyramid :: struct {
   full_view:  vk.ImageView,
   sampler:    vk.Sampler,
   mip_levels: u32,
-  width:      u32,
-  height:     u32,
+  using extent:     vk.Extent2D,
 }
 
 
@@ -98,7 +98,7 @@ init_gpu :: proc(
   gctx: ^gpu.GPUContext,
   camera: ^Camera,
   texture_manager: ^gpu.TextureManager,
-  width, height: u32,
+  extent: vk.Extent2D,
   color_format, depth_format: vk.Format,
   enabled_passes: PassTypeSet = {
     .SHADOW,
@@ -125,8 +125,7 @@ init_gpu :: proc(
       camera.attachments[.FINAL_IMAGE][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         color_format,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
@@ -135,40 +134,35 @@ init_gpu :: proc(
       camera.attachments[.POSITION][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R32G32B32A32_SFLOAT,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
       camera.attachments[.NORMAL][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R8G8B8A8_UNORM,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
       camera.attachments[.ALBEDO][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R8G8B8A8_UNORM,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
       camera.attachments[.METALLIC_ROUGHNESS][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R8G8B8A8_UNORM,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
       camera.attachments[.EMISSIVE][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R8G8B8A8_UNORM,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
@@ -176,8 +170,7 @@ init_gpu :: proc(
     camera.attachments[.DEPTH][frame] = gpu.allocate_texture_2d(
       texture_manager,
       gctx,
-      width,
-      height,
+      extent,
       depth_format,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
@@ -250,8 +243,7 @@ init_gpu :: proc(
         gctx,
         camera,
         texture_manager,
-        width,
-        height,
+        extent,
         u32(frame),
       ) or_return
     }
@@ -429,7 +421,7 @@ resize :: proc(
   gctx: ^gpu.GPUContext,
   camera: ^Camera,
   texture_manager: ^gpu.TextureManager,
-  width, height: u32,
+  extent: vk.Extent2D,
   color_format, depth_format: vk.Format,
   enabled_passes: PassTypeSet,
   enable_depth_pyramid: bool,
@@ -472,8 +464,7 @@ resize :: proc(
       camera.attachments[.FINAL_IMAGE][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         color_format,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
@@ -482,40 +473,35 @@ resize :: proc(
       camera.attachments[.POSITION][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R32G32B32A32_SFLOAT,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
       camera.attachments[.NORMAL][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R8G8B8A8_UNORM,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
       camera.attachments[.ALBEDO][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R8G8B8A8_UNORM,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
       camera.attachments[.METALLIC_ROUGHNESS][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R8G8B8A8_UNORM,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
       camera.attachments[.EMISSIVE][frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        width,
-        height,
+        extent,
         .R8G8B8A8_UNORM,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
@@ -523,8 +509,7 @@ resize :: proc(
     camera.attachments[.DEPTH][frame] = gpu.allocate_texture_2d(
       texture_manager,
       gctx,
-      width,
-      height,
+      extent,
       depth_format,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
@@ -556,14 +541,13 @@ resize :: proc(
         gctx,
         camera,
         texture_manager,
-        width,
-        height,
+        extent,
         u32(frame),
       ) or_return
     }
   }
 
-  log.infof("Camera resized to %dx%d", width, height)
+  log.infof("Camera resized to %dx%d", extent.width, extent.height)
   return .SUCCESS
 }
 
@@ -573,20 +557,15 @@ create_depth_pyramid :: proc(
   gctx: ^gpu.GPUContext,
   camera: ^Camera,
   texture_manager: ^gpu.TextureManager,
-  width: u32,
-  height: u32,
+  extent: vk.Extent2D,
   frame_index: u32,
 ) -> vk.Result {
-  pyramid_width := max(1, width / 2)
-  pyramid_height := max(1, height / 2)
-  mip_levels :=
-    u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
-
+  extent := vk.Extent2D{max(1, extent.width / 2), max(1, extent.height / 2)}
+  mip_levels := alg.log2_greater_than(max(extent.width, extent.height))
   pyramid_handle := gpu.allocate_texture_2d(
     texture_manager,
     gctx,
-    pyramid_width,
-    pyramid_height,
+    extent,
     .R32_SFLOAT,
     {.SAMPLED, .STORAGE, .TRANSFER_DST},
     true, // generate_mips
@@ -618,8 +597,7 @@ create_depth_pyramid :: proc(
 
   camera.depth_pyramid[frame_index].texture = pyramid_handle
   camera.depth_pyramid[frame_index].mip_levels = mip_levels
-  camera.depth_pyramid[frame_index].width = pyramid_width
-  camera.depth_pyramid[frame_index].height = pyramid_height
+  camera.depth_pyramid[frame_index].extent = extent
 
   // Create per-mip views
   for mip in 0 ..< mip_levels {

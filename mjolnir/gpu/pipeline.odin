@@ -821,21 +821,20 @@ bind_vertex_index_buffers :: proc(
 
 set_viewport_scissor :: proc(
   command_buffer: vk.CommandBuffer,
-  width: u32,
-  height: u32,
+  extent: vk.Extent2D,
   flip_x: bool = false,
   flip_y: bool = true,
 ) {
   viewport := vk.Viewport {
-    x        = flip_x ? f32(width) : 0,
-    y        = flip_y ? f32(height) : 0,
-    width    = flip_x ? -f32(width) : f32(width),
-    height   = flip_y ? -f32(height) : f32(height),
+    x        = flip_x ? f32(extent.width) : 0,
+    y        = flip_y ? f32(extent.height) : 0,
+    width    = flip_x ? -f32(extent.width) : f32(extent.width),
+    height   = flip_y ? -f32(extent.height) : f32(extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = {width = width, height = height},
+    extent = extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
@@ -843,13 +842,13 @@ set_viewport_scissor :: proc(
 
 begin_depth_rendering :: proc(
   command_buffer: vk.CommandBuffer,
-  width, height: u32,
+  extent: vk.Extent2D,
   depth_attachment: ^vk.RenderingAttachmentInfo,
   layer_count: u32 = 1,
 ) {
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = {width = width, height = height}},
+    renderArea = {extent = extent},
     layerCount = layer_count,
     pDepthAttachment = depth_attachment,
   }
@@ -922,14 +921,14 @@ create_cube_depth_attachment :: proc(
 
 begin_rendering :: proc(
   command_buffer: vk.CommandBuffer,
-  width, height: u32,
+  extent: vk.Extent2D,
   depth_attachment: Maybe(vk.RenderingAttachmentInfo),
   color_attachments: ..vk.RenderingAttachmentInfo,
 ) {
   depth, has_depth := depth_attachment.?
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = {width = width, height = height}},
+    renderArea = {extent = extent},
     layerCount = 1,
     pDepthAttachment = &depth if has_depth else nil,
     colorAttachmentCount = u32(len(color_attachments)),

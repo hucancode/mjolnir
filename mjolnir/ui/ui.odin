@@ -44,8 +44,7 @@ init_gpu_resources :: proc(
     gctx,
     raw_data(white_pixel[:]),
     vk.DeviceSize(len(white_pixel)),
-    1,
-    1,
+    vk.Extent2D{1, 1},
     .R8G8B8A8_UNORM,
     {.SAMPLED},
   )
@@ -159,8 +158,7 @@ update_font_atlas :: proc(
     gctx,
     raw_data(atlas_data),
     vk.DeviceSize(len(atlas_data)),
-    u32(width),
-    u32(height),
+    vk.Extent2D{u32(width), u32(height)},
     .R8_UNORM,
     {.SAMPLED},
   )

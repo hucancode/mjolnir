@@ -28,8 +28,7 @@ Renderer :: struct {
   index_count:     u32,
   vertices:        [UI_MAX_VERTICES]Vertex2D,
   indices:         [UI_MAX_INDICES]u32,
-  frame_width:     u32,
-  frame_height:    u32,
+  frame:           vk.Extent2D,
   dpi_scale:       f32,
   current_scissor: vk.Rect2D,
 }
@@ -45,7 +44,7 @@ init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   color_format: vk.Format,
-  width, height: u32,
+  extent: vk.Extent2D,
   dpi_scale: f32 = 1.0,
   textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
@@ -54,11 +53,10 @@ init :: proc(
   mu.init(&self.ctx)
   self.ctx.text_width = mu.default_atlas_text_width
   self.ctx.text_height = mu.default_atlas_text_height
-  self.frame_width = width
-  self.frame_height = height
+  self.frame = extent
   self.dpi_scale = dpi_scale
   self.current_scissor = vk.Rect2D {
-    extent = {width, height},
+    extent = extent,
   }
   log.infof("init debug UI pipeline...")
   vert_shader_module := gpu.create_shader_module(
@@ -170,8 +168,7 @@ setup :: proc(
     gctx,
     raw_data(mu.default_atlas_alpha[:]),
     vk.DeviceSize(len(mu.default_atlas_alpha)),
-    mu.DEFAULT_ATLAS_WIDTH,
-    mu.DEFAULT_ATLAS_HEIGHT,
+    vk.Extent2D{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT},
     .R8_UNORM,
     {.SAMPLED},
   )
@@ -184,8 +181,8 @@ setup :: proc(
   self.projection =
     linalg.matrix_ortho3d(
       0,
-      f32(self.frame_width),
-      f32(self.frame_height),
+      f32(self.frame.width),
+      f32(self.frame.height),
       0,
       -1,
       1,
@@ -254,9 +251,9 @@ ui_flush :: proc(
   )
   viewport := vk.Viewport {
     x        = 0,
-    y        = f32(self.frame_height),
-    width    = f32(self.frame_width),
-    height   = -f32(self.frame_height),
+    y        = f32(self.frame.height),
+    width    = f32(self.frame.width),
+    height   = -f32(self.frame.height),
     minDepth = 0,
     maxDepth = 1,
   }
@@ -406,10 +403,10 @@ ui_set_clip_rect :: proc(
   cmd_buf: vk.CommandBuffer,
   rect: mu.Rect,
 ) {
-  x := min(u32(max(rect.x, 0)), self.frame_width)
-  y := min(u32(max(rect.y, 0)), self.frame_height)
-  w := min(u32(rect.w), self.frame_width - x)
-  h := min(u32(rect.h), self.frame_height - y)
+  x := min(u32(max(rect.x, 0)), self.frame.width)
+  y := min(u32(max(rect.y, 0)), self.frame.height)
+  w := min(u32(rect.w), self.frame.width - x)
+  h := min(u32(rect.h), self.frame.height - y)
   self.current_scissor = vk.Rect2D {
     offset = {i32(x), i32(y)},
     extent = {w, h},
@@ -427,17 +424,16 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 recreate_images :: proc(
   self: ^Renderer,
   color_format: vk.Format,
-  width, height: u32,
+  extent: vk.Extent2D,
   dpi_scale: f32,
 ) {
-  self.frame_width = width
-  self.frame_height = height
+  self.frame = extent
   self.dpi_scale = dpi_scale
   self.current_scissor = vk.Rect2D {
-    extent = {width, height},
+    extent = extent,
   }
   self.projection =
-    linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
+    linalg.matrix_ortho3d(0, f32(extent.width), f32(extent.height), 0, -1, 1) *
     linalg.matrix4_scale(dpi_scale)
 }
 
@@ -449,12 +445,11 @@ begin_pass :: proc(
 ) {
   gpu.begin_rendering(
     command_buffer,
-    extent.width,
-    extent.height,
+    extent,
     nil,
     gpu.create_color_attachment_view(color_view, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(command_buffer, extent.width, extent.height)
+  gpu.set_viewport_scissor(command_buffer, extent)
 }
 
 render :: proc(

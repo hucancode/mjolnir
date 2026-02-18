@@ -81,15 +81,13 @@ begin_ambient_pass :: proc(
   )
   gpu.begin_rendering(
     command_buffer,
-    color_texture.spec.width,
-    color_texture.spec.height,
+    color_texture.spec.extent,
     nil,
     gpu.create_color_attachment(color_texture),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    color_texture.spec.width,
-    color_texture.spec.height,
+    color_texture.spec.extent,
     flip_y = false,
   )
   gpu.bind_graphics_pipeline(
@@ -452,7 +450,7 @@ destroy_light_volume_mesh :: proc(device: vk.Device, mesh: ^LightVolumeMesh) {
 
 recreate_images :: proc(
   self: ^Renderer,
-  width, height: u32,
+  extent: vk.Extent2D,
   color_format: vk.Format,
   depth_format: vk.Format,
 ) -> vk.Result {
@@ -479,15 +477,13 @@ begin_pass :: proc(
   )
   gpu.begin_rendering(
     command_buffer,
-    depth_texture.spec.width,
-    depth_texture.spec.height,
+    depth_texture.spec.extent,
     gpu.create_depth_attachment(depth_texture, .LOAD, .DONT_CARE),
     gpu.create_color_attachment(final_image, .LOAD, .STORE, BG_BLUE_GRAY),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    depth_texture.spec.width,
-    depth_texture.spec.height,
+    depth_texture.spec.extent,
   )
   gpu.bind_graphics_pipeline(
     command_buffer,

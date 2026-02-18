@@ -82,7 +82,7 @@ texture_manager_shutdown :: proc(self: ^TextureManager, gctx: ^GPUContext) {
 allocate_texture_2d :: proc(
   self: ^TextureManager,
   gctx: ^GPUContext,
-  width, height: u32,
+  extent: vk.Extent2D,
   format: vk.Format,
   usage: vk.ImageUsageFlags,
   generate_mips: bool = false,
@@ -90,7 +90,7 @@ allocate_texture_2d :: proc(
   handle: Texture2DHandle,
   ret: vk.Result,
 ) {
-  spec := image_spec_2d(width, height, format, usage, generate_mips)
+  spec := image_spec_2d(extent, format, usage, generate_mips)
   img := image_create(gctx, spec) or_return
   gpu_handle, slot, ok := cont.alloc(&self.images_2d, Texture2DHandle)
   if !ok {
@@ -114,7 +114,7 @@ allocate_texture_2d_with_data :: proc(
   gctx: ^GPUContext,
   pixel_data: rawptr,
   data_size: vk.DeviceSize,
-  width, height: u32,
+  extent: vk.Extent2D,
   format: vk.Format,
   usage: vk.ImageUsageFlags,
   generate_mips: bool = false,
@@ -122,7 +122,7 @@ allocate_texture_2d_with_data :: proc(
   handle: Texture2DHandle,
   ret: vk.Result,
 ) {
-  spec := image_spec_2d(width, height, format, usage, generate_mips)
+  spec := image_spec_2d(extent, format, usage, generate_mips)
   img: Image
   if generate_mips {
     img = image_create_with_mipmaps(
@@ -291,8 +291,7 @@ create_texture_2d_from_data :: proc(
     gctx,
     pixels,
     pixel_size,
-    u32(width),
-    u32(height),
+    vk.Extent2D {u32(width), u32(height)},
     format,
     {.SAMPLED},
     generate_mips,
@@ -347,8 +346,7 @@ create_texture_2d_from_path :: proc(
     gctx,
     pixel_data,
     data_size,
-    u32(width),
-    u32(height),
+    vk.Extent2D {u32(width), u32(height)},
     format,
     usage,
     generate_mips,

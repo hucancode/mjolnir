@@ -142,7 +142,10 @@ shadow_init :: proc(
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
+    gpu.per_frame_bindless_buffer_destroy(
+      &self.shadow_data_buffer,
+      gctx.device,
+    )
   }
   gpu.per_frame_bindless_buffer_init(
     &self.shadow_cube_buffer,
@@ -151,7 +154,10 @@ shadow_init :: proc(
     {.VERTEX, .FRAGMENT, .GEOMETRY, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(&self.shadow_cube_buffer, gctx.device)
+    gpu.per_frame_bindless_buffer_destroy(
+      &self.shadow_cube_buffer,
+      gctx.device,
+    )
   }
   self.shadow_cull_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
@@ -391,8 +397,14 @@ shadow_setup :: proc(
   ret: vk.Result,
 ) {
   // Buffers + set_layouts created in shadow_init; just re-allocate descriptor sets here
-  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.shadow_cube_buffer, gctx) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.shadow_data_buffer, gctx) or_return
+  gpu.per_frame_bindless_buffer_realloc_descriptors(
+    &self.shadow_cube_buffer,
+    gctx,
+  ) or_return
+  gpu.per_frame_bindless_buffer_realloc_descriptors(
+    &self.shadow_data_buffer,
+    gctx,
+  ) or_return
   for slot in 0 ..< MAX_SHADOW_MAPS {
     spot := &self.spot_lights[slot]
     directional := &self.directional_lights[slot]
@@ -401,16 +413,14 @@ shadow_setup :: proc(
       spot.shadow_map[frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
+        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
         .D32_SFLOAT,
         {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
       ) or_return
       directional.shadow_map[frame] = gpu.allocate_texture_2d(
         texture_manager,
         gctx,
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
+        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
         .D32_SFLOAT,
         {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
       ) or_return
@@ -520,7 +530,10 @@ shadow_teardown :: proc(
       gpu.mutable_buffer_destroy(gctx.device, &spot.draw_count[frame])
       gpu.mutable_buffer_destroy(gctx.device, &spot.draw_commands[frame])
       gpu.mutable_buffer_destroy(gctx.device, &directional.draw_count[frame])
-      gpu.mutable_buffer_destroy(gctx.device, &directional.draw_commands[frame])
+      gpu.mutable_buffer_destroy(
+        gctx.device,
+        &directional.draw_commands[frame],
+      )
       gpu.mutable_buffer_destroy(gctx.device, &point.draw_count[frame])
       gpu.mutable_buffer_destroy(gctx.device, &point.draw_commands[frame])
       spot.descriptor_sets[frame] = 0
@@ -533,10 +546,7 @@ shadow_teardown :: proc(
   for &ds in self.shadow_cube_buffer.descriptor_sets do ds = 0
 }
 
-shadow_shutdown :: proc(
-  self: ^ShadowSystem,
-  gctx: ^gpu.GPUContext,
-) {
+shadow_shutdown :: proc(self: ^ShadowSystem, gctx: ^gpu.GPUContext) {
   gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
   gpu.per_frame_bindless_buffer_destroy(&self.shadow_cube_buffer, gctx.device)
   vk.DestroyPipeline(gctx.device, self.sphere_depth_pipeline, nil)
@@ -719,7 +729,12 @@ shadow_compute_draw_lists :: proc(
   frame_index: u32,
 ) {
   include_flags: d.NodeFlagSet = {.VISIBLE}
-  exclude_flags: d.NodeFlagSet = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP}
+  exclude_flags: d.NodeFlagSet = {
+    .MATERIAL_TRANSPARENT,
+    .MATERIAL_WIREFRAME,
+    .MATERIAL_RANDOM_COLOR,
+    .MATERIAL_LINE_STRIP,
+  }
   for slot in 0 ..< MAX_SHADOW_MAPS {
     if !self.slot_active[slot] do continue
     kind := self.slot_kind[slot]
@@ -908,14 +923,12 @@ shadow_render_depth :: proc(
       )
       gpu.begin_depth_rendering(
         command_buffer,
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
+        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
         &depth_attachment,
       )
       gpu.set_viewport_scissor(
         command_buffer,
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
+        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
       )
       gpu.bind_graphics_pipeline(
         command_buffer,
@@ -1008,14 +1021,12 @@ shadow_render_depth :: proc(
       )
       gpu.begin_depth_rendering(
         command_buffer,
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
+        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
         &depth_attachment,
       )
       gpu.set_viewport_scissor(
         command_buffer,
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
+        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
       )
       gpu.bind_graphics_pipeline(
         command_buffer,
@@ -1109,15 +1120,13 @@ shadow_render_depth :: proc(
       )
       gpu.begin_depth_rendering(
         command_buffer,
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
+        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
         &depth_attachment,
         layer_count = 6,
       )
       gpu.set_viewport_scissor(
         command_buffer,
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
+        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
         flip_x = true,
         flip_y = false,
       )

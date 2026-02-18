@@ -99,8 +99,7 @@ create_texture_from_data :: proc(
 create_texture_from_pixels :: proc(
   engine: ^Engine,
   pixels: []u8,
-  width: u32,
-  height: u32,
+  extent: vk.Extent2D,
   format: vk.Format = .R8G8B8A8_SRGB,
   generate_mips := false,
 ) -> (
@@ -113,8 +112,7 @@ create_texture_from_pixels :: proc(
     &engine.gctx,
     raw_data(pixels),
     vk.DeviceSize(len(pixels)),
-    width,
-    height,
+    extent,
     format,
     {.SAMPLED},
     generate_mips,
@@ -124,7 +122,7 @@ create_texture_from_pixels :: proc(
 
 create_texture_empty :: proc(
   engine: ^Engine,
-  width, height: u32,
+  extent: vk.Extent2D,
   format: vk.Format,
   usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
 ) -> (
@@ -136,8 +134,7 @@ create_texture_empty :: proc(
   gpu_handle, ret = gpu.allocate_texture_2d(
     &engine.render.texture_manager,
     &engine.gctx,
-    width,
-    height,
+    extent,
     format,
     usage,
   )

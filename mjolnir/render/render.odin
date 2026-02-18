@@ -401,8 +401,7 @@ init :: proc(
     &self.debug_ui,
     gctx,
     swapchain_format,
-    swapchain_extent.width,
-    swapchain_extent.height,
+    swapchain_extent,
     dpi_scale,
     self.texture_manager.set_layout,
   ) or_return
@@ -493,8 +492,7 @@ setup :: proc(
     &self.post_process,
     gctx,
     &self.texture_manager,
-    swapchain_extent.width,
-    swapchain_extent.height,
+    swapchain_extent,
     swapchain_format,
   ) or_return
   debug_ui.setup(&self.debug_ui, gctx, &self.texture_manager) or_return
@@ -693,8 +691,7 @@ resize :: proc(
 ) -> vk.Result {
   light.recreate_images(
     &self.lighting,
-    extent.width,
-    extent.height,
+    extent,
     color_format,
     vk.Format.D32_SFLOAT,
   ) or_return
@@ -702,15 +699,13 @@ resize :: proc(
     gctx,
     &self.post_process,
     &self.texture_manager,
-    extent.width,
-    extent.height,
+    extent,
     color_format,
   ) or_return
   debug_ui.recreate_images(
     &self.debug_ui,
     color_format,
-    extent.width,
-    extent.height,
+    extent,
     dpi_scale,
   )
   return .SUCCESS

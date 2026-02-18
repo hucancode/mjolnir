@@ -207,14 +207,12 @@ render_depth :: proc(
   )
   gpu.begin_depth_rendering(
     command_buffer,
-    depth_texture.spec.width,
-    depth_texture.spec.height,
+    depth_texture.spec.extent,
     &depth_attachment,
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    depth_texture.spec.width,
-    depth_texture.spec.height,
+    depth_texture.spec.extent,
   )
   gpu.bind_graphics_pipeline(
     command_buffer,

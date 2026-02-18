@@ -216,16 +216,14 @@ begin_pass :: proc(
   // Begin rendering with LOAD ops (don't clear, render on top of existing content)
   gpu.begin_rendering(
     command_buffer,
-    depth_texture.spec.width,
-    depth_texture.spec.height,
+    depth_texture.spec.extent,
     gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
     gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
 
   gpu.set_viewport_scissor(
     command_buffer,
-    depth_texture.spec.width,
-    depth_texture.spec.height,
+    depth_texture.spec.extent,
   )
 
   return true

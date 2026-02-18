@@ -1,8 +1,8 @@
 package gpu
 
+import alg "../algebra"
 import "core:log"
 import "core:math"
-import alg "../algebra"
 import vk "vendor:vulkan"
 
 ImageType :: enum {
@@ -15,8 +15,7 @@ ImageType :: enum {
 
 ImageSpec :: struct {
   type:         ImageType,
-  width:        u32,
-  height:       u32,
+  using extent:       vk.Extent2D,
   depth:        u32, // For 3D images
   array_layers: u32, // For array/cube images (cube = 6 layers)
   format:       vk.Format,
@@ -30,10 +29,10 @@ ImageSpec :: struct {
 }
 
 Image :: struct {
-  image:      vk.Image,
-  memory:     vk.DeviceMemory,
-  spec:       ImageSpec,
-  view:       vk.ImageView,
+  image:  vk.Image,
+  memory: vk.DeviceMemory,
+  spec:   ImageSpec,
+  view:   vk.ImageView,
 }
 
 infer_view_type :: proc(
@@ -138,7 +137,7 @@ image_create :: proc(
     sType         = .IMAGE_CREATE_INFO,
     flags         = flags,
     imageType     = infer_image_type(img.spec.view_type),
-    extent        = {img.spec.width, img.spec.height, img.spec.depth},
+    extent        = {img.spec.extent.width, img.spec.extent.height, img.spec.depth},
     mipLevels     = img.spec.mip_levels,
     arrayLayers   = max(img.spec.array_layers, 1),
     format        = img.spec.format,
@@ -177,8 +176,8 @@ image_create :: proc(
   log.debugf(
     "Created image %v %dx%d (mips=%d, layers=%d) 0x%x",
     img.spec.format,
-    img.spec.width,
-    img.spec.height,
+    img.spec.extent.width,
+    img.spec.extent.height,
     img.spec.mip_levels,
     img.spec.array_layers,
     img.image,
@@ -230,7 +229,7 @@ image_create_with_data :: proc(
       mipLevel = 0,
       layerCount = max(img.spec.array_layers, 1),
     },
-    imageExtent = {img.spec.width, img.spec.height, img.spec.depth},
+    imageExtent = {img.spec.extent.width, img.spec.extent.height, img.spec.depth},
   }
   vk.CmdCopyBufferToImage(
     cmd_buffer,
@@ -269,7 +268,7 @@ image_create_with_mipmaps :: proc(
   // Auto-calculate mip levels
   modified_spec := spec
   if modified_spec.mip_levels == 0 {
-    modified_spec.mip_levels = calculate_mip_levels(spec.width, spec.height)
+    modified_spec.mip_levels = calculate_mip_levels(spec.extent.width, spec.extent.height)
   }
   // Ensure required usage flags for mipmap generation
   modified_spec.usage |= {.TRANSFER_DST, .TRANSFER_SRC}
@@ -332,7 +331,7 @@ image_create_with_mipmaps :: proc(
       aspectMask = img.spec.aspect_mask,
       layerCount = max(img.spec.array_layers, 1),
     },
-    imageExtent = {img.spec.width, img.spec.height, img.spec.depth},
+    imageExtent = {img.spec.extent.width, img.spec.extent.height, img.spec.depth},
   }
   vk.CmdCopyBufferToImage(
     cmd_buffer,
@@ -480,19 +479,18 @@ image_destroy :: proc(device: vk.Device, img: ^Image) {
 }
 
 image_spec_2d :: proc(
-  width, height: u32,
+  extent: vk.Extent2D,
   format: vk.Format,
   usage: vk.ImageUsageFlags,
   mipmaps := false,
 ) -> ImageSpec {
   mip_levels := u32(1)
   if mipmaps {
-    mip_levels = calculate_mip_levels(width, height)
+    mip_levels = calculate_mip_levels(extent.width, extent.height)
   }
   return ImageSpec {
     type = .D2,
-    width = width,
-    height = height,
+    extent = extent,
     depth = 1,
     array_layers = 1,
     format = format,
