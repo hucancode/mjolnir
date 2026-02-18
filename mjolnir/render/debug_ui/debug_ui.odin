@@ -1,6 +1,7 @@
 package debug_ui
 
 import cont "../../containers"
+import geo "../../geometry"
 import gpu "../../gpu"
 import d "../data"
 import "../shared"
@@ -33,12 +34,7 @@ Renderer :: struct {
   current_scissor: vk.Rect2D,
 }
 
-Vertex2D :: struct {
-  pos:        [2]f32,
-  uv:         [2]f32,
-  color:      [4]u8,
-  texture_id: u32,
-}
+Vertex2D :: geo.Vertex2D
 
 init :: proc(
   self: ^Renderer,
@@ -73,43 +69,12 @@ init :: proc(
     vert_shader_module,
     frag_shader_module,
   )
-  vertex_binding := vk.VertexInputBindingDescription {
-    binding   = 0,
-    stride    = size_of(Vertex2D),
-    inputRate = .VERTEX,
-  }
-  vertex_attributes := [?]vk.VertexInputAttributeDescription {
-    {   // position
-      binding  = 0,
-      location = 0,
-      format   = .R32G32_SFLOAT,
-      offset   = u32(offset_of(Vertex2D, pos)),
-    },
-    {   // uv
-      binding  = 0,
-      location = 1,
-      format   = .R32G32_SFLOAT,
-      offset   = u32(offset_of(Vertex2D, uv)),
-    },
-    {   // color
-      binding  = 0,
-      location = 2,
-      format   = .R8G8B8A8_UNORM,
-      offset   = u32(offset_of(Vertex2D, color)),
-    },
-    {   // texture_id
-      binding  = 0,
-      location = 3,
-      format   = .R32_UINT,
-      offset   = u32(offset_of(Vertex2D, texture_id)),
-    },
-  }
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
-    pVertexBindingDescriptions      = &vertex_binding,
-    vertexAttributeDescriptionCount = len(vertex_attributes),
-    pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
+    pVertexBindingDescriptions      = &geo.VERTEX2D_BINDING_DESCRIPTION,
+    vertexAttributeDescriptionCount = len(geo.VERTEX2D_ATTRIBUTE_DESCRIPTIONS),
+    pVertexAttributeDescriptions    = raw_data(geo.VERTEX2D_ATTRIBUTE_DESCRIPTIONS[:]),
   }
   self.pipeline_layout = gpu.create_pipeline_layout(
     gctx,
@@ -259,15 +224,11 @@ ui_flush :: proc(
   }
   vk.CmdSetViewport(cmd_buf, 0, 1, &viewport)
   vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
-  offsets := [?]vk.DeviceSize{0}
-  vk.CmdBindVertexBuffers(
+  gpu.bind_vertex_index_buffers(
     cmd_buf,
-    0,
-    1,
-    &self.vertex_buffer.buffer,
-    raw_data(offsets[:]),
+    self.vertex_buffer.buffer,
+    self.index_buffer.buffer,
   )
-  vk.CmdBindIndexBuffer(cmd_buf, self.index_buffer.buffer, 0, .UINT32)
   vk.CmdDrawIndexed(cmd_buf, self.index_count, 1, 0, 0, 0)
   return .SUCCESS
 }

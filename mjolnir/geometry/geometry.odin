@@ -4,56 +4,6 @@ import "core:math"
 import "core:math/linalg"
 import vk "vendor:vulkan"
 
-Vertex :: struct {
-  position: [3]f32,
-  normal:   [3]f32,
-  color:    [4]f32,
-  uv:       [2]f32,
-  tangent:  [4]f32, // xyz = tangent, w = handedness (for bitangent reconstruction)
-}
-
-SkinningData :: struct {
-  joints:  [4]u32,
-  weights: [4]f32,
-}
-
-VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
-  {binding = 0, stride = size_of(Vertex), inputRate = .VERTEX},
-}
-
-VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
-  {
-    binding = 0,
-    location = 0,
-    format = .R32G32B32_SFLOAT,
-    offset = u32(offset_of(Vertex, position)),
-  },
-  {
-    binding = 0,
-    location = 1,
-    format = .R32G32B32_SFLOAT,
-    offset = u32(offset_of(Vertex, normal)),
-  },
-  {
-    binding = 0,
-    location = 2,
-    format = .R32G32B32A32_SFLOAT,
-    offset = u32(offset_of(Vertex, color)),
-  },
-  {
-    binding = 0,
-    location = 3,
-    format = .R32G32_SFLOAT,
-    offset = u32(offset_of(Vertex, uv)),
-  },
-  {
-    binding = 0,
-    location = 4,
-    format = .R32G32B32A32_SFLOAT,
-    offset = u32(offset_of(Vertex, tangent)),
-  },
-}
-
 VEC_FORWARD :: [3]f32{0.0, 0.0, 1.0}
 VEC_BACKWARD :: [3]f32{0.0, 0.0, -1.0}
 VEC_UP :: [3]f32{0.0, 1.0, 0.0}
