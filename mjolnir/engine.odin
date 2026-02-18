@@ -177,33 +177,6 @@ init :: proc(
     self.swapchain.format.format,
     get_window_dpi(self.window),
   ) or_return
-  // Initialize UI GPU resources (font atlas, default texture)
-  ui_module.init_gpu_resources(
-    &self.ui,
-    &self.gctx,
-    &self.render.texture_manager,
-  )
-
-  main_world_handle, main_world_camera, ok_main_camera := cont.alloc(
-    &self.world.cameras,
-    world.CameraHandle,
-  )
-  if !ok_main_camera do return .ERROR_INITIALIZATION_FAILED
-  self.world.main_camera = main_world_handle
-  if !world.camera_init(
-    main_world_camera,
-    self.swapchain.extent.width,
-    self.swapchain.extent.height,
-    {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .POST_PROCESS},
-    {3, 4, 3},
-    {0, 0, 0},
-    math.PI * 0.5,
-    0.1,
-    100.0,
-  ) {
-    return .ERROR_INITIALIZATION_FAILED
-  }
-  world.stage_camera_data(&self.world.staging, main_world_handle)
 
   if self.gctx.has_async_compute {
     log.infof(
@@ -340,6 +313,7 @@ init :: proc(
       mu.input_text(&engine.render.debug_ui.ctx, text_str)
     },
   )
+  setup(self) or_return
   if self.camera_controller_enabled {
     world.setup_camera_controller_callbacks(self.window)
     self.world.orbit_controller = world.camera_controller_orbit_init(
@@ -352,14 +326,66 @@ init :: proc(
     }
     self.world.active_controller = &self.world.orbit_controller
   }
-  if self.setup_proc != nil {
-    self.setup_proc(self)
-  }
   when FRAME_LIMIT > 0 {
     log.infof("Frame limit set to %d", FRAME_LIMIT)
   }
   log.infof("Engine initialized")
   return .SUCCESS
+}
+
+setup :: proc(self: ^Engine) -> (ret: vk.Result) {
+  render.setup(
+    &self.render,
+    &self.gctx,
+    self.swapchain.extent,
+    self.swapchain.format.format,
+  ) or_return
+  defer if ret != .SUCCESS {
+    render.teardown(&self.render, &self.gctx)
+  }
+  // Initialize UI GPU resources (font atlas, default texture)
+  ui_module.init_gpu_resources(
+    &self.ui,
+    &self.gctx,
+    &self.render.texture_manager,
+  )
+  // Create main camera if it doesn't exist yet
+  if cont.get(self.world.cameras, self.world.main_camera) == nil {
+    main_world_handle, main_world_camera, ok_main_camera := cont.alloc(
+      &self.world.cameras,
+      world.CameraHandle,
+    )
+    if !ok_main_camera do return .ERROR_INITIALIZATION_FAILED
+    self.world.main_camera = main_world_handle
+    if !world.camera_init(
+      main_world_camera,
+      self.swapchain.extent.width,
+      self.swapchain.extent.height,
+      {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .POST_PROCESS},
+      {3, 4, 3},
+      {0, 0, 0},
+      math.PI * 0.5,
+      0.1,
+      100.0,
+    ) {
+      return .ERROR_INITIALIZATION_FAILED
+    }
+  }
+  world.stage_camera_data(&self.world.staging, self.world.main_camera)
+  if self.setup_proc != nil {
+    self.setup_proc(self)
+  }
+  return .SUCCESS
+}
+
+teardown :: proc(self: ^Engine) {
+  vk.DeviceWaitIdle(self.gctx.device)
+  ui_module.shutdown_gpu_resources(
+    &self.ui,
+    &self.gctx,
+    &self.render.texture_manager,
+  )
+  render.teardown(&self.render, &self.gctx)
 }
 
 get_delta_time :: proc(self: ^Engine) -> f32 {
@@ -1068,7 +1094,7 @@ update :: proc(self: ^Engine) -> bool {
 }
 
 shutdown :: proc(self: ^Engine) {
-  vk.DeviceWaitIdle(self.gctx.device)
+  teardown(self)
   gpu.free_command_buffer(&self.gctx, ..self.command_buffers[:])
   if self.gctx.has_async_compute {
     gpu.free_compute_command_buffer(
@@ -1077,7 +1103,7 @@ shutdown :: proc(self: ^Engine) {
     )
   }
   render.shutdown(&self.render, &self.gctx)
-  ui_module.shutdown(&self.ui, &self.gctx, &self.render.texture_manager)
+  ui_module.shutdown(&self.ui)
   world.shutdown(&self.world)
   nav.shutdown(&self.nav)
   gpu.swapchain_destroy(&self.swapchain, self.gctx.device)
@@ -1356,7 +1382,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
       self.swapchain.views[self.swapchain.image_index],
       self.swapchain.extent,
     )
-    debug_ui.render(&self.render.debug_ui, command_buffer)
+    debug_ui.render(&self.render.debug_ui, command_buffer, self.render.textures_descriptor_set)
     debug_ui.end_pass(&self.render.debug_ui, command_buffer)
   }
   // Transition swapchain image to present layout

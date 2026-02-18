@@ -161,52 +161,26 @@ compact :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   )
 }
 
-shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.compute_descriptor_set_layout,
-    nil,
-  )
-  vk.DestroyPipeline(gctx.device, self.emitter_pipeline, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.emitter_descriptor_set_layout,
-    nil,
-  )
-  vk.DestroyPipeline(gctx.device, self.compact_pipeline, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.compact_descriptor_set_layout,
-    nil,
-  )
-  vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
-  gpu.mutable_buffer_destroy(gctx.device, &self.params_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
-}
-
-init :: proc(
+setup :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
-  camera_set_layout: vk.DescriptorSetLayout,
-  emitter_set_layout: vk.DescriptorSetLayout,
-  forcefield_set_layout: vk.DescriptorSetLayout,
-  world_matrix_set_layout: vk.DescriptorSetLayout,
   emitter_descriptor_set: vk.DescriptorSet,
   forcefield_descriptor_set: vk.DescriptorSet,
-  textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
-  log.debugf("Initializing particle renderer")
+  self.emitter_bindless_descriptor_set = emitter_descriptor_set
+  self.forcefield_bindless_descriptor_set = forcefield_descriptor_set
+  default_texture_handle := gpu.create_texture_2d_from_data(
+    gctx,
+    texture_manager,
+    TEXTURE_BLACK_CIRCLE,
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.free_texture_2d(texture_manager, gctx, default_texture_handle)
+  }
+  self.default_texture_index = default_texture_handle.index
   self.params_buffer = gpu.create_mutable_buffer(
     gctx,
     ParticleSystemParams,
@@ -234,8 +208,114 @@ init :: proc(
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
   }
-  self.emitter_bindless_descriptor_set = emitter_descriptor_set
-  self.forcefield_bindless_descriptor_set = forcefield_descriptor_set
+  self.compact_particle_buffer = gpu.create_mutable_buffer(
+    gctx,
+    Particle,
+    MAX_PARTICLES,
+    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
+  }
+  self.draw_command_buffer = gpu.create_mutable_buffer(
+    gctx,
+    vk.DrawIndirectCommand,
+    1,
+    {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
+  }
+  self.emitter_descriptor_set = gpu.create_descriptor_set(
+    gctx,
+    &self.emitter_descriptor_set_layout,
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_count_buffer)},
+    {.UNIFORM_BUFFER, gpu.buffer_info(&self.params_buffer)},
+  ) or_return
+  self.compute_descriptor_set = gpu.create_descriptor_set(
+    gctx,
+    &self.compute_descriptor_set_layout,
+    {type = .UNIFORM_BUFFER, info = gpu.buffer_info(&self.params_buffer)},
+    {
+      type = .STORAGE_BUFFER,
+      info = gpu.buffer_info(&self.compact_particle_buffer),
+    },
+    {
+      type = .STORAGE_BUFFER,
+      info = gpu.buffer_info(&self.particle_count_buffer),
+    },
+  ) or_return
+  self.compact_descriptor_set = gpu.create_descriptor_set(
+    gctx,
+    &self.compact_descriptor_set_layout,
+    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.particle_buffer)},
+    {
+      type = .STORAGE_BUFFER,
+      info = gpu.buffer_info(&self.compact_particle_buffer),
+    },
+    {
+      type = .STORAGE_BUFFER,
+      info = gpu.buffer_info(&self.draw_command_buffer),
+    },
+    {
+      type = .STORAGE_BUFFER,
+      info = gpu.buffer_info(&self.particle_count_buffer),
+    },
+  ) or_return
+  return .SUCCESS
+}
+
+teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+  gpu.mutable_buffer_destroy(gctx.device, &self.params_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
+  // descriptor sets freed by ResetDescriptorPool in render.teardown
+  self.emitter_descriptor_set = 0
+  self.compute_descriptor_set = 0
+  self.compact_descriptor_set = 0
+}
+
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+  vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.compute_descriptor_set_layout,
+    nil,
+  )
+  vk.DestroyPipeline(gctx.device, self.emitter_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.emitter_descriptor_set_layout,
+    nil,
+  )
+  vk.DestroyPipeline(gctx.device, self.compact_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.compact_descriptor_set_layout,
+    nil,
+  )
+  vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
+}
+
+init :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  camera_set_layout: vk.DescriptorSetLayout,
+  emitter_set_layout: vk.DescriptorSetLayout,
+  forcefield_set_layout: vk.DescriptorSetLayout,
+  world_matrix_set_layout: vk.DescriptorSetLayout,
+  textures_set_layout: vk.DescriptorSetLayout,
+) -> (
+  ret: vk.Result,
+) {
+  log.debugf("Initializing particle renderer")
   create_emitter_pipeline(
     gctx,
     self,
@@ -279,7 +359,6 @@ init :: proc(
   create_render_pipeline(
     gctx,
     self,
-    texture_manager,
     camera_set_layout,
     textures_set_layout,
   ) or_return
@@ -314,13 +393,6 @@ create_emitter_pipeline :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
   }
-  self.emitter_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.emitter_descriptor_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_count_buffer)},
-    {.UNIFORM_BUFFER, gpu.buffer_info(&self.params_buffer)},
-  ) or_return
   emitter_shader_module := gpu.create_shader_module(
     gctx.device,
     SHADER_EMITTER_COMP,
@@ -378,19 +450,6 @@ create_compute_pipeline :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
   }
-  self.compute_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.compute_descriptor_set_layout,
-    {type = .UNIFORM_BUFFER, info = gpu.buffer_info(&self.params_buffer)},
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.buffer_info(&self.compact_particle_buffer),
-    },
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.buffer_info(&self.particle_count_buffer),
-    },
-  ) or_return
   compute_shader_module := gpu.create_shader_module(
     gctx.device,
     SHADER_PARTICLE_COMP,
@@ -445,41 +504,6 @@ create_compact_pipeline :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
   }
-  self.compact_particle_buffer = gpu.create_mutable_buffer(
-    gctx,
-    Particle,
-    MAX_PARTICLES,
-    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
-  }
-  self.draw_command_buffer = gpu.create_mutable_buffer(
-    gctx,
-    vk.DrawIndirectCommand,
-    1,
-    {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
-  }
-  self.compact_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.compact_descriptor_set_layout,
-    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.particle_buffer)},
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.buffer_info(&self.compact_particle_buffer),
-    },
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.buffer_info(&self.draw_command_buffer),
-    },
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.buffer_info(&self.particle_count_buffer),
-    },
-  ) or_return
   compact_shader_module := gpu.create_shader_module(
     gctx.device,
     SHADER_PARTICLE_COMPACT_COMP,
@@ -509,7 +533,6 @@ create_compact_pipeline :: proc(
 create_render_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  texture_manager: ^gpu.TextureManager,
   camera_set_layout: vk.DescriptorSetLayout,
   textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
@@ -524,15 +547,6 @@ create_render_pipeline :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
   }
-  default_texture_handle := gpu.create_texture_2d_from_data(
-    gctx,
-    texture_manager,
-    TEXTURE_BLACK_CIRCLE,
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_texture_2d(texture_manager, gctx, default_texture_handle)
-  }
-  self.default_texture_index = default_texture_handle.index
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Particle),

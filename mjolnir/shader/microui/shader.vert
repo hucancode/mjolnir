@@ -1,5 +1,5 @@
 #version 450
-layout(binding = 0) uniform Uniforms {
+layout(push_constant) uniform PushConstants {
     mat4 projection;
 };
 

@@ -138,7 +138,6 @@ end_ambient_pass :: proc(command_buffer: vk.CommandBuffer) {
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
   camera_set_layout: vk.DescriptorSetLayout,
   lights_set_layout: vk.DescriptorSetLayout,
   shadow_data_set_layout: vk.DescriptorSetLayout,
@@ -202,47 +201,6 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   }
-  env_map, env_result := gpu.create_texture_2d_from_path(
-    gctx,
-    texture_manager,
-    "assets/Cannon_Exterior.hdr",
-    .R32G32B32A32_SFLOAT,
-    true,
-    {.SAMPLED},
-    true,
-  )
-  if env_result == .SUCCESS {
-    self.environment_map = env_map
-  } else {
-    log.warn("HDR environment map not found, using default lighting")
-    self.environment_map = {} // Empty handle - renderer should handle gracefully
-  }
-  defer if ret != .SUCCESS {
-    gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
-  }
-  environment_map := gpu.get_texture_2d(texture_manager, self.environment_map)
-  if environment_map != nil {
-    self.environment_max_lod =
-      f32(
-        gpu.calculate_mip_levels(
-          environment_map.spec.width,
-          environment_map.spec.height,
-        ),
-      ) -
-      1.0
-  } else {
-    self.environment_max_lod = 0.0
-  }
-  brdf_handle := gpu.create_texture_2d_from_data(
-    gctx,
-    texture_manager,
-    TEXTURE_LUT_GGX,
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_texture_2d(texture_manager, gctx, brdf_handle)
-  }
-  self.brdf_lut = brdf_handle
-  self.ibl_intensity = 1.0
   log.info("Ambient pipeline initialized successfully")
   self.lighting_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
@@ -318,6 +276,57 @@ init :: proc(
     vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
   }
   log.info("Lighting pipeline initialized successfully")
+  return .SUCCESS
+}
+
+setup :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
+) -> (
+  ret: vk.Result,
+) {
+  env_map, env_result := gpu.create_texture_2d_from_path(
+    gctx,
+    texture_manager,
+    "assets/Cannon_Exterior.hdr",
+    .R32G32B32A32_SFLOAT,
+    true,
+    {.SAMPLED},
+    true,
+  )
+  if env_result == .SUCCESS {
+    self.environment_map = env_map
+  } else {
+    log.warn("HDR environment map not found, using default lighting")
+    self.environment_map = {}
+  }
+  defer if ret != .SUCCESS {
+    gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
+  }
+  environment_map := gpu.get_texture_2d(texture_manager, self.environment_map)
+  if environment_map != nil {
+    self.environment_max_lod =
+      f32(
+        gpu.calculate_mip_levels(
+          environment_map.spec.width,
+          environment_map.spec.height,
+        ),
+      ) -
+      1.0
+  } else {
+    self.environment_max_lod = 0.0
+  }
+  brdf_handle := gpu.create_texture_2d_from_data(
+    gctx,
+    texture_manager,
+    TEXTURE_LUT_GGX,
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.free_texture_2d(texture_manager, gctx, brdf_handle)
+  }
+  self.brdf_lut = brdf_handle
+  self.ibl_intensity = 1.0
   create_light_volume_mesh(
     gctx,
     &self.sphere_mesh,
@@ -342,24 +351,32 @@ init :: proc(
   defer if ret != .SUCCESS {
     destroy_light_volume_mesh(gctx.device, &self.triangle_mesh)
   }
-  log.info("Light volume meshes initialized")
+  log.info("Lighting GPU resources setup")
   return .SUCCESS
+}
+
+teardown :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
+) {
+  gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
+  self.environment_map = {}
+  gpu.free_texture_2d(texture_manager, gctx, self.brdf_lut)
+  self.brdf_lut = {}
+  destroy_light_volume_mesh(gctx.device, &self.sphere_mesh)
+  destroy_light_volume_mesh(gctx.device, &self.cone_mesh)
+  destroy_light_volume_mesh(gctx.device, &self.triangle_mesh)
 }
 
 shutdown :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
 ) {
   vk.DestroyPipeline(gctx.device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.ambient_pipeline_layout, nil)
   self.ambient_pipeline_layout = 0
-  gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
-  gpu.free_texture_2d(texture_manager, gctx, self.brdf_lut)
-  destroy_light_volume_mesh(gctx.device, &self.sphere_mesh)
-  destroy_light_volume_mesh(gctx.device, &self.cone_mesh)
-  destroy_light_volume_mesh(gctx.device, &self.triangle_mesh)
   vk.DestroyPipelineLayout(gctx.device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.lighting_pipeline, nil)
 }

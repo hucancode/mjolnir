@@ -1,8 +1,8 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : enable
 
-layout(binding = 0, set = 1) uniform texture2D textures[];
-layout(binding = 1, set = 1) uniform sampler samplers[];
+layout(binding = 0, set = 0) uniform texture2D textures[];
+layout(binding = 1, set = 0) uniform sampler samplers[];
 
 layout(constant_id = 3) const uint SAMPLER_NEAREST_CLAMP = 0u;
 

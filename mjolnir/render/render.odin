@@ -252,20 +252,6 @@ shutdown_bone_buffer :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
 }
 
 @(private)
-init_camera_buffers :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  gpu.per_frame_bindless_buffer_init(
-    &self.camera_buffer,
-    gctx,
-    d.MAX_ACTIVE_CAMERAS,
-    {.VERTEX, .FRAGMENT, .COMPUTE},
-  ) or_return
-  return .SUCCESS
-}
-
-@(private)
 shutdown_camera_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
 }
@@ -278,7 +264,7 @@ shutdown_camera_resources :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
 }
 
 @(private)
-init_bindless_layouts :: proc(
+init_bindless_layouts_infra :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
 ) -> (
@@ -386,6 +372,11 @@ init_bindless_layouts :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
     self.sprite_pipeline_layout = 0
   }
+  return .SUCCESS
+}
+
+@(private)
+setup_bindless_textures :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
   gpu.allocate_descriptor_set(
     gctx,
     &self.textures_descriptor_set,
@@ -400,7 +391,6 @@ init_bindless_layouts :: proc(
     {.SAMPLER, vk.DescriptorImageInfo{sampler = self.nearest_repeat_sampler}},
     {.SAMPLER, vk.DescriptorImageInfo{sampler = self.linear_repeat_sampler}},
   )
-  // Initialize texture manager
   gpu.texture_manager_init(
     &self.texture_manager,
     self.textures_descriptor_set,
@@ -409,8 +399,13 @@ init_bindless_layouts :: proc(
 }
 
 @(private)
-shutdown_bindless_layouts :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
+teardown_bindless_textures :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.texture_manager_shutdown(&self.texture_manager, gctx)
+  self.textures_descriptor_set = 0
+}
+
+@(private)
+shutdown_bindless_layouts_infra :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(gctx.device, self.textures_set_layout, nil)
@@ -421,7 +416,6 @@ shutdown_bindless_layouts :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   self.general_pipeline_layout = 0
   self.sprite_pipeline_layout = 0
   self.textures_set_layout = 0
-  self.textures_descriptor_set = 0
   self.linear_repeat_sampler = 0
   self.linear_clamp_sampler = 0
   self.nearest_repeat_sampler = 0
@@ -511,7 +505,8 @@ init :: proc(
 ) {
   self.cameras = make(map[u32]camera.Camera)
   self.meshes = make(map[u32]Mesh)
-  // Initialize texture tracking maps
+  self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
+  // Initialize geometry/bone/camera/scene buffers (survive teardown/setup cycles)
   init_geometry_buffers(self, gctx) or_return
   defer if ret != .SUCCESS {
     destroy_geometry_buffers(self, gctx)
@@ -520,7 +515,12 @@ init :: proc(
   defer if ret != .SUCCESS {
     shutdown_bone_buffer(self, gctx)
   }
-  init_camera_buffers(self, gctx) or_return
+  gpu.per_frame_bindless_buffer_init(
+    &self.camera_buffer,
+    gctx,
+    d.MAX_ACTIVE_CAMERAS,
+    {.VERTEX, .FRAGMENT, .COMPUTE},
+  ) or_return
   defer if ret != .SUCCESS {
     shutdown_camera_buffers(self, gctx)
   }
@@ -528,11 +528,12 @@ init :: proc(
   defer if ret != .SUCCESS {
     shutdown_scene_buffers(self, gctx)
   }
-  init_bindless_layouts(self, gctx) or_return
+  // Initialize bindless infra (samplers + descriptor set layouts + pipeline layouts)
+  init_bindless_layouts_infra(self, gctx) or_return
   defer if ret != .SUCCESS {
-    shutdown_bindless_layouts(self, gctx)
+    shutdown_bindless_layouts_infra(self, gctx)
   }
-  // Camera initialization moved to World module - Engine will sync cameras to Render
+  // Initialize all subsystems (pipeline creation only)
   camera.init(
     &self.visibility,
     gctx,
@@ -543,10 +544,6 @@ init :: proc(
   light.shadow_init(
     &self.shadow,
     gctx,
-    &self.texture_manager,
-    &self.node_data_buffer,
-    &self.mesh_data_buffer,
-    &self.world_matrix_buffer,
     self.textures_set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
@@ -558,7 +555,6 @@ init :: proc(
   light.init(
     &self.lighting,
     gctx,
-    &self.texture_manager,
     self.camera_buffer.set_layout,
     self.lights_buffer.set_layout,
     self.shadow.shadow_data_buffer.set_layout,
@@ -578,13 +574,10 @@ init :: proc(
   particles.init(
     &self.particles,
     gctx,
-    &self.texture_manager,
     self.camera_buffer.set_layout,
     self.emitter_buffer.set_layout,
     self.forcefield_buffer.set_layout,
     self.world_matrix_buffer.set_layout,
-    self.emitter_buffer.descriptor_set,
-    self.forcefield_buffer.descriptor_set,
     self.textures_set_layout,
   ) or_return
   transparency.init(
@@ -598,16 +591,12 @@ init :: proc(
   post_process.init(
     &self.post_process,
     gctx,
-    &self.texture_manager,
     swapchain_format,
-    swapchain_extent.width,
-    swapchain_extent.height,
     self.textures_set_layout,
   ) or_return
   debug_ui.init(
     &self.debug_ui,
     gctx,
-    &self.texture_manager,
     swapchain_format,
     swapchain_extent.width,
     swapchain_extent.height,
@@ -619,19 +608,95 @@ init :: proc(
     gctx,
     self.camera_buffer.set_layout,
   ) or_return
-  // Initialize UI renderer (command-based, no ui_system dependency)
-  self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
   ui_render.init_renderer(
     &self.ui,
     gctx,
-    &self.texture_manager,
     self.textures_set_layout,
+    swapchain_format,
+  ) or_return
+  return .SUCCESS
+}
+
+setup :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  swapchain_extent: vk.Extent2D,
+  swapchain_format: vk.Format,
+) -> (
+  ret: vk.Result,
+) {
+  // Allocate textures_descriptor_set and init texture_manager
+  setup_bindless_textures(self, gctx) or_return
+  defer if ret != .SUCCESS {
+    teardown_bindless_textures(self, gctx)
+  }
+  // Re-allocate descriptor sets for scene buffers (freed by previous ResetDescriptorPool)
+  gpu.bindless_buffer_realloc_descriptor(&self.material_buffer, gctx) or_return
+  gpu.bindless_buffer_realloc_descriptor(&self.world_matrix_buffer, gctx) or_return
+  gpu.bindless_buffer_realloc_descriptor(&self.node_data_buffer, gctx) or_return
+  gpu.bindless_buffer_realloc_descriptor(&self.mesh_data_buffer, gctx) or_return
+  gpu.bindless_buffer_realloc_descriptor(&self.emitter_buffer, gctx) or_return
+  gpu.bindless_buffer_realloc_descriptor(&self.forcefield_buffer, gctx) or_return
+  gpu.bindless_buffer_realloc_descriptor(&self.sprite_buffer, gctx) or_return
+  gpu.bindless_buffer_realloc_descriptor(&self.lights_buffer, gctx) or_return
+  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.bone_buffer, gctx) or_return
+  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.camera_buffer, gctx) or_return
+  gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
+  // Setup subsystem GPU resources
+  light.setup(&self.lighting, gctx, &self.texture_manager) or_return
+  light.shadow_setup(
+    &self.shadow,
+    gctx,
+    &self.texture_manager,
+    &self.node_data_buffer,
+    &self.mesh_data_buffer,
+    &self.world_matrix_buffer,
+  ) or_return
+  particles.setup(
+    &self.particles,
+    gctx,
+    &self.texture_manager,
+    self.emitter_buffer.descriptor_set,
+    self.forcefield_buffer.descriptor_set,
+  ) or_return
+  post_process.setup(
+    &self.post_process,
+    gctx,
+    &self.texture_manager,
     swapchain_extent.width,
     swapchain_extent.height,
     swapchain_format,
   ) or_return
-
+  debug_ui.setup(&self.debug_ui, gctx, &self.texture_manager) or_return
+  ui_render.setup(&self.ui, gctx) or_return
   return .SUCCESS
+}
+
+teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
+  // Destroy camera GPU resources (VkImages, draw command buffers) before texture_manager goes away
+  shutdown_camera_resources(self, gctx)
+  clear(&self.cameras)
+  ui_render.teardown(&self.ui, gctx)
+  debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
+  post_process.teardown(&self.post_process, gctx, &self.texture_manager)
+  particles.teardown(&self.particles, gctx)
+  light.shadow_teardown(&self.shadow, gctx, &self.texture_manager)
+  light.teardown(&self.lighting, gctx, &self.texture_manager)
+  teardown_bindless_textures(self, gctx)
+  // Zero all descriptor set handles (freed in bulk below)
+  self.material_buffer.descriptor_set = 0
+  self.world_matrix_buffer.descriptor_set = 0
+  self.node_data_buffer.descriptor_set = 0
+  self.mesh_data_buffer.descriptor_set = 0
+  self.emitter_buffer.descriptor_set = 0
+  self.forcefield_buffer.descriptor_set = 0
+  self.sprite_buffer.descriptor_set = 0
+  self.lights_buffer.descriptor_set = 0
+  for &ds in self.bone_buffer.descriptor_sets do ds = 0
+  for &ds in self.camera_buffer.descriptor_sets do ds = 0
+  self.mesh_manager.vertex_skinning_buffer.descriptor_set = 0
+  // Bulk-free all descriptor sets allocated from the pool
+  vk.ResetDescriptorPool(gctx.device, gctx.descriptor_pool, {})
 }
 
 // Stage UI commands from UI module
@@ -653,24 +718,22 @@ clear_debug_visualization :: proc(self: ^Manager) {
 }
 
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  ui_render.shutdown(&self.ui, gctx, &self.texture_manager)
+  ui_render.shutdown(&self.ui, gctx)
   delete(self.ui_commands)
   debug.shutdown(&self.debug_renderer, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
-  post_process.shutdown(&self.post_process, gctx, &self.texture_manager)
+  post_process.shutdown(&self.post_process, gctx)
   particles.shutdown(&self.particles, gctx)
   transparency.shutdown(&self.transparency, gctx)
-  light.shutdown(&self.lighting, gctx, &self.texture_manager)
-  light.shadow_shutdown(&self.shadow, gctx, &self.texture_manager)
+  light.shutdown(&self.lighting, gctx)
+  light.shadow_shutdown(&self.shadow, gctx)
   geometry.shutdown(&self.geometry, gctx)
   camera.shutdown(&self.visibility, gctx)
-  shutdown_camera_resources(self, gctx)
-  shutdown_bindless_layouts(self, gctx)
+  shutdown_bindless_layouts_infra(self, gctx)
   shutdown_scene_buffers(self, gctx)
   shutdown_camera_buffers(self, gctx)
   shutdown_bone_buffer(self, gctx)
   destroy_geometry_buffers(self, gctx)
-  // Cleanup texture tracking maps
   delete(self.cameras)
   delete(self.meshes)
 }
@@ -703,7 +766,7 @@ resize :: proc(
     extent.width,
     extent.height,
     dpi_scale,
-  ) or_return
+  )
   return .SUCCESS
 }
 
@@ -1318,16 +1381,6 @@ record_ui_pass :: proc(
     .GRAPHICS,
     self.ui.pipeline_layout,
     0,
-    1,
-    &self.ui.projection_descriptor_set,
-    0,
-    nil,
-  )
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    self.ui.pipeline_layout,
-    1,
     1,
     &self.textures_descriptor_set,
     0,

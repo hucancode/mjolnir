@@ -347,12 +347,28 @@ effect_clear :: proc(self: ^Renderer) {
   clear(&self.effect_stack)
 }
 
-init :: proc(
+setup :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
-  color_format: vk.Format,
   width, height: u32,
+  format: vk.Format,
+) -> vk.Result {
+  return create_images(gctx, self, texture_manager, width, height, format)
+}
+
+teardown :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
+) {
+  destroy_images(self, gctx, texture_manager)
+}
+
+init :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  color_format: vk.Format,
   textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
@@ -394,14 +410,6 @@ init :: proc(
       shader_code,
     ) or_return
   }
-  create_images(
-    gctx,
-    self,
-    texture_manager,
-    width,
-    height,
-    color_format,
-  ) or_return
   shader_stages: [count][2]vk.PipelineShaderStageCreateInfo
   pipeline_infos: [count]vk.GraphicsPipelineCreateInfo
   for effect_type, i in PostProcessEffectType {
@@ -511,11 +519,7 @@ recreate_images :: proc(
   return create_images(gctx, self, texture_manager, width, height, format)
 }
 
-shutdown :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
-) {
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   for &p in self.pipelines {
     vk.DestroyPipeline(gctx.device, p, nil)
     p = 0
@@ -525,7 +529,6 @@ shutdown :: proc(
     layout = 0
   }
   delete(self.effect_stack)
-  destroy_images(self, gctx, texture_manager)
 }
 
 // Modular postprocess API

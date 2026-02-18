@@ -1,6 +1,6 @@
 #version 450
 
-layout(binding = 0) uniform Projection {
+layout(push_constant) uniform PushConstants {
     mat4 projection;
 };
 

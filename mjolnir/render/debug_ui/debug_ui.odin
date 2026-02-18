@@ -17,25 +17,21 @@ UI_MAX_VERTICES :: UI_MAX_QUAD * 4
 UI_MAX_INDICES :: UI_MAX_QUAD * 6
 
 Renderer :: struct {
-  ctx:                       mu.Context,
-  projection_layout:         vk.DescriptorSetLayout,
-  projection_descriptor_set: vk.DescriptorSet,
-  texture_layout:            vk.DescriptorSetLayout,
-  texture_descriptor_set:    vk.DescriptorSet,
-  pipeline_layout:           vk.PipelineLayout,
-  pipeline:                  vk.Pipeline,
-  atlas_handle:              gpu.Texture2DHandle,
-  proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
-  vertex_buffer:             gpu.MutableBuffer(Vertex2D),
-  index_buffer:              gpu.MutableBuffer(u32),
-  vertex_count:              u32,
-  index_count:               u32,
-  vertices:                  [UI_MAX_VERTICES]Vertex2D,
-  indices:                   [UI_MAX_INDICES]u32,
-  frame_width:               u32,
-  frame_height:              u32,
-  dpi_scale:                 f32,
-  current_scissor:           vk.Rect2D,
+  ctx:             mu.Context,
+  pipeline_layout: vk.PipelineLayout,
+  pipeline:        vk.Pipeline,
+  atlas_handle:    gpu.Texture2DHandle,
+  projection:      matrix[4, 4]f32,
+  vertex_buffer:   gpu.MutableBuffer(Vertex2D),
+  index_buffer:    gpu.MutableBuffer(u32),
+  vertex_count:    u32,
+  index_count:     u32,
+  vertices:        [UI_MAX_VERTICES]Vertex2D,
+  indices:         [UI_MAX_INDICES]u32,
+  frame_width:     u32,
+  frame_height:    u32,
+  dpi_scale:       f32,
+  current_scissor: vk.Rect2D,
 }
 
 Vertex2D :: struct {
@@ -48,7 +44,6 @@ Vertex2D :: struct {
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
   color_format: vk.Format,
   width, height: u32,
   dpi_scale: f32 = 1.0,
@@ -65,7 +60,7 @@ init :: proc(
   self.current_scissor = vk.Rect2D {
     extent = {width, height},
   }
-  log.infof("init UI pipeline...")
+  log.infof("init debug UI pipeline...")
   vert_shader_module := gpu.create_shader_module(
     gctx.device,
     SHADER_MICROUI_VERT,
@@ -118,27 +113,17 @@ init :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-  self.projection_layout = gpu.create_descriptor_set_layout(
-    gctx,
-    {.UNIFORM_BUFFER, {.VERTEX}},
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
-    self.projection_layout = 0
-  }
-  self.texture_layout = textures_set_layout
-  self.texture_descriptor_set = texture_manager.textures_descriptor_set
   self.pipeline_layout = gpu.create_pipeline_layout(
     gctx,
-    nil,
-    self.projection_layout,
+    vk.PushConstantRange {
+      stageFlags = {.VERTEX},
+      size = size_of(matrix[4, 4]f32),
+    },
     textures_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
     self.pipeline_layout = 0
-    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
-    self.projection_layout = 0
   }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -167,19 +152,19 @@ init :: proc(
     self.pipeline = 0
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
     self.pipeline_layout = 0
-    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
-    self.projection_layout = 0
   }
-  defer if ret != .SUCCESS {
-    // texture is managed by resource manager, no manual cleanup needed
-    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
-    self.pipeline = 0
-    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-    self.pipeline_layout = 0
-    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
-    self.projection_layout = 0
-  }
-  log.infof("init UI texture...")
+  log.infof("done init debug UI pipeline")
+  return .SUCCESS
+}
+
+setup :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
+) -> (
+  ret: vk.Result,
+) {
+  log.infof("setup debug UI atlas texture...")
   self.atlas_handle, ret = gpu.allocate_texture_2d_with_data(
     texture_manager,
     gctx,
@@ -191,8 +176,21 @@ init :: proc(
     {.SAMPLED},
   )
   if ret != .SUCCESS do return
-  log.infof("UI atlas created at bindless index %d", self.atlas_handle.index)
-  log.infof("init UI vertex buffer...")
+  defer if ret != .SUCCESS {
+    gpu.free_texture_2d(texture_manager, gctx, self.atlas_handle)
+    self.atlas_handle = {}
+  }
+  log.infof("debug UI atlas at bindless index %d", self.atlas_handle.index)
+  self.projection =
+    linalg.matrix_ortho3d(
+      0,
+      f32(self.frame_width),
+      f32(self.frame_height),
+      0,
+      -1,
+      1,
+    ) *
+    linalg.matrix4_scale(self.dpi_scale)
   self.vertex_buffer = gpu.create_mutable_buffer(
     gctx,
     Vertex2D,
@@ -201,15 +199,7 @@ init :: proc(
   ) or_return
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
-    // texture is managed by resource manager, no manual cleanup needed
-    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
-    self.pipeline = 0
-    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-    self.pipeline_layout = 0
-    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
-    self.projection_layout = 0
   }
-  log.infof("init UI indices buffer...")
   self.index_buffer = gpu.create_mutable_buffer(
     gctx,
     u32,
@@ -218,48 +208,27 @@ init :: proc(
   ) or_return
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
-    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
-    // texture is managed by resource manager, no manual cleanup needed
-    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
-    self.pipeline = 0
-    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-    self.pipeline_layout = 0
-    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
-    self.projection_layout = 0
   }
-  ortho :=
-    linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
-    linalg.matrix4_scale(dpi_scale)
-  log.infof("init UI proj buffer...")
-  self.proj_buffer = gpu.create_mutable_buffer(
-    gctx,
-    matrix[4, 4]f32,
-    1,
-    {.UNIFORM_BUFFER},
-    raw_data(&ortho),
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.proj_buffer)
-    gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
-    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
-    // texture is managed by resource manager, no manual cleanup needed
-    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
-    self.pipeline = 0
-    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-    self.pipeline_layout = 0
-    vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
-    self.projection_layout = 0
-  }
-  self.projection_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.projection_layout,
-    {type = .UNIFORM_BUFFER, info = gpu.buffer_info(&self.proj_buffer)},
-  ) or_return
-  log.infof("done init UI")
+  log.infof("done setup debug UI")
   return .SUCCESS
 }
 
-ui_flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
+teardown :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
+) {
+  gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
+  gpu.free_texture_2d(texture_manager, gctx, self.atlas_handle)
+  self.atlas_handle = {}
+}
+
+ui_flush :: proc(
+  self: ^Renderer,
+  cmd_buf: vk.CommandBuffer,
+  textures_descriptor_set: vk.DescriptorSet,
+) -> vk.Result {
   if self.vertex_count == 0 && self.index_count == 0 {
     return .SUCCESS
   }
@@ -273,8 +242,15 @@ ui_flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
     cmd_buf,
     self.pipeline,
     self.pipeline_layout,
-    self.projection_descriptor_set,
-    self.texture_descriptor_set,
+    textures_descriptor_set,
+  )
+  vk.CmdPushConstants(
+    cmd_buf,
+    self.pipeline_layout,
+    {.VERTEX},
+    0,
+    size_of(matrix[4, 4]f32),
+    &self.projection,
   )
   viewport := vk.Viewport {
     x        = 0,
@@ -302,13 +278,14 @@ ui_flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
 ui_push_quad :: proc(
   self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
+  textures_descriptor_set: vk.DescriptorSet,
   dst, src: mu.Rect,
   color: mu.Color,
   texture_id: u32,
 ) {
   if (self.vertex_count + 4 > UI_MAX_VERTICES ||
        self.index_count + 6 > UI_MAX_INDICES) {
-    ui_flush(self, cmd_buf)
+    ui_flush(self, cmd_buf, textures_descriptor_set)
   }
   x, y, w, h :=
     f32(src.x) /
@@ -358,12 +335,14 @@ ui_push_quad :: proc(
 ui_draw_rect :: proc(
   self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
+  textures_descriptor_set: vk.DescriptorSet,
   rect: mu.Rect,
   color: mu.Color,
 ) {
   ui_push_quad(
     self,
     cmd_buf,
+    textures_descriptor_set,
     rect,
     mu.default_atlas[mu.DEFAULT_ATLAS_WHITE],
     color,
@@ -374,6 +353,7 @@ ui_draw_rect :: proc(
 ui_draw_text :: proc(
   self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
+  textures_descriptor_set: vk.DescriptorSet,
   text: string,
   pos: mu.Vec2,
   color: mu.Color,
@@ -385,7 +365,15 @@ ui_draw_text :: proc(
       src := mu.default_atlas[mu.DEFAULT_ATLAS_FONT + r]
       dst.w = src.w
       dst.h = src.h
-      ui_push_quad(self, cmd_buf, dst, src, color, self.atlas_handle.index)
+      ui_push_quad(
+        self,
+        cmd_buf,
+        textures_descriptor_set,
+        dst,
+        src,
+        color,
+        self.atlas_handle.index,
+      )
       dst.x += dst.w
     }
   }
@@ -394,6 +382,7 @@ ui_draw_text :: proc(
 ui_draw_icon :: proc(
   self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
+  textures_descriptor_set: vk.DescriptorSet,
   id: mu.Icon,
   rect: mu.Rect,
   color: mu.Color,
@@ -404,6 +393,7 @@ ui_draw_icon :: proc(
   ui_push_quad(
     self,
     cmd_buf,
+    textures_descriptor_set,
     {x, y, src.w, src.h},
     src,
     color,
@@ -428,15 +418,10 @@ ui_set_clip_rect :: proc(
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.proj_buffer)
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
-  vk.DestroyDescriptorSetLayout(gctx.device, self.projection_layout, nil)
-  self.projection_layout = 0
 }
 
 recreate_images :: proc(
@@ -444,18 +429,16 @@ recreate_images :: proc(
   color_format: vk.Format,
   width, height: u32,
   dpi_scale: f32,
-) -> vk.Result {
+) {
   self.frame_width = width
   self.frame_height = height
   self.dpi_scale = dpi_scale
   self.current_scissor = vk.Rect2D {
     extent = {width, height},
   }
-  ortho :=
+  self.projection =
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
     linalg.matrix4_scale(dpi_scale)
-  gpu.write(&self.proj_buffer, &ortho) or_return
-  return .SUCCESS
 }
 
 begin_pass :: proc(
@@ -474,24 +457,47 @@ begin_pass :: proc(
   gpu.set_viewport_scissor(command_buffer, extent.width, extent.height)
 }
 
-render :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
+render :: proc(
+  self: ^Renderer,
+  command_buffer: vk.CommandBuffer,
+  textures_descriptor_set: vk.DescriptorSet,
+) {
   command_backing: ^mu.Command
   for variant in mu.next_command_iterator(&self.ctx, &command_backing) {
-    // log.infof("executing UI command", variant)
     switch cmd in variant {
     case ^mu.Command_Text:
-      ui_draw_text(self, command_buffer, cmd.str, cmd.pos, cmd.color)
+      ui_draw_text(
+        self,
+        command_buffer,
+        textures_descriptor_set,
+        cmd.str,
+        cmd.pos,
+        cmd.color,
+      )
     case ^mu.Command_Rect:
-      ui_draw_rect(self, command_buffer, cmd.rect, cmd.color)
+      ui_draw_rect(
+        self,
+        command_buffer,
+        textures_descriptor_set,
+        cmd.rect,
+        cmd.color,
+      )
     case ^mu.Command_Icon:
-      ui_draw_icon(self, command_buffer, cmd.id, cmd.rect, cmd.color)
+      ui_draw_icon(
+        self,
+        command_buffer,
+        textures_descriptor_set,
+        cmd.id,
+        cmd.rect,
+        cmd.color,
+      )
     case ^mu.Command_Clip:
       ui_set_clip_rect(self, command_buffer, cmd.rect)
     case ^mu.Command_Jump:
       unreachable()
     }
   }
-  ui_flush(self, command_buffer)
+  ui_flush(self, command_buffer, textures_descriptor_set)
 }
 
 end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {

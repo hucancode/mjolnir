@@ -120,10 +120,6 @@ make_light_view :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
 shadow_init :: proc(
   self: ^ShadowSystem,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
-  node_data_buffer: ^gpu.BindlessBuffer(d.Node),
-  mesh_data_buffer: ^gpu.BindlessBuffer(d.Mesh),
-  world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
   textures_set_layout: vk.DescriptorSetLayout,
   bone_set_layout: vk.DescriptorSetLayout,
   material_set_layout: vk.DescriptorSetLayout,
@@ -138,18 +134,7 @@ shadow_init :: proc(
   for i in 0 ..< d.MAX_LIGHTS {
     self.light_to_slot[i] = INVALID_SHADOW_INDEX
   }
-  gpu.per_frame_bindless_buffer_init(
-    &self.shadow_cube_buffer,
-    gctx,
-    MAX_SHADOW_MAPS,
-    {.VERTEX, .FRAGMENT, .GEOMETRY, .COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(
-      &self.shadow_cube_buffer,
-      gctx.device,
-    )
-  }
+  // Initialize buffer + set_layout only (no descriptor sets yet — allocated in shadow_setup)
   gpu.per_frame_bindless_buffer_init(
     &self.shadow_data_buffer,
     gctx,
@@ -157,10 +142,16 @@ shadow_init :: proc(
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(
-      &self.shadow_data_buffer,
-      gctx.device,
-    )
+    gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
+  }
+  gpu.per_frame_bindless_buffer_init(
+    &self.shadow_cube_buffer,
+    gctx,
+    MAX_SHADOW_MAPS,
+    {.VERTEX, .FRAGMENT, .GEOMETRY, .COMPUTE},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.per_frame_bindless_buffer_destroy(&self.shadow_cube_buffer, gctx.device)
   }
   self.shadow_cull_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
@@ -386,6 +377,22 @@ shadow_init :: proc(
     vk.DestroyPipeline(gctx.device, self.sphere_depth_pipeline, nil)
     self.sphere_depth_pipeline = 0
   }
+  return .SUCCESS
+}
+
+shadow_setup :: proc(
+  self: ^ShadowSystem,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^gpu.TextureManager,
+  node_data_buffer: ^gpu.BindlessBuffer(d.Node),
+  mesh_data_buffer: ^gpu.BindlessBuffer(d.Mesh),
+  world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
+) -> (
+  ret: vk.Result,
+) {
+  // Buffers + set_layouts created in shadow_init; just re-allocate descriptor sets here
+  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.shadow_cube_buffer, gctx) or_return
+  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.shadow_data_buffer, gctx) or_return
   for slot in 0 ..< MAX_SHADOW_MAPS {
     spot := &self.spot_lights[slot]
     directional := &self.directional_lights[slot]
@@ -494,7 +501,7 @@ shadow_init :: proc(
   return .SUCCESS
 }
 
-shadow_shutdown :: proc(
+shadow_teardown :: proc(
   self: ^ShadowSystem,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
@@ -505,19 +512,33 @@ shadow_shutdown :: proc(
     point := &self.point_lights[slot]
     for frame in 0 ..< d.FRAMES_IN_FLIGHT {
       gpu.free_texture_2d(texture_manager, gctx, spot.shadow_map[frame])
+      spot.shadow_map[frame] = {}
       gpu.free_texture_2d(texture_manager, gctx, directional.shadow_map[frame])
+      directional.shadow_map[frame] = {}
       gpu.free_texture_cube(texture_manager, gctx, point.shadow_cube[frame])
+      point.shadow_cube[frame] = {}
       gpu.mutable_buffer_destroy(gctx.device, &spot.draw_count[frame])
       gpu.mutable_buffer_destroy(gctx.device, &spot.draw_commands[frame])
       gpu.mutable_buffer_destroy(gctx.device, &directional.draw_count[frame])
-      gpu.mutable_buffer_destroy(
-        gctx.device,
-        &directional.draw_commands[frame],
-      )
+      gpu.mutable_buffer_destroy(gctx.device, &directional.draw_commands[frame])
       gpu.mutable_buffer_destroy(gctx.device, &point.draw_count[frame])
       gpu.mutable_buffer_destroy(gctx.device, &point.draw_commands[frame])
+      spot.descriptor_sets[frame] = 0
+      directional.descriptor_sets[frame] = 0
+      point.descriptor_sets[frame] = 0
     }
   }
+  // Zero shadow buffer descriptor sets; buffers+set_layouts persist until shadow_shutdown
+  for &ds in self.shadow_data_buffer.descriptor_sets do ds = 0
+  for &ds in self.shadow_cube_buffer.descriptor_sets do ds = 0
+}
+
+shadow_shutdown :: proc(
+  self: ^ShadowSystem,
+  gctx: ^gpu.GPUContext,
+) {
+  gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
+  gpu.per_frame_bindless_buffer_destroy(&self.shadow_cube_buffer, gctx.device)
   vk.DestroyPipeline(gctx.device, self.sphere_depth_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.sphere_cull_pipeline, nil)
@@ -536,8 +557,6 @@ shadow_shutdown :: proc(
     self.shadow_cull_descriptor_layout,
     nil,
   )
-  gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
-  gpu.per_frame_bindless_buffer_destroy(&self.shadow_cube_buffer, gctx.device)
 }
 
 shadow_sync_lights :: proc(

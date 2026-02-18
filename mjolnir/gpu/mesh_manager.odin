@@ -110,7 +110,6 @@ mesh_manager_init :: proc(
   defer if ret != .SUCCESS {
     cont.slab_destroy(&manager.index_slab)
   }
-
   log.info("Vertex buffer capacity:", vertex_count, "vertices")
   log.info("Index buffer capacity:", index_count, "indices")
   return .SUCCESS
@@ -123,6 +122,17 @@ mesh_manager_shutdown :: proc(manager: ^MeshManager, gctx: ^GPUContext) {
   buffer_destroy(gctx.device, &manager.index_buffer)
   cont.slab_destroy(&manager.vertex_slab)
   cont.slab_destroy(&manager.index_slab)
+}
+
+// Re-allocate descriptor sets for the mesh manager after ResetDescriptorPool.
+mesh_manager_realloc_descriptors :: proc(
+  manager: ^MeshManager,
+  gctx: ^GPUContext,
+) -> vk.Result {
+  return immutable_bindless_buffer_realloc_descriptor(
+    &manager.vertex_skinning_buffer,
+    gctx,
+  )
 }
 
 allocate_vertices :: proc(

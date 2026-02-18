@@ -361,59 +361,11 @@ PerFrameBindlessBuffer :: struct($T: typeid, $N: int) {
   descriptor_sets: [N]vk.DescriptorSet,
 }
 
-bindless_buffer_init :: proc(
-  self: ^BindlessBuffer($T),
-  gctx: ^GPUContext,
-  capacity: int,
-  stages: vk.ShaderStageFlags,
-) -> vk.Result {
-  self.buffer = malloc_mutable_buffer(
-    gctx,
-    T,
-    capacity,
-    {.STORAGE_BUFFER},
-  ) or_return
-  self.set_layout = create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, stages},
-  ) or_return
-  self.descriptor_set = create_descriptor_set(
-    gctx,
-    &self.set_layout,
-    {.STORAGE_BUFFER, buffer_info(&self.buffer)},
-  ) or_return
-  return .SUCCESS
-}
-
 bindless_buffer_destroy :: proc(self: ^BindlessBuffer($T), device: vk.Device) {
   mutable_buffer_destroy(device, &self.buffer)
   vk.DestroyDescriptorSetLayout(device, self.set_layout, nil)
   self.set_layout = 0
   self.descriptor_set = 0
-}
-
-immutable_bindless_buffer_init :: proc(
-  self: ^ImmutableBindlessBuffer($T),
-  gctx: ^GPUContext,
-  capacity: int,
-  stages: vk.ShaderStageFlags,
-) -> vk.Result {
-  self.buffer = malloc_buffer(
-    gctx,
-    T,
-    capacity,
-    {.STORAGE_BUFFER},
-  ) or_return
-  self.set_layout = create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, stages},
-  ) or_return
-  self.descriptor_set = create_descriptor_set(
-    gctx,
-    &self.set_layout,
-    {.STORAGE_BUFFER, buffer_info(&self.buffer)},
-  ) or_return
-  return .SUCCESS
 }
 
 immutable_bindless_buffer_destroy :: proc(
@@ -444,32 +396,6 @@ immutable_bindless_buffer_write_multi :: proc(
   return buffer_write_multi(gctx, &self.buffer, data, index)
 }
 
-per_frame_bindless_buffer_init :: proc(
-  self: ^PerFrameBindlessBuffer($T, $N),
-  gctx: ^GPUContext,
-  capacity: int,
-  stages: vk.ShaderStageFlags,
-) -> vk.Result {
-  self.set_layout = create_descriptor_set_layout(
-    gctx,
-    {.STORAGE_BUFFER, stages},
-  ) or_return
-  for frame_idx in 0 ..< N {
-    self.buffers[frame_idx] = create_mutable_buffer(
-      gctx,
-      T,
-      capacity,
-      {.STORAGE_BUFFER},
-    ) or_return
-    self.descriptor_sets[frame_idx] = create_descriptor_set(
-      gctx,
-      &self.set_layout,
-      {.STORAGE_BUFFER, buffer_info(&self.buffers[frame_idx])},
-    ) or_return
-  }
-  return .SUCCESS
-}
-
 per_frame_bindless_buffer_destroy :: proc(
   self: ^PerFrameBindlessBuffer($T, $N),
   device: vk.Device,
@@ -477,4 +403,117 @@ per_frame_bindless_buffer_destroy :: proc(
   for &b in self.buffers do mutable_buffer_destroy(device, &b)
   vk.DestroyDescriptorSetLayout(device, self.set_layout, nil)
   self.set_layout = 0
+}
+
+// Initialize ImmutableBindlessBuffer buffer + set_layout only, without allocating descriptor set.
+// Call immutable_bindless_buffer_realloc_descriptor to allocate the descriptor set separately.
+immutable_bindless_buffer_init :: proc(
+  self: ^ImmutableBindlessBuffer($T),
+  gctx: ^GPUContext,
+  capacity: int,
+  stages: vk.ShaderStageFlags,
+) -> (
+  ret: vk.Result,
+) {
+  self.buffer = malloc_buffer(gctx, T, capacity, {.STORAGE_BUFFER}) or_return
+  defer if ret != .SUCCESS do buffer_destroy(gctx.device, &self.buffer)
+  self.set_layout = create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, stages},
+  ) or_return
+  return .SUCCESS
+}
+
+// Initialize buffer + set_layout only, without allocating descriptor set.
+// Call bindless_buffer_realloc_descriptor to allocate the descriptor set separately.
+bindless_buffer_init :: proc(
+  self: ^BindlessBuffer($T),
+  gctx: ^GPUContext,
+  capacity: int,
+  stages: vk.ShaderStageFlags,
+) -> (
+  ret: vk.Result,
+) {
+  self.buffer = malloc_mutable_buffer(
+    gctx,
+    T,
+    capacity,
+    {.STORAGE_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS do mutable_buffer_destroy(gctx.device, &self.buffer)
+  self.set_layout = create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, stages},
+  ) or_return
+  return .SUCCESS
+}
+
+// Initialize per-frame buffer + set_layout only, without allocating descriptor sets.
+per_frame_bindless_buffer_init :: proc(
+  self: ^PerFrameBindlessBuffer($T, $N),
+  gctx: ^GPUContext,
+  capacity: int,
+  stages: vk.ShaderStageFlags,
+) -> (
+  ret: vk.Result,
+) {
+  self.set_layout = create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, stages},
+  ) or_return
+  defer if ret != .SUCCESS {
+    for frame_idx in 0 ..< N {
+      mutable_buffer_destroy(gctx.device, &self.buffers[frame_idx])
+    }
+  }
+  for frame_idx in 0 ..< N {
+    self.buffers[frame_idx] = create_mutable_buffer(
+      gctx,
+      T,
+      capacity,
+      {.STORAGE_BUFFER},
+    ) or_return
+  }
+  return .SUCCESS
+}
+
+// Re-allocate a descriptor set for an existing ImmutableBindlessBuffer after ResetDescriptorPool.
+immutable_bindless_buffer_realloc_descriptor :: proc(
+  self: ^ImmutableBindlessBuffer($T),
+  gctx: ^GPUContext,
+) -> vk.Result {
+  self.descriptor_set = create_descriptor_set(
+    gctx,
+    &self.set_layout,
+    {.STORAGE_BUFFER, buffer_info(&self.buffer)},
+  ) or_return
+  return .SUCCESS
+}
+
+// Re-allocate a descriptor set for an existing BindlessBuffer after ResetDescriptorPool.
+bindless_buffer_realloc_descriptor :: proc(
+  self: ^BindlessBuffer($T),
+  gctx: ^GPUContext,
+) -> vk.Result {
+  self.descriptor_set = create_descriptor_set(
+    gctx,
+    &self.set_layout,
+    {.STORAGE_BUFFER, buffer_info(&self.buffer)},
+  ) or_return
+  return .SUCCESS
+}
+
+// Re-allocate descriptor sets for an existing PerFrameBindlessBuffer after ResetDescriptorPool.
+per_frame_bindless_buffer_realloc_descriptors :: proc(
+  self: ^PerFrameBindlessBuffer($T, $N),
+  gctx: ^GPUContext,
+) -> vk.Result {
+  for frame_idx in 0 ..< N {
+    self.descriptor_sets[frame_idx] = create_descriptor_set(
+      gctx,
+      &self.set_layout,
+      {.STORAGE_BUFFER, buffer_info(&self.buffers[frame_idx])},
+    ) or_return
+  }
+  return .SUCCESS
 }

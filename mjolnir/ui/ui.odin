@@ -81,24 +81,26 @@ init_gpu_resources :: proc(
   log.info("UI system GPU resources initialized")
 }
 
-shutdown :: proc(
+shutdown_gpu_resources :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
 ) {
+  if self.default_texture != (gpu.Texture2DHandle{}) {
+    gpu.free_texture_2d(texture_manager, gctx, self.default_texture)
+    self.default_texture = {}
+  }
+  if self.font_atlas != (gpu.Texture2DHandle{}) {
+    gpu.free_texture_2d(texture_manager, gctx, self.font_atlas)
+    self.font_atlas = {}
+  }
+  log.info("UI system GPU resources released")
+}
+
+shutdown :: proc(self: ^System) {
   // Clean up all active widgets
   cont.destroy(self.widget_pool, cleanup_widget)
   delete(self.staging)
-
-  // Clean up white texture
-  if self.default_texture != (gpu.Texture2DHandle{}) {
-    gpu.free_texture_2d(texture_manager, gctx, self.default_texture)
-  }
-
-  // Clean up font atlas
-  if self.font_atlas != (gpu.Texture2DHandle{}) {
-    gpu.free_texture_2d(texture_manager, gctx, self.font_atlas)
-  }
 
   if self.font_context != nil {
     fs.Destroy(self.font_context)
