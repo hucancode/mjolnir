@@ -1630,13 +1630,10 @@ upload_camera_data :: proc(
   camera_data: rd.Camera
   camera_data.view = view
   camera_data.projection = projection
-  camera_data.viewport_params = [4]f32 {
-    f32(extent[0]),
-    f32(extent[1]),
-    near,
-    far,
-  }
-  camera_data.position = [4]f32{position[0], position[1], position[2], 1.0}
+  camera_data.viewport_extent = {f32(extent[0]), f32(extent[1])}
+  camera_data.near = near
+  camera_data.far = far
+  camera_data.position = [4]f32{position.x, position.y, position.z, 1.0}
   frustum := geom.make_frustum(camera_data.projection * camera_data.view)
   camera_data.frustum_planes = frustum.planes
   gpu.write(

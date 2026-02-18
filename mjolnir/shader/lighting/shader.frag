@@ -19,7 +19,9 @@ layout(location = 0) out vec4 outColor;
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec4 viewport_params;
+    vec2 viewport_extent;
+    float near;
+    float far;
     vec4 position;
     vec4 frustum_planes[6];
 };
@@ -252,7 +254,7 @@ void main() {
         return;
     }
     Camera camera = camera_buffer.cameras[scene_camera_idx];
-    vec2 uv = (gl_FragCoord.xy / camera.viewport_params.xy);
+    vec2 uv = (gl_FragCoord.xy / camera.viewport_extent);
     vec3 position = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz;
     vec3 normal = normalize(texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz * 2.0 - 1.0);
     vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rgb;

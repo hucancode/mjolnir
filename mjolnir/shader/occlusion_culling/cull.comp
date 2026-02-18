@@ -21,7 +21,9 @@ const uint INVALID_ID = 0xFFFFFFFFu;
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec4 viewport_params;
+    vec2 viewport_extent;
+    float near;
+    float far;
     vec4 position;
     vec4 frustum_planes[6];
 };
@@ -128,10 +130,7 @@ bool frustum_cull(vec3 center, vec3 extent, Camera camera) {
 }
 
 // 2D Polyhedral Bounds of a Clipped, Perspective-Projected 3D Sphere
-bool project_sphere(vec3 center, float radius, mat4 proj, vec4 viewport_params, out vec4 aabb) {
-    float near = viewport_params.z;
-    float far = viewport_params.w;
-
+bool project_sphere(vec3 center, float radius, mat4 proj, float near, float far, out vec4 aabb) {
     if (center.z - radius > -near) return false;
     if (center.z + radius < -far) return false;
 
@@ -170,7 +169,7 @@ bool occlusion_test(vec3 center, float radius, Camera camera) {
     vec3 view_center = view_center4.xyz;
 
     vec4 aabb;
-    if (!project_sphere(view_center, radius, camera.projection, camera.viewport_params, aabb)) {
+    if (!project_sphere(view_center, radius, camera.projection, camera.near, camera.far, aabb)) {
         return true;
     }
 

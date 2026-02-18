@@ -18,7 +18,9 @@ layout(location = 0) in vec3 a_position; // Vertex position for light volume geo
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec4 viewport_params;
+    vec2 viewport_extent;
+    float near;
+    float far;
     vec4 position;
     vec4 frustum_planes[6];
 };

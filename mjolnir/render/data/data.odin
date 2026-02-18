@@ -139,16 +139,16 @@ Light :: struct {
   radius:       f32, // range for point/spot lights
   angle_inner:  f32, // inner cone angle for spot lights
   angle_outer:  f32, // outer cone angle for spot lights
-  type:         LightType, // LightType
   cast_shadow:  b32, // 0 = no shadow, 1 = cast shadow
   shadow_index: u32, // index into shadow buffers
-  _padding:     [2]u32, // Maintain 16-byte alignment
 }
 
 Camera :: struct {
   view:            matrix[4, 4]f32,
   projection:      matrix[4, 4]f32,
-  viewport_params: [4]f32,
+  viewport_extent: [2]f32,
+  near:            f32,
+  far:             f32,
   position:        [4]f32,
   frustum_planes:  [6][4]f32,
 }

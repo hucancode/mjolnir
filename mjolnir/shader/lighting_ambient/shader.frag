@@ -22,7 +22,9 @@ const float AMBIENT_STRENGTH = 0.2;
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec4 viewport_params;
+    vec2 viewport_extent;
+    float near;
+    float far;
     vec4 position;
     vec4 frustum_planes[6];
 };
