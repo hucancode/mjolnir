@@ -764,6 +764,7 @@ render_camera_depth :: proc(
         .MATERIAL_RANDOM_COLOR,
         .MATERIAL_LINE_STRIP,
       },
+      self.general_pipeline_layout,
       self.camera_buffer.descriptor_sets[frame_index],
       self.texture_manager.descriptor_set,
       self.bone_buffer.descriptor_sets[frame_index],

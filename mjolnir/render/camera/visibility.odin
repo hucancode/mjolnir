@@ -58,7 +58,7 @@ System :: struct {
   depth_pipeline:                 vk.Pipeline, // uses general_pipeline_layout
   depth_reduce_layout:            vk.PipelineLayout,
   depth_reduce_pipeline:          vk.Pipeline,
-  depth_descriptor_layout:   vk.DescriptorSetLayout,
+  depth_descriptor_layout:        vk.DescriptorSetLayout,
   depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
   max_draws:                      u32,
   node_count:                     u32,
@@ -66,7 +66,6 @@ System :: struct {
   depth_height:                   u32,
   depth_bias:                     f32,
   stats_enabled:                  bool,
-  general_pipeline_layout:        vk.PipelineLayout,
 }
 
 init :: proc(
@@ -81,7 +80,6 @@ init :: proc(
   self.depth_width = depth_width
   self.depth_height = depth_height
   self.depth_bias = 0.0001
-  self.general_pipeline_layout = general_pipeline_layout
   self.depth_descriptor_layout = gpu.create_descriptor_set_layout(
   gctx,
   {.STORAGE_BUFFER, {.COMPUTE}}, // node data
@@ -124,7 +122,7 @@ init :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.cull_layout, nil)
     vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
   }
-  create_depth_pipeline(self, gctx) or_return
+  create_depth_pipeline(self, gctx, general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
   }
@@ -174,6 +172,7 @@ render_depth :: proc(
   frame_index: u32,
   include_flags: rd.NodeFlagSet,
   exclude_flags: rd.NodeFlagSet,
+  general_pipeline_layout: vk.PipelineLayout,
   cameras_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
@@ -210,14 +209,11 @@ render_depth :: proc(
     depth_texture.spec.extent,
     &depth_attachment,
   )
-  gpu.set_viewport_scissor(
-    command_buffer,
-    depth_texture.spec.extent,
-  )
+  gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.depth_pipeline,
-    self.general_pipeline_layout,
+    general_pipeline_layout,
     cameras_descriptor_set,
     textures_descriptor_set,
     bone_descriptor_set,
@@ -230,7 +226,7 @@ render_depth :: proc(
   camera_index := camera_index
   vk.CmdPushConstants(
     command_buffer,
-    self.general_pipeline_layout,
+    general_pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(u32),
@@ -447,6 +443,7 @@ create_compute_pipelines :: proc(
 create_depth_pipeline :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
+  general_pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
   vert_shader := gpu.create_shader_module(
     gctx.device,
@@ -472,9 +469,6 @@ create_depth_pipeline :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-  if self.general_pipeline_layout == 0 {
-    return .ERROR_INITIALIZATION_FAILED
-  }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     pNext               = &gpu.DEPTH_ONLY_RENDERING_INFO,
@@ -487,7 +481,7 @@ create_depth_pipeline :: proc(
     pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
     pDepthStencilState  = &gpu.READ_WRITE_DEPTH_STATE,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = self.general_pipeline_layout,
+    layout              = general_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
     gctx.device,
