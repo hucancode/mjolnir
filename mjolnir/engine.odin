@@ -22,6 +22,7 @@ import "render"
 import "render/camera"
 import rd "render/data"
 import "render/debug_ui"
+import oc "render/occlusion_culling"
 import "render/particles"
 import ui_module "ui"
 import "vendor:glfw"
@@ -538,9 +539,9 @@ update_visibility_node_count :: proc(
   render: ^render.Manager,
   world: ^world.World,
 ) {
-  n := min(u32(len(world.nodes.entries)), render.visibility.max_draws)
+  n := min(u32(len(world.nodes.entries)), render.occlusion_culling.max_draws)
   for ; n > 0; n -= 1 do if world.nodes.entries[n - 1].active do break
-  render.visibility.node_count = n
+  render.occlusion_culling.node_count = n
   render.shadow.node_count = n
 }
 
@@ -950,8 +951,8 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         &self.gctx,
         cam,
         &self.render.texture_manager,
-        &self.render.visibility.depth_descriptor_layout,
-        &self.render.visibility.depth_reduce_descriptor_layout,
+        &self.render.occlusion_culling.depth_descriptor_layout,
+        &self.render.occlusion_culling.depth_reduce_descriptor_layout,
         &self.render.node_data_buffer,
         &self.render.mesh_data_buffer,
         &self.render.camera_buffer,
@@ -1111,15 +1112,15 @@ populate_debug_ui :: proc(self: ^Engine) {
     )
     if main_camera := get_main_camera(self); main_camera != nil {
       main_camera := &self.render.cameras[self.world.main_camera.index]
-      main_stats := camera.stats(
-        &self.render.visibility,
+      main_stats := oc.stats(
+        &self.render.occlusion_culling,
         main_camera,
         self.world.main_camera.index,
         self.frame_index,
       )
       mu.label(
         &self.render.debug_ui.ctx,
-        fmt.tprintf("Total Objects: %d", self.render.visibility.node_count),
+        fmt.tprintf("Total Objects: %d", self.render.occlusion_culling.node_count),
       )
       mu.label(
         &self.render.debug_ui.ctx,
@@ -1194,8 +1195,8 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         &engine.gctx,
         camera_gpu,
         &engine.render.texture_manager,
-        &engine.render.visibility.depth_descriptor_layout,
-        &engine.render.visibility.depth_reduce_descriptor_layout,
+        &engine.render.occlusion_culling.depth_descriptor_layout,
+        &engine.render.occlusion_culling.depth_reduce_descriptor_layout,
         &engine.render.node_data_buffer,
         &engine.render.mesh_data_buffer,
         &engine.render.camera_buffer,

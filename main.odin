@@ -26,7 +26,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  engine.render.visibility.stats_enabled = false
+  engine.render.occlusion_culling.stats_enabled = false
   engine.debug_ui_enabled = true
   plain_material_handle := engine.world.builtin_materials[world.Color.WHITE]
   cube_mesh_handle := engine.world.builtin_meshes[world.Primitive.CUBE]
