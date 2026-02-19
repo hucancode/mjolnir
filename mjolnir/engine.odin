@@ -934,7 +934,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     )
     // Initialize GPU resources for new cameras
     if is_new_camera {
-      camera.init_gpu(
+      camera.init(
         &self.gctx,
         cam,
         &self.render.texture_manager,

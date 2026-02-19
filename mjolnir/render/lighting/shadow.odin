@@ -28,19 +28,6 @@ ShadowData :: struct {
   frustum_planes: [6][4]f32,
 }
 
-DirectionalLightGPU :: struct {
-  radius:          f32,
-  projection:      matrix[4, 4]f32,
-  view:            matrix[4, 4]f32,
-  position:        [4]f32,
-  direction:       [4]f32,
-  near_far:        [2]f32,
-  shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
-  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
-}
-
 VisibilityPushConstants :: struct {
   camera_index:  u32,
   node_count:    u32,
@@ -64,9 +51,9 @@ ShadowSystem :: struct {
     ShadowData,
     d.FRAMES_IN_FLIGHT,
   ),
-  spot_lights:                   [MAX_SHADOW_MAPS]SpotLightGPU,
-  directional_lights:            [MAX_SHADOW_MAPS]DirectionalLightGPU,
-  point_lights:                  [MAX_SHADOW_MAPS]PointLightGPU,
+  spot_lights:                   [MAX_SHADOW_MAPS]SpotLight,
+  directional_lights:            [MAX_SHADOW_MAPS]DirectionalLight,
+  point_lights:                  [MAX_SHADOW_MAPS]PointLight,
   slot_active:                   [MAX_SHADOW_MAPS]bool,
   slot_kind:                     [MAX_SHADOW_MAPS]d.LightType,
   light_to_slot:                 [d.MAX_LIGHTS]u32,

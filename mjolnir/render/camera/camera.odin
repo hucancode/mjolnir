@@ -90,7 +90,7 @@ DepthPyramid :: struct {
 
 // Initialize GPU resources for perspective camera
 // Takes only the specific resources needed, no dependency on render manager
-init_gpu :: proc(
+init :: proc(
   gctx: ^gpu.GPUContext,
   camera: ^Camera,
   texture_manager: ^gpu.TextureManager,
