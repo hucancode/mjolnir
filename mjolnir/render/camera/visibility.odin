@@ -55,7 +55,8 @@ CullingStats :: struct {
 System :: struct {
   cull_layout:                    vk.PipelineLayout,
   cull_pipeline:                  vk.Pipeline, // Generates 3 draw lists in one dispatch
-  depth_pipeline:                 vk.Pipeline, // uses general_pipeline_layout
+  depth_pipeline_layout:          vk.PipelineLayout,
+  depth_pipeline:                 vk.Pipeline,
   depth_reduce_layout:            vk.PipelineLayout,
   depth_reduce_pipeline:          vk.Pipeline,
   depth_descriptor_layout:        vk.DescriptorSetLayout,
@@ -72,7 +73,14 @@ init :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   depth_width, depth_height: u32,
-  general_pipeline_layout: vk.PipelineLayout,
+  camera_set_layout: vk.DescriptorSetLayout,
+  textures_set_layout: vk.DescriptorSetLayout,
+  bone_set_layout: vk.DescriptorSetLayout,
+  material_set_layout: vk.DescriptorSetLayout,
+  world_matrix_set_layout: vk.DescriptorSetLayout,
+  node_data_set_layout: vk.DescriptorSetLayout,
+  mesh_data_set_layout: vk.DescriptorSetLayout,
+  vertex_skinning_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -122,8 +130,20 @@ init :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.cull_layout, nil)
     vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
   }
-  create_depth_pipeline(self, gctx, general_pipeline_layout) or_return
+  create_depth_pipeline(
+    self,
+    gctx,
+    camera_set_layout,
+    textures_set_layout,
+    bone_set_layout,
+    material_set_layout,
+    world_matrix_set_layout,
+    node_data_set_layout,
+    mesh_data_set_layout,
+    vertex_skinning_set_layout,
+  ) or_return
   defer if ret != .SUCCESS {
+    vk.DestroyPipelineLayout(gctx.device, self.depth_pipeline_layout, nil)
     vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
   }
   return .SUCCESS
@@ -133,8 +153,20 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_reduce_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
+  self.cull_pipeline = 0
+  self.depth_reduce_pipeline = 0
+  self.depth_pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.cull_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.depth_reduce_layout, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.depth_pipeline_layout, nil)
+  self.cull_layout = 0
+  self.depth_reduce_layout = 0
+  self.depth_pipeline_layout = 0
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.depth_descriptor_layout,
+    nil,
+  )
   self.depth_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
@@ -172,7 +204,6 @@ render_depth :: proc(
   frame_index: u32,
   include_flags: rd.NodeFlagSet,
   exclude_flags: rd.NodeFlagSet,
-  general_pipeline_layout: vk.PipelineLayout,
   cameras_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
@@ -213,7 +244,7 @@ render_depth :: proc(
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.depth_pipeline,
-    general_pipeline_layout,
+    self.depth_pipeline_layout,
     cameras_descriptor_set,
     textures_descriptor_set,
     bone_descriptor_set,
@@ -226,7 +257,7 @@ render_depth :: proc(
   camera_index := camera_index
   vk.CmdPushConstants(
     command_buffer,
-    general_pipeline_layout,
+    self.depth_pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(u32),
@@ -443,8 +474,30 @@ create_compute_pipelines :: proc(
 create_depth_pipeline :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
-  general_pipeline_layout: vk.PipelineLayout,
+  camera_set_layout: vk.DescriptorSetLayout,
+  textures_set_layout: vk.DescriptorSetLayout,
+  bone_set_layout: vk.DescriptorSetLayout,
+  material_set_layout: vk.DescriptorSetLayout,
+  world_matrix_set_layout: vk.DescriptorSetLayout,
+  node_data_set_layout: vk.DescriptorSetLayout,
+  mesh_data_set_layout: vk.DescriptorSetLayout,
+  vertex_skinning_set_layout: vk.DescriptorSetLayout,
 ) -> vk.Result {
+  self.depth_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange {
+      stageFlags = {.VERTEX, .FRAGMENT},
+      size = size_of(u32),
+    },
+    camera_set_layout,
+    textures_set_layout,
+    bone_set_layout,
+    material_set_layout,
+    world_matrix_set_layout,
+    node_data_set_layout,
+    mesh_data_set_layout,
+    vertex_skinning_set_layout,
+  ) or_return
   vert_shader := gpu.create_shader_module(
     gctx.device,
     SHADER_DEPTH_VERT,
@@ -481,7 +534,7 @@ create_depth_pipeline :: proc(
     pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
     pDepthStencilState  = &gpu.READ_WRITE_DEPTH_STATE,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = general_pipeline_layout,
+    layout              = self.depth_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
     gctx.device,

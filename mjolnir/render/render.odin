@@ -75,8 +75,6 @@ Manager :: struct {
   meshes:                  map[u32]Mesh,
   visibility:              camera.System,
   shadow:                  light.ShadowSystem,
-  general_pipeline_layout: vk.PipelineLayout,
-  sprite_pipeline_layout:  vk.PipelineLayout,
   linear_repeat_sampler:   vk.Sampler,
   linear_clamp_sampler:    vk.Sampler,
   nearest_repeat_sampler:  vk.Sampler,
@@ -301,12 +299,12 @@ init :: proc(
     vk.DestroySampler(gctx.device, self.nearest_clamp_sampler, nil)
     self.nearest_clamp_sampler = 0
   }
-  self.general_pipeline_layout = gpu.create_pipeline_layout(
+  // Initialize all subsystems (pipeline creation only)
+  camera.init(
+    &self.visibility,
     gctx,
-    vk.PushConstantRange {
-      stageFlags = {.VERTEX, .FRAGMENT},
-      size = size_of(u32),
-    },
+    swapchain_extent.width,
+    swapchain_extent.height,
     self.camera_buffer.set_layout,
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
@@ -315,34 +313,6 @@ init :: proc(
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
-    self.general_pipeline_layout = 0
-  }
-  self.sprite_pipeline_layout = gpu.create_pipeline_layout(
-    gctx,
-    vk.PushConstantRange {
-      stageFlags = {.VERTEX, .FRAGMENT},
-      size = size_of(u32),
-    },
-    self.camera_buffer.set_layout,
-    self.texture_manager.set_layout,
-    self.world_matrix_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.sprite_buffer.set_layout,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
-    self.sprite_pipeline_layout = 0
-  }
-  // Initialize all subsystems (pipeline creation only)
-  camera.init(
-    &self.visibility,
-    gctx,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    self.general_pipeline_layout,
   ) or_return
   light.shadow_init(
     &self.shadow,
@@ -372,7 +342,14 @@ init :: proc(
     gctx,
     swapchain_extent.width,
     swapchain_extent.height,
-    self.general_pipeline_layout,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.world_matrix_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   particles.init(
     &self.particles,
@@ -388,8 +365,15 @@ init :: proc(
     gctx,
     swapchain_extent.width,
     swapchain_extent.height,
-    self.general_pipeline_layout,
-    self.sprite_pipeline_layout,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.world_matrix_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
+    self.sprite_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   post_process.init(
     &self.post_process,
@@ -652,10 +636,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   light.shadow_shutdown(&self.shadow, gctx)
   geometry.shutdown(&self.geometry, gctx)
   camera.shutdown(&self.visibility, gctx)
-  vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
-  self.general_pipeline_layout = 0
-  vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
-  self.sprite_pipeline_layout = 0
   vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
   self.linear_repeat_sampler = 0
   vk.DestroySampler(gctx.device, self.linear_clamp_sampler, nil)
@@ -764,7 +744,6 @@ render_camera_depth :: proc(
         .MATERIAL_RANDOM_COLOR,
         .MATERIAL_LINE_STRIP,
       },
-      self.general_pipeline_layout,
       self.camera_buffer.descriptor_sets[frame_index],
       self.texture_manager.descriptor_set,
       self.bone_buffer.descriptor_sets[frame_index],
@@ -794,7 +773,6 @@ record_geometry_pass :: proc(
     cam_index,
     frame_index,
     cmd,
-    self.general_pipeline_layout,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
@@ -947,8 +925,6 @@ record_transparency_pass :: proc(
     &self.transparency,
     cam,
     self.transparency.transparent_pipeline,
-    self.general_pipeline_layout,
-    self.sprite_pipeline_layout,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
@@ -1004,8 +980,6 @@ record_transparency_pass :: proc(
     &self.transparency,
     cam,
     self.transparency.wireframe_pipeline,
-    self.general_pipeline_layout,
-    self.sprite_pipeline_layout,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
@@ -1061,8 +1035,6 @@ record_transparency_pass :: proc(
     &self.transparency,
     cam,
     self.transparency.random_color_pipeline,
-    self.general_pipeline_layout,
-    self.sprite_pipeline_layout,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
@@ -1118,8 +1090,6 @@ record_transparency_pass :: proc(
     &self.transparency,
     cam,
     self.transparency.line_strip_pipeline,
-    self.general_pipeline_layout,
-    self.sprite_pipeline_layout,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
@@ -1170,8 +1140,6 @@ record_transparency_pass :: proc(
     &self.transparency,
     cam,
     self.transparency.sprite_pipeline,
-    self.general_pipeline_layout,
-    self.sprite_pipeline_layout,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],

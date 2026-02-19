@@ -21,6 +21,8 @@ SHADER_LINE_STRIP_VERT := #load("../../shader/line_strip/vert.spv")
 SHADER_LINE_STRIP_FRAG := #load("../../shader/line_strip/frag.spv")
 
 Renderer :: struct {
+  general_pipeline_layout: vk.PipelineLayout,
+  sprite_pipeline_layout:  vk.PipelineLayout,
   line_strip_pipeline:   vk.Pipeline,
   random_color_pipeline: vk.Pipeline,
   transparent_pipeline:  vk.Pipeline,
@@ -36,32 +38,74 @@ init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   width, height: u32,
-  general_pipeline_layout: vk.PipelineLayout,
-  sprite_pipeline_layout: vk.PipelineLayout,
+  camera_set_layout: vk.DescriptorSetLayout,
+  textures_set_layout: vk.DescriptorSetLayout,
+  bone_set_layout: vk.DescriptorSetLayout,
+  material_set_layout: vk.DescriptorSetLayout,
+  world_matrix_set_layout: vk.DescriptorSetLayout,
+  node_data_set_layout: vk.DescriptorSetLayout,
+  mesh_data_set_layout: vk.DescriptorSetLayout,
+  sprite_set_layout: vk.DescriptorSetLayout,
+  vertex_skinning_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
   log.info("Initializing transparent renderer")
-  if general_pipeline_layout == 0 {
+  self.general_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange {
+      stageFlags = {.VERTEX, .FRAGMENT},
+      size = size_of(u32),
+    },
+    camera_set_layout,
+    textures_set_layout,
+    bone_set_layout,
+    material_set_layout,
+    world_matrix_set_layout,
+    node_data_set_layout,
+    mesh_data_set_layout,
+    vertex_skinning_set_layout,
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
+    self.general_pipeline_layout = 0
+  }
+  self.sprite_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange {
+      stageFlags = {.VERTEX, .FRAGMENT},
+      size = size_of(u32),
+    },
+    camera_set_layout,
+    textures_set_layout,
+    world_matrix_set_layout,
+    node_data_set_layout,
+    sprite_set_layout,
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
+    self.sprite_pipeline_layout = 0
+  }
+  if self.general_pipeline_layout == 0 || self.sprite_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-  create_transparent_pipelines(gctx, self, general_pipeline_layout) or_return
+  create_transparent_pipelines(gctx, self, self.general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.transparent_pipeline, nil)
   }
-  create_wireframe_pipelines(gctx, self, general_pipeline_layout) or_return
+  create_wireframe_pipelines(gctx, self, self.general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.wireframe_pipeline, nil)
   }
-  create_random_color_pipeline(gctx, self, general_pipeline_layout) or_return
+  create_random_color_pipeline(gctx, self, self.general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.random_color_pipeline, nil)
   }
-  create_line_strip_pipeline(gctx, self, general_pipeline_layout) or_return
+  create_line_strip_pipeline(gctx, self, self.general_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.line_strip_pipeline, nil)
   }
-  create_sprite_pipeline(gctx, self, sprite_pipeline_layout) or_return
+  create_sprite_pipeline(gctx, self, self.sprite_pipeline_layout) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.sprite_pipeline, nil)
   }
@@ -360,6 +404,10 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   self.line_strip_pipeline = 0
   vk.DestroyPipeline(gctx.device, self.sprite_pipeline, nil)
   self.sprite_pipeline = 0
+  vk.DestroyPipelineLayout(gctx.device, self.general_pipeline_layout, nil)
+  self.general_pipeline_layout = 0
+  vk.DestroyPipelineLayout(gctx.device, self.sprite_pipeline_layout, nil)
+  self.sprite_pipeline_layout = 0
 }
 
 begin_pass :: proc(
@@ -401,8 +449,6 @@ render :: proc(
   self: ^Renderer,
   camera: ^camera.Camera,
   pipeline: vk.Pipeline,
-  general_pipeline_layout: vk.PipelineLayout,
-  sprite_pipeline_layout: vk.PipelineLayout,
   cameras_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
@@ -426,7 +472,7 @@ render :: proc(
   }
   // Determine which pipeline layout to use
   pipeline_layout :=
-    pipeline == self.sprite_pipeline ? sprite_pipeline_layout : general_pipeline_layout
+    pipeline == self.sprite_pipeline ? self.sprite_pipeline_layout : self.general_pipeline_layout
 
   if pipeline == self.sprite_pipeline {
     // Sprite pipeline: 5 descriptor sets (0, 1, 2, 3, 4)

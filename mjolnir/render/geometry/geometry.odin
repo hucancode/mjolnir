@@ -17,19 +17,46 @@ PushConstant :: struct {
 }
 
 Renderer :: struct {
-  pipeline: vk.Pipeline,
+  pipeline_layout: vk.PipelineLayout,
+  pipeline:         vk.Pipeline,
 }
 
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   width, height: u32,
-  general_pipeline_layout: vk.PipelineLayout,
+  camera_set_layout: vk.DescriptorSetLayout,
+  textures_set_layout: vk.DescriptorSetLayout,
+  bone_set_layout: vk.DescriptorSetLayout,
+  material_set_layout: vk.DescriptorSetLayout,
+  world_matrix_set_layout: vk.DescriptorSetLayout,
+  node_data_set_layout: vk.DescriptorSetLayout,
+  mesh_data_set_layout: vk.DescriptorSetLayout,
+  vertex_skinning_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
   depth_format: vk.Format = .D32_SFLOAT
-  if general_pipeline_layout == 0 {
+  self.pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange {
+      stageFlags = {.VERTEX, .FRAGMENT},
+      size = size_of(u32),
+    },
+    camera_set_layout,
+    textures_set_layout,
+    bone_set_layout,
+    material_set_layout,
+    world_matrix_set_layout,
+    node_data_set_layout,
+    mesh_data_set_layout,
+    vertex_skinning_set_layout,
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+    self.pipeline_layout = 0
+  }
+  if self.pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
   log.info("About to build G-buffer pipelines...")
@@ -98,7 +125,7 @@ init :: proc(
     pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
     pColorBlendState    = &color_blending,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = general_pipeline_layout,
+    layout              = self.pipeline_layout,
     pNext               = &rendering_info,
   }
   vk.CreateGraphicsPipelines(
@@ -323,7 +350,6 @@ render :: proc(
   camera_handle: u32,
   frame_index: u32,
   command_buffer: vk.CommandBuffer,
-  general_pipeline_layout: vk.PipelineLayout,
   cameras_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
@@ -343,7 +369,7 @@ render :: proc(
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.pipeline,
-    general_pipeline_layout,
+    self.pipeline_layout,
     cameras_descriptor_set,
     textures_descriptor_set,
     bone_descriptor_set,
@@ -358,7 +384,7 @@ render :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    general_pipeline_layout,
+    self.pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
@@ -379,4 +405,6 @@ render :: proc(
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   self.pipeline = 0
+  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+  self.pipeline_layout = 0
 }
