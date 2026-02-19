@@ -780,14 +780,15 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_sprites, handle)
     }
     sprite := cont.get(self.world.sprites, handle) or_continue
+    sprite_anim, has_anim := sprite.animation.?
     render.upload_sprite_data(
       &self.render,
       handle.index,
       &render.Sprite {
-        texture_index = sprite.texture_index,
+        texture_index = sprite.texture.index,
         frame_columns = sprite.frame_columns,
         frame_rows = sprite.frame_rows,
-        frame_index = sprite.frame_index,
+        frame_index = sprite_anim.current_frame if has_anim else 0,
       },
     )
   }

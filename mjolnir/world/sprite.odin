@@ -5,14 +5,10 @@ import "core:log"
 import "core:math"
 import "core:slice"
 
-SpriteData :: struct {
-  texture_index: u32,
+Sprite :: struct {
+  texture: Image2DHandle,
   frame_columns: u32, // Number of columns in sprite sheet
   frame_rows:    u32, // Number of rows in sprite sheet
-  frame_index:   u32, // Current frame (0-based)
-}
-Sprite :: struct {
-  using data: SpriteData,
   animation:  Maybe(SpriteAnimation),
 }
 
@@ -21,18 +17,10 @@ sprite_init :: proc(
   texture: Image2DHandle,
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
-  frame_index: u32 = 0,
 ) {
-  self.texture_index = texture.index
+  self.texture = texture
   self.frame_columns = frame_columns
   self.frame_rows = frame_rows
-  self.frame_index = frame_index
-}
-
-sprite_update_gpu_data :: proc(sprite: ^Sprite) {
-  if anim, has_anim := &sprite.animation.?; has_anim {
-    sprite.frame_index = anim.current_frame
-  }
 }
 
 create_sprite :: proc(
@@ -40,7 +28,6 @@ create_sprite :: proc(
   texture: Image2DHandle,
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
-  frame_index: u32 = 0,
   animation: Maybe(SpriteAnimation) = nil,
 ) -> (
   handle: SpriteHandle,
@@ -57,31 +44,14 @@ create_sprite :: proc(
     cont.free(&world.sprites, handle)
     return {}, false
   }
-  sprite_init(sprite, texture, frame_columns, frame_rows, frame_index)
+  sprite_init(sprite, texture, frame_columns, frame_rows)
   sprite.animation = animation
-  sprite_update_gpu_data(sprite)
   stage_sprite_data(&world.staging, handle)
-  if _, has_anim := animation.?; has_anim {
-    register_animatable_sprite(world, handle)
-  }
   return handle, true
 }
 
 destroy_sprite :: proc(world: ^World, handle: SpriteHandle) {
-  unregister_animatable_sprite(world, handle)
   cont.free(&world.sprites, handle)
-}
-
-register_animatable_sprite :: proc(world: ^World, handle: SpriteHandle) {
-  if slice.contains(world.animatable_sprites[:], handle) do return
-  append(&world.animatable_sprites, handle)
-}
-
-unregister_animatable_sprite :: proc(world: ^World, handle: SpriteHandle) {
-  if i, found := slice.linear_search(world.animatable_sprites[:], handle);
-     found {
-    unordered_remove(&world.animatable_sprites, i)
-  }
 }
 
 SpriteAnimationState :: enum {

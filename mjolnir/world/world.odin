@@ -160,7 +160,6 @@ World :: struct {
   sprites:                 cont.Pool(Sprite),
   animation_clips:         cont.Pool(anim.Clip),
   // Active resource tracking
-  animatable_sprites:      [dynamic]SpriteHandle,
   active_light_nodes:      [dynamic]NodeHandle,
   // Builtin resources
   builtin_materials:       [len(Color)]MaterialHandle,
@@ -396,9 +395,6 @@ shutdown :: proc(world: ^World) {
   }
   delete(world.animation_clips.entries)
   delete(world.animation_clips.free_indices)
-
-  // Clean up active resource tracking
-  delete(world.animatable_sprites)
 
   // Clean up nodes
   for &entry, i in world.nodes.entries {

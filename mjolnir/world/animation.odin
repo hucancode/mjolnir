@@ -137,14 +137,12 @@ update_node_animations :: proc(world: ^World, delta_time: f32) {
 // Update all sprite animations
 update_sprite_animations :: proc(world: ^World, delta_time: f32) {
   if delta_time <= 0 do return
-
-  for handle in world.animatable_sprites {
-    sprite := cont.get(world.sprites, handle) or_continue
+  for &entry, i in world.sprites.entries {
+    sprite := &entry.item
     anim_inst, has_anim := &sprite.animation.?
     if !has_anim do continue
     sprite_animation_update(anim_inst, delta_time)
-    sprite_update_gpu_data(sprite)
-    stage_sprite_data(&world.staging, handle)
+    stage_sprite_data(&world.staging, {index = u32(i), generation = entry.generation})
   }
 }
 

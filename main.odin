@@ -683,7 +683,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         warrior_sprite_texture,
         frame_columns = 6, // 6 columns in sprite sheet
         frame_rows = 17, // 17 rows in sprite sheet
-        frame_index = 0, // Starting frame (animation will override this)
         animation = warrior_animation,
       )
       if sprite_ok {
