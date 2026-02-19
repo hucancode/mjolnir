@@ -44,7 +44,6 @@ VisibilityPushConstants :: struct {
 
 DepthReducePushConstants :: struct {
   current_mip: u32,
-  _padding:    [3]u32,
 }
 
 CullingStats :: struct {
@@ -59,7 +58,7 @@ System :: struct {
   depth_pipeline:                 vk.Pipeline, // uses general_pipeline_layout
   depth_reduce_layout:            vk.PipelineLayout,
   depth_reduce_pipeline:          vk.Pipeline,
-  normal_cam_descriptor_layout:   vk.DescriptorSetLayout,
+  depth_descriptor_layout:   vk.DescriptorSetLayout,
   depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
   max_draws:                      u32,
   node_count:                     u32,
@@ -83,7 +82,7 @@ init :: proc(
   self.depth_height = depth_height
   self.depth_bias = 0.0001
   self.general_pipeline_layout = general_pipeline_layout
-  self.normal_cam_descriptor_layout = gpu.create_descriptor_set_layout(
+  self.depth_descriptor_layout = gpu.create_descriptor_set_layout(
   gctx,
   {.STORAGE_BUFFER, {.COMPUTE}}, // node data
   {.STORAGE_BUFFER, {.COMPUTE}}, // mesh data
@@ -100,10 +99,10 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
       gctx.device,
-      self.normal_cam_descriptor_layout,
+      self.depth_descriptor_layout,
       nil,
     )
-    self.normal_cam_descriptor_layout = 0
+    self.depth_descriptor_layout = 0
   }
   self.depth_reduce_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
@@ -138,7 +137,7 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.cull_layout, nil)
   vk.DestroyPipelineLayout(gctx.device, self.depth_reduce_layout, nil)
-  self.normal_cam_descriptor_layout = 0
+  self.depth_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
     self.depth_reduce_descriptor_layout,
@@ -413,7 +412,7 @@ create_compute_pipelines :: proc(
       stageFlags = {.COMPUTE},
       size = size_of(VisibilityPushConstants),
     },
-    self.normal_cam_descriptor_layout,
+    self.depth_descriptor_layout,
   ) or_return
   self.depth_reduce_layout = gpu.create_pipeline_layout(
     gctx,
