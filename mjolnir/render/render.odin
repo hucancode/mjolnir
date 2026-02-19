@@ -548,29 +548,25 @@ record_compute_commands :: proc(
   next_frame_index := alg.next(frame_index, rd.FRAMES_IN_FLIGHT)
   for cam_index, &cam in self.cameras {
     // Only build pyramid if enabled for this camera
-    if cam.enable_depth_pyramid {
-      oc.build_pyramid(
-        &self.occlusion_culling,
-        gctx,
-        cmd,
-        &cam,
-        u32(cam_index),
-        frame_index,
-      ) // Build pyramid[N]
-    }
-    // Only perform culling if enabled for this camera
-    if cam.enable_culling {
-      oc.perform_culling(
-        &self.occlusion_culling,
-        gctx,
-        cmd,
-        &cam,
-        u32(cam_index),
-        next_frame_index,
-        {.VISIBLE},
-        {},
-      ) // Write draw_list[N+1]
-    }
+    oc.build_pyramid(
+      &self.occlusion_culling,
+      gctx,
+      cmd,
+      &cam,
+      u32(cam_index),
+      frame_index,
+    ) // Build pyramid[N]
+    oc.perform_culling(
+      &self.occlusion_culling,
+      gctx,
+      cmd,
+      &cam,
+      u32(cam_index),
+      next_frame_index,
+      {.VISIBLE},
+      {},
+    ) // Write draw_list[N+1]
+
   }
   particles.simulate(
     &self.particles,

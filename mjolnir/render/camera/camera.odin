@@ -33,31 +33,29 @@ PassTypeSet :: bit_set[PassType;u32]
 
 Camera :: struct {
   // Render pass configuration
-  enabled_passes:                PassTypeSet,
+  enabled_passes:               PassTypeSet,
   // Visibility culling control flags
-  enable_culling:                bool, // If false, skip culling compute pass
-  enable_depth_pyramid:          bool, // If false, skip depth pyramid generation
   // GPU resources - Render target attachments (G-buffer textures, depth, final image)
-  attachments:                   [AttachmentType][FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
   // Indirect draw buffers (double-buffered for async compute)
   // Frame N compute writes to buffers[N], Frame N graphics reads from buffers[N-1]
-  opaque_draw_count:             [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  opaque_draw_commands:          [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  opaque_draw_count:            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  opaque_draw_commands:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  transparent_draw_count:        [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  transparent_draw_commands:     [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  transparent_draw_count:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  transparent_draw_commands:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  sprite_draw_count:             [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  sprite_draw_commands:          [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  sprite_draw_count:            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  sprite_draw_commands:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
   // Depth pyramid for hierarchical Z culling
-  depth_pyramid:                 [FRAMES_IN_FLIGHT]DepthPyramid,
+  depth_pyramid:                [FRAMES_IN_FLIGHT]DepthPyramid,
   // Descriptor sets for visibility culling compute shaders
-  descriptor_set:                [FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  depth_reduce_descriptor_sets:  [FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
+  descriptor_set:               [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  depth_reduce_descriptor_sets: [FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
 }
 
 // Get camera viewport extent from its depth attachment
@@ -81,12 +79,12 @@ get_extent :: proc(
 
 // DepthPyramid - Hierarchical depth buffer for occlusion culling (GPU resource)
 DepthPyramid :: struct {
-  texture:    gpu.Texture2DHandle,
-  views:      [MAX_DEPTH_MIPS_LEVEL]vk.ImageView,
-  full_view:  vk.ImageView,
-  sampler:    vk.Sampler,
-  mip_levels: u32,
-  using extent:     vk.Extent2D,
+  texture:      gpu.Texture2DHandle,
+  views:        [MAX_DEPTH_MIPS_LEVEL]vk.ImageView,
+  full_view:    vk.ImageView,
+  sampler:      vk.Sampler,
+  mip_levels:   u32,
+  using extent: vk.Extent2D,
 }
 
 
@@ -106,7 +104,6 @@ init_gpu :: proc(
     .PARTICLES,
     .POST_PROCESS,
   },
-  enable_depth_pyramid: bool = true,
   max_draws: u32,
 ) -> vk.Result {
   // Determine which attachments are needed based on enabled passes
@@ -235,16 +232,14 @@ init_gpu :: proc(
   }
 
   // Create depth pyramids for hierarchical Z culling
-  if enable_depth_pyramid {
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
-      create_depth_pyramid(
-        gctx,
-        camera,
-        texture_manager,
-        extent,
-        u32(frame),
-      ) or_return
-    }
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    create_depth_pyramid(
+      gctx,
+      camera,
+      texture_manager,
+      extent,
+      u32(frame),
+    ) or_return
   }
 
   return .SUCCESS
@@ -418,7 +413,6 @@ resize :: proc(
   extent: vk.Extent2D,
   color_format, depth_format: vk.Format,
   enabled_passes: PassTypeSet,
-  enable_depth_pyramid: bool,
 ) -> vk.Result {
   // Destroy old attachments
   for attachment_type in AttachmentType {
@@ -529,16 +523,14 @@ resize :: proc(
   }
 
   // Recreate depth pyramids
-  if enable_depth_pyramid {
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
-      create_depth_pyramid(
-        gctx,
-        camera,
-        texture_manager,
-        extent,
-        u32(frame),
-      ) or_return
-    }
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    create_depth_pyramid(
+      gctx,
+      camera,
+      texture_manager,
+      extent,
+      u32(frame),
+    ) or_return
   }
 
   log.infof("Camera resized to %dx%d", extent.width, extent.height)

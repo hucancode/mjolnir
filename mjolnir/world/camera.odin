@@ -43,8 +43,6 @@ Camera :: struct {
   projection:              CameraProjection,
   extent:                  [2]u32, // width, height
   enabled_passes:          PassTypeSet,
-  enable_culling:          bool,
-  enable_depth_pyramid:    bool,
   draw_list_source_handle: CameraHandle,
 }
 
@@ -121,10 +119,7 @@ camera_look_at :: proc(self: ^Camera, from, to: [3]f32) {
   self.rotation = linalg.to_quaternion(rotation_matrix)
 }
 
-main_camera_look_at :: proc(
-  world: ^World,
-  from, to: [3]f32,
-) {
+main_camera_look_at :: proc(world: ^World, from, to: [3]f32) {
   camera, ok := cont.get(world.cameras, world.main_camera)
   if !ok do return
   camera_look_at(camera, from, to)
@@ -199,8 +194,6 @@ camera_init :: proc(
   camera_look_at(camera, camera_position, camera_target)
   camera.extent = {width, height}
   camera.enabled_passes = enabled_passes
-  camera.enable_culling = true
-  camera.enable_depth_pyramid = true
   camera.draw_list_source_handle = {}
   return true
 }
@@ -227,8 +220,6 @@ camera_init_orthographic :: proc(
   camera_look_at(camera, camera_position, camera_target)
   camera.extent = {width, height}
   camera.enabled_passes = enabled_passes
-  camera.enable_culling = true
-  camera.enable_depth_pyramid = true
   camera.draw_list_source_handle = {}
   return true
 }
@@ -240,19 +231,4 @@ camera_resize :: proc(camera: ^Camera, width, height: u32) -> bool {
     perspective.aspect_ratio = f32(width) / f32(height)
   }
   return true
-}
-
-camera_use_external_draw_list_handle :: proc(
-  target_camera: ^Camera,
-  source_camera_handle: CameraHandle,
-) {
-  target_camera.draw_list_source_handle = source_camera_handle
-  target_camera.enable_culling = false
-  target_camera.enable_depth_pyramid = false
-}
-
-camera_use_own_draw_list :: proc(target_camera: ^Camera) {
-  target_camera.draw_list_source_handle = {}
-  target_camera.enable_culling = true
-  target_camera.enable_depth_pyramid = true
 }

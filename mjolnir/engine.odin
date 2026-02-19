@@ -917,8 +917,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     cam := &self.render.cameras[handle.index]
     cam.enabled_passes =
     transmute(camera.PassTypeSet)world_camera.enabled_passes
-    cam.enable_culling = world_camera.enable_culling
-    cam.enable_depth_pyramid = world_camera.enable_depth_pyramid
     // Upload camera transform data to GPU buffer
     view_matrix := world.camera_view_matrix(world_camera)
     projection_matrix := world.camera_projection_matrix(world_camera)
@@ -944,7 +942,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         self.swapchain.format.format,
         vk.Format.D32_SFLOAT,
         cam.enabled_passes,
-        cam.enable_depth_pyramid,
         rd.MAX_NODES_IN_SCENE,
       ) or_return
       camera.allocate_descriptors(
@@ -1120,7 +1117,10 @@ populate_debug_ui :: proc(self: ^Engine) {
       )
       mu.label(
         &self.render.debug_ui.ctx,
-        fmt.tprintf("Total Objects: %d", self.render.occlusion_culling.node_count),
+        fmt.tprintf(
+          "Total Objects: %d",
+          self.render.occlusion_culling.node_count,
+        ),
       )
       mu.label(
         &self.render.debug_ui.ctx,
@@ -1189,7 +1189,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         engine.swapchain.format.format,
         vk.Format.D32_SFLOAT,
         transmute(camera.PassTypeSet)world_camera.enabled_passes,
-        world_camera.enable_depth_pyramid,
       ) or_return
       camera.allocate_descriptors(
         &engine.gctx,
