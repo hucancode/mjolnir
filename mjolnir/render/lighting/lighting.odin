@@ -58,6 +58,7 @@ begin_ambient_pass :: proc(
   camera: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
+  cameras_descriptor_set: vk.DescriptorSet,
   frame_index: u32,
 ) {
   color_texture := gpu.get_texture_2d(
@@ -79,7 +80,7 @@ begin_ambient_pass :: proc(
     command_buffer,
     self.ambient_pipeline,
     self.ambient_pipeline_layout,
-    camera.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame camera buffer)
+    cameras_descriptor_set, // set = 0 (per-frame camera buffer)
     texture_manager.descriptor_set, // set = 1 (bindless textures)
   )
 }
@@ -448,6 +449,7 @@ begin_pass :: proc(
   camera: ^camera.Camera,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
+  cameras_descriptor_set: vk.DescriptorSet,
   lights_descriptor_set: vk.DescriptorSet,
   shadow_data_descriptor_set: vk.DescriptorSet,
   frame_index: u32,
@@ -474,7 +476,7 @@ begin_pass :: proc(
     command_buffer,
     self.lighting_pipeline,
     self.lighting_pipeline_layout,
-    camera.camera_buffer_descriptor_sets[frame_index], // set = 0 (per-frame cameras)
+    cameras_descriptor_set, // set = 0 (per-frame cameras)
     texture_manager.descriptor_set, // set = 1 (textures/samplers)
     lights_descriptor_set, // set = 2 (lights)
     shadow_data_descriptor_set, // set = 3 (per-frame shadow data)

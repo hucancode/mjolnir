@@ -39,8 +39,6 @@ Camera :: struct {
   enable_depth_pyramid:          bool, // If false, skip depth pyramid generation
   // GPU resources - Render target attachments (G-buffer textures, depth, final image)
   attachments:                   [AttachmentType][FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  // Per-frame camera buffer descriptor sets used by graphics/compute passes
-  camera_buffer_descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
   // Indirect draw buffers (double-buffered for async compute)
   // Frame N compute writes to buffers[N], Frame N graphics reads from buffers[N-1]
   opaque_draw_count:             [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
@@ -319,8 +317,6 @@ allocate_descriptors :: proc(
   camera_buffer: ^gpu.PerFrameBindlessBuffer(rd.Camera, FRAMES_IN_FLIGHT),
 ) -> vk.Result {
   for frame_index in 0 ..< FRAMES_IN_FLIGHT {
-    camera.camera_buffer_descriptor_sets[frame_index] =
-      camera_buffer.descriptor_sets[frame_index]
     prev_frame_index := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
     pyramid := &camera.depth_pyramid[frame_index]
     prev_pyramid := &camera.depth_pyramid[prev_frame_index]

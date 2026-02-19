@@ -403,6 +403,7 @@ render :: proc(
   pipeline: vk.Pipeline,
   general_pipeline_layout: vk.PipelineLayout,
   sprite_pipeline_layout: vk.PipelineLayout,
+  cameras_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
   material_descriptor_set: vk.DescriptorSet,
@@ -433,7 +434,7 @@ render :: proc(
       command_buffer,
       pipeline,
       pipeline_layout,
-      camera.camera_buffer_descriptor_sets[frame_index], // Set 0
+      cameras_descriptor_set, // Set 0
       textures_descriptor_set, // Set 1
       world_matrix_descriptor_set, // Set 2
       node_data_descriptor_set, // Set 3
@@ -445,7 +446,7 @@ render :: proc(
       command_buffer,
       pipeline,
       pipeline_layout,
-      camera.camera_buffer_descriptor_sets[frame_index], // Set 0
+      cameras_descriptor_set, // Set 0
       textures_descriptor_set, // Set 1
       bone_descriptor_set, // Set 2
       material_descriptor_set, // Set 3

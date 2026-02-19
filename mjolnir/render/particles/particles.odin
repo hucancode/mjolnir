@@ -667,6 +667,7 @@ render :: proc(
   camera: ^camera.Camera,
   camera_index: u32,
   frame_index: u32,
+  cameras_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
 ) {
   // Use indirect draw - GPU handles the count
@@ -674,7 +675,7 @@ render :: proc(
     command_buffer,
     self.render_pipeline,
     self.render_pipeline_layout,
-    camera.camera_buffer_descriptor_sets[frame_index],
+    cameras_descriptor_set,
     textures_descriptor_set,
   )
   camera_idx := camera_index
