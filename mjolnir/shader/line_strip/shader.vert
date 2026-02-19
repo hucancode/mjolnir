@@ -26,18 +26,15 @@ layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 
-layout(set = 4, binding = 0) readonly buffer WorldMatrices {
-    mat4 world_matrices[];
-};
-
 struct NodeData {
+    mat4 world_matrix;
     uint material_id;
     uint mesh_id;
     uint attachment_data_index;
     uint flags;
 };
 
-layout(set = 5, binding = 0) readonly buffer NodeBuffer {
+layout(set = 4, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
@@ -54,7 +51,7 @@ struct MeshData {
     uint _padding;
 };
 
-layout(set = 6, binding = 0) readonly buffer MeshBuffer {
+layout(set = 5, binding = 0) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
@@ -63,7 +60,7 @@ struct VertexSkinningData {
     vec4 weights;
 };
 
-layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
+layout(set = 6, binding = 0) readonly buffer VertexSkinningBuffer {
     VertexSkinningData vertex_skinning[];
 };
 
@@ -74,7 +71,7 @@ layout(push_constant) uniform PushConstants {
 void main() {
     Camera camera = cameras[camera_index];
     uint node_index = uint(gl_InstanceIndex);
-    mat4 world = world_matrices[node_index];
+    mat4 world = nodes[node_index].world_matrix;
     NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
 

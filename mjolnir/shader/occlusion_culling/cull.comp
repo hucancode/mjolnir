@@ -29,6 +29,7 @@ struct Camera {
 };
 
 struct NodeData {
+    mat4 world_matrix;
     uint material_id;
     uint mesh_id;
     uint attachment_data_index;
@@ -74,42 +75,38 @@ layout(set = 0, binding = 1) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
-layout(set = 0, binding = 2) readonly buffer WorldBuffer {
-    mat4 world_matrices[];
-};
-
-layout(set = 0, binding = 3) readonly buffer CameraBuffer {
+layout(set = 0, binding = 2) readonly buffer CameraBuffer {
     Camera cameras[];
 };
 
 // Late pass (opaque) outputs
-layout(set = 0, binding = 4) buffer LateDrawCountBuffer {
+layout(set = 0, binding = 3) buffer LateDrawCountBuffer {
     uint opaque_draw_count;
 };
 
-layout(set = 0, binding = 5) buffer OpaqueDrawCommandBuffer {
+layout(set = 0, binding = 4) buffer OpaqueDrawCommandBuffer {
     DrawCommand opaque_commands[];
 };
 
 // Transparent pass outputs
-layout(set = 0, binding = 6) buffer TransparentDrawCountBuffer {
+layout(set = 0, binding = 5) buffer TransparentDrawCountBuffer {
     uint transparent_draw_count;
 };
 
-layout(set = 0, binding = 7) buffer TransparentDrawCommandBuffer {
+layout(set = 0, binding = 6) buffer TransparentDrawCommandBuffer {
     DrawCommand transparent_commands[];
 };
 
 // Sprite pass outputs
-layout(set = 0, binding = 8) buffer SpriteDrawCountBuffer {
+layout(set = 0, binding = 7) buffer SpriteDrawCountBuffer {
     uint sprite_draw_count;
 };
 
-layout(set = 0, binding = 9) buffer SpriteDrawCommandBuffer {
+layout(set = 0, binding = 8) buffer SpriteDrawCommandBuffer {
     DrawCommand sprite_commands[];
 };
 
-layout(set = 0, binding = 10) uniform sampler2D depth_pyramid;
+layout(set = 0, binding = 9) uniform sampler2D depth_pyramid;
 
 // return true if aabb is visible, false if outside frustum
 bool frustum_cull(vec3 center, vec3 extent, Camera camera) {
@@ -207,7 +204,7 @@ void main() {
 
     MeshData mesh = meshes[node.mesh_id];
     Camera camera = cameras[params.camera_index];
-    mat4 world = world_matrices[node_id];
+    mat4 world = nodes[node_id].world_matrix;
 
     // Transform AABB to world space
     vec3 local_min = mesh.aabb_min;

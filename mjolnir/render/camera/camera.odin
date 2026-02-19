@@ -313,7 +313,6 @@ allocate_descriptors :: proc(
   depth_reduce_descriptor_layout: ^vk.DescriptorSetLayout,
   node_data_buffer: ^gpu.BindlessBuffer(rd.Node),
   mesh_data_buffer: ^gpu.BindlessBuffer(rd.Mesh),
-  world_matrix_buffer: ^gpu.BindlessBuffer(matrix[4, 4]f32),
   camera_buffer: ^gpu.PerFrameBindlessBuffer(rd.Camera, FRAMES_IN_FLIGHT),
 ) -> vk.Result {
   for frame_index in 0 ..< FRAMES_IN_FLIGHT {
@@ -344,7 +343,6 @@ allocate_descriptors :: proc(
       normal_descriptor_layout,
       {.STORAGE_BUFFER, gpu.buffer_info(&node_data_buffer.buffer)},
       {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)},
-      {.STORAGE_BUFFER, gpu.buffer_info(&world_matrix_buffer.buffer)},
       {.STORAGE_BUFFER, gpu.buffer_info(&camera_buffer.buffers[frame_index])},
       {
         .STORAGE_BUFFER,

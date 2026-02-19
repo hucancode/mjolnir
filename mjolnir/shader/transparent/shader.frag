@@ -52,13 +52,14 @@ layout(set = 3, binding = 0) readonly buffer MaterialBuffer {
 };
 
 struct NodeData {
+    mat4 world_matrix;
     uint material_id;
     uint mesh_id;
     uint attachment_data_index;
     uint flags;
 };
 
-layout(set = 5, binding = 0) readonly buffer NodeBuffer {
+layout(set = 4, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 

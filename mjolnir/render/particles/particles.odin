@@ -72,7 +72,7 @@ Renderer :: struct {
 simulate :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  world_matrix_set: vk.DescriptorSet,
+  node_data_set: vk.DescriptorSet,
 ) {
   params_ptr := gpu.get(&self.params_buffer)
   counter_ptr := gpu.get(&self.particle_count_buffer)
@@ -84,7 +84,7 @@ simulate :: proc(
     self.emitter_pipeline_layout,
     self.emitter_bindless_descriptor_set,
     self.emitter_descriptor_set,
-    world_matrix_set,
+    node_data_set,
   )
   // One thread per emitter (local_size_x = 64)
   vk.CmdDispatch(command_buffer, u32(d.MAX_EMITTERS + 63) / 64, 1, 1)
@@ -112,7 +112,7 @@ simulate :: proc(
     self.compute_pipeline_layout,
     self.compute_descriptor_set,
     self.forcefield_bindless_descriptor_set,
-    world_matrix_set,
+    node_data_set,
   )
   vk.CmdDispatch(
     command_buffer,
@@ -310,7 +310,7 @@ init :: proc(
   camera_set_layout: vk.DescriptorSetLayout,
   emitter_set_layout: vk.DescriptorSetLayout,
   forcefield_set_layout: vk.DescriptorSetLayout,
-  world_matrix_set_layout: vk.DescriptorSetLayout,
+  node_data_set_layout: vk.DescriptorSetLayout,
   textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
@@ -320,7 +320,7 @@ init :: proc(
     gctx,
     self,
     emitter_set_layout,
-    world_matrix_set_layout,
+    node_data_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
@@ -345,7 +345,7 @@ init :: proc(
     gctx,
     self,
     forcefield_set_layout,
-    world_matrix_set_layout,
+    node_data_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
@@ -373,7 +373,7 @@ create_emitter_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   emitter_set_layout: vk.DescriptorSetLayout,
-  world_matrix_set_layout: vk.DescriptorSetLayout,
+  node_data_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -388,7 +388,7 @@ create_emitter_pipeline :: proc(
     nil,
     emitter_set_layout,
     self.emitter_descriptor_set_layout,
-    world_matrix_set_layout,
+    node_data_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
@@ -423,7 +423,7 @@ create_compute_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
   forcefield_set_layout: vk.DescriptorSetLayout,
-  world_matrix_set_layout: vk.DescriptorSetLayout,
+  node_data_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
@@ -445,7 +445,7 @@ create_compute_pipeline :: proc(
     nil,
     self.compute_descriptor_set_layout,
     forcefield_set_layout,
-    world_matrix_set_layout,
+    node_data_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)

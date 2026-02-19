@@ -13,7 +13,6 @@ StagingEntry :: struct {
 }
 
 StagingList :: struct {
-  transforms:         map[NodeHandle]StagingEntry,
   node_data:          map[NodeHandle]StagingEntry,
   mesh_updates:       map[MeshHandle]StagingEntry,
   material_updates:   map[MaterialHandle]StagingEntry,
@@ -27,7 +26,6 @@ StagingList :: struct {
 }
 
 staging_init :: proc(staging: ^StagingList) {
-  staging.transforms = make(map[NodeHandle]StagingEntry)
   staging.node_data = make(map[NodeHandle]StagingEntry)
   staging.mesh_updates = make(map[MeshHandle]StagingEntry)
   staging.material_updates = make(map[MaterialHandle]StagingEntry)
@@ -40,7 +38,6 @@ staging_init :: proc(staging: ^StagingList) {
 }
 
 staging_destroy :: proc(staging: ^StagingList) {
-  delete(staging.transforms)
   delete(staging.node_data)
   delete(staging.mesh_updates)
   delete(staging.material_updates)
@@ -50,18 +47,6 @@ staging_destroy :: proc(staging: ^StagingList) {
   delete(staging.forcefield_updates)
   delete(staging.light_updates)
   delete(staging.camera_updates)
-}
-
-stage_node_transform :: proc(staging: ^StagingList, handle: NodeHandle) {
-  sync.mutex_lock(&staging.mutex)
-  staging.transforms[handle] = {op = .Update}
-  sync.mutex_unlock(&staging.mutex)
-}
-
-stage_node_transform_removal :: proc(staging: ^StagingList, handle: NodeHandle) {
-  sync.mutex_lock(&staging.mutex)
-  staging.transforms[handle] = {op = .Remove}
-  sync.mutex_unlock(&staging.mutex)
 }
 
 stage_node_data :: proc(staging: ^StagingList, handle: NodeHandle) {

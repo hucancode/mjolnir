@@ -562,36 +562,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   )
   stale_lights := make([dynamic]world.NodeHandle, context.temp_allocator)
   stale_cameras := make([dynamic]world.CameraHandle, context.temp_allocator)
-  for handle, entry in self.world.staging.transforms {
-    if entry.op == .Remove {
-      zero_matrix: matrix[4, 4]f32
-      render.upload_node_transform(&self.render, handle.index, &zero_matrix)
-      append(&stale_handles, handle)
-      continue
-    }
-    next_age := entry.age
-    if entry.age < world.FRAMES_IN_FLIGHT {
-      if node := cont.get(self.world.nodes, handle); node != nil {
-        render.upload_node_transform(
-          &self.render,
-          handle.index,
-          &node.transform.world_matrix,
-        )
-      } else {
-        zero_matrix: matrix[4, 4]f32
-        render.upload_node_transform(&self.render, handle.index, &zero_matrix)
-      }
-      next_age += 1
-      self.world.staging.transforms[handle] = {next_age, .Update}
-    }
-    if next_age >= world.FRAMES_IN_FLIGHT {
-      append(&stale_handles, handle)
-    }
-  }
-  for handle in stale_handles {
-    delete_key(&self.world.staging.transforms, handle)
-  }
-  clear(&stale_handles)
   for handle, entry in self.world.staging.node_data {
     if entry.op == .Remove {
       node_data := render.Node {
@@ -614,6 +584,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     }
     defer render.upload_node_data(&self.render, handle.index, &node_data)
     node := cont.get(self.world.nodes, handle) or_continue
+    node_data.world_matrix = node.transform.world_matrix
     // When a staged node is not found (nil), it means the node was despawned.
     // Trigger cleanup in Render module by releasing GPU resources.
     // This eliminates the need for a separate pending removal list in World module.
@@ -983,7 +954,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         &self.render.visibility.depth_reduce_descriptor_layout,
         &self.render.node_data_buffer,
         &self.render.mesh_data_buffer,
-        &self.render.world_matrix_buffer,
         &self.render.camera_buffer,
       ) or_return
     }
@@ -1228,7 +1198,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         &engine.render.visibility.depth_reduce_descriptor_layout,
         &engine.render.node_data_buffer,
         &engine.render.mesh_data_buffer,
-        &engine.render.world_matrix_buffer,
         &engine.render.camera_buffer,
       ) or_return
     }

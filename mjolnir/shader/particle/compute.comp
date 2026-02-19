@@ -43,8 +43,16 @@ layout(set = 1, binding = 0) readonly buffer ForceFieldBuffer {
     ForceField forcefields[];
 };
 
-layout(set = 2, binding = 0) readonly buffer WorldMatrixBuffer {
-    mat4 world_matrices[];
+struct NodeData {
+    mat4 world_matrix;
+    uint material_id;
+    uint mesh_id;
+    uint attachment_data_index;
+    uint flags;
+};
+
+layout(set = 2, binding = 0) readonly buffer NodeDataBuffer {
+    NodeData nodes[];
 };
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
@@ -84,7 +92,7 @@ void main() {
         uint visible = 1;
         // Ignore unused or invisible forcefields
         if (visible == 0 || ff.area_of_effect <= 0.0) continue;
-        vec3 ff_pos = world_matrices[ff.node_index][3].xyz;
+        vec3 ff_pos = nodes[ff.node_index].world_matrix[3].xyz;
         vec3 to_particle = p - ff_pos;
         float dist = length(to_particle);
         if (dist > ff.area_of_effect) continue;

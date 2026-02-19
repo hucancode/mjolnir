@@ -306,7 +306,6 @@ spawn_child :: proc(
   node.transform.position = position
   node.transform.is_dirty = true
   attach(self.nodes, parent, handle)
-  stage_node_transform(&self.staging, handle)
   stage_node_data(&self.staging, handle)
   return handle, true
 }
@@ -437,7 +436,6 @@ despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
   detach(world.nodes, handle)
 
   // Stage for GPU cleanup - Engine will detect nil and trigger Render cleanup
-  stage_node_transform(&world.staging, handle)
   stage_node_data(&world.staging, handle)
 
   // Unregister from tracking lists
@@ -501,7 +499,6 @@ traverse :: proc(world: ^World) -> bool {
         &current_node.transform,
         entry.parent_transform * bone_socket_transform,
       )
-      stage_node_transform(&world.staging, entry.handle)
       #partial switch _ in current_node.attachment {
       case PointLightAttachment,
            DirectionalLightAttachment,

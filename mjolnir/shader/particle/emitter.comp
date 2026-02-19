@@ -56,11 +56,17 @@ layout(set = 1, binding = 2) uniform ParamsBuffer {
     vec4 frustum_planes[6];
 };
 
-
-layout(set = 2, binding = 0) buffer WorldMatrixBuffer {
-    mat4 world_matrices[];
+struct NodeData {
+    mat4 world_matrix;
+    uint material_id;
+    uint mesh_id;
+    uint attachment_data_index;
+    uint flags;
 };
 
+layout(set = 2, binding = 0) readonly buffer WorldMatrixBuffer {
+    NodeData nodes[];
+};
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -87,7 +93,7 @@ void main() {
     uint emitter_idx = gl_GlobalInvocationID.x;
     if (emitter_idx >= emitter_count) return;
     uint node_index = emitters[emitter_idx].node_index;
-    if (node_index >= world_matrices.length()) {
+    if (node_index >= nodes.length()) {
         return;
     }
     // TODO: query node array to find visibility
@@ -112,7 +118,7 @@ void main() {
         if (idx >= MAX_PARTICLES) break;
         // Random seed per particle
         vec2 seed = vec2(float(idx), float(emitter_idx) + float(i) * 0.123);
-        mat4 world = world_matrices[node_index];
+        mat4 world = nodes[node_index].world_matrix;
         mat3 world_rotation = mat3(world);
         // Position: emitter position + random spread (local spread rotated into world space)
         vec4 base_pos = world * vec4(0.0, 0.0, 0.0, 1.0);

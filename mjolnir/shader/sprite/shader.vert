@@ -20,18 +20,15 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
 };
 
-layout(set = 2, binding = 0) readonly buffer WorldMatrices {
-    mat4 world_matrices[];
-};
-
 struct NodeData {
+    mat4 world_matrix;
     uint material_id;
     uint mesh_id;
     uint attachment_data_index;  // For skinned meshes: bone matrix offset; For sprites: sprite index
     uint flags;
 };
 
-layout(set = 3, binding = 0) readonly buffer NodeBuffer {
+layout(set = 2, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
@@ -42,7 +39,7 @@ struct SpriteData {
     uint frame_index;
 };
 
-layout(set = 4, binding = 0) readonly buffer SpriteBuffer {
+layout(set = 3, binding = 0) readonly buffer SpriteBuffer {
     SpriteData sprites[];
 };
 
@@ -58,7 +55,7 @@ layout(location = 3) flat out uint outTextureIndex;
 void main() {
     Camera camera = cameras[camera_index];
     uint node_index = uint(gl_InstanceIndex);
-    mat4 world = world_matrices[node_index];
+    mat4 world = nodes[node_index].world_matrix;
     NodeData node = nodes[node_index];
     uint sprite_index = node.attachment_data_index;
     SpriteData sprite = sprites[sprite_index];

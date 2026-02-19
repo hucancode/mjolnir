@@ -42,7 +42,6 @@ init :: proc(
   textures_set_layout: vk.DescriptorSetLayout,
   bone_set_layout: vk.DescriptorSetLayout,
   material_set_layout: vk.DescriptorSetLayout,
-  world_matrix_set_layout: vk.DescriptorSetLayout,
   node_data_set_layout: vk.DescriptorSetLayout,
   mesh_data_set_layout: vk.DescriptorSetLayout,
   sprite_set_layout: vk.DescriptorSetLayout,
@@ -61,7 +60,6 @@ init :: proc(
     textures_set_layout,
     bone_set_layout,
     material_set_layout,
-    world_matrix_set_layout,
     node_data_set_layout,
     mesh_data_set_layout,
     vertex_skinning_set_layout,
@@ -78,7 +76,6 @@ init :: proc(
     },
     camera_set_layout,
     textures_set_layout,
-    world_matrix_set_layout,
     node_data_set_layout,
     sprite_set_layout,
   ) or_return
@@ -453,7 +450,6 @@ render :: proc(
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
   material_descriptor_set: vk.DescriptorSet,
-  world_matrix_descriptor_set: vk.DescriptorSet,
   node_data_descriptor_set: vk.DescriptorSet,
   mesh_data_descriptor_set: vk.DescriptorSet,
   sprite_descriptor_set: vk.DescriptorSet,
@@ -482,9 +478,8 @@ render :: proc(
       pipeline_layout,
       cameras_descriptor_set, // Set 0
       textures_descriptor_set, // Set 1
-      world_matrix_descriptor_set, // Set 2
-      node_data_descriptor_set, // Set 3
-      sprite_descriptor_set, // Set 4
+      node_data_descriptor_set, // Set 2
+      sprite_descriptor_set, // Set 3
     )
   } else {
     // General pipeline: 8 descriptor sets (0-7)
@@ -496,10 +491,9 @@ render :: proc(
       textures_descriptor_set, // Set 1
       bone_descriptor_set, // Set 2
       material_descriptor_set, // Set 3
-      world_matrix_descriptor_set, // Set 4
-      node_data_descriptor_set, // Set 5
-      mesh_data_descriptor_set, // Set 6
-      vertex_skinning_descriptor_set, // Set 7
+      node_data_descriptor_set, // Set 4
+      mesh_data_descriptor_set, // Set 5
+      vertex_skinning_descriptor_set, // Set 6
     )
   }
 

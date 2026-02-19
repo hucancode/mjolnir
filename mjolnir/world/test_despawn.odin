@@ -206,13 +206,7 @@ test_despawn_with_staging :: proc(t: ^testing.T) {
   testing.expectf(t, ok, "failed to spawn node")
 
   // Node should be staged after spawn
-  _, transform_staged := w.staging.transforms[node_handle]
   _, data_staged := w.staging.node_data[node_handle]
-  testing.expectf(
-    t,
-    transform_staged,
-    "node transform should be staged after spawn",
-  )
   testing.expectf(t, data_staged, "node data should be staged after spawn")
 
   // Despawn the node
@@ -220,13 +214,7 @@ test_despawn_with_staging :: proc(t: ^testing.T) {
   testing.expectf(t, despawn_ok, "despawn should succeed")
 
   // Node should be staged again for GPU cleanup
-  _, transform_staged_after := w.staging.transforms[node_handle]
   _, data_staged_after := w.staging.node_data[node_handle]
-  testing.expectf(
-    t,
-    transform_staged_after,
-    "node transform should be staged after despawn for GPU cleanup",
-  )
   testing.expectf(
     t,
     data_staged_after,

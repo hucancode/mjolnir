@@ -88,7 +88,6 @@ Manager :: struct {
     FRAMES_IN_FLIGHT,
   ),
   material_buffer:         gpu.BindlessBuffer(Material),
-  world_matrix_buffer:     gpu.BindlessBuffer(matrix[4, 4]f32),
   node_data_buffer:        gpu.BindlessBuffer(Node),
   mesh_data_buffer:        gpu.BindlessBuffer(Mesh),
   emitter_buffer:          gpu.BindlessBuffer(Emitter),
@@ -175,19 +174,10 @@ init :: proc(
     gpu.bindless_buffer_destroy(&self.material_buffer, gctx.device)
   }
   gpu.bindless_buffer_init(
-    &self.world_matrix_buffer,
-    gctx,
-    rd.MAX_NODES_IN_SCENE,
-    {.VERTEX, .FRAGMENT, .COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.world_matrix_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
     &self.node_data_buffer,
     gctx,
     rd.MAX_NODES_IN_SCENE,
-    {.VERTEX, .FRAGMENT},
+    {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
     gpu.bindless_buffer_destroy(&self.node_data_buffer, gctx.device)
@@ -309,7 +299,6 @@ init :: proc(
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
-    self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
@@ -320,7 +309,6 @@ init :: proc(
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
-    self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
@@ -346,7 +334,6 @@ init :: proc(
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
-    self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
@@ -357,7 +344,7 @@ init :: proc(
     self.camera_buffer.set_layout,
     self.emitter_buffer.set_layout,
     self.forcefield_buffer.set_layout,
-    self.world_matrix_buffer.set_layout,
+    self.node_data_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
   transparency.init(
@@ -369,7 +356,6 @@ init :: proc(
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
-    self.world_matrix_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
     self.sprite_buffer.set_layout,
@@ -428,10 +414,6 @@ setup :: proc(
   // Re-allocate descriptor sets for scene buffers (freed by previous ResetDescriptorPool)
   gpu.bindless_buffer_realloc_descriptor(&self.material_buffer, gctx) or_return
   gpu.bindless_buffer_realloc_descriptor(
-    &self.world_matrix_buffer,
-    gctx,
-  ) or_return
-  gpu.bindless_buffer_realloc_descriptor(
     &self.node_data_buffer,
     gctx,
   ) or_return
@@ -463,7 +445,6 @@ setup :: proc(
     &self.texture_manager,
     &self.node_data_buffer,
     &self.mesh_data_buffer,
-    &self.world_matrix_buffer,
   ) or_return
   particles.setup(
     &self.particles,
@@ -499,7 +480,6 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
   // Zero all descriptor set handles (freed in bulk below)
   self.material_buffer.descriptor_set = 0
-  self.world_matrix_buffer.descriptor_set = 0
   self.node_data_buffer.descriptor_set = 0
   self.mesh_data_buffer.descriptor_set = 0
   self.emitter_buffer.descriptor_set = 0
@@ -594,7 +574,7 @@ record_compute_commands :: proc(
   particles.simulate(
     &self.particles,
     cmd,
-    self.world_matrix_buffer.descriptor_set,
+    self.node_data_buffer.descriptor_set,
   )
   return .SUCCESS
 }
@@ -646,7 +626,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   self.nearest_clamp_sampler = 0
   gpu.texture_manager_shutdown(&self.texture_manager, gctx)
   gpu.bindless_buffer_destroy(&self.material_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.world_matrix_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.node_data_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.mesh_data_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
@@ -711,7 +690,6 @@ render_shadow_depth :: proc(
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
-    self.world_matrix_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
@@ -745,10 +723,7 @@ render_camera_depth :: proc(
         .MATERIAL_LINE_STRIP,
       },
       self.camera_buffer.descriptor_sets[frame_index],
-      self.texture_manager.descriptor_set,
       self.bone_buffer.descriptor_sets[frame_index],
-      self.material_buffer.descriptor_set,
-      self.world_matrix_buffer.descriptor_set,
       self.node_data_buffer.descriptor_set,
       self.mesh_data_buffer.descriptor_set,
       self.mesh_manager.vertex_skinning_buffer.descriptor_set,
@@ -777,7 +752,6 @@ record_geometry_pass :: proc(
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
-    self.world_matrix_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
@@ -929,7 +903,6 @@ record_transparency_pass :: proc(
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
-    self.world_matrix_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
     self.sprite_buffer.descriptor_set,
@@ -984,7 +957,6 @@ record_transparency_pass :: proc(
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
-    self.world_matrix_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
     self.sprite_buffer.descriptor_set,
@@ -1039,7 +1011,6 @@ record_transparency_pass :: proc(
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
-    self.world_matrix_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
     self.sprite_buffer.descriptor_set,
@@ -1094,7 +1065,6 @@ record_transparency_pass :: proc(
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
-    self.world_matrix_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
     self.sprite_buffer.descriptor_set,
@@ -1144,7 +1114,6 @@ record_transparency_pass :: proc(
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
-    self.world_matrix_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
     self.sprite_buffer.descriptor_set,
@@ -1506,14 +1475,6 @@ set_texture_cube_descriptor :: proc(
       },
     },
   )
-}
-
-upload_node_transform :: proc(
-  render: ^Manager,
-  index: u32,
-  world_matrix: ^matrix[4, 4]f32,
-) {
-  gpu.write(&render.world_matrix_buffer.buffer, world_matrix, int(index))
 }
 
 upload_node_data :: proc(render: ^Manager, index: u32, node_data: ^Node) {

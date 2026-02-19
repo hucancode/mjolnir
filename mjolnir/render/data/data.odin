@@ -63,7 +63,8 @@ NodeFlag :: enum u32 {
 
 NodeFlagSet :: bit_set[NodeFlag;u32]
 
-Node :: struct {
+Node :: struct #packed {
+  world_matrix:          matrix[4, 4]f32,
   material_id:           u32,
   mesh_id:               u32,
   attachment_data_index: u32,

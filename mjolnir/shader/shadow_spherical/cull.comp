@@ -20,6 +20,7 @@ struct ShadowData {
 };
 
 struct NodeData {
+    mat4 world_matrix;
     uint material_id;
     uint mesh_id;
     uint attachment_data_index;
@@ -61,19 +62,15 @@ layout(set = 0, binding = 1) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
-layout(set = 0, binding = 2) readonly buffer WorldBuffer {
-    mat4 world_matrices[];
-};
-
-layout(set = 0, binding = 3) readonly buffer ShadowBuffer {
+layout(set = 0, binding = 2) readonly buffer ShadowBuffer {
     ShadowData shadows[];
 };
 
-layout(set = 0, binding = 4) buffer DrawCountBuffer {
+layout(set = 0, binding = 3) buffer DrawCountBuffer {
     uint draw_count;
 };
 
-layout(set = 0, binding = 5) buffer DrawCommandBuffer {
+layout(set = 0, binding = 4) buffer DrawCommandBuffer {
     DrawCommand commands[];
 };
 
@@ -113,7 +110,7 @@ void main() {
     }
 
     ShadowData shadow = shadows[params.shadow_index];
-    mat4 world = world_matrices[node_id];
+    mat4 world = nodes[node_id].world_matrix;
 
     // Transform AABB to world space
     vec3 local_min = mesh.aabb_min;
