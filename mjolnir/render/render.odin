@@ -580,11 +580,7 @@ record_compute_commands :: proc(
     ) // Write draw_list[N+1]
 
   }
-  particles.simulate(
-    &self.particles,
-    cmd,
-    self.node_data_buffer.descriptor_set,
-  )
+  // Particle simulation is now handled by the render graph
   return .SUCCESS
 }
 
@@ -674,107 +670,6 @@ resize :: proc(
   ) or_return
   debug_ui.recreate_images(&self.debug_ui, color_format, extent, dpi_scale)
   return .SUCCESS
-}
-
-render_shadow_depth :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  active_lights: []rd.LightHandle,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  light.shadow_sync_lights(
-    &self.shadow,
-    &self.lights_buffer,
-    active_lights,
-    frame_index,
-  )
-  light.shadow_compute_draw_lists(&self.shadow, cmd, frame_index)
-  light.shadow_render_depth(
-    &self.shadow,
-    cmd,
-    &self.texture_manager,
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    frame_index,
-  )
-  return .SUCCESS
-}
-
-record_ui_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  swapchain_view: vk.ImageView,
-  swapchain_extent: vk.Extent2D,
-) {
-  cmd := self.command_buffers[frame_index]
-  // UI rendering pass - renders on top of post-processed image
-  rendering_attachment_info := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = swapchain_view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .STORE,
-  }
-
-  rendering_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = swapchain_extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &rendering_attachment_info,
-  }
-
-  vk.CmdBeginRendering(cmd, &rendering_info)
-
-  // Set viewport and scissor
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(swapchain_extent.height),
-    width    = f32(swapchain_extent.width),
-    height   = -f32(swapchain_extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    offset = {0, 0},
-    extent = swapchain_extent,
-  }
-  vk.CmdSetViewport(cmd, 0, 1, &viewport)
-  vk.CmdSetScissor(cmd, 0, 1, &scissor)
-
-  // Bind pipeline and descriptor sets
-  vk.CmdBindPipeline(cmd, .GRAPHICS, self.ui.pipeline)
-  vk.CmdBindDescriptorSets(
-    cmd,
-    .GRAPHICS,
-    self.ui.pipeline_layout,
-    0,
-    1,
-    &self.texture_manager.descriptor_set,
-    0,
-    nil,
-  )
-
-  // Render UI using staged commands
-  ui_render.render(
-    &self.ui,
-    self.ui_commands[:],
-    gctx,
-    &self.texture_manager,
-    cmd,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    frame_index,
-  )
-
-  vk.CmdEndRendering(cmd)
 }
 
 allocate_mesh_geometry :: proc(

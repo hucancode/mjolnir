@@ -1,12 +1,12 @@
 package render
 
 // default_graph.odin: builds the default render graph mirroring the current pipeline.
-// Used when use_render_graph == true.
 
 import "../gpu"
 import "camera"
 import rd "data"
 import "debug"
+import "debug_ui"
 import rg "graph"
 import "geometry"
 import light "lighting"
@@ -14,8 +14,12 @@ import oc "occlusion_culling"
 import "particles"
 import "post_process"
 import "transparency"
+import ui_render "ui"
 import vk "vendor:vulkan"
 
+// Default Graph
+// occlusion culling -> geometry -> ambient -> lighting -> tranparent -> sprite -> wireframe -> post process -> swap chain
+// shadow compute -> shadow map -> lighting
 // ============================================================
 // Per-pass context structs
 // ============================================================
@@ -25,6 +29,20 @@ DepthPassCtx :: struct {
 	gctx:      ^gpu.GPUContext,
 	cam_index: u32,
 	cam_res:   ^camera.CameraResources,
+}
+
+ShadowComputePassCtx :: struct {
+	manager:       ^Manager,
+	active_lights: []rd.LightHandle,
+}
+
+ShadowDepthPassCtx :: struct {
+	manager: ^Manager,
+}
+
+ShadowSlotCtx :: struct {
+	manager: ^Manager,
+	slot:    u32,
 }
 
 GeometryPassCtx :: struct {
@@ -40,17 +58,37 @@ LightingPassCtx :: struct {
 	active_lights: []rd.LightHandle,
 }
 
+ParticleSimulationPassCtx :: struct {
+	manager: ^Manager,
+}
+
 ParticlesPassCtx :: struct {
 	manager:   ^Manager,
 	cam_index: u32,
 	cam_res:   ^camera.CameraResources,
 }
 
-TransparencyPassCtx :: struct {
+DrawListKind :: enum {
+	TRANSPARENT,
+	SPRITE,
+}
+
+TransparencyCullPassCtx :: struct {
 	manager:   ^Manager,
 	gctx:      ^gpu.GPUContext,
 	cam_index: u32,
 	cam_res:   ^camera.CameraResources,
+	include:   NodeFlagSet,
+	exclude:   NodeFlagSet,
+	draw_list: DrawListKind,
+}
+
+TransparencyRenderPassCtx :: struct {
+	manager:   ^Manager,
+	cam_index: u32,
+	cam_res:   ^camera.CameraResources,
+	pipeline:  vk.Pipeline,
+	draw_list: DrawListKind,
 }
 
 DebugPassCtx :: struct {
@@ -67,9 +105,118 @@ PostProcessPassCtx :: struct {
 	swapchain_view:   vk.ImageView,
 }
 
+UIPassCtx :: struct {
+	manager:          ^Manager,
+	gctx:             ^gpu.GPUContext,
+	swapchain_extent: vk.Extent2D,
+	swapchain_view:   vk.ImageView,
+}
+
+DebugUIPassCtx :: struct {
+	manager:          ^Manager,
+	enabled:          bool,
+	swapchain_extent: vk.Extent2D,
+	swapchain_view:   vk.ImageView,
+}
+
 // ============================================================
 // Pass execute callbacks
 // ============================================================
+
+@(private)
+shadow_compute_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^ShadowComputePassCtx)user_data
+	m := ctx.manager
+	light.shadow_sync_lights(
+		&m.shadow,
+		&m.lights_buffer,
+		ctx.active_lights,
+		frame_index,
+	)
+	light.shadow_compute_draw_lists(&m.shadow, cmd, frame_index)
+}
+
+@(private)
+shadow_depth_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^ShadowDepthPassCtx)user_data
+	m := ctx.manager
+	light.shadow_render_depth(
+		&m.shadow,
+		cmd,
+		&m.texture_manager,
+		m.texture_manager.descriptor_set,
+		m.bone_buffer.descriptor_sets[frame_index],
+		m.material_buffer.descriptor_set,
+		m.node_data_buffer.descriptor_set,
+		m.mesh_data_buffer.descriptor_set,
+		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
+		m.mesh_manager.vertex_buffer.buffer,
+		m.mesh_manager.index_buffer.buffer,
+		frame_index,
+	)
+}
+
+@(private)
+get_transparency_draw_buffers :: proc(
+	ctx: ^TransparencyRenderPassCtx,
+	frame_index: u32,
+) -> (
+	draw_buffer: vk.Buffer,
+	count_buffer: vk.Buffer,
+) {
+	switch ctx.draw_list {
+	case .TRANSPARENT:
+		return ctx.cam_res.transparent_draw_commands[frame_index].buffer, ctx.cam_res.transparent_draw_count[frame_index].buffer
+	case .SPRITE:
+		return ctx.cam_res.sprite_draw_commands[frame_index].buffer, ctx.cam_res.sprite_draw_count[frame_index].buffer
+	}
+	return 0, 0
+}
+
+@(private)
+transparency_cull_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^TransparencyCullPassCtx)user_data
+	m := ctx.manager
+	oc.perform_culling(
+		&m.occlusion_culling,
+		ctx.gctx,
+		cmd,
+		ctx.cam_res,
+		ctx.cam_index,
+		frame_index,
+		ctx.include,
+		ctx.exclude,
+	)
+}
+
+@(private)
+transparency_render_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^TransparencyRenderPassCtx)user_data
+	m := ctx.manager
+	draw_buffer, count_buffer := get_transparency_draw_buffers(ctx, frame_index)
+	transparency.begin_pass(&m.transparency, ctx.cam_res, &m.texture_manager, cmd, frame_index)
+	transparency.render(
+		&m.transparency,
+		ctx.cam_res,
+		ctx.pipeline,
+		m.camera_buffer.descriptor_sets[frame_index],
+		m.texture_manager.descriptor_set,
+		m.bone_buffer.descriptor_sets[frame_index],
+		m.material_buffer.descriptor_set,
+		m.node_data_buffer.descriptor_set,
+		m.mesh_data_buffer.descriptor_set,
+		m.sprite_buffer.descriptor_set,
+		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
+		m.mesh_manager.vertex_buffer.buffer,
+		m.mesh_manager.index_buffer.buffer,
+		ctx.cam_index,
+		frame_index,
+		cmd,
+		draw_buffer,
+		count_buffer,
+	)
+	transparency.end_pass(&m.transparency, cmd)
+}
 
 @(private)
 depth_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
@@ -173,6 +320,16 @@ lighting_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data
 }
 
 @(private)
+particle_simulation_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^ParticleSimulationPassCtx)user_data
+	m := ctx.manager
+	particles.simulate(
+		&m.particles,
+		cmd,
+		m.node_data_buffer.descriptor_set,
+	)
+}
+
 particles_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^ParticlesPassCtx)user_data
 	m := ctx.manager
@@ -189,260 +346,6 @@ particles_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_dat
 	particles.end_pass(cmd)
 }
 
-@(private)
-transparency_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
-	ctx := cast(^TransparencyPassCtx)user_data
-	m := ctx.manager
-	transparency.begin_pass(&m.transparency, ctx.cam_res, &m.texture_manager, cmd, frame_index)
-	// Transparent objects
-	oc.perform_culling(
-		&m.occlusion_culling,
-		ctx.gctx,
-		cmd,
-		ctx.cam_res,
-		ctx.cam_index,
-		frame_index,
-		NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT},
-		NodeFlagSet{.MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.transparent_draw_commands[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.transparent_draw_commands[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.transparent_draw_count[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.transparent_draw_count[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	transparency.render(
-		&m.transparency,
-		ctx.cam_res,
-		m.transparency.transparent_pipeline,
-		m.camera_buffer.descriptor_sets[frame_index],
-		m.texture_manager.descriptor_set,
-		m.bone_buffer.descriptor_sets[frame_index],
-		m.material_buffer.descriptor_set,
-		m.node_data_buffer.descriptor_set,
-		m.mesh_data_buffer.descriptor_set,
-		m.sprite_buffer.descriptor_set,
-		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
-		m.mesh_manager.vertex_buffer.buffer,
-		m.mesh_manager.index_buffer.buffer,
-		ctx.cam_index,
-		frame_index,
-		cmd,
-		ctx.cam_res.transparent_draw_commands[frame_index].buffer,
-		ctx.cam_res.transparent_draw_count[frame_index].buffer,
-	)
-	// Wireframe
-	oc.perform_culling(
-		&m.occlusion_culling,
-		ctx.gctx,
-		cmd,
-		ctx.cam_res,
-		ctx.cam_index,
-		frame_index,
-		NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME},
-		NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.transparent_draw_commands[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.transparent_draw_commands[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.transparent_draw_count[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.transparent_draw_count[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	transparency.render(
-		&m.transparency,
-		ctx.cam_res,
-		m.transparency.wireframe_pipeline,
-		m.camera_buffer.descriptor_sets[frame_index],
-		m.texture_manager.descriptor_set,
-		m.bone_buffer.descriptor_sets[frame_index],
-		m.material_buffer.descriptor_set,
-		m.node_data_buffer.descriptor_set,
-		m.mesh_data_buffer.descriptor_set,
-		m.sprite_buffer.descriptor_set,
-		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
-		m.mesh_manager.vertex_buffer.buffer,
-		m.mesh_manager.index_buffer.buffer,
-		ctx.cam_index,
-		frame_index,
-		cmd,
-		ctx.cam_res.transparent_draw_commands[frame_index].buffer,
-		ctx.cam_res.transparent_draw_count[frame_index].buffer,
-	)
-	// Random color
-	oc.perform_culling(
-		&m.occlusion_culling,
-		ctx.gctx,
-		cmd,
-		ctx.cam_res,
-		ctx.cam_index,
-		frame_index,
-		NodeFlagSet{.VISIBLE, .MATERIAL_RANDOM_COLOR},
-		NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.transparent_draw_commands[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.transparent_draw_commands[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.transparent_draw_count[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.transparent_draw_count[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	transparency.render(
-		&m.transparency,
-		ctx.cam_res,
-		m.transparency.random_color_pipeline,
-		m.camera_buffer.descriptor_sets[frame_index],
-		m.texture_manager.descriptor_set,
-		m.bone_buffer.descriptor_sets[frame_index],
-		m.material_buffer.descriptor_set,
-		m.node_data_buffer.descriptor_set,
-		m.mesh_data_buffer.descriptor_set,
-		m.sprite_buffer.descriptor_set,
-		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
-		m.mesh_manager.vertex_buffer.buffer,
-		m.mesh_manager.index_buffer.buffer,
-		ctx.cam_index,
-		frame_index,
-		cmd,
-		ctx.cam_res.transparent_draw_commands[frame_index].buffer,
-		ctx.cam_res.transparent_draw_count[frame_index].buffer,
-	)
-	// Line strip
-	oc.perform_culling(
-		&m.occlusion_culling,
-		ctx.gctx,
-		cmd,
-		ctx.cam_res,
-		ctx.cam_index,
-		frame_index,
-		NodeFlagSet{.VISIBLE, .MATERIAL_LINE_STRIP},
-		NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_SPRITE},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.transparent_draw_commands[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.transparent_draw_commands[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.transparent_draw_count[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.transparent_draw_count[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	transparency.render(
-		&m.transparency,
-		ctx.cam_res,
-		m.transparency.line_strip_pipeline,
-		m.camera_buffer.descriptor_sets[frame_index],
-		m.texture_manager.descriptor_set,
-		m.bone_buffer.descriptor_sets[frame_index],
-		m.material_buffer.descriptor_set,
-		m.node_data_buffer.descriptor_set,
-		m.mesh_data_buffer.descriptor_set,
-		m.sprite_buffer.descriptor_set,
-		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
-		m.mesh_manager.vertex_buffer.buffer,
-		m.mesh_manager.index_buffer.buffer,
-		ctx.cam_index,
-		frame_index,
-		cmd,
-		ctx.cam_res.transparent_draw_commands[frame_index].buffer,
-		ctx.cam_res.transparent_draw_count[frame_index].buffer,
-	)
-	// Sprites
-	oc.perform_culling(
-		&m.occlusion_culling,
-		ctx.gctx,
-		cmd,
-		ctx.cam_res,
-		ctx.cam_index,
-		frame_index,
-		NodeFlagSet{.VISIBLE, .MATERIAL_SPRITE},
-		NodeFlagSet{},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.sprite_draw_commands[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.sprite_draw_commands[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		ctx.cam_res.sprite_draw_count[frame_index].buffer,
-		vk.DeviceSize(ctx.cam_res.sprite_draw_count[frame_index].bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	transparency.render(
-		&m.transparency,
-		ctx.cam_res,
-		m.transparency.sprite_pipeline,
-		m.camera_buffer.descriptor_sets[frame_index],
-		m.texture_manager.descriptor_set,
-		m.bone_buffer.descriptor_sets[frame_index],
-		m.material_buffer.descriptor_set,
-		m.node_data_buffer.descriptor_set,
-		m.mesh_data_buffer.descriptor_set,
-		m.sprite_buffer.descriptor_set,
-		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
-		m.mesh_manager.vertex_buffer.buffer,
-		m.mesh_manager.index_buffer.buffer,
-		ctx.cam_index,
-		frame_index,
-		cmd,
-		ctx.cam_res.sprite_draw_commands[frame_index].buffer,
-		ctx.cam_res.sprite_draw_count[frame_index].buffer,
-	)
-	transparency.end_pass(&m.transparency, cmd)
-}
-
-@(private)
 debug_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^DebugPassCtx)user_data
 	m := ctx.manager
@@ -470,19 +373,105 @@ post_process_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_
 	post_process.end_pass(&m.post_process, cmd)
 }
 
+@(private)
+ui_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^UIPassCtx)user_data
+	m := ctx.manager
+
+	rendering_attachment_info := vk.RenderingAttachmentInfo {
+		sType       = .RENDERING_ATTACHMENT_INFO,
+		imageView   = ctx.swapchain_view,
+		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+		loadOp      = .LOAD,
+		storeOp     = .STORE,
+	}
+
+	rendering_info := vk.RenderingInfo {
+		sType = .RENDERING_INFO,
+		renderArea = {extent = ctx.swapchain_extent},
+		layerCount = 1,
+		colorAttachmentCount = 1,
+		pColorAttachments = &rendering_attachment_info,
+	}
+	vk.CmdBeginRendering(cmd, &rendering_info)
+
+	viewport := vk.Viewport {
+		x        = 0,
+		y        = f32(ctx.swapchain_extent.height),
+		width    = f32(ctx.swapchain_extent.width),
+		height   = -f32(ctx.swapchain_extent.height),
+		minDepth = 0.0,
+		maxDepth = 1.0,
+	}
+	scissor := vk.Rect2D {
+		offset = {0, 0},
+		extent = ctx.swapchain_extent,
+	}
+	vk.CmdSetViewport(cmd, 0, 1, &viewport)
+	vk.CmdSetScissor(cmd, 0, 1, &scissor)
+
+	vk.CmdBindPipeline(cmd, .GRAPHICS, m.ui.pipeline)
+	vk.CmdBindDescriptorSets(
+		cmd,
+		.GRAPHICS,
+		m.ui.pipeline_layout,
+		0,
+		1,
+		&m.texture_manager.descriptor_set,
+		0,
+		nil,
+	)
+
+	ui_render.render(
+		&m.ui,
+		m.ui_commands[:],
+		ctx.gctx,
+		&m.texture_manager,
+		cmd,
+		ctx.swapchain_extent.width,
+		ctx.swapchain_extent.height,
+		frame_index,
+	)
+
+	vk.CmdEndRendering(cmd)
+}
+
+@(private)
+debug_ui_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^DebugUIPassCtx)user_data
+	if !ctx.enabled do return
+	m := ctx.manager
+	debug_ui.begin_pass(&m.debug_ui, cmd, ctx.swapchain_view, ctx.swapchain_extent)
+	debug_ui.render(&m.debug_ui, cmd, m.texture_manager.descriptor_set)
+	debug_ui.end_pass(&m.debug_ui, cmd)
+}
+
 // ============================================================
 // Build the default render graph
 // ============================================================
 
 // DefaultGraphState holds all the context structs for pass callbacks
 DefaultGraphState :: struct {
+	shadow_compute_ctx: ShadowComputePassCtx,
+	shadow_depth_ctx:   ShadowDepthPassCtx,
+	shadow_slot_ctxs:   [light.MAX_SHADOW_MAPS]ShadowSlotCtx,
 	depth_ctxs:        [rd.MAX_ACTIVE_CAMERAS]DepthPassCtx,
 	geometry_ctxs:     [rd.MAX_ACTIVE_CAMERAS]GeometryPassCtx,
 	lighting_ctxs:     [rd.MAX_ACTIVE_CAMERAS]LightingPassCtx,
+	particle_simulation_ctx: ParticleSimulationPassCtx,
 	particles_ctxs:    [rd.MAX_ACTIVE_CAMERAS]ParticlesPassCtx,
-	transparency_ctxs: [rd.MAX_ACTIVE_CAMERAS]TransparencyPassCtx,
+	transparency_cull_ctxs:      [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
+	transparency_render_ctxs:    [rd.MAX_ACTIVE_CAMERAS]TransparencyRenderPassCtx,
+	wireframe_cull_ctxs:         [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
+	wireframe_render_ctxs:       [rd.MAX_ACTIVE_CAMERAS]TransparencyRenderPassCtx,
+	random_color_cull_ctxs:      [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
+	random_color_render_ctxs:    [rd.MAX_ACTIVE_CAMERAS]TransparencyRenderPassCtx,
+	sprite_cull_ctxs:            [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
+	sprite_render_ctxs:          [rd.MAX_ACTIVE_CAMERAS]TransparencyRenderPassCtx,
 	debug_ctxs:        [rd.MAX_ACTIVE_CAMERAS]DebugPassCtx,
 	post_process_ctx: PostProcessPassCtx,
+	ui_ctx:            UIPassCtx,
+	debug_ui_ctx:      DebugUIPassCtx,
 }
 
 // build_default_render_graph resets and rebuilds the graph from scratch.
@@ -495,6 +484,7 @@ build_default_render_graph :: proc(
 	swapchain_image: vk.Image,
 	swapchain_view: vk.ImageView,
 	swapchain_extent: vk.Extent2D,
+	debug_ui_enabled: bool,
 	state: ^DefaultGraphState,
 ) {
 	g := &self.graph
@@ -522,8 +512,169 @@ build_default_render_graph :: proc(
 		&state.post_process_ctx,
 	)
 
-	// Shadow pass is handled outside the graph (in engine.odin) until shadow map resources
-	// are registered as graph resources in a future phase.
+	// Register particle buffer resource
+	state.particle_simulation_ctx = ParticleSimulationPassCtx{manager = self}
+
+	particle_buffer_res := rg.add_buffer(
+		g,
+		"particle_buffer",
+		proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+			ctx := cast(^ParticleSimulationPassCtx)user_data
+			buffer := &ctx.manager.particles.particle_buffer
+			return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+		},
+		&state.particle_simulation_ctx,
+	)
+
+	// Particle simulation compute pass (updates particle positions/velocities)
+	particle_simulation_pass := rg.add_pass(
+		g,
+		"particle_simulation",
+		particle_simulation_pass_execute,
+		&state.particle_simulation_ctx,
+		.COMPUTE,
+	)
+	rg.pass_read_write(g, particle_simulation_pass, particle_buffer_res)
+
+	// Register shadow resources for all slots (dead pass elimination removes unused ones)
+	shadow_draw_cmd_resources: [light.MAX_SHADOW_MAPS]rg.ResourceId
+	shadow_draw_count_resources: [light.MAX_SHADOW_MAPS]rg.ResourceId
+	shadow_map_resources: [light.MAX_SHADOW_MAPS]rg.ResourceId
+
+	// Context structs for shadow pass callbacks
+	state.shadow_compute_ctx = ShadowComputePassCtx {
+		manager       = self,
+		active_lights = active_lights,
+	}
+	state.shadow_depth_ctx = ShadowDepthPassCtx{manager = self}
+
+	// Shadow compute pass (writes draw commands for all active shadows)
+	shadow_compute_pass := rg.add_pass(
+		g,
+		"shadow_compute",
+		shadow_compute_pass_execute,
+		&state.shadow_compute_ctx,
+	)
+
+	// Shadow depth pass (renders shadow maps for all active shadows)
+	shadow_depth_pass := rg.add_pass(
+		g,
+		"shadow_depth",
+		shadow_depth_pass_execute,
+		&state.shadow_depth_ctx,
+	)
+
+	// Register shadow resources for each slot
+	for slot in 0 ..< light.MAX_SHADOW_MAPS {
+		// Initialize per-slot context
+		state.shadow_slot_ctxs[slot] = ShadowSlotCtx {
+			manager = self,
+			slot    = u32(slot),
+		}
+
+		// Draw command buffer
+		shadow_draw_cmd_resources[slot] = rg.add_buffer(
+			g,
+			"shadow_draw_cmds",
+			proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+				ctx := cast(^ShadowSlotCtx)user_data
+				shadow := &ctx.manager.shadow
+				slot := ctx.slot
+				if !shadow.slot_active[slot] do return 0, 0
+
+				switch shadow.slot_kind[slot] {
+				case .SPOT:
+					buffer := &shadow.spot_lights[slot].draw_commands[frame_index]
+					return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+				case .DIRECTIONAL:
+					buffer := &shadow.directional_lights[slot].draw_commands[frame_index]
+					return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+				case .POINT:
+					buffer := &shadow.point_lights[slot].draw_commands[frame_index]
+					return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+				}
+				return 0, 0
+			},
+			&state.shadow_slot_ctxs[slot],
+		)
+
+		// Draw count buffer
+		shadow_draw_count_resources[slot] = rg.add_buffer(
+			g,
+			"shadow_draw_count",
+			proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+				ctx := cast(^ShadowSlotCtx)user_data
+				shadow := &ctx.manager.shadow
+				slot := ctx.slot
+				if !shadow.slot_active[slot] do return 0, 0
+
+				switch shadow.slot_kind[slot] {
+				case .SPOT:
+					buffer := &shadow.spot_lights[slot].draw_count[frame_index]
+					return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+				case .DIRECTIONAL:
+					buffer := &shadow.directional_lights[slot].draw_count[frame_index]
+					return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+				case .POINT:
+					buffer := &shadow.point_lights[slot].draw_count[frame_index]
+					return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+				}
+				return 0, 0
+			},
+			&state.shadow_slot_ctxs[slot],
+		)
+
+		// Shadow map resource (depth texture or cube)
+		shadow_map_resources[slot] = rg.add_depth_texture(
+			g,
+			"shadow_map",
+			.D32_SFLOAT,
+			proc(user_data: rawptr, frame_index: u32) -> (vk.Image, vk.ImageView, vk.Extent2D) {
+				ctx := cast(^ShadowSlotCtx)user_data
+				shadow := &ctx.manager.shadow
+				slot := ctx.slot
+				if !shadow.slot_active[slot] do return 0, 0, {}
+
+				switch shadow.slot_kind[slot] {
+				case .SPOT:
+					tex := gpu.get_texture_2d(
+						&ctx.manager.texture_manager,
+						shadow.spot_lights[slot].shadow_map[frame_index],
+					)
+					if tex == nil do return 0, 0, {}
+					return tex.image, tex.view, tex.spec.extent
+				case .DIRECTIONAL:
+					tex := gpu.get_texture_2d(
+						&ctx.manager.texture_manager,
+						shadow.directional_lights[slot].shadow_map[frame_index],
+					)
+					if tex == nil do return 0, 0, {}
+					return tex.image, tex.view, tex.spec.extent
+				case .POINT:
+					// Point lights use cube textures, but we register as depth texture
+					// The graph will handle it as a depth resource
+					cube := gpu.get_texture_cube(
+						&ctx.manager.texture_manager,
+						shadow.point_lights[slot].shadow_cube[frame_index],
+					)
+					if cube == nil do return 0, 0, {}
+					return cube.image, cube.view, vk.Extent2D{light.SHADOW_MAP_SIZE, light.SHADOW_MAP_SIZE}
+				}
+				return 0, 0, {}
+			},
+			&state.shadow_slot_ctxs[slot],
+		)
+
+		// Wire up dependencies:
+		// shadow_compute writes draw buffers
+		rg.pass_write(g, shadow_compute_pass, shadow_draw_cmd_resources[slot], .DONT_CARE)
+		rg.pass_write(g, shadow_compute_pass, shadow_draw_count_resources[slot], .DONT_CARE)
+
+		// shadow_depth reads draw buffers, writes shadow map
+		rg.pass_read(g, shadow_depth_pass, shadow_draw_cmd_resources[slot])
+		rg.pass_read(g, shadow_depth_pass, shadow_draw_count_resources[slot])
+		rg.pass_write(g, shadow_depth_pass, shadow_map_resources[slot], .CLEAR)
+	}
 
 	// Track the main camera's final_image resource to wire into post-process
 	main_final_res := rg.ResourceId(rg.INVALID_RESOURCE)
@@ -707,6 +858,56 @@ build_default_render_graph :: proc(
 			},
 			&state.geometry_ctxs[cam_idx],
 		)
+		transparent_draw_cmd_res := rg.add_buffer(
+			g,
+			"transparent_draw_cmds",
+			proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+				ctx := cast(^GeometryPassCtx)user_data
+				buffer := &ctx.cam_res.transparent_draw_commands[frame_index]
+				return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+			},
+			&state.geometry_ctxs[cam_idx],
+		)
+		transparent_draw_count_res := rg.add_buffer(
+			g,
+			"transparent_draw_count",
+			proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+				ctx := cast(^GeometryPassCtx)user_data
+				buffer := &ctx.cam_res.transparent_draw_count[frame_index]
+				return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+			},
+			&state.geometry_ctxs[cam_idx],
+		)
+		sprite_draw_cmd_res := rg.add_buffer(
+			g,
+			"sprite_draw_cmds",
+			proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+				ctx := cast(^GeometryPassCtx)user_data
+				buffer := &ctx.cam_res.sprite_draw_commands[frame_index]
+				return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+			},
+			&state.geometry_ctxs[cam_idx],
+		)
+		sprite_draw_count_res := rg.add_buffer(
+			g,
+			"sprite_draw_count",
+			proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+				ctx := cast(^GeometryPassCtx)user_data
+				buffer := &ctx.cam_res.sprite_draw_count[frame_index]
+				return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+			},
+			&state.geometry_ctxs[cam_idx],
+		)
+		transparency_seq_res := rg.add_buffer(
+			g,
+			"transparency_sequence_token",
+			proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+				ctx := cast(^GeometryPassCtx)user_data
+				buffer := &ctx.manager.camera_buffer.buffers[frame_index]
+				return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+			},
+			&state.geometry_ctxs[cam_idx],
+		)
 
 		// Depth pass: writes depth
 		rg.pass_write(g, depth_pass, depth_res, .CLEAR)
@@ -739,41 +940,194 @@ build_default_render_graph :: proc(
 		rg.pass_read(g, lighting_pass, metallic_res)
 		rg.pass_read(g, lighting_pass, emissive_res)
 		rg.pass_read(g, lighting_pass, depth_res)
+		// Read all shadow maps (dead pass elimination removes unused ones)
+		for slot in 0 ..< light.MAX_SHADOW_MAPS {
+			rg.pass_read(g, lighting_pass, shadow_map_resources[slot])
+		}
 		rg.pass_read_write(g, lighting_pass, final_image_res)
 
-		// Particles pass
+		// Particle render pass
 		if camera.PassType.PARTICLES in cam.enabled_passes {
 			state.particles_ctxs[cam_idx] = ParticlesPassCtx {
 				manager   = self,
 				cam_index = cam_id,
 				cam_res   = cam_res,
 			}
-			particles_pass := rg.add_pass(
+			particle_render_pass := rg.add_pass(
 				g,
-				"particles",
+				"particle_render",
 				particles_pass_execute,
 				&state.particles_ctxs[cam_idx],
 			)
-			rg.pass_read_write(g, particles_pass, final_image_res)
-			rg.pass_read_write(g, particles_pass, depth_res)
+			rg.pass_read(g, particle_render_pass, particle_buffer_res)
+			rg.pass_read_write(g, particle_render_pass, final_image_res)
+			rg.pass_read_write(g, particle_render_pass, depth_res)
 		}
 
-		// Transparency pass
+		// Transparency passes (decomposed)
 		if camera.PassType.TRANSPARENCY in cam.enabled_passes {
-			state.transparency_ctxs[cam_idx] = TransparencyPassCtx {
+			state.transparency_cull_ctxs[cam_idx] = TransparencyCullPassCtx {
 				manager   = self,
 				gctx      = gctx,
 				cam_index = cam_id,
 				cam_res   = cam_res,
+				include   = NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT},
+				exclude   = NodeFlagSet{.MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
+				draw_list = .TRANSPARENT,
 			}
-			transparency_pass := rg.add_pass(
+			transparency_cull_pass := rg.add_pass(
+				g,
+				"transparency_cull",
+				transparency_cull_pass_execute,
+				&state.transparency_cull_ctxs[cam_idx],
+			)
+			rg.pass_read(g, transparency_cull_pass, final_image_res)
+			rg.pass_read(g, transparency_cull_pass, depth_res)
+			rg.pass_write(g, transparency_cull_pass, transparency_seq_res, .DONT_CARE)
+			rg.pass_write(g, transparency_cull_pass, transparent_draw_cmd_res, .DONT_CARE)
+			rg.pass_write(g, transparency_cull_pass, transparent_draw_count_res, .DONT_CARE)
+			state.transparency_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
+				manager   = self,
+				cam_index = cam_id,
+				cam_res   = cam_res,
+				pipeline  = self.transparency.transparent_pipeline,
+				draw_list = .TRANSPARENT,
+			}
+			transparency_render_pass := rg.add_pass(
 				g,
 				"transparency",
-				transparency_pass_execute,
-				&state.transparency_ctxs[cam_idx],
+				transparency_render_pass_execute,
+				&state.transparency_render_ctxs[cam_idx],
 			)
-			rg.pass_read_write(g, transparency_pass, final_image_res)
-			rg.pass_read_write(g, transparency_pass, depth_res)
+			rg.pass_read(g, transparency_render_pass, transparency_seq_res)
+			rg.pass_write(g, transparency_render_pass, transparency_seq_res, .DONT_CARE)
+			rg.pass_read(g, transparency_render_pass, transparent_draw_cmd_res)
+			rg.pass_read(g, transparency_render_pass, transparent_draw_count_res)
+			rg.pass_read_write(g, transparency_render_pass, final_image_res)
+			rg.pass_read_write(g, transparency_render_pass, depth_res)
+
+			state.wireframe_cull_ctxs[cam_idx] = TransparencyCullPassCtx {
+				manager   = self,
+				gctx      = gctx,
+				cam_index = cam_id,
+				cam_res   = cam_res,
+				include   = NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME},
+				exclude   = NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
+				draw_list = .TRANSPARENT,
+			}
+			wireframe_cull_pass := rg.add_pass(
+				g,
+				"wireframe_cull",
+				transparency_cull_pass_execute,
+				&state.wireframe_cull_ctxs[cam_idx],
+			)
+			rg.pass_read(g, wireframe_cull_pass, final_image_res)
+			rg.pass_read(g, wireframe_cull_pass, depth_res)
+			rg.pass_read(g, wireframe_cull_pass, transparency_seq_res)
+			rg.pass_write(g, wireframe_cull_pass, transparency_seq_res, .DONT_CARE)
+			rg.pass_write(g, wireframe_cull_pass, transparent_draw_cmd_res, .DONT_CARE)
+			rg.pass_write(g, wireframe_cull_pass, transparent_draw_count_res, .DONT_CARE)
+			state.wireframe_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
+				manager   = self,
+				cam_index = cam_id,
+				cam_res   = cam_res,
+				pipeline  = self.transparency.wireframe_pipeline,
+				draw_list = .TRANSPARENT,
+			}
+			wireframe_render_pass := rg.add_pass(
+				g,
+				"wireframe",
+				transparency_render_pass_execute,
+				&state.wireframe_render_ctxs[cam_idx],
+			)
+			rg.pass_read(g, wireframe_render_pass, transparency_seq_res)
+			rg.pass_write(g, wireframe_render_pass, transparency_seq_res, .DONT_CARE)
+			rg.pass_read(g, wireframe_render_pass, transparent_draw_cmd_res)
+			rg.pass_read(g, wireframe_render_pass, transparent_draw_count_res)
+			rg.pass_read_write(g, wireframe_render_pass, final_image_res)
+			rg.pass_read_write(g, wireframe_render_pass, depth_res)
+
+			state.random_color_cull_ctxs[cam_idx] = TransparencyCullPassCtx {
+				manager   = self,
+				gctx      = gctx,
+				cam_index = cam_id,
+				cam_res   = cam_res,
+				include   = NodeFlagSet{.VISIBLE, .MATERIAL_RANDOM_COLOR},
+				exclude   = NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
+				draw_list = .TRANSPARENT,
+			}
+			random_color_cull_pass := rg.add_pass(
+				g,
+				"random_color_cull",
+				transparency_cull_pass_execute,
+				&state.random_color_cull_ctxs[cam_idx],
+			)
+			rg.pass_read(g, random_color_cull_pass, final_image_res)
+			rg.pass_read(g, random_color_cull_pass, depth_res)
+			rg.pass_read(g, random_color_cull_pass, transparency_seq_res)
+			rg.pass_write(g, random_color_cull_pass, transparency_seq_res, .DONT_CARE)
+			rg.pass_write(g, random_color_cull_pass, transparent_draw_cmd_res, .DONT_CARE)
+			rg.pass_write(g, random_color_cull_pass, transparent_draw_count_res, .DONT_CARE)
+			state.random_color_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
+				manager   = self,
+				cam_index = cam_id,
+				cam_res   = cam_res,
+				pipeline  = self.transparency.random_color_pipeline,
+				draw_list = .TRANSPARENT,
+			}
+			random_color_render_pass := rg.add_pass(
+				g,
+				"random_color",
+				transparency_render_pass_execute,
+				&state.random_color_render_ctxs[cam_idx],
+			)
+			rg.pass_read(g, random_color_render_pass, transparency_seq_res)
+			rg.pass_write(g, random_color_render_pass, transparency_seq_res, .DONT_CARE)
+			rg.pass_read(g, random_color_render_pass, transparent_draw_cmd_res)
+			rg.pass_read(g, random_color_render_pass, transparent_draw_count_res)
+			rg.pass_read_write(g, random_color_render_pass, final_image_res)
+			rg.pass_read_write(g, random_color_render_pass, depth_res)
+
+			state.sprite_cull_ctxs[cam_idx] = TransparencyCullPassCtx {
+				manager   = self,
+				gctx      = gctx,
+				cam_index = cam_id,
+				cam_res   = cam_res,
+				include   = NodeFlagSet{.VISIBLE, .MATERIAL_SPRITE},
+				exclude   = NodeFlagSet{},
+				draw_list = .SPRITE,
+			}
+			sprite_cull_pass := rg.add_pass(
+				g,
+				"sprite_cull",
+				transparency_cull_pass_execute,
+				&state.sprite_cull_ctxs[cam_idx],
+			)
+			rg.pass_read(g, sprite_cull_pass, final_image_res)
+			rg.pass_read(g, sprite_cull_pass, depth_res)
+			rg.pass_read(g, sprite_cull_pass, transparency_seq_res)
+			rg.pass_write(g, sprite_cull_pass, transparency_seq_res, .DONT_CARE)
+			rg.pass_write(g, sprite_cull_pass, sprite_draw_cmd_res, .DONT_CARE)
+			rg.pass_write(g, sprite_cull_pass, sprite_draw_count_res, .DONT_CARE)
+			state.sprite_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
+				manager   = self,
+				cam_index = cam_id,
+				cam_res   = cam_res,
+				pipeline  = self.transparency.sprite_pipeline,
+				draw_list = .SPRITE,
+			}
+			sprite_render_pass := rg.add_pass(
+				g,
+				"sprite",
+				transparency_render_pass_execute,
+				&state.sprite_render_ctxs[cam_idx],
+			)
+			rg.pass_read(g, sprite_render_pass, transparency_seq_res)
+			rg.pass_write(g, sprite_render_pass, transparency_seq_res, .DONT_CARE)
+			rg.pass_read(g, sprite_render_pass, sprite_draw_cmd_res)
+			rg.pass_read(g, sprite_render_pass, sprite_draw_count_res)
+			rg.pass_read_write(g, sprite_render_pass, final_image_res)
+			rg.pass_read_write(g, sprite_render_pass, depth_res)
 		}
 
 		// Debug pass
@@ -801,6 +1155,26 @@ build_default_render_graph :: proc(
 		rg.pass_read(g, post_process_pass, main_final_res)
 	}
 	rg.pass_write(g, post_process_pass, swapchain_res, .CLEAR)
+
+	// UI pass: overlays UI on top of swapchain
+	state.ui_ctx = UIPassCtx {
+		manager          = self,
+		gctx             = gctx,
+		swapchain_extent = swapchain_extent,
+		swapchain_view   = swapchain_view,
+	}
+	ui_pass := rg.add_pass(g, "ui", ui_pass_execute, &state.ui_ctx)
+	rg.pass_read_write(g, ui_pass, swapchain_res)
+
+	// Debug UI pass: overlays debug UI after UI
+	state.debug_ui_ctx = DebugUIPassCtx {
+		manager          = self,
+		enabled          = debug_ui_enabled,
+		swapchain_extent = swapchain_extent,
+		swapchain_view   = swapchain_view,
+	}
+	debug_ui_pass := rg.add_pass(g, "debug_ui", debug_ui_pass_execute, &state.debug_ui_ctx)
+	rg.pass_read_write(g, debug_ui_pass, swapchain_res)
 
 	// Compile the graph
 	rg.compile(g)

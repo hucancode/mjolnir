@@ -21,7 +21,6 @@ import nav "navigation"
 import "render"
 import "render/camera"
 import rd "render/data"
-import "render/debug_ui"
 import rg "render/graph"
 import oc "render/occlusion_culling"
 import "render/particles"
@@ -1227,12 +1226,9 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   command_buffer := self.render.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
 
-  // Shadow depth pass runs before the graph (shadow map resources not yet tracked by graph)
-  render.render_shadow_depth(
-    &self.render,
-    self.frame_index,
-    active_render_lights[:],
-  ) or_return
+	// Build debug UI content before graph execution so debug_ui pass can consume it.
+	populate_debug_ui(self)
+	mu.end(&self.render.debug_ui.ctx)
 
   // Build default render graph for this frame
   render.build_default_render_graph(
@@ -1243,6 +1239,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
+    self.debug_ui_enabled,
     &self.render.default_graph_state,
   )
 
@@ -1263,15 +1260,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   )
 
-  // UI pass (renders on top of swapchain after graph)
-  render.record_ui_pass(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
-    self.swapchain.views[self.swapchain.image_index],
-    self.swapchain.extent,
-  )
-
   // Compute commands (depth pyramid + culling for next frame)
   render.record_compute_commands(
     &self.render,
@@ -1281,24 +1269,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
 
   if self.gctx.has_async_compute {
     gpu.end_record(compute_cmd_buffer) or_return
-  }
-
-  // Debug UI (always rendered inline)
-  populate_debug_ui(self)
-  mu.end(&self.render.debug_ui.ctx)
-  if self.debug_ui_enabled {
-    debug_ui.begin_pass(
-      &self.render.debug_ui,
-      command_buffer,
-      self.swapchain.views[self.swapchain.image_index],
-      self.swapchain.extent,
-    )
-    debug_ui.render(
-      &self.render.debug_ui,
-      command_buffer,
-      self.render.texture_manager.descriptor_set,
-    )
-    debug_ui.end_pass(&self.render.debug_ui, command_buffer)
   }
 
   // Transition swapchain image to present layout

@@ -781,40 +781,12 @@ shadow_render_depth :: proc(
     switch self.slot_kind[slot] {
     case .SPOT:
       spot := &self.spot_lights[slot]
-      gpu.buffer_barrier(
-        command_buffer,
-        spot.draw_commands[frame_index].buffer,
-        vk.DeviceSize(spot.draw_commands[frame_index].bytes_count),
-        {.SHADER_WRITE},
-        {.INDIRECT_COMMAND_READ},
-        {.COMPUTE_SHADER},
-        {.DRAW_INDIRECT},
-      )
-      gpu.buffer_barrier(
-        command_buffer,
-        spot.draw_count[frame_index].buffer,
-        vk.DeviceSize(spot.draw_count[frame_index].bytes_count),
-        {.SHADER_WRITE},
-        {.INDIRECT_COMMAND_READ},
-        {.COMPUTE_SHADER},
-        {.DRAW_INDIRECT},
-      )
+      // All barriers removed - graph handles all transitions
       depth_texture := gpu.get_texture_2d(
         texture_manager,
         spot.shadow_map[frame_index],
       )
       if depth_texture == nil do continue
-      gpu.image_barrier(
-        command_buffer,
-        depth_texture.image,
-        .UNDEFINED,
-        .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        {},
-        {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        {.TOP_OF_PIPE},
-        {.EARLY_FRAGMENT_TESTS},
-        {.DEPTH},
-      )
       depth_attachment := gpu.create_depth_attachment(
         depth_texture,
         .CLEAR,
@@ -865,53 +837,14 @@ shadow_render_depth :: proc(
         u32(size_of(vk.DrawIndexedIndirectCommand)),
       )
       vk.CmdEndRendering(command_buffer)
-      gpu.image_barrier(
-        command_buffer,
-        depth_texture.image,
-        .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-        {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        {.SHADER_READ},
-        {.LATE_FRAGMENT_TESTS},
-        {.FRAGMENT_SHADER},
-        {.DEPTH},
-      )
     case .DIRECTIONAL:
       directional := &self.directional_lights[slot]
-      gpu.buffer_barrier(
-        command_buffer,
-        directional.draw_commands[frame_index].buffer,
-        vk.DeviceSize(directional.draw_commands[frame_index].bytes_count),
-        {.SHADER_WRITE},
-        {.INDIRECT_COMMAND_READ},
-        {.COMPUTE_SHADER},
-        {.DRAW_INDIRECT},
-      )
-      gpu.buffer_barrier(
-        command_buffer,
-        directional.draw_count[frame_index].buffer,
-        vk.DeviceSize(directional.draw_count[frame_index].bytes_count),
-        {.SHADER_WRITE},
-        {.INDIRECT_COMMAND_READ},
-        {.COMPUTE_SHADER},
-        {.DRAW_INDIRECT},
-      )
+      // All barriers removed - graph handles all transitions
       depth_texture := gpu.get_texture_2d(
         texture_manager,
         directional.shadow_map[frame_index],
       )
       if depth_texture == nil do continue
-      gpu.image_barrier(
-        command_buffer,
-        depth_texture.image,
-        .UNDEFINED,
-        .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        {},
-        {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        {.TOP_OF_PIPE},
-        {.EARLY_FRAGMENT_TESTS},
-        {.DEPTH},
-      )
       depth_attachment := gpu.create_depth_attachment(
         depth_texture,
         .CLEAR,
@@ -962,54 +895,14 @@ shadow_render_depth :: proc(
         u32(size_of(vk.DrawIndexedIndirectCommand)),
       )
       vk.CmdEndRendering(command_buffer)
-      gpu.image_barrier(
-        command_buffer,
-        depth_texture.image,
-        .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-        {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        {.SHADER_READ},
-        {.LATE_FRAGMENT_TESTS},
-        {.FRAGMENT_SHADER},
-        {.DEPTH},
-      )
     case .POINT:
       point := &self.point_lights[slot]
-      gpu.buffer_barrier(
-        command_buffer,
-        point.draw_commands[frame_index].buffer,
-        vk.DeviceSize(point.draw_commands[frame_index].bytes_count),
-        {.SHADER_WRITE},
-        {.INDIRECT_COMMAND_READ},
-        {.COMPUTE_SHADER},
-        {.DRAW_INDIRECT},
-      )
-      gpu.buffer_barrier(
-        command_buffer,
-        point.draw_count[frame_index].buffer,
-        vk.DeviceSize(point.draw_count[frame_index].bytes_count),
-        {.SHADER_WRITE},
-        {.INDIRECT_COMMAND_READ},
-        {.COMPUTE_SHADER},
-        {.DRAW_INDIRECT},
-      )
+      // All barriers removed - graph handles all transitions
       depth_cube := gpu.get_texture_cube(
         texture_manager,
         point.shadow_cube[frame_index],
       )
       if depth_cube == nil do continue
-      gpu.image_barrier(
-        command_buffer,
-        depth_cube.image,
-        .UNDEFINED,
-        .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        {},
-        {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        {.TOP_OF_PIPE},
-        {.EARLY_FRAGMENT_TESTS},
-        {.DEPTH},
-        layer_count = 6,
-      )
       depth_attachment := gpu.create_cube_depth_attachment(
         depth_cube,
         .CLEAR,
@@ -1063,18 +956,6 @@ shadow_render_depth :: proc(
         u32(size_of(vk.DrawIndexedIndirectCommand)),
       )
       vk.CmdEndRendering(command_buffer)
-      gpu.image_barrier(
-        command_buffer,
-        depth_cube.image,
-        .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-        {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        {.SHADER_READ},
-        {.LATE_FRAGMENT_TESTS},
-        {.FRAGMENT_SHADER},
-        {.DEPTH},
-        layer_count = 6,
-      )
     }
   }
 }
