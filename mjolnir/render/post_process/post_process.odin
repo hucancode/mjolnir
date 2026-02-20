@@ -552,7 +552,7 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   texture_manager: ^gpu.TextureManager,
   frame_index: u32,
 ) {

@@ -50,10 +50,6 @@ layout(set = 4, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
-layout(push_constant) uniform PushConstants {
-    uint camera_index;
-};
-
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
 layout(location = 2) in vec3 normal;

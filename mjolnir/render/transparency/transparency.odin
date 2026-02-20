@@ -409,7 +409,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
@@ -444,7 +444,7 @@ begin_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   pipeline: vk.Pipeline,
   cameras_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,

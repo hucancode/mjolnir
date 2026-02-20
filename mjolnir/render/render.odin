@@ -13,6 +13,7 @@ import "core:math/linalg"
 import rd "data"
 import "debug"
 import "debug_ui"
+import rg "graph"
 import "geometry"
 import light "lighting"
 import oc "occlusion_culling"
@@ -73,6 +74,7 @@ Manager :: struct {
   ui:                      ui_render.Renderer,
   ui_commands:             [dynamic]cmd.RenderCommand, // Staged commands from UI module
   cameras:                 map[u32]camera.Camera,
+  camera_resources:        map[u32]camera.CameraResources,
   meshes:                  map[u32]Mesh,
   occlusion_culling:       oc.System,
   shadow:                  light.ShadowSystem,
@@ -99,6 +101,9 @@ Manager :: struct {
   bone_matrix_slab:        cont.SlabAllocator,
   bone_matrix_offsets:     map[u32]u32,
   texture_manager:         gpu.TextureManager,
+  // Render graph (Phase 1+)
+  graph:                   rg.Graph,
+  default_graph_state:     DefaultGraphState,
 }
 
 init :: proc(
@@ -111,8 +116,10 @@ init :: proc(
   ret: vk.Result,
 ) {
   self.cameras = make(map[u32]camera.Camera)
+  self.camera_resources = make(map[u32]camera.CameraResources)
   self.meshes = make(map[u32]Mesh)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
+  rg.init(&self.graph)
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
     gpu.free_command_buffer(gctx, ..self.command_buffers[:])
@@ -468,9 +475,10 @@ setup :: proc(
 
 teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   // Destroy camera GPU resources (VkImages, draw command buffers) before texture_manager goes away
-  for _, &cam in self.cameras {
-    camera.destroy_gpu(gctx, &cam, &self.texture_manager)
+  for _, &cam_res in self.camera_resources {
+    camera.destroy_gpu(gctx, &cam_res, &self.texture_manager)
   }
+  clear(&self.camera_resources)
   clear(&self.cameras)
   ui_render.teardown(&self.ui, gctx)
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
@@ -498,6 +506,9 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
 ensure_camera_slot :: proc(self: ^Manager, handle: u32) {
   if handle not_in self.cameras {
     self.cameras[handle] = {}
+  }
+  if handle not_in self.camera_resources {
+    self.camera_resources[handle] = {}
   }
 }
 
@@ -528,6 +539,7 @@ sync_camera_from_world :: proc(
   world_camera: ^camera.Camera,
   swapchain_format: vk.Format,
 ) {
+  // intentionally empty
 }
 
 clear_mesh :: proc(self: ^Manager, handle: u32) {
@@ -546,13 +558,13 @@ record_compute_commands :: proc(
   // Compute for frame N prepares data for frame N+1
   // Buffer indices with rd.FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
   next_frame_index := alg.next(frame_index, rd.FRAMES_IN_FLIGHT)
-  for cam_index, &cam in self.cameras {
+  for cam_index, &cam_res in self.camera_resources {
     // Only build pyramid if enabled for this camera
     oc.build_pyramid(
       &self.occlusion_culling,
       gctx,
       cmd,
-      &cam,
+      &cam_res,
       u32(cam_index),
       frame_index,
     ) // Build pyramid[N]
@@ -560,7 +572,7 @@ record_compute_commands :: proc(
       &self.occlusion_culling,
       gctx,
       cmd,
-      &cam,
+      &cam_res,
       u32(cam_index),
       next_frame_index,
       {.VISIBLE},
@@ -635,7 +647,9 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   cont.slab_destroy(&self.bone_matrix_slab)
   gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
   delete(self.cameras)
+  delete(self.camera_resources)
   delete(self.meshes)
+  rg.destroy(&self.graph)
 }
 
 resize :: proc(
@@ -689,523 +703,6 @@ render_shadow_depth :: proc(
     self.mesh_manager.index_buffer.buffer,
     frame_index,
   )
-  return .SUCCESS
-}
-
-render_camera_depth :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  for cam_index, &cam in self.cameras {
-    oc.render_depth(
-      &self.occlusion_culling,
-      gctx,
-      cmd,
-      &cam,
-      &self.texture_manager,
-      u32(cam_index),
-      frame_index,
-      {.VISIBLE},
-      {
-        .MATERIAL_TRANSPARENT,
-        .MATERIAL_WIREFRAME,
-        .MATERIAL_RANDOM_COLOR,
-        .MATERIAL_LINE_STRIP,
-      },
-      self.camera_buffer.descriptor_sets[frame_index],
-      self.bone_buffer.descriptor_sets[frame_index],
-      self.node_data_buffer.descriptor_set,
-      self.mesh_data_buffer.descriptor_set,
-      self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-      self.mesh_manager.vertex_buffer.buffer,
-      self.mesh_manager.index_buffer.buffer,
-    )
-  }
-  return .SUCCESS
-}
-
-record_geometry_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  geometry.begin_pass(cam, &self.texture_manager, cmd, frame_index)
-  geometry.render(
-    &self.geometry,
-    cam,
-    cam_index,
-    frame_index,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.opaque_draw_commands[frame_index].buffer,
-    cam.opaque_draw_count[frame_index].buffer,
-  )
-  geometry.end_pass(cam, &self.texture_manager, cmd, frame_index)
-  return .SUCCESS
-}
-
-record_lighting_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  active_lights: []rd.LightHandle,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  light.begin_ambient_pass(
-    &self.lighting,
-    cam,
-    &self.texture_manager,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    frame_index,
-  )
-  light.render_ambient(&self.lighting, cam_index, cam, cmd, frame_index)
-  light.end_ambient_pass(cmd)
-  light.begin_pass(
-    &self.lighting,
-    cam,
-    &self.texture_manager,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.lights_buffer.descriptor_set,
-    self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
-    frame_index,
-  )
-  shadow_texture_indices: [rd.MAX_LIGHTS]u32
-  for i in 0 ..< rd.MAX_LIGHTS {
-    shadow_texture_indices[i] = 0xFFFFFFFF
-  }
-  for handle in active_lights {
-    light_data := gpu.get(&self.lights_buffer.buffer, handle.index)
-    shadow_texture_indices[handle.index] = light.shadow_get_texture_index(
-      &self.shadow,
-      light_data.type,
-      light_data.shadow_index,
-      frame_index,
-    )
-  }
-  light.render(
-    &self.lighting,
-    cam_index,
-    cam,
-    &shadow_texture_indices,
-    cmd,
-    &self.lights_buffer,
-    active_lights,
-    frame_index,
-  )
-  light.end_pass(cmd)
-  return .SUCCESS
-}
-
-record_particles_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  particles.begin_pass(
-    &self.particles,
-    cmd,
-    cam,
-    &self.texture_manager,
-    frame_index,
-  )
-  particles.render(
-    &self.particles,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-  )
-  particles.end_pass(cmd)
-  return .SUCCESS
-}
-
-record_transparency_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  transparency.begin_pass(
-    &self.transparency,
-    cam,
-    &self.texture_manager,
-    cmd,
-    frame_index,
-  )
-  // Render transparent objects
-  oc.perform_culling(
-    &self.occlusion_culling,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT},
-    NodeFlagSet {
-      .MATERIAL_WIREFRAME,
-      .MATERIAL_RANDOM_COLOR,
-      .MATERIAL_LINE_STRIP,
-      .MATERIAL_SPRITE,
-    },
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.transparent_pipeline,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-  )
-  // Render wireframe objects
-  oc.perform_culling(
-    &self.occlusion_culling,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME},
-    NodeFlagSet {
-      .MATERIAL_TRANSPARENT,
-      .MATERIAL_RANDOM_COLOR,
-      .MATERIAL_LINE_STRIP,
-      .MATERIAL_SPRITE,
-    },
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.wireframe_pipeline,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-  )
-  // Render random_color objects
-  oc.perform_culling(
-    &self.occlusion_culling,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_RANDOM_COLOR},
-    NodeFlagSet {
-      .MATERIAL_TRANSPARENT,
-      .MATERIAL_WIREFRAME,
-      .MATERIAL_LINE_STRIP,
-      .MATERIAL_SPRITE,
-    },
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.random_color_pipeline,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-  )
-  // Render line_strip objects
-  oc.perform_culling(
-    &self.occlusion_culling,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_LINE_STRIP},
-    NodeFlagSet {
-      .MATERIAL_TRANSPARENT,
-      .MATERIAL_WIREFRAME,
-      .MATERIAL_RANDOM_COLOR,
-      .MATERIAL_SPRITE,
-    },
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.line_strip_pipeline,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-  )
-  // Render sprites
-  oc.perform_culling(
-    &self.occlusion_culling,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_SPRITE},
-    NodeFlagSet{},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.sprite_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.sprite_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.sprite_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.sprite_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.sprite_pipeline,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
-    cam.sprite_draw_commands[frame_index].buffer,
-    cam.sprite_draw_count[frame_index].buffer,
-  )
-
-  transparency.end_pass(&self.transparency, cmd)
-  return .SUCCESS
-}
-
-record_debug_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  // Skip debug rendering if no instances are staged
-  if len(self.debug_renderer.bone_instances) == 0 do return .SUCCESS
-
-  cmd := self.command_buffers[frame_index]
-
-  // Begin debug render pass (renders on top of transparency)
-  // Skip rendering if attachments are missing
-  if !debug.begin_pass(
-    &self.debug_renderer,
-    cam,
-    &self.texture_manager,
-    cmd,
-    frame_index,
-  ) {
-    return .SUCCESS
-  }
-
-  // Render debug visualization (bones, etc.)
-  debug.render(
-    &self.debug_renderer,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    cam_index,
-  ) or_return
-
-  debug.end_pass(&self.debug_renderer, cmd)
-
-  return .SUCCESS
-}
-
-record_post_process_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam: ^camera.Camera,
-  swapchain_extent: vk.Extent2D,
-  swapchain_image: vk.Image,
-  swapchain_view: vk.ImageView,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  if final_image := gpu.get_texture_2d(
-    &self.texture_manager,
-    cam.attachments[.FINAL_IMAGE][frame_index],
-  ); final_image != nil {
-    gpu.image_barrier(
-      cmd,
-      final_image.image,
-      .COLOR_ATTACHMENT_OPTIMAL,
-      .SHADER_READ_ONLY_OPTIMAL,
-      {.COLOR_ATTACHMENT_WRITE},
-      {.SHADER_READ},
-      {.COLOR_ATTACHMENT_OUTPUT},
-      {.FRAGMENT_SHADER},
-      {.COLOR},
-    )
-  }
-  gpu.image_barrier(
-    cmd,
-    swapchain_image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  post_process.begin_pass(&self.post_process, cmd, swapchain_extent)
-  post_process.render(
-    &self.post_process,
-    cmd,
-    swapchain_extent,
-    swapchain_view,
-    cam,
-    &self.texture_manager,
-    frame_index,
-  )
-  post_process.end_pass(&self.post_process, cmd)
   return .SUCCESS
 }
 

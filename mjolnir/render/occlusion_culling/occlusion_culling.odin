@@ -171,7 +171,7 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
 
 stats :: proc(
   self: ^System,
-  camera: ^cam.Camera,
+  camera: ^cam.CameraResources,
   camera_index: u32,
   frame_index: u32,
 ) -> CullingStats {
@@ -191,7 +191,7 @@ render_depth :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
-  camera: ^cam.Camera,
+  camera: ^cam.CameraResources,
   texture_manager: ^gpu.TextureManager,
   camera_index: u32,
   frame_index: u32,
@@ -208,17 +208,6 @@ render_depth :: proc(
   depth_texture := gpu.get_texture_2d(
     texture_manager,
     camera.attachments[.DEPTH][frame_index],
-  )
-  gpu.image_barrier(
-    command_buffer,
-    depth_texture.image,
-    .UNDEFINED,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    {},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.EARLY_FRAGMENT_TESTS},
-    {.DEPTH},
   )
   depth_attachment := gpu.create_depth_attachment(
     depth_texture,
@@ -263,19 +252,6 @@ render_depth :: proc(
     u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
   vk.CmdEndRendering(command_buffer)
-  // Barrier: depth writes complete, transition for compute + fragment shader reads
-  // Pyramid generation (compute) and lighting (fragment) both sample this depth
-  gpu.image_barrier(
-    command_buffer,
-    depth_texture.image,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.LATE_FRAGMENT_TESTS},
-    {.COMPUTE_SHADER, .FRAGMENT_SHADER},
-    {.DEPTH},
-  )
 }
 
 // STEP 3: Build pyramid - reads depth[N-1], builds pyramid[N]
@@ -283,7 +259,7 @@ build_pyramid :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
-  camera: ^cam.Camera,
+  camera: ^cam.CameraResources,
   camera_index: u32,
   frame_index: u32, // Which pyramid to write to
 ) {
@@ -358,7 +334,7 @@ perform_culling :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
-  camera: ^cam.Camera,
+  camera: ^cam.CameraResources,
   camera_index: u32,
   frame_index: u32,
   include_flags: rd.NodeFlagSet,

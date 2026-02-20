@@ -68,7 +68,7 @@ LightPushConstant :: struct {
 
 begin_ambient_pass :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   cameras_descriptor_set: vk.DescriptorSet,
@@ -101,7 +101,7 @@ begin_ambient_pass :: proc(
 render_ambient :: proc(
   self: ^Renderer,
   camera_handle: u32,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
 ) {
@@ -459,7 +459,7 @@ recreate_images :: proc(
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   cameras_descriptor_set: vk.DescriptorSet,
@@ -499,7 +499,7 @@ begin_pass :: proc(
 render :: proc(
   self: ^Renderer,
   camera_handle: u32,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
   command_buffer: vk.CommandBuffer,
   lights_buffer: ^gpu.BindlessBuffer(d.Light),

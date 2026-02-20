@@ -629,7 +629,7 @@ create_render_pipeline :: proc(
 begin_pass :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   texture_manager: ^gpu.TextureManager,
   frame_index: u32,
 ) {
@@ -664,7 +664,7 @@ begin_pass :: proc(
 render :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   camera_index: u32,
   frame_index: u32,
   cameras_descriptor_set: vk.DescriptorSet,

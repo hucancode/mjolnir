@@ -22,6 +22,7 @@ import "render"
 import "render/camera"
 import rd "render/data"
 import "render/debug_ui"
+import rg "render/graph"
 import oc "render/occlusion_culling"
 import "render/particles"
 import ui_module "ui"
@@ -913,6 +914,9 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     if is_new_camera {
       self.render.cameras[handle.index] = {}
     }
+    if handle.index not_in self.render.camera_resources {
+      self.render.camera_resources[handle.index] = {}
+    }
     // Sync camera configuration
     cam := &self.render.cameras[handle.index]
     cam.enabled_passes =
@@ -934,9 +938,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     )
     // Initialize GPU resources for new cameras
     if is_new_camera {
+      cam_res := &self.render.camera_resources[handle.index]
       camera.init(
         &self.gctx,
-        cam,
+        cam_res,
         &self.render.texture_manager,
         vk.Extent2D{world_camera.extent[0], world_camera.extent[1]},
         self.swapchain.format.format,
@@ -946,7 +951,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       ) or_return
       camera.allocate_descriptors(
         &self.gctx,
-        cam,
+        cam_res,
         &self.render.texture_manager,
         &self.render.occlusion_culling.depth_descriptor_layout,
         &self.render.occlusion_culling.depth_reduce_descriptor_layout,
@@ -1108,10 +1113,10 @@ populate_debug_ui :: proc(self: ^Engine) {
       ),
     )
     if main_camera := get_main_camera(self); main_camera != nil {
-      main_camera := &self.render.cameras[self.world.main_camera.index]
+      main_camera_res := &self.render.camera_resources[self.world.main_camera.index]
       main_stats := oc.stats(
         &self.render.occlusion_culling,
-        main_camera,
+        main_camera_res,
         self.world.main_camera.index,
         self.frame_index,
       )
@@ -1179,8 +1184,8 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         generation = entry.generation,
       },
     )
-    if camera_gpu := &engine.render.cameras[u32(cam_index)];
-       camera_gpu != nil {
+    if _, ok := engine.render.camera_resources[u32(cam_index)]; ok {
+      camera_gpu := &engine.render.camera_resources[u32(cam_index)]
       camera.resize(
         &engine.gctx,
         camera_gpu,
@@ -1221,78 +1226,27 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   command_buffer := self.render.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
+
+  // Shadow depth pass runs before the graph (shadow map resources not yet tracked by graph)
   render.render_shadow_depth(
     &self.render,
     self.frame_index,
     active_render_lights[:],
   ) or_return
-  render.render_camera_depth(
+
+  // Build default render graph for this frame
+  render.build_default_render_graph(
     &self.render,
-    self.frame_index,
     &self.gctx,
-  ) or_return
-  for &entry, cam_index in self.world.cameras.entries {
-    if !entry.active do continue
-    world_cam := &entry.item
-    render_cam := &self.render.cameras[u32(cam_index)]
-    if world.PassType.GEOMETRY in world_cam.enabled_passes {
-      render.record_geometry_pass(
-        &self.render,
-        self.frame_index,
-        u32(cam_index),
-        render_cam,
-      )
-    }
-    if world.PassType.LIGHTING in world_cam.enabled_passes {
-      render.record_lighting_pass(
-        &self.render,
-        self.frame_index,
-        active_render_lights[:],
-        u32(cam_index),
-        render_cam,
-      )
-    }
-    if world.PassType.PARTICLES in world_cam.enabled_passes {
-      render.record_particles_pass(
-        &self.render,
-        self.frame_index,
-        u32(cam_index),
-        render_cam,
-      )
-    }
-    if world.PassType.TRANSPARENCY in world_cam.enabled_passes {
-      render.record_transparency_pass(
-        &self.render,
-        self.frame_index,
-        &self.gctx,
-        u32(cam_index),
-        render_cam,
-      )
-    }
-  }
-  main_render_cam := &self.render.cameras[self.world.main_camera.index]
-  // Debug rendering pass (bones, etc.) - renders after transparency
-  render.record_debug_pass(
-    &self.render,
-    self.frame_index,
+    active_render_lights[:],
     self.world.main_camera.index,
-    main_render_cam,
-  )
-  render.record_post_process_pass(
-    &self.render,
-    self.frame_index,
-    main_render_cam,
-    self.swapchain.extent,
     self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
-  )
-  render.record_ui_pass(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
-    self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
+    &self.render.default_graph_state,
   )
+
+  // Execute the compiled graph (graphics queue)
   compute_cmd_buffer: vk.CommandBuffer
   if self.gctx.has_async_compute {
     compute_cmd_buffer = self.render.compute_command_buffers[self.frame_index]
@@ -1300,14 +1254,36 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   } else {
     compute_cmd_buffer = command_buffer
   }
+
+  // Execute graphics queue passes
+  rg.execute(
+    &self.render.graph,
+    command_buffer,
+    compute_cmd_buffer,
+    self.frame_index,
+  )
+
+  // UI pass (renders on top of swapchain after graph)
+  render.record_ui_pass(
+    &self.render,
+    self.frame_index,
+    &self.gctx,
+    self.swapchain.views[self.swapchain.image_index],
+    self.swapchain.extent,
+  )
+
+  // Compute commands (depth pyramid + culling for next frame)
   render.record_compute_commands(
     &self.render,
     self.frame_index,
     &self.gctx,
   ) or_return
+
   if self.gctx.has_async_compute {
     gpu.end_record(compute_cmd_buffer) or_return
   }
+
+  // Debug UI (always rendered inline)
   populate_debug_ui(self)
   mu.end(&self.render.debug_ui.ctx)
   if self.debug_ui_enabled {
@@ -1324,6 +1300,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     )
     debug_ui.end_pass(&self.render.debug_ui, command_buffer)
   }
+
   // Transition swapchain image to present layout
   present_barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -1341,13 +1318,11 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     {.COLOR_ATTACHMENT_OUTPUT},
     {.BOTTOM_OF_PIPE},
     {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &present_barrier,
+    0, nil,
+    0, nil,
+    1, &present_barrier,
   )
+
   gpu.end_record(command_buffer) or_return
   gpu.submit_queue_and_present(
     &self.gctx,

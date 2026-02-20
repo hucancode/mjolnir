@@ -139,7 +139,7 @@ init :: proc(
 }
 
 begin_pass :: proc(
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
@@ -169,73 +169,6 @@ begin_pass :: proc(
     texture_manager,
     camera.attachments[.FINAL_IMAGE][frame_index],
   )
-  // Transition all G-buffer images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
-  gpu.image_barrier(
-    command_buffer,
-    position_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    normal_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    albedo_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    metallic_roughness_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    emissive_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    final_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
   depth_texture := gpu.get_texture_2d(
     texture_manager,
     camera.attachments[.DEPTH][frame_index],
@@ -257,7 +190,7 @@ begin_pass :: proc(
 }
 
 end_pass :: proc(
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
@@ -344,7 +277,7 @@ end_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
+  camera: ^camera.CameraResources,
   camera_handle: u32,
   frame_index: u32,
   command_buffer: vk.CommandBuffer,
