@@ -12,7 +12,7 @@ import "vendor:glfw"
 
 LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
-ALL_POINT_LIGHT :: false
+ALL_POINT_LIGHT :: true
 portal_camera_handle: world.CameraHandle
 portal_material_handle: world.MaterialHandle
 

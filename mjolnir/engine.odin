@@ -1234,6 +1234,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   render.build_default_render_graph(
     &self.render,
     &self.gctx,
+    self.frame_index,
     active_render_lights[:],
     self.world.main_camera.index,
     self.swapchain.images[self.swapchain.image_index],

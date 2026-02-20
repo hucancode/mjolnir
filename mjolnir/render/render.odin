@@ -19,6 +19,7 @@ import light "lighting"
 import oc "occlusion_culling"
 import "particles"
 import "post_process"
+import shd "shadow"
 import "transparency"
 import ui_render "ui"
 import vk "vendor:vulkan"
@@ -61,6 +62,20 @@ DEBUG_BONE_PALETTE :: [6][4]f32 {
   {0.0, 1.0, 1.0, 1.0}, // Level 5: Cyan
 }
 
+ShadowResources :: struct {
+  shadow_data_buffer: gpu.PerFrameBindlessBuffer(
+    shd.ShadowData,
+    FRAMES_IN_FLIGHT,
+  ),
+  spot_lights:         [shd.MAX_SHADOW_MAPS]light.SpotLight,
+  directional_lights:  [shd.MAX_SHADOW_MAPS]light.DirectionalLight,
+  point_lights:        [shd.MAX_SHADOW_MAPS]light.PointLight,
+  slot_active:         [shd.MAX_SHADOW_MAPS]bool,      // Set by shadow_sync_lights each frame
+  slot_allocated:      [shd.MAX_SHADOW_MAPS]bool,      // Tracks which slots have GPU resources
+  slot_kind:           [shd.MAX_SHADOW_MAPS]LightType, // Current frame's light type
+  light_to_slot:       [rd.MAX_LIGHTS]u32,
+}
+
 Manager :: struct {
   command_buffers:         [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -77,7 +92,8 @@ Manager :: struct {
   camera_resources:        map[u32]camera.CameraResources,
   meshes:                  map[u32]Mesh,
   occlusion_culling:       oc.System,
-  shadow:                  light.ShadowSystem,
+  shadow:                  shd.ShadowSystem,
+  shadow_resources:        ShadowResources,
   linear_repeat_sampler:   vk.Sampler,
   linear_clamp_sampler:    vk.Sampler,
   nearest_repeat_sampler:  vk.Sampler,
@@ -311,9 +327,22 @@ init :: proc(
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
-  light.shadow_init(
+  gpu.per_frame_bindless_buffer_init(
+    &self.shadow_resources.shadow_data_buffer,
+    gctx,
+    shd.MAX_SHADOW_MAPS,
+    {.VERTEX, .FRAGMENT, .GEOMETRY, .COMPUTE},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.per_frame_bindless_buffer_destroy(
+      &self.shadow_resources.shadow_data_buffer,
+      gctx.device,
+    )
+  }
+  shd.shadow_init(
     &self.shadow,
     gctx,
+    self.shadow_resources.shadow_data_buffer.set_layout,
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
@@ -326,7 +355,7 @@ init :: proc(
     gctx,
     self.camera_buffer.set_layout,
     self.lights_buffer.set_layout,
-    self.shadow.shadow_data_buffer.set_layout,
+    self.shadow_resources.shadow_data_buffer.set_layout,
     self.texture_manager.set_layout,
     swapchain_extent.width,
     swapchain_extent.height,
@@ -447,13 +476,26 @@ setup :: proc(
   gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
   // Setup subsystem GPU resources
   light.setup(&self.lighting, gctx, &self.texture_manager) or_return
-  light.shadow_setup(
-    &self.shadow,
+  shd.shadow_setup_buffers(
+    &self.shadow_resources.shadow_data_buffer,
     gctx,
-    &self.texture_manager,
-    &self.node_data_buffer,
-    &self.mesh_data_buffer,
   ) or_return
+  // Pre-allocate all shadow slots upfront (following single-node API)
+  for slot in 0 ..< shd.MAX_SHADOW_MAPS {
+    shd.shadow_setup_slot(
+      &self.shadow,
+      &self.shadow_resources.shadow_data_buffer,
+      u32(slot),
+      &self.shadow_resources.spot_lights[slot],
+      &self.shadow_resources.directional_lights[slot],
+      &self.shadow_resources.point_lights[slot],
+      gctx,
+      &self.texture_manager,
+      &self.node_data_buffer,
+      &self.mesh_data_buffer,
+    ) or_return
+    self.shadow_resources.slot_allocated[slot] = true
+  }
   particles.setup(
     &self.particles,
     gctx,
@@ -484,7 +526,20 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
   post_process.teardown(&self.post_process, gctx, &self.texture_manager)
   particles.teardown(&self.particles, gctx)
-  light.shadow_teardown(&self.shadow, gctx, &self.texture_manager)
+  // Teardown shadow slots that were allocated
+  for slot in 0 ..< shd.MAX_SHADOW_MAPS {
+    if !self.shadow_resources.slot_allocated[slot] do continue
+    shd.shadow_teardown_slot(
+      &self.shadow,
+      u32(slot),
+      &self.shadow_resources.spot_lights[slot],
+      &self.shadow_resources.directional_lights[slot],
+      &self.shadow_resources.point_lights[slot],
+      gctx,
+      &self.texture_manager,
+    )
+    self.shadow_resources.slot_allocated[slot] = false
+  }
   light.teardown(&self.lighting, gctx, &self.texture_manager)
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
   // Zero all descriptor set handles (freed in bulk below)
@@ -618,7 +673,11 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   particles.shutdown(&self.particles, gctx)
   transparency.shutdown(&self.transparency, gctx)
   light.shutdown(&self.lighting, gctx)
-  light.shadow_shutdown(&self.shadow, gctx)
+  shd.shadow_shutdown(&self.shadow, gctx)
+  gpu.per_frame_bindless_buffer_destroy(
+    &self.shadow_resources.shadow_data_buffer,
+    gctx.device,
+  )
   geometry.shutdown(&self.geometry, gctx)
   oc.shutdown(&self.occlusion_culling, gctx)
   vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
@@ -905,7 +964,11 @@ upload_light_data :: proc(
   light_data: ^rd.Light,
 ) {
   gpu.write(&render.lights_buffer.buffer, light_data, int(index))
-  light.shadow_invalidate_light(&render.shadow, index)
+  shd.shadow_invalidate_light(
+    &render.shadow_resources.slot_active,
+    &render.shadow_resources.light_to_slot,
+    index,
+  )
 }
 
 upload_mesh_data :: proc(render: ^Manager, index: u32, mesh: ^Mesh) {

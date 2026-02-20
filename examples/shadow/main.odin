@@ -13,6 +13,7 @@ import "vendor:glfw"
 light_handle: world.NodeHandle
 
 main :: proc() {
+  context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update

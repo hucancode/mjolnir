@@ -496,14 +496,14 @@ begin_pass :: proc(
   )
 }
 
-render :: proc(
+render_light :: proc(
   self: ^Renderer,
   camera_handle: u32,
   camera: ^camera.CameraResources,
-  shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
+  light_index: u32,
+  shadow_map_index: u32,
   command_buffer: vk.CommandBuffer,
   lights_buffer: ^gpu.BindlessBuffer(d.Light),
-  active_lights: []d.LightHandle,
   frame_index: u32,
 ) {
   bind_and_draw_mesh :: proc(
@@ -519,7 +519,9 @@ render :: proc(
     )
     vk.CmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0)
   }
+  light := gpu.get(&lights_buffer.buffer, light_index)
   push_constant := LightPushConstant {
+    light_index            = light_index,
     scene_camera_idx       = camera_handle,
     position_texture_index = camera.attachments[.POSITION][frame_index].index,
     normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
@@ -527,34 +529,29 @@ render :: proc(
     metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
     emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
     input_image_index      = camera.attachments[.FINAL_IMAGE][frame_index].index,
+    shadow_map_index       = shadow_map_index,
   }
-  for handle in active_lights {
-    light := gpu.get(&lights_buffer.buffer, handle.index)
-    shadow_map_index := shadow_texture_indices[handle.index]
-    push_constant.light_index = handle.index
-    push_constant.shadow_map_index = shadow_map_index
-    vk.CmdPushConstants(
-      command_buffer,
-      self.lighting_pipeline_layout,
-      {.VERTEX, .FRAGMENT},
-      0,
-      size_of(push_constant),
-      &push_constant,
-    )
-    switch light.type {
-    case .POINT:
-      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
-      vk.CmdSetCullMode(command_buffer, {.FRONT})
-      bind_and_draw_mesh(&self.sphere_mesh, command_buffer)
-    case .DIRECTIONAL:
-      vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
-      vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(&self.triangle_mesh, command_buffer)
-    case .SPOT:
-      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
-      vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(&self.cone_mesh, command_buffer)
-    }
+  vk.CmdPushConstants(
+    command_buffer,
+    self.lighting_pipeline_layout,
+    {.VERTEX, .FRAGMENT},
+    0,
+    size_of(push_constant),
+    &push_constant,
+  )
+  switch light.type {
+  case .POINT:
+    vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
+    vk.CmdSetCullMode(command_buffer, {.FRONT})
+    bind_and_draw_mesh(&self.sphere_mesh, command_buffer)
+  case .DIRECTIONAL:
+    vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
+    vk.CmdSetCullMode(command_buffer, {.BACK})
+    bind_and_draw_mesh(&self.triangle_mesh, command_buffer)
+  case .SPOT:
+    vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
+    vk.CmdSetCullMode(command_buffer, {.BACK})
+    bind_and_draw_mesh(&self.cone_mesh, command_buffer)
   }
 }
 

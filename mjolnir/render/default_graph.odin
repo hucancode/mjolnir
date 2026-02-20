@@ -4,6 +4,7 @@ package render
 
 import "../gpu"
 import "camera"
+import "core:log"
 import rd "data"
 import "debug"
 import "debug_ui"
@@ -13,6 +14,7 @@ import light "lighting"
 import oc "occlusion_culling"
 import "particles"
 import "post_process"
+import shd "shadow"
 import "transparency"
 import ui_render "ui"
 import vk "vendor:vulkan"
@@ -32,12 +34,12 @@ DepthPassCtx :: struct {
 }
 
 ShadowComputePassCtx :: struct {
-	manager:       ^Manager,
-	active_lights: []rd.LightHandle,
-}
-
-ShadowDepthPassCtx :: struct {
-	manager: ^Manager,
+	manager:     ^Manager,
+	slot:        u32,
+	light_type:  LightType,
+	spot:        ^light.SpotLight,
+	directional: ^light.DirectionalLight,
+	point:       ^light.PointLight,
 }
 
 ShadowSlotCtx :: struct {
@@ -52,10 +54,17 @@ GeometryPassCtx :: struct {
 }
 
 LightingPassCtx :: struct {
-	manager:       ^Manager,
-	cam_index:     u32,
-	cam_res:       ^camera.CameraResources,
-	active_lights: []rd.LightHandle,
+	manager:          ^Manager,
+	cam_index:        u32,
+	cam_res:          ^camera.CameraResources,
+	light_index:      u32,
+	shadow_map_index: u32,
+}
+
+AmbientPassCtx :: struct {
+	manager:   ^Manager,
+	cam_index: u32,
+	cam_res:   ^camera.CameraResources,
 }
 
 ParticleSimulationPassCtx :: struct {
@@ -126,24 +135,65 @@ DebugUIPassCtx :: struct {
 @(private)
 shadow_compute_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^ShadowComputePassCtx)user_data
-	m := ctx.manager
-	light.shadow_sync_lights(
-		&m.shadow,
-		&m.lights_buffer,
-		ctx.active_lights,
-		frame_index,
+	descriptor_set: vk.DescriptorSet
+	draw_count_buffer: vk.Buffer
+	draw_count_size: vk.DeviceSize
+	switch ctx.light_type {
+	case .SPOT:
+		descriptor_set = ctx.spot.descriptor_sets[frame_index]
+		draw_count := &ctx.spot.draw_count[frame_index]
+		draw_count_buffer = draw_count.buffer
+		draw_count_size = vk.DeviceSize(draw_count.bytes_count)
+	case .DIRECTIONAL:
+		descriptor_set = ctx.directional.descriptor_sets[frame_index]
+		draw_count := &ctx.directional.draw_count[frame_index]
+		draw_count_buffer = draw_count.buffer
+		draw_count_size = vk.DeviceSize(draw_count.bytes_count)
+	case .POINT:
+		descriptor_set = ctx.point.descriptor_sets[frame_index]
+		draw_count := &ctx.point.draw_count[frame_index]
+		draw_count_buffer = draw_count.buffer
+		draw_count_size = vk.DeviceSize(draw_count.bytes_count)
+	}
+	shd.shadow_compute_draw_list(
+		&ctx.manager.shadow,
+		cmd,
+		ctx.slot,
+		transmute(rd.LightType)ctx.light_type,
+		descriptor_set,
+		draw_count_buffer,
+		draw_count_size,
 	)
-	light.shadow_compute_draw_lists(&m.shadow, cmd, frame_index)
 }
 
 @(private)
 shadow_depth_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
-	ctx := cast(^ShadowDepthPassCtx)user_data
+	ctx := cast(^ShadowComputePassCtx)user_data
 	m := ctx.manager
-	light.shadow_render_depth(
+	shadow_data_descriptor_set := m.shadow_resources.shadow_data_buffer.descriptor_sets[frame_index]
+	draw_commands_buffer: vk.Buffer
+	draw_count_buffer: vk.Buffer
+	shadow_map_2d: gpu.Texture2DHandle
+	shadow_map_cube: gpu.TextureCubeHandle
+	switch ctx.light_type {
+	case .SPOT:
+		draw_commands_buffer = ctx.spot.draw_commands[frame_index].buffer
+		draw_count_buffer = ctx.spot.draw_count[frame_index].buffer
+		shadow_map_2d = ctx.spot.shadow_map[frame_index]
+	case .DIRECTIONAL:
+		draw_commands_buffer = ctx.directional.draw_commands[frame_index].buffer
+		draw_count_buffer = ctx.directional.draw_count[frame_index].buffer
+		shadow_map_2d = ctx.directional.shadow_map[frame_index]
+	case .POINT:
+		draw_commands_buffer = ctx.point.draw_commands[frame_index].buffer
+		draw_count_buffer = ctx.point.draw_count[frame_index].buffer
+		shadow_map_cube = ctx.point.shadow_cube[frame_index]
+	}
+	shd.shadow_render_depth_slot(
 		&m.shadow,
 		cmd,
 		&m.texture_manager,
+		shadow_data_descriptor_set,
 		m.texture_manager.descriptor_set,
 		m.bone_buffer.descriptor_sets[frame_index],
 		m.material_buffer.descriptor_set,
@@ -152,7 +202,12 @@ shadow_depth_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_
 		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
 		m.mesh_manager.vertex_buffer.buffer,
 		m.mesh_manager.index_buffer.buffer,
-		frame_index,
+		ctx.slot,
+		transmute(rd.LightType)ctx.light_type,
+		draw_commands_buffer,
+		draw_count_buffer,
+		shadow_map_2d,
+		shadow_map_cube,
 	)
 }
 
@@ -269,8 +324,8 @@ geometry_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data
 }
 
 @(private)
-lighting_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
-	ctx := cast(^LightingPassCtx)user_data
+ambient_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^AmbientPassCtx)user_data
 	m := ctx.manager
 	light.begin_ambient_pass(
 		&m.lighting,
@@ -282,7 +337,12 @@ lighting_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data
 	)
 	light.render_ambient(&m.lighting, ctx.cam_index, ctx.cam_res, cmd, frame_index)
 	light.end_ambient_pass(cmd)
+}
 
+@(private)
+lighting_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^LightingPassCtx)user_data
+	m := ctx.manager
 	light.begin_pass(
 		&m.lighting,
 		ctx.cam_res,
@@ -290,30 +350,17 @@ lighting_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data
 		cmd,
 		m.camera_buffer.descriptor_sets[frame_index],
 		m.lights_buffer.descriptor_set,
-		m.shadow.shadow_data_buffer.descriptor_sets[frame_index],
+		m.shadow_resources.shadow_data_buffer.descriptor_sets[frame_index],
 		frame_index,
 	)
-	shadow_texture_indices: [rd.MAX_LIGHTS]u32
-	for i in 0 ..< rd.MAX_LIGHTS {
-		shadow_texture_indices[i] = 0xFFFFFFFF
-	}
-	for handle in ctx.active_lights {
-		light_data := gpu.get(&m.lights_buffer.buffer, handle.index)
-		shadow_texture_indices[handle.index] = light.shadow_get_texture_index(
-			&m.shadow,
-			light_data.type,
-			light_data.shadow_index,
-			frame_index,
-		)
-	}
-	light.render(
+	light.render_light(
 		&m.lighting,
 		ctx.cam_index,
 		ctx.cam_res,
-		&shadow_texture_indices,
+		ctx.light_index,
+		ctx.shadow_map_index,
 		cmd,
 		&m.lights_buffer,
-		ctx.active_lights,
 		frame_index,
 	)
 	light.end_pass(cmd)
@@ -452,12 +499,14 @@ debug_ui_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data
 
 // DefaultGraphState holds all the context structs for pass callbacks
 DefaultGraphState :: struct {
-	shadow_compute_ctx: ShadowComputePassCtx,
-	shadow_depth_ctx:   ShadowDepthPassCtx,
-	shadow_slot_ctxs:   [light.MAX_SHADOW_MAPS]ShadowSlotCtx,
+	shadow_compute_ctxs: [shd.MAX_SHADOW_MAPS]ShadowComputePassCtx,
+	shadow_compute_count: u32,
+	shadow_slot_ctxs:   [shd.MAX_SHADOW_MAPS]ShadowSlotCtx,
 	depth_ctxs:        [rd.MAX_ACTIVE_CAMERAS]DepthPassCtx,
 	geometry_ctxs:     [rd.MAX_ACTIVE_CAMERAS]GeometryPassCtx,
-	lighting_ctxs:     [rd.MAX_ACTIVE_CAMERAS]LightingPassCtx,
+	ambient_ctxs:      [rd.MAX_ACTIVE_CAMERAS]AmbientPassCtx,
+	lighting_ctxs:     [rd.MAX_ACTIVE_CAMERAS * rd.MAX_LIGHTS]LightingPassCtx,
+	lighting_count:    u32,
 	particle_simulation_ctx: ParticleSimulationPassCtx,
 	particles_ctxs:    [rd.MAX_ACTIVE_CAMERAS]ParticlesPassCtx,
 	transparency_cull_ctxs:      [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
@@ -479,6 +528,7 @@ DefaultGraphState :: struct {
 build_default_render_graph :: proc(
 	self: ^Manager,
 	gctx: ^gpu.GPUContext,
+	frame_index: u32,
 	active_lights: []rd.LightHandle,
 	main_cam_index: u32,
 	swapchain_image: vk.Image,
@@ -489,6 +539,18 @@ build_default_render_graph :: proc(
 ) {
 	g := &self.graph
 	rg.reset(g)
+	state.shadow_compute_count = 0
+	state.lighting_count = 0
+
+	shd.shadow_sync_lights(
+		&self.shadow_resources.slot_active,
+		&self.shadow_resources.slot_kind,
+		&self.shadow_resources.light_to_slot,
+		&self.shadow_resources.shadow_data_buffer,
+		&self.lights_buffer,
+		active_lights,
+		frame_index,
+	)
 
 	// Register swapchain resource with a simple resolve callback
 	// We use a persistent pointer for swapchain image/view since they change per frame
@@ -536,52 +598,46 @@ build_default_render_graph :: proc(
 	)
 	rg.pass_read_write(g, particle_simulation_pass, particle_buffer_res)
 
-	// Register shadow resources for all slots (dead pass elimination removes unused ones)
-	shadow_draw_cmd_resources: [light.MAX_SHADOW_MAPS]rg.ResourceId
-	shadow_draw_count_resources: [light.MAX_SHADOW_MAPS]rg.ResourceId
-	shadow_map_resources: [light.MAX_SHADOW_MAPS]rg.ResourceId
-
-	// Context structs for shadow pass callbacks
-	state.shadow_compute_ctx = ShadowComputePassCtx {
-		manager       = self,
-		active_lights = active_lights,
+	shadow_map_resources_by_light: [rd.MAX_LIGHTS]rg.ResourceId
+	for i in 0 ..< rd.MAX_LIGHTS {
+		shadow_map_resources_by_light[i] = rg.INVALID_RESOURCE
 	}
-	state.shadow_depth_ctx = ShadowDepthPassCtx{manager = self}
 
-	// Shadow compute pass (writes draw commands for all active shadows)
-	shadow_compute_pass := rg.add_pass(
-		g,
-		"shadow_compute",
-		shadow_compute_pass_execute,
-		&state.shadow_compute_ctx,
-	)
+	for handle in active_lights {
+		light_data := gpu.get(&self.lights_buffer.buffer, handle.index)
+		if !light_data.cast_shadow || light_data.shadow_index == shd.INVALID_SHADOW_INDEX do continue
+		if light_data.shadow_index >= shd.MAX_SHADOW_MAPS do continue
+		slot := light_data.shadow_index
 
-	// Shadow depth pass (renders shadow maps for all active shadows)
-	shadow_depth_pass := rg.add_pass(
-		g,
-		"shadow_depth",
-		shadow_depth_pass_execute,
-		&state.shadow_depth_ctx,
-	)
-
-	// Register shadow resources for each slot
-	for slot in 0 ..< light.MAX_SHADOW_MAPS {
-		// Initialize per-slot context
+		// Shadow slot resources are pre-allocated in setup(), just use them
 		state.shadow_slot_ctxs[slot] = ShadowSlotCtx {
 			manager = self,
-			slot    = u32(slot),
+			slot    = slot,
 		}
+		ctx_index := state.shadow_compute_count
+			state.shadow_compute_ctxs[ctx_index] = ShadowComputePassCtx {
+				manager    = self,
+				slot       = slot,
+				light_type = light_data.type,
+			}
+			switch light_data.type {
+			case .SPOT:
+				state.shadow_compute_ctxs[ctx_index].spot = &self.shadow_resources.spot_lights[slot]
+			case .DIRECTIONAL:
+				state.shadow_compute_ctxs[ctx_index].directional = &self.shadow_resources.directional_lights[slot]
+			case .POINT:
+				state.shadow_compute_ctxs[ctx_index].point = &self.shadow_resources.point_lights[slot]
+			}
+		state.shadow_compute_count += 1
+		ctx := &state.shadow_compute_ctxs[ctx_index]
 
-		// Draw command buffer
-		shadow_draw_cmd_resources[slot] = rg.add_buffer(
+		shadow_draw_cmd_res := rg.add_buffer(
 			g,
 			"shadow_draw_cmds",
 			proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
-				ctx := cast(^ShadowSlotCtx)user_data
-				shadow := &ctx.manager.shadow
-				slot := ctx.slot
-				if !shadow.slot_active[slot] do return 0, 0
-
+				slot_ctx := cast(^ShadowSlotCtx)user_data
+				shadow := &slot_ctx.manager.shadow_resources
+				slot := slot_ctx.slot
 				switch shadow.slot_kind[slot] {
 				case .SPOT:
 					buffer := &shadow.spot_lights[slot].draw_commands[frame_index]
@@ -598,16 +654,13 @@ build_default_render_graph :: proc(
 			&state.shadow_slot_ctxs[slot],
 		)
 
-		// Draw count buffer
-		shadow_draw_count_resources[slot] = rg.add_buffer(
+		shadow_draw_count_res := rg.add_buffer(
 			g,
 			"shadow_draw_count",
 			proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
-				ctx := cast(^ShadowSlotCtx)user_data
-				shadow := &ctx.manager.shadow
-				slot := ctx.slot
-				if !shadow.slot_active[slot] do return 0, 0
-
+				slot_ctx := cast(^ShadowSlotCtx)user_data
+				shadow := &slot_ctx.manager.shadow_resources
+				slot := slot_ctx.slot
 				switch shadow.slot_kind[slot] {
 				case .SPOT:
 					buffer := &shadow.spot_lights[slot].draw_count[frame_index]
@@ -624,56 +677,62 @@ build_default_render_graph :: proc(
 			&state.shadow_slot_ctxs[slot],
 		)
 
-		// Shadow map resource (depth texture or cube)
-		shadow_map_resources[slot] = rg.add_depth_texture(
+		shadow_map_res := rg.add_depth_texture(
 			g,
 			"shadow_map",
 			.D32_SFLOAT,
 			proc(user_data: rawptr, frame_index: u32) -> (vk.Image, vk.ImageView, vk.Extent2D) {
-				ctx := cast(^ShadowSlotCtx)user_data
-				shadow := &ctx.manager.shadow
-				slot := ctx.slot
-				if !shadow.slot_active[slot] do return 0, 0, {}
-
+				slot_ctx := cast(^ShadowSlotCtx)user_data
+				shadow := &slot_ctx.manager.shadow_resources
+				slot := slot_ctx.slot
 				switch shadow.slot_kind[slot] {
 				case .SPOT:
 					tex := gpu.get_texture_2d(
-						&ctx.manager.texture_manager,
+						&slot_ctx.manager.texture_manager,
 						shadow.spot_lights[slot].shadow_map[frame_index],
 					)
 					if tex == nil do return 0, 0, {}
 					return tex.image, tex.view, tex.spec.extent
 				case .DIRECTIONAL:
 					tex := gpu.get_texture_2d(
-						&ctx.manager.texture_manager,
+						&slot_ctx.manager.texture_manager,
 						shadow.directional_lights[slot].shadow_map[frame_index],
 					)
 					if tex == nil do return 0, 0, {}
 					return tex.image, tex.view, tex.spec.extent
 				case .POINT:
-					// Point lights use cube textures, but we register as depth texture
-					// The graph will handle it as a depth resource
 					cube := gpu.get_texture_cube(
-						&ctx.manager.texture_manager,
+						&slot_ctx.manager.texture_manager,
 						shadow.point_lights[slot].shadow_cube[frame_index],
 					)
 					if cube == nil do return 0, 0, {}
-					return cube.image, cube.view, vk.Extent2D{light.SHADOW_MAP_SIZE, light.SHADOW_MAP_SIZE}
+					return cube.image, cube.view, vk.Extent2D{shd.SHADOW_MAP_SIZE, shd.SHADOW_MAP_SIZE}
 				}
 				return 0, 0, {}
 			},
 			&state.shadow_slot_ctxs[slot],
 		)
+		shadow_map_resources_by_light[handle.index] = shadow_map_res
 
-		// Wire up dependencies:
-		// shadow_compute writes draw buffers
-		rg.pass_write(g, shadow_compute_pass, shadow_draw_cmd_resources[slot], .DONT_CARE)
-		rg.pass_write(g, shadow_compute_pass, shadow_draw_count_resources[slot], .DONT_CARE)
+		shadow_compute_pass := rg.add_pass(
+			g,
+			"shadow_compute",
+			shadow_compute_pass_execute,
+			ctx,
+			.COMPUTE,
+		)
+		rg.pass_write(g, shadow_compute_pass, shadow_draw_cmd_res, .DONT_CARE)
+		rg.pass_write(g, shadow_compute_pass, shadow_draw_count_res, .DONT_CARE)
 
-		// shadow_depth reads draw buffers, writes shadow map
-		rg.pass_read(g, shadow_depth_pass, shadow_draw_cmd_resources[slot])
-		rg.pass_read(g, shadow_depth_pass, shadow_draw_count_resources[slot])
-		rg.pass_write(g, shadow_depth_pass, shadow_map_resources[slot], .CLEAR)
+		shadow_depth_pass := rg.add_pass(
+			g,
+			"shadow_depth",
+			shadow_depth_pass_execute,
+			ctx,
+		)
+		rg.pass_read(g, shadow_depth_pass, shadow_draw_cmd_res)
+		rg.pass_read(g, shadow_depth_pass, shadow_draw_count_res)
+		rg.pass_write(g, shadow_depth_pass, shadow_map_res, .CLEAR)
 	}
 
 	// Track the main camera's final_image resource to wire into post-process
@@ -692,7 +751,7 @@ build_default_render_graph :: proc(
 			cam_index = cam_id,
 			cam_res   = cam_res,
 		}
-		depth_pass := rg.add_pass(g, "depth_prepass", depth_pass_execute, &state.depth_ctxs[cam_idx])
+		depth_pass := rg.add_pass(g, "occlusion_culling", depth_pass_execute, &state.depth_ctxs[cam_idx])
 
 		// G-buffer geometry pass
 		state.geometry_ctxs[cam_idx] = GeometryPassCtx{manager = self, cam_index = cam_id, cam_res = cam_res}
@@ -921,30 +980,74 @@ build_default_render_graph :: proc(
 		rg.pass_write(g, geom_pass, emissive_res, .CLEAR)
 		rg.pass_write(g, geom_pass, final_image_res, .CLEAR)
 
-		// Lighting pass
-		state.lighting_ctxs[cam_idx] = LightingPassCtx {
-			manager       = self,
-			cam_index     = cam_id,
-			cam_res       = cam_res,
-			active_lights = active_lights,
+		state.ambient_ctxs[cam_idx] = AmbientPassCtx {
+			manager   = self,
+			cam_index = cam_id,
+			cam_res   = cam_res,
 		}
-		lighting_pass := rg.add_pass(
+		ambient_pass := rg.add_pass(
 			g,
-			"lighting",
-			lighting_pass_execute,
-			&state.lighting_ctxs[cam_idx],
+			"ambient",
+			ambient_pass_execute,
+			&state.ambient_ctxs[cam_idx],
 		)
-		rg.pass_read(g, lighting_pass, position_res)
-		rg.pass_read(g, lighting_pass, normal_res)
-		rg.pass_read(g, lighting_pass, albedo_res)
-		rg.pass_read(g, lighting_pass, metallic_res)
-		rg.pass_read(g, lighting_pass, emissive_res)
-		rg.pass_read(g, lighting_pass, depth_res)
-		// Read all shadow maps (dead pass elimination removes unused ones)
-		for slot in 0 ..< light.MAX_SHADOW_MAPS {
-			rg.pass_read(g, lighting_pass, shadow_map_resources[slot])
+		rg.pass_read(g, ambient_pass, position_res)
+		rg.pass_read(g, ambient_pass, normal_res)
+		rg.pass_read(g, ambient_pass, albedo_res)
+		rg.pass_read(g, ambient_pass, metallic_res)
+		rg.pass_read(g, ambient_pass, emissive_res)
+		rg.pass_write(g, ambient_pass, final_image_res, .CLEAR)
+
+		for handle in active_lights {
+			if state.lighting_count >= len(state.lighting_ctxs) do break
+			light_data := gpu.get(&self.lights_buffer.buffer, handle.index)
+			lighting_ctx_idx := state.lighting_count
+			state.lighting_count += 1
+			state.lighting_ctxs[lighting_ctx_idx] = LightingPassCtx {
+				manager          = self,
+				cam_index        = cam_id,
+				cam_res          = cam_res,
+				light_index      = handle.index,
+				shadow_map_index = shd.INVALID_SHADOW_INDEX,
+			}
+			if light_data.cast_shadow && light_data.shadow_index < shd.MAX_SHADOW_MAPS {
+				slot := light_data.shadow_index
+				spot_shadow_map: gpu.Texture2DHandle
+				directional_shadow_map: gpu.Texture2DHandle
+				point_shadow_cube: gpu.TextureCubeHandle
+				switch light_data.type {
+				case .SPOT:
+					spot_shadow_map = self.shadow_resources.spot_lights[slot].shadow_map[frame_index]
+				case .DIRECTIONAL:
+					directional_shadow_map = self.shadow_resources.directional_lights[slot].shadow_map[frame_index]
+				case .POINT:
+					point_shadow_cube = self.shadow_resources.point_lights[slot].shadow_cube[frame_index]
+				}
+				state.lighting_ctxs[lighting_ctx_idx].shadow_map_index = shd.shadow_get_texture_index(
+					light_data.type,
+					spot_shadow_map,
+					directional_shadow_map,
+					point_shadow_cube,
+				)
+			}
+
+			lighting_pass := rg.add_pass(
+				g,
+				"lighting",
+				lighting_pass_execute,
+				&state.lighting_ctxs[lighting_ctx_idx],
+			)
+			rg.pass_read(g, lighting_pass, position_res)
+			rg.pass_read(g, lighting_pass, normal_res)
+			rg.pass_read(g, lighting_pass, albedo_res)
+			rg.pass_read(g, lighting_pass, metallic_res)
+			rg.pass_read(g, lighting_pass, emissive_res)
+			rg.pass_read(g, lighting_pass, depth_res)
+			rg.pass_read_write(g, lighting_pass, final_image_res)
+			if shadow_map_res := shadow_map_resources_by_light[handle.index]; shadow_map_res != rg.INVALID_RESOURCE {
+				rg.pass_read(g, lighting_pass, shadow_map_res)
+			}
 		}
-		rg.pass_read_write(g, lighting_pass, final_image_res)
 
 		// Particle render pass
 		if camera.PassType.PARTICLES in cam.enabled_passes {
