@@ -118,6 +118,56 @@ infer_required_state :: proc(
 			stage  = {.COLOR_ATTACHMENT_OUTPUT},
 		}
 
+	case TransientTexture:
+		// Transient textures behave like color textures
+		aspect = {.COLOR}
+		switch access {
+		case .READ:
+			stage := queue == .COMPUTE ? vk.PipelineStageFlags{.COMPUTE_SHADER} : vk.PipelineStageFlags{.FRAGMENT_SHADER}
+			state = ResourceState {
+				layout = .SHADER_READ_ONLY_OPTIMAL,
+				access = {.SHADER_READ},
+				stage  = stage,
+			}
+		case .WRITE:
+			state = ResourceState {
+				layout = .COLOR_ATTACHMENT_OPTIMAL,
+				access = {.COLOR_ATTACHMENT_WRITE},
+				stage  = {.COLOR_ATTACHMENT_OUTPUT},
+			}
+		case .READ_WRITE:
+			state = ResourceState {
+				layout = .COLOR_ATTACHMENT_OPTIMAL,
+				access = {.COLOR_ATTACHMENT_READ, .COLOR_ATTACHMENT_WRITE},
+				stage  = {.COLOR_ATTACHMENT_OUTPUT},
+			}
+		}
+
+	case TransientBuffer:
+		// Transient buffers behave like buffer resources
+		aspect = {}
+		switch access {
+		case .READ:
+			stage := queue == .COMPUTE ? vk.PipelineStageFlags{.COMPUTE_SHADER} : vk.PipelineStageFlags{.DRAW_INDIRECT, .VERTEX_SHADER}
+			state = ResourceState {
+				layout = .UNDEFINED,
+				access = {.SHADER_READ, .INDIRECT_COMMAND_READ},
+				stage  = stage,
+			}
+		case .WRITE:
+			state = ResourceState {
+				layout = .UNDEFINED,
+				access = {.SHADER_WRITE},
+				stage  = {.COMPUTE_SHADER},
+			}
+		case .READ_WRITE:
+			state = ResourceState {
+				layout = .UNDEFINED,
+				access = {.SHADER_READ, .SHADER_WRITE},
+				stage  = {.COMPUTE_SHADER},
+			}
+		}
+
 	case CameraData:
 		// Camera data never needs barriers - it's persistently mapped
 		aspect = {}

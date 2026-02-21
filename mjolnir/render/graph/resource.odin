@@ -69,6 +69,19 @@ CameraData :: struct {
 	user_data: rawptr,
 }
 
+// Transient resources - graph-owned, allocated/freed each frame
+TransientTexture :: struct {
+	format: vk.Format,
+	extent: vk.Extent2D,
+	usage:  vk.ImageUsageFlags,
+}
+
+TransientBuffer :: struct {
+	element_size:  u32,
+	element_count: u32,
+	usage:         vk.BufferUsageFlags,
+}
+
 Resource :: union {
 	ColorTexture,
 	DepthTexture,
@@ -76,6 +89,8 @@ Resource :: union {
 	BufferResource,
 	SwapchainResource,
 	CameraData,
+	TransientTexture,
+	TransientBuffer,
 }
 
 // Resolved handles at execute time
@@ -180,10 +195,41 @@ add_camera :: proc(
 	return id
 }
 
+add_transient_color_texture :: proc(
+	g: ^Graph,
+	name: string,
+	format: vk.Format,
+	extent: vk.Extent2D,
+	usage: vk.ImageUsageFlags,
+) -> ResourceId {
+	id := g.next_resource_id
+	g.next_resource_id += 1
+	res := Resource(TransientTexture{format = format, extent = extent, usage = usage})
+	g.resources[id] = ResourceEntry{name = name, resource = res}
+	return id
+}
+
+add_transient_buffer :: proc(
+	g: ^Graph,
+	name: string,
+	element_size: u32,
+	element_count: u32,
+	usage: vk.BufferUsageFlags,
+) -> ResourceId {
+	id := g.next_resource_id
+	g.next_resource_id += 1
+	res := Resource(TransientBuffer{element_size = element_size, element_count = element_count, usage = usage})
+	g.resources[id] = ResourceEntry{name = name, resource = res}
+	return id
+}
+
 // Resolve a resource to its concrete handles at frame time
 resolve_image :: proc(
+	g: ^Graph,
+	resource_id: ResourceId,
 	resource: Resource,
 	frame_index: u32,
+	texture_manager: ^gpu.TextureManager,
 ) -> (
 	resolved: ResolvedImage,
 	ok: bool,
@@ -205,13 +251,22 @@ resolve_image :: proc(
 		img, view, extent := r.resolve(r.user_data, frame_index)
 		if img == 0 do return {}, false
 		return ResolvedImage{image = img, view = view, extent = extent}, true
-	case BufferResource, CameraData:
+	case TransientTexture:
+		// Look up transient texture from graph storage
+		handle, has_handle := g.transient_textures[resource_id]
+		if !has_handle do return {}, false
+		tex := gpu.get_texture_2d(texture_manager, handle)
+		if tex == nil do return {}, false
+		return ResolvedImage{image = tex.image, view = tex.view, extent = tex.spec.extent}, true
+	case BufferResource, TransientBuffer, CameraData:
 		return {}, false
 	}
 	return {}, false
 }
 
 resolve_buffer :: proc(
+	g: ^Graph,
+	resource_id: ResourceId,
 	resource: Resource,
 	frame_index: u32,
 ) -> (
@@ -222,6 +277,12 @@ resolve_buffer :: proc(
 		buf, size := r.resolve(r.user_data, frame_index)
 		if buf == 0 do return {}, false
 		return ResolvedBuffer{buffer = buf, size = size}, true
+	}
+	if _, ok2 := resource.(TransientBuffer); ok2 {
+		// Look up transient buffer from graph storage
+		alloc, has_alloc := g.transient_buffers[resource_id]
+		if !has_alloc do return {}, false
+		return ResolvedBuffer{buffer = alloc.buffer, size = alloc.size}, true
 	}
 	return {}, false
 }

@@ -1244,6 +1244,14 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.render.default_graph_state,
   )
 
+  // Allocate transient resources for this frame
+  rg.allocate_transient_resources(
+    &self.render.graph,
+    &self.gctx,
+    &self.render.texture_manager,
+    self.frame_index,
+  )
+
   // Execute the compiled graph (graphics queue)
   compute_cmd_buffer: vk.CommandBuffer
   if self.gctx.has_async_compute {
@@ -1259,6 +1267,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     compute_cmd_buffer,
     self.frame_index,
+    &self.render.texture_manager,
   )
 
   // Compute commands (depth pyramid + culling for next frame)

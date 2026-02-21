@@ -8,11 +8,13 @@ import vk "vendor:vulkan"
 // graphics_cmd: command buffer for graphics queue passes
 // compute_cmd:  command buffer for compute queue passes (may be 0 if no async compute)
 // frame_index:  current frame index (0..FRAMES_IN_FLIGHT-1)
+// texture_manager: needed to resolve transient texture handles
 execute :: proc(
 	g: ^Graph,
 	graphics_cmd: vk.CommandBuffer,
 	compute_cmd: vk.CommandBuffer,
 	frame_index: u32,
+	texture_manager: ^gpu.TextureManager,
 ) {
 	if !g.is_compiled {
 		log.error("Render graph not compiled - call compile() before execute()")
@@ -33,7 +35,7 @@ execute :: proc(
 			entry, has_entry := g.resources[ib.resource_id]
 			if !has_entry do continue
 
-			resolved, ok := resolve_image(entry.resource, frame_index)
+			resolved, ok := resolve_image(g, ib.resource_id, entry.resource, frame_index, texture_manager)
 			if !ok do continue
 
 			gpu.image_barrier(
@@ -55,7 +57,7 @@ execute :: proc(
 			entry, has_entry := g.resources[bb.resource_id]
 			if !has_entry do continue
 
-			resolved, ok := resolve_buffer(entry.resource, frame_index)
+			resolved, ok := resolve_buffer(g, bb.resource_id, entry.resource, frame_index)
 			if !ok do continue
 
 			barrier := vk.BufferMemoryBarrier {

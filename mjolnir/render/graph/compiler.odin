@@ -165,7 +165,7 @@ compile :: proc(g: ^Graph) {
 
 			// Check if we're a buffer or image resource
 			switch _ in entry.resource {
-			case BufferResource:
+			case BufferResource, TransientBuffer:
 				current, has_state := resource_states[ra.resource_id]
 				if !has_state {
 					current = INITIAL_RESOURCE_STATE
@@ -185,7 +185,7 @@ compile :: proc(g: ^Graph) {
 					resource_states[ra.resource_id] = required_state
 				}
 
-			case ColorTexture, DepthTexture, CubeTexture, SwapchainResource:
+			case ColorTexture, DepthTexture, CubeTexture, SwapchainResource, TransientTexture:
 				current, has_state := resource_states[ra.resource_id]
 				if !has_state {
 					current = INITIAL_RESOURCE_STATE

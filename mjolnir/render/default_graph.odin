@@ -538,7 +538,7 @@ build_default_render_graph :: proc(
 	state: ^DefaultGraphState,
 ) {
 	g := &self.graph
-	rg.reset(g)
+	rg.reset(g, gctx, &self.texture_manager)
 	state.shadow_compute_count = 0
 	state.lighting_count = 0
 
