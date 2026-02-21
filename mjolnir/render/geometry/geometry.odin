@@ -4,6 +4,7 @@ import cont "../../containers"
 import "../../geometry"
 import "../../gpu"
 import "../camera"
+import rctx "../context"
 import d "../data"
 import "../shared"
 import "core:log"
@@ -200,54 +201,44 @@ end_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  camera: ^camera.CameraResources,
-  camera_handle: u32,
-  frame_index: u32,
-  command_buffer: vk.CommandBuffer,
-  cameras_descriptor_set: vk.DescriptorSet,
-  textures_descriptor_set: vk.DescriptorSet,
-  bone_descriptor_set: vk.DescriptorSet,
-  material_descriptor_set: vk.DescriptorSet,
-  node_data_descriptor_set: vk.DescriptorSet,
-  mesh_data_descriptor_set: vk.DescriptorSet,
-  vertex_skinning_descriptor_set: vk.DescriptorSet,
-  vertex_buffer: vk.Buffer,
-  index_buffer: vk.Buffer,
-  draw_buffer: vk.Buffer,
-  count_buffer: vk.Buffer,
+  ctx: ^rctx.RenderContext,
+  cmd: vk.CommandBuffer,
+  camera_index: u32,
+  draw_commands: vk.Buffer,
+  draw_count: vk.Buffer,
 ) {
-  if draw_buffer == 0 || count_buffer == 0 {
+  if draw_commands == 0 || draw_count == 0 {
     return
   }
   gpu.bind_graphics_pipeline(
-    command_buffer,
+    cmd,
     self.pipeline,
     self.pipeline_layout,
-    cameras_descriptor_set,
-    textures_descriptor_set,
-    bone_descriptor_set,
-    material_descriptor_set,
-    node_data_descriptor_set,
-    mesh_data_descriptor_set,
-    vertex_skinning_descriptor_set,
+    ctx.cameras_descriptor_set,
+    ctx.textures_descriptor_set,
+    ctx.bone_descriptor_set,
+    ctx.material_descriptor_set,
+    ctx.node_data_descriptor_set,
+    ctx.mesh_data_descriptor_set,
+    ctx.vertex_skinning_descriptor_set,
   )
   push_constants := PushConstant {
-    camera_index = camera_handle,
+    camera_index = camera_index,
   }
   vk.CmdPushConstants(
-    command_buffer,
+    cmd,
     self.pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
     &push_constants,
   )
-  gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
+  gpu.bind_vertex_index_buffers(cmd, ctx.vertex_buffer, ctx.index_buffer)
   vk.CmdDrawIndexedIndirectCount(
-    command_buffer,
-    draw_buffer,
+    cmd,
+    draw_commands,
     0,
-    count_buffer,
+    draw_count,
     0,
     d.MAX_NODES_IN_SCENE,
     u32(size_of(vk.DrawIndexedIndirectCommand)),

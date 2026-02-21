@@ -7,6 +7,7 @@ import "../gpu"
 import cmd "../gpu/ui"
 import "camera"
 import cam "camera"
+import rctx "context"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -18,13 +19,16 @@ import "geometry"
 import light "lighting"
 import oc "occlusion_culling"
 import "particles"
-import "post_process"
+import tonemap "post_process/tonemap"
 import shd "shadow"
 import "transparency"
 import ui_render "ui"
 import vk "vendor:vulkan"
 
 FRAMES_IN_FLIGHT :: rd.FRAMES_IN_FLIGHT
+
+// Re-export RenderContext from context package
+RenderContext :: rctx.RenderContext
 
 Handle :: rd.Handle
 MeshHandle :: rd.MeshHandle
@@ -76,6 +80,26 @@ ShadowResources :: struct {
   light_to_slot:       [rd.MAX_LIGHTS]u32,
 }
 
+ParticleResources :: struct {
+  particle_buffer:         gpu.MutableBuffer(particles.Particle),
+  compact_particle_buffer: gpu.MutableBuffer(particles.Particle),
+  draw_command_buffer:     gpu.MutableBuffer(vk.DrawIndirectCommand),
+}
+
+UIResources :: struct {
+  vertex_buffers: [FRAMES_IN_FLIGHT]gpu.MutableBuffer(ui_render.Vertex2D),
+  index_buffers:  [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+}
+
+DebugUIResources :: struct {
+  vertex_buffer: gpu.MutableBuffer(debug_ui.Vertex2D),
+  index_buffer:  gpu.MutableBuffer(u32),
+}
+
+DebugResources :: struct {
+  bone_instance_buffer: gpu.MutableBuffer(debug.BoneInstance),
+}
+
 Manager :: struct {
   command_buffers:         [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -83,7 +107,7 @@ Manager :: struct {
   lighting:                light.Renderer,
   transparency:            transparency.Renderer,
   particles:               particles.Renderer,
-  post_process:            post_process.Renderer,
+  tonemap_renderer:        tonemap.Renderer,
   debug_ui:                debug_ui.Renderer,
   debug_renderer:          debug.Renderer,
   ui:                      ui_render.Renderer,
@@ -94,6 +118,10 @@ Manager :: struct {
   occlusion_culling:       oc.System,
   shadow:                  shd.ShadowSystem,
   shadow_resources:        ShadowResources,
+  particle_resources:      ParticleResources,
+  ui_resources:            UIResources,
+  debug_ui_resources:      DebugUIResources,
+  debug_resources:         DebugResources,
   linear_repeat_sampler:   vk.Sampler,
   linear_clamp_sampler:    vk.Sampler,
   nearest_repeat_sampler:  vk.Sampler,
@@ -120,6 +148,23 @@ Manager :: struct {
   // Render graph (Phase 1+)
   graph:                   rg.Graph,
   default_graph_state:     DefaultGraphState,
+}
+
+// build_render_context constructs a RenderContext for the current frame.
+// Should be called once per frame before rendering.
+build_render_context :: proc(manager: ^Manager, frame_index: u32) -> RenderContext {
+	return RenderContext {
+		cameras_descriptor_set = manager.camera_buffer.descriptor_sets[frame_index],
+		textures_descriptor_set = manager.texture_manager.descriptor_set,
+		bone_descriptor_set = manager.bone_buffer.descriptor_sets[frame_index],
+		material_descriptor_set = manager.material_buffer.descriptor_set,
+		node_data_descriptor_set = manager.node_data_buffer.descriptor_set,
+		mesh_data_descriptor_set = manager.mesh_data_buffer.descriptor_set,
+		vertex_skinning_descriptor_set = manager.mesh_manager.vertex_skinning_buffer.descriptor_set,
+		sprite_buffer_descriptor_set = manager.sprite_buffer.descriptor_set,
+		vertex_buffer = manager.mesh_manager.vertex_buffer.buffer,
+		index_buffer = manager.mesh_manager.index_buffer.buffer,
+	}
 }
 
 init :: proc(
@@ -398,10 +443,9 @@ init :: proc(
     self.sprite_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
-  post_process.init(
-    &self.post_process,
+  tonemap.init(
+    &self.tonemap_renderer,
     gctx,
-    swapchain_format,
     self.texture_manager.set_layout,
   ) or_return
   debug_ui.init(
@@ -412,6 +456,89 @@ init :: proc(
     dpi_scale,
     self.texture_manager.set_layout,
   ) or_return
+
+  // Allocate debug resources (bone instance buffer)
+  self.debug_resources.bone_instance_buffer = gpu.create_mutable_buffer(
+    gctx,
+    debug.BoneInstance,
+    4096, // max bones
+    {.VERTEX_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.debug_resources.bone_instance_buffer)
+  }
+
+  // Allocate UI resources (vertex and index buffers per frame)
+  for i in 0 ..< FRAMES_IN_FLIGHT {
+    self.ui_resources.vertex_buffers[i] = gpu.create_mutable_buffer(
+      gctx,
+      ui_render.Vertex2D,
+      ui_render.UI_MAX_VERTICES,
+      {.VERTEX_BUFFER},
+    ) or_return
+    defer if ret != .SUCCESS {
+      gpu.mutable_buffer_destroy(gctx.device, &self.ui_resources.vertex_buffers[i])
+    }
+    self.ui_resources.index_buffers[i] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      ui_render.UI_MAX_INDICES,
+      {.INDEX_BUFFER},
+    ) or_return
+    defer if ret != .SUCCESS {
+      gpu.mutable_buffer_destroy(gctx.device, &self.ui_resources.index_buffers[i])
+    }
+  }
+
+  // Allocate Debug UI resources
+  self.debug_ui_resources.vertex_buffer = gpu.create_mutable_buffer(
+    gctx,
+    debug_ui.Vertex2D,
+    debug_ui.UI_MAX_VERTICES,
+    {.VERTEX_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.debug_ui_resources.vertex_buffer)
+  }
+  self.debug_ui_resources.index_buffer = gpu.create_mutable_buffer(
+    gctx,
+    u32,
+    debug_ui.UI_MAX_INDICES,
+    {.INDEX_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.debug_ui_resources.index_buffer)
+  }
+
+  // Allocate Particle resources
+  self.particle_resources.particle_buffer = gpu.create_mutable_buffer(
+    gctx,
+    particles.Particle,
+    particles.MAX_PARTICLES,
+    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_buffer)
+  }
+  self.particle_resources.compact_particle_buffer = gpu.create_mutable_buffer(
+    gctx,
+    particles.Particle,
+    particles.MAX_PARTICLES,
+    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
+  }
+  self.particle_resources.draw_command_buffer = gpu.create_mutable_buffer(
+    gctx,
+    vk.DrawIndirectCommand,
+    1,
+    {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
+  }
+
   debug.init(
     &self.debug_renderer,
     gctx,
@@ -502,16 +629,13 @@ setup :: proc(
     &self.texture_manager,
     self.emitter_buffer.descriptor_set,
     self.forcefield_buffer.descriptor_set,
+    &self.particle_resources.particle_buffer,
+    &self.particle_resources.compact_particle_buffer,
+    &self.particle_resources.draw_command_buffer,
   ) or_return
-  post_process.setup(
-    &self.post_process,
-    gctx,
-    &self.texture_manager,
-    swapchain_extent,
-    swapchain_format,
-  ) or_return
+  // Post-processing is now node-based, no setup needed
   debug_ui.setup(&self.debug_ui, gctx, &self.texture_manager) or_return
-  ui_render.setup(&self.ui, gctx) or_return
+  // UI buffers now managed by Manager.ui_resources, no setup needed
   return .SUCCESS
 }
 
@@ -522,9 +646,27 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   }
   clear(&self.camera_resources)
   clear(&self.cameras)
-  ui_render.teardown(&self.ui, gctx)
+
+  // Destroy debug resources
+  gpu.mutable_buffer_destroy(gctx.device, &self.debug_resources.bone_instance_buffer)
+
+  // Destroy UI resources
+  for i in 0 ..< FRAMES_IN_FLIGHT {
+    gpu.mutable_buffer_destroy(gctx.device, &self.ui_resources.vertex_buffers[i])
+    gpu.mutable_buffer_destroy(gctx.device, &self.ui_resources.index_buffers[i])
+  }
+
+  // Destroy Debug UI resources
+  gpu.mutable_buffer_destroy(gctx.device, &self.debug_ui_resources.vertex_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.debug_ui_resources.index_buffer)
+
+  // Destroy Particle resources
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
+
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
-  post_process.teardown(&self.post_process, gctx, &self.texture_manager)
+  // Post-processing is now node-based, no teardown needed
   particles.teardown(&self.particles, gctx)
   // Teardown shadow slots that were allocated
   for slot in 0 ..< shd.MAX_SHADOW_MAPS {
@@ -669,7 +811,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   delete(self.ui_commands)
   debug.shutdown(&self.debug_renderer, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
-  post_process.shutdown(&self.post_process, gctx)
+  tonemap.destroy(&self.tonemap_renderer, gctx)
   particles.shutdown(&self.particles, gctx)
   transparency.shutdown(&self.transparency, gctx)
   light.shutdown(&self.lighting, gctx)
@@ -720,13 +862,7 @@ resize :: proc(
     color_format,
     vk.Format.D32_SFLOAT,
   ) or_return
-  post_process.recreate_images(
-    gctx,
-    &self.post_process,
-    &self.texture_manager,
-    extent,
-    color_format,
-  ) or_return
+  // Post-processing is now node-based, no image recreation needed
   debug_ui.recreate_images(&self.debug_ui, color_format, extent, dpi_scale)
   return .SUCCESS
 }

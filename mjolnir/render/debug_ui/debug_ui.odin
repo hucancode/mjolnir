@@ -23,8 +23,6 @@ Renderer :: struct {
   pipeline:        vk.Pipeline,
   atlas_handle:    gpu.Texture2DHandle,
   projection:      matrix[4, 4]f32,
-  vertex_buffer:   gpu.MutableBuffer(Vertex2D),
-  index_buffer:    gpu.MutableBuffer(u32),
   vertex_count:    u32,
   index_count:     u32,
   vertices:        [UI_MAX_VERTICES]Vertex2D,
@@ -153,24 +151,6 @@ setup :: proc(
       1,
     ) *
     linalg.matrix4_scale(self.dpi_scale)
-  self.vertex_buffer = gpu.create_mutable_buffer(
-    gctx,
-    Vertex2D,
-    UI_MAX_VERTICES,
-    {.VERTEX_BUFFER},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
-  }
-  self.index_buffer = gpu.create_mutable_buffer(
-    gctx,
-    u32,
-    UI_MAX_INDICES,
-    {.INDEX_BUFFER},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
-  }
   log.infof("done setup debug UI")
   return .SUCCESS
 }
@@ -180,8 +160,6 @@ teardown :: proc(
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
 ) {
-  gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.index_buffer)
   gpu.free_texture_2d(texture_manager, gctx, self.atlas_handle)
   self.atlas_handle = {}
 }
@@ -190,6 +168,8 @@ ui_flush :: proc(
   self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
   textures_descriptor_set: vk.DescriptorSet,
+  vertex_buffer: ^gpu.MutableBuffer(Vertex2D),
+  index_buffer: ^gpu.MutableBuffer(u32),
 ) -> vk.Result {
   if self.vertex_count == 0 && self.index_count == 0 {
     return .SUCCESS
@@ -198,8 +178,8 @@ ui_flush :: proc(
     self.vertex_count = 0
     self.index_count = 0
   }
-  gpu.write(&self.vertex_buffer, self.vertices[:self.vertex_count]) or_return
-  gpu.write(&self.index_buffer, self.indices[:self.index_count]) or_return
+  gpu.write(vertex_buffer, self.vertices[:self.vertex_count]) or_return
+  gpu.write(index_buffer, self.indices[:self.index_count]) or_return
   gpu.bind_graphics_pipeline(
     cmd_buf,
     self.pipeline,
@@ -226,8 +206,8 @@ ui_flush :: proc(
   vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
   gpu.bind_vertex_index_buffers(
     cmd_buf,
-    self.vertex_buffer.buffer,
-    self.index_buffer.buffer,
+    vertex_buffer.buffer,
+    index_buffer.buffer,
   )
   vk.CmdDrawIndexed(cmd_buf, self.index_count, 1, 0, 0, 0)
   return .SUCCESS
@@ -240,10 +220,12 @@ ui_push_quad :: proc(
   dst, src: mu.Rect,
   color: mu.Color,
   texture_id: u32,
+  vertex_buffer: ^gpu.MutableBuffer(Vertex2D),
+  index_buffer: ^gpu.MutableBuffer(u32),
 ) {
   if (self.vertex_count + 4 > UI_MAX_VERTICES ||
        self.index_count + 6 > UI_MAX_INDICES) {
-    ui_flush(self, cmd_buf, textures_descriptor_set)
+    ui_flush(self, cmd_buf, textures_descriptor_set, vertex_buffer, index_buffer)
   }
   x, y, w, h :=
     f32(src.x) /
@@ -296,6 +278,8 @@ ui_draw_rect :: proc(
   textures_descriptor_set: vk.DescriptorSet,
   rect: mu.Rect,
   color: mu.Color,
+  vertex_buffer: ^gpu.MutableBuffer(Vertex2D),
+  index_buffer: ^gpu.MutableBuffer(u32),
 ) {
   ui_push_quad(
     self,
@@ -305,6 +289,8 @@ ui_draw_rect :: proc(
     mu.default_atlas[mu.DEFAULT_ATLAS_WHITE],
     color,
     self.atlas_handle.index,
+    vertex_buffer,
+    index_buffer,
   )
 }
 
@@ -315,6 +301,8 @@ ui_draw_text :: proc(
   text: string,
   pos: mu.Vec2,
   color: mu.Color,
+  vertex_buffer: ^gpu.MutableBuffer(Vertex2D),
+  index_buffer: ^gpu.MutableBuffer(u32),
 ) {
   dst := mu.Rect{pos.x, pos.y, 0, 0}
   for ch in text {
@@ -331,6 +319,8 @@ ui_draw_text :: proc(
         src,
         color,
         self.atlas_handle.index,
+        vertex_buffer,
+        index_buffer,
       )
       dst.x += dst.w
     }
@@ -344,6 +334,8 @@ ui_draw_icon :: proc(
   id: mu.Icon,
   rect: mu.Rect,
   color: mu.Color,
+  vertex_buffer: ^gpu.MutableBuffer(Vertex2D),
+  index_buffer: ^gpu.MutableBuffer(u32),
 ) {
   src := mu.default_atlas[id]
   x := rect.x + (rect.w - src.w) / 2
@@ -356,6 +348,8 @@ ui_draw_icon :: proc(
     src,
     color,
     self.atlas_handle.index,
+    vertex_buffer,
+    index_buffer,
   )
 }
 
@@ -417,6 +411,8 @@ render :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   textures_descriptor_set: vk.DescriptorSet,
+  vertex_buffer: ^gpu.MutableBuffer(Vertex2D),
+  index_buffer: ^gpu.MutableBuffer(u32),
 ) {
   command_backing: ^mu.Command
   for variant in mu.next_command_iterator(&self.ctx, &command_backing) {
@@ -429,6 +425,8 @@ render :: proc(
         cmd.str,
         cmd.pos,
         cmd.color,
+        vertex_buffer,
+        index_buffer,
       )
     case ^mu.Command_Rect:
       ui_draw_rect(
@@ -437,6 +435,8 @@ render :: proc(
         textures_descriptor_set,
         cmd.rect,
         cmd.color,
+        vertex_buffer,
+        index_buffer,
       )
     case ^mu.Command_Icon:
       ui_draw_icon(
@@ -446,6 +446,8 @@ render :: proc(
         cmd.id,
         cmd.rect,
         cmd.color,
+        vertex_buffer,
+        index_buffer,
       )
     case ^mu.Command_Clip:
       ui_set_clip_rect(self, command_buffer, cmd.rect)
@@ -453,7 +455,7 @@ render :: proc(
       unreachable()
     }
   }
-  ui_flush(self, command_buffer, textures_descriptor_set)
+  ui_flush(self, command_buffer, textures_descriptor_set, vertex_buffer, index_buffer)
 }
 
 end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {

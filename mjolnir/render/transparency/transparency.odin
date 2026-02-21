@@ -4,6 +4,7 @@ import cont "../../containers"
 import "../../geometry"
 import "../../gpu"
 import "../camera"
+import rctx "../context"
 import d "../data"
 import "../shared"
 import "core:log"
@@ -444,26 +445,15 @@ begin_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  camera: ^camera.CameraResources,
+  ctx: ^rctx.RenderContext,
+  cmd: vk.CommandBuffer,
   pipeline: vk.Pipeline,
-  cameras_descriptor_set: vk.DescriptorSet,
-  textures_descriptor_set: vk.DescriptorSet,
-  bone_descriptor_set: vk.DescriptorSet,
-  material_descriptor_set: vk.DescriptorSet,
-  node_data_descriptor_set: vk.DescriptorSet,
-  mesh_data_descriptor_set: vk.DescriptorSet,
-  sprite_descriptor_set: vk.DescriptorSet,
-  vertex_skinning_descriptor_set: vk.DescriptorSet,
-  vertex_buffer: vk.Buffer,
-  index_buffer: vk.Buffer,
-  camera_handle: u32,
-  frame_index: u32,
-  command_buffer: vk.CommandBuffer,
-  draw_buffer: vk.Buffer,
-  count_buffer: vk.Buffer,
+  camera_index: u32,
+  draw_commands: vk.Buffer,
+  draw_count: vk.Buffer,
 ) {
-  if draw_buffer == 0 || count_buffer == 0 {
-    log.warn("Transparency render: draw_buffer or count_buffer is null")
+  if draw_commands == 0 || draw_count == 0 {
+    log.warn("Transparency render: draw_commands or draw_count is null")
     return
   }
   // Determine which pipeline layout to use
@@ -471,58 +461,58 @@ render :: proc(
     pipeline == self.sprite_pipeline ? self.sprite_pipeline_layout : self.general_pipeline_layout
 
   if pipeline == self.sprite_pipeline {
-    // Sprite pipeline: 5 descriptor sets (0, 1, 2, 3, 4)
+    // Sprite pipeline: 4 descriptor sets (0, 1, 2, 3)
     gpu.bind_graphics_pipeline(
-      command_buffer,
+      cmd,
       pipeline,
       pipeline_layout,
-      cameras_descriptor_set, // Set 0
-      textures_descriptor_set, // Set 1
-      node_data_descriptor_set, // Set 2
-      sprite_descriptor_set, // Set 3
+      ctx.cameras_descriptor_set, // Set 0
+      ctx.textures_descriptor_set, // Set 1
+      ctx.node_data_descriptor_set, // Set 2
+      ctx.sprite_buffer_descriptor_set, // Set 3
     )
   } else {
-    // General pipeline: 8 descriptor sets (0-7)
+    // General pipeline: 7 descriptor sets (0-6)
     gpu.bind_graphics_pipeline(
-      command_buffer,
+      cmd,
       pipeline,
       pipeline_layout,
-      cameras_descriptor_set, // Set 0
-      textures_descriptor_set, // Set 1
-      bone_descriptor_set, // Set 2
-      material_descriptor_set, // Set 3
-      node_data_descriptor_set, // Set 4
-      mesh_data_descriptor_set, // Set 5
-      vertex_skinning_descriptor_set, // Set 6
+      ctx.cameras_descriptor_set, // Set 0
+      ctx.textures_descriptor_set, // Set 1
+      ctx.bone_descriptor_set, // Set 2
+      ctx.material_descriptor_set, // Set 3
+      ctx.node_data_descriptor_set, // Set 4
+      ctx.mesh_data_descriptor_set, // Set 5
+      ctx.vertex_skinning_descriptor_set, // Set 6
     )
   }
 
   push_constants := PushConstant {
-    camera_index = camera_handle,
+    camera_index = camera_index,
   }
   vk.CmdPushConstants(
-    command_buffer,
+    cmd,
     pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
     &push_constants,
   )
-  vertex_buffers := [?]vk.Buffer{vertex_buffer}
+  vertex_buffers := [?]vk.Buffer{ctx.vertex_buffer}
   vertex_offsets := [?]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
-    command_buffer,
+    cmd,
     0,
     1,
     raw_data(vertex_buffers[:]),
     raw_data(vertex_offsets[:]),
   )
-  vk.CmdBindIndexBuffer(command_buffer, index_buffer, 0, .UINT32)
+  vk.CmdBindIndexBuffer(cmd, ctx.index_buffer, 0, .UINT32)
   vk.CmdDrawIndexedIndirectCount(
-    command_buffer,
-    draw_buffer,
+    cmd,
+    draw_commands,
     0,
-    count_buffer,
+    draw_count,
     0,
     d.MAX_NODES_IN_SCENE,
     u32(size_of(vk.DrawIndexedIndirectCommand)),

@@ -27,6 +27,7 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint emissive_texture_index;
     uint depth_texture_index;
     uint input_image_index;
+    uint padding;  // Align to 16-byte boundary
     float exposure;
     float gamma;
 };

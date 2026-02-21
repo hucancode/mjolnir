@@ -30,5 +30,13 @@ layout(push_constant) uniform PostProcessPushConstant {
 };
 
 void main() {
-    out_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+    // LEVEL 1 TEST: Flat color (bright green)
+    // If you see green, the shader is running
+    out_color = vec4(0.0, 1.0, 0.0, 1.0);
+
+    // LEVEL 2 TEST: Sampled texture
+    // Uncomment below to test if texture sampling works
+    // out_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+
+    // LEVEL 3 TEST: Full tonemap (will add later)
 }

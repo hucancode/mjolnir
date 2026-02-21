@@ -11,6 +11,8 @@ import vk "vendor:vulkan"
 SHADER_BONE_VERT :: #load("../../shader/debug_bone/vert.spv")
 SHADER_BONE_FRAG :: #load("../../shader/debug_bone/frag.spv")
 
+MAX_BONES :: 4096
+
 // Debug rendering module for 3D debug visualization
 // Currently supports: Bone visualization with hierarchical coloring
 
@@ -25,10 +27,6 @@ Renderer :: struct {
   // Graphics pipeline
   pipeline:        vk.Pipeline,
   pipeline_layout: vk.PipelineLayout,
-
-  // Instance buffer for bone data
-  instance_buffer: gpu.MutableBuffer(BoneInstance),
-  max_bones:       u32,
 
   // Staged bone instances for rendering (populated by engine/world)
   bone_instances: [dynamic]BoneInstance,
@@ -45,18 +43,6 @@ init :: proc(
 
   // Initialize bone instances array
   self.bone_instances = make([dynamic]BoneInstance, 0, 1024)
-
-  // Create instance buffer (support up to 4096 bones)
-  self.max_bones = 4096
-  self.instance_buffer = gpu.create_mutable_buffer(
-    gctx,
-    BoneInstance,
-    int(self.max_bones),
-    {.VERTEX_BUFFER},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.instance_buffer)
-  }
 
   // Create pipeline layout with camera descriptor set
   self.pipeline_layout = gpu.create_pipeline_layout(
@@ -168,7 +154,6 @@ init :: proc(
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   log.debugf("Shutting down debug renderer")
   delete(self.bone_instances)
-  gpu.mutable_buffer_destroy(gctx.device, &self.instance_buffer)
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
 }
@@ -242,22 +227,23 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   camera_descriptor_set: vk.DescriptorSet,
   camera_index: u32,
+  instance_buffer: ^gpu.MutableBuffer(BoneInstance),
 ) -> vk.Result {
   if len(self.bone_instances) == 0 do return .SUCCESS
 
   bone_count := u32(len(self.bone_instances))
-  if bone_count > self.max_bones {
+  if bone_count > MAX_BONES {
     log.warnf(
       "Too many bones to render: %d (max %d), truncating",
       bone_count,
-      self.max_bones,
+      MAX_BONES,
     )
-    bone_count = self.max_bones
+    bone_count = MAX_BONES
   }
 
   // Upload bone instance data to GPU
   // Copy to instance buffer (CPU → GPU staging)
-  instance_data := gpu.get_all(&self.instance_buffer)
+  instance_data := gpu.get_all(instance_buffer)
   for i in 0 ..< bone_count {
     instance_data[i] = self.bone_instances[i]
   }
@@ -271,7 +257,7 @@ render :: proc(
     command_buffer,
     0,
     1,
-    &self.instance_buffer.buffer,
+    &instance_buffer.buffer,
     raw_data(offsets[:]),
   )
 

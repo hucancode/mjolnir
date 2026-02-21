@@ -13,7 +13,7 @@ import "geometry"
 import light "lighting"
 import oc "occlusion_culling"
 import "particles"
-import "post_process"
+import tonemap "post_process/tonemap"
 import shd "shadow"
 import "transparency"
 import ui_render "ui"
@@ -34,23 +34,26 @@ DepthPassCtx :: struct {
 }
 
 ShadowComputePassCtx :: struct {
-	manager:     ^Manager,
-	slot:        u32,
-	light_type:  LightType,
-	spot:        ^light.SpotLight,
-	directional: ^light.DirectionalLight,
-	point:       ^light.PointLight,
+	manager:        ^Manager,
+	render_context: ^RenderContext,
+	slot:           u32,
+	light_type:     LightType,
+	spot:           ^light.SpotLight,
+	directional:    ^light.DirectionalLight,
+	point:          ^light.PointLight,
 }
 
 ShadowSlotCtx :: struct {
-	manager: ^Manager,
-	slot:    u32,
+	manager:        ^Manager,
+	render_context: ^RenderContext,
+	slot:           u32,
 }
 
 GeometryPassCtx :: struct {
-	manager:   ^Manager,
-	cam_index: u32,
-	cam_res:   ^camera.CameraResources,
+	manager:        ^Manager,
+	render_context: ^RenderContext,
+	cam_index:      u32,
+	cam_res:        ^camera.CameraResources,
 }
 
 LightingPassCtx :: struct {
@@ -93,25 +96,18 @@ TransparencyCullPassCtx :: struct {
 }
 
 TransparencyRenderPassCtx :: struct {
-	manager:   ^Manager,
-	cam_index: u32,
-	cam_res:   ^camera.CameraResources,
-	pipeline:  vk.Pipeline,
-	draw_list: DrawListKind,
+	manager:        ^Manager,
+	render_context: ^RenderContext,
+	cam_index:      u32,
+	cam_res:        ^camera.CameraResources,
+	pipeline:       vk.Pipeline,
+	draw_list:      DrawListKind,
 }
 
 DebugPassCtx :: struct {
 	manager:   ^Manager,
 	cam_index: u32,
 	cam_res:   ^camera.CameraResources,
-}
-
-PostProcessPassCtx :: struct {
-	manager:          ^Manager,
-	cam_res:          ^camera.CameraResources,
-	swapchain_extent: vk.Extent2D,
-	swapchain_image:  vk.Image,
-	swapchain_view:   vk.ImageView,
 }
 
 UIPassCtx :: struct {
@@ -126,6 +122,16 @@ DebugUIPassCtx :: struct {
 	enabled:          bool,
 	swapchain_extent: vk.Extent2D,
 	swapchain_view:   vk.ImageView,
+}
+
+// ============================================================
+// Swapchain resource resolver
+// ============================================================
+
+SwapchainResolveCtx :: struct {
+	swapchain_image:  vk.Image,
+	swapchain_view:   vk.ImageView,
+	swapchain_extent: vk.Extent2D,
 }
 
 // ============================================================
@@ -191,17 +197,10 @@ shadow_depth_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_
 	}
 	shd.shadow_render_depth_slot(
 		&m.shadow,
+		ctx.render_context,
 		cmd,
 		&m.texture_manager,
 		shadow_data_descriptor_set,
-		m.texture_manager.descriptor_set,
-		m.bone_buffer.descriptor_sets[frame_index],
-		m.material_buffer.descriptor_set,
-		m.node_data_buffer.descriptor_set,
-		m.mesh_data_buffer.descriptor_set,
-		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
-		m.mesh_manager.vertex_buffer.buffer,
-		m.mesh_manager.index_buffer.buffer,
 		ctx.slot,
 		transmute(rd.LightType)ctx.light_type,
 		draw_commands_buffer,
@@ -252,21 +251,10 @@ transparency_render_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32
 	transparency.begin_pass(&m.transparency, ctx.cam_res, &m.texture_manager, cmd, frame_index)
 	transparency.render(
 		&m.transparency,
-		ctx.cam_res,
-		ctx.pipeline,
-		m.camera_buffer.descriptor_sets[frame_index],
-		m.texture_manager.descriptor_set,
-		m.bone_buffer.descriptor_sets[frame_index],
-		m.material_buffer.descriptor_set,
-		m.node_data_buffer.descriptor_set,
-		m.mesh_data_buffer.descriptor_set,
-		m.sprite_buffer.descriptor_set,
-		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
-		m.mesh_manager.vertex_buffer.buffer,
-		m.mesh_manager.index_buffer.buffer,
-		ctx.cam_index,
-		frame_index,
+		ctx.render_context,
 		cmd,
+		ctx.pipeline,
+		ctx.cam_index,
 		draw_buffer,
 		count_buffer,
 	)
@@ -301,22 +289,13 @@ depth_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: r
 geometry_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^GeometryPassCtx)user_data
 	m := ctx.manager
+	log.infof("GEOMETRY PASS EXECUTING for camera %v", ctx.cam_index)
 	geometry.begin_pass(ctx.cam_res, &m.texture_manager, cmd, frame_index)
 	geometry.render(
 		&m.geometry,
-		ctx.cam_res,
-		ctx.cam_index,
-		frame_index,
+		ctx.render_context,
 		cmd,
-		m.camera_buffer.descriptor_sets[frame_index],
-		m.texture_manager.descriptor_set,
-		m.bone_buffer.descriptor_sets[frame_index],
-		m.material_buffer.descriptor_set,
-		m.node_data_buffer.descriptor_set,
-		m.mesh_data_buffer.descriptor_set,
-		m.mesh_manager.vertex_skinning_buffer.descriptor_set,
-		m.mesh_manager.vertex_buffer.buffer,
-		m.mesh_manager.index_buffer.buffer,
+		ctx.cam_index,
 		ctx.cam_res.opaque_draw_commands[frame_index].buffer,
 		ctx.cam_res.opaque_draw_count[frame_index].buffer,
 	)
@@ -327,6 +306,7 @@ geometry_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data
 ambient_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^AmbientPassCtx)user_data
 	m := ctx.manager
+	log.infof("AMBIENT PASS EXECUTING for camera %v", ctx.cam_index)
 	light.begin_ambient_pass(
 		&m.lighting,
 		ctx.cam_res,
@@ -374,6 +354,8 @@ particle_simulation_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32
 		&m.particles,
 		cmd,
 		m.node_data_buffer.descriptor_set,
+		&m.particle_resources.particle_buffer,
+		&m.particle_resources.compact_particle_buffer,
 	)
 }
 
@@ -389,6 +371,8 @@ particles_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_dat
 		frame_index,
 		m.camera_buffer.descriptor_sets[frame_index],
 		m.texture_manager.descriptor_set,
+		&m.particle_resources.compact_particle_buffer,
+		&m.particle_resources.draw_command_buffer,
 	)
 	particles.end_pass(cmd)
 }
@@ -398,32 +382,22 @@ debug_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: r
 	m := ctx.manager
 	if len(m.debug_renderer.bone_instances) == 0 do return
 	if !debug.begin_pass(&m.debug_renderer, ctx.cam_res, &m.texture_manager, cmd, frame_index) do return
-	debug.render(&m.debug_renderer, cmd, m.camera_buffer.descriptor_sets[frame_index], ctx.cam_index)
+	debug.render(
+		&m.debug_renderer,
+		cmd,
+		m.camera_buffer.descriptor_sets[frame_index],
+		ctx.cam_index,
+		&m.debug_resources.bone_instance_buffer,
+	)
 	debug.end_pass(&m.debug_renderer, cmd)
 }
 
-@(private)
-post_process_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
-	ctx := cast(^PostProcessPassCtx)user_data
-	m := ctx.manager
-	// Barriers are handled by the graph
-	post_process.begin_pass(&m.post_process, cmd, ctx.swapchain_extent)
-	post_process.render(
-		&m.post_process,
-		cmd,
-		ctx.swapchain_extent,
-		ctx.swapchain_view,
-		ctx.cam_res,
-		&m.texture_manager,
-		frame_index,
-	)
-	post_process.end_pass(&m.post_process, cmd)
-}
 
 @(private)
 ui_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^UIPassCtx)user_data
 	m := ctx.manager
+	log.infof("UI PASS EXECUTING - swapchain_view=%v", ctx.swapchain_view)
 
 	rendering_attachment_info := vk.RenderingAttachmentInfo {
 		sType       = .RENDERING_ATTACHMENT_INFO,
@@ -478,6 +452,8 @@ ui_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawp
 		ctx.swapchain_extent.width,
 		ctx.swapchain_extent.height,
 		frame_index,
+		&m.ui_resources.vertex_buffers[frame_index],
+		&m.ui_resources.index_buffers[frame_index],
 	)
 
 	vk.CmdEndRendering(cmd)
@@ -486,10 +462,18 @@ ui_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawp
 @(private)
 debug_ui_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^DebugUIPassCtx)user_data
+	log.infof("DEBUG_UI PASS: enabled=%v", ctx.enabled)
 	if !ctx.enabled do return
 	m := ctx.manager
+	log.infof("DEBUG_UI PASS EXECUTING")
 	debug_ui.begin_pass(&m.debug_ui, cmd, ctx.swapchain_view, ctx.swapchain_extent)
-	debug_ui.render(&m.debug_ui, cmd, m.texture_manager.descriptor_set)
+	debug_ui.render(
+		&m.debug_ui,
+		cmd,
+		m.texture_manager.descriptor_set,
+		&m.debug_ui_resources.vertex_buffer,
+		&m.debug_ui_resources.index_buffer,
+	)
 	debug_ui.end_pass(&m.debug_ui, cmd)
 }
 
@@ -499,6 +483,8 @@ debug_ui_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data
 
 // DefaultGraphState holds all the context structs for pass callbacks
 DefaultGraphState :: struct {
+	// Shared render context (built once per frame, used by all passes)
+	render_context: RenderContext,
 	shadow_compute_ctxs: [shd.MAX_SHADOW_MAPS]ShadowComputePassCtx,
 	shadow_compute_count: u32,
 	shadow_slot_ctxs:   [shd.MAX_SHADOW_MAPS]ShadowSlotCtx,
@@ -518,13 +504,51 @@ DefaultGraphState :: struct {
 	sprite_cull_ctxs:            [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
 	sprite_render_ctxs:          [rd.MAX_ACTIVE_CAMERAS]TransparencyRenderPassCtx,
 	debug_ctxs:        [rd.MAX_ACTIVE_CAMERAS]DebugPassCtx,
-	post_process_ctx: PostProcessPassCtx,
+	swapchain_ctx:     SwapchainResolveCtx,
+	// Default post-process effect context (for simple blit/tonemap to swapchain)
+	default_tonemap_ctx: tonemap.PassCtx,
 	ui_ctx:            UIPassCtx,
 	debug_ui_ctx:      DebugUIPassCtx,
 }
 
 // build_default_render_graph resets and rebuilds the graph from scratch.
 // Must be called after acquiring the swapchain image but before executing.
+//
+// Resource Flow (DAG):
+// ====================
+// Buffers (persistent, registered with resolve callbacks):
+//   - particle_buffer: particle_simulation (RW) -> particle_render (R)
+//   - debug_bone_instance_buffer: debug_pass (R) [shared across cameras]
+//   - ui_vertex_buffer, ui_index_buffer: ui_pass (R) [per-frame]
+//   - debug_ui_vertex_buffer, debug_ui_index_buffer: debug_ui_pass (R)
+//   - shadow_draw_cmds, shadow_draw_count: shadow_compute (W) -> shadow_depth (R) [per light]
+//   - transparent_draw_cmd, transparent_draw_count: transparency_compute (W) -> transparency_render (R) [per camera]
+//   - sprite_draw_cmd, sprite_draw_count: sprite_compute (W) -> sprite_render (R) [per camera]
+//
+// Textures (per-camera, transient or swapchain):
+//   - depth: depth_prepass (W) -> geometry (RW) -> lighting (R) -> transparency (RW) -> sprite (RW) -> debug (RW)
+//   - albedo, normal, material: geometry (W) -> lighting (R)
+//   - final_image: lighting (W) -> particle_render (RW) -> transparency (RW) -> sprite (RW) -> debug (RW) -> tonemap (R)
+//   - shadow_map: shadow_depth (W) -> lighting (R) [per light]
+//   - swapchain: tonemap (W) -> ui (RW) -> debug_ui (RW) [final output]
+//
+// Pass Execution Order (topologically sorted by graph compiler):
+//   1. particle_simulation (compute)
+//   2. shadow_compute (compute, per light)
+//   3. shadow_depth (graphics, per light)
+//   4. depth_prepass (graphics, per camera)
+//   5. geometry (graphics, per camera)
+//   6. lighting (graphics, per camera)
+//   7. particle_render (graphics, per camera)
+//   8. transparency_compute (compute, per camera)
+//   9. transparency_render (graphics, per camera)
+//   10. sprite_compute (compute, per camera)
+//   11. sprite_render (graphics, per camera)
+//   12. debug (graphics, per camera)
+//   13. tonemap (graphics, main camera only)
+//   14. ui (graphics, swapchain)
+//   15. debug_ui (graphics, swapchain)
+//
 build_default_render_graph :: proc(
 	self: ^Manager,
 	gctx: ^gpu.GPUContext,
@@ -542,6 +566,9 @@ build_default_render_graph :: proc(
 	state.shadow_compute_count = 0
 	state.lighting_count = 0
 
+	// Build shared render context for this frame
+	state.render_context = build_render_context(self, frame_index)
+
 	shd.shadow_sync_lights(
 		&self.shadow_resources.slot_active,
 		&self.shadow_resources.slot_kind,
@@ -553,14 +580,10 @@ build_default_render_graph :: proc(
 	)
 
 	// Register swapchain resource with a simple resolve callback
-	// We use a persistent pointer for swapchain image/view since they change per frame
-	// The resolve callback captures the current swapchain image via user_data
-	state.post_process_ctx = PostProcessPassCtx {
-		manager          = self,
-		cam_res          = &self.camera_resources[main_cam_index],
-		swapchain_extent = swapchain_extent,
+	state.swapchain_ctx = SwapchainResolveCtx {
 		swapchain_image  = swapchain_image,
 		swapchain_view   = swapchain_view,
+		swapchain_extent = swapchain_extent,
 	}
 
 	// Register swapchain as a graph resource
@@ -568,10 +591,10 @@ build_default_render_graph :: proc(
 		g,
 		"swapchain",
 		proc(user_data: rawptr, frame_index: u32) -> (vk.Image, vk.ImageView, vk.Extent2D) {
-			ctx := cast(^PostProcessPassCtx)user_data
+			ctx := cast(^SwapchainResolveCtx)user_data
 			return ctx.swapchain_image, ctx.swapchain_view, ctx.swapchain_extent
 		},
-		&state.post_process_ctx,
+		&state.swapchain_ctx,
 	)
 
 	// Register particle buffer resource
@@ -582,7 +605,7 @@ build_default_render_graph :: proc(
 		"particle_buffer",
 		proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
 			ctx := cast(^ParticleSimulationPassCtx)user_data
-			buffer := &ctx.manager.particles.particle_buffer
+			buffer := &ctx.manager.particle_resources.particle_buffer
 			return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
 		},
 		&state.particle_simulation_ctx,
@@ -611,14 +634,16 @@ build_default_render_graph :: proc(
 
 		// Shadow slot resources are pre-allocated in setup(), just use them
 		state.shadow_slot_ctxs[slot] = ShadowSlotCtx {
-			manager = self,
-			slot    = slot,
+			manager        = self,
+			render_context = &state.render_context,
+			slot           = slot,
 		}
 		ctx_index := state.shadow_compute_count
 			state.shadow_compute_ctxs[ctx_index] = ShadowComputePassCtx {
-				manager    = self,
-				slot       = slot,
-				light_type = light_data.type,
+				manager        = self,
+				render_context = &state.render_context,
+				slot           = slot,
+				light_type     = light_data.type,
 			}
 			switch light_data.type {
 			case .SPOT:
@@ -738,6 +763,20 @@ build_default_render_graph :: proc(
 	// Track the main camera's final_image resource to wire into post-process
 	main_final_res := rg.ResourceId(rg.INVALID_RESOURCE)
 
+	// Register debug bone instance buffer (shared across all cameras)
+	// Note: We use a simple context with just manager for the resolve callback
+	debug_bone_buffer_ctx := struct { manager: ^Manager }{manager = self}
+	debug_bone_buffer_res := rg.add_buffer(
+		g,
+		"debug_bone_instance_buffer",
+		proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+			ctx := cast(^struct { manager: ^Manager })user_data
+			buffer := &ctx.manager.debug_resources.bone_instance_buffer
+			return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+		},
+		&debug_bone_buffer_ctx,
+	)
+
 	// Per-camera passes
 	cam_idx := u32(0)
 	for cam_id, _ in self.cameras {
@@ -754,7 +793,12 @@ build_default_render_graph :: proc(
 		depth_pass := rg.add_pass(g, "occlusion_culling", depth_pass_execute, &state.depth_ctxs[cam_idx])
 
 		// G-buffer geometry pass
-		state.geometry_ctxs[cam_idx] = GeometryPassCtx{manager = self, cam_index = cam_id, cam_res = cam_res}
+		state.geometry_ctxs[cam_idx] = GeometryPassCtx {
+			manager        = self,
+			render_context = &state.render_context,
+			cam_index      = cam_id,
+			cam_res        = cam_res,
+		}
 		geom_pass := rg.add_pass(
 			g,
 			"geometry",
@@ -1090,11 +1134,12 @@ build_default_render_graph :: proc(
 			rg.pass_write(g, transparency_cull_pass, transparent_draw_cmd_res, .DONT_CARE)
 			rg.pass_write(g, transparency_cull_pass, transparent_draw_count_res, .DONT_CARE)
 			state.transparency_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
-				manager   = self,
-				cam_index = cam_id,
-				cam_res   = cam_res,
-				pipeline  = self.transparency.transparent_pipeline,
-				draw_list = .TRANSPARENT,
+				manager        = self,
+				render_context = &state.render_context,
+				cam_index      = cam_id,
+				cam_res        = cam_res,
+				pipeline       = self.transparency.transparent_pipeline,
+				draw_list      = .TRANSPARENT,
 			}
 			transparency_render_pass := rg.add_pass(
 				g,
@@ -1131,11 +1176,12 @@ build_default_render_graph :: proc(
 			rg.pass_write(g, wireframe_cull_pass, transparent_draw_cmd_res, .DONT_CARE)
 			rg.pass_write(g, wireframe_cull_pass, transparent_draw_count_res, .DONT_CARE)
 			state.wireframe_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
-				manager   = self,
-				cam_index = cam_id,
-				cam_res   = cam_res,
-				pipeline  = self.transparency.wireframe_pipeline,
-				draw_list = .TRANSPARENT,
+				manager        = self,
+				render_context = &state.render_context,
+				cam_index      = cam_id,
+				cam_res        = cam_res,
+				pipeline       = self.transparency.wireframe_pipeline,
+				draw_list      = .TRANSPARENT,
 			}
 			wireframe_render_pass := rg.add_pass(
 				g,
@@ -1172,11 +1218,12 @@ build_default_render_graph :: proc(
 			rg.pass_write(g, random_color_cull_pass, transparent_draw_cmd_res, .DONT_CARE)
 			rg.pass_write(g, random_color_cull_pass, transparent_draw_count_res, .DONT_CARE)
 			state.random_color_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
-				manager   = self,
-				cam_index = cam_id,
-				cam_res   = cam_res,
-				pipeline  = self.transparency.random_color_pipeline,
-				draw_list = .TRANSPARENT,
+				manager        = self,
+				render_context = &state.render_context,
+				cam_index      = cam_id,
+				cam_res        = cam_res,
+				pipeline       = self.transparency.random_color_pipeline,
+				draw_list      = .TRANSPARENT,
 			}
 			random_color_render_pass := rg.add_pass(
 				g,
@@ -1213,11 +1260,12 @@ build_default_render_graph :: proc(
 			rg.pass_write(g, sprite_cull_pass, sprite_draw_cmd_res, .DONT_CARE)
 			rg.pass_write(g, sprite_cull_pass, sprite_draw_count_res, .DONT_CARE)
 			state.sprite_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
-				manager   = self,
-				cam_index = cam_id,
-				cam_res   = cam_res,
-				pipeline  = self.transparency.sprite_pipeline,
-				draw_list = .SPRITE,
+				manager        = self,
+				render_context = &state.render_context,
+				cam_index      = cam_id,
+				cam_res        = cam_res,
+				pipeline       = self.transparency.sprite_pipeline,
+				draw_list      = .SPRITE,
 			}
 			sprite_render_pass := rg.add_pass(
 				g,
@@ -1236,28 +1284,42 @@ build_default_render_graph :: proc(
 		// Debug pass
 		state.debug_ctxs[cam_idx] = DebugPassCtx{manager = self, cam_index = cam_id, cam_res = cam_res}
 		debug_pass := rg.add_pass(g, "debug", debug_pass_execute, &state.debug_ctxs[cam_idx])
+		rg.pass_read(g, debug_pass, debug_bone_buffer_res)
 		rg.pass_read_write(g, debug_pass, final_image_res)
 		rg.pass_read_write(g, debug_pass, depth_res)
 
 		// Track main camera's final image resource for post-process
 		if cam_id == main_cam_index {
 			main_final_res = final_image_res
+			log.infof("Found main camera (id=%v), setting main_final_res=%v", cam_id, main_final_res)
 		}
 
 		cam_idx += 1
 	}
 
-	// Post-process pass: reads main camera's final_image, writes swapchain
-	post_process_pass := rg.add_pass(
-		g,
-		"post_process",
-		post_process_pass_execute,
-		&state.post_process_ctx,
-	)
+	// Default post-processing: simple tonemap to swapchain
+	// Users can customize this by adding their own node chains before the final blit
 	if main_final_res != rg.INVALID_RESOURCE {
-		rg.pass_read(g, post_process_pass, main_final_res)
+		main_cam_res := &self.camera_resources[main_cam_index]
+		log.infof("Adding default tonemap node: input_res=%v, swapchain_res=%v", main_final_res, swapchain_res)
+		output_res := tonemap.add_node(
+			g,
+			&self.tonemap_renderer,
+			&self.texture_manager,
+			main_cam_res,
+			main_final_res,
+			swapchain_extent,
+			frame_index,
+			tonemap.Config{exposure = 1.0, gamma = 2.2},
+			true, // is_final_output
+			swapchain_res,
+			swapchain_view,
+			&state.default_tonemap_ctx,
+		)
+		log.infof("Tonemap node output_res=%v", output_res)
+	} else {
+		log.warn("main_final_res is INVALID, skipping post-processing")
 	}
-	rg.pass_write(g, post_process_pass, swapchain_res, .CLEAR)
 
 	// UI pass: overlays UI on top of swapchain
 	state.ui_ctx = UIPassCtx {
@@ -1266,7 +1328,31 @@ build_default_render_graph :: proc(
 		swapchain_extent = swapchain_extent,
 		swapchain_view   = swapchain_view,
 	}
+
+	// Register UI buffers with graph (for documentation and dependency tracking)
+	ui_vertex_buffer_res := rg.add_buffer(
+		g,
+		"ui_vertex_buffer",
+		proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+			ctx := cast(^UIPassCtx)user_data
+			buffer := &ctx.manager.ui_resources.vertex_buffers[frame_index]
+			return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+		},
+		&state.ui_ctx,
+	)
+	ui_index_buffer_res := rg.add_buffer(
+		g,
+		"ui_index_buffer",
+		proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+			ctx := cast(^UIPassCtx)user_data
+			buffer := &ctx.manager.ui_resources.index_buffers[frame_index]
+			return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+		},
+		&state.ui_ctx,
+	)
 	ui_pass := rg.add_pass(g, "ui", ui_pass_execute, &state.ui_ctx)
+	rg.pass_read(g, ui_pass, ui_vertex_buffer_res)
+	rg.pass_read(g, ui_pass, ui_index_buffer_res)
 	rg.pass_read_write(g, ui_pass, swapchain_res)
 
 	// Debug UI pass: overlays debug UI after UI
@@ -1276,7 +1362,32 @@ build_default_render_graph :: proc(
 		swapchain_extent = swapchain_extent,
 		swapchain_view   = swapchain_view,
 	}
+
+	// Register Debug UI buffers with graph
+	debug_ui_vertex_buffer_res := rg.add_buffer(
+		g,
+		"debug_ui_vertex_buffer",
+		proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+			ctx := cast(^DebugUIPassCtx)user_data
+			buffer := &ctx.manager.debug_ui_resources.vertex_buffer
+			return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+		},
+		&state.debug_ui_ctx,
+	)
+	debug_ui_index_buffer_res := rg.add_buffer(
+		g,
+		"debug_ui_index_buffer",
+		proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
+			ctx := cast(^DebugUIPassCtx)user_data
+			buffer := &ctx.manager.debug_ui_resources.index_buffer
+			return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
+		},
+		&state.debug_ui_ctx,
+	)
+
 	debug_ui_pass := rg.add_pass(g, "debug_ui", debug_ui_pass_execute, &state.debug_ui_ctx)
+	rg.pass_read(g, debug_ui_pass, debug_ui_vertex_buffer_res)
+	rg.pass_read(g, debug_ui_pass, debug_ui_index_buffer_res)
 	rg.pass_read_write(g, debug_ui_pass, swapchain_res)
 
 	// Compile the graph

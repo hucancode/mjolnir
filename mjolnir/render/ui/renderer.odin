@@ -18,8 +18,6 @@ Vertex2D :: geometry.Vertex2D
 Renderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
-  vertex_buffers:  [FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
-  index_buffers:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   vertices:        [UI_MAX_VERTICES]Vertex2D,
   indices:         [UI_MAX_INDICES]u32,
   vertex_count:    u32,
@@ -55,33 +53,6 @@ init_renderer :: proc(
   create_pipeline(self, gctx, format) or_return
   log.info("UI renderer pipeline initialized successfully")
   return .SUCCESS
-}
-
-setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
-  log.info("Setting up UI renderer buffers...")
-  for i in 0 ..< FRAMES_IN_FLIGHT {
-    self.vertex_buffers[i] = gpu.create_mutable_buffer(
-      gctx,
-      Vertex2D,
-      UI_MAX_VERTICES,
-      {.VERTEX_BUFFER},
-    ) or_return
-    self.index_buffers[i] = gpu.create_mutable_buffer(
-      gctx,
-      u32,
-      UI_MAX_INDICES,
-      {.INDEX_BUFFER},
-    ) or_return
-  }
-  log.info("UI renderer buffers set up successfully")
-  return .SUCCESS
-}
-
-teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  for i in 0 ..< FRAMES_IN_FLIGHT {
-    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
-    gpu.mutable_buffer_destroy(gctx.device, &self.index_buffers[i])
-  }
 }
 
 create_pipeline :: proc(
@@ -156,6 +127,8 @@ render :: proc(
   width: u32,
   height: u32,
   frame_index: u32,
+  vertex_buffer: ^gpu.MutableBuffer(Vertex2D),
+  index_buffer: ^gpu.MutableBuffer(u32),
 ) {
   projection := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
   vk.CmdPushConstants(
@@ -240,17 +213,17 @@ render :: proc(
 
   if self.vertex_count > 0 {
     gpu.write(
-      &self.vertex_buffers[frame_index],
+      vertex_buffer,
       self.vertices[:self.vertex_count],
     )
     gpu.write(
-      &self.index_buffers[frame_index],
+      index_buffer,
       self.indices[:self.index_count],
     )
     gpu.bind_vertex_index_buffers(
       command_buffer,
-      self.vertex_buffers[frame_index].buffer,
-      self.index_buffers[frame_index].buffer,
+      vertex_buffer.buffer,
+      index_buffer.buffer,
     )
     for batch in draw_batches {
       vk.CmdDrawIndexed(

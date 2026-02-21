@@ -2,6 +2,7 @@ package shadow
 
 import "../../geometry"
 import "../../gpu"
+import rctx "../context"
 import d "../data"
 import light "../lighting"
 import "core:math"
@@ -721,21 +722,14 @@ shadow_compute_draw_list :: proc(
 
 shadow_render_depth_slot :: proc(
   self: ^ShadowSystem,
-  command_buffer: vk.CommandBuffer,
+  ctx: ^rctx.RenderContext,
+  cmd: vk.CommandBuffer,
   texture_manager: ^gpu.TextureManager,
   shadow_data_descriptor_set: vk.DescriptorSet,
-  textures_descriptor_set: vk.DescriptorSet,
-  bone_descriptor_set: vk.DescriptorSet,
-  material_descriptor_set: vk.DescriptorSet,
-  node_data_descriptor_set: vk.DescriptorSet,
-  mesh_data_descriptor_set: vk.DescriptorSet,
-  vertex_skinning_descriptor_set: vk.DescriptorSet,
-  vertex_buffer: vk.Buffer,
-  index_buffer: vk.Buffer,
   slot: u32,
   light_type: d.LightType,
-  draw_commands_buffer: vk.Buffer,
-  draw_count_buffer: vk.Buffer,
+  draw_commands: vk.Buffer,
+  draw_count: vk.Buffer,
   shadow_map_2d: gpu.Texture2DHandle,
   shadow_map_cube: gpu.TextureCubeHandle,
 ) {
@@ -750,29 +744,29 @@ shadow_render_depth_slot :: proc(
       .STORE,
     )
     gpu.begin_depth_rendering(
-      command_buffer,
+      cmd,
       vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
       &depth_attachment,
     )
     gpu.set_viewport_scissor(
-      command_buffer,
+      cmd,
       vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
     )
     gpu.bind_graphics_pipeline(
-      command_buffer,
+      cmd,
       self.depth_pipeline,
       self.depth_pipeline_layout,
       shadow_data_descriptor_set,
-      textures_descriptor_set,
-      bone_descriptor_set,
-      material_descriptor_set,
-      node_data_descriptor_set,
-      mesh_data_descriptor_set,
-      vertex_skinning_descriptor_set,
+      ctx.textures_descriptor_set,
+      ctx.bone_descriptor_set,
+      ctx.material_descriptor_set,
+      ctx.node_data_descriptor_set,
+      ctx.mesh_data_descriptor_set,
+      ctx.vertex_skinning_descriptor_set,
     )
     cam_idx := slot
     vk.CmdPushConstants(
-      command_buffer,
+      cmd,
       self.depth_pipeline_layout,
       {.VERTEX, .FRAGMENT},
       0,
@@ -780,20 +774,20 @@ shadow_render_depth_slot :: proc(
       &cam_idx,
     )
     gpu.bind_vertex_index_buffers(
-      command_buffer,
-      vertex_buffer,
-      index_buffer,
+      cmd,
+      ctx.vertex_buffer,
+      ctx.index_buffer,
     )
     vk.CmdDrawIndexedIndirectCount(
-      command_buffer,
-      draw_commands_buffer,
+      cmd,
+      draw_commands,
       0,
-      draw_count_buffer,
+      draw_count,
       0,
       self.max_draws,
       u32(size_of(vk.DrawIndexedIndirectCommand)),
     )
-    vk.CmdEndRendering(command_buffer)
+    vk.CmdEndRendering(cmd)
   case .DIRECTIONAL:
     depth_texture := gpu.get_texture_2d(texture_manager, shadow_map_2d)
     if depth_texture == nil do return
@@ -803,29 +797,29 @@ shadow_render_depth_slot :: proc(
       .STORE,
     )
     gpu.begin_depth_rendering(
-      command_buffer,
+      cmd,
       vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
       &depth_attachment,
     )
     gpu.set_viewport_scissor(
-      command_buffer,
+      cmd,
       vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
     )
     gpu.bind_graphics_pipeline(
-      command_buffer,
+      cmd,
       self.depth_pipeline,
       self.depth_pipeline_layout,
       shadow_data_descriptor_set,
-      textures_descriptor_set,
-      bone_descriptor_set,
-      material_descriptor_set,
-      node_data_descriptor_set,
-      mesh_data_descriptor_set,
-      vertex_skinning_descriptor_set,
+      ctx.textures_descriptor_set,
+      ctx.bone_descriptor_set,
+      ctx.material_descriptor_set,
+      ctx.node_data_descriptor_set,
+      ctx.mesh_data_descriptor_set,
+      ctx.vertex_skinning_descriptor_set,
     )
     cam_idx := slot
     vk.CmdPushConstants(
-      command_buffer,
+      cmd,
       self.depth_pipeline_layout,
       {.VERTEX, .FRAGMENT},
       0,
@@ -833,20 +827,20 @@ shadow_render_depth_slot :: proc(
       &cam_idx,
     )
     gpu.bind_vertex_index_buffers(
-      command_buffer,
-      vertex_buffer,
-      index_buffer,
+      cmd,
+      ctx.vertex_buffer,
+      ctx.index_buffer,
     )
     vk.CmdDrawIndexedIndirectCount(
-      command_buffer,
-      draw_commands_buffer,
+      cmd,
+      draw_commands,
       0,
-      draw_count_buffer,
+      draw_count,
       0,
       self.max_draws,
       u32(size_of(vk.DrawIndexedIndirectCommand)),
     )
-    vk.CmdEndRendering(command_buffer)
+    vk.CmdEndRendering(cmd)
   case .POINT:
     depth_cube := gpu.get_texture_cube(texture_manager, shadow_map_cube)
     if depth_cube == nil do return
@@ -856,32 +850,32 @@ shadow_render_depth_slot :: proc(
       .STORE,
     )
     gpu.begin_depth_rendering(
-      command_buffer,
+      cmd,
       vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
       &depth_attachment,
       layer_count = 6,
     )
     gpu.set_viewport_scissor(
-      command_buffer,
+      cmd,
       vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
       flip_x = true,
       flip_y = false,
     )
     gpu.bind_graphics_pipeline(
-      command_buffer,
+      cmd,
       self.sphere_depth_pipeline,
       self.sphere_depth_pipeline_layout,
       shadow_data_descriptor_set,
-      textures_descriptor_set,
-      bone_descriptor_set,
-      material_descriptor_set,
-      node_data_descriptor_set,
-      mesh_data_descriptor_set,
-      vertex_skinning_descriptor_set,
+      ctx.textures_descriptor_set,
+      ctx.bone_descriptor_set,
+      ctx.material_descriptor_set,
+      ctx.node_data_descriptor_set,
+      ctx.mesh_data_descriptor_set,
+      ctx.vertex_skinning_descriptor_set,
     )
     cam_idx := slot
     vk.CmdPushConstants(
-      command_buffer,
+      cmd,
       self.sphere_depth_pipeline_layout,
       {.VERTEX, .GEOMETRY, .FRAGMENT},
       0,
@@ -889,20 +883,20 @@ shadow_render_depth_slot :: proc(
       &cam_idx,
     )
     gpu.bind_vertex_index_buffers(
-      command_buffer,
-      vertex_buffer,
-      index_buffer,
+      cmd,
+      ctx.vertex_buffer,
+      ctx.index_buffer,
     )
     vk.CmdDrawIndexedIndirectCount(
-      command_buffer,
-      draw_commands_buffer,
+      cmd,
+      draw_commands,
       0,
-      draw_count_buffer,
+      draw_count,
       0,
       self.max_draws,
       u32(size_of(vk.DrawIndexedIndirectCommand)),
     )
-    vk.CmdEndRendering(command_buffer)
+    vk.CmdEndRendering(cmd)
   }
 }
 

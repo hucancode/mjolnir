@@ -16,14 +16,24 @@ execute :: proc(
 	frame_index: u32,
 	texture_manager: ^gpu.TextureManager,
 ) {
+	log.infof("EXECUTOR: execute() called, compiled=%v, compiled_passes=%v", g.is_compiled, len(g.compiled))
 	if !g.is_compiled {
 		log.error("Render graph not compiled - call compile() before execute()")
 		return
 	}
 
+	log.infof("EXECUTOR: Starting loop over %v compiled passes", len(g.compiled))
 	for &cp in g.compiled {
 		pass, has := g.passes[cp.pass_id]
-		if !has || !pass.enabled do continue
+		if !has || !pass.enabled {
+			if !has {
+				log.warnf("EXECUTOR: Pass %v not found in passes map!", cp.pass_id)
+			} else {
+				log.infof("EXECUTOR: Skipping disabled pass: %s", pass.name)
+			}
+			continue
+		}
+		log.infof("EXECUTOR: Executing pass: %s (id=%v)", pass.name, cp.pass_id)
 
 		cmd := graphics_cmd
 		if cp.queue == .COMPUTE && compute_cmd != nil {
