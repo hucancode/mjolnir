@@ -14,14 +14,14 @@ TEXTURE_BLACK_CIRCLE :: #load("../../assets/black-circle.png")
 // Re-export Particle type from simulation module
 Particle :: psim.Particle
 
-ParticleRenderer :: struct {
-	render_pipeline_layout: vk.PipelineLayout,
-	render_pipeline:        vk.Pipeline,
-	default_texture_index:  u32,
+Renderer :: struct {
+	pipeline_layout:       vk.PipelineLayout,
+	pipeline:              vk.Pipeline,
+	default_texture_index: u32,
 }
 
 init :: proc(
-	self: ^ParticleRenderer,
+	self: ^Renderer,
 	gctx: ^gpu.GPUContext,
 	camera_set_layout: vk.DescriptorSetLayout,
 	textures_set_layout: vk.DescriptorSetLayout,
@@ -36,14 +36,14 @@ init :: proc(
 		textures_set_layout,
 	) or_return
 	defer if ret != .SUCCESS {
-		vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
-		vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
+		vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+		vk.DestroyPipeline(gctx.device, self.pipeline, nil)
 	}
 	return .SUCCESS
 }
 
 setup :: proc(
-	self: ^ParticleRenderer,
+	self: ^Renderer,
 	gctx: ^gpu.GPUContext,
 	texture_manager: ^gpu.TextureManager,
 ) -> (
@@ -62,23 +62,23 @@ setup :: proc(
 }
 
 teardown :: proc(
-	self: ^ParticleRenderer,
+	self: ^Renderer,
 	gctx: ^gpu.GPUContext,
 	texture_manager: ^gpu.TextureManager,
 ) {
-	// Texture freed in texture_manager teardown
+	// Default texture handle cleanup happens in texture_manager teardown
 }
 
 destroy :: proc(
-	self: ^ParticleRenderer,
+	self: ^Renderer,
 	gctx: ^gpu.GPUContext,
 ) {
-	vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
-	vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
+	vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+	vk.DestroyPipeline(gctx.device, self.pipeline, nil)
 }
 
 begin_pass :: proc(
-	self: ^ParticleRenderer,
+	self: ^Renderer,
 	command_buffer: vk.CommandBuffer,
 	camera: ^camera.CameraResources,
 	texture_manager: ^gpu.TextureManager,
@@ -113,7 +113,7 @@ begin_pass :: proc(
 }
 
 render :: proc(
-	self: ^ParticleRenderer,
+	self: ^Renderer,
 	command_buffer: vk.CommandBuffer,
 	camera: ^camera.CameraResources,
 	camera_index: u32,
@@ -126,15 +126,15 @@ render :: proc(
 	// Use indirect draw - GPU handles the count
 	gpu.bind_graphics_pipeline(
 		command_buffer,
-		self.render_pipeline,
-		self.render_pipeline_layout,
+		self.pipeline,
+		self.pipeline_layout,
 		cameras_descriptor_set,
 		textures_descriptor_set,
 	)
 	camera_idx := camera_index
 	vk.CmdPushConstants(
 		command_buffer,
-		self.render_pipeline_layout,
+		self.pipeline_layout,
 		{.VERTEX},
 		0,
 		size_of(u32),
@@ -164,20 +164,20 @@ end_pass :: proc(command_buffer: vk.CommandBuffer) {
 @(private)
 create_render_pipeline :: proc(
 	gctx: ^gpu.GPUContext,
-	self: ^ParticleRenderer,
+	self: ^Renderer,
 	camera_set_layout: vk.DescriptorSetLayout,
 	textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
 	ret: vk.Result,
 ) {
-	self.render_pipeline_layout = gpu.create_pipeline_layout(
+	self.pipeline_layout = gpu.create_pipeline_layout(
 		gctx,
 		vk.PushConstantRange{stageFlags = {.VERTEX}, size = size_of(u32)},
 		camera_set_layout,
 		textures_set_layout,
 	) or_return
 	defer if ret != .SUCCESS {
-		vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
+		vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
 	}
 	vertex_binding := vk.VertexInputBindingDescription {
 		binding   = 0,
@@ -244,7 +244,7 @@ create_render_pipeline :: proc(
 		pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
 		pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
 		pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
-		layout              = self.render_pipeline_layout,
+		layout              = self.pipeline_layout,
 		pNext               = &gpu.STANDARD_RENDERING_INFO,
 	}
 	vk.CreateGraphicsPipelines(
@@ -253,7 +253,7 @@ create_render_pipeline :: proc(
 		1,
 		&pipeline_info,
 		nil,
-		&self.render_pipeline,
+		&self.pipeline,
 	) or_return
 	return .SUCCESS
 }

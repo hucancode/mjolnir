@@ -17,6 +17,7 @@ RenderContext :: struct {
 	mesh_data_descriptor_set:       vk.DescriptorSet,
 	vertex_skinning_descriptor_set: vk.DescriptorSet,
 	sprite_buffer_descriptor_set:   vk.DescriptorSet,
+	lights_descriptor_set:          vk.DescriptorSet,
 
 	// Global buffers (same for all render calls)
 	vertex_buffer: vk.Buffer,

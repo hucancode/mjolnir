@@ -120,7 +120,7 @@ Manager :: struct {
   line_strip:              line_strip.Renderer,
   sprite:                  sprite.Renderer,
   particle_simulation:     psim.System,
-  particle_render:         prender.ParticleRenderer,
+  particle_render:         prender.Renderer,
   tonemap_renderer:        tonemap.Renderer,
   debug_ui:                debug_ui.Renderer,
   debug_renderer:          debug.Renderer,
