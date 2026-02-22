@@ -64,6 +64,7 @@ GeometryPassCtx :: struct {
 
 LightingPassCtx :: struct {
 	manager:          ^Manager,
+	render_context:   ^RenderContext,
 	cam_index:        u32,
 	cam_res:          ^camera.CameraResources,
 	light_index:      u32,
@@ -71,9 +72,10 @@ LightingPassCtx :: struct {
 }
 
 AmbientPassCtx :: struct {
-	manager:   ^Manager,
-	cam_index: u32,
-	cam_res:   ^camera.CameraResources,
+	manager:        ^Manager,
+	render_context: ^RenderContext,
+	cam_index:      u32,
+	cam_res:        ^camera.CameraResources,
 }
 
 ParticleSimulationPassCtx :: struct {
@@ -366,10 +368,10 @@ ambient_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data:
 	log.infof("AMBIENT PASS EXECUTING for camera %v", ctx.cam_index)
 	ambient.begin_ambient_pass(
 		&m.ambient,
+		ctx.render_context,
 		ctx.cam_res,
 		&m.texture_manager,
 		cmd,
-		m.camera_buffer.descriptor_sets[frame_index],
 		frame_index,
 	)
 	ambient.render_ambient(&m.ambient, ctx.cam_index, ctx.cam_res, cmd, frame_index)
@@ -382,11 +384,10 @@ lighting_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data
 	m := ctx.manager
 	light.begin_pass(
 		&m.lighting,
+		ctx.render_context,
 		ctx.cam_res,
 		&m.texture_manager,
 		cmd,
-		m.camera_buffer.descriptor_sets[frame_index],
-		m.lights_buffer.descriptor_set,
 		m.shadow_resources.shadow_data_buffer.descriptor_sets[frame_index],
 		frame_index,
 	)
@@ -1090,9 +1091,10 @@ build_default_render_graph :: proc(
 		rg.pass_write(g, geom_pass, final_image_res, .CLEAR)
 
 		state.ambient_ctxs[cam_idx] = AmbientPassCtx {
-			manager   = self,
-			cam_index = cam_id,
-			cam_res   = cam_res,
+			manager        = self,
+			render_context = &state.render_context,
+			cam_index      = cam_id,
+			cam_res        = cam_res,
 		}
 		ambient_pass := rg.add_pass(
 			g,
@@ -1114,6 +1116,7 @@ build_default_render_graph :: proc(
 			state.lighting_count += 1
 			state.lighting_ctxs[lighting_ctx_idx] = LightingPassCtx {
 				manager          = self,
+				render_context   = &state.render_context,
 				cam_index        = cam_id,
 				cam_res          = cam_res,
 				light_index      = handle.index,

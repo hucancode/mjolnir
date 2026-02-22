@@ -267,11 +267,10 @@ recreate_images :: proc(
 
 begin_pass :: proc(
 	self: ^LightingRenderer,
+	ctx: ^rctx.RenderContext,
 	camera: ^camera.CameraResources,
 	texture_manager: ^gpu.TextureManager,
 	command_buffer: vk.CommandBuffer,
-	cameras_descriptor_set: vk.DescriptorSet,
-	lights_descriptor_set: vk.DescriptorSet,
 	shadow_data_descriptor_set: vk.DescriptorSet,
 	frame_index: u32,
 ) {
@@ -297,9 +296,9 @@ begin_pass :: proc(
 		command_buffer,
 		self.pipeline,
 		self.pipeline_layout,
-		cameras_descriptor_set, // set = 0 (per-frame cameras)
-		texture_manager.descriptor_set, // set = 1 (textures/samplers)
-		lights_descriptor_set, // set = 2 (lights)
+		ctx.cameras_descriptor_set, // set = 0 (per-frame cameras)
+		ctx.textures_descriptor_set, // set = 1 (textures/samplers)
+		ctx.lights_descriptor_set, // set = 2 (lights)
 		shadow_data_descriptor_set, // set = 3 (per-frame shadow data)
 	)
 }

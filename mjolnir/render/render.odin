@@ -176,6 +176,7 @@ build_render_context :: proc(manager: ^Manager, frame_index: u32) -> RenderConte
 		mesh_data_descriptor_set = manager.mesh_data_buffer.descriptor_set,
 		vertex_skinning_descriptor_set = manager.mesh_manager.vertex_skinning_buffer.descriptor_set,
 		sprite_buffer_descriptor_set = manager.sprite_buffer.descriptor_set,
+		lights_descriptor_set = manager.lights_buffer.descriptor_set,
 		vertex_buffer = manager.mesh_manager.vertex_buffer.buffer,
 		index_buffer = manager.mesh_manager.index_buffer.buffer,
 	}

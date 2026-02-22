@@ -34,10 +34,10 @@ AmbientRenderer :: struct {
 
 begin_ambient_pass :: proc(
 	self: ^AmbientRenderer,
+	ctx: ^rctx.RenderContext,
 	camera: ^camera.CameraResources,
 	texture_manager: ^gpu.TextureManager,
 	command_buffer: vk.CommandBuffer,
-	cameras_descriptor_set: vk.DescriptorSet,
 	frame_index: u32,
 ) {
 	color_texture := gpu.get_texture_2d(
@@ -59,8 +59,8 @@ begin_ambient_pass :: proc(
 		command_buffer,
 		self.pipeline,
 		self.pipeline_layout,
-		cameras_descriptor_set, // set = 0 (per-frame camera buffer)
-		texture_manager.descriptor_set, // set = 1 (bindless textures)
+		ctx.cameras_descriptor_set, // set = 0 (per-frame camera buffer)
+		ctx.textures_descriptor_set, // set = 1 (bindless textures)
 	)
 }
 
