@@ -565,6 +565,7 @@ DefaultGraphState :: struct {
 	sprite_cull_ctxs:            [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
 	sprite_render_ctxs:          [rd.MAX_ACTIVE_CAMERAS]SpriteRenderPassCtx,
 	debug_ctxs:        [rd.MAX_ACTIVE_CAMERAS]DebugPassCtx,
+	debug_bone_buffer_ctx: struct { manager: ^Manager },
 	swapchain_ctx:     SwapchainResolveCtx,
 	// Default post-process effect context (for simple blit/tonemap to swapchain)
 	default_tonemap_ctx: tonemap.PassCtx,
@@ -666,6 +667,9 @@ build_default_render_graph :: proc(
 		"particle_buffer",
 		proc(user_data: rawptr, frame_index: u32) -> (vk.Buffer, vk.DeviceSize) {
 			ctx := cast(^ParticleSimulationPassCtx)user_data
+			if ctx == nil || ctx.manager == nil {
+				return 0, 0
+			}
 			buffer := &ctx.manager.particle_resources.particle_buffer
 			return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
 		},
@@ -826,7 +830,7 @@ build_default_render_graph :: proc(
 
 	// Register debug bone instance buffer (shared across all cameras)
 	// Note: We use a simple context with just manager for the resolve callback
-	debug_bone_buffer_ctx := struct { manager: ^Manager }{manager = self}
+	state.debug_bone_buffer_ctx = struct { manager: ^Manager }{manager = self}
 	debug_bone_buffer_res := rg.add_buffer(
 		g,
 		"debug_bone_instance_buffer",
@@ -835,7 +839,7 @@ build_default_render_graph :: proc(
 			buffer := &ctx.manager.debug_resources.bone_instance_buffer
 			return buffer.buffer, vk.DeviceSize(buffer.bytes_count)
 		},
-		&debug_bone_buffer_ctx,
+		&state.debug_bone_buffer_ctx,
 	)
 
 	// Per-camera passes
