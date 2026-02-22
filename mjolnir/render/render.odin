@@ -18,12 +18,17 @@ import rg "graph"
 import "geometry"
 import ambient "ambient"
 import light "lighting"
+import line_strip "line_strip"
 import oc "occlusion_culling"
-import "particles"
+import psim "particle_simulation"
+import prender "particle_render"
 import tonemap "post_process/tonemap"
+import random_color "random_color"
 import shd "shadow"
-import "transparency"
+import sprite "sprite"
+import transparent "transparent"
 import ui_render "ui"
+import wireframe "wireframe"
 import vk "vendor:vulkan"
 
 FRAMES_IN_FLIGHT :: rd.FRAMES_IN_FLIGHT
@@ -82,9 +87,11 @@ ShadowResources :: struct {
 }
 
 ParticleResources :: struct {
-  particle_buffer:         gpu.MutableBuffer(particles.Particle),
-  compact_particle_buffer: gpu.MutableBuffer(particles.Particle),
+  particle_buffer:         gpu.MutableBuffer(psim.Particle),
+  compact_particle_buffer: gpu.MutableBuffer(psim.Particle),
   draw_command_buffer:     gpu.MutableBuffer(vk.DrawIndirectCommand),
+  params_buffer:           gpu.MutableBuffer(psim.ParticleSystemParams),
+  particle_count_buffer:   gpu.MutableBuffer(u32),
 }
 
 UIResources :: struct {
@@ -107,8 +114,13 @@ Manager :: struct {
   geometry:                geometry.Renderer,
   ambient:                 ambient.AmbientRenderer,
   lighting:                light.LightingRenderer,
-  transparency:            transparency.Renderer,
-  particles:               particles.Renderer,
+  transparent:             transparent.Renderer,
+  wireframe:               wireframe.Renderer,
+  random_color:            random_color.Renderer,
+  line_strip:              line_strip.Renderer,
+  sprite:                  sprite.Renderer,
+  particle_simulation:     psim.System,
+  particle_render:         prender.ParticleRenderer,
   tonemap_renderer:        tonemap.Renderer,
   debug_ui:                debug_ui.Renderer,
   debug_renderer:          debug.Renderer,
@@ -431,28 +443,70 @@ init :: proc(
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
-  particles.init(
-    &self.particles,
+  psim.init(
+    &self.particle_simulation,
     gctx,
-    self.camera_buffer.set_layout,
     self.emitter_buffer.set_layout,
     self.forcefield_buffer.set_layout,
     self.node_data_buffer.set_layout,
+  ) or_return
+  prender.init(
+    &self.particle_render,
+    gctx,
+    self.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
-  transparency.init(
-    &self.transparency,
+  transparent.init(
+    &self.transparent,
     gctx,
-    swapchain_extent.width,
-    swapchain_extent.height,
     self.camera_buffer.set_layout,
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
-    self.sprite_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
+  ) or_return
+  wireframe.init(
+    &self.wireframe,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
+  ) or_return
+  random_color.init(
+    &self.random_color,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
+  ) or_return
+  line_strip.init(
+    &self.line_strip,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
+  ) or_return
+  sprite.init(
+    &self.sprite,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.node_data_buffer.set_layout,
+    self.sprite_buffer.set_layout,
   ) or_return
   tonemap.init(
     &self.tonemap_renderer,
@@ -524,8 +578,8 @@ init :: proc(
   // Allocate Particle resources
   self.particle_resources.particle_buffer = gpu.create_mutable_buffer(
     gctx,
-    particles.Particle,
-    particles.MAX_PARTICLES,
+    psim.Particle,
+    psim.MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
   ) or_return
   defer if ret != .SUCCESS {
@@ -533,8 +587,8 @@ init :: proc(
   }
   self.particle_resources.compact_particle_buffer = gpu.create_mutable_buffer(
     gctx,
-    particles.Particle,
-    particles.MAX_PARTICLES,
+    psim.Particle,
+    psim.MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
   ) or_return
   defer if ret != .SUCCESS {
@@ -548,6 +602,24 @@ init :: proc(
   ) or_return
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
+  }
+  self.particle_resources.params_buffer = gpu.create_mutable_buffer(
+    gctx,
+    psim.ParticleSystemParams,
+    1,
+    {.UNIFORM_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.params_buffer)
+  }
+  self.particle_resources.particle_count_buffer = gpu.create_mutable_buffer(
+    gctx,
+    u32,
+    1,
+    {.STORAGE_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_count_buffer)
   }
 
   debug.init(
@@ -635,15 +707,21 @@ setup :: proc(
     ) or_return
     self.shadow_resources.slot_allocated[slot] = true
   }
-  particles.setup(
-    &self.particles,
+  psim.setup(
+    &self.particle_simulation,
     gctx,
-    &self.texture_manager,
     self.emitter_buffer.descriptor_set,
     self.forcefield_buffer.descriptor_set,
     &self.particle_resources.particle_buffer,
     &self.particle_resources.compact_particle_buffer,
     &self.particle_resources.draw_command_buffer,
+    &self.particle_resources.params_buffer,
+    &self.particle_resources.particle_count_buffer,
+  ) or_return
+  prender.setup(
+    &self.particle_render,
+    gctx,
+    &self.texture_manager,
   ) or_return
   // Post-processing is now node-based, no setup needed
   debug_ui.setup(&self.debug_ui, gctx, &self.texture_manager) or_return
@@ -676,10 +754,13 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.params_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_count_buffer)
 
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
   // Post-processing is now node-based, no teardown needed
-  particles.teardown(&self.particles, gctx)
+  psim.teardown(&self.particle_simulation, gctx)
+  prender.teardown(&self.particle_render, gctx, &self.texture_manager)
   // Teardown shadow slots that were allocated
   for slot in 0 ..< shd.MAX_SHADOW_MAPS {
     if !self.shadow_resources.slot_allocated[slot] do continue
@@ -825,8 +906,13 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   debug.shutdown(&self.debug_renderer, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
   tonemap.destroy(&self.tonemap_renderer, gctx)
-  particles.shutdown(&self.particles, gctx)
-  transparency.shutdown(&self.transparency, gctx)
+  psim.destroy(&self.particle_simulation, gctx)
+  prender.destroy(&self.particle_render, gctx)
+  transparent.destroy(&self.transparent, gctx)
+  wireframe.destroy(&self.wireframe, gctx)
+  random_color.destroy(&self.random_color, gctx)
+  line_strip.destroy(&self.line_strip, gctx)
+  sprite.destroy(&self.sprite, gctx)
   ambient.destroy(&self.ambient, gctx)
   light.destroy(&self.lighting, gctx)
   shd.shadow_shutdown(&self.shadow, gctx)

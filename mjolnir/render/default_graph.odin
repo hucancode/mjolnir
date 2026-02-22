@@ -12,12 +12,17 @@ import rg "graph"
 import "geometry"
 import ambient "ambient"
 import light "lighting"
+import line_strip "line_strip"
 import oc "occlusion_culling"
-import "particles"
+import psim "particle_simulation"
+import prender "particle_render"
 import tonemap "post_process/tonemap"
+import random_color "random_color"
 import shd "shadow"
-import "transparency"
+import sprite "sprite"
+import transparent "transparent"
 import ui_render "ui"
+import wireframe "wireframe"
 import vk "vendor:vulkan"
 
 // Default Graph
@@ -96,12 +101,43 @@ TransparencyCullPassCtx :: struct {
 	draw_list: DrawListKind,
 }
 
-TransparencyRenderPassCtx :: struct {
+TransparentRenderPassCtx :: struct {
 	manager:        ^Manager,
 	render_context: ^RenderContext,
 	cam_index:      u32,
 	cam_res:        ^camera.CameraResources,
-	pipeline:       vk.Pipeline,
+	draw_list:      DrawListKind,
+}
+
+WireframeRenderPassCtx :: struct {
+	manager:        ^Manager,
+	render_context: ^RenderContext,
+	cam_index:      u32,
+	cam_res:        ^camera.CameraResources,
+	draw_list:      DrawListKind,
+}
+
+RandomColorRenderPassCtx :: struct {
+	manager:        ^Manager,
+	render_context: ^RenderContext,
+	cam_index:      u32,
+	cam_res:        ^camera.CameraResources,
+	draw_list:      DrawListKind,
+}
+
+LineStripRenderPassCtx :: struct {
+	manager:        ^Manager,
+	render_context: ^RenderContext,
+	cam_index:      u32,
+	cam_res:        ^camera.CameraResources,
+	draw_list:      DrawListKind,
+}
+
+SpriteRenderPassCtx :: struct {
+	manager:        ^Manager,
+	render_context: ^RenderContext,
+	cam_index:      u32,
+	cam_res:        ^camera.CameraResources,
 	draw_list:      DrawListKind,
 }
 
@@ -212,23 +248,6 @@ shadow_depth_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_
 }
 
 @(private)
-get_transparency_draw_buffers :: proc(
-	ctx: ^TransparencyRenderPassCtx,
-	frame_index: u32,
-) -> (
-	draw_buffer: vk.Buffer,
-	count_buffer: vk.Buffer,
-) {
-	switch ctx.draw_list {
-	case .TRANSPARENT:
-		return ctx.cam_res.transparent_draw_commands[frame_index].buffer, ctx.cam_res.transparent_draw_count[frame_index].buffer
-	case .SPRITE:
-		return ctx.cam_res.sprite_draw_commands[frame_index].buffer, ctx.cam_res.sprite_draw_count[frame_index].buffer
-	}
-	return 0, 0
-}
-
-@(private)
 transparency_cull_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^TransparencyCullPassCtx)user_data
 	m := ctx.manager
@@ -245,21 +264,58 @@ transparency_cull_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, 
 }
 
 @(private)
-transparency_render_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
-	ctx := cast(^TransparencyRenderPassCtx)user_data
+transparent_render_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^TransparentRenderPassCtx)user_data
 	m := ctx.manager
-	draw_buffer, count_buffer := get_transparency_draw_buffers(ctx, frame_index)
-	transparency.begin_pass(&m.transparency, ctx.cam_res, &m.texture_manager, cmd, frame_index)
-	transparency.render(
-		&m.transparency,
-		ctx.render_context,
-		cmd,
-		ctx.pipeline,
-		ctx.cam_index,
-		draw_buffer,
-		count_buffer,
-	)
-	transparency.end_pass(&m.transparency, cmd)
+	draw_buffer := ctx.cam_res.transparent_draw_commands[frame_index].buffer
+	count_buffer := ctx.cam_res.transparent_draw_count[frame_index].buffer
+	transparent.begin_pass(ctx.cam_res, &m.texture_manager, cmd, frame_index)
+	transparent.render(&m.transparent, ctx.render_context, cmd, ctx.cam_index, draw_buffer, count_buffer)
+	transparent.end_pass(cmd)
+}
+
+@(private)
+wireframe_render_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^WireframeRenderPassCtx)user_data
+	m := ctx.manager
+	draw_buffer := ctx.cam_res.transparent_draw_commands[frame_index].buffer
+	count_buffer := ctx.cam_res.transparent_draw_count[frame_index].buffer
+	wireframe.begin_pass(ctx.cam_res, &m.texture_manager, cmd, frame_index)
+	wireframe.render(&m.wireframe, ctx.render_context, cmd, ctx.cam_index, draw_buffer, count_buffer)
+	wireframe.end_pass(cmd)
+}
+
+@(private)
+random_color_render_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^RandomColorRenderPassCtx)user_data
+	m := ctx.manager
+	draw_buffer := ctx.cam_res.transparent_draw_commands[frame_index].buffer
+	count_buffer := ctx.cam_res.transparent_draw_count[frame_index].buffer
+	random_color.begin_pass(ctx.cam_res, &m.texture_manager, cmd, frame_index)
+	random_color.render(&m.random_color, ctx.render_context, cmd, ctx.cam_index, draw_buffer, count_buffer)
+	random_color.end_pass(cmd)
+}
+
+@(private)
+line_strip_render_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^LineStripRenderPassCtx)user_data
+	m := ctx.manager
+	draw_buffer := ctx.cam_res.transparent_draw_commands[frame_index].buffer
+	count_buffer := ctx.cam_res.transparent_draw_count[frame_index].buffer
+	line_strip.begin_pass(ctx.cam_res, &m.texture_manager, cmd, frame_index)
+	line_strip.render(&m.line_strip, ctx.render_context, cmd, ctx.cam_index, draw_buffer, count_buffer)
+	line_strip.end_pass(cmd)
+}
+
+@(private)
+sprite_render_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
+	ctx := cast(^SpriteRenderPassCtx)user_data
+	m := ctx.manager
+	draw_buffer := ctx.cam_res.sprite_draw_commands[frame_index].buffer
+	count_buffer := ctx.cam_res.sprite_draw_count[frame_index].buffer
+	sprite.begin_pass(ctx.cam_res, &m.texture_manager, cmd, frame_index)
+	sprite.render(&m.sprite, ctx.render_context, cmd, ctx.cam_index, draw_buffer, count_buffer)
+	sprite.end_pass(cmd)
 }
 
 @(private)
@@ -351,21 +407,23 @@ lighting_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data
 particle_simulation_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^ParticleSimulationPassCtx)user_data
 	m := ctx.manager
-	particles.simulate(
-		&m.particles,
+	psim.simulate(
+		&m.particle_simulation,
 		cmd,
 		m.node_data_buffer.descriptor_set,
 		&m.particle_resources.particle_buffer,
 		&m.particle_resources.compact_particle_buffer,
+		&m.particle_resources.params_buffer,
+		&m.particle_resources.particle_count_buffer,
 	)
 }
 
 particles_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
 	ctx := cast(^ParticlesPassCtx)user_data
 	m := ctx.manager
-	particles.begin_pass(&m.particles, cmd, ctx.cam_res, &m.texture_manager, frame_index)
-	particles.render(
-		&m.particles,
+	prender.begin_pass(&m.particle_render, cmd, ctx.cam_res, &m.texture_manager, frame_index)
+	prender.render(
+		&m.particle_render,
 		cmd,
 		ctx.cam_res,
 		ctx.cam_index,
@@ -375,7 +433,7 @@ particles_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_dat
 		&m.particle_resources.compact_particle_buffer,
 		&m.particle_resources.draw_command_buffer,
 	)
-	particles.end_pass(cmd)
+	prender.end_pass(cmd)
 }
 
 debug_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data: rawptr) {
@@ -497,13 +555,15 @@ DefaultGraphState :: struct {
 	particle_simulation_ctx: ParticleSimulationPassCtx,
 	particles_ctxs:    [rd.MAX_ACTIVE_CAMERAS]ParticlesPassCtx,
 	transparency_cull_ctxs:      [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
-	transparency_render_ctxs:    [rd.MAX_ACTIVE_CAMERAS]TransparencyRenderPassCtx,
+	transparency_render_ctxs:    [rd.MAX_ACTIVE_CAMERAS]TransparentRenderPassCtx,
 	wireframe_cull_ctxs:         [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
-	wireframe_render_ctxs:       [rd.MAX_ACTIVE_CAMERAS]TransparencyRenderPassCtx,
+	wireframe_render_ctxs:       [rd.MAX_ACTIVE_CAMERAS]WireframeRenderPassCtx,
 	random_color_cull_ctxs:      [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
-	random_color_render_ctxs:    [rd.MAX_ACTIVE_CAMERAS]TransparencyRenderPassCtx,
+	random_color_render_ctxs:    [rd.MAX_ACTIVE_CAMERAS]RandomColorRenderPassCtx,
+	line_strip_cull_ctxs:        [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
+	line_strip_render_ctxs:      [rd.MAX_ACTIVE_CAMERAS]LineStripRenderPassCtx,
 	sprite_cull_ctxs:            [rd.MAX_ACTIVE_CAMERAS]TransparencyCullPassCtx,
-	sprite_render_ctxs:          [rd.MAX_ACTIVE_CAMERAS]TransparencyRenderPassCtx,
+	sprite_render_ctxs:          [rd.MAX_ACTIVE_CAMERAS]SpriteRenderPassCtx,
 	debug_ctxs:        [rd.MAX_ACTIVE_CAMERAS]DebugPassCtx,
 	swapchain_ctx:     SwapchainResolveCtx,
 	// Default post-process effect context (for simple blit/tonemap to swapchain)
@@ -1134,18 +1194,17 @@ build_default_render_graph :: proc(
 			rg.pass_write(g, transparency_cull_pass, transparency_seq_res, .DONT_CARE)
 			rg.pass_write(g, transparency_cull_pass, transparent_draw_cmd_res, .DONT_CARE)
 			rg.pass_write(g, transparency_cull_pass, transparent_draw_count_res, .DONT_CARE)
-			state.transparency_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
+			state.transparency_render_ctxs[cam_idx] = TransparentRenderPassCtx {
 				manager        = self,
 				render_context = &state.render_context,
 				cam_index      = cam_id,
 				cam_res        = cam_res,
-				pipeline       = self.transparency.transparent_pipeline,
 				draw_list      = .TRANSPARENT,
 			}
 			transparency_render_pass := rg.add_pass(
 				g,
 				"transparency",
-				transparency_render_pass_execute,
+				transparent_render_pass_execute,
 				&state.transparency_render_ctxs[cam_idx],
 			)
 			rg.pass_read(g, transparency_render_pass, transparency_seq_res)
@@ -1176,18 +1235,17 @@ build_default_render_graph :: proc(
 			rg.pass_write(g, wireframe_cull_pass, transparency_seq_res, .DONT_CARE)
 			rg.pass_write(g, wireframe_cull_pass, transparent_draw_cmd_res, .DONT_CARE)
 			rg.pass_write(g, wireframe_cull_pass, transparent_draw_count_res, .DONT_CARE)
-			state.wireframe_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
+			state.wireframe_render_ctxs[cam_idx] = WireframeRenderPassCtx {
 				manager        = self,
 				render_context = &state.render_context,
 				cam_index      = cam_id,
 				cam_res        = cam_res,
-				pipeline       = self.transparency.wireframe_pipeline,
 				draw_list      = .TRANSPARENT,
 			}
 			wireframe_render_pass := rg.add_pass(
 				g,
 				"wireframe",
-				transparency_render_pass_execute,
+				wireframe_render_pass_execute,
 				&state.wireframe_render_ctxs[cam_idx],
 			)
 			rg.pass_read(g, wireframe_render_pass, transparency_seq_res)
@@ -1218,18 +1276,17 @@ build_default_render_graph :: proc(
 			rg.pass_write(g, random_color_cull_pass, transparency_seq_res, .DONT_CARE)
 			rg.pass_write(g, random_color_cull_pass, transparent_draw_cmd_res, .DONT_CARE)
 			rg.pass_write(g, random_color_cull_pass, transparent_draw_count_res, .DONT_CARE)
-			state.random_color_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
+			state.random_color_render_ctxs[cam_idx] = RandomColorRenderPassCtx {
 				manager        = self,
 				render_context = &state.render_context,
 				cam_index      = cam_id,
 				cam_res        = cam_res,
-				pipeline       = self.transparency.random_color_pipeline,
 				draw_list      = .TRANSPARENT,
 			}
 			random_color_render_pass := rg.add_pass(
 				g,
 				"random_color",
-				transparency_render_pass_execute,
+				random_color_render_pass_execute,
 				&state.random_color_render_ctxs[cam_idx],
 			)
 			rg.pass_read(g, random_color_render_pass, transparency_seq_res)
@@ -1238,6 +1295,55 @@ build_default_render_graph :: proc(
 			rg.pass_read(g, random_color_render_pass, transparent_draw_count_res)
 			rg.pass_read_write(g, random_color_render_pass, final_image_res)
 			rg.pass_read_write(g, random_color_render_pass, depth_res)
+
+			// Line strip cull pass (compute)
+			state.line_strip_cull_ctxs[cam_idx] = TransparencyCullPassCtx {
+				manager   = self,
+				gctx      = gctx,
+				cam_index = cam_id,
+				cam_res   = cam_res,
+				include   = NodeFlagSet{.VISIBLE, .MATERIAL_LINE_STRIP},
+				exclude   = NodeFlagSet{
+					.MATERIAL_TRANSPARENT,
+					.MATERIAL_WIREFRAME,
+					.MATERIAL_RANDOM_COLOR,
+					.MATERIAL_SPRITE,
+				},
+				draw_list = .TRANSPARENT,
+			}
+			line_strip_cull := rg.add_pass(
+				g,
+				"line_strip_cull",
+				transparency_cull_pass_execute,
+				&state.line_strip_cull_ctxs[cam_idx],
+			)
+			rg.pass_read(g, line_strip_cull, final_image_res)
+			rg.pass_read(g, line_strip_cull, depth_res)
+			rg.pass_read(g, line_strip_cull, transparency_seq_res)
+			rg.pass_write(g, line_strip_cull, transparency_seq_res, .DONT_CARE)
+			rg.pass_write(g, line_strip_cull, transparent_draw_cmd_res, .DONT_CARE)
+			rg.pass_write(g, line_strip_cull, transparent_draw_count_res, .DONT_CARE)
+
+			// Line strip render pass (graphics)
+			state.line_strip_render_ctxs[cam_idx] = LineStripRenderPassCtx {
+				manager        = self,
+				render_context = &state.render_context,
+				cam_index      = cam_id,
+				cam_res        = cam_res,
+				draw_list      = .TRANSPARENT,
+			}
+			line_strip_render := rg.add_pass(
+				g,
+				"line_strip",
+				line_strip_render_pass_execute,
+				&state.line_strip_render_ctxs[cam_idx],
+			)
+			rg.pass_read(g, line_strip_render, transparency_seq_res)
+			rg.pass_write(g, line_strip_render, transparency_seq_res, .DONT_CARE)
+			rg.pass_read(g, line_strip_render, transparent_draw_cmd_res)
+			rg.pass_read(g, line_strip_render, transparent_draw_count_res)
+			rg.pass_read_write(g, line_strip_render, final_image_res)
+			rg.pass_read_write(g, line_strip_render, depth_res)
 
 			state.sprite_cull_ctxs[cam_idx] = TransparencyCullPassCtx {
 				manager   = self,
@@ -1260,18 +1366,17 @@ build_default_render_graph :: proc(
 			rg.pass_write(g, sprite_cull_pass, transparency_seq_res, .DONT_CARE)
 			rg.pass_write(g, sprite_cull_pass, sprite_draw_cmd_res, .DONT_CARE)
 			rg.pass_write(g, sprite_cull_pass, sprite_draw_count_res, .DONT_CARE)
-			state.sprite_render_ctxs[cam_idx] = TransparencyRenderPassCtx {
+			state.sprite_render_ctxs[cam_idx] = SpriteRenderPassCtx {
 				manager        = self,
 				render_context = &state.render_context,
 				cam_index      = cam_id,
 				cam_res        = cam_res,
-				pipeline       = self.transparency.sprite_pipeline,
 				draw_list      = .SPRITE,
 			}
 			sprite_render_pass := rg.add_pass(
 				g,
 				"sprite",
-				transparency_render_pass_execute,
+				sprite_render_pass_execute,
 				&state.sprite_render_ctxs[cam_idx],
 			)
 			rg.pass_read(g, sprite_render_pass, transparency_seq_res)

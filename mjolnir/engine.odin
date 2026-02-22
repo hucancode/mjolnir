@@ -23,7 +23,7 @@ import "render/camera"
 import rd "render/data"
 import rg "render/graph"
 import oc "render/occlusion_culling"
-import "render/particles"
+import psim "render/particle_simulation"
 import ui_module "ui"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -1016,7 +1016,7 @@ update :: proc(self: ^Engine) -> bool {
     return false
   }
   self.last_update_timestamp = time.now()
-  params := gpu.get(&self.render.particles.params_buffer, 0)
+  params := gpu.get(&self.render.particle_resources.params_buffer, 0)
   params.delta_time = delta_time
   params.emitter_count = u32(
     min(len(self.world.emitters.entries), world.MAX_EMITTERS),
