@@ -3,8 +3,8 @@ package particles
 import cont "../../containers"
 import "../../gpu"
 import "../camera"
+import rctx "../context"
 import d "../data"
-import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -568,7 +568,7 @@ create_render_pipeline :: proc(
   shader_stages := gpu.create_vert_frag_stages(
     vert_module,
     frag_module,
-    &shared.SHADER_SPEC_CONSTANTS,
+    &rctx.SHADER_SPEC_CONSTANTS,
   )
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,

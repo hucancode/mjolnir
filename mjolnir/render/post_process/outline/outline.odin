@@ -2,8 +2,8 @@ package outline
 
 import "../../../gpu"
 import "../../camera"
+import rctx "../../context"
 import rg "../../graph"
-import "../../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -53,7 +53,7 @@ init :: proc(
 	frag_module := gpu.create_shader_module(gctx.device, SHADER_FRAG) or_return
 	defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
 
-	shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
+	shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &rctx.SHADER_SPEC_CONSTANTS)
 
 	self.pipeline_layout = gpu.create_pipeline_layout(
 		gctx,

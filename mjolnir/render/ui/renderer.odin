@@ -2,7 +2,7 @@ package ui_render
 
 import "../../geometry"
 import "../../gpu"
-import "../shared"
+import rctx "../context"
 import cmd "../../gpu/ui"
 import "core:log"
 import "core:math/linalg"
@@ -69,7 +69,7 @@ create_pipeline :: proc(
   shader_stages := gpu.create_vert_frag_stages(
     vert_module,
     frag_module,
-    &shared.SHADER_SPEC_CONSTANTS,
+    &rctx.SHADER_SPEC_CONSTANTS,
   )
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,

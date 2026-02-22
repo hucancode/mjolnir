@@ -10,6 +10,7 @@ import "debug"
 import "debug_ui"
 import rg "graph"
 import "geometry"
+import ambient "ambient"
 import light "lighting"
 import oc "occlusion_culling"
 import "particles"
@@ -307,16 +308,16 @@ ambient_pass_execute :: proc(cmd: vk.CommandBuffer, frame_index: u32, user_data:
 	ctx := cast(^AmbientPassCtx)user_data
 	m := ctx.manager
 	log.infof("AMBIENT PASS EXECUTING for camera %v", ctx.cam_index)
-	light.begin_ambient_pass(
-		&m.lighting,
+	ambient.begin_ambient_pass(
+		&m.ambient,
 		ctx.cam_res,
 		&m.texture_manager,
 		cmd,
 		m.camera_buffer.descriptor_sets[frame_index],
 		frame_index,
 	)
-	light.render_ambient(&m.lighting, ctx.cam_index, ctx.cam_res, cmd, frame_index)
-	light.end_ambient_pass(cmd)
+	ambient.render_ambient(&m.ambient, ctx.cam_index, ctx.cam_res, cmd, frame_index)
+	ambient.end_ambient_pass(cmd)
 }
 
 @(private)

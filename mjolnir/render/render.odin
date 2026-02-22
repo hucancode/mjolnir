@@ -16,6 +16,7 @@ import "debug"
 import "debug_ui"
 import rg "graph"
 import "geometry"
+import ambient "ambient"
 import light "lighting"
 import oc "occlusion_culling"
 import "particles"
@@ -104,7 +105,8 @@ Manager :: struct {
   command_buffers:         [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   geometry:                geometry.Renderer,
-  lighting:                light.Renderer,
+  ambient:                 ambient.AmbientRenderer,
+  lighting:                light.LightingRenderer,
   transparency:            transparency.Renderer,
   particles:               particles.Renderer,
   tonemap_renderer:        tonemap.Renderer,
@@ -395,6 +397,15 @@ init :: proc(
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
+  ambient.init(
+    &self.ambient,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    swapchain_extent.width,
+    swapchain_extent.height,
+    swapchain_format,
+  ) or_return
   light.init(
     &self.lighting,
     gctx,
@@ -602,7 +613,8 @@ setup :: proc(
   ) or_return
   gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
   // Setup subsystem GPU resources
-  light.setup(&self.lighting, gctx, &self.texture_manager) or_return
+  ambient.setup(&self.ambient, gctx, &self.texture_manager) or_return
+  light.setup(&self.lighting, gctx) or_return
   shd.shadow_setup_buffers(
     &self.shadow_resources.shadow_data_buffer,
     gctx,
@@ -682,7 +694,8 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
     )
     self.shadow_resources.slot_allocated[slot] = false
   }
-  light.teardown(&self.lighting, gctx, &self.texture_manager)
+  ambient.teardown(&self.ambient, gctx, &self.texture_manager)
+  light.teardown(&self.lighting, gctx)
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
   // Zero all descriptor set handles (freed in bulk below)
   self.material_buffer.descriptor_set = 0
@@ -814,7 +827,8 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   tonemap.destroy(&self.tonemap_renderer, gctx)
   particles.shutdown(&self.particles, gctx)
   transparency.shutdown(&self.transparency, gctx)
-  light.shutdown(&self.lighting, gctx)
+  ambient.destroy(&self.ambient, gctx)
+  light.destroy(&self.lighting, gctx)
   shd.shadow_shutdown(&self.shadow, gctx)
   gpu.per_frame_bindless_buffer_destroy(
     &self.shadow_resources.shadow_data_buffer,

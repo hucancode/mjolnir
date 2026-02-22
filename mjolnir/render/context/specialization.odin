@@ -1,4 +1,4 @@
-package shared
+package render_context
 
 import "../../gpu"
 import d "../data"
