@@ -14,20 +14,6 @@ SHADER_LIGHTING_VERT := #load("../../shader/lighting/vert.spv")
 SHADER_LIGHTING_FRAG := #load("../../shader/lighting/frag.spv")
 TEXTURE_LUT_GGX :: #load("../../assets/lut_ggx.png")
 
-SpotLightGPU :: struct {
-  shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
-  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
-}
-
-PointLightGPU :: struct {
-  shadow_cube:     [d.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
-  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
-  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
-}
-
 AmbientPushConstant :: struct {
   camera_index:           u32,
   environment_index:      u32,

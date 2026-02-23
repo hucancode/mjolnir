@@ -15,6 +15,7 @@ import "debug_bone"
 import "debug_ui"
 import "geometry"
 import light "lighting"
+import "shadow"
 import "occlusion_culling"
 import particles_compute "particles_compute"
 import particles_render "particles_render"
@@ -92,7 +93,7 @@ Manager :: struct {
   cameras:                 map[u32]camera.Camera,
   meshes:                  map[u32]Mesh,
   visibility:              occlusion_culling.System,
-  shadow:                  light.ShadowSystem,
+  shadow:                  shadow.ShadowSystem,
   linear_repeat_sampler:   vk.Sampler,
   linear_clamp_sampler:    vk.Sampler,
   nearest_repeat_sampler:  vk.Sampler,
@@ -321,7 +322,7 @@ init :: proc(
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
-  light.shadow_init(
+  shadow.init(
     &self.shadow,
     gctx,
     self.texture_manager.set_layout,
@@ -501,7 +502,7 @@ setup :: proc(
   gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
   // Setup subsystem GPU resources
   light.setup(&self.lighting, gctx, &self.texture_manager) or_return
-  light.shadow_setup(
+  shadow.setup(
     &self.shadow,
     gctx,
     &self.texture_manager,
@@ -570,7 +571,7 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
-  light.shadow_teardown(&self.shadow, gctx, &self.texture_manager)
+  shadow.teardown(&self.shadow, gctx, &self.texture_manager)
   light.teardown(&self.lighting, gctx, &self.texture_manager)
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
   // Zero all descriptor set handles (freed in bulk below)
@@ -718,7 +719,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   line_strip.destroy(&self.line_strip_renderer, gctx)
   random_color.destroy(&self.random_color_renderer, gctx)
   light.shutdown(&self.lighting, gctx)
-  light.shadow_shutdown(&self.shadow, gctx)
+  shadow.shutdown(&self.shadow, gctx)
   geometry.shutdown(&self.geometry, gctx)
   occlusion_culling.shutdown(&self.visibility, gctx)
   vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
@@ -781,14 +782,14 @@ render_shadow_depth :: proc(
   active_lights: []rd.LightHandle,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
-  light.shadow_sync_lights(
+  shadow.sync_lights(
     &self.shadow,
     &self.lights_buffer,
     active_lights,
     frame_index,
   )
-  light.shadow_compute_draw_lists(&self.shadow, cmd, frame_index)
-  light.shadow_render_depth(
+  shadow.compute_draw_lists(&self.shadow, cmd, frame_index)
+  shadow.render_depth(
     &self.shadow,
     cmd,
     &self.texture_manager,
@@ -903,7 +904,7 @@ record_lighting_pass :: proc(
   }
   for handle in active_lights {
     light_data := gpu.get(&self.lights_buffer.buffer, handle.index)
-    shadow_texture_indices[handle.index] = light.shadow_get_texture_index(
+    shadow_texture_indices[handle.index] = shadow.get_texture_index(
       &self.shadow,
       light_data.type,
       light_data.shadow_index,
@@ -1598,7 +1599,7 @@ upload_light_data :: proc(
   light_data: ^rd.Light,
 ) {
   gpu.write(&render.lights_buffer.buffer, light_data, int(index))
-  light.shadow_invalidate_light(&render.shadow, index)
+  shadow.invalidate_light(&render.shadow, index)
 }
 
 upload_mesh_data :: proc(render: ^Manager, index: u32, mesh: ^Mesh) {

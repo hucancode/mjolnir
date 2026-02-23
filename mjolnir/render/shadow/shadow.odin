@@ -1,4 +1,4 @@
-package lighting
+package shadow
 
 import "../../geometry"
 import "../../gpu"
@@ -28,6 +28,13 @@ ShadowData :: struct {
   frustum_planes: [6][4]f32,
 }
 
+SpotLightGPU :: struct {
+  shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
+}
+
 DirectionalLightGPU :: struct {
   radius:          f32,
   projection:      matrix[4, 4]f32,
@@ -36,6 +43,13 @@ DirectionalLightGPU :: struct {
   direction:       [4]f32,
   near_far:        [2]f32,
   shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
+}
+
+PointLightGPU :: struct {
+  shadow_cube:     [d.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
   draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
@@ -100,7 +114,7 @@ make_light_view :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
   return linalg.matrix4_look_at(position, target, up)
 }
 
-shadow_init :: proc(
+init :: proc(
   self: ^ShadowSystem,
   gctx: ^gpu.GPUContext,
   textures_set_layout: vk.DescriptorSetLayout,
@@ -354,7 +368,7 @@ shadow_init :: proc(
   return .SUCCESS
 }
 
-shadow_setup :: proc(
+setup :: proc(
   self: ^ShadowSystem,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
@@ -471,7 +485,7 @@ shadow_setup :: proc(
   return .SUCCESS
 }
 
-shadow_teardown :: proc(
+teardown :: proc(
   self: ^ShadowSystem,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
@@ -505,7 +519,7 @@ shadow_teardown :: proc(
   for &ds in self.shadow_data_buffer.descriptor_sets do ds = 0
 }
 
-shadow_shutdown :: proc(self: ^ShadowSystem, gctx: ^gpu.GPUContext) {
+shutdown :: proc(self: ^ShadowSystem, gctx: ^gpu.GPUContext) {
   gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
   vk.DestroyPipeline(gctx.device, self.sphere_depth_pipeline, nil)
   vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
@@ -527,7 +541,7 @@ shadow_shutdown :: proc(self: ^ShadowSystem, gctx: ^gpu.GPUContext) {
   )
 }
 
-shadow_sync_lights :: proc(
+sync_lights :: proc(
   self: ^ShadowSystem,
   lights_buffer: ^gpu.BindlessBuffer(d.Light),
   active_lights: []d.LightHandle,
@@ -628,7 +642,7 @@ shadow_sync_lights :: proc(
   }
 }
 
-shadow_invalidate_light :: proc(self: ^ShadowSystem, light_index: u32) {
+invalidate_light :: proc(self: ^ShadowSystem, light_index: u32) {
   if light_index >= d.MAX_LIGHTS do return
   slot := self.light_to_slot[light_index]
   if slot == INVALID_SHADOW_INDEX do return
@@ -636,7 +650,7 @@ shadow_invalidate_light :: proc(self: ^ShadowSystem, light_index: u32) {
   self.light_to_slot[light_index] = INVALID_SHADOW_INDEX
 }
 
-shadow_compute_draw_lists :: proc(
+compute_draw_lists :: proc(
   self: ^ShadowSystem,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
@@ -775,7 +789,7 @@ shadow_compute_draw_lists :: proc(
   }
 }
 
-shadow_render_depth :: proc(
+render_depth :: proc(
   self: ^ShadowSystem,
   command_buffer: vk.CommandBuffer,
   texture_manager: ^gpu.TextureManager,
@@ -1092,7 +1106,7 @@ shadow_render_depth :: proc(
   }
 }
 
-shadow_get_texture_index :: proc(
+get_texture_index :: proc(
   self: ^ShadowSystem,
   light_type: d.LightType,
   shadow_index: u32,
