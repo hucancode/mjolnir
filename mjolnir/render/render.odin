@@ -11,7 +11,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import rd "data"
-import "debug"
+import "debug_bone"
 import "debug_ui"
 import "geometry"
 import light "lighting"
@@ -52,7 +52,7 @@ ForceField :: rd.ForceField
 Sprite :: rd.Sprite
 Light :: rd.Light
 LightType :: rd.LightType
-BoneInstance :: debug.BoneInstance
+BoneInstance :: debug_bone.BoneInstance
 
 DEBUG_SHOW_BONES :: #config(DEBUG_SHOW_BONES, false)
 DEBUG_BONE_SCALE :: #config(DEBUG_BONE_SCALE, 0.15)
@@ -86,7 +86,7 @@ Manager :: struct {
   particle_resources:      ParticleResources,
   post_process:            post_process.Renderer,
   debug_ui:                debug_ui.Renderer,
-  debug_renderer:          debug.Renderer,
+  debug_renderer:          debug_bone.Renderer,
   ui:                      ui_render.Renderer,
   ui_commands:             [dynamic]cmd.RenderCommand, // Staged commands from UI module
   cameras:                 map[u32]camera.Camera,
@@ -437,7 +437,7 @@ init :: proc(
     dpi_scale,
     self.texture_manager.set_layout,
   ) or_return
-  debug.init(
+  debug_bone.init(
     &self.debug_renderer,
     gctx,
     self.camera_buffer.set_layout,
@@ -689,14 +689,14 @@ stage_ui_commands :: proc(self: ^Manager, commands: []cmd.RenderCommand) {
 // Stage bone visualization instances for debug rendering
 stage_bone_visualization :: proc(
   self: ^Manager,
-  instances: []debug.BoneInstance,
+  instances: []debug_bone.BoneInstance,
 ) {
-  debug.stage_bones(&self.debug_renderer, instances)
+  debug_bone.stage_bones(&self.debug_renderer, instances)
 }
 
 // Clear staged debug visualization data
 clear_debug_visualization :: proc(self: ^Manager) {
-  debug.clear_bones(&self.debug_renderer)
+  debug_bone.clear_bones(&self.debug_renderer)
 }
 
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
@@ -706,7 +706,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   }
   ui_render.shutdown(&self.ui, gctx)
   delete(self.ui_commands)
-  debug.shutdown(&self.debug_renderer, gctx)
+  debug_bone.shutdown(&self.debug_renderer, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
   post_process.shutdown(&self.post_process, gctx)
   particles_compute.shutdown(&self.particles_compute, gctx)
@@ -1221,7 +1221,7 @@ record_debug_pass :: proc(
 
   // Begin debug render pass (renders on top of transparency)
   // Skip rendering if attachments are missing
-  if !debug.begin_pass(
+  if !debug_bone.begin_pass(
     &self.debug_renderer,
     cam,
     &self.texture_manager,
@@ -1232,14 +1232,14 @@ record_debug_pass :: proc(
   }
 
   // Render debug visualization (bones, etc.)
-  debug.render(
+  debug_bone.render(
     &self.debug_renderer,
     cmd,
     self.camera_buffer.descriptor_sets[frame_index],
     cam_index,
   ) or_return
 
-  debug.end_pass(&self.debug_renderer, cmd)
+  debug_bone.end_pass(&self.debug_renderer, cmd)
 
   return .SUCCESS
 }
