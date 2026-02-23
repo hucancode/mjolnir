@@ -15,7 +15,8 @@ import "debug"
 import "debug_ui"
 import "geometry"
 import light "lighting"
-import "particles"
+import particles_compute "particles_compute"
+import particles_render "particles_render"
 import "post_process"
 import "transparent"
 import "sprite"
@@ -63,6 +64,12 @@ DEBUG_BONE_PALETTE :: [6][4]f32 {
   {0.0, 1.0, 1.0, 1.0}, // Level 5: Cyan
 }
 
+ParticleResources :: struct {
+	particle_buffer:         gpu.MutableBuffer(particles_compute.Particle),
+	compact_particle_buffer: gpu.MutableBuffer(particles_compute.Particle),
+	draw_command_buffer:     gpu.MutableBuffer(vk.DrawIndirectCommand),
+}
+
 Manager :: struct {
   command_buffers:         [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -73,7 +80,9 @@ Manager :: struct {
   wireframe_renderer:      wireframe.Renderer,
   line_strip_renderer:     line_strip.Renderer,
   random_color_renderer:   random_color.Renderer,
-  particles:               particles.Renderer,
+  particles_compute:       particles_compute.Renderer,
+  particles_render:        particles_render.Renderer,
+  particle_resources:      ParticleResources,
   post_process:            post_process.Renderer,
   debug_ui:                debug_ui.Renderer,
   debug_renderer:          debug.Renderer,
@@ -346,13 +355,18 @@ init :: proc(
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
-  particles.init(
-    &self.particles,
+  particles_compute.init(
+    &self.particles_compute,
     gctx,
-    self.camera_buffer.set_layout,
     self.emitter_buffer.set_layout,
     self.forcefield_buffer.set_layout,
     self.node_data_buffer.set_layout,
+  ) or_return
+  particles_render.init(
+    &self.particles_render,
+    gctx,
+    &self.texture_manager,
+    self.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
   // Initialize transparency renderers
@@ -493,12 +507,42 @@ setup :: proc(
     &self.node_data_buffer,
     &self.mesh_data_buffer,
   ) or_return
-  particles.setup(
-    &self.particles,
+  // Allocate particle buffers
+  self.particle_resources.particle_buffer = gpu.create_mutable_buffer(
     gctx,
-    &self.texture_manager,
+    particles_compute.Particle,
+    particles_compute.MAX_PARTICLES,
+    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_buffer)
+  }
+  self.particle_resources.compact_particle_buffer = gpu.create_mutable_buffer(
+    gctx,
+    particles_compute.Particle,
+    particles_compute.MAX_PARTICLES,
+    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
+  }
+  self.particle_resources.draw_command_buffer = gpu.create_mutable_buffer(
+    gctx,
+    vk.DrawIndirectCommand,
+    1,
+    {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
+  }
+  particles_compute.setup(
+    &self.particles_compute,
+    gctx,
     self.emitter_buffer.descriptor_set,
     self.forcefield_buffer.descriptor_set,
+    &self.particle_resources.particle_buffer,
+    &self.particle_resources.compact_particle_buffer,
+    &self.particle_resources.draw_command_buffer,
   ) or_return
   post_process.setup(
     &self.post_process,
@@ -521,7 +565,10 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   ui_render.teardown(&self.ui, gctx)
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
   post_process.teardown(&self.post_process, gctx, &self.texture_manager)
-  particles.teardown(&self.particles, gctx)
+  particles_compute.teardown(&self.particles_compute, gctx)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
   light.shadow_teardown(&self.shadow, gctx, &self.texture_manager)
   light.teardown(&self.lighting, gctx, &self.texture_manager)
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
@@ -618,10 +665,14 @@ record_compute_commands :: proc(
       ) // Write draw_list[N+1]
     }
   }
-  particles.simulate(
-    &self.particles,
+  particles_compute.simulate(
+    &self.particles_compute,
     cmd,
     self.node_data_buffer.descriptor_set,
+    self.particle_resources.particle_buffer.buffer,
+    self.particle_resources.compact_particle_buffer.buffer,
+    self.particle_resources.draw_command_buffer.buffer,
+    vk.DeviceSize(self.particle_resources.particle_buffer.bytes_count),
   )
   return .SUCCESS
 }
@@ -657,7 +708,8 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   debug.shutdown(&self.debug_renderer, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
   post_process.shutdown(&self.post_process, gctx)
-  particles.shutdown(&self.particles, gctx)
+  particles_compute.shutdown(&self.particles_compute, gctx)
+  particles_render.shutdown(&self.particles_render, gctx)
   // Cleanup transparency renderers
   transparent.destroy(&self.transparent_renderer, gctx)
   sprite.destroy(&self.sprite_renderer, gctx)
@@ -878,23 +930,23 @@ record_particles_pass :: proc(
   cam: ^camera.Camera,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
-  particles.begin_pass(
-    &self.particles,
+  particles_render.begin_pass(
+    &self.particles_render,
     cmd,
     cam,
     &self.texture_manager,
     frame_index,
   )
-  particles.render(
-    &self.particles,
+  particles_render.render(
+    &self.particles_render,
     cmd,
-    cam,
     cam_index,
-    frame_index,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
+    self.particle_resources.compact_particle_buffer.buffer,
+    self.particle_resources.draw_command_buffer.buffer,
   )
-  particles.end_pass(cmd)
+  particles_render.end_pass(cmd)
   return .SUCCESS
 }
 

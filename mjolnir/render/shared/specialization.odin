@@ -10,6 +10,7 @@ SamplerType :: enum u32 {
   NEAREST_REPEAT = 2,
   LINEAR_REPEAT  = 3,
 }
+
 Constants :: struct {
   max_textures:           u32,
   max_cube_textures:      u32,

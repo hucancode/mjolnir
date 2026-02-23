@@ -22,7 +22,6 @@ import "render"
 import "render/camera"
 import rd "render/data"
 import "render/debug_ui"
-import "render/particles"
 import ui_module "ui"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -1014,7 +1013,7 @@ update :: proc(self: ^Engine) -> bool {
     return false
   }
   self.last_update_timestamp = time.now()
-  params := gpu.get(&self.render.particles.params_buffer, 0)
+  params := gpu.get(&self.render.particles_compute.params_buffer, 0)
   params.delta_time = delta_time
   params.emitter_count = u32(
     min(len(self.world.emitters.entries), world.MAX_EMITTERS),
