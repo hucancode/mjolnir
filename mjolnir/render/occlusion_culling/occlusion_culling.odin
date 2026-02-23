@@ -1,9 +1,10 @@
-package camera
+package occlusion_culling
 
 import alg "../../algebra"
 import cont "../../containers"
 import "../../geometry"
 import "../../gpu"
+import cam "../camera"
 import d "../data"
 import rd "../data"
 import "core:fmt"
@@ -173,7 +174,7 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
 
 stats :: proc(
   self: ^System,
-  camera: ^Camera,
+  camera: ^cam.Camera,
   camera_index: u32,
   frame_index: u32,
 ) -> CullingStats {
@@ -193,7 +194,7 @@ render_depth :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
-  camera: ^Camera,
+  camera: ^cam.Camera,
   texture_manager: ^gpu.TextureManager,
   camera_index: u32,
   frame_index: u32,
@@ -285,7 +286,7 @@ build_pyramid :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
-  camera: ^Camera,
+  camera: ^cam.Camera,
   camera_index: u32,
   frame_index: u32, // Which pyramid to write to
 ) {
@@ -360,7 +361,7 @@ perform_culling :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
-  camera: ^Camera,
+  camera: ^cam.Camera,
   camera_index: u32,
   frame_index: u32,
   include_flags: rd.NodeFlagSet,

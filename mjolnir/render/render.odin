@@ -15,6 +15,7 @@ import "debug"
 import "debug_ui"
 import "geometry"
 import light "lighting"
+import "occlusion_culling"
 import particles_compute "particles_compute"
 import particles_render "particles_render"
 import "post_process"
@@ -90,7 +91,7 @@ Manager :: struct {
   ui_commands:             [dynamic]cmd.RenderCommand, // Staged commands from UI module
   cameras:                 map[u32]camera.Camera,
   meshes:                  map[u32]Mesh,
-  visibility:              camera.System,
+  visibility:              occlusion_culling.System,
   shadow:                  light.ShadowSystem,
   linear_repeat_sampler:   vk.Sampler,
   linear_clamp_sampler:    vk.Sampler,
@@ -307,7 +308,7 @@ init :: proc(
     self.nearest_clamp_sampler = 0
   }
   // Initialize all subsystems (pipeline creation only)
-  camera.init(
+  occlusion_culling.init(
     &self.visibility,
     gctx,
     swapchain_extent.width,
@@ -642,7 +643,7 @@ record_compute_commands :: proc(
   for cam_index, &cam in self.cameras {
     // Only build pyramid if enabled for this camera
     if cam.enable_depth_pyramid {
-      camera.build_pyramid(
+      occlusion_culling.build_pyramid(
         &self.visibility,
         gctx,
         cmd,
@@ -653,7 +654,7 @@ record_compute_commands :: proc(
     }
     // Only perform culling if enabled for this camera
     if cam.enable_culling {
-      camera.perform_culling(
+      occlusion_culling.perform_culling(
         &self.visibility,
         gctx,
         cmd,
@@ -719,7 +720,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   light.shutdown(&self.lighting, gctx)
   light.shadow_shutdown(&self.shadow, gctx)
   geometry.shutdown(&self.geometry, gctx)
-  camera.shutdown(&self.visibility, gctx)
+  occlusion_culling.shutdown(&self.visibility, gctx)
   vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
   self.linear_repeat_sampler = 0
   vk.DestroySampler(gctx.device, self.linear_clamp_sampler, nil)
@@ -811,7 +812,7 @@ render_camera_depth :: proc(
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
   for cam_index, &cam in self.cameras {
-    camera.render_depth(
+    occlusion_culling.render_depth(
       &self.visibility,
       gctx,
       cmd,
@@ -971,7 +972,7 @@ record_transparency_pass :: proc(
   gpu.set_viewport_scissor(cmd, depth_texture.spec.extent)
 
   // Render transparent objects
-  camera.perform_culling(
+  occlusion_culling.perform_culling(
     &self.visibility,
     gctx,
     cmd,
@@ -1018,7 +1019,7 @@ record_transparency_pass :: proc(
   )
 
   // Render wireframe objects
-  camera.perform_culling(
+  occlusion_culling.perform_culling(
     &self.visibility,
     gctx,
     cmd,
@@ -1065,7 +1066,7 @@ record_transparency_pass :: proc(
   )
 
   // Render random_color objects
-  camera.perform_culling(
+  occlusion_culling.perform_culling(
     &self.visibility,
     gctx,
     cmd,
@@ -1112,7 +1113,7 @@ record_transparency_pass :: proc(
   )
 
   // Render line_strip objects
-  camera.perform_culling(
+  occlusion_culling.perform_culling(
     &self.visibility,
     gctx,
     cmd,
@@ -1159,7 +1160,7 @@ record_transparency_pass :: proc(
   )
 
   // Render sprites
-  camera.perform_culling(
+  occlusion_culling.perform_culling(
     &self.visibility,
     gctx,
     cmd,

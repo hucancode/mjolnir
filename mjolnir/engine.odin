@@ -22,6 +22,7 @@ import "render"
 import "render/camera"
 import rd "render/data"
 import "render/debug_ui"
+import occlusion_culling "render/occlusion_culling"
 import ui_module "ui"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -1110,7 +1111,7 @@ populate_debug_ui :: proc(self: ^Engine) {
     )
     if main_camera := get_main_camera(self); main_camera != nil {
       main_camera := &self.render.cameras[self.world.main_camera.index]
-      main_stats := camera.stats(
+      main_stats := occlusion_culling.stats(
         &self.render.visibility,
         main_camera,
         self.world.main_camera.index,
