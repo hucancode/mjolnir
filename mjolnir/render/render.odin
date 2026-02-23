@@ -14,7 +14,8 @@ import rd "data"
 import "debug_bone"
 import "debug_ui"
 import "geometry"
-import light "lighting"
+import "ambient"
+import "direct_light"
 import "shadow"
 import "occlusion_culling"
 import particles_compute "particles_compute"
@@ -76,7 +77,8 @@ Manager :: struct {
   command_buffers:         [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   geometry:                geometry.Renderer,
-  lighting:                light.Renderer,
+  ambient:                 ambient.Renderer,
+  direct_light:            direct_light.Renderer,
   transparent_renderer:    transparent.Renderer,
   sprite_renderer:         sprite.Renderer,
   wireframe_renderer:      wireframe.Renderer,
@@ -332,17 +334,19 @@ init :: proc(
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
-  light.init(
-    &self.lighting,
+  ambient.init(
+    &self.ambient,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+  ) or_return
+  direct_light.init(
+    &self.direct_light,
     gctx,
     self.camera_buffer.set_layout,
     self.lights_buffer.set_layout,
     self.shadow.shadow_data_buffer.set_layout,
     self.texture_manager.set_layout,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    swapchain_format,
-    vk.Format.D32_SFLOAT,
   ) or_return
   geometry.init(
     &self.geometry,
@@ -501,7 +505,8 @@ setup :: proc(
   ) or_return
   gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
   // Setup subsystem GPU resources
-  light.setup(&self.lighting, gctx, &self.texture_manager) or_return
+  ambient.setup(&self.ambient, gctx, &self.texture_manager) or_return
+  direct_light.setup(&self.direct_light, gctx) or_return
   shadow.setup(
     &self.shadow,
     gctx,
@@ -572,7 +577,8 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
   shadow.teardown(&self.shadow, gctx, &self.texture_manager)
-  light.teardown(&self.lighting, gctx, &self.texture_manager)
+  ambient.teardown(&self.ambient, gctx, &self.texture_manager)
+  direct_light.teardown(&self.direct_light, gctx)
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
   // Zero all descriptor set handles (freed in bulk below)
   self.material_buffer.descriptor_set = 0
@@ -718,7 +724,8 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   wireframe.destroy(&self.wireframe_renderer, gctx)
   line_strip.destroy(&self.line_strip_renderer, gctx)
   random_color.destroy(&self.random_color_renderer, gctx)
-  light.shutdown(&self.lighting, gctx)
+  ambient.shutdown(&self.ambient, gctx)
+  direct_light.shutdown(&self.direct_light, gctx)
   shadow.shutdown(&self.shadow, gctx)
   geometry.shutdown(&self.geometry, gctx)
   occlusion_culling.shutdown(&self.visibility, gctx)
@@ -754,12 +761,6 @@ resize :: proc(
   color_format: vk.Format,
   dpi_scale: f32,
 ) -> vk.Result {
-  light.recreate_images(
-    &self.lighting,
-    extent,
-    color_format,
-    vk.Format.D32_SFLOAT,
-  ) or_return
   post_process.recreate_images(
     gctx,
     &self.post_process,
@@ -878,18 +879,18 @@ record_lighting_pass :: proc(
   cam: ^camera.Camera,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
-  light.begin_ambient_pass(
-    &self.lighting,
+  ambient.begin_pass(
+    &self.ambient,
     cam,
     &self.texture_manager,
     cmd,
     self.camera_buffer.descriptor_sets[frame_index],
     frame_index,
   )
-  light.render_ambient(&self.lighting, cam_index, cam, cmd, frame_index)
-  light.end_ambient_pass(cmd)
-  light.begin_pass(
-    &self.lighting,
+  ambient.render(&self.ambient, cam_index, cam, cmd, frame_index)
+  ambient.end_pass(cmd)
+  direct_light.begin_pass(
+    &self.direct_light,
     cam,
     &self.texture_manager,
     cmd,
@@ -911,8 +912,8 @@ record_lighting_pass :: proc(
       frame_index,
     )
   }
-  light.render(
-    &self.lighting,
+  direct_light.render(
+    &self.direct_light,
     cam_index,
     cam,
     &shadow_texture_indices,
@@ -921,7 +922,7 @@ record_lighting_pass :: proc(
     active_lights,
     frame_index,
   )
-  light.end_pass(cmd)
+  direct_light.end_pass(cmd)
   return .SUCCESS
 }
 
