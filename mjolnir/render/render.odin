@@ -7,6 +7,7 @@ import "../gpu"
 import cmd "../gpu/ui"
 import "camera"
 import cam "camera"
+import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -27,6 +28,7 @@ import "wireframe"
 import "line_strip"
 import "random_color"
 import ui_render "ui"
+import rg "graph"
 import vk "vendor:vulkan"
 
 FRAMES_IN_FLIGHT :: rd.FRAMES_IN_FLIGHT
@@ -76,6 +78,11 @@ ParticleResources :: struct {
 Manager :: struct {
   command_buffers:         [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
+
+  // Render graph system
+  graph:                   rg.Graph,
+
+  // Renderers
   geometry:                geometry.Renderer,
   ambient:                 ambient.Renderer,
   direct_light:            direct_light.Renderer,
@@ -133,6 +140,10 @@ init :: proc(
   self.cameras = make(map[u32]camera.Camera)
   self.meshes = make(map[u32]Mesh)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
+
+  // Initialize render graph
+  rg.init(&self.graph)
+
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
     gpu.free_command_buffer(gctx, ..self.command_buffers[:])
@@ -375,6 +386,9 @@ init :: proc(
     self.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
+
+  // Register render graph resources for particle system
+  register_particle_resources(self)
   // Initialize transparency renderers
   transparent.init(
     &self.transparent_renderer,
@@ -564,6 +578,9 @@ setup :: proc(
 }
 
 teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
+  // Destroy render graph
+  rg.destroy(&self.graph)
+
   // Destroy camera GPU resources (VkImages, draw command buffers) before texture_manager goes away
   for _, &cam in self.cameras {
     camera.destroy_gpu(gctx, &cam, &self.texture_manager)
@@ -1660,4 +1677,135 @@ upload_camera_data :: proc(
     &camera_data,
     int(camera_index),
   )
+}
+
+// ====== RENDER GRAPH RESOURCE REGISTRATION ======
+
+MAX_CAMERAS_IN_GRAPH :: 16 // Maximum cameras supported by graph system
+
+// Register particle system resources in the render graph
+register_particle_resources :: proc(self: ^Manager) {
+  // Register compact particle buffer (GLOBAL scope)
+  rg.register_resource(&self.graph, rg.ResourceDescriptor{
+    name = "compact_particle_buffer",
+    scope = .GLOBAL,
+    type = .BUFFER,
+    format = rg.BufferFormat{
+      element_size = size_of(particles_render.Particle),
+      element_count = 1024 * 1024, // Max particles
+      usage = {.VERTEX_BUFFER, .STORAGE_BUFFER},
+    },
+    is_transient = false,
+    resolve = resolve_buffer,
+  })
+
+  // Register draw command buffer (GLOBAL scope)
+  rg.register_resource(&self.graph, rg.ResourceDescriptor{
+    name = "draw_command_buffer",
+    scope = .GLOBAL,
+    type = .BUFFER,
+    format = rg.BufferFormat{
+      element_size = size_of(vk.DrawIndirectCommand),
+      element_count = 1,
+      usage = {.INDIRECT_BUFFER, .STORAGE_BUFFER},
+    },
+    is_transient = false,
+    resolve = resolve_buffer,
+  })
+
+  // Register camera resources (depth and final_image) for all possible cameras
+  // These use PER_CAMERA scope and are resolved via resolve_camera_texture callback
+  for cam_idx in 0..<MAX_CAMERAS_IN_GRAPH {
+    // Register camera depth texture
+    depth_name := fmt.aprintf("camera_%d_depth", cam_idx)
+    rg.register_resource(&self.graph, rg.ResourceDescriptor{
+      name = depth_name,
+      scope = .PER_CAMERA,
+      type = .DEPTH_TEXTURE,
+      format = rg.TextureFormat{
+        width = 1920, // Placeholder, actual size determined at runtime
+        height = 1080,
+        format = .D32_SFLOAT,
+        usage = {.DEPTH_STENCIL_ATTACHMENT},
+        mip_levels = 1,
+      },
+      is_transient = false,
+      resolve = resolve_camera_texture,
+    })
+
+    // Register camera final_image texture
+    final_image_name := fmt.aprintf("camera_%d_final_image", cam_idx)
+    rg.register_resource(&self.graph, rg.ResourceDescriptor{
+      name = final_image_name,
+      scope = .PER_CAMERA,
+      type = .TEXTURE_2D,
+      format = rg.TextureFormat{
+        width = 1920, // Placeholder
+        height = 1080,
+        format = .R16G16B16A16_SFLOAT,
+        usage = {.COLOR_ATTACHMENT, .SAMPLED},
+        mip_levels = 1,
+      },
+      is_transient = false,
+      resolve = resolve_camera_texture,
+    })
+  }
+
+  log.infof("Registered %d particle resources and %d camera resources in graph",
+    2, MAX_CAMERAS_IN_GRAPH * 2)
+}
+
+// Test function: Execute particle rendering via render graph
+test_graph_particle_render :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  active_cameras: []u32,
+) -> vk.Result {
+  // Create pass context for particle render (needs descriptor sets)
+  particle_ctx := particles_render.ParticleRenderGraphContext{
+    renderer = &self.particles_render,
+    camera_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
+    textures_descriptor_set = self.texture_manager.descriptor_set,
+  }
+
+  // Register particle render pass template
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "particles_render",
+    scope = .PER_CAMERA,
+    queue = .GRAPHICS,
+    setup = particles_render.particles_render_setup,
+    execute = particles_render.particles_render_execute,
+    user_data = &particle_ctx,
+  })
+
+  // Instantiate passes for active cameras
+  if err := rg.instantiate_passes(&self.graph, active_cameras, {}); err != .SUCCESS {
+    log.errorf("Failed to instantiate passes: %v", err)
+    return .ERROR_UNKNOWN
+  }
+
+  // Compile graph (build execution order + compute barriers)
+  if err := rg.compile(&self.graph); err != .SUCCESS {
+    log.errorf("Failed to compile graph: %v", err)
+    return .ERROR_UNKNOWN
+  }
+
+  // Create execution context
+  exec_ctx := rg.GraphExecutionContext{
+    texture_manager = &self.texture_manager,
+    render_manager = self,
+  }
+
+  // Execute graph
+  cmd := self.command_buffers[frame_index]
+  if err := rg.execute(&self.graph, cmd, frame_index, &exec_ctx); err != .SUCCESS {
+    log.errorf("Failed to execute graph: %v", err)
+    return .ERROR_UNKNOWN
+  }
+
+  // Reset graph for next frame
+  rg.reset(&self.graph)
+
+  log.infof("Successfully executed particle render pass via graph")
+  return .SUCCESS
 }
