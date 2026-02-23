@@ -17,7 +17,11 @@ import "geometry"
 import light "lighting"
 import "particles"
 import "post_process"
-import "transparency"
+import "transparent"
+import "sprite"
+import "wireframe"
+import "line_strip"
+import "random_color"
 import ui_render "ui"
 import vk "vendor:vulkan"
 
@@ -64,7 +68,11 @@ Manager :: struct {
   compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   geometry:                geometry.Renderer,
   lighting:                light.Renderer,
-  transparency:            transparency.Renderer,
+  transparent_renderer:    transparent.Renderer,
+  sprite_renderer:         sprite.Renderer,
+  wireframe_renderer:      wireframe.Renderer,
+  line_strip_renderer:     line_strip.Renderer,
+  random_color_renderer:   random_color.Renderer,
   particles:               particles.Renderer,
   post_process:            post_process.Renderer,
   debug_ui:                debug_ui.Renderer,
@@ -347,18 +355,57 @@ init :: proc(
     self.node_data_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
-  transparency.init(
-    &self.transparency,
+  // Initialize transparency renderers
+  transparent.init(
+    &self.transparent_renderer,
     gctx,
-    swapchain_extent.width,
-    swapchain_extent.height,
     self.camera_buffer.set_layout,
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
     self.node_data_buffer.set_layout,
     self.mesh_data_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
+  ) or_return
+  sprite.init(
+    &self.sprite_renderer,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.node_data_buffer.set_layout,
     self.sprite_buffer.set_layout,
+  ) or_return
+  wireframe.init(
+    &self.wireframe_renderer,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
+  ) or_return
+  line_strip.init(
+    &self.line_strip_renderer,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
+  ) or_return
+  random_color.init(
+    &self.random_color_renderer,
+    gctx,
+    self.camera_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   post_process.init(
@@ -611,7 +658,12 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   debug_ui.shutdown(&self.debug_ui, gctx)
   post_process.shutdown(&self.post_process, gctx)
   particles.shutdown(&self.particles, gctx)
-  transparency.shutdown(&self.transparency, gctx)
+  // Cleanup transparency renderers
+  transparent.destroy(&self.transparent_renderer, gctx)
+  sprite.destroy(&self.sprite_renderer, gctx)
+  wireframe.destroy(&self.wireframe_renderer, gctx)
+  line_strip.destroy(&self.line_strip_renderer, gctx)
+  random_color.destroy(&self.random_color_renderer, gctx)
   light.shutdown(&self.lighting, gctx)
   light.shadow_shutdown(&self.shadow, gctx)
   geometry.shutdown(&self.geometry, gctx)
@@ -854,13 +906,18 @@ record_transparency_pass :: proc(
   cam: ^camera.Camera,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
-  transparency.begin_pass(
-    &self.transparency,
-    cam,
-    &self.texture_manager,
+
+  // Begin pass (shared by all 5 techniques)
+  color_texture := gpu.get_texture_2d(&self.texture_manager, cam.attachments[.FINAL_IMAGE][frame_index])
+  depth_texture := gpu.get_texture_2d(&self.texture_manager, cam.attachments[.DEPTH][frame_index])
+  gpu.begin_rendering(
     cmd,
-    frame_index,
+    depth_texture.spec.extent,
+    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
   )
+  gpu.set_viewport_scissor(cmd, depth_texture.spec.extent)
+
   // Render transparent objects
   camera.perform_culling(
     &self.visibility,
@@ -870,12 +927,7 @@ record_transparency_pass :: proc(
     cam_index,
     frame_index,
     NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT},
-    NodeFlagSet {
-      .MATERIAL_WIREFRAME,
-      .MATERIAL_RANDOM_COLOR,
-      .MATERIAL_LINE_STRIP,
-      .MATERIAL_SPRITE,
-    },
+    NodeFlagSet{.MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
   )
   gpu.buffer_barrier(
     cmd,
@@ -895,26 +947,24 @@ record_transparency_pass :: proc(
     {.COMPUTE_SHADER},
     {.DRAW_INDIRECT},
   )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.transparent_pipeline,
+  transparent.render(
+    &self.transparent_renderer,
+    cmd,
+    cam_index,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     cam.transparent_draw_count[frame_index].buffer,
+    rd.MAX_NODES_IN_SCENE,
   )
+
   // Render wireframe objects
   camera.perform_culling(
     &self.visibility,
@@ -924,12 +974,7 @@ record_transparency_pass :: proc(
     cam_index,
     frame_index,
     NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME},
-    NodeFlagSet {
-      .MATERIAL_TRANSPARENT,
-      .MATERIAL_RANDOM_COLOR,
-      .MATERIAL_LINE_STRIP,
-      .MATERIAL_SPRITE,
-    },
+    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
   )
   gpu.buffer_barrier(
     cmd,
@@ -949,26 +994,24 @@ record_transparency_pass :: proc(
     {.COMPUTE_SHADER},
     {.DRAW_INDIRECT},
   )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.wireframe_pipeline,
+  wireframe.render(
+    &self.wireframe_renderer,
+    cmd,
+    cam_index,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     cam.transparent_draw_count[frame_index].buffer,
+    rd.MAX_NODES_IN_SCENE,
   )
+
   // Render random_color objects
   camera.perform_culling(
     &self.visibility,
@@ -978,12 +1021,7 @@ record_transparency_pass :: proc(
     cam_index,
     frame_index,
     NodeFlagSet{.VISIBLE, .MATERIAL_RANDOM_COLOR},
-    NodeFlagSet {
-      .MATERIAL_TRANSPARENT,
-      .MATERIAL_WIREFRAME,
-      .MATERIAL_LINE_STRIP,
-      .MATERIAL_SPRITE,
-    },
+    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
   )
   gpu.buffer_barrier(
     cmd,
@@ -1003,26 +1041,24 @@ record_transparency_pass :: proc(
     {.COMPUTE_SHADER},
     {.DRAW_INDIRECT},
   )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.random_color_pipeline,
+  random_color.render(
+    &self.random_color_renderer,
+    cmd,
+    cam_index,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     cam.transparent_draw_count[frame_index].buffer,
+    rd.MAX_NODES_IN_SCENE,
   )
+
   // Render line_strip objects
   camera.perform_culling(
     &self.visibility,
@@ -1032,12 +1068,7 @@ record_transparency_pass :: proc(
     cam_index,
     frame_index,
     NodeFlagSet{.VISIBLE, .MATERIAL_LINE_STRIP},
-    NodeFlagSet {
-      .MATERIAL_TRANSPARENT,
-      .MATERIAL_WIREFRAME,
-      .MATERIAL_RANDOM_COLOR,
-      .MATERIAL_SPRITE,
-    },
+    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_SPRITE},
   )
   gpu.buffer_barrier(
     cmd,
@@ -1057,26 +1088,24 @@ record_transparency_pass :: proc(
     {.COMPUTE_SHADER},
     {.DRAW_INDIRECT},
   )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.line_strip_pipeline,
+  line_strip.render(
+    &self.line_strip_renderer,
+    cmd,
+    cam_index,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
     self.mesh_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
     cam.transparent_draw_commands[frame_index].buffer,
     cam.transparent_draw_count[frame_index].buffer,
+    rd.MAX_NODES_IN_SCENE,
   )
+
   // Render sprites
   camera.perform_culling(
     &self.visibility,
@@ -1106,28 +1135,23 @@ record_transparency_pass :: proc(
     {.COMPUTE_SHADER},
     {.DRAW_INDIRECT},
   )
-  transparency.render(
-    &self.transparency,
-    cam,
-    self.transparency.sprite_pipeline,
+  sprite.render(
+    &self.sprite_renderer,
+    cmd,
+    cam_index,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
     self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
     self.sprite_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    cam_index,
-    frame_index,
-    cmd,
     cam.sprite_draw_commands[frame_index].buffer,
     cam.sprite_draw_count[frame_index].buffer,
+    rd.MAX_NODES_IN_SCENE,
   )
 
-  transparency.end_pass(&self.transparency, cmd)
+  // End pass
+  vk.CmdEndRendering(cmd)
   return .SUCCESS
 }
 
