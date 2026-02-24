@@ -41,7 +41,7 @@ emit_barrier :: proc(g: ^Graph, cmd: vk.CommandBuffer, barrier: Barrier, frame_i
 	}
 
 	// Resolve resource
-	handle, handle_ok := desc.resolve(exec_ctx, desc.name, frame_index)
+	handle, handle_ok := desc.resolve(exec_ctx, string(barrier.resource_id), frame_index)
 	if !handle_ok {
 		// This is not necessarily an error - resource might not exist yet (e.g., inactive camera)
 		return

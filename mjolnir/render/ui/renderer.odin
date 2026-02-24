@@ -426,13 +426,13 @@ ui_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
 
   // Resolve vertex buffer
   vb_id := rg.ResourceId("ui_vertex_buffer")
-  if vb_id not_in pass_ctx.graph.resources do return
-  vb_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, vb_id)
+  vb_handle, vb_ok := rg.resolve(rg.BufferHandle, pass_ctx, vb_id)
+  if !vb_ok do return
 
   // Resolve index buffer
   ib_id := rg.ResourceId("ui_index_buffer")
-  if ib_id not_in pass_ctx.graph.resources do return
-  ib_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, ib_id)
+  ib_handle, ib_ok := rg.resolve(rg.BufferHandle, pass_ctx, ib_id)
+  if !ib_ok do return
 
   // Use swapchain view/extent from context (passed from Engine, not a graph resource)
   swapchain_view := ctx.swapchain_view

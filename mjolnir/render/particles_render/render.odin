@@ -286,10 +286,6 @@ particles_render_execute :: proc(ctx: ^rg.PassContext, user_data: rawptr) {
 
 	// Resolve compact particle buffer
 	compact_buf_id := rg.ResourceId("compact_particle_buffer")
-	if compact_buf_id not_in ctx.graph.resources {
-		log.error("Failed to find compact_particle_buffer resource")
-		return
-	}
 	compact_buf_handle, resolve_ok1 := rg.resolve(rg.BufferHandle, ctx, compact_buf_id)
 	if !resolve_ok1 {
 		log.error("Failed to resolve compact_particle_buffer")
@@ -298,10 +294,6 @@ particles_render_execute :: proc(ctx: ^rg.PassContext, user_data: rawptr) {
 
 	// Resolve draw command buffer
 	draw_cmd_id := rg.ResourceId("draw_command_buffer")
-	if draw_cmd_id not_in ctx.graph.resources {
-		log.error("Failed to find draw_command_buffer resource")
-		return
-	}
 	draw_cmd_handle, resolve_ok2 := rg.resolve(rg.BufferHandle, ctx, draw_cmd_id)
 	if !resolve_ok2 {
 		log.error("Failed to resolve draw_command_buffer")
@@ -311,10 +303,6 @@ particles_render_execute :: proc(ctx: ^rg.PassContext, user_data: rawptr) {
 	// Resolve camera depth
 	depth_name := fmt.tprintf("camera_%d_depth", cam_idx)
 	depth_id := rg.ResourceId(depth_name)
-	if depth_id not_in ctx.graph.resources {
-		log.errorf("Failed to find camera depth resource: %s", depth_name)
-		return
-	}
 	depth_handle, resolve_ok3 := rg.resolve(rg.DepthTextureHandle, ctx, depth_id)
 	if !resolve_ok3 {
 		log.error("Failed to resolve camera depth")
@@ -324,10 +312,6 @@ particles_render_execute :: proc(ctx: ^rg.PassContext, user_data: rawptr) {
 	// Resolve camera final image
 	final_image_name := fmt.tprintf("camera_%d_final_image", cam_idx)
 	final_image_id := rg.ResourceId(final_image_name)
-	if final_image_id not_in ctx.graph.resources {
-		log.errorf("Failed to find camera final_image resource: %s", final_image_name)
-		return
-	}
 	final_image_handle, resolve_ok4 := rg.resolve(rg.TextureHandle, ctx, final_image_id)
 	if !resolve_ok4 {
 		log.error("Failed to resolve camera final_image")

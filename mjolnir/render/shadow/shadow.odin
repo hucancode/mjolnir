@@ -1333,19 +1333,6 @@ shadow_depth_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
     return
   }
 
-  // Resolve shadow map resource
-  shadow_map_name := fmt.tprintf("shadow_map_%d", light_slot)
-  shadow_map_id := rg.ResourceId(shadow_map_name)
-  if shadow_map_id not_in pass_ctx.graph.resources do return
-
-  draw_commands_name := fmt.tprintf("shadow_draw_commands_%d", light_slot)
-  draw_commands_id := rg.ResourceId(draw_commands_name)
-  if draw_commands_id not_in pass_ctx.graph.resources do return
-
-  draw_count_name := fmt.tprintf("shadow_draw_count_%d", light_slot)
-  draw_count_id := rg.ResourceId(draw_count_name)
-  if draw_count_id not_in pass_ctx.graph.resources do return
-
   // Note: Shadow map resolution happens inside each light type case below
   // to handle different texture types (2D vs Cube)
 

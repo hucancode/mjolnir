@@ -1,6 +1,7 @@
 package render_graph
 
 import "core:log"
+import "core:slice"
 
 // Result type for graph operations
 Result :: enum {
@@ -10,8 +11,20 @@ Result :: enum {
 	ERROR_INVALID_PASS,
 }
 
+ResourceLifetime :: struct {
+	first_use_step: int,
+	last_use_step:  int,
+}
+
+TransientResourceInfo :: struct {
+	resource_id: ResourceId,
+	desc:        ResourceDescriptor,
+	lifetime:    ResourceLifetime,
+}
+
 // Reserved for transient allocation/aliasing implementation.
 TransientResourcePool :: struct {
+	transient_resources: [dynamic]TransientResourceInfo,
 }
 
 // Core Graph type
@@ -28,21 +41,48 @@ Graph :: struct {
 	// Compiled execution plan
 	execution_order: [dynamic]PassId,
 	barriers:        map[PassId][dynamic]Barrier,
+	resource_lifetimes: map[ResourceId]ResourceLifetime,
 
 	// Internal seam for transient allocation/aliasing.
 	transient_pool: TransientResourcePool,
 }
 
 transient_pool_init :: proc(pool: ^TransientResourcePool) {
+	pool.transient_resources = make([dynamic]TransientResourceInfo)
 }
 
 transient_pool_destroy :: proc(pool: ^TransientResourcePool) {
+	delete(pool.transient_resources)
 }
 
 transient_pool_begin_frame :: proc(pool: ^TransientResourcePool) {
+	clear(&pool.transient_resources)
 }
 
 transient_pool_compile :: proc(pool: ^TransientResourcePool, g: ^Graph) -> Result {
+	clear(&pool.transient_resources)
+	for res_id, desc in g.resources {
+		if !desc.is_transient do continue
+		lifetime, has_lifetime := g.resource_lifetimes[res_id]
+		if !has_lifetime do continue
+		append(&pool.transient_resources, TransientResourceInfo{
+			resource_id = res_id,
+			desc = desc,
+			lifetime = lifetime,
+		})
+	}
+	slice.sort_by(pool.transient_resources[:], proc(a, b: TransientResourceInfo) -> bool {
+		if a.lifetime.first_use_step != b.lifetime.first_use_step {
+			return a.lifetime.first_use_step < b.lifetime.first_use_step
+		}
+		if a.lifetime.last_use_step != b.lifetime.last_use_step {
+			return a.lifetime.last_use_step > b.lifetime.last_use_step
+		}
+		return string(a.resource_id) < string(b.resource_id)
+	})
+	if len(pool.transient_resources) > 0 {
+		log.infof("Transient compile prepared %d resources", len(pool.transient_resources))
+	}
 	return .SUCCESS
 }
 
@@ -53,43 +93,43 @@ init :: proc(g: ^Graph) {
 	g.passes = make([dynamic]PassInstance)
 	g.execution_order = make([dynamic]PassId)
 	g.barriers = make(map[PassId][dynamic]Barrier)
+	g.resource_lifetimes = make(map[ResourceId]ResourceLifetime)
 	transient_pool_init(&g.transient_pool)
 }
 
-// Cleanup graph resources
-destroy :: proc(g: ^Graph) {
-	delete(g.resources)
-	delete(g.pass_templates)
-
-	// Clean up pass instances
-	for &pass in g.passes {
-		delete(pass.inputs)
-		delete(pass.outputs)
-	}
-	delete(g.passes)
-
-	delete(g.execution_order)
-	for _, barriers in g.barriers {
-		delete(barriers)
-	}
-	delete(g.barriers)
-	transient_pool_destroy(&g.transient_pool)
-}
-
-// Reset graph for next frame (clears pass instances, keeps templates)
-reset :: proc(g: ^Graph) {
-	// Clean up pass instances
+clear_compiled_state :: proc(g: ^Graph) {
 	for &pass in g.passes {
 		delete(pass.inputs)
 		delete(pass.outputs)
 	}
 	clear(&g.passes)
-	clear(&g.execution_order)
 
+	clear(&g.execution_order)
 	for _, barriers in g.barriers {
 		delete(barriers)
 	}
 	clear(&g.barriers)
+
+	clear(&g.resource_lifetimes)
+}
+
+// Cleanup graph resources
+destroy :: proc(g: ^Graph) {
+	clear_compiled_state(g)
+
+	delete(g.resources)
+	delete(g.pass_templates)
+	delete(g.passes)
+
+	delete(g.execution_order)
+	delete(g.barriers)
+	delete(g.resource_lifetimes)
+	transient_pool_destroy(&g.transient_pool)
+}
+
+// Reset graph for next frame (clears pass instances, keeps templates)
+reset :: proc(g: ^Graph) {
+	clear_compiled_state(g)
 	transient_pool_begin_frame(&g.transient_pool)
 
 	// NOTE: We DO clear templates because they're registered fresh each frame
@@ -98,17 +138,15 @@ reset :: proc(g: ^Graph) {
 }
 
 // Register resource in graph
-register_resource :: proc(g: ^Graph, desc: ResourceDescriptor) -> ResourceId {
-	id := ResourceId(desc.name)
+register_resource :: proc(g: ^Graph, resource_id: string, desc: ResourceDescriptor) {
+	id := ResourceId(resource_id)
 
-	// Check if resource already exists
 	if id in g.resources {
-		log.warnf("Resource '%s' already registered, returning existing ID", desc.name)
-		return id
+		log.warnf("Resource '%s' already registered", resource_id)
+		return
 	}
 
 	g.resources[id] = desc
-	return id
 }
 
 get_resource_descriptor :: proc(g: ^Graph, res_id: ResourceId) -> (ResourceDescriptor, bool) {
@@ -155,12 +193,14 @@ create_pass_instance :: proc(
 	scope_index: u32,
 ) -> PassInstance {
 	instance := PassInstance{
+		name = template.name,
 		scope_index = scope_index,
 		queue = template.queue,
 		execute = template.execute,
 		user_data = template.user_data,
 		inputs = make([dynamic]ResourceId),
 		outputs = make([dynamic]ResourceId),
+		is_valid = true,
 	}
 
 	// Call setup proc to populate inputs/outputs
@@ -174,15 +214,20 @@ create_pass_instance :: proc(
 
 	instance.inputs = builder.inputs
 	instance.outputs = builder.outputs
+	instance.is_valid = !builder.has_missing_resource
 
 	return instance
 }
 
 // Compile graph: build execution order and compute barriers
 compile :: proc(g: ^Graph) -> Result {
+	if err := validate_passes(g); err != .SUCCESS {
+		return err
+	}
 	if err := build_execution_order(g); err != .SUCCESS {
 		return err
 	}
+	compute_resource_lifetimes(g)
 	if err := transient_pool_compile(&g.transient_pool, g); err != .SUCCESS {
 		return err
 	}
@@ -190,6 +235,56 @@ compile :: proc(g: ^Graph) -> Result {
 		return err
 	}
 	return .SUCCESS
+}
+
+build :: proc(g: ^Graph) -> Result {
+	clear_compiled_state(g)
+	if err := instantiate_passes(g); err != .SUCCESS {
+		return err
+	}
+	return compile(g)
+}
+
+validate_passes :: proc(g: ^Graph) -> Result {
+	for pass in g.passes {
+		if pass.is_valid {
+			continue
+		}
+		log.errorf("Invalid pass '%s' (scope index: %d): missing graph resources in setup",
+			pass.name, pass.scope_index)
+		return .ERROR_MISSING_RESOURCE
+	}
+	return .SUCCESS
+}
+
+compute_resource_lifetimes :: proc(g: ^Graph) {
+	clear(&g.resource_lifetimes)
+	for pass_id, step_idx in g.execution_order {
+		pass := &g.passes[pass_id]
+		for res_id in pass.inputs {
+			record_resource_lifetime(g, res_id, step_idx)
+		}
+		for res_id in pass.outputs {
+			record_resource_lifetime(g, res_id, step_idx)
+		}
+	}
+}
+
+record_resource_lifetime :: proc(g: ^Graph, res_id: ResourceId, step_idx: int) {
+	if lifetime, ok := g.resource_lifetimes[res_id]; ok {
+		if step_idx < lifetime.first_use_step {
+			lifetime.first_use_step = step_idx
+		}
+		if step_idx > lifetime.last_use_step {
+			lifetime.last_use_step = step_idx
+		}
+		g.resource_lifetimes[res_id] = lifetime
+		return
+	}
+	g.resource_lifetimes[res_id] = ResourceLifetime{
+		first_use_step = step_idx,
+		last_use_step = step_idx,
+	}
 }
 
 pass_reads_resource :: proc(pass: ^PassInstance, res_id: ResourceId) -> bool {

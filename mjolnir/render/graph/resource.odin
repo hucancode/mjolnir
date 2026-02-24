@@ -48,17 +48,16 @@ GraphExecutionContext :: struct {
 	render_manager:  rawptr, // ^render.Manager (to avoid circular import)
 }
 
-// Resource resolution callback - maps resource name to actual GPU handle
+// Resource resolution callback - maps resource ID to actual GPU handle
 // Takes execution context as parameter (NOT stored in struct!)
 ResourceResolveProc :: #type proc(
 	ctx: ^GraphExecutionContext,
-	name: string,
+	resource_id: string,
 	frame_index: u32,
 ) -> (ResourceHandle, bool)
 
 // Resource descriptor - defines a resource in the graph
 ResourceDescriptor :: struct {
-	name:         string,
 	scope:        ResourceScope,
 	type:         ResourceType,
 	format:       ResourceFormat,

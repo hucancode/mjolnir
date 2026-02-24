@@ -1113,8 +1113,7 @@ register_graph_buffer_resource :: proc(
   usage: vk.BufferUsageFlags,
   resolve: rg.ResourceResolveProc,
 ) {
-  rg.register_resource(&self.graph, rg.ResourceDescriptor{
-    name = name,
+  rg.register_resource(&self.graph, name, rg.ResourceDescriptor{
     scope = scope,
     type = .BUFFER,
     format = rg.BufferFormat{
@@ -1138,8 +1137,7 @@ register_graph_texture_resource :: proc(
   width: u32 = 1920,
   height: u32 = 1080,
 ) {
-  rg.register_resource(&self.graph, rg.ResourceDescriptor{
-    name = name,
+  rg.register_resource(&self.graph, name, rg.ResourceDescriptor{
     scope = scope,
     type = type,
     format = rg.TextureFormat{
@@ -1317,8 +1315,7 @@ register_post_process_resources :: proc(self: ^Manager) {
   // It's accessed directly through the camera pointer in PostProcessPassGraphContext
 
   // Register post-process ping-pong image 0 (GLOBAL scope)
-  rg.register_resource(&self.graph, rg.ResourceDescriptor{
-    name = "post_process_image_0",
+  rg.register_resource(&self.graph, "post_process_image_0", rg.ResourceDescriptor{
     scope = .GLOBAL,
     type = .TEXTURE_2D,
     format = rg.TextureFormat{
@@ -1343,8 +1340,7 @@ register_post_process_resources :: proc(self: ^Manager) {
   })
 
   // Register post-process ping-pong image 1 (GLOBAL scope)
-  rg.register_resource(&self.graph, rg.ResourceDescriptor{
-    name = "post_process_image_1",
+  rg.register_resource(&self.graph, "post_process_image_1", rg.ResourceDescriptor{
     scope = .GLOBAL,
     type = .TEXTURE_2D,
     format = rg.TextureFormat{
@@ -1411,34 +1407,6 @@ debug_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
     log.errorf("Debug graph pass render failed for camera %d: %v", cam_index, err)
   }
   debug_bone.end_pass(ctx.renderer, pass_ctx.cmd)
-}
-
-execute_registered_graph_templates :: proc(
-  self: ^Manager,
-  frame_index: u32,
-) -> vk.Result {
-  if err := rg.instantiate_passes(&self.graph); err != .SUCCESS {
-    log.errorf("Failed to instantiate graph passes: %v", err)
-    return .ERROR_UNKNOWN
-  }
-
-  if err := rg.compile(&self.graph); err != .SUCCESS {
-    log.errorf("Failed to compile graph: %v", err)
-    return .ERROR_UNKNOWN
-  }
-
-  exec_ctx := rg.GraphExecutionContext{
-    texture_manager = &self.texture_manager,
-    render_manager = self,
-  }
-
-  cmd := self.command_buffers[frame_index]
-  if err := rg.execute(&self.graph, cmd, frame_index, &exec_ctx); err != .SUCCESS {
-    log.errorf("Failed to execute graph: %v", err)
-    return .ERROR_UNKNOWN
-  }
-
-  return .SUCCESS
 }
 
 render_frame_graph :: proc(
@@ -1738,6 +1706,18 @@ render_frame_graph :: proc(
     user_data = &ui_ctx,
   })
 
-  execute_registered_graph_templates(self, frame_index) or_return
+  exec_ctx := rg.GraphExecutionContext{
+    texture_manager = &self.texture_manager,
+    render_manager = self,
+  }
+  cmd := self.command_buffers[frame_index]
+  if err := rg.build(&self.graph); err != .SUCCESS {
+    log.errorf("Failed to build graph: %v", err)
+    return .ERROR_UNKNOWN
+  }
+  if err := rg.execute(&self.graph, cmd, frame_index, &exec_ctx); err != .SUCCESS {
+    log.errorf("Failed to execute graph: %v", err)
+    return .ERROR_UNKNOWN
+  }
   return .SUCCESS
 }

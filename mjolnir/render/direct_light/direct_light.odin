@@ -383,11 +383,6 @@ direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) 
   // Resolve final_image resource ID
   final_image_name := fmt.tprintf("camera_%d_final_image", cam_idx)
   final_image_id := rg.ResourceId(final_image_name)
-  if final_image_id not_in pass_ctx.graph.resources {
-    log.errorf("Failed to find final_image resource ID for camera %d", cam_idx)
-    return
-  }
-
   final_image_handle, resolve_ok := rg.resolve(rg.TextureHandle, pass_ctx, final_image_id)
   if !resolve_ok {
     log.errorf("Failed to resolve final_image for camera %d", cam_idx)
@@ -396,11 +391,6 @@ direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) 
   // Resolve depth resource ID
   depth_name := fmt.tprintf("camera_%d_depth", cam_idx)
   depth_id := rg.ResourceId(depth_name)
-  if depth_id not_in pass_ctx.graph.resources {
-    log.errorf("Failed to find depth resource ID for camera %d", cam_idx)
-    return
-  }
-
   depth_handle, depth_resolve_ok := rg.resolve(rg.DepthTextureHandle, pass_ctx, depth_id)
   if !depth_resolve_ok {
     log.errorf("Failed to resolve depth for camera %d", cam_idx)

@@ -1,6 +1,7 @@
 package render_graph
 
 import vk "vendor:vulkan"
+import "core:log"
 
 // Pass identification
 PassId :: distinct u32
@@ -41,16 +42,19 @@ PassBuilder :: struct {
 	scope_index: u32,  // Camera/light index for PER_CAMERA/PER_LIGHT
 	inputs:      [dynamic]ResourceId,
 	outputs:     [dynamic]ResourceId,
+	has_missing_resource: bool,
 }
 
 // Compiled pass instance (after template instantiation)
 PassInstance :: struct {
+	name:        string,
 	scope_index: u32,
 	queue:       QueueType,
 	inputs:      [dynamic]ResourceId,
 	outputs:     [dynamic]ResourceId,
 	execute:     PassExecuteProc,
 	user_data:   rawptr,
+	is_valid:    bool,
 }
 
 // Pass execution context (like Frostbite's FrameGraphResources)
@@ -63,35 +67,36 @@ PassContext :: struct {
 	exec_ctx:    ^GraphExecutionContext,  // For resource resolution
 }
 
-// Builder API: Declare read dependency on existing resource
-builder_read :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) {
+builder_has_resource :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) {
 	id := ResourceId(name)
 	if id not_in b.graph.resources {
+		b.has_missing_resource = true
+		log.errorf("Missing graph resource '%s' referenced by pass scope index %d", name, b.scope_index)
 		return "", false
 	}
-	append(&b.inputs, id)
 	return id, true
+}
+
+// Builder API: Declare read dependency on existing resource
+builder_read :: proc(b: ^PassBuilder, name: string) {
+	id, ok := builder_has_resource(b, name)
+	if !ok do return
+	append(&b.inputs, id)
 }
 
 // Builder API: Declare write dependency on existing resource
-builder_write :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) {
-	id := ResourceId(name)
-	if id not_in b.graph.resources {
-		return "", false
-	}
+builder_write :: proc(b: ^PassBuilder, name: string) {
+	id, ok := builder_has_resource(b, name)
+	if !ok do return
 	append(&b.outputs, id)
-	return id, true
 }
 
 // Builder API: Declare read-write dependency (both input and output)
-builder_read_write :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) {
-	id := ResourceId(name)
-	if id not_in b.graph.resources {
-		return "", false
-	}
+builder_read_write :: proc(b: ^PassBuilder, name: string) {
+	id, ok := builder_has_resource(b, name)
+	if !ok do return
 	append(&b.inputs, id)
 	append(&b.outputs, id)
-	return id, true
 }
 
 // Type-safe resource resolution (generic procedure)
@@ -101,7 +106,7 @@ resolve :: proc($T: typeid, ctx: ^PassContext, resource_id: ResourceId) -> (resu
 	if !has_desc do return {}, false
 
 	// Resolve to actual handle
-	handle, resolve_ok := desc.resolve(ctx.exec_ctx, desc.name, ctx.frame_index)
+	handle, resolve_ok := desc.resolve(ctx.exec_ctx, string(resource_id), ctx.frame_index)
 	if !resolve_ok do return {}, false
 
 	// Type-safe extraction

@@ -447,38 +447,38 @@ geometry_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
 
   // Resolve depth texture
   depth_id := rg.ResourceId(fmt.tprintf("camera_%d_depth", cam_idx))
-  if depth_id not_in pass_ctx.graph.resources do return
-  depth_handle, _ := rg.resolve(rg.DepthTextureHandle, pass_ctx, depth_id)
+  depth_handle, depth_ok := rg.resolve(rg.DepthTextureHandle, pass_ctx, depth_id)
+  if !depth_ok do return
 
   // Resolve G-buffer textures
   position_id := rg.ResourceId(fmt.tprintf("camera_%d_gbuffer_position", cam_idx))
-  if position_id not_in pass_ctx.graph.resources do return
-  position_handle, _ := rg.resolve(rg.TextureHandle, pass_ctx, position_id)
+  position_handle, position_ok := rg.resolve(rg.TextureHandle, pass_ctx, position_id)
+  if !position_ok do return
 
   normal_id := rg.ResourceId(fmt.tprintf("camera_%d_gbuffer_normal", cam_idx))
-  if normal_id not_in pass_ctx.graph.resources do return
-  normal_handle, _ := rg.resolve(rg.TextureHandle, pass_ctx, normal_id)
+  normal_handle, normal_ok := rg.resolve(rg.TextureHandle, pass_ctx, normal_id)
+  if !normal_ok do return
 
   albedo_id := rg.ResourceId(fmt.tprintf("camera_%d_gbuffer_albedo", cam_idx))
-  if albedo_id not_in pass_ctx.graph.resources do return
-  albedo_handle, _ := rg.resolve(rg.TextureHandle, pass_ctx, albedo_id)
+  albedo_handle, albedo_ok := rg.resolve(rg.TextureHandle, pass_ctx, albedo_id)
+  if !albedo_ok do return
 
   metallic_roughness_id := rg.ResourceId(fmt.tprintf("camera_%d_gbuffer_metallic_roughness", cam_idx))
-  if metallic_roughness_id not_in pass_ctx.graph.resources do return
-  metallic_roughness_handle, _ := rg.resolve(rg.TextureHandle, pass_ctx, metallic_roughness_id)
+  metallic_roughness_handle, metallic_roughness_ok := rg.resolve(rg.TextureHandle, pass_ctx, metallic_roughness_id)
+  if !metallic_roughness_ok do return
 
   emissive_id := rg.ResourceId(fmt.tprintf("camera_%d_gbuffer_emissive", cam_idx))
-  if emissive_id not_in pass_ctx.graph.resources do return
-  emissive_handle, _ := rg.resolve(rg.TextureHandle, pass_ctx, emissive_id)
+  emissive_handle, emissive_ok := rg.resolve(rg.TextureHandle, pass_ctx, emissive_id)
+  if !emissive_ok do return
 
   // Resolve draw buffers
   draw_cmd_id := rg.ResourceId(fmt.tprintf("camera_%d_opaque_draw_commands", cam_idx))
-  if draw_cmd_id not_in pass_ctx.graph.resources do return
-  draw_cmd_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, draw_cmd_id)
+  draw_cmd_handle, draw_cmd_ok := rg.resolve(rg.BufferHandle, pass_ctx, draw_cmd_id)
+  if !draw_cmd_ok do return
 
   draw_count_id := rg.ResourceId(fmt.tprintf("camera_%d_opaque_draw_count", cam_idx))
-  if draw_count_id not_in pass_ctx.graph.resources do return
-  draw_count_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, draw_count_id)
+  draw_count_handle, draw_count_ok := rg.resolve(rg.BufferHandle, pass_ctx, draw_count_id)
+  if !draw_count_ok do return
 
   if draw_cmd_handle.buffer == 0 || draw_count_handle.buffer == 0 {
     return
