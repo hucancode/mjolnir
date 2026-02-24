@@ -91,15 +91,19 @@ DepthTextureHandle :: struct {
 	extent: vk.Extent2D,
 }
 
-// Helper to infer resource type from format
-infer_resource_type :: proc(format: ResourceFormat) -> ResourceType {
+// ============================================================================
+// PRIVATE HELPERS
+// ============================================================================
+
+@(private)
+_infer_resource_type :: proc(format: ResourceFormat) -> ResourceType {
 	switch _ in format {
 	case BufferFormat:
 		return .BUFFER
 	case TextureFormat:
 		tex_fmt := format.(TextureFormat)
 		// Check if it's a depth format
-		if is_depth_format(tex_fmt.format) {
+		if _is_depth_format(tex_fmt.format) {
 			return .DEPTH_TEXTURE
 		}
 		return .TEXTURE_2D
@@ -107,8 +111,8 @@ infer_resource_type :: proc(format: ResourceFormat) -> ResourceType {
 	return .BUFFER
 }
 
-// Helper to check if format is a depth format
-is_depth_format :: proc(format: vk.Format) -> bool {
+@(private)
+_is_depth_format :: proc(format: vk.Format) -> bool {
 	#partial switch format {
 	case .D16_UNORM, .D32_SFLOAT, .D16_UNORM_S8_UINT, .D24_UNORM_S8_UINT, .D32_SFLOAT_S8_UINT:
 		return true

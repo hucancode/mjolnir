@@ -822,23 +822,7 @@ PostProcessPassGraphContext :: struct {
 }
 
 // Setup phase: declare dependencies for post-process pass
-post_process_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-  ctx := cast(^PostProcessPassGraphContext)user_data
-
-  // Depend on main camera output before post-process.
-  rg.builder_read(
-    builder,
-    fmt.tprintf("camera_%d_final_image", ctx.main_camera_index),
-  )
-
-  // Establish post-process write dependency for downstream UI ordering.
-  rg.builder_read_write(builder, "post_process_image_0")
-
-  // Second ping-pong image only needed when effects are active.
-  if len(ctx.renderer.effect_stack) > 0 {
-    rg.builder_read_write(builder, "post_process_image_1")
-  }
-}
+// REMOVED: Old setup callback (replaced by declarative PassTemplate)
 
 // Execute phase: render all post-process effects
 post_process_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {

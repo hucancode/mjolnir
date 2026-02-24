@@ -482,28 +482,6 @@ VisibilityCullingPassGraphContext :: struct {
   camera_index: u32,
 }
 
-// Setup phase: declare dependencies for unified visibility culling
-// Writes to ALL 6 draw command/count buffer pairs
-visibility_culling_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-  cam_index := builder.scope_index
-
-  // Write opaque draw commands/count
-  rg.builder_write(builder, fmt.tprintf("camera_%d_opaque_draw_commands", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_opaque_draw_count", cam_index))
-
-  // Write all 5 transparency draw command/count buffers
-  rg.builder_write(builder, fmt.tprintf("camera_%d_transparent_draw_commands", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_transparent_draw_count", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_wireframe_draw_commands", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_wireframe_draw_count", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_random_color_draw_commands", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_random_color_draw_count", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_line_strip_draw_commands", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_line_strip_draw_count", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_sprite_draw_commands", cam_index))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_sprite_draw_count", cam_index))
-}
-
 // Execute phase: perform unified visibility culling
 // Processes ALL visible objects and routes to appropriate buffers based on material flags
 // Shader automatically applies occlusion culling only to opaque objects
@@ -660,17 +638,7 @@ DepthPassGraphContext :: struct {
 }
 
 // Setup phase: declare resource dependencies
-depth_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-  // This is a PER_CAMERA pass, scope_index is the camera index
-  cam_idx := builder.scope_index
-
-  // Read opaque draw commands and count (written by occlusion culling)
-  rg.builder_read(builder, fmt.tprintf("camera_%d_opaque_draw_commands", cam_idx))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_opaque_draw_count", cam_idx))
-
-  // Write camera depth
-  rg.builder_write(builder, fmt.tprintf("camera_%d_depth", cam_idx))
-}
+// REMOVED: Old setup callback (replaced by declarative PassTemplate)
 
 // Execute phase: render with resolved resources
 depth_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {

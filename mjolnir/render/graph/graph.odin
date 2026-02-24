@@ -1,5 +1,44 @@
 package render_graph
 
+// Package render_graph implements a Frostbite-inspired frame graph for automatic
+// resource dependency tracking and barrier insertion.
+//
+// The graph follows a three-phase execution model:
+//
+// SETUP PHASE:
+//   1. graph_init() - Initialize empty graph
+//   2. graph_register_resource() - Declare all resources (buffers, textures)
+//   3. graph_register_pass() - Declare all passes with inputs/outputs
+//   4. Repeat steps 2-3 each frame
+//
+// COMPILE PHASE:
+//   5. graph_compile() - Build execution order and compute barriers
+//      - Instantiates pass templates (PER_CAMERA, PER_LIGHT expansion)
+//      - Topological sort (Kahn's algorithm)
+//      - Automatic barrier inference from resource access patterns
+//
+// EXECUTE PHASE:
+//   6. graph_execute() - Render frame with automatic synchronization
+//      - Emits barriers before each pass
+//      - Calls pass execute callbacks with resolved resources
+//
+// Example usage:
+//
+//   g: Graph
+//   graph_init(&g)
+//
+//   // Setup phase (each frame)
+//   graph_register_resource(&g, "depth", depth_desc)
+//   graph_register_pass(&g, GEOMETRY_PASS, active_cameras, geometry_execute, &ctx)
+//
+//   // Compile phase
+//   if graph_compile(&g) != .SUCCESS {
+//       log.error("Graph compilation failed")
+//   }
+//
+//   // Execute phase
+//   graph_execute(&g, cmd, frame_index, &exec_ctx)
+
 import "core:log"
 import "core:slice"
 import "core:strings"
@@ -49,19 +88,23 @@ Graph :: struct {
 	transient_pool: TransientResourcePool,
 }
 
-transient_pool_init :: proc(pool: ^TransientResourcePool) {
+@(private)
+_transient_pool_init :: proc(pool: ^TransientResourcePool) {
 	pool.transient_resources = make([dynamic]TransientResourceInfo)
 }
 
-transient_pool_destroy :: proc(pool: ^TransientResourcePool) {
+@(private)
+_transient_pool_destroy :: proc(pool: ^TransientResourcePool) {
 	delete(pool.transient_resources)
 }
 
-transient_pool_begin_frame :: proc(pool: ^TransientResourcePool) {
+@(private)
+_transient_pool_begin_frame :: proc(pool: ^TransientResourcePool) {
 	clear(&pool.transient_resources)
 }
 
-transient_pool_compile :: proc(pool: ^TransientResourcePool, g: ^Graph) -> Result {
+@(private)
+_transient_pool_compile :: proc(pool: ^TransientResourcePool, g: ^Graph) -> Result {
 	clear(&pool.transient_resources)
 	for res_id, desc in g.resources {
 		if !desc.is_transient do continue
@@ -88,18 +131,51 @@ transient_pool_compile :: proc(pool: ^TransientResourcePool, g: ^Graph) -> Resul
 	return .SUCCESS
 }
 
+// ============================================================================
+// PUBLIC API - SETUP PHASE
+// ============================================================================
+
 // Initialize empty graph
-init :: proc(g: ^Graph) {
+graph_init :: proc(g: ^Graph) {
 	g.resources = make(map[ResourceId]ResourceDescriptor)
 	g.pass_templates = make([dynamic]PassTemplate)
 	g.passes = make([dynamic]PassInstance)
 	g.execution_order = make([dynamic]PassId)
 	g.barriers = make(map[PassId][dynamic]Barrier)
 	g.resource_lifetimes = make(map[ResourceId]ResourceLifetime)
-	transient_pool_init(&g.transient_pool)
+	_transient_pool_init(&g.transient_pool)
 }
 
-clear_compiled_state :: proc(g: ^Graph) {
+// Cleanup graph resources
+graph_destroy :: proc(g: ^Graph) {
+	_clear_compiled_state(g)
+
+	delete(g.resources)
+	delete(g.pass_templates)
+	delete(g.passes)
+
+	delete(g.execution_order)
+	delete(g.barriers)
+	delete(g.resource_lifetimes)
+	_transient_pool_destroy(&g.transient_pool)
+}
+
+// Reset graph for next frame (clears pass instances, keeps templates)
+graph_reset :: proc(g: ^Graph) {
+	_clear_compiled_state(g)
+	_transient_pool_begin_frame(&g.transient_pool)
+
+	// NOTE: We DO clear templates because they're registered fresh each frame
+	// with stack-allocated context pointers that become invalid after the frame
+	clear(&g.pass_templates)
+}
+
+// ============================================================================
+// PRIVATE HELPERS
+// ============================================================================
+
+@(private)
+_clear_compiled_state :: proc(g: ^Graph) {
 	for &pass in g.passes {
 		delete(pass.inputs)
 		delete(pass.outputs)
@@ -115,32 +191,8 @@ clear_compiled_state :: proc(g: ^Graph) {
 	clear(&g.resource_lifetimes)
 }
 
-// Cleanup graph resources
-destroy :: proc(g: ^Graph) {
-	clear_compiled_state(g)
-
-	delete(g.resources)
-	delete(g.pass_templates)
-	delete(g.passes)
-
-	delete(g.execution_order)
-	delete(g.barriers)
-	delete(g.resource_lifetimes)
-	transient_pool_destroy(&g.transient_pool)
-}
-
-// Reset graph for next frame (clears pass instances, keeps templates)
-reset :: proc(g: ^Graph) {
-	clear_compiled_state(g)
-	transient_pool_begin_frame(&g.transient_pool)
-
-	// NOTE: We DO clear templates because they're registered fresh each frame
-	// with stack-allocated context pointers that become invalid after the frame
-	clear(&g.pass_templates)
-}
-
 // Register resource in graph
-register_resource :: proc(g: ^Graph, resource_id: string, desc: ResourceDescriptor) {
+graph_register_resource :: proc(g: ^Graph, resource_id: string, desc: ResourceDescriptor) {
 	id := ResourceId(resource_id)
 
 	if id in g.resources {
@@ -151,20 +203,9 @@ register_resource :: proc(g: ^Graph, resource_id: string, desc: ResourceDescript
 	g.resources[id] = desc
 }
 
-get_resource_descriptor :: proc(g: ^Graph, res_id: ResourceId) -> (ResourceDescriptor, bool) {
-	desc, ok := g.resources[res_id]
-	return desc, ok
-}
-
-// Add pass template to graph
-add_pass_template :: proc(g: ^Graph, template: PassTemplate) {
-	append(&g.pass_templates, template)
-	log.infof("Registered pass template: %s (scope: %v, queue: %v)", template.name, template.scope, template.queue)
-}
-
-// Combine declarative template with runtime execution context
-// This allows separating structure (inputs/outputs) from behavior (execute callback)
-add_declarative_pass :: proc(
+// Register pass template (declarative, with inputs/outputs)
+// Combines declarative structure (inputs/outputs) with runtime behavior (execute callback)
+graph_register_pass :: proc(
 	g: ^Graph,
 	decl: PassTemplate, // Declarative template with inputs/outputs
 	instance_indices: []u32, // Active camera/light indices
@@ -175,27 +216,58 @@ add_declarative_pass :: proc(
 	template.instance_indices = instance_indices
 	template.execute = execute
 	template.user_data = user_data
-	template.setup = nil // Declarative mode doesn't use setup callbacks
-	add_pass_template(g, template)
+
+	append(&g.pass_templates, template)
+	log.infof("Registered pass template: %s (scope: %v, queue: %v)", template.name, template.scope, template.queue)
 }
 
-// Instantiate pass templates using their explicit indices
-instantiate_passes :: proc(g: ^Graph) -> Result {
+// ============================================================================
+// PRIVATE HELPERS
+// ============================================================================
+
+@(private)
+_get_resource_descriptor :: proc(g: ^Graph, res_id: ResourceId) -> (ResourceDescriptor, bool) {
+	desc, ok := g.resources[res_id]
+	return desc, ok
+}
+
+// ============================================================================
+// PUBLIC API - COMPILE PHASE
+// ============================================================================
+
+// Compile graph: instantiate passes, build execution order, compute barriers
+graph_compile :: proc(g: ^Graph) -> Result {
+	_clear_compiled_state(g)
+	if err := _instantiate_passes(g); err != .SUCCESS do return err
+	if err := _validate_passes(g); err != .SUCCESS do return err
+	if err := _build_execution_order(g); err != .SUCCESS do return err
+	_compute_resource_lifetimes(g)
+	if err := _transient_pool_compile(&g.transient_pool, g); err != .SUCCESS do return err
+	if err := _compute_barriers(g); err != .SUCCESS do return err
+	return .SUCCESS
+}
+
+// ============================================================================
+// PRIVATE COMPILATION STAGES
+// ============================================================================
+
+@(private)
+_instantiate_passes :: proc(g: ^Graph) -> Result {
 	for &template in g.pass_templates {
 		switch template.scope {
 		case .GLOBAL:
-			instance := create_pass_instance(g, &template, 0)
+			instance := _create_pass_instance(g, &template, 0)
 			append(&g.passes, instance)
 
 		case .PER_CAMERA:
 			for cam_index in template.instance_indices {
-				instance := create_pass_instance(g, &template, cam_index)
+				instance := _create_pass_instance(g, &template, cam_index)
 				append(&g.passes, instance)
 			}
 
 		case .PER_LIGHT:
 			for light_index in template.instance_indices {
-				instance := create_pass_instance(g, &template, light_index)
+				instance := _create_pass_instance(g, &template, light_index)
 				append(&g.passes, instance)
 			}
 		}
@@ -205,10 +277,8 @@ instantiate_passes :: proc(g: ^Graph) -> Result {
 	return .SUCCESS
 }
 
-// Expand template string by replacing {cam} or {slot} with actual index
-// Example: "camera_{cam}_depth" + scope_index=5 → "camera_5_depth"
-// Uses fmt.tprintf which allocates from temp allocator (auto-freed at end of frame)
-expand_template_string :: proc(template: string, scope_index: u32, scope: PassScope) -> string {
+@(private)
+_expand_template_string :: proc(template: string, scope_index: u32, scope: PassScope) -> string {
 	switch scope {
 	case .PER_CAMERA:
 		// Replace {cam} with camera index
@@ -234,8 +304,8 @@ expand_template_string :: proc(template: string, scope_index: u32, scope: PassSc
 	return template
 }
 
-// Create pass instance by calling setup proc
-create_pass_instance :: proc(
+@(private)
+_create_pass_instance :: proc(
 	g: ^Graph,
 	template: ^PassTemplate,
 	scope_index: u32,
@@ -251,64 +321,22 @@ create_pass_instance :: proc(
 		is_valid = true,
 	}
 
-	// Use declarative inputs/outputs if provided (Phase 2), otherwise use setup callback (legacy)
-	if len(template.inputs) > 0 || len(template.outputs) > 0 {
-		// Declarative path: expand template strings
-		for input_template in template.inputs {
-			expanded := expand_template_string(input_template, scope_index, template.scope)
-			append(&instance.inputs, ResourceId(expanded))
-		}
-		for output_template in template.outputs {
-			expanded := expand_template_string(output_template, scope_index, template.scope)
-			append(&instance.outputs, ResourceId(expanded))
-		}
-		instance.is_valid = true
-
-	} else {
-		// Legacy path: call setup proc to populate inputs/outputs
-		builder := PassBuilder{
-			graph = g,
-			scope_index = scope_index,
-			inputs = make([dynamic]ResourceId),
-			outputs = make([dynamic]ResourceId),
-		}
-		template.setup(&builder, template.user_data)
-
-		instance.inputs = builder.inputs
-		instance.outputs = builder.outputs
-		instance.is_valid = !builder.has_missing_resource
+	// Declarative path: expand template strings
+	for input_template in template.inputs {
+		expanded := _expand_template_string(input_template, scope_index, template.scope)
+		append(&instance.inputs, ResourceId(expanded))
 	}
+	for output_template in template.outputs {
+		expanded := _expand_template_string(output_template, scope_index, template.scope)
+		append(&instance.outputs, ResourceId(expanded))
+	}
+	instance.is_valid = true
 
 	return instance
 }
 
-// Compile graph: build execution order and compute barriers
-compile :: proc(g: ^Graph) -> Result {
-	if err := validate_passes(g); err != .SUCCESS {
-		return err
-	}
-	if err := build_execution_order(g); err != .SUCCESS {
-		return err
-	}
-	compute_resource_lifetimes(g)
-	if err := transient_pool_compile(&g.transient_pool, g); err != .SUCCESS {
-		return err
-	}
-	if err := compute_barriers(g); err != .SUCCESS {
-		return err
-	}
-	return .SUCCESS
-}
-
-build :: proc(g: ^Graph) -> Result {
-	clear_compiled_state(g)
-	if err := instantiate_passes(g); err != .SUCCESS {
-		return err
-	}
-	return compile(g)
-}
-
-validate_passes :: proc(g: ^Graph) -> Result {
+@(private)
+_validate_passes :: proc(g: ^Graph) -> Result {
 	for pass in g.passes {
 		if pass.is_valid {
 			continue
@@ -320,20 +348,22 @@ validate_passes :: proc(g: ^Graph) -> Result {
 	return .SUCCESS
 }
 
-compute_resource_lifetimes :: proc(g: ^Graph) {
+@(private)
+_compute_resource_lifetimes :: proc(g: ^Graph) {
 	clear(&g.resource_lifetimes)
 	for pass_id, step_idx in g.execution_order {
 		pass := &g.passes[pass_id]
 		for res_id in pass.inputs {
-			record_resource_lifetime(g, res_id, step_idx)
+			_record_resource_lifetime(g, res_id, step_idx)
 		}
 		for res_id in pass.outputs {
-			record_resource_lifetime(g, res_id, step_idx)
+			_record_resource_lifetime(g, res_id, step_idx)
 		}
 	}
 }
 
-record_resource_lifetime :: proc(g: ^Graph, res_id: ResourceId, step_idx: int) {
+@(private)
+_record_resource_lifetime :: proc(g: ^Graph, res_id: ResourceId, step_idx: int) {
 	if lifetime, ok := g.resource_lifetimes[res_id]; ok {
 		if step_idx < lifetime.first_use_step {
 			lifetime.first_use_step = step_idx
@@ -350,7 +380,8 @@ record_resource_lifetime :: proc(g: ^Graph, res_id: ResourceId, step_idx: int) {
 	}
 }
 
-pass_reads_resource :: proc(pass: ^PassInstance, res_id: ResourceId) -> bool {
+@(private)
+_pass_reads_resource :: proc(pass: ^PassInstance, res_id: ResourceId) -> bool {
 	for input_res in pass.inputs {
 		if input_res == res_id {
 			return true
@@ -359,7 +390,8 @@ pass_reads_resource :: proc(pass: ^PassInstance, res_id: ResourceId) -> bool {
 	return false
 }
 
-pass_writes_resource :: proc(pass: ^PassInstance, res_id: ResourceId) -> bool {
+@(private)
+_pass_writes_resource :: proc(pass: ^PassInstance, res_id: ResourceId) -> bool {
 	for output_res in pass.outputs {
 		if output_res == res_id {
 			return true
@@ -368,8 +400,8 @@ pass_writes_resource :: proc(pass: ^PassInstance, res_id: ResourceId) -> bool {
 	return false
 }
 
-// Build dependency graph via topological sort (Kahn's algorithm)
-build_execution_order :: proc(g: ^Graph) -> Result {
+@(private)
+_build_execution_order :: proc(g: ^Graph) -> Result {
 	pass_count := len(g.passes)
 	in_degree := make([]int, pass_count)
 	defer delete(in_degree)
@@ -405,8 +437,8 @@ build_execution_order :: proc(g: ^Graph) -> Result {
 
 		for pass_idx in 0..<pass_count {
 			pass := &g.passes[pass_idx]
-			reads := pass_reads_resource(pass, res_id)
-			writes := pass_writes_resource(pass, res_id)
+			reads := _pass_reads_resource(pass, res_id)
+			writes := _pass_writes_resource(pass, res_id)
 			if !reads && !writes do continue
 
 			if reads {

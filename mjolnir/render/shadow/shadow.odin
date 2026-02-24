@@ -1150,16 +1150,7 @@ ShadowDepthGraphContext :: struct {
 }
 
 // Setup phase: declare dependencies for shadow_compute pass (PER_LIGHT)
-shadow_compute_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-  light_slot := builder.scope_index
-
-  // Write draw commands and draw count for this light
-  rg.builder_write(
-    builder,
-    fmt.tprintf("shadow_draw_commands_%d", light_slot),
-  )
-  rg.builder_write(builder, fmt.tprintf("shadow_draw_count_%d", light_slot))
-}
+// REMOVED: Old setup callback (replaced by declarative PassTemplate)
 
 // Execute phase: compute shadow draw lists for this light (PER_LIGHT)
 shadow_compute_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
@@ -1309,19 +1300,7 @@ shadow_compute_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
 }
 
 // Setup phase: declare dependencies for shadow_depth pass (PER_LIGHT)
-shadow_depth_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-  light_slot := builder.scope_index
-
-  // Read draw commands and count (written by shadow_compute)
-  rg.builder_read(
-    builder,
-    fmt.tprintf("shadow_draw_commands_%d", light_slot),
-  )
-  rg.builder_read(builder, fmt.tprintf("shadow_draw_count_%d", light_slot))
-
-  // Write shadow map
-  rg.builder_write(builder, fmt.tprintf("shadow_map_%d", light_slot))
-}
+// REMOVED: Old setup callback (replaced by declarative PassTemplate)
 
 // Execute phase: render shadow depth map for this light (PER_LIGHT)
 shadow_depth_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {

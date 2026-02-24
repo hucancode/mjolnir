@@ -261,22 +261,7 @@ ParticleRenderGraphContext :: struct {
 }
 
 // Setup phase: declare resource dependencies
-particles_render_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-	// Read compact particle buffer (written by particle compute pass)
-	rg.builder_read(builder, "compact_particle_buffer")
-
-	// Read draw command buffer (written by particle compute pass)
-	rg.builder_read(builder, "draw_command_buffer")
-
-	// Read/Write camera attachments (per-camera scoped)
-	cam_idx := builder.scope_index
-
-	// Read depth for depth testing
-	rg.builder_read(builder, fmt.tprintf("camera_%d_depth", cam_idx))
-
-	// Write to final image (additive blending)
-	rg.builder_write(builder, fmt.tprintf("camera_%d_final_image", cam_idx))
-}
+// REMOVED: Old setup callback (replaced by declarative PassTemplate)
 
 // Execute phase: render with resolved resources
 particles_render_execute :: proc(ctx: ^rg.PassContext, user_data: rawptr) {

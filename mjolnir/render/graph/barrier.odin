@@ -3,7 +3,10 @@ package render_graph
 import vk "vendor:vulkan"
 import "core:log"
 
-// Barrier description for synchronization
+// ============================================================================
+// INTERNAL TYPES - Barrier computation implementation
+// ============================================================================
+
 Barrier :: struct {
 	resource_id: ResourceId,
 	src_access:  vk.AccessFlags,
@@ -14,20 +17,25 @@ Barrier :: struct {
 	new_layout:  vk.ImageLayout,
 }
 
-// Resource access tracking
 ResourceAccess :: struct {
 	access: vk.AccessFlags,
 	stage:  vk.PipelineStageFlags,
 	layout: vk.ImageLayout,
 }
 
-has_access_transition :: proc(src, dst: ResourceAccess) -> bool {
+// ============================================================================
+// PRIVATE BARRIER COMPUTATION
+// ============================================================================
+
+@(private)
+_has_access_transition :: proc(src, dst: ResourceAccess) -> bool {
 	return src.access != dst.access ||
 		src.stage != dst.stage ||
 		src.layout != dst.layout
 }
 
-resource_written_in_pass :: proc(pass: ^PassInstance, res: ResourceId) -> bool {
+@(private)
+_resource_written_in_pass :: proc(pass: ^PassInstance, res: ResourceId) -> bool {
 	for output_res in pass.outputs {
 		if output_res == res {
 			return true
@@ -36,8 +44,9 @@ resource_written_in_pass :: proc(pass: ^PassInstance, res: ResourceId) -> bool {
 	return false
 }
 
-initial_access_for_resource :: proc(g: ^Graph, res_id: ResourceId) -> (ResourceAccess, bool) {
-	desc, ok := get_resource_descriptor(g, res_id)
+@(private)
+_initial_access_for_resource :: proc(g: ^Graph, res_id: ResourceId) -> (ResourceAccess, bool) {
+	desc, ok := _get_resource_descriptor(g, res_id)
 	if !ok {
 		return {}, false
 	}
@@ -48,30 +57,31 @@ initial_access_for_resource :: proc(g: ^Graph, res_id: ResourceId) -> (ResourceA
 			layout = .UNDEFINED,
 		}, true
 	}
-	access := infer_imported_resource_layout(desc)
+	access := _infer_imported_resource_layout(desc)
 	if access.stage == {} {
 		access.stage = {.TOP_OF_PIPE}
 	}
 	return access, true
 }
 
-append_transition_barrier :: proc(
+@(private)
+_append_transition_barrier :: proc(
 	barriers: ^[dynamic]Barrier,
 	res_id: ResourceId,
 	src, dst: ResourceAccess,
 ) {
-	if !has_access_transition(src, dst) {
+	if !_has_access_transition(src, dst) {
 		return
 	}
-	append(barriers, compute_barrier(
+	append(barriers, _compute_barrier(
 		res_id,
 		src,
 		dst,
 	))
 }
 
-// Compute barriers for all passes
-compute_barriers :: proc(g: ^Graph) -> Result {
+@(private)
+_compute_barriers :: proc(g: ^Graph) -> Result {
 	// Track last access for each resource
 	last_access := make(map[ResourceId]ResourceAccess)
 	defer delete(last_access)
@@ -88,19 +98,19 @@ compute_barriers :: proc(g: ^Graph) -> Result {
 				continue
 			}
 			seen_inputs[input_res] = true
-			if resource_written_in_pass(pass, input_res) {
+			if _resource_written_in_pass(pass, input_res) {
 				continue
 			}
-			target_access := infer_read_access(g, pass, input_res)
+			target_access := _infer_read_access(g, pass, input_res)
 			if prev_access, has_prev := last_access[input_res]; has_prev {
-				append_transition_barrier(
+				_append_transition_barrier(
 					&barriers,
 					input_res,
 					prev_access,
 					target_access,
 				)
-			} else if initial_access, ok := initial_access_for_resource(g, input_res); ok {
-				append_transition_barrier(&barriers, input_res, initial_access, target_access)
+			} else if initial_access, ok := _initial_access_for_resource(g, input_res); ok {
+				_append_transition_barrier(&barriers, input_res, initial_access, target_access)
 			}
 			last_access[input_res] = target_access
 		}
@@ -112,16 +122,16 @@ compute_barriers :: proc(g: ^Graph) -> Result {
 			}
 			seen_outputs[output_res] = true
 
-			target_access := infer_write_access(g, pass, output_res)
+			target_access := _infer_write_access(g, pass, output_res)
 			if prev_access, has_prev := last_access[output_res]; has_prev {
-				append_transition_barrier(
+				_append_transition_barrier(
 					&barriers,
 					output_res,
 					prev_access,
 					target_access,
 				)
-			} else if initial_access, ok := initial_access_for_resource(g, output_res); ok {
-				append_transition_barrier(&barriers, output_res, initial_access, target_access)
+			} else if initial_access, ok := _initial_access_for_resource(g, output_res); ok {
+				_append_transition_barrier(&barriers, output_res, initial_access, target_access)
 			}
 			last_access[output_res] = target_access
 		}
@@ -135,9 +145,9 @@ compute_barriers :: proc(g: ^Graph) -> Result {
 	return .SUCCESS
 }
 
-// Infer access flags for read operation
-infer_read_access :: proc(g: ^Graph, pass: ^PassInstance, res: ResourceId) -> ResourceAccess {
-	desc, ok := get_resource_descriptor(g, res)
+@(private)
+_infer_read_access :: proc(g: ^Graph, pass: ^PassInstance, res: ResourceId) -> ResourceAccess {
+	desc, ok := _get_resource_descriptor(g, res)
 	if !ok {
 		return {}
 	}
@@ -186,9 +196,9 @@ infer_read_access :: proc(g: ^Graph, pass: ^PassInstance, res: ResourceId) -> Re
 	return access
 }
 
-// Infer access flags for write operation
-infer_write_access :: proc(g: ^Graph, pass: ^PassInstance, res: ResourceId) -> ResourceAccess {
-	desc, ok := get_resource_descriptor(g, res)
+@(private)
+_infer_write_access :: proc(g: ^Graph, pass: ^PassInstance, res: ResourceId) -> ResourceAccess {
+	desc, ok := _get_resource_descriptor(g, res)
 	if !ok {
 		return {}
 	}
@@ -237,10 +247,8 @@ infer_write_access :: proc(g: ^Graph, pass: ^PassInstance, res: ResourceId) -> R
 	return access
 }
 
-// Infer the initial layout/access of an imported resource
-// Imported resources are created outside the graph (e.g., by depth prepass, geometry pass)
-// We assume they're already in their expected usage layout
-infer_imported_resource_layout :: proc(desc: ResourceDescriptor) -> ResourceAccess {
+@(private)
+_infer_imported_resource_layout :: proc(desc: ResourceDescriptor) -> ResourceAccess {
 	access := ResourceAccess{}
 
 	switch desc.type {
@@ -281,8 +289,8 @@ infer_imported_resource_layout :: proc(desc: ResourceDescriptor) -> ResourceAcce
 	return access
 }
 
-// Compute barrier between two accesses
-compute_barrier :: proc(
+@(private)
+_compute_barrier :: proc(
 	res_id: ResourceId,
 	src: ResourceAccess,
 	dst: ResourceAccess,

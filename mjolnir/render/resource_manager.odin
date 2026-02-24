@@ -17,7 +17,7 @@ import "core:log"
 //
 // Usage:
 //   Called automatically by render graph via resolve callbacks
-//   rg.register_resource(&g, "particle_buffer", ..., resolve_resource)
+//   rg.graph_register_resource(&g, "particle_buffer", ..., resolve_resource)
 
 resolve_resource :: proc(
 	exec_ctx: ^rg.GraphExecutionContext,

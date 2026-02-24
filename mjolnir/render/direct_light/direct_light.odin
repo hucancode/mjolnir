@@ -349,29 +349,7 @@ DirectLightPassGraphContext :: struct {
   shadow_texture_indices:   ^[d.MAX_LIGHTS]u32,
 }
 
-direct_light_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-  cam_index := builder.scope_index
-
-  // Read G-buffer attachments (written by geometry pass)
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_position", cam_index))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_normal", cam_index))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_albedo", cam_index))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_metallic_roughness", cam_index))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_emissive", cam_index))
-
-  // Read depth (for depth testing during light volume rendering)
-  rg.builder_read(builder, fmt.tprintf("camera_%d_depth", cam_index))
-
-  // Read shadow maps from all active shadow slots
-  // Note: Dead pass elimination will remove unused shadow resources automatically
-  for slot in 0 ..< shadow.MAX_SHADOW_MAPS {
-    rg.builder_read(builder, fmt.tprintf("shadow_map_%d", slot))
-  }
-
-  // Read-write final_image (blend direct lighting with existing ambient lighting)
-  // Must use read_write because loadOp = LOAD reads the existing framebuffer content
-  rg.builder_read_write(builder, fmt.tprintf("camera_%d_final_image", cam_index))
-}
+// REMOVED: Old setup callback (replaced by declarative PassTemplate)
 
 direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
   ctx := cast(^DirectLightPassGraphContext)user_data

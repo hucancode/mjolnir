@@ -3,16 +3,20 @@ package render_graph
 import vk "vendor:vulkan"
 import "core:log"
 
-// Execute graph for a frame
+// ============================================================================
+// PUBLIC API - EXECUTE PHASE
+// ============================================================================
+
+// Execute graph for a frame with automatic barrier insertion
 // Takes execution context as parameter (NOT stored in Graph!)
-execute :: proc(g: ^Graph, cmd: vk.CommandBuffer, frame_index: u32, exec_ctx: ^GraphExecutionContext) -> Result {
+graph_execute :: proc(g: ^Graph, cmd: vk.CommandBuffer, frame_index: u32, exec_ctx: ^GraphExecutionContext) -> Result {
 	for pass_id in g.execution_order {
 		pass := &g.passes[pass_id]
 
 		// Insert barriers before pass
 		if barriers, has_barriers := g.barriers[pass_id]; has_barriers {
 			for barrier in barriers {
-				emit_barrier(g, cmd, barrier, frame_index, exec_ctx)
+				_emit_barrier(g, cmd, barrier, frame_index, exec_ctx)
 			}
 		}
 
@@ -31,8 +35,12 @@ execute :: proc(g: ^Graph, cmd: vk.CommandBuffer, frame_index: u32, exec_ctx: ^G
 	return .SUCCESS
 }
 
-// Emit Vulkan barrier
-emit_barrier :: proc(g: ^Graph, cmd: vk.CommandBuffer, barrier: Barrier, frame_index: u32, exec_ctx: ^GraphExecutionContext) {
+// ============================================================================
+// PRIVATE HELPERS
+// ============================================================================
+
+@(private)
+_emit_barrier :: proc(g: ^Graph, cmd: vk.CommandBuffer, barrier: Barrier, frame_index: u32, exec_ctx: ^GraphExecutionContext) {
 	// Get resource descriptor
 	desc, ok := g.resources[barrier.resource_id]
 	if !ok {

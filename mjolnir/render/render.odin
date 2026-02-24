@@ -142,7 +142,7 @@ init :: proc(
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
 
   // Initialize render graph
-  rg.init(&self.graph)
+  rg.graph_init(&self.graph)
 
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
@@ -589,7 +589,7 @@ setup :: proc(
 
 teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   // Destroy render graph
-  rg.destroy(&self.graph)
+  rg.graph_destroy(&self.graph)
 
   // Destroy camera GPU resources (VkImages, draw command buffers) before texture_manager goes away
   for _, &cam in self.cameras {
@@ -1113,7 +1113,7 @@ register_graph_buffer_resource :: proc(
   usage: vk.BufferUsageFlags,
   resolve: rg.ResourceResolveProc,
 ) {
-  rg.register_resource(&self.graph, name, rg.ResourceDescriptor{
+  rg.graph_register_resource(&self.graph, name, rg.ResourceDescriptor{
     scope = scope,
     type = .BUFFER,
     format = rg.BufferFormat{
@@ -1137,7 +1137,7 @@ register_graph_texture_resource :: proc(
   width: u32 = 1920,
   height: u32 = 1080,
 ) {
-  rg.register_resource(&self.graph, name, rg.ResourceDescriptor{
+  rg.graph_register_resource(&self.graph, name, rg.ResourceDescriptor{
     scope = scope,
     type = type,
     format = rg.TextureFormat{
@@ -1315,7 +1315,7 @@ register_post_process_resources :: proc(self: ^Manager) {
   // It's accessed directly through the camera pointer in PostProcessPassGraphContext
 
   // Register post-process ping-pong image 0 (GLOBAL scope)
-  rg.register_resource(&self.graph, "post_process_image_0", rg.ResourceDescriptor{
+  rg.graph_register_resource(&self.graph, "post_process_image_0", rg.ResourceDescriptor{
     scope = .GLOBAL,
     type = .TEXTURE_2D,
     format = rg.TextureFormat{
@@ -1340,7 +1340,7 @@ register_post_process_resources :: proc(self: ^Manager) {
   })
 
   // Register post-process ping-pong image 1 (GLOBAL scope)
-  rg.register_resource(&self.graph, "post_process_image_1", rg.ResourceDescriptor{
+  rg.graph_register_resource(&self.graph, "post_process_image_1", rg.ResourceDescriptor{
     scope = .GLOBAL,
     type = .TEXTURE_2D,
     format = rg.TextureFormat{
@@ -1374,11 +1374,7 @@ DebugPassGraphContext :: struct {
   cameras:                ^map[u32]camera.Camera,
 }
 
-debug_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-  cam_index := builder.scope_index
-  rg.builder_read(builder, fmt.tprintf("camera_%d_depth", cam_index))
-  rg.builder_read_write(builder, fmt.tprintf("camera_%d_final_image", cam_index))
-}
+// REMOVED: Old setup callback (replaced by declarative PassTemplate)
 
 debug_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
   ctx := cast(^DebugPassGraphContext)user_data
@@ -1419,7 +1415,7 @@ render_frame_graph :: proc(
   swapchain_view: vk.ImageView,
   swapchain_extent: vk.Extent2D,
 ) -> vk.Result {
-  defer rg.reset(&self.graph)
+  defer rg.graph_reset(&self.graph)
 
   shadow.sync_lights(
     &self.shadow,
@@ -1575,30 +1571,30 @@ render_frame_graph :: proc(
 
   // PER_LIGHT passes (shadow system)
   if len(active_light_slots) > 0 {
-    rg.add_declarative_pass(&self.graph, SHADOW_COMPUTE_PASS, active_light_slots[:], shadow.shadow_compute_execute, &shadow_compute_ctx)
-    rg.add_declarative_pass(&self.graph, SHADOW_DEPTH_PASS, active_light_slots[:], shadow.shadow_depth_execute, &shadow_depth_ctx)
+    rg.graph_register_pass(&self.graph, SHADOW_COMPUTE_PASS, active_light_slots[:], shadow.shadow_compute_execute, &shadow_compute_ctx)
+    rg.graph_register_pass(&self.graph, SHADOW_DEPTH_PASS, active_light_slots[:], shadow.shadow_depth_execute, &shadow_depth_ctx)
   }
 
   // PER_CAMERA passes (rendering pipeline)
   if len(depth_cameras) > 0 {
-    rg.add_declarative_pass(&self.graph, DEPTH_PREPASS, depth_cameras[:], occlusion_culling.depth_pass_execute, &depth_ctx)
+    rg.graph_register_pass(&self.graph, DEPTH_PREPASS, depth_cameras[:], occlusion_culling.depth_pass_execute, &depth_ctx)
   }
   if len(geometry_cameras) > 0 {
-    rg.add_declarative_pass(&self.graph, GEOMETRY_PASS, geometry_cameras[:], geometry.geometry_pass_execute, &geometry_ctx)
+    rg.graph_register_pass(&self.graph, GEOMETRY_PASS, geometry_cameras[:], geometry.geometry_pass_execute, &geometry_ctx)
   }
   if len(lighting_cameras) > 0 {
-    rg.add_declarative_pass(&self.graph, AMBIENT_PASS, lighting_cameras[:], ambient.ambient_pass_execute, &ambient_ctx)
-    rg.add_declarative_pass(&self.graph, DIRECT_LIGHT_PASS, lighting_cameras[:], direct_light.direct_light_pass_execute, &direct_light_ctx)
+    rg.graph_register_pass(&self.graph, AMBIENT_PASS, lighting_cameras[:], ambient.ambient_pass_execute, &ambient_ctx)
+    rg.graph_register_pass(&self.graph, DIRECT_LIGHT_PASS, lighting_cameras[:], direct_light.direct_light_pass_execute, &direct_light_ctx)
   }
   if len(particles_cameras) > 0 {
-    rg.add_declarative_pass(&self.graph, PARTICLES_RENDER_PASS, particles_cameras[:], particles_render.particles_render_execute, &particle_ctx)
+    rg.graph_register_pass(&self.graph, PARTICLES_RENDER_PASS, particles_cameras[:], particles_render.particles_render_execute, &particle_ctx)
   }
   if len(transparency_cameras) > 0 {
-    rg.add_declarative_pass(&self.graph, TRANSPARENCY_RENDERING_PASS, transparency_cameras[:], transparent.transparency_rendering_pass_execute, &transparency_ctx)
+    rg.graph_register_pass(&self.graph, TRANSPARENCY_RENDERING_PASS, transparency_cameras[:], transparent.transparency_rendering_pass_execute, &transparency_ctx)
   }
   if len(self.debug_renderer.bone_instances) > 0 {
     append(&debug_cameras, main_camera_index)
-    rg.add_declarative_pass(&self.graph, DEBUG_PASS, debug_cameras[:], debug_pass_execute, &debug_ctx)
+    rg.graph_register_pass(&self.graph, DEBUG_PASS, debug_cameras[:], debug_pass_execute, &debug_ctx)
   }
 
   // GLOBAL passes (post-processing and UI)
@@ -1624,19 +1620,19 @@ render_frame_graph :: proc(
     swapchain_view = swapchain_view,
     swapchain_extent = swapchain_extent,
   }
-  rg.add_declarative_pass(&self.graph, POST_PROCESS_PASS, {}, post_process.post_process_pass_execute, &pp_ctx)
-  rg.add_declarative_pass(&self.graph, UI_PASS, {}, ui_render.ui_pass_execute, &ui_ctx)
+  rg.graph_register_pass(&self.graph, POST_PROCESS_PASS, {}, post_process.post_process_pass_execute, &pp_ctx)
+  rg.graph_register_pass(&self.graph, UI_PASS, {}, ui_render.ui_pass_execute, &ui_ctx)
 
   exec_ctx := rg.GraphExecutionContext{
     texture_manager = &self.texture_manager,
     render_manager = self,
   }
   cmd := self.command_buffers[frame_index]
-  if err := rg.build(&self.graph); err != .SUCCESS {
+  if err := rg.graph_compile(&self.graph); err != .SUCCESS {
     log.errorf("Failed to build graph: %v", err)
     return .ERROR_UNKNOWN
   }
-  if err := rg.execute(&self.graph, cmd, frame_index, &exec_ctx); err != .SUCCESS {
+  if err := rg.graph_execute(&self.graph, cmd, frame_index, &exec_ctx); err != .SUCCESS {
     log.errorf("Failed to execute graph: %v", err)
     return .ERROR_UNKNOWN
   }

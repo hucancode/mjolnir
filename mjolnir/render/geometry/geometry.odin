@@ -425,21 +425,7 @@ GeometryPassGraphContext :: struct {
   index_buffer:                  vk.Buffer,
 }
 
-geometry_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-  cam_idx := builder.scope_index
-
-  // Read dependencies
-  rg.builder_read(builder, fmt.tprintf("camera_%d_depth", cam_idx))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_opaque_draw_commands", cam_idx))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_opaque_draw_count", cam_idx))
-
-  // Write G-buffer outputs
-  rg.builder_write(builder, fmt.tprintf("camera_%d_gbuffer_position", cam_idx))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_gbuffer_normal", cam_idx))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_gbuffer_albedo", cam_idx))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_gbuffer_metallic_roughness", cam_idx))
-  rg.builder_write(builder, fmt.tprintf("camera_%d_gbuffer_emissive", cam_idx))
-}
+// REMOVED: Old setup callback (replaced by declarative PassTemplate)
 
 geometry_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
   ctx := cast(^GeometryPassGraphContext)user_data

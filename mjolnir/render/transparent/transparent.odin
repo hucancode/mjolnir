@@ -182,27 +182,7 @@ TransparencyRenderingPassGraphContext :: struct {
 }
 
 // Setup phase: declare dependencies for transparency rendering
-transparency_rendering_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-	cam_index := builder.scope_index
-
-	// Read depth (for depth testing)
-	rg.builder_read(builder, fmt.tprintf("camera_%d_depth", cam_index))
-
-	// Read all 5 transparency draw command/count buffers (written by culling pass)
-	rg.builder_read(builder, fmt.tprintf("camera_%d_transparent_draw_commands", cam_index))
-	rg.builder_read(builder, fmt.tprintf("camera_%d_transparent_draw_count", cam_index))
-	rg.builder_read(builder, fmt.tprintf("camera_%d_wireframe_draw_commands", cam_index))
-	rg.builder_read(builder, fmt.tprintf("camera_%d_wireframe_draw_count", cam_index))
-	rg.builder_read(builder, fmt.tprintf("camera_%d_random_color_draw_commands", cam_index))
-	rg.builder_read(builder, fmt.tprintf("camera_%d_random_color_draw_count", cam_index))
-	rg.builder_read(builder, fmt.tprintf("camera_%d_line_strip_draw_commands", cam_index))
-	rg.builder_read(builder, fmt.tprintf("camera_%d_line_strip_draw_count", cam_index))
-	rg.builder_read(builder, fmt.tprintf("camera_%d_sprite_draw_commands", cam_index))
-	rg.builder_read(builder, fmt.tprintf("camera_%d_sprite_draw_count", cam_index))
-
-	// Read-write final_image (blend transparency with existing lighting)
-	rg.builder_read_write(builder, fmt.tprintf("camera_%d_final_image", cam_index))
-}
+// REMOVED: Old setup callback (replaced by declarative PassTemplate)
 
 // Execute phase: render all transparency techniques
 transparency_rendering_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {

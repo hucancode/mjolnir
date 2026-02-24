@@ -250,19 +250,6 @@ AmbientPassGraphContext :: struct {
   cameras:                 ^map[u32]camera.Camera,
 }
 
-ambient_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
-  cam_index := builder.scope_index
-
-  // Read G-buffer attachments (written by geometry pass)
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_position", cam_index))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_normal", cam_index))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_albedo", cam_index))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_metallic_roughness", cam_index))
-  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_emissive", cam_index))
-
-  // Write final_image (first pass to render to this target)
-  rg.builder_write(builder, fmt.tprintf("camera_%d_final_image", cam_index))
-}
 
 ambient_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
   ctx := cast(^AmbientPassGraphContext)user_data
