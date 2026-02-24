@@ -1161,7 +1161,7 @@ register_particle_resources :: proc(self: ^Manager) {
     size_of(particles_render.Particle),
     1024 * 1024,
     {.VERTEX_BUFFER, .STORAGE_BUFFER},
-    resolve_buffer,
+    resolve_resource,
   )
   register_graph_buffer_resource(
     self,
@@ -1170,11 +1170,11 @@ register_particle_resources :: proc(self: ^Manager) {
     size_of(vk.DrawIndirectCommand),
     1,
     {.INDIRECT_BUFFER, .STORAGE_BUFFER},
-    resolve_buffer,
+    resolve_resource,
   )
 
   // Register camera resources (depth and final_image) for all possible cameras
-  // These use PER_CAMERA scope and are resolved via resolve_camera_texture callback
+  // These use PER_CAMERA scope and are resolved via resolve_resource callback
   gbuffer_suffixes := [?]string{"normal", "albedo", "metallic_roughness", "emissive"}
   camera_draw_techniques := [?]string{"opaque", "transparent", "wireframe", "random_color", "line_strip", "sprite"}
   for cam_idx in 0..<MAX_CAMERAS_IN_GRAPH {
@@ -1185,7 +1185,7 @@ register_particle_resources :: proc(self: ^Manager) {
       .DEPTH_TEXTURE,
       .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT},
-      resolve_camera_texture,
+      resolve_resource,
     )
     register_graph_texture_resource(
       self,
@@ -1194,7 +1194,7 @@ register_particle_resources :: proc(self: ^Manager) {
       .TEXTURE_2D,
       .R16G16B16A16_SFLOAT,
       {.COLOR_ATTACHMENT, .SAMPLED},
-      resolve_camera_texture,
+      resolve_resource,
     )
     register_graph_texture_resource(
       self,
@@ -1203,7 +1203,7 @@ register_particle_resources :: proc(self: ^Manager) {
       .TEXTURE_2D,
       .R32G32B32A32_SFLOAT,
       {.COLOR_ATTACHMENT, .SAMPLED},
-      resolve_camera_texture,
+      resolve_resource,
     )
     for suffix in gbuffer_suffixes {
       register_graph_texture_resource(
@@ -1213,7 +1213,7 @@ register_particle_resources :: proc(self: ^Manager) {
         .TEXTURE_2D,
         .R8G8B8A8_UNORM,
         {.COLOR_ATTACHMENT, .SAMPLED},
-        resolve_camera_texture,
+        resolve_resource,
       )
     }
 
@@ -1225,7 +1225,7 @@ register_particle_resources :: proc(self: ^Manager) {
         size_of(vk.DrawIndexedIndirectCommand),
         rd.MAX_NODES_IN_SCENE,
         {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-        resolve_camera_buffer,
+        resolve_resource,
       )
       register_graph_buffer_resource(
         self,
@@ -1234,7 +1234,7 @@ register_particle_resources :: proc(self: ^Manager) {
         size_of(u32),
         1,
         {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-        resolve_camera_buffer,
+        resolve_resource,
       )
     }
   }
@@ -1255,7 +1255,7 @@ register_shadow_resources :: proc(self: ^Manager) {
       size_of(vk.DrawIndexedIndirectCommand),
       rd.MAX_NODES_IN_SCENE,
       {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-      resolve_shadow_buffer,
+      resolve_resource,
     )
     register_graph_buffer_resource(
       self,
@@ -1264,7 +1264,7 @@ register_shadow_resources :: proc(self: ^Manager) {
       size_of(u32),
       1,
       {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-      resolve_shadow_buffer,
+      resolve_resource,
     )
     register_graph_texture_resource(
       self,
@@ -1273,7 +1273,7 @@ register_shadow_resources :: proc(self: ^Manager) {
       .DEPTH_TEXTURE,
       .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      resolve_shadow_texture,
+      resolve_resource,
       shadow.SHADOW_MAP_SIZE,
       shadow.SHADOW_MAP_SIZE,
     )
@@ -1291,7 +1291,7 @@ register_ui_resources :: proc(self: ^Manager) {
     size_of(ui_render.Vertex2D),
     ui_render.UI_MAX_VERTICES,
     {.VERTEX_BUFFER},
-    resolve_buffer,
+    resolve_resource,
   )
   register_graph_buffer_resource(
     self,
@@ -1300,7 +1300,7 @@ register_ui_resources :: proc(self: ^Manager) {
     size_of(u32),
     ui_render.UI_MAX_INDICES,
     {.INDEX_BUFFER},
-    resolve_buffer,
+    resolve_resource,
   )
 
   // Note: Swapchain image is NOT registered in graph because it's owned by Engine,
