@@ -95,6 +95,10 @@ reset :: proc(g: ^Graph) {
 		delete(barriers)
 	}
 	clear(&g.barriers)
+
+	// NOTE: We DO clear templates because they're registered fresh each frame
+	// with stack-allocated context pointers that become invalid after the frame
+	clear(&g.pass_templates)
 }
 
 // Register resource in graph

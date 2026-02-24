@@ -4,6 +4,7 @@ import "../../geometry"
 import "../../gpu"
 import "../shared"
 import cmd "../../gpu/ui"
+import rg "../graph"
 import "core:log"
 import "core:math/linalg"
 import "core:slice"
@@ -388,4 +389,111 @@ add_text_to_batch :: proc(
     self.indices[self.index_count] = base_vertex + 2;self.index_count += 1
     self.indices[self.index_count] = base_vertex + 3;self.index_count += 1
   }
+}
+
+// ============================================================================
+// RENDER GRAPH INTEGRATION
+// ============================================================================
+
+// Context for graph-based UI rendering
+UIPassGraphContext :: struct {
+  renderer:         ^Renderer,
+  texture_manager:  ^gpu.TextureManager,
+  gctx:             ^gpu.GPUContext,
+  commands:         []cmd.RenderCommand,
+  swapchain_view:   vk.ImageView,
+  swapchain_extent: vk.Extent2D,
+}
+
+// Setup phase: declare resource dependencies
+ui_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
+  // Read UI vertex/index buffers (per-frame)
+  rg.builder_read(builder, "ui_vertex_buffer")
+  rg.builder_read(builder, "ui_index_buffer")
+
+  // Note: Swapchain image is NOT a graph resource - it's passed through context
+  // UI pass writes to swapchain but doesn't declare it as a graph dependency
+}
+
+// Execute phase: render with resolved resources
+ui_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
+  ctx := cast(^UIPassGraphContext)user_data
+  self := ctx.renderer
+  cmd := pass_ctx.cmd
+
+  // Resolve vertex buffer
+  vb_id, vb_ok := pass_ctx.graph.resource_ids["ui_vertex_buffer"]
+  if !vb_ok do return
+  vb_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, pass_ctx.exec_ctx, vb_id)
+
+  // Resolve index buffer
+  ib_id, ib_ok := pass_ctx.graph.resource_ids["ui_index_buffer"]
+  if !ib_ok do return
+  ib_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, pass_ctx.exec_ctx, ib_id)
+
+  // Use swapchain view/extent from context (passed from Engine, not a graph resource)
+  swapchain_view := ctx.swapchain_view
+  swapchain_extent := ctx.swapchain_extent
+
+  // Begin rendering to swapchain
+  rendering_attachment_info := vk.RenderingAttachmentInfo {
+    sType       = .RENDERING_ATTACHMENT_INFO,
+    imageView   = swapchain_view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp      = .LOAD,  // Don't clear - render on top
+    storeOp     = .STORE,
+  }
+
+  rendering_info := vk.RenderingInfo {
+    sType = .RENDERING_INFO,
+    renderArea = {extent = swapchain_extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &rendering_attachment_info,
+  }
+
+  vk.CmdBeginRendering(cmd, &rendering_info)
+
+  // Set viewport and scissor
+  viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(swapchain_extent.height),
+    width    = f32(swapchain_extent.width),
+    height   = -f32(swapchain_extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D {
+    offset = {0, 0},
+    extent = swapchain_extent,
+  }
+  vk.CmdSetViewport(cmd, 0, 1, &viewport)
+  vk.CmdSetScissor(cmd, 0, 1, &scissor)
+
+  // Bind pipeline and descriptor sets
+  vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipeline)
+  vk.CmdBindDescriptorSets(
+    cmd,
+    .GRAPHICS,
+    self.pipeline_layout,
+    0,
+    1,
+    &ctx.texture_manager.descriptor_set,
+    0,
+    nil,
+  )
+
+  // Render UI using staged commands
+  render(
+    self,
+    ctx.commands,
+    ctx.gctx,
+    ctx.texture_manager,
+    cmd,
+    swapchain_extent.width,
+    swapchain_extent.height,
+    pass_ctx.frame_index,
+  )
+
+  vk.CmdEndRendering(cmd)
 }

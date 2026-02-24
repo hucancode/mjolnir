@@ -60,7 +60,8 @@ System :: struct {
   depth_pipeline:                 vk.Pipeline,
   depth_reduce_layout:            vk.PipelineLayout,
   depth_reduce_pipeline:          vk.Pipeline,
-  depth_descriptor_layout:        vk.DescriptorSetLayout,
+  cull_input_descriptor_layout:   vk.DescriptorSetLayout, // Set 0: inputs (nodes, meshes, cameras, depth pyramid)
+  cull_output_descriptor_layout:  vk.DescriptorSetLayout, // Set 1: outputs (draw command buffers)
   depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
   max_draws:                      u32,
   node_count:                     u32,
@@ -88,26 +89,46 @@ init :: proc(
   self.depth_width = depth_width
   self.depth_height = depth_height
   self.depth_bias = 0.0001
-  self.depth_descriptor_layout = gpu.create_descriptor_set_layout(
-  gctx,
-  {.STORAGE_BUFFER, {.COMPUTE}}, // node data
-  {.STORAGE_BUFFER, {.COMPUTE}}, // mesh data
-  {.STORAGE_BUFFER, {.COMPUTE}}, // camera data
-  {.STORAGE_BUFFER, {.COMPUTE}}, // late draw count
-  {.STORAGE_BUFFER, {.COMPUTE}}, // late draw commands
-  {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw count
-  {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw commands
-  {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw count
-  {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw commands
-  {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // depth pyramid
+  // Set 0: Input descriptor layout (read-only)
+  self.cull_input_descriptor_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, {.COMPUTE}}, // node data
+    {.STORAGE_BUFFER, {.COMPUTE}}, // mesh data
+    {.STORAGE_BUFFER, {.COMPUTE}}, // camera data
+    {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}, // depth pyramid
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(
       gctx.device,
-      self.depth_descriptor_layout,
+      self.cull_input_descriptor_layout,
       nil,
     )
-    self.depth_descriptor_layout = 0
+    self.cull_input_descriptor_layout = 0
+  }
+
+  // Set 1: Output descriptor layout (draw command buffers)
+  self.cull_output_descriptor_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, {.COMPUTE}}, // opaque draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // opaque draw commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // transparent draw commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // wireframe draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // wireframe draw commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // random_color draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // random_color draw commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // line_strip draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // line_strip draw commands
+    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw count
+    {.STORAGE_BUFFER, {.COMPUTE}}, // sprite draw commands
+  ) or_return
+  defer if ret != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gctx.device,
+      self.cull_output_descriptor_layout,
+      nil,
+    )
+    self.cull_output_descriptor_layout = 0
   }
   self.depth_reduce_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
@@ -160,10 +181,16 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   self.depth_pipeline_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
-    self.depth_descriptor_layout,
+    self.cull_input_descriptor_layout,
     nil,
   )
-  self.depth_descriptor_layout = 0
+  self.cull_input_descriptor_layout = 0
+  vk.DestroyDescriptorSetLayout(
+    gctx.device,
+    self.cull_output_descriptor_layout,
+    nil,
+  )
+  self.cull_output_descriptor_layout = 0
   vk.DestroyDescriptorSetLayout(
     gctx.device,
     self.depth_reduce_descriptor_layout,
@@ -384,6 +411,27 @@ perform_culling :: proc(
   )
   vk.CmdFillBuffer(
     command_buffer,
+    camera.wireframe_draw_count[frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.wireframe_draw_count[frame_index].bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.random_color_draw_count[frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.random_color_draw_count[frame_index].bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.line_strip_draw_count[frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.line_strip_draw_count[frame_index].bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
     camera.sprite_draw_count[frame_index].buffer,
     0,
     vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
@@ -393,7 +441,8 @@ perform_culling :: proc(
     command_buffer,
     self.cull_pipeline,
     self.cull_layout,
-    camera.descriptor_set[frame_index],
+    camera.cull_input_descriptor_set[frame_index],  // Set 0: inputs
+    camera.cull_output_descriptor_set[frame_index], // Set 1: outputs
   )
   prev_frame := alg.prev(frame_index, d.FRAMES_IN_FLIGHT)
   push_constants := VisibilityPushConstants {
@@ -419,6 +468,63 @@ perform_culling :: proc(
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
 }
 
+// Perform transparency culling - generates all 5 transparency draw lists in one dispatch
+// This is used by the graph-based transparency culling pass
+// ============================================================================
+// Graph-based API for unified visibility culling pass
+// This pass generates ALL draw lists (opaque + 5 transparency types) in one dispatch
+// ============================================================================
+
+VisibilityCullingPassGraphContext :: struct {
+  system:       ^System,
+  gctx:         ^gpu.GPUContext,
+  camera:       ^cam.Camera,
+  camera_index: u32,
+}
+
+// Setup phase: declare dependencies for unified visibility culling
+// Writes to ALL 6 draw command/count buffer pairs
+visibility_culling_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
+  cam_index := builder.scope_index
+
+  // Write opaque draw commands/count
+  rg.builder_write(builder, fmt.tprintf("camera_%d_opaque_draw_commands", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_opaque_draw_count", cam_index))
+
+  // Write all 5 transparency draw command/count buffers
+  rg.builder_write(builder, fmt.tprintf("camera_%d_transparent_draw_commands", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_transparent_draw_count", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_wireframe_draw_commands", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_wireframe_draw_count", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_random_color_draw_commands", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_random_color_draw_count", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_line_strip_draw_commands", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_line_strip_draw_count", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_sprite_draw_commands", cam_index))
+  rg.builder_write(builder, fmt.tprintf("camera_%d_sprite_draw_count", cam_index))
+}
+
+// Execute phase: perform unified visibility culling
+// Processes ALL visible objects and routes to appropriate buffers based on material flags
+// Shader automatically applies occlusion culling only to opaque objects
+visibility_culling_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
+  ctx := cast(^VisibilityCullingPassGraphContext)user_data
+
+  // Call perform_culling with flags that include ALL visible objects
+  // The shader will route objects to appropriate buffers based on material flags
+  // and automatically skip occlusion culling for transparent objects
+  perform_culling(
+    ctx.system,
+    ctx.gctx,
+    pass_ctx.cmd,
+    ctx.camera,
+    ctx.camera_index,
+    pass_ctx.frame_index,
+    rd.NodeFlagSet{.VISIBLE}, // Include all visible objects
+    rd.NodeFlagSet{}, // No exclusions - shader handles routing
+  )
+}
+
 @(private)
 create_compute_pipelines :: proc(
   self: ^System,
@@ -430,7 +536,8 @@ create_compute_pipelines :: proc(
       stageFlags = {.COMPUTE},
       size = size_of(VisibilityPushConstants),
     },
-    self.depth_descriptor_layout,
+    self.cull_input_descriptor_layout,  // Set 0: inputs
+    self.cull_output_descriptor_layout, // Set 1: outputs
   ) or_return
   self.depth_reduce_layout = gpu.create_pipeline_layout(
     gctx,
@@ -529,4 +636,130 @@ create_depth_pipeline :: proc(
     &self.depth_pipeline,
   ) or_return
   return .SUCCESS
+}
+
+// ============================================================================
+// RENDER GRAPH INTEGRATION
+// ============================================================================
+
+import rg "../graph"
+
+// Context for graph-based depth pass rendering
+DepthPassGraphContext :: struct {
+  system:                    ^System,
+  texture_manager:           ^gpu.TextureManager,
+  include_flags:             rd.NodeFlagSet,
+  exclude_flags:             rd.NodeFlagSet,
+  cameras_descriptor_set:    vk.DescriptorSet,
+  bone_descriptor_set:       vk.DescriptorSet,
+  node_data_descriptor_set:  vk.DescriptorSet,
+  mesh_data_descriptor_set:  vk.DescriptorSet,
+  vertex_skinning_descriptor_set: vk.DescriptorSet,
+  vertex_buffer:             vk.Buffer,
+  index_buffer:              vk.Buffer,
+}
+
+// Setup phase: declare resource dependencies
+depth_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
+  // This is a PER_CAMERA pass, scope_index is the camera index
+  cam_idx := builder.scope_index
+
+  // Read opaque draw commands and count (written by occlusion culling)
+  rg.builder_read(builder, fmt.tprintf("camera_%d_opaque_draw_commands", cam_idx))
+  rg.builder_read(builder, fmt.tprintf("camera_%d_opaque_draw_count", cam_idx))
+
+  // Write camera depth
+  rg.builder_write(builder, fmt.tprintf("camera_%d_depth", cam_idx))
+}
+
+// Execute phase: render with resolved resources
+depth_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
+  ctx := cast(^DepthPassGraphContext)user_data
+  self := ctx.system
+  cmd := pass_ctx.cmd
+  cam_idx := pass_ctx.scope_index
+
+  // Resolve depth texture
+  depth_name := fmt.tprintf("camera_%d_depth", cam_idx)
+  depth_id, depth_ok := pass_ctx.graph.resource_ids[depth_name]
+  if !depth_ok do return
+  depth_handle, _ := rg.resolve(rg.DepthTextureHandle, pass_ctx, pass_ctx.exec_ctx, depth_id)
+
+  // Begin depth rendering
+  depth_attachment := vk.RenderingAttachmentInfo {
+    sType = .RENDERING_ATTACHMENT_INFO,
+    imageView = depth_handle.view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = {depthStencil = {depth = 1.0}},
+  }
+
+  gpu.begin_depth_rendering(
+    cmd,
+    depth_handle.extent,
+    &depth_attachment,
+  )
+
+  gpu.set_viewport_scissor(cmd, depth_handle.extent)
+
+  // Bind graphics pipeline
+  gpu.bind_graphics_pipeline(
+    cmd,
+    self.depth_pipeline,
+    self.depth_pipeline_layout,
+    ctx.cameras_descriptor_set,
+    ctx.bone_descriptor_set,
+    ctx.node_data_descriptor_set,
+    ctx.mesh_data_descriptor_set,
+    ctx.vertex_skinning_descriptor_set,
+  )
+
+  // Push camera index
+  camera_index := cam_idx
+  vk.CmdPushConstants(
+    cmd,
+    self.depth_pipeline_layout,
+    {.VERTEX, .FRAGMENT},
+    0,
+    size_of(u32),
+    &camera_index,
+  )
+
+  gpu.bind_vertex_index_buffers(cmd, ctx.vertex_buffer, ctx.index_buffer)
+
+  // Resolve draw commands buffer
+  draw_cmd_name := fmt.tprintf("camera_%d_opaque_draw_commands", cam_idx)
+  draw_cmd_id, draw_cmd_ok := pass_ctx.graph.resource_ids[draw_cmd_name]
+  if !draw_cmd_ok {
+    vk.CmdEndRendering(cmd)
+    return
+  }
+  draw_cmd_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, pass_ctx.exec_ctx, draw_cmd_id)
+
+  // Resolve draw count buffer
+  draw_count_name := fmt.tprintf("camera_%d_opaque_draw_count", cam_idx)
+  draw_count_id, draw_count_ok := pass_ctx.graph.resource_ids[draw_count_name]
+  if !draw_count_ok {
+    vk.CmdEndRendering(cmd)
+    return
+  }
+  draw_count_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, pass_ctx.exec_ctx, draw_count_id)
+
+  // Draw indexed indirect count
+  vk.CmdDrawIndexedIndirectCount(
+    cmd,
+    draw_cmd_handle.buffer,
+    0, // offset
+    draw_count_handle.buffer,
+    0, // count offset
+    self.max_draws,
+    u32(size_of(vk.DrawIndexedIndirectCommand)),
+  )
+
+  vk.CmdEndRendering(cmd)
+
+  // Note: Barriers are now handled automatically by the graph
+  // The manual barriers (UNDEFINED->DEPTH_ATTACHMENT and DEPTH_ATTACHMENT->SHADER_READ)
+  // are replaced by automatic graph barrier computation
 }

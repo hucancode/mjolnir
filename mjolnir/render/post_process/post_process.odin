@@ -4,6 +4,7 @@ import cont "../../containers"
 import "../../gpu"
 import "../camera"
 import d "../data"
+import rg "../graph"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -803,4 +804,56 @@ render :: proc(
 }
 
 end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
+}
+
+// ============================================================================
+// Render Graph Integration
+// ============================================================================
+
+PostProcessPassGraphContext :: struct {
+  renderer:         ^Renderer,
+  texture_manager:  ^gpu.TextureManager,
+  main_camera:      ^camera.Camera,
+  swapchain_view:   vk.ImageView,
+  swapchain_extent: vk.Extent2D,
+  frame_index:      u32,
+}
+
+// Setup phase: declare dependencies for post-process pass
+post_process_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
+  ctx := cast(^PostProcessPassGraphContext)user_data
+
+  // Note: main_camera_final_image is NOT a graph resource - accessed via context.main_camera
+  // Note: swapchain is NOT a graph resource - passed via context
+
+  // Ping-pong images only needed if effects are present
+  if len(ctx.renderer.effect_stack) > 0 {
+    rg.builder_read_write(builder, "post_process_image_0")
+    rg.builder_read_write(builder, "post_process_image_1")
+  }
+}
+
+// Execute phase: render all post-process effects
+post_process_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
+  ctx := cast(^PostProcessPassGraphContext)user_data
+
+  // Call begin_pass to setup viewport and handle empty effect stack
+  // (begin_pass adds a nil effect if stack is empty, ensuring input is copied to output)
+  begin_pass(ctx.renderer, pass_ctx.cmd, ctx.swapchain_extent)
+
+  // Call original render() function with resolved resources
+  // Note: render() still has internal ping-pong barriers (intra-pass)
+  // Graph handles inter-pass barriers (final_image input, swapchain output)
+  render(
+    ctx.renderer,
+    pass_ctx.cmd,
+    ctx.swapchain_extent,
+    ctx.swapchain_view,
+    ctx.main_camera,
+    ctx.texture_manager,
+    ctx.frame_index,
+  )
+
+  // Call end_pass for symmetry (currently empty but may be used in future)
+  end_pass(ctx.renderer, pass_ctx.cmd)
 }

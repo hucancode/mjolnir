@@ -31,6 +31,12 @@ PassType :: enum {
 
 PassTypeSet :: bit_set[PassType;u32]
 
+// Grouped draw command buffers (count + commands)
+DrawCommandSet :: struct {
+  count:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  commands: [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+}
+
 Camera :: struct {
   // Render pass configuration
   enabled_passes:                PassTypeSet,
@@ -49,6 +55,18 @@ Camera :: struct {
   transparent_draw_commands:     [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
+  wireframe_draw_count:          [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  wireframe_draw_commands:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  random_color_draw_count:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  random_color_draw_commands:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  line_strip_draw_count:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  line_strip_draw_commands:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
   sprite_draw_count:             [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   sprite_draw_commands:          [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
@@ -56,7 +74,8 @@ Camera :: struct {
   // Depth pyramid for hierarchical Z culling
   depth_pyramid:                 [FRAMES_IN_FLIGHT]DepthPyramid,
   // Descriptor sets for visibility culling compute shaders
-  descriptor_set:                [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  cull_input_descriptor_set:     [FRAMES_IN_FLIGHT]vk.DescriptorSet, // Set 0: inputs
+  cull_output_descriptor_set:    [FRAMES_IN_FLIGHT]vk.DescriptorSet, // Set 1: outputs
   depth_reduce_descriptor_sets:  [FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
 }
 
@@ -220,6 +239,42 @@ init_gpu :: proc(
       int(max_draws),
       {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
+    camera.wireframe_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.wireframe_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.random_color_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.random_color_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.line_strip_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.line_strip_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
     camera.sprite_draw_count[frame] = gpu.create_mutable_buffer(
       gctx,
       u32,
@@ -294,6 +349,21 @@ destroy_gpu :: proc(
       gctx.device,
       &camera.transparent_draw_commands[frame],
     )
+    gpu.mutable_buffer_destroy(gctx.device, &camera.wireframe_draw_count[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.wireframe_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(gctx.device, &camera.random_color_draw_count[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.random_color_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(gctx.device, &camera.line_strip_draw_count[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.line_strip_draw_commands[frame],
+    )
     gpu.mutable_buffer_destroy(gctx.device, &camera.sprite_draw_count[frame])
     gpu.mutable_buffer_destroy(
       gctx.device,
@@ -309,7 +379,8 @@ allocate_descriptors :: proc(
   gctx: ^gpu.GPUContext,
   camera: ^Camera,
   texture_manager: ^gpu.TextureManager,
-  normal_descriptor_layout: ^vk.DescriptorSetLayout,
+  cull_input_descriptor_layout: ^vk.DescriptorSetLayout,
+  cull_output_descriptor_layout: ^vk.DescriptorSetLayout,
   depth_reduce_descriptor_layout: ^vk.DescriptorSetLayout,
   node_data_buffer: ^gpu.BindlessBuffer(rd.Node),
   mesh_data_buffer: ^gpu.BindlessBuffer(rd.Mesh),
@@ -338,36 +409,13 @@ allocate_descriptors :: proc(
       return .ERROR_INITIALIZATION_FAILED
     }
 
-    camera.descriptor_set[frame_index] = gpu.create_descriptor_set(
+    // Set 0: Input descriptor set (read-only)
+    camera.cull_input_descriptor_set[frame_index] = gpu.create_descriptor_set(
       gctx,
-      normal_descriptor_layout,
+      cull_input_descriptor_layout,
       {.STORAGE_BUFFER, gpu.buffer_info(&node_data_buffer.buffer)},
       {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)},
       {.STORAGE_BUFFER, gpu.buffer_info(&camera_buffer.buffers[frame_index])},
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&camera.opaque_draw_count[frame_index]),
-      },
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&camera.opaque_draw_commands[frame_index]),
-      },
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&camera.transparent_draw_count[frame_index]),
-      },
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&camera.transparent_draw_commands[frame_index]),
-      },
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&camera.sprite_draw_count[frame_index]),
-      },
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&camera.sprite_draw_commands[frame_index]),
-      },
       {
         .COMBINED_IMAGE_SAMPLER,
         vk.DescriptorImageInfo {
@@ -376,6 +424,24 @@ allocate_descriptors :: proc(
           imageLayout = .GENERAL,
         },
       },
+    ) or_return
+
+    // Set 1: Output descriptor set (draw command buffers)
+    camera.cull_output_descriptor_set[frame_index] = gpu.create_descriptor_set(
+      gctx,
+      cull_output_descriptor_layout,
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.opaque_draw_count[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.opaque_draw_commands[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.transparent_draw_count[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.transparent_draw_commands[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.wireframe_draw_count[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.wireframe_draw_commands[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.random_color_draw_count[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.random_color_draw_commands[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.line_strip_draw_count[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.line_strip_draw_commands[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.sprite_draw_count[frame_index])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera.sprite_draw_commands[frame_index])},
     ) or_return
 
     for mip in 0 ..< pyramid.mip_levels {

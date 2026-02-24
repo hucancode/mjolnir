@@ -389,6 +389,16 @@ init :: proc(
 
   // Register render graph resources for particle system
   register_particle_resources(self)
+
+  // Register render graph resources for UI system
+  register_ui_resources(self)
+
+  // Register render graph resources for shadow system
+  register_shadow_resources(self)
+
+  // Register render graph resources for post-process system
+  register_post_process_resources(self)
+
   // Initialize transparency renderers
   transparent.init(
     &self.transparent_renderer,
@@ -895,27 +905,7 @@ record_lighting_pass :: proc(
   cam_index: u32,
   cam: ^camera.Camera,
 ) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  ambient.begin_pass(
-    &self.ambient,
-    cam,
-    &self.texture_manager,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    frame_index,
-  )
-  ambient.render(&self.ambient, cam_index, cam, cmd, frame_index)
-  ambient.end_pass(cmd)
-  direct_light.begin_pass(
-    &self.direct_light,
-    cam,
-    &self.texture_manager,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.lights_buffer.descriptor_set,
-    self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
-    frame_index,
-  )
+  // Prepare shadow texture indices for direct lighting
   shadow_texture_indices: [rd.MAX_LIGHTS]u32
   for i in 0 ..< rd.MAX_LIGHTS {
     shadow_texture_indices[i] = 0xFFFFFFFF
@@ -929,17 +919,52 @@ record_lighting_pass :: proc(
       frame_index,
     )
   }
-  direct_light.render(
-    &self.direct_light,
-    cam_index,
-    cam,
-    &shadow_texture_indices,
-    cmd,
-    &self.lights_buffer,
-    active_lights,
-    frame_index,
-  )
-  direct_light.end_pass(cmd)
+
+  // Create contexts for both lighting passes (ambient + direct)
+  ambient_ctx := ambient.AmbientPassGraphContext{
+    renderer = &self.ambient,
+    texture_manager = &self.texture_manager,
+    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
+    camera = cam,
+    camera_index = cam_index,
+  }
+
+  direct_light_ctx := direct_light.DirectLightPassGraphContext{
+    renderer = &self.direct_light,
+    texture_manager = &self.texture_manager,
+    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
+    lights_descriptor_set = self.lights_buffer.descriptor_set,
+    shadow_data_descriptor_set = self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
+    camera = cam,
+    camera_index = cam_index,
+    lights_buffer = &self.lights_buffer,
+    active_lights = active_lights,
+    shadow_texture_indices = &shadow_texture_indices,
+  }
+
+  // Register BOTH templates before execution (so they run together in the graph)
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "ambient_pass",
+    scope = .PER_CAMERA,
+    queue = .GRAPHICS,
+    setup = ambient.ambient_pass_setup,
+    execute = ambient.ambient_pass_execute,
+    user_data = &ambient_ctx,
+  })
+
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "direct_light_pass",
+    scope = .PER_CAMERA,
+    queue = .GRAPHICS,
+    setup = direct_light.direct_light_pass_setup,
+    execute = direct_light.direct_light_pass_execute,
+    user_data = &direct_light_ctx,
+  })
+
+  // Execute both passes together in a single graph
+  execute_registered_graph_templates(self, frame_index, {cam_index}, {}) or_return
+
+  log.debugf("Successfully executed lighting passes via graph (camera %d)", cam_index)
   return .SUCCESS
 }
 
@@ -1681,82 +1706,310 @@ upload_camera_data :: proc(
 
 // ====== RENDER GRAPH RESOURCE REGISTRATION ======
 
-MAX_CAMERAS_IN_GRAPH :: 16 // Maximum cameras supported by graph system
+MAX_CAMERAS_IN_GRAPH :: rd.MAX_ACTIVE_CAMERAS
+MAX_GRAPH_CAMERA_TECHNIQUES :: 6
+
+register_graph_buffer_resource :: proc(
+  self: ^Manager,
+  name: string,
+  scope: rg.ResourceScope,
+  element_size: uint,
+  element_count: uint,
+  usage: vk.BufferUsageFlags,
+  resolve: rg.ResourceResolveProc,
+) {
+  rg.register_resource(&self.graph, rg.ResourceDescriptor{
+    name = name,
+    scope = scope,
+    type = .BUFFER,
+    format = rg.BufferFormat{
+      element_size = element_size,
+      element_count = element_count,
+      usage = usage,
+    },
+    is_transient = false,
+    resolve = resolve,
+  })
+}
+
+register_graph_texture_resource :: proc(
+  self: ^Manager,
+  name: string,
+  scope: rg.ResourceScope,
+  type: rg.ResourceType,
+  format: vk.Format,
+  usage: vk.ImageUsageFlags,
+  resolve: rg.ResourceResolveProc,
+  width: u32 = 1920,
+  height: u32 = 1080,
+) {
+  rg.register_resource(&self.graph, rg.ResourceDescriptor{
+    name = name,
+    scope = scope,
+    type = type,
+    format = rg.TextureFormat{
+      width = width,
+      height = height,
+      format = format,
+      usage = usage,
+      mip_levels = 1,
+    },
+    is_transient = false,
+    resolve = resolve,
+  })
+}
 
 // Register particle system resources in the render graph
 register_particle_resources :: proc(self: ^Manager) {
-  // Register compact particle buffer (GLOBAL scope)
-  rg.register_resource(&self.graph, rg.ResourceDescriptor{
-    name = "compact_particle_buffer",
-    scope = .GLOBAL,
-    type = .BUFFER,
-    format = rg.BufferFormat{
-      element_size = size_of(particles_render.Particle),
-      element_count = 1024 * 1024, // Max particles
-      usage = {.VERTEX_BUFFER, .STORAGE_BUFFER},
-    },
-    is_transient = false,
-    resolve = resolve_buffer,
-  })
-
-  // Register draw command buffer (GLOBAL scope)
-  rg.register_resource(&self.graph, rg.ResourceDescriptor{
-    name = "draw_command_buffer",
-    scope = .GLOBAL,
-    type = .BUFFER,
-    format = rg.BufferFormat{
-      element_size = size_of(vk.DrawIndirectCommand),
-      element_count = 1,
-      usage = {.INDIRECT_BUFFER, .STORAGE_BUFFER},
-    },
-    is_transient = false,
-    resolve = resolve_buffer,
-  })
+  register_graph_buffer_resource(
+    self,
+    "compact_particle_buffer",
+    .GLOBAL,
+    size_of(particles_render.Particle),
+    1024 * 1024,
+    {.VERTEX_BUFFER, .STORAGE_BUFFER},
+    resolve_buffer,
+  )
+  register_graph_buffer_resource(
+    self,
+    "draw_command_buffer",
+    .GLOBAL,
+    size_of(vk.DrawIndirectCommand),
+    1,
+    {.INDIRECT_BUFFER, .STORAGE_BUFFER},
+    resolve_buffer,
+  )
 
   // Register camera resources (depth and final_image) for all possible cameras
   // These use PER_CAMERA scope and are resolved via resolve_camera_texture callback
+  gbuffer_suffixes := [?]string{"normal", "albedo", "metallic_roughness", "emissive"}
+  camera_draw_techniques := [?]string{"opaque", "transparent", "wireframe", "random_color", "line_strip", "sprite"}
   for cam_idx in 0..<MAX_CAMERAS_IN_GRAPH {
-    // Register camera depth texture
-    depth_name := fmt.aprintf("camera_%d_depth", cam_idx)
-    rg.register_resource(&self.graph, rg.ResourceDescriptor{
-      name = depth_name,
-      scope = .PER_CAMERA,
-      type = .DEPTH_TEXTURE,
-      format = rg.TextureFormat{
-        width = 1920, // Placeholder, actual size determined at runtime
-        height = 1080,
-        format = .D32_SFLOAT,
-        usage = {.DEPTH_STENCIL_ATTACHMENT},
-        mip_levels = 1,
-      },
-      is_transient = false,
-      resolve = resolve_camera_texture,
-    })
+    register_graph_texture_resource(
+      self,
+      fmt.aprintf("camera_%d_depth", cam_idx),
+      .PER_CAMERA,
+      .DEPTH_TEXTURE,
+      .D32_SFLOAT,
+      {.DEPTH_STENCIL_ATTACHMENT},
+      resolve_camera_texture,
+    )
+    register_graph_texture_resource(
+      self,
+      fmt.aprintf("camera_%d_final_image", cam_idx),
+      .PER_CAMERA,
+      .TEXTURE_2D,
+      .R16G16B16A16_SFLOAT,
+      {.COLOR_ATTACHMENT, .SAMPLED},
+      resolve_camera_texture,
+    )
+    register_graph_texture_resource(
+      self,
+      fmt.aprintf("camera_%d_gbuffer_position", cam_idx),
+      .PER_CAMERA,
+      .TEXTURE_2D,
+      .R32G32B32A32_SFLOAT,
+      {.COLOR_ATTACHMENT, .SAMPLED},
+      resolve_camera_texture,
+    )
+    for suffix in gbuffer_suffixes {
+      register_graph_texture_resource(
+        self,
+        fmt.aprintf("camera_%d_gbuffer_%s", cam_idx, suffix),
+        .PER_CAMERA,
+        .TEXTURE_2D,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+        resolve_camera_texture,
+      )
+    }
 
-    // Register camera final_image texture
-    final_image_name := fmt.aprintf("camera_%d_final_image", cam_idx)
-    rg.register_resource(&self.graph, rg.ResourceDescriptor{
-      name = final_image_name,
-      scope = .PER_CAMERA,
-      type = .TEXTURE_2D,
-      format = rg.TextureFormat{
-        width = 1920, // Placeholder
-        height = 1080,
-        format = .R16G16B16A16_SFLOAT,
-        usage = {.COLOR_ATTACHMENT, .SAMPLED},
-        mip_levels = 1,
-      },
-      is_transient = false,
-      resolve = resolve_camera_texture,
-    })
+    for technique in camera_draw_techniques {
+      register_graph_buffer_resource(
+        self,
+        fmt.aprintf("camera_%d_%s_draw_commands", cam_idx, technique),
+        .PER_CAMERA,
+        size_of(vk.DrawIndexedIndirectCommand),
+        rd.MAX_NODES_IN_SCENE,
+        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+        resolve_camera_buffer,
+      )
+      register_graph_buffer_resource(
+        self,
+        fmt.aprintf("camera_%d_%s_draw_count", cam_idx, technique),
+        .PER_CAMERA,
+        size_of(u32),
+        1,
+        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+        resolve_camera_buffer,
+      )
+    }
   }
 
   log.infof("Registered %d particle resources and %d camera resources in graph",
-    2, MAX_CAMERAS_IN_GRAPH * 2)
+    2, MAX_CAMERAS_IN_GRAPH * (7 + MAX_GRAPH_CAMERA_TECHNIQUES * 2))
 }
 
-// Test function: Execute particle rendering via render graph
-test_graph_particle_render :: proc(
+// Register shadow system resources in the render graph
+register_shadow_resources :: proc(self: ^Manager) {
+  // Register shadow resources for all MAX_SHADOW_MAPS slots
+  // Dead pass elimination will remove unused slots automatically
+  for slot in 0 ..< shadow.MAX_SHADOW_MAPS {
+    register_graph_buffer_resource(
+      self,
+      fmt.aprintf("shadow_draw_commands_%d", slot),
+      .PER_LIGHT,
+      size_of(vk.DrawIndexedIndirectCommand),
+      rd.MAX_NODES_IN_SCENE,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      resolve_shadow_buffer,
+    )
+    register_graph_buffer_resource(
+      self,
+      fmt.aprintf("shadow_draw_count_%d", slot),
+      .PER_LIGHT,
+      size_of(u32),
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      resolve_shadow_buffer,
+    )
+    register_graph_texture_resource(
+      self,
+      fmt.aprintf("shadow_map_%d", slot),
+      .PER_LIGHT,
+      .DEPTH_TEXTURE,
+      .D32_SFLOAT,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      resolve_shadow_texture,
+      shadow.SHADOW_MAP_SIZE,
+      shadow.SHADOW_MAP_SIZE,
+    )
+  }
+
+  log.infof("Registered %d shadow resources in graph (3 per slot)", shadow.MAX_SHADOW_MAPS * 3)
+}
+
+// Register UI system resources in the render graph
+register_ui_resources :: proc(self: ^Manager) {
+  register_graph_buffer_resource(
+    self,
+    "ui_vertex_buffer",
+    .PER_FRAME,
+    size_of(ui_render.Vertex2D),
+    ui_render.UI_MAX_VERTICES,
+    {.VERTEX_BUFFER},
+    resolve_buffer,
+  )
+  register_graph_buffer_resource(
+    self,
+    "ui_index_buffer",
+    .PER_FRAME,
+    size_of(u32),
+    ui_render.UI_MAX_INDICES,
+    {.INDEX_BUFFER},
+    resolve_buffer,
+  )
+
+  // Note: Swapchain image is NOT registered in graph because it's owned by Engine,
+  // not Manager. It's passed directly through UIPassGraphContext.
+
+  log.info("Registered UI resources in graph (vertex buffer, index buffer)")
+}
+
+// Register post-process system resources in the render graph
+register_post_process_resources :: proc(self: ^Manager) {
+  // Note: main_camera_final_image is NOT registered as a graph resource
+  // It's accessed directly through the camera pointer in PostProcessPassGraphContext
+
+  // Register post-process ping-pong image 0 (GLOBAL scope)
+  rg.register_resource(&self.graph, rg.ResourceDescriptor{
+    name = "post_process_image_0",
+    scope = .GLOBAL,
+    type = .TEXTURE_2D,
+    format = rg.TextureFormat{
+      width = 1920, // Set during post_process.setup()
+      height = 1080,
+      format = .R8G8B8A8_UNORM, // Matches swapchain format
+      usage = {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      mip_levels = 1,
+    },
+    is_transient = false,
+    resolve = proc(exec_ctx: ^rg.GraphExecutionContext, name: string, frame_index: u32) -> (rg.ResourceHandle, bool) {
+      manager := cast(^Manager)exec_ctx.render_manager
+      texture := gpu.get_texture_2d(&manager.texture_manager, manager.post_process.images[0])
+      if texture == nil do return {}, false
+      return rg.TextureHandle{
+        image = texture.image,
+        view = texture.view,
+        extent = texture.spec.extent,
+        format = texture.spec.format,
+      }, true
+    },
+  })
+
+  // Register post-process ping-pong image 1 (GLOBAL scope)
+  rg.register_resource(&self.graph, rg.ResourceDescriptor{
+    name = "post_process_image_1",
+    scope = .GLOBAL,
+    type = .TEXTURE_2D,
+    format = rg.TextureFormat{
+      width = 1920,
+      height = 1080,
+      format = .R8G8B8A8_UNORM,
+      usage = {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      mip_levels = 1,
+    },
+    is_transient = false,
+    resolve = proc(exec_ctx: ^rg.GraphExecutionContext, name: string, frame_index: u32) -> (rg.ResourceHandle, bool) {
+      manager := cast(^Manager)exec_ctx.render_manager
+      texture := gpu.get_texture_2d(&manager.texture_manager, manager.post_process.images[1])
+      if texture == nil do return {}, false
+      return rg.TextureHandle{
+        image = texture.image,
+        view = texture.view,
+        extent = texture.spec.extent,
+        format = texture.spec.format,
+      }, true
+    },
+  })
+
+  log.info("Registered post-process resources in graph (2 ping-pong images)")
+}
+
+execute_registered_graph_templates :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  active_cameras: []u32,
+  active_lights: []u32,
+) -> vk.Result {
+  defer rg.reset(&self.graph)
+
+  if err := rg.instantiate_passes(&self.graph, active_cameras, active_lights); err != .SUCCESS {
+    log.errorf("Failed to instantiate graph passes: %v", err)
+    return .ERROR_UNKNOWN
+  }
+
+  if err := rg.compile(&self.graph); err != .SUCCESS {
+    log.errorf("Failed to compile graph: %v", err)
+    return .ERROR_UNKNOWN
+  }
+
+  exec_ctx := rg.GraphExecutionContext{
+    texture_manager = &self.texture_manager,
+    render_manager = self,
+  }
+
+  cmd := self.command_buffers[frame_index]
+  if err := rg.execute(&self.graph, cmd, frame_index, &exec_ctx); err != .SUCCESS {
+    log.errorf("Failed to execute graph: %v", err)
+    return .ERROR_UNKNOWN
+  }
+
+  return .SUCCESS
+}
+
+// Execute particle rendering via render graph
+render_particles_graph_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   active_cameras: []u32,
@@ -1778,34 +2031,309 @@ test_graph_particle_render :: proc(
     user_data = &particle_ctx,
   })
 
-  // Instantiate passes for active cameras
-  if err := rg.instantiate_passes(&self.graph, active_cameras, {}); err != .SUCCESS {
-    log.errorf("Failed to instantiate passes: %v", err)
-    return .ERROR_UNKNOWN
-  }
+  execute_registered_graph_templates(self, frame_index, active_cameras, {}) or_return
 
-  // Compile graph (build execution order + compute barriers)
-  if err := rg.compile(&self.graph); err != .SUCCESS {
-    log.errorf("Failed to compile graph: %v", err)
-    return .ERROR_UNKNOWN
-  }
+  log.infof("Successfully executed particles render pass via graph (%d cameras)", len(active_cameras))
+  return .SUCCESS
+}
 
-  // Create execution context
-  exec_ctx := rg.GraphExecutionContext{
+// Execute UI rendering via render graph
+render_ui_graph_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  gctx: ^gpu.GPUContext,
+  swapchain_view: vk.ImageView,
+  swapchain_extent: vk.Extent2D,
+) -> vk.Result {
+  // Create pass context for UI render
+  ui_ctx := ui_render.UIPassGraphContext{
+    renderer = &self.ui,
     texture_manager = &self.texture_manager,
-    render_manager = self,
+    gctx = gctx,
+    commands = self.ui_commands[:],
+    swapchain_view = swapchain_view,
+    swapchain_extent = swapchain_extent,
   }
 
-  // Execute graph
-  cmd := self.command_buffers[frame_index]
-  if err := rg.execute(&self.graph, cmd, frame_index, &exec_ctx); err != .SUCCESS {
-    log.errorf("Failed to execute graph: %v", err)
+  // Register UI pass template (GLOBAL scope - runs once per frame)
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "ui_pass",
+    scope = .GLOBAL,
+    queue = .GRAPHICS,
+    setup = ui_render.ui_pass_setup,
+    execute = ui_render.ui_pass_execute,
+    user_data = &ui_ctx,
+  })
+
+  execute_registered_graph_templates(self, frame_index, {}, {}) or_return
+
+  log.info("Successfully executed UI pass via graph")
+  return .SUCCESS
+}
+
+// Execute post-process effects via render graph
+render_post_process_graph_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  main_camera: ^camera.Camera,
+  swapchain_extent: vk.Extent2D,
+  swapchain_view: vk.ImageView,
+) -> vk.Result {
+  // Note: Always register pass even if effect_stack is empty
+  // begin_pass() will add a nil effect to copy input to output
+
+  // Create pass context
+  pp_ctx := post_process.PostProcessPassGraphContext{
+    renderer = &self.post_process,
+    texture_manager = &self.texture_manager,
+    main_camera = main_camera,
+    swapchain_view = swapchain_view,
+    swapchain_extent = swapchain_extent,
+    frame_index = frame_index,
+  }
+
+  // Register post-process pass template (GLOBAL scope)
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "post_process_pass",
+    scope = .GLOBAL,
+    queue = .GRAPHICS,
+    setup = post_process.post_process_pass_setup,
+    execute = post_process.post_process_pass_execute,
+    user_data = &pp_ctx,
+  })
+
+  execute_registered_graph_templates(self, frame_index, {}, {}) or_return
+
+  log.infof("Successfully executed post-process pass via graph (%d effects)", len(self.post_process.effect_stack))
+  return .SUCCESS
+}
+
+// Execute depth prepass via render graph
+render_depth_graph_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  active_cameras: []u32,
+) -> vk.Result {
+  // Create pass context for depth prepass
+  depth_ctx := occlusion_culling.DepthPassGraphContext{
+    system = &self.visibility,
+    texture_manager = &self.texture_manager,
+    include_flags = {.VISIBLE},
+    exclude_flags = {
+      .MATERIAL_TRANSPARENT,
+      .MATERIAL_WIREFRAME,
+      .MATERIAL_RANDOM_COLOR,
+      .MATERIAL_LINE_STRIP,
+    },
+    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
+    bone_descriptor_set = self.bone_buffer.descriptor_sets[frame_index],
+    node_data_descriptor_set = self.node_data_buffer.descriptor_set,
+    mesh_data_descriptor_set = self.mesh_data_buffer.descriptor_set,
+    vertex_skinning_descriptor_set = self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
+    index_buffer = self.mesh_manager.index_buffer.buffer,
+  }
+
+  // Register depth prepass template (PER_CAMERA scope)
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "depth_prepass",
+    scope = .PER_CAMERA,
+    queue = .GRAPHICS,
+    setup = occlusion_culling.depth_pass_setup,
+    execute = occlusion_culling.depth_pass_execute,
+    user_data = &depth_ctx,
+  })
+
+  execute_registered_graph_templates(self, frame_index, active_cameras, {}) or_return
+
+  log.infof("Successfully executed depth prepass via graph (%d cameras)", len(active_cameras))
+  return .SUCCESS
+}
+
+// Execute geometry pass via render graph
+render_geometry_graph_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  active_cameras: []u32,
+) -> vk.Result {
+  // Create pass context for geometry pass
+  geometry_ctx := geometry.GeometryPassGraphContext{
+    renderer = &self.geometry,
+    texture_manager = &self.texture_manager,
+    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
+    textures_descriptor_set = self.texture_manager.descriptor_set,
+    bone_descriptor_set = self.bone_buffer.descriptor_sets[frame_index],
+    material_descriptor_set = self.material_buffer.descriptor_set,
+    node_data_descriptor_set = self.node_data_buffer.descriptor_set,
+    mesh_data_descriptor_set = self.mesh_data_buffer.descriptor_set,
+    vertex_skinning_descriptor_set = self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
+    index_buffer = self.mesh_manager.index_buffer.buffer,
+  }
+
+  // Register geometry pass template (PER_CAMERA scope)
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "geometry_pass",
+    scope = .PER_CAMERA,
+    queue = .GRAPHICS,
+    setup = geometry.geometry_pass_setup,
+    execute = geometry.geometry_pass_execute,
+    user_data = &geometry_ctx,
+  })
+
+  execute_registered_graph_templates(self, frame_index, active_cameras, {}) or_return
+
+  log.infof("Successfully executed geometry pass via graph (%d cameras)", len(active_cameras))
+  return .SUCCESS
+}
+
+// Execute shadow compute pass via render graph
+render_shadow_compute_graph_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  active_lights: []rd.LightHandle,
+) -> vk.Result {
+  // Sync lights first (updates shadow slots based on active lights)
+  shadow.sync_lights(
+    &self.shadow,
+    &self.lights_buffer,
+    active_lights,
+    frame_index,
+  )
+
+  // Collect active shadow slots
+  active_light_slots := make([dynamic]u32, context.temp_allocator)
+  for slot in 0 ..< shadow.MAX_SHADOW_MAPS {
+    if self.shadow.slot_active[slot] {
+      append(&active_light_slots, u32(slot))
+    }
+  }
+
+  if len(active_light_slots) == 0 {
+    return .SUCCESS
+  }
+
+  // Create pass context for shadow compute pass
+  shadow_compute_ctx := shadow.ShadowComputeGraphContext{
+    renderer = &self.shadow,
+  }
+
+  // Register shadow compute pass template (PER_LIGHT scope)
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "shadow_compute",
+    scope = .PER_LIGHT,
+    queue = .COMPUTE,
+    setup = shadow.shadow_compute_setup,
+    execute = shadow.shadow_compute_execute,
+    user_data = &shadow_compute_ctx,
+  })
+
+  execute_registered_graph_templates(self, frame_index, {}, active_light_slots[:]) or_return
+
+  log.infof("Successfully executed shadow compute pass via graph (%d lights)", len(active_light_slots))
+  return .SUCCESS
+}
+
+// Execute shadow depth pass via render graph
+render_shadow_depth_graph_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+) -> vk.Result {
+  // Collect active shadow slots
+  active_light_slots := make([dynamic]u32, context.temp_allocator)
+  for slot in 0 ..< shadow.MAX_SHADOW_MAPS {
+    if self.shadow.slot_active[slot] {
+      append(&active_light_slots, u32(slot))
+    }
+  }
+
+  if len(active_light_slots) == 0 {
+    return .SUCCESS
+  }
+
+  // Create pass context for shadow depth pass
+  shadow_depth_ctx := shadow.ShadowDepthGraphContext{
+    renderer = &self.shadow,
+    texture_manager = &self.texture_manager,
+    textures_descriptor_set = self.texture_manager.descriptor_set,
+    bone_descriptor_set = self.bone_buffer.descriptor_sets[frame_index],
+    material_descriptor_set = self.material_buffer.descriptor_set,
+    node_data_descriptor_set = self.node_data_buffer.descriptor_set,
+    mesh_data_descriptor_set = self.mesh_data_buffer.descriptor_set,
+    vertex_skinning_descriptor_set = self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
+    index_buffer = self.mesh_manager.index_buffer.buffer,
+  }
+
+  // Register shadow depth pass template (PER_LIGHT scope)
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "shadow_depth",
+    scope = .PER_LIGHT,
+    queue = .GRAPHICS,
+    setup = shadow.shadow_depth_setup,
+    execute = shadow.shadow_depth_execute,
+    user_data = &shadow_depth_ctx,
+  })
+
+  execute_registered_graph_templates(self, frame_index, {}, active_light_slots[:]) or_return
+
+  log.infof("Successfully executed shadow depth pass via graph (%d lights)", len(active_light_slots))
+  return .SUCCESS
+}
+
+// ============================================================================
+// Transparency rendering pass (graph-based)
+// ============================================================================
+
+render_transparency_rendering_graph_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  cam_index: u32,
+) -> vk.Result {
+  cam, cam_ok := self.cameras[cam_index]
+  if !cam_ok {
+    log.errorf("Camera %d not found", cam_index)
     return .ERROR_UNKNOWN
   }
 
-  // Reset graph for next frame
-  rg.reset(&self.graph)
+  // Create pass context for transparency rendering pass (all 5 techniques)
+  transparency_ctx := transparent.TransparencyRenderingPassGraphContext{
+    // All 5 renderers
+    transparent_renderer = &self.transparent_renderer,
+    wireframe_renderer = &self.wireframe_renderer,
+    random_color_renderer = &self.random_color_renderer,
+    line_strip_renderer = &self.line_strip_renderer,
+    sprite_renderer = &self.sprite_renderer,
 
-  log.infof("Successfully executed particle render pass via graph")
+    // Shared resources
+    texture_manager = &self.texture_manager,
+    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
+    textures_descriptor_set = self.texture_manager.descriptor_set,
+    bone_descriptor_set = self.bone_buffer.descriptor_sets[frame_index],
+    material_descriptor_set = self.material_buffer.descriptor_set,
+    node_data_descriptor_set = self.node_data_buffer.descriptor_set,
+    mesh_data_descriptor_set = self.mesh_data_buffer.descriptor_set,
+    vertex_skinning_descriptor_set = self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    sprite_descriptor_set = self.sprite_buffer.descriptor_set,
+    vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
+    index_buffer = self.mesh_manager.index_buffer.buffer,
+    camera = &cam,
+    camera_index = cam_index,
+  }
+
+  // Register transparency rendering pass template (PER_CAMERA scope)
+  // This single pass renders all 5 techniques (transparent, wireframe, random_color, line_strip, sprite)
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "transparency_rendering_pass",
+    scope = .PER_CAMERA,
+    queue = .GRAPHICS,
+    setup = transparent.transparency_rendering_pass_setup,
+    execute = transparent.transparency_rendering_pass_execute,
+    user_data = &transparency_ctx,
+  })
+
+  execute_registered_graph_templates(self, frame_index, {cam_index}, {}) or_return
+
+  log.debugf("Successfully executed transparency rendering pass via graph (all 5 techniques, camera %d)", cam_index)
   return .SUCCESS
 }

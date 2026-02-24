@@ -46,21 +46,34 @@ compute_barriers :: proc(g: ^Graph) -> Result {
 					append(&barriers, barrier)
 				}
 			} else {
-				// First access - initialize from UNDEFINED if it's an image
+				// First access within the graph
 				desc, ok := get_resource_descriptor(g, input_res)
 				if ok && (desc.type == .TEXTURE_2D || desc.type == .DEPTH_TEXTURE) {
-					initial_access := ResourceAccess{
-						access = {},
-						stage = {.TOP_OF_PIPE},
-						layout = .UNDEFINED,
+					// For imported resources (is_transient = false), assume they're
+					// already in the correct layout from previous passes outside the graph
+					// For transient resources, transition from UNDEFINED
+					initial_access: ResourceAccess
+					if desc.is_transient {
+						// Transient resource - transition from UNDEFINED
+						initial_access = ResourceAccess{
+							access = {},
+							stage = {.TOP_OF_PIPE},
+							layout = .UNDEFINED,
+						}
+					} else {
+						// Imported resource - assume already in expected layout
+						// Infer what layout it should be in based on its usage
+						initial_access = infer_imported_resource_layout(desc)
 					}
-					barrier := compute_barrier(
-						g,
-						input_res,
-						initial_access,
-						infer_read_access(g, pass, input_res),
-					)
-					append(&barriers, barrier)
+
+					target_access := infer_read_access(g, pass, input_res)
+
+					// Only insert barrier if layout/access actually changes
+					if initial_access.layout != target_access.layout ||
+					   initial_access.access != target_access.access {
+						barrier := compute_barrier(g, input_res, initial_access, target_access)
+						append(&barriers, barrier)
+					}
 				}
 			}
 		}
@@ -186,6 +199,50 @@ infer_write_access :: proc(g: ^Graph, pass: ^PassInstance, res: ResourceId) -> R
 			access.access = {.DEPTH_STENCIL_ATTACHMENT_WRITE}
 			access.layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
 		}
+	}
+
+	return access
+}
+
+// Infer the initial layout/access of an imported resource
+// Imported resources are created outside the graph (e.g., by depth prepass, geometry pass)
+// We assume they're already in their expected usage layout
+infer_imported_resource_layout :: proc(desc: ResourceDescriptor) -> ResourceAccess {
+	access := ResourceAccess{}
+
+	switch desc.type {
+	case .DEPTH_TEXTURE:
+		// Depth textures are typically left in DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+		// after depth prepass/geometry pass
+		access.stage = {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS}
+		access.access = {.DEPTH_STENCIL_ATTACHMENT_WRITE}
+		access.layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+
+	case .TEXTURE_2D, .TEXTURE_CUBE:
+		// Check usage flags to determine expected layout
+		tex_format, is_tex := desc.format.(TextureFormat)
+		if is_tex {
+			if .COLOR_ATTACHMENT in tex_format.usage {
+				// Color attachment - assume COLOR_ATTACHMENT_OPTIMAL
+				access.stage = {.COLOR_ATTACHMENT_OUTPUT}
+				access.access = {.COLOR_ATTACHMENT_WRITE}
+				access.layout = .COLOR_ATTACHMENT_OPTIMAL
+			} else if .SAMPLED in tex_format.usage {
+				// Sampled texture - assume SHADER_READ_ONLY_OPTIMAL
+				access.stage = {.FRAGMENT_SHADER}
+				access.access = {.SHADER_READ}
+				access.layout = .SHADER_READ_ONLY_OPTIMAL
+			} else {
+				// Default to GENERAL for other cases
+				access.stage = {.FRAGMENT_SHADER}
+				access.access = {.SHADER_READ}
+				access.layout = .GENERAL
+			}
+		}
+
+	case .BUFFER:
+		// Buffers don't have layouts
+		access.layout = .UNDEFINED
 	}
 
 	return access

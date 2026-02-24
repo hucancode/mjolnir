@@ -3,6 +3,8 @@ package shadow
 import "../../geometry"
 import "../../gpu"
 import d "../data"
+import rg "../graph"
+import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import vk "vendor:vulkan"
@@ -1124,4 +1126,410 @@ get_texture_index :: proc(
     return self.point_lights[shadow_index].shadow_cube[frame_index].index
   }
   return INVALID_SHADOW_INDEX
+}
+
+// ============================================================================
+// Graph-based API
+// ============================================================================
+
+ShadowComputeGraphContext :: struct {
+  renderer: ^ShadowSystem,
+}
+
+ShadowDepthGraphContext :: struct {
+  renderer:                      ^ShadowSystem,
+  texture_manager:               ^gpu.TextureManager,
+  textures_descriptor_set:       vk.DescriptorSet,
+  bone_descriptor_set:           vk.DescriptorSet,
+  material_descriptor_set:       vk.DescriptorSet,
+  node_data_descriptor_set:      vk.DescriptorSet,
+  mesh_data_descriptor_set:      vk.DescriptorSet,
+  vertex_skinning_descriptor_set: vk.DescriptorSet,
+  vertex_buffer:                 vk.Buffer,
+  index_buffer:                  vk.Buffer,
+}
+
+// Setup phase: declare dependencies for shadow_compute pass (PER_LIGHT)
+shadow_compute_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
+  light_slot := builder.scope_index
+
+  // Write draw commands and draw count for this light
+  rg.builder_write(
+    builder,
+    fmt.tprintf("shadow_draw_commands_%d", light_slot),
+  )
+  rg.builder_write(builder, fmt.tprintf("shadow_draw_count_%d", light_slot))
+}
+
+// Execute phase: compute shadow draw lists for this light (PER_LIGHT)
+shadow_compute_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
+  ctx := cast(^ShadowComputeGraphContext)user_data
+  self := ctx.renderer
+  light_slot := pass_ctx.scope_index
+
+  if !self.slot_active[light_slot] {
+    return
+  }
+
+  include_flags: d.NodeFlagSet = {.VISIBLE}
+  exclude_flags: d.NodeFlagSet =
+    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP}
+
+  kind := self.slot_kind[light_slot]
+  switch kind {
+  case .SPOT:
+    spot := &self.spot_lights[light_slot]
+    vk.CmdFillBuffer(
+      pass_ctx.cmd,
+      spot.draw_count[pass_ctx.frame_index].buffer,
+      0,
+      vk.DeviceSize(spot.draw_count[pass_ctx.frame_index].bytes_count),
+      0,
+    )
+    // Intra-pass barrier (FillBuffer -> Compute)
+    gpu.buffer_barrier(
+      pass_ctx.cmd,
+      spot.draw_count[pass_ctx.frame_index].buffer,
+      vk.DeviceSize(spot.draw_count[pass_ctx.frame_index].bytes_count),
+      {.TRANSFER_WRITE},
+      {.SHADER_READ, .SHADER_WRITE},
+      {.TRANSFER},
+      {.COMPUTE_SHADER},
+    )
+    gpu.bind_compute_pipeline(
+      pass_ctx.cmd,
+      self.shadow_cull_pipeline,
+      self.shadow_cull_layout,
+      spot.descriptor_sets[pass_ctx.frame_index],
+    )
+    push := VisibilityPushConstants {
+      camera_index  = u32(light_slot),
+      node_count    = self.node_count,
+      max_draws     = self.max_draws,
+      include_flags = include_flags,
+      exclude_flags = exclude_flags,
+    }
+    vk.CmdPushConstants(
+      pass_ctx.cmd,
+      self.shadow_cull_layout,
+      {.COMPUTE},
+      0,
+      size_of(push),
+      &push,
+    )
+    dispatch_x := (self.node_count + 63) / 64
+    vk.CmdDispatch(pass_ctx.cmd, dispatch_x, 1, 1)
+
+  case .DIRECTIONAL:
+    directional := &self.directional_lights[light_slot]
+    vk.CmdFillBuffer(
+      pass_ctx.cmd,
+      directional.draw_count[pass_ctx.frame_index].buffer,
+      0,
+      vk.DeviceSize(directional.draw_count[pass_ctx.frame_index].bytes_count),
+      0,
+    )
+    // Intra-pass barrier (FillBuffer -> Compute)
+    gpu.buffer_barrier(
+      pass_ctx.cmd,
+      directional.draw_count[pass_ctx.frame_index].buffer,
+      vk.DeviceSize(directional.draw_count[pass_ctx.frame_index].bytes_count),
+      {.TRANSFER_WRITE},
+      {.SHADER_READ, .SHADER_WRITE},
+      {.TRANSFER},
+      {.COMPUTE_SHADER},
+    )
+    gpu.bind_compute_pipeline(
+      pass_ctx.cmd,
+      self.shadow_cull_pipeline,
+      self.shadow_cull_layout,
+      directional.descriptor_sets[pass_ctx.frame_index],
+    )
+    push := VisibilityPushConstants {
+      camera_index  = u32(light_slot),
+      node_count    = self.node_count,
+      max_draws     = self.max_draws,
+      include_flags = include_flags,
+      exclude_flags = exclude_flags,
+    }
+    vk.CmdPushConstants(
+      pass_ctx.cmd,
+      self.shadow_cull_layout,
+      {.COMPUTE},
+      0,
+      size_of(push),
+      &push,
+    )
+    dispatch_x := (self.node_count + 63) / 64
+    vk.CmdDispatch(pass_ctx.cmd, dispatch_x, 1, 1)
+
+  case .POINT:
+    point := &self.point_lights[light_slot]
+    vk.CmdFillBuffer(
+      pass_ctx.cmd,
+      point.draw_count[pass_ctx.frame_index].buffer,
+      0,
+      vk.DeviceSize(point.draw_count[pass_ctx.frame_index].bytes_count),
+      0,
+    )
+    // Intra-pass barrier (FillBuffer -> Compute)
+    gpu.buffer_barrier(
+      pass_ctx.cmd,
+      point.draw_count[pass_ctx.frame_index].buffer,
+      vk.DeviceSize(point.draw_count[pass_ctx.frame_index].bytes_count),
+      {.TRANSFER_WRITE},
+      {.SHADER_READ, .SHADER_WRITE},
+      {.TRANSFER},
+      {.COMPUTE_SHADER},
+    )
+    gpu.bind_compute_pipeline(
+      pass_ctx.cmd,
+      self.sphere_cull_pipeline,
+      self.sphere_cull_layout,
+      point.descriptor_sets[pass_ctx.frame_index],
+    )
+    push := SphereVisibilityPushConstants {
+      camera_index  = u32(light_slot),
+      node_count    = self.node_count,
+      max_draws     = self.max_draws,
+      include_flags = include_flags,
+      exclude_flags = exclude_flags,
+    }
+    vk.CmdPushConstants(
+      pass_ctx.cmd,
+      self.sphere_cull_layout,
+      {.COMPUTE},
+      0,
+      size_of(push),
+      &push,
+    )
+    dispatch_x := (self.node_count + 63) / 64
+    vk.CmdDispatch(pass_ctx.cmd, dispatch_x, 1, 1)
+  }
+}
+
+// Setup phase: declare dependencies for shadow_depth pass (PER_LIGHT)
+shadow_depth_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
+  light_slot := builder.scope_index
+
+  // Read draw commands and count (written by shadow_compute)
+  rg.builder_read(
+    builder,
+    fmt.tprintf("shadow_draw_commands_%d", light_slot),
+  )
+  rg.builder_read(builder, fmt.tprintf("shadow_draw_count_%d", light_slot))
+
+  // Write shadow map
+  rg.builder_write(builder, fmt.tprintf("shadow_map_%d", light_slot))
+}
+
+// Execute phase: render shadow depth map for this light (PER_LIGHT)
+shadow_depth_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
+  ctx := cast(^ShadowDepthGraphContext)user_data
+  self := ctx.renderer
+  light_slot := pass_ctx.scope_index
+
+  if !self.slot_active[light_slot] {
+    return
+  }
+
+  // Resolve shadow map resource
+  shadow_map_name := fmt.tprintf("shadow_map_%d", light_slot)
+  shadow_map_id, ok := pass_ctx.graph.resource_ids[shadow_map_name]
+  if !ok do return
+
+  draw_commands_name := fmt.tprintf("shadow_draw_commands_%d", light_slot)
+  draw_commands_id, ok2 := pass_ctx.graph.resource_ids[draw_commands_name]
+  if !ok2 do return
+
+  draw_count_name := fmt.tprintf("shadow_draw_count_%d", light_slot)
+  draw_count_id, ok3 := pass_ctx.graph.resource_ids[draw_count_name]
+  if !ok3 do return
+
+  // Note: Shadow map resolution happens inside each light type case below
+  // to handle different texture types (2D vs Cube)
+
+  switch self.slot_kind[light_slot] {
+  case .SPOT:
+    spot := &self.spot_lights[light_slot]
+    depth_texture := gpu.get_texture_2d(
+      ctx.texture_manager,
+      spot.shadow_map[pass_ctx.frame_index],
+    )
+    if depth_texture == nil do return
+
+    // Graph handles UNDEFINED -> DEPTH_ATTACHMENT transition automatically
+    depth_attachment := gpu.create_depth_attachment(
+      depth_texture,
+      .CLEAR,
+      .STORE,
+    )
+    gpu.begin_depth_rendering(
+      pass_ctx.cmd,
+      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+      &depth_attachment,
+    )
+    gpu.set_viewport_scissor(
+      pass_ctx.cmd,
+      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+    )
+    gpu.bind_graphics_pipeline(
+      pass_ctx.cmd,
+      self.depth_pipeline,
+      self.depth_pipeline_layout,
+      self.shadow_data_buffer.descriptor_sets[pass_ctx.frame_index],
+      ctx.textures_descriptor_set,
+      ctx.bone_descriptor_set,
+      ctx.material_descriptor_set,
+      ctx.node_data_descriptor_set,
+      ctx.mesh_data_descriptor_set,
+      ctx.vertex_skinning_descriptor_set,
+    )
+    slot_idx := u32(light_slot)
+    vk.CmdPushConstants(
+      pass_ctx.cmd,
+      self.depth_pipeline_layout,
+      {.VERTEX, .FRAGMENT},
+      0,
+      size_of(u32),
+      &slot_idx,
+    )
+    gpu.bind_vertex_index_buffers(
+      pass_ctx.cmd,
+      ctx.vertex_buffer,
+      ctx.index_buffer,
+    )
+    vk.CmdDrawIndexedIndirectCount(
+      pass_ctx.cmd,
+      spot.draw_commands[pass_ctx.frame_index].buffer,
+      0,
+      spot.draw_count[pass_ctx.frame_index].buffer,
+      0,
+      self.max_draws,
+      u32(size_of(vk.DrawIndexedIndirectCommand)),
+    )
+    vk.CmdEndRendering(pass_ctx.cmd)
+    // Graph handles DEPTH_ATTACHMENT -> SHADER_READ transition automatically
+
+  case .DIRECTIONAL:
+    directional := &self.directional_lights[light_slot]
+    depth_texture := gpu.get_texture_2d(
+      ctx.texture_manager,
+      directional.shadow_map[pass_ctx.frame_index],
+    )
+    if depth_texture == nil do return
+
+    depth_attachment := gpu.create_depth_attachment(
+      depth_texture,
+      .CLEAR,
+      .STORE,
+    )
+    gpu.begin_depth_rendering(
+      pass_ctx.cmd,
+      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+      &depth_attachment,
+    )
+    gpu.set_viewport_scissor(
+      pass_ctx.cmd,
+      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+    )
+    gpu.bind_graphics_pipeline(
+      pass_ctx.cmd,
+      self.depth_pipeline,
+      self.depth_pipeline_layout,
+      self.shadow_data_buffer.descriptor_sets[pass_ctx.frame_index],
+      ctx.textures_descriptor_set,
+      ctx.bone_descriptor_set,
+      ctx.material_descriptor_set,
+      ctx.node_data_descriptor_set,
+      ctx.mesh_data_descriptor_set,
+      ctx.vertex_skinning_descriptor_set,
+    )
+    slot_idx := u32(light_slot)
+    vk.CmdPushConstants(
+      pass_ctx.cmd,
+      self.depth_pipeline_layout,
+      {.VERTEX, .FRAGMENT},
+      0,
+      size_of(u32),
+      &slot_idx,
+    )
+    gpu.bind_vertex_index_buffers(
+      pass_ctx.cmd,
+      ctx.vertex_buffer,
+      ctx.index_buffer,
+    )
+    vk.CmdDrawIndexedIndirectCount(
+      pass_ctx.cmd,
+      directional.draw_commands[pass_ctx.frame_index].buffer,
+      0,
+      directional.draw_count[pass_ctx.frame_index].buffer,
+      0,
+      self.max_draws,
+      u32(size_of(vk.DrawIndexedIndirectCommand)),
+    )
+    vk.CmdEndRendering(pass_ctx.cmd)
+
+  case .POINT:
+    point := &self.point_lights[light_slot]
+    depth_cube := gpu.get_texture_cube(
+      ctx.texture_manager,
+      point.shadow_cube[pass_ctx.frame_index],
+    )
+    if depth_cube == nil do return
+
+    depth_attachment := gpu.create_cube_depth_attachment(
+      depth_cube,
+      .CLEAR,
+      .STORE,
+    )
+    gpu.begin_depth_rendering(
+      pass_ctx.cmd,
+      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+      &depth_attachment,
+      layer_count = 6,
+    )
+    gpu.set_viewport_scissor(
+      pass_ctx.cmd,
+      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+      flip_x = true,
+      flip_y = false,
+    )
+    gpu.bind_graphics_pipeline(
+      pass_ctx.cmd,
+      self.sphere_depth_pipeline,
+      self.sphere_depth_pipeline_layout,
+      self.shadow_data_buffer.descriptor_sets[pass_ctx.frame_index],
+      ctx.textures_descriptor_set,
+      ctx.bone_descriptor_set,
+      ctx.material_descriptor_set,
+      ctx.node_data_descriptor_set,
+      ctx.mesh_data_descriptor_set,
+      ctx.vertex_skinning_descriptor_set,
+    )
+    slot_idx := u32(light_slot)
+    vk.CmdPushConstants(
+      pass_ctx.cmd,
+      self.sphere_depth_pipeline_layout,
+      {.VERTEX, .GEOMETRY, .FRAGMENT},
+      0,
+      size_of(u32),
+      &slot_idx,
+    )
+    gpu.bind_vertex_index_buffers(
+      pass_ctx.cmd,
+      ctx.vertex_buffer,
+      ctx.index_buffer,
+    )
+    vk.CmdDrawIndexedIndirectCount(
+      pass_ctx.cmd,
+      point.draw_commands[pass_ctx.frame_index].buffer,
+      0,
+      point.draw_count[pass_ctx.frame_index].buffer,
+      0,
+      self.max_draws,
+      u32(size_of(vk.DrawIndexedIndirectCommand)),
+    )
+    vk.CmdEndRendering(pass_ctx.cmd)
+  }
 }

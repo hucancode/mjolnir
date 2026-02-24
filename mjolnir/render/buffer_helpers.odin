@@ -99,6 +99,23 @@ resolve_buffer :: proc(
 			size = vk.DeviceSize(mgr.particle_resources.draw_command_buffer.bytes_count),
 			descriptor_set = {},
 		}, true
+
+	// UI buffers (per-frame)
+	case "ui_vertex_buffer":
+		buf := &mgr.ui.vertex_buffers[frame_index]
+		return rg.BufferHandle{
+			buffer = buf.buffer,
+			size = vk.DeviceSize(buf.bytes_count),
+			descriptor_set = {},
+		}, true
+
+	case "ui_index_buffer":
+		buf := &mgr.ui.index_buffers[frame_index]
+		return rg.BufferHandle{
+			buffer = buf.buffer,
+			size = vk.DeviceSize(buf.bytes_count),
+			descriptor_set = {},
+		}, true
 	}
 
 	return {}, false

@@ -4,6 +4,8 @@ import "../../gpu"
 import "../camera"
 import d "../data"
 import "../shared"
+import rg "../graph"
+import "core:fmt"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -235,4 +237,110 @@ render :: proc(
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
+}
+
+// ============================================================================
+// Graph-based API for render graph integration
+// ============================================================================
+
+AmbientPassGraphContext :: struct {
+  renderer:                ^Renderer,
+  texture_manager:         ^gpu.TextureManager,
+  cameras_descriptor_set:  vk.DescriptorSet,
+  camera:                  ^camera.Camera,
+  camera_index:            u32,
+}
+
+ambient_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
+  cam_index := builder.scope_index
+
+  // Read G-buffer attachments (written by geometry pass)
+  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_position", cam_index))
+  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_normal", cam_index))
+  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_albedo", cam_index))
+  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_metallic_roughness", cam_index))
+  rg.builder_read(builder, fmt.tprintf("camera_%d_gbuffer_emissive", cam_index))
+
+  // Write final_image (first pass to render to this target)
+  rg.builder_write(builder, fmt.tprintf("camera_%d_final_image", cam_index))
+}
+
+ambient_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
+  ctx := cast(^AmbientPassGraphContext)user_data
+  self := ctx.renderer
+
+  // Resolve final_image resource ID
+  final_image_name := fmt.tprintf("camera_%d_final_image", ctx.camera_index)
+  final_image_id, id_ok := pass_ctx.graph.resource_ids[final_image_name]
+  if !id_ok do return
+
+  // Resolve final_image handle
+  final_image_handle, handle_ok := rg.resolve(
+    rg.TextureHandle,
+    pass_ctx,
+    pass_ctx.exec_ctx,
+    final_image_id,
+  )
+  if !handle_ok do return
+
+  // Create color attachment info manually
+  color_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
+    imageView = final_image_handle.view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,  // Clear since this is the first pass to render to final_image
+    storeOp = .STORE,
+    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 0.0}}},
+  }
+
+  // Begin rendering to final_image
+  rendering_info := vk.RenderingInfo{
+    sType = .RENDERING_INFO,
+    renderArea = {extent = final_image_handle.extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &color_attachment,
+  }
+
+  vk.CmdBeginRendering(pass_ctx.cmd, &rendering_info)
+
+  gpu.set_viewport_scissor(
+    pass_ctx.cmd,
+    final_image_handle.extent,
+    flip_y = false,
+  )
+
+  gpu.bind_graphics_pipeline(
+    pass_ctx.cmd,
+    self.pipeline,
+    self.pipeline_layout,
+    ctx.cameras_descriptor_set,
+    ctx.texture_manager.descriptor_set,
+  )
+
+  // Build push constants using camera attachment texture indices
+  push := PushConstant {
+    camera_index           = ctx.camera_index,
+    environment_index      = self.environment_map.index,
+    brdf_lut_index         = self.brdf_lut.index,
+    position_texture_index = ctx.camera.attachments[.POSITION][pass_ctx.frame_index].index,
+    normal_texture_index   = ctx.camera.attachments[.NORMAL][pass_ctx.frame_index].index,
+    albedo_texture_index   = ctx.camera.attachments[.ALBEDO][pass_ctx.frame_index].index,
+    metallic_texture_index = ctx.camera.attachments[.METALLIC_ROUGHNESS][pass_ctx.frame_index].index,
+    emissive_texture_index = ctx.camera.attachments[.EMISSIVE][pass_ctx.frame_index].index,
+    environment_max_lod    = self.environment_max_lod,
+    ibl_intensity          = self.ibl_intensity,
+  }
+
+  vk.CmdPushConstants(
+    pass_ctx.cmd,
+    self.pipeline_layout,
+    {.FRAGMENT},
+    0,
+    size_of(PushConstant),
+    &push,
+  )
+
+  vk.CmdDraw(pass_ctx.cmd, 3, 1, 0, 0) // fullscreen triangle
+  vk.CmdEndRendering(pass_ctx.cmd)
 }
