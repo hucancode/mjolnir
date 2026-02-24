@@ -33,29 +33,15 @@ execute :: proc(g: ^Graph, cmd: vk.CommandBuffer, frame_index: u32, exec_ctx: ^G
 
 // Emit Vulkan barrier
 emit_barrier :: proc(g: ^Graph, cmd: vk.CommandBuffer, barrier: Barrier, frame_index: u32, exec_ctx: ^GraphExecutionContext) {
-	// Get resource name from ID
-	res_name: string
-	for name, id in g.resource_ids {
-		if id == barrier.resource_id {
-			res_name = name
-			break
-		}
-	}
-
-	if res_name == "" {
-		log.warnf("Failed to find resource name for ID %d", barrier.resource_id)
-		return
-	}
-
 	// Get resource descriptor
-	desc, ok := g.resources[res_name]
+	desc, ok := g.resources[barrier.resource_id]
 	if !ok {
-		log.warnf("Failed to find resource descriptor for '%s'", res_name)
+		log.warnf("Failed to find resource descriptor for '%s'", string(barrier.resource_id))
 		return
 	}
 
 	// Resolve resource
-	handle, handle_ok := desc.resolve(exec_ctx, res_name, frame_index)
+	handle, handle_ok := desc.resolve(exec_ctx, desc.name, frame_index)
 	if !handle_ok {
 		// This is not necessarily an error - resource might not exist yet (e.g., inactive camera)
 		return

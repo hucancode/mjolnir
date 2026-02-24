@@ -271,16 +271,11 @@ ambient_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
 
   // Resolve final_image resource ID
   final_image_name := fmt.tprintf("camera_%d_final_image", ctx.camera_index)
-  final_image_id, id_ok := pass_ctx.graph.resource_ids[final_image_name]
-  if !id_ok do return
+  final_image_id := rg.ResourceId(final_image_name)
+  if final_image_id not_in pass_ctx.graph.resources do return
 
   // Resolve final_image handle
-  final_image_handle, handle_ok := rg.resolve(
-    rg.TextureHandle,
-    pass_ctx,
-    pass_ctx.exec_ctx,
-    final_image_id,
-  )
+  final_image_handle, handle_ok := rg.resolve(rg.TextureHandle, pass_ctx, final_image_id)
   if !handle_ok do return
 
   // Create color attachment info manually

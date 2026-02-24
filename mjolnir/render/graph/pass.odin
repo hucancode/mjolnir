@@ -68,20 +68,22 @@ PassContext :: struct {
 
 // Builder API: Declare read dependency on existing resource
 builder_read :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) {
-	id, ok := b.graph.resource_ids[name]
-	if ok {
-		append(&b.inputs, id)
+	id := ResourceId(name)
+	if id not_in b.graph.resources {
+		return "", false
 	}
-	return id, ok
+	append(&b.inputs, id)
+	return id, true
 }
 
 // Builder API: Declare write dependency on existing resource
 builder_write :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) {
-	id, ok := b.graph.resource_ids[name]
-	if ok {
-		append(&b.outputs, id)
+	id := ResourceId(name)
+	if id not_in b.graph.resources {
+		return "", false
 	}
-	return id, ok
+	append(&b.outputs, id)
+	return id, true
 }
 
 // Builder API: Create new transient resource (Frostbite-style)
@@ -101,12 +103,13 @@ builder_create :: proc(b: ^PassBuilder, name: string, format: ResourceFormat) ->
 
 // Builder API: Declare read-write dependency (both input and output)
 builder_read_write :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) {
-	id, ok := b.graph.resource_ids[name]
-	if ok {
-		append(&b.inputs, id)
-		append(&b.outputs, id)
+	id := ResourceId(name)
+	if id not_in b.graph.resources {
+		return "", false
 	}
-	return id, ok
+	append(&b.inputs, id)
+	append(&b.outputs, id)
+	return id, true
 }
 
 // Transient resource resolve proc (placeholder - will be implemented with transient pool)
@@ -134,24 +137,13 @@ make_instance_name :: proc(template_name: string, scope: PassScope, index: u32, 
 }
 
 // Type-safe resource resolution (generic procedure)
-// Takes execution context as parameter
-resolve :: proc($T: typeid, ctx: ^PassContext, exec_ctx: ^GraphExecutionContext, resource_id: ResourceId) -> (result: T, ok: bool) {
-	// Get resource name from ID
-	name: string
-	for res_name, res_id in ctx.graph.resource_ids {
-		if res_id == resource_id {
-			name = res_name
-			break
-		}
-	}
-	if name == "" do return {}, false
-
+resolve :: proc($T: typeid, ctx: ^PassContext, resource_id: ResourceId) -> (result: T, ok: bool) {
 	// Get descriptor
-	desc, has_desc := ctx.graph.resources[name]
+	desc, has_desc := get_resource_descriptor(ctx.graph, resource_id)
 	if !has_desc do return {}, false
 
-	// Resolve to actual handle (pass execution context to callback)
-	handle, resolve_ok := desc.resolve(exec_ctx, name, ctx.frame_index)
+	// Resolve to actual handle
+	handle, resolve_ok := desc.resolve(ctx.exec_ctx, desc.name, ctx.frame_index)
 	if !resolve_ok do return {}, false
 
 	// Type-safe extraction

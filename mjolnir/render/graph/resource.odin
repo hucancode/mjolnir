@@ -4,8 +4,8 @@ import "../../gpu"
 import vk "vendor:vulkan"
 import "base:intrinsics"
 
-// Resource identification
-ResourceId :: distinct u32
+// Resource identification (human-readable, stable key)
+ResourceId :: distinct string
 
 // Resource scope determines instantiation behavior
 ResourceScope :: enum {

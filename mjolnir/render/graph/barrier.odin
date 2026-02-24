@@ -21,6 +21,55 @@ ResourceAccess :: struct {
 	layout: vk.ImageLayout,
 }
 
+has_access_transition :: proc(src, dst: ResourceAccess) -> bool {
+	return src.access != dst.access ||
+		src.stage != dst.stage ||
+		src.layout != dst.layout
+}
+
+resource_written_in_pass :: proc(pass: ^PassInstance, res: ResourceId) -> bool {
+	for output_res in pass.outputs {
+		if output_res == res {
+			return true
+		}
+	}
+	return false
+}
+
+initial_access_for_resource :: proc(g: ^Graph, res_id: ResourceId) -> (ResourceAccess, bool) {
+	desc, ok := get_resource_descriptor(g, res_id)
+	if !ok {
+		return {}, false
+	}
+	if desc.is_transient {
+		return ResourceAccess{
+			access = {},
+			stage = {.TOP_OF_PIPE},
+			layout = .UNDEFINED,
+		}, true
+	}
+	access := infer_imported_resource_layout(desc)
+	if access.stage == {} {
+		access.stage = {.TOP_OF_PIPE}
+	}
+	return access, true
+}
+
+append_transition_barrier :: proc(
+	barriers: ^[dynamic]Barrier,
+	res_id: ResourceId,
+	src, dst: ResourceAccess,
+) {
+	if !has_access_transition(src, dst) {
+		return
+	}
+	append(barriers, compute_barrier(
+		res_id,
+		src,
+		dst,
+	))
+}
+
 // Compute barriers for all passes
 compute_barriers :: proc(g: ^Graph) -> Result {
 	// Track last access for each resource
@@ -30,76 +79,60 @@ compute_barriers :: proc(g: ^Graph) -> Result {
 	for pass_id in g.execution_order {
 		pass := &g.passes[pass_id]
 		barriers := make([dynamic]Barrier)
+		seen_inputs := make(map[ResourceId]bool)
+		seen_outputs := make(map[ResourceId]bool)
 
-		// Insert barrier for each input resource
+		// Insert barriers for reads (skip read/write resources, handled by write pass)
 		for input_res in pass.inputs {
+			if _, already_seen := seen_inputs[input_res]; already_seen {
+				continue
+			}
+			seen_inputs[input_res] = true
+			if resource_written_in_pass(pass, input_res) {
+				continue
+			}
+			target_access := infer_read_access(g, pass, input_res)
 			if prev_access, has_prev := last_access[input_res]; has_prev {
-				barrier := compute_barrier(
-					g,
+				append_transition_barrier(
+					&barriers,
 					input_res,
 					prev_access,
-					infer_read_access(g, pass, input_res),
+					target_access,
 				)
-				// Only add barrier if there's actual transition needed
-				if barrier.src_access != barrier.dst_access ||
-				   barrier.old_layout != barrier.new_layout {
-					append(&barriers, barrier)
-				}
-			} else {
-				// First access within the graph
-				desc, ok := get_resource_descriptor(g, input_res)
-				if ok && (desc.type == .TEXTURE_2D || desc.type == .DEPTH_TEXTURE) {
-					// For imported resources (is_transient = false), assume they're
-					// already in the correct layout from previous passes outside the graph
-					// For transient resources, transition from UNDEFINED
-					initial_access: ResourceAccess
-					if desc.is_transient {
-						// Transient resource - transition from UNDEFINED
-						initial_access = ResourceAccess{
-							access = {},
-							stage = {.TOP_OF_PIPE},
-							layout = .UNDEFINED,
-						}
-					} else {
-						// Imported resource - assume already in expected layout
-						// Infer what layout it should be in based on its usage
-						initial_access = infer_imported_resource_layout(desc)
-					}
-
-					target_access := infer_read_access(g, pass, input_res)
-
-					// Only insert barrier if layout/access actually changes
-					if initial_access.layout != target_access.layout ||
-					   initial_access.access != target_access.access {
-						barrier := compute_barrier(g, input_res, initial_access, target_access)
-						append(&barriers, barrier)
-					}
-				}
+			} else if initial_access, ok := initial_access_for_resource(g, input_res); ok {
+				append_transition_barrier(&barriers, input_res, initial_access, target_access)
 			}
+			last_access[input_res] = target_access
 		}
 
-		// Update last access for outputs
+		// Insert barriers for writes
 		for output_res in pass.outputs {
-			last_access[output_res] = infer_write_access(g, pass, output_res)
+			if _, already_seen := seen_outputs[output_res]; already_seen {
+				continue
+			}
+			seen_outputs[output_res] = true
+
+			target_access := infer_write_access(g, pass, output_res)
+			if prev_access, has_prev := last_access[output_res]; has_prev {
+				append_transition_barrier(
+					&barriers,
+					output_res,
+					prev_access,
+					target_access,
+				)
+			} else if initial_access, ok := initial_access_for_resource(g, output_res); ok {
+				append_transition_barrier(&barriers, output_res, initial_access, target_access)
+			}
+			last_access[output_res] = target_access
 		}
+		delete(seen_inputs)
+		delete(seen_outputs)
 
 		g.barriers[pass_id] = barriers
 	}
 
 	log.infof("Computed barriers for %d passes", len(g.execution_order))
 	return .SUCCESS
-}
-
-// Get resource descriptor from ID
-get_resource_descriptor :: proc(g: ^Graph, res_id: ResourceId) -> (ResourceDescriptor, bool) {
-	for name, id in g.resource_ids {
-		if id == res_id {
-			if desc, ok := g.resources[name]; ok {
-				return desc, true
-			}
-		}
-	}
-	return {}, false
 }
 
 // Infer access flags for read operation
@@ -190,13 +223,13 @@ infer_write_access :: proc(g: ^Graph, pass: ^PassInstance, res: ResourceId) -> R
 		case .TEXTURE_2D, .TEXTURE_CUBE:
 			// Color attachment output
 			access.stage = {.COLOR_ATTACHMENT_OUTPUT}
-			access.access = {.COLOR_ATTACHMENT_WRITE}
+			access.access = {.COLOR_ATTACHMENT_READ, .COLOR_ATTACHMENT_WRITE}
 			access.layout = .COLOR_ATTACHMENT_OPTIMAL
 
 		case .DEPTH_TEXTURE:
 			// Depth/stencil attachment output
 			access.stage = {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS}
-			access.access = {.DEPTH_STENCIL_ATTACHMENT_WRITE}
+			access.access = {.DEPTH_STENCIL_ATTACHMENT_READ, .DEPTH_STENCIL_ATTACHMENT_WRITE}
 			access.layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
 		}
 	}
@@ -215,7 +248,7 @@ infer_imported_resource_layout :: proc(desc: ResourceDescriptor) -> ResourceAcce
 		// Depth textures are typically left in DEPTH_STENCIL_ATTACHMENT_OPTIMAL
 		// after depth prepass/geometry pass
 		access.stage = {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS}
-		access.access = {.DEPTH_STENCIL_ATTACHMENT_WRITE}
+		access.access = {.DEPTH_STENCIL_ATTACHMENT_READ, .DEPTH_STENCIL_ATTACHMENT_WRITE}
 		access.layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
 
 	case .TEXTURE_2D, .TEXTURE_CUBE:
@@ -225,7 +258,7 @@ infer_imported_resource_layout :: proc(desc: ResourceDescriptor) -> ResourceAcce
 			if .COLOR_ATTACHMENT in tex_format.usage {
 				// Color attachment - assume COLOR_ATTACHMENT_OPTIMAL
 				access.stage = {.COLOR_ATTACHMENT_OUTPUT}
-				access.access = {.COLOR_ATTACHMENT_WRITE}
+				access.access = {.COLOR_ATTACHMENT_READ, .COLOR_ATTACHMENT_WRITE}
 				access.layout = .COLOR_ATTACHMENT_OPTIMAL
 			} else if .SAMPLED in tex_format.usage {
 				// Sampled texture - assume SHADER_READ_ONLY_OPTIMAL
@@ -250,7 +283,6 @@ infer_imported_resource_layout :: proc(desc: ResourceDescriptor) -> ResourceAcce
 
 // Compute barrier between two accesses
 compute_barrier :: proc(
-	g: ^Graph,
 	res_id: ResourceId,
 	src: ResourceAccess,
 	dst: ResourceAccess,

@@ -213,14 +213,14 @@ transparency_rendering_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data
 
 	// Resolve final_image and depth resources
 	final_image_name := fmt.tprintf("camera_%d_final_image", cam_idx)
-	final_image_id, final_ok := pass_ctx.graph.resource_ids[final_image_name]
-	if !final_ok do return
-	final_image_handle, _ := rg.resolve(rg.TextureHandle, pass_ctx, pass_ctx.exec_ctx, final_image_id)
+	final_image_id := rg.ResourceId(final_image_name)
+	if final_image_id not_in pass_ctx.graph.resources do return
+	final_image_handle, _ := rg.resolve(rg.TextureHandle, pass_ctx, final_image_id)
 
 	depth_name := fmt.tprintf("camera_%d_depth", cam_idx)
-	depth_id, depth_ok := pass_ctx.graph.resource_ids[depth_name]
-	if !depth_ok do return
-	depth_handle, _ := rg.resolve(rg.DepthTextureHandle, pass_ctx, pass_ctx.exec_ctx, depth_id)
+	depth_id := rg.ResourceId(depth_name)
+	if depth_id not_in pass_ctx.graph.resources do return
+	depth_handle, _ := rg.resolve(rg.DepthTextureHandle, pass_ctx, depth_id)
 
 	// Create rendering attachments with LOAD operations
 	color_attachment := vk.RenderingAttachmentInfo{

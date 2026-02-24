@@ -18,9 +18,8 @@ TransientResourcePool :: struct {
 
 // Core Graph type
 Graph :: struct {
-	// Resource registry (string name -> descriptor)
-	resources:    map[string]ResourceDescriptor,
-	resource_ids: map[string]ResourceId,  // name -> ID lookup
+	// Resource registry (resource ID == resource name)
+	resources: map[ResourceId]ResourceDescriptor,
 
 	// Pass registry (template declarations)
 	pass_templates: [dynamic]PassTemplate,
@@ -36,26 +35,21 @@ Graph :: struct {
 	// Transient allocator (future: for memory aliasing)
 	transient_pool: TransientResourcePool,
 
-	// Resource counter for ID generation
-	next_resource_id: u32,
 }
 
 // Initialize empty graph
 init :: proc(g: ^Graph) {
-	g.resources = make(map[string]ResourceDescriptor)
-	g.resource_ids = make(map[string]ResourceId)
+	g.resources = make(map[ResourceId]ResourceDescriptor)
 	g.pass_templates = make([dynamic]PassTemplate)
 	g.passes = make([dynamic]PassInstance)
 	g.pass_ids = make(map[string]PassId)
 	g.execution_order = make([dynamic]PassId)
 	g.barriers = make(map[PassId][dynamic]Barrier)
-	g.next_resource_id = 0
 }
 
 // Cleanup graph resources
 destroy :: proc(g: ^Graph) {
 	delete(g.resources)
-	delete(g.resource_ids)
 	delete(g.pass_templates)
 
 	// Clean up pass instances
@@ -103,17 +97,21 @@ reset :: proc(g: ^Graph) {
 
 // Register resource in graph
 register_resource :: proc(g: ^Graph, desc: ResourceDescriptor) -> ResourceId {
+	id := ResourceId(desc.name)
+
 	// Check if resource already exists
-	if existing_id, ok := g.resource_ids[desc.name]; ok {
+	if id in g.resources {
 		log.warnf("Resource '%s' already registered, returning existing ID", desc.name)
-		return existing_id
+		return id
 	}
 
-	g.resources[desc.name] = desc
-	id := ResourceId(g.next_resource_id)
-	g.resource_ids[desc.name] = id
-	g.next_resource_id += 1
+	g.resources[id] = desc
 	return id
+}
+
+get_resource_descriptor :: proc(g: ^Graph, res_id: ResourceId) -> (ResourceDescriptor, bool) {
+	desc, ok := g.resources[res_id]
+	return desc, ok
 }
 
 // Add pass template to graph

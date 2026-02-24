@@ -681,9 +681,9 @@ depth_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
 
   // Resolve depth texture
   depth_name := fmt.tprintf("camera_%d_depth", cam_idx)
-  depth_id, depth_ok := pass_ctx.graph.resource_ids[depth_name]
-  if !depth_ok do return
-  depth_handle, _ := rg.resolve(rg.DepthTextureHandle, pass_ctx, pass_ctx.exec_ctx, depth_id)
+  depth_id := rg.ResourceId(depth_name)
+  if depth_id not_in pass_ctx.graph.resources do return
+  depth_handle, _ := rg.resolve(rg.DepthTextureHandle, pass_ctx, depth_id)
 
   // Begin depth rendering
   depth_attachment := vk.RenderingAttachmentInfo {
@@ -730,21 +730,21 @@ depth_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
 
   // Resolve draw commands buffer
   draw_cmd_name := fmt.tprintf("camera_%d_opaque_draw_commands", cam_idx)
-  draw_cmd_id, draw_cmd_ok := pass_ctx.graph.resource_ids[draw_cmd_name]
-  if !draw_cmd_ok {
+  draw_cmd_id := rg.ResourceId(draw_cmd_name)
+  if draw_cmd_id not_in pass_ctx.graph.resources {
     vk.CmdEndRendering(cmd)
     return
   }
-  draw_cmd_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, pass_ctx.exec_ctx, draw_cmd_id)
+  draw_cmd_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, draw_cmd_id)
 
   // Resolve draw count buffer
   draw_count_name := fmt.tprintf("camera_%d_opaque_draw_count", cam_idx)
-  draw_count_id, draw_count_ok := pass_ctx.graph.resource_ids[draw_count_name]
-  if !draw_count_ok {
+  draw_count_id := rg.ResourceId(draw_count_name)
+  if draw_count_id not_in pass_ctx.graph.resources {
     vk.CmdEndRendering(cmd)
     return
   }
-  draw_count_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, pass_ctx.exec_ctx, draw_count_id)
+  draw_count_handle, _ := rg.resolve(rg.BufferHandle, pass_ctx, draw_count_id)
 
   // Draw indexed indirect count
   vk.CmdDrawIndexedIndirectCount(

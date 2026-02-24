@@ -377,50 +377,33 @@ direct_light_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
 direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
   ctx := cast(^DirectLightPassGraphContext)user_data
   self := ctx.renderer
-  log.infof("Direct light execute: camera=%d, active_lights=%d", ctx.camera_index,
-  len(ctx.active_lights))
-
-  log.debugf("Direct light pass executing for camera %d with %d active lights", ctx.camera_index, len(ctx.active_lights))
 
   // Resolve final_image resource ID
   final_image_name := fmt.tprintf("camera_%d_final_image", ctx.camera_index)
-  final_image_id, final_ok := pass_ctx.graph.resource_ids[final_image_name]
-  if !final_ok {
+  final_image_id := rg.ResourceId(final_image_name)
+  if final_image_id not_in pass_ctx.graph.resources {
     log.errorf("Failed to find final_image resource ID for camera %d", ctx.camera_index)
     return
   }
 
-  final_image_handle, resolve_ok := rg.resolve(
-    rg.TextureHandle,
-    pass_ctx,
-    pass_ctx.exec_ctx,
-    final_image_id,
-  )
+  final_image_handle, resolve_ok := rg.resolve(rg.TextureHandle, pass_ctx, final_image_id)
   if !resolve_ok {
     log.errorf("Failed to resolve final_image for camera %d", ctx.camera_index)
     return
   }
   // Resolve depth resource ID
   depth_name := fmt.tprintf("camera_%d_depth", ctx.camera_index)
-  depth_id, depth_ok := pass_ctx.graph.resource_ids[depth_name]
-  if !depth_ok {
+  depth_id := rg.ResourceId(depth_name)
+  if depth_id not_in pass_ctx.graph.resources {
     log.errorf("Failed to find depth resource ID for camera %d", ctx.camera_index)
     return
   }
 
-  depth_handle, depth_resolve_ok := rg.resolve(
-    rg.DepthTextureHandle,
-    pass_ctx,
-    pass_ctx.exec_ctx,
-    depth_id,
-  )
+  depth_handle, depth_resolve_ok := rg.resolve(rg.DepthTextureHandle, pass_ctx, depth_id)
   if !depth_resolve_ok {
     log.errorf("Failed to resolve depth for camera %d", ctx.camera_index)
     return
   }
-  log.infof("  final_image view=%d, depth view=%d", final_image_handle.view,
-  depth_handle.view)
-
 
   // Begin rendering to final_image with depth test
   color_attachment := vk.RenderingAttachmentInfo{
@@ -493,15 +476,6 @@ direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) 
     input_image_index = ctx.camera.attachments[.FINAL_IMAGE][pass_ctx.frame_index].index,
   }
 
-  log.debugf("Direct light pass texture indices: pos=%d, normal=%d, albedo=%d, metallic=%d, emissive=%d, input=%d",
-    push_constant.position_texture_index,
-    push_constant.normal_texture_index,
-    push_constant.albedo_texture_index,
-    push_constant.metallic_texture_index,
-    push_constant.emissive_texture_index,
-    push_constant.input_image_index,
-  )
-
   // Render light volumes for each active light
   for handle in ctx.active_lights {
     light := gpu.get(&ctx.lights_buffer.buffer, handle.index)
@@ -535,5 +509,4 @@ direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) 
   }
 
   vk.CmdEndRendering(pass_ctx.cmd)
-  log.debugf("Direct light pass completed for camera %d, rendered %d lights", ctx.camera_index, len(ctx.active_lights))
 }
