@@ -1,7 +1,6 @@
 package render_graph
 
 import vk "vendor:vulkan"
-import "core:fmt"
 
 // Pass identification
 PassId :: distinct u32
@@ -27,18 +26,18 @@ PassExecuteProc :: #type proc(ctx: ^PassContext, user_data: rawptr)
 
 // Pass template - declares a pass type that can be instantiated
 PassTemplate :: struct {
-	name:      string,           // Template name (e.g., "geometry_pass")
-	scope:     PassScope,
-	queue:     QueueType,
-	setup:     PassSetupProc,   // Setup phase: declare dependencies
-	execute:   PassExecuteProc, // Execute phase: render with resolved resources
-	user_data: rawptr,          // Points to subsystem renderer
+	name:             string, // Template name (e.g., "geometry_pass")
+	scope:            PassScope,
+	instance_indices: []u32, // Used for PER_CAMERA/PER_LIGHT instantiation
+	queue:            QueueType,
+	setup:            PassSetupProc, // Setup phase: declare dependencies
+	execute:          PassExecuteProc, // Execute phase: render with resolved resources
+	user_data:        rawptr, // Points to subsystem renderer
 }
 
 // Builder API - used during setup phase
 PassBuilder :: struct {
 	graph:       ^Graph,
-	pass_id:     PassId,
 	scope_index: u32,  // Camera/light index for PER_CAMERA/PER_LIGHT
 	inputs:      [dynamic]ResourceId,
 	outputs:     [dynamic]ResourceId,
@@ -46,14 +45,12 @@ PassBuilder :: struct {
 
 // Compiled pass instance (after template instantiation)
 PassInstance :: struct {
-	template_name: string,
-	instance_name: string,   // "geometry_pass_camera_0"
-	scope_index:   u32,
-	queue:         QueueType,
-	inputs:        [dynamic]ResourceId,
-	outputs:       [dynamic]ResourceId,
-	execute:       PassExecuteProc,
-	user_data:     rawptr,
+	scope_index: u32,
+	queue:       QueueType,
+	inputs:      [dynamic]ResourceId,
+	outputs:     [dynamic]ResourceId,
+	execute:     PassExecuteProc,
+	user_data:   rawptr,
 }
 
 // Pass execution context (like Frostbite's FrameGraphResources)
@@ -86,21 +83,6 @@ builder_write :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) {
 	return id, true
 }
 
-// Builder API: Create new transient resource (Frostbite-style)
-builder_create :: proc(b: ^PassBuilder, name: string, format: ResourceFormat) -> ResourceId {
-	desc := ResourceDescriptor{
-		name = name,
-		scope = .GLOBAL, // Transient resources are global by default
-		type = infer_resource_type(format),
-		format = format,
-		is_transient = true,
-		resolve = transient_resolve_proc, // Resolved from transient pool
-	}
-	id := register_resource(b.graph, desc)
-	append(&b.outputs, id)
-	return id
-}
-
 // Builder API: Declare read-write dependency (both input and output)
 builder_read_write :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) {
 	id := ResourceId(name)
@@ -110,30 +92,6 @@ builder_read_write :: proc(b: ^PassBuilder, name: string) -> (ResourceId, bool) 
 	append(&b.inputs, id)
 	append(&b.outputs, id)
 	return id, true
-}
-
-// Transient resource resolve proc (placeholder - will be implemented with transient pool)
-transient_resolve_proc :: proc(
-	ctx: ^GraphExecutionContext,
-	name: string,
-	frame_index: u32,
-) -> (ResourceHandle, bool) {
-	// TODO: Implement transient resource pool resolution
-	// For now, transient resources are not supported
-	return {}, false
-}
-
-// Generate instance name from template (e.g., "geometry_pass_camera_0")
-make_instance_name :: proc(template_name: string, scope: PassScope, index: u32, allocator := context.allocator) -> string {
-	switch scope {
-	case .GLOBAL:
-		return template_name
-	case .PER_CAMERA:
-		return fmt.aprintf("%s_camera_%d", template_name, index, allocator = allocator)
-	case .PER_LIGHT:
-		return fmt.aprintf("%s_light_%d", template_name, index, allocator = allocator)
-	}
-	return template_name
 }
 
 // Type-safe resource resolution (generic procedure)

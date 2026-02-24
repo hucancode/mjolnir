@@ -343,8 +343,7 @@ DirectLightPassGraphContext :: struct {
   cameras_descriptor_set:   vk.DescriptorSet,
   lights_descriptor_set:    vk.DescriptorSet,
   shadow_data_descriptor_set: vk.DescriptorSet,
-  camera:                   ^camera.Camera,
-  camera_index:             u32,
+  cameras:                  ^map[u32]camera.Camera,
   lights_buffer:            ^gpu.BindlessBuffer(d.Light),
   active_lights:            []d.LightHandle,
   shadow_texture_indices:   ^[d.MAX_LIGHTS]u32,
@@ -377,31 +376,34 @@ direct_light_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
 direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
   ctx := cast(^DirectLightPassGraphContext)user_data
   self := ctx.renderer
+  cam_idx := pass_ctx.scope_index
+  cam, cam_ok := ctx.cameras[cam_idx]
+  if !cam_ok do return
 
   // Resolve final_image resource ID
-  final_image_name := fmt.tprintf("camera_%d_final_image", ctx.camera_index)
+  final_image_name := fmt.tprintf("camera_%d_final_image", cam_idx)
   final_image_id := rg.ResourceId(final_image_name)
   if final_image_id not_in pass_ctx.graph.resources {
-    log.errorf("Failed to find final_image resource ID for camera %d", ctx.camera_index)
+    log.errorf("Failed to find final_image resource ID for camera %d", cam_idx)
     return
   }
 
   final_image_handle, resolve_ok := rg.resolve(rg.TextureHandle, pass_ctx, final_image_id)
   if !resolve_ok {
-    log.errorf("Failed to resolve final_image for camera %d", ctx.camera_index)
+    log.errorf("Failed to resolve final_image for camera %d", cam_idx)
     return
   }
   // Resolve depth resource ID
-  depth_name := fmt.tprintf("camera_%d_depth", ctx.camera_index)
+  depth_name := fmt.tprintf("camera_%d_depth", cam_idx)
   depth_id := rg.ResourceId(depth_name)
   if depth_id not_in pass_ctx.graph.resources {
-    log.errorf("Failed to find depth resource ID for camera %d", ctx.camera_index)
+    log.errorf("Failed to find depth resource ID for camera %d", cam_idx)
     return
   }
 
   depth_handle, depth_resolve_ok := rg.resolve(rg.DepthTextureHandle, pass_ctx, depth_id)
   if !depth_resolve_ok {
-    log.errorf("Failed to resolve depth for camera %d", ctx.camera_index)
+    log.errorf("Failed to resolve depth for camera %d", cam_idx)
     return
   }
 
@@ -467,13 +469,13 @@ direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) 
 
   // Build push constants using camera attachment texture indices
   push_constant := PushConstant{
-    scene_camera_idx = ctx.camera_index,
-    position_texture_index = ctx.camera.attachments[.POSITION][pass_ctx.frame_index].index,
-    normal_texture_index = ctx.camera.attachments[.NORMAL][pass_ctx.frame_index].index,
-    albedo_texture_index = ctx.camera.attachments[.ALBEDO][pass_ctx.frame_index].index,
-    metallic_texture_index = ctx.camera.attachments[.METALLIC_ROUGHNESS][pass_ctx.frame_index].index,
-    emissive_texture_index = ctx.camera.attachments[.EMISSIVE][pass_ctx.frame_index].index,
-    input_image_index = ctx.camera.attachments[.FINAL_IMAGE][pass_ctx.frame_index].index,
+    scene_camera_idx = cam_idx,
+    position_texture_index = cam.attachments[.POSITION][pass_ctx.frame_index].index,
+    normal_texture_index = cam.attachments[.NORMAL][pass_ctx.frame_index].index,
+    albedo_texture_index = cam.attachments[.ALBEDO][pass_ctx.frame_index].index,
+    metallic_texture_index = cam.attachments[.METALLIC_ROUGHNESS][pass_ctx.frame_index].index,
+    emissive_texture_index = cam.attachments[.EMISSIVE][pass_ctx.frame_index].index,
+    input_image_index = cam.attachments[.FINAL_IMAGE][pass_ctx.frame_index].index,
   }
 
   // Render light volumes for each active light

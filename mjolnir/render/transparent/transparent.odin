@@ -178,8 +178,7 @@ TransparencyRenderingPassGraphContext :: struct {
 	sprite_descriptor_set:   vk.DescriptorSet,
 	vertex_buffer:           vk.Buffer,
 	index_buffer:            vk.Buffer,
-	camera:                  ^camera.Camera,
-	camera_index:            u32,
+	cameras:                 ^map[u32]camera.Camera,
 }
 
 // Setup phase: declare dependencies for transparency rendering
@@ -210,6 +209,8 @@ transparency_rendering_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data
 	ctx := cast(^TransparencyRenderingPassGraphContext)user_data
 	cmd := pass_ctx.cmd
 	cam_idx := pass_ctx.scope_index
+	cam, cam_ok := ctx.cameras[cam_idx]
+	if !cam_ok do return
 
 	// Resolve final_image and depth resources
 	final_image_name := fmt.tprintf("camera_%d_final_image", cam_idx)
@@ -266,8 +267,8 @@ transparency_rendering_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data
 		ctx.vertex_skinning_descriptor_set,
 		ctx.vertex_buffer,
 		ctx.index_buffer,
-		ctx.camera.transparent_draw_commands[pass_ctx.frame_index].buffer,
-		ctx.camera.transparent_draw_count[pass_ctx.frame_index].buffer,
+		cam.transparent_draw_commands[pass_ctx.frame_index].buffer,
+		cam.transparent_draw_count[pass_ctx.frame_index].buffer,
 		d.MAX_NODES_IN_SCENE,
 	)
 
@@ -285,8 +286,8 @@ transparency_rendering_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data
 		ctx.vertex_skinning_descriptor_set,
 		ctx.vertex_buffer,
 		ctx.index_buffer,
-		ctx.camera.wireframe_draw_commands[pass_ctx.frame_index].buffer,
-		ctx.camera.wireframe_draw_count[pass_ctx.frame_index].buffer,
+		cam.wireframe_draw_commands[pass_ctx.frame_index].buffer,
+		cam.wireframe_draw_count[pass_ctx.frame_index].buffer,
 		d.MAX_NODES_IN_SCENE,
 	)
 
@@ -304,8 +305,8 @@ transparency_rendering_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data
 		ctx.vertex_skinning_descriptor_set,
 		ctx.vertex_buffer,
 		ctx.index_buffer,
-		ctx.camera.random_color_draw_commands[pass_ctx.frame_index].buffer,
-		ctx.camera.random_color_draw_count[pass_ctx.frame_index].buffer,
+		cam.random_color_draw_commands[pass_ctx.frame_index].buffer,
+		cam.random_color_draw_count[pass_ctx.frame_index].buffer,
 		d.MAX_NODES_IN_SCENE,
 	)
 
@@ -323,8 +324,8 @@ transparency_rendering_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data
 		ctx.vertex_skinning_descriptor_set,
 		ctx.vertex_buffer,
 		ctx.index_buffer,
-		ctx.camera.line_strip_draw_commands[pass_ctx.frame_index].buffer,
-		ctx.camera.line_strip_draw_count[pass_ctx.frame_index].buffer,
+		cam.line_strip_draw_commands[pass_ctx.frame_index].buffer,
+		cam.line_strip_draw_count[pass_ctx.frame_index].buffer,
 		d.MAX_NODES_IN_SCENE,
 	)
 
@@ -339,8 +340,8 @@ transparency_rendering_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data
 		ctx.sprite_descriptor_set,
 		ctx.vertex_buffer,
 		ctx.index_buffer,
-		ctx.camera.sprite_draw_commands[pass_ctx.frame_index].buffer,
-		ctx.camera.sprite_draw_count[pass_ctx.frame_index].buffer,
+		cam.sprite_draw_commands[pass_ctx.frame_index].buffer,
+		cam.sprite_draw_count[pass_ctx.frame_index].buffer,
 		d.MAX_NODES_IN_SCENE,
 	)
 

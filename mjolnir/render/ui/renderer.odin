@@ -411,6 +411,9 @@ ui_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
   rg.builder_read(builder, "ui_vertex_buffer")
   rg.builder_read(builder, "ui_index_buffer")
 
+  // Keep UI ordered after post-process in the graph.
+  rg.builder_read(builder, "post_process_image_0")
+
   // Note: Swapchain image is NOT a graph resource - it's passed through context
   // UI pass writes to swapchain but doesn't declare it as a graph dependency
 }

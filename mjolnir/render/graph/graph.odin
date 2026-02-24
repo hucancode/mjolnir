@@ -1,7 +1,6 @@
 package render_graph
 
 import "core:log"
-import "core:fmt"
 
 // Result type for graph operations
 Result :: enum {
@@ -11,9 +10,8 @@ Result :: enum {
 	ERROR_INVALID_PASS,
 }
 
-// Transient resource pool (placeholder for future implementation)
+// Reserved for transient allocation/aliasing implementation.
 TransientResourcePool :: struct {
-	// TODO: Implement transient resource aliasing
 }
 
 // Core Graph type
@@ -25,16 +23,27 @@ Graph :: struct {
 	pass_templates: [dynamic]PassTemplate,
 
 	// Compiled pass instances (after instantiation)
-	passes:   [dynamic]PassInstance,
-	pass_ids: map[string]PassId,  // name -> ID lookup
+	passes: [dynamic]PassInstance,
 
 	// Compiled execution plan
 	execution_order: [dynamic]PassId,
 	barriers:        map[PassId][dynamic]Barrier,
 
-	// Transient allocator (future: for memory aliasing)
+	// Internal seam for transient allocation/aliasing.
 	transient_pool: TransientResourcePool,
+}
 
+transient_pool_init :: proc(pool: ^TransientResourcePool) {
+}
+
+transient_pool_destroy :: proc(pool: ^TransientResourcePool) {
+}
+
+transient_pool_begin_frame :: proc(pool: ^TransientResourcePool) {
+}
+
+transient_pool_compile :: proc(pool: ^TransientResourcePool, g: ^Graph) -> Result {
+	return .SUCCESS
 }
 
 // Initialize empty graph
@@ -42,9 +51,9 @@ init :: proc(g: ^Graph) {
 	g.resources = make(map[ResourceId]ResourceDescriptor)
 	g.pass_templates = make([dynamic]PassTemplate)
 	g.passes = make([dynamic]PassInstance)
-	g.pass_ids = make(map[string]PassId)
 	g.execution_order = make([dynamic]PassId)
 	g.barriers = make(map[PassId][dynamic]Barrier)
+	transient_pool_init(&g.transient_pool)
 }
 
 // Cleanup graph resources
@@ -56,19 +65,15 @@ destroy :: proc(g: ^Graph) {
 	for &pass in g.passes {
 		delete(pass.inputs)
 		delete(pass.outputs)
-		// Instance name is allocated, free it if it's not the template name
-		if pass.instance_name != pass.template_name {
-			delete(pass.instance_name)
-		}
 	}
 	delete(g.passes)
-	delete(g.pass_ids)
 
 	delete(g.execution_order)
 	for _, barriers in g.barriers {
 		delete(barriers)
 	}
 	delete(g.barriers)
+	transient_pool_destroy(&g.transient_pool)
 }
 
 // Reset graph for next frame (clears pass instances, keeps templates)
@@ -77,18 +82,15 @@ reset :: proc(g: ^Graph) {
 	for &pass in g.passes {
 		delete(pass.inputs)
 		delete(pass.outputs)
-		if pass.instance_name != pass.template_name {
-			delete(pass.instance_name)
-		}
 	}
 	clear(&g.passes)
-	clear(&g.pass_ids)
 	clear(&g.execution_order)
 
 	for _, barriers in g.barriers {
 		delete(barriers)
 	}
 	clear(&g.barriers)
+	transient_pool_begin_frame(&g.transient_pool)
 
 	// NOTE: We DO clear templates because they're registered fresh each frame
 	// with stack-allocated context pointers that become invalid after the frame
@@ -120,34 +122,24 @@ add_pass_template :: proc(g: ^Graph, template: PassTemplate) {
 	log.infof("Registered pass template: %s (scope: %v, queue: %v)", template.name, template.scope, template.queue)
 }
 
-// Instantiate pass templates for active cameras/lights
-instantiate_passes :: proc(
-	g: ^Graph,
-	active_cameras: []u32,
-	active_lights: []u32,
-) -> Result {
+// Instantiate pass templates using their explicit indices
+instantiate_passes :: proc(g: ^Graph) -> Result {
 	for &template in g.pass_templates {
 		switch template.scope {
 		case .GLOBAL:
-			// Single instance, no scope index
 			instance := create_pass_instance(g, &template, 0)
 			append(&g.passes, instance)
-			g.pass_ids[instance.instance_name] = PassId(len(g.passes) - 1)
 
 		case .PER_CAMERA:
-			// One instance per active camera
-			for cam_index in active_cameras {
+			for cam_index in template.instance_indices {
 				instance := create_pass_instance(g, &template, cam_index)
 				append(&g.passes, instance)
-				g.pass_ids[instance.instance_name] = PassId(len(g.passes) - 1)
 			}
 
 		case .PER_LIGHT:
-			// One instance per shadow-casting light
-			for light_index in active_lights {
+			for light_index in template.instance_indices {
 				instance := create_pass_instance(g, &template, light_index)
 				append(&g.passes, instance)
-				g.pass_ids[instance.instance_name] = PassId(len(g.passes) - 1)
 			}
 		}
 	}
@@ -163,8 +155,6 @@ create_pass_instance :: proc(
 	scope_index: u32,
 ) -> PassInstance {
 	instance := PassInstance{
-		template_name = template.name,
-		instance_name = make_instance_name(template.name, template.scope, scope_index),
 		scope_index = scope_index,
 		queue = template.queue,
 		execute = template.execute,
@@ -173,12 +163,9 @@ create_pass_instance :: proc(
 		outputs = make([dynamic]ResourceId),
 	}
 
-	pass_id := PassId(len(g.passes))
-
 	// Call setup proc to populate inputs/outputs
 	builder := PassBuilder{
 		graph = g,
-		pass_id = pass_id,
 		scope_index = scope_index,
 		inputs = make([dynamic]ResourceId),
 		outputs = make([dynamic]ResourceId),
@@ -196,75 +183,119 @@ compile :: proc(g: ^Graph) -> Result {
 	if err := build_execution_order(g); err != .SUCCESS {
 		return err
 	}
+	if err := transient_pool_compile(&g.transient_pool, g); err != .SUCCESS {
+		return err
+	}
 	if err := compute_barriers(g); err != .SUCCESS {
 		return err
 	}
 	return .SUCCESS
 }
 
+pass_reads_resource :: proc(pass: ^PassInstance, res_id: ResourceId) -> bool {
+	for input_res in pass.inputs {
+		if input_res == res_id {
+			return true
+		}
+	}
+	return false
+}
+
+pass_writes_resource :: proc(pass: ^PassInstance, res_id: ResourceId) -> bool {
+	for output_res in pass.outputs {
+		if output_res == res_id {
+			return true
+		}
+	}
+	return false
+}
+
 // Build dependency graph via topological sort (Kahn's algorithm)
 build_execution_order :: proc(g: ^Graph) -> Result {
-	// Build adjacency list and in-degree counts
-	in_degree := make(map[PassId]int)
-	adj_list := make(map[PassId][dynamic]PassId)
+	pass_count := len(g.passes)
+	in_degree := make([]int, pass_count)
 	defer delete(in_degree)
+	adj_list := make([][dynamic]PassId, pass_count)
 	defer {
-		for _, list in adj_list {
-			delete(list)
+		for &neighbors in adj_list {
+			delete(neighbors)
 		}
 		delete(adj_list)
 	}
 
-	// Initialize in-degrees
-	for pass_id in 0..<len(g.passes) {
-		in_degree[PassId(pass_id)] = 0
-	}
-
-	// Build edges: if pass A writes resource R and pass B reads R, edge A->B
-	for &pass_a, idx_a in g.passes {
-		for output_res in pass_a.outputs {
-			// Find all passes that read this output
-			for &pass_b, idx_b in g.passes {
-				if idx_a == idx_b do continue
-
-				for input_res in pass_b.inputs {
-					if input_res == output_res {
-						// Edge: pass_a -> pass_b
-						if _, ok := adj_list[PassId(idx_a)]; !ok {
-							adj_list[PassId(idx_a)] = make([dynamic]PassId)
-						}
-						append(&adj_list[PassId(idx_a)], PassId(idx_b))
-						in_degree[PassId(idx_b)] += 1
-					}
-				}
+	add_edge :: proc(
+		adj: ^[] [dynamic]PassId,
+		in_degree: ^[]int,
+		src_idx, dst_idx: int,
+	) {
+		if src_idx == dst_idx do return
+		dst := PassId(dst_idx)
+		for existing_dst in adj[src_idx] {
+			if existing_dst == dst {
+				return
 			}
 		}
+		append(&adj[src_idx], dst)
+		in_degree[dst_idx] += 1
+	}
+
+	// Build forward dependencies per resource by declaration order.
+	// This handles read-write (RMW) resources without generating backward edges.
+	for res_id in g.resources {
+		last_writer_idx := -1
+		readers_since_last_write := make([dynamic]int)
+
+		for pass_idx in 0..<pass_count {
+			pass := &g.passes[pass_idx]
+			reads := pass_reads_resource(pass, res_id)
+			writes := pass_writes_resource(pass, res_id)
+			if !reads && !writes do continue
+
+			if reads {
+				if last_writer_idx >= 0 {
+					add_edge(&adj_list, &in_degree, last_writer_idx, pass_idx)
+				}
+				append(&readers_since_last_write, pass_idx)
+			}
+
+			if writes {
+				if last_writer_idx >= 0 {
+					add_edge(&adj_list, &in_degree, last_writer_idx, pass_idx)
+				}
+				for reader_idx in readers_since_last_write {
+					add_edge(&adj_list, &in_degree, reader_idx, pass_idx)
+				}
+				last_writer_idx = pass_idx
+				clear(&readers_since_last_write)
+			}
+		}
+
+		delete(readers_since_last_write)
 	}
 
 	// Kahn's topological sort
 	queue := make([dynamic]PassId)
 	defer delete(queue)
 
-	for pass_id, degree in in_degree {
-		if degree == 0 {
-			append(&queue, pass_id)
+	for pass_idx in 0..<pass_count {
+		if in_degree[pass_idx] == 0 {
+			append(&queue, PassId(pass_idx))
 		}
 	}
 
 	clear(&g.execution_order)
-	for len(queue) > 0 {
-		// Pop front
-		current := queue[0]
-		ordered_remove(&queue, 0)
+	queue_head := 0
+	for queue_head < len(queue) {
+		current := queue[queue_head]
+		queue_head += 1
 
 		append(&g.execution_order, current)
 
-		if neighbors, ok := adj_list[current]; ok {
-			for neighbor in neighbors {
-				in_degree[neighbor] -= 1
-				if in_degree[neighbor] == 0 {
-					append(&queue, neighbor)
-				}
+		for neighbor in adj_list[int(current)] {
+			neighbor_idx := int(neighbor)
+			in_degree[neighbor_idx] -= 1
+			if in_degree[neighbor_idx] == 0 {
+				append(&queue, neighbor)
 			}
 		}
 	}

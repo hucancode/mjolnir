@@ -1224,119 +1224,20 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   command_buffer := self.render.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
 
-  // Graph-based shadow passes (PER_LIGHT)
-  render.render_shadow_compute_graph_pass(
-    &self.render,
-    self.frame_index,
-    active_render_lights[:],
-  ) or_return
-
-  render.render_shadow_depth_graph_pass(
-    &self.render,
-    self.frame_index,
-  ) or_return
-  // Collect active cameras for depth prepass
-  active_depth_cameras := make([dynamic]u32, context.temp_allocator)
+  active_cameras := make([dynamic]u32, context.temp_allocator)
   for &entry, cam_index in self.world.cameras.entries {
     if entry.active {
-      append(&active_depth_cameras, u32(cam_index))
+      append(&active_cameras, u32(cam_index))
     }
   }
 
-  // Graph-based depth prepass (PER_CAMERA)
-  if len(active_depth_cameras) > 0 {
-    render.render_depth_graph_pass(
-      &self.render,
-      self.frame_index,
-      active_depth_cameras[:],
-    ) or_return
-  }
-
-  // Collect cameras that need geometry rendering
-  active_geometry_cameras := make([dynamic]u32, context.temp_allocator)
-  for &entry, cam_index in self.world.cameras.entries {
-    if entry.active {
-      if world.PassType.GEOMETRY in entry.item.enabled_passes {
-        append(&active_geometry_cameras, u32(cam_index))
-      }
-    }
-  }
-
-  // Graph-based geometry pass (PER_CAMERA)
-  if len(active_geometry_cameras) > 0 {
-    render.render_geometry_graph_pass(
-      &self.render,
-      self.frame_index,
-      active_geometry_cameras[:],
-    ) or_return
-  }
-
-  // Collect cameras that need particle rendering in the graph path
-  active_particle_cameras := make([dynamic]u32, context.temp_allocator)
-  for &entry, cam_index in self.world.cameras.entries {
-    if entry.active {
-      if world.PassType.PARTICLES in entry.item.enabled_passes {
-        append(&active_particle_cameras, u32(cam_index))
-      }
-    }
-  }
-  particle_graph_dispatched := false
-
-  for &entry, cam_index in self.world.cameras.entries {
-    if !entry.active do continue
-    world_cam := &entry.item
-    render_cam := &self.render.cameras[u32(cam_index)]
-    // Geometry pass now handled by graph above
-    if world.PassType.LIGHTING in world_cam.enabled_passes {
-      render.record_lighting_pass(
-        &self.render,
-        self.frame_index,
-        active_render_lights[:],
-        u32(cam_index),
-        render_cam,
-      )
-    }
-    if world.PassType.PARTICLES in world_cam.enabled_passes {
-      // Graph-based particle rendering (run once per frame for all particle-enabled cameras)
-      if !particle_graph_dispatched && len(active_particle_cameras) > 0 {
-        render.render_particles_graph_pass(
-          &self.render,
-          self.frame_index,
-          active_particle_cameras[:],
-        ) or_return
-        particle_graph_dispatched = true
-      }
-    }
-    if world.PassType.TRANSPARENCY in world_cam.enabled_passes {
-      // Graph-based transparency rendering (all 5 techniques: transparent, wireframe, random_color, line_strip, sprite)
-      render.render_transparency_rendering_graph_pass(
-        &self.render,
-        self.frame_index,
-        u32(cam_index),
-      ) or_return
-    }
-  }
-  main_render_cam := &self.render.cameras[self.world.main_camera.index]
-  // Debug rendering pass (bones, etc.) - renders after transparency
-  render.record_debug_pass(
-    &self.render,
-    self.frame_index,
-    self.world.main_camera.index,
-    main_render_cam,
-  )
-  // Graph-based post-process effects (final pass 10/10)
-  render.render_post_process_graph_pass(
-    &self.render,
-    self.frame_index,
-    main_render_cam,
-    self.swapchain.extent,
-    self.swapchain.views[self.swapchain.image_index],
-  ) or_return
-  // Graph-based UI rendering (integrated in Phase 5.2 Action 3)
-  render.render_ui_graph_pass(
+  render.render_frame_graph(
     &self.render,
     self.frame_index,
     &self.gctx,
+    active_cameras[:],
+    active_render_lights[:],
+    self.world.main_camera.index,
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
   ) or_return

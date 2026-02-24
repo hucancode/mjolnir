@@ -804,611 +804,6 @@ resize :: proc(
   return .SUCCESS
 }
 
-render_shadow_depth :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  active_lights: []rd.LightHandle,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  shadow.sync_lights(
-    &self.shadow,
-    &self.lights_buffer,
-    active_lights,
-    frame_index,
-  )
-  shadow.compute_draw_lists(&self.shadow, cmd, frame_index)
-  shadow.render_depth(
-    &self.shadow,
-    cmd,
-    &self.texture_manager,
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    frame_index,
-  )
-  return .SUCCESS
-}
-
-render_camera_depth :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  for cam_index, &cam in self.cameras {
-    occlusion_culling.render_depth(
-      &self.visibility,
-      gctx,
-      cmd,
-      &cam,
-      &self.texture_manager,
-      u32(cam_index),
-      frame_index,
-      {.VISIBLE},
-      {
-        .MATERIAL_TRANSPARENT,
-        .MATERIAL_WIREFRAME,
-        .MATERIAL_RANDOM_COLOR,
-        .MATERIAL_LINE_STRIP,
-      },
-      self.camera_buffer.descriptor_sets[frame_index],
-      self.bone_buffer.descriptor_sets[frame_index],
-      self.node_data_buffer.descriptor_set,
-      self.mesh_data_buffer.descriptor_set,
-      self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-      self.mesh_manager.vertex_buffer.buffer,
-      self.mesh_manager.index_buffer.buffer,
-    )
-  }
-  return .SUCCESS
-}
-
-record_geometry_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  geometry.begin_pass(cam, &self.texture_manager, cmd, frame_index)
-  geometry.render(
-    &self.geometry,
-    cam,
-    cam_index,
-    frame_index,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.opaque_draw_commands[frame_index].buffer,
-    cam.opaque_draw_count[frame_index].buffer,
-  )
-  geometry.end_pass(cam, &self.texture_manager, cmd, frame_index)
-  return .SUCCESS
-}
-
-record_lighting_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  active_lights: []rd.LightHandle,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  // Prepare shadow texture indices for direct lighting
-  shadow_texture_indices: [rd.MAX_LIGHTS]u32
-  for i in 0 ..< rd.MAX_LIGHTS {
-    shadow_texture_indices[i] = 0xFFFFFFFF
-  }
-  for handle in active_lights {
-    light_data := gpu.get(&self.lights_buffer.buffer, handle.index)
-    shadow_texture_indices[handle.index] = shadow.get_texture_index(
-      &self.shadow,
-      light_data.type,
-      light_data.shadow_index,
-      frame_index,
-    )
-  }
-
-  // Create contexts for both lighting passes (ambient + direct)
-  ambient_ctx := ambient.AmbientPassGraphContext{
-    renderer = &self.ambient,
-    texture_manager = &self.texture_manager,
-    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
-    camera = cam,
-    camera_index = cam_index,
-  }
-
-  direct_light_ctx := direct_light.DirectLightPassGraphContext{
-    renderer = &self.direct_light,
-    texture_manager = &self.texture_manager,
-    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
-    lights_descriptor_set = self.lights_buffer.descriptor_set,
-    shadow_data_descriptor_set = self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
-    camera = cam,
-    camera_index = cam_index,
-    lights_buffer = &self.lights_buffer,
-    active_lights = active_lights,
-    shadow_texture_indices = &shadow_texture_indices,
-  }
-
-  // Register BOTH templates before execution (so they run together in the graph)
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "ambient_pass",
-    scope = .PER_CAMERA,
-    queue = .GRAPHICS,
-    setup = ambient.ambient_pass_setup,
-    execute = ambient.ambient_pass_execute,
-    user_data = &ambient_ctx,
-  })
-
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "direct_light_pass",
-    scope = .PER_CAMERA,
-    queue = .GRAPHICS,
-    setup = direct_light.direct_light_pass_setup,
-    execute = direct_light.direct_light_pass_execute,
-    user_data = &direct_light_ctx,
-  })
-
-  // Execute both passes together in a single graph
-  execute_registered_graph_templates(self, frame_index, {cam_index}, {}) or_return
-
-  log.debugf("Successfully executed lighting passes via graph (camera %d)", cam_index)
-  return .SUCCESS
-}
-
-record_particles_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  particles_render.begin_pass(
-    &self.particles_render,
-    cmd,
-    cam,
-    &self.texture_manager,
-    frame_index,
-  )
-  particles_render.render(
-    &self.particles_render,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.particle_resources.compact_particle_buffer.buffer,
-    self.particle_resources.draw_command_buffer.buffer,
-  )
-  particles_render.end_pass(cmd)
-  return .SUCCESS
-}
-
-record_transparency_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-
-  // Begin pass (shared by all 5 techniques)
-  color_texture := gpu.get_texture_2d(&self.texture_manager, cam.attachments[.FINAL_IMAGE][frame_index])
-  depth_texture := gpu.get_texture_2d(&self.texture_manager, cam.attachments[.DEPTH][frame_index])
-  gpu.begin_rendering(
-    cmd,
-    depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
-    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
-  )
-  gpu.set_viewport_scissor(cmd, depth_texture.spec.extent)
-
-  // Render transparent objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT},
-    NodeFlagSet{.MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  transparent.render(
-    &self.transparent_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // Render wireframe objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME},
-    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  wireframe.render(
-    &self.wireframe_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // Render random_color objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_RANDOM_COLOR},
-    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  random_color.render(
-    &self.random_color_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // Render line_strip objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_LINE_STRIP},
-    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_SPRITE},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  line_strip.render(
-    &self.line_strip_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // Render sprites
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_SPRITE},
-    NodeFlagSet{},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.sprite_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.sprite_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.sprite_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.sprite_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  sprite.render(
-    &self.sprite_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.sprite_draw_commands[frame_index].buffer,
-    cam.sprite_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // End pass
-  vk.CmdEndRendering(cmd)
-  return .SUCCESS
-}
-
-record_debug_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  // Skip debug rendering if no instances are staged
-  if len(self.debug_renderer.bone_instances) == 0 do return .SUCCESS
-
-  cmd := self.command_buffers[frame_index]
-
-  // Begin debug render pass (renders on top of transparency)
-  // Skip rendering if attachments are missing
-  if !debug_bone.begin_pass(
-    &self.debug_renderer,
-    cam,
-    &self.texture_manager,
-    cmd,
-    frame_index,
-  ) {
-    return .SUCCESS
-  }
-
-  // Render debug visualization (bones, etc.)
-  debug_bone.render(
-    &self.debug_renderer,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    cam_index,
-  ) or_return
-
-  debug_bone.end_pass(&self.debug_renderer, cmd)
-
-  return .SUCCESS
-}
-
-record_post_process_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam: ^camera.Camera,
-  swapchain_extent: vk.Extent2D,
-  swapchain_image: vk.Image,
-  swapchain_view: vk.ImageView,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  if final_image := gpu.get_texture_2d(
-    &self.texture_manager,
-    cam.attachments[.FINAL_IMAGE][frame_index],
-  ); final_image != nil {
-    gpu.image_barrier(
-      cmd,
-      final_image.image,
-      .COLOR_ATTACHMENT_OPTIMAL,
-      .SHADER_READ_ONLY_OPTIMAL,
-      {.COLOR_ATTACHMENT_WRITE},
-      {.SHADER_READ},
-      {.COLOR_ATTACHMENT_OUTPUT},
-      {.FRAGMENT_SHADER},
-      {.COLOR},
-    )
-  }
-  gpu.image_barrier(
-    cmd,
-    swapchain_image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  post_process.begin_pass(&self.post_process, cmd, swapchain_extent)
-  post_process.render(
-    &self.post_process,
-    cmd,
-    swapchain_extent,
-    swapchain_view,
-    cam,
-    &self.texture_manager,
-    frame_index,
-  )
-  post_process.end_pass(&self.post_process, cmd)
-  return .SUCCESS
-}
-
-record_ui_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  swapchain_view: vk.ImageView,
-  swapchain_extent: vk.Extent2D,
-) {
-  cmd := self.command_buffers[frame_index]
-  // UI rendering pass - renders on top of post-processed image
-  rendering_attachment_info := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = swapchain_view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .STORE,
-  }
-
-  rendering_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = swapchain_extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &rendering_attachment_info,
-  }
-
-  vk.CmdBeginRendering(cmd, &rendering_info)
-
-  // Set viewport and scissor
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(swapchain_extent.height),
-    width    = f32(swapchain_extent.width),
-    height   = -f32(swapchain_extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    offset = {0, 0},
-    extent = swapchain_extent,
-  }
-  vk.CmdSetViewport(cmd, 0, 1, &viewport)
-  vk.CmdSetScissor(cmd, 0, 1, &scissor)
-
-  // Bind pipeline and descriptor sets
-  vk.CmdBindPipeline(cmd, .GRAPHICS, self.ui.pipeline)
-  vk.CmdBindDescriptorSets(
-    cmd,
-    .GRAPHICS,
-    self.ui.pipeline_layout,
-    0,
-    1,
-    &self.texture_manager.descriptor_set,
-    0,
-    nil,
-  )
-
-  // Render UI using staged commands
-  ui_render.render(
-    &self.ui,
-    self.ui_commands[:],
-    gctx,
-    &self.texture_manager,
-    cmd,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    frame_index,
-  )
-
-  vk.CmdEndRendering(cmd)
-}
-
 allocate_mesh_geometry :: proc(
   gctx: ^gpu.GPUContext,
   render: ^Manager,
@@ -1976,15 +1371,53 @@ register_post_process_resources :: proc(self: ^Manager) {
   log.info("Registered post-process resources in graph (2 ping-pong images)")
 }
 
+DebugPassGraphContext :: struct {
+  renderer:               ^debug_bone.Renderer,
+  texture_manager:        ^gpu.TextureManager,
+  cameras_descriptor_set: vk.DescriptorSet,
+  cameras:                ^map[u32]camera.Camera,
+}
+
+debug_pass_setup :: proc(builder: ^rg.PassBuilder, user_data: rawptr) {
+  cam_index := builder.scope_index
+  rg.builder_read(builder, fmt.tprintf("camera_%d_depth", cam_index))
+  rg.builder_read_write(builder, fmt.tprintf("camera_%d_final_image", cam_index))
+}
+
+debug_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
+  ctx := cast(^DebugPassGraphContext)user_data
+  if len(ctx.renderer.bone_instances) == 0 do return
+
+  cam_index := pass_ctx.scope_index
+  cam, cam_ok := ctx.cameras[cam_index]
+  if !cam_ok do return
+
+  if !debug_bone.begin_pass(
+    ctx.renderer,
+    &cam,
+    ctx.texture_manager,
+    pass_ctx.cmd,
+    pass_ctx.frame_index,
+  ) {
+    return
+  }
+
+  if err := debug_bone.render(
+    ctx.renderer,
+    pass_ctx.cmd,
+    ctx.cameras_descriptor_set,
+    cam_index,
+  ); err != .SUCCESS {
+    log.errorf("Debug graph pass render failed for camera %d: %v", cam_index, err)
+  }
+  debug_bone.end_pass(ctx.renderer, pass_ctx.cmd)
+}
+
 execute_registered_graph_templates :: proc(
   self: ^Manager,
   frame_index: u32,
-  active_cameras: []u32,
-  active_lights: []u32,
 ) -> vk.Result {
-  defer rg.reset(&self.graph)
-
-  if err := rg.instantiate_passes(&self.graph, active_cameras, active_lights); err != .SUCCESS {
+  if err := rg.instantiate_passes(&self.graph); err != .SUCCESS {
     log.errorf("Failed to instantiate graph passes: %v", err)
     return .ERROR_UNKNOWN
   }
@@ -2008,113 +1441,87 @@ execute_registered_graph_templates :: proc(
   return .SUCCESS
 }
 
-// Execute particle rendering via render graph
-render_particles_graph_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  active_cameras: []u32,
-) -> vk.Result {
-  // Create pass context for particle render (needs descriptor sets)
-  particle_ctx := particles_render.ParticleRenderGraphContext{
-    renderer = &self.particles_render,
-    camera_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
-    textures_descriptor_set = self.texture_manager.descriptor_set,
-  }
-
-  // Register particle render pass template
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "particles_render",
-    scope = .PER_CAMERA,
-    queue = .GRAPHICS,
-    setup = particles_render.particles_render_setup,
-    execute = particles_render.particles_render_execute,
-    user_data = &particle_ctx,
-  })
-
-  execute_registered_graph_templates(self, frame_index, active_cameras, {}) or_return
-
-  log.infof("Successfully executed particles render pass via graph (%d cameras)", len(active_cameras))
-  return .SUCCESS
-}
-
-// Execute UI rendering via render graph
-render_ui_graph_pass :: proc(
+render_frame_graph :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
-  swapchain_view: vk.ImageView,
-  swapchain_extent: vk.Extent2D,
-) -> vk.Result {
-  // Create pass context for UI render
-  ui_ctx := ui_render.UIPassGraphContext{
-    renderer = &self.ui,
-    texture_manager = &self.texture_manager,
-    gctx = gctx,
-    commands = self.ui_commands[:],
-    swapchain_view = swapchain_view,
-    swapchain_extent = swapchain_extent,
-  }
-
-  // Register UI pass template (GLOBAL scope - runs once per frame)
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "ui_pass",
-    scope = .GLOBAL,
-    queue = .GRAPHICS,
-    setup = ui_render.ui_pass_setup,
-    execute = ui_render.ui_pass_execute,
-    user_data = &ui_ctx,
-  })
-
-  execute_registered_graph_templates(self, frame_index, {}, {}) or_return
-
-  log.info("Successfully executed UI pass via graph")
-  return .SUCCESS
-}
-
-// Execute post-process effects via render graph
-render_post_process_graph_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  main_camera: ^camera.Camera,
-  swapchain_extent: vk.Extent2D,
-  swapchain_view: vk.ImageView,
-) -> vk.Result {
-  // Note: Always register pass even if effect_stack is empty
-  // begin_pass() will add a nil effect to copy input to output
-
-  // Create pass context
-  pp_ctx := post_process.PostProcessPassGraphContext{
-    renderer = &self.post_process,
-    texture_manager = &self.texture_manager,
-    main_camera = main_camera,
-    swapchain_view = swapchain_view,
-    swapchain_extent = swapchain_extent,
-    frame_index = frame_index,
-  }
-
-  // Register post-process pass template (GLOBAL scope)
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "post_process_pass",
-    scope = .GLOBAL,
-    queue = .GRAPHICS,
-    setup = post_process.post_process_pass_setup,
-    execute = post_process.post_process_pass_execute,
-    user_data = &pp_ctx,
-  })
-
-  execute_registered_graph_templates(self, frame_index, {}, {}) or_return
-
-  log.infof("Successfully executed post-process pass via graph (%d effects)", len(self.post_process.effect_stack))
-  return .SUCCESS
-}
-
-// Execute depth prepass via render graph
-render_depth_graph_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
   active_cameras: []u32,
+  active_lights: []rd.LightHandle,
+  main_camera_index: u32,
+  swapchain_view: vk.ImageView,
+  swapchain_extent: vk.Extent2D,
 ) -> vk.Result {
-  // Create pass context for depth prepass
+  defer rg.reset(&self.graph)
+
+  shadow.sync_lights(
+    &self.shadow,
+    &self.lights_buffer,
+    active_lights,
+    frame_index,
+  )
+
+  active_light_slots := make([dynamic]u32, context.temp_allocator)
+  for slot in 0 ..< shadow.MAX_SHADOW_MAPS {
+    if self.shadow.slot_active[slot] {
+      append(&active_light_slots, u32(slot))
+    }
+  }
+
+  depth_cameras := make([dynamic]u32, context.temp_allocator)
+  geometry_cameras := make([dynamic]u32, context.temp_allocator)
+  lighting_cameras := make([dynamic]u32, context.temp_allocator)
+  particles_cameras := make([dynamic]u32, context.temp_allocator)
+  transparency_cameras := make([dynamic]u32, context.temp_allocator)
+  debug_cameras := make([dynamic]u32, context.temp_allocator)
+  for cam_index in active_cameras {
+    cam, cam_ok := self.cameras[cam_index]
+    if !cam_ok do continue
+
+    append(&depth_cameras, cam_index)
+
+    if .GEOMETRY in cam.enabled_passes || .LIGHTING in cam.enabled_passes {
+      append(&geometry_cameras, cam_index)
+    }
+    if .LIGHTING in cam.enabled_passes {
+      append(&lighting_cameras, cam_index)
+    }
+    if .PARTICLES in cam.enabled_passes {
+      append(&particles_cameras, cam_index)
+    }
+    if .TRANSPARENCY in cam.enabled_passes {
+      append(&transparency_cameras, cam_index)
+    }
+  }
+
+  shadow_texture_indices: [rd.MAX_LIGHTS]u32
+  for i in 0 ..< rd.MAX_LIGHTS {
+    shadow_texture_indices[i] = 0xFFFFFFFF
+  }
+  for handle in active_lights {
+    light_data := gpu.get(&self.lights_buffer.buffer, handle.index)
+    shadow_texture_indices[handle.index] = shadow.get_texture_index(
+      &self.shadow,
+      light_data.type,
+      light_data.shadow_index,
+      frame_index,
+    )
+  }
+
+  shadow_compute_ctx := shadow.ShadowComputeGraphContext{
+    renderer = &self.shadow,
+  }
+  shadow_depth_ctx := shadow.ShadowDepthGraphContext{
+    renderer = &self.shadow,
+    texture_manager = &self.texture_manager,
+    textures_descriptor_set = self.texture_manager.descriptor_set,
+    bone_descriptor_set = self.bone_buffer.descriptor_sets[frame_index],
+    material_descriptor_set = self.material_buffer.descriptor_set,
+    node_data_descriptor_set = self.node_data_buffer.descriptor_set,
+    mesh_data_descriptor_set = self.mesh_data_buffer.descriptor_set,
+    vertex_skinning_descriptor_set = self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
+    index_buffer = self.mesh_manager.index_buffer.buffer,
+  }
   depth_ctx := occlusion_culling.DepthPassGraphContext{
     system = &self.visibility,
     texture_manager = &self.texture_manager,
@@ -2133,30 +1540,6 @@ render_depth_graph_pass :: proc(
     vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
     index_buffer = self.mesh_manager.index_buffer.buffer,
   }
-
-  // Register depth prepass template (PER_CAMERA scope)
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "depth_prepass",
-    scope = .PER_CAMERA,
-    queue = .GRAPHICS,
-    setup = occlusion_culling.depth_pass_setup,
-    execute = occlusion_culling.depth_pass_execute,
-    user_data = &depth_ctx,
-  })
-
-  execute_registered_graph_templates(self, frame_index, active_cameras, {}) or_return
-
-  log.infof("Successfully executed depth prepass via graph (%d cameras)", len(active_cameras))
-  return .SUCCESS
-}
-
-// Execute geometry pass via render graph
-render_geometry_graph_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  active_cameras: []u32,
-) -> vk.Result {
-  // Create pass context for geometry pass
   geometry_ctx := geometry.GeometryPassGraphContext{
     renderer = &self.geometry,
     texture_manager = &self.texture_manager,
@@ -2170,142 +1553,34 @@ render_geometry_graph_pass :: proc(
     vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
     index_buffer = self.mesh_manager.index_buffer.buffer,
   }
-
-  // Register geometry pass template (PER_CAMERA scope)
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "geometry_pass",
-    scope = .PER_CAMERA,
-    queue = .GRAPHICS,
-    setup = geometry.geometry_pass_setup,
-    execute = geometry.geometry_pass_execute,
-    user_data = &geometry_ctx,
-  })
-
-  execute_registered_graph_templates(self, frame_index, active_cameras, {}) or_return
-
-  log.infof("Successfully executed geometry pass via graph (%d cameras)", len(active_cameras))
-  return .SUCCESS
-}
-
-// Execute shadow compute pass via render graph
-render_shadow_compute_graph_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  active_lights: []rd.LightHandle,
-) -> vk.Result {
-  // Sync lights first (updates shadow slots based on active lights)
-  shadow.sync_lights(
-    &self.shadow,
-    &self.lights_buffer,
-    active_lights,
-    frame_index,
-  )
-
-  // Collect active shadow slots
-  active_light_slots := make([dynamic]u32, context.temp_allocator)
-  for slot in 0 ..< shadow.MAX_SHADOW_MAPS {
-    if self.shadow.slot_active[slot] {
-      append(&active_light_slots, u32(slot))
-    }
-  }
-
-  if len(active_light_slots) == 0 {
-    return .SUCCESS
-  }
-
-  // Create pass context for shadow compute pass
-  shadow_compute_ctx := shadow.ShadowComputeGraphContext{
-    renderer = &self.shadow,
-  }
-
-  // Register shadow compute pass template (PER_LIGHT scope)
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "shadow_compute",
-    scope = .PER_LIGHT,
-    queue = .COMPUTE,
-    setup = shadow.shadow_compute_setup,
-    execute = shadow.shadow_compute_execute,
-    user_data = &shadow_compute_ctx,
-  })
-
-  execute_registered_graph_templates(self, frame_index, {}, active_light_slots[:]) or_return
-
-  log.infof("Successfully executed shadow compute pass via graph (%d lights)", len(active_light_slots))
-  return .SUCCESS
-}
-
-// Execute shadow depth pass via render graph
-render_shadow_depth_graph_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-) -> vk.Result {
-  // Collect active shadow slots
-  active_light_slots := make([dynamic]u32, context.temp_allocator)
-  for slot in 0 ..< shadow.MAX_SHADOW_MAPS {
-    if self.shadow.slot_active[slot] {
-      append(&active_light_slots, u32(slot))
-    }
-  }
-
-  if len(active_light_slots) == 0 {
-    return .SUCCESS
-  }
-
-  // Create pass context for shadow depth pass
-  shadow_depth_ctx := shadow.ShadowDepthGraphContext{
-    renderer = &self.shadow,
+  ambient_ctx := ambient.AmbientPassGraphContext{
+    renderer = &self.ambient,
     texture_manager = &self.texture_manager,
+    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
+    cameras = &self.cameras,
+  }
+  direct_light_ctx := direct_light.DirectLightPassGraphContext{
+    renderer = &self.direct_light,
+    texture_manager = &self.texture_manager,
+    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
+    lights_descriptor_set = self.lights_buffer.descriptor_set,
+    shadow_data_descriptor_set = self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
+    cameras = &self.cameras,
+    lights_buffer = &self.lights_buffer,
+    active_lights = active_lights,
+    shadow_texture_indices = &shadow_texture_indices,
+  }
+  particle_ctx := particles_render.ParticleRenderGraphContext{
+    renderer = &self.particles_render,
+    camera_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
     textures_descriptor_set = self.texture_manager.descriptor_set,
-    bone_descriptor_set = self.bone_buffer.descriptor_sets[frame_index],
-    material_descriptor_set = self.material_buffer.descriptor_set,
-    node_data_descriptor_set = self.node_data_buffer.descriptor_set,
-    mesh_data_descriptor_set = self.mesh_data_buffer.descriptor_set,
-    vertex_skinning_descriptor_set = self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
-    index_buffer = self.mesh_manager.index_buffer.buffer,
   }
-
-  // Register shadow depth pass template (PER_LIGHT scope)
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "shadow_depth",
-    scope = .PER_LIGHT,
-    queue = .GRAPHICS,
-    setup = shadow.shadow_depth_setup,
-    execute = shadow.shadow_depth_execute,
-    user_data = &shadow_depth_ctx,
-  })
-
-  execute_registered_graph_templates(self, frame_index, {}, active_light_slots[:]) or_return
-
-  log.infof("Successfully executed shadow depth pass via graph (%d lights)", len(active_light_slots))
-  return .SUCCESS
-}
-
-// ============================================================================
-// Transparency rendering pass (graph-based)
-// ============================================================================
-
-render_transparency_rendering_graph_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-) -> vk.Result {
-  cam, cam_ok := self.cameras[cam_index]
-  if !cam_ok {
-    log.errorf("Camera %d not found", cam_index)
-    return .ERROR_UNKNOWN
-  }
-
-  // Create pass context for transparency rendering pass (all 5 techniques)
   transparency_ctx := transparent.TransparencyRenderingPassGraphContext{
-    // All 5 renderers
     transparent_renderer = &self.transparent_renderer,
     wireframe_renderer = &self.wireframe_renderer,
     random_color_renderer = &self.random_color_renderer,
     line_strip_renderer = &self.line_strip_renderer,
     sprite_renderer = &self.sprite_renderer,
-
-    // Shared resources
     texture_manager = &self.texture_manager,
     cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
     textures_descriptor_set = self.texture_manager.descriptor_set,
@@ -2317,23 +1592,152 @@ render_transparency_rendering_graph_pass :: proc(
     sprite_descriptor_set = self.sprite_buffer.descriptor_set,
     vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
     index_buffer = self.mesh_manager.index_buffer.buffer,
-    camera = &cam,
-    camera_index = cam_index,
+    cameras = &self.cameras,
+  }
+  debug_ctx := DebugPassGraphContext{
+    renderer = &self.debug_renderer,
+    texture_manager = &self.texture_manager,
+    cameras_descriptor_set = self.camera_buffer.descriptor_sets[frame_index],
+    cameras = &self.cameras,
   }
 
-  // Register transparency rendering pass template (PER_CAMERA scope)
-  // This single pass renders all 5 techniques (transparent, wireframe, random_color, line_strip, sprite)
+  if len(active_light_slots) > 0 {
+    rg.add_pass_template(&self.graph, rg.PassTemplate{
+      name = "shadow_compute",
+      scope = .PER_LIGHT,
+      instance_indices = active_light_slots[:],
+      queue = .COMPUTE,
+      setup = shadow.shadow_compute_setup,
+      execute = shadow.shadow_compute_execute,
+      user_data = &shadow_compute_ctx,
+    })
+    rg.add_pass_template(&self.graph, rg.PassTemplate{
+      name = "shadow_depth",
+      scope = .PER_LIGHT,
+      instance_indices = active_light_slots[:],
+      queue = .GRAPHICS,
+      setup = shadow.shadow_depth_setup,
+      execute = shadow.shadow_depth_execute,
+      user_data = &shadow_depth_ctx,
+    })
+  }
+
+  if len(depth_cameras) > 0 {
+    rg.add_pass_template(&self.graph, rg.PassTemplate{
+      name = "depth_prepass",
+      scope = .PER_CAMERA,
+      instance_indices = depth_cameras[:],
+      queue = .GRAPHICS,
+      setup = occlusion_culling.depth_pass_setup,
+      execute = occlusion_culling.depth_pass_execute,
+      user_data = &depth_ctx,
+    })
+  }
+  if len(geometry_cameras) > 0 {
+    rg.add_pass_template(&self.graph, rg.PassTemplate{
+      name = "geometry_pass",
+      scope = .PER_CAMERA,
+      instance_indices = geometry_cameras[:],
+      queue = .GRAPHICS,
+      setup = geometry.geometry_pass_setup,
+      execute = geometry.geometry_pass_execute,
+      user_data = &geometry_ctx,
+    })
+  }
+  if len(lighting_cameras) > 0 {
+    rg.add_pass_template(&self.graph, rg.PassTemplate{
+      name = "ambient_pass",
+      scope = .PER_CAMERA,
+      instance_indices = lighting_cameras[:],
+      queue = .GRAPHICS,
+      setup = ambient.ambient_pass_setup,
+      execute = ambient.ambient_pass_execute,
+      user_data = &ambient_ctx,
+    })
+    rg.add_pass_template(&self.graph, rg.PassTemplate{
+      name = "direct_light_pass",
+      scope = .PER_CAMERA,
+      instance_indices = lighting_cameras[:],
+      queue = .GRAPHICS,
+      setup = direct_light.direct_light_pass_setup,
+      execute = direct_light.direct_light_pass_execute,
+      user_data = &direct_light_ctx,
+    })
+  }
+  if len(particles_cameras) > 0 {
+    rg.add_pass_template(&self.graph, rg.PassTemplate{
+      name = "particles_render",
+      scope = .PER_CAMERA,
+      instance_indices = particles_cameras[:],
+      queue = .GRAPHICS,
+      setup = particles_render.particles_render_setup,
+      execute = particles_render.particles_render_execute,
+      user_data = &particle_ctx,
+    })
+  }
+  if len(transparency_cameras) > 0 {
+    rg.add_pass_template(&self.graph, rg.PassTemplate{
+      name = "transparency_rendering_pass",
+      scope = .PER_CAMERA,
+      instance_indices = transparency_cameras[:],
+      queue = .GRAPHICS,
+      setup = transparent.transparency_rendering_pass_setup,
+      execute = transparent.transparency_rendering_pass_execute,
+      user_data = &transparency_ctx,
+    })
+  }
+  if len(self.debug_renderer.bone_instances) > 0 {
+    append(&debug_cameras, main_camera_index)
+    rg.add_pass_template(&self.graph, rg.PassTemplate{
+      name = "debug_pass",
+      scope = .PER_CAMERA,
+      instance_indices = debug_cameras[:],
+      queue = .GRAPHICS,
+      setup = debug_pass_setup,
+      execute = debug_pass_execute,
+      user_data = &debug_ctx,
+    })
+  }
+
+  main_camera, has_main_camera := self.cameras[main_camera_index]
+  if !has_main_camera {
+    log.errorf("Failed to find main camera %d for post-process", main_camera_index)
+    return .ERROR_UNKNOWN
+  }
+  pp_ctx := post_process.PostProcessPassGraphContext{
+    renderer = &self.post_process,
+    texture_manager = &self.texture_manager,
+    main_camera = &main_camera,
+    main_camera_index = main_camera_index,
+    swapchain_view = swapchain_view,
+    swapchain_extent = swapchain_extent,
+    frame_index = frame_index,
+  }
+  ui_ctx := ui_render.UIPassGraphContext{
+    renderer = &self.ui,
+    texture_manager = &self.texture_manager,
+    gctx = gctx,
+    commands = self.ui_commands[:],
+    swapchain_view = swapchain_view,
+    swapchain_extent = swapchain_extent,
+  }
   rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "transparency_rendering_pass",
-    scope = .PER_CAMERA,
+    name = "post_process_pass",
+    scope = .GLOBAL,
     queue = .GRAPHICS,
-    setup = transparent.transparency_rendering_pass_setup,
-    execute = transparent.transparency_rendering_pass_execute,
-    user_data = &transparency_ctx,
+    setup = post_process.post_process_pass_setup,
+    execute = post_process.post_process_pass_execute,
+    user_data = &pp_ctx,
+  })
+  rg.add_pass_template(&self.graph, rg.PassTemplate{
+    name = "ui_pass",
+    scope = .GLOBAL,
+    queue = .GRAPHICS,
+    setup = ui_render.ui_pass_setup,
+    execute = ui_render.ui_pass_execute,
+    user_data = &ui_ctx,
   })
 
-  execute_registered_graph_templates(self, frame_index, {cam_index}, {}) or_return
-
-  log.debugf("Successfully executed transparency rendering pass via graph (all 5 techniques, camera %d)", cam_index)
+  execute_registered_graph_templates(self, frame_index) or_return
   return .SUCCESS
 }
