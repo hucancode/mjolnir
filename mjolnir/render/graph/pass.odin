@@ -31,9 +31,15 @@ PassTemplate :: struct {
 	scope:            PassScope,
 	instance_indices: []u32, // Used for PER_CAMERA/PER_LIGHT instantiation
 	queue:            QueueType,
-	setup:            PassSetupProc, // Setup phase: declare dependencies
+	setup:            PassSetupProc, // Setup phase: declare dependencies (legacy)
 	execute:          PassExecuteProc, // Execute phase: render with resolved resources
 	user_data:        rawptr, // Points to subsystem renderer
+
+	// Declarative input/output lists (Phase 2 - replaces setup callbacks)
+	// Use template strings: "{cam}" for PER_CAMERA, "{slot}" for PER_LIGHT
+	// Examples: "camera_{cam}_depth", "shadow_draw_commands_{slot}"
+	inputs:           []string, // Resources this pass reads
+	outputs:          []string, // Resources this pass writes
 }
 
 // Builder API - used during setup phase

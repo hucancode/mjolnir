@@ -2,6 +2,8 @@ package render_graph
 
 import "core:log"
 import "core:slice"
+import "core:strings"
+import "core:fmt"
 
 // Result type for graph operations
 Result :: enum {
@@ -160,6 +162,23 @@ add_pass_template :: proc(g: ^Graph, template: PassTemplate) {
 	log.infof("Registered pass template: %s (scope: %v, queue: %v)", template.name, template.scope, template.queue)
 }
 
+// Combine declarative template with runtime execution context
+// This allows separating structure (inputs/outputs) from behavior (execute callback)
+add_declarative_pass :: proc(
+	g: ^Graph,
+	decl: PassTemplate, // Declarative template with inputs/outputs
+	instance_indices: []u32, // Active camera/light indices
+	execute: PassExecuteProc, // Execute callback (runtime)
+	user_data: rawptr, // User data (runtime)
+) {
+	template := decl
+	template.instance_indices = instance_indices
+	template.execute = execute
+	template.user_data = user_data
+	template.setup = nil // Declarative mode doesn't use setup callbacks
+	add_pass_template(g, template)
+}
+
 // Instantiate pass templates using their explicit indices
 instantiate_passes :: proc(g: ^Graph) -> Result {
 	for &template in g.pass_templates {
@@ -186,6 +205,35 @@ instantiate_passes :: proc(g: ^Graph) -> Result {
 	return .SUCCESS
 }
 
+// Expand template string by replacing {cam} or {slot} with actual index
+// Example: "camera_{cam}_depth" + scope_index=5 → "camera_5_depth"
+// Uses fmt.tprintf which allocates from temp allocator (auto-freed at end of frame)
+expand_template_string :: proc(template: string, scope_index: u32, scope: PassScope) -> string {
+	switch scope {
+	case .PER_CAMERA:
+		// Replace {cam} with camera index
+		if strings.contains(template, "{cam}") {
+			// Find {cam} and replace it
+			before, after, was_allocation := strings.partition(template, "{cam}")
+			return fmt.tprintf("%s%d%s", before, scope_index, after)
+		}
+
+	case .PER_LIGHT:
+		// Replace {slot} with light slot index
+		if strings.contains(template, "{slot}") {
+			// Find {slot} and replace it
+			before, after, was_allocation := strings.partition(template, "{slot}")
+			return fmt.tprintf("%s%d%s", before, scope_index, after)
+		}
+
+	case .GLOBAL:
+		// No expansion needed for global passes
+	}
+
+	// No template tokens found, return as-is
+	return template
+}
+
 // Create pass instance by calling setup proc
 create_pass_instance :: proc(
 	g: ^Graph,
@@ -203,18 +251,33 @@ create_pass_instance :: proc(
 		is_valid = true,
 	}
 
-	// Call setup proc to populate inputs/outputs
-	builder := PassBuilder{
-		graph = g,
-		scope_index = scope_index,
-		inputs = make([dynamic]ResourceId),
-		outputs = make([dynamic]ResourceId),
-	}
-	template.setup(&builder, template.user_data)
+	// Use declarative inputs/outputs if provided (Phase 2), otherwise use setup callback (legacy)
+	if len(template.inputs) > 0 || len(template.outputs) > 0 {
+		// Declarative path: expand template strings
+		for input_template in template.inputs {
+			expanded := expand_template_string(input_template, scope_index, template.scope)
+			append(&instance.inputs, ResourceId(expanded))
+		}
+		for output_template in template.outputs {
+			expanded := expand_template_string(output_template, scope_index, template.scope)
+			append(&instance.outputs, ResourceId(expanded))
+		}
+		instance.is_valid = true
 
-	instance.inputs = builder.inputs
-	instance.outputs = builder.outputs
-	instance.is_valid = !builder.has_missing_resource
+	} else {
+		// Legacy path: call setup proc to populate inputs/outputs
+		builder := PassBuilder{
+			graph = g,
+			scope_index = scope_index,
+			inputs = make([dynamic]ResourceId),
+			outputs = make([dynamic]ResourceId),
+		}
+		template.setup(&builder, template.user_data)
+
+		instance.inputs = builder.inputs
+		instance.outputs = builder.outputs
+		instance.is_valid = !builder.has_missing_resource
+	}
 
 	return instance
 }

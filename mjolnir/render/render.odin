@@ -1569,104 +1569,39 @@ render_frame_graph :: proc(
     cameras = &self.cameras,
   }
 
+  // ====== DECLARATIVE PASS REGISTRATION (Phase 2) ======
+  // All passes now use compile-time declarations from graph_declarations.odin
+  // This replaces ~140 lines of manual PassTemplate construction with simple calls
+
+  // PER_LIGHT passes (shadow system)
   if len(active_light_slots) > 0 {
-    rg.add_pass_template(&self.graph, rg.PassTemplate{
-      name = "shadow_compute",
-      scope = .PER_LIGHT,
-      instance_indices = active_light_slots[:],
-      queue = .COMPUTE,
-      setup = shadow.shadow_compute_setup,
-      execute = shadow.shadow_compute_execute,
-      user_data = &shadow_compute_ctx,
-    })
-    rg.add_pass_template(&self.graph, rg.PassTemplate{
-      name = "shadow_depth",
-      scope = .PER_LIGHT,
-      instance_indices = active_light_slots[:],
-      queue = .GRAPHICS,
-      setup = shadow.shadow_depth_setup,
-      execute = shadow.shadow_depth_execute,
-      user_data = &shadow_depth_ctx,
-    })
+    rg.add_declarative_pass(&self.graph, SHADOW_COMPUTE_PASS, active_light_slots[:], shadow.shadow_compute_execute, &shadow_compute_ctx)
+    rg.add_declarative_pass(&self.graph, SHADOW_DEPTH_PASS, active_light_slots[:], shadow.shadow_depth_execute, &shadow_depth_ctx)
   }
 
+  // PER_CAMERA passes (rendering pipeline)
   if len(depth_cameras) > 0 {
-    rg.add_pass_template(&self.graph, rg.PassTemplate{
-      name = "depth_prepass",
-      scope = .PER_CAMERA,
-      instance_indices = depth_cameras[:],
-      queue = .GRAPHICS,
-      setup = occlusion_culling.depth_pass_setup,
-      execute = occlusion_culling.depth_pass_execute,
-      user_data = &depth_ctx,
-    })
+    rg.add_declarative_pass(&self.graph, DEPTH_PREPASS, depth_cameras[:], occlusion_culling.depth_pass_execute, &depth_ctx)
   }
   if len(geometry_cameras) > 0 {
-    rg.add_pass_template(&self.graph, rg.PassTemplate{
-      name = "geometry_pass",
-      scope = .PER_CAMERA,
-      instance_indices = geometry_cameras[:],
-      queue = .GRAPHICS,
-      setup = geometry.geometry_pass_setup,
-      execute = geometry.geometry_pass_execute,
-      user_data = &geometry_ctx,
-    })
+    rg.add_declarative_pass(&self.graph, GEOMETRY_PASS, geometry_cameras[:], geometry.geometry_pass_execute, &geometry_ctx)
   }
   if len(lighting_cameras) > 0 {
-    rg.add_pass_template(&self.graph, rg.PassTemplate{
-      name = "ambient_pass",
-      scope = .PER_CAMERA,
-      instance_indices = lighting_cameras[:],
-      queue = .GRAPHICS,
-      setup = ambient.ambient_pass_setup,
-      execute = ambient.ambient_pass_execute,
-      user_data = &ambient_ctx,
-    })
-    rg.add_pass_template(&self.graph, rg.PassTemplate{
-      name = "direct_light_pass",
-      scope = .PER_CAMERA,
-      instance_indices = lighting_cameras[:],
-      queue = .GRAPHICS,
-      setup = direct_light.direct_light_pass_setup,
-      execute = direct_light.direct_light_pass_execute,
-      user_data = &direct_light_ctx,
-    })
+    rg.add_declarative_pass(&self.graph, AMBIENT_PASS, lighting_cameras[:], ambient.ambient_pass_execute, &ambient_ctx)
+    rg.add_declarative_pass(&self.graph, DIRECT_LIGHT_PASS, lighting_cameras[:], direct_light.direct_light_pass_execute, &direct_light_ctx)
   }
   if len(particles_cameras) > 0 {
-    rg.add_pass_template(&self.graph, rg.PassTemplate{
-      name = "particles_render",
-      scope = .PER_CAMERA,
-      instance_indices = particles_cameras[:],
-      queue = .GRAPHICS,
-      setup = particles_render.particles_render_setup,
-      execute = particles_render.particles_render_execute,
-      user_data = &particle_ctx,
-    })
+    rg.add_declarative_pass(&self.graph, PARTICLES_RENDER_PASS, particles_cameras[:], particles_render.particles_render_execute, &particle_ctx)
   }
   if len(transparency_cameras) > 0 {
-    rg.add_pass_template(&self.graph, rg.PassTemplate{
-      name = "transparency_rendering_pass",
-      scope = .PER_CAMERA,
-      instance_indices = transparency_cameras[:],
-      queue = .GRAPHICS,
-      setup = transparent.transparency_rendering_pass_setup,
-      execute = transparent.transparency_rendering_pass_execute,
-      user_data = &transparency_ctx,
-    })
+    rg.add_declarative_pass(&self.graph, TRANSPARENCY_RENDERING_PASS, transparency_cameras[:], transparent.transparency_rendering_pass_execute, &transparency_ctx)
   }
   if len(self.debug_renderer.bone_instances) > 0 {
     append(&debug_cameras, main_camera_index)
-    rg.add_pass_template(&self.graph, rg.PassTemplate{
-      name = "debug_pass",
-      scope = .PER_CAMERA,
-      instance_indices = debug_cameras[:],
-      queue = .GRAPHICS,
-      setup = debug_pass_setup,
-      execute = debug_pass_execute,
-      user_data = &debug_ctx,
-    })
+    rg.add_declarative_pass(&self.graph, DEBUG_PASS, debug_cameras[:], debug_pass_execute, &debug_ctx)
   }
 
+  // GLOBAL passes (post-processing and UI)
   main_camera, has_main_camera := self.cameras[main_camera_index]
   if !has_main_camera {
     log.errorf("Failed to find main camera %d for post-process", main_camera_index)
@@ -1689,22 +1624,8 @@ render_frame_graph :: proc(
     swapchain_view = swapchain_view,
     swapchain_extent = swapchain_extent,
   }
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "post_process_pass",
-    scope = .GLOBAL,
-    queue = .GRAPHICS,
-    setup = post_process.post_process_pass_setup,
-    execute = post_process.post_process_pass_execute,
-    user_data = &pp_ctx,
-  })
-  rg.add_pass_template(&self.graph, rg.PassTemplate{
-    name = "ui_pass",
-    scope = .GLOBAL,
-    queue = .GRAPHICS,
-    setup = ui_render.ui_pass_setup,
-    execute = ui_render.ui_pass_execute,
-    user_data = &ui_ctx,
-  })
+  rg.add_declarative_pass(&self.graph, POST_PROCESS_PASS, {}, post_process.post_process_pass_execute, &pp_ctx)
+  rg.add_declarative_pass(&self.graph, UI_PASS, {}, ui_render.ui_pass_execute, &ui_ctx)
 
   exec_ctx := rg.GraphExecutionContext{
     texture_manager = &self.texture_manager,
