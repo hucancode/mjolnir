@@ -31,9 +31,9 @@ ShadowData :: struct {
 }
 
 SpotLightGPU :: struct {
-  shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
-  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  shadow_map:      []gpu.Texture2DHandle,
+  draw_commands:   []gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count:      []gpu.MutableBuffer(u32),
   descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
@@ -44,18 +44,27 @@ DirectionalLightGPU :: struct {
   position:        [4]f32,
   direction:       [4]f32,
   near_far:        [2]f32,
-  shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
-  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  shadow_map:      []gpu.Texture2DHandle,
+  draw_commands:   []gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count:      []gpu.MutableBuffer(u32),
   descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 PointLightGPU :: struct {
-  shadow_cube:     [d.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
-  draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
-  draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  shadow_cube:     []gpu.TextureCubeHandle,
+  draw_commands:   []gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count:      []gpu.MutableBuffer(u32),
   descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
+
+DrawCountResources :: [MAX_SHADOW_MAPS][d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  u32,
+)
+DrawCommandResources :: [MAX_SHADOW_MAPS][d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  vk.DrawIndexedIndirectCommand,
+)
+ShadowMap2DResources :: [MAX_SHADOW_MAPS][d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle
+ShadowMapCubeResources :: [MAX_SHADOW_MAPS][d.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle
 
 VisibilityPushConstants :: struct {
   camera_index:  u32,
@@ -74,28 +83,28 @@ SphereVisibilityPushConstants :: struct {
 }
 
 ShadowSystem :: struct {
-  node_count:                    u32,
-  max_draws:                     u32,
-  shadow_data_buffer:            gpu.PerFrameBindlessBuffer(
+  node_count:                     u32,
+  max_draws:                      u32,
+  shadow_data_buffer:             gpu.PerFrameBindlessBuffer(
     ShadowData,
     d.FRAMES_IN_FLIGHT,
   ),
-  spot_lights:                   [MAX_SHADOW_MAPS]SpotLightGPU,
-  directional_lights:            [MAX_SHADOW_MAPS]DirectionalLightGPU,
-  point_lights:                  [MAX_SHADOW_MAPS]PointLightGPU,
-  slot_active:                   [MAX_SHADOW_MAPS]bool,
-  slot_kind:                     [MAX_SHADOW_MAPS]d.LightType,
-  light_to_slot:                 [d.MAX_LIGHTS]u32,
-  shadow_cull_descriptor_layout: vk.DescriptorSetLayout,
-  sphere_cull_descriptor_layout: vk.DescriptorSetLayout,
-  shadow_cull_layout:            vk.PipelineLayout,
-  sphere_cull_layout:            vk.PipelineLayout,
-  shadow_cull_pipeline:          vk.Pipeline,
-  sphere_cull_pipeline:          vk.Pipeline,
-  depth_pipeline_layout:         vk.PipelineLayout,
-  depth_pipeline:                vk.Pipeline,
-  sphere_depth_pipeline_layout:  vk.PipelineLayout,
-  sphere_depth_pipeline:         vk.Pipeline,
+  spot_lights:                    [MAX_SHADOW_MAPS]SpotLightGPU,
+  directional_lights:             [MAX_SHADOW_MAPS]DirectionalLightGPU,
+  point_lights:                   [MAX_SHADOW_MAPS]PointLightGPU,
+  slot_active:                    [MAX_SHADOW_MAPS]bool,
+  slot_kind:                      [MAX_SHADOW_MAPS]d.LightType,
+  light_to_slot:                  [d.MAX_LIGHTS]u32,
+  shadow_cull_descriptor_layout:  vk.DescriptorSetLayout,
+  sphere_cull_descriptor_layout:  vk.DescriptorSetLayout,
+  shadow_cull_layout:             vk.PipelineLayout,
+  sphere_cull_layout:             vk.PipelineLayout,
+  shadow_cull_pipeline:           vk.Pipeline,
+  sphere_cull_pipeline:           vk.Pipeline,
+  depth_pipeline_layout:          vk.PipelineLayout,
+  depth_pipeline:                 vk.Pipeline,
+  sphere_depth_pipeline_layout:   vk.PipelineLayout,
+  sphere_depth_pipeline:          vk.Pipeline,
 }
 
 @(private)
@@ -376,9 +385,19 @@ setup :: proc(
   texture_manager: ^gpu.TextureManager,
   node_data_buffer: ^gpu.BindlessBuffer(d.Node),
   mesh_data_buffer: ^gpu.BindlessBuffer(d.Mesh),
+  spot_shadow_maps: ^ShadowMap2DResources,
+  directional_shadow_maps: ^ShadowMap2DResources,
+  point_shadow_cubes: ^ShadowMapCubeResources,
+  spot_draw_counts: ^DrawCountResources,
+  spot_draw_commands: ^DrawCommandResources,
+  directional_draw_counts: ^DrawCountResources,
+  directional_draw_commands: ^DrawCommandResources,
+  point_draw_counts: ^DrawCountResources,
+  point_draw_commands: ^DrawCommandResources,
 ) -> (
   ret: vk.Result,
 ) {
+  _ = texture_manager
   // Buffers + set_layouts created in shadow_init; just re-allocate descriptor sets here
   gpu.per_frame_bindless_buffer_realloc_descriptors(
     &self.shadow_data_buffer,
@@ -388,64 +407,16 @@ setup :: proc(
     spot := &self.spot_lights[slot]
     directional := &self.directional_lights[slot]
     point := &self.point_lights[slot]
+    spot.shadow_map = spot_shadow_maps[slot][:]
+    directional.shadow_map = directional_shadow_maps[slot][:]
+    point.shadow_cube = point_shadow_cubes[slot][:]
+    spot.draw_count = spot_draw_counts[slot][:]
+    spot.draw_commands = spot_draw_commands[slot][:]
+    directional.draw_count = directional_draw_counts[slot][:]
+    directional.draw_commands = directional_draw_commands[slot][:]
+    point.draw_count = point_draw_counts[slot][:]
+    point.draw_commands = point_draw_commands[slot][:]
     for frame in 0 ..< d.FRAMES_IN_FLIGHT {
-      spot.shadow_map[frame] = gpu.allocate_texture_2d(
-        texture_manager,
-        gctx,
-        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
-        .D32_SFLOAT,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      ) or_return
-      directional.shadow_map[frame] = gpu.allocate_texture_2d(
-        texture_manager,
-        gctx,
-        vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
-        .D32_SFLOAT,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      ) or_return
-      point.shadow_cube[frame] = gpu.allocate_texture_cube(
-        texture_manager,
-        gctx,
-        SHADOW_MAP_SIZE,
-        .D32_SFLOAT,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      ) or_return
-      spot.draw_count[frame] = gpu.create_mutable_buffer(
-        gctx,
-        u32,
-        1,
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-      ) or_return
-      spot.draw_commands[frame] = gpu.create_mutable_buffer(
-        gctx,
-        vk.DrawIndexedIndirectCommand,
-        d.MAX_NODES_IN_SCENE,
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-      ) or_return
-      directional.draw_count[frame] = gpu.create_mutable_buffer(
-        gctx,
-        u32,
-        1,
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-      ) or_return
-      directional.draw_commands[frame] = gpu.create_mutable_buffer(
-        gctx,
-        vk.DrawIndexedIndirectCommand,
-        d.MAX_NODES_IN_SCENE,
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-      ) or_return
-      point.draw_count[frame] = gpu.create_mutable_buffer(
-        gctx,
-        u32,
-        1,
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-      ) or_return
-      point.draw_commands[frame] = gpu.create_mutable_buffer(
-        gctx,
-        vk.DrawIndexedIndirectCommand,
-        d.MAX_NODES_IN_SCENE,
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-      ) or_return
       spot.descriptor_sets[frame] = gpu.create_descriptor_set(
         gctx,
         &self.shadow_cull_descriptor_layout,
@@ -492,26 +463,22 @@ teardown :: proc(
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
 ) {
+  _ = gctx
+  _ = texture_manager
   for slot in 0 ..< MAX_SHADOW_MAPS {
     spot := &self.spot_lights[slot]
     directional := &self.directional_lights[slot]
     point := &self.point_lights[slot]
+    spot.shadow_map = nil
+    directional.shadow_map = nil
+    point.shadow_cube = nil
+    spot.draw_count = nil
+    spot.draw_commands = nil
+    directional.draw_count = nil
+    directional.draw_commands = nil
+    point.draw_count = nil
+    point.draw_commands = nil
     for frame in 0 ..< d.FRAMES_IN_FLIGHT {
-      gpu.free_texture_2d(texture_manager, gctx, spot.shadow_map[frame])
-      spot.shadow_map[frame] = {}
-      gpu.free_texture_2d(texture_manager, gctx, directional.shadow_map[frame])
-      directional.shadow_map[frame] = {}
-      gpu.free_texture_cube(texture_manager, gctx, point.shadow_cube[frame])
-      point.shadow_cube[frame] = {}
-      gpu.mutable_buffer_destroy(gctx.device, &spot.draw_count[frame])
-      gpu.mutable_buffer_destroy(gctx.device, &spot.draw_commands[frame])
-      gpu.mutable_buffer_destroy(gctx.device, &directional.draw_count[frame])
-      gpu.mutable_buffer_destroy(
-        gctx.device,
-        &directional.draw_commands[frame],
-      )
-      gpu.mutable_buffer_destroy(gctx.device, &point.draw_count[frame])
-      gpu.mutable_buffer_destroy(gctx.device, &point.draw_commands[frame])
       spot.descriptor_sets[frame] = 0
       directional.descriptor_sets[frame] = 0
       point.descriptor_sets[frame] = 0
@@ -1132,30 +1099,11 @@ get_texture_index :: proc(
 // Graph-based API
 // ============================================================================
 
-ShadowComputeGraphContext :: struct {
-  renderer: ^ShadowSystem,
-}
-
-ShadowDepthGraphContext :: struct {
-  renderer:                      ^ShadowSystem,
-  texture_manager:               ^gpu.TextureManager,
-  textures_descriptor_set:       vk.DescriptorSet,
-  bone_descriptor_set:           vk.DescriptorSet,
-  material_descriptor_set:       vk.DescriptorSet,
-  node_data_descriptor_set:      vk.DescriptorSet,
-  mesh_data_descriptor_set:      vk.DescriptorSet,
-  vertex_skinning_descriptor_set: vk.DescriptorSet,
-  vertex_buffer:                 vk.Buffer,
-  index_buffer:                  vk.Buffer,
-}
-
-// Setup phase: declare dependencies for shadow_compute pass (PER_LIGHT)
-// REMOVED: Old setup callback (replaced by declarative PassTemplate)
-
 // Execute phase: compute shadow draw lists for this light (PER_LIGHT)
-shadow_compute_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
-  ctx := cast(^ShadowComputeGraphContext)user_data
-  self := ctx.renderer
+shadow_compute_execute :: proc(
+  self: ^ShadowSystem,
+  pass_ctx: ^rg.PassContext,
+) {
   light_slot := pass_ctx.scope_index
 
   if !self.slot_active[light_slot] {
@@ -1163,8 +1111,12 @@ shadow_compute_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
   }
 
   include_flags: d.NodeFlagSet = {.VISIBLE}
-  exclude_flags: d.NodeFlagSet =
-    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP}
+  exclude_flags: d.NodeFlagSet = {
+    .MATERIAL_TRANSPARENT,
+    .MATERIAL_WIREFRAME,
+    .MATERIAL_RANDOM_COLOR,
+    .MATERIAL_LINE_STRIP,
+  }
 
   kind := self.slot_kind[light_slot]
   switch kind {
@@ -1299,57 +1251,73 @@ shadow_compute_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
   }
 }
 
-// Setup phase: declare dependencies for shadow_depth pass (PER_LIGHT)
-// REMOVED: Old setup callback (replaced by declarative PassTemplate)
-
 // Execute phase: render shadow depth map for this light (PER_LIGHT)
-shadow_depth_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
-  ctx := cast(^ShadowDepthGraphContext)user_data
-  self := ctx.renderer
+Blackboard :: struct {
+  shadow_map:    rg.DepthTexture,
+  draw_commands: rg.Buffer,
+  draw_count:    rg.Buffer,
+  textures_descriptor_set:        vk.DescriptorSet,
+  bone_descriptor_set:            vk.DescriptorSet,
+  material_descriptor_set:        vk.DescriptorSet,
+  node_data_descriptor_set:       vk.DescriptorSet,
+  mesh_data_descriptor_set:       vk.DescriptorSet,
+  vertex_skinning_descriptor_set: vk.DescriptorSet,
+  vertex_buffer:                  vk.Buffer,
+  index_buffer:                   vk.Buffer,
+}
+
+shadow_depth_pass_deps_from_context :: proc(
+  pass_ctx: ^rg.PassContext,
+) -> Blackboard {
+  return Blackboard {
+    shadow_map = rg.get_depth(pass_ctx, .SHADOW_MAP),
+    draw_commands = rg.get_buffer(pass_ctx, .SHADOW_DRAW_COMMANDS),
+    draw_count = rg.get_buffer(pass_ctx, .SHADOW_DRAW_COUNT),
+  }
+}
+
+shadow_depth_execute :: proc(
+  self: ^ShadowSystem,
+  pass_ctx: ^rg.PassContext,
+  deps: Blackboard,
+) {
   light_slot := pass_ctx.scope_index
 
   if !self.slot_active[light_slot] {
     return
   }
 
-  // Note: Shadow map resolution happens inside each light type case below
-  // to handle different texture types (2D vs Cube)
+  shadow_map := deps.shadow_map
+  draw_commands := deps.draw_commands
+  draw_count := deps.draw_count
 
   switch self.slot_kind[light_slot] {
   case .SPOT:
-    spot := &self.spot_lights[light_slot]
-    depth_texture := gpu.get_texture_2d(
-      ctx.texture_manager,
-      spot.shadow_map[pass_ctx.frame_index],
-    )
-    if depth_texture == nil do return
-
-    // Graph handles UNDEFINED -> DEPTH_ATTACHMENT transition automatically
-    depth_attachment := gpu.create_depth_attachment(
-      depth_texture,
-      .CLEAR,
-      .STORE,
-    )
+    depth_attachment := vk.RenderingAttachmentInfo {
+      sType = .RENDERING_ATTACHMENT_INFO,
+      imageView = shadow_map.view,
+      imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      loadOp = .CLEAR,
+      storeOp = .STORE,
+      clearValue = {depthStencil = {depth = 1.0}},
+    }
     gpu.begin_depth_rendering(
       pass_ctx.cmd,
-      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+      shadow_map.extent,
       &depth_attachment,
     )
-    gpu.set_viewport_scissor(
-      pass_ctx.cmd,
-      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
-    )
+    gpu.set_viewport_scissor(pass_ctx.cmd, shadow_map.extent)
     gpu.bind_graphics_pipeline(
       pass_ctx.cmd,
       self.depth_pipeline,
       self.depth_pipeline_layout,
       self.shadow_data_buffer.descriptor_sets[pass_ctx.frame_index],
-      ctx.textures_descriptor_set,
-      ctx.bone_descriptor_set,
-      ctx.material_descriptor_set,
-      ctx.node_data_descriptor_set,
-      ctx.mesh_data_descriptor_set,
-      ctx.vertex_skinning_descriptor_set,
+      deps.textures_descriptor_set,
+      deps.bone_descriptor_set,
+      deps.material_descriptor_set,
+      deps.node_data_descriptor_set,
+      deps.mesh_data_descriptor_set,
+      deps.vertex_skinning_descriptor_set,
     )
     slot_idx := u32(light_slot)
     vk.CmdPushConstants(
@@ -1362,54 +1330,46 @@ shadow_depth_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
     )
     gpu.bind_vertex_index_buffers(
       pass_ctx.cmd,
-      ctx.vertex_buffer,
-      ctx.index_buffer,
+      deps.vertex_buffer,
+      deps.index_buffer,
     )
     vk.CmdDrawIndexedIndirectCount(
       pass_ctx.cmd,
-      spot.draw_commands[pass_ctx.frame_index].buffer,
+      draw_commands.buffer,
       0,
-      spot.draw_count[pass_ctx.frame_index].buffer,
+      draw_count.buffer,
       0,
       self.max_draws,
       u32(size_of(vk.DrawIndexedIndirectCommand)),
     )
     vk.CmdEndRendering(pass_ctx.cmd)
-    // Graph handles DEPTH_ATTACHMENT -> SHADER_READ transition automatically
 
   case .DIRECTIONAL:
-    directional := &self.directional_lights[light_slot]
-    depth_texture := gpu.get_texture_2d(
-      ctx.texture_manager,
-      directional.shadow_map[pass_ctx.frame_index],
-    )
-    if depth_texture == nil do return
-
-    depth_attachment := gpu.create_depth_attachment(
-      depth_texture,
-      .CLEAR,
-      .STORE,
-    )
+    depth_attachment := vk.RenderingAttachmentInfo {
+      sType = .RENDERING_ATTACHMENT_INFO,
+      imageView = shadow_map.view,
+      imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      loadOp = .CLEAR,
+      storeOp = .STORE,
+      clearValue = {depthStencil = {depth = 1.0}},
+    }
     gpu.begin_depth_rendering(
       pass_ctx.cmd,
-      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+      shadow_map.extent,
       &depth_attachment,
     )
-    gpu.set_viewport_scissor(
-      pass_ctx.cmd,
-      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
-    )
+    gpu.set_viewport_scissor(pass_ctx.cmd, shadow_map.extent)
     gpu.bind_graphics_pipeline(
       pass_ctx.cmd,
       self.depth_pipeline,
       self.depth_pipeline_layout,
       self.shadow_data_buffer.descriptor_sets[pass_ctx.frame_index],
-      ctx.textures_descriptor_set,
-      ctx.bone_descriptor_set,
-      ctx.material_descriptor_set,
-      ctx.node_data_descriptor_set,
-      ctx.mesh_data_descriptor_set,
-      ctx.vertex_skinning_descriptor_set,
+      deps.textures_descriptor_set,
+      deps.bone_descriptor_set,
+      deps.material_descriptor_set,
+      deps.node_data_descriptor_set,
+      deps.mesh_data_descriptor_set,
+      deps.vertex_skinning_descriptor_set,
     )
     slot_idx := u32(light_slot)
     vk.CmdPushConstants(
@@ -1422,14 +1382,14 @@ shadow_depth_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
     )
     gpu.bind_vertex_index_buffers(
       pass_ctx.cmd,
-      ctx.vertex_buffer,
-      ctx.index_buffer,
+      deps.vertex_buffer,
+      deps.index_buffer,
     )
     vk.CmdDrawIndexedIndirectCount(
       pass_ctx.cmd,
-      directional.draw_commands[pass_ctx.frame_index].buffer,
+      draw_commands.buffer,
       0,
-      directional.draw_count[pass_ctx.frame_index].buffer,
+      draw_count.buffer,
       0,
       self.max_draws,
       u32(size_of(vk.DrawIndexedIndirectCommand)),
@@ -1437,27 +1397,23 @@ shadow_depth_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
     vk.CmdEndRendering(pass_ctx.cmd)
 
   case .POINT:
-    point := &self.point_lights[light_slot]
-    depth_cube := gpu.get_texture_cube(
-      ctx.texture_manager,
-      point.shadow_cube[pass_ctx.frame_index],
-    )
-    if depth_cube == nil do return
-
-    depth_attachment := gpu.create_cube_depth_attachment(
-      depth_cube,
-      .CLEAR,
-      .STORE,
-    )
+    depth_attachment := vk.RenderingAttachmentInfo {
+      sType = .RENDERING_ATTACHMENT_INFO,
+      imageView = shadow_map.view,
+      imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      loadOp = .CLEAR,
+      storeOp = .STORE,
+      clearValue = {depthStencil = {depth = 1.0}},
+    }
     gpu.begin_depth_rendering(
       pass_ctx.cmd,
-      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+      shadow_map.extent,
       &depth_attachment,
       layer_count = 6,
     )
     gpu.set_viewport_scissor(
       pass_ctx.cmd,
-      vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
+      shadow_map.extent,
       flip_x = true,
       flip_y = false,
     )
@@ -1466,12 +1422,12 @@ shadow_depth_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
       self.sphere_depth_pipeline,
       self.sphere_depth_pipeline_layout,
       self.shadow_data_buffer.descriptor_sets[pass_ctx.frame_index],
-      ctx.textures_descriptor_set,
-      ctx.bone_descriptor_set,
-      ctx.material_descriptor_set,
-      ctx.node_data_descriptor_set,
-      ctx.mesh_data_descriptor_set,
-      ctx.vertex_skinning_descriptor_set,
+      deps.textures_descriptor_set,
+      deps.bone_descriptor_set,
+      deps.material_descriptor_set,
+      deps.node_data_descriptor_set,
+      deps.mesh_data_descriptor_set,
+      deps.vertex_skinning_descriptor_set,
     )
     slot_idx := u32(light_slot)
     vk.CmdPushConstants(
@@ -1484,14 +1440,14 @@ shadow_depth_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
     )
     gpu.bind_vertex_index_buffers(
       pass_ctx.cmd,
-      ctx.vertex_buffer,
-      ctx.index_buffer,
+      deps.vertex_buffer,
+      deps.index_buffer,
     )
     vk.CmdDrawIndexedIndirectCount(
       pass_ctx.cmd,
-      point.draw_commands[pass_ctx.frame_index].buffer,
+      draw_commands.buffer,
       0,
-      point.draw_count[pass_ctx.frame_index].buffer,
+      draw_count.buffer,
       0,
       self.max_draws,
       u32(size_of(vk.DrawIndexedIndirectCommand)),

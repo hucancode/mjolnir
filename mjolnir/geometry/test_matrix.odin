@@ -51,7 +51,7 @@ test_matrix_mul_order_right_operand_first :: proc(t: ^testing.T) {
     log.infof("transform matrix in memory (alt) %v", transmute([16]f32)transform_alt)
     transformed_alt := transform_alt * point
     expected_transformed_alt := [4]f32{10, 0, 0, 1}
-    testing.expect(t, linalg.distance(expected_transformed_alt, expected_transformed_alt) < 0.001)
+    testing.expect(t, linalg.distance(transformed_alt, expected_transformed_alt) < 0.001)
 }
 
 @(test)

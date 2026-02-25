@@ -2,12 +2,10 @@ package direct_light
 
 import "../../geometry"
 import "../../gpu"
-import "../camera"
 import d "../data"
-import "../shared"
-import "../shadow"
 import rg "../graph"
-import "core:fmt"
+import "../shadow"
+import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -28,6 +26,12 @@ PushConstant :: struct {
   emissive_texture_index: u32,
   input_image_index:      u32,
   shadow_map_index:       u32,
+}
+
+ActiveLightRuntime :: struct {
+  index:            u32,
+  light_type:       d.LightType,
+  shadow_map_index: u32,
 }
 
 Renderer :: struct {
@@ -114,15 +118,9 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   }
-  vert_module := gpu.create_shader_module(
-    gctx.device,
-    SHADER_VERT,
-  ) or_return
+  vert_module := gpu.create_shader_module(gctx.device, SHADER_VERT) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_module := gpu.create_shader_module(
-    gctx.device,
-    SHADER_FRAG,
-  ) or_return
+  frag_module := gpu.create_shader_module(gctx.device, SHADER_FRAG) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   dynamic_states := [?]vk.DynamicState {
     .VIEWPORT,
@@ -130,9 +128,7 @@ init :: proc(
     .DEPTH_COMPARE_OP,
     .CULL_MODE,
   }
-  dynamic_state := gpu.create_dynamic_state(
-    dynamic_states[:],
-  )
+  dynamic_state := gpu.create_dynamic_state(dynamic_states[:])
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
@@ -177,12 +173,7 @@ init :: proc(
   return .SUCCESS
 }
 
-setup :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-) -> (
-  ret: vk.Result,
-) {
+setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   create_light_volume_mesh(
     gctx,
     &self.sphere_mesh,
@@ -211,122 +202,43 @@ setup :: proc(
   return .SUCCESS
 }
 
-teardown :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-) {
+teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   destroy_light_volume_mesh(gctx.device, &self.sphere_mesh)
   destroy_light_volume_mesh(gctx.device, &self.cone_mesh)
   destroy_light_volume_mesh(gctx.device, &self.triangle_mesh)
 }
 
-shutdown :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-) {
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
 }
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
-  texture_manager: ^gpu.TextureManager,
+  _camera: rawptr,
+  _texture_manager: rawptr,
   command_buffer: vk.CommandBuffer,
-  cameras_descriptor_set: vk.DescriptorSet,
-  lights_descriptor_set: vk.DescriptorSet,
-  shadow_data_descriptor_set: vk.DescriptorSet,
-  frame_index: u32,
+  _cameras_descriptor_set: vk.DescriptorSet,
+  _lights_descriptor_set: vk.DescriptorSet,
+  _shadow_data_descriptor_set: vk.DescriptorSet,
+  _frame_index: u32,
 ) {
-  final_image := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.FINAL_IMAGE][frame_index],
-  )
-  depth_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.DEPTH][frame_index],
-  )
-  gpu.begin_rendering(
-    command_buffer,
-    depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .LOAD, .DONT_CARE),
-    gpu.create_color_attachment(final_image, .LOAD, .STORE, BG_BLUE_GRAY),
-  )
-  gpu.set_viewport_scissor(
-    command_buffer,
-    depth_texture.spec.extent,
-  )
-  gpu.bind_graphics_pipeline(
-    command_buffer,
-    self.pipeline,
-    self.pipeline_layout,
-    cameras_descriptor_set, // set = 0 (per-frame cameras)
-    texture_manager.descriptor_set, // set = 1 (textures/samplers)
-    lights_descriptor_set, // set = 2 (lights)
-    shadow_data_descriptor_set, // set = 3 (per-frame shadow data)
-  )
+  _ = self
+  _ = command_buffer
 }
 
 render :: proc(
   self: ^Renderer,
-  camera_handle: u32,
-  camera: ^camera.Camera,
-  shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
+  _camera_handle: u32,
+  _camera: rawptr,
+  _shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
   command_buffer: vk.CommandBuffer,
-  lights_buffer: ^gpu.BindlessBuffer(d.Light),
-  active_lights: []d.LightHandle,
-  frame_index: u32,
+  _lights_buffer: ^gpu.BindlessBuffer(d.Light),
+  _active_lights: []d.LightHandle,
+  _frame_index: u32,
 ) {
-  bind_and_draw_mesh :: proc(
-    mesh: ^LightVolumeMesh,
-    command_buffer: vk.CommandBuffer,
-  ) {
-    gpu.bind_vertex_index_buffers(
-      command_buffer,
-      mesh.vertex_buffer.buffer,
-      mesh.index_buffer.buffer,
-      0,
-      0,
-    )
-    vk.CmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0)
-  }
-  push_constant := PushConstant {
-    scene_camera_idx       = camera_handle,
-    position_texture_index = camera.attachments[.POSITION][frame_index].index,
-    normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
-    albedo_texture_index   = camera.attachments[.ALBEDO][frame_index].index,
-    metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
-    input_image_index      = camera.attachments[.FINAL_IMAGE][frame_index].index,
-  }
-  for handle in active_lights {
-    light := gpu.get(&lights_buffer.buffer, handle.index)
-    shadow_map_index := shadow_texture_indices[handle.index]
-    push_constant.light_index = handle.index
-    push_constant.shadow_map_index = shadow_map_index
-    vk.CmdPushConstants(
-      command_buffer,
-      self.pipeline_layout,
-      {.VERTEX, .FRAGMENT},
-      0,
-      size_of(push_constant),
-      &push_constant,
-    )
-    switch light.type {
-    case .POINT:
-      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
-      vk.CmdSetCullMode(command_buffer, {.FRONT})
-      bind_and_draw_mesh(&self.sphere_mesh, command_buffer)
-    case .DIRECTIONAL:
-      vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
-      vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(&self.triangle_mesh, command_buffer)
-    case .SPOT:
-      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
-      vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(&self.cone_mesh, command_buffer)
-    }
-  }
+  _ = self
+  _ = command_buffer
 }
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {
@@ -337,64 +249,69 @@ end_pass :: proc(command_buffer: vk.CommandBuffer) {
 // Graph-based API for render graph integration
 // ============================================================================
 
-DirectLightPassGraphContext :: struct {
-  renderer:                 ^Renderer,
-  texture_manager:          ^gpu.TextureManager,
-  cameras_descriptor_set:   vk.DescriptorSet,
-  lights_descriptor_set:    vk.DescriptorSet,
+Blackboard :: struct {
+	final_image: rg.Texture,
+	depth:       rg.DepthTexture,
+	position:    rg.Texture,
+	normal:      rg.Texture,
+	albedo:      rg.Texture,
+	metallic:    rg.Texture,
+	emissive:    rg.Texture,
+  cameras_descriptor_set:     vk.DescriptorSet,
+  textures_descriptor_set:    vk.DescriptorSet,
+  lights_descriptor_set:      vk.DescriptorSet,
   shadow_data_descriptor_set: vk.DescriptorSet,
-  cameras:                  ^map[u32]camera.Camera,
-  lights_buffer:            ^gpu.BindlessBuffer(d.Light),
-  active_lights:            []d.LightHandle,
-  shadow_texture_indices:   ^[d.MAX_LIGHTS]u32,
+  active_lights:              []ActiveLightRuntime,
 }
 
-// REMOVED: Old setup callback (replaced by declarative PassTemplate)
+direct_light_pass_deps_from_context :: proc(
+  pass_ctx: ^rg.PassContext,
+) -> Blackboard {
+  return Blackboard {
+    final_image = rg.get_texture(pass_ctx, .CAMERA_FINAL_IMAGE),
+    depth = rg.get_depth(pass_ctx, .CAMERA_DEPTH),
+    position = rg.get_texture(pass_ctx, .CAMERA_GBUFFER_POSITION),
+    normal = rg.get_texture(pass_ctx, .CAMERA_GBUFFER_NORMAL),
+    albedo = rg.get_texture(pass_ctx, .CAMERA_GBUFFER_ALBEDO),
+    metallic = rg.get_texture(pass_ctx, .CAMERA_GBUFFER_METALLIC_ROUGHNESS),
+    emissive = rg.get_texture(pass_ctx, .CAMERA_GBUFFER_EMISSIVE),
+  }
+}
 
-direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) {
-  ctx := cast(^DirectLightPassGraphContext)user_data
-  self := ctx.renderer
+direct_light_pass_execute :: proc(
+  self: ^Renderer,
+  pass_ctx: ^rg.PassContext,
+  deps: Blackboard,
+) {
   cam_idx := pass_ctx.scope_index
-  cam, cam_ok := ctx.cameras[cam_idx]
-  if !cam_ok do return
-
-  // Resolve final_image resource ID
-  final_image_name := fmt.tprintf("camera_%d_final_image", cam_idx)
-  final_image_id := rg.ResourceId(final_image_name)
-  final_image_handle, resolve_ok := rg.resolve(rg.TextureHandle, pass_ctx, final_image_id)
-  if !resolve_ok {
-    log.errorf("Failed to resolve final_image for camera %d", cam_idx)
-    return
-  }
-  // Resolve depth resource ID
-  depth_name := fmt.tprintf("camera_%d_depth", cam_idx)
-  depth_id := rg.ResourceId(depth_name)
-  depth_handle, depth_resolve_ok := rg.resolve(rg.DepthTextureHandle, pass_ctx, depth_id)
-  if !depth_resolve_ok {
-    log.errorf("Failed to resolve depth for camera %d", cam_idx)
-    return
-  }
+  final_image_handle := deps.final_image
+  depth_handle := deps.depth
+  position_handle := deps.position
+  normal_handle := deps.normal
+  albedo_handle := deps.albedo
+  metallic_handle := deps.metallic
+  emissive_handle := deps.emissive
 
   // Begin rendering to final_image with depth test
-  color_attachment := vk.RenderingAttachmentInfo{
+  color_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = final_image_handle.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .LOAD,  // Load existing content (ambient lighting)
+    loadOp = .LOAD, // Load existing content (ambient lighting)
     storeOp = .STORE,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},  // Unused with LOAD, but good practice
+    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}}, // Unused with LOAD, but good practice
   }
 
-  depth_attachment := vk.RenderingAttachmentInfo{
+  depth_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = depth_handle.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp = .LOAD,  // Load existing depth from geometry pass
-    storeOp = .DONT_CARE,  // Don't need to save depth
-    clearValue = {depthStencil = {depth = 1.0}},  // Unused with LOAD, but good practice
+    loadOp = .LOAD, // Load existing depth from geometry pass
+    storeOp = .DONT_CARE, // Don't need to save depth
+    clearValue = {depthStencil = {depth = 1.0}}, // Unused with LOAD, but good practice
   }
 
-  rendering_info := vk.RenderingInfo{
+  rendering_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
     renderArea = {extent = final_image_handle.extent},
     layerCount = 1,
@@ -405,19 +322,16 @@ direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) 
 
   vk.CmdBeginRendering(pass_ctx.cmd, &rendering_info)
 
-  gpu.set_viewport_scissor(
-    pass_ctx.cmd,
-    final_image_handle.extent,
-  )
+  gpu.set_viewport_scissor(pass_ctx.cmd, final_image_handle.extent)
 
   gpu.bind_graphics_pipeline(
     pass_ctx.cmd,
     self.pipeline,
     self.pipeline_layout,
-    ctx.cameras_descriptor_set,
-    ctx.texture_manager.descriptor_set,
-    ctx.lights_descriptor_set,
-    ctx.shadow_data_descriptor_set,
+    deps.cameras_descriptor_set,
+    deps.textures_descriptor_set,
+    deps.lights_descriptor_set,
+    deps.shadow_data_descriptor_set,
   )
 
   // Helper to bind and draw mesh
@@ -436,22 +350,20 @@ direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) 
   }
 
   // Build push constants using camera attachment texture indices
-  push_constant := PushConstant{
-    scene_camera_idx = cam_idx,
-    position_texture_index = cam.attachments[.POSITION][pass_ctx.frame_index].index,
-    normal_texture_index = cam.attachments[.NORMAL][pass_ctx.frame_index].index,
-    albedo_texture_index = cam.attachments[.ALBEDO][pass_ctx.frame_index].index,
-    metallic_texture_index = cam.attachments[.METALLIC_ROUGHNESS][pass_ctx.frame_index].index,
-    emissive_texture_index = cam.attachments[.EMISSIVE][pass_ctx.frame_index].index,
-    input_image_index = cam.attachments[.FINAL_IMAGE][pass_ctx.frame_index].index,
+  push_constant := PushConstant {
+    scene_camera_idx       = cam_idx,
+    position_texture_index = position_handle.index,
+    normal_texture_index   = normal_handle.index,
+    albedo_texture_index   = albedo_handle.index,
+    metallic_texture_index = metallic_handle.index,
+    emissive_texture_index = emissive_handle.index,
+    input_image_index      = final_image_handle.index,
   }
 
   // Render light volumes for each active light
-  for handle in ctx.active_lights {
-    light := gpu.get(&ctx.lights_buffer.buffer, handle.index)
-    shadow_map_index := ctx.shadow_texture_indices[handle.index]
-    push_constant.light_index = handle.index
-    push_constant.shadow_map_index = shadow_map_index
+  for light in deps.active_lights {
+    push_constant.light_index = light.index
+    push_constant.shadow_map_index = light.shadow_map_index
 
     vk.CmdPushConstants(
       pass_ctx.cmd,
@@ -462,7 +374,7 @@ direct_light_pass_execute :: proc(pass_ctx: ^rg.PassContext, user_data: rawptr) 
       &push_constant,
     )
 
-    switch light.type {
+    switch light.light_type {
     case .POINT:
       vk.CmdSetDepthCompareOp(pass_ctx.cmd, .GREATER_OR_EQUAL)
       vk.CmdSetCullMode(pass_ctx.cmd, {.FRONT})

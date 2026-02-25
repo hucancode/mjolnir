@@ -1,8 +1,8 @@
 package debug
 
 import "../../gpu"
-import "../camera"
 import "../data"
+import rg "../graph"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -190,40 +190,49 @@ clear_bones :: proc(self: ^Renderer) {
 // Returns false if attachments are missing (caller should skip rendering)
 begin_pass :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
-  texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  frame_index: u32,
+  final_image: rg.Texture,
+  depth_image: rg.DepthTexture,
 ) -> bool {
-  color_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.FINAL_IMAGE][frame_index],
-  )
-  if color_texture == nil {
+  _ = self
+
+  if final_image.view == 0 {
     log.error("Debug rendering missing color attachment")
     return false
   }
 
-  depth_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.DEPTH][frame_index],
-  )
-  if depth_texture == nil {
+  if depth_image.view == 0 {
     log.error("Debug rendering missing depth attachment")
     return false
   }
 
-  // Begin rendering with LOAD ops (don't clear, render on top of existing content)
-  gpu.begin_rendering(
-    command_buffer,
-    depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
-    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
-  )
+  color_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
+    imageView = final_image.view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .LOAD,
+    storeOp = .STORE,
+  }
+  depth_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
+    imageView = depth_image.view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .LOAD,
+    storeOp = .STORE,
+  }
+  rendering_info := vk.RenderingInfo{
+    sType = .RENDERING_INFO,
+    renderArea = {extent = depth_image.extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &color_attachment,
+    pDepthAttachment = &depth_attachment,
+  }
+  vk.CmdBeginRendering(command_buffer, &rendering_info)
 
   gpu.set_viewport_scissor(
     command_buffer,
-    depth_texture.spec.extent,
+    depth_image.extent,
   )
 
   return true

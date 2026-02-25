@@ -552,13 +552,12 @@ construct_scene :: proc(
     node.parent = entry.parent
     if gltf_node.mesh in geometry_cache {
       geometry_data := geometry_cache[gltf_node.mesh]
-      geometry_copy := geometry.Geometry{
+      geometry_copy := geometry.Geometry {
         vertices  = slice.clone(geometry_data.geometry.vertices),
         skinnings = slice.clone(geometry_data.geometry.skinnings),
         indices   = slice.clone(geometry_data.geometry.indices),
         aabb      = geometry_data.geometry.aabb,
       }
-      mesh_handle: MeshHandle
       if gltf_node.skin in skin_cache {
         skin_data := skin_cache[gltf_node.skin]
         mesh_handle, mesh, alloc_result := create_mesh(
@@ -579,7 +578,9 @@ construct_scene :: proc(
         // Compute and cache bind matrices (inverse of inverse_bind_matrix)
         skinning.bind_matrices = make([]matrix[4, 4]f32, len(skinning.bones))
         for bone, i in skinning.bones {
-          skinning.bind_matrices[i] = linalg.matrix4_inverse(bone.inverse_bind_matrix)
+          skinning.bind_matrices[i] = linalg.matrix4_inverse(
+            bone.inverse_bind_matrix,
+          )
         }
         // Compute and cache bone hierarchy depths for visualization
         skinning.bone_depths = calculate_bone_depths(skinning)
@@ -604,11 +605,7 @@ construct_scene :: proc(
           load_animations(world, gltf_data, gltf_node.skin, mesh_handle)
         }
       } else {
-        mesh_handle, _, alloc_result := create_mesh(
-          world,
-          geometry_copy,
-          true,
-        )
+        mesh_handle, _, alloc_result := create_mesh(world, geometry_copy, true)
         if !alloc_result do continue
         node.attachment = MeshAttachment {
           handle      = mesh_handle,

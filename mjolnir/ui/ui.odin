@@ -349,7 +349,7 @@ generate_render_commands :: proc(sys: ^System) {
   font_atlas_id := get_font_atlas_id(sys)
 
   // Iterate through all widgets and generate commands
-  for &entry, i in sys.widget_pool.entries {
+  for &entry in sys.widget_pool.entries {
     if !entry.active do continue
 
     widget := &entry.item
