@@ -900,7 +900,9 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   }
   for handle, entry in self.world.staging.camera_updates {
     if entry.op == .Remove {
-      append(&stale_cameras, handle)
+      new_age := entry.age + 1
+      self.world.staging.camera_updates[handle] = {new_age, entry.op}
+      if new_age >= world.FRAMES_IN_FLIGHT do append(&stale_cameras, handle)
       continue
     }
     defer {
@@ -912,10 +914,26 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     if is_new_camera {
       self.render.cameras[handle.index] = {}
     }
-    // Sync camera configuration
     cam := &self.render.cameras[handle.index]
-    cam.enabled_passes =
-    transmute(camera.PassTypeSet)world_camera.enabled_passes
+    current_width, current_height := render.resource_pool_get_camera_extent(
+      &self.render.resource_pool,
+      &self.render.texture_manager,
+      handle.index,
+      0,
+    )
+    prev_enabled_passes := cam.enabled_passes
+    prev_enable_depth_pyramid := cam.enable_depth_pyramid
+
+    next_enabled_passes := transmute(camera.PassTypeSet)world_camera.enabled_passes
+    needs_camera_realloc :=
+      is_new_camera ||
+      current_width != world_camera.extent[0] ||
+      current_height != world_camera.extent[1] ||
+      prev_enabled_passes != next_enabled_passes ||
+      prev_enable_depth_pyramid != world_camera.enable_depth_pyramid
+
+    // Sync camera configuration
+    cam.enabled_passes = next_enabled_passes
     cam.enable_culling = world_camera.enable_culling
     cam.enable_depth_pyramid = world_camera.enable_depth_pyramid
     // Upload camera transform data to GPU buffer
@@ -933,32 +951,42 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       far,
       self.frame_index,
     )
-    // Initialize GPU resources for new cameras
-    if is_new_camera {
-      camera.init_gpu(
+    if needs_camera_realloc {
+      render.resource_pool_allocate_camera_resources(
+        &self.render.resource_pool,
         &self.gctx,
-        cam,
         &self.render.texture_manager,
+        handle.index,
         vk.Extent2D{world_camera.extent[0], world_camera.extent[1]},
         self.swapchain.format.format,
         vk.Format.D32_SFLOAT,
         cam.enabled_passes,
         cam.enable_depth_pyramid,
-        rd.MAX_NODES_IN_SCENE,
       ) or_return
-      camera.allocate_descriptors(
+      render.resource_pool_allocate_camera_descriptors(
+        &self.render.resource_pool,
         &self.gctx,
-        cam,
         &self.render.texture_manager,
-        &self.render.visibility.depth_descriptor_layout,
+        handle.index,
+        &self.render.visibility.cull_input_descriptor_layout,
+        &self.render.visibility.cull_output_descriptor_layout,
         &self.render.visibility.depth_reduce_descriptor_layout,
-        &self.render.node_data_buffer,
-        &self.render.mesh_data_buffer,
-        &self.render.camera_buffer,
       ) or_return
     }
   }
   for handle in stale_cameras {
+    if entry, ok := self.world.staging.camera_updates[handle];
+       ok && entry.op == .Remove {
+      if handle.index < rd.MAX_ACTIVE_CAMERAS {
+        render.resource_pool_release_camera_resources(
+          &self.render.resource_pool,
+          &self.gctx,
+          &self.render.texture_manager,
+          handle.index,
+        )
+      }
+      delete_key(&self.render.cameras, handle.index)
+    }
     delete_key(&self.world.staging.camera_updates, handle)
   }
   // Collect and stage bone visualization data for debug rendering (compile-time controlled)
@@ -1110,11 +1138,11 @@ populate_debug_ui :: proc(self: ^Engine) {
       ),
     )
     if main_camera := get_main_camera(self); main_camera != nil {
-      main_camera := &self.render.cameras[self.world.main_camera.index]
+      main_camera_index := self.world.main_camera.index
       main_stats := occlusion_culling.stats(
         &self.render.visibility,
-        main_camera,
-        self.world.main_camera.index,
+        &self.render.resource_pool.camera_opaque_draw_counts[main_camera_index][self.frame_index],
+        main_camera_index,
         self.frame_index,
       )
       mu.label(
@@ -1178,27 +1206,29 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         generation = entry.generation,
       },
     )
-    if camera_gpu := &engine.render.cameras[u32(cam_index)];
-       camera_gpu != nil {
-      camera.resize(
+    if camera_gpu := &engine.render.cameras[u32(cam_index)]; camera_gpu != nil {
+      camera_gpu.enabled_passes = transmute(camera.PassTypeSet)world_camera.enabled_passes
+      camera_gpu.enable_culling = world_camera.enable_culling
+      camera_gpu.enable_depth_pyramid = world_camera.enable_depth_pyramid
+      render.resource_pool_allocate_camera_resources(
+        &engine.render.resource_pool,
         &engine.gctx,
-        camera_gpu,
         &engine.render.texture_manager,
+        u32(cam_index),
         vk.Extent2D{world_camera.extent[0], world_camera.extent[1]},
         engine.swapchain.format.format,
         vk.Format.D32_SFLOAT,
-        transmute(camera.PassTypeSet)world_camera.enabled_passes,
-        world_camera.enable_depth_pyramid,
+        camera_gpu.enabled_passes,
+        camera_gpu.enable_depth_pyramid,
       ) or_return
-      camera.allocate_descriptors(
+      render.resource_pool_allocate_camera_descriptors(
+        &engine.render.resource_pool,
         &engine.gctx,
-        camera_gpu,
         &engine.render.texture_manager,
-        &engine.render.visibility.depth_descriptor_layout,
+        u32(cam_index),
+        &engine.render.visibility.cull_input_descriptor_layout,
+        &engine.render.visibility.cull_output_descriptor_layout,
         &engine.render.visibility.depth_reduce_descriptor_layout,
-        &engine.render.node_data_buffer,
-        &engine.render.mesh_data_buffer,
-        &engine.render.camera_buffer,
       ) or_return
     }
   }
@@ -1221,92 +1251,29 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   command_buffer := self.render.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
-  render.render_shadow_depth(
-    &self.render,
-    self.frame_index,
-    active_render_lights[:],
-  ) or_return
-  render.render_camera_depth(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
-  ) or_return
+
+  active_cameras := make([dynamic]u32, context.temp_allocator)
   for &entry, cam_index in self.world.cameras.entries {
-    if !entry.active do continue
-    world_cam := &entry.item
-    render_cam := &self.render.cameras[u32(cam_index)]
-    if world.PassType.GEOMETRY in world_cam.enabled_passes {
-      render.record_geometry_pass(
-        &self.render,
-        self.frame_index,
-        u32(cam_index),
-        render_cam,
-      )
-    }
-    if world.PassType.LIGHTING in world_cam.enabled_passes {
-      render.record_lighting_pass(
-        &self.render,
-        self.frame_index,
-        active_render_lights[:],
-        u32(cam_index),
-        render_cam,
-      )
-    }
-    if world.PassType.PARTICLES in world_cam.enabled_passes {
-      render.record_particles_pass(
-        &self.render,
-        self.frame_index,
-        u32(cam_index),
-        render_cam,
-      )
-    }
-    if world.PassType.TRANSPARENCY in world_cam.enabled_passes {
-      render.record_transparency_pass(
-        &self.render,
-        self.frame_index,
-        &self.gctx,
-        u32(cam_index),
-        render_cam,
-      )
+    if entry.active {
+      append(&active_cameras, u32(cam_index))
     }
   }
-  main_render_cam := &self.render.cameras[self.world.main_camera.index]
-  // Debug rendering pass (bones, etc.) - renders after transparency
-  render.record_debug_pass(
-    &self.render,
-    self.frame_index,
-    self.world.main_camera.index,
-    main_render_cam,
-  )
-  render.record_post_process_pass(
-    &self.render,
-    self.frame_index,
-    main_render_cam,
-    self.swapchain.extent,
-    self.swapchain.images[self.swapchain.image_index],
-    self.swapchain.views[self.swapchain.image_index],
-  )
-  render.record_ui_pass(
+
+  render.render_frame_graph(
     &self.render,
     self.frame_index,
     &self.gctx,
+    active_cameras[:],
+    active_render_lights[:],
+    self.world.main_camera.index,
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
-  )
+  ) or_return
   compute_cmd_buffer: vk.CommandBuffer
   if self.gctx.has_async_compute {
-    compute_cmd_buffer = self.render.compute_command_buffers[self.frame_index]
-    gpu.begin_record(compute_cmd_buffer) or_return
+    compute_cmd_buffer = {}
   } else {
     compute_cmd_buffer = command_buffer
-  }
-  render.record_compute_commands(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
-  ) or_return
-  if self.gctx.has_async_compute {
-    gpu.end_record(compute_cmd_buffer) or_return
   }
   populate_debug_ui(self)
   mu.end(&self.render.debug_ui.ctx)

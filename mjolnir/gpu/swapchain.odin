@@ -274,20 +274,22 @@ submit_queue_and_present :: proc(
   append(&wait_semaphores, self.image_available_semaphores[frame_index])
   append(&wait_stages, vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT})
   if gctx.has_async_compute {
-    if compute_queue, ok := gctx.compute_queue.?; ok {
-      append(&wait_semaphores, self.compute_finished_semaphores[frame_index])
-      append(
-        &wait_stages,
-        vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER},
-      )
-      compute_submit := vk.SubmitInfo {
-        sType                = .SUBMIT_INFO,
-        commandBufferCount   = 1,
-        pCommandBuffers      = compute_command_buffer,
-        signalSemaphoreCount = 1,
-        pSignalSemaphores    = &self.compute_finished_semaphores[frame_index],
+    if compute_command_buffer^ != {} {
+      if compute_queue, ok := gctx.compute_queue.?; ok {
+        append(&wait_semaphores, self.compute_finished_semaphores[frame_index])
+        append(
+          &wait_stages,
+          vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER},
+        )
+        compute_submit := vk.SubmitInfo {
+          sType                = .SUBMIT_INFO,
+          commandBufferCount   = 1,
+          pCommandBuffers      = compute_command_buffer,
+          signalSemaphoreCount = 1,
+          pSignalSemaphores    = &self.compute_finished_semaphores[frame_index],
+        }
+        vk.QueueSubmit(compute_queue, 1, &compute_submit, 0) or_return
       }
-      vk.QueueSubmit(compute_queue, 1, &compute_submit, 0) or_return
     }
   }
   graphics_submit := vk.SubmitInfo {

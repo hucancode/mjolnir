@@ -345,8 +345,13 @@ get_camera_attachment :: proc(
   ok: bool,
 ) #optional_ok {
   if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
-  gpu_handle :=
-    engine.render.cameras[camera_handle.index].attachments[attachment_type][frame_index]
+  gpu_handle, found := render.resource_pool_get_camera_attachment(
+    &engine.render.resource_pool,
+    camera_handle.index,
+    attachment_type,
+    frame_index,
+  )
+  if !found do return {}, false
   return transmute(world.Image2DHandle)gpu_handle, true
 }
 

@@ -5,29 +5,31 @@ import cont "../containers"
 import geom "../geometry"
 import "../gpu"
 import cmd "../gpu/ui"
+import "ambient"
 import "camera"
 import cam "camera"
+import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import rd "data"
 import "debug_bone"
 import "debug_ui"
-import "geometry"
-import "ambient"
 import "direct_light"
-import "shadow"
+import "geometry"
+import rg "graph"
+import "line_strip"
 import "occlusion_culling"
 import particles_compute "particles_compute"
 import particles_render "particles_render"
 import "post_process"
-import "transparent"
-import "sprite"
-import "wireframe"
-import "line_strip"
 import "random_color"
+import "shadow"
+import "sprite"
+import "transparent"
 import ui_render "ui"
 import vk "vendor:vulkan"
+import "wireframe"
 
 FRAMES_IN_FLIGHT :: rd.FRAMES_IN_FLIGHT
 
@@ -67,15 +69,15 @@ DEBUG_BONE_PALETTE :: [6][4]f32 {
   {0.0, 1.0, 1.0, 1.0}, // Level 5: Cyan
 }
 
-ParticleResources :: struct {
-	particle_buffer:         gpu.MutableBuffer(particles_compute.Particle),
-	compact_particle_buffer: gpu.MutableBuffer(particles_compute.Particle),
-	draw_command_buffer:     gpu.MutableBuffer(vk.DrawIndirectCommand),
-}
-
 Manager :: struct {
   command_buffers:         [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers: [FRAMES_IN_FLIGHT]vk.CommandBuffer,
+
+  // Render graph system
+  graph:                   rg.Graph,
+  resource_pool:           RenderResourceManager,
+
+  // Renderers
   geometry:                geometry.Renderer,
   ambient:                 ambient.Renderer,
   direct_light:            direct_light.Renderer,
@@ -86,7 +88,6 @@ Manager :: struct {
   random_color_renderer:   random_color.Renderer,
   particles_compute:       particles_compute.Renderer,
   particles_render:        particles_render.Renderer,
-  particle_resources:      ParticleResources,
   post_process:            post_process.Renderer,
   debug_ui:                debug_ui.Renderer,
   debug_renderer:          debug_bone.Renderer,
@@ -100,21 +101,6 @@ Manager :: struct {
   linear_clamp_sampler:    vk.Sampler,
   nearest_repeat_sampler:  vk.Sampler,
   nearest_clamp_sampler:   vk.Sampler,
-  bone_buffer:             gpu.PerFrameBindlessBuffer(
-    matrix[4, 4]f32,
-    FRAMES_IN_FLIGHT,
-  ),
-  camera_buffer:           gpu.PerFrameBindlessBuffer(
-    rd.Camera,
-    FRAMES_IN_FLIGHT,
-  ),
-  material_buffer:         gpu.BindlessBuffer(Material),
-  node_data_buffer:        gpu.BindlessBuffer(Node),
-  mesh_data_buffer:        gpu.BindlessBuffer(Mesh),
-  emitter_buffer:          gpu.BindlessBuffer(Emitter),
-  forcefield_buffer:       gpu.BindlessBuffer(ForceField),
-  sprite_buffer:           gpu.BindlessBuffer(Sprite),
-  lights_buffer:           gpu.BindlessBuffer(Light),
   mesh_manager:            gpu.MeshManager,
   bone_matrix_slab:        cont.SlabAllocator,
   bone_matrix_offsets:     map[u32]u32,
@@ -133,6 +119,11 @@ init :: proc(
   self.cameras = make(map[u32]camera.Camera)
   self.meshes = make(map[u32]Mesh)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
+
+  // Initialize render graph
+  rg.graph_init(&self.graph)
+  resource_pool_build(&self.resource_pool)
+
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
     gpu.free_command_buffer(gctx, ..self.command_buffers[:])
@@ -164,89 +155,18 @@ init :: proc(
       {4096, 0},
     },
   )
-  gpu.per_frame_bindless_buffer_init(
-    &self.bone_buffer,
-    gctx,
-    int(self.bone_matrix_slab.capacity),
-    {.VERTEX},
-  ) or_return
   self.bone_matrix_offsets = make(map[u32]u32)
   defer if ret != .SUCCESS {
     delete(self.bone_matrix_offsets)
-    gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
     cont.slab_destroy(&self.bone_matrix_slab)
   }
-  gpu.per_frame_bindless_buffer_init(
-    &self.camera_buffer,
+  resource_pool_init_persistent(
+    &self.resource_pool,
     gctx,
-    rd.MAX_ACTIVE_CAMERAS,
-    {.VERTEX, .FRAGMENT, .COMPUTE},
+    int(self.bone_matrix_slab.capacity),
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.material_buffer,
-    gctx,
-    rd.MAX_MATERIALS,
-    {.VERTEX, .FRAGMENT},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.material_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.node_data_buffer,
-    gctx,
-    rd.MAX_NODES_IN_SCENE,
-    {.VERTEX, .FRAGMENT, .COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.node_data_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.mesh_data_buffer,
-    gctx,
-    rd.MAX_MESHES,
-    {.VERTEX},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.mesh_data_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.emitter_buffer,
-    gctx,
-    rd.MAX_EMITTERS,
-    {.COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.forcefield_buffer,
-    gctx,
-    rd.MAX_FORCE_FIELDS,
-    {.COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.sprite_buffer,
-    gctx,
-    rd.MAX_SPRITES,
-    {.VERTEX, .FRAGMENT},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.lights_buffer,
-    gctx,
-    rd.MAX_LIGHTS,
-    {.VERTEX, .FRAGMENT},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
+    resource_pool_destroy_persistent(&self.resource_pool, gctx.device)
   }
   // Initialize texture manager layout (must precede pipeline layout creation)
   gpu.texture_manager_init(&self.texture_manager, gctx) or_return
@@ -316,35 +236,35 @@ init :: proc(
     gctx,
     swapchain_extent.width,
     swapchain_extent.height,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
     self.texture_manager.set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
+    self.resource_pool.bone_buffer.set_layout,
+    self.resource_pool.material_buffer.set_layout,
+    self.resource_pool.node_data_buffer.set_layout,
+    self.resource_pool.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   shadow.init(
     &self.shadow,
     gctx,
     self.texture_manager.set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
+    self.resource_pool.bone_buffer.set_layout,
+    self.resource_pool.material_buffer.set_layout,
+    self.resource_pool.node_data_buffer.set_layout,
+    self.resource_pool.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   ambient.init(
     &self.ambient,
     gctx,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
   direct_light.init(
     &self.direct_light,
     gctx,
-    self.camera_buffer.set_layout,
-    self.lights_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
+    self.resource_pool.lights_buffer.set_layout,
     self.shadow.shadow_data_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
@@ -353,79 +273,92 @@ init :: proc(
     gctx,
     swapchain_extent.width,
     swapchain_extent.height,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
     self.texture_manager.set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
+    self.resource_pool.bone_buffer.set_layout,
+    self.resource_pool.material_buffer.set_layout,
+    self.resource_pool.node_data_buffer.set_layout,
+    self.resource_pool.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   particles_compute.init(
     &self.particles_compute,
     gctx,
-    self.emitter_buffer.set_layout,
-    self.forcefield_buffer.set_layout,
-    self.node_data_buffer.set_layout,
+    self.resource_pool.emitter_buffer.set_layout,
+    self.resource_pool.forcefield_buffer.set_layout,
+    self.resource_pool.node_data_buffer.set_layout,
   ) or_return
   particles_render.init(
     &self.particles_render,
     gctx,
     &self.texture_manager,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
+
+  // Register render graph resources for particle system
+  register_particle_resources(self)
+
+  // Register render graph resources for UI system
+  register_ui_resources(self)
+
+  // Register render graph resources for shadow system
+  register_shadow_resources(self)
+
+  // Register render graph resources for post-process system
+  register_post_process_resources(self)
+
   // Initialize transparency renderers
   transparent.init(
     &self.transparent_renderer,
     gctx,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
     self.texture_manager.set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
+    self.resource_pool.bone_buffer.set_layout,
+    self.resource_pool.material_buffer.set_layout,
+    self.resource_pool.node_data_buffer.set_layout,
+    self.resource_pool.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   sprite.init(
     &self.sprite_renderer,
     gctx,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
     self.texture_manager.set_layout,
-    self.node_data_buffer.set_layout,
-    self.sprite_buffer.set_layout,
+    self.resource_pool.node_data_buffer.set_layout,
+    self.resource_pool.sprite_buffer.set_layout,
   ) or_return
   wireframe.init(
     &self.wireframe_renderer,
     gctx,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
     self.texture_manager.set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
+    self.resource_pool.bone_buffer.set_layout,
+    self.resource_pool.material_buffer.set_layout,
+    self.resource_pool.node_data_buffer.set_layout,
+    self.resource_pool.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   line_strip.init(
     &self.line_strip_renderer,
     gctx,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
     self.texture_manager.set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
+    self.resource_pool.bone_buffer.set_layout,
+    self.resource_pool.material_buffer.set_layout,
+    self.resource_pool.node_data_buffer.set_layout,
+    self.resource_pool.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   random_color.init(
     &self.random_color_renderer,
     gctx,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
     self.texture_manager.set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
+    self.resource_pool.bone_buffer.set_layout,
+    self.resource_pool.material_buffer.set_layout,
+    self.resource_pool.node_data_buffer.set_layout,
+    self.resource_pool.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
   post_process.init(
@@ -445,7 +378,7 @@ init :: proc(
   debug_bone.init(
     &self.debug_renderer,
     gctx,
-    self.camera_buffer.set_layout,
+    self.resource_pool.camera_buffer.set_layout,
   ) or_return
   ui_render.init_renderer(
     &self.ui,
@@ -479,31 +412,17 @@ setup :: proc(
     gpu.texture_manager_teardown(&self.texture_manager, gctx)
   }
   // Re-allocate descriptor sets for scene buffers (freed by previous ResetDescriptorPool)
-  gpu.bindless_buffer_realloc_descriptor(&self.material_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(
-    &self.node_data_buffer,
-    gctx,
-  ) or_return
-  gpu.bindless_buffer_realloc_descriptor(
-    &self.mesh_data_buffer,
-    gctx,
-  ) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.emitter_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(
-    &self.forcefield_buffer,
-    gctx,
-  ) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.sprite_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.lights_buffer, gctx) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(
-    &self.bone_buffer,
-    gctx,
-  ) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(
-    &self.camera_buffer,
-    gctx,
-  ) or_return
+  resource_pool_realloc_descriptors(&self.resource_pool, gctx) or_return
   gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
+  // Allocate resource-pool owned per-setup resources.
+  resource_pool_setup(
+    &self.resource_pool,
+    gctx,
+    &self.texture_manager,
+  ) or_return
+  defer if ret != .SUCCESS {
+    resource_pool_teardown(&self.resource_pool, gctx, &self.texture_manager)
+  }
   // Setup subsystem GPU resources
   ambient.setup(&self.ambient, gctx, &self.texture_manager) or_return
   direct_light.setup(&self.direct_light, gctx) or_return
@@ -511,45 +430,27 @@ setup :: proc(
     &self.shadow,
     gctx,
     &self.texture_manager,
-    &self.node_data_buffer,
-    &self.mesh_data_buffer,
+    &self.resource_pool.node_data_buffer,
+    &self.resource_pool.mesh_data_buffer,
+    &self.resource_pool.shadow_spot_maps,
+    &self.resource_pool.shadow_directional_maps,
+    &self.resource_pool.shadow_point_cubes,
+    &self.resource_pool.shadow_spot_draw_counts,
+    &self.resource_pool.shadow_spot_draw_commands,
+    &self.resource_pool.shadow_directional_draw_counts,
+    &self.resource_pool.shadow_directional_draw_commands,
+    &self.resource_pool.shadow_point_draw_counts,
+    &self.resource_pool.shadow_point_draw_commands,
   ) or_return
-  // Allocate particle buffers
-  self.particle_resources.particle_buffer = gpu.create_mutable_buffer(
-    gctx,
-    particles_compute.Particle,
-    particles_compute.MAX_PARTICLES,
-    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_buffer)
-  }
-  self.particle_resources.compact_particle_buffer = gpu.create_mutable_buffer(
-    gctx,
-    particles_compute.Particle,
-    particles_compute.MAX_PARTICLES,
-    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
-  }
-  self.particle_resources.draw_command_buffer = gpu.create_mutable_buffer(
-    gctx,
-    vk.DrawIndirectCommand,
-    1,
-    {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
-  }
   particles_compute.setup(
     &self.particles_compute,
     gctx,
-    self.emitter_buffer.descriptor_set,
-    self.forcefield_buffer.descriptor_set,
-    &self.particle_resources.particle_buffer,
-    &self.particle_resources.compact_particle_buffer,
-    &self.particle_resources.draw_command_buffer,
+    self.resource_pool.emitter_buffer.descriptor_set,
+    self.resource_pool.forcefield_buffer.descriptor_set,
+    self.resource_pool.node_data_buffer.descriptor_set,
+    &self.resource_pool.particle_resources.particle_buffer,
+    &self.resource_pool.particle_resources.compact_particle_buffer,
+    &self.resource_pool.particle_resources.draw_command_buffer,
   ) or_return
   post_process.setup(
     &self.post_process,
@@ -564,32 +465,22 @@ setup :: proc(
 }
 
 teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  // Destroy camera GPU resources (VkImages, draw command buffers) before texture_manager goes away
-  for _, &cam in self.cameras {
-    camera.destroy_gpu(gctx, &cam, &self.texture_manager)
-  }
+  // Destroy render graph
+  rg.graph_destroy(&self.graph)
+
+  // Camera GPU resources are pool-owned (P0.3) and released via resource_pool_teardown.
   clear(&self.cameras)
   ui_render.teardown(&self.ui, gctx)
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
   post_process.teardown(&self.post_process, gctx, &self.texture_manager)
   particles_compute.teardown(&self.particles_compute, gctx)
-  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
+  resource_pool_teardown(&self.resource_pool, gctx, &self.texture_manager)
   shadow.teardown(&self.shadow, gctx, &self.texture_manager)
   ambient.teardown(&self.ambient, gctx, &self.texture_manager)
   direct_light.teardown(&self.direct_light, gctx)
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
   // Zero all descriptor set handles (freed in bulk below)
-  self.material_buffer.descriptor_set = 0
-  self.node_data_buffer.descriptor_set = 0
-  self.mesh_data_buffer.descriptor_set = 0
-  self.emitter_buffer.descriptor_set = 0
-  self.forcefield_buffer.descriptor_set = 0
-  self.sprite_buffer.descriptor_set = 0
-  self.lights_buffer.descriptor_set = 0
-  for &ds in self.bone_buffer.descriptor_sets do ds = 0
-  for &ds in self.camera_buffer.descriptor_sets do ds = 0
+  resource_pool_zero_descriptors(&self.resource_pool)
   self.mesh_manager.vertex_skinning_buffer.descriptor_set = 0
   // Bulk-free all descriptor sets allocated from the pool
   vk.ResetDescriptorPool(gctx.device, gctx.descriptor_pool, {})
@@ -648,39 +539,57 @@ record_compute_commands :: proc(
   // Buffer indices with rd.FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
   next_frame_index := alg.next(frame_index, rd.FRAMES_IN_FLIGHT)
   for cam_index, &cam in self.cameras {
+    if cam_index >= rd.MAX_ACTIVE_CAMERAS do continue
+    cam_idx := u32(cam_index)
+
     // Only build pyramid if enabled for this camera
     if cam.enable_depth_pyramid {
       occlusion_culling.build_pyramid(
         &self.visibility,
         gctx,
         cmd,
-        &cam,
-        u32(cam_index),
+        &self.resource_pool.camera_depth_pyramids[cam_idx][frame_index],
+        &self.resource_pool.camera_depth_reduce_descriptor_sets[cam_idx][frame_index],
+        &self.resource_pool.camera_opaque_draw_counts[cam_idx][frame_index],
+        cam_idx,
         frame_index,
       ) // Build pyramid[N]
     }
     // Only perform culling if enabled for this camera
     if cam.enable_culling {
+      prev_frame := alg.prev(next_frame_index, rd.FRAMES_IN_FLIGHT)
+      pyramid := self.resource_pool.camera_depth_pyramids[cam_idx][prev_frame]
       occlusion_culling.perform_culling(
         &self.visibility,
         gctx,
         cmd,
-        &cam,
-        u32(cam_index),
+        cam_idx,
         next_frame_index,
         {.VISIBLE},
         {},
+        &self.resource_pool.camera_opaque_draw_counts[cam_idx][next_frame_index],
+        &self.resource_pool.camera_transparent_draw_counts[cam_idx][next_frame_index],
+        &self.resource_pool.camera_wireframe_draw_counts[cam_idx][next_frame_index],
+        &self.resource_pool.camera_random_color_draw_counts[cam_idx][next_frame_index],
+        &self.resource_pool.camera_line_strip_draw_counts[cam_idx][next_frame_index],
+        &self.resource_pool.camera_sprite_draw_counts[cam_idx][next_frame_index],
+        self.resource_pool.camera_cull_input_descriptor_sets[cam_idx][next_frame_index],
+        self.resource_pool.camera_cull_output_descriptor_sets[cam_idx][next_frame_index],
+        pyramid.width,
+        pyramid.height,
       ) // Write draw_list[N+1]
     }
   }
   particles_compute.simulate(
     &self.particles_compute,
     cmd,
-    self.node_data_buffer.descriptor_set,
-    self.particle_resources.particle_buffer.buffer,
-    self.particle_resources.compact_particle_buffer.buffer,
-    self.particle_resources.draw_command_buffer.buffer,
-    vk.DeviceSize(self.particle_resources.particle_buffer.bytes_count),
+    self.resource_pool.node_data_buffer.descriptor_set,
+    self.resource_pool.particle_resources.particle_buffer.buffer,
+    self.resource_pool.particle_resources.compact_particle_buffer.buffer,
+    self.resource_pool.particle_resources.draw_command_buffer.buffer,
+    vk.DeviceSize(
+      self.resource_pool.particle_resources.particle_buffer.bytes_count,
+    ),
   )
   return .SUCCESS
 }
@@ -738,16 +647,8 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   vk.DestroySampler(gctx.device, self.nearest_clamp_sampler, nil)
   self.nearest_clamp_sampler = 0
   gpu.texture_manager_shutdown(&self.texture_manager, gctx)
-  gpu.bindless_buffer_destroy(&self.material_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.node_data_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.mesh_data_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
-  gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
+  resource_pool_destroy_persistent(&self.resource_pool, gctx.device)
   delete(self.bone_matrix_offsets)
-  gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
   cont.slab_destroy(&self.bone_matrix_slab)
   gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
   delete(self.cameras)
@@ -768,603 +669,8 @@ resize :: proc(
     extent,
     color_format,
   ) or_return
-  debug_ui.recreate_images(
-    &self.debug_ui,
-    color_format,
-    extent,
-    dpi_scale,
-  )
+  debug_ui.recreate_images(&self.debug_ui, color_format, extent, dpi_scale)
   return .SUCCESS
-}
-
-render_shadow_depth :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  active_lights: []rd.LightHandle,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  shadow.sync_lights(
-    &self.shadow,
-    &self.lights_buffer,
-    active_lights,
-    frame_index,
-  )
-  shadow.compute_draw_lists(&self.shadow, cmd, frame_index)
-  shadow.render_depth(
-    &self.shadow,
-    cmd,
-    &self.texture_manager,
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    frame_index,
-  )
-  return .SUCCESS
-}
-
-render_camera_depth :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  for cam_index, &cam in self.cameras {
-    occlusion_culling.render_depth(
-      &self.visibility,
-      gctx,
-      cmd,
-      &cam,
-      &self.texture_manager,
-      u32(cam_index),
-      frame_index,
-      {.VISIBLE},
-      {
-        .MATERIAL_TRANSPARENT,
-        .MATERIAL_WIREFRAME,
-        .MATERIAL_RANDOM_COLOR,
-        .MATERIAL_LINE_STRIP,
-      },
-      self.camera_buffer.descriptor_sets[frame_index],
-      self.bone_buffer.descriptor_sets[frame_index],
-      self.node_data_buffer.descriptor_set,
-      self.mesh_data_buffer.descriptor_set,
-      self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-      self.mesh_manager.vertex_buffer.buffer,
-      self.mesh_manager.index_buffer.buffer,
-    )
-  }
-  return .SUCCESS
-}
-
-record_geometry_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  geometry.begin_pass(cam, &self.texture_manager, cmd, frame_index)
-  geometry.render(
-    &self.geometry,
-    cam,
-    cam_index,
-    frame_index,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.opaque_draw_commands[frame_index].buffer,
-    cam.opaque_draw_count[frame_index].buffer,
-  )
-  geometry.end_pass(cam, &self.texture_manager, cmd, frame_index)
-  return .SUCCESS
-}
-
-record_lighting_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  active_lights: []rd.LightHandle,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  ambient.begin_pass(
-    &self.ambient,
-    cam,
-    &self.texture_manager,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    frame_index,
-  )
-  ambient.render(&self.ambient, cam_index, cam, cmd, frame_index)
-  ambient.end_pass(cmd)
-  direct_light.begin_pass(
-    &self.direct_light,
-    cam,
-    &self.texture_manager,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.lights_buffer.descriptor_set,
-    self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
-    frame_index,
-  )
-  shadow_texture_indices: [rd.MAX_LIGHTS]u32
-  for i in 0 ..< rd.MAX_LIGHTS {
-    shadow_texture_indices[i] = 0xFFFFFFFF
-  }
-  for handle in active_lights {
-    light_data := gpu.get(&self.lights_buffer.buffer, handle.index)
-    shadow_texture_indices[handle.index] = shadow.get_texture_index(
-      &self.shadow,
-      light_data.type,
-      light_data.shadow_index,
-      frame_index,
-    )
-  }
-  direct_light.render(
-    &self.direct_light,
-    cam_index,
-    cam,
-    &shadow_texture_indices,
-    cmd,
-    &self.lights_buffer,
-    active_lights,
-    frame_index,
-  )
-  direct_light.end_pass(cmd)
-  return .SUCCESS
-}
-
-record_particles_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  particles_render.begin_pass(
-    &self.particles_render,
-    cmd,
-    cam,
-    &self.texture_manager,
-    frame_index,
-  )
-  particles_render.render(
-    &self.particles_render,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.particle_resources.compact_particle_buffer.buffer,
-    self.particle_resources.draw_command_buffer.buffer,
-  )
-  particles_render.end_pass(cmd)
-  return .SUCCESS
-}
-
-record_transparency_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-
-  // Begin pass (shared by all 5 techniques)
-  color_texture := gpu.get_texture_2d(&self.texture_manager, cam.attachments[.FINAL_IMAGE][frame_index])
-  depth_texture := gpu.get_texture_2d(&self.texture_manager, cam.attachments[.DEPTH][frame_index])
-  gpu.begin_rendering(
-    cmd,
-    depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
-    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
-  )
-  gpu.set_viewport_scissor(cmd, depth_texture.spec.extent)
-
-  // Render transparent objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT},
-    NodeFlagSet{.MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  transparent.render(
-    &self.transparent_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // Render wireframe objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME},
-    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  wireframe.render(
-    &self.wireframe_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // Render random_color objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_RANDOM_COLOR},
-    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  random_color.render(
-    &self.random_color_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // Render line_strip objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_LINE_STRIP},
-    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_SPRITE},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  line_strip.render(
-    &self.line_strip_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // Render sprites
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    gctx,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_SPRITE},
-    NodeFlagSet{},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.sprite_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.sprite_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.sprite_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.sprite_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  sprite.render(
-    &self.sprite_renderer,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.sprite_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.sprite_draw_commands[frame_index].buffer,
-    cam.sprite_draw_count[frame_index].buffer,
-    rd.MAX_NODES_IN_SCENE,
-  )
-
-  // End pass
-  vk.CmdEndRendering(cmd)
-  return .SUCCESS
-}
-
-record_debug_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^camera.Camera,
-) -> vk.Result {
-  // Skip debug rendering if no instances are staged
-  if len(self.debug_renderer.bone_instances) == 0 do return .SUCCESS
-
-  cmd := self.command_buffers[frame_index]
-
-  // Begin debug render pass (renders on top of transparency)
-  // Skip rendering if attachments are missing
-  if !debug_bone.begin_pass(
-    &self.debug_renderer,
-    cam,
-    &self.texture_manager,
-    cmd,
-    frame_index,
-  ) {
-    return .SUCCESS
-  }
-
-  // Render debug visualization (bones, etc.)
-  debug_bone.render(
-    &self.debug_renderer,
-    cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    cam_index,
-  ) or_return
-
-  debug_bone.end_pass(&self.debug_renderer, cmd)
-
-  return .SUCCESS
-}
-
-record_post_process_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam: ^camera.Camera,
-  swapchain_extent: vk.Extent2D,
-  swapchain_image: vk.Image,
-  swapchain_view: vk.ImageView,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  if final_image := gpu.get_texture_2d(
-    &self.texture_manager,
-    cam.attachments[.FINAL_IMAGE][frame_index],
-  ); final_image != nil {
-    gpu.image_barrier(
-      cmd,
-      final_image.image,
-      .COLOR_ATTACHMENT_OPTIMAL,
-      .SHADER_READ_ONLY_OPTIMAL,
-      {.COLOR_ATTACHMENT_WRITE},
-      {.SHADER_READ},
-      {.COLOR_ATTACHMENT_OUTPUT},
-      {.FRAGMENT_SHADER},
-      {.COLOR},
-    )
-  }
-  gpu.image_barrier(
-    cmd,
-    swapchain_image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  post_process.begin_pass(&self.post_process, cmd, swapchain_extent)
-  post_process.render(
-    &self.post_process,
-    cmd,
-    swapchain_extent,
-    swapchain_view,
-    cam,
-    &self.texture_manager,
-    frame_index,
-  )
-  post_process.end_pass(&self.post_process, cmd)
-  return .SUCCESS
-}
-
-record_ui_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  swapchain_view: vk.ImageView,
-  swapchain_extent: vk.Extent2D,
-) {
-  cmd := self.command_buffers[frame_index]
-  // UI rendering pass - renders on top of post-processed image
-  rendering_attachment_info := vk.RenderingAttachmentInfo {
-    sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = swapchain_view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .STORE,
-  }
-
-  rendering_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = swapchain_extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &rendering_attachment_info,
-  }
-
-  vk.CmdBeginRendering(cmd, &rendering_info)
-
-  // Set viewport and scissor
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(swapchain_extent.height),
-    width    = f32(swapchain_extent.width),
-    height   = -f32(swapchain_extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    offset = {0, 0},
-    extent = swapchain_extent,
-  }
-  vk.CmdSetViewport(cmd, 0, 1, &viewport)
-  vk.CmdSetScissor(cmd, 0, 1, &scissor)
-
-  // Bind pipeline and descriptor sets
-  vk.CmdBindPipeline(cmd, .GRAPHICS, self.ui.pipeline)
-  vk.CmdBindDescriptorSets(
-    cmd,
-    .GRAPHICS,
-    self.ui.pipeline_layout,
-    0,
-    1,
-    &self.texture_manager.descriptor_set,
-    0,
-    nil,
-  )
-
-  // Render UI using staged commands
-  ui_render.render(
-    &self.ui,
-    self.ui_commands[:],
-    gctx,
-    &self.texture_manager,
-    cmd,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    frame_index,
-  )
-
-  vk.CmdEndRendering(cmd)
 }
 
 allocate_mesh_geometry :: proc(
@@ -1557,7 +863,11 @@ set_texture_cube_descriptor :: proc(
 }
 
 upload_node_data :: proc(render: ^Manager, index: u32, node_data: ^Node) {
-  gpu.write(&render.node_data_buffer.buffer, node_data, int(index))
+  gpu.write(
+    &render.resource_pool.node_data_buffer.buffer,
+    node_data,
+    int(index),
+  )
 }
 
 upload_bone_matrices :: proc(
@@ -1566,7 +876,7 @@ upload_bone_matrices :: proc(
   offset: u32,
   matrices: []matrix[4, 4]f32,
 ) {
-  frame_buffer := &render.bone_buffer.buffers[frame_index]
+  frame_buffer := &render.resource_pool.bone_buffer.buffers[frame_index]
   if frame_buffer.mapped == nil do return
   l := int(offset)
   r := l + len(matrices)
@@ -1579,11 +889,15 @@ upload_sprite_data :: proc(
   index: u32,
   sprite_data: ^Sprite,
 ) {
-  gpu.write(&render.sprite_buffer.buffer, sprite_data, int(index))
+  gpu.write(
+    &render.resource_pool.sprite_buffer.buffer,
+    sprite_data,
+    int(index),
+  )
 }
 
 upload_emitter_data :: proc(render: ^Manager, index: u32, emitter: ^Emitter) {
-  gpu.write(&render.emitter_buffer.buffer, emitter, int(index))
+  gpu.write(&render.resource_pool.emitter_buffer.buffer, emitter, int(index))
 }
 
 upload_forcefield_data :: proc(
@@ -1591,7 +905,11 @@ upload_forcefield_data :: proc(
   index: u32,
   forcefield: ^ForceField,
 ) {
-  gpu.write(&render.forcefield_buffer.buffer, forcefield, int(index))
+  gpu.write(
+    &render.resource_pool.forcefield_buffer.buffer,
+    forcefield,
+    int(index),
+  )
 }
 
 upload_light_data :: proc(
@@ -1599,12 +917,12 @@ upload_light_data :: proc(
   index: u32,
   light_data: ^rd.Light,
 ) {
-  gpu.write(&render.lights_buffer.buffer, light_data, int(index))
+  gpu.write(&render.resource_pool.lights_buffer.buffer, light_data, int(index))
   shadow.invalidate_light(&render.shadow, index)
 }
 
 upload_mesh_data :: proc(render: ^Manager, index: u32, mesh: ^Mesh) {
-  gpu.write(&render.mesh_data_buffer.buffer, mesh, int(index))
+  gpu.write(&render.resource_pool.mesh_data_buffer.buffer, mesh, int(index))
 }
 
 upload_material_data :: proc(
@@ -1612,7 +930,7 @@ upload_material_data :: proc(
   index: u32,
   material: ^Material,
 ) {
-  gpu.write(&render.material_buffer.buffer, material, int(index))
+  gpu.write(&render.resource_pool.material_buffer.buffer, material, int(index))
 }
 
 ensure_bone_matrix_range_for_node :: proc(
@@ -1656,8 +974,541 @@ upload_camera_data :: proc(
   frustum := geom.make_frustum(camera_data.projection * camera_data.view)
   camera_data.frustum_planes = frustum.planes
   gpu.write(
-    &render.camera_buffer.buffers[frame_index],
+    &render.resource_pool.camera_buffer.buffers[frame_index],
     &camera_data,
     int(camera_index),
   )
+}
+
+// ====== RENDER GRAPH RESOURCE REGISTRATION ======
+
+MAX_CAMERAS_IN_GRAPH :: rd.MAX_ACTIVE_CAMERAS
+MAX_GRAPH_CAMERA_TECHNIQUES :: 6
+
+register_graph_buffer_resource :: proc(
+  self: ^Manager,
+  resource_ref: rg.ResourceRef,
+  element_size: uint,
+  element_count: uint,
+  usage: vk.BufferUsageFlags,
+) {
+  rg.graph_register_resource(
+    &self.graph,
+    rg.ResourceDescriptor {
+      ref = resource_ref,
+      type = .BUFFER,
+      format = rg.BufferFormat {
+        element_size = element_size,
+        element_count = element_count,
+        usage = usage,
+      },
+      is_transient = false,
+    },
+  )
+}
+
+register_graph_texture_resource :: proc(
+  self: ^Manager,
+  resource_ref: rg.ResourceRef,
+  format: vk.Format,
+  usage: vk.ImageUsageFlags,
+  width: u32 = 1920,
+  height: u32 = 1080,
+  mip_levels: u32 = 1,
+) {
+  rg.graph_register_resource(
+    &self.graph,
+    rg.ResourceDescriptor {
+      ref = resource_ref,
+      type = .TEXTURE_2D,
+      format = rg.TextureFormat {
+        width = width,
+        height = height,
+        format = format,
+        usage = usage,
+        mip_levels = mip_levels,
+      },
+      is_transient = false,
+    },
+  )
+}
+
+register_graph_depth_resource :: proc(
+  self: ^Manager,
+  resource_ref: rg.ResourceRef,
+  format: vk.Format,
+  usage: vk.ImageUsageFlags,
+  width: u32 = 1920,
+  height: u32 = 1080,
+) {
+  rg.graph_register_resource(
+    &self.graph,
+    rg.ResourceDescriptor {
+      ref = resource_ref,
+      type = .DEPTH_TEXTURE,
+      format = rg.TextureFormat {
+        width = width,
+        height = height,
+        format = format,
+        usage = usage,
+        mip_levels = 1,
+      },
+      is_transient = false,
+    },
+  )
+}
+
+// Register particle system resources in the render graph
+register_particle_resources :: proc(self: ^Manager) {
+  register_graph_buffer_resource(
+    self,
+    rg.ResourceRef{index = .PARTICLE_BUFFER, scope_index = 0},
+    size_of(particles_compute.Particle),
+    particles_compute.MAX_PARTICLES,
+    {.VERTEX_BUFFER, .STORAGE_BUFFER, .TRANSFER_DST, .TRANSFER_SRC},
+  )
+  register_graph_buffer_resource(
+    self,
+    rg.ResourceRef {
+      index = .COMPACT_PARTICLE_BUFFER,
+      scope_index = 0,
+    },
+    size_of(particles_render.Particle),
+    1024 * 1024,
+    {.VERTEX_BUFFER, .STORAGE_BUFFER},
+  )
+  register_graph_buffer_resource(
+    self,
+    rg.ResourceRef {
+      index = .DRAW_COMMAND_BUFFER,
+      scope_index = 0,
+    },
+    size_of(vk.DrawIndirectCommand),
+    1,
+    {.INDIRECT_BUFFER, .STORAGE_BUFFER},
+  )
+
+  for cam_idx in 0 ..< MAX_CAMERAS_IN_GRAPH {
+    register_graph_depth_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_DEPTH,
+        scope_index = u32(cam_idx),
+      },
+      .D32_SFLOAT,
+      {.DEPTH_STENCIL_ATTACHMENT},
+    )
+
+    register_graph_texture_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_DEPTH_PYRAMID,
+        scope_index = u32(cam_idx),
+      },
+      .R32_SFLOAT,
+      {.SAMPLED, .STORAGE},
+      1920,
+      1080,
+      camera.MAX_DEPTH_MIPS_LEVEL,
+    )
+
+    register_graph_texture_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_FINAL_IMAGE,
+        scope_index = u32(cam_idx),
+      },
+      .R16G16B16A16_SFLOAT,
+      {.COLOR_ATTACHMENT, .SAMPLED},
+    )
+
+    register_graph_texture_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_GBUFFER_POSITION,
+        scope_index = u32(cam_idx),
+      },
+      .R32G32B32A32_SFLOAT,
+      {.COLOR_ATTACHMENT, .SAMPLED},
+    )
+
+    register_graph_texture_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_GBUFFER_NORMAL,
+        scope_index = u32(cam_idx),
+      },
+      .R8G8B8A8_UNORM,
+      {.COLOR_ATTACHMENT, .SAMPLED},
+    )
+    register_graph_texture_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_GBUFFER_ALBEDO,
+        scope_index = u32(cam_idx),
+      },
+      .R8G8B8A8_UNORM,
+      {.COLOR_ATTACHMENT, .SAMPLED},
+    )
+    register_graph_texture_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_GBUFFER_METALLIC_ROUGHNESS,
+        scope_index = u32(cam_idx),
+      },
+      .R8G8B8A8_UNORM,
+      {.COLOR_ATTACHMENT, .SAMPLED},
+    )
+    register_graph_texture_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_GBUFFER_EMISSIVE,
+        scope_index = u32(cam_idx),
+      },
+      .R8G8B8A8_UNORM,
+      {.COLOR_ATTACHMENT, .SAMPLED},
+    )
+
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_OPAQUE_DRAW_COMMANDS,
+        scope_index = u32(cam_idx),
+      },
+      size_of(vk.DrawIndexedIndirectCommand),
+      rd.MAX_NODES_IN_SCENE,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_OPAQUE_DRAW_COUNT,
+        scope_index = u32(cam_idx),
+      },
+      size_of(u32),
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_TRANSPARENT_DRAW_COMMANDS,
+        scope_index = u32(cam_idx),
+      },
+      size_of(vk.DrawIndexedIndirectCommand),
+      rd.MAX_NODES_IN_SCENE,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_TRANSPARENT_DRAW_COUNT,
+        scope_index = u32(cam_idx),
+      },
+      size_of(u32),
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_WIREFRAME_DRAW_COMMANDS,
+        scope_index = u32(cam_idx),
+      },
+      size_of(vk.DrawIndexedIndirectCommand),
+      rd.MAX_NODES_IN_SCENE,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_WIREFRAME_DRAW_COUNT,
+        scope_index = u32(cam_idx),
+      },
+      size_of(u32),
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_RANDOM_COLOR_DRAW_COMMANDS,
+        scope_index = u32(cam_idx),
+      },
+      size_of(vk.DrawIndexedIndirectCommand),
+      rd.MAX_NODES_IN_SCENE,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_RANDOM_COLOR_DRAW_COUNT,
+        scope_index = u32(cam_idx),
+      },
+      size_of(u32),
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_LINE_STRIP_DRAW_COMMANDS,
+        scope_index = u32(cam_idx),
+      },
+      size_of(vk.DrawIndexedIndirectCommand),
+      rd.MAX_NODES_IN_SCENE,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_LINE_STRIP_DRAW_COUNT,
+        scope_index = u32(cam_idx),
+      },
+      size_of(u32),
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_SPRITE_DRAW_COMMANDS,
+        scope_index = u32(cam_idx),
+      },
+      size_of(vk.DrawIndexedIndirectCommand),
+      rd.MAX_NODES_IN_SCENE,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .CAMERA_SPRITE_DRAW_COUNT,
+        scope_index = u32(cam_idx),
+      },
+      size_of(u32),
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+  }
+
+  log.infof(
+    "Registered %d particle resources and %d camera resources in graph",
+    3,
+    MAX_CAMERAS_IN_GRAPH * (8 + MAX_GRAPH_CAMERA_TECHNIQUES * 2),
+  )
+}
+
+// Register shadow system resources in the render graph
+register_shadow_resources :: proc(self: ^Manager) {
+  for slot in 0 ..< shadow.MAX_SHADOW_MAPS {
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .SHADOW_DRAW_COMMANDS,
+        scope_index = u32(slot),
+      },
+      size_of(vk.DrawIndexedIndirectCommand),
+      rd.MAX_NODES_IN_SCENE,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_buffer_resource(
+      self,
+      rg.ResourceRef {
+        index = .SHADOW_DRAW_COUNT,
+        scope_index = u32(slot),
+      },
+      size_of(u32),
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    )
+    register_graph_depth_resource(
+      self,
+      rg.ResourceRef {
+        index = .SHADOW_MAP,
+        scope_index = u32(slot),
+      },
+      .D32_SFLOAT,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      shadow.SHADOW_MAP_SIZE,
+      shadow.SHADOW_MAP_SIZE,
+    )
+  }
+
+  log.infof(
+    "Registered %d shadow resources in graph (3 per slot)",
+    shadow.MAX_SHADOW_MAPS * 3,
+  )
+}
+
+// Register UI system resources in the render graph
+register_ui_resources :: proc(self: ^Manager) {
+  register_graph_buffer_resource(
+    self,
+    rg.ResourceRef {
+      index = .UI_VERTEX_BUFFER,
+      scope_index = 0,
+    },
+    size_of(ui_render.Vertex2D),
+    ui_render.UI_MAX_VERTICES,
+    {.VERTEX_BUFFER},
+  )
+  register_graph_buffer_resource(
+    self,
+    rg.ResourceRef {
+      index = .UI_INDEX_BUFFER,
+      scope_index = 0,
+    },
+    size_of(u32),
+    ui_render.UI_MAX_INDICES,
+    {.INDEX_BUFFER},
+  )
+
+  // Note: Swapchain image is NOT registered in graph because it's owned by Engine,
+  // not Manager. It's passed through runtime fields on ui.Renderer.
+
+  log.info("Registered UI resources in graph (vertex buffer, index buffer)")
+}
+
+// Register post-process system resources in the render graph
+register_post_process_resources :: proc(self: ^Manager) {
+  register_graph_texture_resource(
+    self,
+    rg.ResourceRef {
+      index = .POST_PROCESS_IMAGE_0,
+      scope_index = 0,
+    },
+    .R8G8B8A8_UNORM,
+    {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+  )
+  register_graph_texture_resource(
+    self,
+    rg.ResourceRef {
+      index = .POST_PROCESS_IMAGE_1,
+      scope_index = 1,
+    },
+    .R8G8B8A8_UNORM,
+    {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+  )
+
+  log.info("Registered post-process resources in graph (2 ping-pong images)")
+}
+
+Blackboard :: struct {
+  depth:       rg.DepthTexture,
+  final_image: rg.Texture,
+}
+
+debug_pass_deps_from_context :: proc(pass_ctx: ^rg.PassContext) -> Blackboard {
+  return Blackboard {
+    depth = rg.get_depth(pass_ctx, .CAMERA_DEPTH),
+    final_image = rg.get_texture(pass_ctx, .CAMERA_FINAL_IMAGE),
+  }
+}
+
+debug_pass_execute :: proc(
+  manager: ^Manager,
+  pass_ctx: ^rg.PassContext,
+  deps: Blackboard,
+) {
+  if len(manager.debug_renderer.bone_instances) == 0 do return
+
+  cam_index := pass_ctx.scope_index
+
+  if !debug_bone.begin_pass(
+    &manager.debug_renderer,
+    pass_ctx.cmd,
+    deps.final_image,
+    deps.depth,
+  ) {
+    return
+  }
+
+  if err := debug_bone.render(
+    &manager.debug_renderer,
+    pass_ctx.cmd,
+    manager.resource_pool.camera_buffer.descriptor_sets[pass_ctx.frame_index],
+    cam_index,
+  ); err != .SUCCESS {
+    log.errorf(
+      "Debug graph pass render failed for camera %d: %v",
+      cam_index,
+      err,
+    )
+  }
+  debug_bone.end_pass(&manager.debug_renderer, pass_ctx.cmd)
+}
+
+render_frame_graph :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  gctx: ^gpu.GPUContext,
+  active_cameras: []u32,
+  active_lights: []rd.LightHandle,
+  main_camera_index: u32,
+  swapchain_view: vk.ImageView,
+  swapchain_extent: vk.Extent2D,
+) -> vk.Result {
+  defer rg.graph_reset(&self.graph)
+
+  shadow.sync_lights(
+    &self.shadow,
+    &self.resource_pool.lights_buffer,
+    active_lights,
+    frame_index,
+  )
+  active_light_slots := collect_active_light_slots(self)
+  shadow_texture_indices := build_shadow_texture_indices(
+    self,
+    active_lights,
+    frame_index,
+  )
+
+  // GLOBAL passes (post-processing and UI) require a main camera.
+  _, has_main_camera := self.cameras[main_camera_index]
+  if !has_main_camera {
+    log.errorf(
+      "Failed to find main camera %d for post-process",
+      main_camera_index,
+    )
+    return .ERROR_UNKNOWN
+  }
+
+  build_input := build_frame_graph_template_input(
+    self,
+    active_cameras,
+    active_light_slots,
+    main_camera_index,
+  )
+
+  payload := FrameGraphExecutionPayload {
+    main_camera_index      = main_camera_index,
+    active_lights          = active_lights,
+    shadow_texture_indices = shadow_texture_indices,
+    swapchain_view         = swapchain_view,
+    swapchain_extent       = swapchain_extent,
+    ui_commands            = self.ui_commands[:],
+  }
+
+  // ====== BUILD PASS TEMPLATE ARRAY (P0.1 - static registry + compile parameters) ======
+  templates := build_frame_graph_templates(&build_input)
+
+  // ====== COMPILE AND EXECUTE GRAPH ======
+  exec_ctx := rg.GraphExecutionContext {
+    render_manager         = self,
+    frame_payload          = &payload,
+    resolve_resource_index = resolve_resource_index_from_manager,
+  }
+  cmd := self.command_buffers[frame_index]
+
+  // Compile: templates passed as parameter, not stored in Graph
+  if err := rg.graph_compile(&self.graph, templates, &exec_ctx);
+     err != .SUCCESS {
+    log.errorf("Failed to build graph: %v", err)
+    return .ERROR_UNKNOWN
+  }
+  if err := rg.graph_execute(&self.graph, cmd, frame_index); err != .SUCCESS {
+    log.errorf("Failed to execute graph: %v", err)
+    return .ERROR_UNKNOWN
+  }
+  return .SUCCESS
 }

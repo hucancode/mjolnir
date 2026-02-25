@@ -2,8 +2,9 @@ package ui_render
 
 import "../../geometry"
 import "../../gpu"
-import "../shared"
 import cmd "../../gpu/ui"
+import rg "../graph"
+import "../shared"
 import "core:log"
 import "core:math/linalg"
 import "core:slice"
@@ -18,8 +19,6 @@ Vertex2D :: geometry.Vertex2D
 Renderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
-  vertex_buffers:  [FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
-  index_buffers:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   vertices:        [UI_MAX_VERTICES]Vertex2D,
   indices:         [UI_MAX_INDICES]u32,
   vertex_count:    u32,
@@ -58,30 +57,14 @@ init_renderer :: proc(
 }
 
 setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
-  log.info("Setting up UI renderer buffers...")
-  for i in 0 ..< FRAMES_IN_FLIGHT {
-    self.vertex_buffers[i] = gpu.create_mutable_buffer(
-      gctx,
-      Vertex2D,
-      UI_MAX_VERTICES,
-      {.VERTEX_BUFFER},
-    ) or_return
-    self.index_buffers[i] = gpu.create_mutable_buffer(
-      gctx,
-      u32,
-      UI_MAX_INDICES,
-      {.INDEX_BUFFER},
-    ) or_return
-  }
-  log.info("UI renderer buffers set up successfully")
+  _ = self
+  _ = gctx
   return .SUCCESS
 }
 
 teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  for i in 0 ..< FRAMES_IN_FLIGHT {
-    gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
-    gpu.mutable_buffer_destroy(gctx.device, &self.index_buffers[i])
-  }
+  _ = self
+  _ = gctx
 }
 
 create_pipeline :: proc(
@@ -104,8 +87,12 @@ create_pipeline :: proc(
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
     pVertexBindingDescriptions      = &geometry.VERTEX2D_BINDING_DESCRIPTION,
-    vertexAttributeDescriptionCount = len(geometry.VERTEX2D_ATTRIBUTE_DESCRIPTIONS),
-    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX2D_ATTRIBUTE_DESCRIPTIONS[:]),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX2D_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX2D_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
   }
 
   color_formats := [?]vk.Format{format}
@@ -150,12 +137,11 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 render :: proc(
   self: ^Renderer,
   commands: []cmd.RenderCommand,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
+  ui_vertex_buffer: ^gpu.MutableBuffer(Vertex2D),
+  ui_index_buffer: ^gpu.MutableBuffer(u32),
   command_buffer: vk.CommandBuffer,
   width: u32,
   height: u32,
-  frame_index: u32,
 ) {
   projection := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
   vk.CmdPushConstants(
@@ -239,18 +225,12 @@ render :: proc(
   }
 
   if self.vertex_count > 0 {
-    gpu.write(
-      &self.vertex_buffers[frame_index],
-      self.vertices[:self.vertex_count],
-    )
-    gpu.write(
-      &self.index_buffers[frame_index],
-      self.indices[:self.index_count],
-    )
+    gpu.write(ui_vertex_buffer, self.vertices[:self.vertex_count])
+    gpu.write(ui_index_buffer, self.indices[:self.index_count])
     gpu.bind_vertex_index_buffers(
       command_buffer,
-      self.vertex_buffers[frame_index].buffer,
-      self.index_buffers[frame_index].buffer,
+      ui_vertex_buffer.buffer,
+      ui_index_buffer.buffer,
     )
     for batch in draw_batches {
       vk.CmdDrawIndexed(
@@ -388,4 +368,105 @@ add_text_to_batch :: proc(
     self.indices[self.index_count] = base_vertex + 2;self.index_count += 1
     self.indices[self.index_count] = base_vertex + 3;self.index_count += 1
   }
+}
+
+// ============================================================================
+// RENDER GRAPH INTEGRATION
+// ============================================================================
+
+Blackboard :: struct {
+  vertex_buffer:          rg.Buffer,
+  index_buffer:           rg.Buffer,
+  textures_descriptor_set: vk.DescriptorSet,
+  ui_vertex_buffer:       gpu.MutableBuffer(Vertex2D),
+  ui_index_buffer:        gpu.MutableBuffer(u32),
+  commands:               []cmd.RenderCommand,
+  swapchain_view:         vk.ImageView,
+  swapchain_extent:       vk.Extent2D,
+}
+
+ui_pass_deps_from_context :: proc(pass_ctx: ^rg.PassContext) -> Blackboard {
+  return Blackboard {
+    vertex_buffer = rg.get_buffer(pass_ctx, .UI_VERTEX_BUFFER),
+    index_buffer = rg.get_buffer(pass_ctx, .UI_INDEX_BUFFER),
+  }
+}
+
+// Execute phase: render with resolved resources
+ui_pass_execute :: proc(
+  self: ^Renderer,
+  pass_ctx: ^rg.PassContext,
+  deps: Blackboard,
+) {
+  cmd := pass_ctx.cmd
+
+  _ = deps.vertex_buffer
+  _ = deps.index_buffer
+
+  swapchain_view := deps.swapchain_view
+  swapchain_extent := deps.swapchain_extent
+
+  // Begin rendering to swapchain
+  rendering_attachment_info := vk.RenderingAttachmentInfo {
+    sType       = .RENDERING_ATTACHMENT_INFO,
+    imageView   = swapchain_view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp      = .LOAD, // Don't clear - render on top
+    storeOp     = .STORE,
+  }
+
+  rendering_info := vk.RenderingInfo {
+    sType = .RENDERING_INFO,
+    renderArea = {extent = swapchain_extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &rendering_attachment_info,
+  }
+
+  vk.CmdBeginRendering(cmd, &rendering_info)
+
+  // Set viewport and scissor
+  viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(swapchain_extent.height),
+    width    = f32(swapchain_extent.width),
+    height   = -f32(swapchain_extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D {
+    offset = {0, 0},
+    extent = swapchain_extent,
+  }
+  vk.CmdSetViewport(cmd, 0, 1, &viewport)
+  vk.CmdSetScissor(cmd, 0, 1, &scissor)
+
+  // Bind pipeline and descriptor sets
+  vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipeline)
+  textures_descriptor_set := deps.textures_descriptor_set
+  vk.CmdBindDescriptorSets(
+    cmd,
+    .GRAPHICS,
+    self.pipeline_layout,
+    0,
+    1,
+    &textures_descriptor_set,
+    0,
+    nil,
+  )
+
+  // Render UI using staged commands
+  ui_vertex_buffer := deps.ui_vertex_buffer
+  ui_index_buffer := deps.ui_index_buffer
+  render(
+    self,
+    deps.commands,
+    &ui_vertex_buffer,
+    &ui_index_buffer,
+    cmd,
+    swapchain_extent.width,
+    swapchain_extent.height,
+  )
+
+  vk.CmdEndRendering(cmd)
 }

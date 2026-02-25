@@ -1,8 +1,11 @@
 #version 450
 
-// Multi-pass culling - generates 3 draw lists in one dispatch:
+// Multi-pass culling - generates 6 draw lists in one dispatch:
 // - Late pass (opaque objects)
-// - Transparent pass (transparent non-sprite objects)
+// - Transparent pass (transparent objects)
+// - Wireframe pass (wireframe objects)
+// - Random color pass (random color debug objects)
+// - Line strip pass (line strip objects)
 // - Sprite pass (sprite objects)
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
@@ -67,6 +70,7 @@ layout(push_constant) uniform PushConstants {
     uint occlusion_enabled;
 } params;
 
+// Set 0: Read-only inputs
 layout(set = 0, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
@@ -79,34 +83,56 @@ layout(set = 0, binding = 2) readonly buffer CameraBuffer {
     Camera cameras[];
 };
 
-// Late pass (opaque) outputs
-layout(set = 0, binding = 3) buffer LateDrawCountBuffer {
+layout(set = 0, binding = 3) uniform sampler2D depth_pyramid;
+
+// Set 1: Output draw command buffers
+layout(set = 1, binding = 0) buffer LateDrawCountBuffer {
     uint opaque_draw_count;
 };
 
-layout(set = 0, binding = 4) buffer OpaqueDrawCommandBuffer {
+layout(set = 1, binding = 1) buffer OpaqueDrawCommandBuffer {
     DrawCommand opaque_commands[];
 };
 
-// Transparent pass outputs
-layout(set = 0, binding = 5) buffer TransparentDrawCountBuffer {
+layout(set = 1, binding = 2) buffer TransparentDrawCountBuffer {
     uint transparent_draw_count;
 };
 
-layout(set = 0, binding = 6) buffer TransparentDrawCommandBuffer {
+layout(set = 1, binding = 3) buffer TransparentDrawCommandBuffer {
     DrawCommand transparent_commands[];
 };
 
-// Sprite pass outputs
-layout(set = 0, binding = 7) buffer SpriteDrawCountBuffer {
+layout(set = 1, binding = 4) buffer WireframeDrawCountBuffer {
+    uint wireframe_draw_count;
+};
+
+layout(set = 1, binding = 5) buffer WireframeDrawCommandBuffer {
+    DrawCommand wireframe_commands[];
+};
+
+layout(set = 1, binding = 6) buffer RandomColorDrawCountBuffer {
+    uint random_color_draw_count;
+};
+
+layout(set = 1, binding = 7) buffer RandomColorDrawCommandBuffer {
+    DrawCommand random_color_commands[];
+};
+
+layout(set = 1, binding = 8) buffer LineStripDrawCountBuffer {
+    uint line_strip_draw_count;
+};
+
+layout(set = 1, binding = 9) buffer LineStripDrawCommandBuffer {
+    DrawCommand line_strip_commands[];
+};
+
+layout(set = 1, binding = 10) buffer SpriteDrawCountBuffer {
     uint sprite_draw_count;
 };
 
-layout(set = 0, binding = 8) buffer SpriteDrawCommandBuffer {
+layout(set = 1, binding = 11) buffer SpriteDrawCommandBuffer {
     DrawCommand sprite_commands[];
 };
-
-layout(set = 0, binding = 9) uniform sampler2D depth_pyramid;
 
 // return true if aabb is visible, false if outside frustum
 bool frustum_cull(vec3 center, vec3 extent, Camera camera) {
@@ -250,15 +276,33 @@ void main() {
     cmd.vertex_offset = mesh.vertex_offset;
     cmd.first_instance = node_id;
 
-    // Route to appropriate draw list
+    // Route to appropriate draw list based on material flags
     if (is_sprite) {
         // Sprite pass
         uint draw_index = atomicAdd(sprite_draw_count, 1);
         if (draw_index < params.max_draws) {
             sprite_commands[draw_index] = cmd;
         }
-    } else if (is_non_opaque) {
-        // Transparent pass (all non-opaque materials: transparent, wireframe, random_color, line_strip)
+    } else if (is_line_strip) {
+        // Line strip pass
+        uint draw_index = atomicAdd(line_strip_draw_count, 1);
+        if (draw_index < params.max_draws) {
+            line_strip_commands[draw_index] = cmd;
+        }
+    } else if (is_random_color) {
+        // Random color pass
+        uint draw_index = atomicAdd(random_color_draw_count, 1);
+        if (draw_index < params.max_draws) {
+            random_color_commands[draw_index] = cmd;
+        }
+    } else if (is_wireframe) {
+        // Wireframe pass
+        uint draw_index = atomicAdd(wireframe_draw_count, 1);
+        if (draw_index < params.max_draws) {
+            wireframe_commands[draw_index] = cmd;
+        }
+    } else if (is_transparent) {
+        // Transparent pass
         uint draw_index = atomicAdd(transparent_draw_count, 1);
         if (draw_index < params.max_draws) {
             transparent_commands[draw_index] = cmd;

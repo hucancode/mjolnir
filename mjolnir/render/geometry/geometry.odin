@@ -3,8 +3,8 @@ package geometry_pass
 import cont "../../containers"
 import "../../geometry"
 import "../../gpu"
-import "../camera"
 import d "../data"
+import rg "../graph"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -18,7 +18,7 @@ PushConstant :: struct {
 
 Renderer :: struct {
   pipeline_layout: vk.PipelineLayout,
-  pipeline:         vk.Pipeline,
+  pipeline:        vk.Pipeline,
 }
 
 init :: proc(
@@ -138,269 +138,180 @@ init :: proc(
   return .SUCCESS
 }
 
-begin_pass :: proc(
-  camera: ^camera.Camera,
-  texture_manager: ^gpu.TextureManager,
-  command_buffer: vk.CommandBuffer,
-  frame_index: u32,
-) {
-  // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
-  position_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.POSITION][frame_index],
-  )
-  normal_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.NORMAL][frame_index],
-  )
-  albedo_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.ALBEDO][frame_index],
-  )
-  metallic_roughness_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
-  )
-  emissive_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.EMISSIVE][frame_index],
-  )
-  final_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.FINAL_IMAGE][frame_index],
-  )
-  // Transition all G-buffer images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
-  gpu.image_barrier(
-    command_buffer,
-    position_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    normal_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    albedo_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    metallic_roughness_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    emissive_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    final_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  depth_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.DEPTH][frame_index],
-  )
-  gpu.begin_rendering(
-    command_buffer,
-    depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
-    gpu.create_color_attachment(position_texture),
-    gpu.create_color_attachment(normal_texture),
-    gpu.create_color_attachment(albedo_texture),
-    gpu.create_color_attachment(metallic_roughness_texture),
-    gpu.create_color_attachment(emissive_texture),
-  )
-  gpu.set_viewport_scissor(
-    command_buffer,
-    depth_texture.spec.extent,
-  )
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+  vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+  self.pipeline = 0
+  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+  self.pipeline_layout = 0
 }
 
-end_pass :: proc(
-  camera: ^camera.Camera,
-  texture_manager: ^gpu.TextureManager,
-  command_buffer: vk.CommandBuffer,
-  frame_index: u32,
-) {
-  vk.CmdEndRendering(command_buffer)
-  // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting and post-processing
-  position_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.POSITION][frame_index],
-  )
-  normal_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.NORMAL][frame_index],
-  )
-  albedo_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.ALBEDO][frame_index],
-  )
-  metallic_roughness_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
-  )
-  emissive_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.EMISSIVE][frame_index],
-  )
-  // transition all G-buffer attachments + depth to SHADER_READ_ONLY_OPTIMAL
-  gpu.image_barrier(
-    command_buffer,
-    position_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    normal_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    albedo_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    metallic_roughness_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    emissive_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-}
+//
+// Render Graph Integration
+//
 
-render :: proc(
-  self: ^Renderer,
-  camera: ^camera.Camera,
-  camera_handle: u32,
-  frame_index: u32,
-  command_buffer: vk.CommandBuffer,
-  cameras_descriptor_set: vk.DescriptorSet,
-  textures_descriptor_set: vk.DescriptorSet,
-  bone_descriptor_set: vk.DescriptorSet,
-  material_descriptor_set: vk.DescriptorSet,
-  node_data_descriptor_set: vk.DescriptorSet,
-  mesh_data_descriptor_set: vk.DescriptorSet,
+Blackboard :: struct {
+  depth:              rg.DepthTexture,
+  position:           rg.Texture,
+  normal:             rg.Texture,
+  albedo:             rg.Texture,
+  metallic_roughness: rg.Texture,
+  emissive:           rg.Texture,
+  draw_commands:      rg.Buffer,
+  draw_count:         rg.Buffer,
+  cameras_descriptor_set:         vk.DescriptorSet,
+  textures_descriptor_set:        vk.DescriptorSet,
+  bone_descriptor_set:            vk.DescriptorSet,
+  material_descriptor_set:        vk.DescriptorSet,
+  node_data_descriptor_set:       vk.DescriptorSet,
+  mesh_data_descriptor_set:       vk.DescriptorSet,
   vertex_skinning_descriptor_set: vk.DescriptorSet,
-  vertex_buffer: vk.Buffer,
-  index_buffer: vk.Buffer,
-  draw_buffer: vk.Buffer,
-  count_buffer: vk.Buffer,
-) {
-  if draw_buffer == 0 || count_buffer == 0 {
-    return
+  vertex_buffer:                  vk.Buffer,
+  index_buffer:                   vk.Buffer,
+}
+
+geometry_pass_deps_from_context :: proc(
+  pass_ctx: ^rg.PassContext,
+) -> Blackboard {
+  return Blackboard {
+    depth = rg.get_depth(pass_ctx, .CAMERA_DEPTH),
+    position = rg.get_texture(pass_ctx, .CAMERA_GBUFFER_POSITION),
+    normal = rg.get_texture(pass_ctx, .CAMERA_GBUFFER_NORMAL),
+    albedo = rg.get_texture(pass_ctx, .CAMERA_GBUFFER_ALBEDO),
+    metallic_roughness = rg.get_texture(
+      pass_ctx,
+      .CAMERA_GBUFFER_METALLIC_ROUGHNESS,
+    ),
+    emissive = rg.get_texture(pass_ctx, .CAMERA_GBUFFER_EMISSIVE),
+    draw_commands = rg.get_buffer(pass_ctx, .CAMERA_OPAQUE_DRAW_COMMANDS),
+    draw_count = rg.get_buffer(pass_ctx, .CAMERA_OPAQUE_DRAW_COUNT),
   }
+}
+
+geometry_pass_execute :: proc(
+  self: ^Renderer,
+  pass_ctx: ^rg.PassContext,
+  deps: Blackboard,
+) {
+  cam_idx := pass_ctx.scope_index
+
+  depth_handle := deps.depth
+  position_handle := deps.position
+  normal_handle := deps.normal
+  albedo_handle := deps.albedo
+  metallic_roughness_handle := deps.metallic_roughness
+  emissive_handle := deps.emissive
+  draw_cmd_handle := deps.draw_commands
+  draw_count_handle := deps.draw_count
+
+  // Create color attachments (UNDEFINED → COLOR_ATTACHMENT_OPTIMAL handled by graph)
+  color_attachments := [5]vk.RenderingAttachmentInfo {
+    {
+      sType = .RENDERING_ATTACHMENT_INFO,
+      imageView = position_handle.view,
+      imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      loadOp = .CLEAR,
+      storeOp = .STORE,
+    },
+    {
+      sType = .RENDERING_ATTACHMENT_INFO,
+      imageView = normal_handle.view,
+      imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      loadOp = .CLEAR,
+      storeOp = .STORE,
+    },
+    {
+      sType = .RENDERING_ATTACHMENT_INFO,
+      imageView = albedo_handle.view,
+      imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      loadOp = .CLEAR,
+      storeOp = .STORE,
+    },
+    {
+      sType = .RENDERING_ATTACHMENT_INFO,
+      imageView = metallic_roughness_handle.view,
+      imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      loadOp = .CLEAR,
+      storeOp = .STORE,
+    },
+    {
+      sType = .RENDERING_ATTACHMENT_INFO,
+      imageView = emissive_handle.view,
+      imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      loadOp = .CLEAR,
+      storeOp = .STORE,
+    },
+  }
+
+  // Create depth attachment (already in correct state from depth prepass)
+  depth_attachment := vk.RenderingAttachmentInfo {
+    sType       = .RENDERING_ATTACHMENT_INFO,
+    imageView   = depth_handle.view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp      = .LOAD,
+    storeOp     = .STORE,
+  }
+
+  // Begin rendering
+  rendering_info := vk.RenderingInfo {
+    sType = .RENDERING_INFO,
+    renderArea = {extent = depth_handle.extent},
+    layerCount = 1,
+    colorAttachmentCount = len(color_attachments),
+    pColorAttachments = raw_data(color_attachments[:]),
+    pDepthAttachment = &depth_attachment,
+  }
+
+  vk.CmdBeginRendering(pass_ctx.cmd, &rendering_info)
+
+  // Set viewport and scissor
+  gpu.set_viewport_scissor(pass_ctx.cmd, depth_handle.extent)
+
+  // Bind pipeline and descriptor sets
   gpu.bind_graphics_pipeline(
-    command_buffer,
+    pass_ctx.cmd,
     self.pipeline,
     self.pipeline_layout,
-    cameras_descriptor_set,
-    textures_descriptor_set,
-    bone_descriptor_set,
-    material_descriptor_set,
-    node_data_descriptor_set,
-    mesh_data_descriptor_set,
-    vertex_skinning_descriptor_set,
+    deps.cameras_descriptor_set,
+    deps.textures_descriptor_set,
+    deps.bone_descriptor_set,
+    deps.material_descriptor_set,
+    deps.node_data_descriptor_set,
+    deps.mesh_data_descriptor_set,
+    deps.vertex_skinning_descriptor_set,
   )
+
+  // Push constants
   push_constants := PushConstant {
-    camera_index = camera_handle,
+    camera_index = u32(cam_idx),
   }
   vk.CmdPushConstants(
-    command_buffer,
+    pass_ctx.cmd,
     self.pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
     &push_constants,
   )
-  gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
+
+  // Bind vertex and index buffers
+  gpu.bind_vertex_index_buffers(
+    pass_ctx.cmd,
+    deps.vertex_buffer,
+    deps.index_buffer,
+  )
+
+  // Draw indirect
   vk.CmdDrawIndexedIndirectCount(
-    command_buffer,
-    draw_buffer,
+    pass_ctx.cmd,
+    draw_cmd_handle.buffer,
     0,
-    count_buffer,
+    draw_count_handle.buffer,
     0,
     d.MAX_NODES_IN_SCENE,
     u32(size_of(vk.DrawIndexedIndirectCommand)),
   )
-}
 
-shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  vk.DestroyPipeline(gctx.device, self.pipeline, nil)
-  self.pipeline = 0
-  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-  self.pipeline_layout = 0
+  vk.CmdEndRendering(pass_ctx.cmd)
+
+  // Graph will automatically transition G-buffer textures to SHADER_READ_ONLY_OPTIMAL
 }

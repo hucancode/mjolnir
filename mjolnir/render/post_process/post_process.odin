@@ -2,9 +2,10 @@ package post_process
 
 import cont "../../containers"
 import "../../gpu"
-import "../camera"
 import d "../data"
+import rg "../graph"
 import "../shared"
+import "core:fmt"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -180,10 +181,21 @@ PostprocessEffect :: union {
 }
 
 Renderer :: struct {
-  pipelines:        [len(PostProcessEffectType)]vk.Pipeline,
-  pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
-  effect_stack:     [dynamic]PostprocessEffect,
-  images:           [2]gpu.Texture2DHandle,
+  pipelines:               [len(PostProcessEffectType)]vk.Pipeline,
+  pipeline_layouts:        [len(PostProcessEffectType)]vk.PipelineLayout,
+  effect_stack:            [dynamic]PostprocessEffect,
+  images:                  [2]gpu.Texture2DHandle,
+}
+
+FrameResources :: struct {
+  position_texture_index: u32,
+  normal_texture_index:   u32,
+  albedo_texture_index:   u32,
+  metallic_texture_index: u32,
+  emissive_texture_index: u32,
+  depth_texture_index:    u32,
+  input_image_index:      u32,
+  ping_images:            [2]rg.Texture,
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -540,11 +552,7 @@ begin_pass :: proc(
     // if no postprocess effect, just copy the input to output
     append(&self.effect_stack, nil)
   }
-  gpu.set_viewport_scissor(
-    command_buffer,
-    extent,
-    flip_y = false,
-  )
+  gpu.set_viewport_scissor(command_buffer, extent, flip_y = false)
 }
 
 render :: proc(
@@ -552,9 +560,8 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  camera: ^camera.Camera,
-  texture_manager: ^gpu.TextureManager,
-  frame_index: u32,
+  textures_descriptor_set: vk.DescriptorSet,
+  frame: FrameResources,
 ) {
   for effect, i in self.effect_stack {
     is_first := i == 0
@@ -567,12 +574,11 @@ render :: proc(
     input_image_index: u32
     dst_image_idx: u32
     if is_first {
-      input_image_index =
-        camera.attachments[.FINAL_IMAGE][frame_index].index // Use original input
+      input_image_index = frame.input_image_index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
-      input_image_index = self.images[prev_dst_image_idx].index // Read from previous output
+      input_image_index = frame.ping_images[prev_dst_image_idx].index // Read from previous output
       dst_image_idx = u32(i % 2) // Alternate between image[0] and image[1]
     }
     // Ping-pong logic:
@@ -582,17 +588,7 @@ render :: proc(
     // Pass N: image[(N+1)%2] -> swapchain (src: image[(N-1)%2], dst: swapchain)
     dst_view := output_view
     if !is_last {
-      dst_texture := gpu.get_texture_2d(
-        texture_manager,
-        self.images[dst_image_idx],
-      )
-      if dst_texture == nil {
-        log.errorf(
-          "Post-process image handle %v not found",
-          self.images[dst_image_idx],
-        )
-        continue
-      }
+      dst_texture := frame.ping_images[dst_image_idx]
       // Transition dst texture from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
       gpu.image_barrier(
         command_buffer,
@@ -605,23 +601,13 @@ render :: proc(
         {.COLOR_ATTACHMENT_OUTPUT},
         {.COLOR},
       )
-      dst_view = dst_texture.view
+      dst_view = frame.ping_images[dst_image_idx].view
     } else {
       // For the last effect, output is the swapchain image, which should already be transitioned
     }
     if !is_first {
       src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
-      src_texture := gpu.get_texture_2d(
-        texture_manager,
-        self.images[src_texture_idx],
-      )
-      if src_texture == nil {
-        log.errorf(
-          "Post-process source image handle %v not found",
-          self.images[src_texture_idx],
-        )
-        continue
-      }
+      src_texture := frame.ping_images[src_texture_idx]
       // Transition src texture from COLOR_ATTACHMENT to SHADER_READ_ONLY
       gpu.image_barrier(
         command_buffer,
@@ -646,21 +632,15 @@ render :: proc(
       command_buffer,
       self.pipelines[effect_type],
       self.pipeline_layouts[effect_type],
-      texture_manager.descriptor_set,
+      textures_descriptor_set,
     )
     base: BasePushConstant
-    base.position_texture_index =
-      camera.attachments[.POSITION][frame_index].index
-    base.normal_texture_index =
-      camera.attachments[.NORMAL][frame_index].index
-    base.albedo_texture_index =
-      camera.attachments[.ALBEDO][frame_index].index
-    base.metallic_texture_index =
-      camera.attachments[.METALLIC_ROUGHNESS][frame_index].index
-    base.emissive_texture_index =
-      camera.attachments[.EMISSIVE][frame_index].index
-    base.depth_texture_index =
-      camera.attachments[.DEPTH][frame_index].index
+    base.position_texture_index = frame.position_texture_index
+    base.normal_texture_index = frame.normal_texture_index
+    base.albedo_texture_index = frame.albedo_texture_index
+    base.metallic_texture_index = frame.metallic_texture_index
+    base.emissive_texture_index = frame.emissive_texture_index
+    base.depth_texture_index = frame.depth_texture_index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {
@@ -803,4 +783,118 @@ render :: proc(
 }
 
 end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
+}
+
+// ============================================================================
+// Render Graph Integration
+// ============================================================================
+
+// Execute phase: render all post-process effects
+Blackboard :: struct {
+  position:    rg.Texture,
+  normal:      rg.Texture,
+  albedo:      rg.Texture,
+  metallic:    rg.Texture,
+  emissive:    rg.Texture,
+  depth:       rg.DepthTexture,
+  final_image: rg.Texture,
+  post_0:      rg.Texture,
+  post_1:      rg.Texture,
+  main_camera_index:       u32,
+  swapchain_view:          vk.ImageView,
+  swapchain_extent:        vk.Extent2D,
+  textures_descriptor_set: vk.DescriptorSet,
+}
+
+post_process_pass_deps_from_context :: proc(
+  pass_ctx: ^rg.PassContext,
+  main_camera_index: u32,
+) -> Blackboard {
+  return Blackboard {
+    position = rg.require_texture_index(
+      pass_ctx,
+      .CAMERA_GBUFFER_POSITION,
+      main_camera_index,
+    ),
+    normal = rg.require_texture_index(
+      pass_ctx,
+      .CAMERA_GBUFFER_NORMAL,
+      main_camera_index,
+    ),
+    albedo = rg.require_texture_index(
+      pass_ctx,
+      .CAMERA_GBUFFER_ALBEDO,
+      main_camera_index,
+    ),
+    metallic = rg.require_texture_index(
+      pass_ctx,
+      .CAMERA_GBUFFER_METALLIC_ROUGHNESS,
+      main_camera_index,
+    ),
+    emissive = rg.require_texture_index(
+      pass_ctx,
+      .CAMERA_GBUFFER_EMISSIVE,
+      main_camera_index,
+    ),
+    depth = rg.require_depth_index(
+      pass_ctx,
+      .CAMERA_DEPTH,
+      main_camera_index,
+    ),
+    final_image = rg.require_texture_index(
+      pass_ctx,
+      .CAMERA_FINAL_IMAGE,
+      main_camera_index,
+    ),
+    post_0 = rg.get_texture(pass_ctx, .POST_PROCESS_IMAGE_0),
+    post_1 = rg.get_texture(pass_ctx, .POST_PROCESS_IMAGE_1),
+    main_camera_index = main_camera_index,
+  }
+}
+
+post_process_pass_execute :: proc(
+  self: ^Renderer,
+  pass_ctx: ^rg.PassContext,
+  deps: Blackboard,
+) {
+
+  position := deps.position
+  normal := deps.normal
+  albedo := deps.albedo
+  metallic := deps.metallic
+  emissive := deps.emissive
+  depth := deps.depth
+  final_image := deps.final_image
+  post_0 := deps.post_0
+  post_1 := deps.post_1
+
+  // Call begin_pass to setup viewport and handle empty effect stack
+  // (begin_pass adds a nil effect if stack is empty, ensuring input is copied to output)
+  begin_pass(self, pass_ctx.cmd, deps.swapchain_extent)
+
+  frame := FrameResources {
+    position_texture_index = position.index,
+    normal_texture_index   = normal.index,
+    albedo_texture_index   = albedo.index,
+    metallic_texture_index = metallic.index,
+    emissive_texture_index = emissive.index,
+    depth_texture_index    = depth.index,
+    input_image_index      = final_image.index,
+    ping_images            = {post_0, post_1},
+  }
+
+  // Call original render() function with resolved resources
+  // Note: render() still has internal ping-pong barriers (intra-pass)
+  // Graph handles inter-pass barriers (final_image input, swapchain output)
+  render(
+    self,
+    pass_ctx.cmd,
+    deps.swapchain_extent,
+    deps.swapchain_view,
+    deps.textures_descriptor_set,
+    frame,
+  )
+
+  // Call end_pass for symmetry (currently empty but may be used in future)
+  end_pass(self, pass_ctx.cmd)
 }
