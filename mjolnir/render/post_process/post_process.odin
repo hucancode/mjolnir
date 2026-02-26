@@ -2,7 +2,6 @@ package post_process
 
 import cont "../../containers"
 import "../../gpu"
-import "../camera"
 import d "../data"
 import "../shared"
 import "core:log"
@@ -552,9 +551,14 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  camera: ^camera.Camera,
+  final_image_idx: u32,
+  position_texture_idx: u32,
+  normal_texture_idx: u32,
+  albedo_texture_idx: u32,
+  metallic_texture_idx: u32,
+  emissive_texture_idx: u32,
+  depth_texture_idx: u32,
   texture_manager: ^gpu.TextureManager,
-  frame_index: u32,
 ) {
   for effect, i in self.effect_stack {
     is_first := i == 0
@@ -567,8 +571,7 @@ render :: proc(
     input_image_index: u32
     dst_image_idx: u32
     if is_first {
-      input_image_index =
-        camera.attachments[.FINAL_IMAGE][frame_index].index // Use original input
+      input_image_index = final_image_idx // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -649,18 +652,12 @@ render :: proc(
       texture_manager.descriptor_set,
     )
     base: BasePushConstant
-    base.position_texture_index =
-      camera.attachments[.POSITION][frame_index].index
-    base.normal_texture_index =
-      camera.attachments[.NORMAL][frame_index].index
-    base.albedo_texture_index =
-      camera.attachments[.ALBEDO][frame_index].index
-    base.metallic_texture_index =
-      camera.attachments[.METALLIC_ROUGHNESS][frame_index].index
-    base.emissive_texture_index =
-      camera.attachments[.EMISSIVE][frame_index].index
-    base.depth_texture_index =
-      camera.attachments[.DEPTH][frame_index].index
+    base.position_texture_index = position_texture_idx
+    base.normal_texture_index = normal_texture_idx
+    base.albedo_texture_index = albedo_texture_idx
+    base.metallic_texture_index = metallic_texture_idx
+    base.emissive_texture_index = emissive_texture_idx
+    base.depth_texture_index = depth_texture_idx
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

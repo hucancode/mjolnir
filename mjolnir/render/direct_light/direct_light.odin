@@ -2,7 +2,6 @@ package direct_light
 
 import "../../geometry"
 import "../../gpu"
-import "../camera"
 import d "../data"
 import "../shared"
 import "core:log"
@@ -208,21 +207,21 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
+  final_image_handle: gpu.Texture2DHandle,
+  depth_handle: gpu.Texture2DHandle,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   cameras_descriptor_set: vk.DescriptorSet,
   lights_descriptor_set: vk.DescriptorSet,
   shadow_data_descriptor_set: vk.DescriptorSet,
-  frame_index: u32,
 ) {
   final_image := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+    final_image_handle,
   )
   depth_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.DEPTH][frame_index],
+    depth_handle,
   )
   gpu.begin_rendering(
     command_buffer,
@@ -245,12 +244,16 @@ begin_pass :: proc(
 render :: proc(
   self: ^Renderer,
   camera_handle: u32,
-  camera: ^camera.Camera,
+  position_texture_idx: u32,
+  normal_texture_idx: u32,
+  albedo_texture_idx: u32,
+  metallic_texture_idx: u32,
+  emissive_texture_idx: u32,
+  input_image_idx: u32,
   shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
   command_buffer: vk.CommandBuffer,
   lights_buffer: ^gpu.BindlessBuffer(d.Light),
   active_lights: []u32,
-  frame_index: u32,
 ) {
   bind_and_draw_mesh :: proc(
     mesh: ^LightVolumeMesh,
@@ -267,12 +270,12 @@ render :: proc(
   }
   push_constant := PushConstant {
     scene_camera_idx       = camera_handle,
-    position_texture_index = camera.attachments[.POSITION][frame_index].index,
-    normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
-    albedo_texture_index   = camera.attachments[.ALBEDO][frame_index].index,
-    metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
-    input_image_index      = camera.attachments[.FINAL_IMAGE][frame_index].index,
+    position_texture_index = position_texture_idx,
+    normal_texture_index   = normal_texture_idx,
+    albedo_texture_index   = albedo_texture_idx,
+    metallic_texture_index = metallic_texture_idx,
+    emissive_texture_index = emissive_texture_idx,
+    input_image_index      = input_image_idx,
   }
   for light_index in active_lights {
     light := gpu.get(&lights_buffer.buffer, light_index)

@@ -1,7 +1,6 @@
 package debug
 
 import "../../gpu"
-import "../camera"
 import "../data"
 import "../shared"
 import "core:log"
@@ -186,18 +185,18 @@ clear_bones :: proc(self: ^Renderer) {
 }
 
 // Begin debug rendering pass
-// Attaches to the camera's final image and depth buffer
+// Attaches to the final image and depth buffer
 // Returns false if attachments are missing (caller should skip rendering)
 begin_pass :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
+  color_handle: gpu.Texture2DHandle,
+  depth_handle: gpu.Texture2DHandle,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  frame_index: u32,
 ) -> bool {
   color_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+    color_handle,
   )
   if color_texture == nil {
     log.error("Debug rendering missing color attachment")
@@ -206,7 +205,7 @@ begin_pass :: proc(
 
   depth_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.DEPTH][frame_index],
+    depth_handle,
   )
   if depth_texture == nil {
     log.error("Debug rendering missing depth attachment")

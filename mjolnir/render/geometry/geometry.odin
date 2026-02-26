@@ -3,7 +3,6 @@ package geometry_pass
 import cont "../../containers"
 import "../../geometry"
 import "../../gpu"
-import "../camera"
 import d "../data"
 import "../shared"
 import "core:log"
@@ -138,34 +137,39 @@ init :: proc(
 }
 
 begin_pass :: proc(
-  camera: ^camera.Camera,
+  position_handle: gpu.Texture2DHandle,
+  normal_handle: gpu.Texture2DHandle,
+  albedo_handle: gpu.Texture2DHandle,
+  metallic_roughness_handle: gpu.Texture2DHandle,
+  emissive_handle: gpu.Texture2DHandle,
+  final_image_handle: gpu.Texture2DHandle,
+  depth_handle: gpu.Texture2DHandle,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  frame_index: u32,
 ) {
   position_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.POSITION][frame_index],
+    position_handle,
   )
   normal_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.NORMAL][frame_index],
+    normal_handle,
   )
   albedo_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.ALBEDO][frame_index],
+    albedo_handle,
   )
   metallic_roughness_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
+    metallic_roughness_handle,
   )
   emissive_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.EMISSIVE][frame_index],
+    emissive_handle,
   )
   final_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+    final_image_handle,
   )
   gpu.image_barrier(
     command_buffer,
@@ -235,7 +239,7 @@ begin_pass :: proc(
   )
   depth_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.DEPTH][frame_index],
+    depth_handle,
   )
   gpu.image_barrier(
     command_buffer,
@@ -265,35 +269,39 @@ begin_pass :: proc(
 }
 
 end_pass :: proc(
-  camera: ^camera.Camera,
+  position_handle: gpu.Texture2DHandle,
+  normal_handle: gpu.Texture2DHandle,
+  albedo_handle: gpu.Texture2DHandle,
+  metallic_roughness_handle: gpu.Texture2DHandle,
+  emissive_handle: gpu.Texture2DHandle,
+  depth_handle: gpu.Texture2DHandle,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
-  frame_index: u32,
 ) {
   vk.CmdEndRendering(command_buffer)
   position_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.POSITION][frame_index],
+    position_handle,
   )
   normal_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.NORMAL][frame_index],
+    normal_handle,
   )
   albedo_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.ALBEDO][frame_index],
+    albedo_handle,
   )
   metallic_roughness_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.METALLIC_ROUGHNESS][frame_index],
+    metallic_roughness_handle,
   )
   emissive_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.EMISSIVE][frame_index],
+    emissive_handle,
   )
   depth_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.DEPTH][frame_index],
+    depth_handle,
   )
   gpu.image_barrier(
     command_buffer,

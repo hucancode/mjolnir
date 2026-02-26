@@ -12,7 +12,6 @@ import nav "navigation"
 import "navigation/recast"
 import "physics"
 import "render"
-import render_camera "render/camera"
 import "render/post_process"
 import vk "vendor:vulkan"
 import "world"
@@ -338,7 +337,7 @@ create_camera :: proc(
 get_camera_attachment :: proc(
   engine: ^Engine,
   camera_handle: world.CameraHandle,
-  attachment_type: render_camera.AttachmentType,
+  attachment_type: render.AttachmentType,
   frame_index: u32 = 0,
 ) -> (
   handle: world.Image2DHandle,

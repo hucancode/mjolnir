@@ -1,7 +1,6 @@
 package ambient
 
 import "../../gpu"
-import "../camera"
 import d "../data"
 import "../shared"
 import "core:log"
@@ -173,15 +172,14 @@ shutdown :: proc(
 
 begin_pass :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
+  final_image_handle: gpu.Texture2DHandle,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   cameras_descriptor_set: vk.DescriptorSet,
-  frame_index: u32,
 ) {
   color_texture := gpu.get_texture_2d(
     texture_manager,
-    camera.attachments[.FINAL_IMAGE][frame_index],
+    final_image_handle,
   )
   gpu.begin_rendering(
     command_buffer,
@@ -206,19 +204,22 @@ begin_pass :: proc(
 render :: proc(
   self: ^Renderer,
   camera_handle: u32,
-  camera: ^camera.Camera,
+  position_texture_idx: u32,
+  normal_texture_idx: u32,
+  albedo_texture_idx: u32,
+  metallic_texture_idx: u32,
+  emissive_texture_idx: u32,
   command_buffer: vk.CommandBuffer,
-  frame_index: u32,
 ) {
   push := PushConstant {
     camera_index           = camera_handle,
     environment_index      = self.environment_map.index,
     brdf_lut_index         = self.brdf_lut.index,
-    position_texture_index = camera.attachments[.POSITION][frame_index].index,
-    normal_texture_index   = camera.attachments[.NORMAL][frame_index].index,
-    albedo_texture_index   = camera.attachments[.ALBEDO][frame_index].index,
-    metallic_texture_index = camera.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
+    position_texture_index = position_texture_idx,
+    normal_texture_index   = normal_texture_idx,
+    albedo_texture_index   = albedo_texture_idx,
+    metallic_texture_index = metallic_texture_idx,
+    emissive_texture_index = emissive_texture_idx,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }

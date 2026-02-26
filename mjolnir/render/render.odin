@@ -6,8 +6,6 @@ import geom "../geometry"
 import "../gpu"
 import cmd "../gpu/ui"
 import "ambient"
-import "camera"
-import cam "camera"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -109,7 +107,7 @@ Manager :: struct {
   debug_renderer:               debug_bone.Renderer,
   ui:                           ui_render.Renderer,
   ui_commands:                  [dynamic]cmd.RenderCommand, // Staged commands from UI module
-  per_camera_data:              map[u32]camera.Camera,
+  per_camera_data:              map[u32]Camera,
   per_light_data:               map[u32]PerLightData,
   visibility:                   occlusion_culling.System,
   depth_pyramid:                depth_pyramid_system.System,
@@ -158,7 +156,7 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  self.per_camera_data = make(map[u32]camera.Camera)
+  self.per_camera_data = make(map[u32]Camera)
   self.per_light_data = make(map[u32]PerLightData)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
@@ -607,7 +605,7 @@ setup :: proc(
 teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   // Destroy camera GPU resources (VkImages, draw command buffers) before texture_manager goes away
   for _, &cam in self.per_camera_data {
-    camera.destroy(gctx, &cam, &self.texture_manager)
+    camera_destroy(gctx, &cam, &self.texture_manager)
   }
   clear(&self.per_camera_data)
   shadow_keys := make([dynamic]u32, 0, context.temp_allocator)
@@ -656,7 +654,7 @@ get_camera :: proc(
   self: ^Manager,
   handle: u32,
 ) -> (
-  cam: camera.Camera,
+  cam: Camera,
   ok: bool,
 ) #optional_ok {
   cam, ok = self.per_camera_data[handle]
@@ -669,7 +667,7 @@ sync_camera_from_world :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
   handle: u32,
-  world_camera: ^camera.Camera,
+  world_camera: ^Camera,
   swapchain_format: vk.Format,
 ) {
 }
@@ -694,15 +692,24 @@ record_compute_commands :: proc(
     depth_pyramid_system.build_pyramid(
       &self.depth_pyramid,
       cmd,
-      &cam,
-      frame_index,
+      &cam.depth_pyramid[frame_index],
+      cam.depth_reduce_descriptor_sets[frame_index][:],
     ) // Build pyramid[N]
+    prev_frame := alg.prev(next_frame_index, FRAMES_IN_FLIGHT)
     occlusion_culling.perform_culling(
       &self.visibility,
       cmd,
-      &cam,
       u32(cam_index),
       next_frame_index,
+      &cam.opaque_draw_count[next_frame_index],
+      &cam.transparent_draw_count[next_frame_index],
+      &cam.sprite_draw_count[next_frame_index],
+      &cam.wireframe_draw_count[next_frame_index],
+      &cam.random_color_draw_count[next_frame_index],
+      &cam.line_strip_draw_count[next_frame_index],
+      cam.descriptor_set[next_frame_index],
+      cam.depth_pyramid[prev_frame].width,
+      cam.depth_pyramid[prev_frame].height,
     ) // Write draw_list[N+1]
   }
   particles_compute.simulate(
@@ -1012,10 +1019,20 @@ record_geometry_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   cam_index: u32,
-  cam: ^camera.Camera,
+  cam: ^Camera,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
-  geometry.begin_pass(cam, &self.texture_manager, cmd, frame_index)
+  geometry.begin_pass(
+    cam.attachments[.POSITION][frame_index],
+    cam.attachments[.NORMAL][frame_index],
+    cam.attachments[.ALBEDO][frame_index],
+    cam.attachments[.METALLIC_ROUGHNESS][frame_index],
+    cam.attachments[.EMISSIVE][frame_index],
+    cam.attachments[.FINAL_IMAGE][frame_index],
+    cam.attachments[.DEPTH][frame_index],
+    &self.texture_manager,
+    cmd,
+  )
   geometry.render(
     &self.geometry,
     cam_index,
@@ -1032,7 +1049,16 @@ record_geometry_pass :: proc(
     cam.opaque_draw_commands[frame_index].buffer,
     cam.opaque_draw_count[frame_index].buffer,
   )
-  geometry.end_pass(cam, &self.texture_manager, cmd, frame_index)
+  geometry.end_pass(
+    cam.attachments[.POSITION][frame_index],
+    cam.attachments[.NORMAL][frame_index],
+    cam.attachments[.ALBEDO][frame_index],
+    cam.attachments[.METALLIC_ROUGHNESS][frame_index],
+    cam.attachments[.EMISSIVE][frame_index],
+    cam.attachments[.DEPTH][frame_index],
+    &self.texture_manager,
+    cmd,
+  )
   return .SUCCESS
 }
 
@@ -1040,28 +1066,36 @@ record_lighting_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   cam_index: u32,
-  cam: ^camera.Camera,
+  cam: ^Camera,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
   ambient.begin_pass(
     &self.ambient,
-    cam,
+    cam.attachments[.FINAL_IMAGE][frame_index],
     &self.texture_manager,
     cmd,
     self.camera_buffer.descriptor_sets[frame_index],
-    frame_index,
   )
-  ambient.render(&self.ambient, cam_index, cam, cmd, frame_index)
+  ambient.render(
+    &self.ambient,
+    cam_index,
+    cam.attachments[.POSITION][frame_index].index,
+    cam.attachments[.NORMAL][frame_index].index,
+    cam.attachments[.ALBEDO][frame_index].index,
+    cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    cam.attachments[.EMISSIVE][frame_index].index,
+    cmd,
+  )
   ambient.end_pass(cmd)
   direct_light.begin_pass(
     &self.direct_light,
-    cam,
+    cam.attachments[.FINAL_IMAGE][frame_index],
+    cam.attachments[.DEPTH][frame_index],
     &self.texture_manager,
     cmd,
     self.camera_buffer.descriptor_sets[frame_index],
     self.lights_buffer.descriptor_set,
     self.shadow_data_buffer.descriptor_sets[frame_index],
-    frame_index,
   )
   shadow_texture_indices: [rd.MAX_LIGHTS]u32
   for i in 0 ..< rd.MAX_LIGHTS {
@@ -1101,12 +1135,16 @@ record_lighting_pass :: proc(
   direct_light.render(
     &self.direct_light,
     cam_index,
-    cam,
+    cam.attachments[.POSITION][frame_index].index,
+    cam.attachments[.NORMAL][frame_index].index,
+    cam.attachments[.ALBEDO][frame_index].index,
+    cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    cam.attachments[.EMISSIVE][frame_index].index,
+    cam.attachments[.FINAL_IMAGE][frame_index].index,
     &shadow_texture_indices,
     cmd,
     &self.lights_buffer,
     active_light_indices[:],
-    frame_index,
   )
   direct_light.end_pass(cmd)
   return .SUCCESS
@@ -1116,15 +1154,15 @@ record_particles_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   cam_index: u32,
-  cam: ^camera.Camera,
+  cam: ^Camera,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
   particles_render.begin_pass(
     &self.particles_render,
     cmd,
-    cam,
+    cam.attachments[.FINAL_IMAGE][frame_index],
+    cam.attachments[.DEPTH][frame_index],
     &self.texture_manager,
-    frame_index,
   )
   particles_render.render(
     &self.particles_render,
@@ -1144,7 +1182,7 @@ record_transparency_pass :: proc(
   frame_index: u32,
   gctx: ^gpu.GPUContext,
   cam_index: u32,
-  cam: ^camera.Camera,
+  cam: ^Camera,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
 
@@ -1356,7 +1394,7 @@ record_debug_pass :: proc(
   self: ^Manager,
   frame_index: u32,
   cam_index: u32,
-  cam: ^camera.Camera,
+  cam: ^Camera,
 ) -> vk.Result {
   // Skip debug rendering if no instances are staged
   if len(self.debug_renderer.bone_instances) == 0 do return .SUCCESS
@@ -1367,10 +1405,10 @@ record_debug_pass :: proc(
   // Skip rendering if attachments are missing
   if !debug_bone.begin_pass(
     &self.debug_renderer,
-    cam,
+    cam.attachments[.FINAL_IMAGE][frame_index],
+    cam.attachments[.DEPTH][frame_index],
     &self.texture_manager,
     cmd,
-    frame_index,
   ) {
     return .SUCCESS
   }
@@ -1391,7 +1429,7 @@ record_debug_pass :: proc(
 record_post_process_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  cam: ^camera.Camera,
+  cam: ^Camera,
   swapchain_extent: vk.Extent2D,
   swapchain_image: vk.Image,
   swapchain_view: vk.ImageView,
@@ -1430,9 +1468,14 @@ record_post_process_pass :: proc(
     cmd,
     swapchain_extent,
     swapchain_view,
-    cam,
+    cam.attachments[.FINAL_IMAGE][frame_index].index,
+    cam.attachments[.POSITION][frame_index].index,
+    cam.attachments[.NORMAL][frame_index].index,
+    cam.attachments[.ALBEDO][frame_index].index,
+    cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    cam.attachments[.EMISSIVE][frame_index].index,
+    cam.attachments[.DEPTH][frame_index].index,
     &self.texture_manager,
-    frame_index,
   )
   post_process.end_pass(&self.post_process, cmd)
   return .SUCCESS
@@ -1858,4 +1901,593 @@ upload_camera_data :: proc(
     &camera_data,
     int(camera_index),
   )
+}
+
+AttachmentType :: enum {
+  FINAL_IMAGE        = 0,
+  POSITION           = 1,
+  NORMAL             = 2,
+  ALBEDO             = 3,
+  METALLIC_ROUGHNESS = 4,
+  EMISSIVE           = 5,
+  DEPTH              = 6,
+}
+
+PassType :: enum {
+  SHADOW       = 0,
+  GEOMETRY     = 1,
+  LIGHTING     = 2,
+  TRANSPARENCY = 3,
+  PARTICLES    = 4,
+  POST_PROCESS = 5,
+}
+
+PassTypeSet :: bit_set[PassType;u32]
+
+Camera :: struct {
+  // Render pass configuration
+  enabled_passes:               PassTypeSet,
+  // Visibility culling control flags
+  enable_culling:               bool, // If false, skip culling compute pass
+  // GPU resources - Render target attachments (G-buffer textures, depth, final image)
+  attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  // Indirect draw buffers (double-buffered for async compute)
+  // Frame N compute writes to buffers[N], Frame N graphics reads from buffers[N-1]
+  opaque_draw_count:            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  opaque_draw_commands:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  transparent_draw_count:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  transparent_draw_commands:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  wireframe_draw_count:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  wireframe_draw_commands:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  random_color_draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  random_color_draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  line_strip_draw_count:        [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  line_strip_draw_commands:     [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  sprite_draw_count:            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  sprite_draw_commands:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  // Depth pyramid for hierarchical Z culling
+  depth_pyramid:                [FRAMES_IN_FLIGHT]depth_pyramid_system.DepthPyramid,
+  // Descriptor sets for visibility culling compute shaders
+  descriptor_set:               [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  depth_reduce_descriptor_sets: [FRAMES_IN_FLIGHT][depth_pyramid_system.MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
+}
+
+
+// Initialize GPU resources for perspective camera
+// Takes only the specific resources needed, no dependency on render manager
+camera_init :: proc(
+  gctx: ^gpu.GPUContext,
+  camera: ^Camera,
+  texture_manager: ^gpu.TextureManager,
+  extent: vk.Extent2D,
+  color_format, depth_format: vk.Format,
+  enabled_passes: PassTypeSet = {
+    .SHADOW,
+    .GEOMETRY,
+    .LIGHTING,
+    .TRANSPARENCY,
+    .PARTICLES,
+    .POST_PROCESS,
+  },
+  max_draws: u32,
+) -> vk.Result {
+  // Determine which attachments are needed based on enabled passes
+  needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
+  needs_final :=
+    .LIGHTING in enabled_passes ||
+    .TRANSPARENCY in enabled_passes ||
+    .PARTICLES in enabled_passes ||
+    .POST_PROCESS in enabled_passes
+
+  // Create render target attachments for each frame
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    if needs_final {
+      camera.attachments[.FINAL_IMAGE][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        color_format,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+    }
+    if needs_gbuffer {
+      camera.attachments[.POSITION][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R32G32B32A32_SFLOAT,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+      camera.attachments[.NORMAL][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+      camera.attachments[.ALBEDO][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+      camera.attachments[.METALLIC_ROUGHNESS][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+      camera.attachments[.EMISSIVE][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+    }
+    camera.attachments[.DEPTH][frame] = gpu.allocate_texture_2d(
+      texture_manager,
+      gctx,
+      extent,
+      depth_format,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    ) or_return
+
+    // Transition depth image from UNDEFINED to DEPTH_STENCIL_READ_ONLY_OPTIMAL
+    if depth := gpu.get_texture_2d(
+      texture_manager,
+      camera.attachments[.DEPTH][frame],
+    ); depth != nil {
+      cmd_buf := gpu.begin_single_time_command(gctx) or_return
+      gpu.image_barrier(
+        cmd_buf,
+        depth.image,
+        .UNDEFINED,
+        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        {},
+        {.DEPTH_STENCIL_ATTACHMENT_READ},
+        {.TOP_OF_PIPE},
+        {.EARLY_FRAGMENT_TESTS},
+        {.DEPTH},
+      )
+      gpu.end_single_time_command(gctx, &cmd_buf) or_return
+    }
+  }
+
+  // Create indirect draw buffers (double-buffered)
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    camera.opaque_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.opaque_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.transparent_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.transparent_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.wireframe_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.wireframe_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.random_color_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.random_color_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.line_strip_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.line_strip_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.sprite_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.sprite_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+  }
+
+  if camera.enable_culling {
+    for frame in 0 ..< FRAMES_IN_FLIGHT {
+      depth_pyramid_system.setup_pyramid(
+        gctx,
+        &camera.depth_pyramid[frame],
+        texture_manager,
+        extent,
+      ) or_return
+    }
+  }
+
+  return .SUCCESS
+}
+
+// Destroy GPU resources for perspective/orthographic camera
+camera_destroy :: proc(
+  gctx: ^gpu.GPUContext,
+  camera: ^Camera,
+  texture_manager: ^gpu.TextureManager,
+) {
+  // Destroy all attachment textures
+  for attachment_type in AttachmentType {
+    for frame in 0 ..< FRAMES_IN_FLIGHT {
+      handle := camera.attachments[attachment_type][frame]
+      if handle.index == 0 do continue
+      gpu.free_texture_2d(texture_manager, gctx, handle)
+    }
+  }
+
+  // Destroy depth pyramids
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    depth_pyramid_system.destroy_pyramid(
+      gctx,
+      &camera.depth_pyramid[frame],
+      texture_manager,
+    )
+  }
+
+  // Destroy indirect draw buffers
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    gpu.mutable_buffer_destroy(gctx.device, &camera.opaque_draw_count[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.opaque_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.transparent_draw_count[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.transparent_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.wireframe_draw_count[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.wireframe_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.random_color_draw_count[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.random_color_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.line_strip_draw_count[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.line_strip_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(gctx.device, &camera.sprite_draw_count[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.sprite_draw_commands[frame],
+    )
+  }
+  // Zero out the GPU struct
+  camera^ = {}
+}
+
+// Allocate descriptor sets for perspective/orthographic camera culling pipelines
+camera_allocate_descriptors :: proc(
+  gctx: ^gpu.GPUContext,
+  camera: ^Camera,
+  texture_manager: ^gpu.TextureManager,
+  normal_descriptor_layout: ^vk.DescriptorSetLayout,
+  depth_reduce_descriptor_layout: ^vk.DescriptorSetLayout,
+  node_data_buffer: ^gpu.BindlessBuffer(rd.Node),
+  mesh_data_buffer: ^gpu.BindlessBuffer(rd.Mesh),
+  camera_buffer: ^gpu.PerFrameBindlessBuffer(rd.Camera, FRAMES_IN_FLIGHT),
+) -> vk.Result {
+  for frame_index in 0 ..< FRAMES_IN_FLIGHT {
+    prev_frame_index := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
+    pyramid := &camera.depth_pyramid[frame_index]
+    prev_pyramid := &camera.depth_pyramid[prev_frame_index]
+    prev_depth := gpu.get_texture_2d(
+      texture_manager,
+      camera.attachments[.DEPTH][prev_frame_index],
+    )
+    if prev_depth == nil {
+      log.errorf(
+        "allocate_descriptors: missing depth attachment for frame %d",
+        prev_frame_index,
+      )
+      return .ERROR_INITIALIZATION_FAILED
+    }
+    if pyramid.mip_levels == 0 {
+      log.errorf(
+        "allocate_descriptors: missing depth pyramid for frame %d",
+        frame_index,
+      )
+      return .ERROR_INITIALIZATION_FAILED
+    }
+
+    camera.descriptor_set[frame_index] = gpu.create_descriptor_set(
+      gctx,
+      normal_descriptor_layout,
+      {.STORAGE_BUFFER, gpu.buffer_info(&node_data_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&mesh_data_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&camera_buffer.buffers[frame_index])},
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.opaque_draw_count[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.opaque_draw_commands[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.transparent_draw_count[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.transparent_draw_commands[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.sprite_draw_count[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.sprite_draw_commands[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.wireframe_draw_count[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.wireframe_draw_commands[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.random_color_draw_count[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.random_color_draw_commands[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.line_strip_draw_count[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.line_strip_draw_commands[frame_index]),
+      },
+      {
+        .COMBINED_IMAGE_SAMPLER,
+        vk.DescriptorImageInfo {
+          sampler = prev_pyramid.sampler,
+          imageView = prev_pyramid.full_view,
+          imageLayout = .GENERAL,
+        },
+      },
+    ) or_return
+
+    for mip in 0 ..< pyramid.mip_levels {
+      source_info: vk.DescriptorImageInfo
+      if mip == 0 {
+        source_info = {
+          sampler     = pyramid.sampler,
+          imageView   = prev_depth.view,
+          imageLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        }
+      } else {
+        source_info = {
+          sampler     = pyramid.sampler,
+          imageView   = pyramid.views[mip - 1],
+          imageLayout = .GENERAL,
+        }
+      }
+      dest_info := vk.DescriptorImageInfo {
+        imageView   = pyramid.views[mip],
+        imageLayout = .GENERAL,
+      }
+      camera.depth_reduce_descriptor_sets[frame_index][mip] =
+        gpu.create_descriptor_set(
+          gctx,
+          depth_reduce_descriptor_layout,
+          {.COMBINED_IMAGE_SAMPLER, source_info},
+          {.STORAGE_IMAGE, dest_info},
+        ) or_return
+    }
+  }
+
+  return .SUCCESS
+}
+
+// Resize camera render targets (called on window resize)
+camera_resize :: proc(
+  gctx: ^gpu.GPUContext,
+  camera: ^Camera,
+  texture_manager: ^gpu.TextureManager,
+  extent: vk.Extent2D,
+  color_format, depth_format: vk.Format,
+  enabled_passes: PassTypeSet,
+) -> vk.Result {
+  // Destroy old attachments
+  for attachment_type in AttachmentType {
+    for frame in 0 ..< FRAMES_IN_FLIGHT {
+      handle := camera.attachments[attachment_type][frame]
+      if handle.index == 0 do continue
+      gpu.free_texture_2d(texture_manager, gctx, handle)
+      camera.attachments[attachment_type][frame] = {}
+    }
+  }
+
+  // Destroy old depth pyramids
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    pyramid := &camera.depth_pyramid[frame]
+    if pyramid.mip_levels == 0 do continue
+
+    for mip in 0 ..< pyramid.mip_levels {
+      vk.DestroyImageView(gctx.device, pyramid.views[mip], nil)
+    }
+    vk.DestroyImageView(gctx.device, pyramid.full_view, nil)
+    vk.DestroySampler(gctx.device, pyramid.sampler, nil)
+
+    gpu.free_texture_2d(texture_manager, gctx, pyramid.texture)
+    pyramid^ = {}
+  }
+
+  // Recreate attachments with new dimensions
+  needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
+  needs_final :=
+    .LIGHTING in enabled_passes ||
+    .TRANSPARENCY in enabled_passes ||
+    .PARTICLES in enabled_passes ||
+    .POST_PROCESS in enabled_passes
+
+  for frame in 0 ..< FRAMES_IN_FLIGHT {
+    if needs_final {
+      camera.attachments[.FINAL_IMAGE][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        color_format,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+    }
+    if needs_gbuffer {
+      camera.attachments[.POSITION][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R32G32B32A32_SFLOAT,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+      camera.attachments[.NORMAL][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+      camera.attachments[.ALBEDO][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+      camera.attachments[.METALLIC_ROUGHNESS][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+      camera.attachments[.EMISSIVE][frame] = gpu.allocate_texture_2d(
+        texture_manager,
+        gctx,
+        extent,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      ) or_return
+    }
+    camera.attachments[.DEPTH][frame] = gpu.allocate_texture_2d(
+      texture_manager,
+      gctx,
+      extent,
+      depth_format,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    ) or_return
+
+    if depth := gpu.get_texture_2d(
+      texture_manager,
+      camera.attachments[.DEPTH][frame],
+    ); depth != nil {
+      cmd_buf := gpu.begin_single_time_command(gctx) or_return
+      gpu.image_barrier(
+        cmd_buf,
+        depth.image,
+        .UNDEFINED,
+        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        {},
+        {.DEPTH_STENCIL_ATTACHMENT_READ},
+        {.TOP_OF_PIPE},
+        {.EARLY_FRAGMENT_TESTS},
+        {.DEPTH},
+      )
+      gpu.end_single_time_command(gctx, &cmd_buf) or_return
+    }
+  }
+  if camera.enable_culling {
+    for frame in 0 ..< FRAMES_IN_FLIGHT {
+      depth_pyramid_system.setup_pyramid(
+        gctx,
+        &camera.depth_pyramid[frame],
+        texture_manager,
+        extent,
+      ) or_return
+    }
+  }
+
+  log.infof("Camera resized to %dx%d", extent.width, extent.height)
+  return .SUCCESS
 }

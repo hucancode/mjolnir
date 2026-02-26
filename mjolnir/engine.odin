@@ -19,7 +19,6 @@ import "geometry"
 import "gpu"
 import nav "navigation"
 import "render"
-import "render/camera"
 import rd "render/data"
 import "render/debug_ui"
 import occlusion_culling "render/occlusion_culling"
@@ -920,7 +919,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     // Sync camera configuration
     cam := &self.render.per_camera_data[handle.index]
     cam.enabled_passes =
-    transmute(camera.PassTypeSet)world_camera.enabled_passes
+    transmute(render.PassTypeSet)world_camera.enabled_passes
     cam.enable_culling = world_camera.enable_culling
     // Upload camera transform data to GPU buffer
     view_matrix := world.camera_view_matrix(world_camera)
@@ -939,7 +938,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     )
     // Initialize GPU resources for new cameras
     if is_new_camera {
-      camera.init(
+      render.camera_init(
         &self.gctx,
         cam,
         &self.render.texture_manager,
@@ -949,7 +948,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         cam.enabled_passes,
         rd.MAX_NODES_IN_SCENE,
       ) or_return
-      camera.allocate_descriptors(
+      render.camera_allocate_descriptors(
         &self.gctx,
         cam,
         &self.render.texture_manager,
@@ -1113,10 +1112,10 @@ populate_debug_ui :: proc(self: ^Engine) {
       ),
     )
     if main_camera := get_main_camera(self); main_camera != nil {
-      main_camera := &self.render.per_camera_data[self.world.main_camera.index]
+      render_camera := &self.render.per_camera_data[self.world.main_camera.index]
       main_stats := occlusion_culling.stats(
         &self.render.visibility,
-        main_camera,
+        &render_camera.opaque_draw_count[self.frame_index],
         self.world.main_camera.index,
         self.frame_index,
       )
@@ -1162,16 +1161,16 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       },
     )
     if cam, ok := &engine.render.per_camera_data[u32(cam_index)]; ok {
-      camera.resize(
+      render.camera_resize(
         &engine.gctx,
         cam,
         &engine.render.texture_manager,
         vk.Extent2D{world_camera.extent[0], world_camera.extent[1]},
         engine.swapchain.format.format,
         vk.Format.D32_SFLOAT,
-        transmute(camera.PassTypeSet)world_camera.enabled_passes,
+        transmute(render.PassTypeSet)world_camera.enabled_passes,
       ) or_return
-      camera.allocate_descriptors(
+      render.camera_allocate_descriptors(
         &engine.gctx,
         cam,
         &engine.render.texture_manager,

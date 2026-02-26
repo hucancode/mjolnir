@@ -2,7 +2,6 @@ package occlusion_culling
 
 import alg "../../algebra"
 import "../../gpu"
-import cam "../camera"
 import d "../data"
 import rd "../data"
 import vk "vendor:vulkan"
@@ -26,13 +25,13 @@ CullingStats :: struct {
 }
 
 System :: struct {
-  cull_layout:            vk.PipelineLayout,
-  cull_pipeline:          vk.Pipeline,
+  cull_layout:             vk.PipelineLayout,
+  cull_pipeline:           vk.Pipeline,
   depth_descriptor_layout: vk.DescriptorSetLayout,
-  max_draws:              u32,
-  node_count:             u32,
-  depth_bias:             f32,
-  stats_enabled:          bool,
+  max_draws:               u32,
+  node_count:              u32,
+  depth_bias:              f32,
+  stats_enabled:           bool,
 }
 
 init :: proc(
@@ -107,7 +106,7 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
 
 stats :: proc(
   self: ^System,
-  camera: ^cam.Camera,
+  opaque_draw_count: ^gpu.MutableBuffer(u32),
   camera_index: u32,
   frame_index: u32,
 ) -> CullingStats {
@@ -115,8 +114,8 @@ stats :: proc(
     camera_index = camera_index,
     frame_index  = frame_index,
   }
-  if camera.opaque_draw_count[frame_index].mapped != nil {
-    stats.opaque_draw_count = camera.opaque_draw_count[frame_index].mapped[0]
+  if opaque_draw_count.mapped != nil {
+    stats.opaque_draw_count = opaque_draw_count.mapped[0]
   }
   _ = self
   return stats
@@ -125,66 +124,73 @@ stats :: proc(
 perform_culling :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
-  camera: ^cam.Camera,
   camera_index: u32,
   frame_index: u32,
+  opaque_draw_count: ^gpu.MutableBuffer(u32),
+  transparent_draw_count: ^gpu.MutableBuffer(u32),
+  sprite_draw_count: ^gpu.MutableBuffer(u32),
+  wireframe_draw_count: ^gpu.MutableBuffer(u32),
+  random_color_draw_count: ^gpu.MutableBuffer(u32),
+  line_strip_draw_count: ^gpu.MutableBuffer(u32),
+  descriptor_set: vk.DescriptorSet,
+  pyramid_width: u32,
+  pyramid_height: u32,
 ) {
   if self.node_count == 0 do return
   vk.CmdFillBuffer(
     command_buffer,
-    camera.opaque_draw_count[frame_index].buffer,
+    opaque_draw_count.buffer,
     0,
-    vk.DeviceSize(camera.opaque_draw_count[frame_index].bytes_count),
-    0,
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    camera.transparent_draw_count[frame_index].buffer,
-    0,
-    vk.DeviceSize(camera.transparent_draw_count[frame_index].bytes_count),
+    vk.DeviceSize(opaque_draw_count.bytes_count),
     0,
   )
   vk.CmdFillBuffer(
     command_buffer,
-    camera.sprite_draw_count[frame_index].buffer,
+    transparent_draw_count.buffer,
     0,
-    vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
-    0,
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    camera.wireframe_draw_count[frame_index].buffer,
-    0,
-    vk.DeviceSize(camera.wireframe_draw_count[frame_index].bytes_count),
+    vk.DeviceSize(transparent_draw_count.bytes_count),
     0,
   )
   vk.CmdFillBuffer(
     command_buffer,
-    camera.random_color_draw_count[frame_index].buffer,
+    sprite_draw_count.buffer,
     0,
-    vk.DeviceSize(camera.random_color_draw_count[frame_index].bytes_count),
+    vk.DeviceSize(sprite_draw_count.bytes_count),
     0,
   )
   vk.CmdFillBuffer(
     command_buffer,
-    camera.line_strip_draw_count[frame_index].buffer,
+    wireframe_draw_count.buffer,
     0,
-    vk.DeviceSize(camera.line_strip_draw_count[frame_index].bytes_count),
+    vk.DeviceSize(wireframe_draw_count.bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    random_color_draw_count.buffer,
+    0,
+    vk.DeviceSize(random_color_draw_count.bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    line_strip_draw_count.buffer,
+    0,
+    vk.DeviceSize(line_strip_draw_count.bytes_count),
     0,
   )
   gpu.bind_compute_pipeline(
     command_buffer,
     self.cull_pipeline,
     self.cull_layout,
-    camera.descriptor_set[frame_index],
+    descriptor_set,
   )
-  prev_frame := alg.prev(frame_index, d.FRAMES_IN_FLIGHT)
   push_constants := VisibilityPushConstants {
     camera_index      = camera_index,
     node_count        = self.node_count,
     max_draws         = self.max_draws,
-    pyramid_width     = f32(camera.depth_pyramid[prev_frame].width),
-    pyramid_height    = f32(camera.depth_pyramid[prev_frame].height),
+    pyramid_width     = f32(pyramid_width),
+    pyramid_height    = f32(pyramid_height),
     depth_bias        = self.depth_bias,
     occlusion_enabled = 1,
   }

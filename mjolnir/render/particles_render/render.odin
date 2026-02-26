@@ -1,7 +1,6 @@
 package particles_render
 
 import "../../gpu"
-import "../camera"
 import rd "../data"
 import "../shared"
 import "core:log"
@@ -155,13 +154,13 @@ create_render_pipeline :: proc(
 begin_pass :: proc(
 	self: ^Renderer,
 	command_buffer: vk.CommandBuffer,
-	camera: ^camera.Camera,
+	color_handle: gpu.Texture2DHandle,
+	depth_handle: gpu.Texture2DHandle,
 	texture_manager: ^gpu.TextureManager,
-	frame_index: u32,
 ) {
 	color_texture := gpu.get_texture_2d(
 		texture_manager,
-		camera.attachments[.FINAL_IMAGE][frame_index],
+		color_handle,
 	)
 	if color_texture == nil {
 		log.error("Particle renderer missing color attachment")
@@ -170,7 +169,7 @@ begin_pass :: proc(
 
 	depth_texture := gpu.get_texture_2d(
 		texture_manager,
-		camera.attachments[.DEPTH][frame_index],
+		depth_handle,
 	)
 	if depth_texture == nil {
 		log.error("Particle renderer missing depth attachment")
