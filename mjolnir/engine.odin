@@ -541,7 +541,8 @@ update_visibility_node_count :: proc(
   n := min(u32(len(world.nodes.entries)), render.visibility.max_draws)
   for ; n > 0; n -= 1 do if world.nodes.entries[n - 1].active do break
   render.visibility.node_count = n
-  render.shadow.node_count = n
+  render.shadow_culling.node_count = n
+  render.shadow_sphere_culling.node_count = n
 }
 
 sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {

@@ -16,7 +16,10 @@ import "debug_ui"
 import "geometry"
 import "ambient"
 import "direct_light"
-import "shadow"
+import shadow_culling_system "shadow_culling"
+import shadow_render_system "shadow_render"
+import shadow_sphere_culling_system "shadow_sphere_culling"
+import shadow_sphere_render_system "shadow_sphere_render"
 import "occlusion_culling"
 import particles_compute "particles_compute"
 import particles_render "particles_render"
@@ -95,7 +98,14 @@ Manager :: struct {
   cameras:                 map[u32]camera.Camera,
   meshes:                  map[u32]Mesh,
   visibility:              occlusion_culling.System,
-  shadow:                  shadow.ShadowSystem,
+  shadow_culling:          shadow_culling_system.System,
+  shadow_sphere_culling:   shadow_sphere_culling_system.System,
+  shadow_render:           shadow_render_system.System,
+  shadow_sphere_render:    shadow_sphere_render_system.System,
+  shadow_slot_state:       rd.ShadowSlotState,
+  spot_shadow_lights:      [rd.MAX_SHADOW_MAPS]rd.SpotShadowGPU,
+  directional_shadow_lights: [rd.MAX_SHADOW_MAPS]rd.DirectionalShadowGPU,
+  point_shadow_lights:     [rd.MAX_SHADOW_MAPS]rd.PointShadowGPU,
   linear_repeat_sampler:   vk.Sampler,
   linear_clamp_sampler:    vk.Sampler,
   nearest_repeat_sampler:  vk.Sampler,
@@ -106,6 +116,10 @@ Manager :: struct {
   ),
   camera_buffer:           gpu.PerFrameBindlessBuffer(
     rd.Camera,
+    FRAMES_IN_FLIGHT,
+  ),
+  shadow_data_buffer:      gpu.PerFrameBindlessBuffer(
+    rd.ShadowData,
     FRAMES_IN_FLIGHT,
   ),
   material_buffer:         gpu.BindlessBuffer(Material),
@@ -184,6 +198,18 @@ init :: proc(
   ) or_return
   defer if ret != .SUCCESS {
     gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
+  }
+  gpu.per_frame_bindless_buffer_init(
+    &self.shadow_data_buffer,
+    gctx,
+    rd.MAX_SHADOW_MAPS,
+    {.VERTEX, .FRAGMENT, .GEOMETRY, .COMPUTE},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.per_frame_bindless_buffer_destroy(
+      &self.shadow_data_buffer,
+      gctx.device,
+    )
   }
   gpu.bindless_buffer_init(
     &self.material_buffer,
@@ -324,9 +350,29 @@ init :: proc(
     self.mesh_data_buffer.set_layout,
     self.mesh_manager.vertex_skinning_buffer.set_layout,
   ) or_return
-  shadow.init(
-    &self.shadow,
+  shadow_culling_system.init(
+    &self.shadow_culling,
     gctx,
+  ) or_return
+  shadow_sphere_culling_system.init(
+    &self.shadow_sphere_culling,
+    gctx,
+  ) or_return
+  shadow_render_system.init(
+    &self.shadow_render,
+    gctx,
+    self.shadow_data_buffer.set_layout,
+    self.texture_manager.set_layout,
+    self.bone_buffer.set_layout,
+    self.material_buffer.set_layout,
+    self.node_data_buffer.set_layout,
+    self.mesh_data_buffer.set_layout,
+    self.mesh_manager.vertex_skinning_buffer.set_layout,
+  ) or_return
+  shadow_sphere_render_system.init(
+    &self.shadow_sphere_render,
+    gctx,
+    self.shadow_data_buffer.set_layout,
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
@@ -345,7 +391,7 @@ init :: proc(
     gctx,
     self.camera_buffer.set_layout,
     self.lights_buffer.set_layout,
-    self.shadow.shadow_data_buffer.set_layout,
+    self.shadow_data_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
   geometry.init(
@@ -503,17 +549,104 @@ setup :: proc(
     &self.camera_buffer,
     gctx,
   ) or_return
+  gpu.per_frame_bindless_buffer_realloc_descriptors(
+    &self.shadow_data_buffer,
+    gctx,
+  ) or_return
   gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
   // Setup subsystem GPU resources
   ambient.setup(&self.ambient, gctx, &self.texture_manager) or_return
   direct_light.setup(&self.direct_light, gctx) or_return
-  shadow.setup(
-    &self.shadow,
-    gctx,
-    &self.texture_manager,
-    &self.node_data_buffer,
-    &self.mesh_data_buffer,
-  ) or_return
+  for slot in 0 ..< rd.MAX_SHADOW_MAPS {
+    for frame in 0 ..< rd.FRAMES_IN_FLIGHT {
+      self.spot_shadow_lights[slot].shadow_map[frame] = gpu.allocate_texture_2d(
+        &self.texture_manager,
+        gctx,
+        vk.Extent2D{rd.SHADOW_MAP_SIZE, rd.SHADOW_MAP_SIZE},
+        .D32_SFLOAT,
+        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      ) or_return
+      self.directional_shadow_lights[slot].shadow_map[frame] = gpu.allocate_texture_2d(
+        &self.texture_manager,
+        gctx,
+        vk.Extent2D{rd.SHADOW_MAP_SIZE, rd.SHADOW_MAP_SIZE},
+        .D32_SFLOAT,
+        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      ) or_return
+      self.point_shadow_lights[slot].shadow_cube[frame] = gpu.allocate_texture_cube(
+        &self.texture_manager,
+        gctx,
+        rd.SHADOW_MAP_SIZE,
+        .D32_SFLOAT,
+        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      ) or_return
+
+      self.spot_shadow_lights[slot].draw_count[frame] = gpu.create_mutable_buffer(
+        gctx,
+        u32,
+        1,
+        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      ) or_return
+      self.spot_shadow_lights[slot].draw_commands[frame] = gpu.create_mutable_buffer(
+        gctx,
+        vk.DrawIndexedIndirectCommand,
+        rd.MAX_NODES_IN_SCENE,
+        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      ) or_return
+      self.directional_shadow_lights[slot].draw_count[frame] = gpu.create_mutable_buffer(
+        gctx,
+        u32,
+        1,
+        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      ) or_return
+      self.directional_shadow_lights[slot].draw_commands[frame] = gpu.create_mutable_buffer(
+        gctx,
+        vk.DrawIndexedIndirectCommand,
+        rd.MAX_NODES_IN_SCENE,
+        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      ) or_return
+      self.point_shadow_lights[slot].draw_count[frame] = gpu.create_mutable_buffer(
+        gctx,
+        u32,
+        1,
+        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      ) or_return
+      self.point_shadow_lights[slot].draw_commands[frame] = gpu.create_mutable_buffer(
+        gctx,
+        vk.DrawIndexedIndirectCommand,
+        rd.MAX_NODES_IN_SCENE,
+        {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      ) or_return
+
+      self.spot_shadow_lights[slot].descriptor_sets[frame] = gpu.create_descriptor_set(
+        gctx,
+        &self.shadow_culling.descriptor_layout,
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.node_data_buffer.buffer)},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.mesh_data_buffer.buffer)},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.shadow_data_buffer.buffers[frame])},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.spot_shadow_lights[slot].draw_count[frame])},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.spot_shadow_lights[slot].draw_commands[frame])},
+      ) or_return
+      self.directional_shadow_lights[slot].descriptor_sets[frame] = gpu.create_descriptor_set(
+        gctx,
+        &self.shadow_culling.descriptor_layout,
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.node_data_buffer.buffer)},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.mesh_data_buffer.buffer)},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.shadow_data_buffer.buffers[frame])},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.directional_shadow_lights[slot].draw_count[frame])},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.directional_shadow_lights[slot].draw_commands[frame])},
+      ) or_return
+      self.point_shadow_lights[slot].descriptor_sets[frame] = gpu.create_descriptor_set(
+        gctx,
+        &self.shadow_sphere_culling.descriptor_layout,
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.node_data_buffer.buffer)},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.mesh_data_buffer.buffer)},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.shadow_data_buffer.buffers[frame])},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.point_shadow_lights[slot].draw_count[frame])},
+        {.STORAGE_BUFFER, gpu.buffer_info(&self.point_shadow_lights[slot].draw_commands[frame])},
+      ) or_return
+    }
+  }
   // Allocate particle buffers
   self.particle_resources.particle_buffer = gpu.create_mutable_buffer(
     gctx,
@@ -576,7 +709,55 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.compact_particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_resources.draw_command_buffer)
-  shadow.teardown(&self.shadow, gctx, &self.texture_manager)
+  for slot in 0 ..< rd.MAX_SHADOW_MAPS {
+    for frame in 0 ..< rd.FRAMES_IN_FLIGHT {
+      gpu.free_texture_2d(
+        &self.texture_manager,
+        gctx,
+        self.spot_shadow_lights[slot].shadow_map[frame],
+      )
+      self.spot_shadow_lights[slot].shadow_map[frame] = {}
+      gpu.free_texture_2d(
+        &self.texture_manager,
+        gctx,
+        self.directional_shadow_lights[slot].shadow_map[frame],
+      )
+      self.directional_shadow_lights[slot].shadow_map[frame] = {}
+      gpu.free_texture_cube(
+        &self.texture_manager,
+        gctx,
+        self.point_shadow_lights[slot].shadow_cube[frame],
+      )
+      self.point_shadow_lights[slot].shadow_cube[frame] = {}
+      gpu.mutable_buffer_destroy(
+        gctx.device,
+        &self.spot_shadow_lights[slot].draw_count[frame],
+      )
+      gpu.mutable_buffer_destroy(
+        gctx.device,
+        &self.spot_shadow_lights[slot].draw_commands[frame],
+      )
+      gpu.mutable_buffer_destroy(
+        gctx.device,
+        &self.directional_shadow_lights[slot].draw_count[frame],
+      )
+      gpu.mutable_buffer_destroy(
+        gctx.device,
+        &self.directional_shadow_lights[slot].draw_commands[frame],
+      )
+      gpu.mutable_buffer_destroy(
+        gctx.device,
+        &self.point_shadow_lights[slot].draw_count[frame],
+      )
+      gpu.mutable_buffer_destroy(
+        gctx.device,
+        &self.point_shadow_lights[slot].draw_commands[frame],
+      )
+      self.spot_shadow_lights[slot].descriptor_sets[frame] = 0
+      self.directional_shadow_lights[slot].descriptor_sets[frame] = 0
+      self.point_shadow_lights[slot].descriptor_sets[frame] = 0
+    }
+  }
   ambient.teardown(&self.ambient, gctx, &self.texture_manager)
   direct_light.teardown(&self.direct_light, gctx)
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
@@ -590,6 +771,7 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   self.lights_buffer.descriptor_set = 0
   for &ds in self.bone_buffer.descriptor_sets do ds = 0
   for &ds in self.camera_buffer.descriptor_sets do ds = 0
+  for &ds in self.shadow_data_buffer.descriptor_sets do ds = 0
   self.mesh_manager.vertex_skinning_buffer.descriptor_set = 0
   // Bulk-free all descriptor sets allocated from the pool
   vk.ResetDescriptorPool(gctx.device, gctx.descriptor_pool, {})
@@ -726,7 +908,10 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   random_color.destroy(&self.random_color_renderer, gctx)
   ambient.shutdown(&self.ambient, gctx)
   direct_light.shutdown(&self.direct_light, gctx)
-  shadow.shutdown(&self.shadow, gctx)
+  shadow_sphere_render_system.shutdown(&self.shadow_sphere_render, gctx)
+  shadow_render_system.shutdown(&self.shadow_render, gctx)
+  shadow_sphere_culling_system.shutdown(&self.shadow_sphere_culling, gctx)
+  shadow_culling_system.shutdown(&self.shadow_culling, gctx)
   geometry.shutdown(&self.geometry, gctx)
   occlusion_culling.shutdown(&self.visibility, gctx)
   vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
@@ -745,6 +930,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
+  gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
   gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
   delete(self.bone_matrix_offsets)
   gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
@@ -783,17 +969,53 @@ render_shadow_depth :: proc(
   active_lights: []rd.LightHandle,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
-  shadow.sync_lights(
-    &self.shadow,
+  shadow_render_system.sync_lights(
+    &self.shadow_slot_state,
+    &self.shadow_data_buffer,
     &self.lights_buffer,
     active_lights,
     frame_index,
   )
-  shadow.compute_draw_lists(&self.shadow, cmd, frame_index)
-  shadow.render_depth(
-    &self.shadow,
+  shadow_culling_system.shadow_culling(
+    &self.shadow_culling,
+    cmd,
+    &self.shadow_slot_state,
+    &self.spot_shadow_lights,
+    &self.directional_shadow_lights,
+    frame_index,
+  )
+  shadow_sphere_culling_system.shadow_sphere_culling(
+    &self.shadow_sphere_culling,
+    cmd,
+    &self.shadow_slot_state,
+    &self.point_shadow_lights,
+    frame_index,
+  )
+  shadow_render_system.shadow_render(
+    &self.shadow_render,
     cmd,
     &self.texture_manager,
+    &self.shadow_slot_state,
+    &self.spot_shadow_lights,
+    &self.directional_shadow_lights,
+    self.shadow_data_buffer.descriptor_sets[frame_index],
+    self.texture_manager.descriptor_set,
+    self.bone_buffer.descriptor_sets[frame_index],
+    self.material_buffer.descriptor_set,
+    self.node_data_buffer.descriptor_set,
+    self.mesh_data_buffer.descriptor_set,
+    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    self.mesh_manager.vertex_buffer.buffer,
+    self.mesh_manager.index_buffer.buffer,
+    frame_index,
+  )
+  shadow_sphere_render_system.shadow_sphere_render(
+    &self.shadow_sphere_render,
+    cmd,
+    &self.texture_manager,
+    &self.shadow_slot_state,
+    &self.point_shadow_lights,
+    self.shadow_data_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
     self.bone_buffer.descriptor_sets[frame_index],
     self.material_buffer.descriptor_set,
@@ -896,7 +1118,7 @@ record_lighting_pass :: proc(
     cmd,
     self.camera_buffer.descriptor_sets[frame_index],
     self.lights_buffer.descriptor_set,
-    self.shadow.shadow_data_buffer.descriptor_sets[frame_index],
+    self.shadow_data_buffer.descriptor_sets[frame_index],
     frame_index,
   )
   shadow_texture_indices: [rd.MAX_LIGHTS]u32
@@ -905,8 +1127,10 @@ record_lighting_pass :: proc(
   }
   for handle in active_lights {
     light_data := gpu.get(&self.lights_buffer.buffer, handle.index)
-    shadow_texture_indices[handle.index] = shadow.get_texture_index(
-      &self.shadow,
+    shadow_texture_indices[handle.index] = shadow_render_system.get_texture_index(
+      &self.spot_shadow_lights,
+      &self.directional_shadow_lights,
+      &self.point_shadow_lights,
       light_data.type,
       light_data.shadow_index,
       frame_index,
@@ -1600,7 +1824,7 @@ upload_light_data :: proc(
   light_data: ^rd.Light,
 ) {
   gpu.write(&render.lights_buffer.buffer, light_data, int(index))
-  shadow.invalidate_light(&render.shadow, index)
+  shadow_render_system.invalidate_light(&render.shadow_slot_state, index)
 }
 
 upload_mesh_data :: proc(render: ^Manager, index: u32, mesh: ^Mesh) {

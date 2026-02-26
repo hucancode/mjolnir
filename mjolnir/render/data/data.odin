@@ -2,6 +2,7 @@ package render_data
 
 import cont "../../containers"
 import "../../gpu"
+import vk "vendor:vulkan"
 
 Handle :: cont.Handle
 
@@ -19,6 +20,9 @@ MAX_MESHES :: 65536
 MAX_MATERIALS :: 4096
 MAX_SPRITES :: 4096
 MAX_CAMERAS :: 64
+MAX_SHADOW_MAPS :: 16
+INVALID_SHADOW_INDEX :: 0xFFFFFFFF
+SHADOW_MAP_SIZE :: 512
 
 BufferAllocation :: gpu.BufferAllocation
 
@@ -145,6 +149,33 @@ Light :: struct {
   shadow_index: u32, // index into shadow buffers
 }
 
+SpotShadowGPU :: struct {
+  shadow_map:      [FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+}
+
+DirectionalShadowGPU :: struct {
+  shadow_map:      [FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+}
+
+PointShadowGPU :: struct {
+  shadow_cube:     [FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
+  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+}
+
+ShadowSlotState :: struct {
+  slot_active:   [MAX_SHADOW_MAPS]bool,
+  slot_kind:     [MAX_SHADOW_MAPS]LightType,
+  light_to_slot: [MAX_LIGHTS]u32,
+}
+
 Camera :: struct {
   view:            matrix[4, 4]f32,
   projection:      matrix[4, 4]f32,
@@ -153,4 +184,14 @@ Camera :: struct {
   far:             f32,
   position:        [4]f32,
   frustum_planes:  [6][4]f32,
+}
+
+ShadowData :: struct {
+  view:           matrix[4, 4]f32,
+  projection:     matrix[4, 4]f32,
+  position:       [3]f32,
+  near:           f32,
+  direction:      [3]f32,
+  far:            f32,
+  frustum_planes: [6][4]f32,
 }
