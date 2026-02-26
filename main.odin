@@ -7,6 +7,7 @@ import "mjolnir"
 import "mjolnir/animation"
 import cont "mjolnir/containers"
 import "mjolnir/geometry"
+import "mjolnir/render/post_process"
 import "mjolnir/world"
 import "vendor:glfw"
 
@@ -347,7 +348,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     when LIGHT_COUNT > 0 {
       // Create lights as children of the root, arranged in a circle
-      radius: f32 = 10.0
+      radius: f32 = 8.0
       for i in 0 ..< LIGHT_COUNT {
         color := [4]f32 {
           math.sin(f32(i)),
@@ -359,7 +360,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         angle := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
         local_x := math.cos(angle) * radius
         local_z := math.sin(angle) * radius
-        local_y: f32 = 10.0
+        local_y: f32 = 5.0
         should_make_spot_light := i % 2 != 1
         if ALL_SPOT_LIGHT {
           should_make_spot_light = true
@@ -620,9 +621,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       bypass_depth = true,
     )
   }
-  // mjolnir.add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  post_process.add_fog(&engine.render.post_process, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  // mjolnir.add_crosshatch(engine, [2]f32{1280, 720})
+  post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)

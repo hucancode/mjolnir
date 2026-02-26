@@ -107,17 +107,17 @@ AnimationInstance :: struct {
 }
 
 Node :: struct {
-  parent:           NodeHandle,
-  children:         [dynamic]NodeHandle,
-  transform:        geometry.Transform,
-  name:             string,
-  bone_socket:      string, // if not empty, attach to this bone on parent skinned mesh
-  attachment:       NodeAttachment,
-  animation:        Maybe(AnimationInstance),
-  culling_enabled:  bool,
-  visible:          bool, // node's own visibility state
-  parent_visible:   bool, // visibility inherited from parent chain
-  tags:             NodeTagSet, // tags for queries and filtering
+  parent:          NodeHandle,
+  children:        [dynamic]NodeHandle,
+  transform:       geometry.Transform,
+  name:            string,
+  bone_socket:     string, // if not empty, attach to this bone on parent skinned mesh
+  attachment:      NodeAttachment,
+  animation:       Maybe(AnimationInstance),
+  culling_enabled: bool,
+  visible:         bool, // node's own visibility state
+  parent_visible:  bool, // visibility inherited from parent chain
+  tags:            NodeTagSet, // tags for queries and filtering
 }
 
 TraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
@@ -145,29 +145,29 @@ DebugDrawMeshCallback :: proc(
 )
 
 World :: struct {
-  root:                    NodeHandle,
-  nodes:                   Pool(Node),
-  traversal_stack:         [dynamic]TraverseEntry,
-  staging:                 StagingList,
-  animatable_nodes:        [dynamic]NodeHandle,
+  root:               NodeHandle,
+  nodes:              Pool(Node),
+  traversal_stack:    [dynamic]TraverseEntry,
+  staging:            StagingList,
+  animatable_nodes:   [dynamic]NodeHandle,
   // CPU resource pools (moved from resources.Manager)
-  meshes:                  cont.Pool(Mesh),
-  materials:               cont.Pool(Material),
-  cameras:                 cont.Pool(Camera),
-  main_camera:             CameraHandle,
-  emitters:                cont.Pool(Emitter),
-  forcefields:             cont.Pool(ForceField),
-  sprites:                 cont.Pool(Sprite),
-  animation_clips:         cont.Pool(anim.Clip),
+  meshes:             cont.Pool(Mesh),
+  materials:          cont.Pool(Material),
+  cameras:            cont.Pool(Camera),
+  main_camera:        CameraHandle,
+  emitters:           cont.Pool(Emitter),
+  forcefields:        cont.Pool(ForceField),
+  sprites:            cont.Pool(Sprite),
+  animation_clips:    cont.Pool(anim.Clip),
   // Active resource tracking
-  active_light_nodes:      [dynamic]NodeHandle,
+  active_light_nodes: [dynamic]NodeHandle,
   // Builtin resources
-  builtin_materials:       [len(Color)]MaterialHandle,
-  builtin_meshes:          [len(Primitive)]MeshHandle,
+  builtin_materials:  [len(Color)]MaterialHandle,
+  builtin_meshes:     [len(Primitive)]MeshHandle,
   // Camera controllers
-  orbit_controller:        CameraController,
-  free_controller:         CameraController,
-  active_controller:       ^CameraController,
+  orbit_controller:   CameraController,
+  free_controller:    CameraController,
+  active_controller:  ^CameraController,
 }
 
 init_node :: proc(self: ^Node, name: string = "") {
@@ -211,12 +211,6 @@ destroy_node :: proc(
     return
   }
   #partial switch &attachment in &self.attachment {
-  case PointLightAttachment:
-    unregister_active_light(world, node_handle)
-  case DirectionalLightAttachment:
-    unregister_active_light(world, node_handle)
-  case SpotLightAttachment:
-    unregister_active_light(world, node_handle)
   case EmitterAttachment:
     destroy_emitter(world, attachment.handle)
     attachment.handle = {}
@@ -301,7 +295,6 @@ spawn_child :: proc(
   node.attachment = attachment
   assign_emitter_to_node(self, handle, node)
   assign_forcefield_to_node(self, handle, node)
-  assign_light_to_node(self, handle, node)
   update_node_tags(node)
   node.transform.position = position
   node.transform.is_dirty = true
@@ -422,11 +415,20 @@ despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
     return false
   }
 
-  log.infof("despawn: freeing node %v '%s' and %d children", handle, node.name, len(node.children))
+  log.infof(
+    "despawn: freeing node %v '%s' and %d children",
+    handle,
+    node.name,
+    len(node.children),
+  )
 
   // Recursively despawn all children FIRST (bottom-up cleanup)
   // Make a copy since we'll modify the children array during iteration
-  children_copy := make([dynamic]NodeHandle, len(node.children), context.temp_allocator)
+  children_copy := make(
+    [dynamic]NodeHandle,
+    len(node.children),
+    context.temp_allocator,
+  )
   copy(children_copy[:], node.children[:])
   for child_handle in children_copy {
     despawn(world, child_handle)
@@ -555,18 +557,6 @@ assign_forcefield_to_node :: proc(
   if ok {
     forcefield.node_handle = node_handle
     stage_forcefield_data(&world.staging, attachment.handle)
-  }
-}
-
-@(private)
-assign_light_to_node :: proc(
-  world: ^World,
-  node_handle: NodeHandle,
-  node: ^Node,
-) {
-  #partial switch _ in node.attachment {
-  case PointLightAttachment, DirectionalLightAttachment, SpotLightAttachment:
-    register_active_light(world, node_handle)
   }
 }
 

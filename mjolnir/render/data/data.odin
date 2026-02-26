@@ -2,7 +2,6 @@ package render_data
 
 import cont "../../containers"
 import "../../gpu"
-import vk "vendor:vulkan"
 
 Handle :: cont.Handle
 
@@ -147,30 +146,6 @@ Light :: struct {
   angle_outer:  f32, // outer cone angle for spot lights
   cast_shadow:  b32, // 0 = no shadow, 1 = cast shadow
   shadow_index: u32, // index into shadow buffers
-}
-
-ShadowMap :: struct {
-  shadow_map:      [FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
-    vk.DrawIndexedIndirectCommand,
-  ),
-  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
-}
-
-ShadowMapCube :: struct {
-  shadow_cube:     [FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
-  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
-    vk.DrawIndexedIndirectCommand,
-  ),
-  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
-}
-
-ShadowSlotState :: struct {
-  slot_active:   [MAX_SHADOW_MAPS]bool,
-  slot_kind:     [MAX_SHADOW_MAPS]LightType,
-  light_to_slot: [MAX_LIGHTS]u32,
 }
 
 Camera :: struct {

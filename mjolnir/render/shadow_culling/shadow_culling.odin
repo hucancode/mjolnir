@@ -15,11 +15,11 @@ CullPushConstants :: struct {
 }
 
 System :: struct {
-  node_count:       u32,
-  max_draws:        u32,
+  node_count:        u32,
+  max_draws:         u32,
   descriptor_layout: vk.DescriptorSetLayout,
-  pipeline_layout:  vk.PipelineLayout,
-  pipeline:         vk.Pipeline,
+  pipeline_layout:   vk.PipelineLayout,
+  pipeline:          vk.Pipeline,
 }
 
 init :: proc(self: ^System, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
@@ -48,9 +48,16 @@ init :: proc(self: ^System, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
     self.pipeline_layout = 0
   }
-  shader := gpu.create_shader_module(gctx.device, SHADER_SHADOW_CULLING) or_return
+  shader := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SHADOW_CULLING,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, shader, nil)
-  self.pipeline = gpu.create_compute_pipeline(gctx, shader, self.pipeline_layout) or_return
+  self.pipeline = gpu.create_compute_pipeline(
+    gctx,
+    shader,
+    self.pipeline_layout,
+  ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.pipeline, nil)
     self.pipeline = 0
@@ -64,12 +71,12 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyDescriptorSetLayout(gctx.device, self.descriptor_layout, nil)
 }
 
-shadow_culling :: proc(
+execute :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
   shadow_index: u32,
-  shadow: ^d.ShadowMap,
-  frame_index: u32,
+  shadow_draw_count_buffer: vk.Buffer,
+  shadow_draw_count_ds: vk.DescriptorSet,
 ) {
   include_flags: d.NodeFlagSet = {.VISIBLE}
   exclude_flags: d.NodeFlagSet = {
@@ -81,15 +88,15 @@ shadow_culling :: proc(
   dispatch_x := (self.node_count + 63) / 64
   vk.CmdFillBuffer(
     command_buffer,
-    shadow.draw_count[frame_index].buffer,
+    shadow_draw_count_buffer,
     0,
-    vk.DeviceSize(shadow.draw_count[frame_index].bytes_count),
+    vk.DeviceSize(size_of(u32)),
     0,
   )
   gpu.buffer_barrier(
     command_buffer,
-    shadow.draw_count[frame_index].buffer,
-    vk.DeviceSize(shadow.draw_count[frame_index].bytes_count),
+    shadow_draw_count_buffer,
+    vk.DeviceSize(size_of(u32)),
     {.TRANSFER_WRITE},
     {.SHADER_READ, .SHADER_WRITE},
     {.TRANSFER},
@@ -99,7 +106,7 @@ shadow_culling :: proc(
     command_buffer,
     self.pipeline,
     self.pipeline_layout,
-    shadow.descriptor_sets[frame_index],
+    shadow_draw_count_ds,
   )
   push := CullPushConstants {
     shadow_index  = shadow_index,

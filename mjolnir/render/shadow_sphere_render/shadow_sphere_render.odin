@@ -10,9 +10,9 @@ SHADER_SPHERE_DEPTH_GEOM :: #load("../../shader/shadow_spherical/geom.spv")
 SHADER_SPHERE_DEPTH_FRAG :: #load("../../shader/shadow_spherical/frag.spv")
 
 System :: struct {
-  max_draws:                   u32,
-  depth_pipeline_layout:       vk.PipelineLayout,
-  depth_pipeline:              vk.Pipeline,
+  max_draws:             u32,
+  depth_pipeline_layout: vk.PipelineLayout,
+  depth_pipeline:        vk.Pipeline,
 }
 
 init :: proc(
@@ -25,7 +25,9 @@ init :: proc(
   node_data_set_layout: vk.DescriptorSetLayout,
   mesh_data_set_layout: vk.DescriptorSetLayout,
   vertex_skinning_set_layout: vk.DescriptorSetLayout,
-) -> (ret: vk.Result) {
+) -> (
+  ret: vk.Result,
+) {
   self.max_draws = d.MAX_NODES_IN_SCENE
   self.depth_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
@@ -45,11 +47,20 @@ init :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.depth_pipeline_layout, nil)
     self.depth_pipeline_layout = 0
   }
-  vert := gpu.create_shader_module(gctx.device, SHADER_SPHERE_DEPTH_VERT) or_return
+  vert := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SPHERE_DEPTH_VERT,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert, nil)
-  geom := gpu.create_shader_module(gctx.device, SHADER_SPHERE_DEPTH_GEOM) or_return
+  geom := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SPHERE_DEPTH_GEOM,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, geom, nil)
-  frag := gpu.create_shader_module(gctx.device, SHADER_SPHERE_DEPTH_FRAG) or_return
+  frag := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SPHERE_DEPTH_FRAG,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag, nil)
 
   vertex_bindings := [?]vk.VertexInputBindingDescription {
@@ -85,7 +96,14 @@ init :: proc(
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
     layout              = self.depth_pipeline_layout,
   }
-  vk.CreateGraphicsPipelines(gctx.device, 0, 1, &info, nil, &self.depth_pipeline) or_return
+  vk.CreateGraphicsPipelines(
+    gctx.device,
+    0,
+    1,
+    &info,
+    nil,
+    &self.depth_pipeline,
+  ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
     self.depth_pipeline = 0
@@ -98,12 +116,14 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.depth_pipeline_layout, nil)
 }
 
-shadow_sphere_render :: proc(
+render :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
   texture_manager: ^gpu.TextureManager,
   shadow_index: u32,
-  shadow: ^d.ShadowMapCube,
+  shadow_map: gpu.TextureCubeHandle,
+  draw_command: gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count: gpu.MutableBuffer(u32),
   shadow_data_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
@@ -117,8 +137,8 @@ shadow_sphere_render :: proc(
 ) {
   gpu.buffer_barrier(
     command_buffer,
-    shadow.draw_commands[frame_index].buffer,
-    vk.DeviceSize(shadow.draw_commands[frame_index].bytes_count),
+    draw_command.buffer,
+    vk.DeviceSize(draw_command.bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -126,14 +146,14 @@ shadow_sphere_render :: proc(
   )
   gpu.buffer_barrier(
     command_buffer,
-    shadow.draw_count[frame_index].buffer,
-    vk.DeviceSize(shadow.draw_count[frame_index].bytes_count),
+    draw_count.buffer,
+    vk.DeviceSize(draw_count.bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
     {.DRAW_INDIRECT},
   )
-  depth_cube := gpu.get_texture_cube(texture_manager, shadow.shadow_cube[frame_index])
+  depth_cube := gpu.get_texture_cube(texture_manager, shadow_map)
   if depth_cube == nil do return
   gpu.image_barrier(
     command_buffer,
@@ -147,7 +167,11 @@ shadow_sphere_render :: proc(
     {.DEPTH},
     layer_count = 6,
   )
-  depth_attachment := gpu.create_cube_depth_attachment(depth_cube, .CLEAR, .STORE)
+  depth_attachment := gpu.create_cube_depth_attachment(
+    depth_cube,
+    .CLEAR,
+    .STORE,
+  )
   gpu.begin_depth_rendering(
     command_buffer,
     vk.Extent2D{d.SHADOW_MAP_SIZE, d.SHADOW_MAP_SIZE},
@@ -184,9 +208,9 @@ shadow_sphere_render :: proc(
   gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
-    shadow.draw_commands[frame_index].buffer,
+    draw_command.buffer,
     0,
-    shadow.draw_count[frame_index].buffer,
+    draw_count.buffer,
     0,
     self.max_draws,
     u32(size_of(vk.DrawIndexedIndirectCommand)),

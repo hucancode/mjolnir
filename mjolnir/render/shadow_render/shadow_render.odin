@@ -10,9 +10,9 @@ import vk "vendor:vulkan"
 SHADER_SHADOW_DEPTH_VERT :: #load("../../shader/shadow/vert.spv")
 
 System :: struct {
-  max_draws:            u32,
+  max_draws:             u32,
   depth_pipeline_layout: vk.PipelineLayout,
-  depth_pipeline:       vk.Pipeline,
+  depth_pipeline:        vk.Pipeline,
 }
 
 @(private)
@@ -43,7 +43,9 @@ init :: proc(
   node_data_set_layout: vk.DescriptorSetLayout,
   mesh_data_set_layout: vk.DescriptorSetLayout,
   vertex_skinning_set_layout: vk.DescriptorSetLayout,
-) -> (ret: vk.Result) {
+) -> (
+  ret: vk.Result,
+) {
   self.max_draws = d.MAX_NODES_IN_SCENE
   self.depth_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
@@ -63,7 +65,10 @@ init :: proc(
     vk.DestroyPipelineLayout(gctx.device, self.depth_pipeline_layout, nil)
     self.depth_pipeline_layout = 0
   }
-  shader := gpu.create_shader_module(gctx.device, SHADER_SHADOW_DEPTH_VERT) or_return
+  shader := gpu.create_shader_module(
+    gctx.device,
+    SHADER_SHADOW_DEPTH_VERT,
+  ) or_return
   defer vk.DestroyShaderModule(gctx.device, shader, nil)
   vertex_bindings := [?]vk.VertexInputBindingDescription {
     {binding = 0, stride = size_of(geometry.Vertex), inputRate = .VERTEX},
@@ -98,7 +103,14 @@ init :: proc(
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
     layout              = self.depth_pipeline_layout,
   }
-  vk.CreateGraphicsPipelines(gctx.device, 0, 1, &info, nil, &self.depth_pipeline) or_return
+  vk.CreateGraphicsPipelines(
+    gctx.device,
+    0,
+    1,
+    &info,
+    nil,
+    &self.depth_pipeline,
+  ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipeline(gctx.device, self.depth_pipeline, nil)
     self.depth_pipeline = 0
@@ -111,12 +123,14 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.depth_pipeline_layout, nil)
 }
 
-shadow_render :: proc(
+render :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
   texture_manager: ^gpu.TextureManager,
   shadow_index: u32,
-  shadow: ^d.ShadowMap,
+  shadow_map: gpu.Texture2DHandle,
+  draw_command: gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_count: gpu.MutableBuffer(u32),
   shadow_data_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
@@ -130,8 +144,8 @@ shadow_render :: proc(
 ) {
   gpu.buffer_barrier(
     command_buffer,
-    shadow.draw_commands[frame_index].buffer,
-    vk.DeviceSize(shadow.draw_commands[frame_index].bytes_count),
+    draw_command.buffer,
+    vk.DeviceSize(draw_command.bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -139,14 +153,14 @@ shadow_render :: proc(
   )
   gpu.buffer_barrier(
     command_buffer,
-    shadow.draw_count[frame_index].buffer,
-    vk.DeviceSize(shadow.draw_count[frame_index].bytes_count),
+    draw_count.buffer,
+    vk.DeviceSize(draw_count.bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
     {.DRAW_INDIRECT},
   )
-  depth_texture := gpu.get_texture_2d(texture_manager, shadow.shadow_map[frame_index])
+  depth_texture := gpu.get_texture_2d(texture_manager, shadow_map)
   if depth_texture == nil do return
   gpu.image_barrier(
     command_buffer,
@@ -159,7 +173,11 @@ shadow_render :: proc(
     {.EARLY_FRAGMENT_TESTS},
     {.DEPTH},
   )
-  depth_attachment := gpu.create_depth_attachment(depth_texture, .CLEAR, .STORE)
+  depth_attachment := gpu.create_depth_attachment(
+    depth_texture,
+    .CLEAR,
+    .STORE,
+  )
   gpu.begin_depth_rendering(
     command_buffer,
     vk.Extent2D{d.SHADOW_MAP_SIZE, d.SHADOW_MAP_SIZE},
@@ -193,9 +211,9 @@ shadow_render :: proc(
   gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
-    shadow.draw_commands[frame_index].buffer,
+    draw_command.buffer,
     0,
-    shadow.draw_count[frame_index].buffer,
+    draw_count.buffer,
     0,
     self.max_draws,
     u32(size_of(vk.DrawIndexedIndirectCommand)),

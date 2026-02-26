@@ -111,15 +111,9 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   }
-  vert_module := gpu.create_shader_module(
-    gctx.device,
-    SHADER_VERT,
-  ) or_return
+  vert_module := gpu.create_shader_module(gctx.device, SHADER_VERT) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_module := gpu.create_shader_module(
-    gctx.device,
-    SHADER_FRAG,
-  ) or_return
+  frag_module := gpu.create_shader_module(gctx.device, SHADER_FRAG) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   dynamic_states := [?]vk.DynamicState {
     .VIEWPORT,
@@ -127,9 +121,7 @@ init :: proc(
     .DEPTH_COMPARE_OP,
     .CULL_MODE,
   }
-  dynamic_state := gpu.create_dynamic_state(
-    dynamic_states[:],
-  )
+  dynamic_state := gpu.create_dynamic_state(dynamic_states[:])
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
@@ -174,12 +166,7 @@ init :: proc(
   return .SUCCESS
 }
 
-setup :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-) -> (
-  ret: vk.Result,
-) {
+setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   create_light_volume_mesh(
     gctx,
     &self.sphere_mesh,
@@ -208,19 +195,13 @@ setup :: proc(
   return .SUCCESS
 }
 
-teardown :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-) {
+teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   destroy_light_volume_mesh(gctx.device, &self.sphere_mesh)
   destroy_light_volume_mesh(gctx.device, &self.cone_mesh)
   destroy_light_volume_mesh(gctx.device, &self.triangle_mesh)
 }
 
-shutdown :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-) {
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
 }
@@ -249,10 +230,7 @@ begin_pass :: proc(
     gpu.create_depth_attachment(depth_texture, .LOAD, .DONT_CARE),
     gpu.create_color_attachment(final_image, .LOAD, .STORE, BG_BLUE_GRAY),
   )
-  gpu.set_viewport_scissor(
-    command_buffer,
-    depth_texture.spec.extent,
-  )
+  gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)
   gpu.bind_graphics_pipeline(
     command_buffer,
     self.pipeline,
@@ -271,7 +249,7 @@ render :: proc(
   shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
   command_buffer: vk.CommandBuffer,
   lights_buffer: ^gpu.BindlessBuffer(d.Light),
-  active_lights: []d.LightHandle,
+  active_lights: []u32,
   frame_index: u32,
 ) {
   bind_and_draw_mesh :: proc(
@@ -296,10 +274,10 @@ render :: proc(
     emissive_texture_index = camera.attachments[.EMISSIVE][frame_index].index,
     input_image_index      = camera.attachments[.FINAL_IMAGE][frame_index].index,
   }
-  for handle in active_lights {
-    light := gpu.get(&lights_buffer.buffer, handle.index)
-    shadow_map_index := shadow_texture_indices[handle.index]
-    push_constant.light_index = handle.index
+  for light_index in active_lights {
+    light := gpu.get(&lights_buffer.buffer, light_index)
+    shadow_map_index := shadow_texture_indices[light_index]
+    push_constant.light_index = light_index
     push_constant.shadow_map_index = shadow_map_index
     vk.CmdPushConstants(
       command_buffer,

@@ -827,12 +827,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   }
   for node_handle, entry in self.world.staging.light_updates {
     if entry.op == .Remove {
-      if slot, found := slice.linear_search(
-        self.world.active_light_nodes[:],
-        node_handle,
-      ); found {
-        render.remove_shadow_entry(&self.render, &self.gctx, u32(slot))
-      }
+      render.remove_light_entry(&self.render, &self.gctx, node_handle.index)
       append(&stale_lights, node_handle)
       continue
     }
@@ -840,86 +835,69 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       self.world.staging.light_updates[node_handle] = {entry.age + 1, .Update}
       if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_lights, node_handle)
     }
-    light_slot, in_active := slice.linear_search(
-      self.world.active_light_nodes[:],
-      node_handle,
-    )
-    if in_active {
-      node := cont.get(self.world.nodes, node_handle) or_continue
-      light_position := node.transform.world_matrix[3].xyz
-      light_direction := node.transform.world_matrix[2].xyz
-      if linalg.dot(light_direction, light_direction) < 1e-6 {
-        light_direction = {0, -1, 0}
-      } else {
-        light_direction = linalg.normalize(light_direction)
-      }
-      render_handle := render.LightHandle {
-        index      = u32(light_slot),
-        generation = 1,
-      }
-      light_data: render.Light
-      #partial switch attachment in node.attachment {
-      case world.PointLightAttachment:
-        light_data = render.Light {
-          color        = attachment.color,
-          position     = light_position,
-          direction    = light_direction,
-          radius       = attachment.radius,
-          angle_inner  = 0.0,
-          angle_outer  = 0.0,
-          type         = .POINT,
-          cast_shadow  = b32(attachment.cast_shadow),
-          shadow_index = 0xFFFFFFFF,
-        }
-      case world.DirectionalLightAttachment:
-        light_data = render.Light {
-          color        = attachment.color,
-          position     = light_position,
-          direction    = light_direction,
-          radius       = attachment.radius,
-          angle_inner  = 0.0,
-          angle_outer  = 0.0,
-          type         = .DIRECTIONAL,
-          cast_shadow  = b32(attachment.cast_shadow),
-          shadow_index = 0xFFFFFFFF,
-        }
-      case world.SpotLightAttachment:
-        light_data = render.Light {
-          color        = attachment.color,
-          position     = light_position,
-          direction    = light_direction,
-          radius       = attachment.radius,
-          angle_inner  = attachment.angle_inner,
-          angle_outer  = attachment.angle_outer,
-          type         = .SPOT,
-          cast_shadow  = b32(attachment.cast_shadow),
-          shadow_index = 0xFFFFFFFF,
-        }
-      case:
-        light_data = {}
-      }
-      if light_data.cast_shadow {
-        render.ensure_shadow_entry(
-          &self.render,
-          &self.gctx,
-          render_handle.index,
-          light_data.type,
-        ) or_return
-      } else {
-        render.remove_shadow_entry(
-          &self.render,
-          &self.gctx,
-          render_handle.index,
-        )
-      }
-      render.upload_light_data(&self.render, render_handle.index, &light_data)
+    node, ok := cont.get(self.world.nodes, node_handle)
+    if !ok {
+      render.remove_light_entry(&self.render, &self.gctx, node_handle.index)
+      continue
+    }
+    light_position := node.transform.world_matrix[3].xyz
+    light_direction := node.transform.world_matrix[2].xyz
+    if linalg.dot(light_direction, light_direction) < 1e-6 {
+      light_direction = {0, -1, 0}
     } else {
-      if slot, found := slice.linear_search(
-        self.world.active_light_nodes[:],
-        node_handle,
-      ); found {
-        render.remove_shadow_entry(&self.render, &self.gctx, u32(slot))
+      light_direction = linalg.normalize(light_direction)
+    }
+    light_data: render.Light
+    has_light := true
+    #partial switch attachment in node.attachment {
+    case world.PointLightAttachment:
+      light_data = render.Light {
+        color        = attachment.color,
+        position     = light_position,
+        direction    = light_direction,
+        radius       = attachment.radius,
+        angle_inner  = 0.0,
+        angle_outer  = 0.0,
+        type         = .POINT,
+        cast_shadow  = b32(attachment.cast_shadow),
+        shadow_index = 0xFFFFFFFF,
       }
+    case world.DirectionalLightAttachment:
+      light_data = render.Light {
+        color        = attachment.color,
+        position     = light_position,
+        direction    = light_direction,
+        radius       = attachment.radius,
+        angle_inner  = 0.0,
+        angle_outer  = 0.0,
+        type         = .DIRECTIONAL,
+        cast_shadow  = b32(attachment.cast_shadow),
+        shadow_index = 0xFFFFFFFF,
+      }
+    case world.SpotLightAttachment:
+      light_data = render.Light {
+        color        = attachment.color,
+        position     = light_position,
+        direction    = light_direction,
+        radius       = attachment.radius,
+        angle_inner  = attachment.angle_inner,
+        angle_outer  = attachment.angle_outer,
+        type         = .SPOT,
+        cast_shadow  = b32(attachment.cast_shadow),
+        shadow_index = 0xFFFFFFFF,
+      }
+    case:
+      has_light = false
+    }
+    if has_light {
+      render.upsert_light_entry(
+        &self.render,
+        &self.gctx,
+        node_handle.index,
+        &light_data,
+      ) or_return
+    } else {
+      render.remove_light_entry(&self.render, &self.gctx, node_handle.index)
     }
   }
   for node_handle in stale_lights {
@@ -1154,26 +1132,6 @@ populate_debug_ui :: proc(self: ^Engine) {
   }
 }
 
-@(private)
-build_active_render_light_handles :: proc(
-  engine: ^Engine,
-  allocator := context.temp_allocator,
-) -> [dynamic]render.LightHandle {
-  active_render_lights := make(
-    [dynamic]render.LightHandle,
-    len(engine.world.active_light_nodes),
-    allocator,
-  )
-  clear(&active_render_lights)
-  for _, light_idx in engine.world.active_light_nodes {
-    append(
-      &active_render_lights,
-      render.LightHandle{index = u32(light_idx), generation = 1},
-    )
-  }
-  return active_render_lights
-}
-
 @(private = "file")
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   old_extent := engine.swapchain.extent
@@ -1236,7 +1194,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 render_and_present :: proc(self: ^Engine) -> vk.Result {
-  active_render_lights := build_active_render_light_handles(self)
   gpu.acquire_next_image(
     self.gctx.device,
     &self.swapchain,
@@ -1244,11 +1201,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   command_buffer := self.render.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
-  render.render_shadow_depth(
-    &self.render,
-    self.frame_index,
-    active_render_lights[:],
-  ) or_return
+  render.render_shadow_depth(&self.render, self.frame_index) or_return
   for &entry, cam_index in self.world.cameras.entries {
     if !entry.active do continue
     world_cam := &entry.item
@@ -1265,7 +1218,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
       render.record_lighting_pass(
         &self.render,
         self.frame_index,
-        active_render_lights[:],
         u32(cam_index),
         render_cam,
       )
