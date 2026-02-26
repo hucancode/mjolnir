@@ -36,12 +36,6 @@ SpotLightGPU :: struct {
 }
 
 DirectionalLightGPU :: struct {
-  radius:          f32,
-  projection:      matrix[4, 4]f32,
-  view:            matrix[4, 4]f32,
-  position:        [4]f32,
-  direction:       [4]f32,
-  near_far:        [2]f32,
   shadow_map:      [d.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
   draw_commands:   [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   draw_count:      [d.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
