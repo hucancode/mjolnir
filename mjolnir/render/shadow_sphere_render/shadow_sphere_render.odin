@@ -102,8 +102,8 @@ shadow_sphere_render :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
   texture_manager: ^gpu.TextureManager,
-  slot_state: ^d.ShadowSlotState,
-  point_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMapCube,
+  shadow_index: u32,
+  shadow: ^d.ShadowMapCube,
   shadow_data_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
@@ -115,96 +115,93 @@ shadow_sphere_render :: proc(
   index_buffer: vk.Buffer,
   frame_index: u32,
 ) {
-  for slot in 0 ..< d.MAX_SHADOW_MAPS {
-    if !slot_state.slot_active[slot] || slot_state.slot_kind[slot] != .POINT do continue
-    gpu.buffer_barrier(
-      command_buffer,
-      point_lights[slot].draw_commands[frame_index].buffer,
-      vk.DeviceSize(point_lights[slot].draw_commands[frame_index].bytes_count),
-      {.SHADER_WRITE},
-      {.INDIRECT_COMMAND_READ},
-      {.COMPUTE_SHADER},
-      {.DRAW_INDIRECT},
-    )
-    gpu.buffer_barrier(
-      command_buffer,
-      point_lights[slot].draw_count[frame_index].buffer,
-      vk.DeviceSize(point_lights[slot].draw_count[frame_index].bytes_count),
-      {.SHADER_WRITE},
-      {.INDIRECT_COMMAND_READ},
-      {.COMPUTE_SHADER},
-      {.DRAW_INDIRECT},
-    )
-    depth_cube := gpu.get_texture_cube(texture_manager, point_lights[slot].shadow_cube[frame_index])
-    if depth_cube == nil do continue
-    gpu.image_barrier(
-      command_buffer,
-      depth_cube.image,
-      .UNDEFINED,
-      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      {},
-      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      {.TOP_OF_PIPE},
-      {.EARLY_FRAGMENT_TESTS},
-      {.DEPTH},
-      layer_count = 6,
-    )
-    depth_attachment := gpu.create_cube_depth_attachment(depth_cube, .CLEAR, .STORE)
-    gpu.begin_depth_rendering(
-      command_buffer,
-      vk.Extent2D{d.SHADOW_MAP_SIZE, d.SHADOW_MAP_SIZE},
-      &depth_attachment,
-      layer_count = 6,
-    )
-    gpu.set_viewport_scissor(
-      command_buffer,
-      vk.Extent2D{d.SHADOW_MAP_SIZE, d.SHADOW_MAP_SIZE},
-      flip_x = true,
-      flip_y = false,
-    )
-    gpu.bind_graphics_pipeline(
-      command_buffer,
-      self.depth_pipeline,
-      self.depth_pipeline_layout,
-      shadow_data_descriptor_set,
-      textures_descriptor_set,
-      bone_descriptor_set,
-      material_descriptor_set,
-      node_data_descriptor_set,
-      mesh_data_descriptor_set,
-      vertex_skinning_descriptor_set,
-    )
-    cam_idx := u32(slot)
-    vk.CmdPushConstants(
-      command_buffer,
-      self.depth_pipeline_layout,
-      {.VERTEX, .GEOMETRY, .FRAGMENT},
-      0,
-      size_of(u32),
-      &cam_idx,
-    )
-    gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
-    vk.CmdDrawIndexedIndirectCount(
-      command_buffer,
-      point_lights[slot].draw_commands[frame_index].buffer,
-      0,
-      point_lights[slot].draw_count[frame_index].buffer,
-      0,
-      self.max_draws,
-      u32(size_of(vk.DrawIndexedIndirectCommand)),
-    )
-    vk.CmdEndRendering(command_buffer)
-    gpu.image_barrier(
-      command_buffer,
-      depth_cube.image,
-      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      {.SHADER_READ},
-      {.LATE_FRAGMENT_TESTS},
-      {.FRAGMENT_SHADER},
-      {.DEPTH},
-      layer_count = 6,
-    )
-  }
+  gpu.buffer_barrier(
+    command_buffer,
+    shadow.draw_commands[frame_index].buffer,
+    vk.DeviceSize(shadow.draw_commands[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    shadow.draw_count[frame_index].buffer,
+    vk.DeviceSize(shadow.draw_count[frame_index].bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  depth_cube := gpu.get_texture_cube(texture_manager, shadow.shadow_cube[frame_index])
+  if depth_cube == nil do return
+  gpu.image_barrier(
+    command_buffer,
+    depth_cube.image,
+    .UNDEFINED,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    {},
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.TOP_OF_PIPE},
+    {.EARLY_FRAGMENT_TESTS},
+    {.DEPTH},
+    layer_count = 6,
+  )
+  depth_attachment := gpu.create_cube_depth_attachment(depth_cube, .CLEAR, .STORE)
+  gpu.begin_depth_rendering(
+    command_buffer,
+    vk.Extent2D{d.SHADOW_MAP_SIZE, d.SHADOW_MAP_SIZE},
+    &depth_attachment,
+    layer_count = 6,
+  )
+  gpu.set_viewport_scissor(
+    command_buffer,
+    vk.Extent2D{d.SHADOW_MAP_SIZE, d.SHADOW_MAP_SIZE},
+    flip_x = true,
+    flip_y = false,
+  )
+  gpu.bind_graphics_pipeline(
+    command_buffer,
+    self.depth_pipeline,
+    self.depth_pipeline_layout,
+    shadow_data_descriptor_set,
+    textures_descriptor_set,
+    bone_descriptor_set,
+    material_descriptor_set,
+    node_data_descriptor_set,
+    mesh_data_descriptor_set,
+    vertex_skinning_descriptor_set,
+  )
+  cam_idx := shadow_index
+  vk.CmdPushConstants(
+    command_buffer,
+    self.depth_pipeline_layout,
+    {.VERTEX, .GEOMETRY, .FRAGMENT},
+    0,
+    size_of(u32),
+    &cam_idx,
+  )
+  gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
+  vk.CmdDrawIndexedIndirectCount(
+    command_buffer,
+    shadow.draw_commands[frame_index].buffer,
+    0,
+    shadow.draw_count[frame_index].buffer,
+    0,
+    self.max_draws,
+    u32(size_of(vk.DrawIndexedIndirectCommand)),
+  )
+  vk.CmdEndRendering(command_buffer)
+  gpu.image_barrier(
+    command_buffer,
+    depth_cube.image,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+    {.LATE_FRAGMENT_TESTS},
+    {.FRAGMENT_SHADER},
+    {.DEPTH},
+    layer_count = 6,
+  )
 }

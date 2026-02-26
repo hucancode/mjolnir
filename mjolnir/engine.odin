@@ -827,6 +827,12 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   }
   for node_handle, entry in self.world.staging.light_updates {
     if entry.op == .Remove {
+      if slot, found := slice.linear_search(
+        self.world.active_light_nodes[:],
+        node_handle,
+      ); found {
+        render.remove_shadow_entry(&self.render, &self.gctx, u32(slot))
+      }
       append(&stale_lights, node_handle)
       continue
     }
@@ -892,7 +898,28 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       case:
         light_data = {}
       }
+      if light_data.cast_shadow {
+        render.ensure_shadow_entry(
+          &self.render,
+          &self.gctx,
+          render_handle.index,
+          light_data.type,
+        ) or_return
+      } else {
+        render.remove_shadow_entry(
+          &self.render,
+          &self.gctx,
+          render_handle.index,
+        )
+      }
       render.upload_light_data(&self.render, render_handle.index, &light_data)
+    } else {
+      if slot, found := slice.linear_search(
+        self.world.active_light_nodes[:],
+        node_handle,
+      ); found {
+        render.remove_shadow_entry(&self.render, &self.gctx, u32(slot))
+      }
     }
   }
   for node_handle in stale_lights {

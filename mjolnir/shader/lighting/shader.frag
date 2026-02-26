@@ -106,7 +106,7 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light) {
     if (shadow_map_index >= MAX_TEXTURES && (light.type == DIRECTIONAL_LIGHT || light.type == SPOT_LIGHT)) {
         return 1.0; // No valid shadow map for directional/spot light
     }
-    if (shadow_map_index >= shadow_data_buffer.shadows.length()) {
+    if (light.shadow_index >= shadow_data_buffer.shadows.length()) {
         return 1.0;
     }
     ShadowData shadow = shadow_data_buffer.shadows[light.shadow_index];
@@ -246,7 +246,7 @@ void main() {
     // Get light data from the lights buffer
     LightData light = lights_buffer.lights[light_index];
     // Only validate shadow index if shadows are enabled
-    bool will_use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light, light.shadow_index);
+    bool will_use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light, shadow_map_index);
     if (will_use_shadow && light.shadow_index >= shadow_data_buffer.shadows.length()) {
         outColor = vec4(1.0, 0.0, 1.0, 1.0); // Magenta for invalid light camera index
         return;

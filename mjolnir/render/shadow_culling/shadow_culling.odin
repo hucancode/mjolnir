@@ -67,9 +67,8 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
 shadow_culling :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
-  slot_state: ^d.ShadowSlotState,
-  spot_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMap,
-  directional_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMap,
+  shadow_index: u32,
+  shadow: ^d.ShadowMap,
   frame_index: u32,
 ) {
   include_flags: d.NodeFlagSet = {.VISIBLE}
@@ -80,72 +79,42 @@ shadow_culling :: proc(
     .MATERIAL_LINE_STRIP,
   }
   dispatch_x := (self.node_count + 63) / 64
-  for slot in 0 ..< d.MAX_SHADOW_MAPS {
-    if !slot_state.slot_active[slot] do continue
-    kind := slot_state.slot_kind[slot]
-    if kind != .SPOT && kind != .DIRECTIONAL do continue
-    if kind == .SPOT {
-      vk.CmdFillBuffer(
-        command_buffer,
-        spot_lights[slot].draw_count[frame_index].buffer,
-        0,
-        vk.DeviceSize(spot_lights[slot].draw_count[frame_index].bytes_count),
-        0,
-      )
-      gpu.buffer_barrier(
-        command_buffer,
-        spot_lights[slot].draw_count[frame_index].buffer,
-        vk.DeviceSize(spot_lights[slot].draw_count[frame_index].bytes_count),
-        {.TRANSFER_WRITE},
-        {.SHADER_READ, .SHADER_WRITE},
-        {.TRANSFER},
-        {.COMPUTE_SHADER},
-      )
-      gpu.bind_compute_pipeline(
-        command_buffer,
-        self.pipeline,
-        self.pipeline_layout,
-        spot_lights[slot].descriptor_sets[frame_index],
-      )
-    } else {
-      vk.CmdFillBuffer(
-        command_buffer,
-        directional_lights[slot].draw_count[frame_index].buffer,
-        0,
-        vk.DeviceSize(directional_lights[slot].draw_count[frame_index].bytes_count),
-        0,
-      )
-      gpu.buffer_barrier(
-        command_buffer,
-        directional_lights[slot].draw_count[frame_index].buffer,
-        vk.DeviceSize(directional_lights[slot].draw_count[frame_index].bytes_count),
-        {.TRANSFER_WRITE},
-        {.SHADER_READ, .SHADER_WRITE},
-        {.TRANSFER},
-        {.COMPUTE_SHADER},
-      )
-      gpu.bind_compute_pipeline(
-        command_buffer,
-        self.pipeline,
-        self.pipeline_layout,
-        directional_lights[slot].descriptor_sets[frame_index],
-      )
-    }
-    push := CullPushConstants {
-      shadow_index  = u32(slot),
-      node_count    = self.node_count,
-      max_draws     = self.max_draws,
-      include_flags = include_flags,
-      exclude_flags = exclude_flags,
-    }
-    vk.CmdPushConstants(
-      command_buffer,
-      self.pipeline_layout,
-      {.COMPUTE},
-      0,
-      size_of(push),
-      &push,
-    )
-    vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
+  vk.CmdFillBuffer(
+    command_buffer,
+    shadow.draw_count[frame_index].buffer,
+    0,
+    vk.DeviceSize(shadow.draw_count[frame_index].bytes_count),
+    0,
+  )
+  gpu.buffer_barrier(
+    command_buffer,
+    shadow.draw_count[frame_index].buffer,
+    vk.DeviceSize(shadow.draw_count[frame_index].bytes_count),
+    {.TRANSFER_WRITE},
+    {.SHADER_READ, .SHADER_WRITE},
+    {.TRANSFER},
+    {.COMPUTE_SHADER},
+  )
+  gpu.bind_compute_pipeline(
+    command_buffer,
+    self.pipeline,
+    self.pipeline_layout,
+    shadow.descriptor_sets[frame_index],
+  )
+  push := CullPushConstants {
+    shadow_index  = shadow_index,
+    node_count    = self.node_count,
+    max_draws     = self.max_draws,
+    include_flags = include_flags,
+    exclude_flags = exclude_flags,
   }
+  vk.CmdPushConstants(
+    command_buffer,
+    self.pipeline_layout,
+    {.COMPUTE},
+    0,
+    size_of(push),
+    &push,
+  )
+  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
 }
