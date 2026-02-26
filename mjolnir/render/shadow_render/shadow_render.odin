@@ -220,8 +220,8 @@ shadow_render :: proc(
   command_buffer: vk.CommandBuffer,
   texture_manager: ^gpu.TextureManager,
   slot_state: ^d.ShadowSlotState,
-  spot_lights: ^[d.MAX_SHADOW_MAPS]d.SpotShadowGPU,
-  directional_lights: ^[d.MAX_SHADOW_MAPS]d.DirectionalShadowGPU,
+  spot_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMap,
+  directional_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMap,
   shadow_data_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
@@ -385,9 +385,9 @@ shadow_render :: proc(
 }
 
 get_texture_index :: proc(
-  spot_lights: ^[d.MAX_SHADOW_MAPS]d.SpotShadowGPU,
-  directional_lights: ^[d.MAX_SHADOW_MAPS]d.DirectionalShadowGPU,
-  point_lights: ^[d.MAX_SHADOW_MAPS]d.PointShadowGPU,
+  spot_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMap,
+  directional_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMap,
+  point_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMapCube,
   light_type: d.LightType,
   shadow_index: u32,
   frame_index: u32,

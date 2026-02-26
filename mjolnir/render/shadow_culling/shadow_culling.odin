@@ -68,8 +68,8 @@ shadow_culling :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
   slot_state: ^d.ShadowSlotState,
-  spot_lights: ^[d.MAX_SHADOW_MAPS]d.SpotShadowGPU,
-  directional_lights: ^[d.MAX_SHADOW_MAPS]d.DirectionalShadowGPU,
+  spot_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMap,
+  directional_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMap,
   frame_index: u32,
 ) {
   include_flags: d.NodeFlagSet = {.VISIBLE}

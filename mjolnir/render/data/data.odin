@@ -149,23 +149,20 @@ Light :: struct {
   shadow_index: u32, // index into shadow buffers
 }
 
-SpotShadowGPU :: struct {
+ShadowMap :: struct {
   shadow_map:      [FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
   draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
-DirectionalShadowGPU :: struct {
-  shadow_map:      [FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
-  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
-}
-
-PointShadowGPU :: struct {
+ShadowMapCube :: struct {
   shadow_cube:     [FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
-  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
   draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
@@ -194,4 +191,18 @@ ShadowData :: struct {
   direction:      [3]f32,
   far:            f32,
   frustum_planes: [6][4]f32,
+}
+
+Particle :: struct {
+  position:      [3]f32,
+  size:          f32,
+  velocity:      [3]f32,
+  size_end:      f32,
+  color_start:   [4]f32,
+  color_end:     [4]f32,
+  color:         [4]f32,
+  life:          f32,
+  max_life:      f32,
+  weight:        f32,
+  texture_index: u32,
 }

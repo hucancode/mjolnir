@@ -68,7 +68,7 @@ shadow_sphere_culling :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
   slot_state: ^d.ShadowSlotState,
-  point_lights: ^[d.MAX_SHADOW_MAPS]d.PointShadowGPU,
+  point_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMapCube,
   frame_index: u32,
 ) {
   include_flags: d.NodeFlagSet = {.VISIBLE}

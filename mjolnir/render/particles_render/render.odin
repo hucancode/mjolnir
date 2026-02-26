@@ -2,6 +2,7 @@ package particles_render
 
 import "../../gpu"
 import "../camera"
+import rd "../data"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -10,19 +11,7 @@ SHADER_PARTICLE_VERT := #load("../../shader/particle/vert.spv")
 SHADER_PARTICLE_FRAG := #load("../../shader/particle/frag.spv")
 TEXTURE_BLACK_CIRCLE :: #load("../../assets/black-circle.png")
 
-Particle :: struct {
-	position:      [3]f32,
-	size:          f32,
-	velocity:      [3]f32,
-	size_end:      f32,
-	color_start:   [4]f32,
-	color_end:     [4]f32,
-	color:         [4]f32,
-	life:          f32,
-	max_life:      f32,
-	weight:        f32,
-	texture_index: u32,
-}
+Particle :: rd.Particle
 
 Renderer :: struct {
 	render_pipeline_layout: vk.PipelineLayout,

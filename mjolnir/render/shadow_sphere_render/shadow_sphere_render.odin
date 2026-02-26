@@ -103,7 +103,7 @@ shadow_sphere_render :: proc(
   command_buffer: vk.CommandBuffer,
   texture_manager: ^gpu.TextureManager,
   slot_state: ^d.ShadowSlotState,
-  point_lights: ^[d.MAX_SHADOW_MAPS]d.PointShadowGPU,
+  point_lights: ^[d.MAX_SHADOW_MAPS]d.ShadowMapCube,
   shadow_data_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
