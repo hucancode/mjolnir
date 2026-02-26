@@ -89,7 +89,7 @@ Manager :: struct {
   debug_renderer:               debug_bone.Renderer,
   ui:                           ui_render.Renderer,
   ui_commands:                  [dynamic]cmd.RenderCommand, // Staged commands from UI module
-  cameras:                      map[u32]camera.Camera,
+  per_camera_data:              map[u32]camera.Camera,
   meshes:                       map[u32]Mesh,
   visibility:                   occlusion_culling.System,
   depth_pyramid:                depth_pyramid_system.System,
@@ -142,7 +142,7 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  self.cameras = make(map[u32]camera.Camera)
+  self.per_camera_data = make(map[u32]camera.Camera)
   self.meshes = make(map[u32]Mesh)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
@@ -727,10 +727,10 @@ setup :: proc(
 
 teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   // Destroy camera GPU resources (VkImages, draw command buffers) before texture_manager goes away
-  for _, &cam in self.cameras {
-    camera.destroy_gpu(gctx, &cam, &self.texture_manager)
+  for _, &cam in self.per_camera_data {
+    camera.destroy(gctx, &cam, &self.texture_manager)
   }
-  clear(&self.cameras)
+  clear(&self.per_camera_data)
   ui_render.teardown(&self.ui, gctx)
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
   post_process.teardown(&self.post_process, gctx, &self.texture_manager)
@@ -808,8 +808,8 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
 
 @(private)
 ensure_camera_slot :: proc(self: ^Manager, handle: u32) {
-  if handle not_in self.cameras {
-    self.cameras[handle] = {}
+  if handle not_in self.per_camera_data {
+    self.per_camera_data[handle] = {}
   }
 }
 
@@ -821,7 +821,7 @@ get_camera :: proc(
   cam: camera.Camera,
   ok: bool,
 ) #optional_ok {
-  cam, ok = self.cameras[handle]
+  cam, ok = self.per_camera_data[handle]
   if !ok do return {}, false
   return cam, true
 }
@@ -858,26 +858,22 @@ record_compute_commands :: proc(
   // Compute for frame N prepares data for frame N+1
   // Buffer indices with rd.FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
   next_frame_index := alg.next(frame_index, rd.FRAMES_IN_FLIGHT)
-  for cam_index, &cam in self.cameras {
-    // Only build pyramid if enabled for this camera
-    if cam.enable_depth_pyramid {
-      depth_pyramid_system.build_pyramid(
-        &self.depth_pyramid,
-        cmd,
-        &cam,
-        frame_index,
-      ) // Build pyramid[N]
-    }
+  for cam_index, &cam in self.per_camera_data {
     // Only perform culling if enabled for this camera
-    if cam.enable_culling {
-      occlusion_culling.perform_culling(
-        &self.visibility,
-        cmd,
-        &cam,
-        u32(cam_index),
-        next_frame_index,
-      ) // Write draw_list[N+1]
-    }
+    if !cam.enable_culling do continue
+    depth_pyramid_system.build_pyramid(
+      &self.depth_pyramid,
+      cmd,
+      &cam,
+      frame_index,
+    ) // Build pyramid[N]
+    occlusion_culling.perform_culling(
+      &self.visibility,
+      cmd,
+      &cam,
+      u32(cam_index),
+      next_frame_index,
+    ) // Write draw_list[N+1]
   }
   particles_compute.simulate(
     &self.particles_compute,
@@ -961,7 +957,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
   cont.slab_destroy(&self.bone_matrix_slab)
   gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
-  delete(self.cameras)
+  delete(self.per_camera_data)
   delete(self.meshes)
 }
 

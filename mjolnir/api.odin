@@ -346,7 +346,7 @@ get_camera_attachment :: proc(
 ) #optional_ok {
   if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
   gpu_handle :=
-    engine.render.cameras[camera_handle.index].attachments[attachment_type][frame_index]
+    engine.render.per_camera_data[camera_handle.index].attachments[attachment_type][frame_index]
   return transmute(world.Image2DHandle)gpu_handle, true
 }
 

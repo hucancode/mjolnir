@@ -33,78 +33,57 @@ PassTypeSet :: bit_set[PassType;u32]
 
 Camera :: struct {
   // Render pass configuration
-  enabled_passes:                PassTypeSet,
+  enabled_passes:               PassTypeSet,
   // Visibility culling control flags
-  enable_culling:                bool, // If false, skip culling compute pass
-  enable_depth_pyramid:          bool, // If false, skip depth pyramid generation
+  enable_culling:               bool, // If false, skip culling compute pass
   // GPU resources - Render target attachments (G-buffer textures, depth, final image)
-  attachments:                   [AttachmentType][FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
   // Indirect draw buffers (double-buffered for async compute)
   // Frame N compute writes to buffers[N], Frame N graphics reads from buffers[N-1]
-  opaque_draw_count:             [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  opaque_draw_commands:          [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  opaque_draw_count:            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  opaque_draw_commands:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  transparent_draw_count:        [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  transparent_draw_commands:     [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  transparent_draw_count:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  transparent_draw_commands:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  wireframe_draw_count:          [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  wireframe_draw_commands:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  wireframe_draw_count:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  wireframe_draw_commands:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  random_color_draw_count:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  random_color_draw_commands:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  random_color_draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  random_color_draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  line_strip_draw_count:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  line_strip_draw_commands:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  line_strip_draw_count:        [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  line_strip_draw_commands:     [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  sprite_draw_count:             [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  sprite_draw_commands:          [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  sprite_draw_count:            [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  sprite_draw_commands:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
   // Depth pyramid for hierarchical Z culling
-  depth_pyramid:                 [FRAMES_IN_FLIGHT]DepthPyramid,
+  depth_pyramid:                [FRAMES_IN_FLIGHT]DepthPyramid,
   // Descriptor sets for visibility culling compute shaders
-  descriptor_set:                [FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  depth_reduce_descriptor_sets:  [FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
-}
-
-// Get camera viewport extent from its depth attachment
-get_extent :: proc(
-  camera: ^Camera,
-  texture_manager: ^gpu.TextureManager,
-  frame_index: u32,
-) -> (
-  width: u32,
-  height: u32,
-) {
-  depth_texture := gpu.get_texture_2d(
-    texture_manager,
-    camera.attachments[.DEPTH][frame_index],
-  )
-  if depth_texture != nil {
-    return depth_texture.spec.width, depth_texture.spec.height
-  }
-  return 0, 0
+  descriptor_set:               [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  depth_reduce_descriptor_sets: [FRAMES_IN_FLIGHT][MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
 }
 
 // DepthPyramid - Hierarchical depth buffer for occlusion culling (GPU resource)
 DepthPyramid :: struct {
-  texture:    gpu.Texture2DHandle,
-  views:      [MAX_DEPTH_MIPS_LEVEL]vk.ImageView,
-  full_view:  vk.ImageView,
-  sampler:    vk.Sampler,
-  mip_levels: u32,
-  using extent:     vk.Extent2D,
+  texture:      gpu.Texture2DHandle,
+  views:        [MAX_DEPTH_MIPS_LEVEL]vk.ImageView,
+  full_view:    vk.ImageView,
+  sampler:      vk.Sampler,
+  mip_levels:   u32,
+  using extent: vk.Extent2D,
 }
-
 
 // Initialize GPU resources for perspective camera
 // Takes only the specific resources needed, no dependency on render manager
-init_gpu :: proc(
+init :: proc(
   gctx: ^gpu.GPUContext,
   camera: ^Camera,
   texture_manager: ^gpu.TextureManager,
@@ -118,7 +97,6 @@ init_gpu :: proc(
     .PARTICLES,
     .POST_PROCESS,
   },
-  enable_depth_pyramid: bool = true,
   max_draws: u32,
 ) -> vk.Result {
   // Determine which attachments are needed based on enabled passes
@@ -282,8 +260,7 @@ init_gpu :: proc(
     ) or_return
   }
 
-  // Create depth pyramids for hierarchical Z culling
-  if enable_depth_pyramid {
+  if camera.enable_culling {
     for frame in 0 ..< FRAMES_IN_FLIGHT {
       create_depth_pyramid(
         gctx,
@@ -299,7 +276,7 @@ init_gpu :: proc(
 }
 
 // Destroy GPU resources for perspective/orthographic camera
-destroy_gpu :: proc(
+destroy :: proc(
   gctx: ^gpu.GPUContext,
   camera: ^Camera,
   texture_manager: ^gpu.TextureManager,
@@ -342,7 +319,10 @@ destroy_gpu :: proc(
       gctx.device,
       &camera.transparent_draw_commands[frame],
     )
-    gpu.mutable_buffer_destroy(gctx.device, &camera.wireframe_draw_count[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.wireframe_draw_count[frame],
+    )
     gpu.mutable_buffer_destroy(
       gctx.device,
       &camera.wireframe_draw_commands[frame],
@@ -355,7 +335,10 @@ destroy_gpu :: proc(
       gctx.device,
       &camera.random_color_draw_commands[frame],
     )
-    gpu.mutable_buffer_destroy(gctx.device, &camera.line_strip_draw_count[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.line_strip_draw_count[frame],
+    )
     gpu.mutable_buffer_destroy(
       gctx.device,
       &camera.line_strip_draw_commands[frame],
@@ -508,7 +491,6 @@ resize :: proc(
   extent: vk.Extent2D,
   color_format, depth_format: vk.Format,
   enabled_passes: PassTypeSet,
-  enable_depth_pyramid: bool,
 ) -> vk.Result {
   // Destroy old attachments
   for attachment_type in AttachmentType {
@@ -617,9 +599,7 @@ resize :: proc(
       gpu.end_single_time_command(gctx, &cmd_buf) or_return
     }
   }
-
-  // Recreate depth pyramids
-  if enable_depth_pyramid {
+  if camera.enable_culling {
     for frame in 0 ..< FRAMES_IN_FLIGHT {
       create_depth_pyramid(
         gctx,
