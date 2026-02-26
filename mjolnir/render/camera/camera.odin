@@ -49,6 +49,18 @@ Camera :: struct {
   transparent_draw_commands:     [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
+  wireframe_draw_count:          [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  wireframe_draw_commands:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  random_color_draw_count:       [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  random_color_draw_commands:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  line_strip_draw_count:         [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  line_strip_draw_commands:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
   sprite_draw_count:             [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   sprite_draw_commands:          [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
@@ -220,6 +232,42 @@ init_gpu :: proc(
       int(max_draws),
       {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
+    camera.wireframe_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.wireframe_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.random_color_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.random_color_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.line_strip_draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
+    camera.line_strip_draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      int(max_draws),
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+    ) or_return
     camera.sprite_draw_count[frame] = gpu.create_mutable_buffer(
       gctx,
       u32,
@@ -294,6 +342,24 @@ destroy_gpu :: proc(
       gctx.device,
       &camera.transparent_draw_commands[frame],
     )
+    gpu.mutable_buffer_destroy(gctx.device, &camera.wireframe_draw_count[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.wireframe_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.random_color_draw_count[frame],
+    )
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.random_color_draw_commands[frame],
+    )
+    gpu.mutable_buffer_destroy(gctx.device, &camera.line_strip_draw_count[frame])
+    gpu.mutable_buffer_destroy(
+      gctx.device,
+      &camera.line_strip_draw_commands[frame],
+    )
     gpu.mutable_buffer_destroy(gctx.device, &camera.sprite_draw_count[frame])
     gpu.mutable_buffer_destroy(
       gctx.device,
@@ -367,6 +433,30 @@ allocate_descriptors :: proc(
       {
         .STORAGE_BUFFER,
         gpu.buffer_info(&camera.sprite_draw_commands[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.wireframe_draw_count[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.wireframe_draw_commands[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.random_color_draw_count[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.random_color_draw_commands[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.line_strip_draw_count[frame_index]),
+      },
+      {
+        .STORAGE_BUFFER,
+        gpu.buffer_info(&camera.line_strip_draw_commands[frame_index]),
       },
       {
         .COMBINED_IMAGE_SAMPLER,

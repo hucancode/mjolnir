@@ -842,8 +842,6 @@ record_compute_commands :: proc(
         &cam,
         u32(cam_index),
         next_frame_index,
-        {.VISIBLE},
-        {},
       ) // Write draw_list[N+1]
     }
   }
@@ -1155,15 +1153,6 @@ record_transparency_pass :: proc(
   gpu.set_viewport_scissor(cmd, depth_texture.spec.extent)
 
   // Render transparent objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT},
-    NodeFlagSet{.MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-  )
   gpu.buffer_barrier(
     cmd,
     cam.transparent_draw_commands[frame_index].buffer,
@@ -1201,19 +1190,10 @@ record_transparency_pass :: proc(
   )
 
   // Render wireframe objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME},
-    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_RANDOM_COLOR, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-  )
   gpu.buffer_barrier(
     cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
+    cam.wireframe_draw_commands[frame_index].buffer,
+    vk.DeviceSize(cam.wireframe_draw_commands[frame_index].bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -1221,8 +1201,8 @@ record_transparency_pass :: proc(
   )
   gpu.buffer_barrier(
     cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
+    cam.wireframe_draw_count[frame_index].buffer,
+    vk.DeviceSize(cam.wireframe_draw_count[frame_index].bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -1241,25 +1221,16 @@ record_transparency_pass :: proc(
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
+    cam.wireframe_draw_commands[frame_index].buffer,
+    cam.wireframe_draw_count[frame_index].buffer,
     rd.MAX_NODES_IN_SCENE,
   )
 
   // Render random_color objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_RANDOM_COLOR},
-    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_LINE_STRIP, .MATERIAL_SPRITE},
-  )
   gpu.buffer_barrier(
     cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
+    cam.random_color_draw_commands[frame_index].buffer,
+    vk.DeviceSize(cam.random_color_draw_commands[frame_index].bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -1267,8 +1238,8 @@ record_transparency_pass :: proc(
   )
   gpu.buffer_barrier(
     cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
+    cam.random_color_draw_count[frame_index].buffer,
+    vk.DeviceSize(cam.random_color_draw_count[frame_index].bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -1287,25 +1258,16 @@ record_transparency_pass :: proc(
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
+    cam.random_color_draw_commands[frame_index].buffer,
+    cam.random_color_draw_count[frame_index].buffer,
     rd.MAX_NODES_IN_SCENE,
   )
 
   // Render line_strip objects
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_LINE_STRIP},
-    NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME, .MATERIAL_RANDOM_COLOR, .MATERIAL_SPRITE},
-  )
   gpu.buffer_barrier(
     cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
+    cam.line_strip_draw_commands[frame_index].buffer,
+    vk.DeviceSize(cam.line_strip_draw_commands[frame_index].bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -1313,8 +1275,8 @@ record_transparency_pass :: proc(
   )
   gpu.buffer_barrier(
     cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
+    cam.line_strip_draw_count[frame_index].buffer,
+    vk.DeviceSize(cam.line_strip_draw_count[frame_index].bytes_count),
     {.SHADER_WRITE},
     {.INDIRECT_COMMAND_READ},
     {.COMPUTE_SHADER},
@@ -1333,21 +1295,12 @@ record_transparency_pass :: proc(
     self.mesh_manager.vertex_skinning_buffer.descriptor_set,
     self.mesh_manager.vertex_buffer.buffer,
     self.mesh_manager.index_buffer.buffer,
-    cam.transparent_draw_commands[frame_index].buffer,
-    cam.transparent_draw_count[frame_index].buffer,
+    cam.line_strip_draw_commands[frame_index].buffer,
+    cam.line_strip_draw_count[frame_index].buffer,
     rd.MAX_NODES_IN_SCENE,
   )
 
   // Render sprites
-  occlusion_culling.perform_culling(
-    &self.visibility,
-    cmd,
-    cam,
-    cam_index,
-    frame_index,
-    NodeFlagSet{.VISIBLE, .MATERIAL_SPRITE},
-    NodeFlagSet{},
-  )
   gpu.buffer_barrier(
     cmd,
     cam.sprite_draw_commands[frame_index].buffer,

@@ -13,8 +13,6 @@ VisibilityPushConstants :: struct {
   camera_index:      u32,
   node_count:        u32,
   max_draws:         u32,
-  include_flags:     rd.NodeFlagSet,
-  exclude_flags:     rd.NodeFlagSet,
   pyramid_width:     f32,
   pyramid_height:    f32,
   depth_bias:        f32,
@@ -47,6 +45,12 @@ init :: proc(
   self.depth_bias = 0.0001
   self.depth_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},
     {.STORAGE_BUFFER, {.COMPUTE}},
     {.STORAGE_BUFFER, {.COMPUTE}},
     {.STORAGE_BUFFER, {.COMPUTE}},
@@ -124,8 +128,6 @@ perform_culling :: proc(
   camera: ^cam.Camera,
   camera_index: u32,
   frame_index: u32,
-  include_flags: rd.NodeFlagSet,
-  exclude_flags: rd.NodeFlagSet,
 ) {
   if self.node_count == 0 do return
   vk.CmdFillBuffer(
@@ -149,6 +151,27 @@ perform_culling :: proc(
     vk.DeviceSize(camera.sprite_draw_count[frame_index].bytes_count),
     0,
   )
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.wireframe_draw_count[frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.wireframe_draw_count[frame_index].bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.random_color_draw_count[frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.random_color_draw_count[frame_index].bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.line_strip_draw_count[frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.line_strip_draw_count[frame_index].bytes_count),
+    0,
+  )
   gpu.bind_compute_pipeline(
     command_buffer,
     self.cull_pipeline,
@@ -160,8 +183,6 @@ perform_culling :: proc(
     camera_index      = camera_index,
     node_count        = self.node_count,
     max_draws         = self.max_draws,
-    include_flags     = include_flags,
-    exclude_flags     = exclude_flags,
     pyramid_width     = f32(camera.depth_pyramid[prev_frame].width),
     pyramid_height    = f32(camera.depth_pyramid[prev_frame].height),
     depth_bias        = self.depth_bias,
