@@ -63,12 +63,11 @@ layout(push_constant) uniform PushConstants {
 };
 
 void main() {
-    ShadowData camera = shadows[shadow_index];
+    ShadowData shadow = shadows[shadow_index];
     uint node_index = uint(gl_InstanceIndex);
     mat4 world = nodes[node_index].world_matrix;
     NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
-
     vec4 model_position;
     bool is_skinned = (mesh.flags & MESH_FLAG_SKINNED) != 0u &&
                       node.attachment_data_index < bones.length();
@@ -86,7 +85,6 @@ void main() {
     } else {
         model_position = vec4(inPosition, 1.0);
     }
-
     vec4 world_position = world * model_position;
-    gl_Position = camera.projection * camera.view * world_position;
+    gl_Position = shadow.projection * shadow.view * world_position;
 }

@@ -5,20 +5,6 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 0) out vec3 worldPos;
 layout(location = 1) out uint instanceIndex;
 
-struct ShadowData {
-    mat4 view;
-    mat4 projection;
-    vec3 position;
-    float near;
-    vec3 direction;
-    float far;
-    vec4 frustum_planes[6];
-};
-
-layout(set = 0, binding = 0) readonly buffer ShadowBuffer {
-    ShadowData shadows[];
-};
-
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };

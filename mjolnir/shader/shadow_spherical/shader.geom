@@ -27,8 +27,7 @@ layout(push_constant) uniform PushConstants {
     uint shadow_index;
 };
 
-mat4 makeView(vec3 pos, vec3 forward, vec3 up)
-{
+mat4 makeView(vec3 pos, vec3 forward, vec3 up) {
     vec3 f = normalize(forward);
     vec3 r = normalize(cross(up, f));
     vec3 u = cross(f, r);
@@ -47,7 +46,7 @@ mat4 makeView(vec3 pos, vec3 forward, vec3 up)
 
 void main() {
     ShadowData shadow = shadows[shadow_index];
-    vec3 center = shadow.position.xyz;
+    vec3 center = shadow.position;
 
     mat4 views[6];
     // (+X, -X, +Y, -Y, +Z, -Z)

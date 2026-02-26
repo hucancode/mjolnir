@@ -55,7 +55,7 @@ PointLightGPU :: struct {
   descriptor_sets: [d.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
-VisibilityPushConstants :: struct {
+CullPushConstants :: struct {
   camera_index:  u32,
   node_count:    u32,
   max_draws:     u32,
@@ -63,8 +63,8 @@ VisibilityPushConstants :: struct {
   exclude_flags: d.NodeFlagSet,
 }
 
-SphereVisibilityPushConstants :: struct {
-  camera_index:  u32,
+SphereCullPushConstants :: struct {
+  shadow_index:  u32,
   node_count:    u32,
   max_draws:     u32,
   include_flags: d.NodeFlagSet,
@@ -181,7 +181,7 @@ init :: proc(
     gctx,
     vk.PushConstantRange {
       stageFlags = {.COMPUTE},
-      size = size_of(VisibilityPushConstants),
+      size = size_of(CullPushConstants),
     },
     self.shadow_cull_descriptor_layout,
   ) or_return
@@ -193,7 +193,7 @@ init :: proc(
     gctx,
     vk.PushConstantRange {
       stageFlags = {.COMPUTE},
-      size = size_of(SphereVisibilityPushConstants),
+      size = size_of(SphereCullPushConstants),
     },
     self.sphere_cull_descriptor_layout,
   ) or_return
@@ -690,7 +690,7 @@ compute_draw_lists :: proc(
         self.shadow_cull_layout,
         spot.descriptor_sets[frame_index],
       )
-      push := VisibilityPushConstants {
+      push := CullPushConstants {
         camera_index  = u32(slot),
         node_count    = self.node_count,
         max_draws     = self.max_draws,
@@ -729,7 +729,7 @@ compute_draw_lists :: proc(
         self.shadow_cull_layout,
         directional.descriptor_sets[frame_index],
       )
-      push := VisibilityPushConstants {
+      push := CullPushConstants {
         camera_index  = u32(slot),
         node_count    = self.node_count,
         max_draws     = self.max_draws,
@@ -768,8 +768,8 @@ compute_draw_lists :: proc(
         self.sphere_cull_layout,
         point.descriptor_sets[frame_index],
       )
-      push := SphereVisibilityPushConstants {
-        camera_index  = u32(slot),
+      push := SphereCullPushConstants {
+        shadow_index  = u32(slot),
         node_count    = self.node_count,
         max_draws     = self.max_draws,
         include_flags = include_flags,

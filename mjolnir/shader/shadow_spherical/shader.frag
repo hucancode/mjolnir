@@ -22,7 +22,7 @@ layout(push_constant) uniform PushConstants {
 
 void main() {
     ShadowData shadow = shadows[shadow_index];
-    vec3 lightPos = shadow.position.xyz;
+    vec3 lightPos = shadow.position;
     float linearDepth = length(fragWorldPos - lightPos);
     // Linear depth mapping: [near, far] -> [0, 1]
     // Provides uniform precision across entire light radius
