@@ -122,8 +122,7 @@ find_bones_by_names :: proc(
   return indices, true
 }
 
-mesh_destroy :: proc(self: ^Mesh, world: ^World) {
-  _ = world
+mesh_destroy :: proc(self: ^Mesh) {
   skin, has_skin := &self.skinning.?
   if has_skin {
     for &bone in skin.bones do bone_destroy(&bone)
@@ -538,7 +537,7 @@ create_mesh :: proc(
 destroy_mesh :: proc(self: ^World, handle: MeshHandle) {
   if mesh, ok := cont.free(&self.meshes, handle); ok {
     stage_mesh_removal(&self.staging, handle)
-    mesh_destroy(mesh, self)
+    mesh_destroy(mesh)
   }
 }
 

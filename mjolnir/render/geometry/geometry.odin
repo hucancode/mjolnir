@@ -24,7 +24,6 @@ Renderer :: struct {
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  width, height: u32,
   camera_set_layout: vk.DescriptorSetLayout,
   textures_set_layout: vk.DescriptorSetLayout,
   bone_set_layout: vk.DescriptorSetLayout,
@@ -120,7 +119,7 @@ init :: proc(
     pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
     pRasterizationState = &gpu.STANDARD_RASTERIZER,
     pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-    pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
+    pDepthStencilState  = &gpu.READ_WRITE_DEPTH_STATE,
     pColorBlendState    = &color_blending,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
     layout              = self.pipeline_layout,
@@ -144,7 +143,6 @@ begin_pass :: proc(
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
 ) {
-  // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
   position_texture := gpu.get_texture_2d(
     texture_manager,
     camera.attachments[.POSITION][frame_index],
@@ -169,7 +167,6 @@ begin_pass :: proc(
     texture_manager,
     camera.attachments[.FINAL_IMAGE][frame_index],
   )
-  // Transition all G-buffer images from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
   gpu.image_barrier(
     command_buffer,
     position_texture.image,
@@ -240,10 +237,21 @@ begin_pass :: proc(
     texture_manager,
     camera.attachments[.DEPTH][frame_index],
   )
+  gpu.image_barrier(
+    command_buffer,
+    depth_texture.image,
+    .UNDEFINED,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    {},
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.TOP_OF_PIPE},
+    {.EARLY_FRAGMENT_TESTS},
+    {.DEPTH},
+  )
   gpu.begin_rendering(
     command_buffer,
     depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+    gpu.create_depth_attachment(depth_texture, .CLEAR, .STORE),
     gpu.create_color_attachment(position_texture),
     gpu.create_color_attachment(normal_texture),
     gpu.create_color_attachment(albedo_texture),
@@ -263,7 +271,6 @@ end_pass :: proc(
   frame_index: u32,
 ) {
   vk.CmdEndRendering(command_buffer)
-  // transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting and post-processing
   position_texture := gpu.get_texture_2d(
     texture_manager,
     camera.attachments[.POSITION][frame_index],
@@ -284,7 +291,10 @@ end_pass :: proc(
     texture_manager,
     camera.attachments[.EMISSIVE][frame_index],
   )
-  // transition all G-buffer attachments + depth to SHADER_READ_ONLY_OPTIMAL
+  depth_texture := gpu.get_texture_2d(
+    texture_manager,
+    camera.attachments[.DEPTH][frame_index],
+  )
   gpu.image_barrier(
     command_buffer,
     position_texture.image,
@@ -340,13 +350,22 @@ end_pass :: proc(
     {.FRAGMENT_SHADER},
     {.COLOR},
   )
+  gpu.image_barrier(
+    command_buffer,
+    depth_texture.image,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+    {.LATE_FRAGMENT_TESTS},
+    {.COMPUTE_SHADER, .FRAGMENT_SHADER},
+    {.DEPTH},
+  )
 }
 
 render :: proc(
   self: ^Renderer,
-  camera: ^camera.Camera,
   camera_handle: u32,
-  frame_index: u32,
   command_buffer: vk.CommandBuffer,
   cameras_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,

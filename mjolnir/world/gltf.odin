@@ -34,7 +34,6 @@ SkinData :: struct {
 }
 
 TextureFromDataAllocator :: #type proc(
-  world: ^World,
   pixel_data: []u8,
 ) -> (
   handle: Image2DHandle,
@@ -90,14 +89,11 @@ load_gltf :: proc(
     world,
     create_texture_from_data,
     path,
-    gltf_data,
     manifest.unique_textures[:],
     &texture_cache,
   ) or_return
   load_materials_batch(
     world,
-    path,
-    gltf_data,
     manifest.unique_materials[:],
     &texture_cache,
     &material_cache,
@@ -187,11 +183,9 @@ load_textures_batch :: proc(
   world: ^World,
   create_texture_from_data: TextureFromDataAllocator,
   gltf_path: string,
-  gltf_data: ^cgltf.data,
   textures: []^cgltf.texture,
   cache: ^map[^cgltf.texture]Image2DHandle,
 ) -> cgltf.result {
-  _ = gltf_data
   for texture in textures do if texture != nil && texture.image_ != nil {
     pixel_data: []u8
     own_pixel_data: bool
@@ -210,7 +204,7 @@ load_textures_batch :: proc(
     } else {
       continue
     }
-    handle, ok := create_texture_from_data(world, pixel_data)
+    handle, ok := create_texture_from_data(pixel_data)
     if !ok do return .io_error
     cache[texture] = handle
     log.infof("Created texture %v", handle)
@@ -221,8 +215,6 @@ load_textures_batch :: proc(
 @(private = "file")
 load_materials_batch :: proc(
   world: ^World,
-  gltf_path: string,
-  gltf_data: ^cgltf.data,
   materials: []^cgltf.material,
   texture_cache: ^map[^cgltf.texture]Image2DHandle,
   material_cache: ^map[^cgltf.material]MaterialHandle,
@@ -230,8 +222,6 @@ load_materials_batch :: proc(
   ret: cgltf.result,
 ) {
   ret = .success
-  _ = gltf_data
-  _ = gltf_path
   for gltf_mat in materials do if gltf_mat != nil {
     albedo, metallic_roughness, normal, emissive, occlusion, features := load_material_textures(gltf_mat, texture_cache)
     defer if ret != .success {

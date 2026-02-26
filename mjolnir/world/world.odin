@@ -364,7 +364,7 @@ shutdown :: proc(world: ^World) {
   // Clean up meshes
   for &entry in world.meshes.entries {
     if entry.generation > 0 && entry.active {
-      mesh_destroy(&entry.item, world)
+      mesh_destroy(&entry.item)
     }
   }
   delete(world.meshes.entries)

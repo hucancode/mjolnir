@@ -21,6 +21,7 @@ import shadow_render_system "shadow_render"
 import shadow_sphere_culling_system "shadow_sphere_culling"
 import shadow_sphere_render_system "shadow_sphere_render"
 import "occlusion_culling"
+import depth_pyramid_system "depth_pyramid"
 import particles_compute "particles_compute"
 import particles_render "particles_render"
 import "post_process"
@@ -98,6 +99,7 @@ Manager :: struct {
   cameras:                 map[u32]camera.Camera,
   meshes:                  map[u32]Mesh,
   visibility:              occlusion_culling.System,
+  depth_pyramid:           depth_pyramid_system.System,
   shadow_culling:          shadow_culling_system.System,
   shadow_sphere_culling:   shadow_sphere_culling_system.System,
   shadow_render:           shadow_render_system.System,
@@ -340,15 +342,10 @@ init :: proc(
   occlusion_culling.init(
     &self.visibility,
     gctx,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    self.camera_buffer.set_layout,
-    self.texture_manager.set_layout,
-    self.bone_buffer.set_layout,
-    self.material_buffer.set_layout,
-    self.node_data_buffer.set_layout,
-    self.mesh_data_buffer.set_layout,
-    self.mesh_manager.vertex_skinning_buffer.set_layout,
+  ) or_return
+  depth_pyramid_system.init(
+    &self.depth_pyramid,
+    gctx,
   ) or_return
   shadow_culling_system.init(
     &self.shadow_culling,
@@ -397,8 +394,6 @@ init :: proc(
   geometry.init(
     &self.geometry,
     gctx,
-    swapchain_extent.width,
-    swapchain_extent.height,
     self.camera_buffer.set_layout,
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
@@ -832,12 +827,10 @@ record_compute_commands :: proc(
   for cam_index, &cam in self.cameras {
     // Only build pyramid if enabled for this camera
     if cam.enable_depth_pyramid {
-      occlusion_culling.build_pyramid(
-        &self.visibility,
-        gctx,
+      depth_pyramid_system.build_pyramid(
+        &self.depth_pyramid,
         cmd,
         &cam,
-        u32(cam_index),
         frame_index,
       ) // Build pyramid[N]
     }
@@ -845,7 +838,6 @@ record_compute_commands :: proc(
     if cam.enable_culling {
       occlusion_culling.perform_culling(
         &self.visibility,
-        gctx,
         cmd,
         &cam,
         u32(cam_index),
@@ -913,6 +905,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   shadow_sphere_culling_system.shutdown(&self.shadow_sphere_culling, gctx)
   shadow_culling_system.shutdown(&self.shadow_culling, gctx)
   geometry.shutdown(&self.geometry, gctx)
+  depth_pyramid_system.shutdown(&self.depth_pyramid, gctx)
   occlusion_culling.shutdown(&self.visibility, gctx)
   vk.DestroySampler(gctx.device, self.linear_repeat_sampler, nil)
   self.linear_repeat_sampler = 0
@@ -1029,40 +1022,6 @@ render_shadow_depth :: proc(
   return .SUCCESS
 }
 
-render_camera_depth :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  for cam_index, &cam in self.cameras {
-    occlusion_culling.render_depth(
-      &self.visibility,
-      gctx,
-      cmd,
-      &cam,
-      &self.texture_manager,
-      u32(cam_index),
-      frame_index,
-      {.VISIBLE},
-      {
-        .MATERIAL_TRANSPARENT,
-        .MATERIAL_WIREFRAME,
-        .MATERIAL_RANDOM_COLOR,
-        .MATERIAL_LINE_STRIP,
-      },
-      self.camera_buffer.descriptor_sets[frame_index],
-      self.bone_buffer.descriptor_sets[frame_index],
-      self.node_data_buffer.descriptor_set,
-      self.mesh_data_buffer.descriptor_set,
-      self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-      self.mesh_manager.vertex_buffer.buffer,
-      self.mesh_manager.index_buffer.buffer,
-    )
-  }
-  return .SUCCESS
-}
-
 record_geometry_pass :: proc(
   self: ^Manager,
   frame_index: u32,
@@ -1073,9 +1032,7 @@ record_geometry_pass :: proc(
   geometry.begin_pass(cam, &self.texture_manager, cmd, frame_index)
   geometry.render(
     &self.geometry,
-    cam,
     cam_index,
-    frame_index,
     cmd,
     self.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
@@ -1200,7 +1157,6 @@ record_transparency_pass :: proc(
   // Render transparent objects
   occlusion_culling.perform_culling(
     &self.visibility,
-    gctx,
     cmd,
     cam,
     cam_index,
@@ -1247,7 +1203,6 @@ record_transparency_pass :: proc(
   // Render wireframe objects
   occlusion_culling.perform_culling(
     &self.visibility,
-    gctx,
     cmd,
     cam,
     cam_index,
@@ -1294,7 +1249,6 @@ record_transparency_pass :: proc(
   // Render random_color objects
   occlusion_culling.perform_culling(
     &self.visibility,
-    gctx,
     cmd,
     cam,
     cam_index,
@@ -1341,7 +1295,6 @@ record_transparency_pass :: proc(
   // Render line_strip objects
   occlusion_culling.perform_culling(
     &self.visibility,
-    gctx,
     cmd,
     cam,
     cam_index,
@@ -1388,7 +1341,6 @@ record_transparency_pass :: proc(
   // Render sprites
   occlusion_culling.perform_culling(
     &self.visibility,
-    gctx,
     cmd,
     cam,
     cam_index,

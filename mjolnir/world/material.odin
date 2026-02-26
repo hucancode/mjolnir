@@ -63,11 +63,6 @@ material_init :: proc(
   self.base_color_factor = base_color_factor
 }
 
-material_destroy :: proc(self: ^Material, world: ^World) {
-  _ = self
-  _ = world
-}
-
 create_material :: proc(
   world: ^World,
   features: ShaderFeatureSet = {},

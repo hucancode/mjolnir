@@ -393,13 +393,11 @@ load_gltf :: proc(
   ok: bool,
 ) #optional_ok {
   create_texture_from_data_adapter := proc(
-    world_ptr: ^world.World,
     pixel_data: []u8,
   ) -> (
     handle: world.Image2DHandle,
     ok: bool,
   ) {
-    _ = world_ptr
     engine_ctx := cast(^Engine)context.user_ptr
     if engine_ctx == nil {
       return {}, false
@@ -541,6 +539,7 @@ update_visibility_node_count :: proc(
   n := min(u32(len(world.nodes.entries)), render.visibility.max_draws)
   for ; n > 0; n -= 1 do if world.nodes.entries[n - 1].active do break
   render.visibility.node_count = n
+  render.depth_pyramid.node_count = n
   render.shadow_culling.node_count = n
   render.shadow_sphere_culling.node_count = n
 }
@@ -952,7 +951,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         cam,
         &self.render.texture_manager,
         &self.render.visibility.depth_descriptor_layout,
-        &self.render.visibility.depth_reduce_descriptor_layout,
+        &self.render.depth_pyramid.depth_reduce_descriptor_layout,
         &self.render.node_data_buffer,
         &self.render.mesh_data_buffer,
         &self.render.camera_buffer,
@@ -1196,7 +1195,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         camera_gpu,
         &engine.render.texture_manager,
         &engine.render.visibility.depth_descriptor_layout,
-        &engine.render.visibility.depth_reduce_descriptor_layout,
+        &engine.render.depth_pyramid.depth_reduce_descriptor_layout,
         &engine.render.node_data_buffer,
         &engine.render.mesh_data_buffer,
         &engine.render.camera_buffer,
@@ -1226,11 +1225,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.render,
     self.frame_index,
     active_render_lights[:],
-  ) or_return
-  render.render_camera_depth(
-    &self.render,
-    self.frame_index,
-    &self.gctx,
   ) or_return
   for &entry, cam_index in self.world.cameras.entries {
     if !entry.active do continue
