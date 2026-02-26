@@ -90,7 +90,6 @@ Manager :: struct {
   ui:                           ui_render.Renderer,
   ui_commands:                  [dynamic]cmd.RenderCommand, // Staged commands from UI module
   per_camera_data:              map[u32]camera.Camera,
-  meshes:                       map[u32]Mesh,
   visibility:                   occlusion_culling.System,
   depth_pyramid:                depth_pyramid_system.System,
   shadow_culling:               shadow_culling_system.System,
@@ -143,7 +142,6 @@ init :: proc(
   ret: vk.Result,
 ) {
   self.per_camera_data = make(map[u32]camera.Camera)
-  self.meshes = make(map[u32]Mesh)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
@@ -826,12 +824,6 @@ get_camera :: proc(
   return cam, true
 }
 
-@(private)
-ensure_mesh_slot :: proc(self: ^Manager, handle: u32) {
-  if _, ok := self.meshes[handle]; !ok {
-    self.meshes[handle] = {}
-  }
-}
 
 sync_camera_from_world :: proc(
   self: ^Manager,
@@ -843,9 +835,7 @@ sync_camera_from_world :: proc(
 }
 
 clear_mesh :: proc(self: ^Manager, handle: u32) {
-  if _, ok := self.meshes[handle]; !ok do return
   free_mesh_geometry(self, handle)
-  upload_mesh_data(self, handle, &Mesh{})
 }
 
 record_compute_commands :: proc(
@@ -958,7 +948,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   cont.slab_destroy(&self.bone_matrix_slab)
   gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
   delete(self.per_camera_data)
-  delete(self.meshes)
 }
 
 resize :: proc(
@@ -1528,65 +1517,13 @@ record_ui_pass :: proc(
   vk.CmdEndRendering(cmd)
 }
 
-allocate_mesh_geometry :: proc(
-  gctx: ^gpu.GPUContext,
-  render: ^Manager,
-  geometry_data: geom.Geometry,
-) -> (
-  handle: u32,
-  ret: vk.Result,
-) {
-  if len(render.meshes) >= rd.MAX_MESHES do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  found := false
-  // TODO: eliminate this inefficiency
-  for i in u32(0) ..< rd.MAX_MESHES {
-    if _, ok := render.meshes[i]; !ok {
-      handle = i
-      found = true
-      break
-    }
-  }
-  if !found do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  mesh := Mesh{}
-  mesh.aabb_min = geometry_data.aabb.min
-  mesh.aabb_max = geometry_data.aabb.max
-  mesh.flags = {}
-  mesh.index_count = u32(len(geometry_data.indices))
-  vertex_allocation := gpu.allocate_vertices(
-    &render.mesh_manager,
-    gctx,
-    geometry_data.vertices,
-  ) or_return
-  index_allocation := gpu.allocate_indices(
-    &render.mesh_manager,
-    gctx,
-    geometry_data.indices,
-  ) or_return
-  mesh.first_index = index_allocation.offset
-  mesh.vertex_offset = i32(vertex_allocation.offset)
-  mesh.skinning_offset = 0
-  if len(geometry_data.skinnings) > 0 {
-    skinning_allocation := gpu.allocate_vertex_skinning(
-      &render.mesh_manager,
-      gctx,
-      geometry_data.skinnings,
-    ) or_return
-    mesh.skinning_offset = skinning_allocation.offset
-    mesh.flags |= {.SKINNED}
-  }
-  render.meshes[handle] = mesh
-  upload_mesh_data(render, handle, &mesh)
-  return handle, .SUCCESS
-}
-
 sync_mesh_geometry_for_handle :: proc(
   gctx: ^gpu.GPUContext,
   render: ^Manager,
   handle: u32,
   geometry_data: geom.Geometry,
 ) -> vk.Result {
-  ensure_mesh_slot(render, handle)
-  mesh := render.meshes[handle]
+  mesh := gpu.mutable_buffer_get(&render.mesh_data_buffer.buffer, handle)
   if mesh.index_count > 0 {
     gpu.free_vertices(
       &render.mesh_manager,
@@ -1629,14 +1566,11 @@ sync_mesh_geometry_for_handle :: proc(
     mesh.skinning_offset = skinning_allocation.offset
     mesh.flags |= {.SKINNED}
   }
-  render.meshes[handle] = mesh
-  upload_mesh_data(render, handle, &mesh)
   return .SUCCESS
 }
 
 free_mesh_geometry :: proc(render: ^Manager, handle: u32) {
-  mesh, ok := render.meshes[handle]
-  if !ok do return
+  mesh := gpu.mutable_buffer_get(&render.mesh_data_buffer.buffer, handle)
   if mesh.index_count > 0 {
     gpu.free_vertices(
       &render.mesh_manager,
@@ -1653,7 +1587,7 @@ free_mesh_geometry :: proc(render: ^Manager, handle: u32) {
       BufferAllocation{offset = mesh.skinning_offset, count = 1},
     )
   }
-  delete_key(&render.meshes, handle)
+  mesh^ = {}
 }
 
 set_texture_2d_descriptor :: proc(
