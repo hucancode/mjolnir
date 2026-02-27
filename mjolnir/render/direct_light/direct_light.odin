@@ -5,40 +5,69 @@ import "../../gpu"
 import d "../data"
 import "../shared"
 import "core:log"
+import "core:math/linalg"
 import vk "vendor:vulkan"
 
 LightType :: d.LightType
 
-SHADER_VERT := #load("../../shader/lighting/vert.spv")
-SHADER_FRAG := #load("../../shader/lighting/frag.spv")
+SHADER_POINT_VERT := #load("../../shader/lighting_point/vert.spv")
+SHADER_POINT_FRAG := #load("../../shader/lighting_point/frag.spv")
+SHADER_SPOT_VERT := #load("../../shader/lighting_spot/vert.spv")
+SHADER_SPOT_FRAG := #load("../../shader/lighting_spot/frag.spv")
+SHADER_DIRECTIONAL_VERT := #load("../../shader/lighting_directional/vert.spv")
+SHADER_DIRECTIONAL_FRAG := #load("../../shader/lighting_directional/frag.spv")
 
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
-DirectLightPushConstants :: struct {
-  light_color:  [4]f32, // 16 bytes - color.rgb + intensity (all types)
-  position:     [3]f32, // 12 bytes - world position (point/spot only)
-  radius:       f32,    // 4 bytes - light range (point/spot only)
-  direction:    [3]f32, // 12 bytes - direction vector (spot/directional only)
-  angle_inner:  f32,    // 4 bytes - inner cone angle (spot only)
-  angle_outer:     f32, // 4 bytes - outer cone angle (spot only)
-  light_type:      u32, // 4 bytes - 0=Point, 1=Directional, 2=Spot
-  shadow_map_idx:  u32, // 4 bytes - shadow texture index, 0xFFFFFFFF = no shadow
-  scene_camera_idx: u32, // 4 bytes
+PointLightPushConstants :: struct {
   shadow_view_projection: matrix[4, 4]f32, // 64 bytes
-  position_texture_index: u32, // 4 bytes
-  normal_texture_index:   u32, // 4 bytes
-  albedo_texture_index:   u32, // 4 bytes
-  metallic_texture_index: u32, // 4 bytes
+  light_color:            [4]f32, // 16 bytes
+  position:               [3]f32, // 12 bytes
+  radius:                 f32,    // 4 bytes
+  shadow_map_idx:         u32,    // 4 bytes
+  scene_camera_idx:       u32,    // 4 bytes
+  position_texture_index: u32,
+  normal_texture_index:   u32,
+  albedo_texture_index:   u32,
+  metallic_texture_index: u32,
+}
+
+SpotLightPushConstants :: struct {
+  shadow_view_projection:       matrix[4, 4]f32, // 64 bytes
+  light_color:                  [4]f32,          // 16 bytes
+  position:                     [3]f32,          // 12 bytes
+  angle_inner:                  f32,             // 4 bytes
+  direction:                    [3]f32,          // 12 bytes
+  radius:                       f32,             // 4 bytes
+  angle_outer:                  f32,             // 4 bytes
+  shadow_and_camera_indices:    u32,             // 4 bytes (shadow_map_idx | scene_camera_idx << 16)
+  position_and_normal_indices:  u32,             // 4 bytes (position_texture_index | normal_texture_index << 16)
+  albedo_and_metallic_indices:  u32,             // 4 bytes (albedo_texture_index | metallic_texture_index << 16)
+}
+// Total: 128 bytes (optimized from 136 bytes)
+
+DirectionalLightPushConstants :: struct {
+  shadow_view_projection: matrix[4, 4]f32, // 64 bytes
+  light_color:            [4]f32, // 16 bytes
+  direction:              [3]f32, // 12 bytes
+  shadow_map_idx:         u32,    // 4 bytes
+  scene_camera_idx:       u32,    // 4 bytes
+  position_texture_index: u32,
+  normal_texture_index:   u32,
+  albedo_texture_index:   u32,
+  metallic_texture_index: u32,
 }
 
 Renderer :: struct {
-  pipeline:        vk.Pipeline,
-  pipeline_layout: vk.PipelineLayout,
-  sphere_mesh:     LightVolumeMesh,
-  cone_mesh:       LightVolumeMesh,
-  triangle_mesh:   LightVolumeMesh,
+  point_pipeline:       vk.Pipeline,
+  spot_pipeline:        vk.Pipeline,
+  directional_pipeline: vk.Pipeline,
+  pipeline_layout:      vk.PipelineLayout,
+  sphere_mesh:          LightVolumeMesh,
+  cone_mesh:            LightVolumeMesh,
+  triangle_mesh:        LightVolumeMesh,
 }
 
 LightVolumeMesh :: struct {
@@ -101,11 +130,13 @@ init :: proc(
   ret: vk.Result,
 ) {
   log.debug("Direct lighting renderer init")
+  // Push constant size must fit largest variant (SpotLightPushConstants = 128 bytes)
+  log.debugf("SpotLightPushConstants size: %d bytes", size_of(SpotLightPushConstants))
   self.pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
       stageFlags = {.VERTEX, .FRAGMENT},
-      size = size_of(DirectLightPushConstants),
+      size = size_of(SpotLightPushConstants),
     },
     camera_set_layout,
     textures_set_layout,
@@ -113,10 +144,7 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   }
-  vert_module := gpu.create_shader_module(gctx.device, SHADER_VERT) or_return
-  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_module := gpu.create_shader_module(gctx.device, SHADER_FRAG) or_return
-  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
+
   dynamic_states := [?]vk.DynamicState {
     .VIEWPORT,
     .SCISSOR,
@@ -128,43 +156,89 @@ init :: proc(
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
     pVertexBindingDescriptions      = &geometry.VERTEX_BINDING_DESCRIPTION[0],
-    vertexAttributeDescriptionCount = 1, // Only position needed for lighting
-    pVertexAttributeDescriptions    = raw_data(
-      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
-    ), // Position at location 0
+    vertexAttributeDescriptionCount = 1,
+    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]),
   }
-  shader_stages := gpu.create_vert_frag_stages(
-    vert_module,
-    frag_module,
-    &shared.SHADER_SPEC_CONSTANTS,
-  )
-  pipeline_info := vk.GraphicsPipelineCreateInfo {
-    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &gpu.STANDARD_RENDERING_INFO,
-    stageCount          = len(shader_stages),
-    pStages             = raw_data(shader_stages[:]),
-    pVertexInputState   = &vertex_input,
-    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-    pRasterizationState = &gpu.STANDARD_RASTERIZER,
-    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-    pColorBlendState    = &gpu.COLOR_BLENDING_OVERFLOW,
-    pDynamicState       = &dynamic_state,
-    pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
-    layout              = self.pipeline_layout,
+
+  // Create point light pipeline
+  {
+    vert_module := gpu.create_shader_module(gctx.device, SHADER_POINT_VERT) or_return
+    defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
+    frag_module := gpu.create_shader_module(gctx.device, SHADER_POINT_FRAG) or_return
+    defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
+    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
+    pipeline_info := vk.GraphicsPipelineCreateInfo {
+      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+      pNext               = &gpu.STANDARD_RENDERING_INFO,
+      stageCount          = len(shader_stages),
+      pStages             = raw_data(shader_stages[:]),
+      pVertexInputState   = &vertex_input,
+      pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
+      pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+      pRasterizationState = &gpu.STANDARD_RASTERIZER,
+      pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+      pColorBlendState    = &gpu.COLOR_BLENDING_OVERFLOW,
+      pDynamicState       = &dynamic_state,
+      pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
+      layout              = self.pipeline_layout,
+    }
+    vk.CreateGraphicsPipelines(gctx.device, 0, 1, &pipeline_info, nil, &self.point_pipeline) or_return
+    defer if ret != .SUCCESS do vk.DestroyPipeline(gctx.device, self.point_pipeline, nil)
   }
-  vk.CreateGraphicsPipelines(
-    gctx.device,
-    0,
-    1,
-    &pipeline_info,
-    nil,
-    &self.pipeline,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+
+  // Create spot light pipeline
+  {
+    vert_module := gpu.create_shader_module(gctx.device, SHADER_SPOT_VERT) or_return
+    defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
+    frag_module := gpu.create_shader_module(gctx.device, SHADER_SPOT_FRAG) or_return
+    defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
+    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
+    pipeline_info := vk.GraphicsPipelineCreateInfo {
+      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+      pNext               = &gpu.STANDARD_RENDERING_INFO,
+      stageCount          = len(shader_stages),
+      pStages             = raw_data(shader_stages[:]),
+      pVertexInputState   = &vertex_input,
+      pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
+      pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+      pRasterizationState = &gpu.STANDARD_RASTERIZER,
+      pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+      pColorBlendState    = &gpu.COLOR_BLENDING_OVERFLOW,
+      pDynamicState       = &dynamic_state,
+      pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
+      layout              = self.pipeline_layout,
+    }
+    vk.CreateGraphicsPipelines(gctx.device, 0, 1, &pipeline_info, nil, &self.spot_pipeline) or_return
+    defer if ret != .SUCCESS do vk.DestroyPipeline(gctx.device, self.spot_pipeline, nil)
   }
-  log.info("Direct lighting pipeline initialized successfully")
+
+  // Create directional light pipeline
+  {
+    vert_module := gpu.create_shader_module(gctx.device, SHADER_DIRECTIONAL_VERT) or_return
+    defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
+    frag_module := gpu.create_shader_module(gctx.device, SHADER_DIRECTIONAL_FRAG) or_return
+    defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
+    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
+    pipeline_info := vk.GraphicsPipelineCreateInfo {
+      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+      pNext               = &gpu.STANDARD_RENDERING_INFO,
+      stageCount          = len(shader_stages),
+      pStages             = raw_data(shader_stages[:]),
+      pVertexInputState   = &vertex_input,
+      pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
+      pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
+      pRasterizationState = &gpu.STANDARD_RASTERIZER,
+      pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
+      pColorBlendState    = &gpu.COLOR_BLENDING_OVERFLOW,
+      pDynamicState       = &dynamic_state,
+      pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
+      layout              = self.pipeline_layout,
+    }
+    vk.CreateGraphicsPipelines(gctx.device, 0, 1, &pipeline_info, nil, &self.directional_pipeline) or_return
+    defer if ret != .SUCCESS do vk.DestroyPipeline(gctx.device, self.directional_pipeline, nil)
+  }
+
+  log.info("Direct lighting pipelines initialized successfully (point, spot, directional)")
   return .SUCCESS
 }
 
@@ -205,7 +279,9 @@ teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-  vk.DestroyPipeline(gctx.device, self.pipeline, nil)
+  vk.DestroyPipeline(gctx.device, self.point_pipeline, nil)
+  vk.DestroyPipeline(gctx.device, self.spot_pipeline, nil)
+  vk.DestroyPipeline(gctx.device, self.directional_pipeline, nil)
 }
 
 begin_pass :: proc(
@@ -231,12 +307,18 @@ begin_pass :: proc(
     gpu.create_color_attachment(final_image, .LOAD, .STORE, BG_BLUE_GRAY),
   )
   gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)
-  gpu.bind_graphics_pipeline(
+  // Bind descriptor sets (shared across all light types)
+  // Pipeline binding happens per-light in render_*_light() functions
+  descriptor_sets := [?]vk.DescriptorSet{cameras_descriptor_set, texture_manager.descriptor_set}
+  vk.CmdBindDescriptorSets(
     command_buffer,
-    self.pipeline,
+    .GRAPHICS,
     self.pipeline_layout,
-    cameras_descriptor_set, // set = 0 (per-frame cameras)
-    texture_manager.descriptor_set, // set = 1 (textures/samplers)
+    0,
+    2,
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
   )
 }
 
@@ -259,17 +341,20 @@ draw_light_volume_mesh :: proc(
 push_and_draw :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  push: ^DirectLightPushConstants,
+  pipeline: vk.Pipeline,
+  push: rawptr,
+  push_size: int,
   mesh: ^LightVolumeMesh,
   depth_compare_op: vk.CompareOp,
   cull_mode: vk.CullModeFlags,
 ) {
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
   vk.CmdPushConstants(
     command_buffer,
     self.pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
-    size_of(push^),
+    u32(push_size),
     push,
   )
   vk.CmdSetDepthCompareOp(command_buffer, depth_compare_op)
@@ -291,7 +376,7 @@ render_point_light :: proc(
   shadow_view_projection: matrix[4, 4]f32,
   command_buffer: vk.CommandBuffer,
 ) {
-  push := DirectLightPushConstants{
+  push := PointLightPushConstants{
     scene_camera_idx       = camera_handle,
     position_texture_index = position_texture_idx,
     normal_texture_index   = normal_texture_idx,
@@ -301,7 +386,6 @@ render_point_light :: proc(
     light_color            = light_color,
     position               = position,
     radius                 = radius,
-    light_type             = u32(LightType.POINT),
   }
   if shadow_map_idx != 0xFFFFFFFF {
     push.shadow_view_projection = shadow_view_projection
@@ -309,7 +393,9 @@ render_point_light :: proc(
   push_and_draw(
     self,
     command_buffer,
+    self.point_pipeline,
     &push,
+    size_of(push),
     &self.sphere_mesh,
     .GREATER_OR_EQUAL,
     {.FRONT},
@@ -333,20 +419,21 @@ render_spot_light :: proc(
   shadow_view_projection: matrix[4, 4]f32,
   command_buffer: vk.CommandBuffer,
 ) {
-  push := DirectLightPushConstants{
-    scene_camera_idx       = camera_handle,
-    position_texture_index = position_texture_idx,
-    normal_texture_index   = normal_texture_idx,
-    albedo_texture_index   = albedo_texture_idx,
-    metallic_texture_index = metallic_texture_idx,
-    shadow_map_idx         = shadow_map_idx,
-    light_color            = light_color,
-    position               = position,
-    direction              = direction,
-    radius                 = radius,
-    angle_inner            = angle_inner,
-    angle_outer            = angle_outer,
-    light_type             = u32(LightType.SPOT),
+  // Pack indices: 2 indices per u32 (16-bit each)
+  shadow_and_camera := (shadow_map_idx & 0xFFFF) | ((camera_handle & 0xFFFF) << 16)
+  position_and_normal := (position_texture_idx & 0xFFFF) | ((normal_texture_idx & 0xFFFF) << 16)
+  albedo_and_metallic := (albedo_texture_idx & 0xFFFF) | ((metallic_texture_idx & 0xFFFF) << 16)
+
+  push := SpotLightPushConstants{
+    light_color                  = light_color,
+    position                     = position,
+    direction                    = linalg.normalize(direction),
+    radius                       = radius,
+    angle_inner                  = angle_inner,
+    angle_outer                  = angle_outer,
+    shadow_and_camera_indices    = shadow_and_camera,
+    position_and_normal_indices  = position_and_normal,
+    albedo_and_metallic_indices  = albedo_and_metallic,
   }
   if shadow_map_idx != 0xFFFFFFFF {
     push.shadow_view_projection = shadow_view_projection
@@ -354,7 +441,9 @@ render_spot_light :: proc(
   push_and_draw(
     self,
     command_buffer,
+    self.spot_pipeline,
     &push,
+    size_of(push),
     &self.cone_mesh,
     .GREATER_OR_EQUAL,
     {.BACK},
@@ -374,7 +463,7 @@ render_directional_light :: proc(
   shadow_view_projection: matrix[4, 4]f32,
   command_buffer: vk.CommandBuffer,
 ) {
-  push := DirectLightPushConstants{
+  push := DirectionalLightPushConstants{
     scene_camera_idx       = camera_handle,
     position_texture_index = position_texture_idx,
     normal_texture_index   = normal_texture_idx,
@@ -383,7 +472,6 @@ render_directional_light :: proc(
     shadow_map_idx         = shadow_map_idx,
     light_color            = light_color,
     direction              = direction,
-    light_type             = u32(LightType.DIRECTIONAL),
   }
   if shadow_map_idx != 0xFFFFFFFF {
     push.shadow_view_projection = shadow_view_projection
@@ -391,7 +479,9 @@ render_directional_light :: proc(
   push_and_draw(
     self,
     command_buffer,
+    self.directional_pipeline,
     &push,
+    size_of(push),
     &self.triangle_mesh,
     .ALWAYS,
     {.BACK},

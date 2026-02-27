@@ -9,9 +9,6 @@ layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
 layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
 layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
 layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
-layout(constant_id = 6) const uint POINT_LIGHT = 0u;
-layout(constant_id = 7) const uint DIRECTIONAL_LIGHT = 1u;
-layout(constant_id = 8) const uint SPOT_LIGHT = 2u;
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 outColor;

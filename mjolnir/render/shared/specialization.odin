@@ -30,9 +30,6 @@ SHADER_SPEC_DATA := Constants {
   sampler_linear_clamp   = u32(SamplerType.LINEAR_CLAMP),
   sampler_nearest_repeat = u32(SamplerType.NEAREST_REPEAT),
   sampler_linear_repeat  = u32(SamplerType.LINEAR_REPEAT),
-  light_kind_point       = u32(d.LightType.POINT),
-  light_kind_directional = u32(d.LightType.DIRECTIONAL),
-  light_kind_spot        = u32(d.LightType.SPOT),
 }
 
 SHADER_SPEC_ENTRIES := [?]vk.SpecializationMapEntry {
@@ -64,21 +61,6 @@ SHADER_SPEC_ENTRIES := [?]vk.SpecializationMapEntry {
   {
     constantID = 5,
     offset = u32(offset_of(Constants, sampler_linear_repeat)),
-    size = size_of(u32),
-  },
-  {
-    constantID = 6,
-    offset = u32(offset_of(Constants, light_kind_point)),
-    size = size_of(u32),
-  },
-  {
-    constantID = 7,
-    offset = u32(offset_of(Constants, light_kind_directional)),
-    size = size_of(u32),
-  },
-  {
-    constantID = 8,
-    offset = u32(offset_of(Constants, light_kind_spot)),
     size = size_of(u32),
   },
 }
