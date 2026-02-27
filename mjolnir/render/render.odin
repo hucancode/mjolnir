@@ -1119,14 +1119,10 @@ record_lighting_pass :: proc(
     case PointLight:
       shadow_map_idx: u32 = 0xFFFFFFFF
       shadow_view_projection := matrix[4, 4]f32{}
-      shadow_near: f32 = 0
-      shadow_far: f32 = 0
       if variant.shadow != nil {
         sm := variant.shadow.?
         shadow_map_idx = sm.shadow_map_cube[frame_index].index
         shadow_view_projection = sm.projection
-        shadow_near = sm.near
-        shadow_far = sm.far
       }
       direct_light.render_point_light(
         &self.direct_light,
@@ -1135,28 +1131,20 @@ record_lighting_pass :: proc(
         cam.attachments[.NORMAL][frame_index].index,
         cam.attachments[.ALBEDO][frame_index].index,
         cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-        cam.attachments[.EMISSIVE][frame_index].index,
-        cam.attachments[.FINAL_IMAGE][frame_index].index,
         variant.color,
         variant.position,
         variant.radius,
         shadow_map_idx,
         shadow_view_projection,
-        shadow_near,
-        shadow_far,
         cmd,
       )
     case SpotLight:
       shadow_map_idx: u32 = 0xFFFFFFFF
       shadow_view_projection := matrix[4, 4]f32{}
-      shadow_near: f32 = 0
-      shadow_far: f32 = 0
       if variant.shadow != nil {
         sm := variant.shadow.?
         shadow_map_idx = sm.shadow_map_2d[frame_index].index
         shadow_view_projection = sm.view_projection
-        shadow_near = sm.near
-        shadow_far = sm.far
       }
       direct_light.render_spot_light(
         &self.direct_light,
@@ -1165,8 +1153,6 @@ record_lighting_pass :: proc(
         cam.attachments[.NORMAL][frame_index].index,
         cam.attachments[.ALBEDO][frame_index].index,
         cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-        cam.attachments[.EMISSIVE][frame_index].index,
-        cam.attachments[.FINAL_IMAGE][frame_index].index,
         variant.color,
         variant.position,
         variant.direction,
@@ -1175,21 +1161,15 @@ record_lighting_pass :: proc(
         variant.angle_outer,
         shadow_map_idx,
         shadow_view_projection,
-        shadow_near,
-        shadow_far,
         cmd,
       )
     case DirectionalLight:
       shadow_map_idx: u32 = 0xFFFFFFFF
       shadow_view_projection := matrix[4, 4]f32{}
-      shadow_near: f32 = 0
-      shadow_far: f32 = 0
       if variant.shadow != nil {
         sm := variant.shadow.?
         shadow_map_idx = sm.shadow_map_2d[frame_index].index
         shadow_view_projection = sm.view_projection
-        shadow_near = sm.near
-        shadow_far = sm.far
       }
       direct_light.render_directional_light(
         &self.direct_light,
@@ -1198,14 +1178,10 @@ record_lighting_pass :: proc(
         cam.attachments[.NORMAL][frame_index].index,
         cam.attachments[.ALBEDO][frame_index].index,
         cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-        cam.attachments[.EMISSIVE][frame_index].index,
-        cam.attachments[.FINAL_IMAGE][frame_index].index,
         variant.color,
         variant.direction,
         shadow_map_idx,
         shadow_view_projection,
-        shadow_near,
-        shadow_far,
         cmd,
       )
     }

@@ -4,14 +4,13 @@ const float PI = 3.14159265359;
 
 layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
 layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
-layout(constant_id = 2) const uint MAX_SAMPLERS = 1u;
-layout(constant_id = 3) const uint SAMPLER_NEAREST_CLAMP = 0u;
-layout(constant_id = 4) const uint SAMPLER_LINEAR_CLAMP = 1u;
-layout(constant_id = 5) const uint SAMPLER_NEAREST_REPEAT = 2u;
-layout(constant_id = 6) const uint SAMPLER_LINEAR_REPEAT = 3u;
-layout(constant_id = 7) const uint POINT_LIGHT = 0u;
-layout(constant_id = 8) const uint DIRECTIONAL_LIGHT = 1u;
-layout(constant_id = 9) const uint SPOT_LIGHT = 2u;
+layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
+layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
+layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
+layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
+layout(constant_id = 6) const uint POINT_LIGHT = 0u;
+layout(constant_id = 7) const uint DIRECTIONAL_LIGHT = 1u;
+layout(constant_id = 8) const uint SPOT_LIGHT = 2u;
 
 layout(location = 0) in vec3 a_position; // Vertex position for light volume geometry
 
@@ -31,24 +30,20 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 } camera_buffer;
 
 layout(push_constant) uniform PushConstant {
-    vec4  light_color;       // 16 bytes
-    vec3  position;          // 12 bytes
-    float radius;            // 4 bytes
-    vec3  direction;         // 12 bytes
-    float angle_inner;       // 4 bytes
-    float angle_outer;       // 4 bytes
-    uint  light_type;        // 4 bytes
-    uint  shadow_map_idx;    // 4 bytes
-    uint  scene_camera_idx;  // 4 bytes
-    mat4  shadow_view_projection;  // 64 bytes
-    float shadow_near;             // 4 bytes
-    float shadow_far;              // 4 bytes
-    uint position_texture_index;
-    uint normal_texture_index;
-    uint albedo_texture_index;
-    uint metallic_texture_index;
-    uint emissive_texture_index;
-    uint input_image_index;
+    vec4  light_color;            // vec4
+    vec3  position;               // vec4
+    float radius;                 //
+    vec3  direction;              // vec4
+    float angle_inner;            //
+    float angle_outer;            // vec4
+    uint  light_type;             //
+    uint  shadow_map_idx;         //
+    uint  scene_camera_idx;       //
+    mat4  shadow_view_projection; // vec4x4
+    uint position_texture_index;  // vec4
+    uint normal_texture_index;    //
+    uint albedo_texture_index;    //
+    uint metallic_texture_index;  //
 };
 
 void main() {

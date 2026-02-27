@@ -27,14 +27,10 @@ DirectLightPushConstants :: struct {
   shadow_map_idx:  u32, // 4 bytes - shadow texture index, 0xFFFFFFFF = no shadow
   scene_camera_idx: u32, // 4 bytes
   shadow_view_projection: matrix[4, 4]f32, // 64 bytes
-  shadow_near:            f32,             // 4 bytes
-  shadow_far:             f32,             // 4 bytes
   position_texture_index: u32, // 4 bytes
   normal_texture_index:   u32, // 4 bytes
   albedo_texture_index:   u32, // 4 bytes
   metallic_texture_index: u32, // 4 bytes
-  emissive_texture_index: u32, // 4 bytes
-  input_image_index:      u32, // 4 bytes
 }
 
 Renderer :: struct {
@@ -288,15 +284,11 @@ render_point_light :: proc(
   normal_texture_idx: u32,
   albedo_texture_idx: u32,
   metallic_texture_idx: u32,
-  emissive_texture_idx: u32,
-  input_image_idx: u32,
   light_color: [4]f32,
   position: [3]f32,
   radius: f32,
   shadow_map_idx: u32,
   shadow_view_projection: matrix[4, 4]f32,
-  shadow_near: f32,
-  shadow_far: f32,
   command_buffer: vk.CommandBuffer,
 ) {
   push := DirectLightPushConstants{
@@ -305,8 +297,6 @@ render_point_light :: proc(
     normal_texture_index   = normal_texture_idx,
     albedo_texture_index   = albedo_texture_idx,
     metallic_texture_index = metallic_texture_idx,
-    emissive_texture_index = emissive_texture_idx,
-    input_image_index      = input_image_idx,
     shadow_map_idx         = shadow_map_idx,
     light_color            = light_color,
     position               = position,
@@ -315,8 +305,6 @@ render_point_light :: proc(
   }
   if shadow_map_idx != 0xFFFFFFFF {
     push.shadow_view_projection = shadow_view_projection
-    push.shadow_near = shadow_near
-    push.shadow_far = shadow_far
   }
   push_and_draw(
     self,
@@ -335,8 +323,6 @@ render_spot_light :: proc(
   normal_texture_idx: u32,
   albedo_texture_idx: u32,
   metallic_texture_idx: u32,
-  emissive_texture_idx: u32,
-  input_image_idx: u32,
   light_color: [4]f32,
   position: [3]f32,
   direction: [3]f32,
@@ -345,8 +331,6 @@ render_spot_light :: proc(
   angle_outer: f32,
   shadow_map_idx: u32,
   shadow_view_projection: matrix[4, 4]f32,
-  shadow_near: f32,
-  shadow_far: f32,
   command_buffer: vk.CommandBuffer,
 ) {
   push := DirectLightPushConstants{
@@ -355,8 +339,6 @@ render_spot_light :: proc(
     normal_texture_index   = normal_texture_idx,
     albedo_texture_index   = albedo_texture_idx,
     metallic_texture_index = metallic_texture_idx,
-    emissive_texture_index = emissive_texture_idx,
-    input_image_index      = input_image_idx,
     shadow_map_idx         = shadow_map_idx,
     light_color            = light_color,
     position               = position,
@@ -368,8 +350,6 @@ render_spot_light :: proc(
   }
   if shadow_map_idx != 0xFFFFFFFF {
     push.shadow_view_projection = shadow_view_projection
-    push.shadow_near = shadow_near
-    push.shadow_far = shadow_far
   }
   push_and_draw(
     self,
@@ -388,14 +368,10 @@ render_directional_light :: proc(
   normal_texture_idx: u32,
   albedo_texture_idx: u32,
   metallic_texture_idx: u32,
-  emissive_texture_idx: u32,
-  input_image_idx: u32,
   light_color: [4]f32,
   direction: [3]f32,
   shadow_map_idx: u32,
   shadow_view_projection: matrix[4, 4]f32,
-  shadow_near: f32,
-  shadow_far: f32,
   command_buffer: vk.CommandBuffer,
 ) {
   push := DirectLightPushConstants{
@@ -404,8 +380,6 @@ render_directional_light :: proc(
     normal_texture_index   = normal_texture_idx,
     albedo_texture_index   = albedo_texture_idx,
     metallic_texture_index = metallic_texture_idx,
-    emissive_texture_index = emissive_texture_idx,
-    input_image_index      = input_image_idx,
     shadow_map_idx         = shadow_map_idx,
     light_color            = light_color,
     direction              = direction,
@@ -413,8 +387,6 @@ render_directional_light :: proc(
   }
   if shadow_map_idx != 0xFFFFFFFF {
     push.shadow_view_projection = shadow_view_projection
-    push.shadow_near = shadow_near
-    push.shadow_far = shadow_far
   }
   push_and_draw(
     self,

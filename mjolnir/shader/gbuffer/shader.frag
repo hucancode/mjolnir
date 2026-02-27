@@ -3,14 +3,13 @@
 
 layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
 layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
-layout(constant_id = 2) const uint MAX_SAMPLERS = 1u;
-layout(constant_id = 3) const uint SAMPLER_NEAREST_CLAMP = 0u;
-layout(constant_id = 4) const uint SAMPLER_LINEAR_CLAMP = 1u;
-layout(constant_id = 5) const uint SAMPLER_NEAREST_REPEAT = 2u;
-layout(constant_id = 6) const uint SAMPLER_LINEAR_REPEAT = 3u;
-layout(constant_id = 7) const uint POINT_LIGHT = 0u;
-layout(constant_id = 8) const uint DIRECTIONAL_LIGHT = 1u;
-layout(constant_id = 9) const uint SPOT_LIGHT = 2u;
+layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
+layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
+layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
+layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
+layout(constant_id = 6) const uint POINT_LIGHT = 0u;
+layout(constant_id = 7) const uint DIRECTIONAL_LIGHT = 1u;
+layout(constant_id = 8) const uint SPOT_LIGHT = 2u;
 
 const uint FEATURE_ALBEDO_TEXTURE = 1u << 0;
 const uint FEATURE_METALLIC_ROUGHNESS_TEXTURE = 1u << 1;

@@ -5,14 +5,13 @@ const float PI = 3.14159265359;
 
 layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
 layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
-layout(constant_id = 2) const uint MAX_SAMPLERS = 1u;
-layout(constant_id = 3) const uint SAMPLER_NEAREST_CLAMP = 0u;
-layout(constant_id = 4) const uint SAMPLER_LINEAR_CLAMP = 1u;
-layout(constant_id = 5) const uint SAMPLER_NEAREST_REPEAT = 2u;
-layout(constant_id = 6) const uint SAMPLER_LINEAR_REPEAT = 3u;
-layout(constant_id = 7) const uint POINT_LIGHT = 0u;
-layout(constant_id = 8) const uint DIRECTIONAL_LIGHT = 1u;
-layout(constant_id = 9) const uint SPOT_LIGHT = 2u;
+layout(constant_id = 2) const uint SAMPLER_NEAREST_CLAMP = 0u;
+layout(constant_id = 3) const uint SAMPLER_LINEAR_CLAMP = 1u;
+layout(constant_id = 4) const uint SAMPLER_NEAREST_REPEAT = 2u;
+layout(constant_id = 5) const uint SAMPLER_LINEAR_REPEAT = 3u;
+layout(constant_id = 6) const uint POINT_LIGHT = 0u;
+layout(constant_id = 7) const uint DIRECTIONAL_LIGHT = 1u;
+layout(constant_id = 8) const uint SPOT_LIGHT = 2u;
 
 layout(location = 0) out vec4 outColor;
 
@@ -35,24 +34,20 @@ layout(set = 1, binding = 1) uniform sampler samplers[];
 layout(set = 1, binding = 2) uniform textureCube cube_textures[];
 
 layout(push_constant) uniform PushConstant {
-    vec4  light_color;       // 16 bytes - color.rgb + intensity (all types)
-    vec3  position;          // 12 bytes - world position (point/spot only)
-    float radius;            // 4 bytes - light range (point/spot only)
-    vec3  direction;         // 12 bytes - direction vector (spot/directional only)
-    float angle_inner;       // 4 bytes - inner cone angle (spot only)
-    float angle_outer;       // 4 bytes - outer cone angle (spot only)
-    uint  light_type;        // 4 bytes - 0=Point, 1=Directional, 2=Spot
-    uint  shadow_map_idx;    // 4 bytes - shadow texture index, 0xFFFFFFFF = no shadow
-    uint  scene_camera_idx;  // 4 bytes
-    mat4  shadow_view_projection;  // 64 bytes
-    float shadow_near;             // 4 bytes
-    float shadow_far;              // 4 bytes
-    uint position_texture_index;  // 4 bytes
-    uint normal_texture_index;    // 4 bytes
-    uint albedo_texture_index;    // 4 bytes
-    uint metallic_texture_index;  // 4 bytes
-    uint emissive_texture_index;  // 4 bytes
-    uint input_image_index;       // 4 bytes
+    vec4  light_color;            // vec4
+    vec3  position;               // vec4
+    float radius;                 //
+    vec3  direction;              // vec4
+    float angle_inner;            //
+    float angle_outer;            // vec4
+    uint  light_type;             //
+    uint  shadow_map_idx;         //
+    uint  scene_camera_idx;       //
+    mat4  shadow_view_projection; // vec4x4
+    uint position_texture_index;  // vec4
+    uint normal_texture_index;    //
+    uint albedo_texture_index;    //
+    uint metallic_texture_index;  //
 };
 
 // Helper to check if light casts shadow
@@ -110,7 +105,7 @@ float calculateShadow(vec3 fragPos, vec3 n) {
         float shadowDepth = texture(samplerCube(cube_textures[shadow_map_idx], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
         // return shadowDepth;
         // Linear depth mapping: [near, far] -> [0, 1]
-        float currentDepth = (linearDepth - shadow_near) / (shadow_far - shadow_near);
+        float currentDepth = (linearDepth - 0.1) / (radius - 0.1);
         currentDepth = clamp(currentDepth, 0.0, 1.0);
         float cosTheta = clamp(dot(n, -lightToFrag), 0.0, 1.0);
         float bias = 0.0005 * tan(acos(cosTheta));
