@@ -504,7 +504,7 @@ init :: proc(
     gctx,
     self.camera_buffer.set_layout,
   ) or_return
-  ui_render.init_renderer(
+  ui_render.init(
     &self.ui,
     gctx,
     self.texture_manager.set_layout,
@@ -766,11 +766,11 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   particles_compute.shutdown(&self.particles_compute, gctx)
   particles_render.shutdown(&self.particles_render, gctx)
   // Cleanup transparency renderers
-  transparent.destroy(&self.transparent_renderer, gctx)
-  sprite.destroy(&self.sprite_renderer, gctx)
-  wireframe.destroy(&self.wireframe_renderer, gctx)
-  line_strip.destroy(&self.line_strip_renderer, gctx)
-  random_color.destroy(&self.random_color_renderer, gctx)
+  transparent.shutdown(&self.transparent_renderer, gctx)
+  sprite.shutdown(&self.sprite_renderer, gctx)
+  wireframe.shutdown(&self.wireframe_renderer, gctx)
+  line_strip.shutdown(&self.line_strip_renderer, gctx)
+  random_color.shutdown(&self.random_color_renderer, gctx)
   ambient.shutdown(&self.ambient, gctx)
   direct_light.shutdown(&self.direct_light, gctx)
   shadow_sphere_render_system.shutdown(&self.shadow_sphere_render, gctx)

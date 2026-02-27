@@ -97,7 +97,7 @@ init :: proc(
   return .SUCCESS
 }
 
-destroy :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)

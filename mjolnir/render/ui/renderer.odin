@@ -37,7 +37,7 @@ CommandSortKey :: struct {
   cmd_index:  int,
 }
 
-init_renderer :: proc(
+init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   textures_set_layout: vk.DescriptorSetLayout,
