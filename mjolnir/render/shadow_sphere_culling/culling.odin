@@ -7,12 +7,14 @@ import vk "vendor:vulkan"
 SHADER_SPHERE_CULLING :: #load("../../shader/shadow_spherical/cull.spv")
 
 SphereCullPushConstants :: struct {
-  shadow_index:  u32,
-  node_count:    u32,
-  max_draws:     u32,
-  include_flags: d.NodeFlagSet,
-  exclude_flags: d.NodeFlagSet,
+  light_position: [3]f32,        // 12 bytes (vec3 in std140 = 12 bytes, followed by...)
+  sphere_radius:  f32,           // 4 bytes - shadow far distance
+  node_count:     u32,           // 4 bytes
+  max_draws:      u32,           // 4 bytes
+  include_flags:  d.NodeFlagSet, // 4 bytes
+  exclude_flags:  d.NodeFlagSet, // 4 bytes
 }
+// Total: 32 bytes (vec3+float+4xuint = naturally packed in std430)
 
 System :: struct {
   node_count:        u32,
@@ -26,11 +28,10 @@ init :: proc(self: ^System, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   self.max_draws = d.MAX_NODES_IN_SCENE
   self.descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE}},  // nodes
+    {.STORAGE_BUFFER, {.COMPUTE}},  // meshes
+    {.STORAGE_BUFFER, {.COMPUTE}},  // draw_count
+    {.STORAGE_BUFFER, {.COMPUTE}},  // draw_commands
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(gctx.device, self.descriptor_layout, nil)
@@ -74,7 +75,8 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
 execute :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
-  shadow_index: u32,
+  light_position: [3]f32,
+  sphere_radius: f32,
   shadow_draw_count_buffer: vk.Buffer,
   shadow_draw_count_ds: vk.DescriptorSet,
 ) {
@@ -109,11 +111,12 @@ execute :: proc(
     shadow_draw_count_ds,
   )
   push := SphereCullPushConstants {
-    shadow_index  = shadow_index,
-    node_count    = self.node_count,
-    max_draws     = self.max_draws,
-    include_flags = include_flags,
-    exclude_flags = exclude_flags,
+    light_position = light_position,
+    sphere_radius  = sphere_radius,
+    node_count     = self.node_count,
+    max_draws      = self.max_draws,
+    include_flags  = include_flags,
+    exclude_flags  = exclude_flags,
   }
   vk.CmdPushConstants(
     command_buffer,

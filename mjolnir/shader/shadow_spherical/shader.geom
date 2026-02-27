@@ -9,22 +9,11 @@ layout(location = 1) in uint instanceIndex[];
 
 layout(location = 0) out vec3 fragWorldPos;
 
-struct ShadowData {
-    mat4 view;
-    mat4 projection;
-    vec3 position;
-    float near;
-    vec3 direction;
-    float far;
-    vec4 frustum_planes[6];
-};
-
-layout(set = 0, binding = 0) readonly buffer ShadowBuffer {
-    ShadowData shadows[];
-};
-
 layout(push_constant) uniform PushConstants {
-    uint shadow_index;
+    mat4  projection;      // 64 bytes
+    vec3  light_position;  // 12 bytes (aligned to 16)
+    float near_plane;      // 4 bytes
+    float far_plane;       // 4 bytes
 };
 
 mat4 makeView(vec3 pos, vec3 forward, vec3 up) {
@@ -45,8 +34,7 @@ mat4 makeView(vec3 pos, vec3 forward, vec3 up) {
 }
 
 void main() {
-    ShadowData shadow = shadows[shadow_index];
-    vec3 center = shadow.position;
+    vec3 center = light_position;
 
     mat4 views[6];
     // (+X, -X, +Y, -Y, +Z, -Z)
@@ -61,7 +49,7 @@ void main() {
         gl_Layer = face;
         for (int i = 0; i < 3; i++) {
             fragWorldPos = worldPos[i];
-            gl_Position = shadow.projection * views[face] * vec4(worldPos[i], 1.0);
+            gl_Position = projection * views[face] * vec4(worldPos[i], 1.0);
             EmitVertex();
         }
         EndPrimitive();

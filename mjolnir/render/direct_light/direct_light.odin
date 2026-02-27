@@ -7,6 +7,8 @@ import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
+LightType :: d.LightType
+
 SHADER_VERT := #load("../../shader/lighting/vert.spv")
 SHADER_FRAG := #load("../../shader/lighting/frag.spv")
 
@@ -14,16 +16,25 @@ BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
-PushConstant :: struct {
-  light_index:            u32,
-  scene_camera_idx:       u32,
-  position_texture_index: u32,
-  normal_texture_index:   u32,
-  albedo_texture_index:   u32,
-  metallic_texture_index: u32,
-  emissive_texture_index: u32,
-  input_image_index:      u32,
-  shadow_map_index:       u32,
+DirectLightPushConstants :: struct {
+  light_color:  [4]f32, // 16 bytes - color.rgb + intensity (all types)
+  position:     [3]f32, // 12 bytes - world position (point/spot only)
+  radius:       f32,    // 4 bytes - light range (point/spot only)
+  direction:    [3]f32, // 12 bytes - direction vector (spot/directional only)
+  angle_inner:  f32,    // 4 bytes - inner cone angle (spot only)
+  angle_outer:     f32, // 4 bytes - outer cone angle (spot only)
+  light_type:      u32, // 4 bytes - 0=Point, 1=Directional, 2=Spot
+  shadow_map_idx:  u32, // 4 bytes - shadow texture index, 0xFFFFFFFF = no shadow
+  scene_camera_idx: u32, // 4 bytes
+  shadow_view_projection: matrix[4, 4]f32, // 64 bytes
+  shadow_near:            f32,             // 4 bytes
+  shadow_far:             f32,             // 4 bytes
+  position_texture_index: u32, // 4 bytes
+  normal_texture_index:   u32, // 4 bytes
+  albedo_texture_index:   u32, // 4 bytes
+  metallic_texture_index: u32, // 4 bytes
+  emissive_texture_index: u32, // 4 bytes
+  input_image_index:      u32, // 4 bytes
 }
 
 Renderer :: struct {
@@ -89,8 +100,6 @@ init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   camera_set_layout: vk.DescriptorSetLayout,
-  lights_set_layout: vk.DescriptorSetLayout,
-  shadow_data_set_layout: vk.DescriptorSetLayout,
   textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
@@ -100,12 +109,10 @@ init :: proc(
     gctx,
     vk.PushConstantRange {
       stageFlags = {.VERTEX, .FRAGMENT},
-      size = size_of(PushConstant),
+      size = size_of(DirectLightPushConstants),
     },
     camera_set_layout,
     textures_set_layout,
-    lights_set_layout,
-    shadow_data_set_layout,
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
@@ -212,8 +219,6 @@ begin_pass :: proc(
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
   cameras_descriptor_set: vk.DescriptorSet,
-  lights_descriptor_set: vk.DescriptorSet,
-  shadow_data_descriptor_set: vk.DescriptorSet,
 ) {
   final_image := gpu.get_texture_2d(
     texture_manager,
@@ -236,12 +241,47 @@ begin_pass :: proc(
     self.pipeline_layout,
     cameras_descriptor_set, // set = 0 (per-frame cameras)
     texture_manager.descriptor_set, // set = 1 (textures/samplers)
-    lights_descriptor_set, // set = 2 (lights)
-    shadow_data_descriptor_set, // set = 3 (per-frame shadow data)
   )
 }
 
-render :: proc(
+@(private)
+draw_light_volume_mesh :: proc(
+  mesh: ^LightVolumeMesh,
+  command_buffer: vk.CommandBuffer,
+) {
+  gpu.bind_vertex_index_buffers(
+    command_buffer,
+    mesh.vertex_buffer.buffer,
+    mesh.index_buffer.buffer,
+    0,
+    0,
+  )
+  vk.CmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0)
+}
+
+@(private)
+push_and_draw :: proc(
+  self: ^Renderer,
+  command_buffer: vk.CommandBuffer,
+  push: ^DirectLightPushConstants,
+  mesh: ^LightVolumeMesh,
+  depth_compare_op: vk.CompareOp,
+  cull_mode: vk.CullModeFlags,
+) {
+  vk.CmdPushConstants(
+    command_buffer,
+    self.pipeline_layout,
+    {.VERTEX, .FRAGMENT},
+    0,
+    size_of(push^),
+    push,
+  )
+  vk.CmdSetDepthCompareOp(command_buffer, depth_compare_op)
+  vk.CmdSetCullMode(command_buffer, cull_mode)
+  draw_light_volume_mesh(mesh, command_buffer)
+}
+
+render_point_light :: proc(
   self: ^Renderer,
   camera_handle: u32,
   position_texture_idx: u32,
@@ -250,25 +290,16 @@ render :: proc(
   metallic_texture_idx: u32,
   emissive_texture_idx: u32,
   input_image_idx: u32,
-  shadow_texture_indices: ^[d.MAX_LIGHTS]u32,
+  light_color: [4]f32,
+  position: [3]f32,
+  radius: f32,
+  shadow_map_idx: u32,
+  shadow_view_projection: matrix[4, 4]f32,
+  shadow_near: f32,
+  shadow_far: f32,
   command_buffer: vk.CommandBuffer,
-  lights_buffer: ^gpu.BindlessBuffer(d.Light),
-  active_lights: []u32,
 ) {
-  bind_and_draw_mesh :: proc(
-    mesh: ^LightVolumeMesh,
-    command_buffer: vk.CommandBuffer,
-  ) {
-    gpu.bind_vertex_index_buffers(
-      command_buffer,
-      mesh.vertex_buffer.buffer,
-      mesh.index_buffer.buffer,
-      0,
-      0,
-    )
-    vk.CmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0)
-  }
-  push_constant := PushConstant {
+  push := DirectLightPushConstants{
     scene_camera_idx       = camera_handle,
     position_texture_index = position_texture_idx,
     normal_texture_index   = normal_texture_idx,
@@ -276,35 +307,123 @@ render :: proc(
     metallic_texture_index = metallic_texture_idx,
     emissive_texture_index = emissive_texture_idx,
     input_image_index      = input_image_idx,
+    shadow_map_idx         = shadow_map_idx,
+    light_color            = light_color,
+    position               = position,
+    radius                 = radius,
+    light_type             = u32(LightType.POINT),
   }
-  for light_index in active_lights {
-    light := gpu.get(&lights_buffer.buffer, light_index)
-    shadow_map_index := shadow_texture_indices[light_index]
-    push_constant.light_index = light_index
-    push_constant.shadow_map_index = shadow_map_index
-    vk.CmdPushConstants(
-      command_buffer,
-      self.pipeline_layout,
-      {.VERTEX, .FRAGMENT},
-      0,
-      size_of(push_constant),
-      &push_constant,
-    )
-    switch light.type {
-    case .POINT:
-      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
-      vk.CmdSetCullMode(command_buffer, {.FRONT})
-      bind_and_draw_mesh(&self.sphere_mesh, command_buffer)
-    case .DIRECTIONAL:
-      vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
-      vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(&self.triangle_mesh, command_buffer)
-    case .SPOT:
-      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
-      vk.CmdSetCullMode(command_buffer, {.BACK})
-      bind_and_draw_mesh(&self.cone_mesh, command_buffer)
-    }
+  if shadow_map_idx != 0xFFFFFFFF {
+    push.shadow_view_projection = shadow_view_projection
+    push.shadow_near = shadow_near
+    push.shadow_far = shadow_far
   }
+  push_and_draw(
+    self,
+    command_buffer,
+    &push,
+    &self.sphere_mesh,
+    .GREATER_OR_EQUAL,
+    {.FRONT},
+  )
+}
+
+render_spot_light :: proc(
+  self: ^Renderer,
+  camera_handle: u32,
+  position_texture_idx: u32,
+  normal_texture_idx: u32,
+  albedo_texture_idx: u32,
+  metallic_texture_idx: u32,
+  emissive_texture_idx: u32,
+  input_image_idx: u32,
+  light_color: [4]f32,
+  position: [3]f32,
+  direction: [3]f32,
+  radius: f32,
+  angle_inner: f32,
+  angle_outer: f32,
+  shadow_map_idx: u32,
+  shadow_view_projection: matrix[4, 4]f32,
+  shadow_near: f32,
+  shadow_far: f32,
+  command_buffer: vk.CommandBuffer,
+) {
+  push := DirectLightPushConstants{
+    scene_camera_idx       = camera_handle,
+    position_texture_index = position_texture_idx,
+    normal_texture_index   = normal_texture_idx,
+    albedo_texture_index   = albedo_texture_idx,
+    metallic_texture_index = metallic_texture_idx,
+    emissive_texture_index = emissive_texture_idx,
+    input_image_index      = input_image_idx,
+    shadow_map_idx         = shadow_map_idx,
+    light_color            = light_color,
+    position               = position,
+    direction              = direction,
+    radius                 = radius,
+    angle_inner            = angle_inner,
+    angle_outer            = angle_outer,
+    light_type             = u32(LightType.SPOT),
+  }
+  if shadow_map_idx != 0xFFFFFFFF {
+    push.shadow_view_projection = shadow_view_projection
+    push.shadow_near = shadow_near
+    push.shadow_far = shadow_far
+  }
+  push_and_draw(
+    self,
+    command_buffer,
+    &push,
+    &self.cone_mesh,
+    .GREATER_OR_EQUAL,
+    {.BACK},
+  )
+}
+
+render_directional_light :: proc(
+  self: ^Renderer,
+  camera_handle: u32,
+  position_texture_idx: u32,
+  normal_texture_idx: u32,
+  albedo_texture_idx: u32,
+  metallic_texture_idx: u32,
+  emissive_texture_idx: u32,
+  input_image_idx: u32,
+  light_color: [4]f32,
+  direction: [3]f32,
+  shadow_map_idx: u32,
+  shadow_view_projection: matrix[4, 4]f32,
+  shadow_near: f32,
+  shadow_far: f32,
+  command_buffer: vk.CommandBuffer,
+) {
+  push := DirectLightPushConstants{
+    scene_camera_idx       = camera_handle,
+    position_texture_index = position_texture_idx,
+    normal_texture_index   = normal_texture_idx,
+    albedo_texture_index   = albedo_texture_idx,
+    metallic_texture_index = metallic_texture_idx,
+    emissive_texture_index = emissive_texture_idx,
+    input_image_index      = input_image_idx,
+    shadow_map_idx         = shadow_map_idx,
+    light_color            = light_color,
+    direction              = direction,
+    light_type             = u32(LightType.DIRECTIONAL),
+  }
+  if shadow_map_idx != 0xFFFFFFFF {
+    push.shadow_view_projection = shadow_view_projection
+    push.shadow_near = shadow_near
+    push.shadow_far = shadow_far
+  }
+  push_and_draw(
+    self,
+    command_buffer,
+    &push,
+    &self.triangle_mesh,
+    .ALWAYS,
+    {.BACK},
+  )
 }
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {

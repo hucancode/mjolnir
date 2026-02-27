@@ -9,16 +9,6 @@ const uint NODE_FLAG_VISIBLE = 1u << 0;
 const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
 const uint INVALID_ID = 0xFFFFFFFFu;
 
-struct ShadowData {
-    mat4 view;
-    mat4 projection;
-    vec3 position;
-    float near;
-    vec3 direction;
-    float far;
-    vec4 frustum_planes[6];
-};
-
 struct NodeData {
     mat4 world_matrix;
     uint material_id;
@@ -47,11 +37,12 @@ struct DrawCommand {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint shadow_index;
-    uint node_count;
-    uint max_draws;
-    uint include_flags;
-    uint exclude_flags;
+    vec3  light_position;  // 12 bytes - sphere center
+    float sphere_radius;   // 4 bytes - shadow far distance
+    uint  node_count;      // 4 bytes
+    uint  max_draws;       // 4 bytes
+    uint  include_flags;   // 4 bytes
+    uint  exclude_flags;   // 4 bytes
 } params;
 
 layout(set = 0, binding = 0) readonly buffer NodeBuffer {
@@ -62,15 +53,11 @@ layout(set = 0, binding = 1) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
-layout(set = 0, binding = 2) readonly buffer ShadowBuffer {
-    ShadowData shadows[];
-};
-
-layout(set = 0, binding = 3) buffer DrawCountBuffer {
+layout(set = 0, binding = 2) buffer DrawCountBuffer {
     uint draw_count;
 };
 
-layout(set = 0, binding = 4) buffer DrawCommandBuffer {
+layout(set = 0, binding = 3) buffer DrawCommandBuffer {
     DrawCommand commands[];
 };
 
@@ -109,7 +96,6 @@ void main() {
         return;
     }
 
-    ShadowData shadow = shadows[params.shadow_index];
     mat4 world = nodes[node_id].world_matrix;
 
     // Transform AABB to world space
@@ -129,14 +115,14 @@ void main() {
     vec3 world_min = world_center - world_extent;
     vec3 world_max = world_center + world_extent;
 
-    // Extract sphere center and radius from camera data
-    vec3 sphere_center = shadow.position;
-    float sphere_radius = shadow.far;
+    // Use sphere center and radius from push constants
+    vec3 sphere_center = params.light_position;
+    float sphere_radius_val = params.sphere_radius;
 
     // Simple sphere test
     bool visible = true;
     if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
-        visible = sphere_intersects_aabb(sphere_center, sphere_radius, world_min, world_max);
+        visible = sphere_intersects_aabb(sphere_center, sphere_radius_val, world_min, world_max);
     }
 
     if (!visible) return;

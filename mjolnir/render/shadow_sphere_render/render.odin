@@ -9,6 +9,24 @@ SHADER_SPHERE_DEPTH_VERT :: #load("../../shader/shadow_spherical/vert.spv")
 SHADER_SPHERE_DEPTH_GEOM :: #load("../../shader/shadow_spherical/geom.spv")
 SHADER_SPHERE_DEPTH_FRAG :: #load("../../shader/shadow_spherical/frag.spv")
 
+ShadowTransform :: struct {
+  view:            matrix[4, 4]f32,
+  projection:      matrix[4, 4]f32,
+  view_projection: matrix[4, 4]f32,
+  near:            f32,
+  far:             f32,
+  frustum_planes:  [6][4]f32,
+  position:        [3]f32,  // Light position for cubemap generation
+}
+
+ShadowDepthPushConstants :: struct {
+  projection:     matrix[4, 4]f32,  // 64 bytes (aligned to 16 bytes)
+  light_position: [3]f32,           // 12 bytes
+  near_plane:     f32,              // 4 bytes
+  far_plane:      f32,              // 4 bytes
+}
+// Total: 84 bytes (std140 layout)
+
 System :: struct {
   max_draws:             u32,
   depth_pipeline_layout: vk.PipelineLayout,
@@ -18,7 +36,6 @@ System :: struct {
 init :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
-  shadow_data_set_layout: vk.DescriptorSetLayout,
   textures_set_layout: vk.DescriptorSetLayout,
   bone_set_layout: vk.DescriptorSetLayout,
   material_set_layout: vk.DescriptorSetLayout,
@@ -33,9 +50,8 @@ init :: proc(
     gctx,
     vk.PushConstantRange {
       stageFlags = {.VERTEX, .GEOMETRY, .FRAGMENT},
-      size = size_of(u32),
+      size = size_of(ShadowDepthPushConstants),
     },
-    shadow_data_set_layout,
     textures_set_layout,
     bone_set_layout,
     material_set_layout,
@@ -120,11 +136,12 @@ render :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
   texture_manager: ^gpu.TextureManager,
-  shadow_index: u32,
+  projection: matrix[4,4]f32,
+  near, far: f32,
+  position: [3]f32,
   shadow_map: gpu.TextureCubeHandle,
   draw_command: gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   draw_count: gpu.MutableBuffer(u32),
-  shadow_data_descriptor_set: vk.DescriptorSet,
   textures_descriptor_set: vk.DescriptorSet,
   bone_descriptor_set: vk.DescriptorSet,
   material_descriptor_set: vk.DescriptorSet,
@@ -188,7 +205,6 @@ render :: proc(
     command_buffer,
     self.depth_pipeline,
     self.depth_pipeline_layout,
-    shadow_data_descriptor_set,
     textures_descriptor_set,
     bone_descriptor_set,
     material_descriptor_set,
@@ -196,14 +212,19 @@ render :: proc(
     mesh_data_descriptor_set,
     vertex_skinning_descriptor_set,
   )
-  cam_idx := shadow_index
+  push := ShadowDepthPushConstants{
+    projection     = projection,
+    near_plane     = near,
+    far_plane      = far,
+    light_position = position,
+  }
   vk.CmdPushConstants(
     command_buffer,
     self.depth_pipeline_layout,
     {.VERTEX, .GEOMETRY, .FRAGMENT},
     0,
-    size_of(u32),
-    &cam_idx,
+    size_of(push),
+    &push,
   )
   gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
   vk.CmdDrawIndexedIndirectCount(

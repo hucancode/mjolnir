@@ -25,37 +25,30 @@ struct Camera {
     vec4 frustum_planes[6];
 };
 
-struct LightData {
-    vec4 color;           // RGB + intensity
-    vec3 position;
-    uint type;
-    vec3 direction;
-    float radius;
-    float angle_inner;
-    float angle_outer;
-    uint cast_shadow;
-    uint shadow_index;
-};
-
 // Bindless camera buffer (set 0, binding 0)
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
 } camera_buffer;
-// Lights buffer (set 2, binding 0)
-layout(set = 2, binding = 0) readonly buffer LightsBuffer {
-    LightData lights[];
-} lights_buffer;
 
 layout(push_constant) uniform PushConstant {
-    uint light_index;
-    uint scene_camera_idx;
+    vec4  light_color;       // 16 bytes
+    vec3  position;          // 12 bytes
+    float radius;            // 4 bytes
+    vec3  direction;         // 12 bytes
+    float angle_inner;       // 4 bytes
+    float angle_outer;       // 4 bytes
+    uint  light_type;        // 4 bytes
+    uint  shadow_map_idx;    // 4 bytes
+    uint  scene_camera_idx;  // 4 bytes
+    mat4  shadow_view_projection;  // 64 bytes
+    float shadow_near;             // 4 bytes
+    float shadow_far;              // 4 bytes
     uint position_texture_index;
     uint normal_texture_index;
     uint albedo_texture_index;
     uint metallic_texture_index;
     uint emissive_texture_index;
     uint input_image_index;
-    uint shadow_map_index;
 };
 
 void main() {
@@ -64,35 +57,30 @@ void main() {
         gl_Position = vec4(0.0); // Invalid position to indicate error
         return;
     }
-    if (light_index >= lights_buffer.lights.length()) {
-        gl_Position = vec4(0.0); // Invalid position to indicate error
-        return;
-    }
 
     Camera camera = camera_buffer.cameras[scene_camera_idx];
-    LightData light = lights_buffer.lights[light_index];
 
-    if (light.type == DIRECTIONAL_LIGHT) {
+    if (light_type == DIRECTIONAL_LIGHT) {
         // For directional lights, use the NDC triangle mesh directly
         gl_Position = vec4(a_position, 1.0);
     } else {
         vec3 world_position;
-        if (light.type == POINT_LIGHT) {
+        if (light_type == POINT_LIGHT) {
             // Scale unit sphere by light radius and translate to light position
-            world_position = light.position + a_position * light.radius;
-        } else if (light.type == SPOT_LIGHT) {
+            world_position = position + a_position * radius;
+        } else if (light_type == SPOT_LIGHT) {
             // Standard cone mesh: height=1 (Y+), base radius=1 (XZ)
-            float tana = tan(min(light.angle_outer, PI*0.45));
-            float y_scale = light.radius;
-            float xz_scale = light.radius * tana * 2;
+            float tana = tan(min(angle_outer, PI*0.45));
+            float y_scale = radius;
+            float xz_scale = radius * tana * 2;
             vec3 scaled_pos = vec3(a_position.x * xz_scale, (a_position.y - 0.5) * -y_scale, a_position.z * xz_scale);
             // Orient cone along light_direction (which is already -Z forward)
-            vec3 up = normalize(light.direction);
+            vec3 up = normalize(direction);
             vec3 forward = abs(up.y) < 0.9 ? normalize(cross(vec3(0, 1, 0), up)) : vec3(1, 0, 0);
             vec3 right = cross(up, forward);
             // Create orientation matrix: right=+X, up=+Y, forward=-Z
             mat3 orientation = mat3(right, up, forward);
-            world_position = light.position + orientation * scaled_pos;
+            world_position = position + orientation * scaled_pos;
         }
         // Transform world position to clip space using camera view-projection
         gl_Position = camera.projection * camera.view * vec4(world_position, 1.0);

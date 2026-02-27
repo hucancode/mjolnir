@@ -5,7 +5,7 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 0) out vec3 worldPos;
 layout(location = 1) out uint instanceIndex;
 
-layout(set = 2, binding = 0) readonly buffer BoneMatrices {
+layout(set = 1, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 
@@ -17,7 +17,7 @@ struct NodeData {
     uint flags;
 };
 
-layout(set = 4, binding = 0) readonly buffer NodeBuffer {
+layout(set = 3, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
@@ -34,7 +34,7 @@ struct MeshData {
     uint _padding;
 };
 
-layout(set = 5, binding = 0) readonly buffer MeshBuffer {
+layout(set = 4, binding = 0) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
@@ -43,12 +43,15 @@ struct VertexSkinningData {
     vec4 weights;
 };
 
-layout(set = 6, binding = 0) readonly buffer VertexSkinningBuffer {
+layout(set = 5, binding = 0) readonly buffer VertexSkinningBuffer {
     VertexSkinningData vertex_skinning[];
 };
 
 layout(push_constant) uniform PushConstants {
-    uint shadow_index;
+    mat4  projection;      // 64 bytes
+    vec3  light_position;  // 12 bytes (aligned to 16)
+    float near_plane;      // 4 bytes
+    float far_plane;       // 4 bytes
 };
 
 void main() {

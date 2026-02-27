@@ -7,12 +7,13 @@ import vk "vendor:vulkan"
 SHADER_SHADOW_CULLING :: #load("../../shader/shadow/cull.spv")
 
 CullPushConstants :: struct {
-  shadow_index:  u32,
-  node_count:    u32,
-  max_draws:     u32,
-  include_flags: d.NodeFlagSet,
-  exclude_flags: d.NodeFlagSet,
+  frustum_planes: [6][4]f32,
+  node_count:     u32,
+  max_draws:      u32,
+  include_flags:  d.NodeFlagSet,
+  exclude_flags:  d.NodeFlagSet,
 }
+// Total: 112 bytes
 
 System :: struct {
   node_count:        u32,
@@ -74,7 +75,7 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
 execute :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
-  shadow_index: u32,
+  frustum_planes: [6][4]f32,
   shadow_draw_count_buffer: vk.Buffer,
   shadow_draw_count_ds: vk.DescriptorSet,
 ) {
@@ -109,11 +110,11 @@ execute :: proc(
     shadow_draw_count_ds,
   )
   push := CullPushConstants {
-    shadow_index  = shadow_index,
-    node_count    = self.node_count,
-    max_draws     = self.max_draws,
-    include_flags = include_flags,
-    exclude_flags = exclude_flags,
+    frustum_planes = frustum_planes,
+    node_count     = self.node_count,
+    max_draws      = self.max_draws,
+    include_flags  = include_flags,
+    exclude_flags  = exclude_flags,
   }
   vk.CmdPushConstants(
     command_buffer,

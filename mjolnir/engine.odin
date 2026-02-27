@@ -850,50 +850,53 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     has_light := true
     #partial switch attachment in node.attachment {
     case world.PointLightAttachment:
-      light_data = render.Light {
-        color        = attachment.color,
-        position     = light_position,
-        direction    = light_direction,
-        radius       = attachment.radius,
-        angle_inner  = 0.0,
-        angle_outer  = 0.0,
-        type         = .POINT,
-        cast_shadow  = b32(attachment.cast_shadow),
-        shadow_index = 0xFFFFFFFF,
+      light_variant := render.PointLight {
+        color    = attachment.color,
+        position = light_position,
+        radius   = attachment.radius,
+        shadow   = nil, // Shadow managed by render layer
       }
+      light_data = render.Light(light_variant)
     case world.DirectionalLightAttachment:
-      light_data = render.Light {
-        color        = attachment.color,
-        position     = light_position,
-        direction    = light_direction,
-        radius       = attachment.radius,
-        angle_inner  = 0.0,
-        angle_outer  = 0.0,
-        type         = .DIRECTIONAL,
-        cast_shadow  = b32(attachment.cast_shadow),
-        shadow_index = 0xFFFFFFFF,
+      light_variant := render.DirectionalLight {
+        color     = attachment.color,
+        position  = light_position,
+        direction = light_direction,
+        radius    = attachment.radius,
+        shadow    = nil,
       }
+      light_data = render.Light(light_variant)
     case world.SpotLightAttachment:
-      light_data = render.Light {
-        color        = attachment.color,
-        position     = light_position,
-        direction    = light_direction,
-        radius       = attachment.radius,
-        angle_inner  = attachment.angle_inner,
-        angle_outer  = attachment.angle_outer,
-        type         = .SPOT,
-        cast_shadow  = b32(attachment.cast_shadow),
-        shadow_index = 0xFFFFFFFF,
+      light_variant := render.SpotLight {
+        color       = attachment.color,
+        position    = light_position,
+        direction   = light_direction,
+        radius      = attachment.radius,
+        angle_inner = attachment.angle_inner,
+        angle_outer = attachment.angle_outer,
+        shadow      = nil,
       }
+      light_data = render.Light(light_variant)
     case:
       has_light = false
     }
     if has_light {
+      // Determine cast_shadow flag from attachment
+      cast_shadow := false
+      #partial switch att in node.attachment {
+      case world.PointLightAttachment:
+        cast_shadow = att.cast_shadow
+      case world.DirectionalLightAttachment:
+        cast_shadow = att.cast_shadow
+      case world.SpotLightAttachment:
+        cast_shadow = att.cast_shadow
+      }
       render.upsert_light_entry(
         &self.render,
         &self.gctx,
         node_handle.index,
         &light_data,
+        cast_shadow,
       ) or_return
     } else {
       render.remove_light_entry(&self.render, &self.gctx, node_handle.index)

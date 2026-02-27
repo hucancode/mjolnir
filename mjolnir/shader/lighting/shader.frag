@@ -26,28 +26,6 @@ struct Camera {
     vec4 frustum_planes[6];
 };
 
-struct ShadowData {
-    mat4 view;
-    mat4 projection;
-    vec3 position;
-    float near;
-    vec3 direction;
-    float far;
-    vec4 frustum_planes[6];
-};
-
-struct LightData {
-    vec4 color;
-    vec3 position;
-    uint type;
-    vec3 direction;
-    float radius;
-    float angle_inner;
-    float angle_outer;
-    uint cast_shadow;
-    uint shadow_index;
-};
-
 // Bindless camera buffer (set 0, binding 0) - Regular cameras
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
@@ -55,26 +33,32 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
 layout(set = 1, binding = 2) uniform textureCube cube_textures[];
-// Lights buffer (set 2, binding 0)
-layout(set = 2, binding = 0) readonly buffer LightsBuffer {
-    LightData lights[];
-} lights_buffer;
-// Shadow data buffer (set 3, binding 0)
-layout(set = 3, binding = 0) readonly buffer ShadowDataBuffer {
-    ShadowData shadows[];
-} shadow_data_buffer;
 
 layout(push_constant) uniform PushConstant {
-    uint light_index;
-    uint scene_camera_idx;
-    uint position_texture_index;
-    uint normal_texture_index;
-    uint albedo_texture_index;
-    uint metallic_texture_index;
-    uint emissive_texture_index;
-    uint input_image_index;
-    uint shadow_map_index;
+    vec4  light_color;       // 16 bytes - color.rgb + intensity (all types)
+    vec3  position;          // 12 bytes - world position (point/spot only)
+    float radius;            // 4 bytes - light range (point/spot only)
+    vec3  direction;         // 12 bytes - direction vector (spot/directional only)
+    float angle_inner;       // 4 bytes - inner cone angle (spot only)
+    float angle_outer;       // 4 bytes - outer cone angle (spot only)
+    uint  light_type;        // 4 bytes - 0=Point, 1=Directional, 2=Spot
+    uint  shadow_map_idx;    // 4 bytes - shadow texture index, 0xFFFFFFFF = no shadow
+    uint  scene_camera_idx;  // 4 bytes
+    mat4  shadow_view_projection;  // 64 bytes
+    float shadow_near;             // 4 bytes
+    float shadow_far;              // 4 bytes
+    uint position_texture_index;  // 4 bytes
+    uint normal_texture_index;    // 4 bytes
+    uint albedo_texture_index;    // 4 bytes
+    uint metallic_texture_index;  // 4 bytes
+    uint emissive_texture_index;  // 4 bytes
+    uint input_image_index;       // 4 bytes
 };
+
+// Helper to check if light casts shadow
+bool has_shadow() {
+    return shadow_map_idx != 0xFFFFFFFFu;
+}
 
 // Convert a direction vector to equirectangular UV coordinates
 vec2 dirToEquirectUv(vec3 dir) {
@@ -89,29 +73,19 @@ float linearizeDepth(float depth, float near, float far) {
     return (2.0 * near * far) / (far + near - z * (far - near));
 }
 
-bool has_shadow_resource(LightData light, uint shadow_map) {
-    if (light.type == POINT_LIGHT) {
-        return shadow_map < MAX_CUBE_TEXTURES;
-    }
-    return shadow_map < MAX_TEXTURES;
-}
-
-float calculateShadow(vec3 fragPos, vec3 n, LightData light) {
-    if (light.cast_shadow == 0u) {
+float calculateShadow(vec3 fragPos, vec3 n) {
+    if (!has_shadow()) {
         return 1.0;
     }
-    if (shadow_map_index >= MAX_CUBE_TEXTURES && light.type == POINT_LIGHT) {
+    if (shadow_map_idx >= MAX_CUBE_TEXTURES && light_type == POINT_LIGHT) {
         return 1.0; // No valid shadow map for point light
     }
-    if (shadow_map_index >= MAX_TEXTURES && (light.type == DIRECTIONAL_LIGHT || light.type == SPOT_LIGHT)) {
+    if (shadow_map_idx >= MAX_TEXTURES && (light_type == DIRECTIONAL_LIGHT || light_type == SPOT_LIGHT)) {
         return 1.0; // No valid shadow map for directional/spot light
     }
-    if (light.shadow_index >= shadow_data_buffer.shadows.length()) {
-        return 1.0;
-    }
-    ShadowData shadow = shadow_data_buffer.shadows[light.shadow_index];
-    if (light.type == DIRECTIONAL_LIGHT) {
-        vec4 lightSpacePos = shadow.projection * shadow.view * vec4(fragPos, 1.0);
+
+    if (light_type == DIRECTIONAL_LIGHT) {
+        vec4 lightSpacePos = shadow_view_projection * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         // Transform XY from [-1,1] to [0,1], but Z is already [0,1] in Vulkan!
         shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
@@ -123,28 +97,28 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light) {
         }
         shadowCoord.z = clamp(shadowCoord.z, 0.0, 1.0);
         // For directional lights, negate direction (it points where light shines, we need direction TO light)
-        vec3 lightDir = normalize(-light.direction);
+        vec3 lightDir = normalize(-direction);
         float cosTheta = clamp(dot(n, lightDir), 0.0, 1.0);
         float bias = 0.005 * tan(acos(cosTheta));
         bias = clamp(bias, 0.001, 0.01);
-        float shadowDepth = texture(sampler2D(textures[shadow_map_index], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
+        float shadowDepth = texture(sampler2D(textures[shadow_map_idx], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
         return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
-    } else if (light.type == POINT_LIGHT) {
-        vec3 lightToFrag = fragPos - light.position;
+    } else if (light_type == POINT_LIGHT) {
+        vec3 lightToFrag = fragPos - position;
         vec3 coord = normalize(lightToFrag);
         float linearDepth = length(lightToFrag);
-        float shadowDepth = texture(samplerCube(cube_textures[shadow_map_index], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
+        float shadowDepth = texture(samplerCube(cube_textures[shadow_map_idx], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
         // return shadowDepth;
         // Linear depth mapping: [near, far] -> [0, 1]
-        float currentDepth = (linearDepth - shadow.near) / (shadow.far - shadow.near);
+        float currentDepth = (linearDepth - shadow_near) / (shadow_far - shadow_near);
         currentDepth = clamp(currentDepth, 0.0, 1.0);
         float cosTheta = clamp(dot(n, -lightToFrag), 0.0, 1.0);
         float bias = 0.0005 * tan(acos(cosTheta));
         bias = clamp(bias, 0.001, 0.01);
         float brightness = (currentDepth > shadowDepth + bias) ? 0.1 : 1.0;
         return brightness;
-    } else if (light.type == SPOT_LIGHT) {
-        vec4 lightSpacePos = shadow.projection * shadow.view * vec4(fragPos, 1.0);
+    } else if (light_type == SPOT_LIGHT) {
+        vec4 lightSpacePos = shadow_view_projection * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         // Transform XY from [-1,1] to [0,1], Z is already [0,1]
         shadowCoord.xy = shadowCoord.xy * 0.5 + 0.5;
@@ -154,8 +128,8 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light) {
             return 1.0;
         }
         shadowCoord.z = clamp(shadowCoord.z, 0.0, 1.0);
-        float shadowDepth = texture(sampler2D(textures[shadow_map_index], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
-        vec3 lightDir = normalize(light.position - fragPos);
+        float shadowDepth = texture(sampler2D(textures[shadow_map_idx], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
+        vec3 lightDir = normalize(position - fragPos);
         float cosTheta = clamp(dot(n, lightDir), 0.0, 1.0);
         float bias = 0.0005 * tan(acos(cosTheta));
         bias = clamp(bias, 0.001, 0.01);
@@ -164,25 +138,25 @@ float calculateShadow(vec3 fragPos, vec3 n, LightData light) {
     return 1.0;
 }
 
-vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fragPos, LightData light) {
+vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fragPos) {
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
-    vec3 light_color = light.color.rgb * light.color.a; // RGB * intensity
+    vec3 light_col = light_color.rgb * light_color.a; // RGB * intensity
     // Light direction and distance
     // For directional lights: negate direction (it points where light shines, we need direction TO light source)
     // For point/spot lights: calculate vector from fragment to light position
-    vec3 L = light.type == DIRECTIONAL_LIGHT ? normalize(-light.direction) : normalize(light.position - fragPos);
+    vec3 L = light_type == DIRECTIONAL_LIGHT ? normalize(-direction) : normalize(position - fragPos);
     vec3 H = normalize(V + L);
-    float distance = light.type == DIRECTIONAL_LIGHT ? 1.0 : length(light.position - fragPos);
-    float attenuation = light.radius;
-    if (light.type == POINT_LIGHT) {
-        float norm_dist = distance / max(0.01, light.radius);
+    float distance = light_type == DIRECTIONAL_LIGHT ? 1.0 : length(position - fragPos);
+    float attenuation = radius;
+    if (light_type == POINT_LIGHT) {
+        float norm_dist = distance / max(0.01, radius);
         attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
     }
-    if (light.type == SPOT_LIGHT) {
+    if (light_type == SPOT_LIGHT) {
         // Vector from cone tip to fragment
-        vec3 tipToFrag = fragPos - light.position;
-        vec3 cone_axis = normalize(light.direction);
+        vec3 tipToFrag = fragPos - position;
+        vec3 cone_axis = normalize(direction);
         // Project onto cone axis to get distance along the axis
         float distance_along_axis = dot(tipToFrag, cone_axis);
         // Calculate perpendicular component (rejection from axis)
@@ -190,13 +164,13 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
         vec3 perpendicular_component = tipToFrag - projection_on_axis;
         float radial_distance = length(perpendicular_component);
         // Cone radius at this distance: r = d * tan(angle)
-        float cone_radius_at_height = distance_along_axis * tan(light.angle_outer);
+        float cone_radius_at_height = distance_along_axis * tan(angle_outer);
         // Normalized radial distance: 0 = on centerline, 1 = at edge
         float normalized_radial = radial_distance / max(cone_radius_at_height, 0.001);
         // Smooth falloff from inner to outer angle
-        float inner_outer_ratio = tan(light.angle_inner) / tan(light.angle_outer);
+        float inner_outer_ratio = tan(angle_inner) / tan(angle_outer);
         float spotEffect = smoothstep(1.0, inner_outer_ratio, normalized_radial);
-        float norm_dist = distance_along_axis / max(0.01, light.radius);
+        float norm_dist = distance_along_axis / max(0.01, radius);
         spotEffect *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
         attenuation *= spotEffect;
     }
@@ -216,7 +190,7 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     vec3 spec = NDF * G * F / (4.0 * NdotV * NdotL + 0.01);
     vec3 kS = clamp(F, 0.0, 1.0);
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-    Lo += (kD * albedo / PI + spec) * light_color * NdotL * attenuation;
+    Lo += (kD * albedo / PI + spec) * light_col * NdotL * attenuation;
     return Lo;
 }
 
@@ -235,33 +209,21 @@ vec3 colorBand(float x) {
 }
 
 void main() {
-    if (light_index >= lights_buffer.lights.length()) {
-        outColor = vec4(1.0, 0.0, 0.0, 1.0); // Red for invalid light index
-        return;
-    }
     if (scene_camera_idx >= camera_buffer.cameras.length()) {
         outColor = vec4(0.0, 1.0, 0.0, 1.0); // Green for invalid scene camera index
         return;
     }
-    // Get light data from the lights buffer
-    LightData light = lights_buffer.lights[light_index];
-    // Only validate shadow index if shadows are enabled
-    bool will_use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light, shadow_map_index);
-    if (will_use_shadow && light.shadow_index >= shadow_data_buffer.shadows.length()) {
-        outColor = vec4(1.0, 0.0, 1.0, 1.0); // Magenta for invalid light camera index
-        return;
-    }
     Camera camera = camera_buffer.cameras[scene_camera_idx];
     vec2 uv = (gl_FragCoord.xy / camera.viewport_extent);
-    vec3 position = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz;
+    vec3 fragPos = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz;
     vec3 normal = normalize(texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).xyz * 2.0 - 1.0);
     vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rgb;
     vec2 mr = texture(sampler2D(textures[metallic_texture_index], samplers[SAMPLER_LINEAR_CLAMP]), uv).rg;
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.08, 1.0);
-    vec3 V = normalize(camera.position.xyz - position);
-    float shadowFactor = calculateShadow(position, normal, light);
-    vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light);
+    vec3 V = normalize(camera.position.xyz - fragPos);
+    float shadowFactor = calculateShadow(fragPos, normal);
+    vec3 direct = brdf(normal, V, albedo, roughness, metallic, fragPos);
     outColor = vec4(direct * shadowFactor, 1.0);
     // outColor.b = clamp(outColor.b, 0.1, 1.0);
 }

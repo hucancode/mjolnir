@@ -55,27 +55,72 @@ Material :: rd.Material
 Emitter :: rd.Emitter
 ForceField :: rd.ForceField
 Sprite :: rd.Sprite
-Light :: rd.Light
 LightType :: rd.LightType
 BoneInstance :: debug_bone.BoneInstance
 
+// Shadow resource types - embed in light variants
 ShadowMap :: struct {
-  shadow_map:      [FRAMES_IN_FLIGHT]union {
-    gpu.Texture2DHandle,
-    gpu.TextureCubeHandle,
-  },
+  shadow_map_2d:   [FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
   draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
   draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  view:            matrix[4, 4]f32,
+  projection:      matrix[4, 4]f32,
+  view_projection: matrix[4, 4]f32, // Pre-multiplied
+  near:            f32,
+  far:             f32,
+  frustum_planes:  [6][4]f32,
+}
+
+ShadowMapCube :: struct {
+  shadow_map_cube: [FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
+  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+    vk.DrawIndexedIndirectCommand,
+  ),
+  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  projection:      matrix[4, 4]f32,
+  near:            f32,
+  far:             f32,
+}
+
+// Light union variants
+PointLight :: struct {
+  color:    [4]f32, // RGB + intensity
+  position: [3]f32,
+  radius:   f32,
+  shadow:   Maybe(ShadowMapCube),
+}
+
+SpotLight :: struct {
+  color:       [4]f32,
+  position:    [3]f32,
+  direction:   [3]f32,
+  radius:      f32,
+  angle_inner: f32,
+  angle_outer: f32,
+  shadow:      Maybe(ShadowMap),
+}
+
+DirectionalLight :: struct {
+  color:     [4]f32,
+  position:  [3]f32,
+  direction: [3]f32,
+  radius:    f32,
+  shadow:    Maybe(ShadowMap),
+}
+
+Light :: union {
+  PointLight,
+  SpotLight,
+  DirectionalLight,
 }
 
 PerLightData :: struct {
-  light:        rd.Light,
-  light_index:  u32,
-  shadow_index: u32,
-  using shadow: ShadowMap,
+  light:       Light, // Union type (contains embedded shadow)
+  light_index: u32,
 }
 
 DEBUG_SHOW_BONES :: #config(DEBUG_SHOW_BONES, false)
@@ -130,17 +175,12 @@ Manager :: struct {
     rd.Camera,
     FRAMES_IN_FLIGHT,
   ),
-  shadow_data_buffer:           gpu.PerFrameBindlessBuffer(
-    rd.ShadowData,
-    FRAMES_IN_FLIGHT,
-  ),
   material_buffer:              gpu.BindlessBuffer(Material),
   node_data_buffer:             gpu.BindlessBuffer(Node),
   mesh_data_buffer:             gpu.BindlessBuffer(Mesh),
   emitter_buffer:               gpu.BindlessBuffer(Emitter),
   forcefield_buffer:            gpu.BindlessBuffer(ForceField),
   sprite_buffer:                gpu.BindlessBuffer(Sprite),
-  lights_buffer:                gpu.BindlessBuffer(Light),
   mesh_manager:                 gpu.MeshManager,
   bone_matrix_slab:             cont.SlabAllocator,
   bone_matrix_offsets:          map[u32]u32,
@@ -211,18 +251,6 @@ init :: proc(
   defer if ret != .SUCCESS {
     gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
   }
-  gpu.per_frame_bindless_buffer_init(
-    &self.shadow_data_buffer,
-    gctx,
-    rd.MAX_SHADOW_MAPS,
-    {.VERTEX, .FRAGMENT, .GEOMETRY, .COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(
-      &self.shadow_data_buffer,
-      gctx.device,
-    )
-  }
   gpu.bindless_buffer_init(
     &self.material_buffer,
     gctx,
@@ -276,15 +304,6 @@ init :: proc(
   ) or_return
   defer if ret != .SUCCESS {
     gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.lights_buffer,
-    gctx,
-    rd.MAX_LIGHTS,
-    {.VERTEX, .FRAGMENT},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
   }
   // Initialize texture manager layout (must precede pipeline layout creation)
   gpu.texture_manager_init(&self.texture_manager, gctx) or_return
@@ -359,7 +378,6 @@ init :: proc(
   shadow_render_system.init(
     &self.shadow_render,
     gctx,
-    self.shadow_data_buffer.set_layout,
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
@@ -370,7 +388,6 @@ init :: proc(
   shadow_sphere_render_system.init(
     &self.shadow_sphere_render,
     gctx,
-    self.shadow_data_buffer.set_layout,
     self.texture_manager.set_layout,
     self.bone_buffer.set_layout,
     self.material_buffer.set_layout,
@@ -388,8 +405,6 @@ init :: proc(
     &self.direct_light,
     gctx,
     self.camera_buffer.set_layout,
-    self.lights_buffer.set_layout,
-    self.shadow_data_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
   geometry.init(
@@ -536,17 +551,12 @@ setup :: proc(
     gctx,
   ) or_return
   gpu.bindless_buffer_realloc_descriptor(&self.sprite_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.lights_buffer, gctx) or_return
   gpu.per_frame_bindless_buffer_realloc_descriptors(
     &self.bone_buffer,
     gctx,
   ) or_return
   gpu.per_frame_bindless_buffer_realloc_descriptors(
     &self.camera_buffer,
-    gctx,
-  ) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(
-    &self.shadow_data_buffer,
     gctx,
   ) or_return
   gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
@@ -633,10 +643,8 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   self.emitter_buffer.descriptor_set = 0
   self.forcefield_buffer.descriptor_set = 0
   self.sprite_buffer.descriptor_set = 0
-  self.lights_buffer.descriptor_set = 0
   for &ds in self.bone_buffer.descriptor_sets do ds = 0
   for &ds in self.camera_buffer.descriptor_sets do ds = 0
-  for &ds in self.shadow_data_buffer.descriptor_sets do ds = 0
   self.mesh_manager.vertex_skinning_buffer.descriptor_set = 0
   // Bulk-free all descriptor sets allocated from the pool
   vk.ResetDescriptorPool(gctx.device, gctx.descriptor_pool, {})
@@ -787,8 +795,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   gpu.bindless_buffer_destroy(&self.emitter_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.forcefield_buffer, gctx.device)
   gpu.bindless_buffer_destroy(&self.sprite_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.lights_buffer, gctx.device)
-  gpu.per_frame_bindless_buffer_destroy(&self.shadow_data_buffer, gctx.device)
   gpu.per_frame_bindless_buffer_destroy(&self.camera_buffer, gctx.device)
   delete(self.bone_matrix_offsets)
   gpu.per_frame_bindless_buffer_destroy(&self.bone_buffer, gctx.device)
@@ -836,79 +842,8 @@ shadow_make_light_view :: proc(
   return linalg.matrix4_look_at(position, target, up)
 }
 
-@(private)
-build_shadow_data :: proc(light: ^rd.Light) -> rd.ShadowData {
-  position := light.position.xyz
-  direction := shadow_safe_normalize(light.direction.xyz, {0, -1, 0})
-  shadow_data := rd.ShadowData {
-    view       = linalg.MATRIX4F32_IDENTITY,
-    projection = linalg.MATRIX4F32_IDENTITY,
-    near       = 0.1,
-    far        = max(0.2, light.radius),
-    position   = position,
-    direction  = direction,
-  }
-  switch light.type {
-  case .POINT:
-    near_plane: f32 = 0.1
-    far_plane := max(near_plane + 0.1, light.radius)
-    shadow_data.near = near_plane
-    shadow_data.far = far_plane
-    shadow_data.projection = linalg.matrix4_perspective(
-      f32(math.PI * 0.5),
-      1.0,
-      near_plane,
-      far_plane,
-      flip_z_axis = false,
-    )
-    shadow_data.position = position
-  case .SPOT:
-    near_plane: f32 = 0.1
-    far_plane := max(near_plane + 0.1, light.radius)
-    shadow_data.view = shadow_make_light_view(position, direction)
-    shadow_data.projection = linalg.matrix4_perspective(
-      max(light.angle_outer * 2.0, 0.001),
-      1.0,
-      near_plane,
-      far_plane,
-    )
-    shadow_data.near = near_plane
-    shadow_data.far = far_plane
-    shadow_data.frustum_planes =
-      geom.make_frustum(shadow_data.projection * shadow_data.view).planes
-  case .DIRECTIONAL:
-    near_plane: f32 = 0.1
-    far_plane := max(near_plane + 0.1, light.radius * 2.0)
-    camera_pos := position - direction * light.radius
-    shadow_data.view = shadow_make_light_view(camera_pos, direction)
-    half_extent := max(light.radius, 0.5)
-    shadow_data.projection = linalg.matrix_ortho3d(
-      -half_extent,
-      half_extent,
-      -half_extent,
-      half_extent,
-      near_plane,
-      far_plane,
-    )
-    shadow_data.near = near_plane
-    shadow_data.far = far_plane
-    shadow_data.position = camera_pos
-    shadow_data.frustum_planes =
-      geom.make_frustum(shadow_data.projection * shadow_data.view).planes
-  }
-  return shadow_data
-}
-
 render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
   cmd := self.command_buffers[frame_index]
-  zero_shadow: rd.ShadowData
-  for slot in 0 ..< rd.MAX_SHADOW_MAPS {
-    gpu.write(
-      &self.shadow_data_buffer.buffers[frame_index],
-      &zero_shadow,
-      int(slot),
-    )
-  }
   light_node_indices := make(
     [dynamic]u32,
     0,
@@ -928,38 +863,79 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
   )
   defer delete(active_shadow_keys)
   next_light_index: u32 = 0
-  next_shadow_index: u32 = 0
   for light_node_index in light_node_indices {
-    light, ok := self.per_light_data[light_node_index]
-    if !ok do continue
+    light := &self.per_light_data[light_node_index]
     if next_light_index >= rd.MAX_LIGHTS do continue
     light.light_index = next_light_index
     next_light_index += 1
-    light.shadow_index = rd.INVALID_SHADOW_INDEX
-    light.light.shadow_index = rd.INVALID_SHADOW_INDEX
-    if light.light.cast_shadow && next_shadow_index < rd.MAX_SHADOW_MAPS {
-      light.shadow_index = next_shadow_index
-      light.light.shadow_index = next_shadow_index
-      shadow_data := build_shadow_data(&light.light)
-      gpu.write(
-        &self.shadow_data_buffer.buffers[frame_index],
-        &shadow_data,
-        int(next_shadow_index),
-      )
-      append(&active_shadow_keys, light_node_index)
-      next_shadow_index += 1
+    switch &variant in light.light {
+    case PointLight:
+      shadow, has_shadow := &variant.shadow.?
+      if has_shadow {
+        shadow.near = 0.1
+        shadow.far = max(shadow.near + 0.1, variant.radius)
+        shadow.projection = linalg.matrix4_perspective(
+          f32(math.PI * 0.5),
+          1.0,
+          shadow.near,
+          shadow.far,
+          flip_z_axis = false,
+        )
+        append(&active_shadow_keys, light_node_index)
+      }
+    case SpotLight:
+      shadow, has_shadow := &variant.shadow.?
+      if has_shadow {
+        shadow.near = 0.1
+        shadow.far = max(shadow.near + 0.1, variant.radius)
+        shadow.view = shadow_make_light_view(
+          variant.position,
+          variant.direction,
+        )
+        shadow.projection = linalg.matrix4_perspective(
+          max(variant.angle_outer * 2.0, 0.001),
+          1.0,
+          shadow.near,
+          shadow.far,
+        )
+        shadow.view_projection = shadow.projection * shadow.view
+        shadow.frustum_planes =
+          geom.make_frustum(shadow.view_projection).planes
+        append(&active_shadow_keys, light_node_index)
+      }
+    case DirectionalLight:
+      shadow, has_shadow := &variant.shadow.?
+      if has_shadow {
+        shadow.near = 0.1
+        shadow.far = max(shadow.near + 0.1, variant.radius * 2.0)
+        camera_pos := variant.position - variant.direction * variant.radius
+        shadow.view = shadow_make_light_view(camera_pos, variant.direction)
+        half_extent := max(variant.radius, 0.5)
+        shadow.projection = linalg.matrix_ortho3d(
+          -half_extent,
+          half_extent,
+          -half_extent,
+          half_extent,
+          shadow.near,
+          shadow.far,
+        )
+        shadow.view_projection = shadow.projection * shadow.view
+        shadow.frustum_planes =
+          geom.make_frustum(shadow.view_projection).planes
+        append(&active_shadow_keys, light_node_index)
+      }
     }
-    gpu.write(&self.lights_buffer.buffer, &light.light, int(light.light_index))
-    self.per_light_data[light_node_index] = light
   }
   for light_node_index in active_shadow_keys {
-    shadow := &self.per_light_data[light_node_index]
-    switch &shadow_map in shadow.shadow.shadow_map[frame_index] {
-    case gpu.Texture2DHandle:
+    light_data := &self.per_light_data[light_node_index]
+    // Access shadow resources from Light union variant
+    switch &variant in &light_data.light {
+    case SpotLight:
+    shadow, has_shadow := &variant.shadow.?
       shadow_culling_system.execute(
         &self.shadow_culling,
         cmd,
-        shadow.shadow_index,
+        shadow.frustum_planes,
         shadow.draw_count[frame_index].buffer,
         shadow.descriptor_sets[frame_index],
       )
@@ -967,11 +943,10 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
         &self.shadow_render,
         cmd,
         &self.texture_manager,
-        shadow.shadow_index,
-        shadow_map,
+        shadow.view_projection,
+        shadow.shadow_map_2d[frame_index],
         shadow.draw_commands[frame_index],
         shadow.draw_count[frame_index],
-        self.shadow_data_buffer.descriptor_sets[frame_index],
         self.texture_manager.descriptor_set,
         self.bone_buffer.descriptor_sets[frame_index],
         self.material_buffer.descriptor_set,
@@ -982,11 +957,40 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
         self.mesh_manager.index_buffer.buffer,
         frame_index,
       )
-    case gpu.TextureCubeHandle:
+    case DirectionalLight:
+    shadow, has_shadow := &variant.shadow.?
+      shadow_culling_system.execute(
+        &self.shadow_culling,
+        cmd,
+        shadow.frustum_planes,
+        shadow.draw_count[frame_index].buffer,
+        shadow.descriptor_sets[frame_index],
+      )
+      shadow_render_system.render(
+        &self.shadow_render,
+        cmd,
+        &self.texture_manager,
+        shadow.view_projection,
+        shadow.shadow_map_2d[frame_index],
+        shadow.draw_commands[frame_index],
+        shadow.draw_count[frame_index],
+        self.texture_manager.descriptor_set,
+        self.bone_buffer.descriptor_sets[frame_index],
+        self.material_buffer.descriptor_set,
+        self.node_data_buffer.descriptor_set,
+        self.mesh_data_buffer.descriptor_set,
+        self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+        self.mesh_manager.vertex_buffer.buffer,
+        self.mesh_manager.index_buffer.buffer,
+        frame_index,
+      )
+    case PointLight:
+    shadow, has_shadow := &variant.shadow.?
       shadow_sphere_culling_system.execute(
         &self.shadow_sphere_culling,
         cmd,
-        shadow.shadow_index,
+        variant.position,
+        variant.radius,
         shadow.draw_count[frame_index].buffer,
         shadow.descriptor_sets[frame_index],
       )
@@ -994,11 +998,13 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
         &self.shadow_sphere_render,
         cmd,
         &self.texture_manager,
-        shadow.shadow_index,
-        shadow_map,
+        shadow.projection,
+        shadow.near,
+        shadow.far,
+        variant.position,
+        shadow.shadow_map_cube[frame_index],
         shadow.draw_commands[frame_index],
         shadow.draw_count[frame_index],
-        self.shadow_data_buffer.descriptor_sets[frame_index],
         self.texture_manager.descriptor_set,
         self.bone_buffer.descriptor_sets[frame_index],
         self.material_buffer.descriptor_set,
@@ -1009,7 +1015,6 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
         self.mesh_manager.index_buffer.buffer,
         frame_index,
       )
-    case:
     }
   }
   return .SUCCESS
@@ -1094,20 +1099,7 @@ record_lighting_pass :: proc(
     &self.texture_manager,
     cmd,
     self.camera_buffer.descriptor_sets[frame_index],
-    self.lights_buffer.descriptor_set,
-    self.shadow_data_buffer.descriptor_sets[frame_index],
   )
-  shadow_texture_indices: [rd.MAX_LIGHTS]u32
-  for i in 0 ..< rd.MAX_LIGHTS {
-    shadow_texture_indices[i] = 0xFFFFFFFF
-  }
-  active_light_indices := make(
-    [dynamic]u32,
-    0,
-    len(self.per_light_data),
-    context.temp_allocator,
-  )
-  defer delete(active_light_indices)
   light_node_indices := make(
     [dynamic]u32,
     0,
@@ -1120,32 +1112,104 @@ record_lighting_pass :: proc(
   }
   slice.sort(light_node_indices[:])
   for light_node_index in light_node_indices {
-    light, ok := self.per_light_data[light_node_index]
-    if !ok do continue
-    if light.light_index >= rd.MAX_LIGHTS do continue
-    append(&active_light_indices, light.light_index)
-    if light.shadow_index == rd.INVALID_SHADOW_INDEX do continue
-    switch &shadow_map in light.shadow.shadow_map[frame_index] {
-    case gpu.Texture2DHandle:
-      shadow_texture_indices[light.light_index] = shadow_map.index
-    case gpu.TextureCubeHandle:
-      shadow_texture_indices[light.light_index] = shadow_map.index
+    light_data := &self.per_light_data[light_node_index]
+    if light_data.light_index >= rd.MAX_LIGHTS do continue
+
+    switch &variant in &light_data.light {
+    case PointLight:
+      shadow_map_idx: u32 = 0xFFFFFFFF
+      shadow_view_projection := matrix[4, 4]f32{}
+      shadow_near: f32 = 0
+      shadow_far: f32 = 0
+      if variant.shadow != nil {
+        sm := variant.shadow.?
+        shadow_map_idx = sm.shadow_map_cube[frame_index].index
+        shadow_view_projection = sm.projection
+        shadow_near = sm.near
+        shadow_far = sm.far
+      }
+      direct_light.render_point_light(
+        &self.direct_light,
+        cam_index,
+        cam.attachments[.POSITION][frame_index].index,
+        cam.attachments[.NORMAL][frame_index].index,
+        cam.attachments[.ALBEDO][frame_index].index,
+        cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+        cam.attachments[.EMISSIVE][frame_index].index,
+        cam.attachments[.FINAL_IMAGE][frame_index].index,
+        variant.color,
+        variant.position,
+        variant.radius,
+        shadow_map_idx,
+        shadow_view_projection,
+        shadow_near,
+        shadow_far,
+        cmd,
+      )
+    case SpotLight:
+      shadow_map_idx: u32 = 0xFFFFFFFF
+      shadow_view_projection := matrix[4, 4]f32{}
+      shadow_near: f32 = 0
+      shadow_far: f32 = 0
+      if variant.shadow != nil {
+        sm := variant.shadow.?
+        shadow_map_idx = sm.shadow_map_2d[frame_index].index
+        shadow_view_projection = sm.view_projection
+        shadow_near = sm.near
+        shadow_far = sm.far
+      }
+      direct_light.render_spot_light(
+        &self.direct_light,
+        cam_index,
+        cam.attachments[.POSITION][frame_index].index,
+        cam.attachments[.NORMAL][frame_index].index,
+        cam.attachments[.ALBEDO][frame_index].index,
+        cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+        cam.attachments[.EMISSIVE][frame_index].index,
+        cam.attachments[.FINAL_IMAGE][frame_index].index,
+        variant.color,
+        variant.position,
+        variant.direction,
+        variant.radius,
+        variant.angle_inner,
+        variant.angle_outer,
+        shadow_map_idx,
+        shadow_view_projection,
+        shadow_near,
+        shadow_far,
+        cmd,
+      )
+    case DirectionalLight:
+      shadow_map_idx: u32 = 0xFFFFFFFF
+      shadow_view_projection := matrix[4, 4]f32{}
+      shadow_near: f32 = 0
+      shadow_far: f32 = 0
+      if variant.shadow != nil {
+        sm := variant.shadow.?
+        shadow_map_idx = sm.shadow_map_2d[frame_index].index
+        shadow_view_projection = sm.view_projection
+        shadow_near = sm.near
+        shadow_far = sm.far
+      }
+      direct_light.render_directional_light(
+        &self.direct_light,
+        cam_index,
+        cam.attachments[.POSITION][frame_index].index,
+        cam.attachments[.NORMAL][frame_index].index,
+        cam.attachments[.ALBEDO][frame_index].index,
+        cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+        cam.attachments[.EMISSIVE][frame_index].index,
+        cam.attachments[.FINAL_IMAGE][frame_index].index,
+        variant.color,
+        variant.direction,
+        shadow_map_idx,
+        shadow_view_projection,
+        shadow_near,
+        shadow_far,
+        cmd,
+      )
     }
   }
-  direct_light.render(
-    &self.direct_light,
-    cam_index,
-    cam.attachments[.POSITION][frame_index].index,
-    cam.attachments[.NORMAL][frame_index].index,
-    cam.attachments[.ALBEDO][frame_index].index,
-    cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    cam.attachments[.EMISSIVE][frame_index].index,
-    cam.attachments[.FINAL_IMAGE][frame_index].index,
-    &shadow_texture_indices,
-    cmd,
-    &self.lights_buffer,
-    active_light_indices[:],
-  )
   direct_light.end_pass(cmd)
   return .SUCCESS
 }
@@ -1687,86 +1751,134 @@ set_texture_cube_descriptor :: proc(
 }
 
 @(private)
-release_shadow_resource :: proc(
+release_shadow_2d :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
-  light: ^PerLightData,
+  shadow: ^ShadowMap,
 ) {
   for frame in 0 ..< rd.FRAMES_IN_FLIGHT {
-    switch &handle in light.shadow_map[frame] {
-    case gpu.Texture2DHandle:
-      gpu.free_texture_2d(&render.texture_manager, gctx, handle)
-    case gpu.TextureCubeHandle:
-      gpu.free_texture_cube(&render.texture_manager, gctx, handle)
-    }
-    gpu.mutable_buffer_destroy(gctx.device, &light.draw_count[frame])
-    gpu.mutable_buffer_destroy(gctx.device, &light.draw_commands[frame])
-    light.shadow_map[frame] = {}
-    light.descriptor_sets[frame] = 0
+    gpu.free_texture_2d(
+      &render.texture_manager,
+      gctx,
+      shadow.shadow_map_2d[frame],
+    )
+    gpu.mutable_buffer_destroy(gctx.device, &shadow.draw_count[frame])
+    gpu.mutable_buffer_destroy(gctx.device, &shadow.draw_commands[frame])
+    shadow.descriptor_sets[frame] = 0
   }
-  light.shadow = {}
-  light.shadow_index = rd.INVALID_SHADOW_INDEX
 }
 
 @(private)
-ensure_shadow_resource :: proc(
+release_shadow_cube :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
-  light: ^PerLightData,
-  light_type: LightType,
-) -> vk.Result {
-  switch light_type {
-  case .SPOT, .DIRECTIONAL:
-    if _, ok := light.shadow_map[0].(gpu.Texture2DHandle); ok do return .SUCCESS
-  case .POINT:
-    if _, ok := light.shadow_map[0].(gpu.TextureCubeHandle); ok do return .SUCCESS
-  }
-  release_shadow_resource(render, gctx, light)
-  light.shadow_index = rd.INVALID_SHADOW_INDEX
+  shadow: ^ShadowMapCube,
+) {
   for frame in 0 ..< rd.FRAMES_IN_FLIGHT {
-    switch light_type {
-    case .SPOT, .DIRECTIONAL:
-      light.shadow_map[frame] = gpu.allocate_texture_2d(
-        &render.texture_manager,
-        gctx,
-        vk.Extent2D{rd.SHADOW_MAP_SIZE, rd.SHADOW_MAP_SIZE},
-        .D32_SFLOAT,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      ) or_return
-    case .POINT:
-      light.shadow_map[frame] = gpu.allocate_texture_cube(
-        &render.texture_manager,
-        gctx,
-        rd.SHADOW_MAP_SIZE,
-        .D32_SFLOAT,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      ) or_return
+    gpu.free_texture_cube(
+      &render.texture_manager,
+      gctx,
+      shadow.shadow_map_cube[frame],
+    )
+    gpu.mutable_buffer_destroy(gctx.device, &shadow.draw_count[frame])
+    gpu.mutable_buffer_destroy(gctx.device, &shadow.draw_commands[frame])
+    shadow.descriptor_sets[frame] = 0
+  }
+}
+
+@(private)
+ensure_shadow_2d_resource :: proc(
+  render: ^Manager,
+  gctx: ^gpu.GPUContext,
+  shadow: ^Maybe(ShadowMap),
+) -> vk.Result {
+  // Check if already allocated
+  if shadow != nil {
+    if sm, ok := shadow^.?; ok {
+      if sm.shadow_map_2d[0].index != 0 do return .SUCCESS
     }
-    light.draw_count[frame] = gpu.create_mutable_buffer(
+  }
+
+  // Allocate new shadow resources
+  sm: ShadowMap
+  for frame in 0 ..< rd.FRAMES_IN_FLIGHT {
+    sm.shadow_map_2d[frame] = gpu.allocate_texture_2d(
+      &render.texture_manager,
+      gctx,
+      vk.Extent2D{rd.SHADOW_MAP_SIZE, rd.SHADOW_MAP_SIZE},
+      .D32_SFLOAT,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    ) or_return
+    sm.draw_count[frame] = gpu.create_mutable_buffer(
       gctx,
       u32,
       1,
       {.STORAGE_BUFFER, .INDIRECT_BUFFER},
     ) or_return
-    light.draw_commands[frame] = gpu.create_mutable_buffer(
+    sm.draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,
       vk.DrawIndexedIndirectCommand,
       rd.MAX_NODES_IN_SCENE,
       {.STORAGE_BUFFER, .INDIRECT_BUFFER},
     ) or_return
-    light.descriptor_sets[frame] = gpu.create_descriptor_set(
+    sm.descriptor_sets[frame] = gpu.create_descriptor_set(
       gctx,
       &render.shadow_culling.descriptor_layout,
       {.STORAGE_BUFFER, gpu.buffer_info(&render.node_data_buffer.buffer)},
       {.STORAGE_BUFFER, gpu.buffer_info(&render.mesh_data_buffer.buffer)},
-      {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&render.shadow_data_buffer.buffers[frame]),
-      },
-      {.STORAGE_BUFFER, gpu.buffer_info(&light.draw_count[frame])},
-      {.STORAGE_BUFFER, gpu.buffer_info(&light.draw_commands[frame])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&sm.draw_count[frame])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&sm.draw_commands[frame])},
     ) or_return
   }
+  shadow^ = sm
+  return .SUCCESS
+}
+
+@(private)
+ensure_shadow_cube_resource :: proc(
+  render: ^Manager,
+  gctx: ^gpu.GPUContext,
+  shadow: ^Maybe(ShadowMapCube),
+) -> vk.Result {
+  // Check if already allocated
+  if shadow != nil {
+    if sm, ok := shadow^.?; ok {
+      if sm.shadow_map_cube[0].index != 0 do return .SUCCESS
+    }
+  }
+
+  // Allocate new shadow resources
+  sm: ShadowMapCube
+  for frame in 0 ..< rd.FRAMES_IN_FLIGHT {
+    sm.shadow_map_cube[frame] = gpu.allocate_texture_cube(
+      &render.texture_manager,
+      gctx,
+      rd.SHADOW_MAP_SIZE,
+      .D32_SFLOAT,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    ) or_return
+    sm.draw_count[frame] = gpu.create_mutable_buffer(
+      gctx,
+      u32,
+      1,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    ) or_return
+    sm.draw_commands[frame] = gpu.create_mutable_buffer(
+      gctx,
+      vk.DrawIndexedIndirectCommand,
+      rd.MAX_NODES_IN_SCENE,
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    ) or_return
+    sm.descriptor_sets[frame] = gpu.create_descriptor_set(
+      gctx,
+      &render.shadow_sphere_culling.descriptor_layout,
+      {.STORAGE_BUFFER, gpu.buffer_info(&render.node_data_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&render.mesh_data_buffer.buffer)},
+      {.STORAGE_BUFFER, gpu.buffer_info(&sm.draw_count[frame])},
+      {.STORAGE_BUFFER, gpu.buffer_info(&sm.draw_commands[frame])},
+    ) or_return
+  }
+  shadow^ = sm
   return .SUCCESS
 }
 
@@ -1774,24 +1886,93 @@ upsert_light_entry :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
   light_node_index: u32,
-  light_data: ^rd.Light,
+  light_data: ^Light,
+  cast_shadow: bool,
 ) -> vk.Result {
-  light, ok := render.per_light_data[light_node_index]
-  if !ok {
-    light = PerLightData {
-      light_index  = rd.MAX_LIGHTS,
-      shadow_index = rd.INVALID_SHADOW_INDEX,
+  is_existing := light_node_index in render.per_light_data
+
+  if is_existing {
+    // UPDATE PATH: Preserve shadow resources when updating light properties
+    light := &render.per_light_data[light_node_index]
+    existing_shadow_2d: Maybe(ShadowMap)
+    existing_shadow_cube: Maybe(ShadowMapCube)
+
+    #partial switch &variant in &light.light {
+    case SpotLight:
+      existing_shadow_2d = variant.shadow
+    case DirectionalLight:
+      existing_shadow_2d = variant.shadow
+    case PointLight:
+      existing_shadow_cube = variant.shadow
+    }
+
+    // Update light data
+    light.light = light_data^
+
+    // Restore preserved shadows
+    #partial switch &variant in &light.light {
+    case SpotLight:
+      variant.shadow = existing_shadow_2d
+    case DirectionalLight:
+      variant.shadow = existing_shadow_2d
+    case PointLight:
+      variant.shadow = existing_shadow_cube
+    }
+  } else {
+    // INSERT PATH: Create new entry (no shadows to preserve)
+    render.per_light_data[light_node_index] = PerLightData {
+      light       = light_data^,
+      light_index = rd.MAX_LIGHTS,
     }
   }
-  light.light = light_data^
-  light.light.shadow_index = rd.INVALID_SHADOW_INDEX
-  light.shadow_index = rd.INVALID_SHADOW_INDEX
-  if light.light.cast_shadow {
-    ensure_shadow_resource(render, gctx, &light, light.light.type) or_return
+
+  // Manage shadow resources (common for both insert and update)
+  light := &render.per_light_data[light_node_index]
+  if cast_shadow {
+    shadow_result: vk.Result
+    switch &variant in &light.light {
+    case PointLight:
+      shadow_result = ensure_shadow_cube_resource(
+        render,
+        gctx,
+        &variant.shadow,
+      )
+    case SpotLight:
+      shadow_result = ensure_shadow_2d_resource(render, gctx, &variant.shadow)
+    case DirectionalLight:
+      shadow_result = ensure_shadow_2d_resource(render, gctx, &variant.shadow)
+    }
+    if shadow_result != .SUCCESS {
+      log.warnf(
+        "Failed to allocate shadow resources for light %d: %v (shadows disabled)",
+        light_node_index,
+        shadow_result,
+      )
+    }
   } else {
-    release_shadow_resource(render, gctx, &light)
+    // Release shadow resources if they exist
+    switch &variant in &light.light {
+    case PointLight:
+      if variant.shadow != nil {
+        sm := variant.shadow.?
+        release_shadow_cube(render, gctx, &sm)
+        variant.shadow = nil
+      }
+    case SpotLight:
+      if variant.shadow != nil {
+        sm := variant.shadow.?
+        release_shadow_2d(render, gctx, &sm)
+        variant.shadow = nil
+      }
+    case DirectionalLight:
+      if variant.shadow != nil {
+        sm := variant.shadow.?
+        release_shadow_2d(render, gctx, &sm)
+        variant.shadow = nil
+      }
+    }
   }
-  render.per_light_data[light_node_index] = light
+
   return .SUCCESS
 }
 
@@ -1802,7 +1983,26 @@ remove_light_entry :: proc(
 ) {
   light, ok := render.per_light_data[light_node_index]
   if !ok do return
-  release_shadow_resource(render, gctx, &light)
+
+  // Release shadow resources if they exist
+  switch &variant in light.light {
+  case PointLight:
+    if variant.shadow != nil {
+      sm := variant.shadow.?
+      release_shadow_cube(render, gctx, &sm)
+    }
+  case SpotLight:
+    if variant.shadow != nil {
+      sm := variant.shadow.?
+      release_shadow_2d(render, gctx, &sm)
+    }
+  case DirectionalLight:
+    if variant.shadow != nil {
+      sm := variant.shadow.?
+      release_shadow_2d(render, gctx, &sm)
+    }
+  }
+
   delete_key(&render.per_light_data, light_node_index)
 }
 

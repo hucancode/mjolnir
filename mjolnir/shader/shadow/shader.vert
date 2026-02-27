@@ -2,21 +2,11 @@
 
 layout(location = 0) in vec3 inPosition;
 
-struct ShadowData {
-    mat4 view;
-    mat4 projection;
-    vec3 position;
-    float near;
-    vec3 direction;
-    float far;
-    vec4 frustum_planes[6];
+layout(push_constant) uniform PushConstants {
+    mat4 view_projection;
 };
 
-layout(set = 0, binding = 0) readonly buffer ShadowBuffer {
-    ShadowData shadows[];
-};
-
-layout(set = 2, binding = 0) readonly buffer BoneMatrices {
+layout(set = 1, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 
@@ -28,7 +18,7 @@ struct NodeData {
     uint flags;
 };
 
-layout(set = 4, binding = 0) readonly buffer NodeBuffer {
+layout(set = 3, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
@@ -45,7 +35,7 @@ struct MeshData {
     uint _padding;
 };
 
-layout(set = 5, binding = 0) readonly buffer MeshBuffer {
+layout(set = 4, binding = 0) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
@@ -54,16 +44,11 @@ struct VertexSkinningData {
     vec4 weights;
 };
 
-layout(set = 6, binding = 0) readonly buffer VertexSkinningBuffer {
+layout(set = 5, binding = 0) readonly buffer VertexSkinningBuffer {
     VertexSkinningData vertex_skinning[];
 };
 
-layout(push_constant) uniform PushConstants {
-    uint shadow_index;
-};
-
 void main() {
-    ShadowData shadow = shadows[shadow_index];
     uint node_index = uint(gl_InstanceIndex);
     mat4 world = nodes[node_index].world_matrix;
     NodeData node = nodes[node_index];
@@ -86,5 +71,5 @@ void main() {
         model_position = vec4(inPosition, 1.0);
     }
     vec4 world_position = world * model_position;
-    gl_Position = shadow.projection * shadow.view * world_position;
+    gl_Position = view_projection * world_position;
 }

@@ -5,16 +5,6 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
 const uint INVALID_ID = 0xFFFFFFFFu;
 
-struct ShadowData {
-    mat4 view;
-    mat4 projection;
-    vec3 position;
-    float near;
-    vec3 direction;
-    float far;
-    vec4 frustum_planes[6];
-};
-
 struct NodeData {
     mat4 world_matrix;
     uint material_id;
@@ -43,7 +33,7 @@ struct DrawCommand {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint shadow_index;
+    vec4 frustum_planes[6];  // 96 bytes
     uint node_count;
     uint max_draws;
     uint include_flags;
@@ -58,21 +48,17 @@ layout(set = 0, binding = 1) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
-layout(set = 0, binding = 2) readonly buffer ShadowBuffer {
-    ShadowData shadows[];
-};
-
-layout(set = 0, binding = 3) buffer DrawCountBuffer {
+layout(set = 0, binding = 2) buffer DrawCountBuffer {
     uint draw_count;
 };
 
-layout(set = 0, binding = 4) buffer DrawCommandBuffer {
+layout(set = 0, binding = 3) buffer DrawCommandBuffer {
     DrawCommand commands[];
 };
 
-bool frustum_cull(vec3 center, vec3 extent, ShadowData shadow) {
+bool frustum_cull(vec3 center, vec3 extent) {
     for (int i = 0; i < 6; ++i) {
-        vec4 plane_raw = shadow.frustum_planes[i];
+        vec4 plane_raw = params.frustum_planes[i];
         float denom = length(plane_raw.xyz);
         if (denom <= 1e-6) continue;
 
@@ -103,7 +89,6 @@ void main() {
     }
 
     MeshData mesh = meshes[node.mesh_id];
-    ShadowData shadow = shadows[params.shadow_index];
     mat4 world = nodes[node_id].world_matrix;
 
     vec3 local_min = mesh.aabb_min;
@@ -118,7 +103,7 @@ void main() {
 
     bool visible = true;
     if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
-        visible = frustum_cull(world_center, world_extent, shadow);
+        visible = frustum_cull(world_center, world_extent);
     }
     if (!visible) return;
 

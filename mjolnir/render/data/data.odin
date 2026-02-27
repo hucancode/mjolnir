@@ -130,22 +130,11 @@ Sprite :: struct {
   frame_index:   u32,
 }
 
+// Legacy LightType enum - kept for shader compatibility
 LightType :: enum u32 {
   POINT       = 0,
   DIRECTIONAL = 1,
   SPOT        = 2,
-}
-
-Light :: struct {
-  color:        [4]f32, // RGB + intensity
-  position:     [3]f32, // world position
-  type:         LightType, // LightType
-  direction:    [3]f32, // world forward direction
-  radius:       f32, // range for point/spot lights
-  angle_inner:  f32, // inner cone angle for spot lights
-  angle_outer:  f32, // outer cone angle for spot lights
-  cast_shadow:  b32, // 0 = no shadow, 1 = cast shadow
-  shadow_index: u32, // index into shadow buffers
 }
 
 Camera :: struct {
@@ -156,16 +145,6 @@ Camera :: struct {
   far:             f32,
   position:        [4]f32,
   frustum_planes:  [6][4]f32,
-}
-
-ShadowData :: struct {
-  view:           matrix[4, 4]f32,
-  projection:     matrix[4, 4]f32,
-  position:       [3]f32,
-  near:           f32,
-  direction:      [3]f32,
-  far:            f32,
-  frustum_planes: [6][4]f32,
 }
 
 Particle :: struct {
