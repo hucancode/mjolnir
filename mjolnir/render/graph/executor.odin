@@ -1,6 +1,7 @@
 package render_graph
 
 import "core:fmt"
+import "core:log"
 import vk "vendor:vulkan"
 
 // ============================================================================
@@ -12,14 +13,11 @@ execute :: proc(
 	frame_index: u32,
 	cmd: vk.CommandBuffer,
 ) {
-	import "core:fmt"
-	import "core:log"
-
 	// Process passes in sorted order
 	for pass_id in graph.sorted_passes {
 		pass := get_pass(graph, pass_id)
 
-		log.infof("Executing pass: %s", pass.name)
+		log.debugf("Executing pass: %s", pass.name)
 
 		// Emit barriers before pass
 		emit_barriers_for_pass(graph, pass_id, cmd)

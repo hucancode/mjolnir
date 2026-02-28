@@ -20,6 +20,7 @@ import "gpu"
 import nav "navigation"
 import "render"
 import rd "render/data"
+import rg "render/graph"
 import "render/debug_ui"
 import occlusion_culling "render/occlusion_culling"
 import ui_module "ui"
@@ -158,6 +159,9 @@ init :: proc(
     self.swapchain.format.format,
     get_window_dpi(self.window),
   ) or_return
+
+  // NOTE: Frame graph compilation is deferred until after cameras are registered
+  // It will be compiled on first render_and_present() call if use_frame_graph is enabled
 
   if self.gctx.has_async_compute {
     log.infof(
@@ -1203,6 +1207,107 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   command_buffer := self.render.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
+
+  // Always use frame graph
+  render_with_frame_graph(self, command_buffer) or_return
+
+  gpu.end_record(command_buffer) or_return
+
+  // Frame graph doesn't support async compute yet
+  // Submit only graphics command buffer (compute commands are recorded there too)
+  // Pass nil for compute to prevent submitting unrecorded compute buffer
+  if self.gctx.has_async_compute {
+    // Temporarily disable async compute for frame graph
+    old_has_async := self.gctx.has_async_compute
+    self.gctx.has_async_compute = false
+    gpu.submit_queue_and_present(
+      &self.gctx,
+      &self.swapchain,
+      &command_buffer,
+      &command_buffer,  // Use graphics cmd for both
+      self.frame_index,
+    ) or_return
+    self.gctx.has_async_compute = old_has_async
+  } else {
+    gpu.submit_queue_and_present(
+      &self.gctx,
+      &self.swapchain,
+      &command_buffer,
+      &command_buffer,
+      self.frame_index,
+    ) or_return
+  }
+  self.frame_index = alg.next(self.frame_index, FRAMES_IN_FLIGHT)
+  self.last_render_timestamp = time.now()
+  return .SUCCESS
+}
+
+// Frame graph rendering path
+render_with_frame_graph :: proc(self: ^Engine, command_buffer: vk.CommandBuffer) -> vk.Result {
+  // Check if graph needs (re)compilation
+  need_compile := false
+
+  if self.render.frame_graph.sorted_passes == nil {
+    log.info("Compiling frame graph on first use...")
+    need_compile = true
+  } else {
+    // Check if topology changed (cameras/lights added/removed)
+    if len(self.render.frame_graph.camera_handles) != len(self.render.per_camera_data) ||
+       len(self.render.frame_graph.light_handles) != len(self.render.per_light_data) {
+      log.info("Frame graph topology changed, recompiling...")
+      need_compile = true
+    }
+  }
+
+  if need_compile {
+    if render.compile_frame_graph(&self.render, &self.gctx) != .SUCCESS {
+      log.error("Frame graph compilation failed!")
+      return .ERROR_UNKNOWN
+    }
+  }
+
+  // Set swapchain context for passes that need it
+  self.render.current_swapchain_image = self.swapchain.images[self.swapchain.image_index]
+  self.render.current_swapchain_view = self.swapchain.views[self.swapchain.image_index]
+  self.render.current_swapchain_extent = self.swapchain.extent
+
+  // Assign light indices and compute shadow matrices before any GPU work.
+  // The graph's shadow_culling/shadow_render passes depend on these being set.
+  render.prepare_lights_for_frame(&self.render)
+
+  // Execute frame graph
+  rg.run_graph(&self.render.frame_graph, self.frame_index, command_buffer)
+
+  // Transition swapchain image to present layout
+  present_barrier := vk.ImageMemoryBarrier{
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    dstAccessMask = {},
+    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    newLayout = .PRESENT_SRC_KHR,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = self.swapchain.images[self.swapchain.image_index],
+    subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.BOTTOM_OF_PIPE},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &present_barrier,
+  )
+
+  return .SUCCESS
+}
+
+// Legacy rendering path (original implementation)
+render_with_legacy_path :: proc(self: ^Engine, command_buffer: vk.CommandBuffer) -> vk.Result {
   render.render_shadow_depth(&self.render, self.frame_index) or_return
   for &entry, cam_index in self.world.cameras.entries {
     if !entry.active do continue
@@ -1320,16 +1425,6 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     1,
     &present_barrier,
   )
-  gpu.end_record(command_buffer) or_return
-  gpu.submit_queue_and_present(
-    &self.gctx,
-    &self.swapchain,
-    &command_buffer,
-    &compute_cmd_buffer,
-    self.frame_index,
-  ) or_return
-  self.frame_index = alg.next(self.frame_index, FRAMES_IN_FLIGHT)
-  self.last_render_timestamp = time.now()
   return .SUCCESS
 }
 

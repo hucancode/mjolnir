@@ -25,34 +25,61 @@ compile :: proc(
 	instances := instantiate_passes(pass_decls, ctx) or_return
 
 	// Step 2: Run setup callbacks to collect resource declarations
+	// IMPORTANT: All passes share the same resources array so later passes
+	// can find resources registered by earlier passes via find_texture/find_buffer
 	all_resources: [dynamic]ResourceDecl
 	defer delete(all_resources)
+
+	// Track which declaration each instance came from
+	decl_for_instance := make([dynamic]int, len(instances))
+	defer delete(decl_for_instance)
 
 	for &instance in instances {
 		setup := PassSetup{
 			pass_name = instance.name,
 			pass_scope = instance.scope,
 			instance_idx = instance.instance,
-			resources = make([dynamic]ResourceDecl),
+			resources = all_resources, // Share the same array across all passes
 			reads = make([dynamic]ResourceAccess),
 			writes = make([dynamic]ResourceAccess),
 		}
 
-		// Call setup callback
-		if instance.execute != nil && pass_decls[instance.instance].setup != nil {
-			pass_decls[instance.instance].setup(&setup, instance.user_data)
+		// Find which PassDecl this instance came from by matching the base name
+		decl_idx := -1
+		for decl, idx in pass_decls {
+			// Instance names are formatted as "name" (GLOBAL) or "name_cam_N" (PER_CAMERA) or "name_light_N" (PER_LIGHT)
+			// Check if instance name matches this decl
+			if instance.scope == .GLOBAL && instance.name == decl.name {
+				decl_idx = idx
+				break
+			} else if instance.scope == .PER_CAMERA && strings.has_prefix(instance.name, fmt.tprintf("%s_cam_", decl.name)) {
+				decl_idx = idx
+				break
+			} else if instance.scope == .PER_LIGHT && strings.has_prefix(instance.name, fmt.tprintf("%s_light_", decl.name)) {
+				decl_idx = idx
+				break
+			}
 		}
 
-		// Copy dependencies to instance
+		if decl_idx == -1 {
+			fmt.eprintf("ERROR: Could not find PassDecl for instance '%s'\n", instance.name)
+			continue
+		}
+
+		// Call the CORRECT setup callback for this pass
+		if pass_decls[decl_idx].setup != nil {
+			pass_decls[decl_idx].setup(&setup, instance.user_data)
+		}
+
+		// Update shared resources array (in case it was reallocated during append)
+		all_resources = setup.resources
+
+		// Copy dependencies to instance (instance now owns these arrays)
 		instance.reads = setup.reads
 		instance.writes = setup.writes
 
-		// Merge resources into global list
-		for res in setup.resources {
-			append(&all_resources, res)
-		}
-
-		delete(setup.resources)
+		// NOTE: Do NOT delete setup.reads/writes here - they're now owned by instance!
+		// Only the resources array is shared across passes
 	}
 
 	// Step 3: Create resource instances
@@ -107,6 +134,15 @@ compile :: proc(
 	// Step 7: Eliminate dead passes
 	live_passes := eliminate_dead_passes(&graph, edges)
 	defer delete(live_passes)
+
+	when ODIN_DEBUG {
+		fmt.println("\n=== DEAD PASS ELIMINATION ===")
+		for &pass, idx in graph.pass_instances {
+			status := live_passes[idx] ? "LIVE" : "DEAD"
+			fmt.printf("[%s] %s\n", status, pass.name)
+		}
+		fmt.println("=============================\n")
+	}
 
 	// Step 8: Topological sort
 	sorted := topological_sort(&graph, edges, live_passes) or_return
@@ -262,11 +298,20 @@ build_dependency_edges :: proc(
 
 			// Find last writer
 			if writer_id, found := last_writer[read.resource_name]; found {
-				// Add edge: writer -> this pass
+				// Add edge: writer -> this pass (deduplicate)
 				if writer_id not_in edges {
 					edges[writer_id] = make([dynamic]PassInstanceId)
 				}
-				append(&edges[writer_id], pass_id)
+				already_has_edge := false
+				for existing in edges[writer_id] {
+					if existing == pass_id {
+						already_has_edge = true
+						break
+					}
+				}
+				if !already_has_edge {
+					append(&edges[writer_id], pass_id)
+				}
 			}
 		}
 
@@ -274,6 +319,21 @@ build_dependency_edges :: proc(
 		for write in pass.writes {
 			if write.frame_offset == .CURRENT {
 				last_writer[write.resource_name] = pass_id
+			}
+		}
+	}
+
+	when ODIN_DEBUG {
+		fmt.println("[GRAPH] Dependency edges:")
+		for from_id, to_list in edges {
+			from_pass := &graph.pass_instances[from_id]
+			if len(to_list) == 0 {
+				fmt.printf("  %s → (no downstream consumers)\n", from_pass.name)
+			} else {
+				for to_id in to_list {
+					to_pass := &graph.pass_instances[to_id]
+					fmt.printf("  %s → %s\n", from_pass.name, to_pass.name)
+				}
 			}
 		}
 	}
@@ -302,6 +362,7 @@ eliminate_dead_passes :: proc(
 		pass_id := PassInstanceId(idx)
 		if pass_id not_in edges || len(edges[pass_id]) == 0 {
 			live[idx] = true
+			when ODIN_DEBUG { fmt.printf("[GRAPH] Sink pass (no downstream): %s\n", pass.name) }
 		}
 	}
 
@@ -324,12 +385,27 @@ eliminate_dead_passes :: proc(
 
 						for write in other_pass.writes {
 							if write.resource_name == read.resource_name {
+								when ODIN_DEBUG {
+									fmt.printf("[GRAPH] Marking %s as live (writes %s for %s)\n",
+										other_pass.name, write.resource_name, pass.name)
+								}
 								live[other_idx] = true
 								changed = true
 							}
 						}
 					}
 				}
+			}
+		}
+	}
+
+	when ODIN_DEBUG {
+		fmt.println("[GRAPH] Dead pass elimination results:")
+		for &pass, idx in graph.pass_instances {
+			if live[idx] {
+				fmt.printf("  ✓ LIVE: %s\n", pass.name)
+			} else {
+				fmt.printf("  ✗ DEAD: %s (eliminated)\n", pass.name)
 			}
 		}
 	}

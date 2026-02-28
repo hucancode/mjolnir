@@ -5,6 +5,7 @@ import cont "../containers"
 import geom "../geometry"
 import "../gpu"
 import cmd "../gpu/ui"
+import graph "graph"
 import "ambient"
 import "core:log"
 import "core:math"
@@ -33,6 +34,7 @@ import vk "vendor:vulkan"
 import "wireframe"
 
 FRAMES_IN_FLIGHT :: rd.FRAMES_IN_FLIGHT
+USE_FRAME_GRAPH :: #config(USE_FRAME_GRAPH, true)
 
 Handle :: rd.Handle
 MeshHandle :: rd.MeshHandle
@@ -137,6 +139,12 @@ DEBUG_BONE_PALETTE :: [6][4]f32 {
 Manager :: struct {
   command_buffers:              [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers:      [FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  // Frame graph
+  frame_graph:                  graph.Graph,
+  // Swapchain context for frame graph (set per-frame)
+  current_swapchain_image:      vk.Image,
+  current_swapchain_view:       vk.ImageView,
+  current_swapchain_extent:     vk.Extent2D,
   geometry:                     geometry.Renderer,
   ambient:                      ambient.Renderer,
   direct_light:                 direct_light.Renderer,
@@ -842,8 +850,11 @@ shadow_make_light_view :: proc(
   return linalg.matrix4_look_at(position, target, up)
 }
 
-render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
+// prepare_lights_for_frame assigns sequential light indices and computes shadow
+// matrices (view, projection, frustum planes) for all lights. Must be called
+// once per frame before any shadow culling/rendering, whether via the legacy
+// path or the frame graph path.
+prepare_lights_for_frame :: proc(self: ^Manager) {
   light_node_indices := make(
     [dynamic]u32,
     0,
@@ -855,13 +866,6 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
     append(&light_node_indices, light_node_index)
   }
   slice.sort(light_node_indices[:])
-  active_shadow_keys := make(
-    [dynamic]u32,
-    0,
-    len(light_node_indices),
-    context.temp_allocator,
-  )
-  defer delete(active_shadow_keys)
   next_light_index: u32 = 0
   for light_node_index in light_node_indices {
     light := &self.per_light_data[light_node_index]
@@ -881,7 +885,6 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
           shadow.far,
           flip_z_axis = false,
         )
-        append(&active_shadow_keys, light_node_index)
       }
     case SpotLight:
       shadow, has_shadow := &variant.shadow.?
@@ -901,7 +904,6 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
         shadow.view_projection = shadow.projection * shadow.view
         shadow.frustum_planes =
           geom.make_frustum(shadow.view_projection).planes
-        append(&active_shadow_keys, light_node_index)
       }
     case DirectionalLight:
       shadow, has_shadow := &variant.shadow.?
@@ -922,8 +924,31 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
         shadow.view_projection = shadow.projection * shadow.view
         shadow.frustum_planes =
           geom.make_frustum(shadow.view_projection).planes
-        append(&active_shadow_keys, light_node_index)
       }
+    }
+  }
+}
+
+render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
+  cmd := self.command_buffers[frame_index]
+  prepare_lights_for_frame(self)
+  active_shadow_keys := make(
+    [dynamic]u32,
+    0,
+    len(self.per_light_data),
+    context.temp_allocator,
+  )
+  defer delete(active_shadow_keys)
+  for light_node_index in self.per_light_data {
+    light_data := &self.per_light_data[light_node_index]
+    if light_data.light_index >= rd.MAX_LIGHTS do continue
+    switch &variant in light_data.light {
+    case PointLight:
+      if variant.shadow != nil do append(&active_shadow_keys, light_node_index)
+    case SpotLight:
+      if variant.shadow != nil do append(&active_shadow_keys, light_node_index)
+    case DirectionalLight:
+      if variant.shadow != nil do append(&active_shadow_keys, light_node_index)
     }
   }
   for light_node_index in active_shadow_keys {
@@ -2666,4 +2691,102 @@ camera_resize :: proc(
 
   log.infof("Camera resized to %dx%d", extent.width, extent.height)
   return .SUCCESS
+}
+
+// ============================================================================
+// Frame Graph Compilation
+// ============================================================================
+
+// Compile frame graph from current topology (camera/light counts)
+compile_frame_graph :: proc(
+	self: ^Manager,
+	gctx: ^gpu.GPUContext,
+) -> vk.Result {
+	log.info("Compiling frame graph...")
+
+	// Build camera and light handle arrays for graph context
+	camera_handles := make([dynamic]u32, 0, len(self.per_camera_data))
+	defer delete(camera_handles)
+	for handle in self.per_camera_data {
+		append(&camera_handles, handle)
+	}
+	slice.sort(camera_handles[:])
+
+	light_handles := make([dynamic]u32, 0, len(self.per_light_data))
+	defer delete(light_handles)
+	for handle in self.per_light_data {
+		append(&light_handles, handle)
+	}
+	slice.sort(light_handles[:])
+
+	log.infof("Frame graph topology: %d cameras, %d lights", len(camera_handles), len(light_handles))
+
+	// Validate we have at least one camera
+	if len(camera_handles) == 0 {
+		log.warn("No cameras registered - frame graph requires at least one camera")
+		return .ERROR_UNKNOWN
+	}
+
+	// Create compile context
+	ctx := graph.CompileContext{
+		num_cameras = len(camera_handles),
+		num_lights = len(light_handles),
+		frames_in_flight = FRAMES_IN_FLIGHT,
+		gctx = gctx,
+		camera_handles = camera_handles[:],
+		light_handles = light_handles[:],
+	}
+
+	// Build pass declarations
+	pass_decls := build_pass_declarations(self)
+	defer delete(pass_decls)
+
+	// If graph exists, rebuild it; otherwise build new
+	if self.frame_graph.sorted_passes != nil {
+		err := graph.rebuild_graph(&self.frame_graph, pass_decls[:], ctx)
+		if err != .NONE {
+			log.errorf("Failed to rebuild frame graph: %v", err)
+			return .ERROR_UNKNOWN
+		}
+	} else {
+		new_graph, err := graph.build_graph(pass_decls[:], ctx)
+		if err != .NONE {
+			log.errorf("Failed to build frame graph: %v", err)
+			return .ERROR_UNKNOWN
+		}
+		self.frame_graph = new_graph
+	}
+
+	log.infof("Frame graph compiled: %d passes, %d cameras, %d lights",
+		len(self.frame_graph.sorted_passes), len(camera_handles), len(light_handles))
+
+	return .SUCCESS
+}
+
+// get_camera_handle_by_index returns the actual camera handle for the N-th camera
+// (sorted by handle value, matching compile_frame_graph ordering).
+get_camera_handle_by_index :: proc(self: ^Manager, instance_idx: u32) -> u32 {
+	handles := make([dynamic]u32, 0, len(self.per_camera_data), context.temp_allocator)
+	for h in self.per_camera_data {
+		append(&handles, h)
+	}
+	slice.sort(handles[:])
+	if int(instance_idx) < len(handles) {
+		return handles[instance_idx]
+	}
+	return 0
+}
+
+// get_light_handle_by_index returns the actual light handle for the N-th light
+// (sorted by handle value, matching compile_frame_graph ordering).
+get_light_handle_by_index :: proc(self: ^Manager, instance_idx: u32) -> u32 {
+	handles := make([dynamic]u32, 0, len(self.per_light_data), context.temp_allocator)
+	for h in self.per_light_data {
+		append(&handles, h)
+	}
+	slice.sort(handles[:])
+	if int(instance_idx) < len(handles) {
+		return handles[instance_idx]
+	}
+	return 0
 }

@@ -40,7 +40,7 @@ compute_barriers :: proc(graph: ^Graph) {
 		}
 
 		// Update resource state after pass executes
-		update_resource_state(pass, &resource_state)
+		update_resource_state(pass, &resource_state, graph)
 	}
 }
 
@@ -55,14 +55,20 @@ ResourceState :: struct {
 	last_queue:  QueueType,
 }
 
-update_resource_state :: proc(pass: ^PassInstance, state: ^map[string]ResourceState) {
+update_resource_state :: proc(pass: ^PassInstance, state: ^map[string]ResourceState, graph: ^Graph) {
 	// Update state for all writes
 	for write in pass.writes {
 		if write.frame_offset != .CURRENT {
 			continue
 		}
 
-		new_state := infer_resource_state_after_access(write.access_mode, pass.queue)
+		// Get resource for depth/stencil detection
+		res: ^ResourceInstance = nil
+		if res_id, found := find_resource_by_name(graph, write.resource_name); found {
+			res = get_resource(graph, res_id)
+		}
+
+		new_state := infer_resource_state_after_access(write.access_mode, pass.queue, res)
 		state[write.resource_name] = new_state
 	}
 
@@ -74,7 +80,13 @@ update_resource_state :: proc(pass: ^PassInstance, state: ^map[string]ResourceSt
 
 		// Only update if this is a "consuming" read that changes state
 		if pass.queue == .GRAPHICS {
-			new_state := infer_resource_state_after_access(.READ, pass.queue)
+			// Get resource for depth/stencil detection
+			res: ^ResourceInstance = nil
+			if res_id, found := find_resource_by_name(graph, read.resource_name); found {
+				res = get_resource(graph, res_id)
+			}
+
+			new_state := infer_resource_state_after_access(.READ, pass.queue, res)
 			// Don't overwrite write state with read state
 			if _, exists := state[read.resource_name]; !exists {
 				state[read.resource_name] = new_state
@@ -109,8 +121,8 @@ emit_full_barrier :: proc(
 		current_state = get_initial_resource_state(res)
 	}
 
-	// Infer desired state
-	desired_state := infer_resource_state_before_access(access, queue)
+	// Infer desired state (pass resource for depth/stencil detection)
+	desired_state := infer_resource_state_before_access(access, queue, res)
 
 	// Create barrier
 	barrier := create_barrier(res, current_state, desired_state)
@@ -142,7 +154,7 @@ emit_memory_barrier :: proc(
 		current_state = get_initial_resource_state(res)
 	}
 
-	desired_state := infer_resource_state_before_access(access, queue)
+	desired_state := infer_resource_state_before_access(access, queue, res)
 
 	// Create barrier with memory-only synchronization
 	barrier := create_memory_barrier(res, current_state, desired_state)
@@ -219,24 +231,48 @@ get_initial_resource_state :: proc(res: ^ResourceInstance) -> ResourceState {
 	}
 }
 
-infer_resource_state_before_access :: proc(access: AccessMode, queue: QueueType) -> ResourceState {
+infer_resource_state_before_access :: proc(access: AccessMode, queue: QueueType, res: ^ResourceInstance = nil) -> ResourceState {
 	state := ResourceState{}
+
+	// Check if this is a depth/stencil texture
+	is_depth := false
+	if res != nil && (res.type == .TEXTURE_2D || res.type == .TEXTURE_CUBE) {
+		is_depth = .DEPTH in res.texture_desc.aspect || .STENCIL in res.texture_desc.aspect
+	}
 
 	switch queue {
 	case .GRAPHICS:
 		switch access {
 		case .READ:
-			state.last_stage = {.FRAGMENT_SHADER}
-			state.last_access = {.SHADER_READ}
-			state.last_layout = .SHADER_READ_ONLY_OPTIMAL
+			if is_depth {
+				state.last_stage = {.EARLY_FRAGMENT_TESTS}
+				state.last_access = {.DEPTH_STENCIL_ATTACHMENT_READ}
+				state.last_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL
+			} else {
+				state.last_stage = {.FRAGMENT_SHADER}
+				state.last_access = {.SHADER_READ}
+				state.last_layout = .SHADER_READ_ONLY_OPTIMAL
+			}
 		case .WRITE:
-			state.last_stage = {.COLOR_ATTACHMENT_OUTPUT}
-			state.last_access = {.COLOR_ATTACHMENT_WRITE}
-			state.last_layout = .COLOR_ATTACHMENT_OPTIMAL
+			if is_depth {
+				state.last_stage = {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS}
+				state.last_access = {.DEPTH_STENCIL_ATTACHMENT_WRITE}
+				state.last_layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+			} else {
+				state.last_stage = {.COLOR_ATTACHMENT_OUTPUT}
+				state.last_access = {.COLOR_ATTACHMENT_WRITE}
+				state.last_layout = .COLOR_ATTACHMENT_OPTIMAL
+			}
 		case .READ_WRITE:
-			state.last_stage = {.FRAGMENT_SHADER}
-			state.last_access = {.SHADER_READ, .SHADER_WRITE}
-			state.last_layout = .GENERAL
+			if is_depth {
+				state.last_stage = {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS}
+				state.last_access = {.DEPTH_STENCIL_ATTACHMENT_READ, .DEPTH_STENCIL_ATTACHMENT_WRITE}
+				state.last_layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+			} else {
+				state.last_stage = {.FRAGMENT_SHADER}
+				state.last_access = {.SHADER_READ, .SHADER_WRITE}
+				state.last_layout = .GENERAL
+			}
 		}
 
 	case .COMPUTE:
@@ -259,7 +295,7 @@ infer_resource_state_before_access :: proc(access: AccessMode, queue: QueueType)
 	return state
 }
 
-infer_resource_state_after_access :: proc(access: AccessMode, queue: QueueType) -> ResourceState {
+infer_resource_state_after_access :: proc(access: AccessMode, queue: QueueType, res: ^ResourceInstance = nil) -> ResourceState {
 	// After access, resource is in the state that the access left it in
-	return infer_resource_state_before_access(access, queue)
+	return infer_resource_state_before_access(access, queue, res)
 }
