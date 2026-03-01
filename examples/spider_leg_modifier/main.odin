@@ -39,9 +39,8 @@ main :: proc() {
     // Configure 6 legs with spider leg modifiers
     // Each leg has 6 bones (bone_0 to bone_5)
     // Time offsets arranged for diagonal alternating pairs:
-    // - Pair 1 (0.0): Front right + Back left
-    // - Pair 2 (0.33): Middle right + Middle left
-    // - Pair 3 (0.67): Front left + Back right
+    lift_frequency :: 1.5
+    half_frequency :: lift_frequency * 0.5
     leg_configs := []struct {
       root_name:      string,
       tip_name:       string,
@@ -49,14 +48,13 @@ main :: proc() {
       time_offset:    f32,
     } {
       {"leg_front_r_0", "leg_front_r_5", {0, 0, 0}, 0.0}, // Front right
-      {"leg_middle_r_0", "leg_middle_r_5", {0, 0, 0}, 0.33}, // Middle right
-      {"leg_back_r_0", "leg_back_r_5", {0, 0, 0}, 0.67}, // Back right
-      {"leg_front_l_0", "leg_front_l_5", {0, 0, 0}, 0.67}, // Front left
-      {"leg_middle_l_0", "leg_middle_l_5", {0, 0, 0}, 0.33}, // Middle left
-      {"leg_back_l_0", "leg_back_l_5", {0, 0, 0}, 0.0}, // Back left
+      {"leg_middle_r_0", "leg_middle_r_5", {0, 0, 0}, half_frequency }, // Middle right
+      {"leg_back_r_0", "leg_back_r_5", {0, 0, 0}, 0.0}, // Back right
+      {"leg_front_l_0", "leg_front_l_5", {0, 0, 0}, half_frequency }, // Front left
+      {"leg_middle_l_0", "leg_middle_l_5", {0, 0, 0}, 0.0}, // Middle left
+      {"leg_back_l_0", "leg_back_l_5", {0, 0, 0}, half_frequency }, // Back left
     }
 
-    lift_frequency :: 0.8
 
     // Find the skinned mesh node and calculate initial offsets from rest pose
     for handle in spider_roots {
@@ -209,7 +207,7 @@ main :: proc() {
     // Move the spider body back and forth along the X axis
     animation_time += delta_time
     amplitude :: 8.0 // How far to move left/right
-    speed :: 0.1 // Oscillation speed (Hz)
+    speed :: 0.05 // Oscillation speed (Hz)
 
     body_x := amplitude * math.sin(animation_time * speed * 2 * math.PI)
     body_pos := [3]f32{body_x, 2, 0}
