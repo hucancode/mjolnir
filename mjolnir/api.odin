@@ -334,18 +334,21 @@ create_camera :: proc(
   return camera_handle, true
 }
 
-get_camera_attachment :: proc(
+get_camera_final_image :: proc(
   engine: ^Engine,
   camera_handle: world.CameraHandle,
-  attachment_type: render.AttachmentType,
   frame_index: u32 = 0,
 ) -> (
   handle: world.Image2DHandle,
   ok: bool,
 ) #optional_ok {
   if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
-  gpu_handle :=
-    engine.render.per_camera_data[camera_handle.index].attachments[attachment_type][frame_index]
+  gpu_handle, found := render.get_camera_final_image(
+    &engine.render,
+    camera_handle.index,
+    frame_index,
+  )
+  if !found do return {}, false
   return transmute(world.Image2DHandle)gpu_handle, true
 }
 

@@ -5,6 +5,7 @@ import geo "../../geometry"
 import gpu "../../gpu"
 import d "../data"
 import "../shared"
+import rg "../graph"
 import "core:log"
 import "core:math/linalg"
 import mu "vendor:microui"
@@ -458,4 +459,32 @@ render :: proc(
 
 end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  swapchain_tex, _ := rg.find_texture(setup, "swapchain")
+  rg.read_write_texture(setup, swapchain_tex, .CURRENT)
+}
+
+// ExecuteContext holds all data the execute callback needs from the render manager.
+// Use pointers for fields that change each frame (swapchain_view, swapchain_extent).
+ExecuteContext :: struct {
+  renderer:        ^Renderer,
+  swapchain_view:  ^vk.ImageView,
+  swapchain_extent: ^vk.Extent2D,
+  texture_ds:      ^vk.DescriptorSet,
+  enabled:         ^bool,
+}
+
+execute :: proc(
+  _: ^rg.PassResources,
+  command_buffer: vk.CommandBuffer,
+  _: u32,
+  user_data: rawptr,
+) {
+  ctx := cast(^ExecuteContext)user_data
+  if !ctx.enabled^ do return
+  begin_pass(ctx.renderer, command_buffer, ctx.swapchain_view^, ctx.swapchain_extent^)
+  render(ctx.renderer, command_buffer, ctx.texture_ds^)
+  end_pass(ctx.renderer, command_buffer)
 }

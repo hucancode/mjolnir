@@ -2,6 +2,7 @@ package particles_compute
 
 import "../../gpu"
 import d "../data"
+import rg "../graph"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -474,4 +475,44 @@ create_compact_pipeline :: proc(
   ) or_return
 
   return .SUCCESS
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  particle_buf := rg.register_external_buffer(setup, "particle_buffer", rg.BufferDesc{
+    size = 1024 * 1024,
+    usage = {.STORAGE_BUFFER},
+    is_external = true,
+  })
+  compact_buf := rg.register_external_buffer(setup, "compact_particle_buffer", rg.BufferDesc{
+    size = 1024 * 1024,
+    usage = {.STORAGE_BUFFER},
+    is_external = true,
+  })
+  draw_cmd_buf := rg.register_external_buffer(setup, "particle_draw_command_buffer", rg.BufferDesc{
+    size = 1024,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  rg.writes_buffers(setup, particle_buf, compact_buf, draw_cmd_buf)
+}
+
+// ExecuteContext holds all data the execute callback needs from the render manager.
+// Initialized once after setup; fields are stable for the lifetime of the graph.
+ExecuteContext :: struct {
+  renderer:      ^Renderer,
+  node_data_ds:  vk.DescriptorSet,
+  particle_buf:  vk.Buffer,
+  compact_buf:   vk.Buffer,
+  draw_cmd_buf:  vk.Buffer,
+  particle_bytes: vk.DeviceSize,
+}
+
+execute :: proc(
+  _: ^rg.PassResources,
+  cmd: vk.CommandBuffer,
+  _: u32,
+  user_data: rawptr,
+) {
+  ctx := cast(^ExecuteContext)user_data
+  simulate(ctx.renderer, cmd, ctx.node_data_ds, ctx.particle_buf, ctx.compact_buf, ctx.draw_cmd_buf, ctx.particle_bytes)
 }

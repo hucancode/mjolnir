@@ -923,13 +923,12 @@ point_triangle_mesh_distance :: proc(
   return min_dist
 }
 
-safe_normalize :: proc(v: ^[3]f32) {
-  sq_mag := v.x * v.x + v.y * v.y + v.z * v.z
-  if sq_mag <= math.F32_EPSILON do return
-  inv_mag := 1.0 / math.sqrt(sq_mag)
-  v.x *= inv_mag
-  v.y *= inv_mag
-  v.z *= inv_mag
+safe_normalize :: proc(v: [3]f32, fallback: [3]f32 = {0, 0, 0}) -> [3]f32 {
+  sq_mag := linalg.length2(v)
+  if sq_mag <= math.F32_EPSILON {
+    return fallback
+  }
+  return v / math.sqrt(sq_mag)
 }
 
 // Offset polygon - creates an inset/outset polygon with proper miter/bevel handling
@@ -962,13 +961,13 @@ offset_poly_2d :: proc(
     prev_segment_dir.x = vert_b.x - vert_a.x
     prev_segment_dir.y = 0 // Squash onto x/z plane
     prev_segment_dir.z = vert_b.z - vert_a.z
-    safe_normalize(&prev_segment_dir)
+    prev_segment_dir = safe_normalize(prev_segment_dir)
     // From B to C on the x/z plane
     curr_segment_dir: [3]f32
     curr_segment_dir.x = vert_c.x - vert_b.x
     curr_segment_dir.y = 0 // Squash onto x/z plane
     curr_segment_dir.z = vert_c.z - vert_b.z
-    safe_normalize(&curr_segment_dir)
+    curr_segment_dir = safe_normalize(curr_segment_dir)
     // The y component of the cross product of the two normalized segment directions
     // The X and Z components of the cross product are both zero because the two
     // segment direction vectors fall within the x/z plane

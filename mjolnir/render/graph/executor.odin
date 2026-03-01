@@ -11,7 +11,8 @@ import vk "vendor:vulkan"
 execute :: proc(
 	graph: ^Graph,
 	frame_index: u32,
-	cmd: vk.CommandBuffer,
+	graphics_cmd: vk.CommandBuffer,
+	compute_cmd: vk.CommandBuffer,
 ) {
 	// Process passes in sorted order
 	for pass_id in graph.sorted_passes {
@@ -19,8 +20,12 @@ execute :: proc(
 
 		log.debugf("Executing pass: %s", pass.name)
 
-		// Emit barriers before pass
-		emit_barriers_for_pass(graph, pass_id, cmd)
+		// Route to the appropriate command buffer based on queue type.
+		// When compute_cmd == graphics_cmd (no async compute) this is a no-op distinction.
+		cmd := graphics_cmd if pass.queue == .GRAPHICS else compute_cmd
+
+		// Emit barriers before pass on the same command buffer as the pass itself
+		emit_barriers_for_pass(graph, pass_id, cmd, frame_index)
 
 		// Resolve resources for this pass
 		resources := resolve_pass_resources(graph, pass, frame_index)
@@ -41,14 +46,13 @@ emit_barriers_for_pass :: proc(
 	graph: ^Graph,
 	pass_id: PassInstanceId,
 	cmd: vk.CommandBuffer,
+	frame_index: u32,
 ) {
-	// Get barriers for this pass
 	barriers, has_barriers := graph.barriers[pass_id]
 	if !has_barriers || len(barriers) == 0 {
 		return
 	}
 
-	// Group barriers by type
 	buffer_barriers := make([dynamic]vk.BufferMemoryBarrier, 0, len(barriers))
 	image_barriers := make([dynamic]vk.ImageMemoryBarrier, 0, len(barriers))
 	defer delete(buffer_barriers)
@@ -61,44 +65,64 @@ emit_barriers_for_pass :: proc(
 		src_stage_mask |= barrier.src_stage
 		dst_stage_mask |= barrier.dst_stage
 
-		if barrier.buffer != 0 {
-			// Buffer barrier
-			vk_barrier := vk.BufferMemoryBarrier{
-				sType = .BUFFER_MEMORY_BARRIER,
-				srcAccessMask = barrier.src_access,
-				dstAccessMask = barrier.dst_access,
-				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				buffer = barrier.buffer,
-				offset = 0,
-				size = vk.DeviceSize(vk.WHOLE_SIZE),
+		// Resolve the actual GPU handle at emit time using the current frame index.
+		// This correctly handles multi-variant resources (NEXT/PREV frame offsets)
+		// and external resources whose handles may change each frame.
+		res := get_resource(graph, barrier.resource_id)
+		switch res.type {
+		case .BUFFER:
+			actual_variants := max(len(res.buffers), 1)
+			variant_idx := compute_variant_index(frame_index, barrier.frame_offset, actual_variants)
+			buf: vk.Buffer
+			if res.buffer_desc.is_external {
+				buf = res.external_buffer
+			} else if variant_idx < len(res.buffers) {
+				buf = res.buffers[variant_idx]
 			}
-			append(&buffer_barriers, vk_barrier)
+			if buf != 0 {
+				append(&buffer_barriers, vk.BufferMemoryBarrier{
+					sType               = .BUFFER_MEMORY_BARRIER,
+					srcAccessMask       = barrier.src_access,
+					dstAccessMask       = barrier.dst_access,
+					srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+					dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+					buffer              = buf,
+					offset              = 0,
+					size                = vk.DeviceSize(vk.WHOLE_SIZE),
+				})
+			}
 
-		} else if barrier.image != 0 {
-			// Image barrier
-			vk_barrier := vk.ImageMemoryBarrier{
-				sType = .IMAGE_MEMORY_BARRIER,
-				srcAccessMask = barrier.src_access,
-				dstAccessMask = barrier.dst_access,
-				oldLayout = barrier.old_layout,
-				newLayout = barrier.new_layout,
-				srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-				image = barrier.image,
-				subresourceRange = {
-					aspectMask = barrier.aspect,
-					baseMipLevel = 0,
-					levelCount = vk.REMAINING_MIP_LEVELS,
-					baseArrayLayer = 0,
-					layerCount = vk.REMAINING_ARRAY_LAYERS,
-				},
+		case .TEXTURE_2D, .TEXTURE_CUBE:
+			actual_variants := max(len(res.images), 1)
+			variant_idx := compute_variant_index(frame_index, barrier.frame_offset, actual_variants)
+			img: vk.Image
+			if res.texture_desc.is_external {
+				img = res.external_image
+			} else if variant_idx < len(res.images) {
+				img = res.images[variant_idx]
 			}
-			append(&image_barriers, vk_barrier)
+			if img != 0 {
+				append(&image_barriers, vk.ImageMemoryBarrier{
+					sType               = .IMAGE_MEMORY_BARRIER,
+					srcAccessMask       = barrier.src_access,
+					dstAccessMask       = barrier.dst_access,
+					oldLayout           = barrier.old_layout,
+					newLayout           = barrier.new_layout,
+					srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+					dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+					image               = img,
+					subresourceRange    = {
+						aspectMask     = barrier.aspect,
+						baseMipLevel   = 0,
+						levelCount     = vk.REMAINING_MIP_LEVELS,
+						baseArrayLayer = 0,
+						layerCount     = vk.REMAINING_ARRAY_LAYERS,
+					},
+				})
+			}
 		}
 	}
 
-	// Emit pipeline barrier
 	if len(buffer_barriers) > 0 || len(image_barriers) > 0 {
 		vk.CmdPipelineBarrier(
 			cmd,
@@ -122,8 +146,9 @@ resolve_pass_resources :: proc(
 	frame_index: u32,
 ) -> PassResources {
 	resources := PassResources{
-		textures = make(map[string]ResolvedTexture),
-		buffers = make(map[string]ResolvedBuffer),
+		textures    = make(map[string]ResolvedTexture),
+		buffers     = make(map[string]ResolvedBuffer),
+		scope        = pass.scope,
 		instance_idx = pass.instance,
 	}
 
@@ -170,8 +195,18 @@ resolve_resource :: proc(
 
 	res := get_resource(graph, res_id)
 
-	// Compute variant index based on frame offset
-	variant_idx := compute_variant_index(frame_index, frame_offset, graph.frames_in_flight)
+	// Use actual allocated variant count, not frames_in_flight.
+	// Resources accessed only with .CURRENT have variant_count=1, so variant_idx
+	// must always be 0 regardless of frame_index.
+	actual_variants: int
+	switch res.type {
+	case .BUFFER:
+		actual_variants = max(len(res.buffers), 1)
+	case .TEXTURE_2D, .TEXTURE_CUBE:
+		actual_variants = max(len(res.images), 1)
+	}
+
+	variant_idx := compute_variant_index(frame_index, frame_offset, actual_variants)
 
 	// Resolve based on resource type
 	switch res.type {
@@ -204,26 +239,31 @@ resolve_buffer :: proc(res: ^ResourceInstance, variant_idx: int) -> ResolvedBuff
 }
 
 resolve_texture :: proc(res: ^ResourceInstance, variant_idx: int) -> ResolvedTexture {
-	image: vk.Image
-	view: vk.ImageView
+	image:       vk.Image
+	view:        vk.ImageView
+	handle_bits: u64
 	format := res.texture_desc.format
-	width := res.texture_desc.width
+	width  := res.texture_desc.width
 	height := res.texture_desc.height
 
 	if res.texture_desc.is_external {
 		image = res.external_image
-		view = res.external_image_view
+		view  = res.external_image_view
 	} else if variant_idx < len(res.images) {
 		image = res.images[variant_idx]
-		view = res.image_views[variant_idx]
+		view  = res.image_views[variant_idx]
+		if variant_idx < len(res.texture_handle_bits) {
+			handle_bits = res.texture_handle_bits[variant_idx]
+		}
 	}
 
 	return ResolvedTexture{
-		image = image,
-		view = view,
-		format = format,
-		width = width,
-		height = height,
+		image       = image,
+		view        = view,
+		format      = format,
+		width       = width,
+		height      = height,
+		handle_bits = handle_bits,
 	}
 }
 

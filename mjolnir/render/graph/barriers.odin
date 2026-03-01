@@ -17,14 +17,31 @@ compute_barriers :: proc(graph: ^Graph) {
 	for pass_id in graph.sorted_passes {
 		pass := get_pass(graph, pass_id)
 
-		// Emit barriers for all reads
+		// Emit barriers for all reads.
+		// For resources declared via read_write_texture (appears in both reads and writes),
+		// skip the read barrier — the write barrier below handles the layout transition.
+		// The reads entry still creates the dependency edge in the DAG.
 		for read in pass.reads {
+			// Skip if also written by this pass (read_write_texture / read_write_buffer).
+			// The write barrier handles the full transition; emitting a separate read barrier
+			// would incorrectly try to transition a COLOR_ATTACHMENT to SHADER_READ_ONLY.
+			is_also_written := false
+			for write in pass.writes {
+				if write.resource_name == read.resource_name {
+					is_also_written = true
+					break
+				}
+			}
+			if is_also_written {
+				continue
+			}
+
 			if read.frame_offset != .CURRENT {
 				// Temporal dependency - memory barrier only (no execution dependency)
-				emit_memory_barrier(graph, pass_id, read.resource_name, .READ, pass.queue, &resource_state)
+				emit_memory_barrier(graph, pass_id, read.resource_name, read.frame_offset, .READ, pass.queue, &resource_state)
 			} else {
 				// Same-frame dependency - full barrier (execution + memory)
-				emit_full_barrier(graph, pass_id, read.resource_name, .READ, pass.queue, &resource_state)
+				emit_full_barrier(graph, pass_id, read.resource_name, read.frame_offset, .READ, pass.queue, &resource_state)
 			}
 		}
 
@@ -32,10 +49,10 @@ compute_barriers :: proc(graph: ^Graph) {
 		for write in pass.writes {
 			if write.frame_offset != .CURRENT {
 				// Temporal dependency
-				emit_memory_barrier(graph, pass_id, write.resource_name, .WRITE, pass.queue, &resource_state)
+				emit_memory_barrier(graph, pass_id, write.resource_name, write.frame_offset, .WRITE, pass.queue, &resource_state)
 			} else {
 				// Same-frame dependency
-				emit_full_barrier(graph, pass_id, write.resource_name, .WRITE, pass.queue, &resource_state)
+				emit_full_barrier(graph, pass_id, write.resource_name, write.frame_offset, .WRITE, pass.queue, &resource_state)
 			}
 		}
 
@@ -72,25 +89,38 @@ update_resource_state :: proc(pass: ^PassInstance, state: ^map[string]ResourceSt
 		state[write.resource_name] = new_state
 	}
 
-	// Update state for reads (some reads change layout, e.g. shader reads)
+	// Update state for pure reads (not part of a read_write_texture pair).
+	// read_write_texture adds the resource to both reads[] and writes[]; the write
+	// state set above already reflects the post-access layout for those.  For a
+	// resource that is only read (no corresponding write in this pass), the barrier
+	// has transitioned it to SHADER_READ_ONLY_OPTIMAL (or the equivalent depth
+	// layout), so the state map must be updated accordingly.
 	for read in pass.reads {
 		if read.frame_offset != .CURRENT {
 			continue
 		}
 
-		// Only update if this is a "consuming" read that changes state
+		// Skip resources that are also written by this pass (read_write_texture).
+		// Their layout is already captured by the write state update above.
+		is_also_written := false
+		for write in pass.writes {
+			if write.resource_name == read.resource_name {
+				is_also_written = true
+				break
+			}
+		}
+		if is_also_written {
+			continue
+		}
+
 		if pass.queue == .GRAPHICS {
-			// Get resource for depth/stencil detection
 			res: ^ResourceInstance = nil
 			if res_id, found := find_resource_by_name(graph, read.resource_name); found {
 				res = get_resource(graph, res_id)
 			}
 
 			new_state := infer_resource_state_after_access(.READ, pass.queue, res)
-			// Don't overwrite write state with read state
-			if _, exists := state[read.resource_name]; !exists {
-				state[read.resource_name] = new_state
-			}
+			state[read.resource_name] = new_state
 		}
 	}
 }
@@ -103,11 +133,11 @@ emit_full_barrier :: proc(
 	graph: ^Graph,
 	pass_id: PassInstanceId,
 	resource_name: string,
+	frame_offset: FrameOffset,
 	access: AccessMode,
 	queue: QueueType,
 	state: ^map[string]ResourceState,
 ) {
-	// Get resource instance
 	res_id, found := find_resource_by_name(graph, resource_name)
 	if !found {
 		return
@@ -115,19 +145,13 @@ emit_full_barrier :: proc(
 
 	res := get_resource(graph, res_id)
 
-	// Get current state (or default)
 	current_state, has_state := state[resource_name]
 	if !has_state {
 		current_state = get_initial_resource_state(res)
 	}
 
-	// Infer desired state (pass resource for depth/stencil detection)
 	desired_state := infer_resource_state_before_access(access, queue, res)
-
-	// Create barrier
-	barrier := create_barrier(res, current_state, desired_state)
-
-	// Add to graph
+	barrier := create_barrier(res_id, res, frame_offset, current_state, desired_state)
 	add_barrier(graph, pass_id, barrier)
 }
 
@@ -135,13 +159,13 @@ emit_memory_barrier :: proc(
 	graph: ^Graph,
 	pass_id: PassInstanceId,
 	resource_name: string,
+	frame_offset: FrameOffset,
 	access: AccessMode,
 	queue: QueueType,
 	state: ^map[string]ResourceState,
 ) {
-	// Similar to full barrier, but no execution dependency
-	// (the temporal offset means execution already separated by frames)
-
+	// Similar to full barrier but no execution dependency
+	// (temporal offset means execution is already separated by frames)
 	res_id, found := find_resource_by_name(graph, resource_name)
 	if !found {
 		return
@@ -155,10 +179,7 @@ emit_memory_barrier :: proc(
 	}
 
 	desired_state := infer_resource_state_before_access(access, queue, res)
-
-	// Create barrier with memory-only synchronization
-	barrier := create_memory_barrier(res, current_state, desired_state)
-
+	barrier := create_memory_barrier(res_id, res, frame_offset, current_state, desired_state)
 	add_barrier(graph, pass_id, barrier)
 }
 
@@ -167,53 +188,46 @@ emit_memory_barrier :: proc(
 // ============================================================================
 
 create_barrier :: proc(
+	res_id: ResourceInstanceId,
 	res: ^ResourceInstance,
+	frame_offset: FrameOffset,
 	from: ResourceState,
 	to: ResourceState,
 ) -> Barrier {
 	barrier := Barrier{
-		src_access = from.last_access,
-		dst_access = to.last_access,
-		src_stage = from.last_stage,
-		dst_stage = to.last_stage,
+		resource_id  = res_id,
+		frame_offset = frame_offset,
+		src_access   = from.last_access,
+		dst_access   = to.last_access,
+		src_stage    = from.last_stage,
+		dst_stage    = to.last_stage,
 	}
 
-	// Set resource handle
+	// Store image layout/aspect for image barriers (resolved at emit time)
 	switch res.type {
-	case .BUFFER:
-		if len(res.buffers) > 0 {
-			barrier.buffer = res.buffers[0]
-		} else if res.buffer_desc.is_external {
-			barrier.buffer = res.external_buffer
-		}
-
 	case .TEXTURE_2D, .TEXTURE_CUBE:
-		if len(res.images) > 0 {
-			barrier.image = res.images[0]
-		} else if res.texture_desc.is_external {
-			barrier.image = res.external_image
-		}
-
 		barrier.old_layout = from.last_layout
 		barrier.new_layout = to.last_layout
 		barrier.aspect = res.texture_desc.aspect
+	case .BUFFER:
+		// No extra fields needed
 	}
 
 	return barrier
 }
 
 create_memory_barrier :: proc(
+	res_id: ResourceInstanceId,
 	res: ^ResourceInstance,
+	frame_offset: FrameOffset,
 	from: ResourceState,
 	to: ResourceState,
 ) -> Barrier {
 	// Memory barrier only (no execution dependency)
-	barrier := create_barrier(res, from, to)
-
-	// Use ALL_COMMANDS for src/dst stages to avoid execution dependency
+	barrier := create_barrier(res_id, res, frame_offset, from, to)
+	// Use ALL_COMMANDS for src/dst stages to avoid adding an execution dependency
 	barrier.src_stage = {.ALL_COMMANDS}
 	barrier.dst_stage = {.ALL_COMMANDS}
-
 	return barrier
 }
 
@@ -269,9 +283,12 @@ infer_resource_state_before_access :: proc(access: AccessMode, queue: QueueType,
 				state.last_access = {.DEPTH_STENCIL_ATTACHMENT_READ, .DEPTH_STENCIL_ATTACHMENT_WRITE}
 				state.last_layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
 			} else {
-				state.last_stage = {.FRAGMENT_SHADER}
-				state.last_access = {.SHADER_READ, .SHADER_WRITE}
-				state.last_layout = .GENERAL
+				// Render attachment read-write (loadOp=LOAD / storeOp=STORE).
+				// COLOR_ATTACHMENT_OPTIMAL is correct; it only requires COLOR_ATTACHMENT_BIT
+				// (unlike SHADER_READ_ONLY_OPTIMAL which requires SAMPLED_BIT).
+				state.last_stage = {.COLOR_ATTACHMENT_OUTPUT}
+				state.last_access = {.COLOR_ATTACHMENT_READ, .COLOR_ATTACHMENT_WRITE}
+				state.last_layout = .COLOR_ATTACHMENT_OPTIMAL
 			}
 		}
 

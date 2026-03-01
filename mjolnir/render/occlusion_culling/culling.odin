@@ -4,6 +4,7 @@ import alg "../../algebra"
 import "../../gpu"
 import d "../data"
 import rd "../data"
+import rg "../graph"
 import vk "vendor:vulkan"
 
 SHADER_CULLING :: #load("../../shader/occlusion_culling/cull.spv")
@@ -204,4 +205,31 @@ perform_culling :: proc(
   )
   dispatch_x := (self.node_count + 63) / 64
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  opaque_cmds := rg.register_external_buffer(setup, "opaque_draw_commands", rg.BufferDesc{
+    size = 1024 * 1024,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  opaque_count := rg.register_external_buffer(setup, "opaque_draw_count", rg.BufferDesc{
+    size = 4,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  transparent_cmds := rg.register_external_buffer(setup, "transparent_draw_commands", rg.BufferDesc{
+    size = 1024 * 1024,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  transparent_count := rg.register_external_buffer(setup, "transparent_draw_count", rg.BufferDesc{
+    size = 4,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  rg.write_buffer(setup, opaque_cmds, .NEXT)
+  rg.write_buffer(setup, opaque_count, .NEXT)
+  rg.write_buffer(setup, transparent_cmds, .NEXT)
+  rg.write_buffer(setup, transparent_count, .NEXT)
 }

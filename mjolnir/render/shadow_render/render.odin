@@ -3,6 +3,7 @@ package shadow_render
 import "../../geometry"
 import "../../gpu"
 import d "../data"
+import rg "../graph"
 import "core:math"
 import "core:math/linalg"
 import vk "vendor:vulkan"
@@ -232,4 +233,28 @@ render :: proc(
     {.FRAGMENT_SHADER},
     {.DEPTH},
   )
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup, is_point_light: bool) {
+  shadow_draw_cmds, _ := rg.find_buffer(setup, "shadow_draw_commands")
+  shadow_draw_count, _ := rg.find_buffer(setup, "shadow_draw_count")
+  rg.reads_buffers(setup, shadow_draw_cmds, shadow_draw_count)
+  if is_point_light {
+    shadow_map := rg.create_texture(setup, "shadow_map_cube", rg.TextureDesc{
+      width = d.SHADOW_MAP_SIZE, height = d.SHADOW_MAP_SIZE,
+      format = .D32_SFLOAT,
+      usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      aspect = {.DEPTH},
+      is_cube = true,
+    })
+    rg.write_texture(setup, shadow_map, .CURRENT)
+  } else {
+    shadow_map := rg.create_texture(setup, "shadow_map_2d", rg.TextureDesc{
+      width = d.SHADOW_MAP_SIZE, height = d.SHADOW_MAP_SIZE,
+      format = .D32_SFLOAT,
+      usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      aspect = {.DEPTH},
+    })
+    rg.write_texture(setup, shadow_map, .CURRENT)
+  }
 }

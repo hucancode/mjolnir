@@ -2,6 +2,7 @@ package shadow_culling
 
 import "../../gpu"
 import d "../data"
+import rg "../graph"
 import vk "vendor:vulkan"
 
 SHADER_SHADOW_CULLING :: #load("../../shader/shadow/cull.spv")
@@ -125,4 +126,18 @@ execute :: proc(
     &push,
   )
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  shadow_draw_cmds := rg.register_external_buffer(setup, "shadow_draw_commands", rg.BufferDesc{
+    size = 1024 * 1024,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  shadow_draw_count := rg.register_external_buffer(setup, "shadow_draw_count", rg.BufferDesc{
+    size = 4,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  rg.writes_buffers(setup, shadow_draw_cmds, shadow_draw_count)
 }

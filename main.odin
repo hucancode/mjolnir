@@ -745,10 +745,9 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
 on_post_render :: proc(engine: ^mjolnir.Engine) {
   if material, ok := cont.get(engine.world.materials, portal_material_handle);
      ok {
-    material.albedo = mjolnir.get_camera_attachment(
+    material.albedo = mjolnir.get_camera_final_image(
       engine,
       portal_camera_handle,
-      .FINAL_IMAGE,
       engine.frame_index,
     )
     world.stage_material_data(&engine.world.staging, portal_material_handle)
