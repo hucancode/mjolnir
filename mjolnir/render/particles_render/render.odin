@@ -3,6 +3,7 @@ package particles_render
 import "../../gpu"
 import rd "../data"
 import "../shared"
+import rg "../graph"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -234,4 +235,15 @@ render :: proc(
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {
 	vk.CmdEndRendering(command_buffer)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+	final_image_tex, ok1 := rg.find_texture(setup, "final_image")
+	depth_tex, ok2 := rg.find_texture(setup, "depth")
+	compact_buf, ok3 := rg.find_buffer(setup, "compact_particle_buffer")
+	draw_cmd_buf, ok4 := rg.find_buffer(setup, "particle_draw_command_buffer")
+	if !ok1 || !ok2 || !ok3 || !ok4 do return
+	rg.reads_buffers(setup, compact_buf, draw_cmd_buf)
+	rg.read_write_texture(setup, final_image_tex)
+	rg.read_write_texture(setup, depth_tex)
 }

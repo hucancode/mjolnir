@@ -3,6 +3,7 @@ package ui_render
 import "../../geometry"
 import "../../gpu"
 import "../shared"
+import rg "../graph"
 import cmd "../../gpu/ui"
 import "core:log"
 import "core:math/linalg"
@@ -145,6 +146,48 @@ create_pipeline :: proc(
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+}
+
+begin_pass :: proc(
+  self: ^Renderer,
+  cmd: vk.CommandBuffer,
+  swapchain_view: vk.ImageView,
+  extent: vk.Extent2D,
+  textures_descriptor: vk.DescriptorSet,
+) {
+  attachment := vk.RenderingAttachmentInfo{
+    sType       = .RENDERING_ATTACHMENT_INFO,
+    imageView   = swapchain_view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp      = .LOAD,
+    storeOp     = .STORE,
+  }
+  rendering_info := vk.RenderingInfo{
+    sType                = .RENDERING_INFO,
+    renderArea           = {extent = extent},
+    layerCount           = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments    = &attachment,
+  }
+  vk.CmdBeginRendering(cmd, &rendering_info)
+  viewport := vk.Viewport{
+    x        = 0,
+    y        = f32(extent.height),
+    width    = f32(extent.width),
+    height   = -f32(extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D{offset = {0, 0}, extent = extent}
+  vk.CmdSetViewport(cmd, 0, 1, &viewport)
+  vk.CmdSetScissor(cmd, 0, 1, &scissor)
+  vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipeline)
+  textures_set := textures_descriptor
+  vk.CmdBindDescriptorSets(cmd, .GRAPHICS, self.pipeline_layout, 0, 1, &textures_set, 0, nil)
+}
+
+end_pass :: proc(cmd: vk.CommandBuffer) {
+  vk.CmdEndRendering(cmd)
 }
 
 render :: proc(
@@ -388,4 +431,33 @@ add_text_to_batch :: proc(
     self.indices[self.index_count] = base_vertex + 2;self.index_count += 1
     self.indices[self.index_count] = base_vertex + 3;self.index_count += 1
   }
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  swapchain_tex, _ := rg.find_texture(setup, "swapchain")
+  rg.read_write_texture(setup, swapchain_tex, .CURRENT)
+}
+
+// ExecuteContext holds all data the execute callback needs from the render manager.
+// Use pointers for fields that change each frame (swapchain_view, swapchain_extent).
+ExecuteContext :: struct {
+  renderer:        ^Renderer,
+  texture_manager: ^gpu.TextureManager,
+  commands:        ^[dynamic]cmd.RenderCommand,
+  swapchain_view:  ^vk.ImageView,
+  swapchain_extent: ^vk.Extent2D,
+  texture_ds:      vk.DescriptorSet,
+}
+
+execute :: proc(
+  _: ^rg.PassResources,
+  command_buffer: vk.CommandBuffer,
+  frame_index: u32,
+  user_data: rawptr,
+) {
+  ctx := cast(^ExecuteContext)user_data
+  begin_pass(ctx.renderer, command_buffer, ctx.swapchain_view^, ctx.swapchain_extent^, ctx.texture_ds)
+  render(ctx.renderer, ctx.commands[:], nil, ctx.texture_manager, command_buffer,
+    ctx.swapchain_extent.width, ctx.swapchain_extent.height, frame_index)
+  end_pass(command_buffer)
 }

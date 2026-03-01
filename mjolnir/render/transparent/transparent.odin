@@ -2,6 +2,7 @@ package transparent
 
 import "../../geometry"
 import "../../gpu"
+import rg "../graph"
 import vk "vendor:vulkan"
 
 SHADER_TRANSPARENT_VERT :: #load("../../shader/transparent/vert.spv")
@@ -85,6 +86,28 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 	self.pipeline_layout = 0
 }
 
+begin_pass :: proc(
+	self: ^Renderer,
+	cmd: vk.CommandBuffer,
+	final_image_h: gpu.Texture2DHandle,
+	depth_h: gpu.Texture2DHandle,
+	texture_manager: ^gpu.TextureManager,
+) {
+	color_texture := gpu.get_texture_2d(texture_manager, final_image_h)
+	depth_texture := gpu.get_texture_2d(texture_manager, depth_h)
+	gpu.begin_rendering(
+		cmd,
+		depth_texture.spec.extent,
+		gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+		gpu.create_color_attachment(color_texture, .LOAD, .STORE),
+	)
+	gpu.set_viewport_scissor(cmd, depth_texture.spec.extent)
+}
+
+end_pass :: proc(cmd: vk.CommandBuffer) {
+	vk.CmdEndRendering(cmd)
+}
+
 render :: proc(
 	self: ^Renderer,
 	cmd: vk.CommandBuffer,
@@ -143,4 +166,15 @@ render :: proc(
 		max_draw_count,
 		u32(size_of(vk.DrawIndexedIndirectCommand)),
 	)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+	final_image_tex, ok1 := rg.find_texture(setup, "final_image")
+	depth_tex, ok2 := rg.find_texture(setup, "depth")
+	transparent_cmds, ok3 := rg.find_buffer(setup, "transparent_draw_commands")
+	transparent_count, ok4 := rg.find_buffer(setup, "transparent_draw_count")
+	if !ok1 || !ok2 || !ok3 || !ok4 do return
+	rg.reads_buffers(setup, transparent_cmds, transparent_count)
+	rg.read_write_texture(setup, final_image_tex)
+	rg.read_write_texture(setup, depth_tex)
 }

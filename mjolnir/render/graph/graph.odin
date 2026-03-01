@@ -43,10 +43,10 @@ init :: proc(graph: ^Graph, frames_in_flight: int) {
 	graph.frames_in_flight = frames_in_flight
 }
 
-destroy :: proc(graph: ^Graph, gctx: rawptr) {
+destroy :: proc(graph: ^Graph, gctx: rawptr, tm_ptr: rawptr) {
 	// Destroy all allocated GPU resources
 	for &res in graph.resource_instances {
-		destroy_resource(&res, gctx)
+		destroy_resource(&res, gctx, tm_ptr)
 	}
 
 	// Free barriers
@@ -102,33 +102,15 @@ reset :: proc(graph: ^Graph) {
 // Resource Lifecycle
 // ============================================================================
 
-destroy_resource :: proc(res: ^ResourceInstance, gctx: rawptr) {
+destroy_resource :: proc(res: ^ResourceInstance, gctx: rawptr, tm_ptr: rawptr) {
 	// External resources are not owned by graph
 	if (res.type == .BUFFER && res.buffer_desc.is_external) ||
 	   (res.type != .BUFFER && res.texture_desc.is_external) {
 		return
 	}
 
-	// TODO: Once integrated with gpu package, destroy actual resources
-	// For now, just clean up arrays
-
-	// Destroy buffers
-	for i := 0; i < len(res.buffers); i += 1 {
-		// vk.DestroyBuffer(device, res.buffers[i], nil)
-		// vk.FreeMemory(device, res.buffer_memory[i], nil)
-	}
-	delete(res.buffers)
-	delete(res.buffer_memory)
-
-	// Destroy images
-	for i := 0; i < len(res.images); i += 1 {
-		// vk.DestroyImageView(device, res.image_views[i], nil)
-		// vk.DestroyImage(device, res.images[i], nil)
-		// vk.FreeMemory(device, res.image_memory[i], nil)
-	}
-	delete(res.images)
-	delete(res.image_views)
-	delete(res.image_memory)
+	// Delegate actual GPU deallocation to allocator (which imports gpu package)
+	deallocate_resource(res, gctx, tm_ptr)
 }
 
 // ============================================================================

@@ -5,6 +5,7 @@ import "../../geometry"
 import "../../gpu"
 import d "../data"
 import "../shared"
+import rg "../graph"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -142,116 +143,16 @@ begin_pass :: proc(
   albedo_handle: gpu.Texture2DHandle,
   metallic_roughness_handle: gpu.Texture2DHandle,
   emissive_handle: gpu.Texture2DHandle,
-  final_image_handle: gpu.Texture2DHandle,
   depth_handle: gpu.Texture2DHandle,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
 ) {
-  position_texture := gpu.get_texture_2d(
-    texture_manager,
-    position_handle,
-  )
-  normal_texture := gpu.get_texture_2d(
-    texture_manager,
-    normal_handle,
-  )
-  albedo_texture := gpu.get_texture_2d(
-    texture_manager,
-    albedo_handle,
-  )
-  metallic_roughness_texture := gpu.get_texture_2d(
-    texture_manager,
-    metallic_roughness_handle,
-  )
-  emissive_texture := gpu.get_texture_2d(
-    texture_manager,
-    emissive_handle,
-  )
-  final_texture := gpu.get_texture_2d(
-    texture_manager,
-    final_image_handle,
-  )
-  gpu.image_barrier(
-    command_buffer,
-    position_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    normal_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    albedo_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    metallic_roughness_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    emissive_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    final_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  depth_texture := gpu.get_texture_2d(
-    texture_manager,
-    depth_handle,
-  )
-  gpu.image_barrier(
-    command_buffer,
-    depth_texture.image,
-    .UNDEFINED,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    {},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.EARLY_FRAGMENT_TESTS},
-    {.DEPTH},
-  )
+  position_texture := gpu.get_texture_2d(texture_manager, position_handle)
+  normal_texture := gpu.get_texture_2d(texture_manager, normal_handle)
+  albedo_texture := gpu.get_texture_2d(texture_manager, albedo_handle)
+  metallic_roughness_texture := gpu.get_texture_2d(texture_manager, metallic_roughness_handle)
+  emissive_texture := gpu.get_texture_2d(texture_manager, emissive_handle)
+  depth_texture := gpu.get_texture_2d(texture_manager, depth_handle)
   gpu.begin_rendering(
     command_buffer,
     depth_texture.spec.extent,
@@ -262,113 +163,11 @@ begin_pass :: proc(
     gpu.create_color_attachment(metallic_roughness_texture),
     gpu.create_color_attachment(emissive_texture),
   )
-  gpu.set_viewport_scissor(
-    command_buffer,
-    depth_texture.spec.extent,
-  )
+  gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)
 }
 
-end_pass :: proc(
-  position_handle: gpu.Texture2DHandle,
-  normal_handle: gpu.Texture2DHandle,
-  albedo_handle: gpu.Texture2DHandle,
-  metallic_roughness_handle: gpu.Texture2DHandle,
-  emissive_handle: gpu.Texture2DHandle,
-  depth_handle: gpu.Texture2DHandle,
-  texture_manager: ^gpu.TextureManager,
-  command_buffer: vk.CommandBuffer,
-) {
+end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
-  position_texture := gpu.get_texture_2d(
-    texture_manager,
-    position_handle,
-  )
-  normal_texture := gpu.get_texture_2d(
-    texture_manager,
-    normal_handle,
-  )
-  albedo_texture := gpu.get_texture_2d(
-    texture_manager,
-    albedo_handle,
-  )
-  metallic_roughness_texture := gpu.get_texture_2d(
-    texture_manager,
-    metallic_roughness_handle,
-  )
-  emissive_texture := gpu.get_texture_2d(
-    texture_manager,
-    emissive_handle,
-  )
-  depth_texture := gpu.get_texture_2d(
-    texture_manager,
-    depth_handle,
-  )
-  gpu.image_barrier(
-    command_buffer,
-    position_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    normal_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    albedo_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    metallic_roughness_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    emissive_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    depth_texture.image,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.LATE_FRAGMENT_TESTS},
-    {.COMPUTE_SHADER, .FRAGMENT_SHADER},
-    {.DEPTH},
-  )
 }
 
 render :: proc(
@@ -430,4 +229,69 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   self.pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
+}
+
+// Declare graph resources for the geometry pass.
+// Creates G-buffer textures owned by the graph, and registers external
+// depth + draw command buffers. Called from render.odin's setup callback.
+declare_resources :: proc(setup: ^rg.PassSetup, extent: vk.Extent2D) {
+  position_tex := rg.create_texture(setup, "gbuffer_position", rg.TextureDesc{
+    width = extent.width, height = extent.height,
+    format = .R32G32B32A32_SFLOAT,
+    usage = {.COLOR_ATTACHMENT, .SAMPLED},
+    aspect = {.COLOR},
+  })
+  normal_tex := rg.create_texture(setup, "gbuffer_normal", rg.TextureDesc{
+    width = extent.width, height = extent.height,
+    format = .R8G8B8A8_UNORM,
+    usage = {.COLOR_ATTACHMENT, .SAMPLED},
+    aspect = {.COLOR},
+  })
+  albedo_tex := rg.create_texture(setup, "gbuffer_albedo", rg.TextureDesc{
+    width = extent.width, height = extent.height,
+    format = .R8G8B8A8_UNORM,
+    usage = {.COLOR_ATTACHMENT, .SAMPLED},
+    aspect = {.COLOR},
+  })
+  metallic_roughness_tex := rg.create_texture(setup, "gbuffer_metallic_roughness", rg.TextureDesc{
+    width = extent.width, height = extent.height,
+    format = .R8G8B8A8_UNORM,
+    usage = {.COLOR_ATTACHMENT, .SAMPLED},
+    aspect = {.COLOR},
+  })
+  emissive_tex := rg.create_texture(setup, "gbuffer_emissive", rg.TextureDesc{
+    width = extent.width, height = extent.height,
+    format = .R8G8B8A8_UNORM,
+    usage = {.COLOR_ATTACHMENT, .SAMPLED},
+    aspect = {.COLOR},
+  })
+  final_image_tex := rg.create_texture(setup, "final_image", rg.TextureDesc{
+    width = extent.width, height = extent.height,
+    format = .R16G16B16A16_SFLOAT,
+    usage = {.COLOR_ATTACHMENT, .SAMPLED},
+    aspect = {.COLOR},
+    // Non-main cameras double-buffer their output so the main camera can sample
+    // the previous frame's result (frame N-1) while this camera renders frame N,
+    // eliminating the data hazard on the shared image.
+    double_buffer = setup.instance_idx > 0,
+  })
+  depth_tex := rg.register_external_texture(setup, "depth", rg.TextureDesc{
+    width = extent.width, height = extent.height,
+    format = .D32_SFLOAT,
+    usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    aspect = {.DEPTH},
+    is_external = true,
+  })
+  opaque_cmds := rg.register_external_buffer(setup, "opaque_draw_commands", rg.BufferDesc{
+    size = 1024 * 1024,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  opaque_count := rg.register_external_buffer(setup, "opaque_draw_count", rg.BufferDesc{
+    size = 4,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  rg.reads_buffers(setup, opaque_cmds, opaque_count)
+  rg.writes_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex, final_image_tex, depth_tex)
 }

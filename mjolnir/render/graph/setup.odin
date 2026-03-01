@@ -103,8 +103,10 @@ register_external_buffer :: proc(
 // Resource Lookup API
 // ============================================================================
 
-// Find texture by name (searches current scope first, then global)
-find_texture :: proc(setup: ^PassSetup, name: string) -> (TextureId, bool) {
+// Find texture by name (searches current scope first, then global).
+// Cross-scope overload: find_texture(setup, name, scope, instance_idx)
+@(private)
+_find_texture_same_scope :: proc(setup: ^PassSetup, name: string) -> (TextureId, bool) {
 	// Try scoped name first (if not global scope)
 	if setup.pass_scope != .GLOBAL {
 		scoped_name := scope_resource_name(name, setup.pass_scope, setup.instance_idx)
@@ -127,8 +129,31 @@ find_texture :: proc(setup: ^PassSetup, name: string) -> (TextureId, bool) {
 	return TextureId{}, false
 }
 
-// Find buffer by name
-find_buffer :: proc(setup: ^PassSetup, name: string) -> (BufferId, bool) {
+// Cross-scope texture lookup. Example: lighting pass (PER_CAMERA) reading
+// shadow maps created by a PER_LIGHT pass at a specific light instance_idx.
+@(private)
+_find_texture_cross_scope :: proc(
+	setup: ^PassSetup,
+	name: string,
+	scope: PassScope,
+	instance_idx: u32,
+) -> (TextureId, bool) {
+	scoped_name := scope_resource_name(name, scope, instance_idx)
+	for decl, i in setup.resources {
+		if decl.name == scoped_name &&
+		   (decl.type == .TEXTURE_2D || decl.type == .TEXTURE_CUBE) {
+			return TextureId{index = u32(i)}, true
+		}
+	}
+	return TextureId{}, false
+}
+
+find_texture :: proc{_find_texture_same_scope, _find_texture_cross_scope}
+
+// Find buffer by name (searches current scope first, then global).
+// Cross-scope overload: find_buffer(setup, name, scope, instance_idx)
+@(private)
+_find_buffer_same_scope :: proc(setup: ^PassSetup, name: string) -> (BufferId, bool) {
 	// Try scoped name first
 	if setup.pass_scope != .GLOBAL {
 		scoped_name := scope_resource_name(name, setup.pass_scope, setup.instance_idx)
@@ -149,43 +174,24 @@ find_buffer :: proc(setup: ^PassSetup, name: string) -> (BufferId, bool) {
 	return BufferId{}, false
 }
 
-// Find texture in specific scope (for cross-scope dependencies)
-// Example: lighting pass (PER_CAMERA) reading shadow maps (PER_LIGHT, instance 0)
-find_texture_in_scope :: proc(
-	setup: ^PassSetup,
-	name: string,
-	scope: PassScope,
-	instance_idx: u32,
-) -> (TextureId, bool) {
-	scoped_name := scope_resource_name(name, scope, instance_idx)
-
-	for decl, i in setup.resources {
-		if decl.name == scoped_name &&
-		   (decl.type == .TEXTURE_2D || decl.type == .TEXTURE_CUBE) {
-			return TextureId{index = u32(i)}, true
-		}
-	}
-
-	return TextureId{}, false
-}
-
-// Find buffer in specific scope
-find_buffer_in_scope :: proc(
+// Cross-scope buffer lookup.
+@(private)
+_find_buffer_cross_scope :: proc(
 	setup: ^PassSetup,
 	name: string,
 	scope: PassScope,
 	instance_idx: u32,
 ) -> (BufferId, bool) {
 	scoped_name := scope_resource_name(name, scope, instance_idx)
-
 	for decl, i in setup.resources {
 		if decl.name == scoped_name && decl.type == .BUFFER {
 			return BufferId{index = u32(i)}, true
 		}
 	}
-
 	return BufferId{}, false
 }
+
+find_buffer :: proc{_find_buffer_same_scope, _find_buffer_cross_scope}
 
 // ============================================================================
 // Dependency Declaration API
@@ -323,10 +329,34 @@ read_write_buffer :: proc(
 }
 
 // ============================================================================
+// Batch Dependency Declaration API
+// Convenience wrappers for declaring multiple resources at once with the
+// default frame offset (.CURRENT). Use the single-item procs above when
+// a non-default frame offset (e.g. .NEXT) is required.
+// ============================================================================
+
+reads_textures :: proc(setup: ^PassSetup, ids: ..TextureId) {
+	for id in ids do read_texture(setup, id)
+}
+
+writes_textures :: proc(setup: ^PassSetup, ids: ..TextureId) {
+	for id in ids do write_texture(setup, id)
+}
+
+reads_buffers :: proc(setup: ^PassSetup, ids: ..BufferId) {
+	for id in ids do read_buffer(setup, id)
+}
+
+writes_buffers :: proc(setup: ^PassSetup, ids: ..BufferId) {
+	for id in ids do write_buffer(setup, id)
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
 // Scope resource name to prevent collisions across instances
+@(private)
 scope_resource_name :: proc(name: string, scope: PassScope, instance_idx: u32) -> string {
 	switch scope {
 	case .GLOBAL:
@@ -343,14 +373,52 @@ scope_resource_name :: proc(name: string, scope: PassScope, instance_idx: u32) -
 // Execution-Phase Resource Access API
 // ============================================================================
 
-// Get resolved texture from PassResources
+// Get resolved texture from PassResources.
+// Tries the exact name first (for global resources and explicit cross-scope
+// lookups), then tries the auto-scoped name (for same-scope simple names).
+// Example: get_texture(res, "gbuffer_position") in a PER_CAMERA pass
+// automatically tries "gbuffer_position_cam_0" if the exact name isn't found.
 get_texture :: proc(res: ^PassResources, name: string) -> (ResolvedTexture, bool) {
-	texture, found := res.textures[name]
-	return texture, found
+	if texture, found := res.textures[name]; found {
+		return texture, found
+	}
+	// Auto-scope: try name with this pass's scope suffix
+	if res.scope != .GLOBAL {
+		scoped: string
+		switch res.scope {
+		case .PER_CAMERA:
+			scoped = fmt.tprintf("%s_cam_%d", name, res.instance_idx)
+		case .PER_LIGHT:
+			scoped = fmt.tprintf("%s_light_%d", name, res.instance_idx)
+		case .GLOBAL:
+			unreachable()
+		}
+		if texture, found := res.textures[scoped]; found {
+			return texture, found
+		}
+	}
+	return {}, false
 }
 
-// Get resolved buffer from PassResources
+// Get resolved buffer from PassResources.
+// Same auto-scoping logic as get_texture.
 get_buffer :: proc(res: ^PassResources, name: string) -> (ResolvedBuffer, bool) {
-	buffer, found := res.buffers[name]
-	return buffer, found
+	if buffer, found := res.buffers[name]; found {
+		return buffer, found
+	}
+	if res.scope != .GLOBAL {
+		scoped: string
+		switch res.scope {
+		case .PER_CAMERA:
+			scoped = fmt.tprintf("%s_cam_%d", name, res.instance_idx)
+		case .PER_LIGHT:
+			scoped = fmt.tprintf("%s_light_%d", name, res.instance_idx)
+		case .GLOBAL:
+			unreachable()
+		}
+		if buffer, found := res.buffers[scoped]; found {
+			return buffer, found
+		}
+	}
+	return {}, false
 }

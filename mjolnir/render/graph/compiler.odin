@@ -36,12 +36,16 @@ compile :: proc(
 
 	for &instance in instances {
 		setup := PassSetup{
-			pass_name = instance.name,
-			pass_scope = instance.scope,
-			instance_idx = instance.instance,
-			resources = all_resources, // Share the same array across all passes
-			reads = make([dynamic]ResourceAccess),
-			writes = make([dynamic]ResourceAccess),
+			pass_name      = instance.name,
+			pass_scope     = instance.scope,
+			instance_idx   = instance.instance,
+			num_cameras    = ctx.num_cameras,
+			num_lights     = ctx.num_lights,
+			camera_extents = ctx.camera_extents,
+			light_is_point = ctx.light_is_point,
+			resources      = all_resources, // Share the same array across all passes
+			reads          = make([dynamic]ResourceAccess),
+			writes         = make([dynamic]ResourceAccess),
 		}
 
 		// Find which PassDecl this instance came from by matching the base name
@@ -103,7 +107,6 @@ compile :: proc(
 			buffer_memory = make([dynamic]vk.DeviceMemory),
 			images = make([dynamic]vk.Image),
 			image_views = make([dynamic]vk.ImageView),
-			image_memory = make([dynamic]vk.DeviceMemory),
 		}
 
 		id := add_resource_instance(&graph, res_instance)

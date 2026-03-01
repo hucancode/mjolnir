@@ -56,7 +56,7 @@ capture: build
 	@APP_PATH="./bin/main"; \
 	FRAME_N="5,6"; \
 	OUT_DIR="screenshots"; \
-	TIMEOUT_SEC="10"; \
+	TIMEOUT_SEC="3"; \
 	\
 	command -v xvfb-run >/dev/null || { echo "Error: 'xvfb-run' not found" >&2; exit 1; }; \
 	command -v magick >/dev/null || { echo "Error: 'magick' not found" >&2; exit 1; }; \

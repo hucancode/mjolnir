@@ -1,6 +1,7 @@
 package render_graph
 
-import "core:fmt"
+import "core:log"
+import "../../gpu"
 import vk "vendor:vulkan"
 
 // ============================================================================
@@ -10,6 +11,7 @@ import vk "vendor:vulkan"
 allocate_resources :: proc(
 	graph: ^Graph,
 	gctx: rawptr,
+	tm_ptr: rawptr,
 	loc := #caller_location,
 ) -> CompileError {
 	// Determine which resources need frame variants (NEXT/PREV access)
@@ -17,14 +19,11 @@ allocate_resources :: proc(
 	defer delete(needs_frame_variants)
 
 	for &pass in graph.pass_instances {
-		// Check reads
 		for read in pass.reads {
 			if read.frame_offset != .CURRENT {
 				needs_frame_variants[read.resource_name] = true
 			}
 		}
-
-		// Check writes
 		for write in pass.writes {
 			if write.frame_offset != .CURRENT {
 				needs_frame_variants[write.resource_name] = true
@@ -33,8 +32,7 @@ allocate_resources :: proc(
 	}
 
 	// Allocate resources
-	for &res, idx in graph.resource_instances {
-		// Skip external resources
+	for &res in graph.resource_instances {
 		is_external := false
 		switch res.type {
 		case .BUFFER:
@@ -42,27 +40,21 @@ allocate_resources :: proc(
 		case .TEXTURE_2D, .TEXTURE_CUBE:
 			is_external = res.texture_desc.is_external
 		}
+		if is_external do continue
 
-		if is_external {
-			continue
-		}
-
-		// Determine number of variants
+		wants_double_buffer := res.type != .BUFFER && res.texture_desc.double_buffer
 		variant_count := 1
-		if needs_frame_variants[res.name] {
+		if needs_frame_variants[res.name] || wants_double_buffer {
 			variant_count = graph.frames_in_flight
 		}
 
-		// Allocate based on resource type
 		switch res.type {
 		case .BUFFER:
 			allocate_buffer(&res, gctx, variant_count) or_return
-
 		case .TEXTURE_2D:
-			allocate_texture_2d(&res, gctx, variant_count) or_return
-
+			allocate_texture_2d(&res, gctx, tm_ptr, variant_count) or_return
 		case .TEXTURE_CUBE:
-			allocate_texture_cube(&res, gctx, variant_count) or_return
+			allocate_texture_cube(&res, gctx, tm_ptr, variant_count) or_return
 		}
 	}
 
@@ -75,28 +67,42 @@ allocate_resources :: proc(
 
 allocate_buffer :: proc(
 	res: ^ResourceInstance,
-	gctx: rawptr,
+	gctx_ptr: rawptr,
 	variant_count: int,
 	loc := #caller_location,
 ) -> CompileError {
-	// TODO: Integrate with actual gpu.GPUContext once available
-	// For now, just allocate arrays to track that allocation happened
+	gctx := cast(^gpu.GPUContext)gctx_ptr
 
-	// Allocate variant arrays
-	res.buffers = make([dynamic]vk.Buffer, variant_count)
+	res.buffers      = make([dynamic]vk.Buffer,       variant_count)
 	res.buffer_memory = make([dynamic]vk.DeviceMemory, variant_count)
-	res.buffer_size = res.buffer_desc.size
+	res.buffer_size  = res.buffer_desc.size
 
-	// In real implementation, would call:
-	// for i in 0..<variant_count {
-	//     buffer_info := vk.BufferCreateInfo{
-	//         sType = .BUFFER_CREATE_INFO,
-	//         size = res.buffer_desc.size,
-	//         usage = res.buffer_desc.usage,
-	//     }
-	//     vk.CreateBuffer(device, &buffer_info, nil, &res.buffers[i])
-	//     ... allocate and bind memory ...
-	// }
+	for i in 0 ..< variant_count {
+		create_info := vk.BufferCreateInfo{
+			sType       = .BUFFER_CREATE_INFO,
+			size        = res.buffer_desc.size,
+			usage       = res.buffer_desc.usage,
+			sharingMode = .EXCLUSIVE,
+		}
+		if vk.CreateBuffer(gctx.device, &create_info, nil, &res.buffers[i]) != .SUCCESS {
+			log.errorf("graph allocator: failed to create buffer '%s'[%d]", res.name, i)
+			return .ALLOCATION_FAILED
+		}
+
+		mem_reqs: vk.MemoryRequirements
+		vk.GetBufferMemoryRequirements(gctx.device, res.buffers[i], &mem_reqs)
+
+		res.buffer_memory[i] = gpu.allocate_memory(gctx, mem_reqs, {.DEVICE_LOCAL}) or_else 0
+		if res.buffer_memory[i] == 0 {
+			log.errorf("graph allocator: failed to allocate memory for buffer '%s'[%d]", res.name, i)
+			return .ALLOCATION_FAILED
+		}
+
+		if vk.BindBufferMemory(gctx.device, res.buffers[i], res.buffer_memory[i], 0) != .SUCCESS {
+			log.errorf("graph allocator: failed to bind memory for buffer '%s'[%d]", res.name, i)
+			return .ALLOCATION_FAILED
+		}
+	}
 
 	return .NONE
 }
@@ -107,61 +113,107 @@ allocate_buffer :: proc(
 
 allocate_texture_2d :: proc(
 	res: ^ResourceInstance,
-	gctx: rawptr,
+	gctx_ptr: rawptr,
+	tm_ptr: rawptr,
 	variant_count: int,
 	loc := #caller_location,
 ) -> CompileError {
-	// TODO: Integrate with actual gpu.GPUContext once available
+	gctx := cast(^gpu.GPUContext)gctx_ptr
+	tm   := cast(^gpu.TextureManager)tm_ptr
 
-	// Allocate variant arrays
-	res.images = make([dynamic]vk.Image, variant_count)
-	res.image_views = make([dynamic]vk.ImageView, variant_count)
-	res.image_memory = make([dynamic]vk.DeviceMemory, variant_count)
+	res.images              = make([dynamic]vk.Image,     variant_count)
+	res.image_views         = make([dynamic]vk.ImageView,  variant_count)
+	res.texture_handle_bits = make([dynamic]u64,           variant_count)
 
-	// In real implementation, would call:
-	// for i in 0..<variant_count {
-	//     image_info := vk.ImageCreateInfo{
-	//         sType = .IMAGE_CREATE_INFO,
-	//         imageType = .IMAGE_TYPE_2D,
-	//         format = res.texture_desc.format,
-	//         extent = {res.texture_desc.width, res.texture_desc.height, 1},
-	//         usage = res.texture_desc.usage,
-	//         ...
-	//     }
-	//     vk.CreateImage(device, &image_info, nil, &res.images[i])
-	//     ... allocate and bind memory ...
-	//     ... create image view ...
-	// }
+	extent := vk.Extent2D{res.texture_desc.width, res.texture_desc.height}
+
+	for i in 0 ..< variant_count {
+		handle, ret := gpu.allocate_texture_2d(tm, gctx, extent, res.texture_desc.format, res.texture_desc.usage)
+		if ret != .SUCCESS {
+			log.errorf("graph allocator: failed to allocate texture_2d '%s'[%d]: %v", res.name, i, ret)
+			return .ALLOCATION_FAILED
+		}
+
+		img := gpu.get_texture_2d(tm, handle)
+		res.images[i]              = img.image
+		res.image_views[i]         = img.view
+		res.texture_handle_bits[i] = transmute(u64)handle
+	}
 
 	return .NONE
 }
 
 allocate_texture_cube :: proc(
 	res: ^ResourceInstance,
-	gctx: rawptr,
+	gctx_ptr: rawptr,
+	tm_ptr: rawptr,
 	variant_count: int,
 	loc := #caller_location,
 ) -> CompileError {
-	// TODO: Integrate with actual gpu.GPUContext once available
+	gctx := cast(^gpu.GPUContext)gctx_ptr
+	tm   := cast(^gpu.TextureManager)tm_ptr
 
-	// Allocate variant arrays
-	res.images = make([dynamic]vk.Image, variant_count)
-	res.image_views = make([dynamic]vk.ImageView, variant_count)
-	res.image_memory = make([dynamic]vk.DeviceMemory, variant_count)
+	res.images              = make([dynamic]vk.Image,     variant_count)
+	res.image_views         = make([dynamic]vk.ImageView,  variant_count)
+	res.texture_handle_bits = make([dynamic]u64,           variant_count)
 
-	// In real implementation, would create cube textures:
-	// image_info.flags = {.CUBE_COMPATIBLE}
-	// image_info.arrayLayers = 6
+	for i in 0 ..< variant_count {
+		handle, ret := gpu.allocate_texture_cube(tm, gctx, res.texture_desc.width, res.texture_desc.format, res.texture_desc.usage)
+		if ret != .SUCCESS {
+			log.errorf("graph allocator: failed to allocate texture_cube '%s'[%d]: %v", res.name, i, ret)
+			return .ALLOCATION_FAILED
+		}
+
+		img := gpu.get_texture_cube(tm, handle)
+		res.images[i]              = img.image
+		res.image_views[i]         = img.view
+		res.texture_handle_bits[i] = transmute(u64)handle
+	}
 
 	return .NONE
 }
 
 // ============================================================================
-// Resource Deallocation (called by graph.destroy)
+// Resource Deallocation
 // ============================================================================
 
-deallocate_resources :: proc(graph: ^Graph, gctx: rawptr) {
+// Deallocate a single resource's GPU memory. Called by graph.destroy_resource.
+deallocate_resource :: proc(res: ^ResourceInstance, gctx_ptr: rawptr, tm_ptr: rawptr) {
+	gctx := cast(^gpu.GPUContext)gctx_ptr
+	tm   := cast(^gpu.TextureManager)tm_ptr
+
+	switch res.type {
+	case .BUFFER:
+		for i in 0 ..< len(res.buffers) {
+			vk.DestroyBuffer(gctx.device, res.buffers[i], nil)
+			vk.FreeMemory(gctx.device, res.buffer_memory[i], nil)
+		}
+		delete(res.buffers)
+		delete(res.buffer_memory)
+
+	case .TEXTURE_2D:
+		for bits in res.texture_handle_bits {
+			handle := transmute(gpu.Texture2DHandle)bits
+			gpu.free_texture_2d(tm, gctx, handle)
+		}
+		delete(res.images)
+		delete(res.image_views)
+		delete(res.texture_handle_bits)
+
+	case .TEXTURE_CUBE:
+		for bits in res.texture_handle_bits {
+			handle := transmute(gpu.TextureCubeHandle)bits
+			gpu.free_texture_cube(tm, gctx, handle)
+		}
+		delete(res.images)
+		delete(res.image_views)
+		delete(res.texture_handle_bits)
+	}
+}
+
+// Deallocate all non-external resources. Called by graph.destroy.
+deallocate_resources :: proc(graph: ^Graph, gctx: rawptr, tm_ptr: rawptr) {
 	for &res in graph.resource_instances {
-		destroy_resource(&res, gctx)
+		destroy_resource(&res, gctx, tm_ptr)
 	}
 }

@@ -2,6 +2,7 @@ package depth_pyramid
 
 import alg "../../algebra"
 import "../../gpu"
+import rg "../graph"
 import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
@@ -271,4 +272,10 @@ build_pyramid :: proc(
       )
     }
   }
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  depth_tex, ok := rg.find_texture(setup, "depth")
+  if !ok do return
+  rg.read_texture(setup, depth_tex, .CURRENT)
 }

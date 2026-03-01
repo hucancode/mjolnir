@@ -4,6 +4,7 @@ import "../../geometry"
 import "../../gpu"
 import d "../data"
 import "../shared"
+import rg "../graph"
 import "core:log"
 import "core:math/linalg"
 import vk "vendor:vulkan"
@@ -490,4 +491,27 @@ render_directional_light :: proc(
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup, num_lights: u32) {
+  position_tex, ok1 := rg.find_texture(setup, "gbuffer_position")
+  normal_tex, ok2 := rg.find_texture(setup, "gbuffer_normal")
+  albedo_tex, ok3 := rg.find_texture(setup, "gbuffer_albedo")
+  metallic_roughness_tex, ok4 := rg.find_texture(setup, "gbuffer_metallic_roughness")
+  final_image_tex, ok5 := rg.find_texture(setup, "final_image")
+  depth_tex, ok6 := rg.find_texture(setup, "depth")
+  if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || !ok6 {
+    log.errorf("direct_light (cam %d): Failed to find G-buffer resources!", setup.instance_idx)
+    return
+  }
+  rg.reads_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, depth_tex)
+  rg.read_write_texture(setup, final_image_tex)
+  for light_idx in 0..<num_lights {
+    if shadow_2d, ok := rg.find_texture(setup, "shadow_map_2d", .PER_LIGHT, light_idx); ok {
+      rg.read_texture(setup, shadow_2d, .CURRENT)
+    }
+    if shadow_cube, ok := rg.find_texture(setup, "shadow_map_cube", .PER_LIGHT, light_idx); ok {
+      rg.read_texture(setup, shadow_cube, .CURRENT)
+    }
+  }
 }
