@@ -167,6 +167,12 @@ compile :: proc(
 	// Step 9: Set execution order
 	set_execution_order(&graph, sorted[:])
 
+	// Step 10: Assign resource aliases.
+	// Two virtual resources with non-overlapping lifetimes and compatible Vulkan
+	// descriptors are allowed to share the same underlying GPU allocation.
+	// Must run after sorted_passes is set (lifetimes are computed from it).
+	assign_resource_aliases(&graph)
+
 	return graph, .NONE
 }
 

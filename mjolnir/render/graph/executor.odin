@@ -195,27 +195,35 @@ resolve_resource :: proc(
 
 	res := get_resource(graph, res_id)
 
+	// Follow alias chain: aliased resources share GPU handles with their target.
+	// barrier.resource_id already points to the physical resource, but here we
+	// look up by name so we must resolve the chain manually.
+	phys_res := res
+	if res.is_alias {
+		phys_res = get_resource(graph, res.alias_target)
+	}
+
 	// Use actual allocated variant count, not frames_in_flight.
 	// Resources accessed only with .CURRENT have variant_count=1, so variant_idx
 	// must always be 0 regardless of frame_index.
 	actual_variants: int
-	switch res.type {
+	switch phys_res.type {
 	case .BUFFER:
-		actual_variants = max(len(res.buffers), 1)
+		actual_variants = max(len(phys_res.buffers), 1)
 	case .TEXTURE_2D, .TEXTURE_CUBE:
-		actual_variants = max(len(res.images), 1)
+		actual_variants = max(len(phys_res.images), 1)
 	}
 
 	variant_idx := compute_variant_index(frame_index, frame_offset, actual_variants)
 
-	// Resolve based on resource type
-	switch res.type {
+	// Resolve based on resource type using physical resource's GPU handles
+	switch phys_res.type {
 	case .BUFFER:
-		resolved := resolve_buffer(res, variant_idx)
+		resolved := resolve_buffer(phys_res, variant_idx)
 		resources.buffers[resource_name] = resolved
 
 	case .TEXTURE_2D, .TEXTURE_CUBE:
-		resolved := resolve_texture(res, variant_idx)
+		resolved := resolve_texture(phys_res, variant_idx)
 		resources.textures[resource_name] = resolved
 	}
 }

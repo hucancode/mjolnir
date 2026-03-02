@@ -33,6 +33,9 @@ allocate_resources :: proc(
 
 	// Allocate resources
 	for &res in graph.resource_instances {
+		// Aliased resources share GPU handles with their alias_target; skip allocation.
+		if res.is_alias do continue
+
 		is_external := false
 		switch res.type {
 		case .BUFFER:
@@ -179,6 +182,9 @@ allocate_texture_cube :: proc(
 
 // Deallocate a single resource's GPU memory. Called by graph.destroy_resource.
 deallocate_resource :: proc(res: ^ResourceInstance, gctx_ptr: rawptr, tm_ptr: rawptr) {
+	// Aliased resources do not own any GPU memory; the alias_target owns it.
+	if res.is_alias { return }
+
 	gctx := cast(^gpu.GPUContext)gctx_ptr
 	tm   := cast(^gpu.TextureManager)tm_ptr
 
