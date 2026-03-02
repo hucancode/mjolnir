@@ -304,7 +304,7 @@ begin_pass :: proc(
   gpu.begin_rendering(
     command_buffer,
     depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .LOAD, .DONT_CARE),
+    gpu.create_depth_attachment(depth_texture, .LOAD, .DONT_CARE, 1.0, true),
     gpu.create_color_attachment(final_image, .LOAD, .STORE, BG_BLUE_GRAY),
   )
   gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)

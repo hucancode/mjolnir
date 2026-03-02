@@ -207,6 +207,7 @@ Manager :: struct {
   current_swapchain_image:      vk.Image,
   current_swapchain_view:       vk.ImageView,
   current_swapchain_extent:     vk.Extent2D,
+  swapchain_format:             vk.Format,
   // Execute contexts for passes dispatched directly to sub-modules
   particles_compute_ctx:        particles_compute.ExecuteContext,
   ui_ctx:                       ui_render.ExecuteContext,
@@ -273,6 +274,7 @@ init :: proc(
   self.per_camera_data = make(map[u32]Camera)
   self.per_light_data = make(map[u32]Light)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
+  self.swapchain_format = swapchain_format
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
     gpu.free_command_buffer(gctx, ..self.command_buffers[:])
@@ -1568,12 +1570,13 @@ build_pass_declarations :: proc(manager: ^Manager) -> [dynamic]rg.PassDecl {
 // GEOMETRY PASS (PER_CAMERA, GRAPHICS)
 // ============================================================================
 
-geometry_setup :: proc(setup: ^rg.PassSetup, _: rawptr) {
+geometry_setup :: proc(setup: ^rg.PassSetup, user_data: rawptr) {
+	manager := cast(^Manager)user_data
 	extent: vk.Extent2D = {1920, 1080}
 	if int(setup.instance_idx) < len(setup.camera_extents) {
 		extent = setup.camera_extents[setup.instance_idx]
 	}
-	geometry.declare_resources(setup, extent)
+	geometry.declare_resources(setup, extent, manager.swapchain_format)
 }
 
 geometry_execute :: proc(
@@ -1593,13 +1596,11 @@ geometry_execute :: proc(
 	alb_tex, _  := rg.get_texture(resources, "gbuffer_albedo")
 	mr_tex, _   := rg.get_texture(resources, "gbuffer_metallic_roughness")
 	emi_tex, _  := rg.get_texture(resources, "gbuffer_emissive")
-	fin_tex, _  := rg.get_texture(resources, "final_image")
 	position_h           := tex2d(pos_tex)
 	normal_h             := tex2d(nrm_tex)
 	albedo_h             := tex2d(alb_tex)
 	metallic_roughness_h := tex2d(mr_tex)
 	emissive_h           := tex2d(emi_tex)
-	final_image_h        := tex2d(fin_tex)
 	depth_h              := cam.depth[frame_index]
 
 	geometry.begin_pass(

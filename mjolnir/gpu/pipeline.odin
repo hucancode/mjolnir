@@ -867,7 +867,7 @@ create_color_attachment :: proc(
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = load_op,
     storeOp = store_op,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
+    clearValue = {color = {float32 = clear_color}},
   }
 }
 
@@ -883,7 +883,7 @@ create_color_attachment_view :: proc(
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = load_op,
     storeOp = store_op,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
+    clearValue = {color = {float32 = clear_color}},
   }
 }
 
@@ -892,11 +892,13 @@ create_depth_attachment :: proc(
   load_op: vk.AttachmentLoadOp = .CLEAR,
   store_op: vk.AttachmentStoreOp = .STORE,
   clear_depth: f32 = 1.0,
+  read_only: bool = false,
 ) -> vk.RenderingAttachmentInfo {
+  layout: vk.ImageLayout = read_only ? .DEPTH_STENCIL_READ_ONLY_OPTIMAL : .DEPTH_STENCIL_ATTACHMENT_OPTIMAL
   return vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = image.view,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    imageLayout = layout,
     loadOp = load_op,
     storeOp = store_op,
     clearValue = {depthStencil = {depth = clear_depth}},
