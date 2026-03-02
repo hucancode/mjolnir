@@ -175,6 +175,13 @@ ResourceInstance :: struct {
 	external_image:      vk.Image,
 	external_image_view: vk.ImageView,
 
+	// Aliasing: if is_alias=true this resource shares GPU handles with alias_target.
+	// No GPU memory is allocated for aliased resources; the alias_target holds the
+	// actual VkImage/VkBuffer arrays.  Lifetime of this resource must not overlap
+	// with alias_target (enforced by assign_resource_aliases).
+	is_alias:     bool,
+	alias_target: ResourceInstanceId,
+
 	// Descriptor
 	texture_desc:  TextureDesc,
 	buffer_desc:   BufferDesc,
