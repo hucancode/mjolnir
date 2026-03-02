@@ -120,16 +120,17 @@ PassSetup :: struct {
 	camera_extents: []vk.Extent2D, // Extent per camera instance (len == num_cameras)
 	light_is_point: []bool,        // Whether each light is a point light (len == num_lights)
 
-	// Internal state (managed by compiler)
-	resources:     [dynamic]ResourceDecl,
-	reads:         [dynamic]ResourceAccess,
-	writes:        [dynamic]ResourceAccess,
+	// Internal state (managed by compiler — do not access directly)
+	_resources: [dynamic]ResourceDecl,
+	_reads:     [dynamic]ResourceAccess,
+	_writes:    [dynamic]ResourceAccess,
 }
 
 ResourceAccess :: struct {
 	resource_name: string,
 	frame_offset:  FrameOffset,
 	access_mode:   AccessMode,
+	version:       u32, // write-version at time of access (0 = no current-frame writer yet)
 }
 
 // ============================================================================

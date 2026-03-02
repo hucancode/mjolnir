@@ -1437,16 +1437,12 @@ compile_frame_graph :: proc(
 		renderer        = &self.ui,
 		texture_manager = &self.texture_manager,
 		commands        = &self.ui_commands,
-		swapchain_view  = &self.current_swapchain_view,
-		swapchain_extent = &self.current_swapchain_extent,
+		// swapchain_view, swapchain_extent updated each frame in engine.odin
 		texture_ds      = self.texture_manager.descriptor_set,
 	}
 	self.debug_ui_ctx = debug_ui.ExecuteContext{
-		renderer        = &self.debug_ui,
-		swapchain_view  = &self.current_swapchain_view,
-		swapchain_extent = &self.current_swapchain_extent,
-		texture_ds      = &self.texture_manager.descriptor_set,
-		enabled         = &self.show_debug_ui,
+		renderer = &self.debug_ui,
+		// swapchain_view, swapchain_extent, texture_ds, enabled updated each frame in engine.odin
 	}
 
 	// Create compile context

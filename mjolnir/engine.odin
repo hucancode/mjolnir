@@ -1243,6 +1243,14 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   self.render.current_swapchain_extent = self.swapchain.extent
   self.render.show_debug_ui = self.debug_ui_enabled
 
+  // Update per-frame values in ExecuteContexts (swapchain changes every frame)
+  self.render.ui_ctx.swapchain_view   = self.render.current_swapchain_view
+  self.render.ui_ctx.swapchain_extent = self.render.current_swapchain_extent
+  self.render.debug_ui_ctx.swapchain_view   = self.render.current_swapchain_view
+  self.render.debug_ui_ctx.swapchain_extent = self.render.current_swapchain_extent
+  self.render.debug_ui_ctx.texture_ds       = self.render.texture_manager.descriptor_set
+  self.render.debug_ui_ctx.enabled          = self.render.show_debug_ui
+
   // Assign light indices and compute shadow matrices before any GPU work.
   // The graph's shadow_culling/shadow_render passes depend on these being set.
   render.prepare_lights_for_frame(&self.render)

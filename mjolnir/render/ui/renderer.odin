@@ -439,14 +439,15 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
 }
 
 // ExecuteContext holds all data the execute callback needs from the render manager.
-// Use pointers for fields that change each frame (swapchain_view, swapchain_extent).
+// Fields that change each frame (swapchain_view, swapchain_extent) are updated
+// as values before each run_graph call — no interior pointers.
 ExecuteContext :: struct {
-  renderer:        ^Renderer,
-  texture_manager: ^gpu.TextureManager,
-  commands:        ^[dynamic]cmd.RenderCommand,
-  swapchain_view:  ^vk.ImageView,
-  swapchain_extent: ^vk.Extent2D,
-  texture_ds:      vk.DescriptorSet,
+  renderer:         ^Renderer,
+  texture_manager:  ^gpu.TextureManager,
+  commands:         ^[dynamic]cmd.RenderCommand,
+  swapchain_view:   vk.ImageView,
+  swapchain_extent: vk.Extent2D,
+  texture_ds:       vk.DescriptorSet,
 }
 
 execute :: proc(
@@ -456,7 +457,7 @@ execute :: proc(
   user_data: rawptr,
 ) {
   ctx := cast(^ExecuteContext)user_data
-  begin_pass(ctx.renderer, command_buffer, ctx.swapchain_view^, ctx.swapchain_extent^, ctx.texture_ds)
+  begin_pass(ctx.renderer, command_buffer, ctx.swapchain_view, ctx.swapchain_extent, ctx.texture_ds)
   render(ctx.renderer, ctx.commands[:], nil, ctx.texture_manager, command_buffer,
     ctx.swapchain_extent.width, ctx.swapchain_extent.height, frame_index)
   end_pass(command_buffer)

@@ -18,7 +18,7 @@ Graph :: struct {
 	sorted_passes:      []PassInstanceId,
 
 	// Barriers to emit before each pass
-	barriers:           map[PassInstanceId][]Barrier,
+	barriers:           map[PassInstanceId][dynamic]Barrier,
 
 	// Lookup tables (name -> instance ID)
 	resource_by_name:   map[string]ResourceInstanceId,
@@ -38,13 +38,20 @@ Graph :: struct {
 init :: proc(graph: ^Graph, frames_in_flight: int) {
 	graph.pass_instances = make([dynamic]PassInstance)
 	graph.resource_instances = make([dynamic]ResourceInstance)
-	graph.barriers = make(map[PassInstanceId][]Barrier)
+	graph.barriers = make(map[PassInstanceId][dynamic]Barrier)
 	graph.resource_by_name = make(map[string]ResourceInstanceId)
 	graph.frames_in_flight = frames_in_flight
 }
 
 destroy :: proc(graph: ^Graph, gctx: rawptr, tm_ptr: rawptr) {
-	// Destroy all allocated GPU resources
+	// Free pass instances (scoped names are heap-allocated)
+	for &pass in graph.pass_instances {
+		if pass.scope != .GLOBAL do delete(pass.name)
+		delete(pass.reads)
+		delete(pass.writes)
+	}
+
+	// Destroy all allocated GPU resources (also frees scoped resource names)
 	for &res in graph.resource_instances {
 		destroy_resource(&res, gctx, tm_ptr)
 	}
@@ -75,8 +82,9 @@ destroy :: proc(graph: ^Graph, gctx: rawptr, tm_ptr: rawptr) {
 
 // Reset graph for recompilation (keeps allocated GPU resources)
 reset :: proc(graph: ^Graph) {
-	// Clear pass instances
+	// Clear pass instances (scoped names are heap-allocated)
 	for &pass in graph.pass_instances {
+		if pass.scope != .GLOBAL do delete(pass.name)
 		delete(pass.reads)
 		delete(pass.writes)
 	}
@@ -103,6 +111,9 @@ reset :: proc(graph: ^Graph) {
 // ============================================================================
 
 destroy_resource :: proc(res: ^ResourceInstance, gctx: rawptr, tm_ptr: rawptr) {
+	// Free heap-allocated scoped names (non-GLOBAL resources have fmt.aprintf names)
+	if res.scope != .GLOBAL do delete(res.name)
+
 	// External resources are not owned by graph
 	if (res.type == .BUFFER && res.buffer_desc.is_external) ||
 	   (res.type != .BUFFER && res.texture_desc.is_external) {
@@ -161,17 +172,8 @@ set_execution_order :: proc(graph: ^Graph, order: []PassInstanceId) {
 
 // Add barrier before pass (called by barrier computation)
 add_barrier :: proc(graph: ^Graph, pass_id: PassInstanceId, barrier: Barrier) {
-	// Get existing barriers for this pass
-	barriers := graph.barriers[pass_id]
-
-	// Append new barrier
-	new_barriers := make([]Barrier, len(barriers) + 1)
-	copy(new_barriers, barriers)
-	new_barriers[len(barriers)] = barrier
-
-	// Update map
-	if len(barriers) > 0 {
-		delete(barriers)
+	if pass_id not_in graph.barriers {
+		graph.barriers[pass_id] = make([dynamic]Barrier)
 	}
-	graph.barriers[pass_id] = new_barriers
+	append(&graph.barriers[pass_id], barrier)
 }

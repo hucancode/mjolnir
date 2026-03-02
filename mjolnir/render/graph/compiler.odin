@@ -30,11 +30,16 @@ compile :: proc(
 	all_resources: [dynamic]ResourceDecl
 	defer delete(all_resources)
 
-	// Track which declaration each instance came from
-	decl_for_instance := make([dynamic]int, len(instances))
-	defer delete(decl_for_instance)
+	// Tracks the current write-version for each resource, incremented on each write.
+	// Version numbers let build_dependency_edges resolve "which pass wrote what I read"
+	// as a direct O(1) lookup instead of a nearest-predecessor search.
+	resource_versions := make(map[string]u32)
+	defer delete(resource_versions)
 
 	for &instance in instances {
+		// All passes share the same _resources array so later passes can find
+		// resources declared by earlier passes via find_texture/find_buffer.
+		// After each callback we recover the (potentially reallocated) array header.
 		setup := PassSetup{
 			pass_name      = instance.name,
 			pass_scope     = instance.scope,
@@ -43,16 +48,14 @@ compile :: proc(
 			num_lights     = ctx.num_lights,
 			camera_extents = ctx.camera_extents,
 			light_is_point = ctx.light_is_point,
-			resources      = all_resources, // Share the same array across all passes
-			reads          = make([dynamic]ResourceAccess),
-			writes         = make([dynamic]ResourceAccess),
+			_resources     = all_resources,
+			_reads         = make([dynamic]ResourceAccess),
+			_writes        = make([dynamic]ResourceAccess),
 		}
 
 		// Find which PassDecl this instance came from by matching the base name
 		decl_idx := -1
 		for decl, idx in pass_decls {
-			// Instance names are formatted as "name" (GLOBAL) or "name_cam_N" (PER_CAMERA) or "name_light_N" (PER_LIGHT)
-			// Check if instance name matches this decl
 			if instance.scope == .GLOBAL && instance.name == decl.name {
 				decl_idx = idx
 				break
@@ -67,23 +70,35 @@ compile :: proc(
 
 		if decl_idx == -1 {
 			fmt.eprintf("ERROR: Could not find PassDecl for instance '%s'\n", instance.name)
+			delete(setup._reads)
+			delete(setup._writes)
 			continue
 		}
 
-		// Call the CORRECT setup callback for this pass
 		if pass_decls[decl_idx].setup != nil {
 			pass_decls[decl_idx].setup(&setup, instance.user_data)
 		}
 
-		// Update shared resources array (in case it was reallocated during append)
-		all_resources = setup.resources
+		// Recover shared resources array (may have reallocated during append)
+		all_resources = setup._resources
 
-		// Copy dependencies to instance (instance now owns these arrays)
-		instance.reads = setup.reads
-		instance.writes = setup.writes
+		// Assign versions: reads capture the version currently produced, writes mint the next.
+		// Must process reads before writes so a READ_WRITE pass reads version N then produces N+1.
+		for &read in setup._reads {
+			if read.frame_offset == .CURRENT {
+				read.version = resource_versions[read.resource_name]
+			}
+		}
+		for &write in setup._writes {
+			if write.frame_offset == .CURRENT {
+				resource_versions[write.resource_name] += 1
+				write.version = resource_versions[write.resource_name]
+			}
+		}
 
-		// NOTE: Do NOT delete setup.reads/writes here - they're now owned by instance!
-		// Only the resources array is shared across passes
+		// Instance takes ownership of the reads/writes arrays
+		instance.reads  = setup._reads
+		instance.writes = setup._writes
 	}
 
 	// Step 3: Create resource instances
@@ -93,6 +108,8 @@ compile :: proc(
 	for res_decl in all_resources {
 		// Check if resource already exists (multiple passes can create same resource)
 		if _, exists := resource_map[res_decl.name]; exists {
+			// Free the duplicate heap-allocated name (non-GLOBAL names are fmt.aprintf'd)
+			if res_decl.scope != .GLOBAL do delete(res_decl.name)
 			continue
 		}
 
@@ -114,12 +131,8 @@ compile :: proc(
 	}
 
 	// Step 4: Add pass instances to graph
-	pass_ids := make([dynamic]PassInstanceId, len(instances))
-	defer delete(pass_ids)
-
 	for instance in instances {
-		id := add_pass_instance(&graph, instance)
-		append(&pass_ids, id)
+		add_pass_instance(&graph, instance)
 	}
 
 	// Step 5: Validate graph
@@ -171,49 +184,37 @@ instantiate_passes :: proc(
 	for decl in pass_decls {
 		switch decl.scope {
 		case .GLOBAL:
-			// Single instance
-			instance := PassInstance{
-				name = decl.name,
-				scope = decl.scope,
-				instance = 0,
-				queue = decl.queue,
-				execute = decl.execute,
+			append(&instances, PassInstance{
+				name      = decl.name,
+				scope     = decl.scope,
+				instance  = 0,
+				queue     = decl.queue,
+				execute   = decl.execute,
 				user_data = decl.user_data,
-				reads = make([dynamic]ResourceAccess),
-				writes = make([dynamic]ResourceAccess),
-			}
-			append(&instances, instance)
+			})
 
 		case .PER_CAMERA:
-			// One instance per camera
 			for cam_idx in 0..<ctx.num_cameras {
-				instance := PassInstance{
-					name = fmt.aprintf("%s_cam_%d", decl.name, cam_idx),
-					scope = decl.scope,
-					instance = u32(cam_idx),
-					queue = decl.queue,
-					execute = decl.execute,
+				append(&instances, PassInstance{
+					name      = fmt.aprintf("%s_cam_%d", decl.name, cam_idx),
+					scope     = decl.scope,
+					instance  = u32(cam_idx),
+					queue     = decl.queue,
+					execute   = decl.execute,
 					user_data = decl.user_data,
-					reads = make([dynamic]ResourceAccess),
-					writes = make([dynamic]ResourceAccess),
-				}
-				append(&instances, instance)
+				})
 			}
 
 		case .PER_LIGHT:
-			// One instance per light
 			for light_idx in 0..<ctx.num_lights {
-				instance := PassInstance{
-					name = fmt.aprintf("%s_light_%d", decl.name, light_idx),
-					scope = decl.scope,
-					instance = u32(light_idx),
-					queue = decl.queue,
-					execute = decl.execute,
+				append(&instances, PassInstance{
+					name      = fmt.aprintf("%s_light_%d", decl.name, light_idx),
+					scope     = decl.scope,
+					instance  = u32(light_idx),
+					queue     = decl.queue,
+					execute   = decl.execute,
 					user_data = decl.user_data,
-					reads = make([dynamic]ResourceAccess),
-					writes = make([dynamic]ResourceAccess),
-				}
-				append(&instances, instance)
+				})
 			}
 		}
 	}
@@ -279,50 +280,53 @@ build_dependency_edges :: proc(
 ) -> map[PassInstanceId][dynamic]PassInstanceId {
 	edges := make(map[PassInstanceId][dynamic]PassInstanceId)
 
-	// Build last_writer map: resource_name -> pass_id
-	last_writer := make(map[string]PassInstanceId)
-	defer delete(last_writer)
+	// Initialize edge list for every pass (so sinks appear in the map)
+	for i in 0..<len(graph.pass_instances) {
+		edges[PassInstanceId(i)] = make([dynamic]PassInstanceId)
+	}
 
-	// Process passes in declaration order to build dependency edges
+	// Pass 1: build version → writer map.
+	// writers[name] is a list where writers[name][version-1] is the pass that produced that version.
+	// Version numbers are 1-based and assigned sequentially in compile(), so the list grows by one
+	// per write and has no gaps.
+	writers := make(map[string][dynamic]PassInstanceId)
+	defer {
+		for _, list in writers {
+			delete(list)
+		}
+		delete(writers)
+	}
+
+	for &pass, pass_idx in graph.pass_instances {
+		for write in pass.writes {
+			if write.frame_offset == .CURRENT && write.version > 0 {
+				list := writers[write.resource_name]
+				append(&list, PassInstanceId(pass_idx))
+				writers[write.resource_name] = list
+			}
+		}
+	}
+
+	// Pass 2: for each CURRENT read, find the pass that produced the version being read.
+	// This is an O(1) lookup: read.version is the exact version assigned during setup.
+	// READ_WRITE chains (A-writes v1, B-reads v1 and writes v2, C-reads v2 ...) produce
+	// the correct linear ordering A→B→C automatically.
 	for &pass, pass_idx in graph.pass_instances {
 		pass_id := PassInstanceId(pass_idx)
-
-		// Initialize edge list for this pass
-		if pass_id not_in edges {
-			edges[pass_id] = make([dynamic]PassInstanceId)
-		}
-
-		// For each read, create edge from last writer (same frame offset only)
 		for read in pass.reads {
-			// Only same-frame same-offset creates execution edge
-			if read.frame_offset != .CURRENT {
-				continue
-			}
+			if read.frame_offset != .CURRENT || read.version == 0 do continue
+			writer_list, found := writers[read.resource_name]
+			if !found || int(read.version) > len(writer_list) do continue
 
-			// Find last writer
-			if writer_id, found := last_writer[read.resource_name]; found {
-				// Add edge: writer -> this pass (deduplicate)
-				if writer_id not_in edges {
-					edges[writer_id] = make([dynamic]PassInstanceId)
-				}
-				already_has_edge := false
-				for existing in edges[writer_id] {
-					if existing == pass_id {
-						already_has_edge = true
-						break
-					}
-				}
-				if !already_has_edge {
-					append(&edges[writer_id], pass_id)
-				}
-			}
-		}
+			writer_id := writer_list[read.version - 1]
+			if writer_id == pass_id do continue // skip self
 
-		// Update last_writer for all writes from this pass
-		for write in pass.writes {
-			if write.frame_offset == .CURRENT {
-				last_writer[write.resource_name] = pass_id
+			// Deduplicate
+			already := false
+			for existing in edges[writer_id] {
+				if existing == pass_id { already = true; break }
 			}
+			if !already do append(&edges[writer_id], pass_id)
 		}
 	}
 
