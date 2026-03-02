@@ -234,7 +234,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 // Declare graph resources for the geometry pass.
 // Creates G-buffer textures owned by the graph, and registers external
 // depth + draw command buffers. Called from render.odin's setup callback.
-declare_resources :: proc(setup: ^rg.PassSetup, extent: vk.Extent2D) {
+declare_resources :: proc(setup: ^rg.PassSetup, extent: vk.Extent2D, color_format: vk.Format) {
   position_tex := rg.create_texture(setup, "gbuffer_position", rg.TextureDesc{
     width = extent.width, height = extent.height,
     format = .R32G32B32A32_SFLOAT,
@@ -267,7 +267,7 @@ declare_resources :: proc(setup: ^rg.PassSetup, extent: vk.Extent2D) {
   })
   final_image_tex := rg.create_texture(setup, "final_image", rg.TextureDesc{
     width = extent.width, height = extent.height,
-    format = .R16G16B16A16_SFLOAT,
+    format = color_format,
     usage = {.COLOR_ATTACHMENT, .SAMPLED},
     aspect = {.COLOR},
     // Non-main cameras double-buffer their output so the main camera can sample
@@ -293,5 +293,5 @@ declare_resources :: proc(setup: ^rg.PassSetup, extent: vk.Extent2D) {
     is_external = true,
   })
   rg.reads_buffers(setup, opaque_cmds, opaque_count)
-  rg.writes_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex, final_image_tex, depth_tex)
+  rg.writes_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex, depth_tex)
 }

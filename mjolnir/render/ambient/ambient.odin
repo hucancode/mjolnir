@@ -251,5 +251,5 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
     return
   }
   rg.reads_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex)
-  rg.read_write_texture(setup, final_image_tex)
+  rg.writes_textures(setup, final_image_tex)
 }
