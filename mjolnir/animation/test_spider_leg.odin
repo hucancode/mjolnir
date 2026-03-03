@@ -98,6 +98,15 @@ test_spider_leg_skips_lift_for_nearby_target :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_spider_leg_target_leads_root_motion :: proc(t: ^testing.T) {
+  leg: SpiderLeg
+  spider_leg_init(&leg, {1, 0, 0}, lift_duration = 0.5)
+  spider_leg_update_with_root(&leg, 0.1, {0, 0, 0})
+  spider_leg_update_with_root(&leg, 0.1, {2, 0, 0})
+  testing.expect_value(t, leg.feet_target, [3]f32{13, 0, 0})
+}
+
+@(test)
 test_spider_leg_full_cycle :: proc(t: ^testing.T) {
   leg: SpiderLeg
   spider_leg_init(&leg, {0, 0, 0})

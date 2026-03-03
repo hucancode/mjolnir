@@ -14,6 +14,7 @@ SpiderLeg :: struct {
 	feet_lift_duration:     f32,
 	feet_position:          [3]f32,  // Current foot position in world space
 	feet_last_target:       [3]f32,  // Last grounded position in world space
+	last_root_position:     [3]f32,
 	accumulated_time:       f32,     // internal
 }
 
@@ -41,6 +42,7 @@ spider_leg_init :: proc(
 	self.feet_lift_duration = lift_duration
 	self.feet_position = initial_offset
 	self.feet_last_target = initial_offset
+	self.last_root_position = {}
 	self.accumulated_time = 0.0
 }
 
@@ -55,6 +57,8 @@ spider_leg_update :: proc(self: ^SpiderLeg, delta_time: f32) {
 	min_lift_distance_sq := linalg.length2(self.feet_offset) * SPIDER_LEG_MIN_LIFT_DISTANCE_RATIO * SPIDER_LEG_MIN_LIFT_DISTANCE_RATIO
 	if linalg.length2(target_delta) <= min_lift_distance_sq {
 		self.accumulated_time += delta_time
+		self.feet_position = self.feet_target
+		self.feet_last_target = self.feet_target
 		return
 	}
 
@@ -89,14 +93,22 @@ spider_leg_update :: proc(self: ^SpiderLeg, delta_time: f32) {
 }
 
 spider_leg_update_with_root :: proc(self: ^SpiderLeg, delta_time: f32, root_position: [3]f32) {
-	// Compute target from root + offset
-	self.feet_target = root_position + self.feet_offset
+	root_velocity := [3]f32{}
+	if self.accumulated_time > 0.0 && delta_time > 0.0 {
+		root_velocity = (root_position - self.last_root_position) / delta_time
+	}
+	target_lead := root_velocity * self.feet_lift_duration
+
+	// Compute target from root + offset, biased slightly forward based on root motion
+	self.feet_target = root_position + self.feet_offset + target_lead
 
 	// Initialize on first call (when accumulated_time is still 0)
 	if self.accumulated_time == 0.0 && delta_time > 0.0 {
 		self.feet_last_target = self.feet_target
 		self.feet_position = self.feet_target
 	}
+
+	self.last_root_position = root_position
 
 	// Then run existing update logic
 	spider_leg_update(self, delta_time)
