@@ -87,6 +87,17 @@ test_spider_leg_zero_duration :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_spider_leg_skips_lift_for_nearby_target :: proc(t: ^testing.T) {
+  leg: SpiderLeg
+  spider_leg_init(&leg, {1, 0, 0})
+  leg.feet_target = {1.05, 0, 0}
+  spider_leg_update(&leg, 0.1)
+  testing.expect_value(t, leg.feet_position, [3]f32{1.05, 0, 0})
+  testing.expect_value(t, leg.feet_last_target, [3]f32{1.05, 0, 0})
+  testing.expect_value(t, leg.feet_position.y, 0.0)
+}
+
+@(test)
 test_spider_leg_full_cycle :: proc(t: ^testing.T) {
   leg: SpiderLeg
   spider_leg_init(&leg, {0, 0, 0})
@@ -98,6 +109,7 @@ test_spider_leg_full_cycle :: proc(t: ^testing.T) {
   testing.expect_value(t, leg.feet_position, [3]f32{1, 0, 0})
   spider_leg_update(&leg, 1.5)
   testing.expect_value(t, leg.feet_position, [3]f32{1, 0, 0})
+  leg.feet_target = {2, 0, 0}
   spider_leg_update(&leg, 0.2)
   testing.expect(t, leg.feet_position.y > 0, "Should lift again in next cycle")
 }
@@ -120,7 +132,6 @@ test_spider_leg_modifier_single_leg :: proc(t: ^testing.T) {
 
   modifier := &state.modifier.(SpiderLegModifier)
   spider_leg_init(&modifier.legs[0], {0, 0, 0})
-  modifier.legs[0].feet_target = {1, 0, 0}
 
   transforms := make([]BoneTransform, 10)
   defer delete(transforms)
@@ -135,6 +146,17 @@ test_spider_leg_modifier_single_leg :: proc(t: ^testing.T) {
   for i in 0 ..< len(bone_lengths) {
     bone_lengths[i] = 1.0
   }
+
+  spider_leg_modifier_update(
+    &state,
+    modifier,
+    0.1,
+    transforms[:],
+    1.0,
+    bone_lengths[:],
+  )
+
+  transforms[0].world_position = {1, 0, 0}
 
   spider_leg_modifier_update(
     &state,
@@ -171,8 +193,6 @@ test_spider_leg_modifier_multiple_legs :: proc(t: ^testing.T) {
   modifier := &state.modifier.(SpiderLegModifier)
   spider_leg_init(&modifier.legs[0], {0, 0, 0}, time_offset = 0.0)
   spider_leg_init(&modifier.legs[1], {0, 0, 1}, time_offset = 0.5)
-  modifier.legs[0].feet_target = {1, 0, 0}
-  modifier.legs[1].feet_target = {1, 0, 1}
 
   transforms := make([]BoneTransform, 10)
   defer delete(transforms)
@@ -187,6 +207,17 @@ test_spider_leg_modifier_multiple_legs :: proc(t: ^testing.T) {
   for i in 0 ..< len(bone_lengths) {
     bone_lengths[i] = 1.0
   }
+
+  spider_leg_modifier_update(
+    &state,
+    modifier,
+    0.1,
+    transforms[:],
+    1.0,
+    bone_lengths[:],
+  )
+
+  transforms[0].world_position = {1, 0, 0}
 
   spider_leg_modifier_update(
     &state,

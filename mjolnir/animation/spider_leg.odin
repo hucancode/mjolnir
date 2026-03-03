@@ -3,6 +3,8 @@ package animation
 import "core:math"
 import "core:math/linalg"
 
+SPIDER_LEG_MIN_LIFT_DISTANCE_RATIO :: f32(0.1)
+
 SpiderLeg :: struct {
 	feet_offset:            [3]f32,
 	feet_target:            [3]f32,  // Current target in world space
@@ -46,6 +48,13 @@ spider_leg_update :: proc(self: ^SpiderLeg, delta_time: f32) {
 	if self.feet_lift_duration <= 0 {
 		self.feet_position = self.feet_target
 		self.feet_last_target = self.feet_target
+		return
+	}
+
+	target_delta := self.feet_target - self.feet_last_target
+	min_lift_distance_sq := linalg.length2(self.feet_offset) * SPIDER_LEG_MIN_LIFT_DISTANCE_RATIO * SPIDER_LEG_MIN_LIFT_DISTANCE_RATIO
+	if linalg.length2(target_delta) <= min_lift_distance_sq {
+		self.accumulated_time += delta_time
 		return
 	}
 
