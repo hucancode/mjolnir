@@ -2,6 +2,7 @@ package render_data
 
 import cont "../../containers"
 import "../../gpu"
+import vk "vendor:vulkan"
 
 Handle :: cont.Handle
 
@@ -159,4 +160,62 @@ Particle :: struct {
   max_life:      f32,
   weight:        f32,
   texture_index: u32,
+}
+
+DrawType :: enum u32 { OPAQUE, TRANSPARENT, SPRITE, WIREFRAME, RANDOM_COLOR, LINE_STRIP }
+
+// ── Shadow map types ──────────────────────────────────────────────────────────
+
+ShadowMap :: struct {
+	draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+	draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+	descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+	view:            matrix[4, 4]f32,
+	projection:      matrix[4, 4]f32,
+	view_projection: matrix[4, 4]f32,
+	near:            f32,
+	far:             f32,
+	frustum_planes:  [6][4]f32,
+}
+
+ShadowMapCube :: struct {
+	draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+	draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+	descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+	projection:      matrix[4, 4]f32,
+	near:            f32,
+	far:             f32,
+}
+
+// ── Light types ───────────────────────────────────────────────────────────────
+
+PointLight :: struct {
+	color:    [4]f32,
+	position: [3]f32,
+	radius:   f32,
+	shadow:   Maybe(ShadowMapCube),
+}
+
+SpotLight :: struct {
+	color:       [4]f32,
+	position:    [3]f32,
+	direction:   [3]f32,
+	radius:      f32,
+	angle_inner: f32,
+	angle_outer: f32,
+	shadow:      Maybe(ShadowMap),
+}
+
+DirectionalLight :: struct {
+	color:     [4]f32,
+	position:  [3]f32,
+	direction: [3]f32,
+	radius:    f32,
+	shadow:    Maybe(ShadowMap),
+}
+
+Light :: union {
+	PointLight,
+	SpotLight,
+	DirectionalLight,
 }

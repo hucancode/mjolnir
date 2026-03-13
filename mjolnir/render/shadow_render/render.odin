@@ -235,26 +235,69 @@ render :: proc(
   )
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup, is_point_light: bool) {
+@(private)
+_render_frustum :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, shadow: d.ShadowMap, frame_index: u32)
+	where type_of(manager.shadow_render) == System &&
+	      type_of(manager.texture_manager) == gpu.TextureManager {
+	shadow_map_tex, found := rg.get_texture(resources, "shadow_map_2d")
+	if !found do return
+	render(
+		&manager.shadow_render,
+		cmd,
+		&manager.texture_manager,
+		shadow.view_projection,
+		transmute(gpu.Texture2DHandle)shadow_map_tex.handle_bits,
+		shadow.draw_commands[frame_index],
+		shadow.draw_count[frame_index],
+		manager.texture_manager.descriptor_set,
+		manager.bone_buffer.descriptor_sets[frame_index],
+		manager.material_buffer.descriptor_set,
+		manager.node_data_buffer.descriptor_set,
+		manager.mesh_data_buffer.descriptor_set,
+		manager.mesh_manager.vertex_skinning_buffer.descriptor_set,
+		manager.mesh_manager.vertex_buffer.buffer,
+		manager.mesh_manager.index_buffer.buffer,
+		frame_index,
+	)
+}
+
+execute_spot :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.shadow_render) == System &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.per_light_data) == map[u32]d.Light {
+	light, ok := manager.per_light_data[resources.light_handle]
+	if !ok do return
+	l, is_spot := light.(d.SpotLight)
+	if !is_spot do return
+	shadow, has_shadow := l.shadow.?
+	if !has_shadow do return
+	_render_frustum(manager, resources, cmd, shadow, frame_index)
+}
+
+execute_directional :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.shadow_render) == System &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.per_light_data) == map[u32]d.Light {
+	light, ok := manager.per_light_data[resources.light_handle]
+	if !ok do return
+	l, is_dir := light.(d.DirectionalLight)
+	if !is_dir do return
+	shadow, has_shadow := l.shadow.?
+	if !has_shadow do return
+	_render_frustum(manager, resources, cmd, shadow, frame_index)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  // shadow_render only handles spot/directional lights — always creates a 2D shadow map.
+  // Point lights are handled by the shadow_render_sphere pass (PER_POINT_LIGHT scope).
   shadow_draw_cmds, _ := rg.find_buffer(setup, "shadow_draw_commands")
   shadow_draw_count, _ := rg.find_buffer(setup, "shadow_draw_count")
   rg.reads_buffers(setup, shadow_draw_cmds, shadow_draw_count)
-  if is_point_light {
-    shadow_map := rg.create_texture(setup, "shadow_map_cube", rg.TextureDesc{
-      width = d.SHADOW_MAP_SIZE, height = d.SHADOW_MAP_SIZE,
-      format = .D32_SFLOAT,
-      usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      aspect = {.DEPTH},
-      is_cube = true,
-    })
-    rg.write_texture(setup, shadow_map, .CURRENT)
-  } else {
-    shadow_map := rg.create_texture(setup, "shadow_map_2d", rg.TextureDesc{
-      width = d.SHADOW_MAP_SIZE, height = d.SHADOW_MAP_SIZE,
-      format = .D32_SFLOAT,
-      usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      aspect = {.DEPTH},
-    })
-    rg.write_texture(setup, shadow_map, .CURRENT)
-  }
+  shadow_map := rg.create_texture(setup, "shadow_map_2d", rg.TextureDesc{
+    width = d.SHADOW_MAP_SIZE, height = d.SHADOW_MAP_SIZE,
+    format = .D32_SFLOAT,
+    usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    aspect = {.DEPTH},
+  })
+  rg.write_texture(setup, shadow_map, .CURRENT)
 }

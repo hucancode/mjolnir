@@ -3,6 +3,7 @@ package shadow_sphere_render
 import "../../geometry"
 import "../../gpu"
 import d "../data"
+import rg "../graph"
 import vk "vendor:vulkan"
 
 SHADER_SPHERE_DEPTH_VERT :: #load("../../shader/shadow_spherical/vert.spv")
@@ -249,4 +250,54 @@ render :: proc(
     {.DEPTH},
     layer_count = 6,
   )
+}
+
+execute_point :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.shadow_sphere_render) == System &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.per_light_data) == map[u32]d.Light {
+	light, ok := manager.per_light_data[resources.light_handle]
+	if !ok do return
+	l, is_point := light.(d.PointLight)
+	if !is_point do return
+	shadow, has_shadow := l.shadow.?
+	if !has_shadow do return
+	shadow_map_tex, found := rg.get_texture(resources, "shadow_map_cube")
+	if !found do return
+	render(
+		&manager.shadow_sphere_render,
+		cmd,
+		&manager.texture_manager,
+		shadow.projection,
+		shadow.near,
+		shadow.far,
+		l.position,
+		transmute(gpu.TextureCubeHandle)shadow_map_tex.handle_bits,
+		shadow.draw_commands[frame_index],
+		shadow.draw_count[frame_index],
+		manager.texture_manager.descriptor_set,
+		manager.bone_buffer.descriptor_sets[frame_index],
+		manager.material_buffer.descriptor_set,
+		manager.node_data_buffer.descriptor_set,
+		manager.mesh_data_buffer.descriptor_set,
+		manager.mesh_manager.vertex_skinning_buffer.descriptor_set,
+		manager.mesh_manager.vertex_buffer.buffer,
+		manager.mesh_manager.index_buffer.buffer,
+		frame_index,
+	)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  // shadow_render_sphere only handles point lights — always creates a cube shadow map.
+  shadow_draw_cmds, _ := rg.find_buffer(setup, "shadow_draw_commands")
+  shadow_draw_count, _ := rg.find_buffer(setup, "shadow_draw_count")
+  rg.reads_buffers(setup, shadow_draw_cmds, shadow_draw_count)
+  shadow_map := rg.create_texture(setup, "shadow_map_cube", rg.TextureDesc{
+    width = d.SHADOW_MAP_SIZE, height = d.SHADOW_MAP_SIZE,
+    format = .D32_SFLOAT,
+    usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    aspect = {.DEPTH},
+    is_cube = true,
+  })
+  rg.write_texture(setup, shadow_map, .CURRENT)
 }

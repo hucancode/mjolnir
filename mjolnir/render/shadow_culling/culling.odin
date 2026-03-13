@@ -73,7 +73,7 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyDescriptorSetLayout(gctx.device, self.descriptor_layout, nil)
 }
 
-execute :: proc(
+cull :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
   frustum_planes: [6][4]f32,
@@ -126,6 +126,30 @@ execute :: proc(
     &push,
   )
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
+}
+
+execute_spot :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.shadow_culling) == System &&
+	      type_of(manager.per_light_data) == map[u32]d.Light {
+	light, ok := manager.per_light_data[resources.light_handle]
+	if !ok do return
+	l, is_spot := light.(d.SpotLight)
+	if !is_spot do return
+	shadow, has_shadow := l.shadow.?
+	if !has_shadow do return
+	cull(&manager.shadow_culling, cmd, shadow.frustum_planes, shadow.draw_count[frame_index].buffer, shadow.descriptor_sets[frame_index])
+}
+
+execute_directional :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.shadow_culling) == System &&
+	      type_of(manager.per_light_data) == map[u32]d.Light {
+	light, ok := manager.per_light_data[resources.light_handle]
+	if !ok do return
+	l, is_dir := light.(d.DirectionalLight)
+	if !is_dir do return
+	shadow, has_shadow := l.shadow.?
+	if !has_shadow do return
+	cull(&manager.shadow_culling, cmd, shadow.frustum_planes, shadow.draw_count[frame_index].buffer, shadow.descriptor_sets[frame_index])
 }
 
 declare_resources :: proc(setup: ^rg.PassSetup) {

@@ -233,3 +233,26 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
   rg.write_buffer(setup, transparent_cmds, .NEXT)
   rg.write_buffer(setup, transparent_count, .NEXT)
 }
+
+execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.visibility) == System {
+	cam_handle := resources.camera_handle
+	cam, exists := &manager.per_camera_data[cam_handle]
+	if !exists do return
+	pyramid := &cam.depth_pyramid[frame_index]
+	perform_culling(
+		&manager.visibility,
+		cmd,
+		cam_handle,
+		frame_index,
+		&cam.draw_count[d.DrawType.OPAQUE][frame_index],
+		&cam.draw_count[d.DrawType.TRANSPARENT][frame_index],
+		&cam.draw_count[d.DrawType.SPRITE][frame_index],
+		&cam.draw_count[d.DrawType.WIREFRAME][frame_index],
+		&cam.draw_count[d.DrawType.RANDOM_COLOR][frame_index],
+		&cam.draw_count[d.DrawType.LINE_STRIP][frame_index],
+		cam.descriptor_set[frame_index],
+		pyramid.width,
+		pyramid.height,
+	)
+}

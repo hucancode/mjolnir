@@ -2,6 +2,7 @@ package transparent
 
 import "../../geometry"
 import "../../gpu"
+import d "../data"
 import rg "../graph"
 import vk "vendor:vulkan"
 
@@ -177,4 +178,44 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
 	rg.reads_buffers(setup, transparent_cmds, transparent_count)
 	rg.read_write_texture(setup, final_image_tex)
 	rg.read_write_texture(setup, depth_tex)
+}
+
+execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.transparent_renderer) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.camera_buffer) == gpu.PerFrameBindlessBuffer(d.Camera, 2) &&
+	      type_of(manager.bone_buffer) == gpu.PerFrameBindlessBuffer(matrix[4, 4]f32, 2) &&
+	      type_of(manager.material_buffer) == gpu.BindlessBuffer(d.Material) &&
+	      type_of(manager.node_data_buffer) == gpu.BindlessBuffer(d.Node) &&
+	      type_of(manager.mesh_data_buffer) == gpu.BindlessBuffer(d.Mesh) &&
+	      type_of(manager.mesh_manager) == gpu.MeshManager {
+	cam_handle := resources.camera_handle
+	cam, exists := &manager.per_camera_data[cam_handle]
+	if !exists do return
+	fin_tex, _ := rg.get_texture(resources, "final_image")
+	begin_pass(
+		&manager.transparent_renderer,
+		cmd,
+		transmute(gpu.Texture2DHandle)fin_tex.handle_bits,
+		cam.depth[frame_index],
+		&manager.texture_manager,
+	)
+	render(
+		&manager.transparent_renderer,
+		cmd,
+		cam_handle,
+		manager.camera_buffer.descriptor_sets[frame_index],
+		manager.texture_manager.descriptor_set,
+		manager.bone_buffer.descriptor_sets[frame_index],
+		manager.material_buffer.descriptor_set,
+		manager.node_data_buffer.descriptor_set,
+		manager.mesh_data_buffer.descriptor_set,
+		manager.mesh_manager.vertex_skinning_buffer.descriptor_set,
+		manager.mesh_manager.vertex_buffer.buffer,
+		manager.mesh_manager.index_buffer.buffer,
+		cam.draw_commands[d.DrawType.TRANSPARENT][frame_index].buffer,
+		cam.draw_count[d.DrawType.TRANSPARENT][frame_index].buffer,
+		d.MAX_NODES_IN_SCENE,
+	)
+	end_pass(cmd)
 }

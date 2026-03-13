@@ -438,27 +438,27 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
   rg.read_write_texture(setup, swapchain_tex, .CURRENT)
 }
 
-// ExecuteContext holds all data the execute callback needs from the render manager.
-// Fields that change each frame (swapchain_view, swapchain_extent) are updated
-// as values before each run_graph call — no interior pointers.
-ExecuteContext :: struct {
-  renderer:         ^Renderer,
-  texture_manager:  ^gpu.TextureManager,
-  commands:         ^[dynamic]cmd.RenderCommand,
-  swapchain_view:   vk.ImageView,
-  swapchain_extent: vk.Extent2D,
-  texture_ds:       vk.DescriptorSet,
-}
-
-execute :: proc(
-  _: ^rg.PassResources,
-  command_buffer: vk.CommandBuffer,
-  frame_index: u32,
-  user_data: rawptr,
-) {
-  ctx := cast(^ExecuteContext)user_data
-  begin_pass(ctx.renderer, command_buffer, ctx.swapchain_view, ctx.swapchain_extent, ctx.texture_ds)
-  render(ctx.renderer, ctx.commands[:], nil, ctx.texture_manager, command_buffer,
-    ctx.swapchain_extent.width, ctx.swapchain_extent.height, frame_index)
-  end_pass(command_buffer)
+execute :: proc(manager: $T, _: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.ui) == Renderer &&
+	      type_of(manager.current_swapchain_view) == vk.ImageView &&
+	      type_of(manager.current_swapchain_extent) == vk.Extent2D &&
+	      type_of(manager.texture_manager) == gpu.TextureManager {
+	begin_pass(
+		&manager.ui,
+		cmd,
+		manager.current_swapchain_view,
+		manager.current_swapchain_extent,
+		manager.texture_manager.descriptor_set,
+	)
+	render(
+		&manager.ui,
+		manager.ui_commands[:],
+		nil,
+		&manager.texture_manager,
+		cmd,
+		manager.current_swapchain_extent.width,
+		manager.current_swapchain_extent.height,
+		frame_index,
+	)
+	end_pass(cmd)
 }

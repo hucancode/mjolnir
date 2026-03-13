@@ -20,8 +20,8 @@ import "gpu"
 import nav "navigation"
 import "render"
 import rd "render/data"
-import rg "render/graph"
 import "render/debug_ui"
+import rg "render/graph"
 import occlusion_culling "render/occlusion_culling"
 import ui_module "ui"
 import "vendor:glfw"
@@ -572,7 +572,11 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         mesh_id               = 0xFFFFFFFF,
         attachment_data_index = 0xFFFFFFFF,
       }
-      render.upload_node_data(&self.render, handle.index, &node_data)
+      render.upload_node_data(
+        &self.render.data_manager,
+        handle.index,
+        &node_data,
+      )
       append(&stale_handles, handle)
       continue
     }
@@ -585,7 +589,11 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       mesh_id               = 0xFFFFFFFF,
       attachment_data_index = 0xFFFFFFFF,
     }
-    defer render.upload_node_data(&self.render, handle.index, &node_data)
+    defer render.upload_node_data(
+      &self.render.data_manager,
+      handle.index,
+      &node_data,
+    )
     node := cont.get(self.world.nodes, handle) or_continue
     node_data.world_matrix = node.transform.world_matrix
     // When a staged node is not found (nil), it means the node was despawned.
@@ -596,7 +604,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       if skinning, has_skin := attachment.skinning.?; has_skin {
         node_data.attachment_data_index =
           render.ensure_bone_matrix_range_for_node(
-            &self.render,
+            &self.render.data_manager,
             handle.index,
             u32(len(skinning.matrices)),
           )
@@ -649,7 +657,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   }
   for handle in stale_handles {
     delete_key(&self.world.staging.node_data, handle)
-    render.release_bone_matrix_range_for_node(&self.render, handle.index)
+    render.release_bone_matrix_range_for_node(
+      &self.render.data_manager,
+      handle.index,
+    )
   }
   for handle, entry in self.world.staging.mesh_updates {
     new_age := entry.age + 1
@@ -663,7 +674,8 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         if geom, has_geom := mesh.cpu_geometry.?; has_geom {
           render.sync_mesh_geometry_for_handle(
             &self.gctx,
-            &self.render,
+            &self.render.data_manager,
+            &self.render.mesh_manager,
             handle.index,
             geom,
           )
@@ -693,7 +705,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     }
     material := cont.get(self.world.materials, handle) or_continue
     render.upload_material_data(
-      &self.render,
+      &self.render.data_manager,
       handle.index,
       &render.Material {
         albedo_index = material.albedo.index,
@@ -728,13 +740,13 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     bone_count := u32(len(skinning.matrices))
     if bone_count <= 0 do continue
     offset := render.ensure_bone_matrix_range_for_node(
-      &self.render,
+      &self.render.data_manager,
       handle.index,
       bone_count,
     )
     if offset != 0xFFFFFFFF {
       render.upload_bone_matrices(
-        &self.render,
+        &self.render.data_manager,
         self.frame_index,
         offset,
         skinning.matrices[:],
@@ -756,7 +768,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     sprite := cont.get(self.world.sprites, handle) or_continue
     sprite_anim, has_anim := sprite.animation.?
     render.upload_sprite_data(
-      &self.render,
+      &self.render.data_manager,
       handle.index,
       &render.Sprite {
         texture_index = sprite.texture.index,
@@ -780,7 +792,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     }
     emitter := cont.get(self.world.emitters, handle) or_continue
     render.upload_emitter_data(
-      &self.render,
+      &self.render.data_manager,
       handle.index,
       &render.Emitter {
         initial_velocity = emitter.initial_velocity,
@@ -815,7 +827,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     }
     forcefield := cont.get(self.world.forcefields, handle) or_continue
     render.upload_forcefield_data(
-      &self.render,
+      &self.render.data_manager,
       handle.index,
       &render.ForceField {
         tangent_strength = forcefield.tangent_strength,
@@ -830,7 +842,11 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   }
   for node_handle, entry in self.world.staging.light_updates {
     if entry.op == .Remove {
-      render.remove_light_entry(&self.render, &self.gctx, node_handle.index)
+      render.remove_light_entry(
+        &self.render.per_light_data,
+        &self.gctx,
+        node_handle.index,
+      )
       append(&stale_lights, node_handle)
       continue
     }
@@ -840,7 +856,11 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     }
     node, ok := cont.get(self.world.nodes, node_handle)
     if !ok {
-      render.remove_light_entry(&self.render, &self.gctx, node_handle.index)
+      render.remove_light_entry(
+        &self.render.per_light_data,
+        &self.gctx,
+        node_handle.index,
+      )
       continue
     }
     light_position := node.transform.world_matrix[3].xyz
@@ -896,14 +916,22 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         cast_shadow = att.cast_shadow
       }
       render.upsert_light_entry(
-        &self.render,
+        &self.render.per_light_data,
         &self.gctx,
         node_handle.index,
         &light_data,
         cast_shadow,
+        &self.render.shadow_culling.descriptor_layout,
+        &self.render.shadow_sphere_culling.descriptor_layout,
+        &self.render.node_data_buffer.buffer,
+        &self.render.mesh_data_buffer.buffer,
       ) or_return
     } else {
-      render.remove_light_entry(&self.render, &self.gctx, node_handle.index)
+      render.remove_light_entry(
+        &self.render.per_light_data,
+        &self.gctx,
+        node_handle.index,
+      )
     }
   }
   for node_handle in stale_lights {
@@ -933,7 +961,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     projection_matrix := world.camera_projection_matrix(world_camera)
     near, far := world.camera_get_near_far(world_camera)
     render.upload_camera_data(
-      &self.render,
+      &self.render.data_manager,
       handle.index,
       view_matrix,
       projection_matrix,
@@ -1122,7 +1150,7 @@ populate_debug_ui :: proc(self: ^Engine) {
       render_camera := &self.render.per_camera_data[self.world.main_camera.index]
       main_stats := occlusion_culling.stats(
         &self.render.visibility,
-        &render_camera.opaque_draw_count[self.frame_index],
+        &render_camera.draw_count[.OPAQUE][self.frame_index],
         self.world.main_camera.index,
         self.frame_index,
       )
@@ -1209,7 +1237,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   ) or_return
   graphics_cmd := self.render.command_buffers[self.frame_index]
-  compute_cmd  := graphics_cmd  // default: same queue as graphics
+  compute_cmd := graphics_cmd // default: same queue as graphics
   if self.gctx.has_async_compute {
     compute_cmd = self.render.compute_command_buffers[self.frame_index]
     gpu.begin_record(compute_cmd) or_return
@@ -1224,8 +1252,10 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   } else if self.render.force_graph_rebuild {
     log.info("Frame graph rebuild requested, recompiling...")
     need_compile = true
-  } else if len(self.render.frame_graph.camera_handles) != len(self.render.per_camera_data) ||
-            len(self.render.frame_graph.light_handles) != len(self.render.per_light_data) {
+  } else if len(self.render.frame_graph.camera_handles) !=
+       len(self.render.per_camera_data) ||
+     len(self.render.frame_graph.light_handles) !=
+       len(self.render.per_light_data) {
     log.info("Frame graph topology changed, recompiling...")
     need_compile = true
   }
@@ -1238,22 +1268,16 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   }
 
   // Set per-frame context for passes
-  self.render.current_swapchain_image = self.swapchain.images[self.swapchain.image_index]
-  self.render.current_swapchain_view = self.swapchain.views[self.swapchain.image_index]
+  self.render.current_swapchain_image =
+    self.swapchain.images[self.swapchain.image_index]
+  self.render.current_swapchain_view =
+    self.swapchain.views[self.swapchain.image_index]
   self.render.current_swapchain_extent = self.swapchain.extent
   self.render.show_debug_ui = self.debug_ui_enabled
 
-  // Update per-frame values in ExecuteContexts (swapchain changes every frame)
-  self.render.ui_ctx.swapchain_view   = self.render.current_swapchain_view
-  self.render.ui_ctx.swapchain_extent = self.render.current_swapchain_extent
-  self.render.debug_ui_ctx.swapchain_view   = self.render.current_swapchain_view
-  self.render.debug_ui_ctx.swapchain_extent = self.render.current_swapchain_extent
-  self.render.debug_ui_ctx.texture_ds       = self.render.texture_manager.descriptor_set
-  self.render.debug_ui_ctx.enabled          = self.render.show_debug_ui
-
   // Assign light indices and compute shadow matrices before any GPU work.
   // The graph's shadow_culling/shadow_render passes depend on these being set.
-  render.prepare_lights_for_frame(&self.render)
+  render.prepare_lights_for_frame(&self.render.per_light_data)
 
   // Update external texture handles in the graph (swapchain changes every frame)
   rg.update_external_texture(
@@ -1264,12 +1288,20 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   )
   // Update camera depth textures (external resources in the graph)
   {
-    cam_handles := make([dynamic]u32, 0, len(self.render.per_camera_data), context.temp_allocator)
-    for h in self.render.per_camera_data { append(&cam_handles, h) }
+    cam_handles := make(
+      [dynamic]u32,
+      0,
+      len(self.render.per_camera_data),
+      context.temp_allocator,
+    )
+    for h in self.render.per_camera_data {append(&cam_handles, h)}
     slice.sort(cam_handles[:])
     for cam_handle, idx in cam_handles {
       cam := &self.render.per_camera_data[cam_handle]
-      if depth := gpu.get_texture_2d(&self.render.texture_manager, cam.depth[self.frame_index]); depth != nil {
+      if depth := gpu.get_texture_2d(
+        &self.render.texture_manager,
+        cam.depth[self.frame_index],
+      ); depth != nil {
         rg.update_external_texture(
           &self.render.frame_graph,
           fmt.tprintf("depth_cam_%d", idx),
@@ -1281,10 +1313,20 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   }
 
   // Execute frame graph: COMPUTE passes → compute_cmd, GRAPHICS passes → graphics_cmd
-  rg.run_graph(&self.render.frame_graph, self.frame_index, graphics_cmd, compute_cmd)
+  iter := rg.make_pass_iterator(
+    &self.render.frame_graph,
+    self.frame_index,
+    graphics_cmd,
+    compute_cmd,
+  )
+  for {
+    pass := rg.next_pass(&iter) or_break
+    pass.execute(&self.render, &iter.resources, iter.cmd, self.frame_index)
+    rg.pass_done(&iter)
+  }
 
   // Transition swapchain image to present layout (always on graphics_cmd)
-  present_barrier := vk.ImageMemoryBarrier{
+  present_barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
     dstAccessMask = {},

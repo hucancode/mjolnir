@@ -247,3 +247,32 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
 	rg.read_write_texture(setup, final_image_tex)
 	rg.read_write_texture(setup, depth_tex)
 }
+
+execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.particles_render) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.camera_buffer) == gpu.PerFrameBindlessBuffer(rd.Camera, 2) &&
+	      type_of(manager.compact_particle_buffer) == gpu.MutableBuffer(rd.Particle) &&
+	      type_of(manager.particle_draw_command_buffer) == gpu.MutableBuffer(vk.DrawIndirectCommand) {
+	cam_handle := resources.camera_handle
+	cam, exists := &manager.per_camera_data[cam_handle]
+	if !exists do return
+	fin_tex, _ := rg.get_texture(resources, "final_image")
+	begin_pass(
+		&manager.particles_render,
+		cmd,
+		transmute(gpu.Texture2DHandle)fin_tex.handle_bits,
+		cam.depth[frame_index],
+		&manager.texture_manager,
+	)
+	render(
+		&manager.particles_render,
+		cmd,
+		cam_handle,
+		manager.camera_buffer.descriptor_sets[frame_index],
+		manager.texture_manager.descriptor_set,
+		manager.compact_particle_buffer.buffer,
+		manager.particle_draw_command_buffer.buffer,
+	)
+	end_pass(cmd)
+}
