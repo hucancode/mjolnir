@@ -279,3 +279,16 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
   if !ok do return
   rg.read_texture(setup, depth_tex, .CURRENT)
 }
+
+execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.depth_pyramid) == System {
+	cam_handle := resources.camera_handle
+	cam, exists := &manager.per_camera_data[cam_handle]
+	if !exists do return
+	build_pyramid(
+		&manager.depth_pyramid,
+		cmd,
+		&cam.depth_pyramid[frame_index],
+		cam.depth_reduce_descriptor_sets[frame_index][:],
+	)
+}

@@ -2,6 +2,7 @@ package shadow_sphere_culling
 
 import "../../gpu"
 import d "../data"
+import rg "../graph"
 import vk "vendor:vulkan"
 
 SHADER_SPHERE_CULLING :: #load("../../shader/shadow_spherical/cull.spv")
@@ -70,6 +71,39 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(gctx.device, self.descriptor_layout, nil)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  shadow_draw_cmds := rg.register_external_buffer(setup, "shadow_draw_commands", rg.BufferDesc{
+    size = 1024 * 1024,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  shadow_draw_count := rg.register_external_buffer(setup, "shadow_draw_count", rg.BufferDesc{
+    size = 4,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    is_external = true,
+  })
+  rg.writes_buffers(setup, shadow_draw_cmds, shadow_draw_count)
+}
+
+execute_point :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.shadow_sphere_culling) == System &&
+	      type_of(manager.per_light_data) == map[u32]d.Light {
+	light, ok := manager.per_light_data[resources.light_handle]
+	if !ok do return
+	l, is_point := light.(d.PointLight)
+	if !is_point do return
+	shadow, has_shadow := l.shadow.?
+	if !has_shadow do return
+	execute(
+		&manager.shadow_sphere_culling,
+		cmd,
+		l.position,
+		l.radius,
+		shadow.draw_count[frame_index].buffer,
+		shadow.descriptor_sets[frame_index],
+	)
 }
 
 execute :: proc(

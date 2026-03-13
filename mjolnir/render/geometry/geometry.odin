@@ -234,7 +234,12 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 // Declare graph resources for the geometry pass.
 // Creates G-buffer textures owned by the graph, and registers external
 // depth + draw command buffers. Called from render.odin's setup callback.
-declare_resources :: proc(setup: ^rg.PassSetup, extent: vk.Extent2D, color_format: vk.Format) {
+declare_resources :: proc(setup: ^rg.PassSetup) {
+	extent: vk.Extent2D = {1920, 1080}
+	if int(setup.instance_idx) < len(setup.camera_extents) {
+		extent = setup.camera_extents[setup.instance_idx]
+	}
+  color_format := setup.swapchain_format
   position_tex := rg.create_texture(setup, "gbuffer_position", rg.TextureDesc{
     width = extent.width, height = extent.height,
     format = .R32G32B32A32_SFLOAT,
@@ -294,4 +299,51 @@ declare_resources :: proc(setup: ^rg.PassSetup, extent: vk.Extent2D, color_forma
   })
   rg.reads_buffers(setup, opaque_cmds, opaque_count)
   rg.writes_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex, depth_tex)
+}
+
+execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.geometry) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.camera_buffer) == gpu.PerFrameBindlessBuffer(d.Camera, 2) &&
+	      type_of(manager.bone_buffer) == gpu.PerFrameBindlessBuffer(matrix[4, 4]f32, 2) &&
+	      type_of(manager.material_buffer) == gpu.BindlessBuffer(d.Material) &&
+	      type_of(manager.node_data_buffer) == gpu.BindlessBuffer(d.Node) &&
+	      type_of(manager.mesh_data_buffer) == gpu.BindlessBuffer(d.Mesh) &&
+	      type_of(manager.mesh_manager) == gpu.MeshManager {
+	cam_handle := resources.camera_handle
+	cam, exists := &manager.per_camera_data[cam_handle]
+	if !exists do return
+
+	pos_tex, _ := rg.get_texture(resources, "gbuffer_position")
+	nrm_tex, _ := rg.get_texture(resources, "gbuffer_normal")
+	alb_tex, _ := rg.get_texture(resources, "gbuffer_albedo")
+	mr_tex,  _ := rg.get_texture(resources, "gbuffer_metallic_roughness")
+	emi_tex, _ := rg.get_texture(resources, "gbuffer_emissive")
+	begin_pass(
+		transmute(gpu.Texture2DHandle)pos_tex.handle_bits,
+		transmute(gpu.Texture2DHandle)nrm_tex.handle_bits,
+		transmute(gpu.Texture2DHandle)alb_tex.handle_bits,
+		transmute(gpu.Texture2DHandle)mr_tex.handle_bits,
+		transmute(gpu.Texture2DHandle)emi_tex.handle_bits,
+		cam.depth[frame_index],
+		&manager.texture_manager,
+		cmd,
+	)
+	render(
+		&manager.geometry,
+		cam_handle,
+		cmd,
+		manager.camera_buffer.descriptor_sets[frame_index],
+		manager.texture_manager.descriptor_set,
+		manager.bone_buffer.descriptor_sets[frame_index],
+		manager.material_buffer.descriptor_set,
+		manager.node_data_buffer.descriptor_set,
+		manager.mesh_data_buffer.descriptor_set,
+		manager.mesh_manager.vertex_skinning_buffer.descriptor_set,
+		manager.mesh_manager.vertex_buffer.buffer,
+		manager.mesh_manager.index_buffer.buffer,
+		cam.draw_commands[.OPAQUE][frame_index].buffer,
+		cam.draw_count[.OPAQUE][frame_index].buffer,
+	)
+	end_pass(cmd)
 }

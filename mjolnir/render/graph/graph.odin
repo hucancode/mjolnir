@@ -1,5 +1,6 @@
 package render_graph
 
+import "../../gpu"
 import "core:slice"
 import vk "vendor:vulkan"
 
@@ -10,25 +11,25 @@ import vk "vendor:vulkan"
 // Graph contains ONLY compiled runtime data, no declarations
 // This is the output of compile() and input to execute()
 Graph :: struct {
-	// Runtime instances (instantiated from PassDecl templates)
-	pass_instances:     [dynamic]PassInstance,
-	resource_instances: [dynamic]ResourceInstance,
+  // Runtime instances (instantiated from PassDecl templates)
+  pass_instances:     [dynamic]PassInstance,
+  resource_instances: [dynamic]ResourceInstance,
 
-	// Execution order (topologically sorted pass instance IDs)
-	sorted_passes:      []PassInstanceId,
+  // Execution order (topologically sorted pass instance IDs)
+  sorted_passes:      []PassInstanceId,
 
-	// Barriers to emit before each pass
-	barriers:           map[PassInstanceId][dynamic]Barrier,
+  // Barriers to emit before each pass
+  barriers:           map[PassInstanceId][dynamic]Barrier,
 
-	// Lookup tables (name -> instance ID)
-	resource_by_name:   map[string]ResourceInstanceId,
+  // Lookup tables (name -> instance ID)
+  resource_by_name:   map[string]ResourceInstanceId,
 
-	// Handle mappings: instance_idx -> actual handle
-	camera_handles:     []u32,  // Maps instance index to camera handle
-	light_handles:      []u32,  // Maps instance index to light node handle
+  // Handle mappings: instance_idx -> actual handle
+  camera_handles:     []u32, // Maps instance index to camera handle
+  light_handles:      []u32, // Maps instance index to light node handle
 
-	// Compilation metadata
-	frames_in_flight:   int,
+  // Compilation metadata
+  frames_in_flight:   int,
 }
 
 // ============================================================================
@@ -36,92 +37,100 @@ Graph :: struct {
 // ============================================================================
 
 init :: proc(graph: ^Graph, frames_in_flight: int) {
-	graph.pass_instances = make([dynamic]PassInstance)
-	graph.resource_instances = make([dynamic]ResourceInstance)
-	graph.barriers = make(map[PassInstanceId][dynamic]Barrier)
-	graph.resource_by_name = make(map[string]ResourceInstanceId)
-	graph.frames_in_flight = frames_in_flight
+  graph.pass_instances = make([dynamic]PassInstance)
+  graph.resource_instances = make([dynamic]ResourceInstance)
+  graph.barriers = make(map[PassInstanceId][dynamic]Barrier)
+  graph.resource_by_name = make(map[string]ResourceInstanceId)
+  graph.frames_in_flight = frames_in_flight
 }
 
-destroy :: proc(graph: ^Graph, gctx: rawptr, tm_ptr: rawptr) {
-	// Free pass instances (scoped names are heap-allocated)
-	for &pass in graph.pass_instances {
-		if pass.scope != .GLOBAL do delete(pass.name)
-		delete(pass.reads)
-		delete(pass.writes)
-	}
+destroy :: proc(
+  graph: ^Graph,
+  gctx: ^gpu.GPUContext,
+  tm: ^gpu.TextureManager,
+) {
+  // Free pass instances (scoped names are heap-allocated)
+  for &pass in graph.pass_instances {
+    if pass.scope != .GLOBAL do delete(pass.name)
+    delete(pass.reads)
+    delete(pass.writes)
+  }
 
-	// Destroy all allocated GPU resources (also frees scoped resource names)
-	for &res in graph.resource_instances {
-		destroy_resource(&res, gctx, tm_ptr)
-	}
+  // Destroy all allocated GPU resources (also frees scoped resource names)
+  for &res in graph.resource_instances {
+    destroy_resource(&res, gctx, tm)
+  }
 
-	// Free barriers
-	for _, barrier_list in graph.barriers {
-		delete(barrier_list)
-	}
+  // Free barriers
+  for _, barrier_list in graph.barriers {
+    delete(barrier_list)
+  }
 
-	// Free containers
-	delete(graph.pass_instances)
-	delete(graph.resource_instances)
-	delete(graph.barriers)
-	delete(graph.resource_by_name)
+  // Free containers
+  delete(graph.pass_instances)
+  delete(graph.resource_instances)
+  delete(graph.barriers)
+  delete(graph.resource_by_name)
 
-	if graph.sorted_passes != nil {
-		delete(graph.sorted_passes)
-	}
+  if graph.sorted_passes != nil {
+    delete(graph.sorted_passes)
+  }
 
-	// Free handle mappings
-	if graph.camera_handles != nil {
-		delete(graph.camera_handles)
-	}
-	if graph.light_handles != nil {
-		delete(graph.light_handles)
-	}
+  // Free handle mappings
+  if graph.camera_handles != nil {
+    delete(graph.camera_handles)
+  }
+  if graph.light_handles != nil {
+    delete(graph.light_handles)
+  }
 }
 
 // Reset graph for recompilation (keeps allocated GPU resources)
 reset :: proc(graph: ^Graph) {
-	// Clear pass instances (scoped names are heap-allocated)
-	for &pass in graph.pass_instances {
-		if pass.scope != .GLOBAL do delete(pass.name)
-		delete(pass.reads)
-		delete(pass.writes)
-	}
-	clear(&graph.pass_instances)
+  // Clear pass instances (scoped names are heap-allocated)
+  for &pass in graph.pass_instances {
+    if pass.scope != .GLOBAL do delete(pass.name)
+    delete(pass.reads)
+    delete(pass.writes)
+  }
+  clear(&graph.pass_instances)
 
-	// Clear barriers
-	for _, barrier_list in graph.barriers {
-		delete(barrier_list)
-	}
-	clear(&graph.barriers)
+  // Clear barriers
+  for _, barrier_list in graph.barriers {
+    delete(barrier_list)
+  }
+  clear(&graph.barriers)
 
-	// Clear sorted passes
-	if graph.sorted_passes != nil {
-		delete(graph.sorted_passes)
-		graph.sorted_passes = nil
-	}
+  // Clear sorted passes
+  if graph.sorted_passes != nil {
+    delete(graph.sorted_passes)
+    graph.sorted_passes = nil
+  }
 
-	// Clear lookup tables
-	clear(&graph.resource_by_name)
+  // Clear lookup tables
+  clear(&graph.resource_by_name)
 }
 
 // ============================================================================
 // Resource Lifecycle
 // ============================================================================
 
-destroy_resource :: proc(res: ^ResourceInstance, gctx: rawptr, tm_ptr: rawptr) {
-	// Free heap-allocated scoped names (non-GLOBAL resources have fmt.aprintf names)
-	if res.scope != .GLOBAL do delete(res.name)
+destroy_resource :: proc(
+  res: ^ResourceInstance,
+  gctx: ^gpu.GPUContext,
+  tm: ^gpu.TextureManager,
+) {
+  // Free heap-allocated scoped names (non-GLOBAL resources have fmt.aprintf names)
+  if res.scope != .GLOBAL do delete(res.name)
 
-	// External resources are not owned by graph
-	if (res.type == .BUFFER && res.buffer_desc.is_external) ||
-	   (res.type != .BUFFER && res.texture_desc.is_external) {
-		return
-	}
+  // External resources are not owned by graph
+  if (res.type == .BUFFER && res.buffer_desc.is_external) ||
+     (res.type != .BUFFER && res.texture_desc.is_external) {
+    return
+  }
 
-	// Delegate actual GPU deallocation to allocator (which imports gpu package)
-	deallocate_resource(res, gctx, tm_ptr)
+  // Delegate actual GPU deallocation to allocator (which imports gpu package)
+  deallocate_resource(res, gctx, tm)
 }
 
 // ============================================================================
@@ -129,51 +138,66 @@ destroy_resource :: proc(res: ^ResourceInstance, gctx: rawptr, tm_ptr: rawptr) {
 // ============================================================================
 
 // Get resource instance by name (for runtime lookups)
-find_resource_by_name :: proc(graph: ^Graph, name: string) -> (ResourceInstanceId, bool) {
-	id, found := graph.resource_by_name[name]
-	return id, found
+find_resource_by_name :: proc(
+  graph: ^Graph,
+  name: string,
+) -> (
+  ResourceInstanceId,
+  bool,
+) {
+  id, found := graph.resource_by_name[name]
+  return id, found
 }
 
 // Get pass instance by ID
 get_pass :: proc(graph: ^Graph, id: PassInstanceId) -> ^PassInstance {
-	return &graph.pass_instances[id]
+  return &graph.pass_instances[id]
 }
 
 // Get resource instance by ID
-get_resource :: proc(graph: ^Graph, id: ResourceInstanceId) -> ^ResourceInstance {
-	return &graph.resource_instances[id]
+get_resource :: proc(
+  graph: ^Graph,
+  id: ResourceInstanceId,
+) -> ^ResourceInstance {
+  return &graph.resource_instances[id]
 }
 
 // Add pass instance (called by compiler)
-add_pass_instance :: proc(graph: ^Graph, pass: PassInstance) -> PassInstanceId {
-	id := PassInstanceId(len(graph.pass_instances))
-	append(&graph.pass_instances, pass)
-	return id
+add_pass_instance :: proc(
+  graph: ^Graph,
+  pass: PassInstance,
+) -> PassInstanceId {
+  id := PassInstanceId(len(graph.pass_instances))
+  append(&graph.pass_instances, pass)
+  return id
 }
 
 // Add resource instance (called by compiler)
-add_resource_instance :: proc(graph: ^Graph, res: ResourceInstance) -> ResourceInstanceId {
-	id := ResourceInstanceId(len(graph.resource_instances))
-	append(&graph.resource_instances, res)
+add_resource_instance :: proc(
+  graph: ^Graph,
+  res: ResourceInstance,
+) -> ResourceInstanceId {
+  id := ResourceInstanceId(len(graph.resource_instances))
+  append(&graph.resource_instances, res)
 
-	// Register in lookup table
-	graph.resource_by_name[res.name] = id
+  // Register in lookup table
+  graph.resource_by_name[res.name] = id
 
-	return id
+  return id
 }
 
 // Set execution order (called by compiler after topological sort)
 set_execution_order :: proc(graph: ^Graph, order: []PassInstanceId) {
-	if graph.sorted_passes != nil {
-		delete(graph.sorted_passes)
-	}
-	graph.sorted_passes = slice.clone(order)
+  if graph.sorted_passes != nil {
+    delete(graph.sorted_passes)
+  }
+  graph.sorted_passes = slice.clone(order)
 }
 
 // Add barrier before pass (called by barrier computation)
 add_barrier :: proc(graph: ^Graph, pass_id: PassInstanceId, barrier: Barrier) {
-	if pass_id not_in graph.barriers {
-		graph.barriers[pass_id] = make([dynamic]Barrier)
-	}
-	append(&graph.barriers[pass_id], barrier)
+  if pass_id not_in graph.barriers {
+    graph.barriers[pass_id] = make([dynamic]Barrier)
+  }
+  append(&graph.barriers[pass_id], barrier)
 }

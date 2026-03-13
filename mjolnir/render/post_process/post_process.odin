@@ -836,3 +836,55 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
   }
   rg.write_texture(setup, swapchain_tex, .CURRENT)
 }
+
+execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.post_process) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.current_swapchain_extent) == vk.Extent2D &&
+	      type_of(manager.current_swapchain_image) == vk.Image &&
+	      type_of(manager.current_swapchain_view) == vk.ImageView &&
+	      type_of(manager.frame_graph) == rg.Graph {
+	fin_tex, _ := rg.get_texture(resources, "final_image_cam_0")
+	pos_tex, _ := rg.get_texture(resources, "gbuffer_position_cam_0")
+	nrm_tex, _ := rg.get_texture(resources, "gbuffer_normal_cam_0")
+	alb_tex, _ := rg.get_texture(resources, "gbuffer_albedo_cam_0")
+	mr_tex, _  := rg.get_texture(resources, "gbuffer_metallic_roughness_cam_0")
+	emi_tex, _ := rg.get_texture(resources, "gbuffer_emissive_cam_0")
+
+	final_image_h := transmute(gpu.Texture2DHandle)fin_tex.handle_bits
+	final_image_vk: vk.Image
+	if tex := gpu.get_texture_2d(&manager.texture_manager, final_image_h); tex != nil {
+		final_image_vk = tex.image
+	}
+
+	main_cam_depth: gpu.Texture2DHandle
+	if rg.camera_handle_count(&manager.frame_graph) > 0 {
+		main_cam_h := rg.get_camera_handle(&manager.frame_graph, 0)
+		if cam, ok := manager.per_camera_data[main_cam_h]; ok {
+			main_cam_depth = cam.depth[frame_index]
+		}
+	}
+
+	begin_pass(
+		&manager.post_process,
+		cmd,
+		manager.current_swapchain_extent,
+		final_image_vk,
+		manager.current_swapchain_image,
+	)
+	render(
+		&manager.post_process,
+		cmd,
+		manager.current_swapchain_extent,
+		manager.current_swapchain_view,
+		final_image_h.index,
+		(transmute(gpu.Texture2DHandle)pos_tex.handle_bits).index,
+		(transmute(gpu.Texture2DHandle)nrm_tex.handle_bits).index,
+		(transmute(gpu.Texture2DHandle)alb_tex.handle_bits).index,
+		(transmute(gpu.Texture2DHandle)mr_tex.handle_bits).index,
+		(transmute(gpu.Texture2DHandle)emi_tex.handle_bits).index,
+		main_cam_depth.index,
+		&manager.texture_manager,
+	)
+	end_pass(&manager.post_process, cmd)
+}

@@ -496,23 +496,19 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
   rg.writes_buffers(setup, particle_buf, compact_buf, draw_cmd_buf)
 }
 
-// ExecuteContext holds all data the execute callback needs from the render manager.
-// Initialized once after setup; fields are stable for the lifetime of the graph.
-ExecuteContext :: struct {
-  renderer:      ^Renderer,
-  node_data_ds:  vk.DescriptorSet,
-  particle_buf:  vk.Buffer,
-  compact_buf:   vk.Buffer,
-  draw_cmd_buf:  vk.Buffer,
-  particle_bytes: vk.DeviceSize,
-}
-
-execute :: proc(
-  _: ^rg.PassResources,
-  cmd: vk.CommandBuffer,
-  _: u32,
-  user_data: rawptr,
-) {
-  ctx := cast(^ExecuteContext)user_data
-  simulate(ctx.renderer, cmd, ctx.node_data_ds, ctx.particle_buf, ctx.compact_buf, ctx.draw_cmd_buf, ctx.particle_bytes)
+execute :: proc(manager: $T, _: ^rg.PassResources, cmd: vk.CommandBuffer, _: u32)
+	where type_of(manager.particles_compute) == Renderer &&
+	      type_of(manager.node_data_buffer) == gpu.BindlessBuffer(d.Node) &&
+	      type_of(manager.particle_buffer) == gpu.MutableBuffer(d.Particle) &&
+	      type_of(manager.compact_particle_buffer) == gpu.MutableBuffer(d.Particle) &&
+	      type_of(manager.particle_draw_command_buffer) == gpu.MutableBuffer(vk.DrawIndirectCommand) {
+	simulate(
+		&manager.particles_compute,
+		cmd,
+		manager.node_data_buffer.descriptor_set,
+		manager.particle_buffer.buffer,
+		manager.compact_particle_buffer.buffer,
+		manager.particle_draw_command_buffer.buffer,
+		vk.DeviceSize(manager.particle_buffer.bytes_count),
+	)
 }

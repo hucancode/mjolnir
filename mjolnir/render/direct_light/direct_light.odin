@@ -5,6 +5,7 @@ import "../../gpu"
 import d "../data"
 import "../shared"
 import rg "../graph"
+import "core:fmt"
 import "core:log"
 import "core:math/linalg"
 import vk "vendor:vulkan"
@@ -493,7 +494,8 @@ end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup, num_lights: u32) {
+declare_resources :: proc(setup: ^rg.PassSetup) {
+  num_lights := u32(setup.num_lights)
   position_tex, ok1 := rg.find_texture(setup, "gbuffer_position")
   normal_tex, ok2 := rg.find_texture(setup, "gbuffer_normal")
   albedo_tex, ok3 := rg.find_texture(setup, "gbuffer_albedo")
@@ -507,11 +509,129 @@ declare_resources :: proc(setup: ^rg.PassSetup, num_lights: u32) {
   rg.reads_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, depth_tex)
   rg.read_write_texture(setup, final_image_tex)
   for light_idx in 0..<num_lights {
-    if shadow_2d, ok := rg.find_texture(setup, "shadow_map_2d", .PER_LIGHT, light_idx); ok {
-      rg.read_texture(setup, shadow_2d, .CURRENT)
-    }
-    if shadow_cube, ok := rg.find_texture(setup, "shadow_map_cube", .PER_LIGHT, light_idx); ok {
-      rg.read_texture(setup, shadow_cube, .CURRENT)
+    switch setup.light_kinds[light_idx] {
+    case .POINT:
+      if shadow_cube, ok := rg.find_texture(setup, "shadow_map_cube", .PER_POINT_LIGHT, light_idx); ok {
+        rg.read_texture(setup, shadow_cube, .CURRENT)
+      }
+    case .SPOT:
+      if shadow_2d, ok := rg.find_texture(setup, "shadow_map_2d", .PER_SPOT_LIGHT, light_idx); ok {
+        rg.read_texture(setup, shadow_2d, .CURRENT)
+      }
+    case .DIRECTIONAL:
+      if shadow_2d, ok := rg.find_texture(setup, "shadow_map_2d", .PER_DIRECTIONAL_LIGHT, light_idx); ok {
+        rg.read_texture(setup, shadow_2d, .CURRENT)
+      }
     }
   }
+}
+
+@(private)
+_begin :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.direct_light) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.camera_buffer) == gpu.PerFrameBindlessBuffer(d.Camera, 2) {
+	cam, cam_ok := &manager.per_camera_data[resources.camera_handle]
+	if !cam_ok do return
+	fin_tex, _ := rg.get_texture(resources, "final_image")
+	begin_pass(
+		&manager.direct_light,
+		transmute(gpu.Texture2DHandle)fin_tex.handle_bits,
+		cam.depth[frame_index],
+		&manager.texture_manager,
+		cmd,
+		manager.camera_buffer.descriptor_sets[frame_index],
+	)
+}
+
+@(private)
+_gbuffer_indices :: proc(resources: ^rg.PassResources) -> (pos, nrm, alb, mr: u32) {
+	pos_tex, _ := rg.get_texture(resources, "gbuffer_position")
+	nrm_tex, _ := rg.get_texture(resources, "gbuffer_normal")
+	alb_tex, _ := rg.get_texture(resources, "gbuffer_albedo")
+	mr_tex,  _ := rg.get_texture(resources, "gbuffer_metallic_roughness")
+	return (transmute(gpu.Texture2DHandle)pos_tex.handle_bits).index,
+	       (transmute(gpu.Texture2DHandle)nrm_tex.handle_bits).index,
+	       (transmute(gpu.Texture2DHandle)alb_tex.handle_bits).index,
+	       (transmute(gpu.Texture2DHandle)mr_tex.handle_bits).index
+}
+
+execute_point :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.direct_light) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.per_light_data) == map[u32]d.Light &&
+	      type_of(manager.camera_buffer) == gpu.PerFrameBindlessBuffer(d.Camera, 2) &&
+	      type_of(manager.frame_graph) == rg.Graph {
+	_begin(manager, resources, cmd, frame_index)
+	pos_idx, nrm_idx, alb_idx, mr_idx := _gbuffer_indices(resources)
+	cam_handle := resources.camera_handle
+	for light_handle, light_inst_idx in rg.get_light_handles(&manager.frame_graph) {
+		l, is_point := manager.per_light_data[light_handle].(d.PointLight)
+		if !is_point do continue
+		shadow_map_idx := u32(0xFFFFFFFF)
+		if shadow, ok := l.shadow.?; ok {
+			shadow_name := fmt.tprintf("shadow_map_cube_light_%d", light_inst_idx)
+			if st, found := rg.get_texture(resources, shadow_name); found {
+				shadow_map_idx = (transmute(gpu.TextureCubeHandle)st.handle_bits).index
+			}
+		}
+		render_point_light(&manager.direct_light, cam_handle, pos_idx, nrm_idx, alb_idx, mr_idx,
+			l.color, l.position, l.radius, shadow_map_idx, {}, cmd)
+	}
+	end_pass(cmd)
+}
+
+execute_spot :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.direct_light) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.per_light_data) == map[u32]d.Light &&
+	      type_of(manager.camera_buffer) == gpu.PerFrameBindlessBuffer(d.Camera, 2) &&
+	      type_of(manager.frame_graph) == rg.Graph {
+	_begin(manager, resources, cmd, frame_index)
+	pos_idx, nrm_idx, alb_idx, mr_idx := _gbuffer_indices(resources)
+	cam_handle := resources.camera_handle
+	for light_handle, light_inst_idx in rg.get_light_handles(&manager.frame_graph) {
+		l, is_spot := manager.per_light_data[light_handle].(d.SpotLight)
+		if !is_spot do continue
+		shadow_map_idx := u32(0xFFFFFFFF)
+		shadow_vp := matrix[4, 4]f32{}
+		if shadow, ok := l.shadow.?; ok {
+			shadow_name := fmt.tprintf("shadow_map_2d_light_%d", light_inst_idx)
+			if st, found := rg.get_texture(resources, shadow_name); found {
+				shadow_map_idx = (transmute(gpu.Texture2DHandle)st.handle_bits).index
+				shadow_vp = shadow.view_projection
+			}
+		}
+		render_spot_light(&manager.direct_light, cam_handle, pos_idx, nrm_idx, alb_idx, mr_idx,
+			l.color, l.position, l.direction, l.radius, l.angle_inner, l.angle_outer,
+			shadow_map_idx, shadow_vp, cmd)
+	}
+	end_pass(cmd)
+}
+
+execute_directional :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.direct_light) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.per_light_data) == map[u32]d.Light &&
+	      type_of(manager.camera_buffer) == gpu.PerFrameBindlessBuffer(d.Camera, 2) &&
+	      type_of(manager.frame_graph) == rg.Graph {
+	_begin(manager, resources, cmd, frame_index)
+	pos_idx, nrm_idx, alb_idx, mr_idx := _gbuffer_indices(resources)
+	cam_handle := resources.camera_handle
+	for light_handle, light_inst_idx in rg.get_light_handles(&manager.frame_graph) {
+		l, is_dir := manager.per_light_data[light_handle].(d.DirectionalLight)
+		if !is_dir do continue
+		shadow_map_idx := u32(0xFFFFFFFF)
+		shadow_vp := matrix[4, 4]f32{}
+		if shadow, ok := l.shadow.?; ok {
+			shadow_name := fmt.tprintf("shadow_map_2d_light_%d", light_inst_idx)
+			if st, found := rg.get_texture(resources, shadow_name); found {
+				shadow_map_idx = (transmute(gpu.Texture2DHandle)st.handle_bits).index
+				shadow_vp = shadow.view_projection
+			}
+		}
+		render_directional_light(&manager.direct_light, cam_handle, pos_idx, nrm_idx, alb_idx, mr_idx,
+			l.color, l.direction, shadow_map_idx, shadow_vp, cmd)
+	}
+	end_pass(cmd)
 }

@@ -26,209 +26,238 @@ import "core:slice"
 //   physical resource while an alias is still live.
 
 _ResourceLifetime :: struct {
-	first_use: int,
-	last_use:  int,
+  first_use: int,
+  last_use:  int,
 }
 
 _AliasCandidate :: struct {
-	id:             ResourceInstanceId,
-	first_use:      int,
-	last_use:       int,
-	wants_variants: bool, // true → allocate frames_in_flight variants
+  id:             ResourceInstanceId,
+  first_use:      int,
+  last_use:       int,
+  wants_variants: bool, // true → allocate frames_in_flight variants
 }
 
 _PhysicalSlot :: struct {
-	id:             ResourceInstanceId,
-	last_use:       int,  // Extended each time an alias is assigned to this slot
-	wants_variants: bool,
+  id:             ResourceInstanceId,
+  last_use:       int, // Extended each time an alias is assigned to this slot
+  wants_variants: bool,
 }
 
 // assign_resource_aliases marks compatible, non-overlapping virtual resources
 // as aliases of a single physical resource.  Must be called after
 // set_execution_order (graph.sorted_passes must be populated).
 assign_resource_aliases :: proc(graph: ^Graph) {
-	if len(graph.resource_instances) == 0 || len(graph.sorted_passes) == 0 {
-		return
-	}
+  if len(graph.resource_instances) == 0 || len(graph.sorted_passes) == 0 {
+    return
+  }
 
-	// ── 1. Determine which resources need per-frame variants ──────────────────
-	// Mirrors the variant-count logic in allocate_resources so that alias
-	// compatibility uses the same variant count the allocator would use.
-	needs_frame_variants := make(map[string]bool)
-	defer delete(needs_frame_variants)
+  // ── 1. Determine which resources need per-frame variants ──────────────────
+  // Mirrors the variant-count logic in allocate_resources so that alias
+  // compatibility uses the same variant count the allocator would use.
+  needs_frame_variants := make(map[string]bool)
+  defer delete(needs_frame_variants)
 
-	for &pass in graph.pass_instances {
-		for read in pass.reads {
-			if read.frame_offset != .CURRENT {
-				needs_frame_variants[read.resource_name] = true
-			}
-		}
-		for write in pass.writes {
-			if write.frame_offset != .CURRENT {
-				needs_frame_variants[write.resource_name] = true
-			}
-		}
-	}
+  for &pass in graph.pass_instances {
+    for read in pass.reads {
+      if read.frame_offset != .CURRENT {
+        needs_frame_variants[read.resource_name] = true
+      }
+    }
+    for write in pass.writes {
+      if write.frame_offset != .CURRENT {
+        needs_frame_variants[write.resource_name] = true
+      }
+    }
+  }
 
-	// ── 2. Compute resource lifetimes from sorted_passes ──────────────────────
-	// Only CURRENT-frame accesses contribute to the lifetime; temporal accesses
-	// (PREV/NEXT) refer to other frame's copies and do not extend liveness.
-	lifetimes := make(map[ResourceInstanceId]_ResourceLifetime)
-	defer delete(lifetimes)
+  // ── 2. Compute resource lifetimes from sorted_passes ──────────────────────
+  // Only CURRENT-frame accesses contribute to the lifetime; temporal accesses
+  // (PREV/NEXT) refer to other frame's copies and do not extend liveness.
+  lifetimes := make(map[ResourceInstanceId]_ResourceLifetime)
+  defer delete(lifetimes)
 
-	for pass_idx in 0..<len(graph.sorted_passes) {
-		pass_id := graph.sorted_passes[pass_idx]
-		pass    := get_pass(graph, pass_id)
+  for pass_idx in 0 ..< len(graph.sorted_passes) {
+    pass_id := graph.sorted_passes[pass_idx]
+    pass := get_pass(graph, pass_id)
 
-		for access in pass.reads {
-			if access.frame_offset == .CURRENT {
-				_touch_lifetime(&lifetimes, graph, access.resource_name, pass_idx)
-			}
-		}
-		for access in pass.writes {
-			if access.frame_offset == .CURRENT {
-				_touch_lifetime(&lifetimes, graph, access.resource_name, pass_idx)
-			}
-		}
-	}
+    for access in pass.reads {
+      if access.frame_offset == .CURRENT {
+        _touch_lifetime(&lifetimes, graph, access.resource_name, pass_idx)
+      }
+    }
+    for access in pass.writes {
+      if access.frame_offset == .CURRENT {
+        _touch_lifetime(&lifetimes, graph, access.resource_name, pass_idx)
+      }
+    }
+  }
 
-	// ── 3. Collect non-external candidates, sorted by first_use ──────────────
-	candidates := make([dynamic]_AliasCandidate)
-	defer delete(candidates)
+  // ── 3. Collect non-external candidates, sorted by first_use ──────────────
+  candidates := make([dynamic]_AliasCandidate)
+  defer delete(candidates)
 
-	for i in 0..<len(graph.resource_instances) {
-		res    := &graph.resource_instances[i]
-		res_id := ResourceInstanceId(i)
+  for i in 0 ..< len(graph.resource_instances) {
+    res := &graph.resource_instances[i]
+    res_id := ResourceInstanceId(i)
 
-		is_external := res.type == .BUFFER \
-			? res.buffer_desc.is_external \
-			: res.texture_desc.is_external
-		if is_external { continue }
+    is_external :=
+      res.type == .BUFFER ? res.buffer_desc.is_external : res.texture_desc.is_external
+    if is_external {continue}
 
-		lt, has_lt := lifetimes[res_id]
-		if !has_lt { continue } // never accessed (should be dead after elimination)
+    lt, has_lt := lifetimes[res_id]
+    if !has_lt {continue}   // never accessed (should be dead after elimination)
 
-		wants_variants :=
-			needs_frame_variants[res.name] ||
-			(res.type != .BUFFER && res.texture_desc.double_buffer)
+    wants_variants :=
+      needs_frame_variants[res.name] ||
+      (res.type != .BUFFER && res.texture_desc.double_buffer)
 
-		append(&candidates, _AliasCandidate{
-			id             = res_id,
-			first_use      = lt.first_use,
-			last_use       = lt.last_use,
-			wants_variants = wants_variants,
-		})
-	}
+    append(
+      &candidates,
+      _AliasCandidate {
+        id = res_id,
+        first_use = lt.first_use,
+        last_use = lt.last_use,
+        wants_variants = wants_variants,
+      },
+    )
+  }
 
-	slice.sort_by(candidates[:], proc(a, b: _AliasCandidate) -> bool {
-		return a.first_use < b.first_use
-	})
+  slice.sort_by(candidates[:], proc(a, b: _AliasCandidate) -> bool {
+    return a.first_use < b.first_use
+  })
 
-	// ── 4. Greedy interval coloring ───────────────────────────────────────────
-	slots       := make([dynamic]_PhysicalSlot)
-	defer delete(slots)
-	alias_count := 0
+  // ── 4. Greedy interval coloring ───────────────────────────────────────────
+  slots := make([dynamic]_PhysicalSlot)
+  defer delete(slots)
+  alias_count := 0
 
-	for cand in candidates {
-		res := get_resource(graph, cand.id)
+  for cand in candidates {
+    res := get_resource(graph, cand.id)
 
-		// Find a compatible physical slot that is free before our start
-		found_slot := -1
-		for slot_idx in 0..<len(slots) {
-			slot := &slots[slot_idx]
-			if slot.last_use >= cand.first_use { continue } // still in use
+    // Find a compatible physical slot that is free before our start
+    found_slot := -1
+    for slot_idx in 0 ..< len(slots) {
+      slot := &slots[slot_idx]
+      if slot.last_use >= cand.first_use {continue}   // still in use
 
-			physical := get_resource(graph, slot.id)
-			if !_alias_compatible(res, physical, cand.wants_variants, slot.wants_variants) {
-				continue
-			}
+      physical := get_resource(graph, slot.id)
+      if !_alias_compatible(
+        res,
+        physical,
+        cand.wants_variants,
+        slot.wants_variants,
+      ) {
+        continue
+      }
 
-			found_slot = slot_idx
-			break
-		}
+      found_slot = slot_idx
+      break
+    }
 
-		if found_slot >= 0 {
-			res.is_alias     = true
-			res.alias_target = slots[found_slot].id
+    if found_slot >= 0 {
+      res.is_alias = true
+      res.alias_target = slots[found_slot].id
 
-			// Extend slot's last_use to cover the alias's lifetime so a third
-			// resource cannot incorrectly reuse this physical slot while the alias
-			// is still active.
-			if cand.last_use > slots[found_slot].last_use {
-				slots[found_slot].last_use = cand.last_use
-			}
-			alias_count += 1
+      // Extend slot's last_use to cover the alias's lifetime so a third
+      // resource cannot incorrectly reuse this physical slot while the alias
+      // is still active.
+      old_last_use := slots[found_slot].last_use
+      if cand.last_use > slots[found_slot].last_use {
+        slots[found_slot].last_use = cand.last_use
+      }
+      alias_count += 1
 
-			when ODIN_DEBUG {
-				target := get_resource(graph, slots[found_slot].id)
-				fmt.printf("[ALIAS] '%s' [%d,%d] → '%s' (slot last_use was %d)\n",
-					res.name, cand.first_use, cand.last_use,
-					target.name, slots[found_slot].last_use)
-			}
-		} else {
-			// New physical slot
-			append(&slots, _PhysicalSlot{
-				id             = cand.id,
-				last_use       = cand.last_use,
-				wants_variants = cand.wants_variants,
-			})
-		}
-	}
+      when ODIN_DEBUG {
+        target := get_resource(graph, slots[found_slot].id)
+        fmt.printf(
+          "[ALIAS] '%s' [%d,%d] → '%s' (slot last_use was %d)\n",
+          res.name,
+          cand.first_use,
+          cand.last_use,
+          target.name,
+          old_last_use,
+        )
+      }
+    } else {
+      // New physical slot
+      append(
+        &slots,
+        _PhysicalSlot {
+          id = cand.id,
+          last_use = cand.last_use,
+          wants_variants = cand.wants_variants,
+        },
+      )
+    }
+  }
 
-	when ODIN_DEBUG {
-		fmt.printf("[ALIAS] %d physical slots, %d aliased, %d total non-external resources\n",
-			len(slots), alias_count, len(candidates))
-	}
+  when ODIN_DEBUG {
+    fmt.printf(
+      "[ALIAS] %d physical slots, %d aliased, %d total non-external resources\n",
+      len(slots),
+      alias_count,
+      len(candidates),
+    )
+  }
 }
 
 // _touch_lifetime extends [first_use, last_use] for the resource named `name`
 // to include `idx`.  No-op if the resource cannot be found.
 _touch_lifetime :: proc(
-	lifetimes: ^map[ResourceInstanceId]_ResourceLifetime,
-	graph:     ^Graph,
-	name:      string,
-	idx:       int,
+  lifetimes: ^map[ResourceInstanceId]_ResourceLifetime,
+  graph: ^Graph,
+  name: string,
+  idx: int,
 ) {
-	res_id, found := find_resource_by_name(graph, name)
-	if !found { return }
-	lt, exists := (lifetimes^)[res_id]
-	if !exists {
-		(lifetimes^)[res_id] = _ResourceLifetime{first_use = idx, last_use = idx}
-		return
-	}
-	if idx < lt.first_use { lt.first_use = idx }
-	if idx > lt.last_use  { lt.last_use  = idx }
-	(lifetimes^)[res_id] = lt
+  res_id, found := find_resource_by_name(graph, name)
+  if !found {return}
+  lt, exists := (lifetimes^)[res_id]
+  if !exists {
+    (lifetimes^)[res_id] = _ResourceLifetime {
+      first_use = idx,
+      last_use  = idx,
+    }
+    return
+  }
+  if idx < lt.first_use {lt.first_use = idx}
+  if idx > lt.last_use {lt.last_use = idx}
+  (lifetimes^)[res_id] = lt
 }
 
 // _alias_compatible returns true when two resources may share the same
 // underlying GPU allocation.  Both type and all relevant Vulkan descriptor
 // fields must match, plus they must have the same variant count.
 _alias_compatible :: proc(
-	a, b:           ^ResourceInstance,
-	a_variants, b_variants: bool,
+  a, b: ^ResourceInstance,
+  a_variants, b_variants: bool,
 ) -> bool {
-	if a.type != b.type             { return false }
-	if a_variants != b_variants     { return false }
+  if a.type != b.type {return false}
+  if a_variants != b_variants {return false}
 
-	switch a.type {
-	case .BUFFER:
-		return a.buffer_desc.size  == b.buffer_desc.size  &&
-		       a.buffer_desc.usage == b.buffer_desc.usage
+  switch a.type {
+  case .BUFFER:
+    return(
+      a.buffer_desc.size == b.buffer_desc.size &&
+      a.buffer_desc.usage == b.buffer_desc.usage
+    )
 
-	case .TEXTURE_2D:
-		return a.texture_desc.format == b.texture_desc.format &&
-		       a.texture_desc.width  == b.texture_desc.width  &&
-		       a.texture_desc.height == b.texture_desc.height &&
-		       a.texture_desc.usage  == b.texture_desc.usage  &&
-		       a.texture_desc.aspect == b.texture_desc.aspect
+  case .TEXTURE_2D:
+    return(
+      a.texture_desc.format == b.texture_desc.format &&
+      a.texture_desc.width == b.texture_desc.width &&
+      a.texture_desc.height == b.texture_desc.height &&
+      a.texture_desc.usage == b.texture_desc.usage &&
+      a.texture_desc.aspect == b.texture_desc.aspect
+    )
 
-	case .TEXTURE_CUBE:
-		return a.texture_desc.format == b.texture_desc.format &&
-		       a.texture_desc.width  == b.texture_desc.width  &&
-		       a.texture_desc.usage  == b.texture_desc.usage  &&
-		       a.texture_desc.aspect == b.texture_desc.aspect
-	}
+  case .TEXTURE_CUBE:
+    return(
+      a.texture_desc.format == b.texture_desc.format &&
+      a.texture_desc.width == b.texture_desc.width &&
+      a.texture_desc.usage == b.texture_desc.usage &&
+      a.texture_desc.aspect == b.texture_desc.aspect
+    )
+  }
 
-	return false
+  return false
 }

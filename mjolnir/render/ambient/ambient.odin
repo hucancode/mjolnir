@@ -253,3 +253,32 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
   rg.reads_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex)
   rg.writes_textures(setup, final_image_tex)
 }
+
+execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.ambient) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.camera_buffer) == gpu.PerFrameBindlessBuffer(d.Camera, 2) {
+	cam_handle := resources.camera_handle
+	pos_tex, _ := rg.get_texture(resources, "gbuffer_position")
+	nrm_tex, _ := rg.get_texture(resources, "gbuffer_normal")
+	alb_tex, _ := rg.get_texture(resources, "gbuffer_albedo")
+	mr_tex,  _ := rg.get_texture(resources, "gbuffer_metallic_roughness")
+	emi_tex, _ := rg.get_texture(resources, "gbuffer_emissive")
+	fin_tex, _ := rg.get_texture(resources, "final_image")
+	begin_pass(
+		&manager.ambient,
+		transmute(gpu.Texture2DHandle)fin_tex.handle_bits,
+		&manager.texture_manager,
+		cmd,
+		manager.camera_buffer.descriptor_sets[frame_index],
+	)
+	render(&manager.ambient, cam_handle,
+		(transmute(gpu.Texture2DHandle)pos_tex.handle_bits).index,
+		(transmute(gpu.Texture2DHandle)nrm_tex.handle_bits).index,
+		(transmute(gpu.Texture2DHandle)alb_tex.handle_bits).index,
+		(transmute(gpu.Texture2DHandle)mr_tex.handle_bits).index,
+		(transmute(gpu.Texture2DHandle)emi_tex.handle_bits).index,
+		cmd,
+	)
+	end_pass(cmd)
+}
