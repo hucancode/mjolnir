@@ -1,6 +1,6 @@
 package geometry
 
-import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:testing"
@@ -146,7 +146,7 @@ test_point_in_polygon_2d :: proc(t: ^testing.T) {
   pt_edge := [3]f32{5, 0, 0}
   edge_result := point_in_polygon_2d(pt_edge, square)
   if edge_result {
-    fmt.printf("Point on edge returned %v, expected false\n", edge_result)
+    log.debugf("Point on edge returned %v, expected false\n", edge_result)
   }
   testing.expect(t, !edge_result, "Point on edge should be considered outside")
   // Test point on vertex
@@ -174,7 +174,7 @@ test_point_in_polygon_2d :: proc(t: ^testing.T) {
   pt_concave_in := [3]f32{2, 0, 4.5}
   in_result := point_in_polygon_2d(pt_concave_in, concave)
   if !in_result {
-    fmt.printf("Point (2,0,4.5) returned %v, expected true\n", in_result)
+    log.debugf("Point (2,0,4.5) returned %v, expected true\n", in_result)
   }
   testing.expect(t, in_result, "Point should be inside concave polygon")
   // Test a point that's clearly outside
@@ -182,7 +182,7 @@ test_point_in_polygon_2d :: proc(t: ^testing.T) {
   pt_concave_out := [3]f32{15, 0, 5}
   out_result := point_in_polygon_2d(pt_concave_out, concave)
   if out_result {
-    fmt.printf("Point (15,0,5) returned %v, expected false\n", out_result)
+    log.debugf("Point (15,0,5) returned %v, expected false\n", out_result)
   }
   testing.expect(
     t,
@@ -338,7 +338,7 @@ test_calc_poly_normal :: proc(t: ^testing.T) {
   normal := calc_poly_normal(square)
   expected := [3]f32{0, 1, 0}
   if !vec3_approx_equal(normal, expected) {
-    fmt.printf("Square normal: got %v, expected %v\n", normal, expected)
+    log.debugf("Square normal: got %v, expected %v\n", normal, expected)
   }
   testing.expect(
     t,
@@ -350,7 +350,7 @@ test_calc_poly_normal :: proc(t: ^testing.T) {
   normal2 := calc_poly_normal(triangle)
   expected2 := [3]f32{0, 0, 1}
   if !vec3_approx_equal(normal2, expected2) {
-    fmt.printf("Triangle normal: got %v, expected %v\n", normal2, expected2)
+    log.debugf("Triangle normal: got %v, expected %v\n", normal2, expected2)
   }
   testing.expect(
     t,

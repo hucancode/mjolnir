@@ -54,21 +54,8 @@ assign_resource_aliases :: proc(graph: ^Graph) {
   // ── 1. Determine which resources need per-frame variants ──────────────────
   // Mirrors the variant-count logic in allocate_resources so that alias
   // compatibility uses the same variant count the allocator would use.
-  needs_frame_variants := make(map[string]bool)
+  needs_frame_variants := _needs_frame_variants(graph)
   defer delete(needs_frame_variants)
-
-  for &pass in graph.pass_instances {
-    for read in pass.reads {
-      if read.frame_offset != .CURRENT {
-        needs_frame_variants[read.resource_name] = true
-      }
-    }
-    for write in pass.writes {
-      if write.frame_offset != .CURRENT {
-        needs_frame_variants[write.resource_name] = true
-      }
-    }
-  }
 
   // ── 2. Compute resource lifetimes from sorted_passes ──────────────────────
   // Only CURRENT-frame accesses contribute to the lifetime; temporal accesses
@@ -100,16 +87,15 @@ assign_resource_aliases :: proc(graph: ^Graph) {
     res := &graph.resource_instances[i]
     res_id := ResourceInstanceId(i)
 
-    is_external :=
-      res.type == .BUFFER ? res.buffer_desc.is_external : res.texture_desc.is_external
-    if is_external {continue}
+    if res.is_external {continue}
 
     lt, has_lt := lifetimes[res_id]
     if !has_lt {continue}   // never accessed (should be dead after elimination)
 
-    wants_variants :=
-      needs_frame_variants[res.name] ||
-      (res.type != .BUFFER && res.texture_desc.double_buffer)
+    wants_variants := needs_frame_variants[res.name]
+    if tex, ok := res.data.(ResourceTexture); ok {
+      wants_variants = wants_variants || tex.double_buffer
+    }
 
     append(
       &candidates,
@@ -169,7 +155,7 @@ assign_resource_aliases :: proc(graph: ^Graph) {
 
       when ODIN_DEBUG {
         target := get_resource(graph, slots[found_slot].id)
-        fmt.printf(
+        log.debugf(
           "[ALIAS] '%s' [%d,%d] → '%s' (slot last_use was %d)\n",
           res.name,
           cand.first_use,
@@ -192,7 +178,7 @@ assign_resource_aliases :: proc(graph: ^Graph) {
   }
 
   when ODIN_DEBUG {
-    fmt.printf(
+    log.debugf(
       "[ALIAS] %d physical slots, %d aliased, %d total non-external resources\n",
       len(slots),
       alias_count,
@@ -231,31 +217,33 @@ _alias_compatible :: proc(
   a, b: ^ResourceInstance,
   a_variants, b_variants: bool,
 ) -> bool {
-  if a.type != b.type {return false}
   if a_variants != b_variants {return false}
 
-  switch a.type {
-  case .BUFFER:
+  switch ad in a.data {
+  case ResourceBuffer:
+    bd, ok := b.data.(ResourceBuffer)
+    if !ok {return false}
+    return ad.size == bd.size && ad.usage == bd.usage
+
+  case ResourceTexture:
+    bt, ok := b.data.(ResourceTexture)
+    if !ok {return false}
     return(
-      a.buffer_desc.size == b.buffer_desc.size &&
-      a.buffer_desc.usage == b.buffer_desc.usage
+      ad.format == bt.format &&
+      ad.width == bt.width &&
+      ad.height == bt.height &&
+      ad.usage == bt.usage &&
+      ad.aspect == bt.aspect
     )
 
-  case .TEXTURE_2D:
+  case ResourceTextureCube:
+    bct, ok := b.data.(ResourceTextureCube)
+    if !ok {return false}
     return(
-      a.texture_desc.format == b.texture_desc.format &&
-      a.texture_desc.width == b.texture_desc.width &&
-      a.texture_desc.height == b.texture_desc.height &&
-      a.texture_desc.usage == b.texture_desc.usage &&
-      a.texture_desc.aspect == b.texture_desc.aspect
-    )
-
-  case .TEXTURE_CUBE:
-    return(
-      a.texture_desc.format == b.texture_desc.format &&
-      a.texture_desc.width == b.texture_desc.width &&
-      a.texture_desc.usage == b.texture_desc.usage &&
-      a.texture_desc.aspect == b.texture_desc.aspect
+      ad.format == bct.format &&
+      ad.width == bct.width &&
+      ad.usage == bct.usage &&
+      ad.aspect == bct.aspect
     )
   }
 

@@ -124,10 +124,7 @@ destroy_resource :: proc(
   if res.scope != .GLOBAL do delete(res.name)
 
   // External resources are not owned by graph
-  if (res.type == .BUFFER && res.buffer_desc.is_external) ||
-     (res.type != .BUFFER && res.texture_desc.is_external) {
-    return
-  }
+  if res.is_external {return}
 
   // Delegate actual GPU deallocation to allocator (which imports gpu package)
   deallocate_resource(res, gctx, tm)
@@ -192,6 +189,26 @@ set_execution_order :: proc(graph: ^Graph, order: []PassInstanceId) {
     delete(graph.sorted_passes)
   }
   graph.sorted_passes = slice.clone(order)
+}
+
+// _needs_frame_variants returns a map of resource names that require per-frame
+// variants (any pass reads or writes with a non-CURRENT frame offset).
+// Caller is responsible for deleting the returned map.
+_needs_frame_variants :: proc(graph: ^Graph) -> map[string]bool {
+  result := make(map[string]bool, len(graph.resource_instances))
+  for &pass in graph.pass_instances {
+    for read in pass.reads {
+      if read.frame_offset != .CURRENT {
+        result[read.resource_name] = true
+      }
+    }
+    for write in pass.writes {
+      if write.frame_offset != .CURRENT {
+        result[write.resource_name] = true
+      }
+    }
+  }
+  return result
 }
 
 // Add barrier before pass (called by barrier computation)

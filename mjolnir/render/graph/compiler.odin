@@ -23,7 +23,8 @@ compile :: proc(
   graph.light_handles = slice.clone(ctx.light_handles)
 
   // Step 1: Instantiate passes based on scope
-  instances := instantiate_passes(pass_decls, ctx) or_return
+  instances, setup_procs := instantiate_passes(pass_decls, ctx) or_return
+  defer delete(setup_procs)
 
   // Step 2: Run setup callbacks to collect resource declarations
   // IMPORTANT: All passes share the same resources array so later passes
@@ -37,10 +38,15 @@ compile :: proc(
   resource_versions := make(map[string]u32)
   defer delete(resource_versions)
 
-  for &instance in instances {
-    // All passes share the same _resources array so later passes can find
+  for &instance, i in instances {
+    // All passes share the same resources array so later passes can find
     // resources declared by earlier passes via find_texture/find_buffer.
     // After each callback we recover the (potentially reallocated) array header.
+    builder := PassBuilder {
+      resources = all_resources,
+      reads     = make([dynamic]ResourceAccess),
+      writes    = make([dynamic]ResourceAccess),
+    }
     setup := PassSetup {
       pass_name        = instance.name,
       pass_scope       = instance.scope,
@@ -50,26 +56,23 @@ compile :: proc(
       camera_extents   = ctx.camera_extents,
       light_kinds      = ctx.light_kinds,
       swapchain_format = ctx.swapchain_format,
-      _resources       = all_resources,
-      _reads           = make([dynamic]ResourceAccess),
-      _writes          = make([dynamic]ResourceAccess),
     }
 
-    if instance.setup != nil {
-      instance.setup(&setup)
+    if setup_procs[i] != nil {
+      setup_procs[i](&setup, &builder)
     }
 
     // Recover shared resources array (may have reallocated during append)
-    all_resources = setup._resources
+    all_resources = builder.resources
 
     // Assign versions: reads capture the version currently produced, writes mint the next.
     // Must process reads before writes so a READ_WRITE pass reads version N then produces N+1.
-    for &read in setup._reads {
+    for &read in builder.reads {
       if read.frame_offset == .CURRENT {
         read.version = resource_versions[read.resource_name]
       }
     }
-    for &write in setup._writes {
+    for &write in builder.writes {
       if write.frame_offset == .CURRENT {
         resource_versions[write.resource_name] += 1
         write.version = resource_versions[write.resource_name]
@@ -77,8 +80,8 @@ compile :: proc(
     }
 
     // Instance takes ownership of the reads/writes arrays
-    instance.reads = setup._reads
-    instance.writes = setup._writes
+    instance.reads = builder.reads
+    instance.writes = builder.writes
   }
 
   // Step 3: Create resource instances
@@ -93,13 +96,40 @@ compile :: proc(
       continue
     }
 
+    data: union {
+      ResourceTexture,
+      ResourceTextureCube,
+      ResourceBuffer,
+    }
+    switch d in res_decl.desc {
+    case TextureDesc:
+      data = ResourceTexture {
+        width         = d.width,
+        height        = d.height,
+        format        = d.format,
+        usage         = d.usage,
+        aspect        = d.aspect,
+        double_buffer = d.double_buffer,
+      }
+    case TextureCubeDesc:
+      data = ResourceTextureCube {
+        width  = d.width,
+        format = d.format,
+        usage  = d.usage,
+        aspect = d.aspect,
+      }
+    case BufferDesc:
+      data = ResourceBuffer {
+        size  = d.size,
+        usage = d.usage,
+      }
+    }
     res_instance := ResourceInstance {
       name         = res_decl.name,
-      type         = res_decl.type,
       scope        = res_decl.scope,
       instance_idx = res_decl.instance_idx,
-      texture_desc = res_decl.texture_desc,
-      buffer_desc  = res_decl.buffer_desc,
+      is_external  = res_decl.is_external,
+      data         = data,
     }
 
     id := add_resource_instance(&graph, res_instance)
@@ -128,12 +158,11 @@ compile :: proc(
   defer delete(live_passes)
 
   when ODIN_DEBUG {
-    fmt.println("\n=== DEAD PASS ELIMINATION ===")
+    log.info("=== DEAD PASS ELIMINATION ===")
     for &pass, idx in graph.pass_instances {
-      status := live_passes[idx] ? "LIVE" : "DEAD"
-      fmt.printf("[%s] %s\n", status, pass.name)
+      log.infof("[%s] %s", live_passes[idx] ? "LIVE" : "DEAD", pass.name)
     }
-    fmt.println("=============================\n")
+    log.info("=============================\n")
   }
 
   // Step 8: Topological sort
@@ -162,91 +191,108 @@ instantiate_passes :: proc(
   loc := #caller_location,
 ) -> (
   instances: [dynamic]PassInstance,
+  setup_procs: [dynamic]PassSetupProc,
   err: CompileError,
 ) {
   instances = make([dynamic]PassInstance)
+  setup_procs = make([dynamic]PassSetupProc)
+
+  _append :: proc(
+    instances: ^[dynamic]PassInstance,
+    setup_procs: ^[dynamic]PassSetupProc,
+    inst: PassInstance,
+    setup: PassSetupProc,
+  ) {
+    append(instances, inst)
+    append(setup_procs, setup)
+  }
 
   for decl in pass_decls {
     switch decl.scope {
     case .GLOBAL:
-      append(
+      _append(
         &instances,
+        &setup_procs,
         PassInstance {
-          name    = decl.name,
-          scope   = decl.scope,
+          name = decl.name,
+          scope = decl.scope,
           instance = 0,
-          queue   = decl.queue,
-          setup   = decl.setup,
+          queue = decl.queue,
           execute = decl.execute,
         },
+        decl.setup,
       )
 
     case .PER_CAMERA:
       for cam_idx in 0 ..< ctx.num_cameras {
-        append(
+        _append(
           &instances,
+          &setup_procs,
           PassInstance {
-            name     = fmt.aprintf("%s_cam_%d", decl.name, cam_idx),
-            scope    = decl.scope,
+            name = fmt.aprintf("%s_cam_%d", decl.name, cam_idx),
+            scope = decl.scope,
             instance = u32(cam_idx),
-            queue    = decl.queue,
-            setup    = decl.setup,
-            execute  = decl.execute,
+            queue = decl.queue,
+            execute = decl.execute,
           },
+          decl.setup,
         )
       }
 
     case .PER_POINT_LIGHT:
       for light_idx in 0 ..< ctx.num_lights {
         if ctx.light_kinds[light_idx] != .POINT do continue
-        append(
+        _append(
           &instances,
+          &setup_procs,
           PassInstance {
-            name     = fmt.aprintf("%s_light_%d", decl.name, light_idx),
-            scope    = decl.scope,
+            name = fmt.aprintf("%s_light_%d", decl.name, light_idx),
+            scope = decl.scope,
             instance = u32(light_idx),
-            queue    = decl.queue,
-            setup    = decl.setup,
-            execute  = decl.execute,
+            queue = decl.queue,
+            execute = decl.execute,
           },
+          decl.setup,
         )
       }
 
     case .PER_SPOT_LIGHT:
       for light_idx in 0 ..< ctx.num_lights {
         if ctx.light_kinds[light_idx] != .SPOT do continue
-        append(
+        _append(
           &instances,
+          &setup_procs,
           PassInstance {
-            name     = fmt.aprintf("%s_light_%d", decl.name, light_idx),
-            scope    = decl.scope,
+            name = fmt.aprintf("%s_light_%d", decl.name, light_idx),
+            scope = decl.scope,
             instance = u32(light_idx),
-            queue    = decl.queue,
-            setup    = decl.setup,
-            execute  = decl.execute,
+            queue = decl.queue,
+            execute = decl.execute,
           },
+          decl.setup,
         )
       }
 
     case .PER_DIRECTIONAL_LIGHT:
       for light_idx in 0 ..< ctx.num_lights {
         if ctx.light_kinds[light_idx] != .DIRECTIONAL do continue
-        append(
+        _append(
           &instances,
+          &setup_procs,
           PassInstance {
-            name     = fmt.aprintf("%s_light_%d", decl.name, light_idx),
-            scope    = decl.scope,
+            name = fmt.aprintf("%s_light_%d", decl.name, light_idx),
+            scope = decl.scope,
             instance = u32(light_idx),
-            queue    = decl.queue,
-            setup    = decl.setup,
-            execute  = decl.execute,
+            queue = decl.queue,
+            execute = decl.execute,
           },
+          decl.setup,
         )
       }
     }
   }
 
-  return instances, .NONE
+  return instances, setup_procs, .NONE
 }
 
 // ============================================================================
@@ -391,15 +437,15 @@ build_dependency_edges :: proc(
   }
 
   when ODIN_DEBUG {
-    fmt.println("[GRAPH] Dependency edges:")
+    log.debug("[GRAPH] Dependency edges:")
     for from_id, to_list in edges {
       from_pass := &graph.pass_instances[from_id]
       if len(to_list) == 0 {
-        fmt.printf("  %s → (no downstream consumers)\n", from_pass.name)
+        log.debugf("  %s → (no downstream consumers)", from_pass.name)
       } else {
         for to_id in to_list {
           to_pass := &graph.pass_instances[to_id]
-          fmt.printf("  %s → %s\n", from_pass.name, to_pass.name)
+          log.debugf("  %s → %s\n", from_pass.name, to_pass.name)
         }
       }
     }
@@ -426,10 +472,8 @@ eliminate_dead_passes :: proc(
     if PassInstanceId(idx) not_in edges ||
        len(edges[PassInstanceId(idx)]) == 0 {
       live[idx] = true
-      when ODIN_DEBUG {fmt.printf(
-          "[GRAPH] Sink pass (no downstream): %s\n",
-          pass.name,
-        )}
+      when ODIN_DEBUG {
+        log.debugf("[GRAPH] Sink pass (no downstream): %s\n", pass.name)}
     }
   }
 
@@ -462,7 +506,7 @@ eliminate_dead_passes :: proc(
           if !live[writer_id] {
             when ODIN_DEBUG {
               writer_name := graph.pass_instances[writer_id].name
-              fmt.printf(
+              log.debugf(
                 "[GRAPH] Marking %s as live (writes %s for %s)\n",
                 writer_name,
                 read.resource_name,
@@ -476,18 +520,6 @@ eliminate_dead_passes :: proc(
       }
     }
   }
-
-  when ODIN_DEBUG {
-    fmt.println("[GRAPH] Dead pass elimination results:")
-    for &pass, idx in graph.pass_instances {
-      if live[idx] {
-        fmt.printf("  ✓ LIVE: %s\n", pass.name)
-      } else {
-        fmt.printf("  ✗ DEAD: %s (eliminated)\n", pass.name)
-      }
-    }
-  }
-
   return live
 }
 

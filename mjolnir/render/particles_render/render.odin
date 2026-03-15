@@ -237,15 +237,15 @@ end_pass :: proc(command_buffer: vk.CommandBuffer) {
 	vk.CmdEndRendering(command_buffer)
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup) {
-	final_image_tex, ok1 := rg.find_texture(setup, "final_image")
-	depth_tex, ok2 := rg.find_texture(setup, "depth")
-	compact_buf, ok3 := rg.find_buffer(setup, "compact_particle_buffer")
-	draw_cmd_buf, ok4 := rg.find_buffer(setup, "particle_draw_command_buffer")
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
+	final_image_tex, ok1 := rg.find_texture(setup, builder, "final_image")
+	depth_tex, ok2 := rg.find_texture(setup, builder, "depth")
+	compact_buf, ok3 := rg.find_buffer(setup, builder, "compact_particle_buffer")
+	draw_cmd_buf, ok4 := rg.find_buffer(setup, builder, "particle_draw_command_buffer")
 	if !ok1 || !ok2 || !ok3 || !ok4 do return
-	rg.reads_buffers(setup, compact_buf, draw_cmd_buf)
-	rg.read_write_texture(setup, final_image_tex)
-	rg.read_write_texture(setup, depth_tex)
+	rg.reads_buffers(setup, builder, compact_buf, draw_cmd_buf)
+	rg.read_write_texture(setup, builder, final_image_tex)
+	rg.read_write_texture(setup, builder, depth_tex)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

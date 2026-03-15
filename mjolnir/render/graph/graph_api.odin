@@ -37,24 +37,34 @@ pass_count :: proc(graph: ^Graph) -> int {
   return len(graph.sorted_passes)
 }
 
+is_compiled :: proc(graph: ^Graph) -> bool {
+  return graph.sorted_passes != nil
+}
+
 // get_texture_handle returns the bindless handle bits for a named texture at the given frame.
 // Returns (handle_bits, true) on success; (0, false) if not found or not a texture.
 get_texture_handle :: proc(graph: ^Graph, name: string, frame_index: u32) -> (u64, bool) {
   res_id, found := find_resource_by_name(graph, name)
   if !found do return 0, false
   res := get_resource(graph, res_id)
-  if len(res.texture_handle_bits) == 0 do return 0, false
-  variant_idx := int(frame_index) % len(res.texture_handle_bits)
-  return res.texture_handle_bits[variant_idx], true
+
+  switch d in res.data {
+  case ResourceTexture:
+    if len(d.texture_handle_bits) == 0 do return 0, false
+    return d.texture_handle_bits[int(frame_index) % len(d.texture_handle_bits)], true
+  case ResourceTextureCube:
+    if len(d.texture_handle_bits) == 0 do return 0, false
+    return d.texture_handle_bits[int(frame_index) % len(d.texture_handle_bits)], true
+  case ResourceBuffer:
+    return 0, false
+  }
+  return 0, false
 }
 
 // ============================================================================
 // External Resource Update API
 // ============================================================================
 
-// Update the VkImage handle for an external texture registered with the graph.
-// Call this each frame (before run_graph) when the handle changes — e.g. for
-// the swapchain image. Once set, the graph will emit correct image barriers.
 update_external_texture :: proc(
   graph: ^Graph,
   name: string,
@@ -64,12 +74,17 @@ update_external_texture :: proc(
   res_id, found := find_resource_by_name(graph, name)
   if !found do return
   res := get_resource(graph, res_id)
-  res.external_image = image
-  res.external_image_view = view
+  switch &d in res.data {
+  case ResourceTexture:
+    d.external_image = image
+    d.external_image_view = view
+  case ResourceTextureCube:
+    d.external_image = image
+    d.external_image_view = view
+  case ResourceBuffer:
+  }
 }
 
-// Update the VkBuffer handle for an external buffer registered with the graph.
-// Call this each frame (before run_graph) when the handle changes.
 update_external_buffer :: proc(
   graph: ^Graph,
   name: string,
@@ -78,19 +93,17 @@ update_external_buffer :: proc(
   res_id, found := find_resource_by_name(graph, name)
   if !found do return
   res := get_resource(graph, res_id)
-  res.external_buffer = buffer
+  switch &d in res.data {
+  case ResourceBuffer:
+    d.external = buffer
+  case ResourceTexture, ResourceTextureCube:
+  }
 }
 
 // ============================================================================
 // Public API - Main Entry Points
 // ============================================================================
 
-// This file provides a clean public API for the frame graph system.
-// Users should primarily use these functions.
-
-// Compile (or recompile) a frame graph from pass declarations.
-// gctx and tm are used for GPU resource allocation only — they are never stored.
-// If the graph already contains compiled data it is destroyed first.
 build_graph :: proc(
   graph: ^Graph,
   pass_decls: []PassDecl,
@@ -120,12 +133,6 @@ build_graph :: proc(
   return .NONE
 }
 
-// Create a pass iterator for executing the compiled graph frame-by-frame.
-// The caller drives the loop: call next_pass to advance, pass_done after each pass.
-//
-// graphics_cmd: command buffer for GRAPHICS passes.
-// compute_cmd:  command buffer for COMPUTE passes.
-// Pass the same buffer for both when async compute is not in use.
 make_pass_iterator :: proc(
   graph: ^Graph,
   frame_index: u32,
@@ -133,10 +140,10 @@ make_pass_iterator :: proc(
   compute_cmd: vk.CommandBuffer,
 ) -> GraphPassIterator {
   return GraphPassIterator {
-    _graph = graph,
-    _frame_index = frame_index,
+    _graph        = graph,
+    _frame_index  = frame_index,
     _graphics_cmd = graphics_cmd,
-    _compute_cmd = compute_cmd,
-    _pass_idx = 0,
+    _compute_cmd  = compute_cmd,
+    _pass_idx     = 0,
   }
 }

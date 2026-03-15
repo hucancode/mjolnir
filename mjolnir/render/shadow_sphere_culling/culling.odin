@@ -73,18 +73,16 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyDescriptorSetLayout(gctx.device, self.descriptor_layout, nil)
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup) {
-  shadow_draw_cmds := rg.register_external_buffer(setup, "shadow_draw_commands", rg.BufferDesc{
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
+  shadow_draw_cmds := rg.register_external_buffer(setup, builder, "shadow_draw_commands", rg.BufferDesc{
     size = 1024 * 1024,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-    is_external = true,
   })
-  shadow_draw_count := rg.register_external_buffer(setup, "shadow_draw_count", rg.BufferDesc{
+  shadow_draw_count := rg.register_external_buffer(setup, builder, "shadow_draw_count", rg.BufferDesc{
     size = 4,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-    is_external = true,
   })
-  rg.writes_buffers(setup, shadow_draw_cmds, shadow_draw_count)
+  rg.writes_buffers(setup, builder, shadow_draw_cmds, shadow_draw_count)
 }
 
 execute_point :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

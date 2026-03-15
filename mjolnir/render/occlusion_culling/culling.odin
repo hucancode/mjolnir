@@ -207,31 +207,27 @@ perform_culling :: proc(
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup) {
-  opaque_cmds := rg.register_external_buffer(setup, "opaque_draw_commands", rg.BufferDesc{
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
+  opaque_cmds := rg.register_external_buffer(setup, builder, "opaque_draw_commands", rg.BufferDesc{
     size = 1024 * 1024,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-    is_external = true,
   })
-  opaque_count := rg.register_external_buffer(setup, "opaque_draw_count", rg.BufferDesc{
+  opaque_count := rg.register_external_buffer(setup, builder, "opaque_draw_count", rg.BufferDesc{
     size = 4,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-    is_external = true,
   })
-  transparent_cmds := rg.register_external_buffer(setup, "transparent_draw_commands", rg.BufferDesc{
+  transparent_cmds := rg.register_external_buffer(setup, builder, "transparent_draw_commands", rg.BufferDesc{
     size = 1024 * 1024,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-    is_external = true,
   })
-  transparent_count := rg.register_external_buffer(setup, "transparent_draw_count", rg.BufferDesc{
+  transparent_count := rg.register_external_buffer(setup, builder, "transparent_draw_count", rg.BufferDesc{
     size = 4,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-    is_external = true,
   })
-  rg.write_buffer(setup, opaque_cmds, .NEXT)
-  rg.write_buffer(setup, opaque_count, .NEXT)
-  rg.write_buffer(setup, transparent_cmds, .NEXT)
-  rg.write_buffer(setup, transparent_count, .NEXT)
+  rg.write_buffer(setup, builder, opaque_cmds, .NEXT)
+  rg.write_buffer(setup, builder, opaque_count, .NEXT)
+  rg.write_buffer(setup, builder, transparent_cmds, .NEXT)
+  rg.write_buffer(setup, builder, transparent_count, .NEXT)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

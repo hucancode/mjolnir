@@ -9,111 +9,145 @@ import vk "vendor:vulkan"
 
 create_texture :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
   desc: TextureDesc,
 ) -> TextureId {
-  return _add_texture(setup, name, desc)
+  return _add_texture(setup, builder, name, desc)
+}
+
+create_texture_cube :: proc(
+  setup: ^PassSetup,
+  builder: ^PassBuilder,
+  name: string,
+  desc: TextureCubeDesc,
+) -> TextureId {
+  return _add_texture_cube(setup, builder, name, desc)
 }
 
 create_buffer :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
   desc: BufferDesc,
 ) -> BufferId {
-  return _add_buffer(setup, name, desc)
+  return _add_buffer(setup, builder, name, desc)
 }
 
 register_external_texture :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
   desc: TextureDesc,
 ) -> TextureId {
-  d := desc
-  d.is_external = true
-  return _add_texture(setup, name, d)
+  id := _add_texture(setup, builder, name, desc)
+  builder.resources[id.index].is_external = true
+  return id
 }
 
 register_external_buffer :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
   desc: BufferDesc,
 ) -> BufferId {
-  d := desc
-  d.is_external = true
-  return _add_buffer(setup, name, d)
+  id := _add_buffer(setup, builder, name, desc)
+  builder.resources[id.index].is_external = true
+  return id
 }
 
 @(private)
 _add_texture :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
   desc: TextureDesc,
 ) -> TextureId {
-  resolved_name := scope_resource_name(
-    name,
-    setup.pass_scope,
-    setup.instance_idx,
-  )
-  tex_type := ResourceType.TEXTURE_CUBE if desc.is_cube else .TEXTURE_2D
-  // Deduplicate: if this scoped name already exists (registered by an earlier pass),
-  // return that entry's index so all accesses share the same canonical string.
-  for decl, i in setup._resources {
-    if decl.name == resolved_name &&
-       (decl.type == .TEXTURE_2D || decl.type == .TEXTURE_CUBE) {
-      if setup.pass_scope != .GLOBAL do delete(resolved_name)
-      return TextureId{index = u32(i)}
+  resolved_name := scope_resource_name(name, setup.pass_scope, setup.instance_idx)
+  for decl, i in builder.resources {
+    if decl.name == resolved_name {
+      if _, ok := decl.desc.(TextureDesc); ok {
+        if setup.pass_scope != .GLOBAL do delete(resolved_name)
+        return TextureId{index = u32(i)}
+      }
     }
   }
-  decl := ResourceDecl {
-    name         = resolved_name,
-    type         = tex_type,
-    texture_desc = desc,
-    scope        = setup.pass_scope,
-    instance_idx = setup.instance_idx,
+  append(
+    &builder.resources,
+    ResourceDecl{
+      name         = resolved_name,
+      desc         = desc,
+      scope        = setup.pass_scope,
+      instance_idx = setup.instance_idx,
+    },
+  )
+  return TextureId{index = u32(len(builder.resources) - 1)}
+}
+
+@(private)
+_add_texture_cube :: proc(
+  setup: ^PassSetup,
+  builder: ^PassBuilder,
+  name: string,
+  desc: TextureCubeDesc,
+) -> TextureId {
+  resolved_name := scope_resource_name(name, setup.pass_scope, setup.instance_idx)
+  for decl, i in builder.resources {
+    if decl.name == resolved_name {
+      if _, ok := decl.desc.(TextureCubeDesc); ok {
+        if setup.pass_scope != .GLOBAL do delete(resolved_name)
+        return TextureId{index = u32(i)}
+      }
+    }
   }
-  append(&setup._resources, decl)
-  return TextureId{index = u32(len(setup._resources) - 1)}
+  append(
+    &builder.resources,
+    ResourceDecl{
+      name         = resolved_name,
+      desc         = desc,
+      scope        = setup.pass_scope,
+      instance_idx = setup.instance_idx,
+    },
+  )
+  return TextureId{index = u32(len(builder.resources) - 1)}
 }
 
 @(private)
 _add_buffer :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
   desc: BufferDesc,
 ) -> BufferId {
-  resolved_name := scope_resource_name(
-    name,
-    setup.pass_scope,
-    setup.instance_idx,
-  )
-  // Deduplicate: if this scoped name already exists (registered by an earlier pass),
-  // return that entry's index so all accesses share the same canonical string.
-  for decl, i in setup._resources {
-    if decl.name == resolved_name && decl.type == .BUFFER {
-      if setup.pass_scope != .GLOBAL do delete(resolved_name)
-      return BufferId{index = u32(i)}
+  resolved_name := scope_resource_name(name, setup.pass_scope, setup.instance_idx)
+  for decl, i in builder.resources {
+    if decl.name == resolved_name {
+      if _, ok := decl.desc.(BufferDesc); ok {
+        if setup.pass_scope != .GLOBAL do delete(resolved_name)
+        return BufferId{index = u32(i)}
+      }
     }
   }
-  decl := ResourceDecl {
-    name         = resolved_name,
-    type         = .BUFFER,
-    buffer_desc  = desc,
-    scope        = setup.pass_scope,
-    instance_idx = setup.instance_idx,
-  }
-  append(&setup._resources, decl)
-  return BufferId{index = u32(len(setup._resources) - 1)}
+  append(
+    &builder.resources,
+    ResourceDecl{
+      name         = resolved_name,
+      desc         = desc,
+      scope        = setup.pass_scope,
+      instance_idx = setup.instance_idx,
+    },
+  )
+  return BufferId{index = u32(len(builder.resources) - 1)}
 }
 
 // ============================================================================
 // Resource Lookup API
 // ============================================================================
 
-// Find texture by name (searches current scope first, then global).
-// Cross-scope overload: find_texture(setup, name, scope, instance_idx)
 @(private)
 _find_texture_same_scope :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
 ) -> (
   TextureId,
@@ -126,17 +160,23 @@ _find_texture_same_scope :: proc(
       _scope_suffix(setup.pass_scope),
       setup.instance_idx,
     )
-    for decl, i in setup._resources {
-      if decl.name == scoped &&
-         (decl.type == .TEXTURE_2D || decl.type == .TEXTURE_CUBE) {
-        return TextureId{index = u32(i)}, true
+    for decl, i in builder.resources {
+      if decl.name == scoped {
+        switch _ in decl.desc {
+        case TextureDesc, TextureCubeDesc:
+          return TextureId{index = u32(i)}, true
+        case BufferDesc:
+        }
       }
     }
   }
-  for decl, i in setup._resources {
-    if decl.name == name &&
-       (decl.type == .TEXTURE_2D || decl.type == .TEXTURE_CUBE) {
-      return TextureId{index = u32(i)}, true
+  for decl, i in builder.resources {
+    if decl.name == name {
+      switch _ in decl.desc {
+      case TextureDesc, TextureCubeDesc:
+        return TextureId{index = u32(i)}, true
+      case BufferDesc:
+      }
     }
   }
   return TextureId{}, false
@@ -145,6 +185,7 @@ _find_texture_same_scope :: proc(
 @(private)
 _find_texture_cross_scope :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
   scope: PassScope,
   instance_idx: u32,
@@ -153,10 +194,13 @@ _find_texture_cross_scope :: proc(
   bool,
 ) {
   scoped := fmt.tprintf("%s_%s_%d", name, _scope_suffix(scope), instance_idx)
-  for decl, i in setup._resources {
-    if decl.name == scoped &&
-       (decl.type == .TEXTURE_2D || decl.type == .TEXTURE_CUBE) {
-      return TextureId{index = u32(i)}, true
+  for decl, i in builder.resources {
+    if decl.name == scoped {
+      switch _ in decl.desc {
+      case TextureDesc, TextureCubeDesc:
+        return TextureId{index = u32(i)}, true
+      case BufferDesc:
+      }
     }
   }
   return TextureId{}, false
@@ -170,6 +214,7 @@ find_texture :: proc {
 @(private)
 _find_buffer_same_scope :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
 ) -> (
   BufferId,
@@ -182,15 +227,19 @@ _find_buffer_same_scope :: proc(
       _scope_suffix(setup.pass_scope),
       setup.instance_idx,
     )
-    for decl, i in setup._resources {
-      if decl.name == scoped && decl.type == .BUFFER {
-        return BufferId{index = u32(i)}, true
+    for decl, i in builder.resources {
+      if decl.name == scoped {
+        if _, ok := decl.desc.(BufferDesc); ok {
+          return BufferId{index = u32(i)}, true
+        }
       }
     }
   }
-  for decl, i in setup._resources {
-    if decl.name == name && decl.type == .BUFFER {
-      return BufferId{index = u32(i)}, true
+  for decl, i in builder.resources {
+    if decl.name == name {
+      if _, ok := decl.desc.(BufferDesc); ok {
+        return BufferId{index = u32(i)}, true
+      }
     }
   }
   return BufferId{}, false
@@ -199,6 +248,7 @@ _find_buffer_same_scope :: proc(
 @(private)
 _find_buffer_cross_scope :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   name: string,
   scope: PassScope,
   instance_idx: u32,
@@ -207,9 +257,11 @@ _find_buffer_cross_scope :: proc(
   bool,
 ) {
   scoped := fmt.tprintf("%s_%s_%d", name, _scope_suffix(scope), instance_idx)
-  for decl, i in setup._resources {
-    if decl.name == scoped && decl.type == .BUFFER {
-      return BufferId{index = u32(i)}, true
+  for decl, i in builder.resources {
+    if decl.name == scoped {
+      if _, ok := decl.desc.(BufferDesc); ok {
+        return BufferId{index = u32(i)}, true
+      }
     }
   }
   return BufferId{}, false
@@ -226,67 +278,73 @@ find_buffer :: proc {
 
 read_texture :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   id: TextureId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, id.index, .READ, frame_offset)}
+) {_declare_access(setup, builder, id.index, .READ, frame_offset)}
 write_texture :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   id: TextureId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, id.index, .WRITE, frame_offset)}
+) {_declare_access(setup, builder, id.index, .WRITE, frame_offset)}
 read_buffer :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   id: BufferId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, id.index, .READ, frame_offset)}
+) {_declare_access(setup, builder, id.index, .READ, frame_offset)}
 write_buffer :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   id: BufferId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, id.index, .WRITE, frame_offset)}
+) {_declare_access(setup, builder, id.index, .WRITE, frame_offset)}
 read_write_texture :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   id: TextureId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, id.index, .READ_WRITE, frame_offset)}
+) {_declare_access(setup, builder, id.index, .READ_WRITE, frame_offset)}
 read_write_buffer :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   id: BufferId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, id.index, .READ_WRITE, frame_offset)}
+) {_declare_access(setup, builder, id.index, .READ_WRITE, frame_offset)}
 
 @(private)
 _declare_access :: proc(
   setup: ^PassSetup,
+  builder: ^PassBuilder,
   index: u32,
   access: AccessMode,
   frame_offset: FrameOffset,
 ) {
-  if int(index) >= len(setup._resources) do return
-  name := setup._resources[index].name
+  if int(index) >= len(builder.resources) do return
+  name := builder.resources[index].name
   acc := ResourceAccess {
     resource_name = name,
     frame_offset  = frame_offset,
     access_mode   = access,
   }
-  if access != .WRITE do append(&setup._reads, acc)
-  if access != .READ do append(&setup._writes, acc)
+  if access != .WRITE do append(&builder.reads, acc)
+  if access != .READ do append(&builder.writes, acc)
 }
 
 // ============================================================================
 // Batch Dependency Declaration API
 // ============================================================================
 
-reads_textures :: proc(setup: ^PassSetup, ids: ..TextureId) {for id in ids do read_texture(setup, id)}
-writes_textures :: proc(setup: ^PassSetup, ids: ..TextureId) {for id in ids do write_texture(setup, id)}
-reads_buffers :: proc(setup: ^PassSetup, ids: ..BufferId) {for id in ids do read_buffer(setup, id)}
-writes_buffers :: proc(setup: ^PassSetup, ids: ..BufferId) {for id in ids do write_buffer(setup, id)}
+reads_textures :: proc(setup: ^PassSetup, builder: ^PassBuilder, ids: ..TextureId) {for id in ids do read_texture(setup, builder, id)}
+writes_textures :: proc(setup: ^PassSetup, builder: ^PassBuilder, ids: ..TextureId) {for id in ids do write_texture(setup, builder, id)}
+reads_buffers :: proc(setup: ^PassSetup, builder: ^PassBuilder, ids: ..BufferId) {for id in ids do read_buffer(setup, builder, id)}
+writes_buffers :: proc(setup: ^PassSetup, builder: ^PassBuilder, ids: ..BufferId) {for id in ids do write_buffer(setup, builder, id)}
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-// Returns the scope suffix string for a given scope (used for name scoping).
 @(private)
 _scope_suffix :: proc(scope: PassScope) -> string {
   switch scope {
@@ -300,9 +358,6 @@ _scope_suffix :: proc(scope: PassScope) -> string {
   return ""
 }
 
-// Returns a heap-allocated scoped resource name (fmt.aprintf).
-// Caller is responsible for freeing if scope != .GLOBAL.
-// Used by creation procs for persistent storage in ResourceDecl/ResourceInstance.
 @(private)
 scope_resource_name :: proc(
   name: string,
@@ -324,8 +379,6 @@ scope_resource_name :: proc(
 // Execution-Phase Resource Access API
 // ============================================================================
 
-// Get resolved texture from PassResources.
-// Tries exact name first (cross-scope/global), then auto-scopes to this pass's instance.
 get_texture :: proc(
   res: ^PassResources,
   name: string,
@@ -350,8 +403,6 @@ get_texture :: proc(
   return {}, false
 }
 
-// Get resolved buffer from PassResources.
-// Same auto-scoping logic as get_texture.
 get_buffer :: proc(
   res: ^PassResources,
   name: string,

@@ -234,43 +234,43 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 // Declare graph resources for the geometry pass.
 // Creates G-buffer textures owned by the graph, and registers external
 // depth + draw command buffers. Called from render.odin's setup callback.
-declare_resources :: proc(setup: ^rg.PassSetup) {
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
 	extent: vk.Extent2D = {1920, 1080}
 	if int(setup.instance_idx) < len(setup.camera_extents) {
 		extent = setup.camera_extents[setup.instance_idx]
 	}
   color_format := setup.swapchain_format
-  position_tex := rg.create_texture(setup, "gbuffer_position", rg.TextureDesc{
+  position_tex := rg.create_texture(setup, builder, "gbuffer_position", rg.TextureDesc{
     width = extent.width, height = extent.height,
     format = .R32G32B32A32_SFLOAT,
     usage = {.COLOR_ATTACHMENT, .SAMPLED},
     aspect = {.COLOR},
   })
-  normal_tex := rg.create_texture(setup, "gbuffer_normal", rg.TextureDesc{
+  normal_tex := rg.create_texture(setup, builder, "gbuffer_normal", rg.TextureDesc{
     width = extent.width, height = extent.height,
     format = .R8G8B8A8_UNORM,
     usage = {.COLOR_ATTACHMENT, .SAMPLED},
     aspect = {.COLOR},
   })
-  albedo_tex := rg.create_texture(setup, "gbuffer_albedo", rg.TextureDesc{
+  albedo_tex := rg.create_texture(setup, builder, "gbuffer_albedo", rg.TextureDesc{
     width = extent.width, height = extent.height,
     format = .R8G8B8A8_UNORM,
     usage = {.COLOR_ATTACHMENT, .SAMPLED},
     aspect = {.COLOR},
   })
-  metallic_roughness_tex := rg.create_texture(setup, "gbuffer_metallic_roughness", rg.TextureDesc{
+  metallic_roughness_tex := rg.create_texture(setup, builder, "gbuffer_metallic_roughness", rg.TextureDesc{
     width = extent.width, height = extent.height,
     format = .R8G8B8A8_UNORM,
     usage = {.COLOR_ATTACHMENT, .SAMPLED},
     aspect = {.COLOR},
   })
-  emissive_tex := rg.create_texture(setup, "gbuffer_emissive", rg.TextureDesc{
+  emissive_tex := rg.create_texture(setup, builder, "gbuffer_emissive", rg.TextureDesc{
     width = extent.width, height = extent.height,
     format = .R8G8B8A8_UNORM,
     usage = {.COLOR_ATTACHMENT, .SAMPLED},
     aspect = {.COLOR},
   })
-  final_image_tex := rg.create_texture(setup, "final_image", rg.TextureDesc{
+  final_image_tex := rg.create_texture(setup, builder, "final_image", rg.TextureDesc{
     width = extent.width, height = extent.height,
     format = color_format,
     usage = {.COLOR_ATTACHMENT, .SAMPLED},
@@ -280,25 +280,22 @@ declare_resources :: proc(setup: ^rg.PassSetup) {
     // eliminating the data hazard on the shared image.
     double_buffer = setup.instance_idx > 0,
   })
-  depth_tex := rg.register_external_texture(setup, "depth", rg.TextureDesc{
+  depth_tex := rg.register_external_texture(setup, builder, "depth", rg.TextureDesc{
     width = extent.width, height = extent.height,
     format = .D32_SFLOAT,
     usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     aspect = {.DEPTH},
-    is_external = true,
   })
-  opaque_cmds := rg.register_external_buffer(setup, "opaque_draw_commands", rg.BufferDesc{
+  opaque_cmds := rg.register_external_buffer(setup, builder, "opaque_draw_commands", rg.BufferDesc{
     size = 1024 * 1024,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-    is_external = true,
   })
-  opaque_count := rg.register_external_buffer(setup, "opaque_draw_count", rg.BufferDesc{
+  opaque_count := rg.register_external_buffer(setup, builder, "opaque_draw_count", rg.BufferDesc{
     size = 4,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-    is_external = true,
   })
-  rg.reads_buffers(setup, opaque_cmds, opaque_count)
-  rg.writes_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex, depth_tex)
+  rg.reads_buffers(setup, builder, opaque_cmds, opaque_count)
+  rg.writes_textures(setup, builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex, depth_tex)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

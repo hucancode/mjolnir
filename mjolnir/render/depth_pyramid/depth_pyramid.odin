@@ -274,10 +274,10 @@ build_pyramid :: proc(
   }
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup) {
-  depth_tex, ok := rg.find_texture(setup, "depth")
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
+  depth_tex, ok := rg.find_texture(setup, builder, "depth")
   if !ok do return
-  rg.read_texture(setup, depth_tex, .CURRENT)
+  rg.read_texture(setup, builder, depth_tex, .CURRENT)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

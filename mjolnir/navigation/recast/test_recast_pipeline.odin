@@ -10,7 +10,7 @@ import "core:time"
 // Test with nav_test.obj - multi-level navigation test mesh
 @(test)
 test_nav_test_mesh :: proc(t: ^testing.T) {
-  fmt.println("Testing with nav_test.obj (multi-level navigation)...")
+  log.info("Testing with nav_test.obj (multi-level navigation)...")
   mesh_path := "assets/nav_test.obj"
   vertices, indices, areas, ok := load_obj_to_navmesh_input(mesh_path, 1.0)
   testing.expect(t, ok, "Failed to load navmesh")
@@ -19,7 +19,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     delete(indices)
     delete(areas)
   }
-  fmt.printf(
+  log.debugf(
     "  Loaded %d vertices and %d triangles\n",
     len(vertices),
     len(indices) / 3,
@@ -30,7 +30,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
   bmin, bmax := calc_bounds(vertices)
   cfg.bmin = bmin
   cfg.bmax = bmax
-  fmt.printf(
+  log.debugf(
     "  Mesh bounds: (%.4f, %.4f, %.4f) to (%.4f, %.4f, %.4f)\n",
     bmin.x,
     bmin.y,
@@ -54,7 +54,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
   cfg.detail_sample_dist = 6.0
   cfg.detail_sample_max_error = 1.0
   cfg.width, cfg.height = calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
-  fmt.printf("  Grid size: %d x %d\n", cfg.width, cfg.height)
+  log.debugf("  Grid size: %d x %d\n", cfg.width, cfg.height)
   // Build heightfield
   hf := create_heightfield(
     cfg.width,
@@ -99,8 +99,8 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     max_layers = max(max_layers, layers)
     if layers > 1 do total_layers += 1
   }
-  fmt.printf("  Maximum layers in single cell: %d\n", max_layers)
-  fmt.printf("  Cells with multiple layers: %d\n", total_layers)
+  log.debugf("  Maximum layers in single cell: %d\n", max_layers)
+  log.debugf("  Cells with multiple layers: %d\n", total_layers)
   // Optionally test layers for multi-level navigation
   // Note: May fail if >255 regions, which is fine for standard navmesh
   lset, layer_ok := build_heightfield_layers(
@@ -110,9 +110,9 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
   )
   defer free_heightfield_layer_set(lset)
   if layer_ok && len(lset) > 0 {
-    fmt.printf("  Generated %d navigation layers:\n", len(lset))
+    log.debugf("  Generated %d navigation layers:\n", len(lset))
     for layer, i in lset {
-      fmt.printf(
+      log.debugf(
         "    Layer %d: %dx%d at height %d-%d\n",
         i,
         layer.width,
@@ -122,7 +122,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
       )
     }
   } else if !layer_ok {
-    fmt.println(
+    log.info(
       "  Note: Layer building skipped (likely >255 regions) - using standard regions instead",
     )
   }
@@ -143,9 +143,9 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
       if reg > max_region do max_region = reg
     }
   }
-  fmt.println("  Region Analysis:")
-  fmt.printf("    Total regions: %d\n", max_region)
-  fmt.printf("    Total spans in regions: %d\n", total_region_spans)
+  log.info("  Region Analysis:")
+  log.infof("    Total regions: %d", max_region)
+  log.infof("    Total spans in regions: %d", total_region_spans)
   // Count regions by size
   small_regions, medium_regions, large_regions := 0, 0, 0
   for i in 1 ..= max_region {
@@ -159,9 +159,9 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
       }
     }
   }
-  fmt.printf("    Small regions (<50 spans): %d\n", small_regions)
-  fmt.printf("    Medium regions (50-200 spans): %d\n", medium_regions)
-  fmt.printf("    Large regions (>200 spans): %d\n", large_regions)
+  log.debugf("    Small regions (<50 spans): %d\n", small_regions)
+  log.debugf("    Medium regions (50-200 spans): %d\n", medium_regions)
+  log.debugf("    Large regions (>200 spans): %d\n", large_regions)
   // Build contours
   cset := create_contour_set(
     chf,
@@ -206,7 +206,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     }
   }
   // Analyze polygon connectivity
-  fmt.println("  Polygon Connectivity Analysis:")
+  log.info("  Polygon Connectivity Analysis:")
   connection_counts := make([]int, 7) // 0 to 6 connections
   defer delete(connection_counts)
   total_connections := 0
@@ -228,20 +228,20 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     if connections == 0 do isolated_polys += 1
     if connections == int(pmesh.nvp) do fully_connected_polys += 1
   }
-  fmt.println("    Connection distribution:")
+  log.info("    Connection distribution:")
   for i in 0 ..= 6 {
     if connection_counts[i] > 0 {
-      fmt.printf(
+      log.debugf(
         "      %d connections: %d polygons\n",
         i,
         connection_counts[i],
       )
     }
   }
-  fmt.printf("    Isolated polygons (no connections): %d\n", isolated_polys)
+  log.debugf("    Isolated polygons (no connections): %d\n", isolated_polys)
   avg_connections :=
     pmesh.npolys > 0 ? f32(total_connections) / f32(pmesh.npolys) : 0
-  fmt.printf("    Average connections per polygon: %.3f\n", avg_connections)
+  log.debugf("    Average connections per polygon: %.3f\n", avg_connections)
   // Check for disconnected regions (islands)
   visited := make([]bool, pmesh.npolys)
   defer delete(visited)

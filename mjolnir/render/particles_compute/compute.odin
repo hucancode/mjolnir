@@ -477,23 +477,20 @@ create_compact_pipeline :: proc(
   return .SUCCESS
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup) {
-  particle_buf := rg.register_external_buffer(setup, "particle_buffer", rg.BufferDesc{
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
+  particle_buf := rg.register_external_buffer(setup, builder, "particle_buffer", rg.BufferDesc{
     size = 1024 * 1024,
     usage = {.STORAGE_BUFFER},
-    is_external = true,
   })
-  compact_buf := rg.register_external_buffer(setup, "compact_particle_buffer", rg.BufferDesc{
+  compact_buf := rg.register_external_buffer(setup, builder, "compact_particle_buffer", rg.BufferDesc{
     size = 1024 * 1024,
     usage = {.STORAGE_BUFFER},
-    is_external = true,
   })
-  draw_cmd_buf := rg.register_external_buffer(setup, "particle_draw_command_buffer", rg.BufferDesc{
+  draw_cmd_buf := rg.register_external_buffer(setup, builder, "particle_draw_command_buffer", rg.BufferDesc{
     size = 1024,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-    is_external = true,
   })
-  rg.writes_buffers(setup, particle_buf, compact_buf, draw_cmd_buf)
+  rg.writes_buffers(setup, builder, particle_buf, compact_buf, draw_cmd_buf)
 }
 
 execute :: proc(manager: $T, _: ^rg.PassResources, cmd: vk.CommandBuffer, _: u32)

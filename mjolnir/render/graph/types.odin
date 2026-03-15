@@ -1,6 +1,5 @@
 package render_graph
 
-import "../../gpu"
 import vk "vendor:vulkan"
 
 // ============================================================================
@@ -8,11 +7,11 @@ import vk "vendor:vulkan"
 // ============================================================================
 
 PassScope :: enum {
-  GLOBAL, // Runs once per frame (e.g., particle simulation, UI)
-  PER_CAMERA, // Runs once per camera (e.g., geometry, lighting)
-  PER_POINT_LIGHT, // Runs once per point light (sphere shadows, point direct lighting)
-  PER_SPOT_LIGHT, // Runs once per spot light (frustum shadows, spot direct lighting)
-  PER_DIRECTIONAL_LIGHT, // Runs once per directional light (frustum shadows, directional lighting)
+  GLOBAL,
+  PER_CAMERA,
+  PER_POINT_LIGHT,
+  PER_SPOT_LIGHT,
+  PER_DIRECTIONAL_LIGHT,
 }
 
 QueueType :: enum {
@@ -32,27 +31,19 @@ AccessMode :: enum {
   READ_WRITE,
 }
 
-ResourceType :: enum {
-  BUFFER,
-  TEXTURE_2D,
-  TEXTURE_CUBE,
-}
-
 // ============================================================================
 // Typed Resource Handles (Compile-time Safety)
 // ============================================================================
 
-// Opaque resource identifier with phantom type parameter
 ResourceId :: struct($T: typeid) {
   index: u32,
 }
 
-// Convenience aliases for common resource types
 TextureId :: ResourceId(TextureDesc)
 BufferId :: ResourceId(BufferDesc)
 
 // ============================================================================
-// Resource Descriptors
+// Resource Descriptors (public — passed by callers at setup time)
 // ============================================================================
 
 TextureDesc :: struct {
@@ -61,29 +52,91 @@ TextureDesc :: struct {
   format:        vk.Format,
   usage:         vk.ImageUsageFlags,
   aspect:        vk.ImageAspectFlags,
-  is_cube:       bool,
-  is_external:   bool, // If true, not allocated by graph
-  double_buffer: bool, // Allocate one variant per frame-in-flight for CURRENT-only resources read across frames
+  double_buffer: bool, // Allocate one variant per frame-in-flight
+}
+
+// Cube faces are always square; no double_buffer (cube shadow maps are not double-buffered).
+TextureCubeDesc :: struct {
+  width:  u32,
+  format: vk.Format,
+  usage:  vk.ImageUsageFlags,
+  aspect: vk.ImageAspectFlags,
 }
 
 BufferDesc :: struct {
-  size:        vk.DeviceSize,
-  usage:       vk.BufferUsageFlags,
-  is_external: bool, // If true, not allocated by graph
+  size:  vk.DeviceSize,
+  usage: vk.BufferUsageFlags,
+}
+
+// ============================================================================
+// Runtime Resource Types
+//
+// Each struct stores the descriptor fields alongside the GPU handles so the
+// resource type is encoded exactly once — in the union discriminant of
+// ResourceInstance.data.  No separate ResourceType enum is needed.
+// ============================================================================
+
+ResourceTexture :: struct {
+  // Descriptor
+  width:               u32,
+  height:              u32,
+  format:              vk.Format,
+  usage:               vk.ImageUsageFlags,
+  aspect:              vk.ImageAspectFlags,
+  double_buffer:       bool,
+  // Allocated handles (len == 1 or FRAMES_IN_FLIGHT)
+  images:              [dynamic]vk.Image,
+  image_views:         [dynamic]vk.ImageView,
+  // Transmute to gpu.Texture2DHandle for bindless shader access
+  texture_handle_bits: [dynamic]u64,
+  // External handles (used when ResourceInstance.is_external)
+  external_image:      vk.Image,
+  external_image_view: vk.ImageView,
+}
+
+ResourceTextureCube :: struct {
+  // Descriptor (no height — cube faces are always square)
+  width:               u32,
+  format:              vk.Format,
+  usage:               vk.ImageUsageFlags,
+  aspect:              vk.ImageAspectFlags,
+  // Allocated handles
+  images:              [dynamic]vk.Image,
+  image_views:         [dynamic]vk.ImageView,
+  // Transmute to gpu.TextureCubeHandle for bindless shader access
+  texture_handle_bits: [dynamic]u64,
+  // External handles
+  external_image:      vk.Image,
+  external_image_view: vk.ImageView,
+}
+
+ResourceBuffer :: struct {
+  // Descriptor
+  size:          vk.DeviceSize,
+  usage:         vk.BufferUsageFlags,
+  // Allocated handles
+  buffers:       [dynamic]vk.Buffer,
+  buffer_memory: [dynamic]vk.DeviceMemory,
+  // External handle
+  external:      vk.Buffer,
 }
 
 // ============================================================================
 // Declaration Layer (Input to Compilation)
 // ============================================================================
 
-// Resource declaration created during pass setup
+// Resource declaration created during pass setup.
+// The desc union encodes the resource type — no separate type field needed.
 ResourceDecl :: struct {
   name:         string,
-  type:         ResourceType,
-  texture_desc: TextureDesc,
-  buffer_desc:  BufferDesc,
-  scope:        PassScope, // Scope where resource was created
-  instance_idx: u32, // Instance index within scope (for PER_CAMERA/PER_*_LIGHT)
+  desc:         union {
+    TextureDesc,
+    TextureCubeDesc,
+    BufferDesc,
+  },
+  scope:        PassScope,
+  instance_idx: u32,
+  is_external:  bool,
 }
 
 LightKind :: enum u8 {
@@ -92,10 +145,8 @@ LightKind :: enum u8 {
   DIRECTIONAL,
 }
 
-// Pass setup callback - called during compilation to declare resources
-PassSetupProc :: #type proc(setup: ^PassSetup)
+PassSetupProc :: #type proc(setup: ^PassSetup, builder: ^PassBuilder)
 
-// Pass execute callback - called at runtime with opaque manager context
 PassExecuteProc :: #type proc(
   ctx: rawptr,
   resources: ^PassResources,
@@ -103,7 +154,6 @@ PassExecuteProc :: #type proc(
   frame_index: u32,
 )
 
-// Pass declaration (template, not runtime instance)
 PassDecl :: struct {
   name:    string,
   scope:   PassScope,
@@ -116,131 +166,100 @@ PassDecl :: struct {
 // Setup-Phase Types
 // ============================================================================
 
-// Context passed to PassSetupProc
+// Mutable accumulation state — owned and managed by compile() per-pass.
+PassBuilder :: struct {
+  resources: [dynamic]ResourceDecl,
+  reads:     [dynamic]ResourceAccess,
+  writes:    [dynamic]ResourceAccess,
+}
+
+// Pure read-only context — topology hints and pass identity.
 PassSetup :: struct {
   pass_name:        string,
   pass_scope:       PassScope,
-  instance_idx:     u32, // Instance index (0 for GLOBAL, camera/light index for scoped)
+  instance_idx:     u32,
 
-  // Topology hints propagated from CompileContext (read-only, do not modify)
+  // Topology hints propagated from CompileContext (read-only)
   num_cameras:      int,
   num_lights:       int,
-  camera_extents:   []vk.Extent2D, // Extent per camera instance (len == num_cameras)
-  light_kinds:      []LightKind, // Kind of each light (len == num_lights)
-  swapchain_format: vk.Format, // Swapchain surface format (for final_image creation)
-
-  // Internal state (managed by compiler — do not access directly)
-  _resources:       [dynamic]ResourceDecl,
-  _reads:           [dynamic]ResourceAccess,
-  _writes:          [dynamic]ResourceAccess,
+  camera_extents:   []vk.Extent2D,
+  light_kinds:      []LightKind,
+  swapchain_format: vk.Format,
 }
 
 ResourceAccess :: struct {
   resource_name: string,
   frame_offset:  FrameOffset,
   access_mode:   AccessMode,
-  version:       u32, // write-version at time of access (0 = no current-frame writer yet)
+  version:       u32,
 }
 
 // ============================================================================
 // Runtime Layer (Output from Compilation)
 // ============================================================================
 
-// Runtime pass instance (one PassDecl can create N PassInstances)
 PassInstance :: struct {
   name:     string,
   scope:    PassScope,
-  instance: u32, // Instance index within scope
+  instance: u32,
   queue:    QueueType,
-  setup:    PassSetupProc, // Setup callback (copied from PassDecl at instantiation)
-  execute:  PassExecuteProc, // Execute callback (copied from PassDecl at instantiation)
+  execute:  PassExecuteProc,
 
-  // Dependencies
   reads:    [dynamic]ResourceAccess,
   writes:   [dynamic]ResourceAccess,
 }
 
-// Runtime resource instance
+// Runtime resource instance.
+// data is the single source of truth for the resource type — switch on it
+// instead of keeping a separate type discriminant.
 ResourceInstance :: struct {
-  name:                string,
-  type:                ResourceType,
-  scope:               PassScope,
-  instance_idx:        u32,
-
-  // Physical resources (allocated by graph)
-  // Array length = 1 (CURRENT only) or FRAMES_IN_FLIGHT (NEXT/PREV used)
-  buffers:             [dynamic]vk.Buffer,
-  buffer_memory:       [dynamic]vk.DeviceMemory,
-  images:              [dynamic]vk.Image,
-  image_views:         [dynamic]vk.ImageView,
-  // Texture handle bits: transmute to gpu.Texture2DHandle or gpu.TextureCubeHandle
-  // Set during allocation; used by execute callbacks for bindless shader access
-  texture_handle_bits: [dynamic]u64,
-
-  // External resources (registered, not allocated)
-  external_buffer:     vk.Buffer,
-  external_image:      vk.Image,
-  external_image_view: vk.ImageView,
-
-  // Aliasing: if is_alias=true this resource shares GPU handles with alias_target.
-  // No GPU memory is allocated for aliased resources; the alias_target holds the
-  // actual VkImage/VkBuffer arrays.  Lifetime of this resource must not overlap
-  // with alias_target (enforced by assign_resource_aliases).
-  is_alias:            bool,
-  alias_target:        ResourceInstanceId,
-
-  // Descriptor
-  texture_desc:        TextureDesc,
-  buffer_desc:         BufferDesc,
+  name:         string,
+  scope:        PassScope,
+  instance_idx: u32,
+  is_external:  bool,
+  is_alias:     bool,
+  alias_target: ResourceInstanceId,
+  data:         union {
+    ResourceTexture,
+    ResourceTextureCube,
+    ResourceBuffer,
+  },
 }
 
 // ============================================================================
 // Execution-Phase Types
 // ============================================================================
 
-// Resolved resources passed to execute procs via the pass iterator
 PassResources :: struct {
   textures:      map[string]ResolvedTexture,
   buffers:       map[string]ResolvedBuffer,
 
-  // Instance context (for PER_CAMERA/PER_*_LIGHT passes)
-  scope:         PassScope, // Pass scope — used by get_texture/get_buffer for auto-scoping
-  instance_idx:  u32, // Instance index (0, 1, 2...)
-  camera_handle: u32, // Actual camera handle (valid for PER_CAMERA passes)
-  light_handle:  u32, // Actual light handle (valid for PER_*_LIGHT passes)
+  scope:         PassScope,
+  instance_idx:  u32,
+  camera_handle: u32,
+  light_handle:  u32,
 }
 
 ResolvedTexture :: struct {
   image:       vk.Image,
   view:        vk.ImageView,
-  format:      vk.Format,
-  width:       u32,
-  height:      u32,
-  // Transmute to gpu.Texture2DHandle or gpu.TextureCubeHandle for bindless shader access
   handle_bits: u64,
 }
 
 ResolvedBuffer :: struct {
   buffer: vk.Buffer,
-  size:   vk.DeviceSize,
 }
 
-// Pipeline barrier
-// Handles are resolved at emit time (not baked at compile time) so that
-// multi-variant resources pick the correct frame variant, and external
-// resources that are updated per-frame (e.g. swapchain) are handled correctly.
 Barrier :: struct {
-  // Resource reference — resolved to VkImage/VkBuffer at emit time
   resource_id:  ResourceInstanceId,
   frame_offset: FrameOffset,
 
-  // Synchronization
   src_access:   vk.AccessFlags,
   dst_access:   vk.AccessFlags,
   src_stage:    vk.PipelineStageFlags,
   dst_stage:    vk.PipelineStageFlags,
 
-  // Image barriers only
+  // Image barriers only (zero for buffer barriers)
   old_layout:   vk.ImageLayout,
   new_layout:   vk.ImageLayout,
   aspect:       vk.ImageAspectFlags,
@@ -250,31 +269,25 @@ Barrier :: struct {
 // Compilation Types
 // ============================================================================
 
-// Context for graph compilation — topology and hints only, no GPU handles.
-// GPU resources (gctx, tm) are passed separately to build_graph so they are
-// never stored on a struct.
 CompileContext :: struct {
   num_cameras:      int,
   num_lights:       int,
   frames_in_flight: int,
 
-  // Handle mappings: instance_idx -> actual handle
-  // These arrays map sequential indices (0, 1, 2...) to actual camera/light handles
-  camera_handles:   []u32, // instance_idx -> camera handle
-  light_handles:    []u32, // instance_idx -> light node handle
+  camera_handles:   []u32,
+  light_handles:    []u32,
 
-  // Optional topology hints passed through to PassSetup during compilation
-  camera_extents:   []vk.Extent2D, // Render extent per camera (len == num_cameras)
-  light_kinds:      []LightKind, // Kind of each light (len == num_lights)
-  swapchain_format: vk.Format, // Swapchain surface format (for final_image creation)
+  camera_extents:   []vk.Extent2D,
+  light_kinds:      []LightKind,
+  swapchain_format: vk.Format,
 }
 
 CompileError :: enum {
   NONE,
   CYCLE_DETECTED,
-  DANGLING_READ, // Pass reads resource that no one writes
-  TYPE_MISMATCH, // TextureId used with buffer, etc.
-  FRAME_OFFSET_INVALID, // PREV used on resource never written with NEXT
+  DANGLING_READ,
+  TYPE_MISMATCH,
+  FRAME_OFFSET_INVALID,
   ALLOCATION_FAILED,
 }
 
@@ -282,15 +295,12 @@ CompileError :: enum {
 // Graph Execution Iterator
 // ============================================================================
 
-// Iterator state for executing a compiled graph pass-by-pass.
-// The caller drives the loop: advance with next_pass, release with pass_done.
 GraphPassIterator :: struct {
   _graph:        ^Graph,
   _frame_index:  u32,
   _graphics_cmd: vk.CommandBuffer,
   _compute_cmd:  vk.CommandBuffer,
   _pass_idx:     int,
-  // Valid between a successful next_pass call and the following pass_done call:
   resources:     PassResources,
   cmd:           vk.CommandBuffer,
 }

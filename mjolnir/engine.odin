@@ -1022,8 +1022,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       }
     }
     render.stage_bone_visualization(&self.render, bone_instances[:])
-  } else {
-    render.clear_debug_visualization(&self.render)
   }
   return .SUCCESS
 }
@@ -1246,15 +1244,15 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
 
   // Check if graph needs (re)compilation
   need_compile := false
-  if self.render.frame_graph.sorted_passes == nil {
+  if !rg.is_compiled(&self.render.frame_graph) {
     log.info("Compiling frame graph on first use...")
     need_compile = true
   } else if self.render.force_graph_rebuild {
     log.info("Frame graph rebuild requested, recompiling...")
     need_compile = true
-  } else if len(self.render.frame_graph.camera_handles) !=
+  } else if rg.camera_handle_count(&self.render.frame_graph) !=
        len(self.render.per_camera_data) ||
-     len(self.render.frame_graph.light_handles) !=
+     rg.light_handle_count(&self.render.frame_graph) !=
        len(self.render.per_light_data) {
     log.info("Frame graph topology changed, recompiling...")
     need_compile = true

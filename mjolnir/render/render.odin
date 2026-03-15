@@ -1,14 +1,14 @@
 package render
 
+import geom "../geometry"
 import "../gpu"
 import cmd "../gpu/ui"
 import "ambient"
 import "core:fmt"
 import "core:log"
-import "core:slice"
-import "core:math/linalg"
 import "core:math"
-import geom "../geometry"
+import "core:math/linalg"
+import "core:slice"
 import rd "data"
 import "debug_bone"
 import "debug_ui"
@@ -57,19 +57,6 @@ ForceField :: rd.ForceField
 Sprite :: rd.Sprite
 LightType :: rd.LightType
 BoneInstance :: debug_bone.BoneInstance
-
-// ── Private helpers ──────────────────────────────────────────────────────────
-// Reduce transmute boilerplate when extracting bindless handles from graph resources.
-
-@(private)
-tex2d :: #force_inline proc(t: rg.ResolvedTexture) -> gpu.Texture2DHandle {
-  return transmute(gpu.Texture2DHandle)t.handle_bits
-}
-
-@(private)
-texcube :: #force_inline proc(t: rg.ResolvedTexture) -> gpu.TextureCubeHandle {
-  return transmute(gpu.TextureCubeHandle)t.handle_bits
-}
 
 Manager :: struct {
   using data_manager:       DataManager,
@@ -442,6 +429,9 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   self.mesh_manager.vertex_skinning_buffer.descriptor_set = 0
   // Bulk-free all descriptor sets allocated from the pool
   vk.ResetDescriptorPool(gctx.device, gctx.descriptor_pool, {})
+  when DEBUG_SHOW_BONES {
+    debug_bone.clear_bones(&self.debug_renderer)
+  }
 }
 
 clear_mesh :: proc(self: ^Manager, handle: u32) {
@@ -462,11 +452,6 @@ stage_bone_visualization :: proc(
   instances: []debug_bone.BoneInstance,
 ) {
   debug_bone.stage_bones(&self.debug_renderer, instances)
-}
-
-// Clear staged debug visualization data
-clear_debug_visualization :: proc(self: ^Manager) {
-  debug_bone.clear_bones(&self.debug_renderer)
 }
 
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {

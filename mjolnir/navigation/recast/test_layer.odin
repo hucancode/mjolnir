@@ -105,7 +105,7 @@ test_region_overflow_handling :: proc(t: ^testing.T) {
 // Test actual nav_test.obj layer detection
 @(test)
 test_navtest_layers :: proc(t: ^testing.T) {
-  fmt.println("\nTesting nav_test.obj layer characteristics...")
+  log.info("Testing nav_test.obj layer characteristics...")
   // Simulate the nav_test.obj structure with known multi-level areas
   bmin := [3]f32{-30, -5, -50}
   bmax := [3]f32{65, 20, 35}

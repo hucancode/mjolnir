@@ -169,15 +169,15 @@ render :: proc(
 	)
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup) {
-	final_image_tex, ok1 := rg.find_texture(setup, "final_image")
-	depth_tex, ok2 := rg.find_texture(setup, "depth")
-	transparent_cmds, ok3 := rg.find_buffer(setup, "transparent_draw_commands")
-	transparent_count, ok4 := rg.find_buffer(setup, "transparent_draw_count")
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
+	final_image_tex, ok1 := rg.find_texture(setup, builder, "final_image")
+	depth_tex, ok2 := rg.find_texture(setup, builder, "depth")
+	transparent_cmds, ok3 := rg.find_buffer(setup, builder, "transparent_draw_commands")
+	transparent_count, ok4 := rg.find_buffer(setup, builder, "transparent_draw_count")
 	if !ok1 || !ok2 || !ok3 || !ok4 do return
-	rg.reads_buffers(setup, transparent_cmds, transparent_count)
-	rg.read_write_texture(setup, final_image_tex)
-	rg.read_write_texture(setup, depth_tex)
+	rg.reads_buffers(setup, builder, transparent_cmds, transparent_count)
+	rg.read_write_texture(setup, builder, final_image_tex)
+	rg.read_write_texture(setup, builder, depth_tex)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

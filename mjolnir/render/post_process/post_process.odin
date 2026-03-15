@@ -801,40 +801,39 @@ render :: proc(
 end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup) {
-  swapchain_tex := rg.register_external_texture(setup, "swapchain", rg.TextureDesc{
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
+  swapchain_tex := rg.register_external_texture(setup, builder, "swapchain", rg.TextureDesc{
     width = 1920, height = 1080,
     format = .B8G8R8A8_SRGB,
     usage = {.COLOR_ATTACHMENT},
     aspect = {.COLOR},
-    is_external = true,
   })
-  final_image_tex, ok_final := rg.find_texture(setup, "final_image",              .PER_CAMERA, 0)
+  final_image_tex, ok_final := rg.find_texture(setup, builder, "final_image",              .PER_CAMERA, 0)
   if !ok_final {
     log.errorf("post_process: Failed to find final_image for camera 0!")
   }
-  position_tex, ok_pos   := rg.find_texture(setup, "gbuffer_position",           .PER_CAMERA, 0)
-  normal_tex, ok_norm    := rg.find_texture(setup, "gbuffer_normal",              .PER_CAMERA, 0)
-  albedo_tex, ok_alb     := rg.find_texture(setup, "gbuffer_albedo",              .PER_CAMERA, 0)
-  mr_tex, ok_mr          := rg.find_texture(setup, "gbuffer_metallic_roughness",  .PER_CAMERA, 0)
-  emissive_tex, ok_em    := rg.find_texture(setup, "gbuffer_emissive",            .PER_CAMERA, 0)
-  depth_tex, ok_depth    := rg.find_texture(setup, "depth",                       .PER_CAMERA, 0)
-  if ok_final do rg.read_texture(setup, final_image_tex, .CURRENT)
-  if ok_pos   do rg.read_texture(setup, position_tex,    .CURRENT)
-  if ok_norm  do rg.read_texture(setup, normal_tex,      .CURRENT)
-  if ok_alb   do rg.read_texture(setup, albedo_tex,      .CURRENT)
-  if ok_mr    do rg.read_texture(setup, mr_tex,          .CURRENT)
-  if ok_em    do rg.read_texture(setup, emissive_tex,    .CURRENT)
-  if ok_depth do rg.read_texture(setup, depth_tex,       .CURRENT)
+  position_tex, ok_pos   := rg.find_texture(setup, builder, "gbuffer_position",           .PER_CAMERA, 0)
+  normal_tex, ok_norm    := rg.find_texture(setup, builder, "gbuffer_normal",              .PER_CAMERA, 0)
+  albedo_tex, ok_alb     := rg.find_texture(setup, builder, "gbuffer_albedo",              .PER_CAMERA, 0)
+  mr_tex, ok_mr          := rg.find_texture(setup, builder, "gbuffer_metallic_roughness",  .PER_CAMERA, 0)
+  emissive_tex, ok_em    := rg.find_texture(setup, builder, "gbuffer_emissive",            .PER_CAMERA, 0)
+  depth_tex, ok_depth    := rg.find_texture(setup, builder, "depth",                       .PER_CAMERA, 0)
+  if ok_final do rg.read_texture(setup, builder, final_image_tex, .CURRENT)
+  if ok_pos   do rg.read_texture(setup, builder, position_tex,    .CURRENT)
+  if ok_norm  do rg.read_texture(setup, builder, normal_tex,      .CURRENT)
+  if ok_alb   do rg.read_texture(setup, builder, albedo_tex,      .CURRENT)
+  if ok_mr    do rg.read_texture(setup, builder, mr_tex,          .CURRENT)
+  if ok_em    do rg.read_texture(setup, builder, emissive_tex,    .CURRENT)
+  if ok_depth do rg.read_texture(setup, builder, depth_tex,       .CURRENT)
   // Transition all non-main-camera final images to SHADER_READ_ONLY_OPTIMAL.
   // Without this, cameras whose output is sampled as a bindless material texture
   // in subsequent frames (e.g. a portal camera) would leave their final_image in
   // COLOR_ATTACHMENT_OPTIMAL — the wrong layout for shader sampling.
   for cam_idx in 1..<u32(setup.num_cameras) {
-    extra_final, ok := rg.find_texture(setup, "final_image", .PER_CAMERA, cam_idx)
-    if ok do rg.read_texture(setup, extra_final, .CURRENT)
+    extra_final, ok := rg.find_texture(setup, builder, "final_image", .PER_CAMERA, cam_idx)
+    if ok do rg.read_texture(setup, builder, extra_final, .CURRENT)
   }
-  rg.write_texture(setup, swapchain_tex, .CURRENT)
+  rg.write_texture(setup, builder, swapchain_tex, .CURRENT)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

@@ -239,19 +239,19 @@ end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup) {
-  position_tex, ok1 := rg.find_texture(setup, "gbuffer_position")
-  normal_tex, ok2 := rg.find_texture(setup, "gbuffer_normal")
-  albedo_tex, ok3 := rg.find_texture(setup, "gbuffer_albedo")
-  metallic_roughness_tex, ok4 := rg.find_texture(setup, "gbuffer_metallic_roughness")
-  emissive_tex, ok5 := rg.find_texture(setup, "gbuffer_emissive")
-  final_image_tex, ok6 := rg.find_texture(setup, "final_image")
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
+  position_tex, ok1 := rg.find_texture(setup, builder, "gbuffer_position")
+  normal_tex, ok2 := rg.find_texture(setup, builder, "gbuffer_normal")
+  albedo_tex, ok3 := rg.find_texture(setup, builder, "gbuffer_albedo")
+  metallic_roughness_tex, ok4 := rg.find_texture(setup, builder, "gbuffer_metallic_roughness")
+  emissive_tex, ok5 := rg.find_texture(setup, builder, "gbuffer_emissive")
+  final_image_tex, ok6 := rg.find_texture(setup, builder, "final_image")
   if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || !ok6 {
     log.errorf("ambient (cam %d): Failed to find G-buffer resources!", setup.instance_idx)
     return
   }
-  rg.reads_textures(setup, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex)
-  rg.writes_textures(setup, final_image_tex)
+  rg.reads_textures(setup, builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex)
+  rg.writes_textures(setup, builder, final_image_tex)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
