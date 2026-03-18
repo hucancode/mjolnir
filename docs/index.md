@@ -26,7 +26,7 @@ See `examples` for common use cases.
 
 And more in development
 
-- Procedural Animation (Tail, Leg)
+- Procedural Animation (Tail, Spider Leg)
 - Animation Layering
 
 ## Build Commands
@@ -63,14 +63,16 @@ Systems on the same level must not depends on each other directly or indirectly.
 
 **Higher Level Systems:**
 
-- **Render**: `mjolnir/render/` - Consists of render sub-systems
-  + Geometry Renderer
-  + Lighting/Shadow Renderer
+- **Render**: `mjolnir/render/` - Frame graph-driven render pipeline
+  + Geometry Renderer (PBR, opaque)
+  + Lighting: Ambient + per-type Direct Light (point/spot/directional)
+  + Shadow Renderer (spot/directional/sphere cubemap)
+  + GPU Occlusion Culling + Depth Pyramid
   + Transparency Renderer
-  + Particle Renderer
+  + Particle Renderer (GPU compute)
   + Post-process Renderer
-  + Camera/Visibility Culling
   + UI Renderer
+  + `render/graph/` — declarative frame graph (resource aliasing, barrier inference, pass scheduling)
 - **World**: `mjolnir/world/` - Scene graph, GLTF/OBJ loading
 - **Physics**: `mjolnir/physics/` - Rigid body dynamics, collision detection
 - **Navigation**: `mjolnir/navigation/` - Recast + Detour

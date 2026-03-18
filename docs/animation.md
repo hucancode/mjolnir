@@ -188,3 +188,69 @@ animation.InterpolationMode:
   .STEP         // Step interpolation (no smoothing)
   .CUBIC_SPLINE // Cubic spline (smoothest, with tangents)
 ```
+
+## Spider Leg Modifier
+
+Simulates procedural leg movement for creatures with multiple limbs. Each leg has an offset from the body root, and automatically lifts and plants based on root movement.
+
+```odin
+import "../../mjolnir/animation"
+
+// One SpiderLeg per limb
+leg: animation.SpiderLeg
+
+animation.spider_leg_init(
+  &leg,
+  initial_offset  = {1.0, 0, 0.5}, // Resting position relative to root
+  lift_height     = 0.4,            // Peak arc height during a step
+  lift_frequency  = 0.5,            // Step cycle period (seconds)
+  lift_duration   = 0.2,            // Time a single step takes (seconds)
+  time_offset     = 0.0,            // Phase offset to stagger legs
+)
+
+// In update loop — drive from body root position
+animation.spider_leg_update_with_root(&leg, delta_time, root_position)
+
+// Current foot world position (use as IK target)
+foot_pos := leg.feet_position
+```
+
+### Manual Target Control
+
+If you manage the target yourself (e.g. raycast to ground):
+
+```odin
+// Set desired foot target
+leg.feet_target = ground_hit_position
+
+// Advance the lift animation
+animation.spider_leg_update(&leg, delta_time)
+
+// Read current position
+foot_pos := leg.feet_position
+```
+
+### Staggering Multiple Legs
+
+Use `time_offset` to prevent all legs lifting simultaneously:
+
+```odin
+legs := [4]animation.SpiderLeg{}
+offsets := [][3]f32{{1, 0, 1}, {-1, 0, 1}, {1, 0, -1}, {-1, 0, -1}}
+for i in 0..<4 {
+  animation.spider_leg_init(
+    &legs[i],
+    initial_offset = offsets[i],
+    lift_frequency = 0.5,
+    time_offset    = f32(i) * 0.125, // quarter-phase stagger per leg
+  )
+}
+```
+
+### Parameters Guide
+
+- **`lift_height`**: Arc peak during a step. Higher = more exaggerated stepping.
+- **`lift_frequency`**: Full cycle duration in seconds. Lower = faster stepping cadence.
+- **`lift_duration`**: How long one step takes. Must be < `lift_frequency`.
+- **`time_offset`**: Phase shift to desynchronize legs. Use `lift_frequency / num_legs` spacing.
+- **`initial_offset`**: Rest position relative to root. Used as the target when stationary.
