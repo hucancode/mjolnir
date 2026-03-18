@@ -2,6 +2,8 @@ package random_color
 
 import "../../geometry"
 import "../../gpu"
+import d "../data"
+import rg "../graph"
 import vk "vendor:vulkan"
 
 SHADER_RANDOM_COLOR_VERT :: #load("../../shader/random_color/vert.spv")
@@ -85,6 +87,28 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 	self.pipeline_layout = 0
 }
 
+begin_pass :: proc(
+	self: ^Renderer,
+	cmd: vk.CommandBuffer,
+	final_image_h: gpu.Texture2DHandle,
+	depth_h: gpu.Texture2DHandle,
+	texture_manager: ^gpu.TextureManager,
+) {
+	color_texture := gpu.get_texture_2d(texture_manager, final_image_h)
+	depth_texture := gpu.get_texture_2d(texture_manager, depth_h)
+	gpu.begin_rendering(
+		cmd,
+		depth_texture.spec.extent,
+		gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+		gpu.create_color_attachment(color_texture, .LOAD, .STORE),
+	)
+	gpu.set_viewport_scissor(cmd, depth_texture.spec.extent)
+}
+
+end_pass :: proc(cmd: vk.CommandBuffer) {
+	vk.CmdEndRendering(cmd)
+}
+
 render :: proc(
 	self: ^Renderer,
 	cmd: vk.CommandBuffer,
@@ -143,4 +167,55 @@ render :: proc(
 		max_draw_count,
 		u32(size_of(vk.DrawIndexedIndirectCommand)),
 	)
+}
+
+declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
+	final_image_tex, ok1 := rg.find_texture(setup, builder, "final_image")
+	depth_tex, ok2 := rg.find_texture(setup, builder, "depth")
+	random_color_cmds, ok3 := rg.find_buffer(setup, builder, "random_color_draw_commands")
+	random_color_count, ok4 := rg.find_buffer(setup, builder, "random_color_draw_count")
+	if !ok1 || !ok2 || !ok3 || !ok4 do return
+	rg.reads_buffers(setup, builder, random_color_cmds, random_color_count)
+	rg.read_write_texture(setup, builder, final_image_tex)
+	rg.read_write_texture(setup, builder, depth_tex)
+}
+
+execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
+	where type_of(manager.random_color_renderer) == Renderer &&
+	      type_of(manager.texture_manager) == gpu.TextureManager &&
+	      type_of(manager.camera_buffer) == gpu.PerFrameBindlessBuffer(d.Camera, 2) &&
+	      type_of(manager.bone_buffer) == gpu.PerFrameBindlessBuffer(matrix[4, 4]f32, 2) &&
+	      type_of(manager.material_buffer) == gpu.BindlessBuffer(d.Material) &&
+	      type_of(manager.node_data_buffer) == gpu.BindlessBuffer(d.Node) &&
+	      type_of(manager.mesh_data_buffer) == gpu.BindlessBuffer(d.Mesh) &&
+	      type_of(manager.mesh_manager) == gpu.MeshManager {
+	cam_handle := resources.camera_handle
+	cam, exists := &manager.per_camera_data[cam_handle]
+	if !exists do return
+	fin_tex, _ := rg.get_texture(resources, "final_image")
+	begin_pass(
+		&manager.random_color_renderer,
+		cmd,
+		transmute(gpu.Texture2DHandle)fin_tex.handle_bits,
+		cam.depth[frame_index],
+		&manager.texture_manager,
+	)
+	render(
+		&manager.random_color_renderer,
+		cmd,
+		cam_handle,
+		manager.camera_buffer.descriptor_sets[frame_index],
+		manager.texture_manager.descriptor_set,
+		manager.bone_buffer.descriptor_sets[frame_index],
+		manager.material_buffer.descriptor_set,
+		manager.node_data_buffer.descriptor_set,
+		manager.mesh_data_buffer.descriptor_set,
+		manager.mesh_manager.vertex_skinning_buffer.descriptor_set,
+		manager.mesh_manager.vertex_buffer.buffer,
+		manager.mesh_manager.index_buffer.buffer,
+		cam.draw_commands[d.DrawType.RANDOM_COLOR][frame_index].buffer,
+		cam.draw_count[d.DrawType.RANDOM_COLOR][frame_index].buffer,
+		d.MAX_NODES_IN_SCENE,
+	)
+	end_pass(cmd)
 }

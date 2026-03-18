@@ -902,6 +902,48 @@ build_pass_declarations :: proc() -> [dynamic]rg.PassDecl {
     },
   })
   append(&decls, rg.PassDecl {
+    name = "wireframe",
+    scope = .PER_CAMERA,
+    queue = .GRAPHICS,
+    setup = wireframe.declare_resources,
+    execute = proc(
+      ctx: rawptr,
+      resources: ^rg.PassResources,
+      cmd: vk.CommandBuffer,
+      fi: u32,
+    ) {
+      wireframe.execute(cast(^Manager)ctx, resources, cmd, fi)
+    },
+  })
+  append(&decls, rg.PassDecl {
+    name = "random_color",
+    scope = .PER_CAMERA,
+    queue = .GRAPHICS,
+    setup = random_color.declare_resources,
+    execute = proc(
+      ctx: rawptr,
+      resources: ^rg.PassResources,
+      cmd: vk.CommandBuffer,
+      fi: u32,
+    ) {
+      random_color.execute(cast(^Manager)ctx, resources, cmd, fi)
+    },
+  })
+  append(&decls, rg.PassDecl {
+    name = "line_strip",
+    scope = .PER_CAMERA,
+    queue = .GRAPHICS,
+    setup = line_strip.declare_resources,
+    execute = proc(
+      ctx: rawptr,
+      resources: ^rg.PassResources,
+      cmd: vk.CommandBuffer,
+      fi: u32,
+    ) {
+      line_strip.execute(cast(^Manager)ctx, resources, cmd, fi)
+    },
+  })
+  append(&decls, rg.PassDecl {
     name = "post_process",
     scope = .GLOBAL,
     queue = .GRAPHICS,

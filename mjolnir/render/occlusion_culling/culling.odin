@@ -224,10 +224,40 @@ declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
     size = 4,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
   })
+  wireframe_cmds := rg.register_external_buffer(setup, builder, "wireframe_draw_commands", rg.BufferDesc{
+    size = size_of(vk.DrawIndexedIndirectCommand) * d.MAX_WIREFRAME_OBJECTS,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  })
+  wireframe_count := rg.register_external_buffer(setup, builder, "wireframe_draw_count", rg.BufferDesc{
+    size = size_of(u32),
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  })
+  random_color_cmds := rg.register_external_buffer(setup, builder, "random_color_draw_commands", rg.BufferDesc{
+    size = size_of(vk.DrawIndexedIndirectCommand) * d.MAX_RANDOM_COLOR_OBJECTS,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  })
+  random_color_count := rg.register_external_buffer(setup, builder, "random_color_draw_count", rg.BufferDesc{
+    size = size_of(u32),
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  })
+  line_strip_cmds := rg.register_external_buffer(setup, builder, "line_strip_draw_commands", rg.BufferDesc{
+    size = size_of(vk.DrawIndexedIndirectCommand) * d.MAX_LINE_STRIP_OBJECTS,
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  })
+  line_strip_count := rg.register_external_buffer(setup, builder, "line_strip_draw_count", rg.BufferDesc{
+    size = size_of(u32),
+    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  })
   rg.write_buffer(setup, builder, opaque_cmds, .NEXT)
   rg.write_buffer(setup, builder, opaque_count, .NEXT)
   rg.write_buffer(setup, builder, transparent_cmds, .NEXT)
   rg.write_buffer(setup, builder, transparent_count, .NEXT)
+  rg.write_buffer(setup, builder, wireframe_cmds, .NEXT)
+  rg.write_buffer(setup, builder, wireframe_count, .NEXT)
+  rg.write_buffer(setup, builder, random_color_cmds, .NEXT)
+  rg.write_buffer(setup, builder, random_color_count, .NEXT)
+  rg.write_buffer(setup, builder, line_strip_cmds, .NEXT)
+  rg.write_buffer(setup, builder, line_strip_count, .NEXT)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)
