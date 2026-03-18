@@ -4,6 +4,293 @@ import "../../gpu"
 import "core:slice"
 import vk "vendor:vulkan"
 
+PassScope :: enum {
+  GLOBAL,
+  PER_CAMERA,
+  PER_POINT_LIGHT,
+  PER_SPOT_LIGHT,
+  PER_DIRECTIONAL_LIGHT,
+}
+
+QueueType :: enum {
+  GRAPHICS,
+  COMPUTE,
+}
+
+FrameOffset :: enum i8 {
+  PREV    = -1,
+  CURRENT = 0,
+  NEXT    = 1,
+}
+
+AccessMode :: enum {
+  READ,
+  WRITE,
+  READ_WRITE,
+}
+
+ResourceId :: struct($T: typeid) {
+  index: u32,
+}
+
+TextureId :: ResourceId(TextureDesc)
+BufferId :: ResourceId(BufferDesc)
+
+TextureDesc :: struct {
+  width:         u32,
+  height:        u32,
+  format:        vk.Format,
+  usage:         vk.ImageUsageFlags,
+  aspect:        vk.ImageAspectFlags,
+  double_buffer: bool, // Allocate one variant per frame-in-flight
+}
+
+// Cube faces are always square; no double_buffer (cube shadow maps are not double-buffered).
+TextureCubeDesc :: struct {
+  width:  u32,
+  format: vk.Format,
+  usage:  vk.ImageUsageFlags,
+  aspect: vk.ImageAspectFlags,
+}
+
+BufferDesc :: struct {
+  size:  vk.DeviceSize,
+  usage: vk.BufferUsageFlags,
+}
+
+// ============================================================================
+// Runtime Resource Types
+//
+// Each struct stores the descriptor fields alongside the GPU handles so the
+// resource type is encoded exactly once — in the union discriminant of
+// ResourceInstance.data.  No separate ResourceType enum is needed.
+// ============================================================================
+
+ResourceTexture :: struct {
+  // Descriptor
+  width:               u32,
+  height:              u32,
+  format:              vk.Format,
+  usage:               vk.ImageUsageFlags,
+  aspect:              vk.ImageAspectFlags,
+  double_buffer:       bool,
+  // Allocated handles (len == 1 or FRAMES_IN_FLIGHT)
+  images:              [dynamic]vk.Image,
+  image_views:         [dynamic]vk.ImageView,
+  // Transmute to gpu.Texture2DHandle for bindless shader access
+  texture_handle_bits: [dynamic]u64,
+  // External handles (used when ResourceInstance.is_external)
+  external_image:      vk.Image,
+  external_image_view: vk.ImageView,
+}
+
+ResourceTextureCube :: struct {
+  // Descriptor (no height — cube faces are always square)
+  width:               u32,
+  format:              vk.Format,
+  usage:               vk.ImageUsageFlags,
+  aspect:              vk.ImageAspectFlags,
+  // Allocated handles
+  images:              [dynamic]vk.Image,
+  image_views:         [dynamic]vk.ImageView,
+  // Transmute to gpu.TextureCubeHandle for bindless shader access
+  texture_handle_bits: [dynamic]u64,
+  // External handles
+  external_image:      vk.Image,
+  external_image_view: vk.ImageView,
+}
+
+ResourceBuffer :: struct {
+  // Descriptor
+  size:          vk.DeviceSize,
+  usage:         vk.BufferUsageFlags,
+  // Allocated handles
+  buffers:       [dynamic]vk.Buffer,
+  buffer_memory: [dynamic]vk.DeviceMemory,
+  // External handle
+  external:      vk.Buffer,
+}
+
+// ============================================================================
+// Declaration Layer (Input to Compilation)
+// ============================================================================
+
+// Resource declaration created during pass setup.
+// The desc union encodes the resource type — no separate type field needed.
+ResourceDecl :: struct {
+  name:         string,
+  desc:         union {
+    TextureDesc,
+    TextureCubeDesc,
+    BufferDesc,
+  },
+  scope:        PassScope,
+  instance_idx: u32,
+  is_external:  bool,
+}
+
+LightKind :: enum u8 {
+  POINT,
+  SPOT,
+  DIRECTIONAL,
+}
+
+PassSetupProc :: #type proc(setup: ^PassSetup, builder: ^PassBuilder)
+
+PassExecuteProc :: #type proc(
+  ctx: rawptr,
+  resources: ^PassResources,
+  cmd: vk.CommandBuffer,
+  frame_index: u32,
+)
+
+PassDecl :: struct {
+  name:    string,
+  scope:   PassScope,
+  queue:   QueueType,
+  setup:   PassSetupProc,
+  execute: PassExecuteProc,
+}
+
+// ============================================================================
+// Setup-Phase Types
+// ============================================================================
+
+// Mutable accumulation state — owned and managed by compile() per-pass.
+PassBuilder :: struct {
+  resources: [dynamic]ResourceDecl,
+  reads:     [dynamic]ResourceAccess,
+  writes:    [dynamic]ResourceAccess,
+}
+
+// Pure read-only context — topology hints and pass identity.
+PassSetup :: struct {
+  pass_name:        string,
+  pass_scope:       PassScope,
+  instance_idx:     u32,
+  num_cameras:      int,
+  num_lights:       int,
+  camera_extents:   []vk.Extent2D,
+  light_kinds:      []LightKind,
+  swapchain_format: vk.Format,
+}
+
+ResourceAccess :: struct {
+  resource_name: string,
+  frame_offset:  FrameOffset,
+  access_mode:   AccessMode,
+  version:       u32,
+}
+
+// ============================================================================
+// Runtime Layer (Output from Compilation)
+// ============================================================================
+
+PassInstance :: struct {
+  name:     string,
+  scope:    PassScope,
+  instance: u32,
+  queue:    QueueType,
+  execute:  PassExecuteProc,
+
+  reads:    [dynamic]ResourceAccess,
+  writes:   [dynamic]ResourceAccess,
+}
+
+// Runtime resource instance.
+// data is the single source of truth for the resource type — switch on it
+// instead of keeping a separate type discriminant.
+ResourceInstance :: struct {
+  name:         string,
+  scope:        PassScope,
+  instance_idx: u32,
+  is_external:  bool,
+  is_alias:     bool,
+  alias_target: ResourceInstanceId,
+  data:         union {
+    ResourceTexture,
+    ResourceTextureCube,
+    ResourceBuffer,
+  },
+}
+
+// ============================================================================
+// Execution-Phase Types
+// ============================================================================
+
+PassResources :: struct {
+  textures:      map[string]ResolvedTexture,
+  buffers:       map[string]ResolvedBuffer,
+
+  scope:         PassScope,
+  instance_idx:  u32,
+  camera_handle: u32,
+  light_handle:  u32,
+}
+
+ResolvedTexture :: struct {
+  image:       vk.Image,
+  view:        vk.ImageView,
+  handle_bits: u64,
+}
+
+ResolvedBuffer :: struct {
+  buffer: vk.Buffer,
+}
+
+Barrier :: struct {
+  resource_id:  ResourceInstanceId,
+  frame_offset: FrameOffset,
+
+  src_access:   vk.AccessFlags,
+  dst_access:   vk.AccessFlags,
+  src_stage:    vk.PipelineStageFlags,
+  dst_stage:    vk.PipelineStageFlags,
+
+  // Image barriers only (zero for buffer barriers)
+  old_layout:   vk.ImageLayout,
+  new_layout:   vk.ImageLayout,
+  aspect:       vk.ImageAspectFlags,
+}
+
+// ============================================================================
+// Compilation Types
+// ============================================================================
+
+CompileContext :: struct {
+  frames_in_flight: int,
+  camera_handles:   []u32,
+  light_handles:    []u32,
+  camera_extents:   []vk.Extent2D,
+  light_kinds:      []LightKind,
+  swapchain_format: vk.Format,
+}
+
+CompileError :: enum {
+  NONE,
+  CYCLE_DETECTED,
+  DANGLING_READ,
+  TYPE_MISMATCH,
+  FRAME_OFFSET_INVALID,
+  ALLOCATION_FAILED,
+}
+
+// ============================================================================
+// Graph Execution Iterator
+// ============================================================================
+
+GraphPassIterator :: struct {
+  graph:        ^Graph,
+  frame_index:  u32,
+  graphics_cmd: vk.CommandBuffer,
+  compute_cmd:  vk.CommandBuffer,
+  pass_idx:     int,
+  resources:    PassResources,
+  cmd:          vk.CommandBuffer,
+}
+
+PassInstanceId :: distinct u32
+ResourceInstanceId :: distinct u32
 // ============================================================================
 // Graph - Compiled Runtime Representation
 // ============================================================================
@@ -36,6 +323,7 @@ Graph :: struct {
 // Graph Lifecycle
 // ============================================================================
 
+@(private = "package")
 init :: proc(graph: ^Graph, frames_in_flight: int) {
   graph.pass_instances = make([dynamic]PassInstance)
   graph.resource_instances = make([dynamic]ResourceInstance)
@@ -86,6 +374,7 @@ destroy :: proc(
 }
 
 // Reset graph for recompilation (keeps allocated GPU resources)
+@(private = "package")
 reset :: proc(graph: ^Graph) {
   // Clear pass instances (scoped names are heap-allocated)
   for &pass in graph.pass_instances {
@@ -115,6 +404,7 @@ reset :: proc(graph: ^Graph) {
 // Resource Lifecycle
 // ============================================================================
 
+@(private = "package")
 destroy_resource :: proc(
   res: ^ResourceInstance,
   gctx: ^gpu.GPUContext,
@@ -135,6 +425,7 @@ destroy_resource :: proc(
 // ============================================================================
 
 // Get resource instance by name (for runtime lookups)
+@(private = "package")
 find_resource_by_name :: proc(
   graph: ^Graph,
   name: string,
@@ -147,11 +438,13 @@ find_resource_by_name :: proc(
 }
 
 // Get pass instance by ID
+@(private = "package")
 get_pass :: proc(graph: ^Graph, id: PassInstanceId) -> ^PassInstance {
   return &graph.pass_instances[id]
 }
 
 // Get resource instance by ID
+@(private = "package")
 get_resource :: proc(
   graph: ^Graph,
   id: ResourceInstanceId,
@@ -160,6 +453,7 @@ get_resource :: proc(
 }
 
 // Add pass instance (called by compiler)
+@(private = "package")
 add_pass_instance :: proc(
   graph: ^Graph,
   pass: PassInstance,
@@ -170,6 +464,7 @@ add_pass_instance :: proc(
 }
 
 // Add resource instance (called by compiler)
+@(private = "package")
 add_resource_instance :: proc(
   graph: ^Graph,
   res: ResourceInstance,
@@ -184,6 +479,7 @@ add_resource_instance :: proc(
 }
 
 // Set execution order (called by compiler after topological sort)
+@(private = "package")
 set_execution_order :: proc(graph: ^Graph, order: []PassInstanceId) {
   if graph.sorted_passes != nil {
     delete(graph.sorted_passes)
@@ -194,6 +490,7 @@ set_execution_order :: proc(graph: ^Graph, order: []PassInstanceId) {
 // _needs_frame_variants returns a map of resource names that require per-frame
 // variants (any pass reads or writes with a non-CURRENT frame offset).
 // Caller is responsible for deleting the returned map.
+@(private = "package")
 _needs_frame_variants :: proc(graph: ^Graph) -> map[string]bool {
   result := make(map[string]bool, len(graph.resource_instances))
   for &pass in graph.pass_instances {
@@ -212,9 +509,121 @@ _needs_frame_variants :: proc(graph: ^Graph) -> map[string]bool {
 }
 
 // Add barrier before pass (called by barrier computation)
+@(private = "package")
 add_barrier :: proc(graph: ^Graph, pass_id: PassInstanceId, barrier: Barrier) {
   if pass_id not_in graph.barriers {
     graph.barriers[pass_id] = make([dynamic]Barrier)
   }
   append(&graph.barriers[pass_id], barrier)
+}
+
+is_compiled :: proc(graph: ^Graph) -> bool {
+  return graph.sorted_passes != nil
+}
+
+// get_texture_handle returns the bindless handle bits for a named texture at the given frame.
+// Returns (handle_bits, true) on success; (0, false) if not found or not a texture.
+get_texture_handle :: proc(graph: ^Graph, name: string, frame_index: u32) -> (u64, bool) {
+  res_id, found := find_resource_by_name(graph, name)
+  if !found do return 0, false
+  res := get_resource(graph, res_id)
+
+  switch d in res.data {
+  case ResourceTexture:
+    if len(d.texture_handle_bits) == 0 do return 0, false
+    return d.texture_handle_bits[int(frame_index) % len(d.texture_handle_bits)], true
+  case ResourceTextureCube:
+    if len(d.texture_handle_bits) == 0 do return 0, false
+    return d.texture_handle_bits[int(frame_index) % len(d.texture_handle_bits)], true
+  case ResourceBuffer:
+    return 0, false
+  }
+  return 0, false
+}
+
+// ============================================================================
+// External Resource Update API
+// ============================================================================
+
+update_external_texture :: proc(
+  graph: ^Graph,
+  name: string,
+  image: vk.Image,
+  view: vk.ImageView,
+) {
+  res_id, found := find_resource_by_name(graph, name)
+  if !found do return
+  res := get_resource(graph, res_id)
+  switch &d in res.data {
+  case ResourceTexture:
+    d.external_image = image
+    d.external_image_view = view
+  case ResourceTextureCube:
+    d.external_image = image
+    d.external_image_view = view
+  case ResourceBuffer:
+  }
+}
+
+update_external_buffer :: proc(
+  graph: ^Graph,
+  name: string,
+  buffer: vk.Buffer,
+) {
+  res_id, found := find_resource_by_name(graph, name)
+  if !found do return
+  res := get_resource(graph, res_id)
+  switch &d in res.data {
+  case ResourceBuffer:
+    d.external = buffer
+  case ResourceTexture, ResourceTextureCube:
+  }
+}
+
+// ============================================================================
+// Public API - Main Entry Points
+// ============================================================================
+
+build_graph :: proc(
+  graph: ^Graph,
+  pass_decls: []PassDecl,
+  ctx: CompileContext,
+  gctx: ^gpu.GPUContext,
+  tm: ^gpu.TextureManager,
+  loc := #caller_location,
+) -> CompileError {
+  if graph.sorted_passes != nil {
+    destroy(graph, gctx, tm)
+  }
+
+  new_graph, err := compile(pass_decls, ctx, loc)
+  if err != .NONE {
+    return err
+  }
+  graph^ = new_graph
+
+  err = allocate_resources(graph, gctx, tm, loc)
+  if err != .NONE {
+    destroy(graph, gctx, tm)
+    return err
+  }
+
+  compute_barriers(graph)
+
+  return .NONE
+}
+
+make_pass_iterator :: proc(
+  graph: ^Graph,
+  frame_index: u32,
+  graphics_cmd: vk.CommandBuffer,
+  compute_cmd: vk.CommandBuffer,
+) -> GraphPassIterator {
+  return GraphPassIterator {
+    graph        = graph,
+    frame_index  = frame_index,
+    graphics_cmd = graphics_cmd,
+    compute_cmd  = compute_cmd,
+    pass_idx     = 0,
+  }
 }

@@ -14,14 +14,14 @@ next_pass :: proc(
   pass: ^PassInstance,
   ok: bool,
 ) {
-  for iter._pass_idx < len(iter._graph.sorted_passes) {
-    pass_id := iter._graph.sorted_passes[iter._pass_idx]
-    iter._pass_idx += 1
-    p := get_pass(iter._graph, pass_id)
+  for iter.pass_idx < len(iter.graph.sorted_passes) {
+    pass_id := iter.graph.sorted_passes[iter.pass_idx]
+    iter.pass_idx += 1
+    p := get_pass(iter.graph, pass_id)
     log.debugf("Executing pass: %s", p.name)
-    cmd := iter._graphics_cmd if p.queue == .GRAPHICS else iter._compute_cmd
-    emit_barriers_for_pass(iter._graph, pass_id, cmd, iter._frame_index)
-    iter.resources = resolve_pass_resources(iter._graph, p, iter._frame_index)
+    cmd := iter.graphics_cmd if p.queue == .GRAPHICS else iter.compute_cmd
+    emit_barriers_for_pass(iter.graph, pass_id, cmd, iter.frame_index)
+    iter.resources = resolve_pass_resources(iter.graph, p, iter.frame_index)
     iter.cmd = cmd
     return p, true
   }
@@ -36,6 +36,7 @@ pass_done :: proc(iter: ^GraphPassIterator) {
 // Barrier Emission
 // ============================================================================
 
+@(private = "package")
 emit_barriers_for_pass :: proc(
   graph: ^Graph,
   pass_id: PassInstanceId,
@@ -169,6 +170,7 @@ _emit_image_barrier :: proc(
 // Resource Resolution
 // ============================================================================
 
+@(private = "package")
 resolve_pass_resources :: proc(
   graph: ^Graph,
   pass: ^PassInstance,
@@ -203,6 +205,7 @@ resolve_pass_resources :: proc(
   return resources
 }
 
+@(private = "package")
 resolve_resource :: proc(
   graph: ^Graph,
   resource_name: string,
@@ -287,6 +290,7 @@ _resolve_texture_images :: proc(
   return {}
 }
 
+@(private = "package")
 compute_variant_index :: proc(
   frame_index: u32,
   offset: FrameOffset,
@@ -300,6 +304,7 @@ compute_variant_index :: proc(
   return variant
 }
 
+@(private = "package")
 cleanup_pass_resources :: proc(resources: ^PassResources) {
   delete(resources.textures)
   delete(resources.buffers)

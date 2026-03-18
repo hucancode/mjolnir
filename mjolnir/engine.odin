@@ -1250,9 +1250,9 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   } else if self.render.force_graph_rebuild {
     log.info("Frame graph rebuild requested, recompiling...")
     need_compile = true
-  } else if rg.camera_handle_count(&self.render.frame_graph) !=
+  } else if len(self.render.frame_graph.camera_handles) !=
        len(self.render.per_camera_data) ||
-     rg.light_handle_count(&self.render.frame_graph) !=
+     len(self.render.frame_graph.light_handles) !=
        len(self.render.per_light_data) {
     log.info("Frame graph topology changed, recompiling...")
     need_compile = true

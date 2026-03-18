@@ -51,8 +51,8 @@ compile :: proc(
       pass_name        = instance.name,
       pass_scope       = instance.scope,
       instance_idx     = instance.instance,
-      num_cameras      = ctx.num_cameras,
-      num_lights       = ctx.num_lights,
+      num_cameras      = len(ctx.camera_handles),
+      num_lights       = len(ctx.light_kinds),
       camera_extents   = ctx.camera_extents,
       light_kinds      = ctx.light_kinds,
       swapchain_format = ctx.swapchain_format,
@@ -224,7 +224,7 @@ instantiate_passes :: proc(
       )
 
     case .PER_CAMERA:
-      for cam_idx in 0 ..< ctx.num_cameras {
+      for cam_idx in 0 ..< len(ctx.camera_handles) {
         _append(
           &instances,
           &setup_procs,
@@ -240,7 +240,7 @@ instantiate_passes :: proc(
       }
 
     case .PER_POINT_LIGHT:
-      for light_idx in 0 ..< ctx.num_lights {
+      for light_idx in 0 ..< len(ctx.light_kinds) {
         if ctx.light_kinds[light_idx] != .POINT do continue
         _append(
           &instances,
@@ -257,7 +257,7 @@ instantiate_passes :: proc(
       }
 
     case .PER_SPOT_LIGHT:
-      for light_idx in 0 ..< ctx.num_lights {
+      for light_idx in 0 ..< len(ctx.light_kinds) {
         if ctx.light_kinds[light_idx] != .SPOT do continue
         _append(
           &instances,
@@ -274,7 +274,7 @@ instantiate_passes :: proc(
       }
 
     case .PER_DIRECTIONAL_LIGHT:
-      for light_idx in 0 ..< ctx.num_lights {
+      for light_idx in 0 ..< len(ctx.light_kinds) {
         if ctx.light_kinds[light_idx] != .DIRECTIONAL do continue
         _append(
           &instances,

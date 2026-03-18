@@ -506,21 +506,21 @@ declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
     log.errorf("direct_light (cam %d): Failed to find G-buffer resources!", setup.instance_idx)
     return
   }
-  rg.reads_textures(setup, builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, depth_tex)
-  rg.read_write_texture(setup, builder, final_image_tex)
+  rg.reads_textures(builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, depth_tex)
+  rg.read_write_texture(builder, final_image_tex)
   for light_idx in 0..<num_lights {
     switch setup.light_kinds[light_idx] {
     case .POINT:
       if shadow_cube, ok := rg.find_texture(setup, builder, "shadow_map_cube", .PER_POINT_LIGHT, light_idx); ok {
-        rg.read_texture(setup, builder, shadow_cube, .CURRENT)
+        rg.read_texture(builder, shadow_cube, .CURRENT)
       }
     case .SPOT:
       if shadow_2d, ok := rg.find_texture(setup, builder, "shadow_map_2d", .PER_SPOT_LIGHT, light_idx); ok {
-        rg.read_texture(setup, builder, shadow_2d, .CURRENT)
+        rg.read_texture(builder, shadow_2d, .CURRENT)
       }
     case .DIRECTIONAL:
       if shadow_2d, ok := rg.find_texture(setup, builder, "shadow_map_2d", .PER_DIRECTIONAL_LIGHT, light_idx); ok {
-        rg.read_texture(setup, builder, shadow_2d, .CURRENT)
+        rg.read_texture(builder, shadow_2d, .CURRENT)
       }
     }
   }
@@ -565,7 +565,7 @@ execute_point :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.Command
 	_begin(manager, resources, cmd, frame_index)
 	pos_idx, nrm_idx, alb_idx, mr_idx := _gbuffer_indices(resources)
 	cam_handle := resources.camera_handle
-	for light_handle, light_inst_idx in rg.get_light_handles(&manager.frame_graph) {
+	for light_handle, light_inst_idx in manager.frame_graph.light_handles {
 		l, is_point := manager.per_light_data[light_handle].(d.PointLight)
 		if !is_point do continue
 		shadow_map_idx := u32(0xFFFFFFFF)
@@ -590,7 +590,7 @@ execute_spot :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandB
 	_begin(manager, resources, cmd, frame_index)
 	pos_idx, nrm_idx, alb_idx, mr_idx := _gbuffer_indices(resources)
 	cam_handle := resources.camera_handle
-	for light_handle, light_inst_idx in rg.get_light_handles(&manager.frame_graph) {
+	for light_handle, light_inst_idx in manager.frame_graph.light_handles {
 		l, is_spot := manager.per_light_data[light_handle].(d.SpotLight)
 		if !is_spot do continue
 		shadow_map_idx := u32(0xFFFFFFFF)
@@ -618,7 +618,7 @@ execute_directional :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.C
 	_begin(manager, resources, cmd, frame_index)
 	pos_idx, nrm_idx, alb_idx, mr_idx := _gbuffer_indices(resources)
 	cam_handle := resources.camera_handle
-	for light_handle, light_inst_idx in rg.get_light_handles(&manager.frame_graph) {
+	for light_handle, light_inst_idx in manager.frame_graph.light_handles {
 		l, is_dir := manager.per_light_data[light_handle].(d.DirectionalLight)
 		if !is_dir do continue
 		shadow_map_idx := u32(0xFFFFFFFF)

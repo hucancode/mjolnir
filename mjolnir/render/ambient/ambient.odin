@@ -250,8 +250,8 @@ declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
     log.errorf("ambient (cam %d): Failed to find G-buffer resources!", setup.instance_idx)
     return
   }
-  rg.reads_textures(setup, builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex)
-  rg.writes_textures(setup, builder, final_image_tex)
+  rg.reads_textures(builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex)
+  rg.writes_textures(builder, final_image_tex)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

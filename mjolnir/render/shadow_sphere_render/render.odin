@@ -291,12 +291,12 @@ declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
   // shadow_render_sphere only handles point lights — always creates a cube shadow map.
   shadow_draw_cmds, _ := rg.find_buffer(setup, builder, "shadow_draw_commands")
   shadow_draw_count, _ := rg.find_buffer(setup, builder, "shadow_draw_count")
-  rg.reads_buffers(setup, builder, shadow_draw_cmds, shadow_draw_count)
+  rg.reads_buffers(builder, shadow_draw_cmds, shadow_draw_count)
   shadow_map := rg.create_texture_cube(setup, builder, "shadow_map_cube", rg.TextureCubeDesc{
     width  = d.SHADOW_MAP_SIZE,
     format = .D32_SFLOAT,
     usage  = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     aspect = {.DEPTH},
   })
-  rg.write_texture(setup, builder, shadow_map, .CURRENT)
+  rg.write_texture(builder, shadow_map, .CURRENT)
 }

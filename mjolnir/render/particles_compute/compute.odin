@@ -490,7 +490,7 @@ declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
     size = 1024,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
   })
-  rg.writes_buffers(setup, builder, particle_buf, compact_buf, draw_cmd_buf)
+  rg.writes_buffers(builder, particle_buf, compact_buf, draw_cmd_buf)
 }
 
 execute :: proc(manager: $T, _: ^rg.PassResources, cmd: vk.CommandBuffer, _: u32)

@@ -294,8 +294,8 @@ declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
     size = 4,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
   })
-  rg.reads_buffers(setup, builder, opaque_cmds, opaque_count)
-  rg.writes_textures(setup, builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex, depth_tex)
+  rg.reads_buffers(builder, opaque_cmds, opaque_count)
+  rg.writes_textures(builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex, depth_tex)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

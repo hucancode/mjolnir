@@ -82,7 +82,7 @@ declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
     size = 4,
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
   })
-  rg.writes_buffers(setup, builder, shadow_draw_cmds, shadow_draw_count)
+  rg.writes_buffers(builder, shadow_draw_cmds, shadow_draw_count)
 }
 
 execute_point :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

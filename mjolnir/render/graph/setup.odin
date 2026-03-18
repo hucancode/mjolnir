@@ -13,56 +13,6 @@ create_texture :: proc(
   name: string,
   desc: TextureDesc,
 ) -> TextureId {
-  return _add_texture(setup, builder, name, desc)
-}
-
-create_texture_cube :: proc(
-  setup: ^PassSetup,
-  builder: ^PassBuilder,
-  name: string,
-  desc: TextureCubeDesc,
-) -> TextureId {
-  return _add_texture_cube(setup, builder, name, desc)
-}
-
-create_buffer :: proc(
-  setup: ^PassSetup,
-  builder: ^PassBuilder,
-  name: string,
-  desc: BufferDesc,
-) -> BufferId {
-  return _add_buffer(setup, builder, name, desc)
-}
-
-register_external_texture :: proc(
-  setup: ^PassSetup,
-  builder: ^PassBuilder,
-  name: string,
-  desc: TextureDesc,
-) -> TextureId {
-  id := _add_texture(setup, builder, name, desc)
-  builder.resources[id.index].is_external = true
-  return id
-}
-
-register_external_buffer :: proc(
-  setup: ^PassSetup,
-  builder: ^PassBuilder,
-  name: string,
-  desc: BufferDesc,
-) -> BufferId {
-  id := _add_buffer(setup, builder, name, desc)
-  builder.resources[id.index].is_external = true
-  return id
-}
-
-@(private)
-_add_texture :: proc(
-  setup: ^PassSetup,
-  builder: ^PassBuilder,
-  name: string,
-  desc: TextureDesc,
-) -> TextureId {
   resolved_name := scope_resource_name(name, setup.pass_scope, setup.instance_idx)
   for decl, i in builder.resources {
     if decl.name == resolved_name {
@@ -84,8 +34,7 @@ _add_texture :: proc(
   return TextureId{index = u32(len(builder.resources) - 1)}
 }
 
-@(private)
-_add_texture_cube :: proc(
+create_texture_cube :: proc(
   setup: ^PassSetup,
   builder: ^PassBuilder,
   name: string,
@@ -112,8 +61,7 @@ _add_texture_cube :: proc(
   return TextureId{index = u32(len(builder.resources) - 1)}
 }
 
-@(private)
-_add_buffer :: proc(
+create_buffer :: proc(
   setup: ^PassSetup,
   builder: ^PassBuilder,
   name: string,
@@ -138,6 +86,28 @@ _add_buffer :: proc(
     },
   )
   return BufferId{index = u32(len(builder.resources) - 1)}
+}
+
+register_external_texture :: proc(
+  setup: ^PassSetup,
+  builder: ^PassBuilder,
+  name: string,
+  desc: TextureDesc,
+) -> TextureId {
+  id := create_texture(setup, builder, name, desc)
+  builder.resources[id.index].is_external = true
+  return id
+}
+
+register_external_buffer :: proc(
+  setup: ^PassSetup,
+  builder: ^PassBuilder,
+  name: string,
+  desc: BufferDesc,
+) -> BufferId {
+  id := create_buffer(setup, builder, name, desc)
+  builder.resources[id.index].is_external = true
+  return id
 }
 
 // ============================================================================
@@ -277,45 +247,38 @@ find_buffer :: proc {
 // ============================================================================
 
 read_texture :: proc(
-  setup: ^PassSetup,
   builder: ^PassBuilder,
   id: TextureId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, builder, id.index, .READ, frame_offset)}
+) {_declare_access(builder, id.index, .READ, frame_offset)}
 write_texture :: proc(
-  setup: ^PassSetup,
   builder: ^PassBuilder,
   id: TextureId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, builder, id.index, .WRITE, frame_offset)}
+) {_declare_access(builder, id.index, .WRITE, frame_offset)}
 read_buffer :: proc(
-  setup: ^PassSetup,
   builder: ^PassBuilder,
   id: BufferId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, builder, id.index, .READ, frame_offset)}
+) {_declare_access(builder, id.index, .READ, frame_offset)}
 write_buffer :: proc(
-  setup: ^PassSetup,
   builder: ^PassBuilder,
   id: BufferId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, builder, id.index, .WRITE, frame_offset)}
+) {_declare_access(builder, id.index, .WRITE, frame_offset)}
 read_write_texture :: proc(
-  setup: ^PassSetup,
   builder: ^PassBuilder,
   id: TextureId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, builder, id.index, .READ_WRITE, frame_offset)}
+) {_declare_access(builder, id.index, .READ_WRITE, frame_offset)}
 read_write_buffer :: proc(
-  setup: ^PassSetup,
   builder: ^PassBuilder,
   id: BufferId,
   frame_offset := FrameOffset.CURRENT,
-) {_declare_access(setup, builder, id.index, .READ_WRITE, frame_offset)}
+) {_declare_access(builder, id.index, .READ_WRITE, frame_offset)}
 
 @(private)
 _declare_access :: proc(
-  setup: ^PassSetup,
   builder: ^PassBuilder,
   index: u32,
   access: AccessMode,
@@ -336,10 +299,10 @@ _declare_access :: proc(
 // Batch Dependency Declaration API
 // ============================================================================
 
-reads_textures :: proc(setup: ^PassSetup, builder: ^PassBuilder, ids: ..TextureId) {for id in ids do read_texture(setup, builder, id)}
-writes_textures :: proc(setup: ^PassSetup, builder: ^PassBuilder, ids: ..TextureId) {for id in ids do write_texture(setup, builder, id)}
-reads_buffers :: proc(setup: ^PassSetup, builder: ^PassBuilder, ids: ..BufferId) {for id in ids do read_buffer(setup, builder, id)}
-writes_buffers :: proc(setup: ^PassSetup, builder: ^PassBuilder, ids: ..BufferId) {for id in ids do write_buffer(setup, builder, id)}
+reads_textures :: proc(builder: ^PassBuilder, ids: ..TextureId) {for id in ids do read_texture(builder, id)}
+writes_textures :: proc(builder: ^PassBuilder, ids: ..TextureId) {for id in ids do write_texture(builder, id)}
+reads_buffers :: proc(builder: ^PassBuilder, ids: ..BufferId) {for id in ids do read_buffer(builder, id)}
+writes_buffers :: proc(builder: ^PassBuilder, ids: ..BufferId) {for id in ids do write_buffer(builder, id)}
 
 // ============================================================================
 // Helper Functions

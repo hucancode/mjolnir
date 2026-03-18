@@ -463,7 +463,7 @@ end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
 
 declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
   swapchain_tex, _ := rg.find_texture(setup, builder, "swapchain")
-  rg.read_write_texture(setup, builder, swapchain_tex, .CURRENT)
+  rg.read_write_texture(builder, swapchain_tex, .CURRENT)
 }
 
 execute :: proc(manager: $T, _: ^rg.PassResources, cmd: vk.CommandBuffer, _: u32)

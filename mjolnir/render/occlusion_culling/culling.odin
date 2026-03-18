@@ -248,16 +248,16 @@ declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
     size = size_of(u32),
     usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
   })
-  rg.write_buffer(setup, builder, opaque_cmds, .NEXT)
-  rg.write_buffer(setup, builder, opaque_count, .NEXT)
-  rg.write_buffer(setup, builder, transparent_cmds, .NEXT)
-  rg.write_buffer(setup, builder, transparent_count, .NEXT)
-  rg.write_buffer(setup, builder, wireframe_cmds, .NEXT)
-  rg.write_buffer(setup, builder, wireframe_count, .NEXT)
-  rg.write_buffer(setup, builder, random_color_cmds, .NEXT)
-  rg.write_buffer(setup, builder, random_color_count, .NEXT)
-  rg.write_buffer(setup, builder, line_strip_cmds, .NEXT)
-  rg.write_buffer(setup, builder, line_strip_count, .NEXT)
+  rg.write_buffer(builder, opaque_cmds, .NEXT)
+  rg.write_buffer(builder, opaque_count, .NEXT)
+  rg.write_buffer(builder, transparent_cmds, .NEXT)
+  rg.write_buffer(builder, transparent_count, .NEXT)
+  rg.write_buffer(builder, wireframe_cmds, .NEXT)
+  rg.write_buffer(builder, wireframe_count, .NEXT)
+  rg.write_buffer(builder, random_color_cmds, .NEXT)
+  rg.write_buffer(builder, random_color_count, .NEXT)
+  rg.write_buffer(builder, line_strip_cmds, .NEXT)
+  rg.write_buffer(builder, line_strip_count, .NEXT)
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

@@ -586,8 +586,6 @@ compile_frame_graph :: proc(
 
   // Create compile context
   ctx := rg.CompileContext {
-    num_cameras      = len(camera_handles),
-    num_lights       = len(light_handles),
     frames_in_flight = FRAMES_IN_FLIGHT,
     camera_handles   = camera_handles[:],
     light_handles    = light_handles[:],
@@ -613,7 +611,7 @@ compile_frame_graph :: proc(
 
   log.infof(
     "Frame graph compiled: %d passes, %d cameras, %d lights",
-    rg.pass_count(&self.frame_graph),
+    len(self.frame_graph.sorted_passes),
     len(camera_handles),
     len(light_handles),
   )
@@ -633,8 +631,8 @@ get_camera_final_image :: proc(
 ) {
   // Find the graph instance_idx for this camera handle
   instance_idx: int = -1
-  for i in 0 ..< rg.camera_handle_count(&manager.frame_graph) {
-    if rg.get_camera_handle(&manager.frame_graph, i) == camera_handle_index {
+  for i in 0 ..< len(manager.frame_graph.camera_handles) {
+    if manager.frame_graph.camera_handles[i] == camera_handle_index {
       instance_idx = i
       break
     }
