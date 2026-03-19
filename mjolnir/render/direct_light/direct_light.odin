@@ -494,36 +494,16 @@ end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
-  num_lights := u32(setup.num_lights)
-  position_tex, ok1 := rg.find_texture(setup, builder, "gbuffer_position")
-  normal_tex, ok2 := rg.find_texture(setup, builder, "gbuffer_normal")
-  albedo_tex, ok3 := rg.find_texture(setup, builder, "gbuffer_albedo")
-  metallic_roughness_tex, ok4 := rg.find_texture(setup, builder, "gbuffer_metallic_roughness")
-  final_image_tex, ok5 := rg.find_texture(setup, builder, "final_image")
-  depth_tex, ok6 := rg.find_texture(setup, builder, "depth")
-  if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || !ok6 {
-    log.errorf("direct_light (cam %d): Failed to find G-buffer resources!", setup.instance_idx)
-    return
-  }
-  rg.reads_textures(builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, depth_tex)
-  rg.read_write_texture(builder, final_image_tex)
-  for light_idx in 0..<num_lights {
-    switch setup.light_kinds[light_idx] {
-    case .POINT:
-      if shadow_cube, ok := rg.find_texture(setup, builder, "shadow_map_cube", .PER_POINT_LIGHT, light_idx); ok {
-        rg.read_texture(builder, shadow_cube, .CURRENT)
-      }
-    case .SPOT:
-      if shadow_2d, ok := rg.find_texture(setup, builder, "shadow_map_2d", .PER_SPOT_LIGHT, light_idx); ok {
-        rg.read_texture(builder, shadow_2d, .CURRENT)
-      }
-    case .DIRECTIONAL:
-      if shadow_2d, ok := rg.find_texture(setup, builder, "shadow_map_2d", .PER_DIRECTIONAL_LIGHT, light_idx); ok {
-        rg.read_texture(builder, shadow_2d, .CURRENT)
-      }
-    }
-  }
+RESOURCES := [?]rg.ResourceSpec{
+  {name = "gbuffer_position", access = .READ},
+  {name = "gbuffer_normal", access = .READ},
+  {name = "gbuffer_albedo", access = .READ},
+  {name = "gbuffer_metallic_roughness", access = .READ},
+  {name = "depth", access = .READ},
+  {name = "final_image", access = .READ_WRITE},
+  {name = "shadow_map_2d", access = .READ, scope_ref = rg.AllOfScope{.PER_SPOT_LIGHT}},
+  {name = "shadow_map_2d", access = .READ, scope_ref = rg.AllOfScope{.PER_DIRECTIONAL_LIGHT}},
+  {name = "shadow_map_cube", access = .READ, scope_ref = rg.AllOfScope{.PER_POINT_LIGHT}},
 }
 
 @(private)

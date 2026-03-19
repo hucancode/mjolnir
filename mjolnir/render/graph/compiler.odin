@@ -2,6 +2,7 @@ package render_graph
 
 import "core:fmt"
 import "core:slice"
+import vk "vendor:vulkan"
 
 // ============================================================================
 // Main Compilation Entry Point
@@ -23,12 +24,11 @@ compile :: proc(
   graph.light_handles = slice.clone(ctx.light_handles)
 
   // Step 1: Instantiate passes based on scope
-  instances, setup_procs := instantiate_passes(pass_decls, ctx) or_return
-  defer delete(setup_procs)
+  instances, resources_per_instance := instantiate_passes(pass_decls, ctx) or_return
+  defer delete(resources_per_instance)
 
-  // Step 2: Run setup callbacks to collect resource declarations
-  // IMPORTANT: All passes share the same resources array so later passes
-  // can find resources registered by earlier passes via find_texture/find_buffer
+  // Step 2: Expand declarative ResourceSpec slices to collect resource declarations
+  // and per-instance reads/writes.
   all_resources: [dynamic]ResourceDecl
   defer delete(all_resources)
 
@@ -38,50 +38,25 @@ compile :: proc(
   resource_versions := make(map[string]u32)
   defer delete(resource_versions)
 
+  // Global set of already-registered resource names (prevents duplicate ResourceDecls).
+  resource_name_set := make(map[string]bool)
+  defer delete(resource_name_set)
+
+  // Canonical name table: maps scoped-name-content → persistent string owned by
+  // all_resources (so desc==nil accesses can borrow instead of allocating).
+  canonical_names := make(map[string]string)
+  defer delete(canonical_names)
+
   for &instance, i in instances {
-    // All passes share the same resources array so later passes can find
-    // resources declared by earlier passes via find_texture/find_buffer.
-    // After each callback we recover the (potentially reallocated) array header.
-    builder := PassBuilder {
-      resources = all_resources,
-      reads     = make([dynamic]ResourceAccess),
-      writes    = make([dynamic]ResourceAccess),
-    }
-    setup := PassSetup {
-      pass_name        = instance.name,
-      pass_scope       = instance.scope,
-      instance_idx     = instance.instance,
-      num_cameras      = len(ctx.camera_handles),
-      num_lights       = len(ctx.light_kinds),
-      camera_extents   = ctx.camera_extents,
-      light_kinds      = ctx.light_kinds,
-      swapchain_format = ctx.swapchain_format,
-    }
-
-    if setup_procs[i] != nil {
-      setup_procs[i](&setup, &builder)
-    }
-
-    // Recover shared resources array (may have reallocated during append)
-    all_resources = builder.resources
-
-    // Assign versions: reads capture the version currently produced, writes mint the next.
-    // Must process reads before writes so a READ_WRITE pass reads version N then produces N+1.
-    for &read in builder.reads {
-      if read.frame_offset == .CURRENT {
-        read.version = resource_versions[read.resource_name]
-      }
-    }
-    for &write in builder.writes {
-      if write.frame_offset == .CURRENT {
-        resource_versions[write.resource_name] += 1
-        write.version = resource_versions[write.resource_name]
-      }
-    }
-
-    // Instance takes ownership of the reads/writes arrays
-    instance.reads = builder.reads
-    instance.writes = builder.writes
+    expand_resource_specs(
+      &instance,
+      resources_per_instance[i],
+      ctx,
+      &all_resources,
+      &resource_name_set,
+      &canonical_names,
+      &resource_versions,
+    )
   }
 
   // Step 3: Create resource instances
@@ -191,20 +166,20 @@ instantiate_passes :: proc(
   loc := #caller_location,
 ) -> (
   instances: [dynamic]PassInstance,
-  setup_procs: [dynamic]PassSetupProc,
+  resources_per_instance: [dynamic][]ResourceSpec,
   err: CompileError,
 ) {
   instances = make([dynamic]PassInstance)
-  setup_procs = make([dynamic]PassSetupProc)
+  resources_per_instance = make([dynamic][]ResourceSpec)
 
   _append :: proc(
     instances: ^[dynamic]PassInstance,
-    setup_procs: ^[dynamic]PassSetupProc,
+    resources: ^[dynamic][]ResourceSpec,
     inst: PassInstance,
-    setup: PassSetupProc,
+    res: []ResourceSpec,
   ) {
     append(instances, inst)
-    append(setup_procs, setup)
+    append(resources, res)
   }
 
   for decl in pass_decls {
@@ -212,30 +187,30 @@ instantiate_passes :: proc(
     case .GLOBAL:
       _append(
         &instances,
-        &setup_procs,
-        PassInstance {
-          name = decl.name,
-          scope = decl.scope,
+        &resources_per_instance,
+        PassInstance{
+          name    = decl.name,
+          scope   = decl.scope,
           instance = 0,
-          queue = decl.queue,
+          queue   = decl.queue,
           execute = decl.execute,
         },
-        decl.setup,
+        decl.resources,
       )
 
     case .PER_CAMERA:
       for cam_idx in 0 ..< len(ctx.camera_handles) {
         _append(
           &instances,
-          &setup_procs,
-          PassInstance {
-            name = fmt.aprintf("%s_cam_%d", decl.name, cam_idx),
-            scope = decl.scope,
+          &resources_per_instance,
+          PassInstance{
+            name     = fmt.aprintf("%s_cam_%d", decl.name, cam_idx),
+            scope    = decl.scope,
             instance = u32(cam_idx),
-            queue = decl.queue,
-            execute = decl.execute,
+            queue    = decl.queue,
+            execute  = decl.execute,
           },
-          decl.setup,
+          decl.resources,
         )
       }
 
@@ -244,15 +219,15 @@ instantiate_passes :: proc(
         if ctx.light_kinds[light_idx] != .POINT do continue
         _append(
           &instances,
-          &setup_procs,
-          PassInstance {
-            name = fmt.aprintf("%s_light_%d", decl.name, light_idx),
-            scope = decl.scope,
+          &resources_per_instance,
+          PassInstance{
+            name     = fmt.aprintf("%s_light_%d", decl.name, light_idx),
+            scope    = decl.scope,
             instance = u32(light_idx),
-            queue = decl.queue,
-            execute = decl.execute,
+            queue    = decl.queue,
+            execute  = decl.execute,
           },
-          decl.setup,
+          decl.resources,
         )
       }
 
@@ -261,15 +236,15 @@ instantiate_passes :: proc(
         if ctx.light_kinds[light_idx] != .SPOT do continue
         _append(
           &instances,
-          &setup_procs,
-          PassInstance {
-            name = fmt.aprintf("%s_light_%d", decl.name, light_idx),
-            scope = decl.scope,
+          &resources_per_instance,
+          PassInstance{
+            name     = fmt.aprintf("%s_light_%d", decl.name, light_idx),
+            scope    = decl.scope,
             instance = u32(light_idx),
-            queue = decl.queue,
-            execute = decl.execute,
+            queue    = decl.queue,
+            execute  = decl.execute,
           },
-          decl.setup,
+          decl.resources,
         )
       }
 
@@ -278,21 +253,248 @@ instantiate_passes :: proc(
         if ctx.light_kinds[light_idx] != .DIRECTIONAL do continue
         _append(
           &instances,
-          &setup_procs,
-          PassInstance {
-            name = fmt.aprintf("%s_light_%d", decl.name, light_idx),
-            scope = decl.scope,
+          &resources_per_instance,
+          PassInstance{
+            name     = fmt.aprintf("%s_light_%d", decl.name, light_idx),
+            scope    = decl.scope,
             instance = u32(light_idx),
-            queue = decl.queue,
-            execute = decl.execute,
+            queue    = decl.queue,
+            execute  = decl.execute,
           },
-          decl.setup,
+          decl.resources,
         )
       }
     }
   }
 
-  return instances, setup_procs, .NONE
+  return instances, resources_per_instance, .NONE
+}
+
+// ============================================================================
+// Declarative Resource Spec Expansion
+// ============================================================================
+
+// expand_resource_specs processes the []ResourceSpec for one pass instance,
+// creating ResourceDecls for new resources and recording reads/writes.
+@(private = "package")
+expand_resource_specs :: proc(
+  instance: ^PassInstance,
+  specs: []ResourceSpec,
+  ctx: CompileContext,
+  all_resources: ^[dynamic]ResourceDecl,
+  resource_name_set: ^map[string]bool,
+  canonical_names: ^map[string]string,
+  resource_versions: ^map[string]u32,
+) {
+  reads := make([dynamic]ResourceAccess)
+  writes := make([dynamic]ResourceAccess)
+
+  for spec in specs {
+    scope_ref := spec.scope_ref
+    if scope_ref == nil {
+      scope_ref = SameScope{}
+    }
+    switch ref in scope_ref {
+    case SameScope:
+      _expand_single(
+        spec,
+        instance.scope,
+        instance.instance,
+        instance.instance,
+        ctx,
+        all_resources,
+        resource_name_set,
+        canonical_names,
+        &reads,
+        &writes,
+      )
+    case CrossScope:
+      _expand_single(
+        spec,
+        ref.scope,
+        ref.instance,
+        instance.instance,
+        ctx,
+        all_resources,
+        resource_name_set,
+        canonical_names,
+        &reads,
+        &writes,
+      )
+    case AllOfScope:
+      switch ref.scope {
+      case .GLOBAL:
+        _expand_single(spec, .GLOBAL, 0, instance.instance, ctx, all_resources, resource_name_set, canonical_names, &reads, &writes)
+      case .PER_CAMERA:
+        for cam_idx in 0 ..< len(ctx.camera_handles) {
+          _expand_single(spec, .PER_CAMERA, u32(cam_idx), instance.instance, ctx, all_resources, resource_name_set, canonical_names, &reads, &writes)
+        }
+      case .PER_POINT_LIGHT:
+        for light_idx in 0 ..< len(ctx.light_kinds) {
+          if ctx.light_kinds[light_idx] == .POINT {
+            _expand_single(spec, .PER_POINT_LIGHT, u32(light_idx), instance.instance, ctx, all_resources, resource_name_set, canonical_names, &reads, &writes)
+          }
+        }
+      case .PER_SPOT_LIGHT:
+        for light_idx in 0 ..< len(ctx.light_kinds) {
+          if ctx.light_kinds[light_idx] == .SPOT {
+            _expand_single(spec, .PER_SPOT_LIGHT, u32(light_idx), instance.instance, ctx, all_resources, resource_name_set, canonical_names, &reads, &writes)
+          }
+        }
+      case .PER_DIRECTIONAL_LIGHT:
+        for light_idx in 0 ..< len(ctx.light_kinds) {
+          if ctx.light_kinds[light_idx] == .DIRECTIONAL {
+            _expand_single(spec, .PER_DIRECTIONAL_LIGHT, u32(light_idx), instance.instance, ctx, all_resources, resource_name_set, canonical_names, &reads, &writes)
+          }
+        }
+      }
+    }
+  }
+
+  // Assign versions: reads capture current version, writes mint next.
+  // Must process reads before writes so a READ_WRITE pass reads version N then produces N+1.
+  for &read in reads {
+    if read.frame_offset == .CURRENT {
+      read.version = resource_versions[read.resource_name]
+    }
+  }
+  for &write in writes {
+    if write.frame_offset == .CURRENT {
+      resource_versions[write.resource_name] += 1
+      write.version = resource_versions[write.resource_name]
+    }
+  }
+
+  instance.reads = reads
+  instance.writes = writes
+}
+
+// _expand_single resolves one ResourceSpec against a concrete (scope, instance_idx) target.
+// `pass_instance_idx` is the pass's own instance index, used for CameraExtent resolution.
+@(private = "package")
+_expand_single :: proc(
+  spec: ResourceSpec,
+  scope: PassScope,
+  instance_idx: u32,
+  pass_instance_idx: u32,
+  ctx: CompileContext,
+  all_resources: ^[dynamic]ResourceDecl,
+  resource_name_set: ^map[string]bool,
+  canonical_names: ^map[string]string,
+  reads: ^[dynamic]ResourceAccess,
+  writes: ^[dynamic]ResourceAccess,
+) {
+  scoped_name := scope_resource_name(spec.name, scope, instance_idx)
+
+  canonical: string
+
+  if spec.desc != nil {
+    if !resource_name_set[scoped_name] {
+      // First time seeing this resource: register it.
+      resource_name_set[scoped_name] = true
+      canonical_names[scoped_name] = scoped_name
+      canonical = scoped_name
+
+      desc_concrete: union {
+        TextureDesc,
+        TextureCubeDesc,
+        BufferDesc,
+      }
+      switch d in spec.desc {
+      case TextureDescSpec:
+        w: u32
+        switch sw in d.width {
+        case u32:
+          w = sw
+        case CameraExtent:
+          w = 1920
+          if int(pass_instance_idx) < len(ctx.camera_extents) {
+            w = ctx.camera_extents[pass_instance_idx].width
+          }
+        }
+        h: u32
+        switch sh in d.height {
+        case u32:
+          h = sh
+        case CameraExtent:
+          h = 1080
+          if int(pass_instance_idx) < len(ctx.camera_extents) {
+            h = ctx.camera_extents[pass_instance_idx].height
+          }
+        }
+        fmt_val: vk.Format
+        switch sf in d.format {
+        case vk.Format:
+          fmt_val = sf
+        case SwapchainFormat:
+          fmt_val = ctx.swapchain_format
+        }
+        double_buf: bool
+        switch d.double_buffer {
+        case .NO:
+          double_buf = false
+        case .YES:
+          double_buf = true
+        case .WHEN_SECONDARY:
+          double_buf = pass_instance_idx > 0
+        }
+        desc_concrete = TextureDesc{
+          width         = w,
+          height        = h,
+          format        = fmt_val,
+          usage         = d.usage,
+          aspect        = d.aspect,
+          double_buffer = double_buf,
+        }
+      case TextureCubeDescSpec:
+        desc_concrete = TextureCubeDesc{
+          width  = d.width,
+          format = d.format,
+          usage  = d.usage,
+          aspect = d.aspect,
+        }
+      case BufferDescSpec:
+        desc_concrete = BufferDesc{
+          size  = d.size,
+          usage = d.usage,
+        }
+      }
+      append(
+        all_resources,
+        ResourceDecl{
+          name         = scoped_name,
+          desc         = desc_concrete,
+          scope        = scope,
+          instance_idx = instance_idx,
+          is_external  = spec.is_external,
+        },
+      )
+    } else {
+      // Resource already registered: borrow canonical name, free duplicate allocation.
+      canonical = canonical_names[scoped_name]
+      if scope != .GLOBAL do delete(scoped_name)
+    }
+  } else {
+    // No desc: referencing an existing resource.
+    // Borrow the canonical name if registered; otherwise use scoped_name as-is
+    // (validate_graph will catch the dangling reference).
+    if c, ok := canonical_names[scoped_name]; ok {
+      canonical = c
+      if scope != .GLOBAL do delete(scoped_name)
+    } else {
+      // Resource not yet registered (will be caught by validate_graph).
+      canonical = scoped_name
+    }
+  }
+
+  // Register access.
+  acc := ResourceAccess{
+    resource_name = canonical,
+    frame_offset  = spec.frame_offset,
+    access_mode   = spec.access,
+  }
+  if spec.access != .WRITE do append(reads, acc)
+  if spec.access != .READ do append(writes, acc)
 }
 
 // ============================================================================

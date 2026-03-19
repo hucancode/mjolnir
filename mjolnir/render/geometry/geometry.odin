@@ -232,70 +232,15 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 }
 
 // Declare graph resources for the geometry pass.
-// Creates G-buffer textures owned by the graph, and registers external
-// depth + draw command buffers. Called from render.odin's setup callback.
-declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
-	extent: vk.Extent2D = {1920, 1080}
-	if int(setup.instance_idx) < len(setup.camera_extents) {
-		extent = setup.camera_extents[setup.instance_idx]
-	}
-  color_format := setup.swapchain_format
-  position_tex := rg.create_texture(setup, builder, "gbuffer_position", rg.TextureDesc{
-    width = extent.width, height = extent.height,
-    format = .R32G32B32A32_SFLOAT,
-    usage = {.COLOR_ATTACHMENT, .SAMPLED},
-    aspect = {.COLOR},
-  })
-  normal_tex := rg.create_texture(setup, builder, "gbuffer_normal", rg.TextureDesc{
-    width = extent.width, height = extent.height,
-    format = .R8G8B8A8_UNORM,
-    usage = {.COLOR_ATTACHMENT, .SAMPLED},
-    aspect = {.COLOR},
-  })
-  albedo_tex := rg.create_texture(setup, builder, "gbuffer_albedo", rg.TextureDesc{
-    width = extent.width, height = extent.height,
-    format = .R8G8B8A8_UNORM,
-    usage = {.COLOR_ATTACHMENT, .SAMPLED},
-    aspect = {.COLOR},
-  })
-  metallic_roughness_tex := rg.create_texture(setup, builder, "gbuffer_metallic_roughness", rg.TextureDesc{
-    width = extent.width, height = extent.height,
-    format = .R8G8B8A8_UNORM,
-    usage = {.COLOR_ATTACHMENT, .SAMPLED},
-    aspect = {.COLOR},
-  })
-  emissive_tex := rg.create_texture(setup, builder, "gbuffer_emissive", rg.TextureDesc{
-    width = extent.width, height = extent.height,
-    format = .R8G8B8A8_UNORM,
-    usage = {.COLOR_ATTACHMENT, .SAMPLED},
-    aspect = {.COLOR},
-  })
-  final_image_tex := rg.create_texture(setup, builder, "final_image", rg.TextureDesc{
-    width = extent.width, height = extent.height,
-    format = color_format,
-    usage = {.COLOR_ATTACHMENT, .SAMPLED},
-    aspect = {.COLOR},
-    // Non-main cameras double-buffer their output so the main camera can sample
-    // the previous frame's result (frame N-1) while this camera renders frame N,
-    // eliminating the data hazard on the shared image.
-    double_buffer = setup.instance_idx > 0,
-  })
-  depth_tex := rg.register_external_texture(setup, builder, "depth", rg.TextureDesc{
-    width = extent.width, height = extent.height,
-    format = .D32_SFLOAT,
-    usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    aspect = {.DEPTH},
-  })
-  opaque_cmds := rg.register_external_buffer(setup, builder, "opaque_draw_commands", rg.BufferDesc{
-    size = 1024 * 1024,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  opaque_count := rg.register_external_buffer(setup, builder, "opaque_draw_count", rg.BufferDesc{
-    size = 4,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  rg.reads_buffers(builder, opaque_cmds, opaque_count)
-  rg.writes_textures(builder, position_tex, normal_tex, albedo_tex, metallic_roughness_tex, emissive_tex, depth_tex)
+RESOURCES := [?]rg.ResourceSpec{
+  {name = "gbuffer_position", desc = rg.TextureDescSpec{width = rg.CameraExtent{}, height = rg.CameraExtent{}, format = .R32G32B32A32_SFLOAT, usage = {.COLOR_ATTACHMENT, .SAMPLED}, aspect = {.COLOR}}, access = .WRITE},
+  {name = "gbuffer_normal", desc = rg.TextureDescSpec{width = rg.CameraExtent{}, height = rg.CameraExtent{}, format = .R8G8B8A8_UNORM, usage = {.COLOR_ATTACHMENT, .SAMPLED}, aspect = {.COLOR}}, access = .WRITE},
+  {name = "gbuffer_albedo", desc = rg.TextureDescSpec{width = rg.CameraExtent{}, height = rg.CameraExtent{}, format = .R8G8B8A8_UNORM, usage = {.COLOR_ATTACHMENT, .SAMPLED}, aspect = {.COLOR}}, access = .WRITE},
+  {name = "gbuffer_metallic_roughness", desc = rg.TextureDescSpec{width = rg.CameraExtent{}, height = rg.CameraExtent{}, format = .R8G8B8A8_UNORM, usage = {.COLOR_ATTACHMENT, .SAMPLED}, aspect = {.COLOR}}, access = .WRITE},
+  {name = "gbuffer_emissive", desc = rg.TextureDescSpec{width = rg.CameraExtent{}, height = rg.CameraExtent{}, format = .R8G8B8A8_UNORM, usage = {.COLOR_ATTACHMENT, .SAMPLED}, aspect = {.COLOR}}, access = .WRITE},
+  {name = "depth", desc = rg.TextureDescSpec{width = rg.CameraExtent{}, height = rg.CameraExtent{}, format = .D32_SFLOAT, usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED}, aspect = {.DEPTH}}, access = .WRITE, is_external = true},
+  {name = "opaque_draw_commands", desc = rg.BufferDescSpec{size = 1024 * 1024, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .READ, is_external = true},
+  {name = "opaque_draw_count", desc = rg.BufferDescSpec{size = 4, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .READ, is_external = true},
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

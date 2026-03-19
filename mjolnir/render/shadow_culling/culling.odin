@@ -152,14 +152,7 @@ execute_directional :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.C
 	cull(&manager.shadow_culling, cmd, shadow.frustum_planes, shadow.draw_count[frame_index].buffer, shadow.descriptor_sets[frame_index])
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
-  shadow_draw_cmds := rg.register_external_buffer(setup, builder, "shadow_draw_commands", rg.BufferDesc{
-    size = 1024 * 1024,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  shadow_draw_count := rg.register_external_buffer(setup, builder, "shadow_draw_count", rg.BufferDesc{
-    size = 4,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  rg.writes_buffers(builder, shadow_draw_cmds, shadow_draw_count)
+RESOURCES := [?]rg.ResourceSpec{
+  {name = "shadow_draw_commands", desc = rg.BufferDescSpec{size = 1024 * 1024, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true},
+  {name = "shadow_draw_count", desc = rg.BufferDescSpec{size = 4, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true},
 }

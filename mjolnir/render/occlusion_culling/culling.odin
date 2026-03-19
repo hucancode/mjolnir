@@ -207,57 +207,17 @@ perform_culling :: proc(
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
-  opaque_cmds := rg.register_external_buffer(setup, builder, "opaque_draw_commands", rg.BufferDesc{
-    size = 1024 * 1024,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  opaque_count := rg.register_external_buffer(setup, builder, "opaque_draw_count", rg.BufferDesc{
-    size = 4,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  transparent_cmds := rg.register_external_buffer(setup, builder, "transparent_draw_commands", rg.BufferDesc{
-    size = 1024 * 1024,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  transparent_count := rg.register_external_buffer(setup, builder, "transparent_draw_count", rg.BufferDesc{
-    size = 4,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  wireframe_cmds := rg.register_external_buffer(setup, builder, "wireframe_draw_commands", rg.BufferDesc{
-    size = size_of(vk.DrawIndexedIndirectCommand) * d.MAX_WIREFRAME_OBJECTS,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  wireframe_count := rg.register_external_buffer(setup, builder, "wireframe_draw_count", rg.BufferDesc{
-    size = size_of(u32),
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  random_color_cmds := rg.register_external_buffer(setup, builder, "random_color_draw_commands", rg.BufferDesc{
-    size = size_of(vk.DrawIndexedIndirectCommand) * d.MAX_RANDOM_COLOR_OBJECTS,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  random_color_count := rg.register_external_buffer(setup, builder, "random_color_draw_count", rg.BufferDesc{
-    size = size_of(u32),
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  line_strip_cmds := rg.register_external_buffer(setup, builder, "line_strip_draw_commands", rg.BufferDesc{
-    size = size_of(vk.DrawIndexedIndirectCommand) * d.MAX_LINE_STRIP_OBJECTS,
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  line_strip_count := rg.register_external_buffer(setup, builder, "line_strip_draw_count", rg.BufferDesc{
-    size = size_of(u32),
-    usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER},
-  })
-  rg.write_buffer(builder, opaque_cmds, .NEXT)
-  rg.write_buffer(builder, opaque_count, .NEXT)
-  rg.write_buffer(builder, transparent_cmds, .NEXT)
-  rg.write_buffer(builder, transparent_count, .NEXT)
-  rg.write_buffer(builder, wireframe_cmds, .NEXT)
-  rg.write_buffer(builder, wireframe_count, .NEXT)
-  rg.write_buffer(builder, random_color_cmds, .NEXT)
-  rg.write_buffer(builder, random_color_count, .NEXT)
-  rg.write_buffer(builder, line_strip_cmds, .NEXT)
-  rg.write_buffer(builder, line_strip_count, .NEXT)
+RESOURCES := [?]rg.ResourceSpec{
+  {name = "opaque_draw_commands", desc = rg.BufferDescSpec{size = 1024 * 1024, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
+  {name = "opaque_draw_count", desc = rg.BufferDescSpec{size = 4, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
+  {name = "transparent_draw_commands", desc = rg.BufferDescSpec{size = 1024 * 1024, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
+  {name = "transparent_draw_count", desc = rg.BufferDescSpec{size = 4, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
+  {name = "wireframe_draw_commands", desc = rg.BufferDescSpec{size = size_of(vk.DrawIndexedIndirectCommand) * d.MAX_WIREFRAME_OBJECTS, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
+  {name = "wireframe_draw_count", desc = rg.BufferDescSpec{size = size_of(u32), usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
+  {name = "random_color_draw_commands", desc = rg.BufferDescSpec{size = size_of(vk.DrawIndexedIndirectCommand) * d.MAX_RANDOM_COLOR_OBJECTS, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
+  {name = "random_color_draw_count", desc = rg.BufferDescSpec{size = size_of(u32), usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
+  {name = "line_strip_draw_commands", desc = rg.BufferDescSpec{size = size_of(vk.DrawIndexedIndirectCommand) * d.MAX_LINE_STRIP_OBJECTS, usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
+  {name = "line_strip_draw_count", desc = rg.BufferDescSpec{size = size_of(u32), usage = {.STORAGE_BUFFER, .INDIRECT_BUFFER}}, access = .WRITE, is_external = true, frame_offset = .NEXT},
 }
 
 execute :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.CommandBuffer, frame_index: u32)

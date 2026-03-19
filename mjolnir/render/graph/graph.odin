@@ -135,7 +135,66 @@ LightKind :: enum u8 {
   DIRECTIONAL,
 }
 
-PassSetupProc :: #type proc(setup: ^PassSetup, builder: ^PassBuilder)
+// ============================================================================
+// Declarative Resource Spec Types (pure-static declaration system)
+// ============================================================================
+
+// Sentinels for template expansion
+CameraExtent    :: struct{} // expand to ctx.camera_extents[instance_idx]
+SwapchainFormat :: struct{} // expand to ctx.swapchain_format
+
+SizeSpec           :: union {u32, CameraExtent}
+FormatSpec         :: union {vk.Format, SwapchainFormat}
+DoubleBufferPolicy :: enum {
+  NO,
+  YES,
+  WHEN_SECONDARY, // double_buffer = instance_idx > 0
+}
+
+// Scope reference for cross-scope resource access
+SameScope  :: struct{}
+CrossScope :: struct {
+  scope:    PassScope,
+  instance: u32,
+}
+AllOfScope :: struct {
+  scope: PassScope,
+}
+
+ScopeRef :: union {SameScope, CrossScope, AllOfScope}
+
+// Descriptor templates (parallel to TextureDesc/BufferDesc but with template fields)
+TextureDescSpec :: struct {
+  width:         SizeSpec,
+  height:        SizeSpec,
+  format:        FormatSpec,
+  usage:         vk.ImageUsageFlags,
+  aspect:        vk.ImageAspectFlags,
+  double_buffer: DoubleBufferPolicy,
+}
+TextureCubeDescSpec :: struct {
+  width:  u32,
+  format: vk.Format,
+  usage:  vk.ImageUsageFlags,
+  aspect: vk.ImageAspectFlags,
+}
+BufferDescSpec :: struct {
+  size:  vk.DeviceSize,
+  usage: vk.BufferUsageFlags,
+}
+ResourceDescSpec :: union {TextureDescSpec, TextureCubeDescSpec, BufferDescSpec}
+
+// Central declarative type — replaces all create/find/read/write calls.
+// desc == nil means "find existing resource"; non-nil means "create/register".
+// frame_offset and access default to .CURRENT and .READ (zero values).
+ResourceSpec :: struct {
+  name:         string,
+  desc:         ResourceDescSpec,
+  access:       AccessMode,
+  is_external:  bool,
+  scope_ref:    ScopeRef,    // nil = SameScope (zero value)
+  frame_offset: FrameOffset, // default .CURRENT (zero value)
+}
 
 PassExecuteProc :: #type proc(
   ctx: rawptr,
@@ -145,34 +204,11 @@ PassExecuteProc :: #type proc(
 )
 
 PassDecl :: struct {
-  name:    string,
-  scope:   PassScope,
-  queue:   QueueType,
-  setup:   PassSetupProc,
-  execute: PassExecuteProc,
-}
-
-// ============================================================================
-// Setup-Phase Types
-// ============================================================================
-
-// Mutable accumulation state — owned and managed by compile() per-pass.
-PassBuilder :: struct {
-  resources: [dynamic]ResourceDecl,
-  reads:     [dynamic]ResourceAccess,
-  writes:    [dynamic]ResourceAccess,
-}
-
-// Pure read-only context — topology hints and pass identity.
-PassSetup :: struct {
-  pass_name:        string,
-  pass_scope:       PassScope,
-  instance_idx:     u32,
-  num_cameras:      int,
-  num_lights:       int,
-  camera_extents:   []vk.Extent2D,
-  light_kinds:      []LightKind,
-  swapchain_format: vk.Format,
+  name:      string,
+  scope:     PassScope,
+  queue:     QueueType,
+  resources: []ResourceSpec,
+  execute:   PassExecuteProc,
 }
 
 ResourceAccess :: struct {

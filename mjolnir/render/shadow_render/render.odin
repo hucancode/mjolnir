@@ -287,17 +287,10 @@ execute_directional :: proc(manager: $T, resources: ^rg.PassResources, cmd: vk.C
 	_render_frustum(manager, resources, cmd, shadow, frame_index)
 }
 
-declare_resources :: proc(setup: ^rg.PassSetup, builder: ^rg.PassBuilder) {
-  // shadow_render only handles spot/directional lights — always creates a 2D shadow map.
-  // Point lights are handled by the shadow_render_sphere pass (PER_POINT_LIGHT scope).
-  shadow_draw_cmds, _ := rg.find_buffer(setup, builder, "shadow_draw_commands")
-  shadow_draw_count, _ := rg.find_buffer(setup, builder, "shadow_draw_count")
-  rg.reads_buffers(builder, shadow_draw_cmds, shadow_draw_count)
-  shadow_map := rg.create_texture(setup, builder, "shadow_map_2d", rg.TextureDesc{
-    width = d.SHADOW_MAP_SIZE, height = d.SHADOW_MAP_SIZE,
-    format = .D32_SFLOAT,
-    usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    aspect = {.DEPTH},
-  })
-  rg.write_texture(builder, shadow_map, .CURRENT)
+// shadow_render handles spot/directional lights — always creates a 2D shadow map.
+// Point lights are handled by shadow_sphere_render (PER_POINT_LIGHT scope).
+RESOURCES := [?]rg.ResourceSpec{
+  {name = "shadow_draw_commands", access = .READ},
+  {name = "shadow_draw_count", access = .READ},
+  {name = "shadow_map_2d", desc = rg.TextureDescSpec{width = d.SHADOW_MAP_SIZE, height = d.SHADOW_MAP_SIZE, format = .D32_SFLOAT, usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED}, aspect = {.DEPTH}}, access = .WRITE},
 }
