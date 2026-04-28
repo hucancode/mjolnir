@@ -48,5 +48,5 @@ graph_dump_dot :: proc(g: ^Graph, path: string) -> bool {
     }
   }
   fmt.sbprintln(&b, "}")
-  return os.write_entire_file(path, transmute([]u8)strings.to_string(b))
+  return os.write_entire_file(path, transmute([]u8)strings.to_string(b)) == nil
 }

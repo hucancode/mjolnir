@@ -1280,8 +1280,8 @@ record_lighting_pass :: proc(
      met_tex == nil || emi_tex == nil || dep_tex == nil {
     return .ERROR_UNKNOWN
   }
-  imp_color :: proc(t: ^gpu.Image, layout: vk.ImageLayout) -> rg.ImportedImage {
-    return rg.ImportedImage {
+  imp :: proc(t: ^gpu.Image, layout: vk.ImageLayout) -> rg.ImportedImage {
+    return rg.ImportedImage{
       image          = t.image,
       view           = t.view,
       format         = t.spec.format,
@@ -1289,25 +1289,13 @@ record_lighting_pass :: proc(
       initial_layout = layout,
     }
   }
-  lookup_or_import :: proc(g: ^rg.Graph, name: string, t: ^gpu.Image, layout: vk.ImageLayout) -> rg.ResourceHandle {
-    if h, ok := g.imports[name]; ok do return h
-    img := rg.ImportedImage{
-      image          = t.image,
-      view           = t.view,
-      format         = t.spec.format,
-      extent         = t.spec.extent,
-      initial_layout = layout,
-    }
-    return rg.graph_import_image(g, name, img)
-  }
-  final_h := lookup_or_import(&self.graph, "final_image", final_tex, .COLOR_ATTACHMENT_OPTIMAL)
-  pos_h := lookup_or_import(&self.graph, "gbuf_position", pos_tex, .SHADER_READ_ONLY_OPTIMAL)
-  nrm_h := lookup_or_import(&self.graph, "gbuf_normal", nrm_tex, .SHADER_READ_ONLY_OPTIMAL)
-  alb_h := lookup_or_import(&self.graph, "gbuf_albedo", alb_tex, .SHADER_READ_ONLY_OPTIMAL)
-  met_h := lookup_or_import(&self.graph, "gbuf_metallic", met_tex, .SHADER_READ_ONLY_OPTIMAL)
-  emi_h := lookup_or_import(&self.graph, "gbuf_emissive", emi_tex, .SHADER_READ_ONLY_OPTIMAL)
-  dep_h := lookup_or_import(&self.graph, "depth", dep_tex, .DEPTH_STENCIL_READ_ONLY_OPTIMAL)
-  _ = imp_color
+  final_h := rg.graph_import_image(&self.graph, "final_image", imp(final_tex, .COLOR_ATTACHMENT_OPTIMAL))
+  pos_h := rg.graph_import_image(&self.graph, "gbuf_position", imp(pos_tex, .SHADER_READ_ONLY_OPTIMAL))
+  nrm_h := rg.graph_import_image(&self.graph, "gbuf_normal", imp(nrm_tex, .SHADER_READ_ONLY_OPTIMAL))
+  alb_h := rg.graph_import_image(&self.graph, "gbuf_albedo", imp(alb_tex, .SHADER_READ_ONLY_OPTIMAL))
+  met_h := rg.graph_import_image(&self.graph, "gbuf_metallic", imp(met_tex, .SHADER_READ_ONLY_OPTIMAL))
+  emi_h := rg.graph_import_image(&self.graph, "gbuf_emissive", imp(emi_tex, .SHADER_READ_ONLY_OPTIMAL))
+  dep_h := rg.graph_import_image(&self.graph, "depth", imp(dep_tex, .DEPTH_STENCIL_READ_ONLY_OPTIMAL))
   exec_data := rg.blackboard_add(&self.graph.blackboard, "lighting.exec", LightingExecData)
   if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
   exec_data^ = LightingExecData {
@@ -1376,29 +1364,22 @@ record_particles_pass :: proc(
   final_tex := gpu.get_texture_2d(tm, cam.attachments[.FINAL_IMAGE][frame_index])
   dep_tex := gpu.get_texture_2d(tm, cam.attachments[.DEPTH][frame_index])
   if final_tex == nil || dep_tex == nil do return .ERROR_UNKNOWN
-  // Reuse prior imports if already added in this graph cycle (lighting did so).
-  final_h, found_f := self.graph.imports["final_image"]
-  if !found_f {
-    final_h = rg.graph_import_image(&self.graph, "final_image",
-      rg.ImportedImage{
-        image          = final_tex.image,
-        view           = final_tex.view,
-        format         = final_tex.spec.format,
-        extent         = final_tex.spec.extent,
-        initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
-      })
-  }
-  dep_h, found_d := self.graph.imports["depth"]
-  if !found_d {
-    dep_h = rg.graph_import_image(&self.graph, "depth",
-      rg.ImportedImage{
-        image          = dep_tex.image,
-        view           = dep_tex.view,
-        format         = dep_tex.spec.format,
-        extent         = dep_tex.spec.extent,
-        initial_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-      })
-  }
+  final_h := rg.graph_import_image(&self.graph, "final_image",
+    rg.ImportedImage{
+      image          = final_tex.image,
+      view           = final_tex.view,
+      format         = final_tex.spec.format,
+      extent         = final_tex.spec.extent,
+      initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
+    })
+  dep_h := rg.graph_import_image(&self.graph, "depth",
+    rg.ImportedImage{
+      image          = dep_tex.image,
+      view           = dep_tex.view,
+      format         = dep_tex.spec.format,
+      extent         = dep_tex.spec.extent,
+      initial_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    })
   exec_data := rg.blackboard_add(&self.graph.blackboard, "particles.exec", ParticlesExecData)
   if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
   exec_data^ = ParticlesExecData {
@@ -1655,28 +1636,22 @@ record_transparency_pass :: proc(
   final_tex := gpu.get_texture_2d(tm, cam.attachments[.FINAL_IMAGE][frame_index])
   dep_tex := gpu.get_texture_2d(tm, cam.attachments[.DEPTH][frame_index])
   if final_tex == nil || dep_tex == nil do return .ERROR_UNKNOWN
-  final_h, found_f := self.graph.imports["final_image"]
-  if !found_f {
-    final_h = rg.graph_import_image(&self.graph, "final_image",
-      rg.ImportedImage{
-        image          = final_tex.image,
-        view           = final_tex.view,
-        format         = final_tex.spec.format,
-        extent         = final_tex.spec.extent,
-        initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
-      })
-  }
-  dep_h, found_d := self.graph.imports["depth"]
-  if !found_d {
-    dep_h = rg.graph_import_image(&self.graph, "depth",
-      rg.ImportedImage{
-        image          = dep_tex.image,
-        view           = dep_tex.view,
-        format         = dep_tex.spec.format,
-        extent         = dep_tex.spec.extent,
-        initial_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-      })
-  }
+  final_h := rg.graph_import_image(&self.graph, "final_image",
+    rg.ImportedImage{
+      image          = final_tex.image,
+      view           = final_tex.view,
+      format         = final_tex.spec.format,
+      extent         = final_tex.spec.extent,
+      initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
+    })
+  dep_h := rg.graph_import_image(&self.graph, "depth",
+    rg.ImportedImage{
+      image          = dep_tex.image,
+      view           = dep_tex.view,
+      format         = dep_tex.spec.format,
+      extent         = dep_tex.spec.extent,
+      initial_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    })
   exec_data := rg.blackboard_add(&self.graph.blackboard, "transparency.exec", TransparencyExecData)
   if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
   exec_data^ = TransparencyExecData {
@@ -1711,28 +1686,22 @@ record_debug_pass :: proc(
   final_tex := gpu.get_texture_2d(tm, cam.attachments[.FINAL_IMAGE][frame_index])
   dep_tex := gpu.get_texture_2d(tm, cam.attachments[.DEPTH][frame_index])
   if final_tex == nil || dep_tex == nil do return .SUCCESS
-  final_h, found_f := self.graph.imports["final_image"]
-  if !found_f {
-    final_h = rg.graph_import_image(&self.graph, "final_image",
-      rg.ImportedImage{
-        image          = final_tex.image,
-        view           = final_tex.view,
-        format         = final_tex.spec.format,
-        extent         = final_tex.spec.extent,
-        initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
-      })
-  }
-  dep_h, found_d := self.graph.imports["depth"]
-  if !found_d {
-    dep_h = rg.graph_import_image(&self.graph, "depth",
-      rg.ImportedImage{
-        image          = dep_tex.image,
-        view           = dep_tex.view,
-        format         = dep_tex.spec.format,
-        extent         = dep_tex.spec.extent,
-        initial_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-      })
-  }
+  final_h := rg.graph_import_image(&self.graph, "final_image",
+    rg.ImportedImage{
+      image          = final_tex.image,
+      view           = final_tex.view,
+      format         = final_tex.spec.format,
+      extent         = final_tex.spec.extent,
+      initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
+    })
+  dep_h := rg.graph_import_image(&self.graph, "depth",
+    rg.ImportedImage{
+      image          = dep_tex.image,
+      view           = dep_tex.view,
+      format         = dep_tex.spec.format,
+      extent         = dep_tex.spec.extent,
+      initial_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    })
   exec_data := rg.blackboard_add(&self.graph.blackboard, "debug.exec", DebugExecData)
   if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
   exec_data^ = DebugExecData {
@@ -1950,24 +1919,17 @@ record_ui_pass :: proc(
   swapchain_extent: vk.Extent2D,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
-  // Re-import swapchain in the same graph cycle as post_process. After
-  // post_process wrote it, current_layout = COLOR_ATTACHMENT_OPTIMAL but the
-  // resource was cleared from g.imports map in flush — wait, no flush happened
-  // yet; post_process is still pending in this same graph. So look up.
-  swapchain_h, found := self.graph.imports["swapchain"]
-  if !found {
-    swapchain_h = rg.graph_import_image(
-      &self.graph,
-      "swapchain",
-      rg.ImportedImage {
-        image          = swapchain_image,
-        view           = swapchain_view,
-        format         = .UNDEFINED,
-        extent         = swapchain_extent,
-        initial_layout = .UNDEFINED,
-      },
-    )
-  }
+  swapchain_h := rg.graph_import_image(
+    &self.graph,
+    "swapchain",
+    rg.ImportedImage {
+      image          = swapchain_image,
+      view           = swapchain_view,
+      format         = .UNDEFINED,
+      extent         = swapchain_extent,
+      initial_layout = .UNDEFINED,
+    },
+  )
   exec_data := rg.blackboard_add(&self.graph.blackboard, "ui.exec", UIExecData)
   if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
   exec_data^ = UIExecData {
