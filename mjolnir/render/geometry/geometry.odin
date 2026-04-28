@@ -171,87 +171,11 @@ begin_pass :: proc(
     texture_manager,
     final_image_handle,
   )
-  gpu.image_barrier(
-    command_buffer,
-    position_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    normal_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    albedo_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    metallic_roughness_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    emissive_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    final_texture.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
-  )
   depth_texture := gpu.get_texture_2d(
     texture_manager,
     depth_handle,
   )
-  gpu.image_barrier(
-    command_buffer,
-    depth_texture.image,
-    .UNDEFINED,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    {},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.EARLY_FRAGMENT_TESTS},
-    {.DEPTH},
-  )
+  // Layout transitions managed by render graph.
   gpu.begin_rendering(
     command_buffer,
     depth_texture.spec.extent,
@@ -268,107 +192,9 @@ begin_pass :: proc(
   )
 }
 
-end_pass :: proc(
-  position_handle: gpu.Texture2DHandle,
-  normal_handle: gpu.Texture2DHandle,
-  albedo_handle: gpu.Texture2DHandle,
-  metallic_roughness_handle: gpu.Texture2DHandle,
-  emissive_handle: gpu.Texture2DHandle,
-  depth_handle: gpu.Texture2DHandle,
-  texture_manager: ^gpu.TextureManager,
-  command_buffer: vk.CommandBuffer,
-) {
+end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
-  position_texture := gpu.get_texture_2d(
-    texture_manager,
-    position_handle,
-  )
-  normal_texture := gpu.get_texture_2d(
-    texture_manager,
-    normal_handle,
-  )
-  albedo_texture := gpu.get_texture_2d(
-    texture_manager,
-    albedo_handle,
-  )
-  metallic_roughness_texture := gpu.get_texture_2d(
-    texture_manager,
-    metallic_roughness_handle,
-  )
-  emissive_texture := gpu.get_texture_2d(
-    texture_manager,
-    emissive_handle,
-  )
-  depth_texture := gpu.get_texture_2d(
-    texture_manager,
-    depth_handle,
-  )
-  gpu.image_barrier(
-    command_buffer,
-    position_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    normal_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    albedo_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    metallic_roughness_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    emissive_texture.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR},
-  )
-  gpu.image_barrier(
-    command_buffer,
-    depth_texture.image,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-    {.LATE_FRAGMENT_TESTS},
-    {.COMPUTE_SHADER, .FRAGMENT_SHADER},
-    {.DEPTH},
-  )
+  // Layout transitions managed by render graph.
 }
 
 render :: proc(

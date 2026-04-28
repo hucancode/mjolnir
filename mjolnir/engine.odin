@@ -20,6 +20,7 @@ import "gpu"
 import nav "navigation"
 import "render"
 import rd "render/data"
+import rg "render/graph"
 import "render/debug_ui"
 import occlusion_culling "render/occlusion_culling"
 import ui_module "ui"
@@ -1203,6 +1204,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   command_buffer := self.render.command_buffers[self.frame_index]
   gpu.begin_record(command_buffer) or_return
+  rg.graph_begin_frame(&self.render.graph, &self.gctx, self.frame_index)
   render.render_shadow_depth(&self.render, self.frame_index) or_return
   for &entry, cam_index in self.world.cameras.entries {
     if !entry.active do continue
@@ -1211,6 +1213,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     if world.PassType.GEOMETRY in world_cam.enabled_passes {
       render.record_geometry_pass(
         &self.render,
+        &self.gctx,
         self.frame_index,
         u32(cam_index),
         render_cam,
@@ -1219,6 +1222,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     if world.PassType.LIGHTING in world_cam.enabled_passes {
       render.record_lighting_pass(
         &self.render,
+        &self.gctx,
         self.frame_index,
         u32(cam_index),
         render_cam,
@@ -1227,6 +1231,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     if world.PassType.PARTICLES in world_cam.enabled_passes {
       render.record_particles_pass(
         &self.render,
+        &self.gctx,
         self.frame_index,
         u32(cam_index),
         render_cam,
@@ -1235,11 +1240,16 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     if world.PassType.TRANSPARENCY in world_cam.enabled_passes {
       render.record_transparency_pass(
         &self.render,
-        self.frame_index,
         &self.gctx,
+        self.frame_index,
         u32(cam_index),
         render_cam,
       )
+    }
+    // Flush per-camera graph (lighting + particles + transparency).
+    if res, err := rg.graph_flush(&self.render.graph, &self.gctx, command_buffer);
+       res != .SUCCESS || err != .None {
+      return res if res != .SUCCESS else .ERROR_UNKNOWN
     }
   }
   main_render_cam := &self.render.per_camera_data[self.world.main_camera.index]
@@ -1252,6 +1262,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   )
   render.record_post_process_pass(
     &self.render,
+    &self.gctx,
     self.frame_index,
     main_render_cam,
     self.swapchain.extent,
@@ -1260,8 +1271,9 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   )
   render.record_ui_pass(
     &self.render,
-    self.frame_index,
     &self.gctx,
+    self.frame_index,
+    self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
   )

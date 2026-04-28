@@ -16,6 +16,7 @@ import "debug_ui"
 import depth_pyramid_system "depth_pyramid"
 import "direct_light"
 import "geometry"
+import rg "graph"
 import "line_strip"
 import "occlusion_culling"
 import particles_compute "particles_compute"
@@ -185,6 +186,7 @@ Manager :: struct {
   bone_matrix_slab:             cont.SlabAllocator,
   bone_matrix_offsets:          map[u32]u32,
   texture_manager:              gpu.TextureManager,
+  graph:                        rg.Graph,
 }
 
 init :: proc(
@@ -199,6 +201,8 @@ init :: proc(
   self.per_camera_data = make(map[u32]Camera)
   self.per_light_data = make(map[u32]PerLightData)
   self.ui_commands = make([dynamic]cmd.RenderCommand, 0, 256)
+  rg.graph_init(&self.graph) or_return
+  defer if ret != .SUCCESS do rg.graph_shutdown(&self.graph, gctx)
   gpu.allocate_command_buffer(gctx, self.command_buffers[:]) or_return
   defer if ret != .SUCCESS {
     gpu.free_command_buffer(gctx, ..self.command_buffers[:])
@@ -754,6 +758,7 @@ clear_debug_visualization :: proc(self: ^Manager) {
 }
 
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
+  rg.graph_shutdown(&self.graph, gctx)
   gpu.free_command_buffer(gctx, ..self.command_buffers[:])
   if gctx.has_async_compute {
     gpu.free_compute_command_buffer(gctx, self.compute_command_buffers[:])
@@ -1020,60 +1025,127 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
   return .SUCCESS
 }
 
-record_geometry_pass :: proc(
-  self: ^Manager,
+GeometryExecData :: struct {
+  manager:     ^Manager,
+  cam:         ^Camera,
+  cam_index:   u32,
   frame_index: u32,
-  cam_index: u32,
-  cam: ^Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
+}
+
+geometry_graph_execute :: proc(g: ^rg.Graph, ctx: rg.ExecuteContext, ud: rawptr) {
+  d := cast(^GeometryExecData)ud
+  cmd := ctx.cmd
   geometry.begin_pass(
-    cam.attachments[.POSITION][frame_index],
-    cam.attachments[.NORMAL][frame_index],
-    cam.attachments[.ALBEDO][frame_index],
-    cam.attachments[.METALLIC_ROUGHNESS][frame_index],
-    cam.attachments[.EMISSIVE][frame_index],
-    cam.attachments[.FINAL_IMAGE][frame_index],
-    cam.attachments[.DEPTH][frame_index],
-    &self.texture_manager,
+    d.cam.attachments[.POSITION][d.frame_index],
+    d.cam.attachments[.NORMAL][d.frame_index],
+    d.cam.attachments[.ALBEDO][d.frame_index],
+    d.cam.attachments[.METALLIC_ROUGHNESS][d.frame_index],
+    d.cam.attachments[.EMISSIVE][d.frame_index],
+    d.cam.attachments[.FINAL_IMAGE][d.frame_index],
+    d.cam.attachments[.DEPTH][d.frame_index],
+    &d.manager.texture_manager,
     cmd,
   )
   geometry.render(
-    &self.geometry,
-    cam_index,
+    &d.manager.geometry,
+    d.cam_index,
     cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.bone_buffer.descriptor_sets[frame_index],
-    self.material_buffer.descriptor_set,
-    self.node_data_buffer.descriptor_set,
-    self.mesh_data_buffer.descriptor_set,
-    self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-    self.mesh_manager.vertex_buffer.buffer,
-    self.mesh_manager.index_buffer.buffer,
-    cam.opaque_draw_commands[frame_index].buffer,
-    cam.opaque_draw_count[frame_index].buffer,
+    d.manager.camera_buffer.descriptor_sets[d.frame_index],
+    d.manager.texture_manager.descriptor_set,
+    d.manager.bone_buffer.descriptor_sets[d.frame_index],
+    d.manager.material_buffer.descriptor_set,
+    d.manager.node_data_buffer.descriptor_set,
+    d.manager.mesh_data_buffer.descriptor_set,
+    d.manager.mesh_manager.vertex_skinning_buffer.descriptor_set,
+    d.manager.mesh_manager.vertex_buffer.buffer,
+    d.manager.mesh_manager.index_buffer.buffer,
+    d.cam.opaque_draw_commands[d.frame_index].buffer,
+    d.cam.opaque_draw_count[d.frame_index].buffer,
   )
-  geometry.end_pass(
-    cam.attachments[.POSITION][frame_index],
-    cam.attachments[.NORMAL][frame_index],
-    cam.attachments[.ALBEDO][frame_index],
-    cam.attachments[.METALLIC_ROUGHNESS][frame_index],
-    cam.attachments[.EMISSIVE][frame_index],
-    cam.attachments[.DEPTH][frame_index],
-    &self.texture_manager,
-    cmd,
-  )
-  return .SUCCESS
+  geometry.end_pass(cmd)
 }
 
-record_lighting_pass :: proc(
+record_geometry_pass :: proc(
   self: ^Manager,
+  gctx: ^gpu.GPUContext,
   frame_index: u32,
   cam_index: u32,
   cam: ^Camera,
 ) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
+  tm := &self.texture_manager
+  pos_tex := gpu.get_texture_2d(tm, cam.attachments[.POSITION][frame_index])
+  nrm_tex := gpu.get_texture_2d(tm, cam.attachments[.NORMAL][frame_index])
+  alb_tex := gpu.get_texture_2d(tm, cam.attachments[.ALBEDO][frame_index])
+  met_tex := gpu.get_texture_2d(tm, cam.attachments[.METALLIC_ROUGHNESS][frame_index])
+  emi_tex := gpu.get_texture_2d(tm, cam.attachments[.EMISSIVE][frame_index])
+  final_tex := gpu.get_texture_2d(tm, cam.attachments[.FINAL_IMAGE][frame_index])
+  dep_tex := gpu.get_texture_2d(tm, cam.attachments[.DEPTH][frame_index])
+  if pos_tex == nil || nrm_tex == nil || alb_tex == nil || met_tex == nil ||
+     emi_tex == nil || final_tex == nil || dep_tex == nil {
+    return .ERROR_UNKNOWN
+  }
+  // Geometry module owns its internal barriers; graph imports the gbuffer at the
+  // post-pass layout that subsequent passes will observe so lighting's lookup
+  // resolves to the same handle without re-importing.
+  imp :: proc(t: ^gpu.Image, layout: vk.ImageLayout) -> rg.ImportedImage {
+    return rg.ImportedImage{
+      image          = t.image,
+      view           = t.view,
+      format         = t.spec.format,
+      extent         = t.spec.extent,
+      initial_layout = layout,
+    }
+  }
+  // Import at UNDEFINED — geometry overwrites the gbuffer each frame, so prior
+  // contents can be discarded regardless of last frame's end layout.
+  pos_h := rg.graph_import_image(&self.graph, "gbuf_position", imp(pos_tex, .UNDEFINED))
+  nrm_h := rg.graph_import_image(&self.graph, "gbuf_normal", imp(nrm_tex, .UNDEFINED))
+  alb_h := rg.graph_import_image(&self.graph, "gbuf_albedo", imp(alb_tex, .UNDEFINED))
+  met_h := rg.graph_import_image(&self.graph, "gbuf_metallic", imp(met_tex, .UNDEFINED))
+  emi_h := rg.graph_import_image(&self.graph, "gbuf_emissive", imp(emi_tex, .UNDEFINED))
+  final_h := rg.graph_import_image(&self.graph, "final_image", imp(final_tex, .UNDEFINED))
+  dep_h := rg.graph_import_image(&self.graph, "depth", imp(dep_tex, .UNDEFINED))
+  exec_data := rg.blackboard_add(&self.graph.blackboard, "geometry.exec", GeometryExecData)
+  if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
+  exec_data^ = GeometryExecData {
+    manager     = self,
+    cam         = cam,
+    cam_index   = cam_index,
+    frame_index = frame_index,
+  }
+  pass := rg.graph_add_pass(
+    &self.graph,
+    "geometry",
+    .Graphics,
+    geometry_graph_execute,
+    exec_data,
+    side_effect = true,
+    manual_rendering = true,
+  )
+  rg.pass_write(&self.graph, pass, pos_h, .ColorAttachment)
+  rg.pass_write(&self.graph, pass, nrm_h, .ColorAttachment)
+  rg.pass_write(&self.graph, pass, alb_h, .ColorAttachment)
+  rg.pass_write(&self.graph, pass, met_h, .ColorAttachment)
+  rg.pass_write(&self.graph, pass, emi_h, .ColorAttachment)
+  rg.pass_write(&self.graph, pass, final_h, .ColorAttachment)
+  rg.pass_write(&self.graph, pass, dep_h, .DepthAttachment)
+  return .SUCCESS
+}
+
+LightingExecData :: struct {
+  manager:     ^Manager,
+  cam:         ^Camera,
+  cam_index:   u32,
+  frame_index: u32,
+}
+
+lighting_graph_execute :: proc(g: ^rg.Graph, ctx: rg.ExecuteContext, ud: rawptr) {
+  d := cast(^LightingExecData)ud
+  self := d.manager
+  cam := d.cam
+  frame_index := d.frame_index
+  cam_index := d.cam_index
+  cmd := ctx.cmd
   ambient.begin_pass(
     &self.ambient,
     cam.attachments[.FINAL_IMAGE][frame_index],
@@ -1114,7 +1186,6 @@ record_lighting_pass :: proc(
   for light_node_index in light_node_indices {
     light_data := &self.per_light_data[light_node_index]
     if light_data.light_index >= rd.MAX_LIGHTS do continue
-
     switch &variant in &light_data.light {
     case PointLight:
       shadow_map_idx: u32 = 0xFFFFFFFF
@@ -1187,45 +1258,189 @@ record_lighting_pass :: proc(
     }
   }
   direct_light.end_pass(cmd)
+}
+
+record_lighting_pass :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  frame_index: u32,
+  cam_index: u32,
+  cam: ^Camera,
+) -> vk.Result {
+  cmd := self.command_buffers[frame_index]
+  tm := &self.texture_manager
+  final_tex := gpu.get_texture_2d(tm, cam.attachments[.FINAL_IMAGE][frame_index])
+  pos_tex := gpu.get_texture_2d(tm, cam.attachments[.POSITION][frame_index])
+  nrm_tex := gpu.get_texture_2d(tm, cam.attachments[.NORMAL][frame_index])
+  alb_tex := gpu.get_texture_2d(tm, cam.attachments[.ALBEDO][frame_index])
+  met_tex := gpu.get_texture_2d(tm, cam.attachments[.METALLIC_ROUGHNESS][frame_index])
+  emi_tex := gpu.get_texture_2d(tm, cam.attachments[.EMISSIVE][frame_index])
+  dep_tex := gpu.get_texture_2d(tm, cam.attachments[.DEPTH][frame_index])
+  if final_tex == nil || pos_tex == nil || nrm_tex == nil || alb_tex == nil ||
+     met_tex == nil || emi_tex == nil || dep_tex == nil {
+    return .ERROR_UNKNOWN
+  }
+  imp_color :: proc(t: ^gpu.Image, layout: vk.ImageLayout) -> rg.ImportedImage {
+    return rg.ImportedImage {
+      image          = t.image,
+      view           = t.view,
+      format         = t.spec.format,
+      extent         = t.spec.extent,
+      initial_layout = layout,
+    }
+  }
+  lookup_or_import :: proc(g: ^rg.Graph, name: string, t: ^gpu.Image, layout: vk.ImageLayout) -> rg.ResourceHandle {
+    if h, ok := g.imports[name]; ok do return h
+    img := rg.ImportedImage{
+      image          = t.image,
+      view           = t.view,
+      format         = t.spec.format,
+      extent         = t.spec.extent,
+      initial_layout = layout,
+    }
+    return rg.graph_import_image(g, name, img)
+  }
+  final_h := lookup_or_import(&self.graph, "final_image", final_tex, .COLOR_ATTACHMENT_OPTIMAL)
+  pos_h := lookup_or_import(&self.graph, "gbuf_position", pos_tex, .SHADER_READ_ONLY_OPTIMAL)
+  nrm_h := lookup_or_import(&self.graph, "gbuf_normal", nrm_tex, .SHADER_READ_ONLY_OPTIMAL)
+  alb_h := lookup_or_import(&self.graph, "gbuf_albedo", alb_tex, .SHADER_READ_ONLY_OPTIMAL)
+  met_h := lookup_or_import(&self.graph, "gbuf_metallic", met_tex, .SHADER_READ_ONLY_OPTIMAL)
+  emi_h := lookup_or_import(&self.graph, "gbuf_emissive", emi_tex, .SHADER_READ_ONLY_OPTIMAL)
+  dep_h := lookup_or_import(&self.graph, "depth", dep_tex, .DEPTH_STENCIL_READ_ONLY_OPTIMAL)
+  _ = imp_color
+  exec_data := rg.blackboard_add(&self.graph.blackboard, "lighting.exec", LightingExecData)
+  if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
+  exec_data^ = LightingExecData {
+    manager     = self,
+    cam         = cam,
+    cam_index   = cam_index,
+    frame_index = frame_index,
+  }
+  pass := rg.graph_add_pass(
+    &self.graph,
+    "lighting",
+    .Graphics,
+    lighting_graph_execute,
+    exec_data,
+    side_effect = true,
+    manual_rendering = true,
+  )
+  rg.pass_read(&self.graph, pass, pos_h, .Sampled)
+  rg.pass_read(&self.graph, pass, nrm_h, .Sampled)
+  rg.pass_read(&self.graph, pass, alb_h, .Sampled)
+  rg.pass_read(&self.graph, pass, met_h, .Sampled)
+  rg.pass_read(&self.graph, pass, emi_h, .Sampled)
+  rg.pass_read(&self.graph, pass, dep_h, .DepthAttachment)
+  rg.pass_write(&self.graph, pass, final_h, .ColorAttachment)
+  // Defer flush — particles + transparency join this per-camera graph cycle.
   return .SUCCESS
+}
+
+ParticlesExecData :: struct {
+  manager:     ^Manager,
+  cam:         ^Camera,
+  cam_index:   u32,
+  frame_index: u32,
+}
+
+particles_graph_execute :: proc(g: ^rg.Graph, ctx: rg.ExecuteContext, ud: rawptr) {
+  d := cast(^ParticlesExecData)ud
+  cmd := ctx.cmd
+  particles_render.begin_pass(
+    &d.manager.particles_render,
+    cmd,
+    d.cam.attachments[.FINAL_IMAGE][d.frame_index],
+    d.cam.attachments[.DEPTH][d.frame_index],
+    &d.manager.texture_manager,
+  )
+  particles_render.render(
+    &d.manager.particles_render,
+    cmd,
+    d.cam_index,
+    d.manager.camera_buffer.descriptor_sets[d.frame_index],
+    d.manager.texture_manager.descriptor_set,
+    d.manager.compact_particle_buffer.buffer,
+    d.manager.particle_draw_command_buffer.buffer,
+  )
+  particles_render.end_pass(cmd)
 }
 
 record_particles_pass :: proc(
   self: ^Manager,
+  gctx: ^gpu.GPUContext,
   frame_index: u32,
   cam_index: u32,
   cam: ^Camera,
 ) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-  particles_render.begin_pass(
-    &self.particles_render,
-    cmd,
-    cam.attachments[.FINAL_IMAGE][frame_index],
-    cam.attachments[.DEPTH][frame_index],
-    &self.texture_manager,
+  tm := &self.texture_manager
+  final_tex := gpu.get_texture_2d(tm, cam.attachments[.FINAL_IMAGE][frame_index])
+  dep_tex := gpu.get_texture_2d(tm, cam.attachments[.DEPTH][frame_index])
+  if final_tex == nil || dep_tex == nil do return .ERROR_UNKNOWN
+  // Reuse prior imports if already added in this graph cycle (lighting did so).
+  final_h, found_f := self.graph.imports["final_image"]
+  if !found_f {
+    final_h = rg.graph_import_image(&self.graph, "final_image",
+      rg.ImportedImage{
+        image          = final_tex.image,
+        view           = final_tex.view,
+        format         = final_tex.spec.format,
+        extent         = final_tex.spec.extent,
+        initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
+      })
+  }
+  dep_h, found_d := self.graph.imports["depth"]
+  if !found_d {
+    dep_h = rg.graph_import_image(&self.graph, "depth",
+      rg.ImportedImage{
+        image          = dep_tex.image,
+        view           = dep_tex.view,
+        format         = dep_tex.spec.format,
+        extent         = dep_tex.spec.extent,
+        initial_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+      })
+  }
+  exec_data := rg.blackboard_add(&self.graph.blackboard, "particles.exec", ParticlesExecData)
+  if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
+  exec_data^ = ParticlesExecData {
+    manager     = self,
+    cam         = cam,
+    cam_index   = cam_index,
+    frame_index = frame_index,
+  }
+  pass := rg.graph_add_pass(
+    &self.graph,
+    "particles",
+    .Graphics,
+    particles_graph_execute,
+    exec_data,
+    side_effect = true,
+    manual_rendering = true,
   )
-  particles_render.render(
-    &self.particles_render,
-    cmd,
-    cam_index,
-    self.camera_buffer.descriptor_sets[frame_index],
-    self.texture_manager.descriptor_set,
-    self.compact_particle_buffer.buffer,
-    self.particle_draw_command_buffer.buffer,
-  )
-  particles_render.end_pass(cmd)
+  rg.pass_write(&self.graph, pass, final_h, .ColorAttachment)
+  rg.pass_read(&self.graph, pass, dep_h, .DepthAttachment)
   return .SUCCESS
 }
 
-record_transparency_pass :: proc(
-  self: ^Manager,
+TransparencyExecData :: struct {
+  manager:     ^Manager,
+  cam:         ^Camera,
+  cam_index:   u32,
   frame_index: u32,
-  gctx: ^gpu.GPUContext,
+}
+
+transparency_graph_execute :: proc(g: ^rg.Graph, ctx: rg.ExecuteContext, ud: rawptr) {
+  d := cast(^TransparencyExecData)ud
+  transparency_record_body(d.manager, ctx.cmd, d.frame_index, d.cam_index, d.cam)
+}
+
+@(private)
+transparency_record_body :: proc(
+  self: ^Manager,
+  cmd: vk.CommandBuffer,
+  frame_index: u32,
   cam_index: u32,
   cam: ^Camera,
-) -> vk.Result {
-  cmd := self.command_buffers[frame_index]
-
+) {
   // Begin pass (shared by all 5 techniques)
   color_texture := gpu.get_texture_2d(
     &self.texture_manager,
@@ -1427,6 +1642,60 @@ record_transparency_pass :: proc(
 
   // End pass
   vk.CmdEndRendering(cmd)
+}
+
+record_transparency_pass :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  frame_index: u32,
+  cam_index: u32,
+  cam: ^Camera,
+) -> vk.Result {
+  tm := &self.texture_manager
+  final_tex := gpu.get_texture_2d(tm, cam.attachments[.FINAL_IMAGE][frame_index])
+  dep_tex := gpu.get_texture_2d(tm, cam.attachments[.DEPTH][frame_index])
+  if final_tex == nil || dep_tex == nil do return .ERROR_UNKNOWN
+  final_h, found_f := self.graph.imports["final_image"]
+  if !found_f {
+    final_h = rg.graph_import_image(&self.graph, "final_image",
+      rg.ImportedImage{
+        image          = final_tex.image,
+        view           = final_tex.view,
+        format         = final_tex.spec.format,
+        extent         = final_tex.spec.extent,
+        initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
+      })
+  }
+  dep_h, found_d := self.graph.imports["depth"]
+  if !found_d {
+    dep_h = rg.graph_import_image(&self.graph, "depth",
+      rg.ImportedImage{
+        image          = dep_tex.image,
+        view           = dep_tex.view,
+        format         = dep_tex.spec.format,
+        extent         = dep_tex.spec.extent,
+        initial_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+      })
+  }
+  exec_data := rg.blackboard_add(&self.graph.blackboard, "transparency.exec", TransparencyExecData)
+  if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
+  exec_data^ = TransparencyExecData {
+    manager     = self,
+    cam         = cam,
+    cam_index   = cam_index,
+    frame_index = frame_index,
+  }
+  pass := rg.graph_add_pass(
+    &self.graph,
+    "transparency",
+    .Graphics,
+    transparency_graph_execute,
+    exec_data,
+    side_effect = true,
+    manual_rendering = true,
+  )
+  rg.pass_write(&self.graph, pass, final_h, .ColorAttachment)
+  rg.pass_read(&self.graph, pass, dep_h, .DepthAttachment)
   return .SUCCESS
 }
 
@@ -1438,36 +1707,118 @@ record_debug_pass :: proc(
 ) -> vk.Result {
   // Skip debug rendering if no instances are staged
   if len(self.debug_renderer.bone_instances) == 0 do return .SUCCESS
+  tm := &self.texture_manager
+  final_tex := gpu.get_texture_2d(tm, cam.attachments[.FINAL_IMAGE][frame_index])
+  dep_tex := gpu.get_texture_2d(tm, cam.attachments[.DEPTH][frame_index])
+  if final_tex == nil || dep_tex == nil do return .SUCCESS
+  final_h, found_f := self.graph.imports["final_image"]
+  if !found_f {
+    final_h = rg.graph_import_image(&self.graph, "final_image",
+      rg.ImportedImage{
+        image          = final_tex.image,
+        view           = final_tex.view,
+        format         = final_tex.spec.format,
+        extent         = final_tex.spec.extent,
+        initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
+      })
+  }
+  dep_h, found_d := self.graph.imports["depth"]
+  if !found_d {
+    dep_h = rg.graph_import_image(&self.graph, "depth",
+      rg.ImportedImage{
+        image          = dep_tex.image,
+        view           = dep_tex.view,
+        format         = dep_tex.spec.format,
+        extent         = dep_tex.spec.extent,
+        initial_layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+      })
+  }
+  exec_data := rg.blackboard_add(&self.graph.blackboard, "debug.exec", DebugExecData)
+  if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
+  exec_data^ = DebugExecData {
+    manager     = self,
+    cam         = cam,
+    cam_index   = cam_index,
+    frame_index = frame_index,
+  }
+  pass := rg.graph_add_pass(
+    &self.graph,
+    "debug",
+    .Graphics,
+    debug_graph_execute,
+    exec_data,
+    side_effect = true,
+    manual_rendering = true,
+  )
+  rg.pass_write(&self.graph, pass, final_h, .ColorAttachment)
+  rg.pass_read(&self.graph, pass, dep_h, .DepthAttachment)
+  return .SUCCESS
+}
 
-  cmd := self.command_buffers[frame_index]
+DebugExecData :: struct {
+  manager:     ^Manager,
+  cam:         ^Camera,
+  cam_index:   u32,
+  frame_index: u32,
+}
 
-  // Begin debug render pass (renders on top of transparency)
-  // Skip rendering if attachments are missing
+debug_graph_execute :: proc(g: ^rg.Graph, ctx: rg.ExecuteContext, ud: rawptr) {
+  d := cast(^DebugExecData)ud
+  cmd := ctx.cmd
   if !debug_bone.begin_pass(
-    &self.debug_renderer,
-    cam.attachments[.FINAL_IMAGE][frame_index],
-    cam.attachments[.DEPTH][frame_index],
-    &self.texture_manager,
+    &d.manager.debug_renderer,
+    d.cam.attachments[.FINAL_IMAGE][d.frame_index],
+    d.cam.attachments[.DEPTH][d.frame_index],
+    &d.manager.texture_manager,
     cmd,
   ) {
-    return .SUCCESS
+    return
   }
-
-  // Render debug visualization (bones, etc.)
   debug_bone.render(
-    &self.debug_renderer,
+    &d.manager.debug_renderer,
     cmd,
-    self.camera_buffer.descriptor_sets[frame_index],
-    cam_index,
-  ) or_return
+    d.manager.camera_buffer.descriptor_sets[d.frame_index],
+    d.cam_index,
+  )
+  debug_bone.end_pass(&d.manager.debug_renderer, cmd)
+}
 
-  debug_bone.end_pass(&self.debug_renderer, cmd)
+PostProcessExecData :: struct {
+  manager:          ^Manager,
+  swapchain_extent: vk.Extent2D,
+  swapchain_view:   vk.ImageView,
+  final_image_idx:  u32,
+  position_idx:     u32,
+  normal_idx:       u32,
+  albedo_idx:       u32,
+  metallic_idx:     u32,
+  emissive_idx:     u32,
+  depth_idx:        u32,
+}
 
-  return .SUCCESS
+post_process_graph_execute :: proc(g: ^rg.Graph, ctx: rg.ExecuteContext, ud: rawptr) {
+  d := cast(^PostProcessExecData)ud
+  post_process.begin_pass(&d.manager.post_process, ctx.cmd, d.swapchain_extent)
+  post_process.render(
+    &d.manager.post_process,
+    ctx.cmd,
+    d.swapchain_extent,
+    d.swapchain_view,
+    d.final_image_idx,
+    d.position_idx,
+    d.normal_idx,
+    d.albedo_idx,
+    d.metallic_idx,
+    d.emissive_idx,
+    d.depth_idx,
+    &d.manager.texture_manager,
+  )
+  post_process.end_pass(&d.manager.post_process, ctx.cmd)
 }
 
 record_post_process_pass :: proc(
   self: ^Manager,
+  gctx: ^gpu.GPUContext,
   frame_index: u32,
   cam: ^Camera,
   swapchain_extent: vk.Extent2D,
@@ -1475,121 +1826,172 @@ record_post_process_pass :: proc(
   swapchain_view: vk.ImageView,
 ) -> vk.Result {
   cmd := self.command_buffers[frame_index]
-  if final_image := gpu.get_texture_2d(
-    &self.texture_manager,
-    cam.attachments[.FINAL_IMAGE][frame_index],
-  ); final_image != nil {
-    gpu.image_barrier(
-      cmd,
-      final_image.image,
-      .COLOR_ATTACHMENT_OPTIMAL,
-      .SHADER_READ_ONLY_OPTIMAL,
-      {.COLOR_ATTACHMENT_WRITE},
-      {.SHADER_READ},
-      {.COLOR_ATTACHMENT_OUTPUT},
-      {.FRAGMENT_SHADER},
-      {.COLOR},
-    )
+  final_handle := cam.attachments[.FINAL_IMAGE][frame_index]
+  final_tex := gpu.get_texture_2d(&self.texture_manager, final_handle)
+  if final_tex == nil do return .ERROR_UNKNOWN
+  final_h := rg.graph_import_image(
+    &self.graph,
+    "post_process_input",
+    rg.ImportedImage {
+      image          = final_tex.image,
+      view           = final_tex.view,
+      format         = final_tex.spec.format,
+      extent         = final_tex.spec.extent,
+      initial_layout = .COLOR_ATTACHMENT_OPTIMAL,
+    },
+  )
+  swapchain_h := rg.graph_import_image(
+    &self.graph,
+    "swapchain",
+    rg.ImportedImage {
+      image          = swapchain_image,
+      view           = swapchain_view,
+      format         = .UNDEFINED,
+      extent         = swapchain_extent,
+      initial_layout = .UNDEFINED,
+    },
+  )
+  exec_data := rg.blackboard_add(&self.graph.blackboard, "post_process.exec", PostProcessExecData)
+  if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
+  exec_data^ = PostProcessExecData {
+    manager          = self,
+    swapchain_extent = swapchain_extent,
+    swapchain_view   = swapchain_view,
+    final_image_idx  = final_handle.index,
+    position_idx     = cam.attachments[.POSITION][frame_index].index,
+    normal_idx       = cam.attachments[.NORMAL][frame_index].index,
+    albedo_idx       = cam.attachments[.ALBEDO][frame_index].index,
+    metallic_idx     = cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
+    emissive_idx     = cam.attachments[.EMISSIVE][frame_index].index,
+    depth_idx        = cam.attachments[.DEPTH][frame_index].index,
   }
-  gpu.image_barrier(
-    cmd,
-    swapchain_image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR},
+  pass := rg.graph_add_pass(
+    &self.graph,
+    "post_process",
+    .Graphics,
+    post_process_graph_execute,
+    exec_data,
+    side_effect = true,
+    manual_rendering = true,
   )
-  post_process.begin_pass(&self.post_process, cmd, swapchain_extent)
-  post_process.render(
-    &self.post_process,
-    cmd,
-    swapchain_extent,
-    swapchain_view,
-    cam.attachments[.FINAL_IMAGE][frame_index].index,
-    cam.attachments[.POSITION][frame_index].index,
-    cam.attachments[.NORMAL][frame_index].index,
-    cam.attachments[.ALBEDO][frame_index].index,
-    cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
-    cam.attachments[.EMISSIVE][frame_index].index,
-    cam.attachments[.DEPTH][frame_index].index,
-    &self.texture_manager,
-  )
-  post_process.end_pass(&self.post_process, cmd)
+  rg.pass_read(&self.graph, pass, final_h, .Sampled)
+  rg.pass_write(&self.graph, pass, swapchain_h, .ColorAttachment)
+  // Defer flush — UI pass shares the swapchain and will join this graph cycle.
   return .SUCCESS
 }
 
-record_ui_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  swapchain_view: vk.ImageView,
+UIExecData :: struct {
+  manager:          ^Manager,
+  gctx:             ^gpu.GPUContext,
+  swapchain_view:   vk.ImageView,
   swapchain_extent: vk.Extent2D,
-) {
-  cmd := self.command_buffers[frame_index]
-  // UI rendering pass - renders on top of post-processed image
+  frame_index:      u32,
+}
+
+ui_graph_execute :: proc(g: ^rg.Graph, ctx: rg.ExecuteContext, ud: rawptr) {
+  d := cast(^UIExecData)ud
+  cmd := ctx.cmd
   rendering_attachment_info := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = swapchain_view,
+    imageView   = d.swapchain_view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-
   rendering_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = swapchain_extent},
+    renderArea = {extent = d.swapchain_extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &rendering_attachment_info,
   }
-
   vk.CmdBeginRendering(cmd, &rendering_info)
-
-  // Set viewport and scissor
   viewport := vk.Viewport {
     x        = 0,
-    y        = f32(swapchain_extent.height),
-    width    = f32(swapchain_extent.width),
-    height   = -f32(swapchain_extent.height),
+    y        = f32(d.swapchain_extent.height),
+    width    = f32(d.swapchain_extent.width),
+    height   = -f32(d.swapchain_extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
-  scissor := vk.Rect2D {
-    offset = {0, 0},
-    extent = swapchain_extent,
-  }
+  scissor := vk.Rect2D{offset = {0, 0}, extent = d.swapchain_extent}
   vk.CmdSetViewport(cmd, 0, 1, &viewport)
   vk.CmdSetScissor(cmd, 0, 1, &scissor)
-
-  // Bind pipeline and descriptor sets
-  vk.CmdBindPipeline(cmd, .GRAPHICS, self.ui.pipeline)
+  vk.CmdBindPipeline(cmd, .GRAPHICS, d.manager.ui.pipeline)
   vk.CmdBindDescriptorSets(
     cmd,
     .GRAPHICS,
-    self.ui.pipeline_layout,
+    d.manager.ui.pipeline_layout,
     0,
     1,
-    &self.texture_manager.descriptor_set,
+    &d.manager.texture_manager.descriptor_set,
     0,
     nil,
   )
-
-  // Render UI using staged commands
   ui_render.render(
-    &self.ui,
-    self.ui_commands[:],
-    gctx,
-    &self.texture_manager,
+    &d.manager.ui,
+    d.manager.ui_commands[:],
+    d.gctx,
+    &d.manager.texture_manager,
     cmd,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    frame_index,
+    d.swapchain_extent.width,
+    d.swapchain_extent.height,
+    d.frame_index,
   )
-
   vk.CmdEndRendering(cmd)
+}
+
+record_ui_pass :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  frame_index: u32,
+  swapchain_image: vk.Image,
+  swapchain_view: vk.ImageView,
+  swapchain_extent: vk.Extent2D,
+) -> vk.Result {
+  cmd := self.command_buffers[frame_index]
+  // Re-import swapchain in the same graph cycle as post_process. After
+  // post_process wrote it, current_layout = COLOR_ATTACHMENT_OPTIMAL but the
+  // resource was cleared from g.imports map in flush — wait, no flush happened
+  // yet; post_process is still pending in this same graph. So look up.
+  swapchain_h, found := self.graph.imports["swapchain"]
+  if !found {
+    swapchain_h = rg.graph_import_image(
+      &self.graph,
+      "swapchain",
+      rg.ImportedImage {
+        image          = swapchain_image,
+        view           = swapchain_view,
+        format         = .UNDEFINED,
+        extent         = swapchain_extent,
+        initial_layout = .UNDEFINED,
+      },
+    )
+  }
+  exec_data := rg.blackboard_add(&self.graph.blackboard, "ui.exec", UIExecData)
+  if exec_data == nil do return .ERROR_OUT_OF_HOST_MEMORY
+  exec_data^ = UIExecData {
+    manager          = self,
+    gctx             = gctx,
+    swapchain_view   = swapchain_view,
+    swapchain_extent = swapchain_extent,
+    frame_index      = frame_index,
+  }
+  pass := rg.graph_add_pass(
+    &self.graph,
+    "ui",
+    .Graphics,
+    ui_graph_execute,
+    exec_data,
+    side_effect = true,
+    manual_rendering = true,
+  )
+  rg.pass_write(&self.graph, pass, swapchain_h, .ColorAttachment)
+  if res, err := rg.graph_flush(&self.graph, gctx, cmd); res != .SUCCESS || err != .None {
+    log.errorf("ui graph flush: vk=%v err=%v", res, err)
+    return res if res != .SUCCESS else .ERROR_UNKNOWN
+  }
+  return .SUCCESS
 }
 
 sync_mesh_geometry_for_handle :: proc(
