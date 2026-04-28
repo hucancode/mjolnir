@@ -1440,24 +1440,6 @@ transparency_record_body :: proc(
   gpu.set_viewport_scissor(cmd, depth_texture.spec.extent)
 
   // Render transparent objects
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.transparent_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.transparent_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
   transparent.render(
     &self.transparent_renderer,
     cmd,
@@ -1477,24 +1459,6 @@ transparency_record_body :: proc(
   )
 
   // Render wireframe objects
-  gpu.buffer_barrier(
-    cmd,
-    cam.wireframe_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.wireframe_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.wireframe_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.wireframe_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
   wireframe.render(
     &self.wireframe_renderer,
     cmd,
@@ -1514,24 +1478,6 @@ transparency_record_body :: proc(
   )
 
   // Render random_color objects
-  gpu.buffer_barrier(
-    cmd,
-    cam.random_color_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.random_color_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.random_color_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.random_color_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
   random_color.render(
     &self.random_color_renderer,
     cmd,
@@ -1551,24 +1497,6 @@ transparency_record_body :: proc(
   )
 
   // Render line_strip objects
-  gpu.buffer_barrier(
-    cmd,
-    cam.line_strip_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.line_strip_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.line_strip_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.line_strip_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
   line_strip.render(
     &self.line_strip_renderer,
     cmd,
@@ -1588,24 +1516,6 @@ transparency_record_body :: proc(
   )
 
   // Render sprites
-  gpu.buffer_barrier(
-    cmd,
-    cam.sprite_draw_commands[frame_index].buffer,
-    vk.DeviceSize(cam.sprite_draw_commands[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
-  gpu.buffer_barrier(
-    cmd,
-    cam.sprite_draw_count[frame_index].buffer,
-    vk.DeviceSize(cam.sprite_draw_count[frame_index].bytes_count),
-    {.SHADER_WRITE},
-    {.INDIRECT_COMMAND_READ},
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-  )
   sprite.render(
     &self.sprite_renderer,
     cmd,
@@ -2135,7 +2045,7 @@ ensure_shadow_2d_resource :: proc(
   // Check if already allocated
   if shadow != nil {
     if sm, ok := shadow^.?; ok {
-      if sm.shadow_map_2d[0].index != 0 do return .SUCCESS
+      if sm.draw_count[0].buffer != 0 do return .SUCCESS
     }
   }
 
@@ -2149,17 +2059,35 @@ ensure_shadow_2d_resource :: proc(
       .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
+    if depth := gpu.get_texture_2d(
+      &render.texture_manager,
+      sm.shadow_map_2d[frame],
+    ); depth != nil {
+      cmd_buf := gpu.begin_single_time_command(gctx) or_return
+      gpu.image_barrier(
+        cmd_buf,
+        depth.image,
+        .UNDEFINED,
+        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        {},
+        {.SHADER_READ},
+        {.TOP_OF_PIPE},
+        {.FRAGMENT_SHADER},
+        {.DEPTH},
+      )
+      gpu.end_single_time_command(gctx, &cmd_buf) or_return
+    }
     sm.draw_count[frame] = gpu.create_mutable_buffer(
       gctx,
       u32,
       1,
-      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
     sm.draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,
       vk.DrawIndexedIndirectCommand,
       rd.MAX_NODES_IN_SCENE,
-      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
     sm.descriptor_sets[frame] = gpu.create_descriptor_set(
       gctx,
@@ -2183,7 +2111,7 @@ ensure_shadow_cube_resource :: proc(
   // Check if already allocated
   if shadow != nil {
     if sm, ok := shadow^.?; ok {
-      if sm.shadow_map_cube[0].index != 0 do return .SUCCESS
+      if sm.draw_count[0].buffer != 0 do return .SUCCESS
     }
   }
 
@@ -2197,17 +2125,36 @@ ensure_shadow_cube_resource :: proc(
       .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
+    if cube := gpu.get_texture_cube(
+      &render.texture_manager,
+      sm.shadow_map_cube[frame],
+    ); cube != nil {
+      cmd_buf := gpu.begin_single_time_command(gctx) or_return
+      gpu.image_barrier(
+        cmd_buf,
+        cube.image,
+        .UNDEFINED,
+        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        {},
+        {.SHADER_READ},
+        {.TOP_OF_PIPE},
+        {.FRAGMENT_SHADER},
+        {.DEPTH},
+        layer_count = 6,
+      )
+      gpu.end_single_time_command(gctx, &cmd_buf) or_return
+    }
     sm.draw_count[frame] = gpu.create_mutable_buffer(
       gctx,
       u32,
       1,
-      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
     sm.draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,
       vk.DrawIndexedIndirectCommand,
       rd.MAX_NODES_IN_SCENE,
-      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
     sm.descriptor_sets[frame] = gpu.create_descriptor_set(
       gctx,

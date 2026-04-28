@@ -1251,6 +1251,22 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
        res != .SUCCESS || err != .None {
       return res if res != .SUCCESS else .ERROR_UNKNOWN
     }
+    if depth := gpu.get_texture_2d(
+      &self.render.texture_manager,
+      render_cam.attachments[.DEPTH][self.frame_index],
+    ); depth != nil {
+      gpu.image_barrier(
+        command_buffer,
+        depth.image,
+        .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        {.SHADER_READ},
+        {.LATE_FRAGMENT_TESTS},
+        {.FRAGMENT_SHADER, .COMPUTE_SHADER},
+        {.DEPTH},
+      )
+    }
   }
   main_render_cam := &self.render.per_camera_data[self.world.main_camera.index]
   // Debug rendering pass (bones, etc.) - renders after transparency
