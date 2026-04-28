@@ -27,19 +27,16 @@ SIMD_TWO_8 := f32x8{2, 2, 2, 2, 2, 2, 2, 2}
 @(init, private)
 init_simd :: proc "contextless" () {
   when ODIN_ARCH == .amd64 {
-    if features, ok := info.cpu.features.?; ok {
-      // Check for AVX2 support
-      if .avx2 in features && .fma in features {
-        simd_mode = .AVX2
-        simd_lanes = 8
-        return
-      }
-      // Check for SSE support (SSE2 is guaranteed on x86-64)
-      if .sse2 in features {
-        simd_mode = .SSE
-        simd_lanes = 4
-        return
-      }
+    features := info.cpu_features()
+    if .avx2 in features && .fma in features {
+      simd_mode = .AVX2
+      simd_lanes = 8
+      return
+    }
+    if .sse2 in features {
+      simd_mode = .SSE
+      simd_lanes = 4
+      return
     }
   }
   // Fallback to scalar

@@ -25,7 +25,7 @@ Nav_Mesh_Tile_Entry :: struct {
 
 // Save navigation mesh to file
 save_navmesh_to_file :: proc(nav_mesh: ^Nav_Mesh, filepath: string) -> bool {
-  file, err := os.open(filepath, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0o644)
+  file, err := os.open(filepath, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, os.perm(0o644))
   if err != os.ERROR_NONE {
     log.errorf("Failed to create navmesh file: %s", filepath)
     return false
@@ -166,7 +166,7 @@ load_navmesh_from_file :: proc(
 
 // Save navigation mesh data to file (raw tile data)
 save_navmesh_data_to_file :: proc(data: []u8, filepath: string) -> bool {
-  file, err := os.open(filepath, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0o644)
+  file, err := os.open(filepath, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, os.perm(0o644))
   if err != os.ERROR_NONE {
     log.errorf("Failed to create navmesh data file: %s", filepath)
     return false
@@ -190,8 +190,8 @@ load_navmesh_data_from_file :: proc(
   bool,
 ) {
   context.allocator = allocator
-  data, read_ok := os.read_entire_file(filepath, allocator)
-  if !read_ok {
+  data, read_err := os.read_entire_file(filepath, allocator)
+  if read_err != nil {
     log.errorf("Failed to read navmesh data file: %s", filepath)
     return nil, false
   }

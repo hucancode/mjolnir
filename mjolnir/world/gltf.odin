@@ -191,11 +191,12 @@ load_textures_batch :: proc(
     own_pixel_data: bool
     defer if own_pixel_data do delete(pixel_data)
     if texture.image_.uri != nil {
-      texture_path_str := path.join({path.dir(gltf_path), string(texture.image_.uri)})
-      ok: bool
-      pixel_data, ok = os.read_entire_file(texture_path_str)
+      texture_path_str, jerr := path.join({path.dir(gltf_path), string(texture.image_.uri)}, context.allocator)
+      if jerr != nil do return .io_error
+      err: os.Error
+      pixel_data, err = os.read_entire_file(texture_path_str, context.allocator)
       own_pixel_data = true
-      if !ok do return .file_not_found
+      if err != nil do return .file_not_found
     } else if texture.image_.buffer_view != nil {
       view := texture.image_.buffer_view
       src_data_ptr := mem.ptr_offset(cast(^u8)view.buffer.data, view.offset)

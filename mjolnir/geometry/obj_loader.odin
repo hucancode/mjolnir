@@ -13,7 +13,8 @@ load_obj :: proc(
   geom: Geometry,
   ok: bool,
 ) {
-  data := os.read_entire_file(filename) or_return
+  data, err := os.read_entire_file(filename, context.allocator)
+  if err != nil do return
   defer delete(data)
   content := string(data)
   lines := strings.split_lines(content)
