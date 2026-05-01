@@ -1,18 +1,57 @@
 package particles_compute
 
 import "../../gpu"
-import d "../data"
 import "core:log"
 import vk "vendor:vulkan"
 
 MAX_PARTICLES :: 65536
 COMPUTE_PARTICLE_BATCH :: 256
+MAX_EMITTERS :: 64
+MAX_FORCE_FIELDS :: 32
 
 SHADER_EMITTER_COMP :: #load("../../shader/particle/emitter.spv")
 SHADER_PARTICLE_COMP :: #load("../../shader/particle/compute.spv")
 SHADER_PARTICLE_COMPACT_COMP :: #load("../../shader/particle/compact.spv")
 
-Particle :: d.Particle
+Particle :: struct {
+  position:      [3]f32,
+  size:          f32,
+  velocity:      [3]f32,
+  size_end:      f32,
+  color_start:   [4]f32,
+  color_end:     [4]f32,
+  color:         [4]f32,
+  life:          f32,
+  max_life:      f32,
+  weight:        f32,
+  texture_index: u32,
+}
+
+Emitter :: struct {
+  initial_velocity:  [3]f32,
+  size_start:        f32,
+  color_start:       [4]f32,
+  color_end:         [4]f32,
+  aabb_min:          [3]f32,
+  emission_rate:     f32,
+  aabb_max:          [3]f32,
+  particle_lifetime: f32,
+  position_spread:   f32,
+  velocity_spread:   f32,
+  time_accumulator:  f32,
+  size_end:          f32,
+  weight:            f32,
+  weight_spread:     f32,
+  texture_index:     u32,
+  node_index:        u32,
+}
+
+ForceField :: struct {
+  tangent_strength: f32,
+  strength:         f32,
+  area_of_effect:   f32,
+  node_index:       u32,
+}
 
 ParticleSystemParams :: struct {
   particle_count:   u32,
@@ -24,6 +63,9 @@ ParticleSystemParams :: struct {
 Renderer :: struct {
   params_buffer:                      gpu.MutableBuffer(ParticleSystemParams),
   particle_count_buffer:              gpu.MutableBuffer(u32),
+  particle_buffer:                    gpu.MutableBuffer(Particle),
+  compact_particle_buffer:            gpu.MutableBuffer(Particle),
+  draw_command_buffer:                gpu.MutableBuffer(vk.DrawIndirectCommand),
   emitter_descriptor_set_layout:      vk.DescriptorSetLayout,
   emitter_descriptor_set:             vk.DescriptorSet,
   emitter_pipeline_layout:            vk.PipelineLayout,
@@ -44,10 +86,6 @@ simulate :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   node_data_set: vk.DescriptorSet,
-  particle_buffer: vk.Buffer,
-  compact_particle_buffer: vk.Buffer,
-  draw_command_buffer: vk.Buffer,
-  particle_buffer_size: vk.DeviceSize,
 ) {
   params_ptr := gpu.get(&self.params_buffer)
   counter_ptr := gpu.get(&self.particle_count_buffer)
@@ -63,7 +101,7 @@ simulate :: proc(
     node_data_set,
   )
   // One thread per emitter (local_size_x = 64)
-  vk.CmdDispatch(command_buffer, u32(d.MAX_EMITTERS + 63) / 64, 1, 1)
+  vk.CmdDispatch(command_buffer, u32(MAX_EMITTERS + 63) / 64, 1, 1)
 
   // Barrier to ensure emission is complete before compaction
   gpu.memory_barrier(
@@ -112,10 +150,10 @@ simulate :: proc(
   // Copy simulated particles back to main buffer
   vk.CmdCopyBuffer(
     command_buffer,
-    compact_particle_buffer,
-    particle_buffer,
+    self.compact_particle_buffer.buffer,
+    self.particle_buffer.buffer,
     1,
-    &vk.BufferCopy{size = particle_buffer_size},
+    &vk.BufferCopy{size = vk.DeviceSize(self.particle_buffer.bytes_count)},
   )
 
   // Final barrier for rendering
@@ -148,9 +186,6 @@ setup :: proc(
   gctx: ^gpu.GPUContext,
   emitter_descriptor_set: vk.DescriptorSet,
   forcefield_descriptor_set: vk.DescriptorSet,
-  particle_buffer: ^gpu.MutableBuffer(Particle),
-  compact_particle_buffer: ^gpu.MutableBuffer(Particle),
-  draw_command_buffer: ^gpu.MutableBuffer(vk.DrawIndirectCommand),
 ) -> (
   ret: vk.Result,
 ) {
@@ -177,10 +212,40 @@ setup :: proc(
     gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
   }
 
+  self.particle_buffer = gpu.create_mutable_buffer(
+    gctx,
+    Particle,
+    MAX_PARTICLES,
+    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
+  }
+
+  self.compact_particle_buffer = gpu.create_mutable_buffer(
+    gctx,
+    Particle,
+    MAX_PARTICLES,
+    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
+  }
+
+  self.draw_command_buffer = gpu.create_mutable_buffer(
+    gctx,
+    vk.DrawIndirectCommand,
+    1,
+    {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
+  }
+
   self.emitter_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.emitter_descriptor_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(particle_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_buffer)},
     {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_count_buffer)},
     {.UNIFORM_BUFFER, gpu.buffer_info(&self.params_buffer)},
   ) or_return
@@ -189,7 +254,7 @@ setup :: proc(
     gctx,
     &self.compute_descriptor_set_layout,
     {type = .UNIFORM_BUFFER, info = gpu.buffer_info(&self.params_buffer)},
-    {type = .STORAGE_BUFFER, info = gpu.buffer_info(compact_particle_buffer)},
+    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.compact_particle_buffer)},
     {
       type = .STORAGE_BUFFER,
       info = gpu.buffer_info(&self.particle_count_buffer),
@@ -199,9 +264,9 @@ setup :: proc(
   self.compact_descriptor_set = gpu.create_descriptor_set(
     gctx,
     &self.compact_descriptor_set_layout,
-    {type = .STORAGE_BUFFER, info = gpu.buffer_info(particle_buffer)},
-    {type = .STORAGE_BUFFER, info = gpu.buffer_info(compact_particle_buffer)},
-    {type = .STORAGE_BUFFER, info = gpu.buffer_info(draw_command_buffer)},
+    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.particle_buffer)},
+    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.compact_particle_buffer)},
+    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.draw_command_buffer)},
     {
       type = .STORAGE_BUFFER,
       info = gpu.buffer_info(&self.particle_count_buffer),
@@ -214,6 +279,9 @@ setup :: proc(
 teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   gpu.mutable_buffer_destroy(gctx.device, &self.params_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
   self.emitter_descriptor_set = 0
   self.compute_descriptor_set = 0
   self.compact_descriptor_set = 0

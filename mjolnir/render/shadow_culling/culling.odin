@@ -1,30 +1,44 @@
 package shadow_culling
 
 import "../../gpu"
-import d "../data"
 import vk "vendor:vulkan"
 
 SHADER_SHADOW_CULLING :: #load("../../shader/shadow/cull.spv")
 
+// include_flags / exclude_flags use the bit layout of render.NodeFlagSet; the
+// caller transmutes its NodeFlagSet to u32 so this package stays unaware of
+// render's NodeFlag enum.
 CullPushConstants :: struct {
   frustum_planes: [6][4]f32,
   node_count:     u32,
   max_draws:      u32,
-  include_flags:  d.NodeFlagSet,
-  exclude_flags:  d.NodeFlagSet,
+  include_flags:  u32,
+  exclude_flags:  u32,
 }
 // Total: 112 bytes
 
 System :: struct {
   node_count:        u32,
   max_draws:         u32,
+  include_flags:     u32,
+  exclude_flags:     u32,
   descriptor_layout: vk.DescriptorSetLayout,
   pipeline_layout:   vk.PipelineLayout,
   pipeline:          vk.Pipeline,
 }
 
-init :: proc(self: ^System, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
-  self.max_draws = d.MAX_NODES_IN_SCENE
+init :: proc(
+  self: ^System,
+  gctx: ^gpu.GPUContext,
+  max_draws: u32,
+  include_flags: u32,
+  exclude_flags: u32,
+) -> (
+  ret: vk.Result,
+) {
+  self.max_draws = max_draws
+  self.include_flags = include_flags
+  self.exclude_flags = exclude_flags
   self.descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.STORAGE_BUFFER, {.COMPUTE}},
@@ -72,6 +86,27 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyDescriptorSetLayout(gctx.device, self.descriptor_layout, nil)
 }
 
+create_per_light_descriptor :: proc(
+  self: ^System,
+  gctx: ^gpu.GPUContext,
+  node_buffer: vk.DescriptorBufferInfo,
+  mesh_buffer: vk.DescriptorBufferInfo,
+  draw_count: vk.DescriptorBufferInfo,
+  draw_commands: vk.DescriptorBufferInfo,
+) -> (
+  vk.DescriptorSet,
+  vk.Result,
+) {
+  return gpu.create_descriptor_set(
+    gctx,
+    &self.descriptor_layout,
+    {.STORAGE_BUFFER, node_buffer},
+    {.STORAGE_BUFFER, mesh_buffer},
+    {.STORAGE_BUFFER, draw_count},
+    {.STORAGE_BUFFER, draw_commands},
+  )
+}
+
 execute :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
@@ -79,13 +114,6 @@ execute :: proc(
   shadow_draw_count_buffer: vk.Buffer,
   shadow_draw_count_ds: vk.DescriptorSet,
 ) {
-  include_flags: d.NodeFlagSet = {.VISIBLE}
-  exclude_flags: d.NodeFlagSet = {
-    .MATERIAL_TRANSPARENT,
-    .MATERIAL_WIREFRAME,
-    .MATERIAL_RANDOM_COLOR,
-    .MATERIAL_LINE_STRIP,
-  }
   dispatch_x := (self.node_count + 63) / 64
   vk.CmdFillBuffer(
     command_buffer,
@@ -113,8 +141,8 @@ execute :: proc(
     frustum_planes = frustum_planes,
     node_count     = self.node_count,
     max_draws      = self.max_draws,
-    include_flags  = include_flags,
-    exclude_flags  = exclude_flags,
+    include_flags  = self.include_flags,
+    exclude_flags  = self.exclude_flags,
   }
   vk.CmdPushConstants(
     command_buffer,

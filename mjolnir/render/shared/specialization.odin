@@ -1,7 +1,6 @@
 package shared
 
 import "../../gpu"
-import d "../data"
 import vk "vendor:vulkan"
 
 SamplerType :: enum u32 {

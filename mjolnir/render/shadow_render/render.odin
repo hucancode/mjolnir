@@ -2,7 +2,6 @@ package shadow_render
 
 import "../../geometry"
 import "../../gpu"
-import d "../data"
 import "core:math"
 import "core:math/linalg"
 import vk "vendor:vulkan"
@@ -15,6 +14,7 @@ ShadowDepthPushConstants :: struct {
 
 System :: struct {
   max_draws:             u32,
+  shadow_map_size:       u32,
   depth_pipeline_layout: vk.PipelineLayout,
   depth_pipeline:        vk.Pipeline,
 }
@@ -46,10 +46,13 @@ init :: proc(
   node_data_set_layout: vk.DescriptorSetLayout,
   mesh_data_set_layout: vk.DescriptorSetLayout,
   vertex_skinning_set_layout: vk.DescriptorSetLayout,
+  max_draws: u32,
+  shadow_map_size: u32,
 ) -> (
   ret: vk.Result,
 ) {
-  self.max_draws = d.MAX_NODES_IN_SCENE
+  self.max_draws = max_draws
+  self.shadow_map_size = shadow_map_size
   self.depth_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
@@ -181,12 +184,12 @@ render :: proc(
   )
   gpu.begin_depth_rendering(
     command_buffer,
-    vk.Extent2D{d.SHADOW_MAP_SIZE, d.SHADOW_MAP_SIZE},
+    vk.Extent2D{self.shadow_map_size, self.shadow_map_size},
     &depth_attachment,
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    vk.Extent2D{d.SHADOW_MAP_SIZE, d.SHADOW_MAP_SIZE},
+    vk.Extent2D{self.shadow_map_size, self.shadow_map_size},
   )
   gpu.bind_graphics_pipeline(
     command_buffer,

@@ -7,6 +7,7 @@ import "mjolnir"
 import "mjolnir/animation"
 import cont "mjolnir/containers"
 import "mjolnir/geometry"
+import "mjolnir/render"
 import "mjolnir/render/post_process"
 import "mjolnir/world"
 import "vendor:glfw"
@@ -27,7 +28,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  engine.render.visibility.stats_enabled = false
+  render.set_visibility_stats_enabled(&engine.render, false)
   engine.debug_ui_enabled = true
   plain_material_handle := engine.world.builtin_materials[world.Color.WHITE]
   cube_mesh_handle := engine.world.builtin_meshes[world.Primitive.CUBE]

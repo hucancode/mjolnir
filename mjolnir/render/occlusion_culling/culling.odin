@@ -2,11 +2,27 @@ package occlusion_culling
 
 import alg "../../algebra"
 import "../../gpu"
-import d "../data"
-import rd "../data"
 import vk "vendor:vulkan"
 
 SHADER_CULLING :: #load("../../shader/occlusion_culling/cull.spv")
+
+FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
+
+// Draw pipelines participate in indirect-draw culling; each camera owns one
+// DrawBuffers per pipeline.
+DrawPipeline :: enum {
+  OPAQUE,
+  TRANSPARENT,
+  WIREFRAME,
+  RANDOM_COLOR,
+  LINE_STRIP,
+  SPRITE,
+}
+
+DrawBuffers :: struct {
+  count:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  commands: [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+}
 
 VisibilityPushConstants :: struct {
   camera_index:      u32,
@@ -37,10 +53,11 @@ System :: struct {
 init :: proc(
   self: ^System,
   gctx: ^gpu.GPUContext,
+  max_draws: u32,
 ) -> (
   ret: vk.Result,
 ) {
-  self.max_draws = d.MAX_NODES_IN_SCENE
+  self.max_draws = max_draws
   self.depth_bias = 0.0001
   self.depth_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
@@ -126,59 +143,23 @@ perform_culling :: proc(
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
   frame_index: u32,
-  opaque_draw_count: ^gpu.MutableBuffer(u32),
-  transparent_draw_count: ^gpu.MutableBuffer(u32),
-  sprite_draw_count: ^gpu.MutableBuffer(u32),
-  wireframe_draw_count: ^gpu.MutableBuffer(u32),
-  random_color_draw_count: ^gpu.MutableBuffer(u32),
-  line_strip_draw_count: ^gpu.MutableBuffer(u32),
+  draws: ^[DrawPipeline]DrawBuffers,
   descriptor_set: vk.DescriptorSet,
   pyramid_width: u32,
   pyramid_height: u32,
 ) {
   if self.node_count == 0 do return
-  vk.CmdFillBuffer(
-    command_buffer,
-    opaque_draw_count.buffer,
-    0,
-    vk.DeviceSize(opaque_draw_count.bytes_count),
-    0,
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    transparent_draw_count.buffer,
-    0,
-    vk.DeviceSize(transparent_draw_count.bytes_count),
-    0,
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    sprite_draw_count.buffer,
-    0,
-    vk.DeviceSize(sprite_draw_count.bytes_count),
-    0,
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    wireframe_draw_count.buffer,
-    0,
-    vk.DeviceSize(wireframe_draw_count.bytes_count),
-    0,
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    random_color_draw_count.buffer,
-    0,
-    vk.DeviceSize(random_color_draw_count.bytes_count),
-    0,
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    line_strip_draw_count.buffer,
-    0,
-    vk.DeviceSize(line_strip_draw_count.bytes_count),
-    0,
-  )
+  // Zero each pipeline's count buffer for this frame so the shader can append.
+  for pipe in DrawPipeline {
+    count := &draws[pipe].count[frame_index]
+    vk.CmdFillBuffer(
+      command_buffer,
+      count.buffer,
+      0,
+      vk.DeviceSize(count.bytes_count),
+      0,
+    )
+  }
   gpu.bind_compute_pipeline(
     command_buffer,
     self.cull_pipeline,

@@ -1,31 +1,43 @@
 package shadow_sphere_culling
 
 import "../../gpu"
-import d "../data"
 import vk "vendor:vulkan"
 
 SHADER_SPHERE_CULLING :: #load("../../shader/shadow_spherical/cull.spv")
 
+// include_flags / exclude_flags use the bit layout of render.NodeFlagSet; the
+// caller transmutes its NodeFlagSet to u32.
 SphereCullPushConstants :: struct {
-  light_position: [3]f32,        // 12 bytes (vec3 in std140 = 12 bytes, followed by...)
-  sphere_radius:  f32,           // 4 bytes - shadow far distance
-  node_count:     u32,           // 4 bytes
-  max_draws:      u32,           // 4 bytes
-  include_flags:  d.NodeFlagSet, // 4 bytes
-  exclude_flags:  d.NodeFlagSet, // 4 bytes
+  light_position: [3]f32,
+  sphere_radius:  f32,
+  node_count:     u32,
+  max_draws:      u32,
+  include_flags:  u32,
+  exclude_flags:  u32,
 }
-// Total: 32 bytes (vec3+float+4xuint = naturally packed in std430)
 
 System :: struct {
   node_count:        u32,
   max_draws:         u32,
+  include_flags:     u32,
+  exclude_flags:     u32,
   descriptor_layout: vk.DescriptorSetLayout,
   pipeline_layout:   vk.PipelineLayout,
   pipeline:          vk.Pipeline,
 }
 
-init :: proc(self: ^System, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
-  self.max_draws = d.MAX_NODES_IN_SCENE
+init :: proc(
+  self: ^System,
+  gctx: ^gpu.GPUContext,
+  max_draws: u32,
+  include_flags: u32,
+  exclude_flags: u32,
+) -> (
+  ret: vk.Result,
+) {
+  self.max_draws = max_draws
+  self.include_flags = include_flags
+  self.exclude_flags = exclude_flags
   self.descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
     {.STORAGE_BUFFER, {.COMPUTE}},  // nodes
@@ -72,6 +84,27 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   vk.DestroyDescriptorSetLayout(gctx.device, self.descriptor_layout, nil)
 }
 
+create_per_light_descriptor :: proc(
+  self: ^System,
+  gctx: ^gpu.GPUContext,
+  node_buffer: vk.DescriptorBufferInfo,
+  mesh_buffer: vk.DescriptorBufferInfo,
+  draw_count: vk.DescriptorBufferInfo,
+  draw_commands: vk.DescriptorBufferInfo,
+) -> (
+  vk.DescriptorSet,
+  vk.Result,
+) {
+  return gpu.create_descriptor_set(
+    gctx,
+    &self.descriptor_layout,
+    {.STORAGE_BUFFER, node_buffer},
+    {.STORAGE_BUFFER, mesh_buffer},
+    {.STORAGE_BUFFER, draw_count},
+    {.STORAGE_BUFFER, draw_commands},
+  )
+}
+
 execute :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
@@ -80,13 +113,6 @@ execute :: proc(
   shadow_draw_count_buffer: vk.Buffer,
   shadow_draw_count_ds: vk.DescriptorSet,
 ) {
-  include_flags: d.NodeFlagSet = {.VISIBLE}
-  exclude_flags: d.NodeFlagSet = {
-    .MATERIAL_TRANSPARENT,
-    .MATERIAL_WIREFRAME,
-    .MATERIAL_RANDOM_COLOR,
-    .MATERIAL_LINE_STRIP,
-  }
   dispatch_x := (self.node_count + 63) / 64
   vk.CmdFillBuffer(
     command_buffer,
@@ -115,8 +141,8 @@ execute :: proc(
     sphere_radius  = sphere_radius,
     node_count     = self.node_count,
     max_draws      = self.max_draws,
-    include_flags  = include_flags,
-    exclude_flags  = exclude_flags,
+    include_flags  = self.include_flags,
+    exclude_flags  = self.exclude_flags,
   }
   vk.CmdPushConstants(
     command_buffer,

@@ -1,7 +1,6 @@
 package ambient
 
 import "../../gpu"
-import d "../data"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -170,17 +169,22 @@ shutdown :: proc(
   self.pipeline_layout = 0
 }
 
-begin_pass :: proc(
+// record draws ambient/IBL contribution as a fullscreen triangle. Owns its
+// own begin_rendering / end_rendering scope.
+record :: proc(
   self: ^Renderer,
-  final_image_handle: gpu.Texture2DHandle,
-  texture_manager: ^gpu.TextureManager,
+  camera_handle: u32,
   command_buffer: vk.CommandBuffer,
+  texture_manager: ^gpu.TextureManager,
+  final_image_handle: gpu.Texture2DHandle,
   cameras_descriptor_set: vk.DescriptorSet,
+  position_texture_idx: u32,
+  normal_texture_idx: u32,
+  albedo_texture_idx: u32,
+  metallic_texture_idx: u32,
+  emissive_texture_idx: u32,
 ) {
-  color_texture := gpu.get_texture_2d(
-    texture_manager,
-    final_image_handle,
-  )
+  color_texture := gpu.get_texture_2d(texture_manager, final_image_handle)
   gpu.begin_rendering(
     command_buffer,
     color_texture.spec.extent,
@@ -199,18 +203,6 @@ begin_pass :: proc(
     cameras_descriptor_set, // set = 0 (per-frame camera buffer)
     texture_manager.descriptor_set, // set = 1 (bindless textures)
   )
-}
-
-render :: proc(
-  self: ^Renderer,
-  camera_handle: u32,
-  position_texture_idx: u32,
-  normal_texture_idx: u32,
-  albedo_texture_idx: u32,
-  metallic_texture_idx: u32,
-  emissive_texture_idx: u32,
-  command_buffer: vk.CommandBuffer,
-) {
   push := PushConstant {
     camera_index           = camera_handle,
     environment_index      = self.environment_map.index,
@@ -232,8 +224,5 @@ render :: proc(
     &push,
   )
   vk.CmdDraw(command_buffer, 3, 1, 0, 0) // fullscreen triangle
-}
-
-end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }

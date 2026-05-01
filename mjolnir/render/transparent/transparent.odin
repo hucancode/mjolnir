@@ -78,6 +78,15 @@ init :: proc(
 	return .SUCCESS
 }
 
+// setup / teardown are no-ops for transparent (no swapchain-dependent state).
+// Provided so the canonical lifecycle init→setup→teardown→shutdown is uniform.
+setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
+	return .SUCCESS
+}
+
+teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+}
+
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 	vk.DestroyPipeline(gctx.device, self.pipeline, nil)
 	self.pipeline = 0
@@ -85,7 +94,9 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 	self.pipeline_layout = 0
 }
 
-render :: proc(
+// record draws transparent objects inside the caller's render scope. Owns its
+// own indirect-draw buffer barriers (compute→graphics).
+record :: proc(
 	self: ^Renderer,
 	cmd: vk.CommandBuffer,
 	camera_index: u32,
@@ -98,11 +109,28 @@ render :: proc(
 	vertex_skinning_set: vk.DescriptorSet,
 	vertex_buffer: vk.Buffer,
 	index_buffer: vk.Buffer,
-	draw_buffer: vk.Buffer,
-	count_buffer: vk.Buffer,
+	draw_buffer: ^gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+	count_buffer: ^gpu.MutableBuffer(u32),
 	max_draw_count: u32,
 ) {
-	// Bind pipeline
+	gpu.buffer_barrier(
+		cmd,
+		draw_buffer.buffer,
+		vk.DeviceSize(draw_buffer.bytes_count),
+		{.SHADER_WRITE},
+		{.INDIRECT_COMMAND_READ},
+		{.COMPUTE_SHADER},
+		{.DRAW_INDIRECT},
+	)
+	gpu.buffer_barrier(
+		cmd,
+		count_buffer.buffer,
+		vk.DeviceSize(count_buffer.bytes_count),
+		{.SHADER_WRITE},
+		{.INDIRECT_COMMAND_READ},
+		{.COMPUTE_SHADER},
+		{.DRAW_INDIRECT},
+	)
 	gpu.bind_graphics_pipeline(
 		cmd,
 		self.pipeline,
@@ -115,8 +143,6 @@ render :: proc(
 		mesh_data_set,
 		vertex_skinning_set,
 	)
-
-	// Push constants
 	push_constants := PushConstant{camera_index = camera_index}
 	vk.CmdPushConstants(
 		cmd,
@@ -126,19 +152,15 @@ render :: proc(
 		size_of(PushConstant),
 		&push_constants,
 	)
-
-	// Bind vertex/index buffers
 	vertex_buffers := [?]vk.Buffer{vertex_buffer}
 	vertex_offsets := [?]vk.DeviceSize{0}
 	vk.CmdBindVertexBuffers(cmd, 0, 1, raw_data(vertex_buffers[:]), raw_data(vertex_offsets[:]))
 	vk.CmdBindIndexBuffer(cmd, index_buffer, 0, .UINT32)
-
-	// Draw
 	vk.CmdDrawIndexedIndirectCount(
 		cmd,
-		draw_buffer,
+		draw_buffer.buffer,
 		0,
-		count_buffer,
+		count_buffer.buffer,
 		0,
 		max_draw_count,
 		u32(size_of(vk.DrawIndexedIndirectCommand)),

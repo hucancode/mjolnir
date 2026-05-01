@@ -24,6 +24,7 @@ Renderer :: struct {
   indices:         [UI_MAX_INDICES]u32,
   vertex_count:    u32,
   index_count:     u32,
+  commands:        [dynamic]cmd.RenderCommand,
 }
 
 DrawBatch :: struct {
@@ -44,6 +45,7 @@ init :: proc(
   format: vk.Format,
 ) -> vk.Result {
   log.info("Initializing UI renderer pipeline...")
+  self.commands = make([dynamic]cmd.RenderCommand, 0, 256)
   self.pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
@@ -55,6 +57,13 @@ init :: proc(
   create_pipeline(self, gctx, format) or_return
   log.info("UI renderer pipeline initialized successfully")
   return .SUCCESS
+}
+
+stage_commands :: proc(self: ^Renderer, commands: []cmd.RenderCommand) {
+  clear(&self.commands)
+  for command in commands {
+    append(&self.commands, command)
+  }
 }
 
 setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
@@ -145,11 +154,11 @@ create_pipeline :: proc(
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+  delete(self.commands)
 }
 
 render :: proc(
   self: ^Renderer,
-  commands: []cmd.RenderCommand,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
   command_buffer: vk.CommandBuffer,
@@ -157,6 +166,17 @@ render :: proc(
   height: u32,
   frame_index: u32,
 ) {
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    self.pipeline_layout,
+    0,
+    1,
+    &texture_manager.descriptor_set,
+    0,
+    nil,
+  )
   projection := linalg.matrix_ortho3d_f32(0, f32(width), f32(height), 0, -1, 1)
   vk.CmdPushConstants(
     command_buffer,
@@ -167,6 +187,7 @@ render :: proc(
     &projection,
   )
 
+  commands := self.commands[:]
   sort_keys := make(
     [dynamic]CommandSortKey,
     0,

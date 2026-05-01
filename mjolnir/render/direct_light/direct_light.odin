@@ -2,13 +2,10 @@ package direct_light
 
 import "../../geometry"
 import "../../gpu"
-import d "../data"
 import "../shared"
 import "core:log"
 import "core:math/linalg"
 import vk "vendor:vulkan"
-
-LightType :: d.LightType
 
 SHADER_POINT_VERT := #load("../../shader/lighting_point/vert.spv")
 SHADER_POINT_FRAG := #load("../../shader/lighting_point/frag.spv")

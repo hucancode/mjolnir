@@ -3,7 +3,6 @@ package debug_ui
 import cont "../../containers"
 import geo "../../geometry"
 import gpu "../../gpu"
-import d "../data"
 import "../shared"
 import "core:log"
 import "core:math/linalg"
@@ -398,11 +397,14 @@ recreate_images :: proc(
     linalg.matrix4_scale(dpi_scale)
 }
 
-begin_pass :: proc(
+// record renders the staged microui commands into the swapchain color view.
+// Owns its own begin_rendering / end_rendering scope.
+record :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
   extent: vk.Extent2D,
+  textures_descriptor_set: vk.DescriptorSet,
 ) {
   gpu.begin_rendering(
     command_buffer,
@@ -411,13 +413,6 @@ begin_pass :: proc(
     gpu.create_color_attachment_view(color_view, .LOAD, .STORE),
   )
   gpu.set_viewport_scissor(command_buffer, extent)
-}
-
-render :: proc(
-  self: ^Renderer,
-  command_buffer: vk.CommandBuffer,
-  textures_descriptor_set: vk.DescriptorSet,
-) {
   command_backing: ^mu.Command
   for variant in mu.next_command_iterator(&self.ctx, &command_backing) {
     switch cmd in variant {
@@ -454,8 +449,5 @@ render :: proc(
     }
   }
   ui_flush(self, command_buffer, textures_descriptor_set)
-}
-
-end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }

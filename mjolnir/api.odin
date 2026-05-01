@@ -60,7 +60,6 @@ create_texture_from_path :: proc(
   handle: world.Image2DHandle,
   ok: bool,
 ) #optional_ok {
-  ret: vk.Result
   render_handle, render_ret := gpu.create_texture_2d_from_path(
     &engine.gctx,
     &engine.render.texture_manager,
@@ -71,8 +70,7 @@ create_texture_from_path :: proc(
     is_hdr,
   )
   handle = transmute(world.Image2DHandle)render_handle
-  ret = render_ret
-  return handle, ret == .SUCCESS
+  return handle, render_ret == .SUCCESS
 }
 
 create_texture_from_data :: proc(
@@ -302,6 +300,13 @@ create_camera :: proc(
     .TRANSPARENCY,
     .PARTICLES,
     .POST_PROCESS,
+    .SPRITE,
+    .WIREFRAME,
+    .LINE_STRIP,
+    .RANDOM_COLOR,
+    .DEBUG_UI,
+    .DEBUG_BONE,
+    .UI,
   },
   position: [3]f32 = {0, 0, 3},
   target: [3]f32 = {0, 0, 0},
@@ -345,7 +350,7 @@ get_camera_attachment :: proc(
 ) #optional_ok {
   if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
   gpu_handle :=
-    engine.render.per_camera_data[camera_handle.index].attachments[attachment_type][frame_index]
+    engine.render.cameras[camera_handle.index].attachments[attachment_type][frame_index]
   return transmute(world.Image2DHandle)gpu_handle, true
 }
 

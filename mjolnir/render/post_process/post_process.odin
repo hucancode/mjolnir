@@ -2,7 +2,6 @@ package post_process
 
 import cont "../../containers"
 import "../../gpu"
-import d "../data"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -529,24 +528,9 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   delete(self.effect_stack)
 }
 
-// Modular postprocess API
-begin_pass :: proc(
-  self: ^Renderer,
-  command_buffer: vk.CommandBuffer,
-  extent: vk.Extent2D,
-) {
-  if len(self.effect_stack) == 0 {
-    // if no postprocess effect, just copy the input to output
-    append(&self.effect_stack, nil)
-  }
-  gpu.set_viewport_scissor(
-    command_buffer,
-    extent,
-    flip_y = false,
-  )
-}
-
-render :: proc(
+// record runs the post-process effect stack into output_view. If the stack is
+// empty a single copy effect is appended so the input always reaches output.
+record :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
@@ -560,6 +544,11 @@ render :: proc(
   depth_texture_idx: u32,
   texture_manager: ^gpu.TextureManager,
 ) {
+  if len(self.effect_stack) == 0 {
+    // if no postprocess effect, just copy the input to output
+    append(&self.effect_stack, nil)
+  }
+  gpu.set_viewport_scissor(command_buffer, extent, flip_y = false)
   for effect, i in self.effect_stack {
     is_first := i == 0
     is_last := i == len(self.effect_stack) - 1
@@ -799,5 +788,3 @@ render :: proc(
   }
 }
 
-end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
-}

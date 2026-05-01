@@ -1,16 +1,16 @@
 package particles_render
 
 import "../../gpu"
-import rd "../data"
+import particles_compute "../particles_compute"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
+Particle :: particles_compute.Particle
+
 SHADER_PARTICLE_VERT := #load("../../shader/particle/vert.spv")
 SHADER_PARTICLE_FRAG := #load("../../shader/particle/frag.spv")
 TEXTURE_BLACK_CIRCLE :: #load("../../assets/black-circle.png")
-
-Particle :: rd.Particle
 
 Renderer :: struct {
 	render_pipeline_layout: vk.PipelineLayout,
@@ -151,50 +151,44 @@ create_render_pipeline :: proc(
 	return .SUCCESS
 }
 
-begin_pass :: proc(
+setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
+	return .SUCCESS
+}
+
+teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+}
+
+// record draws particles into the camera's color/depth attachments. Owns its
+// own begin_rendering / end_rendering scope.
+record :: proc(
 	self: ^Renderer,
 	command_buffer: vk.CommandBuffer,
+	camera_index: u32,
 	color_handle: gpu.Texture2DHandle,
 	depth_handle: gpu.Texture2DHandle,
 	texture_manager: ^gpu.TextureManager,
+	cameras_descriptor_set: vk.DescriptorSet,
+	textures_descriptor_set: vk.DescriptorSet,
+	compact_particle_buffer: vk.Buffer,
+	draw_command_buffer: vk.Buffer,
 ) {
-	color_texture := gpu.get_texture_2d(
-		texture_manager,
-		color_handle,
-	)
+	color_texture := gpu.get_texture_2d(texture_manager, color_handle)
 	if color_texture == nil {
 		log.error("Particle renderer missing color attachment")
 		return
 	}
-
-	depth_texture := gpu.get_texture_2d(
-		texture_manager,
-		depth_handle,
-	)
+	depth_texture := gpu.get_texture_2d(texture_manager, depth_handle)
 	if depth_texture == nil {
 		log.error("Particle renderer missing depth attachment")
 		return
 	}
-
 	gpu.begin_rendering(
 		command_buffer,
 		depth_texture.spec.extent,
 		gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
 		gpu.create_color_attachment(color_texture, .LOAD, .STORE),
 	)
-
 	gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)
-}
-
-render :: proc(
-	self: ^Renderer,
-	command_buffer: vk.CommandBuffer,
-	camera_index: u32,
-	cameras_descriptor_set: vk.DescriptorSet,
-	textures_descriptor_set: vk.DescriptorSet,
-	compact_particle_buffer: vk.Buffer,
-	draw_command_buffer: vk.Buffer,
-) {
 	gpu.bind_graphics_pipeline(
 		command_buffer,
 		self.render_pipeline,
@@ -202,7 +196,6 @@ render :: proc(
 		cameras_descriptor_set,
 		textures_descriptor_set,
 	)
-
 	camera_idx := camera_index
 	vk.CmdPushConstants(
 		command_buffer,
@@ -212,17 +205,9 @@ render :: proc(
 		size_of(u32),
 		&camera_idx,
 	)
-
 	offset: vk.DeviceSize = 0
 	buffer := compact_particle_buffer
-	vk.CmdBindVertexBuffers(
-		command_buffer,
-		0,
-		1,
-		&buffer,
-		&offset,
-	)
-
+	vk.CmdBindVertexBuffers(command_buffer, 0, 1, &buffer, &offset)
 	vk.CmdDrawIndirect(
 		command_buffer,
 		draw_command_buffer,
@@ -230,8 +215,5 @@ render :: proc(
 		1,
 		size_of(vk.DrawIndirectCommand),
 	)
-}
-
-end_pass :: proc(command_buffer: vk.CommandBuffer) {
 	vk.CmdEndRendering(command_buffer)
 }

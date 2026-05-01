@@ -7,12 +7,19 @@ import "core:math"
 import "core:math/linalg"
 
 PassType :: enum {
-  SHADOW       = 0,
-  GEOMETRY     = 1,
-  LIGHTING     = 2,
-  TRANSPARENCY = 3,
-  PARTICLES    = 4,
-  POST_PROCESS = 5,
+  SHADOW,
+  GEOMETRY,
+  LIGHTING,
+  TRANSPARENCY,
+  PARTICLES,
+  POST_PROCESS,
+  SPRITE,
+  WIREFRAME,
+  LINE_STRIP,
+  RANDOM_COLOR,
+  DEBUG_UI,
+  DEBUG_BONE,
+  UI,
 }
 
 PassTypeSet :: bit_set[PassType;u32]
@@ -180,6 +187,13 @@ camera_init :: proc(
     .TRANSPARENCY,
     .PARTICLES,
     .POST_PROCESS,
+    .SPRITE,
+    .WIREFRAME,
+    .LINE_STRIP,
+    .RANDOM_COLOR,
+    .DEBUG_UI,
+    .DEBUG_BONE,
+    .UI,
   },
   camera_position: [3]f32 = {0, 0, 3},
   camera_target: [3]f32 = {0, 0, 0},

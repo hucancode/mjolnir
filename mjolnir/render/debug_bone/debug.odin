@@ -1,7 +1,6 @@
 package debug
 
 import "../../gpu"
-import "../data"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -184,66 +183,35 @@ clear_bones :: proc(self: ^Renderer) {
   clear(&self.bone_instances)
 }
 
-// Begin debug rendering pass
-// Attaches to the final image and depth buffer
-// Returns false if attachments are missing (caller should skip rendering)
-begin_pass :: proc(
+setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
+  return .SUCCESS
+}
+
+teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+}
+
+// record draws all staged bone instances on top of the camera's color/depth
+// attachments. No-op if no bones are staged or attachments are missing.
+record :: proc(
   self: ^Renderer,
+  command_buffer: vk.CommandBuffer,
   color_handle: gpu.Texture2DHandle,
   depth_handle: gpu.Texture2DHandle,
   texture_manager: ^gpu.TextureManager,
-  command_buffer: vk.CommandBuffer,
-) -> bool {
-  color_texture := gpu.get_texture_2d(
-    texture_manager,
-    color_handle,
-  )
-  if color_texture == nil {
-    log.error("Debug rendering missing color attachment")
-    return false
-  }
-
-  depth_texture := gpu.get_texture_2d(
-    texture_manager,
-    depth_handle,
-  )
-  if depth_texture == nil {
-    log.error("Debug rendering missing depth attachment")
-    return false
-  }
-
-  // Begin rendering with LOAD ops (don't clear, render on top of existing content)
-  gpu.begin_rendering(
-    command_buffer,
-    depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
-    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
-  )
-
-  gpu.set_viewport_scissor(
-    command_buffer,
-    depth_texture.spec.extent,
-  )
-
-  return true
-}
-
-// End debug rendering pass
-end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
-  vk.CmdEndRendering(command_buffer)
-}
-
-// Render all staged bone instances
-// Should be called between begin_pass and end_pass
-// Uses point sprite rendering to draw all bones in a single draw call
-render :: proc(
-  self: ^Renderer,
-  command_buffer: vk.CommandBuffer,
   camera_descriptor_set: vk.DescriptorSet,
   camera_index: u32,
 ) -> vk.Result {
   if len(self.bone_instances) == 0 do return .SUCCESS
-
+  color_texture := gpu.get_texture_2d(texture_manager, color_handle)
+  if color_texture == nil {
+    log.error("Debug rendering missing color attachment")
+    return .SUCCESS
+  }
+  depth_texture := gpu.get_texture_2d(texture_manager, depth_handle)
+  if depth_texture == nil {
+    log.error("Debug rendering missing depth attachment")
+    return .SUCCESS
+  }
   bone_count := u32(len(self.bone_instances))
   if bone_count > self.max_bones {
     log.warnf(
@@ -253,18 +221,20 @@ render :: proc(
     )
     bone_count = self.max_bones
   }
-
-  // Upload bone instance data to GPU
-  // Copy to instance buffer (CPU → GPU staging)
+  // Upload bone instance data to GPU (CPU → GPU staging)
   instance_data := gpu.get_all(&self.instance_buffer)
   for i in 0 ..< bone_count {
     instance_data[i] = self.bone_instances[i]
   }
-
-  // Bind pipeline
+  // Render on top of existing content (LOAD ops).
+  gpu.begin_rendering(
+    command_buffer,
+    depth_texture.spec.extent,
+    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
+  )
+  gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
-
-  // Bind vertex buffer (instance data)
   offsets := [?]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -273,8 +243,6 @@ render :: proc(
     &self.instance_buffer.buffer,
     raw_data(offsets[:]),
   )
-
-  // Bind descriptor sets (camera)
   descriptor_set := camera_descriptor_set
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -286,8 +254,6 @@ render :: proc(
     0,
     nil,
   )
-
-  // Push constants (camera index)
   camera_index_copy := camera_index
   vk.CmdPushConstants(
     command_buffer,
@@ -297,9 +263,7 @@ render :: proc(
     size_of(u32),
     &camera_index_copy,
   )
-
-  // Draw points (one per bone)
   vk.CmdDraw(command_buffer, bone_count, 1, 0, 0)
-
+  vk.CmdEndRendering(command_buffer)
   return .SUCCESS
 }

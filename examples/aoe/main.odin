@@ -4,6 +4,7 @@ import "../../mjolnir"
 import cont "../../mjolnir/containers"
 import "../../mjolnir/geometry"
 import "../../mjolnir/physics"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -33,7 +34,7 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   physics.init(&physics_world)
   cube_body_to_mesh = make(map[physics.TriggerHandle]world.NodeHandle)
-  engine.render.visibility.stats_enabled = false
+  render.set_visibility_stats_enabled(&engine.render, false)
   engine.debug_ui_enabled = false
   // Use builtin meshes and materials
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
