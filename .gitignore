@@ -8,3 +8,4 @@ perf.data.old
 screenshots/*.ppm
 screenshots/*.png
 docs/**/*.html
+!docs/mermaid.html

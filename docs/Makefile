@@ -3,8 +3,8 @@ HTML := $(patsubst %.md,%.html,$(MD))
 
 doc: $(HTML)
 
-%.html: %.md style.css
-	pandoc $< -s -c style.css -o $@
+%.html: %.md style.css mermaid.html
+	pandoc $< -s -c style.css --include-in-header=mermaid.html -o $@
 clean:
 	rm *.html
 

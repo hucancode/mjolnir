@@ -1,110 +1,91 @@
 # Mjolnir Engine
 
-[Mjolnir](https://github.com/hucancode/mjolnir) is a minimalistic game engine to help people enjoy game programming
+[Mjolnir](https://github.com/hucancode/mjolnir) is a minimalistic, bindless,
+GPU-driven game engine in Odin + Vulkan 1.3.
 
-![](images/lights.png)
+![](images/pp.png)
 
-# Get Started
-To use Mjolnir in your odin code, run `make shader` to compile shaders to SPIR-V and then copy `mjolnir` directory to your project and start using mjolnir API.
-See `examples` for common use cases.
+## Read order
 
-# Notable features
+1. [`architecture.md`](architecture.html) — layered design, frame timeline,
+   bindless model, staging pipeline, physics step, shadow strategy. **Read
+   this first.** All other docs assume it.
+2. [`cookbook.md`](cookbook.html) — task-oriented recipes (cube, glTF,
+   physics, animation blending, IK, particles, navmesh, post-process, UI).
+3. `api_*.md` — exhaustive per-module reference. One page per module.
 
-- Physically-Based Rendering
-- Camera, Light, Shadow
-- Skinning, Animation
-- GLTF
-- Post-processing
-- Billboard, Sprite
-- Tween, Spline
-- Particles Simulation
-- Render to texture
-- Physics
-- Recast/Detour
-- Inverse Kinematics
-- HUD, text
+## API reference index
 
-And more in development
+| Layer | Module | Reference |
+|---|---|---|
+| 1 | `gpu`        | [api_gpu.md](api_gpu.html) |
+| 1 | `geometry`   | [api_geometry.md](api_geometry.html) |
+| 1 | `algebra`    | [api_algebra.md](api_algebra.html) |
+| 1 | `containers` | [api_containers.md](api_containers.html) |
+| 1 | `animation`  | [api_animation.md](api_animation.html) |
+| 2 | `world`      | [api_world.md](api_world.html) |
+| 2 | `render`     | [api_render.md](api_render.html) |
+| 2 | `physics`    | [api_physics.md](api_physics.html) |
+| 2 | `navigation` | [api_navigation.md](api_navigation.html) |
+| 2 | `ui`         | [api_ui.md](api_ui.html) |
+| 3 | `mjolnir`    | [api_engine.md](api_engine.html) |
 
-- Procedural Animation (Tail, Leg)
-- Animation Layering
+Higher layers depend only on lower layers; sibling modules within a layer
+never depend on each other. See
+[architecture §1](architecture.html#1-layered-module-organization).
 
-## Build Commands
+## Get started
+
+To use Mjolnir, run `make shader` to compile shaders to SPIR-V and copy the
+`mjolnir/` directory into your project. See `examples/` for canonical usage.
+
+## Notable features
+
+- Physically-based rendering (deferred + IBL + light volumes)
+- Bindless GPU resources, GPU-driven culling (frustum + Hi-Z occlusion)
+- Cameras as render targets (sample any camera's output as a bindless texture)
+- 2D and cubemap shadows
+- Skeletal animation: keyframes + spline + FK + IK (FABRIK) + procedural modifiers
+- Animation layering with bone masks, blend modes, transitions
+- glTF and OBJ loading
+- Particle simulation + force fields (compute shader)
+- Rigid-body physics with CCD, BVH broadphase, SIMD contact solver
+- Recast + Detour navigation
+- 2D UI: widgets, layout, events, fontstash text
+- Post-process stack: tonemap, bloom, blur, fog, outline, DoF, crosshatch
+
+## Build commands
 
 ```bash
 # Build and run in release mode
 make run
-# Build and run in debug mode and vulkan validation
+# Build and run in debug + Vulkan validation
 make debug
-# Build only (release mode)
-make build
-# Build only (debug mode)
-make build-debug
+# Build only
+make build         # release
+make build-debug   # debug
 # Build all shaders
 make shader
 # Run all tests
 odin test . --all-packages
-# run a single test called "test_name" inside "module_name"
+# Run a single test
 odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 ```
 
-## Architecture Overview
+## Build flags
 
-### Core Engine Structure
-The engine is organized 3 layers with clear responsibility boundaries.
-Systems on the same level must not depends on each other directly or indirectly. For example *Render* module and *World* module must be able to independently developed by 2 different teams without much communication. 
+| Flag | Default | Effect |
+|---|---|---|
+| `FRAMES_IN_FLIGHT` | 2 | GPU frame buffering. |
+| `RENDER_FPS` | 60 | Target render cadence. |
+| `UPDATE_FPS` | `RENDER_FPS` | Target update cadence. |
+| `USE_PARALLEL_UPDATE` | false | Run `update` on a dedicated thread. |
+| `FRAME_LIMIT` | 0 | Cap total frames (0 = unlimited). |
+| `REQUIRE_GEOMETRY_SHADER` | false | Required for cubemap point-light shadows. |
 
-**Lower Level Systems:**
+## Debugging tips
 
-- **GPU**: `mjolnir/gpu/` - Vulkan context, memory/texture/mesh management, swapchain, pipeline helpers
-- **Containers**: `mjolnir/containers/` - Generic data structures (handle pools, slab allocators)
-- **Geometry**: `mjolnir/geometry/` - Camera, transforms, primitives, BVH, octree, AABB, frustum
-- **Animation**: `mjolnir/animation/` - Skeletal animation support
-
-**Higher Level Systems:**
-
-- **Render**: `mjolnir/render/` - Consists of render sub-systems
-  + Geometry Renderer
-  + Lighting/Shadow Renderer
-  + Transparency Renderer
-  + Particle Renderer
-  + Post-process Renderer
-  + Camera/Visibility Culling
-  + UI Renderer
-- **World**: `mjolnir/world/` - Scene graph, GLTF/OBJ loading
-- **Physics**: `mjolnir/physics/` - Rigid body dynamics, collision detection
-- **Navigation**: `mjolnir/navigation/` - Recast + Detour
-
-**Engine System:**
-
-- **Engine**: `mjolnir/engine.odin` - Final integration point, user-facing API
-
-For more information, see [usage (WIP)](usage.html)
-
-## Development Notes
-
-
-### GPU Resource Management
-- Uses custom slab allocators to sub-allocate vertices/indices/bone matrices
-- **Bindless**: All GPU resources managed in array-based system. Draw commands send resource IDs to index into GPU arrays instead of raw data
-
-### Shader Development
-- Shaders are in `mjolnir/shader/` organized by render pass
-- Use `make shader` to rebuild all shaders. It's fast and incremental, you need not to build individual shader
-- Compute shaders include:
-  + Particle system: `compute.comp`, `compact.comp`, `emitter.comp`
-  + Culling systems: `culling.comp` for visibility
-
-### Debugging Tips
-
-- To debug visual issues, build with *FRAME_LIMIT* set to something like 10, then check the log
-- Collect screenshot with `make capture`
-- To slow down the engine to examine render logs, build with *RENDER_FPS* set to low value like 4 or 2
-
-### Build Flags
-
-- **REQUIRE_GEOMETRY_SHADER**: Compile with geometry shader support (required for spherical shadow mapping)
-- **USE_PARALLEL_UPDATE**: Enable dedicated update thread for parallel scene updates
-- **FRAME_LIMIT**: limit renderer to only render a few frames
-- **RENDER_FPS**: limit renderer FPS
-- **UPDATE_FPS**: limit logic update FPS
+- For visual issues: build with `-define:FRAME_LIMIT=10`, inspect logs.
+- Capture screenshots with `make capture`.
+- Slow the renderer with `-define:RENDER_FPS=4` to read render logs frame by frame.
+- Toggle `engine.debug_ui_enabled = true` for the microui overlay.

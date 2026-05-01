@@ -1,0 +1,17 @@
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' });
+  document.addEventListener('DOMContentLoaded', () => {
+    // pandoc 3.x: <pre class="mermaid"><code>diagram</code></pre>
+    document.querySelectorAll('pre.mermaid > code').forEach(code => {
+      code.parentElement.textContent = code.textContent;
+    });
+    // pandoc 2.x: <pre><code class="language-mermaid">diagram</code></pre>
+    document.querySelectorAll('pre > code.language-mermaid').forEach(code => {
+      const pre = code.parentElement;
+      pre.className = 'mermaid';
+      pre.textContent = code.textContent;
+    });
+    mermaid.run({ querySelector: 'pre.mermaid' });
+  });
+</script>
