@@ -5,35 +5,6 @@ GPU-driven game engine in Odin + Vulkan 1.3.
 
 ![](images/pp.png)
 
-## Read order
-
-1. [`architecture.md`](architecture.html) — layered design, frame timeline,
-   bindless model, staging pipeline, physics step, shadow strategy. **Read
-   this first.** All other docs assume it.
-2. [`cookbook.md`](cookbook.html) — task-oriented recipes (cube, glTF,
-   physics, animation blending, IK, particles, navmesh, post-process, UI).
-3. `api_*.md` — exhaustive per-module reference. One page per module.
-
-## API reference index
-
-| Layer | Module | Reference |
-|---|---|---|
-| 1 | `gpu`        | [api_gpu.md](api_gpu.html) |
-| 1 | `geometry`   | [api_geometry.md](api_geometry.html) |
-| 1 | `algebra`    | [api_algebra.md](api_algebra.html) |
-| 1 | `containers` | [api_containers.md](api_containers.html) |
-| 1 | `animation`  | [api_animation.md](api_animation.html) |
-| 2 | `world`      | [api_world.md](api_world.html) |
-| 2 | `render`     | [api_render.md](api_render.html) |
-| 2 | `physics`    | [api_physics.md](api_physics.html) |
-| 2 | `navigation` | [api_navigation.md](api_navigation.html) |
-| 2 | `ui`         | [api_ui.md](api_ui.html) |
-| 3 | `mjolnir`    | [api_engine.md](api_engine.html) |
-
-Higher layers depend only on lower layers; sibling modules within a layer
-never depend on each other. See
-[architecture §1](architecture.html#1-layered-module-organization).
-
 ## Get started
 
 To use Mjolnir, run `make shader` to compile shaders to SPIR-V and copy the
@@ -89,3 +60,29 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 - Capture screenshots with `make capture`.
 - Slow the renderer with `-define:RENDER_FPS=4` to read render logs frame by frame.
 - Toggle `engine.debug_ui_enabled = true` for the microui overlay.
+
+
+## Read more about engine internals
+
+1. [`architecture.md`](architecture.html) — layered design, frame timeline,
+   bindless model, staging pipeline, physics step, shadow strategy. **Read
+   this first.** All other docs assume it.
+2. [`cookbook.md`](cookbook.html) — task-oriented recipes (cube, glTF,
+   physics, animation blending, IK, particles, navmesh, post-process, UI).
+3. `api_*.md` — exhaustive per-module reference. One page per module.
+
+## API reference index
+
+| Layer | Module | Reference |
+|---|---|---|
+| 1 | `gpu`        | [api_gpu.md](api_gpu.html) |
+| 1 | `geometry`   | [api_geometry.md](api_geometry.html) |
+| 1 | `algebra`    | [api_algebra.md](api_algebra.html) |
+| 1 | `containers` | [api_containers.md](api_containers.html) |
+| 1 | `animation`  | [api_animation.md](api_animation.html) |
+| 2 | `world`      | [api_world.md](api_world.html) |
+| 2 | `render`     | [api_render.md](api_render.html) |
+| 2 | `physics`    | [api_physics.md](api_physics.html) |
+| 2 | `navigation` | [api_navigation.md](api_navigation.html) |
+| 2 | `ui`         | [api_ui.md](api_ui.html) |
+| 3 | `mjolnir`    | [api_engine.md](api_engine.html) |

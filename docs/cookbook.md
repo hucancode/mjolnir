@@ -1,43 +1,6 @@
 # Cookbook
 
-Recipes for the most common things you'll do with Mjolnir. Each recipe gives:
-
-- **Goal** — what you'll achieve
-- **Modules** — which packages you import
-- **Code** — drop-in compilable snippet
-- **Notes** — non-obvious gotchas
-
-All recipes assume you already have `context.logger` and have allocated an
-`^mjolnir.Engine`. Layer references match [`architecture.md`](architecture.html).
-
-> ZEN.md rule 5: avoid wrappers. Recipes call the layer-2 procs directly
-> (`world.*`, `physics.*`, `nav.*`, `ui.*`) — there is no engine façade.
-
----
-
-## Index
-
-1. [Hello cube](#1-hello-cube)
-2. [Move and rotate a node](#2-move-and-rotate-a-node)
-3. [Spawn a primitive grid](#3-spawn-a-primitive-grid)
-4. [Add lights and shadows](#4-add-lights-and-shadows)
-5. [Load a glTF model](#5-load-a-gltf-model)
-6. [Play a skeletal animation](#6-play-a-skeletal-animation)
-7. [Blend two animations on layers](#7-blend-two-animations-on-layers)
-8. [Add IK head tracking](#8-add-ik-head-tracking)
-9. [Procedural tail / spider legs](#9-procedural-tail--spider-legs)
-10. [Spawn a particle emitter](#10-spawn-a-particle-emitter)
-11. [Apply a force field](#11-apply-a-force-field)
-12. [Rigid-body physics](#12-rigid-body-physics)
-13. [Trigger volumes & area-of-effect queries](#13-trigger-volumes--area-of-effect-queries)
-14. [Mouse picking via raycast](#14-mouse-picking-via-raycast)
-15. [Build a navmesh & follow a path](#15-build-a-navmesh--follow-a-path)
-16. [Render a minimap to texture](#16-render-a-minimap-to-texture)
-17. [Add post-process effects](#17-add-post-process-effects)
-18. [Build a HUD with the UI system](#18-build-a-hud-with-the-ui-system)
-19. [Custom orbit / follow camera](#19-custom-orbit--follow-camera)
-20. [Hot-reloading a texture](#20-hot-reloading-a-texture)
-21. [Background loading pattern](#21-background-loading-pattern)
+Recipes for the most common things you'll do with Mjolnir.
 
 ---
 
