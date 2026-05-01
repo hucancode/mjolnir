@@ -217,9 +217,6 @@ init :: proc(
       case:
         return
       }
-      if engine.key_press_proc != nil {
-        engine.key_press_proc(engine, int(key), int(action), int(mods))
-      }
     },
   )
   glfw.SetMouseButtonCallback(
