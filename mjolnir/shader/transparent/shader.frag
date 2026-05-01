@@ -121,9 +121,9 @@ void main() {
         albedo = texture(
             sampler2D(textures[material.albedo_index], samplers[SAMPLER_LINEAR_REPEAT]),
             inTexCoord
-        );
+        ) * material.base_color_factor;
     } else {
-        albedo = inColor;
+        albedo = inColor * material.base_color_factor;
     }
     if (albedo.a < 0.001) {
         discard;
