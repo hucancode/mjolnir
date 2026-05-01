@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import post_process "../../mjolnir/render/post_process"
 import "../../mjolnir/world"
 import "core:log"

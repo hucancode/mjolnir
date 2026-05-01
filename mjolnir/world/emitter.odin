@@ -1,6 +1,7 @@
 package world
 
 import cont "../containers"
+import "../gpu"
 
 Emitter :: struct {
   initial_velocity:  [3]f32,
@@ -17,14 +18,14 @@ Emitter :: struct {
   weight:            f32,
   weight_spread:     f32,
   enabled:           b32,
-  texture_handle:    Image2DHandle,
+  texture_handle:    gpu.Texture2DHandle,
   node_handle:       NodeHandle,
 }
 
 create_emitter :: proc(
   world: ^World,
   node_handle: NodeHandle,
-  texture_handle: Image2DHandle,
+  texture_handle: gpu.Texture2DHandle,
   emission_rate: f32,
   initial_velocity: [3]f32,
   velocity_spread: f32,

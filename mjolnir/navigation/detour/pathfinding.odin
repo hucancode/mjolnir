@@ -6,6 +6,10 @@ import "core:math"
 import "core:math/linalg"
 import "core:mem/virtual"
 
+Find_Path_Options :: enum u8 {
+  Any_Angle = 0x02,
+}
+
 H_SCALE :: 0.999
 
 // A* node with position, cost, and parent info

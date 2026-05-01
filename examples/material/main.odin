@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -33,7 +32,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     &engine.world,
     {.ALBEDO_TEXTURE},
     .PBR,
-    albedo_handle = transmute(world.Image2DHandle)albedo_texture,
+    albedo_handle = albedo_texture,
     roughness_value = 0.35,
     metallic_value = 0.1,
   )
@@ -59,7 +58,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         false,
       ),
     ) or_else {}
-  if light_node, ok := cont.get(engine.world.nodes, light_handle); ok {
+  if light_node, ok := world.node(&engine.world, light_handle); ok {
     light_node.transform.rotation = q2 * q1
     light_node.transform.is_dirty = true
   }

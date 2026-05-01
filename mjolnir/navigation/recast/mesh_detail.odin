@@ -8,6 +8,39 @@ import "core:math/linalg"
 import "core:slice"
 import "core:time"
 
+Poly_Mesh_Detail :: struct {
+  meshes: [][4]u32,
+  verts:  [][3]f32,
+  tris:   [][4]u8,
+}
+
+create_poly_mesh_detail :: proc(
+  pmesh: ^Poly_Mesh,
+  chf: ^Compact_Heightfield,
+  sample_dist, sample_max_error: f32,
+) -> ^Poly_Mesh_Detail {
+  dmesh := new(Poly_Mesh_Detail)
+  if !build_poly_mesh_detail(
+    pmesh,
+    chf,
+    sample_dist,
+    sample_max_error,
+    dmesh,
+  ) {
+    free_poly_mesh_detail(dmesh)
+    return nil
+  }
+  return dmesh
+}
+
+free_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) {
+  if dmesh == nil do return
+  delete(dmesh.meshes)
+  delete(dmesh.verts)
+  delete(dmesh.tris)
+  free(dmesh)
+}
+
 // Detail mesh building constants
 RC_UNSET_HEIGHT :: 0xffff
 

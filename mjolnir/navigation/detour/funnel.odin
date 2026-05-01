@@ -5,6 +5,23 @@ import "../recast"
 import "core:math"
 import "core:math/linalg"
 
+Straight_Path_Point :: struct {
+  pos:   [3]f32,
+  flags: u8,
+  ref:   recast.Poly_Ref,
+}
+
+Straight_Path_Flags :: enum u8 {
+  Start               = 0x01,
+  End                 = 0x02,
+  Off_Mesh_Connection = 0x04,
+}
+
+Straight_Path_Options :: enum u8 {
+  Area_Crossings = 0x01,
+  All_Crossings  = 0x02,
+}
+
 find_straight_path :: proc(
   query: ^Nav_Mesh_Query,
   start_pos, end_pos: [3]f32,

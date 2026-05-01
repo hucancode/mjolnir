@@ -2,8 +2,6 @@ package world
 
 import cont "../containers"
 import "../geometry"
-import "../physics"
-import "core:math"
 import "core:math/linalg"
 
 translate_by :: proc {
@@ -50,6 +48,16 @@ scale :: proc {
   node_scale,
 }
 
+node_rotate_by :: proc {
+  node_rotate_by_quaternion,
+  node_rotate_by_angle,
+}
+
+node_rotate :: proc {
+  node_rotate_quaternion,
+  node_rotate_angle,
+}
+
 node_translate_by :: proc(
   world: ^World,
   handle: NodeHandle,
@@ -74,11 +82,6 @@ node_translate :: proc(
   }
 }
 
-node_rotate_by :: proc {
-  node_rotate_by_quaternion,
-  node_rotate_by_angle,
-}
-
 node_rotate_by_quaternion :: proc(
   world: ^World,
   handle: NodeHandle,
@@ -98,11 +101,6 @@ node_rotate_by_angle :: proc(
   if node, ok := cont.get(world.nodes, handle); ok {
     geometry.rotate_by_angle(&node.transform, angle, axis)
   }
-}
-
-node_rotate :: proc {
-  node_rotate_quaternion,
-  node_rotate_angle,
 }
 
 node_rotate_quaternion :: proc(
@@ -159,76 +157,5 @@ node_scale_xyz :: proc(
 node_scale :: proc(world: ^World, handle: NodeHandle, s: f32) {
   if node, ok := cont.get(world.nodes, handle); ok {
     geometry.scale(&node.transform, s)
-  }
-}
-
-get_node :: proc(
-  world: ^World,
-  handle: NodeHandle,
-) -> (
-  ^Node,
-  bool,
-) #optional_ok {
-  return cont.get(world.nodes, handle)
-}
-
-// Find first mesh child of a parent node
-// Returns (child_handle, child_node, mesh_attachment, ok)
-find_first_mesh_child :: proc(
-  world: ^World,
-  parent_handle: NodeHandle,
-) -> (
-  child_handle: NodeHandle,
-  child_node: ^Node,
-  mesh_attachment: ^MeshAttachment,
-  ok: bool,
-) {
-  node := cont.get(world.nodes, parent_handle) or_return
-  for child in node.children {
-    child_node = cont.get(world.nodes, child) or_continue
-    mesh_attachment, has_mesh := &child_node.attachment.(MeshAttachment)
-    if has_mesh do return child, child_node, mesh_attachment, true
-  }
-  return {}, nil, nil, false
-}
-
-// Add tags to a node by handle
-// Returns false if node not found
-tag_node :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  tags: NodeTagSet,
-) -> bool {
-  node := cont.get(world.nodes, handle) or_return
-  node.tags += tags
-  return true
-}
-
-// Remove tags from a node
-// Returns false if node not found
-untag_node :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  tags: NodeTagSet,
-) -> bool {
-  node := cont.get(world.nodes, handle) or_return
-  node.tags -= tags
-  return true
-}
-
-// Sync all nodes with rigid body attachments from physics to world
-sync_all_physics_to_world :: proc(
-  world: ^World,
-  physics_world: ^physics.World,
-) {
-  for &entry in world.nodes.entries do if entry.active {
-    node := &entry.item
-    if attachment, ok := node.attachment.(RigidBodyAttachment); ok {
-      if body, ok := physics.get_dynamic_body(physics_world, attachment.body_handle); ok {
-        node.transform.position = body.position
-        node.transform.rotation = body.rotation
-        node.transform.is_dirty = true
-      }
-    }
   }
 }

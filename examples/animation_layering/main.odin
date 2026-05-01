@@ -2,7 +2,6 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/animation"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -80,9 +79,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Find the mesh node and setup animation layers
   for handle in root_nodes {
-    node := cont.get(engine.world.nodes, handle) or_continue
+    node := world.node(&engine.world, handle) or_continue
     for child in node.children {
-      child_node := cont.get(engine.world.nodes, child) or_continue
+      child_node := world.node(&engine.world, child) or_continue
       _, has_mesh := child_node.attachment.(world.MeshAttachment)
       if has_mesh {
         fox_handle = child

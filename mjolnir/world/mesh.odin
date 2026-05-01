@@ -6,6 +6,113 @@ import "../geometry"
 import "core:log"
 import "core:math/linalg"
 
+BakedNodeInfo :: struct {
+  tags:         NodeTagSet,
+  vertex_count: int,
+  index_count:  int,
+}
+
+@(private)
+match_bake_node_filter :: proc(
+  tags: NodeTagSet,
+  include: NodeTagSet,
+  exclude: NodeTagSet,
+) -> bool {
+  return(
+    (exclude == {} || (tags & exclude) == {}) &&
+    (include == {} || (tags & include) != {}) \
+  )
+}
+
+// Walk world's nodes; collect filtered mesh geometry into a single buffer.
+// Returns the merged geometry and (optionally) per-node info for downstream tagging.
+bake_geometry :: proc(
+  world: ^World,
+  include_filter: NodeTagSet = {.ENVIRONMENT},
+  exclude_filter: NodeTagSet = {},
+  with_node_info: bool = false,
+) -> (
+  geom: geometry.Geometry,
+  node_infos: []BakedNodeInfo,
+  ok: bool,
+) {
+  vertices := make([dynamic]geometry.Vertex, 0, 4096)
+  indices := make([dynamic]u32, 0, 16384)
+  infos := make([dynamic]BakedNodeInfo, 0, 64) if with_node_info else nil
+  for &entry in world.nodes.entries do if entry.active {
+    n := &entry.item
+    if !match_bake_node_filter(n.tags, include_filter, exclude_filter) do continue
+    mesh_attachment, is_mesh := n.attachment.(MeshAttachment)
+    if !is_mesh do continue
+    mesh := cont.get(world.meshes, mesh_attachment.handle) or_continue
+    mesh_geom, has_geom := mesh.cpu_geometry.?
+    if !has_geom do continue
+    vertex_base := u32(len(vertices))
+    for v in mesh_geom.vertices {
+      p := n.transform.world_matrix * [4]f32{v.position.x, v.position.y, v.position.z, 1.0}
+      append(&vertices, geometry.Vertex{position = p.xyz})
+    }
+    for src_index in mesh_geom.indices {
+      append(&indices, vertex_base + src_index)
+    }
+    if with_node_info {
+      append(&infos, BakedNodeInfo{tags = n.tags, vertex_count = len(mesh_geom.vertices), index_count = len(mesh_geom.indices)})
+    }
+  }
+  if len(vertices) == 0 {
+    delete(vertices)
+    delete(indices)
+    if with_node_info do delete(infos)
+    return {}, nil, false
+  }
+  geom = geometry.Geometry {
+    vertices = vertices[:],
+    indices  = indices[:],
+    aabb     = geometry.aabb_from_vertices(vertices[:]),
+  }
+  if with_node_info {
+    node_infos = infos[:]
+  } else {
+    node_infos = nil
+  }
+  return geom, node_infos, true
+}
+
+// Bake filtered scene geometry into a single mesh.
+bake :: proc(
+  world: ^World,
+  include_filter: NodeTagSet = {.ENVIRONMENT},
+  exclude_filter: NodeTagSet = {},
+) -> (
+  mesh_handle: MeshHandle,
+  ok: bool,
+) #optional_ok {
+  baked_geom, _, baked_ok := bake_geometry(world, include_filter, exclude_filter)
+  if !baked_ok do return
+  mesh_handle, _, ok = create_mesh(world, baked_geom, true)
+  return
+}
+
+// Find first mesh child of a parent node.
+// Returns (child_handle, child_node, mesh_attachment, ok)
+find_first_mesh_child :: proc(
+  world: ^World,
+  parent_handle: NodeHandle,
+) -> (
+  child_handle: NodeHandle,
+  child_node: ^Node,
+  mesh_attachment: ^MeshAttachment,
+  ok: bool,
+) {
+  node := cont.get(world.nodes, parent_handle) or_return
+  for child in node.children {
+    child_node = cont.get(world.nodes, child) or_continue
+    mesh_attachment, has_mesh := &child_node.attachment.(MeshAttachment)
+    if has_mesh do return child, child_node, mesh_attachment, true
+  }
+  return {}, nil, nil, false
+}
+
 Mesh :: struct {
   aabb_min:                    [3]f32,
   index_count:                 u32,

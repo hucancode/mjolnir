@@ -18,6 +18,7 @@ import "core:unicode/utf8"
 import "geometry"
 import "gpu"
 import nav "navigation"
+import "navigation/recast"
 import "render"
 import "render/debug_bone"
 import "render/debug_ui"
@@ -31,8 +32,6 @@ import "world"
 
 // Verify world and GPU handle types have identical memory layout for safe transmutes
 #assert(size_of(world.MeshHandle) == size_of(gpu.MeshHandle))
-#assert(size_of(world.Image2DHandle) == size_of(gpu.Texture2DHandle))
-#assert(size_of(world.ImageCubeHandle) == size_of(gpu.TextureCubeHandle))
 
 FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 RENDER_FPS :: #config(RENDER_FPS, 60)
@@ -387,7 +386,7 @@ load_gltf :: proc(
   create_texture_from_data_adapter := proc(
     pixel_data: []u8,
   ) -> (
-    handle: world.Image2DHandle,
+    handle: gpu.Texture2DHandle,
     ok: bool,
   ) {
     engine_ctx := cast(^Engine)context.user_ptr
@@ -402,7 +401,7 @@ load_gltf :: proc(
     if ret != .SUCCESS {
       return {}, false
     }
-    return transmute(world.Image2DHandle)out_handle, true
+    return out_handle, true
   }
   old_user_ptr := context.user_ptr
   context.user_ptr = engine
@@ -1295,4 +1294,273 @@ update_thread_proc :: proc(thread: ^thread.Thread) {
     }
   }
   log.info("Update thread terminating")
+}
+
+// NavMeshQuality controls navmesh generation precision vs performance tradeoff
+NavMeshQuality :: enum {
+  LOW,    // Fast generation, coarse mesh - good for large open areas
+  MEDIUM, // Balanced quality and performance - recommended default
+  HIGH,   // Higher precision - better for detailed environments
+  ULTRA,  // Maximum precision - use for small intricate spaces
+}
+
+// NavMeshConfig provides user-friendly agent-centric parameters.
+// All Recast internals are derived automatically from quality level.
+NavMeshConfig :: struct {
+  agent_height:    f32,
+  agent_radius:    f32,
+  agent_max_climb: f32,
+  agent_max_slope: f32,
+  quality:         NavMeshQuality,
+}
+
+DEFAULT_NAVMESH_CONFIG :: NavMeshConfig {
+  agent_height    = 2.0,
+  agent_radius    = 0.6,
+  agent_max_climb = 0.9,
+  agent_max_slope = math.PI * 0.25,
+  quality         = .MEDIUM,
+}
+
+create_texture :: proc {
+  create_texture_from_path,
+  create_texture_from_data,
+  create_texture_from_pixels,
+  create_texture_empty,
+}
+
+create_texture_from_path :: proc(
+  engine: ^Engine,
+  path: string,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
+  usage: vk.ImageUsageFlags = {.SAMPLED},
+  is_hdr := false,
+) -> (
+  handle: gpu.Texture2DHandle,
+  ok: bool,
+) #optional_ok {
+  ret: vk.Result
+  handle, ret = gpu.create_texture_2d_from_path(
+    &engine.gctx,
+    &engine.render.texture_manager,
+    path,
+    format,
+    generate_mips,
+    usage,
+    is_hdr,
+  )
+  return handle, ret == .SUCCESS
+}
+
+create_texture_from_data :: proc(
+  engine: ^Engine,
+  data: []u8,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
+) -> (
+  handle: gpu.Texture2DHandle,
+  ok: bool,
+) #optional_ok {
+  ret: vk.Result
+  handle, ret = gpu.create_texture_2d_from_data(
+    &engine.gctx,
+    &engine.render.texture_manager,
+    data,
+    format,
+    generate_mips,
+  )
+  return handle, ret == .SUCCESS
+}
+
+create_texture_from_pixels :: proc(
+  engine: ^Engine,
+  pixels: []u8,
+  extent: vk.Extent2D,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
+) -> (
+  handle: gpu.Texture2DHandle,
+  ok: bool,
+) #optional_ok {
+  ret: vk.Result
+  handle, ret = gpu.allocate_texture_2d_with_data(
+    &engine.render.texture_manager,
+    &engine.gctx,
+    raw_data(pixels),
+    vk.DeviceSize(len(pixels)),
+    extent,
+    format,
+    {.SAMPLED},
+    generate_mips,
+  )
+  return handle, ret == .SUCCESS
+}
+
+create_texture_empty :: proc(
+  engine: ^Engine,
+  extent: vk.Extent2D,
+  format: vk.Format,
+  usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
+) -> (
+  handle: gpu.Texture2DHandle,
+  ok: bool,
+) #optional_ok {
+  ret: vk.Result
+  handle, ret = gpu.allocate_texture_2d(
+    &engine.render.texture_manager,
+    &engine.gctx,
+    extent,
+    format,
+    usage,
+  )
+  return handle, ret == .SUCCESS
+}
+
+// Look up a camera's framebuffer attachment for the given pass type.
+// Crosses the world (validity check) and render (attachment storage) boundaries.
+get_camera_attachment :: proc(
+  engine: ^Engine,
+  camera_handle: world.CameraHandle,
+  attachment_type: render.AttachmentType,
+  frame_index: u32 = 0,
+) -> (
+  handle: gpu.Texture2DHandle,
+  ok: bool,
+) #optional_ok {
+  if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
+  return engine.render.cameras[camera_handle.index].attachments[attachment_type][frame_index], true
+}
+
+@(private)
+navmesh_config_to_recast :: proc(cfg: NavMeshConfig) -> recast.Config {
+  cell_size: f32
+  cell_height: f32
+  min_region_area: i32
+  merge_region_area: i32
+  max_edge_length: f32
+  max_edge_error: f32
+  detail_sample_dist: f32
+  detail_sample_max_error: f32
+  max_verts_per_poly: i32
+
+  switch cfg.quality {
+  case .LOW:
+    cell_size = cfg.agent_radius * 0.5
+    cell_height = cfg.agent_radius * 0.33
+    min_region_area = 32
+    merge_region_area = 200
+    max_edge_length = 20.0
+    max_edge_error = 2.0
+    detail_sample_dist = 4.0
+    detail_sample_max_error = 2.0
+    max_verts_per_poly = 4
+  case .MEDIUM:
+    cell_size = cfg.agent_radius * 0.5
+    cell_height = cfg.agent_radius * 0.33
+    min_region_area = 64
+    merge_region_area = 400
+    max_edge_length = 12.0
+    max_edge_error = 1.3
+    detail_sample_dist = 6.0
+    detail_sample_max_error = 1.0
+    max_verts_per_poly = 6
+  case .HIGH:
+    cell_size = cfg.agent_radius * 0.33
+    cell_height = cfg.agent_radius * 0.25
+    min_region_area = 100
+    merge_region_area = 600
+    max_edge_length = 8.0
+    max_edge_error = 1.0
+    detail_sample_dist = 8.0
+    detail_sample_max_error = 0.5
+    max_verts_per_poly = 6
+  case .ULTRA:
+    cell_size = cfg.agent_radius * 0.25
+    cell_height = cfg.agent_radius * 0.2
+    min_region_area = 150
+    merge_region_area = 800
+    max_edge_length = 6.0
+    max_edge_error = 0.8
+    detail_sample_dist = 10.0
+    detail_sample_max_error = 0.25
+    max_verts_per_poly = 6
+  }
+
+  return recast.Config {
+    cs = cell_size,
+    ch = cell_height,
+    walkable_slope = cfg.agent_max_slope,
+    walkable_height = i32(math.ceil_f32(cfg.agent_height / cell_height)),
+    walkable_climb = i32(math.floor_f32(cfg.agent_max_climb / cell_height)),
+    walkable_radius = i32(math.ceil_f32(cfg.agent_radius / cell_size)),
+    max_edge_len = i32(max_edge_length / cell_size),
+    max_simplification_error = max_edge_error,
+    min_region_area = min_region_area,
+    merge_region_area = merge_region_area,
+    max_verts_per_poly = max_verts_per_poly,
+    detail_sample_dist = detail_sample_dist * cell_size,
+    detail_sample_max_error = detail_sample_max_error * cell_height,
+    border_size = 0,
+  }
+}
+
+@(private)
+build_area_types_from_tags :: proc(node_infos: []world.BakedNodeInfo) -> []u8 {
+  area_types := make([dynamic]u8, 0, len(node_infos) * 10)
+  for info in node_infos {
+    triangle_count := info.index_count / 3
+    area_type :=
+      .NAVMESH_OBSTACLE in info.tags ? u8(recast.RC_NULL_AREA) : u8(recast.RC_WALKABLE_AREA)
+    for _ in 0 ..< triangle_count {
+      append(&area_types, area_type)
+    }
+  }
+  return area_types[:]
+}
+
+setup_navmesh :: proc(
+  engine: ^Engine,
+  config: NavMeshConfig = DEFAULT_NAVMESH_CONFIG,
+  include_filter: world.NodeTagSet = {},
+  exclude_filter: world.NodeTagSet = {},
+) -> bool {
+  world.traverse(&engine.world)
+  baked_geom, node_infos, bake_ok := world.bake_geometry(
+    &engine.world,
+    include_filter,
+    exclude_filter,
+    true,
+  )
+  if !bake_ok {
+    return false
+  }
+  defer {
+    delete(baked_geom.vertices)
+    delete(baked_geom.indices)
+    delete(node_infos)
+  }
+  nav_vertices, nav_indices := nav.convert_geometry_to_nav(
+    baked_geom.vertices,
+    baked_geom.indices,
+  )
+  defer {
+    delete(nav_vertices)
+    delete(nav_indices)
+  }
+  area_types := build_area_types_from_tags(node_infos)
+  defer delete(area_types)
+  recast_config := navmesh_config_to_recast(config)
+  nav_geom := nav.NavigationGeometry {
+    vertices   = nav_vertices,
+    indices    = nav_indices,
+    area_types = area_types,
+  }
+  if !nav.build_navmesh(&engine.nav.nav_mesh, nav_geom, recast_config) {
+    return false
+  }
+  if !nav.init(&engine.nav) {
+    return false
+  }
+  return true
 }

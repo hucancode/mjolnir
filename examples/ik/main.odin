@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
 import "../../mjolnir/world"
 import "core:log"
@@ -41,7 +40,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Position the spider
   for handle in spider_roots {
-    node := cont.get(engine.world.nodes, handle) or_continue
+    node := world.node(&engine.world, handle) or_continue
     spider_root_node = handle
     node.transform.position = {0, 5, 0}
     node.transform.is_dirty = true
@@ -62,10 +61,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Find the skinned mesh node and set up IK for each leg
   for handle in spider_roots {
-    root_node := cont.get(engine.world.nodes, handle) or_continue
+    root_node := world.node(&engine.world, handle) or_continue
 
     for child in root_node.children {
-      child_node := cont.get(engine.world.nodes, child) or_continue
+      child_node := world.node(&engine.world, child) or_continue
       mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
       if !has_mesh {
         continue
@@ -73,7 +72,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
       mesh_node = child
 
-      mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
+      mesh := world.mesh(&engine.world, mesh_attachment.handle) or_continue
       skin, has_skin := mesh.skinning.?
       if !has_skin {
         continue
@@ -169,15 +168,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Find the skinned mesh and create markers for bones
   for handle in root_nodes {
-    node := cont.get(engine.world.nodes, handle) or_continue
+    node := world.node(&engine.world, handle) or_continue
     for child in node.children {
-      child_node := cont.get(engine.world.nodes, child) or_continue
+      child_node := world.node(&engine.world, child) or_continue
       mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
       if !has_mesh {
         continue
       }
 
-      mesh := cont.get(engine.world.meshes, mesh_attachment.handle) or_continue
+      mesh := world.mesh(&engine.world, mesh_attachment.handle) or_continue
       skin, has_skin := mesh.skinning.?
       if !has_skin {
         continue
@@ -201,7 +200,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       ) or_else {}
     world.scale(&engine.world, target_markers[i], 0.5)
     // Position at the fixed target
-    if marker_node := cont.get(engine.world.nodes, target_markers[i]);
+    if marker_node := world.node(&engine.world, target_markers[i]);
        marker_node != nil {
       marker_node.transform.position = leg_targets[i]
       marker_node.transform.is_dirty = true
@@ -244,7 +243,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   body_pos := [3]f32{body_x, 0, 0}
 
   // Move the spider body
-  if node := cont.get(engine.world.nodes, spider_root_node); node != nil {
+  if node := world.node(&engine.world, spider_root_node); node != nil {
     node.transform.position = body_pos
     node.transform.is_dirty = true
   }

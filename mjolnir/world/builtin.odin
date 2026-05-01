@@ -4,6 +4,36 @@ import cont "../containers"
 import "../geometry"
 import "core:log"
 
+// Spawn a builtin primitive mesh with optional transform
+spawn_primitive_mesh :: proc(
+  world: ^World,
+  primitive: Primitive = .CUBE,
+  color: Color = .WHITE,
+  position: [3]f32 = {0, 0, 0},
+  rotation_angle: f32 = 0,
+  rotation_axis: [3]f32 = {0, 1, 0},
+  scale_factor: f32 = 1.0,
+  cast_shadow := true,
+) -> (
+  ret: NodeHandle,
+  ok: bool,
+) #optional_ok {
+  mesh := get_builtin_mesh(world, primitive)
+  mat := get_builtin_material(world, color)
+  handle := spawn(
+    world,
+    position,
+    MeshAttachment{handle = mesh, material = mat, cast_shadow = cast_shadow},
+  ) or_return
+  if rotation_angle != 0 {
+    rotate(world, handle, rotation_angle, rotation_axis)
+  }
+  if scale_factor != 1.0 {
+    scale(world, handle, scale_factor)
+  }
+  return handle, true
+}
+
 get_builtin_material :: proc(world: ^World, color: Color) -> MaterialHandle {
   return world.builtin_materials[color]
 }

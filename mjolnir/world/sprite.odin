@@ -1,12 +1,13 @@
 package world
 
 import cont "../containers"
+import "../gpu"
 import "core:log"
 import "core:math"
 import "core:slice"
 
 Sprite :: struct {
-  texture: Image2DHandle,
+  texture: gpu.Texture2DHandle,
   frame_columns: u32, // Number of columns in sprite sheet
   frame_rows:    u32, // Number of rows in sprite sheet
   animation:  Maybe(SpriteAnimation),
@@ -14,7 +15,7 @@ Sprite :: struct {
 
 sprite_init :: proc(
   self: ^Sprite,
-  texture: Image2DHandle,
+  texture: gpu.Texture2DHandle,
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
 ) {
@@ -25,7 +26,7 @@ sprite_init :: proc(
 
 create_sprite :: proc(
   world: ^World,
-  texture: Image2DHandle,
+  texture: gpu.Texture2DHandle,
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
   animation: Maybe(SpriteAnimation) = nil,

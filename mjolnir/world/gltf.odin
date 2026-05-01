@@ -3,6 +3,7 @@ package world
 import anim "../animation"
 import cont "../containers"
 import "../geometry"
+import "../gpu"
 import "core:fmt"
 import "core:log"
 import "core:math/linalg"
@@ -36,11 +37,11 @@ SkinData :: struct {
 TextureFromDataAllocator :: #type proc(
   pixel_data: []u8,
 ) -> (
-  handle: Image2DHandle,
+  handle: gpu.Texture2DHandle,
   ok: bool,
 )
 
-Texture2DRefProc :: #type proc(handle: Image2DHandle) -> bool
+Texture2DRefProc :: #type proc(handle: gpu.Texture2DHandle) -> bool
 
 load_gltf :: proc(
   world: ^World,
@@ -78,7 +79,7 @@ load_gltf :: proc(
   }
   // step 2: Resource Loading
   texture_cache := make(
-    map[^cgltf.texture]Image2DHandle,
+    map[^cgltf.texture]gpu.Texture2DHandle,
     context.temp_allocator,
   )
   material_cache := make(
@@ -184,7 +185,7 @@ load_textures_batch :: proc(
   create_texture_from_data: TextureFromDataAllocator,
   gltf_path: string,
   textures: []^cgltf.texture,
-  cache: ^map[^cgltf.texture]Image2DHandle,
+  cache: ^map[^cgltf.texture]gpu.Texture2DHandle,
 ) -> cgltf.result {
   for texture in textures do if texture != nil && texture.image_ != nil {
     pixel_data: []u8
@@ -217,7 +218,7 @@ load_textures_batch :: proc(
 load_materials_batch :: proc(
   world: ^World,
   materials: []^cgltf.material,
-  texture_cache: ^map[^cgltf.texture]Image2DHandle,
+  texture_cache: ^map[^cgltf.texture]gpu.Texture2DHandle,
   material_cache: ^map[^cgltf.material]MaterialHandle,
 ) -> (
   ret: cgltf.result,
@@ -242,13 +243,13 @@ load_materials_batch :: proc(
 @(private = "file")
 load_material_textures :: proc(
   mat: ^cgltf.material,
-  cache: ^map[^cgltf.texture]Image2DHandle,
+  cache: ^map[^cgltf.texture]gpu.Texture2DHandle,
 ) -> (
-  albedo: Image2DHandle,
-  metallic_roughness: Image2DHandle,
-  normal: Image2DHandle,
-  emissive: Image2DHandle,
-  occlusion: Image2DHandle,
+  albedo: gpu.Texture2DHandle,
+  metallic_roughness: gpu.Texture2DHandle,
+  normal: gpu.Texture2DHandle,
+  emissive: gpu.Texture2DHandle,
+  occlusion: gpu.Texture2DHandle,
   features: ShaderFeatureSet,
 ) {
   if mat.has_pbr_metallic_roughness {

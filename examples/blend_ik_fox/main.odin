@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -38,10 +37,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   for handle in root_nodes {
-    node := cont.get(engine.world.nodes, handle) or_continue
+    node := world.node(&engine.world, handle) or_continue
     log.infof("Root node has %d children", len(node.children))
     for child in node.children {
-      child_node := cont.get(engine.world.nodes, child) or_continue
+      child_node := world.node(&engine.world, child) or_continue
       log.infof("Child node attachment: %v", child_node.attachment)
       // Check if this is a mesh
       mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment)

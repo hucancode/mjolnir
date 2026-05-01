@@ -6,6 +6,53 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
+// Allocate, initialize, and stage a new camera. Returns handle on success.
+create_camera :: proc(
+  world: ^World,
+  width, height: u32,
+  enabled_passes: PassTypeSet = {
+    .SHADOW,
+    .GEOMETRY,
+    .LIGHTING,
+    .TRANSPARENCY,
+    .PARTICLES,
+    .POST_PROCESS,
+    .SPRITE,
+    .WIREFRAME,
+    .LINE_STRIP,
+    .RANDOM_COLOR,
+    .DEBUG_UI,
+    .DEBUG_BONE,
+    .UI,
+  },
+  position: [3]f32 = {0, 0, 3},
+  target: [3]f32 = {0, 0, 0},
+  fov: f32 = 1.57079632679,
+  near_plane: f32 = 0.1,
+  far_plane: f32 = 100.0,
+) -> (
+  handle: CameraHandle,
+  ok: bool,
+) #optional_ok {
+  camera_handle, camera_ptr := cont.alloc(&world.cameras, CameraHandle) or_return
+  defer if !ok do cont.free(&world.cameras, camera_handle)
+  if !camera_init(
+    camera_ptr,
+    width,
+    height,
+    enabled_passes,
+    position,
+    target,
+    fov,
+    near_plane,
+    far_plane,
+  ) {
+    return {}, false
+  }
+  stage_camera_data(&world.staging, camera_handle)
+  return camera_handle, true
+}
+
 PassType :: enum {
   SHADOW,
   GEOMETRY,

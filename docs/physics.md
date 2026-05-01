@@ -98,7 +98,7 @@ if body, ok := physics.get_dynamic_body(&physics_world, cylinder_handle); ok {
 ```odin
 // Create world node for visual representation
 physics_node := world.spawn(&engine.world, {0, 10, 0}) or_else {}
-physics_node_ptr := world.get_node(&engine.world, physics_node)
+physics_node_ptr := world.node(&engine.world, physics_node)
 
 // Create physics body at same position
 body_handle := physics.create_dynamic_body_box(

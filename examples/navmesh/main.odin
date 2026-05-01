@@ -1,6 +1,5 @@
 package main
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/geometry"
 import "../../mjolnir/gpu"
 import nav "../../mjolnir/navigation"
@@ -128,7 +127,7 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
         },
       ) or_else {}
     // Tag as environment for baking
-    if ground_node, ok := cont.get(engine.world.nodes, ground_handle); ok {
+    if ground_node, ok := world.node(&engine.world, ground_handle); ok {
       ground_node.tags += {.ENVIRONMENT}
     }
   }
@@ -176,7 +175,7 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
           },
         ) or_else {}
       // Tag obstacles as NAVMESH_OBSTACLE for baking
-      if obstacle_node, ok := cont.get(engine.world.nodes, obstacle_handle);
+      if obstacle_node, ok := world.node(&engine.world, obstacle_handle);
          ok {
         obstacle_node.tags += {.NAVMESH_OBSTACLE}
       }
@@ -212,7 +211,7 @@ create_agent :: proc(engine: ^mjolnir.Engine) {
           material = agent_material_handle,
         },
       ) or_else {}
-    if agent_node, ok := cont.get(engine.world.nodes, agent_handle); ok {
+    if agent_node, ok := world.node(&engine.world, agent_handle); ok {
       agent_node.name = "agent"
       log.info("Agent cylinder created successfully")
     }
@@ -254,7 +253,7 @@ create_obj_visualization_mesh :: proc(
         },
       ) or_else {}
   }
-  if node, ok := cont.get(engine.world.nodes, obj_node_handle); ok {
+  if node, ok := world.node(&engine.world, obj_node_handle); ok {
     node.name = "obj_mesh"
     node.tags += {.ENVIRONMENT}
     log.infof(
@@ -459,7 +458,7 @@ find_navmesh_point_from_mouse :: proc(
     height,
   )
   // GLFW returns coordinates with origin at top-left, Y increases downward
-  camera := cont.get(engine.world.cameras, engine.world.main_camera)
+  camera := world.camera(&engine.world, engine.world.main_camera)
   ray_origin, ray_dir := world.camera_viewport_to_world_ray(
     camera,
     mouse_x,

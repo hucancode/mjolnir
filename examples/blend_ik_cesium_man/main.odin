@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -28,7 +27,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   root_nodes := mjolnir.load_gltf(engine, "assets/CesiumMan.glb")
   for handle in root_nodes {
-    node := cont.get(engine.world.nodes, handle) or_continue
+    node := world.node(&engine.world, handle) or_continue
     for child in node.children {
       if world.play_animation(&engine.world, child, "Anim_0") {
         // Setup IK for right arm using FABRIK solver

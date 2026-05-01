@@ -6,6 +6,72 @@ import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 
+Query_Filter :: struct {
+  area_cost:     [recast.DT_MAX_AREAS]f32,
+  include_flags: u16,
+  exclude_flags: u16,
+}
+
+Raycast_Hit :: struct {
+  t:              f32,
+  hit_normal:     [3]f32,
+  hit_edge_index: i32,
+  path:           []recast.Poly_Ref,
+  path_count:     i32,
+  path_cost:      f32,
+}
+
+Raycast_Options :: enum u8 {
+  Use_Costs = 0x01,
+}
+
+Poly_Query :: struct {
+  process:   proc(
+    ref: recast.Poly_Ref,
+    tile: ^Mesh_Tile,
+    poly: ^Poly,
+    user_data: rawptr,
+  ),
+  user_data: rawptr,
+}
+
+query_filter_init :: proc(filter: ^Query_Filter) {
+  filter.include_flags = 0xffff
+  filter.exclude_flags = 0
+  for i in 0 ..< recast.DT_MAX_AREAS do filter.area_cost[i] = 1.0
+}
+
+query_filter_pass_filter :: proc(
+  filter: ^Query_Filter,
+  ref: recast.Poly_Ref,
+  tile: ^Mesh_Tile,
+  poly: ^Poly,
+) -> bool {
+  return(
+    (poly.flags & filter.include_flags) != 0 &&
+    (poly.flags & filter.exclude_flags) == 0 \
+  )
+}
+
+query_filter_get_cost :: proc(
+  filter: ^Query_Filter,
+  pa, pb: [3]f32,
+  prev_ref: recast.Poly_Ref,
+  prev_tile: ^Mesh_Tile,
+  prev_poly: ^Poly,
+  cur_ref: recast.Poly_Ref,
+  cur_tile: ^Mesh_Tile,
+  cur_poly: ^Poly,
+  next_ref: recast.Poly_Ref,
+  next_tile: ^Mesh_Tile,
+  next_poly: ^Poly,
+) -> f32 {
+  cost := linalg.distance(pa, pb)
+  area := poly_get_area(cur_poly)
+  if area < recast.DT_MAX_AREAS do cost *= filter.area_cost[area]
+  return cost
+}
+
 // Find nearest polygon to given position
 find_nearest_poly :: proc(
   query: ^Nav_Mesh_Query,

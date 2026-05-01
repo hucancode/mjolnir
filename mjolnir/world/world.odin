@@ -95,6 +95,61 @@ NodeTag :: enum u32 {
 
 NodeTagSet :: bit_set[NodeTag;u32]
 
+// Boundary accessors. Keep `containers` invisible to user code by going through these.
+node :: proc(w: ^World, h: NodeHandle) -> (^Node, bool) #optional_ok {
+  return cont.get(w.nodes, h)
+}
+
+mesh :: proc(w: ^World, h: MeshHandle) -> (^Mesh, bool) #optional_ok {
+  return cont.get(w.meshes, h)
+}
+
+material :: proc(w: ^World, h: MaterialHandle) -> (^Material, bool) #optional_ok {
+  return cont.get(w.materials, h)
+}
+
+camera :: proc(w: ^World, h: CameraHandle) -> (^Camera, bool) #optional_ok {
+  return cont.get(w.cameras, h)
+}
+
+clip :: proc(w: ^World, h: ClipHandle) -> (^anim.Clip, bool) #optional_ok {
+  return cont.get(w.animation_clips, h)
+}
+
+emitter :: proc(w: ^World, h: EmitterHandle) -> (^Emitter, bool) #optional_ok {
+  return cont.get(w.emitters, h)
+}
+
+forcefield :: proc(w: ^World, h: ForceFieldHandle) -> (^ForceField, bool) #optional_ok {
+  return cont.get(w.forcefields, h)
+}
+
+sprite :: proc(w: ^World, h: SpriteHandle) -> (^Sprite, bool) #optional_ok {
+  return cont.get(w.sprites, h)
+}
+
+// Add tags to a node by handle. Returns false if node not found.
+tag_node :: proc(
+  world: ^World,
+  handle: NodeHandle,
+  tags: NodeTagSet,
+) -> bool {
+  node := cont.get(world.nodes, handle) or_return
+  node.tags += tags
+  return true
+}
+
+// Remove tags from a node. Returns false if node not found.
+untag_node :: proc(
+  world: ^World,
+  handle: NodeHandle,
+  tags: NodeTagSet,
+) -> bool {
+  node := cont.get(world.nodes, handle) or_return
+  node.tags -= tags
+  return true
+}
+
 // AnimationInstance represents a playing animation clip on a node
 // Uses handle-based lookup to avoid pointer invalidation when pools resize
 AnimationInstance :: struct {
@@ -604,5 +659,22 @@ create_spot_light_attachment :: proc(
     angle_inner = angle_inner,
     angle_outer = angle_outer,
     cast_shadow = cast_shadow,
+  }
+}
+
+// Sync all nodes with rigid body attachments from physics to world
+sync_all_physics_to_world :: proc(
+  world: ^World,
+  physics_world: ^physics.World,
+) {
+  for &entry in world.nodes.entries do if entry.active {
+    node := &entry.item
+    if attachment, ok := node.attachment.(RigidBodyAttachment); ok {
+      if body, ok := physics.get_dynamic_body(physics_world, attachment.body_handle); ok {
+        node.transform.position = body.position
+        node.transform.rotation = body.rotation
+        node.transform.is_dirty = true
+      }
+    }
   }
 }

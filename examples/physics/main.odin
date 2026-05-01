@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/geometry"
 import "../../mjolnir/physics"
 import "../../mjolnir/world"
@@ -47,7 +46,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Create ground
   {
     ground_node_handle := world.spawn(&engine.world, {0, -0.5, 0}) or_else {}
-    ground_node := world.get_node(&engine.world, ground_node_handle)
+    ground_node := world.node(&engine.world, ground_node_handle)
     // Create static physics body (no attachment needed - it doesn't move)
     physics.create_static_body_box(
       &physics_world,
@@ -72,7 +71,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   {
     sphere_node_handle :=
       world.spawn(&engine.world, {2.5, SPHERE_RADIUS, 0}) or_else {}
-    sphere_node := world.get_node(&engine.world, sphere_node_handle)
+    sphere_node := world.node(&engine.world, sphere_node_handle)
     physics.create_static_body_sphere(
       &physics_world,
       SPHERE_RADIUS,
@@ -111,7 +110,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   for pos, i in piece_positions {
     // Parent node with physics
     physics_node_handle := world.spawn(&engine.world, pos) or_else {}
-    physics_node := world.get_node(&engine.world, physics_node_handle)
+    physics_node := world.node(&engine.world, physics_node_handle)
 
     // Alternate between cylinder (0), cube (1), and sphere (2)
     shape_type := i % 3

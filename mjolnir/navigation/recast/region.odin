@@ -3,6 +3,28 @@ package recast
 import "core:log"
 import "core:slice"
 
+Partition_Type :: enum {
+  Watershed,
+  Monotone,
+  Layers,
+}
+
+Vertex_Flag :: enum {
+  BORDER_VERTEX = 16,
+  AREA_BORDER   = 17,
+}
+Vertex_Flags :: bit_set[Vertex_Flag;u32]
+
+get_dir_offset_x :: proc "contextless" (dir: int) -> i32 {
+  offset := [4]i32{-1, 0, 1, 0}
+  return offset[dir & 0x03]
+}
+
+get_dir_offset_y :: proc "contextless" (dir: int) -> i32 {
+  offset := [4]i32{0, 1, 0, -1}
+  return offset[dir & 0x03]
+}
+
 // Region building constants
 RC_NULL_NEI :: 0xffff
 

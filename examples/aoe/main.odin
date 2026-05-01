@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/geometry"
 import "../../mjolnir/physics"
 import "../../mjolnir/render"
@@ -114,10 +113,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   mouse_just_clicked := mouse_button_pressed && !last_mouse_button_state
   last_mouse_button_state = mouse_button_pressed
   mouse_click: if mouse_just_clicked {
-    camera := cont.get(
-      engine.world.cameras,
-      engine.world.main_camera,
-    )
+    camera := world.camera(&engine.world, engine.world.main_camera)
     if camera != nil {
       // Get mouse position in window coordinates
       mouse_x_window := f32(engine.input.mouse_pos.x)

@@ -4,6 +4,100 @@ import "../../geometry"
 import "core:math"
 import "core:math/linalg"
 
+Status_Flag :: enum u32 {
+  Success          = 0,
+  In_Progress      = 1,
+  Partial_Result   = 2,
+  Wrong_Magic      = 16,
+  Wrong_Version    = 17,
+  Out_Of_Memory    = 18,
+  Invalid_Param    = 19,
+  Buffer_Too_Small = 20,
+  Out_Of_Nodes     = 21,
+  Partial_Path     = 22,
+}
+
+Status :: bit_set[Status_Flag;u32]
+
+status_succeeded :: proc "contextless" (status: Status) -> bool {
+  return(
+    .Success in status &&
+    .Wrong_Magic not_in status &&
+    .Wrong_Version not_in status &&
+    .Out_Of_Memory not_in status &&
+    .Invalid_Param not_in status &&
+    .Buffer_Too_Small not_in status &&
+    .Out_Of_Nodes not_in status \
+  )
+}
+
+Poly_Ref :: distinct u32
+Tile_Ref :: distinct u32
+Agent_Id :: distinct u32
+Obstacle_Ref :: distinct u32
+
+INVALID_POLY_REF :: Poly_Ref(0)
+INVALID_TILE_REF :: Tile_Ref(0)
+DT_NULL_LINK :: 0xffffffff
+
+Config :: struct {
+  width:                    i32,
+  height:                   i32,
+  tile_size:                i32,
+  border_size:              i32,
+  cs:                       f32,
+  ch:                       f32,
+  bmin:                     [3]f32,
+  bmax:                     [3]f32,
+  walkable_slope:           f32,
+  walkable_height:          i32,
+  walkable_climb:           i32,
+  walkable_radius:          i32,
+  max_edge_len:             i32,
+  max_simplification_error: f32,
+  min_region_area:          i32,
+  merge_region_area:        i32,
+  max_verts_per_poly:       i32,
+  detail_sample_dist:       f32,
+  detail_sample_max_error:  f32,
+}
+
+DT_VERTS_PER_POLYGON :: 6
+DT_MAX_AREAS :: 64
+RC_MAX_LAYERS :: 32
+
+DT_POLYTYPE_GROUND :: 0
+DT_POLYTYPE_OFFMESH_CONNECTION :: 1
+
+DT_TILE_FREE_DATA :: 0x01
+DT_OFFMESH_CON_BIDIR :: 1
+DT_RAYCAST_USE_COSTS :: 0x01
+
+Off_Mesh_Connection_Verts :: struct {
+  start: [3]f32,
+  end:   [3]f32,
+}
+
+RC_SPAN_HEIGHT_BITS :: 13
+RC_SPAN_MAX_HEIGHT :: (1 << RC_SPAN_HEIGHT_BITS) - 1
+RC_SPANS_PER_POOL :: 2048
+
+RC_NULL_AREA :: 0
+RC_WALKABLE_AREA :: 63
+RC_NOT_CONNECTED :: 0x3f
+
+RC_BORDER_REG :: 0x8000
+RC_MULTIPLE_REGS :: 0
+RC_BORDER_VERTEX :: 0x10000
+RC_AREA_BORDER :: 0x20000
+RC_CONTOUR_REG_MASK :: 0xffff
+RC_MESH_NULL_IDX :: 0xffff
+
+DT_NAVMESH_MAGIC :: 'D' << 24 | 'N' << 16 | 'A' << 8 | 'V'
+DT_NAVMESH_VERSION :: 7
+DT_NAVMESH_STATE_MAGIC :: 'D' << 24 | 'N' << 16 | 'M' << 8 | 'S'
+DT_NAVMESH_STATE_VERSION :: 1
+
 // Calculate bounds from vertices
 calc_bounds :: proc(verts: [][3]f32) -> (bmin, bmax: [3]f32) {
   if len(verts) == 0 {

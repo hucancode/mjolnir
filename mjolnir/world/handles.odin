@@ -8,8 +8,6 @@ Pool :: cont.Pool
 NodeHandle :: distinct Handle
 MeshHandle :: distinct Handle
 MaterialHandle :: distinct Handle
-Image2DHandle :: distinct Handle
-ImageCubeHandle :: distinct Handle
 CameraHandle :: distinct Handle
 EmitterHandle :: distinct Handle
 ForceFieldHandle :: distinct Handle

@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 
@@ -11,8 +10,8 @@ main :: proc() {
   engine.setup_proc = proc(engine: ^mjolnir.Engine) {
     for z in 0 ..< 5 {
       for x in 0 ..< 5 {
-        mjolnir.spawn_primitive_mesh(
-          engine,
+        world.spawn_primitive_mesh(
+          &engine.world,
           .CUBE,
           .YELLOW,
           {f32(x - 2) * 4, 0, f32(z - 2) * 4},

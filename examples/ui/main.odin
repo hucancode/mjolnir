@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
 import cmd "../../mjolnir/gpu/ui"
 import "../../mjolnir/ui"
@@ -250,7 +249,7 @@ main :: proc() {
       image_label,
       image_label_ok,
     )
-    mjolnir.spawn_primitive_mesh(engine, .CUBE, .BLUE)
+    world.spawn_primitive_mesh(&engine.world, .CUBE, .BLUE)
     world.main_camera_look_at(
       &engine.world,
       {3, 2, 3},

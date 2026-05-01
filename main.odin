@@ -237,8 +237,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 linalg.VECTOR3F32_Y_AXIS,
               )
             }
-            mjolnir.init_animation_channel(
-              engine,
+            world.init_animation_channel(
+              &engine.world,
               spin_clip_handle,
               channel_idx = 0,
               rotation_count = 3,
@@ -322,8 +322,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
         return linalg.quaternion_angle_axis(angle, linalg.VECTOR3F32_Y_AXIS)
       }
-      mjolnir.init_animation_channel(
-        engine,
+      world.init_animation_channel(
+        &engine.world,
         rotation_clip_handle,
         channel_idx = 0,
         rotation_count = 5,
@@ -559,8 +559,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         angle := f32(i) * math.PI * 0.5 // 0, 90, 180, 270, 360 degrees
         return linalg.quaternion_angle_axis(angle, linalg.VECTOR3F32_Y_AXIS)
       }
-      mjolnir.init_animation_channel(
-        engine,
+      world.init_animation_channel(
+        &engine.world,
         forcefield_clip_handle,
         channel_idx = 0,
         rotation_count = 5,
@@ -631,8 +631,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
   when true {
-    portal_camera_handle = mjolnir.create_camera(
-      engine,
+    portal_camera_handle = world.create_camera(
+      &engine.world,
       512, // width
       512, // height
       {.GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES}, // enabled passes (no post-process for performance)

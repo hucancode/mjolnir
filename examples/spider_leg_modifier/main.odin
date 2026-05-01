@@ -2,7 +2,6 @@ package main
 
 import "../../mjolnir"
 import anim "../../mjolnir/animation"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
@@ -58,21 +57,18 @@ main :: proc() {
 
     // Find the skinned mesh node and calculate initial offsets from rest pose
     for handle in spider_roots {
-      root_node := cont.get(engine.world.nodes, handle) or_continue
+      root_node := world.node(&engine.world, handle) or_continue
 
       // Find the child with the mesh attachment
       for child in root_node.children {
-        child_node := cont.get(engine.world.nodes, child) or_continue
+        child_node := world.node(&engine.world, child) or_continue
         mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
           continue
         }
 
         // Get the mesh and skin data to calculate rest pose positions
-        mesh := cont.get(
-          engine.world.meshes,
-          mesh_attachment.handle,
-        ) or_continue
+        mesh := world.mesh(&engine.world, mesh_attachment.handle) or_continue
         skin, has_skin := mesh.skinning.?
         if !has_skin {
           continue
@@ -213,7 +209,7 @@ main :: proc() {
     body_pos := [3]f32{body_x, 2, 0}
 
     // Move the spider body
-    if node := cont.get(engine.world.nodes, spider_root_node); node != nil {
+    if node := world.node(&engine.world, spider_root_node); node != nil {
       node.transform.position = body_pos
       node.transform.is_dirty = true
     }
@@ -221,10 +217,10 @@ main :: proc() {
     // Target is now automatically computed from leg root + offset in world space
     // Fetch and display the world-space target for each leg
     // Find the skinned mesh child to query leg targets
-    if root_node := cont.get(engine.world.nodes, spider_root_node);
+    if root_node := world.node(&engine.world, spider_root_node);
        root_node != nil {
       for child in root_node.children {
-        child_node := cont.get(engine.world.nodes, child) or_continue
+        child_node := world.node(&engine.world, child) or_continue
         _, has_mesh := &child_node.attachment.(world.MeshAttachment)
         if !has_mesh {
           continue
@@ -237,7 +233,7 @@ main :: proc() {
             layer_index = 0,
             leg_index = i,
           ); ok {
-            if marker_node := cont.get(engine.world.nodes, target_markers[i]);
+            if marker_node := world.node(&engine.world, target_markers[i]);
                marker_node != nil {
               marker_node.transform.position = target^
               marker_node.transform.is_dirty = true

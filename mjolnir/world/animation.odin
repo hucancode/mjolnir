@@ -9,6 +9,72 @@ import "core:math/ease"
 import "core:math/linalg"
 import "core:slice"
 
+// Initialize an animation channel with callback functions for generating keyframe values
+init_animation_channel :: proc(
+  world: ^World,
+  clip_handle: ClipHandle,
+  channel_idx: int,
+  position_count: int = 0,
+  rotation_count: int = 0,
+  scale_count: int = 0,
+  position_fn: proc(i: int) -> [3]f32 = nil,
+  rotation_fn: proc(i: int) -> quaternion128 = nil,
+  scale_fn: proc(i: int) -> [3]f32 = nil,
+  position_interpolation: anim.InterpolationMode = .LINEAR,
+  rotation_interpolation: anim.InterpolationMode = .LINEAR,
+  scale_interpolation: anim.InterpolationMode = .LINEAR,
+) {
+  clip, clip_ok := cont.get(world.animation_clips, clip_handle)
+  if !clip_ok do return
+  anim.channel_init(
+    &clip.channels[channel_idx],
+    position_count = position_count,
+    rotation_count = rotation_count,
+    scale_count = scale_count,
+    position_interpolation = position_interpolation,
+    rotation_interpolation = rotation_interpolation,
+    scale_interpolation = scale_interpolation,
+    duration = clip.duration,
+  )
+  channel := &clip.channels[channel_idx]
+  if position_fn != nil {
+    for &kf, i in channel.positions {
+      switch &variant in kf {
+      case anim.LinearKeyframe([3]f32):
+        variant.value = position_fn(i)
+      case anim.StepKeyframe([3]f32):
+        variant.value = position_fn(i)
+      case anim.CubicSplineKeyframe([3]f32):
+        variant.value = position_fn(i)
+      }
+    }
+  }
+  if rotation_fn != nil {
+    for &kf, i in channel.rotations {
+      switch &variant in kf {
+      case anim.LinearKeyframe(quaternion128):
+        variant.value = rotation_fn(i)
+      case anim.StepKeyframe(quaternion128):
+        variant.value = rotation_fn(i)
+      case anim.CubicSplineKeyframe(quaternion128):
+        variant.value = rotation_fn(i)
+      }
+    }
+  }
+  if scale_fn != nil {
+    for &kf, i in channel.scales {
+      switch &variant in kf {
+      case anim.LinearKeyframe([3]f32):
+        variant.value = scale_fn(i)
+      case anim.StepKeyframe([3]f32):
+        variant.value = scale_fn(i)
+      case anim.CubicSplineKeyframe([3]f32):
+        variant.value = scale_fn(i)
+      }
+    }
+  }
+}
+
 animation_instance_update :: proc(self: ^AnimationInstance, delta_time: f32) {
   if self.status != .PLAYING || self.duration <= 0 {
     return

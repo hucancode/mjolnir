@@ -5,6 +5,42 @@ import "core:log"
 import "core:math/linalg"
 import "core:slice"
 
+Poly_Mesh :: struct {
+  verts:          [][3]u16,
+  polys:          []u16,
+  regs:           []u16,
+  flags:          []u16,
+  areas:          []u8,
+  npolys:         i32,
+  maxpolys:       i32,
+  nvp:            i32,
+  bmin:           [3]f32,
+  bmax:           [3]f32,
+  cs:             f32,
+  ch:             f32,
+  border_size:    i32,
+  max_edge_error: f32,
+}
+
+create_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32) -> ^Poly_Mesh {
+  pmesh := new(Poly_Mesh)
+  if !build_poly_mesh(cset, nvp, pmesh) {
+    free_poly_mesh(pmesh)
+    return nil
+  }
+  return pmesh
+}
+
+free_poly_mesh :: proc(pmesh: ^Poly_Mesh) {
+  if pmesh == nil do return
+  delete(pmesh.verts)
+  delete(pmesh.polys)
+  delete(pmesh.regs)
+  delete(pmesh.flags)
+  delete(pmesh.areas)
+  free(pmesh)
+}
+
 // Check if three vertices form a left turn (counter-clockwise)
 uleft :: proc(a, b, c: [3]i16) -> bool {
   // 2D cross product in XZ plane: (b-a) * (c-a)

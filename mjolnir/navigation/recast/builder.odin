@@ -5,6 +5,123 @@ import "core:log"
 import "core:math/linalg"
 import "core:slice"
 
+Contour :: struct {
+  verts:  [][4]i32,
+  rverts: [][4]i32,
+  reg:    u16,
+  area:   u8,
+}
+
+Contour_Set :: struct {
+  conts:       [dynamic]Contour,
+  bmin:        [3]f32,
+  bmax:        [3]f32,
+  cs:          f32,
+  ch:          f32,
+  width:       i32,
+  height:      i32,
+  border_size: i32,
+  max_error:   f32,
+}
+
+Contour_Tess_Flag :: enum {
+  WALL_EDGES = 0,
+  AREA_EDGES = 1,
+}
+Contour_Tess_Flags :: bit_set[Contour_Tess_Flag;u32]
+
+Potential_Diagonal :: struct {
+  vert: i32,
+  dist: i32,
+}
+
+build_navmesh :: proc(
+  vertices: [][3]f32,
+  indices: []i32,
+  areas: []u8,
+  cfg: Config,
+) -> (
+  pmesh: ^Poly_Mesh,
+  dmesh: ^Poly_Mesh_Detail,
+  ok: bool,
+) {
+  if len(vertices) == 0 || len(indices) == 0 || cfg.cs <= 0 || cfg.ch <= 0 {
+    return
+  }
+  config := cfg
+  if config.bmin == {} && config.bmax == {} {
+    config.bmin, config.bmax = calc_bounds(vertices)
+  }
+  config.width, config.height = calc_grid_size(
+    config.bmin,
+    config.bmax,
+    config.cs,
+  )
+  if config.width <= 0 || config.height <= 0 {
+    return
+  }
+  hf := create_heightfield(
+    config.width,
+    config.height,
+    config.bmin,
+    config.bmax,
+    config.cs,
+    config.ch,
+  )
+  defer free_heightfield(hf)
+  rasterize_triangles(
+    vertices,
+    indices,
+    areas,
+    hf,
+    config.walkable_climb,
+  ) or_return
+  filter_low_hanging_walkable_obstacles(int(config.walkable_climb), hf)
+  filter_ledge_spans(
+    int(config.walkable_height),
+    int(config.walkable_climb),
+    hf,
+  )
+  filter_walkable_low_height_spans(int(config.walkable_height), hf)
+  chf := create_compact_heightfield(
+    config.walkable_height,
+    config.walkable_climb,
+    hf,
+  )
+  if chf == nil do return
+  defer free_compact_heightfield(chf)
+  erode_walkable_area(config.walkable_radius, chf) or_return
+  build_distance_field(chf) or_return
+  build_regions(
+    chf,
+    0,
+    config.min_region_area,
+    config.merge_region_area,
+  ) or_return
+  cset := create_contour_set(
+    chf,
+    config.max_simplification_error,
+    config.max_edge_len,
+  )
+  if cset == nil do return
+  defer free_contour_set(cset)
+  pmesh = create_poly_mesh(cset, config.max_verts_per_poly)
+  if pmesh == nil {
+    return
+  }
+  dmesh = create_poly_mesh_detail(
+    pmesh,
+    chf,
+    config.detail_sample_dist,
+    config.detail_sample_max_error,
+  )
+  if dmesh == nil {
+    free_poly_mesh(pmesh)
+    return
+  }
+  return pmesh, dmesh, true
+}
+
 // Data structures for hole merging
 Contour_Hole :: struct {
   contour:    ^Contour,

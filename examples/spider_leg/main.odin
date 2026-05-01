@@ -2,7 +2,6 @@ package main
 
 import "../../mjolnir"
 import anim "../../mjolnir/animation"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -127,7 +126,7 @@ main :: proc() {
     root_pos := [3]f32{root_x, 10, 0}
 
     // Update leg root visual
-    if node := cont.get(engine.world.nodes, leg_root_node); node != nil {
+    if node := world.node(&engine.world, leg_root_node); node != nil {
       node.transform.position = root_pos
       node.transform.is_dirty = true
     }
@@ -138,13 +137,13 @@ main :: proc() {
       anim.spider_leg_update_with_root(&spider_legs[i], delta_time, root_pos)
 
       // Update target marker (should follow root + offset immediately)
-      if node := cont.get(engine.world.nodes, target_markers[i]); node != nil {
+      if node := world.node(&engine.world, target_markers[i]); node != nil {
         node.transform.position = spider_legs[i].feet_target
         node.transform.is_dirty = true
       }
 
       // Update feet marker (should lift in parabolic arc periodically)
-      if node := cont.get(engine.world.nodes, feet_markers[i]); node != nil {
+      if node := world.node(&engine.world, feet_markers[i]); node != nil {
         node.transform.position = spider_legs[i].feet_position
         node.transform.is_dirty = true
       }

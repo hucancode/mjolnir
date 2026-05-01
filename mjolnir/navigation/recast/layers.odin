@@ -3,6 +3,24 @@ package recast
 import "core:log"
 import "core:slice"
 
+Heightfield_Layer :: struct {
+  bmin:    [3]f32,
+  bmax:    [3]f32,
+  cs:      f32,
+  ch:      f32,
+  width:   i32,
+  height:  i32,
+  minx:    i32,
+  maxx:    i32,
+  miny:    i32,
+  maxy:    i32,
+  hmin:    i32,
+  hmax:    i32,
+  heights: []u8,
+  areas:   []u8,
+  cons:    []u8,
+}
+
 RC_MAX_LAYER_ID :: 255
 RC_NULL_LAYER_ID :: 255
 RC_MAX_LAYERS_DEF :: 63 // Must be ≤ 255

@@ -2,7 +2,6 @@ package main
 
 import "../../mjolnir"
 import anim "../../mjolnir/animation"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/gpu"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
@@ -27,7 +26,7 @@ main :: proc() {
     )
     root_nodes = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
     for handle in root_nodes {
-      node := cont.get(engine.world.nodes, handle) or_continue
+      node := world.node(&engine.world, handle) or_continue
       for child in node.children {
         snake_child_node = child // Store for animation
 

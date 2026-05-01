@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/physics"
 import "../../mjolnir/world"
 import "core:log"
@@ -32,7 +31,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   ground_mat := world.get_builtin_material(&engine.world, .GRAY)
   ground_handle = world.spawn(&engine.world, {0, -0.5, 0}) or_else {}
-  ground_node := world.get_node(&engine.world, ground_handle)
+  ground_node := world.node(&engine.world, ground_handle)
   physics.create_static_body_box(
     &physics_world,
     {40.0, 0.5, 40.0},
@@ -53,7 +52,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   cube_mat := world.get_builtin_material(&engine.world, .CYAN)
   cube_handle = world.spawn(&engine.world, {0, 3, 0}) or_else {}
-  cube_node := world.get_node(&engine.world, cube_handle)
+  cube_node := world.node(&engine.world, cube_handle)
   cube_body = physics.create_dynamic_body_box(
     &physics_world,
     {0.5, 0.5, 0.5},

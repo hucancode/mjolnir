@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -36,7 +35,7 @@ main :: proc() {
           true,
         ),
       ) or_else {}
-    if light_node, ok := cont.get(engine.world.nodes, handle); ok {
+    if light_node, ok := world.node(&engine.world, handle); ok {
       light_node.transform.rotation = q2 * q1
       light_node.transform.is_dirty = true
     }

@@ -1,6 +1,7 @@
 package world
 
 import cont "../containers"
+import "../gpu"
 import "core:log"
 
 ShaderFeature :: enum {
@@ -29,22 +30,22 @@ Material :: struct {
   roughness_value:    f32,
   emissive_value:     f32,
   type:               MaterialType,
-  albedo:             Image2DHandle,
-  metallic_roughness: Image2DHandle,
-  normal:             Image2DHandle,
-  emissive:           Image2DHandle,
-  occlusion:          Image2DHandle,
+  albedo:             gpu.Texture2DHandle,
+  metallic_roughness: gpu.Texture2DHandle,
+  normal:             gpu.Texture2DHandle,
+  emissive:           gpu.Texture2DHandle,
+  occlusion:          gpu.Texture2DHandle,
 }
 
 material_init :: proc(
   self: ^Material,
   features: ShaderFeatureSet,
   type: MaterialType,
-  albedo_handle: Image2DHandle,
-  metallic_roughness_handle: Image2DHandle,
-  normal_handle: Image2DHandle,
-  emissive_handle: Image2DHandle,
-  occlusion_handle: Image2DHandle,
+  albedo_handle: gpu.Texture2DHandle,
+  metallic_roughness_handle: gpu.Texture2DHandle,
+  normal_handle: gpu.Texture2DHandle,
+  emissive_handle: gpu.Texture2DHandle,
+  occlusion_handle: gpu.Texture2DHandle,
   metallic_value: f32,
   roughness_value: f32,
   emissive_value: f32,
@@ -67,11 +68,11 @@ create_material :: proc(
   world: ^World,
   features: ShaderFeatureSet = {},
   type: MaterialType = .PBR,
-  albedo_handle: Image2DHandle = {},
-  metallic_roughness_handle: Image2DHandle = {},
-  normal_handle: Image2DHandle = {},
-  emissive_handle: Image2DHandle = {},
-  occlusion_handle: Image2DHandle = {},
+  albedo_handle: gpu.Texture2DHandle = {},
+  metallic_roughness_handle: gpu.Texture2DHandle = {},
+  normal_handle: gpu.Texture2DHandle = {},
+  emissive_handle: gpu.Texture2DHandle = {},
+  occlusion_handle: gpu.Texture2DHandle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
