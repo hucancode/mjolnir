@@ -2,20 +2,24 @@ name: Performance
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
-  contents: write
-  deployments: write
-  pull-requests: write
+  contents: write       # release upload (master only)
+  pull-requests: write  # PR comment for regressions
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   bench:
     runs-on: ubuntu-24.04
-
+    env:
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
     steps:
       - uses: actions/checkout@v4
 
@@ -35,65 +39,119 @@ jobs:
           version: 1.4.321.1
           cache: true
 
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libglfw3 mesa-vulkan-drivers vulkan-tools \
+            build-essential pkg-config libpng-dev
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
+
       - name: Build shaders
         run: make shader
 
-      - name: Build benchmark binary
-        run: odin build benchmark -out:bin/bench -o:speed -no-bounds-check
+      - name: Pin CPU governor (best effort, noise reduction)
+        run: |
+          echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor || true
 
-      - name: Pin CPU and run benchmark
+      - name: Build benchmark binary
+        run: odin build ./benchmark -out:bin/bench -o:speed -no-bounds-check
+
+      - name: Run benchmarks
         run: |
           mkdir -p artifacts
-          # Pin to two cores for less noise; run twice and keep median by aggregator.
-          taskset -c 0,1 ./bin/bench --out=artifacts/bench-run1.json
-          taskset -c 0,1 ./bin/bench --out=artifacts/bench-run2.json
+          taskset -c 0,1 ./bin/bench --out=artifacts/bench.json
 
-      - name: Aggregate
+      - name: Aggregate into smaller / bigger / context buckets
         run: |
-          python3 benchmark/aggregate.py \
-            artifacts/bench-run1.json artifacts/bench-run2.json \
-            --smaller-out=artifacts/bench-smaller.json \
-            --bigger-out=artifacts/bench-bigger.json \
-            --context-out=artifacts/bench-context.json
+          python3 benchmark/aggregate.py artifacts/bench.json \
+            --smaller-out artifacts/bench-smaller.json \
+            --bigger-out  artifacts/bench-bigger.json \
+            --context-out artifacts/bench-context.json
 
-      - name: Upload raw artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: perf-artifacts
-          path: artifacts
+      # Pull prior history (master push only — PRs compare against last published master).
+      - name: Fetch prior history (master)
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p history
+          for f in bench-smaller.json bench-bigger.json bench-context.json; do
+            gh release download perf-history -p "$f" -D history/ || echo "[]" > "history/$f"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Latency / time metrics — smaller is better
-      - name: Track latency metrics
+      - name: Fetch prior history (PR baseline)
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p history
+          for f in bench-smaller.json bench-bigger.json bench-context.json; do
+            gh release download perf-history -p "$f" -D history/ -R ${{ github.repository }} || echo '{"entries":[]}' > "history/$f"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Each call appends to its history file + alerts on regression.
+      - name: Track latency metrics (smaller is better)
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          name: Mjolnir latency
           tool: customSmallerIsBetter
           output-file-path: artifacts/bench-smaller.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bench/latency
-          # Only push history on master commits.
-          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
-          # Comment on PRs and fail if regression > 25%.
-          comment-on-alert: true
-          alert-threshold: '125%'
+          external-data-json-path: history/bench-smaller.json
+          alert-threshold: '115%'
           fail-on-alert: ${{ github.event_name == 'pull_request' }}
+          comment-on-alert: true
           summary-always: true
+          auto-push: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Throughput metrics — bigger is better
-      - name: Track throughput metrics
+      - name: Track throughput metrics (bigger is better)
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          name: Mjolnir throughput
           tool: customBiggerIsBetter
           output-file-path: artifacts/bench-bigger.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bench/throughput
-          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
-          comment-on-alert: true
-          # 80% of baseline counts as regression on a "bigger" metric.
-          alert-threshold: '80%'
+          external-data-json-path: history/bench-bigger.json
+          alert-threshold: '115%'
           fail-on-alert: ${{ github.event_name == 'pull_request' }}
+          comment-on-alert: true
           summary-always: true
+          auto-push: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Context (counts) — append, no alerts.
+      - name: Track context counters
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: customSmallerIsBetter
+          output-file-path: artifacts/bench-context.json
+          external-data-json-path: history/bench-context.json
+          alert-threshold: '99999%'
+          fail-on-alert: false
+          summary-always: true
+          auto-push: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-data
+          path: |
+            artifacts/bench.json
+            history/bench-smaller.json
+            history/bench-bigger.json
+            history/bench-context.json
+          retention-days: 14
+
+      - name: Publish history to perf-history release (master only)
+        if: github.ref == 'refs/heads/master'
+        run: |
+          gh release view perf-history >/dev/null 2>&1 || \
+            gh release create perf-history --title "Perf history" \
+              --notes "Rolling benchmark history. Updated on every master push." \
+              --prerelease
+          gh release upload perf-history \
+            history/bench-smaller.json \
+            history/bench-bigger.json \
+            history/bench-context.json \
+            --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

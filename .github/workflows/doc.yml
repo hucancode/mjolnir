@@ -7,6 +7,10 @@ on:
     paths:
       - 'docs/**'
       - '.github/workflows/doc.yml'
+  workflow_run:
+    workflows: ["Performance"]
+    types: [completed]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -21,6 +25,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,6 +39,15 @@ jobs:
         run: |
           cd docs
           make doc
+
+      - name: Pull benchmark history from release
+        run: |
+          mkdir -p docs/benchmark
+          for f in bench-smaller.json bench-bigger.json bench-context.json; do
+            gh release download perf-history -p "$f" -D docs/benchmark/ || echo '{"entries":[]}' > "docs/benchmark/$f"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
