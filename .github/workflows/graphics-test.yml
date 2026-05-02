@@ -1,0 +1,81 @@
+name: Graphics Test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  software-render:
+    runs-on: ubuntu-24.04
+    env:
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile Odin vendor libraries
+        run: |
+          make -C /home/runner/odin/vendor/stb/src
+          make -C /home/runner/odin/vendor/cgltf/src
+
+      - name: Setup Vulkan SDK (screenshot + validation layers)
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.321.1
+          cache: true
+
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            xvfb \
+            libglfw3 \
+            mesa-vulkan-drivers \
+            vulkan-tools \
+            build-essential \
+            pkg-config \
+            libpng-dev
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
+
+      - name: Install ImageMagick 7
+        run: |
+          wget -q https://imagemagick.org/archive/ImageMagick.tar.gz
+          tar xzf ImageMagick.tar.gz
+          cd ImageMagick-7.*
+          ./configure --quiet --disable-shared --disable-docs
+          make -j$(nproc) >/dev/null
+          sudo make install >/dev/null
+          sudo ldconfig /usr/local/lib
+          magick --version | head -1
+
+      - name: Verify lavapipe is selected
+        run: |
+          export LD_LIBRARY_PATH="$VULKAN_SDK/lib:${LD_LIBRARY_PATH:-}"
+          vulkaninfo --summary 2>&1 | grep -E "deviceName|apiVersion|driverVersion" | head -10
+
+      - name: Build shaders
+        run: make shader
+
+      - name: Run graphics tests
+        env:
+          VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d
+        run: |
+          export LD_LIBRARY_PATH="$VULKAN_SDK/lib:${LD_LIBRARY_PATH:-}"
+          make examples
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: graphics-test-artifacts
+          path: |
+            artifacts
+            game_output.log
