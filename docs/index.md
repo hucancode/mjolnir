@@ -88,8 +88,3 @@ make bench
 | 2 | `navigation` | [api_navigation.md](api_navigation.html) |
 | 2 | `ui`         | [api_ui.md](api_ui.html) |
 | 3 | `mjolnir`    | [api_engine.md](api_engine.html) |
-
-## Performance tracking
-
-Performance over time is tracked at
-[hucancode.github.io/mjolnir/dev/bench](https://hucancode.github.io/mjolnir/dev/bench).

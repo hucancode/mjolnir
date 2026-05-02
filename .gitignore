@@ -9,3 +9,4 @@ screenshots/*.ppm
 screenshots/*.png
 docs/**/*.html
 !docs/mermaid.html
+!docs/benchmark/index.html

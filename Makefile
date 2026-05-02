@@ -79,10 +79,6 @@ bench: shader
 	@mkdir -p artifacts
 	odin build benchmark -out:bin/bench -o:speed -no-bounds-check
 	./bin/bench --out=artifacts/bench.json
-	@command -v python3 >/dev/null && python3 benchmark/aggregate.py artifacts/bench.json \
-		--smaller-out=artifacts/bench-smaller.json \
-		--bigger-out=artifacts/bench-bigger.json \
-		--context-out=artifacts/bench-context.json || true
 
 clean:
 	rm -rf bin/*
