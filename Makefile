@@ -25,13 +25,13 @@ build-debug: shader
 shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 	@echo "Shader compilation complete."
 
-VISUAL_TESTS := cube blend_ik_cesium_man blend_ik_fox gltf_animation gltf_skinning gltf_static grid256 grid300 grid5 light material navmesh shadow aoe crosshatch ui spline
+EXAMPLES := $(patsubst examples/%/main.odin,%,$(wildcard examples/*/main.odin))
 
-vtest:
+examples:
 	@echo "Running all samples..."
 	@mkdir -p artifacts
 	@failed=0; \
-	for test_name in $(VISUAL_TESTS); do \
+	for test_name in $(EXAMPLES); do \
 		echo "Testing $$test_name..."; \
 		date; \
 		./examples/run.sh "$$test_name" artifacts || failed=$$((failed + 1)); \
@@ -45,7 +45,7 @@ vtest:
 golden:
 	@echo "Regenerating all golden images..."
 	@mkdir -p artifacts
-	@for test_name in $(VISUAL_TESTS); do \
+	@for test_name in $(EXAMPLES); do \
 		echo "Updating golden image for $$test_name..."; \
 		UPDATE_GOLDEN=1 ./examples/run.sh "$$test_name" artifacts || exit 1; \
 	done
@@ -109,4 +109,4 @@ long-example:
 doc:
 	pandoc docs/home.md -s -c style.css -o docs/index.html
 
-.PHONY: build run debug shader check clean vtest golden long-proc long-file doc
+.PHONY: build build-debug run debug shader check clean vtest examples golden capture long-proc long-file long-example doc
