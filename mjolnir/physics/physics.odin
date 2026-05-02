@@ -28,6 +28,35 @@ DynamicRigidBodyHandle :: distinct cont.Handle
 StaticRigidBodyHandle :: distinct cont.Handle
 TriggerHandle :: distinct cont.Handle
 
+PerfFrame :: struct {
+  total_ms:                 f32,
+  warmstart_prep_ms:        f32,
+  force_application_ms:     f32,
+  integration_ms:           f32,
+  ccd_ms:                   f32,
+  bvh_build_ms:             f32,
+  substep_total_ms:         f32,
+  refit_ms:                 f32,
+  broadphase_ms:            f32,
+  prepare_ms:               f32,
+  solver_ms:                f32,
+  integration_substep_ms:   f32,
+  cleanup_ms:               f32,
+  dynamic_body_count:       int,
+  static_body_count:        int,
+  awake_body_count:         int,
+  sleeping_body_count:      int,
+  dynamic_contact_count:    int,
+  static_contact_count:     int,
+  ccd_bodies_tested:        int,
+  ccd_total_candidates:     int,
+  bvh_dynamic_node_count:   int,
+  bvh_static_node_count:    int,
+  trigger_overlap_count:    int,
+  rebuilt_dynamic_bvh:      bool,
+  rebuilt_static_bvh:       bool,
+}
+
 TriggerOverlap :: struct {
   trigger: TriggerHandle,
   body:    DynamicRigidBodyHandle,
@@ -61,6 +90,8 @@ World :: struct {
   // BVH rebuild tracking
   last_dynamic_count:      int,
   last_static_count:       int,
+  // Per-frame performance counters (populated at end of step)
+  last_perf:               PerfFrame,
 }
 
 DynamicBroadPhaseEntry :: struct {
@@ -870,6 +901,41 @@ step :: proc(self: ^World, dt: f32) {
   avg_candidates :=
     ccd_bodies_tested > 0 ? f32(ccd_total_candidates) / f32(ccd_bodies_tested) : 0.0
   total_body_count := dynamic_body_count + static_body_count
+  sleeping_body_count := 0
+  for i in 0 ..< len(self.bodies.entries) {
+    if !self.bodies.entries[i].active do continue
+    body := &self.bodies.entries[i].item
+    if body.is_killed do continue
+    if body.is_sleeping do sleeping_body_count += 1
+  }
+  self.last_perf = PerfFrame {
+    total_ms                 = f32(time.duration_milliseconds(total_time)),
+    warmstart_prep_ms        = f32(time.duration_milliseconds(warmstart_prep_time)),
+    force_application_ms     = f32(time.duration_milliseconds(force_application_time)),
+    integration_ms           = f32(time.duration_milliseconds(integration_time)),
+    ccd_ms                   = f32(time.duration_milliseconds(ccd_time)),
+    bvh_build_ms             = f32(time.duration_milliseconds(bvh_build_time)),
+    substep_total_ms         = f32(time.duration_milliseconds(substep_time)),
+    refit_ms                 = f32(time.duration_milliseconds(refit_time)),
+    broadphase_ms            = f32(time.duration_milliseconds(broadphase_time)),
+    prepare_ms               = f32(time.duration_milliseconds(prepare_time)),
+    solver_ms                = f32(time.duration_milliseconds(solver_time)),
+    integration_substep_ms   = f32(time.duration_milliseconds(integration_time_substep)),
+    cleanup_ms               = f32(time.duration_milliseconds(cleanup_time)),
+    dynamic_body_count       = dynamic_body_count,
+    static_body_count        = static_body_count,
+    awake_body_count         = awake_body_count,
+    sleeping_body_count      = sleeping_body_count,
+    dynamic_contact_count    = len(self.dynamic_contacts),
+    static_contact_count     = len(self.static_contacts),
+    ccd_bodies_tested        = ccd_bodies_tested,
+    ccd_total_candidates     = ccd_total_candidates,
+    bvh_dynamic_node_count   = len(self.dynamic_bvh.nodes),
+    bvh_static_node_count    = len(self.static_bvh.nodes),
+    trigger_overlap_count    = len(self.trigger_overlaps) + len(self.trigger_static_overlaps),
+    rebuilt_dynamic_bvh      = rebuild_dynamic_bvh,
+    rebuilt_static_bvh       = rebuild_static_bvh,
+  }
   log.infof(
     "Physics: %.2fms total | warmstart=%.2fms force=%.2fms integ=%.2fms ccd=%.2fms (fast=%d avg_cands=%.1f) bvh=%.2fms substeps=%.2fms [refit=%.2fms collision=%.2fms prep=%.2fms solve=%.2fms integ=%.2fms] cleanup=%.2fms | bodies=%d (dyn=%d sta=%d) awake=%d contacts=%d (dyn=%d sta=%d)",
     time.duration_milliseconds(total_time),

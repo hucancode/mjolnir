@@ -74,6 +74,16 @@ capture: build
 		magick "$$ppm" "$${ppm%.ppm}.png"; \
 	done; \
 	echo "Screenshots saved to $$OUT_DIR/"
+
+bench: shader
+	@mkdir -p artifacts
+	odin build benchmark -out:bin/bench -o:speed -no-bounds-check
+	./bin/bench --out=artifacts/bench.json
+	@command -v python3 >/dev/null && python3 benchmark/aggregate.py artifacts/bench.json \
+		--smaller-out=artifacts/bench-smaller.json \
+		--bigger-out=artifacts/bench-bigger.json \
+		--context-out=artifacts/bench-context.json || true
+
 clean:
 	rm -rf bin/*
 
@@ -109,4 +119,4 @@ long-example:
 doc:
 	pandoc docs/home.md -s -c style.css -o docs/index.html
 
-.PHONY: build build-debug run debug shader check clean vtest examples golden capture long-proc long-file long-example doc
+.PHONY: build build-debug run debug shader check clean vtest examples golden capture long-proc long-file long-example doc bench
