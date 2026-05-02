@@ -425,26 +425,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
         world.translate(&engine.world, cube_handle, y = 0.5)
       }
     }
-    when false {
-      // Create quaternion: 45° rotation around X-axis (tilts light forward)
-      q := linalg.quaternion_angle_axis(
-        math.PI * 0.3,
-        linalg.VECTOR3F32_X_AXIS,
-      )
+    when true {
       dir_light_handle :=
         world.spawn(
           &engine.world,
           {0, 0, 0},
           world.create_directional_light_attachment(
-            {0.2, 0.5, 0.9, 1.0},
+            {0.2, 0.5, 0.9, 3.0},
             cast_shadow = true,
           ),
         ) or_else {}
-      if dir_light_node, ok := cont.get(engine.world.nodes, dir_light_handle);
-         ok {
-        dir_light_node.transform.rotation = q
-        dir_light_node.transform.is_dirty = true
-      }
+      world.rotate(&engine.world, dir_light_handle, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
     }
   }
   when false {
@@ -622,9 +613,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       bypass_depth = true,
     )
   }
-  post_process.add_fog(&engine.render.post_process, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  // post_process.add_fog(&engine.render.post_process, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
+  // post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)

@@ -111,7 +111,7 @@ camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
 camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
-    return linalg.matrix4_perspective(
+    return geometry.make_perspective_matrix(
       proj.fov,
       proj.aspect_ratio,
       proj.near,
@@ -120,12 +120,7 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   case OrthographicProjection:
     hw := proj.width / 2
     hh := proj.height / 2
-    return matrix[4, 4]f32{
-      1 / hw, 0, 0, 0,
-      0, 1 / hh, 0, 0,
-      0, 0, 1 / (proj.near - proj.far), 0,
-      0, 0, proj.near / (proj.near - proj.far), 1,
-    }
+    return geometry.make_ortho_matrix(-hw, hw, -hh, hh, proj.near, proj.far)
   case:
     return linalg.MATRIX4F32_IDENTITY
   }

@@ -919,12 +919,8 @@ shadow_matrices_spot :: proc(
   near = 0.1
   far = max(near + 0.1, light.radius)
   view = shadow_make_light_view(light.position, light.direction)
-  projection = linalg.matrix4_perspective(
-    max(light.angle_outer * 2.0, 0.001),
-    1.0,
-    near,
-    far,
-  )
+  fovy := max(light.angle_outer * 2.0, 0.001)
+  projection = geom.make_perspective_matrix(fovy, 1.0, near, far)
   return
 }
 
@@ -940,7 +936,7 @@ shadow_matrices_directional :: proc(
   camera_pos := light.position - light.direction * light.radius
   view = shadow_make_light_view(camera_pos, light.direction)
   half_extent := max(light.radius, 0.5)
-  projection = linalg.matrix_ortho3d(
+  projection = geom.make_ortho_matrix(
     -half_extent,
     half_extent,
     -half_extent,
