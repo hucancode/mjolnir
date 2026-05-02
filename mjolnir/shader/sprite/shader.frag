@@ -18,7 +18,7 @@ layout(set = 1, binding = 1) uniform sampler samplers[];
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    vec4 tex_color = texture(sampler2D(textures[inTextureIndex], samplers[SAMPLER_NEAREST_CLAMP]), inUV);
+    vec4 tex_color = texture(sampler2D(textures[nonuniformEXT(inTextureIndex)], samplers[SAMPLER_NEAREST_CLAMP]), inUV);
     outColor = tex_color * inColor;
     outColor = tex_color;
 }

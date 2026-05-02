@@ -16,6 +16,6 @@ layout(location = 0) out vec4 outColor;
 void main() {
     // Sample texture - use red channel as alpha for R8 textures (font atlas)
     // For RGBA textures (colored quads), the red channel will be 1.0 for white
-    float texAlpha = texture(sampler2D(textures[nonuniformEXT(textureId)], samplers[SAMPLER_NEAREST_CLAMP]), uv).r;
+    float texAlpha = texture(sampler2D(textures[textureId], samplers[SAMPLER_NEAREST_CLAMP]), uv).r;
     outColor = vec4(color.rgb, color.a * texAlpha);
 }

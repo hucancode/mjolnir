@@ -75,7 +75,7 @@ void main() {
     vec3 N = normalize(normal);
     if (has_normal) {
         vec2 n_xy = texture(
-            sampler2D(textures[material.normal_index], samplers[SAMPLER_LINEAR_REPEAT]),
+            sampler2D(textures[nonuniformEXT(material.normal_index)], samplers[SAMPLER_LINEAR_REPEAT]),
             uv
         ).xy * 2.0 - 1.0;
         float n_z = sqrt(clamp(1.0 - dot(n_xy, n_xy), 0.0, 1.0));
@@ -91,7 +91,7 @@ void main() {
     vec4 albedo;
     if (has_albedo) {
         albedo = texture(
-            sampler2D(textures[material.albedo_index], samplers[SAMPLER_LINEAR_REPEAT]),
+            sampler2D(textures[nonuniformEXT(material.albedo_index)], samplers[SAMPLER_LINEAR_REPEAT]),
             uv
         );
     } else {
@@ -104,7 +104,7 @@ void main() {
     if (has_mr) {
         vec4 mr = texture(
             sampler2D(
-                textures[material.metallic_roughness_index],
+                textures[nonuniformEXT(material.metallic_roughness_index)],
                 samplers[SAMPLER_LINEAR_REPEAT]
             ),
             uv
@@ -120,7 +120,7 @@ void main() {
     vec3 emissive;
     if (has_emissive) {
         emissive = texture(
-            sampler2D(textures[material.emissive_index], samplers[SAMPLER_LINEAR_REPEAT]),
+            sampler2D(textures[nonuniformEXT(material.emissive_index)], samplers[SAMPLER_LINEAR_REPEAT]),
             uv
         ).rgb;
     } else {
