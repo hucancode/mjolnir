@@ -31,3 +31,18 @@ make_ortho_matrix :: proc "contextless" (
     0, 0, 0, 1,
   }
 }
+
+// Vulkan-friendly LH perspective: clip-z in [0, 1], front along +z in view space.
+// Used by point-shadow geom shader which builds an LH per-face view (forward
+// vector kept as the +z axis instead of negated).
+make_perspective_matrix_lh :: proc "contextless" (
+  fovy, aspect, near, far: f32,
+) -> matrix[4, 4]f32 {
+  tan_half := math.tan(0.5 * fovy)
+  return matrix[4, 4]f32{
+    1 / (aspect * tan_half), 0, 0, 0,
+    0, 1 / tan_half, 0, 0,
+    0, 0, far / (far - near), -near * far / (far - near),
+    0, 0, 1, 0,
+  }
+}

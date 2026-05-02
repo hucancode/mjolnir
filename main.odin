@@ -14,7 +14,8 @@ import "vendor:glfw"
 
 LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
-ALL_POINT_LIGHT :: false
+ALL_POINT_LIGHT :: true
+ENABLE_DIRECTIONAL_LIGHT :: true
 portal_camera_handle: world.CameraHandle
 portal_material_handle: world.MaterialHandle
 
@@ -425,7 +426,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         world.translate(&engine.world, cube_handle, y = 0.5)
       }
     }
-    when true {
+    when ENABLE_DIRECTIONAL_LIGHT {
       dir_light_handle :=
         world.spawn(
           &engine.world,

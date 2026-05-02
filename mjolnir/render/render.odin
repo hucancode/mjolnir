@@ -956,13 +956,7 @@ shadow_projection_point :: proc(
 ) {
   near = 0.1
   far = max(near + 0.1, light.radius)
-  projection = linalg.matrix4_perspective(
-    f32(math.PI * 0.5),
-    1.0,
-    near,
-    far,
-    flip_z_axis = false,
-  )
+  projection = geom.make_perspective_matrix_lh(f32(math.PI * 0.5), 1.0, near, far)
   return
 }
 
