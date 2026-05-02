@@ -100,24 +100,6 @@ record :: proc(
 	count_buffer: ^gpu.MutableBuffer(u32),
 	max_draw_count: u32,
 ) {
-	gpu.buffer_barrier(
-		cmd,
-		draw_buffer.buffer,
-		vk.DeviceSize(draw_buffer.bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
-	gpu.buffer_barrier(
-		cmd,
-		count_buffer.buffer,
-		vk.DeviceSize(count_buffer.bytes_count),
-		{.SHADER_WRITE},
-		{.INDIRECT_COMMAND_READ},
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-	)
 	gpu.bind_graphics_pipeline(
 		cmd,
 		self.pipeline,

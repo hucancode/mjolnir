@@ -185,7 +185,12 @@ record :: proc(
 	gpu.begin_rendering(
 		command_buffer,
 		depth_texture.spec.extent,
-		gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
+		gpu.create_depth_attachment(
+			depth_texture,
+			.LOAD,
+			.STORE,
+			layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+		),
 		gpu.create_color_attachment(color_texture, .LOAD, .STORE),
 	)
 	gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)

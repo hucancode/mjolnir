@@ -892,11 +892,12 @@ create_depth_attachment :: proc(
   load_op: vk.AttachmentLoadOp = .CLEAR,
   store_op: vk.AttachmentStoreOp = .STORE,
   clear_depth: f32 = 1.0,
+  layout: vk.ImageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 ) -> vk.RenderingAttachmentInfo {
   return vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = image.view,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    imageLayout = layout,
     loadOp = load_op,
     storeOp = store_op,
     clearValue = {depthStencil = {depth = clear_depth}},

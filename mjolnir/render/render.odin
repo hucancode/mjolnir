@@ -1272,8 +1272,9 @@ record_transparency_pass :: proc(
   cmd := self.internal.command_buffers[frame_index]
 
   // Open a single render scope shared by all 5 sub-passes (transparent /
-  // wireframe / random_color / line_strip / sprite). Each sub-pass owns its
-  // own draw-buffer barriers (see transparent.record etc.).
+  // wireframe / random_color / line_strip / sprite). Hoist all draw-buffer
+  // barriers + depth layout transition here — Vulkan disallows
+  // vkCmdPipelineBarrier inside a dynamic rendering instance.
   color_texture := gpu.get_texture_2d(
     &self.texture_manager,
     cam.attachments[.FINAL_IMAGE][frame_index],
@@ -1281,6 +1282,49 @@ record_transparency_pass :: proc(
   depth_texture := gpu.get_texture_2d(
     &self.texture_manager,
     cam.attachments[.DEPTH][frame_index],
+  )
+  for pipe in ([?]DrawPipeline {
+       .TRANSPARENT,
+       .WIREFRAME,
+       .RANDOM_COLOR,
+       .LINE_STRIP,
+       .SPRITE,
+     }) {
+    if pipe == .WIREFRAME && .WIREFRAME not_in enabled_passes do continue
+    if pipe == .RANDOM_COLOR && .RANDOM_COLOR not_in enabled_passes do continue
+    if pipe == .LINE_STRIP && .LINE_STRIP not_in enabled_passes do continue
+    if pipe == .SPRITE && .SPRITE not_in enabled_passes do continue
+    cmds := &cam.draws[pipe].commands[frame_index]
+    cnt := &cam.draws[pipe].count[frame_index]
+    gpu.buffer_barrier(
+      cmd,
+      cmds.buffer,
+      vk.DeviceSize(cmds.bytes_count),
+      {.SHADER_WRITE},
+      {.INDIRECT_COMMAND_READ},
+      {.COMPUTE_SHADER},
+      {.DRAW_INDIRECT},
+    )
+    gpu.buffer_barrier(
+      cmd,
+      cnt.buffer,
+      vk.DeviceSize(cnt.bytes_count),
+      {.SHADER_WRITE},
+      {.INDIRECT_COMMAND_READ},
+      {.COMPUTE_SHADER},
+      {.DRAW_INDIRECT},
+    )
+  }
+  gpu.image_barrier(
+    cmd,
+    depth_texture.image,
+    .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    {.SHADER_READ},
+    {.DEPTH_STENCIL_ATTACHMENT_READ, .DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.FRAGMENT_SHADER},
+    {.EARLY_FRAGMENT_TESTS},
+    {.DEPTH},
   )
   gpu.begin_rendering(
     cmd,
@@ -1360,6 +1404,19 @@ record_transparency_pass :: proc(
   }
 
   vk.CmdEndRendering(cmd)
+  // Restore depth to READ_ONLY so subsequent shader sampling (e.g. depth
+  // pyramid build at start of next frame) reads a valid layout.
+  gpu.image_barrier(
+    cmd,
+    depth_texture.image,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+    {.LATE_FRAGMENT_TESTS},
+    {.COMPUTE_SHADER, .FRAGMENT_SHADER},
+    {.DEPTH},
+  )
   return .SUCCESS
 }
 
@@ -1830,7 +1887,7 @@ ensure_shadow_2d_resource :: proc(
       gctx,
       u32,
       1,
-      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
     sm.draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,
@@ -1871,7 +1928,7 @@ ensure_shadow_cube_resource :: proc(
       gctx,
       u32,
       1,
-      {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+      {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
     sm.draw_commands[frame] = gpu.create_mutable_buffer(
       gctx,

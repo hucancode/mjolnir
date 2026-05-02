@@ -109,7 +109,7 @@ init :: proc(
     pVertexInputState   = &vertex_input_info,
     pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
     pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-    pRasterizationState = &gpu.STANDARD_RASTERIZER,
+    pRasterizationState = &gpu.INVERSE_RASTERIZER,
     pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
     pDepthStencilState  = &gpu.READ_WRITE_DEPTH_STATE,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
@@ -201,7 +201,6 @@ render :: proc(
   gpu.set_viewport_scissor(
     command_buffer,
     vk.Extent2D{self.shadow_map_size, self.shadow_map_size},
-    flip_x = true,
     flip_y = false,
   )
   gpu.bind_graphics_pipeline(
@@ -221,6 +220,13 @@ render :: proc(
     far_plane      = far,
     light_position = position,
   }
+  // Flip clip-space X to match Vulkan cube-map sampling convention. Vulkan
+  // disallows negative viewport width, so the flip lives in the projection
+  // (paired with INVERSE_RASTERIZER above to keep winding correct).
+  push.projection[0, 0] = -push.projection[0, 0]
+  push.projection[0, 1] = -push.projection[0, 1]
+  push.projection[0, 2] = -push.projection[0, 2]
+  push.projection[0, 3] = -push.projection[0, 3]
   vk.CmdPushConstants(
     command_buffer,
     self.depth_pipeline_layout,
