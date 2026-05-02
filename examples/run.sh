@@ -95,10 +95,10 @@ if [[ -n "$threshold" ]]; then
             ;;
 
         PHASH)
-            # Perceptual hash - returns distance value (lower is better)
-            # Format: "distance (normalized)"
+            # Perceptual hash - returns "distance (normalized)" (lower is better)
+            # Use normalized value: stable 0..~1.5 range, comparable across content
             raw_output=$(magick compare -metric PHASH "$golden" "$png_file" null: 2>&1 || true)
-            diff=$(echo "$raw_output" | cut -d' ' -f1)
+            diff=$(echo "$raw_output" | sed -n 's/.*(\(.*\)).*/\1/p')
             ;;
 
         RMSE|MAE|MSE)
