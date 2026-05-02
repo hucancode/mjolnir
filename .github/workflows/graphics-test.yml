@@ -42,7 +42,8 @@ jobs:
             vulkan-tools \
             build-essential \
             pkg-config \
-            libpng-dev
+            libpng-dev \
+            gdb
           sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
 
       - name: Install ImageMagick 7

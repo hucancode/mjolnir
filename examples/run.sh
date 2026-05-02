@@ -38,9 +38,11 @@ fi
 binary_name="visual_$(basename "$test_dir")"
 echo "Building $test_dir with FRAME_LIMIT=$frame_limit"
 odin build "$test_dir" -out:"bin/$binary_name" \
+    -debug \
     -define:USE_PARALLEL_UPDATE=false \
     -define:ENABLE_VALIDATION_LAYERS=true \
     -define:REQUIRE_GEOMETRY_SHADER=false \
+    -define:RENDER_FPS=5 \
     -define:FRAME_LIMIT="$frame_limit"
 
 # Setup output
@@ -53,9 +55,23 @@ export VK_INSTANCE_LAYERS="VK_LAYER_KHRONOS_validation:VK_LAYER_LUNARG_screensho
 export VK_SCREENSHOT_FRAMES="$frames"
 export VK_SCREENSHOT_DIR="$(realpath "$out_dir")"
 
+log_file="$artifact_root/logs/$(basename "$test_dir").log"
 xvfb-run -a -s "-screen 0 1920x1080x24" "./bin/$binary_name" \
-    > "$artifact_root/logs/$(basename "$test_dir").log" 2>&1 || {
-    echo "Test crashed with exit code $?"
+    > "$log_file" 2>&1 || {
+    rc=$?
+    echo "Test crashed with exit code $rc"
+    if command -v gdb >/dev/null 2>&1; then
+        echo "Rerunning under gdb for backtrace..."
+        gdb_log="$artifact_root/logs/$(basename "$test_dir").gdb.log"
+        xvfb-run -a -s "-screen 0 1920x1080x24" \
+            gdb -batch -ex "run" -ex "bt full" -ex "info threads" -ex "thread apply all bt" \
+                --args "./bin/$binary_name" \
+            > "$gdb_log" 2>&1 || true
+        echo "--- gdb backtrace ($gdb_log) ---"
+        cat "$gdb_log"
+    else
+        echo "gdb not installed, skipping backtrace"
+    fi
     exit 1
 }
 
