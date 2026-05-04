@@ -416,6 +416,55 @@ get_main_camera :: proc(self: ^Engine) -> ^world.Camera {
   return cont.get(self.world.cameras, self.world.main_camera)
 }
 
+// Create a camera with explicit render-pass selection. World holds spatial
+// state; render side stores enabled_passes + culling on its CameraTarget.
+// Engine eagerly initialises both sides so per-frame sync only handles
+// transform updates.
+create_camera :: proc(
+  engine: ^Engine,
+  width, height: u32,
+  enabled_passes: render.PassTypeSet = render.DEFAULT_ENABLED_PASSES,
+  position: [3]f32 = {0, 0, 3},
+  target: [3]f32 = {0, 0, 0},
+  fov: f32 = 1.57079632679,
+  near_plane: f32 = 0.1,
+  far_plane: f32 = 100.0,
+  enable_culling: bool = true,
+) -> (
+  handle: world.CameraHandle,
+  ok: bool,
+) #optional_ok {
+  handle = world.create_camera(
+    &engine.world,
+    width,
+    height,
+    position,
+    target,
+    fov,
+    near_plane,
+    far_plane,
+  ) or_return
+  engine.render.cameras[handle.index] = {}
+  cam := &engine.render.cameras[handle.index]
+  if render.camera_init(
+    &engine.gctx,
+    cam,
+    &engine.render.texture_manager,
+    vk.Extent2D{width, height},
+    engine.swapchain.format.format,
+    vk.Format.D32_SFLOAT,
+    enabled_passes,
+    enable_culling,
+    render.MAX_NODES_IN_SCENE,
+  ) != .SUCCESS {
+    return {}, false
+  }
+  if render.camera_allocate_descriptors(&engine.render, &engine.gctx, cam) != .SUCCESS {
+    return {}, false
+  }
+  return handle, true
+}
+
 update_input :: proc(self: ^Engine) -> bool {
   glfw.PollEvents()
   last_mouse_pos := self.input.mouse_pos
@@ -903,7 +952,6 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       self.render.cameras[handle.index] = {}
     }
     cam := &self.render.cameras[handle.index]
-    enabled_passes := world_camera.enabled_passes
     // Upload camera transform data to GPU buffer
     view_matrix := world.camera_view_matrix(world_camera)
     projection_matrix := world.camera_projection_matrix(world_camera)
@@ -927,8 +975,8 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         vk.Extent2D{world_camera.extent[0], world_camera.extent[1]},
         self.swapchain.format.format,
         vk.Format.D32_SFLOAT,
-        enabled_passes,
-        world_camera.enable_culling,
+        render.DEFAULT_ENABLED_PASSES,
+        true,
         render.MAX_NODES_IN_SCENE,
       ) or_return
       render.camera_allocate_descriptors(&self.render, &self.gctx, cam) or_return
@@ -1144,8 +1192,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         vk.Extent2D{world_camera.extent[0], world_camera.extent[1]},
         engine.swapchain.format.format,
         vk.Format.D32_SFLOAT,
-        world_camera.enabled_passes,
-        world_camera.enable_culling,
       ) or_return
       render.camera_allocate_descriptors(&engine.render, &engine.gctx, cam) or_return
     }
@@ -1166,27 +1212,16 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &self.swapchain,
     self.frame_index,
   ) or_return
-  cameras_config := make(
-    [dynamic]render.CameraFrameConfig,
+  active_camera_indices := make(
+    [dynamic]u32,
     0,
     len(self.world.cameras.entries),
     context.temp_allocator,
   )
-  defer delete(cameras_config)
+  defer delete(active_camera_indices)
   for &entry, cam_index in self.world.cameras.entries {
     if !entry.active do continue
-    append(
-      &cameras_config,
-      render.CameraFrameConfig{
-        index = u32(cam_index),
-        enabled_passes = entry.item.enabled_passes,
-        enable_culling = entry.item.enable_culling,
-      },
-    )
-  }
-  main_camera_passes: render.PassTypeSet
-  if main_world_cam, ok := cont.get(self.world.cameras, self.world.main_camera); ok {
-    main_camera_passes = main_world_cam.enabled_passes
+    append(&active_camera_indices, u32(cam_index))
   }
   populate_debug_ui(self)
   mu.end(&self.render.debug_ui.ctx)
@@ -1198,8 +1233,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
     self.world.main_camera.index,
-    main_camera_passes,
-    cameras_config[:],
+    active_camera_indices[:],
     self.debug_ui_enabled,
   ) or_return
   graphics_cmd := self.render.internal.command_buffers[self.frame_index]

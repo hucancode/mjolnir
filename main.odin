@@ -623,8 +623,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
   when true {
-    portal_camera_handle = world.create_camera(
-      &engine.world,
+    portal_camera_handle = mjolnir.create_camera(
+      engine,
       512, // width
       512, // height
       {.GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES}, // enabled passes (no post-process for performance)

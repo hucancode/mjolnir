@@ -10,21 +10,6 @@ import "core:math/linalg"
 create_camera :: proc(
   world: ^World,
   width, height: u32,
-  enabled_passes: PassTypeSet = {
-    .SHADOW,
-    .GEOMETRY,
-    .LIGHTING,
-    .TRANSPARENCY,
-    .PARTICLES,
-    .POST_PROCESS,
-    .SPRITE,
-    .WIREFRAME,
-    .LINE_STRIP,
-    .RANDOM_COLOR,
-    .DEBUG_UI,
-    .DEBUG_BONE,
-    .UI,
-  },
   position: [3]f32 = {0, 0, 3},
   target: [3]f32 = {0, 0, 0},
   fov: f32 = 1.57079632679,
@@ -40,7 +25,6 @@ create_camera :: proc(
     camera_ptr,
     width,
     height,
-    enabled_passes,
     position,
     target,
     fov,
@@ -52,24 +36,6 @@ create_camera :: proc(
   stage_camera_data(&world.staging, camera_handle)
   return camera_handle, true
 }
-
-PassType :: enum {
-  SHADOW,
-  GEOMETRY,
-  LIGHTING,
-  TRANSPARENCY,
-  PARTICLES,
-  POST_PROCESS,
-  SPRITE,
-  WIREFRAME,
-  LINE_STRIP,
-  RANDOM_COLOR,
-  DEBUG_UI,
-  DEBUG_BONE,
-  UI,
-}
-
-PassTypeSet :: bit_set[PassType;u32]
 
 PerspectiveProjection :: struct {
   fov:          f32,
@@ -90,14 +56,11 @@ CameraProjection :: union {
   OrthographicProjection,
 }
 
-// Camera (CPU-only data, managed by World module)
 Camera :: struct {
   position:                [3]f32,
   rotation:                quaternion128,
   projection:              CameraProjection,
   extent:                  [2]u32, // width, height
-  enabled_passes:          PassTypeSet,
-  enable_culling:          bool,
   draw_list_source_handle: CameraHandle,
 }
 
@@ -222,21 +185,6 @@ camera_viewport_to_world_ray :: proc(
 camera_init :: proc(
   camera: ^Camera,
   width, height: u32,
-  enabled_passes: PassTypeSet = {
-    .SHADOW,
-    .GEOMETRY,
-    .LIGHTING,
-    .TRANSPARENCY,
-    .PARTICLES,
-    .POST_PROCESS,
-    .SPRITE,
-    .WIREFRAME,
-    .LINE_STRIP,
-    .RANDOM_COLOR,
-    .DEBUG_UI,
-    .DEBUG_BONE,
-    .UI,
-  },
   camera_position: [3]f32 = {0, 0, 3},
   camera_target: [3]f32 = {0, 0, 0},
   fov: f32 = 1.57079632679,
@@ -253,8 +201,6 @@ camera_init :: proc(
   camera.position = camera_position
   camera_look_at(camera, camera_position, camera_target)
   camera.extent = {width, height}
-  camera.enabled_passes = enabled_passes
-  camera.enable_culling = true
   camera.draw_list_source_handle = {}
   return true
 }
@@ -262,7 +208,6 @@ camera_init :: proc(
 camera_init_orthographic :: proc(
   camera: ^Camera,
   width, height: u32,
-  enabled_passes: PassTypeSet = {.SHADOW},
   camera_position: [3]f32 = {0, 0, 0},
   camera_target: [3]f32 = {0, 0, -1},
   ortho_width: f32 = 100.0,
@@ -280,8 +225,6 @@ camera_init_orthographic :: proc(
   camera.position = camera_position
   camera_look_at(camera, camera_position, camera_target)
   camera.extent = {width, height}
-  camera.enabled_passes = enabled_passes
-  camera.enable_culling = true
   camera.draw_list_source_handle = {}
   return true
 }

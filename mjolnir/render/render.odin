@@ -5,7 +5,6 @@ import cont "../containers"
 import geom "../geometry"
 import "../gpu"
 import cmd "../gpu/ui"
-import "../world"
 import "ambient"
 import "core:log"
 import "core:math"
@@ -1555,14 +1554,6 @@ record_ui_pass :: proc(
   vk.CmdEndRendering(cmd)
 }
 
-// CameraFrameConfig bundles per-camera flags for one frame. Built by the
-// caller from world.Camera; rendering does not store these.
-CameraFrameConfig :: struct {
-  index:          u32,
-  enabled_passes: PassTypeSet,
-  enable_culling: bool,
-}
-
 VisibilityStats :: struct {
   node_count:        u32,
   opaque_draw_count: u32,
@@ -1603,8 +1594,7 @@ record_frame :: proc(
   swapchain_view: vk.ImageView,
   swapchain_extent: vk.Extent2D,
   main_camera_index: u32,
-  main_camera_passes: PassTypeSet,
-  cameras_config: []CameraFrameConfig,
+  active_camera_indices: []u32,
   debug_ui_enabled: bool,
 ) -> vk.Result {
   cmd := self.internal.command_buffers[frame_index]
@@ -1614,21 +1604,23 @@ record_frame :: proc(
   cull_indices := make(
     [dynamic]u32,
     0,
-    len(cameras_config),
+    len(active_camera_indices),
     context.temp_allocator,
   )
   defer delete(cull_indices)
-  for cfg in cameras_config {
-    if cfg.enable_culling do append(&cull_indices, cfg.index)
-    cam, ok := &self.cameras[cfg.index]
+  for index in active_camera_indices {
+    cam, ok := &self.cameras[index]
     if !ok do continue
-    record_geometry_pass(self, frame_index, cfg.index, cam, cfg.enabled_passes) or_return
-    record_lighting_pass(self, frame_index, cfg.index, cam, cfg.enabled_passes) or_return
-    record_particles_pass(self, frame_index, cfg.index, cam, cfg.enabled_passes) or_return
-    record_transparency_pass(self, frame_index, gctx, cfg.index, cam, cfg.enabled_passes) or_return
+    if cam.enable_culling do append(&cull_indices, index)
+    record_geometry_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
+    record_lighting_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
+    record_particles_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
+    record_transparency_pass(self, frame_index, gctx, index, cam, cam.enabled_passes) or_return
   }
 
+  main_camera_passes: PassTypeSet
   if main_cam, ok := &self.cameras[main_camera_index]; ok {
+    main_camera_passes = main_cam.enabled_passes
     record_debug_pass(self, frame_index, main_camera_index, main_cam, main_camera_passes) or_return
     record_post_process_pass(
       self,
@@ -2125,13 +2117,44 @@ AttachmentType :: enum {
   DEPTH              = 6,
 }
 
-PassType :: world.PassType
-PassTypeSet :: world.PassTypeSet
+PassType :: enum {
+  SHADOW,
+  GEOMETRY,
+  LIGHTING,
+  TRANSPARENCY,
+  PARTICLES,
+  POST_PROCESS,
+  SPRITE,
+  WIREFRAME,
+  LINE_STRIP,
+  RANDOM_COLOR,
+  DEBUG_UI,
+  DEBUG_BONE,
+  UI,
+}
+
+PassTypeSet :: bit_set[PassType;u32]
+
+DEFAULT_ENABLED_PASSES :: PassTypeSet{
+  .SHADOW,
+  .GEOMETRY,
+  .LIGHTING,
+  .TRANSPARENCY,
+  .PARTICLES,
+  .POST_PROCESS,
+  .SPRITE,
+  .WIREFRAME,
+  .LINE_STRIP,
+  .RANDOM_COLOR,
+  .DEBUG_UI,
+  .DEBUG_BONE,
+  .UI,
+}
 
 // CameraTarget owns render-side GPU resources for one camera (attachments,
-// indirect draw buffers, depth pyramid, descriptor sets). Pass enable/culling
-// configuration via call-site parameters; the world-side `world.Camera` is the
-// single source of truth for those flags.
+// indirect draw buffers, depth pyramid, descriptor sets) and the per-camera
+// pass enable/culling flags. The world-side `Camera` carries only spatial
+// state; engine layer translates high-level config into these flags.
 CameraTarget :: struct {
   attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
   // Indirect draw buffers per pipeline (double-buffered for async compute).
@@ -2140,6 +2163,8 @@ CameraTarget :: struct {
   depth_pyramid:                [FRAMES_IN_FLIGHT]depth_pyramid_system.DepthPyramid,
   descriptor_set:               [FRAMES_IN_FLIGHT]vk.DescriptorSet,
   depth_reduce_descriptor_sets: [FRAMES_IN_FLIGHT][depth_pyramid_system.MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
+  enabled_passes:               PassTypeSet,
+  enable_culling:               bool,
 }
 
 
@@ -2149,24 +2174,12 @@ camera_init :: proc(
   texture_manager: ^gpu.TextureManager,
   extent: vk.Extent2D,
   color_format, depth_format: vk.Format,
-  enabled_passes: PassTypeSet = {
-    .SHADOW,
-    .GEOMETRY,
-    .LIGHTING,
-    .TRANSPARENCY,
-    .PARTICLES,
-    .POST_PROCESS,
-    .SPRITE,
-    .WIREFRAME,
-    .LINE_STRIP,
-    .RANDOM_COLOR,
-    .DEBUG_UI,
-    .DEBUG_BONE,
-    .UI,
-  },
+  enabled_passes: PassTypeSet = DEFAULT_ENABLED_PASSES,
   enable_culling: bool = true,
   max_draws: u32,
 ) -> vk.Result {
+  camera.enabled_passes = enabled_passes
+  camera.enable_culling = enable_culling
   // Determine which attachments are needed based on enabled passes
   needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
   needs_final :=
@@ -2460,9 +2473,9 @@ camera_resize :: proc(
   texture_manager: ^gpu.TextureManager,
   extent: vk.Extent2D,
   color_format, depth_format: vk.Format,
-  enabled_passes: PassTypeSet,
-  enable_culling: bool = true,
 ) -> vk.Result {
+  enabled_passes := camera.enabled_passes
+  enable_culling := camera.enable_culling
   // Destroy old attachments
   for attachment_type in AttachmentType {
     for frame in 0 ..< FRAMES_IN_FLIGHT {

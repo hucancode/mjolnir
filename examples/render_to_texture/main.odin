@@ -71,8 +71,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Off-screen camera looking at scene from a different angle (top-down).
   // No POST_PROCESS pass for cheaper rendering of the texture.
-  rtt_camera_handle = world.create_camera(
-    &engine.world,
+  rtt_camera_handle = mjolnir.create_camera(
+    engine,
     512,
     512,
     {.GEOMETRY, .LIGHTING, .TRANSPARENCY},
