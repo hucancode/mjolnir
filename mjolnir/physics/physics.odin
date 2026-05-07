@@ -67,8 +67,8 @@ TriggerStaticOverlap :: struct {
 }
 
 World :: struct {
-  bodies:                  cont.PoolSoA(DynamicRigidBody),
-  static_bodies:           cont.PoolSoA(StaticRigidBody),
+  bodies:                  cont.Pool(DynamicRigidBody),
+  static_bodies:           cont.Pool(StaticRigidBody),
   dynamic_contacts:        [dynamic]DynamicContact,
   static_contacts:         [dynamic]StaticContact,
   prev_dynamic_warmstart:  [dynamic]ContactWarmstart,
@@ -80,7 +80,7 @@ World :: struct {
   dynamic_bvh:             geometry.BVH(DynamicBroadPhaseEntry),
   static_bvh:              geometry.BVH(StaticBroadPhaseEntry),
   body_bounds:             [dynamic]geometry.Aabb,
-  trigger_bodies:          cont.PoolSoA(TriggerBody),
+  trigger_bodies:          cont.Pool(TriggerBody),
   enable_parallel:         bool,
   thread_count:            int,
   thread_pool:             thread.Pool,
@@ -117,9 +117,9 @@ init :: proc(
   gravity := [3]f32{0, -9.81, 0},
   enable_parallel: bool = true,
 ) -> bool {
-  cont.init_soa(&self.bodies)
-  cont.init_soa(&self.static_bodies)
-  cont.init_soa(&self.trigger_bodies)
+  cont.init(&self.bodies)
+  cont.init(&self.static_bodies)
+  cont.init(&self.trigger_bodies)
   self.trigger_overlaps = make([dynamic]TriggerOverlap)
   self.trigger_static_overlaps = make([dynamic]TriggerStaticOverlap)
   self.dynamic_contacts = make([dynamic]DynamicContact)
@@ -180,9 +180,9 @@ shutdown :: proc(self: ^World) {
     thread.pool_join(&self.thread_pool)
     thread.pool_destroy(&self.thread_pool)
   }
-  cont.destroy_soa(self.bodies, proc(body: ^DynamicRigidBody) {})
-  cont.destroy_soa(self.static_bodies, proc(body: ^StaticRigidBody) {})
-  cont.destroy_soa(self.trigger_bodies, proc(body: ^TriggerBody) {})
+  cont.destroy(self.bodies, proc(body: ^DynamicRigidBody) {})
+  cont.destroy(self.static_bodies, proc(body: ^StaticRigidBody) {})
+  cont.destroy(self.trigger_bodies, proc(body: ^TriggerBody) {})
   delete(self.trigger_overlaps)
   delete(self.trigger_static_overlaps)
   delete(self.body_bounds)
@@ -210,7 +210,7 @@ create_dynamic_body :: proc(
   ok: bool,
 ) #optional_ok {
   body: ^DynamicRigidBody
-  handle, body = cont.alloc_soa(&self.bodies, DynamicRigidBodyHandle) or_return
+  handle, body = cont.alloc(&self.bodies, DynamicRigidBodyHandle) or_return
   rigid_body_init(body, position, rotation, mass)
   body.collider = collider
   return handle, true
@@ -226,7 +226,7 @@ create_static_body :: proc(
   ok: bool,
 ) #optional_ok {
   body: ^StaticRigidBody
-  handle, body = cont.alloc_soa(
+  handle, body = cont.alloc(
     &self.static_bodies,
     StaticRigidBodyHandle,
   ) or_return
@@ -236,11 +236,11 @@ create_static_body :: proc(
 }
 
 destroy_dynamic_body :: proc(self: ^World, handle: DynamicRigidBodyHandle) {
-  cont.free_soa(&self.bodies, handle)
+  cont.free(&self.bodies, handle)
 }
 
 destroy_static_body :: proc(self: ^World, handle: StaticRigidBodyHandle) {
-  cont.free_soa(&self.static_bodies, handle)
+  cont.free(&self.static_bodies, handle)
 }
 
 destroy_body :: proc {
@@ -497,16 +497,16 @@ step :: proc(self: ^World, dt: f32) {
       #unroll for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
         solve_dynamic_pass(self, true)
         for &contact in self.static_contacts {
-          body_a := cont.get_soa(&self.bodies, contact.body_a) or_continue
-          body_b := cont.get_soa(&self.static_bodies, contact.body_b) or_continue
+          body_a := cont.get(self.bodies, contact.body_a) or_continue
+          body_b := cont.get(self.static_bodies, contact.body_b) or_continue
           resolve_contact_dynamic_static(&contact, body_a, body_b)
         }
       }
       #unroll for _ in 0 ..< STABILIZATION_ITERS {
         solve_dynamic_pass(self, false)
         for &contact in self.static_contacts {
-          body_a := cont.get_soa(&self.bodies, contact.body_a) or_continue
-          body_b := cont.get_soa(&self.static_bodies, contact.body_b) or_continue
+          body_a := cont.get(self.bodies, contact.body_a) or_continue
+          body_b := cont.get(self.static_bodies, contact.body_b) or_continue
           resolve_contact_no_bias_dynamic_static(&contact, body_a, body_b)
         }
       }
@@ -672,7 +672,7 @@ get_dynamic_body :: #force_inline proc(
   ret: ^DynamicRigidBody,
   ok: bool,
 ) #optional_ok {
-  return cont.get_soa(&self.bodies, handle)
+  return cont.get(self.bodies, handle)
 }
 
 get_static_body :: #force_inline proc(
@@ -682,7 +682,7 @@ get_static_body :: #force_inline proc(
   ret: ^StaticRigidBody,
   ok: bool,
 ) #optional_ok {
-  return cont.get_soa(&self.static_bodies, handle)
+  return cont.get(self.static_bodies, handle)
 }
 
 get_trigger :: #force_inline proc(
@@ -692,7 +692,7 @@ get_trigger :: #force_inline proc(
   ret: ^TriggerBody,
   ok: bool,
 ) #optional_ok {
-  return cont.get_soa(&self.trigger_bodies, handle)
+  return cont.get(self.trigger_bodies, handle)
 }
 
 get :: proc {
@@ -711,7 +711,7 @@ create_trigger :: proc(
   ok: bool,
 ) #optional_ok {
   body: ^TriggerBody
-  handle, body = cont.alloc_soa(&self.trigger_bodies, TriggerHandle) or_return
+  handle, body = cont.alloc(&self.trigger_bodies, TriggerHandle) or_return
   body.position = position
   body.rotation = rotation
   body.collider = collider
@@ -720,7 +720,7 @@ create_trigger :: proc(
 }
 
 destroy_trigger :: proc(self: ^World, handle: TriggerHandle) {
-  cont.free_soa(&self.trigger_bodies, handle)
+  cont.free(&self.trigger_bodies, handle)
 }
 
 set_trigger_position :: proc(

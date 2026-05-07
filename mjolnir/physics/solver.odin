@@ -76,8 +76,8 @@ solver_worker_task :: proc(task: thread.Task) {
     }
     for idx in shard {
       c := &static_contacts[idx]
-      a := cont.get_soa(&world.bodies, c.body_a) or_continue
-      b := cont.get_soa(&world.static_bodies, c.body_b) or_continue
+      a := cont.get(world.bodies, c.body_a) or_continue
+      b := cont.get(world.static_bodies, c.body_b) or_continue
       if use_bias do resolve_contact_dynamic_static(c, a, b)
       else do resolve_contact_no_bias_dynamic_static(c, a, b)
     }
@@ -91,8 +91,8 @@ run_solver_iters :: proc(world: ^World, total_iters, bias_iters, num_threads: in
       use_bias := iter < bias_iters
       solve_dynamic_pass(world, use_bias)
       for &c in world.static_contacts {
-        a := cont.get_soa(&world.bodies, c.body_a) or_continue
-        b := cont.get_soa(&world.static_bodies, c.body_b) or_continue
+        a := cont.get(world.bodies, c.body_a) or_continue
+        b := cont.get(world.static_bodies, c.body_b) or_continue
         if use_bias do resolve_contact_dynamic_static(&c, a, b)
         else do resolve_contact_no_bias_dynamic_static(&c, a, b)
       }
