@@ -505,7 +505,7 @@ test_bvh_memory_management :: proc(t: ^testing.T) {
   bvh.bounds_func = test_bvh_item_bounds
   defer bvh_destroy(&bvh)
   // Test multiple builds don't leak memory
-  for iteration in 0 ..< 3 {
+  for _ in 0 ..< 3 {
     items := []BVHTestItem {
       make_test_item(1, {0, 0, 0}, 1),
       make_test_item(2, {1, 0, 0}, 1),

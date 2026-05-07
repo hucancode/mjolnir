@@ -2,6 +2,7 @@ package physics
 
 import cont "../containers"
 import "../geometry"
+import "base:intrinsics"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -12,63 +13,24 @@ import "core:time"
 
 DEFAULT_THREAD_COUNT :: 16
 WARMSTART_COEF :: 0.8
-CCD_THRESHOLD :: 5.0
-CCD_THRESHOLD_SQ :: CCD_THRESHOLD * CCD_THRESHOLD
+CCD_VELOCITY_THRESHOLD :: 5.0
+CCD_VELOCITY_THRESHOLD_SQ :: CCD_VELOCITY_THRESHOLD * CCD_VELOCITY_THRESHOLD
+
+pool_wait :: proc(pool: ^thread.Pool) {
+  for {
+    task, ok := thread.pool_pop_waiting(pool)
+    if !ok do break
+    thread.pool_do_work(pool, task)
+  }
+  for thread.pool_num_outstanding(pool) > 0 {
+    intrinsics.cpu_relax()
+  }
+}
 
 BVH_Refit_Task_Data :: struct {
   physics: ^World,
   start:   int,
   end:     int,
-}
-
-AABB_Cache_Task_Data :: struct {
-  physics: ^World,
-  start:   int,
-  end:     int,
-}
-
-Collision_Detection_Task_Data :: struct {
-  physics:            ^World,
-  start:              int,
-  end:                int,
-  dynamic_contacts:   [dynamic]DynamicContact,
-  static_contacts:    [dynamic]StaticContact,
-  // Thread timing instrumentation
-  thread_id:          int,
-  elapsed_time:       time.Duration,
-  bodies_tested:      int,
-  candidates_found:   int,
-  narrow_phase_tests: int,
-}
-
-// Shared work queue for dynamic load balancing
-Collision_Work_Queue :: struct {
-  current_index: i32,
-  total_count:   int,
-}
-
-Collision_Detection_Task_Data_Dynamic :: struct {
-  physics:            ^World,
-  work_queue:         ^Collision_Work_Queue,
-  dynamic_contacts:   [dynamic]DynamicContact,
-  static_contacts:    [dynamic]StaticContact,
-  // Thread timing instrumentation
-  thread_id:          int,
-  elapsed_time:       time.Duration,
-  bodies_tested:      int,
-  candidates_found:   int,
-  narrow_phase_tests: int,
-}
-
-CCD_Task_Data :: struct {
-  physics:          ^World,
-  start:            int,
-  end:              int,
-  dt:               f32,
-  ccd_handled:      []bool,
-  bodies_tested:    int,
-  total_candidates: int,
-  stats_mtx:        ^sync.Mutex,
 }
 
 CCD_Work_Queue :: struct {
@@ -83,6 +45,80 @@ CCD_Task_Data_Dynamic :: struct {
   ccd_handled:      []bool,
   bodies_tested:    int,
   total_candidates: int,
+}
+
+Prepare_Task_Data :: struct {
+  physics: ^World,
+  start:   int,
+  end:     int,
+  dt:      f32,
+  is_static: bool,
+}
+
+prepare_dynamic_task :: proc(task: thread.Task) {
+  data := (^Prepare_Task_Data)(task.data)
+  contacts := data.physics.dynamic_contacts[:]
+  #no_bounds_check for i in data.start ..< data.end {
+    c := &contacts[i]
+    body_a := get(data.physics, c.body_a) or_continue
+    body_b := get(data.physics, c.body_b) or_continue
+    prepare_contact(c, body_a, body_b, data.dt)
+  }
+}
+
+prepare_static_task :: proc(task: thread.Task) {
+  data := (^Prepare_Task_Data)(task.data)
+  contacts := data.physics.static_contacts[:]
+  #no_bounds_check for i in data.start ..< data.end {
+    c := &contacts[i]
+    body_a := get(data.physics, c.body_a) or_continue
+    body_b := get(data.physics, c.body_b) or_continue
+    prepare_contact(c, body_a, body_b, data.dt)
+  }
+}
+
+parallel_prepare_contacts :: proc(world: ^World, dt: f32, num_threads := DEFAULT_THREAD_COUNT) {
+  dyn_count := len(world.dynamic_contacts)
+  sta_count := len(world.static_contacts)
+  total := dyn_count + sta_count
+  if total < 200 || num_threads <= 1 {
+    for &c in world.dynamic_contacts {
+      a := get(world, c.body_a) or_continue
+      b := get(world, c.body_b) or_continue
+      prepare_contact(&c, a, b, dt)
+    }
+    for &c in world.static_contacts {
+      a := get(world, c.body_a) or_continue
+      b := get(world, c.body_b) or_continue
+      prepare_contact(&c, a, b, dt)
+    }
+    return
+  }
+  task_data := make([]Prepare_Task_Data, num_threads * 2, context.temp_allocator)
+  task_idx := 0
+  if dyn_count > 0 {
+    chunk := (dyn_count + num_threads - 1) / num_threads
+    for i in 0 ..< num_threads {
+      s := i * chunk
+      if s >= dyn_count do break
+      e := min(s + chunk, dyn_count)
+      task_data[task_idx] = Prepare_Task_Data{physics = world, start = s, end = e, dt = dt}
+      thread.pool_add_task(&world.thread_pool, mem.nil_allocator(), prepare_dynamic_task, &task_data[task_idx], task_idx)
+      task_idx += 1
+    }
+  }
+  if sta_count > 0 {
+    chunk := (sta_count + num_threads - 1) / num_threads
+    for i in 0 ..< num_threads {
+      s := i * chunk
+      if s >= sta_count do break
+      e := min(s + chunk, sta_count)
+      task_data[task_idx] = Prepare_Task_Data{physics = world, start = s, end = e, dt = dt, is_static = true}
+      thread.pool_add_task(&world.thread_pool, mem.nil_allocator(), prepare_static_task, &task_data[task_idx], task_idx)
+      task_idx += 1
+    }
+  }
+  pool_wait(&world.thread_pool)
 }
 
 bvh_refit_task :: proc(task: thread.Task) {
@@ -128,9 +164,7 @@ parallel_bvh_refit :: proc(
       i,
     )
   }
-  for thread.pool_num_outstanding(&physics.thread_pool) > 0 {
-    time.sleep(time.Microsecond * 100)
-  }
+  pool_wait(&physics.thread_pool)
   geometry.bvh_refit(&physics.dynamic_bvh)
 }
 
@@ -143,859 +177,203 @@ sequential_bvh_refit :: proc(physics: ^World) {
   geometry.bvh_refit(&physics.dynamic_bvh)
 }
 
-aabb_cache_update_task :: proc(task: thread.Task) {
-  data := (^AABB_Cache_Task_Data)(task.data)
-  // SIMD path: Process bodies in batches of 4 for OBB colliders (Box/Cylinder/Fan) with runtime detection
-  // Batch buffer for collecting OBB colliders
-  obb_batch: [4]geometry.Obb
-  body_batch: [4]^DynamicRigidBody
-  collider_batch: [4]^Collider
-  batch_count := 0
-  #no_bounds_check for i in data.start ..< data.end {
-    if i >= len(data.physics.bodies.entries) do break
-    entry := &data.physics.bodies.entries[i]
-    if !entry.active do continue
-    body := &entry.item
-    if body.is_killed || body.is_sleeping do continue
-    // Check if collider needs OBB-to-AABB conversion
-    needs_obb := false
-    obb: geometry.Obb
-    switch sh in body.collider {
-    case SphereCollider:
-      // Spheres don't need OBB conversion - process directly
-      body.cached_aabb = geometry.Aabb {
-        min = body.position - sh.radius,
-        max = body.position + sh.radius,
-      }
-      body.cached_sphere_center = body.position
-      body.cached_sphere_radius = sh.radius
-      continue
-    case BoxCollider:
-      obb = geometry.Obb {
-        center       = body.position,
-        half_extents = sh.half_extents,
-        rotation     = body.rotation,
-      }
-      needs_obb = true
-    case CylinderCollider:
-      r := sh.radius
-      h := sh.height * 0.5
-      half_extents := [3]f32{r, h, r}
-      obb = geometry.Obb {
-        center       = body.position,
-        half_extents = half_extents,
-        rotation     = body.rotation,
-      }
-      needs_obb = true
-    case FanCollider:
-      r := sh.radius
-      h := sh.height * 0.5
-      half_extents := [3]f32{r, h, r}
-      obb = geometry.Obb {
-        center       = body.position,
-        half_extents = half_extents,
-        rotation     = body.rotation,
-      }
-      needs_obb = true
-    }
-    if needs_obb {
-      // Add to batch
-      obb_batch[batch_count] = obb
-      body_batch[batch_count] = body
-      collider_batch[batch_count] = &body.collider
-      batch_count += 1
-
-      // Process batch when full
-      if batch_count == 4 {
-        aabb_batch: [4]geometry.Aabb
-        obb_to_aabb_batch4(obb_batch, &aabb_batch)
-        // Update bodies with results
-        #no_bounds_check #unroll for j in 0 ..< 4 {
-          b := body_batch[j]
-          b.cached_aabb = aabb_batch[j]
-          b.cached_sphere_center = geometry.aabb_center(b.cached_aabb)
-          aabb_half_extents := (b.cached_aabb.max - b.cached_aabb.min) * 0.5
-          b.cached_sphere_radius = linalg.length(aabb_half_extents)
-        }
-        batch_count = 0
-      }
-    }
-  }
-
-  // Process remainder
-  if batch_count > 0 {
-    #no_bounds_check for j in 0 ..< batch_count {
-      body := body_batch[j]
-      body.cached_aabb = geometry.obb_to_aabb(obb_batch[j])
-      body.cached_sphere_center = geometry.aabb_center(body.cached_aabb)
-      aabb_half_extents := (body.cached_aabb.max - body.cached_aabb.min) * 0.5
-      body.cached_sphere_radius = linalg.length(aabb_half_extents)
-    }
-  }
-}
-
-parallel_update_aabb_cache :: proc(
+// Process one dynamic-dynamic broadphase pair into a contact. Returns 1 if narrowphase test was run.
+narrowphase_dynamic_pair :: #force_inline proc(
   physics: ^World,
-  num_threads := DEFAULT_THREAD_COUNT,
-) {
-  body_count := len(physics.bodies.entries)
-  if body_count == 0 do return
-  if body_count < 100 || num_threads == 1 {
-    sequential_update_aabb_cache(physics)
+  pair: geometry.BVHOverlapPair(DynamicBroadPhaseEntry),
+  out: ^[dynamic]DynamicContact,
+) -> (narrow_tests: int) {
+  handle_a := pair.a.handle
+  handle_b := pair.b.handle
+  body_a := get(physics, handle_a) or_else nil
+  body_b := get(physics, handle_b) or_else nil
+  if body_a == nil || body_b == nil do return
+  if body_a.is_killed || body_b.is_killed do return
+  if body_a.is_sleeping && body_b.is_sleeping do return
+  if !bounding_spheres_intersect(
+    body_a.cached_sphere_center, body_a.cached_sphere_radius,
+    body_b.cached_sphere_center, body_b.cached_sphere_radius,
+  ) {
     return
   }
-  chunk_size := (body_count + num_threads - 1) / num_threads
-  task_data_array := make(
-    []AABB_Cache_Task_Data,
-    num_threads,
-    context.temp_allocator,
-  )
-  for i in 0 ..< num_threads {
-    start := i * chunk_size
-    end := min(start + chunk_size, body_count)
-    if start >= body_count do break
-    task_data_array[i] = AABB_Cache_Task_Data {
-      physics = physics,
-      start   = start,
-      end     = end,
-    }
-    thread.pool_add_task(
-      &physics.thread_pool,
-      mem.nil_allocator(),
-      aabb_cache_update_task,
-      &task_data_array[i],
-      i,
-    )
+  narrow_tests = 1
+  point, normal, penetration, hit := test_collision(body_a, body_b)
+  if !hit do return
+  if body_a.is_sleeping do wake_up(body_a)
+  if body_b.is_sleeping do wake_up(body_b)
+  contact := DynamicContact {
+    body_a      = handle_a,
+    body_b      = handle_b,
+    point       = point,
+    normal      = normal,
+    penetration = penetration,
+    restitution = (body_a.restitution + body_b.restitution) * 0.5,
+    friction    = (body_a.friction + body_b.friction) * 0.5,
   }
-  for thread.pool_num_outstanding(&physics.thread_pool) > 0 {
-    time.sleep(time.Microsecond * 100)
+  hash := collision_pair_hash(handle_a, handle_b)
+  if n, t, found := warmstart_lookup(physics.prev_dynamic_warmstart[:], hash); found {
+    contact.normal_impulse = n * WARMSTART_COEF
+    contact.tangent_impulse = t * WARMSTART_COEF
   }
+  append(out, contact)
+  return
 }
 
-sequential_update_aabb_cache :: proc(physics: ^World) {
-  for i in 0..<len(physics.bodies.entries) {
-    if !physics.bodies.entries[i].active do continue
-    body := &physics.bodies.entries[i].item
-    if body.is_killed || body.is_sleeping do continue
-    collider := &body.collider
-    update_cached_aabb(&body.base)
-  }
-}
-
-collision_detection_task :: proc(task: thread.Task) {
-  data := (^Collision_Detection_Task_Data)(task.data)
-  task_start := time.now()
-  defer data.elapsed_time = time.since(task_start)
-  // Pre-allocate with capacity to avoid reallocations
-  dyn_candidates := make(
-    [dynamic]DynamicBroadPhaseEntry,
-    0,
-    128,
-    context.temp_allocator,
-  )
-  static_candidates := make(
-    [dynamic]StaticBroadPhaseEntry,
-    0,
-    128,
-    context.temp_allocator,
-  )
-  #no_bounds_check for i in data.start ..< data.end {
-    bvh_entry := &data.physics.dynamic_bvh.primitives[i]
-    handle_a := bvh_entry.handle
-    body_a := get(data.physics, handle_a) or_continue
-    if body_a.is_killed || body_a.is_sleeping do continue
-    data.bodies_tested += 1
-    // Query dynamic BVH for dynamic-dynamic collisions
-    clear(&dyn_candidates)
-    geometry.bvh_query_aabb(
-      &data.physics.dynamic_bvh,
-      bvh_entry.bounds,
-      &dyn_candidates,
-    )
-    data.candidates_found += len(dyn_candidates)
-    for entry_b in dyn_candidates {
-      handle_b := entry_b.handle
-      if handle_a == handle_b do continue
-      body_b := get(data.physics, handle_b) or_continue
-      if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
-      bounding_spheres_intersect(
-        body_a.cached_sphere_center,
-        body_a.cached_sphere_radius,
-        body_b.cached_sphere_center,
-        body_b.cached_sphere_radius,
-      ) or_continue
-      data.narrow_phase_tests += 1
-      point, normal, penetration, hit := test_collision(body_a, body_b)
-      if !hit do continue
-      if body_a.is_sleeping do wake_up(body_a)
-      if body_b.is_sleeping do wake_up(body_b)
-      contact := DynamicContact {
-        body_a      = handle_a,
-        body_b      = handle_b,
-        point       = point,
-        normal      = normal,
-        penetration = penetration,
-        restitution = (body_a.restitution + body_b.restitution) * 0.5,
-        friction    = (body_a.friction + body_b.friction) * 0.5,
-      }
-      hash := collision_pair_hash(handle_a, handle_b)
-      if prev_contact, found := data.physics.prev_dynamic_contacts[hash];
-         found {
-        contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-        contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-      }
-      append(&data.dynamic_contacts, contact)
-    }
-    // Query static BVH for dynamic-static collisions
-    clear(&static_candidates)
-    geometry.bvh_query_aabb(
-      &data.physics.static_bvh,
-      bvh_entry.bounds,
-      &static_candidates,
-    )
-    data.candidates_found += len(static_candidates)
-    for entry_b in static_candidates {
-      handle_b := entry_b.handle
-      body_b := get(data.physics, handle_b) or_continue
-      bounding_spheres_intersect(
-        body_a.cached_sphere_center,
-        body_a.cached_sphere_radius,
-        body_b.cached_sphere_center,
-        body_b.cached_sphere_radius,
-      ) or_continue
-      data.narrow_phase_tests += 1
-      point, normal, penetration, hit := test_collision(body_a, body_b)
-      if !hit do continue
-      if body_a.is_sleeping do wake_up(body_a)
-      contact := StaticContact {
-        body_a      = handle_a,
-        body_b      = handle_b,
-        point       = point,
-        normal      = normal,
-        penetration = penetration,
-        restitution = (body_a.restitution + body_b.restitution) * 0.5,
-        friction    = (body_a.friction + body_b.friction) * 0.5,
-      }
-      hash := collision_pair_hash(handle_a, handle_b)
-      if prev_contact, found := data.physics.prev_static_contacts[hash];
-         found {
-        contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-        contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-      }
-      append(&data.static_contacts, contact)
-    }
-  }
-}
-
-// Dynamic collision detection task - pulls work atomically from shared queue
-collision_detection_task_dynamic :: proc(task: thread.Task) {
-  data := (^Collision_Detection_Task_Data_Dynamic)(task.data)
-  task_start := time.now()
-  defer data.elapsed_time = time.since(task_start)
-  // Pre-allocate with capacity to avoid reallocations
-  dyn_candidates := make(
-    [dynamic]DynamicBroadPhaseEntry,
-    0,
-    128,
-    context.temp_allocator,
-  )
-  static_candidates := make(
-    [dynamic]StaticBroadPhaseEntry,
-    0,
-    128,
-    context.temp_allocator,
-  )
-  BATCH_SIZE :: 256
-  for {
-    start_idx := i32(
-      sync.atomic_add(&data.work_queue.current_index, i32(BATCH_SIZE)),
-    )
-    if int(start_idx) >= data.work_queue.total_count do break
-    end_idx := min(int(start_idx) + BATCH_SIZE, data.work_queue.total_count)
-    #no_bounds_check for i in int(start_idx) ..< end_idx {
-      bvh_entry := &data.physics.dynamic_bvh.primitives[i]
-      handle_a := bvh_entry.handle
-      body_a := get(data.physics, handle_a) or_continue
-      if body_a.is_killed || body_a.is_sleeping do continue
-      data.bodies_tested += 1
-      // Query dynamic BVH for dynamic-dynamic collisions
-      clear(&dyn_candidates)
-      geometry.bvh_query_aabb(
-        &data.physics.dynamic_bvh,
-        bvh_entry.bounds,
-        &dyn_candidates,
-      )
-      data.candidates_found += len(dyn_candidates)
-      for entry_b in dyn_candidates {
-        handle_b := entry_b.handle
-        if handle_a == handle_b do continue
-        body_b := get(data.physics, handle_b) or_continue
-        if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
-        bounding_spheres_intersect(
-          body_a.cached_sphere_center,
-          body_a.cached_sphere_radius,
-          body_b.cached_sphere_center,
-          body_b.cached_sphere_radius,
-        ) or_continue
-        data.narrow_phase_tests += 1
-        point, normal, penetration, hit := test_collision(body_a, body_b)
-        if !hit do continue
-        if body_a.is_sleeping do wake_up(body_a)
-        if body_b.is_sleeping do wake_up(body_b)
-        contact := DynamicContact {
-          body_a      = handle_a,
-          body_b      = handle_b,
-          point       = point,
-          normal      = normal,
-          penetration = penetration,
-          restitution = (body_a.restitution + body_b.restitution) * 0.5,
-          friction    = (body_a.friction + body_b.friction) * 0.5,
-        }
-        hash := collision_pair_hash(handle_a, handle_b)
-        if prev_contact, found := data.physics.prev_dynamic_contacts[hash];
-           found {
-          contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-          contact.tangent_impulse =
-            prev_contact.tangent_impulse * WARMSTART_COEF
-        }
-        append(&data.dynamic_contacts, contact)
-      }
-      // Query static BVH for dynamic-static collisions
-      clear(&static_candidates)
-      geometry.bvh_query_aabb(
-        &data.physics.static_bvh,
-        bvh_entry.bounds,
-        &static_candidates,
-      )
-      data.candidates_found += len(static_candidates)
-      for entry_b in static_candidates {
-        handle_b := entry_b.handle
-        body_b := get(data.physics, handle_b) or_continue
-        bounding_spheres_intersect(
-          body_a.cached_sphere_center,
-          body_a.cached_sphere_radius,
-          body_b.cached_sphere_center,
-          body_b.cached_sphere_radius,
-        ) or_continue
-        data.narrow_phase_tests += 1
-        point, normal, penetration, hit := test_collision(body_a, body_b)
-        if !hit do continue
-        if body_a.is_sleeping do wake_up(body_a)
-        contact := StaticContact {
-          body_a      = handle_a,
-          body_b      = handle_b,
-          point       = point,
-          normal      = normal,
-          penetration = penetration,
-          restitution = (body_a.restitution + body_b.restitution) * 0.5,
-          friction    = (body_a.friction + body_b.friction) * 0.5,
-        }
-        hash := collision_pair_hash(handle_a, handle_b)
-        if prev_contact, found := data.physics.prev_static_contacts[hash];
-           found {
-          contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-          contact.tangent_impulse =
-            prev_contact.tangent_impulse * WARMSTART_COEF
-        }
-        append(&data.static_contacts, contact)
-      }
-    }
-  }
-}
-
-parallel_collision_detection :: proc(
-  self: ^World,
-  num_threads := DEFAULT_THREAD_COUNT,
-) {
-  parallel_start := time.now()
-  primitive_count := len(self.dynamic_bvh.primitives)
-  if primitive_count < 100 || num_threads == 1 {
-    sequential_collision_detection(self)
+narrowphase_static_pair :: #force_inline proc(
+  physics: ^World,
+  pair: geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
+  out: ^[dynamic]StaticContact,
+) -> (narrow_tests: int) {
+  handle_a := pair.a.handle
+  handle_b := pair.b.handle
+  body_a := get(physics, handle_a) or_else nil
+  body_b := get(physics, handle_b) or_else nil
+  if body_a == nil || body_b == nil do return
+  if body_a.is_killed || body_a.is_sleeping do return
+  if !bounding_spheres_intersect(
+    body_a.cached_sphere_center, body_a.cached_sphere_radius,
+    body_b.cached_sphere_center, body_b.cached_sphere_radius,
+  ) {
     return
   }
-  setup_start := time.now()
-  // Dynamic work queue - threads pull work atomically to balance load
-  work_queue := Collision_Work_Queue {
-    current_index = 0,
-    total_count   = primitive_count,
+  narrow_tests = 1
+  point, normal, penetration, hit := test_collision(body_a, body_b)
+  if !hit do return
+  if body_a.is_sleeping do wake_up(body_a)
+  contact := StaticContact {
+    body_a      = handle_a,
+    body_b      = handle_b,
+    point       = point,
+    normal      = normal,
+    penetration = penetration,
+    restitution = (body_a.restitution + body_b.restitution) * 0.5,
+    friction    = (body_a.friction + body_b.friction) * 0.5,
   }
-  task_data_array := make(
-    []Collision_Detection_Task_Data_Dynamic,
-    num_threads,
-    context.temp_allocator,
-  )
-  for i in 0 ..< num_threads {
-    task_data_array[i] = Collision_Detection_Task_Data_Dynamic {
-      physics          = self,
-      work_queue       = &work_queue,
-      dynamic_contacts = make(
-        [dynamic]DynamicContact,
-        0,
-        100,
-        context.temp_allocator,
-      ),
-      static_contacts  = make(
-        [dynamic]StaticContact,
-        0,
-        100,
-        context.temp_allocator,
-      ),
-      thread_id        = i,
-    }
-    thread.pool_add_task(
-      &self.thread_pool,
-      context.allocator,
-      collision_detection_task_dynamic,
-      &task_data_array[i],
-      i,
-    )
+  hash := collision_pair_hash(handle_a, handle_b)
+  if n, t, found := warmstart_lookup(physics.prev_static_warmstart[:], hash); found {
+    contact.normal_impulse = n * WARMSTART_COEF
+    contact.tangent_impulse = t * WARMSTART_COEF
   }
-  setup_time := time.since(setup_start)
-  parallel_exec_start := time.now()
-  // Wait for all tasks without stopping pool (pool_finish would terminate threads)
-  for thread.pool_num_outstanding(&self.thread_pool) > 0 {
-    time.sleep(time.Microsecond * 100)
-  }
-  parallel_exec_time := time.since(parallel_exec_start)
-  // Collect per-thread statistics
-  collection_start := time.now()
-  total_bodies_tested := 0
-  total_candidates := 0
-  total_narrow_tests := 0
-  min_time := time.Duration(1e10) // 10 billion nano seconds = 10s
-  max_time := time.Duration(0)
-  total_time := time.Duration(0)
-
-  for &task_data in task_data_array {
-    for contact in task_data.dynamic_contacts {
-      append(&self.dynamic_contacts, contact)
-    }
-    for contact in task_data.static_contacts {
-      append(&self.static_contacts, contact)
-    }
-    if task_data.bodies_tested > 0 {
-      total_bodies_tested += task_data.bodies_tested
-      total_candidates += task_data.candidates_found
-      total_narrow_tests += task_data.narrow_phase_tests
-      min_time = min(min_time, task_data.elapsed_time)
-      max_time = max(max_time, task_data.elapsed_time)
-      total_time += task_data.elapsed_time
-    }
-  }
-  collection_time := time.since(collection_start)
-  total_parallel_time := time.since(parallel_start)
-
-  // Log detailed thread performance
-  avg_time := total_time / time.Duration(num_threads)
-  variance_pct := 0.0
-  if avg_time > 0 {
-    variance_pct = f64(max_time - min_time) / f64(avg_time) * 100.0
-  }
-  when ENABLE_VERBOSE_LOG {
-    log.infof(
-      "Thread Timing | min=%.2fms avg=%.2fms max=%.2fms variance=%.1f%%",
-      time.duration_milliseconds(min_time),
-      time.duration_milliseconds(avg_time),
-      time.duration_milliseconds(max_time),
-      variance_pct,
-    )
-    // Log timing breakdown
-    actual_pool_threads := len(self.thread_pool.threads)
-    speedup := f64(total_time) / f64(parallel_exec_time)
-    efficiency := speedup / f64(num_threads) * 100.0
-    log.infof(
-      "Parallel Timing | total=%.2fms (setup=%.2fms exec=%.2fms collect=%.2fms) | max_thread=%.2fms speedup=%.1fx efficiency=%.1f%% | pool_threads=%d",
-      time.duration_milliseconds(total_parallel_time),
-      time.duration_milliseconds(setup_time),
-      time.duration_milliseconds(parallel_exec_time),
-      time.duration_milliseconds(collection_time),
-      time.duration_milliseconds(max_time),
-      speedup,
-      efficiency,
-      actual_pool_threads,
-    )
-  }
+  append(out, contact)
+  return
 }
 
-sequential_collision_detection :: proc(physics: ^World) {
-  dyn_candidates := make(
-    [dynamic]DynamicBroadPhaseEntry,
-    0,
-    128,
-    context.temp_allocator,
-  )
-  static_candidates := make(
-    [dynamic]StaticBroadPhaseEntry,
-    0,
-    128,
-    context.temp_allocator,
-  )
-  test_collision_start := time.now()
-  for &bvh_entry in physics.dynamic_bvh.primitives {
-    handle_a := bvh_entry.handle
-    body_a := get(physics, handle_a) or_continue
-    if body_a.is_killed || body_a.is_sleeping do continue
-    // Query dynamic BVH for dynamic-dynamic collisions
-    clear(&dyn_candidates)
-    geometry.bvh_query_aabb(
-      &physics.dynamic_bvh,
-      bvh_entry.bounds,
-      &dyn_candidates,
-    )
-    for entry_b in dyn_candidates {
-      handle_b := entry_b.handle
-      if handle_a == handle_b do continue
-      pair_hash := collision_pair_hash(handle_a, handle_b)
-      body_b := get(physics, handle_b) or_continue
-      if handle_a.index > handle_b.index && !body_b.is_sleeping do continue
-      if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
-      test_collision_start := time.now()
-      point, normal, penetration, hit := test_collision(body_a, body_b)
-      if !hit do continue
-      if body_a.is_sleeping do wake_up(body_a)
-      if body_b.is_sleeping do wake_up(body_b)
-      contact := DynamicContact {
-        body_a      = handle_a,
-        body_b      = handle_b,
-        point       = point,
-        normal      = normal,
-        penetration = penetration,
-        restitution = (body_a.restitution + body_b.restitution) * 0.5,
-        friction    = (body_a.friction + body_b.friction) * 0.5,
-      }
-      hash := collision_pair_hash(handle_a, handle_b)
-      if prev_contact, found := physics.prev_dynamic_contacts[hash]; found {
-        contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-        contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-      }
-      append(&physics.dynamic_contacts, contact)
-    }
-    // Query static BVH for dynamic-static collisions
-    clear(&static_candidates)
-    geometry.bvh_query_aabb(
-      &physics.static_bvh,
-      bvh_entry.bounds,
-      &static_candidates,
-    )
-    for entry_b in static_candidates {
-      handle_b := entry_b.handle
-      pair_hash := collision_pair_hash(handle_a, handle_b)
-      body_b := get(physics, handle_b) or_continue
-      if !bounding_spheres_intersect(body_a.cached_sphere_center, body_a.cached_sphere_radius, body_b.cached_sphere_center, body_b.cached_sphere_radius) do continue
-      test_collision_start := time.now()
-      point, normal, penetration, hit := test_collision(body_a, body_b)
-      if !hit do continue
-      if body_a.is_sleeping do wake_up(body_a)
-      contact := StaticContact {
-        body_a      = handle_a,
-        body_b      = handle_b,
-        point       = point,
-        normal      = normal,
-        penetration = penetration,
-        restitution = (body_a.restitution + body_b.restitution) * 0.5,
-        friction    = (body_a.friction + body_b.friction) * 0.5,
-      }
-      hash := collision_pair_hash(handle_a, handle_b)
-      if prev_contact, found := physics.prev_static_contacts[hash]; found {
-        contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-        contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-      }
-      append(&physics.static_contacts, contact)
-    }
-  }
-  log.infof(
-    "Test collision time: %.2fms",
-    time.duration_milliseconds(time.since(test_collision_start)),
-  )
-}
-
-// Sequential collision detection using tree traversal (O(N) instead of O(N log N))
-sequential_collision_detection_traversal :: proc(physics: ^World) {
-  start_time := time.now()
-
-  // Find all dynamic-dynamic overlapping pairs using tree traversal
-  traversal_start := time.now()
-  dynamic_pairs := make(
-    [dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry),
-    context.temp_allocator,
-  )
+broadphase_collect_pairs :: proc(physics: ^World) -> (
+  dynamic_pairs: [dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry),
+  static_pairs: [dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
+) {
+  dyn_cap := max(64, physics.last_dynamic_pair_count + (physics.last_dynamic_pair_count >> 2))
+  sta_cap := max(64, physics.last_static_pair_count + (physics.last_static_pair_count >> 2))
+  dynamic_pairs = make([dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry), 0, dyn_cap, context.temp_allocator)
+  static_pairs = make([dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry), 0, sta_cap, context.temp_allocator)
   geometry.bvh_find_all_overlaps(&physics.dynamic_bvh, &dynamic_pairs)
-
-  // Find all dynamic-static overlapping pairs
-  static_pairs := make(
-    [dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
-    context.temp_allocator,
-  )
   geometry.bvh_find_cross_overlaps(&physics.dynamic_bvh, &physics.static_bvh, &static_pairs)
+  physics.last_dynamic_pair_count = len(dynamic_pairs)
+  physics.last_static_pair_count = len(static_pairs)
+  return
+}
 
-  traversal_time := time.since(traversal_start)
+sequential_collision_detection_traversal :: proc(physics: ^World) {
+  dynamic_pairs, static_pairs := broadphase_collect_pairs(physics)
+  for pair in dynamic_pairs do narrowphase_dynamic_pair(physics, pair, &physics.dynamic_contacts)
+  for pair in static_pairs do narrowphase_static_pair(physics, pair, &physics.static_contacts)
+}
 
-  when ENABLE_VERBOSE_LOG {
-    log.infof(
-      "Tree traversal found %d dynamic pairs + %d static pairs in %v",
-      len(dynamic_pairs),
-      len(static_pairs),
-      traversal_time,
-    )
+ccd_step_body :: proc(
+  physics: ^World,
+  body_a: ^DynamicRigidBody,
+  idx_a: int,
+  dt: f32,
+  ccd_handled: []bool,
+  dyn_candidates: ^[dynamic]DynamicBroadPhaseEntry,
+  static_candidates: ^[dynamic]StaticBroadPhaseEntry,
+) -> (tested: bool, candidate_count: int) {
+  if body_a.is_killed || body_a.is_sleeping do return
+  collider_a := &body_a.collider
+  velocity_mag_sq := linalg.length2(body_a.velocity)
+  if velocity_mag_sq < CCD_VELOCITY_THRESHOLD_SQ do return
+  tested = true
+  motion := body_a.velocity * dt
+  earliest_toi := f32(1.0)
+  earliest_normal := linalg.VECTOR3F32_Y_AXIS
+  earliest_body_dyn: ^DynamicRigidBody
+  earliest_body_static: ^StaticRigidBody
+  has_ccd_hit := false
+  swept_aabb := geometry.Aabb {
+    min = linalg.min(body_a.cached_aabb.min, body_a.cached_aabb.min + motion),
+    max = linalg.max(body_a.cached_aabb.max, body_a.cached_aabb.max + motion),
   }
-
-  // Process dynamic-dynamic pairs
-  narrow_phase_start := time.now()
-  narrow_phase_tests := 0
-
-  for pair in dynamic_pairs {
-    handle_a := pair.a.handle
-    handle_b := pair.b.handle
-
-    body_a := get(physics, handle_a) or_continue
+  clear(dyn_candidates)
+  geometry.bvh_query_aabb(&physics.dynamic_bvh, swept_aabb, dyn_candidates)
+  candidate_count = len(dyn_candidates)
+  for candidate in dyn_candidates {
+    handle_b := candidate.handle
+    if u32(idx_a) == handle_b.index do continue
     body_b := get(physics, handle_b) or_continue
-
-    // Skip killed or sleeping bodies
-    if body_a.is_killed || body_b.is_killed do continue
-    if body_a.is_sleeping && body_b.is_sleeping do continue
-
-    // Bounding sphere test
-    if !bounding_spheres_intersect(
-      body_a.cached_sphere_center,
-      body_a.cached_sphere_radius,
-      body_b.cached_sphere_center,
-      body_b.cached_sphere_radius,
-    ) {
-      continue
+    toi := swept_test(collider_a, &body_b.collider, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
+    if toi.has_impact && toi.time < earliest_toi {
+      earliest_toi = toi.time
+      earliest_normal = toi.normal
+      earliest_body_dyn = body_b
+      earliest_body_static = nil
+      has_ccd_hit = true
     }
-
-    // Narrow phase collision test
-    narrow_phase_tests += 1
-    point, normal, penetration, hit := test_collision(body_a, body_b)
-    if !hit do continue
-
-    // Wake up sleeping bodies
-    if body_a.is_sleeping do wake_up(body_a)
-    if body_b.is_sleeping do wake_up(body_b)
-
-    contact := DynamicContact {
-      body_a      = handle_a,
-      body_b      = handle_b,
-      point       = point,
-      normal      = normal,
-      penetration = penetration,
-      restitution = (body_a.restitution + body_b.restitution) * 0.5,
-      friction    = (body_a.friction + body_b.friction) * 0.5,
-    }
-
-    // Warm starting
-    hash := collision_pair_hash(handle_a, handle_b)
-    if prev_contact, found := physics.prev_dynamic_contacts[hash]; found {
-      contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-      contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-    }
-
-    append(&physics.dynamic_contacts, contact)
   }
-
-  // Process dynamic-static pairs
-  for pair in static_pairs {
-    handle_a := pair.a.handle
-    handle_b := pair.b.handle
-
-    body_a := get(physics, handle_a) or_continue
-    body_b := get(physics, handle_b) or_continue
-
-    // Skip killed or sleeping dynamic bodies
-    if body_a.is_killed || body_a.is_sleeping do continue
-
-    // Bounding sphere test
-    if !bounding_spheres_intersect(
-      body_a.cached_sphere_center,
-      body_a.cached_sphere_radius,
-      body_b.cached_sphere_center,
-      body_b.cached_sphere_radius,
-    ) {
-      continue
+  clear(static_candidates)
+  geometry.bvh_query_aabb(&physics.static_bvh, swept_aabb, static_candidates)
+  candidate_count += len(static_candidates)
+  for candidate in static_candidates {
+    body_b := get(physics, candidate.handle) or_continue
+    toi := swept_test(collider_a, &body_b.collider, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
+    if toi.has_impact && toi.time < earliest_toi {
+      earliest_toi = toi.time
+      earliest_normal = toi.normal
+      earliest_body_dyn = nil
+      earliest_body_static = body_b
+      has_ccd_hit = true
     }
-
-    // Narrow phase collision test
-    narrow_phase_tests += 1
-    point, normal, penetration, hit := test_collision(body_a, body_b)
-    if !hit do continue
-
-    // Wake up sleeping body
-    if body_a.is_sleeping do wake_up(body_a)
-
-    contact := StaticContact {
-      body_a      = handle_a,
-      body_b      = handle_b,
-      point       = point,
-      normal      = normal,
-      penetration = penetration,
-      restitution = (body_a.restitution + body_b.restitution) * 0.5,
-      friction    = (body_a.friction + body_b.friction) * 0.5,
-    }
-
-    // Warm starting
-    hash := collision_pair_hash(handle_a, handle_b)
-    if prev_contact, found := physics.prev_static_contacts[hash]; found {
-      contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-      contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-    }
-
-    append(&physics.static_contacts, contact)
   }
-
-  narrow_phase_time := time.since(narrow_phase_start)
-  total_time := time.since(start_time)
-
-  when ENABLE_VERBOSE_LOG {
-    log.infof(
-      "Sequential Traversal: %d pairs, %d narrow tests, %d contacts in %v (traversal: %v, narrow: %v)",
-      len(dynamic_pairs) + len(static_pairs),
-      narrow_phase_tests,
-      len(physics.dynamic_contacts) + len(physics.static_contacts),
-      total_time,
-      traversal_time,
-      narrow_phase_time,
-    )
+  if !(has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99) do return
+  safe_time := earliest_toi * 0.98
+  body_a.position += body_a.velocity * dt * safe_time
+  update_cached_aabb(&body_a.base)
+  vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
+  if vel_along_normal < 0 {
+    wake_up(body_a)
+    if earliest_body_dyn != nil do wake_up(earliest_body_dyn)
+    restitution := body_a.restitution
+    friction := body_a.friction
+    if earliest_body_dyn != nil {
+      restitution = (body_a.restitution + earliest_body_dyn.restitution) * 0.5
+      friction = (body_a.friction + earliest_body_dyn.friction) * 0.5
+    } else if earliest_body_static != nil {
+      restitution = (body_a.restitution + earliest_body_static.restitution) * 0.5
+      friction = (body_a.friction + earliest_body_static.friction) * 0.5
+    }
+    body_a.velocity -= earliest_normal * vel_along_normal * (1.0 + restitution)
+    tangent_vel := body_a.velocity - earliest_normal * linalg.dot(body_a.velocity, earliest_normal)
+    body_a.velocity -= tangent_vel * friction * 0.5
   }
+  ccd_handled[idx_a] = true
+  return
 }
 
 ccd_task_dynamic :: proc(task: thread.Task) {
   data := (^CCD_Task_Data_Dynamic)(task.data)
-  // Pre-allocate with capacity to avoid reallocations
-  dyn_candidates := make(
-    [dynamic]DynamicBroadPhaseEntry,
-    0,
-    64,
-    context.temp_allocator,
-  )
-  static_candidates := make(
-    [dynamic]StaticBroadPhaseEntry,
-    0,
-    64,
-    context.temp_allocator,
-  )
+  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, 0, 64, context.temp_allocator)
+  static_candidates := make([dynamic]StaticBroadPhaseEntry, 0, 64, context.temp_allocator)
   BATCH_SIZE :: 32
   for {
-    start_idx := i32(
-      sync.atomic_add(&data.work_queue.current_index, i32(BATCH_SIZE)),
-    )
-    if int(start_idx) >= data.work_queue.total_count do break
-    end_idx := min(int(start_idx) + BATCH_SIZE, data.work_queue.total_count)
-    #no_bounds_check for idx_a in int(start_idx) ..< end_idx {
+    start_idx := int(sync.atomic_add(&data.work_queue.current_index, i32(BATCH_SIZE)))
+    if start_idx >= data.work_queue.total_count do break
+    end_idx := min(start_idx + BATCH_SIZE, data.work_queue.total_count)
+    #no_bounds_check for idx_a in start_idx ..< end_idx {
       if idx_a >= len(data.physics.bodies.entries) do break
       entry_a := &data.physics.bodies.entries[idx_a]
       if !entry_a.active do continue
-      body_a := &entry_a.item
-      if body_a.is_killed || body_a.is_sleeping do continue
-      collider_a := &body_a.collider
-      velocity_mag_sq := linalg.length2(body_a.velocity)
-      dt_sq := data.dt * data.dt
-      min_extent := collider_min_extent(collider_a)
-      threshold := min_extent * 0.5
-      if velocity_mag_sq * dt_sq < threshold * threshold do continue
-      data.bodies_tested += 1
-      motion := body_a.velocity * data.dt
-      earliest_toi := f32(1.0)
-      earliest_normal := linalg.VECTOR3F32_Y_AXIS
-      earliest_body_dyn: ^DynamicRigidBody = nil
-      earliest_body_static: ^StaticRigidBody = nil
-      has_ccd_hit := false
-      current_aabb := body_a.cached_aabb
-      swept_aabb: geometry.Aabb
-      swept_aabb.min = linalg.min(
-        body_a.cached_aabb.min,
-        body_a.cached_aabb.min + motion,
-      )
-      swept_aabb.max = linalg.max(
-        body_a.cached_aabb.max,
-        body_a.cached_aabb.max + motion,
-      )
-      // Query dynamic BVH
-      clear(&dyn_candidates)
-      geometry.bvh_query_aabb(
-        &data.physics.dynamic_bvh,
-        swept_aabb,
-        &dyn_candidates,
-      )
-      data.total_candidates += len(dyn_candidates)
-      for candidate in dyn_candidates {
-        handle_b := candidate.handle
-        if u32(idx_a) == handle_b.index do continue
-        body_b := get(data.physics, handle_b) or_continue
-        collider_b := &body_b.collider
-        toi := swept_test(
-          collider_a,
-          collider_b,
-          body_a.position,
-          body_b.position,
-          body_a.rotation,
-          body_b.rotation,
-          motion,
-        )
-        if toi.has_impact && toi.time < earliest_toi {
-          earliest_toi = toi.time
-          earliest_normal = toi.normal
-          earliest_body_dyn = body_b
-          earliest_body_static = nil
-          has_ccd_hit = true
-        }
-      }
-      // Query static BVH
-      clear(&static_candidates)
-      geometry.bvh_query_aabb(
-        &data.physics.static_bvh,
-        swept_aabb,
-        &static_candidates,
-      )
-      data.total_candidates += len(static_candidates)
-      for candidate in static_candidates {
-        handle_b := candidate.handle
-        body_b := get(data.physics, handle_b) or_continue
-        collider_b := &body_b.collider
-        toi := swept_test(
-          collider_a,
-          collider_b,
-          body_a.position,
-          body_b.position,
-          body_a.rotation,
-          body_b.rotation,
-          motion,
-        )
-        if toi.has_impact && toi.time < earliest_toi {
-          earliest_toi = toi.time
-          earliest_normal = toi.normal
-          earliest_body_dyn = nil
-          earliest_body_static = body_b
-          has_ccd_hit = true
-        }
-      }
-      if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
-        safe_time := earliest_toi * 0.98
-        body_a.position += body_a.velocity * data.dt * safe_time
-        update_cached_aabb(&body_a.base)
-        vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
-        if vel_along_normal < 0 {
-          wake_up(body_a)
-          if earliest_body_dyn != nil do wake_up(earliest_body_dyn)
-          restitution := body_a.restitution
-          friction := body_a.friction
-          if earliest_body_dyn != nil {
-            restitution =
-              (body_a.restitution + earliest_body_dyn.restitution) * 0.5
-            friction = (body_a.friction + earliest_body_dyn.friction) * 0.5
-          } else if earliest_body_static != nil {
-            restitution =
-              (body_a.restitution + earliest_body_static.restitution) * 0.5
-            friction = (body_a.friction + earliest_body_static.friction) * 0.5
-          }
-          body_a.velocity -=
-            earliest_normal * vel_along_normal * (1.0 + restitution)
-          tangent_vel :=
-            body_a.velocity -
-            earliest_normal * linalg.dot(body_a.velocity, earliest_normal)
-          body_a.velocity -= tangent_vel * friction * 0.5
-        }
-        data.ccd_handled[idx_a] = true
-      }
+      tested, cands := ccd_step_body(data.physics, &entry_a.item, idx_a, data.dt, data.ccd_handled, &dyn_candidates, &static_candidates)
+      if tested do data.bodies_tested += 1
+      data.total_candidates += cands
     }
   }
 }
@@ -1038,9 +416,7 @@ parallel_ccd :: proc(
       i,
     )
   }
-  for thread.pool_num_outstanding(&physics.thread_pool) > 0 {
-    time.sleep(time.Microsecond * 100)
-  }
+  pool_wait(&physics.thread_pool)
   for &task_data in task_data_array {
     bodies_tested += task_data.bodies_tested
     total_candidates += task_data.total_candidates
@@ -1052,97 +428,13 @@ sequential_ccd :: proc(
   physics: ^World,
   dt: f32,
   ccd_handled: []bool,
-) -> (
-  bodies_tested: int,
-  total_candidates: int,
-) {
-  // Pre-allocate with capacity to avoid reallocations
-  dyn_candidates := make(
-    [dynamic]DynamicBroadPhaseEntry,
-    0,
-    64,
-    context.temp_allocator,
-  )
-  static_candidates := make(
-    [dynamic]StaticBroadPhaseEntry,
-    0,
-    64,
-    context.temp_allocator,
-  )
+) -> (bodies_tested: int, total_candidates: int) {
+  dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, 0, 64, context.temp_allocator)
+  static_candidates := make([dynamic]StaticBroadPhaseEntry, 0, 64, context.temp_allocator)
   #no_bounds_check for &entry_a, idx_a in physics.bodies.entries do if entry_a.active {
-    body_a := &entry_a.item
-    if body_a.is_killed || body_a.is_sleeping do continue
-    velocity_mag_sq := linalg.length2(body_a.velocity)
-    if velocity_mag_sq < CCD_THRESHOLD_SQ do continue
-    bodies_tested += 1
-    collider_a := &body_a.collider
-    motion := body_a.velocity * dt
-    earliest_toi := f32(1.0)
-    earliest_normal := linalg.VECTOR3F32_Y_AXIS
-    earliest_body_dyn: ^DynamicRigidBody = nil
-    earliest_body_static: ^StaticRigidBody = nil
-    has_ccd_hit := false
-    swept_aabb: geometry.Aabb
-    swept_aabb.min = linalg.min(body_a.cached_aabb.min, body_a.cached_aabb.min + motion)
-    swept_aabb.max = linalg.max(body_a.cached_aabb.max, body_a.cached_aabb.max + motion)
-    // Query dynamic BVH
-    clear(&dyn_candidates)
-    geometry.bvh_query_aabb(&physics.dynamic_bvh, swept_aabb, &dyn_candidates)
-    total_candidates += len(dyn_candidates)
-    for candidate in dyn_candidates {
-      handle_b := candidate.handle
-      if u32(idx_a) == handle_b.index do continue
-      body_b := get(physics, handle_b) or_continue
-      collider_b := &body_b.collider
-      toi := swept_test(collider_a, collider_b, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
-      if toi.has_impact && toi.time < earliest_toi {
-        earliest_toi = toi.time
-        earliest_normal = toi.normal
-        earliest_body_dyn = body_b
-        earliest_body_static = nil
-        has_ccd_hit = true
-      }
-    }
-    // Query static BVH
-    clear(&static_candidates)
-    geometry.bvh_query_aabb(&physics.static_bvh, swept_aabb, &static_candidates)
-    total_candidates += len(static_candidates)
-    for candidate in static_candidates {
-      handle_b := candidate.handle
-      body_b := get(physics, handle_b) or_continue
-      collider_b := &body_b.collider
-      toi := swept_test(collider_a, collider_b, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
-      if toi.has_impact && toi.time < earliest_toi {
-        earliest_toi = toi.time
-        earliest_normal = toi.normal
-        earliest_body_dyn = nil
-        earliest_body_static = body_b
-        has_ccd_hit = true
-      }
-    }
-    if has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99 {
-      safe_time := earliest_toi * 0.98
-      body_a.position += body_a.velocity * dt * safe_time
-      update_cached_aabb(&body_a.base)
-      vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
-      if vel_along_normal < 0 {
-        wake_up(body_a)
-        if earliest_body_dyn != nil do wake_up(earliest_body_dyn)
-        restitution := body_a.restitution
-        friction := body_a.friction
-        if earliest_body_dyn != nil {
-          restitution = (body_a.restitution + earliest_body_dyn.restitution) * 0.5
-          friction = (body_a.friction + earliest_body_dyn.friction) * 0.5
-        } else if earliest_body_static != nil {
-          restitution = (body_a.restitution + earliest_body_static.restitution) * 0.5
-          friction = (body_a.friction + earliest_body_static.friction) * 0.5
-        }
-        body_a.velocity -= earliest_normal * vel_along_normal * (1.0 + restitution)
-        tangent_vel := body_a.velocity - earliest_normal * linalg.dot(body_a.velocity, earliest_normal)
-        body_a.velocity -= tangent_vel * friction * 0.5
-      }
-      ccd_handled[idx_a] = true
-    }
+    tested, cands := ccd_step_body(physics, &entry_a.item, idx_a, dt, ccd_handled, &dyn_candidates, &static_candidates)
+    if tested do bodies_tested += 1
+    total_candidates += cands
   }
   return
 }
@@ -1169,113 +461,18 @@ collision_detection_task_traversal :: proc(task: thread.Task) {
   task_start := time.now()
   defer data.elapsed_time = time.since(task_start)
 
-  // Process dynamic-dynamic pairs
-  #no_bounds_check for i in data.start ..< data.end {
-    if i >= len(data.dynamic_pairs) do break
-    pair := data.dynamic_pairs[i]
+  // Dynamic pairs in [start, end) clipped to dynamic_pairs range
+  dyn_end := min(data.end, len(data.dynamic_pairs))
+  #no_bounds_check for i in data.start ..< dyn_end {
     data.pairs_tested += 1
-
-    handle_a := pair.a.handle
-    handle_b := pair.b.handle
-
-    body_a := get(data.physics, handle_a) or_continue
-    body_b := get(data.physics, handle_b) or_continue
-
-    // Skip killed or sleeping bodies
-    if body_a.is_killed || body_b.is_killed do continue
-    if body_a.is_sleeping && body_b.is_sleeping do continue
-
-    // Bounding sphere test
-    bounding_spheres_intersect(
-      body_a.cached_sphere_center,
-      body_a.cached_sphere_radius,
-      body_b.cached_sphere_center,
-      body_b.cached_sphere_radius,
-    ) or_continue
-
-    // Narrow phase collision test
-    data.narrow_phase_tests += 1
-    point, normal, penetration, hit := test_collision(body_a, body_b)
-    if !hit do continue
-
-    // Wake up sleeping bodies
-    if body_a.is_sleeping do wake_up(body_a)
-    if body_b.is_sleeping do wake_up(body_b)
-
-    contact := DynamicContact {
-      body_a      = handle_a,
-      body_b      = handle_b,
-      point       = point,
-      normal      = normal,
-      penetration = penetration,
-      restitution = (body_a.restitution + body_b.restitution) * 0.5,
-      friction    = (body_a.friction + body_b.friction) * 0.5,
-    }
-
-    // Warm starting
-    hash := collision_pair_hash(handle_a, handle_b)
-    if prev_contact, found := data.physics.prev_dynamic_contacts[hash]; found {
-      contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-      contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-    }
-
-    append(&data.dynamic_contacts, contact)
+    data.narrow_phase_tests += narrowphase_dynamic_pair(data.physics, data.dynamic_pairs[i], &data.dynamic_contacts)
   }
 
-  // Process dynamic-static pairs
-  static_start := data.start - len(data.dynamic_pairs)
-  static_end := data.end - len(data.dynamic_pairs)
-  if static_start < 0 do static_start = 0
-  if static_end > len(data.static_pairs) do static_end = len(data.static_pairs)
-
+  static_start := max(0, data.start - len(data.dynamic_pairs))
+  static_end := min(data.end - len(data.dynamic_pairs), len(data.static_pairs))
   #no_bounds_check for i in static_start ..< static_end {
-    if i >= len(data.static_pairs) do break
-    pair := data.static_pairs[i]
     data.pairs_tested += 1
-
-    handle_a := pair.a.handle
-    handle_b := pair.b.handle
-
-    body_a := get(data.physics, handle_a) or_continue
-    body_b := get(data.physics, handle_b) or_continue
-
-    // Skip killed or sleeping dynamic bodies
-    if body_a.is_killed || body_a.is_sleeping do continue
-
-    // Bounding sphere test
-    bounding_spheres_intersect(
-      body_a.cached_sphere_center,
-      body_a.cached_sphere_radius,
-      body_b.cached_sphere_center,
-      body_b.cached_sphere_radius,
-    ) or_continue
-
-    // Narrow phase collision test
-    data.narrow_phase_tests += 1
-    point, normal, penetration, hit := test_collision(body_a, body_b)
-    if !hit do continue
-
-    // Wake up sleeping body
-    if body_a.is_sleeping do wake_up(body_a)
-
-    contact := StaticContact {
-      body_a      = handle_a,
-      body_b      = handle_b,
-      point       = point,
-      normal      = normal,
-      penetration = penetration,
-      restitution = (body_a.restitution + body_b.restitution) * 0.5,
-      friction    = (body_a.friction + body_b.friction) * 0.5,
-    }
-
-    // Warm starting
-    hash := collision_pair_hash(handle_a, handle_b)
-    if prev_contact, found := data.physics.prev_static_contacts[hash]; found {
-      contact.normal_impulse = prev_contact.normal_impulse * WARMSTART_COEF
-      contact.tangent_impulse = prev_contact.tangent_impulse * WARMSTART_COEF
-    }
-
-    append(&data.static_contacts, contact)
+    data.narrow_phase_tests += narrowphase_static_pair(data.physics, data.static_pairs[i], &data.static_contacts)
   }
 }
 
@@ -1291,8 +488,12 @@ parallel_collision_detection_traversal :: proc(
 
   // Find all dynamic-dynamic overlapping pairs using tree traversal
   traversal_start := time.now()
+  dyn_cap := max(64, self.last_dynamic_pair_count + (self.last_dynamic_pair_count >> 2))
+  sta_cap := max(64, self.last_static_pair_count + (self.last_static_pair_count >> 2))
   dynamic_pairs := make(
     [dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry),
+    0,
+    dyn_cap,
     context.temp_allocator,
   )
   geometry.bvh_find_all_overlaps(&self.dynamic_bvh, &dynamic_pairs)
@@ -1300,9 +501,13 @@ parallel_collision_detection_traversal :: proc(
   // Find all dynamic-static overlapping pairs
   static_pairs := make(
     [dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
+    0,
+    sta_cap,
     context.temp_allocator,
   )
   geometry.bvh_find_cross_overlaps(&self.dynamic_bvh, &self.static_bvh, &static_pairs)
+  self.last_dynamic_pair_count = len(dynamic_pairs)
+  self.last_static_pair_count = len(static_pairs)
 
   traversal_time := time.since(traversal_start)
 
@@ -1320,6 +525,9 @@ parallel_collision_detection_traversal :: proc(
 
   if total_pairs == 0 do return
 
+  per_thread_dyn_cap := max(64, len(dynamic_pairs) / max(1, num_threads) + 32)
+  per_thread_sta_cap := max(64, len(static_pairs) / max(1, num_threads) + 32)
+
   // If few pairs or single threaded, process sequentially
   if total_pairs < 100 || num_threads == 1 {
     task_data := Collision_Detection_Task_Data_Traversal {
@@ -1328,8 +536,8 @@ parallel_collision_detection_traversal :: proc(
       static_pairs  = static_pairs[:],
       start         = 0,
       end           = total_pairs,
-      dynamic_contacts = make([dynamic]DynamicContact, 0, 100, context.temp_allocator),
-      static_contacts = make([dynamic]StaticContact, 0, 100, context.temp_allocator),
+      dynamic_contacts = make([dynamic]DynamicContact, 0, len(dynamic_pairs), context.temp_allocator),
+      static_contacts = make([dynamic]StaticContact, 0, len(static_pairs), context.temp_allocator),
     }
     collision_detection_task_traversal(thread.Task{data = &task_data})
 
@@ -1363,8 +571,8 @@ parallel_collision_detection_traversal :: proc(
       static_pairs     = static_pairs[:],
       start            = start,
       end              = end,
-      dynamic_contacts = make([dynamic]DynamicContact, 0, 100, context.temp_allocator),
-      static_contacts  = make([dynamic]StaticContact, 0, 100, context.temp_allocator),
+      dynamic_contacts = make([dynamic]DynamicContact, 0, per_thread_dyn_cap, context.temp_allocator),
+      static_contacts  = make([dynamic]StaticContact, 0, per_thread_sta_cap, context.temp_allocator),
       thread_id        = i,
     }
 
@@ -1380,9 +588,7 @@ parallel_collision_detection_traversal :: proc(
 
   // Wait for completion
   parallel_exec_start := time.now()
-  for thread.pool_num_outstanding(&self.thread_pool) > 0 {
-    time.sleep(time.Microsecond * 100)
-  }
+  pool_wait(&self.thread_pool)
   parallel_exec_time := time.since(parallel_exec_start)
 
   // Collect results

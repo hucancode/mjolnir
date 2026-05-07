@@ -1,12 +1,171 @@
 package physics
 
+import cont "../containers"
+import "base:intrinsics"
 import "core:math"
-import "core:log"
+import "core:math/bits"
 import "core:math/linalg"
+import "core:mem"
+import "core:sync"
+import "core:thread"
 
 BAUMGARTE_COEF :: 0.4
 SLOP :: 0.002
 RESTITUTION_THRESHOLD :: -0.5
+SOLVER_PARALLEL_THRESHOLD :: 200
+SOLVER_BUCKET_PARALLEL_THRESHOLD :: 64
+
+SpinBarrier :: struct {
+  arrive: i32,
+  sense:  bool,
+}
+
+@(private)
+spin_barrier_wait :: proc "contextless" (b: ^SpinBarrier, local_sense: ^bool, expected: i32) {
+  local_sense^ = !local_sense^
+  cur := sync.atomic_add(&b.arrive, 1) + 1
+  if cur == expected {
+    sync.atomic_store(&b.arrive, 0)
+    sync.atomic_store(&b.sense, local_sense^)
+    return
+  }
+  for sync.atomic_load(&b.sense) != local_sense^ {
+    intrinsics.cpu_relax()
+  }
+}
+
+SolverWorkerData :: struct {
+  world:        ^World,
+  thread_id:    int,
+  num_threads:  int,
+  total_iters:  int,
+  bias_iters:   int,
+  barrier:      ^SpinBarrier,
+}
+
+solver_worker_task :: proc(task: thread.Task) {
+  data := (^SolverWorkerData)(task.data)
+  world := data.world
+  expected := i32(data.num_threads)
+  local_sense := false
+  contacts := world.dynamic_contacts[:]
+  static_contacts := world.static_contacts[:]
+  shard := world.solver_static_shards[data.thread_id % world.solver_static_shard_count][:]
+  for iter in 0 ..< data.total_iters {
+    use_bias := iter < data.bias_iters
+    for color_idx in 0 ..< world.solver_color_count {
+      bucket := world.solver_color_buckets[color_idx][:]
+      bucket_len := len(bucket)
+      if bucket_len == 0 {
+        spin_barrier_wait(data.barrier, &local_sense, expected)
+        continue
+      }
+      chunk := (bucket_len + data.num_threads - 1) / data.num_threads
+      s := data.thread_id * chunk
+      e := min(s + chunk, bucket_len)
+      if s < e {
+        for idx in bucket[s:e] {
+          c := &contacts[idx]
+          a := get(world, c.body_a) or_continue
+          b := get(world, c.body_b) or_continue
+          if use_bias do resolve_contact_dynamic_dynamic(c, a, b)
+          else do resolve_contact_no_bias_dynamic_dynamic(c, a, b)
+        }
+      }
+      spin_barrier_wait(data.barrier, &local_sense, expected)
+    }
+    for idx in shard {
+      c := &static_contacts[idx]
+      a := cont.get_soa(&world.bodies, c.body_a) or_continue
+      b := cont.get_soa(&world.static_bodies, c.body_b) or_continue
+      if use_bias do resolve_contact_dynamic_static(c, a, b)
+      else do resolve_contact_no_bias_dynamic_static(c, a, b)
+    }
+    spin_barrier_wait(data.barrier, &local_sense, expected)
+  }
+}
+
+run_solver_iters :: proc(world: ^World, total_iters, bias_iters, num_threads: int) {
+  if (len(world.dynamic_contacts) + len(world.static_contacts)) < SOLVER_PARALLEL_THRESHOLD || num_threads <= 1 {
+    for iter in 0 ..< total_iters {
+      use_bias := iter < bias_iters
+      solve_dynamic_pass(world, use_bias)
+      for &c in world.static_contacts {
+        a := cont.get_soa(&world.bodies, c.body_a) or_continue
+        b := cont.get_soa(&world.static_bodies, c.body_b) or_continue
+        if use_bias do resolve_contact_dynamic_static(&c, a, b)
+        else do resolve_contact_no_bias_dynamic_static(&c, a, b)
+      }
+    }
+    return
+  }
+  barrier := SpinBarrier{}
+  task_data := make([]SolverWorkerData, num_threads, context.temp_allocator)
+  for t in 0 ..< num_threads {
+    task_data[t] = SolverWorkerData{
+      world       = world,
+      thread_id   = t,
+      num_threads = num_threads,
+      total_iters = total_iters,
+      bias_iters  = bias_iters,
+      barrier     = &barrier,
+    }
+    thread.pool_add_task(&world.thread_pool, mem.nil_allocator(), solver_worker_task, &task_data[t], t)
+  }
+  pool_wait(&world.thread_pool)
+}
+
+build_solver_partition :: proc(world: ^World, num_shards: int) {
+  body_count := len(world.bodies.entries)
+  resize(&world.solver_color_used, body_count)
+  if body_count > 0 {
+    mem.zero_slice(world.solver_color_used[:])
+  }
+  for &b in world.solver_color_buckets do clear(&b)
+  world.solver_color_count = 0
+  for c, idx in world.dynamic_contacts {
+    a_idx := int(c.body_a.index)
+    b_idx := int(c.body_b.index)
+    if a_idx >= body_count || b_idx >= body_count do continue
+    used := world.solver_color_used[a_idx] | world.solver_color_used[b_idx]
+    free_mask := ~used
+    color := 0
+    if free_mask != 0 {
+      color = int(bits.trailing_zeros(free_mask))
+    }
+    if color >= 64 do color = 0
+    bit := u64(1) << u64(color)
+    world.solver_color_used[a_idx] |= bit
+    world.solver_color_used[b_idx] |= bit
+    if color >= len(world.solver_color_buckets) {
+      old_len := len(world.solver_color_buckets)
+      resize(&world.solver_color_buckets, color + 1)
+      for i in old_len ..< color + 1 {
+        world.solver_color_buckets[i] = make([dynamic]int)
+      }
+    }
+    append(&world.solver_color_buckets[color], idx)
+    if color + 1 > world.solver_color_count {
+      world.solver_color_count = color + 1
+    }
+  }
+  shard_count := max(1, num_shards)
+  if shard_count != world.solver_static_shard_count {
+    for &s in world.solver_static_shards do delete(s)
+    delete(world.solver_static_shards)
+    world.solver_static_shards = make([][dynamic]int, shard_count)
+    for i in 0 ..< shard_count {
+      world.solver_static_shards[i] = make([dynamic]int)
+    }
+    world.solver_static_shard_count = shard_count
+  } else {
+    for i in 0 ..< shard_count do clear(&world.solver_static_shards[i])
+  }
+  for c, idx in world.static_contacts {
+    s := int(c.body_a.index) % shard_count
+    append(&world.solver_static_shards[s], idx)
+  }
+}
 
 prepare_contact_dynamic_dynamic :: proc(
   contact: ^DynamicContact,
@@ -130,87 +289,16 @@ warmstart_contact :: proc {
   warmstart_contact_dynamic_static,
 }
 
-// batch resolver - processes 4 contacts simultaneously
-resolve_contact_batch4_dynamic_dynamic :: proc(
-  contacts: [4]^DynamicContact,
-  bodies_a: [4]^DynamicRigidBody,
-  bodies_b: [4]^DynamicRigidBody,
-) {
-  // Gather data for SIMD processing
-  r_a_batch: [4][3]f32
-  r_b_batch: [4][3]f32
-  normal_batch: [4][3]f32
-  angular_vel_a_batch: [4][3]f32
-  angular_vel_b_batch: [4][3]f32
-  vel_a_batch: [4][3]f32
-  vel_b_batch: [4][3]f32
-
-  for i in 0..<4 {
-    r_a_batch[i] = contacts[i].r_a
-    r_b_batch[i] = contacts[i].r_b
-    normal_batch[i] = contacts[i].normal
-    angular_vel_a_batch[i] = bodies_a[i].angular_velocity
-    angular_vel_b_batch[i] = bodies_b[i].angular_velocity
-    vel_a_batch[i] = bodies_a[i].velocity
-    vel_b_batch[i] = bodies_b[i].velocity
-  }
-
-  // SIMD: Compute 4 cross products at once
-  cross_a := vector_cross3_batch4(angular_vel_a_batch, r_a_batch)
-  cross_b := vector_cross3_batch4(angular_vel_b_batch, r_b_batch)
-
-  // Compute velocities at contact points
-  vel_a_at_point: [4][3]f32
-  vel_b_at_point: [4][3]f32
-  for i in 0..<4 {
-    vel_a_at_point[i] = vel_a_batch[i] + cross_a[i]
-    vel_b_at_point[i] = vel_b_batch[i] + cross_b[i]
-  }
-
-  // Compute relative velocities
-  relative_vel: [4][3]f32
-  for i in 0..<4 {
-    relative_vel[i] = vel_b_at_point[i] - vel_a_at_point[i]
-  }
-
-  // Dot products for velocity along normal
-  vel_along_normal := vector_dot3_batch4(relative_vel, normal_batch)
-
-  // Solve normal impulse for all 4 contacts
-  for i in 0..<4 {
-    contact := contacts[i]
-    delta_impulse := contact.normal_mass * (-vel_along_normal[i] + contact.bias)
-    old_impulse := contact.normal_impulse
-    contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
-    delta_impulse = contact.normal_impulse - old_impulse
-    impulse := contact.normal * delta_impulse
-    apply_impulse_at_point(bodies_a[i], -impulse, contact.point)
-    apply_impulse_at_point(bodies_b[i], impulse, contact.point)
-  }
-
-  // Process friction (2 tangent directions per contact)
-  for i in 0..<4 {
-    contact := contacts[i]
-    body_a := bodies_a[i]
-    body_b := bodies_b[i]
-    tangents := [2][3]f32{contact.tangent1, contact.tangent2}
-    max_friction := contact.friction * contact.normal_impulse
-
-    #unroll for j in 0 ..< 2 {
-      vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-      vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
-      velocity_along_tangent := linalg.dot(vel_b - vel_a, tangents[j])
-      delta_impulse_t := contact.tangent_mass[j] * (-velocity_along_tangent)
-      old_impulse_t := contact.tangent_impulse[j]
-      contact.tangent_impulse[j] = clamp(old_impulse_t + delta_impulse_t, -max_friction, max_friction)
-      impulse_t := tangents[j] * (contact.tangent_impulse[j] - old_impulse_t)
-      apply_impulse_at_point(body_a, -impulse_t, contact.point)
-      apply_impulse_at_point(body_b, impulse_t, contact.point)
-    }
+solve_dynamic_pass :: proc(world: ^World, use_bias: bool) {
+  for &c in world.dynamic_contacts {
+    ba := get(world, c.body_a) or_continue
+    bb := get(world, c.body_b) or_continue
+    if use_bias do resolve_contact_dynamic_dynamic(&c, ba, bb)
+    else do resolve_contact_no_bias_dynamic_dynamic(&c, ba, bb)
   }
 }
 
-resolve_contact_dynamic_dynamic :: proc(
+resolve_contact_dynamic_dynamic :: #force_inline proc(
   contact: ^DynamicContact,
   body_a: ^DynamicRigidBody,
   body_b: ^DynamicRigidBody,
@@ -241,7 +329,7 @@ resolve_contact_dynamic_dynamic :: proc(
   }
 }
 
-resolve_contact_dynamic_static :: proc(
+resolve_contact_dynamic_static :: #force_inline proc(
   contact: ^StaticContact,
   body_a: ^DynamicRigidBody,
   body_b: ^StaticRigidBody,
@@ -272,86 +360,7 @@ resolve_contact :: proc {
   resolve_contact_dynamic_static,
 }
 
-// batch resolver (no bias) - processes 4 contacts simultaneously
-resolve_contact_batch4_no_bias_dynamic_dynamic :: proc(
-  contacts: [4]^DynamicContact,
-  bodies_a: [4]^DynamicRigidBody,
-  bodies_b: [4]^DynamicRigidBody,
-) {
-  // Gather data for SIMD processing
-  r_a_batch: [4][3]f32
-  r_b_batch: [4][3]f32
-  normal_batch: [4][3]f32
-  angular_vel_a_batch: [4][3]f32
-  angular_vel_b_batch: [4][3]f32
-  vel_a_batch: [4][3]f32
-  vel_b_batch: [4][3]f32
-
-  for i in 0..<4 {
-    r_a_batch[i] = contacts[i].r_a
-    r_b_batch[i] = contacts[i].r_b
-    normal_batch[i] = contacts[i].normal
-    angular_vel_a_batch[i] = bodies_a[i].angular_velocity
-    angular_vel_b_batch[i] = bodies_b[i].angular_velocity
-    vel_a_batch[i] = bodies_a[i].velocity
-    vel_b_batch[i] = bodies_b[i].velocity
-  }
-
-  // SIMD: Compute 4 cross products at once
-  cross_a := vector_cross3_batch4(angular_vel_a_batch, r_a_batch)
-  cross_b := vector_cross3_batch4(angular_vel_b_batch, r_b_batch)
-
-  // Compute velocities at contact points
-  vel_a_at_point: [4][3]f32
-  vel_b_at_point: [4][3]f32
-  for i in 0..<4 {
-    vel_a_at_point[i] = vel_a_batch[i] + cross_a[i]
-    vel_b_at_point[i] = vel_b_batch[i] + cross_b[i]
-  }
-
-  // Compute relative velocities
-  relative_vel: [4][3]f32
-  for i in 0..<4 {
-    relative_vel[i] = vel_b_at_point[i] - vel_a_at_point[i]
-  }
-
-  // Dot products for velocity along normal
-  vel_along_normal := vector_dot3_batch4(relative_vel, normal_batch)
-
-  // Solve normal impulse for all 4 contacts (no bias)
-  for i in 0..<4 {
-    contact := contacts[i]
-    delta_impulse := contact.normal_mass * (-vel_along_normal[i])
-    old_impulse := contact.normal_impulse
-    contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
-    impulse := contact.normal * (contact.normal_impulse - old_impulse)
-    apply_impulse_at_point(bodies_a[i], -impulse, contact.point)
-    apply_impulse_at_point(bodies_b[i], impulse, contact.point)
-  }
-
-  // Process friction (2 tangent directions per contact)
-  for i in 0..<4 {
-    contact := contacts[i]
-    body_a := bodies_a[i]
-    body_b := bodies_b[i]
-    tangents := [2][3]f32{contact.tangent1, contact.tangent2}
-    max_friction := contact.friction * contact.normal_impulse
-
-    for j in 0 ..< 2 {
-      vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-      vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
-      velocity_along_tangent := linalg.dot(vel_b - vel_a, tangents[j])
-      delta_impulse_t := contact.tangent_mass[j] * (-velocity_along_tangent)
-      old_impulse_t := contact.tangent_impulse[j]
-      contact.tangent_impulse[j] = clamp(old_impulse_t + delta_impulse_t, -max_friction, max_friction)
-      impulse_t := tangents[j] * (contact.tangent_impulse[j] - old_impulse_t)
-      apply_impulse_at_point(body_a, -impulse_t, contact.point)
-      apply_impulse_at_point(body_b, impulse_t, contact.point)
-    }
-  }
-}
-
-resolve_contact_no_bias_dynamic_dynamic :: proc(
+resolve_contact_no_bias_dynamic_dynamic :: #force_inline proc(
   contact: ^DynamicContact,
   body_a: ^DynamicRigidBody,
   body_b: ^DynamicRigidBody,
@@ -380,7 +389,7 @@ resolve_contact_no_bias_dynamic_dynamic :: proc(
   }
 }
 
-resolve_contact_no_bias_dynamic_static :: proc(
+resolve_contact_no_bias_dynamic_static :: #force_inline proc(
   contact: ^StaticContact,
   body_a: ^DynamicRigidBody,
   body_b: ^StaticRigidBody,

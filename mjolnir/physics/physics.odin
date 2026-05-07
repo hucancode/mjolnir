@@ -22,7 +22,6 @@ SLEEP_ANGULAR_THRESHOLD_SQ :: SLEEP_ANGULAR_THRESHOLD * SLEEP_ANGULAR_THRESHOLD
 SLEEP_TIME_THRESHOLD :: 0.5
 ENABLE_VERBOSE_LOG :: false
 BVH_REBUILD_THRESHOLD :: #config(PHYSICS_BVH_REBUILD_THRESHOLD, 512) // Rebuild BVH when killed bodies exceed this
-BROADPHASE_BVH_TRAVERSAL :: #config(PHYSICS_BROADPHASE_BVH_TRAVERSAL, true)
 
 DynamicRigidBodyHandle :: distinct cont.Handle
 StaticRigidBodyHandle :: distinct cont.Handle
@@ -72,8 +71,8 @@ World :: struct {
   static_bodies:           cont.PoolSoA(StaticRigidBody),
   dynamic_contacts:        [dynamic]DynamicContact,
   static_contacts:         [dynamic]StaticContact,
-  prev_dynamic_contacts:   map[u64]DynamicContact,
-  prev_static_contacts:    map[u64]StaticContact,
+  prev_dynamic_warmstart:  [dynamic]ContactWarmstart,
+  prev_static_warmstart:   [dynamic]ContactWarmstart,
   trigger_overlaps:        [dynamic]TriggerOverlap,
   trigger_static_overlaps: [dynamic]TriggerStaticOverlap,
   gravity:                 [3]f32,
@@ -90,6 +89,15 @@ World :: struct {
   // BVH rebuild tracking
   last_dynamic_count:      int,
   last_static_count:       int,
+  // Broadphase pair count smoothing (capacity hint for next frame)
+  last_dynamic_pair_count: int,
+  last_static_pair_count:  int,
+  // Solver graph coloring
+  solver_color_used:       [dynamic]u64,       // per dynamic body: bitmask of colors used
+  solver_color_buckets:    [dynamic][dynamic]int, // per color: contact indices
+  solver_color_count:      int,
+  solver_static_shards:    [][dynamic]int,    // per shard: static contact indices
+  solver_static_shard_count: int,
   // Per-frame performance counters (populated at end of step)
   last_perf:               PerfFrame,
 }
@@ -116,8 +124,8 @@ init :: proc(
   self.trigger_static_overlaps = make([dynamic]TriggerStaticOverlap)
   self.dynamic_contacts = make([dynamic]DynamicContact)
   self.static_contacts = make([dynamic]StaticContact)
-  self.prev_dynamic_contacts = make(map[u64]DynamicContact)
-  self.prev_static_contacts = make(map[u64]StaticContact)
+  self.prev_dynamic_warmstart = make([dynamic]ContactWarmstart)
+  self.prev_static_warmstart = make([dynamic]ContactWarmstart)
   self.gravity = gravity
   self.gravity_magnitude = linalg.length(gravity)
   self.dynamic_bvh = geometry.BVH(DynamicBroadPhaseEntry) {
@@ -139,6 +147,8 @@ init :: proc(
     },
   }
   self.body_bounds = make([dynamic]geometry.Aabb)
+  self.solver_color_used = make([dynamic]u64)
+  self.solver_color_buckets = make([dynamic][dynamic]int)
   self.enable_parallel = enable_parallel
   self.killed_body_count = 0
   self.last_dynamic_count = 0
@@ -178,8 +188,13 @@ shutdown :: proc(self: ^World) {
   delete(self.body_bounds)
   delete(self.dynamic_contacts)
   delete(self.static_contacts)
-  delete(self.prev_dynamic_contacts)
-  delete(self.prev_static_contacts)
+  delete(self.prev_dynamic_warmstart)
+  delete(self.prev_static_warmstart)
+  delete(self.solver_color_used)
+  for &b in self.solver_color_buckets do delete(b)
+  delete(self.solver_color_buckets)
+  for &s in self.solver_static_shards do delete(s)
+  delete(self.solver_static_shards)
   geometry.bvh_destroy(&self.dynamic_bvh)
   geometry.bvh_destroy(&self.static_bvh)
 }
@@ -237,25 +252,40 @@ step :: proc(self: ^World, dt: f32) {
   step_start := time.now()
   @(static) frame_counter := 0
   frame_counter += 1
-  // Save previous contacts for warmstarting
+  // Save previous contacts for warmstarting (sorted by hash for binary search)
   warmstart_prep_start := time.now()
-  clear(&self.prev_dynamic_contacts)
-  clear(&self.prev_static_contacts)
+  clear(&self.prev_dynamic_warmstart)
+  clear(&self.prev_static_warmstart)
   for contact in self.dynamic_contacts {
-    hash := collision_pair_hash(contact.body_a, contact.body_b)
-    self.prev_dynamic_contacts[hash] = contact
+    if contact.normal_impulse == 0 && contact.tangent_impulse == {0, 0} do continue
+    append(&self.prev_dynamic_warmstart, ContactWarmstart {
+      hash    = collision_pair_hash(contact.body_a, contact.body_b),
+      normal  = contact.normal_impulse,
+      tangent = contact.tangent_impulse,
+    })
   }
   for contact in self.static_contacts {
-    hash := collision_pair_hash(contact.body_a, contact.body_b)
-    self.prev_static_contacts[hash] = contact
+    if contact.normal_impulse == 0 && contact.tangent_impulse == {0, 0} do continue
+    append(&self.prev_static_warmstart, ContactWarmstart {
+      hash    = collision_pair_hash(contact.body_a, contact.body_b),
+      normal  = contact.normal_impulse,
+      tangent = contact.tangent_impulse,
+    })
   }
+  slice.sort_by_key(self.prev_dynamic_warmstart[:], proc(c: ContactWarmstart) -> u64 { return c.hash })
+  slice.sort_by_key(self.prev_static_warmstart[:], proc(c: ContactWarmstart) -> u64 { return c.hash })
   warmstart_prep_time := time.since(warmstart_prep_start)
 
-  // Sleep Update
+  // Sleep update + awake count + velocity integration in single body pass
+  force_application_start := time.now()
+  awake_body_count := 0
+  dynamic_body_count := 0
+  gravity := self.gravity
   for i in 0 ..< len(self.bodies.entries) {
     if !self.bodies.entries[i].active do continue
     body := &self.bodies.entries[i].item
     if body.is_killed do continue
+    dynamic_body_count += 1
     lin_speed_sq := linalg.length2(body.velocity)
     ang_speed_sq := linalg.length2(body.angular_velocity)
     if lin_speed_sq < SLEEP_LINEAR_THRESHOLD_SQ &&
@@ -270,24 +300,15 @@ step :: proc(self: ^World, dt: f32) {
       body.velocity = {}
       body.angular_velocity = {}
     }
-  }
-
-  // Apply forces to all bodies (gravity, air resistance, etc.)
-  force_application_start := time.now()
-  apply_gravity(self)
-  // Count awake bodies for logging
-  awake_body_count := 0
-  for idx in 0 ..< len(self.bodies.entries) {
-    if !self.bodies.entries[idx].active do continue
-    body := &self.bodies.entries[idx].item
-    if body.is_killed || body.is_sleeping do continue
+    if body.is_sleeping do continue
     awake_body_count += 1
+    body.velocity += (gravity + body.force * body.inv_mass) * dt
+    body.velocity *= math.pow(1.0 - body.linear_damping, dt)
+    body.force = {}
+    body.torque = {}
   }
   force_application_time := time.since(force_application_start)
-  // Integrate velocities from forces ONCE for the entire frame
-  integration_start := time.now()
-  integrate_velocities(self, dt)
-  integration_time := time.since(integration_start)
+  integration_time: time.Duration = 0
   // Track which bodies were handled by CCD (outside substep loop)
   ccd_start := time.now()
   ccd_handled := make(
@@ -312,13 +333,6 @@ step :: proc(self: ^World, dt: f32) {
   }
   ccd_time := time.since(ccd_start)
   substep_dt := dt / f32(NUM_SUBSTEPS)
-  dynamic_body_count := 0
-  for i in 0 ..< len(self.bodies.entries) {
-    if !self.bodies.entries[i].active do continue
-    body := &self.bodies.entries[i].item
-    if body.is_killed do continue
-    dynamic_body_count += 1
-  }
   static_body_count := 0
   for i in 0 ..< len(self.static_bodies.entries) {
     if !self.static_bodies.entries[i].active do continue
@@ -420,14 +434,6 @@ step :: proc(self: ^World, dt: f32) {
     bvh_build_time += time.since(bvh_build_start)
   }
   substep_start := time.now()
-  dynamic_candidates := make(
-    [dynamic]DynamicBroadPhaseEntry,
-    context.temp_allocator,
-  )
-  static_candidates := make(
-    [dynamic]StaticBroadPhaseEntry,
-    context.temp_allocator,
-  )
   refit_time: time.Duration
   broadphase_time: time.Duration
   prepare_time: time.Duration
@@ -447,31 +453,27 @@ step :: proc(self: ^World, dt: f32) {
     refit_time += time.since(refit_start)
     broadphase_start := time.now()
     if self.enable_parallel {
-      when BROADPHASE_BVH_TRAVERSAL {
-        parallel_collision_detection_traversal(self, self.thread_count)
-      } else {
-        parallel_collision_detection(self, self.thread_count)
-      }
+      parallel_collision_detection_traversal(self, self.thread_count)
     } else {
-      when BROADPHASE_BVH_TRAVERSAL {
-        sequential_collision_detection_traversal(self)
-      } else {
-        sequential_collision_detection(self)
-      }
+      sequential_collision_detection_traversal(self)
     }
     collision_time := time.since(broadphase_start)
     broadphase_time += collision_time
     // Prepare all contacts (compute mass matrices and bias terms)
     prepare_start := time.now()
-    for &contact in self.dynamic_contacts {
-      body_a := get(self, contact.body_a) or_continue
-      body_b := get(self, contact.body_b) or_continue
-      prepare_contact(&contact, body_a, body_b, substep_dt)
-    }
-    for &contact in self.static_contacts {
-      body_a := get(self, contact.body_a) or_continue
-      body_b := get(self, contact.body_b) or_continue
-      prepare_contact(&contact, body_a, body_b, substep_dt)
+    if self.enable_parallel {
+      parallel_prepare_contacts(self, substep_dt, self.thread_count)
+    } else {
+      for &contact in self.dynamic_contacts {
+        body_a := get(self, contact.body_a) or_continue
+        body_b := get(self, contact.body_b) or_continue
+        prepare_contact(&contact, body_a, body_b, substep_dt)
+      }
+      for &contact in self.static_contacts {
+        body_a := get(self, contact.body_a) or_continue
+        body_b := get(self, contact.body_b) or_continue
+        prepare_contact(&contact, body_a, body_b, substep_dt)
+      }
     }
     prepare_time += time.since(prepare_start)
     // Warmstart with cached impulses (only on first substep)
@@ -488,135 +490,31 @@ step :: proc(self: ^World, dt: f32) {
         warmstart_contact(&contact, body_a, body_b)
       }
     }
-    // Solve constraints with bias (includes position correction + restitution)
-    #unroll for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
-      // Process dynamic contacts in batches of 4
-      i := 0
-      for i + 4 <= len(self.dynamic_contacts) {
-        contacts: [4]^DynamicContact
-        bodies_a: [4]^DynamicRigidBody
-        bodies_b: [4]^DynamicRigidBody
-        valid := true
-        // Gather batch of 4 contacts
-        for j in 0 ..< 4 {
-          contact := &self.dynamic_contacts[i + j]
-          body_a := get(self, contact.body_a) or_else nil
-          body_b := get(self, contact.body_b) or_else nil
-          if body_a == nil || body_b == nil {
-            valid = false
-            break
-          }
-          contacts[j] = contact
-          bodies_a[j] = body_a
-          bodies_b[j] = body_b
-        }
-        if valid {
-          resolve_contact_batch4_dynamic_dynamic(contacts, bodies_a, bodies_b)
-          i += 4
-        } else {
-          // Fall back to scalar for this contact
-          contact := &self.dynamic_contacts[i]
-          body_a, body_b: ^DynamicRigidBody
-          body_a = get(self, contact.body_a) or_else nil
-          body_b = get(self, contact.body_b) or_else nil
-          if body_a != nil && body_b != nil {
-            resolve_contact(contact, body_a, body_b)
-          }
-          i += 1
+    if self.enable_parallel {
+      build_solver_partition(self, self.thread_count)
+      run_solver_iters(self, CONSTRAINT_SOLVER_ITERS + STABILIZATION_ITERS, CONSTRAINT_SOLVER_ITERS, self.thread_count)
+    } else {
+      #unroll for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
+        solve_dynamic_pass(self, true)
+        for &contact in self.static_contacts {
+          body_a := cont.get_soa(&self.bodies, contact.body_a) or_continue
+          body_b := cont.get_soa(&self.static_bodies, contact.body_b) or_continue
+          resolve_contact_dynamic_static(&contact, body_a, body_b)
         }
       }
-
-      // Handle remainder with scalar processing
-      for i < len(self.dynamic_contacts) {
-        contact := &self.dynamic_contacts[i]
-        body_a := get(self, contact.body_a) or_else nil
-        body_b := get(self, contact.body_b) or_else nil
-        if body_a != nil && body_b != nil {
-          resolve_contact(contact, body_a, body_b)
+      #unroll for _ in 0 ..< STABILIZATION_ITERS {
+        solve_dynamic_pass(self, false)
+        for &contact in self.static_contacts {
+          body_a := cont.get_soa(&self.bodies, contact.body_a) or_continue
+          body_b := cont.get_soa(&self.static_bodies, contact.body_b) or_continue
+          resolve_contact_no_bias_dynamic_static(&contact, body_a, body_b)
         }
-        i += 1
-      }
-
-      // Static contacts use scalar path
-      for &contact in self.static_contacts {
-        body_a := get(self, contact.body_a) or_continue
-        body_b := get(self, contact.body_b) or_continue
-        resolve_contact(&contact, body_a, body_b)
-      }
-    }
-    // Additional stabilization iterations WITHOUT bias (pure constraint enforcement)
-    #unroll for _ in 0 ..< STABILIZATION_ITERS {
-      // Process dynamic contacts in batches of 4
-      i := 0
-      for i + 4 <= len(self.dynamic_contacts) {
-        contacts: [4]^DynamicContact
-        bodies_a: [4]^DynamicRigidBody
-        bodies_b: [4]^DynamicRigidBody
-        valid := true
-
-        // Gather batch of 4 contacts
-        for j in 0 ..< 4 {
-          contact := &self.dynamic_contacts[i + j]
-          body_a := get(self, contact.body_a) or_else nil
-          body_b := get(self, contact.body_b) or_else nil
-          if body_a == nil || body_b == nil {
-            valid = false
-            break
-          }
-          contacts[j] = contact
-          bodies_a[j] = body_a
-          bodies_b[j] = body_b
-        }
-
-        if valid {
-          resolve_contact_batch4_no_bias_dynamic_dynamic(
-            contacts,
-            bodies_a,
-            bodies_b,
-          )
-          i += 4
-        } else {
-          // Fall back to scalar for this contact
-          contact := &self.dynamic_contacts[i]
-          body_a, body_b: ^DynamicRigidBody
-          body_a = get(self, contact.body_a) or_else nil
-          body_b = get(self, contact.body_b) or_else nil
-          if body_a != nil && body_b != nil {
-            resolve_contact_no_bias(contact, body_a, body_b)
-          }
-          i += 1
-        }
-      }
-
-      // Handle remainder with scalar processing
-      for i < len(self.dynamic_contacts) {
-        contact := &self.dynamic_contacts[i]
-        body_a := get(self, contact.body_a) or_else nil
-        body_b := get(self, contact.body_b) or_else nil
-        if body_a != nil && body_b != nil {
-          resolve_contact_no_bias(contact, body_a, body_b)
-        }
-        i += 1
-      }
-
-      // Static contacts use scalar path
-      for &contact in self.static_contacts {
-        body_a := get(self, contact.body_a) or_continue
-        body_b := get(self, contact.body_b) or_continue
-        resolve_contact_no_bias(&contact, body_a, body_b)
       }
     }
     solver_time += time.since(solver_start)
     integration_start_substep := time.now()
     integrate_positions(self, substep_dt, ccd_handled[:])
     integration_time_substep += time.since(integration_start_substep)
-    cache_update_start_substep := time.now()
-    if self.enable_parallel {
-      parallel_update_aabb_cache(self, self.thread_count)
-    } else {
-      sequential_update_aabb_cache(self)
-    }
-    refit_time += time.since(cache_update_start_substep)
   }
   substep_time := time.since(substep_start)
   // Trigger overlap detection
@@ -693,34 +591,23 @@ step :: proc(self: ^World, dt: f32) {
   }
   cache_update_time: time.Duration = 0
   cleanup_start := time.now()
-  for idx in 0 ..< len(self.bodies.entries) {
-    if !self.bodies.entries[idx].active do continue
-    body := &self.bodies.entries[idx].item
+  sleeping_body_count := 0
+  for i in 0 ..< len(self.bodies.entries) {
+    if !self.bodies.entries[i].active do continue
+    body := &self.bodies.entries[i].item
     if body.is_killed do continue
     if body.position.y < KILL_Y {
       body.is_killed = true
       self.killed_body_count += 1
-      when ENABLE_VERBOSE_LOG {
-        log.infof(
-          "Marking body for removal at y=%.2f (below KILL_Y=%.2f)",
-          body.position.y,
-          KILL_Y,
-        )
-      }
+      continue
     }
+    if body.is_sleeping do sleeping_body_count += 1
   }
   cleanup_time := time.since(cleanup_start)
   total_time := time.since(step_start)
   avg_candidates :=
     ccd_bodies_tested > 0 ? f32(ccd_total_candidates) / f32(ccd_bodies_tested) : 0.0
   total_body_count := dynamic_body_count + static_body_count
-  sleeping_body_count := 0
-  for i in 0 ..< len(self.bodies.entries) {
-    if !self.bodies.entries[i].active do continue
-    body := &self.bodies.entries[i].item
-    if body.is_killed do continue
-    if body.is_sleeping do sleeping_body_count += 1
-  }
   self.last_perf = PerfFrame {
     total_ms                 = f32(time.duration_milliseconds(total_time)),
     warmstart_prep_ms        = f32(time.duration_milliseconds(warmstart_prep_time)),
@@ -749,31 +636,33 @@ step :: proc(self: ^World, dt: f32) {
     rebuilt_dynamic_bvh      = rebuild_dynamic_bvh,
     rebuilt_static_bvh       = rebuild_static_bvh,
   }
-  log.infof(
-    "Physics: %.2fms total | warmstart=%.2fms force=%.2fms integ=%.2fms ccd=%.2fms (fast=%d avg_cands=%.1f) bvh=%.2fms substeps=%.2fms [refit=%.2fms collision=%.2fms prep=%.2fms solve=%.2fms integ=%.2fms] cleanup=%.2fms | bodies=%d (dyn=%d sta=%d) awake=%d contacts=%d (dyn=%d sta=%d)",
-    time.duration_milliseconds(total_time),
-    time.duration_milliseconds(warmstart_prep_time),
-    time.duration_milliseconds(force_application_time),
-    time.duration_milliseconds(integration_time),
-    time.duration_milliseconds(ccd_time),
-    ccd_bodies_tested,
-    avg_candidates,
-    time.duration_milliseconds(bvh_build_time),
-    time.duration_milliseconds(substep_time),
-    time.duration_milliseconds(refit_time),
-    time.duration_milliseconds(broadphase_time),
-    time.duration_milliseconds(prepare_time),
-    time.duration_milliseconds(solver_time),
-    time.duration_milliseconds(integration_time_substep),
-    time.duration_milliseconds(cleanup_time),
-    total_body_count,
-    dynamic_body_count,
-    static_body_count,
-    awake_body_count,
-    len(self.dynamic_contacts) + len(self.static_contacts),
-    len(self.dynamic_contacts),
-    len(self.static_contacts),
-  )
+  when ENABLE_VERBOSE_LOG {
+    log.infof(
+      "Physics: %.2fms total | warmstart=%.2fms force=%.2fms integ=%.2fms ccd=%.2fms (fast=%d avg_cands=%.1f) bvh=%.2fms substeps=%.2fms [refit=%.2fms collision=%.2fms prep=%.2fms solve=%.2fms integ=%.2fms] cleanup=%.2fms | bodies=%d (dyn=%d sta=%d) awake=%d contacts=%d (dyn=%d sta=%d)",
+      time.duration_milliseconds(total_time),
+      time.duration_milliseconds(warmstart_prep_time),
+      time.duration_milliseconds(force_application_time),
+      time.duration_milliseconds(integration_time),
+      time.duration_milliseconds(ccd_time),
+      ccd_bodies_tested,
+      avg_candidates,
+      time.duration_milliseconds(bvh_build_time),
+      time.duration_milliseconds(substep_time),
+      time.duration_milliseconds(refit_time),
+      time.duration_milliseconds(broadphase_time),
+      time.duration_milliseconds(prepare_time),
+      time.duration_milliseconds(solver_time),
+      time.duration_milliseconds(integration_time_substep),
+      time.duration_milliseconds(cleanup_time),
+      total_body_count,
+      dynamic_body_count,
+      static_body_count,
+      awake_body_count,
+      len(self.dynamic_contacts) + len(self.static_contacts),
+      len(self.dynamic_contacts),
+      len(self.static_contacts),
+    )
+  }
 }
 
 get_dynamic_body :: #force_inline proc(

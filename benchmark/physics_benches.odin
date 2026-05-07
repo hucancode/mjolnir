@@ -112,6 +112,7 @@ bench_physics_simulation :: proc(b: ^Bench) {
   sample_phys_scene(b, "stack_5x4x5",     5,  4, 5, 30, 200, false)
   sample_phys_scene(b, "stack_8x4x8",     8,  4, 8, 30, 200, false)
   sample_phys_scene(b, "grid_10x1x10",   10,  1, 10, 30, 200, false)
+  sample_phys_scene(b, "stack_30x20x30", 30, 20, 30, 5, 30, true)
 }
 
 bench_physics_raycast :: proc(b: ^Bench) {

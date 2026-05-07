@@ -75,6 +75,35 @@ collision_pair_hash :: proc {
   collision_pair_hash_static,
 }
 
+ContactWarmstart :: struct {
+  hash:    u64,
+  normal:  f32,
+  tangent: [2]f32,
+}
+
+warmstart_lookup :: proc "contextless" (
+  arr: []ContactWarmstart,
+  hash: u64,
+) -> (
+  normal: f32,
+  tangent: [2]f32,
+  found: bool,
+) {
+  lo, hi := 0, len(arr)
+  for lo < hi {
+    mid := (lo + hi) >> 1
+    if arr[mid].hash < hash {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  if lo < len(arr) && arr[lo].hash == hash {
+    return arr[lo].normal, arr[lo].tangent, true
+  }
+  return 0, {}, false
+}
+
 // Fast bounding sphere intersection test (use before expensive narrow phase)
 bounding_spheres_intersect :: proc "contextless" (
   pos_a: [3]f32,
@@ -677,49 +706,8 @@ test_collision_dynamic_static :: proc(
   )
 }
 
-// Collision test between static and dynamic rigid bodies
-test_collision_static_dynamic :: proc(
-  body_a: ^StaticRigidBody,
-  body_b: ^DynamicRigidBody,
-) -> (
-  point: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  hit: bool,
-) {
-  return test_collision_collider_collider(
-    &body_a.collider,
-    body_a.position,
-    body_a.rotation,
-    &body_b.collider,
-    body_b.position,
-    body_b.rotation,
-  )
-}
-
-// Collision test between two static rigid bodies
-test_collision_static_static :: proc(
-  body_a, body_b: ^StaticRigidBody,
-) -> (
-  point: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  hit: bool,
-) {
-  return test_collision_collider_collider(
-    &body_a.collider,
-    body_a.position,
-    body_a.rotation,
-    &body_b.collider,
-    body_b.position,
-    body_b.rotation,
-  )
-}
-
 test_collision :: proc {
   test_collision_collider_collider,
   test_collision_dynamic_dynamic,
   test_collision_dynamic_static,
-  test_collision_static_dynamic,
-  test_collision_static_static,
 }

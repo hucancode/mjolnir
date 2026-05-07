@@ -707,7 +707,6 @@ bvh_query_sphere_primitives :: proc(
 ) {
   clear(results)
   if len(bvh.nodes) == 0 do return
-  sphere_bounds := sphere_bounds(sphere)
   stack := make([dynamic]i32, 0, 64, context.temp_allocator)
   append(&stack, 0)
   for len(stack) > 0 {

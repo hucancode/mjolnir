@@ -958,7 +958,7 @@ build_poly_mesh :: proc(
       }
     }
     verts_after := len(verts)
-    new_verts := verts_after - verts_before
+    // new_verts := verts_after - verts_before
     // Start with triangles as initial polygons
     region_polys: [dynamic]Poly_Build
     defer {

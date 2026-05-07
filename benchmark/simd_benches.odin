@@ -21,18 +21,20 @@ bench_simd_obb_to_aabb :: proc(b: ^Bench) {
     t := time.tick_now()
     aabbs: [4]geometry.Aabb
     for _ in 0 ..< N {
-      geometry.obb_to_aabb_batch4(obbs, &aabbs)
+      #unroll for k in 0 ..< 4 {
+        aabbs[k] = geometry.obb_to_aabb(obbs[k])
+      }
     }
     per_iter_ms[it] = f64(time.tick_since(t)) / f64(time.Millisecond)
     if aabbs[0].min.x == 9999.0 do fmt.println("noop")
   }
-  summarize(b, "simd/obb_to_aabb_batch4/1M", "ms", per_iter_ms)
+  summarize(b, "simd/obb_to_aabb_scalar/1M", "ms", per_iter_ms)
   ops := f64(N) * 4
   emit(
     b,
-    "simd/obb_to_aabb_batch4/throughput",
+    "simd/obb_to_aabb_scalar/throughput",
     "M_ops_per_s",
     ops / 1e3 / per_iter_ms[len(per_iter_ms) / 2],
-    "4 OBBs per call",
+    "4 OBBs per call (scalar)",
   )
 }
