@@ -14,7 +14,7 @@ import "vendor:glfw"
 
 LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
-ALL_POINT_LIGHT :: true
+ALL_POINT_LIGHT :: false
 ENABLE_DIRECTIONAL_LIGHT :: true
 portal_camera_handle: world.CameraHandle
 portal_material_handle: world.MaterialHandle
@@ -433,6 +433,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           {0, 0, 0},
           world.create_directional_light_attachment(
             {0.2, 0.5, 0.9, 3.0},
+            20,
             cast_shadow = true,
           ),
         ) or_else {}
