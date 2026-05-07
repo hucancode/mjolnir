@@ -252,7 +252,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 mode        = .LOOP,
                 status      = .PLAYING,
                 time        = 0.0,
-                duration    = spin_duration,
                 speed       = 1.0,
               }
               world.register_animatable_node(&engine.world, hand_cube_handle)
@@ -341,7 +340,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
           mode        = .LOOP,
           status      = .PLAYING,
           time        = 0.0,
-          duration    = rotation_duration,
           speed       = 1.0,
         }
         world.register_animatable_node(&engine.world, lights_root_handle)
@@ -566,7 +564,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
           mode        = .LOOP,
           status      = .PLAYING,
           time        = 0.0,
-          duration    = rotation_duration,
           speed       = 1.0,
         }
         world.register_animatable_node(&engine.world, forcefield_root_handle)

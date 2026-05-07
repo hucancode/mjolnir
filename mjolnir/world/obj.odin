@@ -33,7 +33,7 @@ load_obj :: proc(
   log.infof("Created mesh %v", mesh_handle)
   // step 3: Create node with mesh attachment
   node_handle, node := cont.alloc(&world.nodes, NodeHandle) or_return
-  init_node(node, path)
+  node_init(node, path)
   node.attachment = MeshAttachment {
     handle      = mesh_handle,
     material    = material,

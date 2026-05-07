@@ -34,7 +34,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
         world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
         world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
         pos := [3]f32{world_x, 0.5, world_z}
-        create_static_body_sphere(&state.physics, 0.5, pos)
+        create_static_body(&state.physics, position = pos, collider = SphereCollider{radius = 0.5})
       }
     }
     step(&state.physics, 0.0)
@@ -79,7 +79,7 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     state := cast(^Physics_Raycast_State)raw_data(options.input)
-    destroy(&state.physics)
+    shutdown(&state.physics)
     delete(state.rays)
     free(state)
     return nil

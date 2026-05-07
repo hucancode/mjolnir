@@ -13,11 +13,11 @@ build_cube_grid :: proc(
   drop_height: f32 = 10.0,
 ) {
   half := f32(max(dim_x, dim_z)) * 1.5
-  physics.create_static_body_box(
+  physics.create_static_body(
     world,
-    {half, 0.5, half},
     {0, -0.5, 0},
     linalg.QUATERNIONF32_IDENTITY,
+    physics.BoxCollider{half_extents = {half, 0.5, half}},
   )
   for x in 0 ..< dim_x {
     for y in 0 ..< dim_y {
@@ -27,12 +27,12 @@ build_cube_grid :: proc(
           drop_height + f32(y) * 2.0,
           f32(z - dim_z / 2) * 2.0,
         }
-        h := physics.create_dynamic_body_box(
+        h := physics.create_dynamic_body(
           world,
-          {1, 1, 1},
           pos,
           linalg.QUATERNIONF32_IDENTITY,
           1.0,
+          physics.BoxCollider{half_extents = {1, 1, 1}},
         )
         if body, ok := physics.get_dynamic_body(world, h); ok {
           physics.set_box_inertia(body, {1, 1, 1})
@@ -53,7 +53,7 @@ sample_phys_scene :: proc(
 ) {
   world: physics.World
   physics.init(&world, {0, -9.81, 0}, enable_parallel)
-  defer physics.destroy(&world)
+  defer physics.shutdown(&world)
 
   build_cube_grid(&world, dim_x, dim_y, dim_z)
 
@@ -117,18 +117,18 @@ bench_physics_simulation :: proc(b: ^Bench) {
 bench_physics_raycast :: proc(b: ^Bench) {
   world: physics.World
   physics.init(&world, {0, -9.81, 0}, false)
-  defer physics.destroy(&world)
+  defer physics.shutdown(&world)
 
   grid_size := 50
   for x in 0 ..< grid_size {
     for z in 0 ..< grid_size {
       world_x := (f32(x) - f32(grid_size) * 0.5) * 1.0
       world_z := (f32(z) - f32(grid_size) * 0.5) * 1.0
-      physics.create_static_body_sphere(
+      physics.create_static_body(
         &world,
-        0.5,
         {world_x, 0.5, world_z},
         linalg.QUATERNIONF32_IDENTITY,
+        physics.SphereCollider{radius = 0.5},
       )
     }
   }

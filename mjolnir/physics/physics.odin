@@ -108,7 +108,7 @@ init :: proc(
   self: ^World,
   gravity := [3]f32{0, -9.81, 0},
   enable_parallel: bool = true,
-) {
+) -> bool {
   cont.init_soa(&self.bodies)
   cont.init_soa(&self.static_bodies)
   cont.init_soa(&self.trigger_bodies)
@@ -157,9 +157,10 @@ init :: proc(
       len(self.thread_pool.threads),
     )
   }
+  return true
 }
 
-destroy :: proc(self: ^World) {
+shutdown :: proc(self: ^World) {
   if self.enable_parallel {
     log.infof(
       "Physics.destroy: Destroying thread pool - running=%v, threads=%d",
@@ -230,194 +231,6 @@ destroy_static_body :: proc(self: ^World, handle: StaticRigidBodyHandle) {
 destroy_body :: proc {
   destroy_dynamic_body,
   destroy_static_body,
-}
-
-create_dynamic_body_sphere :: proc(
-  self: ^World,
-  radius: f32 = 1.0,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-  mass: f32 = 1.0,
-) -> (
-  body_handle: DynamicRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider := SphereCollider {
-    radius = radius,
-  }
-  body_handle = create_dynamic_body(
-    self,
-    position,
-    rotation,
-    mass,
-    collider,
-  ) or_return
-  return body_handle, true
-}
-
-create_static_body_sphere :: proc(
-  self: ^World,
-  radius: f32 = 1.0,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> (
-  body_handle: StaticRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider := SphereCollider {
-    radius = radius,
-  }
-  body_handle = create_static_body(
-    self,
-    position,
-    rotation,
-    collider,
-  ) or_return
-  return body_handle, true
-}
-
-create_dynamic_body_box :: proc(
-  self: ^World,
-  half_extents: [3]f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-  mass: f32 = 1.0,
-) -> (
-  body_handle: DynamicRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider := BoxCollider {
-    half_extents = half_extents,
-  }
-  body_handle = create_dynamic_body(
-    self,
-    position,
-    rotation,
-    mass,
-    collider,
-  ) or_return
-  return body_handle, true
-}
-
-create_static_body_box :: proc(
-  self: ^World,
-  half_extents: [3]f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> (
-  body_handle: StaticRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider := BoxCollider {
-    half_extents = half_extents,
-  }
-  body_handle = create_static_body(
-    self,
-    position,
-    rotation,
-    collider,
-  ) or_return
-  return body_handle, true
-}
-
-create_dynamic_body_cylinder :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-  mass: f32 = 1.0,
-) -> (
-  body_handle: DynamicRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider := CylinderCollider {
-    radius = radius,
-    height = height,
-  }
-  body_handle = create_dynamic_body(
-    self,
-    position,
-    rotation,
-    mass,
-    collider,
-  ) or_return
-  return body_handle, true
-}
-
-create_static_body_cylinder :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> (
-  body_handle: StaticRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider := CylinderCollider {
-    radius = radius,
-    height = height,
-  }
-  body_handle = create_static_body(
-    self,
-    position,
-    rotation,
-    collider,
-  ) or_return
-  return body_handle, true
-}
-
-create_dynamic_body_fan :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  angle: f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-  mass: f32 = 1.0,
-) -> (
-  body_handle: DynamicRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider := FanCollider {
-    radius = radius,
-    height = height,
-    angle  = angle,
-  }
-  body_handle = create_dynamic_body(
-    self,
-    position,
-    rotation,
-    mass,
-    collider,
-  ) or_return
-  return body_handle, true
-}
-
-create_static_body_fan :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  angle: f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> (
-  body_handle: StaticRigidBodyHandle,
-  ok: bool,
-) #optional_ok {
-  collider := FanCollider {
-    radius = radius,
-    height = height,
-    angle  = angle,
-  }
-  body_handle = create_static_body(
-    self,
-    position,
-    rotation,
-    collider,
-  ) or_return
-  return body_handle, true
 }
 
 step :: proc(self: ^World, dt: f32) {
@@ -1015,72 +828,6 @@ create_trigger :: proc(
   body.collider = collider
   update_cached_aabb(&body.base)
   return handle, true
-}
-
-create_trigger_sphere :: proc(
-  self: ^World,
-  radius: f32 = 1.0,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> (
-  handle: TriggerHandle,
-  ok: bool,
-) #optional_ok {
-  collider := SphereCollider {
-    radius = radius,
-  }
-  return create_trigger(self, position, rotation, collider)
-}
-
-create_trigger_box :: proc(
-  self: ^World,
-  half_extents: [3]f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> (
-  handle: TriggerHandle,
-  ok: bool,
-) #optional_ok {
-  collider := BoxCollider {
-    half_extents = half_extents,
-  }
-  return create_trigger(self, position, rotation, collider)
-}
-
-create_trigger_cylinder :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> (
-  handle: TriggerHandle,
-  ok: bool,
-) #optional_ok {
-  collider := CylinderCollider {
-    radius = radius,
-    height = height,
-  }
-  return create_trigger(self, position, rotation, collider)
-}
-
-create_trigger_fan :: proc(
-  self: ^World,
-  radius: f32,
-  height: f32,
-  angle: f32,
-  position: [3]f32 = {0, 0, 0},
-  rotation := linalg.QUATERNIONF32_IDENTITY,
-) -> (
-  handle: TriggerHandle,
-  ok: bool,
-) #optional_ok {
-  collider := FanCollider {
-    radius = radius,
-    height = height,
-    angle  = angle,
-  }
-  return create_trigger(self, position, rotation, collider)
 }
 
 destroy_trigger :: proc(self: ^World, handle: TriggerHandle) {

@@ -14,18 +14,18 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
   GROUND_HALF :: f32(14.0)
   physics_world: World
   init(&physics_world, {0, -20, 0}, false) // 2x earth gravity
-  defer destroy(&physics_world)
-  create_static_body_box(
+  defer shutdown(&physics_world)
+  create_static_body(
     &physics_world,
-    {GROUND_HALF, 0.5, GROUND_HALF},
     {0, -0.5, 0},
     linalg.QUATERNIONF32_IDENTITY,
+    BoxCollider{half_extents = {GROUND_HALF, 0.5, GROUND_HALF}},
   )
-  create_static_body_sphere(
+  create_static_body(
     &physics_world,
-    SPHERE_RADIUS,
     {2.5, SPHERE_RADIUS, 0},
     linalg.QUATERNIONF32_IDENTITY,
+    SphereCollider{radius = SPHERE_RADIUS},
   )
   body_handles: [PIECE_COUNT]DynamicRigidBodyHandle
   idx := 0
@@ -42,13 +42,12 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
         switch idx % 3 {
         case 0:
           // Cylinder
-          body_handles[idx] = create_dynamic_body_cylinder(
+          body_handles[idx] = create_dynamic_body(
             &physics_world,
-            1.0,
-            2.0,
             pos,
             linalg.QUATERNIONF32_IDENTITY,
             50.0,
+            CylinderCollider{radius = 1.0, height = 2.0},
           )
           if body, ok := get_dynamic_body(&physics_world, body_handles[idx]);
              ok {
@@ -56,12 +55,12 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
           }
         case 1:
           // Cube
-          body_handles[idx] = create_dynamic_body_box(
+          body_handles[idx] = create_dynamic_body(
             &physics_world,
-            {1.0, 1.0, 1.0},
             pos,
             linalg.QUATERNIONF32_IDENTITY,
             50.0,
+            BoxCollider{half_extents = {1.0, 1.0, 1.0}},
           )
           if body, ok := get_dynamic_body(&physics_world, body_handles[idx]);
              ok {
@@ -69,12 +68,12 @@ test_cubes_should_not_sink :: proc(t: ^testing.T) {
           }
         case 2:
           // Sphere
-          body_handles[idx] = create_dynamic_body_sphere(
+          body_handles[idx] = create_dynamic_body(
             &physics_world,
-            1.0,
             pos,
             linalg.QUATERNIONF32_IDENTITY,
             50.0,
+            SphereCollider{radius = 1.0},
           )
           if body, ok := get_dynamic_body(&physics_world, body_handles[idx]);
              ok {

@@ -70,13 +70,13 @@ test_rigid_body_integration :: proc(t: ^testing.T) {
 test_physics_world_gravity_application :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, -10, 0}, false)
-  defer destroy(&physics_world)
-  body_handle, body_ok := create_dynamic_body_sphere(
+  defer shutdown(&physics_world)
+  body_handle, body_ok := create_dynamic_body(
     &physics_world,
-    1.0,
     {},
     linalg.QUATERNIONF32_IDENTITY,
     2.0,
+    SphereCollider{radius = 1.0},
   )
   testing.expect(t, body_ok, "Body creation should succeed")
   body, get_ok := get_dynamic_body(&physics_world, body_handle)
@@ -97,20 +97,20 @@ test_physics_world_gravity_application :: proc(t: ^testing.T) {
 test_physics_world_two_body_collision :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, 0, 0}, false)
-  defer destroy(&physics_world)
-  body_a_handle, _ := create_dynamic_body_sphere(
+  defer shutdown(&physics_world)
+  body_a_handle, _ := create_dynamic_body(
     &physics_world,
-    1.0,
     {},
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
+    SphereCollider{radius = 1.0},
   )
-  body_b_handle, _ := create_dynamic_body_sphere(
+  body_b_handle, _ := create_dynamic_body(
     &physics_world,
-    1.0,
     {1.5, 0, 0},
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
+    SphereCollider{radius = 1.0},
   )
   body_a, _ := get_dynamic_body(&physics_world, body_a_handle)
   body_b, _ := get_dynamic_body(&physics_world, body_b_handle)
@@ -139,14 +139,14 @@ test_physics_world_two_body_collision :: proc(t: ^testing.T) {
 test_physics_world_static_body_collision :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, 0, 0}, false)
-  defer destroy(&physics_world)
-  body_static_handle, _ := create_static_body_sphere(&physics_world)
-  body_dynamic_handle, _ := create_dynamic_body_sphere(
+  defer shutdown(&physics_world)
+  body_static_handle, _ := create_static_body(&physics_world, collider = SphereCollider{radius = 1.0})
+  body_dynamic_handle, _ := create_dynamic_body(
     &physics_world,
-    1.0,
     {1.5, 0, 0},
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
+    SphereCollider{radius = 1.0},
   )
   body_dynamic, _ := get_dynamic_body(&physics_world, body_dynamic_handle)
   body_dynamic.velocity = {-10, 0, 0}
@@ -228,15 +228,15 @@ test_rigid_body_apply_force_at_point_generates_torque :: proc(t: ^testing.T) {
 test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, 0, 0}, false)
-  defer destroy(&physics_world)
-  body_bullet_handle, _ := create_dynamic_body_sphere(
+  defer shutdown(&physics_world)
+  body_bullet_handle, _ := create_dynamic_body(
     &physics_world,
-    0.1,
     {-5, 0, 0},
     linalg.QUATERNIONF32_IDENTITY,
     0.1,
+    SphereCollider{radius = 0.1},
   )
-  create_static_body_box(&physics_world, {0.5, 5, 5})
+  create_static_body(&physics_world, collider = BoxCollider{half_extents = {0.5, 5, 5}})
   body_bullet := get_dynamic_body(&physics_world, body_bullet_handle)
   body_bullet.velocity = {100, 0, 0}
   dt := f32(0.016)
@@ -257,7 +257,7 @@ test_physics_world_ccd_prevents_tunneling :: proc(t: ^testing.T) {
 test_physics_world_angular_integration :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, 0, 0}, false)
-  defer destroy(&physics_world)
+  defer shutdown(&physics_world)
   body_handle, _ := create_dynamic_body(&physics_world)
   body, _ := get_dynamic_body(&physics_world, body_handle)
   set_sphere_inertia(body, 1.0)
@@ -281,7 +281,7 @@ test_physics_world_angular_integration :: proc(t: ^testing.T) {
 test_physics_world_kill_y_threshold :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, enable_parallel = false)
-  defer destroy(&physics_world)
+  defer shutdown(&physics_world)
   body_handle, _ := create_dynamic_body(&physics_world, {0, KILL_Y - 1, 0})
   dt := f32(0.016)
   step(&physics_world, dt)
@@ -732,7 +732,7 @@ test_off_center_impulse_creates_rotation :: proc(t: ^testing.T) {
 test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, 0, 0}, false)
-  defer destroy(&physics_world)
+  defer shutdown(&physics_world)
   body_handle, _ := create_dynamic_body(&physics_world)
   body, _ := get_dynamic_body(&physics_world, body_handle)
   set_box_inertia(body, {1, 1, 1})
@@ -757,20 +757,20 @@ test_rotation_integration_updates_orientation :: proc(t: ^testing.T) {
 test_collision_off_center_induces_spin :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, 0, 0}, false)
-  defer destroy(&physics_world)
-  body_a_handle := create_dynamic_body_sphere(
+  defer shutdown(&physics_world)
+  body_a_handle := create_dynamic_body(
     &physics_world,
-    1.0,
     {},
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
+    SphereCollider{radius = 1.0},
   )
-  create_dynamic_body_sphere(
+  create_dynamic_body(
     &physics_world,
-    1.0,
     {0.5, 0.5, 0},
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
+    SphereCollider{radius = 1.0},
   )
   body_a := get_dynamic_body(&physics_world, body_a_handle)
   set_box_inertia(body_a, {1, 1, 1})
@@ -854,30 +854,30 @@ test_resolve_contact_friction_reduces_tangent_velocity :: proc(t: ^testing.T) {
 test_integration_box_stack_stability :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, -9.81, 0}, false)
-  defer destroy(&physics_world)
-  create_static_body_box(&physics_world, {5, 0.5, 5}, {0, -0.5, 0})
-  body_1_h, _ := create_dynamic_body_box(
+  defer shutdown(&physics_world)
+  create_static_body(&physics_world, position = {0, -0.5, 0}, collider = BoxCollider{half_extents = {5, 0.5, 5}})
+  body_1_h, _ := create_dynamic_body(
     &physics_world,
-    {0.5, 0.5, 0.5},
     {0, 0.5, 0},
     linalg.QUATERNIONF32_IDENTITY,
     10.0,
+    BoxCollider{half_extents = {0.5, 0.5, 0.5}},
   )
   body_1, _ := get_dynamic_body(&physics_world, body_1_h)
-  body_2_h, _ := create_dynamic_body_box(
+  body_2_h, _ := create_dynamic_body(
     &physics_world,
-    {0.5, 0.5, 0.5},
     {0, 1.5, 0},
     linalg.QUATERNIONF32_IDENTITY,
     10.0,
+    BoxCollider{half_extents = {0.5, 0.5, 0.5}},
   )
   body_2, _ := get_dynamic_body(&physics_world, body_2_h)
-  body_3_h, _ := create_dynamic_body_box(
+  body_3_h, _ := create_dynamic_body(
     &physics_world,
-    {0.5, 0.5, 0.5},
     {0, 2.5, 0},
     linalg.QUATERNIONF32_IDENTITY,
     10.0,
+    BoxCollider{half_extents = {0.5, 0.5, 0.5}},
   )
   body_3, _ := get_dynamic_body(&physics_world, body_3_h)
   dt := f32(0.016)
@@ -985,7 +985,7 @@ test_disable_rotation_prevents_torque_application :: proc(t: ^testing.T) {
 test_disable_rotation_prevents_quaternion_update :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, 0, 0}, false)
-  defer destroy(&physics_world)
+  defer shutdown(&physics_world)
   body_handle, _ := create_dynamic_body(&physics_world)
   body, _ := get_dynamic_body(&physics_world, body_handle)
   set_box_inertia(body, {1, 1, 1})
@@ -1198,14 +1198,14 @@ test_rotated_offset_collider_aabb :: proc(t: ^testing.T) {
 test_rotated_body_with_offset_collision :: proc(t: ^testing.T) {
   physics_world: World
   init(&physics_world, {0, -10, 0}, false)
-  defer destroy(&physics_world)
-  create_static_body_box(&physics_world, {10, 0.5, 10}, {0, -0.5, 0})
-  box_handle, _ := create_dynamic_body_box(
+  defer shutdown(&physics_world)
+  create_static_body(&physics_world, position = {0, -0.5, 0}, collider = BoxCollider{half_extents = {10, 0.5, 10}})
+  box_handle, _ := create_dynamic_body(
     &physics_world,
-    {0.5, 0.5, 0.5},
     {0, 2, 0},
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
+    BoxCollider{half_extents = {0.5, 0.5, 0.5}},
   )
   box, _ := get_dynamic_body(&physics_world, box_handle)
   box.rotation = linalg.quaternion_angle_axis(

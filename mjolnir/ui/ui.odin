@@ -17,17 +17,17 @@ System :: struct {
   staging:          [dynamic]cmd.RenderCommand,
 }
 
-init :: proc(self: ^System, max_widgets: u32 = 4096) {
+init :: proc(self: ^System, max_widgets: u32 = 4096) -> bool {
   cont.init(&self.widget_pool, max_widgets)
   self.staging = make([dynamic]cmd.RenderCommand, 0, 256)
 
-  // Initialize fontstash (UI system owns this)
   font_atlas_width := 512
   font_atlas_height := 512
   self.font_context = new(fs.FontContext)
   fs.Init(self.font_context, font_atlas_width, font_atlas_height, .TOPLEFT)
 
   log.info("UI system initialized with fontstash")
+  return true
 }
 
 // Initialize GPU resources (called after GPU context is ready)

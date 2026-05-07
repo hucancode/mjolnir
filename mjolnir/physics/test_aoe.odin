@@ -10,12 +10,12 @@ spawn_test_body :: proc(
   phys: ^World,
   position: [3]f32,
 ) -> DynamicRigidBodyHandle {
-  handle, _ := create_dynamic_body_sphere(
+  handle, _ := create_dynamic_body(
     phys,
-    0.5,
     position,
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
+    SphereCollider{radius = 0.5},
   )
   return handle
 }
@@ -24,7 +24,7 @@ spawn_test_body :: proc(
 test_physics_query_sphere :: proc(t: ^testing.T) {
   phys: World
   init(&phys, enable_parallel = false)
-  defer destroy(&phys)
+  defer shutdown(&phys)
   // Spawn bodies at specific positions
   b1 := spawn_test_body(&phys, {0, 0, 0})
   b2 := spawn_test_body(&phys, {5, 0, 0})
@@ -54,7 +54,7 @@ test_physics_query_sphere :: proc(t: ^testing.T) {
 test_physics_query_box :: proc(t: ^testing.T) {
   phys: World
   init(&phys, enable_parallel = false)
-  defer destroy(&phys)
+  defer shutdown(&phys)
   b1 := spawn_test_body(&phys, {0, 0, 0})
   b2 := spawn_test_body(&phys, {2, 2, 2})
   b3 := spawn_test_body(&phys, {-2, -2, -2})
@@ -75,7 +75,7 @@ test_physics_query_box :: proc(t: ^testing.T) {
 test_physics_raycast_basic :: proc(t: ^testing.T) {
   phys: World
   init(&phys, enable_parallel = false)
-  defer destroy(&phys)
+  defer shutdown(&phys)
   b1 := spawn_test_body(&phys, {5, 0, 0})
   step(&phys, 0.0)
   // Raycast along X axis
@@ -97,7 +97,7 @@ test_physics_raycast_basic :: proc(t: ^testing.T) {
 test_physics_raycast_miss :: proc(t: ^testing.T) {
   phys: World
   init(&phys, enable_parallel = false)
-  defer destroy(&phys)
+  defer shutdown(&phys)
   spawn_test_body(&phys, {5, 0, 0})
   step(&phys, 0.0)
   // Raycast in opposite direction
@@ -113,7 +113,7 @@ test_physics_raycast_miss :: proc(t: ^testing.T) {
 test_physics_raycast_single :: proc(t: ^testing.T) {
   phys: World
   init(&phys, enable_parallel = false)
-  defer destroy(&phys)
+  defer shutdown(&phys)
   // Spawn multiple bodies in a line
   b1 := spawn_test_body(&phys, {3, 0, 0})
   b2 := spawn_test_body(&phys, {6, 0, 0})
@@ -214,7 +214,7 @@ test_collision_point_fan :: proc(t: ^testing.T) {
 test_physics_world_integration :: proc(t: ^testing.T) {
   phys: World
   init(&phys, enable_parallel = false)
-  defer destroy(&phys)
+  defer shutdown(&phys)
   b1 := spawn_test_body(&phys, {0, 0, 0})
   b2 := spawn_test_body(&phys, {5, 0, 0})
   b3 := spawn_test_body(&phys, {10, 0, 0})
@@ -235,7 +235,7 @@ test_physics_world_integration :: proc(t: ^testing.T) {
 test_physics_edge_cases :: proc(t: ^testing.T) {
   phys: World
   init(&phys, enable_parallel = false)
-  defer destroy(&phys)
+  defer shutdown(&phys)
   results := make([dynamic]DynamicRigidBodyHandle)
   defer delete(results)
   query_sphere(&phys, {0, 0, 0}, 5.0, &results)
@@ -271,14 +271,13 @@ test_physics_edge_cases :: proc(t: ^testing.T) {
 test_physics_cylinder_collision :: proc(t: ^testing.T) {
   phys: World
   init(&phys, enable_parallel = false)
-  defer destroy(&phys)
-  body_handle, _ := create_dynamic_body_cylinder(
+  defer shutdown(&phys)
+  body_handle, _ := create_dynamic_body(
     &phys,
-    2.0,
-    4.0,
     {},
     linalg.QUATERNIONF32_IDENTITY,
     1.0,
+    CylinderCollider{radius = 2.0, height = 4.0},
   )
   step(&phys, 0.0)
   // Query for bodies - should find the cylinder
@@ -293,7 +292,7 @@ test_physics_cylinder_collision :: proc(t: ^testing.T) {
 test_physics_fan_trigger :: proc(t: ^testing.T) {
   phys: World
   init(&phys, enable_parallel = false)
-  defer destroy(&phys)
+  defer shutdown(&phys)
   // Test point-in-fan directly
   fan := FanCollider {
     radius   = 5.0,

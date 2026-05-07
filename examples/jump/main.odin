@@ -7,7 +7,6 @@ import "core:log"
 import "core:math/linalg"
 import "vendor:glfw"
 
-physics_world: physics.World
 cube_handle: world.NodeHandle
 ground_handle: world.NodeHandle
 cube_body: physics.DynamicRigidBodyHandle
@@ -27,16 +26,16 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  physics.init(&physics_world, {0, -10, 0})
+  engine.physics.gravity = {0, -10, 0}
   ground_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   ground_mat := world.get_builtin_material(&engine.world, .GRAY)
   ground_handle = world.spawn(&engine.world, {0, -0.5, 0}) or_else {}
   ground_node := world.node(&engine.world, ground_handle)
-  physics.create_static_body_box(
-    &physics_world,
-    {40.0, 0.5, 40.0},
+  physics.create_static_body(
+    &engine.physics,
     ground_node.transform.position,
     ground_node.transform.rotation,
+    physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}},
   )
   ground_mesh_handle :=
     world.spawn_child(
@@ -53,14 +52,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cube_mat := world.get_builtin_material(&engine.world, .CYAN)
   cube_handle = world.spawn(&engine.world, {0, 3, 0}) or_else {}
   cube_node := world.node(&engine.world, cube_handle)
-  cube_body = physics.create_dynamic_body_box(
-    &physics_world,
-    {0.5, 0.5, 0.5},
+  cube_body = physics.create_dynamic_body(
+    &engine.physics,
     cube_node.transform.position,
     cube_node.transform.rotation,
     2.0,
+    physics.BoxCollider{half_extents = {0.5, 0.5, 0.5}},
   )
-  if body, ok := physics.get_dynamic_body(&physics_world, cube_body); ok {
+  if body, ok := physics.get_dynamic_body(&engine.physics, cube_body); ok {
     physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
   }
   cube_handle =
@@ -101,7 +100,7 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   if action != glfw.PRESS {
     return
   }
-  cube_body_ptr, body_ok := physics.get_dynamic_body(&physics_world, cube_body)
+  cube_body_ptr, body_ok := physics.get_dynamic_body(&engine.physics, cube_body)
   if !body_ok {
     return
   }
@@ -126,7 +125,7 @@ on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   time_since_jump += delta_time
-  cube_body_ptr, body_ok := physics.get_dynamic_body(&physics_world, cube_body)
+  cube_body_ptr, body_ok := physics.get_dynamic_body(&engine.physics, cube_body)
   if !body_ok {
     return
   }
@@ -176,6 +175,4 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     time_since_jump = 0.0
     physics.apply_force(cube_body_ptr, [3]f32{0, JUMP_FORCE, 0})
   }
-  physics.step(&physics_world, delta_time)
-  world.sync_all_physics_to_world(&engine.world, &physics_world)
 }

@@ -10,7 +10,6 @@ import "core:math"
 import "core:os"
 import "vendor:glfw"
 
-physics_world: physics.World
 cube_mesh_handles: [dynamic]world.NodeHandle
 cube_body_to_mesh: map[physics.TriggerHandle]world.NodeHandle
 effector_sphere: world.NodeHandle
@@ -31,7 +30,6 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  physics.init(&physics_world)
   cube_body_to_mesh = make(map[physics.TriggerHandle]world.NodeHandle)
   render.set_visibility_stats_enabled(&engine.render, false)
   engine.debug_ui_enabled = false
@@ -50,10 +48,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
       world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
       world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
       // Create trigger body for cube
-      body_handle := physics.create_trigger_box(
-        &physics_world,
-        {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
+      body_handle := physics.create_trigger(
+        &engine.physics,
         position = {world_x, 0.5, world_z},
+        collider = physics.BoxCollider {
+          half_extents = {0.5 * cube_scale, 0.5 * cube_scale, 0.5 * cube_scale},
+        },
       ) or_continue
       physics_node := world.spawn(
         &engine.world,
@@ -98,16 +98,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     {10, 30, 10},
     {0, 0, 0},
   )
-  // Build initial BVH for all bodies
-  physics.step(&physics_world, 0.0)
-  world.sync_all_physics_to_world(&engine.world, &physics_world)
   log.infof("AOE test setup complete: %d cubes", len(cube_mesh_handles))
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  // Update physics (needed for BVH queries even with static bodies)
-  physics.step(&physics_world, delta_time)
-  world.sync_all_physics_to_world(&engine.world, &physics_world)
   // Handle mouse click for raycasting
   mouse_button_pressed := engine.input.mouse_buttons[glfw.MOUSE_BUTTON_LEFT]
   mouse_just_clicked := mouse_button_pressed && !last_mouse_button_state
@@ -134,7 +128,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       }
       log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
       // Use physics raycast
-      hit := physics.raycast_trigger(&physics_world, ray)
+      hit := physics.raycast_trigger(&engine.physics, ray)
       if !hit.hit {
         clicked_cube = {}
         break mouse_click
@@ -168,7 +162,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   affected: [dynamic]physics.TriggerHandle
   defer delete(affected)
   physics.query_triggers_in_sphere(
-    &physics_world,
+    &engine.physics,
     effector_position,
     effect_radius,
     &affected,

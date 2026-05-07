@@ -75,25 +75,25 @@ init_animation_channel :: proc(
   }
 }
 
-animation_instance_update :: proc(self: ^AnimationInstance, delta_time: f32) {
-  if self.status != .PLAYING || self.duration <= 0 {
+animation_instance_update :: proc(self: ^AnimationInstance, duration: f32, delta_time: f32) {
+  if self.status != .PLAYING || duration <= 0 {
     return
   }
   effective_delta_time := delta_time * self.speed
   switch self.mode {
   case .LOOP:
     self.time += effective_delta_time
-    self.time = math.mod_f32(self.time + self.duration, self.duration)
+    self.time = math.mod_f32(self.time + duration, duration)
   case .ONCE:
     self.time += effective_delta_time
-    self.time = math.mod_f32(self.time + self.duration, self.duration)
-    if self.time >= self.duration {
-      self.time = self.duration
+    self.time = math.mod_f32(self.time + duration, duration)
+    if self.time >= duration {
+      self.time = duration
       self.status = .STOPPED
     }
   case .PING_PONG:
     self.time += effective_delta_time
-    if self.time >= self.duration || self.time < 0 {
+    if self.time >= duration || self.time < 0 {
       self.speed *= -1
     }
   }
@@ -178,7 +178,7 @@ update_node_animations :: proc(world: ^World, delta_time: f32) {
     if !has_anim do continue
     clip, clip_ok := cont.get(world.animation_clips, anim_inst.clip_handle)
     if !clip_ok do continue
-    animation_instance_update(anim_inst, delta_time)
+    animation_instance_update(anim_inst, clip.duration, delta_time)
     if len(clip.channels) > 0 {
       position, rotation, scale := anim.channel_sample_some(
         clip.channels[0],

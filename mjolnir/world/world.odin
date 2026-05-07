@@ -76,12 +76,6 @@ NodeAttachment :: union {
 NodeTag :: enum u32 {
   PAWN, // generic game entities (players, AI, etc.)
   ACTOR, // generic game actor
-  MESH, // has mesh attachment
-  SPRITE, // has sprite attachment
-  LIGHT, // has light attachment
-  EMITTER, // has particle emitter
-  FORCEFIELD, // has force field
-  VISIBLE, // currently visible (own + parent visibility)
   NAVMESH_AGENT, // has navigation agent
   NAVMESH_OBSTACLE, // is navigation obstacle
   INTERACTIVE, // can be interacted with
@@ -157,7 +151,6 @@ AnimationInstance :: struct {
   mode:        anim.PlayMode,
   status:      anim.Status,
   time:        f32,
-  duration:    f32,
   speed:       f32,
 }
 
@@ -225,7 +218,7 @@ World :: struct {
   active_controller:  ^CameraController,
 }
 
-init_node :: proc(self: ^Node, name: string = "") {
+node_init :: proc(self: ^Node, name: string = "") {
   self.transform = geometry.TRANSFORM_IDENTITY
   self.name = name
   self.bone_socket = ""
@@ -235,27 +228,7 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.tags = {}
 }
 
-update_node_tags :: proc(node: ^Node) {
-  #partial switch _ in node.attachment {
-  case MeshAttachment:
-    node.tags |= {.MESH}
-  case SpriteAttachment:
-    node.tags |= {.SPRITE}
-  case PointLightAttachment, DirectionalLightAttachment, SpotLightAttachment:
-    node.tags |= {.LIGHT}
-  case EmitterAttachment:
-    node.tags |= {.EMITTER}
-  case ForceFieldAttachment:
-    node.tags |= {.FORCEFIELD}
-  }
-  if node.visible && node.parent_visible {
-    node.tags |= {.VISIBLE}
-  } else {
-    node.tags -= {.VISIBLE}
-  }
-}
-
-destroy_node :: proc(
+node_destroy :: proc(
   self: ^Node,
   world: ^World = nil,
   node_handle: NodeHandle = {},
@@ -346,11 +319,10 @@ spawn_child :: proc(
 ) #optional_ok {
   node: ^Node
   handle, node = cont.alloc(&self.nodes, NodeHandle) or_return
-  init_node(node)
+  node_init(node)
   node.attachment = attachment
   assign_emitter_to_node(self, handle, node)
   assign_forcefield_to_node(self, handle, node)
-  update_node_tags(node)
   node.transform.position = position
   node.transform.is_dirty = true
   attach(self.nodes, parent, handle)
@@ -358,16 +330,14 @@ spawn_child :: proc(
   return handle, true
 }
 
-init :: proc(world: ^World) {
-  // Scene graph
+init :: proc(world: ^World) -> bool {
   cont.init(&world.nodes, MAX_NODES_IN_SCENE)
   staging_init(&world.staging)
   root: ^Node
   world.root, root, _ = cont.alloc(&world.nodes, NodeHandle)
-  init_node(root, "root")
+  node_init(root, "root")
   root.parent = world.root
 
-  // Resource pools
   cont.init(&world.meshes, MAX_MESHES)
   cont.init(&world.materials, MAX_MATERIALS)
   cont.init(&world.cameras, MAX_ACTIVE_CAMERAS)
@@ -376,11 +346,11 @@ init :: proc(world: ^World) {
   cont.init(&world.sprites, MAX_SPRITES)
   cont.init(&world.animation_clips, 0)
 
-  // Initialize builtin resources
   init_builtin_materials(world)
   init_builtin_meshes(world)
 
   log.info("World resource pools initialized")
+  return true
 }
 
 
@@ -406,51 +376,22 @@ begin_frame :: proc(
 }
 
 shutdown :: proc(world: ^World) {
-  delete(world.cameras.entries)
-  delete(world.cameras.free_indices)
+  cont.destroy(world.cameras, proc(_: ^Camera) {})
+  cont.destroy(world.meshes, mesh_destroy)
+  cont.destroy(world.materials, proc(_: ^Material) {})
+  cont.destroy(world.emitters, proc(_: ^Emitter) {})
+  cont.destroy(world.forcefields, proc(_: ^ForceField) {})
+  cont.destroy(world.sprites, proc(_: ^Sprite) {})
+  cont.destroy(world.animation_clips, anim.clip_destroy)
 
-  // Clean up meshes
-  for &entry in world.meshes.entries {
-    if entry.generation > 0 && entry.active {
-      mesh_destroy(&entry.item)
-    }
-  }
-  delete(world.meshes.entries)
-  delete(world.meshes.free_indices)
-
-  // Clean up materials
-  delete(world.materials.entries)
-  delete(world.materials.free_indices)
-
-  // Clean up emitters
-  delete(world.emitters.entries)
-  delete(world.emitters.free_indices)
-
-  // Clean up forcefields
-  delete(world.forcefields.entries)
-  delete(world.forcefields.free_indices)
-
-  // Clean up sprites
-  delete(world.sprites.entries)
-  delete(world.sprites.free_indices)
-
-  // Clean up animation clips
-  for &entry in world.animation_clips.entries {
-    if entry.generation > 0 && entry.active {
-      anim.clip_destroy(&entry.item)
-    }
-  }
-  delete(world.animation_clips.entries)
-  delete(world.animation_clips.free_indices)
-
-  // Clean up nodes
+  // Nodes need handle to destroy attachments — iterate manually
   for &entry, i in world.nodes.entries {
     if entry.active {
       handle := NodeHandle {
         index      = u32(i),
         generation = entry.generation,
       }
-      destroy_node(&entry.item, world, handle)
+      node_destroy(&entry.item, world, handle)
     }
   }
   cont.destroy(world.nodes, proc(node: ^Node) {})
@@ -500,7 +441,7 @@ despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
 
   // Free immediately
   if freed_node, ok := cont.free(&world.nodes, handle); ok {
-    destroy_node(freed_node, world, handle)
+    node_destroy(freed_node, world, handle)
     // Clear the node struct to prevent use-after-free
     freed_node^ = {}
   }
@@ -520,9 +461,6 @@ traverse :: proc(world: ^World) -> bool {
       current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
     is_dirty := geometry.update_local(&current_node.transform)
-    if visibility_changed {
-      update_node_tags(current_node)
-    }
     bone_socket_transform := linalg.MATRIX4F32_IDENTITY
     has_bone_socket := false
     apply_bone_socket: {

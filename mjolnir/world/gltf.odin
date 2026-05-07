@@ -523,7 +523,7 @@ construct_scene :: proc(
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
     node_handle, node := cont.alloc(&world.nodes, NodeHandle) or_continue
-    init_node(node, string(gltf_node.name))
+    node_init(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
       node.transform = geometry.decompose_matrix(

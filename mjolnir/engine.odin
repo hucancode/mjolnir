@@ -18,6 +18,7 @@ import "core:unicode/utf8"
 import "geometry"
 import "gpu"
 import nav "navigation"
+import "physics"
 import "navigation/recast"
 import "render"
 import "render/debug_bone"
@@ -75,6 +76,7 @@ Engine :: struct {
   frame_index:               u32,
   swapchain:                 gpu.Swapchain,
   world:                     world.World,
+  physics:                   physics.World,
   nav:                       nav.NavigationSystem,
   last_frame_timestamp:      time.Time,
   last_update_timestamp:     time.Time,
@@ -142,15 +144,15 @@ init :: proc(
   }
   log.infof("Window created %v\n", self.window)
   gpu.gpu_context_init(&self.gctx, self.window) or_return
-  nav.init(&self.nav)
+  if !physics.init(&self.physics) do return .ERROR_INITIALIZATION_FAILED
+  if !nav.init(&self.nav) do return .ERROR_INITIALIZATION_FAILED
   self.camera_controller_enabled = true
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
-  world.init(&self.world)
+  if !world.init(&self.world) do return .ERROR_INITIALIZATION_FAILED
   gpu.swapchain_init(&self.swapchain, &self.gctx, self.window) or_return
-  // Initialize UI system (logical, before renderer)
-  ui_module.init(&self.ui)
+  if !ui_module.init(&self.ui) do return .ERROR_INITIALIZATION_FAILED
   render.init(
     &self.render,
     &self.gctx,
@@ -568,7 +570,6 @@ update_input :: proc(self: ^Engine) -> bool {
   }
   return true
 }
-
 update_visibility_node_count :: proc(
   r: ^render.Manager,
   w: ^world.World,
@@ -1015,6 +1016,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
+
 // Sync UI render commands to the renderer (staging list pattern)
 sync_ui_to_renderer :: proc(self: ^Engine) {
   // Update font atlas if dirty
@@ -1080,6 +1082,8 @@ update :: proc(self: ^Engine) -> bool {
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
+  physics.step(&self.physics, delta_time)
+  world.sync_all_physics_to_world(&self.world, &self.physics)
   world.update_node_animations(&self.world, delta_time)
   world.update_skeletal_animations(&self.world, delta_time)
   world.update_sprite_animations(&self.world, delta_time)
@@ -1092,6 +1096,7 @@ shutdown :: proc(self: ^Engine) {
   render.shutdown(&self.render, &self.gctx)
   ui_module.shutdown(&self.ui)
   world.shutdown(&self.world)
+  physics.shutdown(&self.physics)
   nav.shutdown(&self.nav)
   gpu.swapchain_destroy(&self.swapchain, self.gctx.device)
   gpu.shutdown(&self.gctx)

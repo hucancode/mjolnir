@@ -166,6 +166,7 @@ MAX_FORCE_FIELDS :: particles_compute.MAX_FORCE_FIELDS
 // Shadow resources are stored in side maps keyed by light node index.
 // View/projection/near/far/frustum are derived from light state and recomputed
 // per frame at use sites; storing them would duplicate Light fields.
+@(private)
 ShadowMap :: struct {
   shadow_map_2d:   [FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
   draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
@@ -175,6 +176,7 @@ ShadowMap :: struct {
   descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
+@(private)
 ShadowMapCube :: struct {
   shadow_map_cube: [FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
   draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
@@ -226,6 +228,7 @@ DEBUG_BONE_PALETTE :: [6][4]f32 {
 // Internal owns GPU primitives and CPU-side bookkeeping. The engine package
 // reaches into specific subrenderer fields (debug_renderer, ui, command
 // buffers); external user code should not.
+@(private)
 Internal :: struct {
   command_buffers:              [FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers:      [FRAMES_IN_FLIGHT]vk.CommandBuffer,
