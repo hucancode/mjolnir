@@ -12,7 +12,6 @@ import "core:thread"
 import "core:time"
 
 DEFAULT_THREAD_COUNT :: 16
-WARMSTART_COEF :: 0.8
 CCD_VELOCITY_THRESHOLD :: 5.0
 CCD_VELOCITY_THRESHOLD_SQ :: CCD_VELOCITY_THRESHOLD * CCD_VELOCITY_THRESHOLD
 
@@ -52,7 +51,6 @@ Prepare_Task_Data :: struct {
   start:   int,
   end:     int,
   dt:      f32,
-  is_static: bool,
 }
 
 prepare_dynamic_task :: proc(task: thread.Task) {
@@ -77,21 +75,25 @@ prepare_static_task :: proc(task: thread.Task) {
   }
 }
 
+sequential_prepare_contacts :: proc(world: ^World, dt: f32) {
+  for &c in world.dynamic_contacts {
+    a := get(world, c.body_a) or_continue
+    b := get(world, c.body_b) or_continue
+    prepare_contact(&c, a, b, dt)
+  }
+  for &c in world.static_contacts {
+    a := get(world, c.body_a) or_continue
+    b := get(world, c.body_b) or_continue
+    prepare_contact(&c, a, b, dt)
+  }
+}
+
 parallel_prepare_contacts :: proc(world: ^World, dt: f32, num_threads := DEFAULT_THREAD_COUNT) {
   dyn_count := len(world.dynamic_contacts)
   sta_count := len(world.static_contacts)
   total := dyn_count + sta_count
   if total < 200 || num_threads <= 1 {
-    for &c in world.dynamic_contacts {
-      a := get(world, c.body_a) or_continue
-      b := get(world, c.body_b) or_continue
-      prepare_contact(&c, a, b, dt)
-    }
-    for &c in world.static_contacts {
-      a := get(world, c.body_a) or_continue
-      b := get(world, c.body_b) or_continue
-      prepare_contact(&c, a, b, dt)
-    }
+    sequential_prepare_contacts(world, dt)
     return
   }
   task_data := make([]Prepare_Task_Data, num_threads * 2, context.temp_allocator)
@@ -113,7 +115,7 @@ parallel_prepare_contacts :: proc(world: ^World, dt: f32, num_threads := DEFAULT
       s := i * chunk
       if s >= sta_count do break
       e := min(s + chunk, sta_count)
-      task_data[task_idx] = Prepare_Task_Data{physics = world, start = s, end = e, dt = dt, is_static = true}
+      task_data[task_idx] = Prepare_Task_Data{physics = world, start = s, end = e, dt = dt}
       thread.pool_add_task(&world.thread_pool, mem.nil_allocator(), prepare_static_task, &task_data[task_idx], task_idx)
       task_idx += 1
     }
@@ -121,14 +123,18 @@ parallel_prepare_contacts :: proc(world: ^World, dt: f32, num_threads := DEFAULT
   pool_wait(&world.thread_pool)
 }
 
-bvh_refit_task :: proc(task: thread.Task) {
-  data := (^BVH_Refit_Task_Data)(task.data)
-  #no_bounds_check for i in data.start ..< data.end {
-    bvh_entry := &data.physics.dynamic_bvh.primitives[i]
-    body := get(data.physics, bvh_entry.handle) or_continue
+refit_range :: #force_inline proc(physics: ^World, start, end: int) {
+  #no_bounds_check for i in start ..< end {
+    bvh_entry := &physics.dynamic_bvh.primitives[i]
+    body := get(physics, bvh_entry.handle) or_continue
     if body.is_killed || body.is_sleeping do continue
     bvh_entry.bounds = body.cached_aabb
   }
+}
+
+bvh_refit_task :: proc(task: thread.Task) {
+  data := (^BVH_Refit_Task_Data)(task.data)
+  refit_range(data.physics, data.start, data.end)
 }
 
 parallel_bvh_refit :: proc(
@@ -169,11 +175,7 @@ parallel_bvh_refit :: proc(
 }
 
 sequential_bvh_refit :: proc(physics: ^World) {
-  for &bvh_entry in physics.dynamic_bvh.primitives {
-    body := get(physics, bvh_entry.handle) or_continue
-    if body.is_killed || body.is_sleeping do continue
-    bvh_entry.bounds = body.cached_aabb
-  }
+  refit_range(physics, 0, len(physics.dynamic_bvh.primitives))
   geometry.bvh_refit(&physics.dynamic_bvh)
 }
 
@@ -211,9 +213,9 @@ narrowphase_dynamic_pair :: #force_inline proc(
     friction    = (body_a.friction + body_b.friction) * 0.5,
   }
   hash := collision_pair_hash(handle_a, handle_b)
-  if n, t, found := warmstart_lookup(physics.prev_dynamic_warmstart[:], hash); found {
-    contact.normal_impulse = n * WARMSTART_COEF
-    contact.tangent_impulse = t * WARMSTART_COEF
+  if w, found := physics.prev_dynamic_warmstart[hash]; found {
+    contact.normal_impulse = w.normal * WARMSTART_COEF
+    contact.tangent_impulse = w.tangent * WARMSTART_COEF
   }
   append(out, contact)
   return
@@ -250,9 +252,9 @@ narrowphase_static_pair :: #force_inline proc(
     friction    = (body_a.friction + body_b.friction) * 0.5,
   }
   hash := collision_pair_hash(handle_a, handle_b)
-  if n, t, found := warmstart_lookup(physics.prev_static_warmstart[:], hash); found {
-    contact.normal_impulse = n * WARMSTART_COEF
-    contact.tangent_impulse = t * WARMSTART_COEF
+  if w, found := physics.prev_static_warmstart[hash]; found {
+    contact.normal_impulse = w.normal * WARMSTART_COEF
+    contact.tangent_impulse = w.tangent * WARMSTART_COEF
   }
   append(out, contact)
   return
@@ -262,14 +264,10 @@ broadphase_collect_pairs :: proc(physics: ^World) -> (
   dynamic_pairs: [dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry),
   static_pairs: [dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
 ) {
-  dyn_cap := max(64, physics.last_dynamic_pair_count + (physics.last_dynamic_pair_count >> 2))
-  sta_cap := max(64, physics.last_static_pair_count + (physics.last_static_pair_count >> 2))
-  dynamic_pairs = make([dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry), 0, dyn_cap, context.temp_allocator)
-  static_pairs = make([dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry), 0, sta_cap, context.temp_allocator)
+  dynamic_pairs = make([dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry), context.temp_allocator)
+  static_pairs = make([dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry), context.temp_allocator)
   geometry.bvh_find_all_overlaps(&physics.dynamic_bvh, &dynamic_pairs)
   geometry.bvh_find_cross_overlaps(&physics.dynamic_bvh, &physics.static_bvh, &static_pairs)
-  physics.last_dynamic_pair_count = len(dynamic_pairs)
-  physics.last_static_pair_count = len(static_pairs)
   return
 }
 
@@ -486,29 +484,8 @@ parallel_collision_detection_traversal :: proc(
 
   if len(self.dynamic_bvh.primitives) == 0 do return
 
-  // Find all dynamic-dynamic overlapping pairs using tree traversal
   traversal_start := time.now()
-  dyn_cap := max(64, self.last_dynamic_pair_count + (self.last_dynamic_pair_count >> 2))
-  sta_cap := max(64, self.last_static_pair_count + (self.last_static_pair_count >> 2))
-  dynamic_pairs := make(
-    [dynamic]geometry.BVHOverlapPair(DynamicBroadPhaseEntry),
-    0,
-    dyn_cap,
-    context.temp_allocator,
-  )
-  geometry.bvh_find_all_overlaps(&self.dynamic_bvh, &dynamic_pairs)
-
-  // Find all dynamic-static overlapping pairs
-  static_pairs := make(
-    [dynamic]geometry.BVHCrossPair(DynamicBroadPhaseEntry, StaticBroadPhaseEntry),
-    0,
-    sta_cap,
-    context.temp_allocator,
-  )
-  geometry.bvh_find_cross_overlaps(&self.dynamic_bvh, &self.static_bvh, &static_pairs)
-  self.last_dynamic_pair_count = len(dynamic_pairs)
-  self.last_static_pair_count = len(static_pairs)
-
+  dynamic_pairs, static_pairs := broadphase_collect_pairs(self)
   traversal_time := time.since(traversal_start)
 
   total_pairs := len(dynamic_pairs) + len(static_pairs)

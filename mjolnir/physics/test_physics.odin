@@ -183,7 +183,7 @@ test_resolve_contact_momentum_conservation :: proc(t: ^testing.T) {
   }
   dt := f32(0.016)
   prepare_contact(&contact, &body_a, &body_b, dt)
-  resolve_contact(&contact, &body_a, &body_b)
+  resolve_contact(&contact, &body_a, &body_b, true)
   final_momentum :=
     body_a.velocity * body_a.mass + body_b.velocity * body_b.mass
   testing.expect(
@@ -803,7 +803,7 @@ test_resolve_contact_restitution_coefficient :: proc(t: ^testing.T) {
   }
   dt := f32(0.016)
   prepare_contact(&contact, &body_dynamic, &body_static, dt)
-  resolve_contact(&contact, &body_dynamic, &body_static)
+  resolve_contact(&contact, &body_dynamic, &body_static, true)
   // New solver uses sequential impulses, so velocity change might be different
   // Just check that velocity reversed (positive Y) and reduced by bouncing
   testing.expect(
@@ -836,7 +836,7 @@ test_resolve_contact_friction_reduces_tangent_velocity :: proc(t: ^testing.T) {
   initial_tangent_speed := abs(body_dynamic.velocity.x)
   dt := f32(0.016)
   prepare_contact(&contact, &body_dynamic, &body_static, dt)
-  resolve_contact(&contact, &body_dynamic, &body_static)
+  resolve_contact(&contact, &body_dynamic, &body_static, true)
   final_tangent_speed := abs(body_dynamic.velocity.x)
   testing.expect(
     t,

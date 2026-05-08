@@ -12,6 +12,7 @@ import "core:thread"
 BAUMGARTE_COEF :: 0.4
 SLOP :: 0.002
 RESTITUTION_THRESHOLD :: -0.5
+WARMSTART_COEF :: 0.8
 SOLVER_PARALLEL_THRESHOLD :: 200
 SOLVER_BUCKET_PARALLEL_THRESHOLD :: 64
 
@@ -50,7 +51,7 @@ solver_worker_task :: proc(task: thread.Task) {
   local_sense := false
   contacts := world.dynamic_contacts[:]
   static_contacts := world.static_contacts[:]
-  shard := world.solver_static_shards[data.thread_id % world.solver_static_shard_count][:]
+  shard := world.solver_static_shards[data.thread_id][:]
   for iter in 0 ..< data.total_iters {
     use_bias := iter < data.bias_iters
     for color_idx in 0 ..< world.solver_color_count {
@@ -68,8 +69,7 @@ solver_worker_task :: proc(task: thread.Task) {
           c := &contacts[idx]
           a := get(world, c.body_a) or_continue
           b := get(world, c.body_b) or_continue
-          if use_bias do resolve_contact_dynamic_dynamic(c, a, b)
-          else do resolve_contact_no_bias_dynamic_dynamic(c, a, b)
+          resolve_contact_dynamic_dynamic(c, a, b, use_bias)
         }
       }
       spin_barrier_wait(data.barrier, &local_sense, expected)
@@ -78,8 +78,7 @@ solver_worker_task :: proc(task: thread.Task) {
       c := &static_contacts[idx]
       a := cont.get(world.bodies, c.body_a) or_continue
       b := cont.get(world.static_bodies, c.body_b) or_continue
-      if use_bias do resolve_contact_dynamic_static(c, a, b)
-      else do resolve_contact_no_bias_dynamic_static(c, a, b)
+      resolve_contact_dynamic_static(c, a, b, use_bias)
     }
     spin_barrier_wait(data.barrier, &local_sense, expected)
   }
@@ -93,8 +92,7 @@ run_solver_iters :: proc(world: ^World, total_iters, bias_iters, num_threads: in
       for &c in world.static_contacts {
         a := cont.get(world.bodies, c.body_a) or_continue
         b := cont.get(world.static_bodies, c.body_b) or_continue
-        if use_bias do resolve_contact_dynamic_static(&c, a, b)
-        else do resolve_contact_no_bias_dynamic_static(&c, a, b)
+        resolve_contact_dynamic_static(&c, a, b, use_bias)
       }
     }
     return
@@ -293,8 +291,7 @@ solve_dynamic_pass :: proc(world: ^World, use_bias: bool) {
   for &c in world.dynamic_contacts {
     ba := get(world, c.body_a) or_continue
     bb := get(world, c.body_b) or_continue
-    if use_bias do resolve_contact_dynamic_dynamic(&c, ba, bb)
-    else do resolve_contact_no_bias_dynamic_dynamic(&c, ba, bb)
+    resolve_contact_dynamic_dynamic(&c, ba, bb, use_bias)
   }
 }
 
@@ -302,16 +299,16 @@ resolve_contact_dynamic_dynamic :: #force_inline proc(
   contact: ^DynamicContact,
   body_a: ^DynamicRigidBody,
   body_b: ^DynamicRigidBody,
+  use_bias: bool,
 ) {
+  bias := use_bias ? contact.bias : 0
   vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
   vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
-  relative_velocity := vel_b - vel_a
-  velocity_along_normal := linalg.dot(relative_velocity, contact.normal)
-  delta_impulse := contact.normal_mass * (-velocity_along_normal + contact.bias)
+  velocity_along_normal := linalg.dot(vel_b - vel_a, contact.normal)
+  delta_impulse := contact.normal_mass * (-velocity_along_normal + bias)
   old_impulse := contact.normal_impulse
   contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
-  delta_impulse = contact.normal_impulse - old_impulse
-  impulse := contact.normal * delta_impulse
+  impulse := contact.normal * (contact.normal_impulse - old_impulse)
   apply_impulse_at_point(body_a, -impulse, contact.point)
   apply_impulse_at_point(body_b, impulse, contact.point)
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
@@ -333,14 +330,15 @@ resolve_contact_dynamic_static :: #force_inline proc(
   contact: ^StaticContact,
   body_a: ^DynamicRigidBody,
   body_b: ^StaticRigidBody,
+  use_bias: bool,
 ) {
+  bias := use_bias ? contact.bias : 0
   vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
   velocity_along_normal := linalg.dot(-vel_a, contact.normal)
-  delta_impulse := contact.normal_mass * (-velocity_along_normal + contact.bias)
+  delta_impulse := contact.normal_mass * (-velocity_along_normal + bias)
   old_impulse := contact.normal_impulse
   contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
-  delta_impulse = contact.normal_impulse - old_impulse
-  impulse := contact.normal * delta_impulse
+  impulse := contact.normal * (contact.normal_impulse - old_impulse)
   apply_impulse_at_point(body_a, -impulse, contact.point)
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
   max_friction := contact.friction * contact.normal_impulse
@@ -358,65 +356,6 @@ resolve_contact_dynamic_static :: #force_inline proc(
 resolve_contact :: proc {
   resolve_contact_dynamic_dynamic,
   resolve_contact_dynamic_static,
-}
-
-resolve_contact_no_bias_dynamic_dynamic :: #force_inline proc(
-  contact: ^DynamicContact,
-  body_a: ^DynamicRigidBody,
-  body_b: ^DynamicRigidBody,
-) {
-  vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-  vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
-  velocity_along_normal := linalg.dot(vel_b - vel_a, contact.normal)
-  delta_impulse := contact.normal_mass * (-velocity_along_normal)
-  old_impulse := contact.normal_impulse
-  contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
-  impulse := contact.normal * (contact.normal_impulse - old_impulse)
-  apply_impulse_at_point(body_a, -impulse, contact.point)
-  apply_impulse_at_point(body_b, impulse, contact.point)
-  tangents := [2][3]f32{contact.tangent1, contact.tangent2}
-  max_friction := contact.friction * contact.normal_impulse
-  for i in 0 ..< 2 {
-    vel_a = body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-    vel_b = body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
-    velocity_along_tangent := linalg.dot(vel_b - vel_a, tangents[i])
-    delta_impulse_t := contact.tangent_mass[i] * (-velocity_along_tangent)
-    old_impulse_t := contact.tangent_impulse[i]
-    contact.tangent_impulse[i] = clamp(old_impulse_t + delta_impulse_t, -max_friction, max_friction)
-    impulse_t := tangents[i] * (contact.tangent_impulse[i] - old_impulse_t)
-    apply_impulse_at_point(body_a, -impulse_t, contact.point)
-    apply_impulse_at_point(body_b, impulse_t, contact.point)
-  }
-}
-
-resolve_contact_no_bias_dynamic_static :: #force_inline proc(
-  contact: ^StaticContact,
-  body_a: ^DynamicRigidBody,
-  body_b: ^StaticRigidBody,
-) {
-  vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-  velocity_along_normal := linalg.dot(-vel_a, contact.normal)
-  delta_impulse := contact.normal_mass * (-velocity_along_normal)
-  old_impulse := contact.normal_impulse
-  contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
-  impulse := contact.normal * (contact.normal_impulse - old_impulse)
-  apply_impulse_at_point(body_a, -impulse, contact.point)
-  tangents := [2][3]f32{contact.tangent1, contact.tangent2}
-  max_friction := contact.friction * contact.normal_impulse
-  for i in 0 ..< 2 {
-    vel_a = body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-    velocity_along_tangent := linalg.dot(-vel_a, tangents[i])
-    delta_impulse_t := contact.tangent_mass[i] * (-velocity_along_tangent)
-    old_impulse_t := contact.tangent_impulse[i]
-    contact.tangent_impulse[i] = clamp(old_impulse_t + delta_impulse_t, -max_friction, max_friction)
-    impulse_t := tangents[i] * (contact.tangent_impulse[i] - old_impulse_t)
-    apply_impulse_at_point(body_a, -impulse_t, contact.point)
-  }
-}
-
-resolve_contact_no_bias :: proc {
-  resolve_contact_no_bias_dynamic_dynamic,
-  resolve_contact_no_bias_dynamic_static,
 }
 
 compute_tangent_basis :: proc(normal: [3]f32) -> ([3]f32, [3]f32) {
