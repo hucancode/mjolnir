@@ -173,7 +173,7 @@ test_resolve_contact_momentum_conservation :: proc(t: ^testing.T) {
   body_a.velocity = {5, 0, 0}
   body_b.velocity = {-3, 0, 0}
   initial_momentum :=
-    body_a.velocity * body_a.mass + body_b.velocity * body_b.mass
+    body_a.velocity / body_a.inv_mass + body_b.velocity / body_b.inv_mass
   contact := DynamicContact {
     point       = {0, 0, 0},
     normal      = {1, 0, 0},
@@ -185,7 +185,7 @@ test_resolve_contact_momentum_conservation :: proc(t: ^testing.T) {
   prepare_contact(&contact, &body_a, &body_b, dt)
   resolve_contact(&contact, &body_a, &body_b, true)
   final_momentum :=
-    body_a.velocity * body_a.mass + body_b.velocity * body_b.mass
+    body_a.velocity / body_a.inv_mass + body_b.velocity / body_b.inv_mass
   testing.expect(
     t,
     abs(final_momentum.x - initial_momentum.x) < 0.001,
@@ -1046,8 +1046,8 @@ test_force_application :: proc(t: ^testing.T) {
   )
   dt := f32(0.016)
   integrate(&body, dt)
-  expected_vx := force.x / body.mass * dt * (1.0 - body.linear_damping)
-  expected_vy := force.y / body.mass * dt * (1.0 - body.linear_damping)
+  expected_vx := force.x * body.inv_mass * dt * (1.0 - body.linear_damping)
+  expected_vy := force.y * body.inv_mass * dt * (1.0 - body.linear_damping)
   testing.expect(
     t,
     abs(body.velocity.x - expected_vx) < 0.01 &&

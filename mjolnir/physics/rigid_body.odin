@@ -28,7 +28,6 @@ DynamicRigidBody :: struct {
   enable_rotation:  bool,
   is_sleeping:      bool,
   inv_inertia:      [3]f32, // Diagonal inverse inertia for primitive shapes
-  mass:             f32,
   velocity:         [3]f32,
   inv_mass:         f32,
   angular_velocity: [3]f32,
@@ -60,7 +59,6 @@ rigid_body_init :: proc(
 ) {
   self.position = position
   self.rotation = rotation
-  self.mass = mass
   self.inv_mass = 1.0 / mass
   self.restitution = 0.2
   self.friction = 0.8
@@ -79,25 +77,22 @@ wake_up :: #force_inline proc(self: ^DynamicRigidBody) {
 
 set_mass :: proc(self: ^DynamicRigidBody, mass: f32) {
   if mass <= 0.0 do return
-  old_mass := self.mass
-  self.mass = mass
-  self.inv_mass = 1.0 / mass
-  if old_mass > 0.0 {
-    mass_ratio := old_mass / mass
+  new_inv_mass := 1.0 / mass
+  if self.inv_mass > 0.0 {
+    mass_ratio := new_inv_mass / self.inv_mass
     self.inv_inertia = mass_ratio * self.inv_inertia
   }
+  self.inv_mass = new_inv_mass
 }
 
 set_box_inertia :: proc(self: ^DynamicRigidBody, half_extents: [3]f32) {
-  m := self.mass
   v := half_extents * half_extents
-  inertia := [3]f32{v.y + v.z, v.x + v.z, v.x + v.y} * m / 3.0
-  self.inv_inertia = 1.0 / inertia
+  inv_inertia_factor := 3.0 * self.inv_mass
+  self.inv_inertia = inv_inertia_factor / [3]f32{v.y + v.z, v.x + v.z, v.x + v.y}
 }
 
 set_sphere_inertia :: proc(self: ^DynamicRigidBody, radius: f32) {
-  i := (2.0 / 5.0) * self.mass * radius * radius
-  inv_i := 1.0 / i
+  inv_i := (5.0 / 2.0) * self.inv_mass / (radius * radius)
   self.inv_inertia = {inv_i, inv_i, inv_i}
 }
 
@@ -106,12 +101,11 @@ set_cylinder_inertia :: proc(
   radius: f32,
   height: f32,
 ) {
-  m := self.mass
   r2 := radius * radius
   h2 := height * height
-  ix := (m / 12.0) * (3.0 * r2 + h2)
-  iy := (m / 2.0) * r2
-  self.inv_inertia = [3]f32{1.0 / ix, 1.0 / iy, 1.0 / ix}
+  inv_ix := 12.0 * self.inv_mass / (3.0 * r2 + h2)
+  inv_iy := 2.0 * self.inv_mass / r2
+  self.inv_inertia = [3]f32{inv_ix, inv_iy, inv_ix}
 }
 
 apply_force :: proc(self: ^DynamicRigidBody, force: [3]f32) {
@@ -173,6 +167,16 @@ update_cached_aabb :: proc(self: ^RigidBody) {
     self.rotation,
   )
   self.cached_sphere_center = geometry.aabb_center(self.cached_aabb)
-  aabb_half_extents := (self.cached_aabb.max - self.cached_aabb.min) * 0.5
-  self.cached_sphere_radius = linalg.length(aabb_half_extents)
+  switch sh in self.collider {
+  case SphereCollider:
+    self.cached_sphere_radius = sh.radius
+  case BoxCollider:
+    self.cached_sphere_radius = linalg.length(sh.half_extents)
+  case CylinderCollider:
+    h := sh.height * 0.5
+    self.cached_sphere_radius = math.sqrt(sh.radius * sh.radius + h * h)
+  case FanCollider:
+    h := sh.height * 0.5
+    self.cached_sphere_radius = math.sqrt(sh.radius * sh.radius + h * h)
+  }
 }
