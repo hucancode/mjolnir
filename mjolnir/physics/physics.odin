@@ -393,18 +393,16 @@ step_substep :: proc(self: ^World, substep_dt: f32, ccd_handled: []bool, is_firs
       warmstart_contact(&contact, body_a, body_b)
     }
   }
+  clear_pseudo_velocities(self)
   if self.enable_parallel {
     build_solver_partition(self, self.thread_count)
-    run_solver_iters(self, CONSTRAINT_SOLVER_ITERS + STABILIZATION_ITERS, CONSTRAINT_SOLVER_ITERS, self.thread_count)
+    run_solver_iters(self, CONSTRAINT_SOLVER_ITERS, STABILIZATION_ITERS, self.thread_count)
   } else {
-    for iter in 0 ..< CONSTRAINT_SOLVER_ITERS + STABILIZATION_ITERS {
-      use_bias := iter < CONSTRAINT_SOLVER_ITERS
-      solve_dynamic_pass(self, use_bias)
-      for &contact in self.static_contacts {
-        body_a := cont.get(self.bodies, contact.body_a) or_continue
-        body_b := cont.get(self.static_bodies, contact.body_b) or_continue
-        resolve_contact_dynamic_static(&contact, body_a, body_b, use_bias)
-      }
+    for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
+      solve_velocity_pass(self)
+    }
+    for _ in 0 ..< STABILIZATION_ITERS {
+      solve_position_pass(self)
     }
   }
   times.solver = time.since(solver_start)

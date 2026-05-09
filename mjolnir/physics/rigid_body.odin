@@ -24,19 +24,22 @@ StaticRigidBody :: struct {
 }
 
 DynamicRigidBody :: struct {
-  using body:       StaticRigidBody,
-  enable_rotation:  bool,
-  is_sleeping:      bool,
-  inv_inertia:      [3]f32, // Diagonal inverse inertia for primitive shapes
-  velocity:         [3]f32,
-  inv_mass:         f32,
-  angular_velocity: [3]f32,
-  linear_damping:   f32,
-  force:            [3]f32,
-  angular_damping:  f32,
-  torque:           [3]f32,
-  sleep_timer:      f32,
-  is_killed:        bool,
+  using body:              StaticRigidBody,
+  enable_rotation:         bool,
+  is_sleeping:             bool,
+  inv_inertia:             [3]f32, // Diagonal inverse inertia for primitive shapes
+  velocity:                [3]f32,
+  inv_mass:                f32,
+  angular_velocity:        [3]f32,
+  linear_damping:          f32,
+  force:                   [3]f32,
+  angular_damping:         f32,
+  torque:                  [3]f32,
+  sleep_timer:             f32,
+  is_killed:               bool,
+  // Split-impulse position correction state (pseudo velocity, applied to position only)
+  pseudo_velocity:         [3]f32,
+  pseudo_angular_velocity: [3]f32,
 }
 
 static_rigid_body_init :: proc(

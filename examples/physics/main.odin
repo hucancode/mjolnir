@@ -24,7 +24,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  engine.physics.gravity = {0, -20, 0} // 2x earth gravity
+  // engine.physics.gravity = {0, -20, 0} // 2x earth gravity
   ground_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   ground_mat := world.get_builtin_material(&engine.world, .GRAY)
   sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)

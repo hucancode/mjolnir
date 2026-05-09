@@ -9,9 +9,13 @@ import "core:mem"
 import "core:sync"
 import "core:thread"
 
-BAUMGARTE_COEF :: 0.4
+// Split-impulse / pseudo-velocity stabilization.
+// Velocity pass: only restitution feeds the velocity constraint (no positional energy injection).
+// Position pass: Baumgarte penetration error is solved against per-body pseudo-velocities,
+// which are applied to position once at integration time and then discarded.
+BAUMGARTE_COEF :: 0.2
 SLOP :: 0.002
-RESTITUTION_THRESHOLD :: -0.5
+RESTITUTION_THRESHOLD :: -1.0
 WARMSTART_COEF :: 0.8
 SOLVER_PARALLEL_THRESHOLD :: 200
 
@@ -35,12 +39,12 @@ spin_barrier_wait :: proc "contextless" (b: ^SpinBarrier, local_sense: ^bool, ex
 }
 
 SolverWorkerData :: struct {
-  world:        ^World,
-  thread_id:    int,
-  num_threads:  int,
-  total_iters:  int,
-  bias_iters:   int,
-  barrier:      ^SpinBarrier,
+  world:       ^World,
+  thread_id:   int,
+  num_threads: int,
+  vel_iters:   int,
+  pos_iters:   int,
+  barrier:     ^SpinBarrier,
 }
 
 solver_worker_task :: proc(task: thread.Task) {
@@ -51,8 +55,9 @@ solver_worker_task :: proc(task: thread.Task) {
   contacts := world.dynamic_contacts[:]
   static_contacts := world.static_contacts[:]
   shard := world.solver_static_shards[data.thread_id][:]
-  for iter in 0 ..< data.total_iters {
-    use_bias := iter < data.bias_iters
+  total_iters := data.vel_iters + data.pos_iters
+  for iter in 0 ..< total_iters {
+    is_position := iter >= data.vel_iters
     for color_idx in 0 ..< world.solver_color_count {
       bucket := world.solver_color_buckets[color_idx][:]
       bucket_len := len(bucket)
@@ -64,35 +69,50 @@ solver_worker_task :: proc(task: thread.Task) {
       s := data.thread_id * chunk
       e := min(s + chunk, bucket_len)
       if s < e {
-        #no_bounds_check for idx in bucket[s:e] {
-          c := &contacts[idx]
-          a := get(world, c.body_a) or_continue
-          b := get(world, c.body_b) or_continue
-          resolve_contact_dynamic_dynamic(c, a, b, use_bias)
+        if is_position {
+          #no_bounds_check for idx in bucket[s:e] {
+            c := &contacts[idx]
+            a := get(world, c.body_a) or_continue
+            b := get(world, c.body_b) or_continue
+            resolve_position_dynamic_dynamic(c, a, b)
+          }
+        } else {
+          #no_bounds_check for idx in bucket[s:e] {
+            c := &contacts[idx]
+            a := get(world, c.body_a) or_continue
+            b := get(world, c.body_b) or_continue
+            resolve_velocity_dynamic_dynamic(c, a, b)
+          }
         }
       }
       spin_barrier_wait(data.barrier, &local_sense, expected)
     }
-    #no_bounds_check for idx in shard {
-      c := &static_contacts[idx]
-      a := cont.get(world.bodies, c.body_a) or_continue
-      b := cont.get(world.static_bodies, c.body_b) or_continue
-      resolve_contact_dynamic_static(c, a, b, use_bias)
+    if is_position {
+      #no_bounds_check for idx in shard {
+        c := &static_contacts[idx]
+        a := cont.get(world.bodies, c.body_a) or_continue
+        b := cont.get(world.static_bodies, c.body_b) or_continue
+        resolve_position_dynamic_static(c, a, b)
+      }
+    } else {
+      #no_bounds_check for idx in shard {
+        c := &static_contacts[idx]
+        a := cont.get(world.bodies, c.body_a) or_continue
+        b := cont.get(world.static_bodies, c.body_b) or_continue
+        resolve_velocity_dynamic_static(c, a, b)
+      }
     }
     spin_barrier_wait(data.barrier, &local_sense, expected)
   }
 }
 
-run_solver_iters :: proc(world: ^World, total_iters, bias_iters, num_threads: int) {
+run_solver_iters :: proc(world: ^World, vel_iters, pos_iters, num_threads: int) {
   if (len(world.dynamic_contacts) + len(world.static_contacts)) < SOLVER_PARALLEL_THRESHOLD || num_threads <= 1 {
-    for iter in 0 ..< total_iters {
-      use_bias := iter < bias_iters
-      solve_dynamic_pass(world, use_bias)
-      for &c in world.static_contacts {
-        a := cont.get(world.bodies, c.body_a) or_continue
-        b := cont.get(world.static_bodies, c.body_b) or_continue
-        resolve_contact_dynamic_static(&c, a, b, use_bias)
-      }
+    for _ in 0 ..< vel_iters {
+      solve_velocity_pass(world)
+    }
+    for _ in 0 ..< pos_iters {
+      solve_position_pass(world)
     }
     return
   }
@@ -103,8 +123,8 @@ run_solver_iters :: proc(world: ^World, total_iters, bias_iters, num_threads: in
       world       = world,
       thread_id   = t,
       num_threads = num_threads,
-      total_iters = total_iters,
-      bias_iters  = bias_iters,
+      vel_iters   = vel_iters,
+      pos_iters   = pos_iters,
       barrier     = &barrier,
     }
     thread.pool_add_task(&world.thread_pool, mem.nil_allocator(), solver_worker_task, &task_data[t], t)
@@ -164,6 +184,15 @@ build_solver_partition :: proc(world: ^World, num_shards: int) {
   }
 }
 
+clear_pseudo_velocities :: proc(world: ^World) {
+  for i in 0 ..< len(world.bodies.entries) {
+    if !world.bodies.entries[i].active do continue
+    body := &world.bodies.entries[i].item
+    body.pseudo_velocity = {}
+    body.pseudo_angular_velocity = {}
+  }
+}
+
 prepare_contact_dynamic_dynamic :: proc(
   contact: ^DynamicContact,
   body_a: ^DynamicRigidBody,
@@ -198,14 +227,15 @@ prepare_contact_dynamic_dynamic :: proc(
     }
   }
   penetration_to_resolve := max(contact.penetration - SLOP, 0.0)
-  contact.bias = (BAUMGARTE_COEF / dt) * penetration_to_resolve
+  contact.position_bias = (BAUMGARTE_COEF / dt) * penetration_to_resolve
+  contact.velocity_bias = 0
   vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
   vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
-  relative_velocity := vel_b - vel_a
-  velocity_along_normal := linalg.dot(relative_velocity, contact.normal)
+  velocity_along_normal := linalg.dot(vel_b - vel_a, contact.normal)
   if velocity_along_normal < RESTITUTION_THRESHOLD {
-    contact.bias += -contact.restitution * velocity_along_normal
+    contact.velocity_bias = -contact.restitution * velocity_along_normal
   }
+  contact.pseudo_normal_impulse = 0
 }
 
 prepare_contact_dynamic_static :: proc(
@@ -237,13 +267,14 @@ prepare_contact_dynamic_static :: proc(
     }
   }
   penetration_to_resolve := max(contact.penetration - SLOP, 0.0)
-  contact.bias = (BAUMGARTE_COEF / dt) * penetration_to_resolve
+  contact.position_bias = (BAUMGARTE_COEF / dt) * penetration_to_resolve
+  contact.velocity_bias = 0
   vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
-  relative_velocity := -vel_a
-  velocity_along_normal := linalg.dot(relative_velocity, contact.normal)
+  velocity_along_normal := linalg.dot(-vel_a, contact.normal)
   if velocity_along_normal < RESTITUTION_THRESHOLD {
-    contact.bias += -contact.restitution * velocity_along_normal
+    contact.velocity_bias = -contact.restitution * velocity_along_normal
   }
+  contact.pseudo_normal_impulse = 0
 }
 
 prepare_contact :: proc {
@@ -286,25 +317,41 @@ warmstart_contact :: proc {
   warmstart_contact_dynamic_static,
 }
 
-solve_dynamic_pass :: proc(world: ^World, use_bias: bool) {
+solve_velocity_pass :: proc(world: ^World) {
   for &c in world.dynamic_contacts {
     ba := get(world, c.body_a) or_continue
     bb := get(world, c.body_b) or_continue
-    resolve_contact_dynamic_dynamic(&c, ba, bb, use_bias)
+    resolve_velocity_dynamic_dynamic(&c, ba, bb)
+  }
+  for &c in world.static_contacts {
+    a := cont.get(world.bodies, c.body_a) or_continue
+    b := cont.get(world.static_bodies, c.body_b) or_continue
+    resolve_velocity_dynamic_static(&c, a, b)
   }
 }
 
-resolve_contact_dynamic_dynamic :: #force_inline proc(
+solve_position_pass :: proc(world: ^World) {
+  for &c in world.dynamic_contacts {
+    ba := get(world, c.body_a) or_continue
+    bb := get(world, c.body_b) or_continue
+    resolve_position_dynamic_dynamic(&c, ba, bb)
+  }
+  for &c in world.static_contacts {
+    a := cont.get(world.bodies, c.body_a) or_continue
+    b := cont.get(world.static_bodies, c.body_b) or_continue
+    resolve_position_dynamic_static(&c, a, b)
+  }
+}
+
+resolve_velocity_dynamic_dynamic :: #force_inline proc(
   contact: ^DynamicContact,
   body_a: ^DynamicRigidBody,
   body_b: ^DynamicRigidBody,
-  use_bias: bool,
 ) {
-  bias := use_bias ? contact.bias : 0
   vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
   vel_b := body_b.velocity + linalg.cross(body_b.angular_velocity, contact.r_b)
   velocity_along_normal := linalg.dot(vel_b - vel_a, contact.normal)
-  delta_impulse := contact.normal_mass * (-velocity_along_normal + bias)
+  delta_impulse := contact.normal_mass * (-velocity_along_normal + contact.velocity_bias)
   old_impulse := contact.normal_impulse
   contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
   impulse := contact.normal * (contact.normal_impulse - old_impulse)
@@ -325,16 +372,14 @@ resolve_contact_dynamic_dynamic :: #force_inline proc(
   }
 }
 
-resolve_contact_dynamic_static :: #force_inline proc(
+resolve_velocity_dynamic_static :: #force_inline proc(
   contact: ^StaticContact,
   body_a: ^DynamicRigidBody,
   body_b: ^StaticRigidBody,
-  use_bias: bool,
 ) {
-  bias := use_bias ? contact.bias : 0
   vel_a := body_a.velocity + linalg.cross(body_a.angular_velocity, contact.r_a)
   velocity_along_normal := linalg.dot(-vel_a, contact.normal)
-  delta_impulse := contact.normal_mass * (-velocity_along_normal + bias)
+  delta_impulse := contact.normal_mass * (-velocity_along_normal + contact.velocity_bias)
   old_impulse := contact.normal_impulse
   contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
   impulse := contact.normal * (contact.normal_impulse - old_impulse)
@@ -352,9 +397,62 @@ resolve_contact_dynamic_static :: #force_inline proc(
   }
 }
 
-resolve_contact :: proc {
-  resolve_contact_dynamic_dynamic,
-  resolve_contact_dynamic_static,
+// Pseudo-velocity solve. Operates on body.pseudo_{velocity,angular_velocity} only;
+// these are integrated into position once and discarded, so they never feed back
+// into real momentum (no Baumgarte energy injection).
+resolve_position_dynamic_dynamic :: #force_inline proc(
+  contact: ^DynamicContact,
+  body_a: ^DynamicRigidBody,
+  body_b: ^DynamicRigidBody,
+) {
+  if contact.position_bias <= 0 do return
+  pvel_a := body_a.pseudo_velocity + linalg.cross(body_a.pseudo_angular_velocity, contact.r_a)
+  pvel_b := body_b.pseudo_velocity + linalg.cross(body_b.pseudo_angular_velocity, contact.r_b)
+  pseudo_vel_normal := linalg.dot(pvel_b - pvel_a, contact.normal)
+  delta := contact.normal_mass * (contact.position_bias - pseudo_vel_normal)
+  old := contact.pseudo_normal_impulse
+  contact.pseudo_normal_impulse = max(old + delta, 0.0)
+  applied := contact.pseudo_normal_impulse - old
+  if applied == 0 do return
+  impulse := contact.normal * applied
+  body_a.pseudo_velocity -= impulse * body_a.inv_mass
+  body_b.pseudo_velocity += impulse * body_b.inv_mass
+  if body_a.enable_rotation {
+    body_a.pseudo_angular_velocity -= body_a.inv_inertia * linalg.cross(contact.r_a, impulse)
+  }
+  if body_b.enable_rotation {
+    body_b.pseudo_angular_velocity += body_b.inv_inertia * linalg.cross(contact.r_b, impulse)
+  }
+}
+
+resolve_position_dynamic_static :: #force_inline proc(
+  contact: ^StaticContact,
+  body_a: ^DynamicRigidBody,
+  body_b: ^StaticRigidBody,
+) {
+  if contact.position_bias <= 0 do return
+  pvel_a := body_a.pseudo_velocity + linalg.cross(body_a.pseudo_angular_velocity, contact.r_a)
+  pseudo_vel_normal := linalg.dot(-pvel_a, contact.normal)
+  delta := contact.normal_mass * (contact.position_bias - pseudo_vel_normal)
+  old := contact.pseudo_normal_impulse
+  contact.pseudo_normal_impulse = max(old + delta, 0.0)
+  applied := contact.pseudo_normal_impulse - old
+  if applied == 0 do return
+  impulse := contact.normal * applied
+  body_a.pseudo_velocity -= impulse * body_a.inv_mass
+  if body_a.enable_rotation {
+    body_a.pseudo_angular_velocity -= body_a.inv_inertia * linalg.cross(contact.r_a, impulse)
+  }
+}
+
+resolve_velocity :: proc {
+  resolve_velocity_dynamic_dynamic,
+  resolve_velocity_dynamic_static,
+}
+
+resolve_position :: proc {
+  resolve_position_dynamic_dynamic,
+  resolve_position_dynamic_static,
 }
 
 compute_tangent_basis :: proc(normal: [3]f32) -> ([3]f32, [3]f32) {
