@@ -136,12 +136,22 @@ apply_impulse_at_point :: #force_inline proc(
   impulse: [3]f32,
   point: [3]f32,
 ) {
+  apply_impulse_at_point_no_wake(self, impulse, point)
+  wake_up(self)
+}
+
+// Solver-internal impulse application. Caller must have already woken the body.
+// Skips the wake_up writes that pollute the cache during constraint iteration.
+apply_impulse_at_point_no_wake :: #force_inline proc(
+  self: ^DynamicRigidBody,
+  impulse: [3]f32,
+  point: [3]f32,
+) {
   self.velocity += impulse * self.inv_mass
   if !self.enable_rotation do return
   r := point - self.position
   angular_impulse := linalg.cross(r, impulse)
   self.angular_velocity += self.inv_inertia * angular_impulse
-  wake_up(self)
 }
 
 integrate :: proc(self: ^DynamicRigidBody, dt: f32) {

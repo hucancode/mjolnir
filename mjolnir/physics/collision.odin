@@ -1,7 +1,6 @@
 package physics
 
 import "../geometry"
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 
@@ -643,29 +642,9 @@ test_collision_collider_collider :: proc(
   return
 }
 
-// Collision test between two dynamic rigid bodies
-test_collision_dynamic_dynamic :: proc(
-  body_a, body_b: ^DynamicRigidBody,
-) -> (
-  point: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  hit: bool,
-) {
-  return test_collision_collider_collider(
-    &body_a.collider,
-    body_a.position,
-    body_a.rotation,
-    &body_b.collider,
-    body_b.position,
-    body_b.rotation,
-  )
-}
-
-// Collision test between dynamic and static rigid bodies
-test_collision_dynamic_static :: proc(
-  body_a: ^DynamicRigidBody,
-  body_b: ^StaticRigidBody,
+test_collision_bodies :: #force_inline proc(
+  body_a: ^$A,
+  body_b: ^$B,
 ) -> (
   point: [3]f32,
   normal: [3]f32,
@@ -684,6 +663,5 @@ test_collision_dynamic_static :: proc(
 
 test_collision :: proc {
   test_collision_collider_collider,
-  test_collision_dynamic_dynamic,
-  test_collision_dynamic_static,
+  test_collision_bodies,
 }

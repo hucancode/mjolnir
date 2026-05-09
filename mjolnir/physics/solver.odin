@@ -64,7 +64,7 @@ solver_worker_task :: proc(task: thread.Task) {
       s := data.thread_id * chunk
       e := min(s + chunk, bucket_len)
       if s < e {
-        for idx in bucket[s:e] {
+        #no_bounds_check for idx in bucket[s:e] {
           c := &contacts[idx]
           a := get(world, c.body_a) or_continue
           b := get(world, c.body_b) or_continue
@@ -73,7 +73,7 @@ solver_worker_task :: proc(task: thread.Task) {
       }
       spin_barrier_wait(data.barrier, &local_sense, expected)
     }
-    for idx in shard {
+    #no_bounds_check for idx in shard {
       c := &static_contacts[idx]
       a := cont.get(world.bodies, c.body_a) or_continue
       b := cont.get(world.static_bodies, c.body_b) or_continue
@@ -257,13 +257,13 @@ warmstart_contact_dynamic_dynamic :: proc(
   body_b: ^DynamicRigidBody,
 ) {
   impulse_n := contact.normal * contact.normal_impulse
-  apply_impulse_at_point(body_a, -impulse_n, contact.point)
-  apply_impulse_at_point(body_b, impulse_n, contact.point)
+  apply_impulse_at_point_no_wake(body_a, -impulse_n, contact.point)
+  apply_impulse_at_point_no_wake(body_b, impulse_n, contact.point)
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
   #unroll for i in 0 ..< 2 {
     impulse_t := tangents[i] * contact.tangent_impulse[i]
-    apply_impulse_at_point(body_a, -impulse_t, contact.point)
-    apply_impulse_at_point(body_b, impulse_t, contact.point)
+    apply_impulse_at_point_no_wake(body_a, -impulse_t, contact.point)
+    apply_impulse_at_point_no_wake(body_b, impulse_t, contact.point)
   }
 }
 
@@ -273,11 +273,11 @@ warmstart_contact_dynamic_static :: proc(
   body_b: ^StaticRigidBody,
 ) {
   impulse_n := contact.normal * contact.normal_impulse
-  apply_impulse_at_point(body_a, -impulse_n, contact.point)
+  apply_impulse_at_point_no_wake(body_a, -impulse_n, contact.point)
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
   #unroll for i in 0 ..< 2 {
     impulse_t := tangents[i] * contact.tangent_impulse[i]
-    apply_impulse_at_point(body_a, -impulse_t, contact.point)
+    apply_impulse_at_point_no_wake(body_a, -impulse_t, contact.point)
   }
 }
 
@@ -308,8 +308,8 @@ resolve_contact_dynamic_dynamic :: #force_inline proc(
   old_impulse := contact.normal_impulse
   contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
   impulse := contact.normal * (contact.normal_impulse - old_impulse)
-  apply_impulse_at_point(body_a, -impulse, contact.point)
-  apply_impulse_at_point(body_b, impulse, contact.point)
+  apply_impulse_at_point_no_wake(body_a, -impulse, contact.point)
+  apply_impulse_at_point_no_wake(body_b, impulse, contact.point)
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
   max_friction := contact.friction * contact.normal_impulse
   #unroll for i in 0 ..< 2 {
@@ -320,8 +320,8 @@ resolve_contact_dynamic_dynamic :: #force_inline proc(
     old_impulse_t := contact.tangent_impulse[i]
     contact.tangent_impulse[i] = clamp(old_impulse_t + delta_impulse_t, -max_friction, max_friction)
     impulse_t := tangents[i] * (contact.tangent_impulse[i] - old_impulse_t)
-    apply_impulse_at_point(body_a, -impulse_t, contact.point)
-    apply_impulse_at_point(body_b, impulse_t, contact.point)
+    apply_impulse_at_point_no_wake(body_a, -impulse_t, contact.point)
+    apply_impulse_at_point_no_wake(body_b, impulse_t, contact.point)
   }
 }
 
@@ -338,7 +338,7 @@ resolve_contact_dynamic_static :: #force_inline proc(
   old_impulse := contact.normal_impulse
   contact.normal_impulse = max(old_impulse + delta_impulse, 0.0)
   impulse := contact.normal * (contact.normal_impulse - old_impulse)
-  apply_impulse_at_point(body_a, -impulse, contact.point)
+  apply_impulse_at_point_no_wake(body_a, -impulse, contact.point)
   tangents := [2][3]f32{contact.tangent1, contact.tangent2}
   max_friction := contact.friction * contact.normal_impulse
   #unroll for i in 0 ..< 2 {
@@ -348,7 +348,7 @@ resolve_contact_dynamic_static :: #force_inline proc(
     old_impulse_t := contact.tangent_impulse[i]
     contact.tangent_impulse[i] = clamp(old_impulse_t + delta_impulse_t, -max_friction, max_friction)
     impulse_t := tangents[i] * (contact.tangent_impulse[i] - old_impulse_t)
-    apply_impulse_at_point(body_a, -impulse_t, contact.point)
+    apply_impulse_at_point_no_wake(body_a, -impulse_t, contact.point)
   }
 }
 
