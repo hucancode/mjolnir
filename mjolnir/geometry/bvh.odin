@@ -383,44 +383,9 @@ bvh_query_aabb :: proc(
       prim_end := node.primitive_start + node.primitive_count
 
       when intrinsics.type_has_field(T, "bounds") {
-        // Fast path - direct field access with SIMD batching
-        if simd_mode != .Scalar {
-          // Process in batches of 4 using SIMD
-          query_batch := [4]Aabb{query_bounds, query_bounds, query_bounds, query_bounds}
-
-          i := prim_start
-          batch_end := prim_end - 3
-
-          #no_bounds_check for i < batch_end {
-            bounds_batch := [4]Aabb{
-              bvh.primitives[i + 0].bounds,
-              bvh.primitives[i + 1].bounds,
-              bvh.primitives[i + 2].bounds,
-              bvh.primitives[i + 3].bounds,
-            }
-
-            intersects := aabb_intersects_batch4(bounds_batch, query_batch)
-
-            #unroll for j in 0 ..< 4 {
-              if intersects[j] do append(results, bvh.primitives[i + i32(j)])
-            }
-
-            i += 4
-          }
-
-          // Process remaining primitives (< 4)
-          #no_bounds_check for i < prim_end {
-            if aabb_intersects(bvh.primitives[i].bounds, query_bounds) {
-              append(results, bvh.primitives[i])
-            }
-            i += 1
-          }
-        } else {
-          // Scalar fast path
-          #no_bounds_check for i in prim_start ..< prim_end {
-            if aabb_intersects(bvh.primitives[i].bounds, query_bounds) {
-              append(results, bvh.primitives[i])
-            }
+        #no_bounds_check for i in prim_start ..< prim_end {
+          if aabb_intersects(bvh.primitives[i].bounds, query_bounds) {
+            append(results, bvh.primitives[i])
           }
         }
       } else {
