@@ -90,8 +90,8 @@ camera_controller_orbit_init :: proc(
       pitch = pitch,
       min_distance = 1.0,
       max_distance = 20.0,
-      min_pitch = -math.PI * 0.4,
-      max_pitch = math.PI * 0.4,
+      min_pitch = -math.PI * 0.5 + 0.01,
+      max_pitch = math.PI * 0.5 - 0.01,
       zoom_speed = 2.0,
       rotate_speed = 2.0,
       pan_speed = 0.01,
@@ -169,12 +169,20 @@ camera_controller_orbit_update :: proc(
   }
   scroll := get_scroll_delta_for_window(self.window)
   if scroll != 0 {
-    orbit.distance -= scroll * orbit.zoom_speed
-    orbit.distance = clamp(
-      orbit.distance,
-      orbit.min_distance,
-      orbit.max_distance,
-    )
+    if ortho, is_ortho := &camera.projection.(OrthographicProjection);
+       is_ortho {
+      // Ortho: scroll zooms by scaling visible extent
+      factor := math.exp(-scroll * 0.1)
+      ortho.width = max(ortho.width * factor, 0.01)
+      ortho.height = max(ortho.height * factor, 0.01)
+    } else {
+      orbit.distance -= scroll * orbit.zoom_speed
+      orbit.distance = clamp(
+        orbit.distance,
+        orbit.min_distance,
+        orbit.max_distance,
+      )
+    }
   }
   camera_needs_update := false
   if self.is_orbiting {
@@ -296,32 +304,19 @@ camera_controller_orbit_sync :: proc(
   controller: ^CameraController,
   camera: ^Camera,
 ) {
-  if orbit, ok := &controller.data.(OrbitCameraData); ok {
-    offset := camera.position - orbit.target
-    orbit.distance = linalg.length(offset)
-    if orbit.distance > 0.001 {
-      // calculate yaw (rotation around Y axis)
-      orbit.yaw = math.atan2(offset.z, offset.x)
-      // calculate pitch (up/down angle)
-      horizontal_distance := math.sqrt(
-        offset.x * offset.x + offset.z * offset.z,
-      )
-      orbit.pitch = math.atan2(offset.y, horizontal_distance)
-      // clamp values to valid ranges
-      orbit.pitch = clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch)
-      orbit.distance = clamp(
-        orbit.distance,
-        orbit.min_distance,
-        orbit.max_distance,
-      )
-      // Immediately apply the synced state to the camera to ensure first frame is correct
-      x := orbit.distance * math.cos(orbit.pitch) * math.cos(orbit.yaw)
-      y := orbit.distance * math.sin(orbit.pitch)
-      z := orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw)
-      camera_position := orbit.target + [3]f32{x, y, z}
-      camera_look_at(camera, camera_position, orbit.target)
-    }
-  }
+  orbit, ok := &controller.data.(OrbitCameraData)
+  if !ok do return
+  offset := camera.position - orbit.target
+  orbit.distance = linalg.length(offset)
+  if orbit.distance <= 0.001 do return
+  // Record orbit state from current pose. No clamping, no re-apply.
+  // Caller-supplied camera position is authoritative; orbit_update will
+  // take over only when user actually drags/scrolls.
+  orbit.yaw = math.atan2(offset.z, offset.x)
+  horizontal_distance := math.sqrt(
+    offset.x * offset.x + offset.z * offset.z,
+  )
+  orbit.pitch = math.atan2(offset.y, horizontal_distance)
 }
 
 camera_controller_free_sync :: proc(
