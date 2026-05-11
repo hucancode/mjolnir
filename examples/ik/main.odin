@@ -13,6 +13,7 @@ animation_time: f32 = 0
 spider_root_node: world.NodeHandle
 mesh_node: world.NodeHandle
 target_markers: [6]world.NodeHandle
+pole_markers: [6]world.NodeHandle
 ground_plane: world.NodeHandle
 
 // Fixed ground targets for each leg (computed from initial pose)
@@ -184,9 +185,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
 
-  // Create visual markers for each leg target (red spheres)
+  // Create visual markers for each leg target (red spheres) and pole (blue)
   sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
   red_mat := world.get_builtin_material(&engine.world, .RED)
+  blue_mat := world.get_builtin_material(&engine.world, .BLUE)
   for i in 0 ..< 6 {
     target_markers[i] =
       world.spawn(
@@ -198,12 +200,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
         },
       ) or_else {}
     world.scale(&engine.world, target_markers[i], 0.5)
-    // Position at the fixed target
     if marker_node := world.node(&engine.world, target_markers[i]);
        marker_node != nil {
       tgt := leg_targets[i]
       world.translate(&marker_node.transform, tgt.x, tgt.y, tgt.z)
     }
+    pole_markers[i] =
+      world.spawn(
+        &engine.world,
+        {0, 0, 0},
+        attachment = world.MeshAttachment {
+          handle = sphere_mesh,
+          material = blue_mat,
+        },
+      ) or_else {}
+    world.scale(&engine.world, pole_markers[i], 0.3)
   }
 
   // Ground plane for reference
@@ -266,9 +277,13 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       target_pos, // Fixed ground target
       pole_pos,
     )
-    // Debug draw pole position
-    pole_transform := linalg.matrix4_translate(pole_pos)
-    pole_transform *= linalg.matrix4_scale([3]f32{0.2, 0.2, 0.2})
+    // Move target + pole markers to visualize current frame state
+    if tn := world.node(&engine.world, target_markers[i]); tn != nil {
+      world.translate(&tn.transform, target_pos.x, target_pos.y, target_pos.z)
+    }
+    if pn := world.node(&engine.world, pole_markers[i]); pn != nil {
+      world.translate(&pn.transform, pole_pos.x, pole_pos.y, pole_pos.z)
+    }
   }
 }
 
