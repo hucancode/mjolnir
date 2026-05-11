@@ -189,7 +189,7 @@ camera_init :: proc(
   camera_target: [3]f32 = {0, 0, 0},
   fov: f32 = 1.57079632679,
   near_plane: f32 = 0.1,
-  far_plane: f32 = 100.0,
+  far_plane: f32 = 1000.0,
 ) -> bool {
   camera.rotation = linalg.QUATERNIONF32_IDENTITY
   camera.projection = PerspectiveProjection {

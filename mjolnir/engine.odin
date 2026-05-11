@@ -345,7 +345,7 @@ setup :: proc(self: ^Engine) -> (ret: vk.Result) {
       camera_target = {0, 0, 0},
       fov = math.PI * 0.5,
       near_plane = 0.1,
-      far_plane = 100.0,
+      far_plane = 1000.0,
     ) {
       return .ERROR_INITIALIZATION_FAILED
     }
