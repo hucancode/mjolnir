@@ -19,6 +19,7 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint emissive_texture_index;
     uint depth_texture_index;
     uint input_image_index;
+    uint _pad;
     float focus_distance;    // Distance to the focus plane
     float focus_range;       // Range where objects are in focus
     float blur_strength;     // Maximum blur radius

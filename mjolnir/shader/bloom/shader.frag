@@ -23,6 +23,7 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint emissive_texture_index;
     uint depth_texture_index;
     uint input_image_index;
+    uint _pad;
     float threshold;      // Brightness threshold for bloom
     float intensity;      // Bloom intensity
     float blur_radius;    // Blur radius

@@ -23,6 +23,7 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint emissive_texture_index;
     uint depth_texture_index;
     uint input_image_index;
+    uint _pad;
     float radius;
     float direction; // 0.0 = horizontal, 1.0 = vertical
     float weight_falloff; // Controls Gaussian vs box blur
