@@ -406,47 +406,28 @@ shutdown :: proc(world: ^World) {
 // Engine's sync will detect the nil node and release GPU resources.
 despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
   node := cont.get(world.nodes, handle)
-  if node == nil {
-    log.warnf("despawn: node %v not found (already freed or invalid)", handle)
-    return false
-  }
-
-  log.infof(
-    "despawn: freeing node %v '%s' and %d children",
-    handle,
-    node.name,
-    len(node.children),
-  )
-
-  // Recursively despawn all children FIRST (bottom-up cleanup)
-  // Make a copy since we'll modify the children array during iteration
-  children_copy := make(
-    [dynamic]NodeHandle,
-    len(node.children),
-    context.temp_allocator,
-  )
-  copy(children_copy[:], node.children[:])
-  for child_handle in children_copy {
-    despawn(world, child_handle)
-  }
-
-  // Detach from parent (removes self from parent's children array)
+  if node == nil do return false
   detach(world.nodes, handle)
+  despawn_subtree(world, handle, node)
+  return true
+}
 
-  // Stage for GPU cleanup - Engine will detect nil and trigger Render cleanup
+// Internal: free a node and its descendants without touching the parent's
+// children array. Caller must have already detached `handle` from its parent.
+// Skipping the per-child detach is what makes bulk despawn O(N) instead of
+// O(N^2) — every linear_search through a huge children array is avoided.
+@(private)
+despawn_subtree :: proc(world: ^World, handle: NodeHandle, node: ^Node) {
+  for child_handle in node.children {
+    child_node := cont.get(world.nodes, child_handle) or_continue
+    despawn_subtree(world, child_handle, child_node)
+  }
   stage_node_data(&world.staging, handle)
-
-  // Unregister from tracking lists
   unregister_animatable_node(world, handle)
-
-  // Free immediately
   if freed_node, ok := cont.free(&world.nodes, handle); ok {
     node_destroy(freed_node, world, handle)
-    // Clear the node struct to prevent use-after-free
     freed_node^ = {}
   }
-
-  return true
 }
 
 traverse :: proc(world: ^World) -> bool {
