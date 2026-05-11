@@ -106,8 +106,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     4.0 * math.sin(runner_phase * 2.0),
   }
   if rn, ok := world.node(&engine.world, runner_handle); ok {
-    rn.transform.position = follow_target
-    rn.transform.is_dirty = true
+    world.translate(&rn.transform, follow_target.x, follow_target.y, follow_target.z)
   }
 
   // Live-update controller params from sliders, no rebuild

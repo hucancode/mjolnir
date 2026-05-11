@@ -42,8 +42,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   for handle in spider_roots {
     node := world.node(&engine.world, handle) or_continue
     spider_root_node = handle
-    node.transform.position = {0, 5, 0}
-    node.transform.is_dirty = true
+    world.translate(&node.transform, 0, 5, 0)
   }
 
   // Leg configurations: root bone, tip bone
@@ -202,8 +201,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Position at the fixed target
     if marker_node := world.node(&engine.world, target_markers[i]);
        marker_node != nil {
-      marker_node.transform.position = leg_targets[i]
-      marker_node.transform.is_dirty = true
+      tgt := leg_targets[i]
+      world.translate(&marker_node.transform, tgt.x, tgt.y, tgt.z)
     }
   }
 
@@ -244,8 +243,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
   // Move the spider body
   if node := world.node(&engine.world, spider_root_node); node != nil {
-    node.transform.position = body_pos
-    node.transform.is_dirty = true
+    world.translate(&node.transform, body_pos.x, body_pos.y, body_pos.z)
   }
 
   // Update IK targets for each leg - targets stay fixed at ground positions

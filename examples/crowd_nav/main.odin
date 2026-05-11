@@ -242,12 +242,12 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     }
 
     if n, ok := world.node(&engine.world, a.node); ok {
-      n.transform.position = a.pos + [3]f32{0, AGENT_HEIGHT * 0.5, 0}
+      pos := a.pos + [3]f32{0, AGENT_HEIGHT * 0.5, 0}
+      world.translate(&n.transform, pos.x, pos.y, pos.z)
       if linalg.length2(a.velocity.xz) > 0.01 {
         yaw := math.atan2(a.velocity.x, a.velocity.z)
-        n.transform.rotation = linalg.quaternion_angle_axis(yaw, linalg.VECTOR3F32_Y_AXIS)
+        world.rotate(&n.transform, yaw, linalg.VECTOR3F32_Y_AXIS)
       }
-      n.transform.is_dirty = true
     }
   }
 }

@@ -96,20 +96,17 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   phase += delta_time * f32(orbit_speed)
   // Sun spins slowly — propagates to planet world positions through hierarchy
   if n, ok := world.node(&engine.world, sun_handle); ok {
-    n.transform.rotation = quat_y(phase * 0.3)
-    n.transform.is_dirty = true
+    world.rotate(&n.transform, quat_y(phase * 0.3))
   }
   // Each planet spins on own axis
   for h, i in planet_handles {
     if n, ok := world.node(&engine.world, h); ok {
-      n.transform.rotation = quat_y(phase * f32(spin_speed) * f32(i + 1) * 0.5)
-      n.transform.is_dirty = true
+      world.rotate(&n.transform, quat_y(phase * f32(spin_speed) * f32(i + 1) * 0.5))
     }
   }
   // Moon spins fast on planet's local frame
   if n, ok := world.node(&engine.world, moon_handle); ok {
-    n.transform.rotation = quat_y(phase * 4.0)
-    n.transform.is_dirty = true
+    world.rotate(&n.transform, quat_y(phase * 4.0))
   }
 }
 

@@ -87,8 +87,8 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
   if n, ok := world.node(&engine.world, display_node); ok {
     att, _ := &n.attachment.(world.MeshAttachment)
     att.handle = loaded_meshes[index]
-    n.transform.position = -center
-    n.transform.is_dirty = true
+    neg := -center
+    world.translate(&n.transform, neg.x, neg.y, neg.z)
     world.stage_node_data(&engine.world.staging, display_node)
   }
 

@@ -127,8 +127,7 @@ main :: proc() {
 
     // Update leg root visual
     if node := world.node(&engine.world, leg_root_node); node != nil {
-      node.transform.position = root_pos
-      node.transform.is_dirty = true
+      world.translate(&node.transform, root_pos.x, root_pos.y, root_pos.z)
     }
 
     // Update all 8 spider legs
@@ -138,14 +137,14 @@ main :: proc() {
 
       // Update target marker (should follow root + offset immediately)
       if node := world.node(&engine.world, target_markers[i]); node != nil {
-        node.transform.position = spider_legs[i].feet_target
-        node.transform.is_dirty = true
+        tgt := spider_legs[i].feet_target
+        world.translate(&node.transform, tgt.x, tgt.y, tgt.z)
       }
 
       // Update feet marker (should lift in parabolic arc periodically)
       if node := world.node(&engine.world, feet_markers[i]); node != nil {
-        node.transform.position = spider_legs[i].feet_position
-        node.transform.is_dirty = true
+        fp := spider_legs[i].feet_position
+        world.translate(&node.transform, fp.x, fp.y, fp.z)
       }
     }
   }

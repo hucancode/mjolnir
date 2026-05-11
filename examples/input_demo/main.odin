@@ -148,9 +148,8 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     cube_pos.z = clamp(cube_pos.z + move.z * speed, -7.5, 7.5)
   }
   if cn, ok := world.node(&engine.world, cube_handle); ok {
-    cn.transform.position = cube_pos
-    cn.transform.rotation = quat_y(cube_yaw)
-    cn.transform.is_dirty = true
+    world.translate(&cn.transform, cube_pos.x, cube_pos.y, cube_pos.z)
+    world.rotate(&cn.transform, quat_y(cube_yaw))
   }
 
   // Apply light intensity slider/wheel
@@ -158,7 +157,6 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     if att, ok := &ln.attachment.(world.DirectionalLightAttachment); ok {
       att.color.a = f32(light_intensity)
     }
-    ln.transform.is_dirty = true
     world.stage_light_data(&engine.world.staging, light_handle)
   }
 }

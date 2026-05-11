@@ -210,8 +210,7 @@ main :: proc() {
 
     // Move the spider body
     if node := world.node(&engine.world, spider_root_node); node != nil {
-      node.transform.position = body_pos
-      node.transform.is_dirty = true
+      world.translate(&node.transform, body_pos.x, body_pos.y, body_pos.z)
     }
 
     // Target is now automatically computed from leg root + offset in world space
@@ -235,8 +234,7 @@ main :: proc() {
           ); ok {
             if marker_node := world.node(&engine.world, target_markers[i]);
                marker_node != nil {
-              marker_node.transform.position = target^
-              marker_node.transform.is_dirty = true
+              world.translate(&marker_node.transform, target.x, target.y, target.z)
             }
           }
         }

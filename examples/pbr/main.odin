@@ -47,7 +47,6 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     if att, ok := &dn.attachment.(world.DirectionalLightAttachment); ok {
       att.color.a = f32(dir_intensity)
     }
-    dn.transform.is_dirty = true
     world.stage_light_data(&engine.world.staging, dir_light)
   }
 

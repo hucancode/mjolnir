@@ -315,9 +315,8 @@ set_spin :: proc(
 ) {
   if n, ok := world.node(w, h); ok {
     n.visible = visible
-    n.transform.position = pos
-    n.transform.rotation = q
-    n.transform.is_dirty = true
+    world.translate(&n.transform, pos.x, pos.y, pos.z)
+    world.rotate(&n.transform, q)
   }
 }
 

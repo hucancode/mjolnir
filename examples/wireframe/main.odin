@@ -41,11 +41,10 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   axis := linalg.normalize([3]f32{1, 1, 0.4})
   for h, i in handles {
     if n, ok := world.node(&engine.world, h); ok {
-      n.transform.rotation = linalg.quaternion_angle_axis(
-        t * (0.4 + f32(i) * 0.15),
-        axis,
+      world.rotate(
+        &n.transform,
+        linalg.quaternion_angle_axis(t * (0.4 + f32(i) * 0.15), axis),
       )
-      n.transform.is_dirty = true
     }
   }
 }

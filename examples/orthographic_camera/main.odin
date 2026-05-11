@@ -122,8 +122,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   phase += delta_time * 1.0
   if sn, ok := world.node(&engine.world, spinner); ok {
-    sn.transform.rotation = quat_y(phase)
-    sn.transform.is_dirty = true
+    world.rotate(&sn.transform, quat_y(phase))
   }
   apply_camera(&engine.world)
 }

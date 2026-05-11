@@ -120,8 +120,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     world.create_directional_light_attachment({1, 0.97, 0.92, 5}, 12.0),
   ) or_else {}
   if n, ok := world.node(&engine.world, light); ok {
-    n.transform.rotation = q2 * q1
-    n.transform.is_dirty = true
+    world.rotate(&n.transform, q2 * q1)
   }
 }
 
