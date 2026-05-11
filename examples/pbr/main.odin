@@ -5,6 +5,7 @@ import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import mu "vendor:microui"
 
 helmet_nodes: [dynamic]world.NodeHandle
@@ -54,16 +55,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rotation_phase += delta_time * f32(rotate_speed)
   }
   for h in helmet_nodes {
-    if hn, ok := world.node(&engine.world, h); ok {
-      hn.transform.rotation = quat_y(rotation_phase)
-      hn.transform.is_dirty = true
-    }
+    world.rotate(&engine.world, h, rotation_phase, linalg.VECTOR3F32_Y_AXIS)
+    world.rotate_by(&engine.world, h, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   }
-}
-
-quat_y :: proc(angle: f32) -> quaternion128 {
-  half := angle * 0.5
-  return quaternion(w = math.cos(half), x = 0, y = math.sin(half), z = 0)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
