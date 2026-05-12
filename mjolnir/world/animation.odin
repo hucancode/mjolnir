@@ -1275,63 +1275,38 @@ get_bone_world_transform :: proc(
   return transform, true
 }
 
-// Data structure for bone visualization
-BoneVisualizationInstance :: struct {
-  position: [3]f32,
-  color:    [4]f32,
-  scale:    f32,
+// Parent→child bone link for skeleton visualization.
+BoneSegment :: struct {
+  from, to: [3]f32,
+  depth:    u32,
 }
 
-// Collect bone visualization data from all skinned meshes in the world
-// Returns dynamic array of bone instances with hierarchical coloring
-// Caller is responsible for deleting the returned array
-collect_bone_visualization_data :: proc(
+// Collect parent→child bone segments from all skinned meshes. Caller deletes.
+collect_bone_segments :: proc(
   world: ^World,
-  bone_palette: [][4]f32,
-  bone_scale: f32,
   allocator := context.allocator,
-) -> [dynamic]BoneVisualizationInstance {
-  instances := make([dynamic]BoneVisualizationInstance, 0, 256, allocator)
-
-  // Iterate all nodes to find skinned meshes
+) -> [dynamic]BoneSegment {
+  segments := make([dynamic]BoneSegment, 0, 256, allocator)
   for &entry, idx in world.nodes.entries {
     if !entry.active do continue
-
     node := &entry.item
-
-    // Check if node has a mesh attachment with skinning
-    if mesh_attachment, ok := &node.attachment.(MeshAttachment); ok {
-      mesh := cont.get(world.meshes, mesh_attachment.handle) or_continue
-      skin := mesh.skinning.? or_continue
-
-      // Verify node has skinning data (animation layers, matrices)
-      _ = mesh_attachment.skinning.? or_continue
-
-      // Construct node handle for bone transform lookup
-      node_handle := NodeHandle{index = u32(idx), generation = entry.generation}
-
-      // Use cached bone depths for hierarchical coloring
-      bone_depths := skin.bone_depths
-
-      // Extract world-space bone positions
-      for i in 0 ..< len(skin.bones) {
-        // Get bone world transform
-        bone_transform := get_bone_world_transform(world, node_handle, u32(i)) or_continue
-
-        // Assign color based on hierarchical depth (modulo palette length)
-        depth := bone_depths[i]
-        color := bone_palette[depth % u32(len(bone_palette))]
-
-        // Add instance
-        instance := BoneVisualizationInstance {
-          position = bone_transform.position,
-          color    = color,
-          scale    = bone_scale,
-        }
-        append(&instances, instance)
+    mesh_attachment, ok := &node.attachment.(MeshAttachment)
+    if !ok do continue
+    mesh := cont.get(world.meshes, mesh_attachment.handle) or_continue
+    skin := mesh.skinning.? or_continue
+    _ = mesh_attachment.skinning.? or_continue
+    node_handle := NodeHandle{index = u32(idx), generation = entry.generation}
+    for bone, i in skin.bones {
+      parent_xf := get_bone_world_transform(world, node_handle, u32(i)) or_continue
+      depth := skin.bone_depths[i]
+      for child_idx in bone.children {
+        child_xf := get_bone_world_transform(world, node_handle, child_idx) or_continue
+        append(
+          &segments,
+          BoneSegment{from = parent_xf.position, to = child_xf.position, depth = depth},
+        )
       }
     }
   }
-
-  return instances
+  return segments
 }

@@ -3,6 +3,18 @@ package mjolnir
 import "core:math"
 import "core:math/linalg"
 import "render/debug_line"
+import "world"
+
+DEBUG_SHOW_BONES :: #config(DEBUG_SHOW_BONES, false)
+
+DEBUG_BONE_PALETTE :: [6][4]f32 {
+  {1.0, 0.0, 0.0, 1.0},
+  {0.0, 1.0, 0.0, 1.0},
+  {0.0, 0.0, 1.0, 1.0},
+  {1.0, 1.0, 1.0, 1.0},
+  {1.0, 0.5, 0.0, 1.0},
+  {0.0, 1.0, 1.0, 1.0},
+}
 
 DebugColor :: enum {
   WHITE,
@@ -247,6 +259,24 @@ debug_axes :: proc(
     {a = origin, b = origin + z, color = {0, 0, 1, 1}, expiry = exp, bypass_depth = bypass_depth},
   }
   debug_line.add_segments(dl(engine), ..segs[:])
+}
+
+debug_skeletons :: proc(engine: ^Engine, bypass_depth: bool = true, life: f32 = 0) {
+  bone_segments := world.collect_bone_segments(&engine.world, context.temp_allocator)
+  if len(bone_segments) == 0 do return
+  exp := expiry(engine, life)
+  palette := DEBUG_BONE_PALETTE
+  segs := make([]debug_line.Segment, len(bone_segments), context.temp_allocator)
+  for s, i in bone_segments {
+    segs[i] = {
+      a            = s.from,
+      b            = s.to,
+      color        = palette[s.depth % u32(len(palette))],
+      expiry       = exp,
+      bypass_depth = bypass_depth,
+    }
+  }
+  debug_line.add_segments(dl(engine), ..segs)
 }
 
 debug_point :: proc(

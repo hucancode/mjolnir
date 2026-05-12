@@ -10,7 +10,6 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import "debug_bone"
 import "debug_line"
 import "debug_ui"
 import depth_pyramid_system "depth_pyramid"
@@ -65,7 +64,6 @@ ImageCubeHandle :: gpu.TextureCubeHandle
 BufferAllocation :: gpu.BufferAllocation
 DrawPipeline :: occlusion_culling.DrawPipeline
 DrawBuffers :: occlusion_culling.DrawBuffers
-BoneInstance :: debug_bone.BoneInstance
 Particle :: particles_compute.Particle
 
 Primitive :: enum {
@@ -216,17 +214,6 @@ Light :: union {
   DirectionalLight,
 }
 
-DEBUG_SHOW_BONES :: #config(DEBUG_SHOW_BONES, false)
-DEBUG_BONE_SCALE :: #config(DEBUG_BONE_SCALE, 0.15)
-DEBUG_BONE_PALETTE :: [6][4]f32 {
-  {1.0, 0.0, 0.0, 1.0}, // Level 0: Red (root bones)
-  {0.0, 1.0, 0.0, 1.0}, // Level 1: Green
-  {0.0, 0.0, 1.0, 1.0}, // Level 2: Blue
-  {1.0, 1.0, 1.0, 1.0}, // Level 3: White
-  {1.0, 0.5, 0.0, 1.0}, // Level 4: Orange
-  {0.0, 1.0, 1.0, 1.0}, // Level 5: Cyan
-}
-
 // Internal owns GPU primitives and CPU-side bookkeeping. The engine package
 // reaches into specific subrenderer fields (debug_renderer, ui, command
 // buffers); external user code should not.
@@ -266,7 +253,6 @@ Internal :: struct {
   random_color_renderer:        random_color.Renderer,
   particles_compute:            particles_compute.Renderer,
   particles_render:             particles_render.Renderer,
-  debug_renderer:               debug_bone.Renderer,
   debug_line_renderer:          debug_line.Renderer,
   ui:                           ui_render.Renderer,
   // Compute / culling / shadow systems.
@@ -638,11 +624,6 @@ init :: proc(
     dpi_scale,
     self.texture_manager.set_layout,
   ) or_return
-  debug_bone.init(
-    &self.internal.debug_renderer,
-    gctx,
-    self.internal.camera_buffer.set_layout,
-  ) or_return
   debug_line.init(
     &self.internal.debug_line_renderer,
     gctx,
@@ -843,7 +824,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   }
   ui_render.shutdown(&self.internal.ui, gctx)
   debug_line.shutdown(&self.internal.debug_line_renderer, gctx)
-  debug_bone.shutdown(&self.internal.debug_renderer, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
   post_process.shutdown(&self.post_process, gctx)
   particles_compute.shutdown(&self.internal.particles_compute, gctx)
@@ -1450,26 +1430,6 @@ record_transparency_pass :: proc(
 }
 
 @(private)
-record_debug_pass :: proc(
-  self: ^Manager,
-  frame_index: u32,
-  cam_index: u32,
-  cam: ^CameraTarget,
-  enabled_passes: PassTypeSet,
-) -> vk.Result {
-  if .DEBUG_BONE not_in enabled_passes do return .SUCCESS
-  return debug_bone.record(
-    &self.internal.debug_renderer,
-    self.internal.command_buffers[frame_index],
-    cam.attachments[.FINAL_IMAGE][frame_index],
-    cam.attachments[.DEPTH][frame_index],
-    &self.texture_manager,
-    self.internal.camera_buffer.descriptor_sets[frame_index],
-    cam_index,
-  )
-}
-
-@(private)
 record_debug_line_pass :: proc(
   self: ^Manager,
   frame_index: u32,
@@ -1680,7 +1640,6 @@ record_frame :: proc(
   main_camera_passes: PassTypeSet
   if main_cam, ok := &self.cameras[main_camera_index]; ok {
     main_camera_passes = main_cam.enabled_passes
-    record_debug_pass(self, frame_index, main_camera_index, main_cam, main_camera_passes) or_return
     record_debug_line_pass(self, frame_index, main_camera_index, main_cam, main_camera_passes)
     record_post_process_pass(
       self,
@@ -2189,7 +2148,6 @@ PassType :: enum {
   LINE_STRIP,
   RANDOM_COLOR,
   DEBUG_UI,
-  DEBUG_BONE,
   DEBUG_LINE,
   UI,
 }
@@ -2208,7 +2166,6 @@ DEFAULT_ENABLED_PASSES :: PassTypeSet{
   .LINE_STRIP,
   .RANDOM_COLOR,
   .DEBUG_UI,
-  .DEBUG_BONE,
   .DEBUG_LINE,
   .UI,
 }

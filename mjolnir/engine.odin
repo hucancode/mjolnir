@@ -21,7 +21,6 @@ import nav "navigation"
 import "physics"
 import "navigation/recast"
 import "render"
-import "render/debug_bone"
 import "render/debug_ui"
 import occlusion_culling "render/occlusion_culling"
 import ui_render "render/ui"
@@ -1017,32 +1016,8 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
   for handle in stale_cameras {
     delete_key(&self.world.staging.camera_updates, handle)
   }
-  // Collect and stage bone visualization data for debug rendering (compile-time controlled)
-  when render.DEBUG_SHOW_BONES {
-    palette := render.DEBUG_BONE_PALETTE
-    bone_vis := world.collect_bone_visualization_data(
-      &self.world,
-      palette[:],
-      render.DEBUG_BONE_SCALE,
-      context.temp_allocator,
-    )
-    defer delete(bone_vis)
-    // Convert to render.BoneInstance format
-    bone_instances := make(
-      [dynamic]render.BoneInstance,
-      len(bone_vis),
-      context.temp_allocator,
-    )
-    for instance, i in bone_vis {
-      bone_instances[i] = render.BoneInstance {
-        position = instance.position,
-        color    = instance.color,
-        scale    = instance.scale,
-      }
-    }
-    debug_bone.stage_bones(&self.render.internal.debug_renderer, bone_instances[:])
-  } else {
-    debug_bone.clear_bones(&self.render.internal.debug_renderer)
+  when DEBUG_SHOW_BONES {
+    debug_skeletons(self)
   }
   return .SUCCESS
 }
