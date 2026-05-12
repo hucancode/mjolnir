@@ -75,7 +75,7 @@ build_scene :: proc(engine: ^mjolnir.Engine) {
     v.position.z *= size
   }
   append_nav(ground_geom, {0, 0, 0}, false)
-  gm, _, _ := world.create_mesh(&engine.world, ground_geom)
+  gm, _ := world.create_mesh(&engine.world, ground_geom)
   gmat := world.create_material(
     &engine.world,
     type = .PBR,
@@ -104,7 +104,7 @@ build_scene :: proc(engine: ^mjolnir.Engine) {
       v.position.z *= o.size.z
     }
     append_nav(g, o.pos, true)
-    mh, _, _ := world.create_mesh(&engine.world, g)
+    mh, _ := world.create_mesh(&engine.world, g)
     mat := world.create_material(
       &engine.world,
       type = .PBR,
@@ -160,7 +160,7 @@ spawn_agents :: proc(engine: ^mjolnir.Engine) {
     agents[i].color = palette[i % len(palette)]
 
     cap_geom := geometry.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
-    mh, _, _ := world.create_mesh(&engine.world, cap_geom)
+    mh, _ := world.create_mesh(&engine.world, cap_geom)
     mat := world.create_material(
       &engine.world,
       type = .PBR,

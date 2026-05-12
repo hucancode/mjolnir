@@ -11,6 +11,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "debug_bone"
+import "debug_line"
 import "debug_ui"
 import depth_pyramid_system "depth_pyramid"
 import "direct_light"
@@ -835,6 +836,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
     gpu.free_compute_command_buffer(gctx, self.internal.compute_command_buffers[:])
   }
   ui_render.shutdown(&self.internal.ui, gctx)
+  debug_line.shutdown(&self.internal.debug_line_renderer, gctx)
   debug_bone.shutdown(&self.internal.debug_renderer, gctx)
   debug_ui.shutdown(&self.debug_ui, gctx)
   post_process.shutdown(&self.post_process, gctx)

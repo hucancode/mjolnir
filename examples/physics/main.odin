@@ -31,11 +31,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
   sphere_mat := world.get_builtin_material(&engine.world, .MAGENTA)
   cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   cube_mat := world.get_builtin_material(&engine.world, .RED)
-  rand_sphere_mesh, _, _ := world.create_mesh(
+  rand_sphere_mesh, _ := world.create_mesh(
     &engine.world,
     geometry.make_sphere(random_colors = true),
   )
-  rand_cylinder_mesh, _, _ := world.create_mesh(
+  rand_cylinder_mesh, _ := world.create_mesh(
     &engine.world,
     geometry.make_cylinder(random_colors = true),
   )
@@ -175,17 +175,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
     {30, 25, 30},
     {0, 5, 0},
   )
-  light_handle :=
-    world.spawn(
-      &engine.world,
-      {0, 20, 0},
-      world.create_spot_light_attachment(
-        {0.8, 0.9, 1, 1},
-        25.0,
-        math.PI * 0.25,
-        true,
-      ),
-    ) or_else {}
+  light_handle := world.spawn_light_spot(
+    &engine.world,
+    position = {0, 20, 0},
+    color    = {0.8, 0.9, 1, 1},
+    radius   = 25.0,
+    angle    = math.PI * 0.25,
+  )
   world.rotate(
     &engine.world,
     light_handle,

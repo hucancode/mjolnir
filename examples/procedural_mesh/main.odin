@@ -32,86 +32,34 @@ setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
   world.main_camera_look_at(&engine.world, {0, 6, 14}, {0, 1, 0})
 
-  world.spawn(
+  world.spawn_light_directional(
     &engine.world,
-    {6, 12, 6},
-    world.create_directional_light_attachment({1, 0.97, 0.93, 5.0}, 20.0, false),
+    position = {6, 12, 6},
+    color    = {1, 0.97, 0.93, 5.0},
+    radius   = 20.0,
   )
 
-  ground_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  ground_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground :=
-    world.spawn(
-      &engine.world,
-      {0, -1, 0},
-      world.MeshAttachment {
-        handle = ground_mesh,
-        material = ground_mat,
-        cast_shadow = false,
-      },
-    ) or_else {}
+  ground := world.spawn_primitive_mesh(
+    &engine.world,
+    .QUAD_XZ,
+    .GRAY,
+    position    = {0, -1, 0},
+    cast_shadow = false,
+  )
   world.scale(&engine.world, ground, 12.0)
 
-  wave_mat := world.create_material(
-    &engine.world,
-    type = .PBR,
-    base_color_factor = {0.3, 0.55, 0.85, 1},
-    metallic_value = 0.2,
-    roughness_value = 0.5,
-  ) or_else {}
-  knot_mat := world.create_material(
-    &engine.world,
-    type = .PBR,
-    base_color_factor = {0.9, 0.5, 0.2, 1},
-    metallic_value = 0.8,
-    roughness_value = 0.3,
-  ) or_else {}
-  spiral_mat := world.create_material(
-    &engine.world,
-    type = .PBR,
-    base_color_factor = {0.4, 0.85, 0.4, 1},
-    metallic_value = 0.0,
-    roughness_value = 0.7,
-  ) or_else {}
+  wave_mat   := world.material_pbr(&engine.world, {0.3, 0.55, 0.85, 1}, metallic=0.2, roughness=0.5)
+  knot_mat   := world.material_pbr(&engine.world, {0.9, 0.5,  0.2,  1}, metallic=0.8, roughness=0.3)
+  spiral_mat := world.material_pbr(&engine.world, {0.4, 0.85, 0.4,  1}, metallic=0.0, roughness=0.7)
 
-  wave_geom := build_wave(40, 8.0, 0.6)
-  wave_mesh, _, _ := world.create_mesh(&engine.world, wave_geom)
-  wave_node =
-    world.spawn(
-      &engine.world,
-      {-6, 0, 0},
-      world.MeshAttachment {
-        handle = wave_mesh,
-        material = wave_mat,
-        cast_shadow = true,
-      },
-    ) or_else {}
+  wave_mesh := world.create_mesh(&engine.world, build_wave(40, 8.0, 0.6))
+  wave_node = world.spawn_mesh(&engine.world, wave_mesh, wave_mat, {-6, 0, 0})
 
-  knot_geom := build_torus_knot(2, 3, 200, 12, 1.6, 0.3)
-  knot_mesh, _, _ := world.create_mesh(&engine.world, knot_geom)
-  knot_node =
-    world.spawn(
-      &engine.world,
-      {0, 1.5, 0},
-      world.MeshAttachment {
-        handle = knot_mesh,
-        material = knot_mat,
-        cast_shadow = true,
-      },
-    ) or_else {}
+  knot_mesh := world.create_mesh(&engine.world, build_torus_knot(2, 3, 200, 12, 1.6, 0.3))
+  knot_node = world.spawn_mesh(&engine.world, knot_mesh, knot_mat, {0, 1.5, 0})
 
-  spiral_geom := build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)
-  spiral_mesh, _, _ := world.create_mesh(&engine.world, spiral_geom)
-  spiral_node =
-    world.spawn(
-      &engine.world,
-      {6, 0, 0},
-      world.MeshAttachment {
-        handle = spiral_mesh,
-        material = spiral_mat,
-        cast_shadow = true,
-      },
-    ) or_else {}
+  spiral_mesh := world.create_mesh(&engine.world, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0))
+  spiral_node = world.spawn_mesh(&engine.world, spiral_mesh, spiral_mat, {6, 0, 0})
 }
 
 build_wave :: proc(n: int, size: f32, amp: f32) -> geometry.Geometry {

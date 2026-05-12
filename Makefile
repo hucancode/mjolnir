@@ -115,4 +115,14 @@ long-example:
 doc:
 	pandoc docs/home.md -s -c style.css -o docs/index.html
 
-.PHONY: build build-debug run debug shader check clean vtest examples golden capture long-proc long-file long-example doc bench
+compare-physics:
+	git stash
+	odin build examples/physics -out:bin/physics_before -disable-assert -no-bounds-check -o:speed -define:NX=30 -define:NY=30 -define:NZ=30
+	git stash pop
+	odin build examples/physics -out:bin/physics_after -disable-assert -no-bounds-check -o:speed -define:NX=30 -define:NY=30 -define:NZ=30
+	timeout 10s perf record -F 999 -g --call-graph dwarf ./bin/physics_before || true
+	timeout 10s perf record -F 999 -g --call-graph dwarf ./bin/physics_after || true
+	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
+	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
+
+.PHONY: build build-debug run debug shader check clean vtest examples golden capture long-proc long-file long-example doc bench compare-physics

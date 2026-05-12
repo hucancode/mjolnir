@@ -14,13 +14,12 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   world.main_camera_look_at(&engine.world, {0, 1.5, 6}, {0, 1.5, 0})
 
-  plane := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  plane_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground := world.spawn(
+  ground := world.spawn_primitive_mesh(
     &engine.world,
-    {0, 0, 0},
-    world.MeshAttachment{handle = plane, material = plane_mat, cast_shadow = false},
-  ) or_else {}
+    .QUAD_XZ,
+    .GRAY,
+    cast_shadow = false,
+  )
   world.scale(&engine.world, ground, 6.0)
 
   tex, tex_ok := mjolnir.create_texture(engine, "assets/Warrior_Sheet-Effect.png")
@@ -49,7 +48,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if !sprite_ok do continue
     mat, mat_ok := world.create_material(
       &engine.world,
-      {.ALBEDO_TEXTURE},
+      features = {.ALBEDO_TEXTURE},
       type = .TRANSPARENT,
       albedo_handle = tex,
     )
@@ -64,9 +63,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
 
-  world.spawn(
+  world.spawn_light_directional(
     &engine.world,
-    {2, 6, 4},
-    world.create_directional_light_attachment({1, 1, 1, 1}, 8, false),
+    position = {2, 6, 4},
+    color    = {1, 1, 1, 1},
+    radius   = 8,
   )
 }

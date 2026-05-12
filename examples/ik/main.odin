@@ -1,12 +1,10 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/gpu"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:slice"
 
 root_nodes: [dynamic]world.NodeHandle
 animation_time: f32 = 0
@@ -86,14 +84,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
         root_name := leg_configs[i].root_name
         tip_name := leg_configs[i].tip_name
 
-        // Find all bones in the chain from root to tip
-        bone_names := find_bone_chain(skin, root_name, tip_name)
-        if len(bone_names) == 0 {
+        bone_indices, chain_ok := world.find_bone_chain(mesh, root_name, tip_name)
+        if !chain_ok {
           log.warnf("Could not find bone chain for leg %d", i)
           continue
         }
 
-        log.infof("Leg %d chain: %v", i, bone_names)
+        log.infof("Leg %d chain: %v bones", i, len(bone_indices))
 
         // Calculate initial tip position in world space from bind pose
         tip_bone_idx := -1
@@ -149,15 +146,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
 
         // Add IK layer for this leg
-        world.add_ik_layer(
+        if err := world.add_ik_layer_by_indices(
           &engine.world,
           child,
-          bone_names,
+          bone_indices,
           leg_targets[i],
           pole_pos,
           weight = 1.0,
-          layer_index = -1, // Append new layer
-        )
+        ); err != .NONE {
+          log.errorf("IK layer add failed leg %d: %v", i, err)
+        }
       }
 
       break
@@ -186,61 +184,24 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Create visual markers for each leg target (red spheres) and pole (blue)
-  sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
-  red_mat := world.get_builtin_material(&engine.world, .RED)
-  blue_mat := world.get_builtin_material(&engine.world, .BLUE)
   for i in 0 ..< 6 {
-    target_markers[i] =
-      world.spawn(
-        &engine.world,
-        {0, 0, 0},
-        attachment = world.MeshAttachment {
-          handle = sphere_mesh,
-          material = red_mat,
-        },
-      ) or_else {}
+    target_markers[i] = world.spawn_primitive_mesh(&engine.world, .SPHERE, .RED)
     world.scale(&engine.world, target_markers[i], 0.5)
-    if marker_node := world.node(&engine.world, target_markers[i]);
-       marker_node != nil {
-      tgt := leg_targets[i]
-      world.translate(&marker_node.transform, tgt.x, tgt.y, tgt.z)
-    }
-    pole_markers[i] =
-      world.spawn(
-        &engine.world,
-        {0, 0, 0},
-        attachment = world.MeshAttachment {
-          handle = sphere_mesh,
-          material = blue_mat,
-        },
-      ) or_else {}
+    tgt := leg_targets[i]
+    world.translate(&engine.world, target_markers[i], tgt.x, tgt.y, tgt.z)
+
+    pole_markers[i] = world.spawn_primitive_mesh(&engine.world, .SPHERE, .BLUE)
     world.scale(&engine.world, pole_markers[i], 0.3)
   }
 
-  // Ground plane for reference
-  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
-  gray_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground_plane =
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      attachment = world.MeshAttachment {
-        handle = cube_mesh,
-        material = gray_mat,
-      },
-    ) or_else {}
+  ground_plane = world.spawn_primitive_mesh(&engine.world, .CUBE, .GRAY)
   world.scale_xyz(&engine.world, ground_plane, 40, 0.2, 40)
 
-  light_handle :=
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.create_directional_light_attachment(
-        {1.0, 1.0, 1.0, 1.0},
-        10.0,
-        false,
-      ),
-    ) or_else {}
+  world.spawn_light_directional(
+    &engine.world,
+    color  = {1, 1, 1, 1},
+    radius = 10.0,
+  )
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
@@ -258,87 +219,16 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   }
 
   // Update IK targets for each leg - targets stay fixed at ground positions
-  // Each leg has its own IK layer (0-5)
   for i in 0 ..< 6 {
-    // Calculate pole position for this leg (above the target, toward the body)
     pole_pos := [3]f32 {
       leg_targets[i].x * 0.5 + body_pos.x * 0.5,
       5,
       leg_targets[i].z * 0.5,
     }
-
     target_pos := leg_targets[i]
-    target_pos.y +=
-      amplitude * math.max(math.sin(animation_time * speed * math.PI), 0)
-    world.set_ik_layer_target(
-      &engine.world,
-      mesh_node,
-      i, // IK layer index (0-5 for the 6 legs)
-      target_pos, // Fixed ground target
-      pole_pos,
-    )
-    // Move target + pole markers to visualize current frame state
-    if tn := world.node(&engine.world, target_markers[i]); tn != nil {
-      world.translate(&tn.transform, target_pos.x, target_pos.y, target_pos.z)
-    }
-    if pn := world.node(&engine.world, pole_markers[i]); pn != nil {
-      world.translate(&pn.transform, pole_pos.x, pole_pos.y, pole_pos.z)
-    }
+    target_pos.y += amplitude * math.max(math.sin(animation_time * speed * math.PI), 0)
+    world.set_ik_layer_target(&engine.world, mesh_node, i, target_pos, pole_pos)
+    world.translate(&engine.world, target_markers[i], target_pos.x, target_pos.y, target_pos.z)
+    world.translate(&engine.world, pole_markers[i], pole_pos.x, pole_pos.y, pole_pos.z)
   }
-}
-
-// Find all bone names in a chain from root to tip
-find_bone_chain :: proc(
-  skin: world.Skinning,
-  root_name: string,
-  tip_name: string,
-) -> []string {
-  // Build parent map from children arrays
-  parent_map := make(map[int]int)
-  defer delete(parent_map)
-
-  name_to_idx := make(map[string]int)
-  defer delete(name_to_idx)
-
-  for bone, idx in skin.bones {
-    name_to_idx[bone.name] = idx
-    // Build parent map by iterating children
-    for child_idx in bone.children {
-      parent_map[int(child_idx)] = idx
-    }
-  }
-
-  root_idx, has_root := name_to_idx[root_name]
-  tip_idx, has_tip := name_to_idx[tip_name]
-
-  if !has_root || !has_tip {
-    return nil
-  }
-
-  // Walk from tip to root to find the chain
-  chain_indices := make([dynamic]int)
-  defer delete(chain_indices)
-
-  current := tip_idx
-  for {
-    append(&chain_indices, current)
-    if current == root_idx {
-      break
-    }
-    parent, has_parent := parent_map[current]
-    if !has_parent {
-      // Couldn't reach root - invalid chain
-      return nil
-    }
-    current = parent
-  }
-
-  // Reverse to get root-to-tip order
-  result := make([]string, len(chain_indices))
-  for i in 0 ..< len(chain_indices) {
-    idx := chain_indices[len(chain_indices) - 1 - i]
-    result[i] = skin.bones[idx].name
-  }
-
-  return result
 }

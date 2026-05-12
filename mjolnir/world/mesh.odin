@@ -89,7 +89,7 @@ bake :: proc(
 ) #optional_ok {
   baked_geom, _, baked_ok := bake_geometry(world, include_filter, exclude_filter)
   if !baked_ok do return
-  mesh_handle, _, ok = create_mesh(world, baked_geom, true)
+  mesh_handle, ok = create_mesh(world, baked_geom, true)
   return
 }
 
@@ -137,6 +137,41 @@ find_bone_by_name :: proc(
     }
   }
   return 0, false
+}
+
+// Resolve a bone chain (root -> tip) to indices. Validates that tip descends
+// from root. Returns indices in the caller's allocator. Returns nil on miss.
+find_bone_chain :: proc(
+  self: ^Mesh,
+  root_name: string,
+  tip_name: string,
+  allocator := context.allocator,
+) -> (
+  indices: []u32,
+  ok: bool,
+) #optional_ok {
+  skin, has_skin := &self.skinning.?
+  if !has_skin do return nil, false
+  root_idx, has_root := find_bone_by_name(self, root_name)
+  if !has_root do return nil, false
+  tip_idx, has_tip := find_bone_by_name(self, tip_name)
+  if !has_tip do return nil, false
+
+  parent_map := build_bone_parent_map(skin, context.temp_allocator)
+  walk := make([dynamic]u32, context.temp_allocator)
+  cur := tip_idx
+  for {
+    append(&walk, cur)
+    if cur == root_idx do break
+    parent, has_parent := parent_map[cur]
+    if !has_parent do return nil, false
+    cur = parent
+  }
+  out := make([]u32, len(walk), allocator)
+  for i in 0 ..< len(walk) {
+    out[i] = walk[len(walk) - 1 - i]
+  }
+  return out, true
 }
 
 // Build parent index map for efficient traversal
@@ -622,6 +657,30 @@ sample_layers :: proc(
 // Creates mesh in CPU resource pool.
 // Geometry ownership is transferred to the mesh on success.
 create_mesh :: proc(
+  world: ^World,
+  geometry_data: geometry.Geometry,
+  auto_purge: bool = false,
+) -> (
+  handle: MeshHandle,
+  ok: bool,
+) #optional_ok {
+  mesh: ^Mesh
+  handle, mesh, ok = cont.alloc(&world.meshes, MeshHandle)
+  if !ok {
+    geometry.delete_geometry(geometry_data)
+    return
+  }
+  mesh.auto_purge_cpu_geometry = auto_purge
+  mesh_init(mesh, geometry_data)
+  stage_mesh_data(&world.staging, handle)
+  return handle, true
+}
+
+// Internal-use variant returning the mesh pointer directly. Use this only when
+// you need to mutate the mesh in-place (e.g. skinning setup). External code
+// should call `create_mesh` and then `mesh(world, handle)`.
+@(private)
+create_mesh_with_ptr :: proc(
   world: ^World,
   geometry_data: geometry.Geometry,
   auto_purge: bool = false,

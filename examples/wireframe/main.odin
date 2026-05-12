@@ -19,18 +19,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
   world.main_camera_look_at(&engine.world, {0, 4, 9}, {0, 0, 0})
 
   cube := world.get_builtin_mesh(&engine.world, .CUBE)
-  mat := world.create_material(&engine.world, type = .WIREFRAME) or_else {}
+  mat := world.material_wireframe(&engine.world)
 
   for i in 0 ..< 9 {
     row := i / 3
     col := i % 3
     x := f32(col - 1) * 2.5
     z := f32(row - 1) * 2.5
-    h := world.spawn(
-      &engine.world,
-      {x, 0, z},
-      world.MeshAttachment{handle = cube, material = mat, cast_shadow = false},
-    ) or_else {}
+    h := world.spawn_mesh(&engine.world, cube, mat, {x, 0, z}, cast_shadow=false)
     world.scale(&engine.world, h, 0.7)
     handles[i] = h
   }

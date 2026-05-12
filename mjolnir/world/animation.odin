@@ -212,6 +212,37 @@ update_sprite_animations :: proc(world: ^World, delta_time: f32) {
   }
 }
 
+// Error type returned by the typed animation/IK setters. The legacy variants
+// returning plain bool remain for backward compatibility.
+AnimationError :: enum {
+  NONE,
+  NODE_NOT_FOUND,
+  NOT_A_MESH,
+  NO_MESH_RESOURCE,
+  NO_SKINNING,
+  CLIP_NOT_FOUND,
+  INVALID_LAYER_INDEX,
+  INVALID_BONE,
+  INVALID_CHAIN,
+}
+
+// Find clip by name. O(N) scan — cache the handle in setup rather than calling
+// per frame.
+find_clip :: proc(
+  world: ^World,
+  name: string,
+) -> (
+  handle: ClipHandle,
+  ok: bool,
+) #optional_ok {
+  for &entry, idx in world.animation_clips.entries do if entry.active {
+    if entry.item.name == name {
+      return ClipHandle{index = u32(idx), generation = entry.generation}, true
+    }
+  }
+  return {}, false
+}
+
 // Play animation on layer 0 (for backward compatibility)
 play_animation :: proc(
   world: ^World,
@@ -283,6 +314,49 @@ add_animation_layer :: proc(
   }
   register_animatable_node(world, node_handle)
   return true
+}
+
+// Add an animation layer using a pre-resolved clip handle. Skips the O(N) name
+// lookup. Use `find_clip` in setup to obtain the handle.
+add_animation_layer_by_handle :: proc(
+  world: ^World,
+  node_handle: NodeHandle,
+  clip_handle: ClipHandle,
+  weight: f32 = 1.0,
+  mode: anim.PlayMode = .LOOP,
+  speed: f32 = 1.0,
+  layer_index: int = -1,
+  blend_mode: anim.BlendMode = .REPLACE,
+) -> AnimationError {
+  if world == nil do return .NODE_NOT_FOUND
+  node, has_node := cont.get(world.nodes, node_handle)
+  if !has_node do return .NODE_NOT_FOUND
+  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return .NOT_A_MESH
+  if !cont.is_valid(world.meshes, mesh_attachment.handle) do return .NO_MESH_RESOURCE
+  clip, has_clip := cont.get(world.animation_clips, clip_handle)
+  if !has_clip do return .CLIP_NOT_FOUND
+  if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
+    mesh_attachment.skinning = NodeSkinning{}
+  }
+  skinning := &mesh_attachment.skinning.?
+  layer: anim.Layer
+  anim.layer_init_fk(
+    &layer,
+    transmute(u64)clip_handle,
+    clip.duration,
+    weight,
+    mode,
+    speed,
+    blend_mode,
+  )
+  if layer_index >= 0 && layer_index < len(skinning.layers) {
+    skinning.layers[layer_index] = layer
+  } else {
+    append(&skinning.layers, layer)
+  }
+  register_animatable_node(world, node_handle)
+  return .NONE
 }
 
 // Remove animation layer at specified index
@@ -565,6 +639,65 @@ add_ik_layer :: proc(
 
   register_animatable_node(world, node_handle)
   return true
+}
+
+// Add an IK layer using pre-resolved bone indices. Skips per-name lookups and
+// validates structurally — see `find_bone_chain` for resolving names to a
+// chain. `bone_indices` ownership transfers to the layer.
+add_ik_layer_by_indices :: proc(
+  world: ^World,
+  node_handle: NodeHandle,
+  bone_indices: []u32,
+  target_world_pos: [3]f32,
+  pole_world_pos: [3]f32,
+  weight: f32 = 1.0,
+  max_iterations: int = 10,
+  tolerance: f32 = 0.001,
+  layer_index: int = -1,
+) -> AnimationError {
+  if len(bone_indices) < 2 do return .INVALID_CHAIN
+  node, has_node := cont.get(world.nodes, node_handle)
+  if !has_node do return .NODE_NOT_FOUND
+  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return .NOT_A_MESH
+  mesh, has_mesh := cont.get(world.meshes, mesh_attachment.handle)
+  if !has_mesh do return .NO_MESH_RESOURCE
+  mesh_skin, has_mesh_skin := mesh.skinning.?
+  if !has_mesh_skin do return .NO_SKINNING
+  for idx in bone_indices {
+    if int(idx) >= len(mesh_skin.bones) do return .INVALID_BONE
+  }
+  if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
+    mesh_attachment.skinning = NodeSkinning{}
+  }
+  skinning := &mesh_attachment.skinning.?
+  node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
+  target_local := world_to_skeleton_local(node_world_inv, target_world_pos)
+  pole_local := world_to_skeleton_local(node_world_inv, pole_world_pos)
+  chain_length := len(bone_indices)
+  bone_lengths := make([]f32, chain_length - 1)
+  for i in 0 ..< chain_length - 1 {
+    bone_lengths[i] = mesh_skin.bone_lengths[bone_indices[i + 1]]
+  }
+  ik_target := anim.IKTarget {
+    bone_indices    = bone_indices,
+    bone_lengths    = bone_lengths,
+    target_position = target_local,
+    pole_vector     = pole_local,
+    max_iterations  = max_iterations,
+    tolerance       = tolerance,
+    weight          = clamp(weight, 0.0, 1.0),
+    enabled         = true,
+  }
+  layer: anim.Layer
+  anim.layer_init_ik(&layer, ik_target, weight)
+  if layer_index >= 0 && layer_index < len(skinning.layers) {
+    skinning.layers[layer_index] = layer
+  } else {
+    append(&skinning.layers, layer)
+  }
+  register_animatable_node(world, node_handle)
+  return .NONE
 }
 
 // Update IK target position and pole vector for an existing IK layer

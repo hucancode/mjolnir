@@ -56,15 +56,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
   world.main_camera_look_at(&engine.world, {7, 6, 7}, {0, 1, 0})
 
-  // Ground
-  ground_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  ground_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground :=
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.MeshAttachment{handle = ground_mesh, material = ground_mat, cast_shadow = false},
-    ) or_else {}
+  ground := world.spawn_primitive_mesh(
+    &engine.world,
+    .QUAD_XZ,
+    .GRAY,
+    cast_shadow = false,
+  )
   world.scale(&engine.world, ground, 10.0)
 
   // Lit subjects — sphere grid
@@ -72,12 +69,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for z in 0 ..< 3 {
       color: world.Color
       switch (x + z) % 3 {
-      case 0:
-        color = .WHITE
-      case 1:
-        color = .RED
-      case 2:
-        color = .CYAN
+      case 0: color = .WHITE
+      case 1: color = .RED
+      case 2: color = .CYAN
       }
       world.spawn_primitive_mesh(
         &engine.world,
@@ -88,7 +82,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       )
     }
   }
-  // Vertical cube — catches side light, casts shadow
   world.spawn_primitive_mesh(
     &engine.world,
     .CUBE,
@@ -97,71 +90,51 @@ setup :: proc(engine: ^mjolnir.Engine) {
     scale_factor = 0.6,
   )
 
-  dir_light =
-    world.spawn(
-      &engine.world,
-      {6, 10, 6},
-      world.create_directional_light_attachment(
-        color_preset(dir_color, f32(dir_intensity)),
-        12.0,
-        true,
-      ),
-    ) or_else {}
-
-  point_light =
-    world.spawn(
-      &engine.world,
-      {3, 2, 3},
-      world.create_point_light_attachment(
-        color_preset(point_color, f32(point_intensity)),
-        f32(point_radius),
-        true,
-      ),
-    ) or_else {}
-
-  spot_light_pos := [3]f32{-4, 5, 0}
-  spot_light =
-    world.spawn(
-      &engine.world,
-      spot_light_pos,
-      world.create_spot_light_attachment(
-        color_preset(spot_color, f32(spot_intensity)),
-        f32(spot_radius),
-        math.PI * f32(spot_outer_deg) / 180.0,
-        true,
-      ),
-    ) or_else {}
+  dir_light = world.spawn_light_directional(
+    &engine.world,
+    position    = {6, 10, 6},
+    color       = color_preset(dir_color, f32(dir_intensity)),
+    radius      = 12.0,
+    cast_shadow = true,
+  )
+  point_light = world.spawn_light_point(
+    &engine.world,
+    position = {3, 2, 3},
+    color    = color_preset(point_color, f32(point_intensity)),
+    radius   = f32(point_radius),
+  )
+  spot_light = world.spawn_light_spot(
+    &engine.world,
+    position = {-4, 5, 0},
+    color    = color_preset(spot_color, f32(spot_intensity)),
+    radius   = f32(spot_radius),
+    angle    = math.PI * f32(spot_outer_deg) / 180.0,
+  )
   log.info("=========================================")
   log.info("Lights — toggle each via UI, live tune color/intensity")
   log.info("=========================================")
 }
 
 apply_light_settings :: proc(engine: ^mjolnir.Engine) {
-  if dn, ok := world.node(&engine.world, dir_light); ok {
-    if att, ok := &dn.attachment.(world.DirectionalLightAttachment); ok {
-      eff := f32(dir_intensity) if dir_enabled else 0.0
-      att.color = color_preset(dir_color, eff)
-      world.stage_light_data(&engine.world.staging, dir_light)
-    }
+  if att, ok := world.directional_light(&engine.world, dir_light); ok {
+    eff := f32(dir_intensity) if dir_enabled else 0.0
+    att.color = color_preset(dir_color, eff)
+    world.stage_light_data(&engine.world.staging, dir_light)
   }
-  if pn, ok := world.node(&engine.world, point_light); ok {
-    if att, ok := &pn.attachment.(world.PointLightAttachment); ok {
-      eff := f32(point_intensity) if point_enabled else 0.0
-      att.color = color_preset(point_color, eff)
-      att.radius = f32(point_radius) if point_enabled else 0.0
-      world.stage_light_data(&engine.world.staging, point_light)
-    }
+  if att, ok := world.point_light(&engine.world, point_light); ok {
+    eff := f32(point_intensity) if point_enabled else 0.0
+    att.color = color_preset(point_color, eff)
+    att.radius = f32(point_radius) if point_enabled else 0.0
+    world.stage_light_data(&engine.world.staging, point_light)
   }
-  if sn, ok := world.node(&engine.world, spot_light); ok {
-    if att, ok := &sn.attachment.(world.SpotLightAttachment); ok {
-      eff := f32(spot_intensity) if spot_enabled else 0.0
-      att.color = color_preset(spot_color, eff)
-      att.radius = f32(spot_radius) if spot_enabled else 0.0
-      outer := math.PI * f32(spot_outer_deg) / 180.0
-      att.angle_outer = outer
-      att.angle_inner = outer * 0.75
-      world.stage_light_data(&engine.world.staging, spot_light)
-    }
+  if att, ok := world.spot_light(&engine.world, spot_light); ok {
+    eff := f32(spot_intensity) if spot_enabled else 0.0
+    att.color = color_preset(spot_color, eff)
+    att.radius = f32(spot_radius) if spot_enabled else 0.0
+    outer := math.PI * f32(spot_outer_deg) / 180.0
+    att.angle_outer = outer
+    att.angle_inner = outer * 0.75
+    world.stage_light_data(&engine.world.staging, spot_light)
   }
 }
 

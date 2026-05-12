@@ -43,85 +43,43 @@ setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
   world.main_camera_look_at(&engine.world, {6, 5, 10}, {0, 0.5, 0})
 
-  ground_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  ground_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground :=
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.MeshAttachment{handle = ground_mesh, material = ground_mat},
-    ) or_else {}
+  ground := world.spawn_primitive_mesh(&engine.world, .QUAD_XZ, .GRAY)
   world.scale(&engine.world, ground, 30.0)
 
-  emissive_mat := world.create_material(
-    &engine.world,
-    type = .PBR,
-    base_color_factor = {1.0, 0.4, 0.1, 1},
-    emissive_value = 8.0,
-  ) or_else {}
-  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  cube_mesh   := world.get_builtin_mesh(&engine.world, .CUBE)
   sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
-  world.spawn(
-    &engine.world,
-    {-2.0, 1.0, 0.0},
-    world.MeshAttachment{handle = cube_mesh, material = emissive_mat, cast_shadow = true},
-  )
 
-  metal_mat := world.create_material(
-    &engine.world,
-    type = .PBR,
-    base_color_factor = {0.9, 0.9, 0.95, 1},
-    metallic_value = 1.0,
-    roughness_value = 0.15,
-  ) or_else {}
-  world.spawn(
-    &engine.world,
-    {0.5, 1.0, 0.0},
-    world.MeshAttachment{handle = sphere_mesh, material = metal_mat, cast_shadow = true},
-  )
+  emissive_mat := world.material_pbr(&engine.world, {1.0, 0.4, 0.1, 1}, emissive=8.0)
+  world.spawn_mesh(&engine.world, cube_mesh, emissive_mat, {-2.0, 1.0, 0.0})
 
-  rough_mat := world.create_material(
-    &engine.world,
-    type = .PBR,
-    base_color_factor = {0.2, 0.6, 0.8, 1},
-    metallic_value = 0.0,
-    roughness_value = 0.8,
-  ) or_else {}
-  world.spawn(
-    &engine.world,
-    {3.0, 1.0, 0.0},
-    world.MeshAttachment{handle = cube_mesh, material = rough_mat, cast_shadow = true},
-  )
+  metal_mat := world.material_pbr(&engine.world, {0.9, 0.9, 0.95, 1}, metallic=1.0, roughness=0.15)
+  world.spawn_mesh(&engine.world, sphere_mesh, metal_mat, {0.5, 1.0, 0.0})
 
-  glass_mat := world.create_material(
-    &engine.world,
-    type = .TRANSPARENT,
-    base_color_factor = {0.2, 0.9, 0.4, 0.4},
-  ) or_else {}
-  world.spawn(
-    &engine.world,
-    {1.5, 1.5, -2.5},
-    world.MeshAttachment{handle = sphere_mesh, material = glass_mat, cast_shadow = false},
-  )
+  rough_mat := world.material_pbr(&engine.world, {0.2, 0.6, 0.8, 1}, metallic=0.0, roughness=0.8)
+  world.spawn_mesh(&engine.world, cube_mesh, rough_mat, {3.0, 1.0, 0.0})
 
+  glass_mat := world.material_transparent(&engine.world, {0.2, 0.9, 0.4, 0.4})
+  world.spawn_mesh(&engine.world, sphere_mesh, glass_mat, {1.5, 1.5, -2.5}, cast_shadow=false)
+
+  white_mat := world.get_builtin_material(&engine.world, .WHITE)
   for i in 0 ..< 5 {
     x := f32(i) * 4.0 - 8.0
-    world.spawn(
-      &engine.world,
-      {x, 0.5, -6.0},
-      world.MeshAttachment{handle = cube_mesh, material = world.get_builtin_material(&engine.world, .WHITE), cast_shadow = true},
-    )
+    world.spawn_mesh(&engine.world, cube_mesh, white_mat, {x, 0.5, -6.0})
   }
 
-  world.spawn(
+  world.spawn_light_directional(
     &engine.world,
-    {-3, 8, 6},
-    world.create_directional_light_attachment({1.0, 0.95, 0.9, 1}, 5.0, true),
+    position    = {-3, 8, 6},
+    color       = {1.0, 0.95, 0.9, 1},
+    radius      = 5.0,
+    cast_shadow = true,
   )
-  world.spawn(
+  world.spawn_light_point(
     &engine.world,
-    {0, 3, 0},
-    world.create_point_light_attachment({1.0, 0.5, 0.2, 1}, 8.0, false),
+    position    = {0, 3, 0},
+    color       = {1.0, 0.5, 0.2, 1},
+    radius      = 8.0,
+    cast_shadow = false,
   )
 
   log.info("Post-process stack panel — toggle effects via debug UI")

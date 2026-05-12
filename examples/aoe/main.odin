@@ -38,7 +38,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
   cube_mat := world.get_builtin_material(&engine.world, .CYAN)
   // Emissive material for effector sphere
-  effector_mat := world.create_material(&engine.world, emissive_value = 5.0)
+  effector_mat := world.material_pbr(&engine.world, emissive = 5.0)
   // Spawn 50x50 grid of cubes
   grid_size := 50
   spacing: f32 = 1.0
@@ -62,11 +62,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       mesh_handle := world.spawn_child(
         &engine.world,
         physics_node,
-        attachment = world.MeshAttachment {
-          handle = cube_mesh,
-          material = cube_mat,
-          cast_shadow = false,
-        },
+        attachment = world.mesh_attach(cube_mesh, cube_mat, cast_shadow=false),
       ) or_continue
       world.scale(&engine.world, mesh_handle, cube_scale)
       append(&cube_mesh_handles, mesh_handle)
@@ -75,16 +71,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   // Spawn effector sphere
   effector_position = {0, 1, 0}
-  effector_sphere =
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      attachment = world.MeshAttachment {
-        handle = sphere_mesh,
-        material = effector_mat,
-        cast_shadow = false,
-      },
-    ) or_else {}
+  effector_sphere = world.spawn_mesh(
+    &engine.world,
+    sphere_mesh,
+    effector_mat,
+    cast_shadow = false,
+  )
   world.translate(
     &engine.world,
     effector_sphere,

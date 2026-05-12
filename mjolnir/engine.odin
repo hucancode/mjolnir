@@ -418,6 +418,37 @@ get_main_camera :: proc(self: ^Engine) -> ^world.Camera {
   return cont.get(self.world.cameras, self.world.main_camera)
 }
 
+// Build a follow camera controller without exposing the GLFW window handle.
+// The example pattern was `world.camera_controller_follow_init(engine.window, ...)`
+// — leaking the window into gameplay code. Prefer this wrapper.
+camera_controller_follow :: proc(
+  engine: ^Engine,
+  target: ^[3]f32,
+  offset: [3]f32,
+  follow_speed: f32 = 5.0,
+) -> world.CameraController {
+  return world.camera_controller_follow_init(engine.window, target, offset, follow_speed)
+}
+
+// Build an orbit controller. Same rationale as `camera_controller_follow`.
+camera_controller_orbit :: proc(
+  engine: ^Engine,
+  target: [3]f32 = {0, 0, 0},
+  distance: f32 = 5.0,
+  yaw: f32 = 0,
+  pitch: f32 = 0,
+) -> world.CameraController {
+  return world.camera_controller_orbit_init(engine.window, target, distance, yaw, pitch)
+}
+
+camera_controller_free :: proc(
+  engine: ^Engine,
+  move_speed: f32 = 5.0,
+  rotation_speed: f32 = 2.0,
+) -> world.CameraController {
+  return world.camera_controller_free_init(engine.window, move_speed, rotation_speed)
+}
+
 // Create a camera with explicit render-pass selection. World holds spatial
 // state; render side stores enabled_passes + culling on its CameraTarget.
 // Engine eagerly initialises both sides so per-frame sync only handles
@@ -1285,6 +1316,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
       continue
     }
     self.last_frame_timestamp = time.now()
+    debug_pre_frame(self)
     world.begin_frame(&self.world, 0.016, nil)
     mu.begin(&self.render.debug_ui.ctx)
     sync_staging_to_gpu(self)

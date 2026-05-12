@@ -38,20 +38,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
   world.main_camera_look_at(&engine.world, {0, 6, 12}, {0, 0, 0})
 
-  world.spawn(
+  world.spawn_light_directional(
     &engine.world,
-    {6, 12, 6},
-    world.create_directional_light_attachment({1, 0.97, 0.92, 1}, 6.0, true),
+    position    = {6, 12, 6},
+    color       = {1, 0.97, 0.92, 1},
+    radius      = 6.0,
+    cast_shadow = true,
   )
 
-  ground_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  ground_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground :=
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.MeshAttachment{handle = ground_mesh, material = ground_mat},
-    ) or_else {}
+  ground := world.spawn_primitive_mesh(&engine.world, .QUAD_XZ, .GRAY)
   world.scale(&engine.world, ground, 20.0)
 
   // Landmarks at known coords so orientation is obvious when switching cams
@@ -78,8 +73,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
 
   // Pre-init follow controller pointing at moving runner
-  follow_controller = world.camera_controller_follow_init(
-    engine.window,
+  follow_controller = mjolnir.camera_controller_follow(
+    engine,
     &follow_target,
     {0, f32(follow_offset_y), f32(follow_offset_back)},
     f32(follow_lerp),

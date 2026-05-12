@@ -57,7 +57,7 @@ init_builtin_materials :: proc(world: ^World) {
   }
   for color, i in colors {
     world.builtin_materials[i] =
-    create_material(world, type = .PBR, base_color_factor = color) or_continue
+      material_pbr(world, base_color = color) or_continue
     stage_material_data(&world.staging, world.builtin_materials[i])
   }
   log.info("Builtin materials created successfully")
@@ -65,45 +65,13 @@ init_builtin_materials :: proc(world: ^World) {
 
 init_builtin_meshes :: proc(world: ^World) {
   log.info("Creating builtin meshes...")
-  world.builtin_meshes[Primitive.CUBE], _, _ = create_mesh(
-    world,
-    geometry.make_cube(),
-    true,
-  )
-  world.builtin_meshes[Primitive.SPHERE], _, _ = create_mesh(
-    world,
-    geometry.make_sphere(),
-    true,
-  )
-  world.builtin_meshes[Primitive.QUAD_XZ], _, _ = create_mesh(
-    world,
-    geometry.make_quad(),
-    true,
-  )
-  world.builtin_meshes[Primitive.QUAD_XY], _, _ = create_mesh(
-    world,
-    geometry.make_billboard_quad(),
-    true,
-  )
-  world.builtin_meshes[Primitive.CONE], _, _ = create_mesh(
-    world,
-    geometry.make_cone(),
-    true,
-  )
-  world.builtin_meshes[Primitive.CAPSULE], _, _ = create_mesh(
-    world,
-    geometry.make_capsule(),
-    true,
-  )
-  world.builtin_meshes[Primitive.CYLINDER], _, _ = create_mesh(
-    world,
-    geometry.make_cylinder(),
-    true,
-  )
-  world.builtin_meshes[Primitive.TORUS], _, _ = create_mesh(
-    world,
-    geometry.make_torus(),
-    true,
-  )
+  world.builtin_meshes[Primitive.CUBE] = create_mesh(world, geometry.make_cube(), true)
+  world.builtin_meshes[Primitive.SPHERE] = create_mesh(world, geometry.make_sphere(), true)
+  world.builtin_meshes[Primitive.QUAD_XZ] = create_mesh(world, geometry.make_quad(), true)
+  world.builtin_meshes[Primitive.QUAD_XY] = create_mesh(world, geometry.make_billboard_quad(), true)
+  world.builtin_meshes[Primitive.CONE] = create_mesh(world, geometry.make_cone(), true)
+  world.builtin_meshes[Primitive.CAPSULE] = create_mesh(world, geometry.make_capsule(), true)
+  world.builtin_meshes[Primitive.CYLINDER] = create_mesh(world, geometry.make_cylinder(), true)
+  world.builtin_meshes[Primitive.TORUS] = create_mesh(world, geometry.make_torus(), true)
   log.info("Builtin meshes created successfully")
 }

@@ -18,76 +18,64 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   world.main_camera_look_at(&engine.world, {0, 4, 9}, {0, 2, 0})
 
-  plane := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  plane_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground := world.spawn(
-    &engine.world,
-    {0, 0, 0},
-    world.MeshAttachment{handle = plane, material = plane_mat, cast_shadow = false},
-  ) or_else {}
+  ground := world.spawn_primitive_mesh(&engine.world, .QUAD_XZ, .GRAY, cast_shadow=false)
   world.scale(&engine.world, ground, 8.0)
 
   // Particle source at center, large position spread
-  tex, tex_ok := mjolnir.create_texture(engine, "assets/gold-star.png")
-  if tex_ok {
-    src := world.spawn(&engine.world, {0, 2, 0})
-    if emitter, ok := world.create_emitter(
+  if tex, ok := mjolnir.create_texture(engine, "assets/gold-star.png"); ok {
+    world.spawn_emitter(
       &engine.world,
-      src,
-      texture_handle = tex,
-      emission_rate = 60,
-      initial_velocity = {0, 0, 0},
-      velocity_spread = 0.05,
-      color_start = {1, 0.95, 0.4, 1},
-      color_end = {1, 0.2, 0, 0},
-      aabb_min = {-6, -6, -6},
-      aabb_max = {6, 6, 6},
+      position          = {0, 2, 0},
+      texture           = tex,
+      emission_rate     = 60,
+      initial_velocity  = {0, 0, 0},
+      velocity_spread   = 0.05,
+      color_start       = {1, 0.95, 0.4, 1},
+      color_end         = {1, 0.2, 0, 0},
+      aabb_min          = {-6, -6, -6},
+      aabb_max          = {6, 6, 6},
       particle_lifetime = 4.0,
-      position_spread = 2.5,
-      size_start = 100,
-      size_end = 30,
-      weight = 0.0,
-      weight_spread = 0.0,
-    ); ok {
-      world.spawn_child(&engine.world, src, attachment = world.EmitterAttachment{emitter})
-    }
+      position_spread   = 2.5,
+      size_start        = 100,
+      size_end          = 30,
+      weight            = 0.0,
+      weight_spread     = 0.0,
+    )
   }
 
   // Orbiting forcefield: parent rotates, child has the field offset
   ff_handle = world.spawn(&engine.world, {0, 2, 0})
-  child := world.spawn_child(&engine.world, ff_handle)
-  world.translate(&engine.world, child, 2.5, 0, 0)
-  if n, ok := world.node(&engine.world, child); ok {
-    n.attachment = world.ForceFieldAttachment {
-      handle = world.create_forcefield(
-        &engine.world,
-        child,
-        area_of_effect = 4.0,
-        strength = -15.0,        // negative = attract
-        tangent_strength = 8.0,  // swirl
-      ),
-    }
-  }
+  child := world.spawn_forcefield(
+    &engine.world,
+    position         = {2.5, 0, 0},
+    area_of_effect   = 4.0,
+    strength         = -15.0,
+    tangent_strength = 8.0,
+  )
+  world.attach(engine.world.nodes, ff_handle, child)
 
   // Visualize the field with a small sphere
-  sphere := world.get_builtin_mesh(&engine.world, .SPHERE)
-  marker_mat := world.create_material(
+  marker_mat := world.material_pbr(
     &engine.world,
-    type = .PBR,
-    base_color_factor = {0.2, 0.6, 1.0, 1},
-    emissive_value = 2.0,
-    roughness_value = 0.3,
-  ) or_else {}
+    base_color = {0.2, 0.6, 1.0, 1},
+    emissive   = 2.0,
+    roughness  = 0.3,
+  )
   world.spawn_child(
     &engine.world,
     child,
-    attachment = world.MeshAttachment{handle = sphere, material = marker_mat, cast_shadow = false},
+    attachment = world.mesh_attach(
+      world.get_builtin_mesh(&engine.world, .SPHERE),
+      marker_mat,
+      cast_shadow = false,
+    ),
   )
 
-  world.spawn(
+  world.spawn_light_directional(
     &engine.world,
-    {3, 6, 3},
-    world.create_directional_light_attachment({1, 1, 1, 1}, 10, false),
+    position = {3, 6, 3},
+    color    = {1, 1, 1, 1},
+    radius   = 10,
   )
 }
 

@@ -61,7 +61,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       files[i], len(geom.vertices), len(geom.indices) / 3, geom.aabb.min, geom.aabb.max,
     )
     loaded_aabb[i] = {geom.aabb.min, geom.aabb.max}
-    mh, _, _ := world.create_mesh(&engine.world, geom)
+    mh, _ := world.create_mesh(&engine.world, geom)
     loaded_meshes[i] = mh
   }
 

@@ -598,23 +598,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     world.scale(&engine.world, handle, 0.2)
   }
   when false {
-    debug_sphere_mesh := engine.world.builtin_meshes[world.Primitive.SPHERE]
-    translation := linalg.matrix4_translate_f32({0, 5, 0})
-    scale_mat := linalg.matrix4_scale_f32({5, 5, 5})
-    transform := translation * scale_mat
-    debug_handle, ok := debug_draw_spawn_mesh_temporary(
-      engine,
-      debug_sphere_mesh,
-      transform,
-      duration_seconds = 5.0,
-      color = {1.0, 1.0, 1.0, 0.4}, // White with alpha 0.4
-      style = .RANDOM_COLOR,
-      bypass_depth = true,
-    )
+    mjolnir.debug_sphere(engine, {0, 5, 0}, 5, mjolnir.debug_color(.WHITE), life = 5)
+    mjolnir.debug_cube(engine, {2, 3, 0}, size = {1, 1, 1}, color = mjolnir.debug_color(.CYAN), life = 5)
+    mjolnir.debug_arrow(engine, {0, 0, 0}, {3, 3, 0}, mjolnir.debug_color(.YELLOW), life = 5)
+    mjolnir.debug_axes(engine, {0, 0, 0}, scale = 2)
   }
   // post_process.add_fog(&engine.render.post_process, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  // post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
+  post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)

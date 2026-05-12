@@ -553,7 +553,7 @@ construct_scene :: proc(
       mesh_handle: MeshHandle
       if gltf_node.skin in skin_cache {
         skin_data := skin_cache[gltf_node.skin]
-        mesh_handle, mesh, alloc_result := create_mesh(
+        mesh_handle, mesh, alloc_result := create_mesh_with_ptr(
           world,
           geometry_copy,
           true,
@@ -596,7 +596,7 @@ construct_scene :: proc(
           load_animations(world, gltf_data, gltf_node.skin, mesh_handle)
         }
       } else {
-        mesh_handle, _, alloc_result := create_mesh(
+        mesh_handle, alloc_result := create_mesh(
           world,
           geometry_copy,
           true,

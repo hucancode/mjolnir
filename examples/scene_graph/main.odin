@@ -29,36 +29,34 @@ setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
   world.main_camera_look_at(&engine.world, {0, 14, 18}, {0, 0, 0})
 
-  world.spawn(
+  world.spawn_light_directional(
     &engine.world,
-    {8, 14, 8},
-    world.create_directional_light_attachment({1, 0.97, 0.92, 1}, 8.0, true),
+    position    = {8, 14, 8},
+    color       = {1, 0.97, 0.92, 1},
+    radius      = 8.0,
+    cast_shadow = true,
   )
 
-  ground_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  ground_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground :=
-    world.spawn(
-      &engine.world,
-      {0, -2, 0},
-      world.MeshAttachment{handle = ground_mesh, material = ground_mat, cast_shadow = false},
-    ) or_else {}
+  ground := world.spawn_primitive_mesh(
+    &engine.world,
+    .QUAD_XZ,
+    .GRAY,
+    position = {0, -2, 0},
+    cast_shadow = false,
+  )
   world.scale(&engine.world, ground, 20.0)
 
   // Sun — root of the rotating subtree
-  sun_mat := world.create_material(
+  sun_mat := world.material_pbr(
     &engine.world,
-    type = .PBR,
-    base_color_factor = {1.0, 0.8, 0.2, 1.0},
-    emissive_value = 2.0,
-  ) or_else {}
-  sun_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
-  sun_handle =
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.MeshAttachment{handle = sun_mesh, material = sun_mat},
-    ) or_else {}
+    base_color = {1.0, 0.8, 0.2, 1.0},
+    emissive   = 2.0,
+  )
+  sun_handle = world.spawn_mesh(
+    &engine.world,
+    world.get_builtin_mesh(&engine.world, .SPHERE),
+    sun_mat,
+  )
   world.scale(&engine.world, sun_handle, 1.2)
 
   // Planets — children of sun, each at fixed local offset
@@ -70,10 +68,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
         &engine.world,
         sun_handle,
         {planet_radii[i], 0, 0},
-        world.MeshAttachment {
-          handle = world.get_builtin_mesh(&engine.world, .SPHERE),
-          material = world.get_builtin_material(&engine.world, planet_colors[i]),
-        },
+        world.mesh_attach(
+          world.get_builtin_mesh(&engine.world, .SPHERE),
+          world.get_builtin_material(&engine.world, planet_colors[i]),
+        ),
       ) or_else {}
     world.scale(&engine.world, planet_handles[i], 0.5)
   }
@@ -84,10 +82,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.world,
       planet_handles[2],
       {1.5, 0, 0},
-      world.MeshAttachment {
-        handle = world.get_builtin_mesh(&engine.world, .CUBE),
-        material = world.get_builtin_material(&engine.world, .WHITE),
-      },
+      world.mesh_attach(
+        world.get_builtin_mesh(&engine.world, .CUBE),
+        world.get_builtin_material(&engine.world, .WHITE),
+      ),
     ) or_else {}
   world.scale(&engine.world, moon_handle, 0.3)
 }

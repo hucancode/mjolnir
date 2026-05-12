@@ -106,30 +106,23 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
     vertex.position.z *= 50
   }
   append_nav_geometry(ground_geom)
-  ground_mesh_handle, _, ground_mesh_ok := world.create_mesh(
+  ground_mesh_handle, ground_mesh_ok := world.create_mesh(
     &engine.world,
     ground_geom,
   )
-  ground_material_handle, ground_material_ok := world.create_material(
+  ground_material_handle, ground_material_ok := world.material_pbr(
     &engine.world,
-    metallic_value = 0.1,
-    roughness_value = 0.8,
-    emissive_value = 0.02,
+    metallic  = 0.1,
+    roughness = 0.8,
+    emissive  = 0.02,
   )
   if ground_mesh_ok && ground_material_ok {
-    ground_handle =
-      world.spawn(
-        &engine.world,
-        {0, 0, 0},
-        world.MeshAttachment {
-          handle = ground_mesh_handle,
-          material = ground_material_handle,
-        },
-      ) or_else {}
-    // Tag as environment for baking
-    if ground_node, ok := world.node(&engine.world, ground_handle); ok {
-      ground_node.tags += {.ENVIRONMENT}
-    }
+    ground_handle = world.spawn_mesh(
+      &engine.world,
+      ground_mesh_handle,
+      ground_material_handle,
+    )
+    world.tag(&engine.world, ground_handle, {.ENVIRONMENT})
   }
   obstacle_positions := [][3]f32 {
     {-10, 1.5, -10}, // Obstacle 1
@@ -154,31 +147,24 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
       vertex.position.z *= size.z
     }
     append_nav_geometry(obstacle_geom, position, true)
-    obstacle_mesh_handle, _, obstacle_mesh_ok := world.create_mesh(
+    obstacle_mesh_handle, obstacle_mesh_ok := world.create_mesh(
       &engine.world,
       obstacle_geom,
     )
-    obstacle_material_handle, obstacle_material_ok := world.create_material(
+    obstacle_material_handle, obstacle_material_ok := world.material_pbr(
       &engine.world,
-      metallic_value = 0.3,
-      roughness_value = 0.7,
-      emissive_value = 0.1,
+      metallic  = 0.3,
+      roughness = 0.7,
+      emissive  = 0.1,
     )
     if obstacle_mesh_ok && obstacle_material_ok {
-      obstacle_handle :=
-        world.spawn(
-          &engine.world,
-          position,
-          world.MeshAttachment {
-            handle = obstacle_mesh_handle,
-            material = obstacle_material_handle,
-          },
-        ) or_else {}
-      // Tag obstacles as NAVMESH_OBSTACLE for baking
-      if obstacle_node, ok := world.node(&engine.world, obstacle_handle);
-         ok {
-        obstacle_node.tags += {.NAVMESH_OBSTACLE}
-      }
+      obstacle_handle := world.spawn_mesh(
+        &engine.world,
+        obstacle_mesh_handle,
+        obstacle_material_handle,
+        position,
+      )
+      world.tag(&engine.world, obstacle_handle, {.NAVMESH_OBSTACLE})
       append(&obstacle_handles, obstacle_handle)
     }
   }
@@ -192,25 +178,23 @@ create_agent :: proc(engine: ^mjolnir.Engine) {
   log.info("Creating agent cylinder")
   // Create a cylinder geometry for the agent
   agent_geom := geometry.make_cylinder(16, 2, 0.5, {0.2, 0.5, 1.0, 1.0})
-  agent_mesh_handle, _, agent_mesh_ok := world.create_mesh(
+  agent_mesh_handle, agent_mesh_ok := world.create_mesh(
     &engine.world,
     agent_geom,
   )
-  agent_material_handle, agent_material_ok := world.create_material(
+  agent_material_handle, agent_material_ok := world.material_pbr(
     &engine.world,
-    metallic_value = 0.3,
-    roughness_value = 0.6,
-    emissive_value = 0.3,
+    metallic  = 0.3,
+    roughness = 0.6,
+    emissive  = 0.3,
   )
   if agent_mesh_ok && agent_material_ok {
-    agent_handle = world.spawn(
-        &engine.world,
-        agent_pos + [3]f32{0, 1, 0}, // Raise to half height
-        world.MeshAttachment {
-          handle = agent_mesh_handle,
-          material = agent_material_handle,
-        },
-      ) or_else {}
+    agent_handle = world.spawn_mesh(
+      &engine.world,
+      agent_mesh_handle,
+      agent_material_handle,
+      agent_pos + [3]f32{0, 1, 0},
+    )
     if agent_node, ok := world.node(&engine.world, agent_handle); ok {
       agent_node.name = "agent"
       log.info("Agent cylinder created successfully")
@@ -229,33 +213,28 @@ create_obj_visualization_mesh :: proc(
     return
   }
   append_nav_geometry(geom)
-  obj_mesh_handle, _, obj_mesh_ok := world.create_mesh(&engine.world, geom)
+  obj_mesh_handle, obj_mesh_ok := world.create_mesh(&engine.world, geom)
   if obj_mesh_ok {
     obj_mesh_handle = obj_mesh_handle
   } else {
     obj_mesh_handle = {}
   }
-  obj_material_handle, obj_material_ok := world.create_material(
+  obj_material_handle, obj_material_ok := world.material_pbr(
     &engine.world,
-    metallic_value = 0.1,
-    roughness_value = 0.8,
-    emissive_value = 0.02,
+    metallic  = 0.1,
+    roughness = 0.8,
+    emissive  = 0.02,
   )
-  obj_spawn_ok: bool
   if obj_mesh_ok && obj_material_ok {
-    obj_node_handle =
-      world.spawn(
-        &engine.world,
-        {0, 0, 0},
-        world.MeshAttachment {
-          handle = obj_mesh_handle,
-          material = obj_material_handle,
-        },
-      ) or_else {}
+    obj_node_handle = world.spawn_mesh(
+      &engine.world,
+      obj_mesh_handle,
+      obj_material_handle,
+    )
   }
+  world.tag(&engine.world, obj_node_handle, {.ENVIRONMENT})
   if node, ok := world.node(&engine.world, obj_node_handle); ok {
     node.name = "obj_mesh"
-    node.tags += {.ENVIRONMENT}
     log.infof(
       "Created OBJ visualization mesh with %d vertices",
       len(geom.vertices),
@@ -295,7 +274,7 @@ visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
     len(navmesh_geom.vertices),
     len(navmesh_geom.indices),
   )
-  navmesh_mesh_handle, _, mesh_ok := world.create_mesh(
+  navmesh_mesh_handle, mesh_ok := world.create_mesh(
     &engine.world,
     navmesh_geom,
   )
@@ -313,14 +292,7 @@ visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
     return
   }
   navmesh_node_handle =
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.MeshAttachment {
-        handle = navmesh_mesh_handle,
-        material = navmesh_material,
-      },
-    ) or_else {}
+    world.spawn_mesh(&engine.world, navmesh_mesh_handle, navmesh_material)
   log.info("Navmesh visualization spawned with random_color material")
 }
 
@@ -366,26 +338,23 @@ update_position_marker :: proc(
 ) {
   world.despawn(&engine.world, handle^)
   marker_geom := geometry.make_sphere(12, 6, 0.3, color)
-  marker_mesh_handle, _, marker_mesh_ok := world.create_mesh(
+  marker_mesh_handle, marker_mesh_ok := world.create_mesh(
     &engine.world,
     marker_geom,
   )
-  marker_material_handle, marker_material_ok := world.create_material(
+  marker_material_handle, marker_material_ok := world.material_pbr(
     &engine.world,
-    metallic_value = 0.2,
-    roughness_value = 0.8,
-    emissive_value = 0.5,
+    metallic  = 0.2,
+    roughness = 0.8,
+    emissive  = 0.5,
   )
-  node: ^world.Node
   if marker_mesh_ok && marker_material_ok {
-    handle^ = world.spawn(
-        &engine.world,
-        pos + [3]f32{0, 0.2, 0}, // Slightly above ground
-        world.MeshAttachment {
-          handle = marker_mesh_handle,
-          material = marker_material_handle,
-        },
-      ) or_else {}
+    handle^ = world.spawn_mesh(
+      &engine.world,
+      marker_mesh_handle,
+      marker_material_handle,
+      pos + [3]f32{0, 0.2, 0},
+    )
   }
 }
 
@@ -422,7 +391,7 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
     aabb     = geometry.aabb_from_vertices(path_vertices),
   }
 
-  path_mesh, _, mesh_ok := world.create_mesh(&engine.world, path_geom)
+  path_mesh, mesh_ok := world.create_mesh(&engine.world, path_geom)
   if !mesh_ok do return
   path_mesh_handle = path_mesh
 
@@ -433,12 +402,7 @@ visualize_path :: proc(engine: ^mjolnir.Engine) {
   )
   if !mat_ok do return
 
-  path_node_handle =
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.MeshAttachment{handle = path_mesh, material = path_material},
-    ) or_else {}
+  path_node_handle = world.spawn_mesh(&engine.world, path_mesh, path_material)
   path_spawn_time = 0
 }
 

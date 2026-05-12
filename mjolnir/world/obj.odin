@@ -24,8 +24,7 @@ load_obj :: proc(
   )
   // step 2: Create mesh resource in CPU pools
   mesh_handle: MeshHandle
-  mesh_ptr: ^Mesh
-  mesh_handle, mesh_ptr, ok = create_mesh(world, geom, true)
+  mesh_handle, ok = create_mesh(world, geom, true)
   if !ok {
     log.errorf("Failed to create mesh from OBJ file: %s", path)
     return nodes, false

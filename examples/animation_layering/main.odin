@@ -155,30 +155,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Create target cube for IK visualization
-  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
-  cube_material := world.get_builtin_material(&engine.world, .RED)
-  target_cube =
-    world.spawn(
-      &engine.world,
-      {0.0, 4.0, 5.0},
-      world.MeshAttachment {
-        handle = cube_mesh,
-        material = cube_material,
-        cast_shadow = false,
-      },
-    ) or_else {}
+  target_cube = world.spawn_primitive_mesh(
+    &engine.world,
+    .CUBE,
+    .RED,
+    position    = {0.0, 4.0, 5.0},
+    cast_shadow = false,
+  )
   world.scale(&engine.world, target_cube, 0.25)
-  // Add lighting
-  light_handle :=
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.create_directional_light_attachment(
-        {1.0, 1.0, 1.0, 1.0},
-        10.0,
-        true,
-      ),
-    ) or_else {}
+  world.spawn_light_directional(
+    &engine.world,
+    color       = {1, 1, 1, 1},
+    radius      = 10.0,
+    cast_shadow = true,
+  )
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {

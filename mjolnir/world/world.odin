@@ -144,6 +144,82 @@ untag_node :: proc(
   return true
 }
 
+tag   :: tag_node
+untag :: untag_node
+
+// Typed attachment accessors. Skip the .(T) match boilerplate at callsites.
+point_light :: proc(
+  w: ^World,
+  h: NodeHandle,
+) -> (att: ^PointLightAttachment, ok: bool) #optional_ok {
+  n := cont.get(w.nodes, h) or_return
+  att, ok = &n.attachment.(PointLightAttachment)
+  return
+}
+
+directional_light :: proc(
+  w: ^World,
+  h: NodeHandle,
+) -> (att: ^DirectionalLightAttachment, ok: bool) #optional_ok {
+  n := cont.get(w.nodes, h) or_return
+  att, ok = &n.attachment.(DirectionalLightAttachment)
+  return
+}
+
+spot_light :: proc(
+  w: ^World,
+  h: NodeHandle,
+) -> (att: ^SpotLightAttachment, ok: bool) #optional_ok {
+  n := cont.get(w.nodes, h) or_return
+  att, ok = &n.attachment.(SpotLightAttachment)
+  return
+}
+
+mesh_attachment :: proc(
+  w: ^World,
+  h: NodeHandle,
+) -> (att: ^MeshAttachment, ok: bool) #optional_ok {
+  n := cont.get(w.nodes, h) or_return
+  att, ok = &n.attachment.(MeshAttachment)
+  return
+}
+
+emitter_attachment :: proc(
+  w: ^World,
+  h: NodeHandle,
+) -> (att: ^EmitterAttachment, ok: bool) #optional_ok {
+  n := cont.get(w.nodes, h) or_return
+  att, ok = &n.attachment.(EmitterAttachment)
+  return
+}
+
+forcefield_attachment :: proc(
+  w: ^World,
+  h: NodeHandle,
+) -> (att: ^ForceFieldAttachment, ok: bool) #optional_ok {
+  n := cont.get(w.nodes, h) or_return
+  att, ok = &n.attachment.(ForceFieldAttachment)
+  return
+}
+
+sprite_attachment :: proc(
+  w: ^World,
+  h: NodeHandle,
+) -> (att: ^SpriteAttachment, ok: bool) #optional_ok {
+  n := cont.get(w.nodes, h) or_return
+  att, ok = &n.attachment.(SpriteAttachment)
+  return
+}
+
+rigid_body_attachment :: proc(
+  w: ^World,
+  h: NodeHandle,
+) -> (att: ^RigidBodyAttachment, ok: bool) #optional_ok {
+  n := cont.get(w.nodes, h) or_return
+  att, ok = &n.attachment.(RigidBodyAttachment)
+  return
+}
+
 // AnimationInstance represents a playing animation clip on a node
 // Uses handle-based lookup to avoid pointer invalidation when pools resize
 AnimationInstance :: struct {
@@ -176,21 +252,6 @@ TraverseEntry :: struct {
   parent_is_dirty:   bool,
   parent_is_visible: bool,
 }
-
-// Debug draw callbacks - engine can set these to enable debug visualization
-DebugDrawLineStripCallback :: proc(
-  points: []geometry.Vertex,
-  duration_seconds: f64,
-  color: [4]f32,
-  bypass_depth: bool,
-)
-DebugDrawMeshCallback :: proc(
-  mesh_handle: MeshHandle,
-  transform: matrix[4, 4]f32,
-  duration_seconds: f64,
-  color: [4]f32,
-  bypass_depth: bool,
-)
 
 World :: struct {
   root:               NodeHandle,
