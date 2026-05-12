@@ -123,17 +123,6 @@ init :: proc(
     &shared.SHADER_SPEC_CONSTANTS,
   )
 
-  // Depth state with depth testing disabled (always render on top)
-  disabled_depth_state := vk.PipelineDepthStencilStateCreateInfo {
-    sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-    depthTestEnable = false,  // Don't test depth
-    depthWriteEnable = false,  // Don't write depth
-  }
-
-  // Create graphics pipeline
-  // - Point topology (each bone is a point sprite)
-  // - Depth test disabled (always render on top for debugging)
-  // - Alpha blending enabled
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),
@@ -145,7 +134,7 @@ init :: proc(
     pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
     pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    pDepthStencilState  = &disabled_depth_state,  // Always render on top
+    pDepthStencilState  = &gpu.DISABLED_DEPTH_STATE,
     layout              = self.pipeline_layout,
     pNext               = &gpu.STANDARD_RENDERING_INFO,
   }

@@ -267,6 +267,7 @@ Internal :: struct {
   particles_compute:            particles_compute.Renderer,
   particles_render:             particles_render.Renderer,
   debug_renderer:               debug_bone.Renderer,
+  debug_line_renderer:          debug_line.Renderer,
   ui:                           ui_render.Renderer,
   // Compute / culling / shadow systems.
   visibility:                   occlusion_culling.System,
@@ -639,6 +640,11 @@ init :: proc(
   ) or_return
   debug_bone.init(
     &self.internal.debug_renderer,
+    gctx,
+    self.internal.camera_buffer.set_layout,
+  ) or_return
+  debug_line.init(
+    &self.internal.debug_line_renderer,
     gctx,
     self.internal.camera_buffer.set_layout,
   ) or_return
@@ -1464,6 +1470,35 @@ record_debug_pass :: proc(
 }
 
 @(private)
+record_debug_line_pass :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  cam_index: u32,
+  cam: ^CameraTarget,
+  enabled_passes: PassTypeSet,
+) {
+  if .DEBUG_LINE not_in enabled_passes do return
+  color := gpu.get_texture_2d(
+    &self.texture_manager,
+    cam.attachments[.FINAL_IMAGE][frame_index],
+  )
+  depth := gpu.get_texture_2d(
+    &self.texture_manager,
+    cam.attachments[.DEPTH][frame_index],
+  )
+  if color == nil || depth == nil do return
+  debug_line.record(
+    &self.internal.debug_line_renderer,
+    self.internal.command_buffers[frame_index],
+    frame_index,
+    self.internal.camera_buffer.descriptor_sets[frame_index],
+    cam_index,
+    color,
+    depth,
+  )
+}
+
+@(private)
 record_post_process_pass :: proc(
   self: ^Manager,
   frame_index: u32,
@@ -1646,6 +1681,7 @@ record_frame :: proc(
   if main_cam, ok := &self.cameras[main_camera_index]; ok {
     main_camera_passes = main_cam.enabled_passes
     record_debug_pass(self, frame_index, main_camera_index, main_cam, main_camera_passes) or_return
+    record_debug_line_pass(self, frame_index, main_camera_index, main_cam, main_camera_passes)
     record_post_process_pass(
       self,
       frame_index,
@@ -2154,6 +2190,7 @@ PassType :: enum {
   RANDOM_COLOR,
   DEBUG_UI,
   DEBUG_BONE,
+  DEBUG_LINE,
   UI,
 }
 
@@ -2172,6 +2209,7 @@ DEFAULT_ENABLED_PASSES :: PassTypeSet{
   .RANDOM_COLOR,
   .DEBUG_UI,
   .DEBUG_BONE,
+  .DEBUG_LINE,
   .UI,
 }
 

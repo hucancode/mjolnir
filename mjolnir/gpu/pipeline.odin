@@ -26,6 +26,12 @@ READ_ONLY_INVERSE_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
   depthCompareOp  = .GREATER_OR_EQUAL,
 }
 
+DISABLED_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
+  sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+  depthTestEnable  = false,
+  depthWriteEnable = false,
+}
+
 DYNAMIC_STATES := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
 
 STANDARD_DYNAMIC_STATES := vk.PipelineDynamicStateCreateInfo {
