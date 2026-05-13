@@ -17,16 +17,7 @@ main :: proc() {
       {0, 5, 0},
     )
     nodes = mjolnir.load_gltf(engine, "assets/Duck.glb")
-    light_handle :=
-      world.spawn(
-        &engine.world,
-        {0, 0, 0},
-        world.create_directional_light_attachment(
-          {1.0, 1.0, 1.0, 1.0},
-          10.0,
-          false,
-        ),
-      ) or_else {}
+    light_handle, _ := world.spawn_light_directional(&engine.world)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rotation := delta_time * math.PI * 0.5

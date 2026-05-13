@@ -35,11 +35,7 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
 
-  light := world.spawn(
-    &engine.world,
-    {10, 18, 10},
-    world.create_directional_light_attachment({1, 0.97, 0.92, 3.0}, 10.0, false),
-  ) or_else {}
+  light, _ := world.spawn_light_directional(&engine.world, {10, 18, 10}, {1, 0.97, 0.92, 3.0}, 10.0, false)
   world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 
   display_material = world.create_material(
@@ -84,12 +80,10 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
   radius := linalg.length(extents) * 0.5
   if radius < 0.001 do radius = 1
 
+  world.set_mesh_handle(&engine.world, display_node, loaded_meshes[index])
   if n, ok := world.node(&engine.world, display_node); ok {
-    att, _ := &n.attachment.(world.MeshAttachment)
-    att.handle = loaded_meshes[index]
     neg := -center
     world.translate(&n.transform, neg.x, neg.y, neg.z)
-    world.stage_node_data(&engine.world.staging, display_node)
   }
 
   cam_dist := radius * 1.8
@@ -106,11 +100,10 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
     {cam_dist, cam_dist * 0.7, cam_dist},
     {0, 0, 0},
   )
-  world.stage_camera_data(&engine.world.staging, engine.world.main_camera)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "OBJ Loader", {720, 20, 260, 200}, {.NO_CLOSE}) {
     labels := OBJ_LABELS
     mu.label(ctx, fmt.tprintf("Current: %s", labels[current_index] if current_index >= 0 else "<none>"))

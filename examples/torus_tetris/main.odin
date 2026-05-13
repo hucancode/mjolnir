@@ -106,11 +106,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   world.scale(&engine.world, floor_handle, RADIUS * 6.0)
   // single spot light, slightly diagonal
-  spot_handle, _ := world.spawn(
-    &engine.world,
-    {0, 10, 0},
-    world.create_spot_light_attachment({1, 1, 1, 1}, 12.0, math.PI * 0.35, true),
-  )
+  spot_handle, _ := world.spawn_light_spot(&engine.world, {0, 10, 0}, {1, 1, 1, 1}, 12.0, math.PI * 0.35, true)
   world.rotate(&engine.world, spot_handle, math.PI * 0.55, {1, 0, 0})
   world.main_camera_look_at(&engine.world, {0, 14, 14}, {0, 8, 0})
   for c, i in COLOR_RGB {
@@ -243,12 +239,7 @@ lock_piece :: proc(engine: ^mjolnir.Engine) {
     row := state.active_pos[1] + c[1]
     state.board[col][row] = state.active_cells[i]
     state.occupied[col][row] = true
-    if node, ok := cont.get(engine.world.nodes, state.active_cells[i]); ok {
-      if mesh, has_mesh := &node.attachment.(world.MeshAttachment); has_mesh {
-        mesh.material = opaque_mat
-        world.stage_node_data(&engine.world.staging, state.active_cells[i])
-      }
-    }
+    world.set_material_handle(&engine.world, state.active_cells[i], opaque_mat)
   }
   state.has_active = false
   cleared := clear_lines(engine)
@@ -313,7 +304,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   }
   state.fall_timer += dt
   period := state.fall_period
-  if glfw.GetKey(engine.window, glfw.KEY_DOWN) == glfw.PRESS {
+  if mjolnir.is_key_down(engine, glfw.KEY_DOWN) {
     period = SOFT_FALL_PERIOD
   }
   for state.fall_timer >= period {

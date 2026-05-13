@@ -63,11 +63,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     scale_factor = 0.4,
   )
 
-  world.spawn(
-    &engine.world,
-    {0, 3, 1.5},
-    world.create_point_light_attachment({1.0, 0.6, 0.3, 1.0}, 12.0, false),
-  )
+  world.spawn_light_point(&engine.world, {0, 3, 1.5}, {1.0, 0.6, 0.3, 1.0}, 12.0, false)
 
   // Off-screen camera looking at scene from a different angle (top-down).
   // No POST_PROCESS pass for cheaper rendering of the texture.

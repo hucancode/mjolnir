@@ -19,11 +19,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  light := world.spawn(
-    &engine.world,
-    {10, 18, 10},
-    world.create_directional_light_attachment({1, 0.97, 0.92, 2.0}, 60.0, false),
-  ) or_else {}
+  light, _ := world.spawn_light_directional(&engine.world, {10, 18, 10}, {1, 0.97, 0.92, 2.0}, 60.0, false)
   world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 
   world.spawn_primitive_mesh(

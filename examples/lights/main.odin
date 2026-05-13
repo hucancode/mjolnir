@@ -119,13 +119,13 @@ apply_light_settings :: proc(engine: ^mjolnir.Engine) {
   if att, ok := world.directional_light(&engine.world, dir_light); ok {
     eff := f32(dir_intensity) if dir_enabled else 0.0
     att.color = color_preset(dir_color, eff)
-    world.stage_light_data(&engine.world.staging, dir_light)
+    world.mark_light_dirty(&engine.world, dir_light)
   }
   if att, ok := world.point_light(&engine.world, point_light); ok {
     eff := f32(point_intensity) if point_enabled else 0.0
     att.color = color_preset(point_color, eff)
     att.radius = f32(point_radius) if point_enabled else 0.0
-    world.stage_light_data(&engine.world.staging, point_light)
+    world.mark_light_dirty(&engine.world, point_light)
   }
   if att, ok := world.spot_light(&engine.world, spot_light); ok {
     eff := f32(spot_intensity) if spot_enabled else 0.0
@@ -134,7 +134,7 @@ apply_light_settings :: proc(engine: ^mjolnir.Engine) {
     outer := math.PI * f32(spot_outer_deg) / 180.0
     att.angle_outer = outer
     att.angle_inner = outer * 0.75
-    world.stage_light_data(&engine.world.staging, spot_light)
+    world.mark_light_dirty(&engine.world, spot_light)
   }
 }
 
@@ -169,7 +169,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Lights", {700, 20, 280, 540}, {.NO_CLOSE}) {
     light_block(ctx, "Directional", &dir_enabled, &dir_intensity, nil, nil, &dir_color)
     light_block(ctx, "Point (orbit)", &point_enabled, &point_intensity, &point_radius, nil, &point_color)

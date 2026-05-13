@@ -109,7 +109,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Scene Graph", {720, 20, 260, 240}, {.NO_CLOSE}) {
     mu.label(ctx, "Hierarchy: sun > planets > moon")
     mu.label(ctx, "Each planet inherits sun rotation.")

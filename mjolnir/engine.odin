@@ -417,6 +417,16 @@ get_main_camera :: proc(self: ^Engine) -> ^world.Camera {
   return cont.get(self.world.cameras, self.world.main_camera)
 }
 
+// MicroUI context for debug panels. Use inside `pre_render`.
+ui_ctx :: proc(self: ^Engine) -> ^mu.Context {
+  return &self.render.debug_ui.ctx
+}
+
+// True when GLFW key currently held.
+is_key_down :: proc(self: ^Engine, key: c.int) -> bool {
+  return glfw.GetKey(self.window, key) == glfw.PRESS
+}
+
 // Build a follow camera controller without exposing the GLFW window handle.
 // The example pattern was `world.camera_controller_follow_init(engine.window, ...)`
 // — leaking the window into gameplay code. Prefer this wrapper.

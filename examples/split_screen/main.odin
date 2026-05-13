@@ -45,16 +45,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   world.spawn_primitive_mesh(&engine.world, .CONE, .BLUE, position = {2, 0.5, -1})
   spinner = world.spawn_primitive_mesh(&engine.world, .CUBE, .YELLOW, position = {0, 1.8, 0}, scale_factor = 0.4)
 
-  world.spawn(
-    &engine.world,
-    {4, 8, 4},
-    world.create_directional_light_attachment({1, 0.97, 0.92, 4.0}, 30.0, true),
-  )
-  world.spawn(
-    &engine.world,
-    {-4, 6, -4},
-    world.create_point_light_attachment({0.5, 0.7, 1.0, 2.0}, 15.0, false),
-  )
+  world.spawn_light_directional(&engine.world, {4, 8, 4}, {1, 0.97, 0.92, 4.0}, 30.0, true)
+  world.spawn_light_point(&engine.world, {-4, 6, -4}, {0.5, 0.7, 1.0, 2.0}, 15.0, false)
 
   // ---- Two off-screen cameras (perspective + top-down) ----
   cam_a = mjolnir.create_camera(

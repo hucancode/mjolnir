@@ -43,16 +43,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   engine.camera_controller_enabled = false
   world.main_camera_look_at(&engine.world, {0, 8, 12}, {0, 0.5, 0})
 
-  light_handle =
-    world.spawn(
-      &engine.world,
-      {4, 8, 4},
-      world.create_directional_light_attachment(
-        {1, 0.97, 0.92, f32(light_intensity)},
-        15.0,
-        true,
-      ),
-    ) or_else {}
+  light_handle, _ = world.spawn_light_directional(&engine.world, {4, 8, 4}, {1, 0.97, 0.92, f32(light_intensity)}, 15.0, true)
 
   ground_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
   ground_mat := world.get_builtin_material(&engine.world, .GRAY)
@@ -133,15 +124,13 @@ on_mouse_scroll :: proc(engine: ^mjolnir.Engine, offset: [2]f64) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  // WASD polling — engine.input.keys[] is unused, use glfw directly
-  win := engine.window
   move := [3]f32{0, 0, 0}
-  if glfw.GetKey(win, glfw.KEY_W) == glfw.PRESS do move.z -= 1
-  if glfw.GetKey(win, glfw.KEY_S) == glfw.PRESS do move.z += 1
-  if glfw.GetKey(win, glfw.KEY_A) == glfw.PRESS do move.x -= 1
-  if glfw.GetKey(win, glfw.KEY_D) == glfw.PRESS do move.x += 1
-  if glfw.GetKey(win, glfw.KEY_Q) == glfw.PRESS do cube_yaw += delta_time * 2.0
-  if glfw.GetKey(win, glfw.KEY_E) == glfw.PRESS do cube_yaw -= delta_time * 2.0
+  if mjolnir.is_key_down(engine, glfw.KEY_W) do move.z -= 1
+  if mjolnir.is_key_down(engine, glfw.KEY_S) do move.z += 1
+  if mjolnir.is_key_down(engine, glfw.KEY_A) do move.x -= 1
+  if mjolnir.is_key_down(engine, glfw.KEY_D) do move.x += 1
+  if mjolnir.is_key_down(engine, glfw.KEY_Q) do cube_yaw += delta_time * 2.0
+  if mjolnir.is_key_down(engine, glfw.KEY_E) do cube_yaw -= delta_time * 2.0
   if move.x != 0 || move.z != 0 {
     speed := f32(move_speed) * delta_time
     cube_pos.x = clamp(cube_pos.x + move.x * speed, -7.5, 7.5)
@@ -152,13 +141,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     world.rotate(&cn.transform, quat_y(cube_yaw))
   }
 
-  // Apply light intensity slider/wheel
-  if ln, ok := world.node(&engine.world, light_handle); ok {
-    if att, ok := &ln.attachment.(world.DirectionalLightAttachment); ok {
-      att.color.a = f32(light_intensity)
-    }
-    world.stage_light_data(&engine.world.staging, light_handle)
-  }
+  world.set_light_intensity(&engine.world, light_handle, f32(light_intensity))
 }
 
 quat_y :: proc(angle: f32) -> quaternion128 {
@@ -167,7 +150,7 @@ quat_y :: proc(angle: f32) -> quaternion128 {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Input", {700, 20, 280, 460}, {.NO_CLOSE}) {
     mu.label(ctx, "--- Keyboard ---")
     mu.label(ctx, "WASD move, Q/E yaw")

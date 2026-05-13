@@ -63,11 +63,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  world.spawn(
-    &engine.world,
-    {-4, 10, 6},
-    world.create_point_light_attachment({0.6, 0.7, 1.0, 1.5}, 15.0, false),
-  )
+  world.spawn_light_point(&engine.world, {-4, 10, 6}, {0.6, 0.7, 1.0, 1.5}, 15.0, false)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
@@ -96,7 +92,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Tail Modifier", {20, 300, 320, 360}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Propagation speed")

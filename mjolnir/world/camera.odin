@@ -142,6 +142,7 @@ main_camera_look_at :: proc(
   if world.active_controller != nil {
     camera_controller_sync(world.active_controller, camera)
   }
+  stage_camera_data(&world.staging, world.main_camera)
 }
 
 

@@ -55,11 +55,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
   world.main_camera_look_at(&engine.world, {32, 28, 32}, {0, 0, 0})
 
-  world.spawn(
-    &engine.world,
-    {15, 25, 15},
-    world.create_directional_light_attachment({1, 0.97, 0.92, 1}, 10.0, true),
-  )
+  world.spawn_light_directional(&engine.world, {15, 25, 15}, {1, 0.97, 0.92, 1}, 10.0, true)
 
   build_scene(engine)
   build_navmesh(engine)
@@ -253,7 +249,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Crowd", {720, 20, 260, 200}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("agents: %d", AGENT_COUNT))
     mu.label(ctx, fmt.tprintf("time: %.1f", total_time))

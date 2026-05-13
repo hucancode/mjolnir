@@ -39,11 +39,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   world.main_camera_look_at(&engine.world, {-14, 8, 14}, {0, 1, 0})
 
-  world.spawn(
-    &engine.world,
-    {-5, 12, 5},
-    world.create_directional_light_attachment({1, 0.95, 0.9, 1}, 6.0, true),
-  )
+  world.spawn_light_directional(&engine.world, {-5, 12, 5}, {1, 0.95, 0.9, 1}, 6.0, true)
 
   ground_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
   ground_mat := world.get_builtin_material(&engine.world, .GRAY)
@@ -171,7 +167,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Bullet CCD", {700, 20, 280, 380}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Target wall:")

@@ -374,12 +374,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
             &engine.world,
             lights_root_handle,
             {0, 0, 0},
-            world.create_spot_light_attachment(
-              color,
-              14.0,
-              math.PI * 0.25,
-              true,
-            ),
+            world.SpotLightAttachment{
+              color       = color,
+              radius      = 14.0,
+              angle_inner = math.PI * 0.25 * 0.8,
+              angle_outer = math.PI * 0.25,
+              cast_shadow = true,
+            },
           ) or_continue
           world.translate(
             &engine.world,
@@ -400,7 +401,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             &engine.world,
             lights_root_handle,
             {0, 0, 0},
-            world.create_point_light_attachment(color, 14.0, true),
+            world.PointLightAttachment{color = color, radius = 14.0, cast_shadow = true},
           ) or_continue
           world.translate(
             &engine.world,
@@ -425,16 +426,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
     when ENABLE_DIRECTIONAL_LIGHT {
-      dir_light_handle :=
-        world.spawn(
-          &engine.world,
-          {0, 0, 0},
-          world.create_directional_light_attachment(
-            {0.2, 0.5, 0.9, 3.0},
-            20,
-            cast_shadow = true,
-          ),
-        ) or_else {}
+      dir_light_handle, _ := world.spawn_light_directional(&engine.world, color = {0.2, 0.5, 0.9, 3.0}, radius = 20, cast_shadow = true)
       world.rotate(&engine.world, dir_light_handle, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
     }
   }

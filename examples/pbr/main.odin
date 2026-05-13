@@ -29,26 +29,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
   world.main_camera_look_at(&engine.world, {0, 0.2, 3.5}, {0, 0, 0})
   helmet_nodes = mjolnir.load_gltf(engine, "assets/DamagedHelmet.glb")
-  dir_light =
-    world.spawn(
-      &engine.world,
-      {4, 6, 4},
-      world.create_directional_light_attachment(
-        {1, 0.98, 0.95, f32(dir_intensity)},
-        15.0,
-        false,
-      ),
-    ) or_else {}
+  dir_light, _ = world.spawn_light_directional(&engine.world, {4, 6, 4}, {1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  // Direct light intensity slider
-  if dn, ok := world.node(&engine.world, dir_light); ok {
-    if att, ok := &dn.attachment.(world.DirectionalLightAttachment); ok {
-      att.color.a = f32(dir_intensity)
-    }
-    world.stage_light_data(&engine.world.staging, dir_light)
-  }
+  world.set_light_intensity(&engine.world, dir_light, f32(dir_intensity))
 
   if spinning {
     rotation_phase += delta_time * f32(rotate_speed)
@@ -60,7 +45,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "PBR Lighting", {700, 20, 280, 320}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("Sun intensity: %.2f", dir_intensity))
     mu.slider(ctx, &dir_intensity, 0.0, 20.0)

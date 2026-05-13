@@ -79,12 +79,7 @@ main :: proc() {
       ) or_else {}
     world.scale(&engine.world, ground, 20.0)
     world.translate(&engine.world, ground, 0, -2, 0)
-    light_handle :=
-      world.spawn(
-        &engine.world,
-        {0, 10, 0},
-        world.create_point_light_attachment({1.0, 1.0, 1.0, 1.0}, 20.0, true),
-      ) or_else {}
+    light_handle, _ := world.spawn_light_point(&engine.world, {0, 10, 0}, {1.0, 1.0, 1.0, 1.0}, 20.0, true)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     total_length := animation.spline_arc_length(spline)

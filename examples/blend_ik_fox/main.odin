@@ -115,16 +115,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   world.scale(&engine.world, target_cube, 0.25) // Make it smaller for the scaled scene
 
   // Add lighting
-  light_handle :=
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.create_directional_light_attachment(
-        {1.0, 1.0, 1.0, 1.0},
-        10.0,
-        true,
-      ),
-    ) or_else {}
+  light_handle, _ := world.spawn_light_directional(&engine.world, color = {1.0, 1.0, 1.0, 1.0}, radius = 10.0, cast_shadow = true)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {

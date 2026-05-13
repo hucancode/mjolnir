@@ -114,11 +114,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Sun
   q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
   q2 := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
-  light := world.spawn(
-    &engine.world,
-    {0, 10, 0},
-    world.create_directional_light_attachment({1, 0.97, 0.92, 5}, 12.0),
-  ) or_else {}
+  light, _ := world.spawn_light_directional(&engine.world, {0, 10, 0}, {1, 0.97, 0.92, 5}, 12.0)
   if n, ok := world.node(&engine.world, light); ok {
     world.rotate(&n.transform, q2 * q1)
   }

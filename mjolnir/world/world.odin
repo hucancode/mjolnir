@@ -595,51 +595,88 @@ assign_forcefield_to_node :: proc(
   }
 }
 
-create_point_light_attachment :: proc(
-  color: [4]f32 = {1, 1, 1, 1},
-  radius: f32 = 10.0,
-  cast_shadow: bool = true,
-) -> (
-  attachment: PointLightAttachment,
-) {
-  return PointLightAttachment {
-    color = color,
-    radius = radius,
-    cast_shadow = cast_shadow,
+// Mark dirty wrappers. Hide staging detail from gameplay code.
+mark_light_dirty      :: proc(w: ^World, h: NodeHandle)   { stage_light_data(&w.staging, h) }
+mark_node_dirty       :: proc(w: ^World, h: NodeHandle)   { stage_node_data(&w.staging, h) }
+mark_camera_dirty     :: proc(w: ^World, h: CameraHandle) { stage_camera_data(&w.staging, h) }
+
+// Light field setters. Mutate + auto-stage. No-op when value unchanged so
+// per-frame UI bindings don't churn the dirty queue.
+set_light_color :: proc(w: ^World, h: NodeHandle, color: [4]f32) {
+  n, n_ok := cont.get(w.nodes, h)
+  if !n_ok do return
+  target: ^[4]f32
+  switch &a in n.attachment {
+  case PointLightAttachment:       target = &a.color
+  case DirectionalLightAttachment: target = &a.color
+  case SpotLightAttachment:        target = &a.color
+  case MeshAttachment, EmitterAttachment, ForceFieldAttachment,
+       SpriteAttachment, RigidBodyAttachment:
+    return
+  case:
+    return
   }
+  if target^ == color do return
+  target^ = color
+  stage_light_data(&w.staging, h)
 }
 
-create_directional_light_attachment :: proc(
-  color: [4]f32 = {1, 1, 1, 1},
-  radius: f32 = 10.0,
-  cast_shadow: bool = false,
-) -> (
-  attachment: DirectionalLightAttachment,
-) {
-  return DirectionalLightAttachment {
-    color = color,
-    radius = radius,
-    cast_shadow = cast_shadow,
+set_light_intensity :: proc(w: ^World, h: NodeHandle, intensity: f32) {
+  n, n_ok := cont.get(w.nodes, h)
+  if !n_ok do return
+  target: ^f32
+  switch &a in n.attachment {
+  case PointLightAttachment:       target = &a.color[3]
+  case DirectionalLightAttachment: target = &a.color[3]
+  case SpotLightAttachment:        target = &a.color[3]
+  case MeshAttachment, EmitterAttachment, ForceFieldAttachment,
+       SpriteAttachment, RigidBodyAttachment:
+    return
+  case:
+    return
   }
+  if target^ == intensity do return
+  target^ = intensity
+  stage_light_data(&w.staging, h)
 }
 
-create_spot_light_attachment :: proc(
-  color: [4]f32 = {1, 1, 1, 1},
-  radius: f32 = 10.0,
-  angle: f32 = math.PI * 0.2,
-  cast_shadow: bool = true,
-) -> (
-  attachment: SpotLightAttachment,
-) {
-  angle_inner := angle * 0.8
-  angle_outer := angle
-  return SpotLightAttachment {
-    color = color,
-    radius = radius,
-    angle_inner = angle_inner,
-    angle_outer = angle_outer,
-    cast_shadow = cast_shadow,
+set_light_radius :: proc(w: ^World, h: NodeHandle, radius: f32) {
+  n, n_ok := cont.get(w.nodes, h)
+  if !n_ok do return
+  target: ^f32
+  switch &a in n.attachment {
+  case PointLightAttachment: target = &a.radius
+  case SpotLightAttachment:  target = &a.radius
+  case DirectionalLightAttachment, MeshAttachment, EmitterAttachment,
+       ForceFieldAttachment, SpriteAttachment, RigidBodyAttachment:
+    return
+  case:
+    return
   }
+  if target^ == radius do return
+  target^ = radius
+  stage_light_data(&w.staging, h)
+}
+
+// Mesh attachment setters. Mutate + auto-stage. Leave sibling fields untouched.
+set_mesh_handle :: proc(w: ^World, h: NodeHandle, mesh: MeshHandle) {
+  n, n_ok := cont.get(w.nodes, h)
+  if !n_ok do return
+  a, a_ok := &n.attachment.(MeshAttachment)
+  if !a_ok do return
+  if a.handle == mesh do return
+  a.handle = mesh
+  stage_node_data(&w.staging, h)
+}
+
+set_material_handle :: proc(w: ^World, h: NodeHandle, material: MaterialHandle) {
+  n, n_ok := cont.get(w.nodes, h)
+  if !n_ok do return
+  a, a_ok := &n.attachment.(MeshAttachment)
+  if !a_ok do return
+  if a.material == material do return
+  a.material = material
+  stage_node_data(&w.staging, h)
 }
 
 // Sync all nodes with rigid body attachments from physics to world

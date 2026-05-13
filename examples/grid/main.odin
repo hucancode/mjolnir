@@ -26,11 +26,7 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
-  light := world.spawn(
-    &engine.world,
-    {10, 18, 10},
-    world.create_directional_light_attachment({1, 0.97, 0.92, 3.0}, 60.0, false),
-  ) or_else {}
+  light, _ := world.spawn_light_directional(&engine.world, {10, 18, 10}, {1, 0.97, 0.92, 3.0}, 60.0, false)
   world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   world.main_camera_look_at(&engine.world, {14, 14, 14}, {0, 0, 0})
   pending_index = 0
@@ -83,7 +79,7 @@ spawn_grid :: proc(engine: ^mjolnir.Engine, idx: int) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Grid", {540, 20, 240, 200}, {.NO_CLOSE}) {
     sizes := GRID_SIZES
     label_text: string = "<loading>"

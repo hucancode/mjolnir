@@ -29,16 +29,7 @@ main :: proc() {
         if world.play_animation(&engine.world, child, "Anim_0") do break
       }
     }
-    light_handle :=
-      world.spawn(
-        &engine.world,
-        {0, 0, 0},
-        world.create_directional_light_attachment(
-          {1.0, 1.0, 1.0, 1.0},
-          10.0,
-          false,
-        ),
-      ) or_else {}
+    light_handle, _ := world.spawn_light_directional(&engine.world)
   }
   engine.update_proc = proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rotation := delta_time * math.PI * 0.05

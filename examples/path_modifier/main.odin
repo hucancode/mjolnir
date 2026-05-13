@@ -55,22 +55,8 @@ main :: proc() {
       }
     }
 
-    light_handle :=
-      world.spawn(
-        &engine.world,
-        {0, 0, 0},
-        world.create_directional_light_attachment(
-          {1.0, 1.0, 1.0, 1.0},
-          10.0,
-          false,
-        ),
-      ) or_else {}
-    point_light_handle :=
-      world.spawn(
-        &engine.world,
-        {20, 20, 40},
-        world.create_point_light_attachment({1.0, 0.9, 0.8, 1.0}, 500.0, true),
-      ) or_else {}
+    light_handle, _ := world.spawn_light_directional(&engine.world, color = {1.0, 1.0, 1.0, 1.0}, radius = 10.0, cast_shadow = false)
+    point_light_handle, _ := world.spawn_light_point(&engine.world, {20, 20, 40}, {1.0, 0.9, 0.8, 1.0}, 500.0, true)
   }
   mjolnir.run(engine, 800, 600, "Path Modifier")
 }

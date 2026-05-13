@@ -115,15 +115,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       },
     ) or_else {}
   world.scale_xyz(&engine.world, ground_plane_node, 100, 0.2, 100)
-  world.spawn(
-    &engine.world,
-    {0, 10, 10},
-    world.create_point_light_attachment(
-      {1.0, 0.9, 0.8, 1.0},
-      30.0,
-      true,
-    ),
-  )
+  world.spawn_light_point(&engine.world, {0, 10, 10}, {1.0, 0.9, 0.8, 1.0}, 30.0, true)
 }
 
 apply_group_params :: proc(
@@ -183,7 +175,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Spider Legs", {20, 20, 340, 480}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
 

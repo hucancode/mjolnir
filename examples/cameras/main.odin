@@ -124,7 +124,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Cameras", {700, 20, 280, 360}, {.NO_CLOSE}) {
     mu.label(ctx, "Controller:")
     mu.layout_row(ctx, {90, 90, 90}, 0)

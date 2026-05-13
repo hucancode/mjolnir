@@ -78,24 +78,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ) or_else {}
   world.scale(&engine.world, ground, 6.0)
 
-  world.spawn(
-    &engine.world,
-    {3, 8, 3},
-    world.create_point_light_attachment({1.0, 0.95, 0.8, 1.0}, 25.0, false),
-  )
+  world.spawn_light_point(&engine.world, {3, 8, 3}, {1.0, 0.95, 0.8, 1.0}, 25.0, false)
 
   // Directional light too — test that shadow projection survives
   // orthographic main camera (engine shadow_matrices_directional builds its
   // own ortho frustum from light radius, independent of main cam).
-  world.spawn(
-    &engine.world,
-    {-6, 10, -4},
-    world.create_directional_light_attachment(
-      {1.0, 0.95, 0.9, 4.0},
-      15.0,
-      true,
-    ),
-  )
+  world.spawn_light_directional(&engine.world, {-6, 10, -4}, {1.0, 0.95, 0.9, 4.0}, 15.0, true)
 
   // Switch the main camera to orthographic top-down
   if cam, ok := world.camera(&engine.world, engine.world.main_camera); ok {
@@ -111,7 +99,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       near_plane = 0.1,
       far_plane = 100.0,
     )
-    world.stage_camera_data(&engine.world.staging, engine.world.main_camera)
+    world.mark_camera_dirty(&engine.world, engine.world.main_camera)
   }
 
   log.info("=========================================")
@@ -143,7 +131,7 @@ apply_camera :: proc(w: ^world.World) {
   }
   cam.position = pos
   world.camera_look_at(cam, pos, {0, 0, 0})
-  world.stage_camera_data(&w.staging, w.main_camera)
+  world.mark_camera_dirty(w, w.main_camera)
 }
 
 quat_y :: proc(angle: f32) -> quaternion128 {
@@ -152,7 +140,7 @@ quat_y :: proc(angle: f32) -> quaternion128 {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Ortho Main", {700, 20, 280, 280}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("Ortho width: %.1f", ortho_width))
     mu.slider(ctx, &ortho_width, 2.0, 30.0)

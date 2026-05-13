@@ -65,16 +65,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   world.main_camera_look_at(&engine.world, {0, 18, 13}, {0, 0, 0})
 
   // Spot light above grid, pointing down
-  spot := world.spawn(
-    &engine.world,
-    {0, 10, 4},
-    world.create_spot_light_attachment(
-      {0.2, 0.95, 0.85, 1.0},
-      12.0,
-      math.PI * 0.35,
-      true,
-    ),
-  )
+  spot, _ := world.spawn_light_spot(&engine.world, {0, 10, 4}, {0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true)
   world.rotate(&engine.world, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
 
   g.score_label, _ = ui.create_text2d(
