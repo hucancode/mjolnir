@@ -15,10 +15,8 @@ root_bone_modifier: ^anim.SingleBoneRotationModifier
 tail_layer_index: int = -1
 
 // Live-tweakable parameters
-propagation_delay: mu.Real = 0.08
-influence_falloff: mu.Real = 0.85
-stiffness: mu.Real = 45.0
-damping_ratio: mu.Real = 0.45
+propagation_speed: mu.Real = 0.5
+damping: mu.Real = 0.9
 drive_frequency: mu.Real = 0.5
 drive_amplitude_deg: mu.Real = 63.0 // ~math.PI * 0.35 in degrees
 drive_enabled: bool = true
@@ -55,10 +53,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         child,
         root_bone_name = "root",
         tail_length = 10,
-        propagation_delay = f32(propagation_delay),
-        influence_falloff = f32(influence_falloff),
-        stiffness = f32(stiffness),
-        damping_ratio = f32(damping_ratio),
+        propagation_speed = f32(propagation_speed),
+        damping = f32(damping),
         weight = 1.0,
         reverse_chain = false,
       ) {
@@ -102,10 +98,8 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       &engine.world,
       snake_child_node,
       tail_layer_index,
-      propagation_delay = f32(propagation_delay),
-      influence_falloff = f32(influence_falloff),
-      stiffness = f32(stiffness),
-      damping_ratio = f32(damping_ratio),
+      propagation_speed = f32(propagation_speed),
+      damping = f32(damping),
     )
   }
 }
@@ -114,22 +108,14 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
   ctx := &engine.render.debug_ui.ctx
   if mu.window(ctx, "Tail Modifier", {20, 20, 320, 360}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
-
-    mu.label(ctx, "--- Spring dynamics ---")
-    mu.label(ctx, "Propagation delay (s):")
-    mu.slider(ctx, &propagation_delay, 0.0, 0.5)
-    mu.label(ctx, "Influence falloff (0..1):")
-    mu.slider(ctx, &influence_falloff, 0.0, 1.0)
-    mu.label(ctx, "Stiffness (rad/s^2):")
-    mu.slider(ctx, &stiffness, 0.0, 300.0)
-    mu.label(ctx, "Damping ratio:")
-    mu.slider(ctx, &damping_ratio, 0.0, 2.0)
-
-    mu.label(ctx, "--- Drive signal ---")
+    mu.label(ctx, "Propagation speed")
+    mu.slider(ctx, &propagation_speed, 0.0, 1.0)
+    mu.label(ctx, "Damping")
+    mu.slider(ctx, &damping, 0.0, 1.0)
     mu.checkbox(ctx, "Animate root", &drive_enabled)
-    mu.label(ctx, "Frequency (Hz):")
+    mu.label(ctx, "Frequency (Hz)")
     mu.slider(ctx, &drive_frequency, 0.0, 4.0)
-    mu.label(ctx, "Amplitude (deg):")
+    mu.label(ctx, "Amplitude (deg)")
     mu.slider(ctx, &drive_amplitude_deg, 0.0, 180.0)
   }
 }

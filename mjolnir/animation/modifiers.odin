@@ -4,17 +4,24 @@ import "core:math"
 import "core:math/linalg"
 
 // Per-bone state for tail animation
-// Tracks tip position to create follow-through drag effect
+// Spring-damper drives target_tip toward rest_tip; bone aims at target_tip.
 TailBone :: struct {
-  target_tip_world: [3]f32, // Where the tip wants to be in world space (has inertia)
-  is_initialized:   bool, // Flag to initialize on first frame
+  target_tip_world:    [3]f32, // World-space tip target (state)
+  target_tip_velocity: [3]f32, // Tip velocity (gives inertia for overshoot)
+  is_initialized:      bool,
 }
 
 TailModifier :: struct {
-  propagation_speed: f32, // How fast rotation influence travels down the chain (0-1)
-  damping:           f32, // How quickly bones return to rest pose (0-1)
-  bones:             []TailBone, // Per-bone state
+  // 0..1, higher = stiffer spring = faster catch-up, faster oscillation
+  propagation_speed: f32,
+  // Damping ratio: 1 = critical (no overshoot), 0 = undamped, <0 grows, >1 overdamped
+  damping:           f32,
+  bones:             []TailBone,
 }
+
+// Max spring stiffness mapped from propagation_speed = 1.
+// Higher = snappier and faster oscillations.
+TAIL_MAX_STIFFNESS :: f32(200.0)
 
 PathModifier :: struct {
   spline: Spline([3]f32),
@@ -148,22 +155,15 @@ tail_modifier_update :: proc(
       scale,
     )
 
-    // Calculate where bone now points after our rotation
-    current_up := linalg.normalize(
-      world_transforms[bone_idx].world_matrix[1].xyz,
-    )
-    current_tip := bone_world_pos + current_up * bone_length
-
-    // Update target for next frame: blend current position with FK rest position
-    // This creates inertia (follows current) and damping (returns to FK rest)
-    // damping close to 1.0 = slow return to rest (more inertia)
-    // damping close to 0.0 = fast return to rest (less inertia)
-    damping_factor := 1.0 - math.pow(params.damping, delta_time)
-    bone_state.target_tip_world = linalg.lerp(
-      current_tip, // Where we point now (inertia)
-      rest_tip, // Where FK wants us (damping)
-      damping_factor,
-    )
+    // Spring-damper integration on target_tip_world toward rest_tip.
+    // Velocity state lets the system overshoot when damping < 1 and
+    // oscillate divergently when damping < 0.
+    stiffness := TAIL_MAX_STIFFNESS * clamp(params.propagation_speed, 0.0, 1.0)
+    damping_coeff := 2.0 * math.sqrt(stiffness) * params.damping
+    spring_acc := (rest_tip - bone_state.target_tip_world) * stiffness
+    damping_acc := -bone_state.target_tip_velocity * damping_coeff
+    bone_state.target_tip_velocity += (spring_acc + damping_acc) * delta_time
+    bone_state.target_tip_world += bone_state.target_tip_velocity * delta_time
   }
 }
 
