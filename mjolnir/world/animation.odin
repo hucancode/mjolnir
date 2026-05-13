@@ -1085,6 +1085,48 @@ set_tail_modifier_params :: proc(
   return false
 }
 
+set_spider_leg_modifier_params :: proc(
+  world: ^World,
+  node_handle: NodeHandle,
+  layer_index: int,
+  leg_index: int,
+  lift_height: Maybe(f32) = nil,
+  lift_frequency: Maybe(f32) = nil,
+  lift_duration: Maybe(f32) = nil,
+  time_offset: Maybe(f32) = nil,
+) -> bool {
+  node := cont.get(world.nodes, node_handle) or_return
+  mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
+  if !has_mesh do return false
+
+  skinning, has_skin := &mesh_attachment.skinning.?
+  if !has_skin do return false
+
+  if layer_index < 0 || layer_index >= len(skinning.layers) do return false
+
+  switch &layer_data in skinning.layers[layer_index].data {
+  case anim.ProceduralLayer:
+    switch &modifier in layer_data.state.modifier {
+    case anim.SpiderLegModifier:
+      if leg_index < 0 || leg_index >= len(modifier.legs) do return false
+      leg := &modifier.legs[leg_index]
+      if v, ok := lift_height.?; ok do leg.feet_lift_height = v
+      if v, ok := lift_frequency.?; ok do leg.feet_lift_frequency = v
+      if v, ok := lift_duration.?; ok do leg.feet_lift_duration = v
+      if v, ok := time_offset.?; ok do leg.feet_lift_time_offset = v
+      return true
+    case anim.TailModifier,
+         anim.PathModifier,
+         anim.SingleBoneRotationModifier:
+      return false
+    }
+  case anim.FKLayer, anim.IKLayer:
+    return false
+  }
+
+  return false
+}
+
 set_path_modifier_params :: proc(
   world: ^World,
   node_handle: NodeHandle,

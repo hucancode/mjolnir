@@ -15,9 +15,9 @@ root_bone_modifier: ^anim.SingleBoneRotationModifier
 tail_layer_index: int = -1
 
 // Live-tweakable parameters
-propagation_speed: mu.Real = 0.5
-damping: mu.Real = 0.9
-drive_frequency: mu.Real = 0.5
+propagation_speed: mu.Real = 0.3
+damping: mu.Real = 0.5
+drive_frequency: mu.Real = 1.0
 drive_amplitude_deg: mu.Real = 63.0 // ~math.PI * 0.35 in degrees
 drive_enabled: bool = true
 
@@ -32,7 +32,7 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
-  world.main_camera_look_at(&engine.world, {0, 10, 15}, {0, 3, 0})
+  world.main_camera_look_at(&engine.world, {0, 3, 0}, {0, 1, 0})
   root_nodes = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
   for handle in root_nodes {
     node := world.node(&engine.world, handle) or_continue
@@ -65,17 +65,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   world.spawn(
     &engine.world,
-    {0, 0, 0},
-    world.create_directional_light_attachment(
-      {1.0, 1.0, 1.0, 1.0},
-      10.0,
-      false,
-    ),
-  )
-  world.spawn(
-    &engine.world,
-    {0, 50, 50},
-    world.create_point_light_attachment({1.0, 0.9, 0.8, 1.0}, 1000.0, true),
+    {-4, 10, 6},
+    world.create_point_light_attachment({0.6, 0.7, 1.0, 1.5}, 15.0, false),
   )
 }
 
@@ -106,7 +97,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
   ctx := &engine.render.debug_ui.ctx
-  if mu.window(ctx, "Tail Modifier", {20, 20, 320, 360}, {.NO_CLOSE}) {
+  if mu.window(ctx, "Tail Modifier", {20, 300, 320, 360}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Propagation speed")
     mu.slider(ctx, &propagation_speed, 0.0, 1.0)
