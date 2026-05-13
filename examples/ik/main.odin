@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import anim "../../mjolnir/animation"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -145,6 +146,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
           }
         }
 
+        // Build per-bone rotation constraints.
+        // Root (index 0): swing X/Z <= 30deg, twist Y <= 90deg.
+        // Others: X/Y/Z <= 45deg.
+        constraints := make([]anim.IKBoneConstraint, len(bone_indices))
+        deg30 := f32(math.PI / 6.0)
+        deg90 := f32(math.PI / 2.0)
+        constraints[0] = anim.IKBoneConstraint{max_angle = {deg30, deg90, deg30}}
+        for j in 1 ..< len(bone_indices) {
+          constraints[j] = anim.IKBoneConstraint{max_angle = {deg90, deg90, deg90}}
+        }
+
         // Add IK layer for this leg
         if err := world.add_ik_layer_by_indices(
           &engine.world,
@@ -153,6 +165,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           leg_targets[i],
           pole_pos,
           weight = 1.0,
+          constraints = constraints,
         ); err != .NONE {
           log.errorf("IK layer add failed leg %d: %v", i, err)
         }

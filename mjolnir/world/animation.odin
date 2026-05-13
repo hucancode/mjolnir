@@ -938,10 +938,12 @@ add_spider_leg_modifier_layer :: proc(
   leg_configs: []anim.SpiderLegConfig,
   weight: f32 = 1.0,
   layer_index: int = -1,
+  constraints: [][]anim.IKBoneConstraint = nil,
 ) -> bool {
   if len(leg_root_names) != len(leg_chain_lengths) do return false
   if len(leg_root_names) != len(leg_configs) do return false
   if len(leg_root_names) == 0 do return false
+  if constraints != nil && len(constraints) != len(leg_root_names) do return false
 
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
@@ -998,6 +1000,7 @@ add_spider_leg_modifier_layer :: proc(
           legs = legs,
           chain_starts = chain_starts,
           chain_lengths = chain_lengths,
+          constraints = constraints,
         },
       },
     },

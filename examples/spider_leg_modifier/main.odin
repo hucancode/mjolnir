@@ -127,6 +127,13 @@ main :: proc() {
         leg_root_names := make([]string, 6)
         leg_chain_lengths := make([]u32, 6)
         spider_leg_configs := make([]anim.SpiderLegConfig, 6)
+        leg_constraints := make([][]anim.IKBoneConstraint, 6)
+
+        // Same constraints as IK example:
+        // Root (index 0): swing X/Z <= 30deg, twist Y <= 90deg.
+        // Others: X/Y/Z <= 90deg.
+        deg30 := f32(math.PI / 6.0)
+        deg90 := f32(math.PI / 2.0)
 
         for i in 0 ..< 6 {
           leg_root_names[i] = leg_configs[i].root_name
@@ -139,6 +146,13 @@ main :: proc() {
             lift_duration  = 0.6,
             time_offset    = leg_configs[i].time_offset,
           }
+
+          chain := make([]anim.IKBoneConstraint, 6)
+          chain[0] = anim.IKBoneConstraint{max_angle = {deg30, deg90, deg30}}
+          for j in 1 ..< 6 {
+            chain[j] = anim.IKBoneConstraint{max_angle = {deg90, deg90, deg90}}
+          }
+          leg_constraints[i] = chain
         }
 
         success := world.add_spider_leg_modifier_layer(
@@ -149,6 +163,7 @@ main :: proc() {
           spider_leg_configs,
           weight = 1.0,
           layer_index = -1,
+          constraints = leg_constraints,
         )
 
         if success {

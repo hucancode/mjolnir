@@ -92,8 +92,8 @@ test_spider_leg_skips_lift_for_nearby_target :: proc(t: ^testing.T) {
   spider_leg_init(&leg, {1, 0, 0})
   leg.feet_target = {1.05, 0, 0}
   spider_leg_update(&leg, 0.1)
-  testing.expect_value(t, leg.feet_position, [3]f32{1.05, 0, 0})
-  testing.expect_value(t, leg.feet_last_target, [3]f32{1.05, 0, 0})
+  testing.expect_value(t, leg.feet_position, [3]f32{1, 0, 0})
+  testing.expect_value(t, leg.feet_last_target, [3]f32{1, 0, 0})
   testing.expect_value(t, leg.feet_position.y, 0.0)
 }
 

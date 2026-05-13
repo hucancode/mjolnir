@@ -57,8 +57,7 @@ spider_leg_update :: proc(self: ^SpiderLeg, delta_time: f32) {
 	min_lift_distance_sq := linalg.length2(self.feet_offset) * SPIDER_LEG_MIN_LIFT_DISTANCE_RATIO * SPIDER_LEG_MIN_LIFT_DISTANCE_RATIO
 	if linalg.length2(target_delta) <= min_lift_distance_sq {
 		self.accumulated_time += delta_time
-		self.feet_position = self.feet_target
-		self.feet_last_target = self.feet_target
+		self.feet_position = self.feet_last_target
 		return
 	}
 

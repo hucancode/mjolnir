@@ -36,6 +36,7 @@ SpiderLegModifier :: struct {
   legs:          []SpiderLeg,
   chain_starts:  []u32,
   chain_lengths: []u32,
+  constraints:   [][]IKBoneConstraint, // Optional per-leg constraints (nil or len = legs)
   debug_info:    []IKDebugInfo, // Debug info for each leg (allocated if debug enabled)
 }
 
@@ -378,9 +379,14 @@ spider_leg_modifier_update :: proc(
     mid_point := (root_position_skeleton + feet_position_skeleton) / 2.0
     pole := mid_point + linalg.normalize(pole_offset) * 2.0
 
+    leg_constraints: []IKBoneConstraint
+    if params.constraints != nil && leg_idx < len(params.constraints) {
+      leg_constraints = params.constraints[leg_idx]
+    }
     ik_target := IKTarget {
       bone_indices    = leg_bone_indices,
       bone_lengths    = leg_bone_lengths,
+      constraints     = leg_constraints,
       target_position = feet_position_skeleton, // Use skeleton-space position for IK
       pole_vector     = pole,
       pole_weight     = 0.8, // Strong but not absolute pole influence
