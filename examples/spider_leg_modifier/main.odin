@@ -30,6 +30,11 @@ phase_offset_b: mu.Real = mu.Real(lift_frequency_default * 0.5)
 body_amplitude: mu.Real = 8.0
 body_speed: mu.Real = 0.05
 body_anim_enabled: bool = true
+body_pos_x: mu.Real = 0.0
+body_pos_z: mu.Real = 0.0
+body_lerp_rate: mu.Real = 2.0
+body_max_speed: mu.Real = 4.0
+body_current_pos: [3]f32 = {0, 2, 0}
 
 GROUP_A := [3]int{0, 2, 4}
 GROUP_B := [3]int{1, 3, 5}
@@ -214,11 +219,24 @@ apply_group :: proc(
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   if body_anim_enabled {
     animation_time += delta_time
+    body_x := f32(body_amplitude) * math.sin(animation_time * f32(body_speed) * 2 * math.PI)
+    body_current_pos = {body_x, 2, 0}
+    body_pos_x = mu.Real(body_x)
+    body_pos_z = 0
+  } else {
+    target := [3]f32{f32(body_pos_x), 2, f32(body_pos_z)}
+    t := 1 - math.exp(-f32(body_lerp_rate) * delta_time)
+    desired := linalg.lerp(body_current_pos, target, t)
+    step := desired - body_current_pos
+    max_step := f32(body_max_speed) * delta_time
+    step_len := linalg.length(step)
+    if step_len > max_step {
+      step *= max_step / step_len
+    }
+    body_current_pos += step
   }
-  body_x := f32(body_amplitude) * math.sin(animation_time * f32(body_speed) * 2 * math.PI)
-  body_pos := [3]f32{body_x, 2, 0}
   if node := world.node(&engine.world, spider_root_node); node != nil {
-    world.translate(&node.transform, body_pos.x, body_pos.y, body_pos.z)
+    world.translate(&node.transform, body_current_pos.x, body_current_pos.y, body_current_pos.z)
   }
 
   if spider_leg_layer_index >= 0 {
@@ -273,10 +291,17 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
 
     mu.label(ctx, "Body motion")
     mu.checkbox(ctx, "Animate body", &body_anim_enabled)
-    mu.label(ctx, "Amplitude")
-    mu.slider(ctx, &body_amplitude, 0.0, 30.0)
-    mu.label(ctx, "Speed (Hz)")
-    mu.slider(ctx, &body_speed, 0.0, 1.0)
+    if body_anim_enabled {
+      mu.label(ctx, "Amplitude")
+      mu.slider(ctx, &body_amplitude, 0.0, 30.0)
+      mu.label(ctx, "Speed (Hz)")
+      mu.slider(ctx, &body_speed, 0.0, 1.0)
+    } else {
+      mu.label(ctx, "Body X")
+      mu.slider(ctx, &body_pos_x, -30.0, 30.0)
+      mu.label(ctx, "Body Z")
+      mu.slider(ctx, &body_pos_z, -30.0, 30.0)
+    }
 
     mu.label(ctx, "Shared lift frequency (period s)")
     mu.slider(ctx, &lift_frequency_shared, 0.1, 4.0)
