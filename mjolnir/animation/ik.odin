@@ -1,7 +1,6 @@
 package animation
 
 import "../geometry"
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 
@@ -14,6 +13,23 @@ import "core:math/linalg"
 // A negative value means unconstrained on that axis. Zero means locked.
 IKBoneConstraint :: struct {
   max_angle: [3]f32,
+}
+
+// Build a chain of constraints: bone 0 (root) gets `root_max`, bones 1..N-1 get `rest_max`.
+// Caller owns the returned slice.
+ik_constraints_uniform :: proc(
+  chain_length: int,
+  root_max: [3]f32,
+  rest_max: [3]f32,
+  allocator := context.allocator,
+) -> []IKBoneConstraint {
+  out := make([]IKBoneConstraint, chain_length, allocator)
+  if chain_length == 0 do return out
+  out[0] = IKBoneConstraint{max_angle = root_max}
+  for i in 1 ..< chain_length {
+    out[i] = IKBoneConstraint{max_angle = rest_max}
+  }
+  return out
 }
 
 // Coordinate space for IK target/pole values stored in the layer.
@@ -30,7 +46,7 @@ IKTargetSpace :: enum {
 IKTarget :: struct {
   bone_indices:    []u32, // All bones in chain from root to end (min 2 bones)
   bone_lengths:    []f32, // Cached bone lengths (len = bone_indices - 1)
-  constraints:     []IKBoneConstraint, // Optional per-bone constraints (nil or len = bone_indices)
+  constraints:     []IKBoneConstraint, // Optional per-bone constraints (nil or len = chain length)
   target_position: [3]f32,
   pole_vector:     [3]f32, // Controls the bending plane
   pole_weight:     f32, // Pole influence strength (0-1), default 1.0
@@ -92,12 +108,11 @@ apply_twist_constraint :: proc(
   max_twist: f32,
 ) -> quaternion128 {
   if max_twist < 0 do return new_rot
+  // delta_local = inv(fk) * delta_world * fk where delta_world = new_rot * inv(fk),
+  // simplifies to inv(fk) * new_rot. Re-expresses the FK-to-new delta in fk's local frame.
   inv_fk := linalg.quaternion_inverse(fk_rot)
-  // delta in fk-local frame: how new_rot deviates from rest.
-  delta_world := new_rot * inv_fk
-  delta_local := inv_fk * delta_world * fk_rot
-  // Swing-twist decomposition along local Y.
-  // Twist quaternion has zero X and Z components (axis aligned with Y).
+  delta_local := inv_fk * new_rot
+  // Swing-twist decomposition along local Y. Twist quaternion: zero X/Z, axis = Y.
   ty := delta_local.y
   tw := delta_local.w
   twist_mag := math.sqrt(ty * ty + tw * tw)
@@ -110,19 +125,17 @@ apply_twist_constraint :: proc(
   if twist_angle < -math.PI do twist_angle += 2.0 * math.PI
   clamped_angle := clamp(twist_angle, -max_twist, max_twist)
   if math.abs(clamped_angle - twist_angle) < 1e-5 do return new_rot
-  // Rebuild twist quaternion.
   half := clamped_angle * 0.5
   new_twist_local := quaternion128{}
   new_twist_local.w = math.cos(half)
   new_twist_local.y = math.sin(half)
-  // Swing = delta_local * conj(twist_local)
   old_twist_local := quaternion128{}
   old_twist_local.w = twist_w
   old_twist_local.y = twist_y
   swing_local := delta_local * linalg.quaternion_inverse(old_twist_local)
   new_delta_local := swing_local * new_twist_local
-  new_delta_world := fk_rot * new_delta_local * inv_fk
-  return new_delta_world * fk_rot
+  // fk * new_delta_local = fk * (inv(fk) * clamped_new_rot) = clamped_new_rot.
+  return fk_rot * new_delta_local
 }
 
 // FABRIK solver for N-bone IK chains (minimum 2 bones)
@@ -166,7 +179,6 @@ fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
   if dist_to_target > total_length * 0.999 {
     // Target unreachable, stretch toward it (constraints still respected).
     direction := linalg.normalize(target_pos - root_position)
-    positions[0] = root_position
     for i in 0 ..< chain_length - 1 {
       dir := direction
       if has_constraints {
@@ -215,9 +227,11 @@ fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
   )
 }
 
-// Update bone transforms (positions and rotations) from solved positions
+// Update bone transforms (positions and rotations) from solved positions.
 // Uses swing-twist decomposition for pole-controlled twist.
 // When `constraints` is non-nil, applies twist limit (max_angle.y) per bone.
+// Assumes uniform scale 1.0 — extract scale once before the loop if non-uniform needed.
+@(private = "file")
 update_transforms_from_positions :: proc(
   world_transforms: []BoneTransform,
   bone_indices: []u32,
@@ -228,24 +242,23 @@ update_transforms_from_positions :: proc(
   constraints: []IKBoneConstraint,
 ) {
   chain_length := len(bone_indices)
-  // Save original FK positions before we start modifying them
   fk_positions := make([][3]f32, chain_length, context.temp_allocator)
   for i in 0 ..< chain_length {
-    bone_idx := bone_indices[i]
-    fk_positions[i] = world_transforms[bone_idx].world_position
+    fk_positions[i] = world_transforms[bone_indices[i]].world_position
   }
   has_pole := linalg.length2(pole_vector) > math.F32_EPSILON && pole_weight > 0
-  // Process all bones except the last
+  scale_one := [3]f32{1, 1, 1}
+  last_swing := linalg.QUATERNIONF32_IDENTITY
+  // Bones 0..chain_length-2: swing from segment (i, i+1). Last bone inherits last_swing.
   for i in 0 ..< chain_length - 1 {
     bone_idx := bone_indices[i]
-    world_transforms[bone_idx].world_position = positions[i]
     fk_dir := linalg.normalize(fk_positions[i + 1] - fk_positions[i])
     ik_dir := linalg.normalize(positions[i + 1] - positions[i])
     swing := linalg.quaternion_between_two_vector3(fk_dir, ik_dir)
-    new_rot: quaternion128
+    last_swing = swing
+    new_rot := swing * fk_rotations[i]
     if has_pole && i > 0 {
-      fk_rotation := world_transforms[bone_idx].world_rotation
-      fk_perp := geometry.qx(fk_rotation)
+      fk_perp := geometry.qx(fk_rotations[i])
       current_perp := geometry.qmv(swing, fk_perp)
       to_pole := pole_vector - positions[i]
       desired_perp := to_pole - ik_dir * linalg.dot(to_pole, ik_dir)
@@ -253,53 +266,30 @@ update_transforms_from_positions :: proc(
       if perp_len > math.F32_EPSILON {
         desired_perp /= perp_len
         twist := linalg.quaternion_between_two_vector3(current_perp, desired_perp)
-        // Apply twist AFTER swing: twist rotates around ik_dir (the new bone direction),
-        // so swing must be applied first to establish that direction.
+        // Twist after swing: twist rotates around ik_dir (new bone direction).
         interpolated_twist := linalg.quaternion_slerp(
           linalg.QUATERNIONF32_IDENTITY,
           twist,
           pole_weight,
         )
-        new_rot = interpolated_twist * swing * world_transforms[bone_idx].world_rotation
-      } else {
-        new_rot = swing * world_transforms[bone_idx].world_rotation
+        new_rot = interpolated_twist * new_rot
       }
-    } else {
-      new_rot = swing * world_transforms[bone_idx].world_rotation
     }
     if constraints != nil {
       new_rot = apply_twist_constraint(new_rot, fk_rotations[i], constraints[i].max_angle.y)
     }
-    world_transforms[bone_idx].world_rotation = new_rot
-    // IMPORTANT: this algorithm do a deliberate assumption that all scale are 1.0, avoid costly scale computation
-    // If non-uniform scaling is needed, extract scale once before the loop
-    world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
-      world_transforms[bone_idx].world_position,
-      world_transforms[bone_idx].world_rotation,
-      [3]f32{1.0, 1.0, 1.0},
-    )
-  }
-
-  // Process last bone separately
-  if chain_length >= 1 {
-    i := chain_length - 1
-    bone_idx := bone_indices[i]
     world_transforms[bone_idx].world_position = positions[i]
-    // Last bone: orient in same direction as incoming bone segment
-    if chain_length >= 2 {
-      fk_dir := linalg.normalize(fk_positions[i] - fk_positions[i - 1])
-      ik_dir := linalg.normalize(positions[i] - positions[i - 1])
-      delta_rotation := linalg.quaternion_between_two_vector3(fk_dir, ik_dir)
-      new_rot := delta_rotation * world_transforms[bone_idx].world_rotation
-      if constraints != nil {
-        new_rot = apply_twist_constraint(new_rot, fk_rotations[i], constraints[i].max_angle.y)
-      }
-      world_transforms[bone_idx].world_rotation = new_rot
-    }
-    world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
-      world_transforms[bone_idx].world_position,
-      world_transforms[bone_idx].world_rotation,
-      [3]f32{1.0, 1.0, 1.0},
-    )
+    world_transforms[bone_idx].world_rotation = new_rot
+    world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(positions[i], new_rot, scale_one)
   }
+  // Last bone: same swing as parent segment (no outgoing segment).
+  last := chain_length - 1
+  bone_idx := bone_indices[last]
+  new_rot := last_swing * fk_rotations[last]
+  if constraints != nil {
+    new_rot = apply_twist_constraint(new_rot, fk_rotations[last], constraints[last].max_angle.y)
+  }
+  world_transforms[bone_idx].world_position = positions[last]
+  world_transforms[bone_idx].world_rotation = new_rot
+  world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(positions[last], new_rot, scale_one)
 }

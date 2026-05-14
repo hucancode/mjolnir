@@ -131,8 +131,7 @@ spawn_body_node :: proc(engine: ^mjolnir.Engine, c: Cell) -> world.NodeHandle {
 }
 
 place_node :: proc(engine: ^mjolnir.Engine, h: world.NodeHandle, c: Cell, y: f32) {
-  p := cell_to_world(c, y)
-  world.translate(&engine.world, h, p.x, p.y, p.z)
+  world.translate(&engine.world, h, cell_to_world(c, y))
 }
 
 place_food :: proc(engine: ^mjolnir.Engine) {

@@ -51,7 +51,12 @@ decompose_matrix :: proc "contextless" (
 //   return
 // }
 
-translate_by :: proc "contextless" (
+translate_by :: proc {
+  translate_by_xyz,
+  translate_by_vec,
+}
+
+translate_by_xyz :: proc "contextless" (
   t: ^Transform,
   x: f32 = 0,
   y: f32 = 0,
@@ -61,13 +66,28 @@ translate_by :: proc "contextless" (
   t.is_dirty = true
 }
 
-translate :: proc "contextless" (
+translate_by_vec :: proc "contextless" (t: ^Transform, v: [3]f32) {
+  t.position += v
+  t.is_dirty = true
+}
+
+translate :: proc {
+  translate_xyz,
+  translate_vec,
+}
+
+translate_xyz :: proc "contextless" (
   t: ^Transform,
   x: f32 = 0,
   y: f32 = 0,
   z: f32 = 0,
 ) {
   t.position = {x, y, z}
+  t.is_dirty = true
+}
+
+translate_vec :: proc "contextless" (t: ^Transform, v: [3]f32) {
+  t.position = v
   t.is_dirty = true
 }
 
@@ -109,7 +129,12 @@ rotate_angle :: proc "contextless" (
   t.is_dirty = true
 }
 
-scale_xyz_by :: proc "contextless" (
+scale_xyz_by :: proc {
+  scale_xyz_by_args,
+  scale_xyz_by_vec,
+}
+
+scale_xyz_by_args :: proc "contextless" (
   t: ^Transform,
   x: f32 = 1,
   y: f32 = 1,
@@ -119,12 +144,22 @@ scale_xyz_by :: proc "contextless" (
   t.is_dirty = true
 }
 
+scale_xyz_by_vec :: proc "contextless" (t: ^Transform, v: [3]f32) {
+  t.scale *= v
+  t.is_dirty = true
+}
+
 scale_by :: proc "contextless" (t: ^Transform, s: f32) {
   t.scale *= {s, s, s}
   t.is_dirty = true
 }
 
-scale_xyz :: proc "contextless" (
+scale_xyz :: proc {
+  scale_xyz_args,
+  scale_xyz_vec,
+}
+
+scale_xyz_args :: proc "contextless" (
   t: ^Transform,
   x: f32 = 1,
   y: f32 = 1,
@@ -134,7 +169,17 @@ scale_xyz :: proc "contextless" (
   t.is_dirty = true
 }
 
-scale :: proc "contextless" (t: ^Transform, s: f32) {
+scale_xyz_vec :: proc "contextless" (t: ^Transform, v: [3]f32) {
+  t.scale = v
+  t.is_dirty = true
+}
+
+scale :: proc {
+  scale_uniform,
+  scale_xyz_vec,
+}
+
+scale_uniform :: proc "contextless" (t: ^Transform, s: f32) {
   t.scale = {s, s, s}
   t.is_dirty = true
 }

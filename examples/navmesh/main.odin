@@ -359,8 +359,7 @@ update_position_marker :: proc(
 }
 
 update_agent_position :: proc(engine: ^mjolnir.Engine) {
-  pos := agent_pos + [3]f32{0, 1, 0}
-  world.translate(&engine.world, agent_handle, pos.x, pos.y, pos.z)
+  world.translate(&engine.world, agent_handle, agent_pos + [3]f32{0, 1, 0})
 }
 
 visualize_path :: proc(engine: ^mjolnir.Engine) {

@@ -141,30 +141,28 @@ apply_light_settings :: proc(engine: ^mjolnir.Engine) {
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Orbit the point light so user sees range/falloff move
   point_orbit_phase += delta_time * 0.7
-  if pn, ok := world.node(&engine.world, point_light); ok {
-    world.translate(
-      &pn.transform,
-      math.cos(point_orbit_phase) * 4.0,
-      2.5 + math.sin(point_orbit_phase * 1.3) * 0.8,
-      math.sin(point_orbit_phase) * 4.0,
-    )
-  }
+  world.translate(
+    &engine.world,
+    point_light,
+    math.cos(point_orbit_phase) * 4.0,
+    2.5 + math.sin(point_orbit_phase * 1.3) * 0.8,
+    math.sin(point_orbit_phase) * 4.0,
+  )
   // Sweep spot light around scene, always aim at center
   spot_sweep_phase += delta_time * 0.5
-  if sn, ok := world.node(&engine.world, spot_light); ok {
-    pos := [3]f32 {
-      math.cos(spot_sweep_phase) * 6.0,
-      5.0 + math.sin(spot_sweep_phase * 0.7) * 1.5,
-      math.sin(spot_sweep_phase) * 6.0,
-    }
-    world.translate(&sn.transform, pos.x, pos.y, pos.z)
-    target := [3]f32{0, 0.5, 0}
-    dir := linalg.normalize(target - pos)
-    world.rotate(
-      &sn.transform,
-      linalg.quaternion_between_two_vector3(linalg.VECTOR3F32_Z_AXIS, dir),
-    )
+  pos := [3]f32 {
+    math.cos(spot_sweep_phase) * 6.0,
+    5.0 + math.sin(spot_sweep_phase * 0.7) * 1.5,
+    math.sin(spot_sweep_phase) * 6.0,
   }
+  world.translate(&engine.world, spot_light, pos)
+  target := [3]f32{0, 0.5, 0}
+  dir := linalg.normalize(target - pos)
+  world.rotate(
+    &engine.world,
+    spot_light,
+    linalg.quaternion_between_two_vector3(linalg.VECTOR3F32_Z_AXIS, dir),
+  )
   apply_light_settings(engine)
 }
 

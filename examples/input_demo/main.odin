@@ -136,10 +136,8 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     cube_pos.x = clamp(cube_pos.x + move.x * speed, -7.5, 7.5)
     cube_pos.z = clamp(cube_pos.z + move.z * speed, -7.5, 7.5)
   }
-  if cn, ok := world.node(&engine.world, cube_handle); ok {
-    world.translate(&cn.transform, cube_pos.x, cube_pos.y, cube_pos.z)
-    world.rotate(&cn.transform, quat_y(cube_yaw))
-  }
+  world.translate(&engine.world, cube_handle, cube_pos)
+  world.rotate(&engine.world, cube_handle, quat_y(cube_yaw))
 
   world.set_light_intensity(&engine.world, light_handle, f32(light_intensity))
 }

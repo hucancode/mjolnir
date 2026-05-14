@@ -133,7 +133,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     pole := [3]f32{0.0, 5.0, 0.0}
     world.set_ik_layer_target(&engine.world, fox_handle, ik_layer, pos, pole)
     if world.valid(&engine.world, target_cube) {
-      world.translate(&engine.world, target_cube, pos.x, pos.y, pos.z)
+      world.translate(&engine.world, target_cube, pos)
     }
   }
 }

@@ -658,6 +658,44 @@ add_ik_layer :: proc(
   return result_index, true
 }
 
+// Add an IK layer by walking the skeleton from `root_name` down to `tip_name`.
+// Resolves the bone chain internally — caller never deals with indices.
+add_ik_layer_chain :: proc(
+  world: ^World,
+  node_handle: NodeHandle,
+  root_name, tip_name: string,
+  target_pos: [3]f32,
+  pole_pos: [3]f32,
+  weight: f32 = 1.0,
+  max_iterations: int = 10,
+  tolerance: f32 = 0.001,
+  layer_index: int = -1,
+  constraints: []anim.IKBoneConstraint = nil,
+  space: anim.IKTargetSpace = .LOCAL,
+) -> (index: int, err: AnimationError) {
+  node, has_node := cont.get(world.nodes, node_handle)
+  if !has_node do return -1, .NODE_NOT_FOUND
+  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return -1, .NOT_A_MESH
+  mesh, has_mesh := cont.get(world.meshes, mesh_attachment.handle)
+  if !has_mesh do return -1, .NO_MESH_RESOURCE
+  bone_indices, chain_ok := find_bone_chain(mesh, root_name, tip_name)
+  if !chain_ok do return -1, .INVALID_CHAIN
+  return add_ik_layer_by_indices(
+    world,
+    node_handle,
+    bone_indices,
+    target_pos,
+    pole_pos,
+    weight,
+    max_iterations,
+    tolerance,
+    layer_index,
+    constraints,
+    space,
+  )
+}
+
 // Add an IK layer using pre-resolved bone indices. Skips per-name lookups and
 // validates structurally — see `find_bone_chain` for resolving names to a
 // chain. `bone_indices` ownership transfers to the layer.
@@ -967,20 +1005,23 @@ add_path_modifier_layer :: proc(
   return result_index, true
 }
 
+// Single struct describing one leg of a spider rig. Replaces the four parallel
+// slices `add_spider_leg_modifier_layer` used to take.
+SpiderLegSpec :: struct {
+  root_name:    string,
+  chain_length: u32,
+  config:       anim.SpiderLegConfig,
+  constraints:  []anim.IKBoneConstraint, // nil = unconstrained
+}
+
 add_spider_leg_modifier_layer :: proc(
   world: ^World,
   node_handle: NodeHandle,
-  leg_root_names: []string,
-  leg_chain_lengths: []u32,
-  leg_configs: []anim.SpiderLegConfig,
+  legs_spec: []SpiderLegSpec,
   weight: f32 = 1.0,
   layer_index: int = -1,
-  constraints: [][]anim.IKBoneConstraint = nil,
 ) -> (index: int, ok: bool) #optional_ok {
-  if len(leg_root_names) != len(leg_chain_lengths) do return -1, false
-  if len(leg_root_names) != len(leg_configs) do return -1, false
-  if len(leg_root_names) == 0 do return -1, false
-  if constraints != nil && len(constraints) != len(leg_root_names) do return -1, false
+  if len(legs_spec) == 0 do return -1, false
 
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
@@ -991,17 +1032,25 @@ add_spider_leg_modifier_layer :: proc(
 
   mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
 
-  num_legs := len(leg_root_names)
+  num_legs := len(legs_spec)
   all_bone_indices := make([dynamic]u32, 0, context.temp_allocator)
   chain_starts := make([]u32, num_legs)
   chain_lengths := make([]u32, num_legs)
   legs := make([]anim.SpiderLeg, num_legs)
 
+  has_constraints := false
+  for spec in legs_spec do if spec.constraints != nil { has_constraints = true; break }
+  constraints: [][]anim.IKBoneConstraint
+  if has_constraints {
+    constraints = make([][]anim.IKBoneConstraint, num_legs)
+  }
+
   for i in 0 ..< num_legs {
+    spec := legs_spec[i]
     leg_indices, chain_ok := resolve_bone_chain(
       mesh,
-      leg_root_names[i],
-      leg_chain_lengths[i],
+      spec.root_name,
+      spec.chain_length,
     )
     if !chain_ok do return -1, false
     defer delete(leg_indices)
@@ -1013,15 +1062,17 @@ add_spider_leg_modifier_layer :: proc(
       append(&all_bone_indices, idx)
     }
 
-    cfg := leg_configs[i]
     anim.spider_leg_init(
       &legs[i],
-      cfg.initial_offset,
-      cfg.lift_height,
-      cfg.lift_frequency,
-      cfg.lift_duration,
-      cfg.time_offset,
+      spec.config.initial_offset,
+      spec.config.lift_height,
+      spec.config.lift_frequency,
+      spec.config.lift_duration,
+      spec.config.time_offset,
     )
+    if has_constraints {
+      constraints[i] = spec.constraints
+    }
   }
 
   bone_indices := make([]u32, len(all_bone_indices))

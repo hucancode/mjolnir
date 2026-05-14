@@ -5,60 +5,45 @@ import "../geometry"
 import "core:math/linalg"
 
 translate_by :: proc {
-  geometry.translate_by,
-  node_translate_by,
+  node_translate_by_xyz,
+  node_translate_by_vec,
 }
 
 translate :: proc {
-  geometry.translate,
-  node_translate,
+  node_translate_xyz,
+  node_translate_vec,
 }
 
 rotate_by :: proc {
-  geometry.rotate_by_quaternion,
-  geometry.rotate_by_angle,
   node_rotate_by_quaternion,
   node_rotate_by_angle,
 }
 
 rotate :: proc {
-  geometry.rotate_quaternion,
-  geometry.rotate_angle,
   node_rotate_quaternion,
   node_rotate_angle,
 }
 
 scale_xyz_by :: proc {
-  geometry.scale_xyz_by,
-  node_scale_xyz_by,
+  node_scale_xyz_by_args,
+  node_scale_xyz_by_vec,
 }
 
 scale_by :: proc {
-  geometry.scale_by,
   node_scale_by,
 }
 
 scale_xyz :: proc {
-  geometry.scale_xyz,
-  node_scale_xyz,
+  node_scale_xyz_args,
+  node_scale_xyz_vec,
 }
 
 scale :: proc {
-  geometry.scale,
-  node_scale,
+  node_scale_uniform,
+  node_scale_xyz_vec,
 }
 
-node_rotate_by :: proc {
-  node_rotate_by_quaternion,
-  node_rotate_by_angle,
-}
-
-node_rotate :: proc {
-  node_rotate_quaternion,
-  node_rotate_angle,
-}
-
-node_translate_by :: proc(
+node_translate_by_xyz :: proc(
   world: ^World,
   handle: NodeHandle,
   x: f32 = 0,
@@ -66,11 +51,21 @@ node_translate_by :: proc(
   z: f32 = 0,
 ) {
   if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.translate_by(&node.transform, x, y, z)
+    geometry.translate_by_xyz(&node.transform, x, y, z)
   }
 }
 
-node_translate :: proc(
+node_translate_by_vec :: proc(
+  world: ^World,
+  handle: NodeHandle,
+  v: [3]f32,
+) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.translate_by_vec(&node.transform, v)
+  }
+}
+
+node_translate_xyz :: proc(
   world: ^World,
   handle: NodeHandle,
   x: f32 = 0,
@@ -78,7 +73,13 @@ node_translate :: proc(
   z: f32 = 0,
 ) {
   if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.translate(&node.transform, x, y, z)
+    geometry.translate_xyz(&node.transform, x, y, z)
+  }
+}
+
+node_translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.translate_vec(&node.transform, v)
   }
 }
 
@@ -124,7 +125,7 @@ node_rotate_angle :: proc(
   }
 }
 
-node_scale_xyz_by :: proc(
+node_scale_xyz_by_args :: proc(
   world: ^World,
   handle: NodeHandle,
   x: f32 = 1,
@@ -132,7 +133,13 @@ node_scale_xyz_by :: proc(
   z: f32 = 1,
 ) {
   if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.scale_xyz_by(&node.transform, x, y, z)
+    geometry.scale_xyz_by_args(&node.transform, x, y, z)
+  }
+}
+
+node_scale_xyz_by_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.scale_xyz_by_vec(&node.transform, v)
   }
 }
 
@@ -142,7 +149,7 @@ node_scale_by :: proc(world: ^World, handle: NodeHandle, s: f32) {
   }
 }
 
-node_scale_xyz :: proc(
+node_scale_xyz_args :: proc(
   world: ^World,
   handle: NodeHandle,
   x: f32 = 1,
@@ -150,12 +157,18 @@ node_scale_xyz :: proc(
   z: f32 = 1,
 ) {
   if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.scale_xyz(&node.transform, x, y, z)
+    geometry.scale_xyz_args(&node.transform, x, y, z)
   }
 }
 
-node_scale :: proc(world: ^World, handle: NodeHandle, s: f32) {
+node_scale_xyz_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.scale(&node.transform, s)
+    geometry.scale_xyz_vec(&node.transform, v)
+  }
+}
+
+node_scale_uniform :: proc(world: ^World, handle: NodeHandle, s: f32) {
+  if node, ok := cont.get(world.nodes, handle); ok {
+    geometry.scale_uniform(&node.transform, s)
   }
 }

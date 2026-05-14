@@ -92,8 +92,7 @@ main :: proc() {
       )
       normalized := current_s / total_length
       tweened := ease.ease(.Quadratic_In_Out, normalized) * total_length
-      pos := animation.spline_sample_uniform(spline, tweened)
-      world.translate(&engine.world, cubes[i], pos.x, pos.y, pos.z)
+      world.translate(&engine.world, cubes[i], animation.spline_sample_uniform(spline, tweened))
     }
   }
   mjolnir.run(engine, 800, 600, "Spline")

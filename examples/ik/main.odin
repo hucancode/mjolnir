@@ -6,15 +6,12 @@ import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
-import "core:math/linalg"
 import mu "vendor:microui"
 
 root_nodes: [dynamic]world.NodeHandle
 animation_time: f32 = 0
 spider_root_node: world.NodeHandle
 mesh_node: world.NodeHandle
-target_markers: [6]world.NodeHandle
-pole_markers: [6]world.NodeHandle
 ground_plane: world.NodeHandle
 
 // Fixed ground targets for each leg (computed from initial pose)
@@ -55,9 +52,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Position the spider
   for handle in spider_roots {
-    node := world.node(&engine.world, handle) or_continue
     spider_root_node = handle
-    world.translate(&node.transform, 0, 5, 0)
+    world.translate(&engine.world, handle, [3]f32{0, 5, 0})
   }
 
   // Leg configurations: root bone, tip bone
@@ -73,160 +69,60 @@ setup :: proc(engine: ^mjolnir.Engine) {
     {"leg_back_l_0", "leg_back_l_5"},
   }
 
-  // Find the skinned mesh node and set up IK for each leg
+  body_pos := [3]f32{0, 5, 0}
+  deg30 := f32(math.PI / 6.0)
+  deg90 := f32(math.PI / 2.0)
+
   for handle in spider_roots {
-    root_node := world.node(&engine.world, handle) or_continue
+    child, _, mesh_attachment, has_mesh := world.find_first_mesh_child(&engine.world, handle)
+    if !has_mesh do continue
+    mesh := world.mesh(&engine.world, mesh_attachment.handle) or_continue
+    if _, has_skin := mesh.skinning.?; !has_skin do continue
+    mesh_node = child
 
-    for child in root_node.children {
-      child_node := world.node(&engine.world, child) or_continue
-      mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
-      if !has_mesh {
+    for i in 0 ..< 6 {
+      root_name := leg_configs[i].root_name
+      tip_name := leg_configs[i].tip_name
+
+      tip_local, has_tip := world.bone_rest_position(mesh, tip_name)
+      if !has_tip {
+        log.warnf("Leg %d: tip %s missing", i, tip_name)
         continue
       }
+      leg_targets[i] = {tip_local.x + body_pos.x, 0, tip_local.z + body_pos.z}
 
-      mesh_node = child
-
-      mesh := world.mesh(&engine.world, mesh_attachment.handle) or_continue
-      skin, has_skin := mesh.skinning.?
-      if !has_skin {
-        continue
+      pole_pos := [3]f32{0, 10, 0}
+      if root_local, has_root := world.bone_rest_position(mesh, root_name); has_root {
+        root_world := root_local + body_pos
+        pole_pos = {root_world.x * 0.5, root_world.y + 10, root_world.z * 0.5}
       }
 
-      // Get initial body position
-      body_pos := [3]f32{0, 5, 0}
+      // Root (index 0): swing X/Z <= 30°, twist Y <= 90°. Others: 90° on all.
+      constraints := anim.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90})
 
-      // For each leg, find all bones in the chain and calculate initial target
-      for i in 0 ..< 6 {
-        root_name := leg_configs[i].root_name
-        tip_name := leg_configs[i].tip_name
-
-        bone_indices, chain_ok := world.find_bone_chain(mesh, root_name, tip_name)
-        if !chain_ok {
-          log.warnf("Could not find bone chain for leg %d", i)
-          continue
-        }
-
-        log.infof("Leg %d chain: %v bones", i, len(bone_indices))
-
-        // Calculate initial tip position in world space from bind pose
-        tip_bone_idx := -1
-        for bone, idx in skin.bones {
-          if bone.name == tip_name {
-            tip_bone_idx = idx
-            break
-          }
-        }
-
-        if tip_bone_idx >= 0 {
-          // Get bind matrix (rest pose) and compute world position
-          tip_bind := linalg.matrix4_inverse(
-            skin.bones[tip_bone_idx].inverse_bind_matrix,
-          )
-          tip_local_pos := tip_bind[3].xyz
-
-          // Transform to world space (apply body position)
-          tip_world_pos := tip_local_pos + body_pos
-          // Set Y to ground level (0) so legs stick to ground
-          leg_targets[i] = {tip_world_pos.x, 0, tip_world_pos.z}
-
-          log.infof(
-            "Leg %d target: %v (tip local: %v)",
-            i,
-            leg_targets[i],
-            tip_local_pos,
-          )
-        }
-
-        // Calculate pole position (above and behind the leg root for natural bending)
-        root_bone_idx := -1
-        for bone, idx in skin.bones {
-          if bone.name == root_name {
-            root_bone_idx = idx
-            break
-          }
-        }
-
-        pole_pos := [3]f32{0, 10, 0}
-        if root_bone_idx >= 0 {
-          root_bind := linalg.matrix4_inverse(
-            skin.bones[root_bone_idx].inverse_bind_matrix,
-          )
-          root_local_pos := root_bind[3].xyz
-          root_world_pos := root_local_pos + body_pos
-          // Pole is above and slightly toward center
-          pole_pos = {
-            root_world_pos.x * 0.5,
-            root_world_pos.y + 10,
-            root_world_pos.z * 0.5,
-          }
-        }
-
-        // Build per-bone rotation constraints.
-        // Root (index 0): swing X/Z <= 30deg, twist Y <= 90deg.
-        // Others: X/Y/Z <= 45deg.
-        constraints := make([]anim.IKBoneConstraint, len(bone_indices))
-        deg30 := f32(math.PI / 6.0)
-        deg90 := f32(math.PI / 2.0)
-        constraints[0] = anim.IKBoneConstraint{max_angle = {deg30, deg90, deg30}}
-        for j in 1 ..< len(bone_indices) {
-          constraints[j] = anim.IKBoneConstraint{max_angle = {deg90, deg90, deg90}}
-        }
-
-        idx, err := world.add_ik_layer_by_indices(
-          &engine.world,
-          child,
-          bone_indices,
-          leg_targets[i],
-          pole_pos,
-          weight = 1.0,
-          constraints = constraints,
-          space = .WORLD,
-        )
-        if err != .NONE {
-          log.errorf("IK layer add failed leg %d: %v", i, err)
-        } else {
-          leg_layers[i] = idx
-        }
+      idx, err := world.add_ik_layer_chain(
+        &engine.world,
+        child,
+        root_name,
+        tip_name,
+        leg_targets[i],
+        pole_pos,
+        weight = 1.0,
+        constraints = constraints,
+        space = .WORLD,
+      )
+      if err != .NONE {
+        log.errorf("IK layer add failed leg %d: %v", i, err)
+      } else {
+        leg_layers[i] = idx
       }
-
-      break
     }
+    break
   }
 
-  mat := world.get_builtin_material(&engine.world, .YELLOW)
-
-  // Find the skinned mesh and create markers for bones
-  for handle in root_nodes {
-    node := world.node(&engine.world, handle) or_continue
-    for child in node.children {
-      child_node := world.node(&engine.world, child) or_continue
-      mesh_attachment, has_mesh := &child_node.attachment.(world.MeshAttachment)
-      if !has_mesh {
-        continue
-      }
-
-      mesh := world.mesh(&engine.world, mesh_attachment.handle) or_continue
-      skin, has_skin := mesh.skinning.?
-      if !has_skin {
-        continue
-      }
-      log.infof("Found skinned mesh with %d bones", len(skin.bones))
-    }
-  }
-
-  // Create visual markers for each leg target (red spheres) and pole (blue)
-  for i in 0 ..< 6 {
-    target_markers[i] = world.spawn_primitive_mesh(&engine.world, .SPHERE, .RED)
-    world.scale(&engine.world, target_markers[i], 0.5)
-    tgt := leg_targets[i]
-    world.translate(&engine.world, target_markers[i], tgt.x, tgt.y, tgt.z)
-
-    pole_markers[i] = world.spawn_primitive_mesh(&engine.world, .SPHERE, .BLUE)
-    world.scale(&engine.world, pole_markers[i], 0.3)
-  }
 
   ground_plane = world.spawn_primitive_mesh(&engine.world, .CUBE, .GRAY)
-  world.scale_xyz(&engine.world, ground_plane, 40, 0.2, 40)
+  world.scale(&engine.world, ground_plane, [3]f32{40, 0.2, 40})
 
   world.spawn_light_directional(
     &engine.world,
@@ -244,9 +140,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   body_x := amp * math.sin(animation_time * spd * 2 * math.PI)
   body_pos := [3]f32{body_x, 0, 0}
 
-  if node := world.node(&engine.world, spider_root_node); node != nil {
-    world.translate(&node.transform, body_pos.x, body_pos.y, body_pos.z)
-  }
+  world.translate(&engine.world, spider_root_node, body_pos)
 
   for i in 0 ..< 6 {
     pole_pos := [3]f32 {
@@ -264,10 +158,10 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       world.set_ik_layer_target(&engine.world, mesh_node, leg_layers[i], target_pos, pole_pos)
       world.set_animation_layer_weight(&engine.world, mesh_node, leg_layers[i], f32(ik_weight))
     }
-    marker_y: f32 = show_markers ? target_pos.y : -1000.0
-    pole_y: f32 = show_markers ? pole_pos.y : -1000.0
-    world.translate(&engine.world, target_markers[i], target_pos.x, marker_y, target_pos.z)
-    world.translate(&engine.world, pole_markers[i], pole_pos.x, pole_y, pole_pos.z)
+    if show_markers {
+      mjolnir.debug_sphere(engine, target_pos, 0.5, {1, 0.2, 0.2, 1})
+      mjolnir.debug_sphere(engine, pole_pos, 0.3, {0.3, 0.5, 1, 1})
+    }
   }
 }
 

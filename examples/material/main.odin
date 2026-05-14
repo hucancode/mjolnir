@@ -115,9 +115,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
   q2 := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
   light, _ := world.spawn_light_directional(&engine.world, {0, 10, 0}, {1, 0.97, 0.92, 5}, 12.0)
-  if n, ok := world.node(&engine.world, light); ok {
-    world.rotate(&n.transform, q2 * q1)
-  }
+  world.rotate(&engine.world, light, q2 * q1)
 }
 
 hsv_to_rgb :: proc(h, s, v: f32) -> (rgb: [3]f32) {

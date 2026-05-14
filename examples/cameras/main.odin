@@ -100,9 +100,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     0.6,
     4.0 * math.sin(runner_phase * 2.0),
   }
-  if rn, ok := world.node(&engine.world, runner_handle); ok {
-    world.translate(&rn.transform, follow_target.x, follow_target.y, follow_target.z)
-  }
+  world.translate(&engine.world, runner_handle, follow_target)
 
   // Live-update controller params from sliders, no rebuild
   if orbit, ok := &engine.world.orbit_controller.data.(world.OrbitCameraData);

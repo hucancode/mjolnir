@@ -205,8 +205,7 @@ refresh_active_visuals :: proc(w: ^world.World) {
   for c, i in state.active_piece.cells {
     col := wrap_col(state.active_pos[0] + c[0])
     row := state.active_pos[1] + c[1]
-    p := cell_world_pos(col, row)
-    world.translate(w, state.active_cells[i], p.x, p.y, p.z)
+    world.translate(w, state.active_cells[i], cell_world_pos(col, row))
     world.rotate(w, state.active_cells[i], -col_angle(col), {0, 1, 0})
   }
 }
@@ -273,8 +272,7 @@ clear_lines :: proc(engine: ^mjolnir.Engine) -> int {
         state.board[col][r2] = state.board[col][r2 + 1]
         state.occupied[col][r2] = state.occupied[col][r2 + 1]
         if state.occupied[col][r2] {
-          p := cell_world_pos(i32(col), i32(r2))
-          world.translate(&engine.world, state.board[col][r2], p.x, p.y, p.z)
+          world.translate(&engine.world, state.board[col][r2], cell_world_pos(i32(col), i32(r2)))
         }
       }
     }

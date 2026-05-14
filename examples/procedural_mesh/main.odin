@@ -263,9 +263,9 @@ set_spin :: proc(
 ) {
   if n, ok := world.node(w, h); ok {
     n.visible = visible
-    world.translate(&n.transform, pos.x, pos.y, pos.z)
-    world.rotate(&n.transform, q)
   }
+  world.translate(w, h, pos)
+  world.rotate(w, h, q)
 }
 
 quat_y :: proc(angle: f32) -> quaternion128 {

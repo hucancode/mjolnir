@@ -81,10 +81,7 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
   if radius < 0.001 do radius = 1
 
   world.set_mesh_handle(&engine.world, display_node, loaded_meshes[index])
-  if n, ok := world.node(&engine.world, display_node); ok {
-    neg := -center
-    world.translate(&n.transform, neg.x, neg.y, neg.z)
-  }
+  world.translate(&engine.world, display_node, -center)
 
   cam_dist := radius * 1.8
   if cam, ok := cont.get(engine.world.cameras, engine.world.main_camera); ok {

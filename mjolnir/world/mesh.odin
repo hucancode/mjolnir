@@ -174,6 +174,24 @@ find_bone_chain :: proc(
   return out, true
 }
 
+// Rest-pose position of a bone in mesh-local space.
+// Uses cached `bind_matrices` (inverse of `inverse_bind_matrix`)
+bone_rest_position :: proc(self: ^Mesh, name: string) -> (pos: [3]f32, ok: bool) #optional_ok {
+  skin, has_skin := &self.skinning.?
+  if !has_skin do return
+  idx := find_bone_by_name(self, name) or_return
+  if int(idx) >= len(skin.bind_matrices) do return
+  pos = skin.bind_matrices[idx][3].xyz
+  return pos, true
+}
+
+// Rest-pose offset (tip - root) in mesh-local space.
+bone_rest_offset :: proc(self: ^Mesh, root_name, tip_name: string) -> (offset: [3]f32, ok: bool) #optional_ok {
+  root := bone_rest_position(self, root_name) or_return
+  tip := bone_rest_position(self, tip_name) or_return
+  return tip - root, true
+}
+
 // Build parent index map for efficient traversal
 // Returns map of child_index -> parent_index
 build_bone_parent_map :: proc(

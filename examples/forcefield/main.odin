@@ -81,7 +81,5 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   t := mjolnir.time_since_start(engine)
-  if n, ok := world.node(&engine.world, ff_handle); ok {
-    world.rotate(&n.transform, t * 1.2, linalg.VECTOR3F32_Y_AXIS)
-  }
+  world.rotate(&engine.world, ff_handle, t * 1.2, linalg.VECTOR3F32_Y_AXIS)
 }

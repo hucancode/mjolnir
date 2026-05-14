@@ -237,13 +237,11 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       a.velocity = {0, 0, 0}
     }
 
-    if n, ok := world.node(&engine.world, a.node); ok {
-      pos := a.pos + [3]f32{0, AGENT_HEIGHT * 0.5, 0}
-      world.translate(&n.transform, pos.x, pos.y, pos.z)
-      if linalg.length2(a.velocity.xz) > 0.01 {
-        yaw := math.atan2(a.velocity.x, a.velocity.z)
-        world.rotate(&n.transform, yaw, linalg.VECTOR3F32_Y_AXIS)
-      }
+    pos := a.pos + [3]f32{0, AGENT_HEIGHT * 0.5, 0}
+    world.translate(&engine.world, a.node, pos)
+    if linalg.length2(a.velocity.xz) > 0.01 {
+      yaw := math.atan2(a.velocity.x, a.velocity.z)
+      world.rotate(&engine.world, a.node, yaw, linalg.VECTOR3F32_Y_AXIS)
     }
   }
 }
