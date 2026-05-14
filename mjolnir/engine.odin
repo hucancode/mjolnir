@@ -99,6 +99,22 @@ Engine :: struct {
   last_render_timestamp:     time.Time,
   camera_controller_enabled: bool,
   ui_hovered_widget:         Maybe(ui_module.UIWidgetHandle),
+  // Set on PRESS when debug UI captured the click. Cleared on RELEASE.
+  // Used so the matching RELEASE is also withheld from user procs and
+  // camera controller, regardless of where the cursor ends up.
+  ui_captured_mouse_button:  [8]bool,
+}
+
+// True when the debug UI is hovered or has an active pop-up. Mouse input
+// (click / move / scroll) should not propagate to camera or game callbacks.
+debug_ui_wants_mouse :: proc(self: ^Engine) -> bool {
+  return self.render.debug_ui.ctx.hover_root != nil
+}
+
+// True when the debug UI has keyboard focus (e.g. text box). Keyboard input
+// should not propagate to camera or game callbacks.
+debug_ui_wants_keyboard :: proc(self: ^Engine) -> bool {
+  return self.render.debug_ui.ctx.focus_id != 0
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -174,7 +190,7 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-      if engine.key_press_proc != nil {
+      if engine.key_press_proc != nil && !debug_ui_wants_keyboard(engine) {
         engine.key_press_proc(engine, int(key), int(action), int(mods))
       }
       mu_key: mu.Key
@@ -242,7 +258,25 @@ init :: proc(
       case glfw.RELEASE:
         mu.input_mouse_up(&engine.render.debug_ui.ctx, x, y, mu_btn)
       }
-      if engine.mouse_press_proc != nil {
+      btn_idx := int(button)
+      captured := false
+      switch action {
+      case glfw.PRESS, glfw.REPEAT:
+        if debug_ui_wants_mouse(engine) {
+          if btn_idx >= 0 && btn_idx < len(engine.ui_captured_mouse_button) {
+            engine.ui_captured_mouse_button[btn_idx] = true
+          }
+          captured = true
+        }
+      case glfw.RELEASE:
+        if btn_idx >= 0 && btn_idx < len(engine.ui_captured_mouse_button) {
+          if engine.ui_captured_mouse_button[btn_idx] {
+            engine.ui_captured_mouse_button[btn_idx] = false
+            captured = true
+          }
+        }
+      }
+      if engine.mouse_press_proc != nil && !captured {
         engine.mouse_press_proc(engine, int(button), int(action), int(mods))
       }
     },
@@ -258,7 +292,15 @@ init :: proc(
         engine.cursor_pos.x,
         engine.cursor_pos.y,
       )
-      if engine.mouse_move_proc != nil {
+      drag_captured_by_ui := false
+      for held in engine.ui_captured_mouse_button {
+        if held {
+          drag_captured_by_ui = true
+          break
+        }
+      }
+      block := drag_captured_by_ui || debug_ui_wants_mouse(engine)
+      if engine.mouse_move_proc != nil && !block {
         engine.mouse_move_proc(engine, {xpos, ypos}, {0, 0}) // TODO: pass delta
       }
     },
@@ -273,6 +315,9 @@ init :: proc(
         -i32(math.round(xoffset)),
         -i32(math.round(yoffset)),
       )
+      if debug_ui_wants_mouse(engine) {
+        return
+      }
       if world.g_scroll_deltas == nil {
         world.g_scroll_deltas = make(map[glfw.WindowHandle]f32)
       }
@@ -1071,6 +1116,8 @@ update :: proc(self: ^Engine) -> bool {
   if self.camera_controller_enabled && self.world.active_controller != nil {
     main_camera := get_main_camera(self)
     if main_camera != nil {
+      self.world.active_controller.mouse_blocked = debug_ui_wants_mouse(self)
+      self.world.active_controller.keyboard_blocked = debug_ui_wants_keyboard(self)
       switch self.world.active_controller.type {
       case .ORBIT:
         world.camera_controller_orbit_update(
@@ -1127,7 +1174,7 @@ populate_debug_ui :: proc(self: ^Engine) {
     &self.render.debug_ui.ctx,
     "Engine",
     {40, 40, 200, 200},
-    {.NO_CLOSE},
+    {},
   ) {
     mu.label(
       &self.render.debug_ui.ctx,

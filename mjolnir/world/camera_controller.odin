@@ -41,17 +41,22 @@ FollowCameraData :: struct {
 }
 
 CameraController :: struct {
-  type:           CameraControllerType,
-  window:         glfw.WindowHandle,
-  data:           union {
+  type:             CameraControllerType,
+  window:           glfw.WindowHandle,
+  data:             union {
     OrbitCameraData,
     FreeCameraData,
     FollowCameraData,
   },
-  last_mouse_pos: [2]f64,
-  mouse_delta:    [2]f64,
-  scroll_delta:   f32,
-  is_orbiting:    bool,
+  last_mouse_pos:   [2]f64,
+  mouse_delta:      [2]f64,
+  scroll_delta:     f32,
+  is_orbiting:      bool,
+  // When set, mouse-driven motion (orbit start, free-look, scroll-zoom)
+  // is suppressed. Engine sets this per-frame from debug UI capture state.
+  // A drag already in progress (is_orbiting) is unaffected.
+  mouse_blocked:    bool,
+  keyboard_blocked: bool,
 }
 
 // NOTE: This is accessed by engine.odin to forward scroll events
@@ -157,8 +162,9 @@ camera_controller_orbit_update :: proc(
   left_button_pressed :=
     glfw.GetMouseButton(self.window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
   // Handle orbiting state transitions
-  if left_button_pressed && !self.is_orbiting {
-    // Mouse down - start orbiting
+  if left_button_pressed && !self.is_orbiting && !self.mouse_blocked {
+    // Mouse down - start orbiting. Suppressed when UI captures the click;
+    // an in-progress orbit (started outside UI) continues regardless.
     self.is_orbiting = true
     current_mouse_pos: [2]f64
     current_mouse_pos.x, current_mouse_pos.y = glfw.GetCursorPos(self.window)
@@ -240,26 +246,32 @@ camera_controller_free_update :: proc(
   // gather keyboard input for movement
   move_vector := [3]f32{0, 0, 0}
   speed := free.move_speed
-  // check for boost with shift key
-  if glfw.GetKey(self.window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS {
-    speed *= free.boost_multiplier
+  if !self.keyboard_blocked {
+    // check for boost with shift key
+    if glfw.GetKey(self.window, glfw.KEY_LEFT_SHIFT) == glfw.PRESS {
+      speed *= free.boost_multiplier
+    }
+    // WASD movement
+    if glfw.GetKey(self.window, glfw.KEY_W) == glfw.PRESS do move_vector += camera_forward(camera)
+    if glfw.GetKey(self.window, glfw.KEY_S) == glfw.PRESS do move_vector -= camera_forward(camera)
+    if glfw.GetKey(self.window, glfw.KEY_A) == glfw.PRESS do move_vector -= camera_right(camera)
+    if glfw.GetKey(self.window, glfw.KEY_D) == glfw.PRESS do move_vector += camera_right(camera)
+    if glfw.GetKey(self.window, glfw.KEY_Q) == glfw.PRESS do move_vector.y -= 1
+    if glfw.GetKey(self.window, glfw.KEY_E) == glfw.PRESS do move_vector.y += 1
   }
-  // WASD movement
-  if glfw.GetKey(self.window, glfw.KEY_W) == glfw.PRESS do move_vector += camera_forward(camera)
-  if glfw.GetKey(self.window, glfw.KEY_S) == glfw.PRESS do move_vector -= camera_forward(camera)
-  if glfw.GetKey(self.window, glfw.KEY_A) == glfw.PRESS do move_vector -= camera_right(camera)
-  if glfw.GetKey(self.window, glfw.KEY_D) == glfw.PRESS do move_vector += camera_right(camera)
-  if glfw.GetKey(self.window, glfw.KEY_Q) == glfw.PRESS do move_vector.y -= 1
-  if glfw.GetKey(self.window, glfw.KEY_E) == glfw.PRESS do move_vector.y += 1
   if linalg.length2(move_vector) > 0 {
     move_vector = linalg.normalize(move_vector) * speed * delta_time
     camera.position += move_vector
   }
-  // Always track mouse movement for free camera
+  // Always sample cursor — even when blocked — so resuming after the UI
+  // releases capture does not produce a huge accumulated delta.
   current_mouse_pos: [2]f64
   current_mouse_pos.x, current_mouse_pos.y = glfw.GetCursorPos(self.window)
   self.mouse_delta = current_mouse_pos - self.last_mouse_pos
   self.last_mouse_pos = current_mouse_pos
+  if self.mouse_blocked {
+    self.mouse_delta = {0, 0}
+  }
   // apply rotation based on mouse movement
   if self.mouse_delta.x != 0 || self.mouse_delta.y != 0 {
     yaw_delta := f32(self.mouse_delta.x) * free.mouse_sensitivity
