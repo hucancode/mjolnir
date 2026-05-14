@@ -16,6 +16,16 @@ IKBoneConstraint :: struct {
   max_angle: [3]f32,
 }
 
+// Coordinate space for IK target/pole values stored in the layer.
+// LOCAL : already in skeleton-local space. Solver consumes verbatim.
+// WORLD : in world space. sample_layers converts to local each frame
+//         using the current node world matrix, so the target stays fixed
+//         in the world as the rigged node moves.
+IKTargetSpace :: enum {
+  LOCAL,
+  WORLD,
+}
+
 // IK target for FABRIK solver (supports N bones, minimum 2)
 IKTarget :: struct {
   bone_indices:    []u32, // All bones in chain from root to end (min 2 bones)
@@ -28,6 +38,7 @@ IKTarget :: struct {
   tolerance:       f32, // Stop when end effector within this distance
   weight:          f32, // Blend weight (0-1), 1 = full IK, 0 = pure FK
   enabled:         bool,
+  space:           IKTargetSpace, // Space target_position and pole_vector live in
 }
 
 // Internal struct to store bone world transforms during IK solving

@@ -139,7 +139,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         leg_constraints[i] = chain
       }
 
-      if world.add_spider_leg_modifier_layer(
+      idx, ok := world.add_spider_leg_modifier_layer(
         &engine.world,
         child,
         leg_root_names,
@@ -148,10 +148,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
         weight = 1.0,
         layer_index = -1,
         constraints = leg_constraints,
-      ) {
+      )
+      if ok {
         spider_mesh_node = child
-        spider_leg_layer_index = 0
-        log.infof("Added spider leg modifiers for all 6 legs")
+        spider_leg_layer_index = idx
+        log.infof("Added spider leg modifiers for all 6 legs (layer %d)", spider_leg_layer_index)
       }
 
       break
@@ -251,7 +252,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
         if target, ok := world.get_spider_leg_target(
           &engine.world,
           child,
-          layer_index = 0,
+          layer_index = spider_leg_layer_index,
           leg_index = i,
         ); ok {
           if marker_node := world.node(&engine.world, target_markers[i]);

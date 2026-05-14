@@ -8,7 +8,8 @@ GPU-driven game engine in Odin + Vulkan 1.3.
 ## Get started
 
 To use Mjolnir, run `make shader` to compile shaders to SPIR-V and copy the
-`mjolnir/` directory into your project. See `examples/` for canonical usage.
+`mjolnir/` directory into your project. See `examples/` for canonical usage
+or [`examples.md`](examples.html) for video demos of every example.
 
 ## Notable features
 
@@ -71,7 +72,8 @@ make bench
    this first.** All other docs assume it.
 2. [`cookbook.md`](cookbook.html) — task-oriented recipes (cube, glTF,
    physics, animation blending, IK, particles, navmesh, post-process, UI).
-3. `api_*.md` — exhaustive per-module reference. One page per module.
+3. [`examples.md`](examples.html) — every example with a video clip.
+4. `api_*.md` — exhaustive per-module reference. One page per module.
 
 ## API reference index
 

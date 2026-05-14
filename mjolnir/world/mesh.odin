@@ -554,6 +554,10 @@ sample_layers :: proc(
     context.temp_allocator,
   )
 
+  // Lazily computed world→local matrix for converting world-space IK targets.
+  node_world_inv: matrix[4, 4]f32
+  node_world_inv_ready := false
+
   // Collect IK from layers
   for &layer in layers {
     if layer.weight <= 0 do continue
@@ -561,6 +565,14 @@ sample_layers :: proc(
     case animation.IKLayer:
       target := layer_data.target
       target.weight = layer.weight
+      if target.space == .WORLD {
+        if !node_world_inv_ready {
+          node_world_inv = linalg.matrix4_inverse(node_world_matrix)
+          node_world_inv_ready = true
+        }
+        target.target_position = world_to_skeleton_local(node_world_inv, target.target_position)
+        target.pole_vector = world_to_skeleton_local(node_world_inv, target.pole_vector)
+      }
       append(&all_ik_targets, target)
     case animation.FKLayer:
       continue
@@ -569,7 +581,16 @@ sample_layers :: proc(
 
   // Add external IK targets
   for target in ik_targets {
-    append(&all_ik_targets, target)
+    t := target
+    if t.space == .WORLD {
+      if !node_world_inv_ready {
+        node_world_inv = linalg.matrix4_inverse(node_world_matrix)
+        node_world_inv_ready = true
+      }
+      t.target_position = world_to_skeleton_local(node_world_inv, t.target_position)
+      t.pole_vector = world_to_skeleton_local(node_world_inv, t.pole_vector)
+    }
+    append(&all_ik_targets, t)
   }
 
   // Apply all IK

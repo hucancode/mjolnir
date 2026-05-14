@@ -3,9 +3,11 @@ package main
 import "../../mjolnir"
 import anim "../../mjolnir/animation"
 import "../../mjolnir/world"
+import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import mu "vendor:microui"
 
 root_nodes: [dynamic]world.NodeHandle
 animation_time: f32 = 0
@@ -17,20 +19,33 @@ ground_plane: world.NodeHandle
 
 // Fixed ground targets for each leg (computed from initial pose)
 leg_targets: [6][3]f32
+leg_layers:  [6]int = {-1, -1, -1, -1, -1, -1}
+
+body_amplitude: mu.Real = 2.5
+body_speed:     mu.Real = 0.15
+leg_lift:       mu.Real = 2.5
+ik_weight:      mu.Real = 1.0
+paused:         bool    = false
+show_markers:   bool    = true
+manual_feet:    bool    = false
+foot_y:         [6]mu.Real = {0, 0, 0, 0, 0, 0}
+
+LEG_NAMES := [6]string{"FR", "MR", "BR", "FL", "ML", "BL"}
 
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
+  engine.pre_render_proc = debug_ui
   mjolnir.run(engine, 800, 600, "IK")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  // engine.world.debug_draw_ik = true // Removed: debug_draw_ik no longer available
+  engine.debug_ui_enabled = true
   world.main_camera_look_at(
     &engine.world,
-    {0, 80, 120},
+    {0, 20, 20},
     {0, 0, 0},
   )
 
@@ -157,8 +172,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           constraints[j] = anim.IKBoneConstraint{max_angle = {deg90, deg90, deg90}}
         }
 
-        // Add IK layer for this leg
-        if err := world.add_ik_layer_by_indices(
+        idx, err := world.add_ik_layer_by_indices(
           &engine.world,
           child,
           bone_indices,
@@ -166,8 +180,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
           pole_pos,
           weight = 1.0,
           constraints = constraints,
-        ); err != .NONE {
+          space = .WORLD,
+        )
+        if err != .NONE {
           log.errorf("IK layer add failed leg %d: %v", i, err)
+        } else {
+          leg_layers[i] = idx
         }
       }
 
@@ -218,20 +236,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  // Move the spider body back and forth along the X axis
-  animation_time += delta_time
-  amplitude: f32 = 2.5
-  speed: f32 = 0.15
+  if !paused do animation_time += delta_time
+  amp := f32(body_amplitude)
+  spd := f32(body_speed)
+  lift := f32(leg_lift)
 
-  body_x := amplitude * math.sin(animation_time * speed * 2 * math.PI)
+  body_x := amp * math.sin(animation_time * spd * 2 * math.PI)
   body_pos := [3]f32{body_x, 0, 0}
 
-  // Move the spider body
   if node := world.node(&engine.world, spider_root_node); node != nil {
     world.translate(&node.transform, body_pos.x, body_pos.y, body_pos.z)
   }
 
-  // Update IK targets for each leg - targets stay fixed at ground positions
   for i in 0 ..< 6 {
     pole_pos := [3]f32 {
       leg_targets[i].x * 0.5 + body_pos.x * 0.5,
@@ -239,9 +255,43 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       leg_targets[i].z * 0.5,
     }
     target_pos := leg_targets[i]
-    target_pos.y += amplitude * math.max(math.sin(animation_time * speed * math.PI), 0)
-    world.set_ik_layer_target(&engine.world, mesh_node, i, target_pos, pole_pos)
-    world.translate(&engine.world, target_markers[i], target_pos.x, target_pos.y, target_pos.z)
-    world.translate(&engine.world, pole_markers[i], pole_pos.x, pole_pos.y, pole_pos.z)
+    if manual_feet {
+      target_pos.y += f32(foot_y[i])
+    } else {
+      target_pos.y += lift * math.max(math.sin(animation_time * spd * math.PI), 0)
+    }
+    if leg_layers[i] >= 0 {
+      world.set_ik_layer_target(&engine.world, mesh_node, leg_layers[i], target_pos, pole_pos)
+      world.set_animation_layer_weight(&engine.world, mesh_node, leg_layers[i], f32(ik_weight))
+    }
+    marker_y: f32 = show_markers ? target_pos.y : -1000.0
+    pole_y: f32 = show_markers ? pole_pos.y : -1000.0
+    world.translate(&engine.world, target_markers[i], target_pos.x, marker_y, target_pos.z)
+    world.translate(&engine.world, pole_markers[i], pole_pos.x, pole_y, pole_pos.z)
+  }
+}
+
+debug_ui :: proc(engine: ^mjolnir.Engine) {
+  ctx := mjolnir.ui_ctx(engine)
+  if mu.window(ctx, "IK", {480, 20, 300, 560}, {.NO_CLOSE}) {
+    mu.layout_row(ctx, {-1}, 0)
+    mu.checkbox(ctx, "Pause", &paused)
+    mu.checkbox(ctx, "Show markers", &show_markers)
+    mu.label(ctx, fmt.tprintf("Body amplitude: %.2f", body_amplitude))
+    mu.slider(ctx, &body_amplitude, 0.0, 6.0)
+    mu.label(ctx, fmt.tprintf("Body speed: %.2f", body_speed))
+    mu.slider(ctx, &body_speed, 0.0, 1.0)
+    mu.label(ctx, fmt.tprintf("IK weight: %.2f", ik_weight))
+    mu.slider(ctx, &ik_weight, 0.0, 1.0)
+    mu.checkbox(ctx, "Manual feet Y", &manual_feet)
+    if manual_feet {
+      for i in 0 ..< 6 {
+        mu.label(ctx, fmt.tprintf("%s foot Y: %.2f", LEG_NAMES[i], foot_y[i]))
+        mu.slider(ctx, &foot_y[i], 0.0, 6.0)
+      }
+    } else {
+      mu.label(ctx, fmt.tprintf("Leg lift: %.2f", leg_lift))
+      mu.slider(ctx, &leg_lift, 0.0, 6.0)
+    }
   }
 }

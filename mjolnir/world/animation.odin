@@ -251,10 +251,12 @@ play_animation :: proc(
   mode: anim.PlayMode = .LOOP,
   speed: f32 = 1.0,
 ) -> bool {
-  return add_animation_layer(world, node_handle, name, 1.0, mode, speed, 0)
+  _, ok := add_animation_layer(world, node_handle, name, 1.0, mode, speed, 0)
+  return ok
 }
 
-// Add or replace an animation layer at specified index
+// Add or replace an animation layer at specified index.
+// Returns the index of the new/replaced layer.
 add_animation_layer :: proc(
   world: ^World,
   node_handle: NodeHandle,
@@ -264,12 +266,12 @@ add_animation_layer :: proc(
   speed: f32 = 1.0,
   layer_index: int = -1, // -1 means append new layer
   blend_mode: anim.BlendMode = .REPLACE,
-) -> bool {
-  if world == nil do return false
+) -> (index: int, ok: bool) #optional_ok {
+  if world == nil do return -1, false
   node := cont.get(world.nodes, node_handle) or_return
-  mesh_attachment, ok := &node.attachment.(MeshAttachment)
-  if !ok do return false
-  cont.is_valid(world.meshes, mesh_attachment.handle) or_return
+  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return -1, false
+  if !cont.is_valid(world.meshes, mesh_attachment.handle) do return -1, false
   // Get or initialize skinning
   if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
     // Initialize skinning with empty layers
@@ -293,7 +295,7 @@ add_animation_layer :: proc(
       break
     }
   }
-  if !found do return false
+  if !found do return -1, false
   // Create new layer with handle
   layer: anim.Layer
   clip_handle_u64 := transmute(u64)clip_handle
@@ -307,13 +309,15 @@ add_animation_layer :: proc(
     blend_mode,
   )
   // Add or replace layer
+  result_index := layer_index
   if layer_index >= 0 && layer_index < len(skinning.layers) {
     skinning.layers[layer_index] = layer
   } else {
+    result_index = len(skinning.layers)
     append(&skinning.layers, layer)
   }
   register_animatable_node(world, node_handle)
-  return true
+  return result_index, true
 }
 
 // Add an animation layer using a pre-resolved clip handle. Skips the O(N) name
@@ -327,15 +331,15 @@ add_animation_layer_by_handle :: proc(
   speed: f32 = 1.0,
   layer_index: int = -1,
   blend_mode: anim.BlendMode = .REPLACE,
-) -> AnimationError {
-  if world == nil do return .NODE_NOT_FOUND
+) -> (index: int, err: AnimationError) {
+  if world == nil do return -1, .NODE_NOT_FOUND
   node, has_node := cont.get(world.nodes, node_handle)
-  if !has_node do return .NODE_NOT_FOUND
+  if !has_node do return -1, .NODE_NOT_FOUND
   mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
-  if !is_mesh do return .NOT_A_MESH
-  if !cont.is_valid(world.meshes, mesh_attachment.handle) do return .NO_MESH_RESOURCE
+  if !is_mesh do return -1, .NOT_A_MESH
+  if !cont.is_valid(world.meshes, mesh_attachment.handle) do return -1, .NO_MESH_RESOURCE
   clip, has_clip := cont.get(world.animation_clips, clip_handle)
-  if !has_clip do return .CLIP_NOT_FOUND
+  if !has_clip do return -1, .CLIP_NOT_FOUND
   if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
     mesh_attachment.skinning = NodeSkinning{}
   }
@@ -350,13 +354,15 @@ add_animation_layer_by_handle :: proc(
     speed,
     blend_mode,
   )
+  result_index := layer_index
   if layer_index >= 0 && layer_index < len(skinning.layers) {
     skinning.layers[layer_index] = layer
   } else {
+    result_index = len(skinning.layers)
     append(&skinning.layers, layer)
   }
   register_animatable_node(world, node_handle)
-  return .NONE
+  return result_index, .NONE
 }
 
 // Remove animation layer at specified index
@@ -563,22 +569,26 @@ world_to_skeleton_local :: proc(
   return local_h.xyz
 }
 
-// Add an IK layer at specified index
-// IK targets are in world space and will be converted to skeleton-local space internally
+// Add an IK layer at specified index.
+// Returns the index of the new/replaced layer.
+// `space` selects whether `target_pos`/`pole_pos` are kept in skeleton-local
+// space (converted once at add time) or in world space (re-converted each
+// frame so the target stays fixed in the world when the rigged node moves).
 add_ik_layer :: proc(
   world: ^World,
   node_handle: NodeHandle,
   bone_names: []string,
-  target_world_pos: [3]f32,
-  pole_world_pos: [3]f32,
+  target_pos: [3]f32,
+  pole_pos: [3]f32,
   weight: f32 = 1.0,
   max_iterations: int = 10,
   tolerance: f32 = 0.001,
   layer_index: int = -1, // -1 to append, >= 0 to replace existing layer
-) -> bool {
+  space: anim.IKTargetSpace = .LOCAL,
+) -> (index: int, ok: bool) #optional_ok {
   node := cont.get(world.nodes, node_handle) or_return
-  mesh_attachment, ok := &node.attachment.(MeshAttachment)
-  if !ok do return false
+  mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
+  if !is_mesh do return -1, false
   mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
   // Get or initialize skinning
   if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
@@ -586,26 +596,31 @@ add_ik_layer :: proc(
   }
   skinning := &mesh_attachment.skinning.?
   // Resolve bone names to indices
-  if len(bone_names) < 2 do return false
+  if len(bone_names) < 2 do return -1, false
   bone_indices := make([]u32, len(bone_names))
   for name, i in bone_names {
-    idx, ok := find_bone_by_name(mesh, name)
-    if !ok {
+    idx, found := find_bone_by_name(mesh, name)
+    if !found {
       delete(bone_indices)
-      return false
+      return -1, false
     }
     bone_indices[i] = idx
   }
-  // Transform IK target from world space to skeleton-local space
-  node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
-  target_local := world_to_skeleton_local(node_world_inv, target_world_pos)
-  pole_local := world_to_skeleton_local(node_world_inv, pole_world_pos)
+  // Resolve target storage: LOCAL converts up-front, WORLD stays as-is and
+  // sample_layers reconverts every frame.
+  stored_target := target_pos
+  stored_pole := pole_pos
+  if space == .LOCAL {
+    node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
+    stored_target = world_to_skeleton_local(node_world_inv, target_pos)
+    stored_pole = world_to_skeleton_local(node_world_inv, pole_pos)
+  }
 
   // Pre-compute and cache bone lengths for IK chain
   mesh_skin, has_mesh_skin := mesh.skinning.?
   if !has_mesh_skin {
     delete(bone_indices)
-    return false
+    return -1, false
   }
   chain_length := len(bone_names)
   bone_lengths := make([]f32, chain_length - 1)
@@ -614,16 +629,16 @@ add_ik_layer :: proc(
     bone_lengths[i] = mesh_skin.bone_lengths[child_bone_idx]
   }
 
-  // Create IK target (in skeleton-local space)
   ik_target := anim.IKTarget {
     bone_indices    = bone_indices,
     bone_lengths    = bone_lengths,
-    target_position = target_local,
-    pole_vector     = pole_local,
+    target_position = stored_target,
+    pole_vector     = stored_pole,
     max_iterations  = max_iterations,
     tolerance       = tolerance,
     weight          = clamp(weight, 0.0, 1.0),
     enabled         = true,
+    space           = space,
   }
 
   // Create IK layer
@@ -631,14 +646,16 @@ add_ik_layer :: proc(
   anim.layer_init_ik(&layer, ik_target, weight)
 
   // Add or replace layer
+  result_index := layer_index
   if layer_index >= 0 && layer_index < len(skinning.layers) {
     skinning.layers[layer_index] = layer
   } else {
+    result_index = len(skinning.layers)
     append(&skinning.layers, layer)
   }
 
   register_animatable_node(world, node_handle)
-  return true
+  return result_index, true
 }
 
 // Add an IK layer using pre-resolved bone indices. Skips per-name lookups and
@@ -648,32 +665,38 @@ add_ik_layer_by_indices :: proc(
   world: ^World,
   node_handle: NodeHandle,
   bone_indices: []u32,
-  target_world_pos: [3]f32,
-  pole_world_pos: [3]f32,
+  target_pos: [3]f32,
+  pole_pos: [3]f32,
   weight: f32 = 1.0,
   max_iterations: int = 10,
   tolerance: f32 = 0.001,
   layer_index: int = -1,
-) -> AnimationError {
-  if len(bone_indices) < 2 do return .INVALID_CHAIN
+  constraints: []anim.IKBoneConstraint = nil,
+  space: anim.IKTargetSpace = .LOCAL,
+) -> (index: int, err: AnimationError) {
+  if len(bone_indices) < 2 do return -1, .INVALID_CHAIN
   node, has_node := cont.get(world.nodes, node_handle)
-  if !has_node do return .NODE_NOT_FOUND
+  if !has_node do return -1, .NODE_NOT_FOUND
   mesh_attachment, is_mesh := &node.attachment.(MeshAttachment)
-  if !is_mesh do return .NOT_A_MESH
+  if !is_mesh do return -1, .NOT_A_MESH
   mesh, has_mesh := cont.get(world.meshes, mesh_attachment.handle)
-  if !has_mesh do return .NO_MESH_RESOURCE
+  if !has_mesh do return -1, .NO_MESH_RESOURCE
   mesh_skin, has_mesh_skin := mesh.skinning.?
-  if !has_mesh_skin do return .NO_SKINNING
+  if !has_mesh_skin do return -1, .NO_SKINNING
   for idx in bone_indices {
-    if int(idx) >= len(mesh_skin.bones) do return .INVALID_BONE
+    if int(idx) >= len(mesh_skin.bones) do return -1, .INVALID_BONE
   }
   if _, has_skin := &mesh_attachment.skinning.?; !has_skin {
     mesh_attachment.skinning = NodeSkinning{}
   }
   skinning := &mesh_attachment.skinning.?
-  node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
-  target_local := world_to_skeleton_local(node_world_inv, target_world_pos)
-  pole_local := world_to_skeleton_local(node_world_inv, pole_world_pos)
+  stored_target := target_pos
+  stored_pole := pole_pos
+  if space == .LOCAL {
+    node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
+    stored_target = world_to_skeleton_local(node_world_inv, target_pos)
+    stored_pole = world_to_skeleton_local(node_world_inv, pole_pos)
+  }
   chain_length := len(bone_indices)
   bone_lengths := make([]f32, chain_length - 1)
   for i in 0 ..< chain_length - 1 {
@@ -682,32 +705,38 @@ add_ik_layer_by_indices :: proc(
   ik_target := anim.IKTarget {
     bone_indices    = bone_indices,
     bone_lengths    = bone_lengths,
-    target_position = target_local,
-    pole_vector     = pole_local,
+    constraints     = constraints,
+    target_position = stored_target,
+    pole_vector     = stored_pole,
     max_iterations  = max_iterations,
     tolerance       = tolerance,
     weight          = clamp(weight, 0.0, 1.0),
     enabled         = true,
+    space           = space,
   }
   layer: anim.Layer
   anim.layer_init_ik(&layer, ik_target, weight)
+  result_index := layer_index
   if layer_index >= 0 && layer_index < len(skinning.layers) {
     skinning.layers[layer_index] = layer
   } else {
+    result_index = len(skinning.layers)
     append(&skinning.layers, layer)
   }
   register_animatable_node(world, node_handle)
-  return .NONE
+  return result_index, .NONE
 }
 
-// Update IK target position and pole vector for an existing IK layer
-// Targets are in world space and will be converted to skeleton-local space internally
+// Update IK target position and pole vector for an existing IK layer.
+// Stores values in whatever space the layer was created with — caller passes
+// world-space coords for a WORLD layer and skeleton-local coords for a LOCAL
+// layer. The WORLD case is converted automatically at sample time.
 set_ik_layer_target :: proc(
   world: ^World,
   node_handle: NodeHandle,
   layer_index: int,
-  target_world_pos: [3]f32,
-  pole_world_pos: [3]f32,
+  target_pos: [3]f32,
+  pole_pos: [3]f32,
 ) -> bool {
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, ok := &node.attachment.(MeshAttachment)
@@ -716,16 +745,17 @@ set_ik_layer_target :: proc(
   if !has_skin do return false
   if layer_index < 0 || layer_index >= len(skinning.layers) do return false
 
-  // Transform from world space to skeleton-local space
-  node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
-  target_local := world_to_skeleton_local(node_world_inv, target_world_pos)
-  pole_local := world_to_skeleton_local(node_world_inv, pole_world_pos)
-
-  // Check if this is an IK layer
   #partial switch &layer_data in skinning.layers[layer_index].data {
   case anim.IKLayer:
-    layer_data.target.target_position = target_local
-    layer_data.target.pole_vector = pole_local
+    stored_target := target_pos
+    stored_pole := pole_pos
+    if layer_data.target.space == .LOCAL {
+      node_world_inv := linalg.matrix4_inverse(node.transform.world_matrix)
+      stored_target = world_to_skeleton_local(node_world_inv, target_pos)
+      stored_pole = world_to_skeleton_local(node_world_inv, pole_pos)
+    }
+    layer_data.target.target_position = stored_target
+    layer_data.target.pole_vector = stored_pole
     return true
   }
 
@@ -802,21 +832,22 @@ add_tail_modifier_layer :: proc(
   layer_index: int = -1,
   reverse_chain: bool = false, // Set true if root is at tail end (reverses to head→tail)
   stretch: bool = false, // If true, bones may stretch; false = rigid hinge chain
-) -> bool {
+) -> (index: int, ok: bool) #optional_ok {
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
-  if !has_mesh do return false
+  if !has_mesh do return -1, false
 
   skinning, has_skin := &mesh_attachment.skinning.?
-  if !has_skin do return false
+  if !has_skin do return -1, false
 
   mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
 
-  bone_indices := resolve_bone_chain(
+  bone_indices, chain_ok := resolve_bone_chain(
     mesh,
     root_bone_name,
     tail_length,
-  ) or_return
+  )
+  if !chain_ok do return -1, false
 
   // Reverse the chain if needed (when root is at tail, we want head→tail order)
   if reverse_chain {
@@ -850,14 +881,16 @@ add_tail_modifier_layer :: proc(
     },
   }
 
+  result_index := layer_index
   if layer_index < 0 || layer_index >= len(skinning.layers) {
+    result_index = len(skinning.layers)
     append(&skinning.layers, layer)
   } else {
     skinning.layers[layer_index] = layer
   }
 
   register_animatable_node(world, node_handle)
-  return true
+  return result_index, true
 }
 
 add_path_modifier_layer :: proc(
@@ -872,23 +905,24 @@ add_path_modifier_layer :: proc(
   loop: bool = false,
   weight: f32 = 1.0,
   layer_index: int = -1,
-) -> bool {
-  if len(path) < 2 do return false
+) -> (index: int, ok: bool) #optional_ok {
+  if len(path) < 2 do return -1, false
 
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
-  if !has_mesh do return false
+  if !has_mesh do return -1, false
 
   skinning, has_skin := &mesh_attachment.skinning.?
-  if !has_skin do return false
+  if !has_skin do return -1, false
 
   mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
 
-  bone_indices := resolve_bone_chain(
+  bone_indices, chain_ok := resolve_bone_chain(
     mesh,
     root_bone_name,
     tail_length,
-  ) or_return
+  )
+  if !chain_ok do return -1, false
 
   points := make([][3]f32, len(path))
   copy(points, path)
@@ -921,14 +955,16 @@ add_path_modifier_layer :: proc(
     },
   }
 
+  result_index := layer_index
   if layer_index < 0 || layer_index >= len(skinning.layers) {
+    result_index = len(skinning.layers)
     append(&skinning.layers, layer)
   } else {
     skinning.layers[layer_index] = layer
   }
 
   register_animatable_node(world, node_handle)
-  return true
+  return result_index, true
 }
 
 add_spider_leg_modifier_layer :: proc(
@@ -940,18 +976,18 @@ add_spider_leg_modifier_layer :: proc(
   weight: f32 = 1.0,
   layer_index: int = -1,
   constraints: [][]anim.IKBoneConstraint = nil,
-) -> bool {
-  if len(leg_root_names) != len(leg_chain_lengths) do return false
-  if len(leg_root_names) != len(leg_configs) do return false
-  if len(leg_root_names) == 0 do return false
-  if constraints != nil && len(constraints) != len(leg_root_names) do return false
+) -> (index: int, ok: bool) #optional_ok {
+  if len(leg_root_names) != len(leg_chain_lengths) do return -1, false
+  if len(leg_root_names) != len(leg_configs) do return -1, false
+  if len(leg_root_names) == 0 do return -1, false
+  if constraints != nil && len(constraints) != len(leg_root_names) do return -1, false
 
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
-  if !has_mesh do return false
+  if !has_mesh do return -1, false
 
   skinning, has_skin := &mesh_attachment.skinning.?
-  if !has_skin do return false
+  if !has_skin do return -1, false
 
   mesh := cont.get(world.meshes, mesh_attachment.handle) or_return
 
@@ -962,11 +998,12 @@ add_spider_leg_modifier_layer :: proc(
   legs := make([]anim.SpiderLeg, num_legs)
 
   for i in 0 ..< num_legs {
-    leg_indices := resolve_bone_chain(
+    leg_indices, chain_ok := resolve_bone_chain(
       mesh,
       leg_root_names[i],
       leg_chain_lengths[i],
-    ) or_return
+    )
+    if !chain_ok do return -1, false
     defer delete(leg_indices)
 
     chain_starts[i] = u32(len(all_bone_indices))
@@ -1007,14 +1044,16 @@ add_spider_leg_modifier_layer :: proc(
     },
   }
 
+  result_index := layer_index
   if layer_index < 0 || layer_index >= len(skinning.layers) {
+    result_index = len(skinning.layers)
     append(&skinning.layers, layer)
   } else {
     skinning.layers[layer_index] = layer
   }
 
   register_animatable_node(world, node_handle)
-  return true
+  return result_index, true
 }
 
 get_spider_leg_target :: proc(

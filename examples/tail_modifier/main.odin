@@ -40,7 +40,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for child in node.children {
       snake_child_node = child
 
-      if world.add_tail_modifier_layer(
+      idx, ok := world.add_tail_modifier_layer(
         &engine.world,
         child,
         root_bone_name = "root",
@@ -49,8 +49,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
         damping = f32(damping),
         weight = 1.0,
         reverse_chain = false,
-      ) {
-        tail_layer_index = 0
+      )
+      if ok {
+        tail_layer_index = idx
         log.infof("Added tail modifier to node (layer %d)", tail_layer_index)
       }
     }

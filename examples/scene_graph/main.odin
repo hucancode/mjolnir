@@ -4,8 +4,6 @@ import "../../mjolnir"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
-import "core:math"
-import "core:math/linalg"
 import mu "vendor:microui"
 
 sun_handle: world.NodeHandle
@@ -93,19 +91,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   phase += delta_time * f32(orbit_speed)
   // Sun spins slowly — propagates to planet world positions through hierarchy
-  if n, ok := world.node(&engine.world, sun_handle); ok {
-    world.rotate(&n.transform, quat_y(phase * 0.3))
-  }
+  world.rotate(&engine.world, sun_handle, phase * 0.3)
   // Each planet spins on own axis
   for h, i in planet_handles {
-    if n, ok := world.node(&engine.world, h); ok {
-      world.rotate(&n.transform, quat_y(phase * f32(spin_speed) * f32(i + 1) * 0.5))
-    }
+    world.rotate(&engine.world, h, phase * f32(spin_speed) * f32(i + 1) * 0.5)
   }
   // Moon spins fast on planet's local frame
-  if n, ok := world.node(&engine.world, moon_handle); ok {
-    world.rotate(&n.transform, quat_y(phase * 4.0))
-  }
+  world.rotate(&engine.world, moon_handle, phase * 4.0)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
@@ -122,6 +114,3 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
   }
 }
 
-quat_y :: proc(angle: f32) -> quaternion128 {
-  return linalg.quaternion_angle_axis(angle, linalg.VECTOR3F32_Y_AXIS)
-}

@@ -122,6 +122,26 @@ sprite :: proc(w: ^World, h: SpriteHandle) -> (^Sprite, bool) #optional_ok {
   return cont.get(w.sprites, h)
 }
 
+valid :: proc {
+  valid_node,
+  valid_mesh,
+  valid_material,
+  valid_camera,
+  valid_clip,
+  valid_emitter,
+  valid_forcefield,
+  valid_sprite,
+}
+
+valid_node       :: proc(w: ^World, h: NodeHandle)       -> bool { return cont.is_valid(w.nodes, h) }
+valid_mesh       :: proc(w: ^World, h: MeshHandle)       -> bool { return cont.is_valid(w.meshes, h) }
+valid_material   :: proc(w: ^World, h: MaterialHandle)   -> bool { return cont.is_valid(w.materials, h) }
+valid_camera     :: proc(w: ^World, h: CameraHandle)     -> bool { return cont.is_valid(w.cameras, h) }
+valid_clip       :: proc(w: ^World, h: ClipHandle)       -> bool { return cont.is_valid(w.animation_clips, h) }
+valid_emitter    :: proc(w: ^World, h: EmitterHandle)    -> bool { return cont.is_valid(w.emitters, h) }
+valid_forcefield :: proc(w: ^World, h: ForceFieldHandle) -> bool { return cont.is_valid(w.forcefields, h) }
+valid_sprite     :: proc(w: ^World, h: SpriteHandle)     -> bool { return cont.is_valid(w.sprites, h) }
+
 // Add tags to a node by handle. Returns false if node not found.
 tag_node :: proc(
   world: ^World,
