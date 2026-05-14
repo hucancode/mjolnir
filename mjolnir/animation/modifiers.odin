@@ -4,11 +4,12 @@ import "core:math"
 import "core:math/linalg"
 
 // Per-bone state for tail animation
-// Spring-damper drives target_tip toward rest_tip; bone aims at target_tip.
+// position_world lags parent's tip via spring in true world space.
+// Bone orientation is derived in pass 2 by aiming at child's lagged position.
 TailBone :: struct {
-  target_tip_world:    [3]f32, // World-space tip target (state)
-  target_tip_velocity: [3]f32, // Tip velocity (gives inertia for overshoot)
-  is_initialized:      bool,
+  position_world:    [3]f32, // World-space bone root (state, lags FK)
+  position_velocity: [3]f32, // Position velocity (inertia)
+  is_initialized:    bool,
 }
 
 TailModifier :: struct {
@@ -16,6 +17,9 @@ TailModifier :: struct {
   propagation_speed: f32,
   // Damping ratio: 1 = critical (no overshoot), 0 = undamped, <0 grows, >1 overdamped
   damping:           f32,
+  // If true, bones may stretch (pure spring). If false, distance to parent is
+  // clamped to bone_length each frame (rigid hinge chain).
+  stretch:           bool,
   bones:             []TailBone,
 }
 
@@ -47,18 +51,10 @@ SpiderLegModifier :: struct {
   debug_info:    []IKDebugInfo, // Debug info for each leg (allocated if debug enabled)
 }
 
-// Simple modifier to directly set a single bone's rotation
-// Useful for driving animations or testing
-SingleBoneRotationModifier :: struct {
-  bone_index: u32, // Index of the bone to modify
-  rotation:   quaternion128, // Local rotation to apply
-}
-
 Modifier :: union {
   TailModifier,
   PathModifier,
   SpiderLegModifier,
-  SingleBoneRotationModifier,
 }
 
 ProceduralState :: struct {
@@ -78,93 +74,139 @@ tail_modifier_update :: proc(
   world_transforms: []BoneTransform,
   layer_weight: f32,
   bone_lengths: []f32,
+  node_world_matrix: matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY,
 ) {
   chain_length := len(state.bone_indices)
   if chain_length < 2 do return
   if len(params.bones) != chain_length do return
   if bone_lengths == nil do return
 
-  // Process each bone (starting from bone[1], skip root at bone[0])
-  // Algorithm:
-  // 1. Track where the bone's tip was in world space (target_tip_world)
-  // 2. When bone root moves (due to parent FK), rotate bone to point at remembered tip position
-  // 3. Damping: over time, move target_tip toward rest pose tip position
+  node_world_inv := linalg.matrix4_inverse(node_world_matrix)
+
+  to_world :: proc(m: matrix[4, 4]f32, p: [3]f32) -> [3]f32 {
+    h := m * linalg.Vector4f32{p.x, p.y, p.z, 1.0}
+    return h.xyz
+  }
+
+  stiffness := TAIL_MAX_STIFFNESS * clamp(params.propagation_speed, 0.0, 1.0)
+  damping_coeff := 2.0 * math.sqrt(stiffness) * params.damping
+
+  // Pass 1: spring-damp each child bone's world position toward its parent's
+  // FK tip in world space. State stored in world coords so node translation
+  // and FK rotation both produce drag through the chain.
   for i in 1 ..< chain_length {
     bone_idx := state.bone_indices[i]
     parent_idx := state.bone_indices[i - 1]
     bone_state := &params.bones[i]
-
     bone_length := bone_lengths[bone_idx]
 
-    // Get FK rotation before we modify it
-    fk_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
-    fk_rotation := world_transforms[bone_idx].world_rotation
-
-    // Update position FIRST: child's root follows parent's tip
-    // Note: bone_lengths[bone_idx] is the distance from parent to this child bone
-    parent_up := linalg.normalize(
-      world_transforms[parent_idx].world_matrix[1].xyz,
+    parent_pos_world := to_world(
+      node_world_matrix,
+      world_transforms[parent_idx].world_position,
     )
-    new_position :=
-      world_transforms[parent_idx].world_position + parent_up * bone_length
-
-    world_transforms[bone_idx].world_position = linalg.lerp(
-      world_transforms[bone_idx].world_position,
-      new_position,
-      layer_weight,
+    parent_up_world := linalg.normalize(
+      (node_world_matrix *
+        linalg.Vector4f32 {
+            world_transforms[parent_idx].world_matrix[1].x,
+            world_transforms[parent_idx].world_matrix[1].y,
+            world_transforms[parent_idx].world_matrix[1].z,
+            0.0,
+          }).xyz,
     )
+    parent_tip_world := parent_pos_world + parent_up_world * bone_length
 
-    bone_world_pos := world_transforms[bone_idx].world_position
-
-    // Calculate FK rest tip from the UPDATED position
-    rest_tip := bone_world_pos + fk_up * bone_length
-
-    // Initialize target tip position on first frame
     if !bone_state.is_initialized {
-      bone_state.target_tip_world = rest_tip
+      bone_state.position_world = parent_tip_world
       bone_state.is_initialized = true
     }
 
-    // Calculate desired direction to point at target tip
-    tip_direction := bone_state.target_tip_world - bone_world_pos
-    distance := linalg.length(tip_direction)
+    pos_spring := (parent_tip_world - bone_state.position_world) * stiffness
+    pos_damp := -bone_state.position_velocity * damping_coeff
+    bone_state.position_velocity += (pos_spring + pos_damp) * delta_time
+    bone_state.position_world += bone_state.position_velocity * delta_time
 
-    // Only apply rotation if we have a valid direction
-    if distance > 0.001 {
-      // Calculate rotation needed to point at target
-      target_rotation := linalg.quaternion_between_two_vector3(
-        fk_up,
-        tip_direction,
-      )
-
-      // Apply rotation to world transform
-      procedural_rotation := target_rotation * fk_rotation
-
-      world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
-        fk_rotation,
-        procedural_rotation,
-        layer_weight,
-      )
+    // Rigid hinge: pin position to bone_length distance from parent.
+    if !params.stretch {
+      delta := bone_state.position_world - parent_pos_world
+      d := linalg.length(delta)
+      if d > 0.001 {
+        bone_state.position_world =
+          parent_pos_world + (delta / d) * bone_length
+        // Remove the radial component of velocity to avoid spring fighting
+        // the constraint each frame.
+        radial := delta / d
+        radial_speed := linalg.dot(bone_state.position_velocity, radial)
+        bone_state.position_velocity -= radial * radial_speed
+      }
     }
 
-    // Update world matrix
+    lagged_pos_skeleton := to_world(node_world_inv, bone_state.position_world)
+    world_transforms[bone_idx].world_position = linalg.lerp(
+      world_transforms[bone_idx].world_position,
+      lagged_pos_skeleton,
+      layer_weight,
+    )
+  }
+
+  // Pass 2: orient each parent bone toward its child's (lagged) position.
+  // Last bone keeps FK rotation since it has no child to aim at.
+  for i in 0 ..< chain_length - 1 {
+    bone_idx := state.bone_indices[i]
+    child_idx := state.bone_indices[i + 1]
+
+    bone_direction :=
+      world_transforms[child_idx].world_position -
+      world_transforms[bone_idx].world_position
+    if linalg.length(bone_direction) < 0.001 do continue
+
+    bone_up := linalg.normalize(world_transforms[bone_idx].world_matrix[1].xyz)
+    target_rotation := linalg.quaternion_between_two_vector3(
+      bone_up,
+      linalg.normalize(bone_direction),
+    )
+    procedural_rotation :=
+      target_rotation * world_transforms[bone_idx].world_rotation
+    world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
+      world_transforms[bone_idx].world_rotation,
+      procedural_rotation,
+      layer_weight,
+    )
+
     scale := extract_scale(world_transforms[bone_idx].world_matrix)
     world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
       world_transforms[bone_idx].world_position,
       world_transforms[bone_idx].world_rotation,
       scale,
     )
-
-    // Spring-damper integration on target_tip_world toward rest_tip.
-    // Velocity state lets the system overshoot when damping < 1 and
-    // oscillate divergently when damping < 0.
-    stiffness := TAIL_MAX_STIFFNESS * clamp(params.propagation_speed, 0.0, 1.0)
-    damping_coeff := 2.0 * math.sqrt(stiffness) * params.damping
-    spring_acc := (rest_tip - bone_state.target_tip_world) * stiffness
-    damping_acc := -bone_state.target_tip_velocity * damping_coeff
-    bone_state.target_tip_velocity += (spring_acc + damping_acc) * delta_time
-    bone_state.target_tip_world += bone_state.target_tip_velocity * delta_time
   }
+
+  // Last bone: aim along the direction from its parent to itself so it
+  // continues the chain instead of snapping back to FK orientation.
+  last_idx := state.bone_indices[chain_length - 1]
+  prev_idx := state.bone_indices[chain_length - 2]
+  last_direction :=
+    world_transforms[last_idx].world_position -
+    world_transforms[prev_idx].world_position
+  if linalg.length(last_direction) >= 0.001 {
+    bone_up := linalg.normalize(world_transforms[last_idx].world_matrix[1].xyz)
+    target_rotation := linalg.quaternion_between_two_vector3(
+      bone_up,
+      linalg.normalize(last_direction),
+    )
+    procedural_rotation :=
+      target_rotation * world_transforms[last_idx].world_rotation
+    world_transforms[last_idx].world_rotation = linalg.quaternion_slerp(
+      world_transforms[last_idx].world_rotation,
+      procedural_rotation,
+      layer_weight,
+    )
+  }
+  scale := extract_scale(world_transforms[last_idx].world_matrix)
+  world_transforms[last_idx].world_matrix = linalg.matrix4_from_trs(
+    world_transforms[last_idx].world_position,
+    world_transforms[last_idx].world_rotation,
+    scale,
+  )
 }
 
 path_modifier_update :: proc(
@@ -441,32 +483,6 @@ spider_leg_modifier_update :: proc(
       )
     }
   }
-}
-
-single_bone_rotation_modifier_update :: proc(
-  state: ^ProceduralState,
-  params: ^SingleBoneRotationModifier,
-  delta_time: f32,
-  world_transforms: []BoneTransform,
-  layer_weight: f32,
-  bone_lengths: []f32,
-) {
-  bone_idx := params.bone_index
-  // Apply the rotation as a local rotation override
-  fk_rotation := world_transforms[bone_idx].world_rotation
-  procedural_rotation := params.rotation * fk_rotation
-  world_transforms[bone_idx].world_rotation = linalg.quaternion_slerp(
-    fk_rotation,
-    procedural_rotation,
-    layer_weight,
-  )
-  // Update world matrix
-  scale := extract_scale(world_transforms[bone_idx].world_matrix)
-  world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(
-    world_transforms[bone_idx].world_position,
-    world_transforms[bone_idx].world_rotation,
-    scale,
-  )
 }
 
 extract_scale :: proc(m: matrix[4, 4]f32) -> [3]f32 {

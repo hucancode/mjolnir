@@ -474,6 +474,7 @@ sample_layers :: proc(
           world_transforms[:],
           layer.weight,
           skin.bone_lengths,
+          node_world_matrix,
         )
       case animation.PathModifier:
         animation.path_modifier_update(
@@ -494,28 +495,9 @@ sample_layers :: proc(
           skin.bone_lengths,
           node_world_matrix,
         )
-      case animation.SingleBoneRotationModifier:
-        animation.single_bone_rotation_modifier_update(
-          &layer_data.state,
-          &modifier,
-          delta_time,
-          world_transforms[:],
-          layer.weight,
-          skin.bone_lengths,
-        )
       }
-
-      // Track affected bones for child update
-      if layer_data.state.bone_indices != nil {
-        for bone_idx in layer_data.state.bone_indices {
-          procedural_affected_bones[bone_idx] = true
-        }
-      } else {
-        // SingleBoneRotationModifier stores bone_index directly
-        #partial switch &modifier in layer_data.state.modifier {
-        case animation.SingleBoneRotationModifier:
-          procedural_affected_bones[modifier.bone_index] = true
-        }
+      for bone_idx in layer_data.state.bone_indices {
+        procedural_affected_bones[bone_idx] = true
       }
     case animation.FKLayer, animation.IKLayer:
       continue
