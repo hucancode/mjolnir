@@ -2,6 +2,7 @@ package detour
 
 import "../recast"
 import "core:log"
+import "base:runtime"
 import "core:math"
 import "core:math/linalg"
 import "core:testing"
@@ -2130,4 +2131,94 @@ create_simple_tile_data :: proc() -> []u8 {
     links[i] = Link{}
   }
   return data
+}
+
+@(test)
+bench_find_path :: proc(t: ^testing.T) {
+	bench_path_state :: struct {
+		nav_mesh:  ^Nav_Mesh,
+		query:     Nav_Mesh_Query,
+		filter:    Query_Filter,
+		start_ref: recast.Poly_Ref,
+		end_ref:   recast.Poly_Ref,
+		start_pos: [3]f32,
+		end_pos:   [3]f32,
+		path:      []recast.Poly_Ref,
+	}
+
+	setup_path_navmesh :: proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+		s := cast(^bench_path_state)opts.user_data
+		verts := [][3]f32{{-10, 0, -10}, {10, 0, -10}, {10, 0, 10}, {-10, 0, 10}}
+		indices := []i32{0, 2, 1, 0, 3, 2}
+		areas := []u8{recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA}
+		cfg := recast.Config {
+			cs                       = 0.3,
+			ch                       = 0.2,
+			walkable_slope           = math.PI * 0.25,
+			walkable_height          = 10,
+			walkable_climb           = 4,
+			walkable_radius          = 2,
+			max_edge_len             = 12,
+			max_simplification_error = 1.3,
+			min_region_area          = 8,
+			merge_region_area        = 20,
+			max_verts_per_poly       = 6,
+			detail_sample_dist       = 6,
+			detail_sample_max_error  = 1,
+		}
+		pmesh, dmesh, ok := recast.build_navmesh(verts, indices, areas, cfg)
+		if !ok do return .Allocation_Error
+		defer recast.free_poly_mesh(pmesh)
+		defer recast.free_poly_mesh_detail(dmesh)
+		params := Create_Nav_Mesh_Data_Params {
+			poly_mesh        = pmesh,
+			poly_mesh_detail = dmesh,
+			walkable_height  = f32(cfg.walkable_height) * cfg.ch,
+			walkable_radius  = f32(cfg.walkable_radius) * cfg.cs,
+			walkable_climb   = f32(cfg.walkable_climb) * cfg.ch,
+		}
+		nav_mesh, st := create_nav_mesh(&params)
+		if !recast.status_succeeded(st) do return .Allocation_Error
+		s.nav_mesh = nav_mesh
+		if !recast.status_succeeded(nav_mesh_query_init(&s.query, nav_mesh, 2048)) do return .Allocation_Error
+		query_filter_init(&s.filter)
+		s.start_pos = {-5, 0, -5}
+		s.end_pos = {5, 0, 5}
+		half := [3]f32{2, 4, 2}
+		st1, sref, _ := find_nearest_poly(&s.query, s.start_pos, half, &s.filter)
+		st2, eref, _ := find_nearest_poly(&s.query, s.end_pos, half, &s.filter)
+		if !recast.status_succeeded(st1) || !recast.status_succeeded(st2) do return .Allocation_Error
+		s.start_ref = sref
+		s.end_ref = eref
+		s.path = make([]recast.Poly_Ref, 256)
+		return .Okay
+	}
+	teardown_path_navmesh :: proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+		s := cast(^bench_path_state)opts.user_data
+		delete(s.path)
+		nav_mesh_query_destroy(&s.query)
+		nav_mesh_destroy(s.nav_mesh)
+		free(s.nav_mesh)
+		return .Okay
+	}
+	state: bench_path_state
+	opts := time.Benchmark_Options {
+		rounds   = 5000,
+		setup    = setup_path_navmesh,
+		bench    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+			s := cast(^bench_path_state)opts.user_data
+			for _ in 0 ..< opts.rounds {
+				find_path(&s.query, s.start_ref, s.end_ref, s.start_pos, s.end_pos, &s.filter, s.path, 256)
+			}
+			opts.count = opts.rounds
+			return .Okay
+		},
+		teardown = teardown_path_navmesh,
+		user_data = &state,
+	}
+	err := time.benchmark(&opts)
+	testing.expect(t, err == .Okay, "bench failed")
+	ns := time.duration_nanoseconds(opts.duration) / i64(opts.rounds)
+	log.infof("find_path 10x10 plane corner→corner, %d rounds in %v (%d ns/op)",
+		opts.rounds, opts.duration, ns)
 }

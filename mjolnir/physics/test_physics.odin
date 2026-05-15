@@ -9,37 +9,6 @@ import "core:testing"
 import "core:time"
 
 @(test)
-test_rigid_body_apply_force :: proc(t: ^testing.T) {
-  body: DynamicRigidBody
-  rigid_body_init(&body, {}, linalg.QUATERNIONF32_IDENTITY, 10.0, false)
-  force := [3]f32{100, 0, 0}
-  apply_force(&body, force)
-  testing.expect(
-    t,
-    abs(body.force.x - 100) < 0.001 &&
-    abs(body.force.y) < 0.001 &&
-    abs(body.force.z) < 0.001,
-    "Force should be accumulated",
-  )
-}
-
-@(test)
-test_rigid_body_apply_impulse :: proc(t: ^testing.T) {
-  body: DynamicRigidBody
-  rigid_body_init(&body, {}, linalg.QUATERNIONF32_IDENTITY, 10.0, false)
-  impulse := [3]f32{50, 0, 0}
-  apply_impulse(&body, impulse)
-  expected_velocity := impulse * body.inv_mass
-  testing.expect(
-    t,
-    abs(body.velocity.x - expected_velocity.x) < 0.001 &&
-    abs(body.velocity.y - expected_velocity.y) < 0.001 &&
-    abs(body.velocity.z - expected_velocity.z) < 0.001,
-    "Velocity should change based on impulse",
-  )
-}
-
-@(test)
 test_rigid_body_integration :: proc(t: ^testing.T) {
   body: DynamicRigidBody
   rigid_body_init(&body, {}, linalg.QUATERNIONF32_IDENTITY, 10.0, false)

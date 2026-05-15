@@ -1,6 +1,9 @@
 package algebra
 
+import "base:runtime"
+import "core:log"
 import "core:testing"
+import "core:time"
 
 @(test)
 test_next_pow2 :: proc(t: ^testing.T) {
@@ -35,4 +38,21 @@ test_align :: proc(t: ^testing.T) {
   testing.expect_value(t, align(5, 4), 8)
   testing.expect_value(t, align(15, 8), 16)
   testing.expect_value(t, align(16, 8), 16)
+}
+
+@(test)
+test_log2_greater_than :: proc(t: ^testing.T) {
+  testing.expect_value(t, log2_greater_than(1), u32(1))
+  testing.expect_value(t, log2_greater_than(2), u32(2))
+  testing.expect_value(t, log2_greater_than(3), u32(2))
+  testing.expect_value(t, log2_greater_than(4), u32(3))
+  testing.expect_value(t, log2_greater_than(1024), u32(11))
+}
+
+@(test)
+test_circular_next_prev :: proc(t: ^testing.T) {
+  testing.expect_value(t, next(0, 5), 1)
+  testing.expect_value(t, next(4, 5), 0)
+  testing.expect_value(t, prev(0, 5), 4)
+  testing.expect_value(t, prev(4, 5), 3)
 }

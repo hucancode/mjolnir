@@ -3,6 +3,9 @@ package animation
 import "core:math"
 import "core:math/linalg"
 import "core:testing"
+import "core:log"
+import "core:time"
+import "base:runtime"
 
 @(test)
 test_spline_scalar_interpolation :: proc(t: ^testing.T) {
@@ -242,4 +245,48 @@ test_spline_validation :: proc(t: ^testing.T) {
     spline_validate(spline),
     "Equal adjacent times are allowed for simplicity",
   )
+}
+
+@(test)
+bench_spline_sample :: proc(t: ^testing.T) {
+	bench_spline_state :: struct {
+		spline: Spline([3]f32),
+	}
+	state: bench_spline_state
+	opts := time.Benchmark_Options {
+		rounds   = 100_000,
+		setup    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+			s := cast(^bench_spline_state)opts.user_data
+			N :: 32
+			s.spline = spline_create([3]f32, N)
+			for i in 0 ..< N {
+				ti := f32(i) / f32(N - 1)
+				s.spline.times[i] = ti
+				s.spline.points[i] = {math.cos(ti * 6.0), ti, math.sin(ti * 6.0)}
+			}
+			return .Okay
+		},
+		bench    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+			s := cast(^bench_spline_state)opts.user_data
+			sum: [3]f32
+			for k in 0 ..< opts.rounds {
+				ti := f32(k) / f32(opts.rounds)
+				sum += spline_sample(s.spline, ti)
+			}
+			opts.count = opts.rounds
+			// Touch sum so compiler can't remove the loop
+			if sum.x > 1e30 do opts.processed = 0
+			return .Okay
+		},
+		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+			s := cast(^bench_spline_state)opts.user_data
+			spline_destroy(&s.spline)
+			return .Okay
+		},
+		user_data = &state,
+	}
+	err := time.benchmark(&opts)
+	testing.expect(t, err == .Okay, "bench failed")
+	log.infof("spline_sample N=32 ctrl pts, %d rounds in %v, %.0f rounds/sec",
+		opts.rounds, opts.duration, opts.rounds_per_second)
 }

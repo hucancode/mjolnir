@@ -5,6 +5,8 @@ import "core:math"
 import "core:math/linalg"
 import "core:testing"
 import "core:time"
+import "base:runtime"
+import "core:log"
 
 // Test FABRIK with 2-bone chain reaching a target
 @(test)
@@ -273,4 +275,64 @@ test_fabrik_convergence :: proc(t: ^testing.T) {
     dist < 0.001,
     fmt.tprintf("Should converge within tolerance. Distance: %f", dist),
   )
+}
+
+@(test)
+bench_fabrik_solve :: proc(t: ^testing.T) {
+	bench_fabrik_state :: struct {
+		xforms: []BoneTransform,
+		target: IKTarget,
+	}
+	state: bench_fabrik_state
+	opts := time.Benchmark_Options {
+		rounds   = 10_000,
+		setup    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+			s := cast(^bench_fabrik_state)opts.user_data
+			N :: 6
+			s.xforms = make([]BoneTransform, N)
+			for i in 0 ..< N {
+				p := [3]f32{0, f32(i), 0}
+				s.xforms[i] = BoneTransform {
+					world_position = p,
+					world_rotation = linalg.QUATERNIONF32_IDENTITY,
+					world_matrix   = linalg.matrix4_from_trs_f32(p, linalg.QUATERNIONF32_IDENTITY, {1, 1, 1}),
+				}
+			}
+			indices := make([]u32, N)
+			for i in 0 ..< N do indices[i] = u32(i)
+			lengths := make([]f32, N - 1)
+			for i in 0 ..< N - 1 do lengths[i] = 1.0
+			s.target = IKTarget {
+				bone_indices    = indices,
+				bone_lengths    = lengths,
+				target_position = {2.5, 3.0, 1.0},
+				pole_vector     = {1, 0, 0},
+				pole_weight     = 0.5,
+				max_iterations  = 10,
+				tolerance       = 0.01,
+				weight          = 1.0,
+				enabled         = true,
+				space           = .LOCAL,
+			}
+			return .Okay
+		},
+		bench    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+			s := cast(^bench_fabrik_state)opts.user_data
+			for _ in 0 ..< opts.rounds do fabrik_solve(s.xforms, s.target)
+			opts.count = opts.rounds
+			return .Okay
+		},
+		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+			s := cast(^bench_fabrik_state)opts.user_data
+			delete(s.xforms)
+			delete(s.target.bone_indices)
+			delete(s.target.bone_lengths)
+			return .Okay
+		},
+		user_data = &state,
+	}
+	err := time.benchmark(&opts)
+	testing.expect(t, err == .Okay, "bench failed")
+	log.infof("fabrik_solve N=6 max_iter=10, %d rounds in %v, %.0f rounds/sec",
+		opts.rounds, opts.duration, opts.rounds_per_second)
 }

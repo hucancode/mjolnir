@@ -31,6 +31,29 @@ status_succeeded :: proc "contextless" (status: Status) -> bool {
   )
 }
 
+status_failed :: proc "contextless" (status: Status) -> bool {
+  return(
+    .Wrong_Magic in status ||
+    .Wrong_Version in status ||
+    .Out_Of_Memory in status ||
+    .Invalid_Param in status ||
+    .Buffer_Too_Small in status ||
+    .Out_Of_Nodes in status \
+  )
+}
+
+status_in_progress :: proc "contextless" (status: Status) -> bool {
+  return .In_Progress in status
+}
+
+status_detail :: proc "contextless" (status: Status) -> (succeeded: bool, detail: Status) {
+  succeeded = status_succeeded(status)
+  detail = status - {.Success}
+  return
+}
+
+DEFAULT_MAX_PATH :: 256
+
 Poly_Ref :: distinct u32
 Tile_Ref :: distinct u32
 Agent_Id :: distinct u32

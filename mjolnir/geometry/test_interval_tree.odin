@@ -1,5 +1,6 @@
 package geometry
 
+import "base:runtime"
 import "core:log"
 import "core:testing"
 import "core:time"
@@ -138,32 +139,71 @@ test_interval_tree_sparse_pattern :: proc(t: ^testing.T) {
   }
 }
 
+bench_interval_state :: struct {
+  tree: IntervalTree,
+}
+
 @(test)
-test_interval_tree_performance :: proc(t: ^testing.T) {
-  tree: IntervalTree
-  interval_tree_init(&tree)
-  defer interval_tree_destroy(&tree)
-  // Test performance with many ranges
-  range_count := 1000
-  range_size := 10
-  start_time := time.now()
-  for i in 0 ..< range_count {
-    start := i * range_size * 2 // non-overlapping ranges
-    interval_tree_insert(&tree, start, range_size)
+bench_interval_tree_insert_nonoverlap :: proc(t: ^testing.T) {
+  state: bench_interval_state
+  opts := time.Benchmark_Options {
+    rounds = 1000, user_data = &state,
+    setup = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+      s := cast(^bench_interval_state)opts.user_data
+      interval_tree_init(&s.tree)
+      return .Okay
+    },
+    bench = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+      s := cast(^bench_interval_state)opts.user_data
+      for i in 0 ..< opts.rounds do interval_tree_insert(&s.tree, i * 20, 10)
+      opts.count = opts.rounds
+      return .Okay
+    },
+    teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+      s := cast(^bench_interval_state)opts.user_data
+      interval_tree_destroy(&s.tree)
+      return .Okay
+    },
   }
-  insert_duration := time.since(start_time)
-  ranges := interval_tree_get_ranges(&tree)
-  testing.expect(t, len(ranges) == range_count, "Should have all ranges")
-  start_time = time.now()
-  interval_tree_get_ranges(&tree)
-  get_duration := time.since(start_time)
-  log.infof(
-    "Interval tree performance: %d ranges of size %d",
-    range_count,
-    range_size,
-  )
-  log.infof("Insert time: %v", insert_duration)
-  log.infof("Get ranges time: %v", get_duration)
+  err := time.benchmark(&opts)
+  testing.expect(t, err == .Okay, "bench failed")
+  ns := time.duration_nanoseconds(opts.duration) / i64(opts.rounds)
+  log.infof("interval_tree_insert non-overlap %d rounds in %v (%d ns/op)",
+    opts.rounds, opts.duration, ns)
+}
+
+@(test)
+bench_interval_tree_get_ranges :: proc(t: ^testing.T) {
+  state: bench_interval_state
+  opts := time.Benchmark_Options {
+    rounds = 5000, user_data = &state,
+    setup = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+      s := cast(^bench_interval_state)opts.user_data
+      interval_tree_init(&s.tree)
+      for i in 0 ..< 1000 do interval_tree_insert(&s.tree, i * 20, 10)
+      return .Okay
+    },
+    bench = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+      s := cast(^bench_interval_state)opts.user_data
+      acc := 0
+      for _ in 0 ..< opts.rounds {
+        ranges := interval_tree_get_ranges(&s.tree)
+        acc += len(ranges)
+      }
+      opts.count = opts.rounds
+      return .Okay
+    },
+    teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+      s := cast(^bench_interval_state)opts.user_data
+      interval_tree_destroy(&s.tree)
+      return .Okay
+    },
+  }
+  err := time.benchmark(&opts)
+  testing.expect(t, err == .Okay, "bench failed")
+  ns := time.duration_nanoseconds(opts.duration) / i64(opts.rounds)
+  log.infof("interval_tree_get_ranges N=1000 %d rounds in %v (%d ns/op)",
+    opts.rounds, opts.duration, ns)
 }
 
 @(test)

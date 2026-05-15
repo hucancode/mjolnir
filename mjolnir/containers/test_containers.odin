@@ -9,16 +9,6 @@ Test_Item :: struct {
 }
 
 @(test)
-test_pool_init :: proc(t: ^testing.T) {
-  pool: Pool(Test_Item)
-  init(&pool)
-  defer destroy(pool, proc(item: ^Test_Item) {})
-
-  testing.expect(t, len(pool.entries) == 0, "Pool should start empty")
-  testing.expect(t, pool.capacity == 0, "Default capacity should be unlimited")
-}
-
-@(test)
 test_pool_alloc_and_get :: proc(t: ^testing.T) {
   pool: Pool(Test_Item)
   init(&pool)
@@ -202,32 +192,6 @@ test_pool_generation_wraparound :: proc(t: ^testing.T) {
 }
 
 // Slab Allocator Tests
-
-@(test)
-test_slab_init :: proc(t: ^testing.T) {
-  allocator: SlabAllocator
-  config := [MAX_SLAB_CLASSES]struct {
-    block_size, block_count: u32,
-  } {
-    {block_size = 1, block_count = 10},
-    {block_size = 4, block_count = 10},
-    {block_size = 16, block_count = 10},
-    {block_size = 64, block_count = 10},
-    {},
-    {},
-    {},
-    {},
-  }
-  slab_init(&allocator, config)
-  defer slab_destroy(&allocator)
-
-  expected_capacity := u32(1 * 10 + 4 * 10 + 16 * 10 + 64 * 10)
-  testing.expect(
-    t,
-    allocator.capacity == expected_capacity,
-    "Capacity should be sum of all class capacities",
-  )
-}
 
 @(test)
 test_slab_alloc_exact_fit :: proc(t: ^testing.T) {

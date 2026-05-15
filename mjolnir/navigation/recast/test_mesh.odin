@@ -6,6 +6,7 @@ import "core:math"
 import "core:slice"
 import "core:testing"
 import "core:time"
+import "base:runtime"
 
 @(test)
 test_mesh_vertex_hash :: proc(t: ^testing.T) {
@@ -630,4 +631,76 @@ test_triangle_operations_preserve_area_types :: proc(t: ^testing.T) {
   areas_steep := []u8{CUSTOM_AREA}
   clear_unwalkable_triangles(30.0, vertices_steep, indices, areas_steep)
   testing.expect_value(t, areas_steep[0], RC_NULL_AREA) // Should be cleared
+}
+
+@(test)
+bench_build_navmesh :: proc(t: ^testing.T) {
+	bench_navmesh_state :: struct {
+		verts:    [][3]f32,
+		indices:  []i32,
+		areas:    []u8,
+		cfg:      Config,
+	}
+
+	setup_navmesh_inputs :: proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+		s := cast(^bench_navmesh_state)opts.user_data
+		// 3x3 grid of 4 floor quads with 1 raised obstacle
+		s.verts = make([][3]f32, 4)
+		s.verts[0] = {-10, 0, -10}
+		s.verts[1] = {10, 0, -10}
+		s.verts[2] = {10, 0, 10}
+		s.verts[3] = {-10, 0, 10}
+		s.indices = make([]i32, 6)
+		s.indices[0] = 0; s.indices[1] = 2; s.indices[2] = 1
+		s.indices[3] = 0; s.indices[4] = 3; s.indices[5] = 2
+		s.areas = make([]u8, 2)
+		s.areas[0] = RC_WALKABLE_AREA
+		s.areas[1] = RC_WALKABLE_AREA
+		s.cfg = Config{
+			cs                       = 0.3,
+			ch                       = 0.2,
+			walkable_slope           = math.PI * 0.25,
+			walkable_height          = 10,
+			walkable_climb           = 4,
+			walkable_radius          = 2,
+			max_edge_len             = 12,
+			max_simplification_error = 1.3,
+			min_region_area          = 8,
+			merge_region_area        = 20,
+			max_verts_per_poly       = 6,
+			detail_sample_dist       = 6,
+			detail_sample_max_error  = 1,
+		}
+		return .Okay
+	}
+	teardown_navmesh_inputs :: proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+		s := cast(^bench_navmesh_state)opts.user_data
+		delete(s.verts)
+		delete(s.indices)
+		delete(s.areas)
+		return .Okay
+	}
+	state: bench_navmesh_state
+	opts := time.Benchmark_Options {
+		rounds   = 20,
+		setup    = setup_navmesh_inputs,
+		bench    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
+			s := cast(^bench_navmesh_state)opts.user_data
+			for _ in 0 ..< opts.rounds {
+				pmesh, dmesh, ok := build_navmesh(s.verts, s.indices, s.areas, s.cfg)
+				if !ok do return .Allocation_Error
+				free_poly_mesh(pmesh)
+				free_poly_mesh_detail(dmesh)
+			}
+			opts.count = opts.rounds
+			return .Okay
+		},
+		teardown = teardown_navmesh_inputs,
+		user_data = &state,
+	}
+	err := time.benchmark(&opts)
+	testing.expect(t, err == .Okay, "bench failed")
+	per_ms := time.duration_milliseconds(opts.duration) / f64(opts.rounds)
+	log.infof("build_navmesh 10x10 floor + 8 obstacles, %d rounds, %.2f ms/iter",
+		opts.rounds, per_ms)
 }
