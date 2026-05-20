@@ -23,30 +23,64 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint emissive_texture_index;
     uint depth_texture_index;
     uint input_image_index;
-    vec3 color;
-    float line_width;
+    uint _pad;
+    vec3 outline_color;
+    float thickness;
 };
 
+const float near_plane = 0.1;
+const float far_plane = 50.0;
+
+float linearize_depth(float d) {
+    float z = d * 2.0 - 1.0;
+    return (2.0 * near_plane * far_plane) / (far_plane + near_plane - z * (far_plane - near_plane));
+}
+
+float sample_depth(vec2 uv) {
+    return texture(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).r;
+}
+
+vec3 sample_normal(vec2 uv) {
+    vec3 n = texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rgb;
+    return normalize(n * 2.0 - 1.0);
+}
+
 void main() {
-    vec2 texel = 1.0 / vec2(textureSize(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
+    vec4 scene = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+    vec2 texel = thickness / vec2(textureSize(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
 
-    vec4 center_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
-    vec4 left_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(-texel.x * line_width, 0));
-    vec4 right_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2( texel.x * line_width, 0));
-    vec4 up_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(0,  texel.y * line_width));
-    vec4 down_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(0, -texel.y * line_width));
-    // Simple edge detection using luminance difference with neighbors
-    float center = dot(center_color.rgb, vec3(0.299, 0.587, 0.114));
-    float threshold = 0.2;
+    float dc = sample_depth(v_uv);
+    // Sky / background: no outline, keep scene color
+    if (dc >= 1.0) {
+        out_color = vec4(scene.rgb, 1.0);
+        return;
+    }
 
-    float left   = dot(left_color.rgb, vec3(0.299, 0.587, 0.114));
-    float right  = dot(right_color.rgb, vec3(0.299, 0.587, 0.114));
-    float up     = dot(up_color.rgb, vec3(0.299, 0.587, 0.114));
-    float down   = dot(down_color.rgb, vec3(0.299, 0.587, 0.114));
+    float dl = sample_depth(v_uv + vec2(-texel.x, 0.0));
+    float dr = sample_depth(v_uv + vec2( texel.x, 0.0));
+    float du = sample_depth(v_uv + vec2(0.0,  texel.y));
+    float dd = sample_depth(v_uv + vec2(0.0, -texel.y));
 
-    float edge =  smoothstep(threshold, threshold + 0.1, abs(center - left)) +
-        smoothstep(threshold, threshold + 0.1, abs(center - right)) +
-        smoothstep(threshold, threshold + 0.1, abs(center - up)) +
-        smoothstep(threshold, threshold + 0.1, abs(center - down));
-    out_color = vec4(mix(center_color.rgb, color, clamp(edge, 0, 1)), 1.0);
+    float lc = linearize_depth(dc);
+    float ll = linearize_depth(dl);
+    float lr = linearize_depth(dr);
+    float lu = linearize_depth(du);
+    float ld = linearize_depth(dd);
+
+    // Relative depth difference; scale tolerance with distance so far objects stay outlined.
+    float depth_diff = max(max(abs(lc - ll), abs(lc - lr)), max(abs(lc - lu), abs(lc - ld)));
+    float depth_edge = smoothstep(0.02 * lc, 0.05 * lc + 0.01, depth_diff);
+
+    vec3 nc = sample_normal(v_uv);
+    vec3 nl = sample_normal(v_uv + vec2(-texel.x, 0.0));
+    vec3 nr = sample_normal(v_uv + vec2( texel.x, 0.0));
+    vec3 nu = sample_normal(v_uv + vec2(0.0,  texel.y));
+    vec3 nd = sample_normal(v_uv + vec2(0.0, -texel.y));
+
+    float normal_diff = (1.0 - dot(nc, nl)) + (1.0 - dot(nc, nr))
+                      + (1.0 - dot(nc, nu)) + (1.0 - dot(nc, nd));
+    float normal_edge = smoothstep(0.4, 0.8, normal_diff);
+
+    float edge = clamp(max(depth_edge, normal_edge), 0.0, 1.0);
+    out_color = vec4(mix(scene.rgb, outline_color, edge), 1.0);
 }
