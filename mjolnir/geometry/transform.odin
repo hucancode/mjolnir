@@ -28,9 +28,16 @@ decompose_matrix :: proc "contextless" (
   // Extract translation (last column of the matrix)
   ret.position = m[3].xyz
   // Extract scale (length of each basis vector)
-  ret.scale = {linalg.length(m[0]), linalg.length(m[1]), linalg.length(m[2])}
-  // Extract rotation (basis vectors normalized)
-  ret.rotation = linalg.to_quaternion(m)
+  sx := linalg.length(m[0].xyz)
+  sy := linalg.length(m[1].xyz)
+  sz := linalg.length(m[2].xyz)
+  ret.scale = {sx, sy, sz}
+  // Extract rotation from basis vectors after removing scale
+  rot_mat := linalg.MATRIX4F32_IDENTITY
+  if sx > 0 do rot_mat[0].xyz = m[0].xyz / sx
+  if sy > 0 do rot_mat[1].xyz = m[1].xyz / sy
+  if sz > 0 do rot_mat[2].xyz = m[2].xyz / sz
+  ret.rotation = linalg.to_quaternion(rot_mat)
   ret.is_dirty = true
   return
 }
