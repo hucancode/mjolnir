@@ -33,6 +33,7 @@ PathModifier :: struct {
   length: f32, // Length of the path segment to fit the skeleton to
   speed:  f32,
   loop:   bool,
+  closed: bool, // True if spline was built closed (see spline_build_closed)
 }
 
 // Debug info for one IK chain

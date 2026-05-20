@@ -248,3 +248,50 @@ spline_arc_length :: proc(spline: Spline($T)) -> f32 {
   if !has_table do return 0
   return slice.last(table.arc_lengths) if len(table.arc_lengths) > 0 else 0
 }
+
+// Build a closed-loop Catmull-Rom spline from N base points (which must not
+// duplicate the seam — base[N-1] should differ from base[0]).
+//
+// The result has N+3 control points: a ghost-prepend of base[N-1], the N core
+// points, then ghost-appends of base[0] and base[1]. This gives every interior
+// segment — including the wrap segment between base[N-1] and base[0] — real
+// neighbor points for Catmull-Rom tangents, eliminating the seam kink that a
+// straight closed polyline would otherwise produce.
+//
+// The arc-length table is built only over t in [0, N] so that
+// spline_arc_length reports exactly one full loop. Callers can therefore wrap
+// offset with mod(spline_arc_length) without retracing the ghost regions.
+spline_build_closed :: proc(base: [][3]f32, samples := 200) -> Spline([3]f32) {
+  n := len(base)
+  pts := make([][3]f32, n + 3)
+  ts := make([]f32, n + 3)
+  pts[0] = base[n - 1]
+  ts[0] = -1
+  for i in 0 ..< n {
+    pts[i + 1] = base[i]
+    ts[i + 1] = f32(i)
+  }
+  pts[n + 1] = base[0]
+  ts[n + 1] = f32(n)
+  pts[n + 2] = base[1]
+  ts[n + 2] = f32(n + 1)
+  result := Spline([3]f32){points = pts, times = ts}
+
+  arc_lengths := make([]f32, samples)
+  arc_times := make([]f32, samples)
+  prev := spline_sample(result, 0)
+  total: f32 = 0
+  for i in 0 ..< samples {
+    t := f32(i) / f32(samples - 1) * f32(n)
+    pos := spline_sample(result, t)
+    if i > 0 do total += linalg.distance(pos, prev)
+    arc_lengths[i] = total
+    arc_times[i] = t
+    prev = pos
+  }
+  result.arc_table = Spline_Arc_Length_Table([3]f32) {
+    arc_lengths = arc_lengths,
+    times       = arc_times,
+  }
+  return result
+}

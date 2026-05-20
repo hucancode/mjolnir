@@ -931,6 +931,20 @@ add_tail_modifier_layer :: proc(
   return result_index, true
 }
 
+@(private)
+build_path_spline :: proc(path: [][3]f32, closed: bool) -> anim.Spline([3]f32) {
+  if closed && len(path) >= 3 {
+    return anim.spline_build_closed(path)
+  }
+  points := make([][3]f32, len(path))
+  copy(points, path)
+  times := make([]f32, len(path))
+  for i in 0 ..< len(times) {
+    times[i] = f32(i)
+  }
+  return anim.Spline([3]f32){points = points, times = times}
+}
+
 add_path_modifier_layer :: proc(
   world: ^World,
   node_handle: NodeHandle,
@@ -941,6 +955,7 @@ add_path_modifier_layer :: proc(
   length: f32 = 0.0, // Length of path segment to fit skeleton (0 = auto-calculate from offset to end)
   speed: f32 = 0.0,
   loop: bool = false,
+  closed: bool = false, // When true, build a closed-loop spline with smooth seam
   weight: f32 = 1.0,
   layer_index: int = -1,
 ) -> (index: int, ok: bool) #optional_ok {
@@ -962,18 +977,7 @@ add_path_modifier_layer :: proc(
   )
   if !chain_ok do return -1, false
 
-  points := make([][3]f32, len(path))
-  copy(points, path)
-
-  times := make([]f32, len(path))
-  for i in 0 ..< len(times) {
-    times[i] = f32(i)
-  }
-
-  spline := anim.Spline([3]f32) {
-    points = points,
-    times  = times,
-  }
+  spline := build_path_spline(path, closed)
 
   layer := anim.Layer {
     weight = weight,
@@ -988,6 +992,7 @@ add_path_modifier_layer :: proc(
           length = length,
           speed = speed,
           loop = loop,
+          closed = closed,
         },
       },
     },
@@ -1229,6 +1234,7 @@ set_path_modifier_params :: proc(
   length: Maybe(f32) = nil,
   speed: Maybe(f32) = nil,
   loop: Maybe(bool) = nil,
+  closed: Maybe(bool) = nil,
 ) -> bool {
   node := cont.get(world.nodes, node_handle) or_return
   mesh_attachment, has_mesh := &node.attachment.(MeshAttachment)
@@ -1243,22 +1249,13 @@ set_path_modifier_params :: proc(
   case anim.ProceduralLayer:
     switch &modifier in layer_data.state.modifier {
     case anim.PathModifier:
+      if cl, has_cl := closed.?; has_cl {
+        modifier.closed = cl
+      }
       if new_path, has_path := path.?; has_path {
         if len(new_path) >= 2 {
           anim.spline_destroy(&modifier.spline)
-
-          points := make([][3]f32, len(new_path))
-          copy(points, new_path)
-
-          times := make([]f32, len(new_path))
-          for i in 0 ..< len(times) {
-            times[i] = f32(i)
-          }
-
-          modifier.spline = anim.Spline([3]f32) {
-            points = points,
-            times  = times,
-          }
+          modifier.spline = build_path_spline(new_path, modifier.closed)
         }
       }
       if off, has_off := offset.?; has_off {
