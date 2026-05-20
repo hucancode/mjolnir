@@ -9,7 +9,7 @@ GPU-driven game engine in Odin + Vulkan 1.3.
 
 To use Mjolnir, run `make shader` to compile shaders to SPIR-V and copy the
 `mjolnir/` directory into your project. See `examples/` for canonical usage
-or [`examples.md`](examples.html) for video demos of every example.
+or [`examples`](examples.html) for video demos of every example.
 
 ## Notable features
 

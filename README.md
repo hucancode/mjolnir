@@ -27,8 +27,5 @@ See `examples` for common use cases, and [document](https://hucancode.github.io/
 - Recast/Detour
 - Inverse Kinematics
 - HUD, text
-
-And more in development
-
 - Procedural Animation (Tail, Leg)
 - Animation Layering
