@@ -23,6 +23,9 @@ AGENT_HEIGHT :: f32(1.6)
 AGENT_SPEED :: f32(3.2)
 SEPARATION_RADIUS :: AGENT_RADIUS * 4
 WAYPOINT_TOLERANCE :: f32(0.6)
+WORLD_HALF :: f32(50)
+SPAWN_RADIUS :: f32(38)
+GOAL_MIN_DIST :: f32(20)
 
 Agent :: struct {
   pos:           [3]f32,
@@ -38,6 +41,7 @@ agents: [AGENT_COUNT]Agent
 nav_vertices: [dynamic][3]f32
 nav_indices: [dynamic]i32
 nav_area_types: [dynamic]u8
+navmesh_node_handle: world.NodeHandle
 
 repath_phase: f32
 total_time: f32
@@ -59,13 +63,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   build_scene(engine)
   build_navmesh(engine)
+  visualize_navmesh(engine)
   spawn_agents(engine)
   assign_swap_targets(engine)
 }
 
 build_scene :: proc(engine: ^mjolnir.Engine) {
   ground_geom := geometry.make_quad([4]f32{0.25, 0.55, 0.25, 1})
-  size: f32 = 50.0
+  size: f32 = WORLD_HALF * 2
   for &v in ground_geom.vertices {
     v.position.x *= size
     v.position.z *= size
@@ -85,12 +90,20 @@ build_scene :: proc(engine: ^mjolnir.Engine) {
   )
 
   obstacles := [?]struct{pos, size: [3]f32} {
-    {{-8, 1.5, -6}, {2, 3, 2}},
-    {{8, 1.5, -6},  {2, 3, 2}},
-    {{-8, 1.5, 6},  {2, 3, 2}},
-    {{8, 1.5, 6},   {2, 3, 2}},
-    {{0, 2, 0},     {4, 4, 4}},
-    {{-3, 1, 10},   {3, 2, 1.5}},
+    {{-18, 1.5, -14}, {3, 3, 3}},
+    {{ 18, 1.5, -14}, {3, 3, 3}},
+    {{-18, 1.5,  14}, {3, 3, 3}},
+    {{ 18, 1.5,  14}, {3, 3, 3}},
+    {{  0, 2,     0}, {6, 4, 6}},
+    {{ -6, 1,    22}, {4, 2, 2}},
+    {{ 25, 1.5,   0}, {2, 3, 8}},
+    {{-25, 1.5,   0}, {2, 3, 8}},
+    {{ 32, 1.5,  28}, {3, 3, 3}},
+    {{-32, 1.5, -28}, {3, 3, 3}},
+    {{ 12, 1,   -32}, {6, 2, 2}},
+    {{-12, 1,    32}, {6, 2, 2}},
+    {{ 38, 1.5, -22}, {2, 3, 4}},
+    {{-38, 1.5,  22}, {2, 3, 4}},
   }
   for o in obstacles {
     g := geometry.make_cube([4]f32{0.7, 0.2, 0.2, 1})
@@ -139,6 +152,44 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
   }
 }
 
+visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
+  world.despawn(&engine.world, navmesh_node_handle)
+  nm_geom := nav.build_geometry(&engine.nav.nav_mesh)
+  // Lift navmesh viz so it doesn't z-fight the ground or get clipped by the skybox.
+  for &v in nm_geom.vertices do v.position.y += 0.2
+  nm_geom.aabb = geometry.aabb_from_vertices(nm_geom.vertices)
+  nm_mesh, mesh_ok := world.create_mesh(&engine.world, nm_geom)
+  if !mesh_ok do return
+  nm_mat, mat_ok := world.create_material(
+    &engine.world,
+    type = .RANDOM_COLOR,
+    base_color_factor = {1, 0.8, 0.3, 0.7},
+  )
+  if !mat_ok do return
+  navmesh_node_handle = world.spawn_mesh(&engine.world, nm_mesh, nm_mat)
+}
+
+random_goal :: proc(engine: ^mjolnir.Engine, away_from: [3]f32) -> [3]f32 {
+  extents := [3]f32{4, 6, 4}
+  best: [3]f32
+  best_ok: bool
+  for attempt in 0 ..< 32 {
+    p := [3]f32{
+      rand.float32_range(-SPAWN_RADIUS, SPAWN_RADIUS),
+      0,
+      rand.float32_range(-SPAWN_RADIUS, SPAWN_RADIUS),
+    }
+    snap, ok := nav.find_nearest_point(&engine.nav, p, extents)
+    if !ok do continue
+    best = snap
+    best_ok = true
+    // First 16 tries require min distance; after that accept any walkable point.
+    if attempt >= 16 || linalg.length(snap - away_from) >= GOAL_MIN_DIST do return snap
+  }
+  if best_ok do return best
+  return away_from
+}
+
 palette := [6][4]f32 {
   {1, 0.25, 0.25, 1},
   {0.25, 1, 0.25, 1},
@@ -151,7 +202,7 @@ palette := [6][4]f32 {
 spawn_agents :: proc(engine: ^mjolnir.Engine) {
   for i in 0 ..< AGENT_COUNT {
     angle := f32(i) / f32(AGENT_COUNT) * math.PI * 2
-    r: f32 = 18.0
+    r: f32 = SPAWN_RADIUS - 4.0
     agents[i].pos = {math.cos(angle) * r, 0, math.sin(angle) * r}
     agents[i].color = palette[i % len(palette)]
 
@@ -173,9 +224,7 @@ spawn_agents :: proc(engine: ^mjolnir.Engine) {
 
 assign_swap_targets :: proc(engine: ^mjolnir.Engine) {
   for i in 0 ..< AGENT_COUNT {
-    angle := f32(i) / f32(AGENT_COUNT) * math.PI * 2 + math.PI
-    r: f32 = 16.0 + rand.float32() * 4.0
-    agents[i].goal = {math.cos(angle) * r, 0, math.sin(angle) * r}
+    agents[i].goal = random_goal(engine, agents[i].pos)
     replan(engine, &agents[i])
   }
 }
@@ -243,6 +292,19 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       yaw := math.atan2(a.velocity.x, a.velocity.z)
       world.rotate(&engine.world, a.node, yaw, linalg.VECTOR3F32_Y_AXIS)
     }
+
+    draw_agent_path(engine, a)
+  }
+}
+
+draw_agent_path :: proc(engine: ^mjolnir.Engine, a: ^Agent) {
+  if len(a.path) == 0 || a.waypoint_idx >= len(a.path) do return
+  lift := [3]f32{0, 0.15, 0}
+  prev := a.pos + lift
+  for i in a.waypoint_idx ..< len(a.path) {
+    p := a.path[i] + lift
+    mjolnir.debug_segment(engine, prev, p, a.color)
+    prev = p
   }
 }
 
@@ -256,6 +318,7 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
     mu.layout_row(ctx, {-1}, 0)
     if .SUBMIT in mu.button(ctx, "Reassign targets") {
       assign_swap_targets(engine)
+      repath_phase = 0
     }
   }
 }

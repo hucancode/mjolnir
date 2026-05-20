@@ -39,10 +39,9 @@ nav_indices: [dynamic]i32
 nav_area_types: [dynamic]u8
 // Navmesh visualization
 navmesh_node_handle: world.NodeHandle
-// Path visualization
-path_node_handle: world.NodeHandle
-path_mesh_handle: world.MeshHandle
+// Path visualization (debug-line based, time-limited)
 path_spawn_time: f32
+path_active: bool
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -320,11 +319,8 @@ start_find_path :: proc(engine: ^mjolnir.Engine) {
         point.z,
       )
     }
-    // Despawn old path before creating new one
-    world.despawn(&engine.world, path_node_handle)
-    path_node_handle = {}
-    visualize_path(engine)
-    // Start following the path
+    path_spawn_time = 0
+    path_active = true
     current_waypoint_idx = 0
     path_completed = false
   }
@@ -362,47 +358,13 @@ update_agent_position :: proc(engine: ^mjolnir.Engine) {
   world.translate(&engine.world, agent_handle, agent_pos + [3]f32{0, 1, 0})
 }
 
-visualize_path :: proc(engine: ^mjolnir.Engine) {
-  // Clean up old path
-  world.despawn(&engine.world, path_node_handle)
-  if path_mesh_handle != {} {
-    world.destroy_mesh(&engine.world, path_mesh_handle)
-    path_mesh_handle = {}
+draw_path_debug :: proc(engine: ^mjolnir.Engine) {
+  if !path_active || len(current_path) < 2 do return
+  color := [4]f32{1.0, 0.8, 0.0, 1.0}
+  lift := [3]f32{0, 0.15, 0}
+  for i in 0 ..< len(current_path) - 1 {
+    mjolnir.debug_segment(engine, current_path[i] + lift, current_path[i + 1] + lift, color)
   }
-
-  if len(current_path) < 2 do return
-  log.infof("Visualizing path with %d points", len(current_path))
-
-  // Create line strip geometry
-  path_vertices := make([]geometry.Vertex, len(current_path))
-  for pos, i in current_path {
-    path_vertices[i] = geometry.Vertex {
-      position = pos,
-    }
-  }
-  indices := make([]u32, len(path_vertices))
-  for i in 0 ..< len(indices) {
-    indices[i] = u32(i)
-  }
-  path_geom := geometry.Geometry {
-    vertices = path_vertices,
-    indices  = indices,
-    aabb     = geometry.aabb_from_vertices(path_vertices),
-  }
-
-  path_mesh, mesh_ok := world.create_mesh(&engine.world, path_geom)
-  if !mesh_ok do return
-  path_mesh_handle = path_mesh
-
-  path_material, mat_ok := world.create_material(
-    &engine.world,
-    type = .LINE_STRIP,
-    base_color_factor = {1.0, 0.8, 0.0, 1.0},
-  )
-  if !mat_ok do return
-
-  path_node_handle = world.spawn_mesh(&engine.world, path_mesh, path_material)
-  path_spawn_time = 0
 }
 
 find_navmesh_point_from_mouse :: proc(
@@ -524,16 +486,13 @@ demo_mouse_pressed :: proc(
 
 demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
-  // Auto-remove path after 5 seconds
-  if path_node_handle != {} {
+  // Auto-hide path after 5 seconds; redraw via debug_segment until then
+  if path_active {
     path_spawn_time += delta_time
     if path_spawn_time >= 5.0 {
-      world.despawn(&engine.world, path_node_handle)
-      path_node_handle = {}
-      if path_mesh_handle != {} {
-        world.destroy_mesh(&engine.world, path_mesh_handle)
-        path_mesh_handle = {}
-      }
+      path_active = false
+    } else {
+      draw_path_debug(engine)
     }
   }
 
