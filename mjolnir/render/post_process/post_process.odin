@@ -182,7 +182,10 @@ Renderer :: struct {
   pipelines_ldr:    [len(PostProcessEffectType)]vk.Pipeline,
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
-  images:           [2]gpu.Texture2DHandle,
+  // 3 ping-pong buffers: bloom V pass needs to read H output AND pre-bloom
+  // scene simultaneously while writing to a third slot. With only 2 buffers
+  // V would have to write to one of its inputs when bloom isn't the last pass.
+  images:           [3]gpu.Texture2DHandle,
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -571,43 +574,50 @@ record :: proc(
     append(&self.effect_stack, nil)
   }
   gpu.set_viewport_scissor(command_buffer, extent, flip_y = false)
-  for effect, i in self.effect_stack {
-    is_first := i == 0
-    is_last := i == len(self.effect_stack) - 1
-    // Simple ping-pong logic:
-    // Pass 0: reads from original input (final_image), writes to image[0]
-    // Pass 1: reads from image[0], writes to image[1]
-    // Pass 2: reads from image[1], writes to image[0]
-    // etc.
-    input_image_index: u32
-    dst_image_idx: u32
-    if is_first {
-      input_image_index = final_image_idx // Use original input
-      dst_image_idx = 0 // Write to image[0]
-    } else {
-      prev_dst_image_idx := (i - 1) % 2
-      input_image_index = self.images[prev_dst_image_idx].index // Read from previous output
-      dst_image_idx = u32(i % 2) // Alternate between image[0] and image[1]
+  // Slot tracking for 3-buffer ping-pong.
+  //   current_input_slot == -1 means current input is `final_image_idx`
+  //   (external, not one of self.images), so no transition required.
+  //   bloom_h_input_slot is set when an H pass runs and consumed by the V pass
+  //   that follows, so V can composite against the scene as it entered bloom.
+  current_input_slot := -1
+  current_input_image_idx := final_image_idx
+  bloom_h_input_slot := -1
+  bloom_h_input_image_idx: u32 = 0
+  pick_dst_slot :: proc(forbidden_a, forbidden_b: int) -> int {
+    for s in 0 ..< 3 {
+      if s == forbidden_a do continue
+      if s == forbidden_b do continue
+      return s
     }
-    // Ping-pong logic:
-    // Pass 0: input -> image[0]     (src: original input, dst: image[0])
-    // Pass 1: image[0] -> image[1]  (src: image[0], dst: image[1])
-    // Pass 2: image[1] -> image[0]  (src: image[1], dst: image[0])
-    // Pass N: image[(N+1)%2] -> swapchain (src: image[(N-1)%2], dst: swapchain)
+    return 0
+  }
+  for effect, i in self.effect_stack {
+    is_last := i == len(self.effect_stack) - 1
+    is_bloom_h := false
+    is_bloom_v := false
+    if e, ok := effect.(BloomEffect); ok {
+      if e.direction < 0.5 do is_bloom_h = true
+      else do is_bloom_v = true
+    }
+    dst_slot: int
+    if !is_last {
+      // V pass must not overwrite its composite source (bloom_h_input).
+      forbidden_b := bloom_h_input_slot if is_bloom_v else -1
+      dst_slot = pick_dst_slot(current_input_slot, forbidden_b)
+    }
     dst_view := output_view
     if !is_last {
       dst_texture := gpu.get_texture_2d(
         texture_manager,
-        self.images[dst_image_idx],
+        self.images[dst_slot],
       )
       if dst_texture == nil {
         log.errorf(
           "Post-process image handle %v not found",
-          self.images[dst_image_idx],
+          self.images[dst_slot],
         )
         continue
       }
-      // Transition dst texture from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
       gpu.image_barrier(
         command_buffer,
         dst_texture.image,
@@ -620,23 +630,19 @@ record :: proc(
         {.COLOR},
       )
       dst_view = dst_texture.view
-    } else {
-      // For the last effect, output is the swapchain image, which should already be transitioned
     }
-    if !is_first {
-      src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
+    if current_input_slot >= 0 {
       src_texture := gpu.get_texture_2d(
         texture_manager,
-        self.images[src_texture_idx],
+        self.images[current_input_slot],
       )
       if src_texture == nil {
         log.errorf(
           "Post-process source image handle %v not found",
-          self.images[src_texture_idx],
+          self.images[current_input_slot],
         )
         continue
       }
-      // Transition src texture from COLOR_ATTACHMENT to SHADER_READ_ONLY
       gpu.image_barrier(
         command_buffer,
         src_texture.image,
@@ -649,6 +655,7 @@ record :: proc(
         {.COLOR},
       )
     }
+    input_image_index := current_input_image_idx
     gpu.begin_rendering(
       command_buffer,
       extent,
@@ -724,9 +731,11 @@ record :: proc(
         direction   = e.direction,
       }
       push_constant.base = base
-      // Bloom uses the padding slot as `original_image_index` (scene before
-      // bloom), so the V pass can composite blurred bright-pass with original.
-      push_constant.base.padding = final_image_idx
+      // Bloom uses the padding slot as `original_image_index` — the scene as
+      // it entered bloom, so V can composite blurred bright-pass against the
+      // prior stack state (preserving outline, DOF, fog, ...). H is a no-op
+      // for this field but we set it to its own input for consistency.
+      push_constant.base.padding = input_image_index if is_bloom_h else bloom_h_input_image_idx
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],
@@ -811,6 +820,17 @@ record :: proc(
     }
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
     vk.CmdEndRendering(command_buffer)
+    if is_bloom_h {
+      bloom_h_input_slot = current_input_slot
+      bloom_h_input_image_idx = current_input_image_idx
+    } else if is_bloom_v {
+      bloom_h_input_slot = -1
+      bloom_h_input_image_idx = 0
+    }
+    if !is_last {
+      current_input_slot = dst_slot
+      current_input_image_idx = self.images[dst_slot].index
+    }
   }
 }
 
