@@ -1435,25 +1435,24 @@ record_debug_line_pass :: proc(
   frame_index: u32,
   cam_index: u32,
   cam: ^CameraTarget,
+  swapchain_view: vk.ImageView,
+  swapchain_extent: vk.Extent2D,
   enabled_passes: PassTypeSet,
 ) {
   if .DEBUG_LINE not_in enabled_passes do return
-  color := gpu.get_texture_2d(
-    &self.texture_manager,
-    cam.attachments[.FINAL_IMAGE][frame_index],
-  )
   depth := gpu.get_texture_2d(
     &self.texture_manager,
     cam.attachments[.DEPTH][frame_index],
   )
-  if color == nil || depth == nil do return
+  if depth == nil do return
   debug_line.record(
     &self.internal.debug_line_renderer,
     self.internal.command_buffers[frame_index],
     frame_index,
     self.internal.camera_buffer.descriptor_sets[frame_index],
     cam_index,
-    color,
+    swapchain_view,
+    swapchain_extent,
     depth,
   )
 }
@@ -1640,7 +1639,6 @@ record_frame :: proc(
   main_camera_passes: PassTypeSet
   if main_cam, ok := &self.cameras[main_camera_index]; ok {
     main_camera_passes = main_cam.enabled_passes
-    record_debug_line_pass(self, frame_index, main_camera_index, main_cam, main_camera_passes)
     record_post_process_pass(
       self,
       frame_index,
@@ -1650,6 +1648,15 @@ record_frame :: proc(
       swapchain_view,
       main_camera_passes,
     ) or_return
+    record_debug_line_pass(
+      self,
+      frame_index,
+      main_camera_index,
+      main_cam,
+      swapchain_view,
+      swapchain_extent,
+      main_camera_passes,
+    )
   }
   record_ui_pass(self, frame_index, gctx, swapchain_view, swapchain_extent, main_camera_passes)
 
@@ -2214,7 +2221,7 @@ camera_init :: proc(
         texture_manager,
         gctx,
         extent,
-        color_format,
+        gpu.HDR_COLOR_FORMAT,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
     }
@@ -2534,7 +2541,7 @@ camera_resize :: proc(
         texture_manager,
         gctx,
         extent,
-        color_format,
+        gpu.HDR_COLOR_FORMAT,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
     }

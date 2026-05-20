@@ -23,47 +23,67 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint emissive_texture_index;
     uint depth_texture_index;
     uint input_image_index;
-    uint _pad;
-    float threshold;      // Brightness threshold for bloom
-    float intensity;      // Bloom intensity
-    float blur_radius;    // Blur radius
-    float direction;      // 0.0 = horizontal, 1.0 = vertical
+    uint original_image_index;
+    float threshold;
+    float intensity;
+    float blur_radius;
+    float direction;
 };
 
-const float MAX_RADIUS = 32.0;
+const float MAX_RADIUS = 64.0;
 
 float luminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
 
-// Optimized Gaussian weight calculation (same as blur shader)
 float gaussian_weight(float distance, float sigma) {
     return exp(-0.5 * distance * distance / (sigma * sigma));
 }
 
+// UE4/Karis soft-knee bright-pass. Smooth transition around threshold avoids
+// hard cutoff that creates ringing and amplitude cliffs.
+vec3 soft_brightpass(vec3 c, float lum, float threshold) {
+    float knee = threshold * 0.5;
+    float soft = clamp(lum - threshold + knee, 0.0, 2.0 * knee);
+    soft = soft * soft / (4.0 * knee + 1e-4);
+    float contribution = max(soft, lum - threshold) / max(lum, 1e-4);
+    return c * contribution;
+}
+
 void main() {
     vec2 texel_size = 1.0 / vec2(textureSize(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
-    vec4 original_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
-
-    // Normal blur with luminance weighting
-    vec4 blur_sum = vec4(0.0);
-    float total_weight = 0.0;
-
     float effective_radius = clamp(blur_radius, 1.0, MAX_RADIUS);
-    float sigma = effective_radius * 0.3;
-    vec2 blur_direction = mix(vec2(1.0, 0.0), vec2(0.0, 1.0), direction);
-    for (float i = -effective_radius; i <= effective_radius; i += 0.5) {
-        vec2 offset = blur_direction * i * texel_size;
-        vec4 sample_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + offset);
-        float sample_lum = luminance(sample_color.rgb);
-        float gaussian_weight_val = gaussian_weight(abs(i), sigma);
-        sample_lum = smoothstep(0.0, threshold, sample_lum);
-        float final_weight = gaussian_weight_val * sample_lum;
-        blur_sum += sample_color * final_weight;
-        total_weight += final_weight;
-    }
-    vec3 bloom_result = blur_sum.rgb * total_weight / effective_radius / 2.0;
-    vec3 final_color = original_color.rgb + bloom_result * intensity;
+    // 3-sigma rule: kernel must decay to ~0 by the loop edge, otherwise
+    // truncated separable Gaussian leaves a square box artifact (visible as
+    // square halos). sigma = radius/3 keeps the iso-weight contour circular.
+    float sigma = effective_radius / 3.0;
+    vec2 dir = mix(vec2(1.0, 0.0), vec2(0.0, 1.0), direction);
+    bool is_horizontal = direction < 0.5;
 
-    out_color = vec4(final_color, original_color.a);
+    vec3 acc = vec3(0.0);
+    float total = 0.0;
+    for (float i = -effective_radius; i <= effective_radius; i += 1.0) {
+        vec2 offset = dir * i * texel_size;
+        vec3 c = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + offset).rgb;
+        if (is_horizontal) {
+            float lum = luminance(c);
+            c = soft_brightpass(c, lum, threshold);
+        }
+        float w = gaussian_weight(i, sigma);
+        acc += c * w;
+        total += w;
+    }
+    vec3 blurred = acc / total;
+
+    vec3 final_color;
+    if (is_horizontal) {
+        final_color = blurred;
+    } else {
+        vec3 orig = texture(sampler2D(textures[original_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv).rgb;
+        // Soft additive: blur amplitude attenuates where original already
+        // bright. Prevents saturation runaway when intensity raised.
+        vec3 boost = blurred * intensity;
+        final_color = orig + boost / (1.0 + 0.25 * boost);
+    }
+    out_color = vec4(final_color, 1.0);
 }

@@ -30,8 +30,11 @@ layout(push_constant) uniform PostProcessPushConstant {
 
 void main() {
     vec3 color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv).rgb;
-    // Simple Reinhard tonemapping
+    // Exposure tonemap. sRGB swapchain handles linear->sRGB encoding; gamma
+    // param kept for back-compat as additional curve shaping (1.0 = off).
     color = vec3(1.0) - exp(-color * exposure);
-    color = pow(color, vec3(1.0 / gamma));
+    if (gamma > 0.0 && abs(gamma - 1.0) > 1e-4) {
+        color = pow(color, vec3(1.0 / gamma));
+    }
     out_color = vec4(color, 1.0);
 }

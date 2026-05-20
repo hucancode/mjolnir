@@ -178,7 +178,8 @@ PostprocessEffect :: union {
 }
 
 Renderer :: struct {
-  pipelines:        [len(PostProcessEffectType)]vk.Pipeline,
+  pipelines_hdr:    [len(PostProcessEffectType)]vk.Pipeline,
+  pipelines_ldr:    [len(PostProcessEffectType)]vk.Pipeline,
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
   images:           [2]gpu.Texture2DHandle,
@@ -269,7 +270,7 @@ add_bloom :: proc(
   append(&self.effect_stack, effect)
 }
 
-add_tonemap :: proc(self: ^Renderer, exposure: f32 = 1.0, gamma: f32 = 2.2) {
+add_tonemap :: proc(self: ^Renderer, exposure: f32 = 1.0, gamma: f32 = 1.0) {
   effect := ToneMapEffect {
     exposure = exposure,
     gamma    = gamma,
@@ -409,7 +410,14 @@ init :: proc(
     ) or_return
   }
   shader_stages: [count][2]vk.PipelineShaderStageCreateInfo
-  pipeline_infos: [count]vk.GraphicsPipelineCreateInfo
+  hdr_infos: [count]vk.GraphicsPipelineCreateInfo
+  ldr_infos: [count]vk.GraphicsPipelineCreateInfo
+  ldr_format := color_format
+  ldr_rendering_info := vk.PipelineRenderingCreateInfo {
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+    colorAttachmentCount    = 1,
+    pColorAttachmentFormats = &ldr_format,
+  }
   for effect_type, i in PostProcessEffectType {
     push_constant_size: u32
     switch effect_type {
@@ -442,9 +450,9 @@ init :: proc(
       frag_modules[i],
       &shared.SHADER_SPEC_CONSTANTS,
     )
-    pipeline_infos[i] = {
+    hdr_infos[i] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &gpu.COLOR_ONLY_RENDERING_INFO,
+      pNext               = &gpu.HDR_COLOR_ONLY_RENDERING_INFO,
       stageCount          = len(shader_stages[i]),
       pStages             = raw_data(shader_stages[i][:]),
       pVertexInputState   = &gpu.VERTEX_INPUT_NONE,
@@ -456,14 +464,24 @@ init :: proc(
       pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
       layout              = self.pipeline_layouts[i],
     }
+    ldr_infos[i] = hdr_infos[i]
+    ldr_infos[i].pNext = &ldr_rendering_info
   }
   vk.CreateGraphicsPipelines(
     gctx.device,
     0,
     count,
-    raw_data(pipeline_infos[:]),
+    raw_data(hdr_infos[:]),
     nil,
-    raw_data(self.pipelines[:]),
+    raw_data(self.pipelines_hdr[:]),
+  ) or_return
+  vk.CreateGraphicsPipelines(
+    gctx.device,
+    0,
+    count,
+    raw_data(ldr_infos[:]),
+    nil,
+    raw_data(self.pipelines_ldr[:]),
   ) or_return
   log.info("Postprocess pipeline initialized successfully")
   return .SUCCESS
@@ -481,7 +499,7 @@ create_images :: proc(
       texture_manager,
       gctx,
       extent,
-      format,
+      gpu.HDR_COLOR_FORMAT,
       vk.ImageUsageFlags {
         .COLOR_ATTACHMENT,
         .SAMPLED,
@@ -517,7 +535,11 @@ recreate_images :: proc(
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  for &p in self.pipelines {
+  for &p in self.pipelines_hdr {
+    vk.DestroyPipeline(gctx.device, p, nil)
+    p = 0
+  }
+  for &p in self.pipelines_ldr {
     vk.DestroyPipeline(gctx.device, p, nil)
     p = 0
   }
@@ -634,9 +656,10 @@ record :: proc(
       gpu.create_color_attachment_view(dst_view, .CLEAR, .STORE, BG_BLUE_GRAY),
     )
     effect_type := get_effect_type(effect)
+    pipeline := self.pipelines_ldr[effect_type] if is_last else self.pipelines_hdr[effect_type]
     gpu.bind_graphics_pipeline(
       command_buffer,
-      self.pipelines[effect_type],
+      pipeline,
       self.pipeline_layouts[effect_type],
       texture_manager.descriptor_set,
     )
@@ -701,6 +724,9 @@ record :: proc(
         direction   = e.direction,
       }
       push_constant.base = base
+      // Bloom uses the padding slot as `original_image_index` (scene before
+      // bloom), so the V pass can composite blurred bright-pass with original.
+      push_constant.base.padding = final_image_idx
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],

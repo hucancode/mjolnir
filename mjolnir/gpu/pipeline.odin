@@ -156,6 +156,20 @@ COLOR_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
   pColorAttachmentFormats = &STANDARD_COLOR_FORMAT,
 }
 
+HDR_COLOR_FORMAT := vk.Format.R16G16B16A16_SFLOAT
+HDR_STANDARD_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
+  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+  colorAttachmentCount    = 1,
+  pColorAttachmentFormats = &HDR_COLOR_FORMAT,
+  depthAttachmentFormat   = .D32_SFLOAT,
+}
+
+HDR_COLOR_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
+  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+  colorAttachmentCount    = 1,
+  pColorAttachmentFormats = &HDR_COLOR_FORMAT,
+}
+
 DEPTH_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
   sType                 = .PIPELINE_RENDERING_CREATE_INFO,
   depthAttachmentFormat = .D32_SFLOAT,

@@ -161,7 +161,8 @@ record :: proc(
   frame_index: u32,
   camera_set: vk.DescriptorSet,
   camera_index: u32,
-  color_image: ^gpu.Image,
+  color_view: vk.ImageView,
+  extent: vk.Extent2D,
   depth_image: ^gpu.Image,
 ) {
   sync.mutex_lock(&self.mu)
@@ -227,16 +228,16 @@ record :: proc(
 
   gpu.begin_rendering(
     cmd,
-    depth_image.spec.extent,
+    extent,
     gpu.create_depth_attachment(
       depth_image,
       .LOAD,
       .STORE,
       layout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
     ),
-    gpu.create_color_attachment(color_image, .LOAD, .STORE),
+    gpu.create_color_attachment_view(color_view, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(cmd, depth_image.spec.extent)
+  gpu.set_viewport_scissor(cmd, extent)
 
   pc := PushConstant{camera_index = camera_index}
   offset := vk.DeviceSize(0)

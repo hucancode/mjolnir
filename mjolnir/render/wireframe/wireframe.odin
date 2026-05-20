@@ -83,7 +83,7 @@ init :: proc(
     pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
     pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
     layout              = self.pipeline_layout,
-    pNext               = &gpu.STANDARD_RENDERING_INFO,
+    pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
   }
   vk.CreateGraphicsPipelines(
     gctx.device,

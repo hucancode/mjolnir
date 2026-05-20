@@ -7,7 +7,7 @@ import "core:fmt"
 import "core:log"
 import mu "vendor:microui"
 
-bloom_on: bool
+bloom_on: bool = true
 tonemap_on: bool = true
 fog_on: bool
 outline_on: bool
@@ -16,10 +16,10 @@ grayscale_on: bool
 blur_on: bool
 crosshatch_on: bool
 
-bloom_threshold: mu.Real = 0.6
+bloom_threshold: mu.Real = 1.0
 bloom_intensity: mu.Real = 1.0
 tonemap_exposure: mu.Real = 1.0
-tonemap_gamma: mu.Real = 2.2
+tonemap_gamma: mu.Real = 1.0
 fog_density: mu.Real = 0.02
 fog_start: mu.Real = 5.0
 fog_end: mu.Real = 40.0
@@ -41,7 +41,7 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
-  world.main_camera_look_at(&engine.world, {6, 5, 10}, {0, 0.5, 0})
+  world.main_camera_look_at(&engine.world, {6, 5, 10}, {0, 1.0, 0})
 
   ground := world.spawn_primitive_mesh(&engine.world, .QUAD_XZ, .GRAY)
   world.scale(&engine.world, ground, 30.0)
@@ -49,22 +49,32 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cube_mesh   := world.get_builtin_mesh(&engine.world, .CUBE)
   sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
 
-  emissive_mat := world.material_pbr(&engine.world, {1.0, 0.4, 0.1, 1}, emissive=8.0)
-  world.spawn_mesh(&engine.world, cube_mesh, emissive_mat, {-2.0, 1.0, 0.0})
+  // Three strong emissive spheres (HDR > 1.0) to showcase bloom.
+  magenta_emit := world.material_pbr(&engine.world, {1.0, 0.1, 0.8, 1}, emissive=4.0)
+  world.spawn_mesh(&engine.world, sphere_mesh, magenta_emit, {-3.0, 1.2, 1.5})
+
+  cyan_emit := world.material_pbr(&engine.world, {0.1, 0.9, 1.0, 1}, emissive=4.0)
+  world.spawn_mesh(&engine.world, sphere_mesh, cyan_emit, {0.0, 1.2, 1.5})
+
+  yellow_emit := world.material_pbr(&engine.world, {1.0, 0.9, 0.2, 1}, emissive=4.0)
+  world.spawn_mesh(&engine.world, sphere_mesh, yellow_emit, {3.0, 1.2, 1.5})
 
   metal_mat := world.material_pbr(&engine.world, {0.9, 0.9, 0.95, 1}, metallic=1.0, roughness=0.15)
-  world.spawn_mesh(&engine.world, sphere_mesh, metal_mat, {0.5, 1.0, 0.0})
+  world.spawn_mesh(&engine.world, sphere_mesh, metal_mat, {0.5, 1.0, -1.5})
 
   rough_mat := world.material_pbr(&engine.world, {0.2, 0.6, 0.8, 1}, metallic=0.0, roughness=0.8)
-  world.spawn_mesh(&engine.world, cube_mesh, rough_mat, {3.0, 1.0, 0.0})
+  world.spawn_mesh(&engine.world, cube_mesh, rough_mat, {3.0, 1.0, -1.5})
+
+  orange_emit := world.material_pbr(&engine.world, {1.0, 0.4, 0.1, 1}, emissive=4.0)
+  world.spawn_mesh(&engine.world, cube_mesh, orange_emit, {-3.0, 1.0, -1.5})
 
   glass_mat := world.material_transparent(&engine.world, {0.2, 0.9, 0.4, 0.4})
-  world.spawn_mesh(&engine.world, sphere_mesh, glass_mat, {1.5, 1.5, -2.5}, cast_shadow=false)
+  world.spawn_mesh(&engine.world, sphere_mesh, glass_mat, {1.5, 1.5, -3.5}, cast_shadow=false)
 
   white_mat := world.get_builtin_material(&engine.world, .WHITE)
   for i in 0 ..< 5 {
     x := f32(i) * 4.0 - 8.0
-    world.spawn_mesh(&engine.world, cube_mesh, white_mat, {x, 0.5, -6.0})
+    world.spawn_mesh(&engine.world, cube_mesh, white_mat, {x, 0.5, -7.0})
   }
 
   world.spawn_light_directional(
@@ -95,7 +105,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   if outline_on do pp.add_outline(pp_r, f32(outline_thickness), {0.0, 0.0, 0.0})
   if fog_on do pp.add_fog(pp_r, {0.55, 0.6, 0.7}, f32(fog_density), f32(fog_start), f32(fog_end))
   if dof_on do pp.add_dof(pp_r, f32(dof_focus), f32(dof_range), f32(dof_blur), 0.5)
-  if bloom_on do pp.add_bloom(pp_r, f32(bloom_threshold), f32(bloom_intensity), 4.0)
+  if bloom_on do pp.add_bloom(pp_r, f32(bloom_threshold), f32(bloom_intensity), 32.0)
   if blur_on do pp.add_blur(pp_r, f32(blur_radius), true)
   if crosshatch_on {
     ext := engine.swapchain.extent
@@ -126,7 +136,7 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
       mu.label(ctx, fmt.tprintf("threshold %.2f", bloom_threshold))
       mu.slider(ctx, &bloom_threshold, 0.0, 3.0)
       mu.label(ctx, fmt.tprintf("intensity %.2f", bloom_intensity))
-      mu.slider(ctx, &bloom_intensity, 0.0, 3.0)
+      mu.slider(ctx, &bloom_intensity, 0.0, 20.0)
     }
     mu.checkbox(ctx, "Fog", &fog_on)
     if fog_on {

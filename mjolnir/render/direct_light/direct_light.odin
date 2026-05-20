@@ -166,7 +166,7 @@ init :: proc(
     shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
     pipeline_info := vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &gpu.STANDARD_RENDERING_INFO,
+      pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
       stageCount          = len(shader_stages),
       pStages             = raw_data(shader_stages[:]),
       pVertexInputState   = &vertex_input,
@@ -192,7 +192,7 @@ init :: proc(
     shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
     pipeline_info := vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &gpu.STANDARD_RENDERING_INFO,
+      pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
       stageCount          = len(shader_stages),
       pStages             = raw_data(shader_stages[:]),
       pVertexInputState   = &vertex_input,
@@ -218,7 +218,7 @@ init :: proc(
     shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
     pipeline_info := vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &gpu.STANDARD_RENDERING_INFO,
+      pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
       stageCount          = len(shader_stages),
       pStages             = raw_data(shader_stages[:]),
       pVertexInputState   = &vertex_input,

@@ -136,7 +136,7 @@ create_render_pipeline :: proc(
 		pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
 		pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
 		layout              = self.render_pipeline_layout,
-		pNext               = &gpu.STANDARD_RENDERING_INFO,
+		pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
 	}
 
 	vk.CreateGraphicsPipelines(
