@@ -51,7 +51,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
   world.main_camera_look_at(
     &engine.world,
-    {0, 80, 120},
+    {0, 30, 15},
     {0, 0, 0},
   )
   spider_roots := mjolnir.load_gltf(engine, "assets/spider.glb")

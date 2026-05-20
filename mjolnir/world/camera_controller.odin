@@ -94,7 +94,7 @@ camera_controller_orbit_init :: proc(
       yaw = yaw,
       pitch = pitch,
       min_distance = 1.0,
-      max_distance = 20.0,
+      max_distance = 200.0,
       min_pitch = -math.PI * 0.5 + 0.01,
       max_pitch = math.PI * 0.5 - 0.01,
       zoom_speed = 2.0,

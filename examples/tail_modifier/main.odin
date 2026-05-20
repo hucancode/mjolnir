@@ -33,7 +33,7 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   engine.debug_ui_enabled = true
-  world.main_camera_look_at(&engine.world, {0, 3, 0}, {0, 1, 0})
+  world.main_camera_look_at(&engine.world, {0, 4, -4}, {0, 1, 0})
   root_nodes = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
   for handle in root_nodes {
     node := world.node(&engine.world, handle) or_continue
