@@ -371,10 +371,6 @@ layer_update :: proc(self: ^Layer, delta_time: f32) {
       )
     case .ONCE:
       layer_data.time += effective_delta_time
-      layer_data.time = math.mod_f32(
-        layer_data.time + layer_data.duration,
-        layer_data.duration,
-      )
       if layer_data.time >= layer_data.duration {
         layer_data.time = layer_data.duration
         layer_data.status = .STOPPED
