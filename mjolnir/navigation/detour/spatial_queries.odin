@@ -193,6 +193,7 @@ raycast :: proc(
     path_count = 1
   }
   cur_t := f32(0)
+  prev_ref := recast.INVALID_POLY_REF
   for cur_t < ray_len {
     tile, poly, poly_status := get_tile_and_poly_by_ref(
       query.nav_mesh,
@@ -206,7 +207,7 @@ raycast :: proc(
       va := tile.verts[poly.verts[i]]
       vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
       edge_t, intersects := geometry.ray_segment_intersect_2d(
-        cur_pos,
+        start_pos,
         ray_dir,
         va,
         vb,
@@ -221,7 +222,7 @@ raycast :: proc(
           link_iterations += 1
           if get_link_edge(tile, link) == u8(i) {
             neighbor_ref := get_link_poly_ref(tile, link)
-            if neighbor_ref != recast.INVALID_POLY_REF {
+            if neighbor_ref != recast.INVALID_POLY_REF && neighbor_ref != prev_ref {
               neighbor_tile, neighbor_poly, neighbor_status :=
                 get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
               if recast.status_succeeded(neighbor_status) &&
@@ -241,7 +242,7 @@ raycast :: proc(
           link = get_next_link(tile, link)
         }
         if !neighbor_found {
-          hit.t = edge_t
+          hit.t = edge_t / ray_len
           hit.hit_edge_index = i32(i)
           edge_dir := vb - va
           hit.hit_normal = linalg.normalize([3]f32{edge_dir.z, 0, -edge_dir.x})
@@ -250,6 +251,7 @@ raycast :: proc(
       }
     }
     if next_ref == recast.INVALID_POLY_REF do break
+    prev_ref = cur_ref
     cur_ref = next_ref
     cur_t = next_t
     cur_pos = start_pos + ray_dir * cur_t
@@ -276,7 +278,7 @@ raycast :: proc(
       hit.path_cost = prev_cost + segment_cost
     }
   }
-  hit.t = ray_len
+  hit.t = 1.0
   return {.Success}, hit, path_count
 }
 
@@ -553,15 +555,25 @@ find_distance_to_wall :: proc(
       for link != recast.DT_NULL_LINK {
         if get_link_edge(tile, link) == u8(i) {
           neighbor_ref := get_link_poly_ref(tile, link)
-          if query_filter_pass_filter(filter, neighbor_ref, nil, nil) {
-            is_wall = false
-            if _, exists := visited[neighbor_ref];
-               !exists && stack_size < 255 {
-              visited[neighbor_ref] = true
-              stack[stack_size] = neighbor_ref
-              stack_size += 1
+          if neighbor_ref != recast.INVALID_POLY_REF {
+            neighbor_tile, neighbor_poly, neighbor_status :=
+              get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
+            if recast.status_succeeded(neighbor_status) &&
+               query_filter_pass_filter(
+                 filter,
+                 neighbor_ref,
+                 neighbor_tile,
+                 neighbor_poly,
+               ) {
+              is_wall = false
+              if _, exists := visited[neighbor_ref];
+                 !exists && stack_size < 255 {
+                visited[neighbor_ref] = true
+                stack[stack_size] = neighbor_ref
+                stack_size += 1
+              }
+              break
             }
-            break
           }
         }
         link = get_next_link(tile, link)

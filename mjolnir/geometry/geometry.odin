@@ -693,7 +693,7 @@ circum_circle :: proc "contextless" (
   EPS :: 1e-6
   ab := b - a
   ac := c - a
-  cross := linalg.cross(ac.xz, ab.xz)
+  cross := linalg.cross(ab.xz, ac.xz)
   if abs(cross) < EPS {
     valid = false
     return
