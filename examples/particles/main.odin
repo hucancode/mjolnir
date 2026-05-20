@@ -12,7 +12,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 4, 12}, {0, 2, 0})
+  world.main_camera_look_at(&engine.world, {0, 5, 10}, {0, 2, 0})
 
   ground := world.spawn_primitive_mesh(
     &engine.world,
@@ -26,7 +26,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if spark_tex, ok := mjolnir.create_texture(engine, "assets/gold-star.png"); ok {
     world.spawn_emitter(
       &engine.world,
-      position          = {-1.5, 0.2, 0},
+      position          = {-1.5, 5, 0},
       texture           = spark_tex,
       emission_rate     = 200,
       initial_velocity  = {0, 3.0, 0},
@@ -48,20 +48,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if smoke_tex, ok := mjolnir.create_texture(engine, "assets/black-circle.png"); ok {
     world.spawn_emitter(
       &engine.world,
-      position          = {1.5, 0.2, 0},
+      position          = {1.5, 2, 0},
       texture           = smoke_tex,
-      emission_rate     = 80,
-      initial_velocity  = {0, 0.8, 0},
-      velocity_spread   = 0.4,
+      emission_rate     = 10,
+      initial_velocity  = {0.1, 0.1, 0.1},
+      velocity_spread   = 2.4,
       color_start       = {0.2, 0.2, 0.25, 0.8},
       color_end         = {0.05, 0.05, 0.08, 0},
       aabb_min          = {-4, -4, -4},
       aabb_max          = {4, 7, 4},
-      particle_lifetime = 4.0,
+      particle_lifetime = 3.0,
       position_spread   = 0.4,
-      size_start        = 250,
+      size_start        = 50,
       size_end          = 700,
-      weight            = 0.05,
+      weight            = -0.05,
       weight_spread     = 0.02,
     )
   }
