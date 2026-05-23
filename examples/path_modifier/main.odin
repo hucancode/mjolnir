@@ -2,16 +2,14 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/animation"
-import "../../mjolnir/world"
 import "core:fmt"
-import "core:log"
 import "core:math"
 import mu "vendor:microui"
 
 CONTROL_POINTS :: 32
 PATH_DEBUG_SAMPLES :: 96
 
-target_nodes:  [dynamic]world.NodeHandle
+target_nodes:  [dynamic]mjolnir.NodeHandle
 layer_indices: [dynamic]int
 path_buf:      [CONTROL_POINTS][3]f32
 spline:        animation.Spline([3]f32)
@@ -22,20 +20,21 @@ fit_len:    mu.Real = 6
 radius:     mu.Real = 4
 height:     mu.Real = 2
 lobes:      mu.Real = 3
-
 prev_radius: mu.Real = 4
 prev_height: mu.Real = 2
 prev_lobes:  mu.Real = 3
-
 auto_play: bool = true
 
 main :: proc() {
-  context.logger = log.create_console_logger()
-  engine := new(mjolnir.Engine)
-  engine.setup_proc = setup
-  engine.update_proc = update
-  engine.pre_render_proc = debug_ui
-  mjolnir.run(engine, 900, 650, "Path Modifier")
+  mjolnir.run_app({
+    title      = "Path Modifier",
+    width      = 900,
+    height     = 650,
+    debug_ui   = true,
+    setup      = setup,
+    update     = update,
+    pre_render = debug_ui,
+  })
 }
 
 regenerate_points :: proc() {
@@ -43,11 +42,7 @@ regenerate_points :: proc() {
   for i in 0 ..< CONTROL_POINTS {
     t := f32(i) / f32(CONTROL_POINTS)
     u := t * math.PI * 2.0
-    path_buf[i] = {
-      f32(radius) * math.cos(u),
-      f32(height) * math.sin(u * f32(lobes_i)),
-      f32(radius) * math.sin(u),
-    }
+    path_buf[i] = {f32(radius) * math.cos(u), f32(height) * math.sin(u * f32(lobes_i)), f32(radius) * math.sin(u)}
   }
 }
 
@@ -56,26 +51,13 @@ rebuild_path :: proc(engine: ^mjolnir.Engine) {
   animation.spline_destroy(&spline)
   spline = animation.spline_build_closed(path_buf[:])
   for node_handle, i in target_nodes {
-    world.set_path_modifier_params(
-      &engine.world,
-      node_handle,
-      layer_indices[i],
-      path = path_buf[:],
-    )
+    mjolnir.set_path_modifier_params(engine, node_handle, layer_indices[i], path = path_buf[:])
   }
 }
 
 apply_runtime_params :: proc(engine: ^mjolnir.Engine) {
   for node_handle, i in target_nodes {
-    world.set_path_modifier_params(
-      &engine.world,
-      node_handle,
-      layer_indices[i],
-      offset = f32(offset_val),
-      length = f32(fit_len),
-      speed = 0,
-      loop = true,
-    )
+    mjolnir.set_path_modifier_params(engine, node_handle, layer_indices[i], offset = f32(offset_val), length = f32(fit_len), speed = 0, loop = true)
   }
 }
 
@@ -92,28 +74,18 @@ draw_path_debug :: proc(engine: ^mjolnir.Engine) {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  engine.debug_ui_enabled = true
-  world.main_camera_look_at(&engine.world, {5, 3, 5}, {0, 0, 0})
+  mjolnir.main_camera_look_at(engine, {5, 3, 5}, {0, 0, 0})
   roots := mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
-
   regenerate_points()
   spline = animation.spline_build_closed(path_buf[:])
 
   for handle in roots {
-    node := world.node(&engine.world, handle) or_continue
+    node := mjolnir.node(engine, handle) or_continue
     for child in node.children {
-      idx, ok := world.add_path_modifier_layer(
-        &engine.world,
-        child,
-        root_bone_name = "root",
-        tail_length = 14,
-        path = path_buf[:],
-        offset = f32(offset_val),
-        length = f32(fit_len),
-        speed = 0,
-        loop = true,
-        closed = true,
-        weight = 1.0,
+      idx, ok := mjolnir.add_path_modifier_layer(
+        engine, child, "root", 14,
+        path = path_buf[:], offset = f32(offset_val), length = f32(fit_len),
+        speed = 0, loop = true, closed = true, weight = 1.0,
       )
       if ok {
         append(&target_nodes, child)
@@ -121,24 +93,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  world.spawn_primitive_mesh(
-    &engine.world,
-    .QUAD_XZ,
-    .GRAY,
-    position = {0, -3, 0},
-    scale_factor = 30,
-    cast_shadow = false,
-  )
-
-  world.spawn_light_point(&engine.world, {0, 10, 0}, {1, 0.9, 0.8, 1}, 15.0, true)
+  mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, position = {0, -3, 0}, scale_factor = 30, cast_shadow = false)
+  mjolnir.spawn_light_point(engine, {0, 10, 0}, {1, 0.9, 0.8, 1}, 15.0, true)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   if radius != prev_radius || height != prev_height || lobes != prev_lobes {
     rebuild_path(engine)
-    prev_radius = radius
-    prev_height = height
-    prev_lobes = lobes
+    prev_radius = radius; prev_height = height; prev_lobes = lobes
   }
   spline_len := animation.spline_arc_length(spline)
   if auto_play && spline_len > 0 {
@@ -150,24 +112,17 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := &engine.render.debug_ui.ctx
+  ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Path Modifier", {20, 20, 200, 380}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto play", &auto_play)
     spline_len := animation.spline_arc_length(spline)
     mu.label(ctx, fmt.tprintf("Offset: %.2f / %.2f", f32(offset_val), spline_len))
-    if spline_len > 0 {
-      mu.slider(ctx, &offset_val, 0, mu.Real(spline_len))
-    }
-    mu.label(ctx, fmt.tprintf("Speed: %.2f", speed_val))
-    mu.slider(ctx, &speed_val, 0, 10)
-    mu.label(ctx, fmt.tprintf("Fit length: %.2f", fit_len))
-    mu.slider(ctx, &fit_len, 0.5, 12)
-    mu.label(ctx, fmt.tprintf("Radius: %.2f", radius))
-    mu.slider(ctx, &radius, 1, 8)
-    mu.label(ctx, fmt.tprintf("Height: %.2f", height))
-    mu.slider(ctx, &height, 0, 6)
-    mu.label(ctx, fmt.tprintf("Lobes: %d", int(math.round(f32(lobes)))))
-    mu.slider(ctx, &lobes, 1, 8)
+    if spline_len > 0 do mu.slider(ctx, &offset_val, 0, mu.Real(spline_len))
+    mu.label(ctx, fmt.tprintf("Speed: %.2f", speed_val)); mu.slider(ctx, &speed_val, 0, 10)
+    mu.label(ctx, fmt.tprintf("Fit length: %.2f", fit_len)); mu.slider(ctx, &fit_len, 0.5, 12)
+    mu.label(ctx, fmt.tprintf("Radius: %.2f", radius)); mu.slider(ctx, &radius, 1, 8)
+    mu.label(ctx, fmt.tprintf("Height: %.2f", height)); mu.slider(ctx, &height, 0, 6)
+    mu.label(ctx, fmt.tprintf("Lobes: %d", int(math.round(f32(lobes))))); mu.slider(ctx, &lobes, 1, 8)
   }
 }

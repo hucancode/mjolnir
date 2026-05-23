@@ -1,48 +1,35 @@
 package main
 
 import "../../mjolnir"
-import cont "../../mjolnir/containers"
 import "../../mjolnir/geometry"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
-import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
 
-OBJ_FILES :: [3]string {
-  "assets/nav_test.obj",
-  "assets/floor_with_5_obstacles.obj",
-  "assets/dungeon.obj",
-}
+OBJ_FILES :: [3]string{"assets/nav_test.obj", "assets/floor_with_5_obstacles.obj", "assets/dungeon.obj"}
 OBJ_SCALES :: [3]f32{1.0, 1.0, 0.05}
 OBJ_LABELS :: [3]string{"nav_test", "5 obstacles", "dungeon"}
 
-display_node: world.NodeHandle
-display_material: world.MaterialHandle
-loaded_meshes: [3]world.MeshHandle
+display_node: mjolnir.NodeHandle
+display_material: mjolnir.MaterialHandle
+loaded_meshes: [3]mjolnir.MeshHandle
 loaded_aabb: [3]struct{min, max: [3]f32}
 current_index: int = -1
 
 main :: proc() {
-  context.logger = log.create_console_logger()
-  engine := new(mjolnir.Engine)
-  engine.setup_proc = setup
-  engine.pre_render_proc = debug_ui
-  mjolnir.run(engine, 1000, 700, "OBJ Loader")
+  mjolnir.run_app({
+    title = "OBJ Loader", width = 1000, height = 700,
+    debug_ui = true, setup = setup, pre_render = debug_ui,
+  })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  engine.debug_ui_enabled = true
+  light := mjolnir.spawn_light_directional(engine, {10, 18, 10}, {1, 0.97, 0.92, 3.0}, 10.0, false)
+  mjolnir.rotate(engine, light, 1.5707963, [3]f32{1, 0, 0})
 
-  light, _ := world.spawn_light_directional(&engine.world, {10, 18, 10}, {1, 0.97, 0.92, 3.0}, 10.0, false)
-  world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-
-  display_material = world.create_material(
-    &engine.world,
-    type = .RANDOM_COLOR,
-    base_color_factor = {0.7, 0.6, 0.5, 1},
-  ) or_else {}
+  display_material = mjolnir.create_material(engine, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
 
   files := OBJ_FILES
   scales := OBJ_SCALES
@@ -52,21 +39,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
       log.errorf("failed to load %s", files[i])
       continue
     }
-    log.infof(
-      "%s: %d verts, %d tris, aabb %v..%v",
-      files[i], len(geom.vertices), len(geom.indices) / 3, geom.aabb.min, geom.aabb.max,
-    )
+    log.infof("%s: %d verts, %d tris, aabb %v..%v", files[i], len(geom.vertices), len(geom.indices) / 3, geom.aabb.min, geom.aabb.max)
     loaded_aabb[i] = {geom.aabb.min, geom.aabb.max}
-    mh, _ := world.create_mesh(&engine.world, geom)
-    loaded_meshes[i] = mh
+    loaded_meshes[i] = mjolnir.create_mesh(engine, geom)
   }
 
-  display_node = world.spawn(
-    &engine.world,
-    {0, 0, 0},
-    world.MeshAttachment{handle = loaded_meshes[0], material = display_material, cast_shadow = true},
-  ) or_else {}
-
+  display_node = mjolnir.spawn(engine, {0, 0, 0}, world.MeshAttachment{handle = loaded_meshes[0], material = display_material, cast_shadow = true})
   swap_model(engine, 0)
 }
 
@@ -80,23 +58,19 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
   radius := linalg.length(extents) * 0.5
   if radius < 0.001 do radius = 1
 
-  world.set_mesh_handle(&engine.world, display_node, loaded_meshes[index])
-  world.translate(&engine.world, display_node, -center)
+  mjolnir.set_mesh_handle(engine, display_node, loaded_meshes[index])
+  mjolnir.translate(engine, display_node, -center)
 
   cam_dist := radius * 1.8
-  if cam, ok := cont.get(engine.world.cameras, engine.world.main_camera); ok {
-    cam.projection = world.PerspectiveProjection {
-      fov          = 1.2,
+  if cam, ok := mjolnir.main_camera(engine); ok {
+    cam.projection = world.PerspectiveProjection{
+      fov = 1.2,
       aspect_ratio = f32(cam.extent[0]) / f32(cam.extent[1]),
-      near         = max(0.1, cam_dist * 0.01),
-      far          = cam_dist * 5.0,
+      near = max(0.1, cam_dist * 0.01),
+      far = cam_dist * 5.0,
     }
   }
-  world.main_camera_look_at(
-    &engine.world,
-    {cam_dist, cam_dist * 0.7, cam_dist},
-    {0, 0, 0},
-  )
+  mjolnir.main_camera_look_at(engine, {cam_dist, cam_dist * 0.7, cam_dist}, {0, 0, 0})
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

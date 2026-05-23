@@ -103,6 +103,8 @@ Engine :: struct {
   // Used so the matching RELEASE is also withheld from user procs and
   // camera controller, regardless of where the cursor ends up.
   ui_captured_mouse_button:  [8]bool,
+  // Opaque user pointer — stash app state here instead of using globals.
+  user_data:                 rawptr,
 }
 
 // True when the debug UI is hovered or has an active pop-up. Mouse input
@@ -1316,6 +1318,49 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
   self.frame_index = alg.next(self.frame_index, FRAMES_IN_FLIGHT)
   self.last_render_timestamp = time.now()
   return .SUCCESS
+}
+
+// One-stop entry point. Allocates the engine, installs a console logger,
+// runs to window close, and tears down. Example:
+//
+//   main :: proc() {
+//     mjolnir.run_app({ title = "Cube", setup = setup })
+//   }
+RunConfig :: struct {
+  title:        string,
+  width:        u32,             // 0 → 800
+  height:       u32,             // 0 → 600
+  setup:        SetupProc,
+  update:       UpdateProc,
+  pre_render:   PreRenderProc,
+  post_render:  PostRenderProc,
+  key_press:    KeyInputProc,
+  mouse_press:  MousePressProc,
+  mouse_move:   MouseMoveProc,
+  mouse_scroll: MouseScrollProc,
+  mouse_drag:   MouseDragProc,
+  user_data:    rawptr,
+  debug_ui:     bool,
+}
+
+run_app :: proc(cfg: RunConfig) {
+  context.logger = log.create_console_logger()
+  engine := new(Engine)
+  defer free(engine)
+  engine.setup_proc        = cfg.setup
+  engine.update_proc       = cfg.update
+  engine.pre_render_proc   = cfg.pre_render
+  engine.post_render_proc  = cfg.post_render
+  engine.key_press_proc    = cfg.key_press
+  engine.mouse_press_proc  = cfg.mouse_press
+  engine.mouse_move_proc   = cfg.mouse_move
+  engine.mouse_scroll_proc = cfg.mouse_scroll
+  engine.mouse_drag_proc   = cfg.mouse_drag
+  engine.user_data         = cfg.user_data
+  engine.debug_ui_enabled  = cfg.debug_ui
+  w := cfg.width  if cfg.width  != 0 else 800
+  h := cfg.height if cfg.height != 0 else 600
+  run(engine, w, h, cfg.title)
 }
 
 run :: proc(self: ^Engine, width, height: u32, title: string) {

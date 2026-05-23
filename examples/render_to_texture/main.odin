@@ -1,119 +1,50 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/world"
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-rtt_camera_handle: world.CameraHandle
-rtt_material_handle: world.MaterialHandle
-spinner_handle: world.NodeHandle
+rtt_camera_handle: mjolnir.CameraHandle
+rtt_material_handle: mjolnir.MaterialHandle
+spinner_handle: mjolnir.NodeHandle
 
 main :: proc() {
-  context.logger = log.create_console_logger()
-  engine := new(mjolnir.Engine)
-  engine.setup_proc = setup
-  engine.update_proc = update
-  engine.post_render_proc = on_post_render
-  mjolnir.run(engine, 800, 600, "Render To Texture")
+  mjolnir.run_app({
+    title       = "Render To Texture",
+    setup       = setup,
+    update      = update,
+    post_render = on_post_render,
+  })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {5, 3, 6}, {0, 1, 0})
+  mjolnir.main_camera_look_at(engine, {5, 3, 6}, {0, 1, 0})
 
-  ground_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  ground_material := world.get_builtin_material(&engine.world, .GRAY)
-  ground_handle :=
-    world.spawn(
-      &engine.world,
-      {0, 0, 0},
-      world.MeshAttachment {
-        handle = ground_mesh,
-        material = ground_material,
-      },
-    ) or_else {}
-  world.scale(&engine.world, ground_handle, 6.0)
+  ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY)
+  mjolnir.scale(engine, ground, 6.0)
 
-  world.spawn_primitive_mesh(
-    &engine.world,
-    .CUBE,
-    .RED,
-    position = {-1.5, 0.5, 0},
-  )
-  world.spawn_primitive_mesh(
-    &engine.world,
-    .SPHERE,
-    .GREEN,
-    position = {0, 0.6, 1.0},
-    scale_factor = 0.6,
-  )
-  world.spawn_primitive_mesh(
-    &engine.world,
-    .CONE,
-    .BLUE,
-    position = {1.5, 0.5, -0.5},
-  )
+  mjolnir.spawn_primitive_mesh(engine, .CUBE,   .RED,   position = {-1.5, 0.5, 0})
+  mjolnir.spawn_primitive_mesh(engine, .SPHERE, .GREEN, position = {0, 0.6, 1.0}, scale_factor = 0.6)
+  mjolnir.spawn_primitive_mesh(engine, .CONE,   .BLUE,  position = {1.5, 0.5, -0.5})
+  spinner_handle = mjolnir.spawn_primitive_mesh(engine, .CUBE, .YELLOW, position = {0, 1.8, 0}, scale_factor = 0.4)
 
-  spinner_handle = world.spawn_primitive_mesh(
-    &engine.world,
-    .CUBE,
-    .YELLOW,
-    position = {0, 1.8, 0},
-    scale_factor = 0.4,
-  )
+  mjolnir.spawn_light_point(engine, {0, 3, 1.5}, {1.0, 0.6, 0.3, 1.0}, 12.0, false)
 
-  world.spawn_light_point(&engine.world, {0, 3, 1.5}, {1.0, 0.6, 0.3, 1.0}, 12.0, false)
+  rtt_camera_handle = mjolnir.create_camera(engine, 512, 512, {.GEOMETRY, .LIGHTING, .TRANSPARENCY}, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
+  rtt_material_handle = mjolnir.create_material(engine, {.ALBEDO_TEXTURE})
 
-  // Off-screen camera looking at scene from a different angle (top-down).
-  // No POST_PROCESS pass for cheaper rendering of the texture.
-  rtt_camera_handle = mjolnir.create_camera(
-    engine,
-    512,
-    512,
-    {.GEOMETRY, .LIGHTING, .TRANSPARENCY},
-    {0, 8, 0.01},
-    {0, 0, 0},
-    math.PI * 0.5,
-    0.1,
-    100.0,
-  )
-
-  rtt_material_handle = world.create_material(&engine.world, {.ALBEDO_TEXTURE})
-
-  // Quad on the back wall displays whatever rtt_camera renders.
-  display_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XY)
-  display_handle :=
-    world.spawn(
-      &engine.world,
-      {0, 2.5, -3.5},
-      world.MeshAttachment {
-        handle = display_mesh,
-        material = rtt_material_handle,
-        cast_shadow = false,
-      },
-    ) or_else {}
-  world.scale(&engine.world, display_handle, 3.0)
+  display_mesh := mjolnir.builtin_mesh(engine, .QUAD_XY)
+  display_handle := mjolnir.spawn(engine, {0, 2.5, -3.5}, mjolnir.MeshAttachment{handle = display_mesh, material = rtt_material_handle, cast_shadow = false})
+  mjolnir.scale(engine, display_handle, 3.0)
 }
 
-update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  t := mjolnir.time_since_start(engine)
-  world.rotate(
-    &engine.world,
-    spinner_handle,
-    t,
-    linalg.VECTOR3F32_Y_AXIS,
-  )
+update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  mjolnir.rotate(engine, spinner_handle, mjolnir.time_since_start(engine), linalg.VECTOR3F32_Y_AXIS)
 }
 
 on_post_render :: proc(engine: ^mjolnir.Engine) {
-  if material, ok := world.material(&engine.world, rtt_material_handle); ok {
-    material.albedo = mjolnir.get_camera_attachment(
-      engine,
-      rtt_camera_handle,
-      .FINAL_IMAGE,
-      engine.frame_index,
-    )
-    world.stage_material_data(&engine.world.staging, rtt_material_handle)
+  if mat, ok := mjolnir.material(engine, rtt_material_handle); ok {
+    mat.albedo = mjolnir.get_camera_attachment(engine, rtt_camera_handle, .FINAL_IMAGE, engine.frame_index)
+    mjolnir.stage_material_data(engine, rtt_material_handle)
   }
 }

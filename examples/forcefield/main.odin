@@ -2,29 +2,24 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/world"
-import "core:log"
 import "core:math/linalg"
 
-ff_handle: world.NodeHandle
+ff_handle: mjolnir.NodeHandle
 
 main :: proc() {
-  context.logger = log.create_console_logger()
-  engine := new(mjolnir.Engine)
-  engine.setup_proc = setup
-  engine.update_proc = update
-  mjolnir.run(engine, 800, 600, "Forcefield")
+  mjolnir.run_app({title = "Forcefield", setup = setup, update = update})
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 4, 9}, {0, 2, 0})
+  mjolnir.main_camera_look_at(engine, {0, 4, 9}, {0, 2, 0})
 
-  ground := world.spawn_primitive_mesh(&engine.world, .QUAD_XZ, .GRAY, cast_shadow=false)
-  world.scale(&engine.world, ground, 8.0)
+  ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, cast_shadow = false)
+  mjolnir.scale(engine, ground, 8.0)
 
   // Particle source at center, large position spread
   if tex, ok := mjolnir.create_texture(engine, "assets/gold-star.png"); ok {
-    world.spawn_emitter(
-      &engine.world,
+    mjolnir.spawn_emitter(
+      engine,
       position          = {0, 2, 0},
       texture           = tex,
       emission_rate     = 60,
@@ -44,42 +39,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   // Orbiting forcefield: parent rotates, child has the field offset
-  ff_handle = world.spawn(&engine.world, {0, 2, 0})
-  child := world.spawn_forcefield(
-    &engine.world,
-    position         = {2.5, 0, 0},
-    area_of_effect   = 4.0,
-    strength         = -15.0,
-    tangent_strength = 8.0,
-  )
-  world.attach(engine.world.nodes, ff_handle, child)
+  ff_handle = mjolnir.spawn(engine, {0, 2, 0})
+  child := mjolnir.spawn_forcefield(engine, position = {2.5, 0, 0}, area_of_effect = 4.0, strength = -15.0, tangent_strength = 8.0)
+  mjolnir.attach(engine, ff_handle, child)
 
   // Visualize the field with a small sphere
-  marker_mat := world.material_pbr(
-    &engine.world,
-    base_color = {0.2, 0.6, 1.0, 1},
-    emissive   = 2.0,
-    roughness  = 0.3,
-  )
-  world.spawn_child(
-    &engine.world,
-    child,
-    attachment = world.mesh_attach(
-      world.get_builtin_mesh(&engine.world, .SPHERE),
-      marker_mat,
-      cast_shadow = false,
-    ),
-  )
+  marker_mat := mjolnir.material_pbr(engine, base_color = {0.2, 0.6, 1.0, 1}, emissive = 2.0, roughness = 0.3)
+  mjolnir.spawn_child(engine, child, attachment = world.mesh_attach(mjolnir.builtin_mesh(engine, .SPHERE), marker_mat, cast_shadow = false))
 
-  world.spawn_light_directional(
-    &engine.world,
-    position = {3, 6, 3},
-    color    = {1, 1, 1, 1},
-    radius   = 10,
-  )
+  mjolnir.spawn_light_directional(engine, position = {3, 6, 3}, color = {1, 1, 1, 1}, radius = 10)
 }
 
-update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   t := mjolnir.time_since_start(engine)
-  world.rotate(&engine.world, ff_handle, t * 1.2, linalg.VECTOR3F32_Y_AXIS)
+  mjolnir.rotate(engine, ff_handle, t * 1.2, linalg.VECTOR3F32_Y_AXIS)
 }

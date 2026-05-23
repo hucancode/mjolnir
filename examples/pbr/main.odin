@@ -1,15 +1,13 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/world"
 import "core:fmt"
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
 
-helmet_nodes: [dynamic]world.NodeHandle
-dir_light: world.NodeHandle
+helmet_nodes: [dynamic]mjolnir.NodeHandle
+dir_light: mjolnir.NodeHandle
 
 dir_intensity: mu.Real = 4.0
 rotate_speed: mu.Real = 0.5
@@ -17,30 +15,31 @@ spinning: bool = true
 rotation_phase: f32
 
 main :: proc() {
-  context.logger = log.create_console_logger()
-  engine := new(mjolnir.Engine)
-  engine.setup_proc = setup
-  engine.update_proc = update
-  engine.pre_render_proc = debug_ui
-  mjolnir.run(engine, 1000, 700, "PBR Showcase (full texture set)")
+  mjolnir.run_app({
+    title      = "PBR Showcase (full texture set)",
+    width      = 1000,
+    height     = 700,
+    debug_ui   = true,
+    setup      = setup,
+    update     = update,
+    pre_render = debug_ui,
+  })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  engine.debug_ui_enabled = true
-  world.main_camera_look_at(&engine.world, {0, 0.2, 3.5}, {0, 0, 0})
+  mjolnir.main_camera_look_at(engine, {0, 0.2, 3.5}, {0, 0, 0})
   helmet_nodes = mjolnir.load_gltf(engine, "assets/DamagedHelmet.glb")
-  dir_light, _ = world.spawn_light_directional(&engine.world, {4, 6, 4}, {1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false)
+  dir_light = mjolnir.spawn_light_directional(engine, {4, 6, 4}, {1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  world.set_light_intensity(&engine.world, dir_light, f32(dir_intensity))
-
+  mjolnir.set_light_intensity(engine, dir_light, f32(dir_intensity))
   if spinning {
     rotation_phase += delta_time * f32(rotate_speed)
   }
   for h in helmet_nodes {
-    world.rotate(&engine.world, h, rotation_phase, linalg.VECTOR3F32_Y_AXIS)
-    world.rotate_by(&engine.world, h, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+    mjolnir.rotate(engine, h, rotation_phase, linalg.VECTOR3F32_Y_AXIS)
+    mjolnir.rotate_by(engine, h, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
   }
 }
 

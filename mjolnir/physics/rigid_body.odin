@@ -111,6 +111,15 @@ set_cylinder_inertia :: proc(
   self.inv_inertia = [3]f32{inv_ix, inv_iy, inv_ix}
 }
 
+set_inertia_from_collider :: proc(self: ^DynamicRigidBody, collider: Collider) {
+  switch c in collider {
+  case SphereCollider:   set_sphere_inertia(self, c.radius)
+  case BoxCollider:      set_box_inertia(self, c.half_extents)
+  case CylinderCollider: set_cylinder_inertia(self, c.radius, c.height)
+  case FanCollider:      set_cylinder_inertia(self, c.radius, c.height)
+  }
+}
+
 apply_force :: proc(self: ^DynamicRigidBody, force: [3]f32) {
   self.force += force
   wake_up(self)

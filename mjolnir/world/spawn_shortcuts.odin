@@ -13,7 +13,6 @@ mesh_attach :: proc(
   return MeshAttachment{handle = handle, material = material, cast_shadow = cast_shadow}
 }
 
-// Spawn a node with a mesh attachment in one call.
 spawn_mesh :: proc(
   world: ^World,
   mesh: MeshHandle,

@@ -2,177 +2,81 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/physics"
-import "../../mjolnir/world"
-import "core:log"
+import "core:fmt"
 import "core:math/linalg"
 import "vendor:glfw"
+import mu "vendor:microui"
 
-cube_handle: world.NodeHandle
-ground_handle: world.NodeHandle
+cube_handle: mjolnir.NodeHandle
 cube_body: physics.DynamicRigidBodyHandle
 time_since_jump: f32
 
-JUMP_INTERVAL :: 5.0
-JUMP_FORCE :: 1000.0
-MOVEMENT_FORCE :: 20.0
+jump_force: mu.Real = 1000.0
+move_force: mu.Real = 20.0
+jump_interval: mu.Real = 5.0
+mass: mu.Real = 2.0
+last_mass: mu.Real = 2.0
 
 main :: proc() {
-  context.logger = log.create_console_logger()
-  engine := new(mjolnir.Engine)
-  engine.setup_proc = setup
-  engine.update_proc = update
-  engine.key_press_proc = on_key_press
-  mjolnir.run(engine, 800, 600, "Character Controller")
+  mjolnir.run_app({
+    title      = "Character Controller",
+    width      = 1000, height = 700,
+    debug_ui   = true,
+    setup      = setup,
+    update     = update,
+    pre_render = debug_ui,
+  })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
   engine.physics.gravity = {0, -10, 0}
-  ground_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
-  ground_mat := world.get_builtin_material(&engine.world, .GRAY)
-  ground_handle = world.spawn(&engine.world, {0, -0.5, 0}) or_else {}
-  ground_node := world.node(&engine.world, ground_handle)
-  physics.create_static_body(
-    &engine.physics,
-    ground_node.transform.position,
-    ground_node.transform.rotation,
-    physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}},
-  )
-  ground_mesh_handle :=
-    world.spawn_child(
-      &engine.world,
-      ground_handle,
-      attachment = world.MeshAttachment {
-        handle = ground_mesh,
-        material = ground_mat,
-      },
-    ) or_else {}
-  world.scale_xyz(&engine.world, ground_mesh_handle, 40.0, 0.5, 40.0)
-  log.info("Ground body created")
-  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
-  cube_mat := world.get_builtin_material(&engine.world, .CYAN)
-  cube_handle = world.spawn(&engine.world, {0, 3, 0}) or_else {}
-  cube_node := world.node(&engine.world, cube_handle)
-  cube_body = physics.create_dynamic_body(
-    &engine.physics,
-    cube_node.transform.position,
-    cube_node.transform.rotation,
-    2.0,
-    physics.BoxCollider{half_extents = {0.5, 0.5, 0.5}},
-  )
-  if body, ok := physics.get_dynamic_body(&engine.physics, cube_body); ok {
-    physics.set_box_inertia(body, [3]f32{1.0, 1.0, 1.0})
-  }
-  cube_handle =
-    world.spawn(
-      &engine.world,
-      cube_node.transform.position,
-      world.RigidBodyAttachment{body_handle = cube_body},
-    ) or_else {}
-  _ =
-    world.spawn_child(
-      &engine.world,
-      cube_handle,
-      attachment = world.MeshAttachment {
-        handle = cube_mesh,
-        material = cube_mat,
-        cast_shadow = true,
-      },
-    ) or_else {}
-  log.info("Cube body created")
-  world.main_camera_look_at(
-    &engine.world,
-    {8, 5, 8},
-    {0, 2, 0},
-  )
-  time_since_jump = 0.0
-  log.info("====================================")
-  log.info("CONTROLS:")
-  log.info("  SPACE - Jump")
-  log.info("  W/A/S/D - Move horizontally")
-  log.info("  1 - Set mass to 5 kg (Light)")
-  log.info("  2 - Set mass to 20 kg (Medium)")
-  log.info("  3 - Set mass to 50 kg (Heavy)")
-  log.info("====================================")
+  mjolnir.spawn_static(engine, {0, -0.5, 0}, physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}},
+    mjolnir.builtin_mesh(engine, .CUBE), mjolnir.builtin_material(engine, .GRAY), visual_scale = {40.0, 0.5, 40.0})
+  cube_handle, cube_body = mjolnir.spawn_dynamic(engine, {0, 3, 0}, f32(mass), physics.BoxCollider{half_extents = {0.5, 0.5, 0.5}},
+    mjolnir.builtin_mesh(engine, .CUBE), mjolnir.builtin_material(engine, .CYAN))
+  mjolnir.main_camera_look_at(engine, {8, 5, 8}, {0, 2, 0})
 }
 
-on_key_press :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
-  // Only handle key press events, not release or repeat
-  if action != glfw.PRESS {
-    return
+update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  time_since_jump += dt
+  body, ok := mjolnir.get_dynamic_body(engine, cube_body)
+  if !ok do return
+  if mass != last_mass {
+    physics.set_mass(body, f32(mass))
+    physics.set_box_inertia(body, {1, 1, 1})
+    last_mass = mass
   }
-  cube_body_ptr, body_ok := physics.get_dynamic_body(&engine.physics, cube_body)
-  if !body_ok {
-    return
-  }
-  switch key {
-  case glfw.KEY_SPACE:
+  f := [3]f32{0, 0, 0}
+  if engine.input.keys[glfw.KEY_W] do f.z -= f32(move_force)
+  if engine.input.keys[glfw.KEY_S] do f.z += f32(move_force)
+  if engine.input.keys[glfw.KEY_A] do f.x -= f32(move_force)
+  if engine.input.keys[glfw.KEY_D] do f.x += f32(move_force)
+  if linalg.length(f) > 0.1 do physics.apply_force(body, f)
+  if time_since_jump >= f32(jump_interval) {
     time_since_jump = 0.0
-    physics.apply_force(cube_body_ptr, [3]f32{0, JUMP_FORCE, 0})
-  case glfw.KEY_1:
-    physics.set_mass(cube_body_ptr, 5.0)
-    physics.set_box_inertia(cube_body_ptr, [3]f32{1.0, 1.0, 1.0})
-    log.info("Mass set to 5.0 kg (Light)")
-  case glfw.KEY_2:
-    physics.set_mass(cube_body_ptr, 20.0)
-    physics.set_box_inertia(cube_body_ptr, [3]f32{1.0, 1.0, 1.0})
-    log.info("Mass set to 20.0 kg (Medium)")
-  case glfw.KEY_3:
-    physics.set_mass(cube_body_ptr, 50.0)
-    physics.set_box_inertia(cube_body_ptr, [3]f32{1.0, 1.0, 1.0})
-    log.info("Mass set to 50.0 kg (Heavy)")
+    physics.apply_force(body, {0, f32(jump_force), 0})
   }
 }
 
-update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  time_since_jump += delta_time
-  cube_body_ptr, body_ok := physics.get_dynamic_body(&engine.physics, cube_body)
-  if !body_ok {
-    return
-  }
-  // Input is sampled in update_input on the main thread; use the cached state
-  space_pressed :=
-    engine.input.keys[glfw.KEY_SPACE] &&
-    !engine.input.key_holding[glfw.KEY_SPACE]
-  mass_light_pressed :=
-    engine.input.keys[glfw.KEY_1] && !engine.input.key_holding[glfw.KEY_1]
-  mass_medium_pressed :=
-    engine.input.keys[glfw.KEY_2] && !engine.input.key_holding[glfw.KEY_2]
-  mass_heavy_pressed :=
-    engine.input.keys[glfw.KEY_3] && !engine.input.key_holding[glfw.KEY_3]
-  // Horizontal movement controls (WASD) - continuous polling for smooth movement
-  move_force := [3]f32{0, 0, 0}
-  if engine.input.keys[glfw.KEY_W] {
-    move_force.z -= MOVEMENT_FORCE
-  }
-  if engine.input.keys[glfw.KEY_S] {
-    move_force.z += MOVEMENT_FORCE
-  }
-  if engine.input.keys[glfw.KEY_A] {
-    move_force.x -= MOVEMENT_FORCE
-  }
-  if engine.input.keys[glfw.KEY_D] {
-    move_force.x += MOVEMENT_FORCE
-  }
-  if linalg.length(move_force) > 0.1 {
-    physics.apply_force(cube_body_ptr, move_force)
-  }
-  if mass_light_pressed {
-    physics.set_mass(cube_body_ptr, 5.0)
-    physics.set_box_inertia(cube_body_ptr, [3]f32{1.0, 1.0, 1.0})
-    log.info("Mass set to 5.0 kg (Light)")
-  }
-  if mass_medium_pressed {
-    physics.set_mass(cube_body_ptr, 20.0)
-    physics.set_box_inertia(cube_body_ptr, [3]f32{1.0, 1.0, 1.0})
-    log.info("Mass set to 20.0 kg (Medium)")
-  }
-  if mass_heavy_pressed {
-    physics.set_mass(cube_body_ptr, 50.0)
-    physics.set_box_inertia(cube_body_ptr, [3]f32{1.0, 1.0, 1.0})
-    log.info("Mass set to 50.0 kg (Heavy)")
-  }
-  if space_pressed || time_since_jump >= JUMP_INTERVAL {
-    time_since_jump = 0.0
-    physics.apply_force(cube_body_ptr, [3]f32{0, JUMP_FORCE, 0})
+debug_ui :: proc(engine: ^mjolnir.Engine) {
+  ctx := mjolnir.ui_ctx(engine)
+  if mu.window(ctx, "Jump", {720, 20, 260, 280}, {.NO_CLOSE}) {
+    mu.layout_row(ctx, {-1}, 0)
+    mu.label(ctx, fmt.tprintf("Mass: %.1f kg", mass))
+    mu.slider(ctx, &mass, 1.0, 100.0)
+    mu.label(ctx, fmt.tprintf("Jump force: %.0f", jump_force))
+    mu.slider(ctx, &jump_force, 50.0, 5000.0)
+    mu.label(ctx, fmt.tprintf("Move force: %.1f", move_force))
+    mu.slider(ctx, &move_force, 1.0, 200.0)
+    mu.label(ctx, fmt.tprintf("Auto-jump interval: %.1f s", jump_interval))
+    mu.slider(ctx, &jump_interval, 0.5, 10.0)
+    mu.label(ctx, "")
+    if .SUBMIT in mu.button(ctx, "Jump now") {
+      if body, ok := mjolnir.get_dynamic_body(engine, cube_body); ok {
+        physics.apply_force(body, {0, f32(jump_force), 0})
+        time_since_jump = 0
+      }
+    }
+    mu.label(ctx, "W/A/S/D moves the cube")
   }
 }

@@ -31,6 +31,40 @@ NavigationGeometry :: struct {
   area_types: []u8,
 }
 
+// Accumulator for building NavigationGeometry from multiple source geoms.
+// Removes the duplicate `append_nav_geometry` helpers in nav examples.
+NavGeometryBuilder :: struct {
+  vertices:   [dynamic][3]f32,
+  indices:    [dynamic]i32,
+  area_types: [dynamic]u8,
+}
+
+// Append one mesh's verts/indices to a builder. Tri area type defaults to
+// walkable when `is_obstacle` is false. Offsets every position by `offset`.
+append_geometry :: proc(
+  b: ^NavGeometryBuilder,
+  geom: geometry.Geometry,
+  offset: [3]f32 = {0, 0, 0},
+  is_obstacle: bool = false,
+) {
+  base := i32(len(b.vertices))
+  for v in geom.vertices do append(&b.vertices, v.position + offset)
+  for i in geom.indices do append(&b.indices, base + i32(i))
+  area: u8 = u8(recast.RC_NULL_AREA) if is_obstacle else u8(recast.RC_WALKABLE_AREA)
+  for _ in 0 ..< len(geom.indices) / 3 do append(&b.area_types, area)
+}
+
+// Snapshot the builder's slices into a NavigationGeometry view (no copy).
+geometry_view :: proc(b: ^NavGeometryBuilder) -> NavigationGeometry {
+  return {vertices = b.vertices[:], indices = b.indices[:], area_types = b.area_types[:]}
+}
+
+destroy_builder :: proc(b: ^NavGeometryBuilder) {
+  delete(b.vertices)
+  delete(b.indices)
+  delete(b.area_types)
+}
+
 TileCoord :: struct {
   x, y: i32,
 }
