@@ -1,3 +1,6 @@
+---
+title: algebra API
+---
 # `mjolnir/algebra` — API Reference
 
 Layer 1. Tiny module with bit / arithmetic helpers used across the engine.

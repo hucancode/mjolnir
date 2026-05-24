@@ -75,11 +75,6 @@ capture: build
 	done; \
 	echo "Screenshots saved to $$OUT_DIR/"
 
-bench: shader
-	@mkdir -p artifacts
-	odin build benchmark -out:bin/bench -o:speed -no-bounds-check
-	./bin/bench --out=artifacts/bench.json
-
 record: shader
 	@mkdir -p docs/videos artifacts/record
 	./examples/record.sh $(EXAMPLE)
@@ -129,4 +124,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: build build-debug run debug shader check clean vtest examples golden capture long-proc long-file long-example doc bench record compare-physics
+.PHONY: build build-debug run debug shader check clean vtest examples golden capture long-proc long-file long-example doc record compare-physics

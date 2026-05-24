@@ -1,4 +1,6 @@
-# Mjolnir Engine
+---
+title: Mjolnir Engine
+---
 
 [Mjolnir](https://github.com/hucancode/mjolnir) is a minimalistic, bindless,
 GPU-driven game engine in Odin + Vulkan 1.3.
@@ -8,23 +10,25 @@ GPU-driven game engine in Odin + Vulkan 1.3.
 ## Get started
 
 To use Mjolnir, run `make shader` to compile shaders to SPIR-V and copy the
-`mjolnir/` directory into your project. See `examples/` for canonical usage
-or [`examples`](examples.html) for video demos of every example.
+`mjolnir/` directory into your project.
 
 ## Notable features
 
-- Physically-based rendering (deferred + IBL + light volumes)
-- Bindless GPU resources, GPU-driven culling (frustum + Hi-Z occlusion)
-- Cameras as render targets (sample any camera's output as a bindless texture)
-- 2D and cubemap shadows
-- Skeletal animation: keyframes + spline + FK + IK (FABRIK) + procedural modifiers
+- Physically-based rendering with IBL
+- Cameras, lights, shadows (point / spot / directional, 2D + cubemap)
+- Cameras as render targets — sample any camera output as a texture
+- Skeletal animation with FK, IK (FABRIK), procedural modifiers
 - Animation layering with bone masks, blend modes, transitions
-- glTF and OBJ loading
-- Particle simulation + force fields (compute shader)
-- Rigid-body physics with CCD, BVH broadphase, SIMD contact solver
+- Procedural animation: tail follow-through, spider legs, path-on-spline
+- glTF + OBJ loading
+- Particle simulation + force fields
+- Billboards, sprites
+- Splines, tweens
+- Rigid-body physics (tunneling-safe for fast bodies)
 - Recast + Detour navigation
 - 2D UI: widgets, layout, events, fontstash text
-- Post-process stack: tonemap, bloom, blur, fog, outline, DoF, crosshatch
+- Render to texture
+- Post-process: tonemap, bloom, blur, fog, outline, DoF, crosshatch
 
 ## Build commands
 
@@ -42,8 +46,6 @@ make shader
 odin test . --all-packages
 # Run a single test
 odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
-# Run performance benchmarks (writes artifacts/bench*.json)
-make bench
 ```
 
 ## Build flags
@@ -64,29 +66,26 @@ make bench
 - Slow the renderer with `-define:RENDER_FPS=4` to read render logs frame by frame.
 - Toggle `engine.debug_ui_enabled = true` for the microui overlay.
 
-
 ## Read more about engine internals
 
-1. [`architecture.md`](architecture.html) — layered design, frame timeline,
-   bindless model, staging pipeline, physics step, shadow strategy. **Read
-   this first.** All other docs assume it.
-2. [`cookbook.md`](cookbook.html) — task-oriented recipes (cube, glTF,
-   physics, animation blending, IK, particles, navmesh, post-process, UI).
-3. [`examples.md`](examples.html) — every example with a video clip.
-4. `api_*.md` — exhaustive per-module reference. One page per module.
+1. [`architecture`](architecture.html) — layer design, frame timeline,
+   bindless model, staging pipeline, physics, shadow strategy
+2. [`examples`](examples.html) — runnable example code and notes
 
 ## API reference index
 
+**Detail API documents mostly maintained using AI**
+
 | Layer | Module | Reference |
 |---|---|---|
-| 1 | `gpu`        | [api_gpu.md](api_gpu.html) |
-| 1 | `geometry`   | [api_geometry.md](api_geometry.html) |
-| 1 | `algebra`    | [api_algebra.md](api_algebra.html) |
-| 1 | `containers` | [api_containers.md](api_containers.html) |
-| 1 | `animation`  | [api_animation.md](api_animation.html) |
-| 2 | `world`      | [api_world.md](api_world.html) |
-| 2 | `render`     | [api_render.md](api_render.html) |
-| 2 | `physics`    | [api_physics.md](api_physics.html) |
-| 2 | `navigation` | [api_navigation.md](api_navigation.html) |
-| 2 | `ui`         | [api_ui.md](api_ui.html) |
-| 3 | `mjolnir`    | [api_engine.md](api_engine.html) |
+| 1 | `gpu`        | [api_gpu](api_gpu.html) |
+| 1 | `geometry`   | [api_geometry](api_geometry.html) |
+| 1 | `algebra`    | [api_algebra](api_algebra.html) |
+| 1 | `containers` | [api_containers](api_containers.html) |
+| 1 | `animation`  | [api_animation](api_animation.html) |
+| 2 | `world`      | [api_world](api_world.html) |
+| 2 | `render`     | [api_render](api_render.html) |
+| 2 | `physics`    | [api_physics](api_physics.html) |
+| 2 | `navigation` | [api_navigation](api_navigation.html) |
+| 2 | `ui`         | [api_ui](api_ui.html) |
+| 3 | `mjolnir`    | [api_engine](api_engine.html) |

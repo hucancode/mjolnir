@@ -1,3 +1,6 @@
+---
+title: geometry API
+---
 # `mjolnir/geometry` — API Reference
 
 Layer 1. Pure math + spatial-acceleration data structures + vertex formats +
@@ -162,7 +165,7 @@ BVHStats :: struct {
 | `bvh_build` | `(bvh, items, max_leaf_size: i32 = 4)` | SAH-binned build. |
 | `bvh_build_parallel` | `(bvh, items, max_leaf_size = 4, thread_count: int = 0)` | Threaded build (0 = use core count). |
 | `bvh_destroy` | `(bvh)` | Free nodes + primitives. |
-| `bvh_query_aabb` | `(bvh, query: Aabb, results: ^[dynamic]T)` | All primitives overlapping AABB. SIMD. |
+| `bvh_query_aabb` | `(bvh, query: Aabb, results: ^[dynamic]T)` | All primitives overlapping AABB. |
 | `bvh_query_sphere` / `bvh_query_sphere_primitives` | `(bvh, center, radius, results)` | Sphere overlaps. |
 | `bvh_query_ray` | `(bvh, ray, max_dist, results)` | All primitives intersecting ray. |
 | `bvh_query_nearest` | `(bvh, point, max_dist, results)` | Nearest primitives within radius. |
@@ -261,20 +264,6 @@ scale     / scale_by                    (t, s)
 update_local(t) -> bool                 // recompute if dirty
 update_world(t, parent_world) -> bool
 ```
-
-## SIMD batch ops
-
-```odin
-SIMD_Mode :: enum { Scalar, SSE, AVX2 }
-simd_mode  : SIMD_Mode    // detected at startup
-simd_lanes : int          // 1, 4, or 8
-
-aabb_intersects_batch4(a, b: [4]Aabb) -> [4]bool
-obb_to_aabb_batch4(obbs: [4]Obb, aabbs: ^[4]Aabb)
-```
-
-`physics/simd.odin` re-exports these plus a few quaternion / dot / cross
-helpers — see `api_physics.md`.
 
 ## OBJ loader
 

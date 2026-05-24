@@ -1,3 +1,6 @@
+---
+title: UI
+---
 # UI Module (`mjolnir/ui`)
 
 The UI module provides 2D elements for HUD, menus, and overlays with event handling.

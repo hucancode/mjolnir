@@ -1,0 +1,321 @@
+[
+  {
+    "name": "cube",
+    "desc": "Minimal hello-world cube.",
+    "notes": [
+      "<code>run_app</code> allocates engine, installs logger, runs to window close, frees on exit.",
+      "Builtin meshes (<code>.CUBE</code>, <code>.SPHERE</code>, <code>.QUAD_XZ</code>, <code>.CONE</code>, <code>.CAPSULE</code>, <code>.CYLINDER</code>, <code>.TORUS</code>) and colors are pre-baked at <code>world.init</code>.",
+    ]
+  },
+  {
+    "name": "animation_layering",
+    "desc": "Bone-mask layer blending across multiple clips.",
+    "notes": [
+      "Layer indices are returned by <code>add_animation_layer</code>; pick stable slots for \"walk\", \"run\", \"upper-body\".",
+      "<code>BlendMode</code> default <code>.REPLACE</code> (weighted). Use <code>.ADD</code> for additive layers (recoil over aim).",
+      "One-shot crossfade between layers: <code>mjolnir.transition_to_animation</code>.",
+      "Drive per-layer weight live with <code>set_animation_layer_weight</code>."
+    ]
+  },
+  {
+    "name": "aoe",
+    "desc": "Area-of-effect query + trigger volumes.",
+    "notes": [
+      "Triggers don't generate contacts — overlap-test only.",
+      "<code>physics.query_triggers_in_sphere</code> for snapshots; <code>engine.physics.trigger_overlaps</code> for continuous events.",
+      "Mouse picking: <code>camera_viewport_to_world_ray</code> → <code>physics.raycast_trigger</code>. Multiply mouse by DPI on high-DPI displays.",
+      "<code>hit.body_handle</code> is a union — <code>switch</code> on the variant."
+    ]
+  },
+  {
+    "name": "bullet_wall_ccd",
+    "desc": "Fast projectiles don't tunnel through thin walls.",
+    "notes": [
+      "No extra setup — engine keeps fast bodies from tunneling automatically.",
+      "Tune response via <code>body.friction</code>, <code>body.restitution</code>, <code>body.linear_damping</code>, <code>body.angular_damping</code>.",
+      "Set <code>engine.physics.gravity = {0,0,0}</code> in <code>setup</code> for pure ballistic tests."
+    ]
+  },
+  {
+    "name": "cameras",
+    "desc": "Orbit / free / follow camera controllers.",
+    "notes": [
+      "Engine defaults <code>active_controller</code> to orbit. Set <code>engine.camera_controller_enabled = false</code> in <code>setup</code> to write your own.",
+      "Controllers are stateful — call <code>camera_controller_*_sync</code> after warping the camera or swapping controllers.",
+      "Follow controller takes a <code>^[3]f32</code> target."
+    ]
+  },
+  {
+    "name": "crowd_nav",
+    "desc": "Detour crowd agents navigating a navmesh.",
+    "notes": [
+      "Bake the navmesh once via <code>mjolnir.setup_navmesh</code> (tag walkable nodes with <code>.ENVIRONMENT</code>).",
+      "Per-frame: each agent queries <code>find_path</code>, walks the polyline, steers around neighbours.",
+      "Heavy bakes — do them at setup or after major scene changes only."
+    ]
+  },
+  {
+    "name": "debug_draw",
+    "desc": "Line-strip primitives and debug bone overlay.",
+    "notes": [
+      "Toggle bone visualization via the debug overlay (<code>engine.debug_ui_enabled = true</code>).",
+      "Line-strip rendering is a regular material type — spawn a mesh node with line-strip material."
+    ]
+  },
+  {
+    "name": "forcefield",
+    "desc": "Vortex force field dragging particles around it.",
+    "notes": [
+      "<code>strength</code> negative = repel, positive = attract. <code>tangent_strength</code> swirls.",
+      "Parent + child trick orbits the field around a point cheaply (rotate the parent).",
+      "Cap is <code>MAX_FORCE_FIELDS = 32</code>."
+    ]
+  },
+  {
+    "name": "gltf_animation",
+    "desc": "Skinned glTF playback.",
+    "notes": [
+      "Animation names match <code>animations[i].name</code>. Empty names become <code>Anim_0</code>, <code>Anim_1</code>, …",
+      "<code>play_animation</code> adds to layer 0 with weight 1.0. Use <code>add_animation_layer</code> for multi-layer blends.",
+      "<code>mjolnir.skinned_mesh(engine, root)</code> grabs the first skinned child."
+    ]
+  },
+  {
+    "name": "gltf_static",
+    "desc": "glTF asset import.",
+    "notes": [
+      "<code>mjolnir.load_gltf</code> returns root nodes; children wire into the scene graph automatically.",
+      "Embedded textures upload via <code>gpu.create_texture_2d_from_data</code>; PBR maps (metallic, roughness, emissive) are picked up.",
+      "<code>load_gltf</code> blocks — wrap with <code>core:thread</code> for background loads."
+    ]
+  },
+  {
+    "name": "grid",
+    "desc": "Spawning + despawning at scale.",
+    "notes": [
+      "One mesh + one material handle shared across 90k nodes — each draw is a u32 lookup on the GPU.",
+      "Big destroy/create swaps need a <code>FRAMES_IN_FLIGHT</code> gap so the staging pipeline can drain."
+    ]
+  },
+  {
+    "name": "ik",
+    "desc": "FABRIK with bend-cone constraints.",
+    "notes": [
+      "<code>add_ik_layer_chain</code> walks the skeleton from root to tip. <code>add_ik_layer</code> takes the bone list directly.",
+      "Pole vector controls the bending plane (knee/elbow direction).",
+      "<code>weight = 0</code> disables IK without removing the layer.",
+      "<code>anim.ik_constraints_uniform</code> sets bend cones per joint."
+    ]
+  },
+  {
+    "name": "input_demo",
+    "desc": "Keyboard, mouse, scroll event plumbing.",
+    "notes": [
+      "Callbacks fire on the GLFW thread; <code>engine.input</code> mirrors the current state.",
+      "<code>key_holding</code> / <code>mouse_holding</code> are true only when pressed last frame AND this frame."
+    ]
+  },
+  {
+    "name": "jump",
+    "desc": "Character controller with jump impulse.",
+    "notes": [
+      "Character is a dynamic body with <code>enable_rotation = false</code>.",
+      "Jump = <code>apply_impulse</code> on grounded check (raycast down).",
+      "Lateral movement via <code>body.velocity.xz</code>; preserve <code>velocity.y</code> for gravity."
+    ]
+  },
+  {
+    "name": "lights",
+    "desc": "Point, spot, directional lights + shadows.",
+    "notes": [
+      "Color vector's <code>w</code> channel doubles as intensity.",
+      "<code>cast_shadow = true</code> allocates a 2D shadow map (<code>SHADOW_MAP_SIZE = 512</code>).",
+      "Point-light cubemap shadows need <code>-define:REQUIRE_GEOMETRY_SHADER=true</code>.",
+      "Mutate fields without a setter via the pointer, then <code>mark_light_dirty</code>."
+    ]
+  },
+  {
+    "name": "material",
+    "desc": "PBR material parameter sweep.",
+    "notes": [
+      "<code>metallic</code> / <code>roughness</code> drive the BRDF; scalar factors stack with optional textures.",
+      "<code>base_color_factor</code> tints the albedo map (multiplicative)."
+    ]
+  },
+  {
+    "name": "navmesh",
+    "desc": "Recast build + Detour pathfinding.",
+    "notes": [
+      "Custom geometry: accumulate with <code>NavGeometryBuilder</code>, then <code>nav.build_navmesh</code>.",
+      "\"Bake everything tagged\" flow: <code>mjolnir.setup_navmesh</code> reads tagged scene nodes.",
+      "Mouse-pick onto the navmesh: ray-test ground plane → <code>mjolnir.find_nearest_point</code> → <code>mjolnir.find_path</code>.",
+      "Heavy build — do it at setup or after big scene changes."
+    ]
+  },
+  {
+    "name": "obj_loader",
+    "desc": "Wavefront OBJ import.",
+    "notes": [
+      "<code>load_obj</code> takes a single material handle override; .mtl is ignored.",
+      "Vertex normals are computed if missing."
+    ]
+  },
+  {
+    "name": "orthographic_camera",
+    "desc": "Orthographic projection setup.",
+    "notes": [
+      "Use <code>camera_init_orthographic</code> — pass ortho width/height instead of FOV.",
+      "Good for 2.5D, minimaps, isometric views, or shadow casters."
+    ]
+  },
+  {
+    "name": "particles",
+    "desc": "Compute-driven particle system.",
+    "notes": [
+      "Emitter follows its node — translate the node, the source moves.",
+      "<code>weight</code> is gravity-like; negative floats particles up.",
+      "Simulated and compacted on the GPU. Cap is <code>MAX_PARTICLES = 65536</code>.",
+      "<code>position_spread</code> + <code>velocity_spread</code> randomize the burst cone."
+    ]
+  },
+  {
+    "name": "path_modifier",
+    "desc": "Procedural bone modifier following a spline.",
+    "notes": [
+      "Path is a <code>[][3]f32</code> — internally promoted to a Catmull-Rom spline.",
+      "Tune <code>offset</code> + <code>speed</code> per frame to scrub along the path.",
+      "<code>loop = true</code> repeats; otherwise the chain pins to the end."
+    ]
+  },
+  {
+    "name": "pbr",
+    "desc": "IBL + physically based rendering showcase.",
+    "notes": [
+      "Ambient pass samples the loaded environment map + BRDF LUT.",
+      "Tune <code>engine.render.post_process</code> or the ambient renderer's <code>ibl_intensity</code> to balance IBL vs. direct light."
+    ]
+  },
+  {
+    "name": "physics",
+    "desc": "Rigid body cubes, spheres, cylinders.",
+    "notes": [
+      "<code>spawn_static</code> / <code>spawn_dynamic</code> create node + body + visual child in one call. <code>set_inertia_from_collider</code> runs automatically.",
+      "Raw bodies without a node: <code>mjolnir.create_static_body</code> / <code>create_dynamic_body</code>.",
+      "<code>engine.physics.gravity</code> defaults to <code>{0, -9.81, 0}</code>. Set in <code>setup</code> for zero-g.",
+      "<code>KILL_Y = -50.0</code> — bodies that fall below are killed."
+    ]
+  },
+  {
+    "name": "post_process",
+    "desc": "Bloom, DoF, fog, tonemap, outline, crosshatch.",
+    "notes": [
+      "Effects run in insertion order. Conventional chain: fog → bloom → tonemap.",
+      "<code>post_process.clear_effects</code> + rebuild on settings change. No need to rebuild every frame.",
+      "Helper procs: <code>add_outline</code>, <code>add_fog</code>, <code>add_dof</code>, <code>add_bloom</code>, <code>add_blur</code>, <code>add_crosshatch</code>, <code>add_grayscale</code>, <code>add_tonemap</code>."
+    ]
+  },
+  {
+    "name": "procedural_mesh",
+    "desc": "Mesh generated at runtime.",
+    "notes": [
+      "Build a <code>geometry.Geometry</code> at runtime, hand it to <code>mjolnir.create_mesh</code>.",
+      "Tangents are auto-filled if missing.",
+      "For frequently regenerated meshes, set <code>auto_purge = false</code> to keep CPU geometry around."
+    ]
+  },
+  {
+    "name": "render_to_texture",
+    "desc": "Secondary camera rendered into a bindless texture.",
+    "notes": [
+      "Skip <code>POST_PROCESS</code> / <code>UI</code> on non-main cameras to save GPU time.",
+      "<code>get_camera_attachment</code> returns a <code>Texture2DHandle</code> — sample it from any shader, not just UI.",
+      "Re-bind in <code>post_render</code> each frame so per-frame ping-pong picks the right attachment."
+    ]
+  },
+  {
+    "name": "scene_graph",
+    "desc": "Hierarchical transforms and traversal.",
+    "notes": [
+      "<code>spawn_child</code> parents at creation; <code>mjolnir.attach</code> / <code>detach</code> rewire later.",
+      "Local transforms multiply through the chain — rotate a parent, all children orbit.",
+      "<code>despawn</code> is recursive."
+    ]
+  },
+  {
+    "name": "spider_leg_modifier",
+    "desc": "Procedural spider legs — IK + parabolic foot lift.",
+    "notes": [
+      "One layer drives all legs; per-leg <code>time_offset</code> staggers the gait (tripod by default).",
+      "<code>lift_height</code> + <code>lift_frequency</code> + <code>lift_duration</code> shape the foot arc.",
+      "Read the solved foot target via <code>get_spider_leg_target</code>."
+    ]
+  },
+  {
+    "name": "spline",
+    "desc": "Spline evaluation and visualization.",
+    "notes": [
+      "Catmull-Rom by default. <code>spline_sample(s, t)</code> with <code>t</code> in <code>[0,1]</code>.",
+      "Build an arc-length table for uniform-speed traversal along the curve."
+    ]
+  },
+  {
+    "name": "sprite",
+    "desc": "2D sprite batching with frame animation.",
+    "notes": [
+      "<code>frame_columns</code> × <code>frame_rows</code> defines the sprite-sheet layout.",
+      "<code>SpriteAnimation</code> drives the current frame with <code>fps</code>, mode (<code>ONCE</code> / <code>LOOP</code> / <code>PINGPONG</code>).",
+      "Sprites billboard toward the active camera."
+    ]
+  },
+  {
+    "name": "tail_modifier",
+    "desc": "Procedural tail follow-through.",
+    "notes": [
+      "<code>propagation_speed</code> low ⇒ stiff tail; high ⇒ whippy.",
+      "<code>damping</code> controls how fast bones return to rest.",
+      "Tune live with <code>set_tail_modifier_params</code> — <code>Maybe</code> fields mean only values you pass get updated."
+    ]
+  },
+  {
+    "name": "transparent",
+    "desc": "Order-dependent transparency.",
+    "notes": [
+      "Materials with <code>type = .TRANSPARENT</code> render in a separate additive pass.",
+      "Camera-distance sort happens automatically; tie-breaks are insertion order."
+    ]
+  },
+  {
+    "name": "ui",
+    "desc": "2D UI widgets, layout, events, fontstash text.",
+    "notes": [
+      "Coordinates are pixels, origin top-left.",
+      "Per-widget <code>z_order</code>; higher draws on top.",
+      "Hit-testing happens in <code>update_input</code>. Widgets receive <code>HOVER_IN</code> / <code>HOVER_OUT</code> / <code>CLICK_DOWN</code> / <code>CLICK_UP</code> automatically.",
+      "Stash a context pointer via <code>ui.set_user_data</code>; recover in handlers as <code>event.user_data</code>."
+    ]
+  },
+  {
+    "name": "wireframe",
+    "desc": "Wireframe rendering pipeline.",
+    "notes": [
+      "Set <code>MATERIAL_WIREFRAME</code> on the node flag, or use a wireframe material.",
+      "Useful for debug overlays; also bypasses the G-buffer."
+    ]
+  },
+  {
+    "name": "snake",
+    "desc": "Snake game in 3D.",
+    "notes": [
+      "Full game: input → grid sim → spawn/despawn nodes → score UI.",
+      "Game state lives on <code>engine.user_data</code> instead of file globals."
+    ]
+  },
+  {
+    "name": "torus_tetris",
+    "desc": "Tetris on a torus topology.",
+    "notes": [
+      "The board wraps around — pieces falling off one edge re-enter the opposite side.",
+      "Mixes UI text, dynamic spawn, and procedural mesh for the playfield."
+    ]
+  }
+]

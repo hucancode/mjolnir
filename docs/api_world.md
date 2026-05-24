@@ -1,3 +1,6 @@
+---
+title: world API
+---
 # `mjolnir/world` — API Reference
 
 Layer 2. Scene graph, builtin meshes / materials / cameras, animation
@@ -25,27 +28,18 @@ MAX_CAMERAS :: 64
 
 ## World
 
+User-visible fields:
+
 ```odin
 World :: struct {
-  root:                NodeHandle,
-  nodes:               Pool(Node),
-  traversal_stack:     [dynamic]TraverseEntry,
-  staging:             StagingList,
-  animatable_nodes:    [dynamic]NodeHandle,
-  meshes:              Pool(Mesh),
-  materials:           Pool(Material),
-  cameras:             Pool(Camera),
-  main_camera:         CameraHandle,
-  emitters:            Pool(Emitter),
-  forcefields:         Pool(ForceField),
-  sprites:             Pool(Sprite),
-  animation_clips:     Pool(anim.Clip),
-  active_light_nodes:  [dynamic]NodeHandle,
-  builtin_materials:   [len(Color)]MaterialHandle,
-  builtin_meshes:      [len(Primitive)]MeshHandle,
-  orbit_controller:    CameraController,
-  free_controller:     CameraController,
-  active_controller:   ^CameraController,
+  root:              NodeHandle,
+  main_camera:       CameraHandle,
+  orbit_controller:  CameraController,
+  free_controller:   CameraController,
+  active_controller: ^CameraController,
+  // (pools for nodes, meshes, materials, cameras, emitters, forcefields,
+  //  sprites, clips, plus a staging queue and traversal state live here too;
+  //  user code touches them through the procs below, not directly.)
 }
 ```
 
@@ -55,6 +49,8 @@ shutdown (world)
 begin_frame(world, delta_time = 0.016, game_state: rawptr = nil)
 traverse (world) -> bool
 ```
+
+The engine calls `init` / `shutdown` / `begin_frame` for you.
 
 ## Capacity constants (`constants.odin`)
 
@@ -144,7 +140,6 @@ sprite    (w: ^World, h: SpriteHandle)     -> (^Sprite, bool)
 ```odin
 tag_node   (world, handle, tags: NodeTagSet) -> bool
 untag_node (world, handle, tags: NodeTagSet) -> bool
-update_node_tags(node)        // reapply tags from attachment + visibility
 ```
 
 ### Spawn / despawn
@@ -153,13 +148,14 @@ update_node_tags(node)        // reapply tags from attachment + visibility
 spawn      (world, position = {0,0,0}, attachment: NodeAttachment = nil) -> (NodeHandle, bool)
 spawn_child(world, parent, position = {0,0,0}, attachment: NodeAttachment = nil) -> (NodeHandle, bool)
 despawn    (world, handle) -> bool        // recursive
-init_node  (self: ^Node, name = "")
-destroy_node(self: ^Node, world: ^World = nil, node_handle: NodeHandle = {})
-attach     (nodes: Pool(Node), parent_handle, child_handle: NodeHandle)
-detach     (nodes: Pool(Node), child_handle: NodeHandle)
-register_animatable_node  (world, handle)
-unregister_animatable_node(world, handle)
+attach     (nodes, parent_handle, child_handle: NodeHandle)
+detach     (nodes, child_handle: NodeHandle)
 ```
+
+`despawn` recursively destroys children and any attached body / emitter /
+forcefield / sprite. Lower-level `init_node`, `destroy_node`,
+`register_animatable_node`, `unregister_animatable_node` exist but are
+used by spawn/despawn internally — not normally called by users.
 
 ### Transform mutators (`node.odin`)
 
@@ -183,7 +179,7 @@ scale       (world, handle, s: f32)
 ```odin
 create_point_light_attachment      (color={1,1,1,1}, radius=10, cast_shadow=true) -> PointLightAttachment
 create_directional_light_attachment(color={1,1,1,1}, radius=10, cast_shadow=false) -> DirectionalLightAttachment
-create_spot_light_attachment       (color={1,1,1,1}, radius=10, angle=π·0.2, cast_shadow=true) -> SpotLightAttachment
+create_spot_light_attachment       (color={1,1,1,1}, radius=10, angle=0.2*math.PI, cast_shadow=true) -> SpotLightAttachment
 ```
 
 ### Physics sync
@@ -232,26 +228,21 @@ bake_geometry(world, include_filter = {.ENVIRONMENT}, exclude_filter = {}, with_
               -> (geometry.Geometry, []BakedNodeInfo, bool)
 bake         (world, include_filter = {.ENVIRONMENT}, exclude_filter = {}) -> (MeshHandle, bool)
 
-find_first_mesh_child   (world, parent) -> (NodeHandle, ^Node, ^MeshAttachment, bool)
-find_bone_by_name       (mesh, name)    -> (u32, bool)
-build_bone_parent_map   (skin, allocator = context.allocator) -> map[u32]u32
-find_bone_chain_to_root (skin, tip_name, root_name, allocator = context.allocator) -> ([]string, bool)
-find_bones_by_names     (mesh, names, allocator = context.allocator) -> ([]u32, bool)
-compute_bone_lengths    (skin)
-calculate_bone_depths   (skin, allocator = context.allocator) -> []u32
-
-mesh_init           (mesh, geometry: geometry.Geometry)
-mesh_destroy        (mesh)
-mesh_release_memory (mesh)         // drop CPU geometry
-bone_destroy        (bone)
-
 create_mesh (world, geometry, auto_purge = false) -> (MeshHandle, ^Mesh, bool)
 destroy_mesh(world, handle)
 
-sample_layers(mesh, world, layers: []anim.Layer, ik_targets: []anim.IKTarget,
-              out_bone_matrices: []matrix[4,4]f32, delta_time: f32,
-              node_world_matrix = MAT4_IDENTITY)
+find_first_mesh_child  (world, parent) -> (NodeHandle, ^Node, ^MeshAttachment, bool)
+find_bone_by_name      (mesh, name)    -> (u32, bool)
+find_bones_by_names    (mesh, names, allocator = context.allocator) -> ([]u32, bool)
+find_bone_chain_to_root(skin, tip_name, root_name, allocator = context.allocator) -> ([]string, bool)
 ```
+
+`bake_geometry` / `bake` flatten the scene graph into a single mesh
+(used as input to the navmesh builder). The remaining `mesh_init`,
+`mesh_destroy`, `mesh_release_memory`, `bone_destroy`,
+`build_bone_parent_map`, `compute_bone_lengths`, `calculate_bone_depths`,
+`sample_layers` procs are internal helpers used by the spawn / loader /
+animation pipeline; user code doesn't normally call them.
 
 ## Material
 
@@ -323,7 +314,7 @@ Camera :: struct {
 create_camera(world, width, height,
               enabled_passes = {.GEOMETRY,.LIGHTING,.SHADOW,.TRANSPARENCY,...},
               position = {0,0,3}, target = {0,0,0},
-              fov = π/2, near_plane = 0.1, far_plane = 100) -> (CameraHandle, bool)
+              fov = math.PI*0.5, near_plane = 0.1, far_plane = 100) -> (CameraHandle, bool)
 
 camera_init           (camera, width, height, enabled_passes, position, target, fov, near, far) -> bool
 camera_init_orthographic(camera, width, height, enabled_passes = {.SHADOW},
@@ -560,9 +551,9 @@ spawn_primitive_mesh(world, primitive = .CUBE, color = .WHITE,
 
 get_builtin_material(world, color)     -> MaterialHandle
 get_builtin_mesh    (world, primitive) -> MeshHandle
-init_builtin_materials(world)
-init_builtin_meshes  (world)
 ```
+
+The builtin tables are populated by `world.init`; user code only reads them.
 
 ## glTF / OBJ loaders
 
@@ -581,35 +572,10 @@ load_obj(world, path: string, material: MaterialHandle, scale = 1, cast_shadow =
 texture allocator from `engine.render.texture_manager`. Most code should use it
 instead of calling `world.load_gltf` directly.
 
-## Staging (private)
+## Staging
 
-The following are layer-2-private and exposed only for `engine.sync_staging_to_gpu`.
-User code should not call them; mutation procs above stage automatically.
-
-```odin
-StagingOp   :: enum u16 { Update, Remove }
-StagingEntry :: struct { age: u16, op: StagingOp }
-
-StagingList :: struct {
-  node_data, mesh_updates, material_updates, bone_updates, sprite_updates,
-  emitter_updates, forcefield_updates, light_updates, camera_updates: map[<H>]StagingEntry,
-  mutex: sync.Mutex,
-}
-
-staging_init  (^StagingList)
-staging_destroy(^StagingList)
-
-stage_node_data       (^StagingList, NodeHandle)
-stage_node_data_removal(^StagingList, NodeHandle)
-stage_mesh_data        (^StagingList, MeshHandle)
-stage_mesh_removal     (^StagingList, MeshHandle)
-stage_material_data    (^StagingList, MaterialHandle)
-stage_material_removal (^StagingList, MaterialHandle)
-stage_bone_matrices    (^StagingList, NodeHandle)
-stage_bone_matrices_removal(^StagingList, NodeHandle)
-stage_sprite_data      / stage_sprite_removal
-stage_emitter_data     / stage_emitter_removal
-stage_forcefield_data  / stage_forcefield_removal
-stage_light_data       / stage_light_removal
-stage_camera_data      / stage_camera_removal
-```
+CPU mutations queue into a private `StagingList` and `engine.sync_staging_to_gpu`
+drains them once per frame on the render thread. The mutation procs in
+this file (spawn / despawn / translate / rotate / set_*) stage
+automatically — user code never calls `stage_*` directly. See
+[architecture §5](architecture.html#5-the-staging-pipeline-cpu-mutation--gpu-upload).

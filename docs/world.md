@@ -1,72 +1,66 @@
+---
+title: World
+---
 # World Module (`mjolnir/world`)
 
-The World module manages the scene graph, nodes, meshes, materials, cameras, lights, and animations. It provides a hierarchical structure for organizing 3D objects and their relationships.
+The World module manages the scene graph: nodes, meshes, materials,
+cameras, lights, and animations. Hierarchical transforms cascade through
+parent → child.
+
+> Most procs shown below take `^World`. From user code, prefer the
+> engine-rooted shortcuts (`mjolnir.spawn`, `mjolnir.translate`, ...) — see
+> [`api_engine` §Shortcuts](api_engine.html#shortcuts).
 
 ## Scene Graph Basics
 
 ### Spawning Nodes
 
 ```odin
-import "../../mjolnir/world"
-import cont "../../mjolnir/containers"
+mesh := mjolnir.builtin_mesh(engine, .CUBE)
+mat  := mjolnir.builtin_material(engine, .RED)
 
-// Spawn a node with a mesh
-mesh := world.get_builtin_mesh(&engine.world, .CUBE)
-mat := world.get_builtin_material(&engine.world, .RED)
-node := world.spawn(
-  &engine.world,
-  {0, 0, 0}, // position
+node := mjolnir.spawn(
+  engine,
+  {0, 0, 0},
   world.MeshAttachment{handle = mesh, material = mat, cast_shadow = true},
-) or_else {}
+)
 
-// Spawn a child node
-child := world.spawn_child(
-  &engine.world,
-  node, // parent handle
-  position = {0, 2, 0},
+child := mjolnir.spawn_child(
+  engine, node,
+  position   = {0, 2, 0},
   attachment = world.MeshAttachment{handle = mesh, material = mat},
-) or_else {}
+)
 ```
 
 ### Node Hierarchy
 
 ```odin
-// Get node pointer
-node_ptr := cont.get(engine.world.nodes, node) or_return
-
-// Access node properties
+node_ptr := mjolnir.node(engine, node) or_return
 log.infof("Node name: %s", node_ptr.name)
-log.infof("Position: %v", node_ptr.transform.position)
+log.infof("Position:  %v", node_ptr.transform.position)
 
-// Iterate children
 for child_handle in node_ptr.children {
-  child := cont.get(engine.world.nodes, child_handle) or_continue
+  child := mjolnir.node(engine, child_handle) or_continue
   log.infof("Child: %s", child.name)
 }
 ```
 
 ## Transformations
 
-All transformation functions have `_by` variants (relative) and absolute variants:
+All transform procs have `_by` variants (relative) and absolute variants:
 
 ```odin
-// Translate (absolute position)
-world.translate(&engine.world, node, x = 5, y = 0, z = 0)
+mjolnir.translate    (engine, node, x = 5, y = 0, z = 0)   // absolute
+mjolnir.translate    (engine, node, [3]f32{5, 0, 0})       // absolute, vec form
+mjolnir.translate_by (engine, node, x = 1, y = 0, z = 0)   // relative
 
-// Translate by offset (relative)
-world.translate_by(&engine.world, node, x = 1, y = 0, z = 0)
+mjolnir.rotate       (engine, node, math.PI * 0.5, {0, 1, 0})       // absolute (angle, axis)
+mjolnir.rotate       (engine, node, my_quat)                        // absolute (quaternion)
+mjolnir.rotate_by    (engine, node, dt * math.PI)                   // relative
 
-// Rotate (absolute rotation)
-world.rotate(&engine.world, node, math.PI * 0.5, {0, 1, 0})
-
-// Rotate by angle (relative)
-world.rotate_by(&engine.world, node, delta_time * math.PI)
-
-// Scale (uniform)
-world.scale(&engine.world, node, 2.0)
-
-// Scale (non-uniform)
-world.scale_xyz(&engine.world, node, x = 2, y = 1, z = 2)
+mjolnir.scale        (engine, node, 2.0)            // uniform
+mjolnir.scale        (engine, node, [3]f32{2,1,2})  // vec
+mjolnir.scale_xyz    (engine, node, x = 2, y = 1, z = 2)
 ```
 
 ## Creating Custom Geometry
@@ -74,260 +68,165 @@ world.scale_xyz(&engine.world, node, x = 2, y = 1, z = 2)
 ```odin
 import "../../mjolnir/geometry"
 
-// Create custom geometry
 geom := geometry.Geometry{
   vertices = vertices,
-  indices = indices,
-  aabb = geometry.aabb_from_vertices(vertices),
+  indices  = indices,
+  aabb     = geometry.aabb_from_vertices(vertices),
 }
 
-// Upload to GPU and get handle
-mesh_handle, gpu_handle, ok := world.create_mesh(&engine.world, geom, keep_cpu_copy = false)
+mesh_handle := mjolnir.create_mesh(engine, geom)
+material_handle := mjolnir.material_pbr(engine,
+  metallic = 0.5, roughness = 0.8, emissive = 0.1)
 
-// Create material
-material_handle, ok := world.create_material(
-  &engine.world,
-  type = .PBR,
-  metallic_value = 0.5,
-  roughness_value = 0.8,
-  emissive_value = 0.1,
-)
-
-// Spawn with custom mesh
-node := world.spawn(
-  &engine.world,
-  {0, 0, 0},
-  world.MeshAttachment{handle = mesh_handle, material = material_handle},
-) or_else {}
+mjolnir.spawn_mesh(engine, mesh_handle, material_handle, position = {0, 0, 0})
 ```
 
 ## Materials
 
 ```odin
-// Builtin materials
-mat := world.get_builtin_material(&engine.world, .RED)
-// Available colors: .RED, .GREEN, .BLUE, .YELLOW, .CYAN, .MAGENTA, .WHITE, .GRAY, .BLACK
+// Builtin colors: .RED, .GREEN, .BLUE, .YELLOW, .CYAN, .MAGENTA, .WHITE, .GRAY, .BLACK
+mat := mjolnir.builtin_material(engine, .RED)
 
-// Create PBR material
-pbr_mat, ok := world.create_material(
-  &engine.world,
-  type = .PBR,
-  base_color_factor = {1.0, 0.5, 0.2, 1.0},
-  metallic_value = 0.8,
-  roughness_value = 0.2,
-  emissive_value = 0.5,
+pbr_mat := mjolnir.material_pbr(engine,
+  base_color = {1.0, 0.5, 0.2, 1.0},
+  metallic   = 0.8,
+  roughness  = 0.2,
+  emissive   = 0.5,
 )
 
-// Random color material (useful for debugging)
-debug_mat, ok := world.create_material(
-  &engine.world,
-  type = .RANDOM_COLOR,
-  base_color_factor = {1.0, 1.0, 1.0, 1.0},
-)
+// Unlit / wireframe / transparent helpers
+unlit_mat       := mjolnir.material_unlit(engine, base_color = {1, 1, 0, 1})
+wire_mat        := mjolnir.material_wireframe(engine, base_color = {0, 1, 0, 1})
+transparent_mat := mjolnir.material_transparent(engine, base_color = {0.2, 0.9, 0.4, 0.4})
 
-// Line strip material
-line_mat, ok := world.create_material(
-  &engine.world,
-  type = .LINE_STRIP,
-  base_color_factor = {1.0, 0.8, 0.0, 1.0},
+// Full-control creator
+custom := mjolnir.create_material(
+  engine,
+  type              = .RANDOM_COLOR,    // or .PBR, .LINE_STRIP, etc.
+  base_color_factor = {1, 1, 1, 1},
 )
 ```
 
 ## Lights
 
 ```odin
-// Directional light (sun)
-light := world.spawn(
-  &engine.world,
-  {0, 10, 0},
-  world.create_directional_light_attachment(
-    color = {1.0, 1.0, 1.0, 1.0},
-    intensity = 10.0,
-    cast_shadow = true,
-  ),
-) or_else {}
+dir := mjolnir.spawn_light_directional(engine,
+  position = {0, 10, 0}, color = {1, 1, 1, 10.0},
+  radius   = 12, cast_shadow = true,
+)
 
-// Point light
-point_light := world.spawn(
-  &engine.world,
-  {5, 3, 5},
-  world.create_point_light_attachment(
-    color = {1.0, 0.8, 0.6, 1.0},
-    intensity = 100.0,
-    cast_shadow = false,
-  ),
-) or_else {}
+point := mjolnir.spawn_light_point(engine,
+  position = {5, 3, 5}, color = {1, 0.8, 0.6, 100.0},
+  radius   = 8, cast_shadow = false,
+)
 
-// Spot light
-spot_light := world.spawn(
-  &engine.world,
-  {0, 10, 0},
-  world.create_spot_light_attachment(
-    color = {0.8, 0.9, 1.0, 1.0},
-    intensity = 50.0,
-    outer_cone_angle = math.PI * 0.25,
-    cast_shadow = true,
-  ),
-) or_else {}
+spot := mjolnir.spawn_light_spot(engine,
+  position = {0, 10, 0}, color = {0.8, 0.9, 1, 50.0},
+  radius   = 20, angle = math.PI * 0.25, cast_shadow = true,
+)
 ```
+
+The colour `w` channel doubles as intensity. Live-tune with
+`set_light_color`, `set_light_intensity`, `set_light_radius`, or edit the
+attachment struct directly and call `mjolnir.mark_light_dirty`.
 
 ## Camera Control
 
 ```odin
-// Position camera looking at target
-world.main_camera_look_at(
-  &engine.world,
-  eye_position = {10, 5, 10},
-  target_position = {0, 0, 0},
-)
+mjolnir.main_camera_look_at(engine, {10, 5, 10}, {0, 0, 0})
 
-// Mouse picking - convert screen to world ray
-camera := cont.get(engine.world.cameras, engine.world.main_camera)
-ray_origin, ray_dir := world.camera_viewport_to_world_ray(
-  camera,
-  mouse_x,
-  mouse_y,
-)
+cam, _ := mjolnir.main_camera(engine)
+ray_origin, ray_dir := world.camera_viewport_to_world_ray(cam, mouse_x, mouse_y)
 ```
 
 ## Animation
 
-### Playing Animations
+### Playing animations
 
 ```odin
-// Load GLTF with animations
 nodes := mjolnir.load_gltf(engine, "assets/CesiumMan.glb")
-
-// Play animation on node
 for handle in nodes {
-  node := cont.get(engine.world.nodes, handle) or_continue
-  for child in node.children {
-    if world.play_animation(&engine.world, child, "Walk") {
-      log.info("Animation started")
-    }
+  if mesh_node, ok := mjolnir.skinned_mesh(engine, handle); ok {
+    mjolnir.play_animation(engine, mesh_node, "Anim_0")
   }
 }
 ```
 
-### Animation Layers
+### Animation layers
 
 ```odin
-// Add animation layer (returns true if animation found)
-success := world.add_animation_layer(
-  &engine.world,
-  node,
-  animation_name = "Walk",
-  weight = 1.0,
-  blend_mode = .REPLACE, // or .ADD
-  mode = .LOOP,
-  speed = 1.0,
+idx, _ := mjolnir.add_animation_layer(
+  engine, node, "Walk",
+  weight     = 1.0,
+  blend_mode = .REPLACE,    // or .ADD
+  mode       = .LOOP,
+  speed      = 1.0,
 )
 
-// Adjust layer weight
-world.set_animation_layer_weight(&engine.world, node, layer_index = 0, weight = 0.5)
-
-// Blend between two animations
-world.set_animation_layer_weight(&engine.world, node, 0, walk_weight)
-world.set_animation_layer_weight(&engine.world, node, 1, run_weight)
+mjolnir.set_animation_layer_weight(engine, node, idx, 0.5)
 ```
 
 ### IK (Inverse Kinematics)
 
 ```odin
-// Add IK layer for a bone chain
-bone_chain := []string{"Spine1", "Spine2", "Neck", "Head"}
-target_pos := [3]f32{0, 2, 5}
-pole_pos := [3]f32{0, 3, 2}
-
-success := world.add_ik_layer(
-  &engine.world,
-  node,
-  bone_chain,
-  target_pos,
-  pole_pos,
-  weight = 1.0,
-  layer_index = -1, // -1 to append
+idx, _ := mjolnir.add_ik_layer(
+  engine, node,
+  bone_names     = []string{"Spine1", "Spine2", "Neck", "Head"},
+  target_pos     = {0, 2, 5},
+  pole_pos       = {0, 3, 2},
+  weight         = 1.0,
+  max_iterations = 10,
 )
 
-// Update IK target each frame
-world.set_ik_layer_target(
-  &engine.world,
-  node,
-  layer_index = 2,
-  new_target,
-  new_pole,
-)
+mjolnir.set_ik_layer_target(engine, node, idx, new_target, new_pole)
 ```
 
-### Procedural Animation Modifiers
+For a chain by root/tip name, use `mjolnir.add_ik_layer_chain`.
+
+### Procedural modifiers
 
 ```odin
-// Tail modifier - creates follow-through motion
-success := world.add_tail_modifier_layer(
-  &engine.world,
-  node,
-  root_bone_name = "tail_root",
-  tail_length = 10,
-  propagation_speed = 0.85, // How strongly bones react (0-1)
-  damping = 0.1,            // How slowly they return (0-1)
-  weight = 1.0,
-  reverse_chain = false,
+mjolnir.add_tail_modifier_layer(
+  engine, node,
+  root_bone_name    = "tail_root",
+  tail_length       = 10,
+  propagation_speed = 0.85,
+  damping           = 0.1,
+  weight            = 1.0,
 )
 
-// Single bone rotation - control one bone directly
-modifier := world.add_single_bone_rotation_modifier_layer(
-  &engine.world,
-  node,
-  bone_name = "root",
-  weight = 1.0,
-  layer_index = -1,
-) or_else nil
+mjolnir.add_path_modifier_layer(
+  engine, node,
+  root_bone_name = "tentacle_root",
+  tail_length    = 8,
+  path           = my_waypoints,
+  speed          = 1.0,
+  loop           = true,
+)
 
-// Update rotation each frame
-if modifier != nil {
-  modifier.rotation = linalg.quaternion_angle_axis_f32(angle, {0, 1, 0})
-}
+mjolnir.add_spider_leg_modifier_layer(engine, node, legs_spec, weight = 1.0)
 ```
 
 ## Bone Access Helpers
 
-For reading bone world transforms after skinning computation:
-
 ```odin
-// Get computed bone matrices for a skinned node
-matrices, skin, node := world.get_bone_matrices(&engine.world, node_handle) or_continue
-
-// Get world-space transform for a specific bone
-bone_transform := world.get_bone_world_transform(
-  &engine.world,
-  node_handle,
-  bone_index = u32(5),
-) or_continue
-
-// Use bone position/rotation
-marker.transform.position = bone_transform.position
-marker.transform.rotation = bone_transform.rotation
+m, _ := mjolnir.node_mesh(engine, node_handle)
+offset, _ := world.bone_rest_offset(m, "leg_root", "leg_tip")
+pos,    _ := world.bone_rest_position(m, "leg_tip")
 ```
 
 ## Node Management
 
 ```odin
-// Despawn a node and all its children
-world.despawn(&engine.world, node)
-
-// Destroy a mesh
-world.destroy_mesh(&engine.world, mesh_handle)
-
-// Traverse scene graph to update world matrices
-world.traverse(&engine.world)
+mjolnir.despawn(engine, node)              // remove node + descendants
+world.destroy_mesh(&engine.world, mesh_h)  // free a mesh
+world.traverse(&engine.world)              // recompute world matrices
 ```
 
 ## Node Tags
 
 ```odin
-// Tag nodes for specific purposes
-if node := cont.get(engine.world.nodes, handle); node != nil {
-  node.tags += {.ENVIRONMENT}        // For navmesh baking
-  node.tags += {.NAVMESH_OBSTACLE}   // Mark as obstacle
-}
+mjolnir.tag(engine, ground_handle, {.ENVIRONMENT})
+mjolnir.tag(engine, obstacle_handle, {.NAVMESH_OBSTACLE})
+mjolnir.untag(engine, h, {.ENVIRONMENT})
 ```

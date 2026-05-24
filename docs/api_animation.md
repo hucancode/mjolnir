@@ -1,3 +1,6 @@
+---
+title: animation API
+---
 # `mjolnir/animation` — API Reference
 
 Layer 1. Pure animation data + procs. Knows nothing about scene nodes or GPU.

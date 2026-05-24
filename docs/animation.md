@@ -1,3 +1,6 @@
+---
+title: Animation
+---
 # Animation Module (`mjolnir/animation`)
 
 The Animation module provides skeletal animation, IK, procedural animation modifiers, and spline utilities.
@@ -40,21 +43,17 @@ Animation layers allow blending multiple animations together. See [World Module]
 ```odin
 // REPLACE mode: Standard blending (lerp between animations)
 // Use for normal animation clips
-world.add_animation_layer(
-  &engine.world,
-  node,
-  "Walk",
-  weight = 1.0,
+mjolnir.add_animation_layer(
+  engine, node, "Walk",
+  weight     = 1.0,
   blend_mode = .REPLACE,
 )
 
 // ADD mode: Additive blending (add animation on top)
 // Only use for animations specifically authored as additive deltas
-world.add_animation_layer(
-  &engine.world,
-  node,
-  "Breathing",
-  weight = 0.5,
+mjolnir.add_animation_layer(
+  engine, node, "Breathing",
+  weight     = 0.5,
   blend_mode = .ADD,
 )
 ```
@@ -64,14 +63,14 @@ world.add_animation_layer(
 ```odin
 // Blend between walk and run by adjusting weights
 walk_weight := 0.7
-run_weight := 0.3
+run_weight  := 0.3
 
-world.set_animation_layer_weight(&engine.world, node, 0, walk_weight)
-world.set_animation_layer_weight(&engine.world, node, 1, run_weight)
+mjolnir.set_animation_layer_weight(engine, node, 0, walk_weight)
+mjolnir.set_animation_layer_weight(engine, node, 1, run_weight)
 
 // Animate weight smoothly
 target := enable_layer ? 1.0 : 0.0
-current_weight = math.lerp(current_weight, target, delta_time * blend_speed)
+current_weight = math.lerp(current_weight, target, dt * blend_speed)
 ```
 
 ## IK (Inverse Kinematics)
@@ -87,18 +86,17 @@ target_pos := [3]f32{0, 2, 5}  // Where the chain should reach
 pole_pos := [3]f32{0, 3, 2}    // Hints the bending direction
 
 // Add IK layer
-world.add_ik_layer(
-  &engine.world,
-  node,
-  bone_chain,
-  target_pos,
-  pole_pos,
-  weight = 1.0,
-  layer_index = -1, // -1 = append new layer
+mjolnir.add_ik_layer(
+  engine, node,
+  bone_names  = bone_chain,
+  target_pos  = target_pos,
+  pole_pos    = pole_pos,
+  weight      = 1.0,
+  layer_index = -1,  // -1 = append new layer
 )
 
 // Update target each frame
-world.set_ik_layer_target(&engine.world, node, layer_idx, new_target, new_pole)
+mjolnir.set_ik_layer_target(engine, node, layer_idx, new_target, new_pole)
 ```
 
 ## Procedural Animation Modifiers
@@ -109,15 +107,14 @@ Creates natural follow-through motion for tails, hair, antennas, etc. Bones reac
 
 ```odin
 // Add tail modifier
-success := world.add_tail_modifier_layer(
-  &engine.world,
-  node,
-  root_bone_name = "tail_root",
-  tail_length = 10,                    // Number of bones
-  propagation_speed = 0.85,            // Reaction strength (0-1)
-  damping = 0.1,                       // Return speed (0-1, higher = slower)
-  weight = 1.0,
-  reverse_chain = false,               // True if bones are ordered tip->root
+idx, _ := mjolnir.add_tail_modifier_layer(
+  engine, node,
+  root_bone_name    = "tail_root",
+  tail_length       = 10,        // Number of bones
+  propagation_speed = 0.85,      // Reaction strength (0-1)
+  damping           = 0.1,       // Return speed (0-1, higher = slower)
+  weight            = 1.0,
+  reverse_chain     = false,     // True if bones are ordered tip->root
 )
 
 // Parameters guide:
@@ -134,10 +131,9 @@ Directly control one bone's rotation, useful for root motion that drives other m
 ```odin
 // Add modifier and get pointer
 modifier := world.add_single_bone_rotation_modifier_layer(
-  &engine.world,
-  node,
-  bone_name = "root",
-  weight = 1.0,
+  &engine.world, node,
+  bone_name   = "root",
+  weight      = 1.0,
   layer_index = -1,
 ) or_else nil
 

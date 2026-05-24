@@ -1,3 +1,6 @@
+---
+title: gpu API
+---
 # `mjolnir/gpu` — API Reference
 
 Layer 1. Thin Vulkan 1.3 abstraction. **Does not** hide Vulkan — it codifies

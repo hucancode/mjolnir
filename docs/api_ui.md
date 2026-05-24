@@ -1,3 +1,6 @@
+---
+title: ui API
+---
 # `mjolnir/ui` — API Reference
 
 Layer 2. Logical 2D UI: widget tree, layout, hit-testing, event dispatch,
@@ -7,25 +10,19 @@ font atlas. The render side lives in `mjolnir/render/ui/`.
 
 ```odin
 System :: struct {
-  widget_pool:      cont.Pool(Widget),
-  default_texture:  gpu.Texture2DHandle,
-  font_context:     ^fs.FontContext,        // fontstash
-  font_atlas:       gpu.Texture2DHandle,
-  font_atlas_dirty: bool,
-  staging:          [dynamic]cmd.RenderCommand,
+  widget_pool:     cont.Pool(Widget),
+  default_texture: gpu.Texture2DHandle,
+  font_context:    ^fs.FontContext,        // fontstash
+  font_atlas:      gpu.Texture2DHandle,
+  // (additional staging and GPU bookkeeping live here too)
 }
 ```
 
-```odin
-init                   (self, max_widgets: u32 = 4096)
-init_gpu_resources     (self, gctx, texture_manager)
-shutdown_gpu_resources (self, gctx, texture_manager)
-shutdown               (self)
-
-update_font_atlas (self, gctx, texture_manager)
-get_font_atlas_id (self) -> u32
-generate_render_commands(self)
-```
+The engine creates and runs the UI system at `engine.ui`. Lifecycle
+procs — `init`, `shutdown`, `init_gpu_resources`,
+`shutdown_gpu_resources`, `update_font_atlas`, `generate_render_commands`
+— are driven by the engine. User code just creates widgets and handles
+events.
 
 ## Widgets
 

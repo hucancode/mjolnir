@@ -334,7 +334,7 @@ find_random_point_around_circle :: proc(
   }
   // Proper random sampling: uniform distribution in circle using polar coordinates
   // Use proper random number generation for non-deterministic results
-  // Generate random angle [0, 2π)
+  // Generate random angle [0, 2pi)
   angle := math.PI * 2.0 * f64(rand.float32())
   // Generate random radius with uniform area distribution
   // sqrt ensures uniform point distribution (area scales with r²)

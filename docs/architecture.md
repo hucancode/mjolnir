@@ -1,8 +1,10 @@
+---
+title: Architecture
+---
 # Architecture
 
 Mjolnir is a deferred-shading, bindless, GPU-driven game engine in Odin + Vulkan 1.3.
-This page explains *why* the engine is shaped the way it is. Each design decision
-maps back to one of the rules in [`ZEN.md`](../ZEN.md):
+This page explains *why* the engine is shaped the way it is.
 
 > 1. Single source of truth — avoid storing derived information unless evidence of perf issue
 > 2. No duplicated information across structs, no pointer fields on structs
@@ -411,6 +413,6 @@ flowchart TB
 
 | If you want to...                          | Read                                           |
 | ------------------------------------------ | ---------------------------------------------- |
-| Build something step by step               | [`cookbook.md`](cookbook.html)                 |
-| Understand the public engine API           | [`api_engine.md`](api_engine.html)             |
-| Understand scene graph + handles in detail | [`api_world.md`](api_world.html)               |
+| See per-example notes and source           | [`examples`](examples.html)                 |
+| Understand the public engine API           | [`api_engine`](api_engine.html)             |
+| Understand scene graph + handles in detail | [`api_world`](api_world.html)               |

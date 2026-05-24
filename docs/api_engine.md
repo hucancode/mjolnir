@@ -1,11 +1,16 @@
+---
+title: mjolnir API
+---
 # `mjolnir` (engine.odin) — API Reference
 
-Layer 3. Single file. Owns the window, swapchain, frames-in-flight, the
-`Engine` struct, and the main loop. Wires together world/render/physics/
-navigation/UI without ever leaking their internals back through.
+Layer 3. Owns the window, swapchain, frames-in-flight, the `Engine` struct,
+and the main loop. Wires together world/render/physics/navigation/UI without
+ever leaking their internals back through.
 
-The user-facing API is just three procs to start (`init`, `run`, `shutdown`)
-plus a set of callback fields on the `Engine` struct.
+Two entry points: `run_app(RunConfig)` for the common case, or
+`init`/`run`/`shutdown` for a hand-rolled lifecycle. Plus a set of callback
+fields on `Engine` and the [shortcut procs](#shortcuts) that let user code
+say `mjolnir.spawn(engine, ...)` instead of `world.spawn(&engine.world, ...)`.
 
 ## Engine
 
@@ -44,7 +49,25 @@ Engine :: struct {
   camera_controller_enabled: bool,
   update_thread:             Maybe(^thread.Thread),
   update_active:             bool,
+
+  user_data:                 rawptr,   // opaque user pointer; stash app state here
 }
+```
+
+`user_data` lets app code avoid file-scope globals. Cast it back to your own
+struct pointer inside callbacks:
+
+```odin
+GameState :: struct { score: i32, player: mjolnir.NodeHandle }
+state: GameState
+
+mjolnir.run_app({
+  user_data = &state,
+  update    = proc(e: ^mjolnir.Engine, dt: f32) {
+    s := (^GameState)(e.user_data)
+    s.score += 1
+  },
+})
 ```
 
 ## InputState
@@ -107,9 +130,40 @@ FRAME_LIMIT                                 :: #config(FRAME_LIMIT, 0)   // 0 = 
 ## Lifecycle
 
 ```odin
+RunConfig :: struct {
+  title:        string,
+  width:        u32,             // 0 → 800
+  height:       u32,             // 0 → 600
+  setup:        SetupProc,
+  update:       UpdateProc,
+  pre_render:   PreRenderProc,
+  post_render:  PostRenderProc,
+  key_press:    KeyInputProc,
+  mouse_press:  MousePressProc,
+  mouse_move:   MouseMoveProc,
+  mouse_scroll: MouseScrollProc,
+  mouse_drag:   MouseDragProc,
+  user_data:    rawptr,
+  debug_ui:     bool,
+}
+
+run_app (cfg: RunConfig)                                      // recommended entry point
 init    (self, width, height: u32, title: string) -> vk.Result
 shutdown(self)
 run     (self, width, height: u32, title: string)
+```
+
+`run_app` allocates the engine, installs a console logger, calls `run`, and
+frees on exit. Smallest app:
+
+```odin
+mjolnir.run_app({
+  title = "Cube",
+  setup = proc(e: ^mjolnir.Engine) {
+    mjolnir.spawn_primitive_mesh(e, .CUBE, .RED)
+    mjolnir.main_camera_look_at(e, {3, 2, 3}, {0, 0, 0})
+  },
+})
 ```
 
 `run` calls `init` → loop → `shutdown`. Don't call `init`/`shutdown`
@@ -148,6 +202,66 @@ recreate_swapchain (engine: ^Engine) -> vk.Result
 
 `run` orchestrates all of these. You only call them yourself if you build a
 custom loop on top of `init` + `shutdown`.
+
+## Shortcuts {#shortcuts}
+
+Every public `world.*` / `physics.*` / `nav.*` proc that takes a `^World`,
+`^physics.World`, or `^NavigationSystem` has a sibling here that takes
+`^Engine`. Pure forwarders — zero behavior change. They eliminate the
+`&engine.world` / `&engine.physics` / `&engine.nav` plumbing.
+
+```odin
+// Old
+world.spawn_primitive_mesh(&engine.world, .CUBE, .RED)
+world.translate_by(&engine.world, h, y = dt)
+nav.find_path(&engine.nav, a, b)
+physics.create_dynamic_body(&engine.physics, pos, rot, mass, collider)
+
+// New
+mjolnir.spawn_primitive_mesh(engine, .CUBE, .RED)
+mjolnir.translate_by(engine, h, y = dt)
+mjolnir.find_path(engine, a, b)
+mjolnir.create_dynamic_body(engine, pos, rot, mass, collider)
+```
+
+Re-exported type aliases (interchangeable with `world.*` originals):
+
+```odin
+NodeHandle, MeshHandle, MaterialHandle, CameraHandle, ClipHandle,
+EmitterHandle, SpriteHandle, Primitive, Color, NodeTag, NodeTagSet,
+MeshAttachment, NodeAttachment, SpiderLegSpec
+```
+
+Shortcut groups (full signatures live in the relevant API page):
+
+| Group | Procs |
+|---|---|
+| **Spawn** | `spawn`, `spawn_child`, `spawn_mesh`, `spawn_primitive_mesh`, `spawn_light_directional`, `spawn_light_point`, `spawn_light_spot`, `spawn_emitter`, `spawn_forcefield`, `despawn`, `attach` |
+| **Transform** | `translate`, `translate_by`, `rotate`, `rotate_by`, `scale`, `scale_xyz` |
+| **Accessors** | `node`, `mesh`, `material`, `camera`, `main_camera`, `main_camera_handle`, `valid`, `point_light`, `directional_light`, `spot_light`, `mesh_child`, `skinned_mesh`, `bone_rest_position`, `bone_rest_offset`, `node_mesh`, `tag`, `untag` |
+| **Camera** | `main_camera_look_at`, `mark_camera_dirty` |
+| **Materials & meshes** | `material_pbr`, `material_textured`, `material_unlit`, `material_wireframe`, `material_transparent`, `create_material`, `builtin_mesh`, `builtin_material`, `create_mesh` |
+| **Setters** | `set_light_color`, `set_light_intensity`, `set_light_radius`, `mark_light_dirty`, `set_material_handle`, `set_mesh_handle`, `stage_material_data` |
+| **Animation** | `play_animation`, `add_animation_layer`, `set_animation_layer_weight`, `transition_to_animation`, `add_ik_layer`, `add_ik_layer_chain`, `set_ik_layer_target`, `add_tail_modifier_layer`, `set_tail_modifier_params`, `add_path_modifier_layer`, `set_path_modifier_params`, `add_spider_leg_modifier_layer`, `set_spider_leg_modifier_params`, `get_spider_leg_target` |
+| **Navigation** | `find_path`, `find_nearest_point` |
+| **Physics** | `create_static_body`, `create_dynamic_body`, `get_dynamic_body`, `spawn_static`, `spawn_dynamic` |
+
+`spawn_static` / `spawn_dynamic` are higher-level conveniences that combine
+node spawn + body create + (optional) visual child + auto inertia from
+collider in one call.
+
+```odin
+ground := mjolnir.spawn_static(engine, {0, -0.5, 0},
+  physics.BoxCollider{half_extents = {20, 0.5, 20}},
+  ground_mesh, ground_mat, visual_scale = {20, 0.5, 20})
+
+cube_node, cube_body := mjolnir.spawn_dynamic(engine, {0, 10, 0}, mass = 50,
+  physics.BoxCollider{half_extents = {1, 1, 1}}, cube_mesh, cube_mat)
+```
+
+`translate` / `rotate` / `scale` are overload groups — pass either xyz
+floats, a `[3]f32`, a quaternion, or `(angle, axis)`. See `mjolnir/shortcuts.odin`
+for the exact signatures.
 
 ## Asset loading
 

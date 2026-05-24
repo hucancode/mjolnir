@@ -1,37 +1,17 @@
+---
+title: physics API
+---
 # `mjolnir/physics` — API Reference
 
-Layer 2. Constraint-solver rigid-body simulation with BVH broadphase, SIMD
-contact resolution, and continuous collision detection (CCD). See
-[architecture §10](architecture.html#10-physics-step-model) for the step
-pipeline.
+Rigid-body simulation: bodies, colliders, triggers, raycasts, overlap
+queries. The engine owns one `physics.World` at `engine.physics`. Step,
+sleeping, collision response, and tunneling-resistance for fast bodies
+are handled automatically — user code spawns bodies and reads results.
 
-## Constants
-
-```odin
-KILL_Y                       :: f32(-50.0)   // bodies below this go dead
-SEA_LEVEL_AIR_DENSITY        :: 1.225
-NUM_SUBSTEPS                 :: i32(2)
-CONSTRAINT_SOLVER_ITERS      :: i32(4)
-STABILIZATION_ITERS          :: i32(2)
-SLEEP_LINEAR_THRESHOLD       :: 0.05
-SLEEP_ANGULAR_THRESHOLD      :: 0.05
-SLEEP_TIME_THRESHOLD         :: 0.5
-ENABLE_VERBOSE_LOG           :: false
-BVH_REBUILD_THRESHOLD        :: i32(512)
-BROADPHASE_BVH_TRAVERSAL     :: true
-
-// ccd.odin
-CCD_THRESHOLD                :: 5.0          // velocity to trigger swept tests
-
-// parallel.odin
-DEFAULT_THREAD_COUNT         :: i32(16)
-WARMSTART_COEF               :: 0.8
-
-// solver.odin
-BAUMGARTE_COEF               :: 0.4
-SLOP                         :: 0.002
-RESTITUTION_THRESHOLD        :: f32(-0.5)
-```
+Most user code calls the engine-rooted shortcuts (`mjolnir.spawn_dynamic`,
+`mjolnir.spawn_static`, `mjolnir.create_dynamic_body`, …) — see
+[`api_engine` §Shortcuts](api_engine.html#shortcuts). The procs below
+are the underlying API.
 
 ## Handles
 
@@ -47,135 +27,96 @@ BodyHandleResult :: union {
 }
 ```
 
+`BodyHandleResult` is what raycasts return — switch on it to find which
+kind of body was hit.
+
 ## Colliders
 
 ```odin
-ColliderType :: enum { Sphere, Box, Capsule, Cylinder, Fan }
-
 SphereCollider   :: struct { radius: f32 }
 BoxCollider      :: struct { half_extents: [3]f32 }
 CylinderCollider :: struct { radius, height: f32 }
 FanCollider      :: struct { radius, height, angle: f32 }   // angle in radians
 
 Collider :: union { SphereCollider, BoxCollider, CylinderCollider, FanCollider }
-
-collider_calculate_aabb(self: ^Collider, position, rotation: quaternion128) -> geometry.Aabb
-collider_min_extent    (self: ^Collider) -> f32
 ```
 
-(Capsule appears in `ColliderType` but the union currently only carries
-sphere/box/cylinder/fan variants. Capsule support comes through cylinder +
-hemisphere.)
+`FanCollider` is a wedge — a cylinder slice. Useful for cone-of-influence
+triggers (radar zones, melee swings).
 
 ## Bodies
 
+User-tunable fields on a dynamic body:
+
 ```odin
-RigidBody :: struct {
-  position:             [3]f32,
-  cached_sphere_radius: f32,
-  rotation:             quaternion128,
-  collider:             Collider,
-  cached_aabb:          geometry.Aabb,
-  cached_sphere_center: [3]f32,
-}
-
-TriggerBody :: struct { using base: RigidBody }
-
-StaticRigidBody :: struct {
-  using base:   RigidBody,
-  restitution:  f32,
-  friction:     f32,
-}
-
 DynamicRigidBody :: struct {
-  using body:       StaticRigidBody,
+  position:         [3]f32,
+  rotation:         quaternion128,
+  collider:         Collider,
+  velocity:         [3]f32,
+  angular_velocity: [3]f32,
+  restitution:      f32,            // 0 = no bounce, 1 = perfect bounce
+  friction:         f32,            // 0 = frictionless, 1 = grippy
+  linear_damping:   f32,
+  angular_damping:  f32,
   enable_rotation:  bool,
   is_sleeping:      bool,
-  inv_inertia:      [3]f32,        // diagonal of inertia^-1
-  mass:             f32,
-  velocity:         [3]f32,
-  inv_mass:         f32,
-  angular_velocity: [3]f32,
-  linear_damping:   f32,
-  force:            [3]f32,
-  angular_damping:  f32,
-  torque:           [3]f32,
-  sleep_timer:      f32,
   is_killed:        bool,
+  // (additional internal state for the solver lives on this struct
+  //  but should not be written by user code)
 }
+
+StaticRigidBody :: struct {
+  position:    [3]f32,
+  rotation:    quaternion128,
+  collider:    Collider,
+  restitution: f32,
+  friction:    f32,
+}
+
+TriggerBody :: struct { position, rotation, collider /* RigidBody base */ }
 ```
+
+The engine writes `position` / `rotation` back to the attached scene node
+each tick. Setting them directly is fine for teleports — set
+`velocity = {0,0,0}` after.
+
+### Initializing and applying forces
 
 ```odin
-rigid_body_init       (body, position={0,0,0}, rotation=Q_IDENTITY, mass=1, enable_rotation=true)
-static_rigid_body_init(body, position={0,0,0}, rotation=Q_IDENTITY)
-wake_up               (body)                              // inline
-set_mass              (body, mass: f32)
-set_box_inertia       (body, half_extents: [3]f32)
-set_sphere_inertia    (body, radius: f32)
-set_cylinder_inertia  (body, radius: f32, height: f32)
-apply_force           (body, force: [3]f32)               // wakes
-apply_force_at_point  (body, force, point, center: [3]f32) // wakes
-apply_impulse         (body, impulse: [3]f32)             // wakes
-apply_impulse_at_point(body, impulse, point: [3]f32)      // inline, wakes
-integrate             (body, dt: f32)
-clear_forces          (body)
-update_cached_aabb    (body: ^RigidBody)
+rigid_body_init        (body, position={0,0,0}, rotation=Q_IDENTITY, mass=1, enable_rotation=true)
+static_rigid_body_init (body, position={0,0,0}, rotation=Q_IDENTITY)
+
+set_mass               (body, mass: f32)
+set_inertia_from_collider(body, collider: Collider)   // matches sphere/box/cyl/fan
+set_box_inertia        (body, half_extents: [3]f32)
+set_sphere_inertia     (body, radius: f32)
+set_cylinder_inertia   (body, radius, height: f32)
+
+apply_force            (body, force: [3]f32)               // wakes
+apply_force_at_point   (body, force, point, center: [3]f32) // wakes
+apply_impulse          (body, impulse: [3]f32)             // wakes
+apply_impulse_at_point (body, impulse, point: [3]f32)      // wakes
+
+wake_up                (body)
 ```
 
-## Contacts
-
-```odin
-DynamicContact :: struct {
-  body_a, body_b:      DynamicRigidBodyHandle,
-  point, normal:       [3]f32,
-  penetration:         f32,
-  restitution, friction: f32,
-  normal_impulse:      f32,
-  tangent_impulse:     [2]f32,
-  normal_mass:         f32,
-  tangent_mass:        [2]f32,
-  bias:                f32,
-  r_a, r_b:            [3]f32,
-  tangent1, tangent2:  [3]f32,
-}
-
-StaticContact :: struct {                // dynamic-static contact
-  body_a:               DynamicRigidBodyHandle,
-  body_b:               StaticRigidBodyHandle,
-  // ... same as DynamicContact except body_b is static
-}
-```
+`spawn_dynamic` calls `set_inertia_from_collider` for you — only call it
+yourself when you build a body without the shortcut.
 
 ## World
 
 ```odin
-TriggerOverlap         :: struct { trigger: TriggerHandle, body: DynamicRigidBodyHandle }
-TriggerStaticOverlap   :: struct { trigger: TriggerHandle, body: StaticRigidBodyHandle  }
-DynamicBroadPhaseEntry :: struct { handle: DynamicRigidBodyHandle, bounds: geometry.Aabb }
-StaticBroadPhaseEntry  :: struct { handle: StaticRigidBodyHandle,  bounds: geometry.Aabb }
-
 World :: struct {
-  bodies:                   PoolSoA(DynamicRigidBody),
-  static_bodies:            PoolSoA(StaticRigidBody),
-  dynamic_contacts:         [dynamic]DynamicContact,
-  static_contacts:          [dynamic]StaticContact,
-  prev_dynamic_contacts:    map[u64]DynamicContact,
-  prev_static_contacts:     map[u64]StaticContact,
-  trigger_overlaps:         [dynamic]TriggerOverlap,
-  trigger_static_overlaps:  [dynamic]TriggerStaticOverlap,
-  gravity:                  [3]f32,
-  gravity_magnitude:        f32,
-  dynamic_bvh:              BVH(DynamicBroadPhaseEntry),
-  static_bvh:               BVH(StaticBroadPhaseEntry),
-  body_bounds:              [dynamic]geometry.Aabb,
-  trigger_bodies:           PoolSoA(TriggerBody),
-  enable_parallel:          bool,
-  thread_count:             int,
-  thread_pool:              thread.Pool,
-  killed_body_count:        int,
-  last_dynamic_count:        int,
-  last_static_count:         int,
+  gravity:           [3]f32,
+  gravity_magnitude: f32,
+  enable_parallel:   bool,
+  thread_count:      int,
+  // (internal pools, broadphase, contacts, trigger overlaps live here too)
 }
+
+TriggerOverlap       :: struct { trigger: TriggerHandle, body: DynamicRigidBodyHandle }
+TriggerStaticOverlap :: struct { trigger: TriggerHandle, body: StaticRigidBodyHandle  }
 ```
 
 ```odin
@@ -184,9 +125,12 @@ destroy(world)
 step   (world, dt: f32)
 ```
 
-## Body creation (overloaded)
+`engine.run` already calls `step` each frame. Adjust `engine.physics.gravity`
+inside `setup` for non-default gravity.
 
-Generic:
+## Body creation
+
+Generic — collider passed as a union value:
 
 ```odin
 create_dynamic_body(world, position={0,0,0}, rotation=Q_IDENTITY, mass=1, collider: Collider={}) -> (DynamicRigidBodyHandle, bool)
@@ -210,6 +154,22 @@ destroy_static_body (world, handle)
 destroy_body        (world, handle)   // overloaded
 ```
 
+## Engine wrappers
+
+```odin
+mjolnir.create_static_body  (engine, position, rotation, collider) -> StaticRigidBodyHandle
+mjolnir.create_dynamic_body (engine, position, rotation, mass, collider) -> DynamicRigidBodyHandle
+mjolnir.get_dynamic_body    (engine, handle) -> (^DynamicRigidBody, bool)
+
+// Spawn node + body + optional visual child + auto-inertia in one call.
+mjolnir.spawn_static (engine, position, collider,
+                      mesh = {}, material = {}, visual_scale = {1,1,1},
+                      cast_shadow = true) -> NodeHandle
+mjolnir.spawn_dynamic(engine, position, mass, collider,
+                      mesh = {}, material = {}, visual_scale = {1,1,1},
+                      cast_shadow = true) -> (NodeHandle, DynamicRigidBodyHandle)
+```
+
 ## Body access
 
 ```odin
@@ -220,6 +180,8 @@ get             (world, handle)                          // overloaded
 ```
 
 ## Triggers
+
+Triggers don't push bodies; they only report overlap.
 
 ```odin
 create_trigger          (world, position={0,0,0}, rotation=Q_IDENTITY, collider: Collider={}) -> (TriggerHandle, bool)
@@ -234,73 +196,9 @@ set_trigger_rotation    (world, handle, rotation: quaternion128)
 set_trigger_transform   (world, handle, position, rotation)
 ```
 
-## Collision tests
-
-Bounding-volume helpers:
-
-```odin
-bounding_spheres_intersect(pos_a, radius_a, pos_b, radius_b) -> bool
-```
-
-Pairwise tests — each returns `(point, normal, penetration, hit)`:
-
-```odin
-test_sphere_sphere   (pos_a, sphere_a, pos_b, sphere_b)
-test_box_box         (pos_a, rot_a, box_a, pos_b, rot_b, box_b)
-test_box_sphere      (pos_box, rot_box, box, pos_sphere, sphere, invert_normal=false)
-test_sphere_cylinder (pos_sphere, sphere, pos_cyl, rot_cyl, cyl, invert_normal=false)
-test_box_cylinder    (pos_box, rot_box, box, pos_cyl, rot_cyl, cyl, invert_normal=false)
-test_cylinder_cylinder(pos_a, rot_a, cyl_a, pos_b, rot_b, cyl_b)
-test_point_cylinder  (point, cyl_center, cyl_rot, cyl) -> bool
-test_point_fan       (point, fan_center, fan_rot, fan) -> bool
-
-test_collision_collider_collider(collider_a, pos_a, rot_a, collider_b, pos_b, rot_b)
-test_collision                  (overloaded for handle types)
-
-collision_pair_hash_dynamic(a: DynamicRigidBodyHandle, b: DynamicRigidBodyHandle) -> u64
-collision_pair_hash_static (a: DynamicRigidBodyHandle, b: StaticRigidBodyHandle)  -> u64
-collision_pair_hash        (overloaded)
-```
-
-## CCD
-
-```odin
-TOIResult :: struct {
-  has_impact: bool,
-  time:       f32,         // 0..1 fraction of motion
-  normal:     [3]f32,
-  point:      [3]f32,
-}
-
-swept_sphere_sphere(pos_a, pos_b, radius_a, radius_b, velocity_a) -> TOIResult
-swept_sphere_box   (center, radius, velocity, box_min, box_max)   -> TOIResult
-swept_box_box      (pos_a, pos_b, half_extents_a, half_extents_b, velocity_a) -> TOIResult
-swept_test         (collider_a, collider_b, pos_a, pos_b, rot_a, rot_b, velocity_a) -> TOIResult
-```
-
-## Constraint solver
-
-```odin
-prepare_contact_dynamic_dynamic(contact, body_a, body_b, dt: f32)
-prepare_contact_dynamic_static (contact, body_a, body_b, dt: f32)
-prepare_contact                (overloaded)
-
-warmstart_contact_dynamic_dynamic(contact, body_a, body_b)
-warmstart_contact_dynamic_static (contact, body_a, body_b)
-warmstart_contact                (overloaded)
-
-resolve_contact_dynamic_dynamic        (contact, body_a, body_b)
-resolve_contact_dynamic_static         (contact, body_a, body_b)
-resolve_contact_batch4_dynamic_dynamic (contacts: [4], bodies_a, bodies_b: [4])  // SIMD
-resolve_contact                        (overloaded, with bias)
-
-resolve_contact_no_bias_dynamic_dynamic        (contact, body_a, body_b)
-resolve_contact_no_bias_dynamic_static         (contact, body_a, body_b)
-resolve_contact_batch4_no_bias_dynamic_dynamic (contacts, bodies_a, bodies_b)
-resolve_contact_no_bias                        (overloaded, no bias — stabilization)
-
-compute_tangent_basis(normal: [3]f32) -> ([3]f32, [3]f32)
-```
+`world.trigger_overlaps` and `world.trigger_static_overlaps` are populated
+each step; iterate them for continuous overlap events, or call
+`query_trigger` / `query_trigger_static` for an on-demand snapshot.
 
 ## Spatial queries
 
@@ -313,41 +211,66 @@ RayHit :: struct {
   hit:         bool,
 }
 
-raycast        (world, ray, max_dist = max(f32)) -> RayHit
-raycast_single (world, ray, max_dist = max(f32)) -> RayHit
-raycast_trigger(world, ray, max_dist = max(f32)) -> RayHit
-
-raycast_collider(ray, collider, position, rotation, max_dist) -> (t: f32, normal: [3]f32, hit: bool)
+raycast        (world, ray, max_dist = max(f32)) -> RayHit   // all bodies
+raycast_single (world, ray, max_dist = max(f32)) -> RayHit   // first hit, faster
+raycast_trigger(world, ray, max_dist = max(f32)) -> RayHit   // triggers only
 
 query_sphere     (world, center, radius, results: ^[dynamic]DynamicRigidBodyHandle)
 query_box        (world, bounds: geometry.Aabb, results: ^[dynamic]DynamicRigidBodyHandle)
 query_trigger    (world, handle: TriggerHandle, results: ^[dynamic]DynamicRigidBodyHandle)
-query_trigger_static(world, handle, results: ^[dynamic]StaticRigidBodyHandle)
+query_trigger_static    (world, handle, results: ^[dynamic]StaticRigidBodyHandle)
 query_triggers_in_sphere(world, center, radius, results: ^[dynamic]TriggerHandle)
 
 test_collider_sphere_overlap(collider, pos, rot, sphere_center, sphere_radius) -> bool
 test_collider_aabb_overlap  (collider, pos, rot, bounds: geometry.Aabb) -> bool
 ```
 
-## Integration helpers
+Switch on `hit.body_handle` to dispatch on body kind:
 
 ```odin
-apply_gravity        (world)
-integrate_velocities (world, dt: f32)
-integrate_positions  (world, dt: f32, ccd_handled: []bool)
-integrate_rotations  (world, dt: f32, ccd_handled: []bool)
+hit := mjolnir.raycast(engine, geometry.Ray{origin = cam_pos, direction = forward})
+switch h in hit.body_handle {
+case physics.DynamicRigidBodyHandle: ...
+case physics.StaticRigidBodyHandle:  ...
+case physics.TriggerHandle:          ...
+}
 ```
 
-## SIMD batch ops
+## Pairwise collision tests
 
-Re-exports from `geometry`:
+Building blocks for custom queries — each returns
+`(point, normal, penetration, hit)`:
 
 ```odin
-aabb_intersects_batch4
-obb_to_aabb_batch4
-vector_cross3_batch4
-quaternion_mul_vector3_batch4
-vector_dot3_batch4
-vector_length3_batch4
-vector_normalize3_batch4
+test_sphere_sphere    (pos_a, sphere_a, pos_b, sphere_b)
+test_box_box          (pos_a, rot_a, box_a, pos_b, rot_b, box_b)
+test_box_sphere       (pos_box, rot_box, box, pos_sphere, sphere, invert_normal=false)
+test_sphere_cylinder  (pos_sphere, sphere, pos_cyl, rot_cyl, cyl, invert_normal=false)
+test_box_cylinder     (pos_box, rot_box, box, pos_cyl, rot_cyl, cyl, invert_normal=false)
+test_cylinder_cylinder(pos_a, rot_a, cyl_a, pos_b, rot_b, cyl_b)
+test_point_cylinder   (point, cyl_center, cyl_rot, cyl) -> bool
+test_point_fan        (point, fan_center, fan_rot, fan) -> bool
+
+test_collision_collider_collider(collider_a, pos_a, rot_a, collider_b, pos_b, rot_b)
+test_collision                  (overloaded for handle types)
 ```
+
+## Fast-moving bodies
+
+Bullets, projectiles, and other fast bodies don't tunnel through thin
+walls — the engine have CCD handled when velocity exceeds the per-frame threshold. 
+[`examples/bullet_wall_ccd`](https://github.com/hucancode/mjolnir/blob/master/examples/bullet_wall_ccd/main.odin).
+
+## Tunable constants
+
+```odin
+KILL_Y                  :: f32(-50.0)   // bodies below this go dead
+SEA_LEVEL_AIR_DENSITY   :: 1.225
+SLEEP_LINEAR_THRESHOLD  :: 0.05
+SLEEP_ANGULAR_THRESHOLD :: 0.05
+SLEEP_TIME_THRESHOLD    :: 0.5
+```
+
+The remaining constants (substep count, solver iterations, BVH thresholds,
+warmstart and Baumgarte coefficients) are internal solver tuning — not
+expected to be touched. Read `physics/solver.odin` if you need them.

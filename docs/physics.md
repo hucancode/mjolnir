@@ -1,227 +1,170 @@
+---
+title: Physics
+---
 # Physics Module (`mjolnir/physics`)
 
-The Physics module provides rigid body dynamics, collision detection, spatial queries, and continuous collision detection (CCD).
+Rigid-body dynamics, collisions, and spatial queries.
 
-## Initialization
+The engine owns `engine.physics` (a `physics.World`). It is stepped and
+synced to the scene graph every tick — you just spawn bodies and read
+results. Tune `engine.physics.gravity` in `setup` for non-default gravity.
+
+> User code should mostly use the engine-rooted shortcuts (`mjolnir.spawn_static`,
+> `mjolnir.spawn_dynamic`, `mjolnir.create_dynamic_body`, etc.). See
+> [`api_engine` §Shortcuts](api_engine.html#shortcuts) for the full list.
+
+## Spawning a static body
 
 ```odin
 import "../../mjolnir/physics"
 
-physics_world: physics.World
-
 setup :: proc(engine: ^mjolnir.Engine) {
-  // Initialize with gravity
-  physics.init(&physics_world, gravity = {0, -10, 0})
+  ground_mesh := mjolnir.builtin_mesh(engine, .CUBE)
+  ground_mat  := mjolnir.builtin_material(engine, .GRAY)
+
+  mjolnir.spawn_static(
+    engine, {0, -0.5, 0},
+    physics.BoxCollider{half_extents = {20, 0.5, 20}},
+    ground_mesh, ground_mat,
+    visual_scale = {20, 0.5, 20},
+  )
 }
 ```
 
-## Static Bodies
+`spawn_static` creates the node, the static body, and a scaled visual
+child in one call.
 
-Static bodies don't move - used for ground, walls, obstacles.
+## Spawning a dynamic body
 
 ```odin
-// Create static box
-physics.create_static_body_box(
-  &physics_world,
-  half_extents = {10, 0.5, 10},
-  position = {0, -0.5, 0},
-  rotation = {},
-)
-
-// Create static sphere
-physics.create_static_body_sphere(
-  &physics_world,
-  radius = 3.0,
-  position = {5, 3, 0},
-  rotation = {},
-)
-
-// Create static cylinder
-physics.create_static_body_cylinder(
-  &physics_world,
-  radius = 1.0,
-  half_height = 2.0,
-  position = {0, 2, 0},
-  rotation = {},
+node, body := mjolnir.spawn_dynamic(
+  engine, {0, 10, 0}, mass = 50.0,
+  physics.BoxCollider{half_extents = {0.5, 0.5, 0.5}},
+  cube_mesh, cube_mat,
 )
 ```
 
-## Dynamic Bodies
+`spawn_dynamic` additionally calls `set_inertia_from_collider` so the
+inertia tensor matches the collider variant (sphere / box / cylinder / fan).
 
-Dynamic bodies respond to forces and collisions.
+Need raw bodies without a node attachment?
 
 ```odin
-// Create dynamic box
-body_handle := physics.create_dynamic_body_box(
-  &physics_world,
-  half_extents = {0.5, 0.5, 0.5},
-  position = {0, 10, 0},
-  rotation = {},
-  mass = 50.0,
+body := mjolnir.create_dynamic_body(
+  engine,
+  position = {0, 10, 0}, rotation = Q_IDENTITY,
+  mass = 50, collider = physics.SphereCollider{radius = 1},
 )
+```
 
-// Set inertia for box
-if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
-  physics.set_box_inertia(body, {0.5, 0.5, 0.5})
-}
+## Colliders
 
-// Create dynamic sphere
-sphere_handle := physics.create_dynamic_body_sphere(
-  &physics_world,
-  radius = 1.0,
-  position = {0, 5, 0},
-  rotation = {},
-  mass = 50.0,
-)
+```odin
+physics.SphereCollider{radius = 1.0}
+physics.BoxCollider{half_extents = {0.5, 0.5, 0.5}}
+physics.CylinderCollider{radius = 0.5, height = 2.0}
+physics.FanCollider{radius = 6.0, height = 2.0, angle = math.PI * 0.5}
+```
 
-if body, ok := physics.get_dynamic_body(&physics_world, sphere_handle); ok {
-  physics.set_sphere_inertia(body, radius = 1.0)
-}
+`Collider` is a union of these variants.
 
-// Create dynamic cylinder
-cylinder_handle := physics.create_dynamic_body_cylinder(
-  &physics_world,
-  radius = 0.5,
-  half_height = 1.0,
-  position = {0, 8, 0},
-  rotation = {},
-  mass = 50.0,
-)
+## Reading / mutating a body
 
-if body, ok := physics.get_dynamic_body(&physics_world, cylinder_handle); ok {
-  physics.set_cylinder_inertia(body, radius = 0.5, height = 2.0)
+```odin
+if body, ok := mjolnir.get_dynamic_body(engine, handle); ok {
+  body.friction        = 0.5     // 0 = frictionless, 1 = grippy
+  body.restitution     = 0.3     // 0 = no bounce, 1 = perfect
+  body.linear_damping  = 0.1
+  body.angular_damping = 0.1
+  body.velocity        = {0, 5, 0}
 }
 ```
 
-## Attaching Physics to World Nodes
+The engine writes `body.position` / `body.rotation` back to the node each
+tick via `world.sync_all_physics_to_world`, so the scene graph follows.
+
+## Forces & impulses
 
 ```odin
-// Create world node for visual representation
-physics_node := world.spawn(&engine.world, {0, 10, 0}) or_else {}
-physics_node_ptr := world.node(&engine.world, physics_node)
+body, _ := mjolnir.get_dynamic_body(engine, handle)
+physics.apply_force          (body, {0, 100, 0})        // wakes
+physics.apply_impulse        (body, {0, 50, 0})         // wakes
+physics.apply_force_at_point (body, force, point, center)
+physics.apply_impulse_at_point(body, impulse, point)
+```
 
-// Create physics body at same position
-body_handle := physics.create_dynamic_body_box(
-  &physics_world,
-  {0.5, 0.5, 0.5},
-  physics_node_ptr.transform.position,
-  physics_node_ptr.transform.rotation,
-  50.0,
+## Inertia
+
+The shortcut spawners set inertia automatically. For raw bodies use the
+collider-dispatched helper:
+
+```odin
+physics.set_inertia_from_collider(body, body.collider)
+
+// Or shape-specific:
+physics.set_box_inertia      (body, {0.5, 0.5, 0.5})
+physics.set_sphere_inertia   (body, 1.0)
+physics.set_cylinder_inertia (body, radius = 0.5, height = 2.0)
+```
+
+Without it the inertia tensor stays at identity and rotations look
+unrealistic.
+
+## Spatial queries
+
+```odin
+// Raycast (all bodies)
+hit := physics.raycast(
+  &engine.physics,
+  geometry.Ray{origin = {0, 10, 0}, direction = {0, -1, 0}},
+  max_dist = 100.0,
+)
+if hit.hit do log.infof("hit %v at t=%.2f", hit.body_handle, hit.t)
+
+// Sphere overlap → list of dynamic bodies
+overlapping: [dynamic]physics.DynamicRigidBodyHandle
+defer delete(overlapping)
+physics.query_sphere(&engine.physics, center = {0, 0, 0}, radius = 5.0, results = &overlapping)
+
+// Trigger overlap → triggers in a sphere
+triggers: [dynamic]physics.TriggerHandle
+defer delete(triggers)
+physics.query_triggers_in_sphere(&engine.physics, center, radius, &triggers)
+```
+
+`hit.body_handle` is a union of `DynamicRigidBodyHandle` / `StaticRigidBodyHandle` /
+`TriggerHandle` — switch on it to act accordingly. Triggers only:
+`physics.raycast_trigger`.
+
+## Triggers
+
+Triggers don't generate contacts; they overlap-test only.
+
+```odin
+zone := physics.create_trigger(
+  &engine.physics,
+  position = {0, 1, 0},
+  collider = physics.FanCollider{radius = 6.0, height = 2.0, angle = math.PI * 0.5},
 )
 
-// Attach physics handle to node
-physics_node_ptr.attachment = world.RigidBodyAttachment{
-  body_handle = body_handle,
-}
-
-// Create child node with visual mesh
-mesh_node := world.spawn_child(
-  &engine.world,
-  physics_node,
-  attachment = world.MeshAttachment{
-    handle = cube_mesh,
-    material = cube_material,
-    cast_shadow = true,
-  },
-) or_else {}
+// Per frame:
+hits: [dynamic]physics.DynamicRigidBodyHandle
+defer delete(hits)
+physics.query_trigger(&engine.physics, zone, &hits)
 ```
 
-## Simulation
+`engine.physics.trigger_overlaps` is populated each step for continuous
+overlap events.
+
+## Fast-moving bodies
+
+Fast bodies (bullets, projectiles) don't tunnel through thin walls — the
+engine handles it for you. No extra setup required. See
+[`examples/bullet_wall_ccd`](https://github.com/hucancode/mjolnir/blob/master/examples/bullet_wall_ccd/main.odin)
+for the canonical case.
+
+## Tunable constants
 
 ```odin
-update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  // Step physics simulation
-  physics.step(&physics_world, delta_time)
-  
-  // Sync physics results back to world nodes
-  world.sync_all_physics_to_world(&engine.world, &physics_world)
-}
-```
-
-## Forces and Velocities
-
-```odin
-// Get body reference
-body, ok := physics.get_dynamic_body(&physics_world, body_handle)
-if !ok do return
-
-// Apply force
-force := [3]f32{0, 100, 0}
-physics.apply_force(body, force)
-
-// Set velocity directly
-body.linear_velocity = {0, 5, 0}
-body.angular_velocity = {0, 1, 0}
-
-// Set position/rotation directly
-body.position = {0, 10, 0}
-body.rotation = linalg.quaternion_angle_axis_f32(math.PI * 0.5, {0, 1, 0})
-```
-
-## Collision Detection
-
-```odin
-// Collisions are detected automatically during physics.step()
-// Access collision pairs after step:
-for pair in physics_world.collision_pairs {
-  log.infof("Collision: %v <-> %v", pair.body_a, pair.body_b)
-}
-```
-
-## Spatial Queries
-
-```odin
-// Raycast
-hit, ok := physics.raycast(
-  &physics_world,
-  origin = {0, 10, 0},
-  direction = {0, -1, 0},
-  max_distance = 100.0,
-)
-
-if ok {
-  log.infof("Hit at: %v", hit.position)
-  log.infof("Normal: %v", hit.normal)
-  log.infof("Distance: %f", hit.distance)
-}
-
-// Sphere cast
-sphere_hit, ok := physics.sphere_cast(
-  &physics_world,
-  origin = {0, 10, 0},
-  radius = 1.0,
-  direction = {0, -1, 0},
-  max_distance = 100.0,
-)
-
-// Overlap tests
-overlapping := physics.sphere_overlap(
-  &physics_world,
-  center = {0, 0, 0},
-  radius = 5.0,
-)
-
-for body in overlapping {
-  log.infof("Body overlapping sphere: %v", body)
-}
-```
-
-## Material Properties
-
-```odin
-// Set friction and restitution
-if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
-  body.friction = 0.5      // 0 = frictionless, 1 = high friction
-  body.restitution = 0.3   // 0 = no bounce, 1 = perfect bounce
-}
-```
-
-## Continuous Collision Detection (CCD)
-
-For fast-moving objects that might tunnel through geometry:
-
-```odin
-if body, ok := physics.get_dynamic_body(&physics_world, body_handle); ok {
-  body.use_ccd = true
-}
+KILL_Y :: -50.0   // bodies below this go dead
 ```

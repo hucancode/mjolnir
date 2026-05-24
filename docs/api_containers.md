@@ -1,3 +1,6 @@
+---
+title: containers API
+---
 # `mjolnir/containers` — API Reference
 
 Layer 1. Pure data structures with no dependencies on the rest of the engine.

@@ -1,3 +1,6 @@
+---
+title: Render
+---
 # Render Module (`mjolnir/render/*`)
 
 The Render module provides rendering subsystems including geometry rendering, lighting, shadows, transparency, particles, post-processing, and camera management.
@@ -17,8 +20,8 @@ post_process.add_crosshatch(&engine.render.post_process, {800, 600})
 // Toggle visibility culling stats
 engine.render.visibility.stats_enabled = false
 
-// Access camera-specific rendering
-camera := cont.get(engine.world.cameras, engine.world.main_camera)
+// Access main camera
+camera, _ := mjolnir.main_camera(engine)
 ```
 
 ## Custom Cameras
@@ -27,27 +30,23 @@ Create additional cameras for render-to-texture effects:
 
 ```odin
 // Create secondary camera
-secondary_camera, ok := mjolnir.create_camera(
+secondary_camera := mjolnir.create_camera(
   engine,
-  width = 1024,
+  width  = 1024,
   height = 1024,
-  enabled_passes = {.SHADOW, .GEOMETRY, .LIGHTING},
+  enabled_passes = {.GEOMETRY, .LIGHTING},
   position = {0, 5, 10},
-  target = {0, 0, 0},
-  fov = 1.57079632679,
+  target   = {0, 0, 0},
+  fov      = math.PI * 0.5,
   near_plane = 0.1,
-  far_plane = 100.0,
+  far_plane  = 100.0,
 )
 
-// Get camera attachment for use as texture
+// Get camera attachment for use as a bindless texture
 color_attachment, ok := mjolnir.get_camera_attachment(
-  engine,
-  secondary_camera,
-  .COLOR,
-  frame_index = 0,
+  engine, secondary_camera, .FINAL_IMAGE, engine.frame_index,
 )
-
-// Use attachment as texture in material
+// Use `color_attachment` as a texture in a material — see render_to_texture example
 ```
 
 ## Render Passes
@@ -70,23 +69,15 @@ Different material types control how objects are rendered:
 
 ```odin
 // PBR material (default)
-world.create_material(
-  &engine.world,
-  type = .PBR,
-  metallic_value = 0.8,
-  roughness_value = 0.2,
-)
+mjolnir.material_pbr(engine, metallic = 0.8, roughness = 0.2)
 
 // Random color (debugging)
-world.create_material(
-  &engine.world,
-  type = .RANDOM_COLOR,
-)
+mjolnir.create_material(engine, type = .RANDOM_COLOR)
 
 // Line strip rendering
-world.create_material(
-  &engine.world,
-  type = .LINE_STRIP,
+mjolnir.create_material(
+  engine,
+  type              = .LINE_STRIP,
   base_color_factor = {1.0, 0.8, 0.0, 1.0},
 )
 ```
@@ -94,44 +85,26 @@ world.create_material(
 ## Shadows
 
 ```odin
-// Enable shadow casting for lights
-directional_light := world.create_directional_light_attachment(
-  {1.0, 1.0, 1.0, 1.0},
-  intensity = 10.0,
-  cast_shadow = true, // Enable shadows
-)
+// Lights with shadow casting (color.w doubles as intensity)
+dir := mjolnir.spawn_light_directional(engine,
+  position = {0, 10, 0}, color = {1, 1, 1, 10.0},
+  radius = 12, cast_shadow = true)
 
-point_light := world.create_point_light_attachment(
-  {1.0, 0.8, 0.6, 1.0},
-  intensity = 100.0,
-  cast_shadow = true,
-)
+point := mjolnir.spawn_light_point(engine,
+  position = {5, 3, 5}, color = {1, 0.8, 0.6, 100.0},
+  radius = 8, cast_shadow = true)
 
-spot_light := world.create_spot_light_attachment(
-  {0.8, 0.9, 1.0, 1.0},
-  intensity = 50.0,
-  outer_cone_angle = math.PI * 0.25,
-  cast_shadow = true,
-)
+spot := mjolnir.spawn_light_spot(engine,
+  position = {0, 10, 0}, color = {0.8, 0.9, 1, 50.0},
+  radius = 20, angle = math.PI * 0.25, cast_shadow = true)
 
-// Enable shadow casting for meshes
+// Per-mesh shadow casting
 mesh_attachment := world.MeshAttachment{
-  handle = mesh,
-  material = material,
-  cast_shadow = true, // This mesh casts shadows
+  handle      = mesh,
+  material    = material,
+  cast_shadow = true,
 }
 ```
 
-## Rendering Architecture
-
-The render system is organized into subsystems:
-
-- **Geometry Renderer**: Handles opaque geometry with PBR materials
-- **Lighting/Shadow Renderer**: Computes lighting and shadow maps
-- **Transparency Renderer**: Renders transparent objects with proper blending
-- **Particle Renderer**: GPU-based particle systems
-- **Post-process Renderer**: Screen-space effects
-- **Camera/Visibility**: Frustum culling and visibility determination
-- **UI Renderer**: 2D overlay rendering
-
-Too lazy to go into detail now :(
+For internals (passes, BVH culling, staging) see
+[architecture.html](architecture.html).
