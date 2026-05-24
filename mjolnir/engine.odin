@@ -447,6 +447,7 @@ load_gltf :: proc(
       &engine_ctx.gctx,
       &engine_ctx.render.texture_manager,
       pixel_data,
+      .R8G8B8A8_UNORM,
     )
     if ret != .SUCCESS {
       return {}, false
