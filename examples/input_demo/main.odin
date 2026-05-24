@@ -47,11 +47,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, cast_shadow = false)
   mjolnir.scale(engine, ground, 8.0)
 
-  for x := -2; x <= 2; x += 1 do for z := -2; z <= 2; z += 1 {
-    if x == 0 && z == 0 do continue
-    mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY, position = {f32(x) * 2.0, 0.15, f32(z) * 2.0}, scale_factor = 0.15)
-  }
-
   cube_handle = mjolnir.spawn_primitive_mesh(engine, .CUBE, .CYAN, position = cube_pos, scale_factor = 0.5)
   log.info("Input demo  WASD: move cube  Q/E: yaw  LMB drag, RMB, scroll, mouse-move hooked")
 }
@@ -109,27 +104,16 @@ quat_y :: proc(angle: f32) -> quaternion128 {
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
   ctx := mjolnir.ui_ctx(engine)
-  if mu.window(ctx, "Input", {700, 20, 280, 460}, {.NO_CLOSE}) {
-    mu.label(ctx, "--- Keyboard ---")
+  if mu.window(ctx, "Input", {700, 20, 200, 300}, {.NO_CLOSE}) {
     mu.label(ctx, "WASD move, Q/E yaw")
     mu.label(ctx, fmt.tprintf("Last key: %d action %d", last_key, last_key_action))
     mu.label(ctx, fmt.tprintf("Move speed: %.1f", move_speed))
     mu.slider(ctx, &move_speed, 0.5, 20.0)
-
-    mu.label(ctx, "")
-    mu.label(ctx, "--- Mouse ---")
-    mu.label(ctx, fmt.tprintf("Pos: %.0f %.0f", last_mouse.x, last_mouse.y))
+    mu.label(ctx, fmt.tprintf("Mouse: %.0f %.0f", last_mouse.x, last_mouse.y))
     mu.label(ctx, fmt.tprintf("Drag delta: %.1f %.1f", last_drag.x, last_drag.y))
-    mu.label(ctx, fmt.tprintf("Last btn: %d action %d", last_button, last_button_action))
+    mu.label(ctx, fmt.tprintf("Last mouse button: %d action %d", last_button, last_button_action))
     mu.label(ctx, fmt.tprintf("Scroll: %.1f %.1f", last_scroll.x, last_scroll.y))
-
-    mu.label(ctx, "")
-    mu.label(ctx, "--- Cube state ---")
-    mu.label(ctx, fmt.tprintf("Pos: %.2f %.2f %.2f", cube_pos.x, cube_pos.y, cube_pos.z))
-    mu.label(ctx, fmt.tprintf("Yaw: %.2f rad", cube_yaw))
-
-    mu.label(ctx, "")
-    mu.label(ctx, fmt.tprintf("Light (wheel): %.1f", light_intensity))
+    mu.label(ctx, "Light (Scroll to adjust):")
     mu.slider(ctx, &light_intensity, 0.0, 20.0)
   }
 }
