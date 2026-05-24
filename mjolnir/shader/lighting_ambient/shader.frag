@@ -36,6 +36,7 @@ layout(push_constant) uniform AmbientPushConstant {
     uint irradiance_index;
     uint prefilter_index;
     uint brdf_lut_index;
+    uint environment_index;
     uint position_texture_index;
     uint normal_texture_index;
     uint albedo_texture_index;
@@ -43,24 +44,51 @@ layout(push_constant) uniform AmbientPushConstant {
     uint emissive_texture_index;
     float prefilter_max_lod;
     float ibl_intensity;
+    float skybox_intensity;
+    float skybox_blur;
+    uint skybox_enabled;
 };
 
-// Fresnel-Schlick with roughness term (Sebastien Lagarde).
 vec3 fresnel_schlick_roughness(float cos_theta, vec3 F0, float roughness) {
     return F0 + (max(vec3(1.0 - roughness), F0) - F0)
         * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+}
+
+vec2 dirToEquirectUv(vec3 dir) {
+    float u = atan(dir.z, dir.x) / (2.0 * PI) + 0.5;
+    float v = acos(clamp(-dir.y, -1.0, 1.0)) / PI;
+    return vec2(u, v);
+}
+
+vec3 sample_skybox(Camera camera, vec2 uv) {
+    mat4 inv_vp = inverse(camera.projection * camera.view);
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec4 world_far = inv_vp * vec4(ndc, 1.0, 1.0);
+    vec3 dir = normalize(world_far.xyz / world_far.w - camera.position.xyz);
+    float b = clamp(skybox_blur, 0.0, 1.0);
+    if (b <= 0.0 || prefilter_index == 0u || prefilter_max_lod <= 0.0) {
+        vec2 eq_uv = dirToEquirectUv(dir);
+        return textureLod(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_REPEAT]), eq_uv, 0.0).rgb;
+    }
+    float cube_lod = b * prefilter_max_lod;
+    return textureLod(samplerCube(cube_textures[prefilter_index], samplers[SAMPLER_LINEAR_CLAMP]), dir, cube_lod).rgb;
 }
 
 void main() {
     Camera camera = camera_buffer.cameras[camera_index];
     vec2 uv = v_uv;
     vec3 position = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz;
-    // Background pixels (no geometry) get cleared to black; skybox pass fills
-    // them later when enabled. Without this, junk normals would sample the
-    // cubemaps and produce flashing colors as the camera rotates.
+
+    // Background (no geometry): draw skybox if enabled, else discard.
     if (dot(position, position) < 1e-6) {
+        if (skybox_enabled != 0u && environment_index != 0u) {
+            vec3 sky = sample_skybox(camera, uv) * skybox_intensity;
+            outColor = vec4(sky, 1.0);
+            return;
+        }
         discard;
     }
+
     vec3 normal = texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz * 2.0 - 1.0;
     vec3 albedo = texture(sampler2D(textures[albedo_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rgb;
     vec2 mr = texture(sampler2D(textures[metallic_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rg;
@@ -77,13 +105,10 @@ void main() {
 
     vec3 ambient = vec3(0.0);
     if (ibl_intensity > 0.0 && prefilter_max_lod > 0.0) {
-        // Diffuse term: irradiance cubemap, energy-conserved (kD = (1 - F) * (1 - metallic)).
         vec3 irradiance = texture(samplerCube(cube_textures[irradiance_index], samplers[SAMPLER_LINEAR_CLAMP]), normal).rgb;
         vec3 diffuse = irradiance * albedo;
         vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
 
-        // Specular term: split-sum approximation.
-        // prefilteredColor encodes the GGX-importance-sampled lobe per roughness.
         vec3 prefiltered = textureLod(
             samplerCube(cube_textures[prefilter_index], samplers[SAMPLER_LINEAR_CLAMP]),
             R,

@@ -25,7 +25,6 @@ import shadow_culling_system "shadow_culling"
 import shadow_render_system "shadow_render"
 import shadow_sphere_culling_system "shadow_sphere_culling"
 import shadow_sphere_render_system "shadow_sphere_render"
-import "skybox"
 import "sprite"
 import "transparent"
 import ui_render "ui"
@@ -244,7 +243,6 @@ Internal :: struct {
   // Pass renderers - never accessed from outside the render package.
   geometry:                     geometry.Renderer,
   ambient:                      ambient.Renderer,
-  skybox:                       skybox.Renderer,
   direct_light:                 direct_light.Renderer,
   transparent_renderer:         transparent.Renderer,
   sprite_renderer:              sprite.Renderer,
@@ -516,12 +514,6 @@ init :: proc(
   ) or_return
   ambient.init(
     &self.internal.ambient,
-    gctx,
-    self.internal.camera_buffer.set_layout,
-    self.texture_manager.set_layout,
-  ) or_return
-  skybox.init(
-    &self.internal.skybox,
     gctx,
     self.internal.camera_buffer.set_layout,
     self.texture_manager.set_layout,
@@ -840,7 +832,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   line_strip.shutdown(&self.internal.line_strip_renderer, gctx)
   random_color.shutdown(&self.internal.random_color_renderer, gctx)
   ambient.shutdown(&self.internal.ambient, gctx)
-  skybox.shutdown(&self.internal.skybox, gctx)
   direct_light.shutdown(&self.internal.direct_light, gctx)
   shadow_sphere_render_system.shutdown(&self.internal.shadow_sphere_render, gctx)
   shadow_render_system.shutdown(&self.internal.shadow_render, gctx)
@@ -1141,16 +1132,6 @@ record_lighting_pass :: proc(
     cam.attachments[.ALBEDO][frame_index].index,
     cam.attachments[.METALLIC_ROUGHNESS][frame_index].index,
     cam.attachments[.EMISSIVE][frame_index].index,
-  )
-  skybox.record(
-    &self.internal.skybox,
-    cam_index,
-    cmd,
-    &self.texture_manager,
-    cam.attachments[.FINAL_IMAGE][frame_index],
-    self.internal.camera_buffer.descriptor_sets[frame_index],
-    self.internal.ambient.environment_map.index,
-    cam.attachments[.POSITION][frame_index].index,
   )
   direct_light.begin_pass(
     &self.internal.direct_light,

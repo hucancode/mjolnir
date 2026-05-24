@@ -1,4 +1,4 @@
-package ibl
+package ambient
 
 import "../../gpu"
 import "core:log"
@@ -34,7 +34,7 @@ PrefilterPush :: struct {
 
 // Outputs from a single precompute run. The caller owns the handles and must
 // free them via free_results.
-Results :: struct {
+IBLResults :: struct {
   env_cube:           gpu.TextureCubeHandle,
   irradiance_cube:    gpu.TextureCubeHandle,
   prefilter_cube:     gpu.TextureCubeHandle,
@@ -50,7 +50,7 @@ precompute :: proc(
   equirect_handle: gpu.Texture2DHandle,
   linear_repeat_sampler: vk.Sampler,
 ) -> (
-  results: Results,
+  results: IBLResults,
   ret: vk.Result,
 ) {
   equirect := gpu.get_texture_2d(texture_manager, equirect_handle)
@@ -295,7 +295,7 @@ precompute :: proc(
 free_results :: proc(
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
-  r: ^Results,
+  r: ^IBLResults,
 ) {
   gpu.free_texture_cube(texture_manager, gctx, r.env_cube)
   gpu.free_texture_cube(texture_manager, gctx, r.irradiance_cube)

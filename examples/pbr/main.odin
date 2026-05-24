@@ -1,7 +1,6 @@
 package main
 
 import "../../mjolnir"
-import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
@@ -32,6 +31,7 @@ spinning: bool = true
 rotation_phase: f32
 ibl_intensity: mu.Real = 1.0
 skybox_on: bool = true
+skybox_blur: mu.Real = 0.5
 
 main :: proc() {
   mjolnir.run_app({
@@ -63,6 +63,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   mjolnir.set_light_intensity(engine, dir_light, f32(dir_intensity))
   mjolnir.set_ibl_intensity(engine, f32(ibl_intensity))
   mjolnir.set_skybox_enabled(engine, skybox_on)
+  mjolnir.set_skybox_blur(engine, f32(skybox_blur))
   if spinning {
     rotation_phase += delta_time * f32(rotate_speed)
   }
@@ -77,12 +78,14 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
   ctx := mjolnir.ui_ctx(engine)
-  if mu.window(ctx, "PBR Lighting", {580, 20, 220, 420}, {.NO_CLOSE}) {
-    mu.label(ctx, fmt.tprintf("Sun intensity: %.2f", dir_intensity))
+  if mu.window(ctx, "PBR Lighting", {550, 20, 220, 400}, {.NO_CLOSE}) {
+    mu.label(ctx, "Sun intensity")
     mu.slider(ctx, &dir_intensity, 0.0, 5.0)
-    mu.label(ctx, fmt.tprintf("IBL intensity: %.2f", ibl_intensity))
+    mu.label(ctx, "IBL intensity")
     mu.slider(ctx, &ibl_intensity, 0.0, 2.0)
     mu.checkbox(ctx, "Skybox", &skybox_on)
+    mu.label(ctx, "Skybox blur")
+    mu.slider(ctx, &skybox_blur, 0.0, 1.0)
     mu.checkbox(ctx, "Spinning", &spinning)
     mu.label(ctx, "Model:")
     mu.layout_row(ctx, {-1}, 0)

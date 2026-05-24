@@ -20,7 +20,6 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.set_skybox_enabled(engine, false)
   ground_mesh := mjolnir.builtin_mesh(engine, .CUBE)
   ground_mat := mjolnir.builtin_material(engine, .GRAY)
   sphere_mesh := mjolnir.builtin_mesh(engine, .SPHERE)

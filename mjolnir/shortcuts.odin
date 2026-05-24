@@ -415,19 +415,27 @@ get_ibl_intensity :: proc(engine: ^Engine) -> f32 {
 }
 
 set_skybox_enabled :: proc(engine: ^Engine, enabled: bool) {
-  engine.render.internal.skybox.enabled = enabled
+  engine.render.internal.ambient.skybox_enabled = enabled
 }
 
 get_skybox_enabled :: proc(engine: ^Engine) -> bool {
-  return engine.render.internal.skybox.enabled
+  return engine.render.internal.ambient.skybox_enabled
 }
 
 set_skybox_intensity :: proc(engine: ^Engine, intensity: f32) {
-  engine.render.internal.skybox.intensity = max(intensity, 0.0)
+  engine.render.internal.ambient.skybox_intensity = max(intensity, 0.0)
 }
 
 get_skybox_intensity :: proc(engine: ^Engine) -> f32 {
-  return engine.render.internal.skybox.intensity
+  return engine.render.internal.ambient.skybox_intensity
+}
+
+set_skybox_blur :: proc(engine: ^Engine, blur: f32) {
+  engine.render.internal.ambient.skybox_blur = clamp(blur, 0.0, 1.0)
+}
+
+get_skybox_blur :: proc(engine: ^Engine) -> f32 {
+  return engine.render.internal.ambient.skybox_blur
 }
 
 set_material_handle :: proc(engine: ^Engine, h: world.NodeHandle, m: world.MaterialHandle) {

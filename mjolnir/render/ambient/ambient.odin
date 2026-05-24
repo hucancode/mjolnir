@@ -1,7 +1,6 @@
 package ambient
 
 import "../../gpu"
-import "../ibl"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -15,6 +14,7 @@ PushConstant :: struct {
   irradiance_index:       u32,
   prefilter_index:        u32,
   brdf_lut_index:         u32,
+  environment_index:      u32,
   position_texture_index: u32,
   normal_texture_index:   u32,
   albedo_texture_index:   u32,
@@ -22,18 +22,21 @@ PushConstant :: struct {
   emissive_texture_index: u32,
   prefilter_max_lod:      f32,
   ibl_intensity:          f32,
+  skybox_intensity:       f32,
+  skybox_blur:            f32,
+  skybox_enabled:         u32,
 }
 
 Renderer :: struct {
   pipeline:           vk.Pipeline,
   pipeline_layout:    vk.PipelineLayout,
-  // Equirect HDR source, kept around so the skybox can still read it.
   environment_map:    gpu.Texture2DHandle,
-  // BRDF integration LUT (2D, prebaked PNG).
   brdf_lut:           gpu.Texture2DHandle,
-  // IBL precompute outputs.
-  ibl:                ibl.Results,
+  ibl:                IBLResults,
   ibl_intensity:      f32,
+  skybox_enabled:     bool,
+  skybox_intensity:   f32,
+  skybox_blur:        f32,
 }
 
 init :: proc(
@@ -57,15 +60,9 @@ init :: proc(
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   }
-  vert_module := gpu.create_shader_module(
-    gctx.device,
-    SHADER_VERT,
-  ) or_return
+  vert_module := gpu.create_shader_module(gctx.device, SHADER_VERT) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_module := gpu.create_shader_module(
-    gctx.device,
-    SHADER_FRAG,
-  ) or_return
+  frag_module := gpu.create_shader_module(gctx.device, SHADER_FRAG) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   shader_stages := gpu.create_vert_frag_stages(
     vert_module,
@@ -114,7 +111,7 @@ setup :: proc(
     texture_manager,
     "assets/Cannon_Exterior.hdr",
     .R32G32B32A32_SFLOAT,
-    false,
+    true,
     {.SAMPLED},
     true,
   )
@@ -137,10 +134,12 @@ setup :: proc(
   }
   self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0
+  self.skybox_enabled = true
+  self.skybox_intensity = 1.0
+  self.skybox_blur = 0.5
 
-  // Precompute IBL cubemaps (env cube, irradiance, prefilter) from the equirect.
   if self.environment_map.index != 0 {
-    self.ibl = ibl.precompute(
+    self.ibl = precompute(
       gctx,
       texture_manager,
       self.environment_map,
@@ -157,25 +156,20 @@ teardown :: proc(
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
 ) {
-  ibl.free_results(gctx, texture_manager, &self.ibl)
+  free_results(gctx, texture_manager, &self.ibl)
   gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
   self.environment_map = {}
   gpu.free_texture_2d(texture_manager, gctx, self.brdf_lut)
   self.brdf_lut = {}
 }
 
-shutdown :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-) {
+shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }
 
-// record draws ambient/IBL contribution as a fullscreen triangle. Owns its
-// own begin_rendering / end_rendering scope.
 record :: proc(
   self: ^Renderer,
   camera_handle: u32,
@@ -205,14 +199,15 @@ record :: proc(
     command_buffer,
     self.pipeline,
     self.pipeline_layout,
-    cameras_descriptor_set, // set = 0 (per-frame camera buffer)
-    texture_manager.descriptor_set, // set = 1 (bindless textures)
+    cameras_descriptor_set,
+    texture_manager.descriptor_set,
   )
   push := PushConstant {
     camera_index           = camera_handle,
     irradiance_index       = self.ibl.irradiance_cube.index,
     prefilter_index        = self.ibl.prefilter_cube.index,
     brdf_lut_index         = self.brdf_lut.index,
+    environment_index      = self.environment_map.index,
     position_texture_index = position_texture_idx,
     normal_texture_index   = normal_texture_idx,
     albedo_texture_index   = albedo_texture_idx,
@@ -220,6 +215,9 @@ record :: proc(
     emissive_texture_index = emissive_texture_idx,
     prefilter_max_lod      = self.ibl.prefilter_max_lod,
     ibl_intensity          = self.ibl_intensity,
+    skybox_intensity       = self.skybox_intensity,
+    skybox_blur            = self.skybox_blur,
+    skybox_enabled         = self.skybox_enabled ? 1 : 0,
   }
   vk.CmdPushConstants(
     command_buffer,
@@ -229,6 +227,6 @@ record :: proc(
     size_of(PushConstant),
     &push,
   )
-  vk.CmdDraw(command_buffer, 3, 1, 0, 0) // fullscreen triangle
+  vk.CmdDraw(command_buffer, 3, 1, 0, 0)
   vk.CmdEndRendering(command_buffer)
 }
