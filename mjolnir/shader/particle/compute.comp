@@ -29,14 +29,15 @@ layout(set = 0, binding = 0) uniform ParamsBuffer {
     uint emitter_count;
     uint forcefield_count;
     float delta_time;
+    uint frame_counter;
 };
 
 layout(set = 0, binding = 1) buffer ParticleBuffer {
     Particle particles[];
 };
 
-layout(set = 0, binding = 2) buffer CompactCountBuffer {
-    uint compact_count;
+layout(set = 0, binding = 2) buffer AliveCountBuffer {
+    uint alive_count;
 };
 
 layout(set = 1, binding = 0) readonly buffer ForceFieldBuffer {
@@ -82,7 +83,7 @@ const vec3 GRAVITY = vec3(0.0, -9.8, 0.0);
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
-    if (i >= compact_count) return;
+    if (i >= alive_count) return;
     vec3 p = particles[i].position.xyz;
     // Process actual force fields, using the dynamic forcefield_count
     uint n = min(forcefield_count, MAX_FORCE_FIELDS);

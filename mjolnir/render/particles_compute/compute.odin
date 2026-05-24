@@ -58,11 +58,13 @@ ParticleSystemParams :: struct {
   emitter_count:    u32,
   forcefield_count: u32,
   delta_time:       f32,
+  frame_counter:    u32,
 }
 
 Renderer :: struct {
   params_buffer:                      gpu.MutableBuffer(ParticleSystemParams),
   particle_count_buffer:              gpu.MutableBuffer(u32),
+  alive_count_buffer:                 gpu.MutableBuffer(u32),
   particle_buffer:                    gpu.MutableBuffer(Particle),
   compact_particle_buffer:            gpu.MutableBuffer(Particle),
   draw_command_buffer:                gpu.MutableBuffer(vk.DrawIndirectCommand),
@@ -88,9 +90,32 @@ simulate :: proc(
   node_data_set: vk.DescriptorSet,
 ) {
   params_ptr := gpu.get(&self.params_buffer)
-  counter_ptr := gpu.get(&self.particle_count_buffer)
-  params_ptr.particle_count = counter_ptr^
-  counter_ptr^ = 0
+  params_ptr.frame_counter += 1
+
+  // Prologue: seed emit counter with last frame's alive count so emissions
+  // append after surviving particles in particle_buffer, then reset the alive
+  // counter so compact starts at 0.
+  vk.CmdCopyBuffer(
+    command_buffer,
+    self.alive_count_buffer.buffer,
+    self.particle_count_buffer.buffer,
+    1,
+    &vk.BufferCopy{size = size_of(u32)},
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    self.alive_count_buffer.buffer,
+    0,
+    size_of(u32),
+    0,
+  )
+  gpu.memory_barrier(
+    command_buffer,
+    {.TRANSFER_WRITE},
+    {.SHADER_READ, .SHADER_WRITE},
+    {.TRANSFER},
+    {.COMPUTE_SHADER},
+  )
 
   gpu.bind_compute_pipeline(
     command_buffer,
@@ -107,20 +132,31 @@ simulate :: proc(
   gpu.memory_barrier(
     command_buffer,
     {.SHADER_WRITE},
-    {.SHADER_READ},
+    {.SHADER_READ, .SHADER_WRITE},
     {.COMPUTE_SHADER},
     {.COMPUTE_SHADER},
   )
 
   compact(self, command_buffer)
 
-  // Memory barrier before simulation
+  // Compact updates alive_count atomically. Both the compute pass (reads it as
+  // iteration bound) and the indirect draw command (gets vertex_count from it)
+  // need it after this point.
   gpu.memory_barrier(
     command_buffer,
     {.SHADER_WRITE},
-    {.SHADER_READ},
+    {.SHADER_READ, .TRANSFER_READ},
     {.COMPUTE_SHADER},
-    {.COMPUTE_SHADER},
+    {.COMPUTE_SHADER, .TRANSFER},
+  )
+
+  // Publish alive_count into draw_command.vertex_count (offset 0).
+  vk.CmdCopyBuffer(
+    command_buffer,
+    self.alive_count_buffer.buffer,
+    self.draw_command_buffer.buffer,
+    1,
+    &vk.BufferCopy{size = size_of(u32)},
   )
 
   gpu.bind_compute_pipeline(
@@ -156,13 +192,13 @@ simulate :: proc(
     &vk.BufferCopy{size = vk.DeviceSize(self.particle_buffer.bytes_count)},
   )
 
-  // Final barrier for rendering
+  // Final barrier for rendering and next-frame transfers
   gpu.memory_barrier(
     command_buffer,
     {.TRANSFER_WRITE},
-    {.INDIRECT_COMMAND_READ},
+    {.INDIRECT_COMMAND_READ, .VERTEX_ATTRIBUTE_READ, .TRANSFER_READ},
     {.TRANSFER},
-    {.DRAW_INDIRECT},
+    {.DRAW_INDIRECT, .VERTEX_INPUT, .TRANSFER},
   )
 }
 
@@ -206,10 +242,20 @@ setup :: proc(
     gctx,
     u32,
     1,
-    {.STORAGE_BUFFER},
+    {.STORAGE_BUFFER, .TRANSFER_DST},
   ) or_return
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
+  }
+
+  self.alive_count_buffer = gpu.create_mutable_buffer(
+    gctx,
+    u32,
+    1,
+    {.STORAGE_BUFFER, .TRANSFER_SRC, .TRANSFER_DST},
+  ) or_return
+  defer if ret != .SUCCESS {
+    gpu.mutable_buffer_destroy(gctx.device, &self.alive_count_buffer)
   }
 
   self.particle_buffer = gpu.create_mutable_buffer(
@@ -236,10 +282,19 @@ setup :: proc(
     gctx,
     vk.DrawIndirectCommand,
     1,
-    {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+    {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
   ) or_return
   defer if ret != .SUCCESS {
     gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
+  }
+
+  // vertex_count is written each frame by a transfer copy from alive_count.
+  draw_cmd := gpu.get(&self.draw_command_buffer)
+  draw_cmd^ = vk.DrawIndirectCommand {
+    vertexCount   = 0,
+    instanceCount = 1,
+    firstVertex   = 0,
+    firstInstance = 0,
   }
 
   self.emitter_descriptor_set = gpu.create_descriptor_set(
@@ -257,7 +312,7 @@ setup :: proc(
     {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.compact_particle_buffer)},
     {
       type = .STORAGE_BUFFER,
-      info = gpu.buffer_info(&self.particle_count_buffer),
+      info = gpu.buffer_info(&self.alive_count_buffer),
     },
   ) or_return
 
@@ -266,7 +321,10 @@ setup :: proc(
     &self.compact_descriptor_set_layout,
     {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.particle_buffer)},
     {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.compact_particle_buffer)},
-    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.draw_command_buffer)},
+    {
+      type = .STORAGE_BUFFER,
+      info = gpu.buffer_info(&self.alive_count_buffer),
+    },
     {
       type = .STORAGE_BUFFER,
       info = gpu.buffer_info(&self.particle_count_buffer),
@@ -279,6 +337,7 @@ setup :: proc(
 teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   gpu.mutable_buffer_destroy(gctx.device, &self.params_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.alive_count_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
   gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)

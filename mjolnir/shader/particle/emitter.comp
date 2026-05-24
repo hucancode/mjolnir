@@ -53,7 +53,7 @@ layout(set = 1, binding = 2) uniform ParamsBuffer {
     uint emitter_count;
     uint forcefield_count;
     float delta_time;
-    vec4 frustum_planes[6];
+    uint frame_counter;
 };
 
 struct NodeData {
@@ -70,22 +70,35 @@ layout(set = 2, binding = 0) readonly buffer WorldMatrixBuffer {
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-// Simple random number generator based on input seed
-float rand(vec2 co) {
-    return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
+// PCG hash: gives independent, well-distributed 32-bit outputs even when
+// inputs differ by 1. The sin-based hash used previously folds nearby seeds
+// onto nearby outputs, which clusters spawn positions around a single point
+// whenever the emitter index dominates the seed.
+uint pcg_hash(uint state) {
+    state = state * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
-// Generates a random vector within a sphere of given radius
-vec3 random_in_sphere(float radius, vec2 seed) {
-    float u = rand(seed);
-    float v = rand(seed * 1.3);
-    float theta = u * 2.0 * 3.14159265;
-    float phi = acos(2.0 * v - 1.0);
-    float r = pow(rand(seed * 2.1), 1.0/3.0) * radius;
+float rand_unit(uint seed) {
+    return float(pcg_hash(seed)) * (1.0 / 4294967296.0);
+}
+
+// Generates a random vector within a sphere of given radius. Each component
+// is driven by an independent hash of seed/seed+1/seed+2 so x/y/z aren't
+// correlated.
+vec3 random_in_sphere(float radius, uint seed) {
+    float u = rand_unit(seed);
+    float v = rand_unit(seed + 1u);
+    float w = rand_unit(seed + 2u);
+    float theta = u * 6.28318530718;
+    float cos_phi = 2.0 * v - 1.0;
+    float sin_phi = sqrt(max(0.0, 1.0 - cos_phi * cos_phi));
+    float r = pow(w, 1.0 / 3.0) * radius;
     return vec3(
-        r * sin(phi) * cos(theta),
-        r * sin(phi) * sin(theta),
-        r * cos(phi)
+        r * sin_phi * cos(theta),
+        r * sin_phi * sin(theta),
+        r * cos_phi
     );
 }
 
@@ -116,8 +129,14 @@ void main() {
     for (uint i = 0; i < emit_count; ++i) {
         uint idx = atomicAdd(particle_count, 1);
         if (idx >= MAX_PARTICLES) break;
-        // Random seed per particle
-        vec2 seed = vec2(float(idx), float(emitter_idx) + float(i) * 0.123);
+        // Per-particle seed that varies across frames, emitters, and particles.
+        // Without frame_counter every emission with the same idx/emitter would
+        // hash to identical randomness, so low-rate emitters always spawned at
+        // the same point.
+        uint seed = pcg_hash(idx
+                             ^ (frame_counter * 2654435761u)
+                             ^ (emitter_idx * 374761393u)
+                             ^ (i * 2246822519u));
         mat4 world = nodes[node_index].world_matrix;
         mat3 world_rotation = mat3(world);
         // Position: emitter position + random spread (local spread rotated into world space)
@@ -127,7 +146,7 @@ void main() {
         vec4 position = base_pos + vec4(world_offset, 0.0);
         // Velocity: initial_velocity + random spread (expressed in local space)
         vec3 base_vel = world_rotation * emitters[emitter_idx].initial_velocity.xyz;
-        vec3 vel_spread = world_rotation * random_in_sphere(emitters[emitter_idx].velocity_spread, seed * 2.0);
+        vec3 vel_spread = world_rotation * random_in_sphere(emitters[emitter_idx].velocity_spread, seed + 7u);
         vec4 velocity = vec4(base_vel + vel_spread, 0.0);
         // Color
         vec4 color_start = emitters[emitter_idx].color_start;
@@ -138,7 +157,7 @@ void main() {
         // Life
         float lifetime = emitters[emitter_idx].particle_lifetime;
         // Weight
-        float weight = emitters[emitter_idx].weight + (rand(seed * 3.0) - 0.5) * emitters[emitter_idx].weight_spread;
+        float weight = emitters[emitter_idx].weight + (rand_unit(seed + 13u) - 0.5) * emitters[emitter_idx].weight_spread;
         // Texture index
         uint texture_index = emitters[emitter_idx].texture_index;
         // Write particle

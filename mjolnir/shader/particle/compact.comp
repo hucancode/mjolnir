@@ -16,13 +16,6 @@ struct Particle {
     uint texture_index;
 };
 
-struct DrawCommand {
-    uint vertex_count;
-    uint instance_count;
-    uint first_vertex;
-    uint first_instance;
-};
-
 layout(binding = 0) buffer SourceParticleBuffer {
     Particle source_particles[];
 };
@@ -31,12 +24,16 @@ layout(binding = 1) buffer CompactParticleBuffer {
     Particle compact_particles[];
 };
 
-layout(binding = 2) buffer DrawCommandBuffer {
-    DrawCommand draw_command;
+layout(binding = 2) buffer AliveCountBuffer {
+    uint alive_count;
 };
 
-layout(binding = 3) buffer CompactCountBuffer {
-    uint compact_count;
+// particle_count is the upper bound on slots actually written by the emit
+// pass this frame (previous-frame alive + this-frame emissions). Scanning
+// past it would pick up stale particles left in compact_particle_buffer
+// from earlier frames whose life never got refreshed, resurrecting them.
+layout(binding = 3) buffer ParticleCountBuffer {
+    uint particle_count;
 };
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
@@ -48,42 +45,28 @@ shared uint global_write_offset;
 void main() {
     uint global_index = gl_GlobalInvocationID.x;
     uint local_index = gl_LocalInvocationIndex;
-    // Initialize shared memory
     if (local_index == 0) {
         local_alive_count = 0;
     }
     barrier();
-    // Compact alive particles within workgroup
-    bool is_alive = global_index < MAX_PARTICLES && source_particles[global_index].life > 0.0;
+    uint scan_limit = min(particle_count, uint(MAX_PARTICLES));
+    bool is_alive = global_index < scan_limit && source_particles[global_index].life > 0.0;
     if (is_alive) {
         uint local_write_index = atomicAdd(local_alive_count, 1);
-        if (local_write_index < 256) {  // Prevent overflow
+        if (local_write_index < 256) {
             local_alive_particles[local_write_index] = global_index;
         }
     }
     barrier();
-    // First thread in workgroup reserves space in global compact buffer
     if (local_index == 0) {
-        global_write_offset = atomicAdd(compact_count, local_alive_count);
+        global_write_offset = atomicAdd(alive_count, local_alive_count);
     }
     barrier();
-    // Copy alive particles to compact buffer
     if (local_index < local_alive_count) {
         uint source_index = local_alive_particles[local_index];
         uint compact_index = global_write_offset + local_index;
-        if (compact_index < MAX_PARTICLES) {  // Prevent overflow
+        if (compact_index < MAX_PARTICLES) {
             compact_particles[compact_index] = source_particles[source_index];
         }
-    }
-    // Only the first thread in the entire dispatch initializes the draw command
-    if (gl_GlobalInvocationID.x == 0 && gl_LocalInvocationIndex == 0) {
-        // Wait for all writes to complete
-        memoryBarrierBuffer();
-        barrier();
-        // Initialize draw command with the final count
-        draw_command.vertex_count = compact_count;
-        draw_command.instance_count = 1;
-        draw_command.first_vertex = 0;
-        draw_command.first_instance = 0;
     }
 }

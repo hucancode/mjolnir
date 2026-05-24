@@ -461,7 +461,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     goldstar_texture_handle, goldstar_texture_ok := mjolnir.create_texture(
       engine,
-      "assets/gold-star.png",
+      "assets/particles/star_07.png",
     )
     goldstar_material_handle: world.MaterialHandle
     goldstar_material_ok := false

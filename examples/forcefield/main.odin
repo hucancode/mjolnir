@@ -17,7 +17,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   mjolnir.scale(engine, ground, 8.0)
 
   // Particle source at center, large position spread
-  if tex, ok := mjolnir.create_texture(engine, "assets/gold-star.png"); ok {
+  if tex, ok := mjolnir.create_texture(engine, "assets/particles/star_09.png"); ok {
     mjolnir.spawn_emitter(
       engine,
       position          = {0, 2, 0},

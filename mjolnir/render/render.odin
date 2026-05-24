@@ -811,7 +811,11 @@ set_particle_params :: proc(
   )
   assert(params.delta_time >= 0.0, "delta_time must be non-negative")
   ptr := gpu.get(&self.internal.particles_compute.params_buffer, 0)
+  // frame_counter is owned by particles_compute.simulate; preserve it across
+  // the per-frame stage updates from the engine.
+  preserved := ptr.frame_counter
   ptr^ = params
+  ptr.frame_counter = preserved
 }
 
 shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {

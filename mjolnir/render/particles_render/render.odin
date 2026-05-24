@@ -10,7 +10,7 @@ Particle :: particles_compute.Particle
 
 SHADER_PARTICLE_VERT := #load("../../shader/particle/vert.spv")
 SHADER_PARTICLE_FRAG := #load("../../shader/particle/frag.spv")
-TEXTURE_BLACK_CIRCLE :: #load("../../assets/black-circle.png")
+TEXTURE_DEFAULT :: #load("../../assets/circle_03.png")
 
 Renderer :: struct {
 	render_pipeline_layout: vk.PipelineLayout,
@@ -28,11 +28,10 @@ init :: proc(
 	ret: vk.Result,
 ) {
 	log.debugf("Initializing particle render renderer")
-
 	default_texture_handle := gpu.create_texture_2d_from_data(
 		gctx,
 		texture_manager,
-		TEXTURE_BLACK_CIRCLE,
+		TEXTURE_DEFAULT,
 	) or_return
 	defer if ret != .SUCCESS {
 		gpu.free_texture_2d(texture_manager, gctx, default_texture_handle)
