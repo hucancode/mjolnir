@@ -917,6 +917,7 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
         particle_lifetime = emitter.particle_lifetime,
         position_spread = emitter.position_spread,
         velocity_spread = emitter.velocity_spread,
+        emit_count = emitter.pending_emit,
         size_end = emitter.size_end,
         weight = emitter.weight,
         weight_spread = emitter.weight_spread,
@@ -1157,6 +1158,7 @@ update :: proc(self: ^Engine) -> bool {
   world.update_node_animations(&self.world, delta_time)
   world.update_skeletal_animations(&self.world, delta_time)
   world.update_sprite_animations(&self.world, delta_time)
+  world.tick_emitters(&self.world, delta_time)
   self.last_update_timestamp = time.now()
   return true
 }

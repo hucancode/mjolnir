@@ -17,6 +17,11 @@ Emitter :: struct {
   size_end:          f32,
   weight:            f32,
   weight_spread:     f32,
+  // Fractional carryover of emissions; advanced each frame by tick_emitters.
+  // Lives on CPU so per-frame restaging does not clobber sub-particle progress
+  // when emission_rate * delta_time < 1.
+  time_accumulator:  f32,
+  pending_emit:      u32,
   enabled:           b32,
   texture_handle:    gpu.Texture2DHandle,
   node_handle:       NodeHandle,
@@ -67,4 +72,24 @@ create_emitter :: proc(
 destroy_emitter :: proc(world: ^World, handle: EmitterHandle) -> bool {
   _, freed := cont.free(&world.emitters, handle)
   return freed
+}
+
+tick_emitters :: proc(world: ^World, delta_time: f32) {
+  for &entry, idx in world.emitters.entries {
+    if entry.generation == 0 || !entry.active do continue
+    em := &entry.item
+    if !bool(em.enabled) {
+      em.time_accumulator = 0
+      em.pending_emit = 0
+    } else {
+      em.time_accumulator += em.emission_rate * delta_time
+      emit := u32(em.time_accumulator)
+      em.time_accumulator -= f32(emit)
+      em.pending_emit = emit
+    }
+    stage_emitter_data(
+      &world.staging,
+      EmitterHandle{index = u32(idx), generation = entry.generation},
+    )
+  }
 }

@@ -144,7 +144,7 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
     }
   }
 
-  if mu.window(ctx, "Emission & Lifetime", {260, 20, 320, 600}, {.NO_CLOSE}) {
+  if mu.window(ctx, "Emission & Lifetime", {900, 20, 320, 600}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Emission rate")
     mu.slider(ctx, &emission_rate, 1, 300)

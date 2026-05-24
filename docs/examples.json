@@ -117,7 +117,7 @@
   },
   {
     "name": "jump",
-    "desc": "Character controller with jump impulse.",
+    "desc": "Character controller, movement are powered by physics engine.",
     "notes": [
       "Character is a dynamic body with <code>enable_rotation = false</code>.",
       "Jump = <code>apply_impulse</code> on grounded check (raycast down).",

@@ -17,13 +17,14 @@ import "world"
 // Re-export common handle/enum types so user code only imports `mjolnir`.
 // These are plain aliases — same memory layout, interchangeable with the
 // originals in `world.*`.
-NodeHandle     :: world.NodeHandle
-MeshHandle     :: world.MeshHandle
-MaterialHandle :: world.MaterialHandle
-CameraHandle   :: world.CameraHandle
-ClipHandle     :: world.ClipHandle
-EmitterHandle  :: world.EmitterHandle
-SpriteHandle   :: world.SpriteHandle
+NodeHandle       :: world.NodeHandle
+MeshHandle       :: world.MeshHandle
+MaterialHandle   :: world.MaterialHandle
+CameraHandle     :: world.CameraHandle
+ClipHandle       :: world.ClipHandle
+EmitterHandle    :: world.EmitterHandle
+SpriteHandle     :: world.SpriteHandle
+ForceFieldHandle :: world.ForceFieldHandle
 Primitive      :: world.Primitive
 Color          :: world.Color
 NodeTag        :: world.NodeTag
@@ -140,8 +141,24 @@ spawn_forcefield :: proc(
   area_of_effect: f32 = 5.0,
   strength: f32 = 1.0,
   tangent_strength: f32 = 0.0,
-) -> (world.NodeHandle, bool) #optional_ok {
+) -> (world.NodeHandle, world.ForceFieldHandle, bool) {
   return world.spawn_forcefield(&engine.world, position, area_of_effect, strength, tangent_strength)
+}
+
+set_forcefield :: proc(
+  engine: ^Engine,
+  handle: world.ForceFieldHandle,
+  strength: f32,
+  tangent_strength: f32,
+  area_of_effect: f32,
+) -> bool {
+  ff, ok := world.forcefield(&engine.world, handle)
+  if !ok do return false
+  ff.strength = strength
+  ff.tangent_strength = tangent_strength
+  ff.area_of_effect = area_of_effect
+  world.stage_forcefield_data(&engine.world.staging, handle)
+  return true
 }
 
 despawn :: proc(engine: ^Engine, handle: world.NodeHandle) -> bool {

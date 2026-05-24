@@ -457,7 +457,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("Setting up particles...")
     black_circle_texture_handle, black_circle_ok := mjolnir.create_texture(
       engine,
-      "assets/black-circle.png",
+      "assets/particles/circle_05.png",
     )
     goldstar_texture_handle, goldstar_texture_ok := mjolnir.create_texture(
       engine,
@@ -479,9 +479,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
         &engine.world,
         psys_handle1,
         texture_handle = goldstar_texture_handle,
-        emission_rate = 7,
-        particle_lifetime = 5.0,
-        position_spread = 1.5,
+        emission_rate = 70,
+        particle_lifetime = 2.0,
+        position_spread = 0.1,
         initial_velocity = {0, -0.1, 0},
         velocity_spread = 0.1,
         color_start = {1, 1, 0, 1},
@@ -508,7 +508,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         &engine.world,
         psys_handle2,
         texture_handle = black_circle_texture_handle,
-        emission_rate = 7,
+        emission_rate = 70,
         particle_lifetime = 3.0,
         position_spread = 0.3,
         initial_velocity = {0, 0.2, 0},

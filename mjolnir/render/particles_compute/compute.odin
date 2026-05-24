@@ -38,7 +38,7 @@ Emitter :: struct {
   particle_lifetime: f32,
   position_spread:   f32,
   velocity_spread:   f32,
-  time_accumulator:  f32,
+  emit_count:        u32,
   size_end:          f32,
   weight:            f32,
   weight_spread:     f32,

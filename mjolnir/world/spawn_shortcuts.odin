@@ -118,23 +118,23 @@ spawn_emitter :: proc(
   return
 }
 
-// Spawn a node carrying a force field. Returns the parent node handle.
+// Spawn a node carrying a force field. Returns the parent node handle and the field handle.
 spawn_forcefield :: proc(
   world: ^World,
   position: [3]f32 = {0, 0, 0},
   area_of_effect: f32 = 5.0,
   strength: f32 = 1.0,
   tangent_strength: f32 = 0.0,
-) -> (parent: NodeHandle, ok: bool) #optional_ok {
+) -> (parent: NodeHandle, ff: ForceFieldHandle, ok: bool) {
   parent = spawn(world, position) or_return
-  ff_handle := create_forcefield(
+  ff = create_forcefield(
     world,
     node_handle      = parent,
     area_of_effect   = area_of_effect,
     strength         = strength,
     tangent_strength = tangent_strength,
   ) or_return
-  spawn_child(world, parent, attachment = ForceFieldAttachment{handle = ff_handle}) or_return
+  spawn_child(world, parent, attachment = ForceFieldAttachment{handle = ff}) or_return
   ok = true
   return
 }

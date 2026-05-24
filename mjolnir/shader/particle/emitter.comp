@@ -28,7 +28,7 @@ struct Emitter {
   float particle_lifetime;
   float position_spread;
   float velocity_spread;
-  float time_accumulator;
+  uint emit_count;
   float size_end;
   float weight;
   float weight_spread;
@@ -109,23 +109,9 @@ void main() {
     if (node_index >= nodes.length()) {
         return;
     }
-    // TODO: query node array to find visibility
-    uint visible = 1;
-    // Check if this emitter is visible
-    if (visible == 0) {
-        // Emitter is invisible, don't emit particles but still update time accumulator
-        emitters[emitter_idx].time_accumulator += emitters[emitter_idx].emission_rate * delta_time;
-        // Reset accumulator to prevent burst when becoming visible again
-        if (emitters[emitter_idx].time_accumulator > 10.0) {
-            emitters[emitter_idx].time_accumulator = 0.0;
-        }
-        return;
-    }
-
-    // Calculate how many particles to emit this frame
-    emitters[emitter_idx].time_accumulator += emitters[emitter_idx].emission_rate * delta_time;
-    uint emit_count = uint(emitters[emitter_idx].time_accumulator);
-    emitters[emitter_idx].time_accumulator -= float(emit_count);
+    // emit_count is computed CPU-side each frame (see world.tick_emitters)
+    // so per-frame restages don't clobber the fractional accumulator.
+    uint emit_count = emitters[emitter_idx].emit_count;
     for (uint i = 0; i < emit_count; ++i) {
         uint idx = atomicAdd(particle_count, 1);
         if (idx >= MAX_PARTICLES) break;
