@@ -66,26 +66,23 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 - Slow the renderer with `-define:RENDER_FPS=4` to read render logs frame by frame.
 - Toggle `engine.debug_ui_enabled = true` for the microui overlay.
 
-## Read more about engine internals
+## Read more
 
-1. [`architecture`](architecture.html) — layer design, frame timeline,
-   bindless model, staging pipeline, physics, shadow strategy
-2. [`examples`](examples.html) — runnable example code and notes
+- [`architecture`](architecture.html) — layer design, frame phases,
+  staging contract, bindless + GPU-driven model
+- [`examples`](examples.html) — runnable examples with notes
 
-## API reference index
+## Module intros
 
-**Detail API documents mostly maintained using AI**
-
-| Layer | Module | Reference |
+| Layer | Module | Doc |
 |---|---|---|
-| 1 | `gpu`        | [api_gpu](api_gpu.html) |
-| 1 | `geometry`   | [api_geometry](api_geometry.html) |
-| 1 | `algebra`    | [api_algebra](api_algebra.html) |
-| 1 | `containers` | [api_containers](api_containers.html) |
-| 1 | `animation`  | [api_animation](api_animation.html) |
-| 2 | `world`      | [api_world](api_world.html) |
-| 2 | `render`     | [api_render](api_render.html) |
-| 2 | `physics`    | [api_physics](api_physics.html) |
-| 2 | `navigation` | [api_navigation](api_navigation.html) |
-| 2 | `ui`         | [api_ui](api_ui.html) |
-| 3 | `mjolnir`    | [api_engine](api_engine.html) |
+| 1 | `containers` | [containers](containers.html) |
+| 1 | `geometry`   | [geometry](geometry.html) |
+| 1 | `gpu`        | [gpu](gpu.html) |
+| 1 | `animation`  | [animation](animation.html) |
+| 2 | `world`      | [world](world.html) |
+| 2 | `render`     | [render](render.html) |
+| 2 | `physics`    | [physics](physics.html) |
+| 2 | `navigation` | [navigation](navigation.html) |
+| 2 | `ui`         | [ui](ui.html) |
+| 3 | `mjolnir`    | [engine](engine.html) |

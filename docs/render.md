@@ -1,110 +1,60 @@
 ---
 title: Render
 ---
-# Render Module (`mjolnir/render/*`)
 
-The Render module provides rendering subsystems including geometry rendering, lighting, shadows, transparency, particles, post-processing, and camera management.
+Layer 2. GPU-driven, bindless, deferred-shading renderer. The engine
+records the entire pipeline each frame; user code mostly chooses
+material types, light kinds, and a post-process effect stack — the
+pipeline itself is fixed.
 
-## Post-Processing
+## Why deferred + light volumes
 
-```odin
-import post_process "../../mjolnir/render/post_process"
+Forward shading scales as `pixels × lights`. The deferred pass writes
+a G-buffer (position, normal, albedo, metallic-roughness, emissive,
+depth) once per visible fragment, then runs one fullscreen ambient
+pass (IBL + BRDF LUT) plus a per-light volume pass for each direct
+light. A light's volume (sphere for point, cone for spot, fullscreen
+triangle for directional) is rasterized with reversed depth test so
+only fragments actually reached by that light get shaded. Avoids the
+"shade every pixel against every light" loop without needing a tile
+or cluster pass.
 
-// Add crosshatch effect
-post_process.add_crosshatch(&engine.render.post_process, {800, 600})
-```
+## Bindless + GPU-driven culling
 
-## Camera Configuration
-
-```odin
-// Toggle visibility culling stats
-engine.render.visibility.stats_enabled = false
-
-// Access main camera
-camera, _ := mjolnir.main_camera(engine)
-```
-
-## Custom Cameras
-
-Create additional cameras for render-to-texture effects:
-
-```odin
-// Create secondary camera
-secondary_camera := mjolnir.create_camera(
-  engine,
-  width  = 1024,
-  height = 1024,
-  enabled_passes = {.GEOMETRY, .LIGHTING},
-  position = {0, 5, 10},
-  target   = {0, 0, 0},
-  fov      = math.PI * 0.5,
-  near_plane = 0.1,
-  far_plane  = 100.0,
-)
-
-// Get camera attachment for use as a bindless texture
-color_attachment, ok := mjolnir.get_camera_attachment(
-  engine, secondary_camera, .FINAL_IMAGE, engine.frame_index,
-)
-// Use `color_attachment` as a texture in a material — see render_to_texture example
-```
-
-## Render Passes
-
-Cameras can selectively enable render passes:
-
-```odin
-world.PassType:
-  .SHADOW         // Shadow map generation
-  .GEOMETRY       // Opaque geometry
-  .LIGHTING       // Lighting calculations
-  .TRANSPARENCY   // Transparent objects
-  .PARTICLES      // Particle systems
-  .POST_PROCESS   // Post-processing effects
-```
-
-## Material Types
-
-Different material types control how objects are rendered:
-
-```odin
-// PBR material (default)
-mjolnir.material_pbr(engine, metallic = 0.8, roughness = 0.2)
-
-// Random color (debugging)
-mjolnir.create_material(engine, type = .RANDOM_COLOR)
-
-// Line strip rendering
-mjolnir.create_material(
-  engine,
-  type              = .LINE_STRIP,
-  base_color_factor = {1.0, 0.8, 0.0, 1.0},
-)
-```
+All textures live in one descriptor array; all geometry lives in a
+handful of giant vertex / index / skinning buffers. A draw is just
+"indirect dispatch + bindless indices" — there is no per-mesh
+descriptor binding. Visibility culling runs as a compute pass per
+camera (frustum + depth-pyramid occlusion) and writes the indirect
+draw commands the next graphics pass will consume.
 
 ## Shadows
 
-```odin
-// Lights with shadow casting (color.w doubles as intensity)
-dir := mjolnir.spawn_light_directional(engine,
-  position = {0, 10, 0}, color = {1, 1, 1, 10.0},
-  radius = 12, cast_shadow = true)
+Two strategies, picked per light type:
 
-point := mjolnir.spawn_light_point(engine,
-  position = {5, 3, 5}, color = {1, 0.8, 0.6, 100.0},
-  radius = 8, cast_shadow = true)
+- **2D shadow maps** for directional + spot lights. One compute pass
+  per light clips draws against the light frustum; one depth-only
+  graphics pass writes a 512² R32_SFLOAT slice.
+- **Cubemap shadow maps** for point lights. One compute pass clips
+  against the light's sphere; one geometry-shader-amplified draw
+  writes all six faces. Requires
+  `-define:REQUIRE_GEOMETRY_SHADER=true` at build time.
 
-spot := mjolnir.spawn_light_spot(engine,
-  position = {0, 10, 0}, color = {0.8, 0.9, 1, 50.0},
-  radius = 20, angle = math.PI * 0.25, cast_shadow = true)
+Shadow buffers are allocated lazily on the first cast and released
+when the light despawns.
 
-// Per-mesh shadow casting
-mesh_attachment := world.MeshAttachment{
-  handle      = mesh,
-  material    = material,
-  cast_shadow = true,
-}
-```
+## Post-process
 
-For internals (passes, BVH culling, staging) see
-[architecture.html](architecture.html).
+Each camera has an effect stack pushed via
+`render.post_process.add_*`. Effects run in insertion order inside
+the `POST_PROCESS` pass: tonemap, bloom, blur, fog, outline, DoF,
+crosshatch, grayscale. Built as small fullscreen passes against the
+camera's FINAL_IMAGE attachment.
+
+## Camera attachments
+
+Each camera owns per-frame `Texture2DHandle`s for every G-buffer
+slot. `mjolnir.get_camera_attachment(engine, cam, .FINAL_IMAGE)`
+returns a bindless handle — feed it to a UI quad or a material to
+composite that camera's output anywhere (minimaps, mirrors,
+render-to-texture surfaces).
