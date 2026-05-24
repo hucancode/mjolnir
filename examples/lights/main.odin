@@ -15,9 +15,9 @@ dir_enabled: bool = true
 point_enabled: bool = true
 spot_enabled: bool = true
 
-dir_intensity: mu.Real = 4.0
-point_intensity: mu.Real = 12.0
-spot_intensity: mu.Real = 18.0
+dir_intensity: mu.Real = 1.0
+point_intensity: mu.Real = 1.0
+spot_intensity: mu.Real = 1.0
 
 point_radius: mu.Real = 10.0
 spot_radius: mu.Real = 20.0
@@ -112,7 +112,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
   ctx := mjolnir.ui_ctx(engine)
-  if mu.window(ctx, "Lights", {700, 20, 280, 540}, {.NO_CLOSE}) {
+  if mu.window(ctx, "Lights", {700, 20, 280, 600}, {.NO_CLOSE}) {
     light_block(ctx, "Directional", &dir_enabled, &dir_intensity, nil, nil, &dir_color)
     light_block(ctx, "Point (orbit)", &point_enabled, &point_intensity, &point_radius, nil, &point_color)
     light_block(ctx, "Spot", &spot_enabled, &spot_intensity, &spot_radius, &spot_outer_deg, &spot_color)
@@ -121,10 +121,9 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
 
 light_block :: proc(ctx: ^mu.Context, name: string, enabled: ^bool, intensity: ^mu.Real, radius: ^mu.Real, cone: ^mu.Real, color: ^mu.Real) {
   mu.layout_row(ctx, {-1}, 0)
-  mu.label(ctx, fmt.tprintf("--- %s ---", name))
-  mu.checkbox(ctx, "Enabled", enabled)
+  mu.checkbox(ctx, fmt.tprintf("%s", name), enabled)
   mu.label(ctx, "Intensity:")
-  mu.slider(ctx, intensity, 0.0, 40.0)
+  mu.slider(ctx, intensity, 0.0, 20.0)
   if radius != nil {
     mu.label(ctx, "Range:")
     mu.slider(ctx, radius, 1.0, 30.0)
