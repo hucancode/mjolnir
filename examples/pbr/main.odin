@@ -25,13 +25,13 @@ model_nodes: [dynamic]mjolnir.NodeHandle
 current_model: int = -1
 dir_light: mjolnir.NodeHandle
 
-dir_intensity: mu.Real = 4.0
+dir_intensity: mu.Real = 1.0
 rotate_speed: mu.Real = 0.5
 spinning: bool = true
 rotation_phase: f32
 ibl_intensity: mu.Real = 1.0
 skybox_on: bool = true
-skybox_blur: mu.Real = 0.5
+skybox_blur: mu.Real = 0.25
 
 main :: proc() {
   mjolnir.run_app({

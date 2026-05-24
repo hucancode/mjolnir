@@ -136,7 +136,7 @@ setup :: proc(
   self.ibl_intensity = 1.0
   self.skybox_enabled = true
   self.skybox_intensity = 1.0
-  self.skybox_blur = 0.5
+  self.skybox_blur = 0.25
 
   if self.environment_map.index != 0 {
     self.ibl = precompute(
