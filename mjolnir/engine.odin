@@ -192,6 +192,11 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
+      if key >= 0 && int(key) < len(engine.input.keys) {
+        is_pressed := action == glfw.PRESS || action == glfw.REPEAT
+        engine.input.key_holding[key] = is_pressed && engine.input.keys[key]
+        engine.input.keys[key] = is_pressed
+      }
       if engine.key_press_proc != nil && !debug_ui_wants_keyboard(engine) {
         engine.key_press_proc(engine, int(key), int(action), int(mods))
       }

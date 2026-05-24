@@ -11,11 +11,12 @@ cube_handle: mjolnir.NodeHandle
 cube_body: physics.DynamicRigidBodyHandle
 time_since_jump: f32
 
-jump_force: mu.Real = 1000.0
+jump_force: mu.Real = 20.0
 move_force: mu.Real = 20.0
 jump_interval: mu.Real = 5.0
 mass: mu.Real = 2.0
 last_mass: mu.Real = 2.0
+auto_jump: bool = true
 
 main :: proc() {
   mjolnir.run_app({
@@ -52,31 +53,37 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   if engine.input.keys[glfw.KEY_A] do f.x -= f32(move_force)
   if engine.input.keys[glfw.KEY_D] do f.x += f32(move_force)
   if linalg.length(f) > 0.1 do physics.apply_force(body, f)
-  if time_since_jump >= f32(jump_interval) {
+  if engine.input.keys[glfw.KEY_SPACE] {
+    physics.apply_impulse(body, {0, f32(jump_force), 0})
+    engine.input.keys[glfw.KEY_SPACE] = false
     time_since_jump = 0.0
-    physics.apply_force(body, {0, f32(jump_force), 0})
+  }
+  if auto_jump && time_since_jump >= f32(jump_interval) {
+    time_since_jump = 0.0
+    physics.apply_impulse(body, {0, f32(jump_force), 0})
   }
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
   ctx := mjolnir.ui_ctx(engine)
-  if mu.window(ctx, "Jump", {720, 20, 260, 280}, {.NO_CLOSE}) {
+  if mu.window(ctx, "Jump", {720, 20, 260, 350}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Mass: %.1f kg", mass))
-    mu.slider(ctx, &mass, 1.0, 100.0)
+    mu.slider(ctx, &mass, 1.0, 10.0)
     mu.label(ctx, fmt.tprintf("Jump force: %.0f", jump_force))
-    mu.slider(ctx, &jump_force, 50.0, 5000.0)
+    mu.slider(ctx, &jump_force, 5.0, 50.0)
     mu.label(ctx, fmt.tprintf("Move force: %.1f", move_force))
-    mu.slider(ctx, &move_force, 1.0, 200.0)
+    mu.slider(ctx, &move_force, 1.0, 20.0)
+    mu.checkbox(ctx, "Auto-jump", &auto_jump)
     mu.label(ctx, fmt.tprintf("Auto-jump interval: %.1f s", jump_interval))
     mu.slider(ctx, &jump_interval, 0.5, 10.0)
     mu.label(ctx, "")
     if .SUBMIT in mu.button(ctx, "Jump now") {
       if body, ok := mjolnir.get_dynamic_body(engine, cube_body); ok {
-        physics.apply_force(body, {0, f32(jump_force), 0})
+        physics.apply_impulse(body, {0, f32(jump_force), 0})
         time_since_jump = 0
       }
     }
-    mu.label(ctx, "W/A/S/D moves the cube")
+    mu.label(ctx, "W/A/S/D moves, Space jumps")
   }
 }
