@@ -4,7 +4,7 @@
     "desc": "Minimal hello-world cube.",
     "notes": [
       "<code>run_app</code> allocates engine, installs logger, runs to window close, frees on exit.",
-      "Builtin meshes (<code>.CUBE</code>, <code>.SPHERE</code>, <code>.QUAD_XZ</code>, <code>.CONE</code>, <code>.CAPSULE</code>, <code>.CYLINDER</code>, <code>.TORUS</code>) and colors are pre-baked at <code>world.init</code>.",
+      "Builtin meshes (<code>.CUBE</code>, <code>.SPHERE</code>, <code>.QUAD_XZ</code>, <code>.CONE</code>, <code>.CAPSULE</code>, <code>.CYLINDER</code>, <code>.TORUS</code>) and colors are pre-baked at <code>world.init</code>."
     ]
   },
   {
