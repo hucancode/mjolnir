@@ -13,6 +13,9 @@ SPV_COMPUTE_SHADERS := $(patsubst %.comp,%.spv,$(COMP_SHADERS))
 run: shader
 	odin run . -out:bin/main
 
+run-max: shader
+	odin run . -out:bin/main -define:RENDER_FPS=200
+
 debug: shader
 	VK_LOADER_DEBUG=all VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation odin run . -out:bin/main-debug -debug
 
@@ -124,4 +127,4 @@ compare-physics:
 	perf report -i perf.data.old --stdio --no-children -n --percent-limit 1 >perf_report_before.txt
 	perf report -i perf.data --stdio --no-children -n --percent-limit 1 >perf_report_after.txt
 
-.PHONY: build build-debug run debug shader check clean vtest examples golden capture long-proc long-file long-example doc record compare-physics
+.PHONY: build build-debug run run-max debug shader check clean vtest examples golden capture long-proc long-file long-example doc record compare-physics
