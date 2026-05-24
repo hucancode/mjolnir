@@ -1,6 +1,7 @@
 package ambient
 
 import "../../gpu"
+import "../ibl"
 import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
@@ -11,24 +12,28 @@ TEXTURE_LUT_GGX :: #load("../../assets/lut_ggx.png")
 
 PushConstant :: struct {
   camera_index:           u32,
-  environment_index:      u32,
+  irradiance_index:       u32,
+  prefilter_index:        u32,
   brdf_lut_index:         u32,
   position_texture_index: u32,
   normal_texture_index:   u32,
   albedo_texture_index:   u32,
   metallic_texture_index: u32,
   emissive_texture_index: u32,
-  environment_max_lod:    f32,
+  prefilter_max_lod:      f32,
   ibl_intensity:          f32,
 }
 
 Renderer :: struct {
-  pipeline:            vk.Pipeline,
-  pipeline_layout:     vk.PipelineLayout,
-  environment_map:     gpu.Texture2DHandle,
-  brdf_lut:            gpu.Texture2DHandle,
-  environment_max_lod: f32,
-  ibl_intensity:       f32,
+  pipeline:           vk.Pipeline,
+  pipeline_layout:    vk.PipelineLayout,
+  // Equirect HDR source, kept around so the skybox can still read it.
+  environment_map:    gpu.Texture2DHandle,
+  // BRDF integration LUT (2D, prebaked PNG).
+  brdf_lut:           gpu.Texture2DHandle,
+  // IBL precompute outputs.
+  ibl:                ibl.Results,
+  ibl_intensity:      f32,
 }
 
 init :: proc(
@@ -100,6 +105,7 @@ setup :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
+  linear_repeat_sampler: vk.Sampler,
 ) -> (
   ret: vk.Result,
 ) {
@@ -108,31 +114,18 @@ setup :: proc(
     texture_manager,
     "assets/Cannon_Exterior.hdr",
     .R32G32B32A32_SFLOAT,
-    true,
+    false,
     {.SAMPLED},
     true,
   )
   if env_result == .SUCCESS {
     self.environment_map = env_map
   } else {
-    log.warn("HDR environment map not found, using default ambient lighting")
+    log.warn("HDR environment map not found, IBL will fall back to black")
     self.environment_map = {}
   }
   defer if ret != .SUCCESS {
     gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
-  }
-  environment_map := gpu.get_texture_2d(texture_manager, self.environment_map)
-  if environment_map != nil {
-    self.environment_max_lod =
-      f32(
-        gpu.calculate_mip_levels(
-          environment_map.spec.width,
-          environment_map.spec.height,
-        ),
-      ) -
-      1.0
-  } else {
-    self.environment_max_lod = 0.0
   }
   brdf_handle := gpu.create_texture_2d_from_data(
     gctx,
@@ -144,6 +137,17 @@ setup :: proc(
   }
   self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0
+
+  // Precompute IBL cubemaps (env cube, irradiance, prefilter) from the equirect.
+  if self.environment_map.index != 0 {
+    self.ibl = ibl.precompute(
+      gctx,
+      texture_manager,
+      self.environment_map,
+      linear_repeat_sampler,
+    ) or_return
+  }
+
   log.info("Ambient lighting GPU resources setup")
   return .SUCCESS
 }
@@ -153,6 +157,7 @@ teardown :: proc(
   gctx: ^gpu.GPUContext,
   texture_manager: ^gpu.TextureManager,
 ) {
+  ibl.free_results(gctx, texture_manager, &self.ibl)
   gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
   self.environment_map = {}
   gpu.free_texture_2d(texture_manager, gctx, self.brdf_lut)
@@ -205,14 +210,15 @@ record :: proc(
   )
   push := PushConstant {
     camera_index           = camera_handle,
-    environment_index      = self.environment_map.index,
+    irradiance_index       = self.ibl.irradiance_cube.index,
+    prefilter_index        = self.ibl.prefilter_cube.index,
     brdf_lut_index         = self.brdf_lut.index,
     position_texture_index = position_texture_idx,
     normal_texture_index   = normal_texture_idx,
     albedo_texture_index   = albedo_texture_idx,
     metallic_texture_index = metallic_texture_idx,
     emissive_texture_index = emissive_texture_idx,
-    environment_max_lod    = self.environment_max_lod,
+    prefilter_max_lod      = self.ibl.prefilter_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }
   vk.CmdPushConstants(

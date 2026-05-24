@@ -11,6 +11,7 @@ handles: [9]mjolnir.NodeHandle
 
 setup :: proc(engine: ^mjolnir.Engine) {
   mjolnir.main_camera_look_at(engine, {0, 4, 9}, {0, 0, 0})
+  mjolnir.set_skybox_enabled(engine, false)
 
   cube := mjolnir.builtin_mesh(engine, .CUBE)
   mat := mjolnir.material_wireframe(engine)

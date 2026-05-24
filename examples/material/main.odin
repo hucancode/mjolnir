@@ -1,14 +1,29 @@
 package main
 
 import "../../mjolnir"
+import "core:fmt"
 import "core:math"
 import "core:math/linalg"
+import mu "vendor:microui"
 
 GRID :: 5
 SPACING :: 2.5
 
+ibl_intensity: mu.Real = 1.0
+sun_intensity: mu.Real = 5.0
+skybox_on: bool = true
+sun_light: mjolnir.NodeHandle
+
 main :: proc() {
-  mjolnir.run_app({title = "Material PBR Knobs", width = 1000, height = 700, setup = setup})
+  mjolnir.run_app({
+    title      = "Material PBR Knobs",
+    width      = 1000,
+    height     = 700,
+    debug_ui   = true,
+    setup      = setup,
+    update     = update,
+    pre_render = debug_ui,
+  })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -45,8 +60,25 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
   q2 := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
-  light := mjolnir.spawn_light_directional(engine, {0, 10, 0}, {1, 0.97, 0.92, 5}, 12.0)
-  mjolnir.rotate(engine, light, q2 * q1)
+  sun_light = mjolnir.spawn_light_directional(engine, {0, 10, 0}, {1, 0.97, 0.92, f32(sun_intensity)}, 12.0)
+  mjolnir.rotate(engine, sun_light, q2 * q1)
+}
+
+update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+  mjolnir.set_light_intensity(engine, sun_light, f32(sun_intensity))
+  mjolnir.set_ibl_intensity(engine, f32(ibl_intensity))
+  mjolnir.set_skybox_enabled(engine, skybox_on)
+}
+
+debug_ui :: proc(engine: ^mjolnir.Engine) {
+  ctx := mjolnir.ui_ctx(engine)
+  if mu.window(ctx, "Environment", {700, 20, 280, 220}, {.NO_CLOSE}) {
+    mu.label(ctx, fmt.tprintf("Sun intensity: %.2f", sun_intensity))
+    mu.slider(ctx, &sun_intensity, 0.0, 5.0)
+    mu.label(ctx, fmt.tprintf("IBL intensity: %.2f", ibl_intensity))
+    mu.slider(ctx, &ibl_intensity, 0.0, 2.0)
+    mu.checkbox(ctx, "Skybox", &skybox_on)
+  }
 }
 
 hsv_to_rgb :: proc(h, s, v: f32) -> (rgb: [3]f32) {

@@ -404,6 +404,32 @@ mark_light_dirty :: proc(engine: ^Engine, h: world.NodeHandle) {
   world.mark_light_dirty(&engine.world, h)
 }
 
+// ---------- environment / IBL / skybox ----------
+
+set_ibl_intensity :: proc(engine: ^Engine, intensity: f32) {
+  engine.render.internal.ambient.ibl_intensity = max(intensity, 0.0)
+}
+
+get_ibl_intensity :: proc(engine: ^Engine) -> f32 {
+  return engine.render.internal.ambient.ibl_intensity
+}
+
+set_skybox_enabled :: proc(engine: ^Engine, enabled: bool) {
+  engine.render.internal.skybox.enabled = enabled
+}
+
+get_skybox_enabled :: proc(engine: ^Engine) -> bool {
+  return engine.render.internal.skybox.enabled
+}
+
+set_skybox_intensity :: proc(engine: ^Engine, intensity: f32) {
+  engine.render.internal.skybox.intensity = max(intensity, 0.0)
+}
+
+get_skybox_intensity :: proc(engine: ^Engine) -> f32 {
+  return engine.render.internal.skybox.intensity
+}
+
 set_material_handle :: proc(engine: ^Engine, h: world.NodeHandle, m: world.MaterialHandle) {
   world.set_material_handle(&engine.world, h, m)
 }

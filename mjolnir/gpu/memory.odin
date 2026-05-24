@@ -320,6 +320,23 @@ cube_depth_texture_destroy :: proc(device: vk.Device, self: ^CubeImage) {
   image_destroy(device, &self.base)
 }
 
+// Init a color cubemap suitable for IBL (sampled + storage, optional mips).
+// Does not allocate per-face views; callers create per-mip storage views as
+// needed via image_create_view.
+cube_color_texture_init :: proc(
+  gctx: ^GPUContext,
+  self: ^CubeImage,
+  size: u32,
+  format: vk.Format,
+  mip_levels: u32 = 1,
+  usage: vk.ImageUsageFlags = {.SAMPLED, .STORAGE, .TRANSFER_DST},
+) -> vk.Result {
+  spec := image_spec_cube(size, format, usage)
+  spec.mip_levels = max(mip_levels, 1)
+  self.base = image_create(gctx, spec) or_return
+  return .SUCCESS
+}
+
 immutable_buffer_info :: proc(
   self: ^ImmutableBuffer($T),
 ) -> vk.DescriptorBufferInfo {

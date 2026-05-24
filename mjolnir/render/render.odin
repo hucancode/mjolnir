@@ -686,7 +686,12 @@ setup :: proc(
   ) or_return
   gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
   // Setup subsystem GPU resources
-  ambient.setup(&self.internal.ambient, gctx, &self.texture_manager) or_return
+  ambient.setup(
+    &self.internal.ambient,
+    gctx,
+    &self.texture_manager,
+    self.internal.linear_repeat_sampler,
+  ) or_return
   direct_light.setup(&self.internal.direct_light, gctx) or_return
   particles_compute.setup(
     &self.internal.particles_compute,

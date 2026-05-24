@@ -597,7 +597,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   // post_process.add_fog(&engine.render.post_process, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
+  // post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)

@@ -195,6 +195,30 @@ allocate_texture_cube :: proc(
   return h, .SUCCESS
 }
 
+// Allocate a color cube texture (for IBL precompute outputs).
+// Optionally creates mip chain and STORAGE usage for compute writes.
+allocate_texture_cube_color :: proc(
+  tm: ^TextureManager,
+  gctx: ^GPUContext,
+  size: u32,
+  format: vk.Format,
+  mip_levels: u32 = 1,
+  usage: vk.ImageUsageFlags = {.SAMPLED, .STORAGE, .TRANSFER_DST},
+) -> (
+  handle: TextureCubeHandle,
+  ret: vk.Result,
+) {
+  h, img, ok := cont.alloc(&tm.images_cube, TextureCubeHandle)
+  if !ok do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  init_ret := cube_color_texture_init(gctx, img, size, format, mip_levels, usage)
+  if init_ret != .SUCCESS {
+    cont.free(&tm.images_cube, h)
+    return {}, init_ret
+  }
+  set_texture_cube_descriptor(gctx, tm.descriptor_set, h.index, img.view)
+  return h, .SUCCESS
+}
+
 // Free a cube texture
 free_texture_cube :: proc(tm: ^TextureManager, gctx: ^GPUContext, handle: $H) {
   gpu_handle := transmute(TextureCubeHandle)handle

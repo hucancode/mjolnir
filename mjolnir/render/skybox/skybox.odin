@@ -21,6 +21,7 @@ Renderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   intensity:       f32,
   lod:             f32,
+  enabled:         bool,
 }
 
 init :: proc(
@@ -34,6 +35,7 @@ init :: proc(
   log.debug("Skybox renderer init")
   self.intensity = 1.0
   self.lod = 0.0
+  self.enabled = true
   self.pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     vk.PushConstantRange {
@@ -101,7 +103,7 @@ record :: proc(
   environment_index: u32,
   position_texture_idx: u32,
 ) {
-  if environment_index == 0 do return
+  if !self.enabled || environment_index == 0 do return
   color_texture := gpu.get_texture_2d(texture_manager, final_image_handle)
   gpu.begin_rendering(
     command_buffer,
