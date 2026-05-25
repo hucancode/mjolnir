@@ -9,6 +9,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
+import "vendor:glfw"
 import mu "vendor:microui"
 
 AGENT_COUNT :: 20
@@ -33,12 +34,12 @@ Agent :: struct {
 agents: [AGENT_COUNT]Agent
 nav_builder: nav.NavGeometryBuilder
 navmesh_node_handle: world.NodeHandle
-repath_phase, total_time: f32
 
 main :: proc() {
   mjolnir.run_app({
     title = "Crowd Navigation", width = 1000, height = 700,
     debug_ui = true, setup = setup, update = update, pre_render = debug_ui,
+    mouse_press = on_mouse_press,
   })
 }
 
@@ -128,17 +129,45 @@ assign_swap_targets :: proc(engine: ^mjolnir.Engine) {
   }
 }
 
+assign_all_to :: proc(engine: ^mjolnir.Engine, goal: [3]f32) {
+  for i in 0 ..< AGENT_COUNT {
+    agents[i].goal = goal
+    replan(engine, &agents[i])
+  }
+}
+
+pick_navmesh_point :: proc(engine: ^mjolnir.Engine) -> ([3]f32, bool) {
+  ro, rd, ok := mjolnir.cursor_world_ray(engine)
+  if !ok do return {}, false
+  if math.abs(rd.y) > 0.001 {
+    t := -ro.y / rd.y
+    if t > 0 && t < 1000 {
+      hit := ro + rd * t
+      if p, hit_ok := nav.find_nearest_point(&engine.nav, hit, {2, 5, 2}); hit_ok do return p, true
+    }
+  }
+  samples := [?]f32{5, 10, 15, 20, 25, 30, 40, 60}
+  for dist in samples {
+    if p, hit_ok := nav.find_nearest_point(&engine.nav, ro + rd * dist, {5, 10, 5}); hit_ok do return p, true
+  }
+  return {}, false
+}
+
 replan :: proc(engine: ^mjolnir.Engine, a: ^Agent) {
   delete(a.path)
   a.path = nav.find_path(&engine.nav, a.pos, a.goal, 128)
   a.waypoint_idx = 0
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  total_time += dt
-  repath_phase += dt
-  if repath_phase >= 8.0 { repath_phase = 0; assign_swap_targets(engine) }
+on_mouse_press :: proc(engine: ^mjolnir.Engine, button, action, mods: int) {
+  if action != glfw.PRESS || button != glfw.MOUSE_BUTTON_RIGHT do return
+  pos, ok := pick_navmesh_point(engine)
+  if !ok { log.warn("No navmesh point under cursor"); return }
+  assign_all_to(engine, pos)
+  log.infof("All agents -> %v", pos)
+}
 
+update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   for i in 0 ..< AGENT_COUNT {
     a := &agents[i]
     desired_dir := [3]f32{0, 0, 0}
@@ -194,14 +223,11 @@ draw_agent_path :: proc(engine: ^mjolnir.Engine, a: ^Agent) {
 debug_ui :: proc(engine: ^mjolnir.Engine) {
   ctx := mjolnir.ui_ctx(engine)
   if mu.window(ctx, "Crowd", {720, 20, 260, 200}, {.NO_CLOSE}) {
-    mu.label(ctx, fmt.tprintf("agents: %d", AGENT_COUNT))
-    mu.label(ctx, fmt.tprintf("time: %.1f", total_time))
-    mu.label(ctx, fmt.tprintf("next repath in %.1f", 8.0 - repath_phase))
-    mu.label(ctx, "")
+    mu.label(ctx, fmt.tprintf("Agents: %d", AGENT_COUNT))
+    mu.label(ctx, "Right-click: set all goals")
     mu.layout_row(ctx, {-1}, 0)
     if .SUBMIT in mu.button(ctx, "Reassign targets") {
       assign_swap_targets(engine)
-      repath_phase = 0
     }
   }
 }
