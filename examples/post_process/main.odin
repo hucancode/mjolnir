@@ -1,7 +1,9 @@
 package main
 
 import "../../mjolnir"
-import pp "../../mjolnir/render/post_process"
+import "../../mjolnir/render/post_process"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import mu "vendor:microui"
@@ -42,51 +44,46 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {6, 5, 10}, {0, 1.0, 0})
-  ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY)
-  mjolnir.scale(engine, ground, 30.0)
+  world.main_camera_look_at(&engine.world, {6, 5, 10}, {0, 1.0, 0})
+  world.spawn_ground(&engine.world, 30.0)
 
-  cube_mesh   := mjolnir.builtin_mesh(engine, .CUBE)
-  sphere_mesh := mjolnir.builtin_mesh(engine, .SPHERE)
+  cube_mesh   := world.get_builtin_mesh(&engine.world, .CUBE)
+  sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
 
-  magenta_emit := mjolnir.material_pbr(engine, {1.0, 0.1, 0.8, 1}, emissive = 4.0)
-  mjolnir.spawn_mesh(engine, sphere_mesh, magenta_emit, {-3.0, 1.2, 1.5})
-  cyan_emit := mjolnir.material_pbr(engine, {0.1, 0.9, 1.0, 1}, emissive = 4.0)
-  mjolnir.spawn_mesh(engine, sphere_mesh, cyan_emit, {0.0, 1.2, 1.5})
-  yellow_emit := mjolnir.material_pbr(engine, {1.0, 0.9, 0.2, 1}, emissive = 4.0)
-  mjolnir.spawn_mesh(engine, sphere_mesh, yellow_emit, {3.0, 1.2, 1.5})
+  magenta_emit := world.material_pbr(&engine.world, {1.0, 0.1, 0.8, 1}, emissive = 4.0)
+  world.spawn_mesh(&engine.world, sphere_mesh, magenta_emit, {-3.0, 1.2, 1.5})
+  cyan_emit := world.material_pbr(&engine.world, {0.1, 0.9, 1.0, 1}, emissive = 4.0)
+  world.spawn_mesh(&engine.world, sphere_mesh, cyan_emit, {0.0, 1.2, 1.5})
+  yellow_emit := world.material_pbr(&engine.world, {1.0, 0.9, 0.2, 1}, emissive = 4.0)
+  world.spawn_mesh(&engine.world, sphere_mesh, yellow_emit, {3.0, 1.2, 1.5})
 
-  metal := mjolnir.material_pbr(engine, {0.9, 0.9, 0.95, 1}, metallic = 1.0, roughness = 0.15)
-  mjolnir.spawn_mesh(engine, sphere_mesh, metal, {0.5, 1.0, -1.5})
-  rough := mjolnir.material_pbr(engine, {0.2, 0.6, 0.8, 1}, metallic = 0.0, roughness = 0.8)
-  mjolnir.spawn_mesh(engine, cube_mesh, rough, {3.0, 1.0, -1.5})
-  orange := mjolnir.material_pbr(engine, {1.0, 0.4, 0.1, 1}, emissive = 4.0)
-  mjolnir.spawn_mesh(engine, cube_mesh, orange, {-3.0, 1.0, -1.5})
-  glass := mjolnir.material_transparent(engine, {0.2, 0.9, 0.4, 0.4})
-  mjolnir.spawn_mesh(engine, sphere_mesh, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
+  metal := world.material_pbr(&engine.world, {0.9, 0.9, 0.95, 1}, metallic = 1.0, roughness = 0.15)
+  world.spawn_mesh(&engine.world, sphere_mesh, metal, {0.5, 1.0, -1.5})
+  rough := world.material_pbr(&engine.world, {0.2, 0.6, 0.8, 1}, metallic = 0.0, roughness = 0.8)
+  world.spawn_mesh(&engine.world, cube_mesh, rough, {3.0, 1.0, -1.5})
+  orange := world.material_pbr(&engine.world, {1.0, 0.4, 0.1, 1}, emissive = 4.0)
+  world.spawn_mesh(&engine.world, cube_mesh, orange, {-3.0, 1.0, -1.5})
+  glass := world.material_transparent(&engine.world, {0.2, 0.9, 0.4, 0.4})
+  world.spawn_mesh(&engine.world, sphere_mesh, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
 
-  white_mat := mjolnir.builtin_material(engine, .WHITE)
-  for i in 0 ..< 5 do mjolnir.spawn_mesh(engine, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
+  white_mat := world.get_builtin_material(&engine.world, .WHITE)
+  for i in 0 ..< 5 do world.spawn_mesh(&engine.world, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
-  mjolnir.spawn_light_directional(engine, position = {-3, 8, 6}, color = {1.0, 0.95, 0.9, 1}, radius = 5.0, cast_shadow = true)
-  mjolnir.spawn_light_point(engine, position = {0, 3, 0}, color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false)
+  world.spawn_light_directional(&engine.world, position = {-3, 8, 6}, color = {1.0, 0.95, 0.9, 1}, radius = 5.0, cast_shadow = true)
+  world.spawn_light_point(&engine.world, position = {0, 3, 0}, color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false)
   log.info("Post-process stack panel — toggle effects via debug UI")
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  pp_r := &engine.render.post_process
-  pp.clear_effects(pp_r)
-  if outline_on    do pp.add_outline(pp_r, f32(outline_thickness), {0, 0, 0})
-  if fog_on        do pp.add_fog(pp_r, {0.55, 0.6, 0.7}, f32(fog_density), f32(fog_start), f32(fog_end))
-  if dof_on        do pp.add_dof(pp_r, f32(dof_focus), f32(dof_range), f32(dof_blur), 0.5)
-  if bloom_on      do pp.add_bloom(pp_r, f32(bloom_threshold), f32(bloom_intensity), 32.0)
-  if blur_on       do pp.add_blur(pp_r, f32(blur_radius), true)
-  if crosshatch_on {
-    ext := engine.swapchain.extent
-    pp.add_crosshatch(pp_r, {f32(ext.width), f32(ext.height)})
-  }
-  if grayscale_on  do pp.add_grayscale(pp_r, f32(grayscale_strength))
-  if tonemap_on    do pp.add_tonemap(pp_r, f32(tonemap_exposure), f32(tonemap_gamma))
+  post_process.clear_effects(&engine.render.post_process)
+  if outline_on    do post_process.add_outline(&engine.render.post_process, f32(outline_thickness))
+  if fog_on        do post_process.add_fog(&engine.render.post_process, {0.55, 0.6, 0.7}, f32(fog_density), f32(fog_start), f32(fog_end))
+  if dof_on        do post_process.add_dof(&engine.render.post_process, f32(dof_focus), f32(dof_range), f32(dof_blur), 0.5)
+  if bloom_on      do post_process.add_bloom(&engine.render.post_process, f32(bloom_threshold), f32(bloom_intensity), 32.0)
+  if blur_on       do post_process.add_blur(&engine.render.post_process, f32(blur_radius))
+  if crosshatch_on do post_process.add_crosshatch(&engine.render.post_process, {f32(engine.swapchain.extent.width), f32(engine.swapchain.extent.height)})
+  if grayscale_on  do post_process.add_grayscale(&engine.render.post_process, f32(grayscale_strength))
+  if tonemap_on    do post_process.add_tonemap(&engine.render.post_process, f32(tonemap_exposure), f32(tonemap_gamma))
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
@@ -95,29 +92,29 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Tonemap", &tonemap_on)
     if tonemap_on {
-      mu.label(ctx, fmt.tprintf("exposure %.2f", tonemap_exposure)); mu.slider(ctx, &tonemap_exposure, 0.1, 4.0)
-      mu.label(ctx, fmt.tprintf("gamma %.2f", tonemap_gamma));       mu.slider(ctx, &tonemap_gamma, 1.0, 3.0)
+      mu.label(ctx, "Exposure"); mu.slider(ctx, &tonemap_exposure, 0.1, 4.0)
+      mu.label(ctx, "Gamma");       mu.slider(ctx, &tonemap_gamma, 1.0, 3.0)
     }
     mu.checkbox(ctx, "Grayscale", &grayscale_on)
     if grayscale_on do mu.slider(ctx, &grayscale_strength, 0.0, 1.0)
     mu.checkbox(ctx, "Bloom", &bloom_on)
     if bloom_on {
-      mu.label(ctx, fmt.tprintf("threshold %.2f", bloom_threshold)); mu.slider(ctx, &bloom_threshold, 0.0, 3.0)
-      mu.label(ctx, fmt.tprintf("intensity %.2f", bloom_intensity)); mu.slider(ctx, &bloom_intensity, 0.0, 20.0)
+      mu.label(ctx, "Threshold"); mu.slider(ctx, &bloom_threshold, 0.0, 3.0)
+      mu.label(ctx, "Intensity"); mu.slider(ctx, &bloom_intensity, 0.0, 20.0)
     }
     mu.checkbox(ctx, "Fog", &fog_on)
     if fog_on {
-      mu.label(ctx, fmt.tprintf("density %.3f", fog_density)); mu.slider(ctx, &fog_density, 0.0, 0.2)
-      mu.label(ctx, fmt.tprintf("start %.1f", fog_start));     mu.slider(ctx, &fog_start, 0.0, 50.0)
-      mu.label(ctx, fmt.tprintf("end %.1f", fog_end));         mu.slider(ctx, &fog_end, 1.0, 200.0)
+      mu.label(ctx, "Density"); mu.slider(ctx, &fog_density, 0.0, 0.2)
+      mu.label(ctx, "Start");     mu.slider(ctx, &fog_start, 0.0, 50.0)
+      mu.label(ctx, "End");         mu.slider(ctx, &fog_end, 1.0, 200.0)
     }
     mu.checkbox(ctx, "Outline", &outline_on)
     if outline_on do mu.slider(ctx, &outline_thickness, 0.5, 5.0)
     mu.checkbox(ctx, "Depth of Field", &dof_on)
     if dof_on {
-      mu.label(ctx, fmt.tprintf("focus %.1f", dof_focus)); mu.slider(ctx, &dof_focus, 1.0, 30.0)
-      mu.label(ctx, fmt.tprintf("range %.1f", dof_range)); mu.slider(ctx, &dof_range, 0.5, 20.0)
-      mu.label(ctx, fmt.tprintf("blur %.1f", dof_blur));   mu.slider(ctx, &dof_blur, 1.0, 50.0)
+      mu.label(ctx, "Focus"); mu.slider(ctx, &dof_focus, 1.0, 30.0)
+      mu.label(ctx, "Range"); mu.slider(ctx, &dof_range, 0.5, 20.0)
+      mu.label(ctx, "Blur");   mu.slider(ctx, &dof_blur, 1.0, 50.0)
     }
     mu.checkbox(ctx, "Gaussian Blur", &blur_on)
     if blur_on do mu.slider(ctx, &blur_radius, 0.5, 10.0)

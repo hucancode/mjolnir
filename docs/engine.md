@@ -31,14 +31,29 @@ poll input → update_proc → world stages → throttle to RENDER_FPS
 See [architecture](architecture.html) for the full sequence diagram
 and the staging-pipeline contract.
 
-## Engine-rooted shortcuts
+## Public API surface
 
-Every `world.*` / `physics.*` / `nav.*` proc that takes a `^World` /
-`^physics.World` / `^NavigationSystem` has a sibling on `mjolnir.*`
-taking `^Engine`. Pure forwarders — they exist only so user code can
-write `mjolnir.spawn(engine, ...)` instead of
-`world.spawn(&engine.world, ...)`. Full list in
-`mjolnir/shortcuts.odin`.
+User code imports `mjolnir` for engine lifecycle and the small set of
+cross-package composites listed below, plus whichever sub-packages it
+actually needs (`world`, `physics`, `navigation`, `geometry`, `gpu`,
+`animation`, `render`, `render/post_process`, `ui`). Sub-package procs
+take their own data pointer (`^World`, `^physics.World`,
+`^NavigationSystem`), not `^Engine` — e.g. `world.spawn(&engine.world,
+...)`, `physics.raycast_trigger(&engine.physics, ...)`,
+`nav.find_path(&engine.nav, ...)`.
+
+Composites that genuinely cross sub-package boundaries live in
+`mjolnir/engine.odin`:
+
+| Proc | Crosses |
+|---|---|
+| `spawn_static` / `spawn_dynamic` / `spawn_trigger` | world + physics |
+| `viewport_to_world_ray` / `cursor_world_ray` | window DPI + main camera + world raycast |
+| `build_navmesh` | NavMeshConfig translation + `nav.init` |
+
+Engine-scope helpers that need `^Engine` directly (texture loading,
+glTF, camera attachments, navmesh bake, run loop wiring) live in
+`mjolnir/engine.odin`.
 
 ## Threading
 
@@ -55,7 +70,7 @@ write `mjolnir.spawn(engine, ...)` instead of
 
 Engine owns: window, GPU context, swapchain, render manager, world,
 UI, navigation, staging buffers, textures created via the
-`create_texture_*` shortcuts. All freed in `shutdown`.
+`create_texture`. All freed in `shutdown`.
 
 User owns: the `^Engine` itself (you `new` it), callback function
 pointers, and any `[dynamic]NodeHandle` slices returned by

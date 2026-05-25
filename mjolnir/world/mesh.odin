@@ -176,7 +176,7 @@ find_bone_chain :: proc(
 
 // Rest-pose position of a bone in mesh-local space.
 // Uses cached `bind_matrices` (inverse of `inverse_bind_matrix`)
-bone_rest_position :: proc(self: ^Mesh, name: string) -> (pos: [3]f32, ok: bool) #optional_ok {
+bone_rest_position_mesh :: proc(self: ^Mesh, name: string) -> (pos: [3]f32, ok: bool) #optional_ok {
   skin, has_skin := &self.skinning.?
   if !has_skin do return
   idx := find_bone_by_name(self, name) or_return
@@ -185,12 +185,29 @@ bone_rest_position :: proc(self: ^Mesh, name: string) -> (pos: [3]f32, ok: bool)
   return pos, true
 }
 
+// Same, but resolves the node's mesh attachment in one call.
+bone_rest_position_node :: proc(w: ^World, h: NodeHandle, name: string) -> (pos: [3]f32, ok: bool) #optional_ok {
+  att := mesh_attachment(w, h) or_return
+  m := mesh(w, att.handle) or_return
+  return bone_rest_position_mesh(m, name)
+}
+
+bone_rest_position :: proc{bone_rest_position_mesh, bone_rest_position_node}
+
 // Rest-pose offset (tip - root) in mesh-local space.
-bone_rest_offset :: proc(self: ^Mesh, root_name, tip_name: string) -> (offset: [3]f32, ok: bool) #optional_ok {
-  root := bone_rest_position(self, root_name) or_return
-  tip := bone_rest_position(self, tip_name) or_return
+bone_rest_offset_mesh :: proc(self: ^Mesh, root_name, tip_name: string) -> (offset: [3]f32, ok: bool) #optional_ok {
+  root := bone_rest_position_mesh(self, root_name) or_return
+  tip := bone_rest_position_mesh(self, tip_name) or_return
   return tip - root, true
 }
+
+bone_rest_offset_node :: proc(w: ^World, h: NodeHandle, root_name, tip_name: string) -> (offset: [3]f32, ok: bool) #optional_ok {
+  att := mesh_attachment(w, h) or_return
+  m := mesh(w, att.handle) or_return
+  return bone_rest_offset_mesh(m, root_name, tip_name)
+}
+
+bone_rest_offset :: proc{bone_rest_offset_mesh, bone_rest_offset_node}
 
 // Build parent index map for efficient traversal
 // Returns map of child_index -> parent_index
@@ -851,4 +868,47 @@ calculate_bone_depths :: proc(
   }
 
   return depths
+}
+
+// First mesh child handle below `root`.
+mesh_child :: proc(w: ^World, root: NodeHandle) -> (NodeHandle, bool) #optional_ok {
+  child, _, _, ok := find_first_mesh_child(w, root)
+  return child, ok
+}
+
+// First mesh child whose mesh has skinning data.
+skinned_mesh_child :: proc(w: ^World, root: NodeHandle) -> (NodeHandle, bool) #optional_ok {
+  child, _, att, ok := find_first_mesh_child(w, root)
+  if !ok do return {}, false
+  m, has_m := mesh(w, att.handle)
+  if !has_m do return {}, false
+  if _, has_skin := m.skinning.?; !has_skin do return {}, false
+  return child, true
+}
+
+// Flat XZ ground plane via builtin QUAD_XZ. cast_shadow defaults to false.
+spawn_ground :: proc(w: ^World, size: f32 = 10.0, color: Color = .GRAY, position: [3]f32 = {0, 0, 0}) -> NodeHandle {
+  h, _ := spawn_primitive_mesh(w, .QUAD_XZ, color, position, scale_factor = size, cast_shadow = false)
+  return h
+}
+
+spawn_mesh :: proc(
+  world: ^World,
+  mesh: MeshHandle,
+  material: MaterialHandle,
+  position: [3]f32 = {0, 0, 0},
+  cast_shadow: bool = true,
+) -> (NodeHandle, bool) #optional_ok {
+  return spawn(world, position, MeshAttachment{handle = mesh, material = material, cast_shadow = cast_shadow})
+}
+
+spawn_mesh_child :: proc(
+  world: ^World,
+  parent: NodeHandle,
+  mesh: MeshHandle,
+  material: MaterialHandle,
+  position: [3]f32 = {0, 0, 0},
+  cast_shadow: bool = true,
+) -> (NodeHandle, bool) #optional_ok {
+  return spawn_child(world, parent, position, MeshAttachment{handle = mesh, material = material, cast_shadow = cast_shadow})
 }

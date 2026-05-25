@@ -1,13 +1,14 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
 
-root_nodes: [dynamic]mjolnir.NodeHandle
+root_nodes: [dynamic]world.NodeHandle
 animation_time: f32 = 0
-snake_child_node: mjolnir.NodeHandle
+snake_child_node: world.NodeHandle
 tail_layer_index: int = -1
 
 propagation_speed: mu.Real = 0.3
@@ -33,39 +34,34 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {0, 4, -4}, {0, 1, 0})
+  world.main_camera_look_at(&engine.world, {0, 4, -4}, {0, 1, 0})
   root_nodes = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
-  for handle in root_nodes {
-    node := mjolnir.node(engine, handle) or_continue
-    for child in node.children {
-      snake_child_node = child
-      idx, ok := mjolnir.add_tail_modifier_layer(
-        engine, child, "root", 10,
-        propagation_speed = f32(propagation_speed),
-        damping = f32(damping),
-        weight = 1.0,
-      )
-      if ok {
-        tail_layer_index = idx
-        log.infof("Added tail modifier to node (layer %d)", tail_layer_index)
-      }
-    }
+  if len(root_nodes) == 0 do return
+  child, has := world.mesh_child(&engine.world, root_nodes[0])
+  if !has do return
+  snake_child_node = child
+  if idx, layer_ok := world.add_tail_modifier_layer(&engine.world, child, "root", 10,
+    propagation_speed = f32(propagation_speed),
+    damping = f32(damping),
+    weight = 1.0,
+  ); layer_ok {
+    tail_layer_index = idx
+    log.infof("Added tail modifier to node (layer %d)", tail_layer_index)
   }
-  mjolnir.spawn_light_point(engine, {-4, 10, 6}, {0.6, 0.7, 1.0, 1.5}, 15.0, false)
+  world.spawn_light_point(&engine.world, {-4, 10, 6}, {0.6, 0.7, 1.0, 1.5}, 15.0, false)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   if drive_enabled {
     animation_time += dt
     y := f32(drive_amplitude) * math.sin(animation_time * f32(drive_frequency) * 2 * math.PI)
-    mjolnir.translate(engine, snake_child_node, 0, y, 0)
+    world.translate(&engine.world, snake_child_node, 0, y, 0)
   } else {
-    mjolnir.translate(engine, snake_child_node, f32(manual_x), f32(manual_y), f32(manual_z))
+    world.translate(&engine.world, snake_child_node, f32(manual_x), f32(manual_y), f32(manual_z))
   }
 
   if tail_layer_index >= 0 {
-    mjolnir.set_tail_modifier_params(
-      engine, snake_child_node, tail_layer_index,
+    world.set_tail_modifier_params(&engine.world, snake_child_node, tail_layer_index,
       propagation_speed = f32(propagation_speed),
       damping = f32(damping),
       stretch = stretch_enabled,

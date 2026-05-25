@@ -1,18 +1,18 @@
 package main
 
 import "../../mjolnir"
-import anim "../../mjolnir/animation"
+import "../../mjolnir/animation"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
 
-root_nodes: [dynamic]mjolnir.NodeHandle
+root_nodes: [dynamic]world.NodeHandle
 animation_time: f32 = 0
-spider_root_node: mjolnir.NodeHandle
-mesh_node: mjolnir.NodeHandle
-ground_plane: mjolnir.NodeHandle
+spider_root_node: world.NodeHandle
+mesh_node: world.NodeHandle
+ground_plane: world.NodeHandle
 
 leg_targets: [6][3]f32
 leg_layers: [6]int = {-1, -1, -1, -1, -1, -1}
@@ -39,15 +39,16 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {0, 20, 20}, {0, 0, 0})
+  world.main_camera_look_at(&engine.world, {0, 20, 20}, {0, 0, 0})
 
   spider_roots := mjolnir.load_gltf(engine, "assets/spider.glb")
   append(&root_nodes, ..spider_roots[:])
-
-  for handle in spider_roots {
-    spider_root_node = handle
-    mjolnir.translate(engine, handle, [3]f32{0, 5, 0})
-  }
+  if len(spider_roots) == 0 do return
+  spider_root_node = spider_roots[0]
+  world.translate(&engine.world, spider_root_node, [3]f32{0, 5, 0})
+  child, has := world.skinned_mesh_child(&engine.world, spider_root_node)
+  if !has do return
+  mesh_node = child
 
   leg_configs := []struct{root_name, tip_name: string}{
     {"leg_front_r_0", "leg_front_r_5"},
@@ -62,13 +63,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   deg30 := f32(math.PI / 6.0)
   deg90 := f32(math.PI / 2.0)
 
-  child, has := mjolnir.skinned_mesh(engine, spider_root_node)
-  if !has do return
-  mesh_node = child
-  m, _ := mjolnir.node_mesh(engine, child)
-
   for i in 0 ..< 6 {
-    tip_local, has_tip := world.bone_rest_position(m, leg_configs[i].tip_name)
+    tip_local, has_tip := world.bone_rest_position(&engine.world, child, leg_configs[i].tip_name)
     if !has_tip {
       log.warnf("Leg %d: tip %s missing", i, leg_configs[i].tip_name)
       continue
@@ -76,15 +72,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     leg_targets[i] = {tip_local.x + body_pos.x, 0, tip_local.z + body_pos.z}
 
     pole_pos := [3]f32{0, 10, 0}
-    if root_local, has_root := world.bone_rest_position(m, leg_configs[i].root_name); has_root {
+    if root_local, has_root := world.bone_rest_position(&engine.world, child, leg_configs[i].root_name); has_root {
       root_world := root_local + body_pos
       pole_pos = {root_world.x * 0.5, root_world.y + 10, root_world.z * 0.5}
     }
 
-    constraints := anim.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90})
+    constraints := animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90})
 
-    idx, err := mjolnir.add_ik_layer_chain(
-      engine, child, leg_configs[i].root_name, leg_configs[i].tip_name,
+    idx, err := world.add_ik_layer_chain(&engine.world, child, leg_configs[i].root_name, leg_configs[i].tip_name,
       leg_targets[i], pole_pos, weight = 1.0, constraints = constraints, space = .WORLD,
     )
     if err != .NONE {
@@ -94,9 +89,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
 
-  ground_plane = mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY)
-  mjolnir.scale(engine, ground_plane, [3]f32{40, 0.2, 40})
-  mjolnir.spawn_light_directional(engine, color = {1, 1, 1, 1}, radius = 10.0)
+  ground_plane = world.spawn_primitive_mesh(&engine.world, .CUBE, .GRAY)
+  world.scale(&engine.world, ground_plane, [3]f32{40, 0.2, 40})
+  world.spawn_light_directional(&engine.world, color = {1, 1, 1, 1}, radius = 10.0)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -107,7 +102,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
   body_x := amp * math.sin(animation_time * spd * 2 * math.PI)
   body_pos := [3]f32{body_x, 0, 0}
-  mjolnir.translate(engine, spider_root_node, body_pos)
+  world.translate(&engine.world, spider_root_node, body_pos)
 
   for i in 0 ..< 6 {
     pole_pos := [3]f32{leg_targets[i].x * 0.5 + body_pos.x * 0.5, 5, leg_targets[i].z * 0.5}
@@ -118,8 +113,8 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
       target_pos.y += lift * math.max(math.sin(animation_time * spd * math.PI), 0)
     }
     if leg_layers[i] >= 0 {
-      mjolnir.set_ik_layer_target(engine, mesh_node, leg_layers[i], target_pos, pole_pos)
-      mjolnir.set_animation_layer_weight(engine, mesh_node, leg_layers[i], f32(ik_weight))
+      world.set_ik_layer_target(&engine.world, mesh_node, leg_layers[i], target_pos, pole_pos)
+      world.set_animation_layer_weight(&engine.world, mesh_node, leg_layers[i], f32(ik_weight))
     }
     if show_markers {
       mjolnir.debug_sphere(engine, target_pos, 0.5, {1, 0.2, 0.2, 1})

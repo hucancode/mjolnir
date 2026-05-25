@@ -2,9 +2,8 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/geometry"
-import nav "../../mjolnir/navigation"
-import "../../mjolnir/navigation/recast"
 import "../../mjolnir/world"
+import nav "../../mjolnir/navigation"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -28,12 +27,12 @@ Agent :: struct {
   waypoint_idx:      int,
   goal:              [3]f32,
   color:             [4]f32,
-  node:              mjolnir.NodeHandle,
+  node:              world.NodeHandle,
 }
 
 agents: [AGENT_COUNT]Agent
 nav_builder: nav.NavGeometryBuilder
-navmesh_node_handle: mjolnir.NodeHandle
+navmesh_node_handle: world.NodeHandle
 repath_phase, total_time: f32
 
 main :: proc() {
@@ -44,8 +43,8 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {32, 28, 32}, {0, 0, 0})
-  mjolnir.spawn_light_directional(engine, {15, 25, 15}, {1, 0.97, 0.92, 1}, 10.0, true)
+  world.main_camera_look_at(&engine.world, {32, 28, 32}, {0, 0, 0})
+  world.spawn_light_directional(&engine.world, {15, 25, 15}, {1, 0.97, 0.92, 1}, 10.0, true)
   build_scene(engine)
   build_navmesh(engine)
   visualize_navmesh(engine)
@@ -57,9 +56,9 @@ build_scene :: proc(engine: ^mjolnir.Engine) {
   ground_geom := geometry.make_quad({0.25, 0.55, 0.25, 1})
   for &v in ground_geom.vertices { v.position.x *= WORLD_HALF * 2; v.position.z *= WORLD_HALF * 2 }
   nav.append_geometry(&nav_builder, ground_geom, {0, 0, 0}, false)
-  gm := mjolnir.create_mesh(engine, ground_geom)
-  gmat := mjolnir.create_material(engine, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
-  mjolnir.spawn(engine, {0, 0, 0}, world.MeshAttachment{handle = gm, material = gmat, cast_shadow = false})
+  gm := world.create_mesh(&engine.world, ground_geom)
+  gmat := world.create_material(&engine.world, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
+  world.spawn(&engine.world, {0, 0, 0}, world.MeshAttachment{handle = gm, material = gmat, cast_shadow = false})
 
   obstacles := [?]struct{pos, size: [3]f32}{
     {{-18, 1.5, -14}, {3, 3, 3}}, {{18, 1.5, -14}, {3, 3, 3}}, {{-18, 1.5, 14}, {3, 3, 3}}, {{18, 1.5, 14}, {3, 3, 3}},
@@ -71,31 +70,26 @@ build_scene :: proc(engine: ^mjolnir.Engine) {
     g := geometry.make_cube({0.7, 0.2, 0.2, 1})
     for &v in g.vertices { v.position.x *= o.size.x; v.position.y *= o.size.y; v.position.z *= o.size.z }
     nav.append_geometry(&nav_builder, g, o.pos, true)
-    mh := mjolnir.create_mesh(engine, g)
-    mat := mjolnir.create_material(engine, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
-    mjolnir.spawn(engine, o.pos, world.MeshAttachment{handle = mh, material = mat, cast_shadow = true})
+    mh := world.create_mesh(&engine.world, g)
+    mat := world.create_material(&engine.world, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
+    world.spawn_mesh(&engine.world, mh, mat, o.pos)
   }
 }
 
 build_navmesh :: proc(engine: ^mjolnir.Engine) {
-  cfg := recast.config_create()
-  if !nav.build_navmesh(&engine.nav.nav_mesh, nav.geometry_view(&nav_builder), cfg) {
-    log.error("navmesh build failed")
-    return
-  }
-  if !nav.init(&engine.nav) do log.error("nav init failed")
+  if !mjolnir.build_navmesh(engine, nav.geometry_view(&nav_builder)) do log.error("navmesh build failed")
 }
 
 visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.despawn(engine, navmesh_node_handle)
+  world.despawn(&engine.world, navmesh_node_handle)
   nm_geom := nav.build_geometry(&engine.nav.nav_mesh)
   for &v in nm_geom.vertices do v.position.y += 0.2
-  nm_geom.aabb = geometry.aabb_from_vertices(nm_geom.vertices)
-  nm_mesh, mesh_ok := mjolnir.create_mesh(engine, nm_geom)
+  nm_geom.aabb = geometry.aabb_from_vertices(nm_geom.vertices)  // lift moved verts
+  nm_mesh, mesh_ok := world.create_mesh(&engine.world, nm_geom)
   if !mesh_ok do return
-  nm_mat, mat_ok := mjolnir.create_material(engine, type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7})
+  nm_mat, mat_ok := world.create_material(&engine.world, type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7})
   if !mat_ok do return
-  navmesh_node_handle = mjolnir.spawn_mesh(engine, nm_mesh, nm_mat)
+  navmesh_node_handle = world.spawn_mesh(&engine.world, nm_mesh, nm_mat)
 }
 
 random_goal :: proc(engine: ^mjolnir.Engine, away_from: [3]f32) -> [3]f32 {
@@ -103,7 +97,7 @@ random_goal :: proc(engine: ^mjolnir.Engine, away_from: [3]f32) -> [3]f32 {
   best: [3]f32; best_ok: bool
   for attempt in 0 ..< 32 {
     p := [3]f32{rand.float32_range(-SPAWN_RADIUS, SPAWN_RADIUS), 0, rand.float32_range(-SPAWN_RADIUS, SPAWN_RADIUS)}
-    snap, ok := mjolnir.find_nearest_point(engine, p, extents)
+    snap, ok := nav.find_nearest_point(&engine.nav, p, extents)
     if !ok do continue
     best = snap; best_ok = true
     if attempt >= 16 || linalg.length(snap - away_from) >= GOAL_MIN_DIST do return snap
@@ -121,9 +115,9 @@ spawn_agents :: proc(engine: ^mjolnir.Engine) {
     agents[i].pos = {math.cos(angle) * r, 0, math.sin(angle) * r}
     agents[i].color = palette[i % len(palette)]
     cap_geom := geometry.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
-    mh := mjolnir.create_mesh(engine, cap_geom)
-    mat := mjolnir.create_material(engine, type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4)
-    agents[i].node = mjolnir.spawn(engine, agents[i].pos + {0, AGENT_HEIGHT * 0.5, 0}, world.MeshAttachment{handle = mh, material = mat, cast_shadow = true})
+    mh := world.create_mesh(&engine.world, cap_geom)
+    mat := world.create_material(&engine.world, type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4)
+    agents[i].node = world.spawn(&engine.world, agents[i].pos + {0, AGENT_HEIGHT * 0.5, 0}, world.MeshAttachment{handle = mh, material = mat, cast_shadow = true})
   }
 }
 
@@ -136,7 +130,7 @@ assign_swap_targets :: proc(engine: ^mjolnir.Engine) {
 
 replan :: proc(engine: ^mjolnir.Engine, a: ^Agent) {
   delete(a.path)
-  a.path = mjolnir.find_path(engine, a.pos, a.goal, 128)
+  a.path = nav.find_path(&engine.nav, a.pos, a.goal, 128)
   a.waypoint_idx = 0
 }
 
@@ -177,10 +171,10 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
       a.velocity = {0, 0, 0}
     }
 
-    mjolnir.translate(engine, a.node, a.pos + {0, AGENT_HEIGHT * 0.5, 0})
+    world.translate(&engine.world, a.node, a.pos + {0, AGENT_HEIGHT * 0.5, 0})
     if linalg.length2(a.velocity.xz) > 0.01 {
       yaw := math.atan2(a.velocity.x, a.velocity.z)
-      mjolnir.rotate(engine, a.node, yaw, linalg.VECTOR3F32_Y_AXIS)
+      world.rotate(&engine.world, a.node, yaw, linalg.VECTOR3F32_Y_AXIS)
     }
     draw_agent_path(engine, a)
   }

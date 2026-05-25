@@ -401,3 +401,42 @@ camera_controller_free_set_sensitivity :: proc(
     free.mouse_sensitivity = sensitivity
   }
 }
+
+orbit_camera_data :: proc(controller: ^CameraController) -> (^OrbitCameraData, bool) #optional_ok {
+  data, ok := &controller.data.(OrbitCameraData)
+  return data, ok
+}
+
+free_camera_data :: proc(controller: ^CameraController) -> (^FreeCameraData, bool) #optional_ok {
+  data, ok := &controller.data.(FreeCameraData)
+  return data, ok
+}
+
+follow_camera_data :: proc(controller: ^CameraController) -> (^FollowCameraData, bool) #optional_ok {
+  data, ok := &controller.data.(FollowCameraData)
+  return data, ok
+}
+
+// Activate built-in orbit controller. Syncs current main camera pose so the
+// camera doesn't jump on first drag.
+use_orbit_camera :: proc(w: ^World) {
+  cam, ok := main_camera(w)
+  if ok do camera_controller_orbit_sync(&w.orbit_controller, cam)
+  w.active_controller = &w.orbit_controller
+}
+
+use_free_camera :: proc(w: ^World) {
+  w.active_controller = &w.free_controller
+}
+
+use_camera_controller :: proc(w: ^World, controller: ^CameraController) {
+  w.active_controller = controller
+}
+
+orbit_camera :: proc(w: ^World) -> (^OrbitCameraData, bool) #optional_ok {
+  return orbit_camera_data(&w.orbit_controller)
+}
+
+free_camera :: proc(w: ^World) -> (^FreeCameraData, bool) #optional_ok {
+  return free_camera_data(&w.free_controller)
+}

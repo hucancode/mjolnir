@@ -63,6 +63,7 @@ destroy_builder :: proc(b: ^NavGeometryBuilder) {
   delete(b.vertices)
   delete(b.indices)
   delete(b.area_types)
+  b^ = {}
 }
 
 TileCoord :: struct {
@@ -341,6 +342,7 @@ build_geometry :: proc(nav_mesh: ^NavMesh) -> geometry.Geometry {
   }
   copy(result.vertices, vertices[:])
   copy(result.indices, indices[:])
+  result.aabb = geometry.aabb_from_vertices(result.vertices)
   return result
 }
 

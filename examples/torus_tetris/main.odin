@@ -19,7 +19,7 @@ SOFT_FALL_PERIOD :: f32(0.05)
 
 Piece :: struct {
   cells: [PIECE_LEN][2]i32,
-  color: mjolnir.Color,
+  color: world.Color,
 }
 
 PIECES := [?]Piece {
@@ -33,9 +33,9 @@ PIECES := [?]Piece {
 }
 
 State :: struct {
-  board:                [GRID_W][GRID_H]mjolnir.NodeHandle,
+  board:                [GRID_W][GRID_H]world.NodeHandle,
   occupied:             [GRID_W][GRID_H]bool,
-  active_cells:         [PIECE_LEN]mjolnir.NodeHandle,
+  active_cells:         [PIECE_LEN]world.NodeHandle,
   active_piece:         Piece,
   active_pos:           [2]i32,
   fall_timer:           f32,
@@ -44,15 +44,15 @@ State :: struct {
   high_score:           u32,
   game_over:            bool,
   has_active:           bool,
-  transparent_material: [len(mjolnir.Color)]mjolnir.MaterialHandle,
-  opaque_material:      [len(mjolnir.Color)]mjolnir.MaterialHandle,
+  transparent_material: [len(world.Color)]world.MaterialHandle,
+  opaque_material:      [len(world.Color)]world.MaterialHandle,
   score_label:          ui.Text2DHandle,
   high_label:           ui.Text2DHandle,
 }
 
 PIECE_ALPHA :: f32(0.5)
 
-COLOR_RGB := [len(mjolnir.Color)][3]f32 {
+COLOR_RGB := [len(world.Color)][3]f32 {
   {1, 1, 1}, {0, 0, 0}, {0.3, 0.3, 0.3},
   {1, 0, 0}, {0, 1, 0}, {0, 0, 1},
   {1, 1, 0}, {0, 1, 1}, {1, 0, 1},
@@ -72,16 +72,16 @@ cell_world_pos :: proc(col: i32, row: i32) -> [3]f32 {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  ground := mjolnir.builtin_mesh(engine, .QUAD_XZ)
-  dark_mat := mjolnir.create_material(engine, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
-  floor := mjolnir.spawn(engine, {0, 0, 0}, world.MeshAttachment{handle = ground, material = dark_mat, cast_shadow = false})
-  mjolnir.scale(engine, floor, RADIUS * 6.0)
-  spot := mjolnir.spawn_light_spot(engine, {0, 10, 0}, {1, 1, 1, 1}, 12.0, math.PI * 0.35, true)
-  mjolnir.rotate(engine, spot, math.PI * 0.55, {1, 0, 0})
-  mjolnir.main_camera_look_at(engine, {0, 14, 14}, {0, 8, 0})
+  ground := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
+  dark_mat := world.create_material(&engine.world, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
+  floor := world.spawn_mesh(&engine.world, ground, dark_mat, cast_shadow = false)
+  world.scale(&engine.world, floor, RADIUS * 6.0)
+  spot := world.spawn_light_spot(&engine.world, {0, 10, 0}, {1, 1, 1, 1}, 12.0, math.PI * 0.35, true)
+  world.rotate(&engine.world, spot, math.PI * 0.55, {1, 0, 0})
+  world.main_camera_look_at(&engine.world, {0, 14, 14}, {0, 8, 0})
   for c, i in COLOR_RGB {
-    state.transparent_material[i] = mjolnir.create_material(engine, type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA})
-    state.opaque_material[i] = mjolnir.create_material(engine, type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0})
+    state.transparent_material[i] = world.create_material(&engine.world, type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA})
+    state.opaque_material[i] = world.create_material(&engine.world, type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0})
   }
   state.fall_period = FALL_PERIOD
   state.score_label, _ = ui.create_text2d(&engine.ui, position = {20, 20}, text = "Score: 0", font_size = 32, color = {255, 255, 255, 255})
@@ -92,11 +92,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
 reset_game :: proc(engine: ^mjolnir.Engine) {
   for col in 0 ..< GRID_W do for row in 0 ..< GRID_H do if state.occupied[col][row] {
-    mjolnir.despawn(engine, state.board[col][row])
+    world.despawn(&engine.world, state.board[col][row])
     state.board[col][row] = {}; state.occupied[col][row] = false
   }
   if state.has_active {
-    for h in state.active_cells do mjolnir.despawn(engine, h)
+    for h in state.active_cells do world.despawn(&engine.world, h)
     state.has_active = false
   }
   state.score = 0; state.fall_timer = 0
@@ -110,12 +110,12 @@ spawn_piece :: proc(engine: ^mjolnir.Engine) {
   for c in state.active_piece.cells do if c[1] > max_dr do max_dr = c[1]
   state.active_pos = {0, i32(GRID_H) - 1 - max_dr}
   if collides(state.active_piece, state.active_pos) { state.game_over = true; return }
-  cube := mjolnir.builtin_mesh(engine, .CUBE)
+  cube := world.get_builtin_mesh(&engine.world, .CUBE)
   mat := state.transparent_material[state.active_piece.color]
   for i in 0 ..< PIECE_LEN {
-    h := mjolnir.spawn(engine, {0, 0, 0}, world.MeshAttachment{handle = cube, material = mat, cast_shadow = true})
+    h := world.spawn_mesh(&engine.world, cube, mat)
     state.active_cells[i] = h
-    mjolnir.scale(engine, h, 0.5 * CELL)
+    world.scale(&engine.world, h, 0.5 * CELL)
   }
   state.has_active = true
   refresh_active_visuals(engine)
@@ -135,8 +135,8 @@ refresh_active_visuals :: proc(engine: ^mjolnir.Engine) {
   for c, i in state.active_piece.cells {
     col := wrap_col(state.active_pos[0] + c[0])
     row := state.active_pos[1] + c[1]
-    mjolnir.translate(engine, state.active_cells[i], cell_world_pos(col, row))
-    mjolnir.rotate(engine, state.active_cells[i], -col_angle(col), {0, 1, 0})
+    world.translate(&engine.world, state.active_cells[i], cell_world_pos(col, row))
+    world.rotate(&engine.world, state.active_cells[i], -col_angle(col), {0, 1, 0})
   }
 }
 
@@ -164,7 +164,7 @@ lock_piece :: proc(engine: ^mjolnir.Engine) {
     row := state.active_pos[1] + c[1]
     state.board[col][row] = state.active_cells[i]
     state.occupied[col][row] = true
-    mjolnir.set_material_handle(engine, state.active_cells[i], opaque)
+    world.set_material_handle(&engine.world, state.active_cells[i], opaque)
   }
   state.has_active = false
   cleared := clear_lines(engine)
@@ -179,14 +179,14 @@ clear_lines :: proc(engine: ^mjolnir.Engine) -> int {
     for col in 0 ..< GRID_W do if !state.occupied[col][r] { full = false; break }
     if !full { r += 1; continue }
     for col in 0 ..< GRID_W {
-      mjolnir.despawn(engine, state.board[col][r])
+      world.despawn(&engine.world, state.board[col][r])
       state.board[col][r] = {}; state.occupied[col][r] = false
     }
     for r2 := r; r2 < GRID_H - 1; r2 += 1 {
       for col in 0 ..< GRID_W {
         state.board[col][r2] = state.board[col][r2 + 1]
         state.occupied[col][r2] = state.occupied[col][r2 + 1]
-        if state.occupied[col][r2] do mjolnir.translate(engine, state.board[col][r2], cell_world_pos(i32(col), i32(r2)))
+        if state.occupied[col][r2] do world.translate(&engine.world, state.board[col][r2], cell_world_pos(i32(col), i32(r2)))
       }
     }
     for col in 0 ..< GRID_W { state.board[col][GRID_H - 1] = {}; state.occupied[col][GRID_H - 1] = false }

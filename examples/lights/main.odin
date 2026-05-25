@@ -1,15 +1,16 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
 
-dir_light: mjolnir.NodeHandle
-point_light: mjolnir.NodeHandle
-spot_light: mjolnir.NodeHandle
+dir_light: world.NodeHandle
+point_light: world.NodeHandle
+spot_light: world.NodeHandle
 
 dir_enabled: bool = true
 point_enabled: bool = true
@@ -52,61 +53,51 @@ color_preset :: proc(idx: mu.Real, intensity: f32) -> [4]f32 {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {7, 6, 7}, {0, 1, 0})
+  world.main_camera_look_at(&engine.world, {7, 6, 7}, {0, 1, 0})
 
-  ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, cast_shadow = false)
-  mjolnir.scale(engine, ground, 10.0)
+  world.spawn_ground(&engine.world, 10.0)
 
   for x in 0 ..< 3 do for z in 0 ..< 3 {
-    color: mjolnir.Color
+    color: world.Color
     switch (x + z) % 3 {
     case 0: color = .WHITE
     case 1: color = .RED
     case 2: color = .CYAN
     }
-    mjolnir.spawn_primitive_mesh(engine, .SPHERE, color, position = {f32(x - 1) * 2.5, 0.7, f32(z - 1) * 2.5}, scale_factor = 0.7)
+    world.spawn_primitive_mesh(&engine.world, .SPHERE, color, position = {f32(x - 1) * 2.5, 0.7, f32(z - 1) * 2.5}, scale_factor = 0.7)
   }
-  mjolnir.spawn_primitive_mesh(engine, .CUBE, .YELLOW, position = {0, 1.5, 0}, scale_factor = 0.6)
+  world.spawn_primitive_mesh(&engine.world, .CUBE, .YELLOW, position = {0, 1.5, 0}, scale_factor = 0.6)
 
-  dir_light = mjolnir.spawn_light_directional(engine, position = {6, 10, 6}, color = color_preset(dir_color, f32(dir_intensity)), radius = 12.0, cast_shadow = true)
-  point_light = mjolnir.spawn_light_point(engine, position = {3, 2, 3}, color = color_preset(point_color, f32(point_intensity)), radius = f32(point_radius))
-  spot_light = mjolnir.spawn_light_spot(engine, position = {-4, 5, 0}, color = color_preset(spot_color, f32(spot_intensity)), radius = f32(spot_radius), angle = math.PI * f32(spot_outer_deg) / 180.0)
+  dir_light = world.spawn_light_directional(&engine.world, position = {6, 10, 6}, color = color_preset(dir_color, f32(dir_intensity)), radius = 12.0, cast_shadow = true)
+  point_light = world.spawn_light_point(&engine.world, position = {3, 2, 3}, color = color_preset(point_color, f32(point_intensity)), radius = f32(point_radius))
+  spot_light = world.spawn_light_spot(&engine.world, position = {-4, 5, 0}, color = color_preset(spot_color, f32(spot_intensity)), radius = f32(spot_radius), angle = math.PI * f32(spot_outer_deg) / 180.0)
 
   log.info("Lights — toggle each via UI, live tune color/intensity")
 }
 
 apply_light_settings :: proc(engine: ^mjolnir.Engine) {
-  if att, ok := mjolnir.directional_light(engine, dir_light); ok {
-    eff := f32(dir_intensity) if dir_enabled else 0.0
-    mjolnir.set_light_color(engine, dir_light, color_preset(dir_color, eff))
-    _ = att
-  }
-  if att, ok := mjolnir.point_light(engine, point_light); ok {
-    eff := f32(point_intensity) if point_enabled else 0.0
-    mjolnir.set_light_color(engine, point_light, color_preset(point_color, eff))
-    mjolnir.set_light_radius(engine, point_light, f32(point_radius) if point_enabled else 0.0)
-    _ = att
-  }
-  if att, ok := mjolnir.spot_light(engine, spot_light); ok {
-    eff := f32(spot_intensity) if spot_enabled else 0.0
-    mjolnir.set_light_color(engine, spot_light, color_preset(spot_color, eff))
-    mjolnir.set_light_radius(engine, spot_light, f32(spot_radius) if spot_enabled else 0.0)
-    outer := math.PI * f32(spot_outer_deg) / 180.0
-    att.angle_outer = outer
-    att.angle_inner = outer * 0.75
-    mjolnir.mark_light_dirty(engine, spot_light)
-  }
+  world.set_light_enabled(&engine.world, dir_light, dir_enabled)
+  world.set_light_color(&engine.world, dir_light, color_preset(dir_color, f32(dir_intensity)))
+
+  world.set_light_enabled(&engine.world, point_light, point_enabled)
+  world.set_light_color(&engine.world, point_light, color_preset(point_color, f32(point_intensity)))
+  world.set_light_radius(&engine.world, point_light, f32(point_radius))
+
+  world.set_light_enabled(&engine.world, spot_light, spot_enabled)
+  world.set_light_color(&engine.world, spot_light, color_preset(spot_color, f32(spot_intensity)))
+  world.set_light_radius(&engine.world, spot_light, f32(spot_radius))
+  world.set_spot_light_cone(&engine.world, spot_light, math.PI * f32(spot_outer_deg) / 180.0)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   point_orbit_phase += dt * 0.7
-  mjolnir.translate(engine, point_light, math.cos(point_orbit_phase) * 4.0, 2.5 + math.sin(point_orbit_phase * 1.3) * 0.8, math.sin(point_orbit_phase) * 4.0)
+  world.translate(&engine.world, point_light, math.cos(point_orbit_phase) * 4.0, 2.5 + math.sin(point_orbit_phase * 1.3) * 0.8, math.sin(point_orbit_phase) * 4.0)
 
   spot_sweep_phase += dt * 0.5
   pos := [3]f32{math.cos(spot_sweep_phase) * 6.0, 5.0 + math.sin(spot_sweep_phase * 0.7) * 1.5, math.sin(spot_sweep_phase) * 6.0}
-  mjolnir.translate(engine, spot_light, pos)
+  world.translate(&engine.world, spot_light, pos)
   dir := linalg.normalize([3]f32{0, 0.5, 0} - pos)
-  mjolnir.rotate(engine, spot_light, linalg.quaternion_between_two_vector3(linalg.VECTOR3F32_Z_AXIS, dir))
+  world.rotate(&engine.world, spot_light, linalg.quaternion_between_two_vector3(linalg.VECTOR3F32_Z_AXIS, dir))
   apply_light_settings(engine)
 }
 

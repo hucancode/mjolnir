@@ -188,3 +188,22 @@ create_material :: proc(
   stage_material_data(&world.staging, handle)
   return handle, true
 }
+
+// Mutate-and-stage an existing PBR-style material. Only non-nil Maybe fields update.
+set_material_pbr_params :: proc(
+  w: ^World,
+  handle: MaterialHandle,
+  metallic: Maybe(f32) = nil,
+  roughness: Maybe(f32) = nil,
+  emissive: Maybe(f32) = nil,
+  base_color: Maybe([4]f32) = nil,
+) -> bool {
+  mat, ok := material(w, handle)
+  if !ok do return false
+  if v, has := metallic.?;   has do mat.metallic_value     = v
+  if v, has := roughness.?;  has do mat.roughness_value    = v
+  if v, has := emissive.?;   has do mat.emissive_value     = v
+  if v, has := base_color.?; has do mat.base_color_factor  = v
+  stage_material_data(&w.staging, handle)
+  return true
+}

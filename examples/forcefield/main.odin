@@ -1,15 +1,16 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:math/linalg"
 import mu "vendor:microui"
 
 FFState :: struct {
-  parent:           mjolnir.NodeHandle,
-  ff_node:          mjolnir.NodeHandle,
-  ff_handle:        mjolnir.ForceFieldHandle,
+  parent:           world.NodeHandle,
+  ff_node:          world.NodeHandle,
+  ff_handle:        world.ForceFieldHandle,
   color:            [4]f32,
   enabled:          bool,
   strength:         mu.Real,
@@ -42,18 +43,13 @@ spawn_field :: proc(
   spin_speed, spin_dir: f32,
 ) -> FFState {
   s: FFState
-  s.parent = mjolnir.spawn(engine, {0, 2, 0})
-  child, ff, _ := mjolnir.spawn_forcefield(
-    engine,
+  s.parent = world.spawn(&engine.world, {0, 2, 0})
+  s.ff_node, s.ff_handle, _ = world.spawn_forcefield_child(&engine.world, s.parent,
     position         = {offset_x, 0, 0},
     area_of_effect   = area,
     strength         = strength,
     tangent_strength = tangent,
   )
-  mjolnir.attach(engine, s.parent, child)
-
-  s.ff_node = child
-  s.ff_handle = ff
   s.color = color
   s.enabled = true
   s.strength = mu.Real(strength)
@@ -65,13 +61,12 @@ spawn_field :: proc(
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {0, 12, 3}, {0, 2, 0})
-  mjolnir.set_skybox_enabled(engine, false)
+  world.main_camera_look_at(&engine.world, {0, 12, 3}, {0, 2, 0})
+  render.set_skybox_enabled(&engine.render, false)
 
   // Particle source at center, large position spread
   if tex, ok := mjolnir.create_texture(engine, "assets/particles/star_09.png"); ok {
-    mjolnir.spawn_emitter(
-      engine,
+    world.spawn_emitter(&engine.world,
       position          = {0, 2, 0},
       texture           = tex,
       emission_rate     = 100,
@@ -95,15 +90,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Attraction field — green marker, opposite spin, slower, larger orbit radius
   attract = spawn_field(engine, 3.5, 12.0, -5.0, 4.0, {0.2, 1.0, 0.4, 1}, 0.7, -1.0)
 
-  mjolnir.spawn_light_directional(engine, position = {3, 6, 3}, color = {1, 1, 1, 1}, radius = 10)
+  world.spawn_light_directional(&engine.world, position = {3, 6, 3}, color = {1, 1, 1, 1}, radius = 10)
 }
 
 apply_ff :: proc(engine: ^mjolnir.Engine, s: ^FFState) {
-  if s.enabled {
-    mjolnir.set_forcefield(engine, s.ff_handle, f32(s.strength), f32(s.tangent_strength), f32(s.area_of_effect))
-  } else {
-    mjolnir.set_forcefield(engine, s.ff_handle, 0, 0, 0)
-  }
+  world.set_forcefield(&engine.world, s.ff_handle,
+    strength         = f32(s.strength),
+    tangent_strength = f32(s.tangent_strength),
+    area_of_effect   = f32(s.area_of_effect),
+    enabled          = s.enabled,
+  )
 }
 
 draw_ff_marker :: proc(engine: ^mjolnir.Engine, s: ^FFState) {
@@ -120,8 +116,8 @@ draw_ff_marker :: proc(engine: ^mjolnir.Engine, s: ^FFState) {
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   t := mjolnir.time_since_start(engine)
-  mjolnir.rotate(engine, repel.parent,   t * f32(repel.spin_speed)   * repel.spin_dir,   linalg.VECTOR3F32_Y_AXIS)
-  mjolnir.rotate(engine, attract.parent, t * f32(attract.spin_speed) * attract.spin_dir, linalg.VECTOR3F32_Y_AXIS)
+  world.rotate(&engine.world, repel.parent,   t * f32(repel.spin_speed)   * repel.spin_dir,   linalg.VECTOR3F32_Y_AXIS)
+  world.rotate(&engine.world, attract.parent, t * f32(attract.spin_speed) * attract.spin_dir, linalg.VECTOR3F32_Y_AXIS)
   apply_ff(engine, &repel)
   apply_ff(engine, &attract)
   draw_ff_marker(engine, &repel)

@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/gpu"
 import "../../mjolnir/world"
 import "core:strings"
@@ -23,8 +24,8 @@ TEXTURE_FILES := [?]string{
 
 textures:            [dynamic]TextureEntry
 selected_tex_index:  i32 = 0
-emitter_node:        mjolnir.NodeHandle
-emitter_handle:      mjolnir.EmitterHandle
+emitter_node:        world.NodeHandle
+emitter_handle:      world.EmitterHandle
 enabled:             bool = true
 
 emission_rate:    mu.Real = 200
@@ -56,8 +57,8 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {0, 5, 10}, {0, 2, 0})
-  mjolnir.set_skybox_enabled(engine, false)
+  world.main_camera_look_at(&engine.world, {0, 5, 10}, {0, 2, 0})
+  render.set_skybox_enabled(&engine.render, false)
 
   for name in TEXTURE_FILES {
     path := fmt.tprintf("assets/particles/%s.png", name)
@@ -65,63 +66,33 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if !ok do continue
     append(&textures, TextureEntry{name = strings.clone(name), handle = handle})
   }
+  if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0
 
-  initial_tex: gpu.Texture2DHandle
-  if len(textures) > 0 {
-    if int(selected_tex_index) >= len(textures) do selected_tex_index = 0
-    initial_tex = textures[selected_tex_index].handle
-  }
-
-  emitter_node, _ = mjolnir.spawn(engine, {0, 2, 0})
-  emitter_handle, _ = world.create_emitter(
-    &engine.world,
-    node_handle       = emitter_node,
-    texture_handle    = initial_tex,
-    emission_rate     = f32(emission_rate),
-    initial_velocity  = {f32(velocity_x), f32(velocity_y), f32(velocity_z)},
-    velocity_spread   = f32(velocity_spread),
-    color_start       = color_start,
-    color_end         = color_end,
-    aabb_min          = {-aabb_extent, -aabb_extent, -aabb_extent},
-    aabb_max          = { aabb_extent,  aabb_extent,  aabb_extent},
-    particle_lifetime = f32(lifetime),
-    position_spread   = f32(position_spread),
-    size_start        = f32(size_start),
-    size_end          = f32(size_end),
-    weight            = f32(weight),
-    weight_spread     = f32(weight_spread),
-  )
-  mjolnir.spawn_child(engine, emitter_node, attachment = world.EmitterAttachment{handle = emitter_handle})
-
-  // mjolnir.spawn_light_point(engine, position = {3, 5, 3}, color = {1, 0.9, 0.6, 1}, radius = 12, cast_shadow = false)
+  emitter_node, emitter_handle, _ = world.spawn_emitter(&engine.world, position = {0, 2, 0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  em, ok := world.emitter(&engine.world, emitter_handle)
-  if !ok do return
-
   tex: gpu.Texture2DHandle
   if len(textures) > 0 && int(selected_tex_index) < len(textures) {
     tex = textures[selected_tex_index].handle
   }
-
-  em.texture_handle    = tex
-  em.enabled           = b32(enabled)
-  em.emission_rate     = f32(emission_rate)
-  em.particle_lifetime = f32(lifetime)
-  em.size_start        = f32(size_start)
-  em.size_end          = f32(size_end)
-  em.weight            = f32(weight)
-  em.weight_spread     = f32(weight_spread)
-  em.position_spread   = f32(position_spread)
-  em.initial_velocity  = {f32(velocity_x), f32(velocity_y), f32(velocity_z)}
-  em.velocity_spread   = f32(velocity_spread)
-  em.color_start       = color_start
-  em.color_end         = color_end
-  em.aabb_min          = {-aabb_extent, -aabb_extent, -aabb_extent}
-  em.aabb_max          = { aabb_extent,  aabb_extent,  aabb_extent}
-
-  world.stage_emitter_data(&engine.world.staging, emitter_handle)
+  world.set_emitter(&engine.world, emitter_handle,
+    texture           = tex,
+    enabled           = enabled,
+    emission_rate     = f32(emission_rate),
+    particle_lifetime = f32(lifetime),
+    size_start        = f32(size_start),
+    size_end          = f32(size_end),
+    weight            = f32(weight),
+    weight_spread     = f32(weight_spread),
+    position_spread   = f32(position_spread),
+    initial_velocity  = [3]f32{f32(velocity_x), f32(velocity_y), f32(velocity_z)},
+    velocity_spread   = f32(velocity_spread),
+    color_start       = color_start,
+    color_end         = color_end,
+    aabb_min          = [3]f32{-aabb_extent, -aabb_extent, -aabb_extent},
+    aabb_max          = [3]f32{ aabb_extent,  aabb_extent,  aabb_extent},
+  )
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

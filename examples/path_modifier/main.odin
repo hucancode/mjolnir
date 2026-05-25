@@ -2,6 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/animation"
+import "../../mjolnir/world"
 import "core:fmt"
 import "core:math"
 import mu "vendor:microui"
@@ -9,7 +10,7 @@ import mu "vendor:microui"
 CONTROL_POINTS :: 32
 PATH_DEBUG_SAMPLES :: 96
 
-target_nodes:  [dynamic]mjolnir.NodeHandle
+target_nodes:  [dynamic]world.NodeHandle
 layer_indices: [dynamic]int
 path_buf:      [CONTROL_POINTS][3]f32
 spline:        animation.Spline([3]f32)
@@ -51,13 +52,13 @@ rebuild_path :: proc(engine: ^mjolnir.Engine) {
   animation.spline_destroy(&spline)
   spline = animation.spline_build_closed(path_buf[:])
   for node_handle, i in target_nodes {
-    mjolnir.set_path_modifier_params(engine, node_handle, layer_indices[i], path = path_buf[:])
+    world.set_path_modifier_params(&engine.world, node_handle, layer_indices[i], path = path_buf[:])
   }
 }
 
 apply_runtime_params :: proc(engine: ^mjolnir.Engine) {
   for node_handle, i in target_nodes {
-    mjolnir.set_path_modifier_params(engine, node_handle, layer_indices[i], offset = f32(offset_val), length = f32(fit_len), speed = 0, loop = true)
+    world.set_path_modifier_params(&engine.world, node_handle, layer_indices[i], offset = f32(offset_val), length = f32(fit_len), speed = 0, loop = true)
   }
 }
 
@@ -74,16 +75,15 @@ draw_path_debug :: proc(engine: ^mjolnir.Engine) {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {5, 3, 5}, {0, 0, 0})
+  world.main_camera_look_at(&engine.world, {5, 3, 5}, {0, 0, 0})
   roots := mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
   regenerate_points()
   spline = animation.spline_build_closed(path_buf[:])
 
   for handle in roots {
-    node := mjolnir.node(engine, handle) or_continue
+    node := world.node(&engine.world, handle) or_continue
     for child in node.children {
-      idx, ok := mjolnir.add_path_modifier_layer(
-        engine, child, "root", 14,
+      idx, ok := world.add_path_modifier_layer(&engine.world, child, "root", 14,
         path = path_buf[:], offset = f32(offset_val), length = f32(fit_len),
         speed = 0, loop = true, closed = true, weight = 1.0,
       )
@@ -93,8 +93,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, position = {0, -3, 0}, scale_factor = 30, cast_shadow = false)
-  mjolnir.spawn_light_point(engine, {0, 10, 0}, {1, 0.9, 0.8, 1}, 15.0, true)
+  world.spawn_ground(&engine.world, 30.0, position = {0, -3, 0})
+  world.spawn_light_point(&engine.world, {0, 10, 0}, {1, 0.9, 0.8, 1}, 15.0, true)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {

@@ -145,6 +145,44 @@ main_camera_look_at :: proc(
   stage_camera_data(&world.staging, world.main_camera)
 }
 
+// Re-initialize the main camera with a perspective projection + auto-stage.
+main_camera_set_perspective :: proc(
+  w: ^World,
+  fov: f32 = math.PI / 3,
+  from: [3]f32 = {0, 0, 3},
+  to: [3]f32 = {0, 0, 0},
+  near: f32 = 0.1,
+  far: f32 = 1000.0,
+) -> bool {
+  cam, ok := cont.get(w.cameras, w.main_camera)
+  if !ok do return false
+  camera_init(cam, cam.extent[0], cam.extent[1],
+    camera_position = from, camera_target = to,
+    fov = fov, near_plane = near, far_plane = far)
+  mark_camera_dirty(w, w.main_camera)
+  return true
+}
+
+// Re-initialize the main camera with an orthographic projection + auto-stage.
+main_camera_set_orthographic :: proc(
+  w: ^World,
+  ortho_width: f32,
+  ortho_height: f32,
+  from: [3]f32 = {0, 0, 0},
+  to: [3]f32 = {0, 0, -1},
+  near: f32 = 0.1,
+  far: f32 = 100.0,
+) -> bool {
+  cam, ok := cont.get(w.cameras, w.main_camera)
+  if !ok do return false
+  camera_init_orthographic(cam, cam.extent[0], cam.extent[1],
+    camera_position = from, camera_target = to,
+    ortho_width = ortho_width, ortho_height = ortho_height,
+    near_plane = near, far_plane = far)
+  mark_camera_dirty(w, w.main_camera)
+  return true
+}
+
 
 camera_update_aspect_ratio :: proc(self: ^Camera, new_aspect_ratio: f32) {
   switch &proj in self.projection {
@@ -237,4 +275,8 @@ camera_resize :: proc(camera: ^Camera, width, height: u32) -> bool {
     perspective.aspect_ratio = f32(width) / f32(height)
   }
   return true
+}
+
+main_camera :: proc(w: ^World) -> (^Camera, bool) #optional_ok {
+  return camera(w, w.main_camera)
 }

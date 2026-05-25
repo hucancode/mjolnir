@@ -354,7 +354,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           math.sin(f32(i)),
           math.cos(f32(i)),
           math.sin(f32(i)),
-          1.0,
+          0.2,
         }
         // Calculate fixed local position in a circle
         angle := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0

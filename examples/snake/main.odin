@@ -2,6 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/ui"
+import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -22,12 +23,12 @@ Cell :: [2]i32
 
 Game :: struct {
   body:        [dynamic]Cell,
-  head_node:   mjolnir.NodeHandle,
-  body_nodes:  [dynamic]mjolnir.NodeHandle,
+  head_node:   world.NodeHandle,
+  body_nodes:  [dynamic]world.NodeHandle,
   dir:         Cell,
   pending_dir: Cell,
   food:        Cell,
-  food_node:   mjolnir.NodeHandle,
+  food_node:   world.NodeHandle,
   timer:       f32,
   score:       int,
   best:        int,
@@ -54,38 +55,38 @@ setup :: proc(engine: ^mjolnir.Engine) {
   wall_t :: 0.2
   wall_h :: 0.5
 
-  floor := mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY, {0, -0.5, 0})
-  mjolnir.scale_xyz(engine, floor, half, 0.5, half)
+  floor := world.spawn_primitive_mesh(&engine.world, .CUBE, .GRAY, {0, -0.5, 0})
+  world.scale_xyz(&engine.world, floor, half, 0.5, half)
 
   spawn_wall(engine, {0, wall_h, half + wall_t}, half + wall_t * 2, wall_h, wall_t)
   spawn_wall(engine, {0, wall_h, -(half + wall_t)}, half + wall_t * 2, wall_h, wall_t)
   spawn_wall(engine, {half + wall_t, wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
   spawn_wall(engine, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
 
-  mjolnir.main_camera_look_at(engine, {0, 18, 13}, {0, 0, 0})
+  world.main_camera_look_at(&engine.world, {0, 18, 13}, {0, 0, 0})
 
-  spot := mjolnir.spawn_light_spot(engine, {0, 10, 4}, {0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true)
-  mjolnir.rotate(engine, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
+  spot := world.spawn_light_spot(&engine.world, {0, 10, 4}, {0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true)
+  world.rotate(&engine.world, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
 
   g.score_label, _ = ui.create_text2d(&engine.ui, position = {20, 20}, text = "Score: 0", font_size = 28, color = {255, 255, 255, 255})
   g.best_label, _  = ui.create_text2d(&engine.ui, position = {20, 60}, text = "Best: 0",  font_size = 24, color = {255, 220, 100, 255})
 
-  g.head_node = mjolnir.spawn_primitive_mesh(engine, .CUBE, .YELLOW)
-  mjolnir.scale(engine, g.head_node, SEGMENT_SCALE)
-  g.food_node = mjolnir.spawn_primitive_mesh(engine, .SPHERE, .RED)
-  mjolnir.scale(engine, g.food_node, FOOD_SCALE)
+  g.head_node = world.spawn_primitive_mesh(&engine.world, .CUBE, .YELLOW)
+  world.scale(&engine.world, g.head_node, SEGMENT_SCALE)
+  g.food_node = world.spawn_primitive_mesh(&engine.world, .SPHERE, .RED)
+  world.scale(&engine.world, g.food_node, FOOD_SCALE)
 
   reset_game(engine)
   log.info("Controls: WASD or arrows. Auto-restart on game over.")
 }
 
 spawn_wall :: proc(engine: ^mjolnir.Engine, pos: [3]f32, sx, sy, sz: f32) {
-  h := mjolnir.spawn_primitive_mesh(engine, .CUBE, .WHITE, pos)
-  mjolnir.scale_xyz(engine, h, sx, sy, sz)
+  h := world.spawn_primitive_mesh(&engine.world, .CUBE, .WHITE, pos)
+  world.scale_xyz(&engine.world, h, sx, sy, sz)
 }
 
 reset_game :: proc(engine: ^mjolnir.Engine) {
-  for h in g.body_nodes do mjolnir.despawn(engine, h)
+  for h in g.body_nodes do world.despawn(&engine.world, h)
   clear(&g.body_nodes); clear(&g.body)
 
   mid: i32 = GRID / 2
@@ -104,14 +105,14 @@ reset_game :: proc(engine: ^mjolnir.Engine) {
   refresh_score_ui(engine)
 }
 
-spawn_body_node :: proc(engine: ^mjolnir.Engine, c: Cell) -> mjolnir.NodeHandle {
-  h := mjolnir.spawn_primitive_mesh(engine, .CUBE, .GREEN, cell_to_world(c, SEGMENT_Y))
-  mjolnir.scale(engine, h, SEGMENT_SCALE)
+spawn_body_node :: proc(engine: ^mjolnir.Engine, c: Cell) -> world.NodeHandle {
+  h := world.spawn_primitive_mesh(&engine.world, .CUBE, .GREEN, cell_to_world(c, SEGMENT_Y))
+  world.scale(&engine.world, h, SEGMENT_SCALE)
   return h
 }
 
-place_node :: proc(engine: ^mjolnir.Engine, h: mjolnir.NodeHandle, c: Cell, y: f32) {
-  mjolnir.translate(engine, h, cell_to_world(c, y))
+place_node :: proc(engine: ^mjolnir.Engine, h: world.NodeHandle, c: Cell, y: f32) {
+  world.translate(&engine.world, h, cell_to_world(c, y))
 }
 
 place_food :: proc(engine: ^mjolnir.Engine) {

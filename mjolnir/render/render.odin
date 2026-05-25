@@ -1590,6 +1590,40 @@ set_visibility_stats_enabled :: proc(self: ^Manager, enabled: bool) {
   self.internal.visibility.stats_enabled = enabled
 }
 
+// ---------- ambient (IBL + skybox) setters ----------
+
+set_ibl_intensity :: proc(self: ^Manager, intensity: f32) {
+  self.internal.ambient.ibl_intensity = max(intensity, 0.0)
+}
+
+get_ibl_intensity :: proc(self: ^Manager) -> f32 {
+  return self.internal.ambient.ibl_intensity
+}
+
+set_skybox_enabled :: proc(self: ^Manager, enabled: bool) {
+  self.internal.ambient.skybox_enabled = enabled
+}
+
+get_skybox_enabled :: proc(self: ^Manager) -> bool {
+  return self.internal.ambient.skybox_enabled
+}
+
+set_skybox_intensity :: proc(self: ^Manager, intensity: f32) {
+  self.internal.ambient.skybox_intensity = max(intensity, 0.0)
+}
+
+get_skybox_intensity :: proc(self: ^Manager) -> f32 {
+  return self.internal.ambient.skybox_intensity
+}
+
+set_skybox_blur :: proc(self: ^Manager, blur: f32) {
+  self.internal.ambient.skybox_blur = clamp(blur, 0.0, 1.0)
+}
+
+get_skybox_blur :: proc(self: ^Manager) -> f32 {
+  return self.internal.ambient.skybox_blur
+}
+
 // record_frame drives the entire per-frame command sequence: shadow maps,
 // per-camera passes (geometry, lighting, particles, transparency), debug,
 // post-process, UI, async compute, optional debug-UI overlay, and the

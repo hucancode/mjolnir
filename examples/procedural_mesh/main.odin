@@ -2,13 +2,14 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/geometry"
+import "../../mjolnir/world"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
 
-wave_node: mjolnir.NodeHandle
-knot_node: mjolnir.NodeHandle
-spiral_node: mjolnir.NodeHandle
+wave_node: world.NodeHandle
+knot_node: world.NodeHandle
+spiral_node: world.NodeHandle
 
 wave_visible: bool = true
 knot_visible: bool = true
@@ -25,18 +26,17 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {0, 6, 14}, {0, 1, 0})
-  mjolnir.spawn_light_directional(engine, position = {6, 12, 6}, color = {1, 0.97, 0.93, 5.0}, radius = 20.0)
-  ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, position = {0, -1, 0}, cast_shadow = false)
-  mjolnir.scale(engine, ground, 12.0)
+  world.main_camera_look_at(&engine.world, {0, 6, 14}, {0, 1, 0})
+  world.spawn_light_directional(&engine.world, position = {6, 12, 6}, color = {1, 0.97, 0.93, 5.0}, radius = 20.0)
+  world.spawn_ground(&engine.world, 12.0, position = {0, -1, 0})
 
-  wave_mat   := mjolnir.material_pbr(engine, {0.3, 0.55, 0.85, 1}, metallic = 0.2, roughness = 0.5)
-  knot_mat   := mjolnir.material_pbr(engine, {0.9, 0.5,  0.2,  1}, metallic = 0.8, roughness = 0.3)
-  spiral_mat := mjolnir.material_pbr(engine, {0.4, 0.85, 0.4,  1}, metallic = 0.0, roughness = 0.7)
+  wave_mat   := world.material_pbr(&engine.world, {0.3, 0.55, 0.85, 1}, metallic = 0.2, roughness = 0.5)
+  knot_mat   := world.material_pbr(&engine.world, {0.9, 0.5,  0.2,  1}, metallic = 0.8, roughness = 0.3)
+  spiral_mat := world.material_pbr(&engine.world, {0.4, 0.85, 0.4,  1}, metallic = 0.0, roughness = 0.7)
 
-  wave_node   = mjolnir.spawn_mesh(engine, mjolnir.create_mesh(engine, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
-  knot_node   = mjolnir.spawn_mesh(engine, mjolnir.create_mesh(engine, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
-  spiral_node = mjolnir.spawn_mesh(engine, mjolnir.create_mesh(engine, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
+  wave_node   = world.spawn_mesh(&engine.world, world.create_mesh(&engine.world, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
+  knot_node   = world.spawn_mesh(&engine.world, world.create_mesh(&engine.world, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
+  spiral_node = world.spawn_mesh(&engine.world, world.create_mesh(&engine.world, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
 }
 
 build_wave :: proc(n: int, size: f32, amp: f32) -> geometry.Geometry {
@@ -138,19 +138,13 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   spin += dt * f32(rotate_speed)
-  q := quat_y(spin)
-  set_spin(engine, wave_node,   wave_visible,   q, {-6, 0, 0})
-  set_spin(engine, knot_node,   knot_visible,   q, {0, 1.5, 0})
-  set_spin(engine, spiral_node, spiral_visible, q, {6, 0, 0})
+  set_spin(engine, wave_node,   wave_visible,   spin, {-6, 0, 0})
+  set_spin(engine, knot_node,   knot_visible,   spin, {0, 1.5, 0})
+  set_spin(engine, spiral_node, spiral_visible, spin, {6, 0, 0})
 }
 
-set_spin :: proc(engine: ^mjolnir.Engine, h: mjolnir.NodeHandle, visible: bool, q: quaternion128, pos: [3]f32) {
-  if n, ok := mjolnir.node(engine, h); ok do n.visible = visible
-  mjolnir.translate(engine, h, pos)
-  mjolnir.rotate(engine, h, q)
-}
-
-quat_y :: proc(angle: f32) -> quaternion128 {
-  half := angle * 0.5
-  return quaternion(w = math.cos(half), x = 0, y = math.sin(half), z = 0)
+set_spin :: proc(engine: ^mjolnir.Engine, h: world.NodeHandle, visible: bool, angle: f32, pos: [3]f32) {
+  if n, ok := world.node(&engine.world, h); ok do n.visible = visible
+  world.translate(&engine.world, h, pos)
+  world.rotate(&engine.world, h, angle)
 }

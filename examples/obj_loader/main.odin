@@ -12,9 +12,9 @@ OBJ_FILES :: [3]string{"assets/nav_test.obj", "assets/floor_with_5_obstacles.obj
 OBJ_SCALES :: [3]f32{1.0, 1.0, 0.05}
 OBJ_LABELS :: [3]string{"nav_test", "5 obstacles", "dungeon"}
 
-display_node: mjolnir.NodeHandle
-display_material: mjolnir.MaterialHandle
-loaded_meshes: [3]mjolnir.MeshHandle
+display_node: world.NodeHandle
+display_material: world.MaterialHandle
+loaded_meshes: [3]world.MeshHandle
 loaded_aabb: [3]struct{min, max: [3]f32}
 current_index: int = -1
 
@@ -26,10 +26,10 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  light := mjolnir.spawn_light_directional(engine, {10, 18, 10}, {1, 0.97, 0.92, 3.0}, 10.0, false)
-  mjolnir.rotate(engine, light, 1.5707963, [3]f32{1, 0, 0})
+  light := world.spawn_light_directional(&engine.world, {10, 18, 10}, {1, 0.97, 0.92, 3.0}, 10.0, false)
+  world.rotate(&engine.world, light, 1.5707963, [3]f32{1, 0, 0})
 
-  display_material = mjolnir.create_material(engine, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
+  display_material = world.create_material(&engine.world, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
 
   files := OBJ_FILES
   scales := OBJ_SCALES
@@ -41,10 +41,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     log.infof("%s: %d verts, %d tris, aabb %v..%v", files[i], len(geom.vertices), len(geom.indices) / 3, geom.aabb.min, geom.aabb.max)
     loaded_aabb[i] = {geom.aabb.min, geom.aabb.max}
-    loaded_meshes[i] = mjolnir.create_mesh(engine, geom)
+    loaded_meshes[i] = world.create_mesh(&engine.world, geom)
   }
 
-  display_node = mjolnir.spawn(engine, {0, 0, 0}, world.MeshAttachment{handle = loaded_meshes[0], material = display_material, cast_shadow = true})
+  display_node = world.spawn_mesh(&engine.world, loaded_meshes[0], display_material)
   swap_model(engine, 0)
 }
 
@@ -58,19 +58,17 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
   radius := linalg.length(extents) * 0.5
   if radius < 0.001 do radius = 1
 
-  mjolnir.set_mesh_handle(engine, display_node, loaded_meshes[index])
-  mjolnir.translate(engine, display_node, -center)
+  world.set_mesh_handle(&engine.world, display_node, loaded_meshes[index])
+  world.translate(&engine.world, display_node, -center)
 
   cam_dist := radius * 1.8
-  if cam, ok := mjolnir.main_camera(engine); ok {
-    cam.projection = world.PerspectiveProjection{
-      fov = 1.2,
-      aspect_ratio = f32(cam.extent[0]) / f32(cam.extent[1]),
-      near = max(0.1, cam_dist * 0.01),
-      far = cam_dist * 5.0,
-    }
-  }
-  mjolnir.main_camera_look_at(engine, {cam_dist, cam_dist * 0.7, cam_dist}, {0, 0, 0})
+  world.main_camera_set_perspective(&engine.world,
+    fov  = 1.2,
+    from = {cam_dist, cam_dist * 0.7, cam_dist},
+    to   = {0, 0, 0},
+    near = max(0.1, cam_dist * 0.01),
+    far  = cam_dist * 5.0,
+  )
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

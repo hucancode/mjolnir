@@ -7,7 +7,7 @@ import "core:log"
 import "core:math"
 import mu "vendor:microui"
 
-spinner: mjolnir.NodeHandle
+spinner: world.NodeHandle
 
 ortho_width: mu.Real = 12.0
 ortho_height: mu.Real = 12.0
@@ -23,54 +23,33 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.spawn_primitive_mesh(engine, .CUBE,     .RED,    position = {-2.5, 0.5, 0})
-  mjolnir.spawn_primitive_mesh(engine, .SPHERE,   .GREEN,  position = {2.5, 0.5, 0},  scale_factor = 0.7)
-  mjolnir.spawn_primitive_mesh(engine, .CYLINDER, .BLUE,   position = {0, 1.0, 2.5},  scale_factor = 0.5)
-  mjolnir.spawn_primitive_mesh(engine, .CONE,     .YELLOW, position = {0, 0.8, -2.5}, scale_factor = 0.5)
-  spinner = mjolnir.spawn_primitive_mesh(engine, .CUBE, .MAGENTA, position = {0, 1.5, 0}, scale_factor = 0.4)
+  world.spawn_primitive_mesh(&engine.world, .CUBE,     .RED,    position = {-2.5, 0.5, 0})
+  world.spawn_primitive_mesh(&engine.world, .SPHERE,   .GREEN,  position = {2.5, 0.5, 0},  scale_factor = 0.7)
+  world.spawn_primitive_mesh(&engine.world, .CYLINDER, .BLUE,   position = {0, 1.0, 2.5},  scale_factor = 0.5)
+  world.spawn_primitive_mesh(&engine.world, .CONE,     .YELLOW, position = {0, 0.8, -2.5}, scale_factor = 0.5)
+  spinner = world.spawn_primitive_mesh(&engine.world, .CUBE, .MAGENTA, position = {0, 1.5, 0}, scale_factor = 0.4)
 
-  ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, cast_shadow = false)
-  mjolnir.scale(engine, ground, 6.0)
+  world.spawn_ground(&engine.world, 6.0)
 
-  mjolnir.spawn_light_point(engine, {3, 8, 3}, {1.0, 0.95, 0.8, 1.0}, 25.0, false)
-  mjolnir.spawn_light_directional(engine, {-6, 10, -4}, {1.0, 0.95, 0.9, 4.0}, 15.0, true)
+  world.spawn_light_point(&engine.world, {3, 8, 3}, {1.0, 0.95, 0.8, 1.0}, 25.0, false)
+  world.spawn_light_directional(&engine.world, {-6, 10, -4}, {1.0, 0.95, 0.9, 4.0}, 15.0, true)
 
-  if cam, ok := mjolnir.main_camera(engine); ok {
-    extent := cam.extent
-    world.camera_init_orthographic(
-      cam, extent[0], extent[1],
-      camera_position = {0, f32(cam_height), 0.01}, camera_target = {0, 0, 0},
-      ortho_width = f32(ortho_width), ortho_height = f32(ortho_height),
-      near_plane = 0.1, far_plane = 100.0,
-    )
-    mjolnir.mark_camera_dirty(engine, mjolnir.main_camera_handle(engine))
-  }
+  world.main_camera_set_orthographic(&engine.world,
+    ortho_width = f32(ortho_width), ortho_height = f32(ortho_height),
+    from = {0, f32(cam_height), 0.01}, to = {0, 0, 0},
+  )
   log.info("Orthographic Main Camera — top-down view")
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   phase += dt
-  mjolnir.rotate(engine, spinner, quat_y(phase))
-  apply_camera(engine)
-}
-
-apply_camera :: proc(engine: ^mjolnir.Engine) {
-  cam, ok := mjolnir.main_camera(engine)
-  if !ok do return
-  if proj, ok := &cam.projection.(world.OrthographicProjection); ok {
-    proj.width = f32(ortho_width)
-    proj.height = f32(ortho_height)
-  }
+  world.rotate(&engine.world, spinner, phase)
   yaw := f32(cam_yaw)
   pos := [3]f32{math.sin(yaw) * 0.5, f32(cam_height), math.cos(yaw) * 0.5}
-  cam.position = pos
-  world.camera_look_at(cam, pos, {0, 0, 0})
-  mjolnir.mark_camera_dirty(engine, mjolnir.main_camera_handle(engine))
-}
-
-quat_y :: proc(angle: f32) -> quaternion128 {
-  half := angle * 0.5
-  return quaternion(w = math.cos(half), x = 0, y = math.sin(half), z = 0)
+  world.main_camera_set_orthographic(&engine.world,
+    ortho_width = f32(ortho_width), ortho_height = f32(ortho_height),
+    from = pos, to = {0, 0, 0},
+  )
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

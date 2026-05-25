@@ -1,14 +1,14 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
-import "core:math"
 import mu "vendor:microui"
 import "vendor:glfw"
 
-cube_handle: mjolnir.NodeHandle
-light_handle: mjolnir.NodeHandle
+cube_handle: world.NodeHandle
+light_handle: world.NodeHandle
 cube_pos: [3]f32 = {0, 0.5, 0}
 cube_yaw: f32
 
@@ -40,14 +40,13 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   engine.camera_controller_enabled = false
-  mjolnir.main_camera_look_at(engine, {0, 8, 12}, {0, 0.5, 0})
+  world.main_camera_look_at(&engine.world, {0, 8, 12}, {0, 0.5, 0})
 
-  light_handle = mjolnir.spawn_light_directional(engine, {4, 8, 4}, {1, 0.97, 0.92, f32(light_intensity)}, 15.0, true)
+  light_handle = world.spawn_light_directional(&engine.world, {4, 8, 4}, {1, 0.97, 0.92, f32(light_intensity)}, 15.0, true)
 
-  ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, cast_shadow = false)
-  mjolnir.scale(engine, ground, 8.0)
+  world.spawn_ground(&engine.world, 8.0)
 
-  cube_handle = mjolnir.spawn_primitive_mesh(engine, .CUBE, .CYAN, position = cube_pos, scale_factor = 0.5)
+  cube_handle = world.spawn_primitive_mesh(&engine.world, .CUBE, .CYAN, position = cube_pos, scale_factor = 0.5)
   log.info("Input demo  WASD: move cube  Q/E: yaw  LMB drag, RMB, scroll, mouse-move hooked")
 }
 
@@ -92,14 +91,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     cube_pos.x = clamp(cube_pos.x + move.x * speed, -7.5, 7.5)
     cube_pos.z = clamp(cube_pos.z + move.z * speed, -7.5, 7.5)
   }
-  mjolnir.translate(engine, cube_handle, cube_pos)
-  mjolnir.rotate(engine, cube_handle, quat_y(cube_yaw))
-  mjolnir.set_light_intensity(engine, light_handle, f32(light_intensity))
-}
-
-quat_y :: proc(angle: f32) -> quaternion128 {
-  half := angle * 0.5
-  return quaternion(w = math.cos(half), x = 0, y = math.sin(half), z = 0)
+  world.translate(&engine.world, cube_handle, cube_pos)
+  world.rotate(&engine.world, cube_handle, cube_yaw)
+  world.set_light_intensity(&engine.world, light_handle, f32(light_intensity))
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

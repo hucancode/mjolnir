@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/world"
 import "core:math"
 import "core:math/linalg"
 
@@ -19,17 +20,17 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  light := mjolnir.spawn_light_directional(engine, {10, 18, 10}, {1, 0.97, 0.92, 2.0}, 60.0, false)
-  mjolnir.rotate(engine, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  light := world.spawn_light_directional(&engine.world, {10, 18, 10}, {1, 0.97, 0.92, 2.0}, 60.0, false)
+  world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 
-  mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY, position = {0, -0.5, 0}, scale_factor = 0.01)
-  ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, position = {0, -1, 0})
-  mjolnir.scale(engine, ground, 20.0)
+  world.spawn_primitive_mesh(&engine.world, .CUBE, .GRAY, position = {0, -0.5, 0}, scale_factor = 0.01)
+  ground := world.spawn_primitive_mesh(&engine.world, .QUAD_XZ, .GRAY, position = {0, -1, 0})
+  world.scale(&engine.world, ground, 20.0)
 
   // Real cube provides depth-occlusion contrast for the adjacent debug cube.
-  mjolnir.spawn_primitive_mesh(engine, .CUBE, .BLUE, position = {-6, 0, 0}, scale_factor = 0.8)
+  world.spawn_primitive_mesh(&engine.world, .CUBE, .BLUE, position = {-6, 0, 0}, scale_factor = 0.8)
 
-  mjolnir.main_camera_look_at(engine, {12, 8, 14}, {0, 0, 0})
+  world.main_camera_look_at(&engine.world, {12, 8, 14}, {0, 0, 0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {

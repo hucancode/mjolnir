@@ -480,6 +480,37 @@ is_key_down :: proc(self: ^Engine, key: c.int) -> bool {
   return glfw.GetKey(self.window, key) == glfw.PRESS
 }
 
+// True only on the frame `key` transitioned from up to down.
+// Uses the engine's tracked input state — no manual prev-frame bookkeeping.
+is_key_pressed :: proc(self: ^Engine, key: c.int) -> bool {
+  if key < 0 || int(key) >= len(self.input.keys) do return false
+  return self.input.keys[key] && !self.input.key_holding[key]
+}
+
+// True only on the frame `key` transitioned from down to up.
+is_key_released :: proc(self: ^Engine, key: c.int) -> bool {
+  if key < 0 || int(key) >= len(self.input.keys) do return false
+  return !self.input.keys[key] && self.input.key_holding[key]
+}
+
+// True while mouse `button` is currently held.
+is_mouse_down :: proc(self: ^Engine, button: c.int) -> bool {
+  if button < 0 || int(button) >= len(self.input.mouse_buttons) do return false
+  return self.input.mouse_buttons[button]
+}
+
+// True only on the frame mouse `button` transitioned from up to down.
+is_mouse_pressed :: proc(self: ^Engine, button: c.int) -> bool {
+  if button < 0 || int(button) >= len(self.input.mouse_buttons) do return false
+  return self.input.mouse_buttons[button] && !self.input.mouse_holding[button]
+}
+
+// True only on the frame mouse `button` transitioned from down to up.
+is_mouse_released :: proc(self: ^Engine, button: c.int) -> bool {
+  if button < 0 || int(button) >= len(self.input.mouse_buttons) do return false
+  return !self.input.mouse_buttons[button] && self.input.mouse_holding[button]
+}
+
 // Build a follow camera controller without exposing the GLFW window handle.
 // The example pattern was `world.camera_controller_follow_init(engine.window, ...)`
 // — leaking the window into gameplay code. Prefer this wrapper.
@@ -940,12 +971,14 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       if entry.age + 1 >= world.FRAMES_IN_FLIGHT do append(&stale_forcefields, handle)
     }
     forcefield := cont.get(self.world.forcefields, handle) or_continue
+    gpu_strength := forcefield.strength if forcefield.enabled else 0
+    gpu_tangent := forcefield.tangent_strength if forcefield.enabled else 0
     render.upload_forcefield_data(
       &self.render,
       handle.index,
       &render.ForceField {
-        tangent_strength = forcefield.tangent_strength,
-        strength = forcefield.strength,
+        tangent_strength = gpu_tangent,
+        strength = gpu_strength,
         area_of_effect = forcefield.area_of_effect,
         node_index = forcefield.node_handle.index,
       },
@@ -980,6 +1013,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
     has_light := true
     #partial switch attachment in node.attachment {
     case world.PointLightAttachment:
+      if attachment.disabled {
+        has_light = false
+        break
+      }
       light_variant := render.PointLight {
         color    = attachment.color,
         position = light_position,
@@ -987,6 +1024,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       }
       light_data = render.Light(light_variant)
     case world.DirectionalLightAttachment:
+      if attachment.disabled {
+        has_light = false
+        break
+      }
       light_variant := render.DirectionalLight {
         color     = attachment.color,
         position  = light_position,
@@ -995,6 +1036,10 @@ sync_staging_to_gpu :: proc(self: ^Engine) -> vk.Result {
       }
       light_data = render.Light(light_variant)
     case world.SpotLightAttachment:
+      if attachment.disabled {
+        has_light = false
+        break
+      }
       light_variant := render.SpotLight {
         color       = attachment.color,
         position    = light_position,
@@ -1570,22 +1615,24 @@ create_texture_empty :: proc(
   return handle, ret == .SUCCESS
 }
 
-// Look up a camera's framebuffer attachment for the given pass type.
+// Look up a camera's framebuffer attachment for the given pass type. Defaults
+// to the engine's current frame_index so callers writing render-to-texture
+// flows don't need to thread `engine.frame_index` through.
 // Crosses the world (validity check) and render (attachment storage) boundaries.
 get_camera_attachment :: proc(
   engine: ^Engine,
   camera_handle: world.CameraHandle,
   attachment_type: render.AttachmentType,
-  frame_index: u32 = 0,
+  frame_index: Maybe(u32) = nil,
 ) -> (
   handle: gpu.Texture2DHandle,
   ok: bool,
 ) #optional_ok {
   if !cont.is_valid(engine.world.cameras, camera_handle) do return {}, false
-  return engine.render.cameras[camera_handle.index].attachments[attachment_type][frame_index], true
+  fi := frame_index.? or_else engine.frame_index
+  return engine.render.cameras[camera_handle.index].attachments[attachment_type][fi], true
 }
 
-@(private)
 navmesh_config_to_recast :: proc(cfg: NavMeshConfig) -> recast.Config {
   cell_size: f32
   cell_height: f32
@@ -1716,4 +1763,104 @@ setup_navmesh :: proc(
     return false
   }
   return true
+}
+@(private="file") _attach_visual_mesh :: proc(
+  engine: ^Engine,
+  parent: world.NodeHandle,
+  collider: physics.Collider,
+  mesh: world.MeshHandle,
+  material: world.MaterialHandle,
+  visual_scale: Maybe([3]f32),
+  cast_shadow: bool,
+) {
+  if mesh.generation == 0 do return
+  visual, _ := world.spawn_child(&engine.world, parent, attachment = world.MeshAttachment{handle = mesh, material = material, cast_shadow = cast_shadow})
+  s := visual_scale.? or_else physics.collider_visual_scale(collider)
+  world.scale_xyz(&engine.world, visual, s.x, s.y, s.z)
+}
+
+spawn_static :: proc(
+  engine: ^Engine,
+  position: [3]f32,
+  collider: physics.Collider,
+  mesh: world.MeshHandle = {},
+  material: world.MaterialHandle = {},
+  visual_scale: Maybe([3]f32) = nil,
+  cast_shadow: bool = true,
+) -> world.NodeHandle {
+  parent, _ := world.spawn(&engine.world, position)
+  n, _ := world.node(&engine.world, parent)
+  physics.create_static_body(&engine.physics, n.transform.position, n.transform.rotation, collider)
+  _attach_visual_mesh(engine, parent, collider, mesh, material, visual_scale, cast_shadow)
+  return parent
+}
+
+spawn_dynamic :: proc(
+  engine: ^Engine,
+  position: [3]f32,
+  mass: f32,
+  collider: physics.Collider,
+  mesh: world.MeshHandle = {},
+  material: world.MaterialHandle = {},
+  visual_scale: Maybe([3]f32) = nil,
+  cast_shadow: bool = true,
+) -> (parent: world.NodeHandle, body: physics.DynamicRigidBodyHandle) {
+  parent, _ = world.spawn(&engine.world, position)
+  n, _ := world.node(&engine.world, parent)
+  body = physics.create_dynamic_body(&engine.physics, n.transform.position, n.transform.rotation, mass, collider)
+  if b, ok := physics.get_dynamic_body(&engine.physics, body); ok {
+    physics.set_inertia_from_collider(b, collider)
+  }
+  n.attachment = world.RigidBodyAttachment{body_handle = body}
+  _attach_visual_mesh(engine, parent, collider, mesh, material, visual_scale, cast_shadow)
+  return
+}
+
+spawn_trigger :: proc(
+  engine: ^Engine,
+  position: [3]f32,
+  collider: physics.Collider,
+  mesh: world.MeshHandle = {},
+  material: world.MaterialHandle = {},
+  visual_scale: Maybe([3]f32) = nil,
+  cast_shadow: bool = true,
+) -> (parent: world.NodeHandle, body: physics.TriggerHandle, ok: bool) {
+  parent = world.spawn(&engine.world, position) or_return
+  body = physics.create_trigger(&engine.physics, position = position, collider = collider) or_return
+  _attach_visual_mesh(engine, parent, collider, mesh, material, visual_scale, cast_shadow)
+  ok = true
+  return
+}
+
+// ---------- viewport / picking (window DPI + main camera) ----------
+
+// Build a world-space ray from a logical cursor position (GLFW pixels).
+// DPI is applied internally — callers pass raw `engine.input.mouse_pos`.
+viewport_to_world_ray :: proc(
+  engine: ^Engine,
+  mouse_x, mouse_y: f32,
+) -> (origin: [3]f32, dir: [3]f32, ok: bool) {
+  cam, has := world.main_camera(&engine.world)
+  if !has do return {}, {}, false
+  dpi := get_window_dpi(engine.window)
+  origin, dir = world.camera_viewport_to_world_ray(cam, mouse_x * dpi, mouse_y * dpi)
+  return origin, dir, true
+}
+
+cursor_world_ray :: proc(engine: ^Engine) -> (origin: [3]f32, dir: [3]f32, ok: bool) {
+  return viewport_to_world_ray(engine, f32(engine.input.mouse_pos.x), f32(engine.input.mouse_pos.y))
+}
+
+// ---------- navigation (config translation + nav.init) ----------
+
+// One-shot navmesh setup: builds the mesh on `engine.nav` and initialises
+// the query/filter so nav queries work immediately. Translates engine-level
+// NavMeshConfig to recast.Config and chains nav.init after build.
+build_navmesh :: proc(
+  engine: ^Engine,
+  geom: nav.NavigationGeometry,
+  config: NavMeshConfig = DEFAULT_NAVMESH_CONFIG,
+) -> bool {
+  if !nav.build_navmesh(&engine.nav.nav_mesh, geom, navmesh_config_to_recast(config)) do return false
+  return nav.init(&engine.nav)
 }

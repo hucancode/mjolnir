@@ -206,3 +206,24 @@ sprite_animation_set_direction :: proc(anim: ^SpriteAnimation, forward: bool) {
     anim.current_frame = forward ? 0 : anim.frame_count - 1
   }
 }
+
+// Spawn a node carrying a sprite attachment. Bundles create_sprite + spawn(SpriteAttachment).
+spawn_sprite :: proc(
+  world: ^World,
+  texture: gpu.Texture2DHandle,
+  mesh: MeshHandle,
+  material: MaterialHandle,
+  position: [3]f32 = {0, 0, 0},
+  frame_columns: u32 = 1,
+  frame_rows: u32 = 1,
+  animation: Maybe(SpriteAnimation) = nil,
+) -> (node: NodeHandle, sprite_handle: SpriteHandle, ok: bool) {
+  sprite_handle = create_sprite(world, texture, frame_columns, frame_rows, animation) or_return
+  node = spawn(
+    world,
+    position,
+    SpriteAttachment{sprite_handle = sprite_handle, mesh_handle = mesh, material = material},
+  ) or_return
+  ok = true
+  return
+}

@@ -1,6 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 import "core:fmt"
 import "core:math"
 import "core:math/linalg"
@@ -16,8 +18,8 @@ metallic_min: mu.Real = 0.0
 metallic_max: mu.Real = 1.0
 roughness_min: mu.Real = 0.0
 roughness_max: mu.Real = 1.0
-sun_light: mjolnir.NodeHandle
-grid_materials: [GRID][GRID]mjolnir.MaterialHandle
+sun_light: world.NodeHandle
+grid_materials: [GRID][GRID]world.MaterialHandle
 
 main :: proc() {
   mjolnir.run_app({
@@ -33,36 +35,34 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   half := f32(GRID - 1) * 0.5 * SPACING
-  mjolnir.main_camera_look_at(engine, {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
+  world.main_camera_look_at(&engine.world, {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
 
-  sphere_mesh := mjolnir.builtin_mesh(engine, .SPHERE)
-  plane_mesh := mjolnir.builtin_mesh(engine, .QUAD_XZ)
+  sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
+  plane_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
   ground_albedo := mjolnir.create_texture(engine, #load("statue-1275469_1280.jpg"), generate_mips = true)
-  plane_material := mjolnir.create_material(
-    engine, {.ALBEDO_TEXTURE}, .PBR,
+  plane_material := world.create_material(&engine.world, {.ALBEDO_TEXTURE}, .PBR,
     albedo_handle = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
   )
 
-  plane := mjolnir.spawn(engine, {0, -1, 0}, mjolnir.MeshAttachment{handle = plane_mesh, material = plane_material, cast_shadow = false})
-  mjolnir.scale(engine, plane, f32(GRID) * SPACING * 1.5)
+  plane := world.spawn(&engine.world, {0, -1, 0}, world.MeshAttachment{handle = plane_mesh, material = plane_material, cast_shadow = false})
+  world.scale(&engine.world, plane, f32(GRID) * SPACING * 1.5)
 
   base_color: [4]f32 = {0.85, 0.85, 0.9, 1}
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
-    mat := mjolnir.create_material(
-      engine, type = .PBR, base_color_factor = base_color,
+    mat := world.create_material(&engine.world, type = .PBR, base_color_factor = base_color,
       metallic_value = m, roughness_value = r,
     )
     grid_materials[row][col] = mat
     x := f32(col) * SPACING - half
     y := f32(row) * SPACING
-    mjolnir.spawn(engine, {x, y, 0}, mjolnir.MeshAttachment{handle = sphere_mesh, material = mat, cast_shadow = true})
+    world.spawn(&engine.world, {x, y, 0}, world.MeshAttachment{handle = sphere_mesh, material = mat, cast_shadow = true})
   }
 
   q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
   q2 := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
-  sun_light = mjolnir.spawn_light_directional(engine, {0, 10, 0}, {1, 0.97, 0.92, f32(sun_intensity)}, 12.0)
-  mjolnir.rotate(engine, sun_light, q2 * q1)
+  sun_light = world.spawn_light_directional(&engine.world, {0, 10, 0}, {1, 0.97, 0.92, f32(sun_intensity)}, 12.0)
+  world.rotate(&engine.world, sun_light, q2 * q1)
 }
 
 axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
@@ -76,18 +76,12 @@ axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  mjolnir.set_light_intensity(engine, sun_light, f32(sun_intensity))
-  mjolnir.set_ibl_intensity(engine, f32(ibl_intensity))
-  mjolnir.set_skybox_enabled(engine, skybox_on)
+  world.set_light_intensity(&engine.world, sun_light, f32(sun_intensity))
+  render.set_ibl_intensity(&engine.render, f32(ibl_intensity))
+  render.set_skybox_enabled(&engine.render, skybox_on)
   for row in 0 ..< GRID do for col in 0 ..< GRID {
-    h := grid_materials[row][col]
-    mat, ok := mjolnir.material(engine, h)
-    if !ok do continue
     m, r := axis_values(row, col)
-    if mat.metallic_value == m && mat.roughness_value == r do continue
-    mat.metallic_value = m
-    mat.roughness_value = r
-    mjolnir.stage_material_data(engine, h)
+    world.set_material_pbr_params(&engine.world, grid_materials[row][col], metallic = m, roughness = r)
   }
 }
 

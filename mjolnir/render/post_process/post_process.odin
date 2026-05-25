@@ -281,7 +281,7 @@ add_tonemap :: proc(self: ^Renderer, exposure: f32 = 1.0, gamma: f32 = 1.0) {
   append(&self.effect_stack, effect)
 }
 
-add_outline :: proc(self: ^Renderer, thickness: f32, color: [3]f32) {
+add_outline :: proc(self: ^Renderer, thickness: f32, color: [3]f32 = {0, 0, 0}) {
   effect := OutlineEffect {
     thickness = thickness,
     color     = color,

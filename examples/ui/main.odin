@@ -1,7 +1,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/gpu"
+import "../../mjolnir/world"
 import cmd "../../mjolnir/gpu/ui"
 import "../../mjolnir/ui"
 import "core:log"
@@ -53,10 +53,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   star, star_ok := ui.create_mesh2d(&engine.ui, position = {0, 0}, vertices = star_vertices, indices = star_indices, z_order = 1)
   log.infof("Star mesh created: handle=%v, ok=%v", star, star_ok)
 
-  star_texture, texture_ok := gpu.create_texture_2d_from_path(&engine.gctx, &engine.render.texture_manager, "assets/gold-star.png")
+  star_texture, texture_ok := mjolnir.create_texture(engine, "assets/gold-star.png")
   log.infof("Star texture loaded: handle=%v, ok=%v", star_texture, texture_ok)
 
-  if texture_ok == .SUCCESS {
+  if texture_ok {
     image_quad, image_quad_ok := ui.create_quad2d(&engine.ui, position = {350, 300}, size = {128, 128}, texture = star_texture, z_order = 1)
     log.infof("Image quad created: handle=%v, ok=%v", image_quad, image_quad_ok)
   }
@@ -104,6 +104,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   image_label, image_label_ok := ui.create_text2d(&engine.ui, position = {300, 440}, text = "Image display using Quad2D with texture", font_size = 20, color = {255, 255, 255, 255}, z_order = 1)
   log.infof("Image label created: handle=%v, ok=%v", image_label, image_label_ok)
 
-  mjolnir.spawn_primitive_mesh(engine, .CUBE, .BLUE)
-  mjolnir.main_camera_look_at(engine, {3, 2, 3}, {0, 0, 0})
+  world.spawn_primitive_mesh(&engine.world, .CUBE, .BLUE)
+  world.main_camera_look_at(&engine.world, {3, 2, 3}, {0, 0, 0})
 }

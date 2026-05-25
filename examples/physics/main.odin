@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/world"
 import "../../mjolnir/geometry"
 import "../../mjolnir/physics"
 import "core:log"
@@ -20,20 +21,20 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  ground_mesh := mjolnir.builtin_mesh(engine, .CUBE)
-  ground_mat := mjolnir.builtin_material(engine, .GRAY)
-  sphere_mesh := mjolnir.builtin_mesh(engine, .SPHERE)
-  sphere_mat := mjolnir.builtin_material(engine, .MAGENTA)
-  cube_mesh := mjolnir.builtin_mesh(engine, .CUBE)
-  cube_mat := mjolnir.builtin_material(engine, .RED)
-  rand_sphere_mesh := mjolnir.create_mesh(engine, geometry.make_sphere(random_colors = true))
-  rand_cylinder_mesh := mjolnir.create_mesh(engine, geometry.make_cylinder(random_colors = true))
-  rand_mat := mjolnir.builtin_material(engine, .WHITE)
+  ground_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  ground_mat := world.get_builtin_material(&engine.world, .GRAY)
+  sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
+  sphere_mat := world.get_builtin_material(&engine.world, .MAGENTA)
+  cube_mesh := world.get_builtin_mesh(&engine.world, .CUBE)
+  cube_mat := world.get_builtin_material(&engine.world, .RED)
+  rand_sphere_mesh := world.create_mesh(&engine.world, geometry.make_sphere(random_colors = true))
+  rand_cylinder_mesh := world.create_mesh(&engine.world, geometry.make_cylinder(random_colors = true))
+  rand_mat := world.get_builtin_material(&engine.world, .WHITE)
 
   mjolnir.spawn_static(engine, {0, -0.5, 0}, physics.BoxCollider{half_extents = {PLANE_WIDTH, 0.5, PLANE_HEIGHT}},
-    ground_mesh, ground_mat, visual_scale = {PLANE_WIDTH, 0.5, PLANE_HEIGHT})
+    ground_mesh, ground_mat)
   mjolnir.spawn_static(engine, {2.5, SPHERE_RADIUS, 0}, physics.SphereCollider{radius = SPHERE_RADIUS},
-    sphere_mesh, sphere_mat, visual_scale = {SPHERE_RADIUS, SPHERE_RADIUS, SPHERE_RADIUS})
+    sphere_mesh, sphere_mat)
 
   for x in 0 ..< NX do for y in 0 ..< NY do for z in 0 ..< NZ {
     pos := [3]f32{f32(x - NX/2) * 3.0, f32(y) * 3.0 + 10.0, f32(z - NZ/2) * 3.0}
@@ -45,7 +46,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   log.infof("Created %d physics objects", PIECE_COUNT)
-  mjolnir.main_camera_look_at(engine, {30, 25, 30}, {0, 5, 0})
-  light := mjolnir.spawn_light_spot(engine, {0, 20, 0}, {0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25)
-  mjolnir.rotate(engine, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  world.main_camera_look_at(&engine.world, {30, 25, 30}, {0, 5, 0})
+  light := world.spawn_light_spot(&engine.world, {0, 20, 0}, {0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25)
+  world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 }

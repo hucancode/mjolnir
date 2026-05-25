@@ -1,6 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
+import "../../mjolnir/world"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
@@ -21,9 +23,9 @@ MODELS := [?]Model{
   {"SciFi Helmet",   "assets/SciFiHelmet.glb",    1.0,   {0, -1, 0},    0},
 }
 
-model_nodes: [dynamic]mjolnir.NodeHandle
+model_nodes: [dynamic]world.NodeHandle
 current_model: int = -1
-dir_light: mjolnir.NodeHandle
+dir_light: world.NodeHandle
 
 dir_intensity: mu.Real = 1.0
 rotate_speed: mu.Real = 0.5
@@ -44,14 +46,14 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {0, 0.2, 3.5}, {0, 0, 0})
-  dir_light = mjolnir.spawn_light_directional(engine, {4, 6, 4}, {1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false)
+  world.main_camera_look_at(&engine.world, {0, 0.2, 3.5}, {0, 0, 0})
+  dir_light = world.spawn_light_directional(&engine.world, {4, 6, 4}, {1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false)
   swap_model(engine, 0)
 }
 
 swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
   if index == current_model do return
-  for h in model_nodes do mjolnir.despawn(engine, h)
+  for h in model_nodes do world.despawn(&engine.world, h)
   clear(&model_nodes)
   current_model = index
   m := MODELS[index]
@@ -60,19 +62,19 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  mjolnir.set_light_intensity(engine, dir_light, f32(dir_intensity))
-  mjolnir.set_ibl_intensity(engine, f32(ibl_intensity))
-  mjolnir.set_skybox_enabled(engine, skybox_on)
-  mjolnir.set_skybox_blur(engine, f32(skybox_blur))
+  world.set_light_intensity(&engine.world, dir_light, f32(dir_intensity))
+  render.set_ibl_intensity(&engine.render, f32(ibl_intensity))
+  render.set_skybox_enabled(&engine.render, skybox_on)
+  render.set_skybox_blur(&engine.render, f32(skybox_blur))
   if spinning {
     rotation_phase += delta_time * f32(rotate_speed)
   }
   m := MODELS[current_model]
   for h in model_nodes {
-    mjolnir.translate(engine, h, m.offset)
-    mjolnir.rotate(engine, h, rotation_phase, linalg.VECTOR3F32_Y_AXIS)
-    if m.rot_x != 0 do mjolnir.rotate_by(engine, h, m.rot_x, linalg.VECTOR3F32_X_AXIS)
-    mjolnir.scale(engine, h, m.scale)
+    world.translate(&engine.world, h, m.offset)
+    world.rotate(&engine.world, h, rotation_phase, linalg.VECTOR3F32_Y_AXIS)
+    if m.rot_x != 0 do world.rotate_by(&engine.world, h, m.rot_x, linalg.VECTOR3F32_X_AXIS)
+    world.scale(&engine.world, h, m.scale)
   }
 }
 

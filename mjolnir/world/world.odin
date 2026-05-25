@@ -11,16 +11,24 @@ import "core:slice"
 import "core:strings"
 import "core:sync"
 
+// Default inner/outer cone ratio for spot lights. Inner cone is the angular
+// region with full intensity; outer cone is the falloff edge. Both spawn_light_spot
+// and set_spot_light_cone derive `inner = outer * SPOT_LIGHT_INNER_RATIO` when
+// the caller doesn't specify inner explicitly.
+SPOT_LIGHT_INNER_RATIO :: f32(0.75)
+
 PointLightAttachment :: struct {
   color:       [4]f32, // RGB + intensity
   radius:      f32, // range
   cast_shadow: bool,
+  disabled:    bool, // zero-default = enabled; toggle to skip GPU upload without losing color/radius
 }
 
 DirectionalLightAttachment :: struct {
   color:       [4]f32, // RGB + intensity
   radius:      f32, // shadow projection radius
   cast_shadow: bool,
+  disabled:    bool,
 }
 
 SpotLightAttachment :: struct {
@@ -29,6 +37,7 @@ SpotLightAttachment :: struct {
   angle_inner: f32, // inner cone angle
   angle_outer: f32, // outer cone angle
   cast_shadow: bool,
+  disabled:    bool,
 }
 
 NodeSkinning :: struct {
@@ -678,6 +687,27 @@ set_light_radius :: proc(w: ^World, h: NodeHandle, radius: f32) {
   stage_light_data(&w.staging, h)
 }
 
+// Toggle a light without losing its configured color/radius/cone.
+set_light_enabled :: proc(w: ^World, h: NodeHandle, enabled: bool) {
+  n, n_ok := cont.get(w.nodes, h)
+  if !n_ok do return
+  target: ^bool
+  switch &a in n.attachment {
+  case PointLightAttachment:       target = &a.disabled
+  case DirectionalLightAttachment: target = &a.disabled
+  case SpotLightAttachment:        target = &a.disabled
+  case MeshAttachment, EmitterAttachment, ForceFieldAttachment,
+       SpriteAttachment, RigidBodyAttachment:
+    return
+  case:
+    return
+  }
+  want := !enabled
+  if target^ == want do return
+  target^ = want
+  stage_light_data(&w.staging, h)
+}
+
 // Mesh attachment setters. Mutate + auto-stage. Leave sibling fields untouched.
 set_mesh_handle :: proc(w: ^World, h: NodeHandle, mesh: MeshHandle) {
   n, n_ok := cont.get(w.nodes, h)
@@ -714,4 +744,74 @@ sync_all_physics_to_world :: proc(
       }
     }
   }
+}
+
+// Set spot-light cone angles + auto-stage. Pass `inner = nil` to default it to
+// `outer * SPOT_LIGHT_INNER_RATIO` (matches spawn_light_spot's default).
+set_spot_light_cone :: proc(
+  w: ^World,
+  h: NodeHandle,
+  outer: f32,
+  inner: Maybe(f32) = nil,
+) -> bool {
+  att, ok := spot_light(w, h)
+  if !ok do return false
+  inner_angle := inner.? or_else outer * SPOT_LIGHT_INNER_RATIO
+  if att.angle_outer == outer && att.angle_inner == inner_angle do return true
+  att.angle_outer = outer
+  att.angle_inner = inner_angle
+  mark_light_dirty(w, h)
+  return true
+}
+
+// Spawn a point light. Returns the new node handle.
+spawn_light_point :: proc(
+  world: ^World,
+  position: [3]f32 = {0, 0, 0},
+  color: [4]f32 = {1, 1, 1, 1},
+  radius: f32 = 10.0,
+  cast_shadow: bool = true,
+) -> (NodeHandle, bool) #optional_ok {
+  return spawn(world, position, PointLightAttachment{color = color, radius = radius, cast_shadow = cast_shadow})
+}
+
+spawn_light_directional :: proc(
+  world: ^World,
+  position: [3]f32 = {0, 0, 0},
+  color: [4]f32 = {1, 1, 1, 1},
+  radius: f32 = 10.0,
+  cast_shadow: bool = false,
+) -> (NodeHandle, bool) #optional_ok {
+  return spawn(world, position, DirectionalLightAttachment{color = color, radius = radius, cast_shadow = cast_shadow})
+}
+
+spawn_light_spot :: proc(
+  world: ^World,
+  position: [3]f32 = {0, 0, 0},
+  color: [4]f32 = {1, 1, 1, 1},
+  radius: f32 = 10.0,
+  angle: f32 = math.PI * 0.2,
+  cast_shadow: bool = true,
+) -> (NodeHandle, bool) #optional_ok {
+  return spawn(
+    world,
+    position,
+    SpotLightAttachment{
+      color       = color,
+      radius      = radius,
+      angle_inner = angle * SPOT_LIGHT_INNER_RATIO,
+      angle_outer = angle,
+      cast_shadow = cast_shadow,
+    },
+  )
+}
+
+// Spawn a node bound to an existing rigid body. The body is created by the
+// physics module first, then attached.
+spawn_rigid_body :: proc(
+  world: ^World,
+  body: physics.DynamicRigidBodyHandle,
+  position: [3]f32 = {0, 0, 0},
+) -> (NodeHandle, bool) #optional_ok {
+  return spawn(world, position, RigidBodyAttachment{body_handle = body})
 }

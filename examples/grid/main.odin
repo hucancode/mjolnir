@@ -13,16 +13,16 @@ GRID_SIZES :: [3]int{5, 256, 300}
 current_size_index: int = -1
 pending_index: int = -1
 despawn_cooldown: int
-grid_root: mjolnir.NodeHandle
+grid_root: world.NodeHandle
 
 main :: proc() {
   mjolnir.run_app({title = "Grid", debug_ui = true, setup = setup, update = update, pre_render = debug_ui})
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  light := mjolnir.spawn_light_directional(engine, {10, 18, 10}, {1, 0.97, 0.92, 3.0}, 60.0, false)
-  mjolnir.rotate(engine, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-  mjolnir.main_camera_look_at(engine, {14, 14, 14}, {0, 0, 0})
+  light := world.spawn_light_directional(&engine.world, {10, 18, 10}, {1, 0.97, 0.92, 3.0}, 60.0, false)
+  world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  world.main_camera_look_at(&engine.world, {14, 14, 14}, {0, 0, 0})
   pending_index = 0
 }
 
@@ -39,7 +39,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     return
   }
   if pending_index >= 0 && pending_index != current_size_index {
-    if grid_root.index != 0 do mjolnir.despawn(engine, grid_root)
+    if grid_root.index != 0 do world.despawn(&engine.world, grid_root)
     grid_root = {}
     despawn_cooldown = 2
   }
@@ -50,13 +50,12 @@ spawn_grid :: proc(engine: ^mjolnir.Engine, idx: int) {
   pending_index = -1
   sizes := GRID_SIZES
   n := sizes[idx]
-  mat := mjolnir.builtin_material(engine, .GREEN if n > 5 else .YELLOW)
-  m := mjolnir.builtin_mesh(engine, .CUBE)
+  color := world.Color.GREEN if n > 5 else world.Color.YELLOW
   half := f32(n) * 0.5
   log.infof("spawning %dx%d cubes", n, n)
-  grid_root = mjolnir.spawn(engine, {0, 0, 0})
+  grid_root = world.spawn(&engine.world, {0, 0, 0})
   for z in 0 ..< n do for x in 0 ..< n {
-    mjolnir.spawn_child(engine, grid_root, {(f32(x) - half) * 4, 0, (f32(z) - half) * 4}, world.MeshAttachment{handle = m, material = mat})
+    world.spawn_primitive_mesh_child(&engine.world, grid_root, .CUBE, color, position = {(f32(x) - half) * 4, 0, (f32(z) - half) * 4})
   }
 }
 

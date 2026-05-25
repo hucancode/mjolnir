@@ -13,7 +13,7 @@
     "notes": [
       "Layer indices are returned by <code>add_animation_layer</code>; pick stable slots for \"walk\", \"run\", \"upper-body\".",
       "<code>BlendMode</code> default <code>.REPLACE</code> (weighted). Use <code>.ADD</code> for additive layers (recoil over aim).",
-      "One-shot crossfade between layers: <code>mjolnir.transition_to_animation</code>.",
+      "One-shot crossfade between layers: <code>world.transition_to_animation</code>.",
       "Drive per-layer weight live with <code>set_animation_layer_weight</code>."
     ]
   },
@@ -77,7 +77,7 @@
     "notes": [
       "Animation names match <code>animations[i].name</code>. Empty names become <code>Anim_0</code>, <code>Anim_1</code>, …",
       "<code>play_animation</code> adds to layer 0 with weight 1.0. Use <code>add_animation_layer</code> for multi-layer blends.",
-      "<code>mjolnir.skinned_mesh(engine, root)</code> grabs the first skinned child."
+      "<code>world.skinned_mesh_child(&engine.world, root)</code> grabs the first skinned child."
     ]
   },
   {
@@ -148,7 +148,7 @@
     "notes": [
       "Custom geometry: accumulate with <code>NavGeometryBuilder</code>, then <code>nav.build_navmesh</code>.",
       "\"Bake everything tagged\" flow: <code>mjolnir.setup_navmesh</code> reads tagged scene nodes.",
-      "Mouse-pick onto the navmesh: ray-test ground plane → <code>mjolnir.find_nearest_point</code> → <code>mjolnir.find_path</code>.",
+      "Mouse-pick onto the navmesh: ray-test ground plane → <code>nav.find_nearest_point</code> → <code>nav.find_path</code>.",
       "Heavy build — do it at setup or after big scene changes."
     ]
   },
@@ -200,7 +200,7 @@
     "desc": "Rigid body cubes, spheres, cylinders.",
     "notes": [
       "<code>spawn_static</code> / <code>spawn_dynamic</code> create node + body + visual child in one call. <code>set_inertia_from_collider</code> runs automatically.",
-      "Raw bodies without a node: <code>mjolnir.create_static_body</code> / <code>create_dynamic_body</code>.",
+      "Raw bodies without a node: <code>physics.create_static_body</code> / <code>physics.create_dynamic_body</code>.",
       "<code>engine.physics.gravity</code> defaults to <code>{0, -9.81, 0}</code>. Set in <code>setup</code> for zero-g.",
       "<code>KILL_Y = -50.0</code> — bodies that fall below are killed."
     ]
@@ -218,7 +218,7 @@
     "name": "procedural_mesh",
     "desc": "Mesh generated at runtime.",
     "notes": [
-      "Build a <code>geometry.Geometry</code> at runtime, hand it to <code>mjolnir.create_mesh</code>.",
+      "Build a <code>geometry.Geometry</code> at runtime, hand it to <code>world.create_mesh</code>.",
       "Tangents are auto-filled if missing.",
       "For frequently regenerated meshes, set <code>auto_purge = false</code> to keep CPU geometry around."
     ]
@@ -236,7 +236,7 @@
     "name": "scene_graph",
     "desc": "Hierarchical transforms and traversal.",
     "notes": [
-      "<code>spawn_child</code> parents at creation; <code>mjolnir.attach</code> / <code>detach</code> rewire later.",
+      "<code>spawn_child</code> parents at creation; <code>world.attach</code> / <code>detach</code> rewire later.",
       "Local transforms multiply through the chain — rotate a parent, all children orbit.",
       "<code>despawn</code> is recursive."
     ]

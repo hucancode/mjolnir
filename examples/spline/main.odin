@@ -2,6 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/animation"
+import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/ease"
@@ -9,7 +10,7 @@ import "core:math/ease"
 CUBE_COUNT :: 50
 ANIMATION_DURATION :: 8.0
 
-cubes: [CUBE_COUNT]mjolnir.NodeHandle
+cubes: [CUBE_COUNT]world.NodeHandle
 spline: animation.Spline([3]f32)
 
 main :: proc() {
@@ -18,7 +19,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.main_camera_look_at(engine, {0, 10, 0}, {0, 0, 0})
+  world.main_camera_look_at(&engine.world, {0, 10, 0}, {0, 0, 0})
 
   CONTROL_POINTS :: 10
   spline = animation.spline_create([3]f32, CONTROL_POINTS)
@@ -31,22 +32,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if !animation.spline_validate(spline) do log.error("Spline validation failed!")
   animation.spline_build_arc_table(&spline, 200)
 
-  mats := [?]mjolnir.MaterialHandle{
-    mjolnir.builtin_material(engine, .RED), mjolnir.builtin_material(engine, .GREEN),
-    mjolnir.builtin_material(engine, .BLUE), mjolnir.builtin_material(engine, .YELLOW),
-    mjolnir.builtin_material(engine, .CYAN), mjolnir.builtin_material(engine, .MAGENTA),
-    mjolnir.builtin_material(engine, .WHITE), mjolnir.builtin_material(engine, .GRAY),
-    mjolnir.builtin_material(engine, .BLACK),
+  mats := [?]world.MaterialHandle{
+    world.get_builtin_material(&engine.world, .RED), world.get_builtin_material(&engine.world, .GREEN),
+    world.get_builtin_material(&engine.world, .BLUE), world.get_builtin_material(&engine.world, .YELLOW),
+    world.get_builtin_material(&engine.world, .CYAN), world.get_builtin_material(&engine.world, .MAGENTA),
+    world.get_builtin_material(&engine.world, .WHITE), world.get_builtin_material(&engine.world, .GRAY),
+    world.get_builtin_material(&engine.world, .BLACK),
   }
-  cube := mjolnir.builtin_mesh(engine, .CUBE)
+  cube := world.get_builtin_mesh(&engine.world, .CUBE)
   for i in 0 ..< CUBE_COUNT {
-    cubes[i] = mjolnir.spawn(engine, {0, 0, 0}, mjolnir.MeshAttachment{handle = cube, material = mats[i % len(mats)]})
-    mjolnir.scale(engine, cubes[i], 0.3)
+    cubes[i] = world.spawn(&engine.world, {0, 0, 0}, world.MeshAttachment{handle = cube, material = mats[i % len(mats)]})
+    world.scale(&engine.world, cubes[i], 0.3)
   }
-  ground := mjolnir.spawn(engine, {0, 0, 0}, mjolnir.MeshAttachment{handle = mjolnir.builtin_mesh(engine, .QUAD_XZ), material = mjolnir.builtin_material(engine, .GRAY)})
-  mjolnir.scale(engine, ground, 20.0)
-  mjolnir.translate(engine, ground, 0, -2, 0)
-  mjolnir.spawn_light_point(engine, {0, 10, 0}, {1, 1, 1, 1}, 20.0, true)
+  world.spawn_ground(&engine.world, 20.0, position = {0, -2, 0})
+  world.spawn_light_point(&engine.world, {0, 10, 0}, {1, 1, 1, 1}, 20.0, true)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -57,6 +56,6 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     current_s := math.mod_f32(elapsed * (total_length / ANIMATION_DURATION) + offset, total_length)
     normalized := current_s / total_length
     tweened := ease.ease(.Quadratic_In_Out, normalized) * total_length
-    mjolnir.translate(engine, cubes[i], animation.spline_sample_uniform(spline, tweened))
+    world.translate(&engine.world, cubes[i], animation.spline_sample_uniform(spline, tweened))
   }
 }
