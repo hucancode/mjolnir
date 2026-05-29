@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/gpu"
 import "../../mjolnir/world"
 import "core:log"
 
@@ -13,8 +14,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   world.spawn_ground(&engine.world, 6.0)
 
-  tex, tex_ok := mjolnir.create_texture(engine, "assets/Warrior_Sheet-Effect.png")
-  if !tex_ok {
+  tex, tex_ret := gpu.create_texture_2d_from_path(&engine.gctx, &engine.render.texture_manager, "assets/Warrior_Sheet-Effect.png")
+  if tex_ret != .SUCCESS {
     log.error("failed to load warrior sheet")
     return
   }

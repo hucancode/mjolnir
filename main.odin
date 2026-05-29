@@ -7,6 +7,7 @@ import "mjolnir"
 import "mjolnir/animation"
 import cont "mjolnir/containers"
 import "mjolnir/geometry"
+import "mjolnir/gpu"
 import "mjolnir/render"
 import "mjolnir/render/post_process"
 import "mjolnir/world"
@@ -93,11 +94,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   when true {
     brick_wall_mat_handle: world.MaterialHandle
     brick_wall_mat_ok := false
-    brick_albedo_handle, brick_albedo_ok := mjolnir.create_texture(
-      engine,
+    brick_albedo_handle, brick_albedo_ret := gpu.create_texture_2d_from_path(
+      &engine.gctx,
+      &engine.render.texture_manager,
       "assets/t_brick_floor_002_diffuse_1k.jpg",
     )
-    if brick_albedo_ok {
+    if brick_albedo_ret == .SUCCESS {
       brick_wall_mat_handle, brick_wall_mat_ok = world.create_material(
         &engine.world,
         {.ALBEDO_TEXTURE},
@@ -455,14 +457,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   when true {
     log.info("Setting up particles...")
-    black_circle_texture_handle, black_circle_ok := mjolnir.create_texture(
-      engine,
+    black_circle_texture_handle, black_circle_ret := gpu.create_texture_2d_from_path(
+      &engine.gctx,
+      &engine.render.texture_manager,
       "assets/particles/circle_05.png",
     )
-    goldstar_texture_handle, goldstar_texture_ok := mjolnir.create_texture(
-      engine,
+    black_circle_ok := black_circle_ret == .SUCCESS
+    goldstar_texture_handle, goldstar_texture_ret := gpu.create_texture_2d_from_path(
+      &engine.gctx,
+      &engine.render.texture_manager,
       "assets/particles/star_07.png",
     )
+    goldstar_texture_ok := goldstar_texture_ret == .SUCCESS
     goldstar_material_handle: world.MaterialHandle
     goldstar_material_ok := false
     if goldstar_texture_ok {
@@ -640,11 +646,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info(
       "spawning Warrior effect sprite with animation (99 frames @ 24fps)...",
     )
-    warrior_sprite_texture, warrior_sprite_ok := mjolnir.create_texture(
-      engine,
+    warrior_sprite_texture, warrior_sprite_ret := gpu.create_texture_2d_from_path(
+      &engine.gctx,
+      &engine.render.texture_manager,
       "assets/Warrior_Sheet-Effect.png",
     )
-    if warrior_sprite_ok {
+    if warrior_sprite_ret == .SUCCESS {
       sprite_quad := engine.world.builtin_meshes[world.Primitive.QUAD_XY]
       // 6x17 sprite sheet: 6 columns, 17 rows, using frames 0-98 (99 total)
       // Create animation: 99 frames at 24fps, looping

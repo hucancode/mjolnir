@@ -12,7 +12,7 @@ visibility_stats :: proc(
   frame_index: u32,
 ) -> VisibilityStats {
   cam, ok := &self.cameras[camera_index]
-  if !ok do return {node_count = self.internal.visibility.node_count}
+  if !ok do return {node_count = self.node_count}
   st := occlusion_culling.stats(
     &self.internal.visibility,
     &cam.draws[.OPAQUE].count[frame_index],
@@ -20,7 +20,7 @@ visibility_stats :: proc(
     frame_index,
   )
   return {
-    node_count = self.internal.visibility.node_count,
+    node_count = self.node_count,
     opaque_draw_count = st.opaque_draw_count,
   }
 }
@@ -192,6 +192,35 @@ camera_destroy :: proc(
   camera^ = {}
 }
 
+// Allocate the per-camera GPU slot, initialise its attachments, and bind
+// descriptors. Used by both the spawn path and the world->render sync that
+// promotes a freshly-staged world camera to a render-side CameraTarget.
+init_camera_target :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  index: u32,
+  extent: vk.Extent2D,
+  color_format: vk.Format,
+  enabled_passes: PassTypeSet = DEFAULT_ENABLED_PASSES,
+  enable_culling: bool = true,
+) -> vk.Result {
+  self.cameras[index] = {}
+  cam := &self.cameras[index]
+  camera_init(
+    gctx,
+    cam,
+    &self.texture_manager,
+    extent,
+    color_format,
+    .D32_SFLOAT,
+    enabled_passes,
+    enable_culling,
+    MAX_NODES_IN_SCENE,
+  ) or_return
+  camera_allocate_descriptors(self, gctx, cam) or_return
+  return .SUCCESS
+}
+
 // Allocate descriptor sets for perspective/orthographic camera culling pipelines
 camera_allocate_descriptors :: proc(
   self: ^Manager,
@@ -321,6 +350,29 @@ camera_allocate_descriptors :: proc(
   }
 
   return .SUCCESS
+}
+
+// Resize the render-side CameraTarget for a single camera index and rebind
+// its descriptor sets. Skips silently if the index has no render-side state.
+// Pair with world.handle_swapchain_resize to drive a full swapchain resize.
+resize_camera :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  index: u32,
+  extent: vk.Extent2D,
+  color_format: vk.Format,
+) -> vk.Result {
+  cam, ok := &self.cameras[index]
+  if !ok do return .SUCCESS
+  camera_resize(
+    gctx,
+    cam,
+    &self.texture_manager,
+    extent,
+    color_format,
+    .D32_SFLOAT,
+  ) or_return
+  return camera_allocate_descriptors(self, gctx, cam)
 }
 
 // Resize camera render targets (called on window resize)

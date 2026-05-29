@@ -17,7 +17,6 @@ SphereCullPushConstants :: struct {
 }
 
 System :: struct {
-  node_count:        u32,
   max_draws:         u32,
   include_flags:     u32,
   exclude_flags:     u32,
@@ -108,12 +107,13 @@ create_per_light_descriptor :: proc(
 execute :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
+  node_count: u32,
   light_position: [3]f32,
   sphere_radius: f32,
   shadow_draw_count_buffer: vk.Buffer,
   shadow_draw_count_ds: vk.DescriptorSet,
 ) {
-  dispatch_x := (self.node_count + 63) / 64
+  dispatch_x := (node_count + 63) / 64
   vk.CmdFillBuffer(
     command_buffer,
     shadow_draw_count_buffer,
@@ -139,7 +139,7 @@ execute :: proc(
   push := SphereCullPushConstants {
     light_position = light_position,
     sphere_radius  = sphere_radius,
-    node_count     = self.node_count,
+    node_count     = node_count,
     max_draws      = self.max_draws,
     include_flags  = self.include_flags,
     exclude_flags  = self.exclude_flags,

@@ -3,15 +3,10 @@ package render
 import "../gpu"
 import particles_compute "particles_compute"
 
-// set_node_count distributes the node count across every culling subsystem
-// that needs it for compute dispatch sizing. Caller (engine) is the single
-// source of truth.
+// Store the active scene node count (clamped to MAX_NODES_IN_SCENE). Culling
+// and depth pyramid dispatch reads it per-frame from Manager.node_count.
 set_node_count :: proc(self: ^Manager, node_count: u32) {
-  n := min(node_count, self.internal.visibility.max_draws)
-  self.internal.visibility.node_count = n
-  self.internal.depth_pyramid.node_count = n
-  self.internal.shadow_culling.node_count = n
-  self.internal.shadow_sphere_culling.node_count = n
+  self.node_count = min(node_count, self.internal.visibility.max_draws)
 }
 
 set_particle_params :: proc(
@@ -44,6 +39,9 @@ set_visibility_stats_enabled :: proc(self: ^Manager, enabled: bool) {
 }
 
 // ---------- ambient (IBL + skybox) setters ----------
+// Internal struct is package-private, so external callers cannot reach the
+// ambient renderer directly. These wrappers gate access until ambient is
+// promoted to the public Manager surface.
 
 set_ibl_intensity :: proc(self: ^Manager, intensity: f32) {
   self.internal.ambient.ibl_intensity = max(intensity, 0.0)
@@ -75,25 +73,4 @@ set_skybox_blur :: proc(self: ^Manager, blur: f32) {
 
 get_skybox_blur :: proc(self: ^Manager) -> f32 {
   return self.internal.ambient.skybox_blur
-}
-
-mesh_destroy :: proc(render: ^Manager, handle: u32) {
-  mesh := gpu.mutable_buffer_get(&render.internal.mesh_data_buffer.buffer, handle)
-  if mesh.index_count > 0 {
-    gpu.free_vertices(
-      &render.mesh_manager,
-      BufferAllocation{offset = u32(mesh.vertex_offset), count = 1},
-    )
-    gpu.free_indices(
-      &render.mesh_manager,
-      BufferAllocation{offset = mesh.first_index, count = 1},
-    )
-  }
-  if .SKINNED in mesh.flags {
-    gpu.free_vertex_skinning(
-      &render.mesh_manager,
-      BufferAllocation{offset = mesh.skinning_offset, count = 1},
-    )
-  }
-  mesh^ = {}
 }

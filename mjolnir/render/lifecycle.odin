@@ -1,6 +1,5 @@
 package render
 
-import cont "../containers"
 import "../gpu"
 import "ambient"
 import "debug_line"
@@ -24,130 +23,13 @@ import ui_render "ui"
 import vk "vendor:vulkan"
 import "wireframe"
 
-init :: proc(
+@(private)
+init_samplers :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
-  swapchain_extent: vk.Extent2D,
-  swapchain_format: vk.Format,
-  dpi_scale: f32,
 ) -> (
   ret: vk.Result,
 ) {
-  self.cameras = make(map[u32]CameraTarget)
-  self.internal.lights = make(map[u32]Light)
-  self.internal.shadow_maps = make(map[u32]ShadowMap)
-  self.internal.shadow_map_cubes = make(map[u32]ShadowMapCube)
-  gpu.allocate_command_buffer(gctx, self.internal.command_buffers[:]) or_return
-  defer if ret != .SUCCESS {
-    gpu.free_command_buffer(gctx, ..self.internal.command_buffers[:])
-  }
-  if gctx.has_async_compute {
-    gpu.allocate_compute_command_buffer(
-      gctx,
-      self.internal.compute_command_buffers[:],
-    ) or_return
-    defer if ret != .SUCCESS {
-      gpu.free_compute_command_buffer(gctx, self.internal.compute_command_buffers[:])
-    }
-  }
-  // Initialize geometry/bone/camera/scene buffers (survive teardown/setup cycles)
-  gpu.mesh_manager_init(&self.mesh_manager, gctx)
-  defer if ret != .SUCCESS {
-    gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
-  }
-  cont.slab_init(
-    &self.internal.bone_matrix_slab,
-    {
-      {32, 64},
-      {64, 128},
-      {128, 4096},
-      {256, 1792},
-      {512, 0},
-      {1024, 0},
-      {2048, 0},
-      {4096, 0},
-    },
-  )
-  gpu.per_frame_bindless_buffer_init(
-    &self.internal.bone_buffer,
-    gctx,
-    int(self.internal.bone_matrix_slab.capacity),
-    {.VERTEX},
-  ) or_return
-  self.internal.bone_matrix_offsets = make(map[u32]u32)
-  defer if ret != .SUCCESS {
-    delete(self.internal.bone_matrix_offsets)
-    gpu.per_frame_bindless_buffer_destroy(&self.internal.bone_buffer, gctx.device)
-    cont.slab_destroy(&self.internal.bone_matrix_slab)
-  }
-  gpu.per_frame_bindless_buffer_init(
-    &self.internal.camera_buffer,
-    gctx,
-    MAX_ACTIVE_CAMERAS,
-    {.VERTEX, .FRAGMENT, .COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(&self.internal.camera_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.internal.material_buffer,
-    gctx,
-    MAX_MATERIALS,
-    {.VERTEX, .FRAGMENT},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.material_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.internal.node_data_buffer,
-    gctx,
-    MAX_NODES_IN_SCENE,
-    {.VERTEX, .FRAGMENT, .COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.node_data_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.internal.mesh_data_buffer,
-    gctx,
-    MAX_MESHES,
-    {.VERTEX},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.mesh_data_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.internal.emitter_buffer,
-    gctx,
-    MAX_EMITTERS,
-    {.COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.emitter_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.internal.forcefield_buffer,
-    gctx,
-    MAX_FORCE_FIELDS,
-    {.COMPUTE},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.forcefield_buffer, gctx.device)
-  }
-  gpu.bindless_buffer_init(
-    &self.internal.sprite_buffer,
-    gctx,
-    MAX_SPRITES,
-    {.VERTEX, .FRAGMENT},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.sprite_buffer, gctx.device)
-  }
-  // Initialize texture manager layout (must precede pipeline layout creation)
-  gpu.texture_manager_init(&self.texture_manager, gctx) or_return
-  defer if ret != .SUCCESS {
-    gpu.texture_manager_shutdown(&self.texture_manager, gctx)
-  }
   info := vk.SamplerCreateInfo {
     sType        = .SAMPLER_CREATE_INFO,
     magFilter    = .LINEAR,
@@ -158,54 +40,40 @@ init :: proc(
     mipmapMode   = .LINEAR,
     maxLod       = 1000,
   }
-  vk.CreateSampler(
-    gctx.device,
-    &info,
-    nil,
-    &self.internal.linear_repeat_sampler,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroySampler(gctx.device, self.internal.linear_repeat_sampler, nil)
-    self.internal.linear_repeat_sampler = 0
-  }
+  vk.CreateSampler(gctx.device, &info, nil, &self.internal.linear_repeat_sampler) or_return
   info.addressModeU, info.addressModeV, info.addressModeW =
     .CLAMP_TO_EDGE, .CLAMP_TO_EDGE, .CLAMP_TO_EDGE
-  vk.CreateSampler(
-    gctx.device,
-    &info,
-    nil,
-    &self.internal.linear_clamp_sampler,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroySampler(gctx.device, self.internal.linear_clamp_sampler, nil)
-    self.internal.linear_clamp_sampler = 0
-  }
+  vk.CreateSampler(gctx.device, &info, nil, &self.internal.linear_clamp_sampler) or_return
   info.magFilter, info.minFilter = .NEAREST, .NEAREST
   info.addressModeU, info.addressModeV, info.addressModeW =
     .REPEAT, .REPEAT, .REPEAT
-  vk.CreateSampler(
-    gctx.device,
-    &info,
-    nil,
-    &self.internal.nearest_repeat_sampler,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroySampler(gctx.device, self.internal.nearest_repeat_sampler, nil)
-    self.internal.nearest_repeat_sampler = 0
-  }
+  vk.CreateSampler(gctx.device, &info, nil, &self.internal.nearest_repeat_sampler) or_return
   info.addressModeU, info.addressModeV, info.addressModeW =
     .CLAMP_TO_EDGE, .CLAMP_TO_EDGE, .CLAMP_TO_EDGE
-  vk.CreateSampler(
-    gctx.device,
-    &info,
-    nil,
-    &self.internal.nearest_clamp_sampler,
-  ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroySampler(gctx.device, self.internal.nearest_clamp_sampler, nil)
-    self.internal.nearest_clamp_sampler = 0
-  }
-  // Initialize all subsystems (pipeline creation only)
+  vk.CreateSampler(gctx.device, &info, nil, &self.internal.nearest_clamp_sampler) or_return
+  return .SUCCESS
+}
+
+@(private)
+destroy_samplers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
+  vk.DestroySampler(gctx.device, self.internal.linear_repeat_sampler, nil)
+  self.internal.linear_repeat_sampler = 0
+  vk.DestroySampler(gctx.device, self.internal.linear_clamp_sampler, nil)
+  self.internal.linear_clamp_sampler = 0
+  vk.DestroySampler(gctx.device, self.internal.nearest_repeat_sampler, nil)
+  self.internal.nearest_repeat_sampler = 0
+  vk.DestroySampler(gctx.device, self.internal.nearest_clamp_sampler, nil)
+  self.internal.nearest_clamp_sampler = 0
+}
+
+@(private)
+init_subsystems :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  swapchain_extent: vk.Extent2D,
+  swapchain_format: vk.Format,
+  dpi_scale: f32,
+) -> vk.Result {
   shadow_include := transmute(u32)NodeFlagSet{.VISIBLE}
   shadow_exclude := transmute(u32)NodeFlagSet{
     .MATERIAL_TRANSPARENT,
@@ -290,7 +158,6 @@ init :: proc(
     self.internal.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
-  // Initialize transparency renderers
   transparent.init(
     &self.internal.transparent_renderer,
     gctx,
@@ -371,15 +238,36 @@ init :: proc(
   return .SUCCESS
 }
 
+init :: proc(
+  self: ^Manager,
+  gctx: ^gpu.GPUContext,
+  swapchain_extent: vk.Extent2D,
+  swapchain_format: vk.Format,
+  dpi_scale: f32,
+) -> vk.Result {
+  self.cameras = make(map[u32]CameraTarget)
+  init_light_state(self)
+  gpu.allocate_command_buffer(gctx, self.internal.command_buffers[:]) or_return
+  if gctx.has_async_compute {
+    gpu.allocate_compute_command_buffer(
+      gctx,
+      self.internal.compute_command_buffers[:],
+    ) or_return
+  }
+  gpu.mesh_manager_init(&self.mesh_manager, gctx)
+  init_scene_buffers(self, gctx) or_return
+  gpu.texture_manager_init(&self.texture_manager, gctx) or_return
+  init_samplers(self, gctx) or_return
+  init_subsystems(self, gctx, swapchain_extent, swapchain_format, dpi_scale) or_return
+  return .SUCCESS
+}
+
 setup :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
   swapchain_extent: vk.Extent2D,
   swapchain_format: vk.Format,
-) -> (
-  ret: vk.Result,
-) {
-  // Allocate textures descriptor set and init texture pools
+) -> vk.Result {
   gpu.texture_manager_setup(
     &self.texture_manager,
     gctx,
@@ -390,35 +278,7 @@ setup :: proc(
       self.internal.linear_repeat_sampler,
     },
   ) or_return
-  defer if ret != .SUCCESS {
-    gpu.texture_manager_teardown(&self.texture_manager, gctx)
-  }
-  // Re-allocate descriptor sets for scene buffers (freed by previous ResetDescriptorPool)
-  gpu.bindless_buffer_realloc_descriptor(&self.internal.material_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(
-    &self.internal.node_data_buffer,
-    gctx,
-  ) or_return
-  gpu.bindless_buffer_realloc_descriptor(
-    &self.internal.mesh_data_buffer,
-    gctx,
-  ) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.internal.emitter_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(
-    &self.internal.forcefield_buffer,
-    gctx,
-  ) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.internal.sprite_buffer, gctx) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(
-    &self.internal.bone_buffer,
-    gctx,
-  ) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(
-    &self.internal.camera_buffer,
-    gctx,
-  ) or_return
-  gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
-  // Setup subsystem GPU resources
+  realloc_scene_descriptors(self, gctx) or_return
   ambient.setup(
     &self.internal.ambient,
     gctx,
@@ -445,22 +305,11 @@ setup :: proc(
 }
 
 teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  // Destroy camera GPU resources (VkImages, draw command buffers) before texture_manager goes away
   for _, &cam in self.cameras {
     camera_destroy(gctx, &cam, &self.texture_manager)
   }
   clear(&self.cameras)
-  for light_node_index, light in self.internal.lights {
-    switch variant in light {
-    case PointLight:
-      release_shadow_cube(self, gctx, light_node_index)
-    case SpotLight:
-      release_shadow_2d(self, gctx, light_node_index)
-    case DirectionalLight:
-      release_shadow_2d(self, gctx, light_node_index)
-    }
-  }
-  clear(&self.internal.lights)
+  release_all_light_shadows(self, gctx)
   ui_render.teardown(&self.internal.ui, gctx)
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
   post_process.teardown(&self.post_process, gctx, &self.texture_manager)
@@ -468,17 +317,7 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   ambient.teardown(&self.internal.ambient, gctx, &self.texture_manager)
   direct_light.teardown(&self.internal.direct_light, gctx)
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
-  // Zero all descriptor set handles (freed in bulk below)
-  self.internal.material_buffer.descriptor_set = 0
-  self.internal.node_data_buffer.descriptor_set = 0
-  self.internal.mesh_data_buffer.descriptor_set = 0
-  self.internal.emitter_buffer.descriptor_set = 0
-  self.internal.forcefield_buffer.descriptor_set = 0
-  self.internal.sprite_buffer.descriptor_set = 0
-  for &ds in self.internal.bone_buffer.descriptor_sets do ds = 0
-  for &ds in self.internal.camera_buffer.descriptor_sets do ds = 0
-  self.mesh_manager.vertex_skinning_buffer.descriptor_set = 0
-  // Bulk-free all descriptor sets allocated from the pool
+  clear_scene_descriptor_handles(self)
   vk.ResetDescriptorPool(gctx.device, gctx.descriptor_pool, {})
 }
 
@@ -493,7 +332,6 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   post_process.shutdown(&self.post_process, gctx)
   particles_compute.shutdown(&self.internal.particles_compute, gctx)
   particles_render.shutdown(&self.internal.particles_render, gctx)
-  // Cleanup transparency renderers
   transparent.shutdown(&self.internal.transparent_renderer, gctx)
   sprite.shutdown(&self.internal.sprite_renderer, gctx)
   wireframe.shutdown(&self.internal.wireframe_renderer, gctx)
@@ -508,30 +346,12 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   geometry.shutdown(&self.internal.geometry, gctx)
   depth_pyramid_system.shutdown(&self.internal.depth_pyramid, gctx)
   occlusion_culling.shutdown(&self.internal.visibility, gctx)
-  vk.DestroySampler(gctx.device, self.internal.linear_repeat_sampler, nil)
-  self.internal.linear_repeat_sampler = 0
-  vk.DestroySampler(gctx.device, self.internal.linear_clamp_sampler, nil)
-  self.internal.linear_clamp_sampler = 0
-  vk.DestroySampler(gctx.device, self.internal.nearest_repeat_sampler, nil)
-  self.internal.nearest_repeat_sampler = 0
-  vk.DestroySampler(gctx.device, self.internal.nearest_clamp_sampler, nil)
-  self.internal.nearest_clamp_sampler = 0
+  destroy_samplers(self, gctx)
   gpu.texture_manager_shutdown(&self.texture_manager, gctx)
-  gpu.bindless_buffer_destroy(&self.internal.material_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.node_data_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.mesh_data_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.emitter_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.forcefield_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.sprite_buffer, gctx.device)
-  gpu.per_frame_bindless_buffer_destroy(&self.internal.camera_buffer, gctx.device)
-  delete(self.internal.bone_matrix_offsets)
-  gpu.per_frame_bindless_buffer_destroy(&self.internal.bone_buffer, gctx.device)
-  cont.slab_destroy(&self.internal.bone_matrix_slab)
+  destroy_scene_buffers(self, gctx)
   gpu.mesh_manager_shutdown(&self.mesh_manager, gctx)
   delete(self.cameras)
-  delete(self.internal.lights)
-  delete(self.internal.shadow_maps)
-  delete(self.internal.shadow_map_cubes)
+  destroy_light_state(self)
 }
 
 resize :: proc(

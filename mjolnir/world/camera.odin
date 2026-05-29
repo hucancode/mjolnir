@@ -280,3 +280,39 @@ camera_resize :: proc(camera: ^Camera, width, height: u32) -> bool {
 main_camera :: proc(w: ^World) -> (^Camera, bool) #optional_ok {
   return camera(w, w.main_camera)
 }
+
+CameraResizeInfo :: struct {
+  index:  u32,
+  extent: [2]u32,
+}
+
+// Recompute aspect ratios for every active camera, resize any whose extent
+// matched the old swapchain extent, and stage them for GPU sync. Returns the
+// list of cameras whose extent actually changed so the render side can
+// reconfigure attachments for them.
+handle_swapchain_resize :: proc(
+  w: ^World,
+  new_extent: [2]u32,
+  old_extent: [2]u32,
+  allocator := context.temp_allocator,
+) -> []CameraResizeInfo {
+  new_aspect_ratio := f32(new_extent[0]) / f32(new_extent[1])
+  resized := make([dynamic]CameraResizeInfo, 0, allocator)
+  for &entry, cam_index in w.cameras.entries {
+    if !entry.active do continue
+    cam := &entry.item
+    camera_update_aspect_ratio(cam, new_aspect_ratio)
+    if cam.extent[0] == old_extent[0] && cam.extent[1] == old_extent[1] {
+      camera_resize(cam, new_extent[0], new_extent[1])
+      append(
+        &resized,
+        CameraResizeInfo{index = u32(cam_index), extent = cam.extent},
+      )
+    }
+    stage_camera_data(
+      &w.staging,
+      CameraHandle{index = u32(cam_index), generation = entry.generation},
+    )
+  }
+  return resized[:]
+}

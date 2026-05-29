@@ -19,14 +19,23 @@ System :: struct {
   depth_pipeline:        vk.Pipeline,
 }
 
-@(private)
+// Cached per-frame shadow math for one light. Computed once per frame and
+// reused by depth dispatch (for frustum culling + view_projection push) and
+// the deferred lighting pass (for shadow sampling). Point lights only use
+// `projection` + `near/far`; the cube face views are derived inside the
+// shadow_sphere_render pass itself.
+ShadowFrameInfo :: struct {
+  view_projection: matrix[4, 4]f32,
+  projection:      matrix[4, 4]f32,
+  near, far:       f32,
+}
+
 safe_normalize :: proc(v: [3]f32, fallback: [3]f32) -> [3]f32 {
   len_sq := linalg.dot(v, v)
   if len_sq < 1e-6 do return fallback
   return linalg.normalize(v)
 }
 
-@(private)
 make_light_view :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
   forward := safe_normalize(direction, {0, -1, 0})
   up := [3]f32{0, 1, 0}
@@ -35,6 +44,61 @@ make_light_view :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
   }
   target := position + forward
   return linalg.matrix4_look_at(position, target, up)
+}
+
+matrices_spot :: proc(
+  position, direction: [3]f32,
+  radius, angle_outer: f32,
+) -> (
+  view, projection: matrix[4, 4]f32,
+  near, far: f32,
+) {
+  near = 0.1
+  far = max(near + 0.1, radius)
+  view = make_light_view(position, direction)
+  fovy := max(angle_outer * 2.0, 0.001)
+  projection = geometry.make_perspective_matrix(fovy, 1.0, near, far)
+  return
+}
+
+matrices_directional :: proc(
+  position, direction: [3]f32,
+  radius: f32,
+) -> (
+  view, projection: matrix[4, 4]f32,
+  near, far: f32,
+) {
+  near = 0.1
+  far = max(near + 0.1, radius * 2.0)
+  camera_pos := position - direction * radius
+  view = make_light_view(camera_pos, direction)
+  half_extent := max(radius, 0.5)
+  projection = geometry.make_ortho_matrix(
+    -half_extent,
+    half_extent,
+    -half_extent,
+    half_extent,
+    near,
+    far,
+  )
+  return
+}
+
+projection_point :: proc(
+  radius: f32,
+) -> (
+  projection: matrix[4, 4]f32,
+  near, far: f32,
+) {
+  near = 0.1
+  far = max(near + 0.1, radius)
+  projection = geometry.make_perspective_matrix_lh(
+    f32(math.PI * 0.5),
+    1.0,
+    near,
+    far,
+  )
+  return
 }
 
 init :: proc(

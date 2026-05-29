@@ -45,7 +45,6 @@ System :: struct {
   cull_pipeline:           vk.Pipeline,
   depth_descriptor_layout: vk.DescriptorSetLayout,
   max_draws:               u32,
-  node_count:              u32,
   depth_bias:              f32,
   stats_enabled:           bool,
 }
@@ -143,12 +142,13 @@ perform_culling :: proc(
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
   frame_index: u32,
+  node_count: u32,
   draws: ^[DrawPipeline]DrawBuffers,
   descriptor_set: vk.DescriptorSet,
   pyramid_width: u32,
   pyramid_height: u32,
 ) {
-  if self.node_count == 0 do return
+  if node_count == 0 do return
   // Zero each pipeline's count buffer for this frame so the shader can append.
   for pipe in DrawPipeline {
     count := &draws[pipe].count[frame_index]
@@ -168,7 +168,7 @@ perform_culling :: proc(
   )
   push_constants := VisibilityPushConstants {
     camera_index      = camera_index,
-    node_count        = self.node_count,
+    node_count        = node_count,
     max_draws         = self.max_draws,
     pyramid_width     = f32(pyramid_width),
     pyramid_height    = f32(pyramid_height),
@@ -183,6 +183,6 @@ perform_culling :: proc(
     size_of(push_constants),
     &push_constants,
   )
-  dispatch_x := (self.node_count + 63) / 64
+  dispatch_x := (node_count + 63) / 64
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
 }

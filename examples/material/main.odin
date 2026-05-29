@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/gpu"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
@@ -39,7 +40,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   sphere_mesh := world.get_builtin_mesh(&engine.world, .SPHERE)
   plane_mesh := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  ground_albedo := mjolnir.create_texture(engine, #load("statue-1275469_1280.jpg"), generate_mips = true)
+  ground_albedo, _ := gpu.create_texture_2d_from_data(&engine.gctx, &engine.render.texture_manager, #load("statue-1275469_1280.jpg"), generate_mips = true)
   plane_material := world.create_material(&engine.world, {.ALBEDO_TEXTURE}, .PBR,
     albedo_handle = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
   )

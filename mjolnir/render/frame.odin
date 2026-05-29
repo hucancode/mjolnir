@@ -3,8 +3,6 @@ package render
 import geom "../geometry"
 import "../gpu"
 import "ambient"
-import "core:math"
-import "core:math/linalg"
 import "core:slice"
 import "debug_line"
 import "debug_ui"
@@ -45,6 +43,7 @@ record_compute_commands :: proc(
     depth_pyramid_system.build_pyramid(
       &self.internal.depth_pyramid,
       cmd,
+      self.node_count,
       &cam.depth_pyramid[frame_index],
       cam.depth_reduce_descriptor_sets[frame_index][:],
     ) // Build pyramid[N]
@@ -54,6 +53,7 @@ record_compute_commands :: proc(
       cmd,
       cam_index,
       next_frame_index,
+      self.node_count,
       &cam.draws,
       cam.descriptor_set[next_frame_index],
       cam.depth_pyramid[prev_frame].width,
@@ -68,79 +68,51 @@ record_compute_commands :: proc(
   return .SUCCESS
 }
 
+// Build per-frame shadow info for every active light. Computed once at the
+// top of record_frame and consumed by both the depth dispatch and the
+// lighting pass to avoid duplicating matrix derivation.
 @(private)
-shadow_safe_normalize :: proc(v: [3]f32, fallback: [3]f32) -> [3]f32 {
-  len_sq := linalg.dot(v, v)
-  if len_sq < 1e-6 do return fallback
-  return linalg.normalize(v)
-}
-
-@(private)
-shadow_make_light_view :: proc(
-  position, direction: [3]f32,
-) -> matrix[4, 4]f32 {
-  forward := shadow_safe_normalize(direction, {0, -1, 0})
-  up := [3]f32{0, 1, 0}
-  if math.abs(linalg.dot(forward, up)) > 0.95 {
-    up = {0, 0, 1}
-  }
-  target := position + forward
-  return linalg.matrix4_look_at(position, target, up)
-}
-
-@(private)
-shadow_matrices_spot :: proc(
-  light: SpotLight,
-) -> (
-  view, projection: matrix[4, 4]f32,
-  near, far: f32,
-) {
-  near = 0.1
-  far = max(near + 0.1, light.radius)
-  view = shadow_make_light_view(light.position, light.direction)
-  fovy := max(light.angle_outer * 2.0, 0.001)
-  projection = geom.make_perspective_matrix(fovy, 1.0, near, far)
-  return
-}
-
-@(private)
-shadow_matrices_directional :: proc(
-  light: DirectionalLight,
-) -> (
-  view, projection: matrix[4, 4]f32,
-  near, far: f32,
-) {
-  near = 0.1
-  far = max(near + 0.1, light.radius * 2.0)
-  camera_pos := light.position - light.direction * light.radius
-  view = shadow_make_light_view(camera_pos, light.direction)
-  half_extent := max(light.radius, 0.5)
-  projection = geom.make_ortho_matrix(
-    -half_extent,
-    half_extent,
-    -half_extent,
-    half_extent,
-    near,
-    far,
+build_shadow_cache :: proc(
+  self: ^Manager,
+) -> map[u32]shadow_render_system.ShadowFrameInfo {
+  cache := make(
+    map[u32]shadow_render_system.ShadowFrameInfo,
+    len(self.internal.lights),
+    context.temp_allocator,
   )
-  return
+  for idx, light in self.internal.lights {
+    info: shadow_render_system.ShadowFrameInfo
+    switch variant in light {
+    case SpotLight:
+      view, projection, near, far := shadow_render_system.matrices_spot(
+        variant.position,
+        variant.direction,
+        variant.radius,
+        variant.angle_outer,
+      )
+      info = {projection * view, projection, near, far}
+    case DirectionalLight:
+      view, projection, near, far := shadow_render_system.matrices_directional(
+        variant.position,
+        variant.direction,
+        variant.radius,
+      )
+      info = {projection * view, projection, near, far}
+    case PointLight:
+      projection, near, far := shadow_render_system.projection_point(variant.radius)
+      info = {{}, projection, near, far}
+    }
+    cache[idx] = info
+  }
+  return cache
 }
 
 @(private)
-shadow_projection_point :: proc(
-  light: PointLight,
-) -> (
-  projection: matrix[4, 4]f32,
-  near, far: f32,
-) {
-  near = 0.1
-  far = max(near + 0.1, light.radius)
-  projection = geom.make_perspective_matrix_lh(f32(math.PI * 0.5), 1.0, near, far)
-  return
-}
-
-@(private)
-render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
+render_shadow_depth :: proc(
+  self: ^Manager,
+  frame_index: u32,
+  cache: map[u32]shadow_render_system.ShadowFrameInfo,
+) -> vk.Result {
   cmd := self.internal.command_buffers[frame_index]
   light_node_indices := make(
     [dynamic]u32,
@@ -156,16 +128,16 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
   for i in 0 ..< min(len(light_node_indices), int(MAX_LIGHTS)) {
     light_node_index := light_node_indices[i]
     light := self.internal.lights[light_node_index]
+    info := cache[light_node_index]
     switch variant in light {
-    case SpotLight:
+    case SpotLight, DirectionalLight:
       shadow, has_shadow := &self.internal.shadow_maps[light_node_index]
       if !has_shadow do continue
-      view, projection, _, _ := shadow_matrices_spot(variant)
-      view_projection := projection * view
-      frustum_planes := geom.make_frustum(view_projection).planes
+      frustum_planes := geom.make_frustum(info.view_projection).planes
       shadow_culling_system.execute(
         &self.internal.shadow_culling,
         cmd,
+        self.node_count,
         frustum_planes,
         shadow.draw_count[frame_index].buffer,
         shadow.descriptor_sets[frame_index],
@@ -174,38 +146,7 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
         &self.internal.shadow_render,
         cmd,
         &self.texture_manager,
-        view_projection,
-        shadow.shadow_map_2d[frame_index],
-        shadow.draw_commands[frame_index],
-        shadow.draw_count[frame_index],
-        self.texture_manager.descriptor_set,
-        self.internal.bone_buffer.descriptor_sets[frame_index],
-        self.internal.material_buffer.descriptor_set,
-        self.internal.node_data_buffer.descriptor_set,
-        self.internal.mesh_data_buffer.descriptor_set,
-        self.mesh_manager.vertex_skinning_buffer.descriptor_set,
-        self.mesh_manager.vertex_buffer.buffer,
-        self.mesh_manager.index_buffer.buffer,
-        frame_index,
-      )
-    case DirectionalLight:
-      shadow, has_shadow := &self.internal.shadow_maps[light_node_index]
-      if !has_shadow do continue
-      view, projection, _, _ := shadow_matrices_directional(variant)
-      view_projection := projection * view
-      frustum_planes := geom.make_frustum(view_projection).planes
-      shadow_culling_system.execute(
-        &self.internal.shadow_culling,
-        cmd,
-        frustum_planes,
-        shadow.draw_count[frame_index].buffer,
-        shadow.descriptor_sets[frame_index],
-      )
-      shadow_render_system.render(
-        &self.internal.shadow_render,
-        cmd,
-        &self.texture_manager,
-        view_projection,
+        info.view_projection,
         shadow.shadow_map_2d[frame_index],
         shadow.draw_commands[frame_index],
         shadow.draw_count[frame_index],
@@ -222,10 +163,10 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
     case PointLight:
       shadow, has_shadow := &self.internal.shadow_map_cubes[light_node_index]
       if !has_shadow do continue
-      projection, near, far := shadow_projection_point(variant)
       shadow_sphere_culling_system.execute(
         &self.internal.shadow_sphere_culling,
         cmd,
+        self.node_count,
         variant.position,
         variant.radius,
         shadow.draw_count[frame_index].buffer,
@@ -235,9 +176,9 @@ render_shadow_depth :: proc(self: ^Manager, frame_index: u32) -> vk.Result {
         &self.internal.shadow_sphere_render,
         cmd,
         &self.texture_manager,
-        projection,
-        near,
-        far,
+        info.projection,
+        info.near,
+        info.far,
         variant.position,
         shadow.shadow_map_cube[frame_index],
         shadow.draw_commands[frame_index],
@@ -301,6 +242,7 @@ record_lighting_pass :: proc(
   cam_index: u32,
   cam: ^CameraTarget,
   enabled_passes: PassTypeSet,
+  cache: map[u32]shadow_render_system.ShadowFrameInfo,
 ) -> vk.Result {
   if .LIGHTING not_in enabled_passes do return .SUCCESS
   cmd := self.internal.command_buffers[frame_index]
@@ -339,14 +281,14 @@ record_lighting_pass :: proc(
   for i in 0 ..< min(len(light_node_indices), int(MAX_LIGHTS)) {
     light_node_index := light_node_indices[i]
     light := self.internal.lights[light_node_index]
+    info := cache[light_node_index]
     switch variant in light {
     case PointLight:
       shadow_map_idx: u32 = 0xFFFFFFFF
       shadow_view_projection := matrix[4, 4]f32{}
       if sm, ok := self.internal.shadow_map_cubes[light_node_index]; ok {
         shadow_map_idx = sm.shadow_map_cube[frame_index].index
-        projection, _, _ := shadow_projection_point(variant)
-        shadow_view_projection = projection
+        shadow_view_projection = info.projection
       }
       direct_light.render_point_light(
         &self.internal.direct_light,
@@ -367,8 +309,7 @@ record_lighting_pass :: proc(
       shadow_view_projection := matrix[4, 4]f32{}
       if sm, ok := self.internal.shadow_maps[light_node_index]; ok {
         shadow_map_idx = sm.shadow_map_2d[frame_index].index
-        view, projection, _, _ := shadow_matrices_spot(variant)
-        shadow_view_projection = projection * view
+        shadow_view_projection = info.view_projection
       }
       direct_light.render_spot_light(
         &self.internal.direct_light,
@@ -392,8 +333,7 @@ record_lighting_pass :: proc(
       shadow_view_projection := matrix[4, 4]f32{}
       if sm, ok := self.internal.shadow_maps[light_node_index]; ok {
         shadow_map_idx = sm.shadow_map_2d[frame_index].index
-        view, projection, _, _ := shadow_matrices_directional(variant)
-        shadow_view_projection = projection * view
+        shadow_view_projection = info.view_projection
       }
       direct_light.render_directional_light(
         &self.internal.direct_light,
@@ -759,7 +699,8 @@ record_frame :: proc(
 ) -> vk.Result {
   cmd := self.internal.command_buffers[frame_index]
   gpu.begin_record(cmd) or_return
-  render_shadow_depth(self, frame_index) or_return
+  shadow_cache := build_shadow_cache(self)
+  render_shadow_depth(self, frame_index, shadow_cache) or_return
 
   cull_indices := make(
     [dynamic]u32,
@@ -773,7 +714,7 @@ record_frame :: proc(
     if !ok do continue
     if cam.enable_culling do append(&cull_indices, index)
     record_geometry_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
-    record_lighting_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
+    record_lighting_pass(self, frame_index, index, cam, cam.enabled_passes, shadow_cache) or_return
     record_particles_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
     record_transparency_pass(self, frame_index, gctx, index, cam, cam.enabled_passes) or_return
   }

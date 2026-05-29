@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/gpu"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
@@ -65,7 +66,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   render.set_skybox_enabled(&engine.render, false)
 
   // Particle source at center, large position spread
-  if tex, ok := mjolnir.create_texture(engine, "assets/particles/star_09.png"); ok {
+  if tex, ret := gpu.create_texture_2d_from_path(&engine.gctx, &engine.render.texture_manager, "assets/particles/star_09.png"); ret == .SUCCESS {
     world.spawn_emitter(&engine.world,
       position          = {0, 2, 0},
       texture           = tex,

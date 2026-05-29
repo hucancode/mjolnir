@@ -18,7 +18,6 @@ System :: struct {
   depth_reduce_layout:            vk.PipelineLayout,
   depth_reduce_pipeline:          vk.Pipeline,
   depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
-  node_count:                     u32,
 }
 
 // DepthPyramid - Hierarchical depth buffer for occlusion culling (GPU resource)
@@ -227,10 +226,11 @@ destroy_pyramid :: proc(
 build_pyramid :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
+  node_count: u32,
   pyramid: ^DepthPyramid,
   descriptor_sets: []vk.DescriptorSet,
 ) {
-  if self.node_count == 0 do return
+  if node_count == 0 do return
   if pyramid.mip_levels == 0 do return
 
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.depth_reduce_pipeline)

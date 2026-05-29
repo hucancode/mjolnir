@@ -271,6 +271,10 @@ Internal :: struct {
 Manager :: struct {
   internal:        Internal,
   cameras:         map[u32]CameraTarget,
+  // Single source of truth for active scene node count. Drives compute
+  // dispatch sizing across visibility, depth pyramid, and both shadow culls.
+  // Clamped to MAX_NODES_IN_SCENE by set_node_count.
+  node_count:      u32,
   mesh_manager:    gpu.MeshManager,
   texture_manager: gpu.TextureManager,
   post_process:    post_process.Renderer,

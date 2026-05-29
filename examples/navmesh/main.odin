@@ -102,7 +102,7 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
   if len(nav_builder.vertices) == 0 || len(nav_builder.indices) == 0 {
     log.error("No source geometry available for navmesh generation"); return
   }
-  if !mjolnir.build_navmesh(engine, nav.geometry_view(&nav_builder)) {
+  if !nav.build_navmesh(&engine.nav.nav_mesh, nav.geometry_view(&nav_builder), nav.config_to_recast(nav.DEFAULT_NAVMESH_CONFIG)) || !nav.init(&engine.nav) {
     log.error("Failed to build navmesh"); return
   }
   visualize_navmesh(engine)

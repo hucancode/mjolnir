@@ -356,6 +356,24 @@ camera_controller_sync :: proc(
   }
 }
 
+// Dispatch to the per-variant update proc. Engine layer should call this
+// instead of switching on `controller.type` itself.
+camera_controller_update :: proc(
+  controller: ^CameraController,
+  camera: ^Camera,
+  delta_time: f32,
+) {
+  switch controller.type {
+  case .ORBIT:
+    camera_controller_orbit_update(controller, camera, delta_time)
+  case .FREE:
+    camera_controller_free_update(controller, camera, delta_time)
+  case .FOLLOW:
+    camera_controller_follow_update(controller, camera, delta_time)
+  case .CINEMATIC:
+  }
+}
+
 camera_controller_orbit_set_target :: proc(
   controller: ^CameraController,
   target: [3]f32,

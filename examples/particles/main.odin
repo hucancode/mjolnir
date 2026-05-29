@@ -62,8 +62,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   for name in TEXTURE_FILES {
     path := fmt.tprintf("assets/particles/%s.png", name)
-    handle, ok := mjolnir.create_texture(engine, path)
-    if !ok do continue
+    handle, ret := gpu.create_texture_2d_from_path(&engine.gctx, &engine.render.texture_manager, path)
+    if ret != .SUCCESS do continue
     append(&textures, TextureEntry{name = strings.clone(name), handle = handle})
   }
   if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0

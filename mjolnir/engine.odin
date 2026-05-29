@@ -10,11 +10,11 @@ import "core:math"
 import "core:strings"
 import "core:thread"
 import "core:time"
-import "core:unicode/utf8"
 import "gpu"
 import nav "navigation"
 import "physics"
 import "render"
+import scene_sync "sync"
 import ui_module "ui"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -191,47 +191,7 @@ init :: proc(
       if engine.key_press_proc != nil && !debug_ui_wants_keyboard(engine) {
         engine.key_press_proc(engine, int(key), int(action), int(mods))
       }
-      mu_key: mu.Key
-      switch key {
-      case glfw.KEY_LEFT_SHIFT, glfw.KEY_RIGHT_SHIFT:
-        mu_key = .SHIFT
-      case glfw.KEY_LEFT_CONTROL, glfw.KEY_RIGHT_CONTROL:
-        mu_key = .CTRL
-      case glfw.KEY_LEFT_ALT, glfw.KEY_RIGHT_ALT:
-        mu_key = .ALT
-      case glfw.KEY_BACKSPACE:
-        mu_key = .BACKSPACE
-      case glfw.KEY_DELETE:
-        mu_key = .DELETE
-      case glfw.KEY_ENTER:
-        mu_key = .RETURN
-      case glfw.KEY_LEFT:
-        mu_key = .LEFT
-      case glfw.KEY_RIGHT:
-        mu_key = .RIGHT
-      case glfw.KEY_HOME:
-        mu_key = .HOME
-      case glfw.KEY_END:
-        mu_key = .END
-      case glfw.KEY_A:
-        mu_key = .A
-      case glfw.KEY_X:
-        mu_key = .X
-      case glfw.KEY_C:
-        mu_key = .C
-      case glfw.KEY_V:
-        mu_key = .V
-      case:
-        return
-      }
-      switch action {
-      case glfw.PRESS, glfw.REPEAT:
-        mu.input_key_down(&engine.render.debug_ui.ctx, mu_key)
-      case glfw.RELEASE:
-        mu.input_key_up(&engine.render.debug_ui.ctx, mu_key)
-      case:
-        return
-      }
+      dispatch_glfw_key(&engine.render.debug_ui.ctx, key, action)
     },
   )
   glfw.SetMouseButtonCallback(
@@ -239,23 +199,13 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, button, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-      mu_btn: mu.Mouse
-      switch button {
-      case glfw.MOUSE_BUTTON_LEFT:
-        mu_btn = .LEFT
-      case glfw.MOUSE_BUTTON_RIGHT:
-        mu_btn = .RIGHT
-      case glfw.MOUSE_BUTTON_MIDDLE:
-        mu_btn = .MIDDLE
-      }
-      x := engine.cursor_pos.x
-      y := engine.cursor_pos.y
-      switch action {
-      case glfw.PRESS, glfw.REPEAT:
-        mu.input_mouse_down(&engine.render.debug_ui.ctx, x, y, mu_btn)
-      case glfw.RELEASE:
-        mu.input_mouse_up(&engine.render.debug_ui.ctx, x, y, mu_btn)
-      }
+      dispatch_glfw_mouse_button(
+        &engine.render.debug_ui.ctx,
+        button,
+        action,
+        engine.cursor_pos.x,
+        engine.cursor_pos.y,
+      )
       btn_idx := int(button)
       captured := false
       switch action {
@@ -284,12 +234,8 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-      engine.cursor_pos = {i32(math.round(xpos)), i32(math.round(ypos))}
-      mu.input_mouse_move(
-        &engine.render.debug_ui.ctx,
-        engine.cursor_pos.x,
-        engine.cursor_pos.y,
-      )
+      x, y := dispatch_glfw_cursor_pos(&engine.render.debug_ui.ctx, xpos, ypos)
+      engine.cursor_pos = {x, y}
       drag_captured_by_ui := false
       for held in engine.ui_captured_mouse_button {
         if held {
@@ -308,11 +254,7 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-      mu.input_scroll(
-        &engine.render.debug_ui.ctx,
-        -i32(math.round(xoffset)),
-        -i32(math.round(yoffset)),
-      )
+      dispatch_glfw_scroll(&engine.render.debug_ui.ctx, xoffset, yoffset)
       if debug_ui_wants_mouse(engine) {
         return
       }
@@ -330,9 +272,7 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, ch: rune) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-      bytes, size := utf8.encode_rune(ch)
-      text_str := string(bytes[:size])
-      mu.input_text(&engine.render.debug_ui.ctx, text_str)
+      dispatch_glfw_char(&engine.render.debug_ui.ctx, ch)
     },
   )
   setup(self) or_return
@@ -391,6 +331,13 @@ setup :: proc(self: ^Engine) -> (ret: vk.Result) {
     ) {
       return .ERROR_INITIALIZATION_FAILED
     }
+    render.init_camera_target(
+      &self.render,
+      &self.gctx,
+      main_world_handle.index,
+      self.swapchain.extent,
+      self.swapchain.format.format,
+    ) or_return
   }
   world.stage_camera_data(&self.world.staging, self.world.main_camera)
   if self.setup_proc != nil {
@@ -409,7 +356,7 @@ teardown :: proc(self: ^Engine) {
   render.teardown(&self.render, &self.gctx)
 }
 
-@(private = "file")
+@(private)
 get_main_camera :: proc(self: ^Engine) -> ^world.Camera {
   return cont.get(self.world.cameras, self.world.main_camera)
 }
@@ -433,84 +380,13 @@ update_input :: proc(self: ^Engine) -> bool {
   //   self.input.keys[k] = is_pressed
   // }
 
-  // UI event handling
-  {
-    mouse_pos := [2]f32 {
-      f32(self.input.mouse_pos.x),
-      f32(self.input.mouse_pos.y),
-    }
-    current_widget := ui_module.pick_widget(&self.ui, mouse_pos)
-
-    // Handle hover in/out events
-    if old_handle, had_old := self.ui_hovered_widget.?; had_old {
-      if new_handle, has_new := current_widget.?; has_new {
-        // Check if it's a different widget
-        old_raw := transmute(cont.Handle)old_handle
-        new_raw := transmute(cont.Handle)new_handle
-        if old_raw.index != new_raw.index ||
-           old_raw.generation != new_raw.generation {
-          // Hover out from old widget
-          event := ui_module.MouseEvent {
-            type     = .HOVER_OUT,
-            position = mouse_pos,
-            button   = 0,
-            widget   = old_handle,
-          }
-          ui_module.dispatch_mouse_event(&self.ui, old_handle, event, true)
-
-          // Hover in to new widget
-          event.type = .HOVER_IN
-          event.widget = new_handle
-          ui_module.dispatch_mouse_event(&self.ui, new_handle, event, true)
-        }
-      } else {
-        // No widget under cursor, hover out from old
-        event := ui_module.MouseEvent {
-          type     = .HOVER_OUT,
-          position = mouse_pos,
-          button   = 0,
-          widget   = old_handle,
-        }
-        ui_module.dispatch_mouse_event(&self.ui, old_handle, event, true)
-      }
-    } else if new_handle, has_new := current_widget.?; has_new {
-      // Hover in to new widget (no previous widget)
-      event := ui_module.MouseEvent {
-        type     = .HOVER_IN,
-        position = mouse_pos,
-        button   = 0,
-        widget   = new_handle,
-      }
-      ui_module.dispatch_mouse_event(&self.ui, new_handle, event, true)
-    }
-
-    // Handle click events
-    if widget_handle, has_widget := current_widget.?; has_widget {
-      for i in 0 ..< len(self.input.mouse_buttons) {
-        if self.input.mouse_buttons[i] && !self.input.mouse_holding[i] {
-          // Mouse down
-          event := ui_module.MouseEvent {
-            type     = .CLICK_DOWN,
-            position = mouse_pos,
-            button   = i32(i),
-            widget   = widget_handle,
-          }
-          ui_module.dispatch_mouse_event(&self.ui, widget_handle, event, true)
-        } else if !self.input.mouse_buttons[i] && self.input.mouse_holding[i] {
-          // Mouse up
-          event := ui_module.MouseEvent {
-            type     = .CLICK_UP,
-            position = mouse_pos,
-            button   = i32(i),
-            widget   = widget_handle,
-          }
-          ui_module.dispatch_mouse_event(&self.ui, widget_handle, event, true)
-        }
-      }
-    }
-
-    self.ui_hovered_widget = current_widget
-  }
+  self.ui_hovered_widget = ui_module.process_mouse(
+    &self.ui,
+    {f32(self.input.mouse_pos.x), f32(self.input.mouse_pos.y)},
+    &self.input.mouse_buttons,
+    &self.input.mouse_holding,
+    self.ui_hovered_widget,
+  )
 
   if self.mouse_move_proc != nil {
     self.mouse_move_proc(self, self.input.mouse_pos, delta)
@@ -542,27 +418,11 @@ update :: proc(self: ^Engine) -> bool {
     if main_camera != nil {
       self.world.active_controller.mouse_blocked = debug_ui_wants_mouse(self)
       self.world.active_controller.keyboard_blocked = debug_ui_wants_keyboard(self)
-      switch self.world.active_controller.type {
-      case .ORBIT:
-        world.camera_controller_orbit_update(
-          self.world.active_controller,
-          main_camera,
-          delta_time,
-        )
-      case .FREE:
-        world.camera_controller_free_update(
-          self.world.active_controller,
-          main_camera,
-          delta_time,
-        )
-      case .FOLLOW:
-        world.camera_controller_follow_update(
-          self.world.active_controller,
-          main_camera,
-          delta_time,
-        )
-      case .CINEMATIC:
-      }
+      world.camera_controller_update(
+        self.world.active_controller,
+        main_camera,
+        delta_time,
+      )
       world.stage_camera_data(&self.world.staging, self.world.main_camera)
     }
   }
@@ -594,100 +454,18 @@ shutdown :: proc(self: ^Engine) {
 }
 
 @(private = "file")
-populate_debug_ui :: proc(self: ^Engine) {
-  if mu.window(
-    &self.render.debug_ui.ctx,
-    "Engine",
-    {40, 40, 200, 200},
-    {},
-  ) {
-    mu.label(
-      &self.render.debug_ui.ctx,
-      fmt.tprintf(
-        "Objects %d",
-        len(self.world.nodes.entries) - len(self.world.nodes.free_indices),
-      ),
-    )
-    mu.label(
-      &self.render.debug_ui.ctx,
-      fmt.tprintf(
-        "Textures %d",
-        cont.count(self.render.texture_manager.images_2d),
-      ),
-    )
-    mu.label(
-      &self.render.debug_ui.ctx,
-      fmt.tprintf(
-        "Materials %d",
-        len(self.world.materials.entries) -
-        len(self.world.materials.free_indices),
-      ),
-    )
-    mu.label(
-      &self.render.debug_ui.ctx,
-      fmt.tprintf(
-        "Meshes %d",
-        len(self.world.meshes.entries) - len(self.world.meshes.free_indices),
-      ),
-    )
-    if main_camera := get_main_camera(self); main_camera != nil {
-      stats := render.visibility_stats(
-        &self.render,
-        self.world.main_camera.index,
-        self.frame_index,
-      )
-      mu.label(
-        &self.render.debug_ui.ctx,
-        fmt.tprintf("Total Objects: %d", stats.node_count),
-      )
-      mu.label(
-        &self.render.debug_ui.ctx,
-        fmt.tprintf("Draw count: %d draws", stats.opaque_draw_count),
-      )
-    }
-  }
-}
-
-@(private = "file")
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  old_extent := engine.swapchain.extent
-  gpu.swapchain_recreate(
-    &engine.gctx,
-    &engine.swapchain,
-    engine.window,
-  ) or_return
-  new_aspect_ratio :=
-    f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
-  for &entry, cam_index in engine.world.cameras.entries {
-    if !entry.active do continue
-    world_camera := &entry.item
-    world.camera_update_aspect_ratio(world_camera, new_aspect_ratio)
-    if world_camera.extent[0] == old_extent.width &&
-       world_camera.extent[1] == old_extent.height {
-      world.camera_resize(
-        world_camera,
-        engine.swapchain.extent.width,
-        engine.swapchain.extent.height,
-      )
-    }
-    world.stage_camera_data(
-      &engine.world.staging,
-      world.CameraHandle {
-        index = u32(cam_index),
-        generation = entry.generation,
-      },
-    )
-    if cam, ok := &engine.render.cameras[u32(cam_index)]; ok {
-      render.camera_resize(
-        &engine.gctx,
-        cam,
-        &engine.render.texture_manager,
-        vk.Extent2D{world_camera.extent[0], world_camera.extent[1]},
-        engine.swapchain.format.format,
-        vk.Format.D32_SFLOAT,
-      ) or_return
-      render.camera_allocate_descriptors(&engine.render, &engine.gctx, cam) or_return
-    }
+  old_extent := [2]u32{engine.swapchain.extent.width, engine.swapchain.extent.height}
+  gpu.swapchain_recreate(&engine.gctx, &engine.swapchain, engine.window) or_return
+  new_extent := [2]u32{engine.swapchain.extent.width, engine.swapchain.extent.height}
+  for r in world.handle_swapchain_resize(&engine.world, new_extent, old_extent) {
+    render.resize_camera(
+      &engine.render,
+      &engine.gctx,
+      r.index,
+      vk.Extent2D{r.extent[0], r.extent[1]},
+      engine.swapchain.format.format,
+    ) or_return
   }
   render.resize(
     &engine.render,
@@ -819,13 +597,21 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     debug_pre_frame(self)
     world.begin_frame(&self.world, 0.016, nil)
     mu.begin(&self.render.debug_ui.ctx)
-    sync_staging_to_gpu(self)
+    scene_sync.staging_to_gpu(
+      &self.gctx,
+      &self.render,
+      &self.world,
+      self.frame_index,
+    )
+    when DEBUG_SHOW_BONES {
+      debug_skeletons(self)
+    }
     {
       n := u32(len(self.world.nodes.entries))
       for ; n > 0; n -= 1 do if self.world.nodes.entries[n - 1].active do break
       render.set_node_count(&self.render, n)
     }
-    sync_ui_to_renderer(self)
+    scene_sync.ui_to_renderer(&self.gctx, &self.render, &self.ui)
     if self.pre_render_proc != nil {
       self.pre_render_proc(self)
     }

@@ -1,9 +1,10 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/world"
+import "../../mjolnir/gpu"
 import cmd "../../mjolnir/gpu/ui"
 import "../../mjolnir/ui"
+import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 
@@ -53,10 +54,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   star, star_ok := ui.create_mesh2d(&engine.ui, position = {0, 0}, vertices = star_vertices, indices = star_indices, z_order = 1)
   log.infof("Star mesh created: handle=%v, ok=%v", star, star_ok)
 
-  star_texture, texture_ok := mjolnir.create_texture(engine, "assets/gold-star.png")
-  log.infof("Star texture loaded: handle=%v, ok=%v", star_texture, texture_ok)
+  star_texture, texture_ret := gpu.create_texture_2d_from_path(&engine.gctx, &engine.render.texture_manager, "assets/gold-star.png")
+  log.infof("Star texture loaded: handle=%v, ret=%v", star_texture, texture_ret)
 
-  if texture_ok {
+  if texture_ret == .SUCCESS {
     image_quad, image_quad_ok := ui.create_quad2d(&engine.ui, position = {350, 300}, size = {128, 128}, texture = star_texture, z_order = 1)
     log.infof("Image quad created: handle=%v, ok=%v", image_quad, image_quad_ok)
   }

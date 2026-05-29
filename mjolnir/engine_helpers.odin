@@ -101,37 +101,6 @@ is_mouse_released :: proc(self: ^Engine, button: c.int) -> bool {
   return !self.input.mouse_buttons[button] && self.input.mouse_holding[button]
 }
 
-// Build a follow camera controller without exposing the GLFW window handle.
-// The example pattern was `world.camera_controller_follow_init(engine.window, ...)`
-// — leaking the window into gameplay code. Prefer this wrapper.
-camera_controller_follow :: proc(
-  engine: ^Engine,
-  target: ^[3]f32,
-  offset: [3]f32,
-  follow_speed: f32 = 5.0,
-) -> world.CameraController {
-  return world.camera_controller_follow_init(engine.window, target, offset, follow_speed)
-}
-
-// Build an orbit controller. Same rationale as `camera_controller_follow`.
-camera_controller_orbit :: proc(
-  engine: ^Engine,
-  target: [3]f32 = {0, 0, 0},
-  distance: f32 = 5.0,
-  yaw: f32 = 0,
-  pitch: f32 = 0,
-) -> world.CameraController {
-  return world.camera_controller_orbit_init(engine.window, target, distance, yaw, pitch)
-}
-
-camera_controller_free :: proc(
-  engine: ^Engine,
-  move_speed: f32 = 5.0,
-  rotation_speed: f32 = 2.0,
-) -> world.CameraController {
-  return world.camera_controller_free_init(engine.window, move_speed, rotation_speed)
-}
-
 // Create a camera with explicit render-pass selection. World holds spatial
 // state; render side stores enabled_passes + culling on its CameraTarget.
 // Engine eagerly initialises both sides so per-frame sync only handles
@@ -160,120 +129,18 @@ create_camera :: proc(
     near_plane,
     far_plane,
   ) or_return
-  engine.render.cameras[handle.index] = {}
-  cam := &engine.render.cameras[handle.index]
-  if render.camera_init(
+  if render.init_camera_target(
+    &engine.render,
     &engine.gctx,
-    cam,
-    &engine.render.texture_manager,
+    handle.index,
     vk.Extent2D{width, height},
     engine.swapchain.format.format,
-    vk.Format.D32_SFLOAT,
     enabled_passes,
     enable_culling,
-    render.MAX_NODES_IN_SCENE,
   ) != .SUCCESS {
     return {}, false
   }
-  if render.camera_allocate_descriptors(&engine.render, &engine.gctx, cam) != .SUCCESS {
-    return {}, false
-  }
   return handle, true
-}
-
-create_texture :: proc {
-  create_texture_from_path,
-  create_texture_from_data,
-  create_texture_from_pixels,
-  create_texture_empty,
-}
-
-create_texture_from_path :: proc(
-  engine: ^Engine,
-  path: string,
-  format: vk.Format = .R8G8B8A8_SRGB,
-  generate_mips := false,
-  usage: vk.ImageUsageFlags = {.SAMPLED},
-  is_hdr := false,
-) -> (
-  handle: gpu.Texture2DHandle,
-  ok: bool,
-) #optional_ok {
-  ret: vk.Result
-  handle, ret = gpu.create_texture_2d_from_path(
-    &engine.gctx,
-    &engine.render.texture_manager,
-    path,
-    format,
-    generate_mips,
-    usage,
-    is_hdr,
-  )
-  return handle, ret == .SUCCESS
-}
-
-create_texture_from_data :: proc(
-  engine: ^Engine,
-  data: []u8,
-  format: vk.Format = .R8G8B8A8_SRGB,
-  generate_mips := false,
-) -> (
-  handle: gpu.Texture2DHandle,
-  ok: bool,
-) #optional_ok {
-  ret: vk.Result
-  handle, ret = gpu.create_texture_2d_from_data(
-    &engine.gctx,
-    &engine.render.texture_manager,
-    data,
-    format,
-    generate_mips,
-  )
-  return handle, ret == .SUCCESS
-}
-
-create_texture_from_pixels :: proc(
-  engine: ^Engine,
-  pixels: []u8,
-  extent: vk.Extent2D,
-  format: vk.Format = .R8G8B8A8_SRGB,
-  generate_mips := false,
-) -> (
-  handle: gpu.Texture2DHandle,
-  ok: bool,
-) #optional_ok {
-  ret: vk.Result
-  handle, ret = gpu.allocate_texture_2d_with_data(
-    &engine.render.texture_manager,
-    &engine.gctx,
-    raw_data(pixels),
-    vk.DeviceSize(len(pixels)),
-    extent,
-    format,
-    {.SAMPLED},
-    generate_mips,
-  )
-  return handle, ret == .SUCCESS
-}
-
-create_texture_empty :: proc(
-  engine: ^Engine,
-  extent: vk.Extent2D,
-  format: vk.Format,
-  usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
-) -> (
-  handle: gpu.Texture2DHandle,
-  ok: bool,
-) #optional_ok {
-  ret: vk.Result
-  handle, ret = gpu.allocate_texture_2d(
-    &engine.render.texture_manager,
-    &engine.gctx,
-    extent,
-    format,
-    usage,
-  )
-  return handle, ret == .SUCCESS
 }
 
 // Look up a camera's framebuffer attachment for the given pass type. Defaults
@@ -440,16 +307,3 @@ cursor_world_ray :: proc(engine: ^Engine) -> (origin: [3]f32, dir: [3]f32, ok: b
   return viewport_to_world_ray(engine, f32(engine.input.mouse_pos.x), f32(engine.input.mouse_pos.y))
 }
 
-// ---------- navigation (config translation + nav.init) ----------
-
-// One-shot navmesh setup: builds the mesh on `engine.nav` and initialises
-// the query/filter so nav queries work immediately. Translates engine-level
-// NavMeshConfig to recast.Config and chains nav.init after build.
-build_navmesh :: proc(
-  engine: ^Engine,
-  geom: nav.NavigationGeometry,
-  config: nav.NavMeshConfig = nav.DEFAULT_NAVMESH_CONFIG,
-) -> bool {
-  if !nav.build_navmesh(&engine.nav.nav_mesh, geom, nav.config_to_recast(config)) do return false
-  return nav.init(&engine.nav)
-}

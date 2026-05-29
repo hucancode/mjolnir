@@ -7,6 +7,37 @@ import shadow_sphere_culling_system "shadow_sphere_culling"
 import vk "vendor:vulkan"
 
 @(private)
+init_light_state :: proc(self: ^Manager) {
+  self.internal.lights = make(map[u32]Light)
+  self.internal.shadow_maps = make(map[u32]ShadowMap)
+  self.internal.shadow_map_cubes = make(map[u32]ShadowMapCube)
+}
+
+@(private)
+destroy_light_state :: proc(self: ^Manager) {
+  delete(self.internal.lights)
+  delete(self.internal.shadow_maps)
+  delete(self.internal.shadow_map_cubes)
+}
+
+// Release per-light shadow GPU resources without freeing the light state
+// maps themselves. Used during teardown so a future setup can reuse the maps.
+@(private)
+release_all_light_shadows :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
+  for light_node_index, light in self.internal.lights {
+    switch variant in light {
+    case PointLight:
+      release_shadow_cube(self, gctx, light_node_index)
+    case SpotLight:
+      release_shadow_2d(self, gctx, light_node_index)
+    case DirectionalLight:
+      release_shadow_2d(self, gctx, light_node_index)
+    }
+  }
+  clear(&self.internal.lights)
+}
+
+@(private)
 release_shadow_2d :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,

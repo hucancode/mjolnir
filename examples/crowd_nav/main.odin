@@ -78,7 +78,7 @@ build_scene :: proc(engine: ^mjolnir.Engine) {
 }
 
 build_navmesh :: proc(engine: ^mjolnir.Engine) {
-  if !mjolnir.build_navmesh(engine, nav.geometry_view(&nav_builder)) do log.error("navmesh build failed")
+  if !nav.build_navmesh(&engine.nav.nav_mesh, nav.geometry_view(&nav_builder), nav.config_to_recast(nav.DEFAULT_NAVMESH_CONFIG)) || !nav.init(&engine.nav) do log.error("navmesh build failed")
 }
 
 visualize_navmesh :: proc(engine: ^mjolnir.Engine) {

@@ -45,7 +45,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   world.spawn_primitive_mesh(&engine.world, .CUBE, .MAGENTA, position = {0, 0.5, 0})
   runner_handle = world.spawn_primitive_mesh(&engine.world, .SPHERE, .CYAN, position = follow_target, scale_factor = 0.6)
-  follow_controller = mjolnir.camera_controller_follow(engine, &follow_target, {0, f32(follow_offset_y), f32(follow_offset_back)}, f32(follow_lerp))
+  follow_controller = world.camera_controller_follow_init(engine.window, &follow_target, {0, f32(follow_offset_y), f32(follow_offset_back)}, f32(follow_lerp))
 
   log.info("Camera controllers — switch live via UI (ORBIT/FREE/FOLLOW)")
 }
