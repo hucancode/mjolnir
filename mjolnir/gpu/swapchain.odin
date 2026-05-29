@@ -267,41 +267,64 @@ submit_queue_and_present :: proc(
   compute_command_buffer: ^vk.CommandBuffer,
   frame_index: u32,
 ) -> vk.Result {
-  wait_semaphores: [dynamic]vk.Semaphore
-  wait_stages: [dynamic]vk.PipelineStageFlags
-  defer delete(wait_semaphores)
-  defer delete(wait_stages)
-  append(&wait_semaphores, self.image_available_semaphores[frame_index])
-  append(&wait_stages, vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT})
+  wait_infos: [dynamic]vk.SemaphoreSubmitInfo
+  defer delete(wait_infos)
+  append(
+    &wait_infos,
+    vk.SemaphoreSubmitInfo {
+      sType = .SEMAPHORE_SUBMIT_INFO,
+      semaphore = self.image_available_semaphores[frame_index],
+      stageMask = {.COLOR_ATTACHMENT_OUTPUT},
+    },
+  )
   if gctx.has_async_compute {
     if compute_queue, ok := gctx.compute_queue.?; ok {
-      append(&wait_semaphores, self.compute_finished_semaphores[frame_index])
       append(
-        &wait_stages,
-        vk.PipelineStageFlags{.VERTEX_INPUT, .COMPUTE_SHADER},
+        &wait_infos,
+        vk.SemaphoreSubmitInfo {
+          sType = .SEMAPHORE_SUBMIT_INFO,
+          semaphore = self.compute_finished_semaphores[frame_index],
+          stageMask = {.VERTEX_INPUT, .COMPUTE_SHADER},
+        },
       )
-      compute_submit := vk.SubmitInfo {
-        sType                = .SUBMIT_INFO,
-        commandBufferCount   = 1,
-        pCommandBuffers      = compute_command_buffer,
-        signalSemaphoreCount = 1,
-        pSignalSemaphores    = &self.compute_finished_semaphores[frame_index],
+      compute_cmd_info := vk.CommandBufferSubmitInfo {
+        sType         = .COMMAND_BUFFER_SUBMIT_INFO,
+        commandBuffer = compute_command_buffer^,
       }
-      vk.QueueSubmit(compute_queue, 1, &compute_submit, 0) or_return
+      compute_signal := vk.SemaphoreSubmitInfo {
+        sType     = .SEMAPHORE_SUBMIT_INFO,
+        semaphore = self.compute_finished_semaphores[frame_index],
+        stageMask = {.ALL_COMMANDS},
+      }
+      compute_submit := vk.SubmitInfo2 {
+        sType                    = .SUBMIT_INFO_2,
+        commandBufferInfoCount   = 1,
+        pCommandBufferInfos      = &compute_cmd_info,
+        signalSemaphoreInfoCount = 1,
+        pSignalSemaphoreInfos    = &compute_signal,
+      }
+      vk.QueueSubmit2(compute_queue, 1, &compute_submit, 0) or_return
     }
   }
-  graphics_submit := vk.SubmitInfo {
-    sType                = .SUBMIT_INFO,
-    waitSemaphoreCount   = u32(len(wait_semaphores)),
-    pWaitSemaphores      = raw_data(wait_semaphores),
-    pWaitDstStageMask    = raw_data(wait_stages),
-    commandBufferCount   = 1,
-    pCommandBuffers      = command_buffer,
-    signalSemaphoreCount = 1,
-    // Use image_index for presentation sync (graphics->present)
-    pSignalSemaphores    = &self.render_finished_semaphores[self.image_index],
+  gfx_cmd_info := vk.CommandBufferSubmitInfo {
+    sType         = .COMMAND_BUFFER_SUBMIT_INFO,
+    commandBuffer = command_buffer^,
   }
-  vk.QueueSubmit(
+  gfx_signal := vk.SemaphoreSubmitInfo {
+    sType     = .SEMAPHORE_SUBMIT_INFO,
+    semaphore = self.render_finished_semaphores[self.image_index],
+    stageMask = {.ALL_COMMANDS},
+  }
+  graphics_submit := vk.SubmitInfo2 {
+    sType                    = .SUBMIT_INFO_2,
+    waitSemaphoreInfoCount   = u32(len(wait_infos)),
+    pWaitSemaphoreInfos      = raw_data(wait_infos),
+    commandBufferInfoCount   = 1,
+    pCommandBufferInfos      = &gfx_cmd_info,
+    signalSemaphoreInfoCount = 1,
+    pSignalSemaphoreInfos    = &gfx_signal,
+  }
+  vk.QueueSubmit2(
     gctx.graphics_queue,
     1,
     &graphics_submit,

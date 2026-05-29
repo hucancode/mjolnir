@@ -484,6 +484,7 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   vulkan_13_features := vk.PhysicalDeviceVulkan13Features {
     sType                          = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
     dynamicRendering               = true,
+    synchronization2               = true,
     shaderDemoteToHelperInvocation = true,
   }
   REQUIRE_GEOMETRY_SHADER :: #config(
@@ -663,12 +664,16 @@ end_single_time_command :: proc(
   cmd_buffer: ^vk.CommandBuffer,
 ) -> vk.Result {
   end_record(cmd_buffer^) or_return
-  submit_info := vk.SubmitInfo {
-    sType              = .SUBMIT_INFO,
-    commandBufferCount = 1,
-    pCommandBuffers    = cmd_buffer,
+  cmd_info := vk.CommandBufferSubmitInfo {
+    sType         = .COMMAND_BUFFER_SUBMIT_INFO,
+    commandBuffer = cmd_buffer^,
   }
-  vk.QueueSubmit(self.graphics_queue, 1, &submit_info, 0) or_return
+  submit_info := vk.SubmitInfo2 {
+    sType                  = .SUBMIT_INFO_2,
+    commandBufferInfoCount = 1,
+    pCommandBufferInfos    = &cmd_info,
+  }
+  vk.QueueSubmit2(self.graphics_queue, 1, &submit_info, 0) or_return
   vk.QueueWaitIdle(self.graphics_queue) or_return
   vk.FreeCommandBuffers(self.device, self.command_pool, 1, cmd_buffer)
   return .SUCCESS

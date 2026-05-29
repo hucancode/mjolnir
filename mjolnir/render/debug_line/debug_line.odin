@@ -30,13 +30,12 @@ PushConstant :: struct {
 }
 
 Renderer :: struct {
-  pipeline_layout:  vk.PipelineLayout,
-  pipeline:         vk.Pipeline,
-  pipeline_overlay: vk.Pipeline,
-  vertex_buffers:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex),
-  segments:         [dynamic]Segment,
-  now:              f32,
-  mu:               sync.Mutex,
+  pipeline_layout: vk.PipelineLayout,
+  pipeline:        vk.Pipeline,
+  vertex_buffers:  [FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex),
+  segments:        [dynamic]Segment,
+  now:             f32,
+  mu:              sync.Mutex,
 }
 
 init :: proc(
@@ -87,6 +86,9 @@ init :: proc(
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .LINE_LIST,
   }
+  // Depth test toggled dynamically per draw to fold overlay variant into the same pipeline.
+  dyn_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_TEST_ENABLE}
+  dyn_state := gpu.create_dynamic_state(dyn_states[:])
 
   pinfo := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -99,13 +101,11 @@ init :: proc(
     pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
     pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
     pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
-    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
+    pDynamicState       = &dyn_state,
     layout              = self.pipeline_layout,
     pNext               = &gpu.STANDARD_RENDERING_INFO,
   }
   vk.CreateGraphicsPipelines(gctx.device, 0, 1, &pinfo, nil, &self.pipeline) or_return
-  pinfo.pDepthStencilState = &gpu.DISABLED_DEPTH_STATE
-  vk.CreateGraphicsPipelines(gctx.device, 0, 1, &pinfo, nil, &self.pipeline_overlay) or_return
 
   self.segments = make([dynamic]Segment, 0, 1024)
   log.debugf("debug_line renderer initialized")
@@ -118,10 +118,8 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
     gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
   }
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
-  vk.DestroyPipeline(gctx.device, self.pipeline_overlay, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
   self.pipeline = 0
-  self.pipeline_overlay = 0
   self.pipeline_layout = 0
 }
 
@@ -247,12 +245,13 @@ record :: proc(
   vk.CmdBindDescriptorSets(cmd, .GRAPHICS, self.pipeline_layout, 0, 1, raw_data(descs[:]), 0, nil)
   vk.CmdPushConstants(cmd, self.pipeline_layout, {.VERTEX}, 0, size_of(PushConstant), &pc)
 
+  vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipeline)
   if split > 0 {
-    vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipeline)
+    vk.CmdSetDepthTestEnable(cmd, true)
     vk.CmdDraw(cmd, u32(split), 1, 0, 0)
   }
   if vcount > split {
-    vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipeline_overlay)
+    vk.CmdSetDepthTestEnable(cmd, false)
     vk.CmdDraw(cmd, u32(vcount - split), 1, u32(split), 0)
   }
   vk.CmdEndRendering(cmd)

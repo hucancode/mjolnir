@@ -1705,9 +1705,11 @@ record_frame :: proc(
     )
   }
 
-  present_barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
+  present_barrier := vk.ImageMemoryBarrier2 {
+    sType = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask = {.COLOR_ATTACHMENT_OUTPUT},
     srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    dstStageMask = {.BOTTOM_OF_PIPE},
     oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
     newLayout = .PRESENT_SRC_KHR,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
@@ -1715,18 +1717,12 @@ record_frame :: proc(
     image = swapchain_image,
     subresourceRange = {aspectMask = {.COLOR}, levelCount = 1, layerCount = 1},
   }
-  vk.CmdPipelineBarrier(
-    cmd,
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.BOTTOM_OF_PIPE},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &present_barrier,
-  )
+  present_dep := vk.DependencyInfo {
+    sType                   = .DEPENDENCY_INFO,
+    imageMemoryBarrierCount = 1,
+    pImageMemoryBarriers    = &present_barrier,
+  }
+  vk.CmdPipelineBarrier2(cmd, &present_dep)
   gpu.end_record(cmd) or_return
   return .SUCCESS
 }

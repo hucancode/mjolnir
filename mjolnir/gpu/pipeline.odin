@@ -694,19 +694,21 @@ image_barrier :: proc(
   image: vk.Image,
   old_layout: vk.ImageLayout,
   new_layout: vk.ImageLayout,
-  src_access: vk.AccessFlags,
-  dst_access: vk.AccessFlags,
-  src_stage: vk.PipelineStageFlags,
-  dst_stage: vk.PipelineStageFlags,
+  src_access: vk.AccessFlags2,
+  dst_access: vk.AccessFlags2,
+  src_stage: vk.PipelineStageFlags2,
+  dst_stage: vk.PipelineStageFlags2,
   aspect_mask: vk.ImageAspectFlags,
   mip_level: u32 = 0,
   level_count: u32 = 1,
   base_layer: u32 = 0,
   layer_count: u32 = 1,
 ) {
-  barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
+  barrier := vk.ImageMemoryBarrier2 {
+    sType = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask = src_stage,
     srcAccessMask = src_access,
+    dstStageMask = dst_stage,
     dstAccessMask = dst_access,
     oldLayout = old_layout,
     newLayout = new_layout,
@@ -721,59 +723,51 @@ image_barrier :: proc(
       layerCount = layer_count,
     },
   }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    src_stage,
-    dst_stage,
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &barrier,
-  )
+  dep := vk.DependencyInfo {
+    sType                   = .DEPENDENCY_INFO,
+    imageMemoryBarrierCount = 1,
+    pImageMemoryBarriers    = &barrier,
+  }
+  vk.CmdPipelineBarrier2(command_buffer, &dep)
 }
 
 memory_barrier :: proc(
   command_buffer: vk.CommandBuffer,
-  src_access: vk.AccessFlags,
-  dst_access: vk.AccessFlags,
-  src_stage: vk.PipelineStageFlags,
-  dst_stage: vk.PipelineStageFlags,
+  src_access: vk.AccessFlags2,
+  dst_access: vk.AccessFlags2,
+  src_stage: vk.PipelineStageFlags2,
+  dst_stage: vk.PipelineStageFlags2,
 ) {
-  barrier := vk.MemoryBarrier {
-    sType         = .MEMORY_BARRIER,
+  barrier := vk.MemoryBarrier2 {
+    sType         = .MEMORY_BARRIER_2,
+    srcStageMask  = src_stage,
     srcAccessMask = src_access,
+    dstStageMask  = dst_stage,
     dstAccessMask = dst_access,
   }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    src_stage,
-    dst_stage,
-    {},
-    1,
-    &barrier,
-    0,
-    nil,
-    0,
-    nil,
-  )
+  dep := vk.DependencyInfo {
+    sType              = .DEPENDENCY_INFO,
+    memoryBarrierCount = 1,
+    pMemoryBarriers    = &barrier,
+  }
+  vk.CmdPipelineBarrier2(command_buffer, &dep)
 }
 
 buffer_barrier :: proc(
   command_buffer: vk.CommandBuffer,
   buffer: vk.Buffer,
   size: vk.DeviceSize,
-  src_access: vk.AccessFlags,
-  dst_access: vk.AccessFlags,
-  src_stage: vk.PipelineStageFlags,
-  dst_stage: vk.PipelineStageFlags,
+  src_access: vk.AccessFlags2,
+  dst_access: vk.AccessFlags2,
+  src_stage: vk.PipelineStageFlags2,
+  dst_stage: vk.PipelineStageFlags2,
   offset: vk.DeviceSize = 0,
 ) {
-  barrier := vk.BufferMemoryBarrier {
-    sType               = .BUFFER_MEMORY_BARRIER,
+  barrier := vk.BufferMemoryBarrier2 {
+    sType               = .BUFFER_MEMORY_BARRIER_2,
+    srcStageMask        = src_stage,
     srcAccessMask       = src_access,
+    dstStageMask        = dst_stage,
     dstAccessMask       = dst_access,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
@@ -781,18 +775,12 @@ buffer_barrier :: proc(
     offset              = offset,
     size                = size,
   }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    src_stage,
-    dst_stage,
-    {},
-    0,
-    nil,
-    1,
-    &barrier,
-    0,
-    nil,
-  )
+  dep := vk.DependencyInfo {
+    sType                    = .DEPENDENCY_INFO,
+    bufferMemoryBarrierCount = 1,
+    pBufferMemoryBarriers    = &barrier,
+  }
+  vk.CmdPipelineBarrier2(command_buffer, &dep)
 }
 
 create_compute_pipeline :: proc(

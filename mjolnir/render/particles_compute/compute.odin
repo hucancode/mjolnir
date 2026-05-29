@@ -196,9 +196,9 @@ simulate :: proc(
   gpu.memory_barrier(
     command_buffer,
     {.TRANSFER_WRITE},
-    {.INDIRECT_COMMAND_READ, .VERTEX_ATTRIBUTE_READ, .TRANSFER_READ},
+    {.INDIRECT_COMMAND_READ, .TRANSFER_READ},
     {.TRANSFER},
-    {.DRAW_INDIRECT, .VERTEX_INPUT, .TRANSFER},
+    {.DRAW_INDIRECT, .TRANSFER},
   )
 }
 
