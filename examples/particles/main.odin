@@ -1,7 +1,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/render"
+import "../../mjolnir/render/ambient"
 import "../../mjolnir/gpu"
 import "../../mjolnir/world"
 import "core:strings"
@@ -58,7 +58,7 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   world.main_camera_look_at(&engine.world, {0, 5, 10}, {0, 2, 0})
-  render.set_skybox_enabled(&engine.render, false)
+  ambient.set_skybox_enabled(&engine.render.ambient, false)
 
   for name in TEXTURE_FILES {
     path := fmt.tprintf("assets/particles/%s.png", name)

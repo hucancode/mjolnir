@@ -14,6 +14,7 @@ import "gpu"
 import nav "navigation"
 import "physics"
 import "render"
+import debug_ui_module "render/debug_ui"
 import scene_sync "sync"
 import ui_module "ui"
 import "vendor:glfw"
@@ -101,13 +102,13 @@ Engine :: struct {
 // True when the debug UI is hovered or has an active pop-up. Mouse input
 // (click / move / scroll) should not propagate to camera or game callbacks.
 debug_ui_wants_mouse :: proc(self: ^Engine) -> bool {
-  return self.render.debug_ui.ctx.hover_root != nil
+  return debug_ui_module.wants_mouse(&self.render.debug_ui)
 }
 
 // True when the debug UI has keyboard focus (e.g. text box). Keyboard input
 // should not propagate to camera or game callbacks.
 debug_ui_wants_keyboard :: proc(self: ^Engine) -> bool {
-  return self.render.debug_ui.ctx.focus_id != 0
+  return debug_ui_module.wants_keyboard(&self.render.debug_ui)
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {

@@ -122,7 +122,7 @@ init_subsystems :: proc(
     SHADOW_MAP_SIZE,
   ) or_return
   ambient.init(
-    &self.internal.ambient,
+    &self.ambient,
     gctx,
     self.internal.camera_buffer.set_layout,
     self.texture_manager.set_layout,
@@ -280,7 +280,7 @@ setup :: proc(
   ) or_return
   realloc_scene_descriptors(self, gctx) or_return
   ambient.setup(
-    &self.internal.ambient,
+    &self.ambient,
     gctx,
     &self.texture_manager,
     self.internal.linear_repeat_sampler,
@@ -314,7 +314,7 @@ teardown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   debug_ui.teardown(&self.debug_ui, gctx, &self.texture_manager)
   post_process.teardown(&self.post_process, gctx, &self.texture_manager)
   particles_compute.teardown(&self.internal.particles_compute, gctx)
-  ambient.teardown(&self.internal.ambient, gctx, &self.texture_manager)
+  ambient.teardown(&self.ambient, gctx, &self.texture_manager)
   direct_light.teardown(&self.internal.direct_light, gctx)
   gpu.texture_manager_teardown(&self.texture_manager, gctx)
   clear_scene_descriptor_handles(self)
@@ -337,7 +337,7 @@ shutdown :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
   wireframe.shutdown(&self.internal.wireframe_renderer, gctx)
   line_strip.shutdown(&self.internal.line_strip_renderer, gctx)
   random_color.shutdown(&self.internal.random_color_renderer, gctx)
-  ambient.shutdown(&self.internal.ambient, gctx)
+  ambient.shutdown(&self.ambient, gctx)
   direct_light.shutdown(&self.internal.direct_light, gctx)
   shadow_sphere_render_system.shutdown(&self.internal.shadow_sphere_render, gctx)
   shadow_render_system.shutdown(&self.internal.shadow_render, gctx)

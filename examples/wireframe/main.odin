@@ -1,7 +1,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/render"
+import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:math/linalg"
 
@@ -13,7 +13,7 @@ handles: [9]world.NodeHandle
 
 setup :: proc(engine: ^mjolnir.Engine) {
   world.main_camera_look_at(&engine.world, {0, 4, 9}, {0, 0, 0})
-  render.set_skybox_enabled(&engine.render, false)
+  ambient.set_skybox_enabled(&engine.render.ambient, false)
 
   cube := world.get_builtin_mesh(&engine.world, .CUBE)
   mat := world.material_wireframe(&engine.world)

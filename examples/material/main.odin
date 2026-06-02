@@ -2,7 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/gpu"
-import "../../mjolnir/render"
+import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:math"
@@ -78,8 +78,8 @@ axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   world.set_light_intensity(&engine.world, sun_light, f32(sun_intensity))
-  render.set_ibl_intensity(&engine.render, f32(ibl_intensity))
-  render.set_skybox_enabled(&engine.render, skybox_on)
+  ambient.set_ibl_intensity(&engine.render.ambient, f32(ibl_intensity))
+  ambient.set_skybox_enabled(&engine.render.ambient, skybox_on)
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
     world.set_material_pbr_params(&engine.world, grid_materials[row][col], metallic = m, roughness = r)

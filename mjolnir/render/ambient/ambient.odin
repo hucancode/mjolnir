@@ -170,6 +170,22 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   self.pipeline_layout = 0
 }
 
+set_ibl_intensity :: proc(self: ^Renderer, intensity: f32) {
+  self.ibl_intensity = max(intensity, 0.0)
+}
+
+set_skybox_enabled :: proc(self: ^Renderer, enabled: bool) {
+  self.skybox_enabled = enabled
+}
+
+set_skybox_intensity :: proc(self: ^Renderer, intensity: f32) {
+  self.skybox_intensity = max(intensity, 0.0)
+}
+
+set_skybox_blur :: proc(self: ^Renderer, blur: f32) {
+  self.skybox_blur = clamp(blur, 0.0, 1.0)
+}
+
 record :: proc(
   self: ^Renderer,
   camera_handle: u32,

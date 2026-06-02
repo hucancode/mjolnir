@@ -2,7 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/gpu"
-import "../../mjolnir/render"
+import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:math/linalg"
@@ -63,7 +63,7 @@ spawn_field :: proc(
 
 setup :: proc(engine: ^mjolnir.Engine) {
   world.main_camera_look_at(&engine.world, {0, 12, 3}, {0, 2, 0})
-  render.set_skybox_enabled(&engine.render, false)
+  ambient.set_skybox_enabled(&engine.render.ambient, false)
 
   // Particle source at center, large position spread
   if tex, ret := gpu.create_texture_2d_from_path(&engine.gctx, &engine.render.texture_manager, "assets/particles/star_09.png"); ret == .SUCCESS {

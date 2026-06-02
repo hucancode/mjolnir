@@ -3,7 +3,6 @@ package render
 import geom "../geometry"
 import "../gpu"
 import "ambient"
-import "core:slice"
 import "debug_line"
 import "debug_ui"
 import depth_pyramid_system "depth_pyramid"
@@ -68,45 +67,6 @@ record_compute_commands :: proc(
   return .SUCCESS
 }
 
-// Build per-frame shadow info for every active light. Computed once at the
-// top of record_frame and consumed by both the depth dispatch and the
-// lighting pass to avoid duplicating matrix derivation.
-@(private)
-build_shadow_cache :: proc(
-  self: ^Manager,
-) -> map[u32]shadow_render_system.ShadowFrameInfo {
-  cache := make(
-    map[u32]shadow_render_system.ShadowFrameInfo,
-    len(self.internal.lights),
-    context.temp_allocator,
-  )
-  for idx, light in self.internal.lights {
-    info: shadow_render_system.ShadowFrameInfo
-    switch variant in light {
-    case SpotLight:
-      view, projection, near, far := shadow_render_system.matrices_spot(
-        variant.position,
-        variant.direction,
-        variant.radius,
-        variant.angle_outer,
-      )
-      info = {projection * view, projection, near, far}
-    case DirectionalLight:
-      view, projection, near, far := shadow_render_system.matrices_directional(
-        variant.position,
-        variant.direction,
-        variant.radius,
-      )
-      info = {projection * view, projection, near, far}
-    case PointLight:
-      projection, near, far := shadow_render_system.projection_point(variant.radius)
-      info = {{}, projection, near, far}
-    }
-    cache[idx] = info
-  }
-  return cache
-}
-
 @(private)
 render_shadow_depth :: proc(
   self: ^Manager,
@@ -114,19 +74,8 @@ render_shadow_depth :: proc(
   cache: map[u32]shadow_render_system.ShadowFrameInfo,
 ) -> vk.Result {
   cmd := self.internal.command_buffers[frame_index]
-  light_node_indices := make(
-    [dynamic]u32,
-    0,
-    len(self.internal.lights),
-    context.temp_allocator,
-  )
-  defer delete(light_node_indices)
-  for light_node_index in self.internal.lights {
-    append(&light_node_indices, light_node_index)
-  }
-  slice.sort(light_node_indices[:])
-  for i in 0 ..< min(len(light_node_indices), int(MAX_LIGHTS)) {
-    light_node_index := light_node_indices[i]
+  light_node_indices := sorted_light_indices(self)
+  for light_node_index in light_node_indices {
     light := self.internal.lights[light_node_index]
     info := cache[light_node_index]
     switch variant in light {
@@ -247,7 +196,7 @@ record_lighting_pass :: proc(
   if .LIGHTING not_in enabled_passes do return .SUCCESS
   cmd := self.internal.command_buffers[frame_index]
   ambient.record(
-    &self.internal.ambient,
+    &self.ambient,
     cam_index,
     cmd,
     &self.texture_manager,
@@ -267,19 +216,8 @@ record_lighting_pass :: proc(
     cmd,
     self.internal.camera_buffer.descriptor_sets[frame_index],
   )
-  light_node_indices := make(
-    [dynamic]u32,
-    0,
-    len(self.internal.lights),
-    context.temp_allocator,
-  )
-  defer delete(light_node_indices)
-  for light_node_index in self.internal.lights {
-    append(&light_node_indices, light_node_index)
-  }
-  slice.sort(light_node_indices[:])
-  for i in 0 ..< min(len(light_node_indices), int(MAX_LIGHTS)) {
-    light_node_index := light_node_indices[i]
+  light_node_indices := sorted_light_indices(self)
+  for light_node_index in light_node_indices {
     light := self.internal.lights[light_node_index]
     info := cache[light_node_index]
     switch variant in light {

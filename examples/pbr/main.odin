@@ -1,7 +1,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/render"
+import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:math"
 import "core:math/linalg"
@@ -63,9 +63,9 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   world.set_light_intensity(&engine.world, dir_light, f32(dir_intensity))
-  render.set_ibl_intensity(&engine.render, f32(ibl_intensity))
-  render.set_skybox_enabled(&engine.render, skybox_on)
-  render.set_skybox_blur(&engine.render, f32(skybox_blur))
+  ambient.set_ibl_intensity(&engine.render.ambient, f32(ibl_intensity))
+  ambient.set_skybox_enabled(&engine.render.ambient, skybox_on)
+  ambient.set_skybox_blur(&engine.render.ambient, f32(skybox_blur))
   if spinning {
     rotation_phase += delta_time * f32(rotate_speed)
   }

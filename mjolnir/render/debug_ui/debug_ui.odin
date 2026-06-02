@@ -381,6 +381,14 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   self.pipeline_layout = 0
 }
 
+wants_mouse :: proc(self: ^Renderer) -> bool {
+  return self.ctx.hover_root != nil
+}
+
+wants_keyboard :: proc(self: ^Renderer) -> bool {
+  return self.ctx.focus_id != 0
+}
+
 recreate_images :: proc(
   self: ^Renderer,
   color_format: vk.Format,

@@ -84,6 +84,28 @@ Renderer :: struct {
   compact_pipeline:                   vk.Pipeline,
 }
 
+// Update params buffer. Preserves frame_counter (owned by simulate). Caller
+// supplies validated counts; asserts guard the GPU buffer bounds.
+set_params :: proc(self: ^Renderer, params: ParticleSystemParams) {
+  assert(
+    params.emitter_count <= MAX_EMITTERS,
+    "emitter_count exceeds MAX_EMITTERS",
+  )
+  assert(
+    params.forcefield_count <= MAX_FORCE_FIELDS,
+    "forcefield_count exceeds MAX_FORCE_FIELDS",
+  )
+  assert(
+    params.particle_count <= MAX_PARTICLES,
+    "particle_count exceeds MAX_PARTICLES",
+  )
+  assert(params.delta_time >= 0.0, "delta_time must be non-negative")
+  ptr := gpu.get(&self.params_buffer, 0)
+  preserved := ptr.frame_counter
+  ptr^ = params
+  ptr.frame_counter = preserved
+}
+
 simulate :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,

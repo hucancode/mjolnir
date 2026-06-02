@@ -2,7 +2,9 @@ package render
 
 import "../gpu"
 import "core:log"
+import "core:slice"
 import shadow_culling_system "shadow_culling"
+import shadow_render_system "shadow_render"
 import shadow_sphere_culling_system "shadow_sphere_culling"
 import vk "vendor:vulkan"
 
@@ -197,6 +199,62 @@ upsert_light_entry :: proc(
     }
   }
   return .SUCCESS
+}
+
+// Build per-frame shadow info for every active light. Computed once per
+// frame; consumed by depth dispatch and lighting pass to avoid duplicating
+// matrix derivation across passes.
+@(private)
+build_shadow_cache :: proc(
+  self: ^Manager,
+) -> map[u32]shadow_render_system.ShadowFrameInfo {
+  cache := make(
+    map[u32]shadow_render_system.ShadowFrameInfo,
+    len(self.internal.lights),
+    context.temp_allocator,
+  )
+  for idx, light in self.internal.lights {
+    info: shadow_render_system.ShadowFrameInfo
+    switch variant in light {
+    case SpotLight:
+      view, projection, near, far := shadow_render_system.matrices_spot(
+        variant.position,
+        variant.direction,
+        variant.radius,
+        variant.angle_outer,
+      )
+      info = {projection * view, projection, near, far}
+    case DirectionalLight:
+      view, projection, near, far := shadow_render_system.matrices_directional(
+        variant.position,
+        variant.direction,
+        variant.radius,
+      )
+      info = {projection * view, projection, near, far}
+    case PointLight:
+      projection, near, far := shadow_render_system.projection_point(variant.radius)
+      info = {{}, projection, near, far}
+    }
+    cache[idx] = info
+  }
+  return cache
+}
+
+// Sorted light node indices, truncated to MAX_LIGHTS. Shared by shadow depth
+// and lighting passes so iteration order is stable across passes.
+@(private)
+sorted_light_indices :: proc(self: ^Manager) -> []u32 {
+  indices := make(
+    [dynamic]u32,
+    0,
+    len(self.internal.lights),
+    context.temp_allocator,
+  )
+  for light_node_index in self.internal.lights {
+    append(&indices, light_node_index)
+  }
+  slice.sort(indices[:])
+  return indices[:min(len(indices), int(MAX_LIGHTS))]
 }
 
 remove_light_entry :: proc(

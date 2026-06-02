@@ -236,7 +236,6 @@ Internal :: struct {
   bone_matrix_offsets:          map[u32]u32,
   // Pass renderers - never accessed from outside the render package.
   geometry:                     geometry.Renderer,
-  ambient:                      ambient.Renderer,
   direct_light:                 direct_light.Renderer,
   transparent_renderer:         transparent.Renderer,
   sprite_renderer:              sprite.Renderer,
@@ -277,6 +276,7 @@ Manager :: struct {
   node_count:      u32,
   mesh_manager:    gpu.MeshManager,
   texture_manager: gpu.TextureManager,
+  ambient:         ambient.Renderer,
   post_process:    post_process.Renderer,
   debug_ui:        debug_ui.Renderer,
 }
