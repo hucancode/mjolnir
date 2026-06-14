@@ -52,15 +52,6 @@ PreRenderProc :: #type proc(engine: ^Engine)
 PostRenderProc :: #type proc(engine: ^Engine)
 CameraController :: world.CameraController
 
-InputState :: struct {
-  mouse_pos:         [2]f64,
-  mouse_drag_origin: [2]f32,
-  mouse_buttons:     [8]bool,
-  mouse_holding:     [8]bool,
-  key_holding:       [512]bool,
-  keys:              [512]bool,
-}
-
 Engine :: struct {
   window:                    glfw.WindowHandle,
   gctx:                      gpu.GPUContext,
@@ -72,7 +63,7 @@ Engine :: struct {
   last_frame_timestamp:      time.Time,
   last_update_timestamp:     time.Time,
   start_timestamp:           time.Time,
-  input:                     InputState,
+  input:                     Input,
   setup_proc:                SetupProc,
   update_proc:               UpdateProc,
   key_press_proc:            KeyInputProc,
@@ -91,10 +82,6 @@ Engine :: struct {
   last_render_timestamp:     time.Time,
   camera_controller_enabled: bool,
   ui_hovered_widget:         Maybe(ui_module.UIWidgetHandle),
-  // Set on PRESS when debug UI captured the click. Cleared on RELEASE.
-  // Used so the matching RELEASE is also withheld from user procs and
-  // camera controller, regardless of where the cursor ends up.
-  ui_captured_mouse_button:  [8]bool,
   // Opaque user pointer — stash app state here instead of using globals.
   user_data:                 rawptr,
 }
@@ -109,6 +96,14 @@ debug_ui_wants_mouse :: proc(self: ^Engine) -> bool {
 // should not propagate to camera or game callbacks.
 debug_ui_wants_keyboard :: proc(self: ^Engine) -> bool {
   return debug_ui_module.wants_keyboard(&self.render.debug_ui)
+}
+
+get_delta_time :: proc(self: ^Engine) -> f32 {
+  return f32(time.duration_seconds(time.since(self.last_update_timestamp)))
+}
+
+time_since_start :: proc(self: ^Engine) -> f32 {
+  return f32(time.duration_seconds(time.since(self.start_timestamp)))
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -179,19 +174,15 @@ init :: proc(
       "Sequential compute bootstrap: both draw buffers initialized on graphics queue",
     )
   }
+  // Callbacks write ONLY raw device state + forward to the debug UI. Edge
+  // detection and user-callback dispatch happen once per tick in update()
+  // (see input.odin), so the kHz event rate can't outrun the throttled update.
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-      if key >= 0 && int(key) < len(engine.input.keys) {
-        is_pressed := action == glfw.PRESS || action == glfw.REPEAT
-        engine.input.key_holding[key] = is_pressed && engine.input.keys[key]
-        engine.input.keys[key] = is_pressed
-      }
-      if engine.key_press_proc != nil && !debug_ui_wants_keyboard(engine) {
-        engine.key_press_proc(engine, int(key), int(action), int(mods))
-      }
+      input_set_key(&engine.input, key, action == glfw.PRESS || action == glfw.REPEAT)
       dispatch_glfw_key(&engine.render.debug_ui.ctx, key, action)
     },
   )
@@ -200,6 +191,7 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, button, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
+      input_set_button(&engine.input, button, action != glfw.RELEASE)
       dispatch_glfw_mouse_button(
         &engine.render.debug_ui.ctx,
         button,
@@ -207,27 +199,6 @@ init :: proc(
         engine.cursor_pos.x,
         engine.cursor_pos.y,
       )
-      btn_idx := int(button)
-      captured := false
-      switch action {
-      case glfw.PRESS, glfw.REPEAT:
-        if debug_ui_wants_mouse(engine) {
-          if btn_idx >= 0 && btn_idx < len(engine.ui_captured_mouse_button) {
-            engine.ui_captured_mouse_button[btn_idx] = true
-          }
-          captured = true
-        }
-      case glfw.RELEASE:
-        if btn_idx >= 0 && btn_idx < len(engine.ui_captured_mouse_button) {
-          if engine.ui_captured_mouse_button[btn_idx] {
-            engine.ui_captured_mouse_button[btn_idx] = false
-            captured = true
-          }
-        }
-      }
-      if engine.mouse_press_proc != nil && !captured {
-        engine.mouse_press_proc(engine, int(button), int(action), int(mods))
-      }
     },
   )
   glfw.SetCursorPosCallback(
@@ -235,19 +206,9 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
+      input_set_mouse(&engine.input, xpos, ypos)
       x, y := dispatch_glfw_cursor_pos(&engine.render.debug_ui.ctx, xpos, ypos)
       engine.cursor_pos = {x, y}
-      drag_captured_by_ui := false
-      for held in engine.ui_captured_mouse_button {
-        if held {
-          drag_captured_by_ui = true
-          break
-        }
-      }
-      block := drag_captured_by_ui || debug_ui_wants_mouse(engine)
-      if engine.mouse_move_proc != nil && !block {
-        engine.mouse_move_proc(engine, {xpos, ypos}, {0, 0}) // TODO: pass delta
-      }
     },
   )
   glfw.SetScrollCallback(
@@ -255,6 +216,7 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
+      input_add_scroll(&engine.input, xoffset, yoffset)
       dispatch_glfw_scroll(&engine.render.debug_ui.ctx, xoffset, yoffset)
       if debug_ui_wants_mouse(engine) {
         return
@@ -263,9 +225,6 @@ init :: proc(
         world.g_scroll_deltas = make(map[glfw.WindowHandle]f32)
       }
       world.g_scroll_deltas[window] = f32(yoffset)
-      if engine.mouse_scroll_proc != nil {
-        engine.mouse_scroll_proc(engine, {xoffset, yoffset})
-      }
     },
   )
   glfw.SetCharCallback(
@@ -362,39 +321,6 @@ get_main_camera :: proc(self: ^Engine) -> ^world.Camera {
   return cont.get(self.world.cameras, self.world.main_camera)
 }
 
-update_input :: proc(self: ^Engine) -> bool {
-  glfw.PollEvents()
-  last_mouse_pos := self.input.mouse_pos
-  self.input.mouse_pos.x, self.input.mouse_pos.y = glfw.GetCursorPos(
-    self.window,
-  )
-  delta := self.input.mouse_pos - last_mouse_pos
-  for i in 0 ..< len(self.input.mouse_buttons) {
-    is_pressed := glfw.GetMouseButton(self.window, c.int(i)) == glfw.PRESS
-    self.input.mouse_holding[i] = is_pressed && self.input.mouse_buttons[i]
-    self.input.mouse_buttons[i] = is_pressed
-  }
-  // PERF: Disabled polling all 512 keys every frame (7ms~ CPU overhead)
-  // for k in 0 ..< len(self.input.keys) {
-  //   is_pressed := glfw.GetKey(self.window, c.int(k)) == glfw.PRESS
-  //   self.input.key_holding[k] = is_pressed && self.input.keys[k]
-  //   self.input.keys[k] = is_pressed
-  // }
-
-  self.ui_hovered_widget = ui_module.process_mouse(
-    &self.ui,
-    {f32(self.input.mouse_pos.x), f32(self.input.mouse_pos.y)},
-    &self.input.mouse_buttons,
-    &self.input.mouse_holding,
-    self.ui_hovered_widget,
-  )
-
-  if self.mouse_move_proc != nil {
-    self.mouse_move_proc(self, self.input.mouse_pos, delta)
-  }
-  return true
-}
-
 update :: proc(self: ^Engine) -> bool {
   context.user_ptr = self
   delta_time := get_delta_time(self)
@@ -402,6 +328,18 @@ update :: proc(self: ^Engine) -> bool {
     return false
   }
   self.last_update_timestamp = time.now()
+  // One input tick: snapshot the raw accumulator, route edges to the debug UI
+  // and to user callbacks, all on the same cadence as the rest of update().
+  input_new_frame(&self.input)
+  self.input.consumed_by_ui = debug_ui_wants_mouse(self)
+  self.ui_hovered_widget = ui_module.process_mouse(
+    &self.ui,
+    {f32(self.input.cur_mouse.x), f32(self.input.cur_mouse.y)},
+    &self.input.cur_buttons,
+    &self.input.prev_buttons,
+    self.ui_hovered_widget,
+  )
+  input_dispatch_callbacks(self)
   render.set_particle_params(
     &self.render,
     {
@@ -586,12 +524,21 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
   frame := 0
   render_error_count := 0
   for !glfw.WindowShouldClose(self.window) {
-    update_input(self)
+    glfw.PollEvents() // fills the raw input accumulator via GLFW callbacks
     when !USE_PARALLEL_UPDATE {
-      update(self)
+      update(self) // gated internally to the update rate; snapshots input
     }
-    if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
-       FRAME_TIME_MILIS {
+    remaining := FRAME_TIME_MILIS - time.duration_milliseconds(time.since(self.last_frame_timestamp))
+    if remaining > 0 {
+      // Don't oversleep past the next update tick (UPDATE_FPS may exceed
+      // RENDER_FPS); keep input latency bounded to one tick.
+      when !USE_PARALLEL_UPDATE {
+        until_tick := UPDATE_FRAME_TIME_MILIS - time.duration_milliseconds(time.since(self.last_update_timestamp))
+        if until_tick < remaining do remaining = until_tick
+      }
+      if remaining > 0.2 {
+        time.sleep(time.Duration(remaining * f64(time.Millisecond)))
+      }
       continue
     }
     self.last_frame_timestamp = time.now()

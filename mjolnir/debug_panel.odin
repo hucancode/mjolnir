@@ -5,6 +5,11 @@ import "core:fmt"
 import "render"
 import mu "vendor:microui"
 
+// MicroUI context for debug panels. Use inside `pre_render`.
+ui_ctx :: proc(self: ^Engine) -> ^mu.Context {
+  return &self.render.debug_ui.ctx
+}
+
 // Default debug stats panel rendered by render_and_present when debug_ui is
 // enabled. Apps that want a different layout can replace this proc or skip
 // it via their pre_render hook.
