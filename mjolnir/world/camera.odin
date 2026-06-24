@@ -112,14 +112,21 @@ camera_get_near_far :: proc(self: ^Camera) -> (near: f32, far: f32) {
   }
 }
 
-camera_look_at :: proc(self: ^Camera, from, to: [3]f32) {
+// `up` is the desired world-up reference. Pass {0,0,0} (default) to auto-pick
+// a safe up that avoids gimbal lock — but that auto-pick switches axes
+// discretely near the poles and snaps the view. Callers that know a smooth,
+// view-orthogonal up (e.g. orbit derives one from yaw/pitch) should pass it.
+camera_look_at :: proc(self: ^Camera, from, to: [3]f32, up: [3]f32 = {0, 0, 0}) {
   self.position = from
   forward := linalg.normalize(to - from)
-  safe_up := linalg.VECTOR3F32_Y_AXIS
-  if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
-    safe_up = linalg.VECTOR3F32_Z_AXIS
+  safe_up := up
+  if linalg.length2(safe_up) < 1e-6 {
+    safe_up = linalg.VECTOR3F32_Y_AXIS
     if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
-      safe_up = linalg.VECTOR3F32_X_AXIS
+      safe_up = linalg.VECTOR3F32_Z_AXIS
+      if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
+        safe_up = linalg.VECTOR3F32_X_AXIS
+      }
     }
   }
   right := linalg.normalize(linalg.cross(forward, safe_up))

@@ -95,8 +95,8 @@ camera_controller_orbit_init :: proc(
       pitch = pitch,
       min_distance = 1.0,
       max_distance = 200.0,
-      min_pitch = -math.PI * 0.5 + 0.01,
-      max_pitch = math.PI * 0.5 - 0.01,
+      min_pitch = -math.PI * 0.5,
+      max_pitch = math.PI * 0.5,
       zoom_speed = 2.0,
       rotate_speed = 2.0,
       pan_speed = 0.01,
@@ -229,11 +229,13 @@ camera_controller_orbit_update :: proc(
     }
   }
   if camera_needs_update || scroll != 0 {
-    x := orbit.distance * math.cos(orbit.pitch) * math.cos(orbit.yaw)
-    y := orbit.distance * math.sin(orbit.pitch)
-    z := orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw)
-    camera_position := orbit.target + [3]f32{x, y, z}
-    camera_look_at(camera, camera_position, orbit.target)
+    cp := math.cos(orbit.pitch)
+    sp := math.sin(orbit.pitch)
+    cy := math.cos(orbit.yaw)
+    sy := math.sin(orbit.yaw)
+    camera_position := orbit.target + orbit.distance * [3]f32{cp * cy, sp, cp * sy}
+    up := [3]f32{-sp * cy, cp, -sp * sy}
+    camera_look_at(camera, camera_position, orbit.target, up)
   }
 }
 
