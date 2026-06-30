@@ -71,7 +71,7 @@ default_bodies :: proc() -> [3]Body {
 main :: proc() {
   mjolnir.run_app(
     {
-      title = "Collision Demo",
+      title = "Collision",
       width = 1100,
       height = 760,
       debug_ui = true,
@@ -389,28 +389,10 @@ draw_selection :: proc(engine: ^mjolnir.Engine) {
 
 panel :: proc(engine: ^mjolnir.Engine) {
   ctx := mjolnir.ui_ctx(engine)
-  if mu.window(ctx, "Collision Demo", {20, 20, 320, 700}, {.NO_CLOSE}) {
-    mu.layout_row(ctx, {150, -1}, 0)
-    if .SUBMIT in mu.button(ctx, "Reset Scene") {
-      mjolnir.schedule_teardown(engine)
-      mjolnir.schedule_setup(engine)
-    }
-    if .SUBMIT in mu.button(ctx, engine.physics.paused ? "Resume" : "Pause") {
-      engine.physics.paused = !engine.physics.paused
-    }
-    mu.label(ctx, "Left-click an object to select it.")
-
-    perf := engine.physics.last_perf
-    mu.label(
-      ctx,
-      fmt.tprintf(
-        "Contacts: %d static, %d dynamic",
-        perf.static_contact_count,
-        perf.dynamic_contact_count,
-      ),
-    )
-
-    if selected >= 0 {
+  if mu.window(ctx, "Inspector", {20, 220, 320, 500}, {.NO_CLOSE}) {
+    if selected <= 0 {
+      mu.label(ctx, "Left-click an object to select it.")
+    } else {
       b := &bodies[selected]
       mu.layout_row(ctx, {-1}, 0)
       mu.layout_row(ctx, {90, 90, 90}, 0)
@@ -450,6 +432,27 @@ panel :: proc(engine: ^mjolnir.Engine) {
         mu.slider(ctx, &b.mass, 0.5, 50)
       }
     }
+  }
+  if mu.window(ctx, "Collision", {20, 20, 320, 180}, {.NO_CLOSE}) {
+    mu.layout_row(ctx, {150, -1}, 0)
+    if .SUBMIT in mu.button(ctx, "Reset Scene") {
+      mjolnir.schedule_teardown(engine)
+      mjolnir.schedule_setup(engine)
+    }
+    if .SUBMIT in mu.button(ctx, engine.physics.paused ? "Resume" : "Pause") {
+      engine.physics.paused = !engine.physics.paused
+    }
+
+    perf := engine.physics.last_perf
+    mu.label(
+      ctx,
+      fmt.tprintf(
+        "Contacts: %d static, %d dynamic",
+        perf.static_contact_count,
+        perf.dynamic_contact_count,
+      ),
+    )
+
 
     mu.layout_row(ctx, {-1}, 0)
     shown := 0
