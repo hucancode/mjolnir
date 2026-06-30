@@ -739,10 +739,13 @@ create_mesh_with_ptr :: proc(
 }
 
 destroy_mesh :: proc(self: ^World, handle: MeshHandle) {
-  if mesh, ok := cont.free(&self.meshes, handle); ok {
-    stage_mesh_removal(&self.staging, handle)
-    mesh_destroy(mesh)
-  }
+  if cont.get(self.meshes, handle) == nil do return
+  stage_mesh_removal(&self.staging, handle)
+  cont.free_deferred(&self.meshes, handle)
+}
+
+mesh_retire :: proc(item: ^Mesh, user: rawptr) {
+  mesh_destroy(item)
 }
 
 Color :: enum {

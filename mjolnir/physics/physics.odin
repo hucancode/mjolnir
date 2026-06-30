@@ -95,6 +95,7 @@ World :: struct {
   solver_static_shard_count: int,
   // Per-frame performance counters (populated at end of step)
   last_perf:               PerfFrame,
+  paused:                  bool,
 }
 
 DynamicBroadPhaseEntry :: struct {
@@ -112,6 +113,7 @@ init :: proc(
   gravity := [3]f32{0, -9.81, 0},
   enable_parallel: bool = true,
 ) -> bool {
+  self^ = {}
   cont.init(&self.bodies)
   cont.init(&self.static_bodies)
   cont.init(&self.trigger_bodies)
@@ -192,6 +194,38 @@ shutdown :: proc(self: ^World) {
   delete(self.solver_static_shards)
   geometry.bvh_destroy(&self.dynamic_bvh)
   geometry.bvh_destroy(&self.static_bvh)
+  self^ = {}
+}
+
+teardown :: proc(self: ^World) {
+  for i in 0 ..< len(self.bodies.entries) {
+    if self.bodies.entries[i].active {
+      destroy_dynamic_body(self, DynamicRigidBodyHandle{index = u32(i), generation = self.bodies.entries[i].generation})
+    }
+  }
+  for i in 0 ..< len(self.static_bodies.entries) {
+    if self.static_bodies.entries[i].active {
+      destroy_static_body(self, StaticRigidBodyHandle{index = u32(i), generation = self.static_bodies.entries[i].generation})
+    }
+  }
+  for i in 0 ..< len(self.trigger_bodies.entries) {
+    if self.trigger_bodies.entries[i].active {
+      destroy_trigger(self, TriggerHandle{index = u32(i), generation = self.trigger_bodies.entries[i].generation})
+    }
+  }
+  clear(&self.dynamic_contacts)
+  clear(&self.static_contacts)
+  clear(&self.prev_dynamic_warmstart)
+  clear(&self.prev_static_warmstart)
+  clear(&self.trigger_overlaps)
+  clear(&self.trigger_static_overlaps)
+  clear(&self.dynamic_bvh.primitives)
+  clear(&self.dynamic_bvh.nodes)
+  clear(&self.static_bvh.primitives)
+  clear(&self.static_bvh.nodes)
+  self.last_dynamic_count = 0
+  self.last_static_count = 0
+  self.killed_body_count = 0
 }
 
 create_dynamic_body :: proc(
@@ -459,6 +493,7 @@ step_cleanup_and_count :: proc(self: ^World) -> (sleeping_count: int) {
 }
 
 step :: proc(self: ^World, dt: f32) {
+  if self.paused do return
   step_start := time.now()
 
   warmstart_start := time.now()
@@ -564,6 +599,24 @@ step :: proc(self: ^World, dt: f32) {
       len(self.dynamic_contacts), len(self.static_contacts),
     )
   }
+}
+
+rebuild_dynamic_bvh :: proc(self: ^World) {
+  count := 0
+  for i in 0 ..< len(self.bodies.entries) {
+    if self.bodies.entries[i].active && !self.bodies.entries[i].item.is_killed {
+      count += 1
+    }
+  }
+  step_rebuild_dynamic_bvh(self, count)
+}
+
+rebuild_static_bvh :: proc(self: ^World) {
+  count := 0
+  for i in 0 ..< len(self.static_bodies.entries) {
+    if self.static_bodies.entries[i].active do count += 1
+  }
+  step_rebuild_static_bvh(self, count)
 }
 
 get_dynamic_body :: #force_inline proc(

@@ -115,7 +115,8 @@ setup :: proc(
     {.SAMPLED},
     true,
   )
-  if env_result == .SUCCESS {
+  has_env := env_result == .SUCCESS
+  if has_env {
     self.environment_map = env_map
   } else {
     log.warn("HDR environment map not found, IBL will fall back to black")
@@ -138,7 +139,7 @@ setup :: proc(
   self.skybox_intensity = 1.0
   self.skybox_blur = 0.25
 
-  if self.environment_map.index != 0 {
+  if has_env {
     self.ibl = precompute(
       gctx,
       texture_manager,
@@ -186,6 +187,13 @@ set_skybox_blur :: proc(self: ^Renderer, blur: f32) {
   self.skybox_blur = clamp(blur, 0.0, 1.0)
 }
 
+TEX_INDEX_INVALID :: u32(0xFFFFFFFF)
+
+@(private = "file")
+tex_index :: proc(h: $H) -> u32 {
+  return h.index if h.generation != 0 else TEX_INDEX_INVALID
+}
+
 record :: proc(
   self: ^Renderer,
   camera_handle: u32,
@@ -220,10 +228,10 @@ record :: proc(
   )
   push := PushConstant {
     camera_index           = camera_handle,
-    irradiance_index       = self.ibl.irradiance_cube.index,
-    prefilter_index        = self.ibl.prefilter_cube.index,
-    brdf_lut_index         = self.brdf_lut.index,
-    environment_index      = self.environment_map.index,
+    irradiance_index       = tex_index(self.ibl.irradiance_cube),
+    prefilter_index        = tex_index(self.ibl.prefilter_cube),
+    brdf_lut_index         = tex_index(self.brdf_lut),
+    environment_index      = tex_index(self.environment_map),
     position_texture_index = position_texture_idx,
     normal_texture_index   = normal_texture_idx,
     albedo_texture_index   = albedo_texture_idx,

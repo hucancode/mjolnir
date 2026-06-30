@@ -2,6 +2,7 @@
 #extension GL_EXT_nonuniform_qualifier : require
 
 const float PI = 3.14159265359;
+const uint INVALID_TEXTURE = 0xFFFFFFFFu;
 
 layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
 layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
@@ -66,7 +67,7 @@ vec3 sample_skybox(Camera camera, vec2 uv) {
     vec4 world_far = inv_vp * vec4(ndc, 1.0, 1.0);
     vec3 dir = normalize(world_far.xyz / world_far.w - camera.position.xyz);
     float b = clamp(skybox_blur, 0.0, 1.0);
-    if (b <= 0.0 || prefilter_index == 0u || prefilter_max_lod <= 0.0) {
+    if (b <= 0.0 || prefilter_index == INVALID_TEXTURE || prefilter_max_lod <= 0.0) {
         vec2 eq_uv = dirToEquirectUv(dir);
         return textureLod(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_REPEAT]), eq_uv, 0.0).rgb;
     }
@@ -81,7 +82,7 @@ void main() {
 
     // Background (no geometry): draw skybox if enabled, else discard.
     if (dot(position, position) < 1e-6) {
-        if (skybox_enabled != 0u && environment_index != 0u) {
+        if (skybox_enabled != 0u && environment_index != INVALID_TEXTURE) {
             vec3 sky = sample_skybox(camera, uv) * skybox_intensity;
             outColor = vec4(sky, 1.0);
             return;

@@ -78,27 +78,24 @@ fill_sprite_node_data :: proc(
 }
 
 @(private = "file")
+INVALID_NODE :: render.Node {
+  material_id           = 0xFFFFFFFF,
+  mesh_id               = 0xFFFFFFFF,
+  attachment_data_index = 0xFFFFFFFF,
+}
+
+@(private = "file")
 sync_nodes :: proc(rndr: ^render.Manager, wld: ^world.World) {
   stale := make([dynamic]world.NodeHandle, context.temp_allocator)
   for handle, entry in wld.staging.node_data {
-    if entry.op == .Remove {
-      node_data := render.Node {
-        material_id           = 0xFFFFFFFF,
-        mesh_id               = 0xFFFFFFFF,
-        attachment_data_index = 0xFFFFFFFF,
-      }
-      render.upload_node_data(rndr, handle.index, &node_data)
+    node, ok := cont.get(wld.nodes, handle)
+    if entry.op == .Remove || !ok {
+      nd := INVALID_NODE
+      render.upload_node_data(rndr, handle.index, &nd)
       append(&stale, handle)
       continue
     }
-    defer age_and_mark(&wld.staging.node_data, handle, entry.age, &stale)
-    node_data := render.Node {
-      material_id           = 0xFFFFFFFF,
-      mesh_id               = 0xFFFFFFFF,
-      attachment_data_index = 0xFFFFFFFF,
-    }
-    defer render.upload_node_data(rndr, handle.index, &node_data)
-    node := cont.get(wld.nodes, handle) or_continue
+    node_data := INVALID_NODE
     node_data.world_matrix = node.transform.world_matrix
     #partial switch att in node.attachment {
     case world.MeshAttachment:
@@ -106,6 +103,8 @@ sync_nodes :: proc(rndr: ^render.Manager, wld: ^world.World) {
     case world.SpriteAttachment:
       fill_sprite_node_data(wld, node, att, &node_data)
     }
+    render.upload_node_data(rndr, handle.index, &node_data)
+    age_and_mark(&wld.staging.node_data, handle, entry.age, &stale)
   }
   for handle in stale {
     delete_key(&wld.staging.node_data, handle)

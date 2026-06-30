@@ -70,8 +70,7 @@ create_emitter :: proc(
 }
 
 destroy_emitter :: proc(world: ^World, handle: EmitterHandle) -> bool {
-  _, freed := cont.free(&world.emitters, handle)
-  return freed
+  return cont.free_deferred(&world.emitters, handle)
 }
 
 tick_emitters :: proc(world: ^World, delta_time: f32) {

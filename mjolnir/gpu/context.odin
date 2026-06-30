@@ -81,6 +81,7 @@ GPUContext :: struct {
   compute_command_pool: Maybe(vk.CommandPool),
   device_properties:    vk.PhysicalDeviceProperties,
   has_async_compute:    bool,
+  trash:                DeferredTrash, // loose vk resources awaiting deferred destruction
 }
 
 // Global context for debug callback
@@ -106,6 +107,8 @@ gpu_context_init :: proc(
 
 shutdown :: proc(self: ^GPUContext) {
   vk.DeviceWaitIdle(self.device)
+  deferred_flush(self)
+  deferred_destroy(self)
   vk.DestroyDescriptorPool(self.device, self.descriptor_pool, nil)
   vk.DestroyCommandPool(self.device, self.command_pool, nil)
   if pool, ok := self.compute_command_pool.?; ok {

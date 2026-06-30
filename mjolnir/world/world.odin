@@ -421,19 +421,19 @@ spawn_child :: proc(
 }
 
 init :: proc(world: ^World) -> bool {
-  cont.init(&world.nodes, MAX_NODES_IN_SCENE)
+  cont.init(&world.nodes, MAX_NODES_IN_SCENE, RETIRE_GRACE)
   staging_init(&world.staging)
   root: ^Node
   world.root, root, _ = cont.alloc(&world.nodes, NodeHandle)
   node_init(root, "root")
   root.parent = world.root
 
-  cont.init(&world.meshes, MAX_MESHES)
-  cont.init(&world.materials, MAX_MATERIALS)
+  cont.init(&world.meshes, MAX_MESHES, RETIRE_GRACE)
+  cont.init(&world.materials, MAX_MATERIALS, RETIRE_GRACE)
   cont.init(&world.cameras, MAX_ACTIVE_CAMERAS)
-  cont.init(&world.emitters, MAX_EMITTERS)
-  cont.init(&world.forcefields, MAX_FORCE_FIELDS)
-  cont.init(&world.sprites, MAX_SPRITES)
+  cont.init(&world.emitters, MAX_EMITTERS, RETIRE_GRACE)
+  cont.init(&world.forcefields, MAX_FORCE_FIELDS, RETIRE_GRACE)
+  cont.init(&world.sprites, MAX_SPRITES, RETIRE_GRACE)
   cont.init(&world.animation_clips, 0)
 
   init_builtin_materials(world)
@@ -462,10 +462,18 @@ begin_frame :: proc(
   delta_time: f32 = 0.016,
   game_state: rawptr = nil,
 ) {
+  cont.pool_tick(&world.nodes, world, node_retire)
+  cont.pool_tick(&world.meshes, nil, mesh_retire)
+  cont.pool_tick(&world.materials, nil, nil)
+  cont.pool_tick(&world.emitters, nil, nil)
+  cont.pool_tick(&world.forcefields, nil, nil)
+  cont.pool_tick(&world.sprites, nil, nil)
   traverse(world)
 }
 
 shutdown :: proc(world: ^World) {
+  cont.pool_flush(&world.meshes, nil, mesh_retire)
+  cont.pool_flush(&world.materials, nil, nil)
   cont.destroy(world.cameras, proc(_: ^Camera) {})
   cont.destroy(world.meshes, mesh_destroy)
   cont.destroy(world.materials, proc(_: ^Material) {})
@@ -474,6 +482,7 @@ shutdown :: proc(world: ^World) {
   cont.destroy(world.sprites, proc(_: ^Sprite) {})
   cont.destroy(world.animation_clips, anim.clip_destroy)
 
+  cont.pool_flush(&world.nodes, world, node_retire)
   // Nodes need handle to destroy attachments — iterate manually
   for &entry, i in world.nodes.entries {
     if entry.active {
@@ -489,6 +498,32 @@ shutdown :: proc(world: ^World) {
   delete(world.active_light_nodes)
   delete(world.animatable_nodes)
   staging_destroy(&world.staging)
+}
+
+teardown :: proc(world: ^World) {
+  root := cont.get(world.nodes, world.root)
+  if root == nil do return
+  // despawn() mutates root.children, so iterate over a snapshot
+  kids := make([dynamic]NodeHandle, 0, len(root.children), context.temp_allocator)
+  append(&kids, ..root.children[:])
+  clear(&root.children)
+  for h in kids {
+    node := cont.get(world.nodes, h) or_continue
+    node.parent = h // mark detached, matching detach()'s self-parent convention
+    despawn_subtree(world, h, node)
+  }
+  // despawn_subtree frees via free_deferred — slots stay reserved for RETIRE_GRACE
+  // frames. A mid-frame level transition runs setup() in the SAME frame, right
+  // after teardown(), before any begin_frame/pool_tick reclaims them. Without an
+  // explicit flush the pool would have to hold the old AND new level at once and
+  // setup() would silently truncate once it hit MAX_NODES_IN_SCENE. The engine
+  // waits for GPU idle before teardown and node_destroy touches no Vulkan state,
+  // so reclaiming now is safe. Flush nodes first (node_retire defers the attached
+  // emitters/sprites/forcefields), then flush those pools so they are free too.
+  cont.pool_flush(&world.nodes, world, node_retire)
+  cont.pool_flush(&world.emitters, nil, nil)
+  cont.pool_flush(&world.forcefields, nil, nil)
+  cont.pool_flush(&world.sprites, nil, nil)
 }
 
 // Despawn a node and all its children recursively.
@@ -514,10 +549,12 @@ despawn_subtree :: proc(world: ^World, handle: NodeHandle, node: ^Node) {
   }
   stage_node_data(&world.staging, handle)
   unregister_animatable_node(world, handle)
-  if freed_node, ok := cont.free(&world.nodes, handle); ok {
-    node_destroy(freed_node, world, handle)
-    freed_node^ = {}
-  }
+  cont.free_deferred(&world.nodes, handle)
+}
+
+@(private = "file")
+node_retire :: proc(item: ^Node, user: rawptr) {
+  node_destroy(item, (^World)(user))
 }
 
 traverse :: proc(world: ^World) -> bool {

@@ -34,8 +34,7 @@ create_forcefield :: proc(
 }
 
 destroy_forcefield :: proc(world: ^World, handle: ForceFieldHandle) -> bool {
-  _, freed := cont.free(&world.forcefields, handle)
-  return freed
+  return cont.free_deferred(&world.forcefields, handle)
 }
 
 // Mutate-and-stage an existing forcefield. `enabled` toggles without losing config.

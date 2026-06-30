@@ -82,8 +82,38 @@ Engine :: struct {
   last_render_timestamp:     time.Time,
   camera_controller_enabled: bool,
   ui_hovered_widget:         Maybe(ui_module.UIWidgetHandle),
+  // Deferred level teardown/setup requested mid-frame; applied at frame end so
+  // GPU resources are never freed while command buffers still reference them.
+  pending_teardown:          bool,
+  pending_setup:             bool,
   // Opaque user pointer — stash app state here instead of using globals.
   user_data:                 rawptr,
+}
+
+// Request a level teardown, applied at the end of the current frame. Safe to call
+// mid-frame (e.g. from a pre_render / update callback) — nothing is freed while
+// the frame's command buffers are still in flight.
+schedule_teardown :: proc(self: ^Engine) {
+  self.pending_teardown = true
+}
+
+// Request a level setup, applied at the end of the current frame, after any
+// pending teardown. Pair the two to reset a level: schedule_teardown then
+// schedule_setup.
+schedule_setup :: proc(self: ^Engine) {
+  self.pending_setup = true
+}
+
+@(private)
+apply_pending_lifecycle :: proc(self: ^Engine) {
+  if self.pending_teardown {
+    self.pending_teardown = false
+    teardown(self)
+  }
+  if self.pending_setup {
+    self.pending_setup = false
+    setup(self)
+  }
 }
 
 // True when the debug UI is hovered or has an active pop-up. Mouse input
@@ -303,6 +333,16 @@ setup :: proc(self: ^Engine) -> (ret: vk.Result) {
   if self.setup_proc != nil {
     self.setup_proc(self)
   }
+  // Re-sync camera controllers to the (possibly setup_proc-repositioned) camera.
+  // At init the controllers don't exist yet (active_controller is nil) and are
+  // synced right after; on a teardown/setup level reset they already exist and
+  // would otherwise keep stale orbit state and override the new camera.
+  if self.world.active_controller != nil {
+    if mc := get_main_camera(self); mc != nil {
+      world.camera_controller_sync(&self.world.orbit_controller, mc)
+      world.camera_controller_sync(&self.world.free_controller, mc)
+    }
+  }
   return .SUCCESS
 }
 
@@ -314,6 +354,17 @@ teardown :: proc(self: ^Engine) {
     &self.render.texture_manager,
   )
   render.teardown(&self.render, &self.gctx)
+  // render.teardown enqueues loose GPU resources (e.g. shadow buffers) for
+  // deferred destruction; the GPU is idle here, so destroy them immediately.
+  gpu.deferred_flush(&self.gctx)
+  // Level content (the counterpart to setup's setup_proc): tear down the scene
+  // graph, physics bodies and main camera so a following setup() rebuilds them
+  // fresh. App-level resources — GPU pools, render pipelines, world/physics
+  // pools, builtin meshes — are untouched; those belong to init()/shutdown().
+  world.teardown(&self.world)
+  physics.teardown(&self.physics)
+  cont.free(&self.world.cameras, self.world.main_camera)
+  self.world.main_camera = {}
 }
 
 @(private)
@@ -368,7 +419,7 @@ update :: proc(self: ^Engine) -> bool {
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
-  physics.step(&self.physics, delta_time)
+  physics.step(&self.physics, delta_time) // no-op while the physics world is paused
   world.sync_all_physics_to_world(&self.world, &self.physics)
   world.update_node_animations(&self.world, delta_time)
   world.update_skeletal_animations(&self.world, delta_time)
@@ -565,12 +616,19 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     }
     context.user_ptr = self
     res := render_and_present(self)
+    // Advance deferred-destruction grace now that another frame has been
+    // submitted; reclaims GPU resources freed FRAMES_IN_FLIGHT frames ago.
+    gpu.deferred_tick(&self.gctx)
+    gpu.texture_manager_tick(&self.render.texture_manager, &self.gctx)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       recreate_swapchain(self) or_continue
     }
     if self.post_render_proc != nil {
       self.post_render_proc(self)
     }
+    // Apply any teardown/setup requested during this frame now that the frame is
+    // presented — safe point to free/recreate GPU resources (teardown waits idle).
+    apply_pending_lifecycle(self)
     if res != .SUCCESS {
       log.errorf("Error during rendering %v", res)
       render_error_count += 1

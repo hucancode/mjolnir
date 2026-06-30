@@ -53,8 +53,8 @@ release_shadow_2d :: proc(
       gctx,
       shadow.shadow_map_2d[frame],
     )
-    gpu.mutable_buffer_destroy(gctx.device, &shadow.draw_count[frame])
-    gpu.mutable_buffer_destroy(gctx.device, &shadow.draw_commands[frame])
+    gpu.defer_destroy_mutable_buffer(gctx, &shadow.draw_count[frame])
+    gpu.defer_destroy_mutable_buffer(gctx, &shadow.draw_commands[frame])
     shadow.descriptor_sets[frame] = 0
   }
   delete_key(&render.internal.shadow_maps, light_node_index)
@@ -74,8 +74,8 @@ release_shadow_cube :: proc(
       gctx,
       shadow.shadow_map_cube[frame],
     )
-    gpu.mutable_buffer_destroy(gctx.device, &shadow.draw_count[frame])
-    gpu.mutable_buffer_destroy(gctx.device, &shadow.draw_commands[frame])
+    gpu.defer_destroy_mutable_buffer(gctx, &shadow.draw_count[frame])
+    gpu.defer_destroy_mutable_buffer(gctx, &shadow.draw_commands[frame])
     shadow.descriptor_sets[frame] = 0
   }
   delete_key(&render.internal.shadow_map_cubes, light_node_index)

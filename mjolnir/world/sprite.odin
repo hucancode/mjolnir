@@ -52,7 +52,7 @@ create_sprite :: proc(
 }
 
 destroy_sprite :: proc(world: ^World, handle: SpriteHandle) {
-  cont.free(&world.sprites, handle)
+  cont.free_deferred(&world.sprites, handle)
 }
 
 SpriteAnimationState :: enum {

@@ -189,6 +189,12 @@ create_material :: proc(
   return handle, true
 }
 
+destroy_material :: proc(world: ^World, handle: MaterialHandle) -> bool {
+  if cont.get(world.materials, handle) == nil do return false
+  stage_material_removal(&world.staging, handle)
+  return cont.free_deferred(&world.materials, handle)
+}
+
 // Mutate-and-stage an existing PBR-style material. Only non-nil Maybe fields update.
 set_material_pbr_params :: proc(
   w: ^World,

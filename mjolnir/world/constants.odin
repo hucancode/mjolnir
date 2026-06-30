@@ -3,6 +3,7 @@ package world
 import cont "../containers"
 
 FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
+RETIRE_GRACE :: FRAMES_IN_FLIGHT + 1
 MAX_NODES_IN_SCENE :: 65536
 MAX_ACTIVE_CAMERAS :: 128
 MAX_EMITTERS :: 64

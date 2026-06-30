@@ -41,8 +41,10 @@ texture_manager_setup :: proc(
   gctx: ^GPUContext,
   samplers: [MAX_SAMPLERS]vk.Sampler,
 ) -> vk.Result {
-  cont.init(&self.images_2d, MAX_TEXTURES)
-  cont.init(&self.images_cube, MAX_CUBE_TEXTURES)
+  // GPU images back descriptor slots the GPU samples for up to FRAMES_IN_FLIGHT
+  // frames, so a freed slot/image must be retired, not reclaimed inline.
+  cont.init(&self.images_2d, MAX_TEXTURES, FRAMES_IN_FLIGHT)
+  cont.init(&self.images_cube, MAX_CUBE_TEXTURES, FRAMES_IN_FLIGHT)
   allocate_descriptor_set(gctx, &self.descriptor_set, &self.set_layout) or_return
   update_descriptor_set_array(
     gctx,
@@ -59,7 +61,29 @@ texture_manager_setup :: proc(
 // Teardown the texture manager: destroys all GPU images and frees pool memory.
 // The descriptor set handle is zeroed (bulk-freed by the caller via ResetDescriptorPool).
 // Must be paired with texture_manager_setup.
+@(private = "file")
+retire_image_2d :: proc(img: ^Image, user: rawptr) {
+  if img.image != 0 do image_destroy((^GPUContext)(user).device, img)
+}
+
+@(private = "file")
+retire_image_cube :: proc(img: ^CubeImage, user: rawptr) {
+  if img.image != 0 do cube_depth_texture_destroy((^GPUContext)(user).device, img)
+}
+
+// texture_manager_tick reclaims retired texture slots and destroys their vk
+// images once no in-flight frame can still sample them. Call once per presented
+// frame.
+texture_manager_tick :: proc(self: ^TextureManager, gctx: ^GPUContext) {
+  cont.pool_tick(&self.images_2d, gctx, retire_image_2d)
+  cont.pool_tick(&self.images_cube, gctx, retire_image_cube)
+}
+
 texture_manager_teardown :: proc(self: ^TextureManager, gctx: ^GPUContext) {
+  // Destroy any retired-but-not-yet-reclaimed images first; the caller has
+  // already waited for the GPU to go idle, so grace no longer matters.
+  cont.pool_flush(&self.images_2d, gctx, retire_image_2d)
+  cont.pool_flush(&self.images_cube, gctx, retire_image_cube)
   for &entry in self.images_2d.entries do if entry.active {
     if entry.item.image != 0 do image_destroy(gctx.device, &entry.item)
   }
@@ -68,6 +92,8 @@ texture_manager_teardown :: proc(self: ^TextureManager, gctx: ^GPUContext) {
   }
   cont.destroy(self.images_2d, proc(_: ^Image) {})
   cont.destroy(self.images_cube, proc(_: ^CubeImage) {})
+  self.images_2d = {}
+  self.images_cube = {}
   self.descriptor_set = 0
 }
 
@@ -150,13 +176,12 @@ allocate_texture_2d_with_data :: proc(
   return gpu_handle, .SUCCESS
 }
 
-// Free a 2D texture
+// Free a 2D texture. The handle is invalidated immediately, but the slot and the
+// underlying vk image are retired and destroyed by texture_manager_tick once no
+// in-flight frame can still sample them.
 free_texture_2d :: proc(tm: ^TextureManager, gctx: ^GPUContext, handle: $H) {
   gpu_handle := transmute(Texture2DHandle)handle
-  img, ok := cont.get(tm.images_2d, gpu_handle)
-  if !ok do return
-  if img.image != 0 do image_destroy(gctx.device, img)
-  cont.free(&tm.images_2d, gpu_handle)
+  cont.free_deferred(&tm.images_2d, gpu_handle)
 }
 
 // Get a pointer to a 2D texture
@@ -219,13 +244,11 @@ allocate_texture_cube_color :: proc(
   return h, .SUCCESS
 }
 
-// Free a cube texture
+// Free a cube texture. Retired and destroyed by texture_manager_tick — see
+// free_texture_2d.
 free_texture_cube :: proc(tm: ^TextureManager, gctx: ^GPUContext, handle: $H) {
   gpu_handle := transmute(TextureCubeHandle)handle
-  img, ok := cont.get(tm.images_cube, gpu_handle)
-  if !ok do return
-  if img.image != 0 do cube_depth_texture_destroy(gctx.device, img)
-  cont.free(&tm.images_cube, gpu_handle)
+  cont.free_deferred(&tm.images_cube, gpu_handle)
 }
 
 // Get a pointer to a cube texture
