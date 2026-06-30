@@ -77,6 +77,7 @@ Engine :: struct {
   render:                    render.Manager,
   cursor_pos:                [2]i32,
   debug_ui_enabled:          bool,
+  show_engine_stats:         bool,
   update_thread:             Maybe(^thread.Thread),
   update_active:             bool,
   last_render_timestamp:     time.Time,
@@ -484,7 +485,9 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     if !entry.active do continue
     append(&active_camera_indices, u32(cam_index))
   }
-  populate_debug_ui(self)
+  if self.show_engine_stats {
+    populate_debug_ui(self)
+  }
   mu.end(&self.render.debug_ui.ctx)
   render.record_frame(
     &self.render,
@@ -532,6 +535,7 @@ RunConfig :: struct {
   mouse_drag:   MouseDragProc,
   user_data:    rawptr,
   debug_ui:     bool,
+  show_engine_stats: bool, // off by default; built-in Engine stats panel
 }
 
 run_app :: proc(cfg: RunConfig) {
@@ -549,6 +553,7 @@ run_app :: proc(cfg: RunConfig) {
   engine.mouse_drag_proc   = cfg.mouse_drag
   engine.user_data         = cfg.user_data
   engine.debug_ui_enabled  = cfg.debug_ui
+  engine.show_engine_stats = cfg.show_engine_stats
   w := cfg.width  if cfg.width  != 0 else 800
   h := cfg.height if cfg.height != 0 else 600
   run(engine, w, h, cfg.title)
