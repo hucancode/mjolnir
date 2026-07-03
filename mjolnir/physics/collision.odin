@@ -14,65 +14,89 @@ is_identity_quaternion :: proc "contextless" (q: quaternion128) -> bool {
   )
 }
 
-// Contact between two dynamic bodies
+// One solver point of a contact manifold
+// base_separation: signed separation at prepare time (negative = penetrating);
+// current separation is recovered per substep from body position deltas.
+// relative_velocity: normal approach speed captured at prepare, used by the
+// post-substep restitution pass.
+ContactPoint :: struct {
+  point:              [3]f32,
+  penetration:        f32, // filled by narrowphase; prepare converts to base_separation
+  feature_id:         u32,
+  normal_impulse:     f32,
+  max_normal_impulse: f32,
+  normal_mass:        f32,
+  base_separation:    f32,
+  relative_velocity:  f32,
+  r_a:                [3]f32,
+  r_b:                [3]f32,
+}
+
+// Contact between two dynamic bodies: up to 4 normal points plus one
+// manifold-level friction constraint (coupled 2D tangent at the centroid +
+// twist about the normal).
 DynamicContact :: struct {
-  body_a:                DynamicRigidBodyHandle,
-  body_b:                DynamicRigidBodyHandle,
-  point:                 [3]f32,
-  normal:                [3]f32,
-  penetration:           f32,
-  restitution:           f32,
-  friction:              f32,
-  normal_impulse:        f32,
-  tangent_impulse:       [2]f32,
-  pseudo_normal_impulse: f32,
-  normal_mass:           f32,
-  tangent_mass:          [2]f32,
-  // velocity_bias: restitution-only term added to velocity solve.
-  // position_bias: Baumgarte penetration term used by the pseudo-velocity (split impulse) solve only.
-  velocity_bias:         f32,
-  position_bias:         f32,
-  r_a:                   [3]f32,
-  r_b:                   [3]f32,
-  tangent1:              [3]f32,
-  tangent2:              [3]f32,
+  body_a:          DynamicRigidBodyHandle,
+  body_b:          DynamicRigidBodyHandle,
+  normal:          [3]f32,
+  restitution:     f32,
+  friction:        f32,
+  count:           int,
+  points:          [MAX_MANIFOLD_POINTS]ContactPoint,
+  tangent1:        [3]f32,
+  tangent2:        [3]f32,
+  r_a_c:           [3]f32, // centroid offset from body A center
+  r_b_c:           [3]f32,
+  tangent_impulse: [2]f32,
+  twist_impulse:   f32,
+  tangent_mass:    matrix[2, 2]f32, // inverse of the coupled tangent K matrix
+  twist_mass:      f32,
 }
 
 // Contact between dynamic body (A) and static body (B)
 StaticContact :: struct {
-  body_a:                DynamicRigidBodyHandle,
-  body_b:                StaticRigidBodyHandle,
-  point:                 [3]f32,
-  normal:                [3]f32,
-  penetration:           f32,
-  restitution:           f32,
-  friction:              f32,
-  normal_impulse:        f32,
-  tangent_impulse:       [2]f32,
-  pseudo_normal_impulse: f32,
-  normal_mass:           f32,
-  tangent_mass:          [2]f32,
-  velocity_bias:         f32,
-  position_bias:         f32,
-  r_a:                   [3]f32,
-  tangent1:              [3]f32,
-  tangent2:              [3]f32,
+  body_a:          DynamicRigidBodyHandle,
+  body_b:          StaticRigidBodyHandle,
+  normal:          [3]f32,
+  restitution:     f32,
+  friction:        f32,
+  count:           int,
+  points:          [MAX_MANIFOLD_POINTS]ContactPoint,
+  tangent1:        [3]f32,
+  tangent2:        [3]f32,
+  r_a_c:           [3]f32,
+  tangent_impulse: [2]f32,
+  twist_impulse:   f32,
+  tangent_mass:    matrix[2, 2]f32,
+  twist_mass:      f32,
 }
 
+// Warmstart pair keys include handle generations so a recycled slot never
+// inherits the previous occupant's impulses.
 collision_pair_hash_dynamic :: proc "contextless" (
   body_a: DynamicRigidBodyHandle,
   body_b: DynamicRigidBodyHandle,
 ) -> u64 {
-  return (u64(body_a.index) << 32) | u64(body_b.index)
+  ha := u64(body_a.index) | (u64(body_a.generation) << 32)
+  hb := u64(body_b.index) | (u64(body_b.generation) << 32)
+  return ha * 0x9E3779B97F4A7C15 ~ (hb + 0x517CC1B727220A95)
 }
 
 collision_pair_hash_static :: proc "contextless" (
   body_a: DynamicRigidBodyHandle,
   body_b: StaticRigidBodyHandle,
 ) -> u64 {
-  a_index := body_a.index
-  b_index := body_b.index | 0x80000000
-  return (u64(a_index) << 32) | u64(b_index)
+  ha := u64(body_a.index) | (u64(body_a.generation) << 32)
+  hb := u64(body_b.index) | (u64(body_b.generation) << 32)
+  return ha * 0x9E3779B97F4A7C15 ~ (hb + 0xD1B54A32D192ED03)
+}
+
+mix_friction :: #force_inline proc "contextless" (a, b: f32) -> f32 {
+  return math.sqrt(a * b)
+}
+
+mix_restitution :: #force_inline proc "contextless" (a, b: f32) -> f32 {
+  return max(a, b)
 }
 
 collision_pair_hash :: proc {
@@ -81,8 +105,43 @@ collision_pair_hash :: proc {
 }
 
 ContactWarmstart :: struct {
-  normal:  f32,
-  tangent: [2]f32,
+  count:           int,
+  feature_ids:     [MAX_MANIFOLD_POINTS]u32,
+  normal_impulses: [MAX_MANIFOLD_POINTS]f32,
+  tangent:         [2]f32,
+  twist:           f32,
+}
+
+contact_has_impulse :: #force_inline proc(c: ^$T) -> bool {
+  if c.tangent_impulse != {0, 0} || c.twist_impulse != 0 do return true
+  for i in 0 ..< c.count {
+    if c.points[i].normal_impulse != 0 do return true
+  }
+  return false
+}
+
+contact_store_warmstart :: proc(c: ^$T) -> (w: ContactWarmstart) {
+  w.count = c.count
+  for i in 0 ..< c.count {
+    w.feature_ids[i] = c.points[i].feature_id
+    w.normal_impulses[i] = c.points[i].normal_impulse
+  }
+  w.tangent = c.tangent_impulse
+  w.twist = c.twist_impulse
+  return
+}
+
+contact_apply_warmstart :: proc(c: ^$T, w: ^ContactWarmstart) {
+  for i in 0 ..< c.count {
+    for j in 0 ..< w.count {
+      if c.points[i].feature_id == w.feature_ids[j] {
+        c.points[i].normal_impulse = w.normal_impulses[j]
+        break
+      }
+    }
+  }
+  c.tangent_impulse = w.tangent
+  c.twist_impulse = w.twist
 }
 
 // Fast bounding sphere intersection test (use before expensive narrow phase)

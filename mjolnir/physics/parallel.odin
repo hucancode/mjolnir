@@ -12,8 +12,6 @@ import "core:thread"
 import "core:time"
 
 DEFAULT_THREAD_COUNT :: 16
-CCD_VELOCITY_THRESHOLD :: 5.0
-CCD_VELOCITY_THRESHOLD_SQ :: CCD_VELOCITY_THRESHOLD * CCD_VELOCITY_THRESHOLD
 
 pool_wait :: proc(pool: ^thread.Pool) {
   for {
@@ -128,7 +126,10 @@ refit_range :: #force_inline proc(physics: ^World, start, end: int) {
     bvh_entry := &physics.dynamic_bvh.primitives[i]
     body := get(physics, bvh_entry.handle) or_continue
     if body.is_killed || body.is_sleeping do continue
-    bvh_entry.bounds = body.cached_aabb
+    bvh_entry.bounds = geometry.Aabb {
+      min = body.cached_aabb.min - SPECULATIVE_DISTANCE,
+      max = body.cached_aabb.max + SPECULATIVE_DISTANCE,
+    }
   }
 }
 
@@ -193,29 +194,34 @@ narrowphase_dynamic_pair :: #force_inline proc(
   if body_a.is_killed || body_b.is_killed do return
   if body_a.is_sleeping && body_b.is_sleeping do return
   if !bounding_spheres_intersect(
-    body_a.cached_sphere_center, body_a.cached_sphere_radius,
+    body_a.cached_sphere_center, body_a.cached_sphere_radius + SPECULATIVE_DISTANCE,
     body_b.cached_sphere_center, body_b.cached_sphere_radius,
   ) {
     return
   }
   narrow_tests = 1
-  point, normal, penetration, hit := test_collision(body_a, body_b)
+  manifold, hit := collide_bodies(body_a, body_b, SPECULATIVE_DISTANCE)
   if !hit do return
   if body_a.is_sleeping do wake_up(body_a)
   if body_b.is_sleeping do wake_up(body_b)
   contact := DynamicContact {
     body_a      = handle_a,
     body_b      = handle_b,
-    point       = point,
-    normal      = normal,
-    penetration = penetration,
-    restitution = (body_a.restitution + body_b.restitution) * 0.5,
-    friction    = (body_a.friction + body_b.friction) * 0.5,
+    normal      = manifold.normal,
+    count       = manifold.count,
+    restitution = mix_restitution(body_a.restitution, body_b.restitution),
+    friction    = mix_friction(body_a.friction, body_b.friction),
+  }
+  for i in 0 ..< manifold.count {
+    contact.points[i] = ContactPoint {
+      point       = manifold.points[i].point,
+      penetration = manifold.points[i].penetration,
+      feature_id  = manifold.points[i].feature_id,
+    }
   }
   hash := collision_pair_hash(handle_a, handle_b)
-  if w, found := physics.prev_dynamic_warmstart[hash]; found {
-    contact.normal_impulse = w.normal * WARMSTART_COEF
-    contact.tangent_impulse = w.tangent * WARMSTART_COEF
+  if w, found := &physics.prev_dynamic_warmstart[hash]; found {
+    contact_apply_warmstart(&contact, w)
   }
   append(out, contact)
   return
@@ -233,28 +239,33 @@ narrowphase_static_pair :: #force_inline proc(
   if body_a == nil || body_b == nil do return
   if body_a.is_killed || body_a.is_sleeping do return
   if !bounding_spheres_intersect(
-    body_a.cached_sphere_center, body_a.cached_sphere_radius,
+    body_a.cached_sphere_center, body_a.cached_sphere_radius + SPECULATIVE_DISTANCE,
     body_b.cached_sphere_center, body_b.cached_sphere_radius,
   ) {
     return
   }
   narrow_tests = 1
-  point, normal, penetration, hit := test_collision(body_a, body_b)
+  manifold, hit := collide_bodies(body_a, body_b, SPECULATIVE_DISTANCE)
   if !hit do return
   if body_a.is_sleeping do wake_up(body_a)
   contact := StaticContact {
     body_a      = handle_a,
     body_b      = handle_b,
-    point       = point,
-    normal      = normal,
-    penetration = penetration,
-    restitution = (body_a.restitution + body_b.restitution) * 0.5,
-    friction    = (body_a.friction + body_b.friction) * 0.5,
+    normal      = manifold.normal,
+    count       = manifold.count,
+    restitution = mix_restitution(body_a.restitution, body_b.restitution),
+    friction    = mix_friction(body_a.friction, body_b.friction),
+  }
+  for i in 0 ..< manifold.count {
+    contact.points[i] = ContactPoint {
+      point       = manifold.points[i].point,
+      penetration = manifold.points[i].penetration,
+      feature_id  = manifold.points[i].feature_id,
+    }
   }
   hash := collision_pair_hash(handle_a, handle_b)
-  if w, found := physics.prev_static_warmstart[hash]; found {
-    contact.normal_impulse = w.normal * WARMSTART_COEF
-    contact.tangent_impulse = w.tangent * WARMSTART_COEF
+  if w, found := &physics.prev_static_warmstart[hash]; found {
+    contact_apply_warmstart(&contact, w)
   }
   append(out, contact)
   return
@@ -288,70 +299,35 @@ ccd_step_body :: proc(
 ) -> (tested: bool, candidate_count: int) {
   if body_a.is_killed || body_a.is_sleeping do return
   collider_a := &body_a.collider
-  velocity_mag_sq := linalg.length2(body_a.velocity)
-  if velocity_mag_sq < CCD_VELOCITY_THRESHOLD_SQ do return
-  tested = true
   motion := body_a.velocity * dt
+  motion_len_sq := linalg.length2(motion)
+  min_extent := collider_min_extent(collider_a)
+  threshold := 0.5 * min_extent
+  if motion_len_sq < threshold * threshold do return
+  tested = true
   earliest_toi := f32(1.0)
-  earliest_normal := linalg.VECTOR3F32_Y_AXIS
-  earliest_body_dyn: ^DynamicRigidBody
-  earliest_body_static: ^StaticRigidBody
   has_ccd_hit := false
   swept_aabb := geometry.Aabb {
     min = linalg.min(body_a.cached_aabb.min, body_a.cached_aabb.min + motion),
     max = linalg.max(body_a.cached_aabb.max, body_a.cached_aabb.max + motion),
   }
-  clear(dyn_candidates)
-  geometry.bvh_query_aabb(&physics.dynamic_bvh, swept_aabb, dyn_candidates)
-  candidate_count = len(dyn_candidates)
-  for candidate in dyn_candidates {
-    handle_b := candidate.handle
-    if u32(idx_a) == handle_b.index do continue
-    body_b := get(physics, handle_b) or_continue
-    toi := swept_test(collider_a, &body_b.collider, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
-    if toi.has_impact && toi.time < earliest_toi {
-      earliest_toi = toi.time
-      earliest_normal = toi.normal
-      earliest_body_dyn = body_b
-      earliest_body_static = nil
-      has_ccd_hit = true
-    }
-  }
   clear(static_candidates)
   geometry.bvh_query_aabb(&physics.static_bvh, swept_aabb, static_candidates)
-  candidate_count += len(static_candidates)
+  candidate_count = len(static_candidates)
   for candidate in static_candidates {
     body_b := get(physics, candidate.handle) or_continue
     toi := swept_test(collider_a, &body_b.collider, body_a.position, body_b.position, body_a.rotation, body_b.rotation, motion)
     if toi.has_impact && toi.time < earliest_toi {
       earliest_toi = toi.time
-      earliest_normal = toi.normal
-      earliest_body_dyn = nil
-      earliest_body_static = body_b
       has_ccd_hit = true
     }
   }
   if !(has_ccd_hit && earliest_toi > 0.01 && earliest_toi < 0.99) do return
-  safe_time := earliest_toi * 0.98
-  body_a.position += body_a.velocity * dt * safe_time
+  // Park just short of the impact; narrowphase runs after CCD this frame and
+  // the speculative contact stops the remaining approach.
+  body_a.position += motion * (earliest_toi * 0.98)
   update_cached_aabb(&body_a.base)
-  vel_along_normal := linalg.dot(body_a.velocity, earliest_normal)
-  if vel_along_normal < 0 {
-    wake_up(body_a)
-    if earliest_body_dyn != nil do wake_up(earliest_body_dyn)
-    restitution := body_a.restitution
-    friction := body_a.friction
-    if earliest_body_dyn != nil {
-      restitution = (body_a.restitution + earliest_body_dyn.restitution) * 0.5
-      friction = (body_a.friction + earliest_body_dyn.friction) * 0.5
-    } else if earliest_body_static != nil {
-      restitution = (body_a.restitution + earliest_body_static.restitution) * 0.5
-      friction = (body_a.friction + earliest_body_static.friction) * 0.5
-    }
-    body_a.velocity -= earliest_normal * vel_along_normal * (1.0 + restitution)
-    tangent_vel := body_a.velocity - earliest_normal * linalg.dot(body_a.velocity, earliest_normal)
-    body_a.velocity -= tangent_vel * friction * 0.5
-  }
+  wake_up(body_a)
   ccd_handled[idx_a] = true
   return
 }

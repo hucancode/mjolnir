@@ -27,7 +27,8 @@ DynamicRigidBody :: struct {
   using body:              StaticRigidBody,
   enable_rotation:         bool,
   is_sleeping:             bool,
-  inv_inertia:             [3]f32, // Diagonal inverse inertia for primitive shapes
+  inv_inertia:             [3]f32, // Diagonal inverse inertia in body space
+  inv_inertia_world:       matrix[3, 3]f32,
   velocity:                [3]f32,
   inv_mass:                f32,
   angular_velocity:        [3]f32,
@@ -37,9 +38,9 @@ DynamicRigidBody :: struct {
   torque:                  [3]f32,
   sleep_timer:             f32,
   is_killed:               bool,
-  // Split-impulse position correction state (pseudo velocity, applied to position only)
-  pseudo_velocity:         [3]f32,
-  pseudo_angular_velocity: [3]f32,
+  // Position at frame start (after CCD, before substeps) — the solver
+  // recovers per-substep contact separation from position - position0.
+  position0:               [3]f32,
 }
 
 static_rigid_body_init :: proc(
@@ -71,6 +72,53 @@ rigid_body_init :: proc(
   self.inv_inertia = {1.0, 1.0, 1.0}
   self.is_sleeping = false
   self.sleep_timer = 0.0
+  update_world_inertia(self)
+}
+
+skew :: #force_inline proc "contextless" (v: [3]f32) -> matrix[3, 3]f32 {
+  return matrix[3, 3]f32{
+    0, -v.z, v.y,
+    v.z, 0, -v.x,
+    -v.y, v.x, 0,
+  }
+}
+
+// Implicit gyroscopic torque: one Newton-Raphson iteration on
+// I*(w2−w1) + h*(w2 * I*w2) = 0 in body frame. Slightly
+// dissipative but unconditionally stable — energy can only decrease.
+solve_gyroscopic :: proc(body: ^DynamicRigidBody, dt: f32) {
+  ii := body.inv_inertia
+  if ii.x <= 0 || ii.y <= 0 || ii.z <= 0 do return
+  q := body.rotation
+  w1 := linalg.quaternion128_mul_vector3(
+    linalg.quaternion_inverse(q),
+    body.angular_velocity,
+  )
+  inertia := 1.0 / ii
+  iw := inertia * w1
+  f := dt * linalg.cross(w1, iw)
+  i_mat := matrix[3, 3]f32{
+    inertia.x, 0, 0,
+    0, inertia.y, 0,
+    0, 0, inertia.z,
+  }
+  jac := i_mat + dt * (skew(w1) * i_mat - skew(iw))
+  w2 := w1 - linalg.inverse(jac) * f
+  body.angular_velocity = linalg.quaternion128_mul_vector3(q, w2)
+}
+
+update_world_inertia :: proc(self: ^DynamicRigidBody) {
+  if !self.enable_rotation {
+    self.inv_inertia_world = {}
+    return
+  }
+  r := linalg.matrix3_from_quaternion(self.rotation)
+  d := matrix[3, 3]f32{
+    self.inv_inertia.x, 0, 0,
+    0, self.inv_inertia.y, 0,
+    0, 0, self.inv_inertia.z,
+  }
+  self.inv_inertia_world = r * d * linalg.transpose(r)
 }
 
 wake_up :: #force_inline proc(self: ^DynamicRigidBody) {
@@ -86,17 +134,20 @@ set_mass :: proc(self: ^DynamicRigidBody, mass: f32) {
     self.inv_inertia = mass_ratio * self.inv_inertia
   }
   self.inv_mass = new_inv_mass
+  update_world_inertia(self)
 }
 
 set_box_inertia :: proc(self: ^DynamicRigidBody, half_extents: [3]f32) {
   v := half_extents * half_extents
   inv_inertia_factor := 3.0 * self.inv_mass
   self.inv_inertia = inv_inertia_factor / [3]f32{v.y + v.z, v.x + v.z, v.x + v.y}
+  update_world_inertia(self)
 }
 
 set_sphere_inertia :: proc(self: ^DynamicRigidBody, radius: f32) {
   inv_i := (5.0 / 2.0) * self.inv_mass / (radius * radius)
   self.inv_inertia = {inv_i, inv_i, inv_i}
+  update_world_inertia(self)
 }
 
 set_cylinder_inertia :: proc(
@@ -109,6 +160,7 @@ set_cylinder_inertia :: proc(
   inv_ix := 12.0 * self.inv_mass / (3.0 * r2 + h2)
   inv_iy := 2.0 * self.inv_mass / r2
   self.inv_inertia = [3]f32{inv_ix, inv_iy, inv_ix}
+  update_world_inertia(self)
 }
 
 set_inertia_from_collider :: proc(self: ^DynamicRigidBody, collider: Collider) {
@@ -163,14 +215,14 @@ apply_impulse_at_point_no_wake :: #force_inline proc(
   if !self.enable_rotation do return
   r := point - self.position
   angular_impulse := linalg.cross(r, impulse)
-  self.angular_velocity += self.inv_inertia * angular_impulse
+  self.angular_velocity += self.inv_inertia_world * angular_impulse
 }
 
 integrate :: proc(self: ^DynamicRigidBody, dt: f32) {
   if self.is_sleeping do return
   self.velocity += self.force * self.inv_mass * dt
   if self.enable_rotation {
-    self.angular_velocity += (self.inv_inertia * self.torque) * dt
+    self.angular_velocity += (self.inv_inertia_world * self.torque) * dt
   }
   self.velocity *= math.pow(1.0 - self.linear_damping, dt)
   if self.enable_rotation {

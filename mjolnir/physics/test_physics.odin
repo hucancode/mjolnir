@@ -144,15 +144,16 @@ test_resolve_contact_momentum_conservation :: proc(t: ^testing.T) {
   initial_momentum :=
     body_a.velocity / body_a.inv_mass + body_b.velocity / body_b.inv_mass
   contact := DynamicContact {
-    point       = {0, 0, 0},
     normal      = {1, 0, 0},
-    penetration = 0.1,
     restitution = 0.0,
     friction    = 0.0,
+    count       = 1,
+    points      = {0 = {point = {0, 0, 0}, penetration = 0.1}},
   }
   dt := f32(0.016)
   prepare_contact(&contact, &body_a, &body_b, dt)
-  resolve_velocity(&contact, &body_a, &body_b)
+  soft := make_soft(CONTACT_HERTZ, CONTACT_DAMPING_RATIO, dt)
+  resolve_velocity(&contact, &body_a, &body_b, soft, 1.0 / dt, true)
   final_momentum :=
     body_a.velocity / body_a.inv_mass + body_b.velocity / body_b.inv_mass
   testing.expect(
@@ -764,15 +765,17 @@ test_resolve_contact_restitution_coefficient :: proc(t: ^testing.T) {
   static_rigid_body_init(&body_static)
   body_dynamic.velocity = {0, -10, 0}
   contact := StaticContact {
-    point       = {0, 0, 0},
     normal      = {0, -1, 0}, // Points from dynamic (above) to static (below)
-    penetration = 0.01,
     restitution = 0.8,
     friction    = 0.0,
+    count       = 1,
+    points      = {0 = {point = {0, 0, 0}, penetration = 0.01}},
   }
   dt := f32(0.016)
   prepare_contact(&contact, &body_dynamic, &body_static, dt)
-  resolve_velocity(&contact, &body_dynamic, &body_static)
+  soft := make_soft(CONTACT_HERTZ, CONTACT_DAMPING_RATIO, dt)
+  resolve_velocity(&contact, &body_dynamic, &body_static, soft, 1.0 / dt, true)
+  apply_restitution(&contact, &body_dynamic, &body_static)
   // New solver uses sequential impulses, so velocity change might be different
   // Just check that velocity reversed (positive Y) and reduced by bouncing
   testing.expect(
@@ -796,16 +799,17 @@ test_resolve_contact_friction_reduces_tangent_velocity :: proc(t: ^testing.T) {
   static_rigid_body_init(&body_static)
   body_dynamic.velocity = {5, -1, 0}
   contact := StaticContact {
-    point       = {0, 0, 0},
     normal      = {0, -1, 0}, // Points from dynamic (above) to static (below)
-    penetration = 0.01,
     restitution = 0.0,
     friction    = 0.5,
+    count       = 1,
+    points      = {0 = {point = {0, 0, 0}, penetration = 0.01}},
   }
   initial_tangent_speed := abs(body_dynamic.velocity.x)
   dt := f32(0.016)
   prepare_contact(&contact, &body_dynamic, &body_static, dt)
-  resolve_velocity(&contact, &body_dynamic, &body_static)
+  soft := make_soft(CONTACT_HERTZ, CONTACT_DAMPING_RATIO, dt)
+  resolve_velocity(&contact, &body_dynamic, &body_static, soft, 1.0 / dt, true)
   final_tangent_speed := abs(body_dynamic.velocity.x)
   testing.expect(
     t,
@@ -892,22 +896,22 @@ test_resolve_contact_bias_correction :: proc(t: ^testing.T) {
   pos_a := [3]f32{0, 0, 0}
   pos_b := [3]f32{0, 0, 0}
   contact := DynamicContact {
-    point       = {0, 0, 0},
     normal      = {1, 0, 0},
-    penetration = 0.5,
     restitution = 0.0,
     friction    = 0.0,
+    count       = 1,
+    points      = {0 = {point = {0, 0, 0}, penetration = 0.5}},
   }
   dt := f32(0.016)
   prepare_contact(&contact, &body_a, &body_b, dt)
   testing.expect(
     t,
-    contact.position_bias > 0.0,
-    "Position bias should be positive for split-impulse correction",
+    contact.points[0].base_separation < 0.0,
+    "Penetrating contact should have negative base separation",
   )
   testing.expect(
     t,
-    contact.normal_mass > 0.0,
+    contact.points[0].normal_mass > 0.0,
     "Normal mass should be computed",
   )
 }

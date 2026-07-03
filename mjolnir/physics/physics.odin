@@ -11,16 +11,20 @@ import "core:time"
 
 KILL_Y :: #config(PHYSICS_KILL_Y, -50.0)
 SEA_LEVEL_AIR_DENSITY :: 1.225
-NUM_SUBSTEPS :: 2
-CONSTRAINT_SOLVER_ITERS :: 4
-STABILIZATION_ITERS :: 2
+NUM_SUBSTEPS :: 4
 SLEEP_LINEAR_THRESHOLD :: 0.05
 SLEEP_ANGULAR_THRESHOLD :: 0.05
 SLEEP_LINEAR_THRESHOLD_SQ :: SLEEP_LINEAR_THRESHOLD * SLEEP_LINEAR_THRESHOLD
 SLEEP_ANGULAR_THRESHOLD_SQ :: SLEEP_ANGULAR_THRESHOLD * SLEEP_ANGULAR_THRESHOLD
 SLEEP_TIME_THRESHOLD :: 0.5
 ENABLE_VERBOSE_LOG :: false
+MAX_LINEAR_SPEED :: #config(PHYSICS_MAX_LINEAR_SPEED, 400.0)
+MAX_ROTATION_PER_STEP :: 0.25 * math.PI
 BVH_REBUILD_THRESHOLD :: #config(PHYSICS_BVH_REBUILD_THRESHOLD, 512) // Rebuild BVH when killed bodies exceed this
+// Contacts are created while shapes are still this far apart:
+// the solver's speculative branch stops approach exactly at touch, preventing
+// tunneling at moderate speeds without CCD.
+SPECULATIVE_DISTANCE :: 0.02
 
 DynamicRigidBodyHandle :: distinct cont.Handle
 StaticRigidBodyHandle :: distinct cont.Handle
@@ -87,9 +91,14 @@ World :: struct {
   // BVH rebuild tracking
   last_dynamic_count:      int,
   last_static_count:       int,
+  // Dense list of awake body indices, rebuilt after narrowphase each frame
+  // (narrowphase can wake sleeping bodies). Hot substep loops iterate this
+  // instead of branching over the whole pool.
+  awake_list:              [dynamic]u32,
   // Solver graph coloring
   solver_color_used:       [dynamic]u64,       // per dynamic body: bitmask of colors used
   solver_color_buckets:    [dynamic][dynamic]int, // per color: contact indices
+  solver_overflow:         [dynamic]int, // contacts that fit no color; solved single-threaded
   solver_color_count:      int,
   solver_static_shards:    [][dynamic]int,    // per shard: static contact indices
   solver_static_shard_count: int,
@@ -146,6 +155,8 @@ init :: proc(
   self.body_bounds = make([dynamic]geometry.Aabb)
   self.solver_color_used = make([dynamic]u64)
   self.solver_color_buckets = make([dynamic][dynamic]int)
+  self.solver_overflow = make([dynamic]int)
+  self.awake_list = make([dynamic]u32)
   self.enable_parallel = enable_parallel
   self.killed_body_count = 0
   self.last_dynamic_count = 0
@@ -190,6 +201,8 @@ shutdown :: proc(self: ^World) {
   delete(self.solver_color_used)
   for &b in self.solver_color_buckets do delete(b)
   delete(self.solver_color_buckets)
+  delete(self.solver_overflow)
+  delete(self.awake_list)
   for &s in self.solver_static_shards do delete(s)
   delete(self.solver_static_shards)
   geometry.bvh_destroy(&self.dynamic_bvh)
@@ -289,29 +302,63 @@ trigger_collides :: #force_inline proc(trigger: ^TriggerBody, body: ^RigidBody) 
 step_warmstart_prep :: proc(self: ^World) {
   clear(&self.prev_dynamic_warmstart)
   clear(&self.prev_static_warmstart)
-  for contact in self.dynamic_contacts {
-    if contact.normal_impulse == 0 && contact.tangent_impulse == {0, 0} do continue
-    self.prev_dynamic_warmstart[collision_pair_hash(contact.body_a, contact.body_b)] = ContactWarmstart {
-      normal  = contact.normal_impulse,
-      tangent = contact.tangent_impulse,
-    }
+  for &contact in self.dynamic_contacts {
+    if !contact_has_impulse(&contact) do continue
+    self.prev_dynamic_warmstart[collision_pair_hash(contact.body_a, contact.body_b)] =
+      contact_store_warmstart(&contact)
   }
-  for contact in self.static_contacts {
-    if contact.normal_impulse == 0 && contact.tangent_impulse == {0, 0} do continue
-    self.prev_static_warmstart[collision_pair_hash(contact.body_a, contact.body_b)] = ContactWarmstart {
-      normal  = contact.normal_impulse,
-      tangent = contact.tangent_impulse,
-    }
+  for &contact in self.static_contacts {
+    if !contact_has_impulse(&contact) do continue
+    self.prev_static_warmstart[collision_pair_hash(contact.body_a, contact.body_b)] =
+      contact_store_warmstart(&contact)
   }
 }
 
 @(private)
-step_apply_forces_and_sleep :: proc(self: ^World, dt: f32) -> (awake_count, dynamic_count: int) {
+step_count_dynamic :: proc(self: ^World) -> (dynamic_count: int) {
   for i in 0 ..< len(self.bodies.entries) {
+    if !self.bodies.entries[i].active do continue
+    if self.bodies.entries[i].item.is_killed do continue
+    dynamic_count += 1
+  }
+  return
+}
+
+// Island-based sleeping (end of frame, post-solve velocities): bodies linked
+// by dynamic contacts sleep only when EVERY island member has been quiet for
+// SLEEP_TIME_THRESHOLD. Per-body sleep leaves boxes floating when their
+// support dozes off first; per-island can't.
+@(private)
+step_island_sleep :: proc(self: ^World, dt: f32) -> (awake_count: int) {
+  n := len(self.bodies.entries)
+  if n == 0 do return
+  parent := make([]i32, n, context.temp_allocator)
+  for i in 0 ..< n do parent[i] = i32(i)
+  find :: proc(parent: []i32, x: i32) -> i32 {
+    root := x
+    for parent[root] != root do root = parent[root]
+    // path compression
+    cur := x
+    for parent[cur] != root {
+      next := parent[cur]
+      parent[cur] = root
+      cur = next
+    }
+    return root
+  }
+  for &c in self.dynamic_contacts {
+    a := int(c.body_a.index)
+    b := int(c.body_b.index)
+    if a >= n || b >= n do continue
+    ra := find(parent, i32(a))
+    rb := find(parent, i32(b))
+    if ra != rb do parent[rb] = ra
+  }
+  // Per-body quiet timers
+  for i in 0 ..< n {
     if !self.bodies.entries[i].active do continue
     body := &self.bodies.entries[i].item
     if body.is_killed do continue
-    dynamic_count += 1
     lin_speed_sq := linalg.length2(body.velocity)
     ang_speed_sq := linalg.length2(body.angular_velocity)
     if lin_speed_sq < SLEEP_LINEAR_THRESHOLD_SQ && ang_speed_sq < SLEEP_ANGULAR_THRESHOLD_SQ {
@@ -320,17 +367,29 @@ step_apply_forces_and_sleep :: proc(self: ^World, dt: f32) -> (awake_count, dyna
       body.sleep_timer = 0
       body.is_sleeping = false
     }
-    if body.sleep_timer > SLEEP_TIME_THRESHOLD {
+  }
+  // Island-minimum quiet time
+  island_min := make([]f32, n, context.temp_allocator)
+  for i in 0 ..< n do island_min[i] = math.F32_MAX
+  for i in 0 ..< n {
+    if !self.bodies.entries[i].active do continue
+    body := &self.bodies.entries[i].item
+    if body.is_killed do continue
+    root := find(parent, i32(i))
+    island_min[root] = min(island_min[root], body.sleep_timer)
+  }
+  for i in 0 ..< n {
+    if !self.bodies.entries[i].active do continue
+    body := &self.bodies.entries[i].item
+    if body.is_killed do continue
+    root := find(parent, i32(i))
+    if island_min[root] > SLEEP_TIME_THRESHOLD {
       body.is_sleeping = true
       body.velocity = {}
       body.angular_velocity = {}
+    } else {
+      awake_count += 1
     }
-    if body.is_sleeping do continue
-    awake_count += 1
-    body.velocity += (self.gravity + body.force * body.inv_mass) * dt
-    body.velocity *= math.pow(1.0 - body.linear_damping, dt)
-    body.force = {}
-    body.torque = {}
   }
   return
 }
@@ -349,7 +408,11 @@ step_rebuild_dynamic_bvh :: proc(self: ^World, dynamic_body_count: int) {
       continue
     }
     update_cached_aabb(&body.base)
-    append(&entries, DynamicBroadPhaseEntry{handle = handle, bounds = body.cached_aabb})
+    fat := geometry.Aabb {
+      min = body.cached_aabb.min - SPECULATIVE_DISTANCE,
+      max = body.cached_aabb.max + SPECULATIVE_DISTANCE,
+    }
+    append(&entries, DynamicBroadPhaseEntry{handle = handle, bounds = fat})
   }
   if self.enable_parallel {
     geometry.bvh_build_parallel(&self.dynamic_bvh, entries[:], &self.thread_pool, 4, 1000)
@@ -378,73 +441,6 @@ step_rebuild_static_bvh :: proc(self: ^World, static_body_count: int) {
     geometry.bvh_build(&self.static_bvh, entries[:], 4)
   }
   self.last_static_count = static_body_count
-}
-
-@(private)
-SubstepTimes :: struct {
-  refit, broadphase, prepare, solver, integration: time.Duration,
-}
-
-@(private)
-step_substep :: proc(self: ^World, substep_dt: f32, ccd_handled: []bool, is_first: bool) -> SubstepTimes {
-  times: SubstepTimes
-  refit_start := time.now()
-  clear(&self.dynamic_contacts)
-  clear(&self.static_contacts)
-  if self.enable_parallel {
-    parallel_bvh_refit(self, self.thread_count)
-  } else {
-    sequential_bvh_refit(self)
-  }
-  times.refit = time.since(refit_start)
-
-  broadphase_start := time.now()
-  if self.enable_parallel {
-    parallel_collision_detection_traversal(self, self.thread_count)
-  } else {
-    sequential_collision_detection_traversal(self)
-  }
-  times.broadphase = time.since(broadphase_start)
-
-  prepare_start := time.now()
-  if self.enable_parallel {
-    parallel_prepare_contacts(self, substep_dt, self.thread_count)
-  } else {
-    sequential_prepare_contacts(self, substep_dt)
-  }
-  times.prepare = time.since(prepare_start)
-
-  solver_start := time.now()
-  if is_first {
-    for &contact in self.dynamic_contacts {
-      body_a := get(self, contact.body_a) or_continue
-      body_b := get(self, contact.body_b) or_continue
-      warmstart_contact(&contact, body_a, body_b)
-    }
-    for &contact in self.static_contacts {
-      body_a := get(self, contact.body_a) or_continue
-      body_b := get(self, contact.body_b) or_continue
-      warmstart_contact(&contact, body_a, body_b)
-    }
-  }
-  clear_pseudo_velocities(self)
-  if self.enable_parallel {
-    build_solver_partition(self, self.thread_count)
-    run_solver_iters(self, CONSTRAINT_SOLVER_ITERS, STABILIZATION_ITERS, self.thread_count)
-  } else {
-    for _ in 0 ..< CONSTRAINT_SOLVER_ITERS {
-      solve_velocity_pass(self)
-    }
-    for _ in 0 ..< STABILIZATION_ITERS {
-      solve_position_pass(self)
-    }
-  }
-  times.solver = time.since(solver_start)
-
-  integration_start := time.now()
-  integrate_positions(self, substep_dt, ccd_handled)
-  times.integration = time.since(integration_start)
-  return times
 }
 
 @(private)
@@ -501,7 +497,7 @@ step :: proc(self: ^World, dt: f32) {
   warmstart_prep_time := time.since(warmstart_start)
 
   force_start := time.now()
-  awake_body_count, dynamic_body_count := step_apply_forces_and_sleep(self, dt)
+  dynamic_body_count := step_count_dynamic(self)
   force_application_time := time.since(force_start)
 
   ccd_handled := make([dynamic]bool, len(self.bodies.entries), context.temp_allocator)
@@ -533,22 +529,81 @@ step :: proc(self: ^World, dt: f32) {
     bvh_build_time += time.since(t)
   }
 
-  substep_dt := dt / f32(NUM_SUBSTEPS)
-  substep_start := time.now()
-  totals: SubstepTimes
-  for substep in 0 ..< NUM_SUBSTEPS {
-    times := step_substep(self, substep_dt, ccd_handled[:], substep == 0)
-    totals.refit += times.refit
-    totals.broadphase += times.broadphase
-    totals.prepare += times.prepare
-    totals.solver += times.solver
-    totals.integration += times.integration
+  // Anchor frame-start positions for per-substep separation recovery
+  for i in 0 ..< len(self.bodies.entries) {
+    if !self.bodies.entries[i].active do continue
+    body := &self.bodies.entries[i].item
+    body.position0 = body.position
   }
-  substep_time := time.since(substep_start)
+
+  // All-asleep fast path: nothing can move, skip the whole pipeline
+  any_awake := false
+  for i in 0 ..< len(self.bodies.entries) {
+    if !self.bodies.entries[i].active do continue
+    body := &self.bodies.entries[i].item
+    if body.is_killed || body.is_sleeping do continue
+    any_awake = true
+    break
+  }
+
+  refit_time, broadphase_time, prepare_time, substep_time, integration_time: time.Duration
+  substep_dt := dt / f32(NUM_SUBSTEPS)
+  if any_awake {
+    refit_start := time.now()
+    clear(&self.dynamic_contacts)
+    clear(&self.static_contacts)
+    if self.enable_parallel {
+      parallel_bvh_refit(self, self.thread_count)
+    } else {
+      sequential_bvh_refit(self)
+    }
+    refit_time = time.since(refit_start)
+
+    broadphase_start := time.now()
+    if self.enable_parallel {
+      parallel_collision_detection_traversal(self, self.thread_count)
+    } else {
+      sequential_collision_detection_traversal(self)
+    }
+    broadphase_time = time.since(broadphase_start)
+
+    // Narrowphase may have woken sleeping bodies — build the dense awake
+    // list only now
+    clear(&self.awake_list)
+    for i in 0 ..< len(self.bodies.entries) {
+      if !self.bodies.entries[i].active do continue
+      body := &self.bodies.entries[i].item
+      if body.is_killed || body.is_sleeping do continue
+      append(&self.awake_list, u32(i))
+    }
+
+    prepare_start := time.now()
+    if self.enable_parallel {
+      parallel_prepare_contacts(self, substep_dt, self.thread_count)
+    } else {
+      sequential_prepare_contacts(self, substep_dt)
+    }
+    prepare_time = time.since(prepare_start)
+
+    substep_start := time.now()
+    run_substep_loop(self, substep_dt, NUM_SUBSTEPS, ccd_handled[:], self.thread_count)
+    substep_time = time.since(substep_start)
+
+    // Finalize: refresh spatial caches once per frame
+    finalize_start := time.now()
+    for li in 0 ..< len(self.awake_list) {
+      body := &self.bodies.entries[self.awake_list[li]].item
+      body.force = {}
+      body.torque = {}
+      update_cached_aabb(&body.base)
+    }
+    integration_time = time.since(finalize_start)
+  }
 
   step_triggers(self)
 
   cleanup_start := time.now()
+  awake_body_count := step_island_sleep(self, dt)
   sleeping_body_count := step_cleanup_and_count(self)
   cleanup_time := time.since(cleanup_start)
 
@@ -560,11 +615,11 @@ step :: proc(self: ^World, dt: f32) {
     ccd_ms                 = f32(time.duration_milliseconds(ccd_time)),
     bvh_build_ms           = f32(time.duration_milliseconds(bvh_build_time)),
     substep_total_ms       = f32(time.duration_milliseconds(substep_time)),
-    refit_ms               = f32(time.duration_milliseconds(totals.refit)),
-    broadphase_ms          = f32(time.duration_milliseconds(totals.broadphase)),
-    prepare_ms             = f32(time.duration_milliseconds(totals.prepare)),
-    solver_ms              = f32(time.duration_milliseconds(totals.solver)),
-    integration_substep_ms = f32(time.duration_milliseconds(totals.integration)),
+    refit_ms               = f32(time.duration_milliseconds(refit_time)),
+    broadphase_ms          = f32(time.duration_milliseconds(broadphase_time)),
+    prepare_ms             = f32(time.duration_milliseconds(prepare_time)),
+    solver_ms              = f32(time.duration_milliseconds(substep_time)),
+    integration_substep_ms = f32(time.duration_milliseconds(integration_time)),
     cleanup_ms             = f32(time.duration_milliseconds(cleanup_time)),
     dynamic_body_count     = dynamic_body_count,
     static_body_count      = static_body_count,
@@ -589,11 +644,11 @@ step :: proc(self: ^World, dt: f32) {
       time.duration_milliseconds(ccd_time),
       time.duration_milliseconds(bvh_build_time),
       time.duration_milliseconds(substep_time),
-      time.duration_milliseconds(totals.refit),
-      time.duration_milliseconds(totals.broadphase),
-      time.duration_milliseconds(totals.prepare),
-      time.duration_milliseconds(totals.solver),
-      time.duration_milliseconds(totals.integration),
+      time.duration_milliseconds(refit_time),
+      time.duration_milliseconds(broadphase_time),
+      time.duration_milliseconds(prepare_time),
+      time.duration_milliseconds(substep_time),
+      time.duration_milliseconds(integration_time),
       time.duration_milliseconds(cleanup_time),
       dynamic_body_count, static_body_count, awake_body_count,
       len(self.dynamic_contacts), len(self.static_contacts),
