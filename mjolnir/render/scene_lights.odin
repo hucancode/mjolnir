@@ -1,11 +1,10 @@
 package render
 
-import "../gpu"
+import "bindless"
+import "gpu"
 import "core:log"
 import "core:slice"
-import shadow_culling_system "shadow_culling"
-import shadow_render_system "shadow_render"
-import shadow_sphere_culling_system "shadow_sphere_culling"
+import "shadow"
 import vk "vendor:vulkan"
 
 @(private)
@@ -48,7 +47,7 @@ release_shadow_2d :: proc(
   shadow, ok := &render.internal.shadow_maps[light_node_index]
   if !ok do return
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    gpu.free_texture_2d(
+    bindless.free_texture_2d(
       &render.texture_manager,
       gctx,
       shadow.shadow_map_2d[frame],
@@ -69,7 +68,7 @@ release_shadow_cube :: proc(
   shadow, ok := &render.internal.shadow_map_cubes[light_node_index]
   if !ok do return
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    gpu.free_texture_cube(
+    bindless.free_texture_cube(
       &render.texture_manager,
       gctx,
       shadow.shadow_map_cube[frame],
@@ -90,7 +89,7 @@ ensure_shadow_2d_resource :: proc(
   if light_node_index in render.internal.shadow_maps do return .SUCCESS
   sm: ShadowMap
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    sm.shadow_map_2d[frame] = gpu.allocate_texture_2d(
+    sm.shadow_map_2d[frame] = bindless.allocate_texture_2d(
       &render.texture_manager,
       gctx,
       vk.Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE},
@@ -109,8 +108,8 @@ ensure_shadow_2d_resource :: proc(
       MAX_NODES_IN_SCENE,
       {.STORAGE_BUFFER, .INDIRECT_BUFFER},
     ) or_return
-    sm.descriptor_sets[frame] = shadow_culling_system.create_per_light_descriptor(
-      &render.internal.shadow_culling,
+    sm.descriptor_sets[frame] = shadow.create_per_light_descriptor(
+      &render.internal.shadow,
       gctx,
       gpu.buffer_info(&render.internal.node_data_buffer.buffer),
       gpu.buffer_info(&render.internal.mesh_data_buffer.buffer),
@@ -131,7 +130,7 @@ ensure_shadow_cube_resource :: proc(
   if light_node_index in render.internal.shadow_map_cubes do return .SUCCESS
   sm: ShadowMapCube
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    sm.shadow_map_cube[frame] = gpu.allocate_texture_cube(
+    sm.shadow_map_cube[frame] = bindless.allocate_texture_cube(
       &render.texture_manager,
       gctx,
       SHADOW_MAP_SIZE,
@@ -150,8 +149,8 @@ ensure_shadow_cube_resource :: proc(
       MAX_NODES_IN_SCENE,
       {.STORAGE_BUFFER, .INDIRECT_BUFFER},
     ) or_return
-    sm.descriptor_sets[frame] = shadow_sphere_culling_system.create_per_light_descriptor(
-      &render.internal.shadow_sphere_culling,
+    sm.descriptor_sets[frame] = shadow.create_per_light_descriptor(
+      &render.internal.shadow,
       gctx,
       gpu.buffer_info(&render.internal.node_data_buffer.buffer),
       gpu.buffer_info(&render.internal.mesh_data_buffer.buffer),
@@ -163,6 +162,7 @@ ensure_shadow_cube_resource :: proc(
   return .SUCCESS
 }
 
+@(private)
 upsert_light_entry :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,
@@ -207,17 +207,17 @@ upsert_light_entry :: proc(
 @(private)
 build_shadow_cache :: proc(
   self: ^Manager,
-) -> map[u32]shadow_render_system.ShadowFrameInfo {
+) -> map[u32]shadow.ShadowFrameInfo {
   cache := make(
-    map[u32]shadow_render_system.ShadowFrameInfo,
+    map[u32]shadow.ShadowFrameInfo,
     len(self.internal.lights),
     context.temp_allocator,
   )
   for idx, light in self.internal.lights {
-    info: shadow_render_system.ShadowFrameInfo
+    info: shadow.ShadowFrameInfo
     switch variant in light {
     case SpotLight:
-      view, projection, near, far := shadow_render_system.matrices_spot(
+      view, projection, near, far := shadow.matrices_spot(
         variant.position,
         variant.direction,
         variant.radius,
@@ -225,14 +225,14 @@ build_shadow_cache :: proc(
       )
       info = {projection * view, projection, near, far}
     case DirectionalLight:
-      view, projection, near, far := shadow_render_system.matrices_directional(
+      view, projection, near, far := shadow.matrices_directional(
         variant.position,
         variant.direction,
         variant.radius,
       )
       info = {projection * view, projection, near, far}
     case PointLight:
-      projection, near, far := shadow_render_system.projection_point(variant.radius)
+      projection, near, far := shadow.projection_point(variant.radius)
       info = {{}, projection, near, far}
     }
     cache[idx] = info
@@ -257,6 +257,7 @@ sorted_light_indices :: proc(self: ^Manager) -> []u32 {
   return indices[:min(len(indices), int(MAX_LIGHTS))]
 }
 
+@(private)
 remove_light_entry :: proc(
   render: ^Manager,
   gctx: ^gpu.GPUContext,

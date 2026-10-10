@@ -1,6 +1,6 @@
 package particles_compute
 
-import "../../gpu"
+import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -449,6 +449,7 @@ init :: proc(
   return .SUCCESS
 }
 
+@(private)
 create_emitter_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
@@ -481,29 +482,12 @@ create_emitter_pipeline :: proc(
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, emitter_shader_module, nil)
 
-  emitter_pipeline_info := vk.ComputePipelineCreateInfo {
-    sType = .COMPUTE_PIPELINE_CREATE_INFO,
-    stage = {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.COMPUTE},
-      module = emitter_shader_module,
-      pName = "main",
-    },
-    layout = self.emitter_pipeline_layout,
-  }
-
-  vk.CreateComputePipelines(
-    gctx.device,
-    0,
-    1,
-    &emitter_pipeline_info,
-    nil,
-    &self.emitter_pipeline,
-  ) or_return
+  self.emitter_pipeline = gpu.create_compute_pipeline(gctx, emitter_shader_module, self.emitter_pipeline_layout) or_return
 
   return .SUCCESS
 }
 
+@(private)
 create_compute_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
@@ -543,29 +527,12 @@ create_compute_pipeline :: proc(
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, compute_shader_module, nil)
 
-  compute_pipeline_info := vk.ComputePipelineCreateInfo {
-    sType = .COMPUTE_PIPELINE_CREATE_INFO,
-    stage = {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.COMPUTE},
-      module = compute_shader_module,
-      pName = "main",
-    },
-    layout = self.compute_pipeline_layout,
-  }
-
-  vk.CreateComputePipelines(
-    gctx.device,
-    0,
-    1,
-    &compute_pipeline_info,
-    nil,
-    &self.compute_pipeline,
-  ) or_return
+  self.compute_pipeline = gpu.create_compute_pipeline(gctx, compute_shader_module, self.compute_pipeline_layout) or_return
 
   return .SUCCESS
 }
 
+@(private)
 create_compact_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
@@ -602,25 +569,7 @@ create_compact_pipeline :: proc(
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, compact_shader_module, nil)
 
-  compact_pipeline_info := vk.ComputePipelineCreateInfo {
-    sType = .COMPUTE_PIPELINE_CREATE_INFO,
-    stage = {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.COMPUTE},
-      module = compact_shader_module,
-      pName = "main",
-    },
-    layout = self.compact_pipeline_layout,
-  }
-
-  vk.CreateComputePipelines(
-    gctx.device,
-    0,
-    1,
-    &compact_pipeline_info,
-    nil,
-    &self.compact_pipeline,
-  ) or_return
+  self.compact_pipeline = gpu.create_compute_pipeline(gctx, compact_shader_module, self.compact_pipeline_layout) or_return
 
   return .SUCCESS
 }

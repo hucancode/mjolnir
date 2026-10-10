@@ -28,8 +28,8 @@ build_plane_navmesh :: proc(t: ^testing.T) -> ^Nav_Mesh {
 	if !ok {
 		testing.fail_now(t, "build_navmesh failed")
 	}
-	defer recast.free_poly_mesh(pmesh)
-	defer recast.free_poly_mesh_detail(dmesh)
+	defer recast.destroy_poly_mesh(pmesh)
+	defer recast.destroy_poly_mesh_detail(dmesh)
 	params := Create_Nav_Mesh_Data_Params {
 		poly_mesh        = pmesh,
 		poly_mesh_detail = dmesh,

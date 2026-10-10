@@ -36,11 +36,11 @@ validate_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) -> bool {
 test_simple_detail_mesh_build :: proc(t: ^testing.T) {
   // Create minimal working example
   pmesh := new(Poly_Mesh)
-  defer free_poly_mesh(pmesh)
+  defer destroy_poly_mesh(pmesh)
   chf := new(Compact_Heightfield)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   dmesh := new(Poly_Mesh_Detail)
-  defer free_poly_mesh_detail(dmesh)
+  defer destroy_poly_mesh_detail(dmesh)
   // Set up minimal polygon mesh (single triangle)
   pmesh.npolys = 1
   pmesh.nvp = 3
@@ -113,8 +113,8 @@ test_detail_mesh_sampling_quality :: proc(t: ^testing.T) {
   }
   pmesh, dmesh_low, ok := build_navmesh(vertices, indices, areas, cfg)
   testing.expect(t, ok, "Low quality build should succeed")
-  defer free_poly_mesh(pmesh)
-  defer free_poly_mesh_detail(dmesh_low)
+  defer destroy_poly_mesh(pmesh)
+  defer destroy_poly_mesh_detail(dmesh_low)
   // Build with high quality sampling
   cfg.detail_sample_dist = 1.0
   cfg.detail_sample_max_error = 0.1
@@ -125,8 +125,8 @@ test_detail_mesh_sampling_quality :: proc(t: ^testing.T) {
     cfg,
   )
   testing.expect(t, ok2, "High quality build should succeed")
-  defer free_poly_mesh(pmesh2)
-  defer free_poly_mesh_detail(dmesh_high)
+  defer destroy_poly_mesh(pmesh2)
+  defer destroy_poly_mesh_detail(dmesh_high)
   // High quality should have more detail vertices
   testing.expect(
     t,
@@ -169,8 +169,8 @@ test_detail_mesh_height_accuracy :: proc(t: ^testing.T) {
   }
   pmesh, dmesh, ok := build_navmesh(vertices, indices, areas, cfg)
   testing.expect(t, ok, "Build with height variation should succeed")
-  defer free_poly_mesh(pmesh)
-  defer free_poly_mesh_detail(dmesh)
+  defer destroy_poly_mesh(pmesh)
+  defer destroy_poly_mesh_detail(dmesh)
   if ok && len(dmesh.verts) > 0 {
     // Check height range in detail mesh
     min_y, max_y := dmesh.verts[0].y, dmesh.verts[0].y
@@ -222,8 +222,8 @@ test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
     cfg,
   )
   if ok {
-    defer free_poly_mesh(pmesh)
-    defer free_poly_mesh_detail(dmesh)
+    defer destroy_poly_mesh(pmesh)
+    defer destroy_poly_mesh_detail(dmesh)
     testing.expect(
       t,
       validate_poly_mesh_detail(dmesh),
@@ -251,8 +251,8 @@ test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
     cfg,
   )
   if ok2 {
-    defer free_poly_mesh(pmesh2)
-    defer free_poly_mesh_detail(dmesh2)
+    defer destroy_poly_mesh(pmesh2)
+    defer destroy_poly_mesh_detail(dmesh2)
     testing.expect(
       t,
       validate_poly_mesh_detail(dmesh2),
@@ -266,7 +266,7 @@ test_build_detail_mesh_simple :: proc(t: ^testing.T) {
   // Create simple scenario for detail mesh building
   hf := create_heightfield(8, 8, {0, 0, 0}, {8, 8, 8}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add walkable area
   for x in 2 ..= 5 {
     for z in 2 ..= 5 {
@@ -275,7 +275,7 @@ test_build_detail_mesh_simple :: proc(t: ^testing.T) {
   }
   // Build compact heightfield
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Build regions and contours
   ok := build_distance_field(chf)
@@ -284,15 +284,15 @@ test_build_detail_mesh_simple :: proc(t: ^testing.T) {
   testing.expect(t, ok, "Failed to build regions")
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
   testing.expect(t, contour_set != nil, "Failed to build contours")
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   // Build polygon mesh
   poly_mesh := create_poly_mesh(contour_set, 6)
   testing.expect(t, poly_mesh != nil, "Failed to build poly mesh")
-  defer free_poly_mesh(poly_mesh)
+  defer destroy_poly_mesh(poly_mesh)
   // Build detail mesh
   detail_mesh := create_poly_mesh_detail(poly_mesh, chf, 2.0, 1.0)
   testing.expect(t, detail_mesh != nil, "Failed to build detail mesh")
-  defer free_poly_mesh_detail(detail_mesh)
+  defer destroy_poly_mesh_detail(detail_mesh)
   // Verify detail mesh was created
   testing.expect(
     t,
@@ -317,7 +317,7 @@ test_detail_mesh_sample_distance_variations :: proc(t: ^testing.T) {
   // Create base scenario
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create larger walkable area for better testing
   for x in 2 ..= 7 {
     for z in 2 ..= 7 {
@@ -325,18 +325,18 @@ test_detail_mesh_sample_distance_variations :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 2, 8, 20)
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   poly_mesh := create_poly_mesh(contour_set, 6)
-  defer free_poly_mesh(poly_mesh)
+  defer destroy_poly_mesh(poly_mesh)
   // Test different sample distances
   sample_distances := []f32{1.0, 2.0, 4.0}
   for sample_dist in sample_distances {
     detail_mesh := new(Poly_Mesh_Detail)
-    defer free_poly_mesh_detail(detail_mesh)
+    defer destroy_poly_mesh_detail(detail_mesh)
     ok = build_poly_mesh_detail(
       poly_mesh,
       chf,
@@ -365,7 +365,7 @@ test_detail_mesh_max_edge_error_variations :: proc(t: ^testing.T) {
   // Create base scenario with sloped surface for edge error testing
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.2)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create sloped area for better edge error testing
   for x in 2 ..= 7 {
     for z in 2 ..= 7 {
@@ -383,18 +383,18 @@ test_detail_mesh_max_edge_error_variations :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 2, 8, 20)
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   poly_mesh := create_poly_mesh(contour_set, 6)
-  defer free_poly_mesh(poly_mesh)
+  defer destroy_poly_mesh(poly_mesh)
   // Test different max edge errors
   max_edge_errors := []f32{0.5, 1.0, 2.0}
   for max_edge_error in max_edge_errors {
     detail_mesh := new(Poly_Mesh_Detail)
-    defer free_poly_mesh_detail(detail_mesh)
+    defer destroy_poly_mesh_detail(detail_mesh)
     ok = build_poly_mesh_detail(
       poly_mesh,
       chf,
@@ -421,7 +421,7 @@ test_detail_mesh_max_edge_error_variations :: proc(t: ^testing.T) {
 test_detail_mesh_small_polygons :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create several tiny walkable areas
   tiny_areas := [][2]i32{{2, 2}, {2, 3}, {4, 4}, {6, 6}}
   for area in tiny_areas {
@@ -437,13 +437,13 @@ test_detail_mesh_small_polygons :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to add tiny walkable area")
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 1, 1, 1) // Very small regions to accommodate tiny areas
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   poly_mesh := create_poly_mesh(contour_set, 6)
-  defer free_poly_mesh(poly_mesh)
+  defer destroy_poly_mesh(poly_mesh)
   testing.expect(t, poly_mesh == nil, "no polygon should be created")
 }
 
@@ -452,7 +452,7 @@ test_detail_mesh_extreme_parameters :: proc(t: ^testing.T) {
   // Create base scenario
   hf := create_heightfield(8, 8, {0, 0, 0}, {8, 8, 8}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add simple walkable area
   for x in 2 ..= 5 {
     for z in 2 ..= 5 {
@@ -460,13 +460,13 @@ test_detail_mesh_extreme_parameters :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 2, 8, 20)
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   poly_mesh := create_poly_mesh(contour_set, 6)
-  defer free_poly_mesh(poly_mesh)
+  defer destroy_poly_mesh(poly_mesh)
   // Test extreme parameters
   extreme_cases := []struct {
     sample_dist, max_edge_error: f32,
@@ -478,7 +478,7 @@ test_detail_mesh_extreme_parameters :: proc(t: ^testing.T) {
   }
   for extreme_case in extreme_cases {
     detail_mesh := new(Poly_Mesh_Detail)
-    defer free_poly_mesh_detail(detail_mesh)
+    defer destroy_poly_mesh_detail(detail_mesh)
     ok = build_poly_mesh_detail(
       poly_mesh,
       chf,
@@ -499,7 +499,7 @@ test_detail_mesh_data_consistency :: proc(t: ^testing.T) {
   // Create scenario for detail mesh validation
   hf := create_heightfield(8, 8, {0, 0, 0}, {8, 8, 8}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add walkable area
   for x in 2 ..= 5 {
     for z in 2 ..= 5 {
@@ -507,15 +507,15 @@ test_detail_mesh_data_consistency :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 2, 8, 20)
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   poly_mesh := create_poly_mesh(contour_set, 6)
-  defer free_poly_mesh(poly_mesh)
+  defer destroy_poly_mesh(poly_mesh)
   detail_mesh := new(Poly_Mesh_Detail)
-  defer free_poly_mesh_detail(detail_mesh)
+  defer destroy_poly_mesh_detail(detail_mesh)
   ok = build_poly_mesh_detail(poly_mesh, chf, 2.0, 1.0, detail_mesh)
   testing.expect(t, ok, "Failed to build detail mesh")
   // Validate detail mesh data consistency
@@ -577,7 +577,7 @@ test_detail_mesh_performance :: proc(t: ^testing.T) {
   // Create larger scenario for performance testing
   hf := create_heightfield(20, 20, {0, 0, 0}, {20, 20, 20}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add larger walkable area
   for x in 2 ..= 17 {
     for z in 2 ..= 17 {
@@ -585,15 +585,15 @@ test_detail_mesh_performance :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 8, 50, 50)
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   poly_mesh := create_poly_mesh(contour_set, 6)
-  defer free_poly_mesh(poly_mesh)
+  defer destroy_poly_mesh(poly_mesh)
   detail_mesh := new(Poly_Mesh_Detail)
-  defer free_poly_mesh_detail(detail_mesh)
+  defer destroy_poly_mesh_detail(detail_mesh)
   // Measure performance
   start_time := time.now()
   ok = build_poly_mesh_detail(poly_mesh, chf, 2.0, 1.0, detail_mesh)

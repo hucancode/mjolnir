@@ -6,13 +6,8 @@ Handle :: cont.Handle
 Pool :: cont.Pool
 
 NodeHandle :: distinct Handle
-MeshHandle :: distinct Handle
-MaterialHandle :: distinct Handle
-CameraHandle :: distinct Handle
-EmitterHandle :: distinct Handle
-ForceFieldHandle :: distinct Handle
-ClipHandle :: distinct Handle
-SpriteHandle :: distinct Handle
-LightHandle :: distinct Handle
 
-MAX_CAMERAS :: 64
+MAX_NODES_IN_SCENE :: 65536
+// Despawned node slots stay reserved this many updates so consumers keyed by
+// node index see the removal before the slot is reused.
+RETIRE_GRACE :: 3

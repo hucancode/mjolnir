@@ -2,7 +2,6 @@ package crowd
 
 import "core:math"
 import "core:math/linalg"
-import "core:slice"
 import "../recast"
 import "../detour"
 
@@ -252,6 +251,16 @@ crowd_request_move_target :: proc(crowd: ^Crowd, idx: int, ref: recast.Poly_Ref,
 	ag.target_replan = false
 
 	return true
+}
+
+// Snap `pos` to the mesh within `extents` and request it as the agent's
+// move target.
+crowd_move_to :: proc(crowd: ^Crowd, idx: int, pos: [3]f32, extents: [3]f32 = {2, 4, 2}) -> bool {
+	if idx < 0 || idx >= crowd.max_agents do return false
+	filter := &crowd.filters[crowd.agents[idx].params.query_filter_type]
+	status, ref, snapped := detour.find_nearest_poly(crowd.nav_query, pos, extents, filter)
+	if recast.status_failed(status) do return false
+	return crowd_request_move_target(crowd, idx, ref, snapped)
 }
 
 crowd_update :: proc(crowd: ^Crowd, dt: f32) {

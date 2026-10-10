@@ -109,17 +109,6 @@ text_layout :: proc(text: ^Text2D, font_ctx: ^fs.FontContext) {
     append(&text.glyphs, glyph)
     glyph_index += 1
   }
-  // Force fontstash to rasterize the glyphs we just laid out
-  dirty_rect: [4]f32
-  if fs.ValidateTexture(font_ctx, &dirty_rect) {
-    log.debugf(
-      "Forced glyph rasterization: dirty rect (%.0f,%.0f,%.0f,%.0f)",
-      dirty_rect[0],
-      dirty_rect[1],
-      dirty_rect[2],
-      dirty_rect[3],
-    )
-  }
   log.debugf(
     "Text layout complete: '%s' -> %d glyphs, size: %.1fx%.1f, offset: %.1f,%.1f",
     text.text,

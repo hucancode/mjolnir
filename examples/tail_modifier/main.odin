@@ -1,13 +1,17 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/platform"
+import anim "../../mjolnir/animation"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
-import "vendor:glfw"
 import mu "vendor:microui"
 
-root_nodes: [dynamic]world.NodeHandle
+scene: mjolnir.GltfScene
+rig: ^anim.Rig
+animator: anim.Animator
 snake_child_node: world.NodeHandle
 tail_layer_index: int = -1
 
@@ -40,18 +44,19 @@ main :: proc() {
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
+    sync       = sync,
   })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 4, -4}, {0, 1, 0})
-  world.spawn_ground(&engine.world, 20.0, position = {0, GROUND_Y, 0})
-  root_nodes = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
-  if len(root_nodes) == 0 do return
-  child, has := world.mesh_child(&engine.world, root_nodes[0])
-  if !has do return
-  snake_child_node = child
-  if idx, layer_ok := world.add_tail_modifier_layer(&engine.world, child, "root", 10,
+  render.main_camera_look_at(&engine.render, {0, 4, -4}, {0, 1, 0})
+  mjolnir.spawn_ground(engine, 20.0, position = {0, GROUND_Y, 0})
+  scene = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
+  if len(scene.skinned) == 0 do return
+  snake_child_node = scene.skinned[0].node
+  rig = &scene.rigs[scene.skinned[0].rig]
+  anim.animator_init(&animator, &rig.skeleton)
+  if idx, layer_ok := anim.add_tail_layer(&animator, &rig.skeleton, "root", 10,
     propagation_speed = f32(propagation_speed),
     damping = f32(damping),
     weight = 1.0,
@@ -59,12 +64,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     tail_layer_index = idx
     log.infof("Added tail modifier to node (layer %d)", tail_layer_index)
   }
-  if att, has_att := world.mesh_attachment(&engine.world, child); has_att {
-    if m, has_m := world.mesh(&engine.world, att.handle); has_m {
-      head_bone, head_found = world.find_bone_by_name(m, HEAD_BONE)
-    }
-  }
-  world.spawn_light_point(&engine.world, {-4, 10, 6}, {0.6, 0.7, 1.0, 1.5}, 15.0, false)
+  head_bone, head_found = anim.find_bone(&rig.skeleton, HEAD_BONE)
+  mjolnir.spawn(engine, {-4, 10, 6}, render.point_light_attachment({0.6, 0.7, 1.0, 1.5}, 15.0, false))
+}
+
+sync :: proc(engine: ^mjolnir.Engine) {
+  if rig != nil do render.stage_bones(&engine.render, snake_child_node.index, animator.palette)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -77,12 +82,13 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     handle_drag(engine)
   }
   if tail_layer_index >= 0 {
-    world.set_tail_modifier_params(&engine.world, snake_child_node, tail_layer_index,
+    anim.set_tail_params(&animator, tail_layer_index,
       propagation_speed = f32(propagation_speed),
       damping = f32(damping),
       stretch = stretch_enabled,
     )
   }
+  if rig != nil do anim.animator_update(&animator, rig, dt, world.world_matrix(&engine.world, snake_child_node))
 }
 
 // Raycast the cursor onto the ground plane (y = GROUND_Y).
@@ -101,18 +107,17 @@ handle_drag :: proc(engine: ^mjolnir.Engine) {
 
   // Begin drag on press (ignore when the UI owns the click). Capture the
   // head's offset from the node origin so we can land the head on the cursor.
-  if mjolnir.is_mouse_pressed(engine, glfw.MOUSE_BUTTON_RIGHT) &&
-     !mjolnir.debug_ui_wants_mouse(engine) {
+  if platform.input_mouse_pressed(&engine.platform.input, .RIGHT) &&
+     !render.debug_ui_wants_mouse(&engine.render) {
     dragging = true
     rest_y = node.transform.position.y
     head_offset = {0, 0, 0}
     if head_found {
-      if bt, bt_ok := world.get_bone_world_transform(&engine.world, snake_child_node, head_bone); bt_ok {
-        head_offset = bt.position - node.transform.world_matrix[3].xyz
-      }
+      head_world := node.transform.world_matrix * anim.bone_matrix(&animator, head_bone)
+      head_offset = head_world[3].xyz - node.transform.world_matrix[3].xyz
     }
   }
-  if !mjolnir.is_mouse_down(engine, glfw.MOUSE_BUTTON_RIGHT) {
+  if !platform.input_mouse_down(&engine.platform.input, .RIGHT) {
     dragging = false
     return
   }
@@ -126,7 +131,7 @@ handle_drag :: proc(engine: ^mjolnir.Engine) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Tail Modifier", {20, 300, 320, 320}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto animate", &animate_enabled)

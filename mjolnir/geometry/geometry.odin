@@ -2,7 +2,6 @@ package geometry
 
 import "core:math"
 import "core:math/linalg"
-import vk "vendor:vulkan"
 
 VEC_FORWARD :: [3]f32{0.0, 0.0, 1.0}
 VEC_BACKWARD :: [3]f32{0.0, 0.0, -1.0}
@@ -78,28 +77,6 @@ closest_point_on_segment_2d :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
   }
   t := linalg.saturate(linalg.dot(ap.xz, ab.xz) / segment_length_sqr)
   return linalg.mix(a, b, t)
-}
-
-// Ray-circle intersection test (2D XZ plane)
-ray_circle_intersect_2d :: proc "contextless" (
-  pos, vel: [3]f32,
-  radius: f32,
-) -> (
-  t: f32,
-  intersect: bool,
-) {
-  a := linalg.length2(vel.xz)
-  if a < 1e-6 do return // No movement
-  b := 2.0 * linalg.dot(pos.xz, vel.xz)
-  c := linalg.length2(pos.xz) - radius * radius
-  discriminant := b * b - 4 * a * c
-  if discriminant < 0 do return // No intersection
-  sqrt_disc := math.sqrt(discriminant)
-  t1 := (-b - sqrt_disc) / (2 * a)
-  t2 := (-b + sqrt_disc) / (2 * a)
-  if t1 >= 0 do return t1, true
-  if t2 >= 0 do return t2, true
-  return
 }
 
 // Ray-segment intersection test (2D XZ plane)
@@ -203,87 +180,7 @@ calc_tri_normal :: proc "contextless" (v0, v1, v2: [3]f32) -> (norm: [3]f32) {
   return
 }
 
-// Calculate signed area of triangle formed by three 2D points
-// Positive area = counter-clockwise, negative = clockwise
-// This is the 2D cross product of vectors (b-a) and (c-a)
-area2 :: proc "contextless" (a, b, c: [2]i32) -> i32 {
-  return linalg.cross(b - a, c - a)
-}
-
-// Check if point c is to the left or on the directed line from a to b
-left_on :: proc "contextless" (a, b, c: [2]i32) -> bool {
-  return area2(a, b, c) <= 0
-}
-
-// Check if point p is inside the cone formed by three consecutive vertices a0, a1, a2
-// a1 is the apex of the cone
-in_cone :: proc "contextless" (a0, a1, a2, p: [2]i32) -> bool {
-  // If a1 is a convex vertex (a2 is left or on the line from a0 to a1)
-  if left_on(a0, a1, a2) {
-    // p must be left of a1->p->a0 AND left of p->a1->a2
-    return left(a1, p, a0) && left(p, a1, a2)
-  }
-  // else a1 is reflex
-  // p must NOT be (left-or-on a1->p->a2 AND left-or-on p->a1->a0)
-  return !(left_on(a1, p, a2) && left_on(p, a1, a0))
-}
-
-// Check if point c is to the left of the directed line from a to b
-left :: proc "contextless" (a, b, c: [2]i32) -> bool {
-  return area2(a, b, c) < 0
-}
-
-// Check if point p lies on the line segment from a to b
-between :: proc "contextless" (a, b, p: [2]i32) -> bool {
-  if area2(a, b, p) != 0 {
-    return false // Not collinear
-  }
-  // If ab not vertical, check betweenness on x; else on y
-  if a.x != b.x {
-    return ((a.x <= p.x) && (p.x <= b.x)) || ((a.x >= p.x) && (p.x >= b.x))
-  } else {
-    return ((a.y <= p.y) && (p.y <= b.y)) || ((a.y >= p.y) && (p.y >= b.y))
-  }
-}
-
-// Check if line segments ab and cd intersect properly (at a point interior to both segments)
-intersect_prop :: proc "contextless" (a, b, c, d: [2]i32) -> bool {
-  // Eliminate improper cases (endpoints touching)
-  if area2(a, b, c) == 0 ||
-     area2(a, b, d) == 0 ||
-     area2(c, d, a) == 0 ||
-     area2(c, d, b) == 0 {
-    return false
-  }
-  // Check if c and d are on opposite sides of ab, and a and b are on opposite sides of cd
-  return (left(a, b, c) != left(a, b, d)) && (left(c, d, a) != left(c, d, b))
-}
-
-// Check if line segments ab and cd intersect (properly or improperly)
-intersect :: proc "contextless" (a, b, c, d: [2]i32) -> bool {
-  if intersect_prop(a, b, c, d) {
-    return true
-  }
-  // Check if any endpoint lies on the other segment
-  return(
-    between(a, b, c) ||
-    between(a, b, d) ||
-    between(c, d, a) ||
-    between(c, d, b) \
-  )
-}
-
 // Direction utilities
-
-// Get next direction in clockwise order (0=+X, 1=+Z, 2=-X, 3=-Z)
-next_dir :: proc "contextless" (dir: int) -> int {
-  return (dir + 1) & 0x3
-}
-
-// Get previous direction in clockwise order
-prev_dir :: proc "contextless" (dir: int) -> int {
-  return (dir + 3) & 0x3
-}
 
 // Calculate area of triangle in 2D (XZ plane)
 signed_triangle_area_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
@@ -430,16 +327,6 @@ intersect_segments_2d :: proc "contextless" (
   s = linalg.cross(diff, b_dir) / cross
   t = linalg.cross(diff, a_dir) / cross
   return s >= 0 && s <= 1 && t >= 0 && t <= 1, s, t
-}
-
-// Check if circle overlaps with line segment (2D XZ plane)
-overlap_circle_segment :: proc "contextless" (
-  center: [3]f32,
-  radius: f32,
-  p, q: [3]f32,
-) -> bool {
-  dist_sqr, _ := point_segment_distance2_2d(center, p, q)
-  return dist_sqr <= radius * radius
 }
 
 ray_primitive_intersection :: proc(
@@ -668,54 +555,6 @@ point_in_disc :: proc(point: [3]f32, disc: Disc) -> bool {
   return dist_sq <= disc.radius * disc.radius
 }
 
-// Check if two bounding boxes overlap in 2D (XZ plane)
-overlap_bounds_2d :: proc "contextless" (
-  amin, amax, bmin, bmax: [3]f32,
-) -> bool {
-  return(
-    amin.x <= bmax.x &&
-    amax.x >= bmin.x &&
-    amin.z <= bmax.z &&
-    amax.z >= bmin.z \
-  )
-}
-
-// Calculate circumcircle of a triangle
-// Returns center and radius squared
-// Based on C++ circumCircle from RecastMeshDetail.cpp
-circum_circle :: proc "contextless" (
-  a, b, c: [3]f32,
-) -> (
-  center: [2]f32,
-  r_sq: f32,
-  valid: bool,
-) {
-  EPS :: 1e-6
-  ab := b - a
-  ac := c - a
-  cross := linalg.cross(ab.xz, ac.xz)
-  if abs(cross) < EPS {
-    valid = false
-    return
-  }
-  len_ab_sq := linalg.length2(ab.xz)
-  len_ac_sq := linalg.length2(ac.xz)
-  inv_cross := 1.0 / (2.0 * cross)
-  ux := (ac.z * len_ab_sq - ab.z * len_ac_sq) * inv_cross
-  uy := (ab.x * len_ac_sq - ac.x * len_ab_sq) * inv_cross
-  center.x = a.x + ux
-  center.y = a.z + uy
-  r_sq = ux * ux + uy * uy
-  valid = true
-  return
-}
-
-// Check if a point is inside the circumcircle of a triangle
-in_circumcircle :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
-  center, r_sq := circum_circle(a, b, c) or_return
-  return linalg.length2(p.xz - center) <= r_sq
-}
-
 // Distance squared from point to line segment in 3D
 // Returns the squared distance for performance
 point_segment_distance_sq :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
@@ -879,50 +718,6 @@ point_polygon_distance :: proc(pt: [3]f32, vertices: [][3]f32) -> f32 {
   return inside ? -min_dist : min_dist
 }
 
-// Distance from point to triangle mesh
-// Based on C++ distToTriMesh from RecastMeshDetail.cpp
-point_triangle_mesh_distance :: proc(
-  p: [3]f32,
-  verts: [][3]f32,
-  tris: [][3]u8,
-) -> f32 {
-  min_dist := f32(math.F32_MAX)
-  for tri in tris {
-    va := verts[tri[0]]
-    vb := verts[tri[1]]
-    vc := verts[tri[2]]
-    // Project point onto triangle plane
-    n := linalg.cross(vb - va, vc - va)
-    if linalg.length2(n) < math.F32_EPSILON do continue
-    n = linalg.normalize(n)
-    plane_dist := linalg.dot(p - va, n)
-    projected := p - n * plane_dist
-    // Check if projected point is inside triangle using barycentric coordinates
-    v0 := vc - va
-    v1 := vb - va
-    v2 := projected - va
-    dot00 := linalg.dot(v0, v0)
-    dot01 := linalg.dot(v0, v1)
-    dot02 := linalg.dot(v0, v2)
-    dot11 := linalg.dot(v1, v1)
-    dot12 := linalg.dot(v1, v2)
-    denom := dot00 * dot11 - dot01 * dot01
-    if abs(denom) < math.F32_EPSILON do continue
-    inv_denom := 1.0 / denom
-    u := (dot11 * dot02 - dot01 * dot12) * inv_denom
-    v := (dot00 * dot12 - dot01 * dot02) * inv_denom
-    if (u >= 0) && (v >= 0) && (u + v <= 1) {
-      return abs(plane_dist)
-    }
-    // Point is outside triangle, find distance to edges
-    d0 := point_segment_distance(p, va, vb)
-    d1 := point_segment_distance(p, vb, vc)
-    d2 := point_segment_distance(p, vc, va)
-    min_dist = min(min_dist, d0, d1, d2)
-  }
-  return min_dist
-}
-
 safe_normalize :: proc(v: ^[3]f32) {
   sq_mag := v.x * v.x + v.y * v.y + v.z * v.z
   if sq_mag <= math.F32_EPSILON do return
@@ -930,126 +725,4 @@ safe_normalize :: proc(v: ^[3]f32) {
   v.x *= inv_mag
   v.y *= inv_mag
   v.z *= inv_mag
-}
-
-// Offset polygon - creates an inset/outset polygon with proper miter/bevel handling
-// Returns the offset vertices and success status
-offset_poly_2d :: proc(
-  verts: [][3]f32,
-  offset: f32,
-) -> (
-  out_verts: [dynamic][3]f32,
-  ok: bool,
-) {
-  // Defines the limit at which a miter becomes a bevel
-  // Similar in behavior to https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/stroke-miterlimit
-  MITER_LIMIT :: 1.20
-  num_verts := len(verts)
-  if num_verts < 3 do return nil, false
-  // First pass: calculate how many vertices we'll need
-  estimated_verts := num_verts * 2 // Conservative estimate for beveling
-  out_verts = make([dynamic][3]f32, 0, estimated_verts)
-  for vert_index in 0 ..< num_verts {
-    // Grab three vertices of the polygon
-    vert_index_a := (vert_index + num_verts - 1) % num_verts
-    vert_index_b := vert_index
-    vert_index_c := (vert_index + 1) % num_verts
-    vert_a := verts[vert_index_a]
-    vert_b := verts[vert_index_b]
-    vert_c := verts[vert_index_c]
-    // From A to B on the x/z plane
-    prev_segment_dir: [3]f32
-    prev_segment_dir.x = vert_b.x - vert_a.x
-    prev_segment_dir.y = 0 // Squash onto x/z plane
-    prev_segment_dir.z = vert_b.z - vert_a.z
-    safe_normalize(&prev_segment_dir)
-    // From B to C on the x/z plane
-    curr_segment_dir: [3]f32
-    curr_segment_dir.x = vert_c.x - vert_b.x
-    curr_segment_dir.y = 0 // Squash onto x/z plane
-    curr_segment_dir.z = vert_c.z - vert_b.z
-    safe_normalize(&curr_segment_dir)
-    // The y component of the cross product of the two normalized segment directions
-    // The X and Z components of the cross product are both zero because the two
-    // segment direction vectors fall within the x/z plane
-    cross := linalg.cross(curr_segment_dir.xz, prev_segment_dir.xz)
-    // CCW perpendicular vector to AB. The segment normal
-    prev_segment_norm_x := -prev_segment_dir.z
-    prev_segment_norm_z := prev_segment_dir.x
-    // CCW perpendicular vector to BC. The segment normal
-    curr_segment_norm_x := -curr_segment_dir.z
-    curr_segment_norm_z := curr_segment_dir.x
-    // Average the two segment normals to get the proportional miter offset for B
-    // This isn't normalized because it's defining the distance and direction the corner will need to be
-    // adjusted proportionally to the edge offsets to properly miter the adjoining edges
-    corner_miter_x := (prev_segment_norm_x + curr_segment_norm_x) * 0.5
-    corner_miter_z := (prev_segment_norm_z + curr_segment_norm_z) * 0.5
-    corner_miter_sq_mag :=
-      corner_miter_x * corner_miter_x + corner_miter_z * corner_miter_z
-    // If the magnitude of the segment normal average is less than about .69444,
-    // the corner is an acute enough angle that the result should be beveled
-    bevel := corner_miter_sq_mag * MITER_LIMIT * MITER_LIMIT < 1.0
-    // Scale the corner miter so it's proportional to how much the corner should be offset compared to the edges
-    if corner_miter_sq_mag > math.F32_EPSILON {
-      scale := 1.0 / corner_miter_sq_mag
-      corner_miter_x *= scale
-      corner_miter_z *= scale
-    }
-    if bevel && cross < 0.0 {   // If the corner is convex and an acute enough angle, generate a bevel
-      // Generate two bevel vertices at distances from B proportional to the angle between the two segments
-      // Move each bevel vertex out proportional to the given offset
-      d :=
-        (1.0 -
-          (prev_segment_dir.x * curr_segment_dir.x +
-              prev_segment_dir.z * curr_segment_dir.z)) *
-        0.5
-      append(
-        &out_verts,
-        [3]f32 {
-          vert_b.x + (-prev_segment_norm_x + prev_segment_dir.x * d) * offset,
-          vert_b.y,
-          vert_b.z + (-prev_segment_norm_z + prev_segment_dir.z * d) * offset,
-        },
-      )
-      append(
-        &out_verts,
-        [3]f32 {
-          vert_b.x + (-curr_segment_norm_x - curr_segment_dir.x * d) * offset,
-          vert_b.y,
-          vert_b.z + (-curr_segment_norm_z - curr_segment_dir.z * d) * offset,
-        },
-      )
-    } else {
-      // Move B along the miter direction by the specified offset
-      append(
-        &out_verts,
-        [3]f32 {
-          vert_b.x - corner_miter_x * offset,
-          vert_b.y,
-          vert_b.z - corner_miter_z * offset,
-        },
-      )
-    }
-  }
-  // Allocate final output with the exact size needed
-  if len(out_verts) == 0 {
-    delete(out_verts)
-    return nil, false
-  }
-  return out_verts, true
-}
-
-// Calculate signed area of 2D contour (positive = counter-clockwise, negative = clockwise)
-calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
-  if len(verts) < 3 do return 0 // Need at least 3 vertices
-  nverts := len(verts)
-  area: i32 = 0
-  j := nverts - 1
-  for i in 0 ..< nverts {
-    vi := verts[i]
-    vj := verts[j]
-    area += vi.x * vj.z - vj.x * vi.z
-    j = i
-  }
-  return (area + 1) / 2 // Round and return signed area
 }

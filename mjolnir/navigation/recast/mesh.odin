@@ -1,6 +1,5 @@
 package recast
 
-import "../../geometry"
 import "core:log"
 import "core:math/linalg"
 import "core:slice"
@@ -25,13 +24,13 @@ Poly_Mesh :: struct {
 create_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32) -> ^Poly_Mesh {
   pmesh := new(Poly_Mesh)
   if !build_poly_mesh(cset, nvp, pmesh) {
-    free_poly_mesh(pmesh)
+    destroy_poly_mesh(pmesh)
     return nil
   }
   return pmesh
 }
 
-free_poly_mesh :: proc(pmesh: ^Poly_Mesh) {
+destroy_poly_mesh :: proc(pmesh: ^Poly_Mesh) {
   if pmesh == nil do return
   delete(pmesh.verts)
   delete(pmesh.polys)
@@ -273,7 +272,7 @@ diagonalie :: proc "contextless" (
        vc.xz == vb2.xz {
       continue
     }
-    if geometry.intersect(va.xz, vc.xz, vb1.xz, vb2.xz) {
+    if intersect(va.xz, vc.xz, vb1.xz, vb2.xz) {
       return false
     }
   }
@@ -295,7 +294,7 @@ in_cone_indexed :: proc "contextless" (
   va1 := verts[a1_idx]
   va2 := verts[a2_idx]
   vb := verts[b_idx]
-  return geometry.in_cone(va0.xz, va1.xz, va2.xz, vb.xz)
+  return in_cone(va0.xz, va1.xz, va2.xz, vb.xz)
 }
 
 // Check if diagonal from a to b is valid
@@ -335,7 +334,7 @@ diagonalie_loose :: proc "contextless" (
        vc.xz == vb2.xz {
       continue
     }
-    if geometry.intersect_prop(va.xz, vc.xz, vb1.xz, vb2.xz) {
+    if intersect_prop(va.xz, vc.xz, vb1.xz, vb2.xz) {
       return false
     }
   }
@@ -356,15 +355,15 @@ in_cone_loose :: proc "contextless" (
   va1 := verts[a1_idx]
   va2 := verts[a2_idx]
   vb := verts[b_idx]
-  if geometry.left_on(va0.xz, va1.xz, va2.xz) {
+  if left_on(va0.xz, va1.xz, va2.xz) {
     return(
-      geometry.left_on(va1.xz, vb.xz, va0.xz) &&
-      geometry.left_on(vb.xz, va1.xz, va2.xz) \
+      left_on(va1.xz, vb.xz, va0.xz) &&
+      left_on(vb.xz, va1.xz, va2.xz) \
     )
   } else {
     return(
-      !(geometry.left_on(va1.xz, vb.xz, va2.xz) &&
-        geometry.left_on(vb.xz, va1.xz, va0.xz)) \
+      !(left_on(va1.xz, vb.xz, va2.xz) &&
+        left_on(vb.xz, va1.xz, va0.xz)) \
     )
   }
 }

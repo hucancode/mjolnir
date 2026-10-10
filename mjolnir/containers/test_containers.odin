@@ -12,7 +12,7 @@ Test_Item :: struct {
 test_pool_alloc_and_get :: proc(t: ^testing.T) {
   pool: Pool(Test_Item)
   init(&pool)
-  defer destroy(pool, proc(item: ^Test_Item) {})
+  defer destroy(&pool, proc(item: ^Test_Item) {})
 
   // Allocate first item
   h1, item1, ok1 := alloc(&pool, Handle)
@@ -35,7 +35,7 @@ test_pool_alloc_and_get :: proc(t: ^testing.T) {
 test_pool_free_and_reuse :: proc(t: ^testing.T) {
   pool: Pool(Test_Item)
   init(&pool)
-  defer destroy(pool, proc(item: ^Test_Item) {})
+  defer destroy(&pool, proc(item: ^Test_Item) {})
 
   // Allocate and free
   h1, item1, _ := alloc(&pool, Handle)
@@ -73,7 +73,7 @@ test_pool_free_and_reuse :: proc(t: ^testing.T) {
 test_pool_multiple_allocs :: proc(t: ^testing.T) {
   pool: Pool(Test_Item)
   init(&pool)
-  defer destroy(pool, proc(item: ^Test_Item) {})
+  defer destroy(&pool, proc(item: ^Test_Item) {})
 
   handles: [10]Handle
   for i in 0 ..< 10 {
@@ -95,7 +95,7 @@ test_pool_multiple_allocs :: proc(t: ^testing.T) {
 test_pool_capacity_limit :: proc(t: ^testing.T) {
   pool: Pool(Test_Item)
   init(&pool, capacity = 5)
-  defer destroy(pool, proc(item: ^Test_Item) {})
+  defer destroy(&pool, proc(item: ^Test_Item) {})
 
   // Allocate up to capacity
   for i in 0 ..< 5 {
@@ -116,7 +116,7 @@ test_pool_capacity_limit :: proc(t: ^testing.T) {
 test_pool_capacity_limit_with_reuse :: proc(t: ^testing.T) {
   pool: Pool(Test_Item)
   init(&pool, capacity = 3)
-  defer destroy(pool, proc(item: ^Test_Item) {})
+  defer destroy(&pool, proc(item: ^Test_Item) {})
 
   h1, _, ok1 := alloc(&pool, Handle)
   testing.expect(t, ok1, "First alloc should succeed")
@@ -143,7 +143,7 @@ test_pool_capacity_limit_with_reuse :: proc(t: ^testing.T) {
 test_pool_is_valid :: proc(t: ^testing.T) {
   pool: Pool(Test_Item)
   init(&pool)
-  defer destroy(pool, proc(item: ^Test_Item) {})
+  defer destroy(&pool, proc(item: ^Test_Item) {})
 
   h1, _, _ := alloc(&pool, Handle)
   testing.expect(t, is_valid(pool, h1), "New handle should be valid")
@@ -160,7 +160,7 @@ test_pool_is_valid :: proc(t: ^testing.T) {
 test_pool_count :: proc(t: ^testing.T) {
   pool: Pool(Test_Item)
   init(&pool)
-  defer destroy(pool, proc(item: ^Test_Item) {})
+  defer destroy(&pool, proc(item: ^Test_Item) {})
 
   testing.expect(t, count(pool) == 0, "Count should be 0 initially")
 
@@ -181,7 +181,7 @@ test_pool_count :: proc(t: ^testing.T) {
 test_pool_generation_wraparound :: proc(t: ^testing.T) {
   pool: Pool(Test_Item)
   init(&pool)
-  defer destroy(pool, proc(item: ^Test_Item) {})
+  defer destroy(&pool, proc(item: ^Test_Item) {})
   h, _, _ := alloc(&pool, Handle)
   // Manually set generation to max - 1 to test wraparound
   pool.entries[h.index].generation = 0xFFFFFFFF

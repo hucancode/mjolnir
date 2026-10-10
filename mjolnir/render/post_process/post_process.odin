@@ -1,8 +1,7 @@
 package post_process
 
-import cont "../../containers"
-import "../../gpu"
-import "../shared"
+import "../bindless"
+import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -185,7 +184,7 @@ Renderer :: struct {
   // 3 ping-pong buffers: bloom V pass needs to read H output AND pre-bloom
   // scene simultaneously while writing to a third slot. With only 2 buffers
   // V would have to write to one of its inputs when bloom isn't the last pass.
-  images:           [3]gpu.Texture2DHandle,
+  images:           [3]bindless.Texture2DHandle,
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -345,14 +344,10 @@ clear_effects :: proc(self: ^Renderer) {
   clear(&self.effect_stack)
 }
 
-effect_clear :: proc(self: ^Renderer) {
-  clear(&self.effect_stack)
-}
-
 setup :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
   extent: vk.Extent2D,
   format: vk.Format,
 ) -> vk.Result {
@@ -362,7 +357,7 @@ setup :: proc(
 teardown :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
 ) {
   destroy_images(self, gctx, texture_manager)
 }
@@ -451,7 +446,7 @@ init :: proc(
     shader_stages[i] = gpu.create_vert_frag_stages(
       vert_module,
       frag_modules[i],
-      &shared.SHADER_SPEC_CONSTANTS,
+      &bindless.SHADER_SPEC_CONSTANTS,
     )
     hdr_infos[i] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -490,15 +485,16 @@ init :: proc(
   return .SUCCESS
 }
 
+@(private)
 create_images :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
   extent: vk.Extent2D,
   format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
-    handle = gpu.allocate_texture_2d(
+    handle = bindless.allocate_texture_2d(
       texture_manager,
       gctx,
       extent,
@@ -516,20 +512,21 @@ create_images :: proc(
   return .SUCCESS
 }
 
+@(private)
 destroy_images :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
 ) {
   for handle in self.images {
-    gpu.free_texture_2d(texture_manager, gctx, handle)
+    bindless.free_texture_2d(texture_manager, gctx, handle)
   }
 }
 
 recreate_images :: proc(
   gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
   extent: vk.Extent2D,
   format: vk.Format,
 ) -> vk.Result {
@@ -561,13 +558,8 @@ record :: proc(
   extent: vk.Extent2D,
   output_view: vk.ImageView,
   final_image_idx: u32,
-  position_texture_idx: u32,
-  normal_texture_idx: u32,
-  albedo_texture_idx: u32,
-  metallic_texture_idx: u32,
-  emissive_texture_idx: u32,
-  depth_texture_idx: u32,
-  texture_manager: ^gpu.TextureManager,
+  gbuffer: bindless.GBuffer,
+  texture_manager: ^bindless.TextureManager,
 ) {
   if len(self.effect_stack) == 0 {
     // if no postprocess effect, just copy the input to output
@@ -607,7 +599,7 @@ record :: proc(
     }
     dst_view := output_view
     if !is_last {
-      dst_texture := gpu.get_texture_2d(
+      dst_texture := bindless.get_texture_2d(
         texture_manager,
         self.images[dst_slot],
       )
@@ -628,7 +620,7 @@ record :: proc(
       dst_view = dst_texture.view
     }
     if current_input_slot >= 0 {
-      src_texture := gpu.get_texture_2d(
+      src_texture := bindless.get_texture_2d(
         texture_manager,
         self.images[current_input_slot],
       )
@@ -663,15 +655,15 @@ record :: proc(
       texture_manager.descriptor_set,
     )
     base: BasePushConstant
-    base.position_texture_index = position_texture_idx
-    base.normal_texture_index = normal_texture_idx
-    base.albedo_texture_index = albedo_texture_idx
-    base.metallic_texture_index = metallic_texture_idx
-    base.emissive_texture_index = emissive_texture_idx
-    base.depth_texture_index = depth_texture_idx
+    base.position_texture_index = gbuffer.position
+    base.normal_texture_index = gbuffer.normal
+    base.albedo_texture_index = gbuffer.albedo
+    base.metallic_texture_index = gbuffer.metallic_roughness
+    base.emissive_texture_index = gbuffer.emissive
+    base.depth_texture_index = gbuffer.depth
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
-    switch &e in effect {
+    switch e in effect {
     case BlurEffect:
       push_constant := BlurPushConstant {
         radius         = e.radius,
@@ -825,4 +817,3 @@ record :: proc(
     }
   }
 }
-

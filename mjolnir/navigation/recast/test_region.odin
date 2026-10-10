@@ -1,18 +1,14 @@
 package recast
 
-import "core:fmt"
-import "core:log"
 import "core:slice"
-import "core:strings"
 import "core:testing"
-import "core:time"
 import "core:math"
 
 @(test)
 test_erode_walkable_area :: proc(t: ^testing.T) {
   // Create a heightfield with a 10x10 floor
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Add a floor
   for x in 0 ..< 10 {
@@ -30,7 +26,7 @@ test_erode_walkable_area :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Building compact heightfield should succeed")
   // Erode with radius 1
   ok := erode_walkable_area(1, chf)
@@ -60,7 +56,7 @@ test_erode_walkable_area :: proc(t: ^testing.T) {
 @(test)
 test_build_distance_field :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Add a floor with a hole in the middle
   for x in 0 ..< 10 {
@@ -82,7 +78,7 @@ test_build_distance_field :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Building compact heightfield should succeed")
   // Build distance field
   ok := build_distance_field(chf)
@@ -223,7 +219,7 @@ test_build_distance_field :: proc(t: ^testing.T) {
 @(test)
 test_build_regions_watershed :: proc(t: ^testing.T) {
   hf := create_heightfield(20, 20, {0, 0, 0}, {20, 20, 20}, 1.0, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Create two separate platforms
   // Platform 1: x[0-8], z[0-8]
@@ -257,7 +253,7 @@ test_build_regions_watershed :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Building compact heightfield should succeed")
   // Build distance field
   ok := build_distance_field(chf)
@@ -295,7 +291,7 @@ test_build_regions_watershed :: proc(t: ^testing.T) {
 test_region_merging :: proc(t: ^testing.T) {
   // Create a heightfield with small adjacent areas
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Create a floor with varying heights to force region splitting
   for x in 0 ..< 10 {
@@ -317,7 +313,7 @@ test_region_merging :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 4, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Building compact heightfield should succeed")
   ok := build_distance_field(chf)
   testing.expect(t, hf != nil, "Building distance field should succeed")
@@ -343,7 +339,7 @@ test_region_merging :: proc(t: ^testing.T) {
 @(test)
 test_border_regions :: proc(t: ^testing.T) {
   hf := create_heightfield(14, 14, {-2, -2, -2}, {12, 12, 12}, 1.0, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   hf.border_size = 2
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Add floor including border area
@@ -363,7 +359,7 @@ test_border_regions :: proc(t: ^testing.T) {
   }
   // Build compact heightfield
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Building compact heightfield should succeed")
   // Build distance field
   ok := build_distance_field(chf)
@@ -404,7 +400,7 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
   // Create two separate 3x3 platforms with a gap between them
   // This should result in exactly 2 regions with no cross-connections
   hf := create_heightfield(8, 4, {0, 0, 0}, {8, 3, 4}, 1.0, 0.2)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Failed to create heightfield")
   // Platform 1: (0,0) to (2,2) - 3x3 = 9 cells
   for x in 0 ..< 3 {
@@ -439,7 +435,7 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
   }
   // Build compact heightfield
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   ok := build_distance_field(chf)
   testing.expect(t, ok, "Failed to build distance field")
@@ -576,7 +572,7 @@ test_region_generation :: proc(t: ^testing.T) {
     cfg.cs,
     cfg.ch,
   )
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Mark and rasterize
   mark_walkable_triangles(cfg.walkable_slope, vertices, indices, areas)
@@ -602,7 +598,7 @@ test_region_generation :: proc(t: ^testing.T) {
     cfg.walkable_climb,
     hf,
   )
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Compact heightfield creation should succeed")
   // Erode and build distance field
   ok = erode_walkable_area(cfg.walkable_radius, chf)

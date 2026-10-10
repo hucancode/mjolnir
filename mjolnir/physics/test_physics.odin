@@ -1,12 +1,9 @@
 package physics
 
-import "../geometry"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:slice"
 import "core:testing"
-import "core:time"
 
 @(test)
 test_physics_world_gravity_application :: proc(t: ^testing.T) {

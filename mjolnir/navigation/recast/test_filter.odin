@@ -2,13 +2,12 @@ package recast
 
 import "core:log"
 import "core:testing"
-import "core:time"
 
 @(test)
 test_filter_low_hanging_obstacles_basic :: proc(t: ^testing.T) {
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add walkable span at ground level
   add_span(hf, 2, 2, 0, 2, RC_WALKABLE_AREA, 1)
   // testing.expect(t, ok, "Failed to add walkable span")
@@ -36,7 +35,7 @@ test_filter_low_hanging_obstacles_basic :: proc(t: ^testing.T) {
 test_filter_low_hanging_obstacles_too_high :: proc(t: ^testing.T) {
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add walkable span at ground level
   add_span(hf, 2, 2, 0, 2, RC_WALKABLE_AREA, 1)
   // testing.expect(t, ok, "Failed to add walkable span")
@@ -63,7 +62,7 @@ test_filter_low_hanging_obstacles_too_high :: proc(t: ^testing.T) {
 test_filter_low_hanging_obstacles_multiple_spans :: proc(t: ^testing.T) {
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create complex span column: walkable, obstacle (low), walkable, obstacle (high)
   ok := add_span(hf, 2, 2, 0, 2, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Failed to add ground walkable span")
@@ -112,7 +111,7 @@ test_filter_ledge_spans_basic :: proc(t: ^testing.T) {
   // Create heightfield and compact heightfield for ledge filtering
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create a ledge scenario: walkable area with drop-off
   // Add walkable spans in center and some neighbors, but not all
   ok := add_span(hf, 2, 2, 0, 2, RC_WALKABLE_AREA, 1) // Center
@@ -124,7 +123,7 @@ test_filter_ledge_spans_basic :: proc(t: ^testing.T) {
   // Missing right (3,2) and top (2,3) neighbors - this creates a ledge
   // Build compact heightfield
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Apply ledge filter with walkable_height = 4 (must be able to stand)
   filter_ledge_spans(4, 2, hf)
@@ -142,7 +141,7 @@ test_filter_ledge_spans_basic :: proc(t: ^testing.T) {
 test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create a safe area with all neighbors present
   for x in 1 ..= 3 {
     for z in 1 ..= 3 {
@@ -151,7 +150,7 @@ test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Apply ledge filter
   filter_ledge_spans(4, 2, hf)
@@ -172,7 +171,7 @@ test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
 test_filter_walkable_low_height_spans_basic :: proc(t: ^testing.T) {
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add walkable span with low ceiling (insufficient height clearance)
   add_span(hf, 2, 2, 0, 2, RC_WALKABLE_AREA, 1)
   // testing.expect(t, ok, "Failed to add ground span")
@@ -201,7 +200,7 @@ test_filter_walkable_low_height_spans_sufficient_height :: proc(
 ) {
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add walkable span with sufficient ceiling height
   add_span(hf, 2, 2, 0, 2, RC_WALKABLE_AREA, 1)
   // testing.expect(t, ok, "Failed to add ground span")
@@ -227,7 +226,7 @@ test_filter_walkable_low_height_spans_sufficient_height :: proc(
 test_filter_walkable_low_height_no_ceiling :: proc(t: ^testing.T) {
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add walkable span with no ceiling (open sky)
   add_span(hf, 2, 2, 0, 2, RC_WALKABLE_AREA, 1)
   // testing.expect(t, ok, "Failed to add ground span")
@@ -251,7 +250,7 @@ test_filter_interactions_combined :: proc(t: ^testing.T) {
   // Test applying multiple filters in sequence to ensure they work together
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create complex scenario with multiple filter conditions
   // Ground level walkable area
   for x in 2 ..= 7 {
@@ -271,7 +270,7 @@ test_filter_interactions_combined :: proc(t: ^testing.T) {
   filter_walkable_low_height_spans(4, hf)
   // Build compact heightfield for ledge filtering
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   filter_ledge_spans(4, 2, hf)
   // Verify that combined filters worked correctly
@@ -713,7 +712,7 @@ test_walkable_low_height_filter :: proc(t: ^testing.T) {
 @(test)
 test_filter_operations :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield should be created")
   // Create a test scenario with various spans
   // Column with multiple spans at different heights

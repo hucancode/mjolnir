@@ -1,8 +1,6 @@
 package geometry
 
 import "core:log"
-import "core:math"
-import "core:math/linalg"
 import "core:slice"
 import "core:testing"
 import "core:time"

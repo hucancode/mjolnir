@@ -1,9 +1,7 @@
 package geometry_pass
 
-import cont "../../containers"
-import "../../geometry"
-import "../../gpu"
-import "../shared"
+import "../bindless"
+import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -22,30 +20,16 @@ Renderer :: struct {
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  camera_set_layout: vk.DescriptorSetLayout,
-  textures_set_layout: vk.DescriptorSetLayout,
-  bone_set_layout: vk.DescriptorSetLayout,
-  material_set_layout: vk.DescriptorSetLayout,
-  node_data_set_layout: vk.DescriptorSetLayout,
-  mesh_data_set_layout: vk.DescriptorSetLayout,
-  vertex_skinning_set_layout: vk.DescriptorSetLayout,
+  scene: bindless.SceneBindings,
 ) -> (
   ret: vk.Result,
 ) {
   depth_format: vk.Format = .D32_SFLOAT
-  self.pipeline_layout = gpu.create_pipeline_layout(
+  self.pipeline_layout = bindless.create_scene_pipeline_layout(
     gctx,
-    vk.PushConstantRange {
-      stageFlags = {.VERTEX, .FRAGMENT},
-      size = size_of(u32),
-    },
-    camera_set_layout,
-    textures_set_layout,
-    bone_set_layout,
-    material_set_layout,
-    node_data_set_layout,
-    mesh_data_set_layout,
-    vertex_skinning_set_layout,
+    scene,
+    bindless.MESH_SETS,
+    {stageFlags = {.VERTEX, .FRAGMENT}, size = size_of(PushConstant)},
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
@@ -67,15 +51,15 @@ init :: proc(
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    vertexBindingDescriptionCount   = len(bindless.VERTEX_BINDING_DESCRIPTION),
     pVertexBindingDescriptions      = raw_data(
-      geometry.VERTEX_BINDING_DESCRIPTION[:],
+      bindless.VERTEX_BINDING_DESCRIPTION[:],
     ),
     vertexAttributeDescriptionCount = len(
-      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+      bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS,
     ),
     pVertexAttributeDescriptions    = raw_data(
-      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+      bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
   color_blend_attachments := [?]vk.PipelineColorBlendAttachmentState {
@@ -106,7 +90,7 @@ init :: proc(
   shader_stages := gpu.create_vert_frag_stages(
     vert_module,
     frag_module,
-    &shared.SHADER_SPEC_CONSTANTS,
+    &bindless.SHADER_SPEC_CONSTANTS,
   )
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -135,15 +119,6 @@ init :: proc(
   return .SUCCESS
 }
 
-// setup is a no-op for geometry
-setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
-  return .SUCCESS
-}
-
-// teardown is no-op for geometry.
-teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-}
-
 // record performs the full G-buffer pass: barriers + begin_rendering + draw
 // + end_rendering + barriers. Owns its own begin/end so the orchestrator does
 // not coordinate them.
@@ -151,23 +126,15 @@ record :: proc(
   self: ^Renderer,
   camera_handle: u32,
   command_buffer: vk.CommandBuffer,
-  texture_manager: ^gpu.TextureManager,
-  position_handle: gpu.Texture2DHandle,
-  normal_handle: gpu.Texture2DHandle,
-  albedo_handle: gpu.Texture2DHandle,
-  metallic_roughness_handle: gpu.Texture2DHandle,
-  emissive_handle: gpu.Texture2DHandle,
-  final_image_handle: gpu.Texture2DHandle,
-  depth_handle: gpu.Texture2DHandle,
-  cameras_descriptor_set: vk.DescriptorSet,
-  textures_descriptor_set: vk.DescriptorSet,
-  bone_descriptor_set: vk.DescriptorSet,
-  material_descriptor_set: vk.DescriptorSet,
-  node_data_descriptor_set: vk.DescriptorSet,
-  mesh_data_descriptor_set: vk.DescriptorSet,
-  vertex_skinning_descriptor_set: vk.DescriptorSet,
-  vertex_buffer: vk.Buffer,
-  index_buffer: vk.Buffer,
+  texture_manager: ^bindless.TextureManager,
+  position_handle: bindless.Texture2DHandle,
+  normal_handle: bindless.Texture2DHandle,
+  albedo_handle: bindless.Texture2DHandle,
+  metallic_roughness_handle: bindless.Texture2DHandle,
+  emissive_handle: bindless.Texture2DHandle,
+  final_image_handle: bindless.Texture2DHandle,
+  depth_handle: bindless.Texture2DHandle,
+  scene: bindless.SceneBindings,
   draw_buffer: vk.Buffer,
   count_buffer: vk.Buffer,
   max_draws: u32,
@@ -175,16 +142,16 @@ record :: proc(
   if draw_buffer == 0 || count_buffer == 0 {
     return
   }
-  position_texture := gpu.get_texture_2d(texture_manager, position_handle)
-  normal_texture := gpu.get_texture_2d(texture_manager, normal_handle)
-  albedo_texture := gpu.get_texture_2d(texture_manager, albedo_handle)
-  metallic_roughness_texture := gpu.get_texture_2d(
+  position_texture := bindless.get_texture_2d(texture_manager, position_handle)
+  normal_texture := bindless.get_texture_2d(texture_manager, normal_handle)
+  albedo_texture := bindless.get_texture_2d(texture_manager, albedo_handle)
+  metallic_roughness_texture := bindless.get_texture_2d(
     texture_manager,
     metallic_roughness_handle,
   )
-  emissive_texture := gpu.get_texture_2d(texture_manager, emissive_handle)
-  final_texture := gpu.get_texture_2d(texture_manager, final_image_handle)
-  depth_texture := gpu.get_texture_2d(texture_manager, depth_handle)
+  emissive_texture := bindless.get_texture_2d(texture_manager, emissive_handle)
+  final_texture := bindless.get_texture_2d(texture_manager, final_image_handle)
+  depth_texture := bindless.get_texture_2d(texture_manager, depth_handle)
   // Discard previous contents of the G-buffer + final image + depth.
   for img in ([?]vk.Image {
        position_texture.image,
@@ -220,17 +187,12 @@ record :: proc(
     gpu.create_color_attachment(emissive_texture),
   )
   gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)
-  gpu.bind_graphics_pipeline(
+  bindless.bind_scene(
     command_buffer,
     self.pipeline,
     self.pipeline_layout,
-    cameras_descriptor_set,
-    textures_descriptor_set,
-    bone_descriptor_set,
-    material_descriptor_set,
-    node_data_descriptor_set,
-    mesh_data_descriptor_set,
-    vertex_skinning_descriptor_set,
+    scene,
+    bindless.MESH_SETS,
   )
   push_constants := PushConstant {
     camera_index = camera_handle,
@@ -243,7 +205,6 @@ record :: proc(
     size_of(PushConstant),
     &push_constants,
   )
-  gpu.bind_vertex_index_buffers(command_buffer, vertex_buffer, index_buffer)
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     draw_buffer,

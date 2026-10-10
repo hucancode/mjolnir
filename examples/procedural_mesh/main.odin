@@ -1,7 +1,8 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/geometry"
+import "../../mjolnir/render/mesh"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:math"
 import "core:math/linalg"
@@ -26,21 +27,21 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 6, 14}, {0, 1, 0})
-  world.spawn_light_directional(&engine.world, position = {6, 12, 6}, color = {1, 0.97, 0.93, 5.0}, radius = 20.0)
-  world.spawn_ground(&engine.world, 12.0, position = {0, -1, 0})
+  render.main_camera_look_at(&engine.render, {0, 6, 14}, {0, 1, 0})
+  mjolnir.spawn(engine, {6, 12, 6}, render.directional_light_attachment(color = {1, 0.97, 0.93, 5.0}, radius = 20.0))
+  mjolnir.spawn_ground(engine, 12.0, position = {0, -1, 0})
 
-  wave_mat   := world.material_pbr(&engine.world, {0.3, 0.55, 0.85, 1}, metallic = 0.2, roughness = 0.5)
-  knot_mat   := world.material_pbr(&engine.world, {0.9, 0.5,  0.2,  1}, metallic = 0.8, roughness = 0.3)
-  spiral_mat := world.material_pbr(&engine.world, {0.4, 0.85, 0.4,  1}, metallic = 0.0, roughness = 0.7)
+  wave_mat   := render.material_pbr(&engine.render, {0.3, 0.55, 0.85, 1}, metallic = 0.2, roughness = 0.5)
+  knot_mat   := render.material_pbr(&engine.render, {0.9, 0.5,  0.2,  1}, metallic = 0.8, roughness = 0.3)
+  spiral_mat := render.material_pbr(&engine.render, {0.4, 0.85, 0.4,  1}, metallic = 0.0, roughness = 0.7)
 
-  wave_node   = world.spawn_mesh(&engine.world, world.create_mesh(&engine.world, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
-  knot_node   = world.spawn_mesh(&engine.world, world.create_mesh(&engine.world, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
-  spiral_node = world.spawn_mesh(&engine.world, world.create_mesh(&engine.world, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
+  wave_node   = mjolnir.spawn_mesh(engine, render.create_mesh(&engine.render, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
+  knot_node   = mjolnir.spawn_mesh(engine, render.create_mesh(&engine.render, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
+  spiral_node = mjolnir.spawn_mesh(engine, render.create_mesh(&engine.render, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
 }
 
-build_wave :: proc(n: int, size: f32, amp: f32) -> geometry.Geometry {
-  vertices := make([]geometry.Vertex, n * n)
+build_wave :: proc(n: int, size: f32, amp: f32) -> mesh.Geometry {
+  vertices := make([]mesh.Vertex, n * n)
   indices := make([]u32, (n - 1) * (n - 1) * 6)
   step := size / f32(n - 1)
   for j in 0 ..< n do for i in 0 ..< n {
@@ -49,7 +50,7 @@ build_wave :: proc(n: int, size: f32, amp: f32) -> geometry.Geometry {
     y := math.sin(x * 0.9) * math.cos(z * 0.9) * amp
     dy_dx := 0.9 * math.cos(x * 0.9) * math.cos(z * 0.9) * amp
     dy_dz := -0.9 * math.sin(x * 0.9) * math.sin(z * 0.9) * amp
-    vertices[j * n + i] = geometry.Vertex{
+    vertices[j * n + i] = mesh.Vertex{
       position = {x, y, z},
       normal   = linalg.normalize([3]f32{-dy_dx, 1.0, -dy_dz}),
       color    = {1, 1, 1, 1},
@@ -65,11 +66,11 @@ build_wave :: proc(n: int, size: f32, amp: f32) -> geometry.Geometry {
     indices[idx + 3] = b; indices[idx + 4] = c; indices[idx + 5] = d
     idx += 6
   }
-  return geometry.Geometry{vertices = vertices, indices = indices, aabb = geometry.aabb_from_vertices(vertices)}
+  return mesh.Geometry{vertices = vertices, indices = indices, aabb = mesh.aabb_from_vertices(vertices)}
 }
 
-build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -> geometry.Geometry {
-  vertices := make([]geometry.Vertex, segments_u * segments_v)
+build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -> mesh.Geometry {
+  vertices := make([]mesh.Vertex, segments_u * segments_v)
   indices := make([]u32, segments_u * segments_v * 6)
   for i in 0 ..< segments_u {
     u := f32(i) / f32(segments_u) * 2.0 * math.PI
@@ -84,7 +85,7 @@ build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -
       v := f32(j) / f32(segments_v) * 2.0 * math.PI
       offset := nrm * (math.cos(v) * tube) + bi * (math.sin(v) * tube)
       pos := center * radius + offset
-      vertices[i * segments_v + j] = geometry.Vertex{
+      vertices[i * segments_v + j] = mesh.Vertex{
         position = pos, normal = linalg.normalize(offset),
         color = {1, 1, 1, 1}, uv = {f32(i) / f32(segments_u), f32(j) / f32(segments_v)},
         tangent = {t.x, t.y, t.z, 1},
@@ -100,11 +101,11 @@ build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -
     indices[idx + 3] = b; indices[idx + 4] = d; indices[idx + 5] = c
     idx += 6
   }
-  return geometry.Geometry{vertices = vertices, indices = indices, aabb = geometry.aabb_from_vertices(vertices)}
+  return mesh.Geometry{vertices = vertices, indices = indices, aabb = mesh.aabb_from_vertices(vertices)}
 }
 
-build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height, turns: f32) -> geometry.Geometry {
-  vertices := make([]geometry.Vertex, segments_u * segments_v)
+build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height, turns: f32) -> mesh.Geometry {
+  vertices := make([]mesh.Vertex, segments_u * segments_v)
   indices := make([]u32, (segments_u - 1) * segments_v * 6)
   for i in 0 ..< segments_u {
     t := f32(i) / f32(segments_u - 1)
@@ -117,7 +118,7 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
       v := f32(j) / f32(segments_v) * 2.0 * math.PI
       offset := nrm * (math.cos(v) * tube) + side * (math.sin(v) * tube)
       pos := center + offset
-      vertices[i * segments_v + j] = geometry.Vertex{
+      vertices[i * segments_v + j] = mesh.Vertex{
         position = pos, normal = linalg.normalize(offset),
         color = {1, 1, 1, 1}, uv = {t, f32(j) / f32(segments_v)},
         tangent = {tangent.x, tangent.y, tangent.z, 1},
@@ -133,7 +134,7 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
     indices[idx + 3] = b; indices[idx + 4] = d; indices[idx + 5] = c
     idx += 6
   }
-  return geometry.Geometry{vertices = vertices, indices = indices, aabb = geometry.aabb_from_vertices(vertices)}
+  return mesh.Geometry{vertices = vertices, indices = indices, aabb = mesh.aabb_from_vertices(vertices)}
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -144,7 +145,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
 }
 
 set_spin :: proc(engine: ^mjolnir.Engine, h: world.NodeHandle, visible: bool, angle: f32, pos: [3]f32) {
-  if n, ok := world.node(&engine.world, h); ok do n.visible = visible
+  world.set_visible(&engine.world, h, visible)
   world.translate(&engine.world, h, pos)
   world.rotate(&engine.world, h, angle)
 }

@@ -2,6 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/animation"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -19,7 +20,7 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 10, 0}, {0, 0, 0})
+  render.main_camera_look_at(&engine.render, {0, 10, 0}, {0, 0, 0})
 
   CONTROL_POINTS :: 10
   spline = animation.spline_create([3]f32, CONTROL_POINTS)
@@ -32,20 +33,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if !animation.spline_validate(spline) do log.error("Spline validation failed!")
   animation.spline_build_arc_table(&spline, 200)
 
-  mats := [?]world.MaterialHandle{
-    world.get_builtin_material(&engine.world, .RED), world.get_builtin_material(&engine.world, .GREEN),
-    world.get_builtin_material(&engine.world, .BLUE), world.get_builtin_material(&engine.world, .YELLOW),
-    world.get_builtin_material(&engine.world, .CYAN), world.get_builtin_material(&engine.world, .MAGENTA),
-    world.get_builtin_material(&engine.world, .WHITE), world.get_builtin_material(&engine.world, .GRAY),
-    world.get_builtin_material(&engine.world, .BLACK),
+  mats := [?]render.MaterialHandle{
+    render.get_builtin_material(&engine.render, .RED), render.get_builtin_material(&engine.render, .GREEN),
+    render.get_builtin_material(&engine.render, .BLUE), render.get_builtin_material(&engine.render, .YELLOW),
+    render.get_builtin_material(&engine.render, .CYAN), render.get_builtin_material(&engine.render, .MAGENTA),
+    render.get_builtin_material(&engine.render, .WHITE), render.get_builtin_material(&engine.render, .GRAY),
+    render.get_builtin_material(&engine.render, .BLACK),
   }
-  cube := world.get_builtin_mesh(&engine.world, .CUBE)
+  cube := render.get_builtin_mesh(&engine.render, .CUBE)
   for i in 0 ..< CUBE_COUNT {
-    cubes[i] = world.spawn(&engine.world, {0, 0, 0}, world.MeshAttachment{handle = cube, material = mats[i % len(mats)]})
+    cubes[i] = mjolnir.spawn(engine, {0, 0, 0}, render.MeshAttachment{handle = cube, material = mats[i % len(mats)]})
     world.scale(&engine.world, cubes[i], 0.3)
   }
-  world.spawn_ground(&engine.world, 20.0, position = {0, -2, 0})
-  world.spawn_light_point(&engine.world, {0, 10, 0}, {1, 1, 1, 1}, 20.0, true)
+  mjolnir.spawn_ground(engine, 20.0, position = {0, -2, 0})
+  mjolnir.spawn(engine, {0, 10, 0}, render.point_light_attachment({1, 1, 1, 1}, 20.0, true))
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {

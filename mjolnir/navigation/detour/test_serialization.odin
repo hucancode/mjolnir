@@ -1,13 +1,10 @@
 package detour
 
 import "../recast"
-import "core:fmt"
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:os"
 import "core:testing"
-import "core:time"
 
 @(private = "file")
 create_navmesh :: proc(
@@ -143,8 +140,8 @@ test_navmesh_file_serialization :: proc(t: ^testing.T) {
   pmesh, dmesh, build_ok := build_test_mesh(vertices, indices, areas)
   testing.expect(t, build_ok, "Failed to build test mesh")
   defer {
-    recast.free_poly_mesh(pmesh)
-    recast.free_poly_mesh_detail(dmesh)
+    recast.destroy_poly_mesh(pmesh)
+    recast.destroy_poly_mesh_detail(dmesh)
   }
   nav_mesh, create_ok := create_navmesh(pmesh, dmesh, 2.0, 0.6, 0.9)
   testing.expect(t, create_ok, "Failed to create navigation mesh")
@@ -195,8 +192,8 @@ test_navmesh_data_serialization :: proc(t: ^testing.T) {
   pmesh, dmesh, build_ok := build_test_mesh(vertices, indices, areas)
   testing.expect(t, build_ok, "Failed to build test mesh")
   defer {
-    recast.free_poly_mesh(pmesh)
-    recast.free_poly_mesh_detail(dmesh)
+    recast.destroy_poly_mesh(pmesh)
+    recast.destroy_poly_mesh_detail(dmesh)
   }
   params := Create_Nav_Mesh_Data_Params {
     poly_mesh          = pmesh,
@@ -278,8 +275,8 @@ test_bake_and_save_workflow :: proc(t: ^testing.T) {
   pmesh, dmesh, build_ok := build_test_mesh(vertices, indices, areas)
   testing.expect(t, build_ok, "Failed to build test mesh")
   defer {
-    recast.free_poly_mesh(pmesh)
-    recast.free_poly_mesh_detail(dmesh)
+    recast.destroy_poly_mesh(pmesh)
+    recast.destroy_poly_mesh_detail(dmesh)
   }
   baked_file := "test_baked.navmesh"
   defer os.remove(baked_file)
@@ -360,7 +357,7 @@ build_test_mesh :: proc(
     cfg.ch,
   )
   if hf == nil do return nil, nil, false
-  defer recast.free_heightfield(hf)
+  defer recast.destroy_heightfield(hf)
   if !recast.rasterize_triangles(vertices, indices, areas, hf, cfg.walkable_climb) do return nil, nil, false
   recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
   recast.filter_ledge_spans(
@@ -375,7 +372,7 @@ build_test_mesh :: proc(
     hf,
   )
   if chf == nil do return nil, nil, false
-  defer recast.free_compact_heightfield(chf)
+  defer recast.destroy_compact_heightfield(chf)
   recast.erode_walkable_area(cfg.walkable_radius, chf)
   recast.build_distance_field(chf)
   recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
@@ -385,7 +382,7 @@ build_test_mesh :: proc(
     cfg.max_edge_len,
   )
   if cset == nil do return nil, nil, false
-  defer recast.free_contour_set(cset)
+  defer recast.destroy_contour_set(cset)
   pmesh := recast.create_poly_mesh(cset, cfg.max_verts_per_poly)
   if pmesh == nil do return nil, nil, false
   dmesh := recast.create_poly_mesh_detail(
@@ -395,7 +392,7 @@ build_test_mesh :: proc(
     cfg.detail_sample_max_error,
   )
   if dmesh == nil {
-    recast.free_poly_mesh(pmesh)
+    recast.destroy_poly_mesh(pmesh)
     return nil, nil, false
   }
   return pmesh, dmesh, true

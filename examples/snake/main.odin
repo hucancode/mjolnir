@@ -1,6 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
 import "../../mjolnir/ui"
 import "../../mjolnir/world"
 import "core:fmt"
@@ -8,7 +10,6 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
-import "vendor:glfw"
 
 GRID :: 15
 CELL :: 1.0
@@ -55,7 +56,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   wall_t :: 0.2
   wall_h :: 0.5
 
-  floor := world.spawn_primitive_mesh(&engine.world, .CUBE, .GRAY, {0, -0.5, 0})
+  floor := mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY, {0, -0.5, 0})
   world.scale_xyz(&engine.world, floor, half, 0.5, half)
 
   spawn_wall(engine, {0, wall_h, half + wall_t}, half + wall_t * 2, wall_h, wall_t)
@@ -63,17 +64,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
   spawn_wall(engine, {half + wall_t, wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
   spawn_wall(engine, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
 
-  world.main_camera_look_at(&engine.world, {0, 18, 13}, {0, 0, 0})
+  render.main_camera_look_at(&engine.render, {0, 18, 13}, {0, 0, 0})
 
-  spot := world.spawn_light_spot(&engine.world, {0, 10, 4}, {0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true)
+  spot := mjolnir.spawn(engine, {0, 10, 4}, render.spot_light_attachment({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true))
   world.rotate(&engine.world, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
 
   g.score_label, _ = ui.create_text2d(&engine.ui, position = {20, 20}, text = "Score: 0", font_size = 28, color = {255, 255, 255, 255})
   g.best_label, _  = ui.create_text2d(&engine.ui, position = {20, 60}, text = "Best: 0",  font_size = 24, color = {255, 220, 100, 255})
 
-  g.head_node = world.spawn_primitive_mesh(&engine.world, .CUBE, .YELLOW)
+  g.head_node = mjolnir.spawn_primitive_mesh(engine, .CUBE, .YELLOW)
   world.scale(&engine.world, g.head_node, SEGMENT_SCALE)
-  g.food_node = world.spawn_primitive_mesh(&engine.world, .SPHERE, .RED)
+  g.food_node = mjolnir.spawn_primitive_mesh(engine, .SPHERE, .RED)
   world.scale(&engine.world, g.food_node, FOOD_SCALE)
 
   reset_game(engine)
@@ -81,7 +82,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 spawn_wall :: proc(engine: ^mjolnir.Engine, pos: [3]f32, sx, sy, sz: f32) {
-  h := world.spawn_primitive_mesh(&engine.world, .CUBE, .WHITE, pos)
+  h := mjolnir.spawn_primitive_mesh(engine, .CUBE, .WHITE, pos)
   world.scale_xyz(&engine.world, h, sx, sy, sz)
 }
 
@@ -106,7 +107,7 @@ reset_game :: proc(engine: ^mjolnir.Engine) {
 }
 
 spawn_body_node :: proc(engine: ^mjolnir.Engine, c: Cell) -> world.NodeHandle {
-  h := world.spawn_primitive_mesh(&engine.world, .CUBE, .GREEN, cell_to_world(c, SEGMENT_Y))
+  h := mjolnir.spawn_primitive_mesh(engine, .CUBE, .GREEN, cell_to_world(c, SEGMENT_Y))
   world.scale(&engine.world, h, SEGMENT_SCALE)
   return h
 }
@@ -132,13 +133,13 @@ cell_to_world :: proc(c: Cell, y: f32) -> [3]f32 {
   return {x, y, z}
 }
 
-on_key :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
-  if action == glfw.RELEASE do return
-  switch key {
-  case glfw.KEY_W, glfw.KEY_UP:    if g.dir.y != 1  do g.pending_dir = {0, -1}
-  case glfw.KEY_S, glfw.KEY_DOWN:  if g.dir.y != -1 do g.pending_dir = {0, 1}
-  case glfw.KEY_A, glfw.KEY_LEFT:  if g.dir.x != 1  do g.pending_dir = {-1, 0}
-  case glfw.KEY_D, glfw.KEY_RIGHT: if g.dir.x != -1 do g.pending_dir = {1, 0}
+on_key :: proc(engine: ^mjolnir.Engine, key: platform.Key, action: platform.Action) {
+  if action == .RELEASE do return
+  #partial switch key {
+  case .W, .UP:    if g.dir.y != 1  do g.pending_dir = {0, -1}
+  case .S, .DOWN:  if g.dir.y != -1 do g.pending_dir = {0, 1}
+  case .A, .LEFT:  if g.dir.x != 1  do g.pending_dir = {-1, 0}
+  case .D, .RIGHT: if g.dir.x != -1 do g.pending_dir = {1, 0}
   }
 }
 

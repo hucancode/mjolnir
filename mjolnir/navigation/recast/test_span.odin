@@ -2,7 +2,6 @@ package recast
 
 import "core:log"
 import "core:testing"
-import "core:time"
 
 // Unit Test: Verify span bit packing/unpacking with hard-coded inputs
 @(test)
@@ -82,7 +81,7 @@ test_span_allocation :: proc(t: ^testing.T) {
   // Create a small heightfield
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Test adding a single span
   ok := add_span(hf, 5, 5, 10, 20, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Adding span should succeed")
@@ -101,7 +100,7 @@ test_span_allocation :: proc(t: ^testing.T) {
 test_span_invalid_inputs :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Test out of bounds coordinates
   ok := add_span(hf, -1, 5, 10, 20, RC_WALKABLE_AREA, 1)
   testing.expect(t, !ok, "Should fail with negative x")
@@ -121,7 +120,7 @@ test_span_invalid_inputs :: proc(t: ^testing.T) {
 test_span_edge_cases :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Test minimum values
   ok := add_span(hf, 0, 0, 0, 1, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Failed to add min span")
@@ -155,7 +154,7 @@ create_test_heightfield :: proc(width, height: i32) -> ^Heightfield {
   ch := f32(0.5)
   hf := create_heightfield(width, height, bmin, bmax, cs, ch)
   if hf == nil {
-    free_heightfield(hf)
+    destroy_heightfield(hf)
     return nil
   }
   return hf
@@ -195,7 +194,7 @@ verify_span_list :: proc(
 test_span_merging :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add first span
   ok := add_span(hf, 5, 5, 10, 20, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Adding first span should succeed")
@@ -220,7 +219,7 @@ test_span_merging :: proc(t: ^testing.T) {
 test_span_non_overlapping :: proc(t: ^testing.T) {
   hf := create_test_heightfield(10, 10)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add two non-overlapping spans
   ok := add_span(hf, 5, 5, 10, 20, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Failed to add first span")
@@ -240,7 +239,7 @@ test_span_non_overlapping :: proc(t: ^testing.T) {
 test_span_merge_exact_overlap :: proc(t: ^testing.T) {
   hf := create_test_heightfield(10, 10)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add two exactly overlapping spans
   ok := add_span(hf, 5, 5, 10, 20, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Failed to add first span")
@@ -262,7 +261,7 @@ test_span_merge_exact_overlap :: proc(t: ^testing.T) {
 test_span_merge_partial_overlap :: proc(t: ^testing.T) {
   hf := create_test_heightfield(10, 10)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add two partially overlapping spans
   ok := add_span(hf, 5, 5, 10, 20, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Failed to add first span")
@@ -282,7 +281,7 @@ test_span_merge_partial_overlap :: proc(t: ^testing.T) {
 test_span_merge_touching :: proc(t: ^testing.T) {
   hf := create_test_heightfield(10, 10)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add two spans that exactly touch (smax1 == smin2)
   ok := add_span(hf, 5, 5, 10, 20, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Failed to add first span")
@@ -302,7 +301,7 @@ test_span_merge_touching :: proc(t: ^testing.T) {
 test_span_merge_multiple_overlaps :: proc(t: ^testing.T) {
   hf := create_test_heightfield(10, 10)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add multiple spans that will all merge
   ok := add_span(hf, 5, 5, 10, 20, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Failed to add span 1")
@@ -327,7 +326,7 @@ test_span_merge_multiple_overlaps :: proc(t: ^testing.T) {
 test_span_area_priority :: proc(t: ^testing.T) {
   hf := create_test_heightfield(10, 10)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Test that higher area IDs take priority
   ok := add_span(hf, 5, 5, 10, 20, RC_NULL_AREA, 1)
   testing.expect(t, ok, "Failed to add first span")
@@ -349,7 +348,7 @@ test_span_area_priority :: proc(t: ^testing.T) {
 test_span_merge_threshold :: proc(t: ^testing.T) {
   hf := create_test_heightfield(10, 10)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Test flag merge threshold
   ok := add_span(hf, 5, 5, 10, 20, RC_NULL_AREA, 1)
   testing.expect(t, ok, "Failed to add first span")
@@ -373,7 +372,7 @@ test_span_merge_threshold :: proc(t: ^testing.T) {
 test_span_insertion_order :: proc(t: ^testing.T) {
   hf := create_test_heightfield(10, 10)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add spans in reverse order
   ok := add_span(hf, 5, 5, 50, 60, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok, "Failed to add span 1")
@@ -399,7 +398,7 @@ test_span_insertion_order :: proc(t: ^testing.T) {
 test_span_merge_algorithm_correctness :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Test 1: Add non-overlapping spans in order
   ok := add_span(hf, 5, 5, 0, 5, RC_WALKABLE_AREA, 1)
   testing.expect(t, hf != nil, "First span should succeed")
@@ -435,7 +434,7 @@ test_span_merge_out_of_order :: proc(t: ^testing.T) {
   // Test adding spans out of order
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add spans in reverse order
   ok := add_span(hf, 5, 5, 20, 25, RC_WALKABLE_AREA, 1)
   testing.expect(t, hf != nil, "High span should succeed")
@@ -470,7 +469,7 @@ test_span_partial_merge :: proc(t: ^testing.T) {
   // Test partial merging scenarios
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add three spans
   ok := add_span(hf, 5, 5, 0, 10, RC_WALKABLE_AREA, 1)
   testing.expect(t, ok)
@@ -499,7 +498,7 @@ test_span_partial_merge :: proc(t: ^testing.T) {
 test_span_multiple_columns :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add spans in different columns
   for x in 0 ..< 5 {
     for z in 0 ..< 5 {
@@ -532,7 +531,7 @@ test_span_multiple_columns :: proc(t: ^testing.T) {
 test_span_complex_merging :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create a complex scenario with multiple overlapping spans
   // Add spans: [10-20], [30-40], [50-60]
   ok := add_span(hf, 5, 5, 10, 20, RC_WALKABLE_AREA, 1)
@@ -562,7 +561,7 @@ test_span_complex_merging :: proc(t: ^testing.T) {
 test_span_merging_with_flag_threshold :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.2)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Test case 1: Merging spans with area flag threshold
   ok := add_span(hf, 5, 5, 10, 20, 1, 2)
   testing.expect(t, ok, "Failed to add first span")
@@ -611,7 +610,7 @@ test_span_merging_complex_scenarios :: proc(t: ^testing.T) {
   // This validates the correctness of the span merging algorithm
   hf := create_heightfield(3, 3, {0, 0, 0}, {3, 3, 3}, 1.0, 0.2)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add multiple overlapping spans at the same cell (1,1) with different height ranges
   x, z := i32(1), i32(1)
   // Span 1: height 0-10 (floor)
@@ -688,7 +687,7 @@ test_multiple_spans_per_cell :: proc(t: ^testing.T) {
     cell_height,
   )
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add multiple spans to cell (2,2) - simulating a multi-story building
   x, z := i32(2), i32(2)
   // Floor 1: Ground level
@@ -756,7 +755,7 @@ test_many_thin_spans :: proc(t: ^testing.T) {
     cell_height,
   )
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add 20 thin spans with gaps between them
   x, z := i32(1), i32(1)
   spans_added := 0
@@ -800,7 +799,7 @@ test_many_thin_spans :: proc(t: ^testing.T) {
 test_basic_span_merging :: proc(t: ^testing.T) {
   // Create a small heightfield for testing
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Failed to create heightfield")
   // Test 1: Add non-overlapping spans
   ok1 := add_span(hf, 5, 5, 10, 20, RC_WALKABLE_AREA, 1)
@@ -818,7 +817,7 @@ test_basic_span_merging :: proc(t: ^testing.T) {
   testing.expect_value(t, count, 2)
   // Test 2: Add overlapping spans that should merge
   hf2 := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
-  defer free_heightfield(hf2)
+  defer destroy_heightfield(hf2)
   testing.expect(t, hf2 != nil, "Failed to create heightfield")
   ok3 := add_span(hf2, 3, 3, 10, 25, RC_WALKABLE_AREA, 1)
   ok4 := add_span(hf2, 3, 3, 20, 30, RC_WALKABLE_AREA, 1)

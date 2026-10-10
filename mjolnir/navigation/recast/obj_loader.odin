@@ -1,7 +1,6 @@
 package recast
 
 import "../../geometry"
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -18,19 +17,14 @@ load_obj_to_navmesh_input :: proc(
   areas: []u8,
   ok: bool,
 ) {
-  geom := geometry.load_obj(filename, scale) or_return
-  defer geometry.delete_geometry(geom)
-  // Extract vertex positions
-  vertex_count := len(geom.vertices)
-  vertices = make([][3]f32, vertex_count)
-  for i in 0 ..< vertex_count {
-    vertices[i] = geom.vertices[i].position
-  }
+  obj := geometry.load_obj(filename, scale) or_return
+  defer geometry.obj_mesh_destroy(&obj)
+  vertices = slice.clone(obj.positions)
   // Convert indices from u32 to i32
-  index_count := len(geom.indices)
+  index_count := len(obj.indices)
   indices = make([]i32, index_count)
   for i in 0 ..< index_count {
-    indices[i] = i32(geom.indices[i])
+    indices[i] = i32(obj.indices[i])
   }
   // Create area array - start with RC_NULL_AREA (0)
   triangle_count := index_count / 3

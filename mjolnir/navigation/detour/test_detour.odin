@@ -2168,8 +2168,8 @@ bench_find_path :: proc(t: ^testing.T) {
 		}
 		pmesh, dmesh, ok := recast.build_navmesh(verts, indices, areas, cfg)
 		if !ok do return .Allocation_Error
-		defer recast.free_poly_mesh(pmesh)
-		defer recast.free_poly_mesh_detail(dmesh)
+		defer recast.destroy_poly_mesh(pmesh)
+		defer recast.destroy_poly_mesh_detail(dmesh)
 		params := Create_Nav_Mesh_Data_Params {
 			poly_mesh        = pmesh,
 			poly_mesh_detail = dmesh,

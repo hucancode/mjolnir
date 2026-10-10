@@ -29,6 +29,7 @@ DEFAULT_NAVMESH_CONFIG :: NavMeshConfig {
   quality         = .MEDIUM,
 }
 
+@(private)
 config_to_recast :: proc(cfg: NavMeshConfig) -> recast.Config {
   cell_size: f32
   cell_height: f32

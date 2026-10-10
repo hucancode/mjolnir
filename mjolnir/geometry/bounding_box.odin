@@ -13,18 +13,6 @@ AABB_UNDEFINED := Aabb {
   max = {F32_MIN, F32_MIN, F32_MIN},
 }
 
-aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
-  if len(vertices) == 0 {
-    return
-  }
-  ret = AABB_UNDEFINED
-  for vertex in vertices {
-    ret.min = linalg.min(ret.min, vertex.position)
-    ret.max = linalg.max(ret.max, vertex.position)
-  }
-  return ret
-}
-
 aabb_union :: #force_inline proc "contextless" (a, b: Aabb) -> Aabb {
   return Aabb{min = linalg.min(a.min, b.min), max = linalg.max(a.max, b.max)}
 }

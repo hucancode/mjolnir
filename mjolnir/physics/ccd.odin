@@ -1,6 +1,5 @@
 package physics
 
-import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
@@ -78,53 +77,9 @@ swept_sphere_box :: proc(
   velocity: [3]f32,
   box_min, box_max: [3]f32,
 ) -> TOIResult {
-  result: TOIResult
-  // Expand the box by sphere radius - now ray vs expanded box
-  expanded_min := box_min - [3]f32{radius, radius, radius}
-  expanded_max := box_max + [3]f32{radius, radius, radius}
-  // Ray-AABB intersection (Slab method)
-  t_min := f32(-1e6)
-  t_max := f32(1e6)
-  hit_normal := linalg.VECTOR3F32_Y_AXIS
-  #unroll for i in 0 ..< 3 {
-    if abs(velocity[i]) < math.F32_EPSILON {
-      // Ray parallel to slab
-      if center[i] < expanded_min[i] || center[i] > expanded_max[i] {
-        return result // No hit
-      }
-    } else {
-      // Compute intersection with slab
-      inv_d := 1.0 / velocity[i]
-      t1 := (expanded_min[i] - center[i]) * inv_d
-      t2 := (expanded_max[i] - center[i]) * inv_d
-      // Determine which is near/far
-      if t1 > t2 {
-        t1, t2 = t2, t1
-      }
-      // Update intervals
-      if t1 > t_min {
-        t_min = t1
-        // Normal points from box to sphere
-        hit_normal = {}
-        hit_normal[i] = -linalg.sign(velocity[i])
-      }
-      if t2 < t_max {
-        t_max = t2
-      }
-      // Early exit if no overlap
-      if t_min > t_max {
-        return result
-      }
-    }
-  }
-  // Check if impact is in valid range [0, 1]
-  if t_min >= 0 && t_min <= 1.0 {
-    result.has_impact = true
-    result.time = t_min
-    result.normal = hit_normal
-    result.point = center + velocity * t_min
-  }
-  return result
+  // the sphere sweeps like its center against the box grown by the radius
+  r := [3]f32{radius, radius, radius}
+  return sweep_point_aabb(center, velocity, box_min - r, box_max + r)
 }
 
 swept_box_box :: proc(
@@ -132,55 +87,42 @@ swept_box_box :: proc(
   half_extents_a, half_extents_b: [3]f32,
   velocity_a: [3]f32,
 ) -> TOIResult {
-  result: TOIResult
-  // Minkowski sum: treat as a point (pos_a) moving toward an expanded box
-  // The expanded box has size = half_extents_a + half_extents_b
-  sum_half_extents := half_extents_a + half_extents_b
-  expanded_min := pos_b - sum_half_extents
-  expanded_max := pos_b + sum_half_extents
-  // Ray-AABB intersection (Slab method)
+  // Minkowski sum: A's center sweeps against B grown by A's half extents
+  sum := half_extents_a + half_extents_b
+  return sweep_point_aabb(pos_a, velocity_a, pos_b - sum, pos_b + sum)
+}
+
+// Slab test of the segment origin..origin+velocity against an AABB. The
+// normal is the face of first entry, pointing against the motion.
+@(private = "file")
+sweep_point_aabb :: proc(origin, velocity, box_min, box_max: [3]f32) -> (result: TOIResult) {
   t_min := f32(-1e6)
   t_max := f32(1e6)
   hit_normal := linalg.VECTOR3F32_Y_AXIS
   #unroll for i in 0 ..< 3 {
-    if abs(velocity_a[i]) < math.F32_EPSILON {
-      // Ray parallel to slab
-      if pos_a[i] < expanded_min[i] || pos_a[i] > expanded_max[i] {
-        return result // No hit
-      }
+    if abs(velocity[i]) < math.F32_EPSILON {
+      if origin[i] < box_min[i] || origin[i] > box_max[i] do return
     } else {
-      // Compute intersection with slab
-      inv_d := 1.0 / velocity_a[i]
-      t1 := (expanded_min[i] - pos_a[i]) * inv_d
-      t2 := (expanded_max[i] - pos_a[i]) * inv_d
-      // Determine which is near/far
-      if t1 > t2 {
-        t1, t2 = t2, t1
-      }
-      // Update intervals
+      inv_d := 1.0 / velocity[i]
+      t1 := (box_min[i] - origin[i]) * inv_d
+      t2 := (box_max[i] - origin[i]) * inv_d
+      if t1 > t2 do t1, t2 = t2, t1
       if t1 > t_min {
         t_min = t1
-        // Normal points from B to A
         hit_normal = {}
-        hit_normal[i] = -linalg.sign(velocity_a[i])
+        hit_normal[i] = -linalg.sign(velocity[i])
       }
-      if t2 < t_max {
-        t_max = t2
-      }
-      // Early exit if no overlap
-      if t_min > t_max {
-        return result
-      }
+      t_max = min(t_max, t2)
+      if t_min > t_max do return
     }
   }
-  // Check if impact is in valid range [0, 1]
   if t_min >= 0 && t_min <= 1.0 {
     result.has_impact = true
     result.time = t_min
     result.normal = hit_normal
-    result.point = pos_a + velocity_a * t_min
+    result.point = origin + velocity * t_min
   }
-  return result
+  return
 }
 
 // Conservative sweep radius for the sphere-sphere fallback: exact for

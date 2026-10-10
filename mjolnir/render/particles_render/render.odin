@@ -1,8 +1,8 @@
 package particles_render
 
-import "../../gpu"
+import "../bindless"
+import "../gpu"
 import particles_compute "../particles_compute"
-import "../shared"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -39,6 +39,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 	vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
 }
 
+@(private)
 create_render_pipeline :: proc(
 	gctx: ^gpu.GPUContext,
 	self: ^Renderer,
@@ -106,7 +107,7 @@ create_render_pipeline :: proc(
 	shader_stages := gpu.create_vert_frag_stages(
 		vert_module,
 		frag_module,
-		&shared.SHADER_SPEC_CONSTANTS,
+		&bindless.SHADER_SPEC_CONSTANTS,
 	)
 
 	pipeline_info := vk.GraphicsPipelineCreateInfo {
@@ -137,33 +138,26 @@ create_render_pipeline :: proc(
 	return .SUCCESS
 }
 
-setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
-	return .SUCCESS
-}
-
-teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-}
-
 // record draws particles into the camera's color/depth attachments. Owns its
 // own begin_rendering / end_rendering scope.
 record :: proc(
 	self: ^Renderer,
 	command_buffer: vk.CommandBuffer,
 	camera_index: u32,
-	color_handle: gpu.Texture2DHandle,
-	depth_handle: gpu.Texture2DHandle,
-	texture_manager: ^gpu.TextureManager,
+	color_handle: bindless.Texture2DHandle,
+	depth_handle: bindless.Texture2DHandle,
+	texture_manager: ^bindless.TextureManager,
 	cameras_descriptor_set: vk.DescriptorSet,
 	textures_descriptor_set: vk.DescriptorSet,
 	compact_particle_buffer: vk.Buffer,
 	draw_command_buffer: vk.Buffer,
 ) {
-	color_texture := gpu.get_texture_2d(texture_manager, color_handle)
+	color_texture := bindless.get_texture_2d(texture_manager, color_handle)
 	if color_texture == nil {
 		log.error("Particle renderer missing color attachment")
 		return
 	}
-	depth_texture := gpu.get_texture_2d(texture_manager, depth_handle)
+	depth_texture := bindless.get_texture_2d(texture_manager, depth_handle)
 	if depth_texture == nil {
 		log.error("Particle renderer missing depth attachment")
 		return

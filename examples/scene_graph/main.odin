@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
 import mu "vendor:microui"
@@ -26,34 +27,33 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 14, 18}, {0, 0, 0})
+  render.main_camera_look_at(&engine.render, {0, 14, 18}, {0, 0, 0})
 
-  world.spawn_light_directional(&engine.world,
-    position    = {8, 14, 8},
+  mjolnir.spawn(engine, {8, 14, 8}, render.directional_light_attachment(
     color       = {1, 0.97, 0.92, 1},
     radius      = 8.0,
     cast_shadow = true,
-  )
+  ))
 
-  world.spawn_ground(&engine.world, 20.0, position = {0, -2, 0})
+  mjolnir.spawn_ground(engine, 20.0, position = {0, -2, 0})
 
   // Sun — root of the rotating subtree
-  sun_mat := world.material_pbr(&engine.world, base_color = {1.0, 0.8, 0.2, 1.0}, emissive = 2.0)
-  sun_handle = world.spawn_mesh(&engine.world, world.get_builtin_mesh(&engine.world, .SPHERE), sun_mat)
+  sun_mat := render.material_pbr(&engine.render, base_color = {1.0, 0.8, 0.2, 1.0}, emissive = 2.0)
+  sun_handle = mjolnir.spawn_mesh(engine, render.get_builtin_mesh(&engine.render, .SPHERE), sun_mat)
   world.scale(&engine.world, sun_handle, 1.2)
 
   // Planets — children of sun, each at fixed local offset
-  planet_colors := [3]world.Color{.CYAN, .GREEN, .MAGENTA}
+  planet_colors := [3]render.Color{.CYAN, .GREEN, .MAGENTA}
   planet_radii := [3]f32{3.5, 6.0, 9.0}
   for i in 0 ..< 3 {
-    planet_handles[i] = world.spawn_primitive_mesh_child(&engine.world, sun_handle, .SPHERE, planet_colors[i],
-      position = {planet_radii[i], 0, 0}, scale_factor = 0.5,
+    planet_handles[i] = mjolnir.spawn_primitive_mesh(engine, .SPHERE, planet_colors[i],
+      position = {planet_radii[i], 0, 0}, scale_factor = 0.5, parent = sun_handle,
     )
   }
 
   // Moon — child of outermost planet
-  moon_handle = world.spawn_primitive_mesh_child(&engine.world, planet_handles[2], .CUBE, .WHITE,
-    position = {1.5, 0, 0}, scale_factor = 0.3,
+  moon_handle = mjolnir.spawn_primitive_mesh(engine, .CUBE, .WHITE,
+    position = {1.5, 0, 0}, scale_factor = 0.3, parent = planet_handles[2],
   )
 }
 
@@ -67,7 +67,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Scene Graph", {720, 20, 260, 240}, {.NO_CLOSE}) {
     mu.label(ctx, "Hierarchy: sun > planets > moon")
     mu.label(ctx, "Each planet inherits sun rotation.")

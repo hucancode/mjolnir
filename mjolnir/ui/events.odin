@@ -1,8 +1,6 @@
 package ui
 
 import cont "../containers"
-import "core:log"
-import "core:math/linalg"
 
 MouseEventType :: enum {
   CLICK_DOWN,
@@ -216,82 +214,46 @@ dispatch_key_event :: proc(
   }
 }
 
-// process_mouse runs hover + click event dispatch for one input tick. Engine
-// feeds raw mouse state; the proc fires HOVER_IN / HOVER_OUT on transitions
-// and CLICK_DOWN / CLICK_UP on per-button edges, then returns the widget
-// currently under the cursor for the caller to stash.
-//
-// `buttons[i]` is the current frame's button state.
-// `holding[i]` is "was pressed previous frame AND is still pressed" (matches
-// the existing engine convention from update_input).
+// process_mouse runs hover and click dispatch for one input tick from the
+// raw cursor position and button state: HOVER_IN / HOVER_OUT when the widget
+// under the cursor changes, CLICK_DOWN / CLICK_UP on per-button edges.
+// Returns the widget under the cursor.
 process_mouse :: proc(
   sys: ^System,
   mouse_pos: [2]f32,
-  buttons: ^[8]bool,
-  holding: ^[8]bool,
-  prev_hovered: Maybe(UIWidgetHandle),
+  buttons: [MAX_MOUSE_BUTTONS]bool,
 ) -> Maybe(UIWidgetHandle) {
   current := pick_widget(sys, mouse_pos)
-
-  // Hover in/out
-  if old_handle, had_old := prev_hovered.?; had_old {
-    if new_handle, has_new := current.?; has_new {
-      old_raw := transmute(cont.Handle)old_handle
-      new_raw := transmute(cont.Handle)new_handle
-      if old_raw.index != new_raw.index ||
-         old_raw.generation != new_raw.generation {
-        ev := MouseEvent {
-          type     = .HOVER_OUT,
-          position = mouse_pos,
-          button   = 0,
-          widget   = old_handle,
-        }
-        dispatch_mouse_event(sys, old_handle, ev, true)
-        ev.type = .HOVER_IN
-        ev.widget = new_handle
-        dispatch_mouse_event(sys, new_handle, ev, true)
-      }
-    } else {
+  prev := sys.hovered
+  changed: bool
+  if a, had := prev.?; had {
+    b, has := current.?
+    changed = !has || a != b
+  } else {
+    changed = current != nil
+  }
+  if changed {
+    if h, ok := prev.?; ok {
+      dispatch_mouse_event(sys, h, {type = .HOVER_OUT, position = mouse_pos, widget = h}, true)
+    }
+    if h, ok := current.?; ok {
+      dispatch_mouse_event(sys, h, {type = .HOVER_IN, position = mouse_pos, widget = h}, true)
+    }
+  }
+  if h, ok := current.?; ok {
+    for down, i in buttons {
+      was := sys.prev_buttons[i]
+      if down == was do continue
       ev := MouseEvent {
-        type     = .HOVER_OUT,
+        type     = .CLICK_DOWN if down else .CLICK_UP,
         position = mouse_pos,
-        button   = 0,
-        widget   = old_handle,
+        button   = i32(i),
+        widget   = h,
       }
-      dispatch_mouse_event(sys, old_handle, ev, true)
-    }
-  } else if new_handle, has_new := current.?; has_new {
-    ev := MouseEvent {
-      type     = .HOVER_IN,
-      position = mouse_pos,
-      button   = 0,
-      widget   = new_handle,
-    }
-    dispatch_mouse_event(sys, new_handle, ev, true)
-  }
-
-  // Click edges
-  if widget_handle, has_widget := current.?; has_widget {
-    for i in 0 ..< len(buttons) {
-      if buttons[i] && !holding[i] {
-        ev := MouseEvent {
-          type     = .CLICK_DOWN,
-          position = mouse_pos,
-          button   = i32(i),
-          widget   = widget_handle,
-        }
-        dispatch_mouse_event(sys, widget_handle, ev, true)
-      } else if !buttons[i] && holding[i] {
-        ev := MouseEvent {
-          type     = .CLICK_UP,
-          position = mouse_pos,
-          button   = i32(i),
-          widget   = widget_handle,
-        }
-        dispatch_mouse_event(sys, widget_handle, ev, true)
-      }
+      dispatch_mouse_event(sys, h, ev, true)
     }
   }
-
+  sys.hovered = current
+  sys.prev_buttons = buttons
   return current
 }

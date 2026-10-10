@@ -1,8 +1,6 @@
 package physics
 
 import "../geometry"
-import "core:math"
-import "core:math/linalg"
 
 ColliderType :: enum {
   Sphere,
@@ -77,20 +75,6 @@ collider_calculate_aabb :: proc(
     return geometry.obb_to_aabb(obb)
   }
   return {}
-}
-
-// Visual scale derived from a collider's extents — for matching the engine's
-// unit-cube/unit-sphere/unit-cylinder builtin meshes to a collider's geometry
-// without callers passing the same numbers twice. Cylinders/fans halve `height`
-// because the builtin cylinder mesh has unit half-height.
-collider_visual_scale :: proc(collider: Collider) -> [3]f32 {
-  switch sh in collider {
-  case BoxCollider:      return sh.half_extents
-  case SphereCollider:   return {sh.radius, sh.radius, sh.radius}
-  case CylinderCollider: return {sh.radius, sh.height * 0.5, sh.radius}
-  case FanCollider:      return {sh.radius, sh.height * 0.5, sh.radius}
-  }
-  return {1, 1, 1}
 }
 
 collider_min_extent :: proc(self: ^Collider) -> f32 {

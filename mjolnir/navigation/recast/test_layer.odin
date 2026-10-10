@@ -2,9 +2,7 @@ package recast
 
 import "core:fmt"
 import "core:log"
-import "core:slice"
 import "core:testing"
-import "core:time"
 
 // Test simple layer assignment with multi-level structures
 @(test)
@@ -13,7 +11,7 @@ test_simple_layers :: proc(t: ^testing.T) {
   bmin := [3]f32{0, 0, 0}
   bmax := [3]f32{10, 10, 10}
   hf := create_heightfield(20, 20, bmin, bmax, 0.5, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Failed to create heightfield")
   // Create two levels - ground and elevated platform
   // Ground level
@@ -42,7 +40,7 @@ test_simple_layers :: proc(t: ^testing.T) {
   testing.expect(t, ok, "Failed to rasterize platform")
   // Build compact heightfield
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Check for layers
   max_layers := 0
@@ -53,7 +51,7 @@ test_simple_layers :: proc(t: ^testing.T) {
     if layers > 1 do cells_with_layers += 1
   }
   lset, layer_ok := build_heightfield_layers(chf, 0, 2)
-  defer free_heightfield_layer_set(lset)
+  defer destroy_heightfield_layer_set(lset)
   testing.expect(t, layer_ok, "Failed to build layers")
 }
 
@@ -67,7 +65,7 @@ test_region_overflow_handling :: proc(t: ^testing.T) {
   bmin := [3]f32{0, 0, 0}
   bmax := [3]f32{100, 10, 100}
   hf := create_heightfield(200, 200, bmin, bmax, 0.5, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Failed to create heightfield")
   // Create a grid of small platforms (16x16 = 256 platforms)
   for row in 0 ..< 16 {
@@ -87,7 +85,7 @@ test_region_overflow_handling :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   build_distance_field(chf)
   build_regions(chf, 0, 1, 1) // Min area = 1 to keep all small regions
@@ -98,7 +96,7 @@ test_region_overflow_handling :: proc(t: ^testing.T) {
   // Try to build layers - this SHOULD fail with >255 regions
   // The error messages are expected and correct behavior!
   lset, layer_ok := build_heightfield_layers(chf, 0, 2)
-  defer free_heightfield_layer_set(lset)
+  defer destroy_heightfield_layer_set(lset)
   testing.expect(t, !layer_ok, "Layer building should fail with >255 regions")
 }
 
@@ -111,7 +109,7 @@ test_navtest_layers :: proc(t: ^testing.T) {
   bmax := [3]f32{65, 20, 35}
   // Use same grid size as nav_test.obj
   hf := create_heightfield(305, 258, bmin, bmax, 0.3, 0.2)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Failed to create heightfield")
   // Create multiple overlapping levels at different heights
   for level in 0 ..< 4 {
@@ -128,7 +126,7 @@ test_navtest_layers :: proc(t: ^testing.T) {
     rasterize_triangles(verts, tris, areas, hf, 4)
   }
   chf := create_compact_heightfield(10, 4, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Count layers per cell
   histogram: [10]int // Count cells with 0-9 layers
@@ -151,6 +149,6 @@ test_navtest_layers :: proc(t: ^testing.T) {
   }
   // Build layers
   lset, layer_ok := build_heightfield_layers(chf, 0, 10)
-  defer free_heightfield_layer_set(lset)
+  defer destroy_heightfield_layer_set(lset)
   testing.expect(t, layer_ok, "Failed to build heightfield layers")
 }

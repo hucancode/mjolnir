@@ -1,7 +1,6 @@
 package crowd
 
 import "core:math"
-import "../recast"
 
 Proximity_Grid :: struct {
 	cell_size:     f32,

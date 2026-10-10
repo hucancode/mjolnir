@@ -157,14 +157,3 @@ test_point_polygon_distance_inside_outside :: proc(t: ^testing.T) {
 	d_out := point_polygon_distance({3, 0, 1}, square)
 	testing.expectf(t, math.abs(d_out - 1.0) < 1e-4, "1 unit outside expected, got %f", d_out)
 }
-
-@(test)
-test_in_circumcircle_xz_plane :: proc(t: ^testing.T) {
-	// triangle on XZ plane: (0,0,0), (4,0,0), (0,0,4)
-	// circumcircle center = (2,0,2), radius = 2*sqrt(2)
-	a := [3]f32{0, 0, 0}
-	b := [3]f32{4, 0, 0}
-	c := [3]f32{0, 0, 4}
-	testing.expect(t, in_circumcircle({2, 0, 2}, a, b, c), "center inside")
-	testing.expect(t, !in_circumcircle({-5, 0, -5}, a, b, c), "far outside")
-}

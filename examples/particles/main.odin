@@ -1,8 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/render/ambient"
-import "../../mjolnir/gpu"
 import "../../mjolnir/world"
 import "core:strings"
 import "core:fmt"
@@ -10,7 +10,7 @@ import mu "vendor:microui"
 
 TextureEntry :: struct {
   name:   string,
-  handle: gpu.Texture2DHandle,
+  handle: render.Texture2DHandle,
 }
 
 TEXTURE_FILES := [?]string{
@@ -25,7 +25,7 @@ TEXTURE_FILES := [?]string{
 textures:            [dynamic]TextureEntry
 selected_tex_index:  i32 = 0
 emitter_node:        world.NodeHandle
-emitter_handle:      world.EmitterHandle
+emitter_handle:      render.EmitterHandle
 enabled:             bool = true
 
 emission_rate:    mu.Real = 200
@@ -57,26 +57,27 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 5, 10}, {0, 2, 0})
+  render.main_camera_look_at(&engine.render, {0, 5, 10}, {0, 2, 0})
   ambient.set_skybox_enabled(&engine.render.ambient, false)
 
   for name in TEXTURE_FILES {
     path := fmt.tprintf("assets/particles/%s.png", name)
-    handle, ret := gpu.create_texture_2d_from_path(&engine.gctx, &engine.render.texture_manager, path)
+    handle, ret := render.create_texture_from_path(&engine.render, path)
     if ret != .SUCCESS do continue
     append(&textures, TextureEntry{name = strings.clone(name), handle = handle})
   }
   if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0
 
-  emitter_node, emitter_handle, _ = world.spawn_emitter(&engine.world, position = {0, 2, 0})
+  emitter_handle = render.create_emitter(&engine.render)
+  emitter_node = mjolnir.spawn_emitter(engine, emitter_handle, {0, 2, 0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  tex: gpu.Texture2DHandle
+  tex: render.Texture2DHandle
   if len(textures) > 0 && int(selected_tex_index) < len(textures) {
     tex = textures[selected_tex_index].handle
   }
-  world.set_emitter(&engine.world, emitter_handle,
+  render.set_emitter(&engine.render, emitter_handle,
     texture           = tex,
     enabled           = enabled,
     emission_rate     = f32(emission_rate),
@@ -96,7 +97,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
 
   if mu.window(ctx, "Texture", {20, 20, 220, 760}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)

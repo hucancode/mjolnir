@@ -1,8 +1,10 @@
 package render
 
+import "bindless"
 import cont "../containers"
 import geom "../geometry"
-import "../gpu"
+import "mesh"
+import "gpu"
 import vk "vendor:vulkan"
 
 // Allocate every per-resource bindless buffer + the bone slab. Paired with
@@ -132,7 +134,7 @@ realloc_scene_descriptors :: proc(
   gpu.bindless_buffer_realloc_descriptor(&self.internal.sprite_buffer, gctx) or_return
   gpu.per_frame_bindless_buffer_realloc_descriptors(&self.internal.bone_buffer, gctx) or_return
   gpu.per_frame_bindless_buffer_realloc_descriptors(&self.internal.camera_buffer, gctx) or_return
-  gpu.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
+  bindless.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
   return .SUCCESS
 }
 
@@ -152,6 +154,7 @@ clear_scene_descriptor_handles :: proc(self: ^Manager) {
   self.mesh_manager.vertex_skinning_buffer.descriptor_set = 0
 }
 
+@(private)
 ensure_bone_matrix_range_for_node :: proc(
   render: ^Manager,
   handle: u32,
@@ -166,6 +169,7 @@ ensure_bone_matrix_range_for_node :: proc(
   return offset
 }
 
+@(private)
 release_bone_matrix_range_for_node :: proc(render: ^Manager, handle: u32) {
   if offset, ok := render.internal.bone_matrix_offsets[handle]; ok {
     cont.slab_free(&render.internal.bone_matrix_slab, offset)
@@ -173,24 +177,25 @@ release_bone_matrix_range_for_node :: proc(render: ^Manager, handle: u32) {
   }
 }
 
+@(private)
 sync_mesh_geometry_for_handle :: proc(
   gctx: ^gpu.GPUContext,
   render: ^Manager,
   handle: u32,
-  geometry_data: geom.Geometry,
+  geometry_data: mesh.Geometry,
 ) -> vk.Result {
   mesh := gpu.mutable_buffer_get(&render.internal.mesh_data_buffer.buffer, handle)
   if mesh.index_count > 0 {
-    gpu.free_vertices(
+    bindless.free_vertices(
       &render.mesh_manager,
       BufferAllocation{offset = u32(mesh.vertex_offset), count = 1},
     )
-    gpu.free_indices(
+    bindless.free_indices(
       &render.mesh_manager,
       BufferAllocation{offset = mesh.first_index, count = 1},
     )
     if .SKINNED in mesh.flags {
-      gpu.free_vertex_skinning(
+      bindless.free_vertex_skinning(
         &render.mesh_manager,
         BufferAllocation{offset = mesh.skinning_offset, count = 1},
       )
@@ -200,12 +205,12 @@ sync_mesh_geometry_for_handle :: proc(
   mesh.aabb_max = geometry_data.aabb.max
   mesh.flags = {}
   mesh.index_count = u32(len(geometry_data.indices))
-  vertex_allocation := gpu.allocate_vertices(
+  vertex_allocation := bindless.allocate_vertices(
     &render.mesh_manager,
     gctx,
     geometry_data.vertices,
   ) or_return
-  index_allocation := gpu.allocate_indices(
+  index_allocation := bindless.allocate_indices(
     &render.mesh_manager,
     gctx,
     geometry_data.indices,
@@ -214,7 +219,7 @@ sync_mesh_geometry_for_handle :: proc(
   mesh.vertex_offset = i32(vertex_allocation.offset)
   mesh.skinning_offset = 0
   if len(geometry_data.skinnings) > 0 {
-    skinning_allocation := gpu.allocate_vertex_skinning(
+    skinning_allocation := bindless.allocate_vertex_skinning(
       &render.mesh_manager,
       gctx,
       geometry_data.skinnings,
@@ -225,20 +230,21 @@ sync_mesh_geometry_for_handle :: proc(
   return .SUCCESS
 }
 
+@(private)
 mesh_destroy :: proc(render: ^Manager, handle: u32) {
   mesh := gpu.mutable_buffer_get(&render.internal.mesh_data_buffer.buffer, handle)
   if mesh.index_count > 0 {
-    gpu.free_vertices(
+    bindless.free_vertices(
       &render.mesh_manager,
       BufferAllocation{offset = u32(mesh.vertex_offset), count = 1},
     )
-    gpu.free_indices(
+    bindless.free_indices(
       &render.mesh_manager,
       BufferAllocation{offset = mesh.first_index, count = 1},
     )
   }
   if .SKINNED in mesh.flags {
-    gpu.free_vertex_skinning(
+    bindless.free_vertex_skinning(
       &render.mesh_manager,
       BufferAllocation{offset = mesh.skinning_offset, count = 1},
     )
@@ -246,11 +252,13 @@ mesh_destroy :: proc(render: ^Manager, handle: u32) {
   mesh^ = {}
 }
 
-upload_node_data :: proc(render: ^Manager, index: u32, node_data: ^Node) {
+@(private)
+upload_node_data :: proc(render: ^Manager, index: u32, node_data: ^NodeData) {
   assert(index < MAX_NODES_IN_SCENE, "node index exceeds MAX_NODES_IN_SCENE")
   gpu.write(&render.internal.node_data_buffer.buffer, node_data, int(index))
 }
 
+@(private)
 upload_bone_matrices :: proc(
   render: ^Manager,
   frame_index: u32,
@@ -270,43 +278,49 @@ upload_bone_matrices :: proc(
   copy(gpu_slice[l:r], matrices[:])
 }
 
+@(private)
 upload_sprite_data :: proc(
   render: ^Manager,
   index: u32,
-  sprite_data: ^Sprite,
+  sprite_data: ^SpriteData,
 ) {
   assert(index < MAX_SPRITES, "sprite index exceeds MAX_SPRITES")
   gpu.write(&render.internal.sprite_buffer.buffer, sprite_data, int(index))
 }
 
-upload_emitter_data :: proc(render: ^Manager, index: u32, emitter: ^Emitter) {
+@(private)
+upload_emitter_data :: proc(render: ^Manager, index: u32, emitter: ^EmitterData) {
   assert(index < MAX_EMITTERS, "emitter index exceeds MAX_EMITTERS")
   gpu.write(&render.internal.emitter_buffer.buffer, emitter, int(index))
 }
 
+@(private)
 upload_forcefield_data :: proc(
   render: ^Manager,
   index: u32,
-  forcefield: ^ForceField,
+  forcefield: ^ForceFieldData,
 ) {
   assert(index < MAX_FORCE_FIELDS, "forcefield index exceeds MAX_FORCE_FIELDS")
   gpu.write(&render.internal.forcefield_buffer.buffer, forcefield, int(index))
 }
 
-upload_mesh_data :: proc(render: ^Manager, index: u32, mesh: ^Mesh) {
+@(private)
+upload_mesh_data :: proc(render: ^Manager, index: u32, mesh: ^MeshData) {
   assert(index < MAX_MESHES, "mesh index exceeds MAX_MESHES")
   gpu.write(&render.internal.mesh_data_buffer.buffer, mesh, int(index))
 }
 
+@(private)
 upload_material_data :: proc(
   render: ^Manager,
   index: u32,
-  material: ^Material,
+  material: ^MaterialData,
 ) {
   assert(index < MAX_MATERIALS, "material index exceeds MAX_MATERIALS")
   gpu.write(&render.internal.material_buffer.buffer, material, int(index))
 }
 
+@(private)
 upload_camera_data :: proc(
   render: ^Manager,
   camera_index: u32,

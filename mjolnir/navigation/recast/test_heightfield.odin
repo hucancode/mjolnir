@@ -1,12 +1,8 @@
 package recast
 
-import "core:fmt"
 import "core:log"
-import "core:math"
 import "core:slice"
-import "core:strings"
 import "core:testing"
-import "core:time"
 
 @(test)
 test_grid_size_calculation :: proc(t: ^testing.T) {
@@ -29,14 +25,14 @@ test_compact_heightfield_spans :: proc(t: ^testing.T) {
   bmin := [3]f32{0, 0, 0}
   bmax := [3]f32{1, 1, 1}
   hf := create_heightfield(1, 1, bmin, bmax, 1.0, 0.1)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Failed to create heightfield")
   // Add a span manually
   ok := add_span(hf, 0, 0, 0, 10, RC_WALKABLE_AREA, 1)
   // testing.expect(t, ok, "Failed to add span")
   // Build compact heightfield
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   testing.expect_value(t, len(chf.spans), 1)
 }
@@ -50,7 +46,7 @@ test_heightfield_creation :: proc(t: ^testing.T) {
   cs := f32(2.0)
   ch := f32(0.5)
   hf := create_heightfield(width, height, bmin, bmax, cs, ch)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Verify parameters
   testing.expect_value(t, hf.width, width)
@@ -102,7 +98,7 @@ test_heightfield_bounds :: proc(t: ^testing.T) {
       tc.cs,
       0.5,
     )
-    defer free_heightfield(hf)
+    defer destroy_heightfield(hf)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
     testing.expect_value(t, hf.width, tc.expected_width)
     testing.expect_value(t, hf.height, tc.expected_height)
@@ -113,12 +109,12 @@ test_heightfield_bounds :: proc(t: ^testing.T) {
 test_heightfield_edge_cases :: proc(t: ^testing.T) {
   // Test minimum size (1x1)
   hf := create_heightfield(1, 1, {0, 0, 0}, {1, 1, 1}, 1.0, 1.0)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "1x1 heightfield should succeed")
   testing.expect_value(t, len(hf.spans), 1)
   // Test zero width/height (should fail or handle gracefully)
   hf2 := create_heightfield(0, 0, {0, 0, 0}, {1, 1, 1}, 1.0, 1.0)
-  defer free_heightfield(hf2)
+  defer destroy_heightfield(hf2)
   testing.expect_value(t, len(hf2.spans), 0)
 }
 
@@ -128,7 +124,7 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
   // Create a 5x5 heightfield with a single center obstacle
   // This creates a known pattern where distances should form concentric rings
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.2)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Failed to create heightfield")
   // Add spans everywhere except center (2,2) to create a hole
   for x in 0 ..< 5 {
@@ -148,7 +144,7 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
   }
   // Build compact heightfield
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Build distance field
   ok := build_distance_field(chf)
@@ -212,7 +208,7 @@ test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
     cell_size,
     cell_height,
   )
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Add ground level spans for the entire field (walkable area at height 0)
   ground_level := u16(0)
@@ -373,7 +369,7 @@ test_heightfield_elevation_profile :: proc(t: ^testing.T) {
     cell_size,
     cell_height,
   )
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Create varying terrain with obstacles
   for z in 0 ..< field_size {
@@ -458,7 +454,7 @@ test_heightfield_sharp_elevation_changes :: proc(t: ^testing.T) {
     cell_size,
     cell_height,
   )
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Heightfield creation should succeed")
   // Create a cliff-like structure
   cliff_x := i32(10)

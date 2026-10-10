@@ -1,9 +1,7 @@
 package recast
 
-import "core:fmt"
 import "core:log"
 import "core:testing"
-import "core:time"
 import "core:math"
 
 // Test high-level API functions
@@ -34,8 +32,8 @@ test_api_simple_build :: proc(t: ^testing.T) {
   testing.expect(t, ok, "Build failed")
   testing.expect(t, pmesh != nil, "No polygon mesh generated")
   testing.expect(t, dmesh != nil, "No detail mesh generated")
-  defer free_poly_mesh(pmesh)
-  defer free_poly_mesh_detail(dmesh)
+  defer destroy_poly_mesh(pmesh)
+  defer destroy_poly_mesh_detail(dmesh)
   // Check generated mesh
   testing.expect(t, len(pmesh.verts) > 0, "No vertices generated")
   testing.expect(t, pmesh.npolys > 0, "No polygons generated")
@@ -78,8 +76,8 @@ test_api_quick_build :: proc(t: ^testing.T) {
   testing.expect(t, pmesh != nil, "No polygon mesh from quick build")
   testing.expect(t, dmesh != nil, "No detail mesh from quick build")
   defer {
-    free_poly_mesh(pmesh)
-    free_poly_mesh_detail(dmesh)
+    destroy_poly_mesh(pmesh)
+    destroy_poly_mesh_detail(dmesh)
   }
   // Check result
   testing.expect(t, len(pmesh.verts) > 0, "Quick build generated no vertices")
@@ -130,8 +128,8 @@ test_api_configuration :: proc(t: ^testing.T) {
       )
       testing.expect(t, len(pmesh.verts) > 0, "Should generate vertices")
     }
-    free_poly_mesh(pmesh)
-    free_poly_mesh_detail(dmesh)
+    destroy_poly_mesh(pmesh)
+    destroy_poly_mesh_detail(dmesh)
     log.infof(
       "Config %s: cs=%.2f, ch=%.2f -> %d polygons",
       cfg.name,
@@ -244,8 +242,8 @@ test_api_build_with_areas :: proc(t: ^testing.T) {
   pmesh, dmesh, ok := build_navmesh(vertices, indices, areas, config)
   testing.expect(t, ok, "Build with areas failed")
   testing.expect(t, pmesh != nil, "No polygon mesh generated")
-  defer free_poly_mesh(pmesh)
-  defer free_poly_mesh_detail(dmesh)
+  defer destroy_poly_mesh(pmesh)
+  defer destroy_poly_mesh_detail(dmesh)
   // Check that different areas were preserved
   area_counts: map[u8]int
   defer delete(area_counts)
@@ -317,8 +315,8 @@ test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
     config,
   )
   testing.expect(t, ok, "Complex geometry build should succeed")
-  defer free_poly_mesh(pmesh)
-  defer free_poly_mesh_detail(dmesh)
+  defer destroy_poly_mesh(pmesh)
+  defer destroy_poly_mesh_detail(dmesh)
   // Validate comprehensive results
   testing.expect(t, pmesh != nil, "Should generate polygon mesh")
   testing.expect(t, dmesh != nil, "Should generate detail mesh")

@@ -2,7 +2,6 @@ package crowd
 
 import "core:math"
 import "core:math/linalg"
-import "core:slice"
 import "../recast"
 import "../detour"
 

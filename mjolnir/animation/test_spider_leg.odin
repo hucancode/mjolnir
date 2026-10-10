@@ -1,6 +1,5 @@
 package animation
 
-import "core:log"
 import "core:math/linalg"
 import "core:testing"
 

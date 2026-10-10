@@ -1,6 +1,5 @@
 package geometry
 
-import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"

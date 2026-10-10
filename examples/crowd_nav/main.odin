@@ -1,41 +1,47 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/geometry"
+import "../../mjolnir/platform"
+import "../../mjolnir/render/mesh"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import nav "../../mjolnir/navigation"
+import "../../mjolnir/navigation/crowd"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
-import "vendor:glfw"
 import mu "vendor:microui"
 
 AGENT_COUNT :: 20
 AGENT_RADIUS :: f32(0.45)
 AGENT_HEIGHT :: f32(1.6)
 AGENT_SPEED :: f32(3.2)
-SEPARATION_RADIUS :: AGENT_RADIUS * 4
-WAYPOINT_TOLERANCE :: f32(0.6)
 WORLD_HALF :: f32(50)
 SPAWN_RADIUS :: f32(38)
 GOAL_MIN_DIST :: f32(20)
 
+// Scene-side view of a crowd agent; steering, avoidance and path following
+// run in navigation/crowd.
 Agent :: struct {
-  pos, velocity:     [3]f32,
-  path:              [][3]f32,
-  waypoint_idx:      int,
-  goal:              [3]f32,
-  color:             [4]f32,
-  node:              world.NodeHandle,
+  id:    int, // crowd agent index
+  color: [4]f32,
+  node:  world.NodeHandle,
 }
 
 agents: [AGENT_COUNT]Agent
 nav_builder: nav.NavGeometryBuilder
 navmesh_node_handle: world.NodeHandle
+navmesh: nav.NavMesh
+agent_crowd: ^crowd.Crowd
 
 main :: proc() {
+  defer {
+    crowd.destroy_crowd(agent_crowd)
+    nav.destroy(&navmesh)
+    nav.builder_destroy(&nav_builder)
+  }
   mjolnir.run_app({
     title = "Crowd Navigation", width = 1000, height = 700,
     debug_ui = true, setup = setup, update = update, pre_render = debug_ui,
@@ -44,8 +50,8 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {32, 28, 32}, {0, 0, 0})
-  world.spawn_light_directional(&engine.world, {15, 25, 15}, {1, 0.97, 0.92, 1}, 10.0, true)
+  render.main_camera_look_at(&engine.render, {32, 28, 32}, {0, 0, 0})
+  mjolnir.spawn(engine, {15, 25, 15}, render.directional_light_attachment({1, 0.97, 0.92, 1}, 10.0, true))
   build_scene(engine)
   build_navmesh(engine)
   visualize_navmesh(engine)
@@ -54,12 +60,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 build_scene :: proc(engine: ^mjolnir.Engine) {
-  ground_geom := geometry.make_quad({0.25, 0.55, 0.25, 1})
+  ground_geom := mesh.make_quad({0.25, 0.55, 0.25, 1})
   for &v in ground_geom.vertices { v.position.x *= WORLD_HALF * 2; v.position.z *= WORLD_HALF * 2 }
-  nav.append_geometry(&nav_builder, ground_geom, {0, 0, 0}, false)
-  gm := world.create_mesh(&engine.world, ground_geom)
-  gmat := world.create_material(&engine.world, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
-  world.spawn(&engine.world, {0, 0, 0}, world.MeshAttachment{handle = gm, material = gmat, cast_shadow = false})
+  nav.append_triangles(&nav_builder, mesh.positions(ground_geom, context.temp_allocator), ground_geom.indices)
+  gm := render.create_mesh(&engine.render, ground_geom)
+  gmat := render.create_material(&engine.render, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
+  mjolnir.spawn(engine, {0, 0, 0}, render.MeshAttachment{handle = gm, material = gmat, cast_shadow = false})
 
   obstacles := [?]struct{pos, size: [3]f32}{
     {{-18, 1.5, -14}, {3, 3, 3}}, {{18, 1.5, -14}, {3, 3, 3}}, {{-18, 1.5, 14}, {3, 3, 3}}, {{18, 1.5, 14}, {3, 3, 3}},
@@ -68,29 +74,29 @@ build_scene :: proc(engine: ^mjolnir.Engine) {
     {{38, 1.5, -22}, {2, 3, 4}}, {{-38, 1.5, 22}, {2, 3, 4}},
   }
   for o in obstacles {
-    g := geometry.make_cube({0.7, 0.2, 0.2, 1})
+    g := mesh.make_cube({0.7, 0.2, 0.2, 1})
     for &v in g.vertices { v.position.x *= o.size.x; v.position.y *= o.size.y; v.position.z *= o.size.z }
-    nav.append_geometry(&nav_builder, g, o.pos, true)
-    mh := world.create_mesh(&engine.world, g)
-    mat := world.create_material(&engine.world, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
-    world.spawn_mesh(&engine.world, mh, mat, o.pos)
+    nav.append_triangles(&nav_builder, mesh.positions(g, context.temp_allocator), g.indices, o.pos, true)
+    mh := render.create_mesh(&engine.render, g)
+    mat := render.create_material(&engine.render, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
+    mjolnir.spawn_mesh(engine, mh, mat, o.pos)
   }
 }
 
 build_navmesh :: proc(engine: ^mjolnir.Engine) {
-  if !nav.build_navmesh(&engine.nav.nav_mesh, nav.geometry_view(&nav_builder), nav.config_to_recast(nav.DEFAULT_NAVMESH_CONFIG)) || !nav.init(&engine.nav) do log.error("navmesh build failed")
+  if !nav.build(&navmesh, nav.geometry_view(&nav_builder)) do log.error("navmesh build failed")
 }
 
 visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
   world.despawn(&engine.world, navmesh_node_handle)
-  nm_geom := nav.build_geometry(&engine.nav.nav_mesh)
-  for &v in nm_geom.vertices do v.position.y += 0.2
-  nm_geom.aabb = geometry.aabb_from_vertices(nm_geom.vertices)  // lift moved verts
-  nm_mesh, mesh_ok := world.create_mesh(&engine.world, nm_geom)
+  positions, indices := nav.debug_triangles(&navmesh, context.temp_allocator)
+  for &p in positions do p.y += 0.2 // lift above the ground to avoid z-fighting
+  nm_geom := mesh.from_triangles(positions, indices)
+  nm_mesh, mesh_ok := render.create_mesh(&engine.render, nm_geom)
   if !mesh_ok do return
-  nm_mat, mat_ok := world.create_material(&engine.world, type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7})
+  nm_mat, mat_ok := render.create_material(&engine.render, type = .RANDOM_COLOR, base_color_factor = {1, 0.8, 0.3, 0.7})
   if !mat_ok do return
-  navmesh_node_handle = world.spawn_mesh(&engine.world, nm_mesh, nm_mat)
+  navmesh_node_handle = mjolnir.spawn_mesh(engine, nm_mesh, nm_mat)
 }
 
 random_goal :: proc(engine: ^mjolnir.Engine, away_from: [3]f32) -> [3]f32 {
@@ -98,7 +104,7 @@ random_goal :: proc(engine: ^mjolnir.Engine, away_from: [3]f32) -> [3]f32 {
   best: [3]f32; best_ok: bool
   for attempt in 0 ..< 32 {
     p := [3]f32{rand.float32_range(-SPAWN_RADIUS, SPAWN_RADIUS), 0, rand.float32_range(-SPAWN_RADIUS, SPAWN_RADIUS)}
-    snap, ok := nav.find_nearest_point(&engine.nav, p, extents)
+    snap, ok := nav.nearest_point(&navmesh, p, extents)
     if !ok do continue
     best = snap; best_ok = true
     if attempt >= 16 || linalg.length(snap - away_from) >= GOAL_MIN_DIST do return snap
@@ -110,29 +116,47 @@ random_goal :: proc(engine: ^mjolnir.Engine, away_from: [3]f32) -> [3]f32 {
 palette := [6][4]f32{{1, 0.25, 0.25, 1}, {0.25, 1, 0.25, 1}, {0.4, 0.4, 1, 1}, {1, 0.95, 0.2, 1}, {0.25, 0.95, 0.95, 1}, {1, 0.3, 0.95, 1}}
 
 spawn_agents :: proc(engine: ^mjolnir.Engine) {
+  ok: bool
+  agent_crowd, ok = crowd.create_crowd(AGENT_COUNT, AGENT_RADIUS, &navmesh.detour_mesh)
+  if !ok { log.error("crowd creation failed"); return }
+  params := crowd.Crowd_Agent_Params {
+    radius                  = AGENT_RADIUS,
+    height                  = AGENT_HEIGHT,
+    max_acceleration        = 8.0,
+    max_speed               = AGENT_SPEED,
+    collision_query_range   = AGENT_RADIUS * 12,
+    path_optimization_range = AGENT_RADIUS * 30,
+    separation_weight       = 2.0,
+    update_flags            = (1 << u8(crowd.Update_Flags.Anticipate_Turns)) |
+                              (1 << u8(crowd.Update_Flags.Obstacle_Avoidance)) |
+                              (1 << u8(crowd.Update_Flags.Separation)) |
+                              (1 << u8(crowd.Update_Flags.Optimize_Vis)),
+  }
   for i in 0 ..< AGENT_COUNT {
     angle := f32(i) / f32(AGENT_COUNT) * math.PI * 2
     r := SPAWN_RADIUS - 4.0
-    agents[i].pos = {math.cos(angle) * r, 0, math.sin(angle) * r}
+    pos := [3]f32{math.cos(angle) * r, 0, math.sin(angle) * r}
+    agents[i].id = crowd.crowd_add_agent(agent_crowd, pos, &params)
     agents[i].color = palette[i % len(palette)]
-    cap_geom := geometry.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
-    mh := world.create_mesh(&engine.world, cap_geom)
-    mat := world.create_material(&engine.world, type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4)
-    agents[i].node = world.spawn(&engine.world, agents[i].pos + {0, AGENT_HEIGHT * 0.5, 0}, world.MeshAttachment{handle = mh, material = mat, cast_shadow = true})
+    cap_geom := mesh.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
+    mh := render.create_mesh(&engine.render, cap_geom)
+    mat := render.create_material(&engine.render, type = .PBR, base_color_factor = agents[i].color, emissive_value = 0.4)
+    agents[i].node = mjolnir.spawn(engine, pos + {0, AGENT_HEIGHT * 0.5, 0}, render.MeshAttachment{handle = mh, material = mat, cast_shadow = true})
   }
 }
 
 assign_swap_targets :: proc(engine: ^mjolnir.Engine) {
-  for i in 0 ..< AGENT_COUNT {
-    agents[i].goal = random_goal(engine, agents[i].pos)
-    replan(engine, &agents[i])
+  if agent_crowd == nil do return
+  for a in agents {
+    if a.id < 0 do continue
+    crowd.crowd_move_to(agent_crowd, a.id, random_goal(engine, crowd.crowd_get_agent(agent_crowd, a.id).npos))
   }
 }
 
 assign_all_to :: proc(engine: ^mjolnir.Engine, goal: [3]f32) {
-  for i in 0 ..< AGENT_COUNT {
-    agents[i].goal = goal
-    replan(engine, &agents[i])
+  if agent_crowd == nil do return
+  for a in agents {
+    if a.id >= 0 do crowd.crowd_move_to(agent_crowd, a.id, goal)
   }
 }
 
@@ -143,24 +167,18 @@ pick_navmesh_point :: proc(engine: ^mjolnir.Engine) -> ([3]f32, bool) {
     t := -ro.y / rd.y
     if t > 0 && t < 1000 {
       hit := ro + rd * t
-      if p, hit_ok := nav.find_nearest_point(&engine.nav, hit, {2, 5, 2}); hit_ok do return p, true
+      if p, hit_ok := nav.nearest_point(&navmesh, hit, {2, 5, 2}); hit_ok do return p, true
     }
   }
   samples := [?]f32{5, 10, 15, 20, 25, 30, 40, 60}
   for dist in samples {
-    if p, hit_ok := nav.find_nearest_point(&engine.nav, ro + rd * dist, {5, 10, 5}); hit_ok do return p, true
+    if p, hit_ok := nav.nearest_point(&navmesh, ro + rd * dist, {5, 10, 5}); hit_ok do return p, true
   }
   return {}, false
 }
 
-replan :: proc(engine: ^mjolnir.Engine, a: ^Agent) {
-  delete(a.path)
-  a.path = nav.find_path(&engine.nav, a.pos, a.goal, 128)
-  a.waypoint_idx = 0
-}
-
-on_mouse_press :: proc(engine: ^mjolnir.Engine, button, action, mods: int) {
-  if action != glfw.PRESS || button != glfw.MOUSE_BUTTON_RIGHT do return
+on_mouse_press :: proc(engine: ^mjolnir.Engine, button: platform.MouseButton, action: platform.Action) {
+  if action != .PRESS || button != .RIGHT do return
   pos, ok := pick_navmesh_point(engine)
   if !ok { log.warn("No navmesh point under cursor"); return }
   assign_all_to(engine, pos)
@@ -168,60 +186,31 @@ on_mouse_press :: proc(engine: ^mjolnir.Engine, button, action, mods: int) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  for i in 0 ..< AGENT_COUNT {
-    a := &agents[i]
-    desired_dir := [3]f32{0, 0, 0}
-    if len(a.path) > 0 && a.waypoint_idx < len(a.path) {
-      target := a.path[a.waypoint_idx]
-      diff := target - a.pos; diff.y = 0
-      dist := linalg.length(diff)
-      if dist < WAYPOINT_TOLERANCE do a.waypoint_idx += 1
-      else                         do desired_dir = diff / dist
+  if agent_crowd == nil do return
+  crowd.crowd_update(agent_crowd, dt)
+  for a in agents {
+    if a.id < 0 do continue
+    ag := crowd.crowd_get_agent(agent_crowd, a.id)
+    world.translate(&engine.world, a.node, ag.npos + {0, AGENT_HEIGHT * 0.5, 0})
+    if linalg.length2(ag.vel.xz) > 0.01 {
+      world.rotate(&engine.world, a.node, math.atan2(ag.vel.x, ag.vel.z), linalg.VECTOR3F32_Y_AXIS)
     }
-
-    sep := [3]f32{0, 0, 0}; n_sep := 0
-    for j in 0 ..< AGENT_COUNT {
-      if i == j do continue
-      diff := a.pos - agents[j].pos; diff.y = 0
-      d2 := linalg.length2(diff)
-      if d2 < 0.0001 || d2 > SEPARATION_RADIUS * SEPARATION_RADIUS do continue
-      d := math.sqrt(d2)
-      sep += (diff / d) * (1.0 - d / SEPARATION_RADIUS)
-      n_sep += 1
-    }
-    if n_sep > 0 do sep /= f32(n_sep)
-
-    move := desired_dir + sep * 1.5
-    if linalg.length2(move) > 0.0001 {
-      move = linalg.normalize(move)
-      a.velocity = move * AGENT_SPEED
-      a.pos += a.velocity * dt
-    } else {
-      a.velocity = {0, 0, 0}
-    }
-
-    world.translate(&engine.world, a.node, a.pos + {0, AGENT_HEIGHT * 0.5, 0})
-    if linalg.length2(a.velocity.xz) > 0.01 {
-      yaw := math.atan2(a.velocity.x, a.velocity.z)
-      world.rotate(&engine.world, a.node, yaw, linalg.VECTOR3F32_Y_AXIS)
-    }
-    draw_agent_path(engine, a)
+    draw_agent_corners(engine, ag, a.color)
   }
 }
 
-draw_agent_path :: proc(engine: ^mjolnir.Engine, a: ^Agent) {
-  if len(a.path) == 0 || a.waypoint_idx >= len(a.path) do return
+// The agent's next steering corners along its corridor.
+draw_agent_corners :: proc(engine: ^mjolnir.Engine, ag: ^crowd.Crowd_Agent, color: [4]f32) {
   lift := [3]f32{0, 0.15, 0}
-  prev := a.pos + lift
-  for i in a.waypoint_idx ..< len(a.path) {
-    p := a.path[i] + lift
-    mjolnir.debug_segment(engine, prev, p, a.color)
-    prev = p
+  prev := ag.npos + lift
+  for p in ag.corner_verts[:ag.ncorners] {
+    render.debug_segment(&engine.render, prev, p + lift, color)
+    prev = p + lift
   }
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Crowd", {720, 20, 260, 200}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("Agents: %d", AGENT_COUNT))
     mu.label(ctx, "Right-click: set all goals")

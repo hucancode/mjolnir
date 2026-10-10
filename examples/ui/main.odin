@@ -1,10 +1,8 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/gpu"
-import cmd "../../mjolnir/gpu/ui"
+import "../../mjolnir/render"
 import "../../mjolnir/ui"
-import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 
@@ -13,20 +11,20 @@ label: ui.Text2DHandle
 star: ui.Mesh2DHandle
 image_quad: ui.Quad2DHandle
 
-create_star_mesh :: proc(center: [2]f32, outer_radius, inner_radius: f32, color: [4]u8) -> (vertices: []cmd.Vertex2D, indices: []u32) {
-  vertices = make([]cmd.Vertex2D, 11)
+create_star_mesh :: proc(center: [2]f32, outer_radius, inner_radius: f32, color: [4]u8) -> (vertices: []ui.Vertex2D, indices: []u32) {
+  vertices = make([]ui.Vertex2D, 11)
   indices = make([]u32, 30)
-  vertices[0] = cmd.Vertex2D{pos = center, uv = {0.5, 0.5}, color = color}
+  vertices[0] = ui.Vertex2D{pos = center, uv = {0.5, 0.5}, color = color}
   for i in 0 ..< 5 {
     angle := f32(i) * (2.0 * math.PI / 5.0) - math.PI / 2.0
     outer_idx := 1 + i * 2
-    vertices[outer_idx] = cmd.Vertex2D{
+    vertices[outer_idx] = ui.Vertex2D{
       pos = {center.x + math.cos(angle) * outer_radius, center.y + math.sin(angle) * outer_radius},
       uv = {0.5 + math.cos(angle) * 0.5, 0.5 + math.sin(angle) * 0.5}, color = color,
     }
     inner_angle := angle + (math.PI / 5.0)
     inner_idx := 2 + i * 2
-    vertices[inner_idx] = cmd.Vertex2D{
+    vertices[inner_idx] = ui.Vertex2D{
       pos = {center.x + math.cos(inner_angle) * inner_radius, center.y + math.sin(inner_angle) * inner_radius},
       uv = {0.5 + math.cos(inner_angle) * 0.3, 0.5 + math.sin(inner_angle) * 0.3}, color = color,
     }
@@ -40,7 +38,12 @@ create_star_mesh :: proc(center: [2]f32, outer_radius, inner_radius: f32, color:
 }
 
 main :: proc() {
-  mjolnir.run_app({title = "UI", width = 800, height = 700, setup = setup})
+  mjolnir.run_app({
+    title = "UI",
+    width = 800,
+    height = 700,
+    setup = setup,
+  })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -54,11 +57,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
   star, star_ok := ui.create_mesh2d(&engine.ui, position = {0, 0}, vertices = star_vertices, indices = star_indices, z_order = 1)
   log.infof("Star mesh created: handle=%v, ok=%v", star, star_ok)
 
-  star_texture, texture_ret := gpu.create_texture_2d_from_path(&engine.gctx, &engine.render.texture_manager, "assets/gold-star.png")
+  star_texture, texture_ret := render.create_texture_from_path(&engine.render, "assets/gold-star.png")
   log.infof("Star texture loaded: handle=%v, ret=%v", star_texture, texture_ret)
 
   if texture_ret == .SUCCESS {
-    image_quad, image_quad_ok := ui.create_quad2d(&engine.ui, position = {350, 300}, size = {128, 128}, texture = star_texture, z_order = 1)
+    image_quad, image_quad_ok := ui.create_quad2d(&engine.ui, position = {350, 300}, size = {128, 128}, texture = star_texture.index, z_order = 1)
     log.infof("Image quad created: handle=%v, ok=%v", image_quad, image_quad_ok)
   }
 
@@ -105,6 +108,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   image_label, image_label_ok := ui.create_text2d(&engine.ui, position = {300, 440}, text = "Image display using Quad2D with texture", font_size = 20, color = {255, 255, 255, 255}, z_order = 1)
   log.infof("Image label created: handle=%v, ok=%v", image_label, image_label_ok)
 
-  world.spawn_primitive_mesh(&engine.world, .CUBE, .BLUE)
-  world.main_camera_look_at(&engine.world, {3, 2, 3}, {0, 0, 0})
+  mjolnir.spawn_primitive_mesh(engine, .CUBE, .BLUE)
+  render.main_camera_look_at(&engine.render, {3, 2, 3}, {0, 0, 0})
 }

@@ -5,7 +5,6 @@ import "../geometry"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:mem"
 import "core:thread"
 import "core:time"
 
@@ -189,9 +188,9 @@ shutdown :: proc(self: ^World) {
     thread.pool_join(&self.thread_pool)
     thread.pool_destroy(&self.thread_pool)
   }
-  cont.destroy(self.bodies, proc(body: ^DynamicRigidBody) {})
-  cont.destroy(self.static_bodies, proc(body: ^StaticRigidBody) {})
-  cont.destroy(self.trigger_bodies, proc(body: ^TriggerBody) {})
+  cont.destroy(&self.bodies, proc(body: ^DynamicRigidBody) {})
+  cont.destroy(&self.static_bodies, proc(body: ^StaticRigidBody) {})
+  cont.destroy(&self.trigger_bodies, proc(body: ^TriggerBody) {})
   delete(self.trigger_overlaps)
   delete(self.trigger_static_overlaps)
   delete(self.body_bounds)
@@ -248,6 +247,7 @@ create_dynamic_body :: proc(
   rotation := linalg.QUATERNIONF32_IDENTITY,
   mass: f32 = 1.0,
   collider: Collider = {},
+  user: cont.Handle = {},
 ) -> (
   handle: DynamicRigidBodyHandle,
   ok: bool,
@@ -256,6 +256,8 @@ create_dynamic_body :: proc(
   handle, body = cont.alloc(&self.bodies, DynamicRigidBodyHandle) or_return
   rigid_body_init(body, position, rotation, mass)
   body.collider = collider
+  set_inertia_from_collider(body, collider)
+  body.user = user
   return handle, true
 }
 
@@ -264,6 +266,7 @@ create_static_body :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   collider: Collider = {},
+  user: cont.Handle = {},
 ) -> (
   handle: StaticRigidBodyHandle,
   ok: bool,
@@ -275,6 +278,7 @@ create_static_body :: proc(
   ) or_return
   static_rigid_body_init(body, position, rotation)
   body.collider = collider
+  body.user = user
   return handle, true
 }
 
@@ -704,6 +708,7 @@ create_trigger :: proc(
   position: [3]f32 = {0, 0, 0},
   rotation := linalg.QUATERNIONF32_IDENTITY,
   collider: Collider = {},
+  user: cont.Handle = {},
 ) -> (
   handle: TriggerHandle,
   ok: bool,
@@ -713,6 +718,7 @@ create_trigger :: proc(
   body.position = position
   body.rotation = rotation
   body.collider = collider
+  body.user = user
   update_cached_aabb(&body.base)
   return handle, true
 }
@@ -754,4 +760,25 @@ set_trigger_transform :: proc(
   body.position = position
   body.rotation = rotation
   update_cached_aabb(&body.base)
+}
+
+BodyPose :: struct {
+  user:     cont.Handle,
+  position: [3]f32,
+  rotation: quaternion128,
+}
+
+// Poses of awake dynamic bodies that have a `user` link, for copying back
+// into a scene graph after `step`.
+body_poses :: proc(
+  self: ^World,
+  allocator := context.temp_allocator,
+) -> []BodyPose {
+  poses := make([dynamic]BodyPose, 0, len(self.bodies.entries), allocator)
+  for &entry in self.bodies.entries {
+    body := &entry.item
+    if !entry.active || body.is_sleeping || body.user == {} do continue
+    append(&poses, BodyPose{body.user, body.position, body.rotation})
+  }
+  return poses[:]
 }

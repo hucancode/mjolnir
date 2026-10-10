@@ -1,4 +1,9 @@
-package ui_commands
+// 2D draw commands: the data contract between a 2D producer (ui) and a 2D
+// renderer (render/ui). Plain data, no dependencies.
+package draw2d
+
+// texture_id value meaning "untextured"; the renderer substitutes a white texture.
+NO_TEXTURE :: max(u32)
 
 DrawQuadCommand :: struct {
 	position:   [2]f32,
@@ -16,11 +21,11 @@ DrawTextGlyph :: struct {
 	color: [4]u8,
 }
 
+// Glyph uvs index the producer's font atlas, which the renderer owns on the GPU.
 DrawTextCommand :: struct {
-	position:       [2]f32,
-	glyphs:         []DrawTextGlyph,
-	font_atlas_id:  u32,
-	z_order:        i32,
+	position: [2]f32,
+	glyphs:   []DrawTextGlyph,
+	z_order:  i32,
 }
 
 Vertex2D :: struct {

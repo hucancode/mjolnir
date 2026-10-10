@@ -1,7 +1,6 @@
 package recast
 
 import "core:log"
-import "core:math"
 import "core:testing"
 import "core:time"
 
@@ -9,7 +8,7 @@ import "core:time"
 test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Test 1: Zero area triangle (collinear points)
   vertices_collinear := [][3]f32 {
     {0, 0, 0}, // 0
@@ -54,7 +53,7 @@ test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
 test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Nearly collinear points (very thin triangle)
   epsilon := f32(1e-6)
   vertices := [][3]f32 {
@@ -92,7 +91,7 @@ test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
     0.05,
   )
   testing.expect(t, hf != nil, "Failed to create high-res heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Triangle smaller than one cell
   triangle_size := cell_size * 0.8
   vertices := [][3]f32 {
@@ -126,7 +125,7 @@ test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
 test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
   hf := create_heightfield(20, 20, {0, 0, 0}, {10, 10, 10}, 0.5, 0.1)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   tiny_size := f32(0.01)
   // Test tiny triangles at various positions
   test_positions := [][2]f32 {
@@ -153,7 +152,7 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
 test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Large triangle spanning many cells
   vertices := [][3]f32 {
     {1, 1, 1}, // 0
@@ -184,7 +183,7 @@ test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
 test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Triangle that partially covers several cells
   vertices := [][3]f32 {
     {2.2, 1, 2.3}, // 0 - offset from cell centers
@@ -220,7 +219,7 @@ test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
 test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Triangle with coordinates that might cause precision issues
   vertices := [][3]f32 {
     {2.0000001, 1, 2.0000001}, // 0 - tiny offset from grid
@@ -265,7 +264,7 @@ test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
     hf != nil,
     "Failed to create heightfield with extreme coordinates",
   )
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Triangle within the extreme coordinate space
   vertices := [][3]f32 {
     {large_offset + 2, 1, large_offset + 2},
@@ -294,7 +293,7 @@ test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
 test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.2)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Sloped triangle with height variation
   vertices := [][3]f32 {
     {2, 1, 2}, // 0 - low
@@ -329,7 +328,7 @@ test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
 test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Vertical triangle (wall)
   vertices := [][3]f32 {
     {3, 0, 3}, // 0 - bottom
@@ -353,7 +352,7 @@ test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second) // Longer timeout for stress test
   hf := create_heightfield(20, 20, {0, 0, 0}, {20, 20, 20}, 1.0, 0.2)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Generate many small triangles
   triangle_count := 100
   vertices := make([][3]f32, triangle_count * 3)
@@ -410,7 +409,7 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
   areas := []u8{RC_WALKABLE_AREA}
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 0, 5}, 1.0, 0.2)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   ok := rasterize_triangles(verts, tris, areas, hf, 1)
   testing.expect(t, hf != nil, "Failed to rasterize triangle")
   // Validate specific cells that should be covered by the triangle
@@ -462,7 +461,7 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
 @(test)
 test_triangle_rasterization :: proc(t: ^testing.T) {
   hf := create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   testing.expect(t, hf != nil, "Failed to create heightfield")
   // Test single triangle rasterization
   v0 := [3]f32{2, 1, 2}

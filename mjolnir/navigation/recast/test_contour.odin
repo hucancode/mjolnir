@@ -1,19 +1,14 @@
 package recast
 
-import "core:fmt"
 import "core:log"
 import "core:math"
-import "core:math/linalg"
-import "core:slice"
-import "core:strings"
 import "core:testing"
-import "core:time"
 
 @(test)
 test_build_contours_with_holes :: proc(t: ^testing.T) {
   hf := create_heightfield(8, 8, {0, 0, 0}, {8, 8, 8}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create walkable area with hole in middle
   // Outer area: 6x6
   for x in 1 ..= 6 {
@@ -32,7 +27,7 @@ test_build_contours_with_holes :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to allocate compact heightfield")
   ok := build_distance_field(chf)
   testing.expect(t, ok, "Failed to build distance field")
@@ -40,7 +35,7 @@ test_build_contours_with_holes :: proc(t: ^testing.T) {
   testing.expect(t, ok, "Failed to build regions")
   // Build contours
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   testing.expect(t, contour_set != nil, "Failed to build contours with holes")
   // Should generate contours including hole boundaries
   testing.expect(
@@ -54,7 +49,7 @@ test_build_contours_with_holes :: proc(t: ^testing.T) {
 test_contour_simplification_accuracy :: proc(t: ^testing.T) {
   hf := create_heightfield(6, 6, {0, 0, 0}, {6, 6, 6}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create simple rectangular area
   for x in 1 ..= 4 {
     for z in 1 ..= 4 {
@@ -62,14 +57,14 @@ test_contour_simplification_accuracy :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 2, 8, 20) // Reduced border size to allow interior spans
   // Test different simplification levels
   simplification_levels := []f32{0.0, 1.0, 2.0}
   for level in simplification_levels {
     contour_set := create_contour_set(chf, level, 1, {.WALL_EDGES})
-    defer free_contour_set(contour_set)
+    defer destroy_contour_set(contour_set)
     testing.expect(t, ok, "Failed to build contours with simplification")
     if len(contour_set.conts) > 0 {
       contour := &contour_set.conts[0]
@@ -89,7 +84,7 @@ test_contour_simplification_accuracy :: proc(t: ^testing.T) {
 test_contour_edge_length_constraints :: proc(t: ^testing.T) {
   hf := create_heightfield(8, 8, {0, 0, 0}, {8, 8, 8}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create long thin walkable area
   for x in 1 ..= 6 {
     for z in 3 ..= 4 {
@@ -97,7 +92,7 @@ test_contour_edge_length_constraints :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 1, 10, 10)
   // Test different max edge lengths
@@ -109,7 +104,7 @@ test_contour_edge_length_constraints :: proc(t: ^testing.T) {
       max_edge_len,
       {.WALL_EDGES},
     )
-    defer free_contour_set(contour_set)
+    defer destroy_contour_set(contour_set)
     testing.expect(
       t,
       ok,
@@ -122,7 +117,7 @@ test_contour_edge_length_constraints :: proc(t: ^testing.T) {
 test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
   hf := create_heightfield(6, 6, {0, 0, 0}, {6, 6, 6}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create simple area
   for x in 2 ..= 4 {
     for z in 2 ..= 4 {
@@ -130,12 +125,12 @@ test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 1, 10, 10)
   // Test with wall edge tessellation
   contour_set_wall := create_contour_set(chf, 1.0, 3, {.WALL_EDGES})
-  defer free_contour_set(contour_set_wall)
+  defer destroy_contour_set(contour_set_wall)
   testing.expect(t, ok, "Failed to build contours with wall edge tessellation")
 }
 
@@ -143,7 +138,7 @@ test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
 test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
   hf := create_heightfield(6, 6, {0, 0, 0}, {6, 6, 6}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create simple area
   for x in 2 ..= 4 {
     for z in 2 ..= 4 {
@@ -151,12 +146,12 @@ test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 1, 10, 10)
   // Test with area edge tessellation
   contour_set_area := create_contour_set(chf, 1.0, 3, {.AREA_EDGES})
-  defer free_contour_set(contour_set_area)
+  defer destroy_contour_set(contour_set_area)
   testing.expect(t, ok, "Failed to build contours with area edge tessellation")
 }
 
@@ -164,7 +159,7 @@ test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
 test_contour_boundary_vertices :: proc(t: ^testing.T) {
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Add walkable area touching boundaries
   for x in 0 ..= 4 {   // Full width
     for z in 0 ..= 4 {   // Full height
@@ -172,11 +167,11 @@ test_contour_boundary_vertices :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 1, 20, 20)
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   testing.expect(t, ok, "Failed to build contours touching boundaries")
   testing.expect(
     t,
@@ -197,7 +192,7 @@ test_contour_boundary_vertices :: proc(t: ^testing.T) {
 test_contour_l_shaped_region :: proc(t: ^testing.T) {
   hf := create_heightfield(8, 8, {0, 0, 0}, {8, 8, 8}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Create L-shaped walkable area
   // Vertical part of L
   for x in 2 ..= 3 {
@@ -212,11 +207,11 @@ test_contour_l_shaped_region :: proc(t: ^testing.T) {
     }
   }
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   ok := build_distance_field(chf)
   ok = build_regions(chf, 1, 10, 15) // Reduced for L-shaped region (18 spans total)
   contour_set := create_contour_set(chf, 1.0, 2, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   testing.expect(t, ok, "Failed to build L-shaped contours")
   testing.expect(
     t,
@@ -239,9 +234,9 @@ test_contour_l_shaped_region :: proc(t: ^testing.T) {
 test_contour_generation_empty_input :: proc(t: ^testing.T) {
   hf := create_heightfield(5, 5, {0, 0, 0}, {5, 5, 5}, 1.0, 0.5)
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   chf := create_compact_heightfield(2, 1, hf)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(
     t,
     chf != nil,
@@ -256,7 +251,7 @@ test_contour_generation_empty_input :: proc(t: ^testing.T) {
   ok = build_regions(chf, 1, 10, 10)
   testing.expect(t, ok, "Should build regions even with no walkable area")
   contour_set := create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
-  defer free_contour_set(contour_set)
+  defer destroy_contour_set(contour_set)
   testing.expect(t, ok, "Should succeed even with no walkable areas")
   // Should have no contours
   testing.expect_value(t, len(contour_set.conts), 0)
@@ -266,7 +261,7 @@ test_contour_generation_empty_input :: proc(t: ^testing.T) {
 test_contour_generation_simple :: proc(t: ^testing.T) {
   // Create a simple 5x5 heightfield with one region
   chf := new(Compact_Heightfield)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   chf.width = 5
   chf.height = 5
   chf.cs = 0.3
@@ -309,7 +304,7 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
   }
   // Build contours
   cset := create_contour_set(chf, 1.0, 10)
-  defer free_contour_set(cset)
+  defer destroy_contour_set(cset)
   result := (cset != nil)
   testing.expect(t, result, "Contour building should succeed")
   testing.expect(
@@ -338,7 +333,7 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
 test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
   // Create a 10x10 heightfield with two separate regions
   chf := new(Compact_Heightfield)
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   chf.width = 10
   chf.height = 10
   chf.cs = 0.3
@@ -385,7 +380,7 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
   }
   // Build contours
   cset := create_contour_set(chf, 1.0, 10)
-  defer free_contour_set(cset)
+  defer destroy_contour_set(cset)
   result := (cset != nil)
   testing.expect(t, result, "Contour building should succeed")
   testing.expect(
@@ -566,7 +561,7 @@ test_contour_simplification :: proc(t: ^testing.T) {
 test_simple_square_mesh :: proc(t: ^testing.T) {
   // Create a contour set with a simple square
   cset := new(Contour_Set)
-  defer free_contour_set(cset)
+  defer destroy_contour_set(cset)
   // Set up contours with append instead
   append(&cset.conts, Contour{})
   cset.bmin = {0, 0, 0}
@@ -585,7 +580,7 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
   cont.verts[3] = {10, 5, 0, 0} // Bottom-right
   // Build polygon mesh
   pmesh := create_poly_mesh(cset, 6)
-  defer free_poly_mesh(pmesh)
+  defer destroy_poly_mesh(pmesh)
   testing.expect(
     t,
     pmesh != nil,
@@ -604,7 +599,7 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
 test_simple_l_shape_mesh :: proc(t: ^testing.T) {
   // Create a contour set with a simple L-shape
   cset := new(Contour_Set)
-  defer free_contour_set(cset)
+  defer destroy_contour_set(cset)
   // Set up contours with append instead
   append(&cset.conts, Contour{})
   cset.bmin = {0, 0, 0}
@@ -632,7 +627,7 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
   }
   // Build polygon mesh
   pmesh := create_poly_mesh(cset, 6)
-  defer free_poly_mesh(pmesh)
+  defer destroy_poly_mesh(pmesh)
   testing.expect(
     t,
     pmesh != nil,
@@ -655,7 +650,7 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
 test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
   // Create a contour set with an L-shaped region
   cset := new(Contour_Set)
-  defer free_contour_set(cset)
+  defer destroy_contour_set(cset)
   // Set up contours with append instead
   append(&cset.conts, Contour{})
   cset.bmin = {0, 0, 0}
@@ -676,7 +671,7 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
   cont.verts[5] = {20, 5, 0, 0} // Bottom-right
   // Build polygon mesh
   pmesh := create_poly_mesh(cset, 6)
-  defer free_poly_mesh(pmesh)
+  defer destroy_poly_mesh(pmesh)
   testing.expect(
     t,
     pmesh != nil,

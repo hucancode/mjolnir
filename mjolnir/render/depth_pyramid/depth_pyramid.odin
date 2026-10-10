@@ -1,7 +1,7 @@
 package depth_pyramid
 
-import alg "../../algebra"
-import "../../gpu"
+import "../bindless"
+import "../gpu"
 import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
@@ -21,7 +21,7 @@ System :: struct {
 
 // DepthPyramid - Hierarchical depth buffer for occlusion culling (GPU resource)
 DepthPyramid :: struct {
-  texture:      gpu.Texture2DHandle,
+  texture:      bindless.Texture2DHandle,
   views:        [MAX_DEPTH_MIPS_LEVEL]vk.ImageView,
   full_view:    vk.ImageView,
   sampler:      vk.Sampler,
@@ -90,12 +90,12 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
 setup_pyramid :: proc(
   gctx: ^gpu.GPUContext,
   pyramid: ^DepthPyramid,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
   extent: vk.Extent2D,
 ) -> vk.Result {
   extent := vk.Extent2D{max(1, extent.width / 2), max(1, extent.height / 2)}
-  mip_levels := alg.log2_greater_than(max(extent.width, extent.height))
-  pyramid_handle := gpu.allocate_texture_2d(
+  mip_levels := u32(math.floor(math.log2(f32(max(extent.width, extent.height))))) + 1
+  pyramid_handle := bindless.allocate_texture_2d(
     texture_manager,
     gctx,
     extent,
@@ -104,7 +104,7 @@ setup_pyramid :: proc(
     true, // generate_mips
   ) or_return
 
-  pyramid_texture := gpu.get_texture_2d(texture_manager, pyramid_handle)
+  pyramid_texture := bindless.get_texture_2d(texture_manager, pyramid_handle)
   if pyramid_texture == nil {
     log.error("Failed to get allocated depth pyramid texture")
     return .ERROR_OUT_OF_DEVICE_MEMORY
@@ -202,7 +202,7 @@ setup_pyramid :: proc(
 destroy_pyramid :: proc(
   gctx: ^gpu.GPUContext,
   pyramid: ^DepthPyramid,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
 ) {
   if pyramid.mip_levels == 0 do return
 
@@ -212,7 +212,7 @@ destroy_pyramid :: proc(
   vk.DestroyImageView(gctx.device, pyramid.full_view, nil)
   vk.DestroySampler(gctx.device, pyramid.sampler, nil)
 
-  gpu.free_texture_2d(texture_manager, gctx, pyramid.texture)
+  bindless.free_texture_2d(texture_manager, gctx, pyramid.texture)
 
   pyramid^ = {}
 }

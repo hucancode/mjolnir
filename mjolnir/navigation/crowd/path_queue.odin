@@ -1,6 +1,5 @@
 package crowd
 
-import "core:math"
 import "../recast"
 import "../detour"
 

@@ -1,16 +1,30 @@
 package geometry
 
 import "core:log"
-import "core:math/linalg"
 import "core:os"
 import "core:strconv"
 import "core:strings"
 
+// Triangle mesh read from a Wavefront OBJ file: positions and triangulated
+// faces only.
+ObjMesh :: struct {
+  positions: [][3]f32,
+  indices:   []u32,
+}
+
+obj_mesh_destroy :: proc(self: ^ObjMesh) {
+  delete(self.positions)
+  delete(self.indices)
+  self^ = {}
+}
+
+// Load the vertex positions and faces (fan-triangulated) of an OBJ file,
+// scaled by `scale`.
 load_obj :: proc(
   filename: string,
   scale: f32 = 1.0,
 ) -> (
-  geom: Geometry,
+  obj: ObjMesh,
   ok: bool,
 ) {
   data, err := os.read_entire_file(filename, context.allocator)
@@ -20,9 +34,7 @@ load_obj :: proc(
   lines := strings.split_lines(content)
   defer delete(lines)
   positions: [dynamic][3]f32
-  defer delete(positions)
   indices: [dynamic]u32
-  // NOTE: don't defer delete(indices) - ownership transferred to Geometry
   for line in lines {
     trimmed := strings.trim_space(line)
     if len(trimmed) == 0 || trimmed[0] == '#' do continue
@@ -80,57 +92,11 @@ load_obj :: proc(
       }
     }
   }
-  vertex_count := len(positions)
-  if vertex_count == 0 || len(indices) == 0 {
+  if len(positions) == 0 || len(indices) == 0 {
     log.errorf("No valid geometry found in OBJ file: %s", filename)
+    delete(positions)
+    delete(indices)
     return {}, false
   }
-  vertices := make([]Vertex, vertex_count)
-  vertex_normals := make([][3]f32, vertex_count)
-  vertex_normal_counts := make([]int, vertex_count)
-  defer delete(vertex_normals)
-  defer delete(vertex_normal_counts)
-  // Process each triangle to calculate face normals
-  for i := 0; i < len(indices); i += 3 {
-    idx0 := indices[i]
-    idx1 := indices[i + 1]
-    idx2 := indices[i + 2]
-    v0 := positions[idx0]
-    v1 := positions[idx1]
-    v2 := positions[idx2]
-    e0 := v1 - v0
-    e1 := v2 - v0
-    face_normal := linalg.cross(e0, e1)
-    face_normal = linalg.normalize0(face_normal)
-    vertex_normals[idx0] += face_normal
-    vertex_normals[idx1] += face_normal
-    vertex_normals[idx2] += face_normal
-    vertex_normal_counts[idx0] += 1
-    vertex_normal_counts[idx1] += 1
-    vertex_normal_counts[idx2] += 1
-  }
-  for i in 0 ..< vertex_count {
-    vertices[i].position = positions[i]
-    if vertex_normal_counts[i] > 0 {
-      n := vertex_normals[i] / f32(vertex_normal_counts[i])
-      len := linalg.length(n)
-      if len > 0 {
-        vertices[i].normal = n / len
-      } else {
-        vertices[i].normal = linalg.VECTOR3F32_Y_AXIS
-      }
-    } else {
-      vertices[i].normal = linalg.VECTOR3F32_Y_AXIS
-    }
-    // Default color (white)
-    vertices[i].color = [4]f32{1, 1, 1, 1}
-    // Simple UV mapping
-    vertices[i].uv = vertices[i].position.xz * 0.1
-  }
-  // Convert dynamic array to slice - ownership transferred to Geometry
-  indices_slice := indices[:]
-  geom = make_geometry(vertices, indices_slice)
-  // log.infof("Loaded OBJ file: %s", filename)
-  // log.infof("  Vertices: %d, Triangles: %d", len(vertices), len(indices)/3)
-  return geom, true
+  return {positions = positions[:], indices = indices[:]}, true
 }
