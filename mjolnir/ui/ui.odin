@@ -1,67 +1,43 @@
 package ui
 
 import cont "../containers"
-import "../gpu"
-import cmd "../gpu/ui"
+import cmd "../draw2d"
 import "core:log"
-import "core:slice"
 import fs "vendor:fontstash"
-import vk "vendor:vulkan"
 
 System :: struct {
-  widget_pool:      cont.Pool(Widget),
-  default_texture:  gpu.Texture2DHandle,
-  font_context:     ^fs.FontContext,
-  font_atlas:       gpu.Texture2DHandle,
-  font_atlas_dirty: bool,
-  staging:          [dynamic]cmd.RenderCommand,
+  widget_pool:  cont.Pool(Widget),
+  font_context: ^fs.FontContext,
+  staging:      [dynamic]cmd.RenderCommand,
+  hovered:      Maybe(UIWidgetHandle), // widget under the cursor last tick
+  prev_buttons: [MAX_MOUSE_BUTTONS]bool,
 }
 
-init :: proc(self: ^System, max_widgets: u32 = 4096) -> bool {
+MAX_MOUSE_BUTTONS :: 8
+
+DEFAULT_FONT_PATH :: "assets/Outfit-Regular.ttf"
+
+// draw2d types that appear in this package's API.
+Vertex2D :: cmd.Vertex2D
+NO_TEXTURE :: cmd.NO_TEXTURE
+
+init :: proc(
+  self: ^System,
+  max_widgets: u32 = 4096,
+  font_path: string = DEFAULT_FONT_PATH,
+) -> bool {
   cont.init(&self.widget_pool, max_widgets)
   self.staging = make([dynamic]cmd.RenderCommand, 0, 256)
-
   font_atlas_width := 512
   font_atlas_height := 512
   self.font_context = new(fs.FontContext)
   fs.Init(self.font_context, font_atlas_width, font_atlas_height, .TOPLEFT)
-
-  log.info("UI system initialized with fontstash")
-  return true
-}
-
-// Initialize GPU resources (called after GPU context is ready)
-init_gpu_resources :: proc(
-  self: ^System,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
-) {
-  // Create white texture for UI widgets (1x1 white pixel)
-  white_pixel := [4]u8{255, 255, 255, 255}
-  white_tex_result: vk.Result
-  self.default_texture, white_tex_result = gpu.allocate_texture_2d_with_data(
-    texture_manager,
-    gctx,
-    raw_data(white_pixel[:]),
-    vk.DeviceSize(len(white_pixel)),
-    vk.Extent2D{1, 1},
-    .R8G8B8A8_UNORM,
-    {.SAMPLED},
-  )
-  if white_tex_result != .SUCCESS {
-    log.error("Failed to create UI default white texture")
-    return
-  }
-
-  // Add default font
-  default_font_path := "assets/Outfit-Regular.ttf"
-  font_index := fs.AddFont(self.font_context, "default", default_font_path, 0)
+  font_index := fs.AddFont(self.font_context, "default", font_path, 0)
   if font_index == fs.INVALID {
-    log.errorf("Failed to load default font from %s", default_font_path)
-    return
+    log.errorf("Failed to load font from %s", font_path)
+    return false
   }
-
-  // Pre-rasterize common glyphs
+  // Pre-rasterize common glyphs so the first atlas upload covers typical text
   fs.SetFont(self.font_context, font_index)
   fs.SetColor(self.font_context, {255, 255, 255, 255})
   test_string := " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
@@ -72,109 +48,36 @@ init_gpu_resources :: proc(
     quad: fs.Quad
     for fs.TextIterNext(self.font_context, &iter, &quad) {}
   }
-
-  // Create initial font atlas texture
-  self.font_atlas_dirty = true
-  update_font_atlas(self, gctx, texture_manager)
-
-  log.info("UI system GPU resources initialized")
-}
-
-shutdown_gpu_resources :: proc(
-  self: ^System,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
-) {
-  if self.default_texture != (gpu.Texture2DHandle{}) {
-    gpu.free_texture_2d(texture_manager, gctx, self.default_texture)
-    self.default_texture = {}
-  }
-  if self.font_atlas != (gpu.Texture2DHandle{}) {
-    gpu.free_texture_2d(texture_manager, gctx, self.font_atlas)
-    self.font_atlas = {}
-  }
-  log.info("UI system GPU resources released")
+  log.info("UI system initialized with fontstash")
+  return true
 }
 
 shutdown :: proc(self: ^System) {
-  // Clean up all active widgets
-  cont.destroy(self.widget_pool, cleanup_widget)
+  cont.destroy(&self.widget_pool, cleanup_widget)
   delete(self.staging)
-
   if self.font_context != nil {
     fs.Destroy(self.font_context)
     free(self.font_context)
   }
-
   log.info("UI system shutdown")
 }
 
-// Update font atlas texture when dirty
-update_font_atlas :: proc(
+// Font atlas pixels (R8, width x height). changed is true when glyphs were
+// rasterized since the previous call; upload the pixels to the renderer then.
+take_font_atlas :: proc(
   self: ^System,
-  gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
+) -> (
+  pixels: []u8,
+  width, height: u32,
+  changed: bool,
 ) {
-  if !self.font_atlas_dirty do return
   if self.font_context == nil do return
-
-  // Force fontstash to rasterize any pending glyphs
   dirty_rect: [4]f32
-  if fs.ValidateTexture(self.font_context, &dirty_rect) {
-    log.debugf(
-      "Fontstash texture validated, dirty rect: (%.0f,%.0f,%.0f,%.0f)",
-      dirty_rect[0],
-      dirty_rect[1],
-      dirty_rect[2],
-      dirty_rect[3],
-    )
-  }
-
-  // Get atlas data from fontstash
-  atlas_data := self.font_context.textureData
-  width := u32(self.font_context.width)
-  height := u32(self.font_context.height)
-  if len(atlas_data) == 0 {
-    log.warn("Font atlas data is empty, cannot create texture")
-    return
-  }
-
-  log.debugf(
-    "Updating font atlas: %dx%d, data size: %d bytes",
-    width,
-    height,
-    len(atlas_data),
-  )
-
-  // Free old atlas if it exists
-  if self.font_atlas != (gpu.Texture2DHandle{}) {
-    gpu.free_texture_2d(texture_manager, gctx, self.font_atlas)
-  }
-
-  // Create new font atlas texture
-  font_atlas_result: vk.Result
-  self.font_atlas, font_atlas_result = gpu.allocate_texture_2d_with_data(
-    texture_manager,
-    gctx,
-    raw_data(atlas_data),
-    vk.DeviceSize(len(atlas_data)),
-    vk.Extent2D{u32(width), u32(height)},
-    .R8_UNORM,
-    {.SAMPLED},
-  )
-  if font_atlas_result != .SUCCESS {
-    return
-  }
-  self.font_atlas_dirty = false
-}
-
-// Get font atlas texture ID for render commands
-get_font_atlas_id :: proc(self: ^System) -> u32 {
-  if self.font_atlas == (gpu.Texture2DHandle{}) {
-    return 0
-  }
-  handle := transmute(cont.Handle)self.font_atlas
-  return handle.index
+  changed = fs.ValidateTexture(self.font_context, &dirty_rect)
+  pixels = self.font_context.textureData
+  width = u32(self.font_context.width)
+  height = u32(self.font_context.height)
+  return
 }
 
 cleanup_widget :: proc(widget: ^Widget) {
@@ -341,12 +244,11 @@ destroy_widget :: proc(sys: ^System, handle: UIWidgetHandle) {
   cont.free(&sys.widget_pool, handle)
 }
 
-// Generate render commands from widgets (staging list pattern)
-generate_render_commands :: proc(sys: ^System) {
+// Lay out all widgets and return this frame's draw commands. The slice is
+// valid until the next call; glyph data lives in the temp allocator.
+build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
+  compute_layout_all(sys)
   clear(&sys.staging)
-
-  // Get font atlas ID
-  font_atlas_id := get_font_atlas_id(sys)
 
   // Iterate through all widgets and generate commands
   for &entry, i in sys.widget_pool.entries {
@@ -358,23 +260,21 @@ generate_render_commands :: proc(sys: ^System) {
 
     switch &w in widget {
     case Quad2D:
-      raw_handle := transmute(cont.Handle)w.texture
       command := cmd.DrawQuadCommand {
         position   = w.world_position,
         size       = w.size,
         color      = w.color,
-        texture_id = raw_handle.index,
+        texture_id = w.texture,
         z_order    = w.z_order,
       }
       append(&sys.staging, command)
 
     case Mesh2D:
-      raw_handle := transmute(cont.Handle)w.texture
       command := cmd.DrawMeshCommand {
         position   = w.world_position,
         vertices   = w.vertices,
         indices    = w.indices,
-        texture_id = raw_handle.index,
+        texture_id = w.texture,
         z_order    = w.z_order,
       }
       append(&sys.staging, command)
@@ -392,10 +292,9 @@ generate_render_commands :: proc(sys: ^System) {
         }
       }
       command := cmd.DrawTextCommand {
-        position      = w.world_position,
-        glyphs        = glyphs,
-        font_atlas_id = font_atlas_id,
-        z_order       = w.z_order,
+        position = w.world_position,
+        glyphs   = glyphs,
+        z_order  = w.z_order,
       }
       append(&sys.staging, command)
 
@@ -403,4 +302,5 @@ generate_render_commands :: proc(sys: ^System) {
     // Boxes don't render directly
     }
   }
+  return sys.staging[:]
 }

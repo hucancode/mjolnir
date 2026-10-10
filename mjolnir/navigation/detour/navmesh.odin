@@ -1,9 +1,9 @@
 package detour
 
 import "../../geometry"
-import alg "../../algebra"
 import "../recast"
 import "core:math"
+import "core:math/bits"
 import "core:slice"
 
 Poly :: struct {
@@ -321,10 +321,9 @@ nav_mesh_init :: proc(
     nav_mesh.tiles[i].next = nav_mesh.next_free
     nav_mesh.next_free = &nav_mesh.tiles[i]
   }
-  tile_bits_needed := alg.ilog2(alg.next_pow2(u32(params.max_tiles)))
-  poly_bits_needed := alg.ilog2(alg.next_pow2(u32(params.max_polys)))
-  nav_mesh.tile_bits = tile_bits_needed
-  nav_mesh.poly_bits = poly_bits_needed
+  // Bits needed to index n values: ceil(log2(n)).
+  nav_mesh.tile_bits = u32(bits.len_u32(max(u32(params.max_tiles), 1) - 1))
+  nav_mesh.poly_bits = u32(bits.len_u32(max(u32(params.max_polys), 1) - 1))
   nav_mesh.salt_bits = min(31, 32 - nav_mesh.tile_bits - nav_mesh.poly_bits)
   if nav_mesh.salt_bits < 10 do return {.Invalid_Param}
   return {.Success}

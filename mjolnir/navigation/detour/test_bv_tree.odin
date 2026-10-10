@@ -1,11 +1,9 @@
 package detour
 
 import "../recast"
-import "core:log"
 import "core:math"
 import "core:slice"
 import "core:testing"
-import "core:time"
 
 @(test)
 test_bv_tree_construction :: proc(t: ^testing.T) {

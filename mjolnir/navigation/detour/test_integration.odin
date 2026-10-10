@@ -4,7 +4,6 @@ import "../recast"
 import "core:math"
 import "core:math/linalg"
 import "core:testing"
-import "core:time"
 
 // Integration test for priority queue in pathfinding context
 @(test)
@@ -268,8 +267,8 @@ test_navigation_mesh_creation :: proc(t: ^testing.T) {
   )
   testing.expect(t, ok, "Failed to build Recast navigation mesh")
   defer {
-    recast.free_poly_mesh(pmesh)
-    recast.free_poly_mesh_detail(dmesh)
+    recast.destroy_poly_mesh(pmesh)
+    recast.destroy_poly_mesh_detail(dmesh)
   }
   testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")
   testing.expect(t, pmesh.npolys > 0, "Should have at least one polygon")
@@ -380,8 +379,8 @@ test_pathfinding :: proc(t: ^testing.T) {
   )
   testing.expect(t, ok, "Failed to build navigation mesh for pathfinding test")
   defer {
-    recast.free_poly_mesh(pmesh)
-    recast.free_poly_mesh_detail(dmesh)
+    recast.destroy_poly_mesh(pmesh)
+    recast.destroy_poly_mesh_detail(dmesh)
   }
   // Create Detour navigation mesh
   nav_mesh, nav_status := create_nav_mesh(
@@ -542,8 +541,8 @@ test_navigation_edge_cases :: proc(t: ^testing.T) {
       config,
     )
     testing.expect(t, !ok, "Should fail to build navmesh with empty geometry")
-    recast.free_poly_mesh(pmesh)
-    recast.free_poly_mesh_detail(dmesh)
+    recast.destroy_poly_mesh(pmesh)
+    recast.destroy_poly_mesh_detail(dmesh)
   }
   // Test 2: Invalid query positions
   {
@@ -581,8 +580,8 @@ test_navigation_edge_cases :: proc(t: ^testing.T) {
     )
     testing.expect(t, ok, "Should build valid navmesh")
     defer {
-      recast.free_poly_mesh(pmesh)
-      recast.free_poly_mesh_detail(dmesh)
+      recast.destroy_poly_mesh(pmesh)
+      recast.destroy_poly_mesh_detail(dmesh)
     }
     nav_mesh, nav_status := create_nav_mesh(
       &Create_Nav_Mesh_Data_Params {

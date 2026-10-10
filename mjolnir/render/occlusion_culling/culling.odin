@@ -1,21 +1,25 @@
 package occlusion_culling
 
-import alg "../../algebra"
-import "../../gpu"
+import "../gpu"
 import vk "vendor:vulkan"
 
 SHADER_CULLING :: #load("../../shader/occlusion_culling/cull.spv")
 
 // Draw pipelines participate in indirect-draw culling; each camera owns one
-// DrawBuffers per pipeline.
+// DrawBuffers per pipeline. Enum order is the binding order in cull.comp.
 DrawPipeline :: enum {
   OPAQUE,
   TRANSPARENT,
+  SPRITE,
   WIREFRAME,
   RANDOM_COLOR,
   LINE_STRIP,
-  SPRITE,
 }
+
+// Culling set bindings: nodes, meshes, cameras, then a (count, commands)
+// pair per DrawPipeline, then the depth pyramid sampler.
+FIRST_DRAW_BINDING :: 3
+BINDING_COUNT :: FIRST_DRAW_BINDING + 2 * len(DrawPipeline) + 1
 
 DrawBuffers :: struct {
   count:    [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
@@ -56,24 +60,15 @@ init :: proc(
 ) {
   self.max_draws = max_draws
   self.depth_bias = 0.0001
+  bindings: [BINDING_COUNT]struct {
+    type:  vk.DescriptorType,
+    flags: vk.ShaderStageFlags,
+  }
+  for &b in bindings do b = {.STORAGE_BUFFER, {.COMPUTE}}
+  bindings[BINDING_COUNT - 1] = {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}}
   self.depth_descriptor_layout = gpu.create_descriptor_set_layout(
     gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.COMBINED_IMAGE_SAMPLER, {.COMPUTE}},
+    ..bindings[:],
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(

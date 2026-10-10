@@ -1,13 +1,14 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
 import "../../mjolnir/ui"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/rand"
-import "vendor:glfw"
 
 GRID_W :: 20
 GRID_H :: 20
@@ -19,7 +20,7 @@ SOFT_FALL_PERIOD :: f32(0.05)
 
 Piece :: struct {
   cells: [PIECE_LEN][2]i32,
-  color: world.Color,
+  color: render.Color,
 }
 
 PIECES := [?]Piece {
@@ -44,15 +45,15 @@ State :: struct {
   high_score:           u32,
   game_over:            bool,
   has_active:           bool,
-  transparent_material: [len(world.Color)]world.MaterialHandle,
-  opaque_material:      [len(world.Color)]world.MaterialHandle,
+  transparent_material: [len(render.Color)]render.MaterialHandle,
+  opaque_material:      [len(render.Color)]render.MaterialHandle,
   score_label:          ui.Text2DHandle,
   high_label:           ui.Text2DHandle,
 }
 
 PIECE_ALPHA :: f32(0.5)
 
-COLOR_RGB := [len(world.Color)][3]f32 {
+COLOR_RGB := [len(render.Color)][3]f32 {
   {1, 1, 1}, {0, 0, 0}, {0.3, 0.3, 0.3},
   {1, 0, 0}, {0, 1, 0}, {0, 0, 1},
   {1, 1, 0}, {0, 1, 1}, {1, 0, 1},
@@ -72,16 +73,16 @@ cell_world_pos :: proc(col: i32, row: i32) -> [3]f32 {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  ground := world.get_builtin_mesh(&engine.world, .QUAD_XZ)
-  dark_mat := world.create_material(&engine.world, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
-  floor := world.spawn_mesh(&engine.world, ground, dark_mat, cast_shadow = false)
+  ground := render.get_builtin_mesh(&engine.render, .QUAD_XZ)
+  dark_mat := render.create_material(&engine.render, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
+  floor := mjolnir.spawn_mesh(engine, ground, dark_mat, cast_shadow = false)
   world.scale(&engine.world, floor, RADIUS * 6.0)
-  spot := world.spawn_light_spot(&engine.world, {0, 10, 0}, {1, 1, 1, 1}, 12.0, math.PI * 0.35, true)
+  spot := mjolnir.spawn(engine, {0, 10, 0}, render.spot_light_attachment({1, 1, 1, 1}, 12.0, math.PI * 0.35, true))
   world.rotate(&engine.world, spot, math.PI * 0.55, {1, 0, 0})
-  world.main_camera_look_at(&engine.world, {0, 14, 14}, {0, 8, 0})
+  render.main_camera_look_at(&engine.render, {0, 14, 14}, {0, 8, 0})
   for c, i in COLOR_RGB {
-    state.transparent_material[i] = world.create_material(&engine.world, type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA})
-    state.opaque_material[i] = world.create_material(&engine.world, type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0})
+    state.transparent_material[i] = render.create_material(&engine.render, type = .TRANSPARENT, base_color_factor = {c.x, c.y, c.z, PIECE_ALPHA})
+    state.opaque_material[i] = render.create_material(&engine.render, type = .PBR, base_color_factor = {c.x, c.y, c.z, 1.0})
   }
   state.fall_period = FALL_PERIOD
   state.score_label, _ = ui.create_text2d(&engine.ui, position = {20, 20}, text = "Score: 0", font_size = 32, color = {255, 255, 255, 255})
@@ -110,10 +111,10 @@ spawn_piece :: proc(engine: ^mjolnir.Engine) {
   for c in state.active_piece.cells do if c[1] > max_dr do max_dr = c[1]
   state.active_pos = {0, i32(GRID_H) - 1 - max_dr}
   if collides(state.active_piece, state.active_pos) { state.game_over = true; return }
-  cube := world.get_builtin_mesh(&engine.world, .CUBE)
+  cube := render.get_builtin_mesh(&engine.render, .CUBE)
   mat := state.transparent_material[state.active_piece.color]
   for i in 0 ..< PIECE_LEN {
-    h := world.spawn_mesh(&engine.world, cube, mat)
+    h := mjolnir.spawn_mesh(engine, cube, mat)
     state.active_cells[i] = h
     world.scale(&engine.world, h, 0.5 * CELL)
   }
@@ -164,7 +165,7 @@ lock_piece :: proc(engine: ^mjolnir.Engine) {
     row := state.active_pos[1] + c[1]
     state.board[col][row] = state.active_cells[i]
     state.occupied[col][row] = true
-    world.set_material_handle(&engine.world, state.active_cells[i], opaque)
+    render.set_material_handle(&engine.render, state.active_cells[i].index, opaque)
   }
   state.has_active = false
   cleared := clear_lines(engine)
@@ -212,7 +213,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   }
   state.fall_timer += dt
   period := state.fall_period
-  if mjolnir.is_key_down(engine, glfw.KEY_DOWN) do period = SOFT_FALL_PERIOD
+  if platform.input_key_down(&engine.platform.input, .DOWN) do period = SOFT_FALL_PERIOD
   for state.fall_timer >= period {
     state.fall_timer -= period
     drop_step(engine)
@@ -220,14 +221,14 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   }
 }
 
-on_key :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
-  if action != glfw.PRESS do return
+on_key :: proc(engine: ^mjolnir.Engine, key: platform.Key, action: platform.Action) {
+  if action != .PRESS do return
   if state.game_over do return
-  switch key {
-  case glfw.KEY_LEFT:  try_move(engine, 1, 0)
-  case glfw.KEY_RIGHT: try_move(engine, -1, 0)
-  case glfw.KEY_UP:    try_rotate(engine)
-  case glfw.KEY_SPACE:
+  #partial switch key {
+  case .LEFT:  try_move(engine, 1, 0)
+  case .RIGHT: try_move(engine, -1, 0)
+  case .UP:    try_rotate(engine)
+  case .SPACE:
     for try_move(engine, 0, -1) {}
     state.fall_timer = state.fall_period
   }

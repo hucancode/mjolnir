@@ -1,6 +1,5 @@
 package physics
 
-import "core:fmt"
 import "core:math/linalg"
 import "core:testing"
 

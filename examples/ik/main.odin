@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/animation"
 import "../../mjolnir/world"
 import "core:fmt"
@@ -8,7 +9,9 @@ import "core:log"
 import "core:math"
 import mu "vendor:microui"
 
-root_nodes: [dynamic]world.NodeHandle
+scene: mjolnir.GltfScene
+rig: ^animation.Rig
+animator: animation.Animator
 animation_time: f32 = 0
 spider_root_node: world.NodeHandle
 mesh_node: world.NodeHandle
@@ -35,20 +38,21 @@ main :: proc() {
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
+    sync       = sync,
   })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 20, 20}, {0, 0, 0})
+  render.main_camera_look_at(&engine.render, {0, 20, 20}, {0, 0, 0})
 
-  spider_roots := mjolnir.load_gltf(engine, "assets/spider.glb")
-  append(&root_nodes, ..spider_roots[:])
-  if len(spider_roots) == 0 do return
-  spider_root_node = spider_roots[0]
+  scene = mjolnir.load_gltf(engine, "assets/spider.glb")
+  if len(scene.roots) == 0 || len(scene.skinned) == 0 do return
+  spider_root_node = scene.roots[0]
   world.translate(&engine.world, spider_root_node, [3]f32{0, 5, 0})
-  child, has := world.skinned_mesh_child(&engine.world, spider_root_node)
-  if !has do return
-  mesh_node = child
+  mesh_node = scene.skinned[0].node
+  rig = &scene.rigs[scene.skinned[0].rig]
+  skel := &rig.skeleton
+  animation.animator_init(&animator, skel)
 
   leg_configs := []struct{root_name, tip_name: string}{
     {"leg_front_r_0", "leg_front_r_5"},
@@ -64,7 +68,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   deg90 := f32(math.PI / 2.0)
 
   for i in 0 ..< 6 {
-    tip_local, has_tip := world.bone_rest_position(&engine.world, child, leg_configs[i].tip_name)
+    tip_local, has_tip := animation.rest_position(skel, leg_configs[i].tip_name)
     if !has_tip {
       log.warnf("Leg %d: tip %s missing", i, leg_configs[i].tip_name)
       continue
@@ -72,26 +76,31 @@ setup :: proc(engine: ^mjolnir.Engine) {
     leg_targets[i] = {tip_local.x + body_pos.x, 0, tip_local.z + body_pos.z}
 
     pole_pos := [3]f32{0, 10, 0}
-    if root_local, has_root := world.bone_rest_position(&engine.world, child, leg_configs[i].root_name); has_root {
+    if root_local, has_root := animation.rest_position(skel, leg_configs[i].root_name); has_root {
       root_world := root_local + body_pos
       pole_pos = {root_world.x * 0.5, root_world.y + 10, root_world.z * 0.5}
     }
 
     constraints := animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90})
 
-    idx, err := world.add_ik_layer_chain(&engine.world, child, leg_configs[i].root_name, leg_configs[i].tip_name,
+    idx, ok := animation.add_ik_chain_layer(&animator, skel, leg_configs[i].root_name, leg_configs[i].tip_name,
       leg_targets[i], pole_pos, weight = 1.0, constraints = constraints, space = .WORLD,
     )
-    if err != .NONE {
-      log.errorf("IK layer add failed leg %d: %v", i, err)
+    if !ok {
+      log.errorf("IK layer add failed leg %d", i)
+      delete(constraints)
     } else {
       leg_layers[i] = idx
     }
   }
 
-  ground_plane = world.spawn_primitive_mesh(&engine.world, .CUBE, .GRAY)
+  ground_plane = mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY)
   world.scale(&engine.world, ground_plane, [3]f32{40, 0.2, 40})
-  world.spawn_light_directional(&engine.world, color = {1, 1, 1, 1}, radius = 10.0)
+  mjolnir.spawn(engine, attachment = render.directional_light_attachment({1, 1, 1, 1}, 10.0))
+}
+
+sync :: proc(engine: ^mjolnir.Engine) {
+  if rig != nil do render.stage_bones(&engine.render, mesh_node.index, animator.palette)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -113,18 +122,19 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
       target_pos.y += lift * math.max(math.sin(animation_time * spd * math.PI), 0)
     }
     if leg_layers[i] >= 0 {
-      world.set_ik_layer_target(&engine.world, mesh_node, leg_layers[i], target_pos, pole_pos)
-      world.set_animation_layer_weight(&engine.world, mesh_node, leg_layers[i], f32(ik_weight))
+      animation.set_ik_target(&animator, leg_layers[i], target_pos, pole_pos)
+      animation.set_layer_weight(&animator, leg_layers[i], f32(ik_weight))
     }
     if show_markers {
-      mjolnir.debug_sphere(engine, target_pos, 0.5, {1, 0.2, 0.2, 1})
-      mjolnir.debug_sphere(engine, pole_pos, 0.3, {0.3, 0.5, 1, 1})
+      render.debug_sphere(&engine.render, target_pos, 0.5, {1, 0.2, 0.2, 1})
+      render.debug_sphere(&engine.render, pole_pos, 0.3, {0.3, 0.5, 1, 1})
     }
   }
+  if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&engine.world, mesh_node))
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "IK", {480, 20, 300, 560}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Pause", &paused)

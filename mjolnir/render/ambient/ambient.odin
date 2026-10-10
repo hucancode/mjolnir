@@ -1,13 +1,13 @@
 package ambient
 
-import "../../gpu"
-import "../shared"
+import "../bindless"
+import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
 SHADER_VERT :: #load("../../shader/lighting_ambient/vert.spv")
 SHADER_FRAG :: #load("../../shader/lighting_ambient/frag.spv")
-TEXTURE_LUT_GGX :: #load("../../assets/lut_ggx.png")
+TEXTURE_LUT_GGX :: #load("../assets/lut_ggx.png")
 
 PushConstant :: struct {
   camera_index:           u32,
@@ -30,8 +30,8 @@ PushConstant :: struct {
 Renderer :: struct {
   pipeline:           vk.Pipeline,
   pipeline_layout:    vk.PipelineLayout,
-  environment_map:    gpu.Texture2DHandle,
-  brdf_lut:           gpu.Texture2DHandle,
+  environment_map:    bindless.Texture2DHandle,
+  brdf_lut:           bindless.Texture2DHandle,
   ibl:                IBLResults,
   ibl_intensity:      f32,
   skybox_enabled:     bool,
@@ -67,7 +67,7 @@ init :: proc(
   shader_stages := gpu.create_vert_frag_stages(
     vert_module,
     frag_module,
-    &shared.SHADER_SPEC_CONSTANTS,
+    &bindless.SHADER_SPEC_CONSTANTS,
   )
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -101,12 +101,12 @@ init :: proc(
 setup :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
   linear_repeat_sampler: vk.Sampler,
 ) -> (
   ret: vk.Result,
 ) {
-  env_map, env_result := gpu.create_texture_2d_from_path(
+  env_map, env_result := bindless.create_texture_2d_from_path(
     gctx,
     texture_manager,
     "assets/Cannon_Exterior.hdr",
@@ -123,15 +123,15 @@ setup :: proc(
     self.environment_map = {}
   }
   defer if ret != .SUCCESS {
-    gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
+    bindless.free_texture_2d(texture_manager, gctx, self.environment_map)
   }
-  brdf_handle := gpu.create_texture_2d_from_data(
+  brdf_handle := bindless.create_texture_2d_from_data(
     gctx,
     texture_manager,
     TEXTURE_LUT_GGX,
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.free_texture_2d(texture_manager, gctx, brdf_handle)
+    bindless.free_texture_2d(texture_manager, gctx, brdf_handle)
   }
   self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0
@@ -155,12 +155,12 @@ setup :: proc(
 teardown :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
 ) {
   free_results(gctx, texture_manager, &self.ibl)
-  gpu.free_texture_2d(texture_manager, gctx, self.environment_map)
+  bindless.free_texture_2d(texture_manager, gctx, self.environment_map)
   self.environment_map = {}
-  gpu.free_texture_2d(texture_manager, gctx, self.brdf_lut)
+  bindless.free_texture_2d(texture_manager, gctx, self.brdf_lut)
   self.brdf_lut = {}
 }
 
@@ -198,16 +198,12 @@ record :: proc(
   self: ^Renderer,
   camera_handle: u32,
   command_buffer: vk.CommandBuffer,
-  texture_manager: ^gpu.TextureManager,
-  final_image_handle: gpu.Texture2DHandle,
+  texture_manager: ^bindless.TextureManager,
+  final_image_handle: bindless.Texture2DHandle,
   cameras_descriptor_set: vk.DescriptorSet,
-  position_texture_idx: u32,
-  normal_texture_idx: u32,
-  albedo_texture_idx: u32,
-  metallic_texture_idx: u32,
-  emissive_texture_idx: u32,
+  gbuffer: bindless.GBuffer,
 ) {
-  color_texture := gpu.get_texture_2d(texture_manager, final_image_handle)
+  color_texture := bindless.get_texture_2d(texture_manager, final_image_handle)
   gpu.begin_rendering(
     command_buffer,
     color_texture.spec.extent,
@@ -232,11 +228,11 @@ record :: proc(
     prefilter_index        = tex_index(self.ibl.prefilter_cube),
     brdf_lut_index         = tex_index(self.brdf_lut),
     environment_index      = tex_index(self.environment_map),
-    position_texture_index = position_texture_idx,
-    normal_texture_index   = normal_texture_idx,
-    albedo_texture_index   = albedo_texture_idx,
-    metallic_texture_index = metallic_texture_idx,
-    emissive_texture_index = emissive_texture_idx,
+    position_texture_index = gbuffer.position,
+    normal_texture_index   = gbuffer.normal,
+    albedo_texture_index   = gbuffer.albedo,
+    metallic_texture_index = gbuffer.metallic_roughness,
+    emissive_texture_index = gbuffer.emissive,
     prefilter_max_lod      = self.ibl.prefilter_max_lod,
     ibl_intensity          = self.ibl_intensity,
     skybox_intensity       = self.skybox_intensity,

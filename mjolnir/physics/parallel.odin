@@ -1,15 +1,11 @@
 package physics
 
-import cont "../containers"
 import "../geometry"
 import "base:intrinsics"
-import "core:log"
-import "core:math"
 import "core:math/linalg"
 import "core:mem"
 import "core:sync"
 import "core:thread"
-import "core:time"
 
 DEFAULT_THREAD_COUNT :: 16
 

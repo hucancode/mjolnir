@@ -34,9 +34,9 @@ ik_constraints_uniform :: proc(
 
 // Coordinate space for IK target/pole values stored in the layer.
 // LOCAL : already in skeleton-local space. Solver consumes verbatim.
-// WORLD : in world space. sample_layers converts to local each frame
-//         using the current node world matrix, so the target stays fixed
-//         in the world as the rigged node moves.
+// WORLD : in world space. animator_update converts to skeleton space each
+//         update using its root_world argument, so the target stays fixed
+//         in the world as the rigged object moves.
 IKTargetSpace :: enum {
   LOCAL,
   WORLD,

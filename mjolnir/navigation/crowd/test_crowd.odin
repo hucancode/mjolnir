@@ -278,8 +278,8 @@ build_test_navmesh :: proc(t: ^testing.T) -> (^detour.Nav_Mesh, bool) {
 	if !ok {
 		testing.fail_now(t, "build_navmesh failed")
 	}
-	defer recast.free_poly_mesh(pmesh)
-	defer recast.free_poly_mesh_detail(dmesh)
+	defer recast.destroy_poly_mesh(pmesh)
+	defer recast.destroy_poly_mesh_detail(dmesh)
 
 	params := detour.Create_Nav_Mesh_Data_Params {
 		poly_mesh        = pmesh,
@@ -512,4 +512,19 @@ bench_crowd_update :: proc(t: ^testing.T) {
 	testing.expect(t, err == .Okay, "bench failed")
 	log.infof("crowd_update %d ticks in %v, %.0f ticks/sec",
 		opts.rounds, opts.duration, opts.rounds_per_second)
+}
+
+@(test)
+test_crowd_move_to_reaches_goal :: proc(t: ^testing.T) {
+	nav, ok := build_test_navmesh(t)
+	if !ok do return
+	defer destroy_test_navmesh(nav)
+	c, _ := create_crowd(4, 0.6, nav)
+	defer destroy_crowd(c)
+	params := default_agent_params()
+	idx := crowd_add_agent(c, {0, 0, 0}, &params)
+	testing.expect(t, crowd_move_to(c, idx, {5, 0, 5}), "move_to on the mesh must succeed")
+	for _ in 0 ..< 100 do crowd_update(c, 0.1)
+	d := c.agents[idx].npos - {5, 0, 5}
+	testing.expectf(t, d.x * d.x + d.z * d.z < 1.0, "agent should reach the goal, at %v", c.agents[idx].npos)
 }

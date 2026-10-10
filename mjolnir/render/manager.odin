@@ -1,29 +1,21 @@
 package render
 
-import alg "../algebra"
+import "bindless"
 import cont "../containers"
-import "../gpu"
+import "gpu"
 import "ambient"
 import "debug_line"
-import "debug_ui"
 import depth_pyramid_system "depth_pyramid"
 import "direct_light"
+import "forward"
 import "geometry"
-import "line_strip"
 import "occlusion_culling"
 import particles_compute "particles_compute"
 import particles_render "particles_render"
 import "post_process"
-import "random_color"
-import shadow_culling_system "shadow_culling"
-import shadow_render_system "shadow_render"
-import shadow_sphere_culling_system "shadow_sphere_culling"
-import shadow_sphere_render_system "shadow_sphere_render"
-import "sprite"
-import "transparent"
+import "shadow"
 import ui_render "ui"
 import vk "vendor:vulkan"
-import "wireframe"
 
 MAX_NODES_IN_SCENE :: 65536
 MAX_ACTIVE_CAMERAS :: 128
@@ -31,29 +23,32 @@ MAX_LIGHTS :: 256
 MAX_MESHES :: 65536
 MAX_MATERIALS :: 4096
 MAX_SPRITES :: 4096
-MAX_CAMERAS :: 64
 MAX_SHADOW_MAPS :: 16
 INVALID_SHADOW_INDEX :: 0xFFFFFFFF
 SHADOW_MAP_SIZE :: 512
+// Frames a freed CPU resource slot stays reserved before reuse, so in-flight
+// frames never see a recycled index.
+RETIRE_GRACE :: gpu.FRAMES_IN_FLIGHT + 1
 
 @(private)
 frame_next :: #force_inline proc(frame_index: u32) -> u32 {
-  return alg.next(frame_index, gpu.FRAMES_IN_FLIGHT)
+  return (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
 }
 
 @(private)
 frame_prev :: #force_inline proc(frame_index: u32) -> u32 {
-  return alg.prev(frame_index, gpu.FRAMES_IN_FLIGHT)
+  return (frame_index + gpu.FRAMES_IN_FLIGHT - 1) % gpu.FRAMES_IN_FLIGHT
 }
 
 Handle :: cont.Handle
-MeshHandle :: gpu.MeshHandle
+MeshHandle :: bindless.MeshHandle
 MaterialHandle :: distinct Handle
-LightHandle :: distinct Handle
-Image2DHandle :: gpu.Texture2DHandle
-ImageCubeHandle :: gpu.TextureCubeHandle
+SpriteHandle :: distinct Handle
+EmitterHandle :: distinct Handle
+ForceFieldHandle :: distinct Handle
+CameraHandle :: distinct Handle
 
-BufferAllocation :: gpu.BufferAllocation
+BufferAllocation :: bindless.BufferAllocation
 DrawPipeline :: occlusion_culling.DrawPipeline
 DrawBuffers :: occlusion_culling.DrawBuffers
 Particle :: particles_compute.Particle
@@ -67,6 +62,27 @@ Primitive :: enum {
   CAPSULE,
   CYLINDER,
   TORUS,
+}
+
+Color :: enum {
+  WHITE,
+  BLACK,
+  GRAY,
+  RED,
+  GREEN,
+  BLUE,
+  YELLOW,
+  CYAN,
+  MAGENTA,
+}
+
+MaterialType :: enum {
+  PBR,
+  UNLIT,
+  WIREFRAME,
+  TRANSPARENT,
+  RANDOM_COLOR,
+  LINE_STRIP,
 }
 
 MeshFlag :: enum u32 {
@@ -94,12 +110,11 @@ NodeFlag :: enum u32 {
   MATERIAL_RANDOM_COLOR,
   MATERIAL_LINE_STRIP,
   CASTS_SHADOW,
-  NAVIGATION_OBSTACLE,
 }
 
 NodeFlagSet :: bit_set[NodeFlag;u32]
 
-Node :: struct #packed {
+NodeData :: struct #packed {
   world_matrix:          matrix[4, 4]f32,
   material_id:           u32,
   mesh_id:               u32,
@@ -107,7 +122,7 @@ Node :: struct #packed {
   flags:                 NodeFlagSet,
 }
 
-Mesh :: struct {
+MeshData :: struct {
   aabb_min:        [3]f32,
   index_count:     u32,
   aabb_max:        [3]f32,
@@ -118,7 +133,7 @@ Mesh :: struct {
   padding:         u32,
 }
 
-Material :: struct {
+MaterialData :: struct {
   albedo_index:             u32,
   metallic_roughness_index: u32,
   normal_index:             u32,
@@ -130,7 +145,7 @@ Material :: struct {
   base_color_factor:        [4]f32,
 }
 
-Sprite :: struct {
+SpriteData :: struct {
   texture_index: u32,
   frame_columns: u32,
   frame_rows:    u32,
@@ -150,8 +165,8 @@ CameraGPU :: struct {
   frustum_planes:  [6][4]f32,
 }
 
-Emitter :: particles_compute.Emitter
-ForceField :: particles_compute.ForceField
+EmitterData :: particles_compute.Emitter
+ForceFieldData :: particles_compute.ForceField
 MAX_EMITTERS :: particles_compute.MAX_EMITTERS
 MAX_FORCE_FIELDS :: particles_compute.MAX_FORCE_FIELDS
 
@@ -160,7 +175,7 @@ MAX_FORCE_FIELDS :: particles_compute.MAX_FORCE_FIELDS
 // per frame at use sites; storing them would duplicate Light fields.
 @(private)
 ShadowMap :: struct {
-  shadow_map_2d:   [gpu.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  shadow_map_2d:   [gpu.FRAMES_IN_FLIGHT]bindless.Texture2DHandle,
   draw_commands:   [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
@@ -170,7 +185,7 @@ ShadowMap :: struct {
 
 @(private)
 ShadowMapCube :: struct {
-  shadow_map_cube: [gpu.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
+  shadow_map_cube: [gpu.FRAMES_IN_FLIGHT]bindless.TextureCubeHandle,
   draw_commands:   [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
@@ -206,9 +221,7 @@ Light :: union {
   DirectionalLight,
 }
 
-// Internal owns GPU primitives and CPU-side bookkeeping. The engine package
-// reaches into specific subrenderer fields (debug_renderer, ui, command
-// buffers); external user code should not.
+// Internal owns GPU primitives and CPU-side bookkeeping. Private to render.
 @(private)
 Internal :: struct {
   command_buffers:              [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -225,22 +238,21 @@ Internal :: struct {
     CameraGPU,
     gpu.FRAMES_IN_FLIGHT,
   ),
-  material_buffer:              gpu.BindlessBuffer(Material),
-  node_data_buffer:             gpu.BindlessBuffer(Node),
-  mesh_data_buffer:             gpu.BindlessBuffer(Mesh),
-  emitter_buffer:               gpu.BindlessBuffer(Emitter),
-  forcefield_buffer:            gpu.BindlessBuffer(ForceField),
-  sprite_buffer:                gpu.BindlessBuffer(Sprite),
+  material_buffer:              gpu.BindlessBuffer(MaterialData),
+  node_data_buffer:             gpu.BindlessBuffer(NodeData),
+  mesh_data_buffer:             gpu.BindlessBuffer(MeshData),
+  emitter_buffer:               gpu.BindlessBuffer(EmitterData),
+  forcefield_buffer:            gpu.BindlessBuffer(ForceFieldData),
+  sprite_buffer:                gpu.BindlessBuffer(SpriteData),
   bone_matrix_slab:             cont.SlabAllocator,
   bone_matrix_offsets:          map[u32]u32,
+  // CPU copy of each slot's skin palette; re-uploaded to every per-frame
+  // bone buffer until all frames in flight hold it.
+  bone_matrices:                map[u32][]matrix[4, 4]f32,
   // Pass renderers - never accessed from outside the render package.
   geometry:                     geometry.Renderer,
   direct_light:                 direct_light.Renderer,
-  transparent_renderer:         transparent.Renderer,
-  sprite_renderer:              sprite.Renderer,
-  wireframe_renderer:           wireframe.Renderer,
-  line_strip_renderer:          line_strip.Renderer,
-  random_color_renderer:        random_color.Renderer,
+  forward:                      forward.Renderer,
   particles_compute:            particles_compute.Renderer,
   particles_render:             particles_render.Renderer,
   debug_line_renderer:          debug_line.Renderer,
@@ -248,36 +260,54 @@ Internal :: struct {
   // Compute / culling / shadow systems.
   visibility:                   occlusion_culling.System,
   depth_pyramid:                depth_pyramid_system.System,
-  shadow_culling:               shadow_culling_system.System,
-  shadow_sphere_culling:        shadow_sphere_culling_system.System,
-  shadow_render:                shadow_render_system.System,
-  shadow_sphere_render:         shadow_sphere_render_system.System,
+  shadow:                       shadow.System,
   // Per-light render-side state. Indexed by light node index.
   lights:                       map[u32]Light,
   shadow_maps:                  map[u32]ShadowMap,
   shadow_map_cubes:             map[u32]ShadowMapCube,
+  staging:                      Staging,
+  // Pending overlay font atlas upload, applied by flush on the render thread.
+  ui_atlas_pixels:              []u8,
+  ui_atlas_extent:              [2]u32,
+  ui_atlas_dirty:               bool,
 }
 
 // Public Manager surface. Anything outside the render package goes through
 // these fields or the public procs below.
-//   * cameras: per-camera GPU resources, keyed by camera node index. Engine
-//     manages lifecycle (insert / init / destroy).
-//   * mesh_manager / texture_manager: gpu-package asset pools, exposed so
-//     callers can allocate textures and meshes directly via gpu.* helpers.
+//   * meshes / materials / sprites / emitters / forcefields: CPU-side
+//     resources. Create and mutate them through the procs in resources.odin;
+//     changes reach the GPU through staging.
+//   * instances: per-slot looks (mesh, light, emitter, ...), indexed by
+//     transform slot. A slot is whatever index the caller uses to identify a
+//     transform; the engine uses world node indices.
+//   * cameras: views with their GPU targets. `main_camera` is presented.
+//   * mesh_manager / texture_manager: the bindless mesh arena and texture
+//     arrays; create textures through create_texture_* in resources.odin.
 //   * post_process: user-facing effects stack (callers add fog, bloom, etc).
-//   * debug_ui: microui input target. Inputs go directly into debug_ui.ctx.
+// The microui debug context is reached through debug_ui (overlay.odin).
 Manager :: struct {
-  internal:        Internal,
-  cameras:         map[u32]CameraTarget,
+  gctx:              gpu.GPUContext,
+  swapchain:         gpu.Swapchain,
+  frame_index:       u32, // frame in flight recorded next
+  internal:          Internal,
+  meshes:            cont.Pool(Mesh),
+  materials:         cont.Pool(Material),
+  sprites:           cont.Pool(Sprite),
+  emitters:          cont.Pool(Emitter),
+  forcefields:       cont.Pool(ForceField),
+  instances:         [dynamic]Instance,
+  builtin_materials: [Color]MaterialHandle,
+  builtin_meshes:    [Primitive]MeshHandle,
+  cameras:           cont.Pool(Camera),
+  main_camera:       CameraHandle,
+  color_format:      vk.Format,
   // Single source of truth for active scene node count. Drives compute
   // dispatch sizing across visibility, depth pyramid, and both shadow culls.
-  // Clamped to MAX_NODES_IN_SCENE by set_node_count.
-  node_count:      u32,
-  mesh_manager:    gpu.MeshManager,
-  texture_manager: gpu.TextureManager,
-  ambient:         ambient.Renderer,
-  post_process:    post_process.Renderer,
-  debug_ui:        debug_ui.Renderer,
+  node_count:        u32,
+  mesh_manager:      bindless.MeshManager,
+  texture_manager:   bindless.TextureManager,
+  ambient:           ambient.Renderer,
+  post_process:      post_process.Renderer,
 }
 
 AttachmentType :: enum {
@@ -301,7 +331,6 @@ PassType :: enum {
   WIREFRAME,
   LINE_STRIP,
   RANDOM_COLOR,
-  DEBUG_UI,
   DEBUG_LINE,
   UI,
 }
@@ -319,17 +348,38 @@ DEFAULT_ENABLED_PASSES :: PassTypeSet{
   .WIREFRAME,
   .LINE_STRIP,
   .RANDOM_COLOR,
-  .DEBUG_UI,
   .DEBUG_LINE,
   .UI,
 }
 
-// CameraTarget owns render-side GPU resources for one camera (attachments,
-// indirect draw buffers, depth pyramid, descriptor sets) and the per-camera
-// pass enable/culling flags. The world-side `Camera` carries only spatial
-// state; engine layer translates high-level config into these flags.
-CameraTarget :: struct {
-  attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+PerspectiveProjection :: struct {
+  fov:          f32,
+  aspect_ratio: f32,
+  near:         f32,
+  far:          f32,
+}
+
+OrthographicProjection :: struct {
+  width:  f32,
+  height: f32,
+  near:   f32,
+  far:    f32,
+}
+
+CameraProjection :: union {
+  PerspectiveProjection,
+  OrthographicProjection,
+}
+
+// A view into the scene: pose + projection, plus the GPU resources it renders
+// into (attachments, indirect draw buffers, depth pyramid, descriptor sets)
+// and the per-camera pass enable/culling flags.
+Camera :: struct {
+  position:                     [3]f32,
+  rotation:                     quaternion128,
+  projection:                   CameraProjection,
+  extent:                       [2]u32, // width, height
+  attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]bindless.Texture2DHandle,
   // Indirect draw buffers per pipeline (double-buffered for async compute).
   // Frame N compute writes to buffers[N], Frame N graphics reads from buffers[N-1].
   draws:                        [DrawPipeline]DrawBuffers,

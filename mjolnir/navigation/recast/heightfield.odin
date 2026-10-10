@@ -59,7 +59,7 @@ Compact_Heightfield :: struct {
   areas:           []u8,
 }
 
-free_heightfield :: proc(hf: ^Heightfield) {
+destroy_heightfield :: proc(hf: ^Heightfield) {
   if hf == nil do return
   pool := hf.pools
   for pool != nil {
@@ -71,7 +71,7 @@ free_heightfield :: proc(hf: ^Heightfield) {
   free(hf)
 }
 
-free_compact_heightfield :: proc(chf: ^Compact_Heightfield) {
+destroy_compact_heightfield :: proc(chf: ^Compact_Heightfield) {
   if chf == nil do return
   delete(chf.cells)
   delete(chf.spans)
@@ -141,7 +141,7 @@ create_compact_heightfield :: proc(
 ) -> ^Compact_Heightfield {
   chf := new(Compact_Heightfield)
   if !build_compact_heightfield(walkable_height, walkable_climb, hf, chf) {
-    free_compact_heightfield(chf)
+    destroy_compact_heightfield(chf)
     return nil
   }
   return chf

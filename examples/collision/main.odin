@@ -3,6 +3,8 @@ package main
 import "../../mjolnir"
 import "../../mjolnir/geometry"
 import "../../mjolnir/physics"
+import "../../mjolnir/platform"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:math"
@@ -59,6 +61,7 @@ bodies: [3]Body
 scenery: [5]SceneryBox // ground + 4 walls (static, not editable)
 selected: int = -1
 circle_angle: f32
+phys: physics.World
 
 default_bodies :: proc() -> [3]Body {
   return {
@@ -69,6 +72,8 @@ default_bodies :: proc() -> [3]Body {
 }
 
 main :: proc() {
+  physics.init(&phys)
+  defer physics.shutdown(&phys)
   mjolnir.run_app(
     {
       title = "Collision",
@@ -83,13 +88,11 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {16, 14, 16}, {0, 1.5, 0})
-  world.spawn_light_directional(
-    &engine.world,
+  render.main_camera_look_at(&engine.render, {16, 14, 16}, {0, 1.5, 0})
+  mjolnir.spawn(
+    engine,
     {-6, 14, 6},
-    {1, 0.96, 0.9, 1},
-    6.0,
-    true,
+    render.directional_light_attachment({1, 0.96, 0.9, 1}, 6.0, true),
   )
   spawn_scene(engine)
 }
@@ -103,12 +106,13 @@ spawn_scene :: proc(engine: ^mjolnir.Engine) {
   scenery[3] = {center = {0, wy, GROUND_HALF.z}, half = {GROUND_HALF.x, WALL_HEIGHT, WALL_THICK}}
   scenery[4] = {center = {0, wy, -GROUND_HALF.z}, half = {GROUND_HALF.x, WALL_HEIGHT, WALL_THICK}}
   for &s in scenery {
-    s.node = mjolnir.spawn_static(
+    s.node, _ = mjolnir.spawn_static(
       engine,
+      &phys,
       s.center,
       physics.BoxCollider{half_extents = s.half},
-      world.get_builtin_mesh(&engine.world, .CUBE),
-      world.get_builtin_material(&engine.world, .GRAY),
+      render.get_builtin_mesh(&engine.render, .CUBE),
+      render.get_builtin_material(&engine.render, .GRAY),
     )
   }
 
@@ -117,16 +121,16 @@ spawn_scene :: proc(engine: ^mjolnir.Engine) {
     q := obj_rotation(&b)
     b.node, _ = world.spawn(&engine.world, b.position)
     world.rotate(&engine.world, b.node, q)
-    b.visual, _ = world.spawn_child(
-      &engine.world,
-      b.node,
-      attachment = world.MeshAttachment {
-        handle = world.get_builtin_mesh(&engine.world, obj_mesh(b.shape)),
-        material = world.get_builtin_material(&engine.world, obj_color(b.kind)),
+    b.visual, _ = mjolnir.spawn(
+      engine,
+      parent = b.node,
+      attachment = render.MeshAttachment {
+        handle = render.get_builtin_mesh(&engine.render, obj_mesh(b.shape)),
+        material = render.get_builtin_material(&engine.render, obj_color(b.kind)),
         cast_shadow = true,
       },
     )
-    s := physics.collider_visual_scale(obj_collider(&b))
+    s := mjolnir.collider_visual_scale(obj_collider(&b))
     world.scale_xyz(&engine.world, b.visual, s.x, s.y, s.z)
     create_body_physics(engine, &b)
     b.built_shape = b.shape
@@ -146,7 +150,7 @@ obj_collider :: proc(b: ^Body) -> physics.Collider {
   return physics.SphereCollider{radius = b.size.x}
 }
 
-obj_mesh :: proc(shape: Shape) -> world.Primitive {
+obj_mesh :: proc(shape: Shape) -> render.Primitive {
   switch shape {
   case .Sphere:   return .SPHERE
   case .Box:      return .CUBE
@@ -155,7 +159,7 @@ obj_mesh :: proc(shape: Shape) -> world.Primitive {
   return .SPHERE
 }
 
-obj_color :: proc(kind: Kind) -> world.Color {
+obj_color :: proc(kind: Kind) -> render.Color {
   switch kind {
   case .Static:        return .BLUE
   case .DynamicStill:  return .CYAN
@@ -178,44 +182,40 @@ create_body_physics :: proc(engine: ^mjolnir.Engine, b: ^Body) {
   q := obj_rotation(b)
   if b.kind == .Static {
     b.is_static = true
-    b.static_handle = physics.create_static_body(&engine.physics, b.position, q, col)
-    physics.rebuild_static_bvh(&engine.physics)
+    b.static_handle = physics.create_static_body(&phys, b.position, q, col)
+    physics.rebuild_static_bvh(&phys)
   } else {
     b.is_static = false
-    b.dyn_handle = physics.create_dynamic_body(&engine.physics, b.position, q, f32(b.mass), col)
-    if body, ok := physics.get_dynamic_body(&engine.physics, b.dyn_handle); ok {
-      physics.set_inertia_from_collider(body, col)
-    }
-    if n, ok := world.node(&engine.world, b.node); ok {
-      n.attachment = world.RigidBodyAttachment{body_handle = b.dyn_handle}
-    }
+    b.dyn_handle = physics.create_dynamic_body(&phys, b.position, q, f32(b.mass), col, user = world.Handle(b.node))
   }
 }
 
 apply_shape :: proc(engine: ^mjolnir.Engine, b: ^Body) {
   col := obj_collider(b)
   if b.is_static {
-    if sb, ok := physics.get_static_body(&engine.physics, b.static_handle); ok {
+    if sb, ok := physics.get_static_body(&phys, b.static_handle); ok {
       sb.collider = col
       physics.update_cached_aabb(&sb.base)
     }
-    physics.rebuild_static_bvh(&engine.physics)
+    physics.rebuild_static_bvh(&phys)
   } else {
-    if body, ok := physics.get_dynamic_body(&engine.physics, b.dyn_handle); ok {
+    if body, ok := physics.get_dynamic_body(&phys, b.dyn_handle); ok {
       body.collider = col
       physics.set_inertia_from_collider(body, col)
       physics.update_cached_aabb(&body.base)
     }
-    physics.rebuild_dynamic_bvh(&engine.physics)
+    physics.rebuild_dynamic_bvh(&phys)
   }
-  if v, ok := world.node(&engine.world, b.visual); ok {
-    v.attachment = world.MeshAttachment {
-      handle = world.get_builtin_mesh(&engine.world, obj_mesh(b.shape)),
-      material = world.get_builtin_material(&engine.world, obj_color(b.kind)),
+  render.attach(
+    &engine.render,
+    b.visual.index,
+    render.MeshAttachment {
+      handle = render.get_builtin_mesh(&engine.render, obj_mesh(b.shape)),
+      material = render.get_builtin_material(&engine.render, obj_color(b.kind)),
       cast_shadow = true,
-    }
-  }
-  s := physics.collider_visual_scale(col)
+    },
+  )
+  s := mjolnir.collider_visual_scale(col)
   world.scale_xyz(&engine.world, b.visual, s.x, s.y, s.z) // marks the node dirty → re-staged
   b.built_shape = b.shape
   b.built_size = b.size
@@ -233,7 +233,7 @@ drive_circle :: proc(b: ^Body, body: ^physics.DynamicRigidBody) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  if !engine.physics.paused do circle_angle += dt * CIRCLE_OMEGA
+  if !phys.paused do circle_angle += dt * CIRCLE_OMEGA
 
   for i in 0 ..< len(bodies) {
     b := &bodies[i]
@@ -247,7 +247,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     q := obj_rotation(b)
     if b.is_static {
       if !b.applied_valid || b.position != b.applied_pos || q != b.applied_rot {
-        if sb, ok := physics.get_static_body(&engine.physics, b.static_handle);
+        if sb, ok := physics.get_static_body(&phys, b.static_handle);
            ok {
           sb.position = b.position
           sb.rotation = q
@@ -255,18 +255,18 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
         }
         world.translate(&engine.world, b.node, b.position)
         world.rotate(&engine.world, b.node, q)
-        physics.rebuild_static_bvh(&engine.physics)
+        physics.rebuild_static_bvh(&phys)
         b.applied_pos = b.position
         b.applied_rot = q
         b.applied_valid = true
       }
       continue
     }
-    body, ok := physics.get_dynamic_body(&engine.physics, b.dyn_handle)
+    body, ok := physics.get_dynamic_body(&phys, b.dyn_handle)
     if !ok do continue
     if b.mass > 0 do physics.set_mass(body, f32(b.mass))
     if b.kind == .DynamicCircle {
-      if !engine.physics.paused do drive_circle(b, body)
+      if !phys.paused do drive_circle(b, body)
     } else if !b.applied_valid ||
        b.position != b.applied_pos ||
        q != b.applied_rot {
@@ -285,21 +285,23 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   handle_picking(engine)
   draw_contacts(engine, dt)
   draw_selection(engine)
+  physics.step(&phys, dt)
+  for b in physics.body_poses(&phys) do world.set_world_pose(&engine.world, world.NodeHandle(b.user), b.position, b.rotation)
 }
 
 handle_picking :: proc(engine: ^mjolnir.Engine) {
-  if engine.input.consumed_by_ui do return
-  if !mjolnir.is_mouse_pressed(engine, 0) do return
-  cam, has_cam := world.main_camera(&engine.world)
+  if render.debug_ui_wants_mouse(&engine.render) do return
+  if !platform.input_mouse_pressed(&engine.platform.input, .LEFT) do return
+  cam, has_cam := render.main_camera(&engine.render)
   if !has_cam do return
-  mp := mjolnir.input_mouse_position(&engine.input)
-  origin, dir := world.camera_viewport_to_world_ray(
+  mp := platform.input_mouse_position(&engine.platform.input)
+  origin, dir := render.camera_viewport_to_world_ray(
     cam,
     f32(mp.x),
     f32(mp.y),
   )
   hit := physics.raycast(
-    &engine.physics,
+    &phys,
     geometry.Ray{origin = origin, direction = dir},
   )
   if !hit.hit {
@@ -323,13 +325,13 @@ draw_contacts :: proc(engine: ^mjolnir.Engine, dt: f32) {
     penetration, normal_impulse, dt, life: f32,
   ) {
     // hit point
-    mjolnir.debug_sphere(engine, p, 0.12, {1, 0.9, 0, 1}, life, true)
+    render.debug_sphere(&engine.render, p, 0.12, {1, 0.9, 0, 1}, life, true)
     // contact normal (cyan, fixed length)
-    mjolnir.debug_arrow(engine, p, p + n * 0.9, {0, 1, 1, 1}, life, true)
+    render.debug_arrow(&engine.render, p, p + n * 0.9, {0, 1, 1, 1}, life, true)
     // penetration depth (magenta, into surface)
     if penetration > 0 {
-      mjolnir.debug_segment(
-        engine,
+      render.debug_segment(
+        &engine.render,
         p,
         p - n * penetration,
         {1, 0, 1, 1},
@@ -341,16 +343,16 @@ draw_contacts :: proc(engine: ^mjolnir.Engine, dt: f32) {
     if dt > 0 && normal_impulse > 0 {
       force := normal_impulse / dt
       flen := clamp(force * 0.01, 0.1, 4.0)
-      mjolnir.debug_arrow(engine, p, p + n * flen, {1, 0.25, 0.2, 1}, life, true)
+      render.debug_arrow(&engine.render, p, p + n * flen, {1, 0.25, 0.2, 1}, life, true)
     }
   }
-  for c in engine.physics.static_contacts {
+  for c in phys.static_contacts {
     for i in 0 ..< c.count {
       p := c.points[i]
       draw_one(engine, p.point, c.normal, p.penetration, p.normal_impulse, dt, life)
     }
   }
-  for c in engine.physics.dynamic_contacts {
+  for c in phys.dynamic_contacts {
     for i in 0 ..< c.count {
       p := c.points[i]
       draw_one(engine, p.point, c.normal, p.penetration, p.normal_impulse, dt, life)
@@ -368,7 +370,7 @@ body_transform :: proc(
   if b.is_static {
     return b.position, obj_rotation(b)
   }
-  if body, ok := physics.get_dynamic_body(&engine.physics, b.dyn_handle); ok {
+  if body, ok := physics.get_dynamic_body(&phys, b.dyn_handle); ok {
     return body.position, body.rotation
   }
   return b.position, obj_rotation(b)
@@ -378,23 +380,23 @@ draw_selection :: proc(engine: ^mjolnir.Engine) {
   if selected < 0 do return
   b := &bodies[selected]
   pos, rot := body_transform(engine, b)
-  mjolnir.debug_axes(engine, pos, rot, 1.8, 0, true)
+  render.debug_axes(&engine.render, pos, rot, 1.8, 0, true)
   green := [4]f32{0.2, 1, 0.3, 1}
   switch b.shape {
   case .Sphere:
-    mjolnir.debug_sphere(engine, pos, b.size.x, green, 0, true)
+    render.debug_sphere(&engine.render, pos, b.size.x, green, 0, true)
   case .Box:
-    mjolnir.debug_cube(engine, pos, rot, b.size * 2, green, 0, true)
+    render.debug_cube(&engine.render, pos, rot, b.size * 2, green, 0, true)
   case .Cylinder:
     axis := linalg.quaternion_mul_vector3(rot, [3]f32{0, 1, 0})
     h := b.size.y * 0.5
-    mjolnir.debug_circle(engine, pos + axis * h, axis, b.size.x, green, 0, true)
-    mjolnir.debug_circle(engine, pos - axis * h, axis, b.size.x, green, 0, true)
+    render.debug_circle(&engine.render, pos + axis * h, axis, b.size.x, green, 0, true)
+    render.debug_circle(&engine.render, pos - axis * h, axis, b.size.x, green, 0, true)
   }
 }
 
 panel :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Inspector", {20, 220, 320, 500}, {.NO_CLOSE}) {
     if selected <= 0 {
       mu.label(ctx, "Left-click an object to select it.")
@@ -442,14 +444,15 @@ panel :: proc(engine: ^mjolnir.Engine) {
   if mu.window(ctx, "Collision", {20, 20, 320, 180}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {150, -1}, 0)
     if .SUBMIT in mu.button(ctx, "Reset Scene") {
+      physics.teardown(&phys)
       mjolnir.schedule_teardown(engine)
       mjolnir.schedule_setup(engine)
     }
-    if .SUBMIT in mu.button(ctx, engine.physics.paused ? "Resume" : "Pause") {
-      engine.physics.paused = !engine.physics.paused
+    if .SUBMIT in mu.button(ctx, phys.paused ? "Resume" : "Pause") {
+      phys.paused = !phys.paused
     }
 
-    perf := engine.physics.last_perf
+    perf := phys.last_perf
     mu.label(
       ctx,
       fmt.tprintf(
@@ -462,7 +465,7 @@ panel :: proc(engine: ^mjolnir.Engine) {
 
     mu.layout_row(ctx, {-1}, 0)
     shown := 0
-    for c in engine.physics.static_contacts {
+    for c in phys.static_contacts {
       if shown >= 6 do break
       shown += 1
       p := c.points[0]
@@ -474,7 +477,7 @@ panel :: proc(engine: ^mjolnir.Engine) {
         ),
       )
     }
-    for c in engine.physics.dynamic_contacts {
+    for c in phys.dynamic_contacts {
       if shown >= 6 do break
       shown += 1
       p := c.points[0]

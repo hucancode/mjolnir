@@ -1,13 +1,18 @@
 package main
 
 import "../../mjolnir"
+import anim "../../mjolnir/animation"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import mu "vendor:microui"
 
+scene: mjolnir.GltfScene
 fox_handle: world.NodeHandle
+rig: ^anim.Rig
+animator: anim.Animator
 target_cube: world.NodeHandle
 
 walk_layer:   int = -1
@@ -36,36 +41,40 @@ main :: proc() {
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
+    sync       = sync,
   })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {3, 2, 3}, {0, 1, 0})
+  render.main_camera_look_at(&engine.render, {3, 2, 3}, {0, 1, 0})
 
-  roots := mjolnir.load_gltf(engine, "assets/Fox2.glb")
-  if len(roots) == 0 {
-    log.error("Failed to load Fox2.glb")
-    return
-  }
-  child, has := world.skinned_mesh_child(&engine.world, roots[0])
-  if !has {
+  scene = mjolnir.load_gltf(engine, "assets/Fox2.glb")
+  if len(scene.skinned) == 0 {
     log.error("Fox2.glb has no skinned mesh")
     return
   }
-  fox_handle = child
-  walk_layer,   _ = world.add_animation_layer(&engine.world, child, "Walk", weight = 1.0)
-  run_layer,    _ = world.add_animation_layer(&engine.world, child, "Run",  weight = 0.0)
-  survey_layer, _ = world.add_animation_layer(&engine.world, child, "Survey", weight = 0.0, speed = 0.5)
-  ik_layer,     _ = world.add_ik_layer(&engine.world, child, []string{"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}, {f32(target_x), f32(target_y), f32(target_z)}, {0, 5, 2.5}, weight = 0.0, space = .WORLD)
+  fox_handle = scene.skinned[0].node
+  rig = &scene.rigs[scene.skinned[0].rig]
+  anim.animator_init(&animator, &rig.skeleton)
+  walk_layer,   _ = anim.add_clip_layer(&animator, rig, "Walk", weight = 1.0)
+  run_layer,    _ = anim.add_clip_layer(&animator, rig, "Run",  weight = 0.0)
+  survey_layer, _ = anim.add_clip_layer(&animator, rig, "Survey", weight = 0.0, speed = 0.5)
+  if bones, ok := anim.find_bones(&rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}); ok {
+    ik_layer, _ = anim.add_ik_layer(&animator, &rig.skeleton, bones, {f32(target_x), f32(target_y), f32(target_z)}, {0, 5, 2.5}, weight = 0.0, space = .WORLD)
+  }
   log.infof("Layers: walk=%d run=%d survey=%d ik=%d", walk_layer, run_layer, survey_layer, ik_layer)
 
-  target_cube = world.spawn_primitive_mesh(&engine.world, .CUBE, .RED, position = {f32(target_x), f32(target_y), f32(target_z)}, cast_shadow = false)
+  target_cube = mjolnir.spawn_primitive_mesh(engine, .CUBE, .RED, position = {f32(target_x), f32(target_y), f32(target_z)}, cast_shadow = false)
   world.scale(&engine.world, target_cube, 0.25)
-  world.spawn_light_directional(&engine.world, color = {1, 1, 1, 1}, radius = 10.0, cast_shadow = true)
+  mjolnir.spawn(engine, attachment = render.directional_light_attachment({1, 1, 1, 1}, 10.0, true))
+}
+
+sync :: proc(engine: ^mjolnir.Engine) {
+  if rig != nil do render.stage_bones(&engine.render, fox_handle.index, animator.palette)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  if !world.valid(&engine.world, fox_handle) do return
+  if rig == nil do return
 
   if auto_blend {
     walk_run_blend += mu.Real(blend_dir * dt * 0.5)
@@ -73,12 +82,12 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     if walk_run_blend <= 0.0 { walk_run_blend = 0.0; blend_dir =  1.0 }
   }
 
-  if walk_layer >= 0 do world.set_animation_layer_weight(&engine.world, fox_handle, walk_layer, 1.0 - f32(walk_run_blend))
-  if run_layer  >= 0 do world.set_animation_layer_weight(&engine.world, fox_handle, run_layer,  f32(walk_run_blend))
-  if survey_layer >= 0 do world.set_animation_layer_weight(&engine.world, fox_handle, survey_layer, f32(survey_weight))
+  if walk_layer >= 0 do anim.set_layer_weight(&animator, walk_layer, 1.0 - f32(walk_run_blend))
+  if run_layer  >= 0 do anim.set_layer_weight(&animator, run_layer,  f32(walk_run_blend))
+  if survey_layer >= 0 do anim.set_layer_weight(&animator, survey_layer, f32(survey_weight))
 
   if ik_layer >= 0 {
-    world.set_animation_layer_weight(&engine.world, fox_handle, ik_layer, f32(ik_weight))
+    anim.set_layer_weight(&animator, ik_layer, f32(ik_weight))
     if animate_target {
       t := mjolnir.time_since_start(engine) * f32(target_speed)
       r := f32(target_radius)
@@ -87,13 +96,14 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
       target_y = mu.Real(4.0 + math.sin(t * 2.0))
     }
     pos := [3]f32{f32(target_x), f32(target_y), f32(target_z)}
-    world.set_ik_layer_target(&engine.world, fox_handle, ik_layer, pos, {0, 5, 0})
+    anim.set_ik_target(&animator, ik_layer, pos, {0, 5, 0})
     if world.valid(&engine.world, target_cube) do world.translate(&engine.world, target_cube, pos)
   }
+  anim.animator_update(&animator, rig, dt, world.world_matrix(&engine.world, fox_handle))
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Animation Layering", {480, 20, 320, 490}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Base layer (Walk <-> Run)")
@@ -106,7 +116,7 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
         name := on_run ? "Run" : "Walk"
         from := on_run ? walk_layer : run_layer
         to   := on_run ? run_layer  : walk_layer
-        world.transition_to_animation(&engine.world, fox_handle, name, duration = TRANSITION_DURATION, from_layer = from, to_layer = to)
+        anim.transition_to(&animator, rig, name, duration = TRANSITION_DURATION, from = from, to = to)
         auto_blend = false
         walk_run_blend = on_run ? 1.0 : 0.0
       }

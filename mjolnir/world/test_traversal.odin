@@ -42,7 +42,7 @@ test_node_translate :: proc(t: ^testing.T) {
   child_ptr := node(&w, child)
   testing.expectf(t, ok, "failed to spawn child node")
   translate(&w, child, 4, 5, 6)
-  begin_frame(&w)
+  update(&w)
   actual := child_ptr.transform.world_matrix
   expected := matrix[4, 4]f32{
     1.0, 0.0, 0.0, 5.0,
@@ -63,7 +63,7 @@ test_node_rotate :: proc(t: ^testing.T) {
   testing.expectf(t, ok, "failed to spawn node")
   rotate(&w, child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   translate(&w, child, 1, 0, 0)
-  begin_frame(&w)
+  update(&w)
   actual := child_ptr.transform.world_matrix
   expected := matrix[4, 4]f32{
     0.0, 0.0, 1.0, 1.0,
@@ -85,7 +85,7 @@ test_node_scale :: proc(t: ^testing.T) {
   child_ptr := node(&w, child)
   testing.expectf(t, child_ok, "failed to spawn child node")
   scale_xyz(&w, child, 5, 6, 7)
-  begin_frame(&w)
+  update(&w)
   actual := child_ptr.transform.world_matrix
   expected := matrix[4, 4]f32{
     5.0, 0.0, 0.0, 1.0,
@@ -107,7 +107,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   scale(&w, n, 2)
   rotate(&w, n, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   translate(&w, n, 3, 4, 5)
-  begin_frame(&w)
+  update(&w)
   actual := node_ptr.transform.world_matrix
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
@@ -136,7 +136,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   translate(&w, node1_handle, x = 1)
   rotate(&w, node2_handle, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   scale(&w, node3_handle, 2)
-  begin_frame(&w)
+  update(&w)
   // The transforms should cascade:
   // node1: translate(1,0,0)
   // node2: translate(1,0,0) * rotate_y(90°)

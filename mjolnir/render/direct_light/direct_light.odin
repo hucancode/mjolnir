@@ -1,8 +1,8 @@
 package direct_light
 
-import "../../geometry"
-import "../../gpu"
-import "../shared"
+import "../bindless"
+import "../mesh"
+import "../gpu"
 import "core:log"
 import "core:math/linalg"
 import vk "vendor:vulkan"
@@ -68,7 +68,7 @@ Renderer :: struct {
 }
 
 LightVolumeMesh :: struct {
-  vertex_buffer: gpu.ImmutableBuffer(geometry.Vertex),
+  vertex_buffer: gpu.ImmutableBuffer(mesh.Vertex),
   index_buffer:  gpu.ImmutableBuffer(u32),
   index_count:   u32,
 }
@@ -77,12 +77,12 @@ LightVolumeMesh :: struct {
 create_light_volume_mesh :: proc(
   gctx: ^gpu.GPUContext,
   out_mesh: ^LightVolumeMesh,
-  geom: geometry.Geometry,
+  geom: mesh.Geometry,
 ) -> vk.Result {
   out_mesh^ = {}
   vertex_buffer, ret_vertex := gpu.malloc_buffer(
     gctx,
-    geometry.Vertex,
+    mesh.Vertex,
     len(geom.vertices),
     {.VERTEX_BUFFER},
   )
@@ -152,9 +152,9 @@ init :: proc(
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
-    pVertexBindingDescriptions      = &geometry.VERTEX_BINDING_DESCRIPTION[0],
+    pVertexBindingDescriptions      = &bindless.VERTEX_BINDING_DESCRIPTION[0],
     vertexAttributeDescriptionCount = 1,
-    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]),
+    pVertexAttributeDescriptions    = raw_data(bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]),
   }
 
   // Create point light pipeline
@@ -163,7 +163,7 @@ init :: proc(
     defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
     frag_module := gpu.create_shader_module(gctx.device, SHADER_POINT_FRAG) or_return
     defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
+    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &bindless.SHADER_SPEC_CONSTANTS)
     pipeline_info := vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
@@ -189,7 +189,7 @@ init :: proc(
     defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
     frag_module := gpu.create_shader_module(gctx.device, SHADER_SPOT_FRAG) or_return
     defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
+    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &bindless.SHADER_SPEC_CONSTANTS)
     pipeline_info := vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
@@ -215,7 +215,7 @@ init :: proc(
     defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
     frag_module := gpu.create_shader_module(gctx.device, SHADER_DIRECTIONAL_FRAG) or_return
     defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &shared.SHADER_SPEC_CONSTANTS)
+    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &bindless.SHADER_SPEC_CONSTANTS)
     pipeline_info := vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
@@ -243,7 +243,7 @@ setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   create_light_volume_mesh(
     gctx,
     &self.sphere_mesh,
-    geometry.make_sphere(),
+    mesh.make_sphere(),
   ) or_return
   defer if ret != .SUCCESS {
     destroy_light_volume_mesh(gctx.device, &self.sphere_mesh)
@@ -251,7 +251,7 @@ setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   create_light_volume_mesh(
     gctx,
     &self.cone_mesh,
-    geometry.make_cone(),
+    mesh.make_cone(),
   ) or_return
   defer if ret != .SUCCESS {
     destroy_light_volume_mesh(gctx.device, &self.cone_mesh)
@@ -259,7 +259,7 @@ setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> (ret: vk.Result) {
   create_light_volume_mesh(
     gctx,
     &self.triangle_mesh,
-    geometry.make_fullscreen_triangle(),
+    mesh.make_fullscreen_triangle(),
   ) or_return
   defer if ret != .SUCCESS {
     destroy_light_volume_mesh(gctx.device, &self.triangle_mesh)
@@ -283,17 +283,17 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 
 begin_pass :: proc(
   self: ^Renderer,
-  final_image_handle: gpu.Texture2DHandle,
-  depth_handle: gpu.Texture2DHandle,
-  texture_manager: ^gpu.TextureManager,
+  final_image_handle: bindless.Texture2DHandle,
+  depth_handle: bindless.Texture2DHandle,
+  texture_manager: ^bindless.TextureManager,
   command_buffer: vk.CommandBuffer,
   cameras_descriptor_set: vk.DescriptorSet,
 ) {
-  final_image := gpu.get_texture_2d(
+  final_image := bindless.get_texture_2d(
     texture_manager,
     final_image_handle,
   )
-  depth_texture := gpu.get_texture_2d(
+  depth_texture := bindless.get_texture_2d(
     texture_manager,
     depth_handle,
   )
@@ -363,13 +363,10 @@ push_and_draw :: proc(
   draw_light_volume_mesh(mesh, command_buffer)
 }
 
-render_point_light :: proc(
+record_point_light :: proc(
   self: ^Renderer,
   camera_handle: u32,
-  position_texture_idx: u32,
-  normal_texture_idx: u32,
-  albedo_texture_idx: u32,
-  metallic_texture_idx: u32,
+  gbuffer: bindless.GBuffer,
   light_color: [4]f32,
   position: [3]f32,
   radius: f32,
@@ -379,10 +376,10 @@ render_point_light :: proc(
 ) {
   push := PointLightPushConstants{
     scene_camera_idx       = camera_handle,
-    position_texture_index = position_texture_idx,
-    normal_texture_index   = normal_texture_idx,
-    albedo_texture_index   = albedo_texture_idx,
-    metallic_texture_index = metallic_texture_idx,
+    position_texture_index = gbuffer.position,
+    normal_texture_index   = gbuffer.normal,
+    albedo_texture_index   = gbuffer.albedo,
+    metallic_texture_index = gbuffer.metallic_roughness,
     shadow_map_idx         = shadow_map_idx,
     light_color            = light_color,
     position               = position,
@@ -403,13 +400,10 @@ render_point_light :: proc(
   )
 }
 
-render_spot_light :: proc(
+record_spot_light :: proc(
   self: ^Renderer,
   camera_handle: u32,
-  position_texture_idx: u32,
-  normal_texture_idx: u32,
-  albedo_texture_idx: u32,
-  metallic_texture_idx: u32,
+  gbuffer: bindless.GBuffer,
   light_color: [4]f32,
   position: [3]f32,
   direction: [3]f32,
@@ -422,8 +416,8 @@ render_spot_light :: proc(
 ) {
   // Pack indices: 2 indices per u32 (16-bit each)
   shadow_and_camera := (shadow_map_idx & 0xFFFF) | ((camera_handle & 0xFFFF) << 16)
-  position_and_normal := (position_texture_idx & 0xFFFF) | ((normal_texture_idx & 0xFFFF) << 16)
-  albedo_and_metallic := (albedo_texture_idx & 0xFFFF) | ((metallic_texture_idx & 0xFFFF) << 16)
+  position_and_normal := (gbuffer.position & 0xFFFF) | ((gbuffer.normal & 0xFFFF) << 16)
+  albedo_and_metallic := (gbuffer.albedo & 0xFFFF) | ((gbuffer.metallic_roughness & 0xFFFF) << 16)
 
   push := SpotLightPushConstants{
     light_color                  = light_color,
@@ -451,13 +445,10 @@ render_spot_light :: proc(
   )
 }
 
-render_directional_light :: proc(
+record_directional_light :: proc(
   self: ^Renderer,
   camera_handle: u32,
-  position_texture_idx: u32,
-  normal_texture_idx: u32,
-  albedo_texture_idx: u32,
-  metallic_texture_idx: u32,
+  gbuffer: bindless.GBuffer,
   light_color: [4]f32,
   direction: [3]f32,
   shadow_map_idx: u32,
@@ -466,10 +457,10 @@ render_directional_light :: proc(
 ) {
   push := DirectionalLightPushConstants{
     scene_camera_idx       = camera_handle,
-    position_texture_index = position_texture_idx,
-    normal_texture_index   = normal_texture_idx,
-    albedo_texture_index   = albedo_texture_idx,
-    metallic_texture_index = metallic_texture_idx,
+    position_texture_index = gbuffer.position,
+    normal_texture_index   = gbuffer.normal,
+    albedo_texture_index   = gbuffer.albedo,
+    metallic_texture_index = gbuffer.metallic_roughness,
     shadow_map_idx         = shadow_map_idx,
     light_color            = light_color,
     direction              = direction,

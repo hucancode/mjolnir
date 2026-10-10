@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:math/linalg"
@@ -12,18 +13,18 @@ main :: proc() {
 handles: [9]world.NodeHandle
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 4, 9}, {0, 0, 0})
+  render.main_camera_look_at(&engine.render, {0, 4, 9}, {0, 0, 0})
   ambient.set_skybox_enabled(&engine.render.ambient, false)
 
-  cube := world.get_builtin_mesh(&engine.world, .CUBE)
-  mat := world.material_wireframe(&engine.world)
+  cube := render.get_builtin_mesh(&engine.render, .CUBE)
+  mat := render.material_wireframe(&engine.render)
 
   for i in 0 ..< 9 {
     row := i / 3
     col := i % 3
     x := f32(col - 1) * 2.5
     z := f32(row - 1) * 2.5
-    h := world.spawn_mesh(&engine.world, cube, mat, {x, 0, z}, cast_shadow = false)
+    h := mjolnir.spawn_mesh(engine, cube, mat, {x, 0, z}, cast_shadow = false)
     world.scale(&engine.world, h, 0.7)
     handles[i] = h
   }

@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/animation"
 import "../../mjolnir/world"
 import "core:log"
@@ -9,7 +10,9 @@ import "core:math/linalg"
 import "core:slice"
 import mu "vendor:microui"
 
-root_nodes: [dynamic]world.NodeHandle
+scene: mjolnir.GltfScene
+rig: ^animation.Rig
+animator: animation.Animator
 animation_time: f32 = 0
 spider_root_node: world.NodeHandle
 spider_mesh_node: world.NodeHandle
@@ -45,19 +48,20 @@ main :: proc() {
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
+    sync       = sync,
   })
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 30, 15}, {0, 0, 0})
-  spider_roots := mjolnir.load_gltf(engine, "assets/spider.glb")
-  append(&root_nodes, ..spider_roots[:])
-  if len(spider_roots) == 0 do return
-  spider_root_node = spider_roots[0]
+  render.main_camera_look_at(&engine.render, {0, 30, 15}, {0, 0, 0})
+  scene = mjolnir.load_gltf(engine, "assets/spider.glb")
+  if len(scene.roots) == 0 || len(scene.skinned) == 0 do return
+  spider_root_node = scene.roots[0]
   world.translate(&engine.world, spider_root_node, y = 5)
-  child, has := world.skinned_mesh_child(&engine.world, spider_root_node)
-  if !has do return
-  spider_mesh_node = child
+  spider_mesh_node = scene.skinned[0].node
+  rig = &scene.rigs[scene.skinned[0].rig]
+  skel := &rig.skeleton
+  animation.animator_init(&animator, skel)
 
   leg_meta := [6]struct{root_name, tip_name: string, time_offset: f32}{
     {"leg_front_r_0",  "leg_front_r_5",  0.0},
@@ -70,11 +74,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   deg30 := f32(math.PI / 6.0)
   deg90 := f32(math.PI / 2.0)
-  legs_spec := make([]world.SpiderLegSpec, 6)
+  legs_spec := make([]animation.SpiderLegSpec, 6, context.temp_allocator)
   for i in 0 ..< 6 {
-    offset, _ := world.bone_rest_offset(&engine.world, child, leg_meta[i].root_name, leg_meta[i].tip_name)
+    offset, _ := animation.rest_offset(skel, leg_meta[i].root_name, leg_meta[i].tip_name)
     in_group_a := slice.contains(GROUP_A[:], i)
-    legs_spec[i] = world.SpiderLegSpec{
+    legs_spec[i] = animation.SpiderLegSpec{
       root_name = leg_meta[i].root_name,
       chain_length = 6,
       config = animation.SpiderLegConfig{
@@ -87,23 +91,27 @@ setup :: proc(engine: ^mjolnir.Engine) {
       constraints = animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90}),
     }
   }
-  if idx, ok := world.add_spider_leg_modifier_layer(&engine.world, child, legs_spec, weight = 1.0); ok {
+  if idx, ok := animation.add_spider_leg_layer(&animator, skel, legs_spec, weight = 1.0); ok {
     spider_leg_layer_index = idx
     log.infof("Added spider leg modifiers for all 6 legs (layer %d)", spider_leg_layer_index)
   }
 
-  ground_plane = world.spawn_primitive_mesh(&engine.world, .CUBE, .GRAY)
+  ground_plane = mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY)
   world.scale(&engine.world, ground_plane, [3]f32{20, 0.2, 20})
-  world.spawn_light_point(&engine.world, {-15, 15, 20}, {0.6, 0.7, 1.0, 1.5}, 40.0, false)
+  mjolnir.spawn(engine, {-15, 15, 20}, render.point_light_attachment({0.6, 0.7, 1.0, 1.5}, 40.0, false))
 }
 
 apply_group :: proc(engine: ^mjolnir.Engine, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
   for leg_index in group {
-    world.set_spider_leg_modifier_params(&engine.world, spider_mesh_node, spider_leg_layer_index, leg_index,
+    animation.set_spider_leg_params(&animator, spider_leg_layer_index, leg_index,
       lift_height = lift_height, lift_frequency = lift_frequency,
       lift_duration = lift_duration, time_offset = time_offset,
     )
   }
+}
+
+sync :: proc(engine: ^mjolnir.Engine) {
+  if rig != nil do render.stage_bones(&engine.render, spider_mesh_node.index, animator.palette)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -130,16 +138,18 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     apply_group(engine, GROUP_B[:], f32(lift_height_b), f32(lift_duration_b), f32(lift_frequency_shared), f32(phase_offset_b))
   }
 
+  if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&engine.world, spider_mesh_node))
+
   red := [4]f32{1, 0.2, 0.2, 1}
   for i in 0 ..< 6 {
-    target, ok := world.get_spider_leg_target(&engine.world, spider_mesh_node, spider_leg_layer_index, i)
+    target, ok := animation.spider_leg_target(&animator, spider_leg_layer_index, i)
     if !ok do continue
-    mjolnir.debug_sphere(engine, target^, 0.2, red)
+    render.debug_sphere(&engine.render, target^, 0.2, red)
   }
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Spider Legs", {500, 20, 340, 480}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Body motion")

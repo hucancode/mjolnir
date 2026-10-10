@@ -1,6 +1,6 @@
 package debug_line
 
-import "../../gpu"
+import "../gpu"
 import "core:log"
 import "core:sync"
 import vk "vendor:vulkan"

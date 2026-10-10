@@ -1,6 +1,5 @@
 package recast
 
-import "../../geometry"
 import "core:log"
 import "core:math"
 import "core:slice"
@@ -181,13 +180,13 @@ test_geometric_primitives :: proc(t: ^testing.T) {
   verts[2] = {0, 0, 10, 0} // C: Up
   verts[3] = {5, 0, 5, 0} // D: Center
   // Test area2 function
-  area_abc := geometry.area2(verts[0].xz, verts[1].xz, verts[2].xz)
+  area_abc := area2(verts[0].xz, verts[1].xz, verts[2].xz)
   testing.expect(
     t,
     area_abc > 0,
     "Counter-clockwise triangle should have positive area",
   )
-  area_acb := geometry.area2(verts[0].xz, verts[2].xz, verts[1].xz)
+  area_acb := area2(verts[0].xz, verts[2].xz, verts[1].xz)
   testing.expect(
     t,
     area_acb < 0,
@@ -199,13 +198,13 @@ test_geometric_primitives :: proc(t: ^testing.T) {
   // C is to the RIGHT of line AB (positive area2), so left() should return false
   testing.expect(
     t,
-    !geometry.left(verts[0].xz, verts[1].xz, verts[2].xz),
+    !left(verts[0].xz, verts[1].xz, verts[2].xz),
     "C should be right of AB (positive Z)",
   )
   // B is to the LEFT of line AC (negative area2), so left() should return true
   testing.expect(
     t,
-    geometry.left(verts[0].xz, verts[2].xz, verts[1].xz),
+    left(verts[0].xz, verts[2].xz, verts[1].xz),
     "B should be left of AC",
   )
   // Test collinear function
@@ -214,23 +213,23 @@ test_geometric_primitives :: proc(t: ^testing.T) {
   // Collinear means area2 is 0
   testing.expect(
     t,
-    geometry.area2(verts[0].xz, verts[1].xz, verts[3].xz) == 0,
+    area2(verts[0].xz, verts[1].xz, verts[3].xz) == 0,
     "Points A, B, D should be collinear",
   )
   testing.expect(
     t,
-    geometry.area2(verts[0].xz, verts[1].xz, verts[2].xz) != 0,
+    area2(verts[0].xz, verts[1].xz, verts[2].xz) != 0,
     "Points A, B, C should not be collinear",
   )
   // Test between function
   testing.expect(
     t,
-    geometry.between(verts[0].xz, verts[1].xz, verts[3].xz),
+    between(verts[0].xz, verts[1].xz, verts[3].xz),
     "D should be between A and B",
   )
   testing.expect(
     t,
-    !geometry.between(verts[0].xz, verts[2].xz, verts[3].xz),
+    !between(verts[0].xz, verts[2].xz, verts[3].xz),
     "D should not be between A and C",
   )
 }
@@ -271,7 +270,7 @@ test_validate_poly_mesh :: proc(t: ^testing.T) {
   )
   // Create a valid simple mesh
   pmesh := new(Poly_Mesh)
-  defer free_poly_mesh(pmesh)
+  defer destroy_poly_mesh(pmesh)
   pmesh.npolys = 1
   pmesh.nvp = 3
   pmesh.verts = make([][3]u16, 3) // 3 vertices * 3 components
@@ -305,7 +304,7 @@ test_validate_poly_mesh :: proc(t: ^testing.T) {
 test_build_simple_contour_mesh :: proc(t: ^testing.T) {
   // Create a simple contour set with one square contour
   cset := new(Contour_Set)
-  defer free_contour_set(cset)
+  defer destroy_contour_set(cset)
   append(&cset.conts, Contour{})
   cset.bmin = {0, 0, 0}
   cset.bmax = {10, 2, 10}
@@ -324,7 +323,7 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
   cont.verts[3] = {10, 5, 0, 0} // Bottom-right
   // Build polygon mesh
   pmesh := create_poly_mesh(cset, 6)
-  defer free_poly_mesh(pmesh)
+  defer destroy_poly_mesh(pmesh)
   testing.expect(t, pmesh != nil, "Mesh building should succeed")
   testing.expect(t, len(pmesh.verts) > 0, "Should have vertices")
   testing.expect(t, pmesh.npolys > 0, "Should have polygons")
@@ -689,8 +688,8 @@ bench_build_navmesh :: proc(t: ^testing.T) {
 			for _ in 0 ..< opts.rounds {
 				pmesh, dmesh, ok := build_navmesh(s.verts, s.indices, s.areas, s.cfg)
 				if !ok do return .Allocation_Error
-				free_poly_mesh(pmesh)
-				free_poly_mesh_detail(dmesh)
+				destroy_poly_mesh(pmesh)
+				destroy_poly_mesh_detail(dmesh)
 			}
 			opts.count = opts.rounds
 			return .Okay

@@ -1,8 +1,6 @@
 package world
 
-import cont "../containers"
 import "core:fmt"
-import "core:log"
 import "core:testing"
 
 @(test)
@@ -196,36 +194,22 @@ test_despawn_detaches_from_parent :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_despawn_with_staging :: proc(t: ^testing.T) {
+test_despawn_reports_removed_node :: proc(t: ^testing.T) {
   w: World
   init(&w)
   defer shutdown(&w)
-
-  // Spawn a node
   node_handle, ok := spawn(&w, {1, 2, 3})
   testing.expectf(t, ok, "failed to spawn node")
-
-  // Node should be staged after spawn
-  _, data_staged := w.staging.node_data[node_handle]
-  testing.expectf(t, data_staged, "node data should be staged after spawn")
-
-  // Despawn the node
-  despawn_ok := despawn(&w, node_handle)
-  testing.expectf(t, despawn_ok, "despawn should succeed")
-
-  // Node should be staged again for GPU cleanup
-  _, data_staged_after := w.staging.node_data[node_handle]
-  testing.expectf(
-    t,
-    data_staged_after,
-    "node data should be staged after despawn for GPU cleanup",
-  )
-
-  // Node should be freed immediately
-  node_after := node(&w, node_handle)
-  testing.expectf(
-    t,
-    node_after == nil,
-    "node should be freed immediately after despawn",
-  )
+  update(&w)
+  changed := false
+  for n in changed_nodes(&w) do changed |= n.index == node_handle.index
+  testing.expectf(t, changed, "spawned node should be in the change feed")
+  testing.expectf(t, despawn(&w, node_handle), "despawn should succeed")
+  testing.expectf(t, node(&w, node_handle) == nil, "node should be freed immediately")
+  update(&w)
+  removed := false
+  for i in removed_nodes(&w) do removed |= i == node_handle.index
+  testing.expectf(t, removed, "despawned node should be in the removal feed")
+  update(&w)
+  testing.expectf(t, len(removed_nodes(&w)) == 0, "removal reported once")
 }

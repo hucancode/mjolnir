@@ -354,11 +354,6 @@ node_query_disc :: proc(
   }
 }
 
-Ray :: struct {
-  origin:    [3]f32,
-  direction: [3]f32,
-}
-
 octree_query_ray :: proc(
   octree: ^Octree($T),
   ray: Ray,

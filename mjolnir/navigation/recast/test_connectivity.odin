@@ -2,7 +2,6 @@ package recast
 
 import "core:log"
 import "core:testing"
-import "core:time"
 import "core:math"
 
 @(test)
@@ -121,8 +120,8 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
   // Build navigation mesh
   pmesh, dmesh, ok := build_navmesh(vertices, indices, areas, cfg)
   defer {
-    if pmesh != nil do free_poly_mesh(pmesh)
-    if dmesh != nil do free_poly_mesh_detail(dmesh)
+    if pmesh != nil do destroy_poly_mesh(pmesh)
+    if dmesh != nil do destroy_poly_mesh_detail(dmesh)
   }
   testing.expect(t, ok, "Navigation mesh build should succeed")
   testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")
@@ -259,8 +258,8 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
   }
   pmesh, dmesh, ok := build_navmesh(vertices, indices, areas, cfg)
   defer {
-    if pmesh != nil do free_poly_mesh(pmesh)
-    if dmesh != nil do free_poly_mesh_detail(dmesh)
+    if pmesh != nil do destroy_poly_mesh(pmesh)
+    if dmesh != nil do destroy_poly_mesh_detail(dmesh)
   }
   testing.expect(t, ok, "Navigation mesh build should succeed")
   testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")
@@ -357,8 +356,8 @@ test_near_miss_edges :: proc(t: ^testing.T) {
   }
   pmesh, dmesh, ok := build_navmesh(vertices, indices, areas, cfg)
   defer {
-    if pmesh != nil do free_poly_mesh(pmesh)
-    if dmesh != nil do free_poly_mesh_detail(dmesh)
+    if pmesh != nil do destroy_poly_mesh(pmesh)
+    if dmesh != nil do destroy_poly_mesh_detail(dmesh)
   }
   testing.expect(t, ok, "Navigation mesh build should succeed")
   testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")

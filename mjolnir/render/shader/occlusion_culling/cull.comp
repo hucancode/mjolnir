@@ -1,0 +1,301 @@
+#version 450
+
+// Multi-pass culling - generates all draw lists in one dispatch.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+const uint NODE_FLAG_VISIBLE = 1u << 0;
+const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
+const uint NODE_FLAG_MATERIAL_TRANSPARENT = 1u << 2;
+const uint NODE_FLAG_MATERIAL_WIREFRAME = 1u << 3;
+const uint NODE_FLAG_MATERIAL_SPRITE = 1u << 4;
+const uint NODE_FLAG_MATERIAL_RANDOM_COLOR = 1u << 5;
+const uint NODE_FLAG_MATERIAL_LINE_STRIP = 1u << 6;
+const uint NODE_FLAG_CASTS_SHADOW = 1u << 7;
+const uint INVALID_ID = 0xFFFFFFFFu;
+
+struct Camera {
+    mat4 view;
+    mat4 projection;
+    vec2 viewport_extent;
+    float near;
+    float far;
+    vec4 position;
+    vec4 frustum_planes[6];
+};
+
+struct NodeData {
+    mat4 world_matrix;
+    uint material_id;
+    uint mesh_id;
+    uint attachment_data_index;
+    uint flags;
+};
+
+struct MeshData {
+    vec3 aabb_min;
+    uint index_count;
+    vec3 aabb_max;
+    uint first_index;
+    int vertex_offset;
+    uint vertex_skinning_offset;
+    uint flags;
+    uint _padding;
+};
+
+struct DrawCommand {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int vertex_offset;
+    uint first_instance;
+};
+
+layout(push_constant) uniform PushConstants {
+    uint camera_index;
+    uint node_count;
+    uint max_draws;
+    float pyramid_width;
+    float pyramid_height;
+    float depth_bias;
+    uint occlusion_enabled;
+} params;
+
+layout(set = 0, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
+layout(set = 0, binding = 1) readonly buffer MeshBuffer {
+    MeshData meshes[];
+};
+
+layout(set = 0, binding = 2) readonly buffer CameraBuffer {
+    Camera cameras[];
+};
+
+// Late pass (opaque) outputs
+layout(set = 0, binding = 3) buffer LateDrawCountBuffer {
+    uint opaque_draw_count;
+};
+
+layout(set = 0, binding = 4) buffer OpaqueDrawCommandBuffer {
+    DrawCommand opaque_commands[];
+};
+
+// Transparent pass outputs
+layout(set = 0, binding = 5) buffer TransparentDrawCountBuffer {
+    uint transparent_draw_count;
+};
+
+layout(set = 0, binding = 6) buffer TransparentDrawCommandBuffer {
+    DrawCommand transparent_commands[];
+};
+
+// Sprite pass outputs
+layout(set = 0, binding = 7) buffer SpriteDrawCountBuffer {
+    uint sprite_draw_count;
+};
+
+layout(set = 0, binding = 8) buffer SpriteDrawCommandBuffer {
+    DrawCommand sprite_commands[];
+};
+
+layout(set = 0, binding = 9) buffer WireframeDrawCountBuffer {
+    uint wireframe_draw_count;
+};
+
+layout(set = 0, binding = 10) buffer WireframeDrawCommandBuffer {
+    DrawCommand wireframe_commands[];
+};
+
+layout(set = 0, binding = 11) buffer RandomColorDrawCountBuffer {
+    uint random_color_draw_count;
+};
+
+layout(set = 0, binding = 12) buffer RandomColorDrawCommandBuffer {
+    DrawCommand random_color_commands[];
+};
+
+layout(set = 0, binding = 13) buffer LineStripDrawCountBuffer {
+    uint line_strip_draw_count;
+};
+
+layout(set = 0, binding = 14) buffer LineStripDrawCommandBuffer {
+    DrawCommand line_strip_commands[];
+};
+
+layout(set = 0, binding = 15) uniform sampler2D depth_pyramid;
+
+// return true if aabb is visible, false if outside frustum
+bool frustum_cull(vec3 center, vec3 extent, Camera camera) {
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane_raw = camera.frustum_planes[i];
+        float denom = length(plane_raw.xyz);
+        if (denom <= 1e-6) continue;
+
+        vec3 normal = plane_raw.xyz / denom;
+        float distance = dot(normal, center) + plane_raw.w / denom;
+        float radius = dot(abs(normal), extent);
+
+        if (distance + radius < 0.0) {
+            return false; // Outside frustum
+        }
+    }
+    return true; // Inside frustum
+}
+
+// 2D Polyhedral Bounds of a Clipped, Perspective-Projected 3D Sphere
+bool project_sphere(vec3 center, float radius, mat4 proj, float near, float far, out vec4 aabb) {
+    if (center.z - radius > -near) return false;
+    if (center.z + radius < -far) return false;
+
+    vec3 c = vec3(center.x, center.y, -center.z);
+    float r = radius;
+    float znear = near;
+
+    if (c.z < r + znear) {
+        return false;
+    }
+
+    float P00 = proj[0][0];
+    float P11 = proj[1][1];
+
+    vec3 cr = c * r;
+    float czr2 = c.z * c.z - r * r;
+
+    float vx = sqrt(c.x * c.x + czr2);
+    float minx = (vx * c.x - cr.z) / (vx * c.z + cr.x);
+    float maxx = (vx * c.x + cr.z) / (vx * c.z - cr.x);
+
+    float vy = sqrt(c.y * c.y + czr2);
+    float miny = (vy * c.y - cr.z) / (vy * c.z + cr.y);
+    float maxy = (vy * c.y + cr.z) / (vy * c.z - cr.y);
+
+    aabb = vec4(minx * P00, miny * P11, maxx * P00, maxy * P11);
+    aabb = aabb.xwzy * vec4(0.5, -0.5, 0.5, -0.5) + vec4(0.5);
+    aabb = clamp(aabb, 0.0, 1.0);
+
+    return (aabb.z > aabb.x) && (aabb.w > aabb.y);
+}
+
+// return true if the sphere is visible, false if occluded
+bool occlusion_test(vec3 center, float radius, Camera camera) {
+    vec4 view_center4 = camera.view * vec4(center, 1.0);
+    vec3 view_center = view_center4.xyz;
+
+    vec4 aabb;
+    if (!project_sphere(view_center, radius, camera.projection, camera.near, camera.far, aabb)) {
+        return true;
+    }
+
+    float width = (aabb.z - aabb.x) * params.pyramid_width;
+    float height = (aabb.w - aabb.y) * params.pyramid_height;
+    float level = ceil(log2(max(width, height)));
+    level = max(0.0, level);
+
+    vec2 sample_uv = (aabb.xy + aabb.zw) * 0.5;
+    float occluder_depth = textureLod(depth_pyramid, sample_uv, level).r;
+
+    float object_near_z = view_center.z + radius;
+    vec4 clip_pos = camera.projection * vec4(0, 0, object_near_z, 1.0);
+    float object_depth = clip_pos.z / clip_pos.w;
+
+    return object_depth < (occluder_depth + params.depth_bias);
+}
+
+void main() {
+    uint node_id = gl_GlobalInvocationID.x;
+    if (node_id >= params.node_count) return;
+
+    NodeData node = nodes[node_id];
+    if (node.mesh_id == INVALID_ID) {
+        return;
+    }
+
+    MeshData mesh = meshes[node.mesh_id];
+    Camera camera = cameras[params.camera_index];
+    mat4 world = nodes[node_id].world_matrix;
+
+    // Transform AABB to world space
+    vec3 local_min = mesh.aabb_min;
+    vec3 local_max = mesh.aabb_max;
+    vec3 local_center = 0.5 * (local_min + local_max);
+    vec3 local_extent = 0.5 * (local_max - local_min);
+
+    vec4 world_center4 = world * vec4(local_center, 1.0);
+    vec3 world_center = world_center4.xyz / max(world_center4.w, 1e-6);
+
+    mat3 world3 = mat3(world);
+    mat3 abs_world3 = mat3(abs(world3[0]), abs(world3[1]), abs(world3[2]));
+    vec3 world_extent = abs_world3 * local_extent;
+
+    float radius = length(world_extent);
+
+    bool visible = true;
+
+    // Frustum culling
+    if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
+        visible = frustum_cull(world_center, world_extent, camera);
+    }
+
+    // Occlusion culling (only for opaque objects)
+    bool is_transparent = (node.flags & NODE_FLAG_MATERIAL_TRANSPARENT) != 0u;
+    bool is_wireframe = (node.flags & NODE_FLAG_MATERIAL_WIREFRAME) != 0u;
+    bool is_random_color = (node.flags & NODE_FLAG_MATERIAL_RANDOM_COLOR) != 0u;
+    bool is_line_strip = (node.flags & NODE_FLAG_MATERIAL_LINE_STRIP) != 0u;
+    bool is_sprite = (node.flags & NODE_FLAG_MATERIAL_SPRITE) != 0u;
+    bool is_non_opaque = is_transparent || is_wireframe || is_random_color || is_line_strip || is_sprite;
+
+    if (visible && params.occlusion_enabled == 1u && !is_non_opaque) {
+        visible = occlusion_test(world_center, radius, camera);
+    }
+
+    if (!visible) return;
+
+    // Create draw command
+    DrawCommand cmd;
+    cmd.index_count = mesh.index_count;
+    cmd.instance_count = 1u;
+    cmd.first_index = mesh.first_index;
+    cmd.vertex_offset = mesh.vertex_offset;
+    cmd.first_instance = node_id;
+
+    // Route to appropriate draw list
+    if (is_sprite) {
+        // Sprite pass
+        uint draw_index = atomicAdd(sprite_draw_count, 1);
+        if (draw_index < params.max_draws) {
+            sprite_commands[draw_index] = cmd;
+        }
+    } else if (is_transparent) {
+        // Transparent pass
+        uint draw_index = atomicAdd(transparent_draw_count, 1);
+        if (draw_index < params.max_draws) {
+            transparent_commands[draw_index] = cmd;
+        }
+    } else if (is_wireframe) {
+        // Wireframe pass
+        uint draw_index = atomicAdd(wireframe_draw_count, 1);
+        if (draw_index < params.max_draws) {
+            wireframe_commands[draw_index] = cmd;
+        }
+    } else if (is_random_color) {
+        // Random color pass
+        uint draw_index = atomicAdd(random_color_draw_count, 1);
+        if (draw_index < params.max_draws) {
+            random_color_commands[draw_index] = cmd;
+        }
+    } else if (is_line_strip) {
+        // Line strip pass
+        uint draw_index = atomicAdd(line_strip_draw_count, 1);
+        if (draw_index < params.max_draws) {
+            line_strip_commands[draw_index] = cmd;
+        }
+    } else {
+        // Late pass (opaque objects)
+        uint draw_index = atomicAdd(opaque_draw_count, 1);
+        if (draw_index < params.max_draws) {
+            opaque_commands[draw_index] = cmd;
+        }
+    }
+}

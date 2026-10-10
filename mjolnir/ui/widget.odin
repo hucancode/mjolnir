@@ -1,8 +1,6 @@
 package ui
 
-import "../gpu"
-import cmd "../gpu/ui"
-import "core:log"
+import cmd "../draw2d"
 
 HorizontalAlign :: enum {
   Left,
@@ -30,7 +28,7 @@ Mesh2D :: struct {
   using base:    WidgetBase,
   vertices:      []cmd.Vertex2D,
   indices:       []u32,
-  texture:       gpu.Texture2DHandle,
+  texture:       u32, // bindless texture index, or NO_TEXTURE
   vertex_offset: u32,
   index_offset:  u32,
 }
@@ -38,7 +36,7 @@ Mesh2D :: struct {
 Quad2D :: struct {
   using base: WidgetBase,
   size:       [2]f32,
-  texture:    gpu.Texture2DHandle,
+  texture:    u32, // bindless texture index, or NO_TEXTURE
   color:      [4]u8,
 }
 

@@ -1,7 +1,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/gpu"
+import "../../mjolnir/render"
 import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:fmt"
@@ -11,7 +11,7 @@ import mu "vendor:microui"
 FFState :: struct {
   parent:           world.NodeHandle,
   ff_node:          world.NodeHandle,
-  ff_handle:        world.ForceFieldHandle,
+  ff_handle:        render.ForceFieldHandle,
   color:            [4]f32,
   enabled:          bool,
   strength:         mu.Real,
@@ -45,12 +45,8 @@ spawn_field :: proc(
 ) -> FFState {
   s: FFState
   s.parent = world.spawn(&engine.world, {0, 2, 0})
-  s.ff_node, s.ff_handle, _ = world.spawn_forcefield_child(&engine.world, s.parent,
-    position         = {offset_x, 0, 0},
-    area_of_effect   = area,
-    strength         = strength,
-    tangent_strength = tangent,
-  )
+  s.ff_handle = render.create_forcefield(&engine.render, area_of_effect = area, strength = strength, tangent_strength = tangent)
+  s.ff_node = mjolnir.spawn_forcefield(engine, s.ff_handle, {offset_x, 0, 0}, parent = s.parent)
   s.color = color
   s.enabled = true
   s.strength = mu.Real(strength)
@@ -62,14 +58,13 @@ spawn_field :: proc(
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {0, 12, 3}, {0, 2, 0})
+  render.main_camera_look_at(&engine.render, {0, 12, 3}, {0, 2, 0})
   ambient.set_skybox_enabled(&engine.render.ambient, false)
 
   // Particle source at center, large position spread
-  if tex, ret := gpu.create_texture_2d_from_path(&engine.gctx, &engine.render.texture_manager, "assets/particles/star_09.png"); ret == .SUCCESS {
-    world.spawn_emitter(&engine.world,
-      position          = {0, 2, 0},
-      texture           = tex,
+  if tex, ret := render.create_texture_from_path(&engine.render, "assets/particles/star_09.png"); ret == .SUCCESS {
+    em := render.create_emitter(&engine.render,
+      texture_handle    = tex,
       emission_rate     = 100,
       initial_velocity  = {0, 0, 0},
       velocity_spread   = 0.5,
@@ -84,6 +79,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       weight            = 0.0,
       weight_spread     = 0.0,
     )
+    mjolnir.spawn_emitter(engine, em, {0, 2, 0})
   }
 
   // Repulsion field — blue marker
@@ -91,11 +87,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Attraction field — green marker, opposite spin, slower, larger orbit radius
   attract = spawn_field(engine, 3.5, 12.0, -5.0, 4.0, {0.2, 1.0, 0.4, 1}, 0.7, -1.0)
 
-  world.spawn_light_directional(&engine.world, position = {3, 6, 3}, color = {1, 1, 1, 1}, radius = 10)
+  mjolnir.spawn(engine, {3, 6, 3}, render.directional_light_attachment(color = {1, 1, 1, 1}, radius = 10))
 }
 
 apply_ff :: proc(engine: ^mjolnir.Engine, s: ^FFState) {
-  world.set_forcefield(&engine.world, s.ff_handle,
+  render.set_forcefield(&engine.render, s.ff_handle,
     strength         = f32(s.strength),
     tangent_strength = f32(s.tangent_strength),
     area_of_effect   = f32(s.area_of_effect),
@@ -109,9 +105,9 @@ draw_ff_marker :: proc(engine: ^mjolnir.Engine, s: ^FFState) {
   pos := n.transform.world_matrix[3].xyz
   c := s.color
   if !s.enabled do c = {c.r * 0.3, c.g * 0.3, c.b * 0.3, 1}
-  mjolnir.debug_sphere(engine, pos, 0.4, c)
+  render.debug_sphere(&engine.render, pos, 0.4, c)
   if s.enabled {
-    mjolnir.debug_sphere(engine, pos, f32(s.area_of_effect), {c.r, c.g, c.b, 0.5})
+    render.debug_sphere(&engine.render, pos, f32(s.area_of_effect), {c.r, c.g, c.b, 0.5})
   }
 }
 
@@ -140,7 +136,7 @@ ff_panel :: proc(ctx: ^mu.Context, name: string, s: ^FFState) {
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Forcefields", {780, 20, 300, 520}, {.NO_CLOSE}) {
     ff_panel(ctx, "Repel (blue)",   &repel)
     ff_panel(ctx, "Attract (green)", &attract)

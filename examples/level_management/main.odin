@@ -1,7 +1,9 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/geometry"
+import anim "../../mjolnir/animation"
+import "../../mjolnir/render/mesh"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
@@ -13,10 +15,12 @@ AUTOMATED_TEST :: #config(AUTOMATED_TEST, false)
 GRID :: 5
 SPACING :: 2.5
 
-example_materials: [dynamic]world.MaterialHandle
-example_meshes: [dynamic]world.MeshHandle
+example_materials: [dynamic]render.MaterialHandle
+example_meshes: [dynamic]render.MeshHandle
 example_nodes: [dynamic]world.NodeHandle // mesh-bearing nodes we may reassign
 gltf_roots: [dynamic]world.NodeHandle // duck + animated char roots, spun in update
+character: mjolnir.GltfScene
+animators: [dynamic]anim.Animator // one per character.skinned entry
 
 reset_count: int
 test_frame: int
@@ -31,8 +35,13 @@ main :: proc() {
       setup = setup,
       update = update,
       pre_render = panel,
+      sync = sync,
     },
   )
+}
+
+sync :: proc(engine: ^mjolnir.Engine) {
+  for s, i in character.skinned do render.stage_bones(&engine.render, s.node.index, animators[i].palette)
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -40,18 +49,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
   clear(&example_meshes)
   clear(&example_nodes)
   clear(&gltf_roots)
+  for &a in animators do anim.animator_destroy(&a)
+  clear(&animators)
+  mjolnir.gltf_scene_destroy(&character)
 
   half := f32(GRID - 1) * 0.5 * SPACING
-  world.main_camera_look_at(&engine.world, {half + 4, half + 6, half * 2.4}, {0, half - 1, 0})
-  world.spawn_light_directional(&engine.world, {-6, 14, 6}, {1, 0.96, 0.9, 1}, 8.0)
+  render.main_camera_look_at(&engine.render, {half + 4, half + 6, half * 2.4}, {0, half - 1, 0})
+  mjolnir.spawn(engine, {-6, 14, 6}, render.directional_light_attachment({1, 0.96, 0.9, 1}, 8.0))
 
   // Ground uses BUILTIN mesh + material: stays put through every destroy button.
-  ground := world.spawn(
-    &engine.world,
+  ground := mjolnir.spawn(
+    engine,
     {0, -1, 0},
-    world.MeshAttachment {
-      handle = world.get_builtin_mesh(&engine.world, .QUAD_XZ),
-      material = world.get_builtin_material(&engine.world, .GRAY),
+    render.MeshAttachment {
+      handle = render.get_builtin_mesh(&engine.render, .QUAD_XZ),
+      material = render.get_builtin_material(&engine.render, .GRAY),
       cast_shadow = false,
     },
   )
@@ -59,16 +71,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // One example mesh per column (distinct primitive), so "Destroy All Meshes" is
   // visible: every column collapses to the builtin cube.
-  primitives := [GRID]geometry.Geometry {
-    geometry.make_sphere(),
-    geometry.make_cone(),
-    geometry.make_capsule(),
-    geometry.make_cylinder(),
-    geometry.make_torus(),
+  primitives := [GRID]mesh.Geometry {
+    mesh.make_sphere(),
+    mesh.make_cone(),
+    mesh.make_capsule(),
+    mesh.make_cylinder(),
+    mesh.make_torus(),
   }
-  col_meshes: [GRID]world.MeshHandle
+  col_meshes: [GRID]render.MeshHandle
   for geom, col in primitives {
-    m, ok := world.create_mesh(&engine.world, geom, true)
+    m, ok := render.create_mesh(&engine.render, geom, true)
     if !ok do continue
     col_meshes[col] = m
     append(&example_meshes, m)
@@ -79,8 +91,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     t := f32(row) / f32(GRID - 1)
     color := [4]f32{0.2 + 0.8 * f32(col) / f32(GRID - 1), 0.3, 1.0 - 0.8 * t, 1.0}
-    mat, ok := world.create_material(
-      &engine.world,
+    mat, ok := render.create_material(
+      &engine.render,
       type = .PBR,
       base_color_factor = color,
       metallic_value = t,
@@ -90,34 +102,41 @@ setup :: proc(engine: ^mjolnir.Engine) {
     append(&example_materials, mat)
     x := f32(col) * SPACING - half
     y := f32(row) * SPACING
-    node, node_ok := world.spawn(
-      &engine.world,
+    node, node_ok := mjolnir.spawn(
+      engine,
       {x, y, 0},
-      world.MeshAttachment{handle = col_meshes[col], material = mat, cast_shadow = true},
+      render.MeshAttachment{handle = col_meshes[col], material = mat, cast_shadow = true},
     )
     if node_ok do append(&example_nodes, node)
   }
 
   // glTF models join the mix. Their loader-created meshes/materials land in the
-  // same world pools, so fold them into the tracked lists — the destroy buttons
+  // same render pools, so fold them into the tracked lists — the destroy buttons
   // then free them exactly like the grid resources, and reset rebuilds them.
   if duck, ok := mjolnir.load_gltf(engine, "assets/Duck.glb"); ok {
-    for h in duck {
+    defer mjolnir.gltf_scene_destroy(&duck)
+    for h in duck.roots {
       world.scale(&engine.world, h, 1.3)
       world.translate(&engine.world, h, -3.5, 0, 4.5)
       append(&gltf_roots, h)
     }
-    collect_gltf_resources(&engine.world, duck[:])
+    collect_gltf_resources(engine, duck.roots[:])
   }
-  if char, ok := mjolnir.load_gltf(engine, "assets/CesiumMan.glb"); ok {
-    for h in char {
+  if scene, ok := mjolnir.load_gltf(engine, "assets/CesiumMan.glb"); ok {
+    character = scene
+    for h in character.roots {
       world.scale(&engine.world, h, 6.0)
       world.translate(&engine.world, h, 3.5, 0, 4.5)
       append(&gltf_roots, h)
-      node := world.node(&engine.world, h) or_continue
-      for c in node.children do if world.play_animation(&engine.world, c, "Anim_0") do break
     }
-    collect_gltf_resources(&engine.world, char[:])
+    for s in character.skinned {
+      rig := &character.rigs[s.rig]
+      a: anim.Animator
+      anim.animator_init(&a, &rig.skeleton)
+      anim.play(&a, rig, "Anim_0")
+      append(&animators, a)
+    }
+    collect_gltf_resources(engine, character.roots[:])
   }
 
   log.infof(
@@ -129,16 +148,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
 }
 
-collect_gltf_resources :: proc(w: ^world.World, roots: []world.NodeHandle) {
-  seen_mesh := make(map[world.MeshHandle]bool, 16, context.temp_allocator)
-  seen_mat := make(map[world.MaterialHandle]bool, 16, context.temp_allocator)
+collect_gltf_resources :: proc(engine: ^mjolnir.Engine, roots: []world.NodeHandle) {
+  seen_mesh := make(map[render.MeshHandle]bool, 16, context.temp_allocator)
+  seen_mat := make(map[render.MaterialHandle]bool, 16, context.temp_allocator)
   stack := make([dynamic]world.NodeHandle, context.temp_allocator)
   append(&stack, ..roots)
   for len(stack) > 0 {
     h := pop(&stack)
-    n := world.node(w, h) or_continue
+    n := world.node(&engine.world, h) or_continue
     append(&stack, ..n.children[:])
-    att := world.mesh_attachment(w, h) or_continue
+    att := render.mesh_attachment(&engine.render, h.index) or_continue
     append(&example_nodes, h)
     if att.handle not_in seen_mesh {
       seen_mesh[att.handle] = true
@@ -153,13 +172,13 @@ collect_gltf_resources :: proc(w: ^world.World, roots: []world.NodeHandle) {
 
 act_destroy_materials :: proc(engine: ^mjolnir.Engine) {
   if len(example_materials) == 0 do return
-  default_mat := world.get_builtin_material(&engine.world, .GRAY)
+  default_mat := render.get_builtin_material(&engine.render, .GRAY)
   for h in example_nodes {
-    world.set_material_handle(&engine.world, h, default_mat)
+    render.set_material_handle(&engine.render, h.index, default_mat)
   }
   freed := len(example_materials)
   for m in example_materials {
-    world.destroy_material(&engine.world, m)
+    render.destroy_material(&engine.render, m)
   }
   clear(&example_materials)
   log.infof("destroyed %d materials -> builtin GRAY", freed)
@@ -167,21 +186,21 @@ act_destroy_materials :: proc(engine: ^mjolnir.Engine) {
 
 act_destroy_meshes :: proc(engine: ^mjolnir.Engine) {
   if len(example_meshes) == 0 do return
-  cube := world.get_builtin_mesh(&engine.world, .CUBE)
+  cube := render.get_builtin_mesh(&engine.render, .CUBE)
   for h in example_nodes {
-    world.set_mesh_handle(&engine.world, h, cube)
+    render.set_mesh_handle(&engine.render, h.index, cube)
   }
   freed := len(example_meshes)
   for m in example_meshes {
-    world.destroy_mesh(&engine.world, m)
+    render.destroy_mesh(&engine.render, m)
   }
   clear(&example_meshes)
   log.infof("destroyed %d meshes -> builtin CUBE", freed)
 }
 
 act_reset_level :: proc(engine: ^mjolnir.Engine) {
-  for m in example_materials do world.destroy_material(&engine.world, m)
-  for m in example_meshes do world.destroy_mesh(&engine.world, m)
+  for m in example_materials do render.destroy_material(&engine.render, m)
+  for m in example_meshes do render.destroy_mesh(&engine.render, m)
   clear(&example_materials)
   clear(&example_meshes)
   clear(&example_nodes)
@@ -193,6 +212,7 @@ act_reset_level :: proc(engine: ^mjolnir.Engine) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   for h in gltf_roots do world.rotate_by(&engine.world, h, delta_time * math.PI * 0.3)
+  for s, i in character.skinned do anim.animator_update(&animators[i], &character.rigs[s.rig], delta_time)
   when AUTOMATED_TEST {
 	  test_frame += 1
 	  switch test_frame {
@@ -215,7 +235,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 }
 
 panel :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Level Management", {20, 20, 320, 260}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, fmt.tprintf("Example materials: %d", len(example_materials)))

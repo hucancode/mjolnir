@@ -1,279 +1,19 @@
 package world
 
-import anim "../animation"
 import cont "../containers"
 import "../geometry"
-import physics "../physics"
-import "core:log"
-import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import "core:strings"
-import "core:sync"
-
-// Default inner/outer cone ratio for spot lights. Inner cone is the angular
-// region with full intensity; outer cone is the falloff edge. Both spawn_light_spot
-// and set_spot_light_cone derive `inner = outer * SPOT_LIGHT_INNER_RATIO` when
-// the caller doesn't specify inner explicitly.
-SPOT_LIGHT_INNER_RATIO :: f32(0.75)
-
-PointLightAttachment :: struct {
-  color:       [4]f32, // RGB + intensity
-  radius:      f32, // range
-  cast_shadow: bool,
-  disabled:    bool, // zero-default = enabled; toggle to skip GPU upload without losing color/radius
-}
-
-DirectionalLightAttachment :: struct {
-  color:       [4]f32, // RGB + intensity
-  radius:      f32, // shadow projection radius
-  cast_shadow: bool,
-  disabled:    bool,
-}
-
-SpotLightAttachment :: struct {
-  color:       [4]f32, // RGB + intensity
-  radius:      f32, // range
-  angle_inner: f32, // inner cone angle
-  angle_outer: f32, // outer cone angle
-  cast_shadow: bool,
-  disabled:    bool,
-}
-
-NodeSkinning :: struct {
-  layers:            [dynamic]anim.Layer, // Animation layers (FK + IK)
-  active_transition: Maybe(anim.Transition), // Active transition state
-  matrices:          []matrix[4, 4]f32, // Latest computed skinning matrices
-}
-
-MeshAttachment :: struct {
-  handle:      MeshHandle,
-  material:    MaterialHandle,
-  skinning:    Maybe(NodeSkinning),
-  cast_shadow: bool,
-}
-
-EmitterAttachment :: struct {
-  handle: EmitterHandle,
-}
-
-ForceFieldAttachment :: struct {
-  handle: ForceFieldHandle,
-}
-
-SpriteAttachment :: struct {
-  sprite_handle: SpriteHandle,
-  mesh_handle:   MeshHandle,
-  material:      MaterialHandle,
-}
-
-RigidBodyAttachment :: struct {
-  body_handle: physics.DynamicRigidBodyHandle,
-}
-
-NodeAttachment :: union {
-  PointLightAttachment,
-  DirectionalLightAttachment,
-  SpotLightAttachment,
-  MeshAttachment,
-  EmitterAttachment,
-  ForceFieldAttachment,
-  SpriteAttachment,
-  RigidBodyAttachment,
-}
-
-NodeTag :: enum u32 {
-  PAWN, // generic game entities (players, AI, etc.)
-  ACTOR, // generic game actor
-  NAVMESH_AGENT, // has navigation agent
-  NAVMESH_OBSTACLE, // is navigation obstacle
-  INTERACTIVE, // can be interacted with
-  ENEMY, // enemy entity
-  FRIENDLY, // friendly entity
-  PROJECTILE, // projectile entity
-  STATIC, // static, non-moving entity
-  DYNAMIC, // dynamic, moving entity
-  ENVIRONMENT, // static environment mesh (walls, floors, etc.)
-}
-
-NodeTagSet :: bit_set[NodeTag;u32]
-
-// Boundary accessors. Keep `containers` invisible to user code by going through these.
-node :: proc(w: ^World, h: NodeHandle) -> (^Node, bool) #optional_ok {
-  return cont.get(w.nodes, h)
-}
-
-mesh :: proc(w: ^World, h: MeshHandle) -> (^Mesh, bool) #optional_ok {
-  return cont.get(w.meshes, h)
-}
-
-material :: proc(w: ^World, h: MaterialHandle) -> (^Material, bool) #optional_ok {
-  return cont.get(w.materials, h)
-}
-
-camera :: proc(w: ^World, h: CameraHandle) -> (^Camera, bool) #optional_ok {
-  return cont.get(w.cameras, h)
-}
-
-clip :: proc(w: ^World, h: ClipHandle) -> (^anim.Clip, bool) #optional_ok {
-  return cont.get(w.animation_clips, h)
-}
-
-emitter :: proc(w: ^World, h: EmitterHandle) -> (^Emitter, bool) #optional_ok {
-  return cont.get(w.emitters, h)
-}
-
-forcefield :: proc(w: ^World, h: ForceFieldHandle) -> (^ForceField, bool) #optional_ok {
-  return cont.get(w.forcefields, h)
-}
-
-sprite :: proc(w: ^World, h: SpriteHandle) -> (^Sprite, bool) #optional_ok {
-  return cont.get(w.sprites, h)
-}
-
-valid :: proc {
-  valid_node,
-  valid_mesh,
-  valid_material,
-  valid_camera,
-  valid_clip,
-  valid_emitter,
-  valid_forcefield,
-  valid_sprite,
-}
-
-valid_node       :: proc(w: ^World, h: NodeHandle)       -> bool { return cont.is_valid(w.nodes, h) }
-valid_mesh       :: proc(w: ^World, h: MeshHandle)       -> bool { return cont.is_valid(w.meshes, h) }
-valid_material   :: proc(w: ^World, h: MaterialHandle)   -> bool { return cont.is_valid(w.materials, h) }
-valid_camera     :: proc(w: ^World, h: CameraHandle)     -> bool { return cont.is_valid(w.cameras, h) }
-valid_clip       :: proc(w: ^World, h: ClipHandle)       -> bool { return cont.is_valid(w.animation_clips, h) }
-valid_emitter    :: proc(w: ^World, h: EmitterHandle)    -> bool { return cont.is_valid(w.emitters, h) }
-valid_forcefield :: proc(w: ^World, h: ForceFieldHandle) -> bool { return cont.is_valid(w.forcefields, h) }
-valid_sprite     :: proc(w: ^World, h: SpriteHandle)     -> bool { return cont.is_valid(w.sprites, h) }
-
-// Add tags to a node by handle. Returns false if node not found.
-tag_node :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  tags: NodeTagSet,
-) -> bool {
-  node := cont.get(world.nodes, handle) or_return
-  node.tags += tags
-  return true
-}
-
-// Remove tags from a node. Returns false if node not found.
-untag_node :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  tags: NodeTagSet,
-) -> bool {
-  node := cont.get(world.nodes, handle) or_return
-  node.tags -= tags
-  return true
-}
-
-tag   :: tag_node
-untag :: untag_node
-
-// Typed attachment accessors. Skip the .(T) match boilerplate at callsites.
-point_light :: proc(
-  w: ^World,
-  h: NodeHandle,
-) -> (att: ^PointLightAttachment, ok: bool) #optional_ok {
-  n := cont.get(w.nodes, h) or_return
-  att, ok = &n.attachment.(PointLightAttachment)
-  return
-}
-
-directional_light :: proc(
-  w: ^World,
-  h: NodeHandle,
-) -> (att: ^DirectionalLightAttachment, ok: bool) #optional_ok {
-  n := cont.get(w.nodes, h) or_return
-  att, ok = &n.attachment.(DirectionalLightAttachment)
-  return
-}
-
-spot_light :: proc(
-  w: ^World,
-  h: NodeHandle,
-) -> (att: ^SpotLightAttachment, ok: bool) #optional_ok {
-  n := cont.get(w.nodes, h) or_return
-  att, ok = &n.attachment.(SpotLightAttachment)
-  return
-}
-
-mesh_attachment :: proc(
-  w: ^World,
-  h: NodeHandle,
-) -> (att: ^MeshAttachment, ok: bool) #optional_ok {
-  n := cont.get(w.nodes, h) or_return
-  att, ok = &n.attachment.(MeshAttachment)
-  return
-}
-
-emitter_attachment :: proc(
-  w: ^World,
-  h: NodeHandle,
-) -> (att: ^EmitterAttachment, ok: bool) #optional_ok {
-  n := cont.get(w.nodes, h) or_return
-  att, ok = &n.attachment.(EmitterAttachment)
-  return
-}
-
-forcefield_attachment :: proc(
-  w: ^World,
-  h: NodeHandle,
-) -> (att: ^ForceFieldAttachment, ok: bool) #optional_ok {
-  n := cont.get(w.nodes, h) or_return
-  att, ok = &n.attachment.(ForceFieldAttachment)
-  return
-}
-
-sprite_attachment :: proc(
-  w: ^World,
-  h: NodeHandle,
-) -> (att: ^SpriteAttachment, ok: bool) #optional_ok {
-  n := cont.get(w.nodes, h) or_return
-  att, ok = &n.attachment.(SpriteAttachment)
-  return
-}
-
-rigid_body_attachment :: proc(
-  w: ^World,
-  h: NodeHandle,
-) -> (att: ^RigidBodyAttachment, ok: bool) #optional_ok {
-  n := cont.get(w.nodes, h) or_return
-  att, ok = &n.attachment.(RigidBodyAttachment)
-  return
-}
-
-// AnimationInstance represents a playing animation clip on a node
-// Uses handle-based lookup to avoid pointer invalidation when pools resize
-AnimationInstance :: struct {
-  clip_handle: ClipHandle, // handle to animation clip (resolved at runtime)
-  mode:        anim.PlayMode,
-  status:      anim.Status,
-  time:        f32,
-  speed:       f32,
-}
 
 Node :: struct {
-  parent:          NodeHandle,
-  children:        [dynamic]NodeHandle,
-  transform:       geometry.Transform,
-  name:            string,
-  bone_socket:     string, // if not empty, attach to this bone on parent skinned mesh
-  attachment:      NodeAttachment,
-  animation:       Maybe(AnimationInstance),
-  culling_enabled: bool,
-  visible:         bool, // node's own visibility state
-  parent_visible:  bool, // visibility inherited from parent chain
-  tags:            NodeTagSet, // tags for queries and filtering
+  parent:         NodeHandle,
+  children:       [dynamic]NodeHandle,
+  transform:      geometry.Transform,
+  name:           string,
+  visible:        bool, // node's own visibility state
+  parent_visible: bool, // visibility inherited from parent chain
+  tags:           u32, // user-defined bit flags
 }
-
-TraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 
 TraverseEntry :: struct {
   handle:            NodeHandle,
@@ -282,85 +22,74 @@ TraverseEntry :: struct {
   parent_is_visible: bool,
 }
 
+// A node whose world transform or effective visibility changed.
+NodeChange :: struct {
+  index:        u32,
+  world_matrix: matrix[4, 4]f32,
+  visible:      bool, // own visibility and every ancestor's
+}
+
+// What changed during the last `update`. Consumers (renderers, audio, net)
+// read it after update; the next update replaces it. Node indices are stable
+// for a node's lifetime and safe to use as external slot ids.
+ChangeFeed :: struct {
+  changed: [dynamic]NodeChange,
+  removed: [dynamic]u32,
+}
+
 World :: struct {
-  root:               NodeHandle,
-  nodes:              Pool(Node),
-  traversal_stack:    [dynamic]TraverseEntry,
-  staging:            StagingList,
-  animatable_nodes:   [dynamic]NodeHandle,
-  // CPU resource pools (moved from resources.Manager)
-  meshes:             cont.Pool(Mesh),
-  materials:          cont.Pool(Material),
-  cameras:            cont.Pool(Camera),
-  main_camera:        CameraHandle,
-  emitters:           cont.Pool(Emitter),
-  forcefields:        cont.Pool(ForceField),
-  sprites:            cont.Pool(Sprite),
-  animation_clips:    cont.Pool(anim.Clip),
-  // Active resource tracking
-  active_light_nodes: [dynamic]NodeHandle,
-  // Builtin resources
-  builtin_materials:  [len(Color)]MaterialHandle,
-  builtin_meshes:     [len(Primitive)]MeshHandle,
-  // Camera controllers
-  orbit_controller:   CameraController,
-  free_controller:    CameraController,
-  active_controller:  ^CameraController,
+  root:             NodeHandle,
+  nodes:           Pool(Node),
+  traversal_stack: [dynamic]TraverseEntry,
+  feed:            ChangeFeed,
+  // removals made between updates; published by update
+  pending_removed: [dynamic]u32,
+}
+
+// Boundary accessors. Keep `containers` invisible to user code by going through these.
+node :: proc(w: ^World, h: NodeHandle) -> (^Node, bool) #optional_ok {
+  return cont.get(w.nodes, h)
+}
+
+valid :: proc(w: ^World, h: NodeHandle) -> bool {
+  return cont.is_valid(w.nodes, h)
+}
+
+// Set user tag bits on a node. Returns false if node not found.
+tag :: proc(world: ^World, handle: NodeHandle, bits: u32) -> bool {
+  node := cont.get(world.nodes, handle) or_return
+  node.tags |= bits
+  return true
+}
+
+// Clear user tag bits on a node. Returns false if node not found.
+untag :: proc(world: ^World, handle: NodeHandle, bits: u32) -> bool {
+  node := cont.get(world.nodes, handle) or_return
+  node.tags &~= bits
+  return true
 }
 
 node_init :: proc(self: ^Node, name: string = "") {
   self.transform = geometry.TRANSFORM_IDENTITY
   self.name = name
-  self.bone_socket = ""
-  self.culling_enabled = true
   self.visible = true
   self.parent_visible = true
-  self.tags = {}
+  self.tags = 0
 }
 
-node_destroy :: proc(
-  self: ^Node,
-  world: ^World = nil,
-  node_handle: NodeHandle = {},
-) {
+node_destroy :: proc(self: ^Node) {
   delete(self.children)
   self.children = {}
-  if world == nil {
-    return
-  }
-  #partial switch &attachment in &self.attachment {
-  case EmitterAttachment:
-    destroy_emitter(world, attachment.handle)
-    attachment.handle = {}
-  case ForceFieldAttachment:
-    destroy_forcefield(world, attachment.handle)
-    attachment.handle = {}
-  case SpriteAttachment:
-    destroy_sprite(world, attachment.sprite_handle)
-    attachment.sprite_handle = {}
-  case MeshAttachment:
-    skinning, has_skin := &attachment.skinning.?
-    if has_skin {
-      delete(skinning.layers)
-    }
-  }
 }
 
 detach :: proc(nodes: Pool(Node), child_handle: NodeHandle) {
   child_node := cont.get(nodes, child_handle)
-  if child_node == nil {
-    return
-  }
+  if child_node == nil do return
   parent_handle := child_node.parent
-  if parent_handle == child_handle {
-    return
-  }
+  if parent_handle == child_handle do return
   parent_node := cont.get(nodes, parent_handle)
-  if parent_node == nil {
-    return
-  }
-  idx, found := slice.linear_search(parent_node.children[:], child_handle)
-  if found {
+  if parent_node == nil do return
+  if idx, found := slice.linear_search(parent_node.children[:], child_handle); found {
     unordered_remove(&parent_node.children, idx)
   }
   child_node.parent = child_handle
@@ -369,15 +98,9 @@ detach :: proc(nodes: Pool(Node), child_handle: NodeHandle) {
 attach :: proc(nodes: Pool(Node), parent_handle, child_handle: NodeHandle) {
   child_node := cont.get(nodes, child_handle)
   parent_node := cont.get(nodes, parent_handle)
-  if child_node == nil || parent_node == nil {
-    return
-  }
+  if child_node == nil || parent_node == nil do return
   if old_parent_node, ok := cont.get(nodes, child_node.parent); ok {
-    idx, found := slice.linear_search(
-      old_parent_node.children[:],
-      child_handle,
-    )
-    if found {
+    if idx, found := slice.linear_search(old_parent_node.children[:], child_handle); found {
       unordered_remove(&old_parent_node.children, idx)
     }
   }
@@ -390,174 +113,118 @@ attach :: proc(nodes: Pool(Node), parent_handle, child_handle: NodeHandle) {
 spawn :: proc(
   self: ^World,
   position: [3]f32 = {0, 0, 0},
-  attachment: NodeAttachment = nil,
+  name: string = "",
 ) -> (
   handle: NodeHandle,
   ok: bool,
 ) #optional_ok {
-  return spawn_child(self, self.root, position, attachment)
+  return spawn_child(self, self.root, position, name)
 }
 
 spawn_child :: proc(
   self: ^World,
   parent: NodeHandle,
   position: [3]f32 = {0, 0, 0},
-  attachment: NodeAttachment = nil,
+  name: string = "",
 ) -> (
   handle: NodeHandle,
   ok: bool,
 ) #optional_ok {
   node: ^Node
   handle, node = cont.alloc(&self.nodes, NodeHandle) or_return
-  node_init(node)
-  node.attachment = attachment
-  assign_emitter_to_node(self, handle, node)
-  assign_forcefield_to_node(self, handle, node)
+  node_init(node, name)
   node.transform.position = position
   node.transform.is_dirty = true
   attach(self.nodes, parent, handle)
-  stage_node_data(&self.staging, handle)
   return handle, true
 }
 
 init :: proc(world: ^World) -> bool {
   cont.init(&world.nodes, MAX_NODES_IN_SCENE, RETIRE_GRACE)
-  staging_init(&world.staging)
   root: ^Node
-  world.root, root, _ = cont.alloc(&world.nodes, NodeHandle)
+  world.root, root = cont.alloc(&world.nodes, NodeHandle) or_return
   node_init(root, "root")
   root.parent = world.root
-
-  cont.init(&world.meshes, MAX_MESHES, RETIRE_GRACE)
-  cont.init(&world.materials, MAX_MATERIALS, RETIRE_GRACE)
-  cont.init(&world.cameras, MAX_ACTIVE_CAMERAS)
-  cont.init(&world.emitters, MAX_EMITTERS, RETIRE_GRACE)
-  cont.init(&world.forcefields, MAX_FORCE_FIELDS, RETIRE_GRACE)
-  cont.init(&world.sprites, MAX_SPRITES, RETIRE_GRACE)
-  cont.init(&world.animation_clips, 0)
-
-  init_builtin_materials(world)
-  init_builtin_meshes(world)
-
-  log.info("World resource pools initialized")
   return true
 }
 
-
-register_animatable_node :: proc(world: ^World, handle: NodeHandle) {
-  // TODO: if this list get more than 10000 items, we need to use a map
-  if slice.contains(world.animatable_nodes[:], handle) do return
-  append(&world.animatable_nodes, handle)
-}
-
-unregister_animatable_node :: proc(world: ^World, handle: NodeHandle) {
-  if i, found := slice.linear_search(world.animatable_nodes[:], handle);
-     found {
-    unordered_remove(&world.animatable_nodes, i)
-  }
-}
-
-begin_frame :: proc(
-  world: ^World,
-  delta_time: f32 = 0.016,
-  game_state: rawptr = nil,
-) {
-  cont.pool_tick(&world.nodes, world, node_retire)
-  cont.pool_tick(&world.meshes, nil, mesh_retire)
-  cont.pool_tick(&world.materials, nil, nil)
-  cont.pool_tick(&world.emitters, nil, nil)
-  cont.pool_tick(&world.forcefields, nil, nil)
-  cont.pool_tick(&world.sprites, nil, nil)
+// Advance one tick: recompute world transforms and fill the change feed.
+update :: proc(world: ^World) {
+  clear(&world.feed.changed)
+  clear(&world.feed.removed)
+  append(&world.feed.removed, ..world.pending_removed[:])
+  clear(&world.pending_removed)
+  cont.tick(&world.nodes, nil, node_retire)
   traverse(world)
 }
 
-shutdown :: proc(world: ^World) {
-  cont.pool_flush(&world.meshes, nil, mesh_retire)
-  cont.pool_flush(&world.materials, nil, nil)
-  cont.destroy(world.cameras, proc(_: ^Camera) {})
-  cont.destroy(world.meshes, mesh_destroy)
-  cont.destroy(world.materials, proc(_: ^Material) {})
-  cont.destroy(world.emitters, proc(_: ^Emitter) {})
-  cont.destroy(world.forcefields, proc(_: ^ForceField) {})
-  cont.destroy(world.sprites, proc(_: ^Sprite) {})
-  cont.destroy(world.animation_clips, anim.clip_destroy)
-
-  cont.pool_flush(&world.nodes, world, node_retire)
-  // Nodes need handle to destroy attachments — iterate manually
-  for &entry, i in world.nodes.entries {
-    if entry.active {
-      handle := NodeHandle {
-        index      = u32(i),
-        generation = entry.generation,
-      }
-      node_destroy(&entry.item, world, handle)
-    }
-  }
-  cont.destroy(world.nodes, proc(node: ^Node) {})
-  delete(world.traversal_stack)
-  delete(world.active_light_nodes)
-  delete(world.animatable_nodes)
-  staging_destroy(&world.staging)
+changed_nodes :: proc(world: ^World) -> []NodeChange {
+  return world.feed.changed[:]
 }
 
+removed_nodes :: proc(world: ^World) -> []u32 {
+  return world.feed.removed[:]
+}
+
+shutdown :: proc(world: ^World) {
+  cont.flush(&world.nodes, nil, node_retire)
+  cont.destroy(&world.nodes, node_destroy)
+  delete(world.traversal_stack)
+  delete(world.feed.changed)
+  delete(world.feed.removed)
+  delete(world.pending_removed)
+}
+
+// Despawn every node under root. Slots are reclaimed immediately and the
+// removals are not reported: consumers keyed by node index must reset their
+// own slots alongside.
 teardown :: proc(world: ^World) {
   root := cont.get(world.nodes, world.root)
   if root == nil do return
-  // despawn() mutates root.children, so iterate over a snapshot
   kids := make([dynamic]NodeHandle, 0, len(root.children), context.temp_allocator)
   append(&kids, ..root.children[:])
   clear(&root.children)
   for h in kids {
     node := cont.get(world.nodes, h) or_continue
-    node.parent = h // mark detached, matching detach()'s self-parent convention
+    node.parent = h // detached, matching detach()'s self-parent convention
     despawn_subtree(world, h, node)
   }
-  // despawn_subtree frees via free_deferred — slots stay reserved for RETIRE_GRACE
-  // frames. A mid-frame level transition runs setup() in the SAME frame, right
-  // after teardown(), before any begin_frame/pool_tick reclaims them. Without an
-  // explicit flush the pool would have to hold the old AND new level at once and
-  // setup() would silently truncate once it hit MAX_NODES_IN_SCENE. The engine
-  // waits for GPU idle before teardown and node_destroy touches no Vulkan state,
-  // so reclaiming now is safe. Flush nodes first (node_retire defers the attached
-  // emitters/sprites/forcefields), then flush those pools so they are free too.
-  cont.pool_flush(&world.nodes, world, node_retire)
-  cont.pool_flush(&world.emitters, nil, nil)
-  cont.pool_flush(&world.forcefields, nil, nil)
-  cont.pool_flush(&world.sprites, nil, nil)
+  cont.flush(&world.nodes, nil, node_retire)
+  clear(&world.pending_removed)
+  clear(&world.feed.changed)
+  clear(&world.feed.removed)
 }
 
-// Despawn a node and all its children recursively.
-// The node is staged for GPU cleanup and freed immediately.
-// Engine's sync will detect the nil node and release GPU resources.
+// Despawn a node and all its children recursively. Removals are reported by
+// the next update's `removed_nodes`.
 despawn :: proc(world: ^World, handle: NodeHandle) -> bool {
-  node := cont.get(world.nodes, handle)
-  if node == nil do return false
+  node := cont.get(world.nodes, handle) or_return
   detach(world.nodes, handle)
   despawn_subtree(world, handle, node)
   return true
 }
 
-// Internal: free a node and its descendants without touching the parent's
-// children array. Caller must have already detached `handle` from its parent.
-// Skipping the per-child detach is what makes bulk despawn O(N) instead of
-// O(N^2) — every linear_search through a huge children array is avoided.
+// Free a node and its descendants without touching the parent's children
+// array; the caller has already detached `handle`. Skipping per-child detach
+// keeps bulk despawn O(N).
 @(private)
 despawn_subtree :: proc(world: ^World, handle: NodeHandle, node: ^Node) {
   for child_handle in node.children {
     child_node := cont.get(world.nodes, child_handle) or_continue
     despawn_subtree(world, child_handle, child_node)
   }
-  stage_node_data(&world.staging, handle)
-  unregister_animatable_node(world, handle)
+  append(&world.pending_removed, handle.index)
   cont.free_deferred(&world.nodes, handle)
 }
 
 @(private = "file")
-node_retire :: proc(item: ^Node, user: rawptr) {
-  node_destroy(item, (^World)(user))
+node_retire :: proc(item: ^Node, _: rawptr) {
+  node_destroy(item)
 }
 
-traverse :: proc(world: ^World) -> bool {
+// Recompute world transforms of dirty subtrees and record every node whose
+// world transform or effective visibility changed.
+traverse :: proc(world: ^World) {
   append(
     &world.traversal_stack,
     TraverseEntry{world.root, linalg.MATRIX4F32_IDENTITY, false, true},
@@ -565,52 +232,21 @@ traverse :: proc(world: ^World) -> bool {
   for len(world.traversal_stack) > 0 {
     entry := pop(&world.traversal_stack)
     current_node := cont.get(world.nodes, entry.handle) or_continue
-    visibility_changed :=
-      current_node.parent_visible != entry.parent_is_visible
+    visibility_changed := current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
     is_dirty := geometry.update_local(&current_node.transform)
-    bone_socket_transform := linalg.MATRIX4F32_IDENTITY
-    has_bone_socket := false
-    apply_bone_socket: {
-      if current_node.bone_socket == "" do break apply_bone_socket
-      parent_node := cont.get(world.nodes, current_node.parent) or_break
-      parent_mesh_attachment := parent_node.attachment.(MeshAttachment) or_break
-      parent_mesh := cont.get(
-        world.meshes,
-        parent_mesh_attachment.handle,
-      ) or_break
-      bone_index := find_bone_by_name(
-        parent_mesh,
-        current_node.bone_socket,
-      ) or_break
-      parent_skinning := parent_mesh_attachment.skinning.? or_break
-      parent_mesh_skinning := parent_mesh.skinning.? or_break
-      if bone_index >= u32(len(parent_mesh_skinning.bones)) do break apply_bone_socket
-      if bone_index >= u32(len(parent_skinning.matrices)) do break apply_bone_socket
-      // Stored matrices are skinning matrices (world_transform * inverse_bind).
-      // To recover bone world transform, multiply by bind matrix.
-      skinning_matrix := parent_skinning.matrices[bone_index]
-      bone := parent_mesh_skinning.bones[bone_index]
-      bind_matrix := linalg.matrix4_inverse(bone.inverse_bind_matrix)
-      bone_socket_transform = skinning_matrix * bind_matrix
-      has_bone_socket = true
-    }
-    if entry.parent_is_dirty || is_dirty || has_bone_socket {
-      // Bone socket provides an additional transform layer between parent and local
-      // transform_update_world will multiply: (parent * bone_socket) * local_matrix
-      geometry.update_world(
-        &current_node.transform,
-        entry.parent_transform * bone_socket_transform,
-      )
-      #partial switch _ in current_node.attachment {
-      case PointLightAttachment,
-           DirectionalLightAttachment,
-           SpotLightAttachment:
-        stage_light_data(&world.staging, entry.handle)
-      }
+    if entry.parent_is_dirty || is_dirty {
+      geometry.update_world(&current_node.transform, entry.parent_transform)
     }
     if visibility_changed || is_dirty || entry.parent_is_dirty {
-      stage_node_data(&world.staging, entry.handle)
+      append(
+        &world.feed.changed,
+        NodeChange {
+          index = entry.handle.index,
+          world_matrix = current_node.transform.world_matrix,
+          visible = current_node.parent_visible && current_node.visible,
+        },
+      )
     }
     for child_handle in current_node.children {
       append(
@@ -624,231 +260,53 @@ traverse :: proc(world: ^World) -> bool {
       )
     }
   }
-  return true
 }
 
-@(private)
-assign_emitter_to_node :: proc(
+// Place a node so its world pose is (position, rotation), whatever its
+// parent. Scale is kept.
+set_world_pose :: proc(
   world: ^World,
-  node_handle: NodeHandle,
-  node: ^Node,
+  handle: NodeHandle,
+  position: [3]f32,
+  rotation: quaternion128,
 ) {
-  attachment, is_emitter := &node.attachment.(EmitterAttachment)
-  if !is_emitter {
-    return
+  node := cont.get(world.nodes, handle)
+  if node == nil do return
+  parent, has_parent := cont.get(world.nodes, node.parent)
+  if !has_parent || node.parent == world.root || node.parent == handle {
+    node.transform.position = position
+    node.transform.rotation = rotation
+  } else {
+    parent_world := parent.transform.world_matrix
+    inv := linalg.matrix4_inverse(parent_world)
+    node.transform.position = (inv * [4]f32{position.x, position.y, position.z, 1}).xyz
+    parent_rotation := linalg.quaternion_from_matrix4_f32(parent_world)
+    node.transform.rotation = linalg.normalize(linalg.quaternion_inverse(parent_rotation) * rotation)
   }
-  emitter, ok := cont.get(world.emitters, attachment.handle)
-  if ok {
-    emitter.node_handle = node_handle
-    stage_emitter_data(&world.staging, attachment.handle)
-  }
+  node.transform.is_dirty = true
 }
 
-@(private)
-assign_forcefield_to_node :: proc(
-  world: ^World,
-  node_handle: NodeHandle,
-  node: ^Node,
-) {
-  attachment, is_forcefield := &node.attachment.(ForceFieldAttachment)
-  if !is_forcefield {
-    return
-  }
-  forcefield, ok := cont.get(world.forcefields, attachment.handle)
-  if ok {
-    forcefield.node_handle = node_handle
-    stage_forcefield_data(&world.staging, attachment.handle)
-  }
+// Set a node's local transform from a matrix (decomposed into TRS).
+set_local_matrix :: proc(world: ^World, handle: NodeHandle, m: matrix[4, 4]f32) {
+  node := cont.get(world.nodes, handle)
+  if node == nil do return
+  d := geometry.decompose_matrix(m)
+  node.transform.position = d.position
+  node.transform.rotation = d.rotation
+  node.transform.scale = d.scale
+  node.transform.is_dirty = true
 }
 
-// Mark dirty wrappers. Hide staging detail from gameplay code.
-mark_light_dirty      :: proc(w: ^World, h: NodeHandle)   { stage_light_data(&w.staging, h) }
-mark_node_dirty       :: proc(w: ^World, h: NodeHandle)   { stage_node_data(&w.staging, h) }
-mark_camera_dirty     :: proc(w: ^World, h: CameraHandle) { stage_camera_data(&w.staging, h) }
-
-// Light field setters. Mutate + auto-stage. No-op when value unchanged so
-// per-frame UI bindings don't churn the dirty queue.
-set_light_color :: proc(w: ^World, h: NodeHandle, color: [4]f32) {
-  n, n_ok := cont.get(w.nodes, h)
-  if !n_ok do return
-  target: ^[4]f32
-  switch &a in n.attachment {
-  case PointLightAttachment:       target = &a.color
-  case DirectionalLightAttachment: target = &a.color
-  case SpotLightAttachment:        target = &a.color
-  case MeshAttachment, EmitterAttachment, ForceFieldAttachment,
-       SpriteAttachment, RigidBodyAttachment:
-    return
-  case:
-    return
-  }
-  if target^ == color do return
-  target^ = color
-  stage_light_data(&w.staging, h)
+world_matrix :: proc(world: ^World, handle: NodeHandle) -> matrix[4, 4]f32 {
+  node, ok := cont.get(world.nodes, handle)
+  if !ok do return linalg.MATRIX4F32_IDENTITY
+  return node.transform.world_matrix
 }
 
-set_light_intensity :: proc(w: ^World, h: NodeHandle, intensity: f32) {
-  n, n_ok := cont.get(w.nodes, h)
-  if !n_ok do return
-  target: ^f32
-  switch &a in n.attachment {
-  case PointLightAttachment:       target = &a.color[3]
-  case DirectionalLightAttachment: target = &a.color[3]
-  case SpotLightAttachment:        target = &a.color[3]
-  case MeshAttachment, EmitterAttachment, ForceFieldAttachment,
-       SpriteAttachment, RigidBodyAttachment:
-    return
-  case:
-    return
-  }
-  if target^ == intensity do return
-  target^ = intensity
-  stage_light_data(&w.staging, h)
-}
-
-set_light_radius :: proc(w: ^World, h: NodeHandle, radius: f32) {
-  n, n_ok := cont.get(w.nodes, h)
-  if !n_ok do return
-  target: ^f32
-  switch &a in n.attachment {
-  case PointLightAttachment: target = &a.radius
-  case SpotLightAttachment:  target = &a.radius
-  case DirectionalLightAttachment, MeshAttachment, EmitterAttachment,
-       ForceFieldAttachment, SpriteAttachment, RigidBodyAttachment:
-    return
-  case:
-    return
-  }
-  if target^ == radius do return
-  target^ = radius
-  stage_light_data(&w.staging, h)
-}
-
-// Toggle a light without losing its configured color/radius/cone.
-set_light_enabled :: proc(w: ^World, h: NodeHandle, enabled: bool) {
-  n, n_ok := cont.get(w.nodes, h)
-  if !n_ok do return
-  target: ^bool
-  switch &a in n.attachment {
-  case PointLightAttachment:       target = &a.disabled
-  case DirectionalLightAttachment: target = &a.disabled
-  case SpotLightAttachment:        target = &a.disabled
-  case MeshAttachment, EmitterAttachment, ForceFieldAttachment,
-       SpriteAttachment, RigidBodyAttachment:
-    return
-  case:
-    return
-  }
-  want := !enabled
-  if target^ == want do return
-  target^ = want
-  stage_light_data(&w.staging, h)
-}
-
-// Mesh attachment setters. Mutate + auto-stage. Leave sibling fields untouched.
-set_mesh_handle :: proc(w: ^World, h: NodeHandle, mesh: MeshHandle) {
-  n, n_ok := cont.get(w.nodes, h)
-  if !n_ok do return
-  a, a_ok := &n.attachment.(MeshAttachment)
-  if !a_ok do return
-  if a.handle == mesh do return
-  a.handle = mesh
-  stage_node_data(&w.staging, h)
-}
-
-set_material_handle :: proc(w: ^World, h: NodeHandle, material: MaterialHandle) {
-  n, n_ok := cont.get(w.nodes, h)
-  if !n_ok do return
-  a, a_ok := &n.attachment.(MeshAttachment)
-  if !a_ok do return
-  if a.material == material do return
-  a.material = material
-  stage_node_data(&w.staging, h)
-}
-
-// Sync all nodes with rigid body attachments from physics to world
-sync_all_physics_to_world :: proc(
-  world: ^World,
-  physics_world: ^physics.World,
-) {
-  for &entry in world.nodes.entries do if entry.active {
-    node := &entry.item
-    if attachment, ok := node.attachment.(RigidBodyAttachment); ok {
-      if body, ok := physics.get_dynamic_body(physics_world, attachment.body_handle); ok {
-        node.transform.position = body.position
-        node.transform.rotation = body.rotation
-        node.transform.is_dirty = true
-      }
-    }
-  }
-}
-
-// Set spot-light cone angles + auto-stage. Pass `inner = nil` to default it to
-// `outer * SPOT_LIGHT_INNER_RATIO` (matches spawn_light_spot's default).
-set_spot_light_cone :: proc(
-  w: ^World,
-  h: NodeHandle,
-  outer: f32,
-  inner: Maybe(f32) = nil,
-) -> bool {
-  att, ok := spot_light(w, h)
-  if !ok do return false
-  inner_angle := inner.? or_else outer * SPOT_LIGHT_INNER_RATIO
-  if att.angle_outer == outer && att.angle_inner == inner_angle do return true
-  att.angle_outer = outer
-  att.angle_inner = inner_angle
-  mark_light_dirty(w, h)
-  return true
-}
-
-// Spawn a point light. Returns the new node handle.
-spawn_light_point :: proc(
-  world: ^World,
-  position: [3]f32 = {0, 0, 0},
-  color: [4]f32 = {1, 1, 1, 1},
-  radius: f32 = 10.0,
-  cast_shadow: bool = true,
-) -> (NodeHandle, bool) #optional_ok {
-  return spawn(world, position, PointLightAttachment{color = color, radius = radius, cast_shadow = cast_shadow})
-}
-
-spawn_light_directional :: proc(
-  world: ^World,
-  position: [3]f32 = {0, 0, 0},
-  color: [4]f32 = {1, 1, 1, 1},
-  radius: f32 = 10.0,
-  cast_shadow: bool = false,
-) -> (NodeHandle, bool) #optional_ok {
-  return spawn(world, position, DirectionalLightAttachment{color = color, radius = radius, cast_shadow = cast_shadow})
-}
-
-spawn_light_spot :: proc(
-  world: ^World,
-  position: [3]f32 = {0, 0, 0},
-  color: [4]f32 = {1, 1, 1, 1},
-  radius: f32 = 10.0,
-  angle: f32 = math.PI * 0.2,
-  cast_shadow: bool = true,
-) -> (NodeHandle, bool) #optional_ok {
-  return spawn(
-    world,
-    position,
-    SpotLightAttachment{
-      color       = color,
-      radius      = radius,
-      angle_inner = angle * SPOT_LIGHT_INNER_RATIO,
-      angle_outer = angle,
-      cast_shadow = cast_shadow,
-    },
-  )
-}
-
-// Spawn a node bound to an existing rigid body. The body is created by the
-// physics module first, then attached.
-spawn_rigid_body :: proc(
-  world: ^World,
-  body: physics.DynamicRigidBodyHandle,
-  position: [3]f32 = {0, 0, 0},
-) -> (NodeHandle, bool) #optional_ok {
-  return spawn(world, position, RigidBodyAttachment{body_handle = body})
+set_visible :: proc(world: ^World, handle: NodeHandle, visible: bool) {
+  node := cont.get(world.nodes, handle)
+  if node == nil do return
+  if node.visible == visible do return
+  node.visible = visible
+  node.transform.is_dirty = true
 }

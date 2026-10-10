@@ -68,7 +68,7 @@ build_navmesh :: proc(
     config.cs,
     config.ch,
   )
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   rasterize_triangles(
     vertices,
     indices,
@@ -89,7 +89,7 @@ build_navmesh :: proc(
     hf,
   )
   if chf == nil do return
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   erode_walkable_area(config.walkable_radius, chf) or_return
   build_distance_field(chf) or_return
   build_regions(
@@ -104,7 +104,7 @@ build_navmesh :: proc(
     config.max_edge_len,
   )
   if cset == nil do return
-  defer free_contour_set(cset)
+  defer destroy_contour_set(cset)
   pmesh = create_poly_mesh(cset, config.max_verts_per_poly)
   if pmesh == nil {
     return
@@ -116,7 +116,7 @@ build_navmesh :: proc(
     config.detail_sample_max_error,
   )
   if dmesh == nil {
-    free_poly_mesh(pmesh)
+    destroy_poly_mesh(pmesh)
     return
   }
   return pmesh, dmesh, true
@@ -271,7 +271,7 @@ in_cone_hole :: proc(i: i32, verts: [][4]i32, pj: [4]i32) -> bool {
   pi := verts[i]
   pi1 := verts[(i + 1) % n]
   pin1 := verts[(i + n - 1) % n]
-  return geometry.in_cone(pin1.xz, pi.xz, pi1.xz, pj.xz)
+  return in_cone(pin1.xz, pi.xz, pi1.xz, pj.xz)
 }
 
 // Check if segment d0-d1 intersects with contour
@@ -293,7 +293,7 @@ intersect_segment_contour :: proc(
     if d0.xz == p0.xz || d1.xz == p0.xz || d0.xz == p1.xz || d1.xz == p1.xz {
       continue
     }
-    if geometry.intersect(d0.xz, d1.xz, p0.xz, p1.xz) {
+    if intersect(d0.xz, d1.xz, p0.xz, p1.xz) {
       return true
     }
   }
@@ -428,7 +428,7 @@ build_contours :: proc(
   cset.height = chf.height - border_size * 2
   cset.border_size = border_size
   cset.max_error = max_error
-  // defer delete(cset.conts) // Will be freed by free_contour_set
+  // defer delete(cset.conts) // Will be freed by destroy_contour_set
   // Create flags array to mark region boundaries
   flags := make([]u8, len(chf.spans))
   defer delete(flags)
@@ -572,7 +572,7 @@ build_contours :: proc(
     for i in 0 ..< len(cset.conts) {
       cont := &cset.conts[i]
       // If the contour is wound backwards, it is a hole
-      area := geometry.calculate_contour_area(cont.verts)
+      area := calculate_contour_area(cont.verts)
       winding[i] = area < 0 ? -1 : 1
     }
     // Count holes using slice.count_proc
@@ -916,14 +916,14 @@ create_contour_set :: proc(
 ) -> ^Contour_Set {
   cset := new(Contour_Set)
   if !build_contours(chf, max_error, max_edge_len, cset, build_flags) {
-    free_contour_set(cset)
+    destroy_contour_set(cset)
     return nil
   }
   return cset
 }
 
 // Free contour set
-free_contour_set :: proc(cset: ^Contour_Set) {
+destroy_contour_set :: proc(cset: ^Contour_Set) {
   if cset == nil do return
   for cont in cset.conts {
     delete(cont.verts)

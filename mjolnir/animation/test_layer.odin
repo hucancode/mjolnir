@@ -72,62 +72,67 @@ test_blend_scale_modes :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_channel_sample_some_populates_when_present :: proc(t: ^testing.T) {
-	ch: Channel
-	channel_init(&ch, position_count = 2, duration = 1.0)
-	defer channel_destroy(&ch)
-	// override values
-	ch.positions[0] = LinearKeyframe([3]f32){time = 0, value = {0, 0, 0}}
-	ch.positions[1] = LinearKeyframe([3]f32){time = 1, value = {10, 0, 0}}
-	pos, _, _ := channel_sample_some(ch, 0.5)
-	v, has := pos.?
-	testing.expect(t, has, "should have position")
-	testing.expectf(t, math.abs(v.x - 5.0) < 1e-4, "midpoint x=5, got %f", v.x)
-}
-
-@(test)
-test_layer_update_loop_wraps_time :: proc(t: ^testing.T) {
-	l: Layer
-	layer_init_fk(&l, 0, duration = 1.0, mode = .LOOP)
-	layer_update(&l, 0.7)
-	layer_update(&l, 0.5) // total elapsed 1.2 → wrapped to 0.2
-	fk := l.data.(FKLayer)
+test_fk_playback_advance_loop_wraps :: proc(t: ^testing.T) {
+	fk := FKLayer{mode = .LOOP, status = .PLAYING, speed = 1}
+	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 1.0, 0.7)
+	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 1.0, 0.5)
 	testing.expectf(t, math.abs(fk.time - 0.2) < 1e-4, "loop wrap, got %f", fk.time)
 	testing.expect(t, fk.status == .PLAYING, "still playing")
 }
 
 @(test)
-test_layer_update_once_stops :: proc(t: ^testing.T) {
-	l: Layer
-	layer_init_fk(&l, 0, duration = 1.0, mode = .ONCE)
-	layer_update(&l, 1.5)
-	fk := l.data.(FKLayer)
-	testing.expect(t, fk.status == .STOPPED, "ONCE past duration → STOPPED")
+test_fk_playback_advance_once_stops :: proc(t: ^testing.T) {
+	fk := FKLayer{mode = .ONCE, status = .PLAYING, speed = 1}
+	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 1.0, 1.5)
+	testing.expect(t, fk.status == .STOPPED, "ONCE past duration -> STOPPED")
 	testing.expect(t, fk.time == 1.0, "time clamped to duration")
-
-	// further updates do nothing
-	layer_update(&l, 1.0)
-	fk = l.data.(FKLayer)
+	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 1.0, 1.0)
 	testing.expect(t, fk.status == .STOPPED && fk.time == 1.0, "stopped layer unchanged")
 }
 
 @(test)
-test_layer_update_paused_no_progress :: proc(t: ^testing.T) {
-	l: Layer
-	layer_init_fk(&l, 0, duration = 1.0)
-	fk := &l.data.(FKLayer)
-	fk.status = .PAUSED
-	layer_update(&l, 0.5)
-	testing.expect(t, fk.time == 0, "paused layer time stays")
+test_fk_playback_advance_zero_duration_noop :: proc(t: ^testing.T) {
+	fk := FKLayer{mode = .LOOP, status = .PLAYING, speed = 1}
+	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 0, 0.5)
+	testing.expect(t, fk.time == 0, "zero-duration clip does not advance")
 }
 
 @(test)
-test_layer_update_ping_pong_reverses :: proc(t: ^testing.T) {
-	l: Layer
-	layer_init_fk(&l, 0, duration = 1.0, mode = .PING_PONG)
-	fk := &l.data.(FKLayer)
-	layer_update(&l, 1.5) // overshoot, speed should flip
-	testing.expect(t, fk.speed < 0, "speed reversed past duration")
+test_transition_cross_fades :: proc(t: ^testing.T) {
+	layers := []Layer{{weight = 1}, {weight = 0}}
+	tr := Transition{from_layer = 0, to_layer = 1, duration = 1, curve = .Linear, state = .ACTIVE}
+	transition_update(&tr, layers, 0.25)
+	testing.expect(t, tr.state == .ACTIVE)
+	testing.expectf(t, math.abs(layers[0].weight - 0.75) < 1e-5 && math.abs(layers[1].weight - 0.25) < 1e-5,
+		"weights at 25%%: %f %f", layers[0].weight, layers[1].weight)
+	transition_update(&tr, layers, 0.5)
+	testing.expect(t, math.abs(layers[1].weight - 0.75) < 1e-5, "75%")
+	transition_update(&tr, layers, 0.5)
+	testing.expect(t, tr.state == .COMPLETE, "complete")
+	testing.expect(t, layers[0].weight == 0 && layers[1].weight == 1, "final weights 0/1")
+	testing.expect(t, tr.elapsed == tr.duration, "elapsed clamped")
+	// further updates are no-ops
+	layers[0].weight = 0.5
+	transition_update(&tr, layers, 0.5)
+	testing.expect(t, layers[0].weight == 0.5, "complete transition does nothing")
+}
+
+@(test)
+test_transition_zero_duration_completes :: proc(t: ^testing.T) {
+	layers := []Layer{{weight = 1}, {weight = 0}}
+	tr := Transition{from_layer = 0, to_layer = 1, duration = 0, state = .ACTIVE}
+	transition_update(&tr, layers, 0)
+	testing.expect(t, tr.state == .COMPLETE)
+	testing.expect(t, layers[0].weight == 0 && layers[1].weight == 1)
+}
+
+@(test)
+test_transition_invalid_layer_resets :: proc(t: ^testing.T) {
+	layers := []Layer{{weight = 1}}
+	tr := Transition{from_layer = 0, to_layer = 3, duration = 1, state = .ACTIVE}
+	transition_update(&tr, layers, 0.1)
+	testing.expect(t, tr.state == .NONE)
+	testing.expect(t, layers[0].weight == 1)
 }
 
 @(test)

@@ -1,8 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/animation"
-import "../../mjolnir/world"
 import "core:fmt"
 import "core:math"
 import mu "vendor:microui"
@@ -10,7 +10,9 @@ import mu "vendor:microui"
 CONTROL_POINTS :: 32
 PATH_DEBUG_SAMPLES :: 96
 
-target_nodes:  [dynamic]world.NodeHandle
+scene:         mjolnir.GltfScene
+// one animator (and its path layer) per scene.skinned entry
+animators:     [dynamic]animation.Animator
 layer_indices: [dynamic]int
 path_buf:      [CONTROL_POINTS][3]f32
 spline:        animation.Spline([3]f32)
@@ -35,6 +37,7 @@ main :: proc() {
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
+    sync       = sync,
   })
 }
 
@@ -51,14 +54,12 @@ rebuild_path :: proc(engine: ^mjolnir.Engine) {
   regenerate_points()
   animation.spline_destroy(&spline)
   spline = animation.spline_build_closed(path_buf[:])
-  for node_handle, i in target_nodes {
-    world.set_path_modifier_params(&engine.world, node_handle, layer_indices[i], path = path_buf[:])
-  }
+  for &a, i in animators do animation.set_path_params(&a, layer_indices[i], path = path_buf[:])
 }
 
 apply_runtime_params :: proc(engine: ^mjolnir.Engine) {
-  for node_handle, i in target_nodes {
-    world.set_path_modifier_params(&engine.world, node_handle, layer_indices[i], offset = f32(offset_val), length = f32(fit_len), speed = 0, loop = true)
+  for &a, i in animators {
+    animation.set_path_params(&a, layer_indices[i], offset = f32(offset_val), length = f32(fit_len), speed = 0, loop = true)
   }
 }
 
@@ -69,32 +70,34 @@ draw_path_debug :: proc(engine: ^mjolnir.Engine) {
   for i in 1 ..= PATH_DEBUG_SAMPLES {
     s := f32(i) / f32(PATH_DEBUG_SAMPLES) * spline_len
     cur := animation.spline_sample_uniform(spline, s)
-    mjolnir.debug_segment(engine, prev, cur, color = {1, 0.85, 0.1, 1}, bypass_depth = true)
+    render.debug_segment(&engine.render, prev, cur, color = {1, 0.85, 0.1, 1}, bypass_depth = true)
     prev = cur
   }
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  world.main_camera_look_at(&engine.world, {5, 3, 5}, {0, 0, 0})
-  roots := mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
+  render.main_camera_look_at(&engine.render, {5, 3, 5}, {0, 0, 0})
+  scene = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
   regenerate_points()
   spline = animation.spline_build_closed(path_buf[:])
 
-  for handle in roots {
-    node := world.node(&engine.world, handle) or_continue
-    for child in node.children {
-      idx, ok := world.add_path_modifier_layer(&engine.world, child, "root", 14,
-        path = path_buf[:], offset = f32(offset_val), length = f32(fit_len),
-        speed = 0, loop = true, closed = true, weight = 1.0,
-      )
-      if ok {
-        append(&target_nodes, child)
-        append(&layer_indices, idx)
-      }
-    }
+  for s in scene.skinned {
+    skel := &scene.rigs[s.rig].skeleton
+    a: animation.Animator
+    animation.animator_init(&a, skel)
+    idx, _ := animation.add_path_layer(&a, skel, "root", 14,
+      path = path_buf[:], offset = f32(offset_val), length = f32(fit_len),
+      speed = 0, loop = true, closed = true, weight = 1.0,
+    )
+    append(&animators, a)
+    append(&layer_indices, idx)
   }
-  world.spawn_ground(&engine.world, 30.0, position = {0, -3, 0})
-  world.spawn_light_point(&engine.world, {0, 10, 0}, {1, 0.9, 0.8, 1}, 15.0, true)
+  mjolnir.spawn_ground(engine, 30.0, position = {0, -3, 0})
+  mjolnir.spawn(engine, {0, 10, 0}, render.point_light_attachment({1, 0.9, 0.8, 1}, 15.0, true))
+}
+
+sync :: proc(engine: ^mjolnir.Engine) {
+  for s, i in scene.skinned do render.stage_bones(&engine.render, s.node.index, animators[i].palette)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -108,11 +111,12 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     if offset_val < 0 do offset_val += mu.Real(spline_len)
   }
   apply_runtime_params(engine)
+  for s, i in scene.skinned do animation.animator_update(&animators[i], &scene.rigs[s.rig], dt)
   draw_path_debug(engine)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Path Modifier", {20, 20, 200, 380}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto play", &auto_play)

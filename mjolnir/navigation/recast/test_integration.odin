@@ -2,7 +2,6 @@ package recast
 
 import "core:log"
 import "core:testing"
-import "core:time"
 import "core:math"
 
 // Helper to create test configuration
@@ -46,7 +45,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     cfg.ch,
   )
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Rasterize triangles
   ok := rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
   testing.expect(t, ok, "Failed to rasterize triangles")
@@ -64,7 +63,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     cfg.walkable_climb,
     hf,
   )
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   testing.expect(t, len(chf.spans) > 0, "No spans in compact heightfield")
   // Erode walkable area
@@ -84,7 +83,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     cfg.max_simplification_error,
     cfg.max_edge_len,
   )
-  defer free_contour_set(cset)
+  defer destroy_contour_set(cset)
   testing.expect(t, cset != nil, "Failed to build contours")
   // THOROUGH VALIDATION: Verify algorithmic correctness of complete pipeline
   // 1. Validate heightfield rasterization created correct spans
@@ -248,7 +247,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     cfg.ch,
   )
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Rasterize triangles
   ok := rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
   testing.expect(t, ok, "Failed to rasterize triangles")
@@ -266,7 +265,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     cfg.walkable_climb,
     hf,
   )
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Erode walkable area
   ok = erode_walkable_area(cfg.walkable_radius, chf)
@@ -421,7 +420,7 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     cfg.ch,
   )
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Rasterize triangles
   ok := rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
   testing.expect(t, ok, "Failed to rasterize triangles")
@@ -438,7 +437,7 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     cfg.walkable_climb,
     hf,
   )
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Build distance field
   ok = build_distance_field(chf)
@@ -472,7 +471,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     cfg.ch,
   )
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   ok := rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
   testing.expect(t, ok, "Failed to rasterize triangles")
   chf := create_compact_heightfield(
@@ -480,7 +479,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     cfg.walkable_climb,
     hf,
   )
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Mark different areas
   // Mark a box area
@@ -576,7 +575,7 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     cfg.ch,
   )
   testing.expect(t, hf != nil, "Failed to create heightfield")
-  defer free_heightfield(hf)
+  defer destroy_heightfield(hf)
   // Rasterize triangles
   ok := rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
   testing.expect(t, ok, "Failed to rasterize triangles")
@@ -594,7 +593,7 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     cfg.walkable_climb,
     hf,
   )
-  defer free_compact_heightfield(chf)
+  defer destroy_compact_heightfield(chf)
   testing.expect(t, chf != nil, "Failed to build compact heightfield")
   // Build distance field
   ok = build_distance_field(chf)
@@ -623,8 +622,8 @@ test_edge_cases :: proc(t: ^testing.T) {
     }
     pmesh, dmesh, ok := build_navmesh(vertices, indices, areas, cfg)
     testing.expect(t, !ok, "Empty mesh should fail gracefully")
-    free_poly_mesh(pmesh)
-    free_poly_mesh_detail(dmesh)
+    destroy_poly_mesh(pmesh)
+    destroy_poly_mesh_detail(dmesh)
   }
   // Test 2: Single triangle
   {
@@ -652,8 +651,8 @@ test_edge_cases :: proc(t: ^testing.T) {
         "Single triangle should produce at least one polygon",
       )
     }
-    free_poly_mesh(pmesh)
-    free_poly_mesh_detail(dmesh)
+    destroy_poly_mesh(pmesh)
+    destroy_poly_mesh_detail(dmesh)
   }
   // Test 3: Very large mesh bounds
   {
@@ -679,8 +678,8 @@ test_edge_cases :: proc(t: ^testing.T) {
       detail_sample_max_error = 5.0,
     }
     pmesh, dmesh, ok := build_navmesh(vertices, indices, areas, cfg)
-    defer free_poly_mesh(pmesh)
-    defer free_poly_mesh_detail(dmesh)
+    defer destroy_poly_mesh(pmesh)
+    defer destroy_poly_mesh_detail(dmesh)
     if ok {
       testing.expect(t, pmesh.npolys > 0, "Large mesh should produce polygons")
     }

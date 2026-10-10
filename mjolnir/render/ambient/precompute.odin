@@ -1,6 +1,7 @@
 package ambient
 
-import "../../gpu"
+import "../bindless"
+import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -35,9 +36,9 @@ PrefilterPush :: struct {
 // Outputs from a single precompute run. The caller owns the handles and must
 // free them via free_results.
 IBLResults :: struct {
-  env_cube:           gpu.TextureCubeHandle,
-  irradiance_cube:    gpu.TextureCubeHandle,
-  prefilter_cube:     gpu.TextureCubeHandle,
+  env_cube:           bindless.TextureCubeHandle,
+  irradiance_cube:    bindless.TextureCubeHandle,
+  prefilter_cube:     bindless.TextureCubeHandle,
   prefilter_max_lod:  f32,
 }
 
@@ -46,35 +47,35 @@ IBLResults :: struct {
 // passes via a one-shot command buffer. Safe to call once at engine setup.
 precompute :: proc(
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
-  equirect_handle: gpu.Texture2DHandle,
+  texture_manager: ^bindless.TextureManager,
+  equirect_handle: bindless.Texture2DHandle,
   linear_repeat_sampler: vk.Sampler,
 ) -> (
   results: IBLResults,
   ret: vk.Result,
 ) {
-  equirect := gpu.get_texture_2d(texture_manager, equirect_handle)
+  equirect := bindless.get_texture_2d(texture_manager, equirect_handle)
   if equirect == nil {
     log.error("IBL precompute: equirect source texture is nil")
     return {}, .ERROR_UNKNOWN
   }
 
   // Allocate the three output cubemaps and register in bindless descriptor.
-  results.env_cube = gpu.allocate_texture_cube_color(
+  results.env_cube = bindless.allocate_texture_cube_color(
     texture_manager,
     gctx,
     ENV_CUBE_SIZE,
     CUBE_FORMAT,
     1,
   ) or_return
-  results.irradiance_cube = gpu.allocate_texture_cube_color(
+  results.irradiance_cube = bindless.allocate_texture_cube_color(
     texture_manager,
     gctx,
     IRRADIANCE_SIZE,
     CUBE_FORMAT,
     1,
   ) or_return
-  results.prefilter_cube = gpu.allocate_texture_cube_color(
+  results.prefilter_cube = bindless.allocate_texture_cube_color(
     texture_manager,
     gctx,
     PREFILTER_SIZE,
@@ -83,9 +84,9 @@ precompute :: proc(
   ) or_return
   results.prefilter_max_lod = f32(PREFILTER_MIPS - 1)
 
-  env_img := gpu.get_texture_cube(texture_manager, results.env_cube)
-  irr_img := gpu.get_texture_cube(texture_manager, results.irradiance_cube)
-  pre_img := gpu.get_texture_cube(texture_manager, results.prefilter_cube)
+  env_img := bindless.get_texture_cube(texture_manager, results.env_cube)
+  irr_img := bindless.get_texture_cube(texture_manager, results.irradiance_cube)
+  pre_img := bindless.get_texture_cube(texture_manager, results.prefilter_cube)
 
   // Per-mip 2D-array storage views: required because image2DArray writes
   // address all 6 faces of a *single* mip level at a time.
@@ -286,12 +287,12 @@ precompute :: proc(
 
 free_results :: proc(
   gctx: ^gpu.GPUContext,
-  texture_manager: ^gpu.TextureManager,
+  texture_manager: ^bindless.TextureManager,
   r: ^IBLResults,
 ) {
-  gpu.free_texture_cube(texture_manager, gctx, r.env_cube)
-  gpu.free_texture_cube(texture_manager, gctx, r.irradiance_cube)
-  gpu.free_texture_cube(texture_manager, gctx, r.prefilter_cube)
+  bindless.free_texture_cube(texture_manager, gctx, r.env_cube)
+  bindless.free_texture_cube(texture_manager, gctx, r.irradiance_cube)
+  bindless.free_texture_cube(texture_manager, gctx, r.prefilter_cube)
   r^ = {}
 }
 

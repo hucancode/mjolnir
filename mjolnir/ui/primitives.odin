@@ -1,17 +1,15 @@
 package ui
 
 import cont "../containers"
-import "../gpu"
-import cmd "../gpu/ui"
+import cmd "../draw2d"
 import "core:log"
-import "core:slice"
 
 create_mesh2d :: proc(
   sys: ^System,
   position: [2]f32,
   vertices: []cmd.Vertex2D,
   indices: []u32,
-  texture: gpu.Texture2DHandle = {},
+  texture: u32 = cmd.NO_TEXTURE,
   z_order: i32 = 0,
 ) -> (
   Mesh2DHandle,
@@ -29,9 +27,6 @@ create_mesh2d :: proc(
   indices_copy := make([]u32, len(indices))
   copy(indices_copy, indices)
 
-  // Use default texture if none specified
-  final_texture :=
-    texture if texture != (gpu.Texture2DHandle{}) else sys.default_texture
 
   widget^ = Mesh2D {
     position       = position,
@@ -40,7 +35,7 @@ create_mesh2d :: proc(
     visible        = true,
     vertices       = vertices_copy,
     indices        = indices_copy,
-    texture        = final_texture,
+    texture        = texture,
   }
 
   return Mesh2DHandle(handle), true
@@ -50,7 +45,7 @@ create_quad2d :: proc(
   sys: ^System,
   position: [2]f32,
   size: [2]f32,
-  texture: gpu.Texture2DHandle = {},
+  texture: u32 = cmd.NO_TEXTURE,
   color: [4]u8 = {255, 255, 255, 255},
   z_order: i32 = 0,
 ) -> (
@@ -63,9 +58,6 @@ create_quad2d :: proc(
     return {}, false
   }
 
-  // Use default texture if none specified
-  final_texture :=
-    texture if texture != (gpu.Texture2DHandle{}) else sys.default_texture
 
   widget^ = Quad2D {
     position       = position,
@@ -73,7 +65,7 @@ create_quad2d :: proc(
     z_order        = z_order,
     visible        = true,
     size           = size,
-    texture        = final_texture,
+    texture        = texture,
     color          = color,
   }
 

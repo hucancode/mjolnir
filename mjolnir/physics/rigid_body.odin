@@ -1,10 +1,12 @@
 package physics
 
+import cont "../containers"
 import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
 RigidBody :: struct {
+  user:                 cont.Handle, // caller-owned link back, e.g. the scene node this body drives
   position:             [3]f32,
   cached_sphere_radius: f32,
   rotation:             quaternion128,
@@ -163,6 +165,8 @@ set_cylinder_inertia :: proc(
   update_world_inertia(self)
 }
 
+// Solid-body inertia for the collider shape at the current mass. A nil
+// collider keeps the current inertia.
 set_inertia_from_collider :: proc(self: ^DynamicRigidBody, collider: Collider) {
   switch c in collider {
   case SphereCollider:   set_sphere_inertia(self, c.radius)

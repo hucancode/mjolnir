@@ -2,7 +2,6 @@ package crowd
 
 import "core:math"
 import "core:math/linalg"
-import "../recast"
 import "../../geometry"
 
 DT_PI :: math.PI

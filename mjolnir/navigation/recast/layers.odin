@@ -75,7 +75,7 @@ bounds_size :: proc(bounds: [2]u16) -> u16 {
 }
 
 // Free heightfield layer set
-free_heightfield_layer_set :: proc(lset: [dynamic]Heightfield_Layer) {
+destroy_heightfield_layer_set :: proc(lset: [dynamic]Heightfield_Layer) {
   for layer in lset {
     delete(layer.heights)
     delete(layer.areas)

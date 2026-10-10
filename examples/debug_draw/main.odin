@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:math"
 import "core:math/linalg"
@@ -20,45 +21,45 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  light := world.spawn_light_directional(&engine.world, {10, 18, 10}, {1, 0.97, 0.92, 2.0}, 60.0, false)
+  light := mjolnir.spawn(engine, {10, 18, 10}, render.directional_light_attachment({1, 0.97, 0.92, 2.0}, 60.0, false))
   world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 
-  world.spawn_primitive_mesh(&engine.world, .CUBE, .GRAY, position = {0, -0.5, 0}, scale_factor = 0.01)
-  ground := world.spawn_primitive_mesh(&engine.world, .QUAD_XZ, .GRAY, position = {0, -1, 0})
+  mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY, position = {0, -0.5, 0}, scale_factor = 0.01)
+  ground := mjolnir.spawn_primitive_mesh(engine, .QUAD_XZ, .GRAY, position = {0, -1, 0})
   world.scale(&engine.world, ground, 20.0)
 
   // Real cube provides depth-occlusion contrast for the adjacent debug cube.
-  world.spawn_primitive_mesh(&engine.world, .CUBE, .BLUE, position = {-6, 0, 0}, scale_factor = 0.8)
+  mjolnir.spawn_primitive_mesh(engine, .CUBE, .BLUE, position = {-6, 0, 0}, scale_factor = 0.8)
 
-  world.main_camera_look_at(&engine.world, {12, 8, 14}, {0, 0, 0})
+  render.main_camera_look_at(&engine.render, {12, 8, 14}, {0, 0, 0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   elapsed += dt
   t := elapsed
-  white := mjolnir.debug_color(.WHITE)
+  white := render.debug_color(.WHITE)
 
-  mjolnir.debug_axes(engine, {0, 0, 0}, scale = 2)
+  render.debug_axes(&engine.render, {0, 0, 0}, scale = 2)
 
-  mjolnir.debug_segment(engine, {-8, 0, -8}, {8, 0, -8}, white)
-  mjolnir.debug_segment(engine, {-8, 0, -8}, {-8, 6, -8}, white)
-  mjolnir.debug_segment(engine, {8, 0, -8}, {8, 6, -8}, white)
-  mjolnir.debug_segment(engine, {-8, 6, -8}, {8, 6, -8}, white)
+  render.debug_segment(&engine.render, {-8, 0, -8}, {8, 0, -8}, white)
+  render.debug_segment(&engine.render, {-8, 0, -8}, {-8, 6, -8}, white)
+  render.debug_segment(&engine.render, {8, 0, -8}, {8, 6, -8}, white)
+  render.debug_segment(&engine.render, {-8, 6, -8}, {8, 6, -8}, white)
 
-  mjolnir.debug_aabb(engine, {-7, -1, -1}, {-5, 1, 1}, mjolnir.debug_color(.GREEN))
+  render.debug_aabb(&engine.render, {-7, -1, -1}, {-5, 1, 1}, render.debug_color(.GREEN))
 
   rot := linalg.quaternion_angle_axis_f32(t, {0, 1, 0})
-  mjolnir.debug_cube(engine, {-2, 1, 0}, rotation = rot, size = {1.5, 1.5, 1.5}, color = mjolnir.debug_color(.MAGENTA))
+  render.debug_cube(&engine.render, {-2, 1, 0}, rotation = rot, size = {1.5, 1.5, 1.5}, color = render.debug_color(.MAGENTA))
 
   r := 1.0 + 0.3 * math.sin(t * 2)
-  mjolnir.debug_sphere(engine, {2, 1, 0}, radius = r, color = mjolnir.debug_color(.CYAN))
+  render.debug_sphere(&engine.render, {2, 1, 0}, radius = r, color = render.debug_color(.CYAN))
 
-  mjolnir.debug_circle(engine, {6, 0.01, 0}, normal = {0, 1, 0}, radius = 1.5, color = mjolnir.debug_color(.YELLOW))
-  mjolnir.debug_circle(engine, {6, 2, 0}, normal = linalg.normalize([3]f32{1, 1, 0}), radius = 1.0, color = mjolnir.debug_color(.ORANGE))
+  render.debug_circle(&engine.render, {6, 0.01, 0}, normal = {0, 1, 0}, radius = 1.5, color = render.debug_color(.YELLOW))
+  render.debug_circle(&engine.render, {6, 2, 0}, normal = linalg.normalize([3]f32{1, 1, 0}), radius = 1.0, color = render.debug_color(.ORANGE))
 
   target := [3]f32{4 * math.cos(t), 3, 4 * math.sin(t)}
-  mjolnir.debug_arrow(engine, {0, 3, 0}, target, mjolnir.debug_color(.RED))
-  mjolnir.debug_point(engine, target, size = 0.3, color = white)
+  render.debug_arrow(&engine.render, {0, 3, 0}, target, render.debug_color(.RED))
+  render.debug_point(&engine.render, target, size = 0.3, color = white)
 
   trail_period :: 0.25
   trail_count_total := int(t / trail_period)
@@ -67,20 +68,20 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     if last > elapsed - dt && last <= elapsed {
       angle := last * 1.5
       pos := [3]f32{5 * math.cos(angle), 0.5, 5 * math.sin(angle)}
-      mjolnir.debug_sphere(engine, pos, 0.25, mjolnir.debug_color(.GREEN), life = 3.0)
+      render.debug_sphere(&engine.render, pos, 0.25, render.debug_color(.GREEN), life = 3.0)
     }
   }
 
   // bypass_depth = renders over the real cube.
-  mjolnir.debug_axes(engine, {-6, 0, 0}, scale = 1.5, bypass_depth = true)
+  render.debug_axes(&engine.render, {-6, 0, 0}, scale = 1.5, bypass_depth = true)
 }
 
 pre_render :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.debug_sphere(engine, {0, 5, 0}, 0.4, mjolnir.debug_color(.CYAN))
+  render.debug_sphere(&engine.render, {0, 5, 0}, 0.4, render.debug_color(.CYAN))
 }
 
 // post_render_proc fires after record(); these segments appear next frame.
 post_render :: proc(engine: ^mjolnir.Engine) {
-  mjolnir.debug_sphere(engine, {0, 6, 0}, 0.4, mjolnir.debug_color(.MAGENTA))
-  mjolnir.debug_arrow(engine, {0, 5, 0}, {0, 6, 0}, mjolnir.debug_color(.WHITE))
+  render.debug_sphere(&engine.render, {0, 6, 0}, 0.4, render.debug_color(.MAGENTA))
+  render.debug_arrow(&engine.render, {0, 5, 0}, {0, 6, 0}, render.debug_color(.WHITE))
 }

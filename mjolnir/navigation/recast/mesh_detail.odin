@@ -1,12 +1,10 @@
 package recast
 
 import "../../geometry"
-import alg "../../algebra"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import "core:time"
 
 Poly_Mesh_Detail :: struct {
   meshes: [][4]u32,
@@ -27,13 +25,13 @@ create_poly_mesh_detail :: proc(
     sample_max_error,
     dmesh,
   ) {
-    free_poly_mesh_detail(dmesh)
+    destroy_poly_mesh_detail(dmesh)
     return nil
   }
   return dmesh
 }
 
-free_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) {
+destroy_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) {
   if dmesh == nil do return
   delete(dmesh.meshes)
   delete(dmesh.verts)

@@ -1,6 +1,7 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
@@ -20,9 +21,9 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  light := world.spawn_light_directional(&engine.world, {10, 18, 10}, {1, 0.97, 0.92, 3.0}, 60.0, false)
+  light := mjolnir.spawn(engine, {10, 18, 10}, render.directional_light_attachment({1, 0.97, 0.92, 3.0}, 60.0, false))
   world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-  world.main_camera_look_at(&engine.world, {14, 14, 14}, {0, 0, 0})
+  render.main_camera_look_at(&engine.render, {14, 14, 14}, {0, 0, 0})
   pending_index = 0
 }
 
@@ -50,17 +51,17 @@ spawn_grid :: proc(engine: ^mjolnir.Engine, idx: int) {
   pending_index = -1
   sizes := GRID_SIZES
   n := sizes[idx]
-  color := world.Color.GREEN if n > 5 else world.Color.YELLOW
+  color := render.Color.GREEN if n > 5 else render.Color.YELLOW
   half := f32(n) * 0.5
   log.infof("spawning %dx%d cubes", n, n)
   grid_root = world.spawn(&engine.world, {0, 0, 0})
   for z in 0 ..< n do for x in 0 ..< n {
-    world.spawn_primitive_mesh_child(&engine.world, grid_root, .CUBE, color, position = {(f32(x) - half) * 4, 0, (f32(z) - half) * 4})
+    mjolnir.spawn_primitive_mesh(engine, .CUBE, color, position = {(f32(x) - half) * 4, 0, (f32(z) - half) * 4}, parent = grid_root)
   }
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := mjolnir.ui_ctx(engine)
+  ctx := render.debug_ui(&engine.render)
   if mu.window(ctx, "Grid", {540, 20, 240, 200}, {.NO_CLOSE}) {
     sizes := GRID_SIZES
     label_text: string = "<loading>"
