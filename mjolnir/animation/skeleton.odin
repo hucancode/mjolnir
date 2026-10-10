@@ -78,8 +78,8 @@ skeleton_init :: proc(
       local = inverse_bind[p] * self.bind[i]
       self.lengths[i] = linalg.distance(self.bind[p][3].xyz, self.bind[i][3].xyz)
     }
-    d := geometry.decompose_matrix(local)
-    self.rest[i] = {d.position, d.rotation, d.scale}
+    rest := &self.rest[i]
+    rest.position, rest.rotation, rest.scale = geometry.decompose_matrix(local)
   }
   return true
 }

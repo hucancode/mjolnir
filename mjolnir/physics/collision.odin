@@ -4,16 +4,6 @@ import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
-is_identity_quaternion :: proc "contextless" (q: quaternion128) -> bool {
-  epsilon :: 1e-6
-  return(
-    math.abs(q.x) < epsilon &&
-    math.abs(q.y) < epsilon &&
-    math.abs(q.z) < epsilon &&
-    math.abs(q.w - 1.0) < epsilon \
-  )
-}
-
 // One solver point of a contact manifold
 // base_separation: signed separation at prepare time (negative = penetrating);
 // current separation is recovered per substep from body position deltas.
@@ -196,7 +186,7 @@ test_box_sphere :: proc(
   penetration: f32,
   hit: bool,
 ) {
-  is_aligned := is_identity_quaternion(rot_box)
+  is_aligned := geometry.is_identity_quaternion(rot_box)
   if is_aligned {
     min_box := pos_box - box.half_extents
     max_box := pos_box + box.half_extents

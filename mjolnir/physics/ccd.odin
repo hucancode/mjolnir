@@ -1,5 +1,6 @@
 package physics
 
+import "../geometry"
 import "core:math"
 import "core:math/linalg"
 
@@ -93,35 +94,16 @@ swept_box_box :: proc(
 }
 
 // Slab test of the segment origin..origin+velocity against an AABB. The
-// normal is the face of first entry, pointing against the motion.
+// normal is the outward normal of the face of first entry.
 @(private = "file")
 sweep_point_aabb :: proc(origin, velocity, box_min, box_max: [3]f32) -> (result: TOIResult) {
-  t_min := f32(-1e6)
-  t_max := f32(1e6)
-  hit_normal := linalg.VECTOR3F32_Y_AXIS
-  #unroll for i in 0 ..< 3 {
-    if abs(velocity[i]) < math.F32_EPSILON {
-      if origin[i] < box_min[i] || origin[i] > box_max[i] do return
-    } else {
-      inv_d := 1.0 / velocity[i]
-      t1 := (box_min[i] - origin[i]) * inv_d
-      t2 := (box_max[i] - origin[i]) * inv_d
-      if t1 > t2 do t1, t2 = t2, t1
-      if t1 > t_min {
-        t_min = t1
-        hit_normal = {}
-        hit_normal[i] = -linalg.sign(velocity[i])
-      }
-      t_max = min(t_max, t2)
-      if t_min > t_max do return
-    }
-  }
-  if t_min >= 0 && t_min <= 1.0 {
-    result.has_impact = true
-    result.time = t_min
-    result.normal = hit_normal
-    result.point = origin + velocity * t_min
-  }
+  box := geometry.Aabb{box_min, box_max}
+  t_near, t_far := geometry.ray_aabb_intersection(origin, 1.0 / velocity, box)
+  if t_near > t_far || t_near < 0 || t_near > 1.0 do return
+  result.has_impact = true
+  result.time = t_near
+  result.point = origin + velocity * t_near
+  result.normal = geometry.aabb_face_normal(box, result.point)
   return
 }
 
@@ -179,7 +161,7 @@ swept_test :: proc(
       return result
     }
     box_b, is_box := collider_b^.(BoxCollider)
-    if is_box && is_identity_quaternion(rot_a) && is_identity_quaternion(rot_b) {
+    if is_box && geometry.is_identity_quaternion(rot_a) && geometry.is_identity_quaternion(rot_b) {
       return swept_box_box(pos_a, pos_b, shape_a.half_extents, box_b.half_extents, velocity_a)
     }
   }

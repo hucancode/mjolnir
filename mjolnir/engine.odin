@@ -1,8 +1,10 @@
 package mjolnir
 
 import "core:log"
+import "core:os"
 import "core:thread"
 import "core:time"
+import "input"
 import "render"
 import "platform"
 import ui_module "ui"
@@ -17,19 +19,14 @@ UPDATE_FRAME_TIME :: 1.0 / UPDATE_FPS
 UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
 MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
 USE_PARALLEL_UPDATE :: #config(USE_PARALLEL_UPDATE, false)
+UI_FONT_PATH :: "assets/Outfit-Regular.ttf"
+ENVIRONMENT_MAP_PATH :: "assets/Cannon_Exterior.hdr"
 FRAME_LIMIT :: #config(FRAME_LIMIT, 0)
 
 SetupProc :: #type proc(engine: ^Engine)
 UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
-KeyInputProc :: #type proc(engine: ^Engine, key: platform.Key, action: platform.Action)
-MousePressProc :: #type proc(engine: ^Engine, button: platform.MouseButton, action: platform.Action)
-MouseScrollProc :: #type proc(engine: ^Engine, offset: [2]f64)
-MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: [2]f64)
 PreRenderProc :: #type proc(engine: ^Engine)
 PostRenderProc :: #type proc(engine: ^Engine)
-// Extra inter-module glue (e.g. render.stage_bones), run on the update thread
-// after the engine pushes world transform changes into render; see docs/glue.md.
-SyncProc :: #type proc(engine: ^Engine)
 
 Engine :: struct {
   platform:                  platform.Platform,
@@ -39,55 +36,28 @@ Engine :: struct {
   start_timestamp:           time.Time,
   setup_proc:                SetupProc,
   update_proc:               UpdateProc,
-  sync_proc:                 SyncProc,
-  key_press_proc:            KeyInputProc,
-  mouse_press_proc:          MousePressProc,
-  mouse_move_proc:           MouseMoveProc,
-  mouse_scroll_proc:         MouseScrollProc,
   pre_render_proc:           PreRenderProc,
   post_render_proc:          PostRenderProc,
-  // Drives the main camera each update from platform input. Assign another
-  // controller to switch; the zero value disables camera control.
+  // This tick's input, rebuilt at the start of each update. Read it in the
+  // update callback, e.g. input.key_pressed(&engine.input, .SPACE).
+  input:                     input.State,
+  // Set each tick when the debug UI or the retained UI owns the device; skip
+  // game reactions to that device while set.
+  mouse_captured:            bool,
+  keyboard_captured:         bool,
+  // Drives the main camera each update from the input snapshot. Assign
+  // another controller to switch; the zero value disables camera control.
   camera_controller:         render.CameraController,
   ui:                        ui_module.System,
   render:                    render.Manager,
   debug_ui_enabled:          bool,
   show_engine_stats:         bool,
   update_active:             bool,
-  // Deferred level teardown/setup requested mid-frame; applied at frame end so
-  // GPU resources are never freed while command buffers still reference them.
-  pending_teardown:          bool,
-  pending_setup:             bool,
   // Opaque user pointer — stash app state here instead of using globals.
   user_data:                 rawptr,
 }
 
-// Request a level teardown, applied at the end of the current frame. Safe to call
-// mid-frame (e.g. from a pre_render / update callback) — nothing is freed while
-// the frame's command buffers are still in flight.
-schedule_teardown :: proc(self: ^Engine) {
-  self.pending_teardown = true
-}
-
-// Request a level setup, applied at the end of the current frame, after any
-// pending teardown. Pair the two to reset a level: schedule_teardown then
-// schedule_setup.
-schedule_setup :: proc(self: ^Engine) {
-  self.pending_setup = true
-}
-
 @(private)
-apply_pending_lifecycle :: proc(self: ^Engine) {
-  if self.pending_teardown {
-    self.pending_teardown = false
-    teardown(self)
-  }
-  if self.pending_setup {
-    self.pending_setup = false
-    setup(self)
-  }
-}
-
 get_delta_time :: proc(self: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(self.last_update_timestamp)))
 }
@@ -106,9 +76,6 @@ init :: proc(
   if !platform.init(&self.platform, width, height, title) {
     return .ERROR_INITIALIZATION_FAILED
   }
-  // Raw input lands in platform.input; events also feed the debug UI as they
-  // arrive. User callbacks are dispatched once per tick in update.
-  self.platform.hooks = debug_ui_hooks(self)
   render.create_instance(
     &self.render,
     title,
@@ -120,7 +87,13 @@ init :: proc(
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
   if !world.init(&self.world) do return .ERROR_INITIALIZATION_FAILED
-  if !ui_module.init(&self.ui) do return .ERROR_INITIALIZATION_FAILED
+  font, font_err := os.read_entire_file(UI_FONT_PATH, context.allocator)
+  if font_err != nil {
+    log.errorf("Failed to read UI font %s: %v", UI_FONT_PATH, font_err)
+    return .ERROR_INITIALIZATION_FAILED
+  }
+  defer delete(font)
+  if !ui_module.init(&self.ui, font) do return .ERROR_INITIALIZATION_FAILED
   render.init(
     &self.render,
     surface,
@@ -141,6 +114,9 @@ setup :: proc(self: ^Engine) -> (ret: vk.Result) {
   defer if ret != .SUCCESS {
     render.teardown(&self.render)
   }
+  if render.load_environment_map(&self.render, ENVIRONMENT_MAP_PATH) != .SUCCESS {
+    log.warnf("Failed to load environment map %s", ENVIRONMENT_MAP_PATH)
+  }
   if self.setup_proc != nil {
     self.setup_proc(self)
   }
@@ -150,34 +126,12 @@ setup :: proc(self: ^Engine) -> (ret: vk.Result) {
 // Level teardown, the counterpart to setup: the scene graph, every render
 // slot and the cameras go. App-level resources (pools, pipelines, builtin
 // meshes) stay; those belong to init/shutdown. State the app owns (physics,
-// navigation) is torn down by the app.
+// navigation) is torn down by the app. Call it from the update callback (not
+// pre_render/post_render, which run while render builds the UI); pair with
+// setup to reload a level.
 teardown :: proc(self: ^Engine) {
   world.teardown(&self.world)
   render.teardown(&self.render)
-}
-
-// Camera controller input for this tick from the engine's input snapshot.
-camera_input :: proc(self: ^Engine) -> render.CameraInput {
-  inp := &self.platform.input
-  ret := render.CameraInput {
-    mouse_delta   = {f32(inp.mouse_delta.x), f32(inp.mouse_delta.y)},
-    scroll        = f32(inp.scroll.y),
-    drag          = platform.input_mouse_down(inp, .LEFT),
-    mouse_blocked = render.debug_ui_wants_mouse(&self.render),
-  }
-  if render.debug_ui_wants_keyboard(&self.render) do return ret
-  shift := platform.input_key_down(inp, .LEFT_SHIFT) || platform.input_key_down(inp, .RIGHT_SHIFT)
-  ret.pan = shift
-  ret.boost = shift
-  axis :: proc(inp: ^platform.Input, neg, pos: platform.Key) -> f32 {
-    return f32(int(platform.input_key_down(inp, pos))) - f32(int(platform.input_key_down(inp, neg)))
-  }
-  ret.move = {
-    axis(inp, .A, .D),
-    axis(inp, .Q, .E),
-    axis(inp, .S, .W),
-  }
-  return ret
 }
 
 update :: proc(self: ^Engine) -> bool {
@@ -186,25 +140,29 @@ update :: proc(self: ^Engine) -> bool {
     return false
   }
   self.last_update_timestamp = time.now()
-  // One input tick: snapshot the raw accumulator, route edges to the debug UI
-  // and to user callbacks, all on the same cadence as the rest of update().
-  platform.input_new_frame(&self.platform.input)
-  inp := &self.platform.input
-  buttons: [ui_module.MAX_MOUSE_BUTTONS]bool
-  for down, b in inp.cur_buttons do buttons[int(b)] = down
-  ui_module.process_mouse(&self.ui, {f32(inp.cur_mouse.x), f32(inp.cur_mouse.y)}, buttons)
-  input_dispatch_callbacks(self)
+  // One input tick: snapshot the accumulator, feed both UIs, then record who
+  // owns each device so the camera and user code can skip captured input.
+  input.new_frame(&self.input, &self.platform.input)
+  render.debug_ui_input(&self.render, &self.input)
+  // The debug UI draws on top, so the retained UI only sees input it doesn't take.
+  debug_mouse := render.debug_ui_wants_mouse(&self.render)
+  if !debug_mouse do ui_module.process_input(&self.ui, &self.input)
+  self.mouse_captured = debug_mouse || ui_module.wants_mouse(&self.ui)
+  self.keyboard_captured = render.debug_ui_wants_keyboard(&self.render) || ui_module.wants_keyboard(&self.ui)
   if cam, ok := render.main_camera(&self.render); ok {
-    render.camera_controller_update(&self.camera_controller, cam, camera_input(self), delta_time)
+    render.camera_controller_update(
+      &self.camera_controller,
+      cam,
+      &self.input,
+      delta_time,
+      self.mouse_captured,
+      self.keyboard_captured,
+    )
   }
+  // The update callback owns the per-tick glue between modules, including
+  // world.update and the world -> render transform feed; see docs/glue.md.
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
-  }
-  world.update(&self.world)
-  for i in world.removed_nodes(&self.world) do render.stage_slot_removal(&self.render, i)
-  for n in world.changed_nodes(&self.world) do render.stage_transform(&self.render, n.index, n.world_matrix, n.visible)
-  if self.sync_proc != nil {
-    self.sync_proc(self)
   }
   render.update(&self.render, delta_time)
   return true
@@ -231,13 +189,8 @@ RunConfig :: struct {
   height:       u32,             // 0 → 600
   setup:        SetupProc,
   update:       UpdateProc,
-  sync:         SyncProc,
   pre_render:   PreRenderProc,
   post_render:  PostRenderProc,
-  key_press:    KeyInputProc,
-  mouse_press:  MousePressProc,
-  mouse_move:   MouseMoveProc,
-  mouse_scroll: MouseScrollProc,
   user_data:    rawptr,
   debug_ui:     bool,
   show_engine_stats: bool, // off by default; built-in Engine stats panel
@@ -249,13 +202,8 @@ run_app :: proc(cfg: RunConfig) {
   defer free(engine)
   engine.setup_proc        = cfg.setup
   engine.update_proc       = cfg.update
-  engine.sync_proc         = cfg.sync
   engine.pre_render_proc   = cfg.pre_render
   engine.post_render_proc  = cfg.post_render
-  engine.key_press_proc    = cfg.key_press
-  engine.mouse_press_proc  = cfg.mouse_press
-  engine.mouse_move_proc   = cfg.mouse_move
-  engine.mouse_scroll_proc = cfg.mouse_scroll
   engine.user_data         = cfg.user_data
   engine.debug_ui_enabled  = cfg.debug_ui
   engine.show_engine_stats = cfg.show_engine_stats
@@ -284,7 +232,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
   frame := 0
   render_error_count := 0
   for !platform.should_close(&self.platform) {
-    platform.poll_events(&self.platform) // fills the raw input accumulator
+    platform.poll_events(&self.platform) // fills the input accumulator
     when !USE_PARALLEL_UPDATE {
       update(self) // gated internally to the update rate; snapshots input
     }
@@ -302,7 +250,6 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
       continue
     }
     self.last_frame_timestamp = time.now()
-    render.set_debug_time(&self.render, time_since_start(self))
     render.debug_ui_begin(&self.render)
     if pixels, w, h, changed := ui_module.take_font_atlas(&self.ui); changed {
       render.stage_ui_font_atlas(&self.render, pixels, w, h)
@@ -324,9 +271,6 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     if self.post_render_proc != nil {
       self.post_render_proc(self)
     }
-    // Apply any teardown/setup requested during this frame now that the frame is
-    // presented — safe point to free/recreate GPU resources (teardown waits idle).
-    apply_pending_lifecycle(self)
     free_all(context.temp_allocator)
     if res != .SUCCESS {
       log.errorf("Error during rendering %v", res)

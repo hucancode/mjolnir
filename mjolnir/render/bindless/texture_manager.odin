@@ -23,12 +23,13 @@ TextureCubeHandle :: distinct cont.Handle
 TextureManager :: struct {
   images_2d:               cont.Pool(gpu.Image),
   images_cube:             cont.Pool(gpu.CubeImage),
-  set_layout:              vk.DescriptorSetLayout,
+  set_layout:     vk.DescriptorSetLayout,
   descriptor_set: vk.DescriptorSet,
+  samplers:       [SamplerType]vk.Sampler,
 }
 
-// Initialize the texture manager: creates the descriptor set layout.
-// Must be called once at startup, before pipeline layouts are built.
+// Initialize the texture manager: creates the samplers and the descriptor set
+// layout. Must be called once at startup, before pipeline layouts are built.
 texture_manager_init :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) -> vk.Result {
   self.set_layout = gpu.create_descriptor_array_layout(
     gctx,
@@ -36,6 +37,23 @@ texture_manager_init :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) -> vk
     {.SAMPLER, len(SamplerType), {.FRAGMENT}},
     {.SAMPLED_IMAGE, MAX_CUBE_TEXTURES, {.FRAGMENT}},
   ) or_return
+  for &sampler, type in self.samplers {
+    linear := type == .LINEAR_CLAMP || type == .LINEAR_REPEAT
+    repeat := type == .NEAREST_REPEAT || type == .LINEAR_REPEAT
+    filter: vk.Filter = .LINEAR if linear else .NEAREST
+    address: vk.SamplerAddressMode = .REPEAT if repeat else .CLAMP_TO_EDGE
+    info := vk.SamplerCreateInfo {
+      sType        = .SAMPLER_CREATE_INFO,
+      magFilter    = filter,
+      minFilter    = filter,
+      addressModeU = address,
+      addressModeV = address,
+      addressModeW = address,
+      mipmapMode   = .LINEAR,
+      maxLod       = 1000,
+    }
+    vk.CreateSampler(gctx.device, &info, nil, &sampler) or_return
+  }
   return .SUCCESS
 }
 
@@ -44,14 +62,13 @@ texture_manager_init :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) -> vk
 texture_manager_setup :: proc(
   self: ^TextureManager,
   gctx: ^gpu.GPUContext,
-  samplers: [SamplerType]vk.Sampler,
 ) -> vk.Result {
   // GPU images back descriptor slots the GPU samples for up to gpu.FRAMES_IN_FLIGHT
   // frames, so a freed slot/image must be retired, not reclaimed inline.
   cont.init(&self.images_2d, MAX_TEXTURES, gpu.FRAMES_IN_FLIGHT)
   cont.init(&self.images_cube, MAX_CUBE_TEXTURES, gpu.FRAMES_IN_FLIGHT)
   gpu.allocate_descriptor_set(gctx, &self.descriptor_set, &self.set_layout) or_return
-  for sampler, type in samplers {
+  for sampler, type in self.samplers {
     gpu.write_descriptor_array_element(gctx, self.descriptor_set, BINDING_SAMPLERS, u32(type), .SAMPLER, {sampler = sampler})
   }
   return .SUCCESS
@@ -83,11 +100,13 @@ texture_manager_teardown :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) {
   // already waited for the GPU to go idle, so grace no longer matters.
   cont.flush(&self.images_2d, gctx, retire_image_2d)
   cont.flush(&self.images_cube, gctx, retire_image_cube)
-  for &entry in self.images_2d.entries do if entry.active {
-    if entry.item.image != 0 do gpu.image_destroy(gctx.device, &entry.item)
+  it_2d := cont.iterator(&self.images_2d)
+  for img in cont.next(&it_2d, Texture2DHandle) {
+    if img.image != 0 do gpu.image_destroy(gctx.device, img)
   }
-  for &entry in self.images_cube.entries do if entry.active {
-    if entry.item.image != 0 do gpu.cube_depth_texture_destroy(gctx.device, &entry.item)
+  it_cube := cont.iterator(&self.images_cube)
+  for img in cont.next(&it_cube, TextureCubeHandle) {
+    if img.image != 0 do gpu.cube_depth_texture_destroy(gctx.device, img)
   }
   cont.destroy(&self.images_2d, proc(_: ^gpu.Image) {})
   cont.destroy(&self.images_cube, proc(_: ^gpu.CubeImage) {})
@@ -96,9 +115,13 @@ texture_manager_teardown :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) {
   self.descriptor_set = 0
 }
 
-// Shutdown the texture manager: destroys the descriptor set layout.
-// Must be called once at gpu.shutdown, paired with texture_manager_init.
+// Shutdown the texture manager: destroys the samplers and the descriptor set
+// layout. Must be called once at gpu.shutdown, paired with texture_manager_init.
 texture_manager_shutdown :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) {
+  for &sampler in self.samplers {
+    vk.DestroySampler(gctx.device, sampler, nil)
+    sampler = 0
+  }
   vk.DestroyDescriptorSetLayout(gctx.device, self.set_layout, nil)
   self.set_layout = 0
 }

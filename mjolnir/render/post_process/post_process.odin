@@ -407,15 +407,9 @@ init :: proc(
       shader_code,
     ) or_return
   }
-  shader_stages: [count][2]vk.PipelineShaderStageCreateInfo
-  hdr_infos: [count]vk.GraphicsPipelineCreateInfo
-  ldr_infos: [count]vk.GraphicsPipelineCreateInfo
-  ldr_format := color_format
-  ldr_rendering_info := vk.PipelineRenderingCreateInfo {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = 1,
-    pColorAttachmentFormats = &ldr_format,
-  }
+  hdr_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
+  ldr_formats := [?]vk.Format{color_format}
+  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_OVERRIDE}
   for effect_type, i in PostProcessEffectType {
     push_constant_size: u32
     switch effect_type {
@@ -443,44 +437,20 @@ init :: proc(
       vk.PushConstantRange{stageFlags = {.FRAGMENT}, size = push_constant_size} if push_constant_size > 0 else nil,
       textures_set_layout,
     ) or_return
-    shader_stages[i] = gpu.create_vert_frag_stages(
-      vert_module,
-      frag_modules[i],
-      &bindless.SHADER_SPEC_CONSTANTS,
-    )
-    hdr_infos[i] = {
-      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &gpu.HDR_COLOR_ONLY_RENDERING_INFO,
-      stageCount          = len(shader_stages[i]),
-      pStages             = raw_data(shader_stages[i][:]),
-      pVertexInputState   = &gpu.VERTEX_INPUT_NONE,
-      pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-      pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-      pRasterizationState = &gpu.DOUBLE_SIDED_RASTERIZER,
-      pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-      pColorBlendState    = &gpu.COLOR_BLENDING_OVERRIDE,
-      pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-      layout              = self.pipeline_layouts[i],
+    desc := gpu.GraphicsPipelineDesc {
+      vert = vert_module,
+      frag = frag_modules[i],
+      specialization = &bindless.SHADER_SPEC_CONSTANTS,
+      topology = .TRIANGLE_LIST,
+      raster = gpu.DOUBLE_SIDED_RASTERIZER,
+      blend = blend[:],
+      color_formats = hdr_formats[:],
+      layout = self.pipeline_layouts[i],
     }
-    ldr_infos[i] = hdr_infos[i]
-    ldr_infos[i].pNext = &ldr_rendering_info
+    self.pipelines_hdr[i] = gpu.create_graphics_pipeline(gctx, desc) or_return
+    desc.color_formats = ldr_formats[:]
+    self.pipelines_ldr[i] = gpu.create_graphics_pipeline(gctx, desc) or_return
   }
-  vk.CreateGraphicsPipelines(
-    gctx.device,
-    0,
-    count,
-    raw_data(hdr_infos[:]),
-    nil,
-    raw_data(self.pipelines_hdr[:]),
-  ) or_return
-  vk.CreateGraphicsPipelines(
-    gctx.device,
-    0,
-    count,
-    raw_data(ldr_infos[:]),
-    nil,
-    raw_data(self.pipelines_ldr[:]),
-  ) or_return
   log.info("Postprocess pipeline initialized successfully")
   return .SUCCESS
 }

@@ -89,28 +89,6 @@ test_overlap_quantized_bounds :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_triangle_area_2d :: proc(t: ^testing.T) {
-  // Test right triangle
-  a := [3]f32{0, 0, 0}
-  b := [3]f32{3, 0, 0}
-  c := [3]f32{0, 0, 4}
-  area := triangle_area_2d(a, b, c)
-  testing.expect(t, approx_equal(area, 6.0), "Triangle area should be 6")
-  area = triangle_area_2d(a, c, b)
-  testing.expect(t, approx_equal(area, 6.0), "Triangle area should be 6")
-  // Test degenerate triangle (collinear points)
-  d := [3]f32{0, 0, 0}
-  e := [3]f32{1, 0, 0}
-  f := [3]f32{2, 0, 0}
-  area2 := triangle_area_2d(d, e, f)
-  testing.expect(
-    t,
-    approx_equal(area2, 0.0),
-    "Degenerate triangle area should be 0",
-  )
-}
-
-@(test)
 test_point_in_polygon_2d :: proc(t: ^testing.T) {
   // Test square polygon
   square := [][3]f32{{0, 0, 0}, {10, 0, 0}, {10, 0, 10}, {0, 0, 10}}
@@ -178,85 +156,6 @@ test_point_in_polygon_2d :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_intersect_segment_triangle :: proc(t: ^testing.T) {
-  // Define a triangle in XZ plane at Y=0
-  a := [3]f32{0, 0, 0}
-  b := [3]f32{10, 0, 0}
-  c := [3]f32{0, 0, 10}
-  // Test segment that intersects triangle
-  sp1 := [3]f32{2, 5, 2}
-  sq1 := [3]f32{2, -5, 2}
-  hit1, t1 := intersect_segment_triangle(sp1, sq1, a, b, c)
-  testing.expect(t, hit1, "Segment should intersect triangle")
-  testing.expect(t, approx_equal(t1, 0.5), "Intersection should be at t=0.5")
-  // Test segment that misses triangle
-  sp2 := [3]f32{20, 5, 20}
-  sq2 := [3]f32{20, -5, 20}
-  hit2, _ := intersect_segment_triangle(sp2, sq2, a, b, c)
-  testing.expect(t, !hit2, "Segment should miss triangle")
-  // Test segment parallel to triangle
-  sp3 := [3]f32{2, 0, 2}
-  sq3 := [3]f32{5, 0, 5}
-  hit3, _ := intersect_segment_triangle(sp3, sq3, a, b, c)
-  testing.expect(t, !hit3, "Parallel segment should not intersect")
-  // Test segment that starts inside and goes out
-  sp4 := [3]f32{2, -1, 2}
-  sq4 := [3]f32{2, 1, 2}
-  hit4, t4 := intersect_segment_triangle(sp4, sq4, a, b, c)
-  testing.expect(t, hit4, "Segment starting below should intersect")
-  testing.expect(t, approx_equal(t4, 0.5), "Intersection should be at t=0.5")
-}
-
-@(test)
-test_closest_point_on_triangle :: proc(t: ^testing.T) {
-  // Define a triangle
-  a := [3]f32{0, 0, 0}
-  b := [3]f32{10, 0, 0}
-  c := [3]f32{0, 0, 10}
-  // Test point closest to vertex A
-  p1 := [3]f32{-5, 5, -5}
-  closest1 := closest_point_on_triangle(p1, a, b, c)
-  testing.expect(
-    t,
-    vec3_approx_equal(closest1, a),
-    "Closest point should be vertex A",
-  )
-  // Test point closest to vertex B
-  p2 := [3]f32{15, 5, -5}
-  closest2 := closest_point_on_triangle(p2, a, b, c)
-  testing.expect(
-    t,
-    vec3_approx_equal(closest2, b),
-    "Closest point should be vertex B",
-  )
-  // Test point closest to vertex C
-  p3 := [3]f32{-5, 5, 15}
-  closest3 := closest_point_on_triangle(p3, a, b, c)
-  testing.expect(
-    t,
-    vec3_approx_equal(closest3, c),
-    "Closest point should be vertex C",
-  )
-  // Test point closest to edge AB
-  p4 := [3]f32{5, 5, -5}
-  closest4 := closest_point_on_triangle(p4, a, b, c)
-  expected4 := [3]f32{5, 0, 0}
-  testing.expect(
-    t,
-    vec3_approx_equal(closest4, expected4),
-    "Closest point should be on edge AB",
-  )
-  // Test point inside triangle (projects to itself)
-  p5 := [3]f32{2, 0, 2}
-  closest5 := closest_point_on_triangle(p5, a, b, c)
-  testing.expect(
-    t,
-    vec3_approx_equal(closest5, p5, 1e-6),
-    "Point inside triangle should project to itself",
-  )
-}
-
-@(test)
 test_dist_point_segment_sq_2d :: proc(t: ^testing.T) {
   // Test point on segment
   pt1 := [3]f32{5, 0, 0}
@@ -314,82 +213,6 @@ test_dist_point_segment_sq :: proc(t: ^testing.T) {
     approx_equal(dist2, 16.0),
     "2D squared distance in XZ plane should be 16",
   )
-}
-
-@(test)
-test_calc_poly_normal :: proc(t: ^testing.T) {
-  // Test square in XZ plane
-  // Use counter-clockwise winding when viewed from above for upward normal
-  square := [][3]f32{{0, 0, 0}, {0, 0, 10}, {10, 0, 10}, {10, 0, 0}}
-  normal := calc_poly_normal(square)
-  expected := [3]f32{0, 1, 0}
-  if !vec3_approx_equal(normal, expected) {
-    fmt.printf("Square normal: got %v, expected %v\n", normal, expected)
-  }
-  testing.expect(
-    t,
-    vec3_approx_equal(normal, expected),
-    "Normal of XZ square should point up",
-  )
-  // Test triangle
-  triangle := [][3]f32{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}
-  normal2 := calc_poly_normal(triangle)
-  expected2 := [3]f32{0, 0, 1}
-  if !vec3_approx_equal(normal2, expected2) {
-    fmt.printf("Triangle normal: got %v, expected %v\n", normal2, expected2)
-  }
-  testing.expect(
-    t,
-    vec3_approx_equal(normal2, expected2),
-    "Normal should point in Z direction",
-  )
-}
-
-@(test)
-test_poly_area_2d :: proc(t: ^testing.T) {
-  // Test square
-  square := [][3]f32{{0, 0, 0}, {10, 0, 0}, {10, 0, 10}, {0, 0, 10}}
-  area := poly_area_2d(square)
-  testing.expect(t, approx_equal(area, 100.0), "Square area should be 100")
-  // Test triangle
-  triangle := [][3]f32{{0, 0, 0}, {10, 0, 0}, {0, 0, 10}}
-  area2 := poly_area_2d(triangle)
-  testing.expect(t, approx_equal(area2, 50.0), "Triangle area should be 50")
-  // Test clockwise winding (negative area)
-  square_cw := [][3]f32{{0, 0, 0}, {0, 0, 10}, {10, 0, 10}, {10, 0, 0}}
-  area3 := poly_area_2d(square_cw)
-  testing.expect(
-    t,
-    approx_equal(area3, -100.0),
-    "Clockwise square area should be -100",
-  )
-}
-
-@(test)
-test_intersect_segments_2d :: proc(t: ^testing.T) {
-  // Test intersecting segments
-  ap1 := [3]f32{0, 0, 0}
-  aq1 := [3]f32{10, 0, 10}
-  bp1 := [3]f32{0, 0, 10}
-  bq1 := [3]f32{10, 0, 0}
-  hit1, s1, t1 := intersect_segments_2d(ap1, aq1, bp1, bq1)
-  testing.expect(t, hit1, "Segments should intersect")
-  testing.expect(t, approx_equal(s1, 0.5), "Intersection at s=0.5")
-  testing.expect(t, approx_equal(t1, 0.5), "Intersection at t=0.5")
-  // Test parallel segments
-  ap2 := [3]f32{0, 0, 0}
-  aq2 := [3]f32{10, 0, 0}
-  bp2 := [3]f32{0, 0, 5}
-  bq2 := [3]f32{10, 0, 5}
-  hit2, _, _ := intersect_segments_2d(ap2, aq2, bp2, bq2)
-  testing.expect(t, !hit2, "Parallel segments should not intersect")
-  // Test non-intersecting segments
-  ap3 := [3]f32{0, 0, 0}
-  aq3 := [3]f32{5, 0, 0}
-  bp3 := [3]f32{10, 0, 0}
-  bq3 := [3]f32{15, 0, 0}
-  hit3, _, _ := intersect_segments_2d(ap3, aq3, bp3, bq3)
-  testing.expect(t, !hit3, "Non-overlapping segments should not intersect")
 }
 
 @(test)

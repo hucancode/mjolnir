@@ -279,3 +279,13 @@ VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
     offset = u32(offset_of(mesh.Vertex, tangent)),
   },
 }
+
+// Position-only view of mesh.Vertex for depth and light-volume passes.
+POSITION_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
+  {
+    binding = 0,
+    location = 0,
+    format = .R32G32B32_SFLOAT,
+    offset = u32(offset_of(mesh.Vertex, position)),
+  },
+}

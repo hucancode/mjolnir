@@ -3,109 +3,35 @@ package gpu
 import "core:slice"
 import vk "vendor:vulkan"
 
-VERTEX_INPUT_NONE := vk.PipelineVertexInputStateCreateInfo {
-  sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-}
-
 READ_WRITE_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
-  sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   depthTestEnable  = true,
   depthWriteEnable = true,
   depthCompareOp   = .LESS_OR_EQUAL,
 }
 
 READ_ONLY_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
-  sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   depthTestEnable = true,
   depthCompareOp  = .LESS_OR_EQUAL,
 }
 
-READ_ONLY_INVERSE_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
-  sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-  depthTestEnable = true,
-  depthCompareOp  = .GREATER_OR_EQUAL,
-}
-
-DISABLED_DEPTH_STATE := vk.PipelineDepthStencilStateCreateInfo {
-  sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-  depthTestEnable  = false,
-  depthWriteEnable = false,
-}
-
-DYNAMIC_STATES := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
-
-STANDARD_DYNAMIC_STATES := vk.PipelineDynamicStateCreateInfo {
-  sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-  dynamicStateCount = len(DYNAMIC_STATES),
-  pDynamicStates    = raw_data(DYNAMIC_STATES[:]),
-}
-
 STANDARD_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
-  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
   polygonMode = .FILL,
   cullMode    = {.BACK},
   frontFace   = .COUNTER_CLOCKWISE,
 }
 
-INVERSE_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
-  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-  polygonMode = .FILL,
-  cullMode    = {.BACK},
-  frontFace   = .CLOCKWISE,
-}
-
 DOUBLE_SIDED_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
-  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
   polygonMode = .FILL,
   lineWidth   = 1.0,
 }
 
 LINE_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
-  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
   polygonMode = .LINE,
   lineWidth   = 1.0,
 }
 
-BOLD_DOUBLE_SIDED_RASTERIZER := vk.PipelineRasterizationStateCreateInfo {
-  sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-  polygonMode = .FILL,
-  lineWidth   = 3.0,
-}
-
-STANDARD_INPUT_ASSEMBLY := vk.PipelineInputAssemblyStateCreateInfo {
-  sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-  topology = .TRIANGLE_LIST,
-}
-
-POINT_INPUT_ASSEMBLY := vk.PipelineInputAssemblyStateCreateInfo {
-  sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-  topology = .POINT_LIST,
-}
-
-LINE_INPUT_ASSEMBLY := vk.PipelineInputAssemblyStateCreateInfo {
-  sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-  topology = .LINE_STRIP,
-}
-
-STANDARD_VIEWPORT_STATE := vk.PipelineViewportStateCreateInfo {
-  sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-  viewportCount = 1,
-  scissorCount  = 1,
-}
-
-STANDARD_MULTISAMPLING := vk.PipelineMultisampleStateCreateInfo {
-  sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-  rasterizationSamples = {._1},
-}
-
 BLEND_OVERRIDE := vk.PipelineColorBlendAttachmentState {
   colorWriteMask = {.R, .G, .B, .A},
-}
-
-COLOR_BLENDING_OVERRIDE := vk.PipelineColorBlendStateCreateInfo {
-  sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-  attachmentCount = 1,
-  pAttachments    = &BLEND_OVERRIDE,
 }
 
 BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
@@ -119,12 +45,6 @@ BLEND_ADDITIVE := vk.PipelineColorBlendAttachmentState {
   colorWriteMask      = {.R, .G, .B, .A},
 }
 
-COLOR_BLENDING_ADDITIVE := vk.PipelineColorBlendStateCreateInfo {
-  sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-  attachmentCount = 1,
-  pAttachments    = &BLEND_ADDITIVE,
-}
-
 BLEND_OVERFLOW := vk.PipelineColorBlendAttachmentState {
   blendEnable         = true,
   srcColorBlendFactor = .ONE,
@@ -136,127 +56,111 @@ BLEND_OVERFLOW := vk.PipelineColorBlendAttachmentState {
   colorWriteMask      = {.R, .G, .B, .A},
 }
 
-COLOR_BLENDING_OVERFLOW := vk.PipelineColorBlendStateCreateInfo {
-  sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-  attachmentCount = 1,
-  pAttachments    = &BLEND_OVERFLOW,
+HDR_COLOR_FORMAT :: vk.Format.R16G16B16A16_SFLOAT
+
+// Everything that varies between the engine's graphics pipelines, as the raw
+// Vulkan values create_graphics_pipeline writes into GraphicsPipelineCreateInfo.
+// Shader stages use entry point "main"; `geom` and `frag` are optional (0).
+// `raster` and `depth` need no sType. `depth` applies only when
+// `depth_format` is set; `blend` holds one entry per color format. Empty
+// `dynamic_states` means viewport + scissor. Pipelines target dynamic
+// rendering with one sample per pixel.
+GraphicsPipelineDesc :: struct {
+  vert, geom, frag:  vk.ShaderModule,
+  specialization:    ^vk.SpecializationInfo,
+  vertex_bindings:   []vk.VertexInputBindingDescription,
+  vertex_attributes: []vk.VertexInputAttributeDescription,
+  topology:          vk.PrimitiveTopology,
+  raster:            vk.PipelineRasterizationStateCreateInfo,
+  depth:             vk.PipelineDepthStencilStateCreateInfo,
+  blend:             []vk.PipelineColorBlendAttachmentState,
+  color_formats:     []vk.Format,
+  depth_format:      vk.Format,
+  dynamic_states:    []vk.DynamicState,
+  layout:            vk.PipelineLayout,
 }
 
-STANDARD_COLOR_FORMAT := vk.Format.B8G8R8A8_SRGB
-STANDARD_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
-  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-  colorAttachmentCount    = 1,
-  pColorAttachmentFormats = &STANDARD_COLOR_FORMAT,
-  depthAttachmentFormat   = .D32_SFLOAT,
-}
-
-COLOR_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
-  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-  colorAttachmentCount    = 1,
-  pColorAttachmentFormats = &STANDARD_COLOR_FORMAT,
-}
-
-HDR_COLOR_FORMAT := vk.Format.R16G16B16A16_SFLOAT
-HDR_STANDARD_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
-  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-  colorAttachmentCount    = 1,
-  pColorAttachmentFormats = &HDR_COLOR_FORMAT,
-  depthAttachmentFormat   = .D32_SFLOAT,
-}
-
-HDR_COLOR_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
-  sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-  colorAttachmentCount    = 1,
-  pColorAttachmentFormats = &HDR_COLOR_FORMAT,
-}
-
-DEPTH_ONLY_RENDERING_INFO := vk.PipelineRenderingCreateInfo {
-  sType                 = .PIPELINE_RENDERING_CREATE_INFO,
-  depthAttachmentFormat = .D32_SFLOAT,
-}
-
-create_vert_frag_stages :: proc(
-  vert_module: vk.ShaderModule,
-  frag_module: vk.ShaderModule,
-  specialization: ^vk.SpecializationInfo = nil,
-) -> [2]vk.PipelineShaderStageCreateInfo {
-  return [2]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_module,
-      pName = "main",
-      pSpecializationInfo = specialization,
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = frag_module,
-      pName = "main",
-      pSpecializationInfo = specialization,
-    },
+create_graphics_pipeline :: proc(
+  gctx: ^GPUContext,
+  desc: GraphicsPipelineDesc,
+) -> (
+  pipeline: vk.Pipeline,
+  ret: vk.Result,
+) {
+  desc := desc
+  stages: [3]vk.PipelineShaderStageCreateInfo
+  stage_count: u32
+  modules := [3]vk.ShaderModule{desc.vert, desc.geom, desc.frag}
+  stage_flags := [3]vk.ShaderStageFlags{{.VERTEX}, {.GEOMETRY}, {.FRAGMENT}}
+  for module, i in modules {
+    if module == 0 do continue
+    stages[stage_count] = {
+      sType               = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage               = stage_flags[i],
+      module              = module,
+      pName               = "main",
+      pSpecializationInfo = desc.specialization,
+    }
+    stage_count += 1
   }
-}
-
-create_vert_stage :: proc(
-  vert_module: vk.ShaderModule,
-  specialization: ^vk.SpecializationInfo = nil,
-) -> [1]vk.PipelineShaderStageCreateInfo {
-  return [1]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_module,
-      pName = "main",
-      pSpecializationInfo = specialization,
-    },
+  vertex_input := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = u32(len(desc.vertex_bindings)),
+    pVertexBindingDescriptions      = raw_data(desc.vertex_bindings),
+    vertexAttributeDescriptionCount = u32(len(desc.vertex_attributes)),
+    pVertexAttributeDescriptions    = raw_data(desc.vertex_attributes),
   }
-}
-
-create_frag_stage :: proc(
-  frag_module: vk.ShaderModule,
-  specialization: ^vk.SpecializationInfo = nil,
-) -> [1]vk.PipelineShaderStageCreateInfo {
-  return [1]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = frag_module,
-      pName = "main",
-      pSpecializationInfo = specialization,
-    },
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology = desc.topology,
   }
-}
-
-create_vert_geo_frag_stages :: proc(
-  vert_module: vk.ShaderModule,
-  geo_module: vk.ShaderModule,
-  frag_module: vk.ShaderModule,
-  specialization: ^vk.SpecializationInfo = nil,
-) -> [3]vk.PipelineShaderStageCreateInfo {
-  return [3]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_module,
-      pName = "main",
-      pSpecializationInfo = specialization,
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.GEOMETRY},
-      module = geo_module,
-      pName = "main",
-      pSpecializationInfo = specialization,
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = frag_module,
-      pName = "main",
-      pSpecializationInfo = specialization,
-    },
+  viewport := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
   }
+  desc.raster.sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO
+  multisample := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+  }
+  desc.depth.sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO
+  blend := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    attachmentCount = u32(len(desc.blend)),
+    pAttachments    = raw_data(desc.blend),
+  }
+  default_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_states := desc.dynamic_states
+  if len(dynamic_states) == 0 do dynamic_states = default_dynamic_states[:]
+  dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = u32(len(dynamic_states)),
+    pDynamicStates    = raw_data(dynamic_states),
+  }
+  rendering := vk.PipelineRenderingCreateInfo {
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+    colorAttachmentCount    = u32(len(desc.color_formats)),
+    pColorAttachmentFormats = raw_data(desc.color_formats),
+    depthAttachmentFormat   = desc.depth_format,
+  }
+  info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &rendering,
+    stageCount          = stage_count,
+    pStages             = raw_data(stages[:]),
+    pVertexInputState   = &vertex_input,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport,
+    pRasterizationState = &desc.raster,
+    pMultisampleState   = &multisample,
+    pDepthStencilState  = &desc.depth if desc.depth_format != .UNDEFINED else nil,
+    pColorBlendState    = &blend if len(desc.blend) > 0 else nil,
+    pDynamicState       = &dynamic_state,
+    layout              = desc.layout,
+  }
+  vk.CreateGraphicsPipelines(gctx.device, 0, 1, &info, nil, &pipeline) or_return
+  return pipeline, .SUCCESS
 }
 
 begin_record :: proc(

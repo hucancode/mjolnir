@@ -77,14 +77,6 @@ rigid_body_init :: proc(
   update_world_inertia(self)
 }
 
-skew :: #force_inline proc "contextless" (v: [3]f32) -> matrix[3, 3]f32 {
-  return matrix[3, 3]f32{
-    0, -v.z, v.y,
-    v.z, 0, -v.x,
-    -v.y, v.x, 0,
-  }
-}
-
 // Implicit gyroscopic torque: one Newton-Raphson iteration on
 // I*(w2−w1) + h*(w2 * I*w2) = 0 in body frame. Slightly
 // dissipative but unconditionally stable — energy can only decrease.
@@ -104,7 +96,7 @@ solve_gyroscopic :: proc(body: ^DynamicRigidBody, dt: f32) {
     0, inertia.y, 0,
     0, 0, inertia.z,
   }
-  jac := i_mat + dt * (skew(w1) * i_mat - skew(iw))
+  jac := i_mat + dt * (geometry.skew(w1) * i_mat - geometry.skew(iw))
   w2 := w1 - linalg.inverse(jac) * f
   body.angular_velocity = linalg.quaternion128_mul_vector3(q, w2)
 }

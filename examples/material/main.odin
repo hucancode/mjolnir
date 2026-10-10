@@ -77,13 +77,19 @@ axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  render.set_light_intensity(&engine.render, sun_light.index, f32(sun_intensity))
+  if l, ok := render.attachment(&engine.render, sun_light.index, render.DirectionalLightAttachment); ok {
+    l.color[3] = f32(sun_intensity)
+    render.mark_slot_dirty(&engine.render, sun_light.index)
+  }
   ambient.set_ibl_intensity(&engine.render.ambient, f32(ibl_intensity))
   ambient.set_skybox_enabled(&engine.render.ambient, skybox_on)
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
     render.set_material_pbr_params(&engine.render, grid_materials[row][col], metallic = m, roughness = r)
   }
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

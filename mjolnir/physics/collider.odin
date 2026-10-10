@@ -2,14 +2,6 @@ package physics
 
 import "../geometry"
 
-ColliderType :: enum {
-  Sphere,
-  Box,
-  Capsule,
-  Cylinder,
-  Fan,
-}
-
 SphereCollider :: struct {
   radius: f32,
 }

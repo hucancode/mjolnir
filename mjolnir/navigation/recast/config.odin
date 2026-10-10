@@ -4,65 +4,6 @@ import "../../geometry"
 import "core:math"
 import "core:math/linalg"
 
-Status_Flag :: enum u32 {
-  Success          = 0,
-  In_Progress      = 1,
-  Partial_Result   = 2,
-  Wrong_Magic      = 16,
-  Wrong_Version    = 17,
-  Out_Of_Memory    = 18,
-  Invalid_Param    = 19,
-  Buffer_Too_Small = 20,
-  Out_Of_Nodes     = 21,
-  Partial_Path     = 22,
-}
-
-Status :: bit_set[Status_Flag;u32]
-
-status_succeeded :: proc "contextless" (status: Status) -> bool {
-  return(
-    .Success in status &&
-    .Wrong_Magic not_in status &&
-    .Wrong_Version not_in status &&
-    .Out_Of_Memory not_in status &&
-    .Invalid_Param not_in status &&
-    .Buffer_Too_Small not_in status &&
-    .Out_Of_Nodes not_in status \
-  )
-}
-
-status_failed :: proc "contextless" (status: Status) -> bool {
-  return(
-    .Wrong_Magic in status ||
-    .Wrong_Version in status ||
-    .Out_Of_Memory in status ||
-    .Invalid_Param in status ||
-    .Buffer_Too_Small in status ||
-    .Out_Of_Nodes in status \
-  )
-}
-
-status_in_progress :: proc "contextless" (status: Status) -> bool {
-  return .In_Progress in status
-}
-
-status_detail :: proc "contextless" (status: Status) -> (succeeded: bool, detail: Status) {
-  succeeded = status_succeeded(status)
-  detail = status - {.Success}
-  return
-}
-
-DEFAULT_MAX_PATH :: 256
-
-Poly_Ref :: distinct u32
-Tile_Ref :: distinct u32
-Agent_Id :: distinct u32
-Obstacle_Ref :: distinct u32
-
-INVALID_POLY_REF :: Poly_Ref(0)
-INVALID_TILE_REF :: Tile_Ref(0)
-DT_NULL_LINK :: 0xffffffff
-
 Config :: struct {
   width:                    i32,
   height:                   i32,
@@ -85,21 +26,8 @@ Config :: struct {
   detail_sample_max_error:  f32,
 }
 
-DT_VERTS_PER_POLYGON :: 6
-DT_MAX_AREAS :: 64
 RC_MAX_LAYERS :: 32
-
-DT_POLYTYPE_GROUND :: 0
-DT_POLYTYPE_OFFMESH_CONNECTION :: 1
-
-DT_TILE_FREE_DATA :: 0x01
-DT_OFFMESH_CON_BIDIR :: 1
-DT_RAYCAST_USE_COSTS :: 0x01
-
-Off_Mesh_Connection_Verts :: struct {
-  start: [3]f32,
-  end:   [3]f32,
-}
+RC_MAX_VERTS_PER_POLY :: 6
 
 RC_SPAN_HEIGHT_BITS :: 13
 RC_SPAN_MAX_HEIGHT :: (1 << RC_SPAN_HEIGHT_BITS) - 1
@@ -115,11 +43,6 @@ RC_BORDER_VERTEX :: 0x10000
 RC_AREA_BORDER :: 0x20000
 RC_CONTOUR_REG_MASK :: 0xffff
 RC_MESH_NULL_IDX :: 0xffff
-
-DT_NAVMESH_MAGIC :: 'D' << 24 | 'N' << 16 | 'A' << 8 | 'V'
-DT_NAVMESH_VERSION :: 7
-DT_NAVMESH_STATE_MAGIC :: 'D' << 24 | 'N' << 16 | 'M' << 8 | 'S'
-DT_NAVMESH_STATE_VERSION :: 1
 
 // Calculate bounds from vertices
 calc_bounds :: proc(verts: [][3]f32) -> (bmin, bmax: [3]f32) {
@@ -182,7 +105,7 @@ validate_config :: proc(cfg: ^Config) -> bool {
   if cfg.max_verts_per_poly < 3 {
     return false
   }
-  if cfg.max_verts_per_poly > DT_VERTS_PER_POLYGON {
+  if cfg.max_verts_per_poly > RC_MAX_VERTS_PER_POLY {
     return false
   }
   return true

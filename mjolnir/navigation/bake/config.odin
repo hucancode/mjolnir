@@ -1,7 +1,7 @@
-package navigation
+package bake
 
 import "core:math"
-import "recast"
+import "../recast"
 
 // NavMeshQuality controls navmesh generation precision vs performance tradeoff
 NavMeshQuality :: enum {

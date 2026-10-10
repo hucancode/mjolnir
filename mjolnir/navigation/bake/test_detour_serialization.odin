@@ -1,5 +1,6 @@
-package detour
+package bake
 
+import "../detour"
 import "../recast"
 import "core:math"
 import "core:math/linalg"
@@ -14,7 +15,7 @@ create_navmesh :: proc(
   walkable_radius: f32,
   walkable_climb: f32,
 ) -> (
-  nav_mesh: ^Nav_Mesh,
+  nav_mesh: ^detour.Nav_Mesh,
   ok: bool,
 ) {
   params := Create_Nav_Mesh_Data_Params {
@@ -25,27 +26,27 @@ create_navmesh :: proc(
     walkable_climb   = walkable_climb,
   }
   nav_data, data_status := create_nav_mesh_data(&params)
-  if !recast.status_succeeded(data_status) do return nil, false
-  nav_mesh = new(Nav_Mesh)
-  mesh_params := Nav_Mesh_Params {
+  if !detour.status_succeeded(data_status) do return nil, false
+  nav_mesh = new(detour.Nav_Mesh)
+  mesh_params := detour.Nav_Mesh_Params {
     orig        = pmesh.bmin,
     tile_width  = (pmesh.bmax - pmesh.bmin).x,
     tile_height = (pmesh.bmax - pmesh.bmin).z,
     max_tiles   = 1,
     max_polys   = 1024,
   }
-  init_status := nav_mesh_init(nav_mesh, &mesh_params)
-  if !recast.status_succeeded(init_status) {
+  init_status := detour.nav_mesh_init(nav_mesh, &mesh_params)
+  if !detour.status_succeeded(init_status) {
     free(nav_mesh)
     return nil, false
   }
-  _, add_status := nav_mesh_add_tile(
+  _, add_status := detour.nav_mesh_add_tile(
     nav_mesh,
     nav_data,
-    recast.DT_TILE_FREE_DATA,
+    detour.DT_TILE_FREE_DATA,
   )
-  if !recast.status_succeeded(add_status) {
-    nav_mesh_destroy(nav_mesh)
+  if !detour.status_succeeded(add_status) {
+    detour.nav_mesh_destroy(nav_mesh)
     free(nav_mesh)
     return nil, false
   }
@@ -54,31 +55,31 @@ create_navmesh :: proc(
 
 @(private = "file")
 find_path_points :: proc(
-  query: ^Nav_Mesh_Query,
+  query: ^detour.Nav_Mesh_Query,
   start_pos: [3]f32,
   end_pos: [3]f32,
-  filter: ^Query_Filter,
+  filter: ^detour.Query_Filter,
   path: [][3]f32,
 ) -> (
   path_count: int,
-  status: recast.Status,
+  status: detour.Status,
 ) {
   if len(path) == 0 do return 0, {.Buffer_Too_Small}
   half_extents := [3]f32{5.0, 5.0, 5.0}
-  start_status, start_ref, start_nearest := find_nearest_poly(
+  start_status, start_ref, start_nearest := detour.find_nearest_poly(
     query,
     start_pos,
     half_extents,
     filter,
   )
-  if !recast.status_succeeded(start_status) || start_ref == recast.INVALID_POLY_REF do return 0, start_status
-  end_status, end_ref, end_nearest := find_nearest_poly(
+  if !detour.status_succeeded(start_status) || start_ref == detour.INVALID_POLY_REF do return 0, start_status
+  end_status, end_ref, end_nearest := detour.find_nearest_poly(
     query,
     end_pos,
     half_extents,
     filter,
   )
-  if !recast.status_succeeded(end_status) || end_ref == recast.INVALID_POLY_REF do return 0, end_status
+  if !detour.status_succeeded(end_status) || end_ref == detour.INVALID_POLY_REF do return 0, end_status
   if start_ref == end_ref {
     path[0] = start_nearest
     if linalg.length2(end_nearest - start_nearest) > math.F32_EPSILON {
@@ -87,9 +88,9 @@ find_path_points :: proc(
     }
     return 1, {.Success}
   }
-  poly_path := make([]recast.Poly_Ref, len(path))
+  poly_path := make([]detour.Poly_Ref, len(path))
   defer delete(poly_path)
-  path_status, poly_path_count := find_path(
+  path_status, poly_path_count := detour.find_path(
     query,
     start_ref,
     end_ref,
@@ -99,14 +100,14 @@ find_path_points :: proc(
     poly_path,
     i32(len(path)),
   )
-  if !recast.status_succeeded(path_status) || poly_path_count == 0 do return 0, path_status
-  straight_path := make([]Straight_Path_Point, len(path))
+  if !detour.status_succeeded(path_status) || poly_path_count == 0 do return 0, path_status
+  straight_path := make([]detour.Straight_Path_Point, len(path))
   defer delete(straight_path)
   straight_path_flags := make([]u8, len(path))
   defer delete(straight_path_flags)
-  straight_path_refs := make([]recast.Poly_Ref, len(path))
+  straight_path_refs := make([]detour.Poly_Ref, len(path))
   defer delete(straight_path_refs)
-  straight_status, straight_path_count := find_straight_path(
+  straight_status, straight_path_count := detour.find_straight_path(
     query,
     start_nearest,
     end_nearest,
@@ -118,7 +119,7 @@ find_path_points :: proc(
     i32(len(path)),
     0,
   )
-  if !recast.status_succeeded(straight_status) do return 0, straight_status
+  if !detour.status_succeeded(straight_status) do return 0, straight_status
   path_count = 0
   last_pos := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
   for i in 0 ..< int(straight_path_count) {
@@ -146,14 +147,14 @@ test_navmesh_file_serialization :: proc(t: ^testing.T) {
   nav_mesh, create_ok := create_navmesh(pmesh, dmesh, 2.0, 0.6, 0.9)
   testing.expect(t, create_ok, "Failed to create navigation mesh")
   defer {
-    nav_mesh_destroy(nav_mesh)
+    detour.nav_mesh_destroy(nav_mesh)
     free(nav_mesh)
   }
   navmesh_file := "test_navmesh.navmesh"
   defer os.remove(navmesh_file)
-  save_ok := save_navmesh_to_file(nav_mesh, navmesh_file)
+  save_ok := detour.save_navmesh_to_file(nav_mesh, navmesh_file)
   testing.expect(t, save_ok, "Failed to save navigation mesh to file")
-  loaded_nav_mesh, load_ok := load_navmesh_from_file(navmesh_file)
+  loaded_nav_mesh, load_ok := detour.load_navmesh_from_file(navmesh_file)
   testing.expect(t, load_ok, "Failed to load navigation mesh from file")
   testing.expect(
     t,
@@ -161,7 +162,7 @@ test_navmesh_file_serialization :: proc(t: ^testing.T) {
     "Loaded navigation mesh should not be nil",
   )
   defer {
-    nav_mesh_destroy(loaded_nav_mesh)
+    detour.nav_mesh_destroy(loaded_nav_mesh)
     free(loaded_nav_mesh)
   }
   testing.expect(
@@ -210,16 +211,16 @@ test_navmesh_data_serialization :: proc(t: ^testing.T) {
   nav_data, create_status := create_nav_mesh_data(&params)
   testing.expect(
     t,
-    recast.status_succeeded(create_status),
+    detour.status_succeeded(create_status),
     "Failed to create nav mesh data",
   )
   testing.expect(t, len(nav_data) > 0, "Navigation data should not be empty")
   defer delete(nav_data)
   data_file := "test_navdata.bin"
   defer os.remove(data_file)
-  save_ok := save_navmesh_data_to_file(nav_data, data_file)
+  save_ok := detour.save_navmesh_data_to_file(nav_data, data_file)
   testing.expect(t, save_ok, "Failed to save navigation data to file")
-  loaded_data, load_ok := load_navmesh_data_from_file(data_file)
+  loaded_data, load_ok := detour.load_navmesh_data_from_file(data_file)
   testing.expect(t, load_ok, "Failed to load navigation data from file")
   testing.expect(
     t,
@@ -289,7 +290,7 @@ test_bake_and_save_workflow :: proc(t: ^testing.T) {
     baked_file,
   )
   testing.expect(t, bake_ok, "Failed to bake and save navigation mesh")
-  nav_mesh, query, runtime_ok := load_navmesh_for_runtime(baked_file)
+  nav_mesh, query, runtime_ok := detour.load_navmesh_for_runtime(baked_file)
   testing.expect(t, runtime_ok, "Failed to load navigation mesh for runtime")
   testing.expect(
     t,
@@ -297,17 +298,17 @@ test_bake_and_save_workflow :: proc(t: ^testing.T) {
     "Navigation mesh and query should not be nil",
   )
   defer {
-    nav_mesh_query_destroy(query)
+    detour.nav_mesh_query_destroy(query)
     free(query)
-    nav_mesh_destroy(nav_mesh)
+    detour.nav_mesh_destroy(nav_mesh)
     free(nav_mesh)
   }
   start_pos := [3]f32{-6, 0.1, -6}
   end_pos := [3]f32{6, 0.1, 6}
   path := make([][3]f32, 32)
   defer delete(path)
-  filter: Query_Filter
-  query_filter_init(&filter)
+  filter: detour.Query_Filter
+  detour.query_filter_init(&filter)
   path_count, path_status := find_path_points(
     query,
     start_pos,
@@ -317,7 +318,7 @@ test_bake_and_save_workflow :: proc(t: ^testing.T) {
   )
   testing.expect(
     t,
-    recast.status_succeeded(path_status),
+    detour.status_succeeded(path_status),
     "Pathfinding should succeed",
   )
   testing.expect(t, path_count > 0, "Should find a path")
@@ -399,7 +400,7 @@ build_test_mesh :: proc(
 }
 
 // Helper function to count valid tiles in a navigation mesh
-count_valid_tiles :: proc(nav_mesh: ^Nav_Mesh) -> int {
+count_valid_tiles :: proc(nav_mesh: ^detour.Nav_Mesh) -> int {
   count := 0
   for i in 0 ..< nav_mesh.max_tiles {
     tile := &nav_mesh.tiles[i]

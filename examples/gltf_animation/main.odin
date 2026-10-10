@@ -11,11 +11,11 @@ scene: mjolnir.GltfScene
 animators: [dynamic]anim.Animator
 
 main :: proc() {
+  defer mjolnir.gltf_scene_destroy(&scene)
   mjolnir.run_app({
     title  = "GLTF Animation",
     setup  = setup,
     update = update,
-    sync   = sync,
   })
 }
 
@@ -25,7 +25,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   for s in scene.skinned {
     rig := &scene.rigs[s.rig]
     a: anim.Animator
-    anim.animator_init(&a, &rig.skeleton)
+    anim.animator_init(&a, rig)
     anim.play(&a, rig, "Anim_0")
     append(&animators, a)
   }
@@ -36,8 +36,8 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   rot := dt * math.PI * 0.05
   for h in scene.roots do world.rotate_by(&engine.world, h, rot)
   for s, i in scene.skinned do anim.animator_update(&animators[i], &scene.rigs[s.rig], dt)
-}
-
-sync :: proc(engine: ^mjolnir.Engine) {
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
   for s, i in scene.skinned do render.stage_bones(&engine.render, s.node.index, animators[i].palette)
 }

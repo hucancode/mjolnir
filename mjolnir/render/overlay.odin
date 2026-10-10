@@ -1,8 +1,10 @@
 package render
 
 import "../draw2d"
+import "../input"
 import "gpu"
 import cont "../containers"
+import "core:math"
 import "core:sync"
 import ui_render "ui"
 import mu "vendor:microui"
@@ -46,7 +48,7 @@ flush_ui_atlas :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
   )
 }
 
-// The microui debug context. Feed it input, then build widgets between
+// The microui debug context. Feed it with debug_ui_input, then build widgets between
 // debug_ui_begin and debug_ui_end; frame draws it when debug UI is enabled.
 debug_ui :: proc(self: ^Manager) -> ^mu.Context {
   return &self.internal.ui.debug_ctx
@@ -61,9 +63,50 @@ debug_ui_end :: proc(self: ^Manager) {
   mu.end(&self.internal.ui.debug_ctx)
 }
 
-// True when the debug UI is hovered; mouse input belongs to it.
+// Feed one input tick to the debug UI. Call on the update tick, before
+// debug_ui_begin. With USE_PARALLEL_UPDATE the update thread feeds the
+// microui context that the render thread builds, sharing it across threads.
+debug_ui_input :: proc(self: ^Manager, s: ^input.State) {
+  r := &self.internal.ui
+  ctx := &r.debug_ctx
+  hovered := ui_render.debug_wants_mouse(r)
+  x, y := i32(math.round(s.cursor.x)), i32(math.round(s.cursor.y))
+  mu.input_mouse_move(ctx, x, y)
+  for b in input.MouseButton {
+    // A press over the debug UI belongs to it until the tick after release.
+    if input.mouse_pressed(s, b) && hovered do r.debug_buttons += {int(b)}
+    else if !input.mouse_down(s, b) && !input.mouse_released(s, b) do r.debug_buttons -= {int(b)}
+    mb: mu.Mouse
+    #partial switch b {
+    case .LEFT:   mb = .LEFT
+    case .RIGHT:  mb = .RIGHT
+    case .MIDDLE: mb = .MIDDLE
+    case:         continue
+    }
+    if input.mouse_pressed(s, b) do mu.input_mouse_down(ctx, x, y, mb)
+    if input.mouse_released(s, b) do mu.input_mouse_up(ctx, x, y, mb)
+  }
+  if s.scroll != {} {
+    mu.input_scroll(ctx, -i32(math.round(s.scroll.x)), -i32(math.round(s.scroll.y)))
+  }
+  it := 0
+  for key, pressed in input.next_key_edge(s, &it) {
+    mk := mu_key(key) or_continue
+    if pressed do mu.input_key_down(ctx, mk)
+    else do mu.input_key_up(ctx, mk)
+  }
+  for key in input.Key {
+    if !input.key_repeated(s, key) do continue
+    if mk, ok := mu_key(key); ok do mu.input_key_down(ctx, mk)
+  }
+  if t := input.text(s); len(t) > 0 do mu.input_text(ctx, t)
+}
+
+// True when the debug UI is hovered or holds a button pressed over it; mouse
+// input belongs to it.
 debug_ui_wants_mouse :: proc(self: ^Manager) -> bool {
-  return ui_render.debug_wants_mouse(&self.internal.ui)
+  r := &self.internal.ui
+  return ui_render.debug_wants_mouse(r) || r.debug_buttons != {}
 }
 
 // True when a debug UI widget has keyboard focus.
@@ -71,10 +114,26 @@ debug_ui_wants_keyboard :: proc(self: ^Manager) -> bool {
   return ui_render.debug_wants_keyboard(&self.internal.ui)
 }
 
-// Offer a mouse button edge to the debug UI. A press over the UI belongs to
-// it until the matching release. True when the debug UI consumed the edge.
-debug_ui_claim_button :: proc(self: ^Manager, button: int, pressed: bool) -> bool {
-  return ui_render.debug_claim_button(&self.internal.ui, button, pressed)
+// microui models only editing and modifier keys; text arrives as chars.
+@(private = "file")
+mu_key :: proc(key: input.Key) -> (mu.Key, bool) {
+  #partial switch key {
+  case .LEFT_SHIFT, .RIGHT_SHIFT:     return .SHIFT, true
+  case .LEFT_CONTROL, .RIGHT_CONTROL: return .CTRL, true
+  case .LEFT_ALT, .RIGHT_ALT:         return .ALT, true
+  case .BACKSPACE:                    return .BACKSPACE, true
+  case .DELETE:                       return .DELETE, true
+  case .ENTER:                        return .RETURN, true
+  case .LEFT:                         return .LEFT, true
+  case .RIGHT:                        return .RIGHT, true
+  case .HOME:                         return .HOME, true
+  case .END:                          return .END, true
+  case .A:                            return .A, true
+  case .X:                            return .X, true
+  case .C:                            return .C, true
+  case .V:                            return .V, true
+  }
+  return .SHIFT, false
 }
 
 Stats :: struct {

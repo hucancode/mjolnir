@@ -39,12 +39,7 @@ debug_color :: proc(c: DebugColor) -> [4]f32 {
 
 CIRCLE_SEGMENTS :: 24
 
-// Clock for debug line lifetimes, in seconds. Call once per frame.
-set_debug_time :: proc(self: ^Manager, now: f32) {
-  debug_line.set_time(&self.internal.debug_line_renderer, now)
-}
-
-// Queue raw debug segments; `expiry` is absolute (see debug_line.resolve_expiry).
+// Queue raw debug segments. Each lives `life` seconds of render.update time.
 debug_segments :: proc(self: ^Manager, segs: ..debug_line.Segment) {
   debug_line.add_segments(&self.internal.debug_line_renderer, ..segs)
 }
@@ -54,10 +49,6 @@ dl :: proc(self: ^Manager) -> ^debug_line.Renderer {
   return &self.internal.debug_line_renderer
 }
 
-@(private = "file")
-expiry :: #force_inline proc(self: ^Manager, life: f32) -> f32 {
-  return debug_line.resolve_expiry(self.internal.debug_line_renderer.now, life)
-}
 // n must be normalized.
 @(private = "file")
 orthonormal_basis :: proc(n: [3]f32) -> (u, v: [3]f32) {
@@ -73,14 +64,14 @@ fill_circle :: proc(
   center, u, v: [3]f32,
   radius: f32,
   color: [4]f32,
-  exp: f32,
+  life: f32,
   bypass_depth: bool,
 ) {
   prev := center + u * radius
   for i in 1 ..= CIRCLE_SEGMENTS {
     t := f32(i) / f32(CIRCLE_SEGMENTS) * math.TAU
     p := center + u * (radius * math.cos(t)) + v * (radius * math.sin(t))
-    segs[i - 1] = {a = prev, b = p, color = color, expiry = exp, bypass_depth = bypass_depth}
+    segs[i - 1] = {a = prev, b = p, color = color, life = life, bypass_depth = bypass_depth}
     prev = p
   }
 }
@@ -94,7 +85,7 @@ debug_segment :: proc(
 ) {
   debug_line.add_segments(
     dl(self),
-    debug_line.Segment{a = a, b = b, color = color, expiry = expiry(self, life), bypass_depth = bypass_depth},
+    debug_line.Segment{a = a, b = b, color = color, life = life, bypass_depth = bypass_depth},
   )
 }
 
@@ -158,10 +149,9 @@ push_box_edges :: proc(
     {4, 5}, {5, 6}, {6, 7}, {7, 4},
     {0, 4}, {1, 5}, {2, 6}, {3, 7},
   }
-  exp := expiry(self, life)
   segs: [12]debug_line.Segment
   for e, i in edges {
-    segs[i] = {a = c[e[0]], b = c[e[1]], color = color, expiry = exp, bypass_depth = bypass_depth}
+    segs[i] = {a = c[e[0]], b = c[e[1]], color = color, life = life, bypass_depth = bypass_depth}
   }
   debug_line.add_segments(dl(self), ..segs[:])
 }
@@ -175,9 +165,8 @@ debug_circle :: proc(
   bypass_depth: bool = false,
 ) {
   u, v := orthonormal_basis(linalg.normalize0(normal))
-  exp := expiry(self, life)
   segs: [CIRCLE_SEGMENTS]debug_line.Segment
-  fill_circle(segs[:], center, u, v, radius, color, exp, bypass_depth)
+  fill_circle(segs[:], center, u, v, radius, color, life, bypass_depth)
   debug_line.add_segments(dl(self), ..segs[:])
 }
 
@@ -189,14 +178,13 @@ debug_sphere :: proc(
   life: f32 = 0,
   bypass_depth: bool = false,
 ) {
-  exp := expiry(self, life)
   segs: [3 * CIRCLE_SEGMENTS]debug_line.Segment
   X :: [3]f32{1, 0, 0}
   Y :: [3]f32{0, 1, 0}
   Z :: [3]f32{0, 0, 1}
-  fill_circle(segs[0 * CIRCLE_SEGMENTS:1 * CIRCLE_SEGMENTS], center, Y, Z, radius, color, exp, bypass_depth)
-  fill_circle(segs[1 * CIRCLE_SEGMENTS:2 * CIRCLE_SEGMENTS], center, X, Z, radius, color, exp, bypass_depth)
-  fill_circle(segs[2 * CIRCLE_SEGMENTS:3 * CIRCLE_SEGMENTS], center, X, Y, radius, color, exp, bypass_depth)
+  fill_circle(segs[0 * CIRCLE_SEGMENTS:1 * CIRCLE_SEGMENTS], center, Y, Z, radius, color, life, bypass_depth)
+  fill_circle(segs[1 * CIRCLE_SEGMENTS:2 * CIRCLE_SEGMENTS], center, X, Z, radius, color, life, bypass_depth)
+  fill_circle(segs[2 * CIRCLE_SEGMENTS:3 * CIRCLE_SEGMENTS], center, X, Y, radius, color, life, bypass_depth)
   debug_line.add_segments(dl(self), ..segs[:])
 }
 
@@ -209,11 +197,10 @@ debug_arrow :: proc(
 ) {
   dir := to - from
   length := linalg.length(dir)
-  exp := expiry(self, life)
   if length < 1e-5 {
     debug_line.add_segments(
       dl(self),
-      debug_line.Segment{a = from, b = to, color = color, expiry = exp, bypass_depth = bypass_depth},
+      debug_line.Segment{a = from, b = to, color = color, life = life, bypass_depth = bypass_depth},
     )
     return
   }
@@ -223,11 +210,11 @@ debug_arrow :: proc(
   head_r := head_len * 0.4
   base := to - d * head_len
   segs: [5]debug_line.Segment
-  segs[0] = {a = from, b = to, color = color, expiry = exp, bypass_depth = bypass_depth}
+  segs[0] = {a = from, b = to, color = color, life = life, bypass_depth = bypass_depth}
   for i in 0 ..< 4 {
     t := f32(i) / 4.0 * math.TAU
     p := base + u * (head_r * math.cos(t)) + v * (head_r * math.sin(t))
-    segs[1 + i] = {a = to, b = p, color = color, expiry = exp, bypass_depth = bypass_depth}
+    segs[1 + i] = {a = to, b = p, color = color, life = life, bypass_depth = bypass_depth}
   }
   debug_line.add_segments(dl(self), ..segs[:])
 }
@@ -243,12 +230,11 @@ debug_axes :: proc(
   x := linalg.quaternion_mul_vector3(rotation, [3]f32{scale, 0, 0})
   y := linalg.quaternion_mul_vector3(rotation, [3]f32{0, scale, 0})
   z := linalg.quaternion_mul_vector3(rotation, [3]f32{0, 0, scale})
-  exp := expiry(self, life)
   // Canonical axis colors (pure RGB) — independent of DEBUG_PALETTE.BLUE which is tinted.
   segs := [3]debug_line.Segment {
-    {a = origin, b = origin + x, color = {1, 0, 0, 1}, expiry = exp, bypass_depth = bypass_depth},
-    {a = origin, b = origin + y, color = {0, 1, 0, 1}, expiry = exp, bypass_depth = bypass_depth},
-    {a = origin, b = origin + z, color = {0, 0, 1, 1}, expiry = exp, bypass_depth = bypass_depth},
+    {a = origin, b = origin + x, color = {1, 0, 0, 1}, life = life, bypass_depth = bypass_depth},
+    {a = origin, b = origin + y, color = {0, 1, 0, 1}, life = life, bypass_depth = bypass_depth},
+    {a = origin, b = origin + z, color = {0, 0, 1, 1}, life = life, bypass_depth = bypass_depth},
   }
   debug_line.add_segments(dl(self), ..segs[:])
 }
@@ -262,11 +248,10 @@ debug_point :: proc(
   bypass_depth: bool = false,
 ) {
   h := size * 0.5
-  exp := expiry(self, life)
   segs := [3]debug_line.Segment {
-    {a = p - {h, 0, 0}, b = p + {h, 0, 0}, color = color, expiry = exp, bypass_depth = bypass_depth},
-    {a = p - {0, h, 0}, b = p + {0, h, 0}, color = color, expiry = exp, bypass_depth = bypass_depth},
-    {a = p - {0, 0, h}, b = p + {0, 0, h}, color = color, expiry = exp, bypass_depth = bypass_depth},
+    {a = p - {h, 0, 0}, b = p + {h, 0, 0}, color = color, life = life, bypass_depth = bypass_depth},
+    {a = p - {0, h, 0}, b = p + {0, h, 0}, color = color, life = life, bypass_depth = bypass_depth},
+    {a = p - {0, 0, h}, b = p + {0, 0, h}, color = color, life = life, bypass_depth = bypass_depth},
   }
   debug_line.add_segments(dl(self), ..segs[:])
 }

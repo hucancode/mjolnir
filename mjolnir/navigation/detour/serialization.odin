@@ -1,6 +1,5 @@
 package detour
 
-import "../recast"
 import "core:log"
 import "core:os"
 
@@ -18,7 +17,7 @@ Nav_Mesh_File_Header :: struct {
 
 // Tile file entry
 Nav_Mesh_Tile_Entry :: struct {
-  ref:       recast.Tile_Ref,
+  ref:       Tile_Ref,
   data_size: u32,
   // Followed by tile data
 }
@@ -114,7 +113,7 @@ load_navmesh_from_file :: proc(
   // Create and initialize navigation mesh
   nav_mesh := new(Nav_Mesh, allocator)
   init_status := nav_mesh_init(nav_mesh, &file_header.params)
-  if !recast.status_succeeded(init_status) {
+  if !status_succeeded(init_status) {
     log.error("Failed to initialize navigation mesh")
     free(nav_mesh, allocator)
     return nil, false
@@ -148,10 +147,10 @@ load_navmesh_from_file :: proc(
     _, add_status := nav_mesh_add_tile(
       nav_mesh,
       tile_data,
-      recast.DT_TILE_FREE_DATA,
+      DT_TILE_FREE_DATA,
       tile_entry.ref,
     )
-    if !recast.status_succeeded(add_status) {
+    if !status_succeeded(add_status) {
       log.errorf("Failed to add tile %d to navigation mesh", i)
       delete(tile_data, allocator)
       nav_mesh_destroy(nav_mesh)
@@ -199,67 +198,6 @@ load_navmesh_data_from_file :: proc(
   return data, true
 }
 
-// Create single-tile navigation mesh from Recast output and save to file
-bake_and_save_navmesh :: proc(
-  pmesh: ^recast.Poly_Mesh,
-  dmesh: ^recast.Poly_Mesh_Detail,
-  walkable_height, walkable_radius, walkable_climb: f32,
-  filepath: string,
-) -> bool {
-  // Create navigation mesh data
-  params := Create_Nav_Mesh_Data_Params {
-    poly_mesh          = pmesh,
-    poly_mesh_detail   = dmesh,
-    walkable_height    = walkable_height,
-    walkable_radius    = walkable_radius,
-    walkable_climb     = walkable_climb,
-    tile_x             = 0,
-    tile_y             = 0,
-    tile_layer         = 0,
-    user_id            = 0,
-    off_mesh_con_count = 0,
-  }
-  nav_data, create_status := create_nav_mesh_data(&params)
-  if !recast.status_succeeded(create_status) {
-    log.error("Failed to create navigation mesh data")
-    return false
-  }
-  defer delete(nav_data)
-  // Create and initialize navigation mesh
-  nav_mesh := new(Nav_Mesh)
-  defer {
-    nav_mesh_destroy(nav_mesh)
-    free(nav_mesh)
-  }
-  mesh_params := Nav_Mesh_Params {
-    orig        = pmesh.bmin,
-    tile_width  = pmesh.bmax.x - pmesh.bmin.x,
-    tile_height = pmesh.bmax.z - pmesh.bmin.z,
-    max_tiles   = 1,
-    max_polys   = 1024,
-  }
-  init_status := nav_mesh_init(nav_mesh, &mesh_params)
-  if !recast.status_succeeded(init_status) {
-    log.error("Failed to initialize navigation mesh")
-    return false
-  }
-  // Make a copy of nav_data since nav_mesh_add_tile may take ownership
-  nav_data_copy := make([]u8, len(nav_data))
-  copy(nav_data_copy, nav_data)
-  _, add_status := nav_mesh_add_tile(
-    nav_mesh,
-    nav_data_copy,
-    recast.DT_TILE_FREE_DATA,
-  )
-  if !recast.status_succeeded(add_status) {
-    log.error("Failed to add tile to navigation mesh")
-    delete(nav_data_copy)
-    return false
-  }
-  // Save to file
-  return save_navmesh_to_file(nav_mesh, filepath)
-}
-
 // Load navigation mesh from file and create query object
 load_navmesh_for_runtime :: proc(
   filepath: string,
@@ -279,7 +217,7 @@ load_navmesh_for_runtime :: proc(
   // Use the same initialization method as the fresh navmesh creation
   max_nodes := 2048
   query_status := nav_mesh_query_init(query, nav_mesh, i32(max_nodes))
-  if !recast.status_succeeded(query_status) {
+  if !status_succeeded(query_status) {
     nav_mesh_destroy(nav_mesh)
     free(nav_mesh, allocator)
     free(query, allocator)

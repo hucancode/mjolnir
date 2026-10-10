@@ -35,13 +35,13 @@ TRANSITION_DURATION :: f32(1.5)
 on_run: bool = false
 
 main :: proc() {
+  defer mjolnir.gltf_scene_destroy(&scene)
   mjolnir.run_app({
     title      = "Animation Layering",
     debug_ui   = true,
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
-    sync       = sync,
   })
 }
 
@@ -55,12 +55,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   fox_handle = scene.skinned[0].node
   rig = &scene.rigs[scene.skinned[0].rig]
-  anim.animator_init(&animator, &rig.skeleton)
+  anim.animator_init(&animator, rig)
   walk_layer,   _ = anim.add_clip_layer(&animator, rig, "Walk", weight = 1.0)
   run_layer,    _ = anim.add_clip_layer(&animator, rig, "Run",  weight = 0.0)
   survey_layer, _ = anim.add_clip_layer(&animator, rig, "Survey", weight = 0.0, speed = 0.5)
   if bones, ok := anim.find_bones(&rig.skeleton, {"b_Spine01_02", "b_Spine02_03", "b_Neck_04", "b_Head_05"}); ok {
-    ik_layer, _ = anim.add_ik_layer(&animator, &rig.skeleton, bones, {f32(target_x), f32(target_y), f32(target_z)}, {0, 5, 2.5}, weight = 0.0, space = .WORLD)
+    ik_layer, _ = anim.add_ik_layer(&animator, rig, bones, {f32(target_x), f32(target_y), f32(target_z)}, {0, 5, 2.5}, weight = 0.0, space = .WORLD)
   }
   log.infof("Layers: walk=%d run=%d survey=%d ik=%d", walk_layer, run_layer, survey_layer, ik_layer)
 
@@ -69,12 +69,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
   mjolnir.spawn(engine, attachment = render.directional_light_attachment({1, 1, 1, 1}, 10.0, true))
 }
 
-sync :: proc(engine: ^mjolnir.Engine) {
+update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  if rig != nil do animate(engine, dt)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
   if rig != nil do render.stage_bones(&engine.render, fox_handle.index, animator.palette)
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  if rig == nil do return
+animate :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
   if auto_blend {
     walk_run_blend += mu.Real(blend_dir * dt * 0.5)

@@ -1,7 +1,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/platform"
+import "../../mjolnir/input"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "../../mjolnir/physics"
@@ -38,10 +38,15 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   phys.gravity = {0, -10, 0}
-  mjolnir.spawn_static(engine, &phys, {0, -0.5, 0}, physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}},
-    render.get_builtin_mesh(&engine.render, .CUBE), render.get_builtin_material(&engine.render, .GRAY))
-  cube_handle, cube_body = mjolnir.spawn_dynamic(engine, &phys, {0, 3, 0}, f32(mass), box_collider,
-    render.get_builtin_mesh(&engine.render, .CUBE), render.get_builtin_material(&engine.render, .CYAN))
+  ground := world.spawn(&engine.world, {0, -0.5, 0})
+  physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}}, user = world.Handle(ground))
+  ground_visual := mjolnir.spawn_mesh(engine, render.get_builtin_mesh(&engine.render, .CUBE), render.get_builtin_material(&engine.render, .GRAY), parent = ground)
+  world.scale_xyz(&engine.world, ground_visual, 40.0, 0.5, 40.0)
+  cube_handle = world.spawn(&engine.world, {0, 3, 0})
+  cube_body = physics.create_dynamic_body(&phys, {0, 3, 0}, mass = f32(mass), collider = box_collider, user = world.Handle(cube_handle))
+  cube_visual := mjolnir.spawn_mesh(engine, render.get_builtin_mesh(&engine.render, .CUBE), render.get_builtin_material(&engine.render, .CYAN), parent = cube_handle)
+  s := box_collider.half_extents
+  world.scale_xyz(&engine.world, cube_visual, s.x, s.y, s.z)
   render.main_camera_look_at(&engine.render, {8, 5, 8}, {0, 2, 0})
 }
 
@@ -54,14 +59,14 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     }
     last_mass = mass
   }
-  f := [3]f32{0, 0, 0}
-  if platform.input_key_down(&engine.platform.input, .W) do f.z -= f32(move_force)
-  if platform.input_key_down(&engine.platform.input, .S) do f.z += f32(move_force)
-  if platform.input_key_down(&engine.platform.input, .A) do f.x -= f32(move_force)
-  if platform.input_key_down(&engine.platform.input, .D) do f.x += f32(move_force)
+  f := [3]f32 {
+    input.axis(&engine.input, .A, .D),
+    0,
+    input.axis(&engine.input, .W, .S),
+  } * f32(move_force)
   if b, ok := physics.get_dynamic_body(&phys, cube_body); ok {
     if linalg.length(f) > 0.1 do physics.apply_force(b, f)
-    if platform.input_key_pressed(&engine.platform.input, .SPACE) {
+    if input.key_pressed(&engine.input, .SPACE) {
       physics.apply_impulse(b, {0, f32(jump_force), 0})
       time_since_jump = 0.0
     }
@@ -72,6 +77,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   }
   physics.step(&phys, dt)
   for b in physics.body_poses(&phys) do world.set_world_pose(&engine.world, world.NodeHandle(b.user), b.position, b.rotation)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

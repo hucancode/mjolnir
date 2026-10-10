@@ -2,10 +2,7 @@ package forward
 
 import "../bindless"
 import "../gpu"
-import "../occlusion_culling"
 import vk "vendor:vulkan"
-
-DrawPipeline :: occlusion_culling.DrawPipeline
 
 // What distinguishes one forward pipeline from another. Every forward
 // pipeline reads depth without writing it, alpha-blends into the HDR target
@@ -20,7 +17,7 @@ ForwardPipelineDesc :: struct {
 }
 
 // OPAQUE is drawn by the geometry pass.
-PIPELINES := #partial [DrawPipeline]ForwardPipelineDesc {
+PIPELINES := #partial [bindless.DrawPipeline]ForwardPipelineDesc {
   .TRANSPARENT = {
     vert = #load("../shader/transparent/vert.spv"),
     frag = #load("../shader/transparent/frag.spv"),
@@ -61,8 +58,8 @@ PIPELINES := #partial [DrawPipeline]ForwardPipelineDesc {
 }
 
 Renderer :: struct {
-  pipeline_layouts: [DrawPipeline]vk.PipelineLayout,
-  pipelines:        [DrawPipeline]vk.Pipeline,
+  pipeline_layouts: [bindless.DrawPipeline]vk.PipelineLayout,
+  pipelines:        [bindless.DrawPipeline]vk.Pipeline,
 }
 
 PushConstant :: struct {
@@ -74,19 +71,8 @@ init :: proc(
   gctx: ^gpu.GPUContext,
   scene: bindless.SceneBindings,
 ) -> vk.Result {
-  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
-    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = len(bindless.VERTEX_BINDING_DESCRIPTION),
-    pVertexBindingDescriptions      = raw_data(
-      bindless.VERTEX_BINDING_DESCRIPTION[:],
-    ),
-    vertexAttributeDescriptionCount = len(
-      bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS,
-    ),
-    pVertexAttributeDescriptions    = raw_data(
-      bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
-    ),
-  }
+  color_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
+  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
   for desc, pipe in PIPELINES {
     if pipe == .OPAQUE do continue
     self.pipeline_layouts[pipe] = bindless.create_scene_pipeline_layout(
@@ -99,47 +85,34 @@ init :: proc(
     defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
     frag_module := gpu.create_shader_module(gctx.device, desc.frag) or_return
     defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-    input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-      sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-      topology = desc.topology,
-    }
-    rasterizer := vk.PipelineRasterizationStateCreateInfo {
-      sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-      polygonMode = desc.polygon_mode,
-      cullMode    = desc.cull_mode,
-      frontFace   = .COUNTER_CLOCKWISE,
-      lineWidth   = 1,
-    }
-    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &bindless.SHADER_SPEC_CONSTANTS)
-    pipeline_info := vk.GraphicsPipelineCreateInfo {
-      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      stageCount          = len(shader_stages),
-      pStages             = raw_data(shader_stages[:]),
-      pVertexInputState   = &vertex_input_info,
-      pInputAssemblyState = &input_assembly,
-      pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-      pRasterizationState = &rasterizer,
-      pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-      pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
-      pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
-      pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-      layout              = self.pipeline_layouts[pipe],
-      pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
-    }
-    vk.CreateGraphicsPipelines(
-      gctx.device,
-      0,
-      1,
-      &pipeline_info,
-      nil,
-      &self.pipelines[pipe],
+    self.pipelines[pipe] = gpu.create_graphics_pipeline(
+      gctx,
+      {
+        vert = vert_module,
+        frag = frag_module,
+        specialization = &bindless.SHADER_SPEC_CONSTANTS,
+        vertex_bindings = bindless.VERTEX_BINDING_DESCRIPTION[:],
+        vertex_attributes = bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+        topology = desc.topology,
+        raster = {
+          polygonMode = desc.polygon_mode,
+          cullMode = desc.cull_mode,
+          frontFace = .COUNTER_CLOCKWISE,
+          lineWidth = 1,
+        },
+        depth = gpu.READ_ONLY_DEPTH_STATE,
+        blend = blend[:],
+        color_formats = color_formats[:],
+        depth_format = .D32_SFLOAT,
+        layout = self.pipeline_layouts[pipe],
+      },
     ) or_return
   }
   return .SUCCESS
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  for pipe in DrawPipeline {
+  for pipe in bindless.DrawPipeline {
     vk.DestroyPipeline(gctx.device, self.pipelines[pipe], nil)
     vk.DestroyPipelineLayout(gctx.device, self.pipeline_layouts[pipe], nil)
   }
@@ -150,7 +123,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 record :: proc(
   self: ^Renderer,
   cmd: vk.CommandBuffer,
-  pipe: DrawPipeline,
+  pipe: bindless.DrawPipeline,
   camera_index: u32,
   scene: bindless.SceneBindings,
   draw_buffer: vk.Buffer,

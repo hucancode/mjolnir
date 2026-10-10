@@ -180,84 +180,6 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_bvh_query_sphere :: proc(t: ^testing.T) {
-  bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
-  defer bvh_destroy(&bvh)
-  items := []BVHTestItem {
-    make_test_item(1, {0, 0, 0}, 2),
-    make_test_item(2, {3, 0, 0}, 2),
-    make_test_item(3, {0, 3, 0}, 2),
-    make_test_item(4, {0, 0, 3}, 2),
-    make_test_item(5, {10, 10, 10}, 2),
-  }
-  bvh_build(&bvh, items)
-  // Query sphere around origin
-  center := [3]f32{0, 0, 0}
-  radius := f32(4)
-  results := make([dynamic]BVHTestItem)
-  defer delete(results)
-  bvh_query_sphere(&bvh, center, radius, &results)
-  testing.expect(t, len(results) == 4, "Should find 4 items within sphere")
-  // Query smaller sphere
-  radius = 1.5
-  clear(&results)
-  bvh_query_sphere(&bvh, center, radius, &results)
-  testing.expect(
-    t,
-    len(results) == 1,
-    "Should find 1 item within smaller sphere",
-  )
-  testing.expect(t, results[0].id == 1, "Should find the item at origin")
-  // Query sphere in empty area
-  center = [3]f32{100, 100, 100}
-  radius = 5
-  clear(&results)
-  bvh_query_sphere(&bvh, center, radius, &results)
-  testing.expect(t, len(results) == 0, "Should find no items in empty sphere")
-}
-
-@(test)
-test_bvh_query_nearest :: proc(t: ^testing.T) {
-  bvh: BVH(BVHTestItem)
-  bvh.bounds_func = test_bvh_item_bounds
-  defer bvh_destroy(&bvh)
-  items := []BVHTestItem {
-    make_test_item(1, {0, 0, 0}, 2),
-    make_test_item(2, {5, 0, 0}, 2),
-    make_test_item(3, {0, 5, 0}, 2),
-    make_test_item(4, {0, 0, 5}, 2),
-    make_test_item(5, {10, 10, 10}, 2),
-  }
-  bvh_build(&bvh, items)
-  // Query nearest to origin
-  point := [3]f32{0, 0, 0}
-  result, dist, found := bvh_query_nearest(&bvh, point)
-  testing.expect(t, found, "Should find nearest item")
-  testing.expect(t, result.id == 1, "Should find item at origin")
-  testing.expect(t, dist == 0, "Distance should be 0")
-  // Query nearest to a point not at origin
-  point = [3]f32{4, 0, 0}
-  result, dist, found = bvh_query_nearest(&bvh, point)
-  testing.expect(t, found, "Should find nearest item")
-  testing.expect(t, result.id == 2, "Should find item at (5,0,0)")
-  testing.expect(t, dist == 0, "Distance should be 0 (point inside AABB)")
-  // Query with max distance limit
-  point = [3]f32{0, 0, 0}
-  result, dist, found = bvh_query_nearest(&bvh, point, 0.5)
-  testing.expect(t, found, "Should find item within max distance")
-  testing.expect(t, result.id == 1, "Should find closest item")
-  // Query with very small max distance
-  point = [3]f32{20, 20, 20}
-  result, dist, found = bvh_query_nearest(&bvh, point, 1)
-  testing.expect(
-    t,
-    !found,
-    "Should not find any item within small max distance",
-  )
-}
-
-@(test)
 test_bvh_refit :: proc(t: ^testing.T) {
   bvh: BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
@@ -737,74 +659,6 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
 }
 
 @(test)
-bvh_nearest_benchmark :: proc(t: ^testing.T) {
-  setup_proc :: proc(
-    options: ^time.Benchmark_Options,
-    allocator := context.allocator,
-  ) -> time.Benchmark_Error {
-    bvh_ptr := new(BVH(BVHTestItem))
-    bvh_ptr.bounds_func = test_bvh_item_bounds
-    item_count := 8000
-    items := make([]BVHTestItem, item_count)
-    for i in 0 ..< item_count {
-      x := f32(i % 40 - 20) * 3
-      y := f32((i / 40) % 40 - 20) * 3
-      z := f32((i / 1600) % 40 - 20) * 3
-      items[i] = make_test_item(i32(i), {x, y, z}, 2)
-    }
-    bvh_build(bvh_ptr, items)
-    delete(items)
-    options.input = slice.bytes_from_ptr(
-      bvh_ptr,
-      size_of(^BVH(BVHTestItem)),
-    )
-    return nil
-  }
-  bench_proc :: proc(
-    options: ^time.Benchmark_Options,
-    allocator := context.allocator,
-  ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^BVH(BVHTestItem))raw_data(options.input)
-    for i in 0 ..< options.rounds {
-      query_point := [3]f32 {
-        f32(i % 80 - 40) * 0.8,
-        f32((i / 80) % 80 - 40) * 0.8,
-        f32((i / 6400) % 80 - 40) * 0.8,
-      }
-      _, _, found := bvh_query_nearest(bvh_ptr, query_point)
-      if found {
-        options.processed += size_of(BVHTestItem)
-      }
-    }
-    return nil
-  }
-  teardown_proc :: proc(
-    options: ^time.Benchmark_Options,
-    allocator := context.allocator,
-  ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^BVH(BVHTestItem))raw_data(options.input)
-    bvh_destroy(bvh_ptr)
-    free(bvh_ptr)
-    return nil
-  }
-  options := &time.Benchmark_Options {
-    rounds = 1000,
-    bytes = size_of(BVHTestItem) * 1000,
-    setup = setup_proc,
-    bench = bench_proc,
-    teardown = teardown_proc,
-  }
-  err := time.benchmark(options)
-  log.infof(
-    "BVH nearest: %d queries in %v (%.2f MB/s) | %.2f μs/query",
-    options.rounds,
-    options.duration,
-    options.megabytes_per_second,
-    f64(options.duration) / 1000 / f64(options.rounds),
-  )
-}
-
-@(test)
 bvh_empty_query_benchmark :: proc(t: ^testing.T) {
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
@@ -1077,4 +931,74 @@ bvh_build_parallel_benchmark :: proc(t: ^testing.T) {
     options.megabytes_per_second,
     f64(options.duration) / 1000000 / f64(options.rounds),
   )
+}
+
+// Structural invariants of a built BVH.
+@(private = "file")
+bvh_validate :: proc(bvh: ^BVH($T)) -> bool {
+  if len(bvh.nodes) == 0 do return true
+  for i in 0 ..< len(bvh.nodes) {
+    node := bvh.nodes[i]
+    if node.left_child >= 0 {
+      // Internal node checks
+      if node.right_child < 0 do return false
+      if node.primitive_count != -1 do return false
+      if node.left_child >= i32(len(bvh.nodes)) do return false
+      if node.right_child >= i32(len(bvh.nodes)) do return false
+      left := bvh.nodes[node.left_child]
+      right := bvh.nodes[node.right_child]
+      // Check bounds contain children (with some tolerance)
+      if !aabb_contains_approx(node.bounds, left.bounds, 1e-3) do return false
+      if !aabb_contains_approx(node.bounds, right.bounds, 1e-3) do return false
+    } else {
+      // Leaf node checks
+      if node.primitive_count <= 0 do return false
+      if node.primitive_start < 0 do return false
+      if node.primitive_start + node.primitive_count > i32(len(bvh.primitives)) do return false
+    }
+  }
+  return true
+}
+
+@(private = "file")
+aabb_contains_approx :: proc "contextless" (
+  outer, inner: Aabb,
+  epsilon: f32 = 1e-6,
+) -> bool {
+  return(
+    inner.min.x >= outer.min.x - epsilon &&
+    inner.max.x <= outer.max.x + epsilon &&
+    inner.min.y >= outer.min.y - epsilon &&
+    inner.max.y <= outer.max.y + epsilon &&
+    inner.min.z >= outer.min.z - epsilon &&
+    inner.max.z <= outer.max.z + epsilon \
+  )
+}
+
+@(private = "file")
+BVHStats :: struct {
+  total_nodes:      i32,
+  leaf_nodes:       i32,
+  internal_nodes:   i32,
+  total_primitives: i32,
+  max_leaf_size:    i32,
+  empty_leaves:     i32,
+}
+
+@(private = "file")
+bvh_get_stats :: proc(bvh: ^BVH($T)) -> BVHStats {
+  stats: BVHStats
+  for node in bvh.nodes {
+    stats.total_nodes += 1
+    if node.left_child < 0 {
+      stats.leaf_nodes += 1
+      stats.total_primitives += node.primitive_count
+      stats.max_leaf_size =
+        stats.max_leaf_size > node.primitive_count ? stats.max_leaf_size : node.primitive_count
+      if node.primitive_count == 0 do stats.empty_leaves += 1
+    } else {
+      stats.internal_nodes += 1
+    }
+  }
+  return stats
 }

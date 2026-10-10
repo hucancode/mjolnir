@@ -16,7 +16,7 @@ cache previous contacts (for warmstart)
 apply gravity
 integrate velocities (forces, damping)
 CCD pass (swept tests, clamp dt for tunneling-prone bodies)
-rebuild dynamic + static BVH if kill-count > threshold
+rebuild a BVH if bodies were created (or, dynamic only, kill-count > threshold)
 
 substep loop × NUM_SUBSTEPS:
   bvh_refit
@@ -56,7 +56,24 @@ mark bodies below KILL_Y dead (deferred removal next rebuild)
 `CylinderCollider`, `FanCollider` (a cylinder wedge — useful for
 cone-of-influence triggers). `create_dynamic_body` sets the body's
 inertia tensor from its collider and mass; `set_inertia_from_collider`
-recomputes it after the mass or collider changes.
+recomputes it after the mass changes.
+
+## Moving and reshaping bodies
+
+`set_body_pose(&w, handle, position, rotation)` and
+`set_body_collider(&w, handle, collider)` work on dynamic bodies,
+static bodies and triggers. They keep the cached bounds and the BVH
+consistent: static bodies refit the static BVH at once, dynamic bodies
+wake up and are refit by the next `step`, and a new dynamic collider
+also resets the inertia. Never write `position`, `rotation` or
+`collider` on a body directly.
+
+## Raycasts
+
+`raycast`, `raycast_single` and `raycast_trigger` test the BVH
+candidates exactly: boxes, cylinders and fans are tested in the
+collider's local frame and return the true surface normal. A ray that
+starts inside a shape hits at `t = 0`.
 
 ## Triggers
 

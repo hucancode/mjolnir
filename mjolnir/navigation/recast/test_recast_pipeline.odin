@@ -3,7 +3,11 @@ package recast
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
+import "core:os"
 import "core:slice"
+import "core:strconv"
+import "core:strings"
 import "core:testing"
 
 // Test with nav_test.obj - multi-level navigation test mesh
@@ -486,4 +490,91 @@ test_floor_5_obstacles_simple :: proc(t: ^testing.T) {
   testing.expectf(t, build_ok, "Failed to build navigation mesh")
   testing.expect(t, pmesh.npolys > 0, "Should generate polygons")
   testing.expect(t, len(pmesh.verts) > 0, "Should generate vertices")
+}
+
+// Load OBJ file and extract data for navigation mesh input
+// Note: areas are initialized to 0 (RC_NULL_AREA) and must be marked by calling mark_walkable_triangles
+load_obj_to_navmesh_input :: proc(
+  filename: string,
+  scale: f32 = 1.0,
+  walkable_slope: f32 = math.PI * 0.25,
+) -> (
+  vertices: [][3]f32,
+  indices: []i32,
+  areas: []u8,
+  ok: bool,
+) {
+  vertices, indices = parse_obj(filename, scale) or_return
+  index_count := len(indices)
+  // Create area array - start with RC_NULL_AREA (0)
+  triangle_count := index_count / 3
+  areas = make([]u8, triangle_count)
+  // Areas start at 0 (RC_NULL_AREA)
+  // Mark walkable triangles based on slope
+  walkable_thr := math.cos(walkable_slope)
+  for i in 0 ..< triangle_count {
+    idx := i * 3
+    v0 := vertices[indices[idx + 0]]
+    v1 := vertices[indices[idx + 1]]
+    v2 := vertices[indices[idx + 2]]
+    // Calculate triangle normal
+    e0 := v1 - v0
+    e1 := v2 - v0
+    norm := linalg.normalize(linalg.cross(e0, e1))
+    // Check if the face is walkable (normal.y > threshold)
+    if norm.y > walkable_thr {
+      areas[i] = RC_WALKABLE_AREA
+    }
+  }
+  return vertices, indices, areas, true
+}
+
+// Positions and fan-triangulated faces of an OBJ file, scaled by `scale`.
+@(private = "file")
+parse_obj :: proc(
+  filename: string,
+  scale: f32,
+) -> (
+  vertices: [][3]f32,
+  indices: []i32,
+  ok: bool,
+) {
+  data, err := os.read_entire_file(filename, context.allocator)
+  if err != nil do return
+  defer delete(data)
+  positions: [dynamic][3]f32
+  tris: [dynamic]i32
+  face: [dynamic]i32
+  defer delete(face)
+  content := string(data)
+  for line in strings.split_lines_iterator(&content) {
+    parts := strings.fields(line)
+    defer delete(parts)
+    if len(parts) == 0 do continue
+    switch parts[0] {
+    case "v":
+      if len(parts) < 4 do continue
+      x, _ := strconv.parse_f32(parts[1])
+      y, _ := strconv.parse_f32(parts[2])
+      z, _ := strconv.parse_f32(parts[3])
+      append(&positions, [3]f32{x, y, z} * scale)
+    case "f":
+      clear(&face)
+      for part in parts[1:] {
+        end := strings.index_byte(part, '/')
+        idx, idx_ok := strconv.parse_int(part[:end] if end >= 0 else part)
+        if !idx_ok do continue
+        // OBJ indices are 1-based; negative ones count from the end
+        idx = idx - 1 if idx > 0 else len(positions) + idx
+        if idx >= 0 && idx < len(positions) do append(&face, i32(idx))
+      }
+      for i in 2 ..< len(face) do append(&tris, face[0], face[i - 1], face[i])
+    }
+  }
+  if len(positions) == 0 || len(tris) == 0 {
+    delete(positions)
+    delete(tris)
+    return
+  }
+  return positions[:], tris[:], true
 }

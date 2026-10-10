@@ -1,5 +1,6 @@
-package detour
+package bake
 
+import "../detour"
 import "../recast"
 import "core:fmt"
 import "core:log"
@@ -7,12 +8,14 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 
+#assert(recast.RC_MAX_VERTS_PER_POLY <= detour.DT_VERTS_PER_POLYGON)
+
 // Create navigation mesh data from Recast polygon mesh
 create_nav_mesh_data :: proc(
   params: ^Create_Nav_Mesh_Data_Params,
 ) -> (
   []u8,
-  recast.Status,
+  detour.Status,
 ) {
   if params == nil || params.poly_mesh == nil {
     return nil, {.Invalid_Param}
@@ -89,18 +92,18 @@ create_nav_mesh_data :: proc(
   }
   // Calculate data size using validated format specification
   // Data format: [Header][Vertices][Polygons][Links][DetailMeshes][DetailVerts][DetailTris][BVTree][OffMeshConnections]
-  header_size := size_of(Mesh_Header)
+  header_size := size_of(detour.Mesh_Header)
   verts_size := size_of([3]f32) * int(total_vert_count)
-  polys_size := size_of(Poly) * int(total_poly_count)
-  links_size := size_of(Link) * int(max_link_count)
-  detail_meshes_size := size_of(Poly_Detail) * int(detail_mesh_count)
+  polys_size := size_of(detour.Poly) * int(total_poly_count)
+  links_size := size_of(detour.Link) * int(max_link_count)
+  detail_meshes_size := size_of(detour.Poly_Detail) * int(detail_mesh_count)
   detail_verts_size := size_of([3]f32) * int(detail_vert_count)
   detail_tris_size := size_of(u8) * int(detail_tri_count) * 4
   // Calculate BV tree size - simple implementation creates one node per polygon
   bv_node_count := total_poly_count
-  bv_tree_size := size_of(BV_Node) * int(bv_node_count)
+  bv_tree_size := size_of(detour.BV_Node) * int(bv_node_count)
   off_mesh_cons_size :=
-    size_of(Off_Mesh_Connection) * int(stored_off_mesh_con_count)
+    size_of(detour.Off_Mesh_Connection) * int(stored_off_mesh_con_count)
   total_size :=
     header_size +
     verts_size +
@@ -115,10 +118,10 @@ create_nav_mesh_data :: proc(
   data := make([]u8, total_size)
   offset := 0
   // Setup header
-  header := cast(^Mesh_Header)(raw_data(data)[offset:])
+  header := cast(^detour.Mesh_Header)(raw_data(data)[offset:])
   offset += header_size
-  header.magic = recast.DT_NAVMESH_MAGIC
-  header.version = recast.DT_NAVMESH_VERSION
+  header.magic = detour.DT_NAVMESH_MAGIC
+  header.version = detour.DT_NAVMESH_VERSION
   header.x = params.tile_x
   header.y = params.tile_y
   header.layer = params.tile_layer
@@ -160,16 +163,16 @@ create_nav_mesh_data :: proc(
   }
   // Copy polygons - second data section per navmesh format specification
   polys := slice.from_ptr(
-    cast(^Poly)(raw_data(data)[offset:]),
+    cast(^detour.Poly)(raw_data(data)[offset:]),
     int(total_poly_count),
   )
   offset += polys_size
   for i in 0 ..< pmesh.npolys {
     poly := &polys[i]
-    poly.first_link = recast.DT_NULL_LINK
+    poly.first_link = detour.DT_NULL_LINK
     poly.flags = pmesh.flags[i]
-    poly_set_area(poly, pmesh.areas[i])
-    poly_set_type(poly, recast.DT_POLYTYPE_GROUND)
+    detour.poly_set_area(poly, pmesh.areas[i])
+    detour.poly_set_type(poly, detour.DT_POLYTYPE_GROUND)
     poly_base := i * nvp * 2
     for j in 0 ..< nvp {
       if pmesh.polys[poly_base + j] == recast.RC_MESH_NULL_IDX {
@@ -177,12 +180,12 @@ create_nav_mesh_data :: proc(
       }
       // Verify polygon is within vertex limits (should never trigger with proper generation)
       assert(
-        poly.vert_count < recast.DT_VERTS_PER_POLYGON,
+        poly.vert_count < detour.DT_VERTS_PER_POLYGON,
         fmt.tprintf(
           "Polygon %d exceeds vertex limit: %d > %d",
           i,
           poly.vert_count + 1,
-          recast.DT_VERTS_PER_POLYGON,
+          detour.DT_VERTS_PER_POLYGON,
         ),
       )
       poly.verts[poly.vert_count] = pmesh.polys[poly_base + j]
@@ -210,9 +213,9 @@ create_nav_mesh_data :: proc(
       poly.verts[0] = u16(vert_base + 0)
       poly.verts[1] = u16(vert_base + 1)
       poly.flags = params.off_mesh_con_flags[i]
-      poly_set_area(poly, params.off_mesh_con_areas[i])
-      poly_set_type(poly, recast.DT_POLYTYPE_OFFMESH_CONNECTION)
-      poly.first_link = recast.DT_NULL_LINK
+      detour.poly_set_area(poly, params.off_mesh_con_areas[i])
+      detour.poly_set_type(poly, detour.DT_POLYTYPE_OFFMESH_CONNECTION)
+      poly.first_link = detour.DT_NULL_LINK
       poly_idx += 1
       vert_base += 2
     }
@@ -222,7 +225,7 @@ create_nav_mesh_data :: proc(
   // Copy detail meshes
   if dmesh != nil {
     detail_meshes := slice.from_ptr(
-      cast(^Poly_Detail)(raw_data(data)[offset:]),
+      cast(^detour.Poly_Detail)(raw_data(data)[offset:]),
       int(detail_mesh_count),
     )
     offset += detail_meshes_size
@@ -256,42 +259,16 @@ create_nav_mesh_data :: proc(
   // Build BV tree if nodes exist
   if bv_node_count > 0 {
     bv_tree := slice.from_ptr(
-      cast(^BV_Node)(raw_data(data)[offset:]),
+      cast(^detour.BV_Node)(raw_data(data)[offset:]),
       int(bv_node_count),
     )
-    // Debug: Check first few vertices
-    log.infof("Building BV tree: First few vertices from pmesh:")
-    for i in 0 ..< min(5, len(pmesh.verts)) {
-      v := pmesh.verts[i]
-      log.infof("  Vertex %d: [%d, %d, %d]", i, v[0], v[1], v[2])
-    }
-    // Build BV tree for polygon access - pass detail mesh if available
     build_bv_tree(pmesh, bv_tree, bv_node_count, dmesh)
-    // Debug: Log the actual BV tree nodes after building
-    log.infof("Built BV tree nodes:")
-    for i in 0 ..< min(5, int(bv_node_count)) {
-      node := &bv_tree[i]
-      log.infof(
-        "  BV node %d after build: bmin=[%d,%d,%d], bmax=[%d,%d,%d], i=%d",
-        i,
-        node.bmin[0],
-        node.bmin[1],
-        node.bmin[2],
-        node.bmax[0],
-        node.bmax[1],
-        node.bmax[2],
-        node.i,
-      )
-    }
-    offset += bv_tree_size
-  } else {
-    // Skip BV tree section if no nodes
-    offset += bv_tree_size
   }
+  offset += bv_tree_size
   // Copy off-mesh connections (only those starting from this tile)
   if stored_off_mesh_con_count > 0 {
     off_mesh_cons := slice.from_ptr(
-      cast(^Off_Mesh_Connection)(raw_data(data)[offset:]),
+      cast(^detour.Off_Mesh_Connection)(raw_data(data)[offset:]),
       int(stored_off_mesh_con_count),
     )
     con_idx := 0
@@ -305,7 +282,7 @@ create_nav_mesh_data :: proc(
         con.end = conn.end
         con.rad = params.off_mesh_con_rad[i]
         if params.off_mesh_con_dir[i] != 0 {
-          con.flags = recast.DT_OFFMESH_CON_BIDIR
+          con.flags = detour.DT_OFFMESH_CON_BIDIR
         } else {
           con.flags = 0
         }
@@ -316,7 +293,7 @@ create_nav_mesh_data :: proc(
     }
   }
   // Final validation step - verify the created data can be properly parsed
-  validation_result := validate_tile_data(data)
+  validation_result := detour.validate_tile_data(data)
   if !validation_result.valid {
     log.errorf("Created tile data failed validation:")
     for i in 0 ..< validation_result.error_count {
@@ -325,8 +302,8 @@ create_nav_mesh_data :: proc(
     return nil, {.Invalid_Param}
   }
   // Additional integrity check - ensure the data layout matches our expectations
-  parsed_header, parse_status := parse_mesh_header(data)
-  if !recast.status_succeeded(parse_status) {
+  parsed_header, parse_status := detour.parse_mesh_header(data)
+  if !detour.status_succeeded(parse_status) {
     log.errorf("Created tile data failed header parsing: %v", parse_status)
     return nil, {.Invalid_Param}
   }
@@ -353,13 +330,18 @@ create_nav_mesh_data :: proc(
   return data, {.Success}
 }
 
+Off_Mesh_Connection_Verts :: struct {
+  start: [3]f32,
+  end:   [3]f32,
+}
+
 // Parameters for creating navigation mesh data
 Create_Nav_Mesh_Data_Params :: struct {
   // Polygon mesh from Recast
   poly_mesh:            ^recast.Poly_Mesh,
   poly_mesh_detail:     ^recast.Poly_Mesh_Detail,
   // Off-mesh connections
-  off_mesh_con_verts:   []recast.Off_Mesh_Connection_Verts, // Connection endpoints
+  off_mesh_con_verts:   []Off_Mesh_Connection_Verts, // Connection endpoints
   off_mesh_con_rad:     []f32, // [nOffMeshCons]
   off_mesh_con_flags:   []u16, // [nOffMeshCons]
   off_mesh_con_areas:   []u8, // [nOffMeshCons]
@@ -459,32 +441,32 @@ classify_off_mesh_point :: proc(pt: [3]f32, bmin: [3]f32, bmax: [3]f32) -> u8 {
 create_nav_mesh :: proc(
   params: ^Create_Nav_Mesh_Data_Params,
 ) -> (
-  ^Nav_Mesh,
-  recast.Status,
+  ^detour.Nav_Mesh,
+  detour.Status,
 ) {
   // Create navigation mesh data
   data, status := create_nav_mesh_data(params)
-  if !recast.status_succeeded(status) {
+  if !detour.status_succeeded(status) {
     return nil, status
   }
-  nav_mesh := new(Nav_Mesh)
-  nav_params := Nav_Mesh_Params {
+  nav_mesh := new(detour.Nav_Mesh)
+  nav_params := detour.Nav_Mesh_Params {
     orig        = params.poly_mesh.bmin,
     tile_width  = params.poly_mesh.bmax[0] - params.poly_mesh.bmin[0],
     tile_height = params.poly_mesh.bmax[2] - params.poly_mesh.bmin[2],
     max_tiles   = 1,
     max_polys   = 1024,
   }
-  status = nav_mesh_init(nav_mesh, &nav_params)
-  if !recast.status_succeeded(status) {
+  status = detour.nav_mesh_init(nav_mesh, &nav_params)
+  if !detour.status_succeeded(status) {
     free(nav_mesh)
     delete(data)
     return nil, status
   }
   // Add the tile
-  _, status = nav_mesh_add_tile(nav_mesh, data, recast.DT_TILE_FREE_DATA)
-  if !recast.status_succeeded(status) {
-    nav_mesh_destroy(nav_mesh)
+  _, status = detour.nav_mesh_add_tile(nav_mesh, data, detour.DT_TILE_FREE_DATA)
+  if !detour.status_succeeded(status) {
+    detour.nav_mesh_destroy(nav_mesh)
     free(nav_mesh)
     return nil, status
   }
@@ -494,7 +476,7 @@ create_nav_mesh :: proc(
 // Build BV tree for efficient spatial queries with optimized hierarchical construction
 build_bv_tree :: proc(
   pmesh: ^recast.Poly_Mesh,
-  nodes: []BV_Node,
+  nodes: []detour.BV_Node,
   node_count: i32,
   dmesh: ^recast.Poly_Mesh_Detail = nil,
 ) {
@@ -517,7 +499,7 @@ build_bv_tree :: proc(
 @(private)
 build_bv_tree_flat :: proc(
   pmesh: ^recast.Poly_Mesh,
-  nodes: []BV_Node,
+  nodes: []detour.BV_Node,
   node_count: i32,
   quant_factor: f32,
   dmesh: ^recast.Poly_Mesh_Detail = nil,
@@ -546,7 +528,7 @@ build_bv_tree_flat :: proc(
 @(private)
 build_bv_tree_hierarchical :: proc(
   pmesh: ^recast.Poly_Mesh,
-  nodes: []BV_Node,
+  nodes: []detour.BV_Node,
   node_count: i32,
   quant_factor: f32,
 ) {
@@ -577,7 +559,7 @@ build_bv_tree_hierarchical :: proc(
 @(private)
 build_bv_node_recursive :: proc(
   poly_info: []BV_Poly_Info,
-  nodes: []BV_Node,
+  nodes: []detour.BV_Node,
   next_idx: ^i32,
   start: i32,
   end: i32,
@@ -782,4 +764,65 @@ partition_polygons_by_axis :: proc(
     })
   }
   return i32(len(poly_info) / 2)
+}
+
+// Create single-tile navigation mesh from Recast output and save to file
+bake_and_save_navmesh :: proc(
+  pmesh: ^recast.Poly_Mesh,
+  dmesh: ^recast.Poly_Mesh_Detail,
+  walkable_height, walkable_radius, walkable_climb: f32,
+  filepath: string,
+) -> bool {
+  // Create navigation mesh data
+  params := Create_Nav_Mesh_Data_Params {
+    poly_mesh          = pmesh,
+    poly_mesh_detail   = dmesh,
+    walkable_height    = walkable_height,
+    walkable_radius    = walkable_radius,
+    walkable_climb     = walkable_climb,
+    tile_x             = 0,
+    tile_y             = 0,
+    tile_layer         = 0,
+    user_id            = 0,
+    off_mesh_con_count = 0,
+  }
+  nav_data, create_status := create_nav_mesh_data(&params)
+  if !detour.status_succeeded(create_status) {
+    log.error("Failed to create navigation mesh data")
+    return false
+  }
+  defer delete(nav_data)
+  // Create and initialize navigation mesh
+  nav_mesh := new(detour.Nav_Mesh)
+  defer {
+    detour.nav_mesh_destroy(nav_mesh)
+    free(nav_mesh)
+  }
+  mesh_params := detour.Nav_Mesh_Params {
+    orig        = pmesh.bmin,
+    tile_width  = pmesh.bmax.x - pmesh.bmin.x,
+    tile_height = pmesh.bmax.z - pmesh.bmin.z,
+    max_tiles   = 1,
+    max_polys   = 1024,
+  }
+  init_status := detour.nav_mesh_init(nav_mesh, &mesh_params)
+  if !detour.status_succeeded(init_status) {
+    log.error("Failed to initialize navigation mesh")
+    return false
+  }
+  // Make a copy of nav_data since nav_mesh_add_tile may take ownership
+  nav_data_copy := make([]u8, len(nav_data))
+  copy(nav_data_copy, nav_data)
+  _, add_status := detour.nav_mesh_add_tile(
+    nav_mesh,
+    nav_data_copy,
+    detour.DT_TILE_FREE_DATA,
+  )
+  if !detour.status_succeeded(add_status) {
+    log.error("Failed to add tile to navigation mesh")
+    delete(nav_data_copy)
+    return false
+  }
+  // Save to file
+  return detour.save_navmesh_to_file(nav_mesh, filepath)
 }

@@ -17,8 +17,10 @@ application defines. Lookups go through generational `NodeHandle`s:
 `node_count(&w)` counts live nodes.
 
 - `spawn` / `spawn_child` / `despawn` manage nodes.
-- `translate`, `rotate`, `scale` and their `_by` variants edit the
-  local transform; `set_local_matrix` sets it from a matrix.
+- `translate`, `rotate`, `rotate_by`, `scale` and `scale_xyz` edit the
+  local transform; `set_local` sets position, rotation and scale at
+  once and `set_local_matrix` sets them from a matrix. `position`
+  reads the local position.
 - `set_world_pose` writes a world-space pose, solving the local
   transform against the parent. Physics glue uses it.
 - `world_matrix` reads a node's world matrix.

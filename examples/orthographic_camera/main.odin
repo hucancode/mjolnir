@@ -51,6 +51,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     width = f32(ortho_width), height = f32(ortho_height),
     from = pos, to = {0, 0, 0},
   )
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

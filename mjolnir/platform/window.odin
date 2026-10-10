@@ -4,26 +4,15 @@ import "base:runtime"
 import "core:c"
 import "core:log"
 import "core:strings"
+import "../input"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
-// Raw device events, forwarded from the window callbacks after `input` is
-// updated. Every hook is optional and runs on the thread polling events.
-EventHooks :: struct {
-  key:          proc(user: rawptr, key: Key, action: Action),
-  mouse_button: proc(user: rawptr, button: MouseButton, action: Action),
-  cursor:       proc(user: rawptr, x, y: f64),
-  scroll:       proc(user: rawptr, dx, dy: f64),
-  char:         proc(user: rawptr, ch: rune),
-  user:         rawptr,
-}
-
-// A GLFW window plus the input it feeds. Must not move after init (the
-// window callbacks keep a pointer to it).
+// A GLFW window that writes device events into `input`. Must not move after
+// init (the window callbacks keep a pointer to it).
 Platform :: struct {
-  window:  glfw.WindowHandle,
-  input:   Input,
-  hooks:   EventHooks,
+  window:   glfw.WindowHandle,
+  input:    input.Accumulator,
   context_: runtime.Context,
 }
 
@@ -50,6 +39,8 @@ init :: proc(self: ^Platform, width, height: u32, title: string) -> bool {
   glfw.SetCursorPosCallback(self.window, cursor_callback)
   glfw.SetScrollCallback(self.window, scroll_callback)
   glfw.SetCharCallback(self.window, char_callback)
+  x, y := glfw.GetCursorPos(self.window)
+  input.on_cursor(&self.input, f32(x), f32(y))
   return true
 }
 
@@ -62,7 +53,7 @@ should_close :: proc(self: ^Platform) -> bool {
   return bool(glfw.WindowShouldClose(self.window))
 }
 
-// Pump window events into the raw input accumulator and the hooks.
+// Pump window events into the input accumulator.
 poll_events :: proc(self: ^Platform) {
   glfw.PollEvents()
 }
@@ -104,38 +95,34 @@ platform_of :: proc "contextless" (window: glfw.WindowHandle) -> ^Platform {
 key_callback :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
   self := platform_of(window)
   context = self.context_
-  input_set_key(&self.input, Key(key), action == glfw.PRESS || action == glfw.REPEAT)
-  if self.hooks.key != nil do self.hooks.key(self.hooks.user, Key(key), Action(action))
+  input.on_key(&self.input, input.Key(key), input.Action(action))
 }
 
 @(private = "file")
 mouse_button_callback :: proc "c" (window: glfw.WindowHandle, button, action, mods: c.int) {
   self := platform_of(window)
   context = self.context_
-  if button < 0 || button > i32(max(MouseButton)) do return
-  input_set_button(&self.input, MouseButton(button), action != glfw.RELEASE)
-  if self.hooks.mouse_button != nil do self.hooks.mouse_button(self.hooks.user, MouseButton(button), Action(action))
+  if button < 0 || button > i32(max(input.MouseButton)) do return
+  input.on_button(&self.input, input.MouseButton(button), input.Action(action))
 }
 
 @(private = "file")
 cursor_callback :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
   self := platform_of(window)
   context = self.context_
-  input_set_mouse(&self.input, x, y)
-  if self.hooks.cursor != nil do self.hooks.cursor(self.hooks.user, x, y)
+  input.on_cursor(&self.input, f32(x), f32(y))
 }
 
 @(private = "file")
 scroll_callback :: proc "c" (window: glfw.WindowHandle, dx, dy: f64) {
   self := platform_of(window)
   context = self.context_
-  input_add_scroll(&self.input, dx, dy)
-  if self.hooks.scroll != nil do self.hooks.scroll(self.hooks.user, dx, dy)
+  input.on_scroll(&self.input, f32(dx), f32(dy))
 }
 
 @(private = "file")
 char_callback :: proc "c" (window: glfw.WindowHandle, ch: rune) {
   self := platform_of(window)
   context = self.context_
-  if self.hooks.char != nil do self.hooks.char(self.hooks.user, ch)
+  input.on_char(&self.input, ch)
 }

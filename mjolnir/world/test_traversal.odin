@@ -171,7 +171,8 @@ create_scene :: proc(scene: ^World, max_node: int, max_depth: int) {
   entry := QueueEntry{scene.root, 0}
   append(&queue, entry)
   n := 0
-  for len(queue) > 0 && len(scene.nodes.entries) < target_nodes {
+  count := node_count(scene) // tracked locally: node_count is O(n)
+  for len(queue) > 0 && count < target_nodes {
     current := pop_front(&queue)
     if current.depth < max_depth {
       child_handle := spawn_child(scene, current.handle) or_continue
@@ -195,10 +196,11 @@ create_scene :: proc(scene: ^World, max_node: int, max_depth: int) {
       append(&queue, QueueEntry{child_handle, 1})
     }
     n += 1
+    count += 1
   }
   log.infof(
     "Generated a scene with %d nodes and max depth %d",
-    len(scene.nodes.entries),
+    node_count(scene),
     max_depth,
   )
 }
@@ -213,10 +215,11 @@ traverse_scene_benchmark :: proc(
     light_count: u32,
     mesh_count:  u32,
   }
+  count := node_count(scene)
   for _ in 0 ..< options.rounds {
     ctx: Context
     traverse(scene)
-    options.processed += size_of(Node) * len(scene.nodes.entries)
+    options.processed += size_of(Node) * count
   }
   return nil
 }

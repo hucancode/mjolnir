@@ -24,7 +24,6 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  depth_format: vk.Format = .D32_SFLOAT
   self.pipeline_layout = bindless.create_scene_pipeline_layout(
     gctx,
     scene,
@@ -49,30 +48,12 @@ init :: proc(
     SHADER_G_BUFFER_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
-    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = len(bindless.VERTEX_BINDING_DESCRIPTION),
-    pVertexBindingDescriptions      = raw_data(
-      bindless.VERTEX_BINDING_DESCRIPTION[:],
-    ),
-    vertexAttributeDescriptionCount = len(
-      bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS,
-    ),
-    pVertexAttributeDescriptions    = raw_data(
-      bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
-    ),
-  }
-  color_blend_attachments := [?]vk.PipelineColorBlendAttachmentState {
+  blend := [?]vk.PipelineColorBlendAttachmentState {
     gpu.BLEND_OVERRIDE, // position
     gpu.BLEND_OVERRIDE, // normal
     gpu.BLEND_OVERRIDE, // albedo
     gpu.BLEND_OVERRIDE, // metallic/roughness
     gpu.BLEND_OVERRIDE, // emissive
-  }
-  color_blending := vk.PipelineColorBlendStateCreateInfo {
-    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    attachmentCount = len(color_blend_attachments),
-    pAttachments    = raw_data(color_blend_attachments[:]),
   }
   color_formats := [?]vk.Format {
     .R32G32B32A32_SFLOAT, // position
@@ -81,39 +62,22 @@ init :: proc(
     .R8G8B8A8_UNORM, // metallic/roughness
     .R8G8B8A8_UNORM, // emissive
   }
-  rendering_info := vk.PipelineRenderingCreateInfo {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat   = depth_format,
-  }
-  shader_stages := gpu.create_vert_frag_stages(
-    vert_module,
-    frag_module,
-    &bindless.SHADER_SPEC_CONSTANTS,
-  )
-  pipeline_info := vk.GraphicsPipelineCreateInfo {
-    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    stageCount          = len(shader_stages),
-    pStages             = raw_data(shader_stages[:]),
-    pVertexInputState   = &vertex_input_info,
-    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-    pRasterizationState = &gpu.STANDARD_RASTERIZER,
-    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-    pDepthStencilState  = &gpu.READ_WRITE_DEPTH_STATE,
-    pColorBlendState    = &color_blending,
-    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = self.pipeline_layout,
-    pNext               = &rendering_info,
-  }
-  vk.CreateGraphicsPipelines(
-    gctx.device,
-    0,
-    1,
-    &pipeline_info,
-    nil,
-    &self.pipeline,
+  self.pipeline = gpu.create_graphics_pipeline(
+    gctx,
+    {
+      vert = vert_module,
+      frag = frag_module,
+      specialization = &bindless.SHADER_SPEC_CONSTANTS,
+      vertex_bindings = bindless.VERTEX_BINDING_DESCRIPTION[:],
+      vertex_attributes = bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+      topology = .TRIANGLE_LIST,
+      raster = gpu.STANDARD_RASTERIZER,
+      depth = gpu.READ_WRITE_DEPTH_STATE,
+      blend = blend[:],
+      color_formats = color_formats[:],
+      depth_format = .D32_SFLOAT,
+      layout = self.pipeline_layout,
+    },
   ) or_return
   log.info("G-buffer renderer initialized successfully")
   return .SUCCESS

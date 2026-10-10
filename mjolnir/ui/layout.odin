@@ -1,5 +1,7 @@
 package ui
 
+import cont "../containers"
+
 
 compute_layout :: proc(sys: ^System, root: UIWidgetHandle) {
   widget := get_widget(sys, root)
@@ -30,24 +32,11 @@ compute_layout :: proc(sys: ^System, root: UIWidgetHandle) {
   }
 }
 
+// Lay out every root widget (one without a parent) and its subtree.
 compute_layout_all :: proc(sys: ^System) {
-  // Compute layout for all root widgets (widgets without parents)
-  for &entry, i in sys.widget_pool.entries {
-    if !entry.active do continue
-
-    widget := &entry.item
-    if widget == nil do continue
-
-    base := get_widget_base(widget)
-    if base == nil do continue
-
-    // Only process root widgets
-    if _, has_parent := base.parent.?; !has_parent {
-      // Construct handle from entry
-      handle: UIWidgetHandle = {
-        index      = u32(i),
-        generation = entry.generation,
-      }
+  it := cont.iterator(&sys.widget_pool)
+  for widget, handle in cont.next(&it, UIWidgetHandle) {
+    if _, has_parent := get_widget_base(widget).parent.?; !has_parent {
       compute_layout(sys, handle)
     }
   }

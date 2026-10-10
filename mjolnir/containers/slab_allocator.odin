@@ -5,7 +5,7 @@ MAX_SLAB_CLASSES :: 8
 
 // SlabAllocator is a multi-size memory allocator for index-based allocation.
 // It maintains multiple "slabs" of different block sizes for efficient allocation.
-// All indices are in a global resource array space.
+// All classes share one contiguous index range.
 SlabAllocator :: struct {
   classes:  [MAX_SLAB_CLASSES]struct {
     block_size:  u32, // Size of each block in this class
@@ -42,7 +42,7 @@ slab_destroy :: proc(allocator: ^SlabAllocator) {
 }
 
 // slab_alloc allocates a block large enough to hold count items.
-// Returns (index, ok). The index is in the global resource space.
+// Returns (index, ok). The index is in the shared index range.
 slab_alloc :: proc(
   allocator: ^SlabAllocator,
   count: u32,

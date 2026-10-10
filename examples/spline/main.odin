@@ -59,4 +59,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     tweened := ease.ease(.Quadratic_In_Out, normalized) * total_length
     world.translate(&engine.world, cubes[i], animation.spline_sample_uniform(spline, tweened))
   }
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }

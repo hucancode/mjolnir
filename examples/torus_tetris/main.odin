@@ -1,7 +1,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/platform"
+import "../../mjolnir/input"
 import "../../mjolnir/render"
 import "../../mjolnir/ui"
 import "../../mjolnir/world"
@@ -62,7 +62,7 @@ COLOR_RGB := [len(render.Color)][3]f32 {
 state: State
 
 main :: proc() {
-  mjolnir.run_app({title = "Torus Tetris", width = 1024, height = 768, setup = setup, update = update, key_press = on_key})
+  mjolnir.run_app({title = "Torus Tetris", width = 1024, height = 768, setup = setup, update = update})
 }
 
 wrap_col :: proc(c: i32) -> i32 { return c %% GRID_W }
@@ -165,7 +165,10 @@ lock_piece :: proc(engine: ^mjolnir.Engine) {
     row := state.active_pos[1] + c[1]
     state.board[col][row] = state.active_cells[i]
     state.occupied[col][row] = true
-    render.set_material_handle(&engine.render, state.active_cells[i].index, opaque)
+    if a, ok := render.attachment(&engine.render, state.active_cells[i].index, render.MeshAttachment); ok {
+      a.material = opaque
+      render.mark_slot_dirty(&engine.render, state.active_cells[i].index)
+    }
   }
   state.has_active = false
   cleared := clear_lines(engine)
@@ -204,6 +207,17 @@ drop_step :: proc(engine: ^mjolnir.Engine) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  step_game(engine, dt)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+}
+
+step_game :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  if !engine.keyboard_captured {
+    it := 0
+    for key, pressed in input.next_key_edge(&engine.input, &it) do if pressed do on_key(engine, key)
+  }
   if state.game_over {
     if state.score > state.high_score do state.high_score = state.score
     log.infof("game over - score %d high %d - restarting", state.score, state.high_score)
@@ -213,7 +227,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   }
   state.fall_timer += dt
   period := state.fall_period
-  if platform.input_key_down(&engine.platform.input, .DOWN) do period = SOFT_FALL_PERIOD
+  if !engine.keyboard_captured && input.key_down(&engine.input, .DOWN) do period = SOFT_FALL_PERIOD
   for state.fall_timer >= period {
     state.fall_timer -= period
     drop_step(engine)
@@ -221,8 +235,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   }
 }
 
-on_key :: proc(engine: ^mjolnir.Engine, key: platform.Key, action: platform.Action) {
-  if action != .PRESS do return
+on_key :: proc(engine: ^mjolnir.Engine, key: input.Key) {
   if state.game_over do return
   #partial switch key {
   case .LEFT:  try_move(engine, 1, 0)

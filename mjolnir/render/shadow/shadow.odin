@@ -2,7 +2,6 @@ package shadow
 
 import "../bindless"
 import "../../geometry"
-import "../mesh"
 import "../gpu"
 import "core:math"
 import "core:math/linalg"
@@ -197,24 +196,6 @@ init :: proc(
     {.STORAGE_BUFFER, {.COMPUTE}}, // draw_count
     {.STORAGE_BUFFER, {.COMPUTE}}, // draw_commands
   ) or_return
-  vertex_bindings := [?]vk.VertexInputBindingDescription {
-    {binding = 0, stride = size_of(mesh.Vertex), inputRate = .VERTEX},
-  }
-  vertex_attributes := [?]vk.VertexInputAttributeDescription {
-    {
-      location = 0,
-      binding = 0,
-      format = .R32G32B32_SFLOAT,
-      offset = u32(offset_of(mesh.Vertex, position)),
-    },
-  }
-  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
-    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = len(vertex_bindings),
-    pVertexBindingDescriptions      = raw_data(vertex_bindings[:]),
-    vertexAttributeDescriptionCount = len(vertex_attributes),
-    pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
-  }
   for desc, kind in KINDS {
     self.cull_pipeline_layouts[kind] = gpu.create_pipeline_layout(
       gctx,
@@ -237,49 +218,26 @@ init :: proc(
       SHADOW_SETS,
       {stageFlags = desc.depth_push_stages, size = desc.depth_push_size},
     ) or_return
-    stage_flags := [3]vk.ShaderStageFlags{{.VERTEX}, {.GEOMETRY}, {.FRAGMENT}}
     modules: [3]vk.ShaderModule
     defer for m in modules do vk.DestroyShaderModule(gctx.device, m, nil)
-    stages: [3]vk.PipelineShaderStageCreateInfo
-    stage_count: u32
     for code, i in ([3][]u8{desc.depth_vert, desc.depth_geom, desc.depth_frag}) {
       if code == nil do continue
       modules[i] = gpu.create_shader_module(gctx.device, code) or_return
-      stages[stage_count] = {
-        sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage  = stage_flags[i],
-        module = modules[i],
-        pName  = "main",
-      }
-      stage_count += 1
     }
-    rasterizer := vk.PipelineRasterizationStateCreateInfo {
-      sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-      polygonMode = .FILL,
-      cullMode    = {.BACK},
-      frontFace   = desc.front_face,
-    }
-    info := vk.GraphicsPipelineCreateInfo {
-      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &gpu.DEPTH_ONLY_RENDERING_INFO,
-      stageCount          = stage_count,
-      pStages             = raw_data(stages[:]),
-      pVertexInputState   = &vertex_input_info,
-      pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-      pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-      pRasterizationState = &rasterizer,
-      pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-      pDepthStencilState  = &gpu.READ_WRITE_DEPTH_STATE,
-      pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-      layout              = self.depth_pipeline_layouts[kind],
-    }
-    vk.CreateGraphicsPipelines(
-      gctx.device,
-      0,
-      1,
-      &info,
-      nil,
-      &self.depth_pipelines[kind],
+    self.depth_pipelines[kind] = gpu.create_graphics_pipeline(
+      gctx,
+      {
+        vert = modules[0],
+        geom = modules[1],
+        frag = modules[2],
+        vertex_bindings = bindless.VERTEX_BINDING_DESCRIPTION[:],
+        vertex_attributes = bindless.POSITION_ATTRIBUTE_DESCRIPTIONS[:],
+        topology = .TRIANGLE_LIST,
+        raster = {polygonMode = .FILL, cullMode = {.BACK}, frontFace = desc.front_face},
+        depth = gpu.READ_WRITE_DEPTH_STATE,
+        depth_format = .D32_SFLOAT,
+        layout = self.depth_pipeline_layouts[kind],
+      },
     ) or_return
   }
   return .SUCCESS

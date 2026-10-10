@@ -1,14 +1,13 @@
 package detour
 
 import "../../geometry"
-import "../recast"
 import "core:math"
 import "core:math/linalg"
 
 Straight_Path_Point :: struct {
   pos:   [3]f32,
   flags: u8,
-  ref:   recast.Poly_Ref,
+  ref:   Poly_Ref,
 }
 
 Straight_Path_Flags :: enum u8 {
@@ -25,35 +24,35 @@ Straight_Path_Options :: enum u8 {
 find_straight_path :: proc(
   query: ^Nav_Mesh_Query,
   start_pos, end_pos: [3]f32,
-  path: []recast.Poly_Ref,
+  path: []Poly_Ref,
   path_count: i32,
   straight_path: []Straight_Path_Point,
   straight_path_flags: []u8,
-  straight_path_refs: []recast.Poly_Ref,
+  straight_path_refs: []Poly_Ref,
   max_straight_path: i32,
   options: u32,
 ) -> (
-  status: recast.Status,
+  status: Status,
   straight_path_count: i32,
 ) {
   straight_path_count = 0
   if query == nil || query.nav_mesh == nil do return {.Invalid_Param}, 0
-  if path_count == 0 || path[0] == recast.INVALID_POLY_REF || max_straight_path <= 0 do return {.Invalid_Param}, 0
+  if path_count == 0 || path[0] == INVALID_POLY_REF || max_straight_path <= 0 do return {.Invalid_Param}, 0
   // Clamp start and end positions to polygon boundaries
   closest_start_pos, start_status := closest_point_on_poly_boundary(
     query,
     path[0],
     start_pos,
   )
-  if !recast.status_succeeded(start_status) do return {.Invalid_Param}, 0
+  if !status_succeeded(start_status) do return {.Invalid_Param}, 0
   closest_end_pos, end_status := closest_point_on_poly_boundary(
     query,
     path[path_count - 1],
     end_pos,
   )
-  if !recast.status_succeeded(end_status) do return {.Invalid_Param}, 0
+  if !status_succeeded(end_status) do return {.Invalid_Param}, 0
   // Add start point
-  stat: recast.Status
+  stat: Status
   n_straight_path := i32(0)
   if n_straight_path < max_straight_path {
     straight_path[n_straight_path] = {
@@ -96,13 +95,13 @@ find_straight_path :: proc(
     if i + 1 < path_count {
       // Get portal between path[i] and path[i+1]
       from_type: u8
-      portal_status: recast.Status
+      portal_status: Status
       left, right, from_type, portal_status = get_portal_points(
         query,
         path[i],
         path[i + 1],
       )
-      if !recast.status_succeeded(portal_status) {
+      if !status_succeeded(portal_status) {
         // Failed to get portal - add end point
         closest_on_poly, _ := closest_point_on_poly_boundary(
           query,
@@ -244,24 +243,24 @@ find_straight_path :: proc(
 
 get_portal_points :: proc(
   query: ^Nav_Mesh_Query,
-  from: recast.Poly_Ref,
-  to: recast.Poly_Ref,
+  from: Poly_Ref,
+  to: Poly_Ref,
 ) -> (
   left: [3]f32,
   right: [3]f32,
   portal_type: u8,
-  status: recast.Status,
+  status: Status,
 ) {
   from_tile, from_poly, from_status := get_tile_and_poly_by_ref(
     query.nav_mesh,
     from,
   )
-  if !recast.status_succeeded(from_status) do return {}, {}, 0, from_status
+  if !status_succeeded(from_status) do return {}, {}, 0, from_status
   to_tile, to_poly, to_status := get_tile_and_poly_by_ref(query.nav_mesh, to)
-  if !recast.status_succeeded(to_status) do return {}, {}, 0, to_status
+  if !status_succeeded(to_status) do return {}, {}, 0, to_status
   // Find link from 'from' to 'to'
   link := from_poly.first_link
-  for link != recast.DT_NULL_LINK {
+  for link != DT_NULL_LINK {
     if int(link) >= len(from_tile.links) do break
     link_info := &from_tile.links[link]
     if link_info.ref == to {
@@ -332,16 +331,16 @@ calc_poly_center :: proc(tile: ^Mesh_Tile, poly: ^Poly) -> [3]f32 {
 
 move_along_surface :: proc(
   query: ^Nav_Mesh_Query,
-  start_ref: recast.Poly_Ref,
+  start_ref: Poly_Ref,
   start_pos: [3]f32,
   end_pos: [3]f32,
   filter: ^Query_Filter,
-  visited: []recast.Poly_Ref,
+  visited: []Poly_Ref,
   max_visited: i32,
 ) -> (
   result_pos: [3]f32,
   visited_count: i32,
-  status: recast.Status,
+  status: Status,
 ) {
   visited_count = 0
   result_pos = start_pos
@@ -350,7 +349,7 @@ move_along_surface :: proc(
     query.nav_mesh,
     start_ref,
   )
-  if !recast.status_succeeded(tile_status) do return result_pos, visited_count, tile_status
+  if !status_succeeded(tile_status) do return result_pos, visited_count, tile_status
   if max_visited > 0 {
     visited[0] = start_ref
     visited_count = 1
@@ -383,7 +382,7 @@ move_along_surface :: proc(
         closest_pos,
         filter,
       )
-      if neighbor_ref != recast.INVALID_POLY_REF {
+      if neighbor_ref != INVALID_POLY_REF {
         cur_ref = neighbor_ref
         if visited_count < max_visited {
           visited[visited_count] = cur_ref
@@ -403,16 +402,16 @@ move_along_surface :: proc(
 // inside, otherwise the nearest point on its boundary.
 closest_point_on_poly_boundary :: proc(
   query: ^Nav_Mesh_Query,
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
   pos: [3]f32,
 ) -> (
   [3]f32,
-  recast.Status,
+  Status,
 ) {
   tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-  if !recast.status_succeeded(status) || tile == nil || poly == nil do return pos, status
+  if !status_succeeded(status) || tile == nil || poly == nil do return pos, status
   n := int(poly.vert_count)
-  verts: [recast.DT_VERTS_PER_POLYGON][3]f32
+  verts: [DT_VERTS_PER_POLYGON][3]f32
   for i in 0 ..< n do verts[i] = tile.verts[poly.verts[i]]
   if geometry.point_in_polygon_2d(pos, verts[:n]) do return pos, {.Success}
   min_dist := f32(max(f32))
@@ -430,11 +429,11 @@ closest_point_on_poly_boundary :: proc(
 
 closest_point_on_poly :: proc(
   query: ^Nav_Mesh_Query,
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
   pos: [3]f32,
 ) -> [3]f32 {
   tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-  if !recast.status_succeeded(status) do return pos
+  if !status_succeeded(status) do return pos
   verts := make([][3]f32, poly.vert_count)
   defer delete(verts)
   for i in 0 ..< int(poly.vert_count) {
@@ -465,11 +464,11 @@ closest_point_on_poly :: proc(
 
 point_in_polygon :: proc(
   query: ^Nav_Mesh_Query,
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
   pos: [3]f32,
 ) -> bool {
   tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-  if !recast.status_succeeded(status) do return false
+  if !status_succeeded(status) do return false
   verts := make([][3]f32, poly.vert_count)
   defer delete(verts)
   for i in 0 ..< int(poly.vert_count) {
@@ -480,28 +479,28 @@ point_in_polygon :: proc(
 
 find_neighbor_across_edge :: proc(
   query: ^Nav_Mesh_Query,
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
   start_pos: [3]f32,
   end_pos: [3]f32,
   filter: ^Query_Filter,
 ) -> (
-  recast.Poly_Ref,
+  Poly_Ref,
   bool,
 ) {
   tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-  if !recast.status_succeeded(status) do return recast.INVALID_POLY_REF, false
+  if !status_succeeded(status) do return INVALID_POLY_REF, false
   for i in 0 ..< int(poly.vert_count) {
     va := tile.verts[poly.verts[i]]
     vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
     if geometry.segment_segment_intersect_2d(start_pos, end_pos, va, vb) {
       link := poly.first_link
-      for link != recast.DT_NULL_LINK {
+      for link != DT_NULL_LINK {
         if get_link_edge(tile, link) == u8(i) {
           neighbor_ref := get_link_poly_ref(tile, link)
-          if neighbor_ref != recast.INVALID_POLY_REF {
+          if neighbor_ref != INVALID_POLY_REF {
             neighbor_tile, neighbor_poly, neighbor_status :=
               get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-            if recast.status_succeeded(neighbor_status) &&
+            if status_succeeded(neighbor_status) &&
                query_filter_pass_filter(
                  filter,
                  neighbor_ref,
@@ -514,8 +513,8 @@ find_neighbor_across_edge :: proc(
         }
         link = get_next_link(tile, link)
       }
-      return recast.INVALID_POLY_REF, true // hit wall
+      return INVALID_POLY_REF, true // hit wall
     }
   }
-  return recast.INVALID_POLY_REF, false
+  return INVALID_POLY_REF, false
 }

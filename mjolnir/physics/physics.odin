@@ -78,19 +78,17 @@ World :: struct {
   trigger_overlaps:        [dynamic]TriggerOverlap,
   trigger_static_overlaps: [dynamic]TriggerStaticOverlap,
   gravity:                 [3]f32,
-  gravity_magnitude:       f32,
   dynamic_bvh:             geometry.BVH(DynamicBroadPhaseEntry),
   static_bvh:              geometry.BVH(StaticBroadPhaseEntry),
-  body_bounds:             [dynamic]geometry.Aabb,
   trigger_bodies:          cont.Pool(TriggerBody),
   enable_parallel:         bool,
   thread_count:            int,
   thread_pool:             thread.Pool,
   // Deferred body removal tracking
   killed_body_count:       int,
-  // BVH rebuild tracking
-  last_dynamic_count:      int,
-  last_static_count:       int,
+  // Set when bodies are created; the next step rebuilds that BVH
+  dynamic_bvh_dirty:       bool,
+  static_bvh_dirty:        bool,
   // Dense list of awake body indices, rebuilt after narrowphase each frame
   // (narrowphase can wake sleeping bodies). Hot substep loops iterate this
   // instead of branching over the whole pool.
@@ -133,7 +131,6 @@ init :: proc(
   self.prev_dynamic_warmstart = make(map[u64]ContactWarmstart)
   self.prev_static_warmstart = make(map[u64]ContactWarmstart)
   self.gravity = gravity
-  self.gravity_magnitude = linalg.length(gravity)
   self.dynamic_bvh = geometry.BVH(DynamicBroadPhaseEntry) {
     nodes = make([dynamic]geometry.BVHNode),
     primitives = make([dynamic]DynamicBroadPhaseEntry),
@@ -152,15 +149,11 @@ init :: proc(
       return entry.bounds
     },
   }
-  self.body_bounds = make([dynamic]geometry.Aabb)
   self.solver_color_used = make([dynamic]u64)
   self.solver_color_buckets = make([dynamic][dynamic]int)
   self.solver_overflow = make([dynamic]int)
   self.awake_list = make([dynamic]u32)
   self.enable_parallel = enable_parallel
-  self.killed_body_count = 0
-  self.last_dynamic_count = 0
-  self.last_static_count = 0
   if self.enable_parallel {
     self.thread_count = DEFAULT_THREAD_COUNT
     thread.pool_init(
@@ -193,7 +186,6 @@ shutdown :: proc(self: ^World) {
   cont.destroy(&self.trigger_bodies, proc(body: ^TriggerBody) {})
   delete(self.trigger_overlaps)
   delete(self.trigger_static_overlaps)
-  delete(self.body_bounds)
   delete(self.dynamic_contacts)
   delete(self.static_contacts)
   delete(self.prev_dynamic_warmstart)
@@ -211,21 +203,12 @@ shutdown :: proc(self: ^World) {
 }
 
 teardown :: proc(self: ^World) {
-  for i in 0 ..< len(self.bodies.entries) {
-    if self.bodies.entries[i].active {
-      destroy_dynamic_body(self, DynamicRigidBodyHandle{index = u32(i), generation = self.bodies.entries[i].generation})
-    }
-  }
-  for i in 0 ..< len(self.static_bodies.entries) {
-    if self.static_bodies.entries[i].active {
-      destroy_static_body(self, StaticRigidBodyHandle{index = u32(i), generation = self.static_bodies.entries[i].generation})
-    }
-  }
-  for i in 0 ..< len(self.trigger_bodies.entries) {
-    if self.trigger_bodies.entries[i].active {
-      destroy_trigger(self, TriggerHandle{index = u32(i), generation = self.trigger_bodies.entries[i].generation})
-    }
-  }
+  dyn_it := cont.iterator(&self.bodies)
+  for _, handle in cont.next(&dyn_it, DynamicRigidBodyHandle) do destroy_dynamic_body(self, handle)
+  static_it := cont.iterator(&self.static_bodies)
+  for _, handle in cont.next(&static_it, StaticRigidBodyHandle) do destroy_static_body(self, handle)
+  trigger_it := cont.iterator(&self.trigger_bodies)
+  for _, handle in cont.next(&trigger_it, TriggerHandle) do destroy_trigger(self, handle)
   clear(&self.dynamic_contacts)
   clear(&self.static_contacts)
   clear(&self.prev_dynamic_warmstart)
@@ -236,8 +219,8 @@ teardown :: proc(self: ^World) {
   clear(&self.dynamic_bvh.nodes)
   clear(&self.static_bvh.primitives)
   clear(&self.static_bvh.nodes)
-  self.last_dynamic_count = 0
-  self.last_static_count = 0
+  self.dynamic_bvh_dirty = false
+  self.static_bvh_dirty = false
   self.killed_body_count = 0
 }
 
@@ -258,6 +241,7 @@ create_dynamic_body :: proc(
   body.collider = collider
   set_inertia_from_collider(body, collider)
   body.user = user
+  self.dynamic_bvh_dirty = true
   return handle, true
 }
 
@@ -279,6 +263,7 @@ create_static_body :: proc(
   static_rigid_body_init(body, position, rotation)
   body.collider = collider
   body.user = user
+  self.static_bvh_dirty = true
   return handle, true
 }
 
@@ -321,10 +306,9 @@ step_warmstart_prep :: proc(self: ^World) {
 
 @(private)
 step_count_dynamic :: proc(self: ^World) -> (dynamic_count: int) {
-  for i in 0 ..< len(self.bodies.entries) {
-    if !self.bodies.entries[i].active do continue
-    if self.bodies.entries[i].item.is_killed do continue
-    dynamic_count += 1
+  it := cont.iterator(&self.bodies)
+  for body in cont.next(&it, DynamicRigidBodyHandle) {
+    if !body.is_killed do dynamic_count += 1
   }
   return
 }
@@ -361,9 +345,8 @@ step_island_sleep :: proc(self: ^World, dt: f32) -> (awake_count, sleeping_count
     if ra != rb do parent[rb] = ra
   }
   // Per-body quiet timers
-  for i in 0 ..< n {
-    if !self.bodies.entries[i].active do continue
-    body := &self.bodies.entries[i].item
+  it := cont.iterator(&self.bodies)
+  for body in cont.next(&it, DynamicRigidBodyHandle) {
     if body.is_killed do continue
     lin_speed_sq := linalg.length2(body.velocity)
     ang_speed_sq := linalg.length2(body.angular_velocity)
@@ -377,23 +360,21 @@ step_island_sleep :: proc(self: ^World, dt: f32) -> (awake_count, sleeping_count
   // Island-minimum quiet time
   island_min := make([]f32, n, context.temp_allocator)
   for i in 0 ..< n do island_min[i] = math.F32_MAX
-  for i in 0 ..< n {
-    if !self.bodies.entries[i].active do continue
-    body := &self.bodies.entries[i].item
+  it = cont.iterator(&self.bodies)
+  for body, handle in cont.next(&it, DynamicRigidBodyHandle) {
     if body.is_killed do continue
-    root := find(parent, i32(i))
+    root := find(parent, i32(handle.index))
     island_min[root] = min(island_min[root], body.sleep_timer)
   }
-  for i in 0 ..< n {
-    if !self.bodies.entries[i].active do continue
-    body := &self.bodies.entries[i].item
+  it = cont.iterator(&self.bodies)
+  for body, handle in cont.next(&it, DynamicRigidBodyHandle) {
     if body.is_killed do continue
     if body.position.y < KILL_Y {
       body.is_killed = true
       self.killed_body_count += 1
       continue
     }
-    root := find(parent, i32(i))
+    root := find(parent, i32(handle.index))
     if island_min[root] > SLEEP_TIME_THRESHOLD {
       body.is_sleeping = true
       body.velocity = {}
@@ -411,10 +392,8 @@ step_rebuild_dynamic_bvh :: proc(self: ^World, dynamic_body_count: int) {
   clear(&self.dynamic_bvh.nodes)
   clear(&self.dynamic_bvh.primitives)
   entries := make([dynamic]DynamicBroadPhaseEntry, 0, dynamic_body_count, context.temp_allocator)
-  for idx in 0 ..< len(self.bodies.entries) {
-    if !self.bodies.entries[idx].active do continue
-    body := &self.bodies.entries[idx].item
-    handle := DynamicRigidBodyHandle{index = u32(idx), generation = self.bodies.entries[idx].generation}
+  it := cont.iterator(&self.bodies)
+  for body, handle in cont.next(&it, DynamicRigidBodyHandle) {
     if body.is_killed {
       destroy_body(self, handle)
       continue
@@ -432,7 +411,7 @@ step_rebuild_dynamic_bvh :: proc(self: ^World, dynamic_body_count: int) {
     geometry.bvh_build(&self.dynamic_bvh, entries[:], 4)
   }
   self.killed_body_count = 0
-  self.last_dynamic_count = dynamic_body_count
+  self.dynamic_bvh_dirty = false
 }
 
 @(private)
@@ -440,11 +419,9 @@ step_rebuild_static_bvh :: proc(self: ^World, static_body_count: int) {
   clear(&self.static_bvh.nodes)
   clear(&self.static_bvh.primitives)
   entries := make([dynamic]StaticBroadPhaseEntry, 0, static_body_count, context.temp_allocator)
-  for idx in 0 ..< len(self.static_bodies.entries) {
-    if !self.static_bodies.entries[idx].active do continue
-    body := &self.static_bodies.entries[idx].item
+  it := cont.iterator(&self.static_bodies)
+  for body, handle in cont.next(&it, StaticRigidBodyHandle) {
     update_cached_aabb(&body.base)
-    handle := StaticRigidBodyHandle{index = u32(idx), generation = self.static_bodies.entries[idx].generation}
     append(&entries, StaticBroadPhaseEntry{handle = handle, bounds = body.cached_aabb})
   }
   if self.enable_parallel {
@@ -452,7 +429,7 @@ step_rebuild_static_bvh :: proc(self: ^World, static_body_count: int) {
   } else {
     geometry.bvh_build(&self.static_bvh, entries[:], 4)
   }
-  self.last_static_count = static_body_count
+  self.static_bvh_dirty = false
 }
 
 @(private)
@@ -461,10 +438,8 @@ step_triggers :: proc(self: ^World) {
   clear(&self.trigger_static_overlaps)
   dyn_candidates := make([dynamic]DynamicBroadPhaseEntry, context.temp_allocator)
   static_candidates := make([dynamic]StaticBroadPhaseEntry, context.temp_allocator)
-  for i in 0 ..< len(self.trigger_bodies.entries) {
-    if !self.trigger_bodies.entries[i].active do continue
-    trigger := &self.trigger_bodies.entries[i].item
-    trigger_handle := TriggerHandle{index = u32(i), generation = self.trigger_bodies.entries[i].generation}
+  it := cont.iterator(&self.trigger_bodies)
+  for trigger, trigger_handle in cont.next(&it, TriggerHandle) {
     update_cached_aabb(&trigger.base)
     clear(&dyn_candidates)
     geometry.bvh_query_aabb(&self.dynamic_bvh, trigger.cached_aabb, &dyn_candidates)
@@ -513,13 +488,10 @@ step :: proc(self: ^World, dt: f32) {
   }
   when PHYSICS_PERF_STATS do ccd_time = time.since(mark)
 
-  static_body_count := 0
-  for i in 0 ..< len(self.static_bodies.entries) {
-    if self.static_bodies.entries[i].active do static_body_count += 1
-  }
+  static_body_count := cont.count(self.static_bodies)
 
-  rebuild_dynamic_bvh := dynamic_body_count > self.last_dynamic_count || self.killed_body_count >= BVH_REBUILD_THRESHOLD
-  rebuild_static_bvh := static_body_count > self.last_static_count
+  rebuild_dynamic_bvh := self.dynamic_bvh_dirty || self.killed_body_count >= BVH_REBUILD_THRESHOLD
+  rebuild_static_bvh := self.static_bvh_dirty
   if rebuild_dynamic_bvh || rebuild_static_bvh {
     when PHYSICS_PERF_STATS do mark = time.now()
     if rebuild_dynamic_bvh do step_rebuild_dynamic_bvh(self, dynamic_body_count)
@@ -530,9 +502,8 @@ step :: proc(self: ^World, dt: f32) {
   // Anchor frame-start positions for per-substep separation recovery, and
   // check the all-asleep fast path (nothing can move → skip the pipeline)
   any_awake := false
-  for i in 0 ..< len(self.bodies.entries) {
-    if !self.bodies.entries[i].active do continue
-    body := &self.bodies.entries[i].item
+  it := cont.iterator(&self.bodies)
+  for body in cont.next(&it, DynamicRigidBodyHandle) {
     body.position0 = body.position
     if !body.is_killed && !body.is_sleeping do any_awake = true
   }
@@ -562,11 +533,10 @@ step :: proc(self: ^World, dt: f32) {
     // Narrowphase may have woken sleeping bodies — build the dense awake
     // list only now
     clear(&self.awake_list)
-    for i in 0 ..< len(self.bodies.entries) {
-      if !self.bodies.entries[i].active do continue
-      body := &self.bodies.entries[i].item
+    awake_it := cont.iterator(&self.bodies)
+    for body, handle in cont.next(&awake_it, DynamicRigidBodyHandle) {
       if body.is_killed || body.is_sleeping do continue
-      append(&self.awake_list, u32(i))
+      append(&self.awake_list, handle.index)
     }
 
     when PHYSICS_PERF_STATS do mark = time.now()
@@ -649,24 +619,6 @@ step :: proc(self: ^World, dt: f32) {
   }
 }
 
-rebuild_dynamic_bvh :: proc(self: ^World) {
-  count := 0
-  for i in 0 ..< len(self.bodies.entries) {
-    if self.bodies.entries[i].active && !self.bodies.entries[i].item.is_killed {
-      count += 1
-    }
-  }
-  step_rebuild_dynamic_bvh(self, count)
-}
-
-rebuild_static_bvh :: proc(self: ^World) {
-  count := 0
-  for i in 0 ..< len(self.static_bodies.entries) {
-    if self.static_bodies.entries[i].active do count += 1
-  }
-  step_rebuild_static_bvh(self, count)
-}
-
 get_dynamic_body :: #force_inline proc(
   self: ^World,
   handle: DynamicRigidBodyHandle,
@@ -727,39 +679,113 @@ destroy_trigger :: proc(self: ^World, handle: TriggerHandle) {
   cont.free(&self.trigger_bodies, handle)
 }
 
-set_trigger_position :: proc(
+// Pose and collider setters keep the cached bounds and the broadphase in
+// sync. Dynamic bodies are woken so the next `step` refits their BVH leaf;
+// static bodies refit the static BVH immediately.
+set_dynamic_body_pose :: proc(
   self: ^World,
-  handle: TriggerHandle,
+  handle: DynamicRigidBodyHandle,
   position: [3]f32,
+  rotation: quaternion128,
 ) {
-  body, ok := get_trigger(self, handle)
+  body, ok := get(self, handle)
   if !ok do return
   body.position = position
-  update_cached_aabb(&body.base)
-}
-
-set_trigger_rotation :: proc(
-  self: ^World,
-  handle: TriggerHandle,
-  rotation: quaternion128,
-) {
-  body, ok := get_trigger(self, handle)
-  if !ok do return
   body.rotation = rotation
+  update_world_inertia(body)
   update_cached_aabb(&body.base)
+  wake_up(body)
 }
 
-set_trigger_transform :: proc(
+set_static_body_pose :: proc(
   self: ^World,
-  handle: TriggerHandle,
+  handle: StaticRigidBodyHandle,
   position: [3]f32,
   rotation: quaternion128,
 ) {
-  body, ok := get_trigger(self, handle)
+  body, ok := get(self, handle)
   if !ok do return
   body.position = position
   body.rotation = rotation
   update_cached_aabb(&body.base)
+  refit_static_entry(self, handle, body.cached_aabb)
+}
+
+set_trigger_pose :: proc(
+  self: ^World,
+  handle: TriggerHandle,
+  position: [3]f32,
+  rotation: quaternion128,
+) {
+  body, ok := get(self, handle)
+  if !ok do return
+  body.position = position
+  body.rotation = rotation
+  update_cached_aabb(&body.base)
+}
+
+set_body_pose :: proc {
+  set_dynamic_body_pose,
+  set_static_body_pose,
+  set_trigger_pose,
+}
+
+// Also resets the inertia to the new shape at the current mass.
+set_dynamic_body_collider :: proc(
+  self: ^World,
+  handle: DynamicRigidBodyHandle,
+  collider: Collider,
+) {
+  body, ok := get(self, handle)
+  if !ok do return
+  body.collider = collider
+  set_inertia_from_collider(body, collider)
+  update_cached_aabb(&body.base)
+  wake_up(body)
+}
+
+set_static_body_collider :: proc(
+  self: ^World,
+  handle: StaticRigidBodyHandle,
+  collider: Collider,
+) {
+  body, ok := get(self, handle)
+  if !ok do return
+  body.collider = collider
+  update_cached_aabb(&body.base)
+  refit_static_entry(self, handle, body.cached_aabb)
+}
+
+set_trigger_collider :: proc(
+  self: ^World,
+  handle: TriggerHandle,
+  collider: Collider,
+) {
+  body, ok := get(self, handle)
+  if !ok do return
+  body.collider = collider
+  update_cached_aabb(&body.base)
+}
+
+set_body_collider :: proc {
+  set_dynamic_body_collider,
+  set_static_body_collider,
+  set_trigger_collider,
+}
+
+// Bodies not yet in the static BVH are picked up by the next rebuild.
+@(private = "file")
+refit_static_entry :: proc(
+  self: ^World,
+  handle: StaticRigidBodyHandle,
+  bounds: geometry.Aabb,
+) {
+  for &entry in self.static_bvh.primitives {
+    if entry.handle != handle do continue
+    entry.bounds = bounds
+    geometry.bvh_refit(&self.static_bvh)
+    return
+  }
 }
 
 BodyPose :: struct {
@@ -775,9 +801,9 @@ body_poses :: proc(
   allocator := context.temp_allocator,
 ) -> []BodyPose {
   poses := make([dynamic]BodyPose, 0, len(self.bodies.entries), allocator)
-  for &entry in self.bodies.entries {
-    body := &entry.item
-    if !entry.active || body.is_sleeping || body.user == {} do continue
+  it := cont.iterator(&self.bodies)
+  for body in cont.next(&it, DynamicRigidBodyHandle) {
+    if body.is_sleeping || body.user == {} do continue
     append(&poses, BodyPose{body.user, body.position, body.rotation})
   }
   return poses[:]

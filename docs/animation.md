@@ -67,27 +67,27 @@ out-of-range parents. Bone queries: `find_bone`, `find_bones`,
 `bone_chain` (root → tip), `bone_chain_down`, `bone_mask`,
 `bone_subtree_mask`, `rest_position`, `rest_offset`.
 
-`pose_model(skel, local, model)` turns local transforms into
-skeleton-space transforms in one linear pass over `order`.
-
 A `Rig` is the asset type: one skeleton plus the clips authored for
 it. `find_clip(rig, name)` looks a clip up within that rig.
 
 ## Tier 3: animators
 
 An `Animator` is the **per-instance** state of one skeleton. It owns
-a layer stack, an optional transition, and three pose arrays carved
-out of one allocation:
+a layer stack, an optional transition, and flat per-bone pose arrays
+carved out of one allocation:
 
-- `local` — per-bone local transform.
-- `model` — per-bone skeleton-space transform.
-- `palette` — `model * inverse_bind`, what a renderer uploads.
+- `local` — per-bone local transform (`TRS`).
+- `positions`, `rotations`, `scales` — per-bone skeleton-space
+  transform, the parent chain applied in one linear pass over `order`
+  (scale composes per axis, without shear).
+- `palette` — skeleton-space matrix `* inverse_bind`, what a renderer
+  uploads.
 
 Many animators can share one rig; none of them writes to it.
 
 ```odin
 a: anim.Animator
-anim.animator_init(&a, &rig.skeleton)
+anim.animator_init(&a, rig)
 defer anim.animator_destroy(&a)
 anim.play(&a, rig, "walk")
 // every tick
@@ -99,10 +99,10 @@ palette := anim.animator_update(&a, rig, dt, root_world)
 1. Advance every clip layer's play head and the transition.
 2. Blend the clip layers into `local`, honouring weight, blend mode
    and bone mask. Bones no layer touches stay at rest.
-3. `pose_model` into `model`.
-4. Run procedural layers on `model`, then re-pose the descendants of
-   the bones they moved.
-5. Run IK layers on `model` the same way.
+3. Pose the skeleton-space arrays from `local`.
+4. Run procedural layers on the skeleton-space pose, then re-pose the
+   descendants of the bones they moved.
+5. Run IK layers the same way.
 6. Write `palette`.
 
 `root_world` is the skinned object's world matrix. World-space IK
@@ -123,9 +123,13 @@ slerp, scales by weighted product.
 | path | `add_path_layer` | bones ride a spline |
 | spider leg | `add_spider_leg_layer` | feet step toward targets with a parabolic lift |
 
+Layer constructors take the `^Rig` the animator plays. A spider-leg
+layer takes one `SpiderLegConfig` per leg: chain root and length,
+optional constraints, rest foot offset and step timing.
+
 `set_layer_weight`, `set_layer_mask`, `set_ik_target`,
 `set_ik_enabled`, `set_tail_params`, `set_path_params`,
-`set_spider_leg_params`, `spider_leg_target` and `modifier` adjust a
+`set_spider_leg_params` and `spider_leg_target` adjust a
 layer after it is added. `remove_layer` and `clear_layers` drop them.
 
 `transition_to(&a, rig, name, duration, from, to, curve)` cross-fades
@@ -137,7 +141,7 @@ state reads `COMPLETE` on the tick it finishes.
 - `bone_matrix(&a, bone)` — skeleton-space matrix of a bone, for
   sockets.
 - `bone_segments(&a, skel, root_world)` — world-space parent → child
-  segments, for debug drawing (`mjolnir.debug_skeleton` draws them).
+  segments, for debug drawing; feed each to `render.debug_segment`.
 
 ## FABRIK
 

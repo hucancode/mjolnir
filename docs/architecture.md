@@ -32,17 +32,17 @@ split into its own repository.
 ```mermaid
 flowchart TB
   subgraph L3["Layer 3 — Engine"]
-    engine["mjolnir<br/>run loop · spawn_* · glTF<br/>cursor ray · debug_skeleton"]
+    engine["mjolnir (optional)<br/>reference run loop<br/>glTF assembly · spawn helpers"]
   end
 
   subgraph L2["Layer 2 — Subsystems"]
     direction LR
-    platform["platform<br/>window, input<br/>vulkan surface"]
+    platform["platform<br/>GLFW window<br/>vulkan surface"]
     world["world<br/>scene graph<br/>change feed"]
     render["render<br/>Vulkan, frame, passes<br/>bindless, looks"]
     animation["animation<br/>tracks, skeletons<br/>animators, IK"]
     physics["physics<br/>rigid body<br/>BVH broadphase"]
-    nav["navigation<br/>recast / detour / crowd"]
+    nav["navigation<br/>runtime: detour, crowd<br/>bake: recast"]
     ui["ui<br/>widgets, layout<br/>draw commands"]
   end
 
@@ -51,6 +51,7 @@ flowchart TB
     geometry["geometry<br/>math, AABB, frustum<br/>BVH, octree"]
     containers["containers<br/>handle pool<br/>slab allocator"]
     draw2d["draw2d<br/>2D draw commands"]
+    input["input<br/>per-tick snapshot<br/>keys, mouse, text"]
   end
 
   L3 --> L2
@@ -62,31 +63,37 @@ flowchart TB
   the Vulkan layer (context, swapchain, buffers, images, pipelines,
   deferred destruction and the bindless descriptor-array mechanism).
   `render/bindless` defines render's own arrays (textures, samplers,
-  cube maps, the mesh arena, the scene set) and `render/mesh` the
-  vertex format and primitive builders. Shaders (`render/shader`)
+  cube maps, the mesh arena, the scene set, the indirect draw lists)
+  and `render/mesh` the vertex format, primitive builders and OBJ
+  loader. Shaders (`render/shader`)
   and embedded assets (`render/assets`) live inside the module, so
   the folder lifts out whole.
 - `platform` is the only GLFW user, including layer 3 and the
   examples. It hands render the instance extensions, the
-  proc-address loader and a surface; render never sees a window.
+  proc-address loader and a surface; render never sees a window. It
+  writes device events into an `input.Accumulator`; everything else
+  reads the per-tick `input.State` snapshot.
 - `geometry` is math and spatial structures only. No vertex formats,
   no Vulkan.
+- `navigation` splits into a runtime (`navigation`,
+  `navigation/detour`, `navigation/crowd`) that never imports Recast
+  and a baker (`navigation/bake`) that turns triangles into a
+  `NavMesh`; `navigation.init` loads pre-baked data.
 - `animation` is headless: it samples tracks and poses skeletons
   into flat arrays. Applying the result (moving a node, uploading a
   skin palette) is the caller's job.
 
-### What belongs in layer 3
+### Layer 3
 
-A feature lives in `mjolnir` only if it needs two or more layer-2
-modules and belongs to neither: the run loop, the world → render
-transform sync, the main camera controller (platform input → render
-camera), glTF scene construction (world nodes over the `render/gltf`
-and `animation/gltf` loaders), `spawn_*` helpers (world + render +
-physics), cursor rays (platform + render), skeleton debug lines
-(animation → render) and the platform → debug-UI input adapter.
-Layer-3 helpers use only public layer-2 APIs, so user code can always
-rewrite them. Code that touches a single module belongs in that
-module.
+The `mjolnir` package is optional. It is a reference run loop (window,
+input snapshot, update and render cadence), glTF scene assembly
+(world nodes over the `render/gltf` and `animation/gltf` loaders) and
+a few basic spawn helpers (world node + render attachment). It runs
+no glue between modules: `world.update`, the world → render feed,
+skin palettes and physics poses are all the application's `update`
+callback. Layer-3 code uses only public layer-2 APIs, so user code
+can always rewrite it. Code that touches a single module belongs in
+that module.
 
 ---
 
@@ -113,34 +120,38 @@ imports the other.
 
 ## Glue
 
-Modules never call each other. The per-frame glue between them is a
-few lines — see [glue](glue.html). The engine runs the world → render
-transform hop itself right after `world.update`:
+**Modules never call each other, and the engine provides no glue.**
+Cross-module glue is user code made of trivial feed → consume loops;
+each module owns its own timing and thread safety, so a hop never
+needs scheduling or locking. The world → render hop, for example:
 
 ```odin
+world.update(&e.world)
 for i in world.removed_nodes(&e.world) do render.stage_slot_removal(&e.render, i)
 for n in world.changed_nodes(&e.world) do render.stage_transform(&e.render, n.index, n.world_matrix, n.visible)
 ```
 
-The application's `sync` callback runs next for the rest, typically
-one `render.stage_bones(&e.render, node.index, animator.palette)` per
-skinned node.
+With the layer-3 run loop these lines live in the `update` callback,
+next to the physics pose copy and one
+`render.stage_bones(&e.render, node.index, animator.palette)` per
+skinned node. See [glue](glue.html) for every hop.
 
 ---
 
 ## Frame phases
 
 ```
-update thread: input → camera controller → update → world.update → world→render → sync → render.update
+update thread: input snapshot → UI input → camera controller → update (app + glue) → render.update
 render thread: poll events → throttle → ui stage → pre_render
                → render.frame (flush → acquire → record → submit + present) → post_render
 ```
 
 - **Update** runs at `UPDATE_FPS` (defaults to `RENDER_FPS`). On its
   own thread if `USE_PARALLEL_UPDATE=true`.
-- **Sync** is the user callback that feeds world changes to render.
-  It runs on the update thread; every `render.stage_*` and
-  `render.attach` call is thread-safe.
+- **Glue** runs inside the `update` callback on the update thread;
+  every `render.stage_*` and `render.attach` call is thread-safe.
+  `render.update` advances render's own clock (emitters, debug line
+  lifetimes).
 - **Frame** is one `render.frame` call on the render thread: it
   drains staging into GPU buffers, acquires a swapchain image
   (recreating the swapchain on resize), records, submits, presents
@@ -156,7 +167,7 @@ point.
 
 ## Render-owned staging
 
-Mutating a look (`attach`, `stage_transform`, `set_material_handle`,
+Mutating a look (`attach`, `stage_transform`, `mark_slot_dirty`,
 `create_mesh`, …) writes CPU state and marks the slot dirty in a
 mutex-guarded staging set. `render.frame` uploads dirty entries once
 per frame on the render thread.
@@ -185,9 +196,9 @@ A's material or UI quad is just another bindless index.
 
 Following a logical entity is one glue line:
 `render.camera_set_transform(cam, world.world_matrix(&w, player))`.
-Orbit, free and follow controllers are render procs that take plain
-input deltas (`render.CameraInput`); the engine feeds them from
-`platform.Input`.
+Orbit, free and follow controllers are render procs that read the
+per-tick `input.State` through their `CameraBindings`; the engine runs
+the active one each update tick.
 
 ---
 

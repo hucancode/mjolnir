@@ -10,8 +10,7 @@ import "direct_light"
 import "forward"
 import "geometry"
 import "occlusion_culling"
-import particles_compute "particles_compute"
-import particles_render "particles_render"
+import "particles"
 import "post_process"
 import "shadow"
 import ui_render "ui"
@@ -30,16 +29,6 @@ SHADOW_MAP_SIZE :: 512
 // frames never see a recycled index.
 RETIRE_GRACE :: gpu.FRAMES_IN_FLIGHT + 1
 
-@(private)
-frame_next :: #force_inline proc(frame_index: u32) -> u32 {
-  return (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
-}
-
-@(private)
-frame_prev :: #force_inline proc(frame_index: u32) -> u32 {
-  return (frame_index + gpu.FRAMES_IN_FLIGHT - 1) % gpu.FRAMES_IN_FLIGHT
-}
-
 Handle :: cont.Handle
 MeshHandle :: bindless.MeshHandle
 MaterialHandle :: distinct Handle
@@ -49,9 +38,6 @@ ForceFieldHandle :: distinct Handle
 CameraHandle :: distinct Handle
 
 BufferAllocation :: bindless.BufferAllocation
-DrawPipeline :: occlusion_culling.DrawPipeline
-DrawBuffers :: occlusion_culling.DrawBuffers
-Particle :: particles_compute.Particle
 
 Primitive :: enum {
   CUBE,
@@ -165,31 +151,20 @@ CameraGPU :: struct {
   frustum_planes:  [6][4]f32,
 }
 
-EmitterData :: particles_compute.Emitter
-ForceFieldData :: particles_compute.ForceField
-MAX_EMITTERS :: particles_compute.MAX_EMITTERS
-MAX_FORCE_FIELDS :: particles_compute.MAX_FORCE_FIELDS
+EmitterData :: particles.Emitter
+ForceFieldData :: particles.ForceField
+MAX_EMITTERS :: particles.MAX_EMITTERS
+MAX_FORCE_FIELDS :: particles.MAX_FORCE_FIELDS
 
-// Shadow resources are stored in side maps keyed by light node index.
-// View/projection/near/far/frustum are derived from light state and recomputed
-// per frame at use sites; storing them would duplicate Light fields.
+// Per-light shadow resources, keyed by light node index. Point lights render
+// a cube map, spot and directional lights a 2D map; `textures` holds the
+// matching bindless handle. View/projection are derived from light state per
+// frame (see build_shadow_cache).
 @(private)
 ShadowMap :: struct {
-  shadow_map_2d:   [gpu.FRAMES_IN_FLIGHT]bindless.Texture2DHandle,
-  draw_commands:   [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
-    vk.DrawIndexedIndirectCommand,
-  ),
-  draw_count:      [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  descriptor_sets: [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
-}
-
-@(private)
-ShadowMapCube :: struct {
-  shadow_map_cube: [gpu.FRAMES_IN_FLIGHT]bindless.TextureCubeHandle,
-  draw_commands:   [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
-    vk.DrawIndexedIndirectCommand,
-  ),
-  draw_count:      [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  cube:            bool,
+  textures:        [gpu.FRAMES_IN_FLIGHT]Handle,
+  draws:           bindless.DrawBuffers,
   descriptor_sets: [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
@@ -226,10 +201,8 @@ Light :: union {
 Internal :: struct {
   command_buffers:              [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
   compute_command_buffers:      [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  linear_repeat_sampler:        vk.Sampler,
-  linear_clamp_sampler:         vk.Sampler,
-  nearest_repeat_sampler:       vk.Sampler,
-  nearest_clamp_sampler:        vk.Sampler,
+  // Set by setup, cleared by teardown; frame renders nothing while false.
+  level_ready:                  bool,
   bone_buffer:                  gpu.PerFrameBindlessBuffer(
     matrix[4, 4]f32,
     gpu.FRAMES_IN_FLIGHT,
@@ -253,8 +226,7 @@ Internal :: struct {
   geometry:                     geometry.Renderer,
   direct_light:                 direct_light.Renderer,
   forward:                      forward.Renderer,
-  particles_compute:            particles_compute.Renderer,
-  particles_render:             particles_render.Renderer,
+  particles:                    particles.Renderer,
   debug_line_renderer:          debug_line.Renderer,
   ui:                           ui_render.Renderer,
   // Compute / culling / shadow systems.
@@ -264,7 +236,6 @@ Internal :: struct {
   // Per-light render-side state. Indexed by light node index.
   lights:                       map[u32]Light,
   shadow_maps:                  map[u32]ShadowMap,
-  shadow_map_cubes:             map[u32]ShadowMapCube,
   staging:                      Staging,
   // Pending overlay font atlas upload, applied by flush on the render thread.
   ui_atlas_pixels:              []u8,
@@ -285,6 +256,12 @@ Internal :: struct {
 //     arrays; create textures through create_texture_* in resources.odin.
 //   * post_process: user-facing effects stack (callers add fog, bloom, etc).
 // The microui debug context is reached through debug_ui (overlay.odin).
+//
+// Lifecycle, in pairs:
+//   create_instance + init / shutdown: device, swapchain, pipelines, pools.
+//   setup / teardown: level resources (descriptors, cameras, slots, textures).
+// setup and teardown may be called any number of times between init and
+// shutdown, from any point outside frame.
 Manager :: struct {
   gctx:              gpu.GPUContext,
   swapchain:         gpu.Swapchain,
@@ -382,7 +359,7 @@ Camera :: struct {
   attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]bindless.Texture2DHandle,
   // Indirect draw buffers per pipeline (double-buffered for async compute).
   // Frame N compute writes to buffers[N], Frame N graphics reads from buffers[N-1].
-  draws:                        [DrawPipeline]DrawBuffers,
+  draws:                        [bindless.DrawPipeline]bindless.DrawBuffers,
   depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]depth_pyramid_system.DepthPyramid,
   descriptor_set:               [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
   depth_reduce_descriptor_sets: [gpu.FRAMES_IN_FLIGHT][depth_pyramid_system.MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,

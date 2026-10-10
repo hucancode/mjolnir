@@ -323,3 +323,25 @@ test_slab_alloc_too_large :: proc(t: ^testing.T) {
   _, ok := slab_alloc(&allocator, 16)
   testing.expect(t, !ok, "Allocation larger than any class should fail")
 }
+
+@(test)
+test_pool_iterator :: proc(t: ^testing.T) {
+  pool: Pool(int)
+  defer destroy(&pool, proc(_: ^int) {})
+  h0, p0, _ := alloc(&pool, Handle)
+  p0^ = 10
+  h1, _, _ := alloc(&pool, Handle)
+  _, p2, _ := alloc(&pool, Handle)
+  p2^ = 30
+  free(&pool, h1)
+  sum, n := 0, 0
+  it := iterator(&pool)
+  for item, h in next(&it, Handle) {
+    testing.expect(t, is_valid(pool, h))
+    sum += item^
+    n += 1
+  }
+  testing.expect_value(t, n, 2)
+  testing.expect_value(t, sum, 40)
+  _ = h0
+}

@@ -1,5 +1,6 @@
 package animation
 
+import "../geometry"
 import "core:math/ease"
 import "core:math/linalg"
 import "core:mem"
@@ -26,32 +27,41 @@ find_clip :: proc(self: ^Rig, name: string) -> (index: int, ok: bool) #optional_
 
 // Per-instance animation state of one skeleton. Owns its layer stack and the
 // instance pose; the Skeleton definition stays shared and untouched.
-//   local   - per-bone local transform, rebuilt each update
-//   model   - per-bone skeleton-space transform (parent chain applied)
-//   palette - skinning matrices (model * inverse_bind), what a renderer uploads
-// The three pose arrays share one allocation.
+//   local     - per-bone local transform, rebuilt each update
+//   positions, rotations, scales
+//             - per-bone skeleton-space transform (parent chain applied)
+//   palette   - skinning matrices (skeleton-space * inverse_bind), what a
+//               renderer uploads
+// All pose arrays share one allocation.
 Animator :: struct {
   layers:     [dynamic]Layer,
   transition: Transition,
   local:      []TRS,
-  model:      []BoneTransform,
+  positions:  [][3]f32,
+  rotations:  []quaternion128,
+  scales:     [][3]f32,
   palette:    []matrix[4, 4]f32,
 }
 
-animator_init :: proc(self: ^Animator, skel: ^Skeleton) -> bool {
+animator_init :: proc(self: ^Animator, rig: ^Rig) -> bool {
+  skel := &rig.skeleton
   n := bone_count(skel)
-  size := n * (size_of(matrix[4, 4]f32) + size_of(BoneTransform) + size_of(TRS))
+  size := n * (size_of(matrix[4, 4]f32) + size_of(quaternion128) + 2 * size_of([3]f32) + size_of(TRS))
   base, err := mem.alloc(max(size, 1), 16)
   if err != nil do return false
   p := uintptr(base)
   self.palette = ([^]matrix[4, 4]f32)(rawptr(p))[:n]
   p += uintptr(n * size_of(matrix[4, 4]f32))
-  self.model = ([^]BoneTransform)(rawptr(p))[:n]
-  p += uintptr(n * size_of(BoneTransform))
+  self.rotations = ([^]quaternion128)(rawptr(p))[:n]
+  p += uintptr(n * size_of(quaternion128))
   self.local = ([^]TRS)(rawptr(p))[:n]
+  p += uintptr(n * size_of(TRS))
+  self.positions = ([^][3]f32)(rawptr(p))[:n]
+  p += uintptr(n * size_of([3]f32))
+  self.scales = ([^][3]f32)(rawptr(p))[:n]
   copy(self.local, skel.rest)
-  pose_model(skel, self.local, self.model)
-  for i in 0 ..< n do self.palette[i] = self.model[i].world_matrix * skel.inverse_bind[i]
+  pose_model(self, skel)
+  update_palette(self, skel)
   return true
 }
 
@@ -66,53 +76,63 @@ animator_destroy :: proc(self: ^Animator) {
 layer_destroy :: proc(self: ^Layer) {
   switch &d in self.data {
   case FKLayer:
-  case IKLayer:
-    delete(d.target.bone_indices)
-    delete(d.target.bone_lengths)
-    delete(d.target.constraints)
+  case IKTarget:
+    delete(d.bone_indices)
+    delete(d.bone_lengths)
+    delete(d.constraints)
   case ProceduralLayer:
-    delete(d.state.bone_indices)
-    switch &m in d.state.modifier {
+    delete(d.bone_indices)
+    switch &m in d.modifier {
     case TailModifier:
       delete(m.bones)
     case PathModifier:
       spline_destroy(&m.spline)
     case SpiderLegModifier:
+      for leg in m.legs do delete(leg.constraints)
       delete(m.legs)
-      delete(m.chain_starts)
-      delete(m.chain_lengths)
-      for c in m.constraints do delete(c)
-      delete(m.constraints)
-      for info in m.debug_info do delete(info.positions)
-      delete(m.debug_info)
     }
   }
   self^ = {}
 }
 
-// Skeleton-space transforms from local transforms, parents first.
-pose_model :: proc(skel: ^Skeleton, local: []TRS, model: []BoneTransform) {
-  for i in skel.order {
-    m := trs_matrix(local[i])
-    if p := skel.parents[i]; p >= 0 do m = model[p].world_matrix * m
-    model[i] = bone_transform(m)
+// Skeleton-space transform of bone `i` from its local transform and its
+// parent's skeleton-space transform (scale does not shear).
+@(private)
+compose_bone :: #force_inline proc(self: ^Animator, i: u32, parent: i32) {
+  l := self.local[i]
+  if parent < 0 {
+    self.positions[i], self.rotations[i], self.scales[i] = l.position, l.rotation, l.scale
+    return
   }
+  pr := self.rotations[parent]
+  ps := self.scales[parent]
+  self.positions[i] = self.positions[parent] + geometry.qmv(pr, ps * l.position)
+  self.rotations[i] = pr * l.rotation
+  self.scales[i] = ps * l.scale
 }
 
+// Skeleton-space pose from the local pose, parents first.
 @(private)
-bone_transform :: #force_inline proc(m: matrix[4, 4]f32) -> BoneTransform {
-  return {world_position = m[3].xyz, world_rotation = linalg.to_quaternion(m), world_matrix = m}
+pose_model :: proc(self: ^Animator, skel: ^Skeleton) {
+  for i in skel.order do compose_bone(self, i, skel.parents[i])
 }
 
 // Recompute descendants of `moved` bones that were not moved themselves.
 @(private)
-repropagate :: proc(skel: ^Skeleton, local: []TRS, model: []BoneTransform, moved: []bool) {
+repropagate :: proc(self: ^Animator, skel: ^Skeleton, moved: []bool) {
   dirty := make([]bool, len(moved), context.temp_allocator)
   for i in skel.order {
     p := skel.parents[i]
     if p < 0 || moved[i] || !(moved[p] || dirty[p]) do continue
-    model[i] = bone_transform(model[p].world_matrix * trs_matrix(local[i]))
+    compose_bone(self, i, p)
     dirty[i] = true
+  }
+}
+
+@(private)
+update_palette :: proc(self: ^Animator, skel: ^Skeleton) {
+  for i in 0 ..< len(self.palette) {
+    self.palette[i] = linalg.matrix4_from_trs(self.positions[i], self.rotations[i], self.scales[i]) * skel.inverse_bind[i]
   }
 }
 
@@ -164,54 +184,51 @@ animator_update :: proc(
       self.local[i] = skel.rest[i]
     }
   }
-  pose_model(skel, self.local, self.model)
+  pose_model(self, skel)
   // Procedural modifiers work on the skeleton-space pose
   moved := make([]bool, n, context.temp_allocator)
   any_moved := false
   for &layer in self.layers {
     if layer.weight <= 0 do continue
-    proc_layer := (&layer.data.(ProceduralLayer)) or_continue
-    state := &proc_layer.state
-    state.accumulated_time += delta_time
-    switch &m in state.modifier {
+    pl := (&layer.data.(ProceduralLayer)) or_continue
+    switch &m in pl.modifier {
     case TailModifier:
-      tail_modifier_update(state, &m, delta_time, self.model, layer.weight, skel.lengths, root_world)
+      tail_modifier_update(&m, pl.bone_indices, self.positions, self.rotations, skel.lengths, layer.weight, delta_time, root_world)
     case PathModifier:
-      path_modifier_update(state, &m, delta_time, self.model, layer.weight, skel.lengths)
+      path_modifier_update(&m, pl.bone_indices, self.positions, self.rotations, skel.lengths, layer.weight, delta_time)
     case SpiderLegModifier:
-      spider_leg_modifier_update(state, &m, delta_time, self.model, layer.weight, skel.lengths, root_world)
+      spider_leg_modifier_update(&m, pl.bone_indices, self.positions, self.rotations, skel.lengths, layer.weight, delta_time, root_world)
     }
-    for b in state.bone_indices do moved[b] = true
+    for b in pl.bone_indices do moved[b] = true
     any_moved = true
   }
-  if any_moved do repropagate(skel, self.local, self.model, moved)
+  if any_moved do repropagate(self, skel, moved)
   // IK; WORLD-space targets are brought into skeleton space
   slice.fill(moved, false)
   any_moved = false
   root_inv := linalg.matrix4_inverse(root_world)
   for &layer in self.layers {
     if layer.weight <= 0 do continue
-    ik := layer.data.(IKLayer) or_continue
-    target := ik.target
+    target := layer.data.(IKTarget) or_continue
     if !target.enabled do continue
     target.weight = layer.weight
     if target.space == .WORLD {
       target.target_position = (root_inv * [4]f32{target.target_position.x, target.target_position.y, target.target_position.z, 1}).xyz
       target.pole_vector = (root_inv * [4]f32{target.pole_vector.x, target.pole_vector.y, target.pole_vector.z, 1}).xyz
     }
-    fabrik_solve(self.model, target)
+    fabrik_solve(self.positions, self.rotations, target)
     for b in target.bone_indices do moved[b] = true
     any_moved = true
   }
-  if any_moved do repropagate(skel, self.local, self.model, moved)
-  for i in 0 ..< n do self.palette[i] = self.model[i].world_matrix * skel.inverse_bind[i]
+  if any_moved do repropagate(self, skel, moved)
+  update_palette(self, skel)
   return self.palette
 }
 
 // Skeleton-space matrix of a bone in the current pose.
 bone_matrix :: proc(self: ^Animator, bone: u32) -> matrix[4, 4]f32 {
-  if int(bone) >= len(self.model) do return linalg.MATRIX4F32_IDENTITY
-  return self.model[bone].world_matrix
+  if int(bone) >= len(self.positions) do return linalg.MATRIX4F32_IDENTITY
+  return linalg.matrix4_from_trs(self.positions[bone], self.rotations[bone], self.scales[bone])
 }
 
 // Parent→child bone link for skeleton visualization.
@@ -227,10 +244,10 @@ bone_segments :: proc(
   root_world: matrix[4, 4]f32,
   allocator := context.allocator,
 ) -> []BoneSegment {
-  out := make([dynamic]BoneSegment, 0, len(self.model), allocator)
-  for p, i in skel.parents do if p >= 0 && int(p) < len(self.model) && i < len(self.model) {
-    a := root_world * [4]f32{self.model[p].world_position.x, self.model[p].world_position.y, self.model[p].world_position.z, 1}
-    b := root_world * [4]f32{self.model[i].world_position.x, self.model[i].world_position.y, self.model[i].world_position.z, 1}
+  out := make([dynamic]BoneSegment, 0, len(self.positions), allocator)
+  for p, i in skel.parents do if p >= 0 && int(p) < len(self.positions) && i < len(self.positions) {
+    a := root_world * [4]f32{self.positions[p].x, self.positions[p].y, self.positions[p].z, 1}
+    b := root_world * [4]f32{self.positions[i].x, self.positions[i].y, self.positions[i].z, 1}
     append(&out, BoneSegment{from = a.xyz, to = b.xyz, depth = skel.depths[p]})
   }
   return out[:]
@@ -360,7 +377,7 @@ transition_to :: proc(
 // converted with `root_world` on every update.
 add_ik_layer :: proc(
   self: ^Animator,
-  skel: ^Skeleton,
+  rig: ^Rig,
   bones: []u32,
   target, pole: [3]f32,
   weight: f32 = 1,
@@ -373,25 +390,24 @@ add_ik_layer :: proc(
   index: int,
   ok: bool,
 ) #optional_ok {
+  skel := &rig.skeleton
   if len(bones) < 2 do return -1, false
   for b in bones do if int(b) >= bone_count(skel) do return -1, false
   lengths := make([]f32, len(bones) - 1)
   for i in 0 ..< len(bones) - 1 do lengths[i] = skel.lengths[bones[i + 1]]
   layer := Layer {
     weight = weight,
-    data = IKLayer {
-      target = {
-        bone_indices = bones,
-        bone_lengths = lengths,
-        constraints = constraints,
-        target_position = target,
-        pole_vector = pole,
-        max_iterations = max_iterations,
-        tolerance = tolerance,
-        weight = clamp(weight, 0, 1),
-        enabled = true,
-        space = space,
-      },
+    data = IKTarget {
+      bone_indices = bones,
+      bone_lengths = lengths,
+      constraints = constraints,
+      target_position = target,
+      pole_vector = pole,
+      max_iterations = max_iterations,
+      tolerance = tolerance,
+      weight = clamp(weight, 0, 1),
+      enabled = true,
+      space = space,
     },
   }
   return put_layer(self, layer, layer_index), true
@@ -400,7 +416,7 @@ add_ik_layer :: proc(
 // IK layer over the chain from `root_name` down to `tip_name`.
 add_ik_chain_layer :: proc(
   self: ^Animator,
-  skel: ^Skeleton,
+  rig: ^Rig,
   root_name, tip_name: string,
   target, pole: [3]f32,
   weight: f32 = 1,
@@ -413,8 +429,8 @@ add_ik_chain_layer :: proc(
   index: int,
   ok: bool,
 ) #optional_ok {
-  bones := bone_chain(skel, root_name, tip_name) or_return
-  index, ok = add_ik_layer(self, skel, bones, target, pole, weight, max_iterations, tolerance, layer_index, constraints, space)
+  bones := bone_chain(&rig.skeleton, root_name, tip_name) or_return
+  index, ok = add_ik_layer(self, rig, bones, target, pole, weight, max_iterations, tolerance, layer_index, constraints, space)
   if !ok do delete(bones)
   return
 }
@@ -422,16 +438,16 @@ add_ik_chain_layer :: proc(
 // Target and pole in the space the layer was created with.
 set_ik_target :: proc(self: ^Animator, index: int, target, pole: [3]f32) -> bool {
   if !valid_layer(self, index) do return false
-  ik := (&self.layers[index].data.(IKLayer)) or_return
-  ik.target.target_position = target
-  ik.target.pole_vector = pole
+  ik := (&self.layers[index].data.(IKTarget)) or_return
+  ik.target_position = target
+  ik.pole_vector = pole
   return true
 }
 
 set_ik_enabled :: proc(self: ^Animator, index: int, enabled: bool) -> bool {
   if !valid_layer(self, index) do return false
-  ik := (&self.layers[index].data.(IKLayer)) or_return
-  ik.target.enabled = enabled
+  ik := (&self.layers[index].data.(IKTarget)) or_return
+  ik.enabled = enabled
   return true
 }
 
@@ -441,12 +457,12 @@ set_ik_enabled :: proc(self: ^Animator, index: int, enabled: bool) -> bool {
 modifier :: proc(self: ^Animator, index: int, $T: typeid) -> (m: ^T, ok: bool) {
   if !valid_layer(self, index) do return nil, false
   p := (&self.layers[index].data.(ProceduralLayer)) or_return
-  return &p.state.modifier.(T)
+  return &p.modifier.(T)
 }
 
 add_tail_layer :: proc(
   self: ^Animator,
-  skel: ^Skeleton,
+  rig: ^Rig,
   root_bone: string,
   length: u32,
   propagation_speed: f32 = 0.5,
@@ -459,19 +475,17 @@ add_tail_layer :: proc(
   index: int,
   ok: bool,
 ) #optional_ok {
-  bones := bone_chain_down(skel, root_bone, length) or_return
+  bones := bone_chain_down(&rig.skeleton, root_bone, length) or_return
   if reverse_chain do slice.reverse(bones)
   layer := Layer {
     weight = weight,
     data = ProceduralLayer {
-      state = {
-        bone_indices = bones,
-        modifier = TailModifier {
-          propagation_speed = propagation_speed,
-          damping = damping,
-          stretch = stretch,
-          bones = make([]TailBone, len(bones)),
-        },
+      bone_indices = bones,
+      modifier = TailModifier {
+        propagation_speed = propagation_speed,
+        damping = damping,
+        stretch = stretch,
+        bones = make([]TailBone, len(bones)),
       },
     },
   }
@@ -502,7 +516,7 @@ build_path_spline :: proc(path: [][3]f32, closed: bool) -> Spline([3]f32) {
 
 add_path_layer :: proc(
   self: ^Animator,
-  skel: ^Skeleton,
+  rig: ^Rig,
   root_bone: string,
   bone_length: u32,
   path: [][3]f32,
@@ -518,20 +532,18 @@ add_path_layer :: proc(
   ok: bool,
 ) #optional_ok {
   if len(path) < 2 do return -1, false
-  bones := bone_chain_down(skel, root_bone, bone_length) or_return
+  bones := bone_chain_down(&rig.skeleton, root_bone, bone_length) or_return
   layer := Layer {
     weight = weight,
     data = ProceduralLayer {
-      state = {
-        bone_indices = bones,
-        modifier = PathModifier {
-          spline = build_path_spline(path, closed),
-          offset = offset,
-          length = length,
-          speed = speed,
-          loop = loop,
-          closed = closed,
-        },
+      bone_indices = bones,
+      modifier = PathModifier {
+        spline = build_path_spline(path, closed),
+        offset = offset,
+        length = length,
+        speed = speed,
+        loop = loop,
+        closed = closed,
       },
     },
   }
@@ -561,63 +573,37 @@ set_path_params :: proc(
   return true
 }
 
-// One leg of a spider rig.
-SpiderLegSpec :: struct {
-  root_name:    string,
-  chain_length: u32,
-  config:       SpiderLegConfig,
-  constraints:  []IKBoneConstraint, // nil = unconstrained; ownership transfers
-}
-
+// Spider-leg layer, one leg per config. Each leg's chain starts at
+// `config.root`; leg constraints transfer to the layer.
 add_spider_leg_layer :: proc(
   self: ^Animator,
-  skel: ^Skeleton,
-  legs_spec: []SpiderLegSpec,
+  rig: ^Rig,
+  legs: []SpiderLegConfig,
   weight: f32 = 1,
   layer_index: int = -1,
 ) -> (
   index: int,
   ok: bool,
 ) #optional_ok {
-  n := len(legs_spec)
-  if n == 0 do return -1, false
+  if len(legs) == 0 do return -1, false
   all_bones := make([dynamic]u32, 0, context.temp_allocator)
-  chain_starts := make([]u32, n)
-  chain_lengths := make([]u32, n)
-  legs := make([]SpiderLeg, n)
-  constraints: [][]IKBoneConstraint
-  for spec in legs_spec do if spec.constraints != nil {
-    constraints = make([][]IKBoneConstraint, n)
-    break
-  }
-  for spec, i in legs_spec {
-    chain, chain_ok := bone_chain_down(skel, spec.root_name, spec.chain_length, context.temp_allocator)
+  out := make([]SpiderLeg, len(legs))
+  for config, i in legs {
+    chain, chain_ok := bone_chain_down(&rig.skeleton, config.root, config.chain_length, context.temp_allocator)
     if !chain_ok {
-      delete(chain_starts)
-      delete(chain_lengths)
-      delete(legs)
-      delete(constraints)
+      delete(out)
       return -1, false
     }
-    chain_starts[i] = u32(len(all_bones))
-    chain_lengths[i] = u32(len(chain))
+    spider_leg_init(&out[i], config)
+    out[i].chain_start = u32(len(all_bones))
+    out[i].chain_length = u32(len(chain))
     append(&all_bones, ..chain)
-    c := spec.config
-    spider_leg_init(&legs[i], c.initial_offset, c.lift_height, c.lift_frequency, c.lift_duration, c.time_offset)
-    if constraints != nil do constraints[i] = spec.constraints
   }
   layer := Layer {
     weight = weight,
     data = ProceduralLayer {
-      state = {
-        bone_indices = slice.clone(all_bones[:]),
-        modifier = SpiderLegModifier {
-          legs = legs,
-          chain_starts = chain_starts,
-          chain_lengths = chain_lengths,
-          constraints = constraints,
-        },
-      },
+      bone_indices = slice.clone(all_bones[:]),
+      modifier = SpiderLegModifier{legs = out},
     },
   }
   return put_layer(self, layer, layer_index), true
@@ -626,7 +612,7 @@ add_spider_leg_layer :: proc(
 spider_leg_target :: proc(self: ^Animator, index, leg: int) -> (target: ^[3]f32, ok: bool) {
   m := modifier(self, index, SpiderLegModifier) or_return
   if leg < 0 || leg >= len(m.legs) do return nil, false
-  return &m.legs[leg].feet_target, true
+  return &m.legs[leg].target, true
 }
 
 set_spider_leg_params :: proc(
@@ -640,9 +626,9 @@ set_spider_leg_params :: proc(
   m := modifier(self, index, SpiderLegModifier) or_return
   if leg < 0 || leg >= len(m.legs) do return false
   l := &m.legs[leg]
-  if v, ok := lift_height.?; ok do l.feet_lift_height = v
-  if v, ok := lift_frequency.?; ok do l.feet_lift_frequency = v
-  if v, ok := lift_duration.?; ok do l.feet_lift_duration = v
-  if v, ok := time_offset.?; ok do l.feet_lift_time_offset = v
+  if v, ok := lift_height.?; ok do l.lift_height = v
+  if v, ok := lift_frequency.?; ok do l.lift_frequency = v
+  if v, ok := lift_duration.?; ok do l.lift_duration = v
+  if v, ok := time_offset.?; ok do l.time_offset = v
   return true
 }

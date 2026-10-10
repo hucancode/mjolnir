@@ -3,6 +3,7 @@ package main
 import "../../mjolnir"
 import "../../mjolnir/render"
 import "../../mjolnir/ui"
+import "../../mjolnir/world"
 import "core:log"
 import "core:math"
 
@@ -43,7 +44,14 @@ main :: proc() {
     width = 800,
     height = 700,
     setup = setup,
+    update = update,
   })
+}
+
+update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -98,9 +106,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         if q := ui.get_quad2d(&engine.ui, ui.Quad2DHandle(event.widget)); q != nil do q.color = {255, 100, 100, 255}
       },
     }
-    widget := cast(^ui.Widget)btn
-    ui.set_event_handler(widget, handlers)
-    ui.set_user_data(widget, engine)
+    btn.event_handlers = handlers
+    btn.user_data = engine
   }
   label, label_ok := ui.create_text2d(&engine.ui, position = {100, 180}, text = "The star is created using Mesh2D API!", font_size = 20, color = {255, 255, 255, 255}, z_order = 1)
   log.infof("Text label created: handle=%v, ok=%v", label, label_ok)

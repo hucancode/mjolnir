@@ -32,13 +32,13 @@ foot_y: [6]mu.Real = {0, 0, 0, 0, 0, 0}
 LEG_NAMES := [6]string{"FR", "MR", "BR", "FL", "ML", "BL"}
 
 main :: proc() {
+  defer mjolnir.gltf_scene_destroy(&scene)
   mjolnir.run_app({
     title      = "IK",
     debug_ui   = true,
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
-    sync       = sync,
   })
 }
 
@@ -52,7 +52,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   mesh_node = scene.skinned[0].node
   rig = &scene.rigs[scene.skinned[0].rig]
   skel := &rig.skeleton
-  animation.animator_init(&animator, skel)
+  animation.animator_init(&animator, rig)
 
   leg_configs := []struct{root_name, tip_name: string}{
     {"leg_front_r_0", "leg_front_r_5"},
@@ -83,7 +83,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
     constraints := animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90})
 
-    idx, ok := animation.add_ik_chain_layer(&animator, skel, leg_configs[i].root_name, leg_configs[i].tip_name,
+    idx, ok := animation.add_ik_chain_layer(&animator, rig, leg_configs[i].root_name, leg_configs[i].tip_name,
       leg_targets[i], pole_pos, weight = 1.0, constraints = constraints, space = .WORLD,
     )
     if !ok {
@@ -97,10 +97,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground_plane = mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY)
   world.scale(&engine.world, ground_plane, [3]f32{40, 0.2, 40})
   mjolnir.spawn(engine, attachment = render.directional_light_attachment({1, 1, 1, 1}, 10.0))
-}
-
-sync :: proc(engine: ^mjolnir.Engine) {
-  if rig != nil do render.stage_bones(&engine.render, mesh_node.index, animator.palette)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -131,6 +127,10 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     }
   }
   if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&engine.world, mesh_node))
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  if rig != nil do render.stage_bones(&engine.render, mesh_node.index, animator.palette)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

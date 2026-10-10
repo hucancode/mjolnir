@@ -276,86 +276,6 @@ mark_slot_dirty :: proc(self: ^Manager, slot: u32) {
   }
 }
 
-// Light field setters. Mutate + stage. No-op when value unchanged so
-// per-frame UI bindings don't churn the dirty queue.
-set_light_color :: proc(self: ^Manager, slot: u32, color: [4]f32) {
-  inst := instance(self, slot)
-  if inst == nil do return
-  target: ^[4]f32
-  #partial switch &a in inst.attachment {
-  case PointLightAttachment:       target = &a.color
-  case DirectionalLightAttachment: target = &a.color
-  case SpotLightAttachment:        target = &a.color
-  case:                            return
-  }
-  if target^ == color do return
-  target^ = color
-  stage(self, &self.internal.staging.lights, slot)
-}
-
-set_light_intensity :: proc(self: ^Manager, slot: u32, intensity: f32) {
-  inst := instance(self, slot)
-  if inst == nil do return
-  target: ^f32
-  #partial switch &a in inst.attachment {
-  case PointLightAttachment:       target = &a.color[3]
-  case DirectionalLightAttachment: target = &a.color[3]
-  case SpotLightAttachment:        target = &a.color[3]
-  case:                            return
-  }
-  if target^ == intensity do return
-  target^ = intensity
-  stage(self, &self.internal.staging.lights, slot)
-}
-
-set_light_radius :: proc(self: ^Manager, slot: u32, radius: f32) {
-  inst := instance(self, slot)
-  if inst == nil do return
-  target: ^f32
-  #partial switch &a in inst.attachment {
-  case PointLightAttachment: target = &a.radius
-  case SpotLightAttachment:  target = &a.radius
-  case:                      return
-  }
-  if target^ == radius do return
-  target^ = radius
-  stage(self, &self.internal.staging.lights, slot)
-}
-
-// Toggle a light without losing its configured color/radius/cone.
-set_light_enabled :: proc(self: ^Manager, slot: u32, enabled: bool) {
-  inst := instance(self, slot)
-  if inst == nil do return
-  target: ^bool
-  #partial switch &a in inst.attachment {
-  case PointLightAttachment:       target = &a.disabled
-  case DirectionalLightAttachment: target = &a.disabled
-  case SpotLightAttachment:        target = &a.disabled
-  case:                            return
-  }
-  want := !enabled
-  if target^ == want do return
-  target^ = want
-  stage(self, &self.internal.staging.lights, slot)
-}
-
-// Set spot-light cone angles. Pass `inner = nil` to default it to
-// `outer * SPOT_LIGHT_INNER_RATIO`.
-set_spot_light_cone :: proc(
-  self: ^Manager,
-  slot: u32,
-  outer: f32,
-  inner: Maybe(f32) = nil,
-) -> bool {
-  att := attachment(self, slot, SpotLightAttachment) or_return
-  inner_angle := inner.? or_else outer * SPOT_LIGHT_INNER_RATIO
-  if att.angle_outer == outer && att.angle_inner == inner_angle do return true
-  att.angle_outer = outer
-  att.angle_inner = inner_angle
-  stage(self, &self.internal.staging.lights, slot)
-  return true
-}
-
 point_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
@@ -385,23 +305,6 @@ spot_light_attachment :: proc(
     angle_outer = angle,
     cast_shadow = cast_shadow,
   }
-}
-
-// Mesh attachment setters. Mutate + stage. Leave sibling fields untouched.
-set_mesh_handle :: proc(self: ^Manager, slot: u32, mesh: MeshHandle) {
-  a := attachment(self, slot, MeshAttachment)
-  if a == nil do return
-  if a.handle == mesh do return
-  a.handle = mesh
-  stage(self, &self.internal.staging.nodes, slot)
-}
-
-set_material_handle :: proc(self: ^Manager, slot: u32, material: MaterialHandle) {
-  a := attachment(self, slot, MeshAttachment)
-  if a == nil do return
-  if a.material == material do return
-  a.material = material
-  stage(self, &self.internal.staging.nodes, slot)
 }
 
 // ---------- flush: drain staging into GPU buffers (render thread) ----------
@@ -499,7 +402,7 @@ flush_meshes :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
       continue
     }
     if entry.op != .Update do continue
-    m := mesh_at(self, index) or_continue
+    m := live_at(&self.meshes, index) or_continue
     if g, has_geom := m.cpu_geometry.?; has_geom {
       sync_mesh_geometry_for_handle(gctx, self, index, g)
     }
@@ -508,30 +411,30 @@ flush_meshes :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
     entry := self.internal.staging.meshes[index]
     if entry.op == .Remove {
       mesh_destroy(self, index)
-    } else if m, ok := mesh_at(self, index); ok && m.auto_purge_cpu_geometry {
+    } else if m, ok := live_at(&self.meshes, index); ok && m.auto_purge_cpu_geometry {
       mesh_release_memory(m)
     }
     delete_key(&self.internal.staging.meshes, index)
   }
 }
 
+// Live pool item at a staged slot index; staging is keyed by index alone.
 @(private = "file")
-mesh_at :: proc(self: ^Manager, index: u32) -> (^Mesh, bool) {
-  if int(index) >= len(self.meshes.entries) do return nil, false
-  e := &self.meshes.entries[index]
-  if !e.active do return nil, false
-  return &e.item, true
+live_at :: proc(pool: ^cont.Pool($T), index: u32) -> (^T, bool) {
+  if int(index) >= len(pool.entries) do return nil, false
+  e := &pool.entries[index]
+  return &e.item, e.active
 }
 
 @(private = "file")
 flush_materials :: proc(self: ^Manager) {
   stale := make([dynamic]u32, context.temp_allocator)
   for index, entry in self.internal.staging.materials {
-    if entry.op == .Remove || int(index) >= len(self.materials.entries) || !self.materials.entries[index].active {
+    m, live := live_at(&self.materials, index)
+    if entry.op == .Remove || !live {
       append(&stale, index)
       continue
     }
-    m := &self.materials.entries[index].item
     upload_material_data(
       self,
       index,
@@ -582,12 +485,11 @@ flush_bones :: proc(self: ^Manager, frame_index: u32) {
 flush_sprites :: proc(self: ^Manager) {
   stale := make([dynamic]u32, context.temp_allocator)
   for index, entry in self.internal.staging.sprites {
-    if entry.op == .Remove || int(index) >= len(self.sprites.entries) || !self.sprites.entries[index].active {
+    s, live := live_at(&self.sprites, index)
+    if entry.op == .Remove || !live {
       append(&stale, index)
       continue
     }
-    s := &self.sprites.entries[index].item
-    anim, has_anim := s.animation.?
     upload_sprite_data(
       self,
       index,
@@ -595,7 +497,7 @@ flush_sprites :: proc(self: ^Manager) {
         texture_index = s.texture.index,
         frame_columns = s.frame_columns,
         frame_rows = s.frame_rows,
-        frame_index = anim.current_frame if has_anim else 0,
+        frame_index = s.frame_index,
       },
     )
     age_and_mark(&self.internal.staging.sprites, index, entry.age, &stale)
@@ -607,11 +509,11 @@ flush_sprites :: proc(self: ^Manager) {
 flush_emitters :: proc(self: ^Manager) {
   stale := make([dynamic]u32, context.temp_allocator)
   for index, entry in self.internal.staging.emitters {
-    if entry.op == .Remove || int(index) >= len(self.emitters.entries) || !self.emitters.entries[index].active {
+    em, live := live_at(&self.emitters, index)
+    if entry.op == .Remove || !live {
       append(&stale, index)
       continue
     }
-    em := &self.emitters.entries[index].item
     upload_emitter_data(
       self,
       index,
@@ -643,11 +545,11 @@ flush_emitters :: proc(self: ^Manager) {
 flush_forcefields :: proc(self: ^Manager) {
   stale := make([dynamic]u32, context.temp_allocator)
   for index, entry in self.internal.staging.forcefields {
-    if entry.op == .Remove || int(index) >= len(self.forcefields.entries) || !self.forcefields.entries[index].active {
+    ff, live := live_at(&self.forcefields, index)
+    if entry.op == .Remove || !live {
       append(&stale, index)
       continue
     }
-    ff := &self.forcefields.entries[index].item
     upload_forcefield_data(
       self,
       index,
@@ -733,13 +635,12 @@ flush_lights :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
 
 @(private = "file")
 flush_cameras :: proc(self: ^Manager, frame_index: u32) {
-  for &entry, index in self.cameras.entries {
-    if !entry.active do continue
-    cam := &entry.item
+  it := cont.iterator(&self.cameras)
+  for cam, handle in cont.next(&it, CameraHandle) {
     near, far := camera_get_near_far(cam)
     upload_camera_data(
       self,
-      u32(index),
+      handle.index,
       camera_view_matrix(cam),
       camera_projection_matrix(cam),
       cam.position,
@@ -773,7 +674,10 @@ flush :: proc(
     flush_lights(self, gctx) or_return
   }
   flush_cameras(self, frame_index)
-  set_node_count(self, u32(len(self.instances)))
+  self.node_count = min(
+    u32(len(self.instances)),
+    self.internal.visibility.max_draws,
+  )
   flush_ui_atlas(self, gctx) or_return
   return .SUCCESS
 }

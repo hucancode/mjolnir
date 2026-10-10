@@ -77,17 +77,25 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 apply_light_settings :: proc(engine: ^mjolnir.Engine) {
-  render.set_light_enabled(&engine.render, dir_light.index, dir_enabled)
-  render.set_light_color(&engine.render, dir_light.index, color_preset(dir_color, f32(dir_intensity)))
-
-  render.set_light_enabled(&engine.render, point_light.index, point_enabled)
-  render.set_light_color(&engine.render, point_light.index, color_preset(point_color, f32(point_intensity)))
-  render.set_light_radius(&engine.render, point_light.index, f32(point_radius))
-
-  render.set_light_enabled(&engine.render, spot_light.index, spot_enabled)
-  render.set_light_color(&engine.render, spot_light.index, color_preset(spot_color, f32(spot_intensity)))
-  render.set_light_radius(&engine.render, spot_light.index, f32(spot_radius))
-  render.set_spot_light_cone(&engine.render, spot_light.index, math.PI * f32(spot_outer_deg) / 180.0)
+  if l, ok := render.attachment(&engine.render, dir_light.index, render.DirectionalLightAttachment); ok {
+    l.disabled = !dir_enabled
+    l.color = color_preset(dir_color, f32(dir_intensity))
+    render.mark_slot_dirty(&engine.render, dir_light.index)
+  }
+  if l, ok := render.attachment(&engine.render, point_light.index, render.PointLightAttachment); ok {
+    l.disabled = !point_enabled
+    l.color = color_preset(point_color, f32(point_intensity))
+    l.radius = f32(point_radius)
+    render.mark_slot_dirty(&engine.render, point_light.index)
+  }
+  if l, ok := render.attachment(&engine.render, spot_light.index, render.SpotLightAttachment); ok {
+    l.disabled = !spot_enabled
+    l.color = color_preset(spot_color, f32(spot_intensity))
+    l.radius = f32(spot_radius)
+    l.angle_outer = math.PI * f32(spot_outer_deg) / 180.0
+    l.angle_inner = l.angle_outer * render.SPOT_LIGHT_INNER_RATIO
+    render.mark_slot_dirty(&engine.render, spot_light.index)
+  }
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -100,6 +108,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   dir := linalg.normalize([3]f32{0, 0.5, 0} - pos)
   world.rotate(&engine.world, spot_light, linalg.quaternion_between_two_vector3(linalg.VECTOR3F32_Z_AXIS, dir))
   apply_light_settings(engine)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

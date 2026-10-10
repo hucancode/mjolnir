@@ -64,6 +64,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     world.rotate(&engine.world, h, phase * f32(spin_speed) * f32(i + 1) * 0.5)
   }
   world.rotate(&engine.world, moon_handle, phase * 4.0)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

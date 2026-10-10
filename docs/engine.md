@@ -2,17 +2,24 @@
 title: Engine
 ---
 
-Layer 3. The `mjolnir` package owns the default `platform`, `world`,
-`render` and `ui`, runs the main loop, and hosts the few helpers that
-span two or more layer-2 modules. Everything here is built on public
-layer-2 APIs, so any of it can be rewritten in user code.
+Layer 3, optional. The `mjolnir` package is a reference run loop plus
+glTF assembly and a few spawn helpers. It owns the default
+`platform`, `world`, `render` and `ui`. It provides no glue between
+modules: the per-tick hops (world → render, physics → world,
+animation → render) are user code in the `update` callback — see
+[glue](glue.html). Everything here is built on public layer-2 APIs,
+so any of it can be rewritten in user code.
 
 ```odin
 Engine :: struct {
-  platform: platform.Platform,
-  world:    world.World,
-  render:   render.Manager, // owns the Vulkan context, swapchain and frame
-  ui:       ui.System,
+  platform:          platform.Platform,
+  world:             world.World,
+  render:            render.Manager, // owns the Vulkan context, swapchain and frame
+  ui:                ui.System,
+  input:             input.State,    // this tick's snapshot
+  mouse_captured:    bool,           // a UI owns the mouse this tick
+  keyboard_captured: bool,           // a UI owns the keyboard this tick
+  camera_controller: render.CameraController,
   // user callbacks, timing, debug UI flags, user_data
 }
 ```
@@ -21,61 +28,88 @@ Engine :: struct {
 
 `mjolnir.run_app(RunConfig)` allocates the engine, installs a logger,
 runs the loop and tears down on exit. The config takes user callbacks
-(`setup`, `update`, `sync`, `pre_render`, `post_render`, input
-handlers) plus a `user_data: rawptr` for app state.
+(`setup`, `update`, `pre_render`, `post_render`) plus a
+`user_data: rawptr` for app state.
 
 For a hand-rolled lifecycle, call `init` → loop → `shutdown` yourself.
 
 ## Frame timeline
 
 ```
-update:  input → camera controller → update → world.update → world→render → sync → render.update
+update:  input snapshot → debug UI / ui input → camera controller → update callback → render.update
 render:  poll events → throttle to RENDER_FPS → ui stage → pre_render
          → render.frame → post_render
 ```
 
-Right after `world.update` the engine pushes world transform changes
-into render. `sync` runs next, for the remaining glue such as skin
-palettes — see [glue](glue.html).
+The `update` callback is where the application steps its own systems
+and runs the glue, typically ending with `world.update` and the world
+→ render feed.
+
+## Levels
+
+`mjolnir.setup` and `mjolnir.teardown` set up and tear down one level.
+`teardown` clears the scene graph, every render slot and the cameras;
+`setup` recreates render's level state, loads the environment map and
+calls the `setup` callback. Call them from the `update` callback, not
+`pre_render` / `post_render` (the render thread is building UI
+there). To reload a level from a button or key, set a flag and act on
+it at the top of the next update:
+
+```odin
+update :: proc(e: ^mjolnir.Engine, dt: f32) {
+  if reset_requested {
+    reset_requested = false
+    mjolnir.teardown(e)
+    mjolnir.setup(e)
+    return
+  }
+  // ...
+}
+```
+ State the application
+owns (physics, navigation, animators) is torn down by the
+application.
 
 ## Input
 
-`platform.Input` holds the per-tick snapshot; query it directly with
-`platform.input_key_down(&engine.platform.input, .W)` and friends.
-Once per tick the engine dispatches edges to the `key_press`,
-`mouse_press`, `mouse_move` and `mouse_scroll` callbacks, withholding
-what the debug UI captures: a mouse button pressed over the debug UI
-belongs to it until released (`render.debug_ui_claim_button`), and keys are withheld
-while it has keyboard focus. Platform events also feed the debug
-UI's microui context as they arrive.
+At the start of every update tick the engine snapshots the platform's
+accumulator into `engine.input` and feeds it to the debug UI
+(`render.debug_ui_input`) and the retained UI (`ui.process_input`,
+skipped while the debug UI owns the mouse). It then sets
+`engine.mouse_captured` and `engine.keyboard_captured` when either UI
+owns that device. Read input in `update`:
+
+```odin
+update :: proc(e: ^mjolnir.Engine, dt: f32) {
+  if !e.keyboard_captured && input.key_pressed(&e.input, .SPACE) do jump()
+}
+```
 
 ## Camera controller
 
 `engine.camera_controller` drives the main camera every tick from
-platform input; it starts as `render.orbit_controller()`. Assign
-`render.free_controller()`, `render.follow_controller(...)` or your own
-to switch, or `{}` to disable it. Tune the active one through its
-data, e.g. `&engine.camera_controller.data.(render.FreeCameraData)`.
+`engine.input`, ignoring captured devices; it starts as
+`render.orbit_controller()`. Assign `render.free_controller()`,
+`render.follow_controller(...)` or your own to switch, or `{}` to
+disable it. Tune the active one through its data, e.g.
+`&engine.camera_controller.data.(render.FreeCameraData)`, and its
+keys through `engine.camera_controller.bindings`.
 
-## Inter-module helpers
+## Helpers
 
-| Proc | Crosses |
+| Proc | Does |
 |---|---|
-| `spawn`, `spawn_mesh`, `spawn_primitive_mesh`, `spawn_ground`, `spawn_sprite` | world node + render attachment |
-| world → render transform sync (built into `update`) | world change feed → render slots |
-| `Engine.camera_controller` | platform input → render main camera |
-| `spawn_static` / `spawn_dynamic` / `spawn_trigger`, `collider_visual_scale` | world + render + physics (body `user` = node) |
+| `spawn`, `spawn_mesh`, `spawn_primitive_mesh`, `spawn_ground` | world node + render attachment at its slot |
 | `load_gltf` | world nodes + render meshes / materials / textures + animation rigs |
-| `viewport_to_world_ray` / `cursor_world_ray` | platform DPI + cursor, render main camera |
-| `debug_skeleton` | animation pose → render debug lines |
+| `cursor_world_ray` | ray from the main camera through `engine.input.cursor` |
 
 `load_gltf` returns a `GltfScene{roots, rigs, skinned}`. It parses the
 file, lets `render/gltf` (`load_meshes`) create one render mesh per
 glTF mesh and `animation/gltf` (`load_rig`) one `animation.Rig` per
 skin with every animation as a clip, then builds the world nodes;
 `skinned` pairs each skinned node with its rig. Use the two loaders
-directly to import into a single module. The caller creates the animators and frees the scene with
-`gltf_scene_destroy`.
+directly to import into a single module. The caller creates the
+animators and frees the scene with `gltf_scene_destroy`.
 
 Single-module work goes straight to that module: `world.translate`,
 `render.create_material`, `physics.raycast`, `nav.find_path`, …

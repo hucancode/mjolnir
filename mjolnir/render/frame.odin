@@ -11,8 +11,7 @@ import "direct_light"
 import "forward"
 import "geometry"
 import "occlusion_culling"
-import particles_compute "particles_compute"
-import particles_render "particles_render"
+import "particles"
 import "post_process"
 import "shadow"
 import ui_render "ui"
@@ -23,37 +22,36 @@ record_compute_commands :: proc(
   self: ^Manager,
   frame_index: u32,
   gctx: ^gpu.GPUContext,
-  cull_camera_indices: []u32,
+  cull_cameras: []CameraHandle,
 ) -> vk.Result {
   cmd :=
     gctx.has_async_compute ? self.internal.compute_command_buffers[frame_index] : self.internal.command_buffers[frame_index]
-  // Compute for frame N prepares data for frame N+1
-  // Buffer indices with FRAMES_IN_FLIGHT=2: frame N uses buffer [N], produces data for buffer [N+1]
-  next_frame_index := frame_next(frame_index)
-  for cam_index in cull_camera_indices {
-    cam := &self.cameras.entries[cam_index].item
+  // Compute for frame N builds pyramid[N] and writes the draw lists of
+  // frame N+1, culled against pyramid[N].
+  next_frame_index := (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
+  for handle in cull_cameras {
+    cam := cont.get(self.cameras, handle) or_continue
     depth_pyramid_system.build_pyramid(
       &self.internal.depth_pyramid,
       cmd,
       self.node_count,
       &cam.depth_pyramid[frame_index],
       cam.depth_reduce_descriptor_sets[frame_index][:],
-    ) // Build pyramid[N]
-    prev_frame := frame_prev(next_frame_index)
+    )
     occlusion_culling.perform_culling(
       &self.internal.visibility,
       cmd,
-      cam_index,
+      handle.index,
       next_frame_index,
       self.node_count,
       &cam.draws,
       cam.descriptor_set[next_frame_index],
-      cam.depth_pyramid[prev_frame].width,
-      cam.depth_pyramid[prev_frame].height,
-    ) // Write draw_list[N+1]
+      cam.depth_pyramid[frame_index].width,
+      cam.depth_pyramid[frame_index].height,
+    )
   }
-  particles_compute.simulate(
-    &self.internal.particles_compute,
+  particles.simulate(
+    &self.internal.particles,
     cmd,
     self.internal.node_data_buffer.descriptor_set,
   )
@@ -72,16 +70,18 @@ render_shadow_depth :: proc(
   for light_node_index in light_node_indices {
     light := self.internal.lights[light_node_index]
     info := cache[light_node_index]
+    sm, has_shadow := &self.internal.shadow_maps[light_node_index]
+    if !has_shadow do continue
+    draw_commands := sm.draws.commands[frame_index]
+    draw_count := sm.draws.count[frame_index]
     switch variant in light {
     case SpotLight, DirectionalLight:
-      sm, has_shadow := &self.internal.shadow_maps[light_node_index]
-      if !has_shadow do continue
       shadow.cull(
         &self.internal.shadow,
         cmd,
         self.node_count,
         geom.make_frustum(info.view_projection).planes,
-        sm.draw_count[frame_index].buffer,
+        draw_count.buffer,
         sm.descriptor_sets[frame_index],
       )
       shadow.record_frustum(
@@ -90,19 +90,17 @@ render_shadow_depth :: proc(
         &self.texture_manager,
         scene,
         info.view_projection,
-        sm.shadow_map_2d[frame_index],
-        sm.draw_commands[frame_index],
-        sm.draw_count[frame_index],
+        transmute(bindless.Texture2DHandle)sm.textures[frame_index],
+        draw_commands,
+        draw_count,
       )
     case PointLight:
-      sm, has_shadow := &self.internal.shadow_map_cubes[light_node_index]
-      if !has_shadow do continue
       shadow.cull(
         &self.internal.shadow,
         cmd,
         self.node_count,
         shadow.Sphere{variant.position, variant.radius},
-        sm.draw_count[frame_index].buffer,
+        draw_count.buffer,
         sm.descriptor_sets[frame_index],
       )
       shadow.record_sphere(
@@ -114,9 +112,9 @@ render_shadow_depth :: proc(
         info.near,
         info.far,
         variant.position,
-        sm.shadow_map_cube[frame_index],
-        sm.draw_commands[frame_index],
-        sm.draw_count[frame_index],
+        transmute(bindless.TextureCubeHandle)sm.textures[frame_index],
+        draw_commands,
+        draw_count,
       )
     }
   }
@@ -185,14 +183,14 @@ record_lighting_pass :: proc(
   for light_node_index in light_node_indices {
     light := self.internal.lights[light_node_index]
     info := cache[light_node_index]
+    shadow_map_idx: u32 = INVALID_SHADOW_INDEX
+    shadow_view_projection: matrix[4, 4]f32
+    if sm, ok := self.internal.shadow_maps[light_node_index]; ok {
+      shadow_map_idx = sm.textures[frame_index].index
+      shadow_view_projection = info.projection if sm.cube else info.view_projection
+    }
     switch variant in light {
     case PointLight:
-      shadow_map_idx: u32 = 0xFFFFFFFF
-      shadow_view_projection := matrix[4, 4]f32{}
-      if sm, ok := self.internal.shadow_map_cubes[light_node_index]; ok {
-        shadow_map_idx = sm.shadow_map_cube[frame_index].index
-        shadow_view_projection = info.projection
-      }
       direct_light.record_point_light(
         &self.internal.direct_light,
         cam_index,
@@ -205,12 +203,6 @@ record_lighting_pass :: proc(
         cmd,
       )
     case SpotLight:
-      shadow_map_idx: u32 = 0xFFFFFFFF
-      shadow_view_projection := matrix[4, 4]f32{}
-      if sm, ok := self.internal.shadow_maps[light_node_index]; ok {
-        shadow_map_idx = sm.shadow_map_2d[frame_index].index
-        shadow_view_projection = info.view_projection
-      }
       direct_light.record_spot_light(
         &self.internal.direct_light,
         cam_index,
@@ -226,12 +218,6 @@ record_lighting_pass :: proc(
         cmd,
       )
     case DirectionalLight:
-      shadow_map_idx: u32 = 0xFFFFFFFF
-      shadow_view_projection := matrix[4, 4]f32{}
-      if sm, ok := self.internal.shadow_maps[light_node_index]; ok {
-        shadow_map_idx = sm.shadow_map_2d[frame_index].index
-        shadow_view_projection = info.view_projection
-      }
       direct_light.record_directional_light(
         &self.internal.direct_light,
         cam_index,
@@ -257,8 +243,8 @@ record_particles_pass :: proc(
   enabled_passes: PassTypeSet,
 ) -> vk.Result {
   if .PARTICLES not_in enabled_passes do return .SUCCESS
-  particles_render.record(
-    &self.internal.particles_render,
+  particles.record(
+    &self.internal.particles,
     self.internal.command_buffers[frame_index],
     cam_index,
     cam.attachments[.FINAL_IMAGE][frame_index],
@@ -266,8 +252,8 @@ record_particles_pass :: proc(
     &self.texture_manager,
     self.internal.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
-    self.internal.particles_compute.compact_particle_buffer.buffer,
-    self.internal.particles_compute.draw_command_buffer.buffer,
+    self.internal.particles.compact_particle_buffer.buffer,
+    self.internal.particles.draw_command_buffer.buffer,
   )
   return .SUCCESS
 }
@@ -275,7 +261,7 @@ record_particles_pass :: proc(
 // Forward pipelines in draw order, each gated by its pass.
 @(private = "file")
 FORWARD_PASSES := [?]struct {
-  pipe: DrawPipeline,
+  pipe: bindless.DrawPipeline,
   pass: PassType,
 } {
   {.TRANSPARENT, .TRANSPARENCY},
@@ -508,17 +494,11 @@ record_frame :: proc(
   shadow_cache := build_shadow_cache(self)
   render_shadow_depth(self, frame_index, shadow_cache) or_return
 
-  cull_indices := make(
-    [dynamic]u32,
-    0,
-    len(self.cameras.entries),
-    context.temp_allocator,
-  )
-  defer delete(cull_indices)
-  for &entry, i in self.cameras.entries {
-    if !entry.active do continue
-    index, cam := u32(i), &entry.item
-    if cam.enable_culling do append(&cull_indices, index)
+  cull_cameras := make([dynamic]CameraHandle, context.temp_allocator)
+  it := cont.iterator(&self.cameras)
+  for cam, handle in cont.next(&it, CameraHandle) {
+    index := handle.index
+    if cam.enable_culling do append(&cull_cameras, handle)
     record_geometry_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
     record_lighting_pass(self, frame_index, index, cam, cam.enabled_passes, shadow_cache) or_return
     record_particles_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
@@ -564,7 +544,7 @@ record_frame :: proc(
     compute_cmd = self.internal.compute_command_buffers[frame_index]
     gpu.begin_record(compute_cmd) or_return
   }
-  record_compute_commands(self, frame_index, gctx, cull_indices[:]) or_return
+  record_compute_commands(self, frame_index, gctx, cull_cameras[:]) or_return
   if gctx.has_async_compute {
     gpu.end_record(compute_cmd) or_return
   }
@@ -592,27 +572,17 @@ record_frame :: proc(
   return .SUCCESS
 }
 
-// Command buffers recorded by record_frame, for submission.
-@(private)
-command_buffers :: proc(
-  self: ^Manager,
-  frame_index: u32,
-) -> (
-  graphics, compute: vk.CommandBuffer,
-) {
-  return self.internal.command_buffers[frame_index],
-    self.internal.compute_command_buffers[frame_index]
-}
-
 // Render and present one frame: upload staged changes, acquire a swapchain
 // image, record, submit and present, then advance deferred destruction. An
-// out-of-date swapchain is rebuilt at `framebuffer_size`.
+// out-of-date swapchain is rebuilt at `framebuffer_size`. Renders nothing
+// while no level is set up.
 frame :: proc(
   self: ^Manager,
   framebuffer_size: [2]u32,
   dpi_scale: f32,
   debug_ui_enabled: bool,
 ) -> vk.Result {
+  if !self.internal.level_ready do return .SUCCESS
   gctx := &self.gctx
   res := flush(self, gctx, self.frame_index)
   if res == .SUCCESS do res = present(self, debug_ui_enabled)
@@ -639,13 +609,9 @@ present :: proc(self: ^Manager, debug_ui_enabled: bool) -> vk.Result {
     sc.extent,
     debug_ui_enabled,
   ) or_return
-  graphics_cmd, compute_cmd := command_buffers(self, self.frame_index)
+  graphics_cmd := self.internal.command_buffers[self.frame_index]
+  compute_cmd := self.internal.compute_command_buffers[self.frame_index]
   gpu.submit_queue_and_present(gctx, sc, &graphics_cmd, &compute_cmd, self.frame_index) or_return
   self.frame_index = (self.frame_index + 1) % gpu.FRAMES_IN_FLIGHT
   return .SUCCESS
-}
-
-// Current swapchain size in pixels.
-swapchain_extent :: proc(self: ^Manager) -> vk.Extent2D {
-  return self.swapchain.extent
 }

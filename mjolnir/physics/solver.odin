@@ -1,5 +1,6 @@
 package physics
 
+import "../geometry"
 import "base:intrinsics"
 import "core:math"
 import "core:math/bits"
@@ -167,7 +168,7 @@ prepare_contact :: proc(
   }
   centroid /= f32(contact.count)
   contact.r_a_c = centroid - body_a.position
-  contact.tangent1, contact.tangent2 = compute_tangent_basis(contact.normal)
+  contact.tangent1, contact.tangent2 = geometry.tangent_basis(contact.normal)
   rt_a1 := linalg.cross(contact.r_a_c, contact.tangent1)
   rt_a2 := linalg.cross(contact.r_a_c, contact.tangent2)
   ia1 := body_a.inv_inertia_world * rt_a1
@@ -513,10 +514,4 @@ run_substep_loop :: proc(world: ^World, h: f32, num_substeps: int, ccd_handled: 
     thread.pool_add_task(&world.thread_pool, mem.nil_allocator(), solver_worker_task, &task_data[t], t)
   }
   pool_wait(&world.thread_pool)
-}
-
-compute_tangent_basis :: proc(normal: [3]f32) -> ([3]f32, [3]f32) {
-  tangent1 := linalg.orthogonal(normal)
-  tangent2 := linalg.cross(normal, tangent1)
-  return tangent1, tangent2
 }

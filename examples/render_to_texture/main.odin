@@ -41,6 +41,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   world.rotate(&engine.world, spinner_handle, mjolnir.time_since_start(engine), linalg.VECTOR3F32_Y_AXIS)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 on_post_render :: proc(engine: ^mjolnir.Engine) {

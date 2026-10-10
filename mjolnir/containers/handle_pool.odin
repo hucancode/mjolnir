@@ -17,7 +17,7 @@ Entry :: struct($T: typeid) {
 }
 
 // Retiring records a slot that has been logically freed but whose index must
-// not be recycled yet — `ready` is the pool frame at which it becomes safe.
+// not be recycled yet — `ready` is the pool tick at which it becomes safe.
 Retiring :: struct {
   index: u32,
   ready: u64,
@@ -26,10 +26,10 @@ Retiring :: struct {
 // Pool is a handle-based resource pool with generational indices.
 // Freed slots are reused, but their generation increments to invalidate old handles.
 //
-// When `grace > 0` the pool is frame-aware: free_deferred() invalidates the
+// When `grace > 0` the pool is tick-aware: free_deferred() invalidates the
 // handle immediately but holds the slot for `grace` ticks before it can be
-// recycled, so the GPU (which lags by FRAMES_IN_FLIGHT) never reads or has its
-// resource torn down while a despawned slot is reused by a new entry.
+// recycled, so a consumer that lags behind by up to `grace` ticks never sees a
+// freed slot reused by a new entry.
 Pool :: struct($T: typeid) {
   entries:      [dynamic]Entry(T),
   free_indices: [dynamic]u32,
@@ -122,7 +122,7 @@ free :: proc(pool: ^Pool($T), handle: $HT) -> (item: ^T, freed: bool) {
 // free_deferred invalidates the handle immediately (gen++, inactive — so get()
 // returns nil at once) but holds the slot index for `grace` ticks before it can
 // be recycled. The item is left intact so tick can run a destroy callback
-// on it at maturity. Use for pools whose GPU resources lag behind the CPU.
+// on it at maturity. Use for pools whose consumers lag behind by a few ticks.
 free_deferred :: proc(pool: ^Pool($T), handle: $HT) -> bool {
   if handle.index >= u32(len(pool.entries)) {
     return false
@@ -140,9 +140,9 @@ free_deferred :: proc(pool: ^Pool($T), handle: $HT) -> bool {
   return true
 }
 
-// tick advances the pool's frame and reclaims every slot whose grace has
+// tick advances the pool's tick counter and reclaims every slot whose grace has
 // elapsed: destroy_proc (if any) runs on the still-intact item, the slot is
-// zeroed, then made available to alloc. Call once per frame for deferred pools.
+// zeroed, then made available to alloc. Call once per update for deferred pools.
 tick :: proc(
   pool: ^Pool($T),
   user: rawptr,
@@ -167,7 +167,7 @@ tick :: proc(
 }
 
 // flush matures every retiring slot now, ignoring grace. Use at teardown,
-// where there are no more in-flight GPU frames to wait for.
+// once no lagging consumer can still read the slots.
 flush :: proc(
   pool: ^Pool($T),
   user: rawptr,
@@ -218,4 +218,35 @@ count :: proc "contextless" (pool: Pool($T)) -> int {
     if entry.active do active += 1
   }
   return active
+}
+
+// Iterator walks the active entries of a pool in index order.
+Iterator :: struct($T: typeid) {
+  pool:  ^Pool(T),
+  index: int,
+}
+
+iterator :: proc "contextless" (pool: ^Pool($T)) -> Iterator(T) {
+  return {pool = pool}
+}
+
+// next yields the next active item and its handle:
+//   it := iterator(&pool)
+//   for item, handle in next(&it, MyHandle) { ... }
+next :: proc "contextless" (
+  it: ^Iterator($T),
+  $HT: typeid,
+) -> (
+  item: ^T,
+  handle: HT,
+  ok: bool,
+) {
+  for it.index < len(it.pool.entries) {
+    i := it.index
+    it.index += 1
+    entry := &it.pool.entries[i]
+    if !entry.active do continue
+    return &entry.item, HT{u32(i), entry.generation}, true
+  }
+  return
 }

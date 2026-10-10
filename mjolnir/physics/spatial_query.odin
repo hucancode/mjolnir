@@ -1,5 +1,6 @@
 package physics
 
+import cont "../containers"
 import "../geometry"
 import "core:math"
 import "core:math/linalg"
@@ -103,11 +104,10 @@ raycast_trigger :: proc(
     hit = false,
     t   = max_dist,
   }
-  for i in 0 ..< len(self.trigger_bodies.entries) {
-    if !self.trigger_bodies.entries[i].active do continue
-    trigger := &self.trigger_bodies.entries[i].item
+  inv_dir := 1.0 / ray.direction
+  it := cont.iterator(&self.trigger_bodies)
+  for trigger, handle in cont.next(&it, TriggerHandle) {
     // Broad phase: ray vs cached AABB
-    inv_dir := 1.0 / ray.direction
     t_near, t_far := geometry.ray_aabb_intersection(
       ray.origin,
       inv_dir,
@@ -123,10 +123,6 @@ raycast_trigger :: proc(
       closest_hit.t,
     )
     if hit && t < closest_hit.t {
-      handle := TriggerHandle {
-        index      = u32(i),
-        generation = self.trigger_bodies.entries[i].generation,
-      }
       closest_hit.body_handle = handle
       closest_hit.t = t
       closest_hit.point = ray.origin + ray.direction * t
@@ -137,7 +133,9 @@ raycast_trigger :: proc(
   return closest_hit
 }
 
-// Raycast against a specific collider
+// Raycast against a specific collider. The ray is tested in the collider's
+// local frame (Y = cylinder/fan axis, fan forward = +Z) and the hit normal
+// rotated back to world space. A ray starting inside the shape hits at t = 0.
 raycast_collider :: proc(
   ray: geometry.Ray,
   collider: ^Collider,
@@ -149,86 +147,124 @@ raycast_collider :: proc(
   normal: [3]f32,
   hit: bool,
 ) {
-  switch shape in collider {
-  case SphereCollider:
-    sphere_prim := geometry.Sphere {
-      center = position,
-      radius = shape.radius,
-    }
-    hit, t = geometry.ray_sphere_intersection(ray, sphere_prim, max_dist)
-    if hit {
-      hit_point := ray.origin + ray.direction * t
-      normal = linalg.normalize(hit_point - position)
-    }
-    return t, normal, hit
-  case BoxCollider:
-    obb := geometry.Obb {
-      center       = position,
-      half_extents = shape.half_extents,
-      rotation     = rotation,
-    }
-    // Use AABB intersection for axis-aligned boxes
-    if is_identity_quaternion(rotation) {
-      bounds := geometry.Aabb {
-        min = position - shape.half_extents,
-        max = position + shape.half_extents,
-      }
-      inv_dir := 1.0 / ray.direction
-      t_near, t_far := geometry.ray_aabb_intersection(
-        ray.origin,
-        inv_dir,
-        bounds,
-      )
-      if t_near <= t_far && t_far >= 0 && t_near <= max_dist {
-        t = max(0, t_near)
-        hit_point := ray.origin + ray.direction * t
-        // Compute normal based on which face was hit
-        epsilon :: 0.0001
-        if math.abs(hit_point.x - bounds.min.x) < epsilon do normal = -linalg.VECTOR3F32_X_AXIS
-        else if math.abs(hit_point.x - bounds.max.x) < epsilon do normal = linalg.VECTOR3F32_X_AXIS
-        else if math.abs(hit_point.y - bounds.min.y) < epsilon do normal = -linalg.VECTOR3F32_Y_AXIS
-        else if math.abs(hit_point.y - bounds.max.y) < epsilon do normal = linalg.VECTOR3F32_Y_AXIS
-        else if math.abs(hit_point.z - bounds.min.z) < epsilon do normal = -linalg.VECTOR3F32_Z_AXIS
-        else if math.abs(hit_point.z - bounds.max.z) < epsilon do normal = linalg.VECTOR3F32_Z_AXIS
-        return t, normal, true
-      }
-      return 0, {}, false
-    }
-    // For rotated boxes, test via GJK (expensive fallback)
-    // For now, just test AABB
-    bounds := geometry.obb_to_aabb(obb)
-    inv_dir := [3]f32 {
-      1.0 / ray.direction.x,
-      1.0 / ray.direction.y,
-      1.0 / ray.direction.z,
-    }
-    t_near, t_far := geometry.ray_aabb_intersection(
-      ray.origin,
-      inv_dir,
-      bounds,
+  if sphere, is_sphere := collider.(SphereCollider); is_sphere {
+    hit, t = geometry.ray_sphere_intersection(
+      ray,
+      geometry.Sphere{center = position, radius = sphere.radius},
+      max_dist,
     )
-    if t_near <= t_far && t_far >= 0 && t_near <= max_dist {
-      t = max(0, t_near)
-      return t, linalg.VECTOR3F32_Y_AXIS, true // approximate normal
-    }
-    return 0, {}, false
-  case CylinderCollider, FanCollider:
-    // Cylinder and Fan use GJK for collision, but for raycasting we'll use a simplified approach
-    // Transform to AABB for now
-    bounds := collider_calculate_aabb(collider, position, rotation)
-    inv_dir := 1.0 / ray.direction
-    t_near, t_far := geometry.ray_aabb_intersection(
-      ray.origin,
-      inv_dir,
-      bounds,
-    )
-    if t_near <= t_far && t_far >= 0 && t_near <= max_dist {
-      t = max(0, t_near)
-      return t, linalg.VECTOR3F32_Y_AXIS, true // approximate normal
-    }
-    return 0, {}, false
+    if hit do normal = linalg.normalize(ray.origin + ray.direction * t - position)
+    return
   }
-  return 0, {}, false
+  inv_rot := linalg.quaternion_inverse(rotation)
+  local := geometry.Ray {
+    origin    = geometry.qmv(inv_rot, ray.origin - position),
+    direction = geometry.qmv(inv_rot, ray.direction),
+  }
+  local_normal: [3]f32
+  #partial switch shape in collider {
+  case BoxCollider:
+    t, local_normal, hit = raycast_local_box(local, shape.half_extents)
+  case CylinderCollider:
+    t, local_normal, hit = raycast_local_fan(local, shape.radius, shape.height, 2 * math.PI)
+  case FanCollider:
+    t, local_normal, hit = raycast_local_fan(local, shape.radius, shape.height, shape.angle)
+  }
+  if !hit || t > max_dist do return 0, {}, false
+  return t, geometry.qmv(rotation, local_normal), true
+}
+
+@(private = "file")
+raycast_local_box :: proc(
+  ray: geometry.Ray,
+  half_extents: [3]f32,
+) -> (
+  t: f32,
+  normal: [3]f32,
+  hit: bool,
+) {
+  box := geometry.Aabb{-half_extents, half_extents}
+  t_near, t_far := geometry.ray_aabb_intersection(ray.origin, 1.0 / ray.direction, box)
+  if t_near > t_far || t_far < 0 do return
+  t = max(0, t_near)
+  return t, geometry.aabb_face_normal(box, ray.origin + ray.direction * t), true
+}
+
+// Ray vs a cylinder sector centered on the origin: axis Y, sector of `angle`
+// radians centered on +Z (angle >= 2*PI is a full cylinder). Takes the
+// nearest hit among caps, curved wall and the two side planes, each clipped
+// to the solid.
+@(private = "file")
+raycast_local_fan :: proc(
+  ray: geometry.Ray,
+  radius, height, angle: f32,
+) -> (
+  t: f32,
+  normal: [3]f32,
+  hit: bool,
+) {
+  half_h := height * 0.5
+  half_angle := angle * 0.5
+  full := angle >= 2 * math.PI
+  in_sector :: proc(p: [3]f32, half_angle: f32, full: bool) -> bool {
+    if full || linalg.length2(p.xz) < 1e-12 do return true
+    return math.abs(math.atan2(p.x, p.z)) <= half_angle + 1e-5
+  }
+  inside :=
+    linalg.length2(ray.origin.xz) <= radius * radius &&
+    math.abs(ray.origin.y) <= half_h &&
+    in_sector(ray.origin, half_angle, full)
+  if inside do return 0, -linalg.normalize(ray.direction), true
+  t = max(f32)
+  try :: proc(s: f32, n: [3]f32, t: ^f32, normal: ^[3]f32, hit: ^bool) {
+    if s >= 0 && s < t^ {
+      t^ = s
+      normal^ = n
+      hit^ = true
+    }
+  }
+  // Caps
+  if math.abs(ray.direction.y) > 1e-8 {
+    for side in ([2]f32{-1, 1}) {
+      s := (side * half_h - ray.origin.y) / ray.direction.y
+      p := ray.origin + ray.direction * s
+      if linalg.length2(p.xz) <= radius * radius && in_sector(p, half_angle, full) {
+        try(s, {0, side, 0}, &t, &normal, &hit)
+      }
+    }
+  }
+  // Curved wall: |o.xz + s*d.xz|^2 = r^2, entering root
+  a := linalg.length2(ray.direction.xz)
+  if a > 1e-12 {
+    b := linalg.dot(ray.origin.xz, ray.direction.xz)
+    c := linalg.length2(ray.origin.xz) - radius * radius
+    disc := b * b - a * c
+    if disc >= 0 {
+      s := (-b - math.sqrt(disc)) / a
+      p := ray.origin + ray.direction * s
+      if math.abs(p.y) <= half_h && in_sector(p, half_angle, full) {
+        try(s, {p.x / radius, 0, p.z / radius}, &t, &normal, &hit)
+      }
+    }
+  }
+  // Side planes through the axis at +-half_angle from +Z
+  if !full {
+    for sign in ([2]f32{-1, 1}) {
+      phi := sign * half_angle
+      dir := [3]f32{math.sin(phi), 0, math.cos(phi)} // edge direction in XZ
+      n := [3]f32{dir.z, 0, -dir.x} * sign // outward, away from the sector
+      denom := linalg.dot(n, ray.direction)
+      if math.abs(denom) < 1e-8 do continue
+      s := -linalg.dot(n, ray.origin) / denom
+      p := ray.origin + ray.direction * s
+      along := linalg.dot(p, dir)
+      if along >= 0 && along <= radius && math.abs(p.y) <= half_h {
+        try(s, n, &t, &normal, &hit)
+      }
+    }
+  }
+  if !hit do t = 0
+  return
 }
 
 // Query sphere - finds all bodies within a sphere
@@ -364,9 +400,8 @@ query_triggers_in_sphere :: proc(
   results: ^[dynamic]TriggerHandle,
 ) {
   clear(results)
-  for i in 0 ..< len(self.trigger_bodies.entries) {
-    if !self.trigger_bodies.entries[i].active do continue
-    trigger := &self.trigger_bodies.entries[i].item
+  it := cont.iterator(&self.trigger_bodies)
+  for trigger, handle in cont.next(&it, TriggerHandle) {
     // Broad phase: bounding sphere check
     bounding_spheres_intersect(
       trigger.cached_sphere_center,
@@ -382,10 +417,6 @@ query_triggers_in_sphere :: proc(
       center,
       radius,
     ) {
-      handle := TriggerHandle {
-        index      = u32(i),
-        generation = self.trigger_bodies.entries[i].generation,
-      }
       append(results, handle)
     }
   }

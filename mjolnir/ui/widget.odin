@@ -29,8 +29,6 @@ Mesh2D :: struct {
   vertices:      []cmd.Vertex2D,
   indices:       []u32,
   texture:       u32, // bindless texture index, or NO_TEXTURE
-  vertex_offset: u32,
-  index_offset:  u32,
 }
 
 Quad2D :: struct {

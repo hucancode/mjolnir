@@ -257,7 +257,7 @@ collide_boxes :: proc(
   box_b: BoxCollider,
   margin: f32,
 ) -> (m: Manifold, hit: bool) {
-  if is_identity_quaternion(rot_a) && is_identity_quaternion(rot_b) {
+  if geometry.is_identity_quaternion(rot_a) && geometry.is_identity_quaternion(rot_b) {
     return collide_boxes_aligned(pos_a, box_a.half_extents, pos_b, box_b.half_extents, margin)
   }
   fa := box_frame(pos_a, rot_a, box_a.half_extents)

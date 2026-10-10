@@ -5,7 +5,13 @@ import "../../mjolnir/render"
 import "../../mjolnir/world"
 
 main :: proc() {
-  mjolnir.run_app({title = "Transparent", setup = setup})
+  mjolnir.run_app({title = "Transparent", setup = setup, update = update})
+}
+
+update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {

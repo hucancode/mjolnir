@@ -1,13 +1,12 @@
 package detour
 
 import "../../geometry"
-import "../recast"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 
 Query_Filter :: struct {
-  area_cost:     [recast.DT_MAX_AREAS]f32,
+  area_cost:     [DT_MAX_AREAS]f32,
   include_flags: u16,
   exclude_flags: u16,
 }
@@ -16,7 +15,7 @@ Raycast_Hit :: struct {
   t:              f32,
   hit_normal:     [3]f32,
   hit_edge_index: i32,
-  path:           []recast.Poly_Ref,
+  path:           []Poly_Ref,
   path_count:     i32,
   path_cost:      f32,
 }
@@ -27,7 +26,7 @@ Raycast_Options :: enum u8 {
 
 Poly_Query :: struct {
   process:   proc(
-    ref: recast.Poly_Ref,
+    ref: Poly_Ref,
     tile: ^Mesh_Tile,
     poly: ^Poly,
     user_data: rawptr,
@@ -38,12 +37,12 @@ Poly_Query :: struct {
 query_filter_init :: proc(filter: ^Query_Filter) {
   filter.include_flags = 0xffff
   filter.exclude_flags = 0
-  for i in 0 ..< recast.DT_MAX_AREAS do filter.area_cost[i] = 1.0
+  for i in 0 ..< DT_MAX_AREAS do filter.area_cost[i] = 1.0
 }
 
 query_filter_pass_filter :: proc(
   filter: ^Query_Filter,
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
   tile: ^Mesh_Tile,
   poly: ^Poly,
 ) -> bool {
@@ -56,19 +55,19 @@ query_filter_pass_filter :: proc(
 query_filter_get_cost :: proc(
   filter: ^Query_Filter,
   pa, pb: [3]f32,
-  prev_ref: recast.Poly_Ref,
+  prev_ref: Poly_Ref,
   prev_tile: ^Mesh_Tile,
   prev_poly: ^Poly,
-  cur_ref: recast.Poly_Ref,
+  cur_ref: Poly_Ref,
   cur_tile: ^Mesh_Tile,
   cur_poly: ^Poly,
-  next_ref: recast.Poly_Ref,
+  next_ref: Poly_Ref,
   next_tile: ^Mesh_Tile,
   next_poly: ^Poly,
 ) -> f32 {
   cost := linalg.distance(pa, pb)
   area := poly_get_area(cur_poly)
-  if area < recast.DT_MAX_AREAS do cost *= filter.area_cost[area]
+  if area < DT_MAX_AREAS do cost *= filter.area_cost[area]
   return cost
 }
 
@@ -79,11 +78,11 @@ find_nearest_poly :: proc(
   half_extents: [3]f32,
   filter: ^Query_Filter,
 ) -> (
-  status: recast.Status,
-  nearest_ref: recast.Poly_Ref,
+  status: Status,
+  nearest_ref: Poly_Ref,
   nearest_pt: [3]f32,
 ) {
-  nearest_ref = recast.INVALID_POLY_REF
+  nearest_ref = INVALID_POLY_REF
   nearest_pt = center
   bmin := center - half_extents
   bmax := center + half_extents
@@ -94,7 +93,7 @@ find_nearest_poly :: proc(
     for tx in tx0 ..= tx1 {
       tile := get_tile_at(query.nav_mesh, tx, ty, 0)
       if tile == nil || tile.header == nil do continue
-      poly_refs := make([]recast.Poly_Ref, 128)
+      poly_refs := make([]Poly_Ref, 128)
       defer delete(poly_refs)
       poly_count := query_polygons_in_tile(
         query.nav_mesh,
@@ -111,7 +110,7 @@ find_nearest_poly :: proc(
           query.nav_mesh,
           ref,
         )
-        if !recast.status_succeeded(poly_status) do continue
+        if !status_succeeded(poly_status) do continue
         closest_pt, _ := closest_point_on_polygon(tile_poly, poly, center)
         dist_sqr := linalg.length2(center - closest_pt)
         if dist_sqr < nearest_dist_sqr {
@@ -130,9 +129,9 @@ query_polygons :: proc(
   center: [3]f32,
   half_extents: [3]f32,
   filter: ^Query_Filter,
-  polys: []recast.Poly_Ref,
+  polys: []Poly_Ref,
 ) -> (
-  status: recast.Status,
+  status: Status,
   poly_count: i32,
 ) {
   poly_count = 0
@@ -163,14 +162,14 @@ query_polygons :: proc(
 
 raycast :: proc(
   query: ^Nav_Mesh_Query,
-  start_ref: recast.Poly_Ref,
+  start_ref: Poly_Ref,
   start_pos, end_pos: [3]f32,
   filter: ^Query_Filter,
   options: u32,
-  path: []recast.Poly_Ref,
+  path: []Poly_Ref,
   max_path: i32,
 ) -> (
-  status: recast.Status,
+  status: Status,
   hit: Raycast_Hit,
   path_count: i32,
 ) {
@@ -193,14 +192,14 @@ raycast :: proc(
     path_count = 1
   }
   cur_t := f32(0)
-  prev_ref := recast.INVALID_POLY_REF
+  prev_ref := INVALID_POLY_REF
   for cur_t < ray_len {
     tile, poly, poly_status := get_tile_and_poly_by_ref(
       query.nav_mesh,
       cur_ref,
     )
-    if !recast.status_succeeded(poly_status) do break
-    next_ref := recast.INVALID_POLY_REF
+    if !status_succeeded(poly_status) do break
+    next_ref := INVALID_POLY_REF
     next_t := ray_len
     hit_edge := -1
     for i in 0 ..< int(poly.vert_count) {
@@ -217,15 +216,15 @@ raycast :: proc(
         neighbor_found := false
         link_iterations := 0
         max_link_iterations := 32
-        for link != recast.DT_NULL_LINK &&
+        for link != DT_NULL_LINK &&
             link_iterations < max_link_iterations {
           link_iterations += 1
           if get_link_edge(tile, link) == u8(i) {
             neighbor_ref := get_link_poly_ref(tile, link)
-            if neighbor_ref != recast.INVALID_POLY_REF && neighbor_ref != prev_ref {
+            if neighbor_ref != INVALID_POLY_REF && neighbor_ref != prev_ref {
               neighbor_tile, neighbor_poly, neighbor_status :=
                 get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-              if recast.status_succeeded(neighbor_status) &&
+              if status_succeeded(neighbor_status) &&
                  query_filter_pass_filter(
                    filter,
                    neighbor_ref,
@@ -250,7 +249,7 @@ raycast :: proc(
         }
       }
     }
-    if next_ref == recast.INVALID_POLY_REF do break
+    if next_ref == INVALID_POLY_REF do break
     prev_ref = cur_ref
     cur_ref = next_ref
     cur_t = next_t
@@ -259,19 +258,19 @@ raycast :: proc(
       path[path_count] = cur_ref
       path_count += 1
     }
-    if (options & recast.DT_RAYCAST_USE_COSTS) != 0 {
+    if (options & DT_RAYCAST_USE_COSTS) != 0 {
       prev_cost := hit.path_cost
       segment_cost := query_filter_get_cost(
         filter,
         start_pos + ray_dir * (cur_t - 0.01),
         cur_pos,
-        recast.INVALID_POLY_REF,
+        INVALID_POLY_REF,
         nil,
         nil,
         cur_ref,
         tile,
         poly,
-        recast.INVALID_POLY_REF,
+        INVALID_POLY_REF,
         nil,
         nil,
       )
@@ -287,11 +286,11 @@ find_random_point :: proc(
   query: ^Nav_Mesh_Query,
   filter: ^Query_Filter,
 ) -> (
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
   pt: [3]f32,
-  ret: recast.Status,
+  ret: Status,
 ) {
-  ref = recast.INVALID_POLY_REF
+  ref = INVALID_POLY_REF
   // For simplicity, find first walkable polygon
   // A full implementation would properly sample based on polygon areas
   for i in 0 ..< query.nav_mesh.max_tiles {
@@ -317,16 +316,16 @@ find_random_point :: proc(
 // Find random point around given position
 find_random_point_around_circle :: proc(
   query: ^Nav_Mesh_Query,
-  start_ref: recast.Poly_Ref,
+  start_ref: Poly_Ref,
   start_pos: [3]f32,
   max_radius: f32,
   filter: ^Query_Filter,
 ) -> (
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
   pt: [3]f32,
-  ret: recast.Status,
+  ret: Status,
 ) {
-  ref = recast.INVALID_POLY_REF
+  ref = INVALID_POLY_REF
   pt = start_pos
   if !is_valid_poly_ref(query.nav_mesh, start_ref) {
     ret = {.Invalid_Param}
@@ -356,7 +355,7 @@ query_polygons_in_tile :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,
   qmin, qmax: [3]f32,
-  polys: []recast.Poly_Ref,
+  polys: []Poly_Ref,
   max_polys: i32,
   filter: ^Query_Filter,
 ) -> i32 {
@@ -365,7 +364,7 @@ query_polygons_in_tile :: proc(
   for i in 0 ..< int(tile.header.poly_count) {
     if count >= max_polys do break
     poly := &tile.polys[i]
-    ref := base | recast.Poly_Ref(i)
+    ref := base | Poly_Ref(i)
     if filter != nil && !query_filter_pass_filter(filter, ref, tile, poly) do continue
     poly_min := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
     poly_max := [3]f32{-math.F32_MAX, -math.F32_MAX, -math.F32_MAX}
@@ -388,7 +387,7 @@ query_polygons_in_tile_bv :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,
   qmin, qmax: [3]f32,
-  polys: []recast.Poly_Ref,
+  polys: []Poly_Ref,
   max_polys: i32,
 ) -> i32 {
   count := i32(0)
@@ -419,7 +418,7 @@ query_polygons_in_tile_bv :: proc(
     if !overlap do continue
     if node.i >= 0 {
       if count < max_polys {
-        polys[count] = base | recast.Poly_Ref(node.i)
+        polys[count] = base | Poly_Ref(node.i)
         count += 1
       }
     } else {
@@ -474,15 +473,15 @@ closest_point_on_polygon :: proc(
 
 get_poly_height :: proc(
   query: ^Nav_Mesh_Query,
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
   pos: [3]f32,
 ) -> (
   height: f32,
-  status: recast.Status,
+  status: Status,
 ) {
   if !is_valid_poly_ref(query.nav_mesh, ref) do return 0, {.Invalid_Param}
   tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-  if !recast.status_succeeded(poly_status) do return 0, poly_status
+  if !status_succeeded(poly_status) do return 0, poly_status
   if tile.detail_meshes == nil || len(tile.detail_meshes) == 0 {
     avg_height := f32(0)
     for i in 0 ..< int(poly.vert_count) do avg_height += tile.verts[poly.verts[i]].y
@@ -518,7 +517,7 @@ get_poly_height :: proc(
 
 find_distance_to_wall :: proc(
   query: ^Nav_Mesh_Query,
-  start_ref: recast.Poly_Ref,
+  start_ref: Poly_Ref,
   center_pos: [3]f32,
   max_radius: f32,
   filter: ^Query_Filter,
@@ -526,14 +525,14 @@ find_distance_to_wall :: proc(
   hit_dist: f32,
   hit_pos: [3]f32,
   hit_normal: [3]f32,
-  status: recast.Status,
+  status: Status,
 ) {
   if !is_valid_poly_ref(query.nav_mesh, start_ref) do return 0, {}, {}, {.Invalid_Param}
   hit_dist = max_radius
-  visited := make(map[recast.Poly_Ref]bool)
+  visited := make(map[Poly_Ref]bool)
   defer delete(visited)
   visited[start_ref] = true
-  stack := make([]recast.Poly_Ref, 256)
+  stack := make([]Poly_Ref, 256)
   defer delete(stack)
   stack_size := 1
   stack[0] = start_ref
@@ -544,7 +543,7 @@ find_distance_to_wall :: proc(
       query.nav_mesh,
       cur_ref,
     )
-    if !recast.status_succeeded(poly_status) do continue
+    if !status_succeeded(poly_status) do continue
     for i in 0 ..< int(poly.vert_count) {
       va, vb :=
         tile.verts[poly.verts[i]],
@@ -552,13 +551,13 @@ find_distance_to_wall :: proc(
       is_wall := true
       poly_idx := get_poly_index(query.nav_mesh, cur_ref)
       link := get_first_link(tile, i32(poly_idx))
-      for link != recast.DT_NULL_LINK {
+      for link != DT_NULL_LINK {
         if get_link_edge(tile, link) == u8(i) {
           neighbor_ref := get_link_poly_ref(tile, link)
-          if neighbor_ref != recast.INVALID_POLY_REF {
+          if neighbor_ref != INVALID_POLY_REF {
             neighbor_tile, neighbor_poly, neighbor_status :=
               get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-            if recast.status_succeeded(neighbor_status) &&
+            if status_succeeded(neighbor_status) &&
                query_filter_pass_filter(
                  filter,
                  neighbor_ref,
@@ -598,32 +597,32 @@ find_distance_to_wall :: proc(
 // Find local neighborhood of polygons
 find_local_neighbourhood :: proc(
   query: ^Nav_Mesh_Query,
-  start_ref: recast.Poly_Ref,
+  start_ref: Poly_Ref,
   center_pos: [3]f32,
   radius: f32,
   filter: ^Query_Filter,
-  result_ref: []recast.Poly_Ref,
-  result_parent: []recast.Poly_Ref,
+  result_ref: []Poly_Ref,
+  result_parent: []Poly_Ref,
   max_result: i32,
 ) -> (
   result_count: i32,
-  status: recast.Status,
+  status: Status,
 ) {
   if !is_valid_poly_ref(query.nav_mesh, start_ref) || max_result <= 0 {
     return 0, {.Invalid_Param}
   }
   result_count = 0
   // Use a simple flood fill within radius
-  visited := make(map[recast.Poly_Ref]bool)
+  visited := make(map[Poly_Ref]bool)
   defer delete(visited)
   // Queue for BFS
   queue := make([]struct {
-      ref:    recast.Poly_Ref,
-      parent: recast.Poly_Ref,
+      ref:    Poly_Ref,
+      parent: Poly_Ref,
     }, 256)
   defer delete(queue)
   queue_head, queue_tail := 0, 1
-  queue[0] = {start_ref, recast.INVALID_POLY_REF}
+  queue[0] = {start_ref, INVALID_POLY_REF}
   visited[start_ref] = true
   for queue_head < queue_tail && result_count < max_result {
     cur := queue[queue_head]
@@ -632,7 +631,7 @@ find_local_neighbourhood :: proc(
       query.nav_mesh,
       cur.ref,
     )
-    if !recast.status_succeeded(poly_status) do continue
+    if !status_succeeded(poly_status) do continue
     // Check if polygon center is within radius
     center := calc_poly_center(tile, poly)
     if linalg.length2(center - center_pos) > radius * radius {
@@ -646,13 +645,13 @@ find_local_neighbourhood :: proc(
     for i in 0 ..< int(poly.vert_count) {
       poly_idx := get_poly_index(query.nav_mesh, cur.ref)
       link := get_first_link(tile, i32(poly_idx))
-      for link != recast.DT_NULL_LINK {
+      for link != DT_NULL_LINK {
         if get_link_edge(tile, link) == u8(i) {
           neighbor_ref := get_link_poly_ref(tile, link)
           if _, exists := visited[neighbor_ref]; !exists {
             neighbor_tile, neighbor_poly, neighbor_status :=
               get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-            if recast.status_succeeded(neighbor_status) &&
+            if status_succeeded(neighbor_status) &&
                query_filter_pass_filter(
                  filter,
                  neighbor_ref,
@@ -678,17 +677,17 @@ find_local_neighbourhood :: proc(
 // Find polygons within circular area using Dijkstra search
 find_polys_around_circle :: proc(
   query: ^Nav_Mesh_Query,
-  start_ref: recast.Poly_Ref,
+  start_ref: Poly_Ref,
   center_pos: [3]f32,
   radius: f32,
   filter: ^Query_Filter,
-  result_ref: []recast.Poly_Ref,
-  result_parent: []recast.Poly_Ref,
+  result_ref: []Poly_Ref,
+  result_parent: []Poly_Ref,
   result_cost: []f32,
   max_result: i32,
 ) -> (
   result_count: i32,
-  status: recast.Status,
+  status: Status,
 ) {
   if !is_valid_poly_ref(query.nav_mesh, start_ref) || max_result <= 0 {
     return 0, {.Invalid_Param}
@@ -713,7 +712,7 @@ find_polys_around_circle :: proc(
     query.nav_mesh,
     start_ref,
   )
-  if !recast.status_succeeded(poly_status) do return 0, poly_status
+  if !status_succeeded(poly_status) do return 0, poly_status
   start_node.pos, _ = closest_point_on_polygon(
     start_tile,
     start_poly,
@@ -722,7 +721,7 @@ find_polys_around_circle :: proc(
   start_node.cost = 0
   start_node.total = linalg.length2(start_node.pos - center_pos)
   start_node.flags = {.Open}
-  start_node.parent_id = recast.INVALID_POLY_REF
+  start_node.parent_id = INVALID_POLY_REF
   node_queue_push(
     &query.open_list,
     {start_ref, start_node.cost, start_node.total},
@@ -734,7 +733,7 @@ find_polys_around_circle :: proc(
     it += 1
     if result_count >= max_result do break // Found enough results
     best := node_queue_pop(&query.open_list)
-    if best.ref == recast.INVALID_POLY_REF do break
+    if best.ref == INVALID_POLY_REF do break
     current := get_node(&query.pf_context, best.ref)
     if current == nil || .Closed in current.flags do continue
     current.flags |= {.Closed}
@@ -754,15 +753,15 @@ find_polys_around_circle :: proc(
       query.nav_mesh,
       current.id,
     )
-    if !recast.status_succeeded(cur_status) do continue
+    if !status_succeeded(cur_status) do continue
     poly_idx := get_poly_index(query.nav_mesh, current.id)
     link := get_first_link(cur_tile, i32(poly_idx))
-    for link != recast.DT_NULL_LINK {
+    for link != DT_NULL_LINK {
       neighbor_ref := get_link_poly_ref(cur_tile, link)
-      if neighbor_ref != recast.INVALID_POLY_REF {
+      if neighbor_ref != INVALID_POLY_REF {
         neighbor_tile, neighbor_poly, neighbor_status :=
           get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-        if recast.status_succeeded(neighbor_status) &&
+        if status_succeeded(neighbor_status) &&
            query_filter_pass_filter(
              filter,
              neighbor_ref,
@@ -806,16 +805,16 @@ find_polys_around_circle :: proc(
 // Find polygons within convex shape using Dijkstra search
 find_polys_around_shape :: proc(
   query: ^Nav_Mesh_Query,
-  start_ref: recast.Poly_Ref,
+  start_ref: Poly_Ref,
   verts: [][3]f32,
   filter: ^Query_Filter,
-  result_ref: []recast.Poly_Ref,
-  result_parent: []recast.Poly_Ref,
+  result_ref: []Poly_Ref,
+  result_parent: []Poly_Ref,
   result_cost: []f32,
   max_result: i32,
 ) -> (
   result_count: i32,
-  status: recast.Status,
+  status: Status,
 ) {
   if !is_valid_poly_ref(query.nav_mesh, start_ref) ||
      len(verts) < 3 ||
@@ -837,12 +836,12 @@ find_polys_around_shape :: proc(
     query.nav_mesh,
     start_ref,
   )
-  if !recast.status_succeeded(poly_status) do return 0, poly_status
+  if !status_succeeded(poly_status) do return 0, poly_status
   start_node.pos, _ = closest_point_on_polygon(start_tile, start_poly, center)
   start_node.cost = 0
   start_node.total = linalg.length(start_node.pos - center)
   start_node.flags = {.Open}
-  start_node.parent_id = recast.INVALID_POLY_REF
+  start_node.parent_id = INVALID_POLY_REF
   node_queue_push(
     &query.open_list,
     {start_ref, start_node.cost, start_node.total},
@@ -850,7 +849,7 @@ find_polys_around_shape :: proc(
   // Dijkstra search
   for !node_queue_empty(&query.open_list) {
     best := node_queue_pop(&query.open_list)
-    if best.ref == recast.INVALID_POLY_REF do break
+    if best.ref == INVALID_POLY_REF do break
     current := get_node(&query.pf_context, best.ref)
     if current == nil || .Closed in current.flags {
       continue
@@ -871,15 +870,15 @@ find_polys_around_shape :: proc(
       query.nav_mesh,
       current.id,
     )
-    if !recast.status_succeeded(cur_status) do continue
+    if !status_succeeded(cur_status) do continue
     poly_idx := get_poly_index(query.nav_mesh, current.id)
     link := get_first_link(cur_tile, i32(poly_idx))
-    for link != recast.DT_NULL_LINK {
+    for link != DT_NULL_LINK {
       neighbor_ref := get_link_poly_ref(cur_tile, link)
-      if neighbor_ref != recast.INVALID_POLY_REF {
+      if neighbor_ref != INVALID_POLY_REF {
         neighbor_tile, neighbor_poly, neighbor_status :=
           get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-        if recast.status_succeeded(neighbor_status) &&
+        if status_succeeded(neighbor_status) &&
            query_filter_pass_filter(
              filter,
              neighbor_ref,
@@ -924,12 +923,12 @@ find_polys_around_shape :: proc(
 // Get path from Dijkstra search results
 get_path_from_dijkstra_search :: proc(
   query: ^Nav_Mesh_Query,
-  end_ref: recast.Poly_Ref,
-  path: []recast.Poly_Ref,
+  end_ref: Poly_Ref,
+  path: []Poly_Ref,
   max_path: i32,
 ) -> (
   path_count: i32,
-  status: recast.Status,
+  status: Status,
 ) {
   if !is_valid_poly_ref(query.nav_mesh, end_ref) || max_path <= 0 {
     return 0, {.Invalid_Param}
@@ -950,38 +949,38 @@ get_path_from_dijkstra_search :: proc(
 // Get wall segments for polygon
 get_poly_wall_segments :: proc(
   query: ^Nav_Mesh_Query,
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
   filter: ^Query_Filter,
   segment_verts: [][6]f32,
-  segment_refs: []recast.Poly_Ref,
+  segment_refs: []Poly_Ref,
   max_segments: i32,
 ) -> (
   segment_count: i32,
-  status: recast.Status,
+  status: Status,
 ) {
   if !is_valid_poly_ref(query.nav_mesh, ref) || max_segments <= 0 {
     return 0, {.Invalid_Param}
   }
   segment_count = 0
   tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-  if !recast.status_succeeded(poly_status) do return 0, poly_status
+  if !status_succeeded(poly_status) do return 0, poly_status
   poly_idx := get_poly_index(query.nav_mesh, ref)
   for i in 0 ..< min(int(max_segments), int(poly.vert_count)) {
     va := tile.verts[poly.verts[i]]
     vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
     // Find neighbor across this edge
-    neighbor_ref := recast.INVALID_POLY_REF
+    neighbor_ref := INVALID_POLY_REF
     link := poly.first_link
     link_iterations := 0
     max_link_iterations := 32 // Safety limit to prevent infinite loops
-    for link != recast.DT_NULL_LINK && link_iterations < max_link_iterations {
+    for link != DT_NULL_LINK && link_iterations < max_link_iterations {
       link_iterations += 1
       if get_link_edge(tile, link) == u8(i) {
         potential_neighbor := get_link_poly_ref(tile, link)
-        if potential_neighbor != recast.INVALID_POLY_REF {
+        if potential_neighbor != INVALID_POLY_REF {
           neighbor_tile, neighbor_poly, neighbor_status :=
             get_tile_and_poly_by_ref(query.nav_mesh, potential_neighbor)
-          if recast.status_succeeded(neighbor_status) &&
+          if status_succeeded(neighbor_status) &&
              query_filter_pass_filter(
                filter,
                potential_neighbor,
@@ -1006,7 +1005,7 @@ get_poly_wall_segments :: proc(
 // Check if polygon is in closed list during pathfinding
 is_in_closed_list :: proc(
   query: ^Nav_Mesh_Query,
-  ref: recast.Poly_Ref,
+  ref: Poly_Ref,
 ) -> bool {
   if query == nil do return false
   node := get_node(&query.pf_context, ref)

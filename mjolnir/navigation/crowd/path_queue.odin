@@ -1,6 +1,5 @@
 package crowd
 
-import "../recast"
 import "../detour"
 
 MAX_QUEUE :: 8
@@ -12,11 +11,11 @@ Path_Query :: struct {
 	ref:         Path_Queue_Ref,
 	start_pos:   [3]f32,
 	end_pos:     [3]f32,
-	start_ref:   recast.Poly_Ref,
-	end_ref:     recast.Poly_Ref,
-	path:        []recast.Poly_Ref,
+	start_ref:   detour.Poly_Ref,
+	end_ref:     detour.Poly_Ref,
+	path:        []detour.Poly_Ref,
 	npath:       int,
-	status:      recast.Status,
+	status:      detour.Status,
 	keep_alive:  int,
 	filter:      ^detour.Query_Filter,
 }
@@ -36,7 +35,7 @@ create_path_queue :: proc(max_path_size: int, max_search_node_count: int,
 
 	query := new(detour.Nav_Mesh_Query)
 	status := detour.nav_mesh_query_init(query, nav, i32(max_search_node_count))
-	if recast.status_failed(status) {
+	if detour.status_failed(status) {
 		free(query)
 		free(queue)
 		return nil, false
@@ -46,7 +45,7 @@ create_path_queue :: proc(max_path_size: int, max_search_node_count: int,
 	queue.max_path_size = max_path_size
 	for i in 0..<MAX_QUEUE {
 		queue.queue[i].ref = PATHQ_INVALID
-		queue.queue[i].path = make([]recast.Poly_Ref, max_path_size)
+		queue.queue[i].path = make([]detour.Poly_Ref, max_path_size)
 	}
 
 	queue.next_handle = 1
@@ -78,7 +77,7 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iters: int) {
 			continue
 		}
 
-		if recast.status_succeeded(q.status) || recast.status_failed(q.status) {
+		if detour.status_succeeded(q.status) || detour.status_failed(q.status) {
 			q.keep_alive += 1
 			if q.keep_alive > MAX_KEEP_ALIVE {
 				q.ref = PATHQ_INVALID
@@ -93,13 +92,13 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iters: int) {
 			                                        q.start_pos, q.end_pos, q.filter, 0)
 		}
 
-		if recast.status_in_progress(q.status) {
+		if detour.status_in_progress(q.status) {
 			iters: i32
 			iters, q.status = detour.update_sliced_find_path(queue.nav_query, i32(iter_count))
 			iter_count -= int(iters)
 		}
 
-		if recast.status_succeeded(q.status) {
+		if detour.status_succeeded(q.status) {
 			npath: i32
 			q.status, npath = detour.finalize_sliced_find_path(queue.nav_query, q.path,
 			                                                    i32(queue.max_path_size))
@@ -112,7 +111,7 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iters: int) {
 	}
 }
 
-path_queue_request :: proc(queue: ^Path_Queue, start_ref: recast.Poly_Ref, end_ref: recast.Poly_Ref,
+path_queue_request :: proc(queue: ^Path_Queue, start_ref: detour.Poly_Ref, end_ref: detour.Poly_Ref,
                             start_pos: [3]f32, end_pos: [3]f32,
                             filter: ^detour.Query_Filter) -> Path_Queue_Ref {
 	slot := -1
@@ -145,7 +144,7 @@ path_queue_request :: proc(queue: ^Path_Queue, start_ref: recast.Poly_Ref, end_r
 	return ref
 }
 
-path_queue_get_request_status :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref) -> recast.Status {
+path_queue_get_request_status :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref) -> detour.Status {
 	for i in 0..<MAX_QUEUE {
 		if queue.queue[i].ref == ref {
 			return queue.queue[i].status
@@ -155,11 +154,11 @@ path_queue_get_request_status :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref) -
 }
 
 path_queue_get_path_result :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref,
-                                    path: []recast.Poly_Ref) -> (npath: int, status: recast.Status) {
+                                    path: []detour.Poly_Ref) -> (npath: int, status: detour.Status) {
 	for i in 0..<MAX_QUEUE {
 		if queue.queue[i].ref == ref {
 			q := &queue.queue[i]
-			success_status, detail_status := recast.status_detail(q.status)
+			success_status, detail_status := detour.status_detail(q.status)
 
 			q.ref = PATHQ_INVALID
 			q.status = {}

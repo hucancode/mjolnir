@@ -37,6 +37,7 @@ skybox_on: bool = true
 skybox_blur: mu.Real = 0.25
 
 main :: proc() {
+  defer mjolnir.gltf_scene_destroy(&model)
   mjolnir.run_app({
     title      = "PBR",
     debug_ui   = true,
@@ -63,7 +64,10 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  render.set_light_intensity(&engine.render, dir_light.index, f32(dir_intensity))
+  if l, ok := render.attachment(&engine.render, dir_light.index, render.DirectionalLightAttachment); ok {
+    l.color[3] = f32(dir_intensity)
+    render.mark_slot_dirty(&engine.render, dir_light.index)
+  }
   ambient.set_ibl_intensity(&engine.render.ambient, f32(ibl_intensity))
   ambient.set_skybox_enabled(&engine.render.ambient, skybox_on)
   ambient.set_skybox_blur(&engine.render.ambient, f32(skybox_blur))
@@ -77,6 +81,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     if m.rot_x != 0 do world.rotate_by(&engine.world, h, m.rot_x, linalg.VECTOR3F32_X_AXIS)
     world.scale(&engine.world, h, m.scale)
   }
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

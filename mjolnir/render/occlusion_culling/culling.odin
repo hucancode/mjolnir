@@ -1,30 +1,15 @@
 package occlusion_culling
 
+import "../bindless"
 import "../gpu"
 import vk "vendor:vulkan"
 
 SHADER_CULLING :: #load("../shader/occlusion_culling/cull.spv")
 
-// Draw pipelines participate in indirect-draw culling; each camera owns one
-// DrawBuffers per pipeline. Enum order is the binding order in cull.comp.
-DrawPipeline :: enum {
-  OPAQUE,
-  TRANSPARENT,
-  SPRITE,
-  WIREFRAME,
-  RANDOM_COLOR,
-  LINE_STRIP,
-}
-
 // Culling set bindings: nodes, meshes, cameras, then a (count, commands)
-// pair per DrawPipeline, then the depth pyramid sampler.
+// pair per bindless.DrawPipeline, then the depth pyramid sampler.
 FIRST_DRAW_BINDING :: 3
-BINDING_COUNT :: FIRST_DRAW_BINDING + 2 * len(DrawPipeline) + 1
-
-DrawBuffers :: struct {
-  count:    [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  commands: [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
-}
+BINDING_COUNT :: FIRST_DRAW_BINDING + 2 * len(bindless.DrawPipeline) + 1
 
 VisibilityPushConstants :: struct {
   camera_index:      u32,
@@ -48,7 +33,6 @@ System :: struct {
   depth_descriptor_layout: vk.DescriptorSetLayout,
   max_draws:               u32,
   depth_bias:              f32,
-  stats_enabled:           bool,
 }
 
 init :: proc(
@@ -136,14 +120,14 @@ perform_culling :: proc(
   camera_index: u32,
   frame_index: u32,
   node_count: u32,
-  draws: ^[DrawPipeline]DrawBuffers,
+  draws: ^[bindless.DrawPipeline]bindless.DrawBuffers,
   descriptor_set: vk.DescriptorSet,
   pyramid_width: u32,
   pyramid_height: u32,
 ) {
   if node_count == 0 do return
   // Zero each pipeline's count buffer for this frame so the shader can append.
-  for pipe in DrawPipeline {
+  for pipe in bindless.DrawPipeline {
     count := &draws[pipe].count[frame_index]
     vk.CmdFillBuffer(
       command_buffer,

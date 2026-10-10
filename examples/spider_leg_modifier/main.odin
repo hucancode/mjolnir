@@ -40,6 +40,7 @@ GROUP_A := [3]int{0, 2, 4}
 GROUP_B := [3]int{1, 3, 5}
 
 main :: proc() {
+  defer mjolnir.gltf_scene_destroy(&scene)
   mjolnir.run_app({
     title      = "Spider Leg",
     width      = 900,
@@ -48,7 +49,6 @@ main :: proc() {
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
-    sync       = sync,
   })
 }
 
@@ -61,7 +61,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   spider_mesh_node = scene.skinned[0].node
   rig = &scene.rigs[scene.skinned[0].rig]
   skel := &rig.skeleton
-  animation.animator_init(&animator, skel)
+  animation.animator_init(&animator, rig)
 
   leg_meta := [6]struct{root_name, tip_name: string, time_offset: f32}{
     {"leg_front_r_0",  "leg_front_r_5",  0.0},
@@ -74,24 +74,22 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   deg30 := f32(math.PI / 6.0)
   deg90 := f32(math.PI / 2.0)
-  legs_spec := make([]animation.SpiderLegSpec, 6, context.temp_allocator)
-  for i in 0 ..< 6 {
+  legs: [6]animation.SpiderLegConfig
+  for &leg, i in legs {
     offset, _ := animation.rest_offset(skel, leg_meta[i].root_name, leg_meta[i].tip_name)
     in_group_a := slice.contains(GROUP_A[:], i)
-    legs_spec[i] = animation.SpiderLegSpec{
-      root_name = leg_meta[i].root_name,
-      chain_length = 6,
-      config = animation.SpiderLegConfig{
-        initial_offset = offset,
-        lift_height    = f32(in_group_a ? lift_height_a : lift_height_b),
-        lift_frequency = f32(lift_frequency_shared),
-        lift_duration  = f32(in_group_a ? lift_duration_a : lift_duration_b),
-        time_offset    = leg_meta[i].time_offset,
-      },
-      constraints = animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90}),
+    leg = {
+      root           = leg_meta[i].root_name,
+      chain_length   = 6,
+      constraints    = animation.ik_constraints_uniform(6, {deg30, deg90, deg30}, {deg90, deg90, deg90}),
+      offset         = offset,
+      lift_height    = f32(in_group_a ? lift_height_a : lift_height_b),
+      lift_frequency = f32(lift_frequency_shared),
+      lift_duration  = f32(in_group_a ? lift_duration_a : lift_duration_b),
+      time_offset    = leg_meta[i].time_offset,
     }
   }
-  if idx, ok := animation.add_spider_leg_layer(&animator, skel, legs_spec, weight = 1.0); ok {
+  if idx, ok := animation.add_spider_leg_layer(&animator, rig, legs[:], weight = 1.0); ok {
     spider_leg_layer_index = idx
     log.infof("Added spider leg modifiers for all 6 legs (layer %d)", spider_leg_layer_index)
   }
@@ -108,10 +106,6 @@ apply_group :: proc(engine: ^mjolnir.Engine, group: []int, lift_height, lift_dur
       lift_duration = lift_duration, time_offset = time_offset,
     )
   }
-}
-
-sync :: proc(engine: ^mjolnir.Engine) {
-  if rig != nil do render.stage_bones(&engine.render, spider_mesh_node.index, animator.palette)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -146,6 +140,10 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     if !ok do continue
     render.debug_sphere(&engine.render, target^, 0.2, red)
   }
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  if rig != nil do render.stage_bones(&engine.render, spider_mesh_node.index, animator.palette)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {
