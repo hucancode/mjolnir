@@ -63,7 +63,9 @@ flowchart TB
   deferred destruction and the bindless descriptor-array mechanism).
   `render/bindless` defines render's own arrays (textures, samplers,
   cube maps, the mesh arena, the scene set) and `render/mesh` the
-  vertex format and primitive builders.
+  vertex format and primitive builders. Shaders (`render/shader`)
+  and embedded assets (`render/assets`) live inside the module, so
+  the folder lifts out whole.
 - `platform` is the only GLFW user, including layer 3 and the
   examples. It hands render the instance extensions, the
   proc-address loader and a surface; render never sees a window.
@@ -76,10 +78,12 @@ flowchart TB
 ### What belongs in layer 3
 
 A feature lives in `mjolnir` only if it needs two or more layer-2
-modules and belongs to neither: the run loop, glTF instancing (world
-nodes + render meshes + animation rigs), `spawn_*` helpers (world +
-render + physics), cursor rays (platform + render), skeleton debug
-lines (animation → render) and the platform → debug-UI input adapter.
+modules and belongs to neither: the run loop, the world → render
+transform sync, the main camera controller (platform input → render
+camera), glTF scene construction (world nodes over the `render/gltf`
+and `animation/gltf` loaders), `spawn_*` helpers (world + render +
+physics), cursor rays (platform + render), skeleton debug lines
+(animation → render) and the platform → debug-UI input adapter.
 Layer-3 helpers use only public layer-2 APIs, so user code can always
 rewrite them. Code that touches a single module belongs in that
 module.
@@ -107,25 +111,27 @@ imports the other.
 
 ---
 
-## Glue is user code
+## Glue
 
 Modules never call each other. The per-frame glue between them is a
-few lines the application writes itself — see [glue](glue.html). The
-engine calls a `sync` callback right after `world.update`; the
-standard body is:
+few lines — see [glue](glue.html). The engine runs the world → render
+transform hop itself right after `world.update`:
 
 ```odin
 for i in world.removed_nodes(&e.world) do render.stage_slot_removal(&e.render, i)
 for n in world.changed_nodes(&e.world) do render.stage_transform(&e.render, n.index, n.world_matrix, n.visible)
-render.stage_bones(&e.render, node.index, animator.palette) // per skinned node
 ```
+
+The application's `sync` callback runs next for the rest, typically
+one `render.stage_bones(&e.render, node.index, animator.palette)` per
+skinned node.
 
 ---
 
 ## Frame phases
 
 ```
-update thread: input → camera controller → update → world.update → sync → render.update
+update thread: input → camera controller → update → world.update → world→render → sync → render.update
 render thread: poll events → throttle → ui stage → pre_render
                → render.frame (flush → acquire → record → submit + present) → post_render
 ```

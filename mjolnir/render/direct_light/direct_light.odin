@@ -7,12 +7,12 @@ import "core:log"
 import "core:math/linalg"
 import vk "vendor:vulkan"
 
-SHADER_POINT_VERT := #load("../../shader/lighting_point/vert.spv")
-SHADER_POINT_FRAG := #load("../../shader/lighting_point/frag.spv")
-SHADER_SPOT_VERT := #load("../../shader/lighting_spot/vert.spv")
-SHADER_SPOT_FRAG := #load("../../shader/lighting_spot/frag.spv")
-SHADER_DIRECTIONAL_VERT := #load("../../shader/lighting_directional/vert.spv")
-SHADER_DIRECTIONAL_FRAG := #load("../../shader/lighting_directional/frag.spv")
+SHADER_POINT_VERT := #load("../shader/lighting_point/vert.spv")
+SHADER_POINT_FRAG := #load("../shader/lighting_point/frag.spv")
+SHADER_SPOT_VERT := #load("../shader/lighting_spot/vert.spv")
+SHADER_SPOT_FRAG := #load("../shader/lighting_spot/frag.spv")
+SHADER_DIRECTIONAL_VERT := #load("../shader/lighting_directional/vert.spv")
+SHADER_DIRECTIONAL_FRAG := #load("../shader/lighting_directional/frag.spv")
 
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}

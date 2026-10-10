@@ -5,16 +5,16 @@ import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
-SHADER_POSTPROCESS_VERT :: #load("../../shader/postprocess/vert.spv")
-SHADER_POSTPROCESS_FRAG :: #load("../../shader/postprocess/frag.spv")
-SHADER_BLOOM_FRAG :: #load("../../shader/bloom/frag.spv")
-SHADER_BLUR_FRAG :: #load("../../shader/blur/frag.spv")
-SHADER_GRAYSCALE_FRAG :: #load("../../shader/grayscale/frag.spv")
-SHADER_TONEMAP_FRAG :: #load("../../shader/tonemap/frag.spv")
-SHADER_OUTLINE_FRAG :: #load("../../shader/outline/frag.spv")
-SHADER_FOG_FRAG :: #load("../../shader/fog/frag.spv")
-SHADER_CROSSHATCH_FRAG :: #load("../../shader/crosshatch/frag.spv")
-SHADER_DOF_FRAG :: #load("../../shader/dof/frag.spv")
+SHADER_POSTPROCESS_VERT :: #load("../shader/postprocess/vert.spv")
+SHADER_POSTPROCESS_FRAG :: #load("../shader/postprocess/frag.spv")
+SHADER_BLOOM_FRAG :: #load("../shader/bloom/frag.spv")
+SHADER_BLUR_FRAG :: #load("../shader/blur/frag.spv")
+SHADER_GRAYSCALE_FRAG :: #load("../shader/grayscale/frag.spv")
+SHADER_TONEMAP_FRAG :: #load("../shader/tonemap/frag.spv")
+SHADER_OUTLINE_FRAG :: #load("../shader/outline/frag.spv")
+SHADER_FOG_FRAG :: #load("../shader/fog/frag.spv")
+SHADER_CROSSHATCH_FRAG :: #load("../shader/crosshatch/frag.spv")
+SHADER_DOF_FRAG :: #load("../shader/dof/frag.spv")
 
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}

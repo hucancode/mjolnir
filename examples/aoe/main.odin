@@ -88,6 +88,6 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
 mesh_child :: proc(engine: ^mjolnir.Engine, parent: world.NodeHandle) -> (child: world.NodeHandle, ok: bool) {
   n := world.node(&engine.world, parent) or_return
-  for c in n.children do if _, has := render.mesh_attachment(&engine.render, c.index); has do return c, true
+  for c in n.children do if _, has := render.attachment(&engine.render, c.index, render.MeshAttachment); has do return c, true
   return {}, false
 }

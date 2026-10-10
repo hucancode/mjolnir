@@ -46,7 +46,7 @@ spawn_field :: proc(
   s: FFState
   s.parent = world.spawn(&engine.world, {0, 2, 0})
   s.ff_handle = render.create_forcefield(&engine.render, area_of_effect = area, strength = strength, tangent_strength = tangent)
-  s.ff_node = mjolnir.spawn_forcefield(engine, s.ff_handle, {offset_x, 0, 0}, parent = s.parent)
+  s.ff_node = mjolnir.spawn(engine, {offset_x, 0, 0}, render.ForceFieldAttachment{s.ff_handle}, s.parent)
   s.color = color
   s.enabled = true
   s.strength = mu.Real(strength)
@@ -79,7 +79,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       weight            = 0.0,
       weight_spread     = 0.0,
     )
-    mjolnir.spawn_emitter(engine, em, {0, 2, 0})
+    mjolnir.spawn(engine, {0, 2, 0}, render.EmitterAttachment{em})
   }
 
   // Repulsion field — blue marker

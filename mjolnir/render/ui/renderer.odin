@@ -206,8 +206,8 @@ create_pipeline :: proc(
   gctx: ^gpu.GPUContext,
   format: vk.Format,
 ) -> vk.Result {
-  vert_code := #load("../../shader/ui/vert.spv")
-  frag_code := #load("../../shader/ui/frag.spv")
+  vert_code := #load("../shader/ui/vert.spv")
+  frag_code := #load("../shader/ui/frag.spv")
   vert_module := gpu.create_shader_module(gctx.device, vert_code) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   frag_module := gpu.create_shader_module(gctx.device, frag_code) or_return

@@ -32,7 +32,7 @@ Crowd_Agent_Params :: struct {
 	collision_query_range:    f32,
 	path_optimization_range:  f32,
 	separation_weight:        f32,
-	update_flags:             u8,
+	update_flags:             Update_Flag_Set,
 	obstacle_avoidance_type:  u8,
 	query_filter_type:        u8,
 	user_data:                rawptr,
@@ -45,6 +45,8 @@ Update_Flags :: enum u8 {
 	Optimize_Vis        = 3,
 	Optimize_Topo       = 4,
 }
+
+Update_Flag_Set :: bit_set[Update_Flags; u8]
 
 Move_Request_State :: enum u8 {
 	None = 0,
@@ -302,7 +304,7 @@ crowd_update :: proc(crowd: ^Crowd, dt: f32) {
 		                          ag, ag.neis[:], DT_CROWDAGENT_MAX_NEIGHBOURS,
 		                          crowd.active_agents[:nactive], crowd.grid)
 
-		if (ag.params.update_flags & (1 << u8(Update_Flags.Anticipate_Turns))) != 0 {
+		if .Anticipate_Turns in ag.params.update_flags {
 			calc_smooth_steer_direction(ag, &ag.dvel)
 		} else {
 			calc_straight_steer_direction(ag, &ag.dvel)
@@ -325,7 +327,7 @@ crowd_update :: proc(crowd: ^Crowd, dt: f32) {
 
 		if ag.state != .Walking do continue
 
-		if (ag.params.update_flags & (1 << u8(Update_Flags.Separation))) != 0 {
+		if .Separation in ag.params.update_flags {
 			separation_distance := ag.params.collision_query_range
 			inv_separation_distance := 1.0 / separation_distance
 
@@ -361,7 +363,7 @@ crowd_update :: proc(crowd: ^Crowd, dt: f32) {
 
 		ag.nvel = ag.dvel
 
-		if (ag.params.update_flags & (1 << u8(Update_Flags.Obstacle_Avoidance))) != 0 {
+		if .Obstacle_Avoidance in ag.params.update_flags {
 			obstacle_avoidance_query_reset(crowd.obstacle_query)
 
 			for j in 0..<ag.nneis {
@@ -401,7 +403,7 @@ crowd_update :: proc(crowd: ^Crowd, dt: f32) {
 		                                          ag.corner_polys[:], DT_CROWDAGENT_MAX_CORNERS,
 		                                          crowd.nav_query, filter)
 
-		if (ag.params.update_flags & (1 << u8(Update_Flags.Optimize_Vis))) != 0 && ag.ncorners > 0 {
+		if .Optimize_Vis in ag.params.update_flags && ag.ncorners > 0 {
 			target := ag.corner_verts[min(1, ag.ncorners-1)]
 			path_corridor_optimize_path_visibility(ag.corridor, target,
 			                                        ag.params.path_optimization_range,
@@ -478,7 +480,7 @@ update_topology_optimization :: proc(crowd: ^Crowd, agents: []^Crowd_Agent, dt: 
 		ag := agents[i]
 		if ag.state != .Walking do continue
 		if ag.target_state != .Valid do continue
-		if (ag.params.update_flags & (1 << u8(Update_Flags.Optimize_Topo))) == 0 do continue
+		if .Optimize_Topo not_in ag.params.update_flags do continue
 
 		ag.topology_opt_time += dt
 		if ag.topology_opt_time >= 0.5 && nqueue < MAX_NEIS {

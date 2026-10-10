@@ -9,9 +9,9 @@ COMPUTE_PARTICLE_BATCH :: 256
 MAX_EMITTERS :: 64
 MAX_FORCE_FIELDS :: 32
 
-SHADER_EMITTER_COMP :: #load("../../shader/particle/emitter.spv")
-SHADER_PARTICLE_COMP :: #load("../../shader/particle/compute.spv")
-SHADER_PARTICLE_COMPACT_COMP :: #load("../../shader/particle/compact.spv")
+SHADER_EMITTER_COMP :: #load("../shader/particle/emitter.spv")
+SHADER_PARTICLE_COMP :: #load("../shader/particle/compute.spv")
+SHADER_PARTICLE_COMPACT_COMP :: #load("../shader/particle/compact.spv")
 
 Particle :: struct {
   position:      [3]f32,

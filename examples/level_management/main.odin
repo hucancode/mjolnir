@@ -157,7 +157,7 @@ collect_gltf_resources :: proc(engine: ^mjolnir.Engine, roots: []world.NodeHandl
     h := pop(&stack)
     n := world.node(&engine.world, h) or_continue
     append(&stack, ..n.children[:])
-    att := render.mesh_attachment(&engine.render, h.index) or_continue
+    att := render.attachment(&engine.render, h.index, render.MeshAttachment) or_continue
     append(&example_nodes, h)
     if att.handle not_in seen_mesh {
       seen_mesh[att.handle] = true

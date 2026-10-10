@@ -40,13 +40,13 @@ find_straight_path :: proc(
   if query == nil || query.nav_mesh == nil do return {.Invalid_Param}, 0
   if path_count == 0 || path[0] == recast.INVALID_POLY_REF || max_straight_path <= 0 do return {.Invalid_Param}, 0
   // Clamp start and end positions to polygon boundaries
-  closest_start_pos, start_status := closest_point_on_poly_boundary_nav(
+  closest_start_pos, start_status := closest_point_on_poly_boundary(
     query,
     path[0],
     start_pos,
   )
   if !recast.status_succeeded(start_status) do return {.Invalid_Param}, 0
-  closest_end_pos, end_status := closest_point_on_poly_boundary_nav(
+  closest_end_pos, end_status := closest_point_on_poly_boundary(
     query,
     path[path_count - 1],
     end_pos,
@@ -104,7 +104,7 @@ find_straight_path :: proc(
       )
       if !recast.status_succeeded(portal_status) {
         // Failed to get portal - add end point
-        closest_on_poly, _ := closest_point_on_poly_boundary_nav(
+        closest_on_poly, _ := closest_point_on_poly_boundary(
           query,
           path[i],
           closest_end_pos,
@@ -399,7 +399,9 @@ move_along_surface :: proc(
   return result_pos, visited_count, {.Success}
 }
 
-closest_point_on_poly_boundary_nav :: proc(
+// Closest point to `pos` on the polygon in the xz plane: `pos` itself when
+// inside, otherwise the nearest point on its boundary.
+closest_point_on_poly_boundary :: proc(
   query: ^Nav_Mesh_Query,
   ref: recast.Poly_Ref,
   pos: [3]f32,
@@ -409,41 +411,21 @@ closest_point_on_poly_boundary_nav :: proc(
 ) {
   tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
   if !recast.status_succeeded(status) || tile == nil || poly == nil do return pos, status
-  verts := make([][3]f32, poly.vert_count)
-  defer delete(verts)
-  for i in 0 ..< int(poly.vert_count) {
-    verts[i] = tile.verts[poly.verts[i]]
-  }
-  edge_dist := make([]f32, poly.vert_count)
-  defer delete(edge_dist)
-  edge_t := make([]f32, poly.vert_count)
-  defer delete(edge_t)
-  for i in 0 ..< int(poly.vert_count) {
-    j := (i + 1) % int(poly.vert_count)
-    va := verts[i]
-    vb := verts[j]
+  n := int(poly.vert_count)
+  verts: [recast.DT_VERTS_PER_POLYGON][3]f32
+  for i in 0 ..< n do verts[i] = tile.verts[poly.verts[i]]
+  if geometry.point_in_polygon_2d(pos, verts[:n]) do return pos, {.Success}
+  min_dist := f32(max(f32))
+  result := pos
+  for i in 0 ..< n {
+    va, vb := verts[i], verts[(i + 1) % n]
     dist_sqr, t := geometry.point_segment_distance2_2d(pos, va, vb)
-    edge_dist[i] = dist_sqr
-    edge_t[i] = t
-  }
-  inside := geometry.point_in_polygon_2d(pos, verts)
-  if inside {
-    return pos, {.Success}
-  } else {
-    min_dist := edge_dist[0]
-    min_idx := 0
-    for i in 1 ..< int(poly.vert_count) {
-      if edge_dist[i] < min_dist {
-        min_dist = edge_dist[i]
-        min_idx = i
-      }
+    if dist_sqr < min_dist {
+      min_dist = dist_sqr
+      result = linalg.lerp(va, vb, t)
     }
-    j := (min_idx + 1) % int(poly.vert_count)
-    va := verts[min_idx]
-    vb := verts[j]
-    result := linalg.lerp(va, vb, edge_t[min_idx])
-    return result, {.Success}
   }
+  return result, {.Success}
 }
 
 closest_point_on_poly :: proc(

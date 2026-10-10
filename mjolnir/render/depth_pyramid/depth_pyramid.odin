@@ -6,7 +6,7 @@ import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
 
-SHADER_DEPTH_REDUCE :: #load("../../shader/occlusion_culling/depth_reduce.spv")
+SHADER_DEPTH_REDUCE :: #load("../shader/occlusion_culling/depth_reduce.spv")
 MAX_DEPTH_MIPS_LEVEL :: 16
 
 DepthReducePushConstants :: struct {

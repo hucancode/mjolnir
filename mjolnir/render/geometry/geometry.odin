@@ -5,8 +5,8 @@ import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
-SHADER_G_BUFFER_VERT :: #load("../../shader/gbuffer/vert.spv")
-SHADER_G_BUFFER_FRAG :: #load("../../shader/gbuffer/frag.spv")
+SHADER_G_BUFFER_VERT :: #load("../shader/gbuffer/vert.spv")
+SHADER_G_BUFFER_FRAG :: #load("../shader/gbuffer/frag.spv")
 
 PushConstant :: struct {
   camera_index: u32,

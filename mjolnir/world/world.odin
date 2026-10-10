@@ -55,6 +55,11 @@ valid :: proc(w: ^World, h: NodeHandle) -> bool {
   return cont.is_valid(w.nodes, h)
 }
 
+// Live nodes, root included.
+node_count :: proc(w: ^World) -> int {
+  return cont.count(w.nodes)
+}
+
 // Set user tag bits on a node. Returns false if node not found.
 tag :: proc(world: ^World, handle: NodeHandle, bits: u32) -> bool {
   node := cont.get(world.nodes, handle) or_return

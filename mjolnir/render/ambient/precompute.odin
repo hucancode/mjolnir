@@ -5,9 +5,9 @@ import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
-SHADER_EQUIRECT :: #load("../../shader/ibl/equirect_to_cube.spv")
-SHADER_IRRADIANCE :: #load("../../shader/ibl/irradiance.spv")
-SHADER_PREFILTER :: #load("../../shader/ibl/prefilter.spv")
+SHADER_EQUIRECT :: #load("../shader/ibl/equirect_to_cube.spv")
+SHADER_IRRADIANCE :: #load("../shader/ibl/irradiance.spv")
+SHADER_PREFILTER :: #load("../shader/ibl/prefilter.spv")
 
 ENV_CUBE_SIZE :: 512
 IRRADIANCE_SIZE :: 32
