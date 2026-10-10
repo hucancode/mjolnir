@@ -1,30 +1,69 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
+import "core:log"
+
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
 
 main :: proc() {
-  mjolnir.run_app({title = "Transparent", setup = setup, update = update})
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 800, 600, "Transparent") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Transparent", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  render.main_camera_look_at(&engine.render, {6, 3, 6}, {0, 1, 0})
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
+}
 
-  mjolnir.spawn_ground(engine, 6.0)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+setup :: proc(app: ^App) {
+  render.main_camera_look_at(&app.renderer, {6, 3, 6}, {0, 1, 0})
+
+  ground := world.spawn(&app.scene)
+  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  world.scale(&app.scene, ground, 6.0)
 
   // Solid red sphere behind the glass slabs
-  red_mat := render.material_pbr(&engine.render, {0.95, 0.15, 0.15, 1}, roughness = 0.4)
-  mjolnir.spawn_mesh(engine, engine.render.builtin_meshes[.SPHERE], red_mat, {0, 1, -2})
+  red_mat := render.material_pbr(&app.renderer, {0.95, 0.15, 0.15, 1}, roughness = 0.4)
+  sphere := world.spawn(&app.scene, {0, 1, -2})
+  render.attach(&app.renderer, sphere.index, render.MeshAttachment{handle = app.renderer.builtin_meshes[.SPHERE], material = red_mat, cast_shadow = true})
 
   // Stack of transparent quads, increasing opacity
-  cube := engine.render.builtin_meshes[.CUBE]
+  cube := app.renderer.builtin_meshes[.CUBE]
   colors := [4][4]f32{
     {0.2, 0.7, 1.0, 0.20},
     {0.2, 1.0, 0.4, 0.40},
@@ -32,12 +71,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     {1.0, 0.2, 0.7, 0.85},
   }
   for c, i in colors {
-    mat := render.material_transparent(&engine.render, c)
-    h := mjolnir.spawn_mesh(engine, cube, mat, {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4}, cast_shadow = false)
-    world.scale(&engine.world, h, 0.8)
+    mat := render.material_transparent(&app.renderer, c)
+    h := world.spawn(&app.scene, {f32(i) * 0.6 - 1.0, 1.0, f32(i) * 0.4})
+    render.attach(&app.renderer, h.index, render.MeshAttachment{handle = cube, material = mat, cast_shadow = false})
+    world.scale(&app.scene, h, 0.8)
   }
 
-  mjolnir.spawn(engine, {3, 6, 3}, render.directional_light_attachment(
+  light := world.spawn(&app.scene, {3, 6, 3})
+  render.attach(&app.renderer, light.index, render.directional_light_attachment(
     color       = {1, 0.97, 0.9, 1},
     radius      = 10,
     cast_shadow = true,

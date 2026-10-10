@@ -6,7 +6,7 @@ Layer 2. Headless animation: it animates values, vectors and bone
 hierarchies, and knows nothing about scene nodes or GPU buffers. It
 imports only `geometry` and `core`. The caller decides where results
 go: a node transform, a light intensity, a skin palette upload. See
-[glue](glue.html) for the standard wiring.
+[engine](engine.html#wiring-modules) for the standard wiring.
 
 The package has three tiers. Each tier builds on the one below, and
 each is usable on its own.

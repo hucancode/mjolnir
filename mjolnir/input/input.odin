@@ -46,6 +46,10 @@ State :: struct {
   text_buf:         [TEXT_CAPACITY]u8,
   text_len:         int,
   primed:           bool, // cursor seen once; the first tick has no delta
+  // Set by the first consumer that claims the device this tick (debug UI,
+  // then game UI). Later consumers skip a captured device.
+  mouse_captured:    bool,
+  keyboard_captured: bool,
 }
 
 // Drain the accumulator into this tick's snapshot. Call once per tick, before
@@ -65,6 +69,8 @@ new_frame :: proc(self: ^State, acc: ^Accumulator) {
   self.text_buf = acc.text
   self.text_len = acc.text_len
   self.primed = true
+  self.mouse_captured = false
+  self.keyboard_captured = false
   acc.keys_pressed = {}
   acc.keys_released = {}
   acc.keys_repeated = {}

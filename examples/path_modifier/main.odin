@@ -1,18 +1,29 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/animation"
 import "../../mjolnir/world"
 import "core:fmt"
+import "core:log"
 import "core:math"
 import mu "vendor:microui"
+
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
 
 CONTROL_POINTS :: 32
 PATH_DEBUG_SAMPLES :: 96
 
-scene:         mjolnir.GltfScene
-// one animator (and its path layer) per scene.skinned entry
+snake:         mjolnir.GltfScene
+// one animator (and its path layer) per snake.skinned entry
 animators:     [dynamic]animation.Animator
 layer_indices: [dynamic]int
 path_buf:      [CONTROL_POINTS][3]f32
@@ -30,16 +41,25 @@ prev_lobes:  mu.Real = 3
 auto_play: bool = true
 
 main :: proc() {
-  defer mjolnir.gltf_scene_destroy(&scene)
-  mjolnir.run_app({
-    title      = "Path Modifier",
-    width      = 900,
-    height     = 650,
-    debug_ui   = true,
-    setup      = setup,
-    update     = update,
-    pre_render = debug_ui,
-  })
+  context.logger = log.create_console_logger()
+  defer mjolnir.gltf_scene_destroy(&snake)
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 900, 650, "Path Modifier") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Path Modifier", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+}
+
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
 }
 
 regenerate_points :: proc() {
@@ -51,39 +71,39 @@ regenerate_points :: proc() {
   }
 }
 
-rebuild_path :: proc(engine: ^mjolnir.Engine) {
+rebuild_path :: proc(app: ^App) {
   regenerate_points()
   animation.spline_destroy(&spline)
   spline = animation.spline_build_closed(path_buf[:])
   for &a, i in animators do animation.set_path_params(&a, layer_indices[i], path = path_buf[:])
 }
 
-apply_runtime_params :: proc(engine: ^mjolnir.Engine) {
+apply_runtime_params :: proc(app: ^App) {
   for &a, i in animators {
     animation.set_path_params(&a, layer_indices[i], offset = f32(offset_val), length = f32(fit_len), speed = 0, loop = true)
   }
 }
 
-draw_path_debug :: proc(engine: ^mjolnir.Engine) {
+draw_path_debug :: proc(app: ^App) {
   spline_len := animation.spline_arc_length(spline)
   if spline_len <= 0 do return
   prev := animation.spline_sample_uniform(spline, 0)
   for i in 1 ..= PATH_DEBUG_SAMPLES {
     s := f32(i) / f32(PATH_DEBUG_SAMPLES) * spline_len
     cur := animation.spline_sample_uniform(spline, s)
-    render.debug_segment(&engine.render, prev, cur, color = {1, 0.85, 0.1, 1}, bypass_depth = true)
+    render.debug_segment(&app.renderer, prev, cur, color = {1, 0.85, 0.1, 1}, bypass_depth = true)
     prev = cur
   }
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  render.main_camera_look_at(&engine.render, {5, 3, 5}, {0, 0, 0})
-  scene = mjolnir.load_gltf(engine, "assets/stuffed_snake_rigged.glb")
+setup :: proc(app: ^App) {
+  render.main_camera_look_at(&app.renderer, {5, 3, 5}, {0, 0, 0})
+  snake = mjolnir.load_gltf(&app.scene, &app.renderer, "assets/stuffed_snake_rigged.glb")
   regenerate_points()
   spline = animation.spline_build_closed(path_buf[:])
 
-  for s in scene.skinned {
-    rig := &scene.rigs[s.rig]
+  for s in snake.skinned {
+    rig := &snake.rigs[s.rig]
     a: animation.Animator
     animation.animator_init(&a, rig)
     idx, _ := animation.add_path_layer(&a, rig, "root", 14,
@@ -93,13 +113,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
     append(&animators, a)
     append(&layer_indices, idx)
   }
-  mjolnir.spawn_ground(engine, 30.0, position = {0, -3, 0})
-  mjolnir.spawn(engine, {0, 10, 0}, render.point_light_attachment({1, 0.9, 0.8, 1}, 15.0, true))
+  ground := world.spawn(&app.scene, {0, -3, 0})
+  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  world.scale(&app.scene, ground, 30.0)
+  light := world.spawn(&app.scene, {0, 10, 0})
+  render.attach(&app.renderer, light.index, render.point_light_attachment({1, 0.9, 0.8, 1}, 15.0, true))
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   if radius != prev_radius || height != prev_height || lobes != prev_lobes {
-    rebuild_path(engine)
+    rebuild_path(app)
     prev_radius = radius; prev_height = height; prev_lobes = lobes
   }
   spline_len := animation.spline_arc_length(spline)
@@ -107,17 +133,24 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     offset_val = mu.Real(math.mod_f32(f32(offset_val) + f32(speed_val) * dt, spline_len))
     if offset_val < 0 do offset_val += mu.Real(spline_len)
   }
-  apply_runtime_params(engine)
-  for s, i in scene.skinned do animation.animator_update(&animators[i], &scene.rigs[s.rig], dt)
-  draw_path_debug(engine)
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
-  for s, i in scene.skinned do render.stage_bones(&engine.render, s.node.index, animators[i].palette)
+  apply_runtime_params(app)
+  for s, i in snake.skinned do animation.animator_update(&animators[i], &snake.rigs[s.rig], dt)
+  draw_path_debug(app)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  for s, i in snake.skinned do render.stage_bones(&app.renderer, s.node.index, animators[i].palette)
+  render.update(&app.renderer, dt)
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  debug_ui(app)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+debug_ui :: proc(app: ^App) {
+  ctx := render.debug_ui(&app.renderer)
   if mu.window(ctx, "Path Modifier", {20, 20, 200, 380}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Auto play", &auto_play)

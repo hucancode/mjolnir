@@ -6,8 +6,17 @@ import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/animation"
 import "mjolnir/input"
+import "mjolnir/platform"
 import "mjolnir/render"
 import "mjolnir/world"
+
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
 
 LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
@@ -70,18 +79,20 @@ spin_clip :: proc(name: string, duration: f32, angles: []f32, interpolation: ani
   return
 }
 
-add_node_clip :: proc(engine: ^mjolnir.Engine, node: world.NodeHandle, clip: animation.Clip) -> ^NodeClip {
-  n := world.node(&engine.world, node)
+add_node_clip :: proc(app: ^App, node: world.NodeHandle, clip: animation.Clip) -> ^NodeClip {
+  n := world.node(&app.scene, node)
   rest := animation.TRS_IDENTITY
   if n != nil do rest = {n.transform.position, n.transform.rotation, n.transform.scale}
   append(&node_clips, NodeClip{node = node, clip = clip, rest = rest, speed = 1, status = .PLAYING})
   return &node_clips[len(node_clips) - 1]
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  if !engine.keyboard_captured {
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if !app.input.keyboard_captured {
     it := 0
-    for key, pressed in input.next_key_edge(&engine.input, &it) do on_key(engine, key, pressed)
+    for key, pressed in input.next_key_edge(&app.input, &it) do on_key(app, key, pressed)
   }
   for &c in characters {
     for s, i in c.scene.skinned do animation.animator_update(&c.animators[i], &c.scene.rigs[s.rig], dt)
@@ -92,41 +103,75 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     animation.clip_sample_trs(&nc.clip, 0, nc.time, &trs)
     m := animation.trs_matrix(trs)
     if nc.socket do m = animation.bone_matrix(&characters[nc.character].animators[nc.skinned], nc.bone) * m
-    world.set_local_matrix(&engine.world, nc.node, m)
+    world.set_local_matrix(&app.scene, nc.node, m)
   }
   // 99-frame sprite sheet looping at 24 fps
   warrior_time += dt
-  render.set_sprite_frame(&engine.render, warrior_sprite, u32(warrior_time * 24) % 99)
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  render.set_sprite_frame(&app.renderer, warrior_sprite, u32(warrior_time * 24) % 99)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
   for &c in characters {
-    for s, i in c.scene.skinned do render.stage_bones(&engine.render, s.node.index, c.animators[i].palette)
+    for s, i in c.scene.skinned do render.stage_bones(&app.renderer, s.node.index, c.animators[i].palette)
   }
+  render.update(&app.renderer, dt)
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
-  engine := new(mjolnir.Engine)
-  engine.setup_proc = setup
-  engine.post_render_proc = on_post_render
-  engine.update_proc = update
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 1280, 720, "Mjolnir") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Mjolnir", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
   defer for &c in characters do mjolnir.gltf_scene_destroy(&c.scene)
-  mjolnir.run(engine, 1280, 720, "Mjolnir")
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  engine.debug_ui_enabled = true
-  plain_material_handle := engine.render.builtin_materials[render.Color.WHITE]
-  cube_mesh_handle := engine.render.builtin_meshes[render.Primitive.CUBE]
-  sphere_mesh_handle := engine.render.builtin_meshes[render.Primitive.SPHERE]
-  cone_mesh_handle := engine.render.builtin_meshes[render.Primitive.CONE]
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  ok := render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+  on_post_render(app)
+  return ok
+}
+
+// Spawn a node under `parent` (the world root by default) and attach `attachment` to it.
+spawn :: proc(
+  app: ^App,
+  position: [3]f32 = {0, 0, 0},
+  attachment: render.Attachment = nil,
+  parent: world.NodeHandle = {},
+) -> (
+  handle: world.NodeHandle,
+  ok: bool,
+) #optional_ok {
+  handle = world.spawn_child(&app.scene, parent if parent != {} else app.scene.root, position) or_return
+  if attachment != nil do render.attach(&app.renderer, handle.index, attachment)
+  return handle, true
+}
+
+setup :: proc(app: ^App) {
+  plain_material_handle := app.renderer.builtin_materials[render.Color.WHITE]
+  cube_mesh_handle := app.renderer.builtin_meshes[render.Primitive.CUBE]
+  sphere_mesh_handle := app.renderer.builtin_meshes[render.Primitive.SPHERE]
+  cone_mesh_handle := app.renderer.builtin_meshes[render.Primitive.CONE]
   when true {
     log.info("spawning cubes in a grid")
     space: f32 = 4.1
     cube_size: f32 = 0.3
     nx, ny, nz := 240, 1, 240
-    mat_handle := engine.render.builtin_materials[render.Color.CYAN]
+    mat_handle := app.renderer.builtin_materials[render.Color.CYAN]
     spawn_loop: for x in 0 ..< nx {
       for y in 0 ..< ny {
         for z in 0 ..< nz {
@@ -136,8 +181,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
           node_handle: world.NodeHandle
           node_ok := false
           if x % 3 == 0 {
-            node_handle, node_ok = mjolnir.spawn(
-              engine,
+            node_handle, node_ok = spawn(
+              app,
               attachment = render.MeshAttachment {
                 handle = cube_mesh_handle,
                 material = mat_handle,
@@ -145,8 +190,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
               },
             )
           } else if x % 3 == 1 {
-            node_handle, node_ok = mjolnir.spawn(
-              engine,
+            node_handle, node_ok = spawn(
+              app,
               attachment = render.MeshAttachment {
                 handle = cone_mesh_handle,
                 material = mat_handle,
@@ -154,8 +199,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
               },
             )
           } else {
-            node_handle, node_ok = mjolnir.spawn(
-              engine,
+            node_handle, node_ok = spawn(
+              app,
               attachment = render.MeshAttachment {
                 handle = sphere_mesh_handle,
                 material = mat_handle,
@@ -165,13 +210,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
           }
           if !node_ok do break spawn_loop
           world.translate(
-            &engine.world,
+            &app.scene,
             node_handle,
             world_x,
             world_y,
             world_z,
           )
-          world.scale(&engine.world, node_handle, cube_size)
+          world.scale(&app.scene, node_handle, cube_size)
         }
       }
     }
@@ -179,115 +224,115 @@ setup :: proc(engine: ^mjolnir.Engine) {
   when true {
     brick_wall_mat_handle: render.MaterialHandle
     brick_wall_mat_ok := false
-    brick_albedo_handle, brick_albedo_ret := render.create_texture_from_path(&engine.render, "assets/t_brick_floor_002_diffuse_1k.jpg",
+    brick_albedo_handle, brick_albedo_ret := render.create_texture_from_path(&app.renderer, "assets/t_brick_floor_002_diffuse_1k.jpg",
     )
     if brick_albedo_ret == .SUCCESS {
       brick_wall_mat_handle, brick_wall_mat_ok = render.create_material(
-        &engine.render,
+        &app.renderer,
         {.ALBEDO_TEXTURE},
         albedo_handle = brick_albedo_handle,
       )
     }
-    ground_mesh_handle := engine.render.builtin_meshes[render.Primitive.QUAD_XZ]
+    ground_mesh_handle := app.renderer.builtin_meshes[render.Primitive.QUAD_XZ]
     log.info("spawning ground and walls")
     size: f32 = 15.0
     if brick_wall_mat_ok {
-      ground_handle := mjolnir.spawn(
-        engine,
+      ground_handle := spawn(
+        app,
         {0, 0, 0},
         render.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      world.scale(&engine.world, ground_handle, size)
-      left_wall_handle := mjolnir.spawn(
-        engine,
+      world.scale(&app.scene, ground_handle, size)
+      left_wall_handle := spawn(
+        app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      world.translate(&engine.world, left_wall_handle, x = size, y = size)
+      world.translate(&app.scene, left_wall_handle, x = size, y = size)
       world.rotate(
-        &engine.world,
+        &app.scene,
         left_wall_handle,
         math.PI * 0.5,
         linalg.VECTOR3F32_Z_AXIS,
       )
-      world.scale(&engine.world, left_wall_handle, size)
-      right_wall_handle := mjolnir.spawn(
-        engine,
+      world.scale(&app.scene, left_wall_handle, size)
+      right_wall_handle := spawn(
+        app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      world.translate(&engine.world, right_wall_handle, x = -size, y = size)
+      world.translate(&app.scene, right_wall_handle, x = -size, y = size)
       world.rotate(
-        &engine.world,
+        &app.scene,
         right_wall_handle,
         -math.PI * 0.5,
         linalg.VECTOR3F32_Z_AXIS,
       )
-      world.scale(&engine.world, right_wall_handle, size)
-      back_wall_handle := mjolnir.spawn(
-        engine,
+      world.scale(&app.scene, right_wall_handle, size)
+      back_wall_handle := spawn(
+        app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      world.translate(&engine.world, back_wall_handle, y = size, z = -size)
+      world.translate(&app.scene, back_wall_handle, y = size, z = -size)
       world.rotate(
-        &engine.world,
+        &app.scene,
         back_wall_handle,
         math.PI * 0.5,
         linalg.VECTOR3F32_X_AXIS,
       )
-      world.scale(&engine.world, back_wall_handle, size)
-      ceiling_handle := mjolnir.spawn(
-        engine,
+      world.scale(&app.scene, back_wall_handle, size)
+      ceiling_handle := spawn(
+        app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
           handle = ground_mesh_handle,
           material = brick_wall_mat_handle,
         },
       )
-      world.translate(&engine.world, ceiling_handle, y = 2 * size)
+      world.translate(&app.scene, ceiling_handle, y = 2 * size)
       world.rotate(
-        &engine.world,
+        &app.scene,
         ceiling_handle,
         -math.PI,
         linalg.VECTOR3F32_X_AXIS,
       )
-      world.scale(&engine.world, ceiling_handle, size)
+      world.scale(&app.scene, ceiling_handle, size)
     }
   }
   when true {
     log.info("loading Hammer GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Mjolnir.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Mjolnir.glb"); ok {
       defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
-        world.translate(&engine.world, handle, 3, 1, -2)
-        world.scale(&engine.world, handle, 0.2)
+        world.translate(&app.scene, handle, 3, 1, -2)
+        world.scale(&app.scene, handle, 0.2)
       }
     }
   }
   when true {
     log.info("loading Warrior GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Warrior.glb"); ok {
-      for armature in gltf_nodes.roots do world.translate(&engine.world, armature, 0, 0, 1)
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Warrior.glb"); ok {
+      for armature in gltf_nodes.roots do world.translate(&app.scene, armature, 0, 0, 1)
       character := add_character(gltf_nodes, "idle")
       // Attach a spinning cube to the hand.L bone of the first skinned mesh
       for s, i in gltf_nodes.skinned {
         bone := animation.find_bone(&gltf_nodes.rigs[s.rig].skeleton, "hand.L") or_continue
-        hand_cube_handle := mjolnir.spawn(
-          engine,
+        hand_cube_handle := spawn(
+          app,
           parent = s.node,
           attachment = render.MeshAttachment {
             handle = cube_mesh_handle,
@@ -295,8 +340,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
             cast_shadow = true,
           },
         ) or_continue
-        world.scale(&engine.world, hand_cube_handle, 0.1)
-        nc := add_node_clip(engine, hand_cube_handle, spin_clip("cube_spin", 2.0, {0, math.PI, 0}, .CUBIC))
+        world.scale(&app.scene, hand_cube_handle, 0.1)
+        nc := add_node_clip(app, hand_cube_handle, spin_clip("cube_spin", 2.0, {0, math.PI, 0}, .CUBIC))
         nc.socket = true
         nc.character = character
         nc.skinned = i
@@ -307,44 +352,44 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   when true {
     log.info("loading Damaged Helmet GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/DamagedHelmet.glb");
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/DamagedHelmet.glb");
        ok {
       defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
-        world.translate(&engine.world, handle, 0, 1, 3)
-        world.scale(&engine.world, handle, 0.5)
+        world.translate(&app.scene, handle, 0, 1, 3)
+        world.scale(&app.scene, handle, 0.5)
       }
     }
   }
   when true {
     log.info("loading Suzanne GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Suzanne.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Suzanne.glb"); ok {
       defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
-        world.translate(&engine.world, handle, -3, 1, 0)
+        world.translate(&app.scene, handle, -3, 1, 0)
       }
     }
   }
   when true {
     log.info("loading SciFiHelmet GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/SciFiHelmet.glb");
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/SciFiHelmet.glb");
        ok {
       defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
-        world.translate(&engine.world, handle, 3, 0, 3)
-        world.scale(&engine.world, handle, 0.5)
+        world.translate(&app.scene, handle, 3, 0, 3)
+        world.scale(&app.scene, handle, 0.5)
       }
     }
   }
   when true {
     log.info("loading Fox GLTF...")
-    if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Fox2.glb"); ok {
+    if gltf_nodes, ok := mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Fox2.glb"); ok {
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
-        world.translate(&engine.world, handle, 6, 0, 0)
+        world.translate(&app.scene, handle, 6, 0, 0)
       }
       add_character(gltf_nodes, "Run")
     }
@@ -352,8 +397,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   when true {
     log.infof("creating %d lights with animated root", LIGHT_COUNT)
     // Create root node for all lights with rotation animation
-    lights_root_handle := world.spawn(&engine.world, {0, 2, 0})
-    add_node_clip(engine, lights_root_handle, spin_clip("lights_rotation", 10.0, {0, math.PI * 0.5, math.PI, math.PI * 1.5, math.PI * 2}, .LINEAR))
+    lights_root_handle := world.spawn(&app.scene, {0, 2, 0})
+    add_node_clip(app, lights_root_handle, spin_clip("lights_rotation", 10.0, {0, math.PI * 0.5, math.PI, math.PI * 1.5, math.PI * 2}, .LINEAR))
     when LIGHT_COUNT > 0 {
       // Create lights as children of the root, arranged in a circle
       radius: f32 = 8.0
@@ -378,8 +423,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         light_handle: world.NodeHandle
         if should_make_spot_light {
           light_handle =
-          mjolnir.spawn(
-            engine,
+          spawn(
+            app,
             parent = lights_root_handle,
             attachment = render.SpotLightAttachment{
               color       = color,
@@ -390,35 +435,35 @@ setup :: proc(engine: ^mjolnir.Engine) {
             },
           ) or_continue
           world.translate(
-            &engine.world,
+            &app.scene,
             light_handle,
             local_x,
             local_y,
             local_z,
           )
           world.rotate(
-            &engine.world,
+            &app.scene,
             light_handle,
             math.PI * 0.5,
             linalg.VECTOR3F32_X_AXIS,
           )
         } else {
           light_handle =
-          mjolnir.spawn(
-            engine,
+          spawn(
+            app,
             parent = lights_root_handle,
             attachment = render.PointLightAttachment{color = color, radius = 14.0, cast_shadow = true},
           ) or_continue
           world.translate(
-            &engine.world,
+            &app.scene,
             light_handle,
             local_x,
             local_y,
             local_z,
           )
         }
-        cube_handle := mjolnir.spawn(
-          engine,
+        cube_handle := spawn(
+          app,
           parent = light_handle,
           attachment = render.MeshAttachment {
             handle = cube_mesh_handle,
@@ -426,13 +471,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
             cast_shadow = false,
           },
         )
-        world.scale(&engine.world, cube_handle, 0.05)
-        world.translate(&engine.world, cube_handle, y = 0.5)
+        world.scale(&app.scene, cube_handle, 0.05)
+        world.translate(&app.scene, cube_handle, y = 0.5)
       }
     }
     when ENABLE_DIRECTIONAL_LIGHT {
-      dir_light_handle, _ := mjolnir.spawn(engine, attachment = render.directional_light_attachment(color = {0.2, 0.5, 0.9, 3.0}, radius = 20, cast_shadow = true))
-      world.rotate(&engine.world, dir_light_handle, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
+      dir_light_handle, _ := spawn(app, attachment = render.directional_light_attachment(color = {0.2, 0.5, 0.9, 3.0}, radius = 20, cast_shadow = true))
+      world.rotate(&app.scene, dir_light_handle, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
     }
   }
   when false {
@@ -440,12 +485,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
     // Create a bright white ball to test bloom effect
     emissive_handle, emissive_ok := create_material(
-      engine,
+      app,
       emissive_value = 30.0,
     )
     if emissive_ok {
       _, bright_ball_node, bright_ok := spawn(
-        engine,
+        app,
         world.MeshAttachment {
           handle = sphere_mesh_handle,
           material = emissive_handle,
@@ -460,26 +505,26 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   when true {
     log.info("Setting up particles...")
-    black_circle_texture_handle, black_circle_ret := render.create_texture_from_path(&engine.render, "assets/particles/circle_05.png",
+    black_circle_texture_handle, black_circle_ret := render.create_texture_from_path(&app.renderer, "assets/particles/circle_05.png",
     )
     black_circle_ok := black_circle_ret == .SUCCESS
-    goldstar_texture_handle, goldstar_texture_ret := render.create_texture_from_path(&engine.render, "assets/particles/star_07.png",
+    goldstar_texture_handle, goldstar_texture_ret := render.create_texture_from_path(&app.renderer, "assets/particles/star_07.png",
     )
     goldstar_texture_ok := goldstar_texture_ret == .SUCCESS
     goldstar_material_handle: render.MaterialHandle
     goldstar_material_ok := false
     if goldstar_texture_ok {
       goldstar_material_handle, goldstar_material_ok = render.create_material(
-        &engine.render,
+        &app.renderer,
         {.ALBEDO_TEXTURE},
         type = .TRANSPARENT,
         albedo_handle = goldstar_texture_handle,
       )
     }
-    psys_handle1 := world.spawn(&engine.world, {-2.0, 1.9, 0.3})
+    psys_handle1 := world.spawn(&app.scene, {-2.0, 1.9, 0.3})
     if goldstar_texture_ok {
       emitter_handle1, emitter1_ok := render.create_emitter(
-        &engine.render,
+        &app.renderer,
         texture_handle = goldstar_texture_handle,
         emission_rate = 70,
         particle_lifetime = 2.0,
@@ -494,17 +539,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
         weight_spread = 0.05,
       )
       if emitter1_ok {
-        mjolnir.spawn(
-          engine,
+        spawn(
+          app,
           parent = psys_handle1,
           attachment = render.EmitterAttachment{emitter_handle1},
         )
       }
     }
-    psys_handle2 := world.spawn(&engine.world, {2.0, 1.9, 0.3})
+    psys_handle2 := world.spawn(&app.scene, {2.0, 1.9, 0.3})
     if black_circle_ok {
       emitter_handle2, emitter2_ok := render.create_emitter(
-        &engine.render,
+        &app.renderer,
         texture_handle = black_circle_texture_handle,
         emission_rate = 70,
         particle_lifetime = 3.0,
@@ -519,30 +564,30 @@ setup :: proc(engine: ^mjolnir.Engine) {
         weight_spread = 0.3,
       )
       if emitter2_ok {
-        mjolnir.spawn(
-          engine,
+        spawn(
+          app,
           parent = psys_handle2,
           attachment = render.EmitterAttachment{emitter_handle2},
         )
       }
     }
-    forcefield_root_handle := world.spawn(&engine.world, {0, 4, 0})
-    add_node_clip(engine, forcefield_root_handle, spin_clip("forcefield_rotation", 8, {0, math.PI * 0.5, math.PI, math.PI * 1.5, math.PI * 2}, .LINEAR))
+    forcefield_root_handle := world.spawn(&app.scene, {0, 4, 0})
+    add_node_clip(app, forcefield_root_handle, spin_clip("forcefield_rotation", 8, {0, math.PI * 0.5, math.PI, math.PI * 1.5, math.PI * 2}, .LINEAR))
     forcefield_handle := world.spawn_child(
-      &engine.world,
+      &app.scene,
       forcefield_root_handle,
     )
-    world.translate(&engine.world, forcefield_handle, 3.0, 0.0, 0.0)
+    world.translate(&app.scene, forcefield_handle, 3.0, 0.0, 0.0)
     if ff, ok := render.create_forcefield(
-      &engine.render,
+      &app.renderer,
       tangent_strength = 2.0,
       strength = 20.0,
       area_of_effect = 5.0,
     ); ok {
-      render.attach(&engine.render, forcefield_handle.index, render.ForceFieldAttachment{ff})
+      render.attach(&app.renderer, forcefield_handle.index, render.ForceFieldAttachment{ff})
     }
-    handle := mjolnir.spawn(
-      engine,
+    handle := spawn(
+      app,
       parent = forcefield_handle,
       attachment = render.MeshAttachment {
         handle = sphere_mesh_handle,
@@ -550,25 +595,25 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = false,
       },
     )
-    world.scale(&engine.world, handle, 0.2)
+    world.scale(&app.scene, handle, 0.2)
   }
   when false {
-    render.debug_sphere(&engine.render, {0, 5, 0}, 5, render.debug_color(.WHITE), life = 5)
-    render.debug_cube(&engine.render, {2, 3, 0}, size = {1, 1, 1}, color = render.debug_color(.CYAN), life = 5)
-    render.debug_arrow(&engine.render, {0, 0, 0}, {3, 3, 0}, render.debug_color(.YELLOW), life = 5)
-    render.debug_axes(&engine.render, {0, 0, 0}, scale = 2)
+    render.debug_sphere(&app.renderer, {0, 5, 0}, 5, render.debug_color(.WHITE), life = 5)
+    render.debug_cube(&app.renderer, {2, 3, 0}, size = {1, 1, 1}, color = render.debug_color(.CYAN), life = 5)
+    render.debug_arrow(&app.renderer, {0, 0, 0}, {3, 3, 0}, render.debug_color(.YELLOW), life = 5)
+    render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
   }
-  // post_process.add_fog(&engine.render.post_process, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
-  // add_bloom(engine)
-  // post_process.add_crosshatch(&engine.render.post_process)
-  // add_blur(engine, 18.0)
-  // add_tonemap(engine, 1.5, 1.3)
-  // add_dof(engine)
-  // add_grayscale(engine, 0.9)
-  // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
+  // post_process.add_fog(&app.renderer.post_process, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  // add_bloom(app)
+  // post_process.add_crosshatch(&app.renderer.post_process)
+  // add_blur(app, 18.0)
+  // add_tonemap(app, 1.5, 1.3)
+  // add_dof(app)
+  // add_grayscale(app, 0.9)
+  // add_outline(app, 2.0, [3]f32{1.0, 0.0, 0.0})
   when true {
     portal_camera_handle = render.create_camera(
-      &engine.render,
+      &app.renderer,
       512, // width
       512, // height
       {5, 15, 7}, // camera position
@@ -579,14 +624,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     portal_material_ok: bool
     portal_material_handle, portal_material_ok = render.create_material(
-      &engine.render,
+      &app.renderer,
       {.ALBEDO_TEXTURE},
     )
-    portal_quad_handle := engine.render.builtin_meshes[render.Primitive.QUAD_XY]
+    portal_quad_handle := app.renderer.builtin_meshes[render.Primitive.QUAD_XY]
     portal_mesh_ok := true
     if portal_material_ok && portal_mesh_ok {
-      handle := mjolnir.spawn(
-        engine,
+      handle := spawn(
+        app,
         {0, 0, 0},
         attachment = render.MeshAttachment {
           handle = portal_quad_handle,
@@ -594,21 +639,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
           cast_shadow = false,
         },
       )
-      world.translate(&engine.world, handle, 0, 3, -5)
-      world.scale(&engine.world, handle, 2.0)
+      world.translate(&app.scene, handle, 0, 3, -5)
+      world.scale(&app.scene, handle, 2.0)
     }
   }
   when true {
     log.info(
       "spawning Warrior effect sprite with animation (99 frames @ 24fps)...",
     )
-    warrior_sprite_texture, warrior_sprite_ret := render.create_texture_from_path(&engine.render, "assets/Warrior_Sheet-Effect.png",
+    warrior_sprite_texture, warrior_sprite_ret := render.create_texture_from_path(&app.renderer, "assets/Warrior_Sheet-Effect.png",
     )
     if warrior_sprite_ret == .SUCCESS {
-      sprite_quad := engine.render.builtin_meshes[render.Primitive.QUAD_XY]
+      sprite_quad := app.renderer.builtin_meshes[render.Primitive.QUAD_XY]
       // 6x17 sprite sheet using frames 0-98, animated in update
       sprite_handle, sprite_ok := render.create_sprite(
-        &engine.render,
+        &app.renderer,
         warrior_sprite_texture,
         frame_columns = 6,
         frame_rows = 17,
@@ -616,7 +661,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       warrior_sprite = sprite_handle
       if sprite_ok {
         sprite_material, mat_ok := render.create_material(
-          &engine.render,
+          &app.renderer,
           {.ALBEDO_TEXTURE},
           type = .TRANSPARENT,
           albedo_handle = warrior_sprite_texture,
@@ -627,13 +672,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
             mesh_handle   = sprite_quad,
             material      = sprite_material,
           }
-          handle, spawn_ok := mjolnir.spawn(
-            engine,
+          handle, spawn_ok := spawn(
+            app,
             {4, 1.5, 0},
             sprite_attachment,
           )
           if spawn_ok {
-            world.scale(&engine.world, handle, 3.0)
+            world.scale(&app.scene, handle, 3.0)
           }
         }
       }
@@ -642,26 +687,26 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("setup complete")
 }
 
-on_key :: proc(engine: ^mjolnir.Engine, key: input.Key, pressed: bool) {
+on_key :: proc(app: ^App, key: input.Key, pressed: bool) {
   log.infof("key %v %v", key, "PRESS" if pressed else "RELEASE")
   if !pressed do return
   if key == .TAB {
-    if _, is_free := engine.camera_controller.data.(render.FreeCameraData); is_free {
-      engine.camera_controller = render.orbit_controller()
+    if _, is_free := app.camera.data.(render.FreeCameraData); is_free {
+      app.camera = render.orbit_controller()
     } else {
-      engine.camera_controller = render.free_controller()
+      app.camera = render.free_controller()
     }
   }
 }
 
-on_post_render :: proc(engine: ^mjolnir.Engine) {
-  if material, ok := render.material(&engine.render, portal_material_handle);
+on_post_render :: proc(app: ^App) {
+  if material, ok := render.material(&app.renderer, portal_material_handle);
      ok {
     material.albedo = render.camera_attachment(
-      &engine.render,
+      &app.renderer,
       portal_camera_handle,
       .FINAL_IMAGE,
     )
-    render.mark_material_dirty(&engine.render, portal_material_handle)
+    render.mark_material_dirty(&app.renderer, portal_material_handle)
   }
 }

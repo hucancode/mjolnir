@@ -282,6 +282,20 @@ mark_material_dirty :: proc(self: ^Manager, handle: MaterialHandle) {
 
 // ---------- builtins ----------
 
+// A builtin primitive mesh drawn with a builtin color material.
+primitive :: proc(
+  self: ^Manager,
+  shape: Primitive = .CUBE,
+  color: Color = .WHITE,
+  cast_shadow := true,
+) -> MeshAttachment {
+  return {
+    handle = self.builtin_meshes[shape],
+    material = self.builtin_materials[color],
+    cast_shadow = cast_shadow,
+  }
+}
+
 @(private)
 init_builtin_materials :: proc(self: ^Manager) {
   colors := [Color][4]f32 {

@@ -1,27 +1,61 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
+import "core:log"
 import "core:math"
 
-scene: mjolnir.GltfScene
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+  gltf:     mjolnir.GltfScene,
+}
 
 main :: proc() {
-  defer mjolnir.gltf_scene_destroy(&scene)
-  mjolnir.run_app({
-    title  = "GLTF Static",
-    setup  = proc(engine: ^mjolnir.Engine) {
-      render.main_camera_look_at(&engine.render, {5, 6, 5}, {0, 5, 0})
-      scene = mjolnir.load_gltf(engine, "assets/Duck.glb")
-      mjolnir.spawn(engine, attachment = render.directional_light_attachment())
-    },
-    update = proc(engine: ^mjolnir.Engine, dt: f32) {
-      rot := dt * math.PI * 0.5
-      for h in scene.roots do world.rotate_by(&engine.world, h, rot)
-      world.update(&engine.world)
-      for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-      for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
-    },
-  })
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 800, 600, "GLTF Static") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "GLTF Static", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+
+  render.main_camera_look_at(&app.renderer, {5, 6, 5}, {0, 5, 0})
+  app.gltf = mjolnir.load_gltf(&app.scene, &app.renderer, "assets/Duck.glb")
+  defer mjolnir.gltf_scene_destroy(&app.gltf)
+  light := world.spawn(&app.scene)
+  render.attach(&app.renderer, light.index, render.directional_light_attachment())
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+}
+
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  rot := dt * math.PI * 0.5
+  for h in app.gltf.roots do world.rotate_by(&app.scene, h, rot)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
+}
+
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

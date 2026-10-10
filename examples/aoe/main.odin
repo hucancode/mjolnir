@@ -2,6 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/geometry"
 import "../../mjolnir/world"
@@ -21,18 +22,35 @@ clicked_cube: world.NodeHandle
 
 phys: physics.World
 
-main :: proc() {
-  physics.init(&phys)
-  defer physics.shutdown(&phys)
-  mjolnir.run_app({title = "AOE Query", setup = setup, update = update})
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
+main :: proc() {
+  context.logger = log.create_console_logger()
+  physics.init(&phys)
+  defer physics.shutdown(&phys)
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 800, 600, "AOE Query") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "AOE Query", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+
   cube_body_to_mesh = make(map[physics.TriggerHandle]world.NodeHandle)
-  cube_mesh := engine.render.builtin_meshes[.CUBE]
-  sphere_mesh := engine.render.builtin_meshes[.SPHERE]
-  cube_mat := engine.render.builtin_materials[.CYAN]
-  effector_mat := render.material_pbr(&engine.render, emissive = 5.0)
+  cube_mesh := app.renderer.builtin_meshes[.CUBE]
+  sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
+  cube_mat := app.renderer.builtin_materials[.CYAN]
+  effector_mat := render.material_pbr(&app.renderer, emissive = 5.0)
   grid_size := 50
   spacing: f32 = 1.0
   log.infof("Spawning %dx%d grid of cubes...", grid_size, grid_size)
@@ -41,29 +59,39 @@ setup :: proc(engine: ^mjolnir.Engine) {
     world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
     pos := [3]f32{world_x, 0.5, world_z}
     half := 0.5 * cube_scale
-    parent := world.spawn(&engine.world, pos) or_continue
+    parent := world.spawn(&app.scene, pos) or_continue
     body_handle := physics.create_trigger(
       &phys,
       pos,
       collider = physics.BoxCollider{half_extents = {half, half, half}},
       user = world.Handle(parent),
     ) or_continue
-    mh := mjolnir.spawn_mesh(engine, cube_mesh, cube_mat, cast_shadow = false, parent = parent) or_continue
-    world.scale_xyz(&engine.world, mh, half, half, half)
+    mh := world.spawn_child(&app.scene, parent) or_continue
+    render.attach(&app.renderer, mh.index, render.MeshAttachment{handle = cube_mesh, material = cube_mat, cast_shadow = false})
+    world.scale_xyz(&app.scene, mh, half, half, half)
     append(&cube_mesh_handles, mh)
     cube_body_to_mesh[body_handle] = mh
   }
   effector_position = {0, 1, 0}
-  effector_sphere = mjolnir.spawn_mesh(engine, sphere_mesh, effector_mat, cast_shadow = false)
-  world.translate(&engine.world, effector_sphere, effector_position)
-  world.scale(&engine.world, effector_sphere, 0.5)
-  render.main_camera_look_at(&engine.render, {10, 30, 10}, {0, 0, 0})
+  effector_sphere = world.spawn(&app.scene)
+  render.attach(&app.renderer, effector_sphere.index, render.MeshAttachment{handle = sphere_mesh, material = effector_mat, cast_shadow = false})
+  world.translate(&app.scene, effector_sphere, effector_position)
+  world.scale(&app.scene, effector_sphere, 0.5)
+  render.main_camera_look_at(&app.renderer, {10, 30, 10}, {0, 0, 0})
   log.infof("AOE test setup complete: %d cubes", len(cube_mesh_handles))
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  mouse_click: if input.mouse_pressed(&engine.input, .LEFT) && !engine.mouse_captured {
-    ray_origin, ray_dir, ok := mjolnir.cursor_world_ray(engine)
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  mouse_click: if input.mouse_pressed(&app.input, .LEFT) && !app.input.mouse_captured {
+    ray_origin, ray_dir, ok := render.cursor_ray(&app.renderer, app.input.cursor)
     if !ok do break mouse_click
     log.infof("Ray: origin=%v, direction=%v", ray_origin, ray_dir)
     hit := physics.raycast_trigger(&phys, geometry.Ray{origin = ray_origin, direction = ray_dir})
@@ -76,16 +104,22 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   }
   orbit_angle += dt * 0.5
   effector_position = {math.cos(orbit_angle) * orbit_radius, 1.0, math.sin(orbit_angle) * orbit_radius}
-  world.translate(&engine.world, effector_sphere, effector_position)
-  for h in cube_mesh_handles do world.scale(&engine.world, h, cube_scale)
+  world.translate(&app.scene, effector_sphere, effector_position)
+  for h in cube_mesh_handles do world.scale(&app.scene, h, cube_scale)
   affected: [dynamic]physics.TriggerHandle
   defer delete(affected)
   physics.query_triggers_in_sphere(&phys, effector_position, effect_radius, &affected)
-  for bh in affected do if mh, ok := cube_body_to_mesh[bh]; ok do world.scale(&engine.world, mh, 0.1)
-  world.scale(&engine.world, clicked_cube, cube_scale * 3.0)
+  for bh in affected do if mh, ok := cube_body_to_mesh[bh]; ok do world.scale(&app.scene, mh, 0.1)
+  world.scale(&app.scene, clicked_cube, cube_scale * 3.0)
   physics.step(&phys, dt)
-  for b in physics.body_poses(&phys) do world.set_world_pose(&engine.world, world.NodeHandle(b.user), b.position, b.rotation)
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
+}
+
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

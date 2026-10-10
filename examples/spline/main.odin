@@ -2,6 +2,8 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/animation"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:log"
@@ -11,16 +13,42 @@ import "core:math/ease"
 CUBE_COUNT :: 50
 ANIMATION_DURATION :: 8.0
 
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+  time:     f32,
+}
+
 cubes: [CUBE_COUNT]world.NodeHandle
 spline: animation.Spline([3]f32)
 
 main :: proc() {
-  mjolnir.run_app({title = "Spline", setup = setup, update = update})
-  animation.spline_destroy(&spline)
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 800, 600, "Spline") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Spline", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+  defer animation.spline_destroy(&spline)
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  render.main_camera_look_at(&engine.render, {0, 10, 0}, {0, 0, 0})
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+setup :: proc(app: ^App) {
+  render.main_camera_look_at(&app.renderer, {0, 10, 0}, {0, 0, 0})
 
   CONTROL_POINTS :: 10
   spline = animation.spline_create([3]f32, CONTROL_POINTS)
@@ -34,32 +62,45 @@ setup :: proc(engine: ^mjolnir.Engine) {
   animation.spline_build_arc_table(&spline, 200)
 
   mats := [?]render.MaterialHandle{
-    engine.render.builtin_materials[.RED], engine.render.builtin_materials[.GREEN],
-    engine.render.builtin_materials[.BLUE], engine.render.builtin_materials[.YELLOW],
-    engine.render.builtin_materials[.CYAN], engine.render.builtin_materials[.MAGENTA],
-    engine.render.builtin_materials[.WHITE], engine.render.builtin_materials[.GRAY],
-    engine.render.builtin_materials[.BLACK],
+    app.renderer.builtin_materials[.RED], app.renderer.builtin_materials[.GREEN],
+    app.renderer.builtin_materials[.BLUE], app.renderer.builtin_materials[.YELLOW],
+    app.renderer.builtin_materials[.CYAN], app.renderer.builtin_materials[.MAGENTA],
+    app.renderer.builtin_materials[.WHITE], app.renderer.builtin_materials[.GRAY],
+    app.renderer.builtin_materials[.BLACK],
   }
-  cube := engine.render.builtin_meshes[.CUBE]
+  cube := app.renderer.builtin_meshes[.CUBE]
   for i in 0 ..< CUBE_COUNT {
-    cubes[i] = mjolnir.spawn(engine, {0, 0, 0}, render.MeshAttachment{handle = cube, material = mats[i % len(mats)]})
-    world.scale(&engine.world, cubes[i], 0.3)
+    cubes[i] = world.spawn(&app.scene, {0, 0, 0})
+    render.attach(&app.renderer, cubes[i].index, render.MeshAttachment{handle = cube, material = mats[i % len(mats)]})
+    world.scale(&app.scene, cubes[i], 0.3)
   }
-  mjolnir.spawn_ground(engine, 20.0, position = {0, -2, 0})
-  mjolnir.spawn(engine, {0, 10, 0}, render.point_light_attachment({1, 1, 1, 1}, 20.0, true))
+  ground := world.spawn(&app.scene, {0, -2, 0})
+  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  world.scale(&app.scene, ground, 20.0)
+  light := world.spawn(&app.scene, {0, 10, 0})
+  render.attach(&app.renderer, light.index, render.point_light_attachment({1, 1, 1, 1}, 20.0, true))
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+update :: proc(app: ^App, dt: f32) {
+  app.time += dt
+  platform.read_input(&app.window, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   total_length := animation.spline_arc_length(spline)
   for i in 0 ..< CUBE_COUNT {
     offset := f32(i) / f32(CUBE_COUNT) * total_length
-    elapsed := mjolnir.time_since_start(engine)
+    elapsed := app.time
     current_s := math.mod_f32(elapsed * (total_length / ANIMATION_DURATION) + offset, total_length)
     normalized := current_s / total_length
     tweened := ease.ease(.Quadratic_In_Out, normalized) * total_length
-    world.translate(&engine.world, cubes[i], animation.spline_sample_uniform(spline, tweened))
+    world.translate(&app.scene, cubes[i], animation.spline_sample_uniform(spline, tweened))
   }
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
+}
+
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

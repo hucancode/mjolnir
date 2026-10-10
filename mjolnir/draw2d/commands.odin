@@ -48,3 +48,11 @@ RenderCommand :: union {
 	DrawTextCommand,
 	DrawMeshCommand,
 }
+
+// One frame of 2D output. `atlas` holds the producer's R8 font atlas
+// (`atlas_size` texels) only on frames where it changed; otherwise it is empty.
+DrawList :: struct {
+	commands:   []RenderCommand,
+	atlas:      []u8,
+	atlas_size: [2]u32,
+}

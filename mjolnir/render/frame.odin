@@ -2,6 +2,7 @@ package render
 
 import "bindless"
 import cont "../containers"
+import "core:log"
 import geom "../geometry"
 import "gpu"
 import "ambient"
@@ -504,27 +505,34 @@ record_frame :: proc(
   return .SUCCESS
 }
 
-// Render and present one frame: upload staged changes, acquire a swapchain
-// image, record, submit and present, then advance deferred destruction. An
-// out-of-date swapchain is rebuilt at `framebuffer_size`. Renders nothing
-// while no level is set up.
+// Render and present one frame: close the debug UI opened by debug_ui (plus
+// the stats panel when `show_stats`), upload staged changes, acquire a
+// swapchain image, record, submit and present, then advance deferred
+// destruction. An out-of-date swapchain is rebuilt at `framebuffer_size`.
+// Renders nothing while no level is set up. Returns false on a GPU error.
 frame :: proc(
   self: ^Manager,
   framebuffer_size: [2]u32,
   dpi_scale: f32,
-  debug_ui_enabled: bool,
-) -> vk.Result {
-  if !self.internal.level_ready do return .SUCCESS
+  show_stats := false,
+) -> bool {
+  if show_stats do stats_panel(self)
+  debug_ui_drawn := debug_ui_close(self)
+  if !self.internal.level_ready do return true
   gctx := &self.gctx
   res := flush(self, gctx, self.frame_index)
-  if res == .SUCCESS do res = present(self, debug_ui_enabled)
+  if res == .SUCCESS do res = present(self, debug_ui_drawn)
   // reclaims GPU resources freed FRAMES_IN_FLIGHT frames ago
   gpu.deferred_tick(gctx)
   bindless.texture_manager_tick(&self.texture_manager, gctx)
   if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-    return recreate_swapchain(self, framebuffer_size, dpi_scale)
+    res = recreate_swapchain(self, framebuffer_size, dpi_scale)
   }
-  return res
+  if res != .SUCCESS {
+    log.errorf("Error during rendering %v", res)
+    return false
+  }
+  return true
 }
 
 @(private)

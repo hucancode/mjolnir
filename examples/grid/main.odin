@@ -1,6 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
@@ -11,20 +13,44 @@ import mu "vendor:microui"
 
 GRID_SIZES :: [3]int{5, 256, 300}
 
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
+
 current_size_index: int = -1
 pending_index: int = -1
 despawn_cooldown: int
 grid_root: world.NodeHandle
 
 main :: proc() {
-  mjolnir.run_app({title = "Grid", debug_ui = true, setup = setup, update = update, pre_render = debug_ui})
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 800, 600, "Grid") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Grid", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+
+  light := world.spawn(&app.scene, {10, 18, 10})
+  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.97, 0.92, 3.0}, 60.0, false))
+  world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  render.main_camera_look_at(&app.renderer, {14, 14, 14}, {0, 0, 0})
+  pending_index = 0
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  light := mjolnir.spawn(engine, {10, 18, 10}, render.directional_light_attachment({1, 0.97, 0.92, 3.0}, 60.0, false))
-  world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-  render.main_camera_look_at(&engine.render, {14, 14, 14}, {0, 0, 0})
-  pending_index = 0
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
 }
 
 // Split despawn/respawn across FRAMES_IN_FLIGHT frames to let Remove ops drain.
@@ -33,21 +59,25 @@ request_rebuild :: proc(idx: int) {
   pending_index = idx
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   if despawn_cooldown > 0 {
     despawn_cooldown -= 1
-    if despawn_cooldown == 0 do spawn_grid(engine, pending_index)
+    if despawn_cooldown == 0 do spawn_grid(app, pending_index)
   } else if pending_index >= 0 && pending_index != current_size_index {
-    if grid_root.index != 0 do world.despawn(&engine.world, grid_root)
+    if grid_root.index != 0 do world.despawn(&app.scene, grid_root)
     grid_root = {}
     despawn_cooldown = 2
   }
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
 }
 
-spawn_grid :: proc(engine: ^mjolnir.Engine, idx: int) {
+spawn_grid :: proc(app: ^App, idx: int) {
   current_size_index = idx
   pending_index = -1
   sizes := GRID_SIZES
@@ -55,14 +85,16 @@ spawn_grid :: proc(engine: ^mjolnir.Engine, idx: int) {
   color := render.Color.GREEN if n > 5 else render.Color.YELLOW
   half := f32(n) * 0.5
   log.infof("spawning %dx%d cubes", n, n)
-  grid_root = world.spawn(&engine.world, {0, 0, 0})
+  grid_root = world.spawn(&app.scene, {0, 0, 0})
   for z in 0 ..< n do for x in 0 ..< n {
-    mjolnir.spawn_primitive_mesh(engine, .CUBE, color, position = {(f32(x) - half) * 4, 0, (f32(z) - half) * 4}, parent = grid_root)
+    cube := world.spawn_child(&app.scene, grid_root, {(f32(x) - half) * 4, 0, (f32(z) - half) * 4})
+    render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, color))
   }
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  ctx := render.debug_ui(&app.renderer)
   if mu.window(ctx, "Grid", {540, 20, 240, 200}, {.NO_CLOSE}) {
     sizes := GRID_SIZES
     label_text: string = "<loading>"
@@ -74,4 +106,5 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
       if .SUBMIT in mu.button(ctx, fmt.tprintf("%dx%d", n, n)) do request_rebuild(i)
     }
   }
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

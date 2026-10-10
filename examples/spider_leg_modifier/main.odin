@@ -1,6 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/animation"
 import "../../mjolnir/world"
@@ -39,25 +41,42 @@ body_current_pos: [3]f32 = {0, 2, 0}
 GROUP_A := [3]int{0, 2, 4}
 GROUP_B := [3]int{1, 3, 5}
 
-main :: proc() {
-  defer mjolnir.gltf_scene_destroy(&scene)
-  mjolnir.run_app({
-    title      = "Spider Leg",
-    width      = 900,
-    height     = 700,
-    debug_ui   = true,
-    setup      = setup,
-    update     = update,
-    pre_render = debug_ui,
-  })
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  render.main_camera_look_at(&engine.render, {0, 30, 15}, {0, 0, 0})
-  scene = mjolnir.load_gltf(engine, "assets/spider.glb")
+main :: proc() {
+  context.logger = log.create_console_logger()
+  defer mjolnir.gltf_scene_destroy(&scene)
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 900, 700, "Spider Leg") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Spider Leg", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+}
+
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+setup :: proc(app: ^App) {
+  render.main_camera_look_at(&app.renderer, {0, 30, 15}, {0, 0, 0})
+  scene = mjolnir.load_gltf(&app.scene, &app.renderer, "assets/spider.glb")
   if len(scene.roots) == 0 || len(scene.skinned) == 0 do return
   spider_root_node = scene.roots[0]
-  world.translate(&engine.world, spider_root_node, y = 5)
+  world.translate(&app.scene, spider_root_node, y = 5)
   spider_mesh_node = scene.skinned[0].node
   rig = &scene.rigs[scene.skinned[0].rig]
   skel := &rig.skeleton
@@ -94,12 +113,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.infof("Added spider leg modifiers for all 6 legs (layer %d)", spider_leg_layer_index)
   }
 
-  ground_plane = mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY)
-  world.scale(&engine.world, ground_plane, [3]f32{20, 0.2, 20})
-  mjolnir.spawn(engine, {-15, 15, 20}, render.point_light_attachment({0.6, 0.7, 1.0, 1.5}, 40.0, false))
+  ground_plane = world.spawn(&app.scene)
+  render.attach(&app.renderer, ground_plane.index, render.primitive(&app.renderer, .CUBE, .GRAY))
+  world.scale(&app.scene, ground_plane, [3]f32{20, 0.2, 20})
+  light := world.spawn(&app.scene, {-15, 15, 20})
+  render.attach(&app.renderer, light.index, render.point_light_attachment({0.6, 0.7, 1.0, 1.5}, 40.0, false))
 }
 
-apply_group :: proc(engine: ^mjolnir.Engine, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
+apply_group :: proc(app: ^App, group: []int, lift_height, lift_duration, lift_frequency, time_offset: f32) {
   for leg_index in group {
     animation.set_spider_leg_params(&animator, spider_leg_layer_index, leg_index,
       lift_height = lift_height, lift_frequency = lift_frequency,
@@ -108,7 +129,10 @@ apply_group :: proc(engine: ^mjolnir.Engine, group: []int, lift_height, lift_dur
   }
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   if body_anim_enabled {
     animation_time += dt
     body_x := f32(body_amplitude) * math.sin(animation_time * f32(body_speed) * 2 * math.PI)
@@ -125,29 +149,31 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     if step_len > max_step do step *= max_step / step_len
     body_current_pos += step
   }
-  world.translate(&engine.world, spider_root_node, body_current_pos)
+  world.translate(&app.scene, spider_root_node, body_current_pos)
 
   if spider_leg_layer_index >= 0 {
-    apply_group(engine, GROUP_A[:], f32(lift_height_a), f32(lift_duration_a), f32(lift_frequency_shared), 0.0)
-    apply_group(engine, GROUP_B[:], f32(lift_height_b), f32(lift_duration_b), f32(lift_frequency_shared), f32(phase_offset_b))
+    apply_group(app, GROUP_A[:], f32(lift_height_a), f32(lift_duration_a), f32(lift_frequency_shared), 0.0)
+    apply_group(app, GROUP_B[:], f32(lift_height_b), f32(lift_duration_b), f32(lift_frequency_shared), f32(phase_offset_b))
   }
 
-  if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&engine.world, spider_mesh_node))
+  if rig != nil do animation.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, spider_mesh_node))
 
   red := [4]f32{1, 0.2, 0.2, 1}
   for i in 0 ..< 6 {
     target, ok := animation.spider_leg_target(&animator, spider_leg_layer_index, i)
     if !ok do continue
-    render.debug_sphere(&engine.render, target^, 0.2, red)
+    render.debug_sphere(&app.renderer, target^, 0.2, red)
   }
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
-  if rig != nil do render.stage_bones(&engine.render, spider_mesh_node.index, animator.palette)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  if rig != nil do render.stage_bones(&app.renderer, spider_mesh_node.index, animator.palette)
+  render.update(&app.renderer, dt)
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  ctx := render.debug_ui(&app.renderer)
   if mu.window(ctx, "Spider Legs", {500, 20, 340, 480}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Body motion")
@@ -168,4 +194,5 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
     mu.label(ctx, "Lift height"); mu.slider(ctx, &lift_height_b, 0.0, 5.0)
     mu.label(ctx, "Lift duration (s)"); mu.slider(ctx, &lift_duration_b, 0.05, 2.0)
   }
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

@@ -3,9 +3,9 @@ title: UI
 ---
 
 Layer 2. Logical 2D UI — widget tree, layout, hit-testing, event
-dispatch, font atlas. Its output is a list of `draw2d` commands
-(`build_commands`); drawing them is the renderer's job
-(`render.stage_ui`). Input arrives as an `input.State` snapshot.
+dispatch, font atlas. Its output is a `draw2d.DrawList`
+(`draw_list`): the frame's commands plus the font atlas when it
+changed. Drawing them is the renderer's job (`render.stage_ui`). Input arrives as an `input.State` snapshot.
 `ui.Vertex2D` and `ui.NO_TEXTURE` re-export the `draw2d` types that
 appear in widget APIs.
 
@@ -36,7 +36,7 @@ edit fields directly. Shared fields go through
 
 ## Layout
 
-Layout is parent-relative + z-ordered. `build_commands` resolves
+Layout is parent-relative + z-ordered. `draw_list` resolves
 every `Box` subtree (`compute_layout_all`) before generating draw
 commands.
 
@@ -59,17 +59,16 @@ mouse handler on themselves or an ancestor — top-down by z-order.
 - `KEY_DOWN` / `KEY_UP` (with OS auto-repeat flagged) and text events
   to the focused widget.
 
-Every event bubbles to the parents. `wants_mouse` reports that the UI
-owns the mouse (a widget is hovered or captured); `wants_keyboard`
-that the focused widget handles key or text events. The engine uses
-both to set `engine.mouse_captured` / `engine.keyboard_captured`.
+Every event bubbles to the parents. `process_input` skips the tick
+while another consumer has captured the mouse. Otherwise it marks the
+mouse captured while a widget is hovered or holds a press, and the
+keyboard captured while the focused widget handles key or text
+events.
 `pick_widget` and the `dispatch_*_event` procs are available for
 custom routing.
 
 ## Text
 
 Fontstash backs glyph rasterization into a single atlas managed by
-the UI system. Glyphs are cached on first use. `take_font_atlas`
-returns the atlas pixels and whether glyphs were added since the last
-call; the engine uploads them with `render.stage_ui_font_atlas` when
-they change.
+the UI system. Glyphs are cached on first use. `draw_list` carries the atlas pixels
+only on frames where glyphs were added.

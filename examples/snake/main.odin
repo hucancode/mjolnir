@@ -2,6 +2,7 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/ui"
 import "../../mjolnir/world"
@@ -10,6 +11,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
+import "core:os"
 
 GRID :: 15
 CELL :: 1.0
@@ -40,53 +42,91 @@ Game :: struct {
 
 g: Game
 
-main :: proc() {
-  mjolnir.run_app({
-    title     = "Snake 3D",
-    width     = 1024,
-    height    = 768,
-    setup     = setup,
-    update    = update,
-  })
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+  gui:      ui.System,
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
+main :: proc() {
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 1024, 768, "Snake 3D") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Snake 3D", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+  font, err := os.read_entire_file("assets/Outfit-Regular.ttf", context.allocator)
+  if err != nil do return
+  defer delete(font)
+  if !ui.init(&app.gui, font) do return
+  defer ui.shutdown(&app.gui)
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+}
+
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  render.stage_ui(&app.renderer, ui.draw_list(&app.gui))
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+spawn_primitive :: proc(app: ^App, shape: render.Primitive, color: render.Color, pos: [3]f32 = {}) -> world.NodeHandle {
+  n := world.spawn(&app.scene, pos)
+  render.attach(&app.renderer, n.index, render.primitive(&app.renderer, shape, color))
+  return n
+}
+
+setup :: proc(app: ^App) {
   half := f32(GRID) * CELL * 0.5
   wall_t :: 0.2
   wall_h :: 0.5
 
-  floor := mjolnir.spawn_primitive_mesh(engine, .CUBE, .GRAY, {0, -0.5, 0})
-  world.scale_xyz(&engine.world, floor, half, 0.5, half)
+  floor := spawn_primitive(app, .CUBE, .GRAY, {0, -0.5, 0})
+  world.scale_xyz(&app.scene, floor, half, 0.5, half)
 
-  spawn_wall(engine, {0, wall_h, half + wall_t}, half + wall_t * 2, wall_h, wall_t)
-  spawn_wall(engine, {0, wall_h, -(half + wall_t)}, half + wall_t * 2, wall_h, wall_t)
-  spawn_wall(engine, {half + wall_t, wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
-  spawn_wall(engine, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
+  spawn_wall(app, {0, wall_h, half + wall_t}, half + wall_t * 2, wall_h, wall_t)
+  spawn_wall(app, {0, wall_h, -(half + wall_t)}, half + wall_t * 2, wall_h, wall_t)
+  spawn_wall(app, {half + wall_t, wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
+  spawn_wall(app, {-(half + wall_t), wall_h, 0}, wall_t, wall_h, half + wall_t * 2)
 
-  render.main_camera_look_at(&engine.render, {0, 18, 13}, {0, 0, 0})
+  render.main_camera_look_at(&app.renderer, {0, 18, 13}, {0, 0, 0})
 
-  spot := mjolnir.spawn(engine, {0, 10, 4}, render.spot_light_attachment({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true))
-  world.rotate(&engine.world, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
+  spot := world.spawn(&app.scene, {0, 10, 4})
+  render.attach(&app.renderer, spot.index, render.spot_light_attachment({0.2, 0.95, 0.85, 1.0}, 12.0, math.PI * 0.35, true))
+  world.rotate(&app.scene, spot, math.PI * 0.55, linalg.VECTOR3F32_X_AXIS)
 
-  g.score_label, _ = ui.create_text2d(&engine.ui, position = {20, 20}, text = "Score: 0", font_size = 28, color = {255, 255, 255, 255})
-  g.best_label, _  = ui.create_text2d(&engine.ui, position = {20, 60}, text = "Best: 0",  font_size = 24, color = {255, 220, 100, 255})
+  g.score_label, _ = ui.create_text2d(&app.gui, position = {20, 20}, text = "Score: 0", font_size = 28, color = {255, 255, 255, 255})
+  g.best_label, _  = ui.create_text2d(&app.gui, position = {20, 60}, text = "Best: 0",  font_size = 24, color = {255, 220, 100, 255})
 
-  g.head_node = mjolnir.spawn_primitive_mesh(engine, .CUBE, .YELLOW)
-  world.scale(&engine.world, g.head_node, SEGMENT_SCALE)
-  g.food_node = mjolnir.spawn_primitive_mesh(engine, .SPHERE, .RED)
-  world.scale(&engine.world, g.food_node, FOOD_SCALE)
+  g.head_node = spawn_primitive(app, .CUBE, .YELLOW)
+  world.scale(&app.scene, g.head_node, SEGMENT_SCALE)
+  g.food_node = spawn_primitive(app, .SPHERE, .RED)
+  world.scale(&app.scene, g.food_node, FOOD_SCALE)
 
-  reset_game(engine)
+  reset_game(app)
   log.info("Controls: WASD or arrows. Auto-restart on game over.")
 }
 
-spawn_wall :: proc(engine: ^mjolnir.Engine, pos: [3]f32, sx, sy, sz: f32) {
-  h := mjolnir.spawn_primitive_mesh(engine, .CUBE, .WHITE, pos)
-  world.scale_xyz(&engine.world, h, sx, sy, sz)
+spawn_wall :: proc(app: ^App, pos: [3]f32, sx, sy, sz: f32) {
+  h := spawn_primitive(app, .CUBE, .WHITE, pos)
+  world.scale_xyz(&app.scene, h, sx, sy, sz)
 }
 
-reset_game :: proc(engine: ^mjolnir.Engine) {
-  for h in g.body_nodes do world.despawn(&engine.world, h)
+reset_game :: proc(app: ^App) {
+  for h in g.body_nodes do world.despawn(&app.scene, h)
   clear(&g.body_nodes); clear(&g.body)
 
   mid: i32 = GRID / 2
@@ -94,35 +134,35 @@ reset_game :: proc(engine: ^mjolnir.Engine) {
   append(&g.body, Cell{mid - 1, mid})
   append(&g.body, Cell{mid - 2, mid})
   for i in 1 ..< len(g.body) {
-    append(&g.body_nodes, spawn_body_node(engine, g.body[i]))
+    append(&g.body_nodes, spawn_body_node(app, g.body[i]))
   }
-  place_node(engine, g.head_node, g.body[0], SEGMENT_Y)
+  place_node(app, g.head_node, g.body[0], SEGMENT_Y)
 
   g.dir = {1, 0}; g.pending_dir = {1, 0}
   g.timer = 0; g.score = 0; g.alive = true
 
-  place_food(engine)
-  refresh_score_ui(engine)
+  place_food(app)
+  refresh_score_ui(app)
 }
 
-spawn_body_node :: proc(engine: ^mjolnir.Engine, c: Cell) -> world.NodeHandle {
-  h := mjolnir.spawn_primitive_mesh(engine, .CUBE, .GREEN, cell_to_world(c, SEGMENT_Y))
-  world.scale(&engine.world, h, SEGMENT_SCALE)
+spawn_body_node :: proc(app: ^App, c: Cell) -> world.NodeHandle {
+  h := spawn_primitive(app, .CUBE, .GREEN, cell_to_world(c, SEGMENT_Y))
+  world.scale(&app.scene, h, SEGMENT_SCALE)
   return h
 }
 
-place_node :: proc(engine: ^mjolnir.Engine, h: world.NodeHandle, c: Cell, y: f32) {
-  world.translate(&engine.world, h, cell_to_world(c, y))
+place_node :: proc(app: ^App, h: world.NodeHandle, c: Cell, y: f32) {
+  world.translate(&app.scene, h, cell_to_world(c, y))
 }
 
-place_food :: proc(engine: ^mjolnir.Engine) {
+place_food :: proc(app: ^App) {
   for {
     c := Cell{i32(rand.int31_max(GRID)), i32(rand.int31_max(GRID))}
     occupied := false
     for b in g.body do if b == c { occupied = true; break }
     if !occupied { g.food = c; break }
   }
-  place_node(engine, g.food_node, g.food, FOOD_Y)
+  place_node(app, g.food_node, g.food, FOOD_Y)
 }
 
 cell_to_world :: proc(c: Cell, y: f32) -> [3]f32 {
@@ -141,17 +181,21 @@ on_key :: proc(key: input.Key) {
   }
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  step_game(engine, dt)
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  ui.process_input(&app.gui, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  step_game(app, dt)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
 }
 
-step_game :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  if !engine.keyboard_captured {
+step_game :: proc(app: ^App, dt: f32) {
+  if !app.input.keyboard_captured {
     it := 0
-    for key, pressed in input.next_key_edge(&engine.input, &it) do if pressed do on_key(key)
+    for key, pressed in input.next_key_edge(&app.input, &it) do if pressed do on_key(key)
   }
   g.timer += dt
   if g.timer < TICK do return
@@ -159,7 +203,7 @@ step_game :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
   if !g.alive {
     if g.score > g.best do g.best = g.score
-    reset_game(engine)
+    reset_game(app)
     return
   }
 
@@ -176,25 +220,25 @@ step_game :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
   old_head := g.body[0]
   if ate {
-    new_node := spawn_body_node(engine, old_head)
+    new_node := spawn_body_node(app, old_head)
     inject_at(&g.body_nodes, 0, new_node)
     inject_at(&g.body, 0, next)
     g.score += 1
-    place_food(engine)
-    refresh_score_ui(engine)
+    place_food(app)
+    refresh_score_ui(app)
   } else if len(g.body_nodes) > 0 {
     tail_node := pop(&g.body_nodes)
-    place_node(engine, tail_node, old_head, SEGMENT_Y)
+    place_node(app, tail_node, old_head, SEGMENT_Y)
     inject_at(&g.body_nodes, 0, tail_node)
     pop(&g.body)
     inject_at(&g.body, 0, next)
   } else {
     g.body[0] = next
   }
-  place_node(engine, g.head_node, next, SEGMENT_Y)
+  place_node(app, g.head_node, next, SEGMENT_Y)
 }
 
-refresh_score_ui :: proc(engine: ^mjolnir.Engine) {
-  ui.set_text(&engine.ui, g.score_label, fmt.tprintf("Score: %d", g.score))
-  ui.set_text(&engine.ui, g.best_label,  fmt.tprintf("Best: %d",  g.best))
+refresh_score_ui :: proc(app: ^App) {
+  ui.set_text(&app.gui, g.score_label, fmt.tprintf("Score: %d", g.score))
+  ui.set_text(&app.gui, g.best_label,  fmt.tprintf("Best: %d",  g.best))
 }

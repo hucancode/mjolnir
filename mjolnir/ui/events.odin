@@ -232,11 +232,13 @@ dispatch_text_event :: proc(sys: ^System, widget_handle: UIWidgetHandle, event: 
 
 // True when the mouse belongs to the UI: an interactive widget is hovered or
 // holds a press.
+@(private)
 wants_mouse :: proc(sys: ^System) -> bool {
   return sys.hovered != nil || sys.captured != nil
 }
 
 // True when the focused widget (or an ancestor) handles key or text events.
+@(private)
 wants_keyboard :: proc(sys: ^System) -> bool {
   h, ok := sys.focused.?
   for ok {
@@ -250,13 +252,24 @@ wants_keyboard :: proc(sys: ^System) -> bool {
   return false
 }
 
+// Run one tick of input through the widget tree, then capture the mouse /
+// keyboard the UI owns (see input.State). Skipped while another consumer
+// (the debug UI) holds the mouse.
+process_input :: proc(sys: ^System, s: ^input.State) {
+  if s.mouse_captured do return
+  dispatch_input(sys, s)
+  if wants_mouse(sys) do s.mouse_captured = true
+  if wants_keyboard(sys) do s.keyboard_captured = true
+}
+
 // Run one tick of input through the widget tree. Hit testing considers only
 // interactive widgets (see pick_widget). Dispatches HOVER_IN / HOVER_OUT when
 // the hovered widget changes, MOVE to the captured or hovered widget,
 // CLICK_DOWN to the hovered widget (capturing it and taking focus; a press
 // over nothing clears focus), CLICK_UP to the captured widget, and key and
 // text events to the focused widget. Every event bubbles to the parents.
-process_input :: proc(sys: ^System, s: ^input.State) {
+@(private = "file")
+dispatch_input :: proc(sys: ^System, s: ^input.State) {
   pos := s.cursor
   current := pick_widget(sys, pos, interactive_only = true)
   if current != sys.hovered {

@@ -48,6 +48,7 @@ Renderer :: struct {
   white_texture:   bindless.Texture2DHandle, // drawn for cmd.NO_TEXTURE
   font_atlas:      bindless.Texture2DHandle, // sampled by text commands
   debug_ctx:       mu.Context,
+  debug_open:      bool, // mu.begin ran this frame; frame closes it
   // Mouse buttons pressed over the debug UI, owned by it through release.
   debug_buttons:   bit_set[0 ..< 32],
   debug_atlas:     bindless.Texture2DHandle, // microui's builtin atlas

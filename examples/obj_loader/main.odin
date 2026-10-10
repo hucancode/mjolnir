@@ -1,6 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/render/mesh"
 import "../../mjolnir/world"
@@ -19,24 +21,33 @@ loaded_meshes: [3]render.MeshHandle
 loaded_aabb: [3]struct{min, max: [3]f32}
 current_index: int = -1
 
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
+
 main :: proc() {
-  mjolnir.run_app({
-    title = "OBJ Loader", width = 1000, height = 700,
-    debug_ui = true, setup = setup, update = update, pre_render = debug_ui,
-  })
-}
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 1000, 700, "OBJ Loader") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "OBJ Loader", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
-}
+  light := world.spawn(&app.scene, {10, 18, 10})
+  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.97, 0.92, 3.0}, 10.0, false))
+  world.rotate(&app.scene, light, 1.5707963, [3]f32{1, 0, 0})
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  light := mjolnir.spawn(engine, {10, 18, 10}, render.directional_light_attachment({1, 0.97, 0.92, 3.0}, 10.0, false))
-  world.rotate(&engine.world, light, 1.5707963, [3]f32{1, 0, 0})
-
-  display_material = render.create_material(&engine.render, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
+  display_material = render.create_material(&app.renderer, type = .RANDOM_COLOR, base_color_factor = {0.7, 0.6, 0.5, 1})
 
   files := OBJ_FILES
   scales := OBJ_SCALES
@@ -51,14 +62,31 @@ setup :: proc(engine: ^mjolnir.Engine) {
     aabb := mesh.aabb_from_vertices(geom.vertices)
     log.infof("%s: %d verts, %d tris, aabb %v..%v", files[i], len(geom.vertices), len(geom.indices) / 3, aabb.min, aabb.max)
     loaded_aabb[i] = {aabb.min, aabb.max}
-    loaded_meshes[i] = render.create_mesh(&engine.render, geom)
+    loaded_meshes[i] = render.create_mesh(&app.renderer, geom)
   }
 
-  display_node = mjolnir.spawn_mesh(engine, loaded_meshes[0], display_material)
-  swap_model(engine, 0)
+  display_node = world.spawn(&app.scene)
+  render.attach(&app.renderer, display_node.index, render.MeshAttachment{handle = loaded_meshes[0], material = display_material, cast_shadow = true})
+  swap_model(app, 0)
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
+}
+
+swap_model :: proc(app: ^App, index: int) {
   if index == current_index do return
   current_index = index
 
@@ -68,27 +96,29 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
   radius := linalg.length(extents) * 0.5
   if radius < 0.001 do radius = 1
 
-  if a, ok := render.attachment(&engine.render, display_node.index, render.MeshAttachment); ok {
+  if a, ok := render.attachment(&app.renderer, display_node.index, render.MeshAttachment); ok {
     a.handle = loaded_meshes[index]
-    render.mark_slot_dirty(&engine.render, display_node.index)
+    render.mark_slot_dirty(&app.renderer, display_node.index)
   }
-  world.translate(&engine.world, display_node, -center)
+  world.translate(&app.scene, display_node, -center)
 
   cam_dist := radius * 1.8
-  cam := render.main_camera(&engine.render)
+  cam := render.main_camera(&app.renderer)
   render.camera_set_perspective(cam, 1.2, max(0.1, cam_dist * 0.01), cam_dist * 5.0)
   render.camera_look_at(cam, {cam_dist, cam_dist * 0.7, cam_dist}, {0, 0, 0})
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  ctx := render.debug_ui(&app.renderer)
   if mu.window(ctx, "OBJ Loader", {720, 20, 260, 200}, {.NO_CLOSE}) {
     labels := OBJ_LABELS
     mu.label(ctx, fmt.tprintf("Current: %s", labels[current_index] if current_index >= 0 else "<none>"))
     mu.label(ctx, "")
     mu.layout_row(ctx, {-1}, 0)
     for label, i in labels {
-      if .SUBMIT in mu.button(ctx, label) do swap_model(engine, i)
+      if .SUBMIT in mu.button(ctx, label) do swap_model(app, i)
     }
   }
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

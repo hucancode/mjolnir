@@ -15,15 +15,13 @@ frame-in-flight index. Render never sees a window; the caller passes
 in what the windowing library provides:
 
 ```odin
-render.create_instance(&r, title, platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr())
-surface := platform.create_surface(&p, render.vulkan_instance(&r))
-render.init(&r, surface, platform.framebuffer_size(&p), platform.dpi_scale(&p))
-render.setup(&r)
+render.init(&r, title, platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(),
+            platform.create_surface, &p, platform.framebuffer_size(&p), platform.dpi_scale(&p))
 render.load_environment_map(&r, "assets/Cannon_Exterior.hdr")
 // every update tick
 render.update(&r, dt)
 // every frame
-render.frame(&r, platform.framebuffer_size(&p), platform.dpi_scale(&p), debug_ui_enabled)
+render.frame(&r, platform.framebuffer_size(&p), platform.dpi_scale(&p))
 // level change
 render.teardown(&r)
 render.setup(&r)
@@ -32,8 +30,11 @@ render.teardown(&r)
 render.shutdown(&r)
 ```
 
-- `init` / `shutdown` create and destroy the device, swapchain, pass
-  pipelines and resource pools.
+- `init` / `shutdown` create and destroy the instance, the window
+  surface (through the `create_surface` callback, called with the
+  pointer passed after it), the device, swapchain, pass pipelines and
+  resource pools. `init` also sets up the first level. It returns
+  false and logs the Vulkan error on failure.
 - `setup` / `teardown` create and destroy per-level state: bindless
   arrays, cameras, scene buffers, the environment map. Both are safe
   to call at any point outside `frame` and are no-ops when the level
@@ -44,10 +45,11 @@ render.shutdown(&r)
   after `setup`; without one, IBL and the skybox are black.
 - `update(&r, dt)` advances render's own clock once per update tick:
   emitter accumulators and debug line lifetimes.
-- `frame` uploads staged changes, acquires a swapchain image
-  (recreating the swapchain when the framebuffer size changed),
-  records every pass, submits, presents and retires deferred GPU
-  resources.
+- `frame` closes the debug UI, uploads staged changes, acquires a
+  swapchain image (recreating the swapchain when the framebuffer size
+  changed), records every pass, submits, presents and retires
+  deferred GPU resources. It returns false on a GPU error.
+  `show_stats = true` adds a stats window to the debug UI.
 
 ## Transform slots
 
@@ -200,12 +202,12 @@ returns a bindless handle — feed it to a UI quad or a material for
 minimaps, mirrors and render-to-texture surfaces.
 
 Controllers (`orbit_controller`, `free_controller`,
-`follow_controller`) are plain values that drive a camera from the
-tick's `input.State` via `camera_controller_update`, which also takes
-whether the mouse and keyboard are captured. Keys are fixed: WASD + QE
-to move, shift to pan or boost, left drag to orbit. Render does not
-store controllers; the caller
-owns one (the engine keeps `Engine.camera_controller`). The orbit
+`follow_controller`) are plain values that drive the main camera from
+the tick's `input.State` via
+`camera_controller_update(&ctl, &r, &state, dt)`. They ignore devices
+that `state` marks captured. Keys are fixed: WASD + QE to move, shift
+to pan or boost, left drag to orbit. Render does not store
+controllers; the caller owns one. The orbit
 controller reads distance, yaw and pitch from the camera's pose each
 tick, so moving the camera directly never makes it snap back.
 
@@ -213,16 +215,17 @@ tick, so moving the camera directly never makes it snap back.
 
 The UI pass draws two things with one pipeline:
 
-- **Game UI.** `render.stage_ui(&r, commands)` takes `draw2d`
-  commands (from the `ui` module or anywhere else);
-  `stage_ui_font_atlas` uploads the glyph atlas.
-- **Debug UI.** A microui context owned by render. Build it between
-  `debug_ui_begin` and `debug_ui_end` (`debug_ui(&r)` returns the
-  context); it is drawn when `frame` gets `debug_ui_enabled`.
-  `debug_ui_input(&r, &state)` feeds it one `input.State` tick (call
-  it on the update tick); `debug_ui_wants_mouse` /
-  `debug_ui_wants_keyboard` report whether it owns the mouse (hovered,
-  or holding a press made over it) or the keyboard.
+- **Game UI.** `render.stage_ui(&r, list)` takes a `draw2d.DrawList`
+  (from `ui.draw_list` or anywhere else). The list holds the frame's
+  commands and, when it changed, the glyph atlas.
+- **Debug UI.** A microui context owned by render. `debug_ui(&r)`
+  returns it, opening it on the first call of the frame. Build
+  widgets before `frame`, which closes and draws it. Frames that never
+  call `debug_ui` draw no debug UI. `debug_ui_input(&r, &state)` feeds
+  it one `input.State` tick (call it first on the update tick). It
+  marks the mouse captured while the debug UI is hovered or holds a
+  press made over it, and the keyboard captured while a widget has
+  focus.
 
 ## Debug drawing
 

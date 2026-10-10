@@ -64,7 +64,8 @@ shutdown :: proc(self: ^System) {
 }
 
 // Font atlas pixels (R8, width x height). changed is true when glyphs were
-// rasterized since the previous call; upload the pixels to the renderer then.
+// rasterized since the previous call.
+@(private = "file")
 take_font_atlas :: proc(
   self: ^System,
 ) -> (
@@ -166,8 +167,20 @@ destroy_widget :: proc(sys: ^System, handle: UIWidgetHandle) {
   cont.free(&sys.widget_pool, handle)
 }
 
+// This frame's draw commands plus the font atlas when it changed. Hand it to
+// the 2D renderer; the commands stay valid until the next call.
+draw_list :: proc(sys: ^System) -> cmd.DrawList {
+  list := cmd.DrawList{commands = build_commands(sys)}
+  if pixels, w, h, changed := take_font_atlas(sys); changed {
+    list.atlas = pixels
+    list.atlas_size = {w, h}
+  }
+  return list
+}
+
 // Lay out all widgets and return this frame's draw commands. The slice is
 // valid until the next call; glyph data lives in the temp allocator.
+@(private)
 build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
   compute_layout_all(sys)
   clear(&sys.staging)

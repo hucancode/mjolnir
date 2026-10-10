@@ -1,9 +1,12 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render/mesh"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
@@ -19,25 +22,61 @@ spiral_visible: bool = true
 rotate_speed: mu.Real = 0.4
 spin: f32
 
-main :: proc() {
-  mjolnir.run_app({
-    title = "Procedural Mesh", width = 1000, height = 700,
-    debug_ui = true, setup = setup, update = update,
-  })
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  render.main_camera_look_at(&engine.render, {0, 6, 14}, {0, 1, 0})
-  mjolnir.spawn(engine, {6, 12, 6}, render.directional_light_attachment(color = {1, 0.97, 0.93, 5.0}, radius = 20.0))
-  mjolnir.spawn_ground(engine, 12.0, position = {0, -1, 0})
+main :: proc() {
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 1000, 700, "Procedural Mesh") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Procedural Mesh", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+}
 
-  wave_mat   := render.material_pbr(&engine.render, {0.3, 0.55, 0.85, 1}, metallic = 0.2, roughness = 0.5)
-  knot_mat   := render.material_pbr(&engine.render, {0.9, 0.5,  0.2,  1}, metallic = 0.8, roughness = 0.3)
-  spiral_mat := render.material_pbr(&engine.render, {0.4, 0.85, 0.4,  1}, metallic = 0.0, roughness = 0.7)
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
 
-  wave_node   = mjolnir.spawn_mesh(engine, render.create_mesh(&engine.render, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
-  knot_node   = mjolnir.spawn_mesh(engine, render.create_mesh(&engine.render, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
-  spiral_node = mjolnir.spawn_mesh(engine, render.create_mesh(&engine.render, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+spawn_mesh :: proc(app: ^App, mesh_handle: render.MeshHandle, material: render.MaterialHandle, pos: [3]f32) -> world.NodeHandle {
+  n := world.spawn(&app.scene, pos)
+  render.attach(&app.renderer, n.index, render.MeshAttachment{handle = mesh_handle, material = material, cast_shadow = true})
+  return n
+}
+
+setup :: proc(app: ^App) {
+  render.main_camera_look_at(&app.renderer, {0, 6, 14}, {0, 1, 0})
+  light := world.spawn(&app.scene, {6, 12, 6})
+  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 0.97, 0.93, 5.0}, radius = 20.0))
+  ground := world.spawn(&app.scene, {0, -1, 0})
+  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  world.scale(&app.scene, ground, 12.0)
+
+  wave_mat   := render.material_pbr(&app.renderer, {0.3, 0.55, 0.85, 1}, metallic = 0.2, roughness = 0.5)
+  knot_mat   := render.material_pbr(&app.renderer, {0.9, 0.5,  0.2,  1}, metallic = 0.8, roughness = 0.3)
+  spiral_mat := render.material_pbr(&app.renderer, {0.4, 0.85, 0.4,  1}, metallic = 0.0, roughness = 0.7)
+
+  wave_node   = spawn_mesh(app, render.create_mesh(&app.renderer, build_wave(40, 8.0, 0.6)), wave_mat, {-6, 0, 0})
+  knot_node   = spawn_mesh(app, render.create_mesh(&app.renderer, build_torus_knot(2, 3, 200, 12, 1.6, 0.3)), knot_mat, {0, 1.5, 0})
+  spiral_node = spawn_mesh(app, render.create_mesh(&app.renderer, build_helix_tube(120, 8, 2.5, 0.25, 4.0, 3.0)), spiral_mat, {6, 0, 0})
 }
 
 build_wave :: proc(n: int, size: f32, amp: f32) -> mesh.Geometry {
@@ -134,18 +173,21 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
   return mesh.make_geometry(vertices, indices)
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   spin += dt * f32(rotate_speed)
-  set_spin(engine, wave_node,   wave_visible,   spin, {-6, 0, 0})
-  set_spin(engine, knot_node,   knot_visible,   spin, {0, 1.5, 0})
-  set_spin(engine, spiral_node, spiral_visible, spin, {6, 0, 0})
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  set_spin(app, wave_node,   wave_visible,   spin, {-6, 0, 0})
+  set_spin(app, knot_node,   knot_visible,   spin, {0, 1.5, 0})
+  set_spin(app, spiral_node, spiral_visible, spin, {6, 0, 0})
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
 }
 
-set_spin :: proc(engine: ^mjolnir.Engine, h: world.NodeHandle, visible: bool, angle: f32, pos: [3]f32) {
-  world.set_visible(&engine.world, h, visible)
-  world.translate(&engine.world, h, pos)
-  world.rotate(&engine.world, h, angle)
+set_spin :: proc(app: ^App, h: world.NodeHandle, visible: bool, angle: f32, pos: [3]f32) {
+  world.set_visible(&app.scene, h, visible)
+  world.translate(&app.scene, h, pos)
+  world.rotate(&app.scene, h, angle)
 }

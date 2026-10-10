@@ -43,8 +43,16 @@ it := 0
 for key, pressed in input.next_key_edge(&state, &it) { ... }
 ```
 
-The engine snapshots `engine.platform.input` into `engine.input` at
-the start of every update tick; read it in the `update` callback.
-Input does not know about UI. Deciding which input a UI consumed is
-the caller's job (the engine sets `engine.mouse_captured` /
-`engine.keyboard_captured`).
+## Capture
+
+`State.mouse_captured` and `State.keyboard_captured` let several
+consumers share one snapshot without knowing about each other.
+`new_frame` clears both. Each consumer, in priority order, skips a
+device that is already captured and captures the ones it owns. With
+mjolnir's modules the order is `render.debug_ui_input`, then
+`ui.process_input`, then `render.camera_controller_update`. Gameplay
+reads the flags last:
+
+```odin
+if !state.keyboard_captured && input.key_pressed(&state, .SPACE) do jump()
+```

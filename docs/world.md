@@ -41,7 +41,7 @@ Each update publishes what changed since the previous one:
 
 Consumers key on the node index. A despawned node's index stays
 reserved for `RETIRE_GRACE` updates so every consumer sees the
-removal before the index is reused. See [glue](glue.html) for the
+removal before the index is reused. See [engine](engine.html#wiring-modules) for the
 standard world → render loop.
 
 ## Loading

@@ -12,7 +12,9 @@ it out to run on another windowing library.
 swapchain and UI.
 
 The window writes key, mouse button, cursor, scroll and character
-events into `p.input`, an [`input`](input.html) `Accumulator`, as
-`poll_events` delivers them. Turning that into a per-tick snapshot is
-the caller's job (`input.new_frame`). A `Platform` must not move
-after `init`; the GLFW callbacks keep a pointer to it.
+events into an [`input`](input.html) `Accumulator` as `poll_events`
+delivers them. `read_input(&p, &state)` drains it into the tick's
+`input.State`. `create_surface` takes the `^Platform` as a `rawptr`, so
+a renderer can take it as a callback without importing platform. A
+`Platform` must not move after `init`; the GLFW callbacks keep a
+pointer to it.

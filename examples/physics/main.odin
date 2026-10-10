@@ -1,6 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "../../mjolnir/render/mesh"
@@ -18,37 +20,66 @@ SPHERE_RADIUS :: 3.0
 PLANE_WIDTH :: max(10.0, NX * 0.8)
 PLANE_HEIGHT :: max(10.0, NZ * 0.8)
 
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
+
 phys: physics.World
 
 main :: proc() {
+  context.logger = log.create_console_logger()
   physics.init(&phys)
   defer physics.shutdown(&phys)
-  mjolnir.run_app({title = "Physics", setup = setup, update = update})
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 800, 600, "Physics") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Physics", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+
+  setup(app)
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  ground_mesh := engine.render.builtin_meshes[.CUBE]
-  ground_mat := engine.render.builtin_materials[.GRAY]
-  sphere_mesh := engine.render.builtin_meshes[.SPHERE]
-  sphere_mat := engine.render.builtin_materials[.MAGENTA]
-  cube_mesh := engine.render.builtin_meshes[.CUBE]
-  cube_mat := engine.render.builtin_materials[.RED]
+spawn_mesh :: proc(app: ^App, m: render.MeshHandle, mat: render.MaterialHandle, parent: world.NodeHandle) -> world.NodeHandle {
+  n := world.spawn_child(&app.scene, parent)
+  render.attach(&app.renderer, n.index, render.MeshAttachment{handle = m, material = mat, cast_shadow = true})
+  return n
+}
+
+setup :: proc(app: ^App) {
+  ground_mesh := app.renderer.builtin_meshes[.CUBE]
+  ground_mat := app.renderer.builtin_materials[.GRAY]
+  sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
+  sphere_mat := app.renderer.builtin_materials[.MAGENTA]
+  cube_mesh := app.renderer.builtin_meshes[.CUBE]
+  cube_mat := app.renderer.builtin_materials[.RED]
   rand_sphere := mesh.make_sphere()
   rand_cylinder := mesh.make_cylinder()
   for &v in rand_sphere.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
   for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
-  rand_sphere_mesh := render.create_mesh(&engine.render, rand_sphere)
-  rand_cylinder_mesh := render.create_mesh(&engine.render, rand_cylinder)
-  rand_mat := engine.render.builtin_materials[.WHITE]
+  rand_sphere_mesh := render.create_mesh(&app.renderer, rand_sphere)
+  rand_cylinder_mesh := render.create_mesh(&app.renderer, rand_cylinder)
+  rand_mat := app.renderer.builtin_materials[.WHITE]
 
-  ground := world.spawn(&engine.world, {0, -0.5, 0})
+  ground := world.spawn(&app.scene, {0, -0.5, 0})
   physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {PLANE_WIDTH, 0.5, PLANE_HEIGHT}}, user = world.Handle(ground))
-  ground_visual := mjolnir.spawn_mesh(engine, ground_mesh, ground_mat, parent = ground)
-  world.scale_xyz(&engine.world, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
-  ball := world.spawn(&engine.world, {2.5, SPHERE_RADIUS, 0})
+  ground_visual := spawn_mesh(app, ground_mesh, ground_mat, ground)
+  world.scale_xyz(&app.scene, ground_visual, PLANE_WIDTH, 0.5, PLANE_HEIGHT)
+  ball := world.spawn(&app.scene, {2.5, SPHERE_RADIUS, 0})
   physics.create_static_body(&phys, {2.5, SPHERE_RADIUS, 0}, collider = physics.SphereCollider{radius = SPHERE_RADIUS}, user = world.Handle(ball))
-  ball_visual := mjolnir.spawn_mesh(engine, sphere_mesh, sphere_mat, parent = ball)
-  world.scale(&engine.world, ball_visual, SPHERE_RADIUS)
+  ball_visual := spawn_mesh(app, sphere_mesh, sphere_mat, ball)
+  world.scale(&app.scene, ball_visual, SPHERE_RADIUS)
 
   for x in 0 ..< NX do for y in 0 ..< NY do for z in 0 ..< NZ {
     pos := [3]f32{f32(x - NX/2) * 3.0, f32(y) * 3.0 + 10.0, f32(z - NZ/2) * 3.0}
@@ -61,20 +92,33 @@ setup :: proc(engine: ^mjolnir.Engine) {
     case 1: collider = physics.BoxCollider{half_extents = {1.0, 1.0, 1.0}}; piece_mesh, piece_mat = cube_mesh, cube_mat
     case 2: collider = physics.SphereCollider{radius = 1.0}; piece_mesh = rand_sphere_mesh
     }
-    node := world.spawn(&engine.world, pos)
+    node := world.spawn(&app.scene, pos)
     physics.create_dynamic_body(&phys, pos, mass = 50.0, collider = collider, user = world.Handle(node))
-    mjolnir.spawn_mesh(engine, piece_mesh, piece_mat, parent = node)
+    spawn_mesh(app, piece_mesh, piece_mat, node)
   }
   log.infof("Created %d physics objects", PIECE_COUNT)
-  render.main_camera_look_at(&engine.render, {30, 25, 30}, {0, 5, 0})
-  light := mjolnir.spawn(engine, {0, 20, 0}, render.spot_light_attachment({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
-  world.rotate(&engine.world, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+  render.main_camera_look_at(&app.renderer, {30, 25, 30}, {0, 5, 0})
+  light := world.spawn(&app.scene, {0, 20, 0})
+  render.attach(&app.renderer, light.index, render.spot_light_attachment({0.8, 0.9, 1, 1}, 25.0, math.PI * 0.25))
+  world.rotate(&app.scene, light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   physics.step(&phys, dt)
-  for b in physics.body_poses(&phys) do world.set_world_pose(&engine.world, world.NodeHandle(b.user), b.position, b.rotation)
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
+}
+
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

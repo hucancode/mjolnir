@@ -2,130 +2,300 @@
 title: Engine
 ---
 
-Layer 3, optional. The `mjolnir` package is a reference run loop plus
-glTF assembly and a few spawn helpers. It owns the default
-`platform`, `world`, `render` and `ui`. It provides no glue between
-modules: the per-tick hops (world → render, physics → world,
-animation → render) are user code in the `update` callback — see
-[glue](glue.html). Everything here is built on public layer-2 APIs,
-so any of it can be rewritten in user code.
+Layer 3, optional. The `mjolnir` package holds two things:
+
+- **A run loop** (`run`): update and render cadence, plus the optional
+  update thread. It imports no layer-2 module.
+- **Asset loading** (`load_gltf`): one asset fills several modules
+  (world nodes, render looks, animation rigs), so it lives above them.
+
+Everything else is the application's: it owns every module value,
+brings them up, and writes the glue between them. This page shows how.
+
+## Building an application
 
 ```odin
-Engine :: struct {
-  platform:          platform.Platform,
-  world:             world.World,
-  render:            render.Manager, // owns the Vulkan context, swapchain and frame
-  ui:                ui.System,
-  input:             input.State,    // this tick's snapshot
-  mouse_captured:    bool,           // a UI owns the mouse this tick
-  keyboard_captured: bool,           // a UI owns the keyboard this tick
-  camera_controller: render.CameraController,
-  // user callbacks, timing, debug UI flags, user_data
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
+
+main :: proc() {
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 800, 600, "Cube") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Cube", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+
+  cube := world.spawn(&app.scene)
+  render.attach(&app.renderer, cube.index, render.primitive(&app.renderer, .CUBE, .RED))
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+}
+
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
+}
+
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }
 ```
 
-## Entry point
+Allocate `App` with `new`: a `Platform` must not move after `init`.
+The bring-up order is platform, then render, then world. Each `defer`
+tears its module down in reverse.
 
-`mjolnir.run_app(RunConfig)` allocates the engine, installs a logger,
-runs the loop and tears down on exit. The config takes user callbacks
-(`setup`, `update`, `pre_render`, `post_render`) plus a
-`user_data: rawptr` for app state.
+Add modules by adding a field and their lines:
 
-For a hand-rolled lifecycle, call `init` → loop → `shutdown` yourself.
+- **ui:** `ui.init` with a font in `main`, `ui.process_input` in
+  `update`, `render.stage_ui(&app.renderer, ui.draw_list(&app.gui))`
+  in `frame`.
+- **debug UI:** `render.debug_ui_input` first in `update`, and
+  `render.debug_ui(&app.renderer)` widgets in `frame` before
+  `render.frame`.
+- **physics, navigation, animation:** plain values in `App`, stepped
+  in `update`, with the hops below.
 
-## Frame timeline
+## Wiring modules
 
+Modules never call each other. Moving data between them is the
+application's job, and each hop is one trivial loop: the source module
+publishes a feed and the destination consumes it.
+
+```odin
+for x in a.feed(&a_state) do b.consume(&b_state, x)
 ```
-update:  input snapshot → debug UI / ui input → camera controller → update callback → render.update
-render:  poll events → throttle to RENDER_FPS → ui stage → pre_render
-         → render.frame → post_render
+
+Each module owns its own timing and thread safety, so the glue never
+schedules or locks anything. A full `update` with every module:
+
+```odin
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  ui.process_input(&app.gui, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  // gameplay, reading app.input
+  physics.step(&app.phys, dt)
+  for b in physics.body_poses(&app.phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
+  for &a, i in app.animators do anim.animator_update(&a, &app.model.rigs[app.model.skinned[i].rig], dt, world.world_matrix(&app.scene, app.model.skinned[i].node))
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  for s, i in app.model.skinned do render.stage_bones(&app.renderer, s.node.index, app.animators[i].palette)
+  render.update(&app.renderer, dt)
+}
 ```
 
-The `update` callback is where the application steps its own systems
-and runs the glue, typically ending with `world.update` and the world
-→ render feed.
+### Input → debug UI, UI, camera
+
+`platform.read_input` drains window events into one `input.State` per
+tick. Each consumer skips a device an earlier one captured, so the
+call order is the priority. Gameplay reads
+`app.input.mouse_captured` / `app.input.keyboard_captured` to ignore
+input a UI took.
+
+### UI → render
+
+Once per frame, before `render.frame`:
+`render.stage_ui(&app.renderer, ui.draw_list(&app.gui))`. The draw list
+carries the font atlas on frames where it changed.
+
+### Platform → render
+
+`render.init` takes what the window provides: instance extensions, the
+proc-address loader, and `platform.create_surface` with the platform
+as its argument. Every frame, `render.frame` gets the framebuffer size
+and DPI scale. Neither module imports the other.
+
+
+### World → render
+
+`world.update` publishes two feeds, valid until the next update:
+
+| Feed | Item | Render call |
+|---|---|---|
+| `world.removed_nodes` | node index | `render.stage_slot_removal` |
+| `world.changed_nodes` | `{index, world_matrix, visible}` | `render.stage_transform` |
+
+Run `world.update` after every write to the scene graph for the tick
+(physics poses, sockets, gameplay), then the two loops.
+
+### Animation → render
+
+The application owns each `animation.Animator` and keeps it next to
+the node it skins. Advance it, then upload its palette:
+
+```odin
+anim.animator_update(&animator, rig, dt, world.world_matrix(&app.scene, node))
+render.stage_bones(&app.renderer, node.index, animator.palette)
+```
+
+The last argument of `animator_update` places the skeleton in the
+world. Only world-space IK targets and procedural modifiers read it;
+pass nothing when the animator uses neither. `mjolnir.load_gltf`
+returns the rigs and a `skinned` list of `{node, rig}` pairs, and the
+caller creates one animator per entry.
+
+To draw a skeleton, feed `anim.bone_segments(&animator, &rig.skeleton,
+root_world)` to `render.debug_segment`.
+
+### Animation → world
+
+**Bone sockets.** To attach a node to a bone, look the bone up once
+and set the child's local matrix each tick. The child must be
+parented to the skinned node:
+
+```odin
+hand := anim.find_bone(&rig.skeleton, "hand_r")
+world.set_local_matrix(&app.scene, sword, anim.bone_matrix(&animator, hand))
+```
+
+**Node animation.** A clip channel can drive any node. Sample it and
+write the result:
+
+```odin
+anim.playback_advance(&time, &speed, &status, .LOOP, clip.duration, dt)
+trs := anim.TRS_IDENTITY
+anim.clip_sample_trs(&clip, 0, time, &trs)
+world.set_local_matrix(&app.scene, node, anim.trs_matrix(trs))
+```
+
+### Physics → world
+
+Every body carries a `user: cont.Handle`; set it to the node handle
+when creating the body. After stepping, copy awake body poses back,
+before `world.update`:
+
+```odin
+physics.step(&phys, dt)
+for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
+```
+
+`set_world_pose` takes a world-space pose, so bodies on parented nodes
+land in the right place.
+
+The `physics.World` is a user value: `physics.init` it in `main`,
+`physics.shutdown` it on exit. Bodies are user-owned too. Despawning
+a node does not destroy its body or trigger; call
+`physics.destroy_body` / `physics.destroy_trigger` alongside
+`world.despawn`, or `physics.teardown` to clear everything.
+
+### World → camera
+
+Cameras live in render. To follow a node:
+
+```odin
+cam := render.main_camera(&app.renderer)
+render.camera_set_transform(cam, world.world_matrix(&app.scene, player))
+```
+
+### Geometry → navigation
+
+Navigation takes plain triangles; gather them from wherever the level
+comes from:
+
+```odin
+b: bake.NavGeometryBuilder
+defer bake.builder_destroy(&b)
+bake.append_triangles(&b, mesh.positions(ground, context.temp_allocator), ground.indices)
+bake.append_triangles(&b, wall_positions, wall_indices, offset = wall_pos, is_obstacle = true)
+bake.build(&navmesh, bake.geometry_view(&b))
+```
+
+An OBJ file works the same way: `mesh.load_obj(path)` returns an
+`ObjMesh{positions, indices}` to append (free it with
+`mesh.obj_mesh_destroy`).
+
+To draw the result, upload `nav.debug_triangles(&navmesh)` as a
+render mesh.
 
 ## Levels
 
-`mjolnir.setup` and `mjolnir.teardown` set up and tear down one level.
-`teardown` clears the scene graph, every render slot and the cameras;
-`setup` recreates render's level state, loads the environment map and
-calls the `setup` callback. Call them from the `update` callback, not
-`pre_render` / `post_render` (the render thread is building UI
-there). To reload a level from a button or key, set a flag and act on
-it at the top of the next update:
+To swap levels, clear both modules and set up again from `update`:
 
 ```odin
-update :: proc(e: ^mjolnir.Engine, dt: f32) {
-  if reset_requested {
-    reset_requested = false
-    mjolnir.teardown(e)
-    mjolnir.setup(e)
-    return
-  }
-  // ...
-}
-```
- State the application
-owns (physics, navigation, animators) is torn down by the
-application.
-
-## Input
-
-At the start of every update tick the engine snapshots the platform's
-accumulator into `engine.input` and feeds it to the debug UI
-(`render.debug_ui_input`) and the retained UI (`ui.process_input`,
-skipped while the debug UI owns the mouse). It then sets
-`engine.mouse_captured` and `engine.keyboard_captured` when either UI
-owns that device. Read input in `update`:
-
-```odin
-update :: proc(e: ^mjolnir.Engine, dt: f32) {
-  if !e.keyboard_captured && input.key_pressed(&e.input, .SPACE) do jump()
-}
+world.teardown(&app.scene)
+render.teardown(&app.renderer)
+render.setup(&app.renderer)
+render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+// spawn the next level
 ```
 
-## Camera controller
+## glTF
 
-`engine.camera_controller` drives the main camera every tick from
-`engine.input`, ignoring captured devices; it starts as
-`render.orbit_controller()`. Assign `render.free_controller()`,
-`render.follow_controller(...)` or your own to switch, or `{}` to
-disable it. Tune the active one through its data, e.g.
-`&engine.camera_controller.data.(render.FreeCameraData)`, and its
-keys through `engine.camera_controller.bindings`.
+`load_gltf(&w, &r, path, parent = {})` returns a
+`GltfScene{roots, rigs, skinned}`. It works in four steps:
 
-## Helpers
+1. Parses the file.
+2. Has `render/gltf` (`load_meshes`) create one render mesh per glTF mesh.
+3. Has `animation/gltf` (`load_rig`) create one `animation.Rig` per
+   skin, with every animation as a clip.
+4. Spawns one world node per glTF node under `parent` (the world root
+   by default).
 
-| Proc | Does |
-|---|---|
-| `spawn`, `spawn_mesh`, `spawn_primitive_mesh`, `spawn_ground` | world node + render attachment at its slot |
-| `load_gltf` | world nodes + render meshes / materials / textures + animation rigs |
-| `cursor_world_ray` | ray from the main camera through `engine.input.cursor` |
-
-`load_gltf` returns a `GltfScene{roots, rigs, skinned}`. It parses the
-file, lets `render/gltf` (`load_meshes`) create one render mesh per
-glTF mesh and `animation/gltf` (`load_rig`) one `animation.Rig` per
-skin with every animation as a clip, then builds the world nodes;
-`skinned` pairs each skinned node with its rig. Use the two loaders
-directly to import into a single module. The caller creates the
+`skinned` pairs each skinned node with its rig. To import into a
+single module, call the two loaders directly. The caller creates the
 animators and frees the scene with `gltf_scene_destroy`.
 
-Single-module work goes straight to that module: `world.translate`,
-`render.create_material`, `physics.raycast`, `nav.find_path`, …
+## Run loop
+
+```odin
+Loop :: struct($T: typeid) {
+  app:          ^T,
+  should_close: proc(app: ^T) -> bool,
+  update:       proc(app: ^T, dt: f32), // UPDATE_FPS
+  frame:        proc(app: ^T) -> bool,  // RENDER_FPS, main thread; false on error
+}
+
+mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+```
+
+`run` returns when one of these happens:
+
+- `should_close` returns true.
+- `FRAME_LIMIT` frames have rendered.
+- `frame` fails `MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED` times in a row.
+
+It frees `context.temp_allocator` after every frame (and after every
+update tick on the update thread). Install a logger in `main` before
+bringing modules up.
+
+Build flags:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `RENDER_FPS` | 60 | `frame` rate cap |
+| `UPDATE_FPS` | `RENDER_FPS` | `update` tick rate |
+| `USE_PARALLEL_UPDATE` | false | run `update` on its own thread |
+| `FRAME_LIMIT` | 0 | exit after N frames (0 = never) |
 
 ## Threading
 
-- `update` runs on the main thread by default; with
+- `update` runs on the main thread by default. With
   `-define:USE_PARALLEL_UPDATE=true` it moves to a dedicated thread.
-- World and animators are touched only from the update thread.
-- Render's `stage_*` / `attach` calls are mutex-guarded, so the update
-  thread can call them while the render thread runs `render.frame`.
-
-## Allocation ownership
-
-Engine owns: platform, world, render, UI. All freed in `shutdown`.
-
-User owns: the `^Engine` when not using `run_app`, animators, physics
-worlds and bodies, navmeshes and crowds, and the `GltfScene` returned
-by `load_gltf`.
+- `frame` always runs on the main thread. Poll window events and
+  build the debug UI there.
+- Render's `stage_*` / `attach` calls are mutex-guarded, so `update`
+  can call them while `frame` runs `render.frame`.

@@ -5,7 +5,7 @@ title: Physics
 Layer 2. Rigid-body dynamics, collisions, spatial queries. Physics knows
 nothing about the scene graph: the application owns a `physics.World`,
 steps it in `update`, and copies `body_poses` back into world nodes
-(see [glue](glue.html)). Every body and trigger carries a `user` handle
+(see [engine](engine.html#wiring-modules)). Every body and trigger carries a `user` handle
 for that link; bodies are destroyed explicitly, not with their node.
 
 ## Step layout

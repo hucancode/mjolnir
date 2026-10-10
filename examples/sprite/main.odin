@@ -1,6 +1,8 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:log"
@@ -14,19 +16,44 @@ Mode :: enum {
   ONCE,
 }
 
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
+
 sprites: [Mode]render.SpriteHandle
 elapsed: f32
 
 main :: proc() {
-  mjolnir.run_app({title = "Sprite", setup = setup, update = update})
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 800, 600, "Sprite") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Sprite", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+
+  setup(app)
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  render.main_camera_look_at(&engine.render, {0, 1.5, 6}, {0, 1.5, 0})
+setup :: proc(app: ^App) {
+  render.main_camera_look_at(&app.renderer, {0, 1.5, 6}, {0, 1.5, 0})
 
-  mjolnir.spawn_ground(engine, 6.0)
+  ground := world.spawn(&app.scene)
+  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  world.scale(&app.scene, ground, 6.0)
 
-  tex, tex_ret := render.create_texture_from_path(&engine.render, "assets/Warrior_Sheet-Effect.png")
+  tex, tex_ret := render.create_texture_from_path(&app.renderer, "assets/Warrior_Sheet-Effect.png")
   if tex_ret != .SUCCESS {
     log.error("failed to load warrior sheet")
     return
@@ -34,26 +61,34 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   xs := [Mode]f32{.LOOP = -3.0, .PINGPONG = 0.0, .ONCE = 3.0}
   for x, mode in xs {
-    mat := render.create_material(&engine.render, features = {.ALBEDO_TEXTURE}, type = .TRANSPARENT, albedo_handle = tex) or_continue
-    sprite := render.create_sprite(&engine.render, tex, 6, 17) or_continue
-    node, ok := mjolnir.spawn(engine, {x, 1.5, 0}, render.SpriteAttachment {
-      sprite_handle = sprite,
-      mesh_handle   = engine.render.builtin_meshes[.QUAD_XY],
-      material      = mat,
-    })
+    mat := render.create_material(&app.renderer, features = {.ALBEDO_TEXTURE}, type = .TRANSPARENT, albedo_handle = tex) or_continue
+    sprite := render.create_sprite(&app.renderer, tex, 6, 17) or_continue
+    node, ok := world.spawn(&app.scene, {x, 1.5, 0})
     if !ok {
-      render.destroy_sprite(&engine.render, sprite)
+      render.destroy_sprite(&app.renderer, sprite)
       continue
     }
+    render.attach(&app.renderer, node.index, render.SpriteAttachment {
+      sprite_handle = sprite,
+      mesh_handle   = app.renderer.builtin_meshes[.QUAD_XY],
+      material      = mat,
+    })
     sprites[mode] = sprite
-    world.scale(&engine.world, node, 2.5)
+    world.scale(&app.scene, node, 2.5)
   }
 
-  mjolnir.spawn(engine, {2, 6, 4}, render.directional_light_attachment(color = {1, 1, 1, 1}, radius = 8))
+  light := world.spawn(&app.scene, {2, 6, 4})
+  render.attach(&app.renderer, light.index, render.directional_light_attachment(color = {1, 1, 1, 1}, radius = 8))
+}
+
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
 }
 
 // Pick each sprite's sheet cell from elapsed time.
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   elapsed += dt
   step := u32(elapsed * FPS)
   cycle := u32(2 * (FRAME_COUNT - 1))
@@ -63,8 +98,14 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     .PINGPONG = bounce if bounce < FRAME_COUNT else cycle - bounce,
     .ONCE     = min(step, FRAME_COUNT - 1),
   }
-  for sprite, mode in sprites do render.set_sprite_frame(&engine.render, sprite, frames[mode])
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  for sprite, mode in sprites do render.set_sprite_frame(&app.renderer, sprite, frames[mode])
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
+}
+
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

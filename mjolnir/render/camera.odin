@@ -139,6 +139,16 @@ camera_viewport_to_world_ray :: proc(
   return camera.position, ray_dir
 }
 
+// World-space ray from the main camera through `cursor`, in window
+// coordinates as input.State reports them; the window DPI scale is applied
+// here.
+cursor_ray :: proc(self: ^Manager, cursor: [2]f32) -> (origin, dir: [3]f32, ok: bool) {
+  cam := main_camera(self) or_return
+  p := cursor * self.internal.ui.dpi_scale
+  origin, dir = camera_viewport_to_world_ray(cam, p.x, p.y)
+  return origin, dir, true
+}
+
 // ---------- camera pool ----------
 
 camera :: proc(self: ^Manager, handle: CameraHandle) -> (^Camera, bool) #optional_ok {

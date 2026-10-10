@@ -2,11 +2,20 @@ package main
 
 import "../../mjolnir"
 import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import mu "vendor:microui"
+
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
 
 cube_handle: world.NodeHandle
 light_handle: world.NodeHandle
@@ -27,34 +36,46 @@ move_speed: mu.Real = 4.0
 light_intensity: mu.Real = 4.0
 
 main :: proc() {
-  mjolnir.run_app({
-    title        = "Input",
-    width        = 1000,
-    height       = 700,
-    debug_ui     = true,
-    setup        = setup,
-    update       = update,
-    pre_render   = debug_ui,
-  })
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 1000, 700, "Input") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Input", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  engine.camera_controller = {}
-  render.main_camera_look_at(&engine.render, {0, 8, 12}, {0, 0.5, 0})
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
 
-  light_handle = mjolnir.spawn(engine, {4, 8, 4}, render.directional_light_attachment({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true))
+setup :: proc(app: ^App) {
+  render.main_camera_look_at(&app.renderer, {0, 8, 12}, {0, 0.5, 0})
 
-  mjolnir.spawn_ground(engine, 8.0)
+  light_handle = world.spawn(&app.scene, {4, 8, 4})
+  render.attach(&app.renderer, light_handle.index, render.directional_light_attachment({1, 0.97, 0.92, f32(light_intensity)}, 15.0, true))
 
-  cube_handle = mjolnir.spawn_primitive_mesh(engine, .CUBE, .CYAN, position = cube_pos, scale_factor = 0.5)
+  ground := world.spawn(&app.scene)
+  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  world.scale(&app.scene, ground, 8.0)
+
+  cube_handle = world.spawn(&app.scene, cube_pos)
+  render.attach(&app.renderer, cube_handle.index, render.primitive(&app.renderer, .CUBE, .CYAN))
+  world.scale(&app.scene, cube_handle, 0.5)
   log.info("Input demo  WASD: move cube  Q/E: yaw  LMB drag, RMB, scroll, typing read from the input snapshot")
 }
 
 // Track the latest edges from this tick's input snapshot, skipping devices
 // the debug UI owns.
-read_input :: proc(engine: ^mjolnir.Engine) {
-  inp := &engine.input
-  if !engine.keyboard_captured {
+read_input :: proc(app: ^App) {
+  inp := &app.input
+  if !app.input.keyboard_captured {
     it := 0
     for key, pressed in input.next_key_edge(inp, &it) {
       last_key = key; last_key_pressed = pressed
@@ -64,7 +85,7 @@ read_input :: proc(engine: ^mjolnir.Engine) {
     }
   }
   last_mouse = input.cursor(inp)
-  if !engine.mouse_captured {
+  if !app.input.mouse_captured {
     for b in input.MouseButton {
       if input.mouse_pressed(inp, b) {
         last_button = b; last_button_pressed = true
@@ -83,32 +104,42 @@ read_input :: proc(engine: ^mjolnir.Engine) {
   last_drag = input.mouse_delta(inp) if lmb_down else {}
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  read_input(engine)
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  read_input(app)
   move := [3]f32{0, 0, 0}
-  if !engine.keyboard_captured {
-    move.x = input.axis(&engine.input, .A, .D)
-    move.z = input.axis(&engine.input, .W, .S)
-    cube_yaw += input.axis(&engine.input, .E, .Q) * dt * 2.0
+  if !app.input.keyboard_captured {
+    move.x = input.axis(&app.input, .A, .D)
+    move.z = input.axis(&app.input, .W, .S)
+    cube_yaw += input.axis(&app.input, .E, .Q) * dt * 2.0
   }
   if move.x != 0 || move.z != 0 {
     speed := f32(move_speed) * dt
     cube_pos.x = clamp(cube_pos.x + move.x * speed, -7.5, 7.5)
     cube_pos.z = clamp(cube_pos.z + move.z * speed, -7.5, 7.5)
   }
-  world.translate(&engine.world, cube_handle, cube_pos)
-  world.rotate(&engine.world, cube_handle, cube_yaw)
-  if l, ok := render.attachment(&engine.render, light_handle.index, render.DirectionalLightAttachment); ok {
+  world.translate(&app.scene, cube_handle, cube_pos)
+  world.rotate(&app.scene, cube_handle, cube_yaw)
+  if l, ok := render.attachment(&app.renderer, light_handle.index, render.DirectionalLightAttachment); ok {
     l.color[3] = f32(light_intensity)
-    render.mark_slot_dirty(&engine.render, light_handle.index)
+    render.mark_slot_dirty(&app.renderer, light_handle.index)
   }
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  debug_ui(app)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+debug_ui :: proc(app: ^App) {
+  ctx := render.debug_ui(&app.renderer)
   if mu.window(ctx, "Input", {700, 20, 200, 300}, {.NO_CLOSE}) {
     mu.label(ctx, "WASD move, Q/E yaw")
     mu.label(ctx, fmt.tprintf("Last key: %v %v", last_key, "PRESS" if last_key_pressed else "RELEASE"))

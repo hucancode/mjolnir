@@ -32,7 +32,7 @@ split into its own repository.
 ```mermaid
 flowchart TB
   subgraph L3["Layer 3 — Engine"]
-    engine["mjolnir (optional)<br/>reference run loop<br/>glTF assembly · spawn helpers"]
+    engine["mjolnir (optional)<br/>run loop<br/>glTF assembly"]
   end
 
   subgraph L2["Layer 2 — Subsystems"]
@@ -85,15 +85,24 @@ flowchart TB
 
 ### Layer 3
 
-The `mjolnir` package is optional. It is a reference run loop (window,
-input snapshot, update and render cadence), glTF scene assembly
-(world nodes over the `render/gltf` and `animation/gltf` loaders) and
-a few basic spawn helpers (world node + render attachment). It runs
-no glue between modules: `world.update`, the world → render feed,
-skin palettes and physics poses are all the application's `update`
-callback. Layer-3 code uses only public layer-2 APIs, so user code
-can always rewrite it. Code that touches a single module belongs in
-that module.
+The `mjolnir` package is optional and holds two things:
+
+- **A run loop** (`run`): update and render cadence and the optional
+  update thread. It drives the application's `update` / `frame`
+  callbacks and imports no layer-2 module.
+- **Asset loading** (`load_gltf`): world nodes over the `render/gltf`
+  and `animation/gltf` loaders. It stays here because one asset fills
+  several modules.
+
+Everything else is the application's:
+
+- owning the module values and bringing them up;
+- every hop between modules (world → render, input → UIs, UI →
+  render, physics → world, animation → render).
+
+Each hop is one or two calls, so swapping a layer-2 module never
+touches layer 3. Code that touches a single module belongs in that
+module.
 
 ---
 
@@ -126,24 +135,24 @@ each module owns its own timing and thread safety, so a hop never
 needs scheduling or locking. The world → render hop, for example:
 
 ```odin
-world.update(&e.world)
-for i in world.removed_nodes(&e.world) do render.stage_slot_removal(&e.render, i)
-for n in world.changed_nodes(&e.world) do render.stage_transform(&e.render, n.index, n.world_matrix, n.visible)
+world.update(&app.scene)
+for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
 ```
 
-With the layer-3 run loop these lines live in the `update` callback,
-next to the physics pose copy and one
-`render.stage_bones(&e.render, node.index, animator.palette)` per
-skinned node. See [glue](glue.html) for every hop.
+These lines live in the application's `update` callback, next to the
+physics pose copy and one
+`render.stage_bones(&app.renderer, node.index, animator.palette)` per
+skinned node. See [engine](engine.html#wiring-modules) for every hop.
 
 ---
 
 ## Frame phases
 
 ```
-update thread: input snapshot → UI input → camera controller → update (app + glue) → render.update
-render thread: poll events → throttle → ui stage → pre_render
-               → render.frame (flush → acquire → record → submit + present) → post_render
+update tick:  update callback (input snapshot → debug UI / UI / camera input → app + glue → render.update)
+render frame: frame callback (poll events → debug UI widgets → ui stage
+              → render.frame (flush → acquire → record → submit + present))
 ```
 
 - **Update** runs at `UPDATE_FPS` (defaults to `RENDER_FPS`). On its
@@ -197,8 +206,8 @@ A's material or UI quad is just another bindless index.
 Following a logical entity is one glue line:
 `render.camera_set_transform(cam, world.world_matrix(&w, player))`.
 Orbit, free and follow controllers are render procs that read the
-per-tick `input.State` with fixed keys; the engine runs
-the active one each update tick.
+per-tick `input.State` with fixed keys; the application runs the
+active one each update tick (`render.camera_controller_update`).
 
 ---
 
@@ -233,7 +242,7 @@ poses back into the scene graph:
 
 ```odin
 physics.step(&phys, dt)
-for b in physics.body_poses(&phys) do world.set_world_pose(&e.world, world.NodeHandle(b.user), b.position, b.rotation)
+for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
 ```
 
 Inside `step`:
@@ -260,8 +269,8 @@ handle generations stable inside a step.
 
 ## Where to go next
 
-- [`glue`](glue.html) — wiring modules together in user code.
-- [`engine`](engine.html), [`platform`](platform.html),
+- [`engine`](engine.html) — building an application and wiring modules together.
+- [`platform`](platform.html),
   [`world`](world.html), [`render`](render.html),
   [`physics`](physics.html), [`navigation`](navigation.html),
   [`ui`](ui.html), [`animation`](animation.html) — module intros.

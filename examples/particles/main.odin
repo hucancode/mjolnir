@@ -1,12 +1,23 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:strings"
 import "core:fmt"
+import "core:log"
 import mu "vendor:microui"
+
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
 
 TextureEntry :: struct {
   name:   string,
@@ -44,39 +55,50 @@ color_start: [4]f32 = {1.0, 0.9, 0.4, 1.0}
 color_end:   [4]f32 = {1.0, 0.2, 0.0, 0.0}
 
 main :: proc() {
-  mjolnir.run_app({
-    title      = "Particles",
-    width      = 1280,
-    height     = 800,
-    debug_ui   = true,
-    setup      = setup,
-    update     = update,
-    pre_render = debug_ui,
-  })
-}
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 1280, 800, "Particles") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Particles", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  render.main_camera_look_at(&engine.render, {0, 5, 10}, {0, 2, 0})
-  ambient.set_skybox_enabled(&engine.render.ambient, false)
+  render.main_camera_look_at(&app.renderer, {0, 5, 10}, {0, 2, 0})
+  ambient.set_skybox_enabled(&app.renderer.ambient, false)
 
   for name in TEXTURE_FILES {
     path := fmt.tprintf("assets/particles/%s.png", name)
-    handle, ret := render.create_texture_from_path(&engine.render, path)
+    handle, ret := render.create_texture_from_path(&app.renderer, path)
     if ret != .SUCCESS do continue
     append(&textures, TextureEntry{name = strings.clone(name), handle = handle})
   }
   if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0
 
-  emitter_handle = render.create_emitter(&engine.render)
-  emitter_node = mjolnir.spawn(engine, {0, 2, 0}, render.EmitterAttachment{emitter_handle})
+  emitter_handle = render.create_emitter(&app.renderer)
+  emitter_node = world.spawn(&app.scene, {0, 2, 0})
+  render.attach(&app.renderer, emitter_node.index, render.EmitterAttachment{emitter_handle})
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
+
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   tex: render.Texture2DHandle
   if len(textures) > 0 && int(selected_tex_index) < len(textures) {
     tex = textures[selected_tex_index].handle
   }
-  if em, ok := render.emitter(&engine.render, emitter_handle); ok {
+  if em, ok := render.emitter(&app.renderer, emitter_handle); ok {
     em.texture_handle    = tex
     em.enabled           = b32(enabled)
     em.emission_rate     = f32(emission_rate)
@@ -91,13 +113,20 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     em.color_start       = color_start
     em.color_end         = color_end
   }
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  debug_ui(app)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+debug_ui :: proc(app: ^App) {
+  ctx := render.debug_ui(&app.renderer)
 
   if mu.window(ctx, "Texture", {20, 20, 220, 760}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)

@@ -181,22 +181,23 @@ follow_update :: proc(
   camera_look_at(camera, position, follow.target)
 }
 
-// Drive `camera` with `controller` for one tick of input. Blocked mouse /
-// keyboard input belongs to another consumer (e.g. UI) and is ignored; a drag
-// already in progress continues.
+// Drive the main camera with `controller` for one tick of input. Captured
+// mouse / keyboard input (see input.State) belongs to another consumer and is
+// ignored; a drag already in progress continues. The zero controller does
+// nothing.
 camera_controller_update :: proc(
   controller: ^CameraController,
-  camera: ^Camera,
+  self: ^Manager,
   s: ^input.State,
   delta_time: f32,
-  mouse_blocked := false,
-  keyboard_blocked := false,
 ) {
+  camera, ok := main_camera(self)
+  if !ok do return
   switch &d in controller.data {
   case OrbitCameraData:
-    orbit_update(controller, &d, camera, s, mouse_blocked, keyboard_blocked)
+    orbit_update(controller, &d, camera, s, s.mouse_captured, s.keyboard_captured)
   case FreeCameraData:
-    free_update(&d, camera, s, delta_time, mouse_blocked, keyboard_blocked)
+    free_update(&d, camera, s, delta_time, s.mouse_captured, s.keyboard_captured)
   case FollowCameraData:
     follow_update(&d, camera, delta_time)
   }

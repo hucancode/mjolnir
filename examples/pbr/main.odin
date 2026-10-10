@@ -1,9 +1,12 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
@@ -36,58 +39,81 @@ ibl_intensity: mu.Real = 1.0
 skybox_on: bool = true
 skybox_blur: mu.Real = 0.25
 
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
+
 main :: proc() {
   defer mjolnir.gltf_scene_destroy(&model)
-  mjolnir.run_app({
-    title      = "PBR",
-    debug_ui   = true,
-    setup      = setup,
-    update     = update,
-    pre_render = debug_ui,
-  })
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 800, 600, "PBR") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "PBR", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+
+  render.main_camera_look_at(&app.renderer, {0, 0.2, 3.5}, {0, 0, 0})
+  dir_light = world.spawn(&app.scene, {4, 6, 4})
+  render.attach(&app.renderer, dir_light.index, render.directional_light_attachment({1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false))
+  swap_model(app, 0)
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  render.main_camera_look_at(&engine.render, {0, 0.2, 3.5}, {0, 0, 0})
-  dir_light = mjolnir.spawn(engine, {4, 6, 4}, render.directional_light_attachment({1, 0.98, 0.95, f32(dir_intensity)}, 15.0, false))
-  swap_model(engine, 0)
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
 }
 
-swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
+swap_model :: proc(app: ^App, index: int) {
   if index == current_model do return
-  for h in model.roots do world.despawn(&engine.world, h)
+  for h in model.roots do world.despawn(&app.scene, h)
   mjolnir.gltf_scene_destroy(&model)
   current_model = index
   m := MODELS[index]
-  model = mjolnir.load_gltf(engine, m.path)
+  model = mjolnir.load_gltf(&app.scene, &app.renderer, m.path)
   rotation_phase = 0
 }
 
-update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  if l, ok := render.attachment(&engine.render, dir_light.index, render.DirectionalLightAttachment); ok {
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if l, ok := render.attachment(&app.renderer, dir_light.index, render.DirectionalLightAttachment); ok {
     l.color[3] = f32(dir_intensity)
-    render.mark_slot_dirty(&engine.render, dir_light.index)
+    render.mark_slot_dirty(&app.renderer, dir_light.index)
   }
-  ambient.set_ibl_intensity(&engine.render.ambient, f32(ibl_intensity))
-  ambient.set_skybox_enabled(&engine.render.ambient, skybox_on)
-  ambient.set_skybox_blur(&engine.render.ambient, f32(skybox_blur))
+  ambient.set_ibl_intensity(&app.renderer.ambient, f32(ibl_intensity))
+  ambient.set_skybox_enabled(&app.renderer.ambient, skybox_on)
+  ambient.set_skybox_blur(&app.renderer.ambient, f32(skybox_blur))
   if spinning {
-    rotation_phase += delta_time * f32(rotate_speed)
+    rotation_phase += dt * f32(rotate_speed)
   }
   m := MODELS[current_model]
   for h in model.roots {
-    world.translate(&engine.world, h, m.offset)
-    world.rotate(&engine.world, h, rotation_phase, linalg.VECTOR3F32_Y_AXIS)
-    if m.rot_x != 0 do world.rotate_by(&engine.world, h, m.rot_x, linalg.VECTOR3F32_X_AXIS)
-    world.scale(&engine.world, h, m.scale)
+    world.translate(&app.scene, h, m.offset)
+    world.rotate(&app.scene, h, rotation_phase, linalg.VECTOR3F32_Y_AXIS)
+    if m.rot_x != 0 do world.rotate_by(&app.scene, h, m.rot_x, linalg.VECTOR3F32_X_AXIS)
+    world.scale(&app.scene, h, m.scale)
   }
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  ctx := render.debug_ui(&app.renderer)
   if mu.window(ctx, "PBR Lighting", {550, 20, 220, 400}, {.NO_CLOSE}) {
     mu.label(ctx, "Sun intensity")
     mu.slider(ctx, &dir_intensity, 0.0, 5.0)
@@ -100,7 +126,8 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
     mu.label(ctx, "Model:")
     mu.layout_row(ctx, {-1}, 0)
     for m, i in MODELS {
-      if .SUBMIT in mu.button(ctx, m.label) do swap_model(engine, i)
+      if .SUBMIT in mu.button(ctx, m.label) do swap_model(app, i)
     }
   }
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

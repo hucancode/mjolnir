@@ -64,13 +64,13 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 - For visual issues: build with `-define:FRAME_LIMIT=10`, inspect logs.
 - Capture screenshots with `make capture`.
 - Slow the renderer with `-define:RENDER_FPS=4` to read render logs frame by frame.
-- Toggle `engine.debug_ui_enabled = true` for the microui overlay.
+- Call `render.debug_ui(&r)` in the `frame` callback for the microui overlay, or pass `show_stats = true` to `render.frame` for renderer stats.
 
 ## Read more
 
 - [`architecture`](architecture.html) — layer design, frame phases,
   world/render boundary, staging, bindless + GPU-driven model
-- [`glue`](glue.html) — wiring modules together in user code
+- [`engine`](engine.html) — building an application and wiring modules together
 - [`examples`](examples.html) — runnable examples with notes
 
 ## Module intros

@@ -53,9 +53,14 @@ should_close :: proc(self: ^Platform) -> bool {
   return bool(glfw.WindowShouldClose(self.window))
 }
 
-// Pump window events into the input accumulator.
+// Pump window events into the input accumulator. Main thread only.
 poll_events :: proc(self: ^Platform) {
   glfw.PollEvents()
+}
+
+// Take this tick's input snapshot from the events polled so far.
+read_input :: proc(self: ^Platform, s: ^input.State) {
+  input.new_frame(s, &self.input)
 }
 
 // Instance extensions the window surface needs.
@@ -67,7 +72,11 @@ vulkan_get_instance_proc_addr :: proc() -> rawptr {
   return rawptr(glfw.GetInstanceProcAddress)
 }
 
-create_surface :: proc(self: ^Platform, instance: vk.Instance) -> (surface: vk.SurfaceKHR, ret: vk.Result) {
+// Create a Vulkan surface for the window. `platform` is the ^Platform; the
+// erased pointer lets a renderer take this proc as a callback without
+// importing platform.
+create_surface :: proc(platform: rawptr, instance: vk.Instance) -> (surface: vk.SurfaceKHR, ret: vk.Result) {
+  self := cast(^Platform)platform
   ret = glfw.CreateWindowSurface(instance, self.window, nil, &surface)
   return
 }

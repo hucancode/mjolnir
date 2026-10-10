@@ -1,6 +1,7 @@
 package render
 
 import "bindless"
+import "core:log"
 import "core:strings"
 import cont "../containers"
 import "gpu"
@@ -85,32 +86,56 @@ init_subsystems :: proc(
   return .SUCCESS
 }
 
-// Create the Vulkan instance. The caller creates a window surface for
-// vulkan_instance(self) and passes it to init.
-create_instance :: proc(
+// Creates a window surface for `instance`; `user` is passed through from init.
+SurfaceProc :: #type proc(user: rawptr, instance: vk.Instance) -> (vk.SurfaceKHR, vk.Result)
+
+// Bring the renderer up on a window: instance, surface (through
+// `create_surface(surface_user, instance)`), device, swapchain, every
+// app-lifetime resource and an empty level with a main camera. Paired with
+// shutdown.
+init :: proc(
   self: ^Manager,
   app_name: string,
   instance_extensions: []cstring,
   get_instance_proc_addr: rawptr,
-) -> vk.Result {
-  name := strings.clone_to_cstring(app_name, context.temp_allocator)
-  return gpu.instance_init(&self.gctx, name, instance_extensions, get_instance_proc_addr)
+  create_surface: SurfaceProc,
+  surface_user: rawptr,
+  framebuffer_size: [2]u32,
+  dpi_scale: f32,
+) -> bool {
+  res := init_vulkan(
+    self,
+    app_name,
+    instance_extensions,
+    get_instance_proc_addr,
+    create_surface,
+    surface_user,
+    framebuffer_size,
+    dpi_scale,
+  )
+  if res == .SUCCESS do res = setup_level(self)
+  if res != .SUCCESS {
+    log.errorf("Renderer init failed: %v", res)
+    return false
+  }
+  return true
 }
 
-vulkan_instance :: proc(self: ^Manager) -> vk.Instance {
-  return self.gctx.instance
-}
-
-// Create the device, the swapchain for `surface` and every app-lifetime
-// resource. Paired with shutdown. Follow with setup.
-init :: proc(
+@(private = "file")
+init_vulkan :: proc(
   self: ^Manager,
-  surface: vk.SurfaceKHR,
+  app_name: string,
+  instance_extensions: []cstring,
+  get_instance_proc_addr: rawptr,
+  create_surface: SurfaceProc,
+  surface_user: rawptr,
   framebuffer_size: [2]u32,
   dpi_scale: f32,
 ) -> vk.Result {
   gctx := &self.gctx
-  gctx.surface = surface
+  name := strings.clone_to_cstring(app_name, context.temp_allocator)
+  gpu.instance_init(gctx, name, instance_extensions, get_instance_proc_addr) or_return
+  gctx.surface = create_surface(surface_user, gctx.instance) or_return
   gpu.device_init(gctx) or_return
   gpu.swapchain_init(&self.swapchain, gctx, framebuffer_size) or_return
   swapchain_format := self.swapchain.format.format
@@ -133,10 +158,17 @@ init :: proc(
 }
 
 // Level-lifetime resources: descriptors, per-level renderer state and the
-// main camera. Paired with teardown. Safe to call at any point outside frame;
-// a no-op when the level is already set up. Load the environment map with
-// load_environment_map afterwards.
-setup :: proc(self: ^Manager) -> (ret: vk.Result) {
+// main camera. init runs it once; after teardown, call it to start the next
+// level. Safe to call at any point outside frame; a no-op when the level is
+// already set up. Load the environment map with load_environment_map afterwards.
+setup :: proc(self: ^Manager) -> bool {
+  res := setup_level(self)
+  if res != .SUCCESS do log.errorf("Renderer level setup failed: %v", res)
+  return res == .SUCCESS
+}
+
+@(private = "file")
+setup_level :: proc(self: ^Manager) -> (ret: vk.Result) {
   if self.internal.level_ready do return .SUCCESS
   gctx := &self.gctx
   swapchain_extent := self.swapchain.extent
@@ -190,8 +222,10 @@ teardown :: proc(self: ^Manager) {
 // Replace the environment map with the equirectangular HDR image at `path`
 // and precompute image-based lighting from it. Level-lifetime: call after
 // setup; teardown frees it. Without one, IBL and the skybox are black.
-load_environment_map :: proc(self: ^Manager, path: string) -> vk.Result {
-  return ambient.load_environment(&self.ambient, &self.gctx, &self.texture_manager, path)
+load_environment_map :: proc(self: ^Manager, path: string) -> bool {
+  res := ambient.load_environment(&self.ambient, &self.gctx, &self.texture_manager, path)
+  if res != .SUCCESS do log.warnf("Failed to load environment map %s: %v", path, res)
+  return res == .SUCCESS
 }
 
 // Destroy everything init created; tears the level down first if needed.

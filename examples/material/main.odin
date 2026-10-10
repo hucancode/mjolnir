@@ -1,10 +1,13 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import mu "vendor:microui"
@@ -22,48 +25,66 @@ roughness_max: mu.Real = 1.0
 sun_light: world.NodeHandle
 grid_materials: [GRID][GRID]render.MaterialHandle
 
-main :: proc() {
-  mjolnir.run_app({
-    title      = "Material PBR Knobs",
-    width      = 1000,
-    height     = 700,
-    debug_ui   = true,
-    setup      = setup,
-    update     = update,
-    pre_render = debug_ui,
-  })
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  half := f32(GRID - 1) * 0.5 * SPACING
-  render.main_camera_look_at(&engine.render, {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
+main :: proc() {
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 1000, 700, "Material PBR Knobs") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Material PBR Knobs", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
 
-  sphere_mesh := engine.render.builtin_meshes[.SPHERE]
-  plane_mesh := engine.render.builtin_meshes[.QUAD_XZ]
-  ground_albedo, _ := render.create_texture_from_data(&engine.render, #load("statue-1275469_1280.jpg"), generate_mips = true)
-  plane_material := render.create_material(&engine.render, {.ALBEDO_TEXTURE}, .PBR,
+  half := f32(GRID - 1) * 0.5 * SPACING
+  render.main_camera_look_at(&app.renderer, {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
+
+  sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
+  plane_mesh := app.renderer.builtin_meshes[.QUAD_XZ]
+  ground_albedo, _ := render.create_texture_from_data(&app.renderer, #load("statue-1275469_1280.jpg"), generate_mips = true)
+  plane_material := render.create_material(&app.renderer, {.ALBEDO_TEXTURE}, .PBR,
     albedo_handle = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
   )
 
-  plane := mjolnir.spawn(engine, {0, -1, 0}, render.MeshAttachment{handle = plane_mesh, material = plane_material, cast_shadow = false})
-  world.scale(&engine.world, plane, f32(GRID) * SPACING * 1.5)
+  plane := world.spawn(&app.scene, {0, -1, 0})
+  render.attach(&app.renderer, plane.index, render.MeshAttachment{handle = plane_mesh, material = plane_material, cast_shadow = false})
+  world.scale(&app.scene, plane, f32(GRID) * SPACING * 1.5)
 
   base_color: [4]f32 = {0.85, 0.85, 0.9, 1}
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
-    mat := render.create_material(&engine.render, type = .PBR, base_color_factor = base_color,
+    mat := render.create_material(&app.renderer, type = .PBR, base_color_factor = base_color,
       metallic_value = m, roughness_value = r,
     )
     grid_materials[row][col] = mat
     x := f32(col) * SPACING - half
     y := f32(row) * SPACING
-    mjolnir.spawn(engine, {x, y, 0}, render.MeshAttachment{handle = sphere_mesh, material = mat, cast_shadow = true})
+    sphere := world.spawn(&app.scene, {x, y, 0})
+    render.attach(&app.renderer, sphere.index, render.MeshAttachment{handle = sphere_mesh, material = mat, cast_shadow = true})
   }
 
   q1 := linalg.quaternion_angle_axis(-math.PI * 0.35, linalg.VECTOR3F32_Y_AXIS)
   q2 := linalg.quaternion_angle_axis(-math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
-  sun_light = mjolnir.spawn(engine, {0, 10, 0}, render.directional_light_attachment({1, 0.97, 0.92, f32(sun_intensity)}, 12.0))
-  world.rotate(&engine.world, sun_light, q2 * q1)
+  sun_light = world.spawn(&app.scene, {0, 10, 0})
+  render.attach(&app.renderer, sun_light.index, render.directional_light_attachment({1, 0.97, 0.92, f32(sun_intensity)}, 12.0))
+  world.rotate(&app.scene, sun_light, q2 * q1)
+
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
+}
+
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
 }
 
 axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
@@ -76,27 +97,32 @@ axis_values :: proc(row, col: int) -> (metallic, roughness: f32) {
   return
 }
 
-update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  if l, ok := render.attachment(&engine.render, sun_light.index, render.DirectionalLightAttachment); ok {
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  if l, ok := render.attachment(&app.renderer, sun_light.index, render.DirectionalLightAttachment); ok {
     l.color[3] = f32(sun_intensity)
-    render.mark_slot_dirty(&engine.render, sun_light.index)
+    render.mark_slot_dirty(&app.renderer, sun_light.index)
   }
-  ambient.set_ibl_intensity(&engine.render.ambient, f32(ibl_intensity))
-  ambient.set_skybox_enabled(&engine.render.ambient, skybox_on)
+  ambient.set_ibl_intensity(&app.renderer.ambient, f32(ibl_intensity))
+  ambient.set_skybox_enabled(&app.renderer.ambient, skybox_on)
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
-    mat := render.material(&engine.render, grid_materials[row][col]) or_continue
+    mat := render.material(&app.renderer, grid_materials[row][col]) or_continue
     mat.metallic_value = m
     mat.roughness_value = r
-    render.mark_material_dirty(&engine.render, grid_materials[row][col])
+    render.mark_material_dirty(&app.renderer, grid_materials[row][col])
   }
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  ctx := render.debug_ui(&app.renderer)
   if mu.window(ctx, "Environment", {700, 20, 280, 180}, {.NO_CLOSE}) {
     mu.label(ctx, fmt.tprintf("Sun intensity: %.2f", sun_intensity))
     mu.slider(ctx, &sun_intensity, 0.0, 5.0)
@@ -114,4 +140,5 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
     mu.label(ctx, fmt.tprintf("Roughness max: %.2f (cols right)", roughness_max))
     mu.slider(ctx, &roughness_max, 0.0, 1.0)
   }
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
 }

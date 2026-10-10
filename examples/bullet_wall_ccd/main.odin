@@ -1,12 +1,23 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "../../mjolnir/physics"
 import "core:fmt"
+import "core:log"
 import "core:math/linalg"
 import mu "vendor:microui"
+
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
 
 WALL_COUNT :: 3
 WALL_X :: f32(0.0)
@@ -27,45 +38,58 @@ auto_fire_timer: f32
 phys: physics.World
 
 main :: proc() {
+  context.logger = log.create_console_logger()
   physics.init(&phys)
   defer physics.shutdown(&phys)
-  mjolnir.run_app({
-    title      = "Bullet vs Thin Wall (CCD)",
-    width      = 1000,
-    height     = 700,
-    debug_ui   = true,
-    setup      = setup,
-    update     = update,
-    pre_render = debug_ui,
-  })
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 1000, 700, "Bullet vs Thin Wall (CCD)") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Bullet vs Thin Wall (CCD)", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  phys.gravity = {0, 0, 0}
-  render.main_camera_look_at(&engine.render, {-14, 8, 14}, {0, 1, 0})
-  mjolnir.spawn(engine, {-5, 12, 5}, render.directional_light_attachment({1, 0.95, 0.9, 1}, 6.0, true))
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
 
-  cube_mesh := engine.render.builtin_meshes[.CUBE]
-  ground := world.spawn(&engine.world, {0, -0.5, 0})
+setup :: proc(app: ^App) {
+  phys.gravity = {0, 0, 0}
+  render.main_camera_look_at(&app.renderer, {-14, 8, 14}, {0, 1, 0})
+  light := world.spawn(&app.scene, {-5, 12, 5})
+  render.attach(&app.renderer, light.index, render.directional_light_attachment({1, 0.95, 0.9, 1}, 6.0, true))
+
+  cube_mesh := app.renderer.builtin_meshes[.CUBE]
+  ground := world.spawn(&app.scene, {0, -0.5, 0})
   physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {30.0, 0.5, 12.0}}, user = world.Handle(ground))
-  ground_visual := mjolnir.spawn_mesh(engine, cube_mesh, engine.render.builtin_materials[.GRAY], parent = ground)
-  world.scale_xyz(&engine.world, ground_visual, 30.0, 0.5, 12.0)
+  ground_visual := world.spawn_child(&app.scene, ground)
+  render.attach(&app.renderer, ground_visual.index, render.MeshAttachment{handle = cube_mesh, material = app.renderer.builtin_materials[.GRAY], cast_shadow = true})
+  world.scale_xyz(&app.scene, ground_visual, 30.0, 0.5, 12.0)
 
   wall_colors := [WALL_COUNT]render.Color{.RED, .YELLOW, .GREEN}
   for i in 0 ..< WALL_COUNT {
     half_thick := wall_heights[i] * 0.5
     wall_z := (f32(i) - f32(WALL_COUNT - 1) * 0.5) * WALL_SPACING
     wall_pos := [3]f32{WALL_X, 1.5, wall_z}
-    wall_nodes[i] = world.spawn(&engine.world, wall_pos)
+    wall_nodes[i] = world.spawn(&app.scene, wall_pos)
     physics.create_static_body(&phys, wall_pos, collider = physics.BoxCollider{half_extents = {half_thick, 1.5, 2.0}}, user = world.Handle(wall_nodes[i]))
-    wall_visual := mjolnir.spawn_mesh(engine, cube_mesh, engine.render.builtin_materials[wall_colors[i]], parent = wall_nodes[i])
-    world.scale_xyz(&engine.world, wall_visual, half_thick, 1.5, 2.0)
+    wall_visual := world.spawn_child(&app.scene, wall_nodes[i])
+    render.attach(&app.renderer, wall_visual.index, render.MeshAttachment{handle = cube_mesh, material = app.renderer.builtin_materials[wall_colors[i]], cast_shadow = true})
+    world.scale_xyz(&app.scene, wall_visual, half_thick, 1.5, 2.0)
   }
 
-  bullet_node = world.spawn(&engine.world, START_POS)
+  bullet_node = world.spawn(&app.scene, START_POS)
   bullet_body = physics.create_dynamic_body(&phys, START_POS, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(bullet_node))
-  bullet_visual := mjolnir.spawn_mesh(engine, engine.render.builtin_meshes[.SPHERE], engine.render.builtin_materials[.CYAN], parent = bullet_node)
-  world.scale_xyz(&engine.world, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
+  bullet_visual := world.spawn_child(&app.scene, bullet_node)
+  render.attach(&app.renderer, bullet_visual.index, render.primitive(&app.renderer, .SPHERE, .CYAN))
+  world.scale_xyz(&app.scene, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
   if body, ok := physics.get_dynamic_body(&phys, bullet_body); ok {
     body.linear_damping = 0; body.angular_damping = 0
     body.restitution = 0.1;  body.friction = 0.2
@@ -76,7 +100,7 @@ target_z :: proc() -> f32 {
   return (f32(target_wall) - f32(WALL_COUNT - 1) * 0.5) * WALL_SPACING
 }
 
-fire_bullet :: proc(engine: ^mjolnir.Engine) {
+fire_bullet :: proc(app: ^App) {
   body, ok := physics.get_dynamic_body(&phys, bullet_body)
   if !ok do return
   body.position = {START_POS.x, START_POS.y, target_z()}
@@ -86,11 +110,14 @@ fire_bullet :: proc(engine: ^mjolnir.Engine) {
   body.is_sleeping = false; body.sleep_timer = 0
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   if body, ok := physics.get_dynamic_body(&phys, bullet_body); ok {
     if auto_fire {
       auto_fire_timer += dt
-      if auto_fire_timer >= 2.0 { auto_fire_timer = 0; fire_bullet(engine) }
+      if auto_fire_timer >= 2.0 { auto_fire_timer = 0; fire_bullet(app) }
     }
     if body.position.x > 20.0 || body.position.x < -25.0 {
       body.velocity = {}
@@ -98,14 +125,21 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     }
   }
   physics.step(&phys, dt)
-  for b in physics.body_poses(&phys) do world.set_world_pose(&engine.world, world.NodeHandle(b.user), b.position, b.rotation)
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  debug_ui(app)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+debug_ui :: proc(app: ^App) {
+  ctx := render.debug_ui(&app.renderer)
   if mu.window(ctx, "Bullet CCD", {700, 20, 280, 380}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.label(ctx, "Target wall:")
@@ -120,7 +154,7 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
     mu.label(ctx, "CCD: ACTIVE (>=5 m/s threshold)" if bullet_speed >= 5.0 else "CCD: off (low velocity)")
 
     mu.layout_row(ctx, {130, -1}, 0)
-    if .SUBMIT in mu.button(ctx, "Fire") do fire_bullet(engine)
+    if .SUBMIT in mu.button(ctx, "Fire") do fire_bullet(app)
     mu.checkbox(ctx, "Auto-fire (2s)", &auto_fire)
 
     mu.layout_row(ctx, {-1}, 0)

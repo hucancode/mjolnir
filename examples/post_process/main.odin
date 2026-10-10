@@ -1,12 +1,22 @@
 package main
 
 import "../../mjolnir"
+import "../../mjolnir/input"
+import "../../mjolnir/platform"
 import "../../mjolnir/render/post_process"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import mu "vendor:microui"
+
+App :: struct {
+  window:   platform.Platform,
+  scene:    world.World,
+  renderer: render.Manager,
+  camera:   render.CameraController,
+  input:    input.State,
+}
 
 bloom_on: bool = true
 tonemap_on: bool = true
@@ -32,65 +42,93 @@ blur_radius: mu.Real = 3.0
 grayscale_strength: mu.Real = 1.0
 
 main :: proc() {
-  mjolnir.run_app({
-    title      = "Post-process Stack Panel",
-    width      = 1000,
-    height     = 700,
-    debug_ui   = true,
-    setup      = setup,
-    update     = update,
-    pre_render = debug_ui,
-  })
+  context.logger = log.create_console_logger()
+  app := new(App)
+  defer free(app)
+  w := &app.window
+  if !platform.init(w, 1000, 700, "Post-process Stack Panel") do return
+  defer platform.shutdown(w)
+  if !render.init(&app.renderer, "Post-process Stack Panel", platform.vulkan_instance_extensions(), platform.vulkan_get_instance_proc_addr(), platform.create_surface, w, platform.framebuffer_size(w), platform.dpi_scale(w)) do return
+  defer render.shutdown(&app.renderer)
+  if !world.init(&app.scene) do return
+  defer world.shutdown(&app.scene)
+  render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
+  app.camera = render.orbit_controller()
+  setup(app)
+  mjolnir.run(mjolnir.Loop(App){app = app, should_close = should_close, update = update, frame = frame})
 }
 
-setup :: proc(engine: ^mjolnir.Engine) {
-  render.main_camera_look_at(&engine.render, {6, 5, 10}, {0, 1.0, 0})
-  mjolnir.spawn_ground(engine, 30.0)
+should_close :: proc(app: ^App) -> bool {
+  return platform.should_close(&app.window)
+}
 
-  cube_mesh   := engine.render.builtin_meshes[.CUBE]
-  sphere_mesh := engine.render.builtin_meshes[.SPHERE]
+setup :: proc(app: ^App) {
+  render.main_camera_look_at(&app.renderer, {6, 5, 10}, {0, 1.0, 0})
+  ground := world.spawn(&app.scene)
+  render.attach(&app.renderer, ground.index, render.primitive(&app.renderer, .QUAD_XZ, .GRAY, cast_shadow = false))
+  world.scale(&app.scene, ground, 30.0)
 
-  magenta_emit := render.material_pbr(&engine.render, {1.0, 0.1, 0.8, 1}, emissive = 4.0)
-  mjolnir.spawn_mesh(engine, sphere_mesh, magenta_emit, {-3.0, 1.2, 1.5})
-  cyan_emit := render.material_pbr(&engine.render, {0.1, 0.9, 1.0, 1}, emissive = 4.0)
-  mjolnir.spawn_mesh(engine, sphere_mesh, cyan_emit, {0.0, 1.2, 1.5})
-  yellow_emit := render.material_pbr(&engine.render, {1.0, 0.9, 0.2, 1}, emissive = 4.0)
-  mjolnir.spawn_mesh(engine, sphere_mesh, yellow_emit, {3.0, 1.2, 1.5})
+  cube_mesh   := app.renderer.builtin_meshes[.CUBE]
+  sphere_mesh := app.renderer.builtin_meshes[.SPHERE]
 
-  metal := render.material_pbr(&engine.render, {0.9, 0.9, 0.95, 1}, metallic = 1.0, roughness = 0.15)
-  mjolnir.spawn_mesh(engine, sphere_mesh, metal, {0.5, 1.0, -1.5})
-  rough := render.material_pbr(&engine.render, {0.2, 0.6, 0.8, 1}, metallic = 0.0, roughness = 0.8)
-  mjolnir.spawn_mesh(engine, cube_mesh, rough, {3.0, 1.0, -1.5})
-  orange := render.material_pbr(&engine.render, {1.0, 0.4, 0.1, 1}, emissive = 4.0)
-  mjolnir.spawn_mesh(engine, cube_mesh, orange, {-3.0, 1.0, -1.5})
-  glass := render.material_transparent(&engine.render, {0.2, 0.9, 0.4, 0.4})
-  mjolnir.spawn_mesh(engine, sphere_mesh, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
+  magenta_emit := render.material_pbr(&app.renderer, {1.0, 0.1, 0.8, 1}, emissive = 4.0)
+  spawn_mesh(app, sphere_mesh, magenta_emit, {-3.0, 1.2, 1.5})
+  cyan_emit := render.material_pbr(&app.renderer, {0.1, 0.9, 1.0, 1}, emissive = 4.0)
+  spawn_mesh(app, sphere_mesh, cyan_emit, {0.0, 1.2, 1.5})
+  yellow_emit := render.material_pbr(&app.renderer, {1.0, 0.9, 0.2, 1}, emissive = 4.0)
+  spawn_mesh(app, sphere_mesh, yellow_emit, {3.0, 1.2, 1.5})
 
-  white_mat := engine.render.builtin_materials[.WHITE]
-  for i in 0 ..< 5 do mjolnir.spawn_mesh(engine, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
+  metal := render.material_pbr(&app.renderer, {0.9, 0.9, 0.95, 1}, metallic = 1.0, roughness = 0.15)
+  spawn_mesh(app, sphere_mesh, metal, {0.5, 1.0, -1.5})
+  rough := render.material_pbr(&app.renderer, {0.2, 0.6, 0.8, 1}, metallic = 0.0, roughness = 0.8)
+  spawn_mesh(app, cube_mesh, rough, {3.0, 1.0, -1.5})
+  orange := render.material_pbr(&app.renderer, {1.0, 0.4, 0.1, 1}, emissive = 4.0)
+  spawn_mesh(app, cube_mesh, orange, {-3.0, 1.0, -1.5})
+  glass := render.material_transparent(&app.renderer, {0.2, 0.9, 0.4, 0.4})
+  spawn_mesh(app, sphere_mesh, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
 
-  mjolnir.spawn(engine, {-3, 8, 6}, render.directional_light_attachment(color = {1.0, 0.95, 0.9, 1}, radius = 5.0, cast_shadow = true))
-  mjolnir.spawn(engine, {0, 3, 0}, render.point_light_attachment(color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false))
+  white_mat := app.renderer.builtin_materials[.WHITE]
+  for i in 0 ..< 5 do spawn_mesh(app, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
+
+  sun := world.spawn(&app.scene, {-3, 8, 6})
+  render.attach(&app.renderer, sun.index, render.directional_light_attachment(color = {1.0, 0.95, 0.9, 1}, radius = 5.0, cast_shadow = true))
+  lamp := world.spawn(&app.scene, {0, 3, 0})
+  render.attach(&app.renderer, lamp.index, render.point_light_attachment(color = {1.0, 0.5, 0.2, 1}, radius = 8.0, cast_shadow = false))
   log.info("Post-process stack panel — toggle effects via debug UI")
 }
 
-update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  post_process.clear_effects(&engine.render.post_process)
-  if outline_on    do post_process.add_outline(&engine.render.post_process, f32(outline_thickness))
-  if fog_on        do post_process.add_fog(&engine.render.post_process, {0.55, 0.6, 0.7}, f32(fog_density), f32(fog_start), f32(fog_end))
-  if dof_on        do post_process.add_dof(&engine.render.post_process, f32(dof_focus), f32(dof_range), f32(dof_blur), 0.5)
-  if bloom_on      do post_process.add_bloom(&engine.render.post_process, f32(bloom_threshold), f32(bloom_intensity), 32.0)
-  if blur_on       do post_process.add_blur(&engine.render.post_process, f32(blur_radius))
-  if crosshatch_on do post_process.add_crosshatch(&engine.render.post_process)
-  if grayscale_on  do post_process.add_grayscale(&engine.render.post_process, f32(grayscale_strength))
-  if tonemap_on    do post_process.add_tonemap(&engine.render.post_process, f32(tonemap_exposure), f32(tonemap_gamma))
-  world.update(&engine.world)
-  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
-  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+spawn_mesh :: proc(app: ^App, mesh: render.MeshHandle, material: render.MaterialHandle, position: [3]f32, cast_shadow := true) {
+  n := world.spawn(&app.scene, position)
+  render.attach(&app.renderer, n.index, render.MeshAttachment{handle = mesh, material = material, cast_shadow = cast_shadow})
 }
 
-debug_ui :: proc(engine: ^mjolnir.Engine) {
-  ctx := render.debug_ui(&engine.render)
+update :: proc(app: ^App, dt: f32) {
+  platform.read_input(&app.window, &app.input)
+  render.debug_ui_input(&app.renderer, &app.input)
+  render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
+  post_process.clear_effects(&app.renderer.post_process)
+  if outline_on    do post_process.add_outline(&app.renderer.post_process, f32(outline_thickness))
+  if fog_on        do post_process.add_fog(&app.renderer.post_process, {0.55, 0.6, 0.7}, f32(fog_density), f32(fog_start), f32(fog_end))
+  if dof_on        do post_process.add_dof(&app.renderer.post_process, f32(dof_focus), f32(dof_range), f32(dof_blur), 0.5)
+  if bloom_on      do post_process.add_bloom(&app.renderer.post_process, f32(bloom_threshold), f32(bloom_intensity), 32.0)
+  if blur_on       do post_process.add_blur(&app.renderer.post_process, f32(blur_radius))
+  if crosshatch_on do post_process.add_crosshatch(&app.renderer.post_process)
+  if grayscale_on  do post_process.add_grayscale(&app.renderer.post_process, f32(grayscale_strength))
+  if tonemap_on    do post_process.add_tonemap(&app.renderer.post_process, f32(tonemap_exposure), f32(tonemap_gamma))
+  world.update(&app.scene)
+  for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
+  for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
+  render.update(&app.renderer, dt)
+}
+
+frame :: proc(app: ^App) -> bool {
+  platform.poll_events(&app.window)
+  debug_ui(app)
+  return render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
+}
+
+debug_ui :: proc(app: ^App) {
+  ctx := render.debug_ui(&app.renderer)
   if mu.window(ctx, "Post-process", {700, 20, 280, 380}, {.NO_CLOSE}) {
     mu.layout_row(ctx, {-1}, 0)
     mu.checkbox(ctx, "Tonemap", &tonemap_on)
@@ -122,6 +160,6 @@ debug_ui :: proc(engine: ^mjolnir.Engine) {
     mu.checkbox(ctx, "Gaussian Blur", &blur_on)
     if blur_on do mu.slider(ctx, &blur_radius, 0.5, 10.0)
     mu.checkbox(ctx, "Crosshatch", &crosshatch_on)
-    mu.label(ctx, fmt.tprintf("Stack size: %d", len(engine.render.post_process.effect_stack)))
+    mu.label(ctx, fmt.tprintf("Stack size: %d", len(app.renderer.post_process.effect_stack)))
   }
 }
