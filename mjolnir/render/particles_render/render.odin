@@ -10,34 +10,21 @@ Particle :: particles_compute.Particle
 
 SHADER_PARTICLE_VERT := #load("../../shader/particle/vert.spv")
 SHADER_PARTICLE_FRAG := #load("../../shader/particle/frag.spv")
-TEXTURE_DEFAULT :: #load("../../assets/circle_03.png")
 
 Renderer :: struct {
 	render_pipeline_layout: vk.PipelineLayout,
 	render_pipeline:        vk.Pipeline,
-	default_texture_index:  u32,
 }
 
 init :: proc(
 	self: ^Renderer,
 	gctx: ^gpu.GPUContext,
-	texture_manager: ^gpu.TextureManager,
 	camera_set_layout: vk.DescriptorSetLayout,
 	textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
 	ret: vk.Result,
 ) {
 	log.debugf("Initializing particle render renderer")
-	default_texture_handle := gpu.create_texture_2d_from_data(
-		gctx,
-		texture_manager,
-		TEXTURE_DEFAULT,
-	) or_return
-	defer if ret != .SUCCESS {
-		gpu.free_texture_2d(texture_manager, gctx, default_texture_handle)
-	}
-	self.default_texture_index = default_texture_handle.index
-
 	create_render_pipeline(gctx, self, camera_set_layout, textures_set_layout) or_return
 	defer if ret != .SUCCESS {
 		vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)

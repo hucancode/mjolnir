@@ -16,6 +16,29 @@ PlayMode :: enum {
   PING_PONG,
 }
 
+// Advance playback time by delta_time according to mode.
+// ONCE clamps at duration and stops; PING_PONG flips speed at either end.
+playback_advance :: proc(
+  time, speed: ^f32,
+  status: ^Status,
+  mode: PlayMode,
+  duration, delta_time: f32,
+) {
+  if status^ != .PLAYING || duration <= 0 do return
+  time^ += delta_time * speed^
+  switch mode {
+  case .LOOP:
+    time^ = math.mod_f32(time^ + duration, duration)
+  case .ONCE:
+    if time^ >= duration {
+      time^ = duration
+      status^ = .STOPPED
+    }
+  case .PING_PONG:
+    if time^ >= duration || time^ < 0 do speed^ *= -1
+  }
+}
+
 BlendMode :: enum {
   REPLACE,   // Default: weighted blend (current behavior)
   ADD,       // Add transforms on top of accumulated (additive blending)
@@ -357,30 +380,14 @@ layer_init_ik :: proc(
 layer_update :: proc(self: ^Layer, delta_time: f32) {
   switch &layer_data in self.data {
   case FKLayer:
-    // Update FK layer time
-    if layer_data.status != .PLAYING || layer_data.duration <= 0 {
-      return
-    }
-    effective_delta_time := delta_time * layer_data.speed
-    switch layer_data.mode {
-    case .LOOP:
-      layer_data.time += effective_delta_time
-      layer_data.time = math.mod_f32(
-        layer_data.time + layer_data.duration,
-        layer_data.duration,
-      )
-    case .ONCE:
-      layer_data.time += effective_delta_time
-      if layer_data.time >= layer_data.duration {
-        layer_data.time = layer_data.duration
-        layer_data.status = .STOPPED
-      }
-    case .PING_PONG:
-      layer_data.time += effective_delta_time
-      if layer_data.time >= layer_data.duration || layer_data.time < 0 {
-        layer_data.speed *= -1
-      }
-    }
+    playback_advance(
+      &layer_data.time,
+      &layer_data.speed,
+      &layer_data.status,
+      layer_data.mode,
+      layer_data.duration,
+      delta_time,
+    )
   case IKLayer:
   // IK doesn't have time-based updates
   case ProceduralLayer:

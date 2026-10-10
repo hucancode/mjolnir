@@ -46,7 +46,7 @@ camera_init :: proc(
     .POST_PROCESS in enabled_passes
 
   // Create render target attachments for each frame
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     if needs_final {
       camera.attachments[.FINAL_IMAGE][frame] = gpu.allocate_texture_2d(
         texture_manager,
@@ -120,7 +120,7 @@ camera_init :: proc(
 
   // Create indirect draw buffers (double-buffered) for each pipeline.
   for pipe in DrawPipeline {
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
+    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       camera.draws[pipe].count[frame] = gpu.create_mutable_buffer(
         gctx,
         u32,
@@ -137,7 +137,7 @@ camera_init :: proc(
   }
 
   if enable_culling {
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
+    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       depth_pyramid_system.setup_pyramid(
         gctx,
         &camera.depth_pyramid[frame],
@@ -158,7 +158,7 @@ camera_destroy :: proc(
 ) {
   // Destroy all attachment textures
   for attachment_type in AttachmentType {
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
+    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       handle := camera.attachments[attachment_type][frame]
       if handle.index == 0 do continue
       gpu.free_texture_2d(texture_manager, gctx, handle)
@@ -166,7 +166,7 @@ camera_destroy :: proc(
   }
 
   // Destroy depth pyramids
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     depth_pyramid_system.destroy_pyramid(
       gctx,
       &camera.depth_pyramid[frame],
@@ -176,7 +176,7 @@ camera_destroy :: proc(
 
   // Destroy indirect draw buffers
   for pipe in DrawPipeline {
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
+    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       gpu.mutable_buffer_destroy(gctx.device, &camera.draws[pipe].count[frame])
       gpu.mutable_buffer_destroy(
         gctx.device,
@@ -229,8 +229,8 @@ camera_allocate_descriptors :: proc(
   node_data_buffer := &self.internal.node_data_buffer
   mesh_data_buffer := &self.internal.mesh_data_buffer
   camera_buffer := &self.internal.camera_buffer
-  for frame_index in 0 ..< FRAMES_IN_FLIGHT {
-    prev_frame_index := (frame_index + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT
+  for frame_index in 0 ..< gpu.FRAMES_IN_FLIGHT {
+    prev_frame_index := (frame_index + gpu.FRAMES_IN_FLIGHT - 1) % gpu.FRAMES_IN_FLIGHT
     pyramid := &camera.depth_pyramid[frame_index]
     prev_pyramid := &camera.depth_pyramid[prev_frame_index]
     prev_depth := gpu.get_texture_2d(
@@ -383,7 +383,7 @@ camera_resize :: proc(
   enable_culling := camera.enable_culling
   // Destroy old attachments
   for attachment_type in AttachmentType {
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
+    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       handle := camera.attachments[attachment_type][frame]
       if handle.index == 0 do continue
       gpu.free_texture_2d(texture_manager, gctx, handle)
@@ -392,7 +392,7 @@ camera_resize :: proc(
   }
 
   // Destroy old depth pyramids
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     pyramid := &camera.depth_pyramid[frame]
     if pyramid.mip_levels == 0 do continue
 
@@ -414,7 +414,7 @@ camera_resize :: proc(
     .PARTICLES in enabled_passes ||
     .POST_PROCESS in enabled_passes
 
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     if needs_final {
       camera.attachments[.FINAL_IMAGE][frame] = gpu.allocate_texture_2d(
         texture_manager,
@@ -485,7 +485,7 @@ camera_resize :: proc(
     }
   }
   if enable_culling {
-    for frame in 0 ..< FRAMES_IN_FLIGHT {
+    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
       depth_pyramid_system.setup_pyramid(
         gctx,
         &camera.depth_pyramid[frame],

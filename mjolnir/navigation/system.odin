@@ -76,6 +76,8 @@ NavigationSystem :: struct {
 }
 
 init :: proc(sys: ^NavigationSystem, max_nodes: i32 = 2048) -> bool {
+  // Safe to call again after build_navmesh: the query is rebound to the new mesh.
+  detour.nav_mesh_query_destroy(&sys.nav_mesh_query)
   init_status := detour.nav_mesh_query_init(
     &sys.nav_mesh_query,
     &sys.nav_mesh.detour_mesh,

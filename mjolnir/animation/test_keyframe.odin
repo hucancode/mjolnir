@@ -662,3 +662,21 @@ test_node_animation_step_interpolation :: proc(t: ^testing.T) {
   pos, _, _ = channel_sample_all(channel, 1.5)
   testing.expect_value(t, pos, [3]f32{10, 0, 0}) // Hold second value
 }
+
+@(test)
+test_playback_once_stops_at_end :: proc(t: ^testing.T) {
+  time, speed: f32 = 0.0, 1.0
+  status := Status.PLAYING
+  for _ in 0 ..< 5 do playback_advance(&time, &speed, &status, .ONCE, 1.0, 0.3)
+  testing.expect_value(t, time, 1.0)
+  testing.expect_value(t, status, Status.STOPPED)
+}
+
+@(test)
+test_playback_loop_wraps :: proc(t: ^testing.T) {
+  time, speed: f32 = 0.0, 1.0
+  status := Status.PLAYING
+  playback_advance(&time, &speed, &status, .LOOP, 1.0, 1.25)
+  testing.expect(t, abs(time - 0.25) < 1e-5)
+  testing.expect_value(t, status, Status.PLAYING)
+}

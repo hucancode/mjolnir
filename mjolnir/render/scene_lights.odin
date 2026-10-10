@@ -47,7 +47,7 @@ release_shadow_2d :: proc(
 ) {
   shadow, ok := &render.internal.shadow_maps[light_node_index]
   if !ok do return
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     gpu.free_texture_2d(
       &render.texture_manager,
       gctx,
@@ -68,7 +68,7 @@ release_shadow_cube :: proc(
 ) {
   shadow, ok := &render.internal.shadow_map_cubes[light_node_index]
   if !ok do return
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     gpu.free_texture_cube(
       &render.texture_manager,
       gctx,
@@ -89,7 +89,7 @@ ensure_shadow_2d_resource :: proc(
 ) -> vk.Result {
   if light_node_index in render.internal.shadow_maps do return .SUCCESS
   sm: ShadowMap
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     sm.shadow_map_2d[frame] = gpu.allocate_texture_2d(
       &render.texture_manager,
       gctx,
@@ -130,7 +130,7 @@ ensure_shadow_cube_resource :: proc(
 ) -> vk.Result {
   if light_node_index in render.internal.shadow_map_cubes do return .SUCCESS
   sm: ShadowMapCube
-  for frame in 0 ..< FRAMES_IN_FLIGHT {
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
     sm.shadow_map_cube[frame] = gpu.allocate_texture_cube(
       &render.texture_manager,
       gctx,

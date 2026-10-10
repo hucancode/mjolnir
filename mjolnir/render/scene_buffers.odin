@@ -257,7 +257,7 @@ upload_bone_matrices :: proc(
   offset: u32,
   matrices: []matrix[4, 4]f32,
 ) {
-  assert(int(frame_index) < FRAMES_IN_FLIGHT, "frame_index out of range")
+  assert(int(frame_index) < gpu.FRAMES_IN_FLIGHT, "frame_index out of range")
   assert(
     int(offset) + len(matrices) <= int(render.internal.bone_matrix_slab.capacity),
     "bone matrix range exceeds slab capacity",
@@ -317,7 +317,7 @@ upload_camera_data :: proc(
   frame_index: u32,
 ) {
   assert(camera_index < MAX_ACTIVE_CAMERAS, "camera index exceeds MAX_ACTIVE_CAMERAS")
-  assert(int(frame_index) < FRAMES_IN_FLIGHT, "frame_index out of range")
+  assert(int(frame_index) < gpu.FRAMES_IN_FLIGHT, "frame_index out of range")
   camera_data: CameraGPU
   camera_data.view = view
   camera_data.projection = projection

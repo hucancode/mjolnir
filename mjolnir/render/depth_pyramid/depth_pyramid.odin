@@ -8,7 +8,6 @@ import vk "vendor:vulkan"
 
 SHADER_DEPTH_REDUCE :: #load("../../shader/occlusion_culling/depth_reduce.spv")
 MAX_DEPTH_MIPS_LEVEL :: 16
-FRAMES_IN_FLIGHT :: 2
 
 DepthReducePushConstants :: struct {
   current_mip: u32,

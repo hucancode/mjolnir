@@ -8,7 +8,6 @@ import vk "vendor:vulkan"
 SHADER_VERT :: #load("../../shader/debug_line/vert.spv")
 SHADER_FRAG :: #load("../../shader/debug_line/frag.spv")
 
-FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 
 MAX_VERTICES :: 131072
 MAX_SEGMENTS :: 65536
@@ -32,7 +31,7 @@ PushConstant :: struct {
 Renderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
-  vertex_buffers:  [FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex),
+  vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex),
   segments:        [dynamic]Segment,
   now:             f32,
   mu:              sync.Mutex,
@@ -45,7 +44,7 @@ init :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  for i in 0 ..< FRAMES_IN_FLIGHT {
+  for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     self.vertex_buffers[i] = gpu.create_mutable_buffer(
       gctx,
       Vertex,
@@ -114,7 +113,7 @@ init :: proc(
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   delete(self.segments)
-  for i in 0 ..< FRAMES_IN_FLIGHT {
+  for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
   }
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)

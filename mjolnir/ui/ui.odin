@@ -381,7 +381,7 @@ generate_render_commands :: proc(sys: ^System) {
 
     case Text2D:
       // Convert glyphs to draw commands
-      glyphs := make([]cmd.DrawTextGlyph, len(w.glyphs))
+      glyphs := make([]cmd.DrawTextGlyph, len(w.glyphs), context.temp_allocator)
       for glyph, idx in w.glyphs {
         glyphs[idx] = cmd.DrawTextGlyph {
           p0    = glyph.p0,
