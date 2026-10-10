@@ -51,15 +51,15 @@ setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 10, 0}, {0, 0, 0})
 
   CONTROL_POINTS :: 10
-  spline = animation.spline_create([3]f32, CONTROL_POINTS)
+  points: [CONTROL_POINTS][3]f32
+  times: [CONTROL_POINTS]f32
   for i in 0 ..< CONTROL_POINTS {
     t := f32(i) * 2.0 * math.PI / f32(CONTROL_POINTS - 1)
     scale :: 5.0
-    spline.points[i] = {scale * math.sin(t), 0, scale * math.sin(2.0 * t) * 0.5}
-    spline.times[i] = f32(i) * ANIMATION_DURATION / f32(CONTROL_POINTS - 1)
+    points[i] = {scale * math.sin(t), 0, scale * math.sin(2.0 * t) * 0.5}
+    times[i] = f32(i) * ANIMATION_DURATION / f32(CONTROL_POINTS - 1)
   }
-  if !animation.spline_validate(spline) do log.error("Spline validation failed!")
-  animation.spline_build_arc_table(&spline, 200)
+  if !animation.spline_init(&spline, points[:], times[:]) do log.error("Spline validation failed!")
 
   mats := [?]render.MaterialHandle{
     app.renderer.builtin_materials[.RED], app.renderer.builtin_materials[.GREEN],

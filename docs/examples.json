@@ -3,8 +3,8 @@
     "name": "cube",
     "desc": "Minimal hello-world cube.",
     "notes": [
-      "<code>run_app</code> allocates engine, installs logger, runs to window close, frees on exit.",
-      "Builtin meshes (<code>.CUBE</code>, <code>.SPHERE</code>, <code>.QUAD_XZ</code>, <code>.QUAD_XY</code>, <code>.CONE</code>, <code>.CAPSULE</code>, <code>.CYLINDER</code>, <code>.TORUS</code>) and colors are pre-baked by <code>render.init</code>; <code>mjolnir.spawn_primitive_mesh</code> uses them.",
+      "<code>main</code> brings up platform, render and world into an <code>App</code>, then <code>mjolnir.run</code> drives <code>update</code> / <code>frame</code> until the window closes.",
+      "Builtin meshes (<code>.CUBE</code>, <code>.SPHERE</code>, <code>.QUAD_XZ</code>, <code>.QUAD_XY</code>, <code>.CONE</code>, <code>.CAPSULE</code>, <code>.CYLINDER</code>, <code>.TORUS</code>) and colors are pre-baked by <code>render.init</code>; <code>render.primitive</code> returns an attachment using them.",
       "The <code>update</code> callback runs <code>world.update</code> and feeds <code>removed_nodes</code> / <code>changed_nodes</code> to render; without it nothing moves on screen."
     ]
   },
@@ -25,7 +25,7 @@
     "notes": [
       "Triggers don't generate contacts — overlap-test only.",
       "<code>physics.query_triggers_in_sphere</code> for snapshots; <code>phys.trigger_overlaps</code> for continuous events.",
-      "Mouse picking: <code>mjolnir.cursor_world_ray</code> → <code>physics.raycast_trigger</code>.",
+      "Mouse picking: <code>render.cursor_ray</code> → <code>physics.raycast_trigger</code>.",
       "<code>hit.body_handle</code> is a union — <code>switch</code> on the variant."
     ]
   },
@@ -34,7 +34,7 @@
     "desc": "Fast projectiles don't tunnel through thin walls.",
     "notes": [
       "No extra setup — the step keeps fast bodies from tunneling automatically.",
-      "Tune response via <code>body.friction</code>, <code>body.restitution</code>, <code>body.linear_damping</code>, <code>body.angular_damping</code>.",
+      "Tune response through <code>body := physics.get_dynamic_body(&phys, h)</code>: <code>body.friction</code>, <code>body.restitution</code>, <code>body.linear_damping</code>, <code>body.angular_damping</code>.",
       "Set <code>phys.gravity = {0,0,0}</code> on your <code>physics.World</code> for pure ballistic tests."
     ]
   },
@@ -42,7 +42,7 @@
     "name": "cameras",
     "desc": "Orbit / free / follow camera controllers.",
     "notes": [
-      "The engine starts with <code>render.orbit_controller()</code>. Switch by assigning <code>engine.camera_controller</code> (<code>orbit_controller</code>, <code>free_controller</code>, <code>follow_controller</code>), or <code>{}</code> to disable it.",
+      "The app holds a <code>render.CameraController</code> and calls <code>render.camera_controller_update</code> each tick. Switch by assigning it (<code>orbit_controller</code>, <code>free_controller</code>, <code>follow_controller</code>), or <code>{}</code> to disable it.",
       "Controllers read the tick's <code>input.State</code> through their <code>bindings</code> (<code>CameraBindings</code>) and skip devices a UI captured.",
       "Orbit reads distance, yaw and pitch from the camera pose each tick, so warping the camera never snaps it back.",
       "Follow controller tracks <code>FollowCameraData.target</code>; update it each tick."
@@ -124,9 +124,9 @@
     "name": "input_demo",
     "desc": "Keyboard, mouse, scroll event plumbing.",
     "notes": [
-      "Read <code>engine.input</code> (an <code>input.State</code>) in <code>update</code>: <code>input.key_down</code> / <code>key_pressed</code> / <code>key_released</code>, <code>mouse_*</code>, <code>cursor</code>, <code>mouse_delta</code>, <code>scroll</code>, <code>text</code>, <code>axis</code>.",
+      "Read the app's <code>input.State</code> (filled by <code>platform.read_input</code>) in <code>update</code>: <code>input.key_down</code> / <code>key_pressed</code> / <code>key_released</code>, <code>mouse_*</code>, <code>cursor</code>, <code>mouse_delta</code>, <code>scroll</code>, <code>text</code>, <code>axis</code>.",
       "The snapshot is stable for the whole tick; a tap between two ticks still reports both edges.",
-      "Skip reactions while <code>engine.mouse_captured</code> / <code>engine.keyboard_captured</code> is set — a UI owns that device."
+      "Skip reactions while <code>input.mouse_captured</code> / <code>input.keyboard_captured</code> is set — a UI owns that device."
     ]
   },
   {
@@ -134,7 +134,7 @@
     "desc": "Character controller, movement are powered by physics engine.",
     "notes": [
       "The cube is a dynamic body; <code>physics.apply_force</code> moves it from <code>input.axis</code>, <code>apply_impulse</code> jumps on <code>input.key_pressed(.SPACE)</code>.",
-      "After <code>physics.set_mass</code>, <code>set_inertia_from_collider</code> recomputes the inertia.",
+      "<code>physics.set_body_mass</code> sets the mass and recomputes the inertia from the collider.",
       "Glue in <code>update</code>: <code>physics.step</code>, then copy <code>physics.body_poses</code> into the world."
     ]
   },
@@ -153,7 +153,7 @@
       "Color vector's <code>w</code> channel doubles as intensity.",
       "<code>cast_shadow = true</code> allocates a 2D shadow map (<code>SHADOW_MAP_SIZE = 512</code>).",
       "Point-light cubemap shadows need <code>-define:REQUIRE_GEOMETRY_SHADER=true</code>.",
-      "Change a light live through <code>render.attachment(&r, node.index, render.PointLightAttachment)</code> (color, radius, <code>disabled</code>, …), then <code>render.mark_slot_dirty</code>."
+      "Change a light live through <code>render.attachment(&r, node.index, render.PointLightAttachment)</code> (color, radius, <code>disabled</code>, …), then write it back with <code>render.attach</code>."
     ]
   },
   {
@@ -214,7 +214,7 @@
     "desc": "IBL + physically based rendering showcase.",
     "notes": [
       "Ambient pass samples the loaded environment map + BRDF LUT.",
-      "Tune <code>engine.render.post_process</code> or the ambient renderer's <code>ibl_intensity</code> to balance IBL vs. direct light."
+      "Tune <code>app.renderer.ambient.ibl_intensity</code> and <code>render.add_effect</code> to balance IBL vs. direct light."
     ]
   },
   {
@@ -232,7 +232,7 @@
     "desc": "Bloom, DoF, fog, tonemap, outline, crosshatch.",
     "notes": [
       "Effects run in insertion order. Conventional chain: fog → bloom → tonemap.",
-      "<code>post_process.clear_effects</code> + rebuild on settings change. No need to rebuild every frame.",
+      "<code>clear(&app.renderer.post_process.effect_stack)</code> + rebuild on settings change. No need to rebuild every frame.",
       "Helper procs: <code>add_outline</code>, <code>add_fog</code>, <code>add_dof</code>, <code>add_bloom</code>, <code>add_blur</code>, <code>add_crosshatch</code>, <code>add_grayscale</code>, <code>add_tonemap</code>."
     ]
   },
@@ -328,7 +328,7 @@
     "desc": "Snake game in 3D.",
     "notes": [
       "Full game: input → grid sim → spawn/despawn nodes → score UI.",
-      "Game state lives on <code>engine.user_data</code> instead of file globals."
+      "Game state lives in the <code>App</code> struct instead of file globals."
     ]
   },
   {

@@ -12,6 +12,7 @@ import vk "vendor:vulkan"
 
 // ---------- pose + projection (CPU) ----------
 
+@(private)
 camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   return linalg.matrix4_look_at(
     camera.position,
@@ -20,6 +21,7 @@ camera_view_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   )
 }
 
+@(private)
 camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
@@ -37,18 +39,22 @@ camera_projection_matrix :: proc(camera: ^Camera) -> matrix[4, 4]f32 {
   return linalg.MATRIX4F32_IDENTITY
 }
 
+@(private)
 camera_forward :: proc(self: ^Camera) -> [3]f32 {
   return -geom.qz(self.rotation)
 }
 
+@(private)
 camera_right :: proc(self: ^Camera) -> [3]f32 {
   return geom.qx(self.rotation)
 }
 
+@(private)
 camera_up :: proc(self: ^Camera) -> [3]f32 {
   return geom.qy(self.rotation)
 }
 
+@(private)
 camera_get_near_far :: proc(self: ^Camera) -> (near: f32, far: f32) {
   switch proj in self.projection {
   case PerspectiveProjection:
@@ -122,6 +128,7 @@ camera_set_orthographic :: proc(
 }
 
 // World-space ray through a viewport pixel (framebuffer pixels, origin top-left).
+@(private)
 camera_viewport_to_world_ray :: proc(
   camera: ^Camera,
   pixel_x, pixel_y: f32,

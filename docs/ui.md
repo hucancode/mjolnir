@@ -29,16 +29,28 @@ flag, parent, event handlers, user-data pointer):
 
 Each widget kind has its own distinct handle type
 (`Quad2DHandle`, …) on top of `UIWidgetHandle` for compile-time
-safety. `get_quad2d`, `get_text2d`, … resolve a handle to its widget;
-edit fields directly. Shared fields go through
-`get_widget_base(get_widget(&sys, h))`, e.g. to set `event_handlers`,
-`visible` or `user_data`.
+safety. `get_quad2d`, `get_text2d`, `get_mesh2d`, `get_box` resolve a
+handle to its widget pointer (nil for a stale handle); edit fields
+directly. Shared fields go through `get_widget_base(get_widget(&sys, h))`,
+e.g. `position`, `visible`, `event_handlers` and `user_data` (the pointer
+delivered as `event.user_data`). Text2D strings change through
+`set_text(&sys, text_handle, str)`, which re-lays out the glyphs.
+
+```odin
+if q := ui.get_quad2d(&sys, button); q != nil {
+  q.color = {255, 100, 100, 255}
+  q.event_handlers = handlers
+  q.user_data = app
+}
+```
+
+`box_add_child` / `box_remove_child` build the tree;
+`destroy_widget` frees a widget and, for a Box, its subtree.
 
 ## Layout
 
 Layout is parent-relative + z-ordered. `draw_list` resolves
-every `Box` subtree (`compute_layout_all`) before generating draw
-commands.
+every `Box` subtree before generating draw commands.
 
 Z-ordering uses a stable integer rather than insertion order so
 overlays, modals, and HUD layers can be set explicitly without
@@ -63,9 +75,8 @@ Every event bubbles to the parents. `process_input` skips the tick
 while another consumer has captured the mouse. Otherwise it marks the
 mouse captured while a widget is hovered or holds a press, and the
 keyboard captured while the focused widget handles key or text
-events.
-`pick_widget` and the `dispatch_*_event` procs are available for
-custom routing.
+events. Hit testing and dispatch are internal; `process_input` is
+the only entry point.
 
 ## Text
 

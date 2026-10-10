@@ -133,7 +133,7 @@ handle_drag :: proc(app: ^App) {
   // head's offset from the node origin so we can land the head on the cursor.
   if input.mouse_pressed(&app.input, .RIGHT) && !app.input.mouse_captured {
     dragging = true
-    rest_y = world.position(&app.scene, snake_child_node).y
+    rest_y = world.node(&app.scene, snake_child_node).transform.position.y
     head_offset = {0, 0, 0}
     if head_found {
       node_world := world.world_matrix(&app.scene, snake_child_node)

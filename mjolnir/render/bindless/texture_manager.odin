@@ -12,8 +12,11 @@ MAX_TEXTURES :: 1000
 MAX_CUBE_TEXTURES :: 200
 
 // Bindings of the bindless set.
+@(private)
 BINDING_TEXTURES :: 0 // [MAX_TEXTURES] 2D sampled images
+@(private)
 BINDING_SAMPLERS :: 1 // one sampler per SamplerType
+@(private)
 BINDING_CUBE_TEXTURES :: 2 // [MAX_CUBE_TEXTURES] cube sampled images
 Texture2DHandle :: distinct cont.Handle
 TextureCubeHandle :: distinct cont.Handle

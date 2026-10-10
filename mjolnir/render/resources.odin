@@ -9,6 +9,7 @@ import vk "vendor:vulkan"
 
 // CPU-side mesh. flush uploads cpu_geometry into the mesh manager and
 // describes it in mesh_data_buffer at the same index.
+@(private)
 Mesh :: struct {
   cpu_geometry:            Maybe(mesh.Geometry),
   auto_purge_cpu_geometry: bool,
@@ -28,6 +29,7 @@ Material :: struct {
   emissive:           bindless.Texture2DHandle,
 }
 
+@(private)
 Sprite :: struct {
   texture:       bindless.Texture2DHandle,
   frame_columns: u32, // Number of columns in sprite sheet
@@ -99,17 +101,10 @@ tick_resource_pools :: proc(self: ^Manager) {
   cont.tick(&self.sprites, nil, nil)
 }
 
-// Boundary accessors. Keep `containers` invisible to user code.
-mesh :: proc(r: ^Manager, h: MeshHandle) -> (^Mesh, bool) #optional_ok {
-  return cont.get(r.meshes, h)
-}
-
+// Pointers to a material, emitter or force field. Write changes back with the
+// matching set_* proc so they are staged for upload.
 material :: proc(r: ^Manager, h: MaterialHandle) -> (^Material, bool) #optional_ok {
   return cont.get(r.materials, h)
-}
-
-sprite :: proc(r: ^Manager, h: SpriteHandle) -> (^Sprite, bool) #optional_ok {
-  return cont.get(r.sprites, h)
 }
 
 emitter :: proc(r: ^Manager, h: EmitterHandle) -> (^Emitter, bool) #optional_ok {
@@ -118,6 +113,37 @@ emitter :: proc(r: ^Manager, h: EmitterHandle) -> (^Emitter, bool) #optional_ok 
 
 forcefield :: proc(r: ^Manager, h: ForceFieldHandle) -> (^ForceField, bool) #optional_ok {
   return cont.get(r.forcefields, h)
+}
+
+// Replace a material's values and stage the change.
+set_material :: proc(r: ^Manager, h: MaterialHandle, value: Material) -> bool {
+  m := cont.get(r.materials, h) or_return
+  m^ = value
+  stage(r, &r.internal.staging.materials, h.index)
+  return true
+}
+
+// Replace an emitter's settings. Its emission progress and the slot it is
+// attached to are kept.
+set_emitter :: proc(r: ^Manager, h: EmitterHandle, value: Emitter) -> bool {
+  em := cont.get(r.emitters, h) or_return
+  v := value
+  v.time_accumulator = em.time_accumulator
+  v.pending_emit = em.pending_emit
+  v.slot = em.slot
+  em^ = v
+  stage(r, &r.internal.staging.emitters, h.index)
+  return true
+}
+
+// Replace a force field's settings. The slot it is attached to is kept.
+set_forcefield :: proc(r: ^Manager, h: ForceFieldHandle, value: ForceField) -> bool {
+  ff := cont.get(r.forcefields, h) or_return
+  v := value
+  v.slot = ff.slot
+  ff^ = v
+  stage(r, &r.internal.staging.forcefields, h.index)
+  return true
 }
 
 // ---------- meshes ----------
@@ -273,11 +299,6 @@ destroy_material :: proc(self: ^Manager, handle: MaterialHandle) -> bool {
   cont.free_deferred(&self.materials, handle) or_return
   stage(self, &self.internal.staging.materials, handle.index)
   return true
-}
-
-// Stage a material whose fields were edited directly through `material`.
-mark_material_dirty :: proc(self: ^Manager, handle: MaterialHandle) {
-  stage(self, &self.internal.staging.materials, handle.index)
 }
 
 // ---------- builtins ----------
@@ -436,9 +457,8 @@ destroy_forcefield :: proc(self: ^Manager, handle: ForceFieldHandle) -> bool {
 }
 
 // Advance the render clock (debug line lifetimes) and emitter accumulators,
-// and stage every emitter and force field, so edits made through `emitter`
-// and `forcefield` reach the GPU. Call once per update tick; `flush` uploads
-// the results.
+// and stage every emitter. Call once per update tick; `flush` uploads the
+// results.
 update :: proc(self: ^Manager, delta_time: f32) {
   debug_line.advance(&self.internal.debug_line_renderer, delta_time)
   if delta_time <= 0 do return
@@ -454,10 +474,6 @@ update :: proc(self: ^Manager, delta_time: f32) {
       em.pending_emit = emit
     }
     stage(self, &self.internal.staging.emitters, handle.index)
-  }
-  ff_it := cont.iterator(&self.forcefields)
-  for _, handle in cont.next(&ff_it, ForceFieldHandle) {
-    stage(self, &self.internal.staging.forcefields, handle.index)
   }
   particles.set_params(
     &self.internal.particles,

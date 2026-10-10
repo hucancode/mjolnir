@@ -1,3 +1,4 @@
+#+private
 package physics
 
 // Multi-point contact manifold generation. Analytic only — primitives are

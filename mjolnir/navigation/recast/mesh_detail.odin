@@ -40,24 +40,33 @@ destroy_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) {
 }
 
 // Detail mesh building constants
+@(private)
 RC_UNSET_HEIGHT :: 0xffff
 
 // Maximum subdivision levels for edge tessellation
+@(private)
 MAX_EDGE_SUBDIVISIONS :: 10
 
 // Minimum edge length for detail tessellation (in world units)
+@(private)
 MIN_EDGE_LENGTH :: 0.1
 
 // Timeout constants for robustness
+@(private)
 DEFAULT_POLYGON_TIMEOUT_MS :: 5000 // 5 seconds per polygon
+@(private)
 GLOBAL_TIMEOUT_MS :: 30000 // 30 seconds total
+@(private)
 MAX_INTERIOR_SAMPLES :: 10000 // Maximum interior sample points to prevent memory explosion
+@(private)
 MIN_POLYGON_AREA :: 1e-6 // Minimum area for valid polygon
 
 // Quality thresholds for triangle optimization
+@(private)
 MIN_TRIANGLE_QUALITY :: 0.5 // Minimum ratio of inscribed to circumscribed circle
 
 // Vertex structure for detail mesh building
+@(private)
 Detail_Vertex :: struct {
   pos:    [3]f32, // World position
   height: f32, // Sampled height from heightfield
@@ -65,6 +74,7 @@ Detail_Vertex :: struct {
 }
 
 // Edge structure for constrained triangulation
+@(private)
 Detail_Edge :: struct {
   v0:          i32, // First vertex index
   v1:          i32, // Second vertex index
@@ -73,12 +83,14 @@ Detail_Edge :: struct {
 }
 
 // Triangle structure for detail mesh
+@(private)
 Detail_Triangle :: struct {
   v:    [3]i32, // Vertex indices
   area: f32, // Triangle area
 }
 
 // Polygon context for detail mesh building
+@(private)
 Detail_Polygon :: struct {
   vertices:    [dynamic]Detail_Vertex, // Vertices in this polygon
   edges:       [dynamic]Detail_Edge, // Constrained edges
@@ -88,6 +100,7 @@ Detail_Polygon :: struct {
 }
 
 // Height sample point for interpolation
+@(private)
 Height_Sample :: struct {
   pos:    [3]f32, // Sample position
   height: f32, // Interpolated height
@@ -95,6 +108,7 @@ Height_Sample :: struct {
 }
 
 // Sample height from heightfield at given world position
+@(private)
 sample_heightfield_height :: proc(
   chf: ^Compact_Heightfield,
   pos: [3]f32,
@@ -128,6 +142,7 @@ sample_heightfield_height :: proc(
 }
 
 // Get height of cell from compact heightfield
+@(private)
 get_cell_height :: proc(chf: ^Compact_Heightfield, x, z: i32) -> f32 {
   if x < 0 || z < 0 || x >= chf.width || z >= chf.height {
     return 0.0
@@ -145,6 +160,7 @@ get_cell_height :: proc(chf: ^Compact_Heightfield, x, z: i32) -> f32 {
 }
 
 // Add a vertex to the detail polygon, ensuring uniqueness
+@(private)
 add_detail_vertex :: proc(
   poly: ^Detail_Polygon,
   pos: [3]f32,
@@ -170,6 +186,7 @@ add_detail_vertex :: proc(
 }
 
 // Add a constrained edge between two vertices
+@(private)
 add_constrained_edge :: proc(poly: ^Detail_Polygon, v0, v1: i32) {
   if v0 >= i32(len(poly.vertices)) || v1 >= i32(len(poly.vertices)) do return
   if v0 == v1 do return
@@ -194,6 +211,7 @@ add_constrained_edge :: proc(poly: ^Detail_Polygon, v0, v1: i32) {
 }
 
 // Free detail polygon memory
+@(private)
 free_detail_polygon :: proc(poly: ^Detail_Polygon) {
   delete(poly.vertices)
   delete(poly.edges)
@@ -201,6 +219,7 @@ free_detail_polygon :: proc(poly: ^Detail_Polygon) {
 }
 
 // Copy detail mesh
+@(private)
 copy_poly_mesh_detail :: proc(
   src: ^Poly_Mesh_Detail,
   dst: ^Poly_Mesh_Detail,
@@ -223,6 +242,7 @@ copy_poly_mesh_detail :: proc(
 }
 
 // Merge multiple detail meshes
+@(private)
 merge_poly_mesh_details :: proc(
   meshes: []^Poly_Mesh_Detail,
   mesh: ^Poly_Mesh_Detail,
@@ -277,6 +297,7 @@ merge_poly_mesh_details :: proc(
 }
 
 // Main function to build poly mesh detail
+@(private)
 build_poly_mesh_detail :: proc(
   pmesh: ^Poly_Mesh,
   chf: ^Compact_Heightfield,
@@ -426,6 +447,7 @@ build_poly_mesh_detail :: proc(
 }
 
 // Build detail mesh for a single polygon
+@(private)
 build_poly_detail :: proc(
   poly_verts: [][3]f32,
   sample_dist, sample_max_error: f32,
@@ -578,6 +600,7 @@ build_poly_detail :: proc(
 }
 
 // Get height from height patch
+@(private)
 get_height_from_patch :: proc(
   pos: [3]f32,
   cs, ics, ch: f32,
@@ -597,6 +620,7 @@ get_height_from_patch :: proc(
 }
 
 // Simple hull triangulation (equivalent to C++ triangulateHull)
+@(private)
 triangulate_hull_simple :: proc(
   verts: [][3]f32,
   hull: []i32,
@@ -614,6 +638,7 @@ triangulate_hull_simple :: proc(
 
 // Set triangle edge flags
 // Check if edge (a,b) lies on the hull boundary
+@(private)
 on_hull :: proc(a, b: i32, hull: []i32) -> bool {
   // All internal sampled points come after the hull so we can early out for those
   if a >= i32(len(hull)) || b >= i32(len(hull)) {
@@ -631,6 +656,7 @@ on_hull :: proc(a, b: i32, hull: []i32) -> bool {
   return false
 }
 
+@(private)
 set_triangle_flags :: proc(tris: [][4]i32, hull: []i32) {
   // Matches DT_DETAIL_EDGE_BOUNDARY
   DETAIL_EDGE_BOUNDARY :: 0x1
@@ -647,6 +673,7 @@ set_triangle_flags :: proc(tris: [][4]i32, hull: []i32) {
 }
 
 // Add interior samples in grid pattern
+@(private)
 add_interior_samples_grid :: proc(
   poly_verts: [][3]f32,
   sample_dist: f32,
@@ -689,6 +716,7 @@ add_interior_samples_grid :: proc(
 }
 
 // Add samples by error priority using proper distance-to-surface calculation
+@(private)
 add_samples_by_error :: proc(
   verts: ^[dynamic][3]f32,
   tris: [][4]i32,
@@ -742,6 +770,7 @@ add_samples_by_error :: proc(
 }
 
 // Flood fill algorithm for height data collection
+@(private)
 get_height_data :: proc(
   chf: ^Compact_Heightfield,
   poly: []u16,
@@ -838,6 +867,7 @@ get_height_data :: proc(
 }
 
 // Height patch for detail mesh sampling
+@(private)
 Height_Patch :: struct {
   data:   [dynamic]u16,
   xmin:   i32,
@@ -847,6 +877,7 @@ Height_Patch :: struct {
 }
 
 // Seed height patch with polygon center
+@(private)
 seed_array_with_poly_center :: proc(
   chf: ^Compact_Heightfield,
   poly: []u16,
@@ -890,10 +921,13 @@ seed_array_with_poly_center :: proc(
 }
 
 // Edge management constants
+@(private)
 EV_UNDEF :: -1
+@(private)
 EV_HULL :: -2
 
 // Find edge in edge list
+@(private)
 find_edge :: proc(edges: []i32, s, t: i32) -> i32 {
   for i in 0 ..< len(edges) / 4 {
     e := edges[i * 4:]
@@ -905,6 +939,7 @@ find_edge :: proc(edges: []i32, s, t: i32) -> i32 {
 }
 
 // Add edge to edge list
+@(private)
 add_edge :: proc(edges: ^[dynamic]i32, s, t, l, r: i32) -> i32 {
   max_edges := 10000 // Reasonable limit
   nedges := len(edges) / 4
@@ -923,6 +958,7 @@ add_edge :: proc(edges: ^[dynamic]i32, s, t, l, r: i32) -> i32 {
 }
 
 // Validate triangles after generation
+@(private)
 validate_triangles :: proc(tris: ^[dynamic][4]i32, nverts: int) -> bool {
   if len(tris) == 0 do return false
   for i in 0 ..< len(tris) {
@@ -945,6 +981,7 @@ validate_triangles :: proc(tris: ^[dynamic][4]i32, nverts: int) -> bool {
 }
 
 // Simple but robust triangulation - replaces complex Delaunay algorithm temporarily
+@(private)
 delaunay_hull :: proc(
   pts: [][3]f32,
   hull: []i32,

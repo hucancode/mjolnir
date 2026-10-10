@@ -90,10 +90,11 @@ setup :: proc(app: ^App) {
   bullet_visual := world.spawn_child(&app.scene, bullet_node)
   render.attach(&app.renderer, bullet_visual.index, render.primitive(&app.renderer, .SPHERE, .CYAN))
   world.scale_xyz(&app.scene, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
-  if body, ok := physics.get_dynamic_body(&phys, bullet_body); ok {
-    body.linear_damping = 0; body.angular_damping = 0
-    body.restitution = 0.1;  body.friction = 0.2
-  }
+  body := physics.get_dynamic_body(&phys, bullet_body)
+  body.linear_damping = 0
+  body.angular_damping = 0
+  body.restitution = 0.1
+  body.friction = 0.2
 }
 
 target_z :: proc() -> f32 {
@@ -101,28 +102,22 @@ target_z :: proc() -> f32 {
 }
 
 fire_bullet :: proc(app: ^App) {
-  body, ok := physics.get_dynamic_body(&phys, bullet_body)
-  if !ok do return
-  body.position = {START_POS.x, START_POS.y, target_z()}
-  body.velocity = {f32(bullet_speed), 0, 0}
-  body.angular_velocity = {}
-  body.force = {}; body.torque = {}
-  body.is_sleeping = false; body.sleep_timer = 0
+  physics.set_body_pose(&phys, bullet_body, {START_POS.x, START_POS.y, target_z()}, linalg.QUATERNIONF32_IDENTITY)
+  physics.set_velocity(&phys, bullet_body, {f32(bullet_speed), 0, 0})
+  physics.set_angular_velocity(&phys, bullet_body, {})
 }
 
 update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
-  if body, ok := physics.get_dynamic_body(&phys, bullet_body); ok {
-    if auto_fire {
-      auto_fire_timer += dt
-      if auto_fire_timer >= 2.0 { auto_fire_timer = 0; fire_bullet(app) }
-    }
-    if body.position.x > 20.0 || body.position.x < -25.0 {
-      body.velocity = {}
-      body.position = {START_POS.x, START_POS.y, target_z()}
-    }
+  if auto_fire {
+    auto_fire_timer += dt
+    if auto_fire_timer >= 2.0 { auto_fire_timer = 0; fire_bullet(app) }
+  }
+  if body, ok := physics.get_dynamic_body(&phys, bullet_body); ok && (body.position.x > 20.0 || body.position.x < -25.0) {
+    physics.set_velocity(&phys, bullet_body, {})
+    physics.set_body_pose(&phys, bullet_body, {START_POS.x, START_POS.y, target_z()}, body.rotation)
   }
   physics.step(&phys, dt)
   for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)

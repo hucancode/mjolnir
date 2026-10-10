@@ -4,10 +4,13 @@ import "core:log"
 import "core:os"
 
 // File format constants
+@(private)
 NAVMESH_FILE_MAGIC :: 'N' << 24 | 'A' << 16 | 'V' << 8 | 'M'
+@(private)
 NAVMESH_FILE_VERSION :: 1
 
 // File header for .navmesh files
+@(private)
 Nav_Mesh_File_Header :: struct {
   magic:      u32,
   version:    u32,
@@ -16,6 +19,7 @@ Nav_Mesh_File_Header :: struct {
 }
 
 // Tile file entry
+@(private)
 Nav_Mesh_Tile_Entry :: struct {
   ref:       Tile_Ref,
   data_size: u32,

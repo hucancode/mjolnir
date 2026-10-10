@@ -82,6 +82,7 @@ take_font_atlas :: proc(
   return
 }
 
+@(private)
 cleanup_widget :: proc(widget: ^Widget) {
   switch &w in widget {
   case Mesh2D:
@@ -102,13 +103,6 @@ Mesh2DHandle :: distinct UIWidgetHandle
 Quad2DHandle :: distinct UIWidgetHandle
 Text2DHandle :: distinct UIWidgetHandle
 BoxHandle :: distinct UIWidgetHandle
-
-WidgetType :: enum {
-  Mesh2D,
-  Quad2D,
-  Text2D,
-  Box,
-}
 
 get_widget :: proc(sys: ^System, handle: UIWidgetHandle) -> ^Widget {
   widget, ok := cont.get(sys.widget_pool, handle)

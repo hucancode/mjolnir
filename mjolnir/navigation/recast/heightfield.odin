@@ -1,5 +1,6 @@
 package recast
 
+@(private)
 Span :: struct {
   using data: bit_field u32 {
     smin: u32 | 13,
@@ -9,11 +10,13 @@ Span :: struct {
   next:       ^Span,
 }
 
+@(private)
 Span_Pool :: struct {
   next:  ^Span_Pool,
   items: [RC_SPANS_PER_POOL]Span,
 }
 
+@(private)
 Heightfield :: struct {
   width:       i32,
   height:      i32,
@@ -27,11 +30,13 @@ Heightfield :: struct {
   freelist:    ^Span,
 }
 
+@(private)
 Compact_Cell :: bit_field u32 {
   index: u32 | 24,
   count: u8  | 8,
 }
 
+@(private)
 Compact_Span :: struct {
   y:          u16,
   reg:        u16,
@@ -41,6 +46,7 @@ Compact_Span :: struct {
   },
 }
 
+@(private)
 Compact_Heightfield :: struct {
   width:           i32,
   height:          i32,
@@ -80,6 +86,7 @@ destroy_compact_heightfield :: proc(chf: ^Compact_Heightfield) {
   free(chf)
 }
 
+@(private)
 allocate_span :: proc(hf: ^Heightfield) -> ^Span {
   if hf.freelist == nil || hf.freelist.next == nil {
     pool := new(Span_Pool)
@@ -98,6 +105,7 @@ allocate_span :: proc(hf: ^Heightfield) -> ^Span {
   return new_span
 }
 
+@(private)
 free_span :: proc(hf: ^Heightfield, span: ^Span) {
   if span == nil do return
   span.smin = 0
@@ -124,6 +132,7 @@ create_heightfield :: proc(
   return hf
 }
 
+@(private)
 create_heightfield_from_config :: proc(cfg: ^Config) -> ^Heightfield {
   return create_heightfield(
     cfg.width,

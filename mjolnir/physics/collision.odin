@@ -1,65 +1,9 @@
+#+private
 package physics
 
 import "../geometry"
 import "core:math"
 import "core:math/linalg"
-
-// One solver point of a contact manifold
-// base_separation: signed separation at prepare time (negative = penetrating);
-// current separation is recovered per substep from body position deltas.
-// relative_velocity: normal approach speed captured at prepare, used by the
-// post-substep restitution pass.
-ContactPoint :: struct {
-  point:              [3]f32,
-  penetration:        f32, // filled by narrowphase; prepare converts to base_separation
-  feature_id:         u32,
-  normal_impulse:     f32,
-  max_normal_impulse: f32,
-  normal_mass:        f32,
-  base_separation:    f32,
-  relative_velocity:  f32,
-  r_a:                [3]f32,
-  r_b:                [3]f32,
-}
-
-// Contact between two dynamic bodies: up to 4 normal points plus one
-// manifold-level friction constraint (coupled 2D tangent at the centroid +
-// twist about the normal).
-DynamicContact :: struct {
-  body_a:          DynamicRigidBodyHandle,
-  body_b:          DynamicRigidBodyHandle,
-  normal:          [3]f32,
-  restitution:     f32,
-  friction:        f32,
-  count:           int,
-  points:          [MAX_MANIFOLD_POINTS]ContactPoint,
-  tangent1:        [3]f32,
-  tangent2:        [3]f32,
-  r_a_c:           [3]f32, // centroid offset from body A center
-  r_b_c:           [3]f32,
-  tangent_impulse: [2]f32,
-  twist_impulse:   f32,
-  tangent_mass:    matrix[2, 2]f32, // inverse of the coupled tangent K matrix
-  twist_mass:      f32,
-}
-
-// Contact between dynamic body (A) and static body (B)
-StaticContact :: struct {
-  body_a:          DynamicRigidBodyHandle,
-  body_b:          StaticRigidBodyHandle,
-  normal:          [3]f32,
-  restitution:     f32,
-  friction:        f32,
-  count:           int,
-  points:          [MAX_MANIFOLD_POINTS]ContactPoint,
-  tangent1:        [3]f32,
-  tangent2:        [3]f32,
-  r_a_c:           [3]f32,
-  tangent_impulse: [2]f32,
-  twist_impulse:   f32,
-  tangent_mass:    matrix[2, 2]f32,
-  twist_mass:      f32,
-}
 
 // Warmstart pair keys include handle generations so a recycled slot never
 // inherits the previous occupant's impulses.

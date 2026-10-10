@@ -1,6 +1,7 @@
 package render
 
 import "base:builtin"
+import "bindless"
 import cont "../containers"
 import "gpu"
 import "core:math"
@@ -67,6 +68,7 @@ Attachment :: union {
 // What render draws at one transform slot. The transform itself is owned by
 // whoever drives the slot (normally the world module) and pushed in with
 // stage_transform.
+@(private)
 Instance :: struct {
   world_matrix: matrix[4, 4]f32,
   visible:      bool,
@@ -227,8 +229,8 @@ stage_bones :: proc(self: ^Manager, slot: u32, matrices: []matrix[4, 4]f32) {
 
 // ---------- attachments ----------
 
-// Draw `attachment` at `slot`. Emitters and force fields are bound to the
-// slot's transform.
+// Draw `attachment` at `slot`, replacing what the slot drew before. Emitters
+// and force fields are bound to the slot's transform.
 attach :: proc(self: ^Manager, slot: u32, attachment: Attachment) {
   sync.mutex_lock(&self.internal.staging.mutex)
   defer sync.mutex_unlock(&self.internal.staging.mutex)
@@ -255,27 +257,20 @@ attach :: proc(self: ^Manager, slot: u32, attachment: Attachment) {
   }
 }
 
-instance :: proc(self: ^Manager, slot: u32) -> (^Instance, bool) #optional_ok {
-  if int(slot) >= len(self.instances) do return nil, false
-  return &self.instances[slot], true
-}
-
-// The attachment of type T at `slot`, e.g. attachment(r, slot, MeshAttachment).
+// A copy of the attachment of type T at `slot`, e.g.
+// attachment(r, slot, MeshAttachment). Edit it and pass it back to attach.
 attachment :: proc(
   self: ^Manager,
   slot: u32,
   $T: typeid,
 ) -> (
-  att: ^T,
+  att: T,
   ok: bool,
 ) #optional_ok {
-  inst := instance(self, slot)
-  if inst == nil do return
-  return &inst.attachment.(T)
-}
-
-mark_slot_dirty :: proc(self: ^Manager, slot: u32) {
-  stage(self, &self.internal.staging.nodes, slot)
+  sync.mutex_lock(&self.internal.staging.mutex)
+  defer sync.mutex_unlock(&self.internal.staging.mutex)
+  if int(slot) >= len(self.instances) do return
+  return self.instances[slot].attachment.(T)
 }
 
 point_light_attachment :: proc(

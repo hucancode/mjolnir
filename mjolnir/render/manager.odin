@@ -27,6 +27,7 @@ MAX_SHADOW_MAPS :: 16
 SHADOW_MAP_SIZE :: 512
 // Frames a freed CPU resource slot stays reserved before reuse, so in-flight
 // frames never see a recycled index.
+@(private)
 RETIRE_GRACE :: gpu.FRAMES_IN_FLIGHT + 1
 
 Handle :: cont.Handle
@@ -36,8 +37,6 @@ SpriteHandle :: distinct Handle
 EmitterHandle :: distinct Handle
 ForceFieldHandle :: distinct Handle
 CameraHandle :: distinct Handle
-
-BufferAllocation :: bindless.BufferAllocation
 
 Primitive :: enum {
   CUBE,
@@ -67,10 +66,12 @@ MaterialType :: enum {
   RANDOM_COLOR,
 }
 
+@(private)
 MeshFlag :: enum u32 {
   SKINNED,
 }
 
+@(private)
 MeshFlagSet :: bit_set[MeshFlag;u32]
 
 ShaderFeature :: enum {
@@ -82,6 +83,7 @@ ShaderFeature :: enum {
 
 ShaderFeatureSet :: bit_set[ShaderFeature;u32]
 
+@(private)
 NodeFlag :: enum u32 {
   VISIBLE,
   CULLING_ENABLED,
@@ -92,8 +94,10 @@ NodeFlag :: enum u32 {
   CASTS_SHADOW,
 }
 
+@(private)
 NodeFlagSet :: bit_set[NodeFlag;u32]
 
+@(private)
 NodeData :: struct #packed {
   world_matrix:          matrix[4, 4]f32,
   material_id:           u32,
@@ -102,6 +106,7 @@ NodeData :: struct #packed {
   flags:                 NodeFlagSet,
 }
 
+@(private)
 MeshData :: struct {
   aabb_min:        [3]f32,
   index_count:     u32,
@@ -113,6 +118,7 @@ MeshData :: struct {
   padding:         u32,
 }
 
+@(private)
 MaterialData :: struct {
   albedo_index:             u32,
   metallic_roughness_index: u32,
@@ -125,6 +131,7 @@ MaterialData :: struct {
   base_color_factor:        [4]f32,
 }
 
+@(private)
 SpriteData :: struct {
   texture_index: u32,
   frame_columns: u32,
@@ -135,6 +142,7 @@ SpriteData :: struct {
 // CameraGPU is the SSBO layout uploaded each frame to camera_buffer; rendered
 // shaders read it. `frustum_planes` is derived from `projection * view`; kept
 // here so the GPU-side culling pass need not recompute it per node.
+@(private)
 CameraGPU :: struct {
   view:            matrix[4, 4]f32,
   projection:      matrix[4, 4]f32,
@@ -145,7 +153,9 @@ CameraGPU :: struct {
   frustum_planes:  [6][4]f32,
 }
 
+@(private)
 EmitterData :: particles.Emitter
+@(private)
 ForceFieldData :: particles.ForceField
 MAX_EMITTERS :: particles.MAX_EMITTERS
 MAX_FORCE_FIELDS :: particles.MAX_FORCE_FIELDS
@@ -194,18 +204,23 @@ Internal :: struct {
   ui_atlas_dirty:               bool,
 }
 
-// Public Manager surface. Anything outside the render package goes through
-// these fields or the public procs below.
+// Public Manager surface. Callers outside the render package use these
+// fields and the public procs.
 //   * meshes / materials / sprites / emitters / forcefields: CPU-side
-//     resources. Create and mutate them through the procs in resources.odin;
+//     resources. Create and change them through the procs in resources.odin;
 //     changes reach the GPU through staging.
 //   * instances: per-slot looks (mesh, light, emitter, ...), indexed by
 //     transform slot. A slot is whatever index the caller uses to identify a
 //     transform; the engine uses world node indices.
 //   * cameras: views with their GPU targets. `main_camera` is presented.
 //   * mesh_manager / texture_manager: the bindless mesh arena and texture
-//     arrays; create textures through create_texture_* in resources.odin.
-//   * post_process: user-facing effects stack (callers add fog, bloom, etc).
+//     arrays.
+//   * builtin_meshes / builtin_materials: builtin primitives and solid
+//     colors, created by init.
+//   * ambient: environment lighting; write ibl_intensity, skybox_enabled,
+//     skybox_blur and skybox_intensity directly.
+//   * post_process: the effect stack; append through add_effect, empty with
+//     clear(&r.post_process.effect_stack).
 // The microui debug context is reached through debug_ui (overlay.odin).
 //
 // Lifecycle, in pairs:

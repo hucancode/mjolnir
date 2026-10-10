@@ -209,7 +209,7 @@ lock_piece :: proc(app: ^App) {
     state.occupied[col][row] = true
     if a, ok := render.attachment(&app.renderer, state.active_cells[i].index, render.MeshAttachment); ok {
       a.material = opaque
-      render.mark_slot_dirty(&app.renderer, state.active_cells[i].index)
+      render.attach(&app.renderer, state.active_cells[i].index, a)
     }
   }
   state.has_active = false

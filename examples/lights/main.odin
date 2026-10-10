@@ -108,13 +108,13 @@ apply_light_settings :: proc(app: ^App) {
   if l, ok := render.attachment(&app.renderer, dir_light.index, render.DirectionalLightAttachment); ok {
     l.disabled = !dir_enabled
     l.color = color_preset(dir_color, f32(dir_intensity))
-    render.mark_slot_dirty(&app.renderer, dir_light.index)
+    render.attach(&app.renderer, dir_light.index, l)
   }
   if l, ok := render.attachment(&app.renderer, point_light.index, render.PointLightAttachment); ok {
     l.disabled = !point_enabled
     l.color = color_preset(point_color, f32(point_intensity))
     l.radius = f32(point_radius)
-    render.mark_slot_dirty(&app.renderer, point_light.index)
+    render.attach(&app.renderer, point_light.index, l)
   }
   if l, ok := render.attachment(&app.renderer, spot_light.index, render.SpotLightAttachment); ok {
     l.disabled = !spot_enabled
@@ -122,7 +122,7 @@ apply_light_settings :: proc(app: ^App) {
     l.radius = f32(spot_radius)
     l.angle_outer = math.PI * f32(spot_outer_deg) / 180.0
     l.angle_inner = l.angle_outer * render.SPOT_LIGHT_INNER_RATIO
-    render.mark_slot_dirty(&app.renderer, spot_light.index)
+    render.attach(&app.renderer, spot_light.index, l)
   }
 }
 

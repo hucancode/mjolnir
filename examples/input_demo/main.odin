@@ -124,7 +124,7 @@ update :: proc(app: ^App, dt: f32) {
   world.rotate(&app.scene, cube_handle, cube_yaw)
   if l, ok := render.attachment(&app.renderer, light_handle.index, render.DirectionalLightAttachment); ok {
     l.color[3] = f32(light_intensity)
-    render.mark_slot_dirty(&app.renderer, light_handle.index)
+    render.attach(&app.renderer, light_handle.index, l)
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)

@@ -5,15 +5,18 @@ import "core:math/linalg"
 import "core:slice"
 
 // Maximum heightfield height constant
+@(private)
 MAX_HEIGHTFIELD_HEIGHT :: 0xffff
 
 // Get connection from compact span in given direction
+@(private)
 get_con :: proc "contextless" (span: ^Compact_Span, dir: int) -> int {
   shift := u32(dir * 6)
   return int((span.con >> shift) & 0x3f)
 }
 
 // Set connection for compact span in given direction
+@(private)
 set_con :: proc "contextless" (span: ^Compact_Span, dir: int, i: int) {
   shift := u32(dir * 6)
   span.con = (span.con & (~(0x3f << shift))) | (u32(i) << shift)
@@ -179,6 +182,7 @@ filter_walkable_low_height_spans :: proc(
 
 // Apply median filter to walkable area
 // Smooths out small inconsistencies in area assignments
+@(private)
 median_filter_walkable_area :: proc(chf: ^Compact_Heightfield) -> bool {
   x_size := chf.width
   z_size := chf.height
@@ -237,6 +241,7 @@ median_filter_walkable_area :: proc(chf: ^Compact_Heightfield) -> bool {
 }
 
 // Mark all spans within an axis-aligned box with the specified area id
+@(private)
 mark_box_area :: proc(
   box_min_bounds, box_max_bounds: [3]f32,
   area_id: u8,
@@ -284,6 +289,7 @@ mark_box_area :: proc(
 
 // Mark convex polygon area
 // Mark all spans within a convex polygon with the specified area id
+@(private)
 mark_convex_poly_area :: proc(
   verts: [][3]f32,
   min_y, max_y: f32,
@@ -345,6 +351,7 @@ mark_convex_poly_area :: proc(
 }
 
 // Mark all spans within a cylinder with the specified area id
+@(private)
 mark_cylinder_area :: proc(
   position: [3]f32,
   radius, height: f32,

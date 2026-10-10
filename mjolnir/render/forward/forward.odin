@@ -7,6 +7,7 @@ import vk "vendor:vulkan"
 // What distinguishes one forward pipeline from another. Every forward
 // pipeline reads depth without writing it, alpha-blends into the HDR target
 // and pushes the camera index.
+@(private)
 ForwardPipelineDesc :: struct {
   vert:         []u8,
   frag:         []u8,
@@ -60,6 +61,7 @@ Renderer :: struct {
   pipelines:        [bindless.DrawPipeline]vk.Pipeline,
 }
 
+@(private)
 PushConstant :: struct {
   camera_index: u32,
 }

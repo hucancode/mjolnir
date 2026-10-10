@@ -8,6 +8,7 @@ import vk "vendor:vulkan"
 SHADER_VERT := #load("../shader/lighting/vert.spv")
 SHADER_FRAG := #load("../shader/lighting/frag.spv")
 
+@(private)
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 
 // Selects the light branch of the lighting shader (specialization constant 6).
@@ -34,6 +35,7 @@ NO_SHADOW :: 0xFFFF
 // Indices travel as 16-bit halves of a u32.
 #assert(bindless.MAX_TEXTURES < NO_SHADOW && bindless.MAX_CUBE_TEXTURES < NO_SHADOW)
 
+@(private)
 PushConstants :: struct {
   shadow_view_projection:      matrix[4, 4]f32,
   light_color:                 [4]f32,

@@ -15,6 +15,7 @@ Node :: struct {
   tags:           u32, // user-defined bit flags
 }
 
+@(private)
 TraverseEntry :: struct {
   handle:            NodeHandle,
   parent_transform:  matrix[4, 4]f32,
@@ -32,6 +33,7 @@ NodeChange :: struct {
 // What changed during the last `update`. Consumers (renderers, audio, net)
 // read it after update; the next update replaces it. Node indices are stable
 // for a node's lifetime and safe to use as external slot ids.
+@(private)
 ChangeFeed :: struct {
   changed: [dynamic]NodeChange,
   removed: [dynamic]u32,
@@ -46,7 +48,6 @@ World :: struct {
   pending_removed: [dynamic]u32,
 }
 
-// Boundary accessors. Keep `containers` invisible to user code by going through these.
 node :: proc(w: ^World, h: NodeHandle) -> (^Node, bool) #optional_ok {
   return cont.get(w.nodes, h)
 }
@@ -55,7 +56,8 @@ valid :: proc(w: ^World, h: NodeHandle) -> bool {
   return cont.is_valid(w.nodes, h)
 }
 
-// Live nodes, root included.
+// Live nodes, root included. O(capacity).
+@(private)
 node_count :: proc(w: ^World) -> int {
   return cont.count(w.nodes)
 }
@@ -74,6 +76,7 @@ untag :: proc(world: ^World, handle: NodeHandle, bits: u32) -> bool {
   return true
 }
 
+@(private)
 node_init :: proc(self: ^Node, name: string = "") {
   self.transform = TRANSFORM_IDENTITY
   self.name = name
@@ -82,11 +85,13 @@ node_init :: proc(self: ^Node, name: string = "") {
   self.tags = 0
 }
 
+@(private)
 node_destroy :: proc(self: ^Node) {
   delete(self.children)
   self.children = {}
 }
 
+@(private)
 detach :: proc(nodes: cont.Pool(Node), child_handle: NodeHandle) {
   child_node := cont.get(nodes, child_handle)
   if child_node == nil do return
@@ -100,6 +105,7 @@ detach :: proc(nodes: cont.Pool(Node), child_handle: NodeHandle) {
   child_node.parent = child_handle
 }
 
+@(private)
 attach :: proc(nodes: cont.Pool(Node), parent_handle, child_handle: NodeHandle) {
   child_node := cont.get(nodes, child_handle)
   parent_node := cont.get(nodes, parent_handle)
@@ -229,6 +235,7 @@ node_retire :: proc(item: ^Node, _: rawptr) {
 
 // Recompute world transforms of dirty subtrees and record every node whose
 // world transform or effective visibility changed.
+@(private)
 traverse :: proc(world: ^World) {
   append(
     &world.traversal_stack,

@@ -73,27 +73,27 @@ test_blend_scale_modes :: proc(t: ^testing.T) {
 
 @(test)
 test_fk_playback_advance_loop_wraps :: proc(t: ^testing.T) {
-	fk := FKLayer{mode = .LOOP, status = .PLAYING, speed = 1}
-	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 1.0, 0.7)
-	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 1.0, 0.5)
+	fk := ClipPlayer{mode = .LOOP, speed = 1}
+	playback_advance(&fk, 1.0, 0.7)
+	playback_advance(&fk, 1.0, 0.5)
 	testing.expectf(t, math.abs(fk.time - 0.2) < 1e-4, "loop wrap, got %f", fk.time)
 	testing.expect(t, fk.status == .PLAYING, "still playing")
 }
 
 @(test)
 test_fk_playback_advance_once_stops :: proc(t: ^testing.T) {
-	fk := FKLayer{mode = .ONCE, status = .PLAYING, speed = 1}
-	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 1.0, 1.5)
+	fk := ClipPlayer{mode = .ONCE, speed = 1}
+	playback_advance(&fk, 1.0, 1.5)
 	testing.expect(t, fk.status == .STOPPED, "ONCE past duration -> STOPPED")
 	testing.expect(t, fk.time == 1.0, "time clamped to duration")
-	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 1.0, 1.0)
+	playback_advance(&fk, 1.0, 1.0)
 	testing.expect(t, fk.status == .STOPPED && fk.time == 1.0, "stopped layer unchanged")
 }
 
 @(test)
 test_fk_playback_advance_zero_duration_noop :: proc(t: ^testing.T) {
-	fk := FKLayer{mode = .LOOP, status = .PLAYING, speed = 1}
-	playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, 0, 0.5)
+	fk := ClipPlayer{mode = .LOOP, speed = 1}
+	playback_advance(&fk, 0, 0.5)
 	testing.expect(t, fk.time == 0, "zero-duration clip does not advance")
 }
 

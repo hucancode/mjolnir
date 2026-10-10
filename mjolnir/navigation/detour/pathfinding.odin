@@ -5,13 +5,16 @@ import "core:math"
 import "core:math/linalg"
 import "core:mem/virtual"
 
+@(private)
 Find_Path_Options :: enum u8 {
   Any_Angle = 0x02,
 }
 
+@(private)
 H_SCALE :: 0.999
 
 // A* node with position, cost, and parent info
+@(private)
 Node :: struct {
   pos:       [3]f32,
   cost:      f32,
@@ -22,30 +25,36 @@ Node :: struct {
 }
 
 // Queue node for priority queue (minimal data)
+@(private)
 Pathfinding_Node :: struct {
   ref:   Poly_Ref,
   cost:  f32,
   total: f32,
 }
 
+@(private)
 Node_Flag :: enum u8 {
   Open            = 0,
   Closed          = 1,
   Parent_Detached = 2,
 }
+@(private)
 Node_Flags :: bit_set[Node_Flag;u8]
 
 // Arena-based pathfinding context
+@(private)
 Pathfinding_Context :: struct {
   nodes: map[Poly_Ref]^Node,
   arena: virtual.Arena,
 }
 
+@(private)
 Node_Queue :: struct {
   heap: priority_queue.Priority_Queue(Pathfinding_Node),
 }
 
 // Initialize pathfinding context
+@(private)
 pathfinding_context_init :: proc(
   ctx: ^Pathfinding_Context,
   max_nodes: i32,
@@ -57,22 +66,26 @@ pathfinding_context_init :: proc(
   return {.Success}
 }
 
+@(private)
 pathfinding_context_clear :: proc(ctx: ^Pathfinding_Context) {
   clear(&ctx.nodes)
   free_all(virtual.arena_allocator(&ctx.arena))
 }
 
+@(private)
 pathfinding_context_destroy :: proc(ctx: ^Pathfinding_Context) {
   delete(ctx.nodes)
   virtual.arena_destroy(&ctx.arena)
   ctx^ = {}
 }
 
+@(private)
 get_node :: proc(ctx: ^Pathfinding_Context, id: Poly_Ref) -> ^Node {
   if node, exists := ctx.nodes[id]; exists do return node
   return nil
 }
 
+@(private)
 create_node :: proc(ctx: ^Pathfinding_Context, id: Poly_Ref) -> ^Node {
   if existing, ok := ctx.nodes[id]; ok do return existing
   node_mem, err := virtual.arena_alloc(
@@ -92,11 +105,13 @@ create_node :: proc(ctx: ^Pathfinding_Context, id: Poly_Ref) -> ^Node {
 }
 
 // Priority queue comparison (min-heap for A*)
+@(private)
 pathfinding_node_compare :: proc(a, b: Pathfinding_Node) -> bool {
   return a.total < b.total
 }
 
 // Node queue operations
+@(private)
 node_queue_init :: proc(queue: ^Node_Queue, capacity: i32) -> Status {
   queue.heap = priority_queue.Priority_Queue(Pathfinding_Node){}
   priority_queue.init(
@@ -108,24 +123,29 @@ node_queue_init :: proc(queue: ^Node_Queue, capacity: i32) -> Status {
   return {.Success}
 }
 
+@(private)
 node_queue_clear :: proc(queue: ^Node_Queue) {
   priority_queue.clear(&queue.heap)
 }
 
+@(private)
 node_queue_destroy :: proc(queue: ^Node_Queue) {
   priority_queue.destroy(&queue.heap)
   queue^ = {}
 }
 
+@(private)
 node_queue_push :: proc(queue: ^Node_Queue, node: Pathfinding_Node) {
   priority_queue.push(&queue.heap, node)
 }
 
+@(private)
 node_queue_pop :: proc(queue: ^Node_Queue) -> Pathfinding_Node {
   if priority_queue.len(queue.heap) == 0 do return {INVALID_POLY_REF, 0, 0}
   return priority_queue.pop(&queue.heap)
 }
 
+@(private)
 node_queue_empty :: proc(queue: ^Node_Queue) -> bool {
   return priority_queue.len(queue.heap) == 0
 }
@@ -138,6 +158,7 @@ Nav_Mesh_Query :: struct {
   query_data: Query_Data,
 }
 
+@(private)
 Query_Data :: struct {
   status:                Status,
   last_best:             ^Node,
@@ -375,6 +396,7 @@ find_path :: proc(
 }
 
 // Reconstruct path from end node back to start
+@(private)
 get_path_to_node :: proc(
   query: ^Nav_Mesh_Query,
   end_node: ^Node,
@@ -404,26 +426,31 @@ get_path_to_node :: proc(
 }
 
 // Link traversal helpers
+@(private)
 get_first_link :: proc(tile: ^Mesh_Tile, poly: i32) -> u32 {
   if poly < 0 || poly >= i32(len(tile.polys)) do return DT_NULL_LINK
   return tile.polys[poly].first_link
 }
 
+@(private)
 get_next_link :: proc(tile: ^Mesh_Tile, link: u32) -> u32 {
   if link == DT_NULL_LINK || int(link) >= len(tile.links) do return DT_NULL_LINK
   return tile.links[link].next
 }
 
+@(private)
 get_link_poly_ref :: proc(tile: ^Mesh_Tile, link: u32) -> Poly_Ref {
   if link == DT_NULL_LINK || int(link) >= len(tile.links) do return INVALID_POLY_REF
   return tile.links[link].ref
 }
 
+@(private)
 get_link_edge :: proc(tile: ^Mesh_Tile, link: u32) -> u8 {
   if link == DT_NULL_LINK || int(link) >= len(tile.links) do return 0xff
   return tile.links[link].edge
 }
 
+@(private)
 get_edge_mid_point :: proc(
   tile_a, tile_b: ^Mesh_Tile,
   poly_a, poly_b: ^Poly,
@@ -611,6 +638,7 @@ finalize_sliced_find_path_partial :: proc(
 }
 
 // Convenience function for complete sliced pathfinding
+@(private)
 find_path_sliced :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,

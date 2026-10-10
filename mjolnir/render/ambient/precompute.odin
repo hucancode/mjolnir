@@ -5,21 +5,32 @@ import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
+@(private)
 SHADER_EQUIRECT :: #load("../shader/ibl/equirect_to_cube.spv")
+@(private)
 SHADER_IRRADIANCE :: #load("../shader/ibl/irradiance.spv")
+@(private)
 SHADER_PREFILTER :: #load("../shader/ibl/prefilter.spv")
 
+@(private)
 ENV_CUBE_SIZE :: 512
+@(private)
 IRRADIANCE_SIZE :: 32
+@(private)
 PREFILTER_SIZE :: 128
+@(private)
 PREFILTER_MIPS :: 5
+@(private)
 PREFILTER_SAMPLES :: 1024
+@(private)
 IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
+@(private)
 CUBE_FORMAT :: vk.Format.R16G16B16A16_SFLOAT
 
 // Push constants of the three precompute shaders. Each reads a prefix:
 // equirect face_size; irradiance face_size + sample_delta (as `value`);
 // prefilter all three, roughness as `value`.
+@(private)
 PrecomputePush :: struct {
   face_size:    u32,
   value:        f32,
@@ -37,6 +48,7 @@ IBLResults :: struct {
 // Precompute IBL cubemaps from an equirectangular HDR source texture.
 // Allocates 3 cube textures (env, irradiance, prefilter) and runs 3 compute
 // passes via a one-shot command buffer. Safe to call once at engine setup.
+@(private)
 precompute :: proc(
   gctx: ^gpu.GPUContext,
   texture_manager: ^bindless.TextureManager,

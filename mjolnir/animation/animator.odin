@@ -152,7 +152,7 @@ animator_update :: proc(
   for &layer in self.layers {
     fk := (&layer.data.(FKLayer)) or_continue
     if fk.clip < 0 || fk.clip >= len(rig.clips) do continue
-    playback_advance(&fk.time, &fk.speed, &fk.status, fk.mode, rig.clips[fk.clip].duration, delta_time)
+    playback_advance(fk, rig.clips[fk.clip].duration, delta_time)
   }
   // FK: blend every clip layer into the local pose
   acc_pos := make([][3]f32, n, context.temp_allocator)
@@ -311,7 +311,7 @@ add_clip_layer_index :: proc(
     Layer {
       weight = weight,
       blend_mode = blend_mode,
-      data = FKLayer{clip = clip, mode = mode, status = .PLAYING, speed = speed},
+      data = FKLayer{clip = clip, player = {mode = mode, speed = speed}},
     },
     layer_index,
   )
@@ -509,9 +509,11 @@ set_tail_params :: proc(
 @(private)
 build_path_spline :: proc(path: [][3]f32, closed: bool) -> Spline([3]f32) {
   if closed && len(path) >= 3 do return spline_build_closed(path)
-  times := make([]f32, len(path))
+  times := make([]f32, len(path), context.temp_allocator)
   for i in 0 ..< len(times) do times[i] = f32(i)
-  return Spline([3]f32){points = slice.clone(path), times = times}
+  spline: Spline([3]f32)
+  spline_init(&spline, path, times)
+  return spline
 }
 
 add_path_layer :: proc(

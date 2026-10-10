@@ -279,46 +279,56 @@ test_clip_cubic_range :: proc(t: ^testing.T) {
 
 @(test)
 test_playback_once_stops_at_end :: proc(t: ^testing.T) {
-  time, speed: f32 = 0.0, 1.0
-  status := Status.PLAYING
-  for _ in 0 ..< 5 do playback_advance(&time, &speed, &status, .ONCE, 1.0, 0.3)
-  testing.expect_value(t, time, 1.0)
-  testing.expect_value(t, status, Status.STOPPED)
-  playback_advance(&time, &speed, &status, .ONCE, 1.0, 0.3)
-  testing.expect_value(t, time, 1.0)
+  p := ClipPlayer{speed = 1, mode = .ONCE}
+  for _ in 0 ..< 5 do playback_advance(&p, 1.0, 0.3)
+  testing.expect_value(t, p.time, 1.0)
+  testing.expect_value(t, p.status, Status.STOPPED)
+  playback_advance(&p, 1.0, 0.3)
+  testing.expect_value(t, p.time, 1.0)
 }
 
 @(test)
 test_playback_loop_wraps :: proc(t: ^testing.T) {
-  time, speed: f32 = 0.0, 1.0
-  status := Status.PLAYING
-  playback_advance(&time, &speed, &status, .LOOP, 1.0, 1.25)
-  testing.expect(t, abs(time - 0.25) < 1e-5)
-  testing.expect_value(t, status, Status.PLAYING)
-  playback_advance(&time, &speed, &status, .LOOP, 1.0, 0.7)
-  playback_advance(&time, &speed, &status, .LOOP, 1.0, 0.5)
-  testing.expectf(t, abs(time - 0.45) < 1e-5, "got %f", time)
+  p := ClipPlayer{speed = 1}
+  playback_advance(&p, 1.0, 1.25)
+  testing.expect(t, abs(p.time - 0.25) < 1e-5)
+  testing.expect_value(t, p.status, Status.PLAYING)
+  playback_advance(&p, 1.0, 0.7)
+  playback_advance(&p, 1.0, 0.5)
+  testing.expectf(t, abs(p.time - 0.45) < 1e-5, "got %f", p.time)
 }
 
 @(test)
 test_playback_ping_pong :: proc(t: ^testing.T) {
-  time, speed: f32 = 0.0, 1.0
-  status := Status.PLAYING
-  playback_advance(&time, &speed, &status, .PING_PONG, 1.0, 1.5)
-  testing.expect(t, speed < 0, "speed reversed past duration")
-  before := time
-  playback_advance(&time, &speed, &status, .PING_PONG, 1.0, 0.25)
-  testing.expect(t, time < before, "now moving backwards")
-  testing.expect_value(t, status, Status.PLAYING)
+  p := ClipPlayer{speed = 1, mode = .PING_PONG}
+  playback_advance(&p, 1.0, 1.5)
+  testing.expect(t, p.speed < 0, "speed reversed past duration")
+  before := p.time
+  playback_advance(&p, 1.0, 0.25)
+  testing.expect(t, p.time < before, "now moving backwards")
+  testing.expect_value(t, p.status, Status.PLAYING)
 }
 
 @(test)
 test_playback_paused :: proc(t: ^testing.T) {
-  time, speed: f32 = 0.3, 1.0
-  status := Status.PAUSED
-  playback_advance(&time, &speed, &status, .LOOP, 1.0, 0.5)
-  testing.expect_value(t, time, 0.3)
-  status = .STOPPED
-  playback_advance(&time, &speed, &status, .LOOP, 1.0, 0.5)
-  testing.expect_value(t, time, 0.3)
+  p := ClipPlayer{time = 0.3, speed = 1, status = .PAUSED}
+  playback_advance(&p, 1.0, 0.5)
+  testing.expect_value(t, p.time, 0.3)
+  p.status = .STOPPED
+  playback_advance(&p, 1.0, 0.5)
+  testing.expect_value(t, p.time, 0.3)
+}
+
+@(test)
+test_clip_player_update_samples_over_rest :: proc(t: ^testing.T) {
+  clip: Clip
+  clip_init(&clip, 1)
+  defer clip_destroy(&clip)
+  clip_set_positions(&clip, 0, {0, 2}, {{0, 0, 0}, {4, 0, 0}})
+  p := ClipPlayer{speed = 1}
+  rest := TRS{position = {0, 1, 0}, rotation = linalg.QUATERNIONF32_IDENTITY, scale = {2, 2, 2}}
+  m := clip_player_update(&p, &clip, 0.5, rest)
+  testing.expect_value(t, p.time, 0.5)
+  testing.expect_value(t, m[3].xyz, [3]f32{1, 0, 0})
+  testing.expect_value(t, m[0][0], 2)
 }

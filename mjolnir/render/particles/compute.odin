@@ -15,15 +15,20 @@ import "core:log"
 import "core:slice"
 import vk "vendor:vulkan"
 
+@(private)
 MAX_PARTICLES :: 65536
+@(private)
 COMPUTE_PARTICLE_BATCH :: 256
 MAX_EMITTERS :: 64
 MAX_FORCE_FIELDS :: 32
 
+@(private)
 SHADER_EMITTER_COMP :: #load("../shader/particle/emitter.spv")
+@(private)
 SHADER_PARTICLE_COMP :: #load("../shader/particle/compute.spv")
 
 // A slot is dead when life <= 0.
+@(private)
 Particle :: struct {
   position:      [3]f32,
   size_start:    f32,
@@ -62,6 +67,7 @@ ForceField :: struct {
   node_index:       u32,
 }
 
+@(private)
 ParticleSystemParams :: struct {
   emitter_count:    u32,
   forcefield_count: u32,

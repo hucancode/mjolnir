@@ -17,6 +17,7 @@ Kind :: enum {
 // include_flags / exclude_flags use the bit layout of render.NodeFlagSet; the
 // caller transmutes its NodeFlagSet to u32 so this package stays unaware of
 // render's NodeFlag enum.
+@(private)
 CullPushConstants :: struct {
   planes:        [6][4]f32,
   node_count:    u32,
@@ -25,10 +26,12 @@ CullPushConstants :: struct {
   exclude_flags: u32,
 }
 
+@(private)
 FrustumDepthPushConstants :: struct {
   view_projection: matrix[4, 4]f32,
 }
 
+@(private)
 SphereDepthPushConstants :: struct {
   projection:     matrix[4, 4]f32,
   light_position: [3]f32,
@@ -66,6 +69,7 @@ KINDS := [Kind]KindDesc {
 }
 
 // Depth passes bind every mesh set except the camera.
+@(private)
 SHADOW_SETS :: bindless.MESH_SETS - {.CAMERA}
 
 System :: struct {

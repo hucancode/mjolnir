@@ -53,6 +53,7 @@ EventHandlers :: struct {
   on_text:       TextEventProc,
 }
 
+@(private)
 point_in_widget :: proc(widget: ^Widget, point: [2]f32) -> bool {
   switch w in widget {
   case Quad2D:
@@ -115,6 +116,7 @@ point_in_widget :: proc(widget: ^Widget, point: [2]f32) -> bool {
 
 // Topmost visible widget containing `point`. With `interactive_only`, only
 // widgets that handle mouse events (themselves or via an ancestor) count.
+@(private)
 pick_widget :: proc(
   sys: ^System,
   point: [2]f32,
@@ -134,6 +136,7 @@ pick_widget :: proc(
   return best_widget
 }
 
+@(private)
 dispatch_mouse_event :: proc(
   sys: ^System,
   widget_handle: UIWidgetHandle,
@@ -182,6 +185,7 @@ dispatch_mouse_event :: proc(
   }
 }
 
+@(private)
 dispatch_key_event :: proc(
   sys: ^System,
   widget_handle: UIWidgetHandle,
@@ -218,6 +222,7 @@ dispatch_key_event :: proc(
   }
 }
 
+@(private)
 dispatch_text_event :: proc(sys: ^System, widget_handle: UIWidgetHandle, event: TextEvent) {
   widget := get_widget(sys, widget_handle)
   if widget == nil do return

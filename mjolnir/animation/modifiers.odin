@@ -26,6 +26,7 @@ TailModifier :: struct {
 
 // Max spring stiffness mapped from propagation_speed = 1.
 // Higher = snappier and faster oscillations.
+@(private)
 TAIL_MAX_STIFFNESS :: f32(200.0)
 
 PathModifier :: struct {
@@ -75,8 +76,10 @@ ProceduralLayer :: struct {
   modifier:     Modifier,
 }
 
+@(private)
 SPIDER_LEG_MIN_LIFT_DISTANCE_RATIO :: f32(0.1)
 
+@(private)
 spider_leg_init :: proc(self: ^SpiderLeg, config: SpiderLegConfig) {
   self^ = {
     config      = config,
@@ -86,6 +89,7 @@ spider_leg_init :: proc(self: ^SpiderLeg, config: SpiderLegConfig) {
   }
 }
 
+@(private)
 spider_leg_update :: proc(self: ^SpiderLeg, delta_time: f32) {
   if self.lift_duration <= 0 {
     self.position = self.target
@@ -123,6 +127,7 @@ spider_leg_update :: proc(self: ^SpiderLeg, delta_time: f32) {
 
 // Retarget the foot from the leg root's world position (leading it by the
 // root's velocity), then step.
+@(private)
 spider_leg_update_with_root :: proc(self: ^SpiderLeg, delta_time: f32, root_position: [3]f32) {
   root_velocity: [3]f32
   if self.time > 0.0 && delta_time > 0.0 {
@@ -139,6 +144,7 @@ spider_leg_update_with_root :: proc(self: ^SpiderLeg, delta_time: f32, root_posi
 }
 
 // h(t) = 4ht(1-t): parabola with h(0)=0, h(0.5)=h, h(1)=0
+@(private)
 compute_parabolic_height :: proc "contextless" (t: f32, max_height: f32) -> f32 {
   return 4.0 * max_height * t * (1.0 - t)
 }
@@ -161,6 +167,7 @@ transform_point :: #force_inline proc(m: matrix[4, 4]f32, p: [3]f32) -> [3]f32 {
   return (m * [4]f32{p.x, p.y, p.z, 1}).xyz
 }
 
+@(private)
 tail_modifier_update :: proc(
   params: ^TailModifier,
   bone_indices: []u32,
@@ -225,6 +232,7 @@ tail_modifier_update :: proc(
   aim_bone(rotations, last_idx, positions[last_idx] - positions[prev_idx], layer_weight)
 }
 
+@(private)
 path_modifier_update :: proc(
   params: ^PathModifier,
   bone_indices: []u32,
@@ -236,10 +244,6 @@ path_modifier_update :: proc(
 ) {
   chain_length := len(bone_indices)
   if chain_length < 2 || len(params.spline.points) < 2 do return
-  // The arc table must exist before the offset is advanced
-  if _, has_table := params.spline.arc_table.?; !has_table {
-    spline_build_arc_table(&params.spline)
-  }
   if bone_lengths == nil do return
   spline_length := spline_arc_length(params.spline)
   if params.speed != 0 {
@@ -286,6 +290,7 @@ path_modifier_update :: proc(
   aim_bone(rotations, bone_idx, tangent_pos - positions[bone_idx], layer_weight)
 }
 
+@(private)
 spider_leg_modifier_update :: proc(
   params: ^SpiderLegModifier,
   bone_indices: []u32,

@@ -136,6 +136,7 @@ raycast_trigger :: proc(
 // Raycast against a specific collider. The ray is tested in the collider's
 // local frame (Y = cylinder/fan axis, fan forward = +Z) and the hit normal
 // rotated back to world space. A ray starting inside the shape hits at t = 0.
+@(private)
 raycast_collider :: proc(
   ray: geometry.Ray,
   collider: ^Collider,
@@ -423,6 +424,7 @@ query_triggers_in_sphere :: proc(
 }
 
 // Test if collider overlaps with sphere
+@(private)
 test_collider_sphere_overlap :: proc(
   collider: ^Collider,
   collider_pos: [3]f32,
@@ -460,6 +462,7 @@ test_collider_sphere_overlap :: proc(
 }
 
 // Test if collider overlaps with AABB
+@(private)
 test_collider_aabb_overlap :: proc(
   collider: ^Collider,
   collider_pos: [3]f32,

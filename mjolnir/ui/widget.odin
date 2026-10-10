@@ -2,18 +2,6 @@ package ui
 
 import cmd "../draw2d"
 
-HorizontalAlign :: enum {
-  Left,
-  Center,
-  Right,
-}
-
-VerticalAlign :: enum {
-  Top,
-  Middle,
-  Bottom,
-}
-
 WidgetBase :: struct {
   position:       [2]f32,
   world_position: [2]f32,

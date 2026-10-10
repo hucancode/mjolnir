@@ -28,6 +28,7 @@ Collider :: union {
   FanCollider,
 }
 
+@(private)
 collider_calculate_aabb :: proc(
   self: ^Collider,
   position: [3]f32,
@@ -69,6 +70,7 @@ collider_calculate_aabb :: proc(
   return {}
 }
 
+@(private)
 collider_min_extent :: proc(self: ^Collider) -> f32 {
   switch sh in self {
   case SphereCollider:

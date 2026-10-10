@@ -12,6 +12,7 @@ import vk "vendor:vulkan"
 // retirement grace. This queue is for loose resources with no owning pool — e.g.
 // the per-frame shadow draw buffers freed when a light despawns.
 
+@(private)
 TrashItem :: struct {
   ready:  u64,
   buffer: vk.Buffer,

@@ -58,6 +58,63 @@ PerfFrame :: struct {
   rebuilt_static_bvh:       bool,
 }
 
+// One solver point of a contact manifold
+// base_separation: signed separation at prepare time (negative = penetrating);
+// current separation is recovered per substep from body position deltas.
+// relative_velocity: normal approach speed captured at prepare, used by the
+// post-substep restitution pass.
+ContactPoint :: struct {
+  point:              [3]f32,
+  penetration:        f32, // filled by narrowphase; prepare converts to base_separation
+  feature_id:         u32,
+  normal_impulse:     f32,
+  max_normal_impulse: f32,
+  normal_mass:        f32,
+  base_separation:    f32,
+  relative_velocity:  f32,
+  r_a:                [3]f32,
+  r_b:                [3]f32,
+}
+
+// Contact between two dynamic bodies: up to 4 normal points plus one
+// manifold-level friction constraint (coupled 2D tangent at the centroid +
+// twist about the normal).
+DynamicContact :: struct {
+  body_a:          DynamicRigidBodyHandle,
+  body_b:          DynamicRigidBodyHandle,
+  normal:          [3]f32,
+  restitution:     f32,
+  friction:        f32,
+  count:           int,
+  points:          [MAX_MANIFOLD_POINTS]ContactPoint,
+  tangent1:        [3]f32,
+  tangent2:        [3]f32,
+  r_a_c:           [3]f32, // centroid offset from body A center
+  r_b_c:           [3]f32,
+  tangent_impulse: [2]f32,
+  twist_impulse:   f32,
+  tangent_mass:    matrix[2, 2]f32, // inverse of the coupled tangent K matrix
+  twist_mass:      f32,
+}
+
+// Contact between dynamic body (A) and static body (B)
+StaticContact :: struct {
+  body_a:          DynamicRigidBodyHandle,
+  body_b:          StaticRigidBodyHandle,
+  normal:          [3]f32,
+  restitution:     f32,
+  friction:        f32,
+  count:           int,
+  points:          [MAX_MANIFOLD_POINTS]ContactPoint,
+  tangent1:        [3]f32,
+  tangent2:        [3]f32,
+  r_a_c:           [3]f32,
+  tangent_impulse: [2]f32,
+  twist_impulse:   f32,
+  tangent_mass:    matrix[2, 2]f32,
+  twist_mass:      f32,
+}
+
 TriggerOverlap :: struct {
   trigger: TriggerHandle,
   body:    DynamicRigidBodyHandle,
@@ -105,11 +162,13 @@ World :: struct {
   paused:                  bool,
 }
 
+@(private)
 DynamicBroadPhaseEntry :: struct {
   handle: DynamicRigidBodyHandle,
   bounds: geometry.Aabb,
 }
 
+@(private)
 StaticBroadPhaseEntry :: struct {
   handle: StaticRigidBodyHandle,
   bounds: geometry.Aabb,
@@ -280,6 +339,7 @@ destroy_body :: proc {
   destroy_static_body,
 }
 
+@(private)
 trigger_collides :: #force_inline proc(trigger: ^TriggerBody, body: ^RigidBody) -> bool {
   _, hit := collide(
     &trigger.collider, trigger.position, trigger.rotation,
@@ -771,6 +831,66 @@ set_body_collider :: proc {
   set_dynamic_body_collider,
   set_static_body_collider,
   set_trigger_collider,
+}
+
+// Velocity setters wake the body.
+set_velocity :: proc(
+  self: ^World,
+  handle: DynamicRigidBodyHandle,
+  velocity: [3]f32,
+) {
+  body, ok := get(self, handle)
+  if !ok do return
+  body.velocity = velocity
+  wake_up(body)
+}
+
+set_angular_velocity :: proc(
+  self: ^World,
+  handle: DynamicRigidBodyHandle,
+  angular_velocity: [3]f32,
+) {
+  body, ok := get(self, handle)
+  if !ok do return
+  body.angular_velocity = angular_velocity
+  wake_up(body)
+}
+
+// Recomputes the inertia from the body's collider at the new mass. Ignores
+// mass <= 0.
+set_body_mass :: proc(
+  self: ^World,
+  handle: DynamicRigidBodyHandle,
+  mass: f32,
+) {
+  if mass <= 0 do return
+  body, ok := get(self, handle)
+  if !ok do return
+  set_mass(body, mass)
+  set_inertia_from_collider(body, body.collider)
+}
+
+// The force is held for the next `step` and cleared after it.
+apply_force :: proc(
+  self: ^World,
+  handle: DynamicRigidBodyHandle,
+  force: [3]f32,
+) {
+  body, ok := get(self, handle)
+  if !ok do return
+  body.force += force
+  wake_up(body)
+}
+
+apply_impulse :: proc(
+  self: ^World,
+  handle: DynamicRigidBodyHandle,
+  impulse: [3]f32,
+) {
+  body, ok := get(self, handle)
+  if !ok do return
+  body.velocity += impulse * body.inv_mass
+  wake_up(body)
 }
 
 // Bodies not yet in the static BVH are picked up by the next rebuild.

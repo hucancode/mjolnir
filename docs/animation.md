@@ -20,14 +20,26 @@ stores three values per key (in-tangent, value, out-tangent), the
 glTF layout. `track_sample(track, t, fallback)` clamps to the first
 and last key; rotations slerp.
 
-**Playback.** `playback_advance(&time, &speed, &status, mode,
-duration, dt)` advances a play head. `LOOP` wraps, `ONCE` clamps and
-stops, `PING_PONG` flips the speed at either end.
+**Playback.** `ClipPlayer` is a plain-value play head: `time`,
+`speed`, `status` (`PLAYING`, `PAUSED`, `STOPPED`) and `mode`.
+`ClipPlayer{speed = 1}` loops from the start. `LOOP` wraps, `ONCE`
+clamps at the end and stops, `PING_PONG` flips the speed at either
+end. Clip layers carry one each.
 
 **Splines.** `Spline(T)` is Catmull-Rom over any vector type.
-`spline_build_arc_table` + `spline_sample_uniform` resample it at
-uniform arc length. Used for camera moves, paths and the path
-modifier.
+`spline_init(&s, points, times)` copies the control points, fails
+unless there are at least two points with one non-decreasing time
+each, and builds the arc-length table that `spline_sample_uniform`
+and `spline_arc_length` use. `spline_build_closed(base)` returns a
+closed loop with a smooth seam. Free either with `spline_destroy`.
+Used for camera moves, paths and the path modifier.
+
+```odin
+s: anim.Spline([3]f32)
+if !anim.spline_init(&s, points, times) do return
+defer anim.spline_destroy(&s)
+p := anim.spline_sample_uniform(s, 0.5 * anim.spline_arc_length(s))
+```
 
 ## Clips
 
@@ -43,6 +55,17 @@ anim.clip_init(&clip, channel_count = 1, name = "spin", duration = 2)
 anim.clip_set_rotations(&clip, 0, times, rotations, .LINEAR)
 trs := anim.TRS_IDENTITY
 anim.clip_sample_trs(&clip, 0, t, &trs) // unanimated components keep their input value
+```
+
+`clip_player_update(&player, &clip, dt, rest, channel)` advances a
+`ClipPlayer` and returns the channel's local matrix sampled over
+`rest` (default `TRS_IDENTITY`, channel 0). This drives a scene node
+from a clip in one line:
+
+```odin
+player := anim.ClipPlayer{speed = 1}
+// every tick
+m := anim.clip_player_update(&player, &clip, dt)
 ```
 
 `clip_position_track` / `clip_rotation_track` / `clip_scale_track`

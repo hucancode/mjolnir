@@ -1,3 +1,4 @@
+#+private
 package physics
 
 import cont "../containers"

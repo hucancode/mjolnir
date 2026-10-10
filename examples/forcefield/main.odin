@@ -4,7 +4,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
@@ -81,7 +80,7 @@ spawn_field :: proc(
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 12, 3}, {0, 2, 0})
-  ambient.set_skybox_enabled(&app.renderer.ambient, false)
+  app.renderer.ambient.skybox_enabled = false
 
   // Particle source at center, large position spread
   if tex, ret := render.create_texture_from_path(&app.renderer, "assets/particles/star_09.png"); ret == .SUCCESS {
@@ -119,6 +118,7 @@ apply_ff :: proc(app: ^App, s: ^FFState) {
   ff.tangent_strength = f32(s.tangent_strength)
   ff.area_of_effect   = f32(s.area_of_effect)
   ff.enabled          = b32(s.enabled)
+  render.set_forcefield(&app.renderer, s.ff_handle, ff^)
 }
 
 draw_ff_marker :: proc(app: ^App, s: ^FFState) {

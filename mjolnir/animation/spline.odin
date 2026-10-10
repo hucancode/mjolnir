@@ -1,5 +1,6 @@
 package animation
 
+import "base:intrinsics"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -12,6 +13,18 @@ Spline :: struct($T: typeid) {
   arc_table: Maybe(Spline_Arc_Length_Table(T)), // Optional arc-length table for uniform sampling
 }
 
+// Copy `points` and their key `times` into a spline. Fails without
+// allocating unless there are at least 2 points, one time per point, and the
+// times are non-decreasing. Vector splines also get an arc-length table of
+// `samples` entries for spline_sample_uniform. Free with spline_destroy.
+spline_init :: proc(self: ^Spline($T), points: []T, times: []f32, samples := 200) -> bool {
+  if len(points) < 2 || len(points) != len(times) || !slice.is_sorted(times) do return false
+  self^ = {points = slice.clone(points), times = slice.clone(times)}
+  when intrinsics.type_is_array(T) do spline_build_arc_table(self, max(samples, 2))
+  return true
+}
+
+@(private)
 spline_create :: proc($T: typeid, count: int) -> Spline(T) {
   return Spline(T){points = make([]T, count), times = make([]f32, count)}
 }
@@ -25,6 +38,7 @@ spline_destroy :: proc(spline: ^Spline($T)) {
   }
 }
 
+@(private)
 spline_validate :: proc(spline: Spline($T)) -> bool {
   return slice.is_sorted(spline.times)
 }
@@ -61,7 +75,6 @@ catmull_rom_tangent :: proc "contextless" (p_prev: $T, p_next: T) -> T {
 }
 
 spline_sample :: proc(spline: Spline($T), t: f32) -> T {
-  // spline.times should be monotonically non-decreasing (use spline_validate to check)
   n := len(spline.points)
   if n == 0 {
     return T{}
@@ -185,6 +198,7 @@ Spline_Arc_Length_Table :: struct($T: typeid) {
   times:       []f32, // Corresponding time values
 }
 
+@(private)
 spline_build_arc_table :: proc(spline: ^Spline($T), samples := 200) {
   // samples: Number of samples for approximation (more = accurate but slower)
   if len(spline.times) == 0 do return

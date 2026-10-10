@@ -288,3 +288,14 @@ bench_spline_sample :: proc(t: ^testing.T) {
 	log.infof("spline_sample N=32 ctrl pts, %d rounds in %v, %.0f rounds/sec",
 		opts.rounds, opts.duration, opts.rounds_per_second)
 }
+
+@(test)
+test_spline_init_validates_and_builds_arc_table :: proc(t: ^testing.T) {
+	s: Spline([3]f32)
+	testing.expect(t, !spline_init(&s, [][3]f32{{0, 0, 0}}, []f32{0}), "one point rejected")
+	testing.expect(t, !spline_init(&s, [][3]f32{{0, 0, 0}, {1, 0, 0}}, []f32{0}), "length mismatch rejected")
+	testing.expect(t, !spline_init(&s, [][3]f32{{0, 0, 0}, {1, 0, 0}}, []f32{1, 0}), "unsorted times rejected")
+	testing.expect(t, spline_init(&s, [][3]f32{{0, 0, 0}, {3, 0, 0}}, []f32{0, 1}), "valid spline accepted")
+	defer spline_destroy(&s)
+	testing.expectf(t, math.abs(spline_arc_length(s) - 3) < 1e-3, "arc length %f", spline_arc_length(s))
+}

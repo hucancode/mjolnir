@@ -108,7 +108,7 @@ build_scene :: proc(app: ^App) {
 }
 
 build_navmesh :: proc(app: ^App) {
-  if !bake.build(&navmesh, bake.geometry_view(&nav_builder)) do log.error("navmesh build failed")
+  if !bake.build(&navmesh, &nav_builder) do log.error("navmesh build failed")
 }
 
 visualize_navmesh :: proc(app: ^App) {

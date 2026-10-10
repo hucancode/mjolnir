@@ -3,32 +3,39 @@ package recast
 import "core:log"
 import "core:slice"
 
+@(private)
 Partition_Type :: enum {
   Watershed,
   Monotone,
   Layers,
 }
 
+@(private)
 Vertex_Flag :: enum {
   BORDER_VERTEX = 16,
   AREA_BORDER   = 17,
 }
+@(private)
 Vertex_Flags :: bit_set[Vertex_Flag;u32]
 
+@(private)
 get_dir_offset_x :: proc "contextless" (dir: int) -> i32 {
   offset := [4]i32{-1, 0, 1, 0}
   return offset[dir & 0x03]
 }
 
+@(private)
 get_dir_offset_y :: proc "contextless" (dir: int) -> i32 {
   offset := [4]i32{0, 1, 0, -1}
   return offset[dir & 0x03]
 }
 
 // Region building constants
+@(private)
 RC_NULL_NEI :: 0xffff
 
 // Stack entry for level-based flood fill
+@(private)
 Level_Stack_Entry :: struct {
   x:     i32,
   y:     i32,
@@ -36,6 +43,7 @@ Level_Stack_Entry :: struct {
 }
 
 // Sweep span for monotone partitioning
+@(private)
 Sweep_Span :: struct {
   rid: u16, // row id
   id:  u16, // region id
@@ -44,6 +52,7 @@ Sweep_Span :: struct {
 }
 
 // Dirty entry for tracking modified regions during expansion
+@(private)
 Dirty_Entry :: struct {
   index:     i32,
   region:    u16,
@@ -51,6 +60,7 @@ Dirty_Entry :: struct {
 }
 
 // Region structure for merge and filter operations
+@(private)
 Region :: struct {
   span_count:         i32,
   id:                 u16,
@@ -66,6 +76,7 @@ Region :: struct {
 }
 
 // Calculate distance field for watershed algorithm
+@(private)
 calculate_distance_field :: proc(
   chf: ^Compact_Heightfield,
   src: []u16,
@@ -189,6 +200,7 @@ calculate_distance_field :: proc(
 }
 
 // box blur for distance field smoothing
+@(private)
 box_blur :: proc(
   chf: ^Compact_Heightfield,
   thr: i32,
@@ -236,6 +248,7 @@ box_blur :: proc(
 }
 
 // flood region - level set based region growing
+@(private)
 flood_region :: proc(
   x, y, i: i32,
   level, r: u16,
@@ -332,6 +345,7 @@ flood_region :: proc(
 }
 
 // expand regions to fill gaps
+@(private)
 expand_regions :: proc(
   max_iter: i32,
   level: u16,
@@ -432,6 +446,7 @@ expand_regions :: proc(
 }
 
 // paint rectangular region
+@(private)
 paint_rect_region :: proc(
   minx, maxx, miny, maxy: i32,
   reg_id: u16,
@@ -452,6 +467,7 @@ paint_rect_region :: proc(
 }
 
 // remove adjacent duplicate neighbours
+@(private)
 remove_adjacent_neighbours :: proc(reg: ^Region) {
   if len(reg.connections) <= 1 do return
   unique_slice := slice.unique(reg.connections[:])
@@ -465,6 +481,7 @@ remove_adjacent_neighbours :: proc(reg: ^Region) {
 }
 
 // replace neighbour in region connections
+@(private)
 replace_neighbour :: proc(reg: ^Region, old_id, new_id: u16) {
   nei_changed := false
   for i in 0 ..< len(reg.connections) {
@@ -481,6 +498,7 @@ replace_neighbour :: proc(reg: ^Region, old_id, new_id: u16) {
   if nei_changed do remove_adjacent_neighbours(reg)
 }
 
+@(private)
 can_merge_with_region :: proc(rega, regb: ^Region) -> bool {
   if rega.area_type != regb.area_type do return false
   if slice.count(rega.connections[:], i32(regb.id)) > 1 do return false
@@ -488,10 +506,12 @@ can_merge_with_region :: proc(rega, regb: ^Region) -> bool {
   return true
 }
 
+@(private)
 add_unique_floor :: proc(reg: ^Region, n: i32) {
   if !slice.contains(reg.floors[:], n) do append(&reg.floors, n)
 }
 
+@(private)
 merge_regions :: proc(rega, regb: ^Region) -> bool {
   aid := rega.id
   bid := regb.id
@@ -540,6 +560,7 @@ merge_regions :: proc(rega, regb: ^Region) -> bool {
   return true
 }
 
+@(private)
 is_region_connected_to_border :: proc(reg: ^Region) -> bool {
   // region is connected to border if one of the neighbours is null id
   for i in 0 ..< len(reg.connections) {
@@ -550,6 +571,7 @@ is_region_connected_to_border :: proc(reg: ^Region) -> bool {
   return false
 }
 
+@(private)
 is_solid_edge :: proc(
   chf: ^Compact_Heightfield,
   src_reg: []u16,
@@ -571,6 +593,7 @@ is_solid_edge :: proc(
   return r != src_reg[i]
 }
 
+@(private)
 walk_contour_for_region :: proc(
   x_in, y_in, i_in: i32,
   dir_in: int,
@@ -650,10 +673,12 @@ walk_contour_for_region :: proc(
   }
 }
 
+@(private)
 add_unique_connection :: proc(reg: ^Region, n: i32) {
   if !slice.contains(reg.connections[:], n) do append(&reg.connections, n)
 }
 
+@(private)
 merge_and_filter_regions :: proc(
   min_region_area, merge_region_size: i32,
   initial_max_region_id: u16,
@@ -895,6 +920,7 @@ merge_and_filter_regions :: proc(
   return max_region_id, overlaps, true
 }
 
+@(private)
 resolve_region_overlaps :: proc(
   chf: ^Compact_Heightfield,
   src_reg: []u16,
@@ -977,6 +1003,7 @@ resolve_region_overlaps :: proc(
   return resolved_count > 0
 }
 
+@(private)
 group_connected_spans :: proc(
   chf: ^Compact_Heightfield,
   span_indices: []i32,
@@ -1014,6 +1041,7 @@ group_connected_spans :: proc(
   return groups[:]
 }
 
+@(private)
 are_spans_connected :: proc(
   chf: ^Compact_Heightfield,
   span1, span2: i32,
@@ -1029,6 +1057,7 @@ are_spans_connected :: proc(
   return (dx == 1 && dy == 0) || (dx == 0 && dy == 1)
 }
 
+@(private)
 find_span_coordinates :: proc(
   chf: ^Compact_Heightfield,
   span_idx: i32,
@@ -1245,6 +1274,7 @@ build_regions :: proc(
 }
 
 // Build regions using monotone partitioning
+@(private)
 build_regions_monotone :: proc(
   chf: ^Compact_Heightfield,
   border_size, min_region_area, merge_region_area: i32,
@@ -1373,6 +1403,7 @@ build_regions_monotone :: proc(
 }
 
 // Merge and filter layer regions
+@(private)
 merge_and_filter_layer_regions :: proc(
   min_region_area: i32,
   initial_max_region_id: u16,
@@ -1544,6 +1575,7 @@ merge_and_filter_layer_regions :: proc(
 }
 
 // Build layer regions for multi-story environments
+@(private)
 build_layer_regions :: proc(
   chf: ^Compact_Heightfield,
   border_size, min_region_area: i32,

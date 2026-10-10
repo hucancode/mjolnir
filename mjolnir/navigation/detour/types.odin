@@ -1,5 +1,6 @@
 package detour
 
+@(private)
 Status_Flag :: enum u32 {
   Success          = 0,
   In_Progress      = 1,
@@ -51,13 +52,16 @@ status_detail :: proc "contextless" (status: Status) -> (succeeded: bool, detail
 DEFAULT_MAX_PATH :: 256
 
 Poly_Ref :: distinct u32
+@(private)
 Tile_Ref :: distinct u32
 
 INVALID_POLY_REF :: Poly_Ref(0)
+@(private)
 INVALID_TILE_REF :: Tile_Ref(0)
 DT_NULL_LINK :: 0xffffffff
 
 DT_VERTS_PER_POLYGON :: 6
+@(private)
 DT_MAX_AREAS :: 64
 DT_POLYTYPE_GROUND :: 0
 DT_POLYTYPE_OFFMESH_CONNECTION :: 1
@@ -68,5 +72,7 @@ DT_RAYCAST_USE_COSTS :: 0x01
 
 DT_NAVMESH_MAGIC :: 'D' << 24 | 'N' << 16 | 'A' << 8 | 'V'
 DT_NAVMESH_VERSION :: 7
+@(private)
 DT_NAVMESH_STATE_MAGIC :: 'D' << 24 | 'N' << 16 | 'M' << 8 | 'S'
+@(private)
 DT_NAVMESH_STATE_VERSION :: 1

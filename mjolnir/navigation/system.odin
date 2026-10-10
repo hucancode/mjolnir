@@ -51,6 +51,26 @@ destroy :: proc(nav: ^NavMesh) {
   nav^ = {}
 }
 
+// Write the mesh tiles to `path` in the detour .navmesh format.
+save :: proc(nav: ^NavMesh, path: string) -> bool {
+  return detour.save_navmesh_to_file(&nav.detour_mesh, path)
+}
+
+// Load a mesh written by `save`, replacing any previous mesh.
+load :: proc(nav: ^NavMesh, path: string, max_query_nodes: i32 = 2048) -> bool {
+  mesh := detour.load_navmesh_from_file(path) or_return
+  destroy(nav)
+  nav.detour_mesh = mesh^
+  free(mesh)
+  if status := detour.nav_mesh_query_init(&nav.query, &nav.detour_mesh, max_query_nodes); !detour.status_succeeded(status) {
+    log.errorf("Failed to initialize navigation mesh query: %v", status)
+    destroy(nav)
+    return false
+  }
+  detour.query_filter_init(&nav.filter)
+  return true
+}
+
 // Closest point on the mesh within `extents` of `position`.
 nearest_point :: proc(
   nav: ^NavMesh,

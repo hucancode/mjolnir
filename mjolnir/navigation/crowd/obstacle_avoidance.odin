@@ -1,3 +1,4 @@
+#+private
 package crowd
 
 import "core:math"

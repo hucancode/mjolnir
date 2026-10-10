@@ -5,6 +5,18 @@ import "core:log"
 import "core:strings"
 import fs "vendor:fontstash"
 
+HorizontalAlign :: enum {
+  Left,
+  Center,
+  Right,
+}
+
+VerticalAlign :: enum {
+  Top,
+  Middle,
+  Bottom,
+}
+
 create_text2d :: proc(
   sys: ^System,
   position: [2]f32,
@@ -48,6 +60,7 @@ create_text2d :: proc(
   return Text2DHandle(handle), true
 }
 
+@(private)
 text_layout :: proc(text: ^Text2D, font_ctx: ^fs.FontContext) {
   if font_ctx == nil do return
 

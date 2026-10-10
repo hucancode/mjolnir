@@ -176,10 +176,9 @@ world.set_local_matrix(&app.scene, sword, anim.bone_matrix(&animator, hand))
 write the result:
 
 ```odin
-anim.playback_advance(&time, &speed, &status, .LOOP, clip.duration, dt)
-trs := anim.TRS_IDENTITY
-anim.clip_sample_trs(&clip, 0, time, &trs)
-world.set_local_matrix(&app.scene, node, anim.trs_matrix(trs))
+player := anim.ClipPlayer{speed = 1} // kept with the node; loops by default
+// every tick
+world.set_local_matrix(&app.scene, node, anim.clip_player_update(&player, &clip, dt))
 ```
 
 ### Physics → world
@@ -221,7 +220,7 @@ b: bake.NavGeometryBuilder
 defer bake.builder_destroy(&b)
 bake.append_triangles(&b, mesh.positions(ground, context.temp_allocator), ground.indices)
 bake.append_triangles(&b, wall_positions, wall_indices, offset = wall_pos, is_obstacle = true)
-bake.build(&navmesh, bake.geometry_view(&b))
+bake.build(&navmesh, &b)
 ```
 
 An OBJ file works the same way: `mesh.load_obj(path)` returns an

@@ -10,17 +10,21 @@ and cameras live in [render](render.html), skeletons and poses in
 
 ## Scene graph
 
-A `Node` carries a `Transform`, a parent and children, its own and
-inherited visibility, a name, and `tags: u32`, a bit set the
-application defines. Lookups go through generational `NodeHandle`s:
-`node(&w, h)` resolves one, `valid(&w, h)` checks it and
-`node_count(&w)` counts live nodes.
+A node carries a local transform (position, rotation, scale), a
+parent and children, its own and inherited visibility, a name, and a
+`u32` tag bit set the application defines. Nodes are addressed by
+generational `NodeHandle`s. `node(&w, h)` returns `(^Node, bool)`;
+read `n.name`, `n.children`, `n.transform.position` (and the rest of
+`Transform`) through it, and assign `n.name` directly. Change the
+transform, hierarchy and visibility through the procs below so the
+dirty flags stay correct. Procs given a stale handle do nothing
+(setters) or return a default (getters).
 
-- `spawn` / `spawn_child` / `despawn` manage nodes.
+- `spawn` / `spawn_child` / `despawn` manage nodes; `valid(&w, h)`
+  checks a handle. `w.root` is the root node.
 - `translate`, `rotate`, `rotate_by`, `scale` and `scale_xyz` edit the
   local transform; `set_local` sets position, rotation and scale at
-  once and `set_local_matrix` sets them from a matrix. `position`
-  reads the local position.
+  once and `set_local_matrix` sets them from a matrix.
 - `set_world_pose` writes a world-space pose, solving the local
   transform against the parent. Physics glue uses it.
 - `world_matrix` reads a node's world matrix.

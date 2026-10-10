@@ -35,7 +35,7 @@ App :: struct {
 
 main :: proc() {
   context.logger = log.create_console_logger()
-  physics.init(&phys)
+  physics.init(&phys, gravity = {0, -10, 0})
   defer physics.shutdown(&phys)
   app := new(App)
   defer free(app)
@@ -49,7 +49,6 @@ main :: proc() {
   render.load_environment_map(&app.renderer, "assets/Cannon_Exterior.hdr")
   app.camera = render.orbit_controller()
 
-  phys.gravity = {0, -10, 0}
   ground := world.spawn(&app.scene, {0, -0.5, 0})
   physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}}, user = world.Handle(ground))
   ground_visual := world.spawn_child(&app.scene, ground)
@@ -76,10 +75,7 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   time_since_jump += dt
   if mass != last_mass {
-    if b, ok := physics.get_dynamic_body(&phys, cube_body); ok {
-      physics.set_mass(b, f32(mass))
-      physics.set_inertia_from_collider(b, box_collider)
-    }
+    physics.set_body_mass(&phys, cube_body, f32(mass))
     last_mass = mass
   }
   f := [3]f32 {
@@ -87,16 +83,14 @@ update :: proc(app: ^App, dt: f32) {
     0,
     input.axis(&app.input, .W, .S),
   } * f32(move_force)
-  if b, ok := physics.get_dynamic_body(&phys, cube_body); ok {
-    if linalg.length(f) > 0.1 do physics.apply_force(b, f)
-    if input.key_pressed(&app.input, .SPACE) {
-      physics.apply_impulse(b, {0, f32(jump_force), 0})
-      time_since_jump = 0.0
-    }
-    if auto_jump && time_since_jump >= f32(jump_interval) {
-      time_since_jump = 0.0
-      physics.apply_impulse(b, {0, f32(jump_force), 0})
-    }
+  if linalg.length(f) > 0.1 do physics.apply_force(&phys, cube_body, f)
+  if input.key_pressed(&app.input, .SPACE) {
+    physics.apply_impulse(&phys, cube_body, {0, f32(jump_force), 0})
+    time_since_jump = 0.0
+  }
+  if auto_jump && time_since_jump >= f32(jump_interval) {
+    time_since_jump = 0.0
+    physics.apply_impulse(&phys, cube_body, {0, f32(jump_force), 0})
   }
   physics.step(&phys, dt)
   for b in physics.body_poses(&phys) do world.set_world_pose(&app.scene, world.NodeHandle(b.user), b.position, b.rotation)
@@ -122,9 +116,7 @@ frame :: proc(app: ^App) -> bool {
     mu.slider(ctx, &jump_interval, 0.5, 10.0)
     mu.label(ctx, "")
     if .SUBMIT in mu.button(ctx, "Jump now") {
-      if b, ok := physics.get_dynamic_body(&phys, cube_body); ok {
-        physics.apply_impulse(b, {0, f32(jump_force), 0})
-      }
+      physics.apply_impulse(&phys, cube_body, {0, f32(jump_force), 0})
       time_since_jump = 0
     }
     mu.label(ctx, "W/A/S/D moves, Space jumps")

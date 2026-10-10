@@ -176,7 +176,7 @@ point.
 
 ## Render-owned staging
 
-Mutating a look (`attach`, `stage_transform`, `mark_slot_dirty`,
+Mutating a look (`attach`, `stage_transform`, `set_material`,
 `create_mesh`, …) writes CPU state and marks the slot dirty in a
 mutex-guarded staging set. `render.frame` uploads dirty entries once
 per frame on the render thread.

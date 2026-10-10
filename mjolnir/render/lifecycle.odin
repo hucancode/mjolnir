@@ -228,6 +228,34 @@ load_environment_map :: proc(self: ^Manager, path: string) -> bool {
   return res == .SUCCESS
 }
 
+// Append a post-process effect to the stack every camera runs. Blur and
+// bloom run as two separable passes (horizontal then vertical); their
+// `direction` is set here. A grayscale effect with zero weights uses
+// Rec. 601 luma weights.
+add_effect :: proc(self: ^Manager, effect: post_process.PostprocessEffect) {
+  stack := &self.post_process.effect_stack
+  #partial switch e in effect {
+  case post_process.BlurEffect:
+    pass := e
+    pass.direction = 0
+    append(stack, pass)
+    pass.direction = 1
+    append(stack, pass)
+  case post_process.BloomEffect:
+    pass := e
+    pass.direction = 0
+    append(stack, pass)
+    pass.direction = 1
+    append(stack, pass)
+  case post_process.GrayscaleEffect:
+    g := e
+    if g.weights == {} do g.weights = {0.299, 0.587, 0.114}
+    append(stack, g)
+  case:
+    append(stack, effect)
+  }
+}
+
 // Destroy everything init created; tears the level down first if needed.
 shutdown :: proc(self: ^Manager) {
   teardown(self)

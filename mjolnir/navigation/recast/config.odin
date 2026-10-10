@@ -26,21 +26,31 @@ Config :: struct {
   detail_sample_max_error:  f32,
 }
 
+@(private)
 RC_MAX_LAYERS :: 32
 RC_MAX_VERTS_PER_POLY :: 6
 
+@(private)
 RC_SPAN_HEIGHT_BITS :: 13
+@(private)
 RC_SPAN_MAX_HEIGHT :: (1 << RC_SPAN_HEIGHT_BITS) - 1
+@(private)
 RC_SPANS_PER_POOL :: 2048
 
 RC_NULL_AREA :: 0
 RC_WALKABLE_AREA :: 63
+@(private)
 RC_NOT_CONNECTED :: 0x3f
 
+@(private)
 RC_BORDER_REG :: 0x8000
+@(private)
 RC_MULTIPLE_REGS :: 0
+@(private)
 RC_BORDER_VERTEX :: 0x10000
+@(private)
 RC_AREA_BORDER :: 0x20000
+@(private)
 RC_CONTOUR_REG_MASK :: 0xffff
 RC_MESH_NULL_IDX :: 0xffff
 
@@ -66,6 +76,7 @@ calc_grid_size :: proc(bmin, bmax: [3]f32, cs: f32) -> (w, h: i32) {
 }
 
 // Calculate grid size from config
+@(private)
 calc_grid_size_from_config :: proc(cfg: ^Config) -> (width, height: i32) {
   width = i32((cfg.bmax.x - cfg.bmin.x) / cfg.cs + 0.5)
   height = i32((cfg.bmax.z - cfg.bmin.z) / cfg.cs + 0.5)
@@ -73,6 +84,7 @@ calc_grid_size_from_config :: proc(cfg: ^Config) -> (width, height: i32) {
 }
 
 // Validate configuration
+@(private)
 validate_config :: proc(cfg: ^Config) -> bool {
   // Check cell sizes
   if cfg.cs <= 0 || cfg.ch <= 0 {
@@ -112,6 +124,7 @@ validate_config :: proc(cfg: ^Config) -> bool {
 }
 
 // Create default configuration
+@(private)
 config_create :: proc() -> Config {
   return Config {
     cs = 0.3,
@@ -133,6 +146,7 @@ config_create :: proc() -> Config {
 }
 
 // Calculate tile bounds
+@(private)
 calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
   bmin = cfg.bmin
   bmax = cfg.bmax
@@ -147,6 +161,7 @@ calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
 }
 
 // Get tile count
+@(private)
 get_tile_count :: proc(cfg: ^Config) -> (tw, th: i32) {
   if cfg.tile_size <= 0 {
     return 1, 1
@@ -158,16 +173,19 @@ get_tile_count :: proc(cfg: ^Config) -> (tw, th: i32) {
 }
 
 // Calculate walkable threshold from angle
+@(private)
 calc_walkable_threshold :: proc(walkable_slope: f32) -> f32 {
   return math.cos(walkable_slope)
 }
 
 // Area modification for marking areas
+@(private)
 Area_Modification :: struct {
   area_id:   u8,
   mask_type: Area_Mask_Type,
 }
 
+@(private)
 Area_Mask_Type :: enum {
   All,
   Walkable,
@@ -175,6 +193,7 @@ Area_Mask_Type :: enum {
 }
 
 // Convex volume for area marking
+@(private)
 Convex_Volume :: struct {
   verts:   [][3]f32,
   hmin:    f32,
@@ -183,6 +202,7 @@ Convex_Volume :: struct {
 }
 
 // Check if point is inside convex volume
+@(private)
 point_in_convex_volume :: proc(pt: [3]f32, vol: ^Convex_Volume) -> bool {
   if pt.y < vol.hmin || pt.y > vol.hmax {
     return false

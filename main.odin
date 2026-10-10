@@ -8,6 +8,7 @@ import "mjolnir/animation"
 import "mjolnir/input"
 import "mjolnir/platform"
 import "mjolnir/render"
+import "mjolnir/render/post_process"
 import "mjolnir/world"
 
 App :: struct {
@@ -39,9 +40,7 @@ NodeClip :: struct {
   node:      world.NodeHandle,
   clip:      animation.Clip,
   rest:      animation.TRS,
-  time:      f32,
-  speed:     f32,
-  status:    animation.Status,
+  player:    animation.ClipPlayer,
   socket:    bool,
   character: int, // index into characters
   skinned:   int, // index into characters[character].animators
@@ -80,10 +79,9 @@ spin_clip :: proc(name: string, duration: f32, angles: []f32, interpolation: ani
 }
 
 add_node_clip :: proc(app: ^App, node: world.NodeHandle, clip: animation.Clip) -> ^NodeClip {
-  n := world.node(&app.scene, node)
-  rest := animation.TRS_IDENTITY
-  if n != nil do rest = {n.transform.position, n.transform.rotation, n.transform.scale}
-  append(&node_clips, NodeClip{node = node, clip = clip, rest = rest, speed = 1, status = .PLAYING})
+  t := world.node(&app.scene, node).transform
+  rest := animation.TRS{t.position, t.rotation, t.scale}
+  append(&node_clips, NodeClip{node = node, clip = clip, rest = rest, player = {speed = 1}})
   return &node_clips[len(node_clips) - 1]
 }
 
@@ -98,10 +96,7 @@ update :: proc(app: ^App, dt: f32) {
     for s, i in c.scene.skinned do animation.animator_update(&c.animators[i], &c.scene.rigs[s.rig], dt)
   }
   for &nc in node_clips {
-    animation.playback_advance(&nc.time, &nc.speed, &nc.status, .LOOP, nc.clip.duration, dt)
-    trs := nc.rest
-    animation.clip_sample_trs(&nc.clip, 0, nc.time, &trs)
-    m := animation.trs_matrix(trs)
+    m := animation.clip_player_update(&nc.player, &nc.clip, dt, nc.rest)
     if nc.socket do m = animation.bone_matrix(&characters[nc.character].animators[nc.skinned], nc.bone) * m
     world.set_local_matrix(&app.scene, nc.node, m)
   }
@@ -482,25 +477,19 @@ setup :: proc(app: ^App) {
   }
   when false {
     log.info("Setting up bloom...")
-    // add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
-    // Create a bright white ball to test bloom effect
-    emissive_handle, emissive_ok := create_material(
-      app,
-      emissive_value = 30.0,
-    )
-    if emissive_ok {
-      _, bright_ball_node, bright_ok := spawn(
+    render.add_effect(&app.renderer, post_process.BloomEffect{threshold = 0.8, intensity = 0.5, blur_radius = 16.0})
+    // A bright white ball to test the bloom effect
+    if emissive_handle, emissive_ok := render.create_material(&app.renderer, emissive_value = 30.0); emissive_ok {
+      bright_ball := spawn(
         app,
-        world.MeshAttachment {
+        attachment = render.MeshAttachment {
           handle = sphere_mesh_handle,
           material = emissive_handle,
           cast_shadow = false,
         },
       )
-      if bright_ok {
-        translate(bright_ball_node, x = 1.0)
-        scale(bright_ball_node, 0.2)
-      }
+      world.translate(&app.scene, bright_ball, x = 1.0)
+      world.scale(&app.scene, bright_ball, 0.2)
     }
   }
   when true {
@@ -603,14 +592,14 @@ setup :: proc(app: ^App) {
     render.debug_arrow(&app.renderer, {0, 0, 0}, {3, 3, 0}, render.debug_color(.YELLOW), life = 5)
     render.debug_axes(&app.renderer, {0, 0, 0}, scale = 2)
   }
-  // post_process.add_fog(&app.renderer.post_process, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
-  // add_bloom(app)
-  // post_process.add_crosshatch(&app.renderer.post_process)
-  // add_blur(app, 18.0)
-  // add_tonemap(app, 1.5, 1.3)
-  // add_dof(app)
-  // add_grayscale(app, 0.9)
-  // add_outline(app, 2.0, [3]f32{1.0, 0.0, 0.0})
+  // render.add_effect(&app.renderer, post_process.FogEffect{color = {0.4, 0.0, 0.8}, density = 0.02, start = 5.0, end = 20.0})
+  // render.add_effect(&app.renderer, post_process.BloomEffect{threshold = 0.2, intensity = 1.0, blur_radius = 4.0})
+  // render.add_effect(&app.renderer, post_process.CrossHatchEffect{hatch_offset_y = 5.0, lum_threshold_01 = 0.6, lum_threshold_02 = 0.3, lum_threshold_03 = 0.15, lum_threshold_04 = 0.07})
+  // render.add_effect(&app.renderer, post_process.BlurEffect{radius = 18.0, weight_falloff = 1.0})
+  // render.add_effect(&app.renderer, post_process.ToneMapEffect{exposure = 1.5, gamma = 1.3})
+  // render.add_effect(&app.renderer, post_process.DoFEffect{focus_distance = 3.0, focus_range = 2.0, blur_strength = 20.0, bokeh_intensity = 0.5})
+  // render.add_effect(&app.renderer, post_process.GrayscaleEffect{strength = 0.9})
+  // render.add_effect(&app.renderer, post_process.OutlineEffect{thickness = 2.0, color = {1.0, 0.0, 0.0}})
   when true {
     portal_camera_handle = render.create_camera(
       &app.renderer,
@@ -707,6 +696,6 @@ on_post_render :: proc(app: ^App) {
       portal_camera_handle,
       .FINAL_IMAGE,
     )
-    render.mark_material_dirty(&app.renderer, portal_material_handle)
+    render.set_material(&app.renderer, portal_material_handle, material^)
   }
 }

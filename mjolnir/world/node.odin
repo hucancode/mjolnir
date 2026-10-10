@@ -41,10 +41,12 @@ scale :: proc {
   scale_vec,
 }
 
+@(private)
 translate_xyz :: proc(world: ^World, handle: NodeHandle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
   translate_vec(world, handle, {x, y, z})
 }
 
+@(private)
 translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node := cont.get(world.nodes, handle)
   if node == nil do return
@@ -52,6 +54,7 @@ translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node.transform.is_dirty = true
 }
 
+@(private)
 rotate_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
   node := cont.get(world.nodes, handle)
   if node == nil do return
@@ -59,6 +62,7 @@ rotate_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
   node.transform.is_dirty = true
 }
 
+@(private)
 rotate_angle :: proc(
   world: ^World,
   handle: NodeHandle,
@@ -68,6 +72,7 @@ rotate_angle :: proc(
   rotate_quaternion(world, handle, linalg.quaternion_angle_axis(angle, axis))
 }
 
+@(private)
 rotate_by_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
   node := cont.get(world.nodes, handle)
   if node == nil do return
@@ -75,6 +80,7 @@ rotate_by_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128
   node.transform.is_dirty = true
 }
 
+@(private)
 rotate_by_angle :: proc(
   world: ^World,
   handle: NodeHandle,
@@ -84,10 +90,12 @@ rotate_by_angle :: proc(
   rotate_by_quaternion(world, handle, linalg.quaternion_angle_axis(angle, axis))
 }
 
+@(private)
 scale_uniform :: proc(world: ^World, handle: NodeHandle, s: f32) {
   scale_vec(world, handle, {s, s, s})
 }
 
+@(private)
 scale_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
   node := cont.get(world.nodes, handle)
   if node == nil do return
@@ -113,11 +121,4 @@ set_local :: proc(
   node.transform.rotation = rotation
   node.transform.scale = scale
   node.transform.is_dirty = true
-}
-
-// Local position, as set by `translate`.
-position :: proc(world: ^World, handle: NodeHandle) -> [3]f32 {
-  node, ok := cont.get(world.nodes, handle)
-  if !ok do return {}
-  return node.transform.position
 }

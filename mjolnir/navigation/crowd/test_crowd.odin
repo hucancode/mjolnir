@@ -234,11 +234,11 @@ test_obstacle_avoidance_query_capacity :: proc(t: ^testing.T) {
 // ---------------------------------------------------------------
 
 build_test_navmesh :: proc(t: ^testing.T) -> (^navigation.NavMesh, bool) {
-	verts := [][3]f32{{-10, 0, -10}, {10, 0, -10}, {10, 0, 10}, {-10, 0, 10}}
-	indices := []i32{0, 2, 1, 0, 3, 2}
-	areas := []u8{63, 63}
+	b: bake.NavGeometryBuilder
+	defer bake.builder_destroy(&b)
+	bake.append_triangles(&b, {{-10, 0, -10}, {10, 0, -10}, {10, 0, 10}, {-10, 0, 10}}, {0, 2, 1, 0, 3, 2})
 	nav := new(navigation.NavMesh)
-	if !bake.build(nav, {vertices = verts, indices = indices, area_types = areas}) {
+	if !bake.build(nav, &b) {
 		free(nav)
 		testing.fail_now(t, "navigation.build failed")
 	}

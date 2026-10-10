@@ -5,13 +5,7 @@ import ".."
 import "../detour"
 import "../recast"
 
-NavigationGeometry :: struct {
-  vertices:   [][3]f32,
-  indices:    []i32,
-  area_types: []u8,
-}
-
-// Accumulator for building NavigationGeometry from multiple source geoms.
+// Triangle soup to bake: one area type per triangle.
 NavGeometryBuilder :: struct {
   vertices:   [dynamic][3]f32,
   indices:    [dynamic]i32,
@@ -34,11 +28,6 @@ append_triangles :: proc(
   for _ in 0 ..< len(indices) / 3 do append(&b.area_types, area)
 }
 
-// Snapshot the builder's slices into a NavigationGeometry view (no copy).
-geometry_view :: proc(b: ^NavGeometryBuilder) -> NavigationGeometry {
-  return {vertices = b.vertices[:], indices = b.indices[:], area_types = b.area_types[:]}
-}
-
 builder_destroy :: proc(b: ^NavGeometryBuilder) {
   delete(b.vertices)
   delete(b.indices)
@@ -46,12 +35,11 @@ builder_destroy :: proc(b: ^NavGeometryBuilder) {
   b^ = {}
 }
 
-
-// Build the mesh and its query from triangle soup, replacing any previous
-// build.
+// Build the mesh and its query from the builder's triangles, replacing any
+// previous build.
 build :: proc(
   nav: ^navigation.NavMesh,
-  geom: NavigationGeometry,
+  geom: ^NavGeometryBuilder,
   config: NavMeshConfig = DEFAULT_NAVMESH_CONFIG,
   max_query_nodes: i32 = 2048,
 ) -> bool {
@@ -60,7 +48,7 @@ build :: proc(
     return false
   }
   cfg := config_to_recast(config)
-  pmesh, dmesh := recast.build_navmesh(geom.vertices, geom.indices, geom.area_types, cfg) or_return
+  pmesh, dmesh := recast.build_navmesh(geom.vertices[:], geom.indices[:], geom.area_types[:], cfg) or_return
   defer {
     recast.destroy_poly_mesh(pmesh)
     recast.destroy_poly_mesh_detail(dmesh)

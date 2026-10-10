@@ -10,6 +10,7 @@ Straight_Path_Point :: struct {
   ref:   Poly_Ref,
 }
 
+@(private)
 Straight_Path_Flags :: enum u8 {
   Start               = 0x01,
   End                 = 0x02,
@@ -241,6 +242,7 @@ find_straight_path :: proc(
   return stat, straight_path_count
 }
 
+@(private)
 get_portal_points :: proc(
   query: ^Nav_Mesh_Query,
   from: Poly_Ref,
@@ -320,6 +322,7 @@ get_portal_points :: proc(
   return {}, {}, 0, {.Invalid_Param}
 }
 
+@(private)
 calc_poly_center :: proc(tile: ^Mesh_Tile, poly: ^Poly) -> [3]f32 {
   center := [3]f32{0, 0, 0}
   for i in 0 ..< int(poly.vert_count) {
@@ -400,6 +403,7 @@ move_along_surface :: proc(
 
 // Closest point to `pos` on the polygon in the xz plane: `pos` itself when
 // inside, otherwise the nearest point on its boundary.
+@(private)
 closest_point_on_poly_boundary :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,
@@ -477,6 +481,7 @@ point_in_polygon :: proc(
   return geometry.point_in_polygon_2d(pos, verts)
 }
 
+@(private)
 find_neighbor_across_edge :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,

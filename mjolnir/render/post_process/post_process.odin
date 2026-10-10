@@ -7,23 +7,34 @@ import "core:log"
 import "core:reflect"
 import vk "vendor:vulkan"
 
+@(private)
 SHADER_POSTPROCESS_VERT :: #load("../shader/postprocess/vert.spv")
+@(private)
 SHADER_POSTPROCESS_FRAG :: #load("../shader/postprocess/frag.spv")
+@(private)
 SHADER_BLOOM_FRAG :: #load("../shader/bloom/frag.spv")
+@(private)
 SHADER_BLUR_FRAG :: #load("../shader/blur/frag.spv")
+@(private)
 SHADER_GRAYSCALE_FRAG :: #load("../shader/grayscale/frag.spv")
+@(private)
 SHADER_TONEMAP_FRAG :: #load("../shader/tonemap/frag.spv")
+@(private)
 SHADER_OUTLINE_FRAG :: #load("../shader/outline/frag.spv")
+@(private)
 SHADER_FOG_FRAG :: #load("../shader/fog/frag.spv")
+@(private)
 SHADER_CROSSHATCH_FRAG :: #load("../shader/crosshatch/frag.spv")
+@(private)
 SHADER_DOF_FRAG :: #load("../shader/dof/frag.spv")
 
+@(private)
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 
 // Effect structs are pushed verbatim right after the base fields of
 // PushConstant (offset 32); their layout must match each shader's push block.
 GrayscaleEffect :: struct {
-  weights:  [3]f32,
+  weights:  [3]f32, // zero = Rec. 601 luma, filled by render.add_effect
   strength: f32,
 }
 
@@ -34,7 +45,7 @@ ToneMapEffect :: struct {
 
 BlurEffect :: struct {
   radius:         f32,
-  direction:      f32, // 0.0 = horizontal, 1.0 = vertical
+  direction:      f32, // 0.0 = horizontal, 1.0 = vertical; set by render.add_effect
   weight_falloff: f32, // 0.0 = box blur, 1.0 = gaussian blur
 }
 
@@ -42,7 +53,7 @@ BloomEffect :: struct {
   threshold:   f32,
   intensity:   f32,
   blur_radius: f32,
-  direction:   f32, // 0.0 = horizontal, 1.0 = vertical
+  direction:   f32, // 0.0 = horizontal, 1.0 = vertical; set by render.add_effect
 }
 
 OutlineEffect :: struct {
@@ -100,6 +111,7 @@ FRAG_SHADERS := [?][]u8 {
 
 // Odin stores a union's variant bytes at offset 0, so `effect` places the
 // active effect struct at offset 32, followed by the (unread) tag.
+@(private)
 PushConstant :: struct {
   position_texture_index: u32,
   normal_texture_index:   u32,
@@ -124,125 +136,6 @@ Renderer :: struct {
   // scene simultaneously while writing to a third slot. With only 2 buffers
   // V would have to write to one of its inputs when bloom isn't the last pass.
   images:          [3]bindless.Texture2DHandle,
-}
-
-add_grayscale :: proc(
-  self: ^Renderer,
-  strength: f32 = 1.0,
-  weights: [3]f32 = {0.299, 0.587, 0.114},
-) {
-  effect := GrayscaleEffect {
-    strength = strength,
-    weights  = weights,
-  }
-  append(&self.effect_stack, effect)
-}
-
-add_blur :: proc(self: ^Renderer, radius: f32, gaussian: bool = true) {
-  horizontal_effect := BlurEffect {
-    radius         = radius,
-    direction      = 0.0, // horizontal
-    weight_falloff = 1.0 if gaussian else 0.0,
-  }
-  append(&self.effect_stack, horizontal_effect)
-  vertical_effect := BlurEffect {
-    radius         = radius,
-    direction      = 1.0, // vertical
-    weight_falloff = 1.0 if gaussian else 0.0,
-  }
-  append(&self.effect_stack, vertical_effect)
-}
-
-add_bloom :: proc(
-  self: ^Renderer,
-  threshold: f32 = 0.2,
-  intensity: f32 = 1.0,
-  blur_radius: f32 = 4.0,
-) {
-  effect := BloomEffect {
-    threshold   = threshold,
-    intensity   = intensity,
-    blur_radius = blur_radius,
-    direction   = 0.0, // horizontal
-  }
-  append(&self.effect_stack, effect)
-  effect = BloomEffect {
-    threshold   = threshold,
-    intensity   = intensity,
-    blur_radius = blur_radius,
-    direction   = 1.0, // vertical
-  }
-  append(&self.effect_stack, effect)
-}
-
-add_tonemap :: proc(self: ^Renderer, exposure: f32 = 1.0, gamma: f32 = 1.0) {
-  effect := ToneMapEffect {
-    exposure = exposure,
-    gamma    = gamma,
-  }
-  append(&self.effect_stack, effect)
-}
-
-add_outline :: proc(self: ^Renderer, thickness: f32, color: [3]f32 = {0, 0, 0}) {
-  effect := OutlineEffect {
-    thickness = thickness,
-    color     = color,
-  }
-  append(&self.effect_stack, effect)
-}
-
-add_fog :: proc(
-  self: ^Renderer,
-  color: [3]f32 = {0.7, 0.7, 0.8},
-  density: f32 = 0.02,
-  start: f32 = 10.0,
-  end: f32 = 100.0,
-) {
-  effect := FogEffect {
-    color   = color,
-    density = density,
-    start   = start,
-    end     = end,
-  }
-  append(&self.effect_stack, effect)
-}
-
-add_crosshatch :: proc(
-  self: ^Renderer,
-  hatch_offset_y: f32 = 5.0,
-  lum_threshold_01: f32 = 0.6,
-  lum_threshold_02: f32 = 0.3,
-  lum_threshold_03: f32 = 0.15,
-  lum_threshold_04: f32 = 0.07,
-) {
-  effect := CrossHatchEffect {
-    hatch_offset_y   = hatch_offset_y,
-    lum_threshold_01 = lum_threshold_01,
-    lum_threshold_02 = lum_threshold_02,
-    lum_threshold_03 = lum_threshold_03,
-    lum_threshold_04 = lum_threshold_04,
-  }
-  append(&self.effect_stack, effect)
-}
-
-add_dof :: proc(
-  self: ^Renderer,
-  focus_distance: f32 = 3.0,
-  focus_range: f32 = 2.0,
-  blur_strength: f32 = 20.0,
-  bokeh_intensity: f32 = 0.5,
-) {
-  effect := DoFEffect {
-    focus_distance  = focus_distance,
-    focus_range     = focus_range,
-    blur_strength   = blur_strength,
-    bokeh_intensity = bokeh_intensity,
-  }
-  append(&self.effect_stack, effect)
-}
-
-clear_effects :: proc(self: ^Renderer) {
-  clear(&self.effect_stack)
 }
 
 setup :: proc(

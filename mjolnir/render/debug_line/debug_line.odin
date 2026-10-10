@@ -5,11 +5,15 @@ import "core:log"
 import "core:sync"
 import vk "vendor:vulkan"
 
+@(private)
 SHADER_VERT :: #load("../shader/debug_line/vert.spv")
+@(private)
 SHADER_FRAG :: #load("../shader/debug_line/frag.spv")
 
+@(private)
 MAX_SEGMENTS :: 65536
 // Every queued segment fits, so record never drops one.
+@(private)
 MAX_VERTICES :: 2 * MAX_SEGMENTS
 
 Vertex :: struct {

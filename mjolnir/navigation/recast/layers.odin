@@ -3,6 +3,7 @@ package recast
 import "core:log"
 import "core:slice"
 
+@(private)
 Heightfield_Layer :: struct {
   bmin:    [3]f32,
   bmax:    [3]f32,
@@ -21,13 +22,20 @@ Heightfield_Layer :: struct {
   cons:    []u8,
 }
 
+@(private)
 RC_MAX_LAYER_ID :: 255
+@(private)
 RC_NULL_LAYER_ID :: 255
+@(private)
 RC_MAX_LAYERS_DEF :: 63 // Must be ≤ 255
+@(private)
 RC_MAX_NEIS_DEF :: 16
+@(private)
 MAX_STACK :: 64
+@(private)
 RC_NULL_LAYER :: u8(0xff) // Unassigned layer marker
 
+@(private)
 Heightfield_Layer_Region :: struct {
   overlapping_layers: [dynamic]u8, // Overlapping layer IDs
   neighbors:          [dynamic]u8, // Neighbor region IDs
@@ -36,6 +44,7 @@ Heightfield_Layer_Region :: struct {
   is_base:            bool, // Flag: true if base region, false if merged
 }
 
+@(private)
 Layer_Sweep_Span :: struct {
   sample_count: u16, // ns - number samples
   region_id:    u8, // id - region id (set in second phase)
@@ -43,6 +52,7 @@ Layer_Sweep_Span :: struct {
 }
 
 // Utility function: add unique value to dynamic slice
+@(private)
 add_unique :: proc(a: ^[dynamic]u8, v: u8) -> bool {
   if slice.contains(a[:], v) do return true
   append(a, v)
@@ -58,6 +68,7 @@ add_unique_capped :: proc(a: ^[dynamic]u8, v: u8, max_size: int) -> bool {
 }
 
 // Using vector swizzling-like syntax for bounds checking
+@(private)
 ranges_overlap :: proc(a_bounds, b_bounds: [2]u16) -> bool {
   return !(a_bounds.x > b_bounds.y || a_bounds.y < b_bounds.x)
 }
@@ -75,6 +86,7 @@ bounds_size :: proc(bounds: [2]u16) -> u16 {
 }
 
 // Free heightfield layer set
+@(private)
 destroy_heightfield_layer_set :: proc(lset: [dynamic]Heightfield_Layer) {
   for layer in lset {
     delete(layer.heights)
@@ -84,6 +96,7 @@ destroy_heightfield_layer_set :: proc(lset: [dynamic]Heightfield_Layer) {
   delete(lset)
 }
 
+@(private)
 build_heightfield_layers :: proc(
   chf: ^Compact_Heightfield,
   border_size: i32,
@@ -155,6 +168,7 @@ build_heightfield_layers :: proc(
 }
 
 // Phase 1: Monotone region partitioning
+@(private)
 partition_monotone_regions :: proc(
   chf: ^Compact_Heightfield,
   border_size: i32,
@@ -281,6 +295,7 @@ partition_monotone_regions :: proc(
 }
 
 // Phase 2: Region analysis and neighbor detection (Odin-idiomatic)
+@(private)
 analyze_regions :: proc(
   chf: ^Compact_Heightfield,
   src_reg: []u8,
@@ -359,6 +374,7 @@ analyze_regions :: proc(
 }
 
 // Phase 3: Layer assignment via DFS
+@(private)
 assign_layers_dfs :: proc(regions: []Heightfield_Layer_Region) -> int {
   stack: [dynamic]int
   defer delete(stack)
@@ -415,6 +431,7 @@ assign_layers_dfs :: proc(regions: []Heightfield_Layer_Region) -> int {
 }
 
 // Phase 4: Height-based layer merging
+@(private)
 merge_layers :: proc(
   regions: []Heightfield_Layer_Region,
   walkable_height: i32,
@@ -530,6 +547,7 @@ merge_layers :: proc(
 }
 
 // Phase 5: Layer compaction
+@(private)
 compact_layer_ids :: proc(regions: []Heightfield_Layer_Region) -> int {
   // Find which layer IDs are actually used
   used_layers := make([dynamic]bool, 256)
@@ -562,6 +580,7 @@ compact_layer_ids :: proc(regions: []Heightfield_Layer_Region) -> int {
 }
 
 // Phase 6: Build a single layer using region assignments (Odin-idiomatic)
+@(private)
 build_single_layer :: proc(
   chf: ^Compact_Heightfield,
   src_reg: []u8,
@@ -738,6 +757,7 @@ build_single_layer :: proc(
   return true
 }
 
+@(private)
 get_layer_height :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   if x < 0 || x >= layer.width || y < 0 || y >= layer.height {
     return 0xff
@@ -749,6 +769,7 @@ get_layer_height :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   return layer.heights[idx]
 }
 
+@(private)
 get_layer_area :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   if x < 0 || x >= layer.width || y < 0 || y >= layer.height {
     return RC_NULL_AREA
@@ -760,6 +781,7 @@ get_layer_area :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   return layer.areas[idx]
 }
 
+@(private)
 get_layer_connection :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   if x < 0 || x >= layer.width || y < 0 || y >= layer.height {
     return 0
@@ -771,6 +793,7 @@ get_layer_connection :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   return layer.cons[idx]
 }
 
+@(private)
 validate_layer_set :: proc(lset: [dynamic]Heightfield_Layer) -> bool {
   if len(lset) == 0 do return false
   layer_ok :: proc(layer: Heightfield_Layer) -> bool {

@@ -45,6 +45,7 @@ DynamicRigidBody :: struct {
   position0:               [3]f32,
 }
 
+@(private)
 static_rigid_body_init :: proc(
   self: ^StaticRigidBody,
   position: [3]f32 = {0, 0, 0},
@@ -56,6 +57,7 @@ static_rigid_body_init :: proc(
   self.friction = 0.8
 }
 
+@(private)
 rigid_body_init :: proc(
   self: ^DynamicRigidBody,
   position: [3]f32 = {0, 0, 0},
@@ -80,6 +82,7 @@ rigid_body_init :: proc(
 // Implicit gyroscopic torque: one Newton-Raphson iteration on
 // I*(w2−w1) + h*(w2 * I*w2) = 0 in body frame. Slightly
 // dissipative but unconditionally stable — energy can only decrease.
+@(private)
 solve_gyroscopic :: proc(body: ^DynamicRigidBody, dt: f32) {
   ii := body.inv_inertia
   if ii.x <= 0 || ii.y <= 0 || ii.z <= 0 do return
@@ -101,6 +104,7 @@ solve_gyroscopic :: proc(body: ^DynamicRigidBody, dt: f32) {
   body.angular_velocity = linalg.quaternion128_mul_vector3(q, w2)
 }
 
+@(private)
 update_world_inertia :: proc(self: ^DynamicRigidBody) {
   if !self.enable_rotation {
     self.inv_inertia_world = {}
@@ -115,11 +119,13 @@ update_world_inertia :: proc(self: ^DynamicRigidBody) {
   self.inv_inertia_world = r * d * linalg.transpose(r)
 }
 
+@(private)
 wake_up :: #force_inline proc(self: ^DynamicRigidBody) {
   self.is_sleeping = false
   self.sleep_timer = 0.0
 }
 
+@(private)
 set_mass :: proc(self: ^DynamicRigidBody, mass: f32) {
   if mass <= 0.0 do return
   new_inv_mass := 1.0 / mass
@@ -131,6 +137,7 @@ set_mass :: proc(self: ^DynamicRigidBody, mass: f32) {
   update_world_inertia(self)
 }
 
+@(private)
 set_box_inertia :: proc(self: ^DynamicRigidBody, half_extents: [3]f32) {
   v := half_extents * half_extents
   inv_inertia_factor := 3.0 * self.inv_mass
@@ -138,12 +145,14 @@ set_box_inertia :: proc(self: ^DynamicRigidBody, half_extents: [3]f32) {
   update_world_inertia(self)
 }
 
+@(private)
 set_sphere_inertia :: proc(self: ^DynamicRigidBody, radius: f32) {
   inv_i := (5.0 / 2.0) * self.inv_mass / (radius * radius)
   self.inv_inertia = {inv_i, inv_i, inv_i}
   update_world_inertia(self)
 }
 
+@(private)
 set_cylinder_inertia :: proc(
   self: ^DynamicRigidBody,
   radius: f32,
@@ -159,6 +168,7 @@ set_cylinder_inertia :: proc(
 
 // Solid-body inertia for the collider shape at the current mass. A nil
 // collider keeps the current inertia.
+@(private)
 set_inertia_from_collider :: proc(self: ^DynamicRigidBody, collider: Collider) {
   switch c in collider {
   case SphereCollider:   set_sphere_inertia(self, c.radius)
@@ -168,11 +178,7 @@ set_inertia_from_collider :: proc(self: ^DynamicRigidBody, collider: Collider) {
   }
 }
 
-apply_force :: proc(self: ^DynamicRigidBody, force: [3]f32) {
-  self.force += force
-  wake_up(self)
-}
-
+@(private)
 apply_force_at_point :: proc(
   self: ^DynamicRigidBody,
   force: [3]f32,
@@ -186,11 +192,7 @@ apply_force_at_point :: proc(
   wake_up(self)
 }
 
-apply_impulse :: proc(self: ^DynamicRigidBody, impulse: [3]f32) {
-  self.velocity += impulse * self.inv_mass
-  wake_up(self)
-}
-
+@(private)
 apply_impulse_at_point :: #force_inline proc(
   self: ^DynamicRigidBody,
   impulse: [3]f32,
@@ -202,6 +204,7 @@ apply_impulse_at_point :: #force_inline proc(
 
 // Solver-internal impulse application. Caller must have already woken the body.
 // Skips the wake_up writes that pollute the cache during constraint iteration.
+@(private)
 apply_impulse_at_point_no_wake :: #force_inline proc(
   self: ^DynamicRigidBody,
   impulse: [3]f32,
@@ -214,6 +217,7 @@ apply_impulse_at_point_no_wake :: #force_inline proc(
   self.angular_velocity += self.inv_inertia_world * angular_impulse
 }
 
+@(private)
 update_cached_aabb :: proc(self: ^RigidBody) {
   self.cached_aabb = collider_calculate_aabb(
     &self.collider,

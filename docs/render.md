@@ -11,7 +11,8 @@ post-process stack; the pipeline itself is fixed.
 ## Lifecycle
 
 `render.Manager` owns the Vulkan context, the swapchain and the
-frame-in-flight index. Render never sees a window; the caller passes
+frame-in-flight index. Callers use the procs below only; the
+`Manager` fields are render's own state. Render never sees a window; the caller passes
 in what the windowing library provides:
 
 ```odin
@@ -43,6 +44,10 @@ render.shutdown(&r)
 - `load_environment_map(&r, path)` loads an equirectangular HDR image
   as the skybox and precomputes image-based lighting from it. Call it
   after `setup`; without one, IBL and the skybox are black.
+  `r.ambient.ibl_intensity` scales the image-based lighting;
+  `r.ambient.skybox_enabled`, `skybox_blur` (0..1) and
+  `skybox_intensity` show or hide the skybox and set its blur and
+  brightness. `setup` resets them to their defaults.
 - `update(&r, dt)` advances render's own clock once per update tick:
   emitter accumulators and debug line lifetimes.
 - `frame` closes the debug UI, uploads staged changes, acquires a
@@ -58,18 +63,25 @@ and holds one `Attachment` (mesh, sprite, light, emitter or force
 field). Render does not know where slots come from; by convention
 slot = world node index.
 
-- `render.attach(&r, slot, attachment)` sets what a slot draws.
+- `render.attach(&r, slot, attachment)` sets what a slot draws,
+  replacing what it drew before.
 - `render.stage_transform(&r, slot, world_matrix, visible)` moves it.
 - `render.stage_bones(&r, slot, matrices)` uploads a skin palette.
 - `render.stage_slot_removal(&r, slot)` frees it.
 
 All of these are thread-safe and callable from the update thread.
 
-To change a look in place, `render.attachment(&r, slot, T)` returns a
-pointer to the slot's attachment of type `T`; edit its fields (light
-color, radius, `disabled`, mesh handle, material, …) and call
-`render.mark_slot_dirty(&r, slot)` to stage the change. Do this from
-the update thread.
+To change a look, `render.attachment(&r, slot, T)` returns a copy of
+the slot's attachment of type `T`; edit its fields (light color,
+radius, `disabled`, mesh handle, material, …) and pass it back to
+`attach`:
+
+```odin
+if l, ok := render.attachment(&r, slot, render.PointLightAttachment); ok {
+  l.color = {1, 0, 0, 1}
+  render.attach(&r, slot, l)
+}
+```
 
 ## Resources
 
@@ -80,19 +92,22 @@ the update thread.
   and fan-triangulated faces of an OBJ file into an
   `ObjMesh{positions, indices}` (free with `obj_mesh_destroy`).
   `render.create_mesh(&r, geometry)` uploads one into the mesh arena.
-  Builtin primitives are in `r.builtin_meshes` (and colors in
-  `r.builtin_materials`).
+  `r.builtin_meshes[.CUBE]` is a builtin primitive and
+  `r.builtin_materials[.RED]` a builtin solid color;
+  `primitive(&r, shape, color)` pairs them into a `MeshAttachment`.
 - **Textures.** `create_texture_from_path` / `create_texture_from_data`
   return a bindless `Texture2DHandle`; `destroy_texture` releases it.
 - **Materials.** `create_material` and the `material_pbr`,
-  `material_wireframe`, `material_transparent` shorthands. Edit fields
-  through `material(&r, h)`, then call `mark_material_dirty`.
+  `material_wireframe`, `material_transparent` shorthands.
+  `material(&r, h)` returns a `^Material`; edit it and write it back
+  with `set_material(&r, h, m^)` to stage the upload.
 - **Sprites.** `create_sprite(&r, texture, columns, rows)` makes a
   sprite sheet; `set_sprite_frame(&r, h, frame)` shows one cell.
   Animate it by setting the frame as time advances.
-- **Emitters, force fields.** `create_emitter` / `create_forcefield`,
-  edited in place through `emitter(&r, h)` / `forcefield(&r, h)`;
-  `update` uploads them every tick.
+- **Emitters, force fields.** `create_emitter` / `create_forcefield`.
+  `emitter(&r, h)` / `forcefield(&r, h)` return a pointer; write
+  changes back with `set_emitter` / `set_forcefield`, which stage the
+  upload and keep the emission progress and the attached slot.
 - **Lights** have no resource; a light is an attachment
   (`point_light_attachment`, `directional_light_attachment`,
   `spot_light_attachment`).
@@ -131,9 +146,9 @@ before reuse.
 - **`render/bindless`** defines render's arrays on top of that
   mechanism: the 2D texture, cube texture and sampler arrays
   (`TextureManager`), the mesh arena (`MeshManager`: shared vertex,
-  index and skinning buffers sub-allocated by a slab allocator), the
-  scene descriptor set, and the indirect draw lists (`DrawPipeline`,
-  `DrawBuffers`) that culling writes and draws consume.
+  index and skinning buffers sub-allocated by the containers slab
+  allocator), the scene descriptor set, and the indirect draw lists
+  (`DrawPipeline`, `DrawBuffers`) that culling writes and draws consume.
 - **`render/mesh`** is the mesh format described above. It is plain
   data with no Vulkan, so tools and tests can build geometry without
   a device.
@@ -236,8 +251,18 @@ line primitives. A line lasts `life` seconds of render's clock
 
 ## Post-process
 
-The effect stack lives in `r.post_process`; push effects with
-`post_process.add_*` (tonemap, bloom, blur, directional blur, fog,
-outline, DoF, crosshatch, grayscale) and reset it with
-`clear_effects`. Effects run in insertion order inside the
-`POST_PROCESS` pass of every camera that has it.
+`render.add_effect(&r, effect)` appends one `post_process` effect value
+(`ToneMapEffect`, `BloomEffect`, `BlurEffect`, `FogEffect`,
+`OutlineEffect`, `DoFEffect`, `CrossHatchEffect`, `GrayscaleEffect`)
+and `clear(&r.post_process.effect_stack)` empties the stack:
+
+```odin
+clear(&r.post_process.effect_stack)
+render.add_effect(&r, post_process.BloomEffect{threshold = 1, intensity = 2, blur_radius = 32})
+render.add_effect(&r, post_process.ToneMapEffect{exposure = 1, gamma = 2.2})
+```
+
+Effects run in insertion order inside the `POST_PROCESS` pass of every
+camera that has it. Blur and bloom run as two separable passes
+(horizontal, then vertical); `add_effect` sets their `direction`. A
+`GrayscaleEffect` with zero `weights` uses Rec. 601 luma weights.

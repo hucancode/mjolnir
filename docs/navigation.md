@@ -19,9 +19,8 @@ All building procs live in `navigation/bake`.
 
 1. **Gather triangles.** `bake.append_triangles(&builder, positions,
    indices, offset, is_obstacle)` adds a triangle mesh to a
-   `NavGeometryBuilder`; obstacle triangles are carved out. Or fill a
-   `NavigationGeometry{vertices, indices, area_types}` directly.
-2. **Build.** `bake.build(&nav, geometry_view(&builder), config)` runs
+   `NavGeometryBuilder`; obstacle triangles are carved out.
+2. **Build.** `bake.build(&nav, &builder, config)` runs
    Recast (voxelize, erode by agent radius, trace contours,
    triangulate into polygons), then creates the Detour mesh and its
    query. It replaces any previous build and returns `false` on
@@ -29,8 +28,17 @@ All building procs live in `navigation/bake`.
 3. **Clean up.** `bake.builder_destroy` frees the builder once the
    mesh is built; `navigation.destroy` frees the mesh.
 
-`navigation.init(&nav, data, params)` loads single-tile Detour data
-baked earlier, with no Recast involved.
+## Saving and loading
+
+`navigation.save(&nav, path)` writes the built mesh to a binary
+`.navmesh` file; `navigation.load(&nav, path)` reads it back into a
+ready-to-query `NavMesh`, replacing any previous mesh. Both return
+`false` on failure. Loading needs no Recast, so a game can bake
+offline and ship only the file. `navigation.init(&nav, data, params)`
+takes single-tile Detour data already in memory.
+
+The `NavMesh` must not move after `build`, `load` or `init`: its query
+and any crowd hold its address.
 
 `debug_triangles(&nav)` returns the built polygons as positions +
 indices for drawing.
@@ -69,15 +77,21 @@ id := crowd.add_agent(c, spawn_pos, params)
 crowd.move_to(c, id, goal)
 // every tick
 crowd.update(c, dt)
-pos := crowd.get_agent(c, id).npos
+ag := crowd.get_agent(c, id)
+// ag.npos, ag.vel; next steering corners: ag.corner_verts[:ag.ncorners]
 ```
 
 `Agent_Params` sets radius, height, speed, acceleration and which
 behaviours run (`update_flags`, a bit_set such as
 `{.Anticipate_Turns, .Separation}`); `DEFAULT_AGENT_PARAMS` is a
-ready-made starting point. Copying agent positions onto
-nodes is application glue. Walking a single `find_path` result
-without a crowd is also the caller's job.
+ready-made starting point. `crowd.remove_agent(c, id)` frees a
+slot. `get_agent(c, id)` returns the `^Agent` slot; read `npos`,
+`vel` and `corner_verts[:ncorners]` from it. `get_filter(c, i)`
+returns the `^detour.Query_Filter` used by agents whose
+`params.query_filter_type` is `i`, for setting include/exclude flags
+and area costs. Copying agent positions onto nodes is application
+glue. Walking a single `find_path` result without a crowd is also the
+caller's job.
 
 ## Submodules
 
@@ -87,5 +101,5 @@ meshes, custom filters, area costs). Recast is the offline baker;
 Detour is the runtime and never imports Recast. Crowd runs on Detour
 and takes the top-level `NavMesh`. `navigation/bake` bridges Recast
 and Detour: `bake.create_nav_mesh_data` converts a Recast `Poly_Mesh`
-into Detour tile data, and `bake.bake_and_save_navmesh` writes it to
-a file that `detour.load_navmesh_for_runtime` loads.
+into Detour tile data. Recast and Detour keep public only what sibling
+packages and their tests use; the rest is `@(private)`.

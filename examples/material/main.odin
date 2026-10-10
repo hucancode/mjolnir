@@ -4,7 +4,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
@@ -103,16 +102,16 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   if l, ok := render.attachment(&app.renderer, sun_light.index, render.DirectionalLightAttachment); ok {
     l.color[3] = f32(sun_intensity)
-    render.mark_slot_dirty(&app.renderer, sun_light.index)
+    render.attach(&app.renderer, sun_light.index, l)
   }
-  ambient.set_ibl_intensity(&app.renderer.ambient, f32(ibl_intensity))
-  ambient.set_skybox_enabled(&app.renderer.ambient, skybox_on)
+  app.renderer.ambient.ibl_intensity = f32(ibl_intensity)
+  app.renderer.ambient.skybox_enabled = skybox_on
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
     mat := render.material(&app.renderer, grid_materials[row][col]) or_continue
     mat.metallic_value = m
     mat.roughness_value = r
-    render.mark_material_dirty(&app.renderer, grid_materials[row][col])
+    render.set_material(&app.renderer, grid_materials[row][col], mat^)
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)

@@ -20,10 +20,12 @@ Raycast_Hit :: struct {
   path_cost:      f32,
 }
 
+@(private)
 Raycast_Options :: enum u8 {
   Use_Costs = 0x01,
 }
 
+@(private)
 Poly_Query :: struct {
   process:   proc(
     ref: Poly_Ref,
@@ -40,6 +42,7 @@ query_filter_init :: proc(filter: ^Query_Filter) {
   for i in 0 ..< DT_MAX_AREAS do filter.area_cost[i] = 1.0
 }
 
+@(private)
 query_filter_pass_filter :: proc(
   filter: ^Query_Filter,
   ref: Poly_Ref,
@@ -52,6 +55,7 @@ query_filter_pass_filter :: proc(
   )
 }
 
+@(private)
 query_filter_get_cost :: proc(
   filter: ^Query_Filter,
   pa, pb: [3]f32,
@@ -282,6 +286,7 @@ raycast :: proc(
 }
 
 // Find random point on navigation mesh
+@(private)
 find_random_point :: proc(
   query: ^Nav_Mesh_Query,
   filter: ^Query_Filter,
@@ -314,6 +319,7 @@ find_random_point :: proc(
 }
 
 // Find random point around given position
+@(private)
 find_random_point_around_circle :: proc(
   query: ^Nav_Mesh_Query,
   start_ref: Poly_Ref,
@@ -351,6 +357,7 @@ find_random_point_around_circle :: proc(
   return
 }
 
+@(private)
 query_polygons_in_tile :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,
@@ -383,6 +390,7 @@ query_polygons_in_tile :: proc(
   return count
 }
 
+@(private)
 query_polygons_in_tile_bv :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,
@@ -1003,6 +1011,7 @@ get_poly_wall_segments :: proc(
 }
 
 // Check if polygon is in closed list during pathfinding
+@(private)
 is_in_closed_list :: proc(
   query: ^Nav_Mesh_Query,
   ref: Poly_Ref,

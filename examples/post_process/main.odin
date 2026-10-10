@@ -6,7 +6,6 @@ import "../../mjolnir/platform"
 import "../../mjolnir/render/post_process"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
-import "core:fmt"
 import "core:log"
 import mu "vendor:microui"
 
@@ -106,15 +105,15 @@ update :: proc(app: ^App, dt: f32) {
   platform.read_input(&app.window, &app.input)
   render.debug_ui_input(&app.renderer, &app.input)
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
-  post_process.clear_effects(&app.renderer.post_process)
-  if outline_on    do post_process.add_outline(&app.renderer.post_process, f32(outline_thickness))
-  if fog_on        do post_process.add_fog(&app.renderer.post_process, {0.55, 0.6, 0.7}, f32(fog_density), f32(fog_start), f32(fog_end))
-  if dof_on        do post_process.add_dof(&app.renderer.post_process, f32(dof_focus), f32(dof_range), f32(dof_blur), 0.5)
-  if bloom_on      do post_process.add_bloom(&app.renderer.post_process, f32(bloom_threshold), f32(bloom_intensity), 32.0)
-  if blur_on       do post_process.add_blur(&app.renderer.post_process, f32(blur_radius))
-  if crosshatch_on do post_process.add_crosshatch(&app.renderer.post_process)
-  if grayscale_on  do post_process.add_grayscale(&app.renderer.post_process, f32(grayscale_strength))
-  if tonemap_on    do post_process.add_tonemap(&app.renderer.post_process, f32(tonemap_exposure), f32(tonemap_gamma))
+  clear(&app.renderer.post_process.effect_stack)
+  if outline_on    do render.add_effect(&app.renderer, post_process.OutlineEffect{thickness = f32(outline_thickness)})
+  if fog_on        do render.add_effect(&app.renderer, post_process.FogEffect{color = {0.55, 0.6, 0.7}, density = f32(fog_density), start = f32(fog_start), end = f32(fog_end)})
+  if dof_on        do render.add_effect(&app.renderer, post_process.DoFEffect{focus_distance = f32(dof_focus), focus_range = f32(dof_range), blur_strength = f32(dof_blur), bokeh_intensity = 0.5})
+  if bloom_on      do render.add_effect(&app.renderer, post_process.BloomEffect{threshold = f32(bloom_threshold), intensity = f32(bloom_intensity), blur_radius = 32.0})
+  if blur_on       do render.add_effect(&app.renderer, post_process.BlurEffect{radius = f32(blur_radius), weight_falloff = 1.0})
+  if crosshatch_on do render.add_effect(&app.renderer, post_process.CrossHatchEffect{hatch_offset_y = 5.0, lum_threshold_01 = 0.6, lum_threshold_02 = 0.3, lum_threshold_03 = 0.15, lum_threshold_04 = 0.07})
+  if grayscale_on  do render.add_effect(&app.renderer, post_process.GrayscaleEffect{strength = f32(grayscale_strength)})
+  if tonemap_on    do render.add_effect(&app.renderer, post_process.ToneMapEffect{exposure = f32(tonemap_exposure), gamma = f32(tonemap_gamma)})
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)
   for n in world.changed_nodes(&app.scene) do render.stage_transform(&app.renderer, n.index, n.world_matrix, n.visible)
@@ -160,6 +159,5 @@ debug_ui :: proc(app: ^App) {
     mu.checkbox(ctx, "Gaussian Blur", &blur_on)
     if blur_on do mu.slider(ctx, &blur_radius, 0.5, 10.0)
     mu.checkbox(ctx, "Crosshatch", &crosshatch_on)
-    mu.label(ctx, fmt.tprintf("Stack size: %d", len(app.renderer.post_process.effect_stack)))
   }
 }

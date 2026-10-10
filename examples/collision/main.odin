@@ -233,15 +233,16 @@ apply_shape :: proc(app: ^App, b: ^Body) {
   b.built_size = b.size
 }
 
-drive_circle :: proc(b: ^Body, body: ^physics.DynamicRigidBody) {
+drive_circle :: proc(b: ^Body) {
   a := circle_angle
   center := b.position
   target := center + [3]f32{math.cos(a), 0, math.sin(a)} * CIRCLE_RADIUS
   tangent :=
     [3]f32{-math.sin(a), 0, math.cos(a)} * (CIRCLE_RADIUS * CIRCLE_OMEGA)
-  to_target := target - body.position
-  desired := tangent + to_target * 3.0
-  physics.apply_impulse(body, (desired - body.velocity) * f32(b.mass))
+  body, ok := physics.get_dynamic_body(&phys, b.dyn_handle)
+  if !ok do return
+  desired := tangent + (target - body.position) * 3.0
+  physics.apply_impulse(&phys, b.dyn_handle, (desired - body.velocity) * f32(b.mass))
 }
 
 update :: proc(app: ^App, dt: f32) {
@@ -283,18 +284,16 @@ update :: proc(app: ^App, dt: f32) {
       }
       continue
     }
-    body, ok := physics.get_dynamic_body(&phys, b.dyn_handle)
-    if !ok do continue
-    if b.mass > 0 do physics.set_mass(body, f32(b.mass))
+    if b.mass > 0 do physics.set_body_mass(&phys, b.dyn_handle, f32(b.mass))
     if b.kind == .DynamicCircle {
-      if !phys.paused do drive_circle(b, body)
+      if !phys.paused do drive_circle(b)
     } else if !b.applied_valid ||
        b.position != b.applied_pos ||
        q != b.applied_rot {
       // DynamicStill: teleport only when the user edits the transform.
       physics.set_body_pose(&phys, b.dyn_handle, b.position, q)
-      body.velocity = {}
-      body.angular_velocity = {}
+      physics.set_velocity(&phys, b.dyn_handle, {})
+      physics.set_angular_velocity(&phys, b.dyn_handle, {})
       b.applied_pos = b.position
       b.applied_rot = q
       b.applied_valid = true

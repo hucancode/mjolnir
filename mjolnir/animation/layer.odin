@@ -16,26 +16,30 @@ PlayMode :: enum {
   PING_PONG,
 }
 
-// Advance playback time by delta_time according to mode.
-// ONCE clamps at duration and stops; PING_PONG flips speed at either end.
-playback_advance :: proc(
-  time, speed: ^f32,
-  status: ^Status,
-  mode: PlayMode,
-  duration, delta_time: f32,
-) {
-  if status^ != .PLAYING || duration <= 0 do return
-  time^ += delta_time * speed^
-  switch mode {
+// Play head over one clip. A plain value: `ClipPlayer{speed = 1}` loops
+// from the start. ONCE clamps at the clip's end and stops; PING_PONG flips
+// speed at either end.
+ClipPlayer :: struct {
+  time:   f32,
+  speed:  f32,
+  status: Status,
+  mode:   PlayMode,
+}
+
+@(private)
+playback_advance :: proc(self: ^ClipPlayer, duration, delta_time: f32) {
+  if self.status != .PLAYING || duration <= 0 do return
+  self.time += delta_time * self.speed
+  switch self.mode {
   case .LOOP:
-    time^ = math.mod_f32(time^ + duration, duration)
+    self.time = math.mod_f32(self.time + duration, duration)
   case .ONCE:
-    if time^ >= duration {
-      time^ = duration
-      status^ = .STOPPED
+    if self.time >= duration {
+      self.time = duration
+      self.status = .STOPPED
     }
   case .PING_PONG:
-    if time^ >= duration || time^ < 0 do speed^ *= -1
+    if self.time >= duration || self.time < 0 do self.speed *= -1
   }
 }
 
@@ -63,6 +67,7 @@ Transition :: struct {
 
 // Advance a transition and cross-fade the two layer weights. Sets state to
 // COMPLETE on the tick it finishes (from = 0, to = 1).
+@(private)
 transition_update :: proc(self: ^Transition, layers: []Layer, delta_time: f32) {
   if self.state != .ACTIVE do return
   if self.from_layer >= len(layers) || self.to_layer >= len(layers) {
@@ -82,6 +87,7 @@ transition_update :: proc(self: ^Transition, layers: []Layer, delta_time: f32) {
 }
 
 // Blend position based on mode
+@(private)
 blend_position :: proc(
   accumulated: [3]f32,
   new_value: [3]f32,
@@ -106,6 +112,7 @@ blend_position :: proc(
 }
 
 // Blend rotation based on mode
+@(private)
 blend_rotation :: proc(
   accumulated: quaternion128,
   accumulated_weight: f32,
@@ -138,6 +145,7 @@ blend_rotation :: proc(
 }
 
 // Blend scale based on mode
+@(private)
 blend_scale :: proc(
   accumulated: [3]f32,
   new_value: [3]f32,
@@ -163,11 +171,8 @@ blend_scale :: proc(
 
 // Plays one clip of the rig (index into Rig.clips).
 FKLayer :: struct {
-  clip:   int,
-  mode:   PlayMode,
-  status: Status,
-  time:   f32,
-  speed:  f32,
+  clip:         int,
+  using player: ClipPlayer,
 }
 
 LayerData :: union {

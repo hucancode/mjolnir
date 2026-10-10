@@ -14,7 +14,9 @@ import "core:slice"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
+@(private)
 UI_MAX_VERTICES :: 65536
+@(private)
 UI_MAX_INDICES :: 98304
 
 Vertex2D :: cmd.Vertex2D
@@ -57,6 +59,7 @@ Renderer :: struct {
 
 // A run of indices drawn under one scissor rect. Textures are per vertex
 // (bindless), so they never split a batch.
+@(private)
 DrawBatch :: struct {
   first_index: u32,
   index_count: u32,

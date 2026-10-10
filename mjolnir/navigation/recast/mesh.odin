@@ -41,6 +41,7 @@ destroy_poly_mesh :: proc(pmesh: ^Poly_Mesh) {
 }
 
 // Check if three vertices form a left turn (counter-clockwise)
+@(private)
 uleft :: proc(a, b, c: [3]i16) -> bool {
   // 2D cross product in XZ plane: (b-a) * (c-a)
   // return linalg.cross(b.xz - a.xz, c.xz - a.xz) < 0
@@ -54,6 +55,7 @@ uleft :: proc(a, b, c: [3]i16) -> bool {
 
 // Get merge value for two polygons
 // Returns shared edge indices and merge value (edge length squared)
+@(private)
 get_poly_merge_value :: proc(
   pa, pb: []i32,
   verts: []Mesh_Vertex,
@@ -138,6 +140,7 @@ get_poly_merge_value :: proc(
 
 // Merge two polygons along shared edge
 // Now uses temp_allocator for temporary array - no manual cleanup needed!
+@(private)
 merge_poly_verts :: proc(
   pa, pb: ^Poly_Build,
   ea, eb: i32,
@@ -172,20 +175,24 @@ merge_poly_verts :: proc(
 }
 
 // Mesh building constants
+@(private)
 RC_VERTEX_BUCKET_COUNT :: 1 << 12 // 4096 buckets for vertex hashing
 
 // Vertex structure for mesh building
+@(private)
 Mesh_Vertex :: struct {
   x, y, z: u16, // Vertex coordinates (quantized)
   next:    i32, // Next vertex in hash bucket
 }
 
 // Vertex bucket for efficient vertex lookup during welding
+@(private)
 Vertex_Bucket :: struct {
   first: i32, // Index of first vertex in bucket
 }
 
 // Edge structure for polygon mesh building
+@(private)
 Mesh_Edge :: struct {
   vert:      [2]u16, // Vertex indices
   poly:      [2]u16, // Polygon indices (or RC_MESH_NULL_IDX)
@@ -193,6 +200,7 @@ Mesh_Edge :: struct {
 }
 
 // Temporary structure for building polygons
+@(private)
 Poly_Build :: struct {
   verts: []i32, // Vertex indices
   area:  u8, // Area type
@@ -200,6 +208,7 @@ Poly_Build :: struct {
 }
 
 // Hash function for vertices (simple multiplicative hash)
+@(private)
 vertex_hash :: proc "contextless" (x, y, z: u16) -> u32 {
   h1 := u32(x) * 0x8da6b343
   h2 := u32(y) * 0xd8163841
@@ -208,6 +217,7 @@ vertex_hash :: proc "contextless" (x, y, z: u16) -> u32 {
 }
 
 // Add vertex to hash table, return index (existing or new)
+@(private)
 add_vertex :: proc(
   x, y, z: u16,
   verts: ^[dynamic]Mesh_Vertex,
@@ -244,6 +254,7 @@ add_vertex :: proc(
 }
 
 // Check if diagonal from vertex a to vertex c is internal to polygon
+@(private)
 diagonalie :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -280,6 +291,7 @@ diagonalie :: proc "contextless" (
 }
 
 // Check if diagonal is in cone of vertex a
+@(private)
 in_cone_indexed :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -298,6 +310,7 @@ in_cone_indexed :: proc "contextless" (
 }
 
 // Check if diagonal from a to b is valid
+@(private)
 diagonal :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -309,6 +322,7 @@ diagonal :: proc "contextless" (
 }
 
 // Loose versions for degenerate cases (more permissive)
+@(private)
 diagonalie_loose :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -341,6 +355,7 @@ diagonalie_loose :: proc "contextless" (
   return true
 }
 
+@(private)
 in_cone_loose :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -368,6 +383,7 @@ in_cone_loose :: proc "contextless" (
   }
 }
 
+@(private)
 diagonal_loose :: proc "contextless" (
   verts: [][4]i32,
   indices: []u32,
@@ -380,6 +396,7 @@ diagonal_loose :: proc "contextless" (
 }
 
 // Triangulate polygon using ear clipping algorithm
+@(private)
 triangulate_polygon :: proc(
   verts: [][4]i32,
   indices: []i32,
@@ -510,6 +527,7 @@ triangulate_polygon :: proc(
 }
 
 // Validate polygon mesh data
+@(private)
 validate_poly_mesh :: proc(pmesh: ^Poly_Mesh) -> bool {
   if pmesh == nil do return false
   if len(pmesh.verts) <= 0 || pmesh.npolys <= 0 do return false
@@ -532,6 +550,7 @@ validate_poly_mesh :: proc(pmesh: ^Poly_Mesh) -> bool {
 }
 
 // Copy polygon mesh
+@(private)
 copy_poly_mesh :: proc(src: ^Poly_Mesh, dst: ^Poly_Mesh) -> bool {
   if src == nil || dst == nil do return false
   // Copy header data
@@ -559,6 +578,7 @@ copy_poly_mesh :: proc(src: ^Poly_Mesh, dst: ^Poly_Mesh) -> bool {
 }
 
 // Merge two polygon meshes
+@(private)
 merge_poly_meshes :: proc(meshes: []^Poly_Mesh, mesh: ^Poly_Mesh) -> bool {
   if len(meshes) == 0 do return false
   if len(meshes) == 1 {
@@ -634,6 +654,7 @@ merge_poly_meshes :: proc(meshes: []^Poly_Mesh, mesh: ^Poly_Mesh) -> bool {
 }
 
 // Build edge list from polygon data (for neighbor finding)
+@(private)
 build_mesh_edges :: proc(
   pmesh: ^Poly_Mesh,
   edges: ^[dynamic]Mesh_Edge,
@@ -696,6 +717,7 @@ build_mesh_edges :: proc(
 }
 
 // Update polygon neighbor information from edge list
+@(private)
 update_polygon_neighbors :: proc(pmesh: ^Poly_Mesh, edges: []Mesh_Edge) {
   // Initialize all neighbors to null
   for i in 0 ..< pmesh.npolys {
@@ -719,6 +741,7 @@ update_polygon_neighbors :: proc(pmesh: ^Poly_Mesh, edges: []Mesh_Edge) {
 }
 
 // Optimized triangle merging - attempts to merge adjacent triangles into larger polygons
+@(private)
 merge_triangles_into_polygons :: proc(
   triangles: []i32,
   polys: ^[dynamic]Poly_Build,
@@ -812,6 +835,7 @@ merge_triangles_into_polygons :: proc(
   }
 }
 
+@(private)
 merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> (quad: []i32, ok: bool) {
   shared := make([dynamic]i32, 0, 2)
   defer delete(shared)
@@ -868,6 +892,7 @@ merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> (quad: []i32, ok: bool) {
 }
 
 // Main function to build polygon mesh from contour set
+@(private)
 build_poly_mesh :: proc(
   cset: ^Contour_Set,
   nvp: i32,
@@ -1118,6 +1143,7 @@ build_poly_mesh :: proc(
 }
 
 // Check if a vertex can be removed from the mesh
+@(private)
 can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
   if pmesh == nil do return false
   nvp := int(pmesh.nvp)
@@ -1211,6 +1237,7 @@ can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
 }
 
 // Remove a vertex from the polygon mesh and re-triangulate the hole
+@(private)
 remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
   if pmesh == nil do return false
   nvp := int(pmesh.nvp)
@@ -1520,6 +1547,7 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
 }
 
 // Build portal edges between tile boundaries
+@(private)
 build_mesh_portal_edges :: proc(pmesh: ^Poly_Mesh) -> bool {
   if pmesh == nil do return false
   nvp := int(pmesh.nvp)

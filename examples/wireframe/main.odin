@@ -4,7 +4,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math/linalg"
@@ -43,7 +42,7 @@ handles: [9]world.NodeHandle
 
 setup :: proc(app: ^App) {
   render.main_camera_look_at(&app.renderer, {0, 4, 9}, {0, 0, 0})
-  ambient.set_skybox_enabled(&app.renderer.ambient, false)
+  app.renderer.ambient.skybox_enabled = false
 
   cube := app.renderer.builtin_meshes[.CUBE]
   mat := render.material_wireframe(&app.renderer)

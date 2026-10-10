@@ -84,6 +84,7 @@ delete_geometry :: proc(geometry: Geometry) {
 
 // Bounding box of the vertex positions. Flat axes (a quad) are widened to
 // AABB_MIN_EXTENT so culling never sees a zero-thickness box.
+@(private)
 AABB_MIN_EXTENT :: 0.1
 
 aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: geometry.Aabb) {

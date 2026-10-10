@@ -63,6 +63,7 @@ Mesh_Header :: struct {
   bv_quant_factor:    f32,
 }
 
+@(private)
 Mesh_Tile :: struct {
   salt:            u32,
   links_free_list: u32,
@@ -119,6 +120,7 @@ poly_set_type :: proc(poly: ^Poly, type: u8) {
   poly.area_and_type = (poly.area_and_type & 0x3f) | (type << 6)
 }
 
+@(private)
 poly_get_area :: proc(poly: ^Poly) -> u8 {
   return poly.area_and_type & 0x3f
 }
@@ -127,6 +129,7 @@ poly_get_type :: proc(poly: ^Poly) -> u8 {
   return poly.area_and_type >> 6
 }
 
+@(private)
 encode_poly_id :: proc(
   nav_mesh: ^Nav_Mesh,
   salt: u32,
@@ -140,6 +143,7 @@ encode_poly_id :: proc(
   )
 }
 
+@(private)
 decode_poly_id :: proc(
   nav_mesh: ^Nav_Mesh,
   ref: Poly_Ref,
@@ -158,11 +162,13 @@ decode_poly_id :: proc(
   return
 }
 
+@(private)
 get_poly_index :: proc(nav_mesh: ^Nav_Mesh, ref: Poly_Ref) -> u32 {
   if nav_mesh == nil do return 0
   return u32(ref) & ((u32(1) << nav_mesh.poly_bits) - 1)
 }
 
+@(private)
 calc_tile_loc :: proc(
   nav_mesh: ^Nav_Mesh,
   pos: [3]f32,
@@ -180,6 +186,7 @@ calc_tile_loc :: proc(
 }
 
 // Memory-mapped navmesh data that eliminates manual pointer arithmetic
+@(private)
 Navmesh_Memory_Map :: struct {
   data:             []u8,
   header:           ^Mesh_Header,
@@ -194,6 +201,7 @@ Navmesh_Memory_Map :: struct {
 }
 
 // Create memory map from raw data - replaces all pointer arithmetic
+@(private)
 navmesh_create_memory_map :: proc(
   data: []u8,
 ) -> (
@@ -289,6 +297,7 @@ navmesh_create_memory_map :: proc(
 }
 
 // Calculate tile index using slice indexing
+@(private)
 get_tile_index :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> u32 {
   if tile == nil do return 0
   // Use slice offset calculation (much more efficient than loop)
@@ -381,6 +390,7 @@ nav_mesh_add_tile :: proc(
   return get_tile_ref(nav_mesh, tile), {.Success}
 }
 
+@(private)
 nav_mesh_remove_tile :: proc(
   nav_mesh: ^Nav_Mesh,
   ref: Tile_Ref,
@@ -412,6 +422,7 @@ nav_mesh_remove_tile :: proc(
   return {.Success}
 }
 
+@(private)
 get_tile_by_ref :: proc(
   nav_mesh: ^Nav_Mesh,
   ref: Tile_Ref,
@@ -428,6 +439,7 @@ get_tile_by_ref :: proc(
   return tile, {.Success}
 }
 
+@(private)
 get_tile_at :: proc(nav_mesh: ^Nav_Mesh, x, y: i32, layer: i32) -> ^Mesh_Tile {
   h := compute_tile_hash(x, y, nav_mesh.tile_lut_mask)
   tile := nav_mesh.pos_lookup[h]
@@ -443,6 +455,7 @@ get_tile_at :: proc(nav_mesh: ^Nav_Mesh, x, y: i32, layer: i32) -> ^Mesh_Tile {
   return nil
 }
 
+@(private)
 get_tile_ref :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,
@@ -512,6 +525,7 @@ parse_mesh_header :: proc(data: []u8) -> (^Mesh_Header, Status) {
   return header, {.Success}
 }
 
+@(private)
 setup_tile_data :: proc(
   tile: ^Mesh_Tile,
   data: []u8,
@@ -546,6 +560,7 @@ setup_tile_data :: proc(
   return {.Success}
 }
 
+@(private)
 free_tile_data :: proc(tile: ^Mesh_Tile) {
   // Clear slices
   tile.polys = nil
@@ -563,6 +578,7 @@ free_tile_data :: proc(tile: ^Mesh_Tile) {
   tile.data = nil
 }
 
+@(private)
 connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
   if tile.header == nil do return
   base := get_poly_ref_base(nav_mesh, tile)
@@ -592,11 +608,13 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
   }
 }
 
+@(private)
 connect_ext_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
   if tile.header == nil do return
   for i in 0 ..< 4 do connect_ext_links_side(nav_mesh, tile, i)
 }
 
+@(private)
 connect_ext_links_side :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,
@@ -698,6 +716,7 @@ connect_ext_links_side :: proc(
   }
 }
 
+@(private)
 disconnect_ext_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
   if tile.header == nil {
     return
@@ -753,6 +772,7 @@ disconnect_ext_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
   }
 }
 
+@(private)
 allocate_link :: proc(tile: ^Mesh_Tile, poly: u32) -> (u32, bool) {
   if tile.links_free_list == DT_NULL_LINK {
     return DT_NULL_LINK, false
@@ -765,6 +785,7 @@ allocate_link :: proc(tile: ^Mesh_Tile, poly: u32) -> (u32, bool) {
   return link_idx, true
 }
 
+@(private)
 get_poly_ref_base :: proc(
   nav_mesh: ^Nav_Mesh,
   tile: ^Mesh_Tile,
@@ -784,6 +805,7 @@ get_poly_ref_base :: proc(
 
 // Utility functions
 
+@(private)
 compute_tile_hash :: proc(x: i32, y: i32, mask: i32) -> i32 {
   h1: u32 = 0x8da6b343
   h2: u32 = 0xd8163841
@@ -791,6 +813,7 @@ compute_tile_hash :: proc(x: i32, y: i32, mask: i32) -> i32 {
   return h & mask
 }
 
+@(private)
 unlink_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
   // Remove tile from free list
   if nav_mesh.next_free == tile {
@@ -807,6 +830,7 @@ unlink_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
 }
 
 // Tile reference encoding
+@(private)
 encode_tile_ref :: proc(
   nav_mesh: ^Nav_Mesh,
   salt: u32,
@@ -815,11 +839,13 @@ encode_tile_ref :: proc(
   return (salt << nav_mesh.tile_bits) | tile_index
 }
 
+@(private)
 decode_tile_ref :: proc(nav_mesh: ^Nav_Mesh, ref: Tile_Ref) -> u32 {
   tile_mask := (u32(1) << nav_mesh.tile_bits) - 1
   return u32(ref) & tile_mask
 }
 
+@(private)
 decode_tile_ref_salt :: proc(
   nav_mesh: ^Nav_Mesh,
   ref: Tile_Ref,
@@ -831,6 +857,7 @@ decode_tile_ref_salt :: proc(
 // Helper functions for external link connection
 
 // Check if an edge is on a specific border of a tile
+@(private)
 is_edge_on_tile_border :: proc(
   va, vb: [3]f32,
   bmin, bmax: [3]f32,

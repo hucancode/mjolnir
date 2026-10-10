@@ -5,19 +5,26 @@ import "core:math/linalg"
 import ".."
 import "../detour"
 
+@(private)
 DT_CROWDAGENT_MAX_NEIGHBOURS :: 6
 DT_CROWDAGENT_MAX_CORNERS :: 4
+@(private)
 DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS :: 8
+@(private)
 DT_CROWD_MAX_QUERY_FILTER_TYPE :: 16
 
+@(private)
 MAX_ITERS_PER_UPDATE :: 100
+@(private)
 MAX_PATHQUEUE_NODES :: 4096
 
+@(private)
 Neighbour :: struct {
 	idx:  int,
 	dist: f32,
 }
 
+@(private)
 Agent_State :: enum u8 {
 	Invalid,
 	Walking,
@@ -59,6 +66,7 @@ Update_Flags :: enum u8 {
 
 Update_Flag_Set :: bit_set[Update_Flags; u8]
 
+@(private)
 Move_Request_State :: enum u8 {
 	None = 0,
 	Failed,
@@ -250,6 +258,7 @@ remove_agent :: proc(crowd: ^Crowd, idx: int) {
 	crowd.agents[idx].active = false
 }
 
+@(private)
 request_move_target :: proc(crowd: ^Crowd, idx: int, ref: detour.Poly_Ref, pos: [3]f32) -> bool {
 	if idx < 0 || idx >= crowd.max_agents do return false
 	if ref == detour.INVALID_POLY_REF do return false
@@ -429,6 +438,7 @@ update :: proc(crowd: ^Crowd, dt: f32) {
 	path_queue_update(crowd.path_queue, MAX_ITERS_PER_UPDATE)
 }
 
+@(private)
 update_move_request :: proc(crowd: ^Crowd, dt: f32) {
 	PATH_MAX_AGENTS :: 8
 	queue: [PATH_MAX_AGENTS]^Agent
@@ -482,6 +492,7 @@ update_move_request :: proc(crowd: ^Crowd, dt: f32) {
 	}
 }
 
+@(private)
 update_topology_optimization :: proc(crowd: ^Crowd, agents: []^Agent, dt: f32) {
 	MAX_NEIS :: 32
 	queue: [MAX_NEIS]^Agent
@@ -509,6 +520,7 @@ update_topology_optimization :: proc(crowd: ^Crowd, agents: []^Agent, dt: f32) {
 	}
 }
 
+@(private)
 integrate :: proc(ag: ^Agent, dt: f32) {
 	max_delta := ag.params.max_acceleration * dt
 	dv := ag.nvel - ag.vel
@@ -525,6 +537,7 @@ integrate :: proc(ag: ^Agent, dt: f32) {
 	}
 }
 
+@(private)
 calc_smooth_steer_direction :: proc(ag: ^Agent, dir: ^[3]f32) {
 	if ag.ncorners == 0 {
 		dir^ = {0, 0, 0}
@@ -552,6 +565,7 @@ calc_smooth_steer_direction :: proc(ag: ^Agent, dir: ^[3]f32) {
 	dir^ = linalg.normalize(dir^)
 }
 
+@(private)
 calc_straight_steer_direction :: proc(ag: ^Agent, dir: ^[3]f32) {
 	if ag.ncorners == 0 {
 		dir^ = {0, 0, 0}
@@ -562,6 +576,7 @@ calc_straight_steer_direction :: proc(ag: ^Agent, dir: ^[3]f32) {
 	dir^ = linalg.normalize(dir^)
 }
 
+@(private)
 get_distance_to_goal :: proc(ag: ^Agent, range: f32) -> f32 {
 	if ag.ncorners == 0 do return range
 
@@ -579,6 +594,7 @@ get_distance_to_goal :: proc(ag: ^Agent, range: f32) -> f32 {
 	return range
 }
 
+@(private)
 get_neighbours :: proc(pos: [3]f32, height: f32, range: f32, skip: ^Agent,
                        result: []Neighbour, max_result: int,
                        agents: []^Agent, grid: ^Proximity_Grid) -> int {
@@ -607,6 +623,7 @@ get_neighbours :: proc(pos: [3]f32, height: f32, range: f32, skip: ^Agent,
 	return n
 }
 
+@(private)
 add_neighbour :: proc(idx: int, dist: f32, neis: []Neighbour, nneis: int, max_neis: int) -> int {
 	if nneis == 0 {
 		neis[0] = {idx, dist}
@@ -637,11 +654,13 @@ add_neighbour :: proc(idx: int, dist: f32, neis: []Neighbour, nneis: int, max_ne
 	return min(nneis + 1, max_neis)
 }
 
+// Agent slot `idx`; nil for an out-of-range index.
 get_agent :: proc(crowd: ^Crowd, idx: int) -> ^Agent {
 	if idx < 0 || idx >= crowd.max_agents do return nil
 	return &crowd.agents[idx]
 }
 
+// Query filter `i` used by agents whose `query_filter_type` is `i`; nil if out of range.
 get_filter :: proc(crowd: ^Crowd, i: int) -> ^detour.Query_Filter {
 	if i < 0 || i >= DT_CROWD_MAX_QUERY_FILTER_TYPE do return nil
 	return &crowd.filters[i]

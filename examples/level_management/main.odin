@@ -188,7 +188,7 @@ act_destroy_materials :: proc(app: ^App) {
   for h in example_nodes {
     if a, ok := render.attachment(&app.renderer, h.index, render.MeshAttachment); ok {
       a.material = default_mat
-      render.mark_slot_dirty(&app.renderer, h.index)
+      render.attach(&app.renderer, h.index, a)
     }
   }
   freed := len(example_materials)
@@ -205,7 +205,7 @@ act_destroy_meshes :: proc(app: ^App) {
   for h in example_nodes {
     if a, ok := render.attachment(&app.renderer, h.index, render.MeshAttachment); ok {
       a.handle = cube
-      render.mark_slot_dirty(&app.renderer, h.index)
+      render.attach(&app.renderer, h.index, a)
     }
   }
   freed := len(example_meshes)

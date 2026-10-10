@@ -98,7 +98,7 @@ swap_model :: proc(app: ^App, index: int) {
 
   if a, ok := render.attachment(&app.renderer, display_node.index, render.MeshAttachment); ok {
     a.handle = loaded_meshes[index]
-    render.mark_slot_dirty(&app.renderer, display_node.index)
+    render.attach(&app.renderer, display_node.index, a)
   }
   world.translate(&app.scene, display_node, -center)
 

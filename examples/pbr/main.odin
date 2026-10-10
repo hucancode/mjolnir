@@ -4,7 +4,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:log"
 import "core:math"
@@ -90,11 +89,11 @@ update :: proc(app: ^App, dt: f32) {
   render.camera_controller_update(&app.camera, &app.renderer, &app.input, dt)
   if l, ok := render.attachment(&app.renderer, dir_light.index, render.DirectionalLightAttachment); ok {
     l.color[3] = f32(dir_intensity)
-    render.mark_slot_dirty(&app.renderer, dir_light.index)
+    render.attach(&app.renderer, dir_light.index, l)
   }
-  ambient.set_ibl_intensity(&app.renderer.ambient, f32(ibl_intensity))
-  ambient.set_skybox_enabled(&app.renderer.ambient, skybox_on)
-  ambient.set_skybox_blur(&app.renderer.ambient, f32(skybox_blur))
+  app.renderer.ambient.ibl_intensity = f32(ibl_intensity)
+  app.renderer.ambient.skybox_enabled = skybox_on
+  app.renderer.ambient.skybox_blur = f32(skybox_blur)
   if spinning {
     rotation_phase += dt * f32(rotate_speed)
   }

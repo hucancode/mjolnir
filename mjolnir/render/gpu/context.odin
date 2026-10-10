@@ -18,12 +18,14 @@ when ODIN_OS == .Darwin {
 FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 
 // not yet in vendor bindings (needs vulkan header >= 315)
+@(private)
 PhysicalDeviceUnifiedImageLayoutsFeaturesKHR :: struct {
   sType:                                       vk.StructureType,
   pNext:                                       rawptr,
   unifiedImageLayouts, unifiedImageLayoutsVideo: b32,
 }
 
+@(private)
 DEVICE_EXTENSIONS :: []cstring {
   vk.KHR_SWAPCHAIN_EXTENSION_NAME,
   "VK_KHR_unified_image_layouts",
@@ -37,6 +39,7 @@ when ENABLE_VALIDATION_LAYERS {
   VALIDATION_LAYERS :: []cstring{}
 }
 
+@(private)
 SwapchainSupport :: struct {
   capabilities:  vk.SurfaceCapabilitiesKHR,
   formats:       []vk.SurfaceFormatKHR, // Owned by this struct if allocated by it
@@ -51,6 +54,7 @@ swapchain_support_destroy :: proc(support: ^SwapchainSupport) {
   support.present_modes = nil
 }
 
+@(private)
 FoundQueueFamilyIndices :: struct {
   graphics_family: u32,
   present_family:  u32,

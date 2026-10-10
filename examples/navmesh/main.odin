@@ -125,7 +125,7 @@ create_agent :: proc(app: ^App) {
   mh := render.create_mesh(&app.renderer, agent_geom)
   mat := render.material_pbr(&app.renderer, metallic = 0.3, roughness = 0.6, emissive = 0.3)
   agent_handle = spawn_mesh(app, mh, mat, agent_pos + {0, 1, 0})
-  if n, ok := world.node(&app.scene, agent_handle); ok do n.name = "agent"
+  world.node(&app.scene, agent_handle).name = "agent"
 }
 
 create_obj_visualization_mesh :: proc(app: ^App, obj_file: string) {
@@ -137,14 +137,14 @@ create_obj_visualization_mesh :: proc(app: ^App, obj_file: string) {
   mat := render.material_pbr(&app.renderer, metallic = 0.1, roughness = 0.8, emissive = 0.02)
   obj_node_handle = spawn_mesh(app, obj_mesh_handle, mat)
   world.tag(&app.scene, obj_node_handle, TAG_ENVIRONMENT)
-  if n, ok := world.node(&app.scene, obj_node_handle); ok do n.name = "obj_mesh"
+  world.node(&app.scene, obj_node_handle).name = "obj_mesh"
 }
 
 setup_navigation_mesh :: proc(app: ^App) {
   if len(nav_builder.vertices) == 0 || len(nav_builder.indices) == 0 {
     log.error("No source geometry available for navmesh generation"); return
   }
-  if !bake.build(&navmesh, bake.geometry_view(&nav_builder)) {
+  if !bake.build(&navmesh, &nav_builder) {
     log.error("Failed to build navmesh"); return
   }
   visualize_navmesh(app)

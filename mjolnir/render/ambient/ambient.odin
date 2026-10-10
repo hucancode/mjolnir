@@ -6,10 +6,14 @@ import "core:log"
 import vk "vendor:vulkan"
 
 // The post-process fullscreen triangle.
+@(private)
 SHADER_VERT :: #load("../shader/postprocess/vert.spv")
+@(private)
 SHADER_FRAG :: #load("../shader/lighting_ambient/frag.spv")
+@(private)
 TEXTURE_LUT_GGX :: #load("../assets/lut_ggx.png")
 
+@(private)
 PushConstant :: struct {
   camera_index:           u32,
   irradiance_index:       u32,
@@ -160,22 +164,7 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   self.pipeline_layout = 0
 }
 
-set_ibl_intensity :: proc(self: ^Renderer, intensity: f32) {
-  self.ibl_intensity = max(intensity, 0.0)
-}
-
-set_skybox_enabled :: proc(self: ^Renderer, enabled: bool) {
-  self.skybox_enabled = enabled
-}
-
-set_skybox_intensity :: proc(self: ^Renderer, intensity: f32) {
-  self.skybox_intensity = max(intensity, 0.0)
-}
-
-set_skybox_blur :: proc(self: ^Renderer, blur: f32) {
-  self.skybox_blur = clamp(blur, 0.0, 1.0)
-}
-
+@(private)
 TEX_INDEX_INVALID :: u32(0xFFFFFFFF)
 
 @(private = "file")

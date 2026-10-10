@@ -4,7 +4,6 @@ import "../../mjolnir"
 import "../../mjolnir/input"
 import "../../mjolnir/platform"
 import "../../mjolnir/render"
-import "../../mjolnir/render/ambient"
 import "../../mjolnir/world"
 import "core:strings"
 import "core:fmt"
@@ -69,7 +68,7 @@ main :: proc() {
   app.camera = render.orbit_controller()
 
   render.main_camera_look_at(&app.renderer, {0, 5, 10}, {0, 2, 0})
-  ambient.set_skybox_enabled(&app.renderer.ambient, false)
+  app.renderer.ambient.skybox_enabled = false
 
   for name in TEXTURE_FILES {
     path := fmt.tprintf("assets/particles/%s.png", name)
@@ -112,6 +111,7 @@ update :: proc(app: ^App, dt: f32) {
     em.velocity_spread   = f32(velocity_spread)
     em.color_start       = color_start
     em.color_end         = color_end
+    render.set_emitter(&app.renderer, emitter_handle, em^)
   }
   world.update(&app.scene)
   for i in world.removed_nodes(&app.scene) do render.stage_slot_removal(&app.renderer, i)

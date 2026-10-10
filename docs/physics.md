@@ -50,23 +50,67 @@ mark bodies below KILL_Y dead (deferred removal next rebuild)
   removed at the next BVH rebuild — keeps handle generations stable
   inside a single step.
 
+## World
+
+`init(&w, gravity, enable_parallel)` and `shutdown(&w)` own the world;
+`teardown(&w)` destroys every body and trigger but keeps the world
+ready for reuse. `step(&w, dt)` advances one frame in `NUM_SUBSTEPS`
+substeps. `w.gravity` is read every step; setting `w.paused = true`
+makes `step` a no-op. After each step
+`w.last_perf` holds a `PerfFrame` of timings and counters, and
+`w.dynamic_contacts` / `w.static_contacts` hold the frame's contact
+manifolds (read-only, for debug drawing).
+
+Bodies are addressed by `DynamicRigidBodyHandle`,
+`StaticRigidBodyHandle` and `TriggerHandle`. `get_dynamic_body`,
+`get_static_body` and `get_trigger` (overloaded as `get`) return a
+pointer to the `DynamicRigidBody`, `StaticRigidBody` or `TriggerBody`
+(`ok = false` for a stale handle). The solver, CCD, narrow phase and
+parallel stepping are package-private.
+
 ## Colliders
 
 `Collider` is a union of `SphereCollider`, `BoxCollider`,
 `CylinderCollider`, `FanCollider` (a cylinder wedge — useful for
 cone-of-influence triggers). `create_dynamic_body` sets the body's
-inertia tensor from its collider and mass; `set_inertia_from_collider`
-recomputes it after the mass changes.
+inertia tensor from its collider and mass; `set_body_mass` recomputes
+it from the collider at the new mass.
+
+## Creating and destroying
+
+```odin
+h := physics.create_dynamic_body(&w, pos, rot, mass, collider, user = node)
+s := physics.create_static_body(&w, pos, rot, collider, user = node)
+t := physics.create_trigger(&w, pos, rot, collider, user = node)
+physics.destroy_body(&w, h) // or destroy_trigger
+```
 
 ## Moving and reshaping bodies
 
-`set_body_pose(&w, handle, position, rotation)` and
-`set_body_collider(&w, handle, collider)` work on dynamic bodies,
-static bodies and triggers. They keep the cached bounds and the BVH
+Plain fields are written through the body pointer:
+`restitution`, `friction` (dynamic and static), `linear_damping`,
+`angular_damping` (dynamic). Anything that has to keep derived state
+consistent goes through a setter on a handle; an invalid handle is
+ignored.
+
+| Proc | Applies to |
+|---|---|
+| `set_body_pose(&w, h, position, rotation)` | dynamic, static, trigger |
+| `set_body_collider(&w, h, collider)` | dynamic, static, trigger |
+| `set_body_mass(&w, h, mass)` | dynamic |
+| `set_velocity(&w, h, v)` / `set_angular_velocity(&w, h, w)` | dynamic |
+| `apply_force(&w, h, f)` / `apply_impulse(&w, h, j)` | dynamic |
+
+Pose and collider setters keep the cached bounds and the BVH
 consistent: static bodies refit the static BVH at once, dynamic bodies
 wake up and are refit by the next `step`, and a new dynamic collider
-also resets the inertia. Never write `position`, `rotation` or
-`collider` on a body directly.
+also resets the inertia. Velocity setters, forces and impulses wake the
+body. Forces accumulate until the next `step` and are cleared after it.
+
+Reads go through the body pointer (`body.position`, `body.rotation`,
+`body.velocity`, `body.angular_velocity`). `body_poses(&w)`
+lists the poses of awake dynamic bodies with a `user` link, for copying
+into the scene graph after `step`.
 
 ## Raycasts
 
@@ -80,4 +124,6 @@ starts inside a shape hits at `t = 0`.
 Triggers don't generate contact responses. They overlap-test only.
 `trigger_overlaps` and `trigger_static_overlaps` are
 populated each step for continuous-overlap events; on-demand
-snapshots are available via `query_trigger*`.
+snapshots are available via `query_trigger`, `query_trigger_static`
+and `query_triggers_in_sphere`. `query_sphere` and `query_box` return
+the dynamic bodies overlapping a volume.

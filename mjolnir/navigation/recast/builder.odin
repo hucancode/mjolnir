@@ -5,6 +5,7 @@ import "core:log"
 import "core:math/linalg"
 import "core:slice"
 
+@(private)
 Contour :: struct {
   verts:  [][4]i32,
   rverts: [][4]i32,
@@ -12,6 +13,7 @@ Contour :: struct {
   area:   u8,
 }
 
+@(private)
 Contour_Set :: struct {
   conts:       [dynamic]Contour,
   bmin:        [3]f32,
@@ -24,12 +26,15 @@ Contour_Set :: struct {
   max_error:   f32,
 }
 
+@(private)
 Contour_Tess_Flag :: enum {
   WALL_EDGES = 0,
   AREA_EDGES = 1,
 }
+@(private)
 Contour_Tess_Flags :: bit_set[Contour_Tess_Flag;u32]
 
+@(private)
 Potential_Diagonal :: struct {
   vert: i32,
   dist: i32,
@@ -123,12 +128,14 @@ build_navmesh :: proc(
 }
 
 // Data structures for hole merging
+@(private)
 Contour_Hole :: struct {
   contour:    ^Contour,
   minx, minz: i32,
   leftmost:   i32,
 }
 
+@(private)
 Contour_Region :: struct {
   outline: ^Contour,
   holes:   []Contour_Hole,
@@ -136,6 +143,7 @@ Contour_Region :: struct {
 }
 
 // Build compact heightfield from regular heightfield
+@(private)
 build_compact_heightfield :: proc(
   walkable_height, walkable_climb: i32,
   hf: ^Heightfield,
@@ -245,6 +253,7 @@ build_compact_heightfield :: proc(
 }
 
 // Find the leftmost vertex of a contour
+@(private)
 find_leftmost_vertex :: proc(
   contour: ^Contour,
 ) -> (
@@ -266,6 +275,7 @@ find_leftmost_vertex :: proc(
 }
 
 // Check if vertex pj is inside cone at vertex i
+@(private)
 in_cone_hole :: proc(i: i32, verts: [][4]i32, pj: [4]i32) -> bool {
   n := i32(len(verts))
   pi := verts[i]
@@ -275,6 +285,7 @@ in_cone_hole :: proc(i: i32, verts: [][4]i32, pj: [4]i32) -> bool {
 }
 
 // Check if segment d0-d1 intersects with contour
+@(private)
 intersect_segment_contour :: proc(
   d0, d1: [4]i32,
   i: i32,
@@ -301,6 +312,7 @@ intersect_segment_contour :: proc(
 }
 
 // Merge two contours
+@(private)
 merge_contours :: proc(ca, cb: ^Contour, ia, ib: int) -> bool {
   na := len(ca.verts)
   nb := len(cb.verts)
@@ -329,6 +341,7 @@ merge_contours :: proc(ca, cb: ^Contour, ia, ib: int) -> bool {
 }
 
 // Merge region holes into outline
+@(private)
 merge_region_holes :: proc(reg: ^Contour_Region) {
   // Sort holes from left to right
   slice.sort_by(reg.holes[:reg.nholes], proc(a, b: Contour_Hole) -> bool {
@@ -403,6 +416,7 @@ merge_region_holes :: proc(reg: ^Contour_Region) {
 }
 
 // Build contours from compact heightfield
+@(private)
 build_contours :: proc(
   chf: ^Compact_Heightfield,
   max_error: f32,
@@ -645,6 +659,7 @@ build_contours :: proc(
 
 // Walk along the boundary of a region to extract contour vertices
 // Returns true if boundary walk completed successfully, false if algorithm cannot proceed
+@(private)
 walk_contour_boundary :: proc(
   x, y, i: i32,
   chf: ^Compact_Heightfield,
@@ -789,6 +804,7 @@ walk_contour_boundary :: proc(
 }
 
 // Get height at corner, considering neighboring spans
+@(private)
 get_corner_height_for_contour :: proc(
   x, y, i, dir: i32,
   chf: ^Compact_Heightfield,
@@ -888,6 +904,7 @@ get_corner_height_for_contour :: proc(
 }
 
 // Remove degenerate segments from contour
+@(private)
 remove_degenerate_contour_segments :: proc(simplified: ^[dynamic][4]i32) {
   // Remove adjacent vertices which are equal on xz-plane,
   // or else the triangulator will get confused.
@@ -933,6 +950,7 @@ destroy_contour_set :: proc(cset: ^Contour_Set) {
   free(cset)
 }
 
+@(private)
 simplify_contour :: proc(
   raw_verts: [][4]i32,
   simplified: ^[dynamic][4]i32,

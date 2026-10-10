@@ -1,6 +1,7 @@
 package detour
 
 
+@(private)
 Data_Validation_Result :: struct {
   valid:       bool,
   error_count: int,
@@ -61,6 +62,7 @@ validate_tile_data :: proc(data: []u8) -> (result: Data_Validation_Result) {
   return
 }
 
+@(private)
 calculate_expected_tile_size :: proc(header: ^Mesh_Header) -> int {
   size := size_of(Mesh_Header)
   size += size_of([3]f32) * int(header.vert_count)
@@ -74,12 +76,14 @@ calculate_expected_tile_size :: proc(header: ^Mesh_Header) -> int {
   return size
 }
 
+@(private)
 validate_navmesh_header :: proc(header: ^Mesh_Header) -> Status {
   if header == nil do return {.Invalid_Param}
   if header.poly_count < 0 || header.vert_count < 0 do return {.Invalid_Param}
   return {.Success}
 }
 
+@(private)
 verify_data_layout :: proc(data: []u8, header: ^Mesh_Header) -> bool {
   _, map_status := navmesh_create_memory_map(data)
   return !!status_succeeded(map_status)

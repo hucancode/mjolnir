@@ -88,7 +88,7 @@ frame :: proc(app: ^App) -> bool {
   ok := render.frame(&app.renderer, platform.framebuffer_size(&app.window), platform.dpi_scale(&app.window))
   if mat, found := render.material(&app.renderer, rtt_material_handle); found {
     mat.albedo = render.camera_attachment(&app.renderer, rtt_camera_handle, .FINAL_IMAGE)
-    render.mark_material_dirty(&app.renderer, rtt_material_handle)
+    render.set_material(&app.renderer, rtt_material_handle, mat^)
   }
   return ok
 }

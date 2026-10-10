@@ -1,7 +1,7 @@
+#+private
 package ui
 
 import cont "../containers"
-
 
 compute_layout :: proc(sys: ^System, root: UIWidgetHandle) {
   widget := get_widget(sys, root)

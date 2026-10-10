@@ -9,6 +9,7 @@ import vk "vendor:vulkan"
 BINDING_COUNT :: 6
 MAX_DEPTH_MIPS_LEVEL :: 16
 
+@(private)
 CullPushConstants :: struct {
   camera_index: u32,
   node_count:   u32,

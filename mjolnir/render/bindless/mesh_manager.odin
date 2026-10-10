@@ -32,6 +32,7 @@ MeshManager :: struct {
   index_slab:             cont.SlabAllocator,
 }
 
+@(private)
 VERTEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   block_size, block_count: u32,
 } {
@@ -45,6 +46,7 @@ VERTEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   {block_size = 0, block_count = 0},
 }
 
+@(private)
 INDEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   block_size, block_count: u32,
 } {

@@ -129,3 +129,19 @@ clip_sample_trs :: proc(self: ^Clip, channel: int, t: f32, out: ^TRS) {
   if v, ok := r.?; ok do out.rotation = v
   if v, ok := s.?; ok do out.scale = v
 }
+
+// Advance `self` by `delta_time`, sample `channel` of `clip` over `rest`, and
+// return the resulting local matrix. Components the channel does not animate
+// keep their `rest` value.
+clip_player_update :: proc(
+  self: ^ClipPlayer,
+  clip: ^Clip,
+  delta_time: f32,
+  rest := TRS_IDENTITY,
+  channel := 0,
+) -> matrix[4, 4]f32 {
+  playback_advance(self, clip.duration, delta_time)
+  trs := rest
+  clip_sample_trs(clip, channel, self.time, &trs)
+  return trs_matrix(trs)
+}

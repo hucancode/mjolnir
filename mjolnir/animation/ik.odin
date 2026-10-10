@@ -142,6 +142,7 @@ apply_twist_constraint :: proc(
 //
 // `positions`/`rotations` hold the skeleton-space FK pose of every bone,
 // indexed by bone. The chain's entries are overwritten with the solved pose.
+@(private)
 fabrik_solve :: proc(positions: [][3]f32, rotations: []quaternion128, target: IKTarget) {
   if !target.enabled || target.weight <= 0.0 do return
   chain_length := len(target.bone_indices)

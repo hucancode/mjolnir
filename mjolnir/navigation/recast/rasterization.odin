@@ -5,12 +5,14 @@ import "core:math"
 import "core:math/linalg"
 
 // Axis enumeration for polygon division
+@(private)
 Axis :: enum {
   X = 0,
   Y = 1,
   Z = 2,
 }
 
+@(private)
 add_span :: proc(
   hf: ^Heightfield,
   x, z: i32,
@@ -100,6 +102,7 @@ add_span :: proc(
   return true
 }
 
+@(private)
 divide_poly :: proc(
   in_verts, out_verts1, out_verts2: [][3]f32,
   axis_offset: f32,
@@ -151,6 +154,7 @@ divide_poly :: proc(
   return
 }
 
+@(private)
 rasterize_triangle_with_inverse_cs :: proc(
   v0, v1, v2: [3]f32,
   area_id: u8,
@@ -254,6 +258,7 @@ rasterize_triangle_with_inverse_cs :: proc(
 }
 
 // Rasterize a single triangle
+@(private)
 rasterize_triangle :: proc(
   v0, v1, v2: [3]f32,
   area_id: u8,
@@ -311,6 +316,7 @@ rasterize_triangles :: proc(
 }
 
 // Clear unwalkable triangles (mark steep slopes as non-walkable)
+@(private)
 clear_unwalkable_triangles :: proc(
   walkable_slope: f32,
   verts: [][3]f32,
@@ -334,6 +340,7 @@ clear_unwalkable_triangles :: proc(
 }
 
 // Mark triangles by their walkable slope
+@(private)
 mark_walkable_triangles :: proc(
   walkable_slope: f32,
   verts: [][3]f32,
