@@ -17,17 +17,12 @@ Kind :: enum {
 // include_flags / exclude_flags use the bit layout of render.NodeFlagSet; the
 // caller transmutes its NodeFlagSet to u32 so this package stays unaware of
 // render's NodeFlag enum.
-CullPushConstants :: struct($Shape: typeid) {
-  shape:         Shape,
+CullPushConstants :: struct {
+  planes:        [6][4]f32,
   node_count:    u32,
   max_draws:     u32,
   include_flags: u32,
   exclude_flags: u32,
-}
-
-Sphere :: struct {
-  center: [3]f32,
-  radius: f32,
 }
 
 FrustumDepthPushConstants :: struct {
@@ -43,8 +38,6 @@ SphereDepthPushConstants :: struct {
 
 @(private = "file")
 KindDesc :: struct {
-  cull:              []u8,
-  cull_push_size:    u32,
   depth_vert:        []u8,
   depth_geom:        []u8,
   depth_frag:        []u8,
@@ -56,16 +49,12 @@ KindDesc :: struct {
 @(private = "file")
 KINDS := [Kind]KindDesc {
   .FRUSTUM = {
-    cull = #load("../shader/shadow/cull.spv"),
-    cull_push_size = size_of(CullPushConstants([6][4]f32)),
     depth_vert = #load("../shader/shadow/vert.spv"),
     depth_push_stages = {.VERTEX},
     depth_push_size = size_of(FrustumDepthPushConstants),
     front_face = .COUNTER_CLOCKWISE,
   },
   .SPHERE = {
-    cull = #load("../shader/shadow_spherical/cull.spv"),
-    cull_push_size = size_of(CullPushConstants(Sphere)),
     depth_vert = #load("../shader/shadow_spherical/vert.spv"),
     depth_geom = #load("../shader/shadow_spherical/geom.spv"),
     depth_frag = #load("../shader/shadow_spherical/frag.spv"),
@@ -85,8 +74,8 @@ System :: struct {
   include_flags:          u32,
   exclude_flags:          u32,
   cull_descriptor_layout: vk.DescriptorSetLayout,
-  cull_pipeline_layouts:  [Kind]vk.PipelineLayout,
-  cull_pipelines:         [Kind]vk.Pipeline,
+  cull_pipeline_layout:   vk.PipelineLayout,
+  cull_pipeline:          vk.Pipeline,
   depth_pipeline_layouts: [Kind]vk.PipelineLayout,
   depth_pipelines:        [Kind]vk.Pipeline,
 }
@@ -108,6 +97,7 @@ safe_normalize :: proc(v: [3]f32, fallback: [3]f32) -> [3]f32 {
   return linalg.normalize(v)
 }
 
+@(private)
 make_light_view :: proc(position, direction: [3]f32) -> matrix[4, 4]f32 {
   forward := safe_normalize(direction, {0, -1, 0})
   up := [3]f32{0, 1, 0}
@@ -196,22 +186,22 @@ init :: proc(
     {.STORAGE_BUFFER, {.COMPUTE}}, // draw_count
     {.STORAGE_BUFFER, {.COMPUTE}}, // draw_commands
   ) or_return
+  self.cull_pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange{stageFlags = {.COMPUTE}, size = size_of(CullPushConstants)},
+    self.cull_descriptor_layout,
+  ) or_return
+  cull_shader := gpu.create_shader_module(
+    gctx.device,
+    #load("../shader/shadow/cull.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gctx.device, cull_shader, nil)
+  self.cull_pipeline = gpu.create_compute_pipeline(
+    gctx,
+    cull_shader,
+    self.cull_pipeline_layout,
+  ) or_return
   for desc, kind in KINDS {
-    self.cull_pipeline_layouts[kind] = gpu.create_pipeline_layout(
-      gctx,
-      vk.PushConstantRange {
-        stageFlags = {.COMPUTE},
-        size = desc.cull_push_size,
-      },
-      self.cull_descriptor_layout,
-    ) or_return
-    cull_shader := gpu.create_shader_module(gctx.device, desc.cull) or_return
-    defer vk.DestroyShaderModule(gctx.device, cull_shader, nil)
-    self.cull_pipelines[kind] = gpu.create_compute_pipeline(
-      gctx,
-      cull_shader,
-      self.cull_pipeline_layouts[kind],
-    ) or_return
     self.depth_pipeline_layouts[kind] = bindless.create_scene_pipeline_layout(
       gctx,
       scene,
@@ -247,13 +237,13 @@ shutdown :: proc(self: ^System, gctx: ^gpu.GPUContext) {
   for kind in Kind {
     vk.DestroyPipeline(gctx.device, self.depth_pipelines[kind], nil)
     vk.DestroyPipelineLayout(gctx.device, self.depth_pipeline_layouts[kind], nil)
-    vk.DestroyPipeline(gctx.device, self.cull_pipelines[kind], nil)
-    vk.DestroyPipelineLayout(gctx.device, self.cull_pipeline_layouts[kind], nil)
   }
+  vk.DestroyPipeline(gctx.device, self.cull_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.cull_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(gctx.device, self.cull_descriptor_layout, nil)
   self.cull_descriptor_layout = 0
-  self.cull_pipeline_layouts = {}
-  self.cull_pipelines = {}
+  self.cull_pipeline_layout = 0
+  self.cull_pipeline = 0
   self.depth_pipeline_layouts = {}
   self.depth_pipelines = {}
 }
@@ -279,17 +269,28 @@ create_per_light_descriptor :: proc(
   )
 }
 
-// cull writes the light's indirect draw list. `shape` is the light frustum
-// planes for FRUSTUM lights or a Sphere for SPHERE lights.
+// Planes of the axis-aligned box around a sphere, in the plane form cull
+// takes; point lights cull against it.
+box_planes :: proc(center: [3]f32, radius: f32) -> (planes: [6][4]f32) {
+  for axis in 0 ..< 3 {
+    n: [3]f32
+    n[axis] = 1
+    planes[axis * 2] = {n.x, n.y, n.z, radius - center[axis]}
+    planes[axis * 2 + 1] = {-n.x, -n.y, -n.z, radius + center[axis]}
+  }
+  return
+}
+
+// cull writes the light's indirect draw list from the nodes whose bounds
+// touch the inside of every plane.
 cull :: proc(
   self: ^System,
   command_buffer: vk.CommandBuffer,
   node_count: u32,
-  shape: $Shape,
+  planes: [6][4]f32,
   draw_count_buffer: vk.Buffer,
   descriptor_set: vk.DescriptorSet,
-) where Shape == Sphere || Shape == [6][4]f32 {
-  kind := Kind.SPHERE when Shape == Sphere else Kind.FRUSTUM
+) {
   dispatch_x := (node_count + 63) / 64
   vk.CmdFillBuffer(
     command_buffer,
@@ -307,14 +308,15 @@ cull :: proc(
     {.TRANSFER},
     {.COMPUTE_SHADER},
   )
-  gpu.bind_compute_pipeline(
+  gpu.bind_pipeline(
     command_buffer,
-    self.cull_pipelines[kind],
-    self.cull_pipeline_layouts[kind],
+    .COMPUTE,
+    self.cull_pipeline,
+    self.cull_pipeline_layout,
     descriptor_set,
   )
-  push := CullPushConstants(Shape) {
-    shape         = shape,
+  push := CullPushConstants {
+    planes        = planes,
     node_count    = node_count,
     max_draws     = self.max_draws,
     include_flags = self.include_flags,
@@ -322,7 +324,7 @@ cull :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    self.cull_pipeline_layouts[kind],
+    self.cull_pipeline_layout,
     {.COMPUTE},
     0,
     size_of(push),
@@ -353,7 +355,7 @@ record_frustum :: proc(
     command_buffer,
     scene,
     depth_texture.image,
-    gpu.create_depth_attachment(depth_texture, .CLEAR, .STORE),
+    gpu.create_depth_attachment(depth_texture.view),
     1,
     &push,
     draw_command.buffer,
@@ -395,7 +397,7 @@ record_sphere :: proc(
     command_buffer,
     scene,
     depth_cube.image,
-    gpu.create_cube_depth_attachment(depth_cube, .CLEAR, .STORE),
+    gpu.create_depth_attachment(depth_cube.view),
     6,
     &push,
     draw_command.buffer,
@@ -442,7 +444,6 @@ draw_depth :: proc(
   draw_buffer: vk.Buffer,
   count_buffer: vk.Buffer,
 ) {
-  depth_attachment := depth_attachment
   extent := vk.Extent2D{self.shadow_map_size, self.shadow_map_size}
   gpu.image_discard_barrier(
     command_buffer,
@@ -452,10 +453,10 @@ draw_depth :: proc(
     {.DEPTH},
     layer_count = layer_count,
   )
-  gpu.begin_depth_rendering(
+  gpu.begin_rendering(
     command_buffer,
     extent,
-    &depth_attachment,
+    depth_attachment,
     layer_count = layer_count,
   )
   // The cube pass renders all faces through the geometry shader and keeps

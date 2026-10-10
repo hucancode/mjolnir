@@ -59,8 +59,8 @@ spawn_primitive_mesh :: proc(
 ) #optional_ok {
   handle = spawn_mesh(
     engine,
-    render.get_builtin_mesh(&engine.render, primitive),
-    render.get_builtin_material(&engine.render, color),
+    engine.render.builtin_meshes[primitive],
+    engine.render.builtin_materials[color],
     position,
     cast_shadow,
     parent,

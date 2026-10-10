@@ -17,20 +17,13 @@ PREFILTER_SAMPLES :: 1024
 IRRADIANCE_SAMPLE_DELTA :: f32(0.025)
 CUBE_FORMAT :: vk.Format.R16G16B16A16_SFLOAT
 
-EquirectPush :: struct {
-  face_size: u32,
-}
-
-IrradiancePush :: struct {
+// Push constants of the three precompute shaders. Each reads a prefix:
+// equirect face_size; irradiance face_size + sample_delta (as `value`);
+// prefilter all three, roughness as `value`.
+PrecomputePush :: struct {
   face_size:    u32,
-  sample_delta: f32,
-}
-
-PrefilterPush :: struct {
-  face_size:     u32,
-  roughness:     f32,
-  sample_count:  u32,
-  env_face_size: f32,
+  value:        f32,
+  sample_count: u32,
 }
 
 // Outputs from a single precompute run. The caller owns the handles and must
@@ -39,7 +32,6 @@ IBLResults :: struct {
   env_cube:           bindless.TextureCubeHandle,
   irradiance_cube:    bindless.TextureCubeHandle,
   prefilter_cube:     bindless.TextureCubeHandle,
-  prefilter_max_lod:  f32,
 }
 
 // Precompute IBL cubemaps from an equirectangular HDR source texture.
@@ -61,28 +53,30 @@ precompute :: proc(
   }
 
   // Allocate the three output cubemaps and register in bindless descriptor.
-  results.env_cube = bindless.allocate_texture_cube_color(
+  results.env_cube = bindless.allocate_texture_cube(
     texture_manager,
     gctx,
     ENV_CUBE_SIZE,
     CUBE_FORMAT,
+    {.SAMPLED, .STORAGE},
     1,
   ) or_return
-  results.irradiance_cube = bindless.allocate_texture_cube_color(
+  results.irradiance_cube = bindless.allocate_texture_cube(
     texture_manager,
     gctx,
     IRRADIANCE_SIZE,
     CUBE_FORMAT,
+    {.SAMPLED, .STORAGE},
     1,
   ) or_return
-  results.prefilter_cube = bindless.allocate_texture_cube_color(
+  results.prefilter_cube = bindless.allocate_texture_cube(
     texture_manager,
     gctx,
     PREFILTER_SIZE,
     CUBE_FORMAT,
+    {.SAMPLED, .STORAGE},
     PREFILTER_MIPS,
   ) or_return
-  results.prefilter_max_lod = f32(PREFILTER_MIPS - 1)
 
   env_img := bindless.get_texture_cube(texture_manager, results.env_cube)
   irr_img := bindless.get_texture_cube(texture_manager, results.irradiance_cube)
@@ -92,7 +86,7 @@ precompute :: proc(
   // address all 6 faces of a *single* mip level at a time.
   env_storage_view := gpu.image_create_view(
     gctx.device,
-    &env_img.base,
+    env_img,
     .D2_ARRAY,
     0, 1, 0, 6,
   ) or_return
@@ -100,7 +94,7 @@ precompute :: proc(
 
   irr_storage_view := gpu.image_create_view(
     gctx.device,
-    &irr_img.base,
+    irr_img,
     .D2_ARRAY,
     0, 1, 0, 6,
   ) or_return
@@ -110,7 +104,7 @@ precompute :: proc(
   for i in 0 ..< u32(PREFILTER_MIPS) {
     pre_storage_views[i] = gpu.image_create_view(
       gctx.device,
-      &pre_img.base,
+      pre_img,
       .D2_ARRAY,
       i, 1, 0, 6,
     ) or_return
@@ -122,26 +116,12 @@ precompute :: proc(
   if layout_ret != .SUCCESS do return results, layout_ret
   defer vk.DestroyDescriptorSetLayout(gctx.device, ds_layout, nil)
 
-  equirect_layout := gpu.create_pipeline_layout(
+  layout := gpu.create_pipeline_layout(
     gctx,
-    vk.PushConstantRange{stageFlags = {.COMPUTE}, size = size_of(EquirectPush)},
+    vk.PushConstantRange{stageFlags = {.COMPUTE}, size = size_of(PrecomputePush)},
     ds_layout,
   ) or_return
-  defer vk.DestroyPipelineLayout(gctx.device, equirect_layout, nil)
-
-  irradiance_layout := gpu.create_pipeline_layout(
-    gctx,
-    vk.PushConstantRange{stageFlags = {.COMPUTE}, size = size_of(IrradiancePush)},
-    ds_layout,
-  ) or_return
-  defer vk.DestroyPipelineLayout(gctx.device, irradiance_layout, nil)
-
-  prefilter_layout := gpu.create_pipeline_layout(
-    gctx,
-    vk.PushConstantRange{stageFlags = {.COMPUTE}, size = size_of(PrefilterPush)},
-    ds_layout,
-  ) or_return
-  defer vk.DestroyPipelineLayout(gctx.device, prefilter_layout, nil)
+  defer vk.DestroyPipelineLayout(gctx.device, layout, nil)
 
   equirect_mod := gpu.create_shader_module(gctx.device, SHADER_EQUIRECT) or_return
   defer vk.DestroyShaderModule(gctx.device, equirect_mod, nil)
@@ -150,20 +130,19 @@ precompute :: proc(
   prefilter_mod := gpu.create_shader_module(gctx.device, SHADER_PREFILTER) or_return
   defer vk.DestroyShaderModule(gctx.device, prefilter_mod, nil)
 
-  equirect_pipe := gpu.create_compute_pipeline(gctx, equirect_mod, equirect_layout) or_return
+  equirect_pipe := gpu.create_compute_pipeline(gctx, equirect_mod, layout) or_return
   defer vk.DestroyPipeline(gctx.device, equirect_pipe, nil)
-  irradiance_pipe := gpu.create_compute_pipeline(gctx, irradiance_mod, irradiance_layout) or_return
+  irradiance_pipe := gpu.create_compute_pipeline(gctx, irradiance_mod, layout) or_return
   defer vk.DestroyPipeline(gctx.device, irradiance_pipe, nil)
-  prefilter_pipe := gpu.create_compute_pipeline(gctx, prefilter_mod, prefilter_layout) or_return
+  prefilter_pipe := gpu.create_compute_pipeline(gctx, prefilter_mod, layout) or_return
   defer vk.DestroyPipeline(gctx.device, prefilter_pipe, nil)
 
   // One descriptor set per dispatch (equirect, irradiance, + N for prefilter mips).
   // Prefilter samples from the env cubemap (read via env_img.view) but writes
   // to per-mip views; we allocate PREFILTER_MIPS sets so writes don't alias.
-  total_sets := 2 + PREFILTER_MIPS
   ds: [2 + PREFILTER_MIPS]vk.DescriptorSet
-  ds_slice := ds[:total_sets]
-  gpu.allocate_descriptor_set(gctx, ds_slice, ds_layout) or_return
+  defer gpu.free_descriptor_sets(gctx, ..ds[:])
+  for &set in ds do gpu.allocate_descriptor_set(gctx, &set, &ds_layout) or_return
 
   // ds[0]: equirect sampler2D -> env cube storage
   write_compute_ds(
@@ -205,11 +184,9 @@ precompute :: proc(
     layer_count = 6,
   )
   vk.CmdBindPipeline(cmd, .COMPUTE, equirect_pipe)
-  vk.CmdBindDescriptorSets(cmd, .COMPUTE, equirect_layout, 0, 1, &ds[0], 0, nil)
-  ep := EquirectPush{face_size = ENV_CUBE_SIZE}
-  vk.CmdPushConstants(
-    cmd, equirect_layout, {.COMPUTE}, 0, size_of(EquirectPush), &ep,
-  )
+  vk.CmdBindDescriptorSets(cmd, .COMPUTE, layout, 0, 1, &ds[0], 0, nil)
+  ep := PrecomputePush{face_size = ENV_CUBE_SIZE}
+  vk.CmdPushConstants(cmd, layout, {.COMPUTE}, 0, size_of(ep), &ep)
   vk.CmdDispatch(cmd, (ENV_CUBE_SIZE + 7) / 8, (ENV_CUBE_SIZE + 7) / 8, 6)
 
   // Make env cubemap writes visible to downstream sampling.
@@ -229,14 +206,9 @@ precompute :: proc(
     layer_count = 6,
   )
   vk.CmdBindPipeline(cmd, .COMPUTE, irradiance_pipe)
-  vk.CmdBindDescriptorSets(cmd, .COMPUTE, irradiance_layout, 0, 1, &ds[1], 0, nil)
-  ip := IrradiancePush{
-    face_size = IRRADIANCE_SIZE,
-    sample_delta = IRRADIANCE_SAMPLE_DELTA,
-  }
-  vk.CmdPushConstants(
-    cmd, irradiance_layout, {.COMPUTE}, 0, size_of(IrradiancePush), &ip,
-  )
+  vk.CmdBindDescriptorSets(cmd, .COMPUTE, layout, 0, 1, &ds[1], 0, nil)
+  ip := PrecomputePush{face_size = IRRADIANCE_SIZE, value = IRRADIANCE_SAMPLE_DELTA}
+  vk.CmdPushConstants(cmd, layout, {.COMPUTE}, 0, size_of(ip), &ip)
   vk.CmdDispatch(cmd, (IRRADIANCE_SIZE + 7) / 8, (IRRADIANCE_SIZE + 7) / 8, 6)
   gpu.memory_barrier(
     cmd,
@@ -258,17 +230,9 @@ precompute :: proc(
   for i in 0 ..< u32(PREFILTER_MIPS) {
     mip_size := u32(max(PREFILTER_SIZE >> i, 1))
     roughness := f32(i) / f32(PREFILTER_MIPS - 1)
-    pp := PrefilterPush{
-      face_size     = mip_size,
-      roughness     = roughness,
-      sample_count  = PREFILTER_SAMPLES,
-      env_face_size = ENV_CUBE_SIZE,
-    }
-    ds_ptr := &ds[2 + i]
-    vk.CmdBindDescriptorSets(cmd, .COMPUTE, prefilter_layout, 0, 1, ds_ptr, 0, nil)
-    vk.CmdPushConstants(
-      cmd, prefilter_layout, {.COMPUTE}, 0, size_of(PrefilterPush), &pp,
-    )
+    pp := PrecomputePush{face_size = mip_size, value = roughness, sample_count = PREFILTER_SAMPLES}
+    vk.CmdBindDescriptorSets(cmd, .COMPUTE, layout, 0, 1, &ds[2 + i], 0, nil)
+    vk.CmdPushConstants(cmd, layout, {.COMPUTE}, 0, size_of(pp), &pp)
     vk.CmdDispatch(cmd, (mip_size + 7) / 8, (mip_size + 7) / 8, 6)
   }
   gpu.memory_barrier(
@@ -285,6 +249,7 @@ precompute :: proc(
   return results, .SUCCESS
 }
 
+@(private)
 free_results :: proc(
   gctx: ^gpu.GPUContext,
   texture_manager: ^bindless.TextureManager,

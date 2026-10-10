@@ -7,13 +7,12 @@ import "debug_line"
 import "particles"
 import vk "vendor:vulkan"
 
-// CPU-side mesh. GPU vertex/index allocations live in mesh_data_buffer at the
-// same index and are (re)built from cpu_geometry by flush.
+// CPU-side mesh. flush uploads cpu_geometry into the mesh manager and
+// describes it in mesh_data_buffer at the same index.
 Mesh :: struct {
-  aabb_min:                [3]f32,
-  aabb_max:                [3]f32,
   cpu_geometry:            Maybe(mesh.Geometry),
   auto_purge_cpu_geometry: bool,
+  allocations:             bindless.MeshAllocations,
 }
 
 Material :: struct {
@@ -27,7 +26,6 @@ Material :: struct {
   metallic_roughness: bindless.Texture2DHandle,
   normal:             bindless.Texture2DHandle,
   emissive:           bindless.Texture2DHandle,
-  occlusion:          bindless.Texture2DHandle,
 }
 
 Sprite :: struct {
@@ -42,9 +40,7 @@ Emitter :: struct {
   size_start:        f32,
   color_start:       [4]f32,
   color_end:         [4]f32,
-  aabb_min:          [3]f32,
   emission_rate:     f32,
-  aabb_max:          [3]f32,
   particle_lifetime: f32,
   position_spread:   f32,
   velocity_spread:   f32,
@@ -84,6 +80,7 @@ init_resource_pools :: proc(self: ^Manager) {
 
 @(private)
 destroy_resource_pools :: proc(self: ^Manager) {
+  // the mesh manager is already gone: release CPU memory only
   cont.flush(&self.meshes, nil, mesh_retire)
   cont.flush(&self.materials, nil, nil)
   cont.destroy(&self.meshes, mesh_release_memory)
@@ -95,7 +92,7 @@ destroy_resource_pools :: proc(self: ^Manager) {
 
 @(private)
 tick_resource_pools :: proc(self: ^Manager) {
-  cont.tick(&self.meshes, nil, mesh_retire)
+  cont.tick(&self.meshes, self, mesh_retire)
   cont.tick(&self.materials, nil, nil)
   cont.tick(&self.emitters, nil, nil)
   cont.tick(&self.forcefields, nil, nil)
@@ -126,8 +123,8 @@ forcefield :: proc(r: ^Manager, h: ForceFieldHandle) -> (^ForceField, bool) #opt
 // ---------- meshes ----------
 
 // Creates a mesh. Geometry ownership is transferred to the mesh; the GPU copy
-// is uploaded by flush. With auto_purge the CPU geometry is released once
-// every frame in flight has the upload.
+// is uploaded by flush. With auto_purge the CPU geometry is released right
+// after that upload.
 create_mesh :: proc(
   self: ^Manager,
   geometry_data: mesh.Geometry,
@@ -142,8 +139,6 @@ create_mesh :: proc(
     mesh.delete_geometry(geometry_data)
     return
   }
-  m.aabb_min = geometry_data.aabb.min
-  m.aabb_max = geometry_data.aabb.max
   m.cpu_geometry = geometry_data
   m.auto_purge_cpu_geometry = auto_purge
   stage(self, &self.internal.staging.meshes, handle.index)
@@ -151,8 +146,6 @@ create_mesh :: proc(
 }
 
 destroy_mesh :: proc(self: ^Manager, handle: MeshHandle) {
-  if cont.get(self.meshes, handle) == nil do return
-  stage(self, &self.internal.staging.meshes, handle.index, .Remove)
   cont.free_deferred(&self.meshes, handle)
 }
 
@@ -164,8 +157,13 @@ mesh_release_memory :: proc(self: ^Mesh) {
   self.cpu_geometry = nil
 }
 
+// Pool retire callback: no frame in flight reads the mesh any more. `user` is
+// the Manager, or nil once the mesh manager is destroyed.
 @(private)
 mesh_retire :: proc(item: ^Mesh, user: rawptr) {
+  if self := (^Manager)(user); self != nil {
+    bindless.free_mesh(&self.mesh_manager, item.allocations)
+  }
   mesh_release_memory(item)
 }
 
@@ -213,7 +211,6 @@ create_material :: proc(
   metallic_roughness_handle: bindless.Texture2DHandle = {},
   normal_handle: bindless.Texture2DHandle = {},
   emissive_handle: bindless.Texture2DHandle = {},
-  occlusion_handle: bindless.Texture2DHandle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
@@ -231,7 +228,6 @@ create_material :: proc(
     metallic_roughness = metallic_roughness_handle,
     normal             = normal_handle,
     emissive           = emissive_handle,
-    occlusion          = occlusion_handle,
     metallic_value     = metallic_value,
     roughness_value    = roughness_value,
     emissive_value     = emissive_value,
@@ -241,9 +237,7 @@ create_material :: proc(
   return handle, true
 }
 
-// Focused PBR constructor: solid color + metallic/roughness/emissive scalars.
-// For textured variants use `material_textured`. For non-PBR use
-// `material_unlit`, `material_wireframe`, etc.
+// Solid-color PBR material from metallic/roughness/emissive scalars.
 material_pbr :: proc(
   self: ^Manager,
   base_color: [4]f32 = {1, 1, 1, 1},
@@ -258,57 +252,6 @@ material_pbr :: proc(
     metallic_value    = metallic,
     roughness_value   = roughness,
     emissive_value    = emissive,
-  )
-}
-
-// Textured PBR material. Pass any subset of texture handles; pass `{}` to skip.
-material_textured :: proc(
-  self: ^Manager,
-  albedo: bindless.Texture2DHandle = {},
-  metallic_roughness: bindless.Texture2DHandle = {},
-  normal: bindless.Texture2DHandle = {},
-  emissive_tex: bindless.Texture2DHandle = {},
-  occlusion: bindless.Texture2DHandle = {},
-  base_color: [4]f32 = {1, 1, 1, 1},
-  metallic: f32 = 0.0,
-  roughness: f32 = 1.0,
-  emissive: f32 = 0.0,
-) -> (MaterialHandle, bool) #optional_ok {
-  features: ShaderFeatureSet
-  if albedo             != {} do features += {.ALBEDO_TEXTURE}
-  if metallic_roughness != {} do features += {.METALLIC_ROUGHNESS_TEXTURE}
-  if normal             != {} do features += {.NORMAL_TEXTURE}
-  if emissive_tex       != {} do features += {.EMISSIVE_TEXTURE}
-  if occlusion          != {} do features += {.OCCLUSION_TEXTURE}
-  return create_material(
-    self,
-    features                  = features,
-    type                      = .PBR,
-    albedo_handle             = albedo,
-    metallic_roughness_handle = metallic_roughness,
-    normal_handle             = normal,
-    emissive_handle           = emissive_tex,
-    occlusion_handle          = occlusion,
-    metallic_value            = metallic,
-    roughness_value           = roughness,
-    emissive_value            = emissive,
-    base_color_factor         = base_color,
-  )
-}
-
-material_unlit :: proc(
-  self: ^Manager,
-  base_color: [4]f32 = {1, 1, 1, 1},
-  albedo: bindless.Texture2DHandle = {},
-) -> (MaterialHandle, bool) #optional_ok {
-  features: ShaderFeatureSet
-  if albedo != {} do features += {.ALBEDO_TEXTURE}
-  return create_material(
-    self,
-    features          = features,
-    type              = .UNLIT,
-    albedo_handle     = albedo,
-    base_color_factor = base_color,
   )
 }
 
@@ -327,25 +270,7 @@ material_transparent :: proc(
 }
 
 destroy_material :: proc(self: ^Manager, handle: MaterialHandle) -> bool {
-  if cont.get(self.materials, handle) == nil do return false
-  stage(self, &self.internal.staging.materials, handle.index, .Remove)
-  return cont.free_deferred(&self.materials, handle)
-}
-
-// Mutate-and-stage an existing material. Only non-nil Maybe fields update.
-set_material_pbr_params :: proc(
-  self: ^Manager,
-  handle: MaterialHandle,
-  metallic: Maybe(f32) = nil,
-  roughness: Maybe(f32) = nil,
-  emissive: Maybe(f32) = nil,
-  base_color: Maybe([4]f32) = nil,
-) -> bool {
-  mat := cont.get(self.materials, handle) or_return
-  if v, has := metallic.?;   has do mat.metallic_value    = v
-  if v, has := roughness.?;  has do mat.roughness_value   = v
-  if v, has := emissive.?;   has do mat.emissive_value    = v
-  if v, has := base_color.?; has do mat.base_color_factor = v
+  cont.free_deferred(&self.materials, handle) or_return
   stage(self, &self.internal.staging.materials, handle.index)
   return true
 }
@@ -356,14 +281,6 @@ mark_material_dirty :: proc(self: ^Manager, handle: MaterialHandle) {
 }
 
 // ---------- builtins ----------
-
-get_builtin_material :: proc(self: ^Manager, color: Color) -> MaterialHandle {
-  return self.builtin_materials[color]
-}
-
-get_builtin_mesh :: proc(self: ^Manager, primitive: Primitive) -> MeshHandle {
-  return self.builtin_meshes[primitive]
-}
 
 @(private)
 init_builtin_materials :: proc(self: ^Manager) {
@@ -390,9 +307,7 @@ init_builtin_meshes :: proc(self: ^Manager) {
   self.builtin_meshes[.QUAD_XZ] = create_mesh(self, mesh.make_quad(), true)
   self.builtin_meshes[.QUAD_XY] = create_mesh(self, mesh.make_billboard_quad(), true)
   self.builtin_meshes[.CONE] = create_mesh(self, mesh.make_cone(), true)
-  self.builtin_meshes[.CAPSULE] = create_mesh(self, mesh.make_capsule(), true)
   self.builtin_meshes[.CYLINDER] = create_mesh(self, mesh.make_cylinder(), true)
-  self.builtin_meshes[.TORUS] = create_mesh(self, mesh.make_torus(), true)
 }
 
 // ---------- sprites ----------
@@ -418,7 +333,9 @@ create_sprite :: proc(
 }
 
 destroy_sprite :: proc(self: ^Manager, handle: SpriteHandle) {
-  cont.free_deferred(&self.sprites, handle)
+  if cont.free_deferred(&self.sprites, handle) {
+    stage(self, &self.internal.staging.sprites, handle.index)
+  }
 }
 
 // Show cell `frame` (row-major, wrapped to the sheet size) of the sprite
@@ -440,8 +357,6 @@ create_emitter :: proc(
   velocity_spread: f32 = 0.5,
   color_start: [4]f32 = {1, 1, 1, 1},
   color_end: [4]f32 = {1, 1, 1, 0},
-  aabb_min: [3]f32 = {-10, -10, -10},
-  aabb_max: [3]f32 = {10, 10, 10},
   particle_lifetime: f32 = 2.0,
   position_spread: f32 = 0.0,
   size_start: f32 = 100.0,
@@ -459,8 +374,6 @@ create_emitter :: proc(
     velocity_spread   = velocity_spread,
     color_start       = color_start,
     color_end         = color_end,
-    aabb_min          = aabb_min,
-    aabb_max          = aabb_max,
     particle_lifetime = particle_lifetime,
     position_spread   = position_spread,
     size_start        = size_start,
@@ -475,45 +388,7 @@ create_emitter :: proc(
 }
 
 destroy_emitter :: proc(self: ^Manager, handle: EmitterHandle) -> bool {
-  return cont.free_deferred(&self.emitters, handle)
-}
-
-// Mutate-and-stage an existing emitter. Only fields with non-nil Maybe values are updated.
-set_emitter :: proc(
-  self: ^Manager,
-  handle: EmitterHandle,
-  texture: Maybe(bindless.Texture2DHandle) = nil,
-  enabled: Maybe(bool) = nil,
-  emission_rate: Maybe(f32) = nil,
-  particle_lifetime: Maybe(f32) = nil,
-  size_start: Maybe(f32) = nil,
-  size_end: Maybe(f32) = nil,
-  weight: Maybe(f32) = nil,
-  weight_spread: Maybe(f32) = nil,
-  position_spread: Maybe(f32) = nil,
-  initial_velocity: Maybe([3]f32) = nil,
-  velocity_spread: Maybe(f32) = nil,
-  color_start: Maybe([4]f32) = nil,
-  color_end: Maybe([4]f32) = nil,
-  aabb_min: Maybe([3]f32) = nil,
-  aabb_max: Maybe([3]f32) = nil,
-) -> bool {
-  em := cont.get(self.emitters, handle) or_return
-  if v, has := texture.?;           has do em.texture_handle    = v
-  if v, has := enabled.?;           has do em.enabled           = b32(v)
-  if v, has := emission_rate.?;     has do em.emission_rate     = v
-  if v, has := particle_lifetime.?; has do em.particle_lifetime = v
-  if v, has := size_start.?;        has do em.size_start        = v
-  if v, has := size_end.?;          has do em.size_end          = v
-  if v, has := weight.?;            has do em.weight            = v
-  if v, has := weight_spread.?;     has do em.weight_spread     = v
-  if v, has := position_spread.?;   has do em.position_spread   = v
-  if v, has := initial_velocity.?;  has do em.initial_velocity  = v
-  if v, has := velocity_spread.?;   has do em.velocity_spread   = v
-  if v, has := color_start.?;       has do em.color_start       = v
-  if v, has := color_end.?;         has do em.color_end         = v
-  if v, has := aabb_min.?;          has do em.aabb_min          = v
-  if v, has := aabb_max.?;          has do em.aabb_max          = v
+  cont.free_deferred(&self.emitters, handle) or_return
   stage(self, &self.internal.staging.emitters, handle.index)
   return true
 }
@@ -541,29 +416,15 @@ create_forcefield :: proc(
 }
 
 destroy_forcefield :: proc(self: ^Manager, handle: ForceFieldHandle) -> bool {
-  return cont.free_deferred(&self.forcefields, handle)
-}
-
-// Mutate-and-stage an existing forcefield. `enabled` toggles without losing config.
-set_forcefield :: proc(
-  self: ^Manager,
-  handle: ForceFieldHandle,
-  strength: Maybe(f32) = nil,
-  tangent_strength: Maybe(f32) = nil,
-  area_of_effect: Maybe(f32) = nil,
-  enabled: Maybe(bool) = nil,
-) -> bool {
-  ff := cont.get(self.forcefields, handle) or_return
-  if v, has := strength.?;         has do ff.strength         = v
-  if v, has := tangent_strength.?; has do ff.tangent_strength = v
-  if v, has := area_of_effect.?;   has do ff.area_of_effect   = v
-  if v, has := enabled.?;          has do ff.enabled          = b32(v)
+  cont.free_deferred(&self.forcefields, handle) or_return
   stage(self, &self.internal.staging.forcefields, handle.index)
   return true
 }
 
-// Advance the render clock (debug line lifetimes) and emitter accumulators.
-// Call once per update tick; `flush` uploads the results.
+// Advance the render clock (debug line lifetimes) and emitter accumulators,
+// and stage every emitter and force field, so edits made through `emitter`
+// and `forcefield` reach the GPU. Call once per update tick; `flush` uploads
+// the results.
 update :: proc(self: ^Manager, delta_time: f32) {
   debug_line.advance(&self.internal.debug_line_renderer, delta_time)
   if delta_time <= 0 do return
@@ -580,12 +441,14 @@ update :: proc(self: ^Manager, delta_time: f32) {
     }
     stage(self, &self.internal.staging.emitters, handle.index)
   }
+  ff_it := cont.iterator(&self.forcefields)
+  for _, handle in cont.next(&ff_it, ForceFieldHandle) {
+    stage(self, &self.internal.staging.forcefields, handle.index)
+  }
   particles.set_params(
     &self.internal.particles,
-    {
-      delta_time       = delta_time,
-      emitter_count    = u32(min(len(self.emitters.entries), MAX_EMITTERS)),
-      forcefield_count = u32(min(len(self.forcefields.entries), MAX_FORCE_FIELDS)),
-    },
+    u32(min(len(self.emitters.entries), MAX_EMITTERS)),
+    u32(min(len(self.forcefields.entries), MAX_FORCE_FIELDS)),
+    delta_time,
   )
 }

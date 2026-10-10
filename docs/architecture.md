@@ -185,10 +185,10 @@ per frame on the render thread.
 
 ## Cameras as first-class render targets
 
-Cameras live in render. Each `Camera` carries a `PassTypeSet` (which
-passes apply) plus per-frame attachments for every G-buffer slot. The
-main view is a camera with the full pass set; a minimap is a camera
-with `{GEOMETRY, LIGHTING}`.
+Cameras live in render. Each `Camera` carries per-frame attachments
+for every G-buffer slot and renders the full scene. The main camera is
+the one post-processed and presented; a minimap is just another
+camera.
 
 `render.camera_attachment(&r, cam, .FINAL_IMAGE, frame)` returns a
 bindless texture handle. Compositing camera B's output into camera
@@ -197,7 +197,7 @@ A's material or UI quad is just another bindless index.
 Following a logical entity is one glue line:
 `render.camera_set_transform(cam, world.world_matrix(&w, player))`.
 Orbit, free and follow controllers are render procs that read the
-per-tick `input.State` through their `CameraBindings`; the engine runs
+per-tick `input.State` with fixed keys; the engine runs
 the active one each update tick.
 
 ---
@@ -221,8 +221,8 @@ infrastructure.
   draw renders all six faces (`-define:REQUIRE_GEOMETRY_SHADER=true`
   required at build).
 
-Shadow buffers are allocated lazily per light on first cast, freed
-when the light's slot is removed.
+Shadow maps live in `MAX_SHADOW_MAPS` fixed slots, handed out each
+frame to the first shadow casters in slot order.
 
 ---
 

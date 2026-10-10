@@ -19,18 +19,18 @@ MeshAllocations :: struct {
   skinning: BufferAllocation,
 }
 
+// Skinning data is a storage buffer read by the vertex shader through
+// skinning_set; vertices and indices are bound as vertex/index buffers.
 MeshManager :: struct {
-  vertex_skinning_buffer: gpu.ImmutableBindlessBuffer(mesh.SkinningData),
+  vertex_skinning_buffer: gpu.ImmutableBuffer(mesh.SkinningData),
+  skinning_set_layout:    vk.DescriptorSetLayout,
+  skinning_set:           vk.DescriptorSet,
   vertex_buffer:          gpu.ImmutableBuffer(mesh.Vertex),
   index_buffer:           gpu.ImmutableBuffer(u32),
   vertex_skinning_slab:   cont.SlabAllocator,
   vertex_slab:            cont.SlabAllocator,
   index_slab:             cont.SlabAllocator,
 }
-
-BINDLESS_VERTEX_BUFFER_SIZE :: 128 * 1024 * 1024
-BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024
-BINDLESS_SKINNING_BUFFER_SIZE :: 128 * 1024 * 1024
 
 VERTEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   block_size, block_count: u32,
@@ -58,189 +58,114 @@ INDEX_SLAB_CONFIG :: [cont.MAX_SLAB_CLASSES]struct {
   {block_size = 2097152, block_count = 4},
 }
 
+// Buffer capacities come from the slab configs, so a slab can never hand out
+// an offset past the end of its buffer.
 mesh_manager_init :: proc(
   manager: ^MeshManager,
   gctx: ^gpu.GPUContext,
 ) -> (
   ret: vk.Result,
 ) {
-  skinning_count := BINDLESS_SKINNING_BUFFER_SIZE / size_of(mesh.SkinningData)
-  log.infof(
-    "Creating vertex skinning buffer with capacity %d entries...",
-    skinning_count,
-  )
-  gpu.immutable_bindless_buffer_init(
-    &manager.vertex_skinning_buffer,
-    gctx,
-    skinning_count,
-    {.VERTEX},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.immutable_bindless_buffer_destroy(&manager.vertex_skinning_buffer, gctx.device)
-  }
   cont.slab_init(&manager.vertex_skinning_slab, VERTEX_SLAB_CONFIG)
-  defer if ret != .SUCCESS {
-    cont.slab_destroy(&manager.vertex_skinning_slab)
-  }
-
-  vertex_count := BINDLESS_VERTEX_BUFFER_SIZE / size_of(mesh.Vertex)
-  index_count := BINDLESS_INDEX_BUFFER_SIZE / size_of(u32)
+  cont.slab_init(&manager.vertex_slab, VERTEX_SLAB_CONFIG)
+  cont.slab_init(&manager.index_slab, INDEX_SLAB_CONFIG)
+  defer if ret != .SUCCESS do mesh_manager_shutdown(manager, gctx)
+  manager.vertex_skinning_buffer = gpu.malloc_buffer(
+    gctx,
+    mesh.SkinningData,
+    int(manager.vertex_skinning_slab.capacity),
+    {.STORAGE_BUFFER},
+  ) or_return
+  manager.skinning_set_layout = gpu.create_descriptor_set_layout(
+    gctx,
+    {.STORAGE_BUFFER, {.VERTEX}},
+  ) or_return
+  manager.skinning_set = gpu.create_descriptor_set(
+    gctx,
+    &manager.skinning_set_layout,
+    {.STORAGE_BUFFER, gpu.buffer_info(&manager.vertex_skinning_buffer)},
+  ) or_return
   manager.vertex_buffer = gpu.malloc_buffer(
     gctx,
     mesh.Vertex,
-    vertex_count,
+    int(manager.vertex_slab.capacity),
     {.VERTEX_BUFFER},
   ) or_return
-  defer if ret != .SUCCESS {
-    gpu.buffer_destroy(gctx.device, &manager.vertex_buffer)
-  }
   manager.index_buffer = gpu.malloc_buffer(
     gctx,
     u32,
-    index_count,
+    int(manager.index_slab.capacity),
     {.INDEX_BUFFER},
   ) or_return
-  defer if ret != .SUCCESS {
-    gpu.buffer_destroy(gctx.device, &manager.index_buffer)
-  }
-  cont.slab_init(&manager.vertex_slab, VERTEX_SLAB_CONFIG)
-  defer if ret != .SUCCESS {
-    cont.slab_destroy(&manager.vertex_slab)
-  }
-  cont.slab_init(&manager.index_slab, INDEX_SLAB_CONFIG)
-  defer if ret != .SUCCESS {
-    cont.slab_destroy(&manager.index_slab)
-  }
-  log.info("Vertex buffer capacity:", vertex_count, "vertices")
-  log.info("Index buffer capacity:", index_count, "indices")
+  log.info("Vertex buffer capacity:", manager.vertex_slab.capacity, "vertices")
+  log.info("Index buffer capacity:", manager.index_slab.capacity, "indices")
   return .SUCCESS
 }
 
 mesh_manager_shutdown :: proc(manager: ^MeshManager, gctx: ^gpu.GPUContext) {
   cont.slab_destroy(&manager.vertex_skinning_slab)
-  gpu.immutable_bindless_buffer_destroy(&manager.vertex_skinning_buffer, gctx.device)
+  gpu.free_descriptor_sets(gctx, manager.skinning_set)
+  vk.DestroyDescriptorSetLayout(gctx.device, manager.skinning_set_layout, nil)
+  gpu.buffer_destroy(gctx.device, &manager.vertex_skinning_buffer)
   gpu.buffer_destroy(gctx.device, &manager.vertex_buffer)
   gpu.buffer_destroy(gctx.device, &manager.index_buffer)
   cont.slab_destroy(&manager.vertex_slab)
   cont.slab_destroy(&manager.index_slab)
 }
 
-// Re-allocate descriptor sets for the mesh manager after ResetDescriptorPool.
-mesh_manager_realloc_descriptors :: proc(
-  manager: ^MeshManager,
+@(private)
+upload :: proc(
   gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  return gpu.immutable_bindless_buffer_realloc_descriptor(
-    &manager.vertex_skinning_buffer,
-    gctx,
-  )
-}
-
-allocate_vertices :: proc(
-  manager: ^MeshManager,
-  gctx: ^gpu.GPUContext,
-  vertices: []mesh.Vertex,
+  slab: ^cont.SlabAllocator,
+  buffer: ^$B,
+  data: []$T,
 ) -> (
   allocation: BufferAllocation,
   ret: vk.Result,
 ) {
-  vertex_count := u32(len(vertices))
-  offset, ok := cont.slab_alloc(&manager.vertex_slab, vertex_count)
-  if !ok {
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  gpu.write(gctx, &manager.vertex_buffer, vertices, int(offset)) or_return
-  return BufferAllocation{offset = offset, count = vertex_count}, .SUCCESS
+  if len(data) == 0 do return {}, .SUCCESS
+  count := u32(len(data))
+  offset, ok := cont.slab_alloc(slab, count)
+  if !ok do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  gpu.write(gctx, buffer, data, int(offset)) or_return
+  return {offset = offset, count = count}, .SUCCESS
 }
 
-allocate_indices :: proc(
-  manager: ^MeshManager,
-  gctx: ^gpu.GPUContext,
-  indices: []u32,
-) -> (
-  allocation: BufferAllocation,
-  ret: vk.Result,
-) {
-  index_count := u32(len(indices))
-  offset, ok := cont.slab_alloc(&manager.index_slab, index_count)
-  if !ok {
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  gpu.write(gctx, &manager.index_buffer, indices, int(offset)) or_return
-  return BufferAllocation{offset = offset, count = index_count}, .SUCCESS
-}
-
-allocate_vertex_skinning :: proc(
-  manager: ^MeshManager,
-  gctx: ^gpu.GPUContext,
-  skinnings: []mesh.SkinningData,
-) -> (
-  allocation: BufferAllocation,
-  ret: vk.Result,
-) {
-  if len(skinnings) == 0 {
-    return {}, .SUCCESS
-  }
-  skinning_count := u32(len(skinnings))
-  offset, ok := cont.slab_alloc(&manager.vertex_skinning_slab, skinning_count)
-  if !ok {
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  gpu.write(
-    gctx,
-    &manager.vertex_skinning_buffer,
-    skinnings,
-    int(offset),
-  ) or_return
-  return BufferAllocation{offset = offset, count = skinning_count}, .SUCCESS
-}
-
-free_vertices :: proc(manager: ^MeshManager, allocation: BufferAllocation) {
-  cont.slab_free(&manager.vertex_slab, allocation.offset)
-}
-
-free_indices :: proc(manager: ^MeshManager, allocation: BufferAllocation) {
-  cont.slab_free(&manager.index_slab, allocation.offset)
-}
-
-free_vertex_skinning :: proc(manager: ^MeshManager, allocation: BufferAllocation) {
-  cont.slab_free(&manager.vertex_skinning_slab, allocation.offset)
-}
-
+// Upload a geometry's vertices, indices and skinning. On failure the
+// allocations made so far are returned for free_mesh.
 allocate_mesh :: proc(
   manager: ^MeshManager,
   gctx: ^gpu.GPUContext,
   geometry_data: mesh.Geometry,
 ) -> (
   allocations: MeshAllocations,
-  has_skinning: bool,
   ret: vk.Result,
 ) {
-  allocations.vertices = allocate_vertices(manager, gctx, geometry_data.vertices) or_return
-  allocations.indices = allocate_indices(manager, gctx, geometry_data.indices) or_return
-  has_skinning = len(geometry_data.skinnings) > 0
-  if has_skinning {
-    allocations.skinning = allocate_vertex_skinning(
-      manager,
-      gctx,
-      geometry_data.skinnings,
-    ) or_return
-  }
-  return allocations, has_skinning, .SUCCESS
+  allocations.vertices = upload(
+    gctx,
+    &manager.vertex_slab,
+    &manager.vertex_buffer,
+    geometry_data.vertices,
+  ) or_return
+  allocations.indices = upload(
+    gctx,
+    &manager.index_slab,
+    &manager.index_buffer,
+    geometry_data.indices,
+  ) or_return
+  allocations.skinning = upload(
+    gctx,
+    &manager.vertex_skinning_slab,
+    &manager.vertex_skinning_buffer,
+    geometry_data.skinnings,
+  ) or_return
+  return allocations, .SUCCESS
 }
 
-free_mesh :: proc(
-  manager: ^MeshManager,
-  vertex_allocation: BufferAllocation,
-  index_allocation: BufferAllocation,
-  skinning_allocation: BufferAllocation,
-  has_skinning: bool,
-) {
-  if has_skinning && skinning_allocation.count > 0 {
-    free_vertex_skinning(manager, skinning_allocation)
-  }
-  free_vertices(manager, vertex_allocation)
-  free_indices(manager, index_allocation)
+free_mesh :: proc(manager: ^MeshManager, allocations: MeshAllocations) {
+  if allocations.vertices.count > 0 do cont.slab_free(&manager.vertex_slab, allocations.vertices.offset)
+  if allocations.indices.count > 0 do cont.slab_free(&manager.index_slab, allocations.indices.offset)
+  if allocations.skinning.count > 0 do cont.slab_free(&manager.vertex_skinning_slab, allocations.skinning.offset)
 }
 
 VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {

@@ -196,7 +196,7 @@
     "notes": [
       "Emitter follows its node — translate the node, the source moves.",
       "<code>weight</code> is gravity-like; negative floats particles up.",
-      "Simulated and compacted on the GPU. Cap is <code>MAX_PARTICLES = 65536</code>.",
+      "Simulated on the GPU in a ring of <code>MAX_PARTICLES = 65536</code>; the oldest particles are overwritten when it is full.",
       "<code>position_spread</code> + <code>velocity_spread</code> randomize the burst cone."
     ]
   },

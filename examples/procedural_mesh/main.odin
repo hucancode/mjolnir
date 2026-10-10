@@ -55,7 +55,6 @@ build_wave :: proc(n: int, size: f32, amp: f32) -> mesh.Geometry {
       normal   = linalg.normalize([3]f32{-dy_dx, 1.0, -dy_dz}),
       color    = {1, 1, 1, 1},
       uv       = {f32(i) / f32(n - 1), f32(j) / f32(n - 1)},
-      tangent  = {1, 0, 0, 1},
     }
   }
   idx := 0
@@ -66,7 +65,7 @@ build_wave :: proc(n: int, size: f32, amp: f32) -> mesh.Geometry {
     indices[idx + 3] = b; indices[idx + 4] = c; indices[idx + 5] = d
     idx += 6
   }
-  return mesh.Geometry{vertices = vertices, indices = indices, aabb = mesh.aabb_from_vertices(vertices)}
+  return mesh.make_geometry(vertices, indices)
 }
 
 build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -> mesh.Geometry {
@@ -88,7 +87,6 @@ build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -
       vertices[i * segments_v + j] = mesh.Vertex{
         position = pos, normal = linalg.normalize(offset),
         color = {1, 1, 1, 1}, uv = {f32(i) / f32(segments_u), f32(j) / f32(segments_v)},
-        tangent = {t.x, t.y, t.z, 1},
       }
     }
   }
@@ -101,7 +99,7 @@ build_torus_knot :: proc(p, q, segments_u, segments_v: int, radius, tube: f32) -
     indices[idx + 3] = b; indices[idx + 4] = d; indices[idx + 5] = c
     idx += 6
   }
-  return mesh.Geometry{vertices = vertices, indices = indices, aabb = mesh.aabb_from_vertices(vertices)}
+  return mesh.make_geometry(vertices, indices)
 }
 
 build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height, turns: f32) -> mesh.Geometry {
@@ -121,7 +119,6 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
       vertices[i * segments_v + j] = mesh.Vertex{
         position = pos, normal = linalg.normalize(offset),
         color = {1, 1, 1, 1}, uv = {t, f32(j) / f32(segments_v)},
-        tangent = {tangent.x, tangent.y, tangent.z, 1},
       }
     }
   }
@@ -134,7 +131,7 @@ build_helix_tube :: proc(segments_u, segments_v: int, helix_radius, tube, height
     indices[idx + 3] = b; indices[idx + 4] = d; indices[idx + 5] = c
     idx += 6
   }
-  return mesh.Geometry{vertices = vertices, indices = indices, aabb = mesh.aabb_from_vertices(vertices)}
+  return mesh.make_geometry(vertices, indices)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {

@@ -47,8 +47,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   render.main_camera_look_at(&engine.render, {6, 5, 10}, {0, 1.0, 0})
   mjolnir.spawn_ground(engine, 30.0)
 
-  cube_mesh   := render.get_builtin_mesh(&engine.render, .CUBE)
-  sphere_mesh := render.get_builtin_mesh(&engine.render, .SPHERE)
+  cube_mesh   := engine.render.builtin_meshes[.CUBE]
+  sphere_mesh := engine.render.builtin_meshes[.SPHERE]
 
   magenta_emit := render.material_pbr(&engine.render, {1.0, 0.1, 0.8, 1}, emissive = 4.0)
   mjolnir.spawn_mesh(engine, sphere_mesh, magenta_emit, {-3.0, 1.2, 1.5})
@@ -66,7 +66,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   glass := render.material_transparent(&engine.render, {0.2, 0.9, 0.4, 0.4})
   mjolnir.spawn_mesh(engine, sphere_mesh, glass, {1.5, 1.5, -3.5}, cast_shadow = false)
 
-  white_mat := render.get_builtin_material(&engine.render, .WHITE)
+  white_mat := engine.render.builtin_materials[.WHITE]
   for i in 0 ..< 5 do mjolnir.spawn_mesh(engine, cube_mesh, white_mat, {f32(i) * 4.0 - 8.0, 0.5, -7.0})
 
   mjolnir.spawn(engine, {-3, 8, 6}, render.directional_light_attachment(color = {1.0, 0.95, 0.9, 1}, radius = 5.0, cast_shadow = true))
@@ -81,7 +81,7 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   if dof_on        do post_process.add_dof(&engine.render.post_process, f32(dof_focus), f32(dof_range), f32(dof_blur), 0.5)
   if bloom_on      do post_process.add_bloom(&engine.render.post_process, f32(bloom_threshold), f32(bloom_intensity), 32.0)
   if blur_on       do post_process.add_blur(&engine.render.post_process, f32(blur_radius))
-  if crosshatch_on do post_process.add_crosshatch(&engine.render.post_process, {f32(engine.render.swapchain.extent.width), f32(engine.render.swapchain.extent.height)})
+  if crosshatch_on do post_process.add_crosshatch(&engine.render.post_process)
   if grayscale_on  do post_process.add_grayscale(&engine.render.post_process, f32(grayscale_strength))
   if tonemap_on    do post_process.add_tonemap(&engine.render.post_process, f32(tonemap_exposure), f32(tonemap_gamma))
   world.update(&engine.world)

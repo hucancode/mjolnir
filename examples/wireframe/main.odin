@@ -16,7 +16,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   render.main_camera_look_at(&engine.render, {0, 4, 9}, {0, 0, 0})
   ambient.set_skybox_enabled(&engine.render.ambient, false)
 
-  cube := render.get_builtin_mesh(&engine.render, .CUBE)
+  cube := engine.render.builtin_meshes[.CUBE]
   mat := render.material_wireframe(&engine.render)
 
   for i in 0 ..< 9 {

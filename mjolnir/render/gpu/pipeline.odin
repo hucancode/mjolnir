@@ -178,17 +178,7 @@ end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
   return vk.EndCommandBuffer(command_buffer)
 }
 
-create_dynamic_state :: proc(
-  states: []vk.DynamicState,
-) -> vk.PipelineDynamicStateCreateInfo {
-  return {
-    sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = u32(len(states)),
-    pDynamicStates = raw_data(states),
-  }
-}
-
-allocate_descriptor_set_single :: proc(
+allocate_descriptor_set :: proc(
   gctx: ^GPUContext,
   ret: ^vk.DescriptorSet,
   layout: ^vk.DescriptorSetLayout,
@@ -205,52 +195,16 @@ allocate_descriptor_set_single :: proc(
   )
 }
 
-allocate_descriptor_set_multi :: proc(
-  gctx: ^GPUContext,
-  ret: []vk.DescriptorSet,
-  layout: vk.DescriptorSetLayout,
-) -> vk.Result {
-  layouts := make([]vk.DescriptorSetLayout, len(ret))
-  defer delete(layouts)
-  slice.fill(layouts, layout)
-  return vk.AllocateDescriptorSets(
-    gctx.device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gctx.descriptor_pool,
-      descriptorSetCount = u32(len(layouts)),
-      pSetLayouts = raw_data(layouts),
-    },
-    raw_data(ret),
-  )
+// Return sets to the descriptor pool. Null handles are ignored.
+free_descriptor_sets :: proc(gctx: ^GPUContext, sets: ..vk.DescriptorSet) {
+  for set in sets {
+    if set == 0 do continue
+    s := set
+    vk.FreeDescriptorSets(gctx.device, gctx.descriptor_pool, 1, &s)
+  }
 }
 
-allocate_descriptor_set :: proc {
-  allocate_descriptor_set_single,
-  allocate_descriptor_set_multi,
-}
-
-allocate_command_buffer_single :: proc(
-  gctx: ^GPUContext,
-  level: vk.CommandBufferLevel = .PRIMARY,
-) -> (
-  command: vk.CommandBuffer,
-  ret: vk.Result,
-) {
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &vk.CommandBufferAllocateInfo {
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = gctx.command_pool,
-      level = level,
-      commandBufferCount = 1,
-    },
-    &command,
-  ) or_return
-  return
-}
-
-allocate_command_buffer_multi :: proc(
+allocate_command_buffer :: proc(
   gctx: ^GPUContext,
   out_commands: []vk.CommandBuffer,
   level: vk.CommandBufferLevel = .PRIMARY,
@@ -267,56 +221,22 @@ allocate_command_buffer_multi :: proc(
   )
 }
 
-allocate_command_buffer :: proc {
-  allocate_command_buffer_single,
-  allocate_command_buffer_multi,
-}
-
-allocate_compute_command_buffer_single :: proc(
-  gctx: ^GPUContext,
-  level: vk.CommandBufferLevel = .PRIMARY,
-) -> (
-  command: vk.CommandBuffer,
-  ret: vk.Result,
-) {
-  pool, ok := gctx.compute_command_pool.?
-  if !ok do return {}, .ERROR_UNKNOWN
-  vk.AllocateCommandBuffers(
-    gctx.device,
-    &{
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = pool,
-      level = level,
-      commandBufferCount = 1,
-    },
-    &command,
-  ) or_return
-  return
-}
-
-allocate_compute_command_buffer_multi :: proc(
+allocate_compute_command_buffer :: proc(
   gctx: ^GPUContext,
   out_commands: []vk.CommandBuffer,
   level: vk.CommandBufferLevel = .PRIMARY,
 ) -> vk.Result {
-  pool, ok := gctx.compute_command_pool.?
-  if !ok do return .ERROR_UNKNOWN
   vk.AllocateCommandBuffers(
     gctx.device,
     &{
       sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = pool,
+      commandPool = gctx.compute_command_pool,
       level = level,
       commandBufferCount = u32(len(out_commands)),
     },
     raw_data(out_commands),
   ) or_return
   return .SUCCESS
-}
-
-allocate_compute_command_buffer :: proc {
-  allocate_compute_command_buffer_single,
-  allocate_compute_command_buffer_multi,
 }
 
 free_command_buffer :: proc(gctx: ^GPUContext, commands: ..vk.CommandBuffer) {
@@ -328,32 +248,16 @@ free_command_buffer :: proc(gctx: ^GPUContext, commands: ..vk.CommandBuffer) {
   )
 }
 
-free_compute_command_buffer_single :: proc(
-  gctx: ^GPUContext,
-  command: ^vk.CommandBuffer,
-) {
-  pool, ok := gctx.compute_command_pool.?
-  if !ok do return
-  vk.FreeCommandBuffers(gctx.device, pool, 1, command)
-}
-
-free_compute_command_buffer_multi :: proc(
+free_compute_command_buffer :: proc(
   gctx: ^GPUContext,
   commands: []vk.CommandBuffer,
 ) {
-  pool, ok := gctx.compute_command_pool.?
-  if !ok do return
   vk.FreeCommandBuffers(
     gctx.device,
-    pool,
+    gctx.compute_command_pool,
     u32(len(commands)),
     raw_data(commands),
   )
-}
-
-free_compute_command_buffer :: proc {
-  free_compute_command_buffer_single,
-  free_compute_command_buffer_multi,
 }
 
 update_descriptor_set :: proc(
@@ -393,61 +297,6 @@ update_descriptor_set :: proc(
   )
 }
 
-update_descriptor_set_array :: proc(
-  gctx: ^GPUContext,
-  dst: vk.DescriptorSet,
-  dst_binding: u32,
-  buffers: ..struct {
-    type: vk.DescriptorType,
-    info: union {
-      vk.DescriptorBufferInfo,
-      vk.DescriptorImageInfo,
-    },
-  },
-) {
-  update_descriptor_set_array_offset(gctx, dst, dst_binding, 0, ..buffers)
-}
-
-update_descriptor_set_array_offset :: proc(
-  gctx: ^GPUContext,
-  dst: vk.DescriptorSet,
-  dst_binding: u32,
-  dst_offset: u32,
-  buffers: ..struct {
-    type: vk.DescriptorType,
-    info: union {
-      vk.DescriptorBufferInfo,
-      vk.DescriptorImageInfo,
-    },
-  },
-) {
-  writes := make([]vk.WriteDescriptorSet, len(buffers))
-  defer delete(writes)
-  for &b, i in buffers {
-    writes[i] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = dst,
-      dstBinding      = dst_binding,
-      dstArrayElement = u32(i) + dst_offset,
-      descriptorType  = b.type,
-      descriptorCount = 1,
-    }
-    switch &v in b.info {
-    case vk.DescriptorBufferInfo:
-      writes[i].pBufferInfo = &v
-    case vk.DescriptorImageInfo:
-      writes[i].pImageInfo = &v
-    }
-  }
-  vk.UpdateDescriptorSets(
-    gctx.device,
-    u32(len(writes)),
-    raw_data(writes),
-    0,
-    nil,
-  )
-}
-
 create_descriptor_set :: proc(
   gctx: ^GPUContext,
   layout: ^vk.DescriptorSetLayout,
@@ -462,7 +311,7 @@ create_descriptor_set :: proc(
   dst: vk.DescriptorSet,
   ret: vk.Result,
 ) {
-  allocate_descriptor_set_single(gctx, &dst, layout) or_return
+  allocate_descriptor_set(gctx, &dst, layout) or_return
   update_descriptor_set(gctx, dst, ..buffers)
   return dst, .SUCCESS
 }
@@ -587,35 +436,17 @@ create_pipeline_layout :: proc(
   return
 }
 
-bind_graphics_pipeline :: proc(
+bind_pipeline :: proc(
   command_buffer: vk.CommandBuffer,
+  bind_point: vk.PipelineBindPoint,
   pipeline: vk.Pipeline,
   layout: vk.PipelineLayout,
   ds: ..vk.DescriptorSet,
 ) {
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
+  vk.CmdBindPipeline(command_buffer, bind_point, pipeline)
   vk.CmdBindDescriptorSets(
     command_buffer,
-    .GRAPHICS,
-    layout,
-    0,
-    u32(len(ds)),
-    raw_data(ds),
-    0,
-    nil,
-  )
-}
-
-bind_compute_pipeline :: proc(
-  command_buffer: vk.CommandBuffer,
-  pipeline: vk.Pipeline,
-  layout: vk.PipelineLayout,
-  ds: ..vk.DescriptorSet,
-) {
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, pipeline)
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .COMPUTE,
+    bind_point,
     layout,
     0,
     u32(len(ds)),
@@ -775,78 +606,31 @@ set_viewport_scissor :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-begin_depth_rendering :: proc(
-  command_buffer: vk.CommandBuffer,
-  extent: vk.Extent2D,
-  depth_attachment: ^vk.RenderingAttachmentInfo,
-  layer_count: u32 = 1,
-) {
-  render_info := vk.RenderingInfo {
-    sType = .RENDERING_INFO,
-    renderArea = {extent = extent},
-    layerCount = layer_count,
-    pDepthAttachment = depth_attachment,
-  }
-  vk.CmdBeginRendering(command_buffer, &render_info)
-}
-
 create_color_attachment :: proc(
-  image: ^Image,
+  view: vk.ImageView,
   load_op: vk.AttachmentLoadOp = .CLEAR,
   store_op: vk.AttachmentStoreOp = .STORE,
   clear_color: [4]f32 = {0.0, 0.0, 0.0, 1.0},
 ) -> vk.RenderingAttachmentInfo {
   return vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = image.view,
+    imageView = view,
     imageLayout = .GENERAL,
     loadOp = load_op,
     storeOp = store_op,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
-  }
-}
-
-create_color_attachment_view :: proc(
-  image_view: vk.ImageView,
-  load_op: vk.AttachmentLoadOp = .CLEAR,
-  store_op: vk.AttachmentStoreOp = .STORE,
-  clear_color: [4]f32 = {0.0, 0.0, 0.0, 1.0},
-) -> vk.RenderingAttachmentInfo {
-  return vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = image_view,
-    imageLayout = .GENERAL,
-    loadOp = load_op,
-    storeOp = store_op,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
+    clearValue = {color = {float32 = clear_color}},
   }
 }
 
 create_depth_attachment :: proc(
-  image: ^Image,
+  view: vk.ImageView,
   load_op: vk.AttachmentLoadOp = .CLEAR,
   store_op: vk.AttachmentStoreOp = .STORE,
   clear_depth: f32 = 1.0,
 ) -> vk.RenderingAttachmentInfo {
   return vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = image.view,
-    imageLayout = .GENERAL,
-    loadOp = load_op,
-    storeOp = store_op,
-    clearValue = {depthStencil = {depth = clear_depth}},
-  }
-}
-
-create_cube_depth_attachment :: proc(
-  image: ^CubeImage,
-  load_op: vk.AttachmentLoadOp = .CLEAR,
-  store_op: vk.AttachmentStoreOp = .STORE,
-  clear_depth: f32 = 1.0,
-) -> vk.RenderingAttachmentInfo {
-  return vk.RenderingAttachmentInfo {
-    sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = image.view,
+    imageView = view,
     imageLayout = .GENERAL,
     loadOp = load_op,
     storeOp = store_op,
@@ -859,12 +643,13 @@ begin_rendering :: proc(
   extent: vk.Extent2D,
   depth_attachment: Maybe(vk.RenderingAttachmentInfo),
   color_attachments: ..vk.RenderingAttachmentInfo,
+  layer_count: u32 = 1,
 ) {
   depth, has_depth := depth_attachment.?
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
     renderArea = {extent = extent},
-    layerCount = 1,
+    layerCount = layer_count,
     pDepthAttachment = &depth if has_depth else nil,
     colorAttachmentCount = u32(len(color_attachments)),
     pColorAttachments = raw_data(color_attachments),

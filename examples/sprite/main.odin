@@ -38,7 +38,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     sprite := render.create_sprite(&engine.render, tex, 6, 17) or_continue
     node, ok := mjolnir.spawn(engine, {x, 1.5, 0}, render.SpriteAttachment {
       sprite_handle = sprite,
-      mesh_handle   = render.get_builtin_mesh(&engine.render, .QUAD_XY),
+      mesh_handle   = engine.render.builtin_meshes[.QUAD_XY],
       material      = mat,
     })
     if !ok {

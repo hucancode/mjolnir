@@ -1,9 +1,18 @@
-// GPU particles: emission, simulation and compaction on compute, then a
-// point-sprite draw from the compacted buffer.
+// GPU particles: a ring buffer of MAX_PARTICLES slots. Each frame the emit
+// pass writes new particles at an atomic cursor (oldest slots get overwritten
+// when the ring is full), the simulate pass advances every live slot in
+// place, and the draw covers all slots, discarding dead ones in the vertex
+// shader.
+//
+// With async compute the simulation runs on a separate queue and the graphics
+// queue only waits for it before drawing. Frame N+1's simulation may therefore
+// overlap frame N's particle draw, which can then see a mix of old and new
+// particle state for that frame.
 package particles
 
 import "../gpu"
 import "core:log"
+import "core:slice"
 import vk "vendor:vulkan"
 
 MAX_PARTICLES :: 65536
@@ -13,30 +22,28 @@ MAX_FORCE_FIELDS :: 32
 
 SHADER_EMITTER_COMP :: #load("../shader/particle/emitter.spv")
 SHADER_PARTICLE_COMP :: #load("../shader/particle/compute.spv")
-SHADER_PARTICLE_COMPACT_COMP :: #load("../shader/particle/compact.spv")
 
+// A slot is dead when life <= 0.
 Particle :: struct {
   position:      [3]f32,
-  size:          f32,
+  size_start:    f32,
   velocity:      [3]f32,
   size_end:      f32,
   color_start:   [4]f32,
   color_end:     [4]f32,
-  color:         [4]f32,
   life:          f32,
   max_life:      f32,
   weight:        f32,
   texture_index: u32,
 }
 
-Emitter :: struct {
+// std430 rounds the struct to 16 bytes (it holds vec4s); #align(16) keeps the
+// Odin array stride equal to the GLSL one.
+Emitter :: struct #align(16) {
   initial_velocity:  [3]f32,
   size_start:        f32,
   color_start:       [4]f32,
   color_end:         [4]f32,
-  aabb_min:          [3]f32,
-  emission_rate:     f32,
-  aabb_max:          [3]f32,
   particle_lifetime: f32,
   position_spread:   f32,
   velocity_spread:   f32,
@@ -56,7 +63,6 @@ ForceField :: struct {
 }
 
 ParticleSystemParams :: struct {
-  particle_count:   u32,
   emitter_count:    u32,
   forcefield_count: u32,
   delta_time:       f32,
@@ -65,49 +71,41 @@ ParticleSystemParams :: struct {
 
 Renderer :: struct {
   params_buffer:                      gpu.MutableBuffer(ParticleSystemParams),
-  particle_count_buffer:              gpu.MutableBuffer(u32),
-  alive_count_buffer:                 gpu.MutableBuffer(u32),
+  // Next ring slot to emit into; grows forever, read modulo MAX_PARTICLES.
+  cursor_buffer:                      gpu.MutableBuffer(u32),
   particle_buffer:                    gpu.MutableBuffer(Particle),
-  compact_particle_buffer:            gpu.MutableBuffer(Particle),
-  draw_command_buffer:                gpu.MutableBuffer(vk.DrawIndirectCommand),
-  emitter_descriptor_set_layout:      vk.DescriptorSetLayout,
-  emitter_descriptor_set:             vk.DescriptorSet,
+  // particle_buffer, cursor_buffer, params_buffer; shared by emit, simulate
+  // and draw.
+  descriptor_set_layout:              vk.DescriptorSetLayout,
+  descriptor_set:                     vk.DescriptorSet,
   emitter_pipeline_layout:            vk.PipelineLayout,
   emitter_pipeline:                   vk.Pipeline,
   emitter_bindless_descriptor_set:    vk.DescriptorSet,
-  compute_descriptor_set_layout:      vk.DescriptorSetLayout,
-  compute_descriptor_set:             vk.DescriptorSet,
   compute_pipeline_layout:            vk.PipelineLayout,
   compute_pipeline:                   vk.Pipeline,
   forcefield_bindless_descriptor_set: vk.DescriptorSet,
-  compact_descriptor_set_layout:      vk.DescriptorSetLayout,
-  compact_descriptor_set:             vk.DescriptorSet,
-  compact_pipeline_layout:            vk.PipelineLayout,
-  compact_pipeline:                   vk.Pipeline,
   render_pipeline_layout:             vk.PipelineLayout,
   render_pipeline:                    vk.Pipeline,
 }
 
-// Update params buffer. Preserves frame_counter (owned by simulate). Caller
-// supplies validated counts; asserts guard the GPU buffer bounds.
-set_params :: proc(self: ^Renderer, params: ParticleSystemParams) {
+// Update the simulation inputs for the next frame and advance the random
+// seed. Caller supplies validated counts; asserts guard the GPU buffer bounds.
+set_params :: proc(
+  self: ^Renderer,
+  emitter_count, forcefield_count: u32,
+  delta_time: f32,
+) {
+  assert(emitter_count <= MAX_EMITTERS, "emitter_count exceeds MAX_EMITTERS")
   assert(
-    params.emitter_count <= MAX_EMITTERS,
-    "emitter_count exceeds MAX_EMITTERS",
-  )
-  assert(
-    params.forcefield_count <= MAX_FORCE_FIELDS,
+    forcefield_count <= MAX_FORCE_FIELDS,
     "forcefield_count exceeds MAX_FORCE_FIELDS",
   )
-  assert(
-    params.particle_count <= MAX_PARTICLES,
-    "particle_count exceeds MAX_PARTICLES",
-  )
-  assert(params.delta_time >= 0.0, "delta_time must be non-negative")
-  ptr := gpu.get(&self.params_buffer, 0)
-  preserved := ptr.frame_counter
-  ptr^ = params
-  ptr.frame_counter = preserved
+  assert(delta_time >= 0.0, "delta_time must be non-negative")
+  ptr := gpu.get(&self.params_buffer)
+  ptr.emitter_count = emitter_count
+  ptr.forcefield_count = forcefield_count
+  ptr.delta_time = delta_time
+  ptr.frame_counter += 1
 }
 
 simulate :: proc(
@@ -115,46 +113,17 @@ simulate :: proc(
   command_buffer: vk.CommandBuffer,
   node_data_set: vk.DescriptorSet,
 ) {
-  params_ptr := gpu.get(&self.params_buffer)
-  params_ptr.frame_counter += 1
-
-  // Prologue: seed emit counter with last frame's alive count so emissions
-  // append after surviving particles in particle_buffer, then reset the alive
-  // counter so compact starts at 0.
-  vk.CmdCopyBuffer(
+  gpu.bind_pipeline(
     command_buffer,
-    self.alive_count_buffer.buffer,
-    self.particle_count_buffer.buffer,
-    1,
-    &vk.BufferCopy{size = size_of(u32)},
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    self.alive_count_buffer.buffer,
-    0,
-    size_of(u32),
-    0,
-  )
-  gpu.memory_barrier(
-    command_buffer,
-    {.TRANSFER_WRITE},
-    {.SHADER_READ, .SHADER_WRITE},
-    {.TRANSFER},
-    {.COMPUTE_SHADER},
-  )
-
-  gpu.bind_compute_pipeline(
-    command_buffer,
+    .COMPUTE,
     self.emitter_pipeline,
     self.emitter_pipeline_layout,
     self.emitter_bindless_descriptor_set,
-    self.emitter_descriptor_set,
+    self.descriptor_set,
     node_data_set,
   )
   // One thread per emitter (local_size_x = 64)
   vk.CmdDispatch(command_buffer, u32(MAX_EMITTERS + 63) / 64, 1, 1)
-
-  // Barrier to ensure emission is complete before compaction
   gpu.memory_barrier(
     command_buffer,
     {.SHADER_WRITE},
@@ -162,34 +131,12 @@ simulate :: proc(
     {.COMPUTE_SHADER},
     {.COMPUTE_SHADER},
   )
-
-  compact(self, command_buffer)
-
-  // Compact updates alive_count atomically. Both the compute pass (reads it as
-  // iteration bound) and the indirect draw command (gets vertex_count from it)
-  // need it after this point.
-  gpu.memory_barrier(
+  gpu.bind_pipeline(
     command_buffer,
-    {.SHADER_WRITE},
-    {.SHADER_READ, .TRANSFER_READ},
-    {.COMPUTE_SHADER},
-    {.COMPUTE_SHADER, .TRANSFER},
-  )
-
-  // Publish alive_count into draw_command.vertex_count (offset 0).
-  vk.CmdCopyBuffer(
-    command_buffer,
-    self.alive_count_buffer.buffer,
-    self.draw_command_buffer.buffer,
-    1,
-    &vk.BufferCopy{size = size_of(u32)},
-  )
-
-  gpu.bind_compute_pipeline(
-    command_buffer,
+    .COMPUTE,
     self.compute_pipeline,
     self.compute_pipeline_layout,
-    self.compute_descriptor_set,
+    self.descriptor_set,
     self.forcefield_bindless_descriptor_set,
     node_data_set,
   )
@@ -199,177 +146,20 @@ simulate :: proc(
     1,
     1,
   )
-
-  // Memory barrier before copying back
+  // Orders this frame's simulation before the next frame's emission.
   gpu.memory_barrier(
     command_buffer,
     {.SHADER_WRITE},
-    {.TRANSFER_READ},
+    {.SHADER_READ, .SHADER_WRITE},
     {.COMPUTE_SHADER},
-    {.TRANSFER},
-  )
-
-  // Copy simulated particles back to main buffer
-  vk.CmdCopyBuffer(
-    command_buffer,
-    self.compact_particle_buffer.buffer,
-    self.particle_buffer.buffer,
-    1,
-    &vk.BufferCopy{size = vk.DeviceSize(self.particle_buffer.bytes_count)},
-  )
-
-  // Final barrier for rendering and next-frame transfers
-  gpu.memory_barrier(
-    command_buffer,
-    {.TRANSFER_WRITE},
-    {.INDIRECT_COMMAND_READ, .TRANSFER_READ},
-    {.TRANSFER},
-    {.DRAW_INDIRECT, .TRANSFER},
+    {.COMPUTE_SHADER},
   )
 }
 
-compact :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
-  gpu.bind_compute_pipeline(
-    command_buffer,
-    self.compact_pipeline,
-    self.compact_pipeline_layout,
-    self.compact_descriptor_set,
-  )
-  vk.CmdDispatch(
-    command_buffer,
-    u32(MAX_PARTICLES + COMPUTE_PARTICLE_BATCH - 1) / COMPUTE_PARTICLE_BATCH,
-    1,
-    1,
-  )
-}
-
-setup :: proc(
-  self: ^Renderer,
-  gctx: ^gpu.GPUContext,
-  emitter_descriptor_set: vk.DescriptorSet,
-  forcefield_descriptor_set: vk.DescriptorSet,
-) -> (
-  ret: vk.Result,
-) {
-  self.emitter_bindless_descriptor_set = emitter_descriptor_set
-  self.forcefield_bindless_descriptor_set = forcefield_descriptor_set
-
-  self.params_buffer = gpu.create_mutable_buffer(
-    gctx,
-    ParticleSystemParams,
-    1,
-    {.UNIFORM_BUFFER},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.params_buffer)
-  }
-
-  self.particle_count_buffer = gpu.create_mutable_buffer(
-    gctx,
-    u32,
-    1,
-    {.STORAGE_BUFFER, .TRANSFER_DST},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
-  }
-
-  self.alive_count_buffer = gpu.create_mutable_buffer(
-    gctx,
-    u32,
-    1,
-    {.STORAGE_BUFFER, .TRANSFER_SRC, .TRANSFER_DST},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.alive_count_buffer)
-  }
-
-  self.particle_buffer = gpu.create_mutable_buffer(
-    gctx,
-    Particle,
-    MAX_PARTICLES,
-    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
-  }
-
-  self.compact_particle_buffer = gpu.create_mutable_buffer(
-    gctx,
-    Particle,
-    MAX_PARTICLES,
-    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
-  }
-
-  self.draw_command_buffer = gpu.create_mutable_buffer(
-    gctx,
-    vk.DrawIndirectCommand,
-    1,
-    {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
-  ) or_return
-  defer if ret != .SUCCESS {
-    gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
-  }
-
-  // vertex_count is written each frame by a transfer copy from alive_count.
-  draw_cmd := gpu.get(&self.draw_command_buffer)
-  draw_cmd^ = vk.DrawIndirectCommand {
-    vertexCount   = 0,
-    instanceCount = 1,
-    firstVertex   = 0,
-    firstInstance = 0,
-  }
-
-  self.emitter_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.emitter_descriptor_set_layout,
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_buffer)},
-    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_count_buffer)},
-    {.UNIFORM_BUFFER, gpu.buffer_info(&self.params_buffer)},
-  ) or_return
-
-  self.compute_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.compute_descriptor_set_layout,
-    {type = .UNIFORM_BUFFER, info = gpu.buffer_info(&self.params_buffer)},
-    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.compact_particle_buffer)},
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.buffer_info(&self.alive_count_buffer),
-    },
-  ) or_return
-
-  self.compact_descriptor_set = gpu.create_descriptor_set(
-    gctx,
-    &self.compact_descriptor_set_layout,
-    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.particle_buffer)},
-    {type = .STORAGE_BUFFER, info = gpu.buffer_info(&self.compact_particle_buffer)},
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.buffer_info(&self.alive_count_buffer),
-    },
-    {
-      type = .STORAGE_BUFFER,
-      info = gpu.buffer_info(&self.particle_count_buffer),
-    },
-  ) or_return
-
-  return .SUCCESS
-}
-
-teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  gpu.mutable_buffer_destroy(gctx.device, &self.params_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.particle_count_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.alive_count_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.compact_particle_buffer)
-  gpu.mutable_buffer_destroy(gctx.device, &self.draw_command_buffer)
-  self.emitter_descriptor_set = 0
-  self.compute_descriptor_set = 0
-  self.compact_descriptor_set = 0
+// Kill every particle and restart the emit cursor.
+reset :: proc(self: ^Renderer) {
+  slice.zero(gpu.get_all(&self.particle_buffer))
+  gpu.get(&self.cursor_buffer)^ = 0
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
@@ -377,32 +167,22 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.compute_descriptor_set_layout,
-    nil,
-  )
   vk.DestroyPipeline(gctx.device, self.emitter_pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.emitter_descriptor_set_layout,
-    nil,
-  )
-  vk.DestroyPipeline(gctx.device, self.compact_pipeline, nil)
-  vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    gctx.device,
-    self.compact_descriptor_set_layout,
-    nil,
-  )
+  gpu.free_descriptor_sets(gctx, self.descriptor_set)
+  vk.DestroyDescriptorSetLayout(gctx.device, self.descriptor_set_layout, nil)
+  gpu.mutable_buffer_destroy(gctx.device, &self.params_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.cursor_buffer)
+  gpu.mutable_buffer_destroy(gctx.device, &self.particle_buffer)
 }
 
 init :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   emitter_set_layout: vk.DescriptorSetLayout,
+  emitter_descriptor_set: vk.DescriptorSet,
   forcefield_set_layout: vk.DescriptorSetLayout,
+  forcefield_descriptor_set: vk.DescriptorSet,
   node_data_set_layout: vk.DescriptorSetLayout,
   camera_set_layout: vk.DescriptorSetLayout,
   textures_set_layout: vk.DescriptorSetLayout,
@@ -411,125 +191,73 @@ init :: proc(
 ) {
   log.debugf("Initializing particle renderer")
   defer if ret != .SUCCESS do shutdown(self, gctx)
-
-  create_emitter_pipeline(
+  self.emitter_bindless_descriptor_set = emitter_descriptor_set
+  self.forcefield_bindless_descriptor_set = forcefield_descriptor_set
+  self.params_buffer = gpu.create_mutable_buffer(
     gctx,
-    self,
-    emitter_set_layout,
-    node_data_set_layout,
+    ParticleSystemParams,
+    1,
+    {.UNIFORM_BUFFER},
   ) or_return
-
-  create_compact_pipeline(gctx, self) or_return
-
-  create_compute_pipeline(
+  self.cursor_buffer = gpu.create_mutable_buffer(gctx, u32, 1, {.STORAGE_BUFFER}) or_return
+  self.particle_buffer = gpu.create_mutable_buffer(
     gctx,
-    self,
-    forcefield_set_layout,
-    node_data_set_layout,
+    Particle,
+    MAX_PARTICLES,
+    {.STORAGE_BUFFER},
   ) or_return
-  create_render_pipeline(gctx, self, camera_set_layout, textures_set_layout) or_return
+  reset(self)
 
-  return .SUCCESS
-}
-
-@(private)
-create_emitter_pipeline :: proc(
-  gctx: ^gpu.GPUContext,
-  self: ^Renderer,
-  emitter_set_layout: vk.DescriptorSetLayout,
-  node_data_set_layout: vk.DescriptorSetLayout,
-) -> (
-  ret: vk.Result,
-) {
-  self.emitter_descriptor_set_layout = gpu.create_descriptor_set_layout(
+  self.descriptor_set_layout = gpu.create_descriptor_set_layout(
     gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}},
+    {.STORAGE_BUFFER, {.COMPUTE, .VERTEX}},
     {.STORAGE_BUFFER, {.COMPUTE}},
     {.UNIFORM_BUFFER, {.COMPUTE}},
+  ) or_return
+  self.descriptor_set = gpu.create_descriptor_set(
+    gctx,
+    &self.descriptor_set_layout,
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.particle_buffer)},
+    {.STORAGE_BUFFER, gpu.buffer_info(&self.cursor_buffer)},
+    {.UNIFORM_BUFFER, gpu.buffer_info(&self.params_buffer)},
   ) or_return
 
   self.emitter_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     nil,
     emitter_set_layout,
-    self.emitter_descriptor_set_layout,
+    self.descriptor_set_layout,
     node_data_set_layout,
   ) or_return
-
-  emitter_shader_module := gpu.create_shader_module(
+  emitter_module := gpu.create_shader_module(
     gctx.device,
     SHADER_EMITTER_COMP,
   ) or_return
-  defer vk.DestroyShaderModule(gctx.device, emitter_shader_module, nil)
-
-  self.emitter_pipeline = gpu.create_compute_pipeline(gctx, emitter_shader_module, self.emitter_pipeline_layout) or_return
-
-  return .SUCCESS
-}
-
-@(private)
-create_compute_pipeline :: proc(
-  gctx: ^gpu.GPUContext,
-  self: ^Renderer,
-  forcefield_set_layout: vk.DescriptorSetLayout,
-  node_data_set_layout: vk.DescriptorSetLayout,
-) -> (
-  ret: vk.Result,
-) {
-  self.compute_descriptor_set_layout = gpu.create_descriptor_set_layout(
+  defer vk.DestroyShaderModule(gctx.device, emitter_module, nil)
+  self.emitter_pipeline = gpu.create_compute_pipeline(
     gctx,
-    {.UNIFORM_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
+    emitter_module,
+    self.emitter_pipeline_layout,
   ) or_return
 
   self.compute_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     nil,
-    self.compute_descriptor_set_layout,
+    self.descriptor_set_layout,
     forcefield_set_layout,
     node_data_set_layout,
   ) or_return
-
-  compute_shader_module := gpu.create_shader_module(
+  compute_module := gpu.create_shader_module(
     gctx.device,
     SHADER_PARTICLE_COMP,
   ) or_return
-  defer vk.DestroyShaderModule(gctx.device, compute_shader_module, nil)
-
-  self.compute_pipeline = gpu.create_compute_pipeline(gctx, compute_shader_module, self.compute_pipeline_layout) or_return
-
-  return .SUCCESS
-}
-
-@(private)
-create_compact_pipeline :: proc(
-  gctx: ^gpu.GPUContext,
-  self: ^Renderer,
-) -> (
-  ret: vk.Result,
-) {
-  self.compact_descriptor_set_layout = gpu.create_descriptor_set_layout(
+  defer vk.DestroyShaderModule(gctx.device, compute_module, nil)
+  self.compute_pipeline = gpu.create_compute_pipeline(
     gctx,
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
+    compute_module,
+    self.compute_pipeline_layout,
   ) or_return
 
-  self.compact_pipeline_layout = gpu.create_pipeline_layout(
-    gctx,
-    nil,
-    self.compact_descriptor_set_layout,
-  ) or_return
-
-  compact_shader_module := gpu.create_shader_module(
-    gctx.device,
-    SHADER_PARTICLE_COMPACT_COMP,
-  ) or_return
-  defer vk.DestroyShaderModule(gctx.device, compact_shader_module, nil)
-
-  self.compact_pipeline = gpu.create_compute_pipeline(gctx, compact_shader_module, self.compact_pipeline_layout) or_return
-
+  create_render_pipeline(gctx, self, camera_set_layout, textures_set_layout) or_return
   return .SUCCESS
 }

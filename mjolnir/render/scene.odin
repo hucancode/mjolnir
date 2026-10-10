@@ -4,7 +4,6 @@ import "base:builtin"
 import cont "../containers"
 import "gpu"
 import "core:math"
-import "core:math/linalg"
 import "core:sync"
 import vk "vendor:vulkan"
 
@@ -74,30 +73,32 @@ Instance :: struct {
   attachment:   Attachment,
 }
 
+// A slot's skin palette: CPU copy plus its range in the per-frame bone
+// buffers. `offset` is NO_BONES when the slab is full.
 @(private)
-StagingOp :: enum u16 {
-  Update,
-  Remove,
+BonePalette :: struct {
+  offset:   u32,
+  matrices: []matrix[4, 4]f32,
 }
 
 @(private)
-StagingEntry :: struct {
-  age: u16,
-  op:  StagingOp,
-}
+NO_BONES :: 0xFFFFFFFF
 
-// Dirty sets drained by flush. Each entry is re-uploaded until every frame
-// in flight has it (`age` counts uploads), then dropped.
+// Dirty sets drained by flush. Every entry is written from the current state
+// of its slot or pool entry; a removed one is written empty. Bones live in
+// per-frame buffers: a bone entry is re-uploaded until every frame in flight
+// has it (the value counts uploads). Everything else is written once.
+// Instance writes and their staging happen under `mutex` so flush on the
+// render thread never sees a half-written slot.
 @(private)
 Staging :: struct {
-  nodes:       map[u32]StagingEntry,
-  meshes:      map[u32]StagingEntry,
-  materials:   map[u32]StagingEntry,
-  bones:       map[u32]StagingEntry,
-  sprites:     map[u32]StagingEntry,
-  emitters:    map[u32]StagingEntry,
-  forcefields: map[u32]StagingEntry,
-  lights:      map[u32]StagingEntry,
+  nodes:       map[u32]struct{},
+  meshes:      map[u32]struct{},
+  materials:   map[u32]struct{},
+  bones:       map[u32]u16,
+  sprites:     map[u32]struct{},
+  emitters:    map[u32]struct{},
+  forcefields: map[u32]struct{},
   mutex:       sync.Mutex,
 }
 
@@ -110,30 +111,16 @@ staging_destroy :: proc(s: ^Staging) {
   delete(s.sprites)
   delete(s.emitters)
   delete(s.forcefields)
-  delete(s.lights)
 }
 
 @(private)
 stage :: proc(
   self: ^Manager,
-  m: ^map[u32]StagingEntry,
+  m: ^map[u32]struct{},
   index: u32,
-  op: StagingOp = .Update,
 ) {
   sync.mutex_lock(&self.internal.staging.mutex)
-  m[index] = {op = op}
-  sync.mutex_unlock(&self.internal.staging.mutex)
-}
-
-// Instance writes and their staging happen under the staging mutex so flush
-// on the render thread never sees a half-written slot.
-@(private)
-lock_slots :: proc(self: ^Manager) {
-  sync.mutex_lock(&self.internal.staging.mutex)
-}
-
-@(private)
-unlock_slots :: proc(self: ^Manager) {
+  m[index] = {}
   sync.mutex_unlock(&self.internal.staging.mutex)
 }
 
@@ -169,13 +156,12 @@ stage_transform :: proc(
   world_matrix: matrix[4, 4]f32,
   visible: bool,
 ) {
-  lock_slots(self)
-  defer unlock_slots(self)
+  sync.mutex_lock(&self.internal.staging.mutex)
+  defer sync.mutex_unlock(&self.internal.staging.mutex)
   inst := ensure_slot(self, slot)
   inst.world_matrix = world_matrix
   inst.visible = visible
   self.internal.staging.nodes[slot] = {}
-  if is_light(inst.attachment) do self.internal.staging.lights[slot] = {}
 }
 
 // Forget everything drawn at a slot. Emitters, force fields and sprites owned
@@ -191,10 +177,24 @@ stage_slot_removal :: proc(self: ^Manager, slot: u32) {
   case SpriteAttachment:
     destroy_sprite(self, a.sprite_handle)
   }
+  sync.mutex_lock(&self.internal.staging.mutex)
+  defer sync.mutex_unlock(&self.internal.staging.mutex)
   inst^ = {}
-  stage(self, &self.internal.staging.nodes, slot, .Remove)
-  stage(self, &self.internal.staging.lights, slot, .Remove)
-  stage(self, &self.internal.staging.bones, slot, .Remove)
+  self.internal.staging.nodes[slot] = {}
+  delete_key(&self.internal.light_slots, slot)
+  release_bones(self, slot)
+}
+
+// Free a slot's skin palette and its bone buffer range. Caller holds the
+// staging mutex.
+@(private = "file")
+release_bones :: proc(self: ^Manager, slot: u32) {
+  p, ok := self.internal.bones[slot]
+  if !ok do return
+  if p.offset != NO_BONES do cont.slab_free(&self.internal.bone_matrix_slab, p.offset)
+  delete(p.matrices)
+  delete_key(&self.internal.bones, slot)
+  delete_key(&self.internal.staging.bones, slot)
 }
 
 // Remove every slot. Use when the transform owner resets all of its slots at
@@ -211,16 +211,18 @@ stage_bones :: proc(self: ^Manager, slot: u32, matrices: []matrix[4, 4]f32) {
   if len(matrices) == 0 do return
   sync.mutex_lock(&self.internal.staging.mutex)
   defer sync.mutex_unlock(&self.internal.staging.mutex)
-  palette := self.internal.bone_matrices[slot]
-  if len(palette) != len(matrices) {
-    delete(palette)
-    palette = make([]matrix[4, 4]f32, len(matrices))
-    self.internal.bone_matrices[slot] = palette
+  p := self.internal.bones[slot]
+  if len(p.matrices) != len(matrices) {
+    release_bones(self, slot)
+    p.matrices = make([]matrix[4, 4]f32, len(matrices))
+    offset, ok := cont.slab_alloc(&self.internal.bone_matrix_slab, u32(len(matrices)))
+    p.offset = offset if ok else NO_BONES
+    self.internal.bones[slot] = p
     // node data carries the bone range offset; refresh it
     self.internal.staging.nodes[slot] = {}
   }
-  copy(palette, matrices)
-  self.internal.staging.bones[slot] = {}
+  copy(p.matrices, matrices)
+  self.internal.staging.bones[slot] = 0
 }
 
 // ---------- attachments ----------
@@ -228,11 +230,10 @@ stage_bones :: proc(self: ^Manager, slot: u32, matrices: []matrix[4, 4]f32) {
 // Draw `attachment` at `slot`. Emitters and force fields are bound to the
 // slot's transform.
 attach :: proc(self: ^Manager, slot: u32, attachment: Attachment) {
-  lock_slots(self)
-  defer unlock_slots(self)
+  sync.mutex_lock(&self.internal.staging.mutex)
+  defer sync.mutex_unlock(&self.internal.staging.mutex)
   staging := &self.internal.staging
   inst := ensure_slot(self, slot)
-  was_light := is_light(inst.attachment)
   inst.attachment = attachment
   #partial switch a in attachment {
   case EmitterAttachment:
@@ -247,7 +248,11 @@ attach :: proc(self: ^Manager, slot: u32, attachment: Attachment) {
     }
   }
   staging.nodes[slot] = {}
-  if was_light || is_light(attachment) do staging.lights[slot] = {}
+  if is_light(attachment) {
+    self.internal.light_slots[slot] = {}
+  } else {
+    delete_key(&self.internal.light_slots, slot)
+  }
 }
 
 instance :: proc(self: ^Manager, slot: u32) -> (^Instance, bool) #optional_ok {
@@ -271,9 +276,6 @@ attachment :: proc(
 
 mark_slot_dirty :: proc(self: ^Manager, slot: u32) {
   stage(self, &self.internal.staging.nodes, slot)
-  if inst, ok := instance(self, slot); ok && is_light(inst.attachment) {
-    stage(self, &self.internal.staging.lights, slot)
-  }
 }
 
 point_light_attachment :: proc(
@@ -317,38 +319,22 @@ INVALID_NODE :: NodeData {
 }
 
 @(private = "file")
-age_and_mark :: proc(
-  m: ^map[u32]StagingEntry,
-  index: u32,
-  prev_age: u16,
-  stale: ^[dynamic]u32,
-) {
-  new_age := prev_age + 1
-  m[index] = {new_age, .Update}
-  if int(new_age) >= gpu.FRAMES_IN_FLIGHT do append(stale, index)
-}
-
-@(private = "file")
 material_type_flags :: proc(t: MaterialType) -> NodeFlagSet {
   switch t {
   case .TRANSPARENT:  return {.MATERIAL_TRANSPARENT}
   case .WIREFRAME:    return {.MATERIAL_WIREFRAME}
   case .RANDOM_COLOR: return {.MATERIAL_RANDOM_COLOR}
-  case .LINE_STRIP:   return {.MATERIAL_LINE_STRIP}
-  case .PBR, .UNLIT:  return {}
+  case .PBR:          return {}
   }
   return {}
 }
 
 @(private = "file")
 flush_nodes :: proc(self: ^Manager) {
-  stale := make([dynamic]u32, context.temp_allocator)
-  for slot, entry in self.internal.staging.nodes {
-    if entry.op == .Remove || int(slot) >= len(self.instances) {
+  for slot in self.internal.staging.nodes {
+    if int(slot) >= len(self.instances) {
       nd := INVALID_NODE
       upload_node_data(self, slot, &nd)
-      release_bone_matrix_range_for_node(self, slot)
-      append(&stale, slot)
       continue
     }
     inst := &self.instances[slot]
@@ -358,12 +344,8 @@ flush_nodes :: proc(self: ^Manager) {
     has_material := false
     #partial switch att in inst.attachment {
     case MeshAttachment:
-      if palette, skinned := self.internal.bone_matrices[slot]; skinned {
-        nd.attachment_data_index = ensure_bone_matrix_range_for_node(
-          self,
-          slot,
-          u32(len(palette)),
-        )
+      if p, skinned := self.internal.bones[slot]; skinned {
+        nd.attachment_data_index = p.offset
       }
       nd.material_id = att.material.index
       nd.mesh_id = att.handle.index
@@ -384,38 +366,21 @@ flush_nodes :: proc(self: ^Manager) {
       }
     }
     upload_node_data(self, slot, &nd)
-    age_and_mark(&self.internal.staging.nodes, slot, entry.age, &stale)
   }
-  for slot in stale do delete_key(&self.internal.staging.nodes, slot)
+  clear(&self.internal.staging.nodes)
 }
 
-// Meshes age on every iteration regardless of op; the stale step
-// distinguishes Update (purge CPU geometry) from Remove (free GPU mesh slot).
+// Upload staged meshes. Destroyed meshes free their GPU allocations in
+// mesh_retire, once no frame in flight can draw them.
 @(private = "file")
 flush_meshes :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  stale := make([dynamic]u32, context.temp_allocator)
-  for index, entry in self.internal.staging.meshes {
-    new_age := entry.age + 1
-    self.internal.staging.meshes[index] = {new_age, entry.op}
-    if int(new_age) >= gpu.FRAMES_IN_FLIGHT {
-      append(&stale, index)
-      continue
-    }
-    if entry.op != .Update do continue
+  for index in self.internal.staging.meshes {
     m := live_at(&self.meshes, index) or_continue
-    if g, has_geom := m.cpu_geometry.?; has_geom {
-      sync_mesh_geometry_for_handle(gctx, self, index, g)
-    }
+    g := m.cpu_geometry.? or_continue
+    upload_mesh(self, gctx, index, m, g)
+    if m.auto_purge_cpu_geometry do mesh_release_memory(m)
   }
-  for index in stale {
-    entry := self.internal.staging.meshes[index]
-    if entry.op == .Remove {
-      mesh_destroy(self, index)
-    } else if m, ok := live_at(&self.meshes, index); ok && m.auto_purge_cpu_geometry {
-      mesh_release_memory(m)
-    }
-    delete_key(&self.internal.staging.meshes, index)
-  }
+  clear(&self.internal.staging.meshes)
 }
 
 // Live pool item at a staged slot index; staging is keyed by index alone.
@@ -426,211 +391,87 @@ live_at :: proc(pool: ^cont.Pool($T), index: u32) -> (^T, bool) {
   return &e.item, e.active
 }
 
+// Write every staged pool slot into its GPU buffer. Slots no longer live are
+// zeroed so the GPU stops using them (a freed emitter stops emitting).
 @(private = "file")
-flush_materials :: proc(self: ^Manager) {
-  stale := make([dynamic]u32, context.temp_allocator)
-  for index, entry in self.internal.staging.materials {
-    m, live := live_at(&self.materials, index)
-    if entry.op == .Remove || !live {
-      append(&stale, index)
-      continue
-    }
-    upload_material_data(
-      self,
-      index,
-      &MaterialData {
-        albedo_index = m.albedo.index,
-        metallic_roughness_index = m.metallic_roughness.index,
-        normal_index = m.normal.index,
-        emissive_index = m.emissive.index,
-        features = m.features,
-        metallic_value = m.metallic_value,
-        roughness_value = m.roughness_value,
-        emissive_value = m.emissive_value,
-        base_color_factor = m.base_color_factor,
-      },
-    )
-    age_and_mark(&self.internal.staging.materials, index, entry.age, &stale)
+flush_pool :: proc(
+  staged: ^map[u32]struct{},
+  pool: ^cont.Pool($T),
+  buffer: ^gpu.BindlessBuffer($G),
+  to_gpu: proc(item: ^T) -> G,
+) {
+  for index in staged {
+    data: G
+    if item, live := live_at(pool, index); live do data = to_gpu(item)
+    gpu.write(&buffer.buffer, &data, int(index))
   }
-  for index in stale do delete_key(&self.internal.staging.materials, index)
+  clear(staged)
+}
+
+@(private = "file")
+material_gpu :: proc(m: ^Material) -> MaterialData {
+  return {
+    albedo_index = m.albedo.index,
+    metallic_roughness_index = m.metallic_roughness.index,
+    normal_index = m.normal.index,
+    emissive_index = m.emissive.index,
+    features = m.features,
+    metallic_value = m.metallic_value,
+    roughness_value = m.roughness_value,
+    emissive_value = m.emissive_value,
+    base_color_factor = m.base_color_factor,
+  }
+}
+
+@(private = "file")
+sprite_gpu :: proc(s: ^Sprite) -> SpriteData {
+  return {
+    texture_index = s.texture.index,
+    frame_columns = s.frame_columns,
+    frame_rows = s.frame_rows,
+    frame_index = s.frame_index,
+  }
+}
+
+@(private = "file")
+emitter_gpu :: proc(em: ^Emitter) -> EmitterData {
+  return {
+    initial_velocity = em.initial_velocity,
+    size_start = em.size_start,
+    color_start = em.color_start,
+    color_end = em.color_end,
+    particle_lifetime = em.particle_lifetime,
+    position_spread = em.position_spread,
+    velocity_spread = em.velocity_spread,
+    emit_count = em.pending_emit,
+    size_end = em.size_end,
+    weight = em.weight,
+    weight_spread = em.weight_spread,
+    texture_index = em.texture_handle.index,
+    node_index = em.slot,
+  }
+}
+
+@(private = "file")
+forcefield_gpu :: proc(ff: ^ForceField) -> ForceFieldData {
+  return {
+    tangent_strength = ff.tangent_strength if ff.enabled else 0,
+    strength = ff.strength if ff.enabled else 0,
+    area_of_effect = ff.area_of_effect,
+    node_index = ff.slot,
+  }
 }
 
 @(private = "file")
 flush_bones :: proc(self: ^Manager, frame_index: u32) {
   stale := make([dynamic]u32, context.temp_allocator)
-  for slot, entry in self.internal.staging.bones {
-    if entry.op == .Remove {
-      if palette, ok := self.internal.bone_matrices[slot]; ok {
-        delete(palette)
-        delete_key(&self.internal.bone_matrices, slot)
-      }
-      append(&stale, slot)
-      continue
-    }
-    palette, ok := self.internal.bone_matrices[slot]
-    if !ok {
-      append(&stale, slot)
-      continue
-    }
-    offset := ensure_bone_matrix_range_for_node(self, slot, u32(len(palette)))
-    if offset != 0xFFFFFFFF {
-      upload_bone_matrices(self, frame_index, offset, palette)
-    }
-    age_and_mark(&self.internal.staging.bones, slot, entry.age, &stale)
+  for slot, &age in self.internal.staging.bones {
+    p := self.internal.bones[slot]
+    if p.offset != NO_BONES do upload_bone_matrices(self, frame_index, p.offset, p.matrices)
+    age += 1
+    if int(age) >= gpu.FRAMES_IN_FLIGHT do append(&stale, slot)
   }
   for slot in stale do delete_key(&self.internal.staging.bones, slot)
-}
-
-@(private = "file")
-flush_sprites :: proc(self: ^Manager) {
-  stale := make([dynamic]u32, context.temp_allocator)
-  for index, entry in self.internal.staging.sprites {
-    s, live := live_at(&self.sprites, index)
-    if entry.op == .Remove || !live {
-      append(&stale, index)
-      continue
-    }
-    upload_sprite_data(
-      self,
-      index,
-      &SpriteData {
-        texture_index = s.texture.index,
-        frame_columns = s.frame_columns,
-        frame_rows = s.frame_rows,
-        frame_index = s.frame_index,
-      },
-    )
-    age_and_mark(&self.internal.staging.sprites, index, entry.age, &stale)
-  }
-  for index in stale do delete_key(&self.internal.staging.sprites, index)
-}
-
-@(private = "file")
-flush_emitters :: proc(self: ^Manager) {
-  stale := make([dynamic]u32, context.temp_allocator)
-  for index, entry in self.internal.staging.emitters {
-    em, live := live_at(&self.emitters, index)
-    if entry.op == .Remove || !live {
-      append(&stale, index)
-      continue
-    }
-    upload_emitter_data(
-      self,
-      index,
-      &EmitterData {
-        initial_velocity = em.initial_velocity,
-        size_start = em.size_start,
-        color_start = em.color_start,
-        color_end = em.color_end,
-        aabb_min = em.aabb_min,
-        emission_rate = em.emission_rate,
-        aabb_max = em.aabb_max,
-        particle_lifetime = em.particle_lifetime,
-        position_spread = em.position_spread,
-        velocity_spread = em.velocity_spread,
-        emit_count = em.pending_emit,
-        size_end = em.size_end,
-        weight = em.weight,
-        weight_spread = em.weight_spread,
-        texture_index = em.texture_handle.index,
-        node_index = em.slot,
-      },
-    )
-    age_and_mark(&self.internal.staging.emitters, index, entry.age, &stale)
-  }
-  for index in stale do delete_key(&self.internal.staging.emitters, index)
-}
-
-@(private = "file")
-flush_forcefields :: proc(self: ^Manager) {
-  stale := make([dynamic]u32, context.temp_allocator)
-  for index, entry in self.internal.staging.forcefields {
-    ff, live := live_at(&self.forcefields, index)
-    if entry.op == .Remove || !live {
-      append(&stale, index)
-      continue
-    }
-    upload_forcefield_data(
-      self,
-      index,
-      &ForceFieldData {
-        tangent_strength = ff.tangent_strength if ff.enabled else 0,
-        strength = ff.strength if ff.enabled else 0,
-        area_of_effect = ff.area_of_effect,
-        node_index = ff.slot,
-      },
-    )
-    age_and_mark(&self.internal.staging.forcefields, index, entry.age, &stale)
-  }
-  for index in stale do delete_key(&self.internal.staging.forcefields, index)
-}
-
-// GPU light derived from a light attachment placed at `world_matrix`.
-// ok=false when the attachment is not a light or the light is disabled.
-@(private = "file")
-light_from_attachment :: proc(
-  a: Attachment,
-  world_matrix: matrix[4, 4]f32,
-) -> (
-  light: Light,
-  cast_shadow: bool,
-  ok: bool,
-) {
-  position := world_matrix[3].xyz
-  raw_dir := world_matrix[2].xyz
-  direction := [3]f32{0, -1, 0}
-  if linalg.dot(raw_dir, raw_dir) >= 1e-6 do direction = linalg.normalize(raw_dir)
-  #partial switch att in a {
-  case PointLightAttachment:
-    if att.disabled do return
-    return PointLight{color = att.color, position = position, radius = att.radius}, att.cast_shadow, true
-  case DirectionalLightAttachment:
-    if att.disabled do return
-    return DirectionalLight {
-        color = att.color,
-        position = position,
-        direction = direction,
-        radius = att.radius,
-      },
-      att.cast_shadow,
-      true
-  case SpotLightAttachment:
-    if att.disabled do return
-    return SpotLight {
-        color = att.color,
-        position = position,
-        direction = direction,
-        radius = att.radius,
-        angle_inner = att.angle_inner,
-        angle_outer = att.angle_outer,
-      },
-      att.cast_shadow,
-      true
-  }
-  return
-}
-
-@(private = "file")
-flush_lights :: proc(self: ^Manager, gctx: ^gpu.GPUContext) -> vk.Result {
-  stale := make([dynamic]u32, context.temp_allocator)
-  for slot, entry in self.internal.staging.lights {
-    if entry.op == .Remove || int(slot) >= len(self.instances) {
-      remove_light_entry(self, gctx, slot)
-      append(&stale, slot)
-      continue
-    }
-    inst := &self.instances[slot]
-    light, cast_shadow, ok := light_from_attachment(inst.attachment, inst.world_matrix)
-    if !ok {
-      remove_light_entry(self, gctx, slot)
-      append(&stale, slot)
-      continue
-    }
-    upsert_light_entry(self, gctx, slot, &light, cast_shadow) or_return
-    age_and_mark(&self.internal.staging.lights, slot, entry.age, &stale)
-  }
-  for slot in stale do delete_key(&self.internal.staging.lights, slot)
-  return .SUCCESS
 }
 
 @(private = "file")
@@ -664,14 +505,15 @@ flush :: proc(
   {
     sync.mutex_lock(&self.internal.staging.mutex)
     defer sync.mutex_unlock(&self.internal.staging.mutex)
+    staging := &self.internal.staging
     flush_nodes(self)
     flush_meshes(self, gctx)
-    flush_materials(self)
     flush_bones(self, frame_index)
-    flush_sprites(self)
-    flush_emitters(self)
-    flush_forcefields(self)
-    flush_lights(self, gctx) or_return
+    flush_pool(&staging.materials, &self.materials, &self.internal.material_buffer, material_gpu)
+    flush_pool(&staging.sprites, &self.sprites, &self.internal.sprite_buffer, sprite_gpu)
+    flush_pool(&staging.emitters, &self.emitters, &self.internal.emitter_buffer, emitter_gpu)
+    flush_pool(&staging.forcefields, &self.forcefields, &self.internal.forcefield_buffer, forcefield_gpu)
+    collect_lights(self, gctx)
   }
   flush_cameras(self, frame_index)
   self.node_count = min(

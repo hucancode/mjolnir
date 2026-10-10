@@ -39,7 +39,6 @@ velocity_x:       mu.Real = 0
 velocity_y:       mu.Real = 3.0
 velocity_z:       mu.Real = 0
 velocity_spread:  mu.Real = 1.5
-aabb_extent:f32 =      8.0
 
 color_start: [4]f32 = {1.0, 0.9, 0.4, 1.0}
 color_end:   [4]f32 = {1.0, 0.2, 0.0, 0.0}
@@ -77,23 +76,21 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   if len(textures) > 0 && int(selected_tex_index) < len(textures) {
     tex = textures[selected_tex_index].handle
   }
-  render.set_emitter(&engine.render, emitter_handle,
-    texture           = tex,
-    enabled           = enabled,
-    emission_rate     = f32(emission_rate),
-    particle_lifetime = f32(lifetime),
-    size_start        = f32(size_start),
-    size_end          = f32(size_end),
-    weight            = f32(weight),
-    weight_spread     = f32(weight_spread),
-    position_spread   = f32(position_spread),
-    initial_velocity  = [3]f32{f32(velocity_x), f32(velocity_y), f32(velocity_z)},
-    velocity_spread   = f32(velocity_spread),
-    color_start       = color_start,
-    color_end         = color_end,
-    aabb_min          = [3]f32{-aabb_extent, -aabb_extent, -aabb_extent},
-    aabb_max          = [3]f32{ aabb_extent,  aabb_extent,  aabb_extent},
-  )
+  if em, ok := render.emitter(&engine.render, emitter_handle); ok {
+    em.texture_handle    = tex
+    em.enabled           = b32(enabled)
+    em.emission_rate     = f32(emission_rate)
+    em.particle_lifetime = f32(lifetime)
+    em.size_start        = f32(size_start)
+    em.size_end          = f32(size_end)
+    em.weight            = f32(weight)
+    em.weight_spread     = f32(weight_spread)
+    em.position_spread   = f32(position_spread)
+    em.initial_velocity  = {f32(velocity_x), f32(velocity_y), f32(velocity_z)}
+    em.velocity_spread   = f32(velocity_spread)
+    em.color_start       = color_start
+    em.color_end         = color_end
+  }
   world.update(&engine.world)
   for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
   for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)

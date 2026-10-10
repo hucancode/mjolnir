@@ -22,36 +22,8 @@ create_render_pipeline :: proc(
 		vk.PushConstantRange{stageFlags = {.VERTEX}, size = size_of(u32)},
 		camera_set_layout,
 		textures_set_layout,
+		self.descriptor_set_layout,
 	) or_return
-	vertex_bindings := [?]vk.VertexInputBindingDescription {
-		{binding = 0, stride = size_of(Particle), inputRate = .VERTEX},
-	}
-	vertex_attributes := [?]vk.VertexInputAttributeDescription {
-		{
-			location = 0,
-			binding = 0,
-			format = .R32G32B32A32_SFLOAT,
-			offset = u32(offset_of(Particle, position)),
-		},
-		{
-			location = 1,
-			binding = 0,
-			format = .R32G32B32A32_SFLOAT,
-			offset = u32(offset_of(Particle, color)),
-		},
-		{
-			location = 2,
-			binding = 0,
-			format = .R32G32B32A32_SFLOAT,
-			offset = u32(offset_of(Particle, size)),
-		},
-		{
-			location = 3,
-			binding = 0,
-			format = .R32_UINT,
-			offset = u32(offset_of(Particle, texture_index)),
-		},
-	}
 	vert_module := gpu.create_shader_module(gctx.device, SHADER_PARTICLE_VERT) or_return
 	defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
 	frag_module := gpu.create_shader_module(gctx.device, SHADER_PARTICLE_FRAG) or_return
@@ -64,8 +36,6 @@ create_render_pipeline :: proc(
 			vert = vert_module,
 			frag = frag_module,
 			specialization = &bindless.SHADER_SPEC_CONSTANTS,
-			vertex_bindings = vertex_bindings[:],
-			vertex_attributes = vertex_attributes[:],
 			topology = .POINT_LIST,
 			raster = gpu.DOUBLE_SIDED_RASTERIZER,
 			depth = gpu.READ_ONLY_DEPTH_STATE,
@@ -89,8 +59,6 @@ record :: proc(
 	texture_manager: ^bindless.TextureManager,
 	cameras_descriptor_set: vk.DescriptorSet,
 	textures_descriptor_set: vk.DescriptorSet,
-	compact_particle_buffer: vk.Buffer,
-	draw_command_buffer: vk.Buffer,
 ) {
 	color_texture := bindless.get_texture_2d(texture_manager, color_handle)
 	if color_texture == nil {
@@ -102,23 +70,34 @@ record :: proc(
 		log.error("Particle renderer missing depth attachment")
 		return
 	}
+	// Without async compute the simulation shares this queue: it wrote the
+	// particles drawn here at the end of the previous frame.
+	gpu.memory_barrier(
+		command_buffer,
+		{.SHADER_WRITE},
+		{.SHADER_READ},
+		{.COMPUTE_SHADER},
+		{.VERTEX_SHADER},
+	)
 	gpu.begin_rendering(
 		command_buffer,
-		depth_texture.spec.extent,
+		depth_texture.extent,
 		gpu.create_depth_attachment(
-			depth_texture,
+			depth_texture.view,
 			.LOAD,
 			.STORE,
 		),
-		gpu.create_color_attachment(color_texture, .LOAD, .STORE),
+		gpu.create_color_attachment(color_texture.view, .LOAD, .STORE),
 	)
-	gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)
-	gpu.bind_graphics_pipeline(
+	gpu.set_viewport_scissor(command_buffer, depth_texture.extent)
+	gpu.bind_pipeline(
 		command_buffer,
+		.GRAPHICS,
 		self.render_pipeline,
 		self.render_pipeline_layout,
 		cameras_descriptor_set,
 		textures_descriptor_set,
+		self.descriptor_set,
 	)
 	camera_idx := camera_index
 	vk.CmdPushConstants(
@@ -129,15 +108,14 @@ record :: proc(
 		size_of(u32),
 		&camera_idx,
 	)
-	offset: vk.DeviceSize = 0
-	buffer := compact_particle_buffer
-	vk.CmdBindVertexBuffers(command_buffer, 0, 1, &buffer, &offset)
-	vk.CmdDrawIndirect(
-		command_buffer,
-		draw_command_buffer,
-		0,
-		1,
-		size_of(vk.DrawIndirectCommand),
-	)
+	vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
 	vk.CmdEndRendering(command_buffer)
+	// ...and rewrites them later in this frame.
+	gpu.memory_barrier(
+		command_buffer,
+		{},
+		{},
+		{.VERTEX_SHADER},
+		{.COMPUTE_SHADER},
+	)
 }

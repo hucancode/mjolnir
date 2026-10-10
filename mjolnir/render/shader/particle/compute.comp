@@ -5,12 +5,11 @@ const int MAX_FORCE_FIELDS = 32;
 
 struct Particle {
     vec3 position;
-    float size;
+    float size_start;
     vec3 velocity;
     float size_end;
     vec4 color_start;
     vec4 color_end;
-    vec4 color;
     float life;
     float max_life;
     float weight;
@@ -24,20 +23,15 @@ struct ForceField {
     uint node_index;
 };
 
-layout(set = 0, binding = 0) uniform ParamsBuffer {
-    uint particle_count;
+layout(set = 0, binding = 0) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+layout(set = 0, binding = 2) uniform ParamsBuffer {
     uint emitter_count;
     uint forcefield_count;
     float delta_time;
     uint frame_counter;
-};
-
-layout(set = 0, binding = 1) buffer ParticleBuffer {
-    Particle particles[];
-};
-
-layout(set = 0, binding = 2) buffer AliveCountBuffer {
-    uint alive_count;
 };
 
 layout(set = 1, binding = 0) readonly buffer ForceFieldBuffer {
@@ -58,41 +52,18 @@ layout(set = 2, binding = 0) readonly buffer NodeDataBuffer {
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
-// Random number generation
-float rand(vec2 co) {
-    return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
-}
-
-vec3 random_direction(vec3 base_dir, float spread, vec2 seed) {
-    if (spread <= 0.0) return base_dir;
-
-    float theta = rand(seed) * 2.0 * 3.14159265;
-    float phi = acos(2.0 * rand(seed.yx) - 1.0);
-    float r = spread * rand(seed * 2.0);
-
-    vec3 random_offset = vec3(
-        r * sin(phi) * cos(theta),
-        r * sin(phi) * sin(theta),
-        r * cos(phi)
-    );
-
-    return normalize(base_dir + random_offset);
-}
-
 const vec3 GRAVITY = vec3(0.0, -9.8, 0.0);
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
-    if (i >= alive_count) return;
-    vec3 p = particles[i].position.xyz;
-    // Process actual force fields, using the dynamic forcefield_count
+    if (i >= MAX_PARTICLES || particles[i].life <= 0.0) return;
+    vec3 p = particles[i].position;
+    vec3 v = particles[i].velocity;
     uint n = min(forcefield_count, MAX_FORCE_FIELDS);
-    for (int f = 0; f < n; ++f) {
+    for (uint f = 0; f < n; ++f) {
         ForceField ff = forcefields[f];
-        // TODO: query node array to find visibility
-        uint visible = 1;
-        // Ignore unused or invisible forcefields
-        if (visible == 0 || ff.area_of_effect <= 0.0) continue;
+        // Unused slots have area_of_effect 0
+        if (ff.area_of_effect <= 0.0) continue;
         vec3 ff_pos = nodes[ff.node_index].world_matrix[3].xyz;
         vec3 to_particle = p - ff_pos;
         float dist = length(to_particle);
@@ -103,16 +74,13 @@ void main() {
         vec3 ref = mix(vec3(0, 1, 0), vec3(1, 0, 0), step(0.99, abs(dir.y)));
         vec3 tangent = normalize(cross(ref, dir));
         vec3 force = dir * ff.strength + tangent * ff.tangent_strength;
-        particles[i].velocity.xyz += force * effect * delta_time;
+        v += force * effect * delta_time;
     }
-    particles[i].velocity.xyz += GRAVITY * particles[i].weight * delta_time;
-    // Apply velocity limiting to prevent excessive speeds (branchless div-by-zero guard)
-    float velMagnitude = length(particles[i].velocity.xyz);
-    float scale = min(velMagnitude, 5.0) / max(velMagnitude, 1e-6);
-    particles[i].velocity.xyz *= scale;
-    particles[i].position.xyz += particles[i].velocity.xyz * delta_time;
+    v += GRAVITY * particles[i].weight * delta_time;
+    // Limit speed (branchless div-by-zero guard)
+    float speed = length(v);
+    v *= min(speed, 5.0) / max(speed, 1e-6);
+    particles[i].velocity = v;
+    particles[i].position = p + v * delta_time;
     particles[i].life -= delta_time;
-    float life_ratio = particles[i].life / particles[i].max_life;
-    particles[i].color = mix(particles[i].color_end, particles[i].color_start, life_ratio);
-    particles[i].size = mix(particles[i].size_end, particles[i].size, life_ratio);
 }

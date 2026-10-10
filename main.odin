@@ -492,8 +492,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         size_end = 100.0,
         weight = 0.1,
         weight_spread = 0.05,
-        aabb_min = {-2, -2, -2},
-        aabb_max = {2, 2, 2},
       )
       if emitter1_ok {
         mjolnir.spawn(
@@ -519,8 +517,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         size_end = 175.0,
         weight = 0.1,
         weight_spread = 0.3,
-        aabb_min = {-1, -1, -1},
-        aabb_max = {1, 1, 1},
       )
       if emitter2_ok {
         mjolnir.spawn(
@@ -564,7 +560,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   // post_process.add_fog(&engine.render.post_process, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  // post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
+  // post_process.add_crosshatch(&engine.render.post_process)
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)
@@ -575,7 +571,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.render,
       512, // width
       512, // height
-      {.GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES}, // enabled passes (no post-process for performance)
       {5, 15, 7}, // camera position
       {0, 0, 0}, // looking at origin
       math.PI * 0.5, // FOV

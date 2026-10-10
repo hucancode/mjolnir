@@ -10,8 +10,7 @@ const uint NODE_FLAG_MATERIAL_TRANSPARENT = 1u << 2;
 const uint NODE_FLAG_MATERIAL_WIREFRAME = 1u << 3;
 const uint NODE_FLAG_MATERIAL_SPRITE = 1u << 4;
 const uint NODE_FLAG_MATERIAL_RANDOM_COLOR = 1u << 5;
-const uint NODE_FLAG_MATERIAL_LINE_STRIP = 1u << 6;
-const uint NODE_FLAG_CASTS_SHADOW = 1u << 7;
+const uint NODE_FLAG_CASTS_SHADOW = 1u << 6;
 const uint INVALID_ID = 0xFFFFFFFFu;
 
 struct Camera {
@@ -55,11 +54,16 @@ layout(push_constant) uniform PushConstants {
     uint camera_index;
     uint node_count;
     uint max_draws;
-    float pyramid_width;
-    float pyramid_height;
-    float depth_bias;
-    uint occlusion_enabled;
 } params;
+
+const float DEPTH_BIAS = 0.0001;
+
+// bindless.DrawPipeline
+const uint PIPE_OPAQUE = 0u;
+const uint PIPE_TRANSPARENT = 1u;
+const uint PIPE_SPRITE = 2u;
+const uint PIPE_WIREFRAME = 3u;
+const uint PIPE_RANDOM_COLOR = 4u;
 
 layout(set = 0, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
@@ -73,58 +77,17 @@ layout(set = 0, binding = 2) readonly buffer CameraBuffer {
     Camera cameras[];
 };
 
-// Late pass (opaque) outputs
-layout(set = 0, binding = 3) buffer LateDrawCountBuffer {
-    uint opaque_draw_count;
+// One count per draw list, in bindless.DrawPipeline order
+layout(set = 0, binding = 3) buffer DrawCountBuffer {
+    uint draw_counts[];
 };
 
-layout(set = 0, binding = 4) buffer OpaqueDrawCommandBuffer {
-    DrawCommand opaque_commands[];
+// max_draws commands per draw list, lists back to back
+layout(set = 0, binding = 4) buffer DrawCommandBuffer {
+    DrawCommand commands[];
 };
 
-// Transparent pass outputs
-layout(set = 0, binding = 5) buffer TransparentDrawCountBuffer {
-    uint transparent_draw_count;
-};
-
-layout(set = 0, binding = 6) buffer TransparentDrawCommandBuffer {
-    DrawCommand transparent_commands[];
-};
-
-// Sprite pass outputs
-layout(set = 0, binding = 7) buffer SpriteDrawCountBuffer {
-    uint sprite_draw_count;
-};
-
-layout(set = 0, binding = 8) buffer SpriteDrawCommandBuffer {
-    DrawCommand sprite_commands[];
-};
-
-layout(set = 0, binding = 9) buffer WireframeDrawCountBuffer {
-    uint wireframe_draw_count;
-};
-
-layout(set = 0, binding = 10) buffer WireframeDrawCommandBuffer {
-    DrawCommand wireframe_commands[];
-};
-
-layout(set = 0, binding = 11) buffer RandomColorDrawCountBuffer {
-    uint random_color_draw_count;
-};
-
-layout(set = 0, binding = 12) buffer RandomColorDrawCommandBuffer {
-    DrawCommand random_color_commands[];
-};
-
-layout(set = 0, binding = 13) buffer LineStripDrawCountBuffer {
-    uint line_strip_draw_count;
-};
-
-layout(set = 0, binding = 14) buffer LineStripDrawCommandBuffer {
-    DrawCommand line_strip_commands[];
-};
-
-layout(set = 0, binding = 15) uniform sampler2D depth_pyramid;
+layout(set = 0, binding = 5) uniform sampler2D depth_pyramid;
 
 // return true if aabb is visible, false if outside frustum
 bool frustum_cull(vec3 center, vec3 extent, Camera camera) {
@@ -188,8 +151,9 @@ bool occlusion_test(vec3 center, float radius, Camera camera) {
         return true;
     }
 
-    float width = (aabb.z - aabb.x) * params.pyramid_width;
-    float height = (aabb.w - aabb.y) * params.pyramid_height;
+    vec2 pyramid_size = vec2(textureSize(depth_pyramid, 0));
+    float width = (aabb.z - aabb.x) * pyramid_size.x;
+    float height = (aabb.w - aabb.y) * pyramid_size.y;
     float level = ceil(log2(max(width, height)));
     level = max(0.0, level);
 
@@ -200,7 +164,7 @@ bool occlusion_test(vec3 center, float radius, Camera camera) {
     vec4 clip_pos = camera.projection * vec4(0, 0, object_near_z, 1.0);
     float object_depth = clip_pos.z / clip_pos.w;
 
-    return object_depth < (occluder_depth + params.depth_bias);
+    return object_depth < (occluder_depth + DEPTH_BIAS);
 }
 
 void main() {
@@ -242,11 +206,10 @@ void main() {
     bool is_transparent = (node.flags & NODE_FLAG_MATERIAL_TRANSPARENT) != 0u;
     bool is_wireframe = (node.flags & NODE_FLAG_MATERIAL_WIREFRAME) != 0u;
     bool is_random_color = (node.flags & NODE_FLAG_MATERIAL_RANDOM_COLOR) != 0u;
-    bool is_line_strip = (node.flags & NODE_FLAG_MATERIAL_LINE_STRIP) != 0u;
     bool is_sprite = (node.flags & NODE_FLAG_MATERIAL_SPRITE) != 0u;
-    bool is_non_opaque = is_transparent || is_wireframe || is_random_color || is_line_strip || is_sprite;
+    bool is_non_opaque = is_transparent || is_wireframe || is_random_color || is_sprite;
 
-    if (visible && params.occlusion_enabled == 1u && !is_non_opaque) {
+    if (visible && !is_non_opaque) {
         visible = occlusion_test(world_center, radius, camera);
     }
 
@@ -260,42 +223,13 @@ void main() {
     cmd.vertex_offset = mesh.vertex_offset;
     cmd.first_instance = node_id;
 
-    // Route to appropriate draw list
-    if (is_sprite) {
-        // Sprite pass
-        uint draw_index = atomicAdd(sprite_draw_count, 1);
-        if (draw_index < params.max_draws) {
-            sprite_commands[draw_index] = cmd;
-        }
-    } else if (is_transparent) {
-        // Transparent pass
-        uint draw_index = atomicAdd(transparent_draw_count, 1);
-        if (draw_index < params.max_draws) {
-            transparent_commands[draw_index] = cmd;
-        }
-    } else if (is_wireframe) {
-        // Wireframe pass
-        uint draw_index = atomicAdd(wireframe_draw_count, 1);
-        if (draw_index < params.max_draws) {
-            wireframe_commands[draw_index] = cmd;
-        }
-    } else if (is_random_color) {
-        // Random color pass
-        uint draw_index = atomicAdd(random_color_draw_count, 1);
-        if (draw_index < params.max_draws) {
-            random_color_commands[draw_index] = cmd;
-        }
-    } else if (is_line_strip) {
-        // Line strip pass
-        uint draw_index = atomicAdd(line_strip_draw_count, 1);
-        if (draw_index < params.max_draws) {
-            line_strip_commands[draw_index] = cmd;
-        }
-    } else {
-        // Late pass (opaque objects)
-        uint draw_index = atomicAdd(opaque_draw_count, 1);
-        if (draw_index < params.max_draws) {
-            opaque_commands[draw_index] = cmd;
-        }
+    uint pipe = is_sprite ? PIPE_SPRITE
+              : is_transparent ? PIPE_TRANSPARENT
+              : is_wireframe ? PIPE_WIREFRAME
+              : is_random_color ? PIPE_RANDOM_COLOR
+              : PIPE_OPAQUE;
+    uint draw_index = atomicAdd(draw_counts[pipe], 1);
+    if (draw_index < params.max_draws) {
+        commands[pipe * params.max_draws + draw_index] = cmd;
     }
 }

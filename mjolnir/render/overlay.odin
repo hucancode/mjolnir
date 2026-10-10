@@ -1,6 +1,7 @@
 package render
 
 import "../draw2d"
+import "bindless"
 import "../input"
 import "gpu"
 import cont "../containers"
@@ -13,7 +14,7 @@ import vk "vendor:vulkan"
 // Submit this frame's 2D overlay draw commands. The slice must stay valid
 // until the frame is recorded.
 stage_ui :: proc(self: ^Manager, commands: []draw2d.RenderCommand) {
-  ui_render.stage_commands(&self.internal.ui, commands)
+  self.internal.ui.commands = commands
 }
 
 // Stage the overlay font atlas (R8 pixels). The pixels are copied; flush
@@ -69,7 +70,7 @@ debug_ui_end :: proc(self: ^Manager) {
 debug_ui_input :: proc(self: ^Manager, s: ^input.State) {
   r := &self.internal.ui
   ctx := &r.debug_ctx
-  hovered := ui_render.debug_wants_mouse(r)
+  hovered := ctx.hover_root != nil
   x, y := i32(math.round(s.cursor.x)), i32(math.round(s.cursor.y))
   mu.input_mouse_move(ctx, x, y)
   for b in input.MouseButton {
@@ -106,12 +107,12 @@ debug_ui_input :: proc(self: ^Manager, s: ^input.State) {
 // input belongs to it.
 debug_ui_wants_mouse :: proc(self: ^Manager) -> bool {
   r := &self.internal.ui
-  return ui_render.debug_wants_mouse(r) || r.debug_buttons != {}
+  return r.debug_ctx.hover_root != nil || r.debug_buttons != {}
 }
 
 // True when a debug UI widget has keyboard focus.
 debug_ui_wants_keyboard :: proc(self: ^Manager) -> bool {
-  return ui_render.debug_wants_keyboard(&self.internal.ui)
+  return self.internal.ui.debug_ctx.focus_id != 0
 }
 
 // microui models only editing and modifier keys; text arrives as chars.
@@ -151,8 +152,8 @@ stats :: proc(self: ^Manager) -> (ret: Stats) {
   ret.meshes = cont.count(self.meshes)
   ret.materials = cont.count(self.materials)
   ret.nodes = self.node_count
-  if _, ok := main_camera(self); ok {
-    ret.opaque_draw_count = visibility_stats(self, self.main_camera).opaque_draw_count
+  if cam, ok := main_camera(self); ok {
+    ret.opaque_draw_count = cam.draws.count[self.frame_index].mapped[bindless.DrawPipeline.OPAQUE]
   }
   return
 }

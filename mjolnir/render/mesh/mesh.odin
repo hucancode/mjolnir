@@ -23,7 +23,6 @@ Geometry :: struct {
   vertices:  []Vertex,
   skinnings: []SkinningData,
   indices:   []u32,
-  aabb:      geometry.Aabb,
 }
 
 make_geometry :: proc(
@@ -51,30 +50,30 @@ make_geometry :: proc(
       edge2 := p2 - p0
       deltaUV1 := uv1 - uv0
       deltaUV2 := uv2 - uv0
-      tangent :=
-        (deltaUV2.y * edge1 - deltaUV1.y * edge2) /
-        linalg.cross(deltaUV1, deltaUV2)
+      det := linalg.cross(deltaUV1, deltaUV2)
+      if abs(det) < 1e-12 do continue // degenerate UVs contribute no tangent
+      tangent := (deltaUV2.y * edge1 - deltaUV1.y * edge2) / det
       // Accumulate tangent
       ids := [3]u32{i0, i1, i2}
       for idx in ids {
         vertices[idx].tangent.xyz += tangent
       }
     }
-    // Normalize tangents and set handedness to +1
+    // Normalize tangents and set handedness to +1. Vertices touching only
+    // degenerate triangles (sphere poles, cone tip) get any vector
+    // perpendicular to the normal.
     for &v in vertices {
       tangent_vec := v.tangent.xyz
-      if linalg.length2(tangent_vec) > 0.0 {
-        v.tangent.xyz = linalg.normalize(tangent_vec)
+      if linalg.length2(tangent_vec) < 1e-12 {
+        axis := abs(v.normal.x) < 0.9 ? linalg.VECTOR3F32_X_AXIS : linalg.VECTOR3F32_Z_AXIS
+        tangent_vec = linalg.cross(v.normal, axis)
+        if linalg.length2(tangent_vec) < 1e-12 do tangent_vec = linalg.VECTOR3F32_X_AXIS
       }
+      v.tangent.xyz = linalg.normalize(tangent_vec)
       v.tangent.w = 1.0
     }
   }
-  return {
-    vertices = vertices,
-    skinnings = skinnings,
-    indices = indices,
-    aabb = aabb_from_vertices(vertices),
-  }
+  return {vertices = vertices, skinnings = skinnings, indices = indices}
 }
 
 delete_geometry :: proc(geometry: Geometry) {
@@ -82,6 +81,10 @@ delete_geometry :: proc(geometry: Geometry) {
   delete(geometry.skinnings)
   delete(geometry.indices)
 }
+
+// Bounding box of the vertex positions. Flat axes (a quad) are widened to
+// AABB_MIN_EXTENT so culling never sees a zero-thickness box.
+AABB_MIN_EXTENT :: 0.1
 
 aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: geometry.Aabb) {
   if len(vertices) == 0 {
@@ -92,6 +95,9 @@ aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: geometry.Aabb) {
     ret.min = linalg.min(ret.min, vertex.position)
     ret.max = linalg.max(ret.max, vertex.position)
   }
+  pad := linalg.max(AABB_MIN_EXTENT - (ret.max - ret.min), [3]f32{}) * 0.5
+  ret.min -= pad
+  ret.max += pad
   return ret
 }
 

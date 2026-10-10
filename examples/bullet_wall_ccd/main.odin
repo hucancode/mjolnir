@@ -45,10 +45,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   render.main_camera_look_at(&engine.render, {-14, 8, 14}, {0, 1, 0})
   mjolnir.spawn(engine, {-5, 12, 5}, render.directional_light_attachment({1, 0.95, 0.9, 1}, 6.0, true))
 
-  cube_mesh := render.get_builtin_mesh(&engine.render, .CUBE)
+  cube_mesh := engine.render.builtin_meshes[.CUBE]
   ground := world.spawn(&engine.world, {0, -0.5, 0})
   physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {30.0, 0.5, 12.0}}, user = world.Handle(ground))
-  ground_visual := mjolnir.spawn_mesh(engine, cube_mesh, render.get_builtin_material(&engine.render, .GRAY), parent = ground)
+  ground_visual := mjolnir.spawn_mesh(engine, cube_mesh, engine.render.builtin_materials[.GRAY], parent = ground)
   world.scale_xyz(&engine.world, ground_visual, 30.0, 0.5, 12.0)
 
   wall_colors := [WALL_COUNT]render.Color{.RED, .YELLOW, .GREEN}
@@ -58,13 +58,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
     wall_pos := [3]f32{WALL_X, 1.5, wall_z}
     wall_nodes[i] = world.spawn(&engine.world, wall_pos)
     physics.create_static_body(&phys, wall_pos, collider = physics.BoxCollider{half_extents = {half_thick, 1.5, 2.0}}, user = world.Handle(wall_nodes[i]))
-    wall_visual := mjolnir.spawn_mesh(engine, cube_mesh, render.get_builtin_material(&engine.render, wall_colors[i]), parent = wall_nodes[i])
+    wall_visual := mjolnir.spawn_mesh(engine, cube_mesh, engine.render.builtin_materials[wall_colors[i]], parent = wall_nodes[i])
     world.scale_xyz(&engine.world, wall_visual, half_thick, 1.5, 2.0)
   }
 
   bullet_node = world.spawn(&engine.world, START_POS)
   bullet_body = physics.create_dynamic_body(&phys, START_POS, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(bullet_node))
-  bullet_visual := mjolnir.spawn_mesh(engine, render.get_builtin_mesh(&engine.render, .SPHERE), render.get_builtin_material(&engine.render, .CYAN), parent = bullet_node)
+  bullet_visual := mjolnir.spawn_mesh(engine, engine.render.builtin_meshes[.SPHERE], engine.render.builtin_materials[.CYAN], parent = bullet_node)
   world.scale_xyz(&engine.world, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
   if body, ok := physics.get_dynamic_body(&phys, bullet_body); ok {
     body.linear_damping = 0; body.angular_damping = 0

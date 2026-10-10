@@ -2,7 +2,9 @@ package post_process
 
 import "../bindless"
 import "../gpu"
+import "base:intrinsics"
 import "core:log"
+import "core:reflect"
 import vk "vendor:vulkan"
 
 SHADER_POSTPROCESS_VERT :: #load("../shader/postprocess/vert.spv")
@@ -17,9 +19,9 @@ SHADER_CROSSHATCH_FRAG :: #load("../shader/crosshatch/frag.spv")
 SHADER_DOF_FRAG :: #load("../shader/dof/frag.spv")
 
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
-BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
-BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
+// Effect structs are pushed verbatim right after the base fields of
+// PushConstant (offset 32); their layout must match each shader's push block.
 GrayscaleEffect :: struct {
   weights:  [3]f32,
   strength: f32,
@@ -28,14 +30,12 @@ GrayscaleEffect :: struct {
 ToneMapEffect :: struct {
   exposure: f32,
   gamma:    f32,
-  padding:  [2]f32,
 }
 
 BlurEffect :: struct {
   radius:         f32,
   direction:      f32, // 0.0 = horizontal, 1.0 = vertical
   weight_falloff: f32, // 0.0 = box blur, 1.0 = gaussian blur
-  padding:        f32,
 }
 
 BloomEffect :: struct {
@@ -58,13 +58,11 @@ FogEffect :: struct {
 }
 
 CrossHatchEffect :: struct {
-  resolution:       [2]f32,
   hatch_offset_y:   f32,
   lum_threshold_01: f32,
   lum_threshold_02: f32,
   lum_threshold_03: f32,
   lum_threshold_04: f32,
-  padding:          f32,
 }
 
 DoFEffect :: struct {
@@ -74,97 +72,7 @@ DoFEffect :: struct {
   bokeh_intensity: f32, // Bokeh effect intensity
 }
 
-PostProcessEffectType :: enum int {
-  GRAYSCALE,
-  TONEMAP,
-  BLUR,
-  BLOOM,
-  OUTLINE,
-  FOG,
-  CROSSHATCH,
-  DOF,
-  NONE,
-}
-
-// Combined push constant structures for each effect type
-GrayscalePushConstant :: struct {
-  using base: BasePushConstant,
-  // Effect parameters
-  weights:    [3]f32,
-  strength:   f32,
-}
-
-ToneMapPushConstant :: struct {
-  using base: BasePushConstant,
-  // Effect parameters
-  exposure:   f32,
-  gamma:      f32,
-}
-
-BlurPushConstant :: struct {
-  using base:     BasePushConstant,
-  // Effect parameters
-  radius:         f32,
-  direction:      f32,
-  weight_falloff: f32,
-}
-
-BloomPushConstant :: struct {
-  using base:  BasePushConstant,
-  // Effect parameters
-  threshold:   f32,
-  intensity:   f32,
-  blur_radius: f32,
-  direction:   f32,
-}
-
-OutlinePushConstant :: struct {
-  using base: BasePushConstant,
-  // Effect parameters
-  color:      [3]f32,
-  thickness:  f32,
-}
-
-FogPushConstant :: struct {
-  using base: BasePushConstant,
-  // Effect parameters
-  color:      [4]f32, // Changed from [3]f32 to [4]f32 to match GLSL vec4
-  density:    f32,
-  start:      f32,
-  end:        f32,
-}
-
-CrossHatchPushConstant :: struct {
-  using base:       BasePushConstant,
-  // Effect parameters
-  resolution:       [2]f32,
-  hatch_offset_y:   f32,
-  lum_threshold_01: f32,
-  lum_threshold_02: f32,
-  lum_threshold_03: f32,
-  lum_threshold_04: f32,
-}
-
-DoFPushConstant :: struct {
-  using base:      BasePushConstant,
-  // Effect parameters
-  focus_distance:  f32,
-  focus_range:     f32,
-  blur_strength:   f32,
-  bokeh_intensity: f32,
-}
-
-BasePushConstant :: struct {
-  position_texture_index: u32,
-  normal_texture_index:   u32,
-  albedo_texture_index:   u32,
-  metallic_texture_index: u32,
-  emissive_texture_index: u32,
-  depth_texture_index:    u32,
-  input_image_index:      u32,
-  padding:                u32, // Add padding to align to 16-byte boundary for next vec4
-}
-
+// nil is the copy pass that brings the input to the output unchanged
 PostprocessEffect :: union {
   GrayscaleEffect,
   ToneMapEffect,
@@ -176,37 +84,46 @@ PostprocessEffect :: union {
   DoFEffect,
 }
 
+// Fragment shaders indexed by the PostprocessEffect union tag (0 = nil).
+FRAG_SHADERS := [?][]u8 {
+  SHADER_POSTPROCESS_FRAG,
+  SHADER_GRAYSCALE_FRAG,
+  SHADER_TONEMAP_FRAG,
+  SHADER_BLUR_FRAG,
+  SHADER_BLOOM_FRAG,
+  SHADER_OUTLINE_FRAG,
+  SHADER_FOG_FRAG,
+  SHADER_CROSSHATCH_FRAG,
+  SHADER_DOF_FRAG,
+}
+#assert(len(FRAG_SHADERS) == intrinsics.type_union_variant_count(PostprocessEffect) + 1)
+
+// Odin stores a union's variant bytes at offset 0, so `effect` places the
+// active effect struct at offset 32, followed by the (unread) tag.
+PushConstant :: struct {
+  position_texture_index: u32,
+  normal_texture_index:   u32,
+  albedo_texture_index:   u32,
+  metallic_texture_index: u32,
+  emissive_texture_index: u32,
+  depth_texture_index:    u32,
+  input_image_index:      u32,
+  // bloom: the scene as it entered bloom, composited by the V pass
+  original_image_index:   u32,
+  effect:                 PostprocessEffect,
+}
+#assert(offset_of(PushConstant, effect) == 32)
+#assert(size_of(PushConstant) <= 128)
+
 Renderer :: struct {
-  pipelines_hdr:    [len(PostProcessEffectType)]vk.Pipeline,
-  pipelines_ldr:    [len(PostProcessEffectType)]vk.Pipeline,
-  pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
-  effect_stack:     [dynamic]PostprocessEffect,
+  pipelines_hdr:   [len(FRAG_SHADERS)]vk.Pipeline,
+  pipelines_ldr:   [len(FRAG_SHADERS)]vk.Pipeline,
+  pipeline_layout: vk.PipelineLayout,
+  effect_stack:    [dynamic]PostprocessEffect,
   // 3 ping-pong buffers: bloom V pass needs to read H output AND pre-bloom
   // scene simultaneously while writing to a third slot. With only 2 buffers
   // V would have to write to one of its inputs when bloom isn't the last pass.
-  images:           [3]bindless.Texture2DHandle,
-}
-
-get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
-  switch _ in effect {
-  case GrayscaleEffect:
-    return .GRAYSCALE
-  case ToneMapEffect:
-    return .TONEMAP
-  case BlurEffect:
-    return .BLUR
-  case BloomEffect:
-    return .BLOOM
-  case OutlineEffect:
-    return .OUTLINE
-  case FogEffect:
-    return .FOG
-  case CrossHatchEffect:
-    return .CROSSHATCH
-  case DoFEffect:
-    return .DOF
-  }
-  return .NONE
+  images:          [3]bindless.Texture2DHandle,
 }
 
 add_grayscale :: proc(
@@ -234,20 +151,6 @@ add_blur :: proc(self: ^Renderer, radius: f32, gaussian: bool = true) {
     weight_falloff = 1.0 if gaussian else 0.0,
   }
   append(&self.effect_stack, vertical_effect)
-}
-
-add_directional_blur :: proc(
-  self: ^Renderer,
-  radius: f32,
-  direction: f32 = 0.0, // 0.0 = horizontal, 1.0 = vertical
-  gaussian: bool = true,
-) {
-  effect := BlurEffect {
-    radius         = radius,
-    direction      = direction,
-    weight_falloff = 1.0 if gaussian else 0.0,
-  }
-  append(&self.effect_stack, effect)
 }
 
 add_bloom :: proc(
@@ -306,7 +209,6 @@ add_fog :: proc(
 
 add_crosshatch :: proc(
   self: ^Renderer,
-  resolution: [2]f32,
   hatch_offset_y: f32 = 5.0,
   lum_threshold_01: f32 = 0.6,
   lum_threshold_02: f32 = 0.3,
@@ -314,7 +216,6 @@ add_crosshatch :: proc(
   lum_threshold_04: f32 = 0.07,
 ) {
   effect := CrossHatchEffect {
-    resolution       = resolution,
     hatch_offset_y   = hatch_offset_y,
     lum_threshold_01 = lum_threshold_01,
     lum_threshold_02 = lum_threshold_02,
@@ -349,9 +250,8 @@ setup :: proc(
   gctx: ^gpu.GPUContext,
   texture_manager: ^bindless.TextureManager,
   extent: vk.Extent2D,
-  format: vk.Format,
 ) -> vk.Result {
-  return create_images(gctx, self, texture_manager, extent, format)
+  return create_images(gctx, self, texture_manager, extent)
 }
 
 teardown :: proc(
@@ -372,80 +272,31 @@ init :: proc(
 ) {
   self.effect_stack = make([dynamic]PostprocessEffect)
   defer if ret != .SUCCESS do delete(self.effect_stack)
-  count :: len(PostProcessEffectType)
   vert_module := gpu.create_shader_module(
     gctx.device,
     SHADER_POSTPROCESS_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-  frag_modules: [count]vk.ShaderModule
-  defer for m in frag_modules do vk.DestroyShaderModule(gctx.device, m, nil)
-  for effect_type, i in PostProcessEffectType {
-    shader_code: []u8
-    switch effect_type {
-    case .BLOOM:
-      shader_code = SHADER_BLOOM_FRAG
-    case .BLUR:
-      shader_code = SHADER_BLUR_FRAG
-    case .GRAYSCALE:
-      shader_code = SHADER_GRAYSCALE_FRAG
-    case .TONEMAP:
-      shader_code = SHADER_TONEMAP_FRAG
-    case .OUTLINE:
-      shader_code = SHADER_OUTLINE_FRAG
-    case .FOG:
-      shader_code = SHADER_FOG_FRAG
-    case .CROSSHATCH:
-      shader_code = SHADER_CROSSHATCH_FRAG
-    case .DOF:
-      shader_code = SHADER_DOF_FRAG
-    case .NONE:
-      shader_code = SHADER_POSTPROCESS_FRAG
-    }
-    frag_modules[i] = gpu.create_shader_module(
-      gctx.device,
-      shader_code,
-    ) or_return
-  }
+  self.pipeline_layout = gpu.create_pipeline_layout(
+    gctx,
+    vk.PushConstantRange{stageFlags = {.FRAGMENT}, size = size_of(PushConstant)},
+    textures_set_layout,
+  ) or_return
   hdr_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
   ldr_formats := [?]vk.Format{color_format}
   blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_OVERRIDE}
-  for effect_type, i in PostProcessEffectType {
-    push_constant_size: u32
-    switch effect_type {
-    case .BLUR:
-      push_constant_size = size_of(BlurPushConstant)
-    case .OUTLINE:
-      push_constant_size = size_of(OutlinePushConstant)
-    case .GRAYSCALE:
-      push_constant_size = size_of(GrayscalePushConstant)
-    case .BLOOM:
-      push_constant_size = size_of(BloomPushConstant)
-    case .TONEMAP:
-      push_constant_size = size_of(ToneMapPushConstant)
-    case .FOG:
-      push_constant_size = size_of(FogPushConstant)
-    case .CROSSHATCH:
-      push_constant_size = size_of(CrossHatchPushConstant)
-    case .DOF:
-      push_constant_size = size_of(DoFPushConstant)
-    case .NONE:
-      push_constant_size = size_of(BasePushConstant)
-    }
-    self.pipeline_layouts[i] = gpu.create_pipeline_layout(
-      gctx,
-      vk.PushConstantRange{stageFlags = {.FRAGMENT}, size = push_constant_size} if push_constant_size > 0 else nil,
-      textures_set_layout,
-    ) or_return
+  for shader_code, i in FRAG_SHADERS {
+    frag_module := gpu.create_shader_module(gctx.device, shader_code) or_return
+    defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
     desc := gpu.GraphicsPipelineDesc {
       vert = vert_module,
-      frag = frag_modules[i],
+      frag = frag_module,
       specialization = &bindless.SHADER_SPEC_CONSTANTS,
       topology = .TRIANGLE_LIST,
       raster = gpu.DOUBLE_SIDED_RASTERIZER,
       blend = blend[:],
       color_formats = hdr_formats[:],
-      layout = self.pipeline_layouts[i],
+      layout = self.pipeline_layout,
     }
     self.pipelines_hdr[i] = gpu.create_graphics_pipeline(gctx, desc) or_return
     desc.color_formats = ldr_formats[:]
@@ -461,7 +312,6 @@ create_images :: proc(
   self: ^Renderer,
   texture_manager: ^bindless.TextureManager,
   extent: vk.Extent2D,
-  format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
     handle = bindless.allocate_texture_2d(
@@ -469,14 +319,8 @@ create_images :: proc(
       gctx,
       extent,
       gpu.HDR_COLOR_FORMAT,
-      vk.ImageUsageFlags {
-        .COLOR_ATTACHMENT,
-        .SAMPLED,
-        .TRANSFER_SRC,
-        .TRANSFER_DST,
-      },
+      {.COLOR_ATTACHMENT, .SAMPLED},
     ) or_return
-
   }
   log.debugf("created post-process image")
   return .SUCCESS
@@ -498,10 +342,9 @@ recreate_images :: proc(
   self: ^Renderer,
   texture_manager: ^bindless.TextureManager,
   extent: vk.Extent2D,
-  format: vk.Format,
 ) -> vk.Result {
   destroy_images(self, gctx, texture_manager)
-  return create_images(gctx, self, texture_manager, extent, format)
+  return create_images(gctx, self, texture_manager, extent)
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
@@ -513,15 +356,13 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
     vk.DestroyPipeline(gctx.device, p, nil)
     p = 0
   }
-  for &layout in self.pipeline_layouts {
-    vk.DestroyPipelineLayout(gctx.device, layout, nil)
-    layout = 0
-  }
+  vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
+  self.pipeline_layout = 0
   delete(self.effect_stack)
 }
 
-// record runs the post-process effect stack into output_view. If the stack is
-// empty a single copy effect is appended so the input always reaches output.
+// record runs the post-process effect stack into output_view. An empty stack
+// copies the input to output.
 record :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
@@ -531,10 +372,10 @@ record :: proc(
   gbuffer: bindless.GBuffer,
   texture_manager: ^bindless.TextureManager,
 ) {
-  if len(self.effect_stack) == 0 {
-    // if no postprocess effect, just copy the input to output
-    append(&self.effect_stack, nil)
-  }
+  effects := self.effect_stack[:]
+  // with no effect, a single copy (nil effect) brings the input to output
+  copy_only := [1]PostprocessEffect{nil}
+  if len(effects) == 0 do effects = copy_only[:]
   gpu.set_viewport_scissor(command_buffer, extent, flip_y = false)
   // Slot tracking for 3-buffer ping-pong.
   //   current_input_slot == -1 means current input is `final_image_idx`
@@ -553,8 +394,8 @@ record :: proc(
     }
     return 0
   }
-  for effect, i in self.effect_stack {
-    is_last := i == len(self.effect_stack) - 1
+  for effect, i in effects {
+    is_last := i == len(effects) - 1
     is_bloom_h := false
     is_bloom_v := false
     if e, ok := effect.(BloomEffect); ok {
@@ -614,164 +455,36 @@ record :: proc(
       command_buffer,
       extent,
       nil,
-      gpu.create_color_attachment_view(dst_view, .CLEAR, .STORE, BG_BLUE_GRAY),
+      gpu.create_color_attachment(dst_view, .CLEAR, .STORE, BG_BLUE_GRAY),
     )
-    effect_type := get_effect_type(effect)
-    pipeline := self.pipelines_ldr[effect_type] if is_last else self.pipelines_hdr[effect_type]
-    gpu.bind_graphics_pipeline(
+    tag := reflect.get_union_variant_raw_tag(effect)
+    pipeline := self.pipelines_ldr[tag] if is_last else self.pipelines_hdr[tag]
+    gpu.bind_pipeline(
       command_buffer,
+      .GRAPHICS,
       pipeline,
-      self.pipeline_layouts[effect_type],
+      self.pipeline_layout,
       texture_manager.descriptor_set,
     )
-    base: BasePushConstant
-    base.position_texture_index = gbuffer.position
-    base.normal_texture_index = gbuffer.normal
-    base.albedo_texture_index = gbuffer.albedo
-    base.metallic_texture_index = gbuffer.metallic_roughness
-    base.emissive_texture_index = gbuffer.emissive
-    base.depth_texture_index = gbuffer.depth
-    base.input_image_index = input_image_index
-    // Create and push combined push constants based on effect type
-    switch e in effect {
-    case BlurEffect:
-      push_constant := BlurPushConstant {
-        radius         = e.radius,
-        direction      = e.direction,
-        weight_falloff = e.weight_falloff,
-      }
-      push_constant.base = base
-      vk.CmdPushConstants(
-        command_buffer,
-        self.pipeline_layouts[effect_type],
-        {.FRAGMENT},
-        0,
-        size_of(BlurPushConstant),
-        &push_constant,
-      )
-    case GrayscaleEffect:
-      push_constant := GrayscalePushConstant {
-        weights  = e.weights,
-        strength = e.strength,
-      }
-      push_constant.base = base
-      vk.CmdPushConstants(
-        command_buffer,
-        self.pipeline_layouts[effect_type],
-        {.FRAGMENT},
-        0,
-        size_of(GrayscalePushConstant),
-        &push_constant,
-      )
-    case ToneMapEffect:
-      push_constant := ToneMapPushConstant {
-        exposure = e.exposure,
-        gamma    = e.gamma,
-      }
-      push_constant.base = base
-      vk.CmdPushConstants(
-        command_buffer,
-        self.pipeline_layouts[effect_type],
-        {.FRAGMENT},
-        0,
-        size_of(ToneMapPushConstant),
-        &push_constant,
-      )
-    case BloomEffect:
-      push_constant := BloomPushConstant {
-        threshold   = e.threshold,
-        intensity   = e.intensity,
-        blur_radius = e.blur_radius,
-        direction   = e.direction,
-      }
-      push_constant.base = base
-      // Bloom uses the padding slot as `original_image_index` — the scene as
-      // it entered bloom, so V can composite blurred bright-pass against the
-      // prior stack state (preserving outline, DOF, fog, ...). H is a no-op
-      // for this field but we set it to its own input for consistency.
-      push_constant.base.padding = input_image_index if is_bloom_h else bloom_h_input_image_idx
-      vk.CmdPushConstants(
-        command_buffer,
-        self.pipeline_layouts[effect_type],
-        {.FRAGMENT},
-        0,
-        size_of(BloomPushConstant),
-        &push_constant,
-      )
-    case OutlineEffect:
-      push_constant := OutlinePushConstant {
-        color     = e.color,
-        thickness = e.thickness,
-      }
-      push_constant.base = base
-      vk.CmdPushConstants(
-        command_buffer,
-        self.pipeline_layouts[effect_type],
-        {.FRAGMENT},
-        0,
-        size_of(OutlinePushConstant),
-        &push_constant,
-      )
-    case FogEffect:
-      push_constant: FogPushConstant
-      push_constant.base = base
-      push_constant.color = {e.color.x, e.color.y, e.color.z, 1.0} // Convert [3]f32 to [4]f32
-      push_constant.density = e.density
-      push_constant.start = e.start
-      push_constant.end = e.end
-      vk.CmdPushConstants(
-        command_buffer,
-        self.pipeline_layouts[effect_type],
-        {.FRAGMENT},
-        0,
-        size_of(FogPushConstant),
-        &push_constant,
-      )
-    case CrossHatchEffect:
-      push_constant := CrossHatchPushConstant {
-        resolution       = e.resolution,
-        hatch_offset_y   = e.hatch_offset_y,
-        lum_threshold_01 = e.lum_threshold_01,
-        lum_threshold_02 = e.lum_threshold_02,
-        lum_threshold_03 = e.lum_threshold_03,
-        lum_threshold_04 = e.lum_threshold_04,
-      }
-      push_constant.base = base
-      vk.CmdPushConstants(
-        command_buffer,
-        self.pipeline_layouts[effect_type],
-        {.FRAGMENT},
-        0,
-        size_of(CrossHatchPushConstant),
-        &push_constant,
-      )
-    case DoFEffect:
-      push_constant := DoFPushConstant {
-        focus_distance  = e.focus_distance,
-        focus_range     = e.focus_range,
-        blur_strength   = e.blur_strength,
-        bokeh_intensity = e.bokeh_intensity,
-      }
-      push_constant.base = base
-      vk.CmdPushConstants(
-        command_buffer,
-        self.pipeline_layouts[effect_type],
-        {.FRAGMENT},
-        0,
-        size_of(DoFPushConstant),
-        &push_constant,
-      )
-    case:
-      // No effect or nil effect - just copy input to output
-      vk.CmdPushConstants(
-        command_buffer,
-        self.pipeline_layouts[effect_type],
-        {.FRAGMENT},
-        0,
-        size_of(BasePushConstant),
-        &base,
-      )
+    push := PushConstant {
+      position_texture_index = gbuffer.position,
+      normal_texture_index   = gbuffer.normal,
+      albedo_texture_index   = gbuffer.albedo,
+      metallic_texture_index = gbuffer.metallic_roughness,
+      emissive_texture_index = gbuffer.emissive,
+      depth_texture_index    = gbuffer.depth,
+      input_image_index      = input_image_index,
+      original_image_index   = input_image_index if is_bloom_h else bloom_h_input_image_idx,
+      effect                 = effect,
     }
+    vk.CmdPushConstants(
+      command_buffer,
+      self.pipeline_layout,
+      {.FRAGMENT},
+      0,
+      size_of(PushConstant),
+      &push,
+    )
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
     vk.CmdEndRendering(command_buffer)
     if is_bloom_h {

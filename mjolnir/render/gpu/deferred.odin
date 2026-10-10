@@ -12,25 +12,10 @@ import vk "vendor:vulkan"
 // retirement grace. This queue is for loose resources with no owning pool — e.g.
 // the per-frame shadow draw buffers freed when a light despawns.
 
-TrashBuffer :: struct {
+TrashItem :: struct {
+  ready:  u64,
   buffer: vk.Buffer,
   memory: vk.DeviceMemory,
-}
-
-TrashImage :: struct {
-  image:  vk.Image,
-  view:   vk.ImageView,
-  memory: vk.DeviceMemory,
-}
-
-Trash :: union {
-  TrashBuffer,
-  TrashImage,
-}
-
-TrashItem :: struct {
-  ready:   u64,
-  payload: Trash,
 }
 
 DeferredTrash :: struct {
@@ -39,8 +24,8 @@ DeferredTrash :: struct {
 }
 
 @(private = "file")
-enqueue :: proc(gctx: ^GPUContext, payload: Trash) {
-  append(&gctx.trash.items, TrashItem{gctx.trash.frame + FRAMES_IN_FLIGHT, payload})
+enqueue :: proc(gctx: ^GPUContext, buffer: vk.Buffer, memory: vk.DeviceMemory) {
+  append(&gctx.trash.items, TrashItem{gctx.trash.frame + FRAMES_IN_FLIGHT, buffer, memory})
 }
 
 // defer_destroy_mutable_buffer unmaps now (the CPU mapping is never read by the
@@ -53,34 +38,14 @@ defer_destroy_mutable_buffer :: proc(gctx: ^GPUContext, buffer: ^MutableBuffer($
     vk.UnmapMemory(gctx.device, buffer.memory)
     buffer.mapped = nil
   }
-  enqueue(gctx, TrashBuffer{buffer.buffer, buffer.memory})
-  buffer.buffer = 0
-  buffer.memory = 0
-  buffer.bytes_count = 0
-  buffer.element_size = 0
-}
-
-// defer_destroy_image queues an image's handles for deferred destruction. The
-// passed image is zeroed so it cannot be destroyed twice.
-defer_destroy_image :: proc(gctx: ^GPUContext, img: ^Image) {
-  if img.image == 0 do return
-  enqueue(gctx, TrashImage{img.image, img.view, img.memory})
-  img.image = 0
-  img.view = 0
-  img.memory = 0
+  enqueue(gctx, buffer.buffer, buffer.memory)
+  buffer^ = {}
 }
 
 @(private = "file")
-destroy_item :: proc(device: vk.Device, payload: Trash) {
-  switch p in payload {
-  case TrashBuffer:
-    vk.DestroyBuffer(device, p.buffer, nil)
-    vk.FreeMemory(device, p.memory, nil)
-  case TrashImage:
-    vk.DestroyImageView(device, p.view, nil)
-    vk.DestroyImage(device, p.image, nil)
-    vk.FreeMemory(device, p.memory, nil)
-  }
+destroy_item :: proc(device: vk.Device, item: TrashItem) {
+  vk.DestroyBuffer(device, item.buffer, nil)
+  vk.FreeMemory(device, item.memory, nil)
 }
 
 // deferred_tick advances the frame counter and destroys every queued resource
@@ -94,7 +59,7 @@ deferred_tick :: proc(gctx: ^GPUContext) {
       i += 1
       continue
     }
-    destroy_item(gctx.device, d.items[i].payload)
+    destroy_item(gctx.device, d.items[i])
     unordered_remove(&d.items, i)
   }
 }
@@ -103,11 +68,12 @@ deferred_tick :: proc(gctx: ^GPUContext) {
 // after vkDeviceWaitIdle (teardown/shutdown), where no frame is in flight.
 deferred_flush :: proc(gctx: ^GPUContext) {
   for item in gctx.trash.items {
-    destroy_item(gctx.device, item.payload)
+    destroy_item(gctx.device, item)
   }
   clear(&gctx.trash.items)
 }
 
+@(private)
 deferred_destroy :: proc(gctx: ^GPUContext) {
   delete(gctx.trash.items)
   gctx.trash = {}

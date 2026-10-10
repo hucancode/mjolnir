@@ -35,10 +35,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
   mjolnir.spawn(engine, {3, 8, 3}, render.point_light_attachment({1.0, 0.95, 0.8, 1.0}, 25.0, false))
   mjolnir.spawn(engine, {-6, 10, -4}, render.directional_light_attachment({1.0, 0.95, 0.9, 4.0}, 15.0, true))
 
-  render.main_camera_set_orthographic(&engine.render,
-    width = f32(ortho_width), height = f32(ortho_height),
-    from = {0, f32(cam_height), 0.01}, to = {0, 0, 0},
-  )
+  cam := render.main_camera(&engine.render)
+  render.camera_set_orthographic(cam, f32(ortho_width), f32(ortho_height))
+  render.camera_look_at(cam, {0, f32(cam_height), 0.01}, {0, 0, 0})
   log.info("Orthographic Main Camera — top-down view")
 }
 
@@ -47,10 +46,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   world.rotate(&engine.world, spinner, phase)
   yaw := f32(cam_yaw)
   pos := [3]f32{math.sin(yaw) * 0.5, f32(cam_height), math.cos(yaw) * 0.5}
-  render.main_camera_set_orthographic(&engine.render,
-    width = f32(ortho_width), height = f32(ortho_height),
-    from = pos, to = {0, 0, 0},
-  )
+  cam := render.main_camera(&engine.render)
+  render.camera_set_orthographic(cam, f32(ortho_width), f32(ortho_height))
+  render.camera_look_at(cam, pos, {0, 0, 0})
   world.update(&engine.world)
   for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
   for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)

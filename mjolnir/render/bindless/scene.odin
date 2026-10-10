@@ -71,7 +71,7 @@ bind_scene :: proc(
     ds[n] = scene.sets[s]
     n += 1
   }
-  gpu.bind_graphics_pipeline(cmd, pipeline, layout, ..ds[:n])
+  gpu.bind_pipeline(cmd, .GRAPHICS, pipeline, layout, ..ds[:n])
   gpu.bind_vertex_index_buffers(cmd, scene.vertex_buffer, scene.index_buffer)
 }
 

@@ -73,7 +73,7 @@ cell_world_pos :: proc(col: i32, row: i32) -> [3]f32 {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  ground := render.get_builtin_mesh(&engine.render, .QUAD_XZ)
+  ground := engine.render.builtin_meshes[.QUAD_XZ]
   dark_mat := render.create_material(&engine.render, type = .PBR, base_color_factor = {0.05, 0.05, 0.06, 1.0})
   floor := mjolnir.spawn_mesh(engine, ground, dark_mat, cast_shadow = false)
   world.scale(&engine.world, floor, RADIUS * 6.0)
@@ -111,7 +111,7 @@ spawn_piece :: proc(engine: ^mjolnir.Engine) {
   for c in state.active_piece.cells do if c[1] > max_dr do max_dr = c[1]
   state.active_pos = {0, i32(GRID_H) - 1 - max_dr}
   if collides(state.active_piece, state.active_pos) { state.game_over = true; return }
-  cube := render.get_builtin_mesh(&engine.render, .CUBE)
+  cube := engine.render.builtin_meshes[.CUBE]
   mat := state.transparent_material[state.active_piece.color]
   for i in 0 ..< PIECE_LEN {
     h := mjolnir.spawn_mesh(engine, cube, mat)

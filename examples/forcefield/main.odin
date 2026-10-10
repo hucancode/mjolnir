@@ -70,8 +70,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       velocity_spread   = 0.5,
       color_start       = {1, 0.95, 0.4, 1},
       color_end         = {1, 0.2, 0, 0},
-      aabb_min          = {-6, -6, -6},
-      aabb_max          = {6, 6, 6},
       particle_lifetime = 4.0,
       position_spread   = 0.2,
       size_start        = 100,
@@ -91,12 +89,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
 }
 
 apply_ff :: proc(engine: ^mjolnir.Engine, s: ^FFState) {
-  render.set_forcefield(&engine.render, s.ff_handle,
-    strength         = f32(s.strength),
-    tangent_strength = f32(s.tangent_strength),
-    area_of_effect   = f32(s.area_of_effect),
-    enabled          = s.enabled,
-  )
+  ff, ok := render.forcefield(&engine.render, s.ff_handle)
+  if !ok do return
+  ff.strength         = f32(s.strength)
+  ff.tangent_strength = f32(s.tangent_strength)
+  ff.area_of_effect   = f32(s.area_of_effect)
+  ff.enabled          = b32(s.enabled)
 }
 
 draw_ff_marker :: proc(engine: ^mjolnir.Engine, s: ^FFState) {

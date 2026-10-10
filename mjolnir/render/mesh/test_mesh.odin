@@ -10,9 +10,9 @@ test_cube_generation :: proc(t: ^testing.T) {
   defer delete_geometry(cube)
   testing.expect_value(t, len(cube.vertices), 24) // 6 faces * 4 vertices
   testing.expect_value(t, len(cube.indices), 36) // 6 faces * 2 triangles * 3 indices
-  // Check AABB
-  testing.expect_value(t, cube.aabb.min, [3]f32{-1, -1, -1})
-  testing.expect_value(t, cube.aabb.max, [3]f32{1, 1, 1})
+  aabb := aabb_from_vertices(cube.vertices)
+  testing.expect_value(t, aabb.min, [3]f32{-1, -1, -1})
+  testing.expect_value(t, aabb.max, [3]f32{1, 1, 1})
 }
 
 @(test)
@@ -28,22 +28,29 @@ test_sphere_generation :: proc(t: ^testing.T) {
     distance := linalg.length(vertex.position)
     testing.expect(t, abs(distance - 1.0) < math.F32_EPSILON)
   }
-  testing.expect_value(t, sphere.aabb.min, [3]f32{-1, -1, -1})
-  testing.expect_value(t, sphere.aabb.max, [3]f32{1, 1, 1})
+  aabb := aabb_from_vertices(sphere.vertices)
+  testing.expect_value(t, aabb.min, [3]f32{-1, -1, -1})
+  testing.expect_value(t, aabb.max, [3]f32{1, 1, 1})
 }
 
 @(test)
-test_triangle_winding_order :: proc(t: ^testing.T) {
-  triangle := make_triangle()
-  defer delete_geometry(triangle)
-  testing.expect_value(t, len(triangle.indices), 3)
-  // Verify counter-clockwise winding
-  v0 := triangle.vertices[triangle.indices[0]].position
-  v1 := triangle.vertices[triangle.indices[1]].position
-  v2 := triangle.vertices[triangle.indices[2]].position
-  edge1 := v1 - v0
-  edge2 := v2 - v0
-  normal := linalg.cross(edge1, edge2)
-  // Normal should point in positive Z direction for CCW winding
-  testing.expect(t, normal.z > 0)
+test_flat_quad_aabb_has_thickness :: proc(t: ^testing.T) {
+  quad := make_quad()
+  defer delete_geometry(quad)
+  aabb := aabb_from_vertices(quad.vertices)
+  testing.expect(t, aabb.max.y - aabb.min.y >= AABB_MIN_EXTENT - 1e-6)
+  testing.expect_value(t, aabb.max.x, 1)
+}
+
+@(test)
+test_builders_generate_tangents :: proc(t: ^testing.T) {
+  shapes := [?]Geometry{make_cube(), make_quad(), make_sphere(), make_cone(), make_capsule(), make_torus(), make_cylinder()}
+  for g, s in shapes {
+    defer delete_geometry(g)
+    for v, i in g.vertices {
+      ok := abs(linalg.length(v.tangent.xyz) - 1) < 1e-3 && v.tangent.w == 1
+      testing.expectf(t, ok, "shape %d vertex %d tangent %v", s, i, v.tangent)
+      if !ok do break
+    }
+  }
 }

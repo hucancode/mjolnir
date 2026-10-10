@@ -48,8 +48,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     geom := mesh.from_triangles(obj.positions, obj.indices)
     mesh.obj_mesh_destroy(&obj)
-    log.infof("%s: %d verts, %d tris, aabb %v..%v", files[i], len(geom.vertices), len(geom.indices) / 3, geom.aabb.min, geom.aabb.max)
-    loaded_aabb[i] = {geom.aabb.min, geom.aabb.max}
+    aabb := mesh.aabb_from_vertices(geom.vertices)
+    log.infof("%s: %d verts, %d tris, aabb %v..%v", files[i], len(geom.vertices), len(geom.indices) / 3, aabb.min, aabb.max)
+    loaded_aabb[i] = {aabb.min, aabb.max}
     loaded_meshes[i] = render.create_mesh(&engine.render, geom)
   }
 
@@ -74,13 +75,9 @@ swap_model :: proc(engine: ^mjolnir.Engine, index: int) {
   world.translate(&engine.world, display_node, -center)
 
   cam_dist := radius * 1.8
-  render.main_camera_set_perspective(&engine.render,
-    fov  = 1.2,
-    from = {cam_dist, cam_dist * 0.7, cam_dist},
-    to   = {0, 0, 0},
-    near = max(0.1, cam_dist * 0.01),
-    far  = cam_dist * 5.0,
-  )
+  cam := render.main_camera(&engine.render)
+  render.camera_set_perspective(cam, 1.2, max(0.1, cam_dist * 0.01), cam_dist * 5.0)
+  render.camera_look_at(cam, {cam_dist, cam_dist * 0.7, cam_dist}, {0, 0, 0})
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

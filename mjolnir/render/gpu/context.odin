@@ -43,6 +43,7 @@ SwapchainSupport :: struct {
   present_modes: []vk.PresentModeKHR, // Owned by this struct if allocated by it
 }
 
+@(private)
 swapchain_support_destroy :: proc(support: ^SwapchainSupport) {
   delete(support.formats)
   support.formats = nil
@@ -53,30 +54,34 @@ swapchain_support_destroy :: proc(support: ^SwapchainSupport) {
 FoundQueueFamilyIndices :: struct {
   graphics_family: u32,
   present_family:  u32,
-  compute_family:  Maybe(u32),
+  compute_family:  u32,
 }
+
+REQUIRE_GEOMETRY_SHADER :: #config(REQUIRE_GEOMETRY_SHADER, ODIN_OS != .Darwin)
 
 GPUContext :: struct {
   instance:             vk.Instance,
   device:               vk.Device,
   surface:              vk.SurfaceKHR,
-  surface_capabilities: vk.SurfaceCapabilitiesKHR,
-  surface_formats:      []vk.SurfaceFormatKHR,
-  present_modes:        []vk.PresentModeKHR,
   debug_messenger:      vk.DebugUtilsMessengerEXT,
   physical_device:      vk.PhysicalDevice,
   graphics_family:      u32,
   graphics_queue:       vk.Queue,
   present_family:       u32,
   present_queue:        vk.Queue,
-  compute_family:       Maybe(u32),
-  compute_queue:        Maybe(vk.Queue),
+  compute_family:       u32, // equals graphics_family without a dedicated compute queue
+  compute_queue:        vk.Queue,
   descriptor_pool:      vk.DescriptorPool,
   command_pool:         vk.CommandPool,
-  compute_command_pool: Maybe(vk.CommandPool),
+  compute_command_pool: vk.CommandPool,
   device_properties:    vk.PhysicalDeviceProperties,
-  has_async_compute:    bool,
   trash:                DeferredTrash, // loose vk resources awaiting deferred destruction
+}
+
+// Compute work is recorded and submitted separately only when the device has
+// a dedicated compute queue family.
+has_async_compute :: proc(self: ^GPUContext) -> bool {
+  return self.compute_family != self.graphics_family
 }
 
 // Global context for debug callback
@@ -116,19 +121,13 @@ shutdown :: proc(self: ^GPUContext) {
     vk.DestroyDescriptorPool(self.device, self.descriptor_pool, nil)
   }
   vk.DestroyCommandPool(self.device, self.command_pool, nil)
-  if pool, ok := self.compute_command_pool.?; ok {
-    vk.DestroyCommandPool(self.device, pool, nil)
-  }
+  vk.DestroyCommandPool(self.device, self.compute_command_pool, nil)
   vk.DestroyDevice(self.device, nil)
   vk.DestroySurfaceKHR(self.instance, self.surface, nil)
   when ENABLE_VALIDATION_LAYERS {
     vk.DestroyDebugUtilsMessengerEXT(self.instance, self.debug_messenger, nil)
   }
   vk.DestroyInstance(self.instance, nil)
-  delete(self.surface_formats)
-  delete(self.present_modes)
-  self.surface_formats = nil
-  self.present_modes = nil
 }
 
 @(private = "file")
@@ -214,6 +213,7 @@ vulkan_instance_init :: proc(
   return .SUCCESS
 }
 
+@(private)
 query_swapchain_support :: proc(
   physical_device: vk.PhysicalDevice,
   surface: vk.SurfaceKHR,
@@ -277,10 +277,6 @@ score_physical_device :: proc(
   vk.GetPhysicalDeviceFeatures(device, &features)
   device_name_cstring := cstring(&props.deviceName[0])
   log.infof("Scoring device %s", device_name_cstring)
-  REQUIRE_GEOMETRY_SHADER :: #config(
-    REQUIRE_GEOMETRY_SHADER,
-    ODIN_OS != .Darwin,
-  )
   when REQUIRE_GEOMETRY_SHADER {
     if !features.geometryShader {
       log.infof("Device %s: no geometry shader.", device_name_cstring)
@@ -432,14 +428,11 @@ find_queue_families :: proc(
       break
     }
   }
-  // Fallback: use graphics queue for compute if no dedicated queue exists
-  if maybe_compute_family == nil && maybe_graphics_family != nil {
-    maybe_compute_family = maybe_graphics_family
-  }
   if g_fam, ok_g := maybe_graphics_family.?; ok_g {
     if p_fam, ok_p := maybe_present_family.?; ok_p {
-      return FoundQueueFamilyIndices{g_fam, p_fam, maybe_compute_family},
-        .SUCCESS
+      // Without a dedicated queue, compute runs on the graphics queue.
+      c_fam := maybe_compute_family.? or_else g_fam
+      return FoundQueueFamilyIndices{g_fam, p_fam, c_fam}, .SUCCESS
     }
   }
   res = .ERROR_FEATURE_NOT_PRESENT
@@ -452,13 +445,6 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   self.graphics_family = indices.graphics_family
   self.present_family = indices.present_family
   self.compute_family = indices.compute_family
-  support_details := query_swapchain_support(
-    self.physical_device,
-    self.surface,
-  ) or_return
-  self.surface_capabilities = support_details.capabilities
-  self.surface_formats = support_details.formats
-  self.present_modes = support_details.present_modes
   queue_create_infos_list := make(
     [dynamic]vk.DeviceQueueCreateInfo,
     0,
@@ -469,9 +455,7 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     }, 3, context.temp_allocator)
   unique_queue_families[self.graphics_family] = {}
   unique_queue_families[self.present_family] = {}
-  if compute_fam, ok := self.compute_family.?; ok {
-    unique_queue_families[compute_fam] = {}
-  }
+  unique_queue_families[self.compute_family] = {}
   queue_priority: f32 = 1.0
   for family_index in unique_queue_families {
     append(
@@ -496,10 +480,6 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     shaderDemoteToHelperInvocation = true,
     pNext                          = &unified_layouts_features,
   }
-  REQUIRE_GEOMETRY_SHADER :: #config(
-    REQUIRE_GEOMETRY_SHADER,
-    ODIN_OS != .Darwin,
-  )
   basic_features := vk.PhysicalDeviceFeatures {
     multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
@@ -538,25 +518,21 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   ) or_return
   vk.GetDeviceQueue(self.device, self.graphics_family, 0, &self.graphics_queue)
   vk.GetDeviceQueue(self.device, self.present_family, 0, &self.present_queue)
-  if compute_fam, ok := self.compute_family.?; ok {
-    queue: vk.Queue
-    vk.GetDeviceQueue(self.device, compute_fam, 0, &queue)
-    self.compute_queue = queue
-    self.has_async_compute = compute_fam != self.graphics_family
-    if self.has_async_compute {
-      log.infof(
-        "Async compute enabled: dedicated compute queue family %d",
-        compute_fam,
-      )
-    } else {
-      log.infof("Async compute disabled: using graphics queue for compute")
-    }
+  vk.GetDeviceQueue(self.device, self.compute_family, 0, &self.compute_queue)
+  if has_async_compute(self) {
+    log.infof(
+      "Async compute enabled: dedicated compute queue family %d",
+      self.compute_family,
+    )
+  } else {
+    log.infof("Async compute disabled: using graphics queue for compute")
   }
   return .SUCCESS
 }
 
-// Create the shared descriptor pool that the allocate_descriptor_set helpers
-// draw from, sized by the caller (the renderer knows its budget).
+// Create the shared descriptor pool that allocate_descriptor_set draws
+// from, sized by the caller (the renderer knows its budget). Sets are
+// freed individually with free_descriptor_sets.
 descriptor_pool_init :: proc(
   self: ^GPUContext,
   pool_sizes: []vk.DescriptorPoolSize,
@@ -564,6 +540,7 @@ descriptor_pool_init :: proc(
 ) -> vk.Result {
   pool_info := vk.DescriptorPoolCreateInfo {
     sType         = .DESCRIPTOR_POOL_CREATE_INFO,
+    flags         = {.FREE_DESCRIPTOR_SET},
     poolSizeCount = u32(len(pool_sizes)),
     pPoolSizes    = raw_data(pool_sizes),
     maxSets       = max_sets,
@@ -597,17 +574,14 @@ command_pool_init :: proc(self: ^GPUContext) -> vk.Result {
     &self.command_pool,
   ) or_return
   log.infof("Vulkan graphics command pool created")
-  if compute_fam, ok := self.compute_family.?; ok {
-    compute_pool_info := vk.CommandPoolCreateInfo {
-      sType            = .COMMAND_POOL_CREATE_INFO,
-      flags            = {.RESET_COMMAND_BUFFER},
-      queueFamilyIndex = compute_fam,
-    }
-    pool: vk.CommandPool
-    vk.CreateCommandPool(self.device, &compute_pool_info, nil, &pool) or_return
-    self.compute_command_pool = pool
-    log.infof("Vulkan compute command pool created")
-  }
+  pool_info.queueFamilyIndex = self.compute_family
+  vk.CreateCommandPool(
+    self.device,
+    &pool_info,
+    nil,
+    &self.compute_command_pool,
+  ) or_return
+  log.infof("Vulkan compute command pool created")
   return .SUCCESS
 }
 
@@ -669,6 +643,7 @@ end_single_time_command :: proc(
   return .SUCCESS
 }
 
+@(private)
 find_memory_type_index :: proc(
   physical_device: vk.PhysicalDevice,
   type_filter: u32,
@@ -687,6 +662,7 @@ find_memory_type_index :: proc(
   return 0, false
 }
 
+@(private)
 allocate_memory :: proc(
   self: ^GPUContext,
   mem_requirements: vk.MemoryRequirements,

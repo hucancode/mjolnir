@@ -1,7 +1,7 @@
 #version 450
 
 layout(location = 0) out vec4 outColor;
-layout(location = 0) flat in uint node_index;
+layout(location = 5) flat in uint node_index;
 
 struct MaterialData {
     uint albedo_index;

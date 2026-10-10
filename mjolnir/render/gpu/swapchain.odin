@@ -275,34 +275,32 @@ submit_queue_and_present :: proc(
       stageMask = {.COLOR_ATTACHMENT_OUTPUT},
     },
   )
-  if gctx.has_async_compute {
-    if compute_queue, ok := gctx.compute_queue.?; ok {
-      append(
-        &wait_infos,
-        vk.SemaphoreSubmitInfo {
-          sType = .SEMAPHORE_SUBMIT_INFO,
-          semaphore = self.compute_finished_semaphores[frame_index],
-          stageMask = {.VERTEX_INPUT, .COMPUTE_SHADER},
-        },
-      )
-      compute_cmd_info := vk.CommandBufferSubmitInfo {
-        sType         = .COMMAND_BUFFER_SUBMIT_INFO,
-        commandBuffer = compute_command_buffer^,
-      }
-      compute_signal := vk.SemaphoreSubmitInfo {
-        sType     = .SEMAPHORE_SUBMIT_INFO,
+  if has_async_compute(gctx) {
+    append(
+      &wait_infos,
+      vk.SemaphoreSubmitInfo {
+        sType = .SEMAPHORE_SUBMIT_INFO,
         semaphore = self.compute_finished_semaphores[frame_index],
-        stageMask = {.ALL_COMMANDS},
-      }
-      compute_submit := vk.SubmitInfo2 {
-        sType                    = .SUBMIT_INFO_2,
-        commandBufferInfoCount   = 1,
-        pCommandBufferInfos      = &compute_cmd_info,
-        signalSemaphoreInfoCount = 1,
-        pSignalSemaphoreInfos    = &compute_signal,
-      }
-      vk.QueueSubmit2(compute_queue, 1, &compute_submit, 0) or_return
+        stageMask = {.VERTEX_INPUT, .COMPUTE_SHADER},
+      },
+    )
+    compute_cmd_info := vk.CommandBufferSubmitInfo {
+      sType         = .COMMAND_BUFFER_SUBMIT_INFO,
+      commandBuffer = compute_command_buffer^,
     }
+    compute_signal := vk.SemaphoreSubmitInfo {
+      sType     = .SEMAPHORE_SUBMIT_INFO,
+      semaphore = self.compute_finished_semaphores[frame_index],
+      stageMask = {.ALL_COMMANDS},
+    }
+    compute_submit := vk.SubmitInfo2 {
+      sType                    = .SUBMIT_INFO_2,
+      commandBufferInfoCount   = 1,
+      pCommandBufferInfos      = &compute_cmd_info,
+      signalSemaphoreInfoCount = 1,
+      pSignalSemaphoreInfos    = &compute_signal,
+    }
+    vk.QueueSubmit2(gctx.compute_queue, 1, &compute_submit, 0) or_return
   }
   gfx_cmd_info := vk.CommandBufferSubmitInfo {
     sType         = .COMMAND_BUFFER_SUBMIT_INFO,

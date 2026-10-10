@@ -29,9 +29,9 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   cube_body_to_mesh = make(map[physics.TriggerHandle]world.NodeHandle)
-  cube_mesh := render.get_builtin_mesh(&engine.render, .CUBE)
-  sphere_mesh := render.get_builtin_mesh(&engine.render, .SPHERE)
-  cube_mat := render.get_builtin_material(&engine.render, .CYAN)
+  cube_mesh := engine.render.builtin_meshes[.CUBE]
+  sphere_mesh := engine.render.builtin_meshes[.SPHERE]
+  cube_mat := engine.render.builtin_materials[.CYAN]
   effector_mat := render.material_pbr(&engine.render, emissive = 5.0)
   grid_size := 50
   spacing: f32 = 1.0
