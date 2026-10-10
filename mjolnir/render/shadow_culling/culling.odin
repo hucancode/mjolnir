@@ -44,7 +44,6 @@ init :: proc(
     {.STORAGE_BUFFER, {.COMPUTE}},
     {.STORAGE_BUFFER, {.COMPUTE}},
     {.STORAGE_BUFFER, {.COMPUTE}},
-    {.STORAGE_BUFFER, {.COMPUTE}},
   ) or_return
   defer if ret != .SUCCESS {
     vk.DestroyDescriptorSetLayout(gctx.device, self.descriptor_layout, nil)

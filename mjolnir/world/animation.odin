@@ -76,27 +76,7 @@ init_animation_channel :: proc(
 }
 
 animation_instance_update :: proc(self: ^AnimationInstance, duration: f32, delta_time: f32) {
-  if self.status != .PLAYING || duration <= 0 {
-    return
-  }
-  effective_delta_time := delta_time * self.speed
-  switch self.mode {
-  case .LOOP:
-    self.time += effective_delta_time
-    self.time = math.mod_f32(self.time + duration, duration)
-  case .ONCE:
-    self.time += effective_delta_time
-    self.time = math.mod_f32(self.time + duration, duration)
-    if self.time >= duration {
-      self.time = duration
-      self.status = .STOPPED
-    }
-  case .PING_PONG:
-    self.time += effective_delta_time
-    if self.time >= duration || self.time < 0 {
-      self.speed *= -1
-    }
-  }
+  anim.playback_advance(&self.time, &self.speed, &self.status, self.mode, duration, delta_time)
 }
 
 update_skeletal_animations :: proc(

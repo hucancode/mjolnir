@@ -6,8 +6,6 @@ import vk "vendor:vulkan"
 
 SHADER_CULLING :: #load("../../shader/occlusion_culling/cull.spv")
 
-FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
-
 // Draw pipelines participate in indirect-draw culling; each camera owns one
 // DrawBuffers per pipeline.
 DrawPipeline :: enum {
@@ -20,8 +18,8 @@ DrawPipeline :: enum {
 }
 
 DrawBuffers :: struct {
-  count:    [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  commands: [FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
+  count:    [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  commands: [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
 }
 
 VisibilityPushConstants :: struct {

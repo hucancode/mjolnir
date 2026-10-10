@@ -25,7 +25,6 @@ import ui_render "ui"
 import vk "vendor:vulkan"
 import "wireframe"
 
-FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 MAX_NODES_IN_SCENE :: 65536
 MAX_ACTIVE_CAMERAS :: 128
 MAX_LIGHTS :: 256
@@ -39,12 +38,12 @@ SHADOW_MAP_SIZE :: 512
 
 @(private)
 frame_next :: #force_inline proc(frame_index: u32) -> u32 {
-  return alg.next(frame_index, FRAMES_IN_FLIGHT)
+  return alg.next(frame_index, gpu.FRAMES_IN_FLIGHT)
 }
 
 @(private)
 frame_prev :: #force_inline proc(frame_index: u32) -> u32 {
-  return alg.prev(frame_index, FRAMES_IN_FLIGHT)
+  return alg.prev(frame_index, gpu.FRAMES_IN_FLIGHT)
 }
 
 Handle :: cont.Handle
@@ -161,22 +160,22 @@ MAX_FORCE_FIELDS :: particles_compute.MAX_FORCE_FIELDS
 // per frame at use sites; storing them would duplicate Light fields.
 @(private)
 ShadowMap :: struct {
-  shadow_map_2d:   [FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
-  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  shadow_map_2d:   [gpu.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  draw_commands:   [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  draw_count:      [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 @(private)
 ShadowMapCube :: struct {
-  shadow_map_cube: [FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
-  draw_commands:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(
+  shadow_map_cube: [gpu.FRAMES_IN_FLIGHT]gpu.TextureCubeHandle,
+  draw_commands:   [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(
     vk.DrawIndexedIndirectCommand,
   ),
-  draw_count:      [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  descriptor_sets: [FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  draw_count:      [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  descriptor_sets: [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
 PointLight :: struct {
@@ -212,19 +211,19 @@ Light :: union {
 // buffers); external user code should not.
 @(private)
 Internal :: struct {
-  command_buffers:              [FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  compute_command_buffers:      [FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  command_buffers:              [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  compute_command_buffers:      [gpu.FRAMES_IN_FLIGHT]vk.CommandBuffer,
   linear_repeat_sampler:        vk.Sampler,
   linear_clamp_sampler:         vk.Sampler,
   nearest_repeat_sampler:       vk.Sampler,
   nearest_clamp_sampler:        vk.Sampler,
   bone_buffer:                  gpu.PerFrameBindlessBuffer(
     matrix[4, 4]f32,
-    FRAMES_IN_FLIGHT,
+    gpu.FRAMES_IN_FLIGHT,
   ),
   camera_buffer:                gpu.PerFrameBindlessBuffer(
     CameraGPU,
-    FRAMES_IN_FLIGHT,
+    gpu.FRAMES_IN_FLIGHT,
   ),
   material_buffer:              gpu.BindlessBuffer(Material),
   node_data_buffer:             gpu.BindlessBuffer(Node),
@@ -330,13 +329,13 @@ DEFAULT_ENABLED_PASSES :: PassTypeSet{
 // pass enable/culling flags. The world-side `Camera` carries only spatial
 // state; engine layer translates high-level config into these flags.
 CameraTarget :: struct {
-  attachments:                  [AttachmentType][FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
+  attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]gpu.Texture2DHandle,
   // Indirect draw buffers per pipeline (double-buffered for async compute).
   // Frame N compute writes to buffers[N], Frame N graphics reads from buffers[N-1].
   draws:                        [DrawPipeline]DrawBuffers,
-  depth_pyramid:                [FRAMES_IN_FLIGHT]depth_pyramid_system.DepthPyramid,
-  descriptor_set:               [FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  depth_reduce_descriptor_sets: [FRAMES_IN_FLIGHT][depth_pyramid_system.MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
+  depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]depth_pyramid_system.DepthPyramid,
+  descriptor_set:               [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  depth_reduce_descriptor_sets: [gpu.FRAMES_IN_FLIGHT][depth_pyramid_system.MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
   enabled_passes:               PassTypeSet,
   enable_culling:               bool,
 }

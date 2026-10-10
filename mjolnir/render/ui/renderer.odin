@@ -11,15 +11,14 @@ import vk "vendor:vulkan"
 
 UI_MAX_VERTICES :: 65536
 UI_MAX_INDICES :: 98304
-FRAMES_IN_FLIGHT :: 2
 
 Vertex2D :: geometry.Vertex2D
 
 Renderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
-  vertex_buffers:  [FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
-  index_buffers:   [FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
+  index_buffers:   [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
   vertices:        [UI_MAX_VERTICES]Vertex2D,
   indices:         [UI_MAX_INDICES]u32,
   vertex_count:    u32,
@@ -68,7 +67,7 @@ stage_commands :: proc(self: ^Renderer, commands: []cmd.RenderCommand) {
 
 setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
   log.info("Setting up UI renderer buffers...")
-  for i in 0 ..< FRAMES_IN_FLIGHT {
+  for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     self.vertex_buffers[i] = gpu.create_mutable_buffer(
       gctx,
       Vertex2D,
@@ -87,7 +86,7 @@ setup :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) -> vk.Result {
 }
 
 teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-  for i in 0 ..< FRAMES_IN_FLIGHT {
+  for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     gpu.mutable_buffer_destroy(gctx.device, &self.vertex_buffers[i])
     gpu.mutable_buffer_destroy(gctx.device, &self.index_buffers[i])
   }

@@ -25,7 +25,6 @@ import "world"
 // Verify world and GPU handle types have identical memory layout for safe transmutes
 #assert(size_of(world.MeshHandle) == size_of(gpu.MeshHandle))
 
-FRAMES_IN_FLIGHT :: #config(FRAMES_IN_FLIGHT, 2)
 RENDER_FPS :: #config(RENDER_FPS, 60)
 FRAME_TIME :: 1.0 / RENDER_FPS
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
@@ -509,7 +508,7 @@ render_and_present :: proc(self: ^Engine) -> vk.Result {
     &compute_cmd,
     self.frame_index,
   ) or_return
-  self.frame_index = alg.next(self.frame_index, FRAMES_IN_FLIGHT)
+  self.frame_index = alg.next(self.frame_index, gpu.FRAMES_IN_FLIGHT)
   self.last_render_timestamp = time.now()
   return .SUCCESS
 }
@@ -634,6 +633,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     // Apply any teardown/setup requested during this frame now that the frame is
     // presented — safe point to free/recreate GPU resources (teardown waits idle).
     apply_pending_lifecycle(self)
+    free_all(context.temp_allocator)
     if res != .SUCCESS {
       log.errorf("Error during rendering %v", res)
       render_error_count += 1
@@ -658,6 +658,7 @@ update_thread_proc :: proc(thread: ^thread.Thread) {
   engine := cast(^Engine)thread.data
   for engine.update_active {
     if !update(engine) do time.sleep(time.Millisecond * 2)
+    free_all(context.temp_allocator)
   }
   log.info("Update thread terminating")
 }

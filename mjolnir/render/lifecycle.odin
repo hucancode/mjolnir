@@ -154,7 +154,6 @@ init_subsystems :: proc(
   particles_render.init(
     &self.internal.particles_render,
     gctx,
-    &self.texture_manager,
     self.internal.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
