@@ -67,6 +67,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     follow.offset = {0, f32(follow_offset_y), f32(follow_offset_back)}
     follow.follow_speed = f32(follow_lerp)
   }
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

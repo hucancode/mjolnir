@@ -1,18 +1,27 @@
 package render
 
+import "../input"
 import "core:math"
 import "core:math/linalg"
 
-// Per-tick input for camera controllers, in window pixels. The caller fills
-// it from whatever input source it has; controllers never read devices.
-CameraInput :: struct {
-  mouse_delta:   [2]f32, // cursor movement since the last tick
-  scroll:        f32, // vertical scroll since the last tick
-  drag:          bool, // primary button held
-  pan:           bool, // orbit: drag pans instead of rotating
-  boost:         bool, // free: move faster
-  move:          [3]f32, // free: x = right, y = up, z = forward; each in [-1, 1]
-  mouse_blocked: bool, // another consumer (UI) owns the mouse this tick
+// Keys and button a controller reads from the input snapshot.
+CameraBindings :: struct {
+  left, right:   input.Key,
+  down, up:      input.Key,
+  back, forward: input.Key,
+  modifier:      [2]input.Key, // either held: orbit pans, free moves faster
+  drag:          input.MouseButton, // orbit: held to rotate / pan
+}
+
+DEFAULT_CAMERA_BINDINGS :: CameraBindings {
+  left     = .A,
+  right    = .D,
+  down     = .Q,
+  up       = .E,
+  back     = .S,
+  forward  = .W,
+  modifier = {.LEFT_SHIFT, .RIGHT_SHIFT},
+  drag     = .LEFT,
 }
 
 // Orbits `target`. Distance, yaw and pitch come from the camera's pose each
@@ -48,6 +57,7 @@ CameraController :: struct {
     FreeCameraData,
     FollowCameraData,
   },
+  bindings:    CameraBindings,
   is_dragging: bool,
 }
 
@@ -67,6 +77,7 @@ orbit_controller :: proc(target: [3]f32 = {0, 0, 0}) -> CameraController {
       rotate_speed = 2.0,
       pan_speed = 0.01,
     },
+    bindings = DEFAULT_CAMERA_BINDINGS,
   }
 }
 
@@ -77,6 +88,7 @@ free_controller :: proc(move_speed := f32(5.0)) -> CameraController {
       boost_multiplier = 3.0,
       mouse_sensitivity = 0.002,
     },
+    bindings = DEFAULT_CAMERA_BINDINGS,
   }
 }
 
@@ -92,6 +104,7 @@ follow_controller :: proc(
       follow_speed = follow_speed,
       look_at_target = true,
     },
+    bindings = DEFAULT_CAMERA_BINDINGS,
   }
 }
 
@@ -100,14 +113,16 @@ orbit_update :: proc(
   self: ^CameraController,
   orbit: ^OrbitCameraData,
   camera: ^Camera,
-  input: CameraInput,
+  s: ^input.State,
+  mouse_blocked, keyboard_blocked: bool,
 ) {
   // A drag may only start outside the UI; one in progress continues. The
   // tick a drag starts carries no motion.
-  started := input.drag && !self.is_dragging && !input.mouse_blocked
+  drag := input.mouse_down(s, self.bindings.drag)
+  started := drag && !self.is_dragging && !mouse_blocked
   if started do self.is_dragging = true
-  if !input.drag do self.is_dragging = false
-  scroll := input.scroll if !input.mouse_blocked else 0
+  if !drag do self.is_dragging = false
+  scroll := s.scroll.y if !mouse_blocked else 0
   offset := camera.position - orbit.target
   distance := max(linalg.length(offset), 0.001)
   yaw := math.atan2(offset.z, offset.x)
@@ -122,9 +137,9 @@ orbit_update :: proc(
     }
   }
   moved := false
-  if self.is_dragging && !started && input.mouse_delta != {} {
-    d := input.mouse_delta
-    if input.pan {
+  if self.is_dragging && !started && s.mouse_delta != {} {
+    d := s.mouse_delta
+    if !keyboard_blocked && modifier_down(s, self.bindings) {
       forward := linalg.normalize(-offset)
       right := linalg.normalize(linalg.cross(forward, linalg.VECTOR3F32_Y_AXIS))
       up := linalg.cross(right, forward)
@@ -145,23 +160,32 @@ orbit_update :: proc(
 }
 
 @(private = "file")
+modifier_down :: proc(s: ^input.State, b: CameraBindings) -> bool {
+  return input.key_down(s, b.modifier[0]) || input.key_down(s, b.modifier[1])
+}
+
+@(private = "file")
 free_update :: proc(
   free: ^FreeCameraData,
+  b: CameraBindings,
   camera: ^Camera,
-  input: CameraInput,
+  s: ^input.State,
   delta_time: f32,
+  mouse_blocked, keyboard_blocked: bool,
 ) {
-  move :=
-    camera_right(camera) * input.move.x +
-    [3]f32{0, 1, 0} * input.move.y +
-    camera_forward(camera) * input.move.z
-  if linalg.length2(move) > 0 {
-    speed := free.move_speed * (free.boost_multiplier if input.boost else 1)
-    camera.position += linalg.normalize(move) * speed * delta_time
+  if !keyboard_blocked {
+    move :=
+      camera_right(camera) * input.axis(s, b.left, b.right) +
+      [3]f32{0, 1, 0} * input.axis(s, b.down, b.up) +
+      camera_forward(camera) * input.axis(s, b.back, b.forward)
+    if linalg.length2(move) > 0 {
+      speed := free.move_speed * (free.boost_multiplier if modifier_down(s, b) else 1)
+      camera.position += linalg.normalize(move) * speed * delta_time
+    }
   }
-  if input.mouse_blocked || input.mouse_delta == {} do return
-  yaw := input.mouse_delta.x * free.mouse_sensitivity
-  pitch := input.mouse_delta.y * free.mouse_sensitivity
+  if mouse_blocked || s.mouse_delta == {} do return
+  yaw := s.mouse_delta.x * free.mouse_sensitivity
+  pitch := s.mouse_delta.y * free.mouse_sensitivity
   camera.rotation =
     linalg.quaternion_angle_axis(-yaw, linalg.VECTOR3F32_Y_AXIS) * camera.rotation
   camera.rotation =
@@ -187,18 +211,22 @@ follow_update :: proc(
   }
 }
 
-// Drive `camera` with `controller` for one tick.
+// Drive `camera` with `controller` for one tick of input. Blocked mouse /
+// keyboard input belongs to another consumer (e.g. UI) and is ignored; a drag
+// already in progress continues.
 camera_controller_update :: proc(
   controller: ^CameraController,
   camera: ^Camera,
-  input: CameraInput,
+  s: ^input.State,
   delta_time: f32,
+  mouse_blocked := false,
+  keyboard_blocked := false,
 ) {
   switch &d in controller.data {
   case OrbitCameraData:
-    orbit_update(controller, &d, camera, input)
+    orbit_update(controller, &d, camera, s, mouse_blocked, keyboard_blocked)
   case FreeCameraData:
-    free_update(&d, camera, input, delta_time)
+    free_update(&d, controller.bindings, camera, s, delta_time, mouse_blocked, keyboard_blocked)
   case FollowCameraData:
     follow_update(&d, camera, delta_time)
   }

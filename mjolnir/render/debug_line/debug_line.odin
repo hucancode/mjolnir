@@ -17,11 +17,19 @@ Vertex :: struct {
   color:    [4]f32,
 }
 
+// A line to draw. `life` is how long it stays, in seconds of the clock
+// advanced by `advance`; zero or less draws it for one frame.
 Segment :: struct {
   a, b:         [3]f32,
   color:        [4]f32,
-  expiry:       f32,
+  life:         f32,
   bypass_depth: bool,
+}
+
+@(private)
+Queued :: struct {
+  using segment: Segment,
+  expiry:        f32,
 }
 
 PushConstant :: struct {
@@ -32,7 +40,7 @@ Renderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
   vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex),
-  segments:        [dynamic]Segment,
+  segments:        [dynamic]Queued,
   now:             f32,
   mu:              sync.Mutex,
 }
@@ -64,49 +72,36 @@ init :: proc(
   frag_module := gpu.create_shader_module(gctx.device, SHADER_FRAG) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
 
-  binding := vk.VertexInputBindingDescription {
-    binding   = 0,
-    stride    = size_of(Vertex),
-    inputRate = .VERTEX,
+  bindings := [?]vk.VertexInputBindingDescription {
+    {binding = 0, stride = size_of(Vertex), inputRate = .VERTEX},
   }
   attrs := [?]vk.VertexInputAttributeDescription {
     {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(Vertex, position))},
     {location = 1, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(Vertex, color))},
   }
-  vinfo := vk.PipelineVertexInputStateCreateInfo {
-    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = 1,
-    pVertexBindingDescriptions      = &binding,
-    vertexAttributeDescriptionCount = len(attrs),
-    pVertexAttributeDescriptions    = raw_data(attrs[:]),
-  }
-  stages := gpu.create_vert_frag_stages(vert_module, frag_module)
-  ia := vk.PipelineInputAssemblyStateCreateInfo {
-    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology = .LINE_LIST,
-  }
   // Depth test toggled dynamically per draw to fold overlay variant into the same pipeline.
   dyn_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_TEST_ENABLE}
-  dyn_state := gpu.create_dynamic_state(dyn_states[:])
+  color_formats := [?]vk.Format{.B8G8R8A8_SRGB}
+  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
+  self.pipeline = gpu.create_graphics_pipeline(
+    gctx,
+    {
+      vert = vert_module,
+      frag = frag_module,
+      vertex_bindings = bindings[:],
+      vertex_attributes = attrs[:],
+      topology = .LINE_LIST,
+      raster = gpu.LINE_RASTERIZER,
+      depth = gpu.READ_ONLY_DEPTH_STATE,
+      blend = blend[:],
+      color_formats = color_formats[:],
+      depth_format = .D32_SFLOAT,
+      dynamic_states = dyn_states[:],
+      layout = self.pipeline_layout,
+    },
+  ) or_return
 
-  pinfo := vk.GraphicsPipelineCreateInfo {
-    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    stageCount          = len(stages),
-    pStages             = raw_data(stages[:]),
-    pVertexInputState   = &vinfo,
-    pInputAssemblyState = &ia,
-    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-    pRasterizationState = &gpu.LINE_RASTERIZER,
-    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-    pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
-    pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
-    pDynamicState       = &dyn_state,
-    layout              = self.pipeline_layout,
-    pNext               = &gpu.STANDARD_RENDERING_INFO,
-  }
-  vk.CreateGraphicsPipelines(gctx.device, 0, 1, &pinfo, nil, &self.pipeline) or_return
-
-  self.segments = make([dynamic]Segment, 0, 1024)
+  self.segments = make([dynamic]Queued, 0, 1024)
   log.debugf("debug_line renderer initialized")
   return .SUCCESS
 }
@@ -123,16 +118,14 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 }
 
 // Sentinel for one-frame draws; dropped after the first record() packs them.
+@(private)
 ONE_FRAME_EXPIRY :: f32(-1.0)
 
-set_time :: proc(self: ^Renderer, now: f32) {
+// Advance the clock that segment lifetimes count against.
+advance :: proc(self: ^Renderer, delta_time: f32) {
   sync.mutex_lock(&self.mu)
-  self.now = now
+  self.now += delta_time
   sync.mutex_unlock(&self.mu)
-}
-
-resolve_expiry :: #force_inline proc(now, life: f32) -> f32 {
-  return ONE_FRAME_EXPIRY if life <= 0 else now + life
 }
 
 add_segments :: proc(self: ^Renderer, segs: ..Segment) {
@@ -149,7 +142,10 @@ add_segments :: proc(self: ^Renderer, segs: ..Segment) {
       resize(&self.segments, len(self.segments) - overflow)
     }
   }
-  append(&self.segments, ..segs)
+  for seg in segs {
+    expiry := ONE_FRAME_EXPIRY if seg.life <= 0 else self.now + seg.life
+    append(&self.segments, Queued{segment = seg, expiry = expiry})
+  }
 }
 
 record :: proc(

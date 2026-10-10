@@ -39,20 +39,6 @@ aabb_contains :: proc "contextless" (outer, inner: Aabb) -> bool {
   )
 }
 
-aabb_contains_approx :: proc "contextless" (
-  outer, inner: Aabb,
-  epsilon: f32 = 1e-6,
-) -> bool {
-  return(
-    inner.min.x >= outer.min.x - epsilon &&
-    inner.max.x <= outer.max.x + epsilon &&
-    inner.min.y >= outer.min.y - epsilon &&
-    inner.max.y <= outer.max.y + epsilon &&
-    inner.min.z >= outer.min.z - epsilon &&
-    inner.max.z <= outer.max.z + epsilon \
-  )
-}
-
 aabb_contains_point :: proc "contextless" (aabb: Aabb, point: [3]f32) -> bool {
   return(
     point.x >= aabb.min.x &&
@@ -77,11 +63,6 @@ aabb_surface_area :: proc "contextless" (aabb: Aabb) -> f32 {
   return 2.0 * (d.x * d.y + d.y * d.z + d.z * d.x)
 }
 
-aabb_volume :: proc "contextless" (aabb: Aabb) -> f32 {
-  d := aabb.max - aabb.min
-  return d.x * d.y * d.z
-}
-
 aabb_sphere_intersects :: proc "contextless" (
   aabb: Aabb,
   center: [3]f32,
@@ -90,11 +71,6 @@ aabb_sphere_intersects :: proc "contextless" (
   closest := linalg.clamp(center, aabb.min, aabb.max)
   diff := center - closest
   return linalg.dot(diff, diff) <= radius * radius
-}
-
-distance_point_aabb :: proc "contextless" (point: [3]f32, aabb: Aabb) -> f32 {
-  closest := linalg.clamp(point, aabb.min, aabb.max)
-  return linalg.length(point - closest)
 }
 
 ray_aabb_intersection :: proc "contextless" (
@@ -141,21 +117,11 @@ min_vec3 :: proc "contextless" (v: [3]f32) -> f32 {
   return min(v.x, v.y, v.z)
 }
 
-max_vec3 :: proc "contextless" (v: [3]f32) -> f32 {
-  return max(v.x, v.y, v.z)
-}
-
 // Oriented Bounding Box
 Obb :: struct {
   center:       [3]f32,
   half_extents: [3]f32,
   rotation:     quaternion128, // Orientation
-}
-
-// Get the 3 local axes of the OBB (columns of rotation matrix)
-obb_axes :: #force_inline proc "contextless" (obb: Obb) -> (x, y, z: [3]f32) {
-  mat := linalg.matrix3_from_quaternion(obb.rotation)
-  return mat[0], mat[1], mat[2]
 }
 
 // Convert OBB to AABB
@@ -182,153 +148,6 @@ obb_closest_point :: proc "contextless" (obb: Obb, point: [3]f32) -> [3]f32 {
   return obb.center + qmv(obb.rotation, clamped)
 }
 
-// Check if point is inside OBB
-obb_contains_point :: proc "contextless" (obb: Obb, point: [3]f32) -> bool {
-  d := point - obb.center
-  inv_rot := linalg.quaternion_inverse(obb.rotation)
-  local := qmv(inv_rot, d)
-  return(
-    math.abs(local.x) <= obb.half_extents.x &&
-    math.abs(local.y) <= obb.half_extents.y &&
-    math.abs(local.z) <= obb.half_extents.z \
-  )
-}
-
-// OBB-OBB intersection test using Separating Axis Theorem
-obb_obb_intersect :: proc(
-  a, b: Obb,
-) -> (
-  contact: [3]f32,
-  normal: [3]f32,
-  penetration_depth: f32,
-  hit: bool,
-) {
-  ax, ay, az := obb_axes(a)
-  bx, by, bz := obb_axes(b)
-  t := b.center - a.center
-  min_overlap := f32(math.F32_MAX)
-  best_axis: [3]f32
-  best_axis_index := -1 // 0-2: A faces, 3-5: B faces, 6+: edges
-  // Helper to test a single axis
-  test_axis :: #force_inline proc(
-    axis: [3]f32,
-    t: [3]f32,
-    a: Obb,
-    b: Obb,
-    ax, ay, az, bx, by, bz: [3]f32,
-    min_overlap: ^f32,
-    best_axis: ^[3]f32,
-    best_index: ^int,
-    current_index: int,
-  ) -> bool {
-    // Skip degenerate axes (e.g., parallel edges produce near-zero cross products)
-    axis_sq := linalg.length2(axis)
-    if axis_sq < 1e-8 do return true
-    // Normalize axis for edge-edge cross products (face normals are already unit vectors)
-    // Without normalization, edge axes produce scaled overlaps leading to incorrect penetration depths
-    normalized_axis := axis
-    if axis_sq < 0.9999 || axis_sq > 1.0001 {
-      normalized_axis = axis / math.sqrt(axis_sq)
-    }
-    // Project centers onto axis
-    dist := linalg.dot(t, normalized_axis)
-    // Project extents of A onto axis
-    ra :=
-      a.half_extents.x * math.abs(linalg.dot(ax, normalized_axis)) +
-      a.half_extents.y * math.abs(linalg.dot(ay, normalized_axis)) +
-      a.half_extents.z * math.abs(linalg.dot(az, normalized_axis))
-    // Project extents of B onto axis
-    rb :=
-      b.half_extents.x * math.abs(linalg.dot(bx, normalized_axis)) +
-      b.half_extents.y * math.abs(linalg.dot(by, normalized_axis)) +
-      b.half_extents.z * math.abs(linalg.dot(bz, normalized_axis))
-    // Check for separation
-    overlap := ra + rb - math.abs(dist)
-    if overlap < 0 do return false // Separating axis found
-    // Track minimum overlap
-    if overlap < min_overlap^ {
-      min_overlap^ = overlap
-      // Ensure normal points from A to B
-      best_axis^ = dist < 0 ? -normalized_axis : normalized_axis
-      best_index^ = current_index
-    }
-    return true
-  }
-  // Test face normals of A (indices 0-2)
-  test_axis(ax, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 0) or_return
-  test_axis(ay, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 1) or_return
-  test_axis(az, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 2) or_return
-  // Test face normals of B (indices 3-5)
-  test_axis(bx, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 3) or_return
-  test_axis(by, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 4) or_return
-  test_axis(bz, t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 5) or_return
-  // Test edge-edge axes (indices 6+)
-  test_axis(linalg.cross(ax, bx), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 6) or_return
-  test_axis(linalg.cross(ax, by), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 7) or_return
-  test_axis(linalg.cross(ax, bz), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 8) or_return
-  test_axis(linalg.cross(ay, bx), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 9) or_return
-  test_axis(linalg.cross(ay, by), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 10) or_return
-  test_axis(linalg.cross(ay, bz), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 11) or_return
-  test_axis(linalg.cross(az, bx), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 12) or_return
-  test_axis(linalg.cross(az, by), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 13) or_return
-  test_axis(linalg.cross(az, bz), t, a, b, ax, ay, az, bx, by, bz, &min_overlap, &best_axis, &best_axis_index, 14) or_return
-  // All tests passed - OBBs are intersecting
-  // Normalize the best axis (face normals are already unit length, but edge axes may not be)
-  normal = linalg.normalize0(best_axis)
-  penetration_depth = min_overlap
-  // For face-face collisions (best axis is a face normal), compute better contact point
-  if best_axis_index >= 0 && best_axis_index <= 5 {
-    // Face-face collision: find the center of the contact region on the reference face
-    reference_is_a := best_axis_index <= 2
-    reference_obb := reference_is_a ? a : b
-    incident_obb := reference_is_a ? b : a
-    axis_index := reference_is_a ? best_axis_index : best_axis_index - 3
-    // best_axis points from A to B; when using B as reference we need the face that looks back at A
-    reference_normal := reference_is_a ? best_axis : -best_axis
-    reference_face_center :=
-      reference_obb.center + reference_normal * reference_obb.half_extents[axis_index]
-    // Get all 8 vertices of incident box using cached axes
-    inc_x, inc_y, inc_z := (reference_is_a ? bx : ax), (reference_is_a ? by : ay), (reference_is_a ? bz : az)
-    inc_ex, inc_ey, inc_ez := incident_obb.half_extents.x, incident_obb.half_extents.y, incident_obb.half_extents.z
-    incident_vertices := [8][3]f32{
-      incident_obb.center - inc_x * inc_ex - inc_y * inc_ey - inc_z * inc_ez,
-      incident_obb.center + inc_x * inc_ex - inc_y * inc_ey - inc_z * inc_ez,
-      incident_obb.center - inc_x * inc_ex + inc_y * inc_ey - inc_z * inc_ez,
-      incident_obb.center + inc_x * inc_ex + inc_y * inc_ey - inc_z * inc_ez,
-      incident_obb.center - inc_x * inc_ex - inc_y * inc_ey + inc_z * inc_ez,
-      incident_obb.center + inc_x * inc_ex - inc_y * inc_ey + inc_z * inc_ez,
-      incident_obb.center - inc_x * inc_ex + inc_y * inc_ey + inc_z * inc_ez,
-      incident_obb.center + inc_x * inc_ex + inc_y * inc_ey + inc_z * inc_ez,
-    }
-    // Find vertices that are penetrating the reference face
-    contact_sum := [3]f32{0, 0, 0}
-    contact_count := 0
-    for vertex in incident_vertices {
-      // Signed distance from vertex to reference face plane (reference_normal points out of reference)
-      dist_to_face := linalg.dot(vertex - reference_face_center, reference_normal)
-      // If the vertex is behind or on the reference face, project it onto the face plane
-      if dist_to_face <= 1e-4 {
-        projected := vertex - reference_normal * dist_to_face
-        contact_sum += projected
-        contact_count += 1
-      }
-    }
-    // Average the penetrating vertices
-    if contact_count > 0 {
-      contact = contact_sum / f32(contact_count)
-    } else {
-      // Fallback: midpoint between the reference face and incident object along the collision normal
-      contact =
-        reference_face_center - reference_normal * min_overlap * 0.5
-    }
-  } else {
-    // Edge-edge collision: use midpoint approximation
-    contact = a.center + best_axis * min_overlap * 0.5
-  }
-  hit = true
-  return
-}
-
 // Sphere-OBB intersection test
 obb_sphere_intersect :: proc(
   obb: Obb,
@@ -352,63 +171,6 @@ obb_sphere_intersect :: proc(
   distance := math.sqrt(dist_sq)
   normal = distance > 1e-6 ? delta / distance : linalg.VECTOR3F32_Y_AXIS
   penetration = sphere_radius - distance
-  hit = true
-  return
-}
-
-// Capsule-OBB intersection test
-obb_capsule_intersect :: proc(
-  obb: Obb,
-  capsule_center: [3]f32,
-  capsule_radius: f32,
-  capsule_height: f32,
-) -> (
-  closest_on_obb: [3]f32,
-  normal: [3]f32,
-  penetration: f32,
-  hit: bool,
-) {
-  // Capsule is aligned along Y-axis
-  h := capsule_height * 0.5
-  line_start := capsule_center + [3]f32{0, -h, 0}
-  line_end := capsule_center + [3]f32{0, h, 0}
-  // Find closest point on line segment to OBB
-  // We'll sample several points along the capsule's central axis
-  // and find the one closest to the OBB
-  min_dist_sq := f32(math.F32_MAX)
-  closest_on_line: [3]f32
-  // Sample 5 points along the line segment
-  #unroll for i in 0 ..= 4 {
-    t := f32(i) / 4.0
-    sample := linalg.mix(line_start, line_end, t)
-    point_on_obb := obb_closest_point(obb, sample)
-    dist_sq := linalg.length2(sample - point_on_obb)
-
-    if dist_sq < min_dist_sq {
-      min_dist_sq = dist_sq
-      closest_on_line = sample
-      closest_on_obb = point_on_obb
-    }
-  }
-  // Refine: project the closest OBB point back onto the line segment
-  line_dir := line_end - line_start
-  line_length_sq := linalg.length2(line_dir)
-  if line_length_sq > 1e-6 {
-    t := linalg.saturate(
-      linalg.dot(closest_on_obb - line_start, line_dir) / line_length_sq,
-    )
-    closest_on_line = linalg.mix(line_start, line_end, t)
-    closest_on_obb = obb_closest_point(obb, closest_on_line)
-  }
-  // Check if within capsule radius
-  delta := closest_on_line - closest_on_obb
-  dist_sq := linalg.length2(delta)
-  if dist_sq > capsule_radius * capsule_radius {
-    return
-  }
-  distance := math.sqrt(dist_sq)
-  normal = distance > 1e-6 ? delta / distance : [3]f32{0, 1, 0}
-  penetration = capsule_radius - distance
   hit = true
   return
 }

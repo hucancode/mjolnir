@@ -4,7 +4,8 @@
     "desc": "Minimal hello-world cube.",
     "notes": [
       "<code>run_app</code> allocates engine, installs logger, runs to window close, frees on exit.",
-      "Builtin meshes (<code>.CUBE</code>, <code>.SPHERE</code>, <code>.QUAD_XZ</code>, <code>.CONE</code>, <code>.CAPSULE</code>, <code>.CYLINDER</code>, <code>.TORUS</code>) and colors are pre-baked by <code>render.init</code>; <code>mjolnir.spawn_primitive_mesh</code> uses them."
+      "Builtin meshes (<code>.CUBE</code>, <code>.SPHERE</code>, <code>.QUAD_XZ</code>, <code>.QUAD_XY</code>, <code>.CONE</code>, <code>.CAPSULE</code>, <code>.CYLINDER</code>, <code>.TORUS</code>) and colors are pre-baked by <code>render.init</code>; <code>mjolnir.spawn_primitive_mesh</code> uses them.",
+      "The <code>update</code> callback runs <code>world.update</code> and feeds <code>removed_nodes</code> / <code>changed_nodes</code> to render; without it nothing moves on screen."
     ]
   },
   {
@@ -15,7 +16,7 @@
       "<code>BlendMode</code> default <code>.REPLACE</code> (weighted). Use <code>.ADD</code> for additive layers (recoil over aim).",
       "One-shot crossfade between layers: <code>anim.transition_to</code>.",
       "Drive per-layer weight live with <code>anim.set_layer_weight</code>.",
-      "Glue: <code>animator_update</code> in <code>update</code>, <code>render.stage_bones</code> with <code>animator.palette</code> in <code>sync</code>."
+      "Glue in <code>update</code>: <code>animator_update</code>, then <code>render.stage_bones</code> with <code>animator.palette</code>."
     ]
   },
   {
@@ -41,18 +42,27 @@
     "name": "cameras",
     "desc": "Orbit / free / follow camera controllers.",
     "notes": [
-      "The engine starts with the orbit controller. Switch with <code>render.use_orbit_camera</code> / <code>use_free_camera</code> / <code>use_camera_controller</code>.",
-      "Controllers are stateful — call <code>render.camera_controller_sync</code> after warping the camera or swapping controllers.",
-      "Follow controller takes a <code>^[3]f32</code> target."
+      "The engine starts with <code>render.orbit_controller()</code>. Switch by assigning <code>engine.camera_controller</code> (<code>orbit_controller</code>, <code>free_controller</code>, <code>follow_controller</code>), or <code>{}</code> to disable it.",
+      "Controllers read the tick's <code>input.State</code> through their <code>bindings</code> (<code>CameraBindings</code>) and skip devices a UI captured.",
+      "Orbit reads distance, yaw and pitch from the camera pose each tick, so warping the camera never snaps it back.",
+      "Follow controller tracks <code>FollowCameraData.target</code>; update it each tick."
+    ]
+  },
+  {
+    "name": "collision",
+    "desc": "Static and dynamic bodies of every shape, moved and reshaped live.",
+    "notes": [
+      "<code>physics.set_body_pose</code> / <code>set_body_collider</code> move or reshape static and dynamic bodies and keep the BVH consistent.",
+      "<code>physics.raycast</code> tests rotated boxes and cylinders exactly and returns the surface normal."
     ]
   },
   {
     "name": "crowd_nav",
     "desc": "Detour crowd agents navigating a navmesh.",
     "notes": [
-      "Bake once: <code>nav.append_triangles</code> for ground and obstacles, then <code>nav.build</code>.",
-      "<code>crowd.create_crowd</code> on <code>&navmesh.detour_mesh</code>; agents via <code>crowd_add_agent</code>, goals via <code>crowd_move_to</code>.",
-      "<code>crowd_update</code> each tick handles path following, obstacle avoidance and separation; read <code>crowd_get_agent(c, id).npos</code>.",
+      "Bake once: <code>bake.append_triangles</code> for ground and obstacles, then <code>bake.build</code>.",
+      "<code>crowd.create</code> on <code>&navmesh</code>; agents via <code>crowd.add_agent</code> (start from <code>crowd.DEFAULT_AGENT_PARAMS</code>), goals via <code>crowd.move_to</code>.",
+      "<code>crowd.update</code> each tick handles path following, obstacle avoidance and separation; read <code>crowd.get_agent(c, id).npos</code>.",
       "Heavy bakes — do them at setup or after major scene changes only."
     ]
   },
@@ -60,8 +70,8 @@
     "name": "debug_draw",
     "desc": "Line-strip primitives and debug bone overlay.",
     "notes": [
-      "<code>render.debug_segment</code>, <code>debug_aabb</code>, <code>debug_sphere</code>, <code>debug_arrow</code>, <code>debug_axes</code> queue lines for the current frame.",
-      "Skeletons: <code>mjolnir.debug_skeleton(engine, &skel, &animator, root_world)</code> draws an animator's pose."
+      "<code>render.debug_segment</code>, <code>debug_aabb</code>, <code>debug_sphere</code>, <code>debug_arrow</code>, <code>debug_axes</code> queue lines; <code>life</code> keeps them for that many seconds of render's clock, zero for one frame.",
+      "Skeletons: feed <code>anim.bone_segments(&animator, &skel, root_world)</code> to <code>render.debug_segment</code>."
     ]
   },
   {
@@ -114,18 +124,26 @@
     "name": "input_demo",
     "desc": "Keyboard, mouse, scroll event plumbing.",
     "notes": [
-      "Callbacks fire once per update tick with typed <code>platform.Key</code> / <code>MouseButton</code> / <code>Action</code> values.",
-      "Poll state with <code>platform.input_key_down(&engine.platform.input, .W)</code> and the other <code>input_*</code> queries; they are stable for the whole tick.",
-      "Input the debug UI captures is withheld from the callbacks."
+      "Read <code>engine.input</code> (an <code>input.State</code>) in <code>update</code>: <code>input.key_down</code> / <code>key_pressed</code> / <code>key_released</code>, <code>mouse_*</code>, <code>cursor</code>, <code>mouse_delta</code>, <code>scroll</code>, <code>text</code>, <code>axis</code>.",
+      "The snapshot is stable for the whole tick; a tap between two ticks still reports both edges.",
+      "Skip reactions while <code>engine.mouse_captured</code> / <code>engine.keyboard_captured</code> is set — a UI owns that device."
     ]
   },
   {
     "name": "jump",
     "desc": "Character controller, movement are powered by physics engine.",
     "notes": [
-      "Character is a dynamic body with <code>enable_rotation = false</code>.",
-      "Jump = <code>apply_impulse</code> on grounded check (raycast down).",
-      "Lateral movement via <code>body.velocity.xz</code>; preserve <code>velocity.y</code> for gravity."
+      "The cube is a dynamic body; <code>physics.apply_force</code> moves it from <code>input.axis</code>, <code>apply_impulse</code> jumps on <code>input.key_pressed(.SPACE)</code>.",
+      "After <code>physics.set_mass</code>, <code>set_inertia_from_collider</code> recomputes the inertia.",
+      "Glue in <code>update</code>: <code>physics.step</code>, then copy <code>physics.body_poses</code> into the world."
+    ]
+  },
+  {
+    "name": "level_management",
+    "desc": "Destroying resources and reloading a level.",
+    "notes": [
+      "Reload with <code>mjolnir.teardown</code> then <code>mjolnir.setup</code> at the top of <code>update</code> (a <code>reset_requested</code> flag set by the UI); app-owned state (animators, glTF scenes) is reset in the <code>setup</code> callback.",
+      "App-created meshes and materials are freed explicitly with <code>render.destroy_mesh</code> / <code>destroy_material</code>; builtins survive every teardown."
     ]
   },
   {
@@ -135,7 +153,7 @@
       "Color vector's <code>w</code> channel doubles as intensity.",
       "<code>cast_shadow = true</code> allocates a 2D shadow map (<code>SHADOW_MAP_SIZE = 512</code>).",
       "Point-light cubemap shadows need <code>-define:REQUIRE_GEOMETRY_SHADER=true</code>.",
-      "Change lights live with <code>render.set_light_color</code>, <code>set_light_intensity</code>, <code>set_light_radius</code>, <code>set_light_enabled</code>."
+      "Change a light live through <code>render.attachment(&r, node.index, render.PointLightAttachment)</code> (color, radius, <code>disabled</code>, …), then <code>render.mark_slot_dirty</code>."
     ]
   },
   {
@@ -150,9 +168,9 @@
     "name": "navmesh",
     "desc": "Recast build + Detour pathfinding.",
     "notes": [
-      "Accumulate triangles with <code>nav.append_triangles</code> into a <code>NavGeometryBuilder</code>, then <code>nav.build</code>.",
+      "Accumulate triangles with <code>bake.append_triangles</code> into a <code>NavGeometryBuilder</code>, then <code>bake.build</code>.",
       "<code>nav.debug_triangles</code> gives the built polygons for drawing.",
-      "Mouse-pick onto the navmesh: ray-test ground plane → <code>nav.nearest_point</code> → <code>nav.find_path</code>.",
+      "Mouse-pick onto the navmesh: cursor ray → <code>nav.raycast</code> → <code>nav.find_path</code>.",
       "Heavy build — do it at setup or after big scene changes."
     ]
   },
@@ -160,7 +178,7 @@
     "name": "obj_loader",
     "desc": "Wavefront OBJ import.",
     "notes": [
-      "<code>geometry.load_obj</code> returns positions + indices; <code>mesh.from_triangles</code> turns them into a render mesh. .mtl is ignored.",
+      "<code>mesh.load_obj</code> (<code>render/mesh</code>) returns positions + indices; <code>mesh.from_triangles</code> turns them into a render mesh. .mtl is ignored.",
       "<code>from_triangles</code> computes smooth vertex normals."
     ]
   },
@@ -203,8 +221,8 @@
     "name": "physics",
     "desc": "Rigid body cubes, spheres, cylinders.",
     "notes": [
-      "<code>spawn_static</code> / <code>spawn_dynamic</code> create node + body + visual child in one call.",
-      "Raw bodies without a node: <code>physics.create_static_body</code> / <code>physics.create_dynamic_body</code>; the dynamic one sets inertia from its collider.",
+      "Each body is a <code>physics.create_static_body</code> / <code>create_dynamic_body</code> call with <code>user</code> set to its node; the dynamic one sets inertia from its collider.",
+      "Glue in <code>update</code>: <code>physics.step</code>, then <code>world.set_world_pose</code> for every <code>physics.body_poses</code> entry.",
       "<code>physics.World.gravity</code> defaults to <code>{0, -9.81, 0}</code>.",
       "<code>KILL_Y = -50.0</code> — bodies that fall below are killed."
     ]
@@ -242,7 +260,7 @@
     "notes": [
       "<code>spawn_child</code> parents at creation; <code>world.attach</code> / <code>detach</code> rewire later.",
       "Local transforms multiply through the chain — rotate a parent, all children orbit.",
-      "<code>despawn</code> is recursive."
+      "<code>despawn</code> removes the whole subtree."
     ]
   },
   {
@@ -264,10 +282,10 @@
   },
   {
     "name": "sprite",
-    "desc": "2D sprite batching with frame animation.",
+    "desc": "Sprite sheets with frame animation.",
     "notes": [
       "<code>frame_columns</code> × <code>frame_rows</code> defines the sprite-sheet layout.",
-      "<code>SpriteAnimation</code> drives the current frame with <code>fps</code>, mode (<code>ONCE</code> / <code>LOOP</code> / <code>PINGPONG</code>).",
+      "<code>render.set_sprite_frame</code> shows one cell; the example picks it from elapsed time for loop, ping-pong and once playback.",
       "Sprites billboard toward the active camera."
     ]
   },
@@ -284,8 +302,7 @@
     "name": "transparent",
     "desc": "Order-dependent transparency.",
     "notes": [
-      "Materials with <code>type = .TRANSPARENT</code> render in a separate additive pass.",
-      "Camera-distance sort happens automatically; tie-breaks are insertion order."
+      "Materials with <code>type = .TRANSPARENT</code> draw in the forward pass after lighting, alpha-blended into the HDR target without writing depth."
     ]
   },
   {
@@ -294,16 +311,16 @@
     "notes": [
       "Coordinates are pixels, origin top-left.",
       "Per-widget <code>z_order</code>; higher draws on top.",
-      "Hit-testing happens in <code>ui.process_mouse</code>, which the engine calls each tick. Widgets receive <code>HOVER_IN</code> / <code>HOVER_OUT</code> / <code>CLICK_DOWN</code> / <code>CLICK_UP</code> automatically.",
-      "Stash a context pointer via <code>ui.set_user_data</code>; recover in handlers as <code>event.user_data</code>."
+      "The engine runs <code>ui.process_input</code> each tick. Widgets with handlers receive <code>HOVER_IN</code> / <code>HOVER_OUT</code> / <code>MOVE</code> / <code>CLICK_DOWN</code> / <code>CLICK_UP</code>; a click gives focus, and the focused widget gets key and text events.",
+      "Set <code>event_handlers</code> and <code>user_data</code> on the widget (or via <code>ui.get_widget_base</code>); handlers read <code>event.user_data</code>."
     ]
   },
   {
     "name": "wireframe",
     "desc": "Wireframe rendering pipeline.",
     "notes": [
-      "Set <code>MATERIAL_WIREFRAME</code> on the node flag, or use a wireframe material.",
-      "Useful for debug overlays; also bypasses the G-buffer."
+      "<code>render.material_wireframe</code> makes a material drawn by the wireframe forward pipeline.",
+      "Useful for debug overlays; bypasses the G-buffer."
     ]
   },
   {

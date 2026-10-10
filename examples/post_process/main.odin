@@ -3,6 +3,7 @@ package main
 import "../../mjolnir"
 import "../../mjolnir/render/post_process"
 import "../../mjolnir/render"
+import "../../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import mu "vendor:microui"
@@ -80,9 +81,12 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   if dof_on        do post_process.add_dof(&engine.render.post_process, f32(dof_focus), f32(dof_range), f32(dof_blur), 0.5)
   if bloom_on      do post_process.add_bloom(&engine.render.post_process, f32(bloom_threshold), f32(bloom_intensity), 32.0)
   if blur_on       do post_process.add_blur(&engine.render.post_process, f32(blur_radius))
-  if crosshatch_on do post_process.add_crosshatch(&engine.render.post_process, {f32(render.swapchain_extent(&engine.render).width), f32(render.swapchain_extent(&engine.render).height)})
+  if crosshatch_on do post_process.add_crosshatch(&engine.render.post_process, {f32(engine.render.swapchain.extent.width), f32(engine.render.swapchain.extent.height)})
   if grayscale_on  do post_process.add_grayscale(&engine.render.post_process, f32(grayscale_strength))
   if tonemap_on    do post_process.add_tonemap(&engine.render.post_process, f32(tonemap_exposure), f32(tonemap_gamma))
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

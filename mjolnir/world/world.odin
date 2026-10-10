@@ -8,7 +8,7 @@ import "core:slice"
 Node :: struct {
   parent:         NodeHandle,
   children:       [dynamic]NodeHandle,
-  transform:      geometry.Transform,
+  transform:      Transform,
   name:           string,
   visible:        bool, // node's own visibility state
   parent_visible: bool, // visibility inherited from parent chain
@@ -39,7 +39,7 @@ ChangeFeed :: struct {
 
 World :: struct {
   root:             NodeHandle,
-  nodes:           Pool(Node),
+  nodes:           cont.Pool(Node),
   traversal_stack: [dynamic]TraverseEntry,
   feed:            ChangeFeed,
   // removals made between updates; published by update
@@ -75,7 +75,7 @@ untag :: proc(world: ^World, handle: NodeHandle, bits: u32) -> bool {
 }
 
 node_init :: proc(self: ^Node, name: string = "") {
-  self.transform = geometry.TRANSFORM_IDENTITY
+  self.transform = TRANSFORM_IDENTITY
   self.name = name
   self.visible = true
   self.parent_visible = true
@@ -87,7 +87,7 @@ node_destroy :: proc(self: ^Node) {
   self.children = {}
 }
 
-detach :: proc(nodes: Pool(Node), child_handle: NodeHandle) {
+detach :: proc(nodes: cont.Pool(Node), child_handle: NodeHandle) {
   child_node := cont.get(nodes, child_handle)
   if child_node == nil do return
   parent_handle := child_node.parent
@@ -100,7 +100,7 @@ detach :: proc(nodes: Pool(Node), child_handle: NodeHandle) {
   child_node.parent = child_handle
 }
 
-attach :: proc(nodes: Pool(Node), parent_handle, child_handle: NodeHandle) {
+attach :: proc(nodes: cont.Pool(Node), parent_handle, child_handle: NodeHandle) {
   child_node := cont.get(nodes, child_handle)
   parent_node := cont.get(nodes, parent_handle)
   if child_node == nil || parent_node == nil do return
@@ -239,9 +239,14 @@ traverse :: proc(world: ^World) {
     current_node := cont.get(world.nodes, entry.handle) or_continue
     visibility_changed := current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
-    is_dirty := geometry.update_local(&current_node.transform)
+    t := &current_node.transform
+    is_dirty := t.is_dirty
+    if is_dirty {
+      t.local_matrix = linalg.matrix4_from_trs(t.position, t.rotation, t.scale)
+      t.is_dirty = false
+    }
     if entry.parent_is_dirty || is_dirty {
-      geometry.update_world(&current_node.transform, entry.parent_transform)
+      t.world_matrix = entry.parent_transform * t.local_matrix
     }
     if visibility_changed || is_dirty || entry.parent_is_dirty {
       append(
@@ -293,13 +298,8 @@ set_world_pose :: proc(
 
 // Set a node's local transform from a matrix (decomposed into TRS).
 set_local_matrix :: proc(world: ^World, handle: NodeHandle, m: matrix[4, 4]f32) {
-  node := cont.get(world.nodes, handle)
-  if node == nil do return
-  d := geometry.decompose_matrix(m)
-  node.transform.position = d.position
-  node.transform.rotation = d.rotation
-  node.transform.scale = d.scale
-  node.transform.is_dirty = true
+  position, rotation, scale := geometry.decompose_matrix(m)
+  set_local(world, handle, position, rotation, scale)
 }
 
 world_matrix :: proc(world: ^World, handle: NodeHandle) -> matrix[4, 4]f32 {

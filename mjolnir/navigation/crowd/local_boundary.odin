@@ -1,7 +1,6 @@
 package crowd
 
 import "core:math"
-import "../recast"
 import "../detour"
 import "../../geometry"
 
@@ -12,7 +11,7 @@ Local_Boundary :: struct {
 	center: [3]f32,
 	segs:   [MAX_LOCAL_SEGS]Boundary_Segment,
 	nsegs:  int,
-	polys:  [MAX_LOCAL_POLYS]recast.Poly_Ref,
+	polys:  [MAX_LOCAL_POLYS]detour.Poly_Ref,
 	npolys: int,
 }
 
@@ -71,19 +70,19 @@ local_boundary_add_segment :: proc(boundary: ^Local_Boundary, dist: f32, s: [6]f
 	}
 }
 
-local_boundary_update :: proc(boundary: ^Local_Boundary, ref: recast.Poly_Ref, pos: [3]f32,
+local_boundary_update :: proc(boundary: ^Local_Boundary, ref: detour.Poly_Ref, pos: [3]f32,
                                collision_query_range: f32, query: ^detour.Nav_Mesh_Query,
                                filter: ^detour.Query_Filter) {
-	MAX_SEGS_PER_POLY :: recast.DT_VERTS_PER_POLYGON * 3
+	MAX_SEGS_PER_POLY :: detour.DT_VERTS_PER_POLYGON * 3
 
-	if ref == recast.INVALID_POLY_REF {
+	if ref == detour.INVALID_POLY_REF {
 		local_boundary_reset(boundary)
 		return
 	}
 
 	boundary.center = pos
 
-	parent_refs := make([]recast.Poly_Ref, MAX_LOCAL_POLYS)
+	parent_refs := make([]detour.Poly_Ref, MAX_LOCAL_POLYS)
 	defer delete(parent_refs)
 	npolys, _ := detour.find_local_neighbourhood(query, ref, pos,
 	                                             collision_query_range, filter,
@@ -95,7 +94,7 @@ local_boundary_update :: proc(boundary: ^Local_Boundary, ref: recast.Poly_Ref, p
 	defer delete(segs)
 
 	for j in 0..<boundary.npolys {
-		seg_refs := make([]recast.Poly_Ref, MAX_SEGS_PER_POLY)
+		seg_refs := make([]detour.Poly_Ref, MAX_SEGS_PER_POLY)
 		defer delete(seg_refs)
 		nsegs, _ := detour.get_poly_wall_segments(query, boundary.polys[j],
 		                                          filter, segs, seg_refs, MAX_SEGS_PER_POLY)

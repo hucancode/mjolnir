@@ -1,4 +1,4 @@
-package geometry
+package mesh
 
 import "core:log"
 import "core:os"

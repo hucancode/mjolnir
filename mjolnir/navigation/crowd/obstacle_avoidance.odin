@@ -145,23 +145,6 @@ sweep_circle_circle :: proc(c0: [3]f32, r0: f32, v: [3]f32, c1: [3]f32, r1: f32)
 	return true, tmin, tmax
 }
 
-perp_2d :: proc "contextless" (a: [2]f32, b: [2]f32) -> f32 {
-	return a.x * b.y - a.y * b.x
-}
-
-isect_ray_seg :: proc(ap: [3]f32, u: [3]f32, bp: [3]f32, bq: [3]f32) -> (hit: bool, t: f32) {
-	v := bq - bp
-	w := ap - bp
-	d := perp_2d(u.xz, v.xz)
-	if math.abs(d) < 1e-6 do return false, 0
-	d = 1.0 / d
-	t = perp_2d(v.xz, w.xz) * d
-	if t < 0 || t > 1 do return false, 0
-	s := perp_2d(u.xz, w.xz) * d
-	if s < 0 || s > 1 do return false, 0
-	return true, t
-}
-
 obstacle_avoidance_query_prepare :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, dvel: [3]f32) {
 	for i in 0..<query.ncircles {
 		cir := &query.circles[i]
@@ -240,8 +223,8 @@ obstacle_avoidance_query_process_sample :: proc(query: ^Obstacle_Avoidance_Query
 			if linalg.dot(snorm.xz, vcand.xz) < 0.0 do continue
 			htmin = 0.0
 		} else {
-			hit, t := isect_ray_seg(pos, vcand, seg.p, seg.q)
-			if !hit do continue
+			t, hit := geometry.ray_segment_intersect_2d(pos, vcand, seg.p, seg.q)
+			if !hit || t > 1 do continue
 			htmin = t
 		}
 

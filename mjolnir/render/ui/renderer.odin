@@ -46,7 +46,7 @@ Renderer :: struct {
   white_texture:   bindless.Texture2DHandle, // drawn for cmd.NO_TEXTURE
   font_atlas:      bindless.Texture2DHandle, // sampled by text commands
   debug_ctx:       mu.Context,
-  // Mouse buttons pressed over the debug UI, owned by it until released.
+  // Mouse buttons pressed over the debug UI, owned by it through release.
   debug_buttons:   bit_set[0 ..< 32],
   debug_atlas:     bindless.Texture2DHandle, // microui's builtin atlas
   dpi_scale:       f32,
@@ -187,19 +187,6 @@ debug_wants_keyboard :: proc(self: ^Renderer) -> bool {
   return self.debug_ctx.focus_id != 0
 }
 
-// Route a mouse button edge. A press over the debug UI belongs to it until
-// the matching release, wherever the cursor travels. True when consumed.
-debug_claim_button :: proc(self: ^Renderer, button: int, pressed: bool) -> bool {
-  if pressed {
-    if !debug_wants_mouse(self) do return false
-    self.debug_buttons += {button}
-    return true
-  }
-  if button not_in self.debug_buttons do return false
-  self.debug_buttons -= {button}
-  return true
-}
-
 @(private)
 create_pipeline :: proc(
   self: ^Renderer,
@@ -212,48 +199,23 @@ create_pipeline :: proc(
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   frag_module := gpu.create_shader_module(gctx.device, frag_code) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-  shader_stages := gpu.create_vert_frag_stages(
-    vert_module,
-    frag_module,
-    &bindless.SHADER_SPEC_CONSTANTS,
-  )
-  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
-    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = 1,
-    pVertexBindingDescriptions      = &VERTEX2D_BINDING_DESCRIPTION,
-    vertexAttributeDescriptionCount = len(VERTEX2D_ATTRIBUTE_DESCRIPTIONS),
-    pVertexAttributeDescriptions    = raw_data(VERTEX2D_ATTRIBUTE_DESCRIPTIONS[:]),
-  }
-
+  bindings := [?]vk.VertexInputBindingDescription{VERTEX2D_BINDING_DESCRIPTION}
   color_formats := [?]vk.Format{format}
-  rendering_info := vk.PipelineRenderingCreateInfo {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(&color_formats),
-  }
-
-  pipeline_info := vk.GraphicsPipelineCreateInfo {
-    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &rendering_info,
-    stageCount          = len(shader_stages),
-    pStages             = raw_data(&shader_stages),
-    pVertexInputState   = &vertex_input_info,
-    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-    pRasterizationState = &gpu.DOUBLE_SIDED_RASTERIZER,
-    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-    pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
-    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = self.pipeline_layout,
-  }
-
-  vk.CreateGraphicsPipelines(
-    gctx.device,
-    0,
-    1,
-    &pipeline_info,
-    nil,
-    &self.pipeline,
+  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
+  self.pipeline = gpu.create_graphics_pipeline(
+    gctx,
+    {
+      vert = vert_module,
+      frag = frag_module,
+      specialization = &bindless.SHADER_SPEC_CONSTANTS,
+      vertex_bindings = bindings[:],
+      vertex_attributes = VERTEX2D_ATTRIBUTE_DESCRIPTIONS[:],
+      topology = .TRIANGLE_LIST,
+      raster = gpu.DOUBLE_SIDED_RASTERIZER,
+      blend = blend[:],
+      color_formats = color_formats[:],
+      layout = self.pipeline_layout,
+    },
   ) or_return
   log.info("UI pipeline created successfully")
   return .SUCCESS

@@ -2,13 +2,12 @@ package crowd
 
 import "core:math"
 import "core:math/linalg"
-import "../recast"
 import "../detour"
 
 Path_Corridor :: struct {
 	pos:      [3]f32,
 	target:   [3]f32,
-	path:     []recast.Poly_Ref,
+	path:     []detour.Poly_Ref,
 	npath:    int,
 	max_path: int,
 }
@@ -19,7 +18,7 @@ create_path_corridor :: proc(max_path: int, allocator := context.allocator) -> (
 	}
 	context.allocator = allocator
 	corridor = new(Path_Corridor)
-	corridor.path = make([]recast.Poly_Ref, max_path)
+	corridor.path = make([]detour.Poly_Ref, max_path)
 	corridor.npath = 0
 	corridor.max_path = max_path
 	return corridor, true
@@ -31,7 +30,7 @@ destroy_path_corridor :: proc(corridor: ^Path_Corridor) {
 	free(corridor)
 }
 
-path_corridor_reset :: proc(corridor: ^Path_Corridor, ref: recast.Poly_Ref, pos: [3]f32) {
+path_corridor_reset :: proc(corridor: ^Path_Corridor, ref: detour.Poly_Ref, pos: [3]f32) {
 	corridor.pos = pos
 	corridor.target = pos
 	corridor.path[0] = ref
@@ -39,7 +38,7 @@ path_corridor_reset :: proc(corridor: ^Path_Corridor, ref: recast.Poly_Ref, pos:
 }
 
 path_corridor_find_corners :: proc(corridor: ^Path_Corridor, corner_verts: [][3]f32,
-                                    corner_flags: []u8, corner_polys: []recast.Poly_Ref,
+                                    corner_flags: []u8, corner_polys: []detour.Poly_Ref,
                                     max_corners: int, query: ^detour.Nav_Mesh_Query,
                                     filter: ^detour.Query_Filter) -> int {
 	MIN_TARGET_DIST :: 0.01
@@ -50,7 +49,7 @@ path_corridor_find_corners :: proc(corridor: ^Path_Corridor, corner_verts: [][3]
 	defer delete(straight_path)
 	flags := make([]u8, max_corners)
 	defer delete(flags)
-	refs := make([]recast.Poly_Ref, max_corners)
+	refs := make([]detour.Poly_Ref, max_corners)
 	defer delete(refs)
 
 	_, ncorners := detour.find_straight_path(query, corridor.pos, corridor.target,
@@ -110,12 +109,12 @@ path_corridor_optimize_path_visibility :: proc(corridor: ^Path_Corridor, next: [
 	goal = corridor.pos + delta * (path_optimization_range / linalg.length(delta))
 
 	MAX_RES :: 32
-	res := make([]recast.Poly_Ref, MAX_RES)
+	res := make([]detour.Poly_Ref, MAX_RES)
 	defer delete(res)
 
 	status, hit, nres := detour.raycast(query, corridor.path[0], corridor.pos, goal, filter, 0, res, MAX_RES)
 
-	if recast.status_succeeded(status) && nres > 1 && hit.t > 0.99 {
+	if detour.status_succeeded(status) && nres > 1 && hit.t > 0.99 {
 		corridor.npath = merge_corridor_start_shortcut(corridor.path, corridor.npath,
 		                                                corridor.max_path, res[:nres],
 		                                                int(nres))
@@ -128,21 +127,21 @@ path_corridor_optimize_path_topology :: proc(corridor: ^Path_Corridor, query: ^d
 
 	MAX_ITER :: 32
 	MAX_RES :: 32
-	res := make([]recast.Poly_Ref, MAX_RES)
+	res := make([]detour.Poly_Ref, MAX_RES)
 	defer delete(res)
 
 	status := detour.init_sliced_find_path(query, corridor.path[0], corridor.path[corridor.npath-1],
 	                                       corridor.pos, corridor.target, filter, 0)
-	if recast.status_failed(status) do return false
+	if detour.status_failed(status) do return false
 
 	_, status = detour.update_sliced_find_path(query, MAX_ITER)
-	if recast.status_failed(status) do return false
+	if detour.status_failed(status) do return false
 
 	nres: i32
 	status, nres = detour.finalize_sliced_find_path_partial(query, corridor.path[:corridor.npath],
 	                                                         res, MAX_RES)
 
-	if recast.status_succeeded(status) && nres > 0 {
+	if detour.status_succeeded(status) && nres > 0 {
 		corridor.npath = merge_corridor_start_shortcut(corridor.path, corridor.npath,
 		                                                corridor.max_path, res[:nres], int(nres))
 		return true
@@ -155,20 +154,20 @@ path_corridor_move_position :: proc(corridor: ^Path_Corridor, npos: [3]f32,
                                      query: ^detour.Nav_Mesh_Query,
                                      filter: ^detour.Query_Filter) -> bool {
 	MAX_VISITED :: 16
-	visited := make([]recast.Poly_Ref, MAX_VISITED)
+	visited := make([]detour.Poly_Ref, MAX_VISITED)
 	defer delete(visited)
 
 	result, nvisited, status := detour.move_along_surface(query, corridor.path[0], corridor.pos,
 	                                                       npos, filter, visited, MAX_VISITED)
 
-	if recast.status_succeeded(status) {
+	if detour.status_succeeded(status) {
 		corridor.npath = merge_corridor_start_moved(corridor.path, corridor.npath,
 		                                             corridor.max_path, visited[:nvisited],
 		                                             int(nvisited))
 
 		h := corridor.pos.y
 		poly_h, poly_height_status := detour.get_poly_height(query, corridor.path[0], result)
-		if recast.status_succeeded(poly_height_status) {
+		if detour.status_succeeded(poly_height_status) {
 			h = poly_h
 		}
 		result.y = h
@@ -182,14 +181,14 @@ path_corridor_move_target_position :: proc(corridor: ^Path_Corridor, npos: [3]f3
                                             query: ^detour.Nav_Mesh_Query,
                                             filter: ^detour.Query_Filter) -> bool {
 	MAX_VISITED :: 16
-	visited := make([]recast.Poly_Ref, MAX_VISITED)
+	visited := make([]detour.Poly_Ref, MAX_VISITED)
 	defer delete(visited)
 
 	result, nvisited, status := detour.move_along_surface(query, corridor.path[corridor.npath-1],
 	                                                       corridor.target, npos, filter,
 	                                                       visited, MAX_VISITED)
 
-	if recast.status_succeeded(status) {
+	if detour.status_succeeded(status) {
 		corridor.npath = merge_corridor_end_moved(corridor.path, corridor.npath,
 		                                           corridor.max_path, visited[:nvisited],
 		                                           int(nvisited))
@@ -200,7 +199,7 @@ path_corridor_move_target_position :: proc(corridor: ^Path_Corridor, npos: [3]f3
 }
 
 path_corridor_set_corridor :: proc(corridor: ^Path_Corridor, target: [3]f32,
-                                    path: []recast.Poly_Ref) {
+                                    path: []detour.Poly_Ref) {
 	corridor.target = target
 	n := min(len(path), corridor.max_path)
 	copy(corridor.path[:n], path[:n])
@@ -227,22 +226,22 @@ path_corridor_get_target :: proc(corridor: ^Path_Corridor) -> [3]f32 {
 	return corridor.target
 }
 
-path_corridor_get_first_poly :: proc(corridor: ^Path_Corridor) -> recast.Poly_Ref {
+path_corridor_get_first_poly :: proc(corridor: ^Path_Corridor) -> detour.Poly_Ref {
 	if corridor.npath > 0 do return corridor.path[0]
-	return recast.INVALID_POLY_REF
+	return detour.INVALID_POLY_REF
 }
 
-path_corridor_get_last_poly :: proc(corridor: ^Path_Corridor) -> recast.Poly_Ref {
+path_corridor_get_last_poly :: proc(corridor: ^Path_Corridor) -> detour.Poly_Ref {
 	if corridor.npath > 0 do return corridor.path[corridor.npath-1]
-	return recast.INVALID_POLY_REF
+	return detour.INVALID_POLY_REF
 }
 
-path_corridor_get_path :: proc(corridor: ^Path_Corridor) -> []recast.Poly_Ref {
+path_corridor_get_path :: proc(corridor: ^Path_Corridor) -> []detour.Poly_Ref {
 	return corridor.path[:corridor.npath]
 }
 
-merge_corridor_start_moved :: proc(path: []recast.Poly_Ref, npath: int, max_path: int,
-                                    visited: []recast.Poly_Ref, nvisited: int) -> int {
+merge_corridor_start_moved :: proc(path: []detour.Poly_Ref, npath: int, max_path: int,
+                                    visited: []detour.Poly_Ref, nvisited: int) -> int {
 	furthest_path := -1
 	furthest_visited := -1
 
@@ -276,8 +275,8 @@ merge_corridor_start_moved :: proc(path: []recast.Poly_Ref, npath: int, max_path
 	return req + size
 }
 
-merge_corridor_end_moved :: proc(path: []recast.Poly_Ref, npath: int, max_path: int,
-                                  visited: []recast.Poly_Ref, nvisited: int) -> int {
+merge_corridor_end_moved :: proc(path: []detour.Poly_Ref, npath: int, max_path: int,
+                                  visited: []detour.Poly_Ref, nvisited: int) -> int {
 	furthest_path := -1
 	furthest_visited := -1
 
@@ -304,8 +303,8 @@ merge_corridor_end_moved :: proc(path: []recast.Poly_Ref, npath: int, max_path: 
 	return ppos + count
 }
 
-merge_corridor_start_shortcut :: proc(path: []recast.Poly_Ref, npath: int, max_path: int,
-                                       visited: []recast.Poly_Ref, nvisited: int) -> int {
+merge_corridor_start_shortcut :: proc(path: []detour.Poly_Ref, npath: int, max_path: int,
+                                       visited: []detour.Poly_Ref, nvisited: int) -> int {
 	furthest_path := -1
 	furthest_visited := -1
 

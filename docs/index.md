@@ -80,6 +80,7 @@ odin test . --all-packages -define:ODIN_TEST_NAMES=module_name.test_name
 | 1 | `containers` | [containers](containers.html) |
 | 1 | `geometry`   | [geometry](geometry.html) |
 | 1 | `draw2d`     | 2D vertex + draw command types shared by `ui` and `render` |
+| 1 | `input`      | [input](input.html) |
 | 2 | `platform`   | [platform](platform.html) |
 | 2 | `world`      | [world](world.html) |
 | 2 | `render`     | [render](render.html) (incl. `render/gpu`, `render/bindless`, `render/mesh`) |

@@ -179,20 +179,6 @@ spline_duration :: proc(spline: Spline($T)) -> f32 {
   return slice.last(spline.times) - slice.first(spline.times)
 }
 
-spline_start_time :: proc(spline: Spline($T)) -> f32 {
-  if len(spline.times) == 0 {
-    return 0
-  }
-  return slice.first(spline.times)
-}
-
-spline_end_time :: proc(spline: Spline($T)) -> f32 {
-  if len(spline.times) == 0 {
-    return 0
-  }
-  return slice.last(spline.times)
-}
-
 // Arc-length lookup table for uniform spatial sampling
 Spline_Arc_Length_Table :: struct($T: typeid) {
   arc_lengths: []f32, // Cumulative arc-lengths at sample points
@@ -201,13 +187,13 @@ Spline_Arc_Length_Table :: struct($T: typeid) {
 
 spline_build_arc_table :: proc(spline: ^Spline($T), samples := 200) {
   // samples: Number of samples for approximation (more = accurate but slower)
+  if len(spline.times) == 0 do return
   table := Spline_Arc_Length_Table(T) {
     arc_lengths = make([]f32, samples),
     times       = make([]f32, samples),
   }
-  t_start := spline_start_time(spline^)
-  t_end := spline_end_time(spline^)
-  t_range := t_end - t_start
+  t_start := slice.first(spline.times)
+  t_range := slice.last(spline.times) - t_start
   prev_pos := spline_sample(spline^, t_start)
   total_length := f32(0)
   for i in 0 ..< samples {

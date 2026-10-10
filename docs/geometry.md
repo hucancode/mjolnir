@@ -8,33 +8,24 @@ dependencies on the rest of the engine and no Vulkan. Used by
 
 ## Scope
 
-Shapes (AABB, triangle, sphere, disc) and their intersection and
+Shapes (AABB, OBB, sphere) and their intersection and
 distance tests, `Ray`, transform decomposition,
 projection matrices, frustum extraction, and acceleration structures
-(BVH, octree). Render's vertex format and primitive builders live in
+(BVH, octree). Render's vertex format, primitive builders and OBJ loader live in
 `render/mesh`; recast's polygon helpers live in `navigation/recast`.
 
 ## Acceleration structures
 
 - **BVH** — primary broadphase. Generic over element type with a
-  user-supplied bounds proc, built via SAH binning. Supports incremental
-  insertion and refit; full rebuild only when a kill-count threshold
-  trips. Used by physics broadphase, render visibility culling, and
-  raycast queries.
+  user-supplied bounds proc, built via SAH binning (optionally in
+  parallel). Supports refit, AABB and ray queries, and self/cross overlap
+  pair finding. Used by the physics broadphase and spatial queries.
 - **Octree** — used where queries are dominated by point/sphere lookups
   in a large static set; cheaper to query than a BVH when the workload
   is heavily point-sample dominated.
 
 ## Transform
 
-`Transform{position, rotation, scale}` + a dirty bit + cached
-local/world matrices. `update_local` and `update_world` rebuild lazily
-during the scene-graph traversal — nothing recomputes unless something
-upstream moved.
-
-## OBJ loading
-
-`load_obj(path, scale)` returns an `ObjMesh{positions, indices}`
-(faces fan-triangulated); free it with `obj_mesh_destroy`. Hand it to
-`render/mesh.from_triangles` for a render mesh or to
-`navigation.append_triangles` for a navmesh.
+`decompose_matrix` splits an affine matrix into position, rotation and
+scale. The scene-graph `Transform` (dirty bit, cached matrices) lives in
+`world`.

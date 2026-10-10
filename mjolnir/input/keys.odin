@@ -1,4 +1,4 @@
-package platform
+package input
 
 // Keyboard keys. Values match GLFW key codes.
 Key :: enum i32 {

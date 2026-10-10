@@ -148,91 +148,42 @@ init :: proc(
     .DEPTH_COMPARE_OP,
     .CULL_MODE,
   }
-  dynamic_state := gpu.create_dynamic_state(dynamic_states[:])
-  vertex_input := vk.PipelineVertexInputStateCreateInfo {
-    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = 1,
-    pVertexBindingDescriptions      = &bindless.VERTEX_BINDING_DESCRIPTION[0],
-    vertexAttributeDescriptionCount = 1,
-    pVertexAttributeDescriptions    = raw_data(bindless.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]),
+  color_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
+  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_OVERFLOW}
+  shaders := [?]struct {
+    vert, frag: []u8,
+    pipeline:   ^vk.Pipeline,
+  } {
+    {SHADER_POINT_VERT, SHADER_POINT_FRAG, &self.point_pipeline},
+    {SHADER_SPOT_VERT, SHADER_SPOT_FRAG, &self.spot_pipeline},
+    {SHADER_DIRECTIONAL_VERT, SHADER_DIRECTIONAL_FRAG, &self.directional_pipeline},
   }
-
-  // Create point light pipeline
-  {
-    vert_module := gpu.create_shader_module(gctx.device, SHADER_POINT_VERT) or_return
-    defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-    frag_module := gpu.create_shader_module(gctx.device, SHADER_POINT_FRAG) or_return
-    defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &bindless.SHADER_SPEC_CONSTANTS)
-    pipeline_info := vk.GraphicsPipelineCreateInfo {
-      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
-      stageCount          = len(shader_stages),
-      pStages             = raw_data(shader_stages[:]),
-      pVertexInputState   = &vertex_input,
-      pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-      pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-      pRasterizationState = &gpu.STANDARD_RASTERIZER,
-      pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-      pColorBlendState    = &gpu.COLOR_BLENDING_OVERFLOW,
-      pDynamicState       = &dynamic_state,
-      pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
-      layout              = self.pipeline_layout,
-    }
-    vk.CreateGraphicsPipelines(gctx.device, 0, 1, &pipeline_info, nil, &self.point_pipeline) or_return
-    defer if ret != .SUCCESS do vk.DestroyPipeline(gctx.device, self.point_pipeline, nil)
+  defer if ret != .SUCCESS {
+    for s in shaders do vk.DestroyPipeline(gctx.device, s.pipeline^, nil)
   }
-
-  // Create spot light pipeline
-  {
-    vert_module := gpu.create_shader_module(gctx.device, SHADER_SPOT_VERT) or_return
+  for s in shaders {
+    vert_module := gpu.create_shader_module(gctx.device, s.vert) or_return
     defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-    frag_module := gpu.create_shader_module(gctx.device, SHADER_SPOT_FRAG) or_return
+    frag_module := gpu.create_shader_module(gctx.device, s.frag) or_return
     defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &bindless.SHADER_SPEC_CONSTANTS)
-    pipeline_info := vk.GraphicsPipelineCreateInfo {
-      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
-      stageCount          = len(shader_stages),
-      pStages             = raw_data(shader_stages[:]),
-      pVertexInputState   = &vertex_input,
-      pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-      pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-      pRasterizationState = &gpu.STANDARD_RASTERIZER,
-      pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-      pColorBlendState    = &gpu.COLOR_BLENDING_OVERFLOW,
-      pDynamicState       = &dynamic_state,
-      pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
-      layout              = self.pipeline_layout,
-    }
-    vk.CreateGraphicsPipelines(gctx.device, 0, 1, &pipeline_info, nil, &self.spot_pipeline) or_return
-    defer if ret != .SUCCESS do vk.DestroyPipeline(gctx.device, self.spot_pipeline, nil)
-  }
-
-  // Create directional light pipeline
-  {
-    vert_module := gpu.create_shader_module(gctx.device, SHADER_DIRECTIONAL_VERT) or_return
-    defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
-    frag_module := gpu.create_shader_module(gctx.device, SHADER_DIRECTIONAL_FRAG) or_return
-    defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-    shader_stages := gpu.create_vert_frag_stages(vert_module, frag_module, &bindless.SHADER_SPEC_CONSTANTS)
-    pipeline_info := vk.GraphicsPipelineCreateInfo {
-      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
-      stageCount          = len(shader_stages),
-      pStages             = raw_data(shader_stages[:]),
-      pVertexInputState   = &vertex_input,
-      pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-      pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-      pRasterizationState = &gpu.STANDARD_RASTERIZER,
-      pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-      pColorBlendState    = &gpu.COLOR_BLENDING_OVERFLOW,
-      pDynamicState       = &dynamic_state,
-      pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
-      layout              = self.pipeline_layout,
-    }
-    vk.CreateGraphicsPipelines(gctx.device, 0, 1, &pipeline_info, nil, &self.directional_pipeline) or_return
-    defer if ret != .SUCCESS do vk.DestroyPipeline(gctx.device, self.directional_pipeline, nil)
+    s.pipeline^ = gpu.create_graphics_pipeline(
+      gctx,
+      {
+        vert = vert_module,
+        frag = frag_module,
+        specialization = &bindless.SHADER_SPEC_CONSTANTS,
+        vertex_bindings = bindless.VERTEX_BINDING_DESCRIPTION[:],
+        vertex_attributes = bindless.POSITION_ATTRIBUTE_DESCRIPTIONS[:],
+        topology = .TRIANGLE_LIST,
+        raster = gpu.STANDARD_RASTERIZER,
+        depth = gpu.READ_ONLY_DEPTH_STATE,
+        blend = blend[:],
+        color_formats = color_formats[:],
+        depth_format = .D32_SFLOAT,
+        dynamic_states = dynamic_states[:],
+        layout = self.pipeline_layout,
+      },
+    ) or_return
   }
 
   log.info("Direct lighting pipelines initialized successfully (point, spot, directional)")

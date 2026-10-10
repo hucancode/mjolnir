@@ -1,6 +1,7 @@
 package ui
 
 import cont "../containers"
+import "../input"
 
 MouseEventType :: enum {
   CLICK_DOWN,
@@ -18,20 +19,28 @@ KeyEventType :: enum {
 MouseEvent :: struct {
   type:      MouseEventType,
   position:  [2]f32,
-  button:    i32,
-  widget:    UIWidgetHandle,
-  user_data: rawptr,
+  button:    input.MouseButton, // CLICK_DOWN / CLICK_UP only
+  widget:    UIWidgetHandle, // target; stays the same while bubbling
+  user_data: rawptr, // of the widget whose handler runs
 }
 
 KeyEvent :: struct {
   type:      KeyEventType,
-  key:       i32,
+  key:       input.Key,
+  repeat:    bool, // KEY_DOWN from OS auto-repeat
+  widget:    UIWidgetHandle,
+  user_data: rawptr,
+}
+
+TextEvent :: struct {
+  text:      string, // UTF-8, valid only during the handler
   widget:    UIWidgetHandle,
   user_data: rawptr,
 }
 
 MouseEventProc :: #type proc(event: MouseEvent)
 KeyEventProc :: #type proc(event: KeyEvent)
+TextEventProc :: #type proc(event: TextEvent)
 
 EventHandlers :: struct {
   on_mouse_down: MouseEventProc,
@@ -41,6 +50,7 @@ EventHandlers :: struct {
   on_hover_out:  MouseEventProc,
   on_key_down:   KeyEventProc,
   on_key_up:     KeyEventProc,
+  on_text:       TextEventProc,
 }
 
 point_in_widget :: proc(widget: ^Widget, point: [2]f32) -> bool {
@@ -103,30 +113,24 @@ point_in_widget :: proc(widget: ^Widget, point: [2]f32) -> bool {
   return false
 }
 
-pick_widget :: proc(sys: ^System, point: [2]f32) -> Maybe(UIWidgetHandle) {
+// Topmost visible widget containing `point`. With `interactive_only`, only
+// widgets that handle mouse events (themselves or via an ancestor) count.
+pick_widget :: proc(
+  sys: ^System,
+  point: [2]f32,
+  interactive_only := false,
+) -> Maybe(UIWidgetHandle) {
   best_widget: Maybe(UIWidgetHandle) = nil
   best_z: i32 = min(i32)
-
-  for &entry, i in sys.widget_pool.entries {
-    if !entry.active do continue
-
-    widget := &entry.item
-    if widget == nil do continue
-    if !get_widget_base(widget).visible do continue
-
-    if point_in_widget(widget, point) {
-      z := get_widget_base(widget).z_order
-      if z > best_z {
-        best_z = z
-        // Construct handle from entry
-        raw_handle: cont.Handle
-        raw_handle.index = u32(i)
-        raw_handle.generation = entry.generation
-        best_widget = transmute(UIWidgetHandle)raw_handle
-      }
-    }
+  it := cont.iterator(&sys.widget_pool)
+  for widget, handle in cont.next(&it, UIWidgetHandle) {
+    base := get_widget_base(widget)
+    if !base.visible || base.z_order <= best_z && best_widget != nil do continue
+    if !point_in_widget(widget, point) do continue
+    if interactive_only && !handles_mouse(sys, handle) do continue
+    best_z = base.z_order
+    best_widget = handle
   }
-
   return best_widget
 }
 
@@ -214,46 +218,110 @@ dispatch_key_event :: proc(
   }
 }
 
-// process_mouse runs hover and click dispatch for one input tick from the
-// raw cursor position and button state: HOVER_IN / HOVER_OUT when the widget
-// under the cursor changes, CLICK_DOWN / CLICK_UP on per-button edges.
-// Returns the widget under the cursor.
-process_mouse :: proc(
-  sys: ^System,
-  mouse_pos: [2]f32,
-  buttons: [MAX_MOUSE_BUTTONS]bool,
-) -> Maybe(UIWidgetHandle) {
-  current := pick_widget(sys, mouse_pos)
-  prev := sys.hovered
-  changed: bool
-  if a, had := prev.?; had {
-    b, has := current.?
-    changed = !has || a != b
-  } else {
-    changed = current != nil
+dispatch_text_event :: proc(sys: ^System, widget_handle: UIWidgetHandle, event: TextEvent) {
+  widget := get_widget(sys, widget_handle)
+  if widget == nil do return
+  base := get_widget_base(widget)
+  event := event
+  event.user_data = base.user_data
+  if base.event_handlers.on_text != nil do base.event_handlers.on_text(event)
+  if parent, has_parent := base.parent.?; has_parent {
+    dispatch_text_event(sys, parent, event)
   }
-  if changed {
-    if h, ok := prev.?; ok {
-      dispatch_mouse_event(sys, h, {type = .HOVER_OUT, position = mouse_pos, widget = h}, true)
+}
+
+// True when the mouse belongs to the UI: an interactive widget is hovered or
+// holds a press.
+wants_mouse :: proc(sys: ^System) -> bool {
+  return sys.hovered != nil || sys.captured != nil
+}
+
+// True when the focused widget (or an ancestor) handles key or text events.
+wants_keyboard :: proc(sys: ^System) -> bool {
+  h, ok := sys.focused.?
+  for ok {
+    widget := get_widget(sys, h)
+    if widget == nil do return false
+    base := get_widget_base(widget)
+    e := base.event_handlers
+    if e.on_key_down != nil || e.on_key_up != nil || e.on_text != nil do return true
+    h, ok = base.parent.?
+  }
+  return false
+}
+
+// Run one tick of input through the widget tree. Hit testing considers only
+// interactive widgets (see pick_widget). Dispatches HOVER_IN / HOVER_OUT when
+// the hovered widget changes, MOVE to the captured or hovered widget,
+// CLICK_DOWN to the hovered widget (capturing it and taking focus; a press
+// over nothing clears focus), CLICK_UP to the captured widget, and key and
+// text events to the focused widget. Every event bubbles to the parents.
+process_input :: proc(sys: ^System, s: ^input.State) {
+  pos := s.cursor
+  current := pick_widget(sys, pos, interactive_only = true)
+  if current != sys.hovered {
+    if h, ok := sys.hovered.?; ok {
+      dispatch_mouse_event(sys, h, {type = .HOVER_OUT, position = pos, widget = h})
     }
     if h, ok := current.?; ok {
-      dispatch_mouse_event(sys, h, {type = .HOVER_IN, position = mouse_pos, widget = h}, true)
+      dispatch_mouse_event(sys, h, {type = .HOVER_IN, position = pos, widget = h})
+    }
+    sys.hovered = current
+  }
+  if s.mouse_delta != {} {
+    target := sys.captured if sys.captured != nil else current
+    if h, ok := target.?; ok {
+      dispatch_mouse_event(sys, h, {type = .MOVE, position = pos, widget = h})
     }
   }
-  if h, ok := current.?; ok {
-    for down, i in buttons {
-      was := sys.prev_buttons[i]
-      if down == was do continue
-      ev := MouseEvent {
-        type     = .CLICK_DOWN if down else .CLICK_UP,
-        position = mouse_pos,
-        button   = i32(i),
-        widget   = h,
+  for b in input.MouseButton {
+    if input.mouse_pressed(s, b) {
+      sys.focused = current
+      if sys.captured == nil do sys.captured = current
+      if h, ok := current.?; ok {
+        dispatch_mouse_event(sys, h, {type = .CLICK_DOWN, position = pos, button = b, widget = h})
       }
-      dispatch_mouse_event(sys, h, ev, true)
+    }
+    if input.mouse_released(s, b) {
+      target := sys.captured if sys.captured != nil else current
+      if h, ok := target.?; ok {
+        dispatch_mouse_event(sys, h, {type = .CLICK_UP, position = pos, button = b, widget = h})
+      }
     }
   }
-  sys.hovered = current
-  sys.prev_buttons = buttons
-  return current
+  if s.buttons == {} do sys.captured = nil
+  h, has_focus := sys.focused.?
+  if !has_focus do return
+  if get_widget(sys, h) == nil {
+    sys.focused = nil
+    return
+  }
+  it := 0
+  for key, pressed in input.next_key_edge(s, &it) {
+    dispatch_key_event(sys, h, {type = .KEY_DOWN if pressed else .KEY_UP, key = key, widget = h})
+  }
+  for key in input.Key {
+    if !input.key_repeated(s, key) do continue
+    dispatch_key_event(sys, h, {type = .KEY_DOWN, key = key, repeat = true, widget = h})
+  }
+  if t := input.text(s); len(t) > 0 {
+    dispatch_text_event(sys, h, {text = t, widget = h})
+  }
+}
+
+@(private)
+handles_mouse :: proc(sys: ^System, handle: UIWidgetHandle) -> bool {
+  h, ok := handle, true
+  for ok {
+    widget := get_widget(sys, h)
+    if widget == nil do return false
+    base := get_widget_base(widget)
+    e := base.event_handlers
+    if e.on_mouse_down != nil || e.on_mouse_up != nil || e.on_move != nil ||
+       e.on_hover_in != nil || e.on_hover_out != nil {
+      return true
+    }
+    h, ok = base.parent.?
+  }
+  return false
 }

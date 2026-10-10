@@ -11,61 +11,16 @@ import "direct_light"
 import "forward"
 import "geometry"
 import "occlusion_culling"
-import particles_compute "particles_compute"
-import particles_render "particles_render"
+import "particles"
 import "post_process"
 import "shadow"
 import ui_render "ui"
 import vk "vendor:vulkan"
 
 @(private)
-init_samplers :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> (
-  ret: vk.Result,
-) {
-  info := vk.SamplerCreateInfo {
-    sType        = .SAMPLER_CREATE_INFO,
-    magFilter    = .LINEAR,
-    minFilter    = .LINEAR,
-    addressModeU = .REPEAT,
-    addressModeV = .REPEAT,
-    addressModeW = .REPEAT,
-    mipmapMode   = .LINEAR,
-    maxLod       = 1000,
-  }
-  vk.CreateSampler(gctx.device, &info, nil, &self.internal.linear_repeat_sampler) or_return
-  info.addressModeU, info.addressModeV, info.addressModeW =
-    .CLAMP_TO_EDGE, .CLAMP_TO_EDGE, .CLAMP_TO_EDGE
-  vk.CreateSampler(gctx.device, &info, nil, &self.internal.linear_clamp_sampler) or_return
-  info.magFilter, info.minFilter = .NEAREST, .NEAREST
-  info.addressModeU, info.addressModeV, info.addressModeW =
-    .REPEAT, .REPEAT, .REPEAT
-  vk.CreateSampler(gctx.device, &info, nil, &self.internal.nearest_repeat_sampler) or_return
-  info.addressModeU, info.addressModeV, info.addressModeW =
-    .CLAMP_TO_EDGE, .CLAMP_TO_EDGE, .CLAMP_TO_EDGE
-  vk.CreateSampler(gctx.device, &info, nil, &self.internal.nearest_clamp_sampler) or_return
-  return .SUCCESS
-}
-
-@(private)
-destroy_samplers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  vk.DestroySampler(gctx.device, self.internal.linear_repeat_sampler, nil)
-  self.internal.linear_repeat_sampler = 0
-  vk.DestroySampler(gctx.device, self.internal.linear_clamp_sampler, nil)
-  self.internal.linear_clamp_sampler = 0
-  vk.DestroySampler(gctx.device, self.internal.nearest_repeat_sampler, nil)
-  self.internal.nearest_repeat_sampler = 0
-  vk.DestroySampler(gctx.device, self.internal.nearest_clamp_sampler, nil)
-  self.internal.nearest_clamp_sampler = 0
-}
-
-@(private)
 init_subsystems :: proc(
   self: ^Manager,
   gctx: ^gpu.GPUContext,
-  swapchain_extent: vk.Extent2D,
   swapchain_format: vk.Format,
   dpi_scale: f32,
 ) -> vk.Result {
@@ -100,16 +55,12 @@ init_subsystems :: proc(
     self.texture_manager.set_layout,
   ) or_return
   geometry.init(&self.internal.geometry, gctx, scene_bindings(self, 0)) or_return
-  particles_compute.init(
-    &self.internal.particles_compute,
+  particles.init(
+    &self.internal.particles,
     gctx,
     self.internal.emitter_buffer.set_layout,
     self.internal.forcefield_buffer.set_layout,
     self.internal.node_data_buffer.set_layout,
-  ) or_return
-  particles_render.init(
-    &self.internal.particles_render,
-    gctx,
     self.internal.camera_buffer.set_layout,
     self.texture_manager.set_layout,
   ) or_return
@@ -152,20 +103,17 @@ vulkan_instance :: proc(self: ^Manager) -> vk.Instance {
 }
 
 // Create the device, the swapchain for `surface` and every app-lifetime
-// resource. Follow with setup.
+// resource. Paired with shutdown. Follow with setup.
 init :: proc(
   self: ^Manager,
   surface: vk.SurfaceKHR,
   framebuffer_size: [2]u32,
   dpi_scale: f32,
-  environment_map_path := "assets/Cannon_Exterior.hdr",
 ) -> vk.Result {
   gctx := &self.gctx
-  self.ambient.environment_map_path = environment_map_path
   gctx.surface = surface
   gpu.device_init(gctx) or_return
   gpu.swapchain_init(&self.swapchain, gctx, framebuffer_size) or_return
-  swapchain_extent := self.swapchain.extent
   swapchain_format := self.swapchain.format.format
   gpu.descriptor_pool_init(gctx, DESCRIPTOR_POOL_SIZES[:], DESCRIPTOR_POOL_MAX_SETS) or_return
   self.color_format = swapchain_format
@@ -183,37 +131,27 @@ init :: proc(
   bindless.mesh_manager_init(&self.mesh_manager, gctx)
   init_scene_buffers(self, gctx) or_return
   bindless.texture_manager_init(&self.texture_manager, gctx) or_return
-  init_samplers(self, gctx) or_return
-  init_subsystems(self, gctx, swapchain_extent, swapchain_format, dpi_scale) or_return
+  init_subsystems(self, gctx, swapchain_format, dpi_scale) or_return
   return .SUCCESS
 }
 
 // Level-lifetime resources: descriptors, per-level renderer state and the
-// main camera. Undone by teardown.
-setup :: proc(self: ^Manager) -> vk.Result {
+// main camera. Paired with teardown. Safe to call at any point outside frame;
+// a no-op when the level is already set up. Load the environment map with
+// load_environment_map afterwards.
+setup :: proc(self: ^Manager) -> (ret: vk.Result) {
+  if self.internal.level_ready do return .SUCCESS
   gctx := &self.gctx
   swapchain_extent := self.swapchain.extent
   swapchain_format := self.swapchain.format.format
-  bindless.texture_manager_setup(
-    &self.texture_manager,
-    gctx,
-    {
-      .NEAREST_CLAMP = self.internal.nearest_clamp_sampler,
-      .LINEAR_CLAMP = self.internal.linear_clamp_sampler,
-      .NEAREST_REPEAT = self.internal.nearest_repeat_sampler,
-      .LINEAR_REPEAT = self.internal.linear_repeat_sampler,
-    },
-  ) or_return
+  self.internal.level_ready = true
+  defer if ret != .SUCCESS do teardown(self)
+  bindless.texture_manager_setup(&self.texture_manager, gctx) or_return
   realloc_scene_descriptors(self, gctx) or_return
-  ambient.setup(
-    &self.ambient,
-    gctx,
-    &self.texture_manager,
-    self.internal.linear_repeat_sampler,
-  ) or_return
+  ambient.setup(&self.ambient, gctx, &self.texture_manager) or_return
   direct_light.setup(&self.internal.direct_light, gctx) or_return
-  particles_compute.setup(
-    &self.internal.particles_compute,
+  particles.setup(
+    &self.internal.particles,
     gctx,
     self.internal.emitter_buffer.descriptor_set,
     self.internal.forcefield_buffer.descriptor_set,
@@ -240,20 +178,21 @@ setup :: proc(self: ^Manager) -> vk.Result {
   return .SUCCESS
 }
 
-// Wait for the GPU, then free every slot, camera and level resource.
-// App-lifetime resources (pools, pipelines, builtin meshes) stay.
+// Free every slot, camera and level resource. App-lifetime resources (pools,
+// pipelines, builtin meshes) stay. Safe to call at any point outside frame: it
+// waits for every frame in flight first. A no-op when no level is set up.
 teardown :: proc(self: ^Manager) {
+  if !self.internal.level_ready do return
+  self.internal.level_ready = false
   gctx := &self.gctx
   vk.DeviceWaitIdle(gctx.device)
   clear_slots(self)
-  for &entry, i in self.cameras.entries {
-    if !entry.active do continue
-    destroy_camera(self, {index = u32(i), generation = entry.generation})
-  }
+  it := cont.iterator(&self.cameras)
+  for _, handle in cont.next(&it, CameraHandle) do destroy_camera(self, handle)
   release_all_light_shadows(self, gctx)
   ui_render.teardown(&self.internal.ui, gctx)
   post_process.teardown(&self.post_process, gctx, &self.texture_manager)
-  particles_compute.teardown(&self.internal.particles_compute, gctx)
+  particles.teardown(&self.internal.particles, gctx)
   ambient.teardown(&self.ambient, gctx, &self.texture_manager)
   direct_light.teardown(&self.internal.direct_light, gctx)
   bindless.texture_manager_teardown(&self.texture_manager, gctx)
@@ -263,7 +202,16 @@ teardown :: proc(self: ^Manager) {
   gpu.deferred_flush(gctx)
 }
 
+// Replace the environment map with the equirectangular HDR image at `path`
+// and precompute image-based lighting from it. Level-lifetime: call after
+// setup; teardown frees it. Without one, IBL and the skybox are black.
+load_environment_map :: proc(self: ^Manager, path: string) -> vk.Result {
+  return ambient.load_environment(&self.ambient, &self.gctx, &self.texture_manager, path)
+}
+
+// Destroy everything init created; tears the level down first if needed.
 shutdown :: proc(self: ^Manager) {
+  teardown(self)
   gctx := &self.gctx
   vk.DeviceWaitIdle(gctx.device)
   gpu.free_command_buffer(gctx, ..self.internal.command_buffers[:])
@@ -273,8 +221,7 @@ shutdown :: proc(self: ^Manager) {
   ui_render.shutdown(&self.internal.ui, gctx)
   debug_line.shutdown(&self.internal.debug_line_renderer, gctx)
   post_process.shutdown(&self.post_process, gctx)
-  particles_compute.shutdown(&self.internal.particles_compute, gctx)
-  particles_render.shutdown(&self.internal.particles_render, gctx)
+  particles.shutdown(&self.internal.particles, gctx)
   forward.shutdown(&self.internal.forward, gctx)
   ambient.shutdown(&self.ambient, gctx)
   direct_light.shutdown(&self.internal.direct_light, gctx)
@@ -282,7 +229,6 @@ shutdown :: proc(self: ^Manager) {
   geometry.shutdown(&self.internal.geometry, gctx)
   depth_pyramid_system.shutdown(&self.internal.depth_pyramid, gctx)
   occlusion_culling.shutdown(&self.internal.visibility, gctx)
-  destroy_samplers(self, gctx)
   bindless.texture_manager_shutdown(&self.texture_manager, gctx)
   destroy_scene_buffers(self, gctx)
   bindless.mesh_manager_shutdown(&self.mesh_manager, gctx)

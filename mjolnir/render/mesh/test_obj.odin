@@ -1,4 +1,4 @@
-package geometry
+package mesh
 
 import "core:os"
 import "core:testing"

@@ -1,5 +1,6 @@
 package physics
 
+import cont "../containers"
 import "../geometry"
 import "base:intrinsics"
 import "core:math/linalg"
@@ -375,8 +376,9 @@ sequential_ccd :: proc(
   ccd_handled: []bool,
 ) -> (bodies_tested: int, total_candidates: int) {
   static_candidates := make([dynamic]StaticBroadPhaseEntry, 0, 64, context.temp_allocator)
-  #no_bounds_check for &entry_a, idx_a in physics.bodies.entries do if entry_a.active {
-    tested, cands := ccd_step_body(physics, &entry_a.item, idx_a, dt, ccd_handled, &static_candidates)
+  it := cont.iterator(&physics.bodies)
+  for body, handle in cont.next(&it, DynamicRigidBodyHandle) {
+    tested, cands := ccd_step_body(physics, body, int(handle.index), dt, ccd_handled, &static_candidates)
     if tested do bodies_tested += 1
     total_candidates += cands
   }

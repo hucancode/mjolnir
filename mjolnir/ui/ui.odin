@@ -3,28 +3,31 @@ package ui
 import cont "../containers"
 import cmd "../draw2d"
 import "core:log"
+import "core:slice"
 import fs "vendor:fontstash"
 
 System :: struct {
   widget_pool:  cont.Pool(Widget),
   font_context: ^fs.FontContext,
   staging:      [dynamic]cmd.RenderCommand,
-  hovered:      Maybe(UIWidgetHandle), // widget under the cursor last tick
-  prev_buttons: [MAX_MOUSE_BUTTONS]bool,
+  hovered:      Maybe(UIWidgetHandle), // interactive widget under the cursor
+  captured:     Maybe(UIWidgetHandle), // pressed widget, kept until all buttons release
+  focused:      Maybe(UIWidgetHandle), // receives key and text events
 }
 
-MAX_MOUSE_BUTTONS :: 8
-
-DEFAULT_FONT_PATH :: "assets/Outfit-Regular.ttf"
+// Glyph sizes rasterized at init so the first atlas upload covers typical text.
+DEFAULT_PREWARM_SIZES :: []f32{12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96}
 
 // draw2d types that appear in this package's API.
 Vertex2D :: cmd.Vertex2D
 NO_TEXTURE :: cmd.NO_TEXTURE
 
+// font_data is a TTF/OTF file in memory; it is copied.
 init :: proc(
   self: ^System,
+  font_data: []u8,
   max_widgets: u32 = 4096,
-  font_path: string = DEFAULT_FONT_PATH,
+  prewarm_sizes: []f32 = DEFAULT_PREWARM_SIZES,
 ) -> bool {
   cont.init(&self.widget_pool, max_widgets)
   self.staging = make([dynamic]cmd.RenderCommand, 0, 256)
@@ -32,17 +35,15 @@ init :: proc(
   font_atlas_height := 512
   self.font_context = new(fs.FontContext)
   fs.Init(self.font_context, font_atlas_width, font_atlas_height, .TOPLEFT)
-  font_index := fs.AddFont(self.font_context, "default", font_path, 0)
+  font_index := fs.AddFontMem(self.font_context, "default", slice.clone(font_data), true)
   if font_index == fs.INVALID {
-    log.errorf("Failed to load font from %s", font_path)
+    log.errorf("Failed to load UI font (%d bytes)", len(font_data))
     return false
   }
-  // Pre-rasterize common glyphs so the first atlas upload covers typical text
   fs.SetFont(self.font_context, font_index)
   fs.SetColor(self.font_context, {255, 255, 255, 255})
   test_string := " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-  common_sizes := [?]f32{12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96}
-  for size in common_sizes {
+  for size in prewarm_sizes {
     fs.SetSize(self.font_context, size)
     iter := fs.TextIterInit(self.font_context, 0, 0, test_string)
     quad: fs.Quad
@@ -91,7 +92,6 @@ cleanup_widget :: proc(widget: ^Widget) {
     delete(w.text)
     delete(w.glyphs)
   case Box:
-    // Note: children are already destroyed by pool iteration
     delete(w.children)
   }
 }
@@ -155,92 +155,14 @@ get_box :: proc(sys: ^System, handle: BoxHandle) -> ^Box {
   return nil
 }
 
-set_position :: proc(widget: ^Widget, position: [2]f32) {
-  switch &w in widget {
-  case Mesh2D:
-    w.position = position
-  case Quad2D:
-    w.position = position
-  case Text2D:
-    w.position = position
-  case Box:
-    w.position = position
-  }
-}
-
-set_z_order :: proc(widget: ^Widget, z: i32) {
-  switch &w in widget {
-  case Mesh2D:
-    w.z_order = z
-  case Quad2D:
-    w.z_order = z
-  case Text2D:
-    w.z_order = z
-  case Box:
-    w.z_order = z
-  }
-}
-
-set_visible :: proc(widget: ^Widget, visible: bool) {
-  switch &w in widget {
-  case Mesh2D:
-    w.visible = visible
-  case Quad2D:
-    w.visible = visible
-  case Text2D:
-    w.visible = visible
-  case Box:
-    w.visible = visible
-  }
-}
-
-set_event_handler :: proc(widget: ^Widget, handlers: EventHandlers) {
-  switch &w in widget {
-  case Mesh2D:
-    w.event_handlers = handlers
-  case Quad2D:
-    w.event_handlers = handlers
-  case Text2D:
-    w.event_handlers = handlers
-  case Box:
-    w.event_handlers = handlers
-  }
-}
-
-set_user_data :: proc(widget: ^Widget, data: rawptr) {
-  switch &w in widget {
-  case Mesh2D:
-    w.user_data = data
-  case Quad2D:
-    w.user_data = data
-  case Text2D:
-    w.user_data = data
-  case Box:
-    w.user_data = data
-  }
-}
-
+// Destroy a widget and, for a Box, its children.
 destroy_widget :: proc(sys: ^System, handle: UIWidgetHandle) {
   widget := get_widget(sys, handle)
   if widget == nil do return
-
-  switch &w in widget {
-  case Mesh2D:
-    delete(w.vertices)
-    delete(w.indices)
-  case Quad2D:
-  // No dynamic allocations
-  case Text2D:
-    delete(w.text)
-    delete(w.glyphs)
-  case Box:
-    // Destroy children recursively
-    for child in w.children {
-      destroy_widget(sys, child)
-    }
-    delete(w.children)
+  if box, is_box := widget.(Box); is_box {
+    for child in box.children do destroy_widget(sys, child)
   }
-
+  cleanup_widget(widget)
   cont.free(&sys.widget_pool, handle)
 }
 
@@ -250,12 +172,8 @@ build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
   compute_layout_all(sys)
   clear(&sys.staging)
 
-  // Iterate through all widgets and generate commands
-  for &entry, i in sys.widget_pool.entries {
-    if !entry.active do continue
-
-    widget := &entry.item
-    if widget == nil do continue
+  it := cont.iterator(&sys.widget_pool)
+  for widget in cont.next(&it, UIWidgetHandle) {
     if !get_widget_base(widget).visible do continue
 
     switch &w in widget {
@@ -299,7 +217,15 @@ build_commands :: proc(sys: ^System) -> []cmd.RenderCommand {
       append(&sys.staging, command)
 
     case Box:
-    // Boxes don't render directly
+      if w.background_color.a == 0 do continue
+      command := cmd.DrawQuadCommand {
+        position   = w.world_position,
+        size       = w.size,
+        color      = w.background_color,
+        texture_id = cmd.NO_TEXTURE,
+        z_order    = w.z_order,
+      }
+      append(&sys.staging, command)
     }
   }
   return sys.staging[:]

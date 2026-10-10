@@ -57,34 +57,27 @@ IKTarget :: struct {
   space:           IKTargetSpace, // Space target_position and pole_vector live in
 }
 
-// Internal struct to store bone world transforms during IK solving
-BoneTransform :: struct {
-  world_position: [3]f32,
-  world_rotation: quaternion128,
-  world_matrix:   matrix[4, 4]f32,
-}
-
-// Clamp `dir_world` so its angular deviation from `fk_rot`'s forward axis (qy)
+// Clamp `dir` so its angular deviation from `fk_rot`'s forward axis (qy)
 // stays within an elliptical cone defined by max_angle.x (swing toward bone-local X)
 // and max_angle.z (swing toward bone-local Z). Direction is preserved when within bounds.
 @(private = "file")
 apply_swing_constraint :: proc(
-  dir_world: [3]f32,
+  dir: [3]f32,
   fk_rot: quaternion128,
   max_x: f32,
   max_z: f32,
 ) -> [3]f32 {
   // Both axes unconstrained: nothing to clamp.
-  if max_x < 0 && max_z < 0 do return dir_world
+  if max_x < 0 && max_z < 0 do return dir
   // Convert direction into bone-local frame (rest orientation defines axes).
   inv_fk := linalg.quaternion_inverse(fk_rot)
-  local_dir := geometry.qmv(inv_fk, dir_world)
+  local_dir := geometry.qmv(inv_fk, dir)
   // local_dir.y = cos(swing_angle), (local_dir.x, local_dir.z) is the swing axis direction.
   cos_swing := clamp(local_dir.y, -1.0, 1.0)
   swing_angle := math.acos(cos_swing)
-  if swing_angle < 1e-5 do return dir_world
+  if swing_angle < 1e-5 do return dir
   xz_len := math.sqrt(local_dir.x * local_dir.x + local_dir.z * local_dir.z)
-  if xz_len < 1e-6 do return dir_world
+  if xz_len < 1e-6 do return dir
   sxz_x := local_dir.x / xz_len
   sxz_z := local_dir.z / xz_len
   // Effective limit at this swing direction. Treat negative (unconstrained) by replacing
@@ -92,7 +85,7 @@ apply_swing_constraint :: proc(
   lim_x := max_x if max_x >= 0 else math.PI
   lim_z := max_z if max_z >= 0 else math.PI
   limit := math.sqrt(sxz_x * sxz_x * lim_x * lim_x + sxz_z * sxz_z * lim_z * lim_z)
-  if swing_angle <= limit do return dir_world
+  if swing_angle <= limit do return dir
   new_xz_mag := math.sin(limit)
   new_y := math.cos(limit)
   clamped_local := [3]f32{sxz_x * new_xz_mag, new_y, sxz_z * new_xz_mag}
@@ -147,30 +140,29 @@ apply_twist_constraint :: proc(
 //    is optionally constrained relative to its FK rest before placing the next joint.
 // 3. Repeat until convergence or max iterations
 //
-// Expects world_transforms to contain FK-computed world transforms for all bones
-// Modifies transforms for all bones in the chain to reach the target.
-fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
+// `positions`/`rotations` hold the skeleton-space FK pose of every bone,
+// indexed by bone. The chain's entries are overwritten with the solved pose.
+fabrik_solve :: proc(positions: [][3]f32, rotations: []quaternion128, target: IKTarget) {
   if !target.enabled || target.weight <= 0.0 do return
   chain_length := len(target.bone_indices)
   if chain_length < 2 do return
   // Validate all indices
   for idx in target.bone_indices {
-    if idx >= u32(len(world_transforms)) do return
+    if idx >= u32(len(positions)) || idx >= u32(len(rotations)) do return
   }
   bone_lengths := target.bone_lengths
   if len(bone_lengths) != chain_length - 1 do return
   constraints := target.constraints
   has_constraints := constraints != nil && len(constraints) == chain_length
-  // Allocate temporary positions for the chain
-  positions := make([][3]f32, chain_length, context.temp_allocator)
-  // Cache FK rotations and positions for constraint reference.
+  // Chain joint positions being solved, plus the FK pose for constraint reference
+  joints := make([][3]f32, chain_length, context.temp_allocator)
   fk_rotations := make([]quaternion128, chain_length, context.temp_allocator)
   for i in 0 ..< chain_length {
     bone_idx := target.bone_indices[i]
-    positions[i] = world_transforms[bone_idx].world_position
-    fk_rotations[i] = world_transforms[bone_idx].world_rotation
+    joints[i] = positions[bone_idx]
+    fk_rotations[i] = rotations[bone_idx]
   }
-  root_position := positions[0]
+  root_position := joints[0]
   target_pos := target.target_position
   total_length: f32 = 0
   for length in bone_lengths do total_length += length
@@ -185,7 +177,7 @@ fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
         c := constraints[i]
         dir = apply_swing_constraint(dir, fk_rotations[i], c.max_angle.x, c.max_angle.z)
       }
-      positions[i + 1] = positions[i] + dir * bone_lengths[i]
+      joints[i + 1] = joints[i] + dir * bone_lengths[i]
     }
   } else {
     // Target reachable, iterate FABRIK
@@ -193,33 +185,34 @@ fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
     tolerance := target.tolerance > 0 ? target.tolerance : 0.001
     for _ in 0 ..< iterations {
       // Forward pass: drag from end to root
-      positions[chain_length - 1] = target_pos
+      joints[chain_length - 1] = target_pos
       for i := chain_length - 2; i >= 0; i -= 1 {
-        dir := linalg.normalize(positions[i] - positions[i + 1])
-        positions[i] = positions[i + 1] + dir * bone_lengths[i]
+        dir := linalg.normalize(joints[i] - joints[i + 1])
+        joints[i] = joints[i + 1] + dir * bone_lengths[i]
       }
       // Backward pass: restore root and drag forward (constraints applied per segment)
-      positions[0] = root_position
+      joints[0] = root_position
       for i in 0 ..< chain_length - 1 {
-        dir := linalg.normalize(positions[i + 1] - positions[i])
+        dir := linalg.normalize(joints[i + 1] - joints[i])
         if has_constraints {
           c := constraints[i]
           dir = apply_swing_constraint(dir, fk_rotations[i], c.max_angle.x, c.max_angle.z)
         }
-        positions[i + 1] = positions[i] + dir * bone_lengths[i]
+        joints[i + 1] = joints[i] + dir * bone_lengths[i]
       }
       // Check convergence (using squared distance avoids sqrt)
-      end_dist_sq := linalg.length2(positions[chain_length - 1] - target_pos)
+      end_dist_sq := linalg.length2(joints[chain_length - 1] - target_pos)
       if end_dist_sq < tolerance * tolerance {
         break
       }
     }
   }
-  // Update world transforms from solved positions (with pole-based twist control)
+  // Write back the solved pose (with pole-based twist control)
   update_transforms_from_positions(
-    world_transforms,
+    positions,
+    rotations,
     target.bone_indices,
-    positions[:],
+    joints,
     fk_rotations,
     target.pole_vector,
     target.pole_weight,
@@ -227,15 +220,15 @@ fabrik_solve :: proc(world_transforms: []BoneTransform, target: IKTarget) {
   )
 }
 
-// Update bone transforms (positions and rotations) from solved positions.
-// Uses swing-twist decomposition for pole-controlled twist.
+// Write the chain's solved joint positions and the matching rotations back
+// into the pose. Uses swing-twist decomposition for pole-controlled twist.
 // When `constraints` is non-nil, applies twist limit (max_angle.y) per bone.
-// Assumes uniform scale 1.0 — extract scale once before the loop if non-uniform needed.
 @(private = "file")
 update_transforms_from_positions :: proc(
-  world_transforms: []BoneTransform,
-  bone_indices: []u32,
   positions: [][3]f32,
+  rotations: []quaternion128,
+  bone_indices: []u32,
+  joints: [][3]f32,
   fk_rotations: []quaternion128,
   pole_vector: [3]f32,
   pole_weight: f32,
@@ -244,23 +237,22 @@ update_transforms_from_positions :: proc(
   chain_length := len(bone_indices)
   fk_positions := make([][3]f32, chain_length, context.temp_allocator)
   for i in 0 ..< chain_length {
-    fk_positions[i] = world_transforms[bone_indices[i]].world_position
+    fk_positions[i] = positions[bone_indices[i]]
   }
   has_pole := linalg.length2(pole_vector) > math.F32_EPSILON && pole_weight > 0
-  scale_one := [3]f32{1, 1, 1}
   last_swing := linalg.QUATERNIONF32_IDENTITY
   // Bones 0..chain_length-2: swing from segment (i, i+1). Last bone inherits last_swing.
   for i in 0 ..< chain_length - 1 {
     bone_idx := bone_indices[i]
     fk_dir := linalg.normalize(fk_positions[i + 1] - fk_positions[i])
-    ik_dir := linalg.normalize(positions[i + 1] - positions[i])
+    ik_dir := linalg.normalize(joints[i + 1] - joints[i])
     swing := linalg.quaternion_between_two_vector3(fk_dir, ik_dir)
     last_swing = swing
     new_rot := swing * fk_rotations[i]
     if has_pole && i > 0 {
       fk_perp := geometry.qx(fk_rotations[i])
       current_perp := geometry.qmv(swing, fk_perp)
-      to_pole := pole_vector - positions[i]
+      to_pole := pole_vector - joints[i]
       desired_perp := to_pole - ik_dir * linalg.dot(to_pole, ik_dir)
       perp_len := linalg.length(desired_perp)
       if perp_len > math.F32_EPSILON {
@@ -278,9 +270,8 @@ update_transforms_from_positions :: proc(
     if constraints != nil {
       new_rot = apply_twist_constraint(new_rot, fk_rotations[i], constraints[i].max_angle.y)
     }
-    world_transforms[bone_idx].world_position = positions[i]
-    world_transforms[bone_idx].world_rotation = new_rot
-    world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(positions[i], new_rot, scale_one)
+    positions[bone_idx] = joints[i]
+    rotations[bone_idx] = new_rot
   }
   // Last bone: same swing as parent segment (no outgoing segment).
   last := chain_length - 1
@@ -289,7 +280,6 @@ update_transforms_from_positions :: proc(
   if constraints != nil {
     new_rot = apply_twist_constraint(new_rot, fk_rotations[last], constraints[last].max_angle.y)
   }
-  world_transforms[bone_idx].world_position = positions[last]
-  world_transforms[bone_idx].world_rotation = new_rot
-  world_transforms[bone_idx].world_matrix = linalg.matrix4_from_trs(positions[last], new_rot, scale_one)
+  positions[bone_idx] = joints[last]
+  rotations[bone_idx] = new_rot
 }

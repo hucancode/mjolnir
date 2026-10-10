@@ -179,8 +179,6 @@ test_spline_duration :: proc(t: ^testing.T) {
   spline.times[1] = 3.0
   spline.times[2] = 5.0
   testing.expect_value(t, spline_duration(spline), 4.0)
-  testing.expect_value(t, spline_start_time(spline), 1.0)
-  testing.expect_value(t, spline_end_time(spline), 5.0)
 }
 
 @(test)

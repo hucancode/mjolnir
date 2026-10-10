@@ -37,13 +37,14 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   if despawn_cooldown > 0 {
     despawn_cooldown -= 1
     if despawn_cooldown == 0 do spawn_grid(engine, pending_index)
-    return
-  }
-  if pending_index >= 0 && pending_index != current_size_index {
+  } else if pending_index >= 0 && pending_index != current_size_index {
     if grid_root.index != 0 do world.despawn(&engine.world, grid_root)
     grid_root = {}
     despawn_cooldown = 2
   }
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 spawn_grid :: proc(engine: ^mjolnir.Engine, idx: int) {

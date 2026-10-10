@@ -1,7 +1,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/platform"
+import "../../mjolnir/input"
 import "../../mjolnir/render"
 import "../../mjolnir/ui"
 import "../../mjolnir/world"
@@ -47,7 +47,6 @@ main :: proc() {
     height    = 768,
     setup     = setup,
     update    = update,
-    key_press = on_key,
   })
 }
 
@@ -133,8 +132,7 @@ cell_to_world :: proc(c: Cell, y: f32) -> [3]f32 {
   return {x, y, z}
 }
 
-on_key :: proc(engine: ^mjolnir.Engine, key: platform.Key, action: platform.Action) {
-  if action == .RELEASE do return
+on_key :: proc(key: input.Key) {
   #partial switch key {
   case .W, .UP:    if g.dir.y != 1  do g.pending_dir = {0, -1}
   case .S, .DOWN:  if g.dir.y != -1 do g.pending_dir = {0, 1}
@@ -144,6 +142,17 @@ on_key :: proc(engine: ^mjolnir.Engine, key: platform.Key, action: platform.Acti
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  step_game(engine, dt)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+}
+
+step_game :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  if !engine.keyboard_captured {
+    it := 0
+    for key, pressed in input.next_key_edge(&engine.input, &it) do if pressed do on_key(key)
+  }
   g.timer += dt
   if g.timer < TICK do return
   g.timer = 0

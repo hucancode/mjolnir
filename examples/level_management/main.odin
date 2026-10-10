@@ -23,9 +23,11 @@ character: mjolnir.GltfScene
 animators: [dynamic]anim.Animator // one per character.skinned entry
 
 reset_count: int
+reset_requested: bool
 test_frame: int
 
 main :: proc() {
+  defer mjolnir.gltf_scene_destroy(&character)
   mjolnir.run_app(
     {
       title = "Level Management",
@@ -35,13 +37,8 @@ main :: proc() {
       setup = setup,
       update = update,
       pre_render = panel,
-      sync = sync,
     },
   )
-}
-
-sync :: proc(engine: ^mjolnir.Engine) {
-  for s, i in character.skinned do render.stage_bones(&engine.render, s.node.index, animators[i].palette)
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -132,7 +129,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for s in character.skinned {
       rig := &character.rigs[s.rig]
       a: anim.Animator
-      anim.animator_init(&a, &rig.skeleton)
+      anim.animator_init(&a, rig)
       anim.play(&a, rig, "Anim_0")
       append(&animators, a)
     }
@@ -174,7 +171,10 @@ act_destroy_materials :: proc(engine: ^mjolnir.Engine) {
   if len(example_materials) == 0 do return
   default_mat := render.get_builtin_material(&engine.render, .GRAY)
   for h in example_nodes {
-    render.set_material_handle(&engine.render, h.index, default_mat)
+    if a, ok := render.attachment(&engine.render, h.index, render.MeshAttachment); ok {
+      a.material = default_mat
+      render.mark_slot_dirty(&engine.render, h.index)
+    }
   }
   freed := len(example_materials)
   for m in example_materials {
@@ -188,7 +188,10 @@ act_destroy_meshes :: proc(engine: ^mjolnir.Engine) {
   if len(example_meshes) == 0 do return
   cube := render.get_builtin_mesh(&engine.render, .CUBE)
   for h in example_nodes {
-    render.set_mesh_handle(&engine.render, h.index, cube)
+    if a, ok := render.attachment(&engine.render, h.index, render.MeshAttachment); ok {
+      a.handle = cube
+      render.mark_slot_dirty(&engine.render, h.index)
+    }
   }
   freed := len(example_meshes)
   for m in example_meshes {
@@ -205,12 +208,18 @@ act_reset_level :: proc(engine: ^mjolnir.Engine) {
   clear(&example_meshes)
   clear(&example_nodes)
   reset_count += 1
-  mjolnir.schedule_teardown(engine)
-  mjolnir.schedule_setup(engine)
+  // Teardown + setup run at the start of the next update.
+  reset_requested = true
   log.infof("level reset scheduled (#%d)", reset_count)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+  if reset_requested {
+    reset_requested = false
+    mjolnir.teardown(engine)
+    mjolnir.setup(engine)
+    return
+  }
   for h in gltf_roots do world.rotate_by(&engine.world, h, delta_time * math.PI * 0.3)
   for s, i in character.skinned do anim.animator_update(&animators[i], &character.rigs[s.rig], delta_time)
   when AUTOMATED_TEST {
@@ -232,6 +241,10 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 	    log.info("automated test sequence complete")
 	  }
   }
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  for s, i in character.skinned do render.stage_bones(&engine.render, s.node.index, animators[i].palette)
 }
 
 panel :: proc(engine: ^mjolnir.Engine) {

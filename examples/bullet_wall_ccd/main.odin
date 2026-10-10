@@ -46,19 +46,26 @@ setup :: proc(engine: ^mjolnir.Engine) {
   mjolnir.spawn(engine, {-5, 12, 5}, render.directional_light_attachment({1, 0.95, 0.9, 1}, 6.0, true))
 
   cube_mesh := render.get_builtin_mesh(&engine.render, .CUBE)
-  mjolnir.spawn_static(engine, &phys, {0, -0.5, 0}, physics.BoxCollider{half_extents = {30.0, 0.5, 12.0}},
-    cube_mesh, render.get_builtin_material(&engine.render, .GRAY))
+  ground := world.spawn(&engine.world, {0, -0.5, 0})
+  physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {30.0, 0.5, 12.0}}, user = world.Handle(ground))
+  ground_visual := mjolnir.spawn_mesh(engine, cube_mesh, render.get_builtin_material(&engine.render, .GRAY), parent = ground)
+  world.scale_xyz(&engine.world, ground_visual, 30.0, 0.5, 12.0)
 
   wall_colors := [WALL_COUNT]render.Color{.RED, .YELLOW, .GREEN}
   for i in 0 ..< WALL_COUNT {
     half_thick := wall_heights[i] * 0.5
     wall_z := (f32(i) - f32(WALL_COUNT - 1) * 0.5) * WALL_SPACING
-    wall_nodes[i], _ = mjolnir.spawn_static(engine, &phys, {WALL_X, 1.5, wall_z}, physics.BoxCollider{half_extents = {half_thick, 1.5, 2.0}},
-      cube_mesh, render.get_builtin_material(&engine.render, wall_colors[i]))
+    wall_pos := [3]f32{WALL_X, 1.5, wall_z}
+    wall_nodes[i] = world.spawn(&engine.world, wall_pos)
+    physics.create_static_body(&phys, wall_pos, collider = physics.BoxCollider{half_extents = {half_thick, 1.5, 2.0}}, user = world.Handle(wall_nodes[i]))
+    wall_visual := mjolnir.spawn_mesh(engine, cube_mesh, render.get_builtin_material(&engine.render, wall_colors[i]), parent = wall_nodes[i])
+    world.scale_xyz(&engine.world, wall_visual, half_thick, 1.5, 2.0)
   }
 
-  bullet_node, bullet_body = mjolnir.spawn_dynamic(engine, &phys, START_POS, BULLET_MASS, physics.SphereCollider{radius = BULLET_RADIUS},
-    render.get_builtin_mesh(&engine.render, .SPHERE), render.get_builtin_material(&engine.render, .CYAN))
+  bullet_node = world.spawn(&engine.world, START_POS)
+  bullet_body = physics.create_dynamic_body(&phys, START_POS, mass = BULLET_MASS, collider = physics.SphereCollider{radius = BULLET_RADIUS}, user = world.Handle(bullet_node))
+  bullet_visual := mjolnir.spawn_mesh(engine, render.get_builtin_mesh(&engine.render, .SPHERE), render.get_builtin_material(&engine.render, .CYAN), parent = bullet_node)
+  world.scale_xyz(&engine.world, bullet_visual, BULLET_RADIUS, BULLET_RADIUS, BULLET_RADIUS)
   if body, ok := physics.get_dynamic_body(&phys, bullet_body); ok {
     body.linear_damping = 0; body.angular_damping = 0
     body.restitution = 0.1;  body.friction = 0.2
@@ -92,6 +99,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   }
   physics.step(&phys, dt)
   for b in physics.body_poses(&phys) do world.set_world_pose(&engine.world, world.NodeHandle(b.user), b.position, b.rotation)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

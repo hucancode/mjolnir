@@ -1,4 +1,6 @@
-package particles_compute
+// GPU particles: emission, simulation and compaction on compute, then a
+// point-sprite draw from the compacted buffer.
+package particles
 
 import "../gpu"
 import "core:log"
@@ -82,6 +84,8 @@ Renderer :: struct {
   compact_descriptor_set:             vk.DescriptorSet,
   compact_pipeline_layout:            vk.PipelineLayout,
   compact_pipeline:                   vk.Pipeline,
+  render_pipeline_layout:             vk.PipelineLayout,
+  render_pipeline:                    vk.Pipeline,
 }
 
 // Update params buffer. Preserves frame_counter (owned by simulate). Caller
@@ -369,6 +373,8 @@ teardown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
 }
 
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
+  vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
+  vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
   vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
@@ -398,10 +404,13 @@ init :: proc(
   emitter_set_layout: vk.DescriptorSetLayout,
   forcefield_set_layout: vk.DescriptorSetLayout,
   node_data_set_layout: vk.DescriptorSetLayout,
+  camera_set_layout: vk.DescriptorSetLayout,
+  textures_set_layout: vk.DescriptorSetLayout,
 ) -> (
   ret: vk.Result,
 ) {
-  log.debugf("Initializing particle compute renderer")
+  log.debugf("Initializing particle renderer")
+  defer if ret != .SUCCESS do shutdown(self, gctx)
 
   create_emitter_pipeline(
     gctx,
@@ -409,26 +418,8 @@ init :: proc(
     emitter_set_layout,
     node_data_set_layout,
   ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      self.emitter_descriptor_set_layout,
-      nil,
-    )
-    vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
-    vk.DestroyPipeline(gctx.device, self.emitter_pipeline, nil)
-  }
 
   create_compact_pipeline(gctx, self) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      self.compact_descriptor_set_layout,
-      nil,
-    )
-    vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
-    vk.DestroyPipeline(gctx.device, self.compact_pipeline, nil)
-  }
 
   create_compute_pipeline(
     gctx,
@@ -436,15 +427,7 @@ init :: proc(
     forcefield_set_layout,
     node_data_set_layout,
   ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      self.compute_descriptor_set_layout,
-      nil,
-    )
-    vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
-    vk.DestroyPipeline(gctx.device, self.compute_pipeline, nil)
-  }
+  create_render_pipeline(gctx, self, camera_set_layout, textures_set_layout) or_return
 
   return .SUCCESS
 }
@@ -472,9 +455,6 @@ create_emitter_pipeline :: proc(
     self.emitter_descriptor_set_layout,
     node_data_set_layout,
   ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(gctx.device, self.emitter_pipeline_layout, nil)
-  }
 
   emitter_shader_module := gpu.create_shader_module(
     gctx.device,
@@ -502,13 +482,6 @@ create_compute_pipeline :: proc(
     {.STORAGE_BUFFER, {.COMPUTE}},
     {.STORAGE_BUFFER, {.COMPUTE}},
   ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      self.compute_descriptor_set_layout,
-      nil,
-    )
-  }
 
   self.compute_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
@@ -517,9 +490,6 @@ create_compute_pipeline :: proc(
     forcefield_set_layout,
     node_data_set_layout,
   ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(gctx.device, self.compute_pipeline_layout, nil)
-  }
 
   compute_shader_module := gpu.create_shader_module(
     gctx.device,
@@ -546,22 +516,12 @@ create_compact_pipeline :: proc(
     {.STORAGE_BUFFER, {.COMPUTE}},
     {.STORAGE_BUFFER, {.COMPUTE}},
   ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyDescriptorSetLayout(
-      gctx.device,
-      self.compact_descriptor_set_layout,
-      nil,
-    )
-  }
 
   self.compact_pipeline_layout = gpu.create_pipeline_layout(
     gctx,
     nil,
     self.compact_descriptor_set_layout,
   ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyPipelineLayout(gctx.device, self.compact_pipeline_layout, nil)
-  }
 
   compact_shader_module := gpu.create_shader_module(
     gctx.device,

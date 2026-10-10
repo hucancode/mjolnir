@@ -170,13 +170,9 @@ FKLayer :: struct {
   speed:  f32,
 }
 
-IKLayer :: struct {
-  target: IKTarget,
-}
-
 LayerData :: union {
   FKLayer,
-  IKLayer,
+  IKTarget,
   ProceduralLayer,
 }
 

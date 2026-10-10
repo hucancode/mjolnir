@@ -5,7 +5,7 @@ import "core:math"
 import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/animation"
-import "mjolnir/platform"
+import "mjolnir/input"
 import "mjolnir/render"
 import "mjolnir/world"
 
@@ -15,6 +15,8 @@ ALL_POINT_LIGHT :: false
 ENABLE_DIRECTIONAL_LIGHT :: true
 portal_camera_handle: render.CameraHandle
 portal_material_handle: render.MaterialHandle
+warrior_sprite: render.SpriteHandle
+warrior_time: f32
 
 // A loaded glTF and one animator per skinned node in it.
 Character :: struct {
@@ -45,7 +47,7 @@ add_character :: proc(scene: mjolnir.GltfScene, clip: string) -> int {
   for s in scene.skinned {
     rig := &c.scene.rigs[s.rig]
     a: animation.Animator
-    animation.animator_init(&a, &rig.skeleton)
+    animation.animator_init(&a, rig)
     animation.play(&a, rig, clip)
     append(&c.animators, a)
   }
@@ -77,6 +79,10 @@ add_node_clip :: proc(engine: ^mjolnir.Engine, node: world.NodeHandle, clip: ani
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  if !engine.keyboard_captured {
+    it := 0
+    for key, pressed in input.next_key_edge(&engine.input, &it) do on_key(engine, key, pressed)
+  }
   for &c in characters {
     for s, i in c.scene.skinned do animation.animator_update(&c.animators[i], &c.scene.rigs[s.rig], dt)
   }
@@ -88,27 +94,28 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     if nc.socket do m = animation.bone_matrix(&characters[nc.character].animators[nc.skinned], nc.bone) * m
     world.set_local_matrix(&engine.world, nc.node, m)
   }
+  // 99-frame sprite sheet looping at 24 fps
+  warrior_time += dt
+  render.set_sprite_frame(&engine.render, warrior_sprite, u32(warrior_time * 24) % 99)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  for &c in characters {
+    for s, i in c.scene.skinned do render.stage_bones(&engine.render, s.node.index, c.animators[i].palette)
+  }
 }
 
 main :: proc() {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup
-  engine.key_press_proc = on_key_pressed
   engine.post_render_proc = on_post_render
-  engine.sync_proc = sync
   engine.update_proc = update
+  defer for &c in characters do mjolnir.gltf_scene_destroy(&c.scene)
   mjolnir.run(engine, 1280, 720, "Mjolnir")
 }
 
-sync :: proc(engine: ^mjolnir.Engine) {
-  for &c in characters {
-    for s, i in c.scene.skinned do render.stage_bones(&engine.render, s.node.index, c.animators[i].palette)
-  }
-}
-
 setup :: proc(engine: ^mjolnir.Engine) {
-  render.set_visibility_stats_enabled(&engine.render, false)
   engine.debug_ui_enabled = true
   plain_material_handle := engine.render.builtin_materials[render.Color.WHITE]
   cube_mesh_handle := engine.render.builtin_meshes[render.Primitive.CUBE]
@@ -263,6 +270,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   when true {
     log.info("loading Hammer GLTF...")
     if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Mjolnir.glb"); ok {
+      defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&engine.world, handle, 3, 1, -2)
@@ -301,6 +309,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("loading Damaged Helmet GLTF...")
     if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/DamagedHelmet.glb");
        ok {
+      defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&engine.world, handle, 0, 1, 3)
@@ -311,6 +320,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   when true {
     log.info("loading Suzanne GLTF...")
     if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/Suzanne.glb"); ok {
+      defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&engine.world, handle, -3, 1, 0)
@@ -321,6 +331,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("loading SciFiHelmet GLTF...")
     if gltf_nodes, ok := mjolnir.load_gltf(engine, "assets/SciFiHelmet.glb");
        ok {
+      defer mjolnir.gltf_scene_destroy(&gltf_nodes)
       log.infof("Loaded GLTF nodes: %v", gltf_nodes.roots)
       for handle in gltf_nodes.roots {
         world.translate(&engine.world, handle, 3, 0, 3)
@@ -600,20 +611,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     if warrior_sprite_ret == .SUCCESS {
       sprite_quad := engine.render.builtin_meshes[render.Primitive.QUAD_XY]
-      // 6x17 sprite sheet: 6 columns, 17 rows, using frames 0-98 (99 total)
-      // Create animation: 99 frames at 24fps, looping
-      warrior_animation := render.sprite_animation_init(
-        frame_count = 99,
-        fps = 24.0,
-        mode = .LOOP,
-      )
+      // 6x17 sprite sheet using frames 0-98, animated in update
       sprite_handle, sprite_ok := render.create_sprite(
         &engine.render,
         warrior_sprite_texture,
-        frame_columns = 6, // 6 columns in sprite sheet
-        frame_rows = 17, // 17 rows in sprite sheet
-        animation = warrior_animation,
+        frame_columns = 6,
+        frame_rows = 17,
       )
+      warrior_sprite = sprite_handle
       if sprite_ok {
         sprite_material, mat_ok := render.create_material(
           &engine.render,
@@ -642,9 +647,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("setup complete")
 }
 
-on_key_pressed :: proc(engine: ^mjolnir.Engine, key: platform.Key, action: platform.Action) {
-  log.infof("key %v %v", key, action)
-  if action == .RELEASE do return
+on_key :: proc(engine: ^mjolnir.Engine, key: input.Key, pressed: bool) {
+  log.infof("key %v %v", key, "PRESS" if pressed else "RELEASE")
+  if !pressed do return
   if key == .TAB {
     if _, is_free := engine.camera_controller.data.(render.FreeCameraData); is_free {
       engine.camera_controller = render.orbit_controller()

@@ -1,6 +1,5 @@
 package detour
 
-import "../recast"
 
 Data_Validation_Result :: struct {
   valid:       bool,
@@ -75,7 +74,7 @@ calculate_expected_tile_size :: proc(header: ^Mesh_Header) -> int {
   return size
 }
 
-validate_navmesh_header :: proc(header: ^Mesh_Header) -> recast.Status {
+validate_navmesh_header :: proc(header: ^Mesh_Header) -> Status {
   if header == nil do return {.Invalid_Param}
   if header.poly_count < 0 || header.vert_count < 0 do return {.Invalid_Param}
   return {.Success}
@@ -83,5 +82,5 @@ validate_navmesh_header :: proc(header: ^Mesh_Header) -> recast.Status {
 
 verify_data_layout :: proc(data: []u8, header: ^Mesh_Header) -> bool {
   _, map_status := navmesh_create_memory_map(data)
-  return !!recast.status_succeeded(map_status)
+  return !!status_succeeded(map_status)
 }

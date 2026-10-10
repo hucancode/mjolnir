@@ -74,6 +74,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
 
   // bypass_depth = renders over the real cube.
   render.debug_axes(&engine.render, {-6, 0, 0}, scale = 1.5, bypass_depth = true)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 pre_render :: proc(engine: ^mjolnir.Engine) {

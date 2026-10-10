@@ -3,6 +3,7 @@ package main
 import "../../mjolnir"
 import "../../mjolnir/render"
 import "../../mjolnir/animation"
+import "../../mjolnir/world"
 import "core:fmt"
 import "core:math"
 import mu "vendor:microui"
@@ -29,6 +30,7 @@ prev_lobes:  mu.Real = 3
 auto_play: bool = true
 
 main :: proc() {
+  defer mjolnir.gltf_scene_destroy(&scene)
   mjolnir.run_app({
     title      = "Path Modifier",
     width      = 900,
@@ -37,7 +39,6 @@ main :: proc() {
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
-    sync       = sync,
   })
 }
 
@@ -82,10 +83,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   spline = animation.spline_build_closed(path_buf[:])
 
   for s in scene.skinned {
-    skel := &scene.rigs[s.rig].skeleton
+    rig := &scene.rigs[s.rig]
     a: animation.Animator
-    animation.animator_init(&a, skel)
-    idx, _ := animation.add_path_layer(&a, skel, "root", 14,
+    animation.animator_init(&a, rig)
+    idx, _ := animation.add_path_layer(&a, rig, "root", 14,
       path = path_buf[:], offset = f32(offset_val), length = f32(fit_len),
       speed = 0, loop = true, closed = true, weight = 1.0,
     )
@@ -94,10 +95,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   mjolnir.spawn_ground(engine, 30.0, position = {0, -3, 0})
   mjolnir.spawn(engine, {0, 10, 0}, render.point_light_attachment({1, 0.9, 0.8, 1}, 15.0, true))
-}
-
-sync :: proc(engine: ^mjolnir.Engine) {
-  for s, i in scene.skinned do render.stage_bones(&engine.render, s.node.index, animators[i].palette)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -113,6 +110,10 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   apply_runtime_params(engine)
   for s, i in scene.skinned do animation.animator_update(&animators[i], &scene.rigs[s.rig], dt)
   draw_path_debug(engine)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  for s, i in scene.skinned do render.stage_bones(&engine.render, s.node.index, animators[i].palette)
 }
 
 debug_ui :: proc(engine: ^mjolnir.Engine) {

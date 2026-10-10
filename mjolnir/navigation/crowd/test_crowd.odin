@@ -1,7 +1,8 @@
 package crowd
 
 import "../detour"
-import "../recast"
+import ".."
+import "../bake"
 import "base:runtime"
 import "core:log"
 import "core:math"
@@ -14,7 +15,7 @@ import "core:time"
 
 // Note: proximity_grid wipes bucket heads on every bucket-array growth, so the
 // only safe usage pattern is to seed the bounds with the largest item up-front
-// (matches crowd_update which clears + readds every frame within stable bounds).
+// (matches update which clears + readds every frame within stable bounds).
 @(test)
 test_proximity_grid_add_query :: proc(t: ^testing.T) {
 	// Pool needs slack: sentinel covers (0..15)x(0..15)=256 cells, plus items.
@@ -106,31 +107,8 @@ test_sweep_circle_circle_geometry :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_isect_ray_seg_basic :: proc(t: ^testing.T) {
-	// ray from origin along +x, segment crossing at x=2
-	hit, tt := isect_ray_seg({0, 0, 0}, {4, 0, 0}, {2, 0, -1}, {2, 0, 1})
-	testing.expect(t, hit, "should hit perpendicular wall")
-	testing.expectf(t, math.abs(tt - 0.5) < 1e-4, "expected t=0.5, got %f", tt)
-
-	// parallel: no hit
-	miss, _ := isect_ray_seg({0, 0, 0}, {4, 0, 0}, {0, 0, 1}, {4, 0, 1})
-	testing.expect(t, !miss, "parallel should miss")
-
-	// ray pointing away from segment
-	miss2, _ := isect_ray_seg({0, 0, 0}, {-4, 0, 0}, {2, 0, -1}, {2, 0, 1})
-	testing.expect(t, !miss2, "ray facing away should miss")
-}
-
-@(test)
-test_perp_2d_signs :: proc(t: ^testing.T) {
-	testing.expect(t, perp_2d({1, 0}, {0, 1}) > 0, "ccw turn positive")
-	testing.expect(t, perp_2d({0, 1}, {1, 0}) < 0, "cw turn negative")
-	testing.expect(t, perp_2d({1, 1}, {2, 2}) == 0, "colinear is zero")
-}
-
-@(test)
 test_add_neighbour_inserts_sorted :: proc(t: ^testing.T) {
-	neis: [4]Crowd_Neighbour
+	neis: [4]Neighbour
 	n := 0
 	n = add_neighbour(0, 5.0, neis[:], n, 4)
 	n = add_neighbour(1, 1.0, neis[:], n, 4)
@@ -147,8 +125,8 @@ test_add_neighbour_inserts_sorted :: proc(t: ^testing.T) {
 
 @(test)
 test_merge_corridor_start_moved_truncates_visited :: proc(t: ^testing.T) {
-	path := [8]recast.Poly_Ref{1, 2, 3, 4, 0, 0, 0, 0}
-	visited := [4]recast.Poly_Ref{10, 11, 2, 0}
+	path := [8]detour.Poly_Ref{1, 2, 3, 4, 0, 0, 0, 0}
+	visited := [4]detour.Poly_Ref{10, 11, 2, 0}
 	new_n := merge_corridor_start_moved(path[:], 4, 8, visited[:], 3)
 	// 'visited' overlaps path at 2 -> must replace prefix with reversed unmatched visited then keep tail from match+1
 	testing.expectf(t, new_n >= 3, "expected at least 3 entries, got %d", new_n)
@@ -164,16 +142,16 @@ test_merge_corridor_start_moved_truncates_visited :: proc(t: ^testing.T) {
 
 @(test)
 test_merge_corridor_start_shortcut_no_overlap_keeps_path :: proc(t: ^testing.T) {
-	path := [4]recast.Poly_Ref{1, 2, 3, 4}
-	visited := [3]recast.Poly_Ref{99, 98, 97}
+	path := [4]detour.Poly_Ref{1, 2, 3, 4}
+	visited := [3]detour.Poly_Ref{99, 98, 97}
 	new_n := merge_corridor_start_shortcut(path[:], 4, 4, visited[:], 3)
 	testing.expectf(t, new_n == 4, "no overlap should leave path untouched, got n=%d", new_n)
 }
 
 @(test)
 test_merge_corridor_end_moved_extends_path :: proc(t: ^testing.T) {
-	path := [8]recast.Poly_Ref{1, 2, 3, 4, 0, 0, 0, 0}
-	visited := [4]recast.Poly_Ref{4, 5, 6, 7}
+	path := [8]detour.Poly_Ref{1, 2, 3, 4, 0, 0, 0, 0}
+	visited := [4]detour.Poly_Ref{4, 5, 6, 7}
 	new_n := merge_corridor_end_moved(path[:], 4, 8, visited[:], 4)
 	testing.expectf(t, new_n == 7, "should extend to 7 entries, got %d", new_n)
 	testing.expect(t, path[4] == 5 && path[5] == 6 && path[6] == 7, "extension polys missing")
@@ -181,7 +159,7 @@ test_merge_corridor_end_moved_extends_path :: proc(t: ^testing.T) {
 
 @(test)
 test_integrate_velocity_clamped_by_acceleration :: proc(t: ^testing.T) {
-	ag: Crowd_Agent
+	ag: Agent
 	ag.params.max_acceleration = 4.0
 	ag.params.max_speed = 10.0
 	ag.vel = {0, 0, 0}
@@ -196,7 +174,7 @@ test_integrate_velocity_clamped_by_acceleration :: proc(t: ^testing.T) {
 
 @(test)
 test_integrate_zero_velocity_resets :: proc(t: ^testing.T) {
-	ag: Crowd_Agent
+	ag: Agent
 	ag.params.max_acceleration = 100.0
 	ag.vel = {0.00001, 0, 0}
 	ag.nvel = {0, 0, 0}
@@ -206,7 +184,7 @@ test_integrate_zero_velocity_resets :: proc(t: ^testing.T) {
 
 @(test)
 test_calc_steer_directions_no_corners :: proc(t: ^testing.T) {
-	ag: Crowd_Agent
+	ag: Agent
 	ag.ncorners = 0
 	dir: [3]f32 = {1, 1, 1}
 	calc_smooth_steer_direction(&ag, &dir)
@@ -218,7 +196,7 @@ test_calc_steer_directions_no_corners :: proc(t: ^testing.T) {
 
 @(test)
 test_get_distance_to_goal_clamps_to_range :: proc(t: ^testing.T) {
-	ag: Crowd_Agent
+	ag: Agent
 	ag.ncorners = 0
 	d := get_distance_to_goal(&ag, 5.0)
 	testing.expect(t, d == 5.0, "no corners returns range")
@@ -255,53 +233,25 @@ test_obstacle_avoidance_query_capacity :: proc(t: ^testing.T) {
 // Crowd lifecycle + update with real navmesh ---------------------
 // ---------------------------------------------------------------
 
-build_test_navmesh :: proc(t: ^testing.T) -> (^detour.Nav_Mesh, bool) {
+build_test_navmesh :: proc(t: ^testing.T) -> (^navigation.NavMesh, bool) {
 	verts := [][3]f32{{-10, 0, -10}, {10, 0, -10}, {10, 0, 10}, {-10, 0, 10}}
 	indices := []i32{0, 2, 1, 0, 3, 2}
-	areas := []u8{recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA}
-	cfg := recast.Config {
-		cs                       = 0.3,
-		ch                       = 0.2,
-		walkable_slope           = math.PI * 0.25,
-		walkable_height          = 10,
-		walkable_climb           = 4,
-		walkable_radius          = 2,
-		max_edge_len             = 12,
-		max_simplification_error = 1.3,
-		min_region_area          = 8,
-		merge_region_area        = 20,
-		max_verts_per_poly       = 6,
-		detail_sample_dist       = 6,
-		detail_sample_max_error  = 1,
+	areas := []u8{63, 63}
+	nav := new(navigation.NavMesh)
+	if !bake.build(nav, {vertices = verts, indices = indices, area_types = areas}) {
+		free(nav)
+		testing.fail_now(t, "navigation.build failed")
 	}
-	pmesh, dmesh, ok := recast.build_navmesh(verts, indices, areas, cfg)
-	if !ok {
-		testing.fail_now(t, "build_navmesh failed")
-	}
-	defer recast.destroy_poly_mesh(pmesh)
-	defer recast.destroy_poly_mesh_detail(dmesh)
-
-	params := detour.Create_Nav_Mesh_Data_Params {
-		poly_mesh        = pmesh,
-		poly_mesh_detail = dmesh,
-		walkable_height  = f32(cfg.walkable_height) * cfg.ch,
-		walkable_radius  = f32(cfg.walkable_radius) * cfg.cs,
-		walkable_climb   = f32(cfg.walkable_climb) * cfg.ch,
-	}
-	nav_mesh, status := detour.create_nav_mesh(&params)
-	if !recast.status_succeeded(status) {
-		testing.fail_now(t, "create_nav_mesh failed")
-	}
-	return nav_mesh, true
+	return nav, true
 }
 
-destroy_test_navmesh :: proc(nav: ^detour.Nav_Mesh) {
-	detour.nav_mesh_destroy(nav)
+destroy_test_navmesh :: proc(nav: ^navigation.NavMesh) {
+	navigation.destroy(nav)
 	free(nav)
 }
 
-default_agent_params :: proc() -> Crowd_Agent_Params {
-	return Crowd_Agent_Params {
+default_agent_params :: proc() -> Agent_Params {
+	return Agent_Params {
 		radius = 0.4,
 		height = 1.8,
 		max_acceleration = 8.0,
@@ -318,23 +268,23 @@ test_crowd_lifecycle_add_remove :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_test_navmesh(nav)
 
-	c, cok := create_crowd(8, 0.6, nav)
-	testing.expect(t, cok, "create_crowd")
-	defer destroy_crowd(c)
+	c, cok := create(8, 0.6, nav)
+	testing.expect(t, cok, "create")
+	defer destroy(c)
 
 	params := default_agent_params()
-	a0 := crowd_add_agent(c, {0, 0, 0}, &params)
-	a1 := crowd_add_agent(c, {1, 0, 0}, &params)
+	a0 := add_agent(c, {0, 0, 0}, params)
+	a1 := add_agent(c, {1, 0, 0}, params)
 	testing.expectf(t, a0 == 0 && a1 == 1, "expected sequential slots, got %d %d", a0, a1)
 
-	ag := crowd_get_agent(c, a0)
+	ag := get_agent(c, a0)
 	testing.expect(t, ag != nil && ag.active, "agent must be active after add")
 
-	crowd_remove_agent(c, a0)
+	remove_agent(c, a0)
 	testing.expect(t, !c.agents[a0].active, "agent must be inactive after remove")
 
 	// reuse slot
-	a2 := crowd_add_agent(c, {0, 0, 0}, &params)
+	a2 := add_agent(c, {0, 0, 0}, params)
 	testing.expectf(t, a2 == a0, "slot should be recycled, got %d", a2)
 }
 
@@ -343,11 +293,11 @@ test_crowd_add_agent_off_navmesh_fails :: proc(t: ^testing.T) {
 	nav, ok := build_test_navmesh(t)
 	if !ok do return
 	defer destroy_test_navmesh(nav)
-	c, _ := create_crowd(4, 0.6, nav)
-	defer destroy_crowd(c)
+	c, _ := create(4, 0.6, nav)
+	defer destroy(c)
 
 	params := default_agent_params()
-	idx := crowd_add_agent(c, {1000, 0, 1000}, &params)
+	idx := add_agent(c, {1000, 0, 1000}, params)
 	testing.expect(t, idx == -1, "off-navmesh add should fail")
 }
 
@@ -356,23 +306,23 @@ test_crowd_request_move_target_state :: proc(t: ^testing.T) {
 	nav, ok := build_test_navmesh(t)
 	if !ok do return
 	defer destroy_test_navmesh(nav)
-	c, _ := create_crowd(4, 0.6, nav)
-	defer destroy_crowd(c)
+	c, _ := create(4, 0.6, nav)
+	defer destroy(c)
 	params := default_agent_params()
-	idx := crowd_add_agent(c, {0, 0, 0}, &params)
+	idx := add_agent(c, {0, 0, 0}, params)
 	testing.expect(t, idx >= 0, "agent add")
 
 	// invalid index
-	testing.expect(t, !crowd_request_move_target(c, -1, 1, {0, 0, 0}), "negative idx rejected")
-	testing.expect(t, !crowd_request_move_target(c, idx, recast.INVALID_POLY_REF, {0, 0, 0}), "invalid ref rejected")
+	testing.expect(t, !request_move_target(c, -1, 1, {0, 0, 0}), "negative idx rejected")
+	testing.expect(t, !request_move_target(c, idx, detour.INVALID_POLY_REF, {0, 0, 0}), "invalid ref rejected")
 
 	// valid request: pick any first poly via nearest poly query
 	filter: detour.Query_Filter
 	detour.query_filter_init(&filter)
 	half := [3]f32{2, 4, 2}
 	st, ref, _ := detour.find_nearest_poly(c.nav_query, {3, 0, 3}, half, &filter)
-	if recast.status_succeeded(st) && ref != recast.INVALID_POLY_REF {
-		ok2 := crowd_request_move_target(c, idx, ref, {3, 0, 3})
+	if detour.status_succeeded(st) && ref != detour.INVALID_POLY_REF {
+		ok2 := request_move_target(c, idx, ref, {3, 0, 3})
 		testing.expect(t, ok2, "valid request must succeed")
 		testing.expect(t, c.agents[idx].target_state == .Requesting, "state should be Requesting")
 	}
@@ -383,24 +333,24 @@ test_crowd_update_advances_agent :: proc(t: ^testing.T) {
 	nav, ok := build_test_navmesh(t)
 	if !ok do return
 	defer destroy_test_navmesh(nav)
-	c, _ := create_crowd(4, 0.6, nav)
-	defer destroy_crowd(c)
+	c, _ := create(4, 0.6, nav)
+	defer destroy(c)
 
 	params := default_agent_params()
-	idx := crowd_add_agent(c, {-5, 0, -5}, &params)
+	idx := add_agent(c, {-5, 0, -5}, params)
 	testing.expect(t, idx >= 0, "agent add")
 
 	filter: detour.Query_Filter
 	detour.query_filter_init(&filter)
 	half := [3]f32{2, 4, 2}
 	st, ref, _ := detour.find_nearest_poly(c.nav_query, {5, 0, 5}, half, &filter)
-	if !recast.status_succeeded(st) do return
-	crowd_request_move_target(c, idx, ref, {5, 0, 5})
+	if !detour.status_succeeded(st) do return
+	request_move_target(c, idx, ref, {5, 0, 5})
 
 	start_pos := c.agents[idx].npos
 	// run several update ticks; path planning is sliced and may take several frames
 	for _ in 0 ..< 50 {
-		crowd_update(c, 0.1)
+		update(c, 0.1)
 	}
 	end_pos := c.agents[idx].npos
 	moved_sq := (end_pos.x - start_pos.x) * (end_pos.x - start_pos.x) +
@@ -457,7 +407,7 @@ bench_proximity_grid_query :: proc(t: ^testing.T) {
 
 bench_crowd_state :: struct {
 	t:    ^testing.T,
-	nav:  ^detour.Nav_Mesh,
+	nav:  ^navigation.NavMesh,
 	crowd: ^Crowd,
 }
 
@@ -472,22 +422,22 @@ bench_crowd_update :: proc(t: ^testing.T) {
 			if !ok do return .Allocation_Error
 			s.nav = nav
 			N :: 32
-			c, _ := create_crowd(N, 0.6, nav)
+			c, _ := create(N, 0.6, nav)
 			s.crowd = c
 			params := default_agent_params()
 			for i in 0 ..< N {
 				fi := f32(i)
 				x := -8.0 + (fi * 0.5)
 				z := -8.0 + (f32(i / 8) * 0.5)
-				crowd_add_agent(c, {x, 0, z}, &params)
+				add_agent(c, {x, 0, z}, params)
 			}
 			filter: detour.Query_Filter
 			detour.query_filter_init(&filter)
 			half := [3]f32{2, 4, 2}
 			st, ref, _ := detour.find_nearest_poly(c.nav_query, {8, 0, 8}, half, &filter)
-			if recast.status_succeeded(st) && ref != recast.INVALID_POLY_REF {
+			if detour.status_succeeded(st) && ref != detour.INVALID_POLY_REF {
 				for i in 0 ..< N {
-					crowd_request_move_target(c, i, ref, {8, 0, 8})
+					request_move_target(c, i, ref, {8, 0, 8})
 				}
 			}
 			return .Okay
@@ -495,14 +445,14 @@ bench_crowd_update :: proc(t: ^testing.T) {
 		bench    = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_crowd_state)opts.user_data
 			for _ in 0 ..< opts.rounds {
-				crowd_update(s.crowd, 0.016)
+				update(s.crowd, 0.016)
 			}
 			opts.count = opts.rounds
 			return .Okay
 		},
 		teardown = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_crowd_state)opts.user_data
-			destroy_crowd(s.crowd)
+			destroy(s.crowd)
 			destroy_test_navmesh(s.nav)
 			return .Okay
 		},
@@ -510,7 +460,7 @@ bench_crowd_update :: proc(t: ^testing.T) {
 	}
 	err := time.benchmark(&opts)
 	testing.expect(t, err == .Okay, "bench failed")
-	log.infof("crowd_update %d ticks in %v, %.0f ticks/sec",
+	log.infof("update %d ticks in %v, %.0f ticks/sec",
 		opts.rounds, opts.duration, opts.rounds_per_second)
 }
 
@@ -519,12 +469,12 @@ test_crowd_move_to_reaches_goal :: proc(t: ^testing.T) {
 	nav, ok := build_test_navmesh(t)
 	if !ok do return
 	defer destroy_test_navmesh(nav)
-	c, _ := create_crowd(4, 0.6, nav)
-	defer destroy_crowd(c)
+	c, _ := create(4, 0.6, nav)
+	defer destroy(c)
 	params := default_agent_params()
-	idx := crowd_add_agent(c, {0, 0, 0}, &params)
-	testing.expect(t, crowd_move_to(c, idx, {5, 0, 5}), "move_to on the mesh must succeed")
-	for _ in 0 ..< 100 do crowd_update(c, 0.1)
+	idx := add_agent(c, {0, 0, 0}, params)
+	testing.expect(t, move_to(c, idx, {5, 0, 5}), "move_to on the mesh must succeed")
+	for _ in 0 ..< 100 do update(c, 0.1)
 	d := c.agents[idx].npos - {5, 0, 5}
 	testing.expectf(t, d.x * d.x + d.z * d.z < 1.0, "agent should reach the goal, at %v", c.agents[idx].npos)
 }

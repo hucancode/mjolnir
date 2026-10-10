@@ -1,14 +1,13 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/platform"
-import "../../mjolnir/geometry"
+import "../../mjolnir/input"
 import "../../mjolnir/render/mesh"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import nav "../../mjolnir/navigation"
+import "../../mjolnir/navigation/bake"
 import "core:log"
-import "core:math"
 import "core:math/linalg"
 
 end_pos: [3]f32
@@ -26,7 +25,7 @@ obj_mesh_handle: render.MeshHandle
 obj_node_handle: world.NodeHandle
 use_procedural: bool = true
 
-nav_builder: nav.NavGeometryBuilder
+nav_builder: bake.NavGeometryBuilder
 navmesh_node_handle: world.NodeHandle
 path_spawn_time: f32
 
@@ -38,19 +37,18 @@ navmesh: nav.NavMesh
 main :: proc() {
   defer {
     nav.destroy(&navmesh)
-    nav.builder_destroy(&nav_builder)
+    bake.builder_destroy(&nav_builder)
   }
   mjolnir.run_app({
     title       = "Navigation Mesh",
     setup       = demo_setup,
     update      = demo_update,
-    mouse_press = demo_mouse_pressed,
   })
 }
 
 demo_setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Navigation mesh demo setup with world integration")
-  nav.builder_destroy(&nav_builder)
+  bake.builder_destroy(&nav_builder)
   render.main_camera_look_at(&engine.render, {35, 25, 35}, {0, 0, 0})
 
   if use_procedural do create_demo_scene(engine)
@@ -67,7 +65,7 @@ demo_setup :: proc(engine: ^mjolnir.Engine) {
 create_demo_scene :: proc(engine: ^mjolnir.Engine) {
   ground_geom := mesh.make_quad({0.2, 0.6, 0.2, 1.0})
   for &v in ground_geom.vertices { v.position.x *= 50; v.position.z *= 50 }
-  nav.append_triangles(&nav_builder, mesh.positions(ground_geom, context.temp_allocator), ground_geom.indices)
+  bake.append_triangles(&nav_builder, mesh.positions(ground_geom, context.temp_allocator), ground_geom.indices)
   ground_mesh := render.create_mesh(&engine.render, ground_geom)
   ground_mat := render.material_pbr(&engine.render, metallic = 0.1, roughness = 0.8, emissive = 0.02)
   ground_handle = mjolnir.spawn_mesh(engine, ground_mesh, ground_mat)
@@ -79,7 +77,7 @@ create_demo_scene :: proc(engine: ^mjolnir.Engine) {
     size := obstacle_sizes[i]
     g := mesh.make_cube({0.8, 0.2, 0.2, 1.0})
     for &v in g.vertices { v.position.x *= size.x; v.position.y *= size.y; v.position.z *= size.z }
-    nav.append_triangles(&nav_builder, mesh.positions(g, context.temp_allocator), g.indices, pos, true)
+    bake.append_triangles(&nav_builder, mesh.positions(g, context.temp_allocator), g.indices, pos, true)
     mh := render.create_mesh(&engine.render, g)
     mat := render.material_pbr(&engine.render, metallic = 0.3, roughness = 0.7, emissive = 0.1)
     h := mjolnir.spawn_mesh(engine, mh, mat, pos)
@@ -98,10 +96,10 @@ create_agent :: proc(engine: ^mjolnir.Engine) {
 }
 
 create_obj_visualization_mesh :: proc(engine: ^mjolnir.Engine, obj_file: string) {
-  obj, ok := geometry.load_obj(obj_file, 1.0)
+  obj, ok := mesh.load_obj(obj_file, 1.0)
   if !ok { log.error("Failed to load OBJ file as geometry"); return }
-  defer geometry.obj_mesh_destroy(&obj)
-  nav.append_triangles(&nav_builder, obj.positions, obj.indices)
+  defer mesh.obj_mesh_destroy(&obj)
+  bake.append_triangles(&nav_builder, obj.positions, obj.indices)
   obj_mesh_handle = render.create_mesh(&engine.render, mesh.from_triangles(obj.positions, obj.indices))
   mat := render.material_pbr(&engine.render, metallic = 0.1, roughness = 0.8, emissive = 0.02)
   obj_node_handle = mjolnir.spawn_mesh(engine, obj_mesh_handle, mat)
@@ -113,7 +111,7 @@ setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
   if len(nav_builder.vertices) == 0 || len(nav_builder.indices) == 0 {
     log.error("No source geometry available for navmesh generation"); return
   }
-  if !nav.build(&navmesh, nav.geometry_view(&nav_builder)) {
+  if !bake.build(&navmesh, bake.geometry_view(&nav_builder)) {
     log.error("Failed to build navmesh"); return
   }
   visualize_navmesh(engine)
@@ -164,23 +162,11 @@ draw_path_debug :: proc(engine: ^mjolnir.Engine) {
 find_navmesh_point_from_mouse :: proc(engine: ^mjolnir.Engine) -> ([3]f32, bool) {
   ray_origin, ray_dir, ok := mjolnir.cursor_world_ray(engine)
   if !ok do return {}, false
-  if math.abs(ray_dir.y) > 0.001 {
-    t := -ray_origin.y / ray_dir.y
-    if t > 0 && t < 1000 {
-      gi := ray_origin + ray_dir * t
-      if pos, ok := nav.nearest_point(&navmesh, gi, {2, 5, 2}); ok do return pos, true
-    }
-  }
-  samples := [10]f32{5, 10, 15, 20, 25, 30, 35, 40, 50, 60}
-  for dist in samples {
-    if pos, ok := nav.nearest_point(&navmesh, ray_origin + ray_dir * dist, {5, 10, 5}); ok do return pos, true
-  }
-  return {}, false
+  return nav.raycast(&navmesh, ray_origin, ray_dir)
 }
 
-demo_mouse_pressed :: proc(engine: ^mjolnir.Engine, button: platform.MouseButton, action: platform.Action) {
-  if action != .PRESS do return
-  if button != .RIGHT do return
+demo_mouse_pressed :: proc(engine: ^mjolnir.Engine) {
+  if engine.mouse_captured || !input.mouse_pressed(&engine.input, .RIGHT) do return
   pos, valid := find_navmesh_point_from_mouse(engine)
   if !valid { log.warn("No valid navmesh position found at click location"); return }
   end_pos = pos
@@ -190,6 +176,7 @@ demo_mouse_pressed :: proc(engine: ^mjolnir.Engine, button: platform.MouseButton
 }
 
 demo_update :: proc(engine: ^mjolnir.Engine, dt: f32) {
+  demo_mouse_pressed(engine)
   if path_active {
     path_spawn_time += dt
     if path_spawn_time >= 5.0 do path_active = false
@@ -209,4 +196,7 @@ demo_update :: proc(engine: ^mjolnir.Engine, dt: f32) {
       world.translate(&engine.world, agent_handle, agent_pos + {0, 1, 0})
     }
   }
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }

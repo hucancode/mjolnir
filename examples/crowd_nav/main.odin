@@ -1,11 +1,12 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/platform"
+import "../../mjolnir/input"
 import "../../mjolnir/render/mesh"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
 import nav "../../mjolnir/navigation"
+import "../../mjolnir/navigation/bake"
 import "../../mjolnir/navigation/crowd"
 import "core:fmt"
 import "core:log"
@@ -31,21 +32,20 @@ Agent :: struct {
 }
 
 agents: [AGENT_COUNT]Agent
-nav_builder: nav.NavGeometryBuilder
+nav_builder: bake.NavGeometryBuilder
 navmesh_node_handle: world.NodeHandle
 navmesh: nav.NavMesh
 agent_crowd: ^crowd.Crowd
 
 main :: proc() {
   defer {
-    crowd.destroy_crowd(agent_crowd)
+    crowd.destroy(agent_crowd)
     nav.destroy(&navmesh)
-    nav.builder_destroy(&nav_builder)
+    bake.builder_destroy(&nav_builder)
   }
   mjolnir.run_app({
     title = "Crowd Navigation", width = 1000, height = 700,
     debug_ui = true, setup = setup, update = update, pre_render = debug_ui,
-    mouse_press = on_mouse_press,
   })
 }
 
@@ -62,7 +62,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 build_scene :: proc(engine: ^mjolnir.Engine) {
   ground_geom := mesh.make_quad({0.25, 0.55, 0.25, 1})
   for &v in ground_geom.vertices { v.position.x *= WORLD_HALF * 2; v.position.z *= WORLD_HALF * 2 }
-  nav.append_triangles(&nav_builder, mesh.positions(ground_geom, context.temp_allocator), ground_geom.indices)
+  bake.append_triangles(&nav_builder, mesh.positions(ground_geom, context.temp_allocator), ground_geom.indices)
   gm := render.create_mesh(&engine.render, ground_geom)
   gmat := render.create_material(&engine.render, type = .PBR, base_color_factor = {0.25, 0.6, 0.25, 1}, roughness_value = 0.8)
   mjolnir.spawn(engine, {0, 0, 0}, render.MeshAttachment{handle = gm, material = gmat, cast_shadow = false})
@@ -76,7 +76,7 @@ build_scene :: proc(engine: ^mjolnir.Engine) {
   for o in obstacles {
     g := mesh.make_cube({0.7, 0.2, 0.2, 1})
     for &v in g.vertices { v.position.x *= o.size.x; v.position.y *= o.size.y; v.position.z *= o.size.z }
-    nav.append_triangles(&nav_builder, mesh.positions(g, context.temp_allocator), g.indices, o.pos, true)
+    bake.append_triangles(&nav_builder, mesh.positions(g, context.temp_allocator), g.indices, o.pos, true)
     mh := render.create_mesh(&engine.render, g)
     mat := render.create_material(&engine.render, type = .PBR, base_color_factor = {0.7, 0.2, 0.2, 1}, roughness_value = 0.6)
     mjolnir.spawn_mesh(engine, mh, mat, o.pos)
@@ -84,7 +84,7 @@ build_scene :: proc(engine: ^mjolnir.Engine) {
 }
 
 build_navmesh :: proc(engine: ^mjolnir.Engine) {
-  if !nav.build(&navmesh, nav.geometry_view(&nav_builder)) do log.error("navmesh build failed")
+  if !bake.build(&navmesh, bake.geometry_view(&nav_builder)) do log.error("navmesh build failed")
 }
 
 visualize_navmesh :: proc(engine: ^mjolnir.Engine) {
@@ -117,23 +117,17 @@ palette := [6][4]f32{{1, 0.25, 0.25, 1}, {0.25, 1, 0.25, 1}, {0.4, 0.4, 1, 1}, {
 
 spawn_agents :: proc(engine: ^mjolnir.Engine) {
   ok: bool
-  agent_crowd, ok = crowd.create_crowd(AGENT_COUNT, AGENT_RADIUS, &navmesh.detour_mesh)
+  agent_crowd, ok = crowd.create(AGENT_COUNT, AGENT_RADIUS, &navmesh)
   if !ok { log.error("crowd creation failed"); return }
-  params := crowd.Crowd_Agent_Params {
-    radius                  = AGENT_RADIUS,
-    height                  = AGENT_HEIGHT,
-    max_acceleration        = 8.0,
-    max_speed               = AGENT_SPEED,
-    collision_query_range   = AGENT_RADIUS * 12,
-    path_optimization_range = AGENT_RADIUS * 30,
-    separation_weight       = 2.0,
-    update_flags            = {.Anticipate_Turns, .Obstacle_Avoidance, .Separation, .Optimize_Vis},
-  }
+  params := crowd.DEFAULT_AGENT_PARAMS
+  params.radius = AGENT_RADIUS
+  params.height = AGENT_HEIGHT
+  params.max_speed = AGENT_SPEED
   for i in 0 ..< AGENT_COUNT {
     angle := f32(i) / f32(AGENT_COUNT) * math.PI * 2
     r := SPAWN_RADIUS - 4.0
     pos := [3]f32{math.cos(angle) * r, 0, math.sin(angle) * r}
-    agents[i].id = crowd.crowd_add_agent(agent_crowd, pos, &params)
+    agents[i].id = crowd.add_agent(agent_crowd, pos, params)
     agents[i].color = palette[i % len(palette)]
     cap_geom := mesh.make_capsule(12, 6, AGENT_HEIGHT, AGENT_RADIUS)
     mh := render.create_mesh(&engine.render, cap_geom)
@@ -146,36 +140,25 @@ assign_swap_targets :: proc(engine: ^mjolnir.Engine) {
   if agent_crowd == nil do return
   for a in agents {
     if a.id < 0 do continue
-    crowd.crowd_move_to(agent_crowd, a.id, random_goal(engine, crowd.crowd_get_agent(agent_crowd, a.id).npos))
+    crowd.move_to(agent_crowd, a.id, random_goal(engine, crowd.get_agent(agent_crowd, a.id).npos))
   }
 }
 
 assign_all_to :: proc(engine: ^mjolnir.Engine, goal: [3]f32) {
   if agent_crowd == nil do return
   for a in agents {
-    if a.id >= 0 do crowd.crowd_move_to(agent_crowd, a.id, goal)
+    if a.id >= 0 do crowd.move_to(agent_crowd, a.id, goal)
   }
 }
 
 pick_navmesh_point :: proc(engine: ^mjolnir.Engine) -> ([3]f32, bool) {
   ro, rd, ok := mjolnir.cursor_world_ray(engine)
   if !ok do return {}, false
-  if math.abs(rd.y) > 0.001 {
-    t := -ro.y / rd.y
-    if t > 0 && t < 1000 {
-      hit := ro + rd * t
-      if p, hit_ok := nav.nearest_point(&navmesh, hit, {2, 5, 2}); hit_ok do return p, true
-    }
-  }
-  samples := [?]f32{5, 10, 15, 20, 25, 30, 40, 60}
-  for dist in samples {
-    if p, hit_ok := nav.nearest_point(&navmesh, ro + rd * dist, {5, 10, 5}); hit_ok do return p, true
-  }
-  return {}, false
+  return nav.raycast(&navmesh, ro, rd)
 }
 
-on_mouse_press :: proc(engine: ^mjolnir.Engine, button: platform.MouseButton, action: platform.Action) {
-  if action != .PRESS || button != .RIGHT do return
+on_mouse_press :: proc(engine: ^mjolnir.Engine) {
+  if engine.mouse_captured || !input.mouse_pressed(&engine.input, .RIGHT) do return
   pos, ok := pick_navmesh_point(engine)
   if !ok { log.warn("No navmesh point under cursor"); return }
   assign_all_to(engine, pos)
@@ -183,21 +166,26 @@ on_mouse_press :: proc(engine: ^mjolnir.Engine, button: platform.MouseButton, ac
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
-  if agent_crowd == nil do return
-  crowd.crowd_update(agent_crowd, dt)
-  for a in agents {
-    if a.id < 0 do continue
-    ag := crowd.crowd_get_agent(agent_crowd, a.id)
-    world.translate(&engine.world, a.node, ag.npos + {0, AGENT_HEIGHT * 0.5, 0})
-    if linalg.length2(ag.vel.xz) > 0.01 {
-      world.rotate(&engine.world, a.node, math.atan2(ag.vel.x, ag.vel.z), linalg.VECTOR3F32_Y_AXIS)
+  on_mouse_press(engine)
+  if agent_crowd != nil {
+    crowd.update(agent_crowd, dt)
+    for a in agents {
+      if a.id < 0 do continue
+      ag := crowd.get_agent(agent_crowd, a.id)
+      world.translate(&engine.world, a.node, ag.npos + {0, AGENT_HEIGHT * 0.5, 0})
+      if linalg.length2(ag.vel.xz) > 0.01 {
+        world.rotate(&engine.world, a.node, math.atan2(ag.vel.x, ag.vel.z), linalg.VECTOR3F32_Y_AXIS)
+      }
+      draw_agent_corners(engine, ag, a.color)
     }
-    draw_agent_corners(engine, ag, a.color)
   }
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 // The agent's next steering corners along its corridor.
-draw_agent_corners :: proc(engine: ^mjolnir.Engine, ag: ^crowd.Crowd_Agent, color: [4]f32) {
+draw_agent_corners :: proc(engine: ^mjolnir.Engine, ag: ^crowd.Agent, color: [4]f32) {
   lift := [3]f32{0, 0.15, 0}
   prev := ag.npos + lift
   for p in ag.corner_verts[:ag.ncorners] {

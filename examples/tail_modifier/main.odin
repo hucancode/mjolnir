@@ -1,7 +1,7 @@
 package main
 
 import "../../mjolnir"
-import "../../mjolnir/platform"
+import "../../mjolnir/input"
 import anim "../../mjolnir/animation"
 import "../../mjolnir/render"
 import "../../mjolnir/world"
@@ -36,6 +36,7 @@ rest_y: f32 // node's resting local height, preserved while dragging
 head_offset: [3]f32 // head world pos minus node origin, captured at drag start
 
 main :: proc() {
+  defer mjolnir.gltf_scene_destroy(&scene)
   mjolnir.run_app({
     title      = "Tail Modifier",
     width      = 900,
@@ -44,7 +45,6 @@ main :: proc() {
     setup      = setup,
     update     = update,
     pre_render = debug_ui,
-    sync       = sync,
   })
 }
 
@@ -55,8 +55,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if len(scene.skinned) == 0 do return
   snake_child_node = scene.skinned[0].node
   rig = &scene.rigs[scene.skinned[0].rig]
-  anim.animator_init(&animator, &rig.skeleton)
-  if idx, layer_ok := anim.add_tail_layer(&animator, &rig.skeleton, "root", 10,
+  anim.animator_init(&animator, rig)
+  if idx, layer_ok := anim.add_tail_layer(&animator, rig, "root", 10,
     propagation_speed = f32(propagation_speed),
     damping = f32(damping),
     weight = 1.0,
@@ -66,10 +66,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   head_bone, head_found = anim.find_bone(&rig.skeleton, HEAD_BONE)
   mjolnir.spawn(engine, {-4, 10, 6}, render.point_light_attachment({0.6, 0.7, 1.0, 1.5}, 15.0, false))
-}
-
-sync :: proc(engine: ^mjolnir.Engine) {
-  if rig != nil do render.stage_bones(&engine.render, snake_child_node.index, animator.palette)
 }
 
 update :: proc(engine: ^mjolnir.Engine, dt: f32) {
@@ -89,6 +85,10 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
     )
   }
   if rig != nil do anim.animator_update(&animator, rig, dt, world.world_matrix(&engine.world, snake_child_node))
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
+  if rig != nil do render.stage_bones(&engine.render, snake_child_node.index, animator.palette)
 }
 
 // Raycast the cursor onto the ground plane (y = GROUND_Y).
@@ -102,22 +102,21 @@ cursor_ground_hit :: proc(engine: ^mjolnir.Engine) -> (hit: [3]f32, ok: bool) {
 }
 
 handle_drag :: proc(engine: ^mjolnir.Engine) {
-  node, ok := world.node(&engine.world, snake_child_node)
-  if !ok do return
+  if !world.valid(&engine.world, snake_child_node) do return
 
   // Begin drag on press (ignore when the UI owns the click). Capture the
   // head's offset from the node origin so we can land the head on the cursor.
-  if platform.input_mouse_pressed(&engine.platform.input, .RIGHT) &&
-     !render.debug_ui_wants_mouse(&engine.render) {
+  if input.mouse_pressed(&engine.input, .RIGHT) && !engine.mouse_captured {
     dragging = true
-    rest_y = node.transform.position.y
+    rest_y = world.position(&engine.world, snake_child_node).y
     head_offset = {0, 0, 0}
     if head_found {
-      head_world := node.transform.world_matrix * anim.bone_matrix(&animator, head_bone)
-      head_offset = head_world[3].xyz - node.transform.world_matrix[3].xyz
+      node_world := world.world_matrix(&engine.world, snake_child_node)
+      head_world := node_world * anim.bone_matrix(&animator, head_bone)
+      head_offset = head_world[3].xyz - node_world[3].xyz
     }
   }
-  if !platform.input_mouse_down(&engine.platform.input, .RIGHT) {
+  if !input.mouse_down(&engine.input, .RIGHT) {
     dragging = false
     return
   }

@@ -2,8 +2,8 @@ package world
 
 import cont "../containers"
 
+// Untyped handle, for links stored outside world (e.g. a physics body's user).
 Handle :: cont.Handle
-Pool :: cont.Pool
 
 NodeHandle :: distinct Handle
 

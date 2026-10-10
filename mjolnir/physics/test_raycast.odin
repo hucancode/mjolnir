@@ -1,6 +1,8 @@
 package physics
 
 import "core:log"
+import "core:math"
+import "core:math/linalg"
 import "core:slice"
 import "core:testing"
 import "core:time"
@@ -101,4 +103,99 @@ benchmark_physics_raycast :: proc(t: ^testing.T) {
     state.hit_count,
     hit_rate,
   )
+}
+
+@(private = "file")
+near :: proc(a, b: [3]f32, eps: f32 = 1e-3) -> bool {
+  return linalg.length(a - b) < eps
+}
+
+@(test)
+test_raycast_rotated_box :: proc(t: ^testing.T) {
+  // Unit cube rotated 45 deg about Y: its corner points at -X, 0.707 from center
+  rot := linalg.quaternion_angle_axis_f32(math.PI / 4, {0, 1, 0})
+  box: Collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}}
+  ray := geometry.Ray{origin = {-5, 0.2, 0.2}, direction = {1, 0, 0}}
+  tt, n, hit := raycast_collider(ray, &box, {}, rot, 100)
+  testing.expect(t, hit)
+  // Face x' = -0.5 in local frame: hit at x = -(0.7071 - 0.2) = -0.5071
+  testing.expectf(t, math.abs(tt - 4.4929) < 1e-3, "t = %v", tt)
+  testing.expectf(t, near(n, {-0.7071, 0, 0.7071}), "normal = %v", n)
+  // Line x - z = 1 crosses the world AABB corner but misses the rotated box
+  ray = geometry.Ray{origin = {-4.5, 0, -5.5}, direction = linalg.normalize([3]f32{1, 0, 1})}
+  _, _, hit = raycast_collider(ray, &box, {}, rot, 100)
+  testing.expect(t, !hit)
+}
+
+@(test)
+test_raycast_aligned_box_normals :: proc(t: ^testing.T) {
+  box: Collider = BoxCollider{half_extents = {1, 2, 3}}
+  pos := [3]f32{10, 0, 0}
+  tt, n, hit := raycast_collider({origin = {10, 10, 0}, direction = {0, -1, 0}}, &box, pos, linalg.QUATERNIONF32_IDENTITY, 100)
+  testing.expect(t, hit)
+  testing.expect(t, math.abs(tt - 8) < 1e-4)
+  testing.expect(t, near(n, {0, 1, 0}))
+  tt, n, hit = raycast_collider({origin = {10, 0, -10}, direction = {0, 0, 1}}, &box, pos, linalg.QUATERNIONF32_IDENTITY, 100)
+  testing.expect(t, hit && math.abs(tt - 7) < 1e-4)
+  testing.expect(t, near(n, {0, 0, -1}))
+  _, _, hit = raycast_collider({origin = {10, 0, -10}, direction = {0, 0, 1}}, &box, pos, linalg.QUATERNIONF32_IDENTITY, 5)
+  testing.expect(t, !hit)
+}
+
+@(test)
+test_raycast_cylinder :: proc(t: ^testing.T) {
+  cyl: Collider = CylinderCollider{radius = 1, height = 2}
+  id := linalg.QUATERNIONF32_IDENTITY
+  // Side wall
+  tt, n, hit := raycast_collider({origin = {-5, 0, 0}, direction = {1, 0, 0}}, &cyl, {}, id, 100)
+  testing.expect(t, hit && math.abs(tt - 4) < 1e-4)
+  testing.expect(t, near(n, {-1, 0, 0}))
+  // Top cap
+  tt, n, hit = raycast_collider({origin = {0.5, 5, 0}, direction = {0, -1, 0}}, &cyl, {}, id, 100)
+  testing.expect(t, hit && math.abs(tt - 4) < 1e-4)
+  testing.expect(t, near(n, {0, 1, 0}))
+  // Passes the AABB corner but misses the round wall
+  _, _, hit = raycast_collider({origin = {-5, 0, 0.95}, direction = {1, 0, 1}}, &cyl, {}, id, 100)
+  testing.expect(t, !hit)
+  // Lying on its side (axis along X): the wall faces +Y
+  rot := linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
+  tt, n, hit = raycast_collider({origin = {0, 5, 0}, direction = {0, -1, 0}}, &cyl, {}, rot, 100)
+  testing.expect(t, hit && math.abs(tt - 4) < 1e-4)
+  testing.expectf(t, near(n, {0, 1, 0}), "normal = %v", n)
+}
+
+@(test)
+test_raycast_fan :: proc(t: ^testing.T) {
+  // 90 deg sector facing +Z
+  fan: Collider = FanCollider{radius = 2, height = 1, angle = math.PI / 2}
+  id := linalg.QUATERNIONF32_IDENTITY
+  // Hits the curved wall straight ahead
+  tt, n, hit := raycast_collider({origin = {0, 0, 5}, direction = {0, 0, -1}}, &fan, {}, id, 100)
+  testing.expect(t, hit && math.abs(tt - 3) < 1e-4)
+  testing.expect(t, near(n, {0, 0, 1}))
+  // Behind the fan: misses
+  _, _, hit = raycast_collider({origin = {-5, 0, -0.5}, direction = {1, 0, 0}}, &fan, {}, id, 100)
+  testing.expect(t, !hit)
+  // Through the side plane at +45 deg
+  tt, n, hit = raycast_collider({origin = {5, 0, 0.5}, direction = {-1, 0, 0}}, &fan, {}, id, 100)
+  testing.expect(t, hit)
+  testing.expectf(t, math.abs(tt - 4.5) < 1e-3, "t = %v", tt)
+  testing.expectf(t, near(n, {0.7071, 0, -0.7071}), "normal = %v", n)
+}
+
+@(test)
+test_set_body_pose_updates_broadphase :: proc(t: ^testing.T) {
+  w: World
+  init(&w, enable_parallel = false)
+  defer shutdown(&w)
+  h := create_static_body(&w, position = {0, 0, 0}, collider = BoxCollider{half_extents = {0.5, 0.5, 0.5}})
+  step(&w, 1.0 / 60.0)
+  ray := geometry.Ray{origin = {10, 5, 0}, direction = {0, -1, 0}}
+  testing.expect(t, !raycast(&w, ray).hit)
+  set_body_pose(&w, h, [3]f32{10, 0, 0}, linalg.QUATERNIONF32_IDENTITY)
+  hit := raycast(&w, ray)
+  testing.expect(t, hit.hit && math.abs(hit.t - 4.5) < 1e-4)
+  set_body_collider(&w, h, BoxCollider{half_extents = {1, 2, 1}})
+  hit = raycast(&w, ray)
+  testing.expect(t, hit.hit && math.abs(hit.t - 3) < 1e-4)
 }

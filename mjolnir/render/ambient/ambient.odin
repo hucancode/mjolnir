@@ -31,9 +31,6 @@ Renderer :: struct {
   pipeline:             vk.Pipeline,
   pipeline_layout:      vk.PipelineLayout,
   environment_map:      bindless.Texture2DHandle,
-  // HDR image loaded as the environment map by each setup; IBL falls back
-  // to black when it can't be read.
-  environment_map_path: string,
   brdf_lut:             bindless.Texture2DHandle,
   ibl:                  IBLResults,
   ibl_intensity:        f32,
@@ -67,36 +64,21 @@ init :: proc(
   defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   frag_module := gpu.create_shader_module(gctx.device, SHADER_FRAG) or_return
   defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-  shader_stages := gpu.create_vert_frag_stages(
-    vert_module,
-    frag_module,
-    &bindless.SHADER_SPEC_CONSTANTS,
-  )
-  pipeline_info := vk.GraphicsPipelineCreateInfo {
-    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &gpu.HDR_COLOR_ONLY_RENDERING_INFO,
-    stageCount          = len(shader_stages),
-    pStages             = raw_data(shader_stages[:]),
-    pVertexInputState   = &gpu.VERTEX_INPUT_NONE,
-    pInputAssemblyState = &gpu.STANDARD_INPUT_ASSEMBLY,
-    pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-    pRasterizationState = &gpu.DOUBLE_SIDED_RASTERIZER,
-    pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-    pColorBlendState    = &gpu.COLOR_BLENDING_OVERRIDE,
-    pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-    layout              = self.pipeline_layout,
-  }
-  vk.CreateGraphicsPipelines(
-    gctx.device,
-    0,
-    1,
-    &pipeline_info,
-    nil,
-    &self.pipeline,
+  color_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
+  blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_OVERRIDE}
+  self.pipeline = gpu.create_graphics_pipeline(
+    gctx,
+    {
+      vert = vert_module,
+      frag = frag_module,
+      specialization = &bindless.SHADER_SPEC_CONSTANTS,
+      topology = .TRIANGLE_LIST,
+      raster = gpu.DOUBLE_SIDED_RASTERIZER,
+      blend = blend[:],
+      color_formats = color_formats[:],
+      layout = self.pipeline_layout,
+    },
   ) or_return
-  defer if ret != .SUCCESS {
-    vk.DestroyPipeline(gctx.device, self.pipeline, nil)
-  }
   log.info("Ambient lighting pipeline initialized successfully")
   return .SUCCESS
 }
@@ -105,57 +87,53 @@ setup :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   texture_manager: ^bindless.TextureManager,
-  linear_repeat_sampler: vk.Sampler,
-) -> (
-  ret: vk.Result,
-) {
-  env_map, env_result := bindless.create_texture_2d_from_path(
-    gctx,
-    texture_manager,
-    self.environment_map_path,
-    .R32G32B32A32_SFLOAT,
-    true,
-    {.SAMPLED},
-    true,
-  )
-  has_env := env_result == .SUCCESS
-  if has_env {
-    self.environment_map = env_map
-  } else {
-    log.warn("HDR environment map not found, IBL will fall back to black")
-    self.environment_map = {}
-  }
-  defer if ret != .SUCCESS {
-    bindless.free_texture_2d(texture_manager, gctx, self.environment_map)
-  }
-  brdf_handle := bindless.create_texture_2d_from_data(
+) -> vk.Result {
+  self.brdf_lut = bindless.create_texture_2d_from_data(
     gctx,
     texture_manager,
     TEXTURE_LUT_GGX,
   ) or_return
-  defer if ret != .SUCCESS {
-    bindless.free_texture_2d(texture_manager, gctx, brdf_handle)
-  }
-  self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0
   self.skybox_enabled = true
   self.skybox_intensity = 1.0
   self.skybox_blur = 0.25
-
-  if has_env {
-    self.ibl = precompute(
-      gctx,
-      texture_manager,
-      self.environment_map,
-      linear_repeat_sampler,
-    ) or_return
-  }
-
   log.info("Ambient lighting GPU resources setup")
   return .SUCCESS
 }
 
-teardown :: proc(
+// Replace the environment map with the equirectangular HDR image at `path`
+// and precompute IBL from it. Without an environment map IBL and the skybox
+// are black.
+load_environment :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^bindless.TextureManager,
+  path: string,
+) -> (
+  ret: vk.Result,
+) {
+  free_environment(self, gctx, texture_manager)
+  self.environment_map = bindless.create_texture_2d_from_path(
+    gctx,
+    texture_manager,
+    path,
+    .R32G32B32A32_SFLOAT,
+    true,
+    {.SAMPLED},
+    true,
+  ) or_return
+  defer if ret != .SUCCESS do free_environment(self, gctx, texture_manager)
+  self.ibl = precompute(
+    gctx,
+    texture_manager,
+    self.environment_map,
+    texture_manager.samplers[.LINEAR_REPEAT],
+  ) or_return
+  return .SUCCESS
+}
+
+@(private = "file")
+free_environment :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
   texture_manager: ^bindless.TextureManager,
@@ -163,6 +141,14 @@ teardown :: proc(
   free_results(gctx, texture_manager, &self.ibl)
   bindless.free_texture_2d(texture_manager, gctx, self.environment_map)
   self.environment_map = {}
+}
+
+teardown :: proc(
+  self: ^Renderer,
+  gctx: ^gpu.GPUContext,
+  texture_manager: ^bindless.TextureManager,
+) {
+  free_environment(self, gctx, texture_manager)
   bindless.free_texture_2d(texture_manager, gctx, self.brdf_lut)
   self.brdf_lut = {}
 }

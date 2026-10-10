@@ -3,7 +3,8 @@ package render
 import "bindless"
 import cont "../containers"
 import "mesh"
-import "core:math"
+import "debug_line"
+import "particles"
 import vk "vendor:vulkan"
 
 // CPU-side mesh. GPU vertex/index allocations live in mesh_data_buffer at the
@@ -33,7 +34,7 @@ Sprite :: struct {
   texture:       bindless.Texture2DHandle,
   frame_columns: u32, // Number of columns in sprite sheet
   frame_rows:    u32, // Number of rows in sprite sheet
-  animation:     Maybe(SpriteAnimation),
+  frame_index:   u32, // Cell shown, row-major
 }
 
 Emitter :: struct {
@@ -401,7 +402,6 @@ create_sprite :: proc(
   texture: bindless.Texture2DHandle,
   frame_columns: u32 = 1,
   frame_rows: u32 = 1,
-  animation: Maybe(SpriteAnimation) = nil,
 ) -> (
   handle: SpriteHandle,
   ok: bool,
@@ -412,7 +412,6 @@ create_sprite :: proc(
     texture       = texture,
     frame_columns = frame_columns,
     frame_rows    = frame_rows,
-    animation     = animation,
   }
   stage(self, &self.internal.staging.sprites, handle.index)
   return handle, true
@@ -422,156 +421,13 @@ destroy_sprite :: proc(self: ^Manager, handle: SpriteHandle) {
   cont.free_deferred(&self.sprites, handle)
 }
 
-SpriteAnimationState :: enum {
-  PLAYING,
-  PAUSED,
-  STOPPED,
-}
-
-SpriteAnimationMode :: enum {
-  ONCE,
-  LOOP,
-  PINGPONG,
-}
-
-SpriteAnimation :: struct {
-  frame_count:   u32,
-  current_frame: u32,
-  fps:           f32,
-  time:          f32,
-  state:         SpriteAnimationState,
-  mode:          SpriteAnimationMode,
-  forward:       bool,
-}
-
-sprite_animation_init :: proc(
-  frame_count: u32,
-  fps: f32 = 12.0,
-  mode: SpriteAnimationMode = .LOOP,
-  forward: bool = true,
-) -> SpriteAnimation {
-  initial_frame := forward ? 0 : frame_count - 1
-  return SpriteAnimation {
-    frame_count = frame_count,
-    current_frame = initial_frame,
-    fps = fps,
-    time = 0.0,
-    state = .PLAYING,
-    mode = mode,
-    forward = forward,
-  }
-}
-
-sprite_animation_update :: proc(anim: ^SpriteAnimation, delta_time: f32) {
-  if anim.state != .PLAYING do return
-  if anim.frame_count <= 1 do return
-  if anim.fps <= 0 do return
-  if delta_time <= 0 || delta_time > 1.0 do return
-  anim.time += delta_time
-  frame_duration := 1.0 / anim.fps
-  max_iterations := anim.frame_count * 2
-  iteration := u32(0)
-  for anim.time >= frame_duration {
-    if iteration >= max_iterations {
-      frames_to_skip := u32(anim.time / frame_duration)
-      anim.time = math.mod(anim.time, frame_duration)
-      switch anim.mode {
-      case .ONCE:
-        if anim.forward {
-          anim.current_frame = min(frames_to_skip, anim.frame_count - 1)
-        } else {
-          if frames_to_skip >= anim.frame_count {
-            anim.current_frame = 0
-          } else {
-            anim.current_frame = anim.frame_count - 1 - frames_to_skip
-          }
-        }
-        anim.state = .STOPPED
-      case .LOOP:
-        if anim.forward {
-          anim.current_frame = frames_to_skip % anim.frame_count
-        } else {
-          anim.current_frame =
-            anim.frame_count - 1 - (frames_to_skip % anim.frame_count)
-        }
-      case .PINGPONG:
-        cycle_length := max(1, (anim.frame_count - 1) * 2)
-        position := frames_to_skip % cycle_length
-        if position < anim.frame_count {
-          anim.current_frame = position
-          anim.forward = true
-        } else {
-          anim.current_frame = cycle_length - position
-          anim.forward = false
-        }
-      }
-      break
-    }
-    anim.time -= frame_duration
-    if anim.forward {
-      anim.current_frame += 1
-      if anim.current_frame >= anim.frame_count {
-        switch anim.mode {
-        case .ONCE:
-          anim.current_frame = anim.frame_count - 1
-          anim.state = .STOPPED
-          break
-        case .LOOP:
-          anim.current_frame = 0
-        case .PINGPONG:
-          anim.current_frame = anim.frame_count - 1
-          anim.forward = false
-        }
-      }
-    } else {
-      if anim.current_frame == 0 {
-        switch anim.mode {
-        case .ONCE:
-          anim.state = .STOPPED
-          break
-        case .LOOP:
-          anim.current_frame = anim.frame_count - 1
-        case .PINGPONG:
-          anim.forward = true
-        }
-      } else {
-        anim.current_frame -= 1
-      }
-    }
-    iteration += 1
-  }
-}
-
-sprite_animation_play :: proc(anim: ^SpriteAnimation) {
-  anim.state = .PLAYING
-}
-
-sprite_animation_pause :: proc(anim: ^SpriteAnimation) {
-  anim.state = .PAUSED
-}
-
-sprite_animation_stop :: proc(anim: ^SpriteAnimation) {
-  anim.state = .STOPPED
-  anim.time = 0.0
-  anim.current_frame = anim.forward ? 0 : anim.frame_count - 1
-}
-
-sprite_animation_set_frame :: proc(anim: ^SpriteAnimation, frame: u32) {
-  anim.current_frame = min(frame, anim.frame_count - 1)
-}
-
-sprite_animation_set_mode :: proc(
-  anim: ^SpriteAnimation,
-  mode: SpriteAnimationMode,
-) {
-  anim.mode = mode
-}
-
-sprite_animation_set_direction :: proc(anim: ^SpriteAnimation, forward: bool) {
-  anim.forward = forward
-  if anim.state == .STOPPED {
-    anim.current_frame = forward ? 0 : anim.frame_count - 1
-  }
+// Show cell `frame` (row-major, wrapped to the sheet size) of the sprite
+// sheet. Animate by calling this as time advances.
+set_sprite_frame :: proc(self: ^Manager, handle: SpriteHandle, frame: u32) -> bool {
+  s := cont.get(self.sprites, handle) or_return
+  s.frame_index = frame % max(s.frame_columns * s.frame_rows, 1)
+  stage(self, &self.internal.staging.sprites, handle.index)
+  return true
 }
 
 // ---------- emitters ----------
@@ -706,20 +562,13 @@ set_forcefield :: proc(
   return true
 }
 
-// Advance sprite animations and emitter accumulators. Call once per update
-// tick; `flush` uploads the results.
+// Advance the render clock (debug line lifetimes) and emitter accumulators.
+// Call once per update tick; `flush` uploads the results.
 update :: proc(self: ^Manager, delta_time: f32) {
+  debug_line.advance(&self.internal.debug_line_renderer, delta_time)
   if delta_time <= 0 do return
-  for &entry, i in self.sprites.entries {
-    if !entry.active do continue
-    anim_inst, has_anim := &entry.item.animation.?
-    if !has_anim do continue
-    sprite_animation_update(anim_inst, delta_time)
-    stage(self, &self.internal.staging.sprites, u32(i))
-  }
-  for &entry, i in self.emitters.entries {
-    if !entry.active do continue
-    em := &entry.item
+  it := cont.iterator(&self.emitters)
+  for em, handle in cont.next(&it, EmitterHandle) {
     if !bool(em.enabled) {
       em.time_accumulator = 0
       em.pending_emit = 0
@@ -729,10 +578,10 @@ update :: proc(self: ^Manager, delta_time: f32) {
       em.time_accumulator -= f32(emit)
       em.pending_emit = emit
     }
-    stage(self, &self.internal.staging.emitters, u32(i))
+    stage(self, &self.internal.staging.emitters, handle.index)
   }
-  set_particle_params(
-    self,
+  particles.set_params(
+    &self.internal.particles,
     {
       delta_time       = delta_time,
       emitter_count    = u32(min(len(self.emitters.entries), MAX_EMITTERS)),

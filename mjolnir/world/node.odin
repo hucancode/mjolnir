@@ -1,174 +1,123 @@
 package world
 
 import cont "../containers"
-import "../geometry"
 import "core:math/linalg"
 
-translate_by :: proc {
-  node_translate_by_xyz,
-  node_translate_by_vec,
+// Local TRS plus cached matrices. Setters mark `is_dirty`; `update`
+// recomputes `local_matrix` and `world_matrix` for dirty subtrees.
+Transform :: struct {
+  position:     [3]f32,
+  rotation:     quaternion128,
+  scale:        [3]f32,
+  is_dirty:     bool,
+  local_matrix: matrix[4, 4]f32,
+  world_matrix: matrix[4, 4]f32,
+}
+
+TRANSFORM_IDENTITY :: Transform {
+  rotation     = linalg.QUATERNIONF32_IDENTITY,
+  scale        = {1, 1, 1},
+  local_matrix = linalg.MATRIX4F32_IDENTITY,
+  world_matrix = linalg.MATRIX4F32_IDENTITY,
 }
 
 translate :: proc {
-  node_translate_xyz,
-  node_translate_vec,
-}
-
-rotate_by :: proc {
-  node_rotate_by_quaternion,
-  node_rotate_by_angle,
+  translate_xyz,
+  translate_vec,
 }
 
 rotate :: proc {
-  node_rotate_quaternion,
-  node_rotate_angle,
+  rotate_quaternion,
+  rotate_angle,
 }
 
-scale_xyz_by :: proc {
-  node_scale_xyz_by_args,
-  node_scale_xyz_by_vec,
-}
-
-scale_by :: proc {
-  node_scale_by,
-}
-
-scale_xyz :: proc {
-  node_scale_xyz_args,
-  node_scale_xyz_vec,
+rotate_by :: proc {
+  rotate_by_quaternion,
+  rotate_by_angle,
 }
 
 scale :: proc {
-  node_scale_uniform,
-  node_scale_xyz_vec,
+  scale_uniform,
+  scale_vec,
 }
 
-node_translate_by_xyz :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  x: f32 = 0,
-  y: f32 = 0,
-  z: f32 = 0,
-) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.translate_by_xyz(&node.transform, x, y, z)
-  }
+translate_xyz :: proc(world: ^World, handle: NodeHandle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+  translate_vec(world, handle, {x, y, z})
 }
 
-node_translate_by_vec :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  v: [3]f32,
-) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.translate_by_vec(&node.transform, v)
-  }
+translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
+  node := cont.get(world.nodes, handle)
+  if node == nil do return
+  node.transform.position = v
+  node.transform.is_dirty = true
 }
 
-node_translate_xyz :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  x: f32 = 0,
-  y: f32 = 0,
-  z: f32 = 0,
-) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.translate_xyz(&node.transform, x, y, z)
-  }
+rotate_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
+  node := cont.get(world.nodes, handle)
+  if node == nil do return
+  node.transform.rotation = q
+  node.transform.is_dirty = true
 }
 
-node_translate_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.translate_vec(&node.transform, v)
-  }
-}
-
-node_rotate_by_quaternion :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  q: quaternion128,
-) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.rotate_by_quaternion(&node.transform, q)
-  }
-}
-
-node_rotate_by_angle :: proc(
+rotate_angle :: proc(
   world: ^World,
   handle: NodeHandle,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.rotate_by_angle(&node.transform, angle, axis)
-  }
+  rotate_quaternion(world, handle, linalg.quaternion_angle_axis(angle, axis))
 }
 
-node_rotate_quaternion :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  q: quaternion128,
-) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.rotate_quaternion(&node.transform, q)
-  }
+rotate_by_quaternion :: proc(world: ^World, handle: NodeHandle, q: quaternion128) {
+  node := cont.get(world.nodes, handle)
+  if node == nil do return
+  node.transform.rotation *= q
+  node.transform.is_dirty = true
 }
 
-node_rotate_angle :: proc(
+rotate_by_angle :: proc(
   world: ^World,
   handle: NodeHandle,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.rotate_angle(&node.transform, angle, axis)
-  }
+  rotate_by_quaternion(world, handle, linalg.quaternion_angle_axis(angle, axis))
 }
 
-node_scale_xyz_by_args :: proc(
+scale_uniform :: proc(world: ^World, handle: NodeHandle, s: f32) {
+  scale_vec(world, handle, {s, s, s})
+}
+
+scale_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
+  node := cont.get(world.nodes, handle)
+  if node == nil do return
+  node.transform.scale = v
+  node.transform.is_dirty = true
+}
+
+scale_xyz :: proc(world: ^World, handle: NodeHandle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+  scale_vec(world, handle, {x, y, z})
+}
+
+// Set a node's whole local transform.
+set_local :: proc(
   world: ^World,
   handle: NodeHandle,
-  x: f32 = 1,
-  y: f32 = 1,
-  z: f32 = 1,
+  position: [3]f32 = {0, 0, 0},
+  rotation: quaternion128 = linalg.QUATERNIONF32_IDENTITY,
+  scale: [3]f32 = {1, 1, 1},
 ) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.scale_xyz_by_args(&node.transform, x, y, z)
-  }
+  node := cont.get(world.nodes, handle)
+  if node == nil do return
+  node.transform.position = position
+  node.transform.rotation = rotation
+  node.transform.scale = scale
+  node.transform.is_dirty = true
 }
 
-node_scale_xyz_by_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.scale_xyz_by_vec(&node.transform, v)
-  }
-}
-
-node_scale_by :: proc(world: ^World, handle: NodeHandle, s: f32) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.scale_by(&node.transform, s)
-  }
-}
-
-node_scale_xyz_args :: proc(
-  world: ^World,
-  handle: NodeHandle,
-  x: f32 = 1,
-  y: f32 = 1,
-  z: f32 = 1,
-) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.scale_xyz_args(&node.transform, x, y, z)
-  }
-}
-
-node_scale_xyz_vec :: proc(world: ^World, handle: NodeHandle, v: [3]f32) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.scale_xyz_vec(&node.transform, v)
-  }
-}
-
-node_scale_uniform :: proc(world: ^World, handle: NodeHandle, s: f32) {
-  if node, ok := cont.get(world.nodes, handle); ok {
-    geometry.scale_uniform(&node.transform, s)
-  }
+// Local position, as set by `translate`.
+position :: proc(world: ^World, handle: NodeHandle) -> [3]f32 {
+  node, ok := cont.get(world.nodes, handle)
+  if !ok do return {}
+  return node.transform.position
 }

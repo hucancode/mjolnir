@@ -26,6 +26,13 @@ Backing array + a free-list of recycled indices. `init` sizes it,
 sentinel). `destroy(&pool, cleanup)` runs `cleanup` on live items and
 frees the pool.
 
+`iterator` and `next` walk the live items in index order:
+
+```odin
+it := cont.iterator(&pool)
+for item, handle in cont.next(&it, MyHandle) { ... }
+```
+
 For consumers that key on slot indices, `free_deferred` holds a slot
 back for a grace period. `tick` ages deferred slots once per update
 and releases those that expired; `flush` releases all of them.

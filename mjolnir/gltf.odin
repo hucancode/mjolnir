@@ -4,7 +4,6 @@ import anim "animation"
 import gltf_animation "animation/gltf"
 import "core:log"
 import "core:strings"
-import "geometry"
 import "render"
 import gltf_render "render/gltf"
 import "vendor:cgltf"
@@ -92,23 +91,22 @@ construct_scene :: proc(
       entry.parent,
       name = string(gltf_node.name),
     ) or_continue
-    node := world.node(&engine.world, node_handle)
     if gltf_node.has_matrix {
-      node.transform = geometry.decompose_matrix(
+      world.set_local_matrix(
+        &engine.world,
+        node_handle,
         transmute(matrix[4, 4]f32)gltf_node.matrix_,
       )
     } else {
-      if gltf_node.has_translation {
-        node.transform.position = gltf_node.translation
-      }
-      if gltf_node.has_rotation {
-        node.transform.rotation = transmute(quaternion128)gltf_node.rotation
-      }
-      if gltf_node.has_scale {
-        node.transform.scale = gltf_node.scale
-      }
+      // cgltf fills absent components with identity values
+      world.set_local(
+        &engine.world,
+        node_handle,
+        gltf_node.translation,
+        transmute(quaternion128)gltf_node.rotation,
+        gltf_node.scale,
+      )
     }
-    node.transform.is_dirty = true
     if gltf_node.mesh != nil {
       if look, has_look := looks[cgltf.mesh_index(gltf_data, gltf_node.mesh)].?; has_look {
         render.attach(&engine.render, node_handle.index, look)

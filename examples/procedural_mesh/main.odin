@@ -142,6 +142,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   set_spin(engine, wave_node,   wave_visible,   spin, {-6, 0, 0})
   set_spin(engine, knot_node,   knot_visible,   spin, {0, 1.5, 0})
   set_spin(engine, spiral_node, spiral_visible, spin, {6, 0, 0})
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 set_spin :: proc(engine: ^mjolnir.Engine, h: world.NodeHandle, visible: bool, angle: f32, pos: [3]f32) {

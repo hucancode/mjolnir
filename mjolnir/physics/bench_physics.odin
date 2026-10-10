@@ -1,5 +1,6 @@
 package physics
 
+import cont "../containers"
 import "base:runtime"
 import "core:log"
 import "core:math/linalg"
@@ -154,9 +155,8 @@ bench_sequential_ccd :: proc(t: ^testing.T) {
 		setup     = proc(opts: ^time.Benchmark_Options, _: runtime.Allocator) -> time.Benchmark_Error {
 			s := cast(^bench_world_state)opts.user_data
 			s.world = build_serial_world()
-			for &entry in s.world.bodies.entries {
-				if entry.active do entry.item.velocity = {0, -8, 0}
-			}
+			it := cont.iterator(&s.world.bodies)
+			for body in cont.next(&it, DynamicRigidBodyHandle) do body.velocity = {0, -8, 0}
 			for _ in 0 ..< 3 do step(s.world, 1.0 / 60.0)
 			s.ccd_handled = make([]bool, len(s.world.bodies.entries))
 			return .Okay

@@ -100,9 +100,8 @@ apply_ff :: proc(engine: ^mjolnir.Engine, s: ^FFState) {
 }
 
 draw_ff_marker :: proc(engine: ^mjolnir.Engine, s: ^FFState) {
-  n, ok := world.node(&engine.world, s.ff_node)
-  if !ok do return
-  pos := n.transform.world_matrix[3].xyz
+  if !world.valid(&engine.world, s.ff_node) do return
+  pos := world.world_matrix(&engine.world, s.ff_node)[3].xyz
   c := s.color
   if !s.enabled do c = {c.r * 0.3, c.g * 0.3, c.b * 0.3, 1}
   render.debug_sphere(&engine.render, pos, 0.4, c)
@@ -119,6 +118,9 @@ update :: proc(engine: ^mjolnir.Engine, dt: f32) {
   apply_ff(engine, &attract)
   draw_ff_marker(engine, &repel)
   draw_ff_marker(engine, &attract)
+  world.update(&engine.world)
+  for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)
+  for n in world.changed_nodes(&engine.world) do render.stage_transform(&engine.render, n.index, n.world_matrix, n.visible)
 }
 
 ff_panel :: proc(ctx: ^mu.Context, name: string, s: ^FFState) {

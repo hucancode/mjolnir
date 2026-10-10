@@ -1,43 +1,12 @@
-package particles_render
+package particles
 
 import "../bindless"
 import "../gpu"
-import particles_compute "../particles_compute"
 import "core:log"
 import vk "vendor:vulkan"
 
-Particle :: particles_compute.Particle
-
 SHADER_PARTICLE_VERT := #load("../shader/particle/vert.spv")
 SHADER_PARTICLE_FRAG := #load("../shader/particle/frag.spv")
-
-Renderer :: struct {
-	render_pipeline_layout: vk.PipelineLayout,
-	render_pipeline:        vk.Pipeline,
-}
-
-init :: proc(
-	self: ^Renderer,
-	gctx: ^gpu.GPUContext,
-	camera_set_layout: vk.DescriptorSetLayout,
-	textures_set_layout: vk.DescriptorSetLayout,
-) -> (
-	ret: vk.Result,
-) {
-	log.debugf("Initializing particle render renderer")
-	create_render_pipeline(gctx, self, camera_set_layout, textures_set_layout) or_return
-	defer if ret != .SUCCESS {
-		vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
-		vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
-	}
-
-	return .SUCCESS
-}
-
-shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
-	vk.DestroyPipeline(gctx.device, self.render_pipeline, nil)
-	vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
-}
 
 @(private)
 create_render_pipeline :: proc(
@@ -54,16 +23,9 @@ create_render_pipeline :: proc(
 		camera_set_layout,
 		textures_set_layout,
 	) or_return
-	defer if ret != .SUCCESS {
-		vk.DestroyPipelineLayout(gctx.device, self.render_pipeline_layout, nil)
+	vertex_bindings := [?]vk.VertexInputBindingDescription {
+		{binding = 0, stride = size_of(Particle), inputRate = .VERTEX},
 	}
-
-	vertex_binding := vk.VertexInputBindingDescription {
-		binding   = 0,
-		stride    = size_of(Particle),
-		inputRate = .VERTEX,
-	}
-
 	vertex_attributes := [?]vk.VertexInputAttributeDescription {
 		{
 			location = 0,
@@ -90,51 +52,29 @@ create_render_pipeline :: proc(
 			offset = u32(offset_of(Particle, texture_index)),
 		},
 	}
-
-	vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
-		sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-		vertexBindingDescriptionCount   = 1,
-		pVertexBindingDescriptions      = &vertex_binding,
-		vertexAttributeDescriptionCount = len(vertex_attributes),
-		pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
-	}
-
 	vert_module := gpu.create_shader_module(gctx.device, SHADER_PARTICLE_VERT) or_return
-	frag_module := gpu.create_shader_module(gctx.device, SHADER_PARTICLE_FRAG) or_return
 	defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
+	frag_module := gpu.create_shader_module(gctx.device, SHADER_PARTICLE_FRAG) or_return
 	defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
-
-	shader_stages := gpu.create_vert_frag_stages(
-		vert_module,
-		frag_module,
-		&bindless.SHADER_SPEC_CONSTANTS,
-	)
-
-	pipeline_info := vk.GraphicsPipelineCreateInfo {
-		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-		stageCount          = len(shader_stages),
-		pStages             = raw_data(shader_stages[:]),
-		pVertexInputState   = &vertex_input_info,
-		pInputAssemblyState = &gpu.POINT_INPUT_ASSEMBLY,
-		pViewportState      = &gpu.STANDARD_VIEWPORT_STATE,
-		pRasterizationState = &gpu.DOUBLE_SIDED_RASTERIZER,
-		pMultisampleState   = &gpu.STANDARD_MULTISAMPLING,
-		pColorBlendState    = &gpu.COLOR_BLENDING_ADDITIVE,
-		pDynamicState       = &gpu.STANDARD_DYNAMIC_STATES,
-		pDepthStencilState  = &gpu.READ_ONLY_DEPTH_STATE,
-		layout              = self.render_pipeline_layout,
-		pNext               = &gpu.HDR_STANDARD_RENDERING_INFO,
-	}
-
-	vk.CreateGraphicsPipelines(
-		gctx.device,
-		0,
-		1,
-		&pipeline_info,
-		nil,
-		&self.render_pipeline,
+	color_formats := [?]vk.Format{gpu.HDR_COLOR_FORMAT}
+	blend := [?]vk.PipelineColorBlendAttachmentState{gpu.BLEND_ADDITIVE}
+	self.render_pipeline = gpu.create_graphics_pipeline(
+		gctx,
+		{
+			vert = vert_module,
+			frag = frag_module,
+			specialization = &bindless.SHADER_SPEC_CONSTANTS,
+			vertex_bindings = vertex_bindings[:],
+			vertex_attributes = vertex_attributes[:],
+			topology = .POINT_LIST,
+			raster = gpu.DOUBLE_SIDED_RASTERIZER,
+			depth = gpu.READ_ONLY_DEPTH_STATE,
+			blend = blend[:],
+			color_formats = color_formats[:],
+			depth_format = .D32_SFLOAT,
+			layout = self.render_pipeline_layout,
+		},
 	) or_return
-
 	return .SUCCESS
 }
 

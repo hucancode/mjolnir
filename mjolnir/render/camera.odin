@@ -234,15 +234,10 @@ resize_swapchain_cameras :: proc(
   self: ^Manager,
   old_extent, new_extent: vk.Extent2D,
 ) -> vk.Result {
-  for &entry, i in self.cameras.entries {
-    if !entry.active do continue
-    if entry.item.extent != {old_extent.width, old_extent.height} do continue
-    resize_camera(
-      self,
-      {index = u32(i), generation = entry.generation},
-      new_extent.width,
-      new_extent.height,
-    ) or_return
+  it := cont.iterator(&self.cameras)
+  for cam, handle in cont.next(&it, CameraHandle) {
+    if cam.extent != {old_extent.width, old_extent.height} do continue
+    resize_camera(self, handle, new_extent.width, new_extent.height) or_return
   }
   return .SUCCESS
 }
@@ -337,21 +332,8 @@ create_targets :: proc(
     }
   }
   // Indirect draw buffers (double-buffered) for each pipeline.
-  for pipe in DrawPipeline {
-    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-      camera.draws[pipe].count[frame] = gpu.create_mutable_buffer(
-        gctx,
-        u32,
-        1,
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
-      ) or_return
-      camera.draws[pipe].commands[frame] = gpu.create_mutable_buffer(
-        gctx,
-        vk.DrawIndexedIndirectCommand,
-        MAX_NODES_IN_SCENE,
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
-      ) or_return
-    }
+  for &draws in camera.draws {
+    bindless.draw_buffers_init(&draws, gctx, MAX_NODES_IN_SCENE) or_return
   }
   if camera.enable_culling {
     for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
@@ -389,12 +371,7 @@ destroy_targets :: proc(
     )
   }
   camera.depth_pyramid = {}
-  for pipe in DrawPipeline {
-    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-      gpu.mutable_buffer_destroy(gctx.device, &camera.draws[pipe].count[frame])
-      gpu.mutable_buffer_destroy(gctx.device, &camera.draws[pipe].commands[frame])
-    }
-  }
+  for &draws in camera.draws do bindless.draw_buffers_destroy(&draws, gctx)
   camera.draws = {}
   camera.descriptor_set = {}
   camera.depth_reduce_descriptor_sets = {}
@@ -448,7 +425,7 @@ allocate_descriptors :: proc(
       .STORAGE_BUFFER,
       gpu.buffer_info(&camera_buffer.buffers[frame_index]),
     }
-    for pipe in DrawPipeline {
+    for pipe in bindless.DrawPipeline {
       binding := occlusion_culling.FIRST_DRAW_BINDING + 2 * int(pipe)
       draws := &camera.draws[pipe]
       writes[binding] = {
