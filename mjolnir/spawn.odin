@@ -126,32 +126,6 @@ spawn_sprite :: proc(
   return
 }
 
-// Spawn a node carrying an existing emitter (see render.create_emitter).
-spawn_emitter :: proc(
-  engine: ^Engine,
-  emitter: render.EmitterHandle,
-  position: [3]f32 = {0, 0, 0},
-  parent: world.NodeHandle = {},
-) -> (
-  world.NodeHandle,
-  bool,
-) #optional_ok {
-  return spawn(engine, position, render.EmitterAttachment{emitter}, parent)
-}
-
-// Spawn a node carrying an existing force field (see render.create_forcefield).
-spawn_forcefield :: proc(
-  engine: ^Engine,
-  forcefield: render.ForceFieldHandle,
-  position: [3]f32 = {0, 0, 0},
-  parent: world.NodeHandle = {},
-) -> (
-  world.NodeHandle,
-  bool,
-) #optional_ok {
-  return spawn(engine, position, render.ForceFieldAttachment{forcefield}, parent)
-}
-
 // ---------- physics ----------
 //
 // Bodies link back to their node through `user`; copy their poses into the

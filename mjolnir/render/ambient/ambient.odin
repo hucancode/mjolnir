@@ -5,8 +5,8 @@ import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
-SHADER_VERT :: #load("../../shader/lighting_ambient/vert.spv")
-SHADER_FRAG :: #load("../../shader/lighting_ambient/frag.spv")
+SHADER_VERT :: #load("../shader/lighting_ambient/vert.spv")
+SHADER_FRAG :: #load("../shader/lighting_ambient/frag.spv")
 TEXTURE_LUT_GGX :: #load("../assets/lut_ggx.png")
 
 PushConstant :: struct {
@@ -28,15 +28,18 @@ PushConstant :: struct {
 }
 
 Renderer :: struct {
-  pipeline:           vk.Pipeline,
-  pipeline_layout:    vk.PipelineLayout,
-  environment_map:    bindless.Texture2DHandle,
-  brdf_lut:           bindless.Texture2DHandle,
-  ibl:                IBLResults,
-  ibl_intensity:      f32,
-  skybox_enabled:     bool,
-  skybox_intensity:   f32,
-  skybox_blur:        f32,
+  pipeline:             vk.Pipeline,
+  pipeline_layout:      vk.PipelineLayout,
+  environment_map:      bindless.Texture2DHandle,
+  // HDR image loaded as the environment map by each setup; IBL falls back
+  // to black when it can't be read.
+  environment_map_path: string,
+  brdf_lut:             bindless.Texture2DHandle,
+  ibl:                  IBLResults,
+  ibl_intensity:        f32,
+  skybox_enabled:       bool,
+  skybox_intensity:     f32,
+  skybox_blur:          f32,
 }
 
 init :: proc(
@@ -109,7 +112,7 @@ setup :: proc(
   env_map, env_result := bindless.create_texture_2d_from_path(
     gctx,
     texture_manager,
-    "assets/Cannon_Exterior.hdr",
+    self.environment_map_path,
     .R32G32B32A32_SFLOAT,
     true,
     {.SAMPLED},

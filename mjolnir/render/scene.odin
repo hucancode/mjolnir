@@ -255,98 +255,20 @@ instance :: proc(self: ^Manager, slot: u32) -> (^Instance, bool) #optional_ok {
   return &self.instances[slot], true
 }
 
-point_light :: proc(
+// The attachment of type T at `slot`, e.g. attachment(r, slot, MeshAttachment).
+attachment :: proc(
   self: ^Manager,
   slot: u32,
+  $T: typeid,
 ) -> (
-  att: ^PointLightAttachment,
+  att: ^T,
   ok: bool,
 ) #optional_ok {
   inst := instance(self, slot)
   if inst == nil do return
-  att, ok = &inst.attachment.(PointLightAttachment)
-  return
+  return &inst.attachment.(T)
 }
 
-directional_light :: proc(
-  self: ^Manager,
-  slot: u32,
-) -> (
-  att: ^DirectionalLightAttachment,
-  ok: bool,
-) #optional_ok {
-  inst := instance(self, slot)
-  if inst == nil do return
-  att, ok = &inst.attachment.(DirectionalLightAttachment)
-  return
-}
-
-spot_light :: proc(
-  self: ^Manager,
-  slot: u32,
-) -> (
-  att: ^SpotLightAttachment,
-  ok: bool,
-) #optional_ok {
-  inst := instance(self, slot)
-  if inst == nil do return
-  att, ok = &inst.attachment.(SpotLightAttachment)
-  return
-}
-
-mesh_attachment :: proc(
-  self: ^Manager,
-  slot: u32,
-) -> (
-  att: ^MeshAttachment,
-  ok: bool,
-) #optional_ok {
-  inst := instance(self, slot)
-  if inst == nil do return
-  att, ok = &inst.attachment.(MeshAttachment)
-  return
-}
-
-sprite_attachment :: proc(
-  self: ^Manager,
-  slot: u32,
-) -> (
-  att: ^SpriteAttachment,
-  ok: bool,
-) #optional_ok {
-  inst := instance(self, slot)
-  if inst == nil do return
-  att, ok = &inst.attachment.(SpriteAttachment)
-  return
-}
-
-emitter_attachment :: proc(
-  self: ^Manager,
-  slot: u32,
-) -> (
-  att: ^EmitterAttachment,
-  ok: bool,
-) #optional_ok {
-  inst := instance(self, slot)
-  if inst == nil do return
-  att, ok = &inst.attachment.(EmitterAttachment)
-  return
-}
-
-forcefield_attachment :: proc(
-  self: ^Manager,
-  slot: u32,
-) -> (
-  att: ^ForceFieldAttachment,
-  ok: bool,
-) #optional_ok {
-  inst := instance(self, slot)
-  if inst == nil do return
-  att, ok = &inst.attachment.(ForceFieldAttachment)
-  return
-}
-
-// Stage a slot whose attachment was edited directly through the accessors.
 mark_slot_dirty :: proc(self: ^Manager, slot: u32) {
   stage(self, &self.internal.staging.nodes, slot)
   if inst, ok := instance(self, slot); ok && is_light(inst.attachment) {
@@ -425,7 +347,7 @@ set_spot_light_cone :: proc(
   outer: f32,
   inner: Maybe(f32) = nil,
 ) -> bool {
-  att := spot_light(self, slot) or_return
+  att := attachment(self, slot, SpotLightAttachment) or_return
   inner_angle := inner.? or_else outer * SPOT_LIGHT_INNER_RATIO
   if att.angle_outer == outer && att.angle_inner == inner_angle do return true
   att.angle_outer = outer
@@ -467,7 +389,7 @@ spot_light_attachment :: proc(
 
 // Mesh attachment setters. Mutate + stage. Leave sibling fields untouched.
 set_mesh_handle :: proc(self: ^Manager, slot: u32, mesh: MeshHandle) {
-  a := mesh_attachment(self, slot)
+  a := attachment(self, slot, MeshAttachment)
   if a == nil do return
   if a.handle == mesh do return
   a.handle = mesh
@@ -475,7 +397,7 @@ set_mesh_handle :: proc(self: ^Manager, slot: u32, mesh: MeshHandle) {
 }
 
 set_material_handle :: proc(self: ^Manager, slot: u32, material: MaterialHandle) {
-  a := mesh_attachment(self, slot)
+  a := attachment(self, slot, MeshAttachment)
   if a == nil do return
   if a.material == material do return
   a.material = material

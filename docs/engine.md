@@ -29,13 +29,14 @@ For a hand-rolled lifecycle, call `init` → loop → `shutdown` yourself.
 ## Frame timeline
 
 ```
-update:  input → main camera controller → update → world.update → sync → render.update
+update:  input → camera controller → update → world.update → world→render → sync → render.update
 render:  poll events → throttle to RENDER_FPS → ui stage → pre_render
          → render.frame → post_render
 ```
 
-`sync` is where the application moves world and animation results
-into render — see [glue](glue.html).
+Right after `world.update` the engine pushes world transform changes
+into render. `sync` runs next, for the remaining glue such as skin
+palettes — see [glue](glue.html).
 
 ## Input
 
@@ -44,24 +45,36 @@ into render — see [glue](glue.html).
 Once per tick the engine dispatches edges to the `key_press`,
 `mouse_press`, `mouse_move` and `mouse_scroll` callbacks, withholding
 what the debug UI captures: a mouse button pressed over the debug UI
-belongs to it until released (`UICapture`), and keys are withheld
+belongs to it until released (`render.debug_ui_claim_button`), and keys are withheld
 while it has keyboard focus. Platform events also feed the debug
 UI's microui context as they arrive.
+
+## Camera controller
+
+`engine.camera_controller` drives the main camera every tick from
+platform input; it starts as `render.orbit_controller()`. Assign
+`render.free_controller()`, `render.follow_controller(...)` or your own
+to switch, or `{}` to disable it. Tune the active one through its
+data, e.g. `&engine.camera_controller.data.(render.FreeCameraData)`.
 
 ## Inter-module helpers
 
 | Proc | Crosses |
 |---|---|
-| `spawn`, `spawn_mesh`, `spawn_primitive_mesh`, `spawn_ground`, `spawn_sprite`, `spawn_emitter`, `spawn_forcefield` | world node + render attachment |
+| `spawn`, `spawn_mesh`, `spawn_primitive_mesh`, `spawn_ground`, `spawn_sprite` | world node + render attachment |
+| world → render transform sync (built into `update`) | world change feed → render slots |
+| `Engine.camera_controller` | platform input → render main camera |
 | `spawn_static` / `spawn_dynamic` / `spawn_trigger`, `collider_visual_scale` | world + render + physics (body `user` = node) |
 | `load_gltf` | world nodes + render meshes / materials / textures + animation rigs |
 | `viewport_to_world_ray` / `cursor_world_ray` | platform DPI + cursor, render main camera |
 | `debug_skeleton` | animation pose → render debug lines |
 
-`load_gltf` returns a `GltfScene{roots, rigs, skinned}`. It creates
-one render mesh per glTF mesh and one `animation.Rig` per skin with
-every animation as a clip; `skinned` pairs each skinned node with its
-rig. The caller creates the animators and frees the scene with
+`load_gltf` returns a `GltfScene{roots, rigs, skinned}`. It parses the
+file, lets `render/gltf` (`load_meshes`) create one render mesh per
+glTF mesh and `animation/gltf` (`load_rig`) one `animation.Rig` per
+skin with every animation as a clip, then builds the world nodes;
+`skinned` pairs each skinned node with its rig. Use the two loaders
+directly to import into a single module. The caller creates the animators and frees the scene with
 `gltf_scene_destroy`.
 
 Single-module work goes straight to that module: `world.translate`,

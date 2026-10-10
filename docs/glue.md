@@ -16,16 +16,16 @@ stays a handful of lines you can read, change or drop.
 | `world.removed_nodes` | node index | `render.stage_slot_removal` |
 | `world.changed_nodes` | `{index, world_matrix, visible}` | `render.stage_transform` |
 
-The engine calls the `sync` callback right after `world.update`:
+The engine runs this hop itself right after `world.update`, then
+calls the `sync` callback for any extra glue:
 
 ```odin
-sync :: proc(e: ^mjolnir.Engine) {
-  for i in world.removed_nodes(&e.world) do render.stage_slot_removal(&e.render, i)
-  for n in world.changed_nodes(&e.world) do render.stage_transform(&e.render, n.index, n.world_matrix, n.visible)
-}
+for i in world.removed_nodes(&e.world) do render.stage_slot_removal(&e.render, i)
+for n in world.changed_nodes(&e.world) do render.stage_transform(&e.render, n.index, n.world_matrix, n.visible)
 ```
 
-Filter or remap indices here if render should not mirror every node.
+Without the engine (a custom loop, a headless tool), write these two
+lines yourself.
 
 ## Animation → render
 
@@ -39,7 +39,6 @@ update :: proc(e: ^mjolnir.Engine, dt: f32) {
 }
 
 sync :: proc(e: ^mjolnir.Engine) {
-  // ... world → render loops ...
   render.stage_bones(&e.render, node.index, animator.palette)
 }
 ```

@@ -3,7 +3,7 @@ package occlusion_culling
 import "../gpu"
 import vk "vendor:vulkan"
 
-SHADER_CULLING :: #load("../../shader/occlusion_culling/cull.spv")
+SHADER_CULLING :: #load("../shader/occlusion_culling/cull.spv")
 
 // Draw pipelines participate in indirect-draw culling; each camera owns one
 // DrawBuffers per pipeline. Enum order is the binding order in cull.comp.

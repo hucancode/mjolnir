@@ -13,7 +13,8 @@ and cameras live in [render](render.html), skeletons and poses in
 A `Node` carries a `Transform`, a parent and children, its own and
 inherited visibility, a name, and `tags: u32`, a bit set the
 application defines. Lookups go through generational `NodeHandle`s:
-`node(&w, h)` resolves one, `valid(&w, h)` checks it.
+`node(&w, h)` resolves one, `valid(&w, h)` checks it and
+`node_count(&w)` counts live nodes.
 
 - `spawn` / `spawn_child` / `despawn` manage nodes.
 - `translate`, `rotate`, `scale` and their `_by` variants edit the
@@ -45,4 +46,5 @@ standard world → render loop.
 
 `mjolnir.load_gltf` creates world nodes, render meshes and materials,
 and animation rigs in one pass. It lives in layer 3 because it spans
-three modules.
+three modules; the per-module parts are `render/gltf` and
+`animation/gltf`.

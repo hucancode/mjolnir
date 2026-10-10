@@ -158,8 +158,10 @@ init :: proc(
   surface: vk.SurfaceKHR,
   framebuffer_size: [2]u32,
   dpi_scale: f32,
+  environment_map_path := "assets/Cannon_Exterior.hdr",
 ) -> vk.Result {
   gctx := &self.gctx
+  self.ambient.environment_map_path = environment_map_path
   gctx.surface = surface
   gpu.device_init(gctx) or_return
   gpu.swapchain_init(&self.swapchain, gctx, framebuffer_size) or_return

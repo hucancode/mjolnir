@@ -69,7 +69,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if len(textures) > 0 && int(selected_tex_index) >= len(textures) do selected_tex_index = 0
 
   emitter_handle = render.create_emitter(&engine.render)
-  emitter_node = mjolnir.spawn_emitter(engine, emitter_handle, {0, 2, 0})
+  emitter_node = mjolnir.spawn(engine, {0, 2, 0}, render.EmitterAttachment{emitter_handle})
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

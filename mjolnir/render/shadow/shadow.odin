@@ -57,19 +57,19 @@ KindDesc :: struct {
 @(private = "file")
 KINDS := [Kind]KindDesc {
   .FRUSTUM = {
-    cull = #load("../../shader/shadow/cull.spv"),
+    cull = #load("../shader/shadow/cull.spv"),
     cull_push_size = size_of(CullPushConstants([6][4]f32)),
-    depth_vert = #load("../../shader/shadow/vert.spv"),
+    depth_vert = #load("../shader/shadow/vert.spv"),
     depth_push_stages = {.VERTEX},
     depth_push_size = size_of(FrustumDepthPushConstants),
     front_face = .COUNTER_CLOCKWISE,
   },
   .SPHERE = {
-    cull = #load("../../shader/shadow_spherical/cull.spv"),
+    cull = #load("../shader/shadow_spherical/cull.spv"),
     cull_push_size = size_of(CullPushConstants(Sphere)),
-    depth_vert = #load("../../shader/shadow_spherical/vert.spv"),
-    depth_geom = #load("../../shader/shadow_spherical/geom.spv"),
-    depth_frag = #load("../../shader/shadow_spherical/frag.spv"),
+    depth_vert = #load("../shader/shadow_spherical/vert.spv"),
+    depth_geom = #load("../shader/shadow_spherical/geom.spv"),
+    depth_frag = #load("../shader/shadow_spherical/frag.spv"),
     depth_push_stages = {.VERTEX, .GEOMETRY, .FRAGMENT},
     depth_push_size = size_of(SphereDepthPushConstants),
     // Pairs with the clip-space X flip in record_sphere.

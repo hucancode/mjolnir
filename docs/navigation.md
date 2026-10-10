@@ -58,7 +58,8 @@ pos := crowd.crowd_get_agent(c, id).npos
 ```
 
 `Crowd_Agent_Params` sets radius, height, speed, acceleration and
-which behaviours run (`Update_Flags`). Copying agent positions onto
+which behaviours run (`update_flags`, a bit_set such as
+`{.Anticipate_Turns, .Separation}`). Copying agent positions onto
 nodes is application glue. Walking a single `find_path` result
 without a crowd is also the caller's job.
 

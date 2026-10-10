@@ -5,8 +5,8 @@ import "core:log"
 import "core:sync"
 import vk "vendor:vulkan"
 
-SHADER_VERT :: #load("../../shader/debug_line/vert.spv")
-SHADER_FRAG :: #load("../../shader/debug_line/frag.spv")
+SHADER_VERT :: #load("../shader/debug_line/vert.spv")
+SHADER_FRAG :: #load("../shader/debug_line/frag.spv")
 
 
 MAX_VERTICES :: 131072

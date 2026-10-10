@@ -127,10 +127,7 @@ spawn_agents :: proc(engine: ^mjolnir.Engine) {
     collision_query_range   = AGENT_RADIUS * 12,
     path_optimization_range = AGENT_RADIUS * 30,
     separation_weight       = 2.0,
-    update_flags            = (1 << u8(crowd.Update_Flags.Anticipate_Turns)) |
-                              (1 << u8(crowd.Update_Flags.Obstacle_Avoidance)) |
-                              (1 << u8(crowd.Update_Flags.Separation)) |
-                              (1 << u8(crowd.Update_Flags.Optimize_Vis)),
+    update_flags            = {.Anticipate_Turns, .Obstacle_Avoidance, .Separation, .Optimize_Vis},
   }
   for i in 0 ..< AGENT_COUNT {
     angle := f32(i) / f32(AGENT_COUNT) * math.PI * 2

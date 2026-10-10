@@ -8,8 +8,8 @@ import vk "vendor:vulkan"
 
 Particle :: particles_compute.Particle
 
-SHADER_PARTICLE_VERT := #load("../../shader/particle/vert.spv")
-SHADER_PARTICLE_FRAG := #load("../../shader/particle/frag.spv")
+SHADER_PARTICLE_VERT := #load("../shader/particle/vert.spv")
+SHADER_PARTICLE_FRAG := #load("../shader/particle/frag.spv")
 
 Renderer :: struct {
 	render_pipeline_layout: vk.PipelineLayout,

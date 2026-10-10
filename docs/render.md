@@ -134,7 +134,8 @@ Forward shading scales as `pixels × lights`. The deferred pass writes
 a G-buffer (position, normal, albedo, metallic-roughness, emissive,
 depth) once per visible fragment, then runs one fullscreen ambient
 pass (IBL + BRDF LUT) plus a per-light volume pass for each direct
-light. A light's volume (sphere for point, cone for spot, fullscreen
+light. The IBL environment map is the HDR file passed to `render.init`
+(`environment_map_path`, default `assets/Cannon_Exterior.hdr`). A light's volume (sphere for point, cone for spot, fullscreen
 triangle for directional) is rasterized with reversed depth test so
 only fragments actually reached by that light get shaded.
 
@@ -160,10 +161,12 @@ returns a bindless handle — feed it to a UI quad or a material for
 minimaps, mirrors and render-to-texture surfaces.
 
 Controllers (`orbit_controller`, `free_controller`,
-`follow_controller`) drive a camera from a plain `CameraInput`
-(deltas, scroll, movement axes). `use_orbit_camera` /
-`use_free_camera` / `use_camera_controller` pick the main camera's
-controller.
+`follow_controller`) are plain values that drive a camera from a
+`CameraInput` (deltas, scroll, movement axes) via
+`camera_controller_update`. Render does not store them; the caller
+owns one (the engine keeps `Engine.camera_controller`). The orbit
+controller reads distance, yaw and pitch from the camera's pose each
+tick, so moving the camera directly never makes it snap back.
 
 ## UI and debug UI
 

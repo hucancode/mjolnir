@@ -1012,36 +1012,3 @@ is_in_closed_list :: proc(
   node := get_node(&query.pf_context, ref)
   return node != nil && .Closed in node.flags
 }
-
-// Find closest point on polygon boundary
-closest_point_on_poly_boundary :: proc(
-  tile: ^Mesh_Tile,
-  poly: ^Poly,
-  pos: [3]f32,
-) -> (
-  [3]f32,
-  bool,
-) {
-  closest := pos
-  closest_dist_sqr := f32(math.F32_MAX)
-  // Check all edges
-  for i in 0 ..< int(poly.vert_count) {
-    va := tile.verts[poly.verts[i]]
-    vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
-    // Find closest point on edge
-    edge_pt := geometry.closest_point_on_segment_2d(pos, va, vb)
-    dist_sqr := linalg.length2(pos - edge_pt)
-    if dist_sqr < closest_dist_sqr {
-      closest_dist_sqr = dist_sqr
-      closest = edge_pt
-    }
-  }
-  // Check if original point was inside
-  verts := make([][3]f32, poly.vert_count)
-  defer delete(verts)
-  for i in 0 ..< int(poly.vert_count) {
-    verts[i] = tile.verts[poly.verts[i]]
-  }
-  inside := geometry.point_in_polygon_2d(pos, verts)
-  return closest, inside
-}
