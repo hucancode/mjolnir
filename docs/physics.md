@@ -2,9 +2,11 @@
 title: Physics
 ---
 
-Rigid-body dynamics, collisions, spatial queries. The engine owns one
-`physics.World` at `engine.physics` and steps it each tick before
-syncing transforms back into the scene graph.
+Layer 2. Rigid-body dynamics, collisions, spatial queries. Physics knows
+nothing about the scene graph: the application owns a `physics.World`,
+steps it in `update`, and copies `body_poses` back into world nodes
+(see [glue](glue.html)). Every body and trigger carries a `user` handle
+for that link; bodies are destroyed explicitly, not with their node.
 
 ## Step layout
 
@@ -52,12 +54,13 @@ mark bodies below KILL_Y dead (deferred removal next rebuild)
 
 `Collider` is a union of `SphereCollider`, `BoxCollider`,
 `CylinderCollider`, `FanCollider` (a cylinder wedge — useful for
-cone-of-influence triggers). Each collider has a matching inertia
-helper that `spawn_dynamic` calls automatically.
+cone-of-influence triggers). `create_dynamic_body` sets the body's
+inertia tensor from its collider and mass; `set_inertia_from_collider`
+recomputes it after the mass or collider changes.
 
 ## Triggers
 
 Triggers don't generate contact responses. They overlap-test only.
-`engine.physics.trigger_overlaps` and `trigger_static_overlaps` are
+`trigger_overlaps` and `trigger_static_overlaps` are
 populated each step for continuous-overlap events; on-demand
 snapshots are available via `query_trigger*`.

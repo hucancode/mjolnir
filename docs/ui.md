@@ -3,8 +3,11 @@ title: UI
 ---
 
 Layer 2. Logical 2D UI — widget tree, layout, hit-testing, event
-dispatch, font atlas. The GPU side lives in `mjolnir/render/ui/` and
-is driven by the engine.
+dispatch, font atlas. Its output is a list of `draw2d` commands
+(`build_commands`); drawing them is the renderer's job
+(`render.stage_ui`). `ui.Vertex2D` and `ui.NO_TEXTURE` re-export the
+`draw2d` types that appear in widget APIs. `init` fails if the font
+cannot be loaded.
 
 ## Widgets
 
@@ -35,19 +38,21 @@ re-parenting.
 
 ## Events
 
-The engine's input loop calls `pick_widget(point)` each frame, then
-`dispatch_mouse_event` with the resulting handle. The picker walks
-the widget tree top-down by z-order and returns the first widget
-whose bounds contain the cursor.
-
-Hover transitions (`HOVER_IN` / `HOVER_OUT`) are derived by tracking
-the previous-frame hovered widget. Click events bubble parent-ward by
+The engine calls `process_mouse(&sys, position, buttons)` once per
+tick with the cursor position and raw button state. It picks the
+widget under the cursor (top-down by z-order, first whose bounds
+contain the point) and dispatches events to it. `System` keeps the
+previous tick's hovered widget and button state, so hover transitions
+(`HOVER_IN` / `HOVER_OUT`) and press / release edges need no
+caller-side bookkeeping. `pick_widget` and `dispatch_mouse_event` are
+available for custom input routing. Click events bubble parent-ward by
 default so a click on a child of a `Box` also fires on the `Box`
 unless the child stops propagation.
 
 ## Text
 
-Fontstash backs glyph rasterization into a single atlas texture
-managed by the UI system. Glyphs are cached on first use; the engine
-calls `update_font_atlas` once per frame to upload any new glyphs to
-the GPU.
+Fontstash backs glyph rasterization into a single atlas managed by
+the UI system. Glyphs are cached on first use. `take_font_atlas`
+returns the atlas pixels and whether glyphs were added since the last
+call; the engine uploads them with `render.stage_ui_font_atlas` when
+they change.

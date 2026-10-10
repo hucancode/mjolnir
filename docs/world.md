@@ -2,62 +2,47 @@
 title: World
 ---
 
-Layer 2. CPU-side authoritative state for the scene graph: nodes,
-meshes, materials, cameras, lights, animations, sprites, emitters,
-force fields, rigid-body attachments. `render` only reads from here —
-never the reverse.
+Layer 2. The logical scene graph. World says *where* things are,
+never what they look like or how they move: meshes, materials, lights
+and cameras live in [render](render.html), skeletons and poses in
+[animation](animation.html). It imports only `containers` and
+`geometry`, and runs headless (tests, servers, navmesh baking).
 
 ## Scene graph
 
-`Node` carries a `Transform`, a parent + children, a `NodeTagSet`,
-and a `NodeAttachment` union (mesh / light / emitter / forcefield /
-sprite / rigid body). Hierarchical transforms cascade parent → child.
-Lookups are via generational handles (`NodeHandle`, `MeshHandle`, …)
-backed by `containers.Pool`.
+A `Node` carries a `Transform`, a parent and children, its own and
+inherited visibility, a name, and `tags: u32`, a bit set the
+application defines. Lookups go through generational `NodeHandle`s:
+`node(&w, h)` resolves one, `valid(&w, h)` checks it.
 
-`traverse` walks the dirty subtree and recomputes world matrices.
-Nothing recomputes unless something upstream moved.
+- `spawn` / `spawn_child` / `despawn` manage nodes.
+- `translate`, `rotate`, `scale` and their `_by` variants edit the
+  local transform; `set_local_matrix` sets it from a matrix.
+- `set_world_pose` writes a world-space pose, solving the local
+  transform against the parent. Physics glue uses it.
+- `world_matrix` reads a node's world matrix.
+- `set_visible` hides a node and its subtree.
+- `tag` / `untag` set and clear tag bits.
 
-## Staging, not GPU writes
+## Update and change feed
 
-The world module **must not** touch GPU buffers directly. Every
-mutator (`spawn`, `translate`, `set_material_handle`, …) appends to a
-private staging queue. The engine drains the queue once per frame on
-the render thread inside `sync_staging_to_gpu` and forwards the
-entries to `render`.
+`world.update(&w)` walks the dirty subtrees and recomputes world
+matrices; nothing recomputes unless something upstream moved. It
+takes no time step because nothing in world moves on its own.
 
-This is the single-source-of-truth contract. CPU state in `world` is
-authoritative; GPU state is a mirror. Drift is impossible because
-drift would require two writers, and `render` only ever reads.
+Each update publishes what changed since the previous one:
 
-See [architecture](architecture.html) for the staging pipeline and
-the `FRAMES_IN_FLIGHT` age rule that defers GPU releases.
+- `changed_nodes` — `{index, world_matrix, visible}` per moved or
+  toggled node.
+- `removed_nodes` — indices of despawned nodes.
 
-## Cameras
+Consumers key on the node index. A despawned node's index stays
+reserved for `RETIRE_GRACE` updates so every consumer sees the
+removal before the index is reused. See [glue](glue.html) for the
+standard world → render loop.
 
-Each `Camera` carries a `PassTypeSet` describing which passes run for
-it. The same scene can host a main camera, shadow casters, minimap
-cameras, and offscreen render targets — each with its own pass set
-and attachments. The composition story (camera-B's output as a
-texture in camera-A) is just "sample a bindless handle"; the engine
-side does no special casing.
+## Loading
 
-## Animation
-
-`world` is the layer that *applies* the data structures from
-`animation/`. Per skinned node it runs FK clip sampling, then any IK
-or procedural modifier layers, blends them by weight + bone mask,
-and writes the resulting bone matrices into the node's skinning
-buffer.
-
-Layer types: `FKLayer` (sampled clip), `IKLayer` (FABRIK target),
-`ProceduralLayer` (tail / path / spider-leg / single-bone-rotation
-modifiers). Layers blend in insertion order using the layer's
-`BlendMode` (REPLACE / ADD / MULTIPLY / OVERRIDE).
-
-## glTF / OBJ
-
-`world.load_gltf` and `world.load_obj` populate nodes + meshes +
-materials + skeletons + clips in one pass. The engine wrapper
-`mjolnir.load_gltf` injects the texture allocator so glTF textures
-land in the bindless arena automatically.
+`mjolnir.load_gltf` creates world nodes, render meshes and materials,
+and animation rigs in one pass. It lives in layer 3 because it spans
+three modules.

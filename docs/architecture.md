@@ -17,41 +17,107 @@ way it is, not what the code does.
 5. **Avoid indirection / wrappers** when the underlying call already
    reads well.
 6. **Do not leak internal detail to user code.**
+7. **Expose Vulkan.** Vulkan is not hidden; mjolnir codifies the
+   patterns that make it manageable.
 
 ---
 
 ## Layered modules
 
 The codebase splits into three layers. **Higher layer depends on
-lower; never the reverse, never sideways.** A module on layer N must
-compile without any module on layer N or N+1.
+lower; never the reverse, never sideways.** Every layer-2 module
+compiles and runs without its siblings, so each can be swapped out or
+split into its own repository.
 
 ```mermaid
 flowchart TB
   subgraph L3["Layer 3 — Engine"]
-    engine["mjolnir/engine.odin<br/>window + main loop<br/>wires layer-2 systems<br/>user-facing API"]
+    engine["mjolnir<br/>run loop · spawn_* · glTF<br/>cursor ray · debug_skeleton"]
   end
 
   subgraph L2["Layer 2 — Subsystems"]
     direction LR
-    world["world<br/>scene graph<br/>nodes / cameras / lights"]
-    render["render<br/>passes, GPU-driven<br/>bindless"]
-    nav["navigation<br/>recast / detour"]
+    platform["platform<br/>window, input<br/>vulkan surface"]
+    world["world<br/>scene graph<br/>change feed"]
+    render["render<br/>Vulkan, frame, passes<br/>bindless, looks"]
+    animation["animation<br/>tracks, skeletons<br/>animators, IK"]
     physics["physics<br/>rigid body<br/>BVH broadphase"]
-    ui["ui<br/>widgets, layout<br/>events"]
+    nav["navigation<br/>recast / detour / crowd"]
+    ui["ui<br/>widgets, layout<br/>draw commands"]
   end
 
   subgraph L1["Layer 1 — Primitives"]
     direction LR
-    gpu["gpu<br/>vulkan thin wrap"]
-    geometry["geometry<br/>BVH, AABB, frustum<br/>octree, vertex"]
-    algebra["algebra<br/>pow2, ilog2, align"]
+    geometry["geometry<br/>math, AABB, frustum<br/>BVH, octree"]
     containers["containers<br/>handle pool<br/>slab allocator"]
-    animation["animation<br/>keyframe, spline<br/>FK / IK / modifiers"]
+    draw2d["draw2d<br/>2D draw commands"]
   end
 
   L3 --> L2
   L2 --> L1
+```
+
+- No layer-2 module imports another layer-2 module.
+- `render` is the only Vulkan user. Its subpackage `render/gpu` is
+  the Vulkan layer (context, swapchain, buffers, images, pipelines,
+  deferred destruction and the bindless descriptor-array mechanism).
+  `render/bindless` defines render's own arrays (textures, samplers,
+  cube maps, the mesh arena, the scene set) and `render/mesh` the
+  vertex format and primitive builders.
+- `platform` is the only GLFW user, including layer 3 and the
+  examples. It hands render the instance extensions, the
+  proc-address loader and a surface; render never sees a window.
+- `geometry` is math and spatial structures only. No vertex formats,
+  no Vulkan.
+- `animation` is headless: it samples tracks and poses skeletons
+  into flat arrays. Applying the result (moving a node, uploading a
+  skin palette) is the caller's job.
+
+### What belongs in layer 3
+
+A feature lives in `mjolnir` only if it needs two or more layer-2
+modules and belongs to neither: the run loop, glTF instancing (world
+nodes + render meshes + animation rigs), `spawn_*` helpers (world +
+render + physics), cursor rays (platform + render), skeleton debug
+lines (animation → render) and the platform → debug-UI input adapter.
+Layer-3 helpers use only public layer-2 APIs, so user code can always
+rewrite them. Code that touches a single module belongs in that
+module.
+
+---
+
+## World vs render
+
+**World is the logical world; render is the looks.**
+
+- `world` holds nodes: hierarchy, transforms, visibility and user
+  tag bits. No meshes, materials, lights, cameras or skeletons. It
+  runs headless.
+- `render` owns everything that only affects appearance: meshes,
+  materials, textures, sprites, emitters, force fields, lights and
+  cameras, plus their staging into GPU buffers.
+- `animation` owns poses. An `Animator` is a plain value the
+  application keeps next to the node it drives.
+
+The boundary is the **transform slot**: a `u32` that render keys
+every instance on. The convention is slot = world node index, so
+`render.attach(&r, node.index, ...)` puts a look on a node. World
+publishes what changed each update; render consumes it. Neither
+imports the other.
+
+---
+
+## Glue is user code
+
+Modules never call each other. The per-frame glue between them is a
+few lines the application writes itself — see [glue](glue.html). The
+engine calls a `sync` callback right after `world.update`; the
+standard body is:
+
+```odin
+for i in world.removed_nodes(&e.world) do render.stage_slot_removal(&e.render, i)
+for n in world.changed_nodes(&e.world) do render.stage_transform(&e.render, n.index, n.world_matrix, n.visible)
+render.stage_bones(&e.render, node.index, animator.palette) // per skinned node
 ```
 
 ---
@@ -59,50 +125,63 @@ flowchart TB
 ## Frame phases
 
 ```
-poll input → update → throttle → sync → pre_render → render → present → post_render
+update thread: input → camera controller → update → world.update → sync → render.update
+render thread: poll events → throttle → ui stage → pre_render
+               → render.frame (flush → acquire → record → submit + present) → post_render
 ```
 
 - **Update** runs at `UPDATE_FPS` (defaults to `RENDER_FPS`). On its
   own thread if `USE_PARALLEL_UPDATE=true`.
-- **Sync** drains the staging queue into GPU buffers under the
-  staging mutex. Always on the render thread.
-- **Render** records the full pipeline (cull → shadow → geometry →
+- **Sync** is the user callback that feeds world changes to render.
+  It runs on the update thread; every `render.stage_*` and
+  `render.attach` call is thread-safe.
+- **Frame** is one `render.frame` call on the render thread: it
+  drains staging into GPU buffers, acquires a swapchain image
+  (recreating the swapchain on resize), records, submits, presents
+  and retires deferred GPU resources.
+- **Record** builds the full pipeline (cull → shadow → geometry →
   lighting → particles → transparency → debug → post-process → UI)
-  via dynamic rendering, then submits.
+  via dynamic rendering. The UI pass draws game UI and the debug UI.
 
-Update and render are decoupled. Sync is the only contact point.
+Update and render are decoupled. Render's staging is the only contact
+point.
 
 ---
 
-## The staging contract
+## Render-owned staging
 
-`world` mutates CPU state but never touches GPU buffers. Every
-mutation appends to a private staging queue. `sync_staging_to_gpu`
-drains the queue once per frame on the render thread and forwards
-entries to `render`.
+Mutating a look (`attach`, `stage_transform`, `set_material_handle`,
+`create_mesh`, …) writes CPU state and marks the slot dirty in a
+mutex-guarded staging set. `render.frame` uploads dirty entries once
+per frame on the render thread.
 
-Two consequences:
-
-- **No drift.** CPU is authoritative; GPU is a mirror. Drift would
-  require two writers, and `render` only ever reads.
-- **Releases are deferred by `FRAMES_IN_FLIGHT`.** Each staging entry
-  carries an `age`. A `Remove` doesn't free the GPU side until the
-  GPU is past the frame that might still be reading it. Avoids
-  use-after-free without an explicit fence chain on every resource.
+- **Each entry ages per upload.** An update is re-uploaded until
+  every frame in flight has it, then dropped.
+- **Releases are deferred by `FRAMES_IN_FLIGHT`.** A removal doesn't
+  free GPU memory until the GPU is past every frame that might still
+  read it. No fence chain per resource.
+- **Despawned node slots are held back.** World keeps a despawned
+  node's index reserved for `RETIRE_GRACE` updates so the removal
+  reaches render before the slot is reused.
 
 ---
 
 ## Cameras as first-class render targets
 
-Each `Camera` carries a `PassTypeSet` (which passes apply) plus
-per-frame attachments for every G-buffer slot. The main view is just
-a camera with the full pass set; a minimap is a camera with
-`{GEOMETRY, LIGHTING}`; a shadow caster is a camera with `{SHADOW}`.
+Cameras live in render. Each `Camera` carries a `PassTypeSet` (which
+passes apply) plus per-frame attachments for every G-buffer slot. The
+main view is a camera with the full pass set; a minimap is a camera
+with `{GEOMETRY, LIGHTING}`.
 
-`get_camera_attachment(cam, .FINAL_IMAGE)` returns a bindless texture
-handle. Compositing camera B's output into camera A's material or UI
-quad costs nothing extra at the API level — it's just another
-bindless index.
+`render.camera_attachment(&r, cam, .FINAL_IMAGE, frame)` returns a
+bindless texture handle. Compositing camera B's output into camera
+A's material or UI quad is just another bindless index.
+
+Following a logical entity is one glue line:
+`render.camera_set_transform(cam, world.world_matrix(&w, player))`.
+Orbit, free and follow controllers are render procs that take plain
+input deltas (`render.CameraInput`); the engine feeds them from
+`platform.Input`.
 
 ---
 
@@ -125,12 +204,22 @@ infrastructure.
   draw renders all six faces (`-define:REQUIRE_GEOMETRY_SHADER=true`
   required at build).
 
-Shadow buffers are allocated lazily per light on first cast, freed on
-despawn.
+Shadow buffers are allocated lazily per light on first cast, freed
+when the light's slot is removed.
 
 ---
 
 ## Physics step
+
+Physics is a user-owned `physics.World`. The user steps it and copies
+poses back into the scene graph:
+
+```odin
+physics.step(&phys, dt)
+for b in physics.body_poses(&phys) do world.set_world_pose(&e.world, world.NodeHandle(b.user), b.position, b.rotation)
+```
+
+Inside `step`:
 
 ```
 sleep timers → warmstart cache → gravity → integrate velocity
@@ -154,8 +243,9 @@ handle generations stable inside a step.
 
 ## Where to go next
 
-- [`engine`](engine.html), [`world`](world.html),
-  [`render`](render.html), [`physics`](physics.html),
-  [`navigation`](navigation.html), [`ui`](ui.html),
-  [`animation`](animation.html) — module intros.
+- [`glue`](glue.html) — wiring modules together in user code.
+- [`engine`](engine.html), [`platform`](platform.html),
+  [`world`](world.html), [`render`](render.html),
+  [`physics`](physics.html), [`navigation`](navigation.html),
+  [`ui`](ui.html), [`animation`](animation.html) — module intros.
 - [`examples`](examples.html) — runnable examples and notes.

@@ -2,56 +2,147 @@
 title: Animation
 ---
 
-Layer 1. Pure animation data + procs: keyframes, clips, splines,
-FABRIK IK, procedural modifiers. Knows nothing about scene nodes or
-GPU buffers — `world` is the layer that applies these to skeletons.
+Layer 2. Headless animation: it animates values, vectors and bone
+hierarchies, and knows nothing about scene nodes or GPU buffers. It
+imports only `geometry` and `core`. The caller decides where results
+go: a node transform, a light intensity, a skin palette upload. See
+[glue](glue.html) for the standard wiring.
 
-## Keyframe sampling
+The package has three tiers. Each tier builds on the one below, and
+each is usable on its own.
 
-`Keyframe(T)` is a union of `Linear`, `Step`, and `CubicSpline`
-variants. `keyframe_sample` dispatches to the right interpolator pair
-based on the two surrounding keyframes — so a single track can mix
-interpolation modes per segment (matches glTF authoring conventions).
+## Tier 1: values
 
-A `Clip` is `name + duration + []Channel`. A `Channel` is per-bone
-position / rotation / scale tracks. `channel_sample_all` returns the
-trio at time `t`.
+**Tracks.** `Track(T)` is a keyframed curve over flat arrays:
+`times []f32`, `values []T` and one `Interpolation` (`LINEAR`, `STEP`
+or `CUBIC`). A track is a view and does not own memory. `CUBIC`
+stores three values per key (in-tangent, value, out-tangent), the
+glTF layout. `track_sample(track, t, fallback)` clamps to the first
+and last key; rotations slerp.
 
-## Layers + blending
+**Playback.** `playback_advance(&time, &speed, &status, mode,
+duration, dt)` advances a play head. `LOOP` wraps, `ONCE` clamps and
+stops, `PING_PONG` flips the speed at either end.
 
-Animation is layered. Each `Layer` carries a `weight`, a `BlendMode`
-(REPLACE / ADD / MULTIPLY / OVERRIDE), and an optional `bone_mask`
-to restrict its influence to a chain.
+**Splines.** `Spline(T)` is Catmull-Rom over any vector type.
+`spline_build_arc_table` + `spline_sample_uniform` resample it at
+uniform arc length. Used for camera moves, paths and the path
+modifier.
 
-- **FKLayer** — sampled clip + play state (`LOOP` / `ONCE` /
-  `PING_PONG`, speed).
-- **IKLayer** — FABRIK target plus pole hint.
-- **ProceduralLayer** — tail / path / spider-leg / single-bone
-  rotation modifiers.
+## Clips
 
-Layers blend in insertion order. Position uses weighted addition,
-rotation uses SLERP, scale uses weighted multiplication — same shape
-as Unity's animation layer stack.
+A `Clip` is a set of channels sharing one timeline. A `Channel` has
+three `TrackRange`s (position, rotation, scale), each pointing into
+the clip's flat key arrays: one `times`, one `positions`, one
+`rotations`, one `scales`. A clip with any number of channels is a
+handful of allocations, never one per bone.
+
+```odin
+clip: anim.Clip
+anim.clip_init(&clip, channel_count = 1, name = "spin", duration = 2)
+anim.clip_set_rotations(&clip, 0, times, rotations, .LINEAR)
+trs := anim.TRS_IDENTITY
+anim.clip_sample_trs(&clip, 0, t, &trs) // unanimated components keep their input value
+```
+
+`clip_position_track` / `clip_rotation_track` / `clip_scale_track`
+return a channel component as a `Track` view.
+
+## Tier 2: skeletons
+
+`Skeleton` is the shared, immutable **definition** of a bone
+hierarchy. It is SoA, one flat array per attribute indexed by bone:
+
+| Field | Meaning |
+|---|---|
+| `names`, `parents` | bone name, parent index (-1 = root) |
+| `order` | bone indices with every parent before its children |
+| `rest` | local rest pose (`TRS`) |
+| `bind`, `inverse_bind` | skeleton-space rest pose and its inverse |
+| `lengths`, `depths` | rest distance to parent, depth from root |
+
+`skeleton_init(&s, parents, inverse_bind, names)` copies its inputs,
+derives the rest pose from the inverse binds, and fails on cycles or
+out-of-range parents. Bone queries: `find_bone`, `find_bones`,
+`bone_chain` (root → tip), `bone_chain_down`, `bone_mask`,
+`bone_subtree_mask`, `rest_position`, `rest_offset`.
+
+`pose_model(skel, local, model)` turns local transforms into
+skeleton-space transforms in one linear pass over `order`.
+
+A `Rig` is the asset type: one skeleton plus the clips authored for
+it. `find_clip(rig, name)` looks a clip up within that rig.
+
+## Tier 3: animators
+
+An `Animator` is the **per-instance** state of one skeleton. It owns
+a layer stack, an optional transition, and three pose arrays carved
+out of one allocation:
+
+- `local` — per-bone local transform.
+- `model` — per-bone skeleton-space transform.
+- `palette` — `model * inverse_bind`, what a renderer uploads.
+
+Many animators can share one rig; none of them writes to it.
+
+```odin
+a: anim.Animator
+anim.animator_init(&a, &rig.skeleton)
+defer anim.animator_destroy(&a)
+anim.play(&a, rig, "walk")
+// every tick
+palette := anim.animator_update(&a, rig, dt, root_world)
+```
+
+`animator_update` runs this pipeline:
+
+1. Advance every clip layer's play head and the transition.
+2. Blend the clip layers into `local`, honouring weight, blend mode
+   and bone mask. Bones no layer touches stay at rest.
+3. `pose_model` into `model`.
+4. Run procedural layers on `model`, then re-pose the descendants of
+   the bones they moved.
+5. Run IK layers on `model` the same way.
+6. Write `palette`.
+
+`root_world` is the skinned object's world matrix. World-space IK
+targets and the procedural modifiers read it; nothing else does.
+
+### Layers
+
+Each `Layer` has a `weight`, a `BlendMode` (`REPLACE`, `ADD`,
+`MULTIPLY`, `OVERRIDE`) and an optional bone mask. Layers apply in
+stack order. Positions blend by weighted sum, rotations by weighted
+slerp, scales by weighted product.
+
+| Layer | Added with | Does |
+|---|---|---|
+| clip | `play`, `add_clip_layer`, `add_clip_layer_index` | samples one rig clip |
+| IK | `add_ik_layer`, `add_ik_chain_layer` | FABRIK on a bone chain toward a target, `LOCAL` or `WORLD` space |
+| tail | `add_tail_layer` | bones lag behind parent motion with damping |
+| path | `add_path_layer` | bones ride a spline |
+| spider leg | `add_spider_leg_layer` | feet step toward targets with a parabolic lift |
+
+`set_layer_weight`, `set_layer_mask`, `set_ik_target`,
+`set_ik_enabled`, `set_tail_params`, `set_path_params`,
+`set_spider_leg_params`, `spider_leg_target` and `modifier` adjust a
+layer after it is added. `remove_layer` and `clear_layers` drop them.
+
+`transition_to(&a, rig, name, duration, from, to, curve)` cross-fades
+from one layer to another along an easing curve; the transition's
+state reads `COMPLETE` on the tick it finishes.
+
+### Reading the pose
+
+- `bone_matrix(&a, bone)` — skeleton-space matrix of a bone, for
+  sockets.
+- `bone_segments(&a, skel, root_world)` — world-space parent → child
+  segments, for debug drawing (`mjolnir.debug_skeleton` draws them).
 
 ## FABRIK
 
-Two-sweep iterative IK: forward pass anchors the tip to the target,
-backward pass anchors the root, repeat until tolerance. Cheap, no
-matrix inversion, no Jacobian, converges quickly for typical bone
-chains. The pole hint biases the bending plane so elbows and knees
-don't flip.
-
-## Procedural modifiers
-
-- **Tail** — bones counter-rotate parent motion with damping. Gives
-  hair, antennas, tails their follow-through.
-- **Path** — bones distribute along a spline that follows a path,
-  useful for tentacles / ribbons tracking a route.
-- **Spider-leg** — per-leg parabolic foot-lift driven by root motion;
-  each leg lifts when its target drifts too far from where the foot
-  currently is.
-
-## Spline
-
-Catmull-Rom over any vector type with optional uniform arc-length
-resampling — used by paths, camera moves, and the path modifier.
+Two-sweep iterative IK: the forward pass pins the tip to the target,
+the backward pass pins the root, repeat until within tolerance. No
+matrix inversion, no Jacobian, quick to converge on typical chains.
+Per-bone swing and twist constraints (`IKBoneConstraint`) limit each
+joint.
