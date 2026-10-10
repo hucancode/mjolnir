@@ -38,8 +38,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   half := f32(GRID - 1) * 0.5 * SPACING
   render.main_camera_look_at(&engine.render, {half + 2, half + 4, half * 2.4}, {0, half - 1, 0})
 
-  sphere_mesh := render.get_builtin_mesh(&engine.render, .SPHERE)
-  plane_mesh := render.get_builtin_mesh(&engine.render, .QUAD_XZ)
+  sphere_mesh := engine.render.builtin_meshes[.SPHERE]
+  plane_mesh := engine.render.builtin_meshes[.QUAD_XZ]
   ground_albedo, _ := render.create_texture_from_data(&engine.render, #load("statue-1275469_1280.jpg"), generate_mips = true)
   plane_material := render.create_material(&engine.render, {.ALBEDO_TEXTURE}, .PBR,
     albedo_handle = ground_albedo, roughness_value = 0.7, metallic_value = 0.0,
@@ -85,7 +85,10 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   ambient.set_skybox_enabled(&engine.render.ambient, skybox_on)
   for row in 0 ..< GRID do for col in 0 ..< GRID {
     m, r := axis_values(row, col)
-    render.set_material_pbr_params(&engine.render, grid_materials[row][col], metallic = m, roughness = r)
+    mat := render.material(&engine.render, grid_materials[row][col]) or_continue
+    mat.metallic_value = m
+    mat.roughness_value = r
+    render.mark_material_dirty(&engine.render, grid_materials[row][col])
   }
   world.update(&engine.world)
   for i in world.removed_nodes(&engine.world) do render.stage_slot_removal(&engine.render, i)

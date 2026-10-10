@@ -5,7 +5,8 @@ import "../gpu"
 import "core:log"
 import vk "vendor:vulkan"
 
-SHADER_VERT :: #load("../shader/lighting_ambient/vert.spv")
+// The post-process fullscreen triangle.
+SHADER_VERT :: #load("../shader/postprocess/vert.spv")
 SHADER_FRAG :: #load("../shader/lighting_ambient/frag.spv")
 TEXTURE_LUT_GGX :: #load("../assets/lut_ggx.png")
 
@@ -20,7 +21,6 @@ PushConstant :: struct {
   albedo_texture_index:   u32,
   metallic_texture_index: u32,
   emissive_texture_index: u32,
-  prefilter_max_lod:      f32,
   ibl_intensity:          f32,
   skybox_intensity:       f32,
   skybox_blur:            f32,
@@ -195,17 +195,18 @@ record :: proc(
   color_texture := bindless.get_texture_2d(texture_manager, final_image_handle)
   gpu.begin_rendering(
     command_buffer,
-    color_texture.spec.extent,
+    color_texture.extent,
     nil,
-    gpu.create_color_attachment(color_texture),
+    gpu.create_color_attachment(color_texture.view),
   )
   gpu.set_viewport_scissor(
     command_buffer,
-    color_texture.spec.extent,
+    color_texture.extent,
     flip_y = false,
   )
-  gpu.bind_graphics_pipeline(
+  gpu.bind_pipeline(
     command_buffer,
+    .GRAPHICS,
     self.pipeline,
     self.pipeline_layout,
     cameras_descriptor_set,
@@ -222,7 +223,6 @@ record :: proc(
     albedo_texture_index   = gbuffer.albedo,
     metallic_texture_index = gbuffer.metallic_roughness,
     emissive_texture_index = gbuffer.emissive,
-    prefilter_max_lod      = self.ibl.prefilter_max_lod,
     ibl_intensity          = self.ibl_intensity,
     skybox_intensity       = self.skybox_intensity,
     skybox_blur            = self.skybox_blur,

@@ -39,11 +39,6 @@ debug_color :: proc(c: DebugColor) -> [4]f32 {
 
 CIRCLE_SEGMENTS :: 24
 
-// Queue raw debug segments. Each lives `life` seconds of render.update time.
-debug_segments :: proc(self: ^Manager, segs: ..debug_line.Segment) {
-  debug_line.add_segments(&self.internal.debug_line_renderer, ..segs)
-}
-
 @(private = "file")
 dl :: proc(self: ^Manager) -> ^debug_line.Renderer {
   return &self.internal.debug_line_renderer

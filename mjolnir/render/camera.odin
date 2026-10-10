@@ -7,7 +7,6 @@ import "gpu"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import depth_pyramid_system "depth_pyramid"
 import "occlusion_culling"
 import vk "vendor:vulkan"
 
@@ -155,13 +154,11 @@ main_camera :: proc(self: ^Manager) -> (^Camera, bool) #optional_ok {
 create_camera :: proc(
   self: ^Manager,
   width, height: u32,
-  enabled_passes: PassTypeSet = DEFAULT_ENABLED_PASSES,
   position: [3]f32 = {0, 0, 3},
   target: [3]f32 = {0, 0, 0},
   fov: f32 = math.PI * 0.5,
   near_plane: f32 = 0.1,
   far_plane: f32 = 100.0,
-  enable_culling: bool = true,
 ) -> (
   handle: CameraHandle,
   ok: bool,
@@ -170,9 +167,7 @@ create_camera :: proc(
   cam: ^Camera
   handle, cam = cont.alloc(&self.cameras, CameraHandle) or_return
   cam^ = {
-    extent         = {width, height},
-    enabled_passes = enabled_passes,
-    enable_culling = enable_culling,
+    extent = {width, height},
   }
   camera_set_perspective(cam, fov, near_plane, far_plane)
   camera_look_at(cam, position, target)
@@ -242,23 +237,6 @@ resize_swapchain_cameras :: proc(
   return .SUCCESS
 }
 
-visibility_stats :: proc(
-  self: ^Manager,
-  handle: CameraHandle,
-  frame: Maybe(u32) = nil,
-) -> VisibilityStats {
-  frame_index := frame.? or_else self.frame_index
-  cam, ok := cont.get(self.cameras, handle)
-  if !ok do return {node_count = self.node_count}
-  st := occlusion_culling.stats(
-    &self.internal.visibility,
-    &cam.draws[.OPAQUE].count[frame_index],
-    handle.index,
-    frame_index,
-  )
-  return {node_count = self.node_count, opaque_draw_count = st.opaque_draw_count}
-}
-
 // ---------- GPU targets ----------
 
 @(private)
@@ -269,13 +247,6 @@ create_targets :: proc(
 ) -> vk.Result {
   texture_manager := &self.texture_manager
   extent := vk.Extent2D{camera.extent[0], camera.extent[1]}
-  passes := camera.enabled_passes
-  needs_gbuffer := .GEOMETRY in passes || .LIGHTING in passes
-  needs_final :=
-    .LIGHTING in passes ||
-    .TRANSPARENCY in passes ||
-    .PARTICLES in passes ||
-    .POST_PROCESS in passes
   Target :: struct {
     type:   AttachmentType,
     format: vk.Format,
@@ -288,25 +259,21 @@ create_targets :: proc(
     {.EMISSIVE, .R8G8B8A8_UNORM},
   }
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    if needs_final {
-      camera.attachments[.FINAL_IMAGE][frame] = bindless.allocate_texture_2d(
+    camera.attachments[.FINAL_IMAGE][frame] = bindless.allocate_texture_2d(
+      texture_manager,
+      gctx,
+      extent,
+      gpu.HDR_COLOR_FORMAT,
+      {.COLOR_ATTACHMENT, .SAMPLED},
+    ) or_return
+    for t in gbuffer {
+      camera.attachments[t.type][frame] = bindless.allocate_texture_2d(
         texture_manager,
         gctx,
         extent,
-        gpu.HDR_COLOR_FORMAT,
+        t.format,
         {.COLOR_ATTACHMENT, .SAMPLED},
       ) or_return
-    }
-    if needs_gbuffer {
-      for t in gbuffer {
-        camera.attachments[t.type][frame] = bindless.allocate_texture_2d(
-          texture_manager,
-          gctx,
-          extent,
-          t.format,
-          {.COLOR_ATTACHMENT, .SAMPLED},
-        ) or_return
-      }
     }
     camera.attachments[.DEPTH][frame] = bindless.allocate_texture_2d(
       texture_manager,
@@ -331,21 +298,21 @@ create_targets :: proc(
       gpu.end_single_time_command(gctx, &cmd_buf) or_return
     }
   }
-  // Indirect draw buffers (double-buffered) for each pipeline.
-  for &draws in camera.draws {
-    bindless.draw_buffers_init(&draws, gctx, MAX_NODES_IN_SCENE) or_return
+  bindless.draw_buffers_init(
+    &camera.draws,
+    gctx,
+    MAX_NODES_IN_SCENE,
+    len(bindless.DrawPipeline),
+  ) or_return
+  for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
+    occlusion_culling.setup_pyramid(
+      gctx,
+      &camera.depth_pyramid[frame],
+      texture_manager,
+      extent,
+    ) or_return
   }
-  if camera.enable_culling {
-    for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-      depth_pyramid_system.setup_pyramid(
-        gctx,
-        &camera.depth_pyramid[frame],
-        texture_manager,
-        extent,
-      ) or_return
-    }
-    allocate_descriptors(self, gctx, camera) or_return
-  }
+  allocate_descriptors(self, gctx, camera) or_return
   return .SUCCESS
 }
 
@@ -364,15 +331,19 @@ destroy_targets :: proc(
   }
   camera.attachments = {}
   for frame in 0 ..< gpu.FRAMES_IN_FLIGHT {
-    depth_pyramid_system.destroy_pyramid(
+    occlusion_culling.destroy_pyramid(
       gctx,
       &camera.depth_pyramid[frame],
       &self.texture_manager,
     )
   }
   camera.depth_pyramid = {}
-  for &draws in camera.draws do bindless.draw_buffers_destroy(&draws, gctx)
+  bindless.draw_buffers_destroy(&camera.draws, gctx)
   camera.draws = {}
+  gpu.free_descriptor_sets(gctx, ..camera.descriptor_set[:])
+  for &sets in camera.depth_reduce_descriptor_sets {
+    gpu.free_descriptor_sets(gctx, ..sets[:])
+  }
   camera.descriptor_set = {}
   camera.depth_reduce_descriptor_sets = {}
 }
@@ -385,8 +356,7 @@ allocate_descriptors :: proc(
   camera: ^Camera,
 ) -> vk.Result {
   texture_manager := &self.texture_manager
-  normal_descriptor_layout := &self.internal.visibility.depth_descriptor_layout
-  depth_reduce_descriptor_layout := &self.internal.depth_pyramid.depth_reduce_descriptor_layout
+  visibility := &self.internal.visibility
   node_data_buffer := &self.internal.node_data_buffer
   mesh_data_buffer := &self.internal.mesh_data_buffer
   camera_buffer := &self.internal.camera_buffer
@@ -398,20 +368,8 @@ allocate_descriptors :: proc(
       texture_manager,
       camera.attachments[.DEPTH][prev_frame_index],
     )
-    if prev_depth == nil {
-      log.errorf(
-        "allocate_descriptors: missing depth attachment for frame %d",
-        prev_frame_index,
-      )
-      return .ERROR_INITIALIZATION_FAILED
-    }
-    if pyramid.mip_levels == 0 {
-      log.errorf(
-        "allocate_descriptors: missing depth pyramid for frame %d",
-        frame_index,
-      )
-      return .ERROR_INITIALIZATION_FAILED
-    }
+    pyramid_image := bindless.get_texture_2d(texture_manager, pyramid.texture)
+    prev_pyramid_image := bindless.get_texture_2d(texture_manager, prev_pyramid.texture)
     writes: [occlusion_culling.BINDING_COUNT]struct {
       type: vk.DescriptorType,
       info: union {
@@ -425,34 +383,24 @@ allocate_descriptors :: proc(
       .STORAGE_BUFFER,
       gpu.buffer_info(&camera_buffer.buffers[frame_index]),
     }
-    for pipe in bindless.DrawPipeline {
-      binding := occlusion_culling.FIRST_DRAW_BINDING + 2 * int(pipe)
-      draws := &camera.draws[pipe]
-      writes[binding] = {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&draws.count[frame_index]),
-      }
-      writes[binding + 1] = {
-        .STORAGE_BUFFER,
-        gpu.buffer_info(&draws.commands[frame_index]),
-      }
-    }
-    writes[occlusion_culling.BINDING_COUNT - 1] = {
+    writes[3] = {.STORAGE_BUFFER, gpu.buffer_info(&camera.draws.count[frame_index])}
+    writes[4] = {.STORAGE_BUFFER, gpu.buffer_info(&camera.draws.commands[frame_index])}
+    writes[5] = {
       .COMBINED_IMAGE_SAMPLER,
       vk.DescriptorImageInfo {
-        sampler = prev_pyramid.sampler,
-        imageView = prev_pyramid.full_view,
+        sampler = visibility.sampler,
+        imageView = prev_pyramid_image.view,
         imageLayout = .GENERAL,
       },
     }
     camera.descriptor_set[frame_index] = gpu.create_descriptor_set(
       gctx,
-      normal_descriptor_layout,
+      &visibility.cull_set_layout,
       ..writes[:],
     ) or_return
-    for mip in 0 ..< pyramid.mip_levels {
+    for mip in 0 ..< pyramid_image.mip_levels {
       source_info := vk.DescriptorImageInfo {
-        sampler     = pyramid.sampler,
+        sampler     = visibility.sampler,
         imageView   = prev_depth.view if mip == 0 else pyramid.views[mip - 1],
         imageLayout = .GENERAL,
       }
@@ -463,7 +411,7 @@ allocate_descriptors :: proc(
       camera.depth_reduce_descriptor_sets[frame_index][mip] =
         gpu.create_descriptor_set(
           gctx,
-          depth_reduce_descriptor_layout,
+          &visibility.reduce_set_layout,
           {.COMBINED_IMAGE_SAMPLER, source_info},
           {.STORAGE_IMAGE, dest_info},
         ) or_return

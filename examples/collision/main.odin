@@ -111,8 +111,8 @@ spawn_scene :: proc(engine: ^mjolnir.Engine) {
     physics.create_static_body(&phys, s.center, collider = physics.BoxCollider{half_extents = s.half}, user = world.Handle(s.node))
     visual := mjolnir.spawn_mesh(
       engine,
-      render.get_builtin_mesh(&engine.render, .CUBE),
-      render.get_builtin_material(&engine.render, .GRAY),
+      engine.render.builtin_meshes[.CUBE],
+      engine.render.builtin_materials[.GRAY],
       parent = s.node,
     )
     world.scale_xyz(&engine.world, visual, s.half.x, s.half.y, s.half.z)
@@ -127,8 +127,8 @@ spawn_scene :: proc(engine: ^mjolnir.Engine) {
       engine,
       parent = b.node,
       attachment = render.MeshAttachment {
-        handle = render.get_builtin_mesh(&engine.render, obj_mesh(b.shape)),
-        material = render.get_builtin_material(&engine.render, obj_color(b.kind)),
+        handle = engine.render.builtin_meshes[obj_mesh(b.shape)],
+        material = engine.render.builtin_materials[obj_color(b.kind)],
         cast_shadow = true,
       },
     )
@@ -213,8 +213,8 @@ apply_shape :: proc(engine: ^mjolnir.Engine, b: ^Body) {
     &engine.render,
     b.visual.index,
     render.MeshAttachment {
-      handle = render.get_builtin_mesh(&engine.render, obj_mesh(b.shape)),
-      material = render.get_builtin_material(&engine.render, obj_color(b.kind)),
+      handle = engine.render.builtin_meshes[obj_mesh(b.shape)],
+      material = engine.render.builtin_materials[obj_color(b.kind)],
       cast_shadow = true,
     },
   )

@@ -40,11 +40,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
   phys.gravity = {0, -10, 0}
   ground := world.spawn(&engine.world, {0, -0.5, 0})
   physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {40.0, 0.5, 40.0}}, user = world.Handle(ground))
-  ground_visual := mjolnir.spawn_mesh(engine, render.get_builtin_mesh(&engine.render, .CUBE), render.get_builtin_material(&engine.render, .GRAY), parent = ground)
+  ground_visual := mjolnir.spawn_mesh(engine, engine.render.builtin_meshes[.CUBE], engine.render.builtin_materials[.GRAY], parent = ground)
   world.scale_xyz(&engine.world, ground_visual, 40.0, 0.5, 40.0)
   cube_handle = world.spawn(&engine.world, {0, 3, 0})
   cube_body = physics.create_dynamic_body(&phys, {0, 3, 0}, mass = f32(mass), collider = box_collider, user = world.Handle(cube_handle))
-  cube_visual := mjolnir.spawn_mesh(engine, render.get_builtin_mesh(&engine.render, .CUBE), render.get_builtin_material(&engine.render, .CYAN), parent = cube_handle)
+  cube_visual := mjolnir.spawn_mesh(engine, engine.render.builtin_meshes[.CUBE], engine.render.builtin_materials[.CYAN], parent = cube_handle)
   s := box_collider.half_extents
   world.scale_xyz(&engine.world, cube_visual, s.x, s.y, s.z)
   render.main_camera_look_at(&engine.render, {8, 5, 8}, {0, 2, 0})

@@ -59,8 +59,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     engine,
     {0, -1, 0},
     render.MeshAttachment {
-      handle = render.get_builtin_mesh(&engine.render, .QUAD_XZ),
-      material = render.get_builtin_material(&engine.render, .GRAY),
+      handle = engine.render.builtin_meshes[.QUAD_XZ],
+      material = engine.render.builtin_materials[.GRAY],
       cast_shadow = false,
     },
   )
@@ -169,7 +169,7 @@ collect_gltf_resources :: proc(engine: ^mjolnir.Engine, roots: []world.NodeHandl
 
 act_destroy_materials :: proc(engine: ^mjolnir.Engine) {
   if len(example_materials) == 0 do return
-  default_mat := render.get_builtin_material(&engine.render, .GRAY)
+  default_mat := engine.render.builtin_materials[.GRAY]
   for h in example_nodes {
     if a, ok := render.attachment(&engine.render, h.index, render.MeshAttachment); ok {
       a.material = default_mat
@@ -186,7 +186,7 @@ act_destroy_materials :: proc(engine: ^mjolnir.Engine) {
 
 act_destroy_meshes :: proc(engine: ^mjolnir.Engine) {
   if len(example_meshes) == 0 do return
-  cube := render.get_builtin_mesh(&engine.render, .CUBE)
+  cube := engine.render.builtin_meshes[.CUBE]
   for h in example_nodes {
     if a, ok := render.attachment(&engine.render, h.index, render.MeshAttachment); ok {
       a.handle = cube

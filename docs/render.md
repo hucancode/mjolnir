@@ -78,19 +78,19 @@ the update thread.
   and fan-triangulated faces of an OBJ file into an
   `ObjMesh{positions, indices}` (free with `obj_mesh_destroy`).
   `render.create_mesh(&r, geometry)` uploads one into the mesh arena.
-  Builtin primitives are in `get_builtin_mesh`.
+  Builtin primitives are in `r.builtin_meshes` (and colors in
+  `r.builtin_materials`).
 - **Textures.** `create_texture_from_path` / `create_texture_from_data`
   return a bindless `Texture2DHandle`; `destroy_texture` releases it.
 - **Materials.** `create_material` and the `material_pbr`,
-  `material_textured`, `material_unlit`, `material_wireframe`,
-  `material_transparent` shorthands. `set_material_pbr_params` edits
-  one; after editing fields through `material(&r, h)` call
-  `mark_material_dirty`.
+  `material_wireframe`, `material_transparent` shorthands. Edit fields
+  through `material(&r, h)`, then call `mark_material_dirty`.
 - **Sprites.** `create_sprite(&r, texture, columns, rows)` makes a
   sprite sheet; `set_sprite_frame(&r, h, frame)` shows one cell.
   Animate it by setting the frame as time advances.
 - **Emitters, force fields.** `create_emitter` / `create_forcefield`,
-  edited with `set_emitter` / `set_forcefield`.
+  edited in place through `emitter(&r, h)` / `forcefield(&r, h)`;
+  `update` uploads them every tick.
 - **Lights** have no resource; a light is an attachment
   (`point_light_attachment`, `directional_light_attachment`,
   `spot_light_attachment`).
@@ -102,8 +102,11 @@ and the main camera's opaque draw count.
 
 Every mutation marks an entry dirty in a mutex-guarded staging set.
 `render.frame` uploads dirty entries once per frame on the render
-thread. An update is re-uploaded until every frame in flight has it;
-removals wait `FRAMES_IN_FLIGHT` frames before GPU memory is reused.
+thread. Bone palettes live in per-frame buffers and are re-uploaded
+until every frame in flight has them; everything else is written once.
+Freed meshes, materials, sprites, emitters and force fields hold their
+slot (and a mesh its GPU memory) for `FRAMES_IN_FLIGHT + 1` frames
+before reuse.
 
 ## Subpackages
 
@@ -134,7 +137,7 @@ removals wait `FRAMES_IN_FLIGHT` frames before GPU memory is reused.
   a device.
 - One subpackage per pass: `geometry`, `ambient`, `direct_light`,
   `shadow`, `forward`, `particles` (simulation compute + draw),
-  `occlusion_culling`, `depth_pyramid`, `debug_line`,
+  `occlusion_culling` (depth pyramid + cull), `debug_line`,
   `post_process`, `ui`.
 - **`render/gltf`** loads the render part of a glTF file (meshes,
   materials, textures).
@@ -176,28 +179,32 @@ only fragments actually reached by that light get shaded.
 - **2D shadow maps** for directional + spot lights. One compute pass
   per light clips draws against the light frustum; one depth-only
   graphics pass writes a 512² R32_SFLOAT slice.
-- **Cubemap shadow maps** for point lights. One compute pass clips
-  against the light's sphere; one geometry-shader-amplified draw
+- **Cubemap shadow maps** for point lights. The same compute pass
+  clips against the box around the light's range; one
+  geometry-shader-amplified draw
   writes all six faces. Requires
   `-define:REQUIRE_GEOMETRY_SHADER=true` at build time.
 
-Both kinds share one `ShadowMap` record per light, allocated lazily
-on the first cast and released when the light's slot is removed.
+Each frame the first `MAX_SHADOW_MAPS` shadow casters, in slot order,
+take the fixed shadow slots. A slot's draw buffers are created on first
+use and kept until shutdown; its textures switch between cube and 2D
+when it changes to a light of the other kind.
 
 ## Cameras
 
 `render.create_camera` makes a camera with its own per-frame
-attachments and a `PassTypeSet`. The main camera is presented to the
-swapchain. `render.camera_attachment(&r, cam, .FINAL_IMAGE, frame)`
+attachments. Every camera runs the geometry, lighting, particle and
+forward passes; the main camera also gets post-process, debug lines and
+UI, and is presented to the swapchain. `render.camera_attachment(&r, cam, .FINAL_IMAGE, frame)`
 returns a bindless handle — feed it to a UI quad or a material for
 minimaps, mirrors and render-to-texture surfaces.
 
 Controllers (`orbit_controller`, `free_controller`,
 `follow_controller`) are plain values that drive a camera from the
 tick's `input.State` via `camera_controller_update`, which also takes
-whether the mouse and keyboard are captured. Keys and the drag button
-come from the controller's `bindings` (`CameraBindings`, default
-`DEFAULT_CAMERA_BINDINGS`: WASD + QE, shift modifier, left drag). Render does not store them; the caller
+whether the mouse and keyboard are captured. Keys are fixed: WASD + QE
+to move, shift to pan or boost, left drag to orbit. Render does not
+store controllers; the caller
 owns one (the engine keeps `Engine.camera_controller`). The orbit
 controller reads distance, yaw and pitch from the camera's pose each
 tick, so moving the camera directly never makes it snap back.

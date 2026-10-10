@@ -43,12 +43,15 @@ layout(push_constant) uniform AmbientPushConstant {
     uint albedo_texture_index;
     uint metallic_texture_index;
     uint emissive_texture_index;
-    float prefilter_max_lod;
     float ibl_intensity;
     float skybox_intensity;
     float skybox_blur;
     uint skybox_enabled;
 };
+
+float prefilter_max_lod() {
+    return float(textureQueryLevels(samplerCube(cube_textures[prefilter_index], samplers[SAMPLER_LINEAR_CLAMP])) - 1);
+}
 
 vec3 fresnel_schlick_roughness(float cos_theta, vec3 F0, float roughness) {
     return F0 + (max(vec3(1.0 - roughness), F0) - F0)
@@ -67,11 +70,11 @@ vec3 sample_skybox(Camera camera, vec2 uv) {
     vec4 world_far = inv_vp * vec4(ndc, 1.0, 1.0);
     vec3 dir = normalize(world_far.xyz / world_far.w - camera.position.xyz);
     float b = clamp(skybox_blur, 0.0, 1.0);
-    if (b <= 0.0 || prefilter_index == INVALID_TEXTURE || prefilter_max_lod <= 0.0) {
+    if (b <= 0.0 || prefilter_index == INVALID_TEXTURE) {
         vec2 eq_uv = dirToEquirectUv(dir);
         return textureLod(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_REPEAT]), eq_uv, 0.0).rgb;
     }
-    float cube_lod = b * prefilter_max_lod;
+    float cube_lod = b * prefilter_max_lod();
     return textureLod(samplerCube(cube_textures[prefilter_index], samplers[SAMPLER_LINEAR_CLAMP]), dir, cube_lod).rgb;
 }
 
@@ -105,7 +108,7 @@ void main() {
     vec3 F = fresnel_schlick_roughness(NdotV, F0, roughness);
 
     vec3 ambient = vec3(0.0);
-    if (ibl_intensity > 0.0 && prefilter_max_lod > 0.0) {
+    if (ibl_intensity > 0.0 && prefilter_index != INVALID_TEXTURE) {
         vec3 irradiance = texture(samplerCube(cube_textures[irradiance_index], samplers[SAMPLER_LINEAR_CLAMP]), normal).rgb;
         vec3 diffuse = irradiance * albedo;
         vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
@@ -113,7 +116,7 @@ void main() {
         vec3 prefiltered = textureLod(
             samplerCube(cube_textures[prefilter_index], samplers[SAMPLER_LINEAR_CLAMP]),
             R,
-            roughness * prefilter_max_lod
+            roughness * prefilter_max_lod()
         ).rgb;
         vec2 brdf = texture(
             sampler2D(textures[brdf_lut_index], samplers[SAMPLER_LINEAR_CLAMP]),

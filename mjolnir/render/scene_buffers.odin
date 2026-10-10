@@ -36,10 +36,8 @@ init_scene_buffers :: proc(
     int(self.internal.bone_matrix_slab.capacity),
     {.VERTEX},
   ) or_return
-  self.internal.bone_matrix_offsets = make(map[u32]u32)
   defer if ret != .SUCCESS {
-    delete(self.internal.bone_matrix_offsets)
-    gpu.per_frame_bindless_buffer_destroy(&self.internal.bone_buffer, gctx.device)
+    gpu.per_frame_bindless_buffer_destroy(&self.internal.bone_buffer, gctx)
     cont.slab_destroy(&self.internal.bone_matrix_slab)
   }
   gpu.per_frame_bindless_buffer_init(
@@ -49,7 +47,7 @@ init_scene_buffers :: proc(
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.per_frame_bindless_buffer_destroy(&self.internal.camera_buffer, gctx.device)
+    gpu.per_frame_bindless_buffer_destroy(&self.internal.camera_buffer, gctx)
   }
   gpu.bindless_buffer_init(
     &self.internal.material_buffer,
@@ -58,7 +56,7 @@ init_scene_buffers :: proc(
     {.VERTEX, .FRAGMENT},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.material_buffer, gctx.device)
+    gpu.bindless_buffer_destroy(&self.internal.material_buffer, gctx)
   }
   gpu.bindless_buffer_init(
     &self.internal.node_data_buffer,
@@ -67,7 +65,7 @@ init_scene_buffers :: proc(
     {.VERTEX, .FRAGMENT, .COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.node_data_buffer, gctx.device)
+    gpu.bindless_buffer_destroy(&self.internal.node_data_buffer, gctx)
   }
   gpu.bindless_buffer_init(
     &self.internal.mesh_data_buffer,
@@ -76,7 +74,7 @@ init_scene_buffers :: proc(
     {.VERTEX},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.mesh_data_buffer, gctx.device)
+    gpu.bindless_buffer_destroy(&self.internal.mesh_data_buffer, gctx)
   }
   gpu.bindless_buffer_init(
     &self.internal.emitter_buffer,
@@ -85,7 +83,7 @@ init_scene_buffers :: proc(
     {.COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.emitter_buffer, gctx.device)
+    gpu.bindless_buffer_destroy(&self.internal.emitter_buffer, gctx)
   }
   gpu.bindless_buffer_init(
     &self.internal.forcefield_buffer,
@@ -94,7 +92,7 @@ init_scene_buffers :: proc(
     {.COMPUTE},
   ) or_return
   defer if ret != .SUCCESS {
-    gpu.bindless_buffer_destroy(&self.internal.forcefield_buffer, gctx.device)
+    gpu.bindless_buffer_destroy(&self.internal.forcefield_buffer, gctx)
   }
   gpu.bindless_buffer_init(
     &self.internal.sprite_buffer,
@@ -107,149 +105,42 @@ init_scene_buffers :: proc(
 
 @(private)
 destroy_scene_buffers :: proc(self: ^Manager, gctx: ^gpu.GPUContext) {
-  gpu.bindless_buffer_destroy(&self.internal.material_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.node_data_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.mesh_data_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.emitter_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.forcefield_buffer, gctx.device)
-  gpu.bindless_buffer_destroy(&self.internal.sprite_buffer, gctx.device)
-  gpu.per_frame_bindless_buffer_destroy(&self.internal.camera_buffer, gctx.device)
-  delete(self.internal.bone_matrix_offsets)
-  gpu.per_frame_bindless_buffer_destroy(&self.internal.bone_buffer, gctx.device)
+  gpu.bindless_buffer_destroy(&self.internal.material_buffer, gctx)
+  gpu.bindless_buffer_destroy(&self.internal.node_data_buffer, gctx)
+  gpu.bindless_buffer_destroy(&self.internal.mesh_data_buffer, gctx)
+  gpu.bindless_buffer_destroy(&self.internal.emitter_buffer, gctx)
+  gpu.bindless_buffer_destroy(&self.internal.forcefield_buffer, gctx)
+  gpu.bindless_buffer_destroy(&self.internal.sprite_buffer, gctx)
+  gpu.per_frame_bindless_buffer_destroy(&self.internal.camera_buffer, gctx)
+  gpu.per_frame_bindless_buffer_destroy(&self.internal.bone_buffer, gctx)
   cont.slab_destroy(&self.internal.bone_matrix_slab)
 }
 
-// Re-bind all scene buffer descriptor sets after the descriptor pool is reset
-// (happens during full teardown -> setup cycles around the swapchain).
+// Upload a mesh's CPU geometry into the mesh manager and describe it in
+// mesh_data_buffer at `index`. Its allocations are freed by mesh_retire.
 @(private)
-realloc_scene_descriptors :: proc(
-  self: ^Manager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  gpu.bindless_buffer_realloc_descriptor(&self.internal.material_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.internal.node_data_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.internal.mesh_data_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.internal.emitter_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.internal.forcefield_buffer, gctx) or_return
-  gpu.bindless_buffer_realloc_descriptor(&self.internal.sprite_buffer, gctx) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.internal.bone_buffer, gctx) or_return
-  gpu.per_frame_bindless_buffer_realloc_descriptors(&self.internal.camera_buffer, gctx) or_return
-  bindless.mesh_manager_realloc_descriptors(&self.mesh_manager, gctx) or_return
-  return .SUCCESS
-}
-
-// Zero descriptor set handles after a pool reset so a future realloc rebinds
-// them cleanly. The actual VkDescriptorSet objects were freed in bulk by
-// ResetDescriptorPool.
-@(private)
-clear_scene_descriptor_handles :: proc(self: ^Manager) {
-  self.internal.material_buffer.descriptor_set = 0
-  self.internal.node_data_buffer.descriptor_set = 0
-  self.internal.mesh_data_buffer.descriptor_set = 0
-  self.internal.emitter_buffer.descriptor_set = 0
-  self.internal.forcefield_buffer.descriptor_set = 0
-  self.internal.sprite_buffer.descriptor_set = 0
-  for &ds in self.internal.bone_buffer.descriptor_sets do ds = 0
-  for &ds in self.internal.camera_buffer.descriptor_sets do ds = 0
-  self.mesh_manager.vertex_skinning_buffer.descriptor_set = 0
-}
-
-@(private)
-ensure_bone_matrix_range_for_node :: proc(
+upload_mesh :: proc(
   render: ^Manager,
-  handle: u32,
-  bone_count: u32,
-) -> u32 {
-  if existing, ok := render.internal.bone_matrix_offsets[handle]; ok {
-    return existing
-  }
-  offset := cont.slab_alloc(&render.internal.bone_matrix_slab, bone_count)
-  if offset == 0xFFFFFFFF do return 0xFFFFFFFF
-  render.internal.bone_matrix_offsets[handle] = offset
-  return offset
-}
-
-@(private)
-release_bone_matrix_range_for_node :: proc(render: ^Manager, handle: u32) {
-  if offset, ok := render.internal.bone_matrix_offsets[handle]; ok {
-    cont.slab_free(&render.internal.bone_matrix_slab, offset)
-    delete_key(&render.internal.bone_matrix_offsets, handle)
-  }
-}
-
-@(private)
-sync_mesh_geometry_for_handle :: proc(
   gctx: ^gpu.GPUContext,
-  render: ^Manager,
-  handle: u32,
+  index: u32,
+  m: ^Mesh,
   geometry_data: mesh.Geometry,
 ) -> vk.Result {
-  mesh := gpu.mutable_buffer_get(&render.internal.mesh_data_buffer.buffer, handle)
-  if mesh.index_count > 0 {
-    bindless.free_vertices(
-      &render.mesh_manager,
-      BufferAllocation{offset = u32(mesh.vertex_offset), count = 1},
-    )
-    bindless.free_indices(
-      &render.mesh_manager,
-      BufferAllocation{offset = mesh.first_index, count = 1},
-    )
-    if .SKINNED in mesh.flags {
-      bindless.free_vertex_skinning(
-        &render.mesh_manager,
-        BufferAllocation{offset = mesh.skinning_offset, count = 1},
-      )
-    }
+  res: vk.Result
+  m.allocations, res = bindless.allocate_mesh(&render.mesh_manager, gctx, geometry_data)
+  if res != .SUCCESS do return res
+  aabb := mesh.aabb_from_vertices(geometry_data.vertices)
+  data := MeshData {
+    aabb_min        = aabb.min,
+    aabb_max        = aabb.max,
+    index_count     = u32(len(geometry_data.indices)),
+    first_index     = m.allocations.indices.offset,
+    vertex_offset   = i32(m.allocations.vertices.offset),
+    skinning_offset = m.allocations.skinning.offset,
   }
-  mesh.aabb_min = geometry_data.aabb.min
-  mesh.aabb_max = geometry_data.aabb.max
-  mesh.flags = {}
-  mesh.index_count = u32(len(geometry_data.indices))
-  vertex_allocation := bindless.allocate_vertices(
-    &render.mesh_manager,
-    gctx,
-    geometry_data.vertices,
-  ) or_return
-  index_allocation := bindless.allocate_indices(
-    &render.mesh_manager,
-    gctx,
-    geometry_data.indices,
-  ) or_return
-  mesh.first_index = index_allocation.offset
-  mesh.vertex_offset = i32(vertex_allocation.offset)
-  mesh.skinning_offset = 0
-  if len(geometry_data.skinnings) > 0 {
-    skinning_allocation := bindless.allocate_vertex_skinning(
-      &render.mesh_manager,
-      gctx,
-      geometry_data.skinnings,
-    ) or_return
-    mesh.skinning_offset = skinning_allocation.offset
-    mesh.flags |= {.SKINNED}
-  }
+  if m.allocations.skinning.count > 0 do data.flags |= {.SKINNED}
+  gpu.write(&render.internal.mesh_data_buffer.buffer, &data, int(index))
   return .SUCCESS
-}
-
-@(private)
-mesh_destroy :: proc(render: ^Manager, handle: u32) {
-  mesh := gpu.mutable_buffer_get(&render.internal.mesh_data_buffer.buffer, handle)
-  if mesh.index_count > 0 {
-    bindless.free_vertices(
-      &render.mesh_manager,
-      BufferAllocation{offset = u32(mesh.vertex_offset), count = 1},
-    )
-    bindless.free_indices(
-      &render.mesh_manager,
-      BufferAllocation{offset = mesh.first_index, count = 1},
-    )
-  }
-  if .SKINNED in mesh.flags {
-    bindless.free_vertex_skinning(
-      &render.mesh_manager,
-      BufferAllocation{offset = mesh.skinning_offset, count = 1},
-    )
-  }
-  mesh^ = {}
 }
 
 @(private)
@@ -276,48 +167,6 @@ upload_bone_matrices :: proc(
   r := l + len(matrices)
   gpu_slice := gpu.get_all(frame_buffer)
   copy(gpu_slice[l:r], matrices[:])
-}
-
-@(private)
-upload_sprite_data :: proc(
-  render: ^Manager,
-  index: u32,
-  sprite_data: ^SpriteData,
-) {
-  assert(index < MAX_SPRITES, "sprite index exceeds MAX_SPRITES")
-  gpu.write(&render.internal.sprite_buffer.buffer, sprite_data, int(index))
-}
-
-@(private)
-upload_emitter_data :: proc(render: ^Manager, index: u32, emitter: ^EmitterData) {
-  assert(index < MAX_EMITTERS, "emitter index exceeds MAX_EMITTERS")
-  gpu.write(&render.internal.emitter_buffer.buffer, emitter, int(index))
-}
-
-@(private)
-upload_forcefield_data :: proc(
-  render: ^Manager,
-  index: u32,
-  forcefield: ^ForceFieldData,
-) {
-  assert(index < MAX_FORCE_FIELDS, "forcefield index exceeds MAX_FORCE_FIELDS")
-  gpu.write(&render.internal.forcefield_buffer.buffer, forcefield, int(index))
-}
-
-@(private)
-upload_mesh_data :: proc(render: ^Manager, index: u32, mesh: ^MeshData) {
-  assert(index < MAX_MESHES, "mesh index exceeds MAX_MESHES")
-  gpu.write(&render.internal.mesh_data_buffer.buffer, mesh, int(index))
-}
-
-@(private)
-upload_material_data :: proc(
-  render: ^Manager,
-  index: u32,
-  material: ^MaterialData,
-) {
-  assert(index < MAX_MATERIALS, "material index exceeds MAX_MATERIALS")
-  gpu.write(&render.internal.material_buffer.buffer, material, int(index))
 }
 
 @(private)

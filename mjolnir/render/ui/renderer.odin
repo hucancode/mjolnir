@@ -37,12 +37,14 @@ Renderer :: struct {
   pipeline:        vk.Pipeline,
   vertex_buffers:  [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(Vertex2D),
   index_buffers:   [gpu.FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
-  vertices:        [UI_MAX_VERTICES]Vertex2D,
-  indices:         [UI_MAX_INDICES]u32,
+  // Mapped buffers of the frame being recorded.
+  vertices:        []Vertex2D,
+  indices:         []u32,
   vertex_count:    u32,
   index_count:     u32,
   batches:         [dynamic]DrawBatch,
-  commands:        [dynamic]cmd.RenderCommand,
+  // Staged draw2d commands, owned by the caller until the frame is recorded.
+  commands:        []cmd.RenderCommand,
   white_texture:   bindless.Texture2DHandle, // drawn for cmd.NO_TEXTURE
   font_atlas:      bindless.Texture2DHandle, // sampled by text commands
   debug_ctx:       mu.Context,
@@ -68,7 +70,6 @@ init :: proc(
   dpi_scale: f32,
 ) -> vk.Result {
   log.info("Initializing UI renderer pipeline...")
-  self.commands = make([dynamic]cmd.RenderCommand, 0, 256)
   self.batches = make([dynamic]DrawBatch, 0, 64)
   self.dpi_scale = dpi_scale
   mu.init(&self.debug_ctx)
@@ -87,13 +88,6 @@ init :: proc(
   return .SUCCESS
 }
 
-stage_commands :: proc(self: ^Renderer, commands: []cmd.RenderCommand) {
-  clear(&self.commands)
-  for command in commands {
-    append(&self.commands, command)
-  }
-}
-
 setup :: proc(
   self: ^Renderer,
   gctx: ^gpu.GPUContext,
@@ -110,14 +104,12 @@ setup :: proc(
     .R8G8B8A8_UNORM,
     {.SAMPLED},
   ) or_return
-  self.debug_atlas = bindless.allocate_texture_2d_with_data(
+  self.debug_atlas = allocate_alpha_texture(
     texture_manager,
     gctx,
-    raw_data(mu.default_atlas_alpha[:]),
-    vk.DeviceSize(len(mu.default_atlas_alpha)),
-    vk.Extent2D{mu.DEFAULT_ATLAS_WIDTH, mu.DEFAULT_ATLAS_HEIGHT},
-    .R8_UNORM,
-    {.SAMPLED},
+    mu.default_atlas_alpha[:],
+    mu.DEFAULT_ATLAS_WIDTH,
+    mu.DEFAULT_ATLAS_HEIGHT,
   ) or_return
   for i in 0 ..< gpu.FRAMES_IN_FLIGHT {
     self.vertex_buffers[i] = gpu.create_mutable_buffer(
@@ -160,31 +152,40 @@ upload_font_atlas :: proc(
     bindless.free_texture_2d(texture_manager, gctx, self.font_atlas)
     self.font_atlas = {}
   }
-  self.font_atlas = bindless.allocate_texture_2d_with_data(
+  self.font_atlas = allocate_alpha_texture(
     texture_manager,
     gctx,
-    raw_data(pixels),
-    vk.DeviceSize(len(pixels)),
-    vk.Extent2D{width, height},
-    .R8_UNORM,
-    {.SAMPLED},
+    pixels,
+    width,
+    height,
   ) or_return
   return .SUCCESS
 }
 
-// Window content scale applied to the debug UI.
-set_dpi_scale :: proc(self: ^Renderer, dpi_scale: f32) {
-  self.dpi_scale = dpi_scale
-}
-
-// True when the debug UI is hovered; mouse input belongs to it.
-debug_wants_mouse :: proc(self: ^Renderer) -> bool {
-  return self.debug_ctx.hover_root != nil
-}
-
-// True when a debug UI widget has keyboard focus.
-debug_wants_keyboard :: proc(self: ^Renderer) -> bool {
-  return self.debug_ctx.focus_id != 0
+// Upload R8 coverage as white RGBA8 with alpha = coverage, so the shader
+// multiplies every texture sample with the vertex color.
+@(private)
+allocate_alpha_texture :: proc(
+  texture_manager: ^bindless.TextureManager,
+  gctx: ^gpu.GPUContext,
+  pixels: []u8,
+  width, height: u32,
+) -> (
+  bindless.Texture2DHandle,
+  vk.Result,
+) {
+  rgba := make([][4]u8, len(pixels))
+  defer delete(rgba)
+  for a, i in pixels do rgba[i] = {255, 255, 255, a}
+  return bindless.allocate_texture_2d_with_data(
+    texture_manager,
+    gctx,
+    raw_data(rgba),
+    vk.DeviceSize(len(rgba) * size_of([4]u8)),
+    vk.Extent2D{width, height},
+    .R8G8B8A8_UNORM,
+    {.SAMPLED},
+  )
 }
 
 @(private)
@@ -224,7 +225,6 @@ create_pipeline :: proc(
 shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   vk.DestroyPipeline(gctx.device, self.pipeline, nil)
   vk.DestroyPipelineLayout(gctx.device, self.pipeline_layout, nil)
-  delete(self.commands)
   delete(self.batches)
 }
 
@@ -241,6 +241,8 @@ record :: proc(
   draw_commands, draw_debug: bool,
 ) {
   if !draw_commands && !draw_debug do return
+  self.vertices = gpu.get_all(&self.vertex_buffers[frame_index])
+  self.indices = gpu.get_all(&self.index_buffers[frame_index])
   self.vertex_count = 0
   self.index_count = 0
   clear(&self.batches)
@@ -256,16 +258,15 @@ record :: proc(
   end_batch(self)
   if self.index_count == 0 do return
 
-  gpu.write(&self.vertex_buffers[frame_index], self.vertices[:self.vertex_count])
-  gpu.write(&self.index_buffers[frame_index], self.indices[:self.index_count])
   gpu.begin_rendering(
     command_buffer,
     extent,
     nil,
-    gpu.create_color_attachment_view(color_view, .LOAD, .STORE),
+    gpu.create_color_attachment(color_view, .LOAD, .STORE),
   )
-  gpu.bind_graphics_pipeline(
+  gpu.bind_pipeline(
     command_buffer,
+    .GRAPHICS,
     self.pipeline,
     self.pipeline_layout,
     texture_manager.descriptor_set,

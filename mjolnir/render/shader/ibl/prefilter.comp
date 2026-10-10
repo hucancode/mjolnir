@@ -12,7 +12,6 @@ layout(push_constant) uniform Push {
     uint face_size;       // edge length of *this* mip
     float roughness;      // perceptual roughness in [0, 1]
     uint sample_count;    // e.g. 1024
-    float env_face_size;  // edge length of mip 0 of source env (for mipmap LOD bias)
 };
 
 const float PI = 3.14159265359;
@@ -54,12 +53,6 @@ vec3 importance_sample_ggx(vec2 xi, vec3 N, float a) {
     return normalize(tx * H.x + ty * H.y + N * H.z);
 }
 
-float distribution_ggx(float NdotH, float a) {
-    float a2 = a * a;
-    float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (PI * d * d);
-}
-
 void main() {
     uvec3 gid = gl_GlobalInvocationID;
     if (gid.x >= face_size || gid.y >= face_size || gid.z >= 6u) return;
@@ -71,7 +64,6 @@ void main() {
 
     vec3 color = vec3(0.0);
     float weight = 0.0;
-    float sa_texel = 4.0 * PI / (6.0 * env_face_size * env_face_size);
 
     for (uint i = 0u; i < sample_count; ++i) {
         vec2 xi = hammersley(i, sample_count);
@@ -79,13 +71,7 @@ void main() {
         vec3 L = normalize(2.0 * dot(V, H) * H - V);
         float NdotL = max(dot(N, L), 0.0);
         if (NdotL <= 0.0) continue;
-        float NdotH = max(dot(N, H), 0.0);
-        float HdotV = max(dot(H, V), 0.0);
-        float D = distribution_ggx(NdotH, a);
-        float pdf = (D * NdotH) / (4.0 * HdotV + 1e-4);
-        float sa_sample = 1.0 / (float(sample_count) * pdf + 1e-4);
-        float mip_bias = (roughness == 0.0) ? 0.0 : 0.5 * log2(sa_sample / sa_texel);
-        color += textureLod(u_env, L, max(mip_bias, 0.0)).rgb * NdotL;
+        color += textureLod(u_env, L, 0.0).rgb * NdotL;
         weight += NdotL;
     }
     color /= max(weight, 1e-4);

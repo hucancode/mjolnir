@@ -8,9 +8,9 @@ import vk "vendor:vulkan"
 SHADER_VERT :: #load("../shader/debug_line/vert.spv")
 SHADER_FRAG :: #load("../shader/debug_line/frag.spv")
 
-
-MAX_VERTICES :: 131072
 MAX_SEGMENTS :: 65536
+// Every queued segment fits, so record never drops one.
+MAX_VERTICES :: 2 * MAX_SEGMENTS
 
 Vertex :: struct {
   position: [3]f32,
@@ -30,10 +30,6 @@ Segment :: struct {
 Queued :: struct {
   using segment: Segment,
   expiry:        f32,
-}
-
-PushConstant :: struct {
-  camera_index: u32,
 }
 
 Renderer :: struct {
@@ -63,7 +59,7 @@ init :: proc(
 
   self.pipeline_layout = gpu.create_pipeline_layout(
     gctx,
-    vk.PushConstantRange{stageFlags = {.VERTEX}, size = size_of(PushConstant)},
+    vk.PushConstantRange{stageFlags = {.VERTEX}, size = size_of(u32)},
     camera_set_layout,
   ) or_return
 
@@ -167,86 +163,59 @@ record :: proc(
   mapped := gpu.get_all(vbuf)
   now := self.now
 
-  // Pass 1: pack depth-tested. Drop expired + packed-one-frame. Defer overlay to pass 2.
-  vcount := 0
+  // Depth-tested lines pack from the front, overlay lines from the back.
+  // Expired and one-frame segments are dropped while compacting in place.
+  front, back := 0, MAX_VERTICES
   write := 0
-  for i in 0 ..< len(self.segments) {
-    seg := self.segments[i]
+  for seg in self.segments {
     if seg.expiry > 0 && seg.expiry < now do continue
+    v: []Vertex
     if seg.bypass_depth {
-      self.segments[write] = seg
-      write += 1
-      continue
+      back -= 2
+      v = mapped[back:][:2]
+    } else {
+      v = mapped[front:][:2]
+      front += 2
     }
-    if vcount + 2 > MAX_VERTICES {
-      self.segments[write] = seg
-      write += 1
-      continue
-    }
-    mapped[vcount] = Vertex{position = seg.a, color = seg.color}
-    mapped[vcount + 1] = Vertex{position = seg.b, color = seg.color}
-    vcount += 2
+    v[0] = {position = seg.a, color = seg.color}
+    v[1] = {position = seg.b, color = seg.color}
     if seg.expiry != ONE_FRAME_EXPIRY {
       self.segments[write] = seg
       write += 1
     }
   }
-  split := vcount
+  resize(&self.segments, write)
 
-  // Pass 2: pack overlay from survivor prefix; compact in place.
-  write2 := 0
-  for i in 0 ..< write {
-    seg := self.segments[i]
-    if !seg.bypass_depth {
-      self.segments[write2] = seg
-      write2 += 1
-      continue
-    }
-    if vcount + 2 > MAX_VERTICES {
-      self.segments[write2] = seg
-      write2 += 1
-      continue
-    }
-    mapped[vcount] = Vertex{position = seg.a, color = seg.color}
-    mapped[vcount + 1] = Vertex{position = seg.b, color = seg.color}
-    vcount += 2
-    if seg.expiry != ONE_FRAME_EXPIRY {
-      self.segments[write2] = seg
-      write2 += 1
-    }
-  }
-  resize(&self.segments, write2)
-
-  if vcount == 0 do return
+  if front == 0 && back == MAX_VERTICES do return
 
   gpu.begin_rendering(
     cmd,
     extent,
     gpu.create_depth_attachment(
-      depth_image,
+      depth_image.view,
       .LOAD,
       .STORE,
     ),
-    gpu.create_color_attachment_view(color_view, .LOAD, .STORE),
+    gpu.create_color_attachment(color_view, .LOAD, .STORE),
   )
   gpu.set_viewport_scissor(cmd, extent)
 
-  pc := PushConstant{camera_index = camera_index}
+  camera_index := camera_index
   offset := vk.DeviceSize(0)
   vbuf_h := vbuf.buffer
   vk.CmdBindVertexBuffers(cmd, 0, 1, &vbuf_h, &offset)
   descs := [?]vk.DescriptorSet{camera_set}
   vk.CmdBindDescriptorSets(cmd, .GRAPHICS, self.pipeline_layout, 0, 1, raw_data(descs[:]), 0, nil)
-  vk.CmdPushConstants(cmd, self.pipeline_layout, {.VERTEX}, 0, size_of(PushConstant), &pc)
+  vk.CmdPushConstants(cmd, self.pipeline_layout, {.VERTEX}, 0, size_of(u32), &camera_index)
 
   vk.CmdBindPipeline(cmd, .GRAPHICS, self.pipeline)
-  if split > 0 {
+  if front > 0 {
     vk.CmdSetDepthTestEnable(cmd, true)
-    vk.CmdDraw(cmd, u32(split), 1, 0, 0)
+    vk.CmdDraw(cmd, u32(front), 1, 0, 0)
   }
-  if vcount > split {
+  if back < MAX_VERTICES {
     vk.CmdSetDepthTestEnable(cmd, false)
-    vk.CmdDraw(cmd, u32(vcount - split), 1, u32(split), 0)
+    vk.CmdDraw(cmd, u32(MAX_VERTICES - back), 1, u32(back), 0)
   }
   vk.CmdEndRendering(cmd)
 }

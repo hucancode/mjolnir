@@ -8,6 +8,7 @@ import "../../mjolnir/physics"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:math/rand"
 
 NX :: #config(NX, 4)
 NY :: #config(NY, 3)
@@ -26,15 +27,19 @@ main :: proc() {
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  ground_mesh := render.get_builtin_mesh(&engine.render, .CUBE)
-  ground_mat := render.get_builtin_material(&engine.render, .GRAY)
-  sphere_mesh := render.get_builtin_mesh(&engine.render, .SPHERE)
-  sphere_mat := render.get_builtin_material(&engine.render, .MAGENTA)
-  cube_mesh := render.get_builtin_mesh(&engine.render, .CUBE)
-  cube_mat := render.get_builtin_material(&engine.render, .RED)
-  rand_sphere_mesh := render.create_mesh(&engine.render, mesh.make_sphere(random_colors = true))
-  rand_cylinder_mesh := render.create_mesh(&engine.render, mesh.make_cylinder(random_colors = true))
-  rand_mat := render.get_builtin_material(&engine.render, .WHITE)
+  ground_mesh := engine.render.builtin_meshes[.CUBE]
+  ground_mat := engine.render.builtin_materials[.GRAY]
+  sphere_mesh := engine.render.builtin_meshes[.SPHERE]
+  sphere_mat := engine.render.builtin_materials[.MAGENTA]
+  cube_mesh := engine.render.builtin_meshes[.CUBE]
+  cube_mat := engine.render.builtin_materials[.RED]
+  rand_sphere := mesh.make_sphere()
+  rand_cylinder := mesh.make_cylinder()
+  for &v in rand_sphere.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
+  for &v in rand_cylinder.vertices do v.color = {rand.float32(), rand.float32(), rand.float32(), 1}
+  rand_sphere_mesh := render.create_mesh(&engine.render, rand_sphere)
+  rand_cylinder_mesh := render.create_mesh(&engine.render, rand_cylinder)
+  rand_mat := engine.render.builtin_materials[.WHITE]
 
   ground := world.spawn(&engine.world, {0, -0.5, 0})
   physics.create_static_body(&phys, {0, -0.5, 0}, collider = physics.BoxCollider{half_extents = {PLANE_WIDTH, 0.5, PLANE_HEIGHT}}, user = world.Handle(ground))

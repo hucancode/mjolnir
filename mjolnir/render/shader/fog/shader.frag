@@ -23,8 +23,8 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint emissive_texture_index;
     uint depth_texture_index;
     uint input_image_index;
-    uint padding; // Add padding to match Odin struct
-    vec4 fog_color;
+    uint _pad;
+    vec3 fog_color;
     float fog_density;
     float fog_start;
     float fog_end;
@@ -63,6 +63,6 @@ void main() {
     float depth = texture(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r;
     float linear_depth = linearize_depth(depth);
     float fog_factor = compute_fog_factor(linear_depth);
-    vec3 final_color = mix(color.rgb, fog_color.rgb, fog_factor);
+    vec3 final_color = mix(color.rgb, fog_color, fog_factor);
     out_color = vec4(final_color, 1);
 }

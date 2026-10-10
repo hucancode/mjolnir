@@ -24,7 +24,6 @@ layout(push_constant) uniform PostProcessPushConstant {
     uint depth_texture_index;
     uint input_image_index;
     uint _pad;
-    vec2 resolution;
     float hatch_offset_y;
     float lum_threshold_01;
     float lum_threshold_02;
@@ -49,7 +48,7 @@ void main() {
     float raw_lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
     float lum = raw_lum / (raw_lum + 1.0);
 
-    vec2 screen_pos = v_uv * resolution;
+    vec2 screen_pos = v_uv * vec2(textureSize(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
     float a = screen_pos.x + screen_pos.y;
     float b = screen_pos.x - screen_pos.y;
 

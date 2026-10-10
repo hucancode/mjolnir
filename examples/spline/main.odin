@@ -34,13 +34,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
   animation.spline_build_arc_table(&spline, 200)
 
   mats := [?]render.MaterialHandle{
-    render.get_builtin_material(&engine.render, .RED), render.get_builtin_material(&engine.render, .GREEN),
-    render.get_builtin_material(&engine.render, .BLUE), render.get_builtin_material(&engine.render, .YELLOW),
-    render.get_builtin_material(&engine.render, .CYAN), render.get_builtin_material(&engine.render, .MAGENTA),
-    render.get_builtin_material(&engine.render, .WHITE), render.get_builtin_material(&engine.render, .GRAY),
-    render.get_builtin_material(&engine.render, .BLACK),
+    engine.render.builtin_materials[.RED], engine.render.builtin_materials[.GREEN],
+    engine.render.builtin_materials[.BLUE], engine.render.builtin_materials[.YELLOW],
+    engine.render.builtin_materials[.CYAN], engine.render.builtin_materials[.MAGENTA],
+    engine.render.builtin_materials[.WHITE], engine.render.builtin_materials[.GRAY],
+    engine.render.builtin_materials[.BLACK],
   }
-  cube := render.get_builtin_mesh(&engine.render, .CUBE)
+  cube := engine.render.builtin_meshes[.CUBE]
   for i in 0 ..< CUBE_COUNT {
     cubes[i] = mjolnir.spawn(engine, {0, 0, 0}, render.MeshAttachment{handle = cube, material = mats[i % len(mats)]})
     world.scale(&engine.world, cubes[i], 0.3)

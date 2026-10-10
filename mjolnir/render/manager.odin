@@ -5,7 +5,6 @@ import cont "../containers"
 import "gpu"
 import "ambient"
 import "debug_line"
-import depth_pyramid_system "depth_pyramid"
 import "direct_light"
 import "forward"
 import "geometry"
@@ -18,12 +17,13 @@ import vk "vendor:vulkan"
 
 MAX_NODES_IN_SCENE :: 65536
 MAX_ACTIVE_CAMERAS :: 128
+// direct_light packs camera indices into 16 bits
+#assert(MAX_ACTIVE_CAMERAS < 0xFFFF)
 MAX_LIGHTS :: 256
 MAX_MESHES :: 65536
 MAX_MATERIALS :: 4096
 MAX_SPRITES :: 4096
 MAX_SHADOW_MAPS :: 16
-INVALID_SHADOW_INDEX :: 0xFFFFFFFF
 SHADOW_MAP_SIZE :: 512
 // Frames a freed CPU resource slot stays reserved before reuse, so in-flight
 // frames never see a recycled index.
@@ -45,9 +45,7 @@ Primitive :: enum {
   QUAD_XZ,
   QUAD_XY,
   CONE,
-  CAPSULE,
   CYLINDER,
-  TORUS,
 }
 
 Color :: enum {
@@ -64,11 +62,9 @@ Color :: enum {
 
 MaterialType :: enum {
   PBR,
-  UNLIT,
   WIREFRAME,
   TRANSPARENT,
   RANDOM_COLOR,
-  LINE_STRIP,
 }
 
 MeshFlag :: enum u32 {
@@ -82,7 +78,6 @@ ShaderFeature :: enum {
   METALLIC_ROUGHNESS_TEXTURE = 1,
   NORMAL_TEXTURE             = 2,
   EMISSIVE_TEXTURE           = 3,
-  OCCLUSION_TEXTURE          = 4,
 }
 
 ShaderFeatureSet :: bit_set[ShaderFeature;u32]
@@ -94,7 +89,6 @@ NodeFlag :: enum u32 {
   MATERIAL_WIREFRAME,
   MATERIAL_SPRITE,
   MATERIAL_RANDOM_COLOR,
-  MATERIAL_LINE_STRIP,
   CASTS_SHADOW,
 }
 
@@ -156,46 +150,6 @@ ForceFieldData :: particles.ForceField
 MAX_EMITTERS :: particles.MAX_EMITTERS
 MAX_FORCE_FIELDS :: particles.MAX_FORCE_FIELDS
 
-// Per-light shadow resources, keyed by light node index. Point lights render
-// a cube map, spot and directional lights a 2D map; `textures` holds the
-// matching bindless handle. View/projection are derived from light state per
-// frame (see build_shadow_cache).
-@(private)
-ShadowMap :: struct {
-  cube:            bool,
-  textures:        [gpu.FRAMES_IN_FLIGHT]Handle,
-  draws:           bindless.DrawBuffers,
-  descriptor_sets: [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
-}
-
-PointLight :: struct {
-  color:    [4]f32, // RGB + intensity
-  position: [3]f32,
-  radius:   f32,
-}
-
-SpotLight :: struct {
-  color:       [4]f32,
-  position:    [3]f32,
-  direction:   [3]f32,
-  radius:      f32,
-  angle_inner: f32,
-  angle_outer: f32,
-}
-
-DirectionalLight :: struct {
-  color:     [4]f32,
-  position:  [3]f32,
-  direction: [3]f32,
-  radius:    f32,
-}
-
-Light :: union {
-  PointLight,
-  SpotLight,
-  DirectionalLight,
-}
-
 // Internal owns GPU primitives and CPU-side bookkeeping. Private to render.
 @(private)
 Internal :: struct {
@@ -218,10 +172,7 @@ Internal :: struct {
   forcefield_buffer:            gpu.BindlessBuffer(ForceFieldData),
   sprite_buffer:                gpu.BindlessBuffer(SpriteData),
   bone_matrix_slab:             cont.SlabAllocator,
-  bone_matrix_offsets:          map[u32]u32,
-  // CPU copy of each slot's skin palette; re-uploaded to every per-frame
-  // bone buffer until all frames in flight hold it.
-  bone_matrices:                map[u32][]matrix[4, 4]f32,
+  bones:                        map[u32]BonePalette,
   // Pass renderers - never accessed from outside the render package.
   geometry:                     geometry.Renderer,
   direct_light:                 direct_light.Renderer,
@@ -231,11 +182,11 @@ Internal :: struct {
   ui:                           ui_render.Renderer,
   // Compute / culling / shadow systems.
   visibility:                   occlusion_culling.System,
-  depth_pyramid:                depth_pyramid_system.System,
   shadow:                       shadow.System,
-  // Per-light render-side state. Indexed by light node index.
-  lights:                       map[u32]Light,
-  shadow_maps:                  map[u32]ShadowMap,
+  // Slots whose attachment is a light; collect_lights reads them each frame.
+  light_slots:                  map[u32]struct{},
+  frame_lights:                 [dynamic]FrameLight,
+  shadow_maps:                  [MAX_SHADOW_MAPS]ShadowMap,
   staging:                      Staging,
   // Pending overlay font atlas upload, applied by flush on the render thread.
   ui_atlas_pixels:              []u8,
@@ -277,7 +228,6 @@ Manager :: struct {
   builtin_meshes:    [Primitive]MeshHandle,
   cameras:           cont.Pool(Camera),
   main_camera:       CameraHandle,
-  color_format:      vk.Format,
   // Single source of truth for active scene node count. Drives compute
   // dispatch sizing across visibility, depth pyramid, and both shadow culls.
   node_count:        u32,
@@ -295,38 +245,6 @@ AttachmentType :: enum {
   METALLIC_ROUGHNESS = 4,
   EMISSIVE           = 5,
   DEPTH              = 6,
-}
-
-PassType :: enum {
-  SHADOW,
-  GEOMETRY,
-  LIGHTING,
-  TRANSPARENCY,
-  PARTICLES,
-  POST_PROCESS,
-  SPRITE,
-  WIREFRAME,
-  LINE_STRIP,
-  RANDOM_COLOR,
-  DEBUG_LINE,
-  UI,
-}
-
-PassTypeSet :: bit_set[PassType;u32]
-
-DEFAULT_ENABLED_PASSES :: PassTypeSet{
-  .SHADOW,
-  .GEOMETRY,
-  .LIGHTING,
-  .TRANSPARENCY,
-  .PARTICLES,
-  .POST_PROCESS,
-  .SPRITE,
-  .WIREFRAME,
-  .LINE_STRIP,
-  .RANDOM_COLOR,
-  .DEBUG_LINE,
-  .UI,
 }
 
 PerspectiveProjection :: struct {
@@ -350,24 +268,17 @@ CameraProjection :: union {
 
 // A view into the scene: pose + projection, plus the GPU resources it renders
 // into (attachments, indirect draw buffers, depth pyramid, descriptor sets)
-// and the per-camera pass enable/culling flags.
 Camera :: struct {
   position:                     [3]f32,
   rotation:                     quaternion128,
   projection:                   CameraProjection,
   extent:                       [2]u32, // width, height
   attachments:                  [AttachmentType][gpu.FRAMES_IN_FLIGHT]bindless.Texture2DHandle,
-  // Indirect draw buffers per pipeline (double-buffered for async compute).
-  // Frame N compute writes to buffers[N], Frame N graphics reads from buffers[N-1].
-  draws:                        [bindless.DrawPipeline]bindless.DrawBuffers,
-  depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]depth_pyramid_system.DepthPyramid,
+  // One indirect draw list per bindless.DrawPipeline (double-buffered for
+  // async compute). Frame N compute writes to buffers[N], Frame N graphics
+  // reads from buffers[N-1].
+  draws:                        bindless.DrawBuffers,
+  depth_pyramid:                [gpu.FRAMES_IN_FLIGHT]occlusion_culling.DepthPyramid,
   descriptor_set:               [gpu.FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  depth_reduce_descriptor_sets: [gpu.FRAMES_IN_FLIGHT][depth_pyramid_system.MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
-  enabled_passes:               PassTypeSet,
-  enable_culling:               bool,
-}
-
-VisibilityStats :: struct {
-  node_count:        u32,
-  opaque_draw_count: u32,
+  depth_reduce_descriptor_sets: [gpu.FRAMES_IN_FLIGHT][occlusion_culling.MAX_DEPTH_MIPS_LEVEL]vk.DescriptorSet,
 }

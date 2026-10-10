@@ -16,10 +16,15 @@ ForwardPipelineDesc :: struct {
   cull_mode:    vk.CullModeFlags,
 }
 
+// The geometry pass's vertex shader; its outputs feed every mesh fragment
+// shader.
+@(private = "file")
+MESH_VERT :: #load("../shader/gbuffer/vert.spv")
+
 // OPAQUE is drawn by the geometry pass.
 PIPELINES := #partial [bindless.DrawPipeline]ForwardPipelineDesc {
   .TRANSPARENT = {
-    vert = #load("../shader/transparent/vert.spv"),
+    vert = MESH_VERT,
     frag = #load("../shader/transparent/frag.spv"),
     sets = bindless.MESH_SETS,
     topology = .TRIANGLE_LIST,
@@ -27,26 +32,19 @@ PIPELINES := #partial [bindless.DrawPipeline]ForwardPipelineDesc {
     cull_mode = {.BACK},
   },
   .WIREFRAME = {
-    vert = #load("../shader/wireframe/vert.spv"),
+    vert = MESH_VERT,
     frag = #load("../shader/wireframe/frag.spv"),
     sets = bindless.MESH_SETS,
     topology = .TRIANGLE_LIST,
     polygon_mode = .LINE,
   },
   .RANDOM_COLOR = {
-    vert = #load("../shader/random_color/vert.spv"),
+    vert = MESH_VERT,
     frag = #load("../shader/random_color/frag.spv"),
     sets = bindless.MESH_SETS,
     topology = .TRIANGLE_LIST,
     polygon_mode = .FILL,
     cull_mode = {.BACK},
-  },
-  .LINE_STRIP = {
-    vert = #load("../shader/line_strip/vert.spv"),
-    frag = #load("../shader/line_strip/frag.spv"),
-    sets = bindless.MESH_SETS,
-    topology = .LINE_STRIP,
-    polygon_mode = .LINE,
   },
   .SPRITE = {
     vert = #load("../shader/sprite/vert.spv"),
@@ -119,7 +117,8 @@ shutdown :: proc(self: ^Renderer, gctx: ^gpu.GPUContext) {
   self^ = {}
 }
 
-// record draws one forward pipeline inside the caller's render scope.
+// record draws one forward pipeline inside the caller's render scope, reading
+// the pipeline's list from the camera's draw buffers (see bindless.DrawBuffers).
 record :: proc(
   self: ^Renderer,
   cmd: vk.CommandBuffer,
@@ -152,9 +151,9 @@ record :: proc(
   vk.CmdDrawIndexedIndirectCount(
     cmd,
     draw_buffer,
-    0,
+    vk.DeviceSize(int(pipe) * int(max_draw_count) * size_of(vk.DrawIndexedIndirectCommand)),
     count_buffer,
-    0,
+    vk.DeviceSize(int(pipe) * size_of(u32)),
     max_draw_count,
     u32(size_of(vk.DrawIndexedIndirectCommand)),
   )

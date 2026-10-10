@@ -6,7 +6,6 @@ import cont "../containers"
 import "gpu"
 import "ambient"
 import "debug_line"
-import depth_pyramid_system "depth_pyramid"
 import "direct_light"
 import "forward"
 import "geometry"
@@ -24,15 +23,13 @@ init_subsystems :: proc(
   swapchain_format: vk.Format,
   dpi_scale: f32,
 ) -> vk.Result {
-  shadow_include := transmute(u32)NodeFlagSet{.VISIBLE}
+  shadow_include := transmute(u32)NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
   shadow_exclude := transmute(u32)NodeFlagSet{
     .MATERIAL_TRANSPARENT,
     .MATERIAL_WIREFRAME,
     .MATERIAL_RANDOM_COLOR,
-    .MATERIAL_LINE_STRIP,
   }
   occlusion_culling.init(&self.internal.visibility, gctx, MAX_NODES_IN_SCENE) or_return
-  depth_pyramid_system.init(&self.internal.depth_pyramid, gctx) or_return
   shadow.init(
     &self.internal.shadow,
     gctx,
@@ -59,7 +56,9 @@ init_subsystems :: proc(
     &self.internal.particles,
     gctx,
     self.internal.emitter_buffer.set_layout,
+    self.internal.emitter_buffer.descriptor_set,
     self.internal.forcefield_buffer.set_layout,
+    self.internal.forcefield_buffer.descriptor_set,
     self.internal.node_data_buffer.set_layout,
     self.internal.camera_buffer.set_layout,
     self.texture_manager.set_layout,
@@ -116,19 +115,17 @@ init :: proc(
   gpu.swapchain_init(&self.swapchain, gctx, framebuffer_size) or_return
   swapchain_format := self.swapchain.format.format
   gpu.descriptor_pool_init(gctx, DESCRIPTOR_POOL_SIZES[:], DESCRIPTOR_POOL_MAX_SETS) or_return
-  self.color_format = swapchain_format
   cont.init(&self.cameras, MAX_ACTIVE_CAMERAS)
-  init_light_state(self)
   init_instances(self)
   init_resource_pools(self)
   gpu.allocate_command_buffer(gctx, self.internal.command_buffers[:]) or_return
-  if gctx.has_async_compute {
+  if gpu.has_async_compute(gctx) {
     gpu.allocate_compute_command_buffer(
       gctx,
       self.internal.compute_command_buffers[:],
     ) or_return
   }
-  bindless.mesh_manager_init(&self.mesh_manager, gctx)
+  bindless.mesh_manager_init(&self.mesh_manager, gctx) or_return
   init_scene_buffers(self, gctx) or_return
   bindless.texture_manager_init(&self.texture_manager, gctx) or_return
   init_subsystems(self, gctx, swapchain_format, dpi_scale) or_return
@@ -143,25 +140,16 @@ setup :: proc(self: ^Manager) -> (ret: vk.Result) {
   if self.internal.level_ready do return .SUCCESS
   gctx := &self.gctx
   swapchain_extent := self.swapchain.extent
-  swapchain_format := self.swapchain.format.format
   self.internal.level_ready = true
   defer if ret != .SUCCESS do teardown(self)
-  bindless.texture_manager_setup(&self.texture_manager, gctx) or_return
-  realloc_scene_descriptors(self, gctx) or_return
+  bindless.texture_manager_setup(&self.texture_manager)
   ambient.setup(&self.ambient, gctx, &self.texture_manager) or_return
-  direct_light.setup(&self.internal.direct_light, gctx) or_return
-  particles.setup(
-    &self.internal.particles,
-    gctx,
-    self.internal.emitter_buffer.descriptor_set,
-    self.internal.forcefield_buffer.descriptor_set,
-  ) or_return
+  particles.reset(&self.internal.particles)
   post_process.setup(
     &self.post_process,
     gctx,
     &self.texture_manager,
     swapchain_extent,
-    swapchain_format,
   ) or_return
   ui_render.setup(&self.internal.ui, gctx, &self.texture_manager) or_return
   if _, ok := main_camera(self); !ok {
@@ -189,15 +177,12 @@ teardown :: proc(self: ^Manager) {
   clear_slots(self)
   it := cont.iterator(&self.cameras)
   for _, handle in cont.next(&it, CameraHandle) do destroy_camera(self, handle)
-  release_all_light_shadows(self, gctx)
+  // texture_manager_teardown destroys the shadow textures
+  for &sm in self.internal.shadow_maps do sm.textures = {}
   ui_render.teardown(&self.internal.ui, gctx)
   post_process.teardown(&self.post_process, gctx, &self.texture_manager)
-  particles.teardown(&self.internal.particles, gctx)
   ambient.teardown(&self.ambient, gctx, &self.texture_manager)
-  direct_light.teardown(&self.internal.direct_light, gctx)
   bindless.texture_manager_teardown(&self.texture_manager, gctx)
-  clear_scene_descriptor_handles(self)
-  vk.ResetDescriptorPool(gctx.device, gctx.descriptor_pool, {})
   // the GPU is idle: destroy what teardown queued for deferred destruction
   gpu.deferred_flush(gctx)
 }
@@ -215,7 +200,7 @@ shutdown :: proc(self: ^Manager) {
   gctx := &self.gctx
   vk.DeviceWaitIdle(gctx.device)
   gpu.free_command_buffer(gctx, ..self.internal.command_buffers[:])
-  if gctx.has_async_compute {
+  if gpu.has_async_compute(gctx) {
     gpu.free_compute_command_buffer(gctx, self.internal.compute_command_buffers[:])
   }
   ui_render.shutdown(&self.internal.ui, gctx)
@@ -227,17 +212,16 @@ shutdown :: proc(self: ^Manager) {
   direct_light.shutdown(&self.internal.direct_light, gctx)
   shadow.shutdown(&self.internal.shadow, gctx)
   geometry.shutdown(&self.internal.geometry, gctx)
-  depth_pyramid_system.shutdown(&self.internal.depth_pyramid, gctx)
   occlusion_culling.shutdown(&self.internal.visibility, gctx)
   bindless.texture_manager_shutdown(&self.texture_manager, gctx)
   destroy_scene_buffers(self, gctx)
   bindless.mesh_manager_shutdown(&self.mesh_manager, gctx)
   cont.destroy(&self.cameras, proc(_: ^Camera) {})
-  destroy_light_state(self)
+  destroy_light_state(self, gctx)
   destroy_resource_pools(self)
   staging_destroy(&self.internal.staging)
-  for _, palette in self.internal.bone_matrices do delete(palette)
-  delete(self.internal.bone_matrices)
+  for _, p in self.internal.bones do delete(p.matrices)
+  delete(self.internal.bones)
   delete(self.instances)
   delete(self.internal.ui_atlas_pixels)
   gpu.swapchain_destroy(&self.swapchain, gctx.device)
@@ -252,16 +236,14 @@ recreate_swapchain :: proc(self: ^Manager, framebuffer_size: [2]u32, dpi_scale: 
   old_extent := self.swapchain.extent
   gpu.swapchain_recreate(gctx, &self.swapchain, framebuffer_size) or_return
   extent := self.swapchain.extent
-  color_format := self.swapchain.format.format
   resize_swapchain_cameras(self, old_extent, extent) or_return
   post_process.recreate_images(
     gctx,
     &self.post_process,
     &self.texture_manager,
     extent,
-    color_format,
   ) or_return
-  ui_render.set_dpi_scale(&self.internal.ui, dpi_scale)
+  self.internal.ui.dpi_scale = dpi_scale
   return .SUCCESS
 }
 

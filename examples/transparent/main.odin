@@ -21,10 +21,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Solid red sphere behind the glass slabs
   red_mat := render.material_pbr(&engine.render, {0.95, 0.15, 0.15, 1}, roughness = 0.4)
-  mjolnir.spawn_mesh(engine, render.get_builtin_mesh(&engine.render, .SPHERE), red_mat, {0, 1, -2})
+  mjolnir.spawn_mesh(engine, engine.render.builtin_meshes[.SPHERE], red_mat, {0, 1, -2})
 
   // Stack of transparent quads, increasing opacity
-  cube := render.get_builtin_mesh(&engine.render, .CUBE)
+  cube := engine.render.builtin_meshes[.CUBE]
   colors := [4][4]f32{
     {0.2, 0.7, 1.0, 0.20},
     {0.2, 1.0, 0.4, 0.40},

@@ -65,11 +65,11 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout(location = 0) in vec3 inWorldPos;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec2 inTexCoord;
-layout(location = 3) in vec4 inColor;
-layout(location = 4) in mat3 inTBN;
-layout(location = 7) flat in uint node_index;
+layout(location = 1) in vec4 inColor;
+layout(location = 2) in vec3 inNormal;
+layout(location = 3) in vec2 inTexCoord;
+layout(location = 4) in vec4 inTangent;
+layout(location = 5) flat in uint node_index;
 
 layout(location = 0) out vec4 outColor;
 
@@ -156,7 +156,7 @@ void main() {
         emissive = vec3(material.emissive_value);
     }
 
-    vec3 N;
+    vec3 N = normalize(inNormal);
     if (has_normal) {
         vec2 n_xy = texture(
             sampler2D(textures[material.normal_index], samplers[SAMPLER_LINEAR_REPEAT]),
@@ -164,9 +164,9 @@ void main() {
         ).xy * 2.0 - 1.0;
         float n_z = sqrt(clamp(1.0 - dot(n_xy, n_xy), 0.0, 1.0));
         vec3 normalSample = vec3(n_xy, n_z);
-        N = normalize(inTBN * normalSample);
-    } else {
-        N = normalize(inNormal);
+        vec3 T = normalize(inTangent.xyz);
+        vec3 B = normalize(cross(N, T)) * inTangent.w;
+        N = normalize(mat3(T, B, N) * normalSample);
     }
 
     Camera camera = camera_buffer.cameras[camera_index];

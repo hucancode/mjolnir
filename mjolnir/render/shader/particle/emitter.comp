@@ -5,12 +5,11 @@ const int MAX_EMITTERS = 64;
 
 struct Particle {
     vec3 position;
-    float size;
+    float size_start;
     vec3 velocity;
     float size_end;
     vec4 color_start;
     vec4 color_end;
-    vec4 color;
     float life;
     float max_life;
     float weight;
@@ -22,9 +21,6 @@ struct Emitter {
   float size_start;
   vec4 color_start;
   vec4 color_end;
-  vec3 aabb_min;
-  float emission_rate;
-  vec3 aabb_max;
   float particle_lifetime;
   float position_spread;
   float velocity_spread;
@@ -44,12 +40,13 @@ layout(set = 1, binding = 0) buffer ParticleBuffer {
     Particle particles[];
 };
 
-layout(set = 1, binding = 1) buffer ParticleCounter {
-    uint particle_count;
+// Next ring slot to write; wraps modulo MAX_PARTICLES so new particles
+// overwrite the oldest ones once the ring is full.
+layout(set = 1, binding = 1) buffer ParticleCursor {
+    uint cursor;
 };
 
 layout(set = 1, binding = 2) uniform ParamsBuffer {
-    uint max_particles;
     uint emitter_count;
     uint forcefield_count;
     float delta_time;
@@ -71,9 +68,8 @@ layout(set = 2, binding = 0) readonly buffer WorldMatrixBuffer {
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 // PCG hash: gives independent, well-distributed 32-bit outputs even when
-// inputs differ by 1. The sin-based hash used previously folds nearby seeds
-// onto nearby outputs, which clusters spawn positions around a single point
-// whenever the emitter index dominates the seed.
+// inputs differ by 1, so spawn positions do not cluster when the emitter
+// index dominates the seed.
 uint pcg_hash(uint state) {
     state = state * 747796405u + 2891336453u;
     uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
@@ -109,12 +105,11 @@ void main() {
     if (node_index >= nodes.length()) {
         return;
     }
-    // emit_count is computed CPU-side each frame (see world.tick_emitters)
+    // emit_count is computed CPU-side each frame (see render.update)
     // so per-frame restages don't clobber the fractional accumulator.
     uint emit_count = emitters[emitter_idx].emit_count;
     for (uint i = 0; i < emit_count; ++i) {
-        uint idx = atomicAdd(particle_count, 1);
-        if (idx >= MAX_PARTICLES) break;
+        uint idx = atomicAdd(cursor, 1u) % uint(MAX_PARTICLES);
         // Per-particle seed that varies across frames, emitters, and particles.
         // Without frame_counter every emission with the same idx/emitter would
         // hash to identical randomness, so low-rate emitters always spawned at
@@ -134,29 +129,19 @@ void main() {
         vec3 base_vel = world_rotation * emitters[emitter_idx].initial_velocity.xyz;
         vec3 vel_spread = world_rotation * random_in_sphere(emitters[emitter_idx].velocity_spread, seed + 7u);
         vec4 velocity = vec4(base_vel + vel_spread, 0.0);
-        // Color
-        vec4 color_start = emitters[emitter_idx].color_start;
-        vec4 color_end = emitters[emitter_idx].color_end;
-        // Size
-        float size_start = emitters[emitter_idx].size_start;
-        float size_end = emitters[emitter_idx].size_end;
-        // Life
         float lifetime = emitters[emitter_idx].particle_lifetime;
-        // Weight
         float weight = emitters[emitter_idx].weight + (rand_unit(seed + 13u) - 0.5) * emitters[emitter_idx].weight_spread;
-        // Texture index
-        uint texture_index = emitters[emitter_idx].texture_index;
-        // Write particle
-        particles[idx].position = position.xyz;
-        particles[idx].velocity = velocity.xyz;
-        particles[idx].color_start = color_start;
-        particles[idx].color_end = color_end;
-        particles[idx].color = color_start;
-        particles[idx].size = size_start;
-        particles[idx].size_end = size_end;
-        particles[idx].life = lifetime;
-        particles[idx].max_life = lifetime;
-        particles[idx].weight = weight;
-        particles[idx].texture_index = texture_index;
+        particles[idx] = Particle(
+            position.xyz,
+            emitters[emitter_idx].size_start,
+            velocity.xyz,
+            emitters[emitter_idx].size_end,
+            emitters[emitter_idx].color_start,
+            emitters[emitter_idx].color_end,
+            lifetime,
+            lifetime,
+            weight,
+            emitters[emitter_idx].texture_index
+        );
     }
 }

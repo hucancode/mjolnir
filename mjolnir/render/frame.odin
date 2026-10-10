@@ -6,7 +6,6 @@ import geom "../geometry"
 import "gpu"
 import "ambient"
 import "debug_line"
-import depth_pyramid_system "depth_pyramid"
 import "direct_light"
 import "forward"
 import "geometry"
@@ -21,20 +20,17 @@ import vk "vendor:vulkan"
 record_compute_commands :: proc(
   self: ^Manager,
   frame_index: u32,
-  gctx: ^gpu.GPUContext,
-  cull_cameras: []CameraHandle,
-) -> vk.Result {
-  cmd :=
-    gctx.has_async_compute ? self.internal.compute_command_buffers[frame_index] : self.internal.command_buffers[frame_index]
+  cmd: vk.CommandBuffer,
+) {
   // Compute for frame N builds pyramid[N] and writes the draw lists of
   // frame N+1, culled against pyramid[N].
   next_frame_index := (frame_index + 1) % gpu.FRAMES_IN_FLIGHT
-  for handle in cull_cameras {
-    cam := cont.get(self.cameras, handle) or_continue
-    depth_pyramid_system.build_pyramid(
-      &self.internal.depth_pyramid,
+  it := cont.iterator(&self.cameras)
+  for cam, handle in cont.next(&it, CameraHandle) {
+    occlusion_culling.build_pyramid(
+      &self.internal.visibility,
       cmd,
-      self.node_count,
+      &self.texture_manager,
       &cam.depth_pyramid[frame_index],
       cam.depth_reduce_descriptor_sets[frame_index][:],
     )
@@ -46,8 +42,6 @@ record_compute_commands :: proc(
       self.node_count,
       &cam.draws,
       cam.descriptor_set[next_frame_index],
-      cam.depth_pyramid[frame_index].width,
-      cam.depth_pyramid[frame_index].height,
     )
   }
   particles.simulate(
@@ -55,27 +49,24 @@ record_compute_commands :: proc(
     cmd,
     self.internal.node_data_buffer.descriptor_set,
   )
-  return .SUCCESS
 }
 
 @(private)
 render_shadow_depth :: proc(
   self: ^Manager,
   frame_index: u32,
-  cache: map[u32]shadow.ShadowFrameInfo,
+  lights: []FrameLight,
 ) -> vk.Result {
   cmd := self.internal.command_buffers[frame_index]
   scene := scene_bindings(self, frame_index)
-  light_node_indices := sorted_light_indices(self)
-  for light_node_index in light_node_indices {
-    light := self.internal.lights[light_node_index]
-    info := cache[light_node_index]
-    sm, has_shadow := &self.internal.shadow_maps[light_node_index]
-    if !has_shadow do continue
+  for &fl in lights {
+    sm := fl.shadow_map
+    if sm == nil do continue
+    info := fl.info
     draw_commands := sm.draws.commands[frame_index]
     draw_count := sm.draws.count[frame_index]
-    switch variant in light {
-    case SpotLight, DirectionalLight:
+    switch fl.type {
+    case .SPOT, .DIRECTIONAL:
       shadow.cull(
         &self.internal.shadow,
         cmd,
@@ -90,16 +81,16 @@ render_shadow_depth :: proc(
         &self.texture_manager,
         scene,
         info.view_projection,
-        transmute(bindless.Texture2DHandle)sm.textures[frame_index],
+        bindless.Texture2DHandle(sm.textures[frame_index]),
         draw_commands,
         draw_count,
       )
-    case PointLight:
+    case .POINT:
       shadow.cull(
         &self.internal.shadow,
         cmd,
         self.node_count,
-        shadow.Sphere{variant.position, variant.radius},
+        shadow.box_planes(fl.params.position, fl.params.radius),
         draw_count.buffer,
         sm.descriptor_sets[frame_index],
       )
@@ -111,8 +102,8 @@ render_shadow_depth :: proc(
         info.projection,
         info.near,
         info.far,
-        variant.position,
-        transmute(bindless.TextureCubeHandle)sm.textures[frame_index],
+        fl.params.position,
+        bindless.TextureCubeHandle(sm.textures[frame_index]),
         draw_commands,
         draw_count,
       )
@@ -127,13 +118,34 @@ record_geometry_pass :: proc(
   frame_index: u32,
   cam_index: u32,
   cam: ^Camera,
-  enabled_passes: PassTypeSet,
 ) -> vk.Result {
-  if .GEOMETRY not_in enabled_passes do return .SUCCESS
+  // The cull pass wrote every draw list of this camera; the geometry and
+  // forward passes read them.
+  cmd := self.internal.command_buffers[frame_index]
+  commands := &cam.draws.commands[frame_index]
+  count := &cam.draws.count[frame_index]
+  gpu.buffer_barrier(
+    cmd,
+    commands.buffer,
+    vk.DeviceSize(commands.bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
+  gpu.buffer_barrier(
+    cmd,
+    count.buffer,
+    vk.DeviceSize(count.bytes_count),
+    {.SHADER_WRITE},
+    {.INDIRECT_COMMAND_READ},
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+  )
   geometry.record(
     &self.internal.geometry,
     cam_index,
-    self.internal.command_buffers[frame_index],
+    cmd,
     &self.texture_manager,
     cam.attachments[.POSITION][frame_index],
     cam.attachments[.NORMAL][frame_index],
@@ -143,8 +155,8 @@ record_geometry_pass :: proc(
     cam.attachments[.FINAL_IMAGE][frame_index],
     cam.attachments[.DEPTH][frame_index],
     scene_bindings(self, frame_index),
-    cam.draws[.OPAQUE].commands[frame_index].buffer,
-    cam.draws[.OPAQUE].count[frame_index].buffer,
+    cam.draws.commands[frame_index].buffer,
+    cam.draws.count[frame_index].buffer,
     MAX_NODES_IN_SCENE,
   )
   return .SUCCESS
@@ -156,10 +168,8 @@ record_lighting_pass :: proc(
   frame_index: u32,
   cam_index: u32,
   cam: ^Camera,
-  enabled_passes: PassTypeSet,
-  cache: map[u32]shadow.ShadowFrameInfo,
+  lights: []FrameLight,
 ) -> vk.Result {
-  if .LIGHTING not_in enabled_passes do return .SUCCESS
   cmd := self.internal.command_buffers[frame_index]
   gbuffer := camera_gbuffer(cam, frame_index)
   ambient.record(
@@ -178,57 +188,29 @@ record_lighting_pass :: proc(
     &self.texture_manager,
     cmd,
     self.internal.camera_buffer.descriptor_sets[frame_index],
+    self.mesh_manager.vertex_buffer.buffer,
+    self.mesh_manager.index_buffer.buffer,
   )
-  light_node_indices := sorted_light_indices(self)
-  for light_node_index in light_node_indices {
-    light := self.internal.lights[light_node_index]
-    info := cache[light_node_index]
-    shadow_map_idx: u32 = INVALID_SHADOW_INDEX
+  sphere := cont.get(self.meshes, self.builtin_meshes[.SPHERE])
+  cone := cont.get(self.meshes, self.builtin_meshes[.CONE])
+  for &fl in lights {
+    shadow_map: u32 = direct_light.NO_SHADOW
     shadow_view_projection: matrix[4, 4]f32
-    if sm, ok := self.internal.shadow_maps[light_node_index]; ok {
-      shadow_map_idx = sm.textures[frame_index].index
-      shadow_view_projection = info.projection if sm.cube else info.view_projection
+    if sm := fl.shadow_map; sm != nil {
+      shadow_map = sm.textures[frame_index].index
+      shadow_view_projection = fl.info.projection if sm.cube else fl.info.view_projection
     }
-    switch variant in light {
-    case PointLight:
-      direct_light.record_point_light(
-        &self.internal.direct_light,
-        cam_index,
-        gbuffer,
-        variant.color,
-        variant.position,
-        variant.radius,
-        shadow_map_idx,
-        shadow_view_projection,
-        cmd,
-      )
-    case SpotLight:
-      direct_light.record_spot_light(
-        &self.internal.direct_light,
-        cam_index,
-        gbuffer,
-        variant.color,
-        variant.position,
-        variant.direction,
-        variant.radius,
-        variant.angle_inner,
-        variant.angle_outer,
-        shadow_map_idx,
-        shadow_view_projection,
-        cmd,
-      )
-    case DirectionalLight:
-      direct_light.record_directional_light(
-        &self.internal.direct_light,
-        cam_index,
-        gbuffer,
-        variant.color,
-        variant.direction,
-        shadow_map_idx,
-        shadow_view_projection,
-        cmd,
-      )
-    }
+    direct_light.record_light(
+      &self.internal.direct_light,
+      cmd,
+      fl.type,
+      fl.params,
+      cone.allocations if fl.type == .SPOT else sphere.allocations,
+      cam_index,
+      gbuffer,
+      shadow_map,
+      shadow_view_projection,
+    )
   }
   direct_light.end_pass(cmd)
   return .SUCCESS
@@ -240,9 +222,7 @@ record_particles_pass :: proc(
   frame_index: u32,
   cam_index: u32,
   cam: ^Camera,
-  enabled_passes: PassTypeSet,
 ) -> vk.Result {
-  if .PARTICLES not_in enabled_passes do return .SUCCESS
   particles.record(
     &self.internal.particles,
     self.internal.command_buffers[frame_index],
@@ -252,24 +232,13 @@ record_particles_pass :: proc(
     &self.texture_manager,
     self.internal.camera_buffer.descriptor_sets[frame_index],
     self.texture_manager.descriptor_set,
-    self.internal.particles.compact_particle_buffer.buffer,
-    self.internal.particles.draw_command_buffer.buffer,
   )
   return .SUCCESS
 }
 
-// Forward pipelines in draw order, each gated by its pass.
+// Forward pipelines in draw order.
 @(private = "file")
-FORWARD_PASSES := [?]struct {
-  pipe: bindless.DrawPipeline,
-  pass: PassType,
-} {
-  {.TRANSPARENT, .TRANSPARENCY},
-  {.WIREFRAME, .WIREFRAME},
-  {.RANDOM_COLOR, .RANDOM_COLOR},
-  {.LINE_STRIP, .LINE_STRIP},
-  {.SPRITE, .SPRITE},
-}
+FORWARD_PIPELINES := [?]bindless.DrawPipeline{.TRANSPARENT, .WIREFRAME, .RANDOM_COLOR, .SPRITE}
 
 @(private)
 camera_gbuffer :: proc(cam: ^Camera, frame_index: u32) -> bindless.GBuffer {
@@ -296,7 +265,7 @@ scene_bindings :: proc(
       .MATERIAL = self.internal.material_buffer.set_layout,
       .NODE_DATA = self.internal.node_data_buffer.set_layout,
       .MESH_DATA = self.internal.mesh_data_buffer.set_layout,
-      .VERTEX_SKINNING = self.mesh_manager.vertex_skinning_buffer.set_layout,
+      .VERTEX_SKINNING = self.mesh_manager.skinning_set_layout,
       .SPRITE = self.internal.sprite_buffer.set_layout,
     },
     sets = {
@@ -306,7 +275,7 @@ scene_bindings :: proc(
       .MATERIAL = self.internal.material_buffer.descriptor_set,
       .NODE_DATA = self.internal.node_data_buffer.descriptor_set,
       .MESH_DATA = self.internal.mesh_data_buffer.descriptor_set,
-      .VERTEX_SKINNING = self.mesh_manager.vertex_skinning_buffer.descriptor_set,
+      .VERTEX_SKINNING = self.mesh_manager.skinning_set,
       .SPRITE = self.internal.sprite_buffer.descriptor_set,
     },
     vertex_buffer = self.mesh_manager.vertex_buffer.buffer,
@@ -318,17 +287,14 @@ scene_bindings :: proc(
 record_transparency_pass :: proc(
   self: ^Manager,
   frame_index: u32,
-  gctx: ^gpu.GPUContext,
   cam_index: u32,
   cam: ^Camera,
-  enabled_passes: PassTypeSet,
 ) -> vk.Result {
-  if .TRANSPARENCY not_in enabled_passes do return .SUCCESS
   cmd := self.internal.command_buffers[frame_index]
 
-  // Open a single render scope shared by all forward pipelines. Hoist all
-  // draw-buffer barriers + depth layout transition here — Vulkan disallows
-  // vkCmdPipelineBarrier inside a dynamic rendering instance.
+  // Open a single render scope shared by all forward pipelines. The depth
+  // barrier goes first: Vulkan disallows vkCmdPipelineBarrier inside a
+  // dynamic rendering instance.
   color_texture := bindless.get_texture_2d(
     &self.texture_manager,
     cam.attachments[.FINAL_IMAGE][frame_index],
@@ -337,29 +303,6 @@ record_transparency_pass :: proc(
     &self.texture_manager,
     cam.attachments[.DEPTH][frame_index],
   )
-  for f in FORWARD_PASSES {
-    if f.pass not_in enabled_passes do continue
-    cmds := &cam.draws[f.pipe].commands[frame_index]
-    cnt := &cam.draws[f.pipe].count[frame_index]
-    gpu.buffer_barrier(
-      cmd,
-      cmds.buffer,
-      vk.DeviceSize(cmds.bytes_count),
-      {.SHADER_WRITE},
-      {.INDIRECT_COMMAND_READ},
-      {.COMPUTE_SHADER},
-      {.DRAW_INDIRECT},
-    )
-    gpu.buffer_barrier(
-      cmd,
-      cnt.buffer,
-      vk.DeviceSize(cnt.bytes_count),
-      {.SHADER_WRITE},
-      {.INDIRECT_COMMAND_READ},
-      {.COMPUTE_SHADER},
-      {.DRAW_INDIRECT},
-    )
-  }
   gpu.memory_barrier(
     cmd,
     {.SHADER_READ},
@@ -369,23 +312,22 @@ record_transparency_pass :: proc(
   )
   gpu.begin_rendering(
     cmd,
-    depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .LOAD, .STORE),
-    gpu.create_color_attachment(color_texture, .LOAD, .STORE),
+    depth_texture.extent,
+    gpu.create_depth_attachment(depth_texture.view, .LOAD, .STORE),
+    gpu.create_color_attachment(color_texture.view, .LOAD, .STORE),
   )
-  gpu.set_viewport_scissor(cmd, depth_texture.spec.extent)
+  gpu.set_viewport_scissor(cmd, depth_texture.extent)
 
   scene := scene_bindings(self, frame_index)
-  for f in FORWARD_PASSES {
-    if f.pass not_in enabled_passes do continue
+  for pipe in FORWARD_PIPELINES {
     forward.record(
       &self.internal.forward,
       cmd,
-      f.pipe,
+      pipe,
       cam_index,
       scene,
-      cam.draws[f.pipe].commands[frame_index].buffer,
-      cam.draws[f.pipe].count[frame_index].buffer,
+      cam.draws.commands[frame_index].buffer,
+      cam.draws.count[frame_index].buffer,
       MAX_NODES_IN_SCENE,
     )
   }
@@ -411,9 +353,7 @@ record_debug_line_pass :: proc(
   cam: ^Camera,
   swapchain_view: vk.ImageView,
   swapchain_extent: vk.Extent2D,
-  enabled_passes: PassTypeSet,
 ) {
-  if .DEBUG_LINE not_in enabled_passes do return
   depth := bindless.get_texture_2d(
     &self.texture_manager,
     cam.attachments[.DEPTH][frame_index],
@@ -439,9 +379,7 @@ record_post_process_pass :: proc(
   swapchain_extent: vk.Extent2D,
   swapchain_image: vk.Image,
   swapchain_view: vk.ImageView,
-  enabled_passes: PassTypeSet,
 ) -> vk.Result {
-  if .POST_PROCESS not_in enabled_passes do return .SUCCESS
   cmd := self.internal.command_buffers[frame_index]
   if final_image := bindless.get_texture_2d(
     &self.texture_manager,
@@ -482,7 +420,6 @@ record_post_process_pass :: proc(
 @(private)
 record_frame :: proc(
   self: ^Manager,
-  gctx: ^gpu.GPUContext,
   frame_index: u32,
   swapchain_image: vk.Image,
   swapchain_view: vk.ImageView,
@@ -491,23 +428,20 @@ record_frame :: proc(
 ) -> vk.Result {
   cmd := self.internal.command_buffers[frame_index]
   gpu.begin_record(cmd) or_return
-  shadow_cache := build_shadow_cache(self)
-  render_shadow_depth(self, frame_index, shadow_cache) or_return
+  lights := self.internal.frame_lights[:]
+  render_shadow_depth(self, frame_index, lights) or_return
 
-  cull_cameras := make([dynamic]CameraHandle, context.temp_allocator)
   it := cont.iterator(&self.cameras)
   for cam, handle in cont.next(&it, CameraHandle) {
     index := handle.index
-    if cam.enable_culling do append(&cull_cameras, handle)
-    record_geometry_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
-    record_lighting_pass(self, frame_index, index, cam, cam.enabled_passes, shadow_cache) or_return
-    record_particles_pass(self, frame_index, index, cam, cam.enabled_passes) or_return
-    record_transparency_pass(self, frame_index, gctx, index, cam, cam.enabled_passes) or_return
+    record_geometry_pass(self, frame_index, index, cam) or_return
+    record_lighting_pass(self, frame_index, index, cam, lights) or_return
+    record_particles_pass(self, frame_index, index, cam) or_return
+    record_transparency_pass(self, frame_index, index, cam) or_return
   }
 
-  main_camera_passes: PassTypeSet
-  if main_cam, ok := cont.get(self.cameras, self.main_camera); ok {
-    main_camera_passes = main_cam.enabled_passes
+  main_cam, has_main := cont.get(self.cameras, self.main_camera)
+  if has_main {
     record_post_process_pass(
       self,
       frame_index,
@@ -515,7 +449,6 @@ record_frame :: proc(
       swapchain_extent,
       swapchain_image,
       swapchain_view,
-      main_camera_passes,
     ) or_return
     record_debug_line_pass(
       self,
@@ -524,7 +457,6 @@ record_frame :: proc(
       main_cam,
       swapchain_view,
       swapchain_extent,
-      main_camera_passes,
     )
   }
   ui_render.record(
@@ -534,18 +466,18 @@ record_frame :: proc(
     swapchain_view,
     swapchain_extent,
     frame_index,
-    .UI in main_camera_passes,
+    has_main,
     debug_ui_enabled,
   )
 
   // Compute (potentially on a separate async queue command buffer).
   compute_cmd := cmd
-  if gctx.has_async_compute {
+  if gpu.has_async_compute(&self.gctx) {
     compute_cmd = self.internal.compute_command_buffers[frame_index]
     gpu.begin_record(compute_cmd) or_return
   }
-  record_compute_commands(self, frame_index, gctx, cull_cameras[:]) or_return
-  if gctx.has_async_compute {
+  record_compute_commands(self, frame_index, compute_cmd)
+  if gpu.has_async_compute(&self.gctx) {
     gpu.end_record(compute_cmd) or_return
   }
 
@@ -602,7 +534,6 @@ present :: proc(self: ^Manager, debug_ui_enabled: bool) -> vk.Result {
   gpu.acquire_next_image(gctx.device, sc, self.frame_index) or_return
   record_frame(
     self,
-    gctx,
     self.frame_index,
     sc.images[sc.image_index],
     sc.views[sc.image_index],

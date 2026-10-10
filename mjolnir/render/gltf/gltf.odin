@@ -96,9 +96,14 @@ load_material :: proc(
   ok: bool,
 ) {
   if handle, ok = cache[mat]; ok do return
-  albedo, metallic_roughness, normal, emissive, occlusion: render.Texture2DHandle
+  albedo, metallic_roughness, normal, emissive: render.Texture2DHandle
   features: render.ShaderFeatureSet
+  base_color := [4]f32{1, 1, 1, 1}
+  metallic, roughness: f32 = 0, 1
   if mat.has_pbr_metallic_roughness {
+    base_color = mat.pbr_metallic_roughness.base_color_factor
+    metallic = mat.pbr_metallic_roughness.metallic_factor
+    roughness = mat.pbr_metallic_roughness.roughness_factor
     if tex := mat.pbr_metallic_roughness.metallic_roughness_texture.texture; tex != nil {
       metallic_roughness = load_texture(r, tex, gltf_path, textures) or_return
       features |= {.METALLIC_ROUGHNESS_TEXTURE}
@@ -116,11 +121,18 @@ load_material :: proc(
     emissive = load_texture(r, tex, gltf_path, textures) or_return
     features |= {.EMISSIVE_TEXTURE}
   }
-  if tex := mat.occlusion_texture.texture; tex != nil {
-    occlusion = load_texture(r, tex, gltf_path, textures) or_return
-    features |= {.OCCLUSION_TEXTURE}
-  }
-  handle = render.create_material(r, features, .PBR, albedo, metallic_roughness, normal, emissive, occlusion) or_return
+  handle = render.create_material(
+    r,
+    features,
+    .PBR,
+    albedo,
+    metallic_roughness,
+    normal,
+    emissive,
+    metallic_value = metallic,
+    roughness_value = roughness,
+    base_color_factor = base_color,
+  ) or_return
   cache[mat] = handle
   log.infof("Created material %v", handle)
   return handle, true
@@ -162,27 +174,21 @@ load_vertex_attributes :: proc(
   vertices: []mesh.Vertex,
   skinnings: []mesh.SkinningData = nil,
 ) {
+  // glTF vertex color is optional and multiplies base_color_factor
+  for &v in vertices do v.color = {1, 1, 1, 1}
   for attribute in primitive.attributes {
     accessor := attribute.data
     #partial switch attribute.type {
     case .position:
-      for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].position[:]), 3) or_continue
-      }
+      read_floats(accessor, vertices, offset_of(mesh.Vertex, position), 3)
     case .normal:
-      for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].normal[:]), 3) or_continue
-      }
+      read_floats(accessor, vertices, offset_of(mesh.Vertex, normal), 3)
     case .texcoord:
-      if attribute.index == 0 {
-        for i in 0 ..< min(int(accessor.count), len(vertices)) {
-          cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].uv[:]), 2) or_continue
-        }
-      }
+      if attribute.index == 0 do read_floats(accessor, vertices, offset_of(mesh.Vertex, uv), 2)
+    case .color:
+      if attribute.index == 0 do read_floats(accessor, vertices, offset_of(mesh.Vertex, color), 4)
     case .tangent:
-      for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].tangent[:]), 4) or_continue
-      }
+      read_floats(accessor, vertices, offset_of(mesh.Vertex, tangent), 4)
     case .joints:
       if attribute.index == 0 && skinnings != nil {
         for i in 0 ..< min(int(accessor.count), len(skinnings)) {
@@ -190,11 +196,15 @@ load_vertex_attributes :: proc(
         }
       }
     case .weights:
-      if attribute.index == 0 && skinnings != nil {
-        for i in 0 ..< min(int(accessor.count), len(skinnings)) {
-          cgltf.accessor_read_float(accessor, uint(i), raw_data(skinnings[i].weights[:]), 4) or_continue
-        }
-      }
+      if attribute.index == 0 do read_floats(accessor, skinnings, offset_of(mesh.SkinningData, weights), 4)
     }
+  }
+}
+
+// Reads `n` floats per element of `items` into the field at byte `offset`.
+@(private = "file")
+read_floats :: proc(accessor: ^cgltf.accessor, items: []$T, offset: uintptr, n: uint) {
+  for i in 0 ..< min(int(accessor.count), len(items)) {
+    _ = cgltf.accessor_read_float(accessor, uint(i), ([^]f32)(uintptr(&items[i]) + offset), n)
   }
 }

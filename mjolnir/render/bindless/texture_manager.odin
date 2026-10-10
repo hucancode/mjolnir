@@ -22,14 +22,14 @@ TextureCubeHandle :: distinct cont.Handle
 // Handle.index maps directly to descriptor array indices.
 TextureManager :: struct {
   images_2d:               cont.Pool(gpu.Image),
-  images_cube:             cont.Pool(gpu.CubeImage),
+  images_cube:             cont.Pool(gpu.Image),
   set_layout:     vk.DescriptorSetLayout,
   descriptor_set: vk.DescriptorSet,
   samplers:       [SamplerType]vk.Sampler,
 }
 
-// Initialize the texture manager: creates the samplers and the descriptor set
-// layout. Must be called once at startup, before pipeline layouts are built.
+// Initialize the texture manager: creates the samplers, the descriptor set and
+// its layout. Must be called once at startup, before pipeline layouts are built.
 texture_manager_init :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) -> vk.Result {
   self.set_layout = gpu.create_descriptor_array_layout(
     gctx,
@@ -54,19 +54,6 @@ texture_manager_init :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) -> vk
     }
     vk.CreateSampler(gctx.device, &info, nil, &sampler) or_return
   }
-  return .SUCCESS
-}
-
-// Setup the texture manager: allocates the descriptor set and writes sampler descriptors.
-// Must be called each time the descriptor pool is (re)created.
-texture_manager_setup :: proc(
-  self: ^TextureManager,
-  gctx: ^gpu.GPUContext,
-) -> vk.Result {
-  // GPU images back descriptor slots the GPU samples for up to gpu.FRAMES_IN_FLIGHT
-  // frames, so a freed slot/image must be retired, not reclaimed inline.
-  cont.init(&self.images_2d, MAX_TEXTURES, gpu.FRAMES_IN_FLIGHT)
-  cont.init(&self.images_cube, MAX_CUBE_TEXTURES, gpu.FRAMES_IN_FLIGHT)
   gpu.allocate_descriptor_set(gctx, &self.descriptor_set, &self.set_layout) or_return
   for sampler, type in self.samplers {
     gpu.write_descriptor_array_element(gctx, self.descriptor_set, BINDING_SAMPLERS, u32(type), .SAMPLER, {sampler = sampler})
@@ -74,50 +61,51 @@ texture_manager_setup :: proc(
   return .SUCCESS
 }
 
-// Teardown the texture manager: destroys all GPU images and frees pool memory.
-// The descriptor set handle is zeroed (bulk-freed by the caller via ResetDescriptorPool).
-// Must be paired with texture_manager_setup.
-@(private = "file")
-retire_image_2d :: proc(img: ^gpu.Image, user: rawptr) {
-  if img.image != 0 do gpu.image_destroy((^gpu.GPUContext)(user).device, img)
+// Level-lifetime texture pools. Paired with texture_manager_teardown.
+texture_manager_setup :: proc(self: ^TextureManager) {
+  // GPU images back descriptor slots the GPU samples for up to gpu.FRAMES_IN_FLIGHT
+  // frames, so a freed slot/image must be retired, not reclaimed inline.
+  cont.init(&self.images_2d, MAX_TEXTURES, gpu.FRAMES_IN_FLIGHT)
+  cont.init(&self.images_cube, MAX_CUBE_TEXTURES, gpu.FRAMES_IN_FLIGHT)
 }
 
 @(private = "file")
-retire_image_cube :: proc(img: ^gpu.CubeImage, user: rawptr) {
-  if img.image != 0 do gpu.cube_depth_texture_destroy((^gpu.GPUContext)(user).device, img)
+retire_image :: proc(img: ^gpu.Image, user: rawptr) {
+  if img.image != 0 do gpu.image_destroy((^gpu.GPUContext)(user).device, img)
 }
 
 // texture_manager_tick reclaims retired texture slots and destroys their vk
 // images once no in-flight frame can still sample them. Call once per presented
 // frame.
 texture_manager_tick :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) {
-  cont.tick(&self.images_2d, gctx, retire_image_2d)
-  cont.tick(&self.images_cube, gctx, retire_image_cube)
+  cont.tick(&self.images_2d, gctx, retire_image)
+  cont.tick(&self.images_cube, gctx, retire_image)
 }
 
+// Destroy every texture and free the pools. Paired with texture_manager_setup.
 texture_manager_teardown :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) {
   // Destroy any retired-but-not-yet-reclaimed images first; the caller has
   // already waited for the GPU to go idle, so grace no longer matters.
-  cont.flush(&self.images_2d, gctx, retire_image_2d)
-  cont.flush(&self.images_cube, gctx, retire_image_cube)
+  cont.flush(&self.images_2d, gctx, retire_image)
+  cont.flush(&self.images_cube, gctx, retire_image)
   it_2d := cont.iterator(&self.images_2d)
   for img in cont.next(&it_2d, Texture2DHandle) {
     if img.image != 0 do gpu.image_destroy(gctx.device, img)
   }
   it_cube := cont.iterator(&self.images_cube)
   for img in cont.next(&it_cube, TextureCubeHandle) {
-    if img.image != 0 do gpu.cube_depth_texture_destroy(gctx.device, img)
+    if img.image != 0 do gpu.image_destroy(gctx.device, img)
   }
   cont.destroy(&self.images_2d, proc(_: ^gpu.Image) {})
-  cont.destroy(&self.images_cube, proc(_: ^gpu.CubeImage) {})
+  cont.destroy(&self.images_cube, proc(_: ^gpu.Image) {})
   self.images_2d = {}
   self.images_cube = {}
-  self.descriptor_set = 0
 }
 
-// Shutdown the texture manager: destroys the samplers and the descriptor set
-// layout. Must be called once at gpu.shutdown, paired with texture_manager_init.
+// Destroy the samplers, descriptor set and layout. Paired with
+// texture_manager_init.
 texture_manager_shutdown :: proc(self: ^TextureManager, gctx: ^gpu.GPUContext) {
+  gpu.free_descriptor_sets(gctx, self.descriptor_set)
   for &sampler in self.samplers {
     vk.DestroySampler(gctx.device, sampler, nil)
     sampler = 0
@@ -138,8 +126,8 @@ allocate_texture_2d :: proc(
   handle: Texture2DHandle,
   ret: vk.Result,
 ) {
-  spec := gpu.image_spec_2d(extent, format, usage, generate_mips)
-  img := gpu.image_create(gctx, spec) or_return
+  mips := gpu.calculate_mip_levels(extent.width, extent.height) if generate_mips else 1
+  img := gpu.image_create(gctx, extent, format, usage, mips) or_return
   gpu_handle, slot, ok := cont.alloc(&self.images_2d, Texture2DHandle)
   if !ok {
     gpu.image_destroy(gctx.device, &img)
@@ -165,18 +153,16 @@ allocate_texture_2d_with_data :: proc(
   handle: Texture2DHandle,
   ret: vk.Result,
 ) {
-  spec := gpu.image_spec_2d(extent, format, usage, generate_mips)
-  img: gpu.Image
-  if generate_mips {
-    img = gpu.image_create_with_mipmaps(
-      gctx,
-      spec,
-      pixel_data,
-      data_size,
-    ) or_return
-  } else {
-    img = gpu.image_create_with_data(gctx, spec, pixel_data, data_size) or_return
-  }
+  mips := gpu.calculate_mip_levels(extent.width, extent.height) if generate_mips else 1
+  img := gpu.image_create_with_data(
+    gctx,
+    extent,
+    format,
+    usage,
+    pixel_data,
+    data_size,
+    mips,
+  ) or_return
   gpu_handle, slot, ok := cont.alloc(&tm.images_2d, Texture2DHandle)
   if !ok {
     gpu.image_destroy(gctx.device, &img)
@@ -203,50 +189,26 @@ get_texture_2d :: proc(tm: ^TextureManager, handle: $H) -> ^gpu.Image {
   return img
 }
 
-// Allocate a cube texture (typically used for depth cube maps)
+// Allocate a cube texture: a depth cube for point-light shadows or a color
+// cube (with STORAGE usage and mips) for IBL precompute outputs.
 allocate_texture_cube :: proc(
   tm: ^TextureManager,
   gctx: ^gpu.GPUContext,
   size: u32,
   format: vk.Format,
   usage: vk.ImageUsageFlags,
-) -> (
-  handle: TextureCubeHandle,
-  ret: vk.Result,
-) {
-  h, img, ok := cont.alloc(&tm.images_cube, TextureCubeHandle)
-  if !ok do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  // Initialize the cube image
-  init_ret := gpu.cube_depth_texture_init(gctx, img, size, format, usage)
-  if init_ret != .SUCCESS {
-    cont.free(&tm.images_cube, h)
-    return {}, init_ret
-  }
-  // Update descriptor set
-  write_texture_descriptor(gctx, tm.descriptor_set, BINDING_CUBE_TEXTURES, h.index, img.view)
-  return h, .SUCCESS
-}
-
-// Allocate a color cube texture (for IBL precompute outputs).
-// Optionally creates mip chain and STORAGE usage for compute writes.
-allocate_texture_cube_color :: proc(
-  tm: ^TextureManager,
-  gctx: ^gpu.GPUContext,
-  size: u32,
-  format: vk.Format,
   mip_levels: u32 = 1,
-  usage: vk.ImageUsageFlags = {.SAMPLED, .STORAGE, .TRANSFER_DST},
 ) -> (
   handle: TextureCubeHandle,
   ret: vk.Result,
 ) {
-  h, img, ok := cont.alloc(&tm.images_cube, TextureCubeHandle)
-  if !ok do return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  init_ret := gpu.cube_color_texture_init(gctx, img, size, format, mip_levels, usage)
-  if init_ret != .SUCCESS {
-    cont.free(&tm.images_cube, h)
-    return {}, init_ret
+  img := gpu.image_create(gctx, {size, size}, format, usage, mip_levels, cube = true) or_return
+  h, slot, ok := cont.alloc(&tm.images_cube, TextureCubeHandle)
+  if !ok {
+    gpu.image_destroy(gctx.device, &img)
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
+  slot^ = img
   write_texture_descriptor(gctx, tm.descriptor_set, BINDING_CUBE_TEXTURES, h.index, img.view)
   return h, .SUCCESS
 }
@@ -259,7 +221,7 @@ free_texture_cube :: proc(tm: ^TextureManager, gctx: ^gpu.GPUContext, handle: $H
 }
 
 // Get a pointer to a cube texture
-get_texture_cube :: proc(tm: ^TextureManager, handle: $H) -> ^gpu.CubeImage {
+get_texture_cube :: proc(tm: ^TextureManager, handle: $H) -> ^gpu.Image {
   gpu_handle := transmute(TextureCubeHandle)handle
   img, _ := cont.get(tm.images_cube, gpu_handle)
   return img

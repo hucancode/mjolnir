@@ -39,7 +39,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Sun — root of the rotating subtree
   sun_mat := render.material_pbr(&engine.render, base_color = {1.0, 0.8, 0.2, 1.0}, emissive = 2.0)
-  sun_handle = mjolnir.spawn_mesh(engine, render.get_builtin_mesh(&engine.render, .SPHERE), sun_mat)
+  sun_handle = mjolnir.spawn_mesh(engine, engine.render.builtin_meshes[.SPHERE], sun_mat)
   world.scale(&engine.world, sun_handle, 1.2)
 
   // Planets — children of sun, each at fixed local offset

@@ -31,10 +31,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   mjolnir.spawn(engine, {0, 3, 1.5}, render.point_light_attachment({1.0, 0.6, 0.3, 1.0}, 12.0, false))
 
-  rtt_camera_handle = render.create_camera(&engine.render, 512, 512, {.GEOMETRY, .LIGHTING, .TRANSPARENCY}, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
+  rtt_camera_handle = render.create_camera(&engine.render, 512, 512, {0, 8, 0.01}, {0, 0, 0}, math.PI * 0.5, 0.1, 100.0)
   rtt_material_handle = render.create_material(&engine.render, {.ALBEDO_TEXTURE})
 
-  display_mesh := render.get_builtin_mesh(&engine.render, .QUAD_XY)
+  display_mesh := engine.render.builtin_meshes[.QUAD_XY]
   display_handle := mjolnir.spawn(engine, {0, 2.5, -3.5}, render.MeshAttachment{handle = display_mesh, material = rtt_material_handle, cast_shadow = false})
   world.scale(&engine.world, display_handle, 3.0)
 }

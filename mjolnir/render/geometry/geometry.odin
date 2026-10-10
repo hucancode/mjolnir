@@ -142,15 +142,15 @@ record :: proc(
   )
   gpu.begin_rendering(
     command_buffer,
-    depth_texture.spec.extent,
-    gpu.create_depth_attachment(depth_texture, .CLEAR, .STORE),
-    gpu.create_color_attachment(position_texture),
-    gpu.create_color_attachment(normal_texture),
-    gpu.create_color_attachment(albedo_texture),
-    gpu.create_color_attachment(metallic_roughness_texture),
-    gpu.create_color_attachment(emissive_texture),
+    depth_texture.extent,
+    gpu.create_depth_attachment(depth_texture.view),
+    gpu.create_color_attachment(position_texture.view),
+    gpu.create_color_attachment(normal_texture.view),
+    gpu.create_color_attachment(albedo_texture.view),
+    gpu.create_color_attachment(metallic_roughness_texture.view),
+    gpu.create_color_attachment(emissive_texture.view),
   )
-  gpu.set_viewport_scissor(command_buffer, depth_texture.spec.extent)
+  gpu.set_viewport_scissor(command_buffer, depth_texture.extent)
   bindless.bind_scene(
     command_buffer,
     self.pipeline,
